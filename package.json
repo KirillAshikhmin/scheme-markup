@@ -1,0 +1,14 @@
+{
+  "name": "scheme-markup",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Разметка схем: метки на планах помещений, один статический HTML-файл",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "build": "node build.js"
+  }
+}

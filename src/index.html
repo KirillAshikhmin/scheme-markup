@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-text="app.title"></title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="app-header">
+        <div id="app-brand">
+          <span id="app-title" data-text="app.title"></span>
+          <span id="app-subtitle" data-text="app.subtitle"></span>
+        </div>
+        <div id="project-bar">
+          <span id="project-label" data-text="header.project"></span>
+          <span id="project-name" data-text="header.noProject"></span>
+          <div id="project-actions" class="mount"></div>
+        </div>
+        <div id="header-actions" class="mount"></div>
+      </header>
+
+      <aside id="panel-left" class="panel">
+        <section class="panel__section">
+          <h2 class="panel__title" data-text="panels.tools"></h2>
+          <div id="panel-tools" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--grow">
+          <h2 class="panel__title" data-text="panels.schemes"></h2>
+          <div id="panel-schemes" class="panel__body mount"></div>
+        </section>
+      </aside>
+
+      <main id="canvas-area">
+        <div id="canvas-host" class="mount"></div>
+        <div id="canvas-overlay" class="mount"></div>
+        <p id="canvas-empty" data-text="panels.canvasEmpty"></p>
+      </main>
+
+      <aside id="panel-right" class="panel">
+        <section class="panel__section panel__section--grow">
+          <h2 class="panel__title" data-text="panels.marks"></h2>
+          <div id="panel-marks" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section">
+          <h2 class="panel__title" data-text="panels.properties"></h2>
+          <div id="panel-properties" class="panel__body mount"></div>
+        </section>
+      </aside>
+
+      <div id="dialog-host" class="mount"></div>
+      <div id="notifications"></div>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
