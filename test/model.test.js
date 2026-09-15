@@ -626,3 +626,69 @@ test("у схемы без размеров шаг блока считается
   const down = addToGroup(right.project, right.mark.id, "down");
   assert.ok(Math.abs(down.mark.points[0].y - 0.528) < 1e-12, String(down.mark.points[0].y));
 });
+
+// Настоящий подрозетник: в одной рамке рядом стоят выключатель и розетка.
+test("«+» ставит метку выбранного типа: в блоке рядом с выключателем встаёт розетка", () => {
+  const { project: base, first } = projectWithSchemes();
+  const step = putPoint(base, first.id, "В", { x: 0.5, y: 0.5 });
+  const socket = addToGroup(step.project, step.mark.id, "right", { typeId: typeId(base, "Р") });
+
+  assert.equal(socket.mark.typeId, typeId(base, "Р"));
+  assert.equal(labelOf(socket.project, socket.mark.id), "Р1");
+  assert.equal(socket.project.counters["В"], 1);
+  assert.equal(socket.project.counters["Р"], 1);
+  assert.equal(labelOf(socket.project, socket.group.id), "В1, Р1");
+  assert.deepEqual(findGroup(socket.project, socket.group.id).markIds, [step.mark.id, socket.mark.id]);
+  assert.equal(findMark(socket.project, socket.mark.id).groupId, socket.group.id);
+  assert.equal(findMark(socket.project, socket.mark.id).schemeId, first.id);
+  assert.deepEqual(socket.mark.points[0], { x: 0.5 + 28 / 1000, y: 0.5 });
+  // Цвет и форма — свои у каждой метки блока: он и должен быть разноцветным.
+  assert.notDeepEqual(styleOf(socket.project, typeId(base, "Р")), styleOf(socket.project, typeId(base, "В")));
+
+  // Вторая розетка в том же блоке — свой следующий номер по своему счётчику.
+  const second = addToGroup(socket.project, socket.mark.id, "right", { typeId: typeId(base, "Р") });
+  assert.equal(labelOf(second.project, second.mark.id), "Р2");
+  assert.equal(second.project.counters["В"], 1);
+  assert.equal(labelOf(second.project, socket.group.id), "В1, Р1Р2");
+
+  // Удаление одной метки смешанного блока соседей не трогает, а распад блока
+  // до одной метки распускает группу и возвращает метке собственную подпись.
+  const withoutFirst = deleteMark(second.project, socket.mark.id).project;
+  assert.equal(labelOf(withoutFirst, socket.group.id), "В1, Р2");
+  const alone = deleteMark(withoutFirst, second.mark.id).project;
+  assert.deepEqual(alone.groups, []);
+  assert.equal(findMark(alone, step.mark.id).groupId, null);
+  assert.equal(labelOf(alone, step.mark.id), "В1");
+});
+
+test("режим блока берётся у типа ставящейся метки, а не у соседней", () => {
+  const { project: base, first } = projectWithSchemes();
+  // Розетки — «одна метка на блок», выключатели — «каждая своя».
+  const tuned = updateType(base, typeId(base, "Р"), { blockMode: "single" }).project;
+  const step = putPoint(tuned, first.id, "В", { x: 0.5, y: 0.5 });
+
+  // Своей розетки в блоке ещё нет — появляется первая, со своим номером.
+  const socket = addToGroup(step.project, step.mark.id, "right", { typeId: typeId(base, "Р") });
+  assert.equal(socket.project.marks.length, 2);
+  assert.equal(socket.mark.points.length, 1);
+  assert.equal(labelOf(socket.project, socket.mark.id), "Р1");
+
+  // Вторая розетка того же блока дописывается точкой к первой: номер один.
+  const more = addToGroup(socket.project, socket.mark.id, "right", { typeId: typeId(base, "Р") });
+  assert.equal(more.project.marks.length, 2);
+  assert.equal(findMark(more.project, socket.mark.id).points.length, 2);
+  assert.equal(more.project.counters["Р"], 1);
+  assert.equal(labelOf(more.project, socket.group.id), "В1, Р1");
+
+  // «+» у выключателя с активной розеткой находит розетку блока, а не соседку.
+  const fromSwitch = addToGroup(more.project, step.mark.id, "down", { typeId: typeId(base, "Р") });
+  assert.equal(fromSwitch.project.marks.length, 2);
+  assert.equal(findMark(fromSwitch.project, socket.mark.id).points.length, 3);
+
+  // Обратно: у розетки «одна на блок» выключатель всё равно встаёт своей меткой.
+  const back = addToGroup(fromSwitch.project, socket.mark.id, "up", { typeId: typeId(base, "В") });
+  assert.equal(back.project.marks.length, 3);
+  assert.equal(labelOf(back.project, back.mark.id), "В2");
+  assert.equal(findMark(back.project, socket.mark.id).points.length, 3);
+  assert.equal(labelOf(back.project, socket.group.id), "В1В2, Р1");
+});

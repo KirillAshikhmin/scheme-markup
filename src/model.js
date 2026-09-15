@@ -350,7 +350,7 @@ export function labelOf(project, id) {
   const mark = findMark(project, id);
   if (mark) return markLabel(project, mark);
   const group = findGroup(project, id);
-  if (group) return groupLabel(project, group);
+  if (group) return blockLabel(project, group.markIds);
   return "";
 }
 
@@ -359,38 +359,78 @@ function markLabel(project, mark) {
   return (type ? type.code : "?") + mark.number;
 }
 
-// Подряд идущие номера одного типа склеиваются слитно, остальное — через запятую.
-function groupLabel(project, group) {
-  const members = group.markIds
-    .map((markId) => findMark(project, markId))
-    .filter(Boolean)
-    .map((mark) => ({ mark, type: findType(project, mark.typeId) }))
+// Порядок меток внутри блока — один на всё приложение: сперва порядок типа
+// в справочнике (тот же typesInOrder, что у легенды и таблиц), потом номер.
+// По нему собирается подпись и по нему же берут ведущую метку блока — ту,
+// с которой подпись начинается. В смешанном блоке это не обязательно та,
+// которую поставили первой.
+export function blockMembers(project, markIds) {
+  const order = new Map();
+  let index = 0;
+  for (const { types } of typesInOrder(project)) for (const type of types) order.set(type.id, index++);
+  const rank = (mark) => (order.has(mark.typeId) ? order.get(mark.typeId) : Number.MAX_SAFE_INTEGER);
+  return (markIds || [])
+    .map((markId, position) => ({ mark: findMark(project, markId), position }))
+    .filter((item) => item.mark)
     .sort((a, b) => {
-      const orderA = a.type ? a.type.order : 0;
-      const orderB = b.type ? b.type.order : 0;
-      return orderA === orderB ? a.mark.number - b.mark.number : orderA - orderB;
-    });
+      if (rank(a.mark) !== rank(b.mark)) return rank(a.mark) - rank(b.mark);
+      if (a.mark.number !== b.mark.number) return a.mark.number - b.mark.number;
+      return a.position - b.position;
+    })
+    .map((item) => item.mark);
+}
 
+// Подпись блока: подряд идущие номера одного типа склеиваются слитно,
+// разнородные — через запятую («В1, Р1» — выключатель и розетка в одной рамке).
+// Список меток задаёт вызывающий: у группы это её метки, а на плане под
+// фильтром — только видимые, иначе подпись обещает то, чего на листе нет.
+export function blockLabel(project, markIds) {
   const runs = [];
   let previous = null;
-  for (const member of members) {
-    const code = member.type ? member.type.code : "?";
-    const sameRun =
-      previous && previous.code === code && member.mark.number === previous.number + 1;
-    if (sameRun) runs[runs.length - 1] += code + member.mark.number;
-    else runs.push(code + member.mark.number);
-    previous = { code, number: member.mark.number };
+  for (const mark of blockMembers(project, markIds)) {
+    const type = findType(project, mark.typeId);
+    const code = type ? type.code : "?";
+    const sameRun = previous && previous.code === code && mark.number === previous.number + 1;
+    if (sameRun) runs[runs.length - 1] += code + mark.number;
+    else runs.push(code + mark.number);
+    previous = { code, number: mark.number };
   }
   return runs.join(", ");
 }
 
+// Хозяин новой точки в режиме «одна метка на блок» — метка того же типа:
+// сама соседка, если тип совпал, иначе первая метка этого типа в блоке.
+// Своей метки этого типа в блоке может и не быть — тогда её ставят первой.
+function blockHost(project, mark, typeId) {
+  if (mark.typeId === typeId) return mark;
+  const group = findGroup(project, mark.groupId);
+  if (!group) return null;
+  for (const id of group.markIds) {
+    const member = findMark(project, id);
+    if (member && member.typeId === typeId && member.kind === "point") return member;
+  }
+  return null;
+}
+
+// Режим блока берётся у типа ставящейся метки, а не у соседней: в смешанном
+// блоке выключатели могут идти «каждая своя», а розетки — «одна на блок».
+// Исключение одно: метка, уже собранная как «одна на блок», растёт точками
+// независимо от умолчания типа — её собственная форма важнее справочника.
+function blockModeOf(mark, type) {
+  if (mark.typeId === type.id && mark.kind === "point" && mark.points.length > 1) return "single";
+  return type.blockMode || "each";
+}
+
 // Соседняя точка блока: сдвиг на шаг плана в долях от размера схемы.
+// `options.typeId` — тип ставящейся метки (в одной рамке подрозетника рядом
+// с выключателем стоит розетка); по умолчанию — тип соседней метки.
+// Номер новая метка получает по счётчику своего типа.
 export function addToGroup(project, markId, side, options = {}) {
   const mark = requireMark(project, markId);
   if (mark.kind !== "point") throw modelError("blockOnlyForPoints");
   if (!BLOCK_SIDES.includes(side)) throw modelError("unknownSide");
   const scheme = requireScheme(project, mark.schemeId);
-  const type = requireType(project, mark.typeId);
+  const type = requireType(project, options.typeId || mark.typeId);
   const stepPx = options.step || BLOCK_STEP_PX;
   const dx = stepPx / (scheme.width > 0 ? scheme.width : BLOCK_FALLBACK_SIZE_PX);
   const dy = stepPx / (scheme.height > 0 ? scheme.height : BLOCK_FALLBACK_SIZE_PX);
@@ -400,12 +440,10 @@ export function addToGroup(project, markId, side, options = {}) {
     y: clampFraction(from.y + (side === "up" ? -dy : side === "down" ? dy : 0)),
   };
 
-  // Метка, уже собранная как «одна на блок», растёт точками независимо от
-  // умолчания типа: её собственная форма важнее справочника.
-  const alreadySingle = mark.kind === "point" && mark.points.length > 1;
-  const mode = options.blockMode || (alreadySingle ? "single" : type.blockMode || "each");
-  if (mode === "single") {
-    const grown = updateMark(project, markId, { points: [...mark.points, point] });
+  const mode = options.blockMode || blockModeOf(mark, type);
+  const host = mode === "single" ? blockHost(project, mark, type.id) : null;
+  if (host) {
+    const grown = updateMark(project, host.id, { points: [...host.points, point] });
     return { project: grown.project, mark: grown.mark, group: findGroup(project, mark.groupId) };
   }
 
@@ -414,7 +452,7 @@ export function addToGroup(project, markId, side, options = {}) {
   counters[type.code] = number;
   const created = makeMark({
     schemeId: mark.schemeId,
-    typeId: mark.typeId,
+    typeId: type.id,
     kind: "point",
     points: [point],
     number,

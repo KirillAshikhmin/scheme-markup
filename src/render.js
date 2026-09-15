@@ -10,7 +10,7 @@
 // объекта (`project.view`), их двигает ползунок в панели инструментов. Размер
 // метки задан в пикселях плана, поэтому метка живёт на плане как наклейка:
 // приближение увеличивает и её, а экспорт в двойном разрешении даёт тот же вид.
-import { SHAPE_NAMES, findType, findGroup, styleOf, labelOf, typesInOrder } from "./model.js";
+import { SHAPE_NAMES, blockLabel, blockMembers, findType, findGroup, styleOf, labelOf, typesInOrder } from "./model.js";
 
 export const SHAPES = SHAPE_NAMES;
 
@@ -324,7 +324,7 @@ export function visibleMarks(project, scheme, filter) {
 // поворот плана уносит её вместе с меткой.
 function labelOrigin(project, target) {
   if (target.markIds) {
-    const points = target.markIds
+    const points = labelMemberIds(target)
       .map((id) => project.marks.find((mark) => mark.id === id))
       .filter(Boolean)
       .map((mark) => mark.points[0]);
@@ -333,6 +333,23 @@ function labelOrigin(project, target) {
     return { x: sum.x / points.length, y: sum.y / points.length };
   }
   return target.points[0];
+}
+
+// Метки блока, по которым собирается подпись: под фильтром — только видимые
+// (`shownIds` кладёт labelTargets), иначе весь блок. Смещение подписи это не
+// трогает: его держит первая метка блока, видимая она или нет.
+function labelMemberIds(target) {
+  return target.shownIds || target.markIds;
+}
+
+// Ведущая метка подписи: у блока — та, с которой подпись начинается,
+// у одиночной метки — она сама. По ней берётся цвет подписи: подпись
+// «В1, Р1» красится зелёным выключателя, а не красным розетки.
+export function labelLead(project, target) {
+  if (!target) return null;
+  if (!target.markIds) return target;
+  const [lead] = blockMembers(project, labelMemberIds(target));
+  return lead || null;
 }
 
 // Смещение подписи. У группы своего поля модель не заводит — её подпись стоит
@@ -353,7 +370,7 @@ export function labelBox(project, scheme, target, view) {
   const offset = labelOffsetOf(project, target);
   const dx = offset ? offset.dx * state.zoom : radius * LABEL_GAP;
   const dy = offset ? offset.dy * state.zoom : -radius * LABEL_GAP;
-  const value = labelOf(project, target.id) || "";
+  const value = (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
   return {
     text: value,
     x: anchor.x + dx,
@@ -364,21 +381,30 @@ export function labelBox(project, scheme, target, view) {
   };
 }
 
-// Подписи рисуются у меток без группы и по одной на группу.
+// Подписи рисуются у меток без группы и по одной на группу. Цель группы несёт
+// `shownIds` — метки блока, прошедшие фильтр: на листе розеток от смешанного
+// блока остаётся «Р1», а не «В1, Р1» с невидимым выключателем.
 function labelTargets(project, scheme, filter) {
   const marks = visibleMarks(project, scheme, filter);
   const targets = [];
-  const seenGroups = new Set();
+  const byGroup = new Map();
   for (const mark of marks) {
     if (!mark.groupId) {
       targets.push(mark);
       continue;
     }
-    if (seenGroups.has(mark.groupId)) continue;
-    seenGroups.add(mark.groupId);
-    const group = findGroup(project, mark.groupId);
-    if (group) targets.push(group);
-    else targets.push(mark);
+    let target = byGroup.get(mark.groupId);
+    if (!target) {
+      const group = findGroup(project, mark.groupId);
+      if (!group) {
+        targets.push(mark);
+        continue;
+      }
+      target = { ...group, shownIds: [] };
+      byGroup.set(mark.groupId, target);
+      targets.push(target);
+    }
+    target.shownIds.push(mark.id);
   }
   return targets;
 }
@@ -430,7 +456,9 @@ export function hitTest(project, scheme, point, view, filter) {
     const target = targets[index];
     const box = labelBox(project, scheme, target, state);
     if (box.text && insideBox(point, box)) {
-      const markId = target.markIds ? target.markIds[0] : target.id;
+      // Подпись блока выбирает первую из тех меток, что в ней перечислены:
+      // под фильтром скрытая метка в подписи не стоит и выбираться не должна.
+      const markId = target.markIds ? labelMemberIds(target)[0] : target.id;
       return { markId, part: "label", groupId: target.markIds ? target.id : null, index: 0 };
     }
   }
@@ -539,14 +567,17 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected) {
   ctx.restore();
 }
 
-// Ручки «+» рисуются только у выделенной точки.
-export function drawHandles(ctx, scheme, mark, view) {
+// Ручки «+» рисуются только у выделенной точки. `color` — цвет типа, который
+// эта ручка поставит: в смешанном блоке она красится в цвет ставящейся метки,
+// а без него остаётся цветом выделения.
+export function drawHandles(ctx, scheme, mark, view, color) {
+  const tint = color || "#0969da";
   for (const handle of handlePositions(scheme, mark, view)) {
     ctx.save();
     ctx.beginPath();
     ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-    ctx.strokeStyle = "#0969da";
+    ctx.strokeStyle = tint;
     ctx.lineWidth = 1.5;
     ctx.fill();
     ctx.stroke();
@@ -556,7 +587,7 @@ export function drawHandles(ctx, scheme, mark, view) {
     ctx.lineTo(handle.x + arm, handle.y);
     ctx.moveTo(handle.x, handle.y - arm);
     ctx.lineTo(handle.x, handle.y + arm);
-    ctx.strokeStyle = "#0969da";
+    ctx.strokeStyle = tint;
     ctx.lineWidth = 2;
     ctx.stroke();
     ctx.restore();
@@ -652,10 +683,8 @@ export function drawScheme(ctx, { project, scheme, image, filter, view, legend, 
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
   }
   for (const target of labelTargets(project, scheme, filter)) {
-    const typeId = target.markIds
-      ? (project.marks.find((mark) => mark.id === target.markIds[0]) || {}).typeId
-      : target.typeId;
-    drawLabel(ctx, labelBox(project, scheme, target, state), styleOf(project, typeId).color);
+    const lead = labelLead(project, target);
+    drawLabel(ctx, labelBox(project, scheme, target, state), styleOf(project, lead && lead.typeId).color);
   }
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da");
   if (legend) drawLegend(ctx, { project, scheme, filter, view: state, box: legend === true ? null : legend });

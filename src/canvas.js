@@ -133,7 +133,7 @@ function canvasPaint() {
   if (state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
     if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
-      drawHandles(canvasCtx, scheme, mark, view);
+      drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark));
     }
   }
 }
@@ -202,6 +202,22 @@ function canvasPlacePoint(plan) {
   }
 }
 
+// Тип, который поставит следующий клик: выбранный в панели, пока он жив
+// в справочнике. Иначе — ничего, и модель повторит тип соседней метки.
+function canvasPlacedTypeId(state) {
+  const typeId = state.activeTypeId;
+  if (!typeId || !state.project || !findType(state.project, typeId)) return null;
+  return typeId;
+}
+
+// Цвет ручек «+»: выбран тип, отличный от типа метки, — ручка красится в его
+// цвет, и по ней видно, что рядом встанет розетка, а не второй выключатель.
+// Тип тот же или не выбран — ручка синяя, как выделение.
+function canvasHandleColor(state, mark) {
+  const typeId = canvasPlacedTypeId(state);
+  return typeId && typeId !== mark.typeId ? styleOf(state.project, typeId).color : null;
+}
+
 // Шаг блока — не меньше умолчания модели и не меньше двух радиусов метки,
 // иначе соседние точки блока сливаются в одну кляксу.
 function canvasBlockStep(state) {
@@ -209,10 +225,16 @@ function canvasBlockStep(state) {
   return Math.max(BLOCK_STEP_PX, size * 2.6);
 }
 
+// Ручка «+» ставит метку выбранного типа: выбрана «Р» — рядом с выключателем
+// встаёт розетка со своим номером, как в настоящем подрозетнике. Активного типа
+// нет (режим выделения) — модель берёт тип соседней метки.
 function canvasBlockPoint(markId, side) {
   const state = canvasState();
   try {
-    const result = addToGroup(state.project, markId, side, { step: canvasBlockStep(state) });
+    const result = addToGroup(state.project, markId, side, {
+      step: canvasBlockStep(state),
+      typeId: canvasPlacedTypeId(state),
+    });
     canvasCommit(state.project, result.project, strings.history.addBlock, [result.mark.id]);
   } catch (error) {
     canvasFail(error);

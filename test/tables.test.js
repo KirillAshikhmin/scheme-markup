@@ -3,7 +3,7 @@
 // текстовых формата; картинку и печать проверяет приёмка.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addMark, addRoom, addScheme, createProject, updateMark } from "../src/model.js";
+import { addMark, addRoom, addScheme, addToGroup, createProject, updateMark } from "../src/model.js";
 import { marksTable, toCsv, toMarkdown, toTsv, typesTable } from "../src/tables.js";
 
 // Комната с рукописного листа: свет, выключатели и розетки одной спальни.
@@ -139,6 +139,38 @@ test("блок — одна строка с общей подписью; от у
 
   const half = marksTable(box.project, { query: "кровати справа" }, "category");
   assert.deepEqual(half.groups[0].rows.map((row) => row.cells[0]), ["Р3"]);
+});
+
+test("смешанный блок — одна строка: общая подпись и оба типа в колонке «Тип»", () => {
+  const box = tablesFixture();
+  const sw = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: box.typeOf("В"),
+    kind: "point",
+    points: [{ x: 0.6, y: 0.6 }],
+  });
+  box.project = sw.project;
+  const socket = addToGroup(box.project, sw.mark.id, "right", { typeId: box.typeOf("Р") });
+  box.project = socket.project;
+  const twin = addToGroup(box.project, socket.mark.id, "right", { typeId: box.typeOf("Р") });
+  box.project = twin.project;
+  box.project = updateMark(box.project, sw.mark.id, { location: "у двери" }).project;
+
+  const table = marksTable(box.project, null, "category");
+  const rows = table.groups.flatMap((group) => group.rows.map((row) => ({ title: group.title, cells: row.cells })));
+  const mixed = rows.filter((row) => row.cells[0] === "В1, Р2Р3");
+  assert.equal(mixed.length, 1);
+  assert.equal(mixed[0].title, "Выключатели");
+  assert.equal(mixed[0].cells[1], "Выключатель, Розетка");
+  assert.equal(mixed[0].cells[3], "у двери");
+
+  // Лист розеток: от смешанного блока остаются видимые метки со своим типом,
+  // и подпись собирается по тому же правилу, что на плане, — слитно.
+  const sockets = box.project.categories.find((category) => category.name === "Розетки");
+  const onlySockets = marksTable(box.project, { categoryIds: [sockets.id] }, "category");
+  assert.deepEqual(onlySockets.groups.map((group) => group.title), ["Розетки"]);
+  assert.deepEqual(onlySockets.groups[0].rows.map((row) => row.cells[0]), ["Р1", "Р2Р3"]);
+  assert.equal(onlySockets.groups[0].rows[1].cells[1], "Розетка");
 });
 
 // Маленькая таблица на одну строку: её текстовый вид выписан вручную, чтобы

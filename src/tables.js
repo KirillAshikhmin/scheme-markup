@@ -9,6 +9,7 @@
 // рисовать метку на холсте или нет. Своего фильтра здесь нет намеренно:
 // разойдись они, на картинке и в таблице оказалось бы разное.
 import {
+  blockLabel,
   findCategory,
   findRoom,
   findType,
@@ -91,10 +92,6 @@ function tableEntries(project, filter) {
     const [head] = entry.marks;
     entry.head = head;
     entry.order = sortKey(head);
-    entry.whole = entry.groupId
-      ? (project.groups.find((group) => group.id === entry.groupId) || { markIds: [] }).markIds.length ===
-        entry.marks.length
-      : true;
   }
 
   entries.sort((a, b) => (a.order[0] === b.order[0] ? a.order[1] - b.order[1] : a.order[0] - b.order[0]));
@@ -112,9 +109,12 @@ function tableJoin(values, separator) {
   return seen.join(separator);
 }
 
+// Подпись строки собирается из тех меток, что попали на лист: правило одно
+// с планом (model.blockLabel), поэтому «Р2Р3» на схеме и в таблице выглядят
+// одинаково, а урезанный фильтром блок не обещает скрытых меток.
 function tableEntryLabel(project, entry) {
-  if (entry.groupId && entry.whole) return labelOf(project, entry.groupId);
-  return entry.marks.map((mark) => labelOf(project, mark.id)).join(", ");
+  if (!entry.groupId) return labelOf(project, entry.head.id);
+  return blockLabel(project, entry.marks.map((mark) => mark.id));
 }
 
 function tableEntryRow(project, entry) {

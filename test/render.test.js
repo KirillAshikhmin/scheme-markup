@@ -6,6 +6,8 @@ import {
   fitView,
   hitHandle,
   hitTest,
+  labelBox,
+  labelLead,
   labelOffsetOf,
   planToScreen,
   renderInternals,
@@ -18,6 +20,7 @@ import {
   createProject,
   addScheme,
   addMark,
+  addToGroup,
   updateMark,
   labelOf,
   typesInOrder,
@@ -268,6 +271,28 @@ test("смещение подписи блока берётся у первой 
   assert.deepEqual(labelOffsetOf(moved.project, group), { dx: 40, dy: -20 });
   assert.deepEqual(labelOffsetOf(moved.project, { ...group, labelOffset: { dx: 5, dy: 5 } }), { dx: 5, dy: 5 });
   assert.equal(labelOffsetOf(moved.project, moved.project.marks[1]), null);
+});
+
+test("подпись смешанного блока: ведёт первая по подписи метка, под фильтром — только видимые", () => {
+  const base = world();
+  const socket = addMark(base.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.5, y: 0.5 }] });
+  const switchType = base.project.markTypes.find((item) => item.code === "В").id;
+  const mixed = addToGroup(socket.project, socket.mark.id, "right", { typeId: switchType }).project;
+  const scheme = mixed.schemes[0];
+  const group = mixed.groups[0];
+
+  // Блок начат с розетки, а подпись читается «В1, Р1»: ведёт её выключатель,
+  // его цветом подпись и красится — иначе красная подпись начиналась бы с «В».
+  assert.equal(labelOf(mixed, group.id), "В1, Р1");
+  assert.equal(labelLead(mixed, group).typeId, switchType);
+
+  // Лист розеток: выключатель скрыт фильтром, значит и в подписи его нет,
+  // а стоит она у оставшейся метки, а не посередине между видимой и скрытой.
+  const targets = renderInternals.labelTargets(mixed, scheme, { typeIds: [base.typeId] });
+  assert.equal(targets.length, 1);
+  assert.equal(labelBox(mixed, scheme, targets[0], viewOf()).text, "Р1");
+  assert.equal(labelBox(mixed, scheme, targets[0], viewOf()).x, 500 + 10 * renderInternals.LABEL_GAP);
+  assert.equal(labelLead(mixed, targets[0]).typeId, base.typeId);
 });
 
 // ——— фильтр и запас попадания ————————————————————————————————————————
