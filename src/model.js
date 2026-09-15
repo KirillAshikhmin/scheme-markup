@@ -199,6 +199,25 @@ export function deleteScheme(project, schemeId) {
   return { project: withProject(project, { schemes, marks, groups }) };
 }
 
+// Единственный порядок справочника: категории по своему order, типы внутри —
+// по своему. Им пользуются и окно выбора типа, и легенда в выгрузке, и таблицы:
+// разойдись они — на бумаге окажется не тот порядок, что на экране.
+export function typesInOrder(project) {
+  if (!project) return [];
+  return project.categories
+    .map((category, index) => ({ category, order: category.order == null ? index : category.order }))
+    .sort((a, b) => a.order - b.order)
+    .map(({ category }) => ({
+      category,
+      types: project.markTypes
+        .filter((type) => type.categoryId === category.id)
+        .map((type, index) => ({ type, order: type.order == null ? index : type.order }))
+        .sort((a, b) => a.order - b.order)
+        .map((item) => item.type),
+    }))
+    .filter((group) => group.types.length > 0);
+}
+
 // Порядок схем объекта — одно правило на всех: нумерация, панели и выгрузки
 // обходят схемы одинаково.
 export function schemesInOrder(project) {

@@ -1,0 +1,207 @@
+/* Холст разметки, подсказка поверх него и панель инструментов. */
+
+.canvas {
+  display: block;
+  touch-action: none; /* щипок и панорама разбираются сами, браузер не мешает */
+  background: transparent;
+}
+
+.canvas-hint {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  max-width: 460px;
+  padding: 6px 10px;
+  border: 1px solid var(--canvas-line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #57606a;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tools__label {
+  margin: 6px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+.tools__type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tools__type.is-set {
+  border-color: var(--accent);
+}
+
+.tools__type:hover {
+  border-color: var(--panel-muted);
+}
+
+.tools__code {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.tools__typeName {
+  color: var(--panel-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tools__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tools__row--modes .ui-btn {
+  flex: 1 1 auto;
+}
+
+.ui-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tools__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.tools__field > span {
+  min-width: 68px;
+}
+
+.tools__slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+/* Окно выбора типа */
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, 78vw);
+}
+
+.picker__list {
+  max-height: 46vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.picker__group {
+  margin-top: 8px;
+  padding: 2px 0 2px 8px;
+  border-left: 3px solid var(--panel-line);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.picker__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker__row:hover,
+.picker__row.is-active {
+  background: #21262d;
+  border-color: var(--panel-line);
+}
+
+.picker__swatch {
+  flex: 0 0 auto;
+}
+
+.picker__code {
+  font-weight: 700;
+  min-width: 26px;
+}
+
+.picker__name {
+  color: var(--panel-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__create {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.picker__create:empty {
+  display: none;
+}
+
+.picker__createTitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.picker__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.picker__field > span {
+  min-width: 82px;
+}
+
+.picker__error {
+  margin: 0;
+  color: #ff9aa2;
+  font-size: 12px;
+}
+
+.picker__error:empty {
+  display: none;
+}

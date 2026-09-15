@@ -5,6 +5,214 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title data-text="app.title"></title>
     <style>
+/* Холст разметки, подсказка поверх него и панель инструментов. */
+
+.canvas {
+  display: block;
+  touch-action: none; /* щипок и панорама разбираются сами, браузер не мешает */
+  background: transparent;
+}
+
+.canvas-hint {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  max-width: 460px;
+  padding: 6px 10px;
+  border: 1px solid var(--canvas-line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #57606a;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tools__label {
+  margin: 6px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+.tools__type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tools__type.is-set {
+  border-color: var(--accent);
+}
+
+.tools__type:hover {
+  border-color: var(--panel-muted);
+}
+
+.tools__code {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.tools__typeName {
+  color: var(--panel-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tools__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tools__row--modes .ui-btn {
+  flex: 1 1 auto;
+}
+
+.ui-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tools__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.tools__field > span {
+  min-width: 68px;
+}
+
+.tools__slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+/* Окно выбора типа */
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, 78vw);
+}
+
+.picker__list {
+  max-height: 46vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.picker__group {
+  margin-top: 8px;
+  padding: 2px 0 2px 8px;
+  border-left: 3px solid var(--panel-line);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.picker__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker__row:hover,
+.picker__row.is-active {
+  background: #21262d;
+  border-color: var(--panel-line);
+}
+
+.picker__swatch {
+  flex: 0 0 auto;
+}
+
+.picker__code {
+  font-weight: 700;
+  min-width: 26px;
+}
+
+.picker__name {
+  color: var(--panel-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__create {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.picker__create:empty {
+  display: none;
+}
+
+.picker__createTitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.picker__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.picker__field > span {
+  min-width: 82px;
+}
+
+.picker__error {
+  margin: 0;
+  color: #ff9aa2;
+  font-size: 12px;
+}
+
+.picker__error:empty {
+  display: none;
+}
+
 /* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
 
 .ui-btn {
@@ -480,247 +688,6 @@ body {
     </div>
     <script>
 (function () {
-// src/imagePrep.js
-// Подготовка плана: проверка файла, поворот на четверть оборота и обрезка рамкой.
-// Координаты меток — доли от размера плана, поэтому вместе с картинкой нужно
-// пересчитать и доли: метка обязана остаться на том же месте изображения.
-// Арифметика здесь чистая (проверяется тестами), браузерные части — ниже.
-const PLAN_IMAGE_TYPES = ["image/png", "image/jpeg"];
-const PLAN_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
-const ROTATION_STEPS = [0, 90, 180, 270];
-
-// Тип у перетащенного файла иногда пустой — тогда решает расширение.
-function isPlanImageFile(file) {
-  if (!file) return false;
-  const type = String(file.type || "").toLowerCase();
-  if (PLAN_IMAGE_TYPES.includes(type)) return true;
-  if (type && type !== "application/octet-stream") return false;
-  const name = String(file.name || "").toLowerCase();
-  return PLAN_IMAGE_EXTENSIONS.some((extension) => name.endsWith(extension));
-}
-
-// Тип берётся из расширения, когда браузер его не назвал: у перетащенного
-// файла type часто пуст, и JPEG иначе уехал бы в хранилище и в zip как png.
-function planTypeOf(file) {
-  const type = String((file && file.type) || "").toLowerCase();
-  if (PLAN_IMAGE_TYPES.includes(type)) return type;
-  const name = String((file && file.name) || "").toLowerCase();
-  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-  return "image/png";
-}
-function identityTransform() {
-  return { rotate: 0, crop: null };
-}
-
-function clampUnit(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(1, Math.max(0, number));
-}
-
-// Поворот приводится к четверти оборота, рамка — к прямоугольнику внутри плана.
-function normalizeTransform(transform) {
-  const source = transform || {};
-  const turns = Math.round(Number(source.rotate || 0) / 90);
-  const rotate = ((turns % 4) + 4) % 4 * 90;
-  const raw = source.crop;
-  if (!raw) return { rotate, crop: null };
-  const x = clampUnit(raw.x, 0);
-  const y = clampUnit(raw.y, 0);
-  const width = Math.min(clampUnit(raw.width, 1), 1 - x);
-  const height = Math.min(clampUnit(raw.height, 1), 1 - y);
-  if (width <= 0 || height <= 0) return { rotate, crop: null };
-  if (x === 0 && y === 0 && width === 1 && height === 1) return { rotate, crop: null };
-  return { rotate, crop: { x, y, width, height } };
-}
-
-// Доли в системе повёрнутого плана: вправо (x,y) -> (1−y, x), влево -> (y, 1−x).
-function rotateFraction(point, rotate) {
-  if (rotate === 90) return { x: 1 - point.y, y: point.x };
-  if (rotate === 180) return { x: 1 - point.x, y: 1 - point.y };
-  if (rotate === 270) return { x: point.y, y: 1 - point.x };
-  return { x: point.x, y: point.y };
-}
-
-// Поворот и обрезка копятся в одно преобразование: (поворот на R, затем рамка
-// в долях повёрнутого плана). Так исходник пережимается один раз, а метки
-// пересчитываются одним шагом — и считаются один раз, а не на каждом шаге.
-function rotateTransform(transform, degrees) {
-  const current = normalizeTransform(transform);
-  const turns = ((Math.round(Number(degrees || 0) / 90) % 4) + 4) % 4;
-  const rotate = (current.rotate + turns * 90) % 360;
-  if (!current.crop) return { rotate, crop: null };
-  const a = rotateFraction({ x: current.crop.x, y: current.crop.y }, turns * 90);
-  const b = rotateFraction(
-    { x: current.crop.x + current.crop.width, y: current.crop.y + current.crop.height },
-    turns * 90,
-  );
-  return {
-    rotate,
-    crop: {
-      x: Math.min(a.x, b.x),
-      y: Math.min(a.y, b.y),
-      width: Math.abs(a.x - b.x),
-      height: Math.abs(a.y - b.y),
-    },
-  };
-}
-
-// Рамка задаётся в долях того, что видно сейчас, — то есть внутри прежней рамки.
-function cropTransform(transform, frame) {
-  const current = normalizeTransform(transform);
-  const box = normalizeTransform({ crop: frame }).crop;
-  if (!box) return current;
-  const base = current.crop || { x: 0, y: 0, width: 1, height: 1 };
-  return normalizeTransform({
-    rotate: current.rotate,
-    crop: {
-      x: base.x + box.x * base.width,
-      y: base.y + box.y * base.height,
-      width: box.width * base.width,
-      height: box.height * base.height,
-    },
-  });
-}
-function transformPoint(point, transform) {
-  const { rotate, crop } = normalizeTransform(transform);
-  const turned = rotateFraction({ x: Number(point.x), y: Number(point.y) }, rotate);
-  if (!crop) return turned;
-  return { x: (turned.x - crop.x) / crop.width, y: (turned.y - crop.y) / crop.height };
-}
-
-// Смещение подписи задано в пикселях экрана: обрезка его не трогает, поворот —
-// поворачивает так же, как саму картинку, иначе подпись уедет на другую сторону.
-function transformOffset(offset, transform) {
-  if (!offset) return offset;
-  const { rotate } = normalizeTransform(transform);
-  const dx = Number(offset.dx) || 0;
-  const dy = Number(offset.dy) || 0;
-  if (rotate === 90) return { dx: -dy, dy: dx };
-  if (rotate === 180) return { dx: -dx, dy: -dy };
-  if (rotate === 270) return { dx: dy, dy: -dx };
-  return { dx, dy };
-}
-
-// Ничего не менялось — значит и переписывать план незачем.
-function isIdentityTransform(transform) {
-  const settings = normalizeTransform(transform);
-  return settings.rotate === 0 && !settings.crop;
-}
-function transformSize(size, transform) {
-  const { rotate, crop } = normalizeTransform(transform);
-  const turned =
-    rotate === 90 || rotate === 270
-      ? { width: Number(size.height), height: Number(size.width) }
-      : { width: Number(size.width), height: Number(size.height) };
-  if (!crop) return { width: Math.round(turned.width), height: Math.round(turned.height) };
-  return {
-    width: Math.max(1, Math.round(turned.width * crop.width)),
-    height: Math.max(1, Math.round(turned.height * crop.height)),
-  };
-}
-
-// Пересчёт всех точек одной метки: используется панелью схем перед updateMark.
-function transformMarkPoints(points, transform) {
-  return (points || []).map((point) => {
-    const next = transformPoint(point, transform);
-    return { x: Math.min(1, Math.max(0, next.x)), y: Math.min(1, Math.max(0, next.y)) };
-  });
-}
-
-// Метка за рамкой обрезки была бы потеряна: считаем такие, чтобы предупредить.
-function countPointsOutside(points, transform) {
-  let outside = 0;
-  for (const point of points || []) {
-    const next = transformPoint(point, transform);
-    if (next.x < 0 || next.x > 1 || next.y < 0 || next.y > 1) outside += 1;
-  }
-  return outside;
-}
-
-// ——— браузерная часть ————————————————————————————————————————————————
-
-function planOutputType(blob) {
-  return planTypeOf(blob);
-}
-
-// createImageBitmap есть не везде (и не всегда по file://) — запасной путь <img>.
-async function decodePlanImage(blob) {
-  const url = URL.createObjectURL(blob);
-  try {
-    if (typeof createImageBitmap === "function") {
-      const bitmap = await createImageBitmap(blob);
-      return { image: bitmap, width: bitmap.width, height: bitmap.height, url };
-    }
-    const image = await new Promise((resolve, reject) => {
-      const element = new Image();
-      element.onload = () => resolve(element);
-      element.onerror = () => reject(new Error("decode"));
-      element.src = url;
-    });
-    return { image, width: image.naturalWidth, height: image.naturalHeight, url };
-  } catch (error) {
-    URL.revokeObjectURL(url);
-    throw error;
-  }
-}
-function releasePlanImage(decoded) {
-  if (!decoded) return;
-  if (decoded.url) URL.revokeObjectURL(decoded.url);
-  if (decoded.image && typeof decoded.image.close === "function") decoded.image.close();
-}
-
-// Файл плана: проверка типа и настоящий размер картинки в пикселях.
-async function readPlanImage(file) {
-  const blob = file.slice ? file.slice(0, file.size, planTypeOf(file)) : file;
-  const decoded = await decodePlanImage(blob);
-  const size = { width: decoded.width, height: decoded.height };
-  releasePlanImage(decoded);
-  return { blob, width: size.width, height: size.height };
-}
-
-function blobFromCanvas(canvas, type) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("toBlob"))),
-      type,
-      type === "image/jpeg" ? 0.92 : undefined,
-    );
-  });
-}
-
-// Новая картинка плана по тому же преобразованию, что и доли меток.
-async function renderPlanImage(blob, transform) {
-  const settings = normalizeTransform(transform);
-  const decoded = await decodePlanImage(blob);
-  try {
-    const turned = transformSize({ width: decoded.width, height: decoded.height }, { rotate: settings.rotate });
-    const size = transformSize({ width: decoded.width, height: decoded.height }, settings);
-    const canvas = document.createElement("canvas");
-    canvas.width = size.width;
-    canvas.height = size.height;
-    const ctx = canvas.getContext("2d");
-    if (settings.crop) {
-      ctx.translate(-Math.round(turned.width * settings.crop.x), -Math.round(turned.height * settings.crop.y));
-    }
-    if (settings.rotate === 90) {
-      ctx.translate(turned.width, 0);
-      ctx.rotate(Math.PI / 2);
-    } else if (settings.rotate === 180) {
-      ctx.translate(turned.width, turned.height);
-      ctx.rotate(Math.PI);
-    } else if (settings.rotate === 270) {
-      ctx.translate(0, turned.height);
-      ctx.rotate(-Math.PI / 2);
-    }
-    ctx.drawImage(decoded.image, 0, 0);
-    const out = await blobFromCanvas(canvas, planOutputType(blob));
-    return { blob: out, width: size.width, height: size.height };
-  } finally {
-    releasePlanImage(decoded);
-  }
-}
-
 // src/strings.js
 // Единственный словарь видимых строк. В остальных файлах русских текстов нет.
 const strings = {
@@ -782,6 +749,78 @@ const strings = {
   blockMode: {
     each: "Каждая точка — своя метка",
     single: "Одна метка на блок",
+  },
+  tools: {
+    type: "Тип метки",
+    noType: "Тип не выбран",
+    chooseType: "Выбрать тип",
+    changeType: "Сменить тип",
+    changeTypeHint: "Сменить тип выделенной метки — номер выдастся новый",
+    kind: "Что ставим",
+    kindPoint: "Точка",
+    kindLine: "Линия",
+    kindPointHint: "Клик по плану ставит точку выбранного типа",
+    kindLineHint: "Клики рисуют ломаную: лента или трек",
+    block: "Блок точек",
+    blockHint: "Режим блока хранится у типа метки",
+    sizes: "Размеры",
+    markSize: "Метки",
+    labelSize: "Подписи",
+    zoom: "Масштаб",
+    zoomIn: "Приблизить",
+    zoomOut: "Отдалить",
+    zoomFit: "Вписать план",
+    zoomReset: "100 %",
+    undo: "Отменить",
+    redo: "Вернуть",
+    undoTitle: "Отменить: {label} (Ctrl+Z)",
+    redoTitle: "Вернуть: {label} (Ctrl+Y)",
+    selectMode: "Выделение",
+    noSelection: "Метка не выделена",
+  },
+  picker: {
+    title: "Тип метки",
+    search: "Буква или название",
+    empty: "Ничего не нашлось — введите букву нового кода",
+    createTitle: "Нового типа «{code}» ещё нет",
+    createName: "Название",
+    createNamePlaceholder: "Например: Розетка в полу",
+    createCategory: "Категория",
+    create: "Создать тип",
+    created: "Тип {code} — {name} добавлен",
+    codeHint: "Код типа — одна или две буквы",
+  },
+  canvas: {
+    hintSelect: "Выберите тип метки, чтобы ставить метки по плану",
+    hintPoint:
+      "Клик ставит {label}. Ручки «+» у метки — соседняя точка блока. Esc снимает выделение и прячет ручки, второй Esc выходит из режима.",
+    hintSelectMode:
+      "Клик выбирает метку, перетаскивание двигает её или подпись, Delete удаляет, Esc снимает выделение.",
+    hintLine: "Клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить.",
+    lineTooShort: "Линия из одной точки не сохраняется — поставьте ещё хотя бы одну вершину",
+    needType: "Сначала выберите тип метки",
+    needScheme: "Сначала загрузите план схемы",
+    deleteBlockTitle: "Удалить метку из блока?",
+    deleteBlockMessage:
+      "Метка «{label}» стоит в блоке из {count}. Удалить только её? Соседние метки останутся на месте.",
+    deleteConfirm: "Удалить метку",
+    typeChanged: "Теперь это {label}",
+    undone: "Отменено: {label}",
+    redone: "Возвращено: {label}",
+    nothingToUndo: "Отменять нечего",
+    nothingToRedo: "Возвращать нечего",
+  },
+  history: {
+    addMark: "постановка метки",
+    addBlock: "точка блока",
+    addLine: "линия",
+    move: "перемещение метки",
+    moveLabel: "смещение подписи",
+    remove: "удаление метки",
+    changeType: "смена типа",
+    addType: "новый тип",
+    viewSize: "размер меток и подписей",
+    blockMode: "режим блока",
   },
   errors: {
     schemeNotFound: "Схема не найдена",
@@ -943,6 +982,156 @@ function text(key, vars) {
     }
   }
   return value;
+}
+
+// src/app.js
+// Каркас сеанса: состояние, реестр панелей, уведомления.
+// Панели других тасков монтируются по идентификатору контейнера из index.html
+// и не правят ни этот файл, ни разметку.
+
+// Контейнеры-точки монтирования (идентификаторы из src/index.html).
+const PANEL_IDS = {
+  tools: "panel-tools",
+  schemes: "panel-schemes",
+  marks: "panel-marks",
+  properties: "panel-properties",
+  canvas: "canvas-host",
+  overlay: "canvas-overlay",
+  headerActions: "header-actions",
+  projectActions: "project-actions",
+  dialogs: "dialog-host",
+};
+
+const appState = {
+  project: null,
+  schemeId: null,
+  selectedMarkIds: [],
+  activeTypeId: null,
+  mode: "select",
+  filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
+  view: { zoom: 1, offsetX: 0, offsetY: 0 },
+  dirty: false,
+};
+
+const appSubscribers = new Set();
+const appPanels = new Map();
+const appMounted = new Map();
+let appStarted = false;
+
+// Снимок: вложенные filter/view/selectedMarkIds копируются, чтобы правка
+// на месте в панели не меняла состояние сеанса мимо setState.
+function getState() {
+  return {
+    ...appState,
+    selectedMarkIds: [...appState.selectedMarkIds],
+    filter: { ...appState.filter },
+    view: { ...appState.view },
+  };
+}
+function setState(patch) {
+  if (!patch) return getState();
+  const changed = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (appState[key] !== value) {
+      appState[key] = value;
+      changed[key] = value;
+    }
+  }
+  if (Object.keys(changed).length === 0) return getState();
+  const snapshot = getState();
+  for (const subscriber of [...appSubscribers]) {
+    try {
+      subscriber(snapshot, changed);
+    } catch (error) {
+      reportAppError(error);
+    }
+  }
+  syncCanvasClass();
+  syncProjectName();
+  return snapshot;
+}
+function subscribe(listener) {
+  appSubscribers.add(listener);
+  return () => appSubscribers.delete(listener);
+}
+
+// Регистрация панели: если каркас уже поднят — монтируем сразу.
+function registerPanel(id, mountFn) {
+  if (typeof mountFn !== "function") return;
+  appPanels.set(id, mountFn);
+  if (appStarted) mountPanel(id);
+}
+function panelApi() {
+  return { getState, setState, subscribe, notify, strings, text };
+}
+
+function mountPanel(id) {
+  const mountFn = appPanels.get(id);
+  const host = document.getElementById(id);
+  if (!mountFn || !host || appMounted.get(id) === mountFn) return;
+  try {
+    mountFn(host, panelApi());
+    appMounted.set(id, mountFn);
+  } catch (error) {
+    reportAppError(error);
+  }
+}
+function notify(message, kind = "info") {
+  const host = typeof document === "undefined" ? null : document.getElementById("notifications");
+  if (!host) return null;
+  const toast = document.createElement("div");
+  toast.className = "toast toast--" + kind;
+  toast.textContent = String(message);
+  toast.title = strings.notify.close;
+  toast.addEventListener("click", () => toast.remove());
+  host.append(toast);
+  setTimeout(() => toast.remove(), kind === "error" ? 12000 : 6000);
+  return toast;
+}
+
+function reportAppError(error) {
+  notify(error && error.message ? error.message : String(error), "error");
+}
+
+// Все видимые строки приходят из словаря: разметка держит только ключи.
+function applyStrings(root) {
+  const scope = root || document;
+  for (const node of scope.querySelectorAll("[data-text]")) {
+    node.textContent = text(node.dataset.text);
+  }
+  for (const node of scope.querySelectorAll("[data-title]")) {
+    node.title = text(node.dataset.title);
+  }
+}
+
+function syncProjectName() {
+  const node = document.getElementById("project-name");
+  if (!node) return;
+  node.textContent = appState.project ? appState.project.name : strings.header.noProject;
+}
+
+function syncCanvasClass() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.classList.toggle("has-scheme", Boolean(appState.schemeId));
+}
+function startApp() {
+  if (appStarted) return;
+  appStarted = true;
+  applyStrings(document);
+  syncProjectName();
+  syncCanvasClass();
+  for (const id of appPanels.keys()) mountPanel(id);
+}
+
+// Старт откладывается за границу текущего скрипта: в собранном файле панели
+// и модели определяются ниже по бандлу, и каркас не должен опережать их.
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startApp, { once: true });
+  } else {
+    setTimeout(startApp, 0);
+  }
 }
 
 // src/model.js
@@ -1130,6 +1319,25 @@ function deleteScheme(project, schemeId) {
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
   return { project: withProject(project, { schemes, marks, groups }) };
+}
+
+// Единственный порядок справочника: категории по своему order, типы внутри —
+// по своему. Им пользуются и окно выбора типа, и легенда в выгрузке, и таблицы:
+// разойдись они — на бумаге окажется не тот порядок, что на экране.
+function typesInOrder(project) {
+  if (!project) return [];
+  return project.categories
+    .map((category, index) => ({ category, order: category.order == null ? index : category.order }))
+    .sort((a, b) => a.order - b.order)
+    .map(({ category }) => ({
+      category,
+      types: project.markTypes
+        .filter((type) => type.categoryId === category.id)
+        .map((type, index) => ({ type, order: type.order == null ? index : type.order }))
+        .sort((a, b) => a.order - b.order)
+        .map((item) => item.type),
+    }))
+    .filter((group) => group.types.length > 0);
 }
 
 // Порядок схем объекта — одно правило на всех: нумерация, панели и выгрузки
@@ -1604,153 +1812,1789 @@ function validate(project) {
   return problems;
 }
 
-// src/app.js
-// Каркас сеанса: состояние, реестр панелей, уведомления.
-// Панели других тасков монтируются по идентификатору контейнера из index.html
-// и не правят ни этот файл, ни разметку.
+// src/render.js
+// Рисование схемы и попадание по метке.
+//
+// Две системы координат. В объекте метки лежат долями плана (0…1) — так поворот
+// и обрезка картинки не двигают разметку. На экране (и в экспорте) точка плана
+// превращается в пиксели одной формулой planToScreen: смещение плюс доля,
+// умноженная на размер плана и на масштаб.
+//
+// `view` для рисования — это `{zoom, offsetX, offsetY, markSize, labelSize}`:
+// первые три приходят из состояния сеанса (`state.view`), последние два — из
+// объекта (`project.view`), их двигает ползунок в панели инструментов. Размер
+// метки задан в пикселях плана, поэтому метка живёт на плане как наклейка:
+// приближение увеличивает и её, а экспорт в двойном разрешении даёт тот же вид.
+const SHAPES = SHAPE_NAMES;
 
-// Контейнеры-точки монтирования (идентификаторы из src/index.html).
-const PANEL_IDS = {
-  tools: "panel-tools",
-  schemes: "panel-schemes",
-  marks: "panel-marks",
-  properties: "panel-properties",
-  canvas: "canvas-host",
-  overlay: "canvas-overlay",
-  headerActions: "header-actions",
-  projectActions: "project-actions",
-  dialogs: "dialog-host",
+// Доля радиуса, на которую внутренние вершины звезды ближе к центру.
+const STAR_INNER = 0.45;
+// Запас в пикселях вокруг метки, чтобы попадать по ней не идеально точно.
+const HIT_SLACK_PX = 4;
+// Ширина буквы относительно кегля — оценка, одинаковая в тесте и на холсте.
+const LABEL_CHAR_RATIO = 0.62;
+// Насколько далеко от метки стоит подпись, если её не оттаскивали.
+const LABEL_GAP = 1.5;
+// Ручки «+» стоят от центра метки на столько её радиусов.
+const HANDLE_GAP = 2.4;
+const HANDLE_RADIUS = 9;
+
+const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
+
+// Углы вершин, градусы от «вверх». Все фигуры вписаны в окружность радиуса size.
+const SHAPE_ANGLES = {
+  square: [-135, -45, 45, 135],
+  triangle: [-90, 30, 150],
+  diamond: [-90, 0, 90, 180],
+  hexagon: [-90, -30, 30, 90, 150, 210],
 };
 
-const appState = {
-  project: null,
-  schemeId: null,
-  selectedMarkIds: [],
-  activeTypeId: null,
-  mode: "select",
-  filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
-  view: { zoom: 1, offsetX: 0, offsetY: 0 },
-  dirty: false,
-};
+function renderView(view) {
+  const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
+  if (!(merged.zoom > 0)) merged.zoom = 1;
+  return merged;
+}
 
-const appSubscribers = new Set();
-const appPanels = new Map();
-const appMounted = new Map();
-let appStarted = false;
+function polarPoint(x, y, radius, degrees) {
+  const angle = (degrees * Math.PI) / 180;
+  return { x: x + radius * Math.cos(angle), y: y + radius * Math.sin(angle) };
+}
 
-// Снимок: вложенные filter/view/selectedMarkIds копируются, чтобы правка
-// на месте в панели не меняла состояние сеанса мимо setState.
-function getState() {
+// Геометрия фигуры в экранных пикселях: круг или список вершин.
+function shapeGeometry(shape, x, y, size) {
+  const radius = Math.max(1, size);
+  if (shape === "star") {
+    const points = [];
+    for (let index = 0; index < 10; index += 1) {
+      const long = index % 2 === 0;
+      points.push(polarPoint(x, y, long ? radius : radius * STAR_INNER, -90 + index * 36));
+    }
+    return { kind: "polygon", points, cx: x, cy: y, r: radius, cross: false };
+  }
+  const angles = SHAPE_ANGLES[shape];
+  if (angles) {
+    return {
+      kind: "polygon",
+      points: angles.map((degrees) => polarPoint(x, y, radius, degrees)),
+      cx: x,
+      cy: y,
+      r: radius,
+      cross: false,
+    };
+  }
+  return { kind: "circle", cx: x, cy: y, r: radius, points: [], cross: shape === "circle-cross" };
+}
+
+// Одна фигура — одним кодом и на экране, и в экспорте.
+function drawShape(ctx, shape, x, y, size, color) {
+  const geometry = shapeGeometry(shape, x, y, size);
+  const line = Math.max(1, size * 0.22);
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineWidth = line;
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  if (geometry.kind === "circle") {
+    ctx.arc(geometry.cx, geometry.cy, geometry.r, 0, Math.PI * 2);
+  } else {
+    geometry.points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+  }
+  ctx.fill();
+  ctx.stroke();
+  if (geometry.cross) {
+    const arm = geometry.r * Math.SQRT1_2;
+    ctx.beginPath();
+    ctx.moveTo(geometry.cx - arm, geometry.cy - arm);
+    ctx.lineTo(geometry.cx + arm, geometry.cy + arm);
+    ctx.moveTo(geometry.cx + arm, geometry.cy - arm);
+    ctx.lineTo(geometry.cx - arm, geometry.cy + arm);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ——— координаты —————————————————————————————————————————————————————
+function planToScreen(point, scheme, view) {
+  const state = renderView(view);
   return {
-    ...appState,
-    selectedMarkIds: [...appState.selectedMarkIds],
-    filter: { ...appState.filter },
-    view: { ...appState.view },
+    x: state.offsetX + point.x * schemeWidth(scheme) * state.zoom,
+    y: state.offsetY + point.y * schemeHeight(scheme) * state.zoom,
   };
 }
-function setState(patch) {
-  if (!patch) return getState();
-  const changed = {};
-  for (const [key, value] of Object.entries(patch)) {
-    if (appState[key] !== value) {
-      appState[key] = value;
-      changed[key] = value;
+function screenToPlan(point, scheme, view) {
+  const state = renderView(view);
+  return {
+    x: (point.x - state.offsetX) / (schemeWidth(scheme) * state.zoom),
+    y: (point.y - state.offsetY) / (schemeHeight(scheme) * state.zoom),
+  };
+}
+
+function schemeWidth(scheme) {
+  return scheme && scheme.width > 0 ? scheme.width : 1000;
+}
+
+function schemeHeight(scheme) {
+  return scheme && scheme.height > 0 ? scheme.height : 1000;
+}
+
+// Радиус метки на экране: размер задан в пикселях плана и растёт с масштабом.
+function markRadius(view) {
+  const state = renderView(view);
+  return Math.max(2, state.markSize * state.zoom);
+}
+
+function labelFontSize(view) {
+  const state = renderView(view);
+  return Math.max(6, state.labelSize * state.zoom);
+}
+
+// Вписать план в прямоугольник холста.
+function fitView(scheme, viewport) {
+  const width = schemeWidth(scheme);
+  const height = schemeHeight(scheme);
+  const boxWidth = Math.max(1, viewport.width);
+  const boxHeight = Math.max(1, viewport.height);
+  const zoom = Math.min(boxWidth / width, boxHeight / height) * 0.96;
+  return {
+    zoom,
+    offsetX: (boxWidth - width * zoom) / 2,
+    offsetY: (boxHeight - height * zoom) / 2,
+  };
+}
+
+// ——— видимость ———————————————————————————————————————————————————————
+
+// Фильтр панели меток: скрытая метка не рисуется и по ней не кликается.
+function markVisible(project, mark, filter) {
+  if (!filter) return true;
+  if (Array.isArray(filter.typeIds) && !filter.typeIds.includes(mark.typeId)) return false;
+  if (Array.isArray(filter.categoryIds)) {
+    const type = findType(project, mark.typeId);
+    if (!type || !filter.categoryIds.includes(type.categoryId)) return false;
+  }
+  if (filter.roomId && mark.roomId !== filter.roomId) return false;
+  const query = (filter.query || "").trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [labelOf(project, mark.id), mark.location, mark.original]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+function visibleMarks(project, scheme, filter) {
+  if (!project || !scheme) return [];
+  return project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter));
+}
+
+// ——— подписи —————————————————————————————————————————————————————————
+
+// Точка привязки подписи: для одиночной метки — её точка, для группы — середина
+// между входящими метками. Смещение подписи хранится в пикселях плана, поэтому
+// поворот плана уносит её вместе с меткой.
+function labelOrigin(project, target) {
+  if (target.markIds) {
+    const points = target.markIds
+      .map((id) => project.marks.find((mark) => mark.id === id))
+      .filter(Boolean)
+      .map((mark) => mark.points[0]);
+    if (points.length === 0) return { x: 0, y: 0 };
+    const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+    return { x: sum.x / points.length, y: sum.y / points.length };
+  }
+  return target.points[0];
+}
+
+// Смещение подписи. У группы своего поля модель не заводит — её подпись стоит
+// по смещению первой метки блока (собственной подписи у этой метки нет,
+// подпись у блока одна), и правится оно обычным updateMark.
+function labelOffsetOf(project, target) {
+  if (!target.markIds) return target.labelOffset || null;
+  if (target.labelOffset) return target.labelOffset;
+  const first = project.marks.find((mark) => mark.id === target.markIds[0]);
+  return first && first.labelOffset ? first.labelOffset : null;
+}
+function labelBox(project, scheme, target, view) {
+  const state = renderView(view);
+  const font = labelFontSize(state);
+  const radius = markRadius(state);
+  const anchor = planToScreen(labelOrigin(project, target), scheme, state);
+  const offset = labelOffsetOf(project, target);
+  const dx = offset ? offset.dx * state.zoom : radius * LABEL_GAP;
+  const dy = offset ? offset.dy * state.zoom : -radius * LABEL_GAP;
+  const value = labelOf(project, target.id) || "";
+  return {
+    text: value,
+    x: anchor.x + dx,
+    y: anchor.y + dy,
+    width: Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO),
+    height: font * 1.2,
+    font,
+  };
+}
+
+// Подписи рисуются у меток без группы и по одной на группу.
+function labelTargets(project, scheme, filter) {
+  const marks = visibleMarks(project, scheme, filter);
+  const targets = [];
+  const seenGroups = new Set();
+  for (const mark of marks) {
+    if (!mark.groupId) {
+      targets.push(mark);
+      continue;
+    }
+    if (seenGroups.has(mark.groupId)) continue;
+    seenGroups.add(mark.groupId);
+    const group = findGroup(project, mark.groupId);
+    if (group) targets.push(group);
+    else targets.push(mark);
+  }
+  return targets;
+}
+
+// ——— попадание ———————————————————————————————————————————————————————
+
+function pointInPolygon(point, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const a = points[i];
+    const b = points[j];
+    const crosses = a.y > point.y !== b.y > point.y;
+    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function distanceToSegment(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return Math.hypot(point.x - a.x, point.y - a.y);
+  let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+function insideBox(point, box) {
+  return (
+    point.x >= box.x - 2 &&
+    point.x <= box.x + box.width + 2 &&
+    point.y >= box.y - box.height / 2 &&
+    point.y <= box.y + box.height / 2
+  );
+}
+
+// Точка — в экранных пикселях холста. Возвращает `{markId, part, index}`:
+// `part` — `label` (подпись, её таскают отдельно), `mark` (точка или вершина
+// линии), `line` (сегмент ломаной). Сверху вниз: подписи, потом метки в обратном
+// порядке постановки — поздняя метка лежит выше ранней.
+function hitTest(project, scheme, point, view, filter) {
+  if (!project || !scheme) return null;
+  const state = renderView(view);
+  const radius = markRadius(state);
+  const slack = radius + HIT_SLACK_PX;
+
+  const targets = labelTargets(project, scheme, filter);
+  for (let index = targets.length - 1; index >= 0; index -= 1) {
+    const target = targets[index];
+    const box = labelBox(project, scheme, target, state);
+    if (box.text && insideBox(point, box)) {
+      const markId = target.markIds ? target.markIds[0] : target.id;
+      return { markId, part: "label", groupId: target.markIds ? target.id : null, index: 0 };
     }
   }
-  if (Object.keys(changed).length === 0) return getState();
-  const snapshot = getState();
-  for (const subscriber of [...appSubscribers]) {
-    try {
-      subscriber(snapshot, changed);
-    } catch (error) {
-      reportAppError(error);
+
+  const marks = visibleMarks(project, scheme, filter);
+  for (let index = marks.length - 1; index >= 0; index -= 1) {
+    const mark = marks[index];
+    const style = styleOf(project, mark.typeId);
+    const screen = mark.points.map((item) => planToScreen(item, scheme, state));
+    for (let vertex = 0; vertex < screen.length; vertex += 1) {
+      const geometry = shapeGeometry(style.shape, screen[vertex].x, screen[vertex].y, radius);
+      const near =
+        geometry.kind === "circle"
+          ? Math.hypot(point.x - geometry.cx, point.y - geometry.cy) <= slack
+          : pointInPolygon(point, geometry.points) ||
+            Math.hypot(point.x - geometry.cx, point.y - geometry.cy) <= slack;
+      if (near) return { markId: mark.id, part: "mark", groupId: mark.groupId, index: vertex };
+    }
+    if (mark.kind === "line" && screen.length > 1) {
+      const last = mark.closed ? screen.length : screen.length - 1;
+      for (let segment = 0; segment < last; segment += 1) {
+        const a = screen[segment];
+        const b = screen[(segment + 1) % screen.length];
+        if (distanceToSegment(point, a, b) <= Math.max(4, radius * 0.6)) {
+          return { markId: mark.id, part: "line", groupId: mark.groupId, index: segment };
+        }
+      }
     }
   }
-  syncCanvasClass();
-  syncProjectName();
-  return snapshot;
-}
-function subscribe(listener) {
-  appSubscribers.add(listener);
-  return () => appSubscribers.delete(listener);
+  return null;
 }
 
-// Регистрация панели: если каркас уже поднят — монтируем сразу.
-function registerPanel(id, mountFn) {
-  if (typeof mountFn !== "function") return;
-  appPanels.set(id, mountFn);
-  if (appStarted) mountPanel(id);
-}
-function panelApi() {
-  return { getState, setState, subscribe, notify, strings, text };
-}
+// ——— ручки блока —————————————————————————————————————————————————————
 
-function mountPanel(id) {
-  const mountFn = appPanels.get(id);
-  const host = document.getElementById(id);
-  if (!mountFn || !host || appMounted.get(id) === mountFn) return;
-  try {
-    mountFn(host, panelApi());
-    appMounted.set(id, mountFn);
-  } catch (error) {
-    reportAppError(error);
+// Четыре «+» вокруг выделенной точки: клик ставит соседнюю точку блока.
+// Ради них таск и существует: два десятка розеток ставятся без диалогов.
+function handlePositions(scheme, mark, view) {
+  if (!mark || mark.kind !== "point") return [];
+  const state = renderView(view);
+  const radius = markRadius(state);
+  const gap = radius * HANDLE_GAP;
+  const base = planToScreen(mark.points[mark.points.length - 1], scheme, state);
+  const handleRadius = Math.max(7, Math.min(HANDLE_RADIUS, radius));
+  return [
+    { side: "left", x: base.x - gap, y: base.y, r: handleRadius },
+    { side: "right", x: base.x + gap, y: base.y, r: handleRadius },
+    { side: "up", x: base.x, y: base.y - gap, r: handleRadius },
+    { side: "down", x: base.x, y: base.y + gap, r: handleRadius },
+  ];
+}
+function hitHandle(scheme, mark, point, view) {
+  for (const handle of handlePositions(scheme, mark, view)) {
+    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) return handle.side;
   }
-}
-function notify(message, kind = "info") {
-  const host = typeof document === "undefined" ? null : document.getElementById("notifications");
-  if (!host) return null;
-  const toast = document.createElement("div");
-  toast.className = "toast toast--" + kind;
-  toast.textContent = String(message);
-  toast.title = strings.notify.close;
-  toast.addEventListener("click", () => toast.remove());
-  host.append(toast);
-  setTimeout(() => toast.remove(), kind === "error" ? 12000 : 6000);
-  return toast;
+  return null;
 }
 
-function reportAppError(error) {
-  notify(error && error.message ? error.message : String(error), "error");
+// ——— рисование ———————————————————————————————————————————————————————
+
+function drawLabel(ctx, box, color) {
+  if (!box.text) return;
+  ctx.save();
+  ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  // Обводка-подложка: подпись читается и поверх тёмных линий плана.
+  ctx.lineWidth = Math.max(2, box.font * 0.3);
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.strokeText(box.text, box.x, box.y);
+  ctx.fillStyle = color;
+  ctx.fillText(box.text, box.x, box.y);
+  ctx.restore();
 }
 
-// Все видимые строки приходят из словаря: разметка держит только ключи.
-function applyStrings(root) {
-  const scope = root || document;
-  for (const node of scope.querySelectorAll("[data-text]")) {
-    node.textContent = text(node.dataset.text);
-  }
-  for (const node of scope.querySelectorAll("[data-title]")) {
-    node.title = text(node.dataset.title);
-  }
-}
-
-function syncProjectName() {
-  const node = document.getElementById("project-name");
-  if (!node) return;
-  node.textContent = appState.project ? appState.project.name : strings.header.noProject;
-}
-
-function syncCanvasClass() {
-  const app = document.getElementById("app");
-  if (!app) return;
-  app.classList.toggle("has-scheme", Boolean(appState.schemeId));
-}
-function startApp() {
-  if (appStarted) return;
-  appStarted = true;
-  applyStrings(document);
-  syncProjectName();
-  syncCanvasClass();
-  for (const id of appPanels.keys()) mountPanel(id);
-}
-
-// Старт откладывается за границу текущего скрипта: в собранном файле панели
-// и модели определяются ниже по бандлу, и каркас не должен опережать их.
-if (typeof document !== "undefined") {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", startApp, { once: true });
+function drawMarkBody(ctx, project, scheme, mark, view, selected) {
+  const style = styleOf(project, mark.typeId);
+  const radius = markRadius(view);
+  const screen = mark.points.map((point) => planToScreen(point, scheme, view));
+  if (mark.kind === "line" && screen.length > 1) {
+    ctx.save();
+    ctx.strokeStyle = style.color;
+    ctx.lineWidth = Math.max(2, radius * 0.5);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    if (mark.closed) ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+    for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(2, radius * 0.45), style.color);
   } else {
-    setTimeout(startApp, 0);
+    for (const point of screen) drawShape(ctx, style.shape, point.x, point.y, radius, style.color);
+  }
+  if (!selected) return;
+  ctx.save();
+  ctx.strokeStyle = "#0969da";
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 2;
+  for (const point of screen) {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius * 1.6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Ручки «+» рисуются только у выделенной точки.
+function drawHandles(ctx, scheme, mark, view) {
+  for (const handle of handlePositions(scheme, mark, view)) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.strokeStyle = "#0969da";
+    ctx.lineWidth = 1.5;
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    const arm = handle.r * 0.5;
+    ctx.moveTo(handle.x - arm, handle.y);
+    ctx.lineTo(handle.x + arm, handle.y);
+    ctx.moveTo(handle.x, handle.y - arm);
+    ctx.lineTo(handle.x, handle.y + arm);
+    ctx.strokeStyle = "#0969da";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Черновик линии: уже поставленные вершины плюс резинка до курсора.
+function drawDraft(ctx, scheme, draft, view, color) {
+  if (!draft || draft.points.length === 0) return;
+  const radius = markRadius(view);
+  const screen = draft.points.map((point) => planToScreen(point, scheme, view));
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(2, radius * 0.5);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+  if (draft.cursor) {
+    const cursor = planToScreen(draft.cursor, scheme, view);
+    ctx.lineTo(cursor.x, cursor.y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+  for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(3, radius * 0.5), color);
+  // Первая вершина крупнее: по ней замыкают контур.
+  drawShape(ctx, "circle", screen[0].x, screen[0].y, Math.max(4, radius * 0.75), color);
+}
+
+function legendRows(project, scheme, filter) {
+  const used = new Set(visibleMarks(project, scheme, filter).map((mark) => mark.typeId));
+  const rows = [];
+  for (const group of typesInOrder(project)) {
+    for (const type of group.types) {
+      if (!used.has(type.id)) continue;
+      rows.push({ code: type.code, name: type.name, category: group.category.name, ...styleOf(project, type.id) });
+    }
+  }
+  return rows;
+}
+
+// Легенда — для выгрузки: список типов, встреченных на схеме.
+function drawLegend(ctx, { project, scheme, filter, view, box }) {
+  const rows = legendRows(project, scheme, filter);
+  if (rows.length === 0) return;
+  const state = renderView(view);
+  const font = Math.max(11, labelFontSize(state) * 0.9);
+  const step = font * 1.7;
+  const width = font * 16;
+  const height = step * rows.length + font;
+  const x = box ? box.x : 12;
+  const y = box ? box.y : 12;
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.strokeStyle = "#d0d7de";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.rect(x, y, width, height);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = `${font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  rows.forEach((row, index) => {
+    const lineY = y + font * 0.6 + step * (index + 0.5);
+    drawShape(ctx, row.shape, x + font * 1.1, lineY, font * 0.55, row.color);
+    ctx.fillStyle = "#1f2328";
+    ctx.fillText(`${row.code} — ${row.name}`, x + font * 2.2, lineY);
+  });
+  ctx.restore();
+}
+
+// Весь кадр: план, метки, подписи, при надобности легенда. Тот же код и на
+// экране, и в экспорте — меняется только масштаб во `view`.
+function drawScheme(ctx, { project, scheme, image, filter, view, legend, selectedIds, draft, draftColor }) {
+  const state = renderView(view);
+  if (image) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(
+      image,
+      state.offsetX,
+      state.offsetY,
+      schemeWidth(scheme) * state.zoom,
+      schemeHeight(scheme) * state.zoom,
+    );
+    ctx.restore();
+  }
+  if (!project || !scheme) return;
+  const selected = new Set(selectedIds || []);
+  for (const mark of visibleMarks(project, scheme, filter)) {
+    drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
+  }
+  for (const target of labelTargets(project, scheme, filter)) {
+    const typeId = target.markIds
+      ? (project.marks.find((mark) => mark.id === target.markIds[0]) || {}).typeId
+      : target.typeId;
+    drawLabel(ctx, labelBox(project, scheme, target, state), styleOf(project, typeId).color);
+  }
+  if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da");
+  if (legend) drawLegend(ctx, { project, scheme, filter, view: state, box: legend === true ? null : legend });
+}
+
+// Дверь для тестов — не для панелей: за ней внутренности drawScheme, которые
+// снаружи вызывать незачем, но проверить нужно (геометрия, видимость, запас
+// попадания). Панели и экспорт берут только именованные экспорты выше.
+const renderInternals = {
+  shapeGeometry,
+  labelFontSize,
+  labelTargets,
+  labelOrigin,
+  markVisible,
+  handlePositions,
+  drawDraft,
+  HIT_SLACK_PX,
+  LABEL_CHAR_RATIO,
+  LABEL_GAP,
+  HANDLE_GAP,
+};
+
+// src/history.js
+// Отмена — стек команд в памяти. В файл история не пишется: пользователь просил
+// отмену, а не версии.
+//
+// Команда — это пара функций: `undo()` возвращает как было, `redo()` — как стало.
+// Холст кладёт сюда снимки объекта, которые вернула модель; своего мутатора
+// объекта здесь нет и быть не должно.
+const HISTORY_DEPTH = 100;
+
+const historyDone = [];
+const historyUndone = [];
+const historyListeners = new Set();
+
+function historyChanged() {
+  for (const listener of [...historyListeners]) listener();
+}
+function pushCommand(command) {
+  if (!command || typeof command.undo !== "function" || typeof command.redo !== "function") return null;
+  historyDone.push(command);
+  // Ветка «отменил и сделал иначе»: возвращать уже нечего.
+  historyUndone.length = 0;
+  while (historyDone.length > HISTORY_DEPTH) historyDone.shift();
+  historyChanged();
+  return command;
+}
+function undo() {
+  const command = historyDone.pop();
+  if (!command) return null;
+  command.undo();
+  historyUndone.push(command);
+  historyChanged();
+  return command;
+}
+function redo() {
+  const command = historyUndone.pop();
+  if (!command) return null;
+  command.redo();
+  historyDone.push(command);
+  historyChanged();
+  return command;
+}
+function canUndo() {
+  return historyDone.length > 0;
+}
+function canRedo() {
+  return historyUndone.length > 0;
+}
+function undoLabel() {
+  const command = historyDone[historyDone.length - 1];
+  return command && command.label ? command.label : "";
+}
+function redoLabel() {
+  const command = historyUndone[historyUndone.length - 1];
+  return command && command.label ? command.label : "";
+}
+
+// Стек живёт в пределах объекта: при переключении объекта его чистят.
+function clearHistory() {
+  historyDone.length = 0;
+  historyUndone.length = 0;
+  historyChanged();
+}
+
+// Кнопки «Отменить»/«Вернуть» подсвечиваются по этому событию, и слушателей у
+// него столько, сколько подписалось: панель инструментов, список меток и всё,
+// что появится дальше. Возвращённая функция снимает только свою подписку.
+function onHistoryChange(listener) {
+  if (typeof listener !== "function") return () => {};
+  historyListeners.add(listener);
+  return () => historyListeners.delete(listener);
+}
+
+// src/panels/ui.js
+// Общие кирпичи панелей: элементы, кнопки, модальные диалоги.
+// Отдельный модуль, потому что ими пользуются все панели: тянуть их из чужой
+// панели значило бы тянуть вместе с ней её регистрацию и подписки.
+function uiEl(tag, options = {}, children = []) {
+  const node = document.createElement(tag);
+  if (options.class) node.className = options.class;
+  if (options.text != null) node.textContent = options.text;
+  if (options.title) node.title = options.title;
+  if (options.type) node.type = options.type;
+  if (options.value != null) node.value = options.value;
+  if (options.placeholder) node.placeholder = options.placeholder;
+  if (options.attrs) {
+    for (const [name, value] of Object.entries(options.attrs)) node.setAttribute(name, value);
+  }
+  if (options.on) {
+    for (const [name, handler] of Object.entries(options.on)) node.addEventListener(name, handler);
+  }
+  for (const child of Array.isArray(children) ? children : [children]) {
+    if (child) node.append(child);
+  }
+  return node;
+}
+function uiButton(label, options = {}) {
+  return uiEl("button", {
+    class: options.class || "ui-btn",
+    text: label,
+    title: options.title || "",
+    type: "button",
+    on: options.on,
+    attrs: options.attrs,
+  });
+}
+
+// Диалоги складываются стопкой: подтверждение поверх редактора плана —
+// обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
+// основное действие, нижние ждут своей очереди и закрываются своими же close().
+// Пока стопка не пуста, #dialog-host не пустой — значит затемнение на месте
+// (правило `:empty` из styles.css). Клавиатура не должна оставаться в панели
+// под затемнением: диалог забирает фокус, а закрываясь — возвращает его тому,
+// кто его открыл.
+const uiDialogs = [];
+let uiEscapeListener = null;
+function uiDialogDepth() {
+  return uiDialogs.length;
+}
+
+function uiRefreshDialogs() {
+  const host = document.getElementById("dialog-host");
+  uiDialogs.forEach((entry, index) => {
+    entry.card.hidden = index !== uiDialogs.length - 1;
+  });
+  if (uiDialogs.length === 0) {
+    if (host) host.replaceChildren();
+    if (uiEscapeListener) {
+      document.removeEventListener("keydown", uiEscapeListener);
+      uiEscapeListener = null;
+    }
+    return;
+  }
+  if (uiEscapeListener) return;
+  uiEscapeListener = (event) => {
+    const top = uiDialogs[uiDialogs.length - 1];
+    if (!top) return;
+    if (event.key === "Escape") {
+      if (top.dismissable === false) return;
+      event.preventDefault();
+      top.close();
+      if (top.onCancel) top.onCancel();
+      return;
+    }
+    // Enter подтверждает основное действие. Поле ввода, которое обработало
+    // Enter само (uiPrompt), помечает событие — второй раз не срабатываем.
+    if (event.key !== "Enter" || event.defaultPrevented || !top.primary) return;
+    const target = event.target;
+    if (target && (target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    event.preventDefault();
+    top.primary.click();
+  };
+  document.addEventListener("keydown", uiEscapeListener);
+}
+
+function uiFocusEntry(entry) {
+  const target = entry.card.querySelector("input, select, textarea") || entry.primary || entry.card;
+  if (target && typeof target.focus === "function") target.focus();
+}
+
+// Фокус возвращается открывшему, если он ещё на странице (кнопка панели могла
+// исчезнуть при перерисовке); иначе — диалогу, который снова стал верхним.
+function uiReturnFocus(entry) {
+  const opener = entry.opener;
+  if (opener && typeof opener.focus === "function" && opener.isConnected) {
+    opener.focus();
+    return;
+  }
+  const top = uiDialogs[uiDialogs.length - 1];
+  if (top) uiFocusEntry(top);
+}
+function uiModal(options) {
+  const host = document.getElementById("dialog-host");
+  const actions = options.actions || [];
+  const card = uiEl("div", { class: "modal", attrs: { tabindex: "-1" } }, [
+    uiEl("h3", { class: "modal__title", text: options.title || "" }),
+    uiEl("div", { class: "modal__body" }, options.body || null),
+    uiEl("div", { class: "modal__actions" }, actions),
+  ]);
+  const entry = {
+    card,
+    dismissable: options.dismissable,
+    onCancel: options.onCancel,
+    // Основное действие — последняя кнопка в ряду (в uiConfirm и uiPrompt это
+    // подтверждение, в редакторе плана — «Готово»).
+    primary: options.primary || [...actions].reverse().find((node) => node && node.tagName === "BUTTON") || null,
+    opener: typeof document !== "undefined" ? document.activeElement : null,
+    close() {
+      const index = uiDialogs.indexOf(entry);
+      if (index < 0) return;
+      uiDialogs.splice(index, 1);
+      card.remove();
+      uiRefreshDialogs();
+      uiReturnFocus(entry);
+    },
+  };
+  if (!host) return { close() {}, card };
+  uiDialogs.push(entry);
+  host.append(card);
+  uiRefreshDialogs();
+  uiFocusEntry(entry);
+  return { close: entry.close, card };
+}
+function uiConfirm({ title, message, confirmLabel }) {
+  return new Promise((resolve) => {
+    let modal;
+    const answer = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    modal = uiModal({
+      title,
+      body: uiEl("p", { class: "modal__text", text: message }),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => answer(false) } }),
+        uiButton(confirmLabel || strings.dialog.confirm, {
+          class: "ui-btn ui-btn--danger",
+          on: { click: () => answer(true) },
+        }),
+      ],
+      onCancel: () => resolve(false),
+    });
+  });
+}
+function uiPrompt({ title, value, placeholder, submitLabel }) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (result) => {
+      modal.close();
+      resolve(result || null);
+    };
+    const input = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      value: value || "",
+      placeholder: placeholder || "",
+      on: {
+        keydown: (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          done(input.value.trim());
+        },
+      },
+    });
+    modal = uiModal({
+      title,
+      body: input,
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(submitLabel || strings.dialog.save, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: () => done(input.value.trim()) },
+        }),
+      ],
+      onCancel: () => resolve(null),
+    });
+    input.select();
+  });
+}
+function formatMegabytes(bytes) {
+  return text("units.megabytes", { value: Math.round(bytes / (1024 * 1024)) });
+}
+
+// src/canvas.js
+// Холст разметки: план, метки, блоки, ломаные, выделение и отмена.
+//
+// Главное правило места: заказчик сегодня размечает план ручкой по распечатке.
+// Поэтому диалог тут ровно один — выбор типа, и открывается он один раз на серию.
+// Дальше клик ставит метку, а ручки «+» у поставленной точки продолжают блок,
+// не спрашивая ничего. Всё остальное (панель инструментов, список меток) —
+// вокруг, но не между рукой и планом.
+//
+// Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
+// Переводит их только render.js; здесь координаты не пересчитываются руками.
+
+
+
+
+
+
+const CANVAS_ZOOM_MIN = 0.04;
+const CANVAS_ZOOM_MAX = 24;
+// Смещение курсора, после которого клик считается перетаскиванием.
+const CANVAS_DRAG_SLOP = 3;
+
+let canvasHost = null;
+let canvasNode = null;
+let canvasCtx = null;
+let canvasApi = null;
+let canvasDraft = null; // черновик ломаной: {points, cursor}
+let canvasDrag = null;
+let canvasPreview = null; // объект во время перетаскивания — в состояние не пишется
+let canvasPointers = new Map();
+let canvasPinch = null;
+let canvasSpace = false;
+let canvasFrame = 0;
+let canvasFitted = null;
+let canvasProjectId = null;
+
+function canvasState() {
+  return canvasApi ? canvasApi.getState() : null;
+}
+
+// Во `view` для рисования сходятся две половины: масштаб и сдвиг — сеансовые,
+// размеры метки и подписи — из объекта (их двигает ползунок в панели).
+function canvasViewOf(state) {
+  const sizes = state.project && state.project.view ? state.project.view : {};
+  return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize };
+}
+
+function canvasScheme(state) {
+  return state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
+}
+
+function canvasImage(state) {
+  const loaded = state.schemeImage;
+  return loaded && loaded.schemeId === state.schemeId ? loaded.image : null;
+}
+
+function canvasProject(state) {
+  return canvasPreview || state.project;
+}
+
+function canvasPointOf(event) {
+  const box = canvasNode.getBoundingClientRect();
+  return { x: event.clientX - box.left, y: event.clientY - box.top };
+}
+
+// ——— рисование ———————————————————————————————————————————————————————
+
+function canvasRedraw() {
+  if (canvasFrame || !canvasNode) return;
+  const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+  canvasFrame = schedule(() => {
+    canvasFrame = 0;
+    canvasPaint();
+  });
+}
+
+function canvasResize() {
+  if (!canvasNode || !canvasHost) return;
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(1, canvasHost.clientWidth);
+  const height = Math.max(1, canvasHost.clientHeight);
+  canvasNode.style.width = width + "px";
+  canvasNode.style.height = height + "px";
+  canvasNode.width = Math.round(width * ratio);
+  canvasNode.height = Math.round(height * ratio);
+  canvasPaint();
+}
+
+function canvasPaint() {
+  if (!canvasCtx || !canvasNode) return;
+  const ratio = window.devicePixelRatio || 1;
+  const state = canvasState();
+  canvasCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  canvasCtx.clearRect(0, 0, canvasNode.width, canvasNode.height);
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const project = canvasProject(state);
+  const view = canvasViewOf(state);
+  const draftColor = state.activeTypeId ? styleOf(project, state.activeTypeId).color : "#0969da";
+  drawScheme(canvasCtx, {
+    project,
+    scheme,
+    image: canvasImage(state),
+    filter: state.filter,
+    view,
+    selectedIds: state.selectedMarkIds,
+    draft: canvasDraft,
+    draftColor,
+  });
+  // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
+  if (state.selectedMarkIds.length === 1 && !canvasDrag) {
+    const mark = findMark(project, state.selectedMarkIds[0]);
+    if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
+      drawHandles(canvasCtx, scheme, mark, view);
+    }
+  }
+}
+
+// ——— изменения объекта ————————————————————————————————————————————————
+
+// Любая правка объекта проходит здесь — и с холста, и из панели инструментов:
+// команда отмены получает снимки «до» и «после», которые вернула модель, плюс
+// схему и выделение, на которых действие произошло. Иначе Ctrl+Z после
+// переключения схемы правит метки на той, которую не видно.
+// Своего мутатора объекта в холсте нет.
+function canvasCommit(before, after, label, options = {}) {
+  const { setState } = canvasApi;
+  const state = canvasState();
+  const selectionBefore = state.selectedMarkIds;
+  const schemeBefore = state.schemeId;
+  const keep = options.selection || selectionBefore;
+  const schemeAfter = options.schemeId || schemeBefore;
+  // Правка сеансовых полей (активный тип, режим) едет вместе с командой:
+  // возвращать объект без них — значит оставить панель показывать то, чего нет.
+  // «До» для них снимается здесь же, по именам переданных полей, — вызывающий
+  // передаёт только «после», иначе две половинки пары разъедутся молча.
+  const patch = options.patch || {};
+  const patchBefore = {};
+  for (const key of Object.keys(patch)) patchBefore[key] = state[key];
+  const apply = () =>
+    setState({ project: after, schemeId: schemeAfter, selectedMarkIds: canvasAlive(after, keep), ...patch });
+  apply();
+  pushCommand({
+    label,
+    undo: () =>
+      setState({
+        project: before,
+        schemeId: schemeBefore,
+        selectedMarkIds: canvasAlive(before, selectionBefore),
+        ...patchBefore,
+      }),
+    redo: apply,
+  });
+}
+
+function canvasAlive(project, ids) {
+  return ids.filter((id) => project.marks.some((mark) => mark.id === id));
+}
+
+function canvasFail(error) {
+  canvasApi.notify(error && error.message ? error.message : String(error), "error");
+}
+
+function canvasPlacePoint(plan) {
+  const state = canvasState();
+  if (!state.activeTypeId) {
+    canvasApi.notify(strings.canvas.needType);
+    return;
+  }
+  try {
+    const result = addMark(state.project, {
+      schemeId: state.schemeId,
+      typeId: state.activeTypeId,
+      kind: "point",
+      points: [plan],
+    });
+    canvasCommit(state.project, result.project, strings.history.addMark, [result.mark.id]);
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+// Шаг блока — не меньше умолчания модели и не меньше двух радиусов метки,
+// иначе соседние точки блока сливаются в одну кляксу.
+function canvasBlockStep(state) {
+  const size = state.project && state.project.view ? state.project.view.markSize : 10;
+  return Math.max(BLOCK_STEP_PX, size * 2.6);
+}
+
+function canvasBlockPoint(markId, side) {
+  const state = canvasState();
+  try {
+    const result = addToGroup(state.project, markId, side, { step: canvasBlockStep(state) });
+    canvasCommit(state.project, result.project, strings.history.addBlock, [result.mark.id]);
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+function canvasCancelDraft() {
+  if (!canvasDraft) return false;
+  canvasDraft = null;
+  canvasRedraw();
+  return true;
+}
+
+function canvasLineClick(plan, screen) {
+  const state = canvasState();
+  if (!state.activeTypeId) {
+    canvasApi.notify(strings.canvas.needType);
+    return;
+  }
+  if (!canvasDraft) {
+    canvasDraft = { points: [plan], cursor: plan };
+    canvasRedraw();
+    return;
+  }
+  const scheme = canvasScheme(state);
+  const view = canvasViewOf(state);
+  const threshold = markRadius(view) + 6;
+  const points = canvasDraft.points;
+  const last = planToScreen(points[points.length - 1], scheme, view);
+  const first = planToScreen(points[0], scheme, view);
+  // Клик по последней или первой вершине ничего не добавляет: это первая
+  // половина двойного клика, который завершает или замыкает линию.
+  if (Math.hypot(screen.x - last.x, screen.y - last.y) <= threshold) return;
+  if (points.length >= 2 && Math.hypot(screen.x - first.x, screen.y - first.y) <= threshold) return;
+  points.push(plan);
+  canvasRedraw();
+}
+
+function canvasLineFinish(closed) {
+  if (!canvasDraft) return;
+  const points = canvasDraft.points;
+  const state = canvasState();
+  if (points.length < 2) {
+    canvasApi.notify(strings.canvas.lineTooShort);
+    canvasCancelDraft();
+    return;
+  }
+  try {
+    const result = addMark(state.project, {
+      schemeId: state.schemeId,
+      typeId: state.activeTypeId,
+      kind: "line",
+      points,
+    });
+    let project = result.project;
+    if (closed) project = updateMark(project, result.mark.id, { closed: true }).project;
+    canvasDraft = null;
+    canvasCommit(state.project, project, strings.history.addLine, [result.mark.id]);
+  } catch (error) {
+    canvasCancelDraft();
+    canvasFail(error);
+  }
+}
+
+async function canvasDeleteSelected() {
+  const state = canvasState();
+  const markId = state.selectedMarkIds[0];
+  const mark = markId ? findMark(state.project, markId) : null;
+  if (!mark) return;
+  const group = mark.groupId ? findGroup(state.project, mark.groupId) : null;
+  if (group) {
+    const agreed = await uiConfirm({
+      title: strings.canvas.deleteBlockTitle,
+      message: text("canvas.deleteBlockMessage", {
+        label: labelOf(state.project, mark.id),
+        count: group.markIds.length,
+      }),
+      confirmLabel: strings.canvas.deleteConfirm,
+    });
+    if (!agreed) return;
+  }
+  const fresh = canvasState().project;
+  if (!findMark(fresh, markId)) return;
+  try {
+    const result = deleteMark(fresh, markId);
+    canvasCommit(fresh, result.project, strings.history.remove, []);
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+// ——— отмена ——————————————————————————————————————————————————————————
+function canvasUndoStep() {
+  if (!canUndo()) {
+    canvasApi.notify(strings.canvas.nothingToUndo);
+    return;
+  }
+  const command = undo();
+  canvasApi.notify(text("canvas.undone", { label: command.label }));
+}
+function canvasRedoStep() {
+  if (!canRedo()) {
+    canvasApi.notify(strings.canvas.nothingToRedo);
+    return;
+  }
+  const command = redo();
+  canvasApi.notify(text("canvas.redone", { label: command.label }));
+}
+
+// ——— масштаб —————————————————————————————————————————————————————————
+
+function canvasClampZoom(zoom) {
+  return Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, zoom));
+}
+
+// Приближение к точке: точка плана под курсором остаётся под курсором.
+function canvasZoomAt(point, factor) {
+  const state = canvasState();
+  const view = state.view;
+  const zoom = canvasClampZoom(view.zoom * factor);
+  const ratio = zoom / view.zoom;
+  canvasApi.setState({
+    view: {
+      zoom,
+      offsetX: point.x - (point.x - view.offsetX) * ratio,
+      offsetY: point.y - (point.y - view.offsetY) * ratio,
+    },
+  });
+}
+function canvasZoomBy(factor) {
+  if (!canvasNode) return;
+  canvasZoomAt({ x: canvasNode.clientWidth / 2, y: canvasNode.clientHeight / 2 }, factor);
+}
+function canvasFitPlan() {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  if (!scheme || !canvasNode) return;
+  canvasApi.setState({
+    view: fitView(scheme, { width: canvasNode.clientWidth, height: canvasNode.clientHeight }),
+  });
+  canvasFitted = scheme.id;
+}
+function canvasZoomReset() {
+  if (!canvasNode) return;
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  canvasApi.setState({
+    view: {
+      zoom: 1,
+      offsetX: (canvasNode.clientWidth - scheme.width) / 2,
+      offsetY: (canvasNode.clientHeight - scheme.height) / 2,
+    },
+  });
+}
+
+// ——— указатель ———————————————————————————————————————————————————————
+
+function canvasStartPan(point) {
+  const state = canvasState();
+  canvasDrag = { kind: "pan", start: point, view: { ...state.view }, moved: false };
+}
+
+function canvasPointerDown(event) {
+  if (uiDialogDepth() > 0 || !canvasScheme(canvasState())) return;
+  // Захват может не дать браузер (например, у синтетического события) — это не повод
+  // терять клик.
+  try {
+    canvasNode.setPointerCapture(event.pointerId);
+  } catch (error) {
+    /* работаем без захвата */
+  }
+  canvasPointers.set(event.pointerId, canvasPointOf(event));
+
+  // Планшет: разметка остаётся десктопной, пальцы только смотрят.
+  if (event.pointerType === "touch") {
+    if (canvasPointers.size === 2) {
+      const [a, b] = [...canvasPointers.values()];
+      canvasPinch = {
+        distance: Math.hypot(a.x - b.x, a.y - b.y),
+        center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      };
+      canvasDrag = null;
+      return;
+    }
+    canvasStartPan(canvasPointOf(event));
+    return;
+  }
+  if (event.button === 2) return;
+  const point = canvasPointOf(event);
+  if (event.button === 1 || canvasSpace) {
+    event.preventDefault();
+    canvasStartPan(point);
+    return;
+  }
+  if (event.button !== 0) return;
+
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const view = canvasViewOf(state);
+
+  // Ручка «+» важнее всего остального: она и есть быстрый путь.
+  if (state.selectedMarkIds.length === 1) {
+    const selected = findMark(state.project, state.selectedMarkIds[0]);
+    if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
+      const side = hitHandle(scheme, selected, point, view);
+      if (side) {
+        canvasBlockPoint(selected.id, side);
+        canvasDrag = { kind: "done", start: point, moved: false };
+        return;
+      }
+    }
+  }
+
+  if (state.mode === "line") {
+    canvasDrag = { kind: "line", start: point, view: { ...state.view }, moved: false };
+    return;
+  }
+
+  const hit = hitTest(state.project, scheme, point, view, state.filter);
+  if (hit) {
+    if (state.selectedMarkIds[0] !== hit.markId) canvasApi.setState({ selectedMarkIds: [hit.markId] });
+    canvasDrag = {
+      kind: hit.part === "label" ? "label" : "mark",
+      markId: hit.markId,
+      groupId: hit.groupId,
+      start: point,
+      before: state.project,
+      moved: false,
+    };
+    return;
+  }
+  canvasDrag = {
+    kind: state.mode === "point" ? "place" : "empty",
+    start: point,
+    view: { ...state.view },
+    moved: false,
+  };
+}
+
+// Перетаскивание метки: новые точки считаются от снимка «до», а не от
+// предыдущего кадра, — иначе метка уползает от курсора накопленной ошибкой.
+function canvasDragTo(point) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const view = canvasViewOf(state);
+  const before = canvasDrag.before;
+  const origin = screenToPlan(canvasDrag.start, scheme, view);
+  const now = screenToPlan(point, scheme, view);
+  const dx = now.x - origin.x;
+  const dy = now.y - origin.y;
+  try {
+    if (canvasDrag.kind === "label") {
+      const target = canvasDrag.groupId ? findGroup(before, canvasDrag.groupId) : findMark(before, canvasDrag.markId);
+      const current = target ? labelOffsetOf(before, target) : null;
+      const size = view.markSize || 10;
+      const base = current || { dx: size * 1.5, dy: -size * 1.5 };
+      const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
+      // Подпись блока стоит по смещению его первой метки — своего поля у группы
+      // модель не заводит, а собственной подписи у этой метки нет.
+      const holder = canvasDrag.groupId && target ? target.markIds[0] : canvasDrag.markId;
+      canvasPreview = updateMark(before, holder, { labelOffset: offset }).project;
+    } else {
+      const mark = findMark(before, canvasDrag.markId);
+      const points = mark.points.map((item) => ({ x: item.x + dx, y: item.y + dy }));
+      canvasPreview = updateMark(before, canvasDrag.markId, { points }).project;
+    }
+  } catch (error) {
+    canvasPreview = null;
+  }
+  canvasRedraw();
+}
+
+function canvasPointerMove(event) {
+  if (!canvasNode) return;
+  const point = canvasPointOf(event);
+  if (canvasPointers.has(event.pointerId)) canvasPointers.set(event.pointerId, point);
+
+  if (canvasPinch && canvasPointers.size === 2) {
+    const [a, b] = [...canvasPointers.values()];
+    const distance = Math.hypot(a.x - b.x, a.y - b.y);
+    const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (canvasPinch.distance > 0) canvasZoomAt(center, distance / canvasPinch.distance);
+    const state = canvasState();
+    canvasApi.setState({
+      view: {
+        ...state.view,
+        offsetX: state.view.offsetX + (center.x - canvasPinch.center.x),
+        offsetY: state.view.offsetY + (center.y - canvasPinch.center.y),
+      },
+    });
+    canvasPinch = { distance, center };
+    return;
+  }
+
+  const state = canvasState();
+  if (canvasDraft) {
+    const scheme = canvasScheme(state);
+    canvasDraft.cursor = screenToPlan(point, scheme, canvasViewOf(state));
+    canvasRedraw();
+  }
+  if (!canvasDrag) return;
+  const shift = Math.hypot(point.x - canvasDrag.start.x, point.y - canvasDrag.start.y);
+  if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
+  if (!canvasDrag.moved) return;
+
+  if (canvasDrag.kind === "mark" || canvasDrag.kind === "label") {
+    canvasDragTo(point);
+    return;
+  }
+  if (canvasDrag.kind === "pan" || canvasDrag.kind === "empty" || canvasDrag.kind === "place" || canvasDrag.kind === "line") {
+    canvasApi.setState({
+      view: {
+        ...state.view,
+        offsetX: canvasDrag.view.offsetX + (point.x - canvasDrag.start.x),
+        offsetY: canvasDrag.view.offsetY + (point.y - canvasDrag.start.y),
+      },
+    });
+  }
+}
+
+function canvasPointerUp(event) {
+  canvasPointers.delete(event.pointerId);
+  if (canvasPointers.size < 2) canvasPinch = null;
+  const drag = canvasDrag;
+  canvasDrag = null;
+  if (!drag) return;
+  const point = canvasPointOf(event);
+  const state = canvasState();
+
+  if (drag.moved) {
+    if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
+      const label = drag.kind === "label" ? strings.history.moveLabel : strings.history.move;
+      const after = canvasPreview;
+      canvasPreview = null;
+      canvasCommit(drag.before, after, label, [drag.markId]);
+    }
+    canvasPreview = null;
+    canvasRedraw();
+    return;
+  }
+  canvasPreview = null;
+
+  if (event.pointerType === "touch" || drag.kind === "done") return;
+  const scheme = canvasScheme(state);
+  const plan = screenToPlan(point, scheme, canvasViewOf(state));
+  if (drag.kind === "line") {
+    canvasLineClick(plan, point);
+    return;
+  }
+  if (drag.kind === "place") {
+    canvasPlacePoint(plan);
+    return;
+  }
+  if (drag.kind === "empty" && state.selectedMarkIds.length > 0) {
+    canvasApi.setState({ selectedMarkIds: [] });
+  }
+}
+
+function canvasDoubleClick(event) {
+  const state = canvasState();
+  if (state.mode !== "line" || !canvasDraft) return;
+  const scheme = canvasScheme(state);
+  const view = canvasViewOf(state);
+  const point = canvasPointOf(event);
+  const threshold = markRadius(view) + 6;
+  const points = canvasDraft.points;
+  const first = planToScreen(points[0], scheme, view);
+  const last = planToScreen(points[points.length - 1], scheme, view);
+  const onFirst = Math.hypot(point.x - first.x, point.y - first.y) <= threshold;
+  const onLast = Math.hypot(point.x - last.x, point.y - last.y) <= threshold;
+  // Двойной клик в стороне — это просто две вершины подряд: рисование
+  // продолжается, ничего не теряется и не замыкается.
+  if (!onFirst && !onLast) return;
+  event.preventDefault();
+  // По первой точке — замкнутый контур (лента по периметру комнаты),
+  // по последней — открытая линия, ровно как в брифе.
+  canvasLineFinish(onFirst && !onLast && points.length >= 3);
+}
+
+function canvasWheel(event) {
+  if (uiDialogDepth() > 0) return;
+  event.preventDefault();
+  const step = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+  canvasZoomAt(canvasPointOf(event), Math.exp(-step * 0.0015));
+}
+
+// ——— клавиатура ——————————————————————————————————————————————————————
+
+function canvasTypingTarget(target) {
+  if (!target || !target.tagName) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
+function canvasKeyDown(event) {
+  // Пока открыт диалог, клавиатура принадлежит ему.
+  if (uiDialogDepth() > 0 || canvasTypingTarget(event.target)) return;
+  const state = canvasState();
+  const control = event.ctrlKey || event.metaKey;
+  if (control && event.code === "KeyZ") {
+    event.preventDefault();
+    if (event.shiftKey) canvasRedoStep();
+    else canvasUndoStep();
+    return;
+  }
+  if (control && event.code === "KeyY") {
+    event.preventDefault();
+    canvasRedoStep();
+    return;
+  }
+  if (control) return;
+  if (event.code === "Space") {
+    canvasSpace = true;
+    if (canvasNode) canvasNode.style.cursor = "grab";
+    return;
+  }
+  if (event.key === "Escape") {
+    if (canvasCancelDraft()) return;
+    // Первый Esc снимает выделение: пока метка выделена, вокруг неё ручки «+»,
+    // и отдельную метку вплотную к блоку не поставить. Второй — выходит из режима.
+    if (state.selectedMarkIds.length > 0) {
+      canvasApi.setState({ selectedMarkIds: [] });
+      return;
+    }
+    if (state.mode !== "select") canvasApi.setState({ mode: "select" });
+    return;
+  }
+  if (event.key === "Backspace" && canvasDraft) {
+    event.preventDefault();
+    canvasDraft.points.pop();
+    if (canvasDraft.points.length === 0) canvasDraft = null;
+    canvasRedraw();
+    return;
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && state.selectedMarkIds.length > 0) {
+    event.preventDefault();
+    canvasDeleteSelected();
+  }
+}
+
+function canvasKeyUp(event) {
+  if (event.code !== "Space") return;
+  canvasSpace = false;
+  canvasSyncCursor();
+}
+
+function canvasSyncCursor() {
+  if (!canvasNode) return;
+  const state = canvasState();
+  if (canvasSpace) canvasNode.style.cursor = "grab";
+  else canvasNode.style.cursor = state.mode === "select" ? "default" : "crosshair";
+}
+
+// ——— монтирование ————————————————————————————————————————————————————
+
+function mountCanvas(host, api) {
+  canvasApi = api;
+  canvasHost = host;
+  canvasNode = document.createElement("canvas");
+  canvasNode.className = "canvas";
+  host.replaceChildren(canvasNode);
+  canvasCtx = canvasNode.getContext("2d");
+
+  canvasNode.addEventListener("pointerdown", canvasPointerDown);
+  canvasNode.addEventListener("pointermove", canvasPointerMove);
+  canvasNode.addEventListener("pointerup", canvasPointerUp);
+  canvasNode.addEventListener("pointercancel", canvasPointerUp);
+  canvasNode.addEventListener("dblclick", canvasDoubleClick);
+  canvasNode.addEventListener("wheel", canvasWheel, { passive: false });
+  canvasNode.addEventListener("contextmenu", (event) => event.preventDefault());
+  document.addEventListener("keydown", canvasKeyDown);
+  document.addEventListener("keyup", canvasKeyUp);
+
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(() => canvasResize()).observe(host);
+  } else {
+    window.addEventListener("resize", canvasResize);
+  }
+
+  api.subscribe((state, changed) => {
+    if ("project" in changed) {
+      const id = state.project ? state.project.id : null;
+      // Стек отмены живёт в пределах объекта: сменили объект — история пуста.
+      if (id !== canvasProjectId) {
+        canvasProjectId = id;
+        clearHistory();
+        canvasFitted = null;
+      }
+    }
+    if ("schemeId" in changed) {
+      canvasCancelDraft();
+      canvasPreview = null;
+    }
+    if ("mode" in changed) {
+      if (state.mode !== "line") canvasCancelDraft();
+      canvasSyncCursor();
+    }
+    if ("schemeId" in changed || "schemeImage" in changed) canvasAutoFit(state);
+    canvasRedraw();
+  });
+  canvasResize();
+  canvasSyncCursor();
+  canvasAutoFit(canvasState());
+}
+
+// Новый план показывается целиком: подгонка один раз на схему, дальше масштаб
+// принадлежит пользователю.
+function canvasAutoFit(state) {
+  const scheme = canvasScheme(state);
+  if (!scheme || !canvasNode) return;
+  if (canvasFitted === scheme.id) return;
+  if (!canvasImage(state)) return;
+  canvasFitted = scheme.id;
+  canvasApi.setState({
+    view: fitView(scheme, { width: canvasNode.clientWidth, height: canvasNode.clientHeight }),
+  });
+}
+
+// Подсказка поверх холста: что сейчас ставим и чем это закончить.
+function mountCanvasHint(host, api) {
+  const hint = document.createElement("div");
+  hint.className = "canvas-hint";
+  host.replaceChildren(hint);
+  const render = () => {
+    const state = api.getState();
+    if (!state.schemeId) {
+      hint.hidden = true;
+      return;
+    }
+    const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
+    const label = type ? type.code + " — " + type.name : "";
+    if (state.mode === "point" && type) hint.textContent = text("canvas.hintPoint", { label });
+    else if (state.mode === "line" && type) hint.textContent = strings.canvas.hintLine;
+    else if (type) hint.textContent = strings.canvas.hintSelectMode;
+    else hint.textContent = strings.canvas.hintSelect;
+    hint.hidden = false;
+    if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
+  };
+  api.subscribe((state, changed) => {
+    if ("mode" in changed || "activeTypeId" in changed || "schemeId" in changed || "project" in changed) render();
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.canvas, mountCanvas);
+registerPanel(PANEL_IDS.overlay, mountCanvasHint);
+
+// src/imagePrep.js
+// Подготовка плана: проверка файла, поворот на четверть оборота и обрезка рамкой.
+// Координаты меток — доли от размера плана, поэтому вместе с картинкой нужно
+// пересчитать и доли: метка обязана остаться на том же месте изображения.
+// Арифметика здесь чистая (проверяется тестами), браузерные части — ниже.
+const PLAN_IMAGE_TYPES = ["image/png", "image/jpeg"];
+const PLAN_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
+const ROTATION_STEPS = [0, 90, 180, 270];
+
+// Тип у перетащенного файла иногда пустой — тогда решает расширение.
+function isPlanImageFile(file) {
+  if (!file) return false;
+  const type = String(file.type || "").toLowerCase();
+  if (PLAN_IMAGE_TYPES.includes(type)) return true;
+  if (type && type !== "application/octet-stream") return false;
+  const name = String(file.name || "").toLowerCase();
+  return PLAN_IMAGE_EXTENSIONS.some((extension) => name.endsWith(extension));
+}
+
+// Тип берётся из расширения, когда браузер его не назвал: у перетащенного
+// файла type часто пуст, и JPEG иначе уехал бы в хранилище и в zip как png.
+function planTypeOf(file) {
+  const type = String((file && file.type) || "").toLowerCase();
+  if (PLAN_IMAGE_TYPES.includes(type)) return type;
+  const name = String((file && file.name) || "").toLowerCase();
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  return "image/png";
+}
+function identityTransform() {
+  return { rotate: 0, crop: null };
+}
+
+function clampUnit(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(1, Math.max(0, number));
+}
+
+// Поворот приводится к четверти оборота, рамка — к прямоугольнику внутри плана.
+function normalizeTransform(transform) {
+  const source = transform || {};
+  const turns = Math.round(Number(source.rotate || 0) / 90);
+  const rotate = ((turns % 4) + 4) % 4 * 90;
+  const raw = source.crop;
+  if (!raw) return { rotate, crop: null };
+  const x = clampUnit(raw.x, 0);
+  const y = clampUnit(raw.y, 0);
+  const width = Math.min(clampUnit(raw.width, 1), 1 - x);
+  const height = Math.min(clampUnit(raw.height, 1), 1 - y);
+  if (width <= 0 || height <= 0) return { rotate, crop: null };
+  if (x === 0 && y === 0 && width === 1 && height === 1) return { rotate, crop: null };
+  return { rotate, crop: { x, y, width, height } };
+}
+
+// Доли в системе повёрнутого плана: вправо (x,y) -> (1−y, x), влево -> (y, 1−x).
+function rotateFraction(point, rotate) {
+  if (rotate === 90) return { x: 1 - point.y, y: point.x };
+  if (rotate === 180) return { x: 1 - point.x, y: 1 - point.y };
+  if (rotate === 270) return { x: point.y, y: 1 - point.x };
+  return { x: point.x, y: point.y };
+}
+
+// Поворот и обрезка копятся в одно преобразование: (поворот на R, затем рамка
+// в долях повёрнутого плана). Так исходник пережимается один раз, а метки
+// пересчитываются одним шагом — и считаются один раз, а не на каждом шаге.
+function rotateTransform(transform, degrees) {
+  const current = normalizeTransform(transform);
+  const turns = ((Math.round(Number(degrees || 0) / 90) % 4) + 4) % 4;
+  const rotate = (current.rotate + turns * 90) % 360;
+  if (!current.crop) return { rotate, crop: null };
+  const a = rotateFraction({ x: current.crop.x, y: current.crop.y }, turns * 90);
+  const b = rotateFraction(
+    { x: current.crop.x + current.crop.width, y: current.crop.y + current.crop.height },
+    turns * 90,
+  );
+  return {
+    rotate,
+    crop: {
+      x: Math.min(a.x, b.x),
+      y: Math.min(a.y, b.y),
+      width: Math.abs(a.x - b.x),
+      height: Math.abs(a.y - b.y),
+    },
+  };
+}
+
+// Рамка задаётся в долях того, что видно сейчас, — то есть внутри прежней рамки.
+function cropTransform(transform, frame) {
+  const current = normalizeTransform(transform);
+  const box = normalizeTransform({ crop: frame }).crop;
+  if (!box) return current;
+  const base = current.crop || { x: 0, y: 0, width: 1, height: 1 };
+  return normalizeTransform({
+    rotate: current.rotate,
+    crop: {
+      x: base.x + box.x * base.width,
+      y: base.y + box.y * base.height,
+      width: box.width * base.width,
+      height: box.height * base.height,
+    },
+  });
+}
+function transformPoint(point, transform) {
+  const { rotate, crop } = normalizeTransform(transform);
+  const turned = rotateFraction({ x: Number(point.x), y: Number(point.y) }, rotate);
+  if (!crop) return turned;
+  return { x: (turned.x - crop.x) / crop.width, y: (turned.y - crop.y) / crop.height };
+}
+
+// Смещение подписи задано в пикселях экрана: обрезка его не трогает, поворот —
+// поворачивает так же, как саму картинку, иначе подпись уедет на другую сторону.
+function transformOffset(offset, transform) {
+  if (!offset) return offset;
+  const { rotate } = normalizeTransform(transform);
+  const dx = Number(offset.dx) || 0;
+  const dy = Number(offset.dy) || 0;
+  if (rotate === 90) return { dx: -dy, dy: dx };
+  if (rotate === 180) return { dx: -dx, dy: -dy };
+  if (rotate === 270) return { dx: dy, dy: -dx };
+  return { dx, dy };
+}
+
+// Ничего не менялось — значит и переписывать план незачем.
+function isIdentityTransform(transform) {
+  const settings = normalizeTransform(transform);
+  return settings.rotate === 0 && !settings.crop;
+}
+function transformSize(size, transform) {
+  const { rotate, crop } = normalizeTransform(transform);
+  const turned =
+    rotate === 90 || rotate === 270
+      ? { width: Number(size.height), height: Number(size.width) }
+      : { width: Number(size.width), height: Number(size.height) };
+  if (!crop) return { width: Math.round(turned.width), height: Math.round(turned.height) };
+  return {
+    width: Math.max(1, Math.round(turned.width * crop.width)),
+    height: Math.max(1, Math.round(turned.height * crop.height)),
+  };
+}
+
+// Пересчёт всех точек одной метки: используется панелью схем перед updateMark.
+function transformMarkPoints(points, transform) {
+  return (points || []).map((point) => {
+    const next = transformPoint(point, transform);
+    return { x: Math.min(1, Math.max(0, next.x)), y: Math.min(1, Math.max(0, next.y)) };
+  });
+}
+
+// Метка за рамкой обрезки была бы потеряна: считаем такие, чтобы предупредить.
+function countPointsOutside(points, transform) {
+  let outside = 0;
+  for (const point of points || []) {
+    const next = transformPoint(point, transform);
+    if (next.x < 0 || next.x > 1 || next.y < 0 || next.y > 1) outside += 1;
+  }
+  return outside;
+}
+
+// ——— браузерная часть ————————————————————————————————————————————————
+
+function planOutputType(blob) {
+  return planTypeOf(blob);
+}
+
+// createImageBitmap есть не везде (и не всегда по file://) — запасной путь <img>.
+async function decodePlanImage(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(blob);
+      return { image: bitmap, width: bitmap.width, height: bitmap.height, url };
+    }
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("decode"));
+      element.src = url;
+    });
+    return { image, width: image.naturalWidth, height: image.naturalHeight, url };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+function releasePlanImage(decoded) {
+  if (!decoded) return;
+  if (decoded.url) URL.revokeObjectURL(decoded.url);
+  if (decoded.image && typeof decoded.image.close === "function") decoded.image.close();
+}
+
+// Файл плана: проверка типа и настоящий размер картинки в пикселях.
+async function readPlanImage(file) {
+  const blob = file.slice ? file.slice(0, file.size, planTypeOf(file)) : file;
+  const decoded = await decodePlanImage(blob);
+  const size = { width: decoded.width, height: decoded.height };
+  releasePlanImage(decoded);
+  return { blob, width: size.width, height: size.height };
+}
+
+function blobFromCanvas(canvas, type) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("toBlob"))),
+      type,
+      type === "image/jpeg" ? 0.92 : undefined,
+    );
+  });
+}
+
+// Новая картинка плана по тому же преобразованию, что и доли меток.
+async function renderPlanImage(blob, transform) {
+  const settings = normalizeTransform(transform);
+  const decoded = await decodePlanImage(blob);
+  try {
+    const turned = transformSize({ width: decoded.width, height: decoded.height }, { rotate: settings.rotate });
+    const size = transformSize({ width: decoded.width, height: decoded.height }, settings);
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext("2d");
+    if (settings.crop) {
+      ctx.translate(-Math.round(turned.width * settings.crop.x), -Math.round(turned.height * settings.crop.y));
+    }
+    if (settings.rotate === 90) {
+      ctx.translate(turned.width, 0);
+      ctx.rotate(Math.PI / 2);
+    } else if (settings.rotate === 180) {
+      ctx.translate(turned.width, turned.height);
+      ctx.rotate(Math.PI);
+    } else if (settings.rotate === 270) {
+      ctx.translate(0, turned.height);
+      ctx.rotate(-Math.PI / 2);
+    }
+    ctx.drawImage(decoded.image, 0, 0);
+    const out = await blobFromCanvas(canvas, planOutputType(blob));
+    return { blob: out, width: size.width, height: size.height };
+  } finally {
+    releasePlanImage(decoded);
   }
 }
 
@@ -2018,196 +3862,6 @@ async function estimateSpace() {
   } catch (error) {
     return empty;
   }
-}
-
-// src/panels/ui.js
-// Общие кирпичи панелей: элементы, кнопки, модальные диалоги.
-// Отдельный модуль, потому что ими пользуются все панели: тянуть их из чужой
-// панели значило бы тянуть вместе с ней её регистрацию и подписки.
-function uiEl(tag, options = {}, children = []) {
-  const node = document.createElement(tag);
-  if (options.class) node.className = options.class;
-  if (options.text != null) node.textContent = options.text;
-  if (options.title) node.title = options.title;
-  if (options.type) node.type = options.type;
-  if (options.value != null) node.value = options.value;
-  if (options.placeholder) node.placeholder = options.placeholder;
-  if (options.attrs) {
-    for (const [name, value] of Object.entries(options.attrs)) node.setAttribute(name, value);
-  }
-  if (options.on) {
-    for (const [name, handler] of Object.entries(options.on)) node.addEventListener(name, handler);
-  }
-  for (const child of Array.isArray(children) ? children : [children]) {
-    if (child) node.append(child);
-  }
-  return node;
-}
-function uiButton(label, options = {}) {
-  return uiEl("button", {
-    class: options.class || "ui-btn",
-    text: label,
-    title: options.title || "",
-    type: "button",
-    on: options.on,
-    attrs: options.attrs,
-  });
-}
-
-// Диалоги складываются стопкой: подтверждение поверх редактора плана —
-// обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
-// основное действие, нижние ждут своей очереди и закрываются своими же close().
-// Пока стопка не пуста, #dialog-host не пустой — значит затемнение на месте
-// (правило `:empty` из styles.css). Клавиатура не должна оставаться в панели
-// под затемнением: диалог забирает фокус, а закрываясь — возвращает его тому,
-// кто его открыл.
-const uiDialogs = [];
-let uiEscapeListener = null;
-function uiDialogDepth() {
-  return uiDialogs.length;
-}
-
-function uiRefreshDialogs() {
-  const host = document.getElementById("dialog-host");
-  uiDialogs.forEach((entry, index) => {
-    entry.card.hidden = index !== uiDialogs.length - 1;
-  });
-  if (uiDialogs.length === 0) {
-    if (host) host.replaceChildren();
-    if (uiEscapeListener) {
-      document.removeEventListener("keydown", uiEscapeListener);
-      uiEscapeListener = null;
-    }
-    return;
-  }
-  if (uiEscapeListener) return;
-  uiEscapeListener = (event) => {
-    const top = uiDialogs[uiDialogs.length - 1];
-    if (!top) return;
-    if (event.key === "Escape") {
-      if (top.dismissable === false) return;
-      event.preventDefault();
-      top.close();
-      if (top.onCancel) top.onCancel();
-      return;
-    }
-    // Enter подтверждает основное действие. Поле ввода, которое обработало
-    // Enter само (uiPrompt), помечает событие — второй раз не срабатываем.
-    if (event.key !== "Enter" || event.defaultPrevented || !top.primary) return;
-    const target = event.target;
-    if (target && (target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-    event.preventDefault();
-    top.primary.click();
-  };
-  document.addEventListener("keydown", uiEscapeListener);
-}
-
-function uiFocusEntry(entry) {
-  const target = entry.card.querySelector("input, select, textarea") || entry.primary || entry.card;
-  if (target && typeof target.focus === "function") target.focus();
-}
-
-// Фокус возвращается открывшему, если он ещё на странице (кнопка панели могла
-// исчезнуть при перерисовке); иначе — диалогу, который снова стал верхним.
-function uiReturnFocus(entry) {
-  const opener = entry.opener;
-  if (opener && typeof opener.focus === "function" && opener.isConnected) {
-    opener.focus();
-    return;
-  }
-  const top = uiDialogs[uiDialogs.length - 1];
-  if (top) uiFocusEntry(top);
-}
-function uiModal(options) {
-  const host = document.getElementById("dialog-host");
-  const actions = options.actions || [];
-  const card = uiEl("div", { class: "modal", attrs: { tabindex: "-1" } }, [
-    uiEl("h3", { class: "modal__title", text: options.title || "" }),
-    uiEl("div", { class: "modal__body" }, options.body || null),
-    uiEl("div", { class: "modal__actions" }, actions),
-  ]);
-  const entry = {
-    card,
-    dismissable: options.dismissable,
-    onCancel: options.onCancel,
-    // Основное действие — последняя кнопка в ряду (в uiConfirm и uiPrompt это
-    // подтверждение, в редакторе плана — «Готово»).
-    primary: options.primary || [...actions].reverse().find((node) => node && node.tagName === "BUTTON") || null,
-    opener: typeof document !== "undefined" ? document.activeElement : null,
-    close() {
-      const index = uiDialogs.indexOf(entry);
-      if (index < 0) return;
-      uiDialogs.splice(index, 1);
-      card.remove();
-      uiRefreshDialogs();
-      uiReturnFocus(entry);
-    },
-  };
-  if (!host) return { close() {}, card };
-  uiDialogs.push(entry);
-  host.append(card);
-  uiRefreshDialogs();
-  uiFocusEntry(entry);
-  return { close: entry.close, card };
-}
-function uiConfirm({ title, message, confirmLabel }) {
-  return new Promise((resolve) => {
-    let modal;
-    const answer = (value) => {
-      modal.close();
-      resolve(value);
-    };
-    modal = uiModal({
-      title,
-      body: uiEl("p", { class: "modal__text", text: message }),
-      actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => answer(false) } }),
-        uiButton(confirmLabel || strings.dialog.confirm, {
-          class: "ui-btn ui-btn--danger",
-          on: { click: () => answer(true) },
-        }),
-      ],
-      onCancel: () => resolve(false),
-    });
-  });
-}
-function uiPrompt({ title, value, placeholder, submitLabel }) {
-  return new Promise((resolve) => {
-    let modal;
-    const done = (result) => {
-      modal.close();
-      resolve(result || null);
-    };
-    const input = uiEl("input", {
-      class: "ui-input",
-      type: "text",
-      value: value || "",
-      placeholder: placeholder || "",
-      on: {
-        keydown: (event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          done(input.value.trim());
-        },
-      },
-    });
-    modal = uiModal({
-      title,
-      body: input,
-      actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
-        uiButton(submitLabel || strings.dialog.save, {
-          class: "ui-btn ui-btn--accent",
-          on: { click: () => done(input.value.trim()) },
-        }),
-      ],
-      onCancel: () => resolve(null),
-    });
-    input.select();
-  });
-}
-function formatMegabytes(bytes) {
-  return text("units.megabytes", { value: Math.round(bytes / (1024 * 1024)) });
 }
 
 // src/panels/projects.js
@@ -2867,6 +4521,408 @@ function mountSchemesPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
+
+// src/panels/typePicker.js
+// Своё окно выбора типа метки: «буква — пояснение», группировка по цветным
+// категориям, поиск и ввод нового кода прямо здесь.
+//
+// Окно открывается один раз на серию: выбранный тип «залипает» в панели
+// инструментов, и дальше метки ставятся кликами без единого диалога.
+
+
+
+
+const PICKER_CODE_RE = /^[A-Za-zА-Яа-яЁё]{1,2}$/u;
+
+// Значок типа — та же функция рисования, что на холсте: в списке видно
+// и цвет категории, и форму.
+function typeSwatch(project, typeId, size = 22) {
+  const canvas = uiEl("canvas", { class: "picker__swatch" });
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
+  if (ctx) {
+    const style = styleOf(project, typeId);
+    drawShape(ctx, style.shape, size / 2, size / 2, size * 0.36, style.color);
+  }
+  return canvas;
+}
+
+function pickerExact(type, query) {
+  return type && query && type.code.toUpperCase() === query.toUpperCase() ? 1 : 0;
+}
+
+function pickerMatches(type, query) {
+  if (!query) return true;
+  const needle = query.toLowerCase();
+  return type.code.toLowerCase().startsWith(needle) || type.name.toLowerCase().includes(needle);
+}
+function openTypePicker(project, options = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    let current = project;
+    const done = (result) => {
+      modal.close();
+      resolve(result || null);
+    };
+
+    const list = uiEl("div", { class: "picker__list" });
+    const error = uiEl("p", { class: "picker__error" });
+    const createBox = uiEl("div", { class: "picker__create" });
+    const search = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.picker.search,
+      on: {
+        input: () => renderList(),
+        keydown: (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          const first = list.querySelector(".picker__row");
+          if (first) first.click();
+          else if (createBox.firstChild) createType();
+        },
+      },
+    });
+
+    let createName = null;
+    let createCategory = null;
+
+    function createType() {
+      const code = search.value.trim();
+      if (!createName || !createCategory) return;
+      try {
+        const result = addType(current, {
+          code,
+          name: createName.value.trim() || code,
+          categoryId: createCategory.value,
+        });
+        done({ typeId: result.type.id, project: result.project, created: true });
+      } catch (failure) {
+        error.textContent = failure.message;
+      }
+    }
+
+    function renderCreate(query) {
+      createBox.replaceChildren();
+      error.textContent = "";
+      if (!PICKER_CODE_RE.test(query)) return;
+      const taken = current.markTypes.some((type) => type.code.toUpperCase() === query.toUpperCase());
+      if (taken) return;
+      createName = uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        placeholder: strings.picker.createNamePlaceholder,
+      });
+      createCategory = uiEl(
+        "select",
+        { class: "ui-select" },
+        current.categories.map((category) =>
+          uiEl("option", { text: category.name, value: category.id, attrs: { value: category.id } }),
+        ),
+      );
+      createBox.append(
+        uiEl("p", { class: "picker__createTitle", text: text("picker.createTitle", { code: query }) }),
+        uiEl("p", { class: "picker__createTitle", text: strings.picker.codeHint }),
+        uiEl("label", { class: "picker__field" }, [
+          uiEl("span", { text: strings.picker.createName }),
+          createName,
+        ]),
+        uiEl("label", { class: "picker__field" }, [
+          uiEl("span", { text: strings.picker.createCategory }),
+          createCategory,
+        ]),
+        uiButton(strings.picker.create, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: createType },
+        }),
+      );
+    }
+
+    function renderList() {
+      const query = search.value.trim();
+      list.replaceChildren();
+      let shown = 0;
+      // Точное совпадение по коду — первым: «Р» это Розетка, а не «Подсветка
+      // кровати», где та же буква стоит в середине названия.
+      const groups = typesInOrder(current).map((group) => ({
+        category: group.category,
+        types: group.types.slice().sort((a, b) => pickerExact(b, query) - pickerExact(a, query)),
+      }));
+      groups.sort((a, b) => pickerExact(b.types[0], query) - pickerExact(a.types[0], query));
+      for (const group of groups) {
+        const rows = group.types.filter((type) => pickerMatches(type, query));
+        if (rows.length === 0) continue;
+        shown += rows.length;
+        const head = uiEl("div", { class: "picker__group", text: group.category.name });
+        head.style.borderColor = group.category.color;
+        head.style.color = group.category.color;
+        list.append(head);
+        for (const type of rows) {
+          const row = uiEl(
+            "button",
+            {
+              class: "picker__row" + (type.id === options.activeTypeId ? " is-active" : ""),
+              type: "button",
+              on: { click: () => done({ typeId: type.id, project: current }) },
+            },
+            [
+              typeSwatch(current, type.id),
+              uiEl("span", { class: "picker__code", text: type.code }),
+              uiEl("span", { class: "picker__name", text: type.name }),
+            ],
+          );
+          list.append(row);
+        }
+      }
+      if (shown === 0) list.append(uiEl("p", { class: "panel__empty", text: strings.picker.empty }));
+      renderCreate(query);
+    }
+
+    renderList();
+    modal = uiModal({
+      title: options.title || strings.picker.title,
+      body: uiEl("div", { class: "picker" }, [search, list, createBox, error]),
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      onCancel: () => resolve(null),
+    });
+    search.focus();
+  });
+}
+
+// src/panels/tools.js
+// Панель инструментов: выбранный тип, что ставим, режим блока, размеры,
+// масштаб и отмена. Тип показан крупно и «залипает» — по нему видно, что
+// следующий клик по плану поставит именно его.
+
+
+
+
+
+
+
+const TOOLS_MARK_SIZE = { min: 4, max: 36 };
+const TOOLS_LABEL_SIZE = { min: 8, max: 40 };
+
+// Ползунок двигается живьём, а в историю попадает одним действием на всё
+// перетаскивание: иначе стек забивался бы тридцатью шагами на один жест.
+function toolsSlider(value, range, onInput, onCommit) {
+  return uiEl("input", {
+    class: "tools__slider",
+    type: "range",
+    value: String(value),
+    attrs: { min: String(range.min), max: String(range.max), step: "1" },
+    on: {
+      input: (event) => onInput(Number(event.target.value)),
+      change: () => onCommit(),
+    },
+  });
+}
+
+function mountToolsPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
+  const box = uiEl("div", { class: "tools" });
+  host.replaceChildren(box);
+  // Снимок объекта на время жеста ползунка: пока он есть, панель не
+  // перерисовывается — иначе ползунок исчезал бы из-под пальца.
+  let sizeBefore = null;
+
+  function activeType(state) {
+    return state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
+  }
+
+  async function chooseType(nextMode) {
+    const state = getState();
+    if (!state.project) return;
+    const picked = await openTypePicker(state.project, { activeTypeId: state.activeTypeId });
+    if (!picked) return;
+    const fresh = getState();
+    const mode = nextMode || (fresh.mode === "line" ? "line" : "point");
+    if (!picked.created) {
+      setState({ activeTypeId: picked.typeId, mode });
+      return;
+    }
+    // Новый тип — правка объекта, значит и шаг истории: иначе следующий Ctrl+Z
+    // по метке вернул бы объект без этого типа, ни о чём не спросив.
+    canvasCommit(fresh.project, picked.project, strings.history.addType, {
+      patch: { activeTypeId: picked.typeId, mode },
+    });
+    const type = findType(picked.project, picked.typeId);
+    notify(text("picker.created", { code: type.code, name: type.name }), "success");
+  }
+
+  // Смена типа у выделенной метки: модель выдаёт новый номер, старый остаётся
+  // дырой — так распечатка вчерашнего дня не протухает.
+  async function changeSelectedType() {
+    const state = getState();
+    const markId = state.selectedMarkIds[0];
+    if (!state.project || !markId) return;
+    const picked = await openTypePicker(state.project, { title: strings.tools.changeType });
+    if (!picked) return;
+    const before = picked.created ? state.project : getState().project;
+    const base = picked.created ? picked.project : before;
+    if (!findMark(base, markId)) return;
+    try {
+      const after = changeMarkType(base, markId, picked.typeId).project;
+      canvasCommit(before, after, strings.history.changeType, { selection: [markId] });
+      notify(text("canvas.typeChanged", { label: labelOf(after, markId) }), "success");
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  }
+
+  function setMode(mode) {
+    const state = getState();
+    if (mode !== "select" && !state.schemeId) {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    if (mode !== "select" && !state.activeTypeId) {
+      chooseType(mode);
+      return;
+    }
+    setState({ mode });
+  }
+
+  function setSize(key, value) {
+    const state = getState();
+    if (!state.project) return;
+    if (!sizeBefore) sizeBefore = state.project;
+    setState({ project: updateProject(state.project, { view: { ...state.project.view, [key]: value } }).project });
+  }
+
+  // Конец жеста: один шаг истории на всё перетаскивание ползунка.
+  function commitSize() {
+    if (!sizeBefore) return;
+    const before = sizeBefore;
+    sizeBefore = null;
+    const after = getState().project;
+    if (after !== before) canvasCommit(before, after, strings.history.viewSize);
+    render();
+  }
+
+  function setBlockMode(mode) {
+    const state = getState();
+    const type = activeType(state);
+    if (!type) return;
+    canvasCommit(state.project, updateType(state.project, type.id, { blockMode: mode }).project, strings.history.blockMode);
+  }
+
+  function render() {
+    const state = getState();
+    const type = activeType(state);
+    const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
+    const selected = state.selectedMarkIds.length > 0;
+
+    const typeButton = uiEl(
+      "button",
+      {
+        class: "tools__type" + (type ? " is-set" : ""),
+        type: "button",
+        title: strings.tools.chooseType,
+        on: { click: () => chooseType() },
+      },
+      type
+        ? [
+            typeSwatch(state.project, type.id, 26),
+            uiEl("span", { class: "tools__code", text: type.code }),
+            uiEl("span", { class: "tools__typeName", text: type.name }),
+          ]
+        : [uiEl("span", { class: "tools__typeName", text: strings.tools.noType })],
+    );
+
+    const modeRow = uiEl("div", { class: "tools__row tools__row--modes" }, [
+      uiButton(strings.tools.selectMode, {
+        class: "ui-btn" + (state.mode === "select" ? " is-active" : ""),
+        on: { click: () => setMode("select") },
+      }),
+      uiButton(strings.tools.kindPoint, {
+        class: "ui-btn" + (state.mode === "point" ? " is-active" : ""),
+        title: strings.tools.kindPointHint,
+        on: { click: () => setMode("point") },
+      }),
+      uiButton(strings.tools.kindLine, {
+        class: "ui-btn" + (state.mode === "line" ? " is-active" : ""),
+        title: strings.tools.kindLineHint,
+        on: { click: () => setMode("line") },
+      }),
+    ]);
+
+    const blockSelect = uiEl(
+      "select",
+      {
+        class: "ui-select",
+        title: strings.tools.blockHint,
+        on: { change: (event) => setBlockMode(event.target.value) },
+      },
+      BLOCK_MODES.map((mode) =>
+        uiEl("option", { text: strings.blockMode[mode], value: mode, attrs: { value: mode } }),
+      ),
+    );
+    if (type) blockSelect.value = type.blockMode || "each";
+    blockSelect.disabled = !type;
+
+    const undoButton = uiButton(strings.tools.undo, {
+      title: text("tools.undoTitle", { label: undoLabel() }),
+      on: { click: () => canvasUndoStep() },
+    });
+    const redoButton = uiButton(strings.tools.redo, {
+      title: text("tools.redoTitle", { label: redoLabel() }),
+      on: { click: () => canvasRedoStep() },
+    });
+    undoButton.disabled = !canUndo();
+    redoButton.disabled = !canRedo();
+
+    box.replaceChildren(
+      uiEl("p", { class: "tools__label", text: strings.tools.type }),
+      typeButton,
+      uiButton(strings.tools.changeType, {
+        class: "ui-btn ui-btn--wide",
+        title: selected ? strings.tools.changeTypeHint : strings.tools.noSelection,
+        on: { click: () => changeSelectedType() },
+        attrs: selected ? {} : { disabled: "disabled" },
+      }),
+      uiEl("p", { class: "tools__label", text: strings.tools.kind }),
+      modeRow,
+      uiEl("p", { class: "tools__label", text: strings.tools.block }),
+      blockSelect,
+      uiEl("p", { class: "tools__label", text: strings.tools.sizes }),
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.markSize }),
+        toolsSlider(sizes.markSize, TOOLS_MARK_SIZE, (value) => setSize("markSize", value), commitSize),
+      ]),
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.labelSize }),
+        toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
+      ]),
+      uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
+      uiEl("div", { class: "tools__row" }, [
+        uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
+        uiButton("+", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
+        uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
+        uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
+      ]),
+      uiEl("div", { class: "tools__row" }, [undoButton, redoButton]),
+    );
+  }
+
+  subscribe((state, changed) => {
+    if (sizeBefore) return;
+    if (
+      "project" in changed ||
+      "activeTypeId" in changed ||
+      "mode" in changed ||
+      "selectedMarkIds" in changed ||
+      "schemeId" in changed
+    ) {
+      render();
+    }
+  });
+  onHistoryChange(render);
+  render();
+}
+
+registerPanel(PANEL_IDS.tools, mountToolsPanel);
 
 // src/projectFile.js
 // Формат файла проекта: один zip с project.json, планами в schemes/ и README.txt.
