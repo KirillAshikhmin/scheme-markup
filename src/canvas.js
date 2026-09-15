@@ -44,6 +44,7 @@ import {
   markRadius,
   planToScreen,
   screenToPlan,
+  snapSegment,
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { uiConfirm, uiDialogDepth } from "./panels/ui.js";
@@ -312,6 +313,18 @@ function canvasBlockPoint(markId, side) {
   }
 }
 
+// Магнит направления. Пока тянется следующая вершина, направление от предыдущей
+// липнет к ровным углам — стены в квартире прямые, и целиться в горизонталь от
+// руки инженеру больше не нужно. Зажатый Alt рисует свободно: косые стены и
+// эркеры бывают, и выходить ради них из рисования нельзя.
+// Первая вершина не притягивается: тянуть её не от чего.
+function canvasDraftSnap(plan, free) {
+  if (!canvasDraft || canvasDraft.points.length === 0) return { point: plan, snapped: false };
+  const scheme = canvasScheme(canvasState());
+  const from = canvasDraft.points[canvasDraft.points.length - 1];
+  return snapSegment(from, plan, scheme, { free: Boolean(free) });
+}
+
 function canvasCancelDraft() {
   if (!canvasDraft) return false;
   canvasDraft = null;
@@ -319,35 +332,38 @@ function canvasCancelDraft() {
   return true;
 }
 
-function canvasLineClick(plan, screen) {
+function canvasLineClick(plan, screen, free) {
   const state = canvasState();
   if (!state.activeTypeId) {
     canvasApi.notify(strings.canvas.needType);
     return;
   }
-  canvasDraftClick(plan, screen);
+  canvasDraftClick(plan, screen, free);
 }
 
 // Контур помещения рисуется той же рукой, что и ломаная: клик — вершина,
 // двойной клик по первой замыкает, Backspace убирает последнюю, Esc отменяет.
 // Отличается только то, чем это заканчивается: замкнутым многоугольником
 // помещения, а не линией-меткой.
-function canvasOutlineClick(plan, screen) {
+function canvasOutlineClick(plan, screen, free) {
   const state = canvasState();
   if (!state.activeRoomId || !findRoom(state.project, state.activeRoomId)) {
     canvasApi.notify(strings.canvas.needRoom);
     return;
   }
-  canvasDraftClick(plan, screen);
+  canvasDraftClick(plan, screen, free);
 }
 
-function canvasDraftClick(plan, screen) {
+function canvasDraftClick(plan, screen, free) {
   const state = canvasState();
   if (!canvasDraft) {
-    canvasDraft = { points: [plan], cursor: plan };
+    canvasDraft = { points: [plan], cursor: plan, snapped: false };
     canvasRedraw();
     return;
   }
+  // Вершина встаёт ровно туда, где её показывал черновик: и предпросмотр, и
+  // клик считают магнит одной функцией, разойтись им негде.
+  const snap = canvasDraftSnap(plan, free);
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   const threshold = markRadius(view) + 6;
@@ -358,7 +374,9 @@ function canvasDraftClick(plan, screen) {
   // половина двойного клика, который завершает или замыкает линию.
   if (Math.hypot(screen.x - last.x, screen.y - last.y) <= threshold) return;
   if (points.length >= 2 && Math.hypot(screen.x - first.x, screen.y - first.y) <= threshold) return;
-  points.push(plan);
+  points.push(snap.point);
+  canvasDraft.cursor = snap.point;
+  canvasDraft.snapped = false;
   canvasRedraw();
 }
 
@@ -746,7 +764,9 @@ function canvasPointerMove(event) {
   const state = canvasState();
   if (canvasDraft) {
     const scheme = canvasScheme(state);
-    canvasDraft.cursor = screenToPlan(point, scheme, canvasViewOf(state));
+    const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), event.altKey);
+    canvasDraft.cursor = snap.point;
+    canvasDraft.snapped = snap.snapped;
     canvasRedraw();
   }
   if (!canvasDrag) return;
@@ -802,11 +822,11 @@ function canvasPointerUp(event) {
   const scheme = canvasScheme(state);
   const plan = screenToPlan(point, scheme, canvasViewOf(state));
   if (drag.kind === "line") {
-    canvasLineClick(plan, point);
+    canvasLineClick(plan, point, event.altKey);
     return;
   }
   if (drag.kind === "room") {
-    canvasOutlineClick(plan, point);
+    canvasOutlineClick(plan, point, event.altKey);
     return;
   }
   if (drag.kind === "place") {
@@ -914,6 +934,8 @@ function canvasKeyDown(event) {
     event.preventDefault();
     canvasDraft.points.pop();
     if (canvasDraft.points.length === 0) canvasDraft = null;
+    // Убрали вершину — прежняя пометка магнита относилась к прежнему отрезку.
+    else canvasDraft.snapped = false;
     canvasRedraw();
     return;
   }

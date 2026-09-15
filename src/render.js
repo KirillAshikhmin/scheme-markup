@@ -23,6 +23,7 @@ import {
   labelOf,
   typesInOrder,
 } from "./model.js";
+import { text } from "./strings.js";
 
 export const SHAPES = SHAPE_NAMES;
 
@@ -43,6 +44,14 @@ const LABEL_GAP = 1.5;
 // Ручки «+» стоят от центра метки на столько её радиусов.
 const HANDLE_GAP = 2.4;
 const HANDLE_RADIUS = 9;
+
+// Подсказка угла у курсора: кегль в экранных пикселях (это не часть плана, а
+// подсказка руке), отступ от курсора и цвет для свободного направления.
+const DRAFT_ANGLE_FONT = 12;
+const DRAFT_ANGLE_GAP = 14;
+const DRAFT_ANGLE_FREE = "#57606a";
+// Короче этого отрезок ещё не направление, и градус у него случайный.
+const DRAFT_ANGLE_MIN_PX = 8;
 
 const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
 
@@ -335,6 +344,54 @@ export function fitView(scheme, viewport) {
     zoom,
     offsetX: (boxWidth - width * zoom) / 2,
     offsetY: (boxHeight - height * zoom) / 2,
+  };
+}
+
+// ——— магнит направления ————————————————————————————————————————————————
+//
+// Линиями рисуют ленту по периметру комнаты и треки, контурами — сами комнаты.
+// Стены в квартире прямые, и от руки инженер каждый раз промахивается мимо
+// горизонтали на пару градусов — на распечатке это видно. Магнит дотягивает
+// почти ровное направление до ровного.
+//
+// Порог — 8°: промах «на пару градусов» он забирает с запасом, а наклонный
+// отрезок начинается с восьми градусов от оси и ставится свободно. Ближайшее
+// осмысленное наклонное направление (45°) от порога далеко, так что отобрать
+// его магнит не может. Совсем косые стены и эркеры рисуются при снятом магните
+// — это `free`, холст поднимает его с зажатого Alt.
+
+// Порог притяжения к ровному направлению, градусы.
+export const SNAP_ANGLE_DEG = 8;
+
+// Угол направления в градусах: 0 — вправо, 90 — вверх, дальше против часовой.
+// Экранный `y` растёт вниз, поэтому знак вертикали переворачивается здесь один
+// раз — тот же угол читает и подсказка у курсора.
+function segmentAngle(dx, dy) {
+  const degrees = (Math.atan2(-dy, dx) * 180) / Math.PI;
+  return (degrees + 360) % 360;
+}
+
+// Направление отрезка `from → to` и точка, притянутая к ровному направлению.
+// Считается в пикселях плана: план бывает 1000×500, доли по осям стоят там
+// разных пикселей, и угол по долям — не тот угол, который видит инженер.
+// `options.free` — магнит снят; `options.limit` — свой порог.
+export function snapSegment(from, to, scheme, options = {}) {
+  const dx = (to.x - from.x) * schemeWidth(scheme);
+  const dy = (to.y - from.y) * schemeHeight(scheme);
+  if (dx === 0 && dy === 0) return { point: to, angle: 0, snapped: false };
+  const angle = segmentAngle(dx, dy);
+  const limit = options.limit === undefined ? SNAP_ANGLE_DEG : options.limit;
+  if (options.free || !(limit > 0)) return { point: to, angle, snapped: false };
+  const straight = Math.round(angle / 90) * 90;
+  if (Math.abs(angle - straight) > limit) return { point: to, angle, snapped: false };
+  // Притяжение — это проекция на ось: продольная координата остаётся под
+  // курсором, поперечная возвращается к предыдущей вершине. Поворот с
+  // сохранением длины увёл бы конец отрезка из-под руки.
+  const horizontal = straight % 180 === 0;
+  return {
+    point: horizontal ? { x: to.x, y: from.y } : { x: from.x, y: to.y },
+    angle: straight % 360,
+    snapped: true,
   };
 }
 
@@ -1086,6 +1143,49 @@ function drawDraft(ctx, scheme, draft, view, color) {
   for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(3, radius * 0.5), color);
   // Первая вершина крупнее: по ней замыкают контур.
   drawShape(ctx, "circle", screen[0].x, screen[0].y, Math.max(4, radius * 0.75), color);
+  if (!draft.cursor) return;
+  const from = draft.points[draft.points.length - 1];
+  const start = planToScreen(from, scheme, view);
+  const cursor = planToScreen(draft.cursor, scheme, view);
+  if (Math.hypot(cursor.x - start.x, cursor.y - start.y) < DRAFT_ANGLE_MIN_PX) return;
+  // Угол берётся у уже нарисованного отрезка: точку под курсором холст к этому
+  // времени притянул сам, и подсказка обязана показывать то, что видно.
+  const shown = snapSegment(from, draft.cursor, scheme, { free: true });
+  drawDraftAngle(ctx, cursor, shown.angle, Boolean(draft.snapped), color);
+}
+
+// Градус тянущегося отрезка — у курсора, а не в углу холста: инженер смотрит на
+// конец линии, и по углу холста не понять, к какому отрезку относится число.
+// Сработавший магнит виден по слову «ровно» и цвету — иначе непонятно, почему
+// линия не идёт за рукой.
+function drawDraftAngle(ctx, at, angle, snapped, color) {
+  const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
+  ctx.save();
+  ctx.font = `600 ${DRAFT_ANGLE_FONT}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = Math.max(2, DRAFT_ANGLE_FONT * 0.3);
+  ctx.lineJoin = "round";
+  const x = draftAngleX(ctx, at, ctx.measureText(value).width);
+  const y = at.y - DRAFT_ANGLE_GAP;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.strokeText(value, x, y);
+  ctx.fillStyle = snapped ? color : DRAFT_ANGLE_FREE;
+  ctx.fillText(value, x, y);
+  ctx.restore();
+}
+
+// Подсказка стоит справа от курсора, а у правого края холста переезжает влево:
+// обрезанное число не читается, а курсор у края — обычное дело, когда линию
+// ведут к стене. Ширину холста в своих единицах знает только `ctx`, и если он
+// её не отдаёт (заглушка в тесте), подсказка остаётся справа.
+function draftAngleX(ctx, at, width) {
+  const right = at.x + DRAFT_ANGLE_GAP;
+  const scale = typeof ctx.getTransform === "function" ? ctx.getTransform() : null;
+  const ratio = scale && scale.a > 0 ? scale.a : 0;
+  const edge = ctx.canvas && ctx.canvas.width > 0 && ratio > 0 ? ctx.canvas.width / ratio : 0;
+  if (!(edge > 0) || right + width <= edge) return right;
+  return at.x - DRAFT_ANGLE_GAP - width;
 }
 
 function legendRows(project, scheme, filter) {
