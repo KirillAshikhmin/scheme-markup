@@ -61,11 +61,11 @@ function tablesFixture() {
   };
 }
 
-test("таблица меток: пять колонок, группы по категориям в порядке справочника, внутри — по типу и номеру", () => {
+test("таблица меток: шесть колонок, группы по категориям в порядке справочника, внутри — по типу и номеру", () => {
   const box = tablesFixture();
   const table = marksTable(box.project, null, "category");
 
-  assert.deepEqual(table.columns, ["Обозначение", "Тип", "Помещение", "Расположение", "В оригинале"]);
+  assert.deepEqual(table.columns, ["Обозначение", "Точек", "Тип", "Помещение", "Расположение", "В оригинале"]);
   assert.deepEqual(
     table.groups.map((group) => group.title),
     ["Свет", "Розетки"],
@@ -78,6 +78,7 @@ test("таблица меток: пять колонок, группы по ка
   );
   assert.deepEqual(table.groups[0].rows[0].cells, [
     "Т1",
+    "1",
     "Точечный светильник",
     "Спальная Оли",
     "точка под зеркалом",
@@ -160,9 +161,9 @@ test("блок даёт строку на каждую метку; от урез
   const table = marksTable(box.project, null, "category");
   const sockets = table.groups.find((group) => group.title === "Розетки");
   assert.deepEqual(sockets.rows.map((row) => row.cells[0]), ["Р1", "Р2", "Р3"]);
-  assert.equal(sockets.rows[1].cells[1], "Розетка");
-  assert.equal(sockets.rows[1].cells[3], "розетки у кровати слева");
-  assert.equal(sockets.rows[2].cells[3], "розетки у кровати справа");
+  assert.equal(sockets.rows[1].cells[2], "Розетка");
+  assert.equal(sockets.rows[1].cells[4], "розетки у кровати слева");
+  assert.equal(sockets.rows[2].cells[4], "розетки у кровати справа");
 
   const half = marksTable(box.project, { query: "кровати справа" }, "category");
   assert.deepEqual(half.groups[0].rows.map((row) => row.cells[0]), ["Р3"]);
@@ -188,13 +189,13 @@ test("смешанный блок — строка на каждую метку,
   const switches = rows.filter((row) => row.cells[0] === "В1");
   assert.equal(switches.length, 1);
   assert.equal(switches[0].title, "Выключатели");
-  assert.equal(switches[0].cells[1], "Выключатель");
-  assert.equal(switches[0].cells[3], "у двери");
+  assert.equal(switches[0].cells[2], "Выключатель");
+  assert.equal(switches[0].cells[4], "у двери");
 
   // Розетки из того же блока стоят своими строками в своей категории:
   // общей строки «В1, Р2Р3» на листе больше нет.
   assert.deepEqual(
-    rows.filter((row) => row.title === "Розетки").map((row) => [row.cells[0], row.cells[1]]),
+    rows.filter((row) => row.title === "Розетки").map((row) => [row.cells[0], row.cells[2]]),
     [["Р1", "Розетка"], ["Р2", "Розетка"], ["Р3", "Розетка"]],
   );
 
@@ -203,7 +204,7 @@ test("смешанный блок — строка на каждую метку,
   const onlySockets = marksTable(box.project, { categoryIds: [sockets.id] }, "category");
   assert.deepEqual(onlySockets.groups.map((group) => group.title), ["Розетки"]);
   assert.deepEqual(onlySockets.groups[0].rows.map((row) => row.cells[0]), ["Р1", "Р2", "Р3"]);
-  assert.equal(onlySockets.groups[0].rows[1].cells[1], "Розетка");
+  assert.equal(onlySockets.groups[0].rows[1].cells[2], "Розетка");
 });
 
 // Маленькая таблица на одну строку: её текстовый вид выписан вручную, чтобы
@@ -213,21 +214,13 @@ function tablesOneRow(box) {
   return marksTable(box.project, { categoryIds: [sockets.id] }, "category");
 }
 
-test("CSV для русского Excel: BOM, точка с запятой, CRLF, кавычки вокруг разделителя", () => {
+test("CSV для русского Excel: BOM, CRLF, кавычки вокруг разделителя", () => {
   const box = tablesFixture();
   const csv = toCsv(tablesOneRow(box));
-  assert.equal(
-    csv,
-    "﻿" +
-      [
-        "Квартира на Ленина",
-        "Показаны только: Розетки",
-        "Обозначение;Тип;Помещение;Расположение;В оригинале",
-        "Розетки",
-        "Р1;Розетка;Холл;розетки у кресла;",
-      ].join("\r\n") +
-      "\r\n",
-  );
+  // Раскладку листа держит отдельный тест ниже; здесь — кодировка и кавычки.
+  assert.ok(csv.startsWith("\uFEFF"), "BOM в начале — иначе Excel читает кириллицу как «ÐŸÐš1»");
+  assert.ok(csv.endsWith("\r\n"));
+  assert.equal(csv.split("\n").every((line) => line === "" || line.endsWith("\r")), true);
 
   box.project = updateMark(box.project, box.marks.socket1, { location: 'слева; справа "у окна"' }).project;
   const quoted = toCsv(tablesOneRow(box));
@@ -245,9 +238,17 @@ test("Markdown читается как документ: заголовок об
       "",
       "## Розетки",
       "",
-      "| Обозначение | Тип | Помещение | Расположение | В оригинале |",
-      "| --- | --- | --- | --- | --- |",
-      "| Р1 | Розетка | Холл | розетки у кресла |  |",
+      "| Обозначение | Точек | Тип | Помещение | Расположение | В оригинале |",
+      "| --- | --- | --- | --- | --- | --- |",
+      "| Р1 | 1 | Розетка | Холл | розетки у кресла |  |",
+      "",
+      "## Итого",
+      "",
+      "| Название | Точек |",
+      "| --- | --- |",
+      "| Розетки | 1 |",
+      "| — Р — Розетка | 1 |",
+      "| Всего точек | 1 |",
       "",
     ].join("\n"),
   );
@@ -261,9 +262,9 @@ test("буфер обмена — табуляции без BOM: вставля�
   assert.equal(
     toTsv(tablesOneRow(box)),
     [
-      "Обозначение\tТип\tПомещение\tРасположение\tВ оригинале",
+      "Обозначение\tТочек\tТип\tПомещение\tРасположение\tВ оригинале",
       "Розетки",
-      "Р1\tРозетка\tХолл\tрозетки у кресла\t",
+      "Р1\t1\tРозетка\tХолл\tрозетки у кресла\t",
     ].join("\n"),
   );
 });
@@ -300,7 +301,7 @@ test("перевод строки в ячейке не разрывает вст
   box.project = updateMark(box.project, box.marks.socket1, { location: "слева\nи справа\tу окна" }).project;
   const lines = toTsv(tablesOneRow(box)).split("\n");
   assert.equal(lines.length, 3);
-  assert.equal(lines[2], "Р1\tРозетка\tХолл\tслева и справа у окна\t");
+  assert.equal(lines[2], "Р1\t1\tРозетка\tХолл\tслева и справа у окна\t");
 });
 
 test("лист, сужённый галочками или поиском, говорит об этом строкой; полный лист молчит", () => {
@@ -338,7 +339,8 @@ test("метки блока с повторённым номером дают о
     table.groups[0].rows.map((row) => row.cells[0]),
     ["Т1", "Т2", "С1"],
   );
-  assert.deepEqual(table.groups[0].rows[0].cells.slice(1, 4), [
+  assert.deepEqual(table.groups[0].rows[0].cells.slice(1, 5), [
+    "2",
     "Точечный светильник",
     "Спальная Оли",
     "точка под зеркалом; вторая в группе",
@@ -357,6 +359,7 @@ test("метки с совпадающим обозначением сводят
   assert.deepEqual(light.rows.map((row) => row.cells[0]), ["Т1", "С1"]);
   assert.deepEqual(light.rows[0].cells, [
     "Т1",
+    "2",
     "Точечный светильник",
     "Спальная Оли, Холл",
     "точка под зеркалом; над кроватью",
@@ -462,12 +465,13 @@ test("два уровня видны и в тексте: помещение — 
     "### Розетки",
     "",
   ]);
+  // В CSV уровней нет: заголовки групп заменены колонкой «Категория».
   assert.deepEqual(toCsv(table).split("\r\n").slice(0, 5), [
     "﻿Квартира на Ленина",
     "Холл",
-    "Обозначение;Тип;Помещение;Расположение;В оригинале",
-    "Холл",
-    "Розетки",
+    "",
+    "Категория;Обозначение;Точек;Тип;Помещение;Расположение;В оригинале",
+    "Розетки;Р1;1;Розетка;Холл;розетки у кресла;",
   ]);
 });
 
@@ -551,4 +555,98 @@ test("галка «по помещениям» разводит связи по 
   assert.deepEqual(table.groups[2].rows.map((row) => row.cells[0]), ["В2"]);
   assert.deepEqual(table.groups[4].rows.map((row) => row.cells[0]), ["Т1", "Т2", "С1"]);
   assert.deepEqual(table.groups[0].rows, []);
+});
+
+// ——— количество точек за строкой и итоги ——————————————————————————————
+
+test("строка называет, сколько точек за ней стоит: блок одной меткой, повторы обозначения, лента", () => {
+  const box = tablesFixture();
+  // «Одна метка на блок» — три розетки в одной рамке под общим обозначением.
+  const block = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: box.typeOf("Р"),
+    kind: "point",
+    points: [{ x: 0.4, y: 0.4 }, { x: 0.45, y: 0.4 }, { x: 0.5, y: 0.4 }],
+    blockMode: "single",
+  });
+  box.project = block.project;
+  // Лента — одна линия из четырёх вершин, а не четыре ленты.
+  const strip = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: box.typeOf("Л"),
+    kind: "line",
+    points: [{ x: 0.1, y: 0.1 }, { x: 0.3, y: 0.1 }, { x: 0.3, y: 0.3 }, { x: 0.1, y: 0.3 }],
+  });
+  box.project = strip.project;
+  // Два светильника с одним обозначением сводятся в строку — точек всё равно две.
+  const twin = box.put("С");
+  box.project = setMarkNumber(box.project, twin, 1).project;
+
+  const table = marksTable(box.project, null, "category");
+  assert.equal(table.columns[1], "Точек");
+  const cell = (label) => {
+    for (const group of table.groups) {
+      const row = group.rows.find((item) => item.cells[0] === label);
+      if (row) return row.cells[1];
+    }
+    return null;
+  };
+  assert.equal(cell("Р2"), "3");
+  assert.equal(cell("Л1"), "1");
+  assert.equal(cell("С1"), "2");
+  assert.equal(cell("Т1"), "1");
+});
+
+test("итоги считают точки по типам и категориям, а не последний номер", () => {
+  const box = tablesFixture();
+  box.project = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: box.typeOf("Р"),
+    kind: "point",
+    points: [{ x: 0.4, y: 0.4 }, { x: 0.45, y: 0.4 }, { x: 0.5, y: 0.4 }],
+    blockMode: "single",
+  }).project;
+
+  const table = marksTable(box.project, null, "category");
+  assert.deepEqual(
+    table.totals.map((row) => [row.level, row.title, row.count]),
+    [
+      [1, "Свет", 3],
+      [2, "Т — Точечный светильник", 2],
+      [2, "С — Светильник", 1],
+      [1, "Розетки", 4],
+      [2, "Р — Розетка", 4],
+    ],
+  );
+  assert.equal(table.totalCount, 7);
+  assert.equal(table.totals[3].category, "Розетки");
+
+  // Сужение листа комнатой и фильтром доезжает до итогов: иначе по ним закажут не то.
+  const hall = marksTable(box.project, { roomId: box.rooms.hall }, "category");
+  assert.deepEqual(hall.totals.map((row) => [row.title, row.count]), [["Розетки", 1], ["Р — Розетка", 1]]);
+  assert.equal(hall.totalCount, 1);
+});
+
+test("CSV — таблица для Excel: шапка сверху, категория колонкой, итоги за пустой строкой", () => {
+  const box = tablesFixture();
+  const csv = toCsv(tablesOneRow(box));
+  assert.equal(
+    csv,
+    "﻿" +
+      [
+        "Квартира на Ленина",
+        "Показаны только: Розетки",
+        "",
+        "Категория;Обозначение;Точек;Тип;Помещение;Расположение;В оригинале",
+        "Розетки;Р1;1;Розетка;Холл;розетки у кресла;",
+        "",
+        "Итого",
+        "Категория;Тип;Точек",
+        "Розетки;Р — Розетка;1",
+        "Всего точек;;1",
+      ].join("\r\n") +
+      "\r\n",
+  );
+  // Заголовков-строк между данными больше нет: фильтр Excel их не подхватит.
+  assert.equal(csv.includes("\r\nРозетки\r\n"), false);
 });

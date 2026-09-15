@@ -133,8 +133,11 @@ function mountFilePanel(host, api) {
       // Упаковка идёт через await на каждой записи: вкладка остаётся живой,
       // а строка прогресса успевает перерисоваться.
       const packedFile = await autosavePack(project, {
-        onProgress: ({ done, total }) => {
-          line.textContent = text("file.packingProgress", { done, total });
+        onProgress: ({ done, total, phase }) => {
+          // Сверка идёт после упаковки и на большом объекте занимает заметное
+          // время: молчащее окно выглядело бы как зависшая вкладка.
+          line.textContent =
+            phase === "check" ? strings.file.checking : text("file.packingProgress", { done, total });
         },
       });
       exportDownload(packedFile.blob, packedFile.name);
@@ -325,7 +328,11 @@ function mountFilePanel(host, api) {
       if (result.project) markSaved(result.project);
     } else if (result && result.error && !fileFailReported) {
       fileFailReported = true;
-      notify(strings.autosave.failed, "error");
+      // Не прошедшая сверка — не то же, что «не смогли записать»: файл в папке
+      // есть, но верить ему нельзя, и сказать надо именно это.
+      const failed =
+        result.error.code === "fileCheckFailed" ? strings.autosave.checkFailed : strings.autosave.failed;
+      notify(failed, "error");
     }
     renderStatus();
   }

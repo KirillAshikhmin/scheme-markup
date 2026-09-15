@@ -30,6 +30,7 @@ export const TABLE_GROUP_BY = ["category", "type", "room"];
 function tableMarkColumns() {
   return [
     strings.tables.label,
+    strings.tables.points,
     strings.tables.type,
     strings.tables.room,
     strings.tables.location,
@@ -94,6 +95,20 @@ function tableEntries(project, filter) {
   return entries;
 }
 
+// Сколько физических точек стоит за меткой. «Одна метка на блок» — это одна
+// запись с несколькими точками: три розетки в одной рамке под общим
+// обозначением, и без счёта строка неотличима от одиночной розетки.
+// Линия — всегда одна: у ленты из четырёх вершин не четыре ленты.
+function tableMarkCount(mark) {
+  if (!mark) return 0;
+  if (mark.kind === "line") return 1;
+  return Array.isArray(mark.points) && mark.points.length > 0 ? mark.points.length : 1;
+}
+
+function tableEntryCount(entry) {
+  return entry.marks.reduce((sum, mark) => sum + tableMarkCount(mark), 0);
+}
+
 // Несколько значений в одной ячейке (блок из разных типов или комнат) —
 // перечисление без повторов: пустая ячейка лучше, чем «, , ».
 function tableJoin(values, separator) {
@@ -116,8 +131,11 @@ function tableEntryLabel(project, entry) {
 // и «в оригинале» у одного обозначения бывают разные.
 function tableEntryRow(project, entry) {
   const type = findType(project, entry.head.typeId);
+  const category = type ? findCategory(project, type.categoryId) : null;
+  const count = tableEntryCount(entry);
   const cells = [
     tableEntryLabel(project, entry),
+    String(count),
     type ? type.name : "",
     tableJoin(
       entry.marks.map((mark) => {
@@ -129,7 +147,54 @@ function tableEntryRow(project, entry) {
     tableJoin(entry.marks.map((mark) => mark.location), "; "),
     tableJoin(entry.marks.map((mark) => mark.original), ", "),
   ];
-  return { id: entry.id, cells, color: styleOf(project, entry.head.typeId).color };
+  return {
+    id: entry.id,
+    cells,
+    count,
+    // Категория строкой: в CSV она становится колонкой, и заголовки-строки
+    // между данными исчезают — фильтр Excel их больше не подхватывает.
+    group: category ? category.name : "",
+    color: styleOf(project, entry.head.typeId).color,
+  };
+}
+
+// Итоги «сколько чего»: точки по типам и категориям. Считать по последнему
+// номеру нельзя — он врёт после удалений и при ручной правке номеров.
+// Итоги живут подвалом таблицы меток, а не отдельным листом: вопрос «сколько
+// розеток закупать» задают тому же листу, который уже сужен помещением и
+// фильтром, и второй лист пришлось бы сужать теми же руками ещё раз.
+function tableTotals(project, entries) {
+  const counts = new Map();
+  for (const entry of entries) {
+    counts.set(entry.head.typeId, (counts.get(entry.head.typeId) || 0) + tableEntryCount(entry));
+  }
+  const rows = [];
+  let total = 0;
+  for (const { category, types } of typesInOrder(project)) {
+    const used = types.filter((type) => counts.get(type.id));
+    if (used.length === 0) continue;
+    const sum = used.reduce((acc, type) => acc + counts.get(type.id), 0);
+    rows.push({
+      id: category.id,
+      level: 1,
+      title: category.name,
+      category: category.name,
+      count: sum,
+      color: category.color || null,
+    });
+    for (const type of used) {
+      rows.push({
+        id: type.id,
+        level: 2,
+        title: type.code + " — " + type.name,
+        category: category.name,
+        count: counts.get(type.id),
+        color: styleOf(project, type.id).color,
+      });
+    }
+    total += sum;
+  }
+  return { rows, total };
 }
 
 function tableGroupOf(project, entry, groupBy) {
@@ -271,15 +336,33 @@ export function marksTable(project, filter, groupBy, options = {}) {
   const byRoom = Boolean(options.byRoom) && kind !== "room";
   const columns = tableMarkColumns();
   if (!project) {
-    return { kind: "marks", groupBy: kind, byRoom, title: "", room: "", note: "", columns, groups: [] };
+    return {
+      kind: "marks",
+      groupBy: kind,
+      byRoom,
+      groupColumn: strings.tables.category,
+      totals: [],
+      totalCount: 0,
+      title: "",
+      room: "",
+      note: "",
+      columns,
+      groups: [],
+    };
   }
 
   const entries = tableEntries(project, filter);
   const groups = byRoom ? tableRoomGroups(project, entries, kind) : tableFlatGroups(project, entries, kind);
+  const totals = tableTotals(project, entries);
   return {
     kind: "marks",
     groupBy: kind,
     byRoom,
+    // Колонка, которой в CSV заменяются заголовки-строки: помещение и тип
+    // уже стоят колонками, категория — нет.
+    groupColumn: strings.tables.category,
+    totals: totals.rows,
+    totalCount: totals.total,
     title: project.name || strings.tables.marksTitle,
     room: tableRoomTitle(project, filter),
     note: tableFilterNote(project, filter),
@@ -299,7 +382,7 @@ function tableLinkLabel(project, mark, roomId) {
   return room ? label + " (" + room.name + ")" : label;
 }
 
-function tableLinkRow(project, mark, related, broken) {
+function tableLinkRow(project, mark, related, broken, side) {
   const type = findType(project, mark.typeId);
   const room = mark.roomId ? findRoom(project, mark.roomId) : null;
   const linked = related.map((item) => tableLinkLabel(project, item, mark.roomId));
@@ -316,6 +399,8 @@ function tableLinkRow(project, mark, related, broken) {
       linked.join(", "),
     ],
     color: styleOf(project, mark.typeId).color,
+    // Сторона листа колонкой: в CSV заголовки-строки не выживают.
+    group: side || "",
     problem: Boolean(broken),
   };
 }
@@ -372,7 +457,17 @@ export function linksTable(project, filter, options = {}) {
     strings.tables.linked,
   ];
   if (!project) {
-    return { kind: "links", byRoom, title: "", room: "", note: "", unlinked: 0, columns, groups: [] };
+    return {
+      kind: "links",
+      byRoom,
+      groupColumn: strings.tables.linkSide,
+      title: "",
+      room: "",
+      note: "",
+      unlinked: 0,
+      columns,
+      groups: [],
+    };
   }
 
   const order = tableTypeOrder(project);
@@ -390,15 +485,21 @@ export function linksTable(project, filter, options = {}) {
     const controls = wanted.length > 0 ? markControls(project, mark.id) : [];
     const controlledBy = markControlledBy(project, mark.id);
     if (wanted.length > 0) {
-      forward.push({ mark, row: tableLinkRow(project, mark, controls, wanted.length > controls.length) });
+      forward.push({
+        mark,
+        row: tableLinkRow(project, mark, controls, wanted.length > controls.length, strings.tables.controls),
+      });
     }
-    if (controlledBy.length > 0) back.push({ mark, row: tableLinkRow(project, mark, controlledBy, false) });
+    if (controlledBy.length > 0) {
+      back.push({ mark, row: tableLinkRow(project, mark, controlledBy, false, strings.tables.controlledBy) });
+    }
     if (wanted.length === 0 && controlledBy.length === 0) unlinked += 1;
   }
 
   return {
     kind: "links",
     byRoom,
+    groupColumn: strings.tables.linkSide,
     title: project.name || strings.tables.linksTitle,
     room: tableRoomTitle(project, filter),
     note: tableFilterNote(project, filter),
@@ -462,15 +563,43 @@ function tableCsvCell(value) {
   return '"' + cell.split('"').join('""') + '"';
 }
 
+// CSV — не документ, а таблица: человек её сортирует, фильтрует и суммирует.
+// Поэтому заголовков групп между строками здесь нет (фильтр Excel утаскивал
+// «Свет» в данные) — вместо них колонка: категория у меток, сторона у связей.
+// Название объекта, помещение и пометка о сужении остаются сверху, но
+// отделены пустой строкой: так область данных начинается ровно с шапки.
+// Итоги идут после данных, тоже за пустой строкой, — фильтр их не захватывает.
 export function toCsv(table) {
   const lines = [];
   if (table && table.title) lines.push(tableCsvCell(table.title));
   if (table && table.room) lines.push(tableCsvCell(table.room));
   if (table && table.note) lines.push(tableCsvCell(table.note));
-  lines.push(table.columns.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+  if (lines.length > 0) lines.push("");
+
+  const groupColumn = (table && table.groupColumn) || "";
+  const header = groupColumn ? [groupColumn, ...table.columns] : [...table.columns];
+  lines.push(header.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
   for (const section of tableSections(table)) {
-    if (section.title) lines.push(tableCsvCell(section.title));
-    for (const row of section.rows) lines.push(row.cells.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+    for (const row of section.rows) {
+      const cells = groupColumn ? [row.group || section.title || "", ...row.cells] : row.cells;
+      lines.push(cells.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+    }
+  }
+
+  if (table && Array.isArray(table.totals) && table.totals.length > 0) {
+    lines.push("", tableCsvCell(strings.tables.totals));
+    lines.push(
+      [strings.tables.category, strings.tables.type, strings.tables.points]
+        .map(tableCsvCell)
+        .join(TABLE_CSV_SEPARATOR),
+    );
+    // В Excel строками идут типы: по ним считают закупку, а подытог категории
+    // там собирают сами. Двухуровневый список — для бумаги.
+    for (const row of table.totals) {
+      if (row.level !== 2) continue;
+      lines.push([row.category, row.title, row.count].map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+    }
+    lines.push([strings.tables.totalAll, "", table.totalCount].map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
   }
   return TABLE_CSV_BOM + lines.join("\r\n") + "\r\n";
 }
@@ -494,6 +623,15 @@ export function toMarkdown(table) {
     out.push(header, divider);
     for (const row of section.rows) out.push("| " + row.cells.map(tableMarkdownCell).join(" | ") + " |");
     out.push("");
+  }
+  if (table && Array.isArray(table.totals) && table.totals.length > 0) {
+    out.push("## " + strings.tables.totals, "");
+    out.push("| " + strings.tables.name + " | " + strings.tables.points + " |", "| --- | --- |");
+    for (const row of table.totals) {
+      const title = row.level === 2 ? "— " + row.title : row.title;
+      out.push("| " + tableMarkdownCell(title) + " | " + row.count + " |");
+    }
+    out.push("| " + strings.tables.totalAll + " | " + table.totalCount + " |", "");
   }
   return out.join("\n");
 }

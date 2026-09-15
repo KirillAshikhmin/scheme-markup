@@ -285,7 +285,13 @@ export async function readZip(blob) {
     else if (method === METHOD_DEFLATE) content = await inflateRaw(payload);
     else throw fileError("archiveBroken");
 
-    if (content.length !== size || crc32(content) !== crc) throw fileError("archiveBroken");
+    if (content.length !== size || crc32(content) !== crc) {
+      // Имя записи едет вместе с ошибкой: сверке архива есть что назвать
+      // пользователю, а «архив повреждён» без места ему ничего не говорит.
+      const broken = fileError("archiveBroken");
+      broken.entry = name;
+      throw broken;
+    }
     entries.set(name, content);
   }
   return entries;
@@ -398,6 +404,17 @@ function readmeText(project, date) {
   }) + "\n";
 }
 
+// Имя записи плана в архиве: одно место и на упаковку, и на сверку.
+function imageEntryName(id, blob) {
+  return SCHEMES_DIR + encodeImageId(id) + "." + extensionFor(blob && blob.type);
+}
+
+// Текст project.json. Объект проводится через ту же нормализацию, что и при
+// чтении: тогда сверка сравнивает текст с текстом, а не «почти то же самое».
+function projectJsonText(project) {
+  return JSON.stringify(migrateProject({ ...project, formatVersion: FORMAT_VERSION }), null, 2);
+}
+
 /** Имя для выгрузки: «<объект>-<дата>.zip». */
 export function projectFileName(project, now) {
   const date = now instanceof Date ? now : new Date();
@@ -419,25 +436,92 @@ export function projectFileName(project, now) {
 export async function packProject(project, images, options = {}) {
   if (!looksLikeProject(project)) throw fileError("foreignProject");
   const date = options.date instanceof Date ? options.date : new Date();
-  const forFile = { ...project, formatVersion: FORMAT_VERSION };
+  const forFile = migrateProject({ ...project, formatVersion: FORMAT_VERSION });
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
 
-  const files = [{ name: PROJECT_ENTRY, data: JSON.stringify(forFile, null, 2) }];
+  const files = [{ name: PROJECT_ENTRY, data: projectJsonText(forFile) }];
   for (const [id, blob] of imageEntries(images)) {
     if (!id || !blob) continue;
-    const extension = extensionFor(blob.type);
-    files.push({
-      name: SCHEMES_DIR + encodeImageId(id) + "." + extension,
-      data: blob,
-      compress: false,
-    });
+    files.push({ name: imageEntryName(id, blob), data: blob, compress: false });
   }
   files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
 
-  return writeZip(files, {
+  const blob = await writeZip(files, {
     date,
     compress: options.compress,
-    onProgress: options.onProgress,
+    onProgress: onProgress ? (step) => onProgress({ ...step, phase: "pack" }) : undefined,
   });
+
+  // Файл проекта — единственная настоящая резервная копия объекта. Отдать его,
+  // не прочитав обратно, значит узнать о сбое записи в день восстановления,
+  // когда восстанавливать будет уже нечего.
+  if (options.verify !== false) await verifyProjectFile(blob, forFile, images, { onProgress });
+  return blob;
+}
+
+/**
+ * Сверяет собранный архив с тем, что в него клали: читает его обратно тем же
+ * кодом, которым его прочитает пользователь, и сравнивает по существу — текст
+ * `project.json`, разобранный объект, состав и содержимое планов, наличие
+ * `README.txt`. Расхождение — ошибка `fileCheckFailed` с указанием места.
+ *
+ * Планы сверяются длиной и CRC32 исходных байтов против распакованных.
+ * `readZip` уже сверил каждую запись с контрольной суммой из её заголовка;
+ * здесь замыкается вторая половина — что в заголовок попала сумма тех самых
+ * байтов, которые клали. Побайтовое сравнение дало бы ровно тот же ответ
+ * дороже: лишний проход по всем планам и вторая их копия в памяти.
+ */
+export async function verifyProjectFile(blob, project, images, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const expected = imageEntries(images).filter(([id, image]) => id && image);
+  const expectedJson = projectJsonText(project);
+
+  let entries;
+  let restored;
+  try {
+    // Полный проход чтения: сходятся CRC всех записей, разбирается project.json.
+    entries = await readZip(blob);
+    restored = readProjectEntries(entries, null);
+  } catch (error) {
+    throw fileError("fileCheckFailed", {
+      part: (error && (error.entry || error.message)) || PROJECT_ENTRY,
+    });
+  }
+
+  if (!entries.has(PROJECT_ENTRY) || decodeText(entries.get(PROJECT_ENTRY)) !== expectedJson) {
+    throw fileError("fileCheckFailed", { part: PROJECT_ENTRY });
+  }
+  // И то же самое глазами читателя: объект, который поднимется из файла,
+  // должен совпасть с упакованным, а не просто «разобраться без ошибок».
+  if (JSON.stringify(restored.project, null, 2) !== expectedJson) {
+    throw fileError("fileCheckFailed", { part: PROJECT_ENTRY });
+  }
+  if (!entries.has(README_ENTRY)) throw fileError("fileCheckFailed", { part: README_ENTRY });
+
+  const packedNames = [...entries.keys()].filter((name) => name.startsWith(SCHEMES_DIR));
+  if (packedNames.length !== expected.length || restored.images.size !== expected.length) {
+    throw fileError("fileCheckFailed", { part: SCHEMES_DIR });
+  }
+
+  for (let index = 0; index < expected.length; index += 1) {
+    const [id, image] = expected[index];
+    const name = imageEntryName(id, image);
+    const stored = entries.get(name);
+    const source = await toBytes(image);
+    if (!stored || !restored.images.has(id)) throw fileError("fileCheckFailed", { part: name });
+    if (stored.length !== source.length || crc32(stored) !== crc32(source)) {
+      throw fileError("fileCheckFailed", { part: name });
+    }
+    if (onProgress) onProgress({ done: index + 1, total: expected.length, name, phase: "check" });
+  }
+
+  return {
+    ok: true,
+    bytes: blob && typeof blob.size === "number" ? blob.size : 0,
+    marks: restored.project.marks.length,
+    schemes: restored.project.schemes.length,
+    images: expected.length,
+  };
 }
 
 // Свой архив кладёт project.json в корень; перепакованный вместе с папкой —
@@ -464,7 +548,14 @@ function projectPrefix(entries) {
 export async function unpackProject(blob, options = {}) {
   if (!blob) throw fileError("notAProject");
   const entries = await readZip(blob);
+  return readProjectEntries(entries, typeof options.onProgress === "function" ? options.onProgress : null);
+}
 
+// Сборка объекта из уже прочитанных записей. Отдельно от `unpackProject`
+// потому, что сверка (`verifyProjectFile`) читает архив один раз и смотрит
+// и на записи, и на собранный объект: второй полный проход по десятку планов
+// стоит дороже всей упаковки.
+function readProjectEntries(entries, onProgress) {
   const prefix = projectPrefix(entries);
   if (prefix === null) throw fileError("noProjectJson");
 
@@ -477,7 +568,6 @@ export async function unpackProject(blob, options = {}) {
   if (!looksLikeProject(loaded)) throw fileError("foreignProject");
   const project = migrateProject(loaded);
 
-  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const imageNames = [...entries.keys()].filter(
     (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
   );

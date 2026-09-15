@@ -5,7 +5,7 @@
 // загрузки (самое опасное место: чужие идентификаторы) можно проверить тестом,
 // а панель остаётся тонкой. Zip читает и пишет только `projectFile.js`.
 import { getImage, getSetting, setSetting } from "./store.js";
-import { packProject, projectFileName } from "./projectFile.js";
+import { packProject, projectFileName, verifyProjectFile } from "./projectFile.js";
 import { updateProject } from "./model.js";
 import { strings, text } from "./strings.js";
 
@@ -16,6 +16,8 @@ const AUTOSAVE_EXPORT_KEY = "lastFileExport";
 // Задержка больше, чем у сохранения в браузер (400 мс): запись на диск дороже,
 // и пачка правок должна уложиться в одну запись.
 const AUTOSAVE_DELAY_MS = 1500;
+// Как часто снимок в папке перечитывается с диска и сверяется с объектом.
+const AUTOSAVE_VERIFY_MS = 10 * 60 * 1000;
 
 let autosaveHandle = null;
 let autosavePermission = "none"; // none | prompt | granted | denied
@@ -24,6 +26,7 @@ let autosaveTimer = null;
 let autosaveRunning = false;
 let autosavePending = null;
 let autosaveLastError = null;
+let autosaveVerified = null;
 const autosaveListeners = new Set();
 
 // ——— приёмка загруженного файла ———————————————————————————————————————
@@ -89,11 +92,50 @@ export function autosaveSnapshotName(project, date) {
   return tag ? base.replace(/\.zip$/, "-" + tag + ".zip") : base;
 }
 
+function autosaveVerifyKey(project, images) {
+  const ids = images instanceof Map ? [...images.keys()] : [];
+  return String((project && project.id) || "") + "|" + ids.sort().join(",");
+}
+
+// Сверять каждую запись в папку не нужно и вредно: правки идут пачками раз в
+// полторы секунды, а сверка — полный проход по всем планам объекта (на десятке
+// планов по паре мегабайт это сотни миллисекунд на каждую правку, и они лягут
+// на тот же поток, что рисует холст). Сбой записи — свойство не отдельной
+// правки, а пары «эти данные + этот браузер»: если архив из этих планов
+// собрался верно, через минуту он соберётся так же. Меняется это ровно тогда,
+// когда меняется состав планов. Поэтому сверяются: первая запись в папку,
+// первая после ошибки, первая после смены состава планов — и дальше не реже
+// раза в десять минут. Запись «Сохранить в файл» сверяется всегда: этот файл
+// пользователь уносит с собой как резервную копию.
+export function autosaveVerifyDue(project, images, now) {
+  if (autosaveLastError) return true;
+  if (!autosaveVerified) return true;
+  if (autosaveVerified.key !== autosaveVerifyKey(project, images)) return true;
+  const moment = now instanceof Date ? now.getTime() : Date.now();
+  return moment - autosaveVerified.at >= AUTOSAVE_VERIFY_MS;
+}
+
+// Новая папка — снимок в ней ещё ни разу не проверен.
+export function autosaveResetVerify() {
+  autosaveVerified = null;
+}
+
+function autosaveMarkVerified(project, images, date) {
+  autosaveVerified = {
+    key: autosaveVerifyKey(project, images),
+    at: (date instanceof Date ? date : new Date()).getTime(),
+  };
+}
+
 // Один путь упаковки на всю панель: и «Сохранить в файл», и запись в папку.
 export async function autosavePack(project, options = {}) {
   const images = await autosaveCollectImages(project);
   const date = options.date instanceof Date ? options.date : new Date();
-  const blob = await packProject(project, images, { date, onProgress: options.onProgress });
+  const blob = await packProject(project, images, {
+    date,
+    onProgress: options.onProgress,
+    verify: options.verify,
+  });
   return { blob, name: projectFileName(project, date), images };
 }
 
@@ -174,6 +216,7 @@ export async function autosavePickFolder() {
   autosavePermission = await autosaveQueryPermission(handle);
   if (autosavePermission !== "granted") await autosaveGrant();
   autosaveLastError = null;
+  autosaveResetVerify();
   await setSetting(AUTOSAVE_FOLDER_KEY, handle);
   autosaveAnnounce();
   return autosaveStatus();
@@ -194,6 +237,7 @@ export async function autosaveForget() {
   autosaveHandle = null;
   autosavePermission = "none";
   autosaveLastError = null;
+  autosaveResetVerify();
   if (autosaveTimer) {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
@@ -213,12 +257,23 @@ export async function autosaveWrite(project, options = {}) {
   autosaveAnnounce();
   try {
     const date = options.date instanceof Date ? options.date : new Date();
-    const packedFile = await autosavePack(project, { ...options, date });
+    // Сверку здесь делает не упаковка, а чтение уже записанного файла: так
+    // проверка захватывает и запись на диск, а не только сборку в памяти.
+    const packedFile = await autosavePack(project, { ...options, date, verify: false });
     const name = autosaveSnapshotName(project, date);
     const fileHandle = await autosaveHandle.getFileHandle(name, { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(packedFile.blob);
     await writable.close();
+    const due =
+      options.verify === true ||
+      (options.verify !== false && autosaveVerifyDue(project, packedFile.images, date));
+    if (due) {
+      const written =
+        typeof fileHandle.getFile === "function" ? await fileHandle.getFile() : packedFile.blob;
+      await verifyProjectFile(written, project, packedFile.images);
+      autosaveMarkVerified(project, packedFile.images, date);
+    }
     autosaveLastError = null;
     const at = await autosaveNoteExport(project.id, options.at);
     // Объект возвращается вместе с результатом: пока шла запись, пользователь

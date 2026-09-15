@@ -123,6 +123,36 @@
   white-space: nowrap;
 }
 
+/* Подвал «сколько чего»: числа справа, подытог типа приглушён и сдвинут. */
+.print-doc__totals .print-doc__table {
+  max-width: 420px;
+}
+
+.print-doc__count {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.print-doc__totals-row td:first-child {
+  border-left: 3px solid var(--print-row-color, transparent);
+  font-weight: 600;
+  padding-left: 7px;
+}
+
+.print-doc__totals-row--sub td {
+  color: #57606a;
+  font-weight: 400;
+}
+
+.print-doc__totals-row--sub td:first-child {
+  padding-left: 20px;
+}
+
+.print-doc__totals-row--all td {
+  border-top: 1px solid #d0d7de;
+  font-weight: 600;
+}
+
 .print-doc__image {
   display: block;
   max-width: 100%;
@@ -253,7 +283,37 @@
     padding-top: 3px;
   }
 
-  .print-doc--scheme .print-doc__image {
+  .print-doc--scheme /* Подвал «сколько чего»: числа справа, подытог типа приглушён и сдвинут. */
+.print-doc__totals .print-doc__table {
+  max-width: 420px;
+}
+
+.print-doc__count {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.print-doc__totals-row td:first-child {
+  border-left: 3px solid var(--print-row-color, transparent);
+  font-weight: 600;
+  padding-left: 7px;
+}
+
+.print-doc__totals-row--sub td {
+  color: #57606a;
+  font-weight: 400;
+}
+
+.print-doc__totals-row--sub td:first-child {
+  padding-left: 20px;
+}
+
+.print-doc__totals-row--all td {
+  border-top: 1px solid #d0d7de;
+  font-weight: 600;
+}
+
+.print-doc__image {
     max-height: 96vh;
     object-fit: contain;
   }

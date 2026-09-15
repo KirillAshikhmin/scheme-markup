@@ -379,8 +379,10 @@ function exportTableLayout(table, options = {}) {
     if (section.title) height += EXPORT_TABLE.rowHeight + EXPORT_TABLE.gap;
     height += section.rows.length * EXPORT_TABLE.rowHeight + EXPORT_TABLE.gap;
   }
+  const totals = table && Array.isArray(table.totals) ? table.totals : [];
+  if (totals.length > 0) height += EXPORT_TABLE.rowHeight * (totals.length + 2) + EXPORT_TABLE.gap * 2;
   height += EXPORT_TABLE.padding;
-  return { width, height, bodyWidth, widths, sections, title, room, note, subtitle };
+  return { width, height, bodyWidth, widths, sections, title, room, note, subtitle, totals };
 }
 
 // Размер будущей картинки таблицы — чтобы множитель рядом с кнопкой показывал
@@ -397,7 +399,7 @@ export function exportTableSizeText(table, scale) {
 export async function tablePng(table, options = {}) {
   const scale = options.scale > 0 ? options.scale : 1;
   const layout = exportTableLayout(table, options);
-  const { widths, sections, title, room, note, subtitle, bodyWidth } = layout;
+  const { widths, sections, title, room, note, subtitle, bodyWidth, totals } = layout;
   const layoutWidth = layout.width;
   const layoutHeight = layout.height;
 
@@ -499,6 +501,39 @@ export async function tablePng(table, options = {}) {
       y += EXPORT_TABLE.rowHeight;
     }
     y += EXPORT_TABLE.gap;
+  }
+
+  // Подвал «сколько чего»: по нему заказывают оборудование, поэтому он стоит
+  // под таблицей на том же листе, а не отдельным файлом.
+  if (totals.length > 0) {
+    y += EXPORT_TABLE.gap;
+    ctx.fillStyle = EXPORT_TABLE.ink;
+    ctx.font = `600 ${EXPORT_TABLE.groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.fillText(strings.tables.totals, left, y + EXPORT_TABLE.rowHeight / 2);
+    const lineY = y + EXPORT_TABLE.rowHeight - 2;
+    ctx.strokeStyle = EXPORT_TABLE.ink;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(left, lineY);
+    ctx.lineTo(left + bodyWidth, lineY);
+    ctx.stroke();
+    y += EXPORT_TABLE.rowHeight;
+
+    const line = (label, value, bold, color, indent) => {
+      ctx.font = `${bold ? "600 " : ""}${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      ctx.fillStyle = color || EXPORT_TABLE.ink;
+      ctx.textAlign = "left";
+      ctx.fillText(label, left + indent, y + EXPORT_TABLE.rowHeight / 2);
+      ctx.textAlign = "right";
+      ctx.fillText(String(value), left + bodyWidth, y + EXPORT_TABLE.rowHeight / 2);
+      ctx.textAlign = "left";
+      y += EXPORT_TABLE.rowHeight;
+    };
+    for (const row of totals) {
+      const sub = row.level === 2;
+      line(row.title, row.count, !sub, sub ? EXPORT_TABLE.muted : row.color || EXPORT_TABLE.ink, sub ? EXPORT_TABLE.gap : 0);
+    }
+    line(strings.tables.totalAll, table.totalCount, true, EXPORT_TABLE.ink, 0);
   }
 
   return exportBlob(canvas);
@@ -630,6 +665,33 @@ export function exportTableNode(table, options = {}) {
     }
     tableNode.append(tbody);
     block.append(tableNode);
+    doc.append(block);
+  }
+
+  const totals = Array.isArray(table.totals) ? table.totals : [];
+  if (totals.length > 0) {
+    const block = exportNode("section", "print-doc__group print-doc__totals");
+    block.append(exportNode("h2", "print-doc__group-title", strings.tables.totals));
+    const totalsTable = exportNode("table", "print-doc__table");
+    const body = exportNode("tbody");
+    const line = (title, count, className, color) => {
+      const tr = exportNode("tr", className);
+      if (color) tr.style.setProperty("--print-row-color", color);
+      tr.append(exportNode("td", null, title));
+      tr.append(exportNode("td", "print-doc__count", count));
+      body.append(tr);
+    };
+    for (const row of totals) {
+      line(
+        row.title,
+        row.count,
+        row.level === 2 ? "print-doc__totals-row print-doc__totals-row--sub" : "print-doc__totals-row",
+        row.level === 2 ? null : row.color,
+      );
+    }
+    line(strings.tables.totalAll, table.totalCount, "print-doc__totals-row print-doc__totals-row--all", null);
+    totalsTable.append(body);
+    block.append(totalsTable);
     doc.append(block);
   }
 

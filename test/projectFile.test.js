@@ -8,6 +8,7 @@ import {
   unpackProject,
   writeZip,
   readZip,
+  verifyProjectFile,
   crc32,
   projectFileName,
   FORMAT_VERSION,
@@ -307,13 +308,21 @@ test("прогресс упаковки и распаковки сообщает
   const project = sampleProject();
   const images = sampleImages();
 
-  const packing = [];
-  const file = await packProject(project, images, { onProgress: (step) => packing.push(step) });
+  const steps = [];
+  const file = await packProject(project, images, { onProgress: (step) => steps.push(step) });
+
   // project.json + две картинки + README.txt
+  const packing = steps.filter((step) => step.phase === "pack");
   assert.equal(packing.length, 4);
   assert.deepEqual(packing.map((step) => step.done), [1, 2, 3, 4]);
   assert.ok(packing.every((step) => step.total === 4));
   assert.equal(packing[0].name, "project.json");
+
+  // …и сверка собранного архива: по шагу на план.
+  const checking = steps.filter((step) => step.phase === "check");
+  assert.deepEqual(checking.map((step) => step.done), [1, 2]);
+  assert.ok(checking.every((step) => step.total === 2));
+  assert.equal(steps.length, packing.length + checking.length, "шаг без фазы не проскочил");
 
   const unpacking = [];
   await unpackProject(file, { onProgress: (step) => unpacking.push(step) });
@@ -452,4 +461,96 @@ test("файл версии 1 читается: контуров в нём не�
   assert.equal(restored.project.formatVersion, FORMAT_VERSION);
   assert.deepEqual(restored.project.outlines, []);
   assert.equal(restored.project.marks.length, project.marks.length);
+});
+
+// ——— проверка zip: архив читается обратно сразу после записи ——————————
+
+test("сверка проходит на только что собранном архиве", async () => {
+  const project = sampleProject();
+  const images = sampleImages();
+  const file = await packProject(project, images);
+
+  const checked = await verifyProjectFile(file, project, images);
+  assert.equal(checked.ok, true);
+  assert.equal(checked.images, 2);
+  assert.equal(checked.marks, project.marks.length);
+  assert.equal(checked.schemes, project.schemes.length);
+  assert.equal(checked.bytes, file.size);
+});
+
+test("подпорченный план сверку не проходит", async () => {
+  const project = sampleProject();
+  const images = sampleImages();
+  const bytes = await bytesOf(await packProject(project, images));
+  const entry = listEntries(bytes).find((item) => item.name.startsWith("schemes/"));
+  bytes[entry.dataAt + 7] ^= 0x33;
+
+  const error = await refusal(verifyProjectFile(new Blob([bytes]), project, images));
+  assert.equal(error.code, "fileCheckFailed");
+  assert.ok(error.message.includes("schemes/"), "в отказе названо место: " + error.message);
+});
+
+test("в архиве не тот объект — сверка это видит", async () => {
+  const project = sampleProject();
+  const other = { ...project, name: "Совсем другой объект" };
+  const images = sampleImages();
+  const file = await packProject(other, images);
+
+  const error = await refusal(verifyProjectFile(file, project, images));
+  assert.equal(error.code, "fileCheckFailed");
+  assert.ok(error.message.includes("project.json"), error.message);
+});
+
+test("потерянная запись сверку не проходит", async () => {
+  const project = sampleProject();
+  const images = sampleImages();
+
+  // Архив без README.txt и архив без одного плана собираются в обход packProject:
+  // так выглядел бы сбой, при котором запись не доехала до файла.
+  const noReadme = await writeZip([
+    { name: "project.json", data: JSON.stringify({ ...project }, null, 2) },
+    { name: "schemes/img-1.png", data: images.get("img-1"), compress: false },
+    { name: "schemes/img-2.png", data: images.get("img-2"), compress: false },
+  ]);
+  assert.equal((await refusal(verifyProjectFile(noReadme, project, images))).code, "fileCheckFailed");
+
+  const noImage = await writeZip([
+    { name: "project.json", data: JSON.stringify({ ...project }, null, 2) },
+    { name: "schemes/img-1.png", data: images.get("img-1"), compress: false },
+    { name: "README.txt", data: "про файл" },
+  ]);
+  const error = await refusal(verifyProjectFile(noImage, project, images));
+  assert.equal(error.code, "fileCheckFailed");
+  assert.ok(error.message.includes("schemes/"), error.message);
+});
+
+test("сломанное сжатие не отдаёт битый архив наружу", async () => {
+  const project = sampleProject();
+  const images = sampleImages();
+  const saved = globalThis.CompressionStream;
+  // Писатель, который «сжимает» во что попало: так выглядит сбой записи,
+  // который без сверки всплыл бы в день восстановления.
+  globalThis.CompressionStream = class {
+    constructor() {
+      const broken = new TransformStream({
+        transform(chunk, controller) {
+          controller.enqueue(new Uint8Array([0, 1, 2, 3]));
+        },
+      });
+      this.readable = broken.readable;
+      this.writable = broken.writable;
+    }
+  };
+  try {
+    const error = await refusal(packProject(project, images));
+    assert.equal(error.code, "fileCheckFailed");
+
+    // Без сверки тот же вызов молча отдаёт файл, который уже не открыть, —
+    // ради этого она и стоит.
+    const unchecked = await packProject(project, images, { verify: false });
+    assert.ok(unchecked instanceof Blob);
+    assert.equal((await refusal(unpackProject(unchecked))).code, "archiveBroken");
+  } finally {
+    globalThis.CompressionStream = saved;
+  }
 });
