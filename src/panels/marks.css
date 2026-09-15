@@ -219,6 +219,58 @@
   font-size: 12px;
 }
 
+/* Предпросмотр уплотнения: список замен «было → стало». */
+.compact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 320px;
+}
+
+.compact__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.compact__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--panel-bg-deep);
+}
+
+/* Номер остался прежним — строка есть, но глаз за неё не цепляется. */
+.compact__row.is-same {
+  background: none;
+  color: var(--panel-muted);
+}
+
+.compact__label {
+  font-weight: 700;
+  min-width: 44px;
+}
+
+.compact__arrow {
+  color: var(--panel-muted);
+}
+
+.compact__repeat {
+  margin-left: auto;
+  color: #e36209;
+  font-size: 11px;
+}
+
+.compact__warning {
+  margin: 0;
+  color: #e36209;
+  font-size: 12px;
+}
+
 .rooms__box {
   display: flex;
   flex-direction: column;

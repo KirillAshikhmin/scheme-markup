@@ -480,6 +480,58 @@
   font-size: 12px;
 }
 
+/* Предпросмотр уплотнения: список замен «было → стало». */
+.compact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 320px;
+}
+
+.compact__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.compact__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--panel-bg-deep);
+}
+
+/* Номер остался прежним — строка есть, но глаз за неё не цепляется. */
+.compact__row.is-same {
+  background: none;
+  color: var(--panel-muted);
+}
+
+.compact__label {
+  font-weight: 700;
+  min-width: 44px;
+}
+
+.compact__arrow {
+  color: var(--panel-muted);
+}
+
+.compact__repeat {
+  margin-left: auto;
+  color: #e36209;
+  font-size: 11px;
+}
+
+.compact__warning {
+  margin: 0;
+  color: #e36209;
+  font-size: 12px;
+}
+
 .rooms__box {
   display: flex;
   flex-direction: column;
@@ -1698,6 +1750,7 @@ const strings = {
     blockMode: "режим блока",
     markField: "правка полей метки",
     markNumber: "правка номера метки",
+    compact: "уплотнение нумерации",
     markRoom: "помещение метки",
     addRoom: "новое помещение",
     renameRoom: "переименование помещения",
@@ -1949,6 +2002,16 @@ const strings = {
     removeCategory: "Удалить категорию",
     removeCategoryTitle: "Удалить категорию?",
     removeCategoryMessage: "Категория «{name}» исчезнет из справочника этого объекта.",
+    compactHint: "Уплотнить нумерацию типа {code}",
+    compactEmpty: "У типа {code} нет меток — уплотнять нечего",
+    compactTitle: "Уплотнить нумерацию — {code}",
+    compactSummary: "Сменят номер меток: {count}. Остальные останутся как есть.",
+    compactRepeat: "таких меток {count}",
+    compactWarning:
+      "После уплотнения ранее выданные распечатки и подписи на объекте перестанут совпадать с номерами: " +
+      "тот же номер будет означать другую метку.",
+    compactApply: "Уплотнить",
+    compactNothing: "В нумерации типа {code} дыр нет — уплотнять нечего",
     saveTemplate: "Сохранить как шаблон",
     saveTemplateHint: "Новые объекты начнутся с этого справочника; уже созданные останутся как есть",
     templateSaved: "Справочник сохранён как шаблон для новых объектов",
@@ -7337,6 +7400,73 @@ function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) 
   );
   return button;
 }
+
+// Предпросмотр уплотнения: строка на обозначение, а не на метку. И старый
+// номер, и новый берутся из ответа `compactNumbers` — своей нумерации у панели
+// нет, иначе окно обещало бы одно, а команда делала другое. `count` показывает
+// намеренный повтор: две метки Т1 останутся двумя Т1, и это видно до нажатия.
+// Строки идут по новому номеру: так виден будущий ряд, а не прошлый.
+function typesCompactPreview(project, typeId) {
+  const type = findType(project, typeId);
+  if (!type) return { code: "", rows: [], changes: [] };
+  const result = compactNumbers(project, typeId);
+  const rows = new Map();
+  for (const mark of project.marks) {
+    if (mark.typeId !== typeId) continue;
+    const after = findMark(result.project, mark.id);
+    const to = after ? after.number : mark.number;
+    let row = rows.get(mark.number);
+    if (!row) {
+      row = { from: mark.number, to, fromLabel: type.code + mark.number, toLabel: type.code + to, count: 0 };
+      rows.set(mark.number, row);
+    }
+    row.count += 1;
+  }
+  return {
+    code: type.code,
+    rows: [...rows.values()].sort((a, b) => (a.to === b.to ? a.from - b.from : a.to - b.to)),
+    changes: result.changes,
+  };
+}
+
+// Уплотнение разрушающее (ADR 003): после него распечатка на руках у монтажника
+// начинает врать. Поэтому окно показывает замены целиком и говорит о цене —
+// подтверждение здесь не украшение, а часть команды.
+function openTypesCompactPreview(preview) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const rows = preview.rows.map((row) =>
+      uiEl("div", { class: "compact__row" + (row.from === row.to ? " is-same" : "") }, [
+        uiEl("span", { class: "compact__label", text: row.fromLabel }),
+        uiEl("span", { class: "compact__arrow", text: "→" }),
+        uiEl("span", { class: "compact__label", text: row.toLabel }),
+        row.count > 1
+          ? uiEl("span", { class: "compact__repeat", text: text("dictionary.compactRepeat", { count: row.count }) })
+          : null,
+      ]),
+    );
+    modal = uiModal({
+      title: text("dictionary.compactTitle", { code: preview.code }),
+      body: uiEl("div", { class: "compact" }, [
+        uiEl("p", { class: "modal__text", text: text("dictionary.compactSummary", { count: preview.changes.length }) }),
+        uiEl("div", { class: "compact__rows" }, rows),
+        uiEl("p", { class: "compact__warning", text: strings.dictionary.compactWarning }),
+      ]),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(false) } }),
+        uiButton(strings.dictionary.compactApply, {
+          class: "ui-btn ui-btn--danger",
+          on: { click: () => done(true) },
+        }),
+      ],
+      onCancel: () => resolve(false),
+    });
+  });
+}
 function openTypesDictionary(api) {
   const body = uiEl("div", { class: "dict" });
 
@@ -7372,6 +7502,21 @@ function openTypesDictionary(api) {
     return select;
   }
 
+  // Уплотнение — по одному типу, как просил заказчик: тип назван явно, строкой
+  // справочника, а не «весь объект разом».
+  async function compactType(type) {
+    const preview = typesCompactPreview(project(), type.id);
+    if (preview.changes.length === 0) {
+      api.notify(text("dictionary.compactNothing", { code: type.code }), "info");
+      return;
+    }
+    const agreed = await openTypesCompactPreview(preview);
+    if (!agreed) return;
+    // Считаем заново по свежему объекту: пока окно было открыто, метку могли
+    // поставить или отменить чужим Ctrl+Z.
+    commit((current) => compactNumbers(current, type.id).project, strings.history.compact);
+  }
+
   async function removeType(type) {
     const agreed = await uiConfirm({
       title: strings.dictionary.removeTypeTitle,
@@ -7403,6 +7548,17 @@ function openTypesDictionary(api) {
       on: { click: () => removeType(type) },
     });
     removeButton.disabled = count > 0;
+    // Уплотнение живёт в строке типа: тип назван, и рядом видно, скольких меток
+    // команда коснётся.
+    const compactButton = uiButton("№", {
+      class: "ui-btn",
+      title:
+        count > 0
+          ? text("dictionary.compactHint", { code: type.code })
+          : text("dictionary.compactEmpty", { code: type.code }),
+      on: { click: () => compactType(type) },
+    });
+    compactButton.disabled = count === 0;
     return uiEl("div", { class: "dict__row" }, [
       shapeIcon(style.shape, style.color, 20),
       uiEl("input", {
@@ -7438,6 +7594,7 @@ function openTypesDictionary(api) {
           commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
       }),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
+      compactButton,
       removeButton,
     ]);
   }
