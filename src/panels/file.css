@@ -1,0 +1,42 @@
+/* Работа с файлом проекта в шапке: строка «выгружено N назад», папка
+   автосохранения, «Открыть файл» и «Сохранить в файл». */
+
+#file-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 12px;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file__status {
+  color: var(--panel-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+}
+
+/* Несохранённая работа заметна, но не кричит: цвет, а не модальное окно. */
+.file.is-dirty .file__status {
+  color: #d29922;
+}
+
+.file.is-busy .file__status {
+  opacity: 0.6;
+}
+
+/* Папка выбрана и разрешена — кнопка выглядит включённой. */
+.file .ui-btn.is-on {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.file__picker {
+  display: none;
+}

@@ -213,6 +213,49 @@
   display: none;
 }
 
+/* Работа с файлом проекта в шапке: строка «выгружено N назад», папка
+   автосохранения, «Открыть файл» и «Сохранить в файл». */
+
+#file-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 12px;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file__status {
+  color: var(--panel-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+}
+
+/* Несохранённая работа заметна, но не кричит: цвет, а не модальное окно. */
+.file.is-dirty .file__status {
+  color: #d29922;
+}
+
+.file.is-busy .file__status {
+  opacity: 0.6;
+}
+
+/* Папка выбрана и разрешена — кнопка выглядит включённой. */
+.file .ui-btn.is-on {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.file__picker {
+  display: none;
+}
+
 /* Список меток, фильтры и справочник объекта. Панель узкая, поэтому поля
    строки стоят столбиком: подписи заменяют подсказки-title. */
 
@@ -1227,6 +1270,272 @@ body {
     </div>
     <script>
 (function () {
+// src/store.js
+// Хранение в браузере: IndexedDB своими руками, без единой зависимости.
+// База `scheme-markup`, хранилища `projects` (документ объекта), `images`
+// (Blob планов) и `settings` (ключ-значение).
+//
+// Правило файла: потеря хранилища не должна ронять приложение. По file://
+// IndexedDB доступен не везде, в приватном окне запись может отказать в любой
+// момент — тогда store переходит в память, сообщает о беде подписчикам
+// (панель показывает строку и советует выгрузить проект в файл) и продолжает
+// работать. Данные сеанса живут в памяти в любом случае.
+const STORE_DB_NAME = "scheme-markup";
+const STORE_DB_VERSION = 1;
+const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
+// Ниже этого порога свободного места пользователя предупреждают заранее.
+const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
+// Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
+// вкладка): ждём ограниченное время и уходим в память.
+const STORE_OPEN_TIMEOUT_MS = 4000;
+
+const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
+const storeListeners = new Set();
+let storeDb = null;
+let storeModeValue = "unknown";
+let storeOpening = null;
+let storeReported = false;
+let storeWriteReported = false;
+function storeMode() {
+  return storeModeValue;
+}
+function onStoreProblem(listener) {
+  storeListeners.add(listener);
+  return () => storeListeners.delete(listener);
+}
+
+function reportStoreProblem(kind, error) {
+  const problem = { kind, error: error || null };
+  for (const listener of [...storeListeners]) {
+    try {
+      listener(problem);
+    } catch (ignored) {
+      /* подписчик не должен ломать запись */
+    }
+  }
+}
+
+function newStoreId() {
+  return crypto.randomUUID();
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("indexeddb-failed"));
+  });
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined" || indexedDB === null) {
+      reject(new Error("indexeddb-unavailable"));
+      return;
+    }
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
+    let request;
+    try {
+      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
+    } catch (error) {
+      clearTimeout(timer);
+      finish(reject, error);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
+        db.createObjectStore(STORE_NAMES.projects, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.images)) {
+        db.createObjectStore(STORE_NAMES.images, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
+        db.createObjectStore(STORE_NAMES.settings, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      finish(resolve, request.result);
+    };
+    request.onerror = () => {
+      clearTimeout(timer);
+      finish(reject, request.error || new Error("indexeddb-failed"));
+    };
+    request.onblocked = () => {
+      clearTimeout(timer);
+      finish(reject, new Error("indexeddb-blocked"));
+    };
+  });
+}
+async function openStore() {
+  if (storeModeValue !== "unknown") return storeModeValue;
+  if (!storeOpening) {
+    storeOpening = openDatabase()
+      .then((db) => {
+        storeDb = db;
+        storeModeValue = "idb";
+        db.onclose = () => degradeToMemory(new Error("indexeddb-closed"));
+        return storeModeValue;
+      })
+      .catch((error) => {
+        degradeToMemory(error);
+        return storeModeValue;
+      });
+  }
+  return storeOpening;
+}
+
+function degradeToMemory(error) {
+  storeDb = null;
+  storeModeValue = "memory";
+  if (storeReported) return;
+  storeReported = true;
+  reportStoreProblem("unavailable", error);
+}
+
+// Одна транзакция — одно действие: запись документа объекта атомарна, вкладка,
+// закрытая посреди сохранения, оставляет прежнее состояние, а не половину.
+async function runTransaction(name, mode, action) {
+  await openStore();
+  if (storeModeValue !== "idb" || !storeDb) return { ok: false, memory: true };
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = storeDb.transaction(name, mode);
+      let result;
+      tx.oncomplete = () => {
+        if (mode === "readwrite") storeWriteReported = false;
+        resolve({ ok: true, result });
+      };
+      tx.onerror = () => reject(tx.error || new Error("indexeddb-failed"));
+      tx.onabort = () => reject(tx.error || new Error("indexeddb-aborted"));
+      Promise.resolve(action(tx.objectStore(name)))
+        .then((value) => {
+          result = value;
+        })
+        .catch((error) => {
+          try {
+            tx.abort();
+          } catch (ignored) {
+            /* транзакция уже завершилась */
+          }
+          reject(error);
+        });
+    });
+  } catch (error) {
+    // Автосохранение идёт на каждую правку: об отказавшей записи говорим один
+    // раз — до тех пор, пока запись снова не пройдёт.
+    if (mode === "readwrite" && !storeWriteReported) {
+      storeWriteReported = true;
+      reportStoreProblem("writeFailed", error);
+    }
+    return { ok: false, error };
+  }
+}
+
+// ——— объекты ——————————————————————————————————————————————————————————
+async function listProjects() {
+  const summaries = new Map();
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+  if (read.ok) {
+    for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
+  }
+  for (const doc of storeMemory.projects.values()) summaries.set(doc.id, summaryOf(doc));
+  return [...summaries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+function summaryOf(project) {
+  return {
+    id: project.id,
+    name: project.name,
+    updatedAt: project.updatedAt,
+    schemes: (project.schemes || []).length,
+    marks: (project.marks || []).length,
+  };
+}
+async function loadProject(id) {
+  if (!id) return null;
+  if (storeMemory.projects.has(id)) return storeMemory.projects.get(id);
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result : null;
+}
+
+// Отказ записи не теряет работу: документ остаётся в памяти сеанса, а панель
+// получает повод предложить выгрузку в файл.
+async function saveProject(project) {
+  if (!project || !project.id) return { ok: false };
+  const written = await runTransaction(STORE_NAMES.projects, "readwrite", (store) =>
+    idbRequest(store.put(project)),
+  );
+  if (written.ok) {
+    storeMemory.projects.delete(project.id);
+    return { ok: true, mode: "idb" };
+  }
+  storeMemory.projects.set(project.id, project);
+  return { ok: false, mode: "memory", error: written.error || null };
+}
+async function deleteProject(id) {
+  storeMemory.projects.delete(id);
+  const removed = await runTransaction(STORE_NAMES.projects, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— изображения ——————————————————————————————————————————————————————
+async function putImage(blob) {
+  const id = newStoreId();
+  const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
+    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
+  );
+  if (!written.ok) storeMemory.images.set(id, blob);
+  return id;
+}
+async function getImage(id) {
+  if (!id) return null;
+  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
+  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result.blob : null;
+}
+async function deleteImage(id) {
+  if (!id) return { ok: true };
+  storeMemory.images.delete(id);
+  const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— настройки ————————————————————————————————————————————————————————
+async function getSetting(key) {
+  if (storeMemory.settings.has(key)) return storeMemory.settings.get(key);
+  const read = await runTransaction(STORE_NAMES.settings, "readonly", (store) => idbRequest(store.get(key)));
+  return read.ok && read.result ? read.result.value : null;
+}
+async function setSetting(key, value) {
+  const written = await runTransaction(STORE_NAMES.settings, "readwrite", (store) =>
+    idbRequest(store.put({ key, value })),
+  );
+  if (written.ok) storeMemory.settings.delete(key);
+  else storeMemory.settings.set(key, value);
+  return { ok: written.ok };
+}
+
+// ——— место ————————————————————————————————————————————————————————————
+async function estimateSpace() {
+  const empty = { usage: null, quota: null, free: null, low: false };
+  if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.estimate) return empty;
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (typeof quota !== "number" || typeof usage !== "number") return empty;
+    const free = Math.max(0, quota - usage);
+    return { usage, quota, free, low: free < STORE_LOW_SPACE_BYTES };
+  } catch (error) {
+    return empty;
+  }
+}
+
 // src/strings.js
 // Единственный словарь видимых строк. В остальных файлах русских текстов нет.
 const strings = {
@@ -1451,6 +1760,52 @@ const strings = {
 Если страницы под рукой нет
   project.json читается любым текстовым редактором, а схемы открываются как
   обычные картинки: данные не пропадут, даже если программы не окажется.`,
+    save: "Сохранить в файл",
+    saveHint: "Скачать объект одним zip-архивом",
+    open: "Открыть файл",
+    openHint: "Загрузить объект из zip-архива: схемы, метки и планы",
+    packingTitle: "Сохранение в файл",
+    packing: "Готовим файл…",
+    packingProgress: "Упаковано {done} из {total}",
+    readingTitle: "Загрузка файла",
+    reading: "Читаем файл…",
+    saved: "Файл {name} сохранён",
+    saveFailed: "Не удалось собрать файл",
+    loadTitle: "Загрузить объект из файла",
+    loadSummary: "В файле объект «{name}»: схем {schemes}, меток {marks}",
+    loadHint: "Новый объект встанет рядом с текущим и ничего не заменит.",
+    loadAsNew: "Новым объектом",
+    loadReplace: "Поверх текущего",
+    replaceTitle: "Заменить текущий объект?",
+    replaceMessage:
+      "Объект «{name}» со всеми схемами и метками будет заменён содержимым файла. Вернуть его будет неоткуда.",
+    replaceConfirm: "Да, заменить",
+    loaded: "Объект «{name}» загружен",
+    exported: "в файл выгружено: {ago}",
+    noProject: "Сначала создайте объект",
+  },
+  autosave: {
+    pick: "Сохранять в папку",
+    pickHint: "Выбрать папку — дальше объект будет сохраняться туда сам после каждой правки",
+    folder: "Папка: {name}",
+    dialogTitle: "Автосохранение в папку",
+    dialogText: "Объект сам сохраняется в папку «{name}» файлом {file} — после каждой правки, с задержкой.",
+    change: "Сменить папку",
+    off: "Выключить",
+    offDone: "Автосохранение в папку выключено",
+    allow: "Разрешить папку",
+    allowHint: "Браузер спросит разрешение записывать в папку «{name}»",
+    failed: "Не удалось записать в папку — сохраните объект в файл",
+    unsupported:
+      "Этот браузер не сохраняет в папку сам — выгружайте объект кнопкой «Сохранить в файл». Так бывает, когда страница открыта с диска (file://).",
+    ago: {
+      justNow: "только что",
+      never: "ещё ни разу",
+      pattern: "{count} {word} назад",
+      minutes: ["минуту", "минуты", "минут"],
+      hours: ["час", "часа", "часов"],
+      days: ["день", "дня", "дней"],
+    },
   },
   projects: {
     switch: "Переключить объект",
@@ -1653,156 +2008,6 @@ function text(key, vars) {
     }
   }
   return value;
-}
-
-// src/app.js
-// Каркас сеанса: состояние, реестр панелей, уведомления.
-// Панели других тасков монтируются по идентификатору контейнера из index.html
-// и не правят ни этот файл, ни разметку.
-
-// Контейнеры-точки монтирования (идентификаторы из src/index.html).
-const PANEL_IDS = {
-  tools: "panel-tools",
-  schemes: "panel-schemes",
-  marks: "panel-marks",
-  properties: "panel-properties",
-  canvas: "canvas-host",
-  overlay: "canvas-overlay",
-  headerActions: "header-actions",
-  projectActions: "project-actions",
-  dialogs: "dialog-host",
-};
-
-const appState = {
-  project: null,
-  schemeId: null,
-  selectedMarkIds: [],
-  activeTypeId: null,
-  mode: "select",
-  filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
-  view: { zoom: 1, offsetX: 0, offsetY: 0 },
-  dirty: false,
-};
-
-const appSubscribers = new Set();
-const appPanels = new Map();
-const appMounted = new Map();
-let appStarted = false;
-
-// Снимок: вложенные filter/view/selectedMarkIds копируются, чтобы правка
-// на месте в панели не меняла состояние сеанса мимо setState.
-function getState() {
-  return {
-    ...appState,
-    selectedMarkIds: [...appState.selectedMarkIds],
-    filter: { ...appState.filter },
-    view: { ...appState.view },
-  };
-}
-function setState(patch) {
-  if (!patch) return getState();
-  const changed = {};
-  for (const [key, value] of Object.entries(patch)) {
-    if (appState[key] !== value) {
-      appState[key] = value;
-      changed[key] = value;
-    }
-  }
-  if (Object.keys(changed).length === 0) return getState();
-  const snapshot = getState();
-  for (const subscriber of [...appSubscribers]) {
-    try {
-      subscriber(snapshot, changed);
-    } catch (error) {
-      reportAppError(error);
-    }
-  }
-  syncCanvasClass();
-  syncProjectName();
-  return snapshot;
-}
-function subscribe(listener) {
-  appSubscribers.add(listener);
-  return () => appSubscribers.delete(listener);
-}
-
-// Регистрация панели: если каркас уже поднят — монтируем сразу.
-function registerPanel(id, mountFn) {
-  if (typeof mountFn !== "function") return;
-  appPanels.set(id, mountFn);
-  if (appStarted) mountPanel(id);
-}
-function panelApi() {
-  return { getState, setState, subscribe, notify, strings, text };
-}
-
-function mountPanel(id) {
-  const mountFn = appPanels.get(id);
-  const host = document.getElementById(id);
-  if (!mountFn || !host || appMounted.get(id) === mountFn) return;
-  try {
-    mountFn(host, panelApi());
-    appMounted.set(id, mountFn);
-  } catch (error) {
-    reportAppError(error);
-  }
-}
-function notify(message, kind = "info") {
-  const host = typeof document === "undefined" ? null : document.getElementById("notifications");
-  if (!host) return null;
-  const toast = document.createElement("div");
-  toast.className = "toast toast--" + kind;
-  toast.textContent = String(message);
-  toast.title = strings.notify.close;
-  toast.addEventListener("click", () => toast.remove());
-  host.append(toast);
-  setTimeout(() => toast.remove(), kind === "error" ? 12000 : 6000);
-  return toast;
-}
-
-function reportAppError(error) {
-  notify(error && error.message ? error.message : String(error), "error");
-}
-
-// Все видимые строки приходят из словаря: разметка держит только ключи.
-function applyStrings(root) {
-  const scope = root || document;
-  for (const node of scope.querySelectorAll("[data-text]")) {
-    node.textContent = text(node.dataset.text);
-  }
-  for (const node of scope.querySelectorAll("[data-title]")) {
-    node.title = text(node.dataset.title);
-  }
-}
-
-function syncProjectName() {
-  const node = document.getElementById("project-name");
-  if (!node) return;
-  node.textContent = appState.project ? appState.project.name : strings.header.noProject;
-}
-
-function syncCanvasClass() {
-  const app = document.getElementById("app");
-  if (!app) return;
-  app.classList.toggle("has-scheme", Boolean(appState.schemeId));
-}
-function startApp() {
-  if (appStarted) return;
-  appStarted = true;
-  applyStrings(document);
-  syncProjectName();
-  syncCanvasClass();
-  for (const id of appPanels.keys()) mountPanel(id);
-}
-
-// Старт откладывается за границу текущего скрипта: в собранном файле панели
-// и модели определяются ниже по бандлу, и каркас не должен опережать их.
-if (typeof document !== "undefined") {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", startApp, { once: true });
-  } else {
-    setTimeout(startApp, 0);
-  }
 }
 
 // src/model.js
@@ -2516,6 +2721,923 @@ function validate(project) {
   }
 
   return problems;
+}
+
+// src/projectFile.js
+// Формат файла проекта: один zip с project.json, планами в schemes/ и README.txt.
+// Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
+// там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
+const PROJECT_ENTRY = "project.json";
+const SCHEMES_DIR = "schemes/";
+const README_ENTRY = "README.txt";
+
+const LOCAL_SIGNATURE = 0x04034b50;
+const CENTRAL_SIGNATURE = 0x02014b50;
+const END_SIGNATURE = 0x06054b50;
+const LOCAL_HEADER_SIZE = 30;
+const CENTRAL_HEADER_SIZE = 46;
+const END_HEADER_SIZE = 22;
+const METHOD_STORED = 0;
+const METHOD_DEFLATE = 8;
+const UTF8_FLAG = 0x0800;
+const ZIP64_MARK = 0xffffffff;
+const MAX_ZIP_BYTES = 0xfffffffe;
+
+// Тип картинки восстанавливается по расширению: имя файла в архиве — всё,
+// что о ней известно после распаковки.
+const IMAGE_TYPES = [
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/jpeg", "jpeg"],
+];
+
+function fileError(key, vars) {
+  const error = new Error(text("errors." + key, vars));
+  error.code = key;
+  return error;
+}
+
+// ——— байты ———————————————————————————————————————————————————————————
+
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder("utf-8");
+
+function encodeText(value) {
+  return utf8Encoder.encode(value);
+}
+
+function decodeText(bytes) {
+  return utf8Decoder.decode(bytes);
+}
+
+async function toBytes(data) {
+  if (data == null) return new Uint8Array(0);
+  if (data instanceof Uint8Array) return data;
+  if (typeof data === "string") return encodeText(data);
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (typeof data.arrayBuffer === "function") return new Uint8Array(await data.arrayBuffer());
+  throw fileError("archiveBroken");
+}
+
+let crcTable = null;
+function crc32(bytes) {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let value = n;
+      for (let bit = 0; bit < 8; bit += 1) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      crcTable[n] = value >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xff];
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function hasCompression() {
+  return typeof CompressionStream === "function" && typeof DecompressionStream === "function";
+}
+
+async function collectStream(readable) {
+  const reader = readable.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const step = await reader.read();
+    if (step.done) break;
+    const chunk = step.value instanceof Uint8Array ? step.value : new Uint8Array(step.value);
+    chunks.push(chunk);
+    total += chunk.length;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
+// Поток, а не один кусок: большой план не держит вкладку — между чтениями
+// управление возвращается странице.
+async function pipeBytes(bytes, transform) {
+  const source = new Blob([bytes]).stream().pipeThrough(transform);
+  return collectStream(source);
+}
+
+async function deflateRaw(bytes) {
+  return pipeBytes(bytes, new CompressionStream("deflate-raw"));
+}
+
+async function inflateRaw(bytes) {
+  try {
+    return await pipeBytes(bytes, new DecompressionStream("deflate-raw"));
+  } catch {
+    throw fileError("archiveBroken");
+  }
+}
+
+// ——— запись zip ——————————————————————————————————————————————————————
+
+function dosStamp(date) {
+  const year = date.getUTCFullYear();
+  if (year < 1980) return { time: 0, date: (1 << 5) | 1 };
+  return {
+    time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | (date.getUTCSeconds() >> 1),
+    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
+  };
+}
+
+function headerBuffer(size) {
+  const bytes = new Uint8Array(size);
+  return { bytes, view: new DataView(bytes.buffer) };
+}
+
+/**
+ * Собирает zip из списка {name, data, compress}. `data` — Uint8Array, ArrayBuffer,
+ * строка или Blob. Размеры известны заранее, дескрипторов данных нет — архив
+ * открывается штатным распаковщиком ОС.
+ */
+async function writeZip(files, options = {}) {
+  const allowCompression = options.compress !== false && hasCompression();
+  const stamp = dosStamp(options.date instanceof Date ? options.date : new Date());
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const list = [...files];
+
+  const parts = [];
+  const central = [];
+  let offset = 0;
+
+  for (let index = 0; index < list.length; index += 1) {
+    const entry = list[index];
+    const nameBytes = encodeText(entry.name);
+    const source = await toBytes(entry.data);
+    const wantCompression = entry.compress === false ? false : allowCompression;
+
+    let method = METHOD_STORED;
+    let payload = source;
+    if (wantCompression && source.length > 0) {
+      const packed = await deflateRaw(source);
+      if (packed.length < source.length) {
+        method = METHOD_DEFLATE;
+        payload = packed;
+      }
+    }
+    const crc = crc32(source);
+
+    const local = headerBuffer(LOCAL_HEADER_SIZE + nameBytes.length);
+    local.view.setUint32(0, LOCAL_SIGNATURE, true);
+    local.view.setUint16(4, 20, true);
+    local.view.setUint16(6, UTF8_FLAG, true);
+    local.view.setUint16(8, method, true);
+    local.view.setUint16(10, stamp.time, true);
+    local.view.setUint16(12, stamp.date, true);
+    local.view.setUint32(14, crc, true);
+    local.view.setUint32(18, payload.length, true);
+    local.view.setUint32(22, source.length, true);
+    local.view.setUint16(26, nameBytes.length, true);
+    local.view.setUint16(28, 0, true);
+    local.bytes.set(nameBytes, LOCAL_HEADER_SIZE);
+
+    parts.push(local.bytes, payload);
+    central.push({ nameBytes, method, crc, packedSize: payload.length, size: source.length, offset });
+    offset += local.bytes.length + payload.length;
+    if (offset > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
+    if (onProgress) onProgress({ done: index + 1, total: list.length, name: entry.name });
+  }
+
+  const directoryOffset = offset;
+  let directorySize = 0;
+  for (const entry of central) {
+    const header = headerBuffer(CENTRAL_HEADER_SIZE + entry.nameBytes.length);
+    header.view.setUint32(0, CENTRAL_SIGNATURE, true);
+    header.view.setUint16(4, 20, true);
+    header.view.setUint16(6, 20, true);
+    header.view.setUint16(8, UTF8_FLAG, true);
+    header.view.setUint16(10, entry.method, true);
+    header.view.setUint16(12, stamp.time, true);
+    header.view.setUint16(14, stamp.date, true);
+    header.view.setUint32(16, entry.crc, true);
+    header.view.setUint32(20, entry.packedSize, true);
+    header.view.setUint32(24, entry.size, true);
+    header.view.setUint16(28, entry.nameBytes.length, true);
+    header.view.setUint32(42, entry.offset, true);
+    header.bytes.set(entry.nameBytes, CENTRAL_HEADER_SIZE);
+    parts.push(header.bytes);
+    directorySize += header.bytes.length;
+  }
+
+  const end = headerBuffer(END_HEADER_SIZE);
+  end.view.setUint32(0, END_SIGNATURE, true);
+  end.view.setUint16(8, central.length, true);
+  end.view.setUint16(10, central.length, true);
+  end.view.setUint32(12, directorySize, true);
+  end.view.setUint32(16, directoryOffset, true);
+  parts.push(end.bytes);
+  if (directoryOffset + directorySize + END_HEADER_SIZE > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
+
+  return new Blob(parts, { type: "application/zip" });
+}
+
+// ——— чтение zip ——————————————————————————————————————————————————————
+
+function findEndHeader(bytes, view) {
+  const limit = Math.max(0, bytes.length - 0xffff - END_HEADER_SIZE);
+  for (let at = bytes.length - END_HEADER_SIZE; at >= limit; at -= 1) {
+    if (view.getUint32(at, true) === END_SIGNATURE) return at;
+  }
+  return -1;
+}
+
+/** Распаковывает zip в Map «имя файла → байты». Понимает stored и deflate. */
+async function readZip(blob) {
+  const bytes = await toBytes(blob);
+  if (bytes.length < END_HEADER_SIZE) throw fileError("notAProject");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  const endAt = findEndHeader(bytes, view);
+  if (endAt < 0) throw fileError("notAProject");
+
+  const count = view.getUint16(endAt + 10, true);
+  const directorySize = view.getUint32(endAt + 12, true);
+  const directoryOffset = view.getUint32(endAt + 16, true);
+  if (directoryOffset === ZIP64_MARK || directorySize === ZIP64_MARK || count === 0xffff) {
+    throw fileError("zip64Unsupported");
+  }
+  if (directoryOffset + directorySize > bytes.length) throw fileError("archiveBroken");
+
+  const entries = new Map();
+  let at = directoryOffset;
+  for (let index = 0; index < count; index += 1) {
+    if (at + CENTRAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
+    if (view.getUint32(at, true) !== CENTRAL_SIGNATURE) throw fileError("archiveBroken");
+    const method = view.getUint16(at + 10, true);
+    const crc = view.getUint32(at + 16, true);
+    const packedSize = view.getUint32(at + 20, true);
+    const size = view.getUint32(at + 24, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const extraLength = view.getUint16(at + 30, true);
+    const commentLength = view.getUint16(at + 32, true);
+    const localOffset = view.getUint32(at + 42, true);
+    const name = decodeText(bytes.subarray(at + CENTRAL_HEADER_SIZE, at + CENTRAL_HEADER_SIZE + nameLength));
+    at += CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
+
+    if (name.endsWith("/")) continue;
+    if (packedSize === ZIP64_MARK || size === ZIP64_MARK || localOffset === ZIP64_MARK) {
+      throw fileError("zip64Unsupported");
+    }
+    if (localOffset + LOCAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
+    if (view.getUint32(localOffset, true) !== LOCAL_SIGNATURE) throw fileError("archiveBroken");
+
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataAt = localOffset + LOCAL_HEADER_SIZE + localNameLength + localExtraLength;
+    if (dataAt + packedSize > bytes.length) throw fileError("archiveBroken");
+
+    const payload = bytes.subarray(dataAt, dataAt + packedSize);
+    let content;
+    if (method === METHOD_STORED) content = payload.slice();
+    else if (method === METHOD_DEFLATE) content = await inflateRaw(payload);
+    else throw fileError("archiveBroken");
+
+    if (content.length !== size || crc32(content) !== crc) throw fileError("archiveBroken");
+    entries.set(name, content);
+  }
+  return entries;
+}
+
+// ——— файл проекта ————————————————————————————————————————————————————
+
+function extensionFor(type) {
+  const found = IMAGE_TYPES.find((pair) => pair[0] === String(type || "").toLowerCase());
+  return found ? found[1] : "bin";
+}
+
+function typeForExtension(extension) {
+  const found = IMAGE_TYPES.find((pair) => pair[1] === String(extension || "").toLowerCase());
+  return found ? found[0] : "";
+}
+
+// Идентификатор изображения попадает в имя файла: кодируем, чтобы «/» и прочее
+// не разъехались по папкам, и раскодируем обратно — id восстанавливается точно.
+function encodeImageId(id) {
+  return encodeURIComponent(String(id));
+}
+
+function decodeImageId(name) {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+// Поставщик один — store отдаёт Map. Всё остальное отвергается: тихо вернуть
+// пустой список значило бы упаковать объект без единого плана и промолчать.
+function imageEntries(images) {
+  if (images == null) return [];
+  if (!(images instanceof Map)) throw fileError("imagesNotMap");
+  return [...images.entries()];
+}
+
+function looksLikeProject(value) {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof value.id === "string" &&
+    Array.isArray(value.categories) &&
+    Array.isArray(value.markTypes) &&
+    Array.isArray(value.schemes) &&
+    Array.isArray(value.marks)
+  );
+}
+
+// Единственное место, где живут миграции формата: версия из будущего отвергается,
+// прошлые версии доводятся до текущей здесь.
+function migrateProject(loaded) {
+  const version = Number(loaded.formatVersion);
+  if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
+  if (version > FORMAT_VERSION) {
+    throw fileError("futureVersion", { version, current: FORMAT_VERSION });
+  }
+  return {
+    ...loaded,
+    formatVersion: FORMAT_VERSION,
+    rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
+    groups: Array.isArray(loaded.groups) ? loaded.groups : [],
+    counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
+  };
+}
+
+function readmeText(project, date) {
+  return text("file.readme", {
+    name: project.name || strings.project.untitled,
+    date: date.toISOString(),
+    schemes: project.schemes.length,
+    marks: project.marks.length,
+    version: FORMAT_VERSION,
+  }) + "\n";
+}
+
+/** Имя для выгрузки: «<объект>-<дата>.zip». */
+function projectFileName(project, now) {
+  const date = now instanceof Date ? now : new Date();
+  const day = date.toISOString().slice(0, 10);
+  const raw = String((project && project.name) || strings.project.untitled);
+  const safe = raw
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+  return (safe || strings.project.untitled) + "-" + day + ".zip";
+}
+
+/**
+ * Упаковывает объект и планы в один zip.
+ * `images` — Map «imageId → Blob» (или ничего, если планов нет); картинки кладутся
+ * как есть, без пережатия. `options.onProgress({done, total, name})`.
+ */
+async function packProject(project, images, options = {}) {
+  if (!looksLikeProject(project)) throw fileError("foreignProject");
+  const date = options.date instanceof Date ? options.date : new Date();
+  const forFile = { ...project, formatVersion: FORMAT_VERSION };
+
+  const files = [{ name: PROJECT_ENTRY, data: JSON.stringify(forFile, null, 2) }];
+  for (const [id, blob] of imageEntries(images)) {
+    if (!id || !blob) continue;
+    const extension = extensionFor(blob.type);
+    files.push({
+      name: SCHEMES_DIR + encodeImageId(id) + "." + extension,
+      data: blob,
+      compress: false,
+    });
+  }
+  files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
+
+  return writeZip(files, {
+    date,
+    compress: options.compress,
+    onProgress: options.onProgress,
+  });
+}
+
+// Свой архив кладёт project.json в корень; перепакованный вместе с папкой —
+// на уровень глубже. Из нескольких кандидатов берётся самый неглубокий:
+// сравниваются префиксы с префиксами, а не имя файла с префиксом.
+function projectPrefix(entries) {
+  let prefix = null;
+  for (const name of entries.keys()) {
+    if (name === PROJECT_ENTRY) return "";
+    if (name.endsWith("/" + PROJECT_ENTRY)) {
+      const candidate = name.slice(0, -PROJECT_ENTRY.length);
+      if (prefix === null || candidate.length < prefix.length) prefix = candidate;
+    }
+  }
+  return prefix;
+}
+
+/**
+ * Читает файл проекта: `{project, images}`, где images — Map «imageId → Blob».
+ * Чужой или битый файл отвергается ошибкой с `.code` из strings.errors,
+ * текущий объект при этом не трогается — вызывающий получает исключение
+ * до того, как что-то заменит.
+ */
+async function unpackProject(blob, options = {}) {
+  if (!blob) throw fileError("notAProject");
+  const entries = await readZip(blob);
+
+  const prefix = projectPrefix(entries);
+  if (prefix === null) throw fileError("noProjectJson");
+
+  let loaded;
+  try {
+    loaded = JSON.parse(decodeText(entries.get(prefix + PROJECT_ENTRY)));
+  } catch {
+    throw fileError("brokenProjectJson");
+  }
+  if (!looksLikeProject(loaded)) throw fileError("foreignProject");
+  const project = migrateProject(loaded);
+
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const imageNames = [...entries.keys()].filter(
+    (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
+  );
+  const images = new Map();
+  for (let index = 0; index < imageNames.length; index += 1) {
+    const name = imageNames[index];
+    const tail = name.slice((prefix + SCHEMES_DIR).length);
+    const dot = tail.lastIndexOf(".");
+    const id = decodeImageId(dot > 0 ? tail.slice(0, dot) : tail);
+    const type = typeForExtension(dot > 0 ? tail.slice(dot + 1) : "");
+    images.set(id, new Blob([entries.get(name)], type ? { type } : undefined));
+    if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
+  }
+
+  return { project, images };
+}
+
+// src/autosave.js
+// Файл проекта на диске: приёмка загруженного архива, автосохранение в папку
+// и отметка «когда в последний раз выгружали».
+//
+// Почему отдельно от панели: здесь нет ни одной строки DOM — значит, приёмку
+// загрузки (самое опасное место: чужие идентификаторы) можно проверить тестом,
+// а панель остаётся тонкой. Zip читает и пишет только `projectFile.js`.
+
+
+
+
+// Ключи настроек: ручка папки (структурно клонируется в IndexedDB как есть)
+// и отметки последней выгрузки по объектам.
+const AUTOSAVE_FOLDER_KEY = "autosaveFolder";
+const AUTOSAVE_EXPORT_KEY = "lastFileExport";
+// Задержка больше, чем у сохранения в браузер (400 мс): запись на диск дороже,
+// и пачка правок должна уложиться в одну запись.
+const AUTOSAVE_DELAY_MS = 1500;
+
+let autosaveHandle = null;
+let autosavePermission = "none"; // none | prompt | granted | denied
+let autosaveExports = null;
+let autosaveTimer = null;
+let autosaveRunning = false;
+let autosavePending = null;
+let autosaveLastError = null;
+const autosaveListeners = new Set();
+
+// ——— приёмка загруженного файла ———————————————————————————————————————
+
+// Архив приходит с чужими идентификаторами: и объекта, и картинок. Оставить их
+// как есть нельзя — вторая загрузка того же файла перезаписала бы объект в базе
+// и перемешала картинки с чужими. Поэтому всё переприсваивается здесь, разом,
+// вместе со ссылками `scheme.imageId`; ссылка на картинку, которой в архиве не
+// оказалось, обнуляется — схема без плана честнее схемы со ссылкой в никуда.
+function adoptLoadedProject(loaded, options = {}) {
+  const source = loaded && loaded.project ? loaded.project : null;
+  if (!source) throw new Error(strings.errors.foreignProject);
+  const mode = options.mode === "replace" ? "replace" : "new";
+  const newId = typeof options.newId === "function" ? options.newId : () => crypto.randomUUID();
+
+  const sourceImages = loaded.images instanceof Map ? loaded.images : new Map(loaded.images || []);
+  // Идентификаторы картинок приходят снаружи, когда их уже выдало хранилище
+  // браузера (`store.putImage`): переприсваивание остаётся одной операцией,
+  // и панели не приходится перекладывать ссылки второй раз.
+  const given = options.imageIds instanceof Map ? options.imageIds : null;
+  const remap = new Map();
+  const images = new Map();
+  for (const [oldId, blob] of sourceImages) {
+    if (!blob) continue;
+    const id = (given && given.get(oldId)) || newId();
+    remap.set(oldId, id);
+    images.set(id, blob);
+  }
+
+  const schemes = (source.schemes || []).map((scheme) => ({
+    ...scheme,
+    imageId: scheme.imageId && remap.has(scheme.imageId) ? remap.get(scheme.imageId) : null,
+  }));
+
+  const base = {
+    ...source,
+    id: mode === "replace" && options.currentId ? options.currentId : newId(),
+    schemes,
+  };
+  // Отметку времени ставит модель: свой мутатор объекта в сборке не заводится.
+  return { project: updateProject(base).project, images, mode };
+}
+
+// Картинки текущего объекта для упаковки: `packProject` принимает только Map.
+async function autosaveCollectImages(project) {
+  const images = new Map();
+  for (const scheme of (project && project.schemes) || []) {
+    if (!scheme.imageId || images.has(scheme.imageId)) continue;
+    const blob = await getImage(scheme.imageId);
+    if (blob) images.set(scheme.imageId, blob);
+  }
+  return images;
+}
+
+// Имя снимка в папке автосохранения. Файл в папке живёт рядом с чужими и
+// переписывается сам, поэтому одного имени объекта мало: два объекта с
+// одинаковым именем (а такие заводятся сами — например, файл, загруженный
+// дважды) писали бы в один файл и затирали друг друга. Имя строит всё тот же
+// `projectFileName`, идентификатор дописывается к нему.
+function autosaveSnapshotName(project, date) {
+  const base = projectFileName(project, date);
+  const tag = String((project && project.id) || "").replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
+  return tag ? base.replace(/\.zip$/, "-" + tag + ".zip") : base;
+}
+
+// Один путь упаковки на всю панель: и «Сохранить в файл», и запись в папку.
+async function autosavePack(project, options = {}) {
+  const images = await autosaveCollectImages(project);
+  const date = options.date instanceof Date ? options.date : new Date();
+  const blob = await packProject(project, images, { date, onProgress: options.onProgress });
+  return { blob, name: projectFileName(project, date), images };
+}
+
+// ——— папка ————————————————————————————————————————————————————————————
+
+function autosaveSupported() {
+  return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+}
+function autosaveReady() {
+  return Boolean(autosaveHandle) && autosavePermission === "granted";
+}
+function autosaveStatus() {
+  return {
+    supported: autosaveSupported(),
+    folder: autosaveHandle ? autosaveHandle.name : null,
+    permission: autosavePermission,
+    busy: autosaveRunning,
+    error: autosaveLastError,
+  };
+}
+function onAutosaveChange(listener) {
+  autosaveListeners.add(listener);
+  return () => autosaveListeners.delete(listener);
+}
+
+function autosaveAnnounce() {
+  const status = autosaveStatus();
+  for (const listener of [...autosaveListeners]) {
+    try {
+      listener(status);
+    } catch (ignored) {
+      /* подписчик не должен ломать запись */
+    }
+  }
+}
+
+async function autosaveQueryPermission(handle) {
+  if (!handle) return "none";
+  if (typeof handle.queryPermission !== "function") return "granted";
+  try {
+    return await handle.queryPermission({ mode: "readwrite" });
+  } catch (error) {
+    return "denied";
+  }
+}
+
+// При старте: ручка из прошлого сеанса ещё жива, но разрешение могло
+// «остыть» — тогда панель покажет кнопку «Разрешить», и второй раз выбирать
+// папку не придётся.
+async function autosaveRestore() {
+  autosaveExports = (await getSetting(AUTOSAVE_EXPORT_KEY)) || {};
+  if (!autosaveSupported()) return autosaveStatus();
+  let handle = null;
+  try {
+    handle = await getSetting(AUTOSAVE_FOLDER_KEY);
+  } catch (error) {
+    handle = null;
+  }
+  if (!handle || typeof handle.getFileHandle !== "function") {
+    autosaveHandle = null;
+    autosavePermission = "none";
+    return autosaveStatus();
+  }
+  autosaveHandle = handle;
+  autosavePermission = await autosaveQueryPermission(handle);
+  autosaveAnnounce();
+  return autosaveStatus();
+}
+
+// Только из обработчика клика: браузер спрашивает папку лишь по жесту.
+async function autosavePickFolder() {
+  if (!autosaveSupported()) return autosaveStatus();
+  const handle = await window.showDirectoryPicker({ id: "scheme-markup", mode: "readwrite" });
+  autosaveHandle = handle;
+  autosavePermission = await autosaveQueryPermission(handle);
+  if (autosavePermission !== "granted") await autosaveGrant();
+  autosaveLastError = null;
+  await setSetting(AUTOSAVE_FOLDER_KEY, handle);
+  autosaveAnnounce();
+  return autosaveStatus();
+}
+async function autosaveGrant() {
+  if (!autosaveHandle || typeof autosaveHandle.requestPermission !== "function") return autosaveStatus();
+  try {
+    autosavePermission = await autosaveHandle.requestPermission({ mode: "readwrite" });
+  } catch (error) {
+    autosavePermission = "denied";
+  }
+  autosaveAnnounce();
+  return autosaveStatus();
+}
+async function autosaveForget() {
+  autosaveHandle = null;
+  autosavePermission = "none";
+  autosaveLastError = null;
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }
+  autosavePending = null;
+  await setSetting(AUTOSAVE_FOLDER_KEY, null);
+  autosaveAnnounce();
+  return autosaveStatus();
+}
+
+// ——— запись ———————————————————————————————————————————————————————————
+async function autosaveWrite(project, options = {}) {
+  if (!project) return { ok: false, reason: "noProject" };
+  if (!autosaveReady()) return { ok: false, reason: "noFolder" };
+  autosaveRunning = true;
+  autosaveAnnounce();
+  try {
+    const date = options.date instanceof Date ? options.date : new Date();
+    const packedFile = await autosavePack(project, { ...options, date });
+    const name = autosaveSnapshotName(project, date);
+    const fileHandle = await autosaveHandle.getFileHandle(name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(packedFile.blob);
+    await writable.close();
+    autosaveLastError = null;
+    const at = await autosaveNoteExport(project.id, options.at);
+    // Объект возвращается вместе с результатом: пока шла запись, пользователь
+    // мог успеть поправить ещё раз — панели надо знать, что именно легло в файл.
+    return { ok: true, name, at, project };
+  } catch (error) {
+    // Разрешение могли отозвать между правками — тогда панель снова покажет
+    // кнопку «Разрешить», а не будет молча терять записи.
+    if (error && error.name === "NotAllowedError") autosavePermission = "prompt";
+    autosaveLastError = error;
+    return { ok: false, error };
+  } finally {
+    autosaveRunning = false;
+    autosaveAnnounce();
+  }
+}
+
+// Правки идут пачками: пишем не чаще, чем раз в AUTOSAVE_DELAY_MS, и никогда
+// двумя записями сразу — правка, пришедшая во время записи, ждёт её конца.
+function autosaveSchedule(project, options = {}) {
+  if (!autosaveReady() || !project) return false;
+  autosavePending = project;
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    autosaveFlush(options);
+  }, typeof options.delay === "number" ? options.delay : AUTOSAVE_DELAY_MS);
+  return true;
+}
+
+// Есть ли незаписанная правка: отложенная, ожидающая очереди или та, что
+// пишется прямо сейчас. Вкладка спрашивает об этом перед закрытием.
+function autosavePendingWrite() {
+  return Boolean(autosaveTimer || autosavePending || autosaveRunning);
+}
+async function autosaveFlush(options = {}) {
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }
+  if (autosaveRunning || !autosavePending) return { ok: false, reason: "idle" };
+  const project = autosavePending;
+  autosavePending = null;
+  const result = await autosaveWrite(project, options);
+  if (typeof options.onDone === "function") options.onDone(result);
+  // Пока писали, могла прийти новая правка — её запись ставим в очередь.
+  if (autosavePending) autosaveSchedule(autosavePending, options);
+  return result;
+}
+
+// ——— «выгружено N назад» ———————————————————————————————————————————————
+async function autosaveNoteExport(projectId, at) {
+  const stamp = at || new Date().toISOString();
+  if (!projectId) return stamp;
+  if (!autosaveExports) autosaveExports = (await getSetting(AUTOSAVE_EXPORT_KEY)) || {};
+  autosaveExports = { ...autosaveExports, [projectId]: stamp };
+  await setSetting(AUTOSAVE_EXPORT_KEY, autosaveExports);
+  autosaveAnnounce();
+  return stamp;
+}
+function autosaveLastExport(projectId) {
+  if (!projectId || !autosaveExports) return null;
+  return autosaveExports[projectId] || null;
+}
+
+// Русские числительные: «1 минуту», «2 минуты», «5 минут». Одиннадцать —
+// исключение из правила последней цифры, поэтому второй десяток проверяется
+// отдельно.
+function autosavePlural(count, forms) {
+  const tail = Math.abs(count) % 100;
+  const last = tail % 10;
+  if (tail > 10 && tail < 20) return forms[2];
+  if (last === 1) return forms[0];
+  if (last > 1 && last < 5) return forms[1];
+  return forms[2];
+}
+
+// «в файл выгружено: 3 дня назад». Момент сравнения передаётся явно — так
+// строку можно проверить тестом, не подменяя часы.
+function autosaveAgoText(at, now) {
+  const words = strings.autosave.ago;
+  const stamp = at ? Date.parse(at) : Number.NaN;
+  if (Number.isNaN(stamp)) return words.never;
+  const moment = now instanceof Date ? now.getTime() : Date.now();
+  const minutes = Math.floor(Math.max(0, moment - stamp) / 60000);
+  if (minutes < 1) return words.justNow;
+  if (minutes < 60) return text("autosave.ago.pattern", { count: minutes, word: autosavePlural(minutes, words.minutes) });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return text("autosave.ago.pattern", { count: hours, word: autosavePlural(hours, words.hours) });
+  const days = Math.floor(hours / 24);
+  return text("autosave.ago.pattern", { count: days, word: autosavePlural(days, words.days) });
+}
+
+// src/app.js
+// Каркас сеанса: состояние, реестр панелей, уведомления.
+// Панели других тасков монтируются по идентификатору контейнера из index.html
+// и не правят ни этот файл, ни разметку.
+
+// Контейнеры-точки монтирования (идентификаторы из src/index.html).
+const PANEL_IDS = {
+  tools: "panel-tools",
+  schemes: "panel-schemes",
+  marks: "panel-marks",
+  properties: "panel-properties",
+  canvas: "canvas-host",
+  overlay: "canvas-overlay",
+  headerActions: "header-actions",
+  projectActions: "project-actions",
+  dialogs: "dialog-host",
+};
+
+const appState = {
+  project: null,
+  schemeId: null,
+  selectedMarkIds: [],
+  activeTypeId: null,
+  mode: "select",
+  filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
+  view: { zoom: 1, offsetX: 0, offsetY: 0 },
+  dirty: false,
+};
+
+const appSubscribers = new Set();
+const appPanels = new Map();
+const appMounted = new Map();
+let appStarted = false;
+
+// Снимок: вложенные filter/view/selectedMarkIds копируются, чтобы правка
+// на месте в панели не меняла состояние сеанса мимо setState.
+function getState() {
+  return {
+    ...appState,
+    selectedMarkIds: [...appState.selectedMarkIds],
+    filter: { ...appState.filter },
+    view: { ...appState.view },
+  };
+}
+function setState(patch) {
+  if (!patch) return getState();
+  const changed = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (appState[key] !== value) {
+      appState[key] = value;
+      changed[key] = value;
+    }
+  }
+  if (Object.keys(changed).length === 0) return getState();
+  const snapshot = getState();
+  for (const subscriber of [...appSubscribers]) {
+    try {
+      subscriber(snapshot, changed);
+    } catch (error) {
+      reportAppError(error);
+    }
+  }
+  syncCanvasClass();
+  syncProjectName();
+  return snapshot;
+}
+function subscribe(listener) {
+  appSubscribers.add(listener);
+  return () => appSubscribers.delete(listener);
+}
+
+// Регистрация панели: если каркас уже поднят — монтируем сразу.
+function registerPanel(id, mountFn) {
+  if (typeof mountFn !== "function") return;
+  appPanels.set(id, mountFn);
+  if (appStarted) mountPanel(id);
+}
+function panelApi() {
+  return { getState, setState, subscribe, notify, strings, text };
+}
+
+function mountPanel(id) {
+  const mountFn = appPanels.get(id);
+  const host = document.getElementById(id);
+  if (!mountFn || !host || appMounted.get(id) === mountFn) return;
+  try {
+    mountFn(host, panelApi());
+    appMounted.set(id, mountFn);
+  } catch (error) {
+    reportAppError(error);
+  }
+}
+function notify(message, kind = "info") {
+  const host = typeof document === "undefined" ? null : document.getElementById("notifications");
+  if (!host) return null;
+  const toast = document.createElement("div");
+  toast.className = "toast toast--" + kind;
+  toast.textContent = String(message);
+  toast.title = strings.notify.close;
+  toast.addEventListener("click", () => toast.remove());
+  host.append(toast);
+  setTimeout(() => toast.remove(), kind === "error" ? 12000 : 6000);
+  return toast;
+}
+
+function reportAppError(error) {
+  notify(error && error.message ? error.message : String(error), "error");
+}
+
+// Все видимые строки приходят из словаря: разметка держит только ключи.
+function applyStrings(root) {
+  const scope = root || document;
+  for (const node of scope.querySelectorAll("[data-text]")) {
+    node.textContent = text(node.dataset.text);
+  }
+  for (const node of scope.querySelectorAll("[data-title]")) {
+    node.title = text(node.dataset.title);
+  }
+}
+
+function syncProjectName() {
+  const node = document.getElementById("project-name");
+  if (!node) return;
+  node.textContent = appState.project ? appState.project.name : strings.header.noProject;
+}
+
+function syncCanvasClass() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.classList.toggle("has-scheme", Boolean(appState.schemeId));
+}
+function startApp() {
+  if (appStarted) return;
+  appStarted = true;
+  applyStrings(document);
+  syncProjectName();
+  syncCanvasClass();
+  for (const id of appPanels.keys()) mountPanel(id);
+}
+
+// Старт откладывается за границу текущего скрипта: в собранном файле панели
+// и модели определяются ниже по бандлу, и каркас не должен опережать их.
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startApp, { once: true });
+  } else {
+    setTimeout(startApp, 0);
+  }
 }
 
 // src/render.js
@@ -4143,465 +5265,6 @@ function mountCanvasHint(host, api) {
 registerPanel(PANEL_IDS.canvas, mountCanvas);
 registerPanel(PANEL_IDS.overlay, mountCanvasHint);
 
-// src/projectFile.js
-// Формат файла проекта: один zip с project.json, планами в schemes/ и README.txt.
-// Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
-// там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
-const PROJECT_ENTRY = "project.json";
-const SCHEMES_DIR = "schemes/";
-const README_ENTRY = "README.txt";
-
-const LOCAL_SIGNATURE = 0x04034b50;
-const CENTRAL_SIGNATURE = 0x02014b50;
-const END_SIGNATURE = 0x06054b50;
-const LOCAL_HEADER_SIZE = 30;
-const CENTRAL_HEADER_SIZE = 46;
-const END_HEADER_SIZE = 22;
-const METHOD_STORED = 0;
-const METHOD_DEFLATE = 8;
-const UTF8_FLAG = 0x0800;
-const ZIP64_MARK = 0xffffffff;
-const MAX_ZIP_BYTES = 0xfffffffe;
-
-// Тип картинки восстанавливается по расширению: имя файла в архиве — всё,
-// что о ней известно после распаковки.
-const IMAGE_TYPES = [
-  ["image/png", "png"],
-  ["image/jpeg", "jpg"],
-  ["image/jpeg", "jpeg"],
-];
-
-function fileError(key, vars) {
-  const error = new Error(text("errors." + key, vars));
-  error.code = key;
-  return error;
-}
-
-// ——— байты ———————————————————————————————————————————————————————————
-
-const utf8Encoder = new TextEncoder();
-const utf8Decoder = new TextDecoder("utf-8");
-
-function encodeText(value) {
-  return utf8Encoder.encode(value);
-}
-
-function decodeText(bytes) {
-  return utf8Decoder.decode(bytes);
-}
-
-async function toBytes(data) {
-  if (data == null) return new Uint8Array(0);
-  if (data instanceof Uint8Array) return data;
-  if (typeof data === "string") return encodeText(data);
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  if (typeof data.arrayBuffer === "function") return new Uint8Array(await data.arrayBuffer());
-  throw fileError("archiveBroken");
-}
-
-let crcTable = null;
-function crc32(bytes) {
-  if (!crcTable) {
-    crcTable = new Uint32Array(256);
-    for (let n = 0; n < 256; n += 1) {
-      let value = n;
-      for (let bit = 0; bit < 8; bit += 1) {
-        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-      }
-      crcTable[n] = value >>> 0;
-    }
-  }
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i += 1) {
-    crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xff];
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function hasCompression() {
-  return typeof CompressionStream === "function" && typeof DecompressionStream === "function";
-}
-
-async function collectStream(readable) {
-  const reader = readable.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const step = await reader.read();
-    if (step.done) break;
-    const chunk = step.value instanceof Uint8Array ? step.value : new Uint8Array(step.value);
-    chunks.push(chunk);
-    total += chunk.length;
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.length;
-  }
-  return out;
-}
-
-// Поток, а не один кусок: большой план не держит вкладку — между чтениями
-// управление возвращается странице.
-async function pipeBytes(bytes, transform) {
-  const source = new Blob([bytes]).stream().pipeThrough(transform);
-  return collectStream(source);
-}
-
-async function deflateRaw(bytes) {
-  return pipeBytes(bytes, new CompressionStream("deflate-raw"));
-}
-
-async function inflateRaw(bytes) {
-  try {
-    return await pipeBytes(bytes, new DecompressionStream("deflate-raw"));
-  } catch {
-    throw fileError("archiveBroken");
-  }
-}
-
-// ——— запись zip ——————————————————————————————————————————————————————
-
-function dosStamp(date) {
-  const year = date.getUTCFullYear();
-  if (year < 1980) return { time: 0, date: (1 << 5) | 1 };
-  return {
-    time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | (date.getUTCSeconds() >> 1),
-    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
-  };
-}
-
-function headerBuffer(size) {
-  const bytes = new Uint8Array(size);
-  return { bytes, view: new DataView(bytes.buffer) };
-}
-
-/**
- * Собирает zip из списка {name, data, compress}. `data` — Uint8Array, ArrayBuffer,
- * строка или Blob. Размеры известны заранее, дескрипторов данных нет — архив
- * открывается штатным распаковщиком ОС.
- */
-async function writeZip(files, options = {}) {
-  const allowCompression = options.compress !== false && hasCompression();
-  const stamp = dosStamp(options.date instanceof Date ? options.date : new Date());
-  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
-  const list = [...files];
-
-  const parts = [];
-  const central = [];
-  let offset = 0;
-
-  for (let index = 0; index < list.length; index += 1) {
-    const entry = list[index];
-    const nameBytes = encodeText(entry.name);
-    const source = await toBytes(entry.data);
-    const wantCompression = entry.compress === false ? false : allowCompression;
-
-    let method = METHOD_STORED;
-    let payload = source;
-    if (wantCompression && source.length > 0) {
-      const packed = await deflateRaw(source);
-      if (packed.length < source.length) {
-        method = METHOD_DEFLATE;
-        payload = packed;
-      }
-    }
-    const crc = crc32(source);
-
-    const local = headerBuffer(LOCAL_HEADER_SIZE + nameBytes.length);
-    local.view.setUint32(0, LOCAL_SIGNATURE, true);
-    local.view.setUint16(4, 20, true);
-    local.view.setUint16(6, UTF8_FLAG, true);
-    local.view.setUint16(8, method, true);
-    local.view.setUint16(10, stamp.time, true);
-    local.view.setUint16(12, stamp.date, true);
-    local.view.setUint32(14, crc, true);
-    local.view.setUint32(18, payload.length, true);
-    local.view.setUint32(22, source.length, true);
-    local.view.setUint16(26, nameBytes.length, true);
-    local.view.setUint16(28, 0, true);
-    local.bytes.set(nameBytes, LOCAL_HEADER_SIZE);
-
-    parts.push(local.bytes, payload);
-    central.push({ nameBytes, method, crc, packedSize: payload.length, size: source.length, offset });
-    offset += local.bytes.length + payload.length;
-    if (offset > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
-    if (onProgress) onProgress({ done: index + 1, total: list.length, name: entry.name });
-  }
-
-  const directoryOffset = offset;
-  let directorySize = 0;
-  for (const entry of central) {
-    const header = headerBuffer(CENTRAL_HEADER_SIZE + entry.nameBytes.length);
-    header.view.setUint32(0, CENTRAL_SIGNATURE, true);
-    header.view.setUint16(4, 20, true);
-    header.view.setUint16(6, 20, true);
-    header.view.setUint16(8, UTF8_FLAG, true);
-    header.view.setUint16(10, entry.method, true);
-    header.view.setUint16(12, stamp.time, true);
-    header.view.setUint16(14, stamp.date, true);
-    header.view.setUint32(16, entry.crc, true);
-    header.view.setUint32(20, entry.packedSize, true);
-    header.view.setUint32(24, entry.size, true);
-    header.view.setUint16(28, entry.nameBytes.length, true);
-    header.view.setUint32(42, entry.offset, true);
-    header.bytes.set(entry.nameBytes, CENTRAL_HEADER_SIZE);
-    parts.push(header.bytes);
-    directorySize += header.bytes.length;
-  }
-
-  const end = headerBuffer(END_HEADER_SIZE);
-  end.view.setUint32(0, END_SIGNATURE, true);
-  end.view.setUint16(8, central.length, true);
-  end.view.setUint16(10, central.length, true);
-  end.view.setUint32(12, directorySize, true);
-  end.view.setUint32(16, directoryOffset, true);
-  parts.push(end.bytes);
-  if (directoryOffset + directorySize + END_HEADER_SIZE > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
-
-  return new Blob(parts, { type: "application/zip" });
-}
-
-// ——— чтение zip ——————————————————————————————————————————————————————
-
-function findEndHeader(bytes, view) {
-  const limit = Math.max(0, bytes.length - 0xffff - END_HEADER_SIZE);
-  for (let at = bytes.length - END_HEADER_SIZE; at >= limit; at -= 1) {
-    if (view.getUint32(at, true) === END_SIGNATURE) return at;
-  }
-  return -1;
-}
-
-/** Распаковывает zip в Map «имя файла → байты». Понимает stored и deflate. */
-async function readZip(blob) {
-  const bytes = await toBytes(blob);
-  if (bytes.length < END_HEADER_SIZE) throw fileError("notAProject");
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-
-  const endAt = findEndHeader(bytes, view);
-  if (endAt < 0) throw fileError("notAProject");
-
-  const count = view.getUint16(endAt + 10, true);
-  const directorySize = view.getUint32(endAt + 12, true);
-  const directoryOffset = view.getUint32(endAt + 16, true);
-  if (directoryOffset === ZIP64_MARK || directorySize === ZIP64_MARK || count === 0xffff) {
-    throw fileError("zip64Unsupported");
-  }
-  if (directoryOffset + directorySize > bytes.length) throw fileError("archiveBroken");
-
-  const entries = new Map();
-  let at = directoryOffset;
-  for (let index = 0; index < count; index += 1) {
-    if (at + CENTRAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
-    if (view.getUint32(at, true) !== CENTRAL_SIGNATURE) throw fileError("archiveBroken");
-    const method = view.getUint16(at + 10, true);
-    const crc = view.getUint32(at + 16, true);
-    const packedSize = view.getUint32(at + 20, true);
-    const size = view.getUint32(at + 24, true);
-    const nameLength = view.getUint16(at + 28, true);
-    const extraLength = view.getUint16(at + 30, true);
-    const commentLength = view.getUint16(at + 32, true);
-    const localOffset = view.getUint32(at + 42, true);
-    const name = decodeText(bytes.subarray(at + CENTRAL_HEADER_SIZE, at + CENTRAL_HEADER_SIZE + nameLength));
-    at += CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
-
-    if (name.endsWith("/")) continue;
-    if (packedSize === ZIP64_MARK || size === ZIP64_MARK || localOffset === ZIP64_MARK) {
-      throw fileError("zip64Unsupported");
-    }
-    if (localOffset + LOCAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
-    if (view.getUint32(localOffset, true) !== LOCAL_SIGNATURE) throw fileError("archiveBroken");
-
-    const localNameLength = view.getUint16(localOffset + 26, true);
-    const localExtraLength = view.getUint16(localOffset + 28, true);
-    const dataAt = localOffset + LOCAL_HEADER_SIZE + localNameLength + localExtraLength;
-    if (dataAt + packedSize > bytes.length) throw fileError("archiveBroken");
-
-    const payload = bytes.subarray(dataAt, dataAt + packedSize);
-    let content;
-    if (method === METHOD_STORED) content = payload.slice();
-    else if (method === METHOD_DEFLATE) content = await inflateRaw(payload);
-    else throw fileError("archiveBroken");
-
-    if (content.length !== size || crc32(content) !== crc) throw fileError("archiveBroken");
-    entries.set(name, content);
-  }
-  return entries;
-}
-
-// ——— файл проекта ————————————————————————————————————————————————————
-
-function extensionFor(type) {
-  const found = IMAGE_TYPES.find((pair) => pair[0] === String(type || "").toLowerCase());
-  return found ? found[1] : "bin";
-}
-
-function typeForExtension(extension) {
-  const found = IMAGE_TYPES.find((pair) => pair[1] === String(extension || "").toLowerCase());
-  return found ? found[0] : "";
-}
-
-// Идентификатор изображения попадает в имя файла: кодируем, чтобы «/» и прочее
-// не разъехались по папкам, и раскодируем обратно — id восстанавливается точно.
-function encodeImageId(id) {
-  return encodeURIComponent(String(id));
-}
-
-function decodeImageId(name) {
-  try {
-    return decodeURIComponent(name);
-  } catch {
-    return name;
-  }
-}
-
-// Поставщик один — store отдаёт Map. Всё остальное отвергается: тихо вернуть
-// пустой список значило бы упаковать объект без единого плана и промолчать.
-function imageEntries(images) {
-  if (images == null) return [];
-  if (!(images instanceof Map)) throw fileError("imagesNotMap");
-  return [...images.entries()];
-}
-
-function looksLikeProject(value) {
-  return (
-    Boolean(value) &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    typeof value.id === "string" &&
-    Array.isArray(value.categories) &&
-    Array.isArray(value.markTypes) &&
-    Array.isArray(value.schemes) &&
-    Array.isArray(value.marks)
-  );
-}
-
-// Единственное место, где живут миграции формата: версия из будущего отвергается,
-// прошлые версии доводятся до текущей здесь.
-function migrateProject(loaded) {
-  const version = Number(loaded.formatVersion);
-  if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
-  if (version > FORMAT_VERSION) {
-    throw fileError("futureVersion", { version, current: FORMAT_VERSION });
-  }
-  return {
-    ...loaded,
-    formatVersion: FORMAT_VERSION,
-    rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
-    groups: Array.isArray(loaded.groups) ? loaded.groups : [],
-    counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
-  };
-}
-
-function readmeText(project, date) {
-  return text("file.readme", {
-    name: project.name || strings.project.untitled,
-    date: date.toISOString(),
-    schemes: project.schemes.length,
-    marks: project.marks.length,
-    version: FORMAT_VERSION,
-  }) + "\n";
-}
-
-/** Имя для выгрузки: «<объект>-<дата>.zip». */
-function projectFileName(project, now) {
-  const date = now instanceof Date ? now : new Date();
-  const day = date.toISOString().slice(0, 10);
-  const raw = String((project && project.name) || strings.project.untitled);
-  const safe = raw
-    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 60);
-  return (safe || strings.project.untitled) + "-" + day + ".zip";
-}
-
-/**
- * Упаковывает объект и планы в один zip.
- * `images` — Map «imageId → Blob» (или ничего, если планов нет); картинки кладутся
- * как есть, без пережатия. `options.onProgress({done, total, name})`.
- */
-async function packProject(project, images, options = {}) {
-  if (!looksLikeProject(project)) throw fileError("foreignProject");
-  const date = options.date instanceof Date ? options.date : new Date();
-  const forFile = { ...project, formatVersion: FORMAT_VERSION };
-
-  const files = [{ name: PROJECT_ENTRY, data: JSON.stringify(forFile, null, 2) }];
-  for (const [id, blob] of imageEntries(images)) {
-    if (!id || !blob) continue;
-    const extension = extensionFor(blob.type);
-    files.push({
-      name: SCHEMES_DIR + encodeImageId(id) + "." + extension,
-      data: blob,
-      compress: false,
-    });
-  }
-  files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
-
-  return writeZip(files, {
-    date,
-    compress: options.compress,
-    onProgress: options.onProgress,
-  });
-}
-
-// Свой архив кладёт project.json в корень; перепакованный вместе с папкой —
-// на уровень глубже. Из нескольких кандидатов берётся самый неглубокий:
-// сравниваются префиксы с префиксами, а не имя файла с префиксом.
-function projectPrefix(entries) {
-  let prefix = null;
-  for (const name of entries.keys()) {
-    if (name === PROJECT_ENTRY) return "";
-    if (name.endsWith("/" + PROJECT_ENTRY)) {
-      const candidate = name.slice(0, -PROJECT_ENTRY.length);
-      if (prefix === null || candidate.length < prefix.length) prefix = candidate;
-    }
-  }
-  return prefix;
-}
-
-/**
- * Читает файл проекта: `{project, images}`, где images — Map «imageId → Blob».
- * Чужой или битый файл отвергается ошибкой с `.code` из strings.errors,
- * текущий объект при этом не трогается — вызывающий получает исключение
- * до того, как что-то заменит.
- */
-async function unpackProject(blob, options = {}) {
-  if (!blob) throw fileError("notAProject");
-  const entries = await readZip(blob);
-
-  const prefix = projectPrefix(entries);
-  if (prefix === null) throw fileError("noProjectJson");
-
-  let loaded;
-  try {
-    loaded = JSON.parse(decodeText(entries.get(prefix + PROJECT_ENTRY)));
-  } catch {
-    throw fileError("brokenProjectJson");
-  }
-  if (!looksLikeProject(loaded)) throw fileError("foreignProject");
-  const project = migrateProject(loaded);
-
-  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
-  const imageNames = [...entries.keys()].filter(
-    (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
-  );
-  const images = new Map();
-  for (let index = 0; index < imageNames.length; index += 1) {
-    const name = imageNames[index];
-    const tail = name.slice((prefix + SCHEMES_DIR).length);
-    const dot = tail.lastIndexOf(".");
-    const id = decodeImageId(dot > 0 ? tail.slice(0, dot) : tail);
-    const type = typeForExtension(dot > 0 ? tail.slice(dot + 1) : "");
-    images.set(id, new Blob([entries.get(name)], type ? { type } : undefined));
-    if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
-  }
-
-  return { project, images };
-}
-
 // src/tables.js
 // Таблицы объекта: список меток и справочник типов.
 //
@@ -5705,272 +6368,6 @@ async function renderPlanImage(blob, transform) {
   }
 }
 
-// src/store.js
-// Хранение в браузере: IndexedDB своими руками, без единой зависимости.
-// База `scheme-markup`, хранилища `projects` (документ объекта), `images`
-// (Blob планов) и `settings` (ключ-значение).
-//
-// Правило файла: потеря хранилища не должна ронять приложение. По file://
-// IndexedDB доступен не везде, в приватном окне запись может отказать в любой
-// момент — тогда store переходит в память, сообщает о беде подписчикам
-// (панель показывает строку и советует выгрузить проект в файл) и продолжает
-// работать. Данные сеанса живут в памяти в любом случае.
-const STORE_DB_NAME = "scheme-markup";
-const STORE_DB_VERSION = 1;
-const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
-// Ниже этого порога свободного места пользователя предупреждают заранее.
-const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
-// Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
-// вкладка): ждём ограниченное время и уходим в память.
-const STORE_OPEN_TIMEOUT_MS = 4000;
-
-const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
-const storeListeners = new Set();
-let storeDb = null;
-let storeModeValue = "unknown";
-let storeOpening = null;
-let storeReported = false;
-let storeWriteReported = false;
-function storeMode() {
-  return storeModeValue;
-}
-function onStoreProblem(listener) {
-  storeListeners.add(listener);
-  return () => storeListeners.delete(listener);
-}
-
-function reportStoreProblem(kind, error) {
-  const problem = { kind, error: error || null };
-  for (const listener of [...storeListeners]) {
-    try {
-      listener(problem);
-    } catch (ignored) {
-      /* подписчик не должен ломать запись */
-    }
-  }
-}
-
-function newStoreId() {
-  return crypto.randomUUID();
-}
-
-function idbRequest(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("indexeddb-failed"));
-  });
-}
-
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === "undefined" || indexedDB === null) {
-      reject(new Error("indexeddb-unavailable"));
-      return;
-    }
-    let settled = false;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      fn(value);
-    };
-    const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
-    let request;
-    try {
-      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
-    } catch (error) {
-      clearTimeout(timer);
-      finish(reject, error);
-      return;
-    }
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
-        db.createObjectStore(STORE_NAMES.projects, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(STORE_NAMES.images)) {
-        db.createObjectStore(STORE_NAMES.images, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
-        db.createObjectStore(STORE_NAMES.settings, { keyPath: "key" });
-      }
-    };
-    request.onsuccess = () => {
-      clearTimeout(timer);
-      finish(resolve, request.result);
-    };
-    request.onerror = () => {
-      clearTimeout(timer);
-      finish(reject, request.error || new Error("indexeddb-failed"));
-    };
-    request.onblocked = () => {
-      clearTimeout(timer);
-      finish(reject, new Error("indexeddb-blocked"));
-    };
-  });
-}
-async function openStore() {
-  if (storeModeValue !== "unknown") return storeModeValue;
-  if (!storeOpening) {
-    storeOpening = openDatabase()
-      .then((db) => {
-        storeDb = db;
-        storeModeValue = "idb";
-        db.onclose = () => degradeToMemory(new Error("indexeddb-closed"));
-        return storeModeValue;
-      })
-      .catch((error) => {
-        degradeToMemory(error);
-        return storeModeValue;
-      });
-  }
-  return storeOpening;
-}
-
-function degradeToMemory(error) {
-  storeDb = null;
-  storeModeValue = "memory";
-  if (storeReported) return;
-  storeReported = true;
-  reportStoreProblem("unavailable", error);
-}
-
-// Одна транзакция — одно действие: запись документа объекта атомарна, вкладка,
-// закрытая посреди сохранения, оставляет прежнее состояние, а не половину.
-async function runTransaction(name, mode, action) {
-  await openStore();
-  if (storeModeValue !== "idb" || !storeDb) return { ok: false, memory: true };
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = storeDb.transaction(name, mode);
-      let result;
-      tx.oncomplete = () => {
-        if (mode === "readwrite") storeWriteReported = false;
-        resolve({ ok: true, result });
-      };
-      tx.onerror = () => reject(tx.error || new Error("indexeddb-failed"));
-      tx.onabort = () => reject(tx.error || new Error("indexeddb-aborted"));
-      Promise.resolve(action(tx.objectStore(name)))
-        .then((value) => {
-          result = value;
-        })
-        .catch((error) => {
-          try {
-            tx.abort();
-          } catch (ignored) {
-            /* транзакция уже завершилась */
-          }
-          reject(error);
-        });
-    });
-  } catch (error) {
-    // Автосохранение идёт на каждую правку: об отказавшей записи говорим один
-    // раз — до тех пор, пока запись снова не пройдёт.
-    if (mode === "readwrite" && !storeWriteReported) {
-      storeWriteReported = true;
-      reportStoreProblem("writeFailed", error);
-    }
-    return { ok: false, error };
-  }
-}
-
-// ——— объекты ——————————————————————————————————————————————————————————
-async function listProjects() {
-  const summaries = new Map();
-  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
-  if (read.ok) {
-    for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
-  }
-  for (const doc of storeMemory.projects.values()) summaries.set(doc.id, summaryOf(doc));
-  return [...summaries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-}
-
-function summaryOf(project) {
-  return {
-    id: project.id,
-    name: project.name,
-    updatedAt: project.updatedAt,
-    schemes: (project.schemes || []).length,
-    marks: (project.marks || []).length,
-  };
-}
-async function loadProject(id) {
-  if (!id) return null;
-  if (storeMemory.projects.has(id)) return storeMemory.projects.get(id);
-  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.get(id)));
-  return read.ok && read.result ? read.result : null;
-}
-
-// Отказ записи не теряет работу: документ остаётся в памяти сеанса, а панель
-// получает повод предложить выгрузку в файл.
-async function saveProject(project) {
-  if (!project || !project.id) return { ok: false };
-  const written = await runTransaction(STORE_NAMES.projects, "readwrite", (store) =>
-    idbRequest(store.put(project)),
-  );
-  if (written.ok) {
-    storeMemory.projects.delete(project.id);
-    return { ok: true, mode: "idb" };
-  }
-  storeMemory.projects.set(project.id, project);
-  return { ok: false, mode: "memory", error: written.error || null };
-}
-async function deleteProject(id) {
-  storeMemory.projects.delete(id);
-  const removed = await runTransaction(STORE_NAMES.projects, "readwrite", (store) => idbRequest(store.delete(id)));
-  return { ok: removed.ok || storeModeValue === "memory" };
-}
-
-// ——— изображения ——————————————————————————————————————————————————————
-async function putImage(blob) {
-  const id = newStoreId();
-  const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
-    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
-  );
-  if (!written.ok) storeMemory.images.set(id, blob);
-  return id;
-}
-async function getImage(id) {
-  if (!id) return null;
-  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
-  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
-  return read.ok && read.result ? read.result.blob : null;
-}
-async function deleteImage(id) {
-  if (!id) return { ok: true };
-  storeMemory.images.delete(id);
-  const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
-  return { ok: removed.ok || storeModeValue === "memory" };
-}
-
-// ——— настройки ————————————————————————————————————————————————————————
-async function getSetting(key) {
-  if (storeMemory.settings.has(key)) return storeMemory.settings.get(key);
-  const read = await runTransaction(STORE_NAMES.settings, "readonly", (store) => idbRequest(store.get(key)));
-  return read.ok && read.result ? read.result.value : null;
-}
-async function setSetting(key, value) {
-  const written = await runTransaction(STORE_NAMES.settings, "readwrite", (store) =>
-    idbRequest(store.put({ key, value })),
-  );
-  if (written.ok) storeMemory.settings.delete(key);
-  else storeMemory.settings.set(key, value);
-  return { ok: written.ok };
-}
-
-// ——— место ————————————————————————————————————————————————————————————
-async function estimateSpace() {
-  const empty = { usage: null, quota: null, free: null, low: false };
-  if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.estimate) return empty;
-  try {
-    const { usage, quota } = await navigator.storage.estimate();
-    if (typeof quota !== "number" || typeof usage !== "number") return empty;
-    const free = Math.max(0, quota - usage);
-    return { usage, quota, free, low: free < STORE_LOW_SPACE_BYTES };
-  } catch (error) {
-    return empty;
-  }
-}
-
 // src/panels/export.js
 // Панель выгрузки: две кнопки в шапке и два диалога — таблица и схема.
 //
@@ -6392,259 +6789,6 @@ function mountExportPanel(host, api) {
 
 registerPanel(PANEL_IDS.headerActions, mountExportPanel);
 
-// src/panels/filters.js
-// Фильтры списка меток: галочки категорий и типов, помещение и поиск.
-//
-// Фильтр живёт в состоянии сеанса (`state.filter`) и один на всех: по нему
-// рисует холст, по нему же строится список сбоку и легенда в выгрузке.
-// Поэтому здесь только чистые функции над ним — что видно, что отмечено и во
-// что превращается щелчок по галочке; сама панель собирается из них ниже.
-
-
-
-
-// Порядок строк списка — порядок справочника: категории по своему order, типы
-// внутри, метки по номеру. Тот же обход, что у легенды и таблиц.
-function filtersMarkRows(project, schemeId, filter) {
-  const scheme = project ? findScheme(project, schemeId) : null;
-  if (!scheme) return [];
-  const order = new Map();
-  const categoryOf = new Map();
-  let index = 0;
-  for (const group of typesInOrder(project)) {
-    for (const type of group.types) {
-      order.set(type.id, index);
-      categoryOf.set(type.id, group.category);
-      index += 1;
-    }
-  }
-  const last = index;
-  return visibleMarks(project, scheme, filter)
-    .map((mark) => ({
-      mark,
-      type: findType(project, mark.typeId),
-      category: categoryOf.get(mark.typeId) || null,
-      style: styleOf(project, mark.typeId),
-      label: labelOf(project, mark.id),
-    }))
-    .sort((a, b) => {
-      const orderA = order.has(a.mark.typeId) ? order.get(a.mark.typeId) : last;
-      const orderB = order.has(b.mark.typeId) ? order.get(b.mark.typeId) : last;
-      return orderA === orderB ? a.mark.number - b.mark.number : orderA - orderB;
-    });
-}
-
-// Видимые типы — одно множество, из которого собираются оба поля фильтра.
-// Галочка категории и галочка типа правят его, а `categoryIds`/`typeIds`
-// пересчитываются заново: держать две независимые истины — значит рано или
-// поздно показать метку, которую сняли галочкой, или наоборот.
-function filtersTypeSet(project, filter) {
-  const byType = filter && Array.isArray(filter.typeIds) ? new Set(filter.typeIds) : null;
-  const byCategory = filter && Array.isArray(filter.categoryIds) ? new Set(filter.categoryIds) : null;
-  const visible = new Set();
-  for (const type of project.markTypes) {
-    if (byType && !byType.has(type.id)) continue;
-    if (byCategory && !byCategory.has(type.categoryId)) continue;
-    visible.add(type.id);
-  }
-  return visible;
-}
-
-function filtersFromTypeSet(project, filter, visible) {
-  const types = project.markTypes;
-  const everyType = types.every((type) => visible.has(type.id));
-  // Категория без типов — всегда отмечена: прятать в ней нечего.
-  const categories = project.categories.filter((category) => {
-    const own = types.filter((type) => type.categoryId === category.id);
-    return own.length === 0 || own.some((type) => visible.has(type.id));
-  });
-  const everyCategory = categories.length === project.categories.length;
-  return {
-    ...(filter || {}),
-    categoryIds: everyCategory ? null : categories.map((category) => category.id),
-    typeIds: everyType ? null : types.filter((type) => visible.has(type.id)).map((type) => type.id),
-  };
-}
-function filtersTypeChecked(project, filter, typeId) {
-  return filtersTypeSet(project, filter).has(typeId);
-}
-
-// «on» — видны все типы категории, «off» — ни одного, «mixed» — часть.
-function filtersCategoryChecked(project, filter, categoryId) {
-  const visible = filtersTypeSet(project, filter);
-  const own = project.markTypes.filter((type) => type.categoryId === categoryId);
-  if (own.length === 0) return "on";
-  const shown = own.filter((type) => visible.has(type.id)).length;
-  if (shown === 0) return "off";
-  return shown === own.length ? "on" : "mixed";
-}
-function filtersToggleType(project, filter, typeId, on) {
-  const visible = filtersTypeSet(project, filter);
-  if (on) visible.add(typeId);
-  else visible.delete(typeId);
-  return filtersFromTypeSet(project, filter, visible);
-}
-function filtersToggleCategory(project, filter, categoryId, on) {
-  const visible = filtersTypeSet(project, filter);
-  for (const type of project.markTypes) {
-    if (type.categoryId !== categoryId) continue;
-    if (on) visible.add(type.id);
-    else visible.delete(type.id);
-  }
-  return filtersFromTypeSet(project, filter, visible);
-}
-function filtersSetAllTypes(project, filter, on) {
-  const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
-  return filtersFromTypeSet(project, filter, visible);
-}
-function filtersActive(filter) {
-  if (!filter) return false;
-  return Boolean(
-    Array.isArray(filter.categoryIds) ||
-      Array.isArray(filter.typeIds) ||
-      filter.roomId ||
-      (filter.query || "").trim(),
-  );
-}
-
-// ——— панель фильтров ——————————————————————————————————————————————————
-
-function filtersSignature(project) {
-  if (!project) return "";
-  return [
-    project.categories.map((category) => [category.id, category.name, category.color, category.shape].join("~")).join("|"),
-    project.markTypes.map((type) => [type.id, type.code, type.name, type.categoryId, type.shape].join("~")).join("|"),
-    project.rooms.map((room) => [room.id, room.name].join("~")).join("|"),
-  ].join("#");
-}
-
-// Дерево галочек перестраивается только при правке справочника: щелчок по
-// галочке меняет фильтр, а не разметку панели — иначе чекбокс исчезал бы
-// из-под курсора вместе с фокусом.
-function filtersBox(api) {
-  const { getState, setState, subscribe } = api;
-  const node = uiEl("div", { class: "filters" });
-  const search = uiEl("input", {
-    class: "ui-input filters__search",
-    type: "text",
-    placeholder: strings.filters.searchPlaceholder,
-    title: strings.filters.search,
-    on: { input: () => patch({ query: search.value }) },
-  });
-  const rooms = uiEl("select", {
-    class: "ui-select",
-    title: strings.filters.room,
-    on: { change: () => patch({ roomId: rooms.value || null }) },
-  });
-  const tree = uiEl("div", { class: "filters__tree" });
-  const summary = uiEl("summary", { class: "filters__summary", text: strings.filters.types });
-  const details = uiEl("details", { class: "filters__details" }, [summary, tree]);
-  const reset = uiButton(strings.filters.showAll, {
-    class: "ui-btn ui-btn--wide",
-    on: {
-      click: () => {
-        const state = getState();
-        setState({ filter: { ...filtersSetAllTypes(state.project, state.filter, true), roomId: null, query: "" } });
-        search.value = "";
-      },
-    },
-  });
-  let signature = null;
-  let checks = [];
-
-  function patch(part) {
-    const state = getState();
-    setState({ filter: { ...state.filter, ...part } });
-  }
-
-  function toggle(state, next) {
-    setState({ filter: { ...next, roomId: state.filter.roomId, query: state.filter.query } });
-  }
-
-  function buildTree(project) {
-    checks = [];
-    tree.replaceChildren();
-    rooms.replaceChildren(uiEl("option", { value: "", text: strings.filters.allRooms }));
-    for (const room of roomsInOrder(project)) {
-      rooms.append(uiEl("option", { value: room.id, text: room.name }));
-    }
-    for (const { category, types } of project ? typesInOrder(project) : []) {
-      const box = uiEl("input", { class: "filters__check", type: "checkbox" });
-      box.addEventListener("change", () => {
-        const state = getState();
-        toggle(state, filtersToggleCategory(state.project, state.filter, category.id, box.checked));
-      });
-      checks.push({ box, kind: "category", id: category.id });
-      const dot = uiEl("span", { class: "filters__dot" });
-      dot.style.background = category.color;
-      tree.append(
-        uiEl("label", { class: "filters__category" }, [
-          box,
-          dot,
-          uiEl("span", { class: "filters__name", text: category.name }),
-        ]),
-      );
-      for (const type of types) {
-        const typeBox = uiEl("input", { class: "filters__check", type: "checkbox" });
-        typeBox.addEventListener("change", () => {
-          const state = getState();
-          toggle(state, filtersToggleType(state.project, state.filter, type.id, typeBox.checked));
-        });
-        checks.push({ box: typeBox, kind: "type", id: type.id });
-        tree.append(
-          uiEl("label", { class: "filters__type" }, [
-            typeBox,
-            uiEl("span", { class: "filters__code", text: type.code }),
-            uiEl("span", { class: "filters__name", text: type.name }),
-          ]),
-        );
-      }
-    }
-  }
-
-  function syncChecks(state) {
-    const project = state.project;
-    if (!project) return;
-    let hidden = 0;
-    for (const item of checks) {
-      if (item.kind === "category") {
-        const mode = filtersCategoryChecked(project, state.filter, item.id);
-        item.box.checked = mode !== "off";
-        item.box.indeterminate = mode === "mixed";
-      } else {
-        const on = filtersTypeChecked(project, state.filter, item.id);
-        item.box.checked = on;
-        if (!on) hidden += 1;
-      }
-    }
-    summary.textContent = hidden > 0
-      ? strings.filters.types + " — " + text("filters.hidden", { count: hidden })
-      : strings.filters.types;
-    rooms.value = state.filter.roomId || "";
-    if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
-      search.value = state.filter.query || "";
-    }
-    reset.disabled = !filtersActive(state.filter);
-  }
-
-  function render() {
-    const state = getState();
-    const next = filtersSignature(state.project);
-    if (next !== signature) {
-      signature = next;
-      buildTree(state.project);
-    }
-    syncChecks(state);
-  }
-
-  node.replaceChildren(search, rooms, details, reset);
-  subscribe((state, changed) => {
-    if ("project" in changed || "filter" in changed) render();
-  });
-  render();
-  return { node, render };
-}
-
 // src/panels/rooms.js
 // Помещения объекта: заводятся на ходу из поля «Помещение» в списке меток,
 // правятся и удаляются в своём окне.
@@ -6795,200 +6939,6 @@ function openRoomsEditor(api) {
   }
   return { close };
 }
-
-// src/panels/marks.js
-// Список меток схемы: обозначение, помещение, расположение и обозначение из
-// оригинального проекта — правятся прямо в строке.
-//
-// Почему список, а не карточка метки: заказчик заполняет «Расположение» и
-// «В оригинальной схеме» не в момент постановки, а потом, разом, по списку.
-// Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
-
-
-
-
-
-
-
-
-const MARKS_NEW_ROOM = "--new-room--";
-
-// Холст подводится к метке переводом координат из render.js: доли плана в
-// пиксели экрана здесь руками не пересчитываются.
-function marksCenteredView(scheme, mark, view) {
-  const host = document.getElementById(PANEL_IDS.canvas);
-  if (!host || !host.clientWidth || !host.clientHeight) return view;
-  const local = planToScreen(mark.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
-  return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
-}
-
-function mountMarksPanel(host, api) {
-  const { getState, setState, notify } = api;
-  const filters = filtersBox(api);
-  const list = uiEl("div", { class: "marks" });
-  const count = uiEl("p", { class: "marks__count" });
-  host.replaceChildren(filters.node, count, list);
-  // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
-  // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
-  // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
-  // перестраивать список по ходу — ради этого он и набирается.
-  let pending = false;
-  let shownSelection = "";
-
-  function typing() {
-    const active = document.activeElement;
-    return Boolean(active && list.contains(active) && active.tagName === "INPUT" && active.type === "text");
-  }
-
-  function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
-  }
-
-  function selectMark(markId) {
-    const state = getState();
-    const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
-    const mark = state.project ? findMark(state.project, markId) : null;
-    if (!scheme || !mark) return;
-    setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
-  }
-
-  function setField(markId, field, value) {
-    const state = getState();
-    const mark = state.project ? findMark(state.project, markId) : null;
-    if (!mark) return;
-    const next = value.trim();
-    if ((mark[field] || "") === next) return;
-    try {
-      canvasCommit(state.project, updateMark(state.project, markId, { [field]: next }).project, strings.history.markField);
-    } catch (error) {
-      fail(error);
-    }
-  }
-
-  // Комната заводится по ходу: новое название добавляется в справочник объекта
-  // и тем же шагом истории проставляется метке.
-  function setRoom(markId, name) {
-    const state = getState();
-    const mark = state.project ? findMark(state.project, markId) : null;
-    if (!mark) return;
-    try {
-      const ensured = roomsEnsure(state.project, name);
-      const roomId = ensured.room ? ensured.room.id : null;
-      if (roomId === (mark.roomId || null) && ensured.project === state.project) return;
-      canvasCommit(state.project, updateMark(ensured.project, markId, { roomId }).project, strings.history.markRoom);
-    } catch (error) {
-      fail(error);
-      render();
-    }
-  }
-
-  async function askNewRoom(markId) {
-    const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
-    if (!name) {
-      render();
-      return;
-    }
-    setRoom(markId, name);
-  }
-
-  function roomField(state, mark) {
-    const select = uiEl("select", { class: "ui-select marks__room", title: strings.marks.room });
-    select.append(uiEl("option", { value: "", text: strings.rooms.none }));
-    for (const room of roomsInOrder(state.project)) {
-      select.append(uiEl("option", { value: room.id, text: room.name }));
-    }
-    select.append(uiEl("option", { value: MARKS_NEW_ROOM, text: strings.rooms.newRoom }));
-    select.value = mark.roomId || "";
-    select.addEventListener("change", () => {
-      if (select.value === MARKS_NEW_ROOM) {
-        askNewRoom(mark.id);
-        return;
-      }
-      const room = select.value ? roomsInOrder(state.project).find((item) => item.id === select.value) : null;
-      setRoom(mark.id, room ? room.name : "");
-    });
-    return select;
-  }
-
-  function markRow(state, row, selected) {
-    const mark = row.mark;
-    const node = uiEl("div", { class: "mark-row" + (selected ? " is-current" : ""), title: strings.marks.focus }, [
-      uiEl("div", { class: "mark-row__head" }, [
-        shapeIcon(row.style.shape, row.style.color, 20),
-        uiEl("span", { class: "mark-row__label", text: row.label }),
-        uiEl("span", { class: "mark-row__type", text: row.type ? row.type.name : "" }),
-      ]),
-      roomField(state, mark),
-      uiEl("input", {
-        class: "ui-input",
-        type: "text",
-        value: mark.location || "",
-        placeholder: strings.marks.locationPlaceholder,
-        title: strings.marks.location,
-        on: { change: (event) => setField(mark.id, "location", event.target.value) },
-      }),
-      uiEl("input", {
-        class: "ui-input",
-        type: "text",
-        value: mark.original || "",
-        placeholder: strings.marks.originalPlaceholder,
-        title: strings.marks.original,
-        on: { change: (event) => setField(mark.id, "original", event.target.value) },
-      }),
-    ]);
-    node.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("input, select, button, option")) return;
-      selectMark(mark.id);
-    });
-    return node;
-  }
-
-  function render() {
-    pending = false;
-    const state = getState();
-    if (!state.project || !state.schemeId) {
-      count.textContent = "";
-      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
-      return;
-    }
-    const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
-    const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
-    count.textContent = total > 0 ? text("marks.count", { shown: rows.length, total }) : "";
-    if (rows.length === 0) {
-      list.replaceChildren(
-        uiEl("p", { class: "panel__empty", text: total > 0 ? strings.marks.nothingFound : strings.panels.marksEmpty }),
-      );
-      return;
-    }
-    const selected = new Set(state.selectedMarkIds);
-    list.replaceChildren(...rows.map((row) => markRow(state, row, selected.has(row.mark.id))));
-    // Подводим список к выделенной строке только когда выделение сменилось:
-    // иначе правка поля в одной строке уводила бы список к другой.
-    const selection = state.selectedMarkIds.join(",");
-    const current = list.querySelector(".mark-row.is-current");
-    if (current && selection !== shownSelection) current.scrollIntoView({ block: "nearest" });
-    shownSelection = selection;
-  }
-
-  // Отложенная перерисовка: то, что накопилось, пока пользователь печатал.
-  host.addEventListener("focusout", () => {
-    if (!pending) return;
-    setTimeout(() => {
-      if (!typing()) render();
-    }, 0);
-  });
-  api.subscribe((state, changed) => {
-    if (!("project" in changed || "schemeId" in changed || "filter" in changed || "selectedMarkIds" in changed)) return;
-    if (typing()) {
-      pending = true;
-      return;
-    }
-    render();
-  });
-  render();
-}
-
-registerPanel(PANEL_IDS.marks, mountMarksPanel);
 
 // src/panels/types.js
 // Справочник объекта: типы меток, категории, помещения и шаблон для новых
@@ -7641,6 +7591,902 @@ function mountProjectsPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
+
+// src/panels/file.js
+// Файл проекта: «Сохранить в файл», «Открыть файл», папка автосохранения
+// и строка «в файл выгружено: N назад» в шапке.
+//
+// Панель тонкая: zip пишет и читает `projectFile.js`, переприсваивание
+// идентификаторов и работу с папкой держит `autosave.js`. Здесь — кнопки,
+// диалоги и связь с состоянием сеанса.
+//
+// Своей точки монтирования в разметке у панели нет: она создаёт контейнер в
+// шапке сама, после того как каркас поднялся (`startApp` откладывается на конец
+// загрузки, и наш обработчик встаёт в очередь следом).
+
+
+
+
+
+
+
+
+
+// Строка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
+const FILE_TICK_MS = 60000;
+
+// Выбор при загрузке: по умолчанию новый объект, перезапись — отдельной
+// кнопкой и с подтверждением. Возвращает "new" | "replace" | null.
+function fileAskMode(project, hasCurrent) {
+  return new Promise((resolve) => {
+    let modal;
+    const answer = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const asNew = uiButton(strings.file.loadAsNew, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => answer("new") },
+    });
+    const actions = [uiButton(strings.dialog.cancel, { on: { click: () => answer(null) } })];
+    if (hasCurrent) {
+      actions.push(uiButton(strings.file.loadReplace, { on: { click: () => answer("replace") } }));
+    }
+    actions.push(asNew);
+    modal = uiModal({
+      title: strings.file.loadTitle,
+      body: [
+        uiEl("p", {
+          class: "modal__text",
+          text: text("file.loadSummary", {
+            name: project.name,
+            schemes: (project.schemes || []).length,
+            marks: (project.marks || []).length,
+          }),
+        }),
+        uiEl("p", { class: "modal__hint", text: strings.file.loadHint }),
+      ],
+      actions,
+      primary: asNew,
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
+function mountFilePanel(host, api) {
+  const { getState, setState, notify, subscribe } = api;
+  // Ссылка на объект, который целиком уехал в файл: сравнение по ссылке
+  // честнее флага — правка, пришедшая во время упаковки, оставит dirty.
+  let fileSavedProject = null;
+  let fileFailReported = false;
+
+  const saveButton = uiButton(strings.file.save, {
+    class: "ui-btn ui-btn--accent",
+    title: strings.file.saveHint,
+    on: { click: () => saveToFile() },
+  });
+  const openButton = uiButton(strings.file.open, {
+    title: strings.file.openHint,
+    on: { click: () => picker.click() },
+  });
+  const folderButton = uiButton(strings.autosave.pick, {
+    title: strings.autosave.pickHint,
+    on: { click: () => folderClick() },
+  });
+  const statusNode = uiEl("span", { class: "file__status" });
+  const picker = uiEl("input", {
+    class: "file__picker",
+    type: "file",
+    attrs: { accept: ".zip,application/zip", hidden: "hidden" },
+    on: {
+      change: async () => {
+        const chosen = picker.files && picker.files[0];
+        picker.value = "";
+        if (chosen) await openFromFile(chosen);
+      },
+    },
+  });
+
+  const row = uiEl("div", { class: "file" }, [statusNode, folderButton, openButton, saveButton, picker]);
+  host.replaceChildren(row);
+
+  // ——— сохранение в файл ————————————————————————————————————————————
+
+  async function saveToFile() {
+    const project = getState().project;
+    if (!project) {
+      notify(strings.file.noProject, "error");
+      return;
+    }
+    const line = uiEl("p", { class: "modal__text", text: strings.file.packing });
+    const modal = uiModal({
+      title: strings.file.packingTitle,
+      body: line,
+      actions: [],
+      dismissable: false,
+    });
+    try {
+      // Упаковка идёт через await на каждой записи: вкладка остаётся живой,
+      // а строка прогресса успевает перерисоваться.
+      const packedFile = await autosavePack(project, {
+        onProgress: ({ done, total }) => {
+          line.textContent = text("file.packingProgress", { done, total });
+        },
+      });
+      exportDownload(packedFile.blob, packedFile.name);
+      await autosaveNoteExport(project.id);
+      markSaved(project);
+      notify(text("file.saved", { name: packedFile.name }), "success");
+    } catch (error) {
+      notify((error && error.message) || strings.file.saveFailed, "error");
+    } finally {
+      modal.close();
+      renderStatus();
+    }
+  }
+
+  // ——— загрузка из файла ————————————————————————————————————————————
+
+  async function openFromFile(chosen) {
+    const line = uiEl("p", { class: "modal__text", text: strings.file.reading });
+    const modal = uiModal({
+      title: strings.file.readingTitle,
+      body: line,
+      actions: [],
+      dismissable: false,
+    });
+    let loaded = null;
+    try {
+      loaded = await unpackProject(chosen, {
+        onProgress: ({ done, total }) => {
+          line.textContent = text("file.packingProgress", { done, total });
+        },
+      });
+    } catch (error) {
+      // Отказ ничего не трогает: текущий объект на экране и в базе как был.
+      modal.close();
+      notify((error && error.message) || strings.errors.notAProject, "error");
+      return;
+    }
+    modal.close();
+
+    const current = getState().project;
+    const mode = await fileAskMode(loaded.project, Boolean(current));
+    if (!mode) return;
+    if (mode === "replace") {
+      const agreed = await uiConfirm({
+        title: strings.file.replaceTitle,
+        message: text("file.replaceMessage", { name: current.name }),
+        confirmLabel: strings.file.replaceConfirm,
+      });
+      if (!agreed) return;
+    }
+    await applyLoaded(loaded, mode, current);
+  }
+
+  async function applyLoaded(loaded, mode, current) {
+    const line = uiEl("p", { class: "modal__text", text: strings.file.reading });
+    const modal = uiModal({ title: strings.file.readingTitle, body: line, actions: [], dismissable: false });
+    try {
+      // Картинки сперва ложатся в хранилище — идентификаторы выдаёт оно,
+      // и ровно эти идентификаторы получает приёмка объекта. Второго
+      // переприсваивания в сборке нет: ссылки схем чинятся один раз.
+      const imageIds = new Map();
+      for (const [oldId, blob] of loaded.images) imageIds.set(oldId, await putImage(blob));
+      const adopted = adoptLoadedProject(loaded, {
+        mode,
+        currentId: current ? current.id : null,
+        imageIds,
+      });
+      await saveProject(adopted.project);
+      await setSetting(LAST_PROJECT_KEY, adopted.project.id);
+
+      const schemes = schemesInOrder(adopted.project);
+      setState({
+        project: adopted.project,
+        schemeId: schemes.length > 0 ? schemes[0].id : null,
+        selectedMarkIds: [],
+        activeTypeId: null,
+      });
+      // Объект только что пришёл из файла — он и есть копия файла,
+      // и отметка выгрузки принадлежит уже новому идентификатору.
+      await autosaveNoteExport(adopted.project.id);
+      markSaved(adopted.project);
+      // Заменённый объект унёс с собой свои планы: картинки под старыми
+      // идентификаторами больше никому не нужны.
+      if (mode === "replace" && current) {
+        for (const scheme of current.schemes || []) {
+          if (scheme.imageId) await deleteImage(scheme.imageId);
+        }
+      }
+      notify(text("file.loaded", { name: adopted.project.name }), "success");
+    } catch (error) {
+      notify((error && error.message) || strings.errors.notAProject, "error");
+    } finally {
+      modal.close();
+      renderStatus();
+    }
+  }
+
+  // ——— папка автосохранения ————————————————————————————————————————
+
+  async function folderClick() {
+    const status = autosaveStatus();
+    if (!status.supported) {
+      notify(strings.autosave.unsupported, "info");
+      return;
+    }
+    if (status.folder && status.permission !== "granted") {
+      await autosaveGrant();
+      if (autosaveReady()) await writeToFolder();
+      renderStatus();
+      return;
+    }
+    if (status.folder) {
+      folderDialog();
+      return;
+    }
+    await pickFolder();
+  }
+
+  async function pickFolder() {
+    try {
+      await autosavePickFolder();
+    } catch (error) {
+      // Отмена в системном окне выбора папки — не ошибка. Отказ по file://
+      // (SecurityError) — не поломка, а известное ограничение: страница,
+      // открытая с диска, в папку сохранять не умеет.
+      const name = error && error.name;
+      if (name === "SecurityError" || name === "NotAllowedError") notify(strings.autosave.unsupported, "info");
+      else if (name !== "AbortError") notify(strings.autosave.failed, "error");
+      renderStatus();
+      return;
+    }
+    if (autosaveReady()) await writeToFolder();
+    renderStatus();
+  }
+
+  function folderDialog() {
+    const status = autosaveStatus();
+    let modal;
+    modal = uiModal({
+      title: strings.autosave.dialogTitle,
+      body: uiEl("p", {
+        class: "modal__text",
+        text: text("autosave.dialogText", { name: status.folder, file: currentFileName() }),
+      }),
+      actions: [
+        uiButton(strings.dialog.close, { on: { click: () => modal.close() } }),
+        uiButton(strings.autosave.off, {
+          class: "ui-btn ui-btn--danger",
+          on: {
+            click: async () => {
+              modal.close();
+              await autosaveForget();
+              notify(strings.autosave.offDone, "info");
+              renderStatus();
+            },
+          },
+        }),
+        uiButton(strings.autosave.change, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: async () => {
+              modal.close();
+              await pickFolder();
+            },
+          },
+        }),
+      ],
+    });
+  }
+
+  function currentFileName() {
+    const project = getState().project;
+    return project ? autosaveSnapshotName(project) : "";
+  }
+
+  // Первая запись сразу после выбора папки: пользователь должен увидеть файл
+  // на месте, а не ждать следующей правки.
+  async function writeToFolder() {
+    const project = getState().project;
+    if (!project || !autosaveReady()) return;
+    onFolderWritten(await autosaveWrite(project));
+  }
+
+  // Об отказавшей записи говорим один раз — правок много, а беда одна.
+  function onFolderWritten(result) {
+    if (result && result.ok) {
+      fileFailReported = false;
+      if (result.project) markSaved(result.project);
+    } else if (result && result.error && !fileFailReported) {
+      fileFailReported = true;
+      notify(strings.autosave.failed, "error");
+    }
+    renderStatus();
+  }
+
+  // ——— состояние и строка в шапке ————————————————————————————————————
+
+  function markSaved(project) {
+    fileSavedProject = project;
+    if (getState().project === project) setState({ dirty: false });
+  }
+
+  function renderStatus() {
+    const state = getState();
+    const status = autosaveStatus();
+    const projectId = state.project ? state.project.id : null;
+    statusNode.textContent = text("file.exported", { ago: autosaveAgoText(autosaveLastExport(projectId)) });
+    statusNode.title = status.supported ? "" : strings.autosave.unsupported;
+    row.classList.toggle("is-busy", Boolean(status.busy));
+    row.classList.toggle("is-dirty", Boolean(state.dirty));
+
+    folderButton.hidden = !status.supported;
+    if (!status.supported) return;
+    if (!status.folder) {
+      folderButton.textContent = strings.autosave.pick;
+      folderButton.title = strings.autosave.pickHint;
+      folderButton.classList.remove("is-on");
+      return;
+    }
+    if (status.permission !== "granted") {
+      folderButton.textContent = strings.autosave.allow;
+      folderButton.title = text("autosave.allowHint", { name: status.folder });
+      folderButton.classList.remove("is-on");
+      return;
+    }
+    folderButton.textContent = text("autosave.folder", { name: status.folder });
+    folderButton.title = strings.autosave.dialogTitle;
+    folderButton.classList.add("is-on");
+  }
+
+  // Список объектов держит своя панель и перечитывает его по своим поводам:
+  // объект, пришедший из файла, ей неизвестен. Чиним ровно одно — чтобы в
+  // выпадающем списке стоял тот объект, который на экране.
+  function syncProjectSelect(project) {
+    const select = document.querySelector("#project-actions select");
+    if (!select || !project) return;
+    let option = [...select.options].find((item) => item.value === project.id);
+    if (!option) {
+      option = uiEl("option", { value: project.id, text: project.name });
+      select.append(option);
+    }
+    option.textContent = project.name;
+    select.value = project.id;
+  }
+
+  // Панель объектов перечитывает свой список только по своим поводам, в том
+  // числе отложенно, после сохранения в браузер, — и объект, пришедший из
+  // файла, ей неизвестен. Поэтому чиним не однажды, а на каждую перерисовку
+  // списка: в нём должен стоять тот объект, который сейчас на экране.
+  const projectSelect = document.querySelector("#project-actions select");
+  if (projectSelect && typeof MutationObserver === "function") {
+    new MutationObserver(() => syncProjectSelect(getState().project)).observe(projectSelect, { childList: true });
+  }
+
+  subscribe((state, changed) => {
+    if (!("project" in changed)) {
+      if ("dirty" in changed) row.classList.toggle("is-dirty", Boolean(state.dirty));
+      return;
+    }
+    syncProjectSelect(state.project);
+    if (state.project && state.project !== fileSavedProject) {
+      // Не вложенным вызовом: подписчики сейчас в середине обхода.
+      queueMicrotask(() => {
+        if (getState().project !== fileSavedProject) setState({ dirty: true });
+      });
+      // Пока папка выбрана, «несохранённого» состояния почти не бывает:
+      // запись уходит сама, с задержкой и по одной за раз.
+      autosaveSchedule(state.project, { onDone: onFolderWritten });
+    }
+    renderStatus();
+  });
+
+  // Ctrl+S — привычка, а не сюрприз: браузерное «сохранить страницу» здесь
+  // бесполезно. Пока открыт диалог, горячие клавиши молчат.
+  document.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key !== "s") return;
+    if (uiDialogDepth() > 0) return;
+    event.preventDefault();
+    saveToFile();
+  });
+
+  // Вкладку прячут чаще, чем закрывают, и это единственный момент, когда
+  // дослать отложенную запись можно по-настоящему: обработчик закрытия уже
+  // ничего не дождётся.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && autosavePendingWrite()) autosaveFlush({ onDone: onFolderWritten });
+  });
+
+  // Работа, которой нет ни в папке, ни в файле, не должна уезжать молча.
+  // Отложенную запись досылаем прямо здесь — она успеет, если пользователь
+  // задержится на вопросе или передумает закрывать. Пообещать это нельзя,
+  // поэтому, пока запись не легла, вопрос задаётся и при выбранной папке.
+  window.addEventListener("beforeunload", (event) => {
+    const waiting = autosavePendingWrite();
+    if (waiting) autosaveFlush({ onDone: onFolderWritten });
+    if (!getState().dirty) return;
+    if (autosaveReady() && !waiting) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  onAutosaveChange(() => renderStatus());
+  setInterval(() => renderStatus(), FILE_TICK_MS);
+
+  (async () => {
+    await autosaveRestore();
+    renderStatus();
+  })();
+  renderStatus();
+}
+
+// Контейнер в шапке панель заводит сама: точки монтирования для неё в разметке
+// нет, а править разметку последним таском — лишний повод сломать сборку.
+function startFilePanel() {
+  const header = document.getElementById("app-header");
+  if (!header || document.getElementById("file-actions")) return;
+  const host = uiEl("div", { class: "mount" });
+  host.id = "file-actions";
+  header.append(host);
+  mountFilePanel(host, panelApi());
+}
+
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startFilePanel, { once: true });
+  } else {
+    setTimeout(startFilePanel, 0);
+  }
+}
+
+// src/panels/filters.js
+// Фильтры списка меток: галочки категорий и типов, помещение и поиск.
+//
+// Фильтр живёт в состоянии сеанса (`state.filter`) и один на всех: по нему
+// рисует холст, по нему же строится список сбоку и легенда в выгрузке.
+// Поэтому здесь только чистые функции над ним — что видно, что отмечено и во
+// что превращается щелчок по галочке; сама панель собирается из них ниже.
+
+
+
+
+// Порядок строк списка — порядок справочника: категории по своему order, типы
+// внутри, метки по номеру. Тот же обход, что у легенды и таблиц.
+function filtersMarkRows(project, schemeId, filter) {
+  const scheme = project ? findScheme(project, schemeId) : null;
+  if (!scheme) return [];
+  const order = new Map();
+  const categoryOf = new Map();
+  let index = 0;
+  for (const group of typesInOrder(project)) {
+    for (const type of group.types) {
+      order.set(type.id, index);
+      categoryOf.set(type.id, group.category);
+      index += 1;
+    }
+  }
+  const last = index;
+  return visibleMarks(project, scheme, filter)
+    .map((mark) => ({
+      mark,
+      type: findType(project, mark.typeId),
+      category: categoryOf.get(mark.typeId) || null,
+      style: styleOf(project, mark.typeId),
+      label: labelOf(project, mark.id),
+    }))
+    .sort((a, b) => {
+      const orderA = order.has(a.mark.typeId) ? order.get(a.mark.typeId) : last;
+      const orderB = order.has(b.mark.typeId) ? order.get(b.mark.typeId) : last;
+      return orderA === orderB ? a.mark.number - b.mark.number : orderA - orderB;
+    });
+}
+
+// Видимые типы — одно множество, из которого собираются оба поля фильтра.
+// Галочка категории и галочка типа правят его, а `categoryIds`/`typeIds`
+// пересчитываются заново: держать две независимые истины — значит рано или
+// поздно показать метку, которую сняли галочкой, или наоборот.
+function filtersTypeSet(project, filter) {
+  const byType = filter && Array.isArray(filter.typeIds) ? new Set(filter.typeIds) : null;
+  const byCategory = filter && Array.isArray(filter.categoryIds) ? new Set(filter.categoryIds) : null;
+  const visible = new Set();
+  for (const type of project.markTypes) {
+    if (byType && !byType.has(type.id)) continue;
+    if (byCategory && !byCategory.has(type.categoryId)) continue;
+    visible.add(type.id);
+  }
+  return visible;
+}
+
+function filtersFromTypeSet(project, filter, visible) {
+  const types = project.markTypes;
+  const everyType = types.every((type) => visible.has(type.id));
+  // Категория без типов — всегда отмечена: прятать в ней нечего.
+  const categories = project.categories.filter((category) => {
+    const own = types.filter((type) => type.categoryId === category.id);
+    return own.length === 0 || own.some((type) => visible.has(type.id));
+  });
+  const everyCategory = categories.length === project.categories.length;
+  return {
+    ...(filter || {}),
+    categoryIds: everyCategory ? null : categories.map((category) => category.id),
+    typeIds: everyType ? null : types.filter((type) => visible.has(type.id)).map((type) => type.id),
+  };
+}
+function filtersTypeChecked(project, filter, typeId) {
+  return filtersTypeSet(project, filter).has(typeId);
+}
+
+// «on» — видны все типы категории, «off» — ни одного, «mixed» — часть.
+function filtersCategoryChecked(project, filter, categoryId) {
+  const visible = filtersTypeSet(project, filter);
+  const own = project.markTypes.filter((type) => type.categoryId === categoryId);
+  if (own.length === 0) return "on";
+  const shown = own.filter((type) => visible.has(type.id)).length;
+  if (shown === 0) return "off";
+  return shown === own.length ? "on" : "mixed";
+}
+function filtersToggleType(project, filter, typeId, on) {
+  const visible = filtersTypeSet(project, filter);
+  if (on) visible.add(typeId);
+  else visible.delete(typeId);
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersToggleCategory(project, filter, categoryId, on) {
+  const visible = filtersTypeSet(project, filter);
+  for (const type of project.markTypes) {
+    if (type.categoryId !== categoryId) continue;
+    if (on) visible.add(type.id);
+    else visible.delete(type.id);
+  }
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersSetAllTypes(project, filter, on) {
+  const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersActive(filter) {
+  if (!filter) return false;
+  return Boolean(
+    Array.isArray(filter.categoryIds) ||
+      Array.isArray(filter.typeIds) ||
+      filter.roomId ||
+      (filter.query || "").trim(),
+  );
+}
+
+// ——— панель фильтров ——————————————————————————————————————————————————
+
+function filtersSignature(project) {
+  if (!project) return "";
+  return [
+    project.categories.map((category) => [category.id, category.name, category.color, category.shape].join("~")).join("|"),
+    project.markTypes.map((type) => [type.id, type.code, type.name, type.categoryId, type.shape].join("~")).join("|"),
+    project.rooms.map((room) => [room.id, room.name].join("~")).join("|"),
+  ].join("#");
+}
+
+// Дерево галочек перестраивается только при правке справочника: щелчок по
+// галочке меняет фильтр, а не разметку панели — иначе чекбокс исчезал бы
+// из-под курсора вместе с фокусом.
+function filtersBox(api) {
+  const { getState, setState, subscribe } = api;
+  const node = uiEl("div", { class: "filters" });
+  const search = uiEl("input", {
+    class: "ui-input filters__search",
+    type: "text",
+    placeholder: strings.filters.searchPlaceholder,
+    title: strings.filters.search,
+    on: { input: () => patch({ query: search.value }) },
+  });
+  const rooms = uiEl("select", {
+    class: "ui-select",
+    title: strings.filters.room,
+    on: { change: () => patch({ roomId: rooms.value || null }) },
+  });
+  const tree = uiEl("div", { class: "filters__tree" });
+  const summary = uiEl("summary", { class: "filters__summary", text: strings.filters.types });
+  const details = uiEl("details", { class: "filters__details" }, [summary, tree]);
+  const reset = uiButton(strings.filters.showAll, {
+    class: "ui-btn ui-btn--wide",
+    on: {
+      click: () => {
+        const state = getState();
+        setState({ filter: { ...filtersSetAllTypes(state.project, state.filter, true), roomId: null, query: "" } });
+        search.value = "";
+      },
+    },
+  });
+  let signature = null;
+  let checks = [];
+
+  function patch(part) {
+    const state = getState();
+    setState({ filter: { ...state.filter, ...part } });
+  }
+
+  function toggle(state, next) {
+    setState({ filter: { ...next, roomId: state.filter.roomId, query: state.filter.query } });
+  }
+
+  function buildTree(project) {
+    checks = [];
+    tree.replaceChildren();
+    rooms.replaceChildren(uiEl("option", { value: "", text: strings.filters.allRooms }));
+    for (const room of roomsInOrder(project)) {
+      rooms.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+    for (const { category, types } of project ? typesInOrder(project) : []) {
+      const box = uiEl("input", { class: "filters__check", type: "checkbox" });
+      box.addEventListener("change", () => {
+        const state = getState();
+        toggle(state, filtersToggleCategory(state.project, state.filter, category.id, box.checked));
+      });
+      checks.push({ box, kind: "category", id: category.id });
+      const dot = uiEl("span", { class: "filters__dot" });
+      dot.style.background = category.color;
+      tree.append(
+        uiEl("label", { class: "filters__category" }, [
+          box,
+          dot,
+          uiEl("span", { class: "filters__name", text: category.name }),
+        ]),
+      );
+      for (const type of types) {
+        const typeBox = uiEl("input", { class: "filters__check", type: "checkbox" });
+        typeBox.addEventListener("change", () => {
+          const state = getState();
+          toggle(state, filtersToggleType(state.project, state.filter, type.id, typeBox.checked));
+        });
+        checks.push({ box: typeBox, kind: "type", id: type.id });
+        tree.append(
+          uiEl("label", { class: "filters__type" }, [
+            typeBox,
+            uiEl("span", { class: "filters__code", text: type.code }),
+            uiEl("span", { class: "filters__name", text: type.name }),
+          ]),
+        );
+      }
+    }
+  }
+
+  function syncChecks(state) {
+    const project = state.project;
+    if (!project) return;
+    let hidden = 0;
+    for (const item of checks) {
+      if (item.kind === "category") {
+        const mode = filtersCategoryChecked(project, state.filter, item.id);
+        item.box.checked = mode !== "off";
+        item.box.indeterminate = mode === "mixed";
+      } else {
+        const on = filtersTypeChecked(project, state.filter, item.id);
+        item.box.checked = on;
+        if (!on) hidden += 1;
+      }
+    }
+    summary.textContent = hidden > 0
+      ? strings.filters.types + " — " + text("filters.hidden", { count: hidden })
+      : strings.filters.types;
+    rooms.value = state.filter.roomId || "";
+    if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
+      search.value = state.filter.query || "";
+    }
+    reset.disabled = !filtersActive(state.filter);
+  }
+
+  function render() {
+    const state = getState();
+    const next = filtersSignature(state.project);
+    if (next !== signature) {
+      signature = next;
+      buildTree(state.project);
+    }
+    syncChecks(state);
+  }
+
+  node.replaceChildren(search, rooms, details, reset);
+  subscribe((state, changed) => {
+    if ("project" in changed || "filter" in changed) render();
+  });
+  render();
+  return { node, render };
+}
+
+// src/panels/marks.js
+// Список меток схемы: обозначение, помещение, расположение и обозначение из
+// оригинального проекта — правятся прямо в строке.
+//
+// Почему список, а не карточка метки: заказчик заполняет «Расположение» и
+// «В оригинальной схеме» не в момент постановки, а потом, разом, по списку.
+// Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
+
+
+
+
+
+
+
+
+const MARKS_NEW_ROOM = "--new-room--";
+
+// Холст подводится к метке переводом координат из render.js: доли плана в
+// пиксели экрана здесь руками не пересчитываются.
+function marksCenteredView(scheme, mark, view) {
+  const host = document.getElementById(PANEL_IDS.canvas);
+  if (!host || !host.clientWidth || !host.clientHeight) return view;
+  const local = planToScreen(mark.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
+  return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
+}
+
+function mountMarksPanel(host, api) {
+  const { getState, setState, notify } = api;
+  const filters = filtersBox(api);
+  const list = uiEl("div", { class: "marks" });
+  const count = uiEl("p", { class: "marks__count" });
+  host.replaceChildren(filters.node, count, list);
+  // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
+  // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
+  // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
+  // перестраивать список по ходу — ради этого он и набирается.
+  let pending = false;
+  let shownSelection = "";
+
+  function typing() {
+    const active = document.activeElement;
+    return Boolean(active && list.contains(active) && active.tagName === "INPUT" && active.type === "text");
+  }
+
+  function fail(error) {
+    notify(error && error.message ? error.message : String(error), "error");
+  }
+
+  function selectMark(markId) {
+    const state = getState();
+    const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!scheme || !mark) return;
+    setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
+  }
+
+  function setField(markId, field, value) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    const next = value.trim();
+    if ((mark[field] || "") === next) return;
+    try {
+      canvasCommit(state.project, updateMark(state.project, markId, { [field]: next }).project, strings.history.markField);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // Комната заводится по ходу: новое название добавляется в справочник объекта
+  // и тем же шагом истории проставляется метке.
+  function setRoom(markId, name) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    try {
+      const ensured = roomsEnsure(state.project, name);
+      const roomId = ensured.room ? ensured.room.id : null;
+      if (roomId === (mark.roomId || null) && ensured.project === state.project) return;
+      canvasCommit(state.project, updateMark(ensured.project, markId, { roomId }).project, strings.history.markRoom);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  async function askNewRoom(markId) {
+    const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
+    if (!name) {
+      render();
+      return;
+    }
+    setRoom(markId, name);
+  }
+
+  function roomField(state, mark) {
+    const select = uiEl("select", { class: "ui-select marks__room", title: strings.marks.room });
+    select.append(uiEl("option", { value: "", text: strings.rooms.none }));
+    for (const room of roomsInOrder(state.project)) {
+      select.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+    select.append(uiEl("option", { value: MARKS_NEW_ROOM, text: strings.rooms.newRoom }));
+    select.value = mark.roomId || "";
+    select.addEventListener("change", () => {
+      if (select.value === MARKS_NEW_ROOM) {
+        askNewRoom(mark.id);
+        return;
+      }
+      const room = select.value ? roomsInOrder(state.project).find((item) => item.id === select.value) : null;
+      setRoom(mark.id, room ? room.name : "");
+    });
+    return select;
+  }
+
+  function markRow(state, row, selected) {
+    const mark = row.mark;
+    const node = uiEl("div", { class: "mark-row" + (selected ? " is-current" : ""), title: strings.marks.focus }, [
+      uiEl("div", { class: "mark-row__head" }, [
+        shapeIcon(row.style.shape, row.style.color, 20),
+        uiEl("span", { class: "mark-row__label", text: row.label }),
+        uiEl("span", { class: "mark-row__type", text: row.type ? row.type.name : "" }),
+      ]),
+      roomField(state, mark),
+      uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        value: mark.location || "",
+        placeholder: strings.marks.locationPlaceholder,
+        title: strings.marks.location,
+        on: { change: (event) => setField(mark.id, "location", event.target.value) },
+      }),
+      uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        value: mark.original || "",
+        placeholder: strings.marks.originalPlaceholder,
+        title: strings.marks.original,
+        on: { change: (event) => setField(mark.id, "original", event.target.value) },
+      }),
+    ]);
+    node.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("input, select, button, option")) return;
+      selectMark(mark.id);
+    });
+    return node;
+  }
+
+  function render() {
+    pending = false;
+    const state = getState();
+    if (!state.project || !state.schemeId) {
+      count.textContent = "";
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
+      return;
+    }
+    const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
+    const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
+    count.textContent = total > 0 ? text("marks.count", { shown: rows.length, total }) : "";
+    if (rows.length === 0) {
+      list.replaceChildren(
+        uiEl("p", { class: "panel__empty", text: total > 0 ? strings.marks.nothingFound : strings.panels.marksEmpty }),
+      );
+      return;
+    }
+    const selected = new Set(state.selectedMarkIds);
+    list.replaceChildren(...rows.map((row) => markRow(state, row, selected.has(row.mark.id))));
+    // Подводим список к выделенной строке только когда выделение сменилось:
+    // иначе правка поля в одной строке уводила бы список к другой.
+    const selection = state.selectedMarkIds.join(",");
+    const current = list.querySelector(".mark-row.is-current");
+    if (current && selection !== shownSelection) current.scrollIntoView({ block: "nearest" });
+    shownSelection = selection;
+  }
+
+  // Отложенная перерисовка: то, что накопилось, пока пользователь печатал.
+  host.addEventListener("focusout", () => {
+    if (!pending) return;
+    setTimeout(() => {
+      if (!typing()) render();
+    }, 0);
+  });
+  api.subscribe((state, changed) => {
+    if (!("project" in changed || "schemeId" in changed || "filter" in changed || "selectedMarkIds" in changed)) return;
+    if (typing()) {
+      pending = true;
+      return;
+    }
+    render();
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.marks, mountMarksPanel);
 
 // src/panels/schemes.js
 // Схемы объекта: список, загрузка плана кнопкой и перетаскиванием, поворот
