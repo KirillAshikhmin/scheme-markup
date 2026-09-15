@@ -200,3 +200,91 @@
   pointer-events: none;
   z-index: 5;
 }
+
+/* ——— раздел «Помещения» ————————————————————————————————————————————— */
+
+/* В окне список ограничивал себя сам; в колонке ему растёт раздел, а
+   прокрутку даёт тело раздела — второй ползунок внутри был бы лишним. */
+#panel-rooms .rooms {
+  max-height: none;
+  overflow: visible;
+  gap: 4px;
+}
+
+/* Строка в одну линию: цвет, имя, число меток, контур, удаление. Комнат в
+   объекте бывает десяток, и двухстрочные карточки съедали колонку. */
+#panel-rooms .rooms__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #1c2129;
+}
+
+#panel-rooms .rooms__row .ui-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 5px;
+}
+
+#panel-rooms .rooms__count {
+  flex: none;
+  min-width: 16px;
+  text-align: right;
+  font-size: 11px;
+}
+
+#panel-rooms .rooms__row .ui-btn {
+  flex: none;
+  padding: 2px 5px;
+}
+
+/* Комната, которую сейчас обводят или чей контур правят. */
+#panel-rooms .rooms__row.is-active {
+  border-color: var(--accent);
+}
+
+/* У комнаты уже есть контур на этой схеме — кнопка ведёт в правку вершин. */
+.rooms__outline--set {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+#panel-rooms .rooms__add {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Имя схемы — на всю ширину строки: шесть кнопок рядом оставляли от «Этаж 5 —
+   план» три буквы. Вторая строка делится между размером и кнопками. */
+#panel-schemes .scheme-row {
+  grid-template-columns: 1fr auto;
+}
+
+#panel-schemes .scheme-row__name {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+#panel-schemes .scheme-row__meta {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panel-schemes .scheme-row__tools {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+}
+
+#panel-schemes .scheme-row__tools .ui-btn {
+  padding: 1px 4px;
+}

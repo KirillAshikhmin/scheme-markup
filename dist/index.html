@@ -1063,6 +1063,94 @@
   z-index: 5;
 }
 
+/* ——— раздел «Помещения» ————————————————————————————————————————————— */
+
+/* В окне список ограничивал себя сам; в колонке ему растёт раздел, а
+   прокрутку даёт тело раздела — второй ползунок внутри был бы лишним. */
+#panel-rooms .rooms {
+  max-height: none;
+  overflow: visible;
+  gap: 4px;
+}
+
+/* Строка в одну линию: цвет, имя, число меток, контур, удаление. Комнат в
+   объекте бывает десяток, и двухстрочные карточки съедали колонку. */
+#panel-rooms .rooms__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #1c2129;
+}
+
+#panel-rooms .rooms__row .ui-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 5px;
+}
+
+#panel-rooms .rooms__count {
+  flex: none;
+  min-width: 16px;
+  text-align: right;
+  font-size: 11px;
+}
+
+#panel-rooms .rooms__row .ui-btn {
+  flex: none;
+  padding: 2px 5px;
+}
+
+/* Комната, которую сейчас обводят или чей контур правят. */
+#panel-rooms .rooms__row.is-active {
+  border-color: var(--accent);
+}
+
+/* У комнаты уже есть контур на этой схеме — кнопка ведёт в правку вершин. */
+.rooms__outline--set {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+#panel-rooms .rooms__add {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Имя схемы — на всю ширину строки: шесть кнопок рядом оставляли от «Этаж 5 —
+   план» три буквы. Вторая строка делится между размером и кнопками. */
+#panel-schemes .scheme-row {
+  grid-template-columns: 1fr auto;
+}
+
+#panel-schemes .scheme-row__name {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+#panel-schemes .scheme-row__meta {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panel-schemes .scheme-row__tools {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+}
+
+#panel-schemes .scheme-row__tools .ui-btn {
+  padding: 1px 4px;
+}
+
 /* ——— окно «Тип метки»: категории колонками ————————————————————————————
    Один длинный столбец заставлял листать: «Свет» занимал экран, а
    «Выключатели» уходили за нижний край, и справа половина окна пустовала.
@@ -1467,7 +1555,10 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  /* Колонка листается сама только тогда, когда разделам уже нечего отдавать
+     друг другу; заголовки при этом липнут к верху и остаются на экране. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 #panel-left {
@@ -1480,18 +1571,21 @@ body {
   border-left: 1px solid var(--panel-line);
 }
 
-/* Колонка делится так: секция по содержимому стоит на своём, растущая
-   забирает остаток и прокручивается внутри себя. Раньше обе секции сжимались
-   пропорционально своей высоте, и список из полусотни меток выдавливал
-   «Свойства» за нижний край экрана — до них было не добраться. */
+/* Одно правило на обе колонки. Колонка делится так: раздел по содержимому
+   стоит на своём и не выше половины колонки, дальше листается своим телом;
+   растущий раздел (список схем слева, список меток справа) забирает остаток.
+   Раньше обе секции сжимались пропорционально своей высоте, и список из
+   полусотни меток выдавливал «Свойства» за нижний край экрана — до них было
+   не добраться. Свёрнутый раздел из этого дележа выходит вовсе: он занимает
+   высоту заголовка и всё остальное отдаёт соседям. */
 .panel__section {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* Не растёт: столько, сколько нужно содержимому. Пустая секция — это только
-     заголовок, места у списка она не отнимает. Сжаться даёт себе только на
-     низком экране, когда растущей секции уже нечего отдавать: лучше короткая
-     секция со своей прокруткой, чем обрезанная нижним краем. */
+  /* Не растёт: столько, сколько нужно содержимому. Пустой раздел — это только
+     заголовок, места у списка он не отнимает. Сжаться даёт себе только на
+     низком экране, когда растущему разделу уже нечего отдавать: лучше короткий
+     раздел со своей прокруткой, чем обрезанный нижним краем. */
   flex: 0 1 auto;
   /* Но и колонку целиком не занимает: дальше прокручивается своим телом. */
   max-height: 50%;
@@ -1502,22 +1596,90 @@ body {
   /* Основа ноль — иначе высота содержимого снова стала бы стартовым размером. */
   flex: 1 1 0;
   max-height: none;
-  /* Список остаётся списком даже рядом с высокой соседкой. */
-  min-height: 96px;
+  /* Список остаётся списком даже рядом с высокими соседями: в колонке их
+     теперь четверо, и на 96 px от списка схем оставалась одна строка. */
+  min-height: 140px;
+}
+
+.panel__section.is-collapsed,
+.panel__section--grow.is-collapsed {
+  flex: 0 0 auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.panel__section.is-collapsed > .panel__body {
+  display: none;
 }
 
 .panel__section:last-child {
   border-bottom: none;
 }
 
-.panel__title {
+/* Заголовок всегда на экране: он липнет к верху колонки, тело листается под
+   ним — и внутри раздела, и когда листается вся колонка. */
+.panel__head {
   margin: 0;
-  padding: 10px 12px 6px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel-bg);
+}
+
+.panel__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 12px 7px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--panel-muted);
+  text-align: left;
+}
+
+.panel__title:hover,
+.panel__title:focus-visible {
+  color: var(--panel-text);
+}
+
+.panel__chevron::before {
+  content: "▾";
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+
+.panel__section.is-collapsed .panel__chevron::before {
+  transform: rotate(-90deg);
+}
+
+/* Счётчик: по свёрнутому разделу видно, пуст он или там сорок схем. */
+.panel__badge {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--panel-muted);
+  background: #21262d;
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+
+.panel__badge:empty {
+  display: none;
+}
+
+/* Раздел позвали со стороны — подсветить, чтобы глаз нашёл его сам. */
+.panel__section.is-called > .panel__head .panel__title {
+  color: var(--accent);
 }
 
 .panel__body {
@@ -1626,14 +1788,50 @@ body {
         <div id="header-actions" class="mount"></div>
       </header>
 
+      <!-- Разделы обеих колонок устроены одинаково: кликабельный заголовок
+           сворачивает раздел, заголовок липнет к верху колонки, тело листается
+           под ним. Растущий раздел в колонке один — список, которому нужно
+           место: слева схемы, справа метки. -->
       <aside id="panel-left" class="panel">
-        <section class="panel__section">
-          <h2 class="panel__title" data-text="panels.tools"></h2>
+        <section class="panel__section" data-section-id="marks">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="marks" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.marks"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-tools" class="panel__body mount"></div>
         </section>
-        <section class="panel__section panel__section--grow">
-          <h2 class="panel__title" data-text="panels.schemes"></h2>
+        <section class="panel__section" data-section-id="rooms">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="rooms" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.rooms"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-rooms" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--grow" data-section-id="schemes">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="schemes" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.schemes"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-schemes" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section" data-section-id="sizes">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="sizes" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.sizes"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-sizes" class="panel__body mount"></div>
         </section>
       </aside>
 
@@ -1644,12 +1842,24 @@ body {
       </main>
 
       <aside id="panel-right" class="panel">
-        <section class="panel__section panel__section--grow">
-          <h2 class="panel__title" data-text="panels.marks"></h2>
+        <section class="panel__section panel__section--grow" data-section-id="markList">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="markList" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.markList"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-marks" class="panel__body mount"></div>
         </section>
-        <section class="panel__section">
-          <h2 class="panel__title" data-text="panels.properties"></h2>
+        <section class="panel__section" data-section-id="properties">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="properties" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.properties"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-properties" class="panel__body mount"></div>
         </section>
       </aside>
@@ -1671,9 +1881,11 @@ const strings = {
     noProject: "Объект не выбран",
   },
   panels: {
-    tools: "Инструменты",
     schemes: "Схемы",
     marks: "Метки",
+    rooms: "Помещения",
+    sizes: "Размеры",
+    markList: "Список меток",
     properties: "Свойства",
     canvasEmpty: "Загрузите план схемы, чтобы начать разметку",
     marksEmpty: "Меток пока нет — выберите тип и щёлкните по плану",
@@ -1741,12 +1953,8 @@ const strings = {
     kindLineHint: "Клики рисуют ломаную: лента или трек",
     kindOutline: "Контур",
     kindOutlineHint: "Обвести помещение по стенам: клик — вершина, двойной клик по первой замыкает",
-    room: "Помещение для обводки",
-    chooseRoom: "Выбрать помещение",
-    noRoom: "Помещение не выбрано",
     block: "Блок точек",
     blockHint: "Режим блока хранится у типа: так встают его метки, когда их ставят ручкой «+»",
-    sizes: "Размеры",
     markSize: "Метки",
     labelSize: "Подписи",
     zoom: "Масштаб",
@@ -2070,7 +2278,12 @@ const strings = {
     autoOf: "По контуру: {name}",
     color: "Цвет контура помещения",
     pickTitle: "Какое помещение обводим?",
-    empty: "Помещений пока нет — впишите помещение в строке метки",
+    empty: "Помещений пока нет — впишите название и обведите контур",
+    addAndDraw: "Добавить и обвести",
+    addAndDrawHint: "Заводит помещение и сразу включает обводку контура на плане",
+    outlineDraw: "Обвести контур на плане",
+    outlineEdit: "Править контур помещения",
+    outlineEditing: "Контур выбран: тяните вершины, «+» на стенке добавляет, двойной клик убирает",
     marks: "меток: {count}",
     remove: "Удалить помещение",
     removeTitle: "Удалить помещение?",
@@ -4746,9 +4959,12 @@ function autosaveAgoText(at, now) {
 // Панели других тасков монтируются по идентификатору контейнера из index.html
 // и не правят ни этот файл, ни разметку.
 
+
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 const PANEL_IDS = {
   tools: "panel-tools",
+  rooms: "panel-rooms",
+  sizes: "panel-sizes",
   schemes: "panel-schemes",
   marks: "panel-marks",
   properties: "panel-properties",
@@ -4769,6 +4985,45 @@ const appState = {
   view: { zoom: 1, offsetX: 0, offsetY: 0 },
   dirty: false,
 };
+
+// Разделы колонок: заголовок сворачивает свой раздел, состояние переживает
+// перезагрузку. Имена — из `data-section-id` в разметке.
+const SECTION_IDS = {
+  marks: "marks",
+  rooms: "rooms",
+  schemes: "schemes",
+  sizes: "sizes",
+  markList: "markList",
+  properties: "properties",
+};
+const SECTIONS_SETTING = "collapsedSections";
+// На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
+// место они отнимают у списка схем. Всё остальное открыто — иначе новый
+// пользователь ищет, куда делись инструменты.
+const SECTION_DEFAULT_COLLAPSED = [SECTION_IDS.sizes];
+
+const appCollapsed = new Set();
+
+// Что кладётся в настройки: список свёрнутых разделов. Мусор из хранилища
+// (чужая версия, битое значение) не должен схлопывать панель — он отбрасывается.
+function sectionListFrom(value) {
+  if (!Array.isArray(value)) return [];
+  const known = new Set(Object.values(SECTION_IDS));
+  return [...new Set(value.filter((id) => typeof id === "string" && known.has(id)))];
+}
+
+// Чего ещё не выбирал пользователь — то показываем по умолчанию; пустой
+// сохранённый список означает «всё развёрнуто», а не «умолчание».
+function sectionStartList(saved) {
+  return saved == null ? [...SECTION_DEFAULT_COLLAPSED] : sectionListFrom(saved);
+}
+function sectionsAfterToggle(list, id, collapsed) {
+  const next = new Set(sectionListFrom(list));
+  if (!Object.values(SECTION_IDS).includes(id)) return [...next];
+  if (collapsed) next.add(id);
+  else next.delete(id);
+  return [...next];
+}
 
 const appSubscribers = new Set();
 const appPanels = new Map();
@@ -4872,10 +5127,70 @@ function syncCanvasClass() {
   if (!app) return;
   app.classList.toggle("has-scheme", Boolean(appState.schemeId));
 }
+
+function sectionNode(id) {
+  return typeof document === "undefined" ? null : document.querySelector('[data-section-id="' + id + '"]');
+}
+
+// Свёрнутый раздел — это только заголовок с повёрнутой галочкой: пустым он не
+// выглядит, и место соседям отдаёт целиком.
+function applySectionState(id) {
+  const node = sectionNode(id);
+  if (!node) return;
+  const collapsed = appCollapsed.has(id);
+  node.classList.toggle("is-collapsed", collapsed);
+  const button = node.querySelector("[data-section]");
+  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+function setSectionCollapsed(id, collapsed) {
+  if (collapsed) appCollapsed.add(id);
+  else appCollapsed.delete(id);
+  applySectionState(id);
+  setSetting(SECTIONS_SETTING, [...appCollapsed]);
+}
+function toggleSection(id) {
+  setSectionCollapsed(id, !appCollapsed.has(id));
+}
+
+// Кто-то зовёт раздел со стороны (кнопка «Помещения» в справочнике): развернуть
+// и подвести к глазам — вместо второго окна, делающего то же самое.
+function revealSection(id) {
+  setSectionCollapsed(id, false);
+  const node = sectionNode(id);
+  if (!node) return;
+  if (typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "nearest" });
+  node.classList.add("is-called");
+  setTimeout(() => node.classList.remove("is-called"), 1200);
+}
+
+// Счётчик в заголовке: по свёрнутому разделу видно, пуст он или там сорок схем.
+function setSectionBadge(id, value) {
+  const node = sectionNode(id);
+  if (!node) return;
+  const badge = node.querySelector(".panel__badge");
+  if (badge) badge.textContent = value == null || value === "" ? "" : String(value);
+}
+
+function wireSections() {
+  for (const button of document.querySelectorAll("[data-section]")) {
+    button.addEventListener("click", () => toggleSection(button.dataset.section));
+  }
+  // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
+  // когда хранилище ответит. Ждать его с пустым экраном хуже.
+  Promise.resolve(getSetting(SECTIONS_SETTING))
+    .then((saved) => {
+      for (const id of sectionStartList(saved)) {
+        appCollapsed.add(id);
+        applySectionState(id);
+      }
+    })
+    .catch(() => {});
+}
 function startApp() {
   if (appStarted) return;
   appStarted = true;
   applyStrings(document);
+  wireSections();
   syncProjectName();
   syncCanvasClass();
   for (const id of appPanels.keys()) mountPanel(id);
@@ -9248,12 +9563,14 @@ function mountExportPanel(host, api) {
 registerPanel(PANEL_IDS.headerActions, mountExportPanel);
 
 // src/panels/rooms.js
-// Помещения объекта: заводятся на ходу из поля «Помещение» в списке меток,
-// правятся и удаляются в своём окне.
+// Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
+// меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
+// меток, — поэтому главное здесь не список, а `roomsEnsure`: одно и то же
+// название не должно плодить двойников.
 //
-// Своего справочника комнат пользователь не заполняет заранее — он пишет
-// «Спальная Оли» в строке метки, и комната появляется. Поэтому главное здесь —
-// не окно, а `roomsEnsure`: одно и то же название не должно плодить двойников.
+// Отдельного окна «Помещения» больше нет: список и все его действия живут в
+// панели, а прежняя кнопка в справочнике разворачивает раздел и подводит к нему.
+
 
 
 
@@ -9300,7 +9617,32 @@ function roomsEnsure(project, name) {
 function roomsUsage(project, roomId) {
   return project.marks.filter((mark) => mark.roomId === roomId).length;
 }
-function openRoomsEditor(api) {
+
+// Строки списка: комната, сколько у неё меток и есть ли контур на этой схеме.
+// Чистая функция — на ней и стоят тесты раздела.
+function roomsRows(project, schemeId) {
+  const outlines = schemeId ? outlinesInOrder(project, schemeId) : [];
+  return roomsInOrder(project).map((room) => {
+    const outline = outlines.find((item) => item.roomId === room.id) || null;
+    return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
+  });
+}
+
+// Что делает кнопка контура: нарисовать новый или править вершины прежнего.
+// Правка — это режим выбора с выделенным контуром: дальше вершины таскаются
+// на холсте, «+» на стенке добавляет, двойной клик убирает.
+function roomsOutlineAction(row) {
+  return row && row.outlineId ? "edit" : "draw";
+}
+
+// Прежнее окно помещений уехало в панель; кнопка «Помещения» в справочнике
+// теперь разворачивает раздел, а не открывает второй способ делать то же самое.
+function openRoomsEditor() {
+  revealSection(SECTION_IDS.rooms);
+}
+
+function mountRoomsPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
   const list = uiEl("div", { class: "rooms" });
   const input = uiEl("input", {
     class: "ui-input",
@@ -9310,38 +9652,73 @@ function openRoomsEditor(api) {
       keydown: (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
-        addFromInput();
+        addAndDraw();
       },
     },
   });
+  const addButton = uiButton(strings.rooms.addAndDraw, {
+    class: "ui-btn ui-btn--accent",
+    title: strings.rooms.addAndDrawHint,
+    on: { click: () => addAndDraw() },
+  });
+  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton]));
 
   function project() {
-    return api.getState().project;
-  }
-
-  // Перерисовка приходит подпиской на объект: так окно обновляется и от своей
-  // команды, и от чужой — например, от Ctrl+Z, пока оно открыто.
-  function commit(after, label) {
-    canvasCommit(project(), after, label);
+    return getState().project;
   }
 
   function fail(error) {
-    api.notify(error && error.message ? error.message : String(error), "error");
+    notify(error && error.message ? error.message : String(error), "error");
   }
 
-  function addFromInput() {
+  function commit(after, label, options) {
+    canvasCommit(project(), after, label, options);
+  }
+
+  // Комната заводится и сразу берётся в обводку: режим рисования включается тем
+  // же шагом истории, искать его отдельно не нужно.
+  function addAndDraw() {
+    const state = getState();
     const name = input.value.trim();
-    if (!name) return;
-    if (roomsFind(project(), name)) {
+    if (!state.project || !name) return;
+    const found = roomsFind(state.project, name);
+    if (found) {
       input.value = "";
+      startOutline(found.id);
       return;
     }
     try {
-      commit(addRoom(project(), name).project, strings.history.addRoom);
+      const created = addRoom(state.project, name);
       input.value = "";
+      canvasCommit(state.project, created.project, strings.history.addRoom, {
+        patch: drawPatch(created.room.id),
+      });
+      if (!state.schemeId) notify(strings.canvas.needScheme);
     } catch (error) {
       fail(error);
     }
+  }
+
+  // Без схемы рисовать негде: комната заводится, режим остаётся прежним.
+  function drawPatch(roomId) {
+    return getState().schemeId
+      ? { activeRoomId: roomId, mode: "room", selectedOutlineId: null }
+      : { activeRoomId: roomId };
+  }
+
+  function startOutline(roomId) {
+    const state = getState();
+    if (!state.schemeId) {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
+    if (roomsOutlineAction(row) === "edit") {
+      setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
+      notify(strings.rooms.outlineEditing);
+      return;
+    }
+    setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
   }
 
   function rename(roomId, name) {
@@ -9377,61 +9754,78 @@ function openRoomsEditor(api) {
       confirmLabel: strings.dialog.confirm,
     });
     if (!agreed) return;
-    commit(deleteRoom(project(), roomId).project, strings.history.removeRoom);
+    const fresh = project();
+    if (!findRoom(fresh, roomId)) return;
+    canvasCommit(fresh, deleteRoom(fresh, roomId).project, strings.history.removeRoom);
   }
 
   function render() {
-    const rooms = roomsInOrder(project());
-    if (rooms.length === 0) {
+    const state = getState();
+    if (!state.project) {
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
+      setSectionBadge(SECTION_IDS.rooms, "");
+      input.disabled = true;
+      addButton.disabled = true;
+      return;
+    }
+    input.disabled = false;
+    addButton.disabled = false;
+    const rows = roomsRows(state.project, state.schemeId);
+    setSectionBadge(SECTION_IDS.rooms, rows.length || "");
+    if (rows.length === 0) {
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
       return;
     }
     list.replaceChildren(
-      ...rooms.map((room) =>
-        uiEl("div", { class: "rooms__row" }, [
+      ...rows.map((row) => {
+        const drawing = state.mode === "room" && state.activeRoomId === row.room.id;
+        const editing = Boolean(row.outlineId) && state.selectedOutlineId === row.outlineId;
+        const action = roomsOutlineAction(row);
+        return uiEl("div", { class: "rooms__row" + (drawing || editing ? " is-active" : "") }, [
+          roomColorField(state.project, row.room, (color) => recolor(row.room.id, color)),
           uiEl("input", {
-            class: "ui-input",
+            class: "ui-input rooms__name",
             type: "text",
-            value: room.name,
-            on: { change: (event) => rename(room.id, event.target.value) },
+            value: row.room.name,
+            on: { change: (event) => rename(row.room.id, event.target.value) },
           }),
-          roomColorField(project(), room, (color) => recolor(room.id, color)),
+          // Счётчик числом: в узкой колонке «меток: 3» съедало имя комнаты,
+          // а пояснение живёт в подсказке.
           uiEl("span", {
             class: "rooms__count",
-            text: text("rooms.marks", { count: roomsUsage(project(), room.id) }),
+            text: String(row.marks),
+            title: text("rooms.marks", { count: row.marks }),
+          }),
+          uiButton("⬡", {
+            class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
+            title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
+            on: { click: () => startOutline(row.room.id) },
           }),
           uiButton("🗑", {
             class: "ui-btn ui-btn--danger",
             title: strings.rooms.remove,
-            on: { click: () => remove(room.id) },
+            on: { click: () => remove(row.room.id) },
           }),
-        ]),
-      ),
+        ]);
+      }),
     );
   }
 
+  subscribe((state, changed) => {
+    if (
+      "project" in changed ||
+      "schemeId" in changed ||
+      "mode" in changed ||
+      "activeRoomId" in changed ||
+      "selectedOutlineId" in changed
+    ) {
+      render();
+    }
+  });
   render();
-  const unsubscribe = api.subscribe((state, changed) => {
-    if ("project" in changed) render();
-  });
-  const modal = uiModal({
-    title: strings.rooms.title,
-    body: uiEl("div", { class: "rooms__box" }, [
-      list,
-      uiEl("div", { class: "rooms__add" }, [
-        input,
-        uiButton(strings.rooms.add, { class: "ui-btn ui-btn--accent", on: { click: () => addFromInput() } }),
-      ]),
-    ]),
-    actions: [uiButton(strings.dialog.close, { on: { click: () => close() } })],
-    onCancel: () => unsubscribe(),
-  });
-  function close() {
-    unsubscribe();
-    modal.close();
-  }
-  return { close };
 }
+
+registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 // Окно выбора помещения для обводки: список комнат объекта плюс поле «новое».
 // Устроено как выбор типа метки — по той же причине: выбранное помещение
@@ -11494,6 +11888,8 @@ function mountSchemesPanel(host, api) {
     const project = state.project;
     list.replaceChildren();
     addButton.disabled = !project;
+    // Счётчик в заголовке: свёрнутый раздел не путается с пустым.
+    setSectionBadge(SECTION_IDS.schemes, project && project.schemes.length ? project.schemes.length : "");
     if (!project || project.schemes.length === 0) {
       hint.textContent = project ? strings.schemes.addHint : strings.projects.empty;
       return;
@@ -12032,9 +12428,13 @@ function openTypePicker(project, options = {}) {
 }
 
 // src/panels/tools.js
-// Панель инструментов: выбранный тип, что ставим, режим блока, размеры,
-// масштаб и отмена. Тип показан крупно и «залипает» — по нему видно, что
-// следующий клик по плану поставит именно его.
+// Два раздела левой колонки. «Метки» — всё про постановку: выбранный тип,
+// что ставим, режим блока, отмена. Тип показан крупно и «залипает» — по нему
+// видно, что следующий клик по плану поставит именно его. «Размеры» — размер
+// меток и подписей и масштаб плана.
+//
+// Помещение для обводки больше не выбирается здесь: его показывает и выбирает
+// раздел «Помещения», где рядом список комнат и кнопки контуров.
 
 
 
@@ -12072,9 +12472,6 @@ function mountToolsPanel(host, api) {
   const { getState, setState, subscribe, notify } = api;
   const box = uiEl("div", { class: "tools" });
   host.replaceChildren(box);
-  // Снимок объекта на время жеста ползунка: пока он есть, панель не
-  // перерисовывается — иначе ползунок исчезал бы из-под пальца.
-  let sizeBefore = null;
 
   function activeType(state) {
     return state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
@@ -12164,23 +12561,6 @@ function mountToolsPanel(host, api) {
     setState({ mode });
   }
 
-  function setSize(key, value) {
-    const state = getState();
-    if (!state.project) return;
-    if (!sizeBefore) sizeBefore = state.project;
-    setState({ project: updateProject(state.project, { view: { ...state.project.view, [key]: value } }).project });
-  }
-
-  // Конец жеста: один шаг истории на всё перетаскивание ползунка.
-  function commitSize() {
-    if (!sizeBefore) return;
-    const before = sizeBefore;
-    sizeBefore = null;
-    const after = getState().project;
-    if (after !== before) canvasCommit(before, after, strings.history.viewSize);
-    render();
-  }
-
   function setBlockMode(mode) {
     const state = getState();
     const type = activeType(state);
@@ -12191,7 +12571,6 @@ function mountToolsPanel(host, api) {
   function render() {
     const state = getState();
     const type = activeType(state);
-    const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
     // Метка, у которой можно сменить тип: пока её нет, кнопки нет тоже —
     // серая кнопка, которая никогда не оживает, хуже её отсутствия.
     const selectedId = state.selectedMarkIds[0];
@@ -12242,28 +12621,6 @@ function mountToolsPanel(host, api) {
       }),
     ]);
 
-    // Помещение для обводки: показано рядом с режимом, как выбранный тип метки.
-    const room = activeRoom(state);
-    const roomButton = uiEl(
-      "button",
-      {
-        class: "tools__room" + (room ? " is-set" : ""),
-        type: "button",
-        title: strings.tools.chooseRoom,
-        on: { click: () => chooseRoom() },
-      },
-      room
-        ? [
-            roomSwatch(room.color, 14),
-            uiEl("span", { class: "tools__typeName", text: room.name }),
-            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
-          ]
-        : [
-            uiEl("span", { class: "tools__typeName", text: strings.tools.noRoom }),
-            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
-          ],
-    );
-
     const blockSelect = uiEl(
       "select",
       {
@@ -12303,33 +12660,14 @@ function mountToolsPanel(host, api) {
         : null,
       uiEl("p", { class: "tools__label", text: strings.tools.kind }),
       modeRow,
-      uiEl("p", { class: "tools__label", text: strings.tools.room }),
-      roomButton,
       uiEl("p", { class: "tools__label", text: strings.tools.block }),
       blockSelect,
-      uiEl("p", { class: "tools__label", text: strings.tools.sizes }),
-      uiEl("label", { class: "tools__field" }, [
-        uiEl("span", { text: strings.tools.markSize }),
-        toolsSlider(sizes.markSize, TOOLS_MARK_SIZE, (value) => setSize("markSize", value), commitSize),
-      ]),
-      uiEl("label", { class: "tools__field" }, [
-        uiEl("span", { text: strings.tools.labelSize }),
-        toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
-      ]),
-      uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
-      uiEl("div", { class: "tools__row" }, [
-        uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
-        uiButton("+", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
-        uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
-        uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
-      ]),
       uiEl("div", { class: "tools__row" }, [undoButton, redoButton]),
     ];
     box.replaceChildren(...parts.filter(Boolean));
   }
 
   subscribe((state, changed) => {
-    if (sizeBefore) return;
     if (
       "project" in changed ||
       "activeTypeId" in changed ||
@@ -12345,7 +12683,63 @@ function mountToolsPanel(host, api) {
   render();
 }
 
+// Раздел «Размеры»: размер меток и подписей, масштаб плана.
+function mountSizesPanel(host, api) {
+  const { getState, setState, subscribe } = api;
+  const box = uiEl("div", { class: "tools" });
+  host.replaceChildren(box);
+  // Снимок объекта на время жеста ползунка: пока он есть, раздел не
+  // перерисовывается — иначе ползунок исчезал бы из-под пальца.
+  let sizeBefore = null;
+
+  function setSize(key, value) {
+    const state = getState();
+    if (!state.project) return;
+    if (!sizeBefore) sizeBefore = state.project;
+    setState({ project: updateProject(state.project, { view: { ...state.project.view, [key]: value } }).project });
+  }
+
+  // Конец жеста: один шаг истории на всё перетаскивание ползунка.
+  function commitSize() {
+    if (!sizeBefore) return;
+    const before = sizeBefore;
+    sizeBefore = null;
+    const after = getState().project;
+    if (after !== before) canvasCommit(before, after, strings.history.viewSize);
+    render();
+  }
+
+  function render() {
+    const state = getState();
+    const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
+    box.replaceChildren(
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.markSize }),
+        toolsSlider(sizes.markSize, TOOLS_MARK_SIZE, (value) => setSize("markSize", value), commitSize),
+      ]),
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.labelSize }),
+        toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
+      ]),
+      uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
+      uiEl("div", { class: "tools__row" }, [
+        uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
+        uiButton("+", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
+        uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
+        uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
+      ]),
+    );
+  }
+
+  subscribe((state, changed) => {
+    if (sizeBefore) return;
+    if ("project" in changed) render();
+  });
+  render();
+}
+
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
+registerPanel(PANEL_IDS.sizes, mountSizesPanel);
 })();
     </script>
 </body>

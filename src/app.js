@@ -2,10 +2,13 @@
 // Панели других тасков монтируются по идентификатору контейнера из index.html
 // и не правят ни этот файл, ни разметку.
 import { strings, text } from "./strings.js";
+import { getSetting, setSetting } from "./store.js";
 
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 export const PANEL_IDS = {
   tools: "panel-tools",
+  rooms: "panel-rooms",
+  sizes: "panel-sizes",
   schemes: "panel-schemes",
   marks: "panel-marks",
   properties: "panel-properties",
@@ -26,6 +29,46 @@ const appState = {
   view: { zoom: 1, offsetX: 0, offsetY: 0 },
   dirty: false,
 };
+
+// Разделы колонок: заголовок сворачивает свой раздел, состояние переживает
+// перезагрузку. Имена — из `data-section-id` в разметке.
+export const SECTION_IDS = {
+  marks: "marks",
+  rooms: "rooms",
+  schemes: "schemes",
+  sizes: "sizes",
+  markList: "markList",
+  properties: "properties",
+};
+export const SECTIONS_SETTING = "collapsedSections";
+// На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
+// место они отнимают у списка схем. Всё остальное открыто — иначе новый
+// пользователь ищет, куда делись инструменты.
+export const SECTION_DEFAULT_COLLAPSED = [SECTION_IDS.sizes];
+
+const appCollapsed = new Set();
+
+// Что кладётся в настройки: список свёрнутых разделов. Мусор из хранилища
+// (чужая версия, битое значение) не должен схлопывать панель — он отбрасывается.
+export function sectionListFrom(value) {
+  if (!Array.isArray(value)) return [];
+  const known = new Set(Object.values(SECTION_IDS));
+  return [...new Set(value.filter((id) => typeof id === "string" && known.has(id)))];
+}
+
+// Чего ещё не выбирал пользователь — то показываем по умолчанию; пустой
+// сохранённый список означает «всё развёрнуто», а не «умолчание».
+export function sectionStartList(saved) {
+  return saved == null ? [...SECTION_DEFAULT_COLLAPSED] : sectionListFrom(saved);
+}
+
+export function sectionsAfterToggle(list, id, collapsed) {
+  const next = new Set(sectionListFrom(list));
+  if (!Object.values(SECTION_IDS).includes(id)) return [...next];
+  if (collapsed) next.add(id);
+  else next.delete(id);
+  return [...next];
+}
 
 const appSubscribers = new Set();
 const appPanels = new Map();
@@ -134,10 +177,72 @@ function syncCanvasClass() {
   app.classList.toggle("has-scheme", Boolean(appState.schemeId));
 }
 
+function sectionNode(id) {
+  return typeof document === "undefined" ? null : document.querySelector('[data-section-id="' + id + '"]');
+}
+
+// Свёрнутый раздел — это только заголовок с повёрнутой галочкой: пустым он не
+// выглядит, и место соседям отдаёт целиком.
+function applySectionState(id) {
+  const node = sectionNode(id);
+  if (!node) return;
+  const collapsed = appCollapsed.has(id);
+  node.classList.toggle("is-collapsed", collapsed);
+  const button = node.querySelector("[data-section]");
+  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+export function setSectionCollapsed(id, collapsed) {
+  if (collapsed) appCollapsed.add(id);
+  else appCollapsed.delete(id);
+  applySectionState(id);
+  setSetting(SECTIONS_SETTING, [...appCollapsed]);
+}
+
+export function toggleSection(id) {
+  setSectionCollapsed(id, !appCollapsed.has(id));
+}
+
+// Кто-то зовёт раздел со стороны (кнопка «Помещения» в справочнике): развернуть
+// и подвести к глазам — вместо второго окна, делающего то же самое.
+export function revealSection(id) {
+  setSectionCollapsed(id, false);
+  const node = sectionNode(id);
+  if (!node) return;
+  if (typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "nearest" });
+  node.classList.add("is-called");
+  setTimeout(() => node.classList.remove("is-called"), 1200);
+}
+
+// Счётчик в заголовке: по свёрнутому разделу видно, пуст он или там сорок схем.
+export function setSectionBadge(id, value) {
+  const node = sectionNode(id);
+  if (!node) return;
+  const badge = node.querySelector(".panel__badge");
+  if (badge) badge.textContent = value == null || value === "" ? "" : String(value);
+}
+
+function wireSections() {
+  for (const button of document.querySelectorAll("[data-section]")) {
+    button.addEventListener("click", () => toggleSection(button.dataset.section));
+  }
+  // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
+  // когда хранилище ответит. Ждать его с пустым экраном хуже.
+  Promise.resolve(getSetting(SECTIONS_SETTING))
+    .then((saved) => {
+      for (const id of sectionStartList(saved)) {
+        appCollapsed.add(id);
+        applySectionState(id);
+      }
+    })
+    .catch(() => {});
+}
+
 export function startApp() {
   if (appStarted) return;
   appStarted = true;
   applyStrings(document);
+  wireSections();
   syncProjectName();
   syncCanvasClass();
   for (const id of appPanels.keys()) mountPanel(id);

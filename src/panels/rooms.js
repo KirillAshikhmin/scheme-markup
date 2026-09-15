@@ -1,10 +1,20 @@
-// Помещения объекта: заводятся на ходу из поля «Помещение» в списке меток,
-// правятся и удаляются в своём окне.
+// Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
+// меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
+// меток, — поэтому главное здесь не список, а `roomsEnsure`: одно и то же
+// название не должно плодить двойников.
 //
-// Своего справочника комнат пользователь не заполняет заранее — он пишет
-// «Спальная Оли» в строке метки, и комната появляется. Поэтому главное здесь —
-// не окно, а `roomsEnsure`: одно и то же название не должно плодить двойников.
-import { addRoom, colorsInUse, deleteRoom, findRoom, roomsInOrder, updateRoom } from "../model.js";
+// Отдельного окна «Помещения» больше нет: список и все его действия живут в
+// панели, а прежняя кнопка в справочнике разворачивает раздел и подводит к нему.
+import { PANEL_IDS, registerPanel, revealSection, SECTION_IDS, setSectionBadge } from "../app.js";
+import {
+  addRoom,
+  colorsInUse,
+  deleteRoom,
+  findRoom,
+  outlinesInOrder,
+  roomsInOrder,
+  updateRoom,
+} from "../model.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
 import { colorPickerButton } from "./colorPicker.js";
@@ -54,7 +64,31 @@ export function roomsUsage(project, roomId) {
   return project.marks.filter((mark) => mark.roomId === roomId).length;
 }
 
-export function openRoomsEditor(api) {
+// Строки списка: комната, сколько у неё меток и есть ли контур на этой схеме.
+// Чистая функция — на ней и стоят тесты раздела.
+export function roomsRows(project, schemeId) {
+  const outlines = schemeId ? outlinesInOrder(project, schemeId) : [];
+  return roomsInOrder(project).map((room) => {
+    const outline = outlines.find((item) => item.roomId === room.id) || null;
+    return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
+  });
+}
+
+// Что делает кнопка контура: нарисовать новый или править вершины прежнего.
+// Правка — это режим выбора с выделенным контуром: дальше вершины таскаются
+// на холсте, «+» на стенке добавляет, двойной клик убирает.
+export function roomsOutlineAction(row) {
+  return row && row.outlineId ? "edit" : "draw";
+}
+
+// Прежнее окно помещений уехало в панель; кнопка «Помещения» в справочнике
+// теперь разворачивает раздел, а не открывает второй способ делать то же самое.
+export function openRoomsEditor() {
+  revealSection(SECTION_IDS.rooms);
+}
+
+function mountRoomsPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
   const list = uiEl("div", { class: "rooms" });
   const input = uiEl("input", {
     class: "ui-input",
@@ -64,38 +98,73 @@ export function openRoomsEditor(api) {
       keydown: (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
-        addFromInput();
+        addAndDraw();
       },
     },
   });
+  const addButton = uiButton(strings.rooms.addAndDraw, {
+    class: "ui-btn ui-btn--accent",
+    title: strings.rooms.addAndDrawHint,
+    on: { click: () => addAndDraw() },
+  });
+  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton]));
 
   function project() {
-    return api.getState().project;
-  }
-
-  // Перерисовка приходит подпиской на объект: так окно обновляется и от своей
-  // команды, и от чужой — например, от Ctrl+Z, пока оно открыто.
-  function commit(after, label) {
-    canvasCommit(project(), after, label);
+    return getState().project;
   }
 
   function fail(error) {
-    api.notify(error && error.message ? error.message : String(error), "error");
+    notify(error && error.message ? error.message : String(error), "error");
   }
 
-  function addFromInput() {
+  function commit(after, label, options) {
+    canvasCommit(project(), after, label, options);
+  }
+
+  // Комната заводится и сразу берётся в обводку: режим рисования включается тем
+  // же шагом истории, искать его отдельно не нужно.
+  function addAndDraw() {
+    const state = getState();
     const name = input.value.trim();
-    if (!name) return;
-    if (roomsFind(project(), name)) {
+    if (!state.project || !name) return;
+    const found = roomsFind(state.project, name);
+    if (found) {
       input.value = "";
+      startOutline(found.id);
       return;
     }
     try {
-      commit(addRoom(project(), name).project, strings.history.addRoom);
+      const created = addRoom(state.project, name);
       input.value = "";
+      canvasCommit(state.project, created.project, strings.history.addRoom, {
+        patch: drawPatch(created.room.id),
+      });
+      if (!state.schemeId) notify(strings.canvas.needScheme);
     } catch (error) {
       fail(error);
     }
+  }
+
+  // Без схемы рисовать негде: комната заводится, режим остаётся прежним.
+  function drawPatch(roomId) {
+    return getState().schemeId
+      ? { activeRoomId: roomId, mode: "room", selectedOutlineId: null }
+      : { activeRoomId: roomId };
+  }
+
+  function startOutline(roomId) {
+    const state = getState();
+    if (!state.schemeId) {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
+    if (roomsOutlineAction(row) === "edit") {
+      setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
+      notify(strings.rooms.outlineEditing);
+      return;
+    }
+    setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
   }
 
   function rename(roomId, name) {
@@ -131,61 +200,78 @@ export function openRoomsEditor(api) {
       confirmLabel: strings.dialog.confirm,
     });
     if (!agreed) return;
-    commit(deleteRoom(project(), roomId).project, strings.history.removeRoom);
+    const fresh = project();
+    if (!findRoom(fresh, roomId)) return;
+    canvasCommit(fresh, deleteRoom(fresh, roomId).project, strings.history.removeRoom);
   }
 
   function render() {
-    const rooms = roomsInOrder(project());
-    if (rooms.length === 0) {
+    const state = getState();
+    if (!state.project) {
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
+      setSectionBadge(SECTION_IDS.rooms, "");
+      input.disabled = true;
+      addButton.disabled = true;
+      return;
+    }
+    input.disabled = false;
+    addButton.disabled = false;
+    const rows = roomsRows(state.project, state.schemeId);
+    setSectionBadge(SECTION_IDS.rooms, rows.length || "");
+    if (rows.length === 0) {
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
       return;
     }
     list.replaceChildren(
-      ...rooms.map((room) =>
-        uiEl("div", { class: "rooms__row" }, [
+      ...rows.map((row) => {
+        const drawing = state.mode === "room" && state.activeRoomId === row.room.id;
+        const editing = Boolean(row.outlineId) && state.selectedOutlineId === row.outlineId;
+        const action = roomsOutlineAction(row);
+        return uiEl("div", { class: "rooms__row" + (drawing || editing ? " is-active" : "") }, [
+          roomColorField(state.project, row.room, (color) => recolor(row.room.id, color)),
           uiEl("input", {
-            class: "ui-input",
+            class: "ui-input rooms__name",
             type: "text",
-            value: room.name,
-            on: { change: (event) => rename(room.id, event.target.value) },
+            value: row.room.name,
+            on: { change: (event) => rename(row.room.id, event.target.value) },
           }),
-          roomColorField(project(), room, (color) => recolor(room.id, color)),
+          // Счётчик числом: в узкой колонке «меток: 3» съедало имя комнаты,
+          // а пояснение живёт в подсказке.
           uiEl("span", {
             class: "rooms__count",
-            text: text("rooms.marks", { count: roomsUsage(project(), room.id) }),
+            text: String(row.marks),
+            title: text("rooms.marks", { count: row.marks }),
+          }),
+          uiButton("⬡", {
+            class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
+            title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
+            on: { click: () => startOutline(row.room.id) },
           }),
           uiButton("🗑", {
             class: "ui-btn ui-btn--danger",
             title: strings.rooms.remove,
-            on: { click: () => remove(room.id) },
+            on: { click: () => remove(row.room.id) },
           }),
-        ]),
-      ),
+        ]);
+      }),
     );
   }
 
+  subscribe((state, changed) => {
+    if (
+      "project" in changed ||
+      "schemeId" in changed ||
+      "mode" in changed ||
+      "activeRoomId" in changed ||
+      "selectedOutlineId" in changed
+    ) {
+      render();
+    }
+  });
   render();
-  const unsubscribe = api.subscribe((state, changed) => {
-    if ("project" in changed) render();
-  });
-  const modal = uiModal({
-    title: strings.rooms.title,
-    body: uiEl("div", { class: "rooms__box" }, [
-      list,
-      uiEl("div", { class: "rooms__add" }, [
-        input,
-        uiButton(strings.rooms.add, { class: "ui-btn ui-btn--accent", on: { click: () => addFromInput() } }),
-      ]),
-    ]),
-    actions: [uiButton(strings.dialog.close, { on: { click: () => close() } })],
-    onCancel: () => unsubscribe(),
-  });
-  function close() {
-    unsubscribe();
-    modal.close();
-  }
-  return { close };
 }
+
+registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 // Окно выбора помещения для обводки: список комнат объекта плюс поле «новое».
 // Устроено как выбор типа метки — по той же причине: выбранное помещение

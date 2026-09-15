@@ -2,7 +2,7 @@
 // и обрезка, переименование, порядок, удаление.
 // Холст рисует другой модуль — сюда он приходит только за картинкой:
 // подготовленный план и его размер кладутся в состояние сеанса (`schemeImage`).
-import { PANEL_IDS, registerPanel } from "../app.js";
+import { PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
 import {
   addScheme,
   deleteScheme,
@@ -251,6 +251,8 @@ function mountSchemesPanel(host, api) {
     const project = state.project;
     list.replaceChildren();
     addButton.disabled = !project;
+    // Счётчик в заголовке: свёрнутый раздел не путается с пустым.
+    setSectionBadge(SECTION_IDS.schemes, project && project.schemes.length ? project.schemes.length : "");
     if (!project || project.schemes.length === 0) {
       hint.textContent = project ? strings.schemes.addHint : strings.projects.empty;
       return;

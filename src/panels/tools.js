@@ -1,6 +1,10 @@
-// Панель инструментов: выбранный тип, что ставим, режим блока, размеры,
-// масштаб и отмена. Тип показан крупно и «залипает» — по нему видно, что
-// следующий клик по плану поставит именно его.
+// Два раздела левой колонки. «Метки» — всё про постановку: выбранный тип,
+// что ставим, режим блока, отмена. Тип показан крупно и «залипает» — по нему
+// видно, что следующий клик по плану поставит именно его. «Размеры» — размер
+// меток и подписей и масштаб плана.
+//
+// Помещение для обводки больше не выбирается здесь: его показывает и выбирает
+// раздел «Помещения», где рядом список комнат и кнопки контуров.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
@@ -16,7 +20,7 @@ import {
 } from "../model.js";
 import { uiEl, uiButton } from "./ui.js";
 import { openTypePicker } from "./typePicker.js";
-import { openRoomPicker, roomSwatch } from "./rooms.js";
+import { openRoomPicker } from "./rooms.js";
 import { shapeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
 import {
@@ -56,9 +60,6 @@ function mountToolsPanel(host, api) {
   const { getState, setState, subscribe, notify } = api;
   const box = uiEl("div", { class: "tools" });
   host.replaceChildren(box);
-  // Снимок объекта на время жеста ползунка: пока он есть, панель не
-  // перерисовывается — иначе ползунок исчезал бы из-под пальца.
-  let sizeBefore = null;
 
   function activeType(state) {
     return state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
@@ -148,23 +149,6 @@ function mountToolsPanel(host, api) {
     setState({ mode });
   }
 
-  function setSize(key, value) {
-    const state = getState();
-    if (!state.project) return;
-    if (!sizeBefore) sizeBefore = state.project;
-    setState({ project: updateProject(state.project, { view: { ...state.project.view, [key]: value } }).project });
-  }
-
-  // Конец жеста: один шаг истории на всё перетаскивание ползунка.
-  function commitSize() {
-    if (!sizeBefore) return;
-    const before = sizeBefore;
-    sizeBefore = null;
-    const after = getState().project;
-    if (after !== before) canvasCommit(before, after, strings.history.viewSize);
-    render();
-  }
-
   function setBlockMode(mode) {
     const state = getState();
     const type = activeType(state);
@@ -175,7 +159,6 @@ function mountToolsPanel(host, api) {
   function render() {
     const state = getState();
     const type = activeType(state);
-    const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
     // Метка, у которой можно сменить тип: пока её нет, кнопки нет тоже —
     // серая кнопка, которая никогда не оживает, хуже её отсутствия.
     const selectedId = state.selectedMarkIds[0];
@@ -226,28 +209,6 @@ function mountToolsPanel(host, api) {
       }),
     ]);
 
-    // Помещение для обводки: показано рядом с режимом, как выбранный тип метки.
-    const room = activeRoom(state);
-    const roomButton = uiEl(
-      "button",
-      {
-        class: "tools__room" + (room ? " is-set" : ""),
-        type: "button",
-        title: strings.tools.chooseRoom,
-        on: { click: () => chooseRoom() },
-      },
-      room
-        ? [
-            roomSwatch(room.color, 14),
-            uiEl("span", { class: "tools__typeName", text: room.name }),
-            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
-          ]
-        : [
-            uiEl("span", { class: "tools__typeName", text: strings.tools.noRoom }),
-            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
-          ],
-    );
-
     const blockSelect = uiEl(
       "select",
       {
@@ -287,33 +248,14 @@ function mountToolsPanel(host, api) {
         : null,
       uiEl("p", { class: "tools__label", text: strings.tools.kind }),
       modeRow,
-      uiEl("p", { class: "tools__label", text: strings.tools.room }),
-      roomButton,
       uiEl("p", { class: "tools__label", text: strings.tools.block }),
       blockSelect,
-      uiEl("p", { class: "tools__label", text: strings.tools.sizes }),
-      uiEl("label", { class: "tools__field" }, [
-        uiEl("span", { text: strings.tools.markSize }),
-        toolsSlider(sizes.markSize, TOOLS_MARK_SIZE, (value) => setSize("markSize", value), commitSize),
-      ]),
-      uiEl("label", { class: "tools__field" }, [
-        uiEl("span", { text: strings.tools.labelSize }),
-        toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
-      ]),
-      uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
-      uiEl("div", { class: "tools__row" }, [
-        uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
-        uiButton("+", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
-        uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
-        uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
-      ]),
       uiEl("div", { class: "tools__row" }, [undoButton, redoButton]),
     ];
     box.replaceChildren(...parts.filter(Boolean));
   }
 
   subscribe((state, changed) => {
-    if (sizeBefore) return;
     if (
       "project" in changed ||
       "activeTypeId" in changed ||
@@ -329,4 +271,60 @@ function mountToolsPanel(host, api) {
   render();
 }
 
+// Раздел «Размеры»: размер меток и подписей, масштаб плана.
+function mountSizesPanel(host, api) {
+  const { getState, setState, subscribe } = api;
+  const box = uiEl("div", { class: "tools" });
+  host.replaceChildren(box);
+  // Снимок объекта на время жеста ползунка: пока он есть, раздел не
+  // перерисовывается — иначе ползунок исчезал бы из-под пальца.
+  let sizeBefore = null;
+
+  function setSize(key, value) {
+    const state = getState();
+    if (!state.project) return;
+    if (!sizeBefore) sizeBefore = state.project;
+    setState({ project: updateProject(state.project, { view: { ...state.project.view, [key]: value } }).project });
+  }
+
+  // Конец жеста: один шаг истории на всё перетаскивание ползунка.
+  function commitSize() {
+    if (!sizeBefore) return;
+    const before = sizeBefore;
+    sizeBefore = null;
+    const after = getState().project;
+    if (after !== before) canvasCommit(before, after, strings.history.viewSize);
+    render();
+  }
+
+  function render() {
+    const state = getState();
+    const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
+    box.replaceChildren(
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.markSize }),
+        toolsSlider(sizes.markSize, TOOLS_MARK_SIZE, (value) => setSize("markSize", value), commitSize),
+      ]),
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.labelSize }),
+        toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
+      ]),
+      uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
+      uiEl("div", { class: "tools__row" }, [
+        uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
+        uiButton("+", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
+        uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
+        uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
+      ]),
+    );
+  }
+
+  subscribe((state, changed) => {
+    if (sizeBefore) return;
+    if ("project" in changed) render();
+  });
+  render();
+}
+
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
+registerPanel(PANEL_IDS.sizes, mountSizesPanel);

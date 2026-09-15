@@ -21,14 +21,50 @@
         <div id="header-actions" class="mount"></div>
       </header>
 
+      <!-- Разделы обеих колонок устроены одинаково: кликабельный заголовок
+           сворачивает раздел, заголовок липнет к верху колонки, тело листается
+           под ним. Растущий раздел в колонке один — список, которому нужно
+           место: слева схемы, справа метки. -->
       <aside id="panel-left" class="panel">
-        <section class="panel__section">
-          <h2 class="panel__title" data-text="panels.tools"></h2>
+        <section class="panel__section" data-section-id="marks">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="marks" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.marks"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-tools" class="panel__body mount"></div>
         </section>
-        <section class="panel__section panel__section--grow">
-          <h2 class="panel__title" data-text="panels.schemes"></h2>
+        <section class="panel__section" data-section-id="rooms">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="rooms" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.rooms"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-rooms" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--grow" data-section-id="schemes">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="schemes" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.schemes"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-schemes" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section" data-section-id="sizes">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="sizes" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.sizes"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-sizes" class="panel__body mount"></div>
         </section>
       </aside>
 
@@ -39,12 +75,24 @@
       </main>
 
       <aside id="panel-right" class="panel">
-        <section class="panel__section panel__section--grow">
-          <h2 class="panel__title" data-text="panels.marks"></h2>
+        <section class="panel__section panel__section--grow" data-section-id="markList">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="markList" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.markList"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-marks" class="panel__body mount"></div>
         </section>
-        <section class="panel__section">
-          <h2 class="panel__title" data-text="panels.properties"></h2>
+        <section class="panel__section" data-section-id="properties">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="properties" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.properties"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
           <div id="panel-properties" class="panel__body mount"></div>
         </section>
       </aside>
