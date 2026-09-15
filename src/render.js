@@ -40,6 +40,21 @@ const HANDLE_RADIUS = 9;
 
 const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
 
+// Рамка легенды в высотах строки: отступ до текста, минимальная и предельная
+// ширина. Предел — чтобы длинный код не растянул легенду на полплана.
+const LEGEND_TEXT_EM = 2.2;
+const LEGEND_MIN_EM = 16;
+const LEGEND_MAX_EM = 34;
+
+// Строка легенды по ширине рамки: остаток обрезается многоточием. Мерить
+// нужно тем же `ctx`, которым будем рисовать, — шрифт уже выставлен.
+function legendClip(ctx, value, limit) {
+  if (ctx.measureText(value).width <= limit) return value;
+  let cut = value;
+  while (cut.length > 1 && ctx.measureText(cut + "…").width > limit) cut = cut.slice(0, -1);
+  return cut + "…";
+}
+
 // Контур помещения: тонкая линия цветом комнаты и полупрозрачная заливка.
 // На бумаге («pale») и линия, и заливка бледнее — контур там подсказка,
 // а не главное на листе: главное — метки.
@@ -396,14 +411,19 @@ export function labelBox(project, scheme, target, view) {
   const dx = offset ? offset.dx * state.zoom : radius * LABEL_GAP;
   const dy = offset ? offset.dy * state.zoom : -radius * LABEL_GAP;
   const value = (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
-  return {
-    text: value,
-    x: anchor.x + dx,
-    y: anchor.y + dy,
-    width: Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO),
-    height: font * 1.2,
-    font,
-  };
+  const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
+  let x = anchor.x + dx;
+  // Код типа бывает длинным («ПОДСВЕТКА», шестнадцать букв), и у правого края
+  // такая подпись уходила за план — на выгрузке «весь план» её просто срезало.
+  // Подпись, которую не оттаскивали руками, переходит на левую сторону метки,
+  // если слева помещается; оттащенную не двигает никто.
+  if (!offset) {
+    const left = planToScreen({ x: 0, y: 0 }, scheme, state).x;
+    const right = planToScreen({ x: 1, y: 0 }, scheme, state).x;
+    const mirrored = anchor.x - dx - width;
+    if (x + width > right && mirrored >= left) x = mirrored;
+  }
+  return { text: value, x, y: anchor.y + dy, width, height: font * 1.2, font };
 }
 
 // Подписи рисуются у меток без группы и по одной на группу. Цель группы несёт
@@ -846,11 +866,22 @@ export function drawLegend(ctx, { project, scheme, filter, view, box }) {
   const state = renderView(view);
   const font = Math.max(11, labelFontSize(state) * 0.9);
   const step = font * 1.7;
-  const width = font * 16;
-  const height = step * rows.length + font;
   const x = box ? box.x : 12;
   const y = box ? box.y : 12;
   ctx.save();
+  ctx.font = `${font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  // Ширина рамки — по самой длинной строке: код типа бывает и в шестнадцать
+  // букв, а рамка фиксированной ширины оставляла «ПОДСВЕТКА — подсветка ниши»
+  // лежать поверх плана. Шире предела легенда сама закрывает план, и строка
+  // обрезается многоточием.
+  const textX = font * LEGEND_TEXT_EM;
+  const pad = font * 0.8;
+  const texts = rows.map((row) => legendClip(ctx, `${row.code} — ${row.name}`, font * LEGEND_MAX_EM - textX - pad));
+  const widest = texts.reduce((max, value) => Math.max(max, ctx.measureText(value).width), 0);
+  const width = Math.max(font * LEGEND_MIN_EM, textX + widest + pad);
+  const height = step * rows.length + font;
   ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
   ctx.strokeStyle = "#d0d7de";
   ctx.lineWidth = 1;
@@ -858,14 +889,11 @@ export function drawLegend(ctx, { project, scheme, filter, view, box }) {
   ctx.rect(x, y, width, height);
   ctx.fill();
   ctx.stroke();
-  ctx.font = `${font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
   rows.forEach((row, index) => {
     const lineY = y + font * 0.6 + step * (index + 0.5);
     drawShape(ctx, row.shape, x + font * 1.1, lineY, font * 0.55, row.color);
     ctx.fillStyle = "#1f2328";
-    ctx.fillText(`${row.code} — ${row.name}`, x + font * 2.2, lineY);
+    ctx.fillText(texts[index], x + textX, lineY);
   });
   ctx.restore();
 }

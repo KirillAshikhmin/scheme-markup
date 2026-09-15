@@ -3,7 +3,17 @@
 // текстовых формата; картинку и печать проверяет приёмка.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addMark, addRoom, addScheme, addToGroup, createProject, setMarkNumber, updateMark } from "../src/model.js";
+import {
+  addMark,
+  addRoom,
+  addScheme,
+  addToGroup,
+  addType,
+  createProject,
+  labelOf,
+  setMarkNumber,
+  updateMark,
+} from "../src/model.js";
 import { marksTable, toCsv, toMarkdown, toTsv, typesTable } from "../src/tables.js";
 
 // Комната с рукописного листа: свет, выключатели и розетки одной спальни.
@@ -118,7 +128,7 @@ test("скрытое фильтром в таблицу не попадает: �
   assert.deepEqual(onlySecond.groups[0].rows.map((row) => row.cells[0]), ["Т3"]);
 });
 
-test("блок — одна строка с общей подписью; от урезанного фильтром блока остаются видимые метки", () => {
+test("блок даёт строку на каждую метку; от урезанного фильтром блока остаются видимые", () => {
   const box = tablesFixture();
   const block = addMark(box.project, {
     schemeId: box.schemeId,
@@ -133,15 +143,16 @@ test("блок — одна строка с общей подписью; от у
 
   const table = marksTable(box.project, null, "category");
   const sockets = table.groups.find((group) => group.title === "Розетки");
-  assert.deepEqual(sockets.rows.map((row) => row.cells[0]), ["Р1", "Р2Р3"]);
+  assert.deepEqual(sockets.rows.map((row) => row.cells[0]), ["Р1", "Р2", "Р3"]);
   assert.equal(sockets.rows[1].cells[1], "Розетка");
-  assert.equal(sockets.rows[1].cells[3], "розетки у кровати слева; розетки у кровати справа");
+  assert.equal(sockets.rows[1].cells[3], "розетки у кровати слева");
+  assert.equal(sockets.rows[2].cells[3], "розетки у кровати справа");
 
   const half = marksTable(box.project, { query: "кровати справа" }, "category");
   assert.deepEqual(half.groups[0].rows.map((row) => row.cells[0]), ["Р3"]);
 });
 
-test("смешанный блок — одна строка: общая подпись и оба типа в колонке «Тип»", () => {
+test("смешанный блок — строка на каждую метку, у каждой свой тип", () => {
   const box = tablesFixture();
   const sw = addMark(box.project, {
     schemeId: box.schemeId,
@@ -158,18 +169,24 @@ test("смешанный блок — одна строка: общая подп
 
   const table = marksTable(box.project, null, "category");
   const rows = table.groups.flatMap((group) => group.rows.map((row) => ({ title: group.title, cells: row.cells })));
-  const mixed = rows.filter((row) => row.cells[0] === "В1, Р2Р3");
-  assert.equal(mixed.length, 1);
-  assert.equal(mixed[0].title, "Выключатели");
-  assert.equal(mixed[0].cells[1], "Выключатель, Розетка");
-  assert.equal(mixed[0].cells[3], "у двери");
+  const switches = rows.filter((row) => row.cells[0] === "В1");
+  assert.equal(switches.length, 1);
+  assert.equal(switches[0].title, "Выключатели");
+  assert.equal(switches[0].cells[1], "Выключатель");
+  assert.equal(switches[0].cells[3], "у двери");
 
-  // Лист розеток: от смешанного блока остаются видимые метки со своим типом,
-  // и подпись собирается по тому же правилу, что на плане, — слитно.
+  // Розетки из того же блока стоят своими строками в своей категории:
+  // общей строки «В1, Р2Р3» на листе больше нет.
+  assert.deepEqual(
+    rows.filter((row) => row.title === "Розетки").map((row) => [row.cells[0], row.cells[1]]),
+    [["Р1", "Розетка"], ["Р2", "Розетка"], ["Р3", "Розетка"]],
+  );
+
+  // Лист розеток: от смешанного блока остаются видимые метки, каждая строкой.
   const sockets = box.project.categories.find((category) => category.name === "Розетки");
   const onlySockets = marksTable(box.project, { categoryIds: [sockets.id] }, "category");
   assert.deepEqual(onlySockets.groups.map((group) => group.title), ["Розетки"]);
-  assert.deepEqual(onlySockets.groups[0].rows.map((row) => row.cells[0]), ["Р1", "Р2Р3"]);
+  assert.deepEqual(onlySockets.groups[0].rows.map((row) => row.cells[0]), ["Р1", "Р2", "Р3"]);
   assert.equal(onlySockets.groups[0].rows[1].cells[1], "Розетка");
 });
 
@@ -292,8 +309,9 @@ test("лист, сужённый галочками или поиском, го�
 });
 
 // Повтор номера — приём заказчика: несколько точечных светильников одной группы
-// подписаны Т1. Блок остаётся одной строкой и называет обозначение один раз.
-test("блок с повторённым номером даёт одну строку и одно обозначение", () => {
+// подписаны Т1. Обозначение у них одно — значит, и строка одна, а расположение
+// каждой склеивается в её ячейке.
+test("метки блока с повторённым номером дают одну строку и одно обозначение", () => {
   const box = tablesFixture();
   const added = addToGroup(box.project, box.marks.spot1, "right");
   box.project = setMarkNumber(added.project, added.mark.id, 1).project;
@@ -309,4 +327,47 @@ test("блок с повторённым номером даёт одну стр
     "Спальная Оли",
     "точка под зеркалом; вторая в группе",
   ]);
+});
+
+// Обозначение — это то, что написано на плане: две метки с одним обозначением
+// монтажник читает как одну позицию, и строка у них одна — даже когда они
+// стоят в разных комнатах и в блок не собраны.
+test("метки с совпадающим обозначением сводятся в одну строку и вне блока", () => {
+  const box = tablesFixture();
+  box.project = setMarkNumber(box.project, box.marks.spot2, 1).project;
+  box.project = updateMark(box.project, box.marks.spot2, { roomId: box.rooms.hall }).project;
+
+  const light = marksTable(box.project, null, "category").groups[0];
+  assert.deepEqual(light.rows.map((row) => row.cells[0]), ["Т1", "С1"]);
+  assert.deepEqual(light.rows[0].cells, [
+    "Т1",
+    "Точечный светильник",
+    "Спальная Оли, Холл",
+    "точка под зеркалом; над кроватью",
+    "В33",
+  ]);
+});
+
+// Длинный код («ПОДСВЕТКА» вместо «П») доезжает в колонку целиком: сворачивать
+// в таблице нечего — строка на метку, и обозначение у каждой своё.
+test("длинный код виден в колонке «Обозначение» целиком, а на плане блок свёрнут", () => {
+  const box = tablesFixture();
+  const light = box.project.categories.find((category) => category.name === "Свет");
+  const added = addType(box.project, { code: "ПОДСВЕТКА", name: "Подсветка ниши", categoryId: light.id });
+  box.project = added.project;
+  const block = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: added.type.id,
+    kind: "point",
+    points: [{ x: 0.5, y: 0.5 }, { x: 0.55, y: 0.5 }, { x: 0.6, y: 0.5 }],
+    blockMode: "each",
+  });
+  box.project = block.project;
+
+  const group = marksTable(box.project, null, "type").groups.find(
+    (item) => item.title === "ПОДСВЕТКА — Подсветка ниши",
+  );
+  assert.deepEqual(group.rows.map((row) => row.cells[0]), ["ПОДСВЕТКА1", "ПОДСВЕТКА2", "ПОДСВЕТКА3"]);
+  // Подпись блока на плане заказчик не трогал: она одна и свёрнута в диапазон.
+  assert.equal(labelOf(box.project, block.group.id), "ПОДСВЕТКА1–3");
 });

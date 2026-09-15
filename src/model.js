@@ -47,6 +47,13 @@ export const SHAPE_NAMES = [...SHAPE_PALETTE, ...SHAPE_LEGACY];
 export const BLOCK_MODES = ["each", "single"];
 export const MARK_KINDS = ["point", "line"];
 
+// Код типа: от одной буквы до шестнадцати. Заказчик снял прежний предел в две
+// буквы, чтобы писать «ПОДСВЕТКА», а не «П».
+export const CODE_MAX_LENGTH = 16;
+// До двух букв подпись блока склеивается слитно — «В1В2В3», как на рукописном
+// листе; длинный код так превращается в кашу и сворачивается в диапазон.
+const CODE_GLUE_MAX = 2;
+
 // Шаг соседней точки блока в пикселях плана (доля считается от размера схемы).
 export const BLOCK_STEP_PX = 28;
 // Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
@@ -460,11 +467,20 @@ export function blockLabel(project, markIds) {
     if (named.has(key)) continue;
     named.add(key);
     const sameRun = previous && previous.code === code && mark.number === previous.number + 1;
-    if (sameRun) runs[runs.length - 1] += code + mark.number;
-    else runs.push(code + mark.number);
+    if (sameRun) runs[runs.length - 1].numbers.push(mark.number);
+    else runs.push({ code, numbers: [mark.number] });
     previous = { code, number: mark.number };
   }
-  return runs.join(", ");
+  return runs.map(blockRunLabel).join(", ");
+}
+
+// Подряд идущие номера одного типа: короткий код склеивается слитно («В1В2В3»),
+// длинный сворачивается в диапазон («ПОДСВЕТКА1–3») — иначе подпись блока на
+// плане нечитаема.
+function blockRunLabel(run) {
+  if ([...run.code].length <= CODE_GLUE_MAX) return run.numbers.map((number) => run.code + number).join("");
+  if (run.numbers.length === 1) return run.code + run.numbers[0];
+  return run.code + run.numbers[0] + "–" + run.numbers[run.numbers.length - 1];
 }
 
 // Хозяин новой точки в режиме «одна метка на блок» — метка того же типа:
@@ -708,9 +724,10 @@ export function changeMarkType(project, markId, typeId) {
 
 function normalizeCode(code, project, exceptTypeId) {
   const value = String(code == null ? "" : code).trim();
-  if (!value) throw modelError("codeRequired");
-  if (value.length > 2) throw modelError("codeTooLong");
-  if (!/^[A-Za-zА-Яа-яЁё]{1,2}$/u.test(value)) throw modelError("codeLetters");
+  const limit = { max: CODE_MAX_LENGTH };
+  if (!value) throw modelError("codeRequired", limit);
+  if ([...value].length > CODE_MAX_LENGTH) throw modelError("codeTooLong", limit);
+  if (!/^[A-Za-zА-Яа-яЁё]+$/u.test(value)) throw modelError("codeLetters", limit);
   const taken = project.markTypes.some(
     (type) => type.id !== exceptTypeId && type.code.toUpperCase() === value.toUpperCase(),
   );

@@ -117,13 +117,20 @@
   gap: 6px;
 }
 
+/* Код типа в строке. Длинный код («ПОДСВЕТКА») сжимается многоточием, а не
+   выдавливает поле номера за край панели: панель узкая, 264 пикселя, и рядом
+   стоит полное название типа. */
 .mark-row__label {
   font-weight: 700;
   color: var(--panel-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Номер правится в строке: поле узкое, но цифру видно и попасть в него легко. */
 .mark-row__number {
+  flex: none;
   width: 56px;
   padding: 2px 4px;
   font-weight: 700;
@@ -194,9 +201,11 @@
   min-width: 0;
 }
 
+/* Код типа — до шестнадцати букв (`CODE_MAX_LENGTH`), поэтому поле шире
+   прежних двух знаков; длинное название типа ужимается рядом само. */
 .dict__code {
   flex: none;
-  width: 52px;
+  width: 120px;
   text-align: center;
   font-weight: 700;
 }

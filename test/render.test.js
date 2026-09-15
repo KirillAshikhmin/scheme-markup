@@ -21,6 +21,7 @@ import {
   addScheme,
   addMark,
   addToGroup,
+  addType,
   updateMark,
   labelOf,
   typesInOrder,
@@ -334,4 +335,32 @@ test("справочник упорядочен один раз: категор�
   );
   assert.deepEqual(groups[0].types.map((type) => type.code), ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ"]);
   assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ"]);
+});
+
+// Код типа бывает и в шестнадцать букв. У правого края плана такая подпись
+// уезжала за картинку и на выгруженном PNG обрезалась — а выгрузка «весь план»
+// рисует ровно прямоугольник плана.
+test("длинная подпись у правого края встаёт слева от метки и остаётся на плане", () => {
+  const base = world();
+  const light = base.project.categories.find((item) => item.name === "Свет").id;
+  const added = addType(base.project, { code: "ПОДСВЕТКАПОЛОВАЯ", name: "Подсветка ниши", categoryId: light });
+  const long = addMark(added.project, {
+    schemeId: base.schemeId,
+    typeId: added.type.id,
+    points: [{ x: 0.97, y: 0.5 }],
+  });
+  const scheme = long.project.schemes[0];
+
+  const box = labelBox(long.project, scheme, long.mark, viewOf());
+  assert.equal(box.text, "ПОДСВЕТКАПОЛОВАЯ1");
+  assert.ok(box.x < 970, "подпись осталась справа от метки: " + box.x);
+  assert.ok(box.x + box.width <= 1000, "подпись вылезла за правый край плана: " + (box.x + box.width));
+
+  // Короткой подписи переезжать незачем — она стоит там же, где стояла.
+  const socket = addMark(long.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.9, y: 0.6 }] });
+  assert.equal(labelBox(socket.project, scheme, socket.mark, viewOf()).x, 900 + 10 * renderInternals.LABEL_GAP);
+
+  // Оттащенную руками подпись не двигает никто: где поставили, там и стоит.
+  const moved = updateMark(long.project, long.mark.id, { labelOffset: { dx: 40, dy: 0 } }).project;
+  assert.equal(labelBox(moved, scheme, moved.marks[0], viewOf()).x, 1010);
 });

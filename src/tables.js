@@ -9,7 +9,6 @@
 // рисовать метку на холсте или нет. Своего фильтра здесь нет намеренно:
 // разойдись они, на картинке и в таблице оказалось бы разное.
 import {
-  blockLabel,
   findCategory,
   findRoom,
   findType,
@@ -58,40 +57,34 @@ function tableVisibleMarks(project, filter) {
   return marks;
 }
 
-// Блок — одна строка. На рукописном листе «Р1,Р2 — розетки у кресла» стоит
-// одной строкой, и подпись у блока на плане тоже одна. Когда фильтр оставил
-// от блока часть, подпись собирается из оставшихся меток.
+// Строка — на метку, а не на блок. Блок «Р1 Р2 Р3» заказчик читает как три
+// позиции и требует три строки: в таблице метки блока не сводятся.
+// Сводятся только метки с одинаковым **обозначением** — тот же тип и тот же
+// номер: несколько светильников одной группы, которым проставлен Т1, остаются
+// одной позицией «Т1», где бы они ни стояли. Подпись блока на плане это не
+// трогает — там она по-прежнему одна на блок (model.blockLabel).
 function tableEntries(project, filter) {
   const marks = tableVisibleMarks(project, filter);
   const order = tableTypeOrder(project);
-  const byGroup = new Map();
+  const byLabel = new Map();
   const entries = [];
 
-  const sortKey = (mark) => [order.has(mark.typeId) ? order.get(mark.typeId) : 999, mark.number];
-
   for (const mark of marks) {
-    if (!mark.groupId) {
-      entries.push({ id: mark.id, marks: [mark], groupId: null });
-      continue;
-    }
-    let entry = byGroup.get(mark.groupId);
+    // Ключ — обозначение: тип (код у типов не повторяется) и номер.
+    const key = mark.typeId + "\u0000" + mark.number;
+    let entry = byLabel.get(key);
     if (!entry) {
-      entry = { id: mark.groupId, marks: [], groupId: mark.groupId };
-      byGroup.set(mark.groupId, entry);
+      entry = { id: mark.id, marks: [] };
+      byLabel.set(key, entry);
       entries.push(entry);
     }
     entry.marks.push(mark);
   }
 
   for (const entry of entries) {
-    entry.marks.sort((a, b) => {
-      const [orderA, numberA] = sortKey(a);
-      const [orderB, numberB] = sortKey(b);
-      return orderA === orderB ? numberA - numberB : orderA - orderB;
-    });
     const [head] = entry.marks;
     entry.head = head;
-    entry.order = sortKey(head);
+    entry.order = [order.has(head.typeId) ? order.get(head.typeId) : 999, head.number];
   }
 
   entries.sort((a, b) => (a.order[0] === b.order[0] ? a.order[1] - b.order[1] : a.order[0] - b.order[0]));
@@ -109,24 +102,20 @@ function tableJoin(values, separator) {
   return seen.join(separator);
 }
 
-// Подпись строки собирается из тех меток, что попали на лист: правило одно
-// с планом (model.blockLabel), поэтому «Р2Р3» на схеме и в таблице выглядят
-// одинаково, а урезанный фильтром блок не обещает скрытых меток.
+// Обозначение строки — обозначение метки. У сведённых меток оно одно на всех
+// (на том и сведены), поэтому берётся у ведущей.
 function tableEntryLabel(project, entry) {
-  if (!entry.groupId) return labelOf(project, entry.head.id);
-  return blockLabel(project, entry.marks.map((mark) => mark.id));
+  return labelOf(project, entry.head.id);
 }
 
+// Тип у строки один: обозначение назвало его однозначно. Склейка осталась
+// там, где сведённые метки правда расходятся, — помещение, расположение
+// и «в оригинале» у одного обозначения бывают разные.
 function tableEntryRow(project, entry) {
+  const type = findType(project, entry.head.typeId);
   const cells = [
     tableEntryLabel(project, entry),
-    tableJoin(
-      entry.marks.map((mark) => {
-        const type = findType(project, mark.typeId);
-        return type ? type.name : "";
-      }),
-      ", ",
-    ),
+    type ? type.name : "",
     tableJoin(
       entry.marks.map((mark) => {
         const room = mark.roomId ? findRoom(project, mark.roomId) : null;

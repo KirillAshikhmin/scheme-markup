@@ -8,6 +8,7 @@
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
+  CODE_MAX_LENGTH,
   BLOCK_MODES,
   SHAPE_NAMES,
   SHAPE_PALETTE,
@@ -341,7 +342,7 @@ export function openTypesDictionary(api) {
         type: "text",
         value: type.code,
         title: strings.dictionary.code,
-        attrs: { maxlength: "2" },
+        attrs: { maxlength: String(CODE_MAX_LENGTH) },
         on: {
           change: (event) =>
             commit((current) => updateType(current, type.id, { code: event.target.value }).project, strings.history.editType),
@@ -425,7 +426,7 @@ export function openTypesDictionary(api) {
       class: "ui-input dict__code",
       type: "text",
       placeholder: strings.dictionary.codePlaceholder,
-      attrs: { maxlength: "2" },
+      attrs: { maxlength: String(CODE_MAX_LENGTH) },
     });
     const name = uiEl("input", {
       class: "ui-input",

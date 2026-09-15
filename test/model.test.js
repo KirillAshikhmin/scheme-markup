@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   addCategory,
   BLOCK_STEP_PX,
+  CODE_MAX_LENGTH,
   addMark,
   addRoom,
   addScheme,
@@ -369,13 +370,20 @@ test("разнородная группа перечисляется через 
   assert.equal(labelOf(mixed, block.group.id), "В1, В3, Р1");
 });
 
-test("код типа — одна–две буквы и не повторяется", () => {
+test("код типа — от одной до шестнадцати букв и не повторяется", () => {
   const project = createProject();
   const light = project.categories.find((c) => c.name === "Свет").id;
   assert.throws(() => addType(project, { code: "В", name: "Ещё выключатель", categoryId: light }), {
     message: "Код В уже занят",
   });
-  assert.throws(() => addType(project, { code: "АБВ", name: "Длинный", categoryId: light }), {
+  // прежний предел в две буквы снят заказчиком: «АБВ» теперь законный код
+  const three = addType(project, { code: "АБВ", name: "Три буквы", categoryId: light });
+  assert.equal(three.type.code, "АБВ");
+  assert.equal(CODE_MAX_LENGTH, 16);
+  const sixteen = "ПОДСВЕТКАПОЛОВАЯ"; // ровно 16 букв
+  assert.equal(sixteen.length, 16);
+  assert.equal(addType(project, { code: sixteen, name: "Граница", categoryId: light }).type.code, sixteen);
+  assert.throws(() => addType(project, { code: sixteen + "Я", name: "За границей", categoryId: light }), {
     code: "codeTooLong",
   });
   assert.throws(() => addType(project, { code: "  ", name: "Пустой", categoryId: light }), {
@@ -854,4 +862,68 @@ test("смена типа у метки с ручным номером берё�
   const again = changeMarkType(manual, ids[0], typeId(manual, "С")).project;
   assert.equal(labelOf(again, ids[0]), "С2");
   assert.equal(again.counters["Т"], 40);
+});
+
+test("длинный код даёт обозначение целиком, а блок из него — диапазон", () => {
+  const { project: base, first } = projectWithSchemes();
+  const light = base.categories.find((c) => c.name === "Свет").id;
+  const withLong = addType(base, { code: "ПОДСВЕТКА", name: "Подсветка ниши", categoryId: light });
+  const longId = withLong.type.id;
+
+  const single = addMark(withLong.project, {
+    schemeId: first.id,
+    typeId: longId,
+    kind: "point",
+    points: [{ x: 0.2, y: 0.2 }],
+  });
+  assert.equal(labelOf(single.project, single.mark.id), "ПОДСВЕТКА1");
+
+  const block = addMark(single.project, {
+    schemeId: first.id,
+    typeId: longId,
+    kind: "point",
+    points: [
+      { x: 0.3, y: 0.3 },
+      { x: 0.35, y: 0.3 },
+      { x: 0.4, y: 0.3 },
+    ],
+  });
+  // подряд идущие сворачиваются в диапазон, а не склеиваются в «ПОДСВЕТКА2ПОДСВЕТКА3ПОДСВЕТКА4»
+  assert.equal(labelOf(block.project, block.group.id), "ПОДСВЕТКА2–4");
+
+  const gapped = deleteMark(block.project, block.marks[1].id).project;
+  assert.equal(labelOf(gapped, block.group.id), "ПОДСВЕТКА2, ПОДСВЕТКА4");
+});
+
+test("короткий код по-прежнему склеивается слитно рядом с длинным", () => {
+  const { project: base, first } = projectWithSchemes();
+  const light = base.categories.find((c) => c.name === "Свет").id;
+  const withLong = addType(base, { code: "ЛЕНТА", name: "Лента в нише", categoryId: light });
+
+  const block = addMark(withLong.project, {
+    schemeId: first.id,
+    typeId: typeId(withLong.project, "В"),
+    kind: "point",
+    points: [
+      { x: 0.2, y: 0.2 },
+      { x: 0.25, y: 0.2 },
+      { x: 0.3, y: 0.2 },
+    ],
+  });
+  assert.equal(labelOf(block.project, block.group.id), "В1В2В3");
+
+  // порядок в подписи блока — по справочнику: «Свет» идёт раньше «Выключателей»
+  const mixed = changeMarkType(block.project, block.marks[2].id, withLong.type.id).project;
+  assert.equal(labelOf(mixed, block.group.id), "ЛЕНТА1, В1В2");
+});
+
+test("переименование короткого кода в длинный переносит счётчик и подписи", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "П", 3);
+  const renamed = updateType(filled, typeId(filled, "П"), { code: "ПОДСВЕТКА" }).project;
+
+  assert.equal(labelOf(renamed, ids[2]), "ПОДСВЕТКА3");
+  assert.equal(renamed.counters["ПОДСВЕТКА"], 3);
+  assert.equal(renamed.counters["П"], undefined);
+  assert.deepEqual(validate(renamed), []);
 });

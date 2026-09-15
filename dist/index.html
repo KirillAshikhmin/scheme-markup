@@ -439,13 +439,20 @@
   gap: 6px;
 }
 
+/* Код типа в строке. Длинный код («ПОДСВЕТКА») сжимается многоточием, а не
+   выдавливает поле номера за край панели: панель узкая, 264 пикселя, и рядом
+   стоит полное название типа. */
 .mark-row__label {
   font-weight: 700;
   color: var(--panel-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Номер правится в строке: поле узкое, но цифру видно и попасть в него легко. */
 .mark-row__number {
+  flex: none;
   width: 56px;
   padding: 2px 4px;
   font-weight: 700;
@@ -516,9 +523,11 @@
   min-width: 0;
 }
 
+/* Код типа — до шестнадцати букв (`CODE_MAX_LENGTH`), поэтому поле шире
+   прежних двух знаков; длинное название типа ужимается рядом само. */
 .dict__code {
   flex: none;
-  width: 52px;
+  width: 120px;
   text-align: center;
   font-weight: 700;
 }
@@ -1799,14 +1808,14 @@ const strings = {
   picker: {
     title: "Тип метки",
     search: "Буква или название",
-    empty: "Ничего не нашлось — введите букву нового кода",
+    empty: "Ничего не нашлось — введите код нового типа",
     createTitle: "Нового типа «{code}» ещё нет",
     createName: "Название",
     createNamePlaceholder: "Например: Розетка в полу",
     createCategory: "Категория",
     create: "Создать тип",
     created: "Тип {code} — {name} добавлен",
-    codeHint: "Код типа — одна или две буквы",
+    codeHint: "Код типа — от одной до {max} букв",
   },
   canvas: {
     hintSelect:
@@ -1880,9 +1889,9 @@ const strings = {
     shortOutline: "Контур помещения — не меньше трёх вершин",
     outlineNotFound: "Контур помещения не найден",
     outlinePointNotFound: "Вершина контура не найдена",
-    codeRequired: "Нужен код типа — одна или две буквы",
-    codeTooLong: "Код типа — не больше двух букв",
-    codeLetters: "Код типа — только буквы, одна или две",
+    codeRequired: "Нужен код типа — от одной до {max} букв",
+    codeTooLong: "Код типа — не больше {max} букв",
+    codeLetters: "Код типа — только буквы, без цифр и знаков",
     blockOnlyForPoints: "Блок собирается только из точек, линию в блок не поставить",
     codeTaken: "Код {code} уже занят",
     nameRequired: "Нужно название",
@@ -2272,6 +2281,13 @@ const SHAPE_LEGACY = ["hexagon", "diamond-fill", "circle-half"];
 const SHAPE_NAMES = [...SHAPE_PALETTE, ...SHAPE_LEGACY];
 const BLOCK_MODES = ["each", "single"];
 const MARK_KINDS = ["point", "line"];
+
+// Код типа: от одной буквы до шестнадцати. Заказчик снял прежний предел в две
+// буквы, чтобы писать «ПОДСВЕТКА», а не «П».
+const CODE_MAX_LENGTH = 16;
+// До двух букв подпись блока склеивается слитно — «В1В2В3», как на рукописном
+// листе; длинный код так превращается в кашу и сворачивается в диапазон.
+const CODE_GLUE_MAX = 2;
 
 // Шаг соседней точки блока в пикселях плана (доля считается от размера схемы).
 const BLOCK_STEP_PX = 28;
@@ -2672,11 +2688,20 @@ function blockLabel(project, markIds) {
     if (named.has(key)) continue;
     named.add(key);
     const sameRun = previous && previous.code === code && mark.number === previous.number + 1;
-    if (sameRun) runs[runs.length - 1] += code + mark.number;
-    else runs.push(code + mark.number);
+    if (sameRun) runs[runs.length - 1].numbers.push(mark.number);
+    else runs.push({ code, numbers: [mark.number] });
     previous = { code, number: mark.number };
   }
-  return runs.join(", ");
+  return runs.map(blockRunLabel).join(", ");
+}
+
+// Подряд идущие номера одного типа: короткий код склеивается слитно («В1В2В3»),
+// длинный сворачивается в диапазон («ПОДСВЕТКА1–3») — иначе подпись блока на
+// плане нечитаема.
+function blockRunLabel(run) {
+  if ([...run.code].length <= CODE_GLUE_MAX) return run.numbers.map((number) => run.code + number).join("");
+  if (run.numbers.length === 1) return run.code + run.numbers[0];
+  return run.code + run.numbers[0] + "–" + run.numbers[run.numbers.length - 1];
 }
 
 // Хозяин новой точки в режиме «одна метка на блок» — метка того же типа:
@@ -2919,9 +2944,10 @@ function changeMarkType(project, markId, typeId) {
 
 function normalizeCode(code, project, exceptTypeId) {
   const value = String(code == null ? "" : code).trim();
-  if (!value) throw modelError("codeRequired");
-  if (value.length > 2) throw modelError("codeTooLong");
-  if (!/^[A-Za-zА-Яа-яЁё]{1,2}$/u.test(value)) throw modelError("codeLetters");
+  const limit = { max: CODE_MAX_LENGTH };
+  if (!value) throw modelError("codeRequired", limit);
+  if ([...value].length > CODE_MAX_LENGTH) throw modelError("codeTooLong", limit);
+  if (!/^[A-Za-zА-Яа-яЁё]+$/u.test(value)) throw modelError("codeLetters", limit);
   const taken = project.markTypes.some(
     (type) => type.id !== exceptTypeId && type.code.toUpperCase() === value.toUpperCase(),
   );
@@ -4252,6 +4278,21 @@ const HANDLE_RADIUS = 9;
 
 const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
 
+// Рамка легенды в высотах строки: отступ до текста, минимальная и предельная
+// ширина. Предел — чтобы длинный код не растянул легенду на полплана.
+const LEGEND_TEXT_EM = 2.2;
+const LEGEND_MIN_EM = 16;
+const LEGEND_MAX_EM = 34;
+
+// Строка легенды по ширине рамки: остаток обрезается многоточием. Мерить
+// нужно тем же `ctx`, которым будем рисовать, — шрифт уже выставлен.
+function legendClip(ctx, value, limit) {
+  if (ctx.measureText(value).width <= limit) return value;
+  let cut = value;
+  while (cut.length > 1 && ctx.measureText(cut + "…").width > limit) cut = cut.slice(0, -1);
+  return cut + "…";
+}
+
 // Контур помещения: тонкая линия цветом комнаты и полупрозрачная заливка.
 // На бумаге («pale») и линия, и заливка бледнее — контур там подсказка,
 // а не главное на листе: главное — метки.
@@ -4604,14 +4645,19 @@ function labelBox(project, scheme, target, view) {
   const dx = offset ? offset.dx * state.zoom : radius * LABEL_GAP;
   const dy = offset ? offset.dy * state.zoom : -radius * LABEL_GAP;
   const value = (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
-  return {
-    text: value,
-    x: anchor.x + dx,
-    y: anchor.y + dy,
-    width: Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO),
-    height: font * 1.2,
-    font,
-  };
+  const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
+  let x = anchor.x + dx;
+  // Код типа бывает длинным («ПОДСВЕТКА», шестнадцать букв), и у правого края
+  // такая подпись уходила за план — на выгрузке «весь план» её просто срезало.
+  // Подпись, которую не оттаскивали руками, переходит на левую сторону метки,
+  // если слева помещается; оттащенную не двигает никто.
+  if (!offset) {
+    const left = planToScreen({ x: 0, y: 0 }, scheme, state).x;
+    const right = planToScreen({ x: 1, y: 0 }, scheme, state).x;
+    const mirrored = anchor.x - dx - width;
+    if (x + width > right && mirrored >= left) x = mirrored;
+  }
+  return { text: value, x, y: anchor.y + dy, width, height: font * 1.2, font };
 }
 
 // Подписи рисуются у меток без группы и по одной на группу. Цель группы несёт
@@ -5053,11 +5099,22 @@ function drawLegend(ctx, { project, scheme, filter, view, box }) {
   const state = renderView(view);
   const font = Math.max(11, labelFontSize(state) * 0.9);
   const step = font * 1.7;
-  const width = font * 16;
-  const height = step * rows.length + font;
   const x = box ? box.x : 12;
   const y = box ? box.y : 12;
   ctx.save();
+  ctx.font = `${font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  // Ширина рамки — по самой длинной строке: код типа бывает и в шестнадцать
+  // букв, а рамка фиксированной ширины оставляла «ПОДСВЕТКА — подсветка ниши»
+  // лежать поверх плана. Шире предела легенда сама закрывает план, и строка
+  // обрезается многоточием.
+  const textX = font * LEGEND_TEXT_EM;
+  const pad = font * 0.8;
+  const texts = rows.map((row) => legendClip(ctx, `${row.code} — ${row.name}`, font * LEGEND_MAX_EM - textX - pad));
+  const widest = texts.reduce((max, value) => Math.max(max, ctx.measureText(value).width), 0);
+  const width = Math.max(font * LEGEND_MIN_EM, textX + widest + pad);
+  const height = step * rows.length + font;
   ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
   ctx.strokeStyle = "#d0d7de";
   ctx.lineWidth = 1;
@@ -5065,14 +5122,11 @@ function drawLegend(ctx, { project, scheme, filter, view, box }) {
   ctx.rect(x, y, width, height);
   ctx.fill();
   ctx.stroke();
-  ctx.font = `${font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
   rows.forEach((row, index) => {
     const lineY = y + font * 0.6 + step * (index + 0.5);
     drawShape(ctx, row.shape, x + font * 1.1, lineY, font * 0.55, row.color);
     ctx.fillStyle = "#1f2328";
-    ctx.fillText(`${row.code} — ${row.name}`, x + font * 2.2, lineY);
+    ctx.fillText(texts[index], x + textX, lineY);
   });
   ctx.restore();
 }
@@ -6457,40 +6511,34 @@ function tableVisibleMarks(project, filter) {
   return marks;
 }
 
-// Блок — одна строка. На рукописном листе «Р1,Р2 — розетки у кресла» стоит
-// одной строкой, и подпись у блока на плане тоже одна. Когда фильтр оставил
-// от блока часть, подпись собирается из оставшихся меток.
+// Строка — на метку, а не на блок. Блок «Р1 Р2 Р3» заказчик читает как три
+// позиции и требует три строки: в таблице метки блока не сводятся.
+// Сводятся только метки с одинаковым **обозначением** — тот же тип и тот же
+// номер: несколько светильников одной группы, которым проставлен Т1, остаются
+// одной позицией «Т1», где бы они ни стояли. Подпись блока на плане это не
+// трогает — там она по-прежнему одна на блок (model.blockLabel).
 function tableEntries(project, filter) {
   const marks = tableVisibleMarks(project, filter);
   const order = tableTypeOrder(project);
-  const byGroup = new Map();
+  const byLabel = new Map();
   const entries = [];
 
-  const sortKey = (mark) => [order.has(mark.typeId) ? order.get(mark.typeId) : 999, mark.number];
-
   for (const mark of marks) {
-    if (!mark.groupId) {
-      entries.push({ id: mark.id, marks: [mark], groupId: null });
-      continue;
-    }
-    let entry = byGroup.get(mark.groupId);
+    // Ключ — обозначение: тип (код у типов не повторяется) и номер.
+    const key = mark.typeId + "\u0000" + mark.number;
+    let entry = byLabel.get(key);
     if (!entry) {
-      entry = { id: mark.groupId, marks: [], groupId: mark.groupId };
-      byGroup.set(mark.groupId, entry);
+      entry = { id: mark.id, marks: [] };
+      byLabel.set(key, entry);
       entries.push(entry);
     }
     entry.marks.push(mark);
   }
 
   for (const entry of entries) {
-    entry.marks.sort((a, b) => {
-      const [orderA, numberA] = sortKey(a);
-      const [orderB, numberB] = sortKey(b);
-      return orderA === orderB ? numberA - numberB : orderA - orderB;
-    });
     const [head] = entry.marks;
     entry.head = head;
-    entry.order = sortKey(head);
+    entry.order = [order.has(head.typeId) ? order.get(head.typeId) : 999, head.number];
   }
 
   entries.sort((a, b) => (a.order[0] === b.order[0] ? a.order[1] - b.order[1] : a.order[0] - b.order[0]));
@@ -6508,24 +6556,20 @@ function tableJoin(values, separator) {
   return seen.join(separator);
 }
 
-// Подпись строки собирается из тех меток, что попали на лист: правило одно
-// с планом (model.blockLabel), поэтому «Р2Р3» на схеме и в таблице выглядят
-// одинаково, а урезанный фильтром блок не обещает скрытых меток.
+// Обозначение строки — обозначение метки. У сведённых меток оно одно на всех
+// (на том и сведены), поэтому берётся у ведущей.
 function tableEntryLabel(project, entry) {
-  if (!entry.groupId) return labelOf(project, entry.head.id);
-  return blockLabel(project, entry.marks.map((mark) => mark.id));
+  return labelOf(project, entry.head.id);
 }
 
+// Тип у строки один: обозначение назвало его однозначно. Склейка осталась
+// там, где сведённые метки правда расходятся, — помещение, расположение
+// и «в оригинале» у одного обозначения бывают разные.
 function tableEntryRow(project, entry) {
+  const type = findType(project, entry.head.typeId);
   const cells = [
     tableEntryLabel(project, entry),
-    tableJoin(
-      entry.marks.map((mark) => {
-        const type = findType(project, mark.typeId);
-        return type ? type.name : "";
-      }),
-      ", ",
-    ),
+    type ? type.name : "",
     tableJoin(
       entry.marks.map((mark) => {
         const room = mark.roomId ? findRoom(project, mark.roomId) : null;
@@ -8530,7 +8574,7 @@ function openTypesDictionary(api) {
         type: "text",
         value: type.code,
         title: strings.dictionary.code,
-        attrs: { maxlength: "2" },
+        attrs: { maxlength: String(CODE_MAX_LENGTH) },
         on: {
           change: (event) =>
             commit((current) => updateType(current, type.id, { code: event.target.value }).project, strings.history.editType),
@@ -8614,7 +8658,7 @@ function openTypesDictionary(api) {
       class: "ui-input dict__code",
       type: "text",
       placeholder: strings.dictionary.codePlaceholder,
-      attrs: { maxlength: "2" },
+      attrs: { maxlength: String(CODE_MAX_LENGTH) },
     });
     const name = uiEl("input", {
       class: "ui-input",
@@ -10423,7 +10467,14 @@ registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
 
 
 
-const PICKER_CODE_RE = /^[A-Za-zА-Яа-яЁё]{1,2}$/u;
+// Что годится в новый код прямо из строки поиска. Предел длины — у модели
+// (`CODE_MAX_LENGTH`): здесь он только проверяется, чтобы окно не предлагало
+// создать тип, который модель тут же отвергнет.
+const PICKER_CODE_RE = /^[A-Za-zА-Яа-яЁё]+$/u;
+
+function pickerCodeOk(query) {
+  return PICKER_CODE_RE.test(query) && [...query].length <= CODE_MAX_LENGTH;
+}
 
 // Значок типа — цвет категории и форма из справочника, нарисованные общим
 // `render.shapeIcon`: в списке видно ровно то, что попадёт на план.
@@ -10490,7 +10541,7 @@ function openTypePicker(project, options = {}) {
     function renderCreate(query) {
       createBox.replaceChildren();
       error.textContent = "";
-      if (!PICKER_CODE_RE.test(query)) return;
+      if (!pickerCodeOk(query)) return;
       const taken = current.markTypes.some((type) => type.code.toUpperCase() === query.toUpperCase());
       if (taken) return;
       createName = uiEl("input", {
@@ -10507,7 +10558,7 @@ function openTypePicker(project, options = {}) {
       );
       createBox.append(
         uiEl("p", { class: "picker__createTitle", text: text("picker.createTitle", { code: query }) }),
-        uiEl("p", { class: "picker__createTitle", text: strings.picker.codeHint }),
+        uiEl("p", { class: "picker__createTitle", text: text("picker.codeHint", { max: CODE_MAX_LENGTH }) }),
         uiEl("label", { class: "picker__field" }, [
           uiEl("span", { text: strings.picker.createName }),
           createName,
