@@ -104,6 +104,42 @@ export function canvasPanSpeed(heldMs) {
   return CANVAS_PAN_SPEED_MIN + (CANVAS_PAN_SPEED_MAX - CANVAS_PAN_SPEED_MIN) * ramp * ramp;
 }
 
+// ——— колесо и трекпад ————————————————————————————————————————————————
+//
+// Браузер шлёт двухпальцевый скролл трекпада теми же событиями, что и колесо
+// мыши, а различить их надо: колесом заказчик зумит каждый день, двумя пальцами
+// привык листать. Цена ошибки несимметрична — сломанный зум мыши хуже, чем
+// неузнанный трекпад, — поэтому «листать» включается только по прямой примете
+// трекпада, а всё сомнительное остаётся зумом.
+//
+// Приметы, по порядку надёжности:
+// 1. `ctrlKey` — щипок на трекпаде приходит колесом с поднятым ctrlKey (и это
+//    же Ctrl+колесо у мыши). Зум всегда, даже посреди прокрутки.
+// 2. Строчный и постраничный режимы (`deltaMode` не ноль) шлёт только колесо.
+// 3. Горизонтальная составляющая, дробный шаг или шаг мельче щелчка колеса —
+//    трекпад. Щелчок колеса — это ровно 100 (Chrome) или 120 пикселей целым
+//    числом и без горизонтали.
+// 4. Серия: внутри одного жеста решение не меняется. Палец разгоняется, и к
+//    середине маха шаги становятся крупными и целыми — по приметам уже колесо;
+//    без серии мах переключался бы на зум на полпути.
+
+// Пауза, после которой события колеса считаются новым жестом.
+const CANVAS_WHEEL_STREAK_MS = 220;
+// Мельче этого шага щелчка у колеса мыши не бывает.
+const CANVAS_WHEEL_NOTCH_PX = 40;
+
+// Что делать с событием колеса: `zoom` или `pan`. `streak` — `{kind, time}`
+// предыдущего события или `null`.
+export function canvasWheelKind(event, streak) {
+  if (event.ctrlKey || event.metaKey) return "zoom";
+  if (event.deltaMode !== 0) return "zoom";
+  if (streak && streak.kind && event.timeStamp - streak.time <= CANVAS_WHEEL_STREAK_MS) return streak.kind;
+  const sideways = event.deltaX !== 0;
+  const fractional = !Number.isInteger(event.deltaY) || !Number.isInteger(event.deltaX);
+  const small = Math.abs(event.deltaY) < CANVAS_WHEEL_NOTCH_PX;
+  return sideways || fractional || small ? "pan" : "zoom";
+}
+
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
 // Смещение курсора, после которого клик считается перетаскиванием.
@@ -124,6 +160,8 @@ let canvasFitted = null;
 let canvasProjectId = null;
 // Зажатые стрелки: клавиша → время нажатия. Их может быть две сразу — тогда
 // план едет по диагонали, как и должен.
+// Последнее событие колеса: по нему тянется решение внутри одного жеста.
+let canvasWheelStreak = null;
 let canvasPanHeld = new Map();
 let canvasPanFrame = 0;
 let canvasPanClock = 0;
@@ -1033,6 +1071,14 @@ function canvasDoubleClick(event) {
 function canvasWheel(event) {
   if (uiDialogDepth() > 0) return;
   event.preventDefault();
+  const kind = canvasWheelKind(event, canvasWheelStreak);
+  canvasWheelStreak = { kind, time: event.timeStamp };
+  if (kind === "pan") {
+    // Листаем как прокрутка — в ту же сторону, что и стрелки: жест вниз
+    // показывает то, что ниже, поэтому содержимое уезжает вверх.
+    canvasPanBy(-event.deltaX, -event.deltaY);
+    return;
+  }
   const step = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
   canvasZoomAt(canvasPointOf(event), Math.exp(-step * 0.0015));
 }
