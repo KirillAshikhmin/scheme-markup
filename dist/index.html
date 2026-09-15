@@ -1982,11 +1982,11 @@ const strings = {
   },
   canvas: {
     hintSelect:
-      "Выберите тип метки, чтобы ставить метки по плану. Клик по стенке контура выделяет помещение.",
+      "Выберите тип метки, чтобы ставить метки по плану. Клик по стенке контура выделяет помещение. Стрелки двигают план, удержание разгоняет ход; «+» и «−» меняют масштаб.",
     hintPoint:
       "Клик ставит {label}. Ручки «+» у выделенной метки ставят рядом {label} — так в одной рамке собираются выключатель и розетка. Esc снимает выделение и прячет ручки, второй Esc выходит из режима.",
     hintSelectMode:
-      "Клик выбирает метку, перетаскивание двигает её или подпись, Delete удаляет, Esc снимает выделение. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает.",
+      "Клик выбирает метку, перетаскивание двигает её или подпись, Delete удаляет, Esc снимает выделение. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки двигают план, удержание разгоняет ход; «+» и «−» меняют масштаб.",
     hintLine:
       "Клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить. Направление липнет к ровным углам, у курсора виден градус; Alt — рисовать свободно.",
     // Градус тянущегося отрезка — у курсора. «Ровно» означает, что направление
@@ -6788,6 +6788,51 @@ function formatMegabytes(bytes) {
 
 
 
+// ——— клавиатура: ход и масштаб ————————————————————————————————————————
+//
+// Стрелки везут план в сторону стрелки — ту же, в какую его тащит рука:
+// перетаскивание двигает план за курсором, и клавиша ведёт себя так же, иначе
+// две привычки в одном холсте противоречат друг другу.
+//
+// Короткое нажатие — один шаг: план подвинуть на чуть-чуть. Удержание после
+// небольшой задержки переходит в непрерывный ход с разгоном — мягко в начале
+// (чтобы не проскочить) и быстро дальше (чтобы одним нажатием дотащить план
+// через весь экран).
+
+// Шаг короткого нажатия, экранные пиксели.
+const CANVAS_PAN_STEP_PX = 24;
+// Сколько клавишу держат, прежде чем начнётся непрерывный ход.
+const CANVAS_PAN_HOLD_MS = 180;
+// Скорость непрерывного хода в начале и на потолке, пикселей в секунду.
+const CANVAS_PAN_SPEED_MIN = 240;
+const CANVAS_PAN_SPEED_MAX = 2400;
+// За столько разгон доходит до потолка.
+const CANVAS_PAN_RAMP_MS = 1300;
+// Потолок шага кадра: вкладку свернули на минуту — план не должен улететь.
+const CANVAS_PAN_FRAME_MS = 64;
+// Во сколько раз «+» и «−» меняют масштаб за нажатие.
+const CANVAS_ZOOM_KEY_STEP = 1.2;
+
+// Куда едет план по каждой стрелке.
+const CANVAS_PAN_KEYS = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+};
+
+// Скорость непрерывного хода по времени удержания клавиши, пикселей в секунду.
+// До конца задержки — ноль: там работает шаг короткого нажатия. Дальше квадрат
+// доли разгона: прибавка скорости со временем растёт, поэтому начало мягкое,
+// а конец быстрый. Потолок обязателен — без него удержание на секунду уносит
+// план в другой конец схемы, и обратно его уже не поймать.
+function canvasPanSpeed(heldMs) {
+  const running = heldMs - CANVAS_PAN_HOLD_MS;
+  if (!(running > 0)) return 0;
+  const ramp = Math.min(1, running / CANVAS_PAN_RAMP_MS);
+  return CANVAS_PAN_SPEED_MIN + (CANVAS_PAN_SPEED_MAX - CANVAS_PAN_SPEED_MIN) * ramp * ramp;
+}
+
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
 // Смещение курсора, после которого клик считается перетаскиванием.
@@ -6806,6 +6851,107 @@ let canvasSpace = false;
 let canvasFrame = 0;
 let canvasFitted = null;
 let canvasProjectId = null;
+// Зажатые стрелки: клавиша → время нажатия. Их может быть две сразу — тогда
+// план едет по диагонали, как и должен.
+let canvasPanHeld = new Map();
+let canvasPanFrame = 0;
+let canvasPanClock = 0;
+
+function canvasNow() {
+  const clock = typeof performance === "object" && performance !== null ? performance : null;
+  return clock && typeof clock.now === "function" ? clock.now() : Date.now();
+}
+
+function canvasFrameRequest(fn) {
+  return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, 16);
+}
+
+function canvasFrameCancel(id) {
+  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
+  else clearTimeout(id);
+}
+
+function canvasPanBy(dx, dy) {
+  const state = canvasState();
+  if (!state) return;
+  canvasApi.setState({
+    view: { ...state.view, offsetX: state.view.offsetX + dx, offsetY: state.view.offsetY + dy },
+  });
+}
+
+// Клавиатура холста. Стрелки и «+»/«−» холст берёт себе только тогда, когда
+// клавиатура ничья: их ждут окно выбора типа и окно цвета (там стрелки ходят
+// по колонкам и по полю насыщенности), поля ввода и списки панелей. Диалоги и
+// поля отсекаются выше, в canvasKeyDown; здесь остаётся третий случай —
+// фокус на кнопке или списке панели. Признак «человек работает с холстом»:
+// фокуса нет вовсе (цель события — документ, так и бывает после клика по
+// холсту: он фокус не берёт) либо фокус внутри самого холста.
+function canvasKeyboardOwner(event) {
+  const state = canvasState();
+  if (!state || !state.schemeId) return false;
+  const target = event.target;
+  if (!target || target === document || target === document.body) return true;
+  return Boolean(canvasHost && typeof canvasHost.contains === "function" && canvasHost.contains(target));
+}
+
+// Первое нажатие стрелки: один шаг сразу и завод непрерывного хода. Повторы
+// нажатия от системы пропускаются — ход ведут кадры, а не автоповтор.
+function canvasPanKeyDown(code) {
+  const direction = CANVAS_PAN_KEYS[code];
+  if (!direction) return false;
+  if (!canvasPanHeld.has(code)) {
+    canvasPanHeld.set(code, canvasNow());
+    canvasPanClock = canvasNow();
+    canvasPanBy(direction.x * CANVAS_PAN_STEP_PX, direction.y * CANVAS_PAN_STEP_PX);
+    canvasPanSchedule();
+  }
+  return true;
+}
+
+function canvasPanSchedule() {
+  if (canvasPanFrame || canvasPanHeld.size === 0) return;
+  canvasPanFrame = canvasFrameRequest(canvasPanTick);
+}
+
+function canvasPanTick() {
+  canvasPanFrame = 0;
+  if (canvasPanHeld.size === 0) return;
+  const time = canvasNow();
+  const step = Math.min(CANVAS_PAN_FRAME_MS, time - canvasPanClock) / 1000;
+  canvasPanClock = time;
+  let dx = 0;
+  let dy = 0;
+  for (const [code, since] of canvasPanHeld) {
+    const speed = canvasPanSpeed(time - since) * step;
+    const direction = CANVAS_PAN_KEYS[code];
+    dx += direction.x * speed;
+    dy += direction.y * speed;
+  }
+  if (dx !== 0 || dy !== 0) canvasPanBy(dx, dy);
+  canvasPanSchedule();
+}
+
+// Клавишу отпустили — или её отпустили за нас: окно увели, открылся диалог.
+// Без этого зажатая стрелка уезжает вместе с фокусом и не останавливается.
+function canvasPanRelease(code) {
+  if (code) canvasPanHeld.delete(code);
+  else canvasPanHeld.clear();
+  if (canvasPanHeld.size > 0 || !canvasPanFrame) return;
+  canvasFrameCancel(canvasPanFrame);
+  canvasPanFrame = 0;
+}
+
+// «+» на основном ряду — это Shift и «=», поэтому «=» увеличивает тоже;
+// на цифровой клавиатуре свои клавиши. Ноль означает «не про масштаб».
+function canvasZoomKey(event) {
+  if (event.code === "Equal" || event.code === "NumpadAdd" || event.key === "+" || event.key === "=") {
+    return CANVAS_ZOOM_KEY_STEP;
+  }
+  if (event.code === "Minus" || event.code === "NumpadSubtract" || event.key === "-" || event.key === "_") {
+    return 1 / CANVAS_ZOOM_KEY_STEP;
+  }
+  return 0;
+}
 
 function canvasState() {
   return canvasApi ? canvasApi.getState() : null;
@@ -7642,6 +7788,19 @@ function canvasKeyDown(event) {
     return;
   }
   if (control) return;
+  // Ход и масштаб — до всего остального, но только когда клавиатура ничья.
+  if (canvasKeyboardOwner(event)) {
+    if (canvasPanKeyDown(event.code)) {
+      event.preventDefault();
+      return;
+    }
+    const factor = canvasZoomKey(event);
+    if (factor) {
+      event.preventDefault();
+      canvasZoomBy(factor);
+      return;
+    }
+  }
   if (event.code === "Space") {
     canvasSpace = true;
     if (canvasNode) canvasNode.style.cursor = "grab";
@@ -7683,7 +7842,16 @@ function canvasKeyDown(event) {
 }
 
 function canvasKeyUp(event) {
+  canvasPanRelease(event.code);
   if (event.code !== "Space") return;
+  canvasSpace = false;
+  canvasSyncCursor();
+}
+
+// Окно увели — зажатые клавиши отпустить некому: своего keyup они уже не
+// пришлют, и план уехал бы дальше сам по себе.
+function canvasWindowBlur() {
+  canvasPanRelease(null);
   canvasSpace = false;
   canvasSyncCursor();
 }
@@ -7718,6 +7886,7 @@ function mountCanvas(host, api) {
   if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => canvasResize()).observe(host);
   } else {
+    window.addEventListener("blur", canvasWindowBlur);
     window.addEventListener("resize", canvasResize);
   }
 
