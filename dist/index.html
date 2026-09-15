@@ -585,19 +585,57 @@
   gap: 8px;
 }
 
+/* Свёрнутая строка — одна строка списка: значок и обозначение. Раскрывается
+   выделением: выделенная метка раскрыта, остальные свёрнуты, поэтому клик по
+   метке на плане и клик по строке показывают одно и то же. */
 .mark-row {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px;
-  border: 1px solid var(--panel-line);
+  padding: 4px 6px;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: var(--panel-bg-deep);
   cursor: pointer;
 }
 
+.mark-row:hover {
+  border-color: var(--panel-line);
+}
+
+.mark-row.is-open {
+  padding: 6px;
+  border-color: var(--panel-line);
+}
+
+/* Галочка раскрытия: состояние строки видно до нажатия. */
+.mark-row__toggle {
+  flex: none;
+  width: 10px;
+  color: var(--panel-muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.mark-row__toggle::before {
+  content: "▸";
+}
+
+.mark-row.is-open .mark-row__toggle::before {
+  content: "▾";
+}
+
 .mark-row.is-current {
   border-color: var(--accent);
+}
+
+/* Свёрнутая строка: обозначение целиком, не обрезается соседями. */
+.mark-row:not(.is-open) .mark-row__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mark-row__head {
@@ -12438,6 +12476,114 @@ function filtersBox(api) {
   return { node, render };
 }
 
+// src/panels/markControls.js
+// Окно «чем управляет»: выбор других меток объекта с фильтром по помещению.
+//
+// Отдельный файл, потому что это диалог со своей жизнью: список меток сбоку
+// открывает его и получает ответ, а как он устроен внутри — его дело. В самом
+// списке этому коду тесно: строка метки и так собирает семь полей.
+
+
+
+
+
+// Кандидаты в подчинённые: все метки объекта, кроме самой, в том же порядке,
+// что и список сбоку, — схема за схемой, внутри по справочнику и номеру.
+// Помещение сужает список: с рукописного листа «В3 — на В33 (Т1, Т2, Т3)»
+// видно, что выключатель ищут среди светильников своей комнаты.
+function markControlsCandidates(project, markId, roomId) {
+  const rows = [];
+  for (const scheme of schemesInOrder(project)) {
+    for (const row of filtersMarkRows(project, scheme.id, { roomId: roomId || null })) {
+      if (row.mark.id !== markId) rows.push({ ...row, scheme });
+    }
+  }
+  return rows;
+}
+
+// Окно выбора — кирпичами из ui.js: стопка диалогов, Escape и возврат фокуса
+// у них общие. Отвечает списком отмеченных меток или null, если передумали.
+function openMarkControlsPicker(project, markId) {
+  return new Promise((resolve) => {
+    const mark = findMark(project, markId);
+    const chosen = new Set(markControlIds(mark));
+    const manySchemes = schemesInOrder(project).length > 1;
+    const list = uiEl("div", { class: "controls-pick__list" });
+    const note = uiEl("p", { class: "controls-pick__note" });
+    const rooms = uiEl("select", {
+      class: "ui-select",
+      title: strings.controls.room,
+      on: { change: () => renderList() },
+    });
+    rooms.append(uiEl("option", { value: "", text: strings.filters.allRooms }));
+    for (const room of roomsInOrder(project)) {
+      rooms.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+
+    function renderNote() {
+      note.textContent = text("controls.chosen", { count: chosen.size });
+    }
+
+    function renderList() {
+      const rows = markControlsCandidates(project, markId, rooms.value);
+      if (rows.length === 0) {
+        const others = project.marks.some((item) => item.id !== markId);
+        list.replaceChildren(
+          uiEl("p", { class: "panel__empty", text: others ? strings.controls.nothingFound : strings.controls.empty }),
+        );
+        return;
+      }
+      list.replaceChildren(
+        ...rows.map((row) => {
+          const box = uiEl("input", { class: "controls-pick__check", type: "checkbox" });
+          box.checked = chosen.has(row.mark.id);
+          box.addEventListener("change", () => {
+            if (box.checked) chosen.add(row.mark.id);
+            else chosen.delete(row.mark.id);
+            renderNote();
+          });
+          const room = row.mark.roomId ? findRoom(project, row.mark.roomId) : null;
+          // Где метка стоит: помещение, а для многоэтажного объекта — и схема.
+          const where = [room ? room.name : "", manySchemes ? row.scheme.name : ""].filter(Boolean).join(" · ");
+          return uiEl("label", { class: "controls-pick__row" }, [
+            box,
+            // Метка узнаётся так же, как на плане: обозначение, цвет, форма.
+            shapeIcon(row.style.shape, row.style.color, 20),
+            uiEl("span", { class: "controls-pick__label", text: row.label }),
+            uiEl("span", { class: "controls-pick__name", text: row.type ? row.type.name : "" }),
+            uiEl("span", { class: "controls-pick__room", text: where }),
+          ]);
+        }),
+      );
+    }
+
+    renderList();
+    renderNote();
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    modal = uiModal({
+      title: text("controls.title", { label: labelOf(project, markId) }),
+      body: uiEl("div", { class: "controls-pick" }, [
+        uiEl("p", { class: "modal__hint", text: strings.controls.hint }),
+        rooms,
+        list,
+        note,
+      ]),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(strings.controls.save, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: () => done([...chosen]) },
+        }),
+      ],
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
 // src/panels/rooms.js
 // Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
 // меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
@@ -12729,6 +12875,7 @@ registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 
 
+
 const MARKS_NEW_ROOM = "--new-room--";
 // «По контуру» — метка отдана автоматике: помещение подставляется по контуру
 // на схеме. Любой другой выбор в этом поле — ручная правка, и она главнее:
@@ -12744,101 +12891,50 @@ function marksCenteredView(scheme, mark, view) {
   return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
 }
 
-// Кандидаты в подчинённые: все метки объекта, кроме самой, в том же порядке,
-// что и список сбоку, — схема за схемой, внутри по справочнику и номеру.
-// Помещение сужает список: с рукописного листа «В3 — на В33 (Т1, Т2, Т3)»
-// видно, что выключатель ищут среди светильников своей комнаты.
-function marksControlsCandidates(project, markId, roomId) {
-  const rows = [];
-  for (const scheme of schemesInOrder(project)) {
-    for (const row of filtersMarkRows(project, scheme.id, { roomId: roomId || null })) {
-      if (row.mark.id !== markId) rows.push({ ...row, scheme });
+// Кто кем управляет — одним проходом по объекту: спрашивать модель на каждую
+// строку значило бы пересортировать все метки полтысячи раз.
+function marksControllerIndex(project) {
+  const index = new Map();
+  if (!project) return index;
+  for (const item of project.marks) {
+    for (const id of markControlIds(item)) {
+      if (!index.has(id)) index.set(id, []);
+      index.get(id).push(labelOf(project, item.id));
     }
   }
-  return rows;
+  return index;
 }
 
-// Окно выбора — кирпичами из ui.js: стопка диалогов, Escape и возврат фокуса
-// у них общие. Отвечает списком отмеченных меток или null, если передумали.
-function marksControlsPicker(project, markId) {
-  return new Promise((resolve) => {
-    const mark = findMark(project, markId);
-    const chosen = new Set(markControlIds(mark));
-    const manySchemes = schemesInOrder(project).length > 1;
-    const list = uiEl("div", { class: "controls-pick__list" });
-    const note = uiEl("p", { class: "controls-pick__note" });
-    const rooms = uiEl("select", {
-      class: "ui-select",
-      title: strings.controls.room,
-      on: { change: () => renderList() },
-    });
-    rooms.append(uiEl("option", { value: "", text: strings.filters.allRooms }));
-    for (const room of roomsInOrder(project)) {
-      rooms.append(uiEl("option", { value: room.id, text: room.name }));
-    }
-
-    function renderNote() {
-      note.textContent = text("controls.chosen", { count: chosen.size });
-    }
-
-    function renderList() {
-      const rows = marksControlsCandidates(project, markId, rooms.value);
-      if (rows.length === 0) {
-        const others = project.marks.some((item) => item.id !== markId);
-        list.replaceChildren(
-          uiEl("p", { class: "panel__empty", text: others ? strings.controls.nothingFound : strings.controls.empty }),
-        );
-        return;
-      }
-      list.replaceChildren(
-        ...rows.map((row) => {
-          const box = uiEl("input", { class: "controls-pick__check", type: "checkbox" });
-          box.checked = chosen.has(row.mark.id);
-          box.addEventListener("change", () => {
-            if (box.checked) chosen.add(row.mark.id);
-            else chosen.delete(row.mark.id);
-            renderNote();
-          });
-          const room = row.mark.roomId ? findRoom(project, row.mark.roomId) : null;
-          // Где метка стоит: помещение, а для многоэтажного объекта — и схема.
-          const where = [room ? room.name : "", manySchemes ? row.scheme.name : ""].filter(Boolean).join(" · ");
-          return uiEl("label", { class: "controls-pick__row" }, [
-            box,
-            // Метка узнаётся так же, как на плане: обозначение, цвет, форма.
-            shapeIcon(row.style.shape, row.style.color, 20),
-            uiEl("span", { class: "controls-pick__label", text: row.label }),
-            uiEl("span", { class: "controls-pick__name", text: row.type ? row.type.name : "" }),
-            uiEl("span", { class: "controls-pick__room", text: where }),
-          ]);
-        }),
-      );
-    }
-
-    renderList();
-    renderNote();
-    let modal;
-    const done = (value) => {
-      modal.close();
-      resolve(value);
-    };
-    modal = uiModal({
-      title: text("controls.title", { label: labelOf(project, markId) }),
-      body: uiEl("div", { class: "controls-pick" }, [
-        uiEl("p", { class: "modal__hint", text: strings.controls.hint }),
-        rooms,
-        list,
-        note,
-      ]),
-      actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
-        uiButton(strings.controls.save, {
-          class: "ui-btn ui-btn--accent",
-          on: { click: () => done([...chosen]) },
-        }),
-      ],
-      onCancel: () => resolve(null),
-    });
-  });
+// Что показывает строка списка. Свёрнутая — ровно то, что просил заказчик:
+// значок и обозначение (плюс отметка повтора номера: три строки «Т1» подряд
+// иначе выглядят ошибкой). Раскрытая — прежний вид со всеми полями.
+// Решение о полях принимается здесь, а не в разметке: «в модели полей нет»
+// означает «в строке их не будет», и проверить это можно без браузера.
+function marksRowModel(project, row, options = {}) {
+  const mark = row.mark;
+  const repeat = options.repeat > 1 ? options.repeat : 0;
+  const head = {
+    id: mark.id,
+    open: Boolean(options.open),
+    label: row.label,
+    code: row.type ? row.type.code : "?",
+    style: row.style,
+    typeName: row.type ? row.type.name : "",
+    repeat,
+    fields: null,
+  };
+  if (!head.open) return head;
+  const controllers = options.controllers instanceof Map ? options.controllers : new Map();
+  head.fields = {
+    number: mark.number,
+    roomId: mark.roomId || null,
+    roomManual: markRoomManual(mark),
+    location: mark.location || "",
+    original: mark.original || "",
+    controls: markControls(project, mark.id).map((item) => labelOf(project, item.id)),
+    controlledBy: controllers.get(mark.id) || [],
+  };
+  return head;
 }
 
 function mountMarksPanel(host, api) {
@@ -12948,7 +13044,7 @@ function mountMarksPanel(host, api) {
   async function editControls(markId) {
     const state = getState();
     if (!state.project || !layoutAllows("editMarks", state.layout)) return;
-    const picked = await marksControlsPicker(state.project, markId);
+    const picked = await openMarkControlsPicker(state.project, markId);
     if (!picked) return;
     const fresh = getState();
     if (!fresh.project || !findMark(fresh.project, markId)) return;
@@ -13004,65 +13100,104 @@ function mountMarksPanel(host, api) {
     return select;
   }
 
+  // Раскрыта та метка, что выделена: клик по строке и клик по метке на плане
+  // — один и тот же выбор, и показывать они должны одно и то же. Поэтому
+  // отдельного «раскрытого» состояния нет: одно выделение на список и холст.
   function markRow(state, row, selected, repeats, controllers) {
     const mark = row.mark;
-    const repeat = repeats.get(mark.id) || 0;
-    const controlled = markControls(state.project, mark.id).map((item) => labelOf(state.project, item.id));
-    const controlledBy = (controllers.get(mark.id) || []).join(", ");
-    const controlsButton = uiButton(
-      controlled.length > 0 ? text("marks.controlsOf", { labels: controlled.join(", ") }) : strings.marks.controls,
+    const view = marksRowModel(state.project, row, {
+      open: selected,
+      repeat: repeats.get(mark.id) || 0,
+      controllers,
+    });
+    const badge =
+      view.repeat > 0
+        ? uiEl("span", {
+            class: "mark-row__repeat",
+            text: text("marks.repeatBadge", { count: view.repeat }),
+            title: text("problems.repeatedNumber", { label: view.label, count: view.repeat }),
+          })
+        : null;
+    // Свёрнутая строка — значок и обозначение: ровно то, по чему метку ищут
+    // глазами. Полей в ней нет и в разметке: при полусотне меток это ещё и
+    // полсотни неподнятых полей ввода.
+    const head = view.fields
+      ? uiEl("div", { class: "mark-row__head" }, [
+          // Галочка раскрытия — одна и та же в обоих видах: по ней видно,
+          // свёрнута строка или раскрыта, и куда нажать.
+          uiEl("span", { class: "mark-row__toggle" }),
+          shapeIcon(view.style.shape, view.style.color, 20),
+          uiEl("span", { class: "mark-row__label", text: view.code }),
+          uiEl("input", {
+            class: "ui-input mark-row__number",
+            type: "number",
+            value: String(view.fields.number),
+            title: strings.marks.number,
+            attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
+            on: { change: (event) => setNumber(mark.id, event.target.value) },
+          }),
+          badge,
+          uiEl("span", { class: "mark-row__type", text: view.typeName }),
+        ])
+      : uiEl("div", { class: "mark-row__head" }, [
+          uiEl("span", { class: "mark-row__toggle" }),
+          shapeIcon(view.style.shape, view.style.color, 20),
+          uiEl("span", { class: "mark-row__label", text: view.label }),
+          badge,
+        ]);
+    const controlsButton = view.fields
+      ? uiButton(
+          view.fields.controls.length > 0
+            ? text("marks.controlsOf", { labels: view.fields.controls.join(", ") })
+            : strings.marks.controls,
+          {
+            class: "ui-btn ui-btn--wide mark-row__controls" + (view.fields.controls.length > 0 ? " is-set" : ""),
+            title: strings.marks.controlsTitle,
+            on: { click: () => editControls(mark.id) },
+          },
+        )
+      : null;
+    const node = uiEl(
+      "div",
       {
-        class: "ui-btn ui-btn--wide mark-row__controls" + (controlled.length > 0 ? " is-set" : ""),
-        title: strings.marks.controlsTitle,
-        on: { click: () => editControls(mark.id) },
+        class: "mark-row" + (view.open ? " is-current is-open" : ""),
+        title: strings.marks.focus,
       },
-    );
-    const node = uiEl("div", { class: "mark-row" + (selected ? " is-current" : ""), title: strings.marks.focus }, [
-      uiEl("div", { class: "mark-row__head" }, [
-        shapeIcon(row.style.shape, row.style.color, 20),
-        uiEl("span", { class: "mark-row__label", text: row.type ? row.type.code : "?" }),
-        uiEl("input", {
-          class: "ui-input mark-row__number",
-          type: "number",
-          value: String(mark.number),
-          title: strings.marks.number,
-          attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
-          on: { change: (event) => setNumber(mark.id, event.target.value) },
-        }),
-        repeat > 1
-          ? uiEl("span", {
-              class: "mark-row__repeat",
-              text: text("marks.repeatBadge", { count: repeat }),
-              title: text("problems.repeatedNumber", { label: row.label, count: repeat }),
+      [
+        head,
+        view.fields ? roomField(state, mark) : null,
+        view.fields
+          ? uiEl("input", {
+              class: "ui-input",
+              type: "text",
+              value: view.fields.location,
+              placeholder: strings.marks.locationPlaceholder,
+              title: strings.marks.location,
+              on: { change: (event) => setField(mark.id, "location", event.target.value) },
             })
           : null,
-        uiEl("span", { class: "mark-row__type", text: row.type ? row.type.name : "" }),
-      ]),
-      roomField(state, mark),
-      uiEl("input", {
-        class: "ui-input",
-        type: "text",
-        value: mark.location || "",
-        placeholder: strings.marks.locationPlaceholder,
-        title: strings.marks.location,
-        on: { change: (event) => setField(mark.id, "location", event.target.value) },
-      }),
-      uiEl("input", {
-        class: "ui-input",
-        type: "text",
-        value: mark.original || "",
-        placeholder: strings.marks.originalPlaceholder,
-        title: strings.marks.original,
-        on: { change: (event) => setField(mark.id, "original", event.target.value) },
-      }),
-      controlsButton,
-      // Обратная сторона связи — строкой и только для чтения: стоя у
-      // светильника, надо видеть, какой выключатель его включает, а правится
-      // связь там, где её завели, — у выключателя.
-      controlledBy
-        ? uiEl("p", { class: "mark-row__by", text: text("marks.controlledBy", { labels: controlledBy }) })
-        : null,
-    ]);
+        view.fields
+          ? uiEl("input", {
+              class: "ui-input",
+              type: "text",
+              value: view.fields.original,
+              placeholder: strings.marks.originalPlaceholder,
+              title: strings.marks.original,
+              on: { change: (event) => setField(mark.id, "original", event.target.value) },
+            })
+          : null,
+        controlsButton,
+        // Обратная сторона связи — строкой и только для чтения: стоя у
+        // светильника, надо видеть, какой выключатель его включает, а правится
+        // связь там, где её завели, — у выключателя.
+        view.fields && view.fields.controlledBy.length > 0
+          ? uiEl("p", {
+              class: "mark-row__by",
+              text: text("marks.controlledBy", { labels: view.fields.controlledBy.join(", ") }),
+            })
+          : null,
+      ],
+    );
     node.addEventListener("pointerdown", (event) => {
       if (event.target.closest("input, select, button, option")) return;
       selectMark(mark.id);
@@ -13102,15 +13237,7 @@ function mountMarksPanel(host, api) {
     for (const item of repeatedNumbers(state.project)) {
       for (const markId of item.markIds) repeats.set(markId, item.count);
     }
-    // Кто кем управляет — одним проходом по объекту: спрашивать модель на
-    // каждую строку значило бы пересортировать все метки полтысячи раз.
-    const controllers = new Map();
-    for (const item of state.project.marks) {
-      for (const id of markControlIds(item)) {
-        if (!controllers.has(id)) controllers.set(id, []);
-        controllers.get(id).push(labelOf(state.project, item.id));
-      }
-    }
+    const controllers = marksControllerIndex(state.project);
     list.replaceChildren(
       ...rows.map((row) => markRow(state, row, selected.has(row.mark.id), repeats, controllers)),
     );

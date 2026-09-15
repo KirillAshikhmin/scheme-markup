@@ -96,19 +96,57 @@
   gap: 8px;
 }
 
+/* Свёрнутая строка — одна строка списка: значок и обозначение. Раскрывается
+   выделением: выделенная метка раскрыта, остальные свёрнуты, поэтому клик по
+   метке на плане и клик по строке показывают одно и то же. */
 .mark-row {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px;
-  border: 1px solid var(--panel-line);
+  padding: 4px 6px;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: var(--panel-bg-deep);
   cursor: pointer;
 }
 
+.mark-row:hover {
+  border-color: var(--panel-line);
+}
+
+.mark-row.is-open {
+  padding: 6px;
+  border-color: var(--panel-line);
+}
+
+/* Галочка раскрытия: состояние строки видно до нажатия. */
+.mark-row__toggle {
+  flex: none;
+  width: 10px;
+  color: var(--panel-muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.mark-row__toggle::before {
+  content: "▸";
+}
+
+.mark-row.is-open .mark-row__toggle::before {
+  content: "▾";
+}
+
 .mark-row.is-current {
   border-color: var(--accent);
+}
+
+/* Свёрнутая строка: обозначение целиком, не обрезается соседями. */
+.mark-row:not(.is-open) .mark-row__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mark-row__head {
