@@ -334,11 +334,18 @@ const EXPORT_DATED_TAIL = /-\d{4}-\d{2}-\d{2}\.zip$/;
 /**
  * Имя файла с датой во всей сборке собирает `projectFile.projectFileName`:
  * там же чистятся запрещённые символы и обрезается длина. Здесь у готового
- * имени меняется расширение, а имя схемы приписывается к имени объекта.
+ * имени меняется расширение, а к имени объекта приписывается то, что отличит
+ * выгрузку: `part` — схема или слово-пометка («схемы»).
+ *
+ * Без такой пометки архив схем назывался бы «<Объект>-<дата>.zip» — ровно тем
+ * же именем, что и файл проекта, и в папке загрузок один молча затирал бы
+ * другой. Файл проекта открывается назад в сервисе, архив схем — картинки
+ * монтажнику, и по имени это должно быть видно сразу.
  */
-export function exportFileName(project, scheme, extension) {
+export function exportFileName(project, part, extension) {
   const base = (project && project.name) || "";
-  return projectFileName({ name: scheme ? base + " — " + scheme.name : base }).replace(/zip$/, extension);
+  const suffix = typeof part === "string" ? part : part ? part.name : "";
+  return projectFileName({ name: suffix ? base + " — " + suffix : base }).replace(/zip$/, extension);
 }
 
 // Имя записи внутри архива: та же чистка, но без даты — дата стоит на самом архиве.

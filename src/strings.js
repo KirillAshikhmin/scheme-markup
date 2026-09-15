@@ -450,6 +450,7 @@ export const strings = {
     print: "Печать",
     download: "Скачать PNG",
     allSchemes: "Все схемы (zip)",
+    schemesSuffix: "схемы",
     copied: "Таблица скопирована — вставляйте в Таблицы",
     copyFailed: "Браузер не дал доступ к буферу обмена",
     saved: "Файл «{name}» выгружен",

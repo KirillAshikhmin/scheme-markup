@@ -362,7 +362,7 @@ function exportSchemeDialog(api) {
               legend: exportChoice.legend,
               filter: state.filter,
             });
-            const name = exportFileName(state.project, null, "zip");
+            const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
             exportDownload(zip, name);
             notify(text("exportPanel.schemesDone", { count: state.project.schemes.length }), "success");
           }),

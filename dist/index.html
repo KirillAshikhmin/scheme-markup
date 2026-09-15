@@ -2063,6 +2063,7 @@ const strings = {
     print: "Печать",
     download: "Скачать PNG",
     allSchemes: "Все схемы (zip)",
+    schemesSuffix: "схемы",
     copied: "Таблица скопирована — вставляйте в Таблицы",
     copyFailed: "Браузер не дал доступ к буферу обмена",
     saved: "Файл «{name}» выгружен",
@@ -6254,11 +6255,18 @@ const EXPORT_DATED_TAIL = /-\d{4}-\d{2}-\d{2}\.zip$/;
 /**
  * Имя файла с датой во всей сборке собирает `projectFile.projectFileName`:
  * там же чистятся запрещённые символы и обрезается длина. Здесь у готового
- * имени меняется расширение, а имя схемы приписывается к имени объекта.
+ * имени меняется расширение, а к имени объекта приписывается то, что отличит
+ * выгрузку: `part` — схема или слово-пометка («схемы»).
+ *
+ * Без такой пометки архив схем назывался бы «<Объект>-<дата>.zip» — ровно тем
+ * же именем, что и файл проекта, и в папке загрузок один молча затирал бы
+ * другой. Файл проекта открывается назад в сервисе, архив схем — картинки
+ * монтажнику, и по имени это должно быть видно сразу.
  */
-function exportFileName(project, scheme, extension) {
+function exportFileName(project, part, extension) {
   const base = (project && project.name) || "";
-  return projectFileName({ name: scheme ? base + " — " + scheme.name : base }).replace(/zip$/, extension);
+  const suffix = typeof part === "string" ? part : part ? part.name : "";
+  return projectFileName({ name: suffix ? base + " — " + suffix : base }).replace(/zip$/, extension);
 }
 
 // Имя записи внутри архива: та же чистка, но без даты — дата стоит на самом архиве.
@@ -7048,7 +7056,7 @@ function exportSchemeDialog(api) {
               legend: exportChoice.legend,
               filter: state.filter,
             });
-            const name = exportFileName(state.project, null, "zip");
+            const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
             exportDownload(zip, name);
             notify(text("exportPanel.schemesDone", { count: state.project.schemes.length }), "success");
           }),
