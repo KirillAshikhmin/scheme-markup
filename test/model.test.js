@@ -5,6 +5,7 @@ import {
   addCategory,
   BLOCK_STEP_PX,
   CODE_MAX_LENGTH,
+  codeProblem,
   addMark,
   addRoom,
   addScheme,
@@ -926,4 +927,21 @@ test("переименование короткого кода в длинный
   assert.equal(renamed.counters["ПОДСВЕТКА"], 3);
   assert.equal(renamed.counters["П"], undefined);
   assert.deepEqual(validate(renamed), []);
+});
+
+// Годность кода спрашивают у модели. Копия правила в окне выбора типа уже
+// подвела однажды: она пережила снятие предела в две буквы и отказывалась
+// заводить «ПОДСВЕТКА», хотя модель такой код принимала.
+test("годен ли код — отвечает модель, одной функцией", () => {
+  const project = createProject();
+  assert.equal(codeProblem(project, "ПОДСВЕТКА"), null);
+  assert.equal(codeProblem(project, "  ").code, "codeRequired");
+  assert.equal(codeProblem(project, "П1").code, "codeLetters");
+  assert.equal(codeProblem(project, "П-2").code, "codeLetters");
+  assert.equal(codeProblem(project, "Я".repeat(CODE_MAX_LENGTH + 1)).code, "codeTooLong");
+  assert.equal(codeProblem(project, "В").code, "codeTaken");
+
+  // Свой же код у типа не занят: справочник правит название, не трогая код.
+  const sw = project.markTypes.find((type) => type.code === "В");
+  assert.equal(codeProblem(project, "В", sw.id), null);
 });

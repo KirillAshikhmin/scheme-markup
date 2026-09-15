@@ -722,6 +722,22 @@ export function changeMarkType(project, markId, typeId) {
 
 // ——— справочник ———————————————————————————————————————————————————————
 
+/**
+ * Годится ли строка в код типа: тот же разбор, что у `addType` и `updateType`
+ * (буквы, длина, занятость), только ошибка возвращается, а не бросается.
+ * Это единственный ответ на вопрос во всей сборке — панелям своей копии
+ * правила держать нельзя: прежняя копия в окне выбора типа пережила снятие
+ * предела в две буквы и отказывалась заводить длинные коды.
+ */
+export function codeProblem(project, code, exceptTypeId) {
+  try {
+    normalizeCode(code, project, exceptTypeId);
+    return null;
+  } catch (failure) {
+    return failure;
+  }
+}
+
 function normalizeCode(code, project, exceptTypeId) {
   const value = String(code == null ? "" : code).trim();
   const limit = { max: CODE_MAX_LENGTH };

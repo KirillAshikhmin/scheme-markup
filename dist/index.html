@@ -2942,6 +2942,22 @@ function changeMarkType(project, markId, typeId) {
 
 // ——— справочник ———————————————————————————————————————————————————————
 
+/**
+ * Годится ли строка в код типа: тот же разбор, что у `addType` и `updateType`
+ * (буквы, длина, занятость), только ошибка возвращается, а не бросается.
+ * Это единственный ответ на вопрос во всей сборке — панелям своей копии
+ * правила держать нельзя: прежняя копия в окне выбора типа пережила снятие
+ * предела в две буквы и отказывалась заводить длинные коды.
+ */
+function codeProblem(project, code, exceptTypeId) {
+  try {
+    normalizeCode(code, project, exceptTypeId);
+    return null;
+  } catch (failure) {
+    return failure;
+  }
+}
+
 function normalizeCode(code, project, exceptTypeId) {
   const value = String(code == null ? "" : code).trim();
   const limit = { max: CODE_MAX_LENGTH };
@@ -4269,7 +4285,13 @@ const STAR_INNER = 0.45;
 // Запас в пикселях вокруг метки, чтобы попадать по ней не идеально точно.
 const HIT_SLACK_PX = 4;
 // Ширина буквы относительно кегля — оценка, одинаковая в тесте и на холсте.
-const LABEL_CHAR_RATIO = 0.62;
+// Доля кегля на знак в оценке ширины подписи. Мерить по-настоящему тут нечем:
+// `labelBox` зовут и попадание по клику, и тесты, а холста у них нет. Значит,
+// оценка берётся с запасом: 0,62 — про строчную латиницу, а коды заказчик
+// пишет прописной кириллицей, которая шире примерно на шестую часть. Занижение
+// стоит дважды: подпись у края плана не уезжает влево, когда пора, и клик по
+// ней промахивается мимо прямоугольника.
+const LABEL_CHAR_RATIO = 0.75;
 // Насколько далеко от метки стоит подпись, если её не оттаскивали.
 const LABEL_GAP = 1.5;
 // Ручки «+» стоят от центра метки на столько её радиусов.
@@ -10467,15 +10489,6 @@ registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
 
 
 
-// Что годится в новый код прямо из строки поиска. Предел длины — у модели
-// (`CODE_MAX_LENGTH`): здесь он только проверяется, чтобы окно не предлагало
-// создать тип, который модель тут же отвергнет.
-const PICKER_CODE_RE = /^[A-Za-zА-Яа-яЁё]+$/u;
-
-function pickerCodeOk(query) {
-  return PICKER_CODE_RE.test(query) && [...query].length <= CODE_MAX_LENGTH;
-}
-
 // Значок типа — цвет категории и форма из справочника, нарисованные общим
 // `render.shapeIcon`: в списке видно ровно то, что попадёт на план.
 function pickerIcon(project, typeId, size = 22) {
@@ -10541,9 +10554,11 @@ function openTypePicker(project, options = {}) {
     function renderCreate(query) {
       createBox.replaceChildren();
       error.textContent = "";
-      if (!pickerCodeOk(query)) return;
-      const taken = current.markTypes.some((type) => type.code.toUpperCase() === query.toUpperCase());
-      if (taken) return;
+      // Годится ли код — знает модель, и только она: буквы, длина и занятость
+      // проверяются там же, где их проверит `addType`. Своей копии правила
+      // здесь нет намеренно — прежняя пережила снятие предела в две буквы и
+      // отказывалась заводить «ПОДСВЕТКА».
+      if (codeProblem(current, query)) return;
       createName = uiEl("input", {
         class: "ui-input",
         type: "text",

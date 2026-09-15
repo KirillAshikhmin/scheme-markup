@@ -5,17 +5,8 @@
 // инструментов, и дальше метки ставятся кликами без единого диалога.
 import { strings, text } from "../strings.js";
 import { uiEl, uiButton, uiModal } from "./ui.js";
-import { addType, styleOf, typesInOrder, CODE_MAX_LENGTH } from "../model.js";
+import { addType, codeProblem, styleOf, typesInOrder, CODE_MAX_LENGTH } from "../model.js";
 import { shapeIcon } from "../render.js";
-
-// Что годится в новый код прямо из строки поиска. Предел длины — у модели
-// (`CODE_MAX_LENGTH`): здесь он только проверяется, чтобы окно не предлагало
-// создать тип, который модель тут же отвергнет.
-const PICKER_CODE_RE = /^[A-Za-zА-Яа-яЁё]+$/u;
-
-function pickerCodeOk(query) {
-  return PICKER_CODE_RE.test(query) && [...query].length <= CODE_MAX_LENGTH;
-}
 
 // Значок типа — цвет категории и форма из справочника, нарисованные общим
 // `render.shapeIcon`: в списке видно ровно то, что попадёт на план.
@@ -83,9 +74,11 @@ export function openTypePicker(project, options = {}) {
     function renderCreate(query) {
       createBox.replaceChildren();
       error.textContent = "";
-      if (!pickerCodeOk(query)) return;
-      const taken = current.markTypes.some((type) => type.code.toUpperCase() === query.toUpperCase());
-      if (taken) return;
+      // Годится ли код — знает модель, и только она: буквы, длина и занятость
+      // проверяются там же, где их проверит `addType`. Своей копии правила
+      // здесь нет намеренно — прежняя пережила снятие предела в две буквы и
+      // отказывалась заводить «ПОДСВЕТКА».
+      if (codeProblem(current, query)) return;
       createName = uiEl("input", {
         class: "ui-input",
         type: "text",

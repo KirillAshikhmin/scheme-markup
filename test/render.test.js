@@ -6,6 +6,7 @@ import {
   fitView,
   hitHandle,
   hitTest,
+  drawLegend,
   labelBox,
   labelLead,
   labelOffsetOf,
@@ -363,4 +364,81 @@ test("длинная подпись у правого края встаёт сл
   // Оттащенную руками подпись не двигает никто: где поставили, там и стоит.
   const moved = updateMark(long.project, long.mark.id, { labelOffset: { dx: 40, dy: 0 } }).project;
   assert.equal(labelBox(moved, scheme, moved.marks[0], viewOf()).x, 1010);
+});
+
+// Ширина подписи — оценка: `labelBox` зовут и там, где холста нет (попадание
+// по клику, тесты), измерителя под рукой нет. Значит, оценка обязана быть с
+// запасом: коды заказчик пишет прописной кириллицей, а она шире строчной
+// латиницы примерно на шестую часть. Занижение стоит дважды — подпись не
+// уезжает от края плана, когда пора, и клик по ней промахивается.
+test("ширина подписи считается с запасом на прописные буквы", () => {
+  const base = world();
+  const light = base.project.categories.find((item) => item.name === "Свет").id;
+  const added = addType(base.project, { code: "ПОДСВЕТКАПОЛОВАЯ", name: "Подсветка ниши", categoryId: light });
+  const mark = addMark(added.project, { schemeId: base.schemeId, typeId: added.type.id, points: [{ x: 0.3, y: 0.5 }] });
+  const box = labelBox(mark.project, mark.project.schemes[0], mark.mark, viewOf());
+
+  assert.equal(box.text, "ПОДСВЕТКАПОЛОВАЯ1");
+  // 17 знаков кеглем 12. Прописная кириллица в system-ui занимает не меньше
+  // 0,72 кегля на знак — оценка ниже промахивается мимо собственной подписи.
+  assert.ok(box.width >= 17 * 12 * 0.72, "подпись померена уже, чем она есть: " + box.width);
+  // Но и не вдвое шире: раздутый прямоугольник съедал бы клики по соседям.
+  assert.ok(box.width <= 17 * 12, "подпись померена заметно шире, чем она есть: " + box.width);
+});
+
+// ——— легенда ——————————————————————————————————————————————————————————
+
+// Холста в тестах нет, поэтому легенде подставляется измеритель-заглушка:
+// знак ровно в 7 единиц. Она же записывает рамку и строки, которые легенда
+// нарисовала, — по ним и видно, совпала ли рамка с текстом.
+const legendProbe = (charWidth = 7) => {
+  const base = {
+    rects: [],
+    texts: [],
+    measureText: (value) => ({ width: String(value).length * charWidth }),
+    rect: (x, y, w, h) => base.rects.push({ x, y, w, h }),
+    fillText: (value, x) => base.texts.push({ value, x, width: String(value).length * charWidth }),
+  };
+  return new Proxy(base, {
+    get: (obj, key) => (key in obj ? obj[key] : () => {}),
+    set: (obj, key, value) => ((obj[key] = value), true),
+  });
+};
+
+const legendOf = (project, scheme) => {
+  const probe = legendProbe();
+  drawLegend(probe, { project, scheme, filter: null, view: viewOf() });
+  return probe;
+};
+
+// Рамка легенды стояла шириной «на глазок» (шестнадцать высот строки), и
+// «ПОДСВЕТКАПОЛОВАЯ — Подсветка ниши» ложилась из неё прямо на план.
+test("рамка легенды растёт с самой длинной строкой и держит её внутри", () => {
+  const base = world();
+  const socket = addMark(base.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.2, y: 0.2 }] });
+  const scheme = socket.project.schemes[0];
+  const short = legendOf(socket.project, scheme);
+  assert.equal(short.texts.length, 1);
+  assert.equal(short.texts[0].value, "Р — Розетка");
+
+  const light = socket.project.categories.find((item) => item.name === "Свет").id;
+  const added = addType(socket.project, { code: "ПОДСВЕТКАПОЛОВАЯ", name: "Подсветка ниши", categoryId: light });
+  const long = addMark(added.project, {
+    schemeId: base.schemeId,
+    typeId: added.type.id,
+    points: [{ x: 0.3, y: 0.3 }],
+  });
+  const wide = legendOf(long.project, scheme);
+  assert.equal(wide.texts.length, 2);
+
+  // «ПОДСВЕТКАПОЛОВАЯ — Подсветка ниши» — 33 знака по 7 единиц, то есть 231:
+  // в прежнюю рамку «на глазок» (176) строка не влезала и ложилась на план.
+  assert.ok(wide.rects[0].w >= 33 * 7, "рамка уже своей самой длинной строки: " + wide.rects[0].w);
+  assert.ok(wide.rects[0].w > short.rects[0].w, "рамка не растёт со строкой: " + wide.rects[0].w);
+  for (const row of wide.texts) {
+    assert.ok(
+      row.x + row.width <= wide.rects[0].x + wide.rects[0].w,
+      "строка легенды вылезла из рамки: " + row.value,
+    );
+  }
 });
