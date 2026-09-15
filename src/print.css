@@ -110,6 +110,14 @@
   padding-left: 7px;
 }
 
+/* Строка с потерянной ссылкой: подчёркнута волной и приглушена — обычной
+   связью её не прочесть. */
+.print-doc__row--problem td {
+  font-style: italic;
+  text-decoration: underline wavy rgba(209, 36, 47, 0.6);
+  text-underline-offset: 3px;
+}
+
 .print-doc__label {
   font-weight: 600;
   white-space: nowrap;

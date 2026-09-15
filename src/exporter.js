@@ -477,7 +477,9 @@ export function exportTableNode(table, options = {}) {
     tableNode.append(thead);
     const tbody = exportNode("tbody");
     for (const row of section.rows) {
-      const tr = exportNode("tr", "print-doc__row");
+      // Строка с потерянной ссылкой помечена и на вид: на бумаге она не должна
+      // читаться как обычная связь.
+      const tr = exportNode("tr", row.problem ? "print-doc__row print-doc__row--problem" : "print-doc__row");
       if (row.color) tr.style.setProperty("--print-row-color", row.color);
       row.cells.forEach((cell, index) => {
         const td = exportNode("td", index === 0 ? "print-doc__label" : null, cell);

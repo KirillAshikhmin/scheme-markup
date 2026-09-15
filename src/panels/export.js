@@ -10,7 +10,7 @@ import { findRoom, findScheme, roomsInOrder, schemesInOrder } from "../model.js"
 import { screenToPlan } from "../render.js";
 import { getImage } from "../store.js";
 import { decodePlanImage, releasePlanImage } from "../imagePrep.js";
-import { marksTable, tableRowCount, toCsv, toMarkdown, toTsv, typesTable } from "../tables.js";
+import { linksTable, marksTable, tableRowCount, toCsv, toMarkdown, toTsv, typesTable } from "../tables.js";
 import {
   EXPORT_SCALES,
   allSchemesZip,
@@ -159,12 +159,20 @@ function exportSyncRoom(state) {
 
 function exportTableOf(state) {
   if (exportChoice.kind === "types") return typesTable(state.project);
+  if (exportChoice.kind === "links") {
+    return linksTable(state.project, exportFilterOf(state), { byRoom: exportChoice.byRoom });
+  }
   return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy, { byRoom: exportChoice.byRoom });
 }
 
 function exportSubtitleOf(state, table) {
   const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
   const parts = [text("exportPanel.rows", { count: tableRowCount(table) })];
+  // Лист связей молчит о метках без связей — а их отсутствие на листе не
+  // означает, что на объекте всё связано.
+  if (table.kind === "links" && table.unlinked > 0) {
+    parts.push(text("tables.unlinked", { count: table.unlinked }));
+  }
   if (exportChoice.currentScheme && scheme) parts.push(scheme.name);
   return parts.join(" · ");
 }
@@ -177,6 +185,10 @@ function exportBaseName(state, suffix) {
   if (scheme) parts.push(scheme.name);
   const room = exportChoice.roomId ? findRoom(state.project, exportChoice.roomId) : null;
   if (room) parts.push(room.name);
+  // Три таблицы одного объекта иначе легли бы в папку загрузок одним именем:
+  // лист связей затёр бы лист меток, и молча.
+  if (exportChoice.kind === "links") parts.push(strings.exportPanel.kindLinks);
+  else if (exportChoice.kind === "types") parts.push(strings.exportPanel.kindTypes);
   return exportFileName(state.project, parts.join(" — "), suffix);
 }
 
@@ -254,19 +266,21 @@ function exportTableDialog(api) {
   const kindSelect = exportSelect(
     [
       { value: "marks", label: strings.exportPanel.kindMarks },
+      { value: "links", label: strings.exportPanel.kindLinks },
       { value: "types", label: strings.exportPanel.kindTypes },
     ],
     exportChoice.kind,
     (value) => {
       exportChoice.kind = value;
-      const forTypes = value === "types";
-      groupSelect.disabled = forTypes;
-      roomSelect.disabled = forTypes;
-      byRoomInput.disabled = forTypes;
+      // У связей верхний уровень занят направлением («Управляет» и обратно),
+      // поэтому разбивка внутри там не выбирается; помещения и галка — работают.
+      groupSelect.disabled = value !== "marks";
+      roomSelect.disabled = value === "types";
+      byRoomInput.disabled = value === "types";
       refresh();
     },
   );
-  groupSelect.disabled = exportChoice.kind === "types";
+  groupSelect.disabled = exportChoice.kind !== "marks";
   roomSelect.disabled = exportChoice.kind === "types";
   byRoomInput.disabled = exportChoice.kind === "types";
 

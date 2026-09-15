@@ -13,6 +13,9 @@ import {
   findRoom,
   findType,
   labelOf,
+  markControlIds,
+  markControlledBy,
+  markControls,
   roomsInOrder,
   schemesInOrder,
   styleOf,
@@ -282,6 +285,129 @@ export function marksTable(project, filter, groupBy, options = {}) {
     note: tableFilterNote(project, filter),
     columns,
     groups,
+  };
+}
+
+// ——— связи ————————————————————————————————————————————————————————————
+
+// Ссылка на метку: обозначение, а для метки из другого помещения — ещё и
+// помещение. На объекте в три этажа «С1» само по себе не говорит ничего.
+function tableLinkLabel(project, mark, roomId) {
+  const label = labelOf(project, mark.id);
+  if (!mark.roomId || mark.roomId === roomId) return label;
+  const room = findRoom(project, mark.roomId);
+  return room ? label + " (" + room.name + ")" : label;
+}
+
+function tableLinkRow(project, mark, related, broken) {
+  const type = findType(project, mark.typeId);
+  const room = mark.roomId ? findRoom(project, mark.roomId) : null;
+  const linked = related.map((item) => tableLinkLabel(project, item, mark.roomId));
+  // Ссылка в никуда не должна выглядеть обычной строкой: её видно словами,
+  // а не только в проверке объекта.
+  if (broken) linked.push(strings.tables.brokenLink);
+  return {
+    id: mark.id,
+    cells: [
+      labelOf(project, mark.id),
+      type ? type.name : "",
+      room ? room.name : "",
+      mark.location || "",
+      linked.join(", "),
+    ],
+    color: styleOf(project, mark.typeId).color,
+    problem: Boolean(broken),
+  };
+}
+
+// Сторона листа: «Управляет» или «Управляется от». С галкой «по помещениям»
+// внутри стороны появляются помещения — вторым уровнем, как в таблице меток.
+function tableLinkSide(project, id, title, items, byRoom) {
+  if (items.length === 0) return [];
+  if (!byRoom) return [{ id, title, color: null, rows: items.map((item) => item.row), level: 1 }];
+
+  const groups = [{ id, title, color: null, rows: [], level: 1 }];
+  const byRoomKey = new Map();
+  for (const item of items) {
+    const room = item.mark.roomId ? findRoom(project, item.mark.roomId) : null;
+    const key = room ? room.id : "none";
+    if (!byRoomKey.has(key)) byRoomKey.set(key, []);
+    byRoomKey.get(key).push(item);
+  }
+  for (const key of [...roomsInOrder(project).map((room) => room.id), "none"]) {
+    const list = byRoomKey.get(key);
+    if (!list || list.length === 0) continue;
+    const room = key === "none" ? null : findRoom(project, key);
+    groups.push({
+      id: id + ":" + key,
+      title: room ? room.name : strings.tables.noRoom,
+      color: room ? room.color || null : null,
+      rows: list.map((item) => item.row),
+      level: 2,
+    });
+  }
+  return groups;
+}
+
+/**
+ * Таблица связей: чем метка управляет и от чего управляется.
+ *
+ * Лист читают у щита или у выключателя, поэтому сторон две: «В1 → Т1, Т2» и
+ * обратная «Т1 → В1». Строки — только у меток, которые в связях участвуют:
+ * светильники без связей утопили бы лист, а сколько их, сказано числом
+ * `unlinked`. Разбивка внутри стороны (категории или типы) здесь не нужна —
+ * верхний уровень уже занят направлением, и по такому листу ищут обозначение,
+ * а не категорию; помещения вторым уровнем, наоборот, помогают.
+ *
+ * Связанные метки перечисляются целиком, даже если фильтр их скрыл: строка
+ * «В1 →» без продолжения хуже, чем строка с меткой, которой сейчас не видно.
+ */
+export function linksTable(project, filter, options = {}) {
+  const byRoom = Boolean(options.byRoom);
+  const columns = [
+    strings.tables.label,
+    strings.tables.type,
+    strings.tables.room,
+    strings.tables.location,
+    strings.tables.linked,
+  ];
+  if (!project) {
+    return { kind: "links", byRoom, title: "", room: "", note: "", unlinked: 0, columns, groups: [] };
+  }
+
+  const order = tableTypeOrder(project);
+  const marks = [...tableVisibleMarks(project, filter)].sort((a, b) => {
+    const orderA = order.has(a.typeId) ? order.get(a.typeId) : 999;
+    const orderB = order.has(b.typeId) ? order.get(b.typeId) : 999;
+    return orderA === orderB ? a.number - b.number : orderA - orderB;
+  });
+
+  const forward = [];
+  const back = [];
+  let unlinked = 0;
+  for (const mark of marks) {
+    const wanted = markControlIds(mark);
+    const controls = wanted.length > 0 ? markControls(project, mark.id) : [];
+    const controlledBy = markControlledBy(project, mark.id);
+    if (wanted.length > 0) {
+      forward.push({ mark, row: tableLinkRow(project, mark, controls, wanted.length > controls.length) });
+    }
+    if (controlledBy.length > 0) back.push({ mark, row: tableLinkRow(project, mark, controlledBy, false) });
+    if (wanted.length === 0 && controlledBy.length === 0) unlinked += 1;
+  }
+
+  return {
+    kind: "links",
+    byRoom,
+    title: project.name || strings.tables.linksTitle,
+    room: tableRoomTitle(project, filter),
+    note: tableFilterNote(project, filter),
+    unlinked,
+    columns,
+    groups: [
+      ...tableLinkSide(project, "controls", strings.tables.controls, forward, byRoom),
+      ...tableLinkSide(project, "controlledBy", strings.tables.controlledBy, back, byRoom),
+    ],
   };
 }
 

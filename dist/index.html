@@ -1434,6 +1434,14 @@
   padding-left: 7px;
 }
 
+/* Строка с потерянной ссылкой: подчёркнута волной и приглушена — обычной
+   связью её не прочесть. */
+.print-doc__row--problem td {
+  font-style: italic;
+  text-decoration: underline wavy rgba(209, 36, 47, 0.6);
+  text-underline-offset: 3px;
+}
+
 .print-doc__label {
   font-weight: 600;
   white-space: nowrap;
@@ -2690,6 +2698,12 @@ const strings = {
     color: "Цвет",
     shape: "Форма",
     marksTitle: "Метки объекта",
+    linksTitle: "Связи меток",
+    linked: "Связанные метки",
+    controls: "Управляет",
+    controlledBy: "Управляется от",
+    brokenLink: "ссылка потеряна",
+    unlinked: "Меток без связей: {count}",
     typesTitle: "Справочник типов",
     noRoom: "Без помещения",
     onlyShown: "Показаны только: {names}",
@@ -2712,6 +2726,7 @@ const strings = {
     kind: "Таблица",
     kindMarks: "Метки",
     kindTypes: "Справочник типов",
+    kindLinks: "Связи",
     currentScheme: "Только текущая схема",
     area: "Что выгружаем",
     areaAll: "Вся схема",
@@ -8963,6 +8978,129 @@ function marksTable(project, filter, groupBy, options = {}) {
     groups,
   };
 }
+
+// ——— связи ————————————————————————————————————————————————————————————
+
+// Ссылка на метку: обозначение, а для метки из другого помещения — ещё и
+// помещение. На объекте в три этажа «С1» само по себе не говорит ничего.
+function tableLinkLabel(project, mark, roomId) {
+  const label = labelOf(project, mark.id);
+  if (!mark.roomId || mark.roomId === roomId) return label;
+  const room = findRoom(project, mark.roomId);
+  return room ? label + " (" + room.name + ")" : label;
+}
+
+function tableLinkRow(project, mark, related, broken) {
+  const type = findType(project, mark.typeId);
+  const room = mark.roomId ? findRoom(project, mark.roomId) : null;
+  const linked = related.map((item) => tableLinkLabel(project, item, mark.roomId));
+  // Ссылка в никуда не должна выглядеть обычной строкой: её видно словами,
+  // а не только в проверке объекта.
+  if (broken) linked.push(strings.tables.brokenLink);
+  return {
+    id: mark.id,
+    cells: [
+      labelOf(project, mark.id),
+      type ? type.name : "",
+      room ? room.name : "",
+      mark.location || "",
+      linked.join(", "),
+    ],
+    color: styleOf(project, mark.typeId).color,
+    problem: Boolean(broken),
+  };
+}
+
+// Сторона листа: «Управляет» или «Управляется от». С галкой «по помещениям»
+// внутри стороны появляются помещения — вторым уровнем, как в таблице меток.
+function tableLinkSide(project, id, title, items, byRoom) {
+  if (items.length === 0) return [];
+  if (!byRoom) return [{ id, title, color: null, rows: items.map((item) => item.row), level: 1 }];
+
+  const groups = [{ id, title, color: null, rows: [], level: 1 }];
+  const byRoomKey = new Map();
+  for (const item of items) {
+    const room = item.mark.roomId ? findRoom(project, item.mark.roomId) : null;
+    const key = room ? room.id : "none";
+    if (!byRoomKey.has(key)) byRoomKey.set(key, []);
+    byRoomKey.get(key).push(item);
+  }
+  for (const key of [...roomsInOrder(project).map((room) => room.id), "none"]) {
+    const list = byRoomKey.get(key);
+    if (!list || list.length === 0) continue;
+    const room = key === "none" ? null : findRoom(project, key);
+    groups.push({
+      id: id + ":" + key,
+      title: room ? room.name : strings.tables.noRoom,
+      color: room ? room.color || null : null,
+      rows: list.map((item) => item.row),
+      level: 2,
+    });
+  }
+  return groups;
+}
+
+/**
+ * Таблица связей: чем метка управляет и от чего управляется.
+ *
+ * Лист читают у щита или у выключателя, поэтому сторон две: «В1 → Т1, Т2» и
+ * обратная «Т1 → В1». Строки — только у меток, которые в связях участвуют:
+ * светильники без связей утопили бы лист, а сколько их, сказано числом
+ * `unlinked`. Разбивка внутри стороны (категории или типы) здесь не нужна —
+ * верхний уровень уже занят направлением, и по такому листу ищут обозначение,
+ * а не категорию; помещения вторым уровнем, наоборот, помогают.
+ *
+ * Связанные метки перечисляются целиком, даже если фильтр их скрыл: строка
+ * «В1 →» без продолжения хуже, чем строка с меткой, которой сейчас не видно.
+ */
+function linksTable(project, filter, options = {}) {
+  const byRoom = Boolean(options.byRoom);
+  const columns = [
+    strings.tables.label,
+    strings.tables.type,
+    strings.tables.room,
+    strings.tables.location,
+    strings.tables.linked,
+  ];
+  if (!project) {
+    return { kind: "links", byRoom, title: "", room: "", note: "", unlinked: 0, columns, groups: [] };
+  }
+
+  const order = tableTypeOrder(project);
+  const marks = [...tableVisibleMarks(project, filter)].sort((a, b) => {
+    const orderA = order.has(a.typeId) ? order.get(a.typeId) : 999;
+    const orderB = order.has(b.typeId) ? order.get(b.typeId) : 999;
+    return orderA === orderB ? a.number - b.number : orderA - orderB;
+  });
+
+  const forward = [];
+  const back = [];
+  let unlinked = 0;
+  for (const mark of marks) {
+    const wanted = markControlIds(mark);
+    const controls = wanted.length > 0 ? markControls(project, mark.id) : [];
+    const controlledBy = markControlledBy(project, mark.id);
+    if (wanted.length > 0) {
+      forward.push({ mark, row: tableLinkRow(project, mark, controls, wanted.length > controls.length) });
+    }
+    if (controlledBy.length > 0) back.push({ mark, row: tableLinkRow(project, mark, controlledBy, false) });
+    if (wanted.length === 0 && controlledBy.length === 0) unlinked += 1;
+  }
+
+  return {
+    kind: "links",
+    byRoom,
+    title: project.name || strings.tables.linksTitle,
+    room: tableRoomTitle(project, filter),
+    note: tableFilterNote(project, filter),
+    unlinked,
+    columns,
+    groups: [
+      ...tableLinkSide(project, "controls", strings.tables.controls, forward, byRoom),
+      ...tableLinkSide(project, "controlledBy", strings.tables.controlledBy, back, byRoom),
+    ],
+  };
+}
 function typesTable(project) {
   const columns = [
     strings.tables.code,
@@ -9539,7 +9677,9 @@ function exportTableNode(table, options = {}) {
     tableNode.append(thead);
     const tbody = exportNode("tbody");
     for (const row of section.rows) {
-      const tr = exportNode("tr", "print-doc__row");
+      // Строка с потерянной ссылкой помечена и на вид: на бумаге она не должна
+      // читаться как обычная связь.
+      const tr = exportNode("tr", row.problem ? "print-doc__row print-doc__row--problem" : "print-doc__row");
       if (row.color) tr.style.setProperty("--print-row-color", row.color);
       row.cells.forEach((cell, index) => {
         const td = exportNode("td", index === 0 ? "print-doc__label" : null, cell);
@@ -10409,12 +10549,20 @@ function exportSyncRoom(state) {
 
 function exportTableOf(state) {
   if (exportChoice.kind === "types") return typesTable(state.project);
+  if (exportChoice.kind === "links") {
+    return linksTable(state.project, exportFilterOf(state), { byRoom: exportChoice.byRoom });
+  }
   return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy, { byRoom: exportChoice.byRoom });
 }
 
 function exportSubtitleOf(state, table) {
   const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
   const parts = [text("exportPanel.rows", { count: tableRowCount(table) })];
+  // Лист связей молчит о метках без связей — а их отсутствие на листе не
+  // означает, что на объекте всё связано.
+  if (table.kind === "links" && table.unlinked > 0) {
+    parts.push(text("tables.unlinked", { count: table.unlinked }));
+  }
   if (exportChoice.currentScheme && scheme) parts.push(scheme.name);
   return parts.join(" · ");
 }
@@ -10427,6 +10575,10 @@ function exportBaseName(state, suffix) {
   if (scheme) parts.push(scheme.name);
   const room = exportChoice.roomId ? findRoom(state.project, exportChoice.roomId) : null;
   if (room) parts.push(room.name);
+  // Три таблицы одного объекта иначе легли бы в папку загрузок одним именем:
+  // лист связей затёр бы лист меток, и молча.
+  if (exportChoice.kind === "links") parts.push(strings.exportPanel.kindLinks);
+  else if (exportChoice.kind === "types") parts.push(strings.exportPanel.kindTypes);
   return exportFileName(state.project, parts.join(" — "), suffix);
 }
 
@@ -10504,19 +10656,21 @@ function exportTableDialog(api) {
   const kindSelect = exportSelect(
     [
       { value: "marks", label: strings.exportPanel.kindMarks },
+      { value: "links", label: strings.exportPanel.kindLinks },
       { value: "types", label: strings.exportPanel.kindTypes },
     ],
     exportChoice.kind,
     (value) => {
       exportChoice.kind = value;
-      const forTypes = value === "types";
-      groupSelect.disabled = forTypes;
-      roomSelect.disabled = forTypes;
-      byRoomInput.disabled = forTypes;
+      // У связей верхний уровень занят направлением («Управляет» и обратно),
+      // поэтому разбивка внутри там не выбирается; помещения и галка — работают.
+      groupSelect.disabled = value !== "marks";
+      roomSelect.disabled = value === "types";
+      byRoomInput.disabled = value === "types";
       refresh();
     },
   );
-  groupSelect.disabled = exportChoice.kind === "types";
+  groupSelect.disabled = exportChoice.kind !== "marks";
   roomSelect.disabled = exportChoice.kind === "types";
   byRoomInput.disabled = exportChoice.kind === "types";
 

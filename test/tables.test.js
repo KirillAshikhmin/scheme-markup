@@ -11,10 +11,11 @@ import {
   addType,
   createProject,
   labelOf,
+  setMarkControls,
   setMarkNumber,
   updateMark,
 } from "../src/model.js";
-import { marksTable, toCsv, toMarkdown, toTsv, typesTable } from "../src/tables.js";
+import { linksTable, marksTable, toCsv, toMarkdown, toTsv, typesTable } from "../src/tables.js";
 
 // Комната с рукописного листа: свет, выключатели и розетки одной спальни.
 function tablesFixture() {
@@ -468,4 +469,86 @@ test("два уровня видны и в тексте: помещение — 
     "Холл",
     "Розетки",
   ]);
+});
+
+// ——— таблица связей: что чем управляет ————————————————————————————————
+
+// К меткам примера добавлены два выключателя: В1 в спальне управляет точками
+// Т1 и Т2, В2 из холла — светильником С1 в спальне («В3 → Т1, Т2, Т3»
+// с рукописного листа).
+function tablesLinksFixture() {
+  const box = tablesFixture();
+  const switchOne = box.put("В", { roomId: box.rooms.bedroom, location: "у входа" });
+  const switchTwo = box.put("В", { roomId: box.rooms.hall });
+  box.project = setMarkControls(box.project, switchOne, [box.marks.spot1, box.marks.spot2]).project;
+  box.project = setMarkControls(box.project, switchTwo, [box.marks.lamp1]).project;
+  return { box, switchOne, switchTwo };
+}
+
+test("таблица связей: обе стороны, обозначение с помещением, чужая комната в скобках", () => {
+  const { box } = tablesLinksFixture();
+  const table = linksTable(box.project, null);
+
+  assert.deepEqual(table.columns, ["Обозначение", "Тип", "Помещение", "Расположение", "Связанные метки"]);
+  assert.deepEqual(
+    table.groups.map((group) => [group.level, group.title]),
+    [
+      [1, "Управляет"],
+      [1, "Управляется от"],
+    ],
+  );
+
+  const forward = table.groups[0];
+  assert.deepEqual(forward.rows.map((row) => row.cells[0]), ["В1", "В2"]);
+  assert.deepEqual(forward.rows[0].cells, ["В1", "Выключатель", "Спальная Оли", "у входа", "Т1, Т2"]);
+  // Метка из другой комнаты названа вместе с комнатой: на объекте в три этажа
+  // «С1» без помещения ничего не говорит.
+  assert.deepEqual(forward.rows[1].cells, ["В2", "Выключатель", "Холл", "", "С1 (Спальная Оли)"]);
+
+  const back = table.groups[1];
+  assert.deepEqual(back.rows.map((row) => row.cells[0]), ["Т1", "Т2", "С1"]);
+  assert.equal(back.rows[0].cells[4], "В1");
+  assert.equal(back.rows[2].cells[4], "В2 (Холл)");
+});
+
+test("в таблице связей нет меток без связей, а висящая ссылка не выглядит нормальной строкой", () => {
+  const { box, switchOne } = tablesLinksFixture();
+  const table = linksTable(box.project, null);
+  // Р1 ничем не управляет и никем не управляется — строки у неё нет,
+  // но лист говорит, сколько таких меток осталось за бортом.
+  assert.equal(
+    table.groups.every((group) => group.rows.every((row) => row.cells[0] !== "Р1")),
+    true,
+  );
+  assert.equal(table.unlinked, 1);
+
+  // Ссылка в никуда: метку удалили мимо модели, ссылка осталась.
+  const broken = {
+    ...box.project,
+    marks: box.project.marks.map((mark) =>
+      mark.id === switchOne ? { ...mark, controls: [...mark.controls, "нет-такой-метки"] } : mark,
+    ),
+  };
+  const row = linksTable(broken, null).groups[0].rows[0];
+  assert.equal(row.cells[4], "Т1, Т2, ссылка потеряна");
+  assert.equal(row.problem, true);
+});
+
+test("галка «по помещениям» разводит связи по комнатам внутри каждой стороны", () => {
+  const { box } = tablesLinksFixture();
+  const table = linksTable(box.project, null, { byRoom: true });
+  assert.deepEqual(
+    table.groups.map((group) => [group.level, group.title]),
+    [
+      [1, "Управляет"],
+      [2, "Спальная Оли"],
+      [2, "Холл"],
+      [1, "Управляется от"],
+      [2, "Спальная Оли"],
+    ],
+  );
+  assert.deepEqual(table.groups[1].rows.map((row) => row.cells[0]), ["В1"]);
+  assert.deepEqual(table.groups[2].rows.map((row) => row.cells[0]), ["В2"]);
+  assert.deepEqual(table.groups[4].rows.map((row) => row.cells[0]), ["Т1", "Т2", "С1"]);
+  assert.deepEqual(table.groups[0].rows, []);
 });
