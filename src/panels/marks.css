@@ -270,13 +270,6 @@
   font-size: 12px;
 }
 
-.rooms__box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 360px;
-}
-
 .rooms {
   display: flex;
   flex-direction: column;

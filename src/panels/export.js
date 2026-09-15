@@ -6,7 +6,7 @@
 // поэтому скрытое фильтром не попадает ни в таблицу, ни в картинку, ни в легенду.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
-import { findScheme, schemesInOrder } from "../model.js";
+import { findRoom, findScheme, roomsInOrder, schemesInOrder } from "../model.js";
 import { screenToPlan } from "../render.js";
 import { getImage } from "../store.js";
 import { decodePlanImage, releasePlanImage } from "../imagePrep.js";
@@ -17,6 +17,8 @@ import {
   exportCopy,
   exportDownload,
   exportFileName,
+  exportRoomArea,
+  exportRoomName,
   exportSizeText,
   exportTableNode,
   exportTableSizeText,
@@ -32,7 +34,14 @@ import { uiButton, uiEl, uiModal } from "./ui.js";
 const exportChoice = {
   kind: "marks",
   groupBy: "category",
+  // Галка «разбить по помещениям» и разбивка внутри — два разных выбора:
+  // лист «Спальня → СВЕТ, ВЫКЛЮЧАТЕЛИ» заказчик читает как два уровня.
+  byRoom: false,
+  // Помещение листа таблицы: null — весь объект. Комнату листа выбирают здесь,
+  // а не галочками панели меток (см. exportFilterOf).
+  roomId: null,
   currentScheme: false,
+  // Область схемы: "all" | "view" | "room:<id>".
   area: "all",
   legend: true,
   outlines: true,
@@ -52,6 +61,7 @@ function exportSelect(options, value, onChange) {
   for (const option of options) {
     const node = uiEl("option", { text: option.label, value: option.value });
     node.value = option.value;
+    if (option.disabled) node.disabled = true;
     if (option.value === value) node.selected = true;
     select.append(node);
   }
@@ -91,8 +101,22 @@ function exportViewArea(state, scheme) {
   };
 }
 
+// Выбранная область: вся схема, видимое на экране или габариты помещения.
+// Комната без контура на этой схеме области не даёт — лист берётся целиком.
+function exportAreaOf(state, scheme) {
+  if (exportChoice.area === "view") return exportViewArea(state, scheme);
+  if (exportChoice.area.startsWith("room:")) {
+    return exportRoomArea(state.project, scheme, exportChoice.area.slice(5)) || "all";
+  }
+  return "all";
+}
+
+function exportAreaRoomId() {
+  return exportChoice.area.startsWith("room:") ? exportChoice.area.slice(5) : null;
+}
+
 function exportAreaSize(state, scheme) {
-  const area = exportChoice.area === "view" ? exportViewArea(state, scheme) : "all";
+  const area = exportAreaOf(state, scheme);
   if (area === "all") {
     return {
       width: scheme.width > 0 ? scheme.width : 1000,
@@ -119,15 +143,23 @@ async function exportSchemeImage(state, scheme) {
   return { image: decoded.image, release: () => releasePlanImage(decoded) };
 }
 
+// Комнату листа задаёт диалог, всё остальное (категории, типы, поиск) —
+// панель меток. Два способа сузить одно и то же не спорят: на открытии диалог
+// берёт комнату с экрана, дальше владеет ею он, и в списке видно, какая стоит.
 function exportFilterOf(state) {
-  return exportChoice.currentScheme && state.schemeId
-    ? { ...state.filter, schemeId: state.schemeId }
-    : state.filter;
+  const filter = { ...state.filter, roomId: exportChoice.roomId || null };
+  if (exportChoice.currentScheme && state.schemeId) filter.schemeId = state.schemeId;
+  return filter;
+}
+
+function exportSyncRoom(state) {
+  const fromScreen = state.filter && state.filter.roomId;
+  exportChoice.roomId = fromScreen && findRoom(state.project, fromScreen) ? fromScreen : null;
 }
 
 function exportTableOf(state) {
   if (exportChoice.kind === "types") return typesTable(state.project);
-  return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy);
+  return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy, { byRoom: exportChoice.byRoom });
 }
 
 function exportSubtitleOf(state, table) {
@@ -137,9 +169,15 @@ function exportSubtitleOf(state, table) {
   return parts.join(" · ");
 }
 
+// Имя файла называет то, чем лист сужен: схему и помещение. Иначе три выгрузки
+// одного объекта лягут в папку одинаковыми именами и затрут друг друга.
 function exportBaseName(state, suffix) {
+  const parts = [];
   const scheme = exportChoice.currentScheme && state.schemeId ? findScheme(state.project, state.schemeId) : null;
-  return exportFileName(state.project, scheme, suffix);
+  if (scheme) parts.push(scheme.name);
+  const room = exportChoice.roomId ? findRoom(state.project, exportChoice.roomId) : null;
+  if (room) parts.push(room.name);
+  return exportFileName(state.project, parts.join(" — "), suffix);
 }
 
 // ——— диалог таблицы ———————————————————————————————————————————————————
@@ -147,6 +185,10 @@ function exportBaseName(state, suffix) {
 function exportTableDialog(api) {
   const { getState, notify } = api;
   const state = getState();
+  exportSyncRoom(state);
+  // Галка и «по помещениям» в списке — один и тот же уровень: вместе они
+  // не живут, и список переводится на категории ещё до отрисовки.
+  if (exportChoice.byRoom && exportChoice.groupBy === "room") exportChoice.groupBy = "category";
   const preview = uiEl("div", { class: "export__preview" });
   const hint = uiEl("p", { class: "export__hint" });
   let table = exportTableOf(state);
@@ -172,6 +214,43 @@ function exportTableDialog(api) {
     },
   );
 
+  // Подпись переключателя меняется вместе с галкой: без неё «Разбивка» рядом
+  // с «Разбить по помещениям» читается как второй способ сделать то же самое.
+  const groupLabel = uiEl("span", {
+    class: "export__field-label",
+    text: exportChoice.byRoom ? strings.exportPanel.groupByInside : strings.exportPanel.groupBy,
+  });
+  const groupField = uiEl("label", { class: "export__field" }, [groupLabel, groupSelect]);
+  const roomOption = [...groupSelect.options].find((option) => option.value === "room");
+  if (roomOption) roomOption.disabled = exportChoice.byRoom;
+
+  const byRoomField = exportCheck(strings.exportPanel.splitByRoom, exportChoice.byRoom, (on) => {
+    exportChoice.byRoom = on;
+    groupLabel.textContent = on ? strings.exportPanel.groupByInside : strings.exportPanel.groupBy;
+    if (roomOption) roomOption.disabled = on;
+    // «По помещениям» внутри помещений — тот же уровень дважды.
+    if (on && groupSelect.value === "room") {
+      groupSelect.value = "category";
+      exportChoice.groupBy = "category";
+    }
+    refresh();
+  });
+  const byRoomInput = byRoomField.querySelector("input");
+
+  // Весь объект или одно помещение. «Что на экране» здесь нет и быть не должно:
+  // таблица не про кадр.
+  const roomSelect = exportSelect(
+    [
+      { value: "", label: strings.exportPanel.roomAll },
+      ...roomsInOrder(state.project).map((room) => ({ value: room.id, label: room.name })),
+    ],
+    exportChoice.roomId || "",
+    (value) => {
+      exportChoice.roomId = value || null;
+      refresh();
+    },
+  );
+
   const kindSelect = exportSelect(
     [
       { value: "marks", label: strings.exportPanel.kindMarks },
@@ -180,15 +259,22 @@ function exportTableDialog(api) {
     exportChoice.kind,
     (value) => {
       exportChoice.kind = value;
-      groupSelect.disabled = value === "types";
+      const forTypes = value === "types";
+      groupSelect.disabled = forTypes;
+      roomSelect.disabled = forTypes;
+      byRoomInput.disabled = forTypes;
       refresh();
     },
   );
   groupSelect.disabled = exportChoice.kind === "types";
+  roomSelect.disabled = exportChoice.kind === "types";
+  byRoomInput.disabled = exportChoice.kind === "types";
 
   const controls = uiEl("div", { class: "export__controls" }, [
     exportField(strings.exportPanel.kind, kindSelect),
-    exportField(strings.exportPanel.groupBy, groupSelect),
+    exportField(strings.exportPanel.area, roomSelect),
+    groupField,
+    byRoomField,
     exportField(
       strings.exportPanel.scale,
       exportScaleSelect(exportChoice.tableScale, (value) => {
@@ -281,6 +367,13 @@ function exportTableDialog(api) {
   refresh();
 }
 
+// Заголовок листа схемы: объект, схема и — когда лист режется по комнате —
+// её имя. Иначе распечатка по комнате неотличима от полной.
+function exportSchemeTitle(state, scheme) {
+  const room = exportRoomName(state.project, exportAreaRoomId());
+  return [state.project.name, scheme.name, room].filter(Boolean).join(" · ");
+}
+
 // ——— диалог схемы —————————————————————————————————————————————————————
 
 function exportSchemeDialog(api) {
@@ -288,6 +381,9 @@ function exportSchemeDialog(api) {
   const state = getState();
   const scheme = findScheme(state.project, state.schemeId);
   const hint = uiEl("p", { class: "export__hint" });
+  // Комната, выбранная раньше, могла остаться без контура на этой схеме —
+  // тогда лист берётся целиком, а не молча по пустой рамке.
+  if (exportAreaRoomId() && !exportRoomArea(state.project, scheme, exportAreaRoomId())) exportChoice.area = "all";
 
   const refreshHint = () => {
     const size = exportAreaSize(state, scheme);
@@ -301,6 +397,19 @@ function exportSchemeDialog(api) {
         [
           { value: "all", label: strings.exportPanel.areaAll },
           { value: "view", label: strings.exportPanel.areaView },
+          // Помещение режет лист по габаритам контура с полями. Комната без
+          // контура на этой схеме остаётся в списке, но недоступна — и строка
+          // говорит, почему: искать пропавший вариант хуже, чем прочесть причину.
+          ...roomsInOrder(state.project).map((room) => {
+            const has = Boolean(exportRoomArea(state.project, scheme, room.id));
+            return {
+              value: "room:" + room.id,
+              label: has
+                ? text("exportPanel.areaRoom", { name: room.name })
+                : text("exportPanel.roomNoOutline", { name: room.name }),
+              disabled: !has,
+            };
+          }),
         ],
         exportChoice.area,
         (value) => {
@@ -339,7 +448,7 @@ function exportSchemeDialog(api) {
     if (!image) notify(strings.exportPanel.noImage, "info");
     try {
       return await schemePng(state.project, scheme, image, {
-        area: exportChoice.area === "view" ? exportViewArea(state, scheme) : "all",
+        area: exportAreaOf(state, scheme),
         scale: exportChoice.schemeScale,
         legend: exportChoice.legend,
         outlines: exportChoice.outlines,
@@ -379,7 +488,7 @@ function exportSchemeDialog(api) {
         click: () =>
           guard(async () => {
             const blob = await renderScheme();
-            await printView("scheme", { blob, title: state.project.name + " · " + scheme.name });
+            await printView("scheme", { blob, title: exportSchemeTitle(state, scheme) });
           }),
       },
     }),
@@ -389,7 +498,8 @@ function exportSchemeDialog(api) {
         click: () =>
           guard(async () => {
             const blob = await renderScheme();
-            const name = exportFileName(state.project, scheme, "png");
+            const room = exportRoomName(state.project, exportAreaRoomId());
+            const name = exportFileName(state.project, room ? scheme.name + " — " + room : scheme.name, "png");
             exportDownload(blob, name);
             notify(text("exportPanel.saved", { name }), "success");
           }),

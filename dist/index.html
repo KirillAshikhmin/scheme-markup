@@ -759,13 +759,6 @@
   font-size: 12px;
 }
 
-.rooms__box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 360px;
-}
-
 .rooms {
   display: flex;
   flex-direction: column;
@@ -1285,6 +1278,18 @@
   font-weight: 600;
   margin: 0 0 6px;
   padding-bottom: 3px;
+}
+
+/* Разбивка внутри помещения — заголовок помельче и с тонкой чертой:
+   вложенность видна размером, строки остаются на одной линии с колонками. */
+.print-doc__group--sub {
+  margin-bottom: 10px;
+  margin-left: 0;
+}
+
+.print-doc__group--sub .print-doc__group-title {
+  border-bottom-width: 1px;
+  font-size: 13px;
 }
 
 .print-doc__table {
@@ -1886,7 +1891,7 @@ const strings = {
     rooms: "Помещения",
     sizes: "Размеры",
     markList: "Список меток",
-    properties: "Свойства",
+    properties: "Справочник типов",
     canvasEmpty: "Загрузите план схемы, чтобы начать разметку",
     marksEmpty: "Меток пока нет — выберите тип и щёлкните по плану",
   },
@@ -2270,9 +2275,6 @@ const strings = {
     showAll: "Показать все",
   },
   rooms: {
-    title: "Помещения объекта",
-    open: "Помещения",
-    add: "Добавить",
     namePlaceholder: "Спальная Оли",
     newRoom: "Новое помещение…",
     newTitle: "Название помещения",
@@ -2293,7 +2295,7 @@ const strings = {
     removeMessage: "Помещение «{name}» будет удалено, у меток ({count}) поле опустеет.",
   },
   dictionary: {
-    open: "Справочник типов",
+    open: "Открыть справочник",
     title: "Справочник объекта",
     categories: "Категории",
     types: "Типы меток",
@@ -2358,6 +2360,11 @@ const strings = {
     groupByCategory: "По категориям",
     groupByType: "По типам",
     groupByRoom: "По помещениям",
+    groupByInside: "Разбивка внутри помещений",
+    splitByRoom: "Разбить по помещениям",
+    roomAll: "Весь объект",
+    areaRoom: "Помещение: {name}",
+    roomNoOutline: "Помещение: {name} — нет контура на этой схеме",
     kind: "Таблица",
     kindMarks: "Метки",
     kindTypes: "Справочник типов",
@@ -8173,24 +8180,77 @@ function tableFilterNote(project, filter) {
   }
   return strings.tables.partial;
 }
-function marksTable(project, filter, groupBy) {
-  const kind = TABLE_GROUP_BY.includes(groupBy) ? groupBy : "category";
-  const columns = tableMarkColumns();
-  if (!project) return { kind: "marks", groupBy: kind, title: "", room: "", note: "", columns, groups: [] };
 
+// Один уровень разбивки: категории, типы или помещения — как было и как
+// остаётся, когда галка «по помещениям» снята.
+function tableFlatGroups(project, entries, kind) {
   const buckets = new Map();
-  for (const entry of tableEntries(project, filter)) {
+  for (const entry of entries) {
     const group = tableGroupOf(project, entry, kind);
-    if (!buckets.has(group.key)) buckets.set(group.key, { id: group.key, title: group.title, color: group.color, rows: [] });
+    if (!buckets.has(group.key)) {
+      buckets.set(group.key, { id: group.key, title: group.title, color: group.color, rows: [], level: 1 });
+    }
     buckets.get(group.key).rows.push(tableEntryRow(project, entry));
   }
-
-  const groups = tableGroupOrder(project, kind)
+  return tableGroupOrder(project, kind)
     .map((key) => buckets.get(key))
     .filter(Boolean);
+}
+
+// Два уровня: помещение, внутри — прежняя разбивка. Список остаётся плоским,
+// уровень написан в `level` — так его одинаково читают и печать, и PNG, и
+// текстовые форматы, и ни один из них не учит обход вложенности.
+// Заголовок помещения строк не несёт: строки живут во внутренних группах.
+// Метки без помещения — последней группой «Без помещения»: потерять их на
+// листе хуже, чем показать отдельно, и на плане они тоже никуда не делись.
+function tableRoomGroups(project, entries, kind) {
+  const byRoomKey = new Map();
+  for (const entry of entries) {
+    const room = entry.head.roomId ? findRoom(project, entry.head.roomId) : null;
+    const key = room ? room.id : "none";
+    if (!byRoomKey.has(key)) byRoomKey.set(key, []);
+    byRoomKey.get(key).push(entry);
+  }
+
+  const groups = [];
+  for (const key of [...roomsInOrder(project).map((room) => room.id), "none"]) {
+    const list = byRoomKey.get(key);
+    if (!list || list.length === 0) continue;
+    const room = key === "none" ? null : findRoom(project, key);
+    groups.push({
+      id: key,
+      title: room ? room.name : strings.tables.noRoom,
+      color: room ? room.color || null : null,
+      rows: [],
+      level: 1,
+    });
+    for (const inner of tableFlatGroups(project, list, kind)) {
+      groups.push({ ...inner, id: key + ":" + inner.id, level: 2 });
+    }
+  }
+  return groups;
+}
+
+/**
+ * Таблица меток. `groupBy` — разбивка (`category` | `type` | `room`);
+ * `options.byRoom` поднимает над ней второй уровень — помещения, и тогда
+ * `groupBy` задаёт разбивку **внутри** помещения. С `groupBy: "room"` галка
+ * не складывается (помещения уже и есть разбивка) и молча гасится.
+ */
+function marksTable(project, filter, groupBy, options = {}) {
+  const kind = TABLE_GROUP_BY.includes(groupBy) ? groupBy : "category";
+  const byRoom = Boolean(options.byRoom) && kind !== "room";
+  const columns = tableMarkColumns();
+  if (!project) {
+    return { kind: "marks", groupBy: kind, byRoom, title: "", room: "", note: "", columns, groups: [] };
+  }
+
+  const entries = tableEntries(project, filter);
+  const groups = byRoom ? tableRoomGroups(project, entries, kind) : tableFlatGroups(project, entries, kind);
   return {
     kind: "marks",
     groupBy: kind,
+    byRoom,
     title: project.name || strings.tables.marksTitle,
     room: tableRoomTitle(project, filter),
     note: tableFilterNote(project, filter),
@@ -8220,7 +8280,7 @@ function typesTable(project) {
       }
     }
   }
-  return { kind: "types", title: strings.tables.typesTitle, room: "", note: "", columns, rows };
+  return { kind: "types", title: strings.tables.typesTitle, byRoom: false, room: "", note: "", columns, rows };
 }
 
 // Обе таблицы читаются одинаково: список секций с заголовком и строками.
@@ -8228,7 +8288,7 @@ function typesTable(project) {
 function tableSections(table) {
   if (!table) return [];
   if (Array.isArray(table.groups)) return table.groups;
-  return [{ id: "all", title: "", color: null, rows: table.rows || [] }];
+  return [{ id: "all", title: "", color: null, rows: table.rows || [], level: 1 }];
 }
 function tableRowCount(table) {
   return tableSections(table).reduce((total, section) => total + section.rows.length, 0);
@@ -8271,7 +8331,10 @@ function toMarkdown(table) {
   const header = "| " + table.columns.map(tableMarkdownCell).join(" | ") + " |";
   const divider = "| " + table.columns.map(() => "---").join(" | ") + " |";
   for (const section of tableSections(table)) {
-    if (section.title) out.push("## " + tableMarkdownCell(section.title), "");
+    if (section.title) out.push("#".repeat(1 + (section.level || 1)) + " " + tableMarkdownCell(section.title), "");
+    // Заголовок помещения строк не несёт — пустая шапка таблицы под ним
+    // выглядела бы как потерянные строки.
+    if (section.rows.length === 0) continue;
     out.push(header, divider);
     for (const row of section.rows) out.push("| " + row.cells.map(tableMarkdownCell).join(" | ") + " |");
     out.push("");
@@ -8372,6 +8435,50 @@ function exportArea(scheme, area) {
     width: Math.max(1, Math.min(width - x, area.width || width)),
     height: Math.max(1, Math.min(height - y, area.height || height)),
   };
+}
+
+// Поля вокруг контура: доля большей стороны комнаты, но не меньше запаса
+// в пикселях плана — на узкой кладовке процент дал бы рамку в пару точек.
+const EXPORT_ROOM_PAD = 0.06;
+const EXPORT_ROOM_PAD_MIN = 24;
+
+/**
+ * Габариты помещения на схеме в пикселях плана — рамка по контурам комнаты
+ * плюс поля. `null`, когда контура этой комнаты на схеме нет.
+ *
+ * Метки внутри рамки при этом **не фильтруются**: лист режется по комнате, а
+ * показывает всё, что попало в кадр. Иначе розетка соседней комнаты, физически
+ * стоящая в кадре, исчезла бы с бумаги, и монтажник решил бы, что там пусто.
+ */
+function exportRoomArea(project, scheme, roomId) {
+  if (!project || !scheme || !roomId) return null;
+  const outlines = outlinesInOrder(project, scheme.id).filter((outline) => outline.roomId === roomId);
+  if (outlines.length === 0) return null;
+  const width = scheme.width > 0 ? scheme.width : 1000;
+  const height = scheme.height > 0 ? scheme.height : 1000;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const outline of outlines) {
+    for (const point of outline.points || []) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null;
+  const box = { x: minX * width, y: minY * height, width: (maxX - minX) * width, height: (maxY - minY) * height };
+  const pad = Math.max(EXPORT_ROOM_PAD_MIN, Math.max(box.width, box.height) * EXPORT_ROOM_PAD);
+  return { x: box.x - pad, y: box.y - pad, width: box.width + pad * 2, height: box.height + pad * 2 };
+}
+
+// Имя помещения для заголовка листа схемы: комната названа там же, где и на
+// таблице, иначе лист по комнате не отличить от листа по всей схеме.
+function exportRoomName(project, roomId) {
+  const room = roomId ? findRoom(project, roomId) : null;
+  return room ? room.name : "";
 }
 
 /**
@@ -8587,13 +8694,18 @@ async function tablePng(table, options = {}) {
   for (const section of sections) {
     const color = section.color || EXPORT_TABLE.ink;
     if (section.title) {
+      // Уровень заголовка: помещение — крупнее и с жирной чертой, разбивка
+      // внутри него — мельче и тоньше. Вложенность на бумаге видна размером,
+      // а не отступом: отступ увёл бы строки от колонок.
+      const level = section.level || 1;
       y += EXPORT_TABLE.gap;
       ctx.fillStyle = color;
-      ctx.font = `600 ${EXPORT_TABLE.groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      const groupFont = level === 2 ? EXPORT_TABLE.groupFont - 2 : EXPORT_TABLE.groupFont;
+      ctx.font = `600 ${groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
       ctx.fillText(section.title, left, y + EXPORT_TABLE.rowHeight / 2);
       const lineY = y + EXPORT_TABLE.rowHeight - 2;
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = level === 2 ? 1 : 2;
       ctx.beginPath();
       ctx.moveTo(left, lineY);
       ctx.lineTo(left + bodyWidth, lineY);
@@ -8702,9 +8814,18 @@ function exportTableNode(table, options = {}) {
   doc.append(head);
 
   for (const section of tableSections(table)) {
-    const block = exportNode("section", "print-doc__group");
+    const level = section.level || 1;
+    const block = exportNode("section", level === 2 ? "print-doc__group print-doc__group--sub" : "print-doc__group");
     if (section.color) block.style.setProperty("--print-color", section.color);
-    if (section.title) block.append(exportNode("h2", "print-doc__group-title", section.title));
+    if (section.title) {
+      block.append(exportNode(level === 2 ? "h3" : "h2", "print-doc__group-title", section.title));
+    }
+    // Заголовок помещения строк не несёт: пустая шапка таблицы под ним
+    // читалась бы как потерянные строки.
+    if (section.rows.length === 0) {
+      doc.append(block);
+      continue;
+    }
     const tableNode = exportNode("table", "print-doc__table");
     const thead = exportNode("thead");
     const headRow = exportNode("tr");
@@ -9458,7 +9579,14 @@ function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
 const exportChoice = {
   kind: "marks",
   groupBy: "category",
+  // Галка «разбить по помещениям» и разбивка внутри — два разных выбора:
+  // лист «Спальня → СВЕТ, ВЫКЛЮЧАТЕЛИ» заказчик читает как два уровня.
+  byRoom: false,
+  // Помещение листа таблицы: null — весь объект. Комнату листа выбирают здесь,
+  // а не галочками панели меток (см. exportFilterOf).
+  roomId: null,
   currentScheme: false,
+  // Область схемы: "all" | "view" | "room:<id>".
   area: "all",
   legend: true,
   outlines: true,
@@ -9478,6 +9606,7 @@ function exportSelect(options, value, onChange) {
   for (const option of options) {
     const node = uiEl("option", { text: option.label, value: option.value });
     node.value = option.value;
+    if (option.disabled) node.disabled = true;
     if (option.value === value) node.selected = true;
     select.append(node);
   }
@@ -9517,8 +9646,22 @@ function exportViewArea(state, scheme) {
   };
 }
 
+// Выбранная область: вся схема, видимое на экране или габариты помещения.
+// Комната без контура на этой схеме области не даёт — лист берётся целиком.
+function exportAreaOf(state, scheme) {
+  if (exportChoice.area === "view") return exportViewArea(state, scheme);
+  if (exportChoice.area.startsWith("room:")) {
+    return exportRoomArea(state.project, scheme, exportChoice.area.slice(5)) || "all";
+  }
+  return "all";
+}
+
+function exportAreaRoomId() {
+  return exportChoice.area.startsWith("room:") ? exportChoice.area.slice(5) : null;
+}
+
 function exportAreaSize(state, scheme) {
-  const area = exportChoice.area === "view" ? exportViewArea(state, scheme) : "all";
+  const area = exportAreaOf(state, scheme);
   if (area === "all") {
     return {
       width: scheme.width > 0 ? scheme.width : 1000,
@@ -9545,15 +9688,23 @@ async function exportSchemeImage(state, scheme) {
   return { image: decoded.image, release: () => releasePlanImage(decoded) };
 }
 
+// Комнату листа задаёт диалог, всё остальное (категории, типы, поиск) —
+// панель меток. Два способа сузить одно и то же не спорят: на открытии диалог
+// берёт комнату с экрана, дальше владеет ею он, и в списке видно, какая стоит.
 function exportFilterOf(state) {
-  return exportChoice.currentScheme && state.schemeId
-    ? { ...state.filter, schemeId: state.schemeId }
-    : state.filter;
+  const filter = { ...state.filter, roomId: exportChoice.roomId || null };
+  if (exportChoice.currentScheme && state.schemeId) filter.schemeId = state.schemeId;
+  return filter;
+}
+
+function exportSyncRoom(state) {
+  const fromScreen = state.filter && state.filter.roomId;
+  exportChoice.roomId = fromScreen && findRoom(state.project, fromScreen) ? fromScreen : null;
 }
 
 function exportTableOf(state) {
   if (exportChoice.kind === "types") return typesTable(state.project);
-  return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy);
+  return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy, { byRoom: exportChoice.byRoom });
 }
 
 function exportSubtitleOf(state, table) {
@@ -9563,9 +9714,15 @@ function exportSubtitleOf(state, table) {
   return parts.join(" · ");
 }
 
+// Имя файла называет то, чем лист сужен: схему и помещение. Иначе три выгрузки
+// одного объекта лягут в папку одинаковыми именами и затрут друг друга.
 function exportBaseName(state, suffix) {
+  const parts = [];
   const scheme = exportChoice.currentScheme && state.schemeId ? findScheme(state.project, state.schemeId) : null;
-  return exportFileName(state.project, scheme, suffix);
+  if (scheme) parts.push(scheme.name);
+  const room = exportChoice.roomId ? findRoom(state.project, exportChoice.roomId) : null;
+  if (room) parts.push(room.name);
+  return exportFileName(state.project, parts.join(" — "), suffix);
 }
 
 // ——— диалог таблицы ———————————————————————————————————————————————————
@@ -9573,6 +9730,10 @@ function exportBaseName(state, suffix) {
 function exportTableDialog(api) {
   const { getState, notify } = api;
   const state = getState();
+  exportSyncRoom(state);
+  // Галка и «по помещениям» в списке — один и тот же уровень: вместе они
+  // не живут, и список переводится на категории ещё до отрисовки.
+  if (exportChoice.byRoom && exportChoice.groupBy === "room") exportChoice.groupBy = "category";
   const preview = uiEl("div", { class: "export__preview" });
   const hint = uiEl("p", { class: "export__hint" });
   let table = exportTableOf(state);
@@ -9598,6 +9759,43 @@ function exportTableDialog(api) {
     },
   );
 
+  // Подпись переключателя меняется вместе с галкой: без неё «Разбивка» рядом
+  // с «Разбить по помещениям» читается как второй способ сделать то же самое.
+  const groupLabel = uiEl("span", {
+    class: "export__field-label",
+    text: exportChoice.byRoom ? strings.exportPanel.groupByInside : strings.exportPanel.groupBy,
+  });
+  const groupField = uiEl("label", { class: "export__field" }, [groupLabel, groupSelect]);
+  const roomOption = [...groupSelect.options].find((option) => option.value === "room");
+  if (roomOption) roomOption.disabled = exportChoice.byRoom;
+
+  const byRoomField = exportCheck(strings.exportPanel.splitByRoom, exportChoice.byRoom, (on) => {
+    exportChoice.byRoom = on;
+    groupLabel.textContent = on ? strings.exportPanel.groupByInside : strings.exportPanel.groupBy;
+    if (roomOption) roomOption.disabled = on;
+    // «По помещениям» внутри помещений — тот же уровень дважды.
+    if (on && groupSelect.value === "room") {
+      groupSelect.value = "category";
+      exportChoice.groupBy = "category";
+    }
+    refresh();
+  });
+  const byRoomInput = byRoomField.querySelector("input");
+
+  // Весь объект или одно помещение. «Что на экране» здесь нет и быть не должно:
+  // таблица не про кадр.
+  const roomSelect = exportSelect(
+    [
+      { value: "", label: strings.exportPanel.roomAll },
+      ...roomsInOrder(state.project).map((room) => ({ value: room.id, label: room.name })),
+    ],
+    exportChoice.roomId || "",
+    (value) => {
+      exportChoice.roomId = value || null;
+      refresh();
+    },
+  );
+
   const kindSelect = exportSelect(
     [
       { value: "marks", label: strings.exportPanel.kindMarks },
@@ -9606,15 +9804,22 @@ function exportTableDialog(api) {
     exportChoice.kind,
     (value) => {
       exportChoice.kind = value;
-      groupSelect.disabled = value === "types";
+      const forTypes = value === "types";
+      groupSelect.disabled = forTypes;
+      roomSelect.disabled = forTypes;
+      byRoomInput.disabled = forTypes;
       refresh();
     },
   );
   groupSelect.disabled = exportChoice.kind === "types";
+  roomSelect.disabled = exportChoice.kind === "types";
+  byRoomInput.disabled = exportChoice.kind === "types";
 
   const controls = uiEl("div", { class: "export__controls" }, [
     exportField(strings.exportPanel.kind, kindSelect),
-    exportField(strings.exportPanel.groupBy, groupSelect),
+    exportField(strings.exportPanel.area, roomSelect),
+    groupField,
+    byRoomField,
     exportField(
       strings.exportPanel.scale,
       exportScaleSelect(exportChoice.tableScale, (value) => {
@@ -9707,6 +9912,13 @@ function exportTableDialog(api) {
   refresh();
 }
 
+// Заголовок листа схемы: объект, схема и — когда лист режется по комнате —
+// её имя. Иначе распечатка по комнате неотличима от полной.
+function exportSchemeTitle(state, scheme) {
+  const room = exportRoomName(state.project, exportAreaRoomId());
+  return [state.project.name, scheme.name, room].filter(Boolean).join(" · ");
+}
+
 // ——— диалог схемы —————————————————————————————————————————————————————
 
 function exportSchemeDialog(api) {
@@ -9714,6 +9926,9 @@ function exportSchemeDialog(api) {
   const state = getState();
   const scheme = findScheme(state.project, state.schemeId);
   const hint = uiEl("p", { class: "export__hint" });
+  // Комната, выбранная раньше, могла остаться без контура на этой схеме —
+  // тогда лист берётся целиком, а не молча по пустой рамке.
+  if (exportAreaRoomId() && !exportRoomArea(state.project, scheme, exportAreaRoomId())) exportChoice.area = "all";
 
   const refreshHint = () => {
     const size = exportAreaSize(state, scheme);
@@ -9727,6 +9942,19 @@ function exportSchemeDialog(api) {
         [
           { value: "all", label: strings.exportPanel.areaAll },
           { value: "view", label: strings.exportPanel.areaView },
+          // Помещение режет лист по габаритам контура с полями. Комната без
+          // контура на этой схеме остаётся в списке, но недоступна — и строка
+          // говорит, почему: искать пропавший вариант хуже, чем прочесть причину.
+          ...roomsInOrder(state.project).map((room) => {
+            const has = Boolean(exportRoomArea(state.project, scheme, room.id));
+            return {
+              value: "room:" + room.id,
+              label: has
+                ? text("exportPanel.areaRoom", { name: room.name })
+                : text("exportPanel.roomNoOutline", { name: room.name }),
+              disabled: !has,
+            };
+          }),
         ],
         exportChoice.area,
         (value) => {
@@ -9765,7 +9993,7 @@ function exportSchemeDialog(api) {
     if (!image) notify(strings.exportPanel.noImage, "info");
     try {
       return await schemePng(state.project, scheme, image, {
-        area: exportChoice.area === "view" ? exportViewArea(state, scheme) : "all",
+        area: exportAreaOf(state, scheme),
         scale: exportChoice.schemeScale,
         legend: exportChoice.legend,
         outlines: exportChoice.outlines,
@@ -9805,7 +10033,7 @@ function exportSchemeDialog(api) {
         click: () =>
           guard(async () => {
             const blob = await renderScheme();
-            await printView("scheme", { blob, title: state.project.name + " · " + scheme.name });
+            await printView("scheme", { blob, title: exportSchemeTitle(state, scheme) });
           }),
       },
     }),
@@ -9815,7 +10043,8 @@ function exportSchemeDialog(api) {
         click: () =>
           guard(async () => {
             const blob = await renderScheme();
-            const name = exportFileName(state.project, scheme, "png");
+            const room = exportRoomName(state.project, exportAreaRoomId());
+            const name = exportFileName(state.project, room ? scheme.name + " — " + room : scheme.name, "png");
             exportDownload(blob, name);
             notify(text("exportPanel.saved", { name }), "success");
           }),
@@ -9863,287 +10092,6 @@ function mountExportPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.headerActions, mountExportPanel);
-
-// src/panels/rooms.js
-// Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
-// меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
-// меток, — поэтому главное здесь не список, а `roomsEnsure`: одно и то же
-// название не должно плодить двойников.
-//
-// Отдельного окна «Помещения» больше нет: список и все его действия живут в
-// панели, а прежняя кнопка в справочнике разворачивает раздел и подводит к нему.
-
-
-
-
-
-
-// Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
-// и цвета соседних комнат, и цвета категорий: контуров на плане бывает
-// десяток, а метка своей же комнаты не должна повторять цвет её заливки.
-function roomColorField(project, room, onChange) {
-  return colorPickerButton({
-    value: room.color,
-    used: colorsInUse(project, { exceptRoomId: room.id }),
-    title: strings.rooms.color,
-    onPick: onChange,
-  });
-}
-
-function roomsKey(name) {
-  return String(name == null ? "" : name).trim().toLowerCase();
-}
-function roomsFind(project, name) {
-  const key = roomsKey(name);
-  if (!key) return null;
-  return project.rooms.find((room) => roomsKey(room.name) === key) || null;
-}
-
-// «Было или заведём»: пустое название — это «без помещения», а не комната
-// с пустым именем.
-function roomsEnsure(project, name) {
-  const found = roomsFind(project, name);
-  if (found) return { project, room: found };
-  if (!roomsKey(name)) return { project, room: null };
-  const created = addRoom(project, name);
-  return { project: created.project, room: created.room };
-}
-function roomsUsage(project, roomId) {
-  return project.marks.filter((mark) => mark.roomId === roomId).length;
-}
-
-// Строки списка: комната, сколько у неё меток и есть ли контур на этой схеме.
-// Чистая функция — на ней и стоят тесты раздела.
-function roomsRows(project, schemeId) {
-  const outlines = schemeId ? outlinesInOrder(project, schemeId) : [];
-  return roomsInOrder(project).map((room) => {
-    const outline = outlines.find((item) => item.roomId === room.id) || null;
-    return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
-  });
-}
-
-// Что делает поле добавления: завести комнату или — если такая уже есть —
-// сразу обвести её заново. Вторая ветка и заменяет прежний выбор помещения
-// из раздела «Метки»: там можно было взять комнату с контуром и обвести ещё раз.
-function roomsAddAction(project, name) {
-  const trimmed = String(name == null ? "" : name).trim();
-  if (!trimmed) return { kind: "none", roomId: null, name: "" };
-  const found = roomsFind(project, trimmed);
-  return found
-    ? { kind: "draw", roomId: found.id, name: trimmed }
-    : { kind: "create", roomId: null, name: trimmed };
-}
-
-// Что делает кнопка контура: нарисовать новый или править вершины прежнего.
-// Правка — это режим выбора с выделенным контуром: дальше вершины таскаются
-// на холсте, «+» на стенке добавляет, двойной клик убирает.
-function roomsOutlineAction(row) {
-  return row && row.outlineId ? "edit" : "draw";
-}
-
-// Прежнее окно помещений уехало в панель; кнопка «Помещения» в справочнике
-// теперь разворачивает раздел, а не открывает второй способ делать то же самое.
-function openRoomsEditor() {
-  revealSection(SECTION_IDS.rooms);
-}
-
-function mountRoomsPanel(host, api) {
-  const { getState, setState, subscribe, notify } = api;
-  const list = uiEl("div", { class: "rooms" });
-  const input = uiEl("input", {
-    class: "ui-input",
-    type: "text",
-    placeholder: strings.rooms.namePlaceholder,
-    on: {
-      keydown: (event) => {
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        addAndDraw();
-      },
-    },
-  });
-  const addButton = uiButton(strings.rooms.addAndDraw, {
-    class: "ui-btn ui-btn--accent",
-    title: strings.rooms.addAndDrawHint,
-    on: { click: () => addAndDraw() },
-  });
-  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton]));
-
-  function project() {
-    return getState().project;
-  }
-
-  function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
-  }
-
-  function commit(after, label, options) {
-    canvasCommit(project(), after, label, options);
-  }
-
-  // Комната заводится и сразу берётся в обводку: режим рисования включается тем
-  // же шагом истории, искать его отдельно не нужно.
-  function addAndDraw() {
-    const state = getState();
-    if (!state.project) return;
-    const action = roomsAddAction(state.project, input.value);
-    if (action.kind === "none") return;
-    if (action.kind === "draw") {
-      input.value = "";
-      startDrawing(action.roomId);
-      return;
-    }
-    try {
-      const created = addRoom(state.project, action.name);
-      input.value = "";
-      canvasCommit(state.project, created.project, strings.history.addRoom, {
-        patch: drawPatch(created.room.id),
-      });
-      if (!state.schemeId) notify(strings.canvas.needScheme);
-    } catch (error) {
-      fail(error);
-    }
-  }
-
-  // Без схемы рисовать негде: комната заводится, режим остаётся прежним.
-  function drawPatch(roomId) {
-    return getState().schemeId
-      ? { activeRoomId: roomId, mode: "room", selectedOutlineId: null }
-      : { activeRoomId: roomId };
-  }
-
-  // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
-  // вершины на плане.
-  function startOutline(roomId) {
-    const state = getState();
-    if (!state.schemeId) {
-      notify(strings.canvas.needScheme);
-      return;
-    }
-    const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
-    if (roomsOutlineAction(row) !== "edit") {
-      startDrawing(roomId);
-      return;
-    }
-    setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
-    notify(strings.rooms.outlineEditing);
-  }
-
-  // Обводка с нуля — та самая дорога, что была в разделе «Метки»: она осталась
-  // и для комнаты, у которой контур уже есть (вписать её название в поле).
-  function startDrawing(roomId) {
-    if (!getState().schemeId) {
-      notify(strings.canvas.needScheme);
-      return;
-    }
-    setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
-  }
-
-  function rename(roomId, name) {
-    const current = findRoom(project(), roomId);
-    if (!current || name.trim() === current.name) return;
-    try {
-      commit(updateRoom(project(), roomId, { name }).project, strings.history.renameRoom);
-    } catch (error) {
-      fail(error);
-      render();
-    }
-  }
-
-  function recolor(roomId, color) {
-    const current = findRoom(project(), roomId);
-    // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
-    // сравнение без учёта регистра бережёт историю от пустого шага.
-    if (!current || String(current.color || "").toUpperCase() === String(color).toUpperCase()) return;
-    try {
-      commit(updateRoom(project(), roomId, { color }).project, strings.history.roomColor);
-    } catch (error) {
-      fail(error);
-      render();
-    }
-  }
-
-  async function remove(roomId) {
-    const current = findRoom(project(), roomId);
-    if (!current) return;
-    const agreed = await uiConfirm({
-      title: strings.rooms.removeTitle,
-      message: text("rooms.removeMessage", { name: current.name, count: roomsUsage(project(), roomId) }),
-      confirmLabel: strings.dialog.confirm,
-    });
-    if (!agreed) return;
-    const fresh = project();
-    if (!findRoom(fresh, roomId)) return;
-    canvasCommit(fresh, deleteRoom(fresh, roomId).project, strings.history.removeRoom);
-  }
-
-  function render() {
-    const state = getState();
-    if (!state.project) {
-      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
-      setSectionBadge(SECTION_IDS.rooms, "");
-      input.disabled = true;
-      addButton.disabled = true;
-      return;
-    }
-    input.disabled = false;
-    addButton.disabled = false;
-    const rows = roomsRows(state.project, state.schemeId);
-    setSectionBadge(SECTION_IDS.rooms, rows.length || "");
-    if (rows.length === 0) {
-      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
-      return;
-    }
-    list.replaceChildren(
-      ...rows.map((row) => {
-        const drawing = state.mode === "room" && state.activeRoomId === row.room.id;
-        const editing = Boolean(row.outlineId) && state.selectedOutlineId === row.outlineId;
-        const action = roomsOutlineAction(row);
-        return uiEl("div", { class: "rooms__row" + (drawing || editing ? " is-active" : "") }, [
-          roomColorField(state.project, row.room, (color) => recolor(row.room.id, color)),
-          uiEl("input", {
-            class: "ui-input rooms__name",
-            type: "text",
-            value: row.room.name,
-            on: { change: (event) => rename(row.room.id, event.target.value) },
-          }),
-          // Счётчик числом: в узкой колонке «меток: 3» съедало имя комнаты,
-          // а пояснение живёт в подсказке.
-          uiEl("span", {
-            class: "rooms__count",
-            text: String(row.marks),
-            title: text("rooms.marks", { count: row.marks }),
-          }),
-          uiButton("⬡", {
-            class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
-            title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
-            on: { click: () => startOutline(row.room.id) },
-          }),
-          uiButton("🗑", {
-            class: "ui-btn ui-btn--danger",
-            title: strings.rooms.remove,
-            on: { click: () => remove(row.room.id) },
-          }),
-        ]);
-      }),
-    );
-  }
-
-  subscribe((state, changed) => {
-    if (
-      "project" in changed ||
-      "schemeId" in changed ||
-      "mode" in changed ||
-      "activeRoomId" in changed ||
-      "selectedOutlineId" in changed
-    ) {
-      render();
-    }
-  });
-  render();
-}
-
-registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 // src/panels/types.js
 // Справочник объекта: типы меток, категории, помещения и шаблон для новых
@@ -10667,10 +10615,6 @@ function mountTypesPanel(host, api) {
     class: "ui-btn ui-btn--wide",
     on: { click: () => openTypesDictionary(api) },
   });
-  const roomsButton = uiButton(strings.rooms.open, {
-    class: "ui-btn ui-btn--wide",
-    on: { click: () => openRoomsEditor(api) },
-  });
   const saveButton = uiButton(strings.dictionary.saveTemplate, {
     class: "ui-btn ui-btn--wide",
     title: strings.dictionary.saveTemplateHint,
@@ -10682,7 +10626,7 @@ function mountTypesPanel(host, api) {
   });
   // Кнопка возврата показывается, только когда шаблон и правда сохранён.
   resetButton.hidden = true;
-  host.replaceChildren(uiEl("div", { class: "dict-panel" }, [dictionaryButton, roomsButton, saveButton, resetButton]));
+  host.replaceChildren(uiEl("div", { class: "dict-panel" }, [dictionaryButton, saveButton, resetButton]));
 
   async function saveTemplate() {
     const state = getState();
@@ -11621,6 +11565,282 @@ function filtersBox(api) {
   render();
   return { node, render };
 }
+
+// src/panels/rooms.js
+// Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
+// меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
+// меток, — поэтому главное здесь не список, а `roomsEnsure`: одно и то же
+// название не должно плодить двойников.
+//
+// Дом у помещений один — этот раздел. Ни окна, ни кнопки в правой колонке
+// больше нет: заводить, переименовывать, красить, считать метки и удалять
+// можно только здесь.
+
+
+
+
+
+
+// Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
+// и цвета соседних комнат, и цвета категорий: контуров на плане бывает
+// десяток, а метка своей же комнаты не должна повторять цвет её заливки.
+function roomColorField(project, room, onChange) {
+  return colorPickerButton({
+    value: room.color,
+    used: colorsInUse(project, { exceptRoomId: room.id }),
+    title: strings.rooms.color,
+    onPick: onChange,
+  });
+}
+
+function roomsKey(name) {
+  return String(name == null ? "" : name).trim().toLowerCase();
+}
+function roomsFind(project, name) {
+  const key = roomsKey(name);
+  if (!key) return null;
+  return project.rooms.find((room) => roomsKey(room.name) === key) || null;
+}
+
+// «Было или заведём»: пустое название — это «без помещения», а не комната
+// с пустым именем.
+function roomsEnsure(project, name) {
+  const found = roomsFind(project, name);
+  if (found) return { project, room: found };
+  if (!roomsKey(name)) return { project, room: null };
+  const created = addRoom(project, name);
+  return { project: created.project, room: created.room };
+}
+function roomsUsage(project, roomId) {
+  return project.marks.filter((mark) => mark.roomId === roomId).length;
+}
+
+// Строки списка: комната, сколько у неё меток и есть ли контур на этой схеме.
+// Чистая функция — на ней и стоят тесты раздела.
+function roomsRows(project, schemeId) {
+  const outlines = schemeId ? outlinesInOrder(project, schemeId) : [];
+  return roomsInOrder(project).map((room) => {
+    const outline = outlines.find((item) => item.roomId === room.id) || null;
+    return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
+  });
+}
+
+// Что делает поле добавления: завести комнату или — если такая уже есть —
+// сразу обвести её заново. Вторая ветка и заменяет прежний выбор помещения
+// из раздела «Метки»: там можно было взять комнату с контуром и обвести ещё раз.
+function roomsAddAction(project, name) {
+  const trimmed = String(name == null ? "" : name).trim();
+  if (!trimmed) return { kind: "none", roomId: null, name: "" };
+  const found = roomsFind(project, trimmed);
+  return found
+    ? { kind: "draw", roomId: found.id, name: trimmed }
+    : { kind: "create", roomId: null, name: trimmed };
+}
+
+// Что делает кнопка контура: нарисовать новый или править вершины прежнего.
+// Правка — это режим выбора с выделенным контуром: дальше вершины таскаются
+// на холсте, «+» на стенке добавляет, двойной клик убирает.
+function roomsOutlineAction(row) {
+  return row && row.outlineId ? "edit" : "draw";
+}
+
+function mountRoomsPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
+  const list = uiEl("div", { class: "rooms" });
+  const input = uiEl("input", {
+    class: "ui-input",
+    type: "text",
+    placeholder: strings.rooms.namePlaceholder,
+    on: {
+      keydown: (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        addAndDraw();
+      },
+    },
+  });
+  const addButton = uiButton(strings.rooms.addAndDraw, {
+    class: "ui-btn ui-btn--accent",
+    title: strings.rooms.addAndDrawHint,
+    on: { click: () => addAndDraw() },
+  });
+  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton]));
+
+  function project() {
+    return getState().project;
+  }
+
+  function fail(error) {
+    notify(error && error.message ? error.message : String(error), "error");
+  }
+
+  function commit(after, label, options) {
+    canvasCommit(project(), after, label, options);
+  }
+
+  // Комната заводится и сразу берётся в обводку: режим рисования включается тем
+  // же шагом истории, искать его отдельно не нужно.
+  function addAndDraw() {
+    const state = getState();
+    if (!state.project) return;
+    const action = roomsAddAction(state.project, input.value);
+    if (action.kind === "none") return;
+    if (action.kind === "draw") {
+      input.value = "";
+      startDrawing(action.roomId);
+      return;
+    }
+    try {
+      const created = addRoom(state.project, action.name);
+      input.value = "";
+      canvasCommit(state.project, created.project, strings.history.addRoom, {
+        patch: drawPatch(created.room.id),
+      });
+      if (!state.schemeId) notify(strings.canvas.needScheme);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // Без схемы рисовать негде: комната заводится, режим остаётся прежним.
+  function drawPatch(roomId) {
+    return getState().schemeId
+      ? { activeRoomId: roomId, mode: "room", selectedOutlineId: null }
+      : { activeRoomId: roomId };
+  }
+
+  // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
+  // вершины на плане.
+  function startOutline(roomId) {
+    const state = getState();
+    if (!state.schemeId) {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
+    if (roomsOutlineAction(row) !== "edit") {
+      startDrawing(roomId);
+      return;
+    }
+    setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
+    notify(strings.rooms.outlineEditing);
+  }
+
+  // Обводка с нуля — та самая дорога, что была в разделе «Метки»: она осталась
+  // и для комнаты, у которой контур уже есть (вписать её название в поле).
+  function startDrawing(roomId) {
+    if (!getState().schemeId) {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
+  }
+
+  function rename(roomId, name) {
+    const current = findRoom(project(), roomId);
+    if (!current || name.trim() === current.name) return;
+    try {
+      commit(updateRoom(project(), roomId, { name }).project, strings.history.renameRoom);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  function recolor(roomId, color) {
+    const current = findRoom(project(), roomId);
+    // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
+    // сравнение без учёта регистра бережёт историю от пустого шага.
+    if (!current || String(current.color || "").toUpperCase() === String(color).toUpperCase()) return;
+    try {
+      commit(updateRoom(project(), roomId, { color }).project, strings.history.roomColor);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  async function remove(roomId) {
+    const current = findRoom(project(), roomId);
+    if (!current) return;
+    const agreed = await uiConfirm({
+      title: strings.rooms.removeTitle,
+      message: text("rooms.removeMessage", { name: current.name, count: roomsUsage(project(), roomId) }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    const fresh = project();
+    if (!findRoom(fresh, roomId)) return;
+    canvasCommit(fresh, deleteRoom(fresh, roomId).project, strings.history.removeRoom);
+  }
+
+  function render() {
+    const state = getState();
+    if (!state.project) {
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
+      setSectionBadge(SECTION_IDS.rooms, "");
+      input.disabled = true;
+      addButton.disabled = true;
+      return;
+    }
+    input.disabled = false;
+    addButton.disabled = false;
+    const rows = roomsRows(state.project, state.schemeId);
+    setSectionBadge(SECTION_IDS.rooms, rows.length || "");
+    if (rows.length === 0) {
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
+      return;
+    }
+    list.replaceChildren(
+      ...rows.map((row) => {
+        const drawing = state.mode === "room" && state.activeRoomId === row.room.id;
+        const editing = Boolean(row.outlineId) && state.selectedOutlineId === row.outlineId;
+        const action = roomsOutlineAction(row);
+        return uiEl("div", { class: "rooms__row" + (drawing || editing ? " is-active" : "") }, [
+          roomColorField(state.project, row.room, (color) => recolor(row.room.id, color)),
+          uiEl("input", {
+            class: "ui-input rooms__name",
+            type: "text",
+            value: row.room.name,
+            on: { change: (event) => rename(row.room.id, event.target.value) },
+          }),
+          // Счётчик числом: в узкой колонке «меток: 3» съедало имя комнаты,
+          // а пояснение живёт в подсказке.
+          uiEl("span", {
+            class: "rooms__count",
+            text: String(row.marks),
+            title: text("rooms.marks", { count: row.marks }),
+          }),
+          uiButton("⬡", {
+            class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
+            title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
+            on: { click: () => startOutline(row.room.id) },
+          }),
+          uiButton("🗑", {
+            class: "ui-btn ui-btn--danger",
+            title: strings.rooms.remove,
+            on: { click: () => remove(row.room.id) },
+          }),
+        ]);
+      }),
+    );
+  }
+
+  subscribe((state, changed) => {
+    if (
+      "project" in changed ||
+      "schemeId" in changed ||
+      "mode" in changed ||
+      "activeRoomId" in changed ||
+      "selectedOutlineId" in changed
+    ) {
+      render();
+    }
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 // src/panels/marks.js
 // Список меток схемы: обозначение, помещение, расположение и обозначение из

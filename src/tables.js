@@ -207,24 +207,76 @@ function tableFilterNote(project, filter) {
   return strings.tables.partial;
 }
 
-export function marksTable(project, filter, groupBy) {
-  const kind = TABLE_GROUP_BY.includes(groupBy) ? groupBy : "category";
-  const columns = tableMarkColumns();
-  if (!project) return { kind: "marks", groupBy: kind, title: "", room: "", note: "", columns, groups: [] };
-
+// Один уровень разбивки: категории, типы или помещения — как было и как
+// остаётся, когда галка «по помещениям» снята.
+function tableFlatGroups(project, entries, kind) {
   const buckets = new Map();
-  for (const entry of tableEntries(project, filter)) {
+  for (const entry of entries) {
     const group = tableGroupOf(project, entry, kind);
-    if (!buckets.has(group.key)) buckets.set(group.key, { id: group.key, title: group.title, color: group.color, rows: [] });
+    if (!buckets.has(group.key)) {
+      buckets.set(group.key, { id: group.key, title: group.title, color: group.color, rows: [], level: 1 });
+    }
     buckets.get(group.key).rows.push(tableEntryRow(project, entry));
   }
-
-  const groups = tableGroupOrder(project, kind)
+  return tableGroupOrder(project, kind)
     .map((key) => buckets.get(key))
     .filter(Boolean);
+}
+
+// Два уровня: помещение, внутри — прежняя разбивка. Список остаётся плоским,
+// уровень написан в `level` — так его одинаково читают и печать, и PNG, и
+// текстовые форматы, и ни один из них не учит обход вложенности.
+// Заголовок помещения строк не несёт: строки живут во внутренних группах.
+// Метки без помещения — последней группой «Без помещения»: потерять их на
+// листе хуже, чем показать отдельно, и на плане они тоже никуда не делись.
+function tableRoomGroups(project, entries, kind) {
+  const byRoomKey = new Map();
+  for (const entry of entries) {
+    const room = entry.head.roomId ? findRoom(project, entry.head.roomId) : null;
+    const key = room ? room.id : "none";
+    if (!byRoomKey.has(key)) byRoomKey.set(key, []);
+    byRoomKey.get(key).push(entry);
+  }
+
+  const groups = [];
+  for (const key of [...roomsInOrder(project).map((room) => room.id), "none"]) {
+    const list = byRoomKey.get(key);
+    if (!list || list.length === 0) continue;
+    const room = key === "none" ? null : findRoom(project, key);
+    groups.push({
+      id: key,
+      title: room ? room.name : strings.tables.noRoom,
+      color: room ? room.color || null : null,
+      rows: [],
+      level: 1,
+    });
+    for (const inner of tableFlatGroups(project, list, kind)) {
+      groups.push({ ...inner, id: key + ":" + inner.id, level: 2 });
+    }
+  }
+  return groups;
+}
+
+/**
+ * Таблица меток. `groupBy` — разбивка (`category` | `type` | `room`);
+ * `options.byRoom` поднимает над ней второй уровень — помещения, и тогда
+ * `groupBy` задаёт разбивку **внутри** помещения. С `groupBy: "room"` галка
+ * не складывается (помещения уже и есть разбивка) и молча гасится.
+ */
+export function marksTable(project, filter, groupBy, options = {}) {
+  const kind = TABLE_GROUP_BY.includes(groupBy) ? groupBy : "category";
+  const byRoom = Boolean(options.byRoom) && kind !== "room";
+  const columns = tableMarkColumns();
+  if (!project) {
+    return { kind: "marks", groupBy: kind, byRoom, title: "", room: "", note: "", columns, groups: [] };
+  }
+
+  const entries = tableEntries(project, filter);
+  const groups = byRoom ? tableRoomGroups(project, entries, kind) : tableFlatGroups(project, entries, kind);
   return {
     kind: "marks",
     groupBy: kind,
+    byRoom,
     title: project.name || strings.tables.marksTitle,
     room: tableRoomTitle(project, filter),
     note: tableFilterNote(project, filter),
@@ -255,7 +307,7 @@ export function typesTable(project) {
       }
     }
   }
-  return { kind: "types", title: strings.tables.typesTitle, room: "", note: "", columns, rows };
+  return { kind: "types", title: strings.tables.typesTitle, byRoom: false, room: "", note: "", columns, rows };
 }
 
 // Обе таблицы читаются одинаково: список секций с заголовком и строками.
@@ -263,7 +315,7 @@ export function typesTable(project) {
 export function tableSections(table) {
   if (!table) return [];
   if (Array.isArray(table.groups)) return table.groups;
-  return [{ id: "all", title: "", color: null, rows: table.rows || [] }];
+  return [{ id: "all", title: "", color: null, rows: table.rows || [], level: 1 }];
 }
 
 export function tableRowCount(table) {
@@ -309,7 +361,10 @@ export function toMarkdown(table) {
   const header = "| " + table.columns.map(tableMarkdownCell).join(" | ") + " |";
   const divider = "| " + table.columns.map(() => "---").join(" | ") + " |";
   for (const section of tableSections(table)) {
-    if (section.title) out.push("## " + tableMarkdownCell(section.title), "");
+    if (section.title) out.push("#".repeat(1 + (section.level || 1)) + " " + tableMarkdownCell(section.title), "");
+    // Заголовок помещения строк не несёт — пустая шапка таблицы под ним
+    // выглядела бы как потерянные строки.
+    if (section.rows.length === 0) continue;
     out.push(header, divider);
     for (const row of section.rows) out.push("| " + row.cells.map(tableMarkdownCell).join(" | ") + " |");
     out.push("");

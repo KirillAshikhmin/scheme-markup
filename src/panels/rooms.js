@@ -3,9 +3,10 @@
 // меток, — поэтому главное здесь не список, а `roomsEnsure`: одно и то же
 // название не должно плодить двойников.
 //
-// Отдельного окна «Помещения» больше нет: список и все его действия живут в
-// панели, а прежняя кнопка в справочнике разворачивает раздел и подводит к нему.
-import { PANEL_IDS, registerPanel, revealSection, SECTION_IDS, setSectionBadge } from "../app.js";
+// Дом у помещений один — этот раздел. Ни окна, ни кнопки в правой колонке
+// больше нет: заводить, переименовывать, красить, считать метки и удалять
+// можно только здесь.
+import { PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
 import {
   addRoom,
   colorsInUse,
@@ -83,12 +84,6 @@ export function roomsAddAction(project, name) {
 // на холсте, «+» на стенке добавляет, двойной клик убирает.
 export function roomsOutlineAction(row) {
   return row && row.outlineId ? "edit" : "draw";
-}
-
-// Прежнее окно помещений уехало в панель; кнопка «Помещения» в справочнике
-// теперь разворачивает раздел, а не открывает второй способ делать то же самое.
-export function openRoomsEditor() {
-  revealSection(SECTION_IDS.rooms);
 }
 
 function mountRoomsPanel(host, api) {

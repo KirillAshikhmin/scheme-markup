@@ -386,3 +386,86 @@ test("длинный код виден в колонке «Обозначени�
   // Подпись блока на плане заказчик не трогал: она одна и свёрнута в диапазон.
   assert.equal(labelOf(box.project, block.group.id), "ПОДСВЕТКА1–3");
 });
+
+// ——— двухуровневая разбивка: помещение, внутри — категории или типы ————
+
+test("галка «по помещениям» даёт два уровня: помещение, внутри — прежняя разбивка", () => {
+  const box = tablesFixture();
+  box.put("В");
+  const table = marksTable(box.project, null, "category", { byRoom: true });
+
+  assert.equal(table.byRoom, true);
+  assert.deepEqual(
+    table.groups.map((group) => [group.level, group.title]),
+    [
+      [1, "Спальная Оли"],
+      [2, "Свет"],
+      [1, "Холл"],
+      [2, "Розетки"],
+      [1, "Без помещения"],
+      [2, "Выключатели"],
+    ],
+  );
+  // Строки живут только во внутренних группах; заголовок помещения их не несёт.
+  assert.deepEqual(table.groups[0].rows, []);
+  assert.deepEqual(table.groups[1].rows.map((row) => row.cells[0]), ["Т1", "Т2", "С1"]);
+  assert.deepEqual(table.groups[3].rows.map((row) => row.cells[0]), ["Р1"]);
+  assert.deepEqual(table.groups[5].rows.map((row) => row.cells[0]), ["В1"]);
+
+  // Цвет помещения — у его заголовка, цвет категории — у внутренней группы.
+  const bedroom = box.project.rooms.find((room) => room.id === box.rooms.bedroom);
+  assert.equal(table.groups[0].color, bedroom.color);
+  assert.equal(table.groups[1].color, "#1F6FEB");
+  assert.equal(table.groups[4].color, null);
+  // Идентификаторы внутренних групп не сталкиваются между помещениями.
+  assert.equal(new Set(table.groups.map((group) => group.id)).size, table.groups.length);
+});
+
+test("внутри помещений разбивка переключается на типы; «по помещениям» в списке не задваивает уровень", () => {
+  const box = tablesFixture();
+  const byType = marksTable(box.project, null, "type", { byRoom: true });
+  assert.deepEqual(
+    byType.groups.map((group) => [group.level, group.title]),
+    [
+      [1, "Спальная Оли"],
+      [2, "Т — Точечный светильник"],
+      [2, "С — Светильник"],
+      [1, "Холл"],
+      [2, "Р — Розетка"],
+    ],
+  );
+  assert.deepEqual(byType.groups[1].rows.map((row) => row.cells[0]), ["Т1", "Т2"]);
+
+  const twice = marksTable(box.project, null, "room", { byRoom: true });
+  assert.equal(twice.byRoom, false);
+  assert.deepEqual(
+    twice.groups.map((group) => [group.level, group.title]),
+    [
+      [1, "Спальная Оли"],
+      [1, "Холл"],
+    ],
+  );
+  assert.deepEqual(twice.groups[0].rows.map((row) => row.cells[0]), ["Т1", "Т2", "С1"]);
+});
+
+test("два уровня видны и в тексте: помещение — заголовок, разбивка внутри — подзаголовок", () => {
+  const box = tablesFixture();
+  const table = marksTable(box.project, { roomId: box.rooms.hall }, "category", { byRoom: true });
+  assert.deepEqual(toMarkdown(table).split("\n").slice(0, 8), [
+    "# Квартира на Ленина",
+    "",
+    "**Холл**",
+    "",
+    "## Холл",
+    "",
+    "### Розетки",
+    "",
+  ]);
+  assert.deepEqual(toCsv(table).split("\r\n").slice(0, 5), [
+    "﻿Квартира на Ленина",
+    "Холл",
+    "Обозначение;Тип;Помещение;Расположение;В оригинале",
+    "Холл",
+    "Розетки",
+  ]);
+});

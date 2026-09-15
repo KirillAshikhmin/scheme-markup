@@ -6,7 +6,7 @@
 // Своего рисования меток здесь нет и быть не должно.
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
-import { schemesInOrder } from "./model.js";
+import { findRoom, outlinesInOrder, schemesInOrder } from "./model.js";
 import { drawScheme } from "./render.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { tableSections, tableRowCount } from "./tables.js";
@@ -78,6 +78,50 @@ function exportArea(scheme, area) {
     width: Math.max(1, Math.min(width - x, area.width || width)),
     height: Math.max(1, Math.min(height - y, area.height || height)),
   };
+}
+
+// Поля вокруг контура: доля большей стороны комнаты, но не меньше запаса
+// в пикселях плана — на узкой кладовке процент дал бы рамку в пару точек.
+const EXPORT_ROOM_PAD = 0.06;
+const EXPORT_ROOM_PAD_MIN = 24;
+
+/**
+ * Габариты помещения на схеме в пикселях плана — рамка по контурам комнаты
+ * плюс поля. `null`, когда контура этой комнаты на схеме нет.
+ *
+ * Метки внутри рамки при этом **не фильтруются**: лист режется по комнате, а
+ * показывает всё, что попало в кадр. Иначе розетка соседней комнаты, физически
+ * стоящая в кадре, исчезла бы с бумаги, и монтажник решил бы, что там пусто.
+ */
+export function exportRoomArea(project, scheme, roomId) {
+  if (!project || !scheme || !roomId) return null;
+  const outlines = outlinesInOrder(project, scheme.id).filter((outline) => outline.roomId === roomId);
+  if (outlines.length === 0) return null;
+  const width = scheme.width > 0 ? scheme.width : 1000;
+  const height = scheme.height > 0 ? scheme.height : 1000;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const outline of outlines) {
+    for (const point of outline.points || []) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null;
+  const box = { x: minX * width, y: minY * height, width: (maxX - minX) * width, height: (maxY - minY) * height };
+  const pad = Math.max(EXPORT_ROOM_PAD_MIN, Math.max(box.width, box.height) * EXPORT_ROOM_PAD);
+  return { x: box.x - pad, y: box.y - pad, width: box.width + pad * 2, height: box.height + pad * 2 };
+}
+
+// Имя помещения для заголовка листа схемы: комната названа там же, где и на
+// таблице, иначе лист по комнате не отличить от листа по всей схеме.
+export function exportRoomName(project, roomId) {
+  const room = roomId ? findRoom(project, roomId) : null;
+  return room ? room.name : "";
 }
 
 /**
@@ -293,13 +337,18 @@ export async function tablePng(table, options = {}) {
   for (const section of sections) {
     const color = section.color || EXPORT_TABLE.ink;
     if (section.title) {
+      // Уровень заголовка: помещение — крупнее и с жирной чертой, разбивка
+      // внутри него — мельче и тоньше. Вложенность на бумаге видна размером,
+      // а не отступом: отступ увёл бы строки от колонок.
+      const level = section.level || 1;
       y += EXPORT_TABLE.gap;
       ctx.fillStyle = color;
-      ctx.font = `600 ${EXPORT_TABLE.groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      const groupFont = level === 2 ? EXPORT_TABLE.groupFont - 2 : EXPORT_TABLE.groupFont;
+      ctx.font = `600 ${groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
       ctx.fillText(section.title, left, y + EXPORT_TABLE.rowHeight / 2);
       const lineY = y + EXPORT_TABLE.rowHeight - 2;
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = level === 2 ? 1 : 2;
       ctx.beginPath();
       ctx.moveTo(left, lineY);
       ctx.lineTo(left + bodyWidth, lineY);
@@ -408,9 +457,18 @@ export function exportTableNode(table, options = {}) {
   doc.append(head);
 
   for (const section of tableSections(table)) {
-    const block = exportNode("section", "print-doc__group");
+    const level = section.level || 1;
+    const block = exportNode("section", level === 2 ? "print-doc__group print-doc__group--sub" : "print-doc__group");
     if (section.color) block.style.setProperty("--print-color", section.color);
-    if (section.title) block.append(exportNode("h2", "print-doc__group-title", section.title));
+    if (section.title) {
+      block.append(exportNode(level === 2 ? "h3" : "h2", "print-doc__group-title", section.title));
+    }
+    // Заголовок помещения строк не несёт: пустая шапка таблицы под ним
+    // читалась бы как потерянные строки.
+    if (section.rows.length === 0) {
+      doc.append(block);
+      continue;
+    }
     const tableNode = exportNode("table", "print-doc__table");
     const thead = exportNode("thead");
     const headRow = exportNode("tr");
