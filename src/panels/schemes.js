@@ -3,7 +3,16 @@
 // Холст рисует другой модуль — сюда он приходит только за картинкой:
 // подготовленный план и его размер кладутся в состояние сеанса (`schemeImage`).
 import { PANEL_IDS, registerPanel } from "../app.js";
-import { addScheme, deleteScheme, findScheme, schemesInOrder, updateMark, updateScheme } from "../model.js";
+import {
+  addScheme,
+  deleteScheme,
+  findScheme,
+  replaceSchemeImage,
+  schemesInOrder,
+  updateMark,
+  updateScheme,
+} from "../model.js";
+import { canvasCommit } from "../canvas.js";
 import {
   countPointsOutside,
   cropTransform,
@@ -15,10 +24,11 @@ import {
   releasePlanImage,
   renderPlanImage,
   rotateTransform,
+  sameAspect,
   transformMarkPoints,
   transformOffset,
 } from "../imagePrep.js";
-import { deleteImage, getImage, putImage } from "../store.js";
+import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiModal, uiPrompt } from "./ui.js";
 
@@ -125,9 +135,11 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
 
     async function requestApply() {
       if (busy) return;
-      if (beforeApply && !isIdentityTransform(transform)) {
+      // Спрашиваем всегда, а не только после правки: замене подложки важен
+      // итоговый размер, даже когда картинку не крутили.
+      if (beforeApply) {
         setBusy(true);
-        const agreed = await beforeApply(transform);
+        const agreed = await beforeApply(transform, { width: preview.width, height: preview.height });
         setBusy(false);
         if (!agreed) return;
       }
@@ -202,12 +214,28 @@ function mountSchemesPanel(host, api) {
     },
   });
   fileInput.hidden = true;
+  let replaceTarget = null;
+  const replaceInput = uiEl("input", {
+    class: "scheme-file",
+    type: "file",
+    attrs: { accept: "image/png,image/jpeg,.png,.jpg,.jpeg" },
+    on: {
+      change: async () => {
+        const file = replaceInput.files && replaceInput.files[0];
+        const schemeId = replaceTarget;
+        replaceInput.value = "";
+        replaceTarget = null;
+        if (file && schemeId) await replacePlanFromFile(schemeId, file);
+      },
+    },
+  });
+  replaceInput.hidden = true;
   const addButton = uiButton(strings.schemes.add, {
     class: "ui-btn ui-btn--accent ui-btn--wide",
     on: { click: () => fileInput.click() },
   });
   const hint = uiEl("p", { class: "panel__empty", text: strings.schemes.addHint });
-  host.replaceChildren(addButton, fileInput, list, hint);
+  host.replaceChildren(addButton, fileInput, replaceInput, list, hint);
 
   function render() {
     const state = getState();
@@ -241,6 +269,15 @@ function mountSchemesPanel(host, api) {
         }),
         uiEl("div", { class: "scheme-row__tools" }, [
           uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
+          uiButton("⇄", {
+            title: strings.schemes.replace,
+            on: {
+              click: () => {
+                replaceTarget = scheme.id;
+                replaceInput.click();
+              },
+            },
+          }),
           uiButton("✎", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
           uiButton("↑", {
             title: strings.schemes.up,
@@ -346,6 +383,66 @@ function mountSchemesPanel(host, api) {
     await deleteImage(scheme.imageId);
     setState({ project: next, schemeImage: null });
     notify(pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: pushed }), "success");
+  }
+
+  // Замена подложки: картинка другая, разметка остаётся вся. Координаты — доли
+  // плана, поэтому при той же пропорции всё встаёт само; при другой разметка
+  // поедет, и об этом спрашивают до применения, а не показывают кашу после.
+  // Прежнее преобразование не переносится: поворот и обрезка запечены в старой
+  // картинке, самого преобразования нигде нет. Новый файл правится тем же
+  // редактором и теми же руками — с предпросмотром, а не вслепую.
+  async function replacePlanFromFile(schemeId, file) {
+    const scheme = findScheme(getState().project, schemeId);
+    if (!scheme) return;
+    if (!isPlanImageFile(file)) {
+      notify(strings.image.wrongType, "error");
+      return;
+    }
+    let plan;
+    try {
+      plan = await readPlanImage(file);
+    } catch (error) {
+      notify(strings.image.broken, "error");
+      return;
+    }
+    const wasSize = { width: scheme.width, height: scheme.height };
+    const edited = await openPlanEditor({
+      blob: plan.blob,
+      width: plan.width,
+      height: plan.height,
+      title: text("image.replaceTitle", { name: scheme.name }),
+      beforeApply: async (transform, size) => {
+        if (sameAspect(wasSize, size)) return true;
+        return uiConfirm({
+          title: strings.image.aspectTitle,
+          message: text("image.aspectAsk", {
+            before: text("schemes.size", { width: wasSize.width, height: wasSize.height }),
+            after: text("schemes.size", { width: size.width, height: size.height }),
+          }),
+          confirmLabel: strings.image.replaceAnyway,
+        });
+      },
+    });
+    if (!edited) return;
+    const imageId = await putImage(edited.blob);
+    const before = getState().project;
+    if (!findScheme(before, schemeId)) return;
+    let after;
+    try {
+      after = replaceSchemeImage(before, schemeId, {
+        imageId,
+        width: edited.width,
+        height: edited.height,
+      }).project;
+    } catch (error) {
+      notify(error.message, "error");
+      return;
+    }
+    // Через canvasCommit: замену отменяет Ctrl+Z, как и всё остальное. Прежняя
+    // картинка поэтому и остаётся в хранилище — её убирает уборка при запуске,
+    // когда отменять уже нечего.
+    canvasCommit(before, after, strings.history.replaceImage, { schemeId });
+    notify(sameAspect(wasSize, edited) ? strings.image.replaced : strings.image.replacedShifted, "success");
   }
 
   async function renameScheme(schemeId) {
@@ -455,10 +552,18 @@ function mountSchemesPanel(host, api) {
   document.addEventListener("dragover", (event) => event.preventDefault());
   document.addEventListener("drop", (event) => event.preventDefault());
 
+  // Уборка ничьих подложек — один раз за сеанс, на первом открытом объекте:
+  // стек отмены в этот момент пуст, несохранённых правок ещё нет, и удалять
+  // безопасно. Мусор, нажитый за сеанс, уйдёт при следующем запуске.
+  let swept = false;
   subscribe((state, changed) => {
     if ("project" in changed || "schemeId" in changed) {
       render();
       loadSchemeImage(false);
+    }
+    if (!swept && state.project) {
+      swept = true;
+      sweepOrphanImages([state.project]);
     }
   });
   render();

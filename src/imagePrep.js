@@ -27,6 +27,22 @@ export function planTypeOf(file) {
   return "image/png";
 }
 
+// Пропорция плана. Замена подложки на картинку другой пропорции сдвигает всю
+// разметку относительно плана: доли остаются прежними, а содержимое картинки
+// растянуто иначе. Допуск закрывает округление пикселей при экспорте плана.
+function planAspect(size) {
+  const width = Number(size && size.width);
+  const height = Number(size && size.height);
+  return width > 0 && height > 0 ? width / height : 0;
+}
+
+export function sameAspect(before, after, tolerance = 0.01) {
+  const first = planAspect(before);
+  const second = planAspect(after);
+  if (!first || !second) return true;
+  return Math.abs(first - second) / Math.max(first, second) <= tolerance;
+}
+
 export function identityTransform() {
   return { rotate: 0, crop: null };
 }

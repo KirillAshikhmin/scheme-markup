@@ -495,6 +495,52 @@ export function updateScheme(project, schemeId, patch) {
   return { project: withProject(project, { schemes }), scheme: schemes.find((s) => s.id === schemeId) };
 }
 
+// Смена подложки: картинка другая, разметка та же. Доли меток и контуров не
+// трогаются — при той же пропорции всё встаёт на свои места само, при другой
+// разметка поедет, и спросить об этом обязан вызывающий, до правки.
+// Пересчитывается только то, что задано в пикселях плана, — смещения подписей:
+// на картинке вдвое крупнее прежние 12 px означали бы вдвое меньший отступ.
+export function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) {
+  const scheme = requireScheme(project, schemeId);
+  if (typeof imageId !== "string" || imageId === "") throw modelError("imageRequired");
+  const nextWidth = Math.round(Number(width));
+  const nextHeight = Math.round(Number(height));
+  if (!(nextWidth > 0) || !(nextHeight > 0)) throw modelError("planSizeInvalid");
+  const scaleX = scheme.width > 0 ? nextWidth / scheme.width : 1;
+  const scaleY = scheme.height > 0 ? nextHeight / scheme.height : 1;
+  const scaleOffset = (offset) =>
+    offset ? { dx: roundOffset(offset.dx * scaleX), dy: roundOffset(offset.dy * scaleY) } : offset;
+  const schemes = project.schemes.map((item) =>
+    item.id === schemeId ? { ...item, imageId, width: nextWidth, height: nextHeight } : item,
+  );
+  const marks = project.marks.map((mark) =>
+    mark.schemeId === schemeId && mark.labelOffset ? { ...mark, labelOffset: scaleOffset(mark.labelOffset) } : mark,
+  );
+  const groups = project.groups.map((group) =>
+    group.schemeId === schemeId && group.labelOffset
+      ? { ...group, labelOffset: scaleOffset(group.labelOffset) }
+      : group,
+  );
+  return {
+    project: withProject(project, { schemes, marks, groups }),
+    scheme: schemes.find((item) => item.id === schemeId),
+  };
+}
+
+function roundOffset(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+// Какие картинки объекту нужны: по этому списку хранилище понимает, что в нём
+// осталось от прежних подложек и больше никому не принадлежит.
+export function usedImageIds(project) {
+  const ids = new Set();
+  for (const scheme of (project && project.schemes) || []) {
+    if (scheme.imageId) ids.add(scheme.imageId);
+  }
+  return ids;
+}
+
 export function deleteScheme(project, schemeId) {
   requireScheme(project, schemeId);
   const marks = project.marks.filter((mark) => mark.schemeId !== schemeId);

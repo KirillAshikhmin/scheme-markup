@@ -8,6 +8,8 @@
 // (панель показывает строку и советует выгрузить проект в файл) и продолжает
 // работать. Данные сеанса живут в памяти в любом случае.
 
+import { usedImageIds } from "./model.js";
+
 export const STORE_DB_NAME = "scheme-markup";
 export const STORE_DB_VERSION = 1;
 export const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
@@ -242,6 +244,48 @@ export async function deleteImage(id) {
   storeMemory.images.delete(id);
   const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
   return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— уборка ———————————————————————————————————————————————————————————
+
+// Картинки лежат общей кучей на все объекты, поэтому «ничья» — та, на которую
+// не ссылается ни один объект. Чистая половина уборки: её и проверяют тесты.
+export function orphanImageIds(projects, storedIds) {
+  const used = new Set();
+  for (const project of projects || []) {
+    for (const id of usedImageIds(project)) used.add(id);
+  }
+  return [...(storedIds || [])].filter((id) => id && !used.has(id));
+}
+
+// Не смогли прочитать — возвращаем null: удалять по неполному списку нельзя,
+// так теряются чужие планы.
+async function allProjectDocs() {
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+  if (!read.ok && storeModeValue === "idb") return null;
+  const docs = new Map();
+  for (const doc of read.result || []) docs.set(doc.id, doc);
+  for (const doc of storeMemory.projects.values()) docs.set(doc.id, doc);
+  return [...docs.values()];
+}
+
+export async function listImageIds() {
+  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.getAllKeys()));
+  if (!read.ok && storeModeValue === "idb") return null;
+  const ids = (read.result || []).map((key) => String(key));
+  return [...ids, ...storeMemory.images.keys()];
+}
+
+// Убирает подложки, которые не нужны ни одному объекту. `extraProjects` —
+// то, что ещё не доехало до хранилища (только что открытый объект): его
+// картинки тоже не ничьи.
+export async function sweepOrphanImages(extraProjects = []) {
+  const docs = await allProjectDocs();
+  const stored = await listImageIds();
+  if (!docs || !stored) return { removed: 0, skipped: true };
+  const orphans = orphanImageIds([...docs, ...extraProjects], stored);
+  for (const id of orphans) await deleteImage(id);
+  return { removed: orphans.length, skipped: false };
 }
 
 // ——— настройки ————————————————————————————————————————————————————————

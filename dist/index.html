@@ -1659,272 +1659,6 @@ body {
     </div>
     <script>
 (function () {
-// src/store.js
-// Хранение в браузере: IndexedDB своими руками, без единой зависимости.
-// База `scheme-markup`, хранилища `projects` (документ объекта), `images`
-// (Blob планов) и `settings` (ключ-значение).
-//
-// Правило файла: потеря хранилища не должна ронять приложение. По file://
-// IndexedDB доступен не везде, в приватном окне запись может отказать в любой
-// момент — тогда store переходит в память, сообщает о беде подписчикам
-// (панель показывает строку и советует выгрузить проект в файл) и продолжает
-// работать. Данные сеанса живут в памяти в любом случае.
-const STORE_DB_NAME = "scheme-markup";
-const STORE_DB_VERSION = 1;
-const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
-// Ниже этого порога свободного места пользователя предупреждают заранее.
-const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
-// Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
-// вкладка): ждём ограниченное время и уходим в память.
-const STORE_OPEN_TIMEOUT_MS = 4000;
-
-const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
-const storeListeners = new Set();
-let storeDb = null;
-let storeModeValue = "unknown";
-let storeOpening = null;
-let storeReported = false;
-let storeWriteReported = false;
-function storeMode() {
-  return storeModeValue;
-}
-function onStoreProblem(listener) {
-  storeListeners.add(listener);
-  return () => storeListeners.delete(listener);
-}
-
-function reportStoreProblem(kind, error) {
-  const problem = { kind, error: error || null };
-  for (const listener of [...storeListeners]) {
-    try {
-      listener(problem);
-    } catch (ignored) {
-      /* подписчик не должен ломать запись */
-    }
-  }
-}
-
-function newStoreId() {
-  return crypto.randomUUID();
-}
-
-function idbRequest(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("indexeddb-failed"));
-  });
-}
-
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === "undefined" || indexedDB === null) {
-      reject(new Error("indexeddb-unavailable"));
-      return;
-    }
-    let settled = false;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      fn(value);
-    };
-    const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
-    let request;
-    try {
-      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
-    } catch (error) {
-      clearTimeout(timer);
-      finish(reject, error);
-      return;
-    }
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
-        db.createObjectStore(STORE_NAMES.projects, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(STORE_NAMES.images)) {
-        db.createObjectStore(STORE_NAMES.images, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
-        db.createObjectStore(STORE_NAMES.settings, { keyPath: "key" });
-      }
-    };
-    request.onsuccess = () => {
-      clearTimeout(timer);
-      finish(resolve, request.result);
-    };
-    request.onerror = () => {
-      clearTimeout(timer);
-      finish(reject, request.error || new Error("indexeddb-failed"));
-    };
-    request.onblocked = () => {
-      clearTimeout(timer);
-      finish(reject, new Error("indexeddb-blocked"));
-    };
-  });
-}
-async function openStore() {
-  if (storeModeValue !== "unknown") return storeModeValue;
-  if (!storeOpening) {
-    storeOpening = openDatabase()
-      .then((db) => {
-        storeDb = db;
-        storeModeValue = "idb";
-        db.onclose = () => degradeToMemory(new Error("indexeddb-closed"));
-        return storeModeValue;
-      })
-      .catch((error) => {
-        degradeToMemory(error);
-        return storeModeValue;
-      });
-  }
-  return storeOpening;
-}
-
-function degradeToMemory(error) {
-  storeDb = null;
-  storeModeValue = "memory";
-  if (storeReported) return;
-  storeReported = true;
-  reportStoreProblem("unavailable", error);
-}
-
-// Одна транзакция — одно действие: запись документа объекта атомарна, вкладка,
-// закрытая посреди сохранения, оставляет прежнее состояние, а не половину.
-async function runTransaction(name, mode, action) {
-  await openStore();
-  if (storeModeValue !== "idb" || !storeDb) return { ok: false, memory: true };
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = storeDb.transaction(name, mode);
-      let result;
-      tx.oncomplete = () => {
-        if (mode === "readwrite") storeWriteReported = false;
-        resolve({ ok: true, result });
-      };
-      tx.onerror = () => reject(tx.error || new Error("indexeddb-failed"));
-      tx.onabort = () => reject(tx.error || new Error("indexeddb-aborted"));
-      Promise.resolve(action(tx.objectStore(name)))
-        .then((value) => {
-          result = value;
-        })
-        .catch((error) => {
-          try {
-            tx.abort();
-          } catch (ignored) {
-            /* транзакция уже завершилась */
-          }
-          reject(error);
-        });
-    });
-  } catch (error) {
-    // Автосохранение идёт на каждую правку: об отказавшей записи говорим один
-    // раз — до тех пор, пока запись снова не пройдёт.
-    if (mode === "readwrite" && !storeWriteReported) {
-      storeWriteReported = true;
-      reportStoreProblem("writeFailed", error);
-    }
-    return { ok: false, error };
-  }
-}
-
-// ——— объекты ——————————————————————————————————————————————————————————
-async function listProjects() {
-  const summaries = new Map();
-  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
-  if (read.ok) {
-    for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
-  }
-  for (const doc of storeMemory.projects.values()) summaries.set(doc.id, summaryOf(doc));
-  return [...summaries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-}
-
-function summaryOf(project) {
-  return {
-    id: project.id,
-    name: project.name,
-    updatedAt: project.updatedAt,
-    schemes: (project.schemes || []).length,
-    marks: (project.marks || []).length,
-  };
-}
-async function loadProject(id) {
-  if (!id) return null;
-  if (storeMemory.projects.has(id)) return storeMemory.projects.get(id);
-  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.get(id)));
-  return read.ok && read.result ? read.result : null;
-}
-
-// Отказ записи не теряет работу: документ остаётся в памяти сеанса, а панель
-// получает повод предложить выгрузку в файл.
-async function saveProject(project) {
-  if (!project || !project.id) return { ok: false };
-  const written = await runTransaction(STORE_NAMES.projects, "readwrite", (store) =>
-    idbRequest(store.put(project)),
-  );
-  if (written.ok) {
-    storeMemory.projects.delete(project.id);
-    return { ok: true, mode: "idb" };
-  }
-  storeMemory.projects.set(project.id, project);
-  return { ok: false, mode: "memory", error: written.error || null };
-}
-async function deleteProject(id) {
-  storeMemory.projects.delete(id);
-  const removed = await runTransaction(STORE_NAMES.projects, "readwrite", (store) => idbRequest(store.delete(id)));
-  return { ok: removed.ok || storeModeValue === "memory" };
-}
-
-// ——— изображения ——————————————————————————————————————————————————————
-async function putImage(blob) {
-  const id = newStoreId();
-  const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
-    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
-  );
-  if (!written.ok) storeMemory.images.set(id, blob);
-  return id;
-}
-async function getImage(id) {
-  if (!id) return null;
-  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
-  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
-  return read.ok && read.result ? read.result.blob : null;
-}
-async function deleteImage(id) {
-  if (!id) return { ok: true };
-  storeMemory.images.delete(id);
-  const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
-  return { ok: removed.ok || storeModeValue === "memory" };
-}
-
-// ——— настройки ————————————————————————————————————————————————————————
-async function getSetting(key) {
-  if (storeMemory.settings.has(key)) return storeMemory.settings.get(key);
-  const read = await runTransaction(STORE_NAMES.settings, "readonly", (store) => idbRequest(store.get(key)));
-  return read.ok && read.result ? read.result.value : null;
-}
-async function setSetting(key, value) {
-  const written = await runTransaction(STORE_NAMES.settings, "readwrite", (store) =>
-    idbRequest(store.put({ key, value })),
-  );
-  if (written.ok) storeMemory.settings.delete(key);
-  else storeMemory.settings.set(key, value);
-  return { ok: written.ok };
-}
-
-// ——— место ————————————————————————————————————————————————————————————
-async function estimateSpace() {
-  const empty = { usage: null, quota: null, free: null, low: false };
-  if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.estimate) return empty;
-  try {
-    const { usage, quota } = await navigator.storage.estimate();
-    if (typeof quota !== "number" || typeof usage !== "number") return empty;
-    const free = Math.max(0, quota - usage);
-    return { usage, quota, free, low: free < STORE_LOW_SPACE_BYTES };
-  } catch (error) {
-    return empty;
-  }
-}
-
 // src/strings.js
 // Единственный словарь видимых строк. В остальных файлах русских текстов нет.
 const strings = {
@@ -2080,6 +1814,7 @@ const strings = {
     blockMode: "режим блока",
     markField: "правка полей метки",
     markNumber: "правка номера метки",
+    replaceImage: "замена плана",
     compact: "уплотнение нумерации",
     markRoom: "помещение метки",
     markRoomAuto: "помещение по контуру",
@@ -2122,6 +1857,8 @@ const strings = {
     unknownBlockMode: "Неизвестный режим блока",
     unknownSide: "Неизвестная сторона блока",
     unknownKind: "Неизвестный вид метки",
+    imageRequired: "Нужна картинка плана",
+    planSizeInvalid: "Размер плана должен быть больше нуля",
     unknownCommitOption: "Правка не выполнена: в опциях команды неизвестный ключ {keys}. Известны: {known}",
     commitOptionsNotObject: "Правка не выполнена: опции команды — объект с ключами {keys}, а не список",
     badNumber: "Номер метки — целое число больше нуля",
@@ -2253,6 +1990,7 @@ const strings = {
     addHint: "Перетащите PNG или JPG на план — или нажмите «Загрузить план»",
     dropHere: "Отпустите — план загрузится",
     edit: "Править план",
+    replace: "Заменить план",
     rename: "Переименовать схему",
     renameTitle: "Имя схемы",
     remove: "Удалить схему",
@@ -2269,6 +2007,13 @@ const strings = {
   },
   image: {
     editTitle: "План схемы",
+    replaceTitle: "Новый план для «{name}»",
+    aspectTitle: "Пропорции не совпадают",
+    aspectAsk:
+      "Было {before}, стало {after}. Пропорции другие — метки и контуры сместятся относительно плана. Заменить?",
+    replaceAnyway: "Заменить",
+    replaced: "План заменён, разметка на месте",
+    replacedShifted: "План заменён; пропорции другие — проверьте, куда встала разметка",
     rotateLeft: "Повернуть влево",
     rotateRight: "Повернуть вправо",
     cropHint: "Обведите рамкой то, что оставить, и нажмите «Обрезать»",
@@ -2949,6 +2694,52 @@ function updateScheme(project, schemeId, patch) {
     scheme.id === schemeId ? { ...scheme, ...pick(patch, allowed) } : scheme,
   );
   return { project: withProject(project, { schemes }), scheme: schemes.find((s) => s.id === schemeId) };
+}
+
+// Смена подложки: картинка другая, разметка та же. Доли меток и контуров не
+// трогаются — при той же пропорции всё встаёт на свои места само, при другой
+// разметка поедет, и спросить об этом обязан вызывающий, до правки.
+// Пересчитывается только то, что задано в пикселях плана, — смещения подписей:
+// на картинке вдвое крупнее прежние 12 px означали бы вдвое меньший отступ.
+function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) {
+  const scheme = requireScheme(project, schemeId);
+  if (typeof imageId !== "string" || imageId === "") throw modelError("imageRequired");
+  const nextWidth = Math.round(Number(width));
+  const nextHeight = Math.round(Number(height));
+  if (!(nextWidth > 0) || !(nextHeight > 0)) throw modelError("planSizeInvalid");
+  const scaleX = scheme.width > 0 ? nextWidth / scheme.width : 1;
+  const scaleY = scheme.height > 0 ? nextHeight / scheme.height : 1;
+  const scaleOffset = (offset) =>
+    offset ? { dx: roundOffset(offset.dx * scaleX), dy: roundOffset(offset.dy * scaleY) } : offset;
+  const schemes = project.schemes.map((item) =>
+    item.id === schemeId ? { ...item, imageId, width: nextWidth, height: nextHeight } : item,
+  );
+  const marks = project.marks.map((mark) =>
+    mark.schemeId === schemeId && mark.labelOffset ? { ...mark, labelOffset: scaleOffset(mark.labelOffset) } : mark,
+  );
+  const groups = project.groups.map((group) =>
+    group.schemeId === schemeId && group.labelOffset
+      ? { ...group, labelOffset: scaleOffset(group.labelOffset) }
+      : group,
+  );
+  return {
+    project: withProject(project, { schemes, marks, groups }),
+    scheme: schemes.find((item) => item.id === schemeId),
+  };
+}
+
+function roundOffset(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+// Какие картинки объекту нужны: по этому списку хранилище понимает, что в нём
+// осталось от прежних подложек и больше никому не принадлежит.
+function usedImageIds(project) {
+  const ids = new Set();
+  for (const scheme of (project && project.schemes) || []) {
+    if (scheme.imageId) ids.add(scheme.imageId);
+  }
+  return ids;
 }
 function deleteScheme(project, schemeId) {
   requireScheme(project, schemeId);
@@ -3846,6 +3637,313 @@ function validate(project) {
   }
 
   return problems;
+}
+
+// src/store.js
+// Хранение в браузере: IndexedDB своими руками, без единой зависимости.
+// База `scheme-markup`, хранилища `projects` (документ объекта), `images`
+// (Blob планов) и `settings` (ключ-значение).
+//
+// Правило файла: потеря хранилища не должна ронять приложение. По file://
+// IndexedDB доступен не везде, в приватном окне запись может отказать в любой
+// момент — тогда store переходит в память, сообщает о беде подписчикам
+// (панель показывает строку и советует выгрузить проект в файл) и продолжает
+// работать. Данные сеанса живут в памяти в любом случае.
+const STORE_DB_NAME = "scheme-markup";
+const STORE_DB_VERSION = 1;
+const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
+// Ниже этого порога свободного места пользователя предупреждают заранее.
+const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
+// Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
+// вкладка): ждём ограниченное время и уходим в память.
+const STORE_OPEN_TIMEOUT_MS = 4000;
+
+const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
+const storeListeners = new Set();
+let storeDb = null;
+let storeModeValue = "unknown";
+let storeOpening = null;
+let storeReported = false;
+let storeWriteReported = false;
+function storeMode() {
+  return storeModeValue;
+}
+function onStoreProblem(listener) {
+  storeListeners.add(listener);
+  return () => storeListeners.delete(listener);
+}
+
+function reportStoreProblem(kind, error) {
+  const problem = { kind, error: error || null };
+  for (const listener of [...storeListeners]) {
+    try {
+      listener(problem);
+    } catch (ignored) {
+      /* подписчик не должен ломать запись */
+    }
+  }
+}
+
+function newStoreId() {
+  return crypto.randomUUID();
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("indexeddb-failed"));
+  });
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined" || indexedDB === null) {
+      reject(new Error("indexeddb-unavailable"));
+      return;
+    }
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
+    let request;
+    try {
+      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
+    } catch (error) {
+      clearTimeout(timer);
+      finish(reject, error);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
+        db.createObjectStore(STORE_NAMES.projects, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.images)) {
+        db.createObjectStore(STORE_NAMES.images, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
+        db.createObjectStore(STORE_NAMES.settings, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      finish(resolve, request.result);
+    };
+    request.onerror = () => {
+      clearTimeout(timer);
+      finish(reject, request.error || new Error("indexeddb-failed"));
+    };
+    request.onblocked = () => {
+      clearTimeout(timer);
+      finish(reject, new Error("indexeddb-blocked"));
+    };
+  });
+}
+async function openStore() {
+  if (storeModeValue !== "unknown") return storeModeValue;
+  if (!storeOpening) {
+    storeOpening = openDatabase()
+      .then((db) => {
+        storeDb = db;
+        storeModeValue = "idb";
+        db.onclose = () => degradeToMemory(new Error("indexeddb-closed"));
+        return storeModeValue;
+      })
+      .catch((error) => {
+        degradeToMemory(error);
+        return storeModeValue;
+      });
+  }
+  return storeOpening;
+}
+
+function degradeToMemory(error) {
+  storeDb = null;
+  storeModeValue = "memory";
+  if (storeReported) return;
+  storeReported = true;
+  reportStoreProblem("unavailable", error);
+}
+
+// Одна транзакция — одно действие: запись документа объекта атомарна, вкладка,
+// закрытая посреди сохранения, оставляет прежнее состояние, а не половину.
+async function runTransaction(name, mode, action) {
+  await openStore();
+  if (storeModeValue !== "idb" || !storeDb) return { ok: false, memory: true };
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = storeDb.transaction(name, mode);
+      let result;
+      tx.oncomplete = () => {
+        if (mode === "readwrite") storeWriteReported = false;
+        resolve({ ok: true, result });
+      };
+      tx.onerror = () => reject(tx.error || new Error("indexeddb-failed"));
+      tx.onabort = () => reject(tx.error || new Error("indexeddb-aborted"));
+      Promise.resolve(action(tx.objectStore(name)))
+        .then((value) => {
+          result = value;
+        })
+        .catch((error) => {
+          try {
+            tx.abort();
+          } catch (ignored) {
+            /* транзакция уже завершилась */
+          }
+          reject(error);
+        });
+    });
+  } catch (error) {
+    // Автосохранение идёт на каждую правку: об отказавшей записи говорим один
+    // раз — до тех пор, пока запись снова не пройдёт.
+    if (mode === "readwrite" && !storeWriteReported) {
+      storeWriteReported = true;
+      reportStoreProblem("writeFailed", error);
+    }
+    return { ok: false, error };
+  }
+}
+
+// ——— объекты ——————————————————————————————————————————————————————————
+async function listProjects() {
+  const summaries = new Map();
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+  if (read.ok) {
+    for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
+  }
+  for (const doc of storeMemory.projects.values()) summaries.set(doc.id, summaryOf(doc));
+  return [...summaries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+function summaryOf(project) {
+  return {
+    id: project.id,
+    name: project.name,
+    updatedAt: project.updatedAt,
+    schemes: (project.schemes || []).length,
+    marks: (project.marks || []).length,
+  };
+}
+async function loadProject(id) {
+  if (!id) return null;
+  if (storeMemory.projects.has(id)) return storeMemory.projects.get(id);
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result : null;
+}
+
+// Отказ записи не теряет работу: документ остаётся в памяти сеанса, а панель
+// получает повод предложить выгрузку в файл.
+async function saveProject(project) {
+  if (!project || !project.id) return { ok: false };
+  const written = await runTransaction(STORE_NAMES.projects, "readwrite", (store) =>
+    idbRequest(store.put(project)),
+  );
+  if (written.ok) {
+    storeMemory.projects.delete(project.id);
+    return { ok: true, mode: "idb" };
+  }
+  storeMemory.projects.set(project.id, project);
+  return { ok: false, mode: "memory", error: written.error || null };
+}
+async function deleteProject(id) {
+  storeMemory.projects.delete(id);
+  const removed = await runTransaction(STORE_NAMES.projects, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— изображения ——————————————————————————————————————————————————————
+async function putImage(blob) {
+  const id = newStoreId();
+  const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
+    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
+  );
+  if (!written.ok) storeMemory.images.set(id, blob);
+  return id;
+}
+async function getImage(id) {
+  if (!id) return null;
+  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
+  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result.blob : null;
+}
+async function deleteImage(id) {
+  if (!id) return { ok: true };
+  storeMemory.images.delete(id);
+  const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— уборка ———————————————————————————————————————————————————————————
+
+// Картинки лежат общей кучей на все объекты, поэтому «ничья» — та, на которую
+// не ссылается ни один объект. Чистая половина уборки: её и проверяют тесты.
+function orphanImageIds(projects, storedIds) {
+  const used = new Set();
+  for (const project of projects || []) {
+    for (const id of usedImageIds(project)) used.add(id);
+  }
+  return [...(storedIds || [])].filter((id) => id && !used.has(id));
+}
+
+// Не смогли прочитать — возвращаем null: удалять по неполному списку нельзя,
+// так теряются чужие планы.
+async function allProjectDocs() {
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+  if (!read.ok && storeModeValue === "idb") return null;
+  const docs = new Map();
+  for (const doc of read.result || []) docs.set(doc.id, doc);
+  for (const doc of storeMemory.projects.values()) docs.set(doc.id, doc);
+  return [...docs.values()];
+}
+async function listImageIds() {
+  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.getAllKeys()));
+  if (!read.ok && storeModeValue === "idb") return null;
+  const ids = (read.result || []).map((key) => String(key));
+  return [...ids, ...storeMemory.images.keys()];
+}
+
+// Убирает подложки, которые не нужны ни одному объекту. `extraProjects` —
+// то, что ещё не доехало до хранилища (только что открытый объект): его
+// картинки тоже не ничьи.
+async function sweepOrphanImages(extraProjects = []) {
+  const docs = await allProjectDocs();
+  const stored = await listImageIds();
+  if (!docs || !stored) return { removed: 0, skipped: true };
+  const orphans = orphanImageIds([...docs, ...extraProjects], stored);
+  for (const id of orphans) await deleteImage(id);
+  return { removed: orphans.length, skipped: false };
+}
+
+// ——— настройки ————————————————————————————————————————————————————————
+async function getSetting(key) {
+  if (storeMemory.settings.has(key)) return storeMemory.settings.get(key);
+  const read = await runTransaction(STORE_NAMES.settings, "readonly", (store) => idbRequest(store.get(key)));
+  return read.ok && read.result ? read.result.value : null;
+}
+async function setSetting(key, value) {
+  const written = await runTransaction(STORE_NAMES.settings, "readwrite", (store) =>
+    idbRequest(store.put({ key, value })),
+  );
+  if (written.ok) storeMemory.settings.delete(key);
+  else storeMemory.settings.set(key, value);
+  return { ok: written.ok };
+}
+
+// ——— место ————————————————————————————————————————————————————————————
+async function estimateSpace() {
+  const empty = { usage: null, quota: null, free: null, low: false };
+  if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.estimate) return empty;
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (typeof quota !== "number" || typeof usage !== "number") return empty;
+    const free = Math.max(0, quota - usage);
+    return { usage, quota, free, low: free < STORE_LOW_SPACE_BYTES };
+  } catch (error) {
+    return empty;
+  }
 }
 
 // src/projectFile.js
@@ -8129,6 +8227,21 @@ function planTypeOf(file) {
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
   return "image/png";
 }
+
+// Пропорция плана. Замена подложки на картинку другой пропорции сдвигает всю
+// разметку относительно плана: доли остаются прежними, а содержимое картинки
+// растянуто иначе. Допуск закрывает округление пикселей при экспорте плана.
+function planAspect(size) {
+  const width = Number(size && size.width);
+  const height = Number(size && size.height);
+  return width > 0 && height > 0 ? width / height : 0;
+}
+function sameAspect(before, after, tolerance = 0.01) {
+  const first = planAspect(before);
+  const second = planAspect(after);
+  if (!first || !second) return true;
+  return Math.abs(first - second) / Math.max(first, second) <= tolerance;
+}
 function identityTransform() {
   return { rotate: 0, crop: null };
 }
@@ -11136,6 +11249,7 @@ registerPanel(PANEL_IDS.marks, mountMarksPanel);
 
 
 
+
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
 
@@ -11239,9 +11353,11 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
 
     async function requestApply() {
       if (busy) return;
-      if (beforeApply && !isIdentityTransform(transform)) {
+      // Спрашиваем всегда, а не только после правки: замене подложки важен
+      // итоговый размер, даже когда картинку не крутили.
+      if (beforeApply) {
         setBusy(true);
-        const agreed = await beforeApply(transform);
+        const agreed = await beforeApply(transform, { width: preview.width, height: preview.height });
         setBusy(false);
         if (!agreed) return;
       }
@@ -11316,12 +11432,28 @@ function mountSchemesPanel(host, api) {
     },
   });
   fileInput.hidden = true;
+  let replaceTarget = null;
+  const replaceInput = uiEl("input", {
+    class: "scheme-file",
+    type: "file",
+    attrs: { accept: "image/png,image/jpeg,.png,.jpg,.jpeg" },
+    on: {
+      change: async () => {
+        const file = replaceInput.files && replaceInput.files[0];
+        const schemeId = replaceTarget;
+        replaceInput.value = "";
+        replaceTarget = null;
+        if (file && schemeId) await replacePlanFromFile(schemeId, file);
+      },
+    },
+  });
+  replaceInput.hidden = true;
   const addButton = uiButton(strings.schemes.add, {
     class: "ui-btn ui-btn--accent ui-btn--wide",
     on: { click: () => fileInput.click() },
   });
   const hint = uiEl("p", { class: "panel__empty", text: strings.schemes.addHint });
-  host.replaceChildren(addButton, fileInput, list, hint);
+  host.replaceChildren(addButton, fileInput, replaceInput, list, hint);
 
   function render() {
     const state = getState();
@@ -11355,6 +11487,15 @@ function mountSchemesPanel(host, api) {
         }),
         uiEl("div", { class: "scheme-row__tools" }, [
           uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
+          uiButton("⇄", {
+            title: strings.schemes.replace,
+            on: {
+              click: () => {
+                replaceTarget = scheme.id;
+                replaceInput.click();
+              },
+            },
+          }),
           uiButton("✎", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
           uiButton("↑", {
             title: strings.schemes.up,
@@ -11460,6 +11601,66 @@ function mountSchemesPanel(host, api) {
     await deleteImage(scheme.imageId);
     setState({ project: next, schemeImage: null });
     notify(pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: pushed }), "success");
+  }
+
+  // Замена подложки: картинка другая, разметка остаётся вся. Координаты — доли
+  // плана, поэтому при той же пропорции всё встаёт само; при другой разметка
+  // поедет, и об этом спрашивают до применения, а не показывают кашу после.
+  // Прежнее преобразование не переносится: поворот и обрезка запечены в старой
+  // картинке, самого преобразования нигде нет. Новый файл правится тем же
+  // редактором и теми же руками — с предпросмотром, а не вслепую.
+  async function replacePlanFromFile(schemeId, file) {
+    const scheme = findScheme(getState().project, schemeId);
+    if (!scheme) return;
+    if (!isPlanImageFile(file)) {
+      notify(strings.image.wrongType, "error");
+      return;
+    }
+    let plan;
+    try {
+      plan = await readPlanImage(file);
+    } catch (error) {
+      notify(strings.image.broken, "error");
+      return;
+    }
+    const wasSize = { width: scheme.width, height: scheme.height };
+    const edited = await openPlanEditor({
+      blob: plan.blob,
+      width: plan.width,
+      height: plan.height,
+      title: text("image.replaceTitle", { name: scheme.name }),
+      beforeApply: async (transform, size) => {
+        if (sameAspect(wasSize, size)) return true;
+        return uiConfirm({
+          title: strings.image.aspectTitle,
+          message: text("image.aspectAsk", {
+            before: text("schemes.size", { width: wasSize.width, height: wasSize.height }),
+            after: text("schemes.size", { width: size.width, height: size.height }),
+          }),
+          confirmLabel: strings.image.replaceAnyway,
+        });
+      },
+    });
+    if (!edited) return;
+    const imageId = await putImage(edited.blob);
+    const before = getState().project;
+    if (!findScheme(before, schemeId)) return;
+    let after;
+    try {
+      after = replaceSchemeImage(before, schemeId, {
+        imageId,
+        width: edited.width,
+        height: edited.height,
+      }).project;
+    } catch (error) {
+      notify(error.message, "error");
+      return;
+    }
+    // Через canvasCommit: замену отменяет Ctrl+Z, как и всё остальное. Прежняя
+    // картинка поэтому и остаётся в хранилище — её убирает уборка при запуске,
+    // когда отменять уже нечего.
+    canvasCommit(before, after, strings.history.replaceImage, { schemeId });
+    notify(sameAspect(wasSize, edited) ? strings.image.replaced : strings.image.replacedShifted, "success");
   }
 
   async function renameScheme(schemeId) {
@@ -11569,10 +11770,18 @@ function mountSchemesPanel(host, api) {
   document.addEventListener("dragover", (event) => event.preventDefault());
   document.addEventListener("drop", (event) => event.preventDefault());
 
+  // Уборка ничьих подложек — один раз за сеанс, на первом открытом объекте:
+  // стек отмены в этот момент пуст, несохранённых правок ещё нет, и удалять
+  // безопасно. Мусор, нажитый за сеанс, уйдёт при следующем запуске.
+  let swept = false;
   subscribe((state, changed) => {
     if ("project" in changed || "schemeId" in changed) {
       render();
       loadSchemeImage(false);
+    }
+    if (!swept && state.project) {
+      swept = true;
+      sweepOrphanImages([state.project]);
     }
   });
   render();
