@@ -16,6 +16,8 @@ export const PANEL_IDS = {
   canvas: "canvas-host",
   overlay: "canvas-overlay",
   headerActions: "header-actions",
+  headerSearch: "header-search",
+  headerHistory: "header-history",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -74,6 +76,8 @@ export const LAYOUT_ABILITIES = {
   tables: ["desktop", "mobile"],
   exportFiles: ["desktop", "mobile"],
   openFile: ["desktop", "mobile"],
+  search: ["desktop", "mobile"],
+  undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],
   editSchemes: ["desktop"],

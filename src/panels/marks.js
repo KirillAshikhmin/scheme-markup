@@ -38,7 +38,9 @@ const MARKS_AUTO_ROOM = "--auto-room--";
 
 // Холст подводится к метке переводом координат из render.js: доли плана в
 // пиксели экрана здесь руками не пересчитываются.
-function marksCenteredView(scheme, mark, view) {
+// Подводит холст к метке. Наружу — потому что тем же занят поиск в шапке:
+// найденная метка должна оказаться на виду, а не просто выделиться.
+export function marksCenteredView(scheme, mark, view) {
   const host = document.getElementById(PANEL_IDS.canvas);
   if (!host || !host.clientWidth || !host.clientHeight) return view;
   const local = planToScreen(mark.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
@@ -96,7 +98,9 @@ function mountMarksPanel(host, api) {
   const filters = filtersBox(api);
   const list = uiEl("div", { class: "marks" });
   const count = uiEl("p", { class: "marks__count" });
-  host.replaceChildren(filters.node, count, list);
+  // Поиск и фильтры прибиты к верху панели: список из полусотни меток уносил
+  // их за край, и отменить фильтр было нечем, пока не пролистаешь обратно.
+  host.replaceChildren(uiEl("div", { class: "marks__top" }, [filters.node, count]), list);
   // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
   // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
   // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан

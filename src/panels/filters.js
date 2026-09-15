@@ -139,7 +139,7 @@ export function filtersBox(api) {
     class: "ui-input filters__search",
     type: "text",
     placeholder: strings.filters.searchPlaceholder,
-    title: strings.filters.search,
+    title: strings.filters.searchHint,
     on: { input: () => patch({ query: search.value }) },
   });
   const rooms = uiEl("select", {

@@ -1296,6 +1296,131 @@
   padding: 1px 4px;
 }
 
+/* ——— поиск по объекту и отмена в шапке ——————————————————————————————— */
+
+.history-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* Поиск ужимается первым: рядом с ним в шапке живут отмена, выгрузка и файл.
+   Гибкость задаётся контейнеру-точке монтирования: именно он — элемент шапки. */
+#header-search {
+  flex: 0 1 auto;
+  min-width: 110px;
+}
+
+.search {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 110px;
+}
+
+.search__input {
+  width: 200px;
+  max-width: 100%;
+  min-width: 110px;
+}
+
+.search__drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(440px, 92vw);
+  max-height: min(60vh, 460px);
+  overflow: auto;
+  z-index: 40;
+  padding: 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 18px 44px rgba(1, 4, 9, 0.6);
+}
+
+.search__row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search__row.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.search__label {
+  font-weight: 600;
+}
+
+.search__type {
+  color: var(--panel-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Где метка — второй строкой: три «Т1» из разных комнат иначе неразличимы. */
+.search__where,
+.search__match {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.search__row.is-active .search__type,
+.search__row.is-active .search__where,
+.search__row.is-active .search__match {
+  color: #dbeafe;
+}
+
+.search__empty,
+.search__more {
+  margin: 6px 8px;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+/* Фильтры списка меток не уезжают вместе со списком. */
+.marks__top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: 4px;
+  background: var(--panel-bg);
+}
+
+/* На телефоне поиск занимает свою строку целиком: это главный способ найти
+   метку, когда панелей на экране нет. */
+#app.is-mobile #header-search {
+  flex: 1 0 100%;
+  order: 8;
+}
+
+#app.is-mobile .search {
+  width: 100%;
+}
+
+#app.is-mobile .search__input {
+  width: 100%;
+  max-width: none;
+}
+
+#app.is-mobile .search__drop {
+  left: 0;
+  right: 0;
+  width: auto;
+}
+
 /* ——— окно «Тип метки»: категории колонками ————————————————————————————
    Один длинный столбец заставлял листать: «Свет» занимал экран, а
    «Выключатели» уходили за нижний край, и справа половина окна пустовала.
@@ -1664,7 +1789,9 @@ body {
 #app {
   display: grid;
   grid-template-columns: var(--panel-width) 1fr var(--panel-width);
-  grid-template-rows: var(--header-height) 1fr;
+  /* Шапка не ниже своей высоты, но может перенести строку: в ней теперь и
+     поиск, и отмена, и файл — на узком ноутбуке иначе обрезалось правое. */
+  grid-template-rows: minmax(var(--header-height), auto) 1fr;
   grid-template-areas:
     "header header header"
     "left canvas right";
@@ -1675,6 +1802,8 @@ body {
   grid-area: header;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 4px;
   gap: 16px;
   padding: 0 12px;
   background: var(--panel-bg-deep);
@@ -2142,6 +2271,10 @@ body {
         <!-- Имя открытой схемы: на узком экране списка схем на виду нет,
              и без этой строки непонятно, что вообще открыто. -->
         <span id="scheme-name"></span>
+        <!-- Поиск по всему объекту и отмена: и то, и другое относится ко
+             всему сразу, поэтому живёт в шапке, а не в разделе «Метки». -->
+        <div id="header-search" class="mount"></div>
+        <div id="header-history" class="mount"></div>
         <div id="header-actions" class="mount"></div>
         <!-- Переход к полной версии показывается только там, где экран сам
              выбрал просмотр: на десктопе кнопки нет. -->
@@ -2268,6 +2401,13 @@ const strings = {
     view: "Режим просмотра",
     viewHint: "Вернуться к просмотру: план во весь экран",
     viewOnly: "Режим просмотра — правка на компьютере",
+  },
+  search: {
+    placeholder: "Поиск по объекту",
+    title: "Найти метку: обозначение, расположение, обозначение из оригинала или помещение",
+    empty: "Ничего не нашлось",
+    more: "Показано {shown} из {total}",
+    noRoom: "Без помещения",
   },
   project: {
     untitled: "Новый объект",
@@ -2647,8 +2787,8 @@ const strings = {
     focus: "Показать метку на плане",
   },
   filters: {
-    search: "Поиск по меткам",
-    searchPlaceholder: "Обозначение, расположение, оригинал",
+    searchPlaceholder: "Сузить список",
+    searchHint: "Оставляет в списке и на плане метки этой схемы: обозначение, расположение, оригинал. Поиск по всему объекту — в шапке",
     room: "Помещение",
     allRooms: "Все помещения",
     types: "Категории и типы",
@@ -3775,6 +3915,67 @@ function deleteMark(project, markId) {
   // доехала бы до файла и до таблицы связей.
   const linked = dropControls(cleaned, new Set([markId]));
   return { project: withProject(project, { marks: linked, groups }), deleted: mark };
+}
+
+// ——— поиск по объекту ————————————————————————————————————————————————
+//
+// Ищем по всему объекту, а не по открытой схеме: «где Р14» — вопрос про дом,
+// а не про лист. Четыре поля, которые человек и держит в голове: обозначение,
+// расположение словами, обозначение из оригинального проекта и помещение.
+// Помещение отдельной строкой не выдаётся: выбор строки ведёт к метке, и
+// «показать метки комнаты» — это просто её метки в списке.
+const SEARCH_FIELDS = [
+  { field: "label", rank: 0 },
+  { field: "location", rank: 3 },
+  { field: "original", rank: 6 },
+  { field: "room", rank: 9 },
+];
+function searchProject(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!project || needle === "") return [];
+  const order = new Map(schemesInOrder(project).map((scheme, index) => [scheme.id, index]));
+  const last = order.size;
+  const rows = [];
+  for (const mark of project.marks) {
+    const room = mark.roomId ? findRoom(project, mark.roomId) : null;
+    const values = {
+      label: labelOf(project, mark.id) || "",
+      location: mark.location || "",
+      original: mark.original || "",
+      room: room ? room.name : "",
+    };
+    let best = null;
+    for (const item of SEARCH_FIELDS) {
+      const value = values[item.field];
+      const lower = value.toLowerCase();
+      if (!lower || !lower.includes(needle)) continue;
+      // Точное совпадение сильнее начала строки, начало — сильнее середины.
+      const closeness = lower === needle ? 0 : lower.startsWith(needle) ? 1 : 2;
+      const rank = item.rank + closeness;
+      if (!best || rank < best.rank) best = { field: item.field, rank, value };
+    }
+    if (!best) continue;
+    const type = findType(project, mark.typeId);
+    const scheme = findScheme(project, mark.schemeId);
+    rows.push({
+      markId: mark.id,
+      schemeId: mark.schemeId,
+      schemeName: scheme ? scheme.name : "",
+      typeId: mark.typeId,
+      typeName: type ? type.name : "",
+      roomName: room ? room.name : "",
+      label: values.label,
+      field: best.field,
+      value: best.value,
+      rank: best.rank,
+      order: order.has(mark.schemeId) ? order.get(mark.schemeId) : last,
+    });
+  }
+  return rows.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.order !== b.order) return a.order - b.order;
+    return a.label.localeCompare(b.label, "ru", { numeric: true });
+  });
 }
 
 // ——— нумерация ———————————————————————————————————————————————————————
@@ -5445,6 +5646,8 @@ const PANEL_IDS = {
   canvas: "canvas-host",
   overlay: "canvas-overlay",
   headerActions: "header-actions",
+  headerSearch: "header-search",
+  headerHistory: "header-history",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -5503,6 +5706,8 @@ const LAYOUT_ABILITIES = {
   tables: ["desktop", "mobile"],
   exportFiles: ["desktop", "mobile"],
   openFile: ["desktop", "mobile"],
+  search: ["desktop", "mobile"],
+  undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],
   editSchemes: ["desktop"],
@@ -12359,7 +12564,7 @@ function filtersBox(api) {
     class: "ui-input filters__search",
     type: "text",
     placeholder: strings.filters.searchPlaceholder,
-    title: strings.filters.search,
+    title: strings.filters.searchHint,
     on: { input: () => patch({ query: search.value }) },
   });
   const rooms = uiEl("select", {
@@ -12884,6 +13089,8 @@ const MARKS_AUTO_ROOM = "--auto-room--";
 
 // Холст подводится к метке переводом координат из render.js: доли плана в
 // пиксели экрана здесь руками не пересчитываются.
+// Подводит холст к метке. Наружу — потому что тем же занят поиск в шапке:
+// найденная метка должна оказаться на виду, а не просто выделиться.
 function marksCenteredView(scheme, mark, view) {
   const host = document.getElementById(PANEL_IDS.canvas);
   if (!host || !host.clientWidth || !host.clientHeight) return view;
@@ -12942,7 +13149,9 @@ function mountMarksPanel(host, api) {
   const filters = filtersBox(api);
   const list = uiEl("div", { class: "marks" });
   const count = uiEl("p", { class: "marks__count" });
-  host.replaceChildren(filters.node, count, list);
+  // Поиск и фильтры прибиты к верху панели: список из полусотни меток уносил
+  // их за край, и отменить фильтр было нечем, пока не пролистаешь обратно.
+  host.replaceChildren(uiEl("div", { class: "marks__top" }, [filters.node, count]), list);
   // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
   // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
   // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
@@ -13850,6 +14059,208 @@ function mountSchemesPanel(host, api) {
 
 registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
 
+// src/panels/search.js
+// Поиск по объекту: строка в шапке и выпадающий список вариантов.
+//
+// Ищут не по открытой схеме, а по всему объекту: «где Р14» — вопрос про дом,
+// а не про лист. Поэтому выбор варианта не просто выделяет метку, а переключает
+// схему, если метка на другой, и подводит к ней холст — ради этого поиск
+// и заведён. Подбор вариантов живёт в `model.searchProject`, здесь только
+// список, клавиши и прыжок.
+
+
+
+
+
+// Подводит холст к метке — то же самое делает клик по строке списка меток.
+
+// Больше тридцати строк в выпадающем списке никто не читает: остальное
+// сужают запросом, а сколько всего нашлось — сказано внизу списка.
+const SEARCH_LIMIT = 30;
+
+function searchRowNode(project, row, active, onPick, onHover) {
+  const style = styleOf(project, row.typeId);
+  const where = [row.roomName || strings.search.noRoom, row.schemeName].filter(Boolean).join(" · ");
+  const parts = [
+    shapeIcon(style.shape, style.color, 16),
+    uiEl("span", { class: "search__label", text: row.label }),
+    uiEl("span", { class: "search__type", text: row.typeName }),
+    uiEl("span", { class: "search__where", text: where }),
+  ];
+  // Совпало не обозначение — показываем, что именно нашлось: иначе строка
+  // выглядит случайной.
+  if (row.field === "location" || row.field === "original") {
+    parts.push(uiEl("span", { class: "search__match", text: row.value }));
+  }
+  return uiEl(
+    "button",
+    {
+      class: "search__row" + (active ? " is-active" : ""),
+      type: "button",
+      on: { click: onPick, pointerenter: onHover },
+    },
+    parts,
+  );
+}
+
+function mountSearchPanel(host, api) {
+  const { getState, setState, subscribe } = api;
+  let rows = [];
+  let active = 0;
+  let pending = null;
+
+  const input = uiEl("input", {
+    class: "ui-input search__input",
+    type: "search",
+    placeholder: strings.search.placeholder,
+    title: strings.search.title,
+  });
+  const drop = uiEl("div", { class: "search__drop" });
+  drop.hidden = true;
+  const box = uiEl("div", { class: "search" }, [input, drop]);
+  host.replaceChildren(box);
+
+  function close() {
+    drop.hidden = true;
+    drop.replaceChildren();
+    rows = [];
+    active = 0;
+  }
+
+  function render() {
+    const project = getState().project;
+    if (!project || rows.length === 0) {
+      drop.replaceChildren(uiEl("p", { class: "search__empty", text: strings.search.empty }));
+      drop.hidden = false;
+      return;
+    }
+    const shown = rows.slice(0, SEARCH_LIMIT);
+    const nodes = shown.map((row, index) =>
+      searchRowNode(
+        project,
+        row,
+        index === active,
+        () => pick(index),
+        () => setActive(index, false),
+      ),
+    );
+    if (rows.length > shown.length) {
+      nodes.push(
+        uiEl("p", {
+          class: "search__more",
+          text: text("search.more", { shown: shown.length, total: rows.length }),
+        }),
+      );
+    }
+    drop.replaceChildren(...nodes);
+    drop.hidden = false;
+  }
+
+  function setActive(index, scroll = true) {
+    const shown = Math.min(rows.length, SEARCH_LIMIT);
+    if (shown === 0) return;
+    active = ((index % shown) + shown) % shown;
+    const nodes = drop.querySelectorAll(".search__row");
+    nodes.forEach((node, position) => node.classList.toggle("is-active", position === active));
+    if (scroll && nodes[active]) nodes[active].scrollIntoView({ block: "nearest" });
+  }
+
+  function search() {
+    const state = getState();
+    const query = input.value;
+    if (!state.project || query.trim() === "") {
+      close();
+      return;
+    }
+    rows = searchProject(state.project, query);
+    active = 0;
+    render();
+  }
+
+  // Прыжок к метке: схема, выделение и подведённый холст. Картинка новой схемы
+  // приходит не мгновенно, а холст сам вписывает план, когда её дождётся, —
+  // поэтому центрируем ещё раз, когда картинка доехала.
+  function centerOn(row) {
+    const state = getState();
+    if (!state.project || state.schemeId !== row.schemeId) return false;
+    const scheme = findScheme(state.project, row.schemeId);
+    const mark = findMark(state.project, row.markId);
+    if (!scheme || !mark) return false;
+    setState({ view: marksCenteredView(scheme, mark, state.view) });
+    return true;
+  }
+
+  function pick(index) {
+    const row = rows[index];
+    if (!row) return;
+    const state = getState();
+    const patch = { selectedMarkIds: [row.markId], selectedOutlineId: null };
+    if (state.schemeId !== row.schemeId) patch.schemeId = row.schemeId;
+    setState(patch);
+    pending = row;
+    queueMicrotask(() => {
+      if (pending === row && centerOn(row)) pending = null;
+    });
+    drop.hidden = true;
+    input.blur();
+  }
+
+  input.addEventListener("input", () => search());
+  input.addEventListener("focus", () => {
+    if (input.value.trim() !== "") search();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (drop.hidden) search();
+      else setActive(active + 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActive(active - 1);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      // Enter — первый вариант, как и просил пользователь: набрал «Р14», нажал,
+      // оказался на нужной схеме.
+      if (drop.hidden) search();
+      if (rows.length > 0) pick(active);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (!drop.hidden) {
+        close();
+        return;
+      }
+      input.value = "";
+      input.blur();
+    }
+  });
+  // Клик мимо списка закрывает его, но не мешает клику по строке.
+  box.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!box.contains(document.activeElement)) drop.hidden = true;
+    }, 0);
+  });
+
+  subscribe((state, changed) => {
+    if ("layout" in changed) host.hidden = !layoutAllows("search", state.layout);
+    if ("project" in changed && state.project) {
+      // Сменился объект — прежние находки к нему не относятся.
+      if (!state.project.marks.some((mark) => rows.some((row) => row.markId === mark.id))) close();
+    }
+    if (pending && ("schemeImage" in changed || "schemeId" in changed || "project" in changed)) {
+      if (centerOn(pending)) pending = null;
+    }
+  });
+  host.hidden = !layoutAllows("search", getState().layout);
+}
+
+registerPanel(PANEL_IDS.headerSearch, mountSearchPanel);
+
 // src/panels/typePicker.js
 // Своё окно выбора типа метки: «буква — пояснение», поиск и ввод нового кода
 // прямо здесь.
@@ -14229,17 +14640,6 @@ function mountToolsPanel(host, api) {
     if (type) blockSelect.value = type.blockMode || "each";
     blockSelect.disabled = !type;
 
-    const undoButton = uiButton(strings.tools.undo, {
-      title: text("tools.undoTitle", { label: undoLabel() }),
-      on: { click: () => canvasUndoStep() },
-    });
-    const redoButton = uiButton(strings.tools.redo, {
-      title: text("tools.redoTitle", { label: redoLabel() }),
-      on: { click: () => canvasRedoStep() },
-    });
-    undoButton.disabled = !canUndo();
-    redoButton.disabled = !canRedo();
-
     // Пустые места отсеиваются: «Сменить тип» появляется только при выделенной
     // метке, а replaceChildren на null вставил бы в панель слово «null».
     const parts = [
@@ -14256,7 +14656,6 @@ function mountToolsPanel(host, api) {
       modeRow,
       uiEl("p", { class: "tools__label", text: strings.tools.block }),
       blockSelect,
-      uiEl("div", { class: "tools__row" }, [undoButton, redoButton]),
     ];
     box.replaceChildren(...parts.filter(Boolean));
   }
@@ -14331,7 +14730,34 @@ function mountSizesPanel(host, api) {
   render();
 }
 
+// Отмена — в шапке: она возвращает не только метки, но и помещения, схемы и
+// справочник, и в разделе «Метки» обещала меньше, чем делает. В режиме
+// просмотра её нет вовсе: отменять там нечего.
+function mountHistoryPanel(host, api) {
+  const { getState, subscribe } = api;
+  const undoButton = uiButton(strings.tools.undo, { on: { click: () => canvasUndoStep() } });
+  const redoButton = uiButton(strings.tools.redo, { on: { click: () => canvasRedoStep() } });
+  host.replaceChildren(uiEl("div", { class: "history-actions" }, [undoButton, redoButton]));
+
+  function render() {
+    const shown = layoutAllows("undo", getState().layout);
+    host.hidden = !shown;
+    if (!shown) return;
+    undoButton.disabled = !canUndo();
+    redoButton.disabled = !canRedo();
+    undoButton.title = text("tools.undoTitle", { label: undoLabel() });
+    redoButton.title = text("tools.redoTitle", { label: redoLabel() });
+  }
+
+  subscribe((state, changed) => {
+    if ("layout" in changed) render();
+  });
+  onHistoryChange(render);
+  render();
+}
+
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
+registerPanel(PANEL_IDS.headerHistory, mountHistoryPanel);
 registerPanel(PANEL_IDS.sizes, mountSizesPanel);
 })();
     </script>

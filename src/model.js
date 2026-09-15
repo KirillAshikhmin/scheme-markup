@@ -962,6 +962,68 @@ export function deleteMark(project, markId) {
   return { project: withProject(project, { marks: linked, groups }), deleted: mark };
 }
 
+// ——— поиск по объекту ————————————————————————————————————————————————
+//
+// Ищем по всему объекту, а не по открытой схеме: «где Р14» — вопрос про дом,
+// а не про лист. Четыре поля, которые человек и держит в голове: обозначение,
+// расположение словами, обозначение из оригинального проекта и помещение.
+// Помещение отдельной строкой не выдаётся: выбор строки ведёт к метке, и
+// «показать метки комнаты» — это просто её метки в списке.
+const SEARCH_FIELDS = [
+  { field: "label", rank: 0 },
+  { field: "location", rank: 3 },
+  { field: "original", rank: 6 },
+  { field: "room", rank: 9 },
+];
+
+export function searchProject(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!project || needle === "") return [];
+  const order = new Map(schemesInOrder(project).map((scheme, index) => [scheme.id, index]));
+  const last = order.size;
+  const rows = [];
+  for (const mark of project.marks) {
+    const room = mark.roomId ? findRoom(project, mark.roomId) : null;
+    const values = {
+      label: labelOf(project, mark.id) || "",
+      location: mark.location || "",
+      original: mark.original || "",
+      room: room ? room.name : "",
+    };
+    let best = null;
+    for (const item of SEARCH_FIELDS) {
+      const value = values[item.field];
+      const lower = value.toLowerCase();
+      if (!lower || !lower.includes(needle)) continue;
+      // Точное совпадение сильнее начала строки, начало — сильнее середины.
+      const closeness = lower === needle ? 0 : lower.startsWith(needle) ? 1 : 2;
+      const rank = item.rank + closeness;
+      if (!best || rank < best.rank) best = { field: item.field, rank, value };
+    }
+    if (!best) continue;
+    const type = findType(project, mark.typeId);
+    const scheme = findScheme(project, mark.schemeId);
+    rows.push({
+      markId: mark.id,
+      schemeId: mark.schemeId,
+      schemeName: scheme ? scheme.name : "",
+      typeId: mark.typeId,
+      typeName: type ? type.name : "",
+      roomName: room ? room.name : "",
+      label: values.label,
+      field: best.field,
+      value: best.value,
+      rank: best.rank,
+      order: order.has(mark.schemeId) ? order.get(mark.schemeId) : last,
+    });
+  }
+  return rows.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.order !== b.order) return a.order - b.order;
+    return a.label.localeCompare(b.label, "ru", { numeric: true });
+  });
+}
+
 // ——— нумерация ———————————————————————————————————————————————————————
 
 // Верхняя граница ручного номера: опечатка в поле не должна унести счётчик типа

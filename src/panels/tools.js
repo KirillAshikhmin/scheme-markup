@@ -6,7 +6,7 @@
 // Обводки помещений здесь нет вовсе: контур принадлежит комнате, а не метке,
 // и запускается из раздела «Помещения» — там и список комнат, и кнопки
 // контуров. В этом разделе остаются только режимы про метки.
-import { PANEL_IDS, registerPanel } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   BLOCK_MODES,
@@ -186,17 +186,6 @@ function mountToolsPanel(host, api) {
     if (type) blockSelect.value = type.blockMode || "each";
     blockSelect.disabled = !type;
 
-    const undoButton = uiButton(strings.tools.undo, {
-      title: text("tools.undoTitle", { label: undoLabel() }),
-      on: { click: () => canvasUndoStep() },
-    });
-    const redoButton = uiButton(strings.tools.redo, {
-      title: text("tools.redoTitle", { label: redoLabel() }),
-      on: { click: () => canvasRedoStep() },
-    });
-    undoButton.disabled = !canUndo();
-    redoButton.disabled = !canRedo();
-
     // Пустые места отсеиваются: «Сменить тип» появляется только при выделенной
     // метке, а replaceChildren на null вставил бы в панель слово «null».
     const parts = [
@@ -213,7 +202,6 @@ function mountToolsPanel(host, api) {
       modeRow,
       uiEl("p", { class: "tools__label", text: strings.tools.block }),
       blockSelect,
-      uiEl("div", { class: "tools__row" }, [undoButton, redoButton]),
     ];
     box.replaceChildren(...parts.filter(Boolean));
   }
@@ -288,5 +276,32 @@ function mountSizesPanel(host, api) {
   render();
 }
 
+// Отмена — в шапке: она возвращает не только метки, но и помещения, схемы и
+// справочник, и в разделе «Метки» обещала меньше, чем делает. В режиме
+// просмотра её нет вовсе: отменять там нечего.
+function mountHistoryPanel(host, api) {
+  const { getState, subscribe } = api;
+  const undoButton = uiButton(strings.tools.undo, { on: { click: () => canvasUndoStep() } });
+  const redoButton = uiButton(strings.tools.redo, { on: { click: () => canvasRedoStep() } });
+  host.replaceChildren(uiEl("div", { class: "history-actions" }, [undoButton, redoButton]));
+
+  function render() {
+    const shown = layoutAllows("undo", getState().layout);
+    host.hidden = !shown;
+    if (!shown) return;
+    undoButton.disabled = !canUndo();
+    redoButton.disabled = !canRedo();
+    undoButton.title = text("tools.undoTitle", { label: undoLabel() });
+    redoButton.title = text("tools.redoTitle", { label: redoLabel() });
+  }
+
+  subscribe((state, changed) => {
+    if ("layout" in changed) render();
+  });
+  onHistoryChange(render);
+  render();
+}
+
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
+registerPanel(PANEL_IDS.headerHistory, mountHistoryPanel);
 registerPanel(PANEL_IDS.sizes, mountSizesPanel);
