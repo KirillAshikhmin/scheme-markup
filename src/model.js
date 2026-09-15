@@ -601,8 +601,32 @@ function typeMatchesQuery(type, needle) {
   return type.code.toLowerCase().startsWith(needle) || type.name.toLowerCase().includes(needle);
 }
 
+// Сила совпадения. Точным считается не только код, но и название целиком:
+// «Светильник» — это тип «С», а не «Точечный светильник», где запрос сидит
+// в середине. Код сильнее названия: его вводят, чтобы попасть в тип одним
+// словом. Ниже — совпадение с начала названия, ещё ниже — в середине;
+// внутри одной силы порядок остаётся порядком справочника.
 function typeExactRank(type, needle) {
-  return type && needle && type.code.toLowerCase() === needle ? 1 : 0;
+  if (!type || !needle) return 0;
+  const code = type.code.toLowerCase();
+  const name = type.name.toLowerCase();
+  if (code === needle) return 3;
+  if (name === needle) return 2;
+  if (code.startsWith(needle) || name.startsWith(needle)) return 1;
+  return 0;
+}
+
+// Тип, у которого код или название совпадают с запросом целиком. Нужен окну
+// выбора: пока такой тип есть, заводить второй с тем же названием незачем —
+// на этом проверяющий и поставил две метки не того типа.
+export function matchTypeExactly(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!needle || !project) return null;
+  return (
+    (project.markTypes || []).find(
+      (type) => type.code.toLowerCase() === needle || type.name.toLowerCase() === needle,
+    ) || null
+  );
 }
 
 export function searchTypes(project, query) {

@@ -13,7 +13,7 @@
 // инструментов, и дальше метки ставятся кликами без единого диалога.
 import { strings, text } from "../strings.js";
 import { uiEl, uiButton, uiModal } from "./ui.js";
-import { addType, codeProblem, searchTypes, styleOf, CODE_MAX_LENGTH } from "../model.js";
+import { addType, codeProblem, matchTypeExactly, searchTypes, styleOf, CODE_MAX_LENGTH } from "../model.js";
 import { shapeIcon } from "../render.js";
 
 // Значок типа — цвет категории и форма из справочника, нарисованные общим
@@ -104,6 +104,9 @@ export function openTypePicker(project, options = {}) {
       // проверяются там же, где их проверит `addType`. Своей копии правила
       // здесь нет намеренно — прежняя пережила снятие предела в две буквы и
       // отказывалась заводить «ПОДСВЕТКА».
+      // Тип с таким названием или кодом уже есть — второй такой же заводить
+      // незачем: он стоит первым в списке, и Enter берёт именно его.
+      if (matchTypeExactly(current, query)) return;
       if (codeProblem(current, query)) return;
       createName = uiEl("input", {
         class: "ui-input",

@@ -3,7 +3,14 @@
 // не первым, и заказчик листает вместо того, чтобы кликнуть.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addCategory, addType, createProject, searchTypes, typesInOrder } from "../src/model.js";
+import {
+  addCategory,
+  addType,
+  createProject,
+  matchTypeExactly,
+  searchTypes,
+  typesInOrder,
+} from "../src/model.js";
 
 const codes = (groups) => groups.map((group) => [group.category.name, group.types.map((type) => type.code)]);
 
@@ -39,11 +46,12 @@ test("ищется и по коду с начала, и по названию в
 test("новая категория и длинный код находятся наравне с шаблонными", () => {
   const added = addCategory(createProject({ name: "Тест" }), { name: "Шторы", color: "#123456", shape: "square" });
   const withType = addType(added.project, { code: "ПОДСВЕТКА", name: "Лента в карнизе", categoryId: added.category.id });
-  // «ПОДСВЕТКА» — точное совпадение кода, поэтому своя категория идёт первой,
-  // а подсветки из «Света», найденные по названию, — следом.
+  // «ПОДСВЕТКА» — точное совпадение кода, поэтому своя категория идёт первой.
+  // В «Свете» вперёд выходит «П»: его название совпадает с запросом целиком,
+  // а у «ПК» и «ПШ» запрос — только начало названия.
   assert.deepEqual(codes(searchTypes(withType.project, "подсветка")), [
     ["Шторы", ["ПОДСВЕТКА"]],
-    ["Свет", ["ПК", "П", "ПШ"]],
+    ["Свет", ["П", "ПК", "ПШ"]],
   ]);
   assert.equal(searchTypes(withType.project, "карниз")[0].types[0].code, "ПОДСВЕТКА");
 });
@@ -62,4 +70,51 @@ test("код ищется с начала: совпадение в середи�
   assert.deepEqual(codes(searchTypes(project, "КАРНИЗ")), [["Шторы", ["КАРНИЗЛЕНТА"]]]);
   // Название по-прежнему ищется в середине.
   assert.equal(searchTypes(project, "коробе")[0].types[0].code, "КАРНИЗЛЕНТА");
+});
+
+// Живая проверка: вводишь «Светильник», жмёшь Enter — и получаешь «Точечный
+// светильник», потому что точным считалось только совпадение кода. Две метки
+// не того типа замечают потом по таблице.
+test("точное название стоит первым, а не то, где запрос сидит в середине", () => {
+  const project = createProject({ name: "Тест" });
+  const light = searchTypes(project, "Светильник")[0];
+  assert.equal(light.category.name, "Свет");
+  assert.deepEqual(light.types.map((type) => type.code), ["С", "Т"]);
+  // Регистр и пробелы по краям не мешают.
+  assert.equal(searchTypes(project, "  светильник ")[0].types[0].code, "С");
+});
+
+test("точное название сильнее совпадения в середине, точный код — сильнее названия", () => {
+  const added = addCategory(createProject({ name: "Тест" }), { name: "Шторы", color: "#9C931A", shape: "square" });
+  // Код «ЛЕНТА» у одного типа и название «Лента» у другого: по запросу «лента»
+  // первым идёт код — его вводят, чтобы попасть в тип с одного слова.
+  const project = addType(added.project, { code: "ЛЕНТА", name: "Лента в карнизе", categoryId: added.category.id }).project;
+  const groups = searchTypes(project, "лента");
+  assert.equal(groups[0].types[0].code, "ЛЕНТА");
+  assert.equal(groups[1].types[0].code, "Л");
+});
+
+// Заказчик держит в «Свете» четыре подсветки. Запрос целиком совпал с одной
+// из них — она первая; недопечатанный запрос никого не выделяет, и порядок
+// остаётся порядком справочника, который у заказчика перед глазами.
+test("«Подсветка» находит саму себя, а не тёзок с приставками", () => {
+  const base = createProject({ name: "Тест" });
+  const light = base.categories.find((category) => category.name === "Свет");
+  const project = addType(base, { code: "ПП", name: "Подсветка пола", categoryId: light.id }).project;
+  const whole = searchTypes(project, "подсветка")[0];
+  assert.equal(whole.types[0].code, "П");
+  assert.deepEqual(whole.types.map((type) => type.code), ["П", "ПК", "ПШ", "ПП"]);
+  // Недопечатанное «подсветк» точным ни для кого не стало.
+  const part = searchTypes(project, "подсветк")[0];
+  assert.deepEqual(part.types.map((type) => type.code), ["ПК", "П", "ПШ", "ПП"]);
+});
+
+test("тип с таким же названием или кодом находится точным совпадением", () => {
+  const project = createProject({ name: "Тест" });
+  assert.equal(matchTypeExactly(project, "Светильник").code, "С");
+  assert.equal(matchTypeExactly(project, "  выключатель  ").code, "В");
+  assert.equal(matchTypeExactly(project, "ПК").name, "Подсветка кровати");
+  assert.equal(matchTypeExactly(project, "Розетка в полу"), null);
+  assert.equal(matchTypeExactly(project, ""), null);
+  assert.equal(matchTypeExactly(project, "   "), null);
 });
