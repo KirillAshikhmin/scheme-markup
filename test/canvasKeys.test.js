@@ -7,7 +7,8 @@
 // пикселей), к двум секундам — уже целый экран.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canvasPanSpeed } from "../src/canvas.js";
+import { canvasPanSpeed, canvasPanVector } from "../src/canvas.js";
+import { planToScreen } from "../src/render.js";
 
 // Путь за время удержания: скорость умножается на шаг и складывается —
 // так же, как это делают кадры холста.
@@ -49,4 +50,34 @@ test("полсекунды удержания — подвинуть на чут
   const long = travel(0, 2000);
   assert.ok(short < 400, "за полсекунды план улетает: " + Math.round(short));
   assert.ok(long > 1500, "за две секунды экран не пересечь: " + Math.round(long));
+});
+
+// Стрелки листают план, как прокрутка: «вправо» показывает то, что правее, —
+// значит содержимое уезжает влево, а не едет за стрелкой. Проверяется это не
+// знаком в таблице, а тем, куда после хода попадает точка плана: считает её
+// та же формула, что рисует холст и выгрузку.
+const plan = { id: "s", width: 1000, height: 500 };
+const still = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
+
+const moved = (code, at = { x: 0.5, y: 0.5 }) => {
+  const vector = canvasPanVector(code);
+  assert.ok(vector, "стрелка не двигает холст: " + code);
+  const after = { ...still, offsetX: still.offsetX + vector.x * 100, offsetY: still.offsetY + vector.y * 100 };
+  const was = planToScreen(at, plan, still);
+  const now = planToScreen(at, plan, after);
+  return { dx: now.x - was.x, dy: now.y - was.y };
+};
+
+test("стрелки листают план, как прокрутка: камера едет в сторону стрелки", () => {
+  assert.ok(moved("ArrowRight").dx < 0, "«вправо» обязана показывать то, что правее");
+  assert.ok(moved("ArrowLeft").dx > 0, "«влево» обязана показывать то, что левее");
+  assert.ok(moved("ArrowDown").dy < 0, "«вниз» обязана показывать то, что ниже");
+  assert.ok(moved("ArrowUp").dy > 0, "«вверх» обязана показывать то, что выше");
+
+  // Противоположные стрелки возвращают вид на место, а не уводят его косо.
+  assert.deepEqual(moved("ArrowRight").dx, -moved("ArrowLeft").dx);
+  assert.deepEqual(moved("ArrowUp").dy, -moved("ArrowDown").dy);
+  assert.equal(moved("ArrowRight").dy, 0, "горизонтальная стрелка увела вид по вертикали");
+  assert.equal(moved("ArrowDown").dx, 0, "вертикальная стрелка увела вид по горизонтали");
+  assert.equal(canvasPanVector("KeyA"), null, "холст двигает не своей клавишей");
 });
