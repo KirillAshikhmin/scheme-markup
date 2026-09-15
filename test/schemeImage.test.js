@@ -17,7 +17,8 @@ import {
   replaceSchemeImage,
   updateMark,
 } from "../src/model.js";
-import { orphanImageIds } from "../src/store.js";
+import { orphanImageIds, STORE_IMAGE_GRACE_MS } from "../src/store.js";
+import { schemesSweepReady } from "../src/panels/schemes.js";
 import { sameAspect } from "../src/imagePrep.js";
 
 const SQUARE = [
@@ -121,4 +122,37 @@ test("пропорция считается с допуском на округ�
   assert.equal(sameAspect({ width: 1000, height: 500 }, { width: 500, height: 1000 }), false);
   // Прежнего размера нет (схема без плана) — сравнивать не с чем, спрашивать не о чем.
   assert.equal(sameAspect({ width: 0, height: 0 }, { width: 800, height: 600 }), true);
+});
+
+// Уборка — единственное место, которое удаляет данные заказчика, поэтому
+// «не знаю» здесь означает «ничего не трогаю», и решает это сама функция,
+// а не её обёртка в хранилище.
+test("без списка объектов сирот нет: неизвестное не удаляется", () => {
+  const stored = ["старая", "новая"];
+  assert.deepEqual(orphanImageIds(null, stored), []);
+  assert.deepEqual(orphanImageIds(undefined, stored), []);
+  assert.deepEqual(orphanImageIds([], stored), []);
+  assert.deepEqual(orphanImageIds("не список", stored), []);
+});
+
+test("свежая картинка неприкосновенна: её объект может дописываться в другой вкладке", () => {
+  const { project } = projectWithPlan();
+  const now = 1_000_000_000_000;
+  const images = [
+    { id: "только что", createdAt: now - 1000 },
+    { id: "на грани", createdAt: now - STORE_IMAGE_GRACE_MS + 1000 },
+    { id: "давняя", createdAt: now - STORE_IMAGE_GRACE_MS - 1000 },
+    "без отметки",
+  ];
+  assert.deepEqual(orphanImageIds([project], images, { now }), ["давняя", "без отметки"]);
+  // Часы вкладок разошлись и отметка из будущего — это тоже «не знаю».
+  assert.deepEqual(orphanImageIds([project], [{ id: "из будущего", createdAt: now + 60000 }], { now }), []);
+});
+
+test("уборка запускается один раз за сеанс и только когда отменять нечего", () => {
+  const project = createProject({ name: "Квартира" });
+  assert.equal(schemesSweepReady({ project, swept: false, canUndo: false }), true);
+  assert.equal(schemesSweepReady({ project, swept: false, canUndo: true }), false);
+  assert.equal(schemesSweepReady({ project, swept: true, canUndo: false }), false);
+  assert.equal(schemesSweepReady({ project: null, swept: false, canUndo: false }), false);
 });

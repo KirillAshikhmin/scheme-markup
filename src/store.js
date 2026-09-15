@@ -18,6 +18,10 @@ export const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
 // Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
 // вкладка): ждём ограниченное время и уходим в память.
 export const STORE_OPEN_TIMEOUT_MS = 4000;
+// Картинка моложе этого возраста неприкосновенна: её объект мог не успеть
+// досохраниться — в этой вкладке (автосохранение отложено) или в соседней,
+// открытой на том же хранилище.
+export const STORE_IMAGE_GRACE_MS = 5 * 60 * 1000;
 
 const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
 const storeListeners = new Set();
@@ -225,16 +229,17 @@ export async function deleteProject(id) {
 
 export async function putImage(blob) {
   const id = newStoreId();
+  const createdAt = Date.now();
   const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
-    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
+    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0, createdAt })),
   );
-  if (!written.ok) storeMemory.images.set(id, blob);
+  if (!written.ok) storeMemory.images.set(id, { blob, createdAt });
   return id;
 }
 
 export async function getImage(id) {
   if (!id) return null;
-  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
+  if (storeMemory.images.has(id)) return storeMemory.images.get(id).blob;
   const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
   return read.ok && read.result ? read.result.blob : null;
 }
@@ -250,12 +255,29 @@ export async function deleteImage(id) {
 
 // Картинки лежат общей кучей на все объекты, поэтому «ничья» — та, на которую
 // не ссылается ни один объект. Чистая половина уборки: её и проверяют тесты.
-export function orphanImageIds(projects, storedIds) {
+//
+// Два правила, оба про «лучше не тронуть, чем потерять план»:
+// список объектов пуст или не список — сирот нет вовсе (нечего сверять,
+// значит нечего и удалять); картинка моложе `minAgeMs` — не сирота, её объект
+// мог ещё не досохраниться, в том числе в соседней вкладке.
+export function orphanImageIds(projects, images, options = {}) {
+  if (!Array.isArray(projects) || projects.length === 0) return [];
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  const minAgeMs = Number.isFinite(options.minAgeMs) ? options.minAgeMs : STORE_IMAGE_GRACE_MS;
   const used = new Set();
-  for (const project of projects || []) {
+  for (const project of projects) {
     for (const id of usedImageIds(project)) used.add(id);
   }
-  return [...(storedIds || [])].filter((id) => id && !used.has(id));
+  const orphans = [];
+  for (const entry of images || []) {
+    const id = typeof entry === "string" ? entry : entry && entry.id;
+    if (!id || used.has(id)) continue;
+    const createdAt = typeof entry === "string" ? null : entry && entry.createdAt;
+    // Без отметки — запись из прежних версий: она заведомо старше сеанса.
+    if (Number.isFinite(createdAt) && now - createdAt < minAgeMs) continue;
+    orphans.push(id);
+  }
+  return orphans;
 }
 
 // Не смогли прочитать — возвращаем null: удалять по неполному списку нельзя,
@@ -269,11 +291,13 @@ async function allProjectDocs() {
   return [...docs.values()];
 }
 
-export async function listImageIds() {
-  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.getAllKeys()));
+// Записи, а не одни ключи: возраст картинки решает, можно ли её трогать.
+export async function listImageRecords() {
+  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.getAll()));
   if (!read.ok && storeModeValue === "idb") return null;
-  const ids = (read.result || []).map((key) => String(key));
-  return [...ids, ...storeMemory.images.keys()];
+  const records = (read.result || []).map((item) => ({ id: String(item.id), createdAt: item.createdAt }));
+  for (const [id, item] of storeMemory.images) records.push({ id, createdAt: item.createdAt });
+  return records;
 }
 
 // Убирает подложки, которые не нужны ни одному объекту. `extraProjects` —
@@ -281,7 +305,7 @@ export async function listImageIds() {
 // картинки тоже не ничьи.
 export async function sweepOrphanImages(extraProjects = []) {
   const docs = await allProjectDocs();
-  const stored = await listImageIds();
+  const stored = await listImageRecords();
   if (!docs || !stored) return { removed: 0, skipped: true };
   const orphans = orphanImageIds([...docs, ...extraProjects], stored);
   for (const id of orphans) await deleteImage(id);

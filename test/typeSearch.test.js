@@ -47,3 +47,19 @@ test("новая категория и длинный код находятся 
   ]);
   assert.equal(searchTypes(withType.project, "карниз")[0].types[0].code, "ПОДСВЕТКА");
 });
+
+// Правило поиска: код — с начала, название — в любом месте. Иначе
+// шестнадцатибуквенные коды начинают совпадать серединой со случайными
+// запросами, и заказчик снова стоит перед длинным перечнем, который
+// окно колонками и убирало.
+test("код ищется с начала: совпадение в середине кода не считается", () => {
+  const added = addCategory(createProject({ name: "Тест" }), { name: "Шторы", color: "#9C931A", shape: "square" });
+  const project = addType(added.project, { code: "КАРНИЗЛЕНТА", name: "Лента в коробе", categoryId: added.category.id }).project;
+  // «НИЗЛ» стоит в середине кода и ни в одном названии справочника.
+  assert.deepEqual(searchTypes(project, "НИЗЛ"), []);
+  assert.deepEqual(searchTypes(project, "ризле"), []);
+  // С начала кода — находится.
+  assert.deepEqual(codes(searchTypes(project, "КАРНИЗ")), [["Шторы", ["КАРНИЗЛЕНТА"]]]);
+  // Название по-прежнему ищется в середине.
+  assert.equal(searchTypes(project, "коробе")[0].types[0].code, "КАРНИЗЛЕНТА");
+});

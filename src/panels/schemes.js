@@ -13,6 +13,7 @@ import {
   updateScheme,
 } from "../model.js";
 import { canvasCommit } from "../canvas.js";
+import { canUndo } from "../history.js";
 import {
   countPointsOutside,
   cropTransform,
@@ -34,6 +35,14 @@ import { uiButton, uiConfirm, uiEl, uiModal, uiPrompt } from "./ui.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
+
+// Уборка ничьих подложек сносит данные заказчика, поэтому условия запуска
+// названы явно и проверяются отдельно от порядка событий: объект открыт,
+// за сеанс ещё не убирали, и — главное — отменять нечего. Пока в стеке отмены
+// лежит хоть один шаг, он может вернуть ссылку на «ничью» картинку.
+export function schemesSweepReady({ project, swept, canUndo: hasUndo }) {
+  return Boolean(project) && !swept && !hasUndo;
+}
 
 function planNameFromFile(file, project) {
   const raw = String((file && file.name) || "").replace(/\.[^.]+$/, "").trim();
@@ -561,7 +570,7 @@ function mountSchemesPanel(host, api) {
       render();
       loadSchemeImage(false);
     }
-    if (!swept && state.project) {
+    if (schemesSweepReady({ project: state.project, swept, canUndo: canUndo() })) {
       swept = true;
       sweepOrphanImages([state.project]);
     }
