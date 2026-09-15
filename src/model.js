@@ -526,6 +526,34 @@ export function typesInOrder(project) {
     .filter((group) => group.types.length > 0);
 }
 
+// Поиск типа по строке из окна «Тип метки»: по коду с начала и по названию
+// в любом месте, без учёта регистра. Точное совпадение кода идёт первым —
+// и в своей категории, и среди категорий: «Р» — это Розетка, а не «Подсветка
+// кровати», где та же буква стоит в середине названия. Порядок всего
+// остального — порядок справочника, своей сортировки здесь нет.
+// Пустой запрос отдаёт справочник целиком.
+function typeMatchesQuery(type, needle) {
+  if (!needle) return true;
+  return type.code.toLowerCase().startsWith(needle) || type.name.toLowerCase().includes(needle);
+}
+
+function typeExactRank(type, needle) {
+  return type && needle && type.code.toLowerCase() === needle ? 1 : 0;
+}
+
+export function searchTypes(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  const groups = typesInOrder(project)
+    .map(({ category, types }) => ({
+      category,
+      types: types
+        .filter((type) => typeMatchesQuery(type, needle))
+        .sort((a, b) => typeExactRank(b, needle) - typeExactRank(a, needle)),
+    }))
+    .filter((group) => group.types.length > 0);
+  return groups.sort((a, b) => typeExactRank(b.types[0], needle) - typeExactRank(a.types[0], needle));
+}
+
 // Порядок помещений — порядок появления: их заводят по ходу разметки, и этот
 // порядок пользователю знаком. Живёт рядом со schemesInOrder и typesInOrder:
 // порядок сущностей объекта — правило объекта, а не панели.

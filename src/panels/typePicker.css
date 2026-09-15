@@ -1,0 +1,63 @@
+/* ——— окно «Тип метки»: категории колонками ————————————————————————————
+   Один длинный столбец заставлял листать: «Свет» занимал экран, а
+   «Выключатели» уходили за нижний край, и справа половина окна пустовала.
+   Теперь категории стоят рядом, а ширину окна задаёт их число — столько
+   колонок, сколько нашлось, но не больше `PICKER_MAX_COLUMNS`. */
+
+/* Ширину этой карточки задаёт содержимое, а не общая мера диалогов. */
+.modal--wide {
+  width: auto;
+  max-width: 96vw;
+}
+
+.picker--types {
+  width: min(90vw, calc(var(--picker-columns, 1) * 240px));
+}
+
+.picker__columns {
+  display: grid;
+  grid-template-columns: repeat(var(--picker-columns, 1), minmax(150px, 1fr));
+  gap: 2px 14px;
+  align-items: start;
+  max-height: 56vh;
+  /* Прокрутка — на крайний случай: колонок больше шести (вертикальная)
+     или окно уже, чем помещается колонка (горизонтальная). */
+  overflow: auto;
+}
+
+.picker__column {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Заголовок категории в её цвете остаётся виден при прокрутке. */
+.picker__column .picker__group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 0 2px;
+  padding-top: 2px;
+  background: var(--panel-bg);
+}
+
+/* Код бывает до шестнадцати букв. Место в строке уступает название: оно
+   сжимается первым (основа 0), и только когда ужимать больше нечего,
+   многоточие получает и код. Целиком строка остаётся в подсказке. */
+.picker__column .picker__code {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.picker__column .picker__name {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.picker__columns > .panel__empty {
+  grid-column: 1 / -1;
+}

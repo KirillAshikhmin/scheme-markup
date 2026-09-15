@@ -1,11 +1,19 @@
-// Своё окно выбора типа метки: «буква — пояснение», группировка по цветным
-// категориям, поиск и ввод нового кода прямо здесь.
+// Своё окно выбора типа метки: «буква — пояснение», поиск и ввод нового кода
+// прямо здесь.
+//
+// Категории стоят колонками рядом — «Свет», «Выключатели», «Розетки» и так
+// далее, — а не одним длинным столбцом: окно открывается десятки раз за сеанс,
+// и цель — попасть в нужный тип одним взглядом и одним кликом, без листания.
+// Ширину окна задаёт число колонок (`--picker-columns`), поэтому справа не
+// остаётся пустого поля, а колонки не растягиваются, когда поиск оставил одну.
+// Колонок больше шести — переносятся во второй ряд и прокручиваются по
+// вертикали; горизонтальная прокрутка остаётся на крайний случай узкого окна.
 //
 // Окно открывается один раз на серию: выбранный тип «залипает» в панели
 // инструментов, и дальше метки ставятся кликами без единого диалога.
 import { strings, text } from "../strings.js";
 import { uiEl, uiButton, uiModal } from "./ui.js";
-import { addType, codeProblem, styleOf, typesInOrder, CODE_MAX_LENGTH } from "../model.js";
+import { addType, codeProblem, searchTypes, styleOf, CODE_MAX_LENGTH } from "../model.js";
 import { shapeIcon } from "../render.js";
 
 // Значок типа — цвет категории и форма из справочника, нарисованные общим
@@ -15,14 +23,22 @@ function pickerIcon(project, typeId, size = 22) {
   return shapeIcon(style.shape, style.color, size);
 }
 
-function pickerExact(type, query) {
-  return type && query && type.code.toUpperCase() === query.toUpperCase() ? 1 : 0;
-}
+// Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.
+// Лишние переносятся во второй ряд — вертикальная прокрутка удобнее
+// горизонтальной, когда справочник разросся.
+const PICKER_MAX_COLUMNS = 6;
 
-function pickerMatches(type, query) {
-  if (!query) return true;
-  const needle = query.toLowerCase();
-  return type.code.toLowerCase().startsWith(needle) || type.name.toLowerCase().includes(needle);
+// Клавиатура по сетке: вверх-вниз — по колонке, вправо-влево — в соседнюю
+// колонку на ту же строку (короткая колонка прижимает к последней строке).
+function pickerMove(box, row, dx, dy) {
+  const columns = [...box.children].filter((node) => node.classList.contains("picker__column"));
+  const rowsOf = (node) => [...node.querySelectorAll(".picker__row")];
+  const column = columns.findIndex((node) => node.contains(row));
+  if (column < 0) return;
+  const index = rowsOf(columns[column]).indexOf(row);
+  const rows = rowsOf(columns[Math.min(columns.length - 1, Math.max(0, column + dx))]);
+  const next = rows[Math.min(rows.length - 1, Math.max(0, index + dy))];
+  if (next) next.focus();
 }
 
 export function openTypePicker(project, options = {}) {
@@ -34,7 +50,8 @@ export function openTypePicker(project, options = {}) {
       resolve(result || null);
     };
 
-    const list = uiEl("div", { class: "picker__list" });
+    const box = uiEl("div", { class: "picker__columns" });
+    const body = uiEl("div", { class: "picker picker--types" });
     const error = uiEl("p", { class: "picker__error" });
     const createBox = uiEl("div", { class: "picker__create" });
     const search = uiEl("input", {
@@ -44,9 +61,18 @@ export function openTypePicker(project, options = {}) {
       on: {
         input: () => renderList(),
         keydown: (event) => {
+          // Стрелка вниз из поиска — в первую строку сетки: дальше по ней
+          // ходят стрелками, не хватаясь за мышь.
+          if (event.key === "ArrowDown") {
+            const first = box.querySelector(".picker__row");
+            if (!first) return;
+            event.preventDefault();
+            first.focus();
+            return;
+          }
           if (event.key !== "Enter") return;
           event.preventDefault();
-          const first = list.querySelector(".picker__row");
+          const first = box.querySelector(".picker__row");
           if (first) first.click();
           else if (createBox.firstChild) createType();
         },
@@ -109,53 +135,73 @@ export function openTypePicker(project, options = {}) {
       );
     }
 
+    function typeRow(type) {
+      const row = uiEl(
+        "button",
+        {
+          class: "picker__row" + (type.id === options.activeTypeId ? " is-active" : ""),
+          type: "button",
+          // Длинный код не даёт названию места, и оно ужимается многоточием —
+          // подсказка возвращает его целиком.
+          title: type.code + " — " + type.name,
+          on: { click: () => done({ typeId: type.id, project: current }) },
+        },
+        [
+          pickerIcon(current, type.id),
+          uiEl("span", { class: "picker__code", text: type.code }),
+          uiEl("span", { class: "picker__name", text: type.name }),
+        ],
+      );
+      return row;
+    }
+
     function renderList() {
       const query = search.value.trim();
-      list.replaceChildren();
-      let shown = 0;
-      // Точное совпадение по коду — первым: «Р» это Розетка, а не «Подсветка
-      // кровати», где та же буква стоит в середине названия.
-      const groups = typesInOrder(current).map((group) => ({
-        category: group.category,
-        types: group.types.slice().sort((a, b) => pickerExact(b, query) - pickerExact(a, query)),
-      }));
-      groups.sort((a, b) => pickerExact(b.types[0], query) - pickerExact(a.types[0], query));
-      for (const group of groups) {
-        const rows = group.types.filter((type) => pickerMatches(type, query));
-        if (rows.length === 0) continue;
-        shown += rows.length;
-        const head = uiEl("div", { class: "picker__group", text: group.category.name });
-        head.style.borderColor = group.category.color;
-        head.style.color = group.category.color;
-        list.append(head);
-        for (const type of rows) {
-          const row = uiEl(
-            "button",
-            {
-              class: "picker__row" + (type.id === options.activeTypeId ? " is-active" : ""),
-              type: "button",
-              on: { click: () => done({ typeId: type.id, project: current }) },
-            },
-            [
-              pickerIcon(current, type.id),
-              uiEl("span", { class: "picker__code", text: type.code }),
-              uiEl("span", { class: "picker__name", text: type.name }),
-            ],
-          );
-          list.append(row);
-        }
-      }
-      if (shown === 0) list.append(uiEl("p", { class: "panel__empty", text: strings.picker.empty }));
+      // Что за чем показывать, решает модель: поиск по коду и названию,
+      // точное совпадение кода первым. Своей сортировки здесь нет.
+      const groups = searchTypes(current, query);
+      box.replaceChildren(
+        ...groups.map((group) => {
+          const head = uiEl("div", { class: "picker__group", text: group.category.name });
+          head.style.borderColor = group.category.color;
+          head.style.color = group.category.color;
+          return uiEl("div", { class: "picker__column" }, [head, ...group.types.map(typeRow)]);
+        }),
+      );
+      if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.picker.empty }));
+      // Ширину окна задаёт число колонок: пять категорий — пять колонок и
+      // никакого пустого поля справа, одна найденная — узкое окно.
+      body.style.setProperty("--picker-columns", String(Math.min(Math.max(groups.length, 1), PICKER_MAX_COLUMNS)));
       renderCreate(query);
     }
 
+    // Клавиатура по сетке. Enter здесь обязателен свой: основное действие
+    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
+    // Enter в клик по строке, — то есть выбор терялся бы.
+    box.addEventListener("keydown", (event) => {
+      const row = event.target;
+      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        row.click();
+        return;
+      }
+      const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      pickerMove(box, row, step[0], step[1]);
+    });
+
     renderList();
+    body.replaceChildren(search, box, createBox, error);
     modal = uiModal({
       title: options.title || strings.picker.title,
-      body: uiEl("div", { class: "picker" }, [search, list, createBox, error]),
+      body,
       actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
       onCancel: () => resolve(null),
     });
+    // Широкая карточка — только у этого окна: ширину внутри задаёт сетка колонок.
+    if (modal.card) modal.card.classList.add("modal--wide");
     search.focus();
   });
 }
