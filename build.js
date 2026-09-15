@@ -173,6 +173,22 @@ function orderModules(sources) {
   return ordered;
 }
 
+// Управляющий символ, доживший до страницы (например, живой U+0000 внутри
+// регулярки), браузер при разборе HTML заменяет на U+FFFD — и весь бандл падает
+// с SyntaxError ещё до старта. В Node тот же файл разбирается молча, поэтому
+// проверка стоит здесь, на выходе сборки.
+function assertPlainText(html) {
+  const found = html.match(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
+  if (!found) return;
+  const at = html.indexOf(found[0]);
+  const line = html.slice(0, at).split("\n").length;
+  const code = found[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
+  throw new Error(
+    "Управляющий символ U+" + code + " в собранной странице, строка " + line +
+      ": в браузере он ломает разбор. Пиши его экранированием (\\x00-\\x1f), а не байтом.",
+  );
+}
+
 function assertOffline(html) {
   const forbidden = [
     /<script[^>]+src=/i,
@@ -212,6 +228,7 @@ export async function build() {
       "    <script>\n(function () {\n" + script + "\n})();\n    </script>\n",
     );
 
+  assertPlainText(html);
   assertOffline(html);
   await mkdir(distDir, { recursive: true });
   const out = path.join(distDir, "index.html");
