@@ -7,7 +7,7 @@
 // а всё сомнительное остаётся зумом.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canvasWheelKind } from "../src/canvas.js";
+import { canvasPinchWheel, canvasWheelKind, canvasZoomFactor } from "../src/canvas.js";
 
 // Событие колеса: важны только приметы, по которым идёт разделение.
 const wheel = (patch) => ({ ctrlKey: false, metaKey: false, deltaMode: 0, deltaX: 0, deltaY: 0, timeStamp: 0, ...patch });
@@ -59,4 +59,55 @@ test("щипок посреди прокрутки остаётся зумом, 
   // Пальцы на трекпаде не отрывали, но начали сводить: ctrlKey важнее серии —
   // иначе зум не включится, пока жест не кончится.
   assert.equal(canvasWheelKind(wheel({ ctrlKey: true, deltaY: -2, timeStamp: 1016 }), { kind: "pan", time: 1000 }), "zoom");
+});
+
+// ——— мера масштаба ————————————————————————————————————————————————————
+//
+// Щипок и колесо приходят одним событием, но мерить их одной мерой нельзя:
+// щелчок колеса — это сто пикселей за раз, а щипок сыплет дробными единицами.
+// Пока мера была общей, чтобы приблизить пальцами, приходилось долго сводить
+// их — заказчик так и сказал: «прям очень не чувствительный».
+
+// Путь жеста: события складываются, множители перемножаются.
+const zoomOver = (steps, pinch) =>
+  steps.reduce((total, deltaY) => total * canvasZoomFactor(wheel({ deltaY, ctrlKey: pinch }), pinch), 1);
+
+test("щелчок колеса мыши остался прежней мерой", () => {
+  // Один щелчок — около четырнадцати процентов масштаба. Эта мера заказчика
+  // устраивает, и трогать её было нельзя.
+  const notch = canvasZoomFactor(wheel({ deltaY: -100 }), false);
+  assert.ok(notch > 1.14 && notch < 1.18, "щелчок колеса изменил свою меру: ×" + notch.toFixed(3));
+  assert.ok(Math.abs(1 / canvasZoomFactor(wheel({ deltaY: 100 }), false) - notch) < 1e-9, "вверх и вниз несимметричны");
+});
+
+test("щипок на трекпаде двигает масштаб заметно, а не по капле", () => {
+  // Жест на треть экрана — это около сотни единиц, разбитых на мелкие шаги.
+  const gesture = new Array(40).fill(-2.5);
+  assert.ok(zoomOver(gesture, true) >= 2, "щипок на треть экрана почти не приблизил: ×" + zoomOver(gesture, true).toFixed(2));
+  // Та же сотня единиц колесом остаётся прежней: у колеса своя мера.
+  assert.ok(zoomOver([-100], false) < 1.2, "колесо поехало вслед за щипком");
+});
+
+test("резкий щипок не перескакивает весь диапазон масштаба", () => {
+  const jerk = canvasZoomFactor(wheel({ deltaY: -400, ctrlKey: true }), true);
+  assert.ok(jerk <= 1.5, "одно событие меняет масштаб в " + jerk.toFixed(2) + " раз");
+  // Весь диапазон холста — от 0,04 до 24, это 600 крат: одним рывком не пройти.
+  assert.ok(Math.log(600) / Math.log(jerk) >= 10, "диапазон пролетает меньше чем за десяток событий");
+  assert.ok(canvasZoomFactor(wheel({ deltaY: 400, ctrlKey: true }), true) >= 1 / 1.5);
+});
+
+test("мелкий щипок не застревает на месте", () => {
+  const tiny = canvasZoomFactor(wheel({ deltaY: -0.5, ctrlKey: true }), true);
+  assert.ok(tiny > 1, "самый мелкий шаг щипка не двигает масштаб вовсе");
+  // Полсотни таких шагов — это уже заметное глазу приближение.
+  assert.ok(zoomOver(new Array(50).fill(-0.5), true) > 1.2, "мелкими шагами масштаб не набирается");
+});
+
+test("Ctrl с колесом мыши мерится по-колесному, а не как щипок", () => {
+  // Щипок узнаётся по мелкому дробному шагу; Ctrl+колесо шлёт те же сто целых.
+  assert.equal(canvasPinchWheel(wheel({ ctrlKey: true, deltaY: -2.5 })), true);
+  assert.equal(canvasPinchWheel(wheel({ ctrlKey: true, deltaY: -7 })), true);
+  assert.equal(canvasPinchWheel(wheel({ ctrlKey: true, deltaY: -100 })), false);
+  assert.equal(canvasPinchWheel(wheel({ ctrlKey: true, deltaMode: 1, deltaY: -3 })), false);
+  assert.equal(canvasPinchWheel(wheel({ deltaY: -2.5 })), false, "без ctrlKey это прокрутка, а не щипок");
 });
