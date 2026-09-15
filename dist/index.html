@@ -127,17 +127,6 @@
   border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
-.rooms__color {
-  flex: none;
-  width: 32px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--panel-line);
-  border-radius: 6px;
-  background: #21262d;
-  cursor: pointer;
-}
-
 .tools__row {
   display: flex;
   flex-wrap: wrap;
@@ -275,6 +264,172 @@
 
 .picker__error:empty {
   display: none;
+}
+
+/* ——— окно выбора цвета ————————————————————————————————————————————————
+   Слева палитра объекта, справа — поле оттенка и числа. Всё, что здесь
+   делается мышью, делается и с клавиатуры, поэтому у каждого управляемого
+   элемента есть видимая рамка фокуса. */
+
+.colorpick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.colorpick__side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.colorpick__caption {
+  margin: 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.colorpick__palette {
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 6px;
+}
+
+.colorpick__swatch {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.colorpick__swatch:hover {
+  border-color: var(--panel-text);
+}
+
+.colorpick__swatch.is-active {
+  box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--panel-text);
+}
+
+/* Занятый цвет не запрещён, но помечен: повтор цвета на плане должен быть
+   сознательным, а не случайным. */
+.colorpick__swatch.is-used::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(13, 17, 23, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.colorpick__field {
+  display: block;
+  width: 232px;
+  height: 168px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.colorpick__hue {
+  display: block;
+  width: 232px;
+  height: 18px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.colorpick__swatch:focus-visible,
+.colorpick__field:focus-visible,
+.colorpick__hue:focus-visible,
+.colorpick__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.colorpick__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.colorpick__preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.colorpick__chip {
+  flex: none;
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.colorpick__chip--before {
+  width: 18px;
+  height: 18px;
+  opacity: 0.8;
+}
+
+.colorpick__value {
+  font-size: 12px;
+  color: var(--panel-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.colorpick__numbers {
+  display: flex;
+  gap: 6px;
+}
+
+.colorpick__number-box {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.colorpick__number-label {
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.colorpick__number {
+  width: 54px;
+  padding: 4px 6px;
+  text-align: right;
+}
+
+.colorpick__random {
+  align-self: flex-start;
+}
+
+/* Кнопка цвета в строке помещения или категории — она же предпросмотр. */
+.colorpick__button {
+  flex: none;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.colorpick__button:hover {
+  border-color: var(--panel-text);
 }
 
 /* Работа с файлом проекта в шапке: строка «выгружено N назад», папка
@@ -530,16 +685,6 @@
   width: 120px;
   text-align: center;
   font-weight: 700;
-}
-
-.dict__color {
-  flex: none;
-  width: 32px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--panel-line);
-  border-radius: 6px;
-  background: var(--panel-bg-deep);
 }
 
 .dict__count {
@@ -2207,6 +2352,20 @@ const strings = {
     tooBig: "Слишком большая картинка — уменьшите множитель",
     failed: "Не удалось собрать файл",
   },
+  colorPicker: {
+    title: "Цвет",
+    palette: "Палитра",
+    custom: "Свой цвет",
+    field: "Насыщенность и яркость: стрелки — точнее, Shift — крупнее",
+    hue: "Оттенок: стрелки влево и вправо",
+    random: "Случайный цвет",
+    apply: "ОК",
+    before: "Было",
+    used: "цвет уже занят",
+    red: "R",
+    green: "G",
+    blue: "B",
+  },
   dialog: {
     confirm: "Да, удалить",
     cancel: "Отмена",
@@ -2297,24 +2456,205 @@ const BLOCK_FALLBACK_SIZE_PX = 1000;
 const FALLBACK_COLOR = "#8B949E";
 const BLOCK_SIDES = ["left", "right", "up", "down"];
 
-// Цвета помещений: контур обводится цветом комнаты, и на одном плане их видно
-// сразу десяток — поэтому палитра разведена по тону, а не по яркости, и
-// не повторяет цвета категорий меток (метка на контуре не должна теряться).
-// Цвет назначается при создании комнаты и правится вручную.
+// Цвета помещений и категорий: цветом комнаты обводится её контур на плане,
+// цветом категории красятся метки и заголовки групп в таблицах. На одном
+// плане контуров бывает под десяток, поэтому палитра подобрана числами,
+// а не на глаз:
+//   — любые два цвета расходятся не меньше чем на 22 ΔE (CIE76) — тонкую
+//     линию одного не спутать с линией другого;
+//   — контраст к белому не ниже 2,9 (цвет не теряется на белом плане)
+//     и к чёрному не ниже 2,4 (не сливается с карандашными стенами);
+//   — насыщенность ограничена сверху: кислотный цвет поверх плана режет глаз;
+//   — цвета разведены и с цветами категорий шаблона, чтобы метка не терялась
+//     на контуре своей же комнаты.
+// Порядок не случайный: каждый следующий цвет максимально далёк от всех
+// предыдущих, поэтому первые шесть комнат получают самые несхожие контуры,
+// а запаса хватает на квартиру целиком.
 const ROOM_PALETTE = [
   "#0F766E",
   "#B45309",
   "#7E22CE",
-  "#0369A1",
   "#BE123C",
-  "#4D7C0F",
-  "#A16207",
-  "#1D4ED8",
-  "#9D174D",
   "#15803D",
-  "#C2410C",
-  "#4338CA",
+  "#2A78D1",
+  "#D169B9",
+  "#9C931A",
+  "#664733",
+  "#1DAB1D",
+  "#374F6E",
+  "#852E51",
+  "#633894",
+  "#289EC9",
+  "#D17669",
+  "#D124C0",
+  "#5B6624",
+  "#B38F59",
+  "#D1247A",
+  "#244CD1",
+  "#8C2F20",
+  "#689C2D",
+  "#8C1875",
+  "#A856D1",
 ];
+
+// ——— арифметика цвета ——————————————————————————————————————————————————
+//
+// Переводы нужны окну выбора цвета: поле «насыщенность/яркость» живёт в HSV,
+// поля R, G, B — в байтах, а хранится и рисуется всё в hex. Отдельно —
+// расстояние между цветами: сравнивать сырые байты бесполезно, два далёких
+// по числам цвета глаз читает как один. Поэтому цвета переводятся в CIE Lab
+// (sRGB, D65) и меряются по ΔE76: ΔE ≈ 2 — предел различимости рядом,
+// ΔE > 20 — «явно разные цвета».
+function hexToRgb(value) {
+  const hex = String(value == null ? "" : value).trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  return {
+    r: parseInt(hex.slice(1, 3), 16),
+    g: parseInt(hex.slice(3, 5), 16),
+    b: parseInt(hex.slice(5, 7), 16),
+  };
+}
+
+function colorByte(value) {
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(255, Math.max(0, number));
+}
+function rgbToHex(rgb) {
+  const parts = [colorByte(rgb && rgb.r), colorByte(rgb && rgb.g), colorByte(rgb && rgb.b)];
+  return "#" + parts.map((part) => part.toString(16).padStart(2, "0").toUpperCase()).join("");
+}
+
+// Оттенок — градусы 0…360 (360 сворачивается в 0), насыщенность и яркость — доли.
+function rgbToHsv(rgb) {
+  const r = colorByte(rgb && rgb.r) / 255;
+  const g = colorByte(rgb && rgb.g) / 255;
+  const b = colorByte(rgb && rgb.b) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const span = max - min;
+  let h = 0;
+  if (span > 0) {
+    if (max === r) h = 60 * (((g - b) / span) % 6);
+    else if (max === g) h = 60 * ((b - r) / span + 2);
+    else h = 60 * ((r - g) / span + 4);
+  }
+  if (h < 0) h += 360;
+  return { h, s: max === 0 ? 0 : span / max, v: max };
+}
+function hsvToRgb(hsv) {
+  const h = ((Number(hsv && hsv.h) || 0) % 360 + 360) % 360;
+  const s = Math.min(1, Math.max(0, Number(hsv && hsv.s) || 0));
+  const v = Math.min(1, Math.max(0, Number(hsv && hsv.v) || 0));
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  const sector = Math.floor(h / 60) % 6;
+  const table = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ][sector];
+  return {
+    r: Math.round((table[0] + m) * 255),
+    g: Math.round((table[1] + m) * 255),
+    b: Math.round((table[2] + m) * 255),
+  };
+}
+
+function colorLinear(byte) {
+  const channel = byte / 255;
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+// sRGB → XYZ (D65) → Lab. Константы — из определения пространства.
+function colorToLab(rgb) {
+  const r = colorLinear(rgb.r);
+  const g = colorLinear(rgb.g);
+  const b = colorLinear(rgb.b);
+  const x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047;
+  const y = r * 0.2126729 + g * 0.7151522 + b * 0.072175;
+  const z = (r * 0.0193339 + g * 0.119192 + b * 0.9503041) / 1.08883;
+  const f = (t) => (t > 216 / 24389 ? Math.cbrt(t) : (841 / 108) * t + 4 / 29);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+
+// Неизвестный цвет ничего не ограничивает: расстояние до него бесконечно,
+// и проверка «занят ли цвет» такой цвет просто не замечает.
+function colorDistance(first, second) {
+  const a = hexToRgb(first);
+  const b = hexToRgb(second);
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  const left = colorToLab(a);
+  const right = colorToLab(b);
+  return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2]);
+}
+
+// Ближе этого расстояния два цвета читаются как один и тот же: цвет палитры,
+// рядом с которым уже стоит чужой, свободным не считается.
+const COLOR_SAME_DISTANCE = 10;
+
+// Свободный цвет: первый в палитре, рядом с которым ещё ничего не покрашено.
+// Палитра кончилась — берём тот, что стоит дальше всех от занятых, а при
+// равенстве самый редкий: слепой круг «следующий по счёту» повторял бы цвет
+// соседней комнаты, даже когда в палитре есть менее ходовой.
+function freeColor(used, options = {}) {
+  const palette = Array.isArray(options.palette) && options.palette.length > 0 ? options.palette : ROOM_PALETTE;
+  const limit = Number.isFinite(options.minDistance) ? options.minDistance : COLOR_SAME_DISTANCE;
+  const taken = (Array.isArray(used) ? used : [])
+    .map((value) => (hexToRgb(value) ? String(value).trim().toUpperCase() : null))
+    .filter(Boolean);
+  let best = null;
+  for (const color of palette) {
+    const key = String(color).trim().toUpperCase();
+    let nearest = Number.POSITIVE_INFINITY;
+    let count = 0;
+    for (const other of taken) {
+      const distance = colorDistance(color, other);
+      if (distance < nearest) nearest = distance;
+      if (other === key) count += 1;
+    }
+    if (nearest >= limit) return color;
+    if (!best || nearest > best.nearest || (nearest === best.nearest && count < best.count)) {
+      best = { color, nearest, count };
+    }
+  }
+  return best ? best.color : palette[0];
+}
+
+// Цвет, который глаз читает как «другой»: ΔE ниже — уже оттенок того же.
+const COLOR_FAR_DISTANCE = 22;
+// Границы яркости, в которых цвет виден и на белом плане, и на карандашных
+// стенах (те же, по которым подобрана палитра).
+const COLOR_MIN_LUMINANCE = 0.075;
+const COLOR_MAX_LUMINANCE = 0.3;
+const COLOR_RANDOM_TRIES = 60;
+
+function colorLuminance(rgb) {
+  return 0.2126 * colorLinear(rgb.r) + 0.7152 * colorLinear(rgb.g) + 0.0722 * colorLinear(rgb.b);
+}
+
+// Случайный цвет для кнопки «Случайный цвет»: наугад берётся оттенок, но
+// годится не любой — слишком светлый потеряется на плане, слишком тёмный
+// сольётся со стенами, а похожий на занятый не отличить от соседней комнаты.
+// Не нашлось за отведённые попытки — отдаём свободный цвет палитры: лучше
+// предсказуемый цвет, чем похожий на чужой.
+function randomColor(used, options = {}) {
+  const random = typeof options.random === "function" ? options.random : Math.random;
+  const goal = Number.isFinite(options.minDistance) ? options.minDistance : COLOR_FAR_DISTANCE;
+  const taken = (Array.isArray(used) ? used : []).filter((value) => hexToRgb(value));
+  for (let attempt = 0; attempt < COLOR_RANDOM_TRIES; attempt += 1) {
+    const rgb = hsvToRgb({ h: random() * 360, s: 0.5 + random() * 0.35, v: 0.42 + random() * 0.42 });
+    const light = colorLuminance(rgb);
+    if (light < COLOR_MIN_LUMINANCE || light > COLOR_MAX_LUMINANCE) continue;
+    const color = rgbToHex(rgb);
+    if (taken.every((other) => colorDistance(color, other) >= goal)) return color;
+  }
+  return freeColor(taken, { ...options, minDistance: goal });
+}
 
 // Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
 const OUTLINE_MIN_POINTS = 3;
@@ -3066,14 +3406,10 @@ function deleteCategory(project, categoryId) {
   return { project: withProject(project, { categories }), deleted: current };
 }
 
-// Цвет новой комнаты: первый из палитры, которым ещё не обведена ни одна
-// комната объекта. Кончилась палитра — идём по кругу: десяток разных контуров
-// на одном плане уже различим, а совпадение цвета через двенадцать комнат
-// пользователь поправит руками.
+// Цвет новой комнаты: незанятый цвет палитры. Перекрашенная вручную комната
+// освобождает свой цвет — он снова первый в очереди.
 function nextRoomColor(project) {
-  const used = new Set(project.rooms.map((room) => room.color).filter(Boolean));
-  const free = ROOM_PALETTE.find((color) => !used.has(color));
-  return free || ROOM_PALETTE[project.rooms.length % ROOM_PALETTE.length];
+  return freeColor(project.rooms.map((room) => room.color));
 }
 
 function normalizeColor(value, fallback) {
@@ -4658,28 +4994,53 @@ function labelOffsetOf(project, target) {
   const first = project.marks.find((mark) => mark.id === target.markIds[0]);
   return first && first.labelOffset ? first.labelOffset : null;
 }
-function labelBox(project, scheme, target, view) {
+
+// Текст подписи: у блока — свёрнутый в диапазон список, у одиночной метки — её
+// обозначение.
+function labelTextOf(project, target) {
+  return (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
+}
+
+// Ключ цели в раскладке. Группа и метка живут в разных пространствах
+// идентификаторов, но в одной таблице — отсюда приставка.
+function labelKeyOf(target) {
+  return (target.markIds ? "g:" : "m:") + target.id;
+}
+function labelBox(project, scheme, target, view, layout) {
   const state = renderView(view);
   const font = labelFontSize(state);
-  const radius = markRadius(state);
   const anchor = planToScreen(labelOrigin(project, target), scheme, state);
-  const offset = labelOffsetOf(project, target);
-  const dx = offset ? offset.dx * state.zoom : radius * LABEL_GAP;
-  const dy = offset ? offset.dy * state.zoom : -radius * LABEL_GAP;
-  const value = (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
+  const value = labelTextOf(project, target);
   const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
-  let x = anchor.x + dx;
-  // Код типа бывает длинным («ПОДСВЕТКА», шестнадцать букв), и у правого края
-  // такая подпись уходила за план — на выгрузке «весь план» её просто срезало.
-  // Подпись, которую не оттаскивали руками, переходит на левую сторону метки,
-  // если слева помещается; оттащенную не двигает никто.
-  if (!offset) {
-    const left = planToScreen({ x: 0, y: 0 }, scheme, state).x;
-    const right = planToScreen({ x: 1, y: 0 }, scheme, state).x;
-    const mirrored = anchor.x - dx - width;
-    if (x + width > right && mirrored >= left) x = mirrored;
-  }
-  return { text: value, x, y: anchor.y + dy, width, height: font * 1.2, font };
+  const place = labelPlaceOf(project, scheme, target, state, layout);
+  return {
+    text: value,
+    x: anchor.x + place.dx * state.zoom,
+    y: anchor.y + place.dy * state.zoom,
+    width,
+    height: font * 1.2,
+    font,
+    // Смещение подписи в пикселях плана — в тех же единицах, что `labelOffset`
+    // у метки. Отсюда его берёт перетаскивание: подпись, которую разводка
+    // отодвинула, не прыгает обратно, когда за неё взялись мышью.
+    dx: place.dx,
+    dy: place.dy,
+    row: place.row,
+    crowded: place.crowded,
+  };
+}
+
+// Где стоит подпись. Оттащенная руками — строго по своему смещению: его задал
+// пользователь, и трогать его нельзя. Остальные — по месту, которое нашла им
+// раскладка; без раскладки (её не передали) берётся общая, без фильтра.
+function labelPlaceOf(project, scheme, target, state, layout) {
+  const manual = labelOffsetOf(project, target);
+  if (manual) return { dx: manual.dx, dy: manual.dy, row: 0, crowded: false };
+  const map = layout || labelLayout(project, scheme, null, state);
+  const place = map.get(labelKeyOf(target));
+  if (place) return place;
+  const slot = labelSlots(labelPlanSizes(state).gap, 0, 0)[0];
+  return { dx: slot.dx, dy: slot.dy, row: 0, crowded: false };
 }
 
 // Подписи рисуются у меток без группы и по одной на группу. Цель группы несёт
@@ -4708,6 +5069,178 @@ function labelTargets(project, scheme, filter) {
     target.shownIds.push(mark.id);
   }
   return targets;
+}
+
+// ——— разведение подписей ——————————————————————————————————————————————
+//
+// Метка стоит там, где стоит железка на стене, и двигать её нельзя. Двигать
+// можно только подпись — а подписи соседних меток запросто перекрывают друг
+// друга: код типа бывает в шестнадцать букв, а розетки стоят в сорока
+// пикселях одна от другой. Перекрытая подпись съедает номер, а номер —
+// единственное, ради чего подпись на плане и стоит.
+//
+// Раскладка перебирает для каждой подписи короткий список мест вокруг её
+// метки и берёт первое свободное. Три свойства, ради которых всё считается
+// именно так:
+//
+// 1. Считается в пикселях плана, а не экрана. Экран и выгрузка отличаются
+//    только масштабом, и подпись уезжает на `dx × zoom` — значит распечатка
+//    повторяет то, что видел инженер, знак в знак.
+// 2. Порядок обхода — сверху вниз, слева направо, при равенстве по ключу.
+//    Одна и та же схема, открытая дважды, раскладывается одинаково.
+// 3. Жадность вместо оптимума: перебор мест у каждой подписи ограничен, чужие
+//    подписи уже расставлены и не переставляются. Полсотни меток — это полсотни
+//    коротких переборов, а не поиск идеальной раскладки.
+
+// Сколько рядов вверх и вниз пробует раскладка, прежде чем сдаться. Ряд — это
+// высота подписи: дальше подпись уже не читается как «эта, у этой метки».
+const LABEL_ROWS = 3;
+// Просвет между соседними подписями в пикселях плана: вплотную поставленные
+// строки читаются как одна.
+const LABEL_PAD = 2;
+
+// Кегль и отступ в пикселях плана. Те же нижние границы, что у экранных
+// `labelFontSize` и `markRadius` при единичном масштабе.
+function labelPlanSizes(state) {
+  return { font: Math.max(6, state.labelSize), gap: Math.max(2, state.markSize) * LABEL_GAP };
+}
+
+// Места вокруг метки в порядке убывания желанности: сперва четыре угла вплотную
+// (справа сверху — то самое место, где подпись стояла всегда), потом те же
+// четыре ряд за рядом дальше по вертикали. `dx` — смещение левого края подписи,
+// `dy` — её середины: слева подпись отодвигается на всю свою ширину.
+function labelSlots(gap, width, height) {
+  // Шаг ряда — высота подписи и два просвета: соседние ряды обязаны разойтись
+  // с запасом, иначе проверка наложения упирается в ноль и решает исход по
+  // погрешности последнего разряда.
+  const step = height + LABEL_PAD * 2;
+  const slots = [];
+  for (let row = 0; row <= LABEL_ROWS; row += 1) {
+    const up = -gap - row * step;
+    const down = gap + row * step;
+    slots.push({ dx: gap, dy: up, row });
+    slots.push({ dx: gap, dy: down, row });
+    slots.push({ dx: -gap - width, dy: up, row });
+    slots.push({ dx: -gap - width, dy: down, row });
+  }
+  return slots;
+}
+
+// Подпись в пикселях плана: `x`, `y` — точка привязки (сама метка), размеры —
+// оценка по числу знаков, та же, что у экранного `labelBox`.
+function labelPlanBox(project, scheme, target, sizes) {
+  const origin = labelOrigin(project, target);
+  const text = labelTextOf(project, target);
+  return {
+    text,
+    x: origin.x * schemeWidth(scheme),
+    y: origin.y * schemeHeight(scheme),
+    width: Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
+    height: sizes.font * 1.2,
+  };
+}
+
+function labelRect(box, offset) {
+  return { x: box.x + offset.dx, y: box.y + offset.dy, width: box.width, height: box.height };
+}
+
+// Площадь наложения двух подписей с учётом обязательного просвета. Ноль — место
+// свободно; иначе число тем больше, чем хуже: по нему выбирается наименее
+// плохое место, когда свободных не осталось.
+function labelOverlap(a, b) {
+  const wide = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + LABEL_PAD;
+  const tall =
+    Math.min(a.y + a.height / 2, b.y + b.height / 2) - Math.max(a.y - a.height / 2, b.y - b.height / 2) + LABEL_PAD;
+  return wide > 0 && tall > 0 ? wide * tall : 0;
+}
+
+// Подпись целиком на плане. Выгрузка «весь план» рисует ровно прямоугольник
+// плана — всё, что за его краем, на картинке просто отрезано.
+function labelInsidePlan(rect, width, height) {
+  return (
+    rect.x >= 0 && rect.x + rect.width <= width && rect.y - rect.height / 2 >= 0 && rect.y + rect.height / 2 <= height
+  );
+}
+
+// Фильтр меняет состав подписей, а значит и раскладку: ключ кэша обязан его
+// учитывать.
+function labelFilterKey(filter) {
+  if (!filter) return "-";
+  return [
+    Array.isArray(filter.categoryIds) ? filter.categoryIds.join(",") : "*",
+    Array.isArray(filter.typeIds) ? filter.typeIds.join(",") : "*",
+    filter.roomId || "",
+    (filter.query || "").trim().toLowerCase(),
+  ].join("|");
+}
+
+function labelPlaceAll(project, scheme, filter, sizes) {
+  const planWidth = schemeWidth(scheme);
+  const planHeight = schemeHeight(scheme);
+  const layout = new Map();
+  const entries = labelTargets(project, scheme, filter)
+    .map((target) => ({
+      key: labelKeyOf(target),
+      box: labelPlanBox(project, scheme, target, sizes),
+      offset: labelOffsetOf(project, target),
+    }))
+    .filter((entry) => entry.box.text);
+  entries.sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+
+  // Оттащенные руками подписи в раскладку не попадают, но остаются на плане:
+  // их места заняты, и остальные их обходят.
+  const placed = entries.filter((entry) => entry.offset).map((entry) => labelRect(entry.box, entry.offset));
+
+  for (const entry of entries) {
+    if (entry.offset) continue;
+    const slots = labelSlots(sizes.gap, entry.box.width, entry.box.height);
+    let best = null;
+    for (const slot of slots) {
+      const rect = labelRect(entry.box, slot);
+      const inside = labelInsidePlan(rect, planWidth, planHeight);
+      let overlap = 0;
+      for (const other of placed) overlap += labelOverlap(rect, other);
+      if (overlap === 0 && inside) {
+        best = { slot, rect, overlap, inside };
+        break;
+      }
+      // Свободного и целиком помещающегося места пока нет — запоминаем лучшее
+      // из виденных: сперва по наложению, при равном наложении — то, что не
+      // свешивается с плана.
+      if (!best || overlap < best.overlap || (overlap === best.overlap && inside && !best.inside)) {
+        best = { slot, rect, overlap, inside };
+      }
+    }
+    placed.push(best.rect);
+    layout.set(entry.key, { dx: best.slot.dx, dy: best.slot.dy, row: best.slot.row, crowded: best.overlap > 0 });
+  }
+  return layout;
+}
+
+// Кэш раскладки: объект после любой правки — новый (все функции модели чистые),
+// поэтому WeakMap по объекту сам забывает устаревшее. Внутри — по схеме,
+// размерам и фильтру: раскладка считается один раз, а зовут её и кадр холста,
+// и попадание по клику на каждое движение мыши.
+const labelLayoutCache = new WeakMap();
+
+// Раскладка подписей схемы: ключ цели → смещение в пикселях плана.
+// Оттащенных руками подписей в ней нет — у них своё смещение, и оно главнее.
+function labelLayout(project, scheme, filter, view) {
+  if (!project || !scheme) return new Map();
+  const state = renderView(view);
+  const sizes = labelPlanSizes(state);
+  const key = [scheme.id, sizes.font, sizes.gap, labelFilterKey(filter)].join("|");
+  let byKey = labelLayoutCache.get(project);
+  if (!byKey) {
+    byKey = new Map();
+    labelLayoutCache.set(project, byKey);
+  }
+  let value = byKey.get(key);
+  if (!value) {
+    value = labelPlaceAll(project, scheme, filter, sizes);
+    byKey.set(key, value);
+  }
+  return value;
 }
 
 // ——— контуры помещений ————————————————————————————————————————————————
@@ -4937,9 +5470,10 @@ function hitTest(project, scheme, point, view, filter) {
   const slack = radius + HIT_SLACK_PX;
 
   const targets = labelTargets(project, scheme, filter);
+  const layout = labelLayout(project, scheme, filter, state);
   for (let index = targets.length - 1; index >= 0; index -= 1) {
     const target = targets[index];
-    const box = labelBox(project, scheme, target, state);
+    const box = labelBox(project, scheme, target, state, layout);
     if (box.text && insideBox(point, box)) {
       // Подпись блока выбирает первую из тех меток, что в ней перечислены:
       // под фильтром скрытая метка в подписи не стоит и выбираться не должна.
@@ -5002,6 +5536,22 @@ function hitHandle(scheme, mark, point, view) {
 }
 
 // ——— рисование ———————————————————————————————————————————————————————
+
+// Поводок к отведённой подписи: тонкая линия от метки к ближнему краю текста.
+// Рисуется только тем, кого раскладка увела на ряд и дальше, — у подписи
+// вплотную к метке и так видно, чья она.
+function drawLabelLeader(ctx, anchor, box, color) {
+  if (!box.text) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = Math.max(1, box.font * 0.08);
+  ctx.beginPath();
+  ctx.moveTo(anchor.x, anchor.y);
+  ctx.lineTo(box.x < anchor.x ? box.x + box.width : box.x, box.y);
+  ctx.stroke();
+  ctx.restore();
+}
 
 function drawLabel(ctx, box, color) {
   if (!box.text) return;
@@ -5190,10 +5740,19 @@ function drawScheme(ctx, {
   for (const mark of visibleMarks(project, scheme, filter)) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
   }
-  for (const target of labelTargets(project, scheme, filter)) {
-    const lead = labelLead(project, target);
-    drawLabel(ctx, labelBox(project, scheme, target, state), styleOf(project, lead && lead.typeId).color);
+  // Подписи — после меток и в два прохода: сперва поводки у тех, кого развели
+  // от соседа, потом сам текст. Иначе поводок ляжет поверх уже нарисованной
+  // подписи и перечеркнёт её.
+  const layout = labelLayout(project, scheme, filter, state);
+  const labels = labelTargets(project, scheme, filter).map((target) => ({
+    box: labelBox(project, scheme, target, state, layout),
+    anchor: planToScreen(labelOrigin(project, target), scheme, state),
+    color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
+  }));
+  for (const item of labels) {
+    if (item.box.row > 0) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
+  for (const item of labels) drawLabel(ctx, item.box, item.color);
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da");
   if (legend) drawLegend(ctx, { project, scheme, filter, view: state, box: legend === true ? null : legend });
 }
@@ -5526,6 +6085,13 @@ function canvasState() {
 function canvasViewOf(state) {
   const sizes = state.project && state.project.view ? state.project.view : {};
   return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize };
+}
+
+// Раскладка подписей — от фильтра: скрытые метки в разведении не участвуют.
+// Считается один раз на объект и схему, дальше берётся из кэша `render.js`.
+function canvasLabelLayout(project, scheme, view) {
+  const state = canvasState();
+  return labelLayout(project, scheme, state ? state.filter : null, view);
 }
 
 function canvasScheme(state) {
@@ -6142,9 +6708,12 @@ function canvasDragTo(point) {
       }).project;
     } else if (canvasDrag.kind === "label") {
       const target = canvasDrag.groupId ? findGroup(before, canvasDrag.groupId) : findMark(before, canvasDrag.markId);
-      const current = target ? labelOffsetOf(before, target) : null;
+      // База — там, где подпись сейчас видна, а не там, где лежит её смещение:
+      // подпись, отведённую раскладкой от соседа, нельзя дёргать обратно
+      // в стандартное место в тот миг, когда за неё взялись мышью.
       const size = view.markSize || 10;
-      const base = current || { dx: size * 1.5, dy: -size * 1.5 };
+      const seen = target ? labelBox(before, scheme, target, view, canvasLabelLayout(before, scheme, view)) : null;
+      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: -size * 1.5 };
       const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
       // Подпись блока стоит по смещению его первой метки — своего поля у группы
       // модель не заводит, а собственной подписи у этой метки нет.
@@ -6614,8 +7183,10 @@ function tableGroupOf(project, entry, groupBy) {
   }
   if (groupBy === "room") {
     const room = entry.head.roomId ? findRoom(project, entry.head.roomId) : null;
+    // Цвет помещения — тот же, которым обведён его контур на плане: лист
+    // и схема должны узнаваться одним цветом.
     return room
-      ? { key: room.id, title: room.name, color: null }
+      ? { key: room.id, title: room.name, color: room.color || null }
       : { key: "none", title: strings.tables.noRoom, color: null };
   }
   const category = type ? findCategory(project, type.categoryId) : null;
@@ -7589,6 +8160,344 @@ async function renderPlanImage(blob, transform) {
   }
 }
 
+// src/panels/colorPicker.js
+// Своё окно выбора цвета: слева палитра объекта, справа — поле оттенка
+// и точная правка по числам.
+//
+// Системное `<input type="color">` здесь не годится по двум причинам.
+// Во-первых, оно ничего не знает о палитре объекта и о том, какие цвета уже
+// заняты соседними комнатами, — а повтор цвета на плане и есть главная беда.
+// Во-вторых, оно выглядит по-разному в каждой системе и в каждом браузере,
+// а в части из них его вовсе не открыть с клавиатуры. Поэтому поле
+// «насыщенность/яркость» и полоса оттенка рисуются холстом, а любое движение
+// мыши здесь повторяется стрелками и полями R, G, B.
+
+
+
+const COLOR_FIELD_SIZE = { width: 232, height: 168 };
+const COLOR_HUE_HEIGHT = 18;
+// Шаг стрелок: мелкий для точной подгонки, крупный с Shift.
+const COLOR_STEP = { fine: 0.02, coarse: 0.1, hue: 2, hueCoarse: 12 };
+const COLOR_FALLBACK = "#8B949E";
+
+function colorClamp(value) {
+  return Math.min(1, Math.max(0, value));
+}
+
+function colorHexOf(hsv) {
+  return rgbToHex(hsvToRgb(hsv));
+}
+
+// Поле насыщенности и яркости: заливка чистым оттенком, поверх — белый
+// градиент слева направо и чёрный сверху вниз. Кружок-курсор рисуется тем же
+// холстом: отдельный слой поверх canvas пришлось бы двигать вручную.
+function colorDrawField(canvas, hsv) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const { width, height } = canvas;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = colorHexOf({ h: hsv.h, s: 1, v: 1 });
+  ctx.fillRect(0, 0, width, height);
+  const white = ctx.createLinearGradient(0, 0, width, 0);
+  white.addColorStop(0, "rgba(255, 255, 255, 1)");
+  white.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = white;
+  ctx.fillRect(0, 0, width, height);
+  const black = ctx.createLinearGradient(0, 0, 0, height);
+  black.addColorStop(0, "rgba(0, 0, 0, 0)");
+  black.addColorStop(1, "rgba(0, 0, 0, 1)");
+  ctx.fillStyle = black;
+  ctx.fillRect(0, 0, width, height);
+
+  const x = colorClamp(hsv.s) * width;
+  const y = (1 - colorClamp(hsv.v)) * height;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+  ctx.beginPath();
+  ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "#FFFFFF";
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function colorDrawHue(canvas, hsv) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const { width, height } = canvas;
+  const rainbow = ctx.createLinearGradient(0, 0, width, 0);
+  for (let stop = 0; stop <= 6; stop += 1) {
+    rainbow.addColorStop(stop / 6, colorHexOf({ h: stop * 60, s: 1, v: 1 }));
+  }
+  ctx.fillStyle = rainbow;
+  ctx.fillRect(0, 0, width, height);
+
+  const x = (((hsv.h % 360) + 360) % 360) / 360 * width;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+  ctx.strokeRect(x - 3, 1, 6, height - 2);
+  ctx.strokeStyle = "#FFFFFF";
+  ctx.strokeRect(x - 2, 2, 4, height - 4);
+}
+
+// Мышь, палец и перо — один и тот же обработчик: холст забирает указатель
+// себе, поэтому линия ведётся даже когда курсор ушёл за край поля.
+function colorDrag(canvas, onPoint) {
+  const at = (event) => {
+    const box = canvas.getBoundingClientRect();
+    onPoint(colorClamp((event.clientX - box.left) / box.width), colorClamp((event.clientY - box.top) / box.height));
+  };
+  canvas.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    canvas.focus();
+    at(event);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (canvas.hasPointerCapture(event.pointerId)) at(event);
+  });
+  const release = (event) => {
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+}
+
+function colorTakenList(used) {
+  return (Array.isArray(used) ? used : []).filter((value) => hexToRgb(value)).map((value) => String(value).trim());
+}
+
+// Занят ли цвет: не побайтно, а на глаз — иначе «почти тот же» цвет соседней
+// комнаты выглядел бы свободным.
+function colorIsTaken(color, taken) {
+  return taken.some((other) => colorDistance(color, other) < COLOR_SAME_DISTANCE);
+}
+
+// Enter внутри диалога нажимает его основное действие («ОК»), и делает это
+// раньше, чем браузер успевает превратить Enter в клик по кнопке под фокусом.
+// Поэтому кнопки самого окна обрабатывают Enter сами: выбор цвета с клавиатуры
+// не должен заодно закрывать окно, отдав прежний цвет.
+function colorEnter(node, run) {
+  node.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    run();
+  });
+  return node;
+}
+function openColorPicker(options = {}) {
+  return new Promise((resolve) => {
+    const before = hexToRgb(options.color) ? String(options.color).trim().toUpperCase() : COLOR_FALLBACK;
+    const taken = colorTakenList(options.used).filter(
+      (value) => String(value).toUpperCase() !== before,
+    );
+    let hsv = rgbToHsv(hexToRgb(before));
+    let modal;
+
+    const field = uiEl("canvas", {
+      class: "colorpick__field",
+      title: strings.colorPicker.field,
+      attrs: {
+        width: String(COLOR_FIELD_SIZE.width),
+        height: String(COLOR_FIELD_SIZE.height),
+        tabindex: "0",
+        role: "application",
+        "aria-label": strings.colorPicker.field,
+      },
+    });
+    const hue = uiEl("canvas", {
+      class: "colorpick__hue",
+      title: strings.colorPicker.hue,
+      attrs: {
+        width: String(COLOR_FIELD_SIZE.width),
+        height: String(COLOR_HUE_HEIGHT),
+        tabindex: "0",
+        role: "application",
+        "aria-label": strings.colorPicker.hue,
+      },
+    });
+    const chip = uiEl("span", { class: "colorpick__chip" });
+    const chipBefore = uiEl("span", {
+      class: "colorpick__chip colorpick__chip--before",
+      title: strings.colorPicker.before,
+      attrs: { style: "background:" + before },
+    });
+    const value = uiEl("span", { class: "colorpick__value" });
+    const swatches = uiEl("div", {
+      class: "colorpick__palette",
+      attrs: { role: "group", "aria-label": strings.colorPicker.palette },
+    });
+    const numbers = {};
+
+    function numberField(key, label) {
+      const input = uiEl("input", {
+        class: "ui-input colorpick__number",
+        type: "number",
+        attrs: { min: "0", max: "255", step: "1", "aria-label": label },
+        on: {
+          input: () => {
+            const rgb = {
+              r: Number(numbers.r.value),
+              g: Number(numbers.g.value),
+              b: Number(numbers.b.value),
+            };
+            setColor(rgbToHex(rgb), input);
+          },
+          blur: () => sync(),
+        },
+      });
+      numbers[key] = input;
+      return uiEl("label", { class: "colorpick__number-box" }, [
+        uiEl("span", { class: "colorpick__number-label", text: label }),
+        input,
+      ]);
+    }
+
+    // Единственное место, где перерисовывается всё сразу: поле, полоса,
+    // превью, числа и отметка в палитре. Поле, в котором сейчас печатают,
+    // не трогаем — иначе «12» на пути к «120» прыгало бы обратно.
+    function sync(skip) {
+      const color = colorHexOf(hsv);
+      const rgb = hsvToRgb(hsv);
+      colorDrawField(field, hsv);
+      colorDrawHue(hue, hsv);
+      chip.setAttribute("style", "background:" + color);
+      chip.title = color;
+      value.textContent = color;
+      for (const [key, input] of Object.entries(numbers)) {
+        if (input === skip) continue;
+        input.value = String(rgb[key]);
+      }
+      for (const button of swatches.children) {
+        const same = colorDistance(button.dataset.color, color) < 1;
+        button.classList.toggle("is-active", same);
+        button.setAttribute("aria-pressed", same ? "true" : "false");
+      }
+    }
+
+    function setHsv(next, skip) {
+      hsv = { h: (((next.h % 360) + 360) % 360), s: colorClamp(next.s), v: colorClamp(next.v) };
+      sync(skip);
+    }
+
+    function setColor(color, skip) {
+      const rgb = hexToRgb(color);
+      if (!rgb) return;
+      const next = rgbToHsv(rgb);
+      // Серый и чёрный не хранят оттенка — иначе ползунок прыгал бы к красному.
+      setHsv({ h: next.s === 0 ? hsv.h : next.h, s: next.s, v: next.v }, skip);
+    }
+
+    for (const color of ROOM_PALETTE) {
+      const busy = colorIsTaken(color, taken);
+      const button = uiEl("button", {
+        class: "colorpick__swatch" + (busy ? " is-used" : ""),
+        type: "button",
+        title: busy ? color + " — " + strings.colorPicker.used : color,
+        attrs: { style: "background:" + color, "aria-label": color, "aria-pressed": "false" },
+        on: { click: () => setColor(color) },
+      });
+      button.dataset.color = color;
+      colorEnter(button, () => setColor(color));
+      swatches.append(button);
+    }
+
+    colorDrag(field, (x, y) => setHsv({ h: hsv.h, s: x, v: 1 - y }));
+    colorDrag(hue, (x) => setHsv({ h: x * 360, s: hsv.s, v: hsv.v }));
+
+    field.addEventListener("keydown", (event) => {
+      const step = event.shiftKey ? COLOR_STEP.coarse : COLOR_STEP.fine;
+      const moves = {
+        ArrowLeft: { s: -step, v: 0 },
+        ArrowRight: { s: step, v: 0 },
+        ArrowUp: { s: 0, v: step },
+        ArrowDown: { s: 0, v: -step },
+      };
+      const move = moves[event.key];
+      if (!move) return;
+      event.preventDefault();
+      setHsv({ h: hsv.h, s: hsv.s + move.s, v: hsv.v + move.v });
+    });
+
+    hue.addEventListener("keydown", (event) => {
+      const step = event.shiftKey ? COLOR_STEP.hueCoarse : COLOR_STEP.hue;
+      const moves = { ArrowLeft: -step, ArrowDown: -step, ArrowRight: step, ArrowUp: step };
+      const move = moves[event.key];
+      if (move == null) return;
+      event.preventDefault();
+      setHsv({ h: hsv.h + move, s: hsv.s, v: hsv.v });
+    });
+
+    const roll = () => setColor(randomColor([...taken, colorHexOf(hsv)]));
+    const shuffle = colorEnter(
+      uiButton(strings.colorPicker.random, { class: "ui-btn colorpick__random", on: { click: roll } }),
+      roll,
+    );
+
+    const body = uiEl("div", { class: "colorpick" }, [
+      uiEl("div", { class: "colorpick__side" }, [
+        uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.palette }),
+        swatches,
+      ]),
+      uiEl("div", { class: "colorpick__side colorpick__side--custom" }, [
+        uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.custom }),
+        field,
+        hue,
+        uiEl("div", { class: "colorpick__bottom" }, [
+          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, value]),
+          uiEl("div", { class: "colorpick__numbers" }, [
+            numberField("r", strings.colorPicker.red),
+            numberField("g", strings.colorPicker.green),
+            numberField("b", strings.colorPicker.blue),
+          ]),
+        ]),
+        shuffle,
+      ]),
+    ]);
+
+    const done = (result) => {
+      modal.close();
+      resolve(result);
+    };
+    modal = uiModal({
+      title: options.title || strings.colorPicker.title,
+      body,
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(strings.colorPicker.apply, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: () => done(colorHexOf(hsv)) },
+        }),
+      ],
+      dismissable: true,
+      onCancel: () => resolve(null),
+    });
+    sync();
+    field.focus();
+  });
+}
+
+// Кнопка цвета в строке справочника или помещения: показывает текущий цвет
+// и открывает окно выбора. Никаких `<input type="color">` в сборке больше нет.
+function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
+  const button = uiEl("button", {
+    class: "colorpick__button",
+    type: "button",
+    title: title || strings.colorPicker.title,
+    attrs: { style: "background:" + (value || COLOR_FALLBACK), "aria-label": title || strings.colorPicker.title },
+    on: {
+      click: async () => {
+        const picked = await openColorPicker({ color: value, used, title: dialogTitle || title });
+        if (!picked) return;
+        button.setAttribute("style", "background:" + picked);
+        onPick(picked);
+      },
+    },
+  });
+  return button;
+}
+
 // src/panels/export.js
 // Панель выгрузки: две кнопки в шапке и два диалога — таблица и схема.
 //
@@ -8027,6 +8936,7 @@ registerPanel(PANEL_IDS.headerActions, mountExportPanel);
 
 
 
+
 // Кружок цвета помещения: тем же цветом обводится его контур на схеме.
 function roomSwatch(color, size = 14) {
   return uiEl("span", {
@@ -8035,17 +8945,16 @@ function roomSwatch(color, size = 14) {
   });
 }
 
-// Поле цвета помещения: палитра модели плюс произвольный цвет — контуров на
-// плане бывает десяток, и повтор цвета пользователь правит сам.
-function roomColorField(value, onChange) {
-  const input = uiEl("input", {
-    class: "rooms__color",
-    type: "color",
-    value: value || ROOM_PALETTE[0],
+// Кнопка цвета помещения: открывает своё окно выбора. Цвета соседних комнат
+// уходят в него занятыми — контуров на плане бывает десяток, и повтор цвета
+// виден сразу, ещё до выбора.
+function roomColorField(project, room, onChange) {
+  return colorPickerButton({
+    value: room.color,
+    used: project.rooms.filter((item) => item.id !== room.id).map((item) => item.color),
     title: strings.rooms.color,
-    on: { change: (event) => onChange(event.target.value) },
+    onPick: onChange,
   });
-  return input;
 }
 
 function roomsKey(name) {
@@ -8164,7 +9073,7 @@ function openRoomsEditor(api) {
             value: room.name,
             on: { change: (event) => rename(room.id, event.target.value) },
           }),
-          roomColorField(room.color, (color) => recolor(room.id, color)),
+          roomColorField(project(), room, (color) => recolor(room.id, color)),
           uiEl("span", {
             class: "rooms__count",
             text: text("rooms.marks", { count: roomsUsage(project(), room.id) }),
@@ -8638,18 +9547,17 @@ function openTypesDictionary(api) {
     });
     removeButton.disabled = types > 0;
     return uiEl("div", { class: "dict__row" }, [
-      uiEl("input", {
-        class: "dict__color",
-        type: "color",
+      colorPickerButton({
         value: category.color,
+        used: project()
+          .categories.filter((item) => item.id !== category.id)
+          .map((item) => item.color),
         title: strings.dictionary.color,
-        on: {
-          change: (event) =>
-            commit(
-              (current) => updateCategory(current, category.id, { color: event.target.value }).project,
-              strings.history.editCategory,
-            ),
-        },
+        onPick: (color) =>
+          commit(
+            (current) => updateCategory(current, category.id, { color }).project,
+            strings.history.editCategory,
+          ),
       }),
       uiEl("input", {
         class: "ui-input",
@@ -8709,24 +9617,36 @@ function openTypesDictionary(api) {
       type: "text",
       placeholder: strings.dictionary.categoryNamePlaceholder,
     });
-    const color = uiEl("input", { class: "dict__color", type: "color", value: "#57606A" });
+    // Цвет новой категории — незанятый цвет палитры: метки новой категории
+    // должны быть видны отдельно от соседних, а не повторять их цвет.
+    const busy = project().categories.map((item) => item.color);
+    let color = freeColor(busy);
     let shape = SHAPE_PALETTE[0];
+    const colorButton = colorPickerButton({
+      value: color,
+      used: busy,
+      title: strings.dictionary.color,
+      onPick: (picked) => {
+        color = picked;
+        shapeButton.replaceChildren(shapeIcon(shape, color, 26));
+      },
+    });
     const shapeButton = typesShapeButton({
       shape,
-      color: color.value,
+      color,
       allowInherit: false,
       onPick: (picked) => {
         shape = picked || SHAPE_PALETTE[0];
-        shapeButton.replaceChildren(shapeIcon(shape, color.value, 26));
+        shapeButton.replaceChildren(shapeIcon(shape, color, 26));
       },
     });
     const add = () =>
       commit(
-        (current) => addCategory(current, { name: name.value, color: color.value, shape }).project,
+        (current) => addCategory(current, { name: name.value, color, shape }).project,
         strings.history.addCategory,
       );
     return uiEl("div", { class: "dict__row dict__row--add" }, [
-      color,
+      colorButton,
       name,
       shapeButton,
       uiButton(strings.dictionary.addCategory, { class: "ui-btn ui-btn--accent", on: { click: add } }),

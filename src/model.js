@@ -62,24 +62,208 @@ const BLOCK_FALLBACK_SIZE_PX = 1000;
 const FALLBACK_COLOR = "#8B949E";
 export const BLOCK_SIDES = ["left", "right", "up", "down"];
 
-// Цвета помещений: контур обводится цветом комнаты, и на одном плане их видно
-// сразу десяток — поэтому палитра разведена по тону, а не по яркости, и
-// не повторяет цвета категорий меток (метка на контуре не должна теряться).
-// Цвет назначается при создании комнаты и правится вручную.
+// Цвета помещений и категорий: цветом комнаты обводится её контур на плане,
+// цветом категории красятся метки и заголовки групп в таблицах. На одном
+// плане контуров бывает под десяток, поэтому палитра подобрана числами,
+// а не на глаз:
+//   — любые два цвета расходятся не меньше чем на 22 ΔE (CIE76) — тонкую
+//     линию одного не спутать с линией другого;
+//   — контраст к белому не ниже 2,9 (цвет не теряется на белом плане)
+//     и к чёрному не ниже 2,4 (не сливается с карандашными стенами);
+//   — насыщенность ограничена сверху: кислотный цвет поверх плана режет глаз;
+//   — цвета разведены и с цветами категорий шаблона, чтобы метка не терялась
+//     на контуре своей же комнаты.
+// Порядок не случайный: каждый следующий цвет максимально далёк от всех
+// предыдущих, поэтому первые шесть комнат получают самые несхожие контуры,
+// а запаса хватает на квартиру целиком.
 export const ROOM_PALETTE = [
   "#0F766E",
   "#B45309",
   "#7E22CE",
-  "#0369A1",
   "#BE123C",
-  "#4D7C0F",
-  "#A16207",
-  "#1D4ED8",
-  "#9D174D",
   "#15803D",
-  "#C2410C",
-  "#4338CA",
+  "#2A78D1",
+  "#D169B9",
+  "#9C931A",
+  "#664733",
+  "#1DAB1D",
+  "#374F6E",
+  "#852E51",
+  "#633894",
+  "#289EC9",
+  "#D17669",
+  "#D124C0",
+  "#5B6624",
+  "#B38F59",
+  "#D1247A",
+  "#244CD1",
+  "#8C2F20",
+  "#689C2D",
+  "#8C1875",
+  "#A856D1",
 ];
+
+// ——— арифметика цвета ——————————————————————————————————————————————————
+//
+// Переводы нужны окну выбора цвета: поле «насыщенность/яркость» живёт в HSV,
+// поля R, G, B — в байтах, а хранится и рисуется всё в hex. Отдельно —
+// расстояние между цветами: сравнивать сырые байты бесполезно, два далёких
+// по числам цвета глаз читает как один. Поэтому цвета переводятся в CIE Lab
+// (sRGB, D65) и меряются по ΔE76: ΔE ≈ 2 — предел различимости рядом,
+// ΔE > 20 — «явно разные цвета».
+
+export function hexToRgb(value) {
+  const hex = String(value == null ? "" : value).trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  return {
+    r: parseInt(hex.slice(1, 3), 16),
+    g: parseInt(hex.slice(3, 5), 16),
+    b: parseInt(hex.slice(5, 7), 16),
+  };
+}
+
+function colorByte(value) {
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(255, Math.max(0, number));
+}
+
+export function rgbToHex(rgb) {
+  const parts = [colorByte(rgb && rgb.r), colorByte(rgb && rgb.g), colorByte(rgb && rgb.b)];
+  return "#" + parts.map((part) => part.toString(16).padStart(2, "0").toUpperCase()).join("");
+}
+
+// Оттенок — градусы 0…360 (360 сворачивается в 0), насыщенность и яркость — доли.
+export function rgbToHsv(rgb) {
+  const r = colorByte(rgb && rgb.r) / 255;
+  const g = colorByte(rgb && rgb.g) / 255;
+  const b = colorByte(rgb && rgb.b) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const span = max - min;
+  let h = 0;
+  if (span > 0) {
+    if (max === r) h = 60 * (((g - b) / span) % 6);
+    else if (max === g) h = 60 * ((b - r) / span + 2);
+    else h = 60 * ((r - g) / span + 4);
+  }
+  if (h < 0) h += 360;
+  return { h, s: max === 0 ? 0 : span / max, v: max };
+}
+
+export function hsvToRgb(hsv) {
+  const h = ((Number(hsv && hsv.h) || 0) % 360 + 360) % 360;
+  const s = Math.min(1, Math.max(0, Number(hsv && hsv.s) || 0));
+  const v = Math.min(1, Math.max(0, Number(hsv && hsv.v) || 0));
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  const sector = Math.floor(h / 60) % 6;
+  const table = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ][sector];
+  return {
+    r: Math.round((table[0] + m) * 255),
+    g: Math.round((table[1] + m) * 255),
+    b: Math.round((table[2] + m) * 255),
+  };
+}
+
+function colorLinear(byte) {
+  const channel = byte / 255;
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+// sRGB → XYZ (D65) → Lab. Константы — из определения пространства.
+function colorToLab(rgb) {
+  const r = colorLinear(rgb.r);
+  const g = colorLinear(rgb.g);
+  const b = colorLinear(rgb.b);
+  const x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047;
+  const y = r * 0.2126729 + g * 0.7151522 + b * 0.072175;
+  const z = (r * 0.0193339 + g * 0.119192 + b * 0.9503041) / 1.08883;
+  const f = (t) => (t > 216 / 24389 ? Math.cbrt(t) : (841 / 108) * t + 4 / 29);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+
+// Неизвестный цвет ничего не ограничивает: расстояние до него бесконечно,
+// и проверка «занят ли цвет» такой цвет просто не замечает.
+export function colorDistance(first, second) {
+  const a = hexToRgb(first);
+  const b = hexToRgb(second);
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  const left = colorToLab(a);
+  const right = colorToLab(b);
+  return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2]);
+}
+
+// Ближе этого расстояния два цвета читаются как один и тот же: цвет палитры,
+// рядом с которым уже стоит чужой, свободным не считается.
+export const COLOR_SAME_DISTANCE = 10;
+
+// Свободный цвет: первый в палитре, рядом с которым ещё ничего не покрашено.
+// Палитра кончилась — берём тот, что стоит дальше всех от занятых, а при
+// равенстве самый редкий: слепой круг «следующий по счёту» повторял бы цвет
+// соседней комнаты, даже когда в палитре есть менее ходовой.
+export function freeColor(used, options = {}) {
+  const palette = Array.isArray(options.palette) && options.palette.length > 0 ? options.palette : ROOM_PALETTE;
+  const limit = Number.isFinite(options.minDistance) ? options.minDistance : COLOR_SAME_DISTANCE;
+  const taken = (Array.isArray(used) ? used : [])
+    .map((value) => (hexToRgb(value) ? String(value).trim().toUpperCase() : null))
+    .filter(Boolean);
+  let best = null;
+  for (const color of palette) {
+    const key = String(color).trim().toUpperCase();
+    let nearest = Number.POSITIVE_INFINITY;
+    let count = 0;
+    for (const other of taken) {
+      const distance = colorDistance(color, other);
+      if (distance < nearest) nearest = distance;
+      if (other === key) count += 1;
+    }
+    if (nearest >= limit) return color;
+    if (!best || nearest > best.nearest || (nearest === best.nearest && count < best.count)) {
+      best = { color, nearest, count };
+    }
+  }
+  return best ? best.color : palette[0];
+}
+
+// Цвет, который глаз читает как «другой»: ΔE ниже — уже оттенок того же.
+export const COLOR_FAR_DISTANCE = 22;
+// Границы яркости, в которых цвет виден и на белом плане, и на карандашных
+// стенах (те же, по которым подобрана палитра).
+const COLOR_MIN_LUMINANCE = 0.075;
+const COLOR_MAX_LUMINANCE = 0.3;
+const COLOR_RANDOM_TRIES = 60;
+
+function colorLuminance(rgb) {
+  return 0.2126 * colorLinear(rgb.r) + 0.7152 * colorLinear(rgb.g) + 0.0722 * colorLinear(rgb.b);
+}
+
+// Случайный цвет для кнопки «Случайный цвет»: наугад берётся оттенок, но
+// годится не любой — слишком светлый потеряется на плане, слишком тёмный
+// сольётся со стенами, а похожий на занятый не отличить от соседней комнаты.
+// Не нашлось за отведённые попытки — отдаём свободный цвет палитры: лучше
+// предсказуемый цвет, чем похожий на чужой.
+export function randomColor(used, options = {}) {
+  const random = typeof options.random === "function" ? options.random : Math.random;
+  const goal = Number.isFinite(options.minDistance) ? options.minDistance : COLOR_FAR_DISTANCE;
+  const taken = (Array.isArray(used) ? used : []).filter((value) => hexToRgb(value));
+  for (let attempt = 0; attempt < COLOR_RANDOM_TRIES; attempt += 1) {
+    const rgb = hsvToRgb({ h: random() * 360, s: 0.5 + random() * 0.35, v: 0.42 + random() * 0.42 });
+    const light = colorLuminance(rgb);
+    if (light < COLOR_MIN_LUMINANCE || light > COLOR_MAX_LUMINANCE) continue;
+    const color = rgbToHex(rgb);
+    if (taken.every((other) => colorDistance(color, other) >= goal)) return color;
+  }
+  return freeColor(taken, { ...options, minDistance: goal });
+}
 
 // Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
 export const OUTLINE_MIN_POINTS = 3;
@@ -852,14 +1036,10 @@ export function deleteCategory(project, categoryId) {
   return { project: withProject(project, { categories }), deleted: current };
 }
 
-// Цвет новой комнаты: первый из палитры, которым ещё не обведена ни одна
-// комната объекта. Кончилась палитра — идём по кругу: десяток разных контуров
-// на одном плане уже различим, а совпадение цвета через двенадцать комнат
-// пользователь поправит руками.
+// Цвет новой комнаты: незанятый цвет палитры. Перекрашенная вручную комната
+// освобождает свой цвет — он снова первый в очереди.
 function nextRoomColor(project) {
-  const used = new Set(project.rooms.map((room) => room.color).filter(Boolean));
-  const free = ROOM_PALETTE.find((color) => !used.has(color));
-  return free || ROOM_PALETTE[project.rooms.length % ROOM_PALETTE.length];
+  return freeColor(project.rooms.map((room) => room.color));
 }
 
 function normalizeColor(value, fallback) {

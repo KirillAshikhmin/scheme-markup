@@ -138,8 +138,10 @@ function tableGroupOf(project, entry, groupBy) {
   }
   if (groupBy === "room") {
     const room = entry.head.roomId ? findRoom(project, entry.head.roomId) : null;
+    // Цвет помещения — тот же, которым обведён его контур на плане: лист
+    // и схема должны узнаваться одним цветом.
     return room
-      ? { key: room.id, title: room.name, color: null }
+      ? { key: room.id, title: room.name, color: room.color || null }
       : { key: "none", title: strings.tables.noRoom, color: null };
   }
   const category = type ? findCategory(project, type.categoryId) : null;

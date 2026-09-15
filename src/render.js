@@ -408,28 +408,53 @@ export function labelOffsetOf(project, target) {
   return first && first.labelOffset ? first.labelOffset : null;
 }
 
-export function labelBox(project, scheme, target, view) {
+// Текст подписи: у блока — свёрнутый в диапазон список, у одиночной метки — её
+// обозначение.
+function labelTextOf(project, target) {
+  return (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
+}
+
+// Ключ цели в раскладке. Группа и метка живут в разных пространствах
+// идентификаторов, но в одной таблице — отсюда приставка.
+function labelKeyOf(target) {
+  return (target.markIds ? "g:" : "m:") + target.id;
+}
+
+export function labelBox(project, scheme, target, view, layout) {
   const state = renderView(view);
   const font = labelFontSize(state);
-  const radius = markRadius(state);
   const anchor = planToScreen(labelOrigin(project, target), scheme, state);
-  const offset = labelOffsetOf(project, target);
-  const dx = offset ? offset.dx * state.zoom : radius * LABEL_GAP;
-  const dy = offset ? offset.dy * state.zoom : -radius * LABEL_GAP;
-  const value = (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
+  const value = labelTextOf(project, target);
   const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
-  let x = anchor.x + dx;
-  // Код типа бывает длинным («ПОДСВЕТКА», шестнадцать букв), и у правого края
-  // такая подпись уходила за план — на выгрузке «весь план» её просто срезало.
-  // Подпись, которую не оттаскивали руками, переходит на левую сторону метки,
-  // если слева помещается; оттащенную не двигает никто.
-  if (!offset) {
-    const left = planToScreen({ x: 0, y: 0 }, scheme, state).x;
-    const right = planToScreen({ x: 1, y: 0 }, scheme, state).x;
-    const mirrored = anchor.x - dx - width;
-    if (x + width > right && mirrored >= left) x = mirrored;
-  }
-  return { text: value, x, y: anchor.y + dy, width, height: font * 1.2, font };
+  const place = labelPlaceOf(project, scheme, target, state, layout);
+  return {
+    text: value,
+    x: anchor.x + place.dx * state.zoom,
+    y: anchor.y + place.dy * state.zoom,
+    width,
+    height: font * 1.2,
+    font,
+    // Смещение подписи в пикселях плана — в тех же единицах, что `labelOffset`
+    // у метки. Отсюда его берёт перетаскивание: подпись, которую разводка
+    // отодвинула, не прыгает обратно, когда за неё взялись мышью.
+    dx: place.dx,
+    dy: place.dy,
+    row: place.row,
+    crowded: place.crowded,
+  };
+}
+
+// Где стоит подпись. Оттащенная руками — строго по своему смещению: его задал
+// пользователь, и трогать его нельзя. Остальные — по месту, которое нашла им
+// раскладка; без раскладки (её не передали) берётся общая, без фильтра.
+function labelPlaceOf(project, scheme, target, state, layout) {
+  const manual = labelOffsetOf(project, target);
+  if (manual) return { dx: manual.dx, dy: manual.dy, row: 0, crowded: false };
+  const map = layout || labelLayout(project, scheme, null, state);
+  const place = map.get(labelKeyOf(target));
+  if (place) return place;
+  const slot = labelSlots(labelPlanSizes(state).gap, 0, 0)[0];
+  return { dx: slot.dx, dy: slot.dy, row: 0, crowded: false };
 }
 
 // Подписи рисуются у меток без группы и по одной на группу. Цель группы несёт
@@ -458,6 +483,178 @@ function labelTargets(project, scheme, filter) {
     target.shownIds.push(mark.id);
   }
   return targets;
+}
+
+// ——— разведение подписей ——————————————————————————————————————————————
+//
+// Метка стоит там, где стоит железка на стене, и двигать её нельзя. Двигать
+// можно только подпись — а подписи соседних меток запросто перекрывают друг
+// друга: код типа бывает в шестнадцать букв, а розетки стоят в сорока
+// пикселях одна от другой. Перекрытая подпись съедает номер, а номер —
+// единственное, ради чего подпись на плане и стоит.
+//
+// Раскладка перебирает для каждой подписи короткий список мест вокруг её
+// метки и берёт первое свободное. Три свойства, ради которых всё считается
+// именно так:
+//
+// 1. Считается в пикселях плана, а не экрана. Экран и выгрузка отличаются
+//    только масштабом, и подпись уезжает на `dx × zoom` — значит распечатка
+//    повторяет то, что видел инженер, знак в знак.
+// 2. Порядок обхода — сверху вниз, слева направо, при равенстве по ключу.
+//    Одна и та же схема, открытая дважды, раскладывается одинаково.
+// 3. Жадность вместо оптимума: перебор мест у каждой подписи ограничен, чужие
+//    подписи уже расставлены и не переставляются. Полсотни меток — это полсотни
+//    коротких переборов, а не поиск идеальной раскладки.
+
+// Сколько рядов вверх и вниз пробует раскладка, прежде чем сдаться. Ряд — это
+// высота подписи: дальше подпись уже не читается как «эта, у этой метки».
+const LABEL_ROWS = 3;
+// Просвет между соседними подписями в пикселях плана: вплотную поставленные
+// строки читаются как одна.
+const LABEL_PAD = 2;
+
+// Кегль и отступ в пикселях плана. Те же нижние границы, что у экранных
+// `labelFontSize` и `markRadius` при единичном масштабе.
+function labelPlanSizes(state) {
+  return { font: Math.max(6, state.labelSize), gap: Math.max(2, state.markSize) * LABEL_GAP };
+}
+
+// Места вокруг метки в порядке убывания желанности: сперва четыре угла вплотную
+// (справа сверху — то самое место, где подпись стояла всегда), потом те же
+// четыре ряд за рядом дальше по вертикали. `dx` — смещение левого края подписи,
+// `dy` — её середины: слева подпись отодвигается на всю свою ширину.
+function labelSlots(gap, width, height) {
+  // Шаг ряда — высота подписи и два просвета: соседние ряды обязаны разойтись
+  // с запасом, иначе проверка наложения упирается в ноль и решает исход по
+  // погрешности последнего разряда.
+  const step = height + LABEL_PAD * 2;
+  const slots = [];
+  for (let row = 0; row <= LABEL_ROWS; row += 1) {
+    const up = -gap - row * step;
+    const down = gap + row * step;
+    slots.push({ dx: gap, dy: up, row });
+    slots.push({ dx: gap, dy: down, row });
+    slots.push({ dx: -gap - width, dy: up, row });
+    slots.push({ dx: -gap - width, dy: down, row });
+  }
+  return slots;
+}
+
+// Подпись в пикселях плана: `x`, `y` — точка привязки (сама метка), размеры —
+// оценка по числу знаков, та же, что у экранного `labelBox`.
+function labelPlanBox(project, scheme, target, sizes) {
+  const origin = labelOrigin(project, target);
+  const text = labelTextOf(project, target);
+  return {
+    text,
+    x: origin.x * schemeWidth(scheme),
+    y: origin.y * schemeHeight(scheme),
+    width: Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
+    height: sizes.font * 1.2,
+  };
+}
+
+function labelRect(box, offset) {
+  return { x: box.x + offset.dx, y: box.y + offset.dy, width: box.width, height: box.height };
+}
+
+// Площадь наложения двух подписей с учётом обязательного просвета. Ноль — место
+// свободно; иначе число тем больше, чем хуже: по нему выбирается наименее
+// плохое место, когда свободных не осталось.
+function labelOverlap(a, b) {
+  const wide = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + LABEL_PAD;
+  const tall =
+    Math.min(a.y + a.height / 2, b.y + b.height / 2) - Math.max(a.y - a.height / 2, b.y - b.height / 2) + LABEL_PAD;
+  return wide > 0 && tall > 0 ? wide * tall : 0;
+}
+
+// Подпись целиком на плане. Выгрузка «весь план» рисует ровно прямоугольник
+// плана — всё, что за его краем, на картинке просто отрезано.
+function labelInsidePlan(rect, width, height) {
+  return (
+    rect.x >= 0 && rect.x + rect.width <= width && rect.y - rect.height / 2 >= 0 && rect.y + rect.height / 2 <= height
+  );
+}
+
+// Фильтр меняет состав подписей, а значит и раскладку: ключ кэша обязан его
+// учитывать.
+function labelFilterKey(filter) {
+  if (!filter) return "-";
+  return [
+    Array.isArray(filter.categoryIds) ? filter.categoryIds.join(",") : "*",
+    Array.isArray(filter.typeIds) ? filter.typeIds.join(",") : "*",
+    filter.roomId || "",
+    (filter.query || "").trim().toLowerCase(),
+  ].join("|");
+}
+
+function labelPlaceAll(project, scheme, filter, sizes) {
+  const planWidth = schemeWidth(scheme);
+  const planHeight = schemeHeight(scheme);
+  const layout = new Map();
+  const entries = labelTargets(project, scheme, filter)
+    .map((target) => ({
+      key: labelKeyOf(target),
+      box: labelPlanBox(project, scheme, target, sizes),
+      offset: labelOffsetOf(project, target),
+    }))
+    .filter((entry) => entry.box.text);
+  entries.sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+
+  // Оттащенные руками подписи в раскладку не попадают, но остаются на плане:
+  // их места заняты, и остальные их обходят.
+  const placed = entries.filter((entry) => entry.offset).map((entry) => labelRect(entry.box, entry.offset));
+
+  for (const entry of entries) {
+    if (entry.offset) continue;
+    const slots = labelSlots(sizes.gap, entry.box.width, entry.box.height);
+    let best = null;
+    for (const slot of slots) {
+      const rect = labelRect(entry.box, slot);
+      const inside = labelInsidePlan(rect, planWidth, planHeight);
+      let overlap = 0;
+      for (const other of placed) overlap += labelOverlap(rect, other);
+      if (overlap === 0 && inside) {
+        best = { slot, rect, overlap, inside };
+        break;
+      }
+      // Свободного и целиком помещающегося места пока нет — запоминаем лучшее
+      // из виденных: сперва по наложению, при равном наложении — то, что не
+      // свешивается с плана.
+      if (!best || overlap < best.overlap || (overlap === best.overlap && inside && !best.inside)) {
+        best = { slot, rect, overlap, inside };
+      }
+    }
+    placed.push(best.rect);
+    layout.set(entry.key, { dx: best.slot.dx, dy: best.slot.dy, row: best.slot.row, crowded: best.overlap > 0 });
+  }
+  return layout;
+}
+
+// Кэш раскладки: объект после любой правки — новый (все функции модели чистые),
+// поэтому WeakMap по объекту сам забывает устаревшее. Внутри — по схеме,
+// размерам и фильтру: раскладка считается один раз, а зовут её и кадр холста,
+// и попадание по клику на каждое движение мыши.
+const labelLayoutCache = new WeakMap();
+
+// Раскладка подписей схемы: ключ цели → смещение в пикселях плана.
+// Оттащенных руками подписей в ней нет — у них своё смещение, и оно главнее.
+export function labelLayout(project, scheme, filter, view) {
+  if (!project || !scheme) return new Map();
+  const state = renderView(view);
+  const sizes = labelPlanSizes(state);
+  const key = [scheme.id, sizes.font, sizes.gap, labelFilterKey(filter)].join("|");
+  let byKey = labelLayoutCache.get(project);
+  if (!byKey) {
+    byKey = new Map();
+    labelLayoutCache.set(project, byKey);
+  }
+  let value = byKey.get(key);
+  if (!value) {
+    value = labelPlaceAll(project, scheme, filter, sizes);
+    byKey.set(key, value);
+  }
+  return value;
 }
 
 // ——— контуры помещений ————————————————————————————————————————————————
@@ -687,9 +884,10 @@ export function hitTest(project, scheme, point, view, filter) {
   const slack = radius + HIT_SLACK_PX;
 
   const targets = labelTargets(project, scheme, filter);
+  const layout = labelLayout(project, scheme, filter, state);
   for (let index = targets.length - 1; index >= 0; index -= 1) {
     const target = targets[index];
-    const box = labelBox(project, scheme, target, state);
+    const box = labelBox(project, scheme, target, state, layout);
     if (box.text && insideBox(point, box)) {
       // Подпись блока выбирает первую из тех меток, что в ней перечислены:
       // под фильтром скрытая метка в подписи не стоит и выбираться не должна.
@@ -753,6 +951,22 @@ export function hitHandle(scheme, mark, point, view) {
 }
 
 // ——— рисование ———————————————————————————————————————————————————————
+
+// Поводок к отведённой подписи: тонкая линия от метки к ближнему краю текста.
+// Рисуется только тем, кого раскладка увела на ряд и дальше, — у подписи
+// вплотную к метке и так видно, чья она.
+function drawLabelLeader(ctx, anchor, box, color) {
+  if (!box.text) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = Math.max(1, box.font * 0.08);
+  ctx.beginPath();
+  ctx.moveTo(anchor.x, anchor.y);
+  ctx.lineTo(box.x < anchor.x ? box.x + box.width : box.x, box.y);
+  ctx.stroke();
+  ctx.restore();
+}
 
 function drawLabel(ctx, box, color) {
   if (!box.text) return;
@@ -941,10 +1155,19 @@ export function drawScheme(ctx, {
   for (const mark of visibleMarks(project, scheme, filter)) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
   }
-  for (const target of labelTargets(project, scheme, filter)) {
-    const lead = labelLead(project, target);
-    drawLabel(ctx, labelBox(project, scheme, target, state), styleOf(project, lead && lead.typeId).color);
+  // Подписи — после меток и в два прохода: сперва поводки у тех, кого развели
+  // от соседа, потом сам текст. Иначе поводок ляжет поверх уже нарисованной
+  // подписи и перечеркнёт её.
+  const layout = labelLayout(project, scheme, filter, state);
+  const labels = labelTargets(project, scheme, filter).map((target) => ({
+    box: labelBox(project, scheme, target, state, layout),
+    anchor: planToScreen(labelOrigin(project, target), scheme, state),
+    color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
+  }));
+  for (const item of labels) {
+    if (item.box.row > 0) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
+  for (const item of labels) drawLabel(ctx, item.box, item.color);
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da");
   if (legend) drawLegend(ctx, { project, scheme, filter, view: state, box: legend === true ? null : legend });
 }

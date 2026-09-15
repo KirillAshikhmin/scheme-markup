@@ -104,6 +104,21 @@ test("разбивка переключается: по типам, по пом�
   assert.deepEqual(byRoom.groups[2].rows.map((row) => row.cells[0]), ["В1"]);
 });
 
+// Цвет помещения виден на плане контуром; на бумаге тем же цветом красится
+// заголовок его группы — лист и схема должны узнаваться одним цветом.
+test("заголовок группы по помещению взят из цвета помещения", () => {
+  const box = tablesFixture();
+  box.put("В");
+  const byRoom = marksTable(box.project, null, "room");
+  const bedroom = box.project.rooms.find((room) => room.id === box.rooms.bedroom);
+  const hall = box.project.rooms.find((room) => room.id === box.rooms.hall);
+  assert.equal(byRoom.groups[0].color, bedroom.color);
+  assert.equal(byRoom.groups[1].color, hall.color);
+  assert.notEqual(bedroom.color, hall.color);
+  // «Без помещения» красить нечем.
+  assert.equal(byRoom.groups[2].color, null);
+});
+
 test("скрытое фильтром в таблицу не попадает: категории, поиск и отдельная схема", () => {
   const box = tablesFixture();
   const sockets = box.project.categories.find((category) => category.name === "Розетки");

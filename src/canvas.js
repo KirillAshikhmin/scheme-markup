@@ -40,7 +40,8 @@ import {
   hitHandle,
   hitOutline,
   hitTest,
-  labelOffsetOf,
+  labelBox,
+  labelLayout,
   markRadius,
   planToScreen,
   screenToPlan,
@@ -76,6 +77,13 @@ function canvasState() {
 function canvasViewOf(state) {
   const sizes = state.project && state.project.view ? state.project.view : {};
   return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize };
+}
+
+// Раскладка подписей — от фильтра: скрытые метки в разведении не участвуют.
+// Считается один раз на объект и схему, дальше берётся из кэша `render.js`.
+function canvasLabelLayout(project, scheme, view) {
+  const state = canvasState();
+  return labelLayout(project, scheme, state ? state.filter : null, view);
 }
 
 function canvasScheme(state) {
@@ -699,9 +707,12 @@ function canvasDragTo(point) {
       }).project;
     } else if (canvasDrag.kind === "label") {
       const target = canvasDrag.groupId ? findGroup(before, canvasDrag.groupId) : findMark(before, canvasDrag.markId);
-      const current = target ? labelOffsetOf(before, target) : null;
+      // База — там, где подпись сейчас видна, а не там, где лежит её смещение:
+      // подпись, отведённую раскладкой от соседа, нельзя дёргать обратно
+      // в стандартное место в тот миг, когда за неё взялись мышью.
       const size = view.markSize || 10;
-      const base = current || { dx: size * 1.5, dy: -size * 1.5 };
+      const seen = target ? labelBox(before, scheme, target, view, canvasLabelLayout(before, scheme, view)) : null;
+      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: -size * 1.5 };
       const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
       // Подпись блока стоит по смещению его первой метки — своего поля у группы
       // модель не заводит, а собственной подписи у этой метки нет.

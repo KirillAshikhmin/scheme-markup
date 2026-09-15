@@ -4,9 +4,10 @@
 // Своего справочника комнат пользователь не заполняет заранее — он пишет
 // «Спальная Оли» в строке метки, и комната появляется. Поэтому главное здесь —
 // не окно, а `roomsEnsure`: одно и то же название не должно плодить двойников.
-import { ROOM_PALETTE, addRoom, deleteRoom, findRoom, roomsInOrder, updateRoom } from "../model.js";
+import { addRoom, deleteRoom, findRoom, roomsInOrder, updateRoom } from "../model.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
+import { colorPickerButton } from "./colorPicker.js";
 import { canvasCommit } from "../canvas.js";
 
 // Кружок цвета помещения: тем же цветом обводится его контур на схеме.
@@ -17,17 +18,16 @@ export function roomSwatch(color, size = 14) {
   });
 }
 
-// Поле цвета помещения: палитра модели плюс произвольный цвет — контуров на
-// плане бывает десяток, и повтор цвета пользователь правит сам.
-function roomColorField(value, onChange) {
-  const input = uiEl("input", {
-    class: "rooms__color",
-    type: "color",
-    value: value || ROOM_PALETTE[0],
+// Кнопка цвета помещения: открывает своё окно выбора. Цвета соседних комнат
+// уходят в него занятыми — контуров на плане бывает десяток, и повтор цвета
+// виден сразу, ещё до выбора.
+function roomColorField(project, room, onChange) {
+  return colorPickerButton({
+    value: room.color,
+    used: project.rooms.filter((item) => item.id !== room.id).map((item) => item.color),
     title: strings.rooms.color,
-    on: { change: (event) => onChange(event.target.value) },
+    onPick: onChange,
   });
-  return input;
 }
 
 function roomsKey(name) {
@@ -149,7 +149,7 @@ export function openRoomsEditor(api) {
             value: room.name,
             on: { change: (event) => rename(room.id, event.target.value) },
           }),
-          roomColorField(room.color, (color) => recolor(room.id, color)),
+          roomColorField(project(), room, (color) => recolor(room.id, color)),
           uiEl("span", {
             class: "rooms__count",
             text: text("rooms.marks", { count: roomsUsage(project(), room.id) }),

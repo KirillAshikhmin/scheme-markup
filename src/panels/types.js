@@ -20,6 +20,7 @@ import {
   findCategory,
   findMark,
   findType,
+  freeColor,
   styleOf,
   typesInOrder,
   updateCategory,
@@ -27,6 +28,7 @@ import {
 } from "../model.js";
 import { shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
+import { colorPickerButton } from "./colorPicker.js";
 import { getSetting, setSetting } from "../store.js";
 import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
 import { openRoomsEditor } from "./rooms.js";
@@ -384,18 +386,17 @@ export function openTypesDictionary(api) {
     });
     removeButton.disabled = types > 0;
     return uiEl("div", { class: "dict__row" }, [
-      uiEl("input", {
-        class: "dict__color",
-        type: "color",
+      colorPickerButton({
         value: category.color,
+        used: project()
+          .categories.filter((item) => item.id !== category.id)
+          .map((item) => item.color),
         title: strings.dictionary.color,
-        on: {
-          change: (event) =>
-            commit(
-              (current) => updateCategory(current, category.id, { color: event.target.value }).project,
-              strings.history.editCategory,
-            ),
-        },
+        onPick: (color) =>
+          commit(
+            (current) => updateCategory(current, category.id, { color }).project,
+            strings.history.editCategory,
+          ),
       }),
       uiEl("input", {
         class: "ui-input",
@@ -455,24 +456,36 @@ export function openTypesDictionary(api) {
       type: "text",
       placeholder: strings.dictionary.categoryNamePlaceholder,
     });
-    const color = uiEl("input", { class: "dict__color", type: "color", value: "#57606A" });
+    // Цвет новой категории — незанятый цвет палитры: метки новой категории
+    // должны быть видны отдельно от соседних, а не повторять их цвет.
+    const busy = project().categories.map((item) => item.color);
+    let color = freeColor(busy);
     let shape = SHAPE_PALETTE[0];
+    const colorButton = colorPickerButton({
+      value: color,
+      used: busy,
+      title: strings.dictionary.color,
+      onPick: (picked) => {
+        color = picked;
+        shapeButton.replaceChildren(shapeIcon(shape, color, 26));
+      },
+    });
     const shapeButton = typesShapeButton({
       shape,
-      color: color.value,
+      color,
       allowInherit: false,
       onPick: (picked) => {
         shape = picked || SHAPE_PALETTE[0];
-        shapeButton.replaceChildren(shapeIcon(shape, color.value, 26));
+        shapeButton.replaceChildren(shapeIcon(shape, color, 26));
       },
     });
     const add = () =>
       commit(
-        (current) => addCategory(current, { name: name.value, color: color.value, shape }).project,
+        (current) => addCategory(current, { name: name.value, color, shape }).project,
         strings.history.addCategory,
       );
     return uiEl("div", { class: "dict__row dict__row--add" }, [
-      color,
+      colorButton,
       name,
       shapeButton,
       uiButton(strings.dictionary.addCategory, { class: "ui-btn ui-btn--accent", on: { click: add } }),

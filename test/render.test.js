@@ -8,6 +8,7 @@ import {
   hitTest,
   drawLegend,
   labelBox,
+  labelLayout,
   labelLead,
   labelOffsetOf,
   planToScreen,
@@ -384,6 +385,159 @@ test("ширина подписи считается с запасом на пр
   assert.ok(box.width >= 17 * 12 * 0.72, "подпись померена уже, чем она есть: " + box.width);
   // Но и не вдвое шире: раздутый прямоугольник съедал бы клики по соседям.
   assert.ok(box.width <= 17 * 12, "подпись померена заметно шире, чем она есть: " + box.width);
+});
+
+// ——— разведение подписей ——————————————————————————————————————————————
+
+// Все подписи схемы разом — так их видит и холст, и выгрузка: раскладка
+// считается один раз на схему и передаётся в каждый прямоугольник.
+const labelBoxes = (project, scheme, view, filter = null) => {
+  const layout = labelLayout(project, scheme, filter, view);
+  return renderInternals
+    .labelTargets(project, scheme, filter)
+    .map((target) => labelBox(project, scheme, target, view, layout));
+};
+
+const boxesOverlap = (a, b) =>
+  a.x < b.x + b.width &&
+  b.x < a.x + a.width &&
+  a.y - a.height / 2 < b.y + b.height / 2 &&
+  b.y - b.height / 2 < a.y + a.height / 2;
+
+// Ряд меток вдоль стены — обычное дело: три подсветки в сорока пяти пикселях
+// друг от друга. Подпись шире этого шага, и без разведения на выгрузке
+// получается «ПОДСВЕТКПОДСВЕТКПОДСВЕТКА3»: номера съедены, а номер — это
+// единственное, ради чего подпись на плане стоит.
+const rowOfThree = (code = "ПОДСВЕТКА", xs = [0.2, 0.245, 0.29]) => {
+  const base = world();
+  const light = base.project.categories.find((item) => item.name === "Свет").id;
+  const added = addType(base.project, { code, name: "Подсветка", categoryId: light });
+  let project = added.project;
+  for (const x of xs) {
+    project = addMark(project, { schemeId: base.schemeId, typeId: added.type.id, points: [{ x, y: 0.4 }] }).project;
+  }
+  return { project, scheme: project.schemes[0] };
+};
+
+// Куча меток в одной точке — крайний случай приёмки: щит, где два десятка
+// линий сходятся на пятачке.
+const pileOf = (count) => {
+  const base = world();
+  const light = base.project.categories.find((item) => item.name === "Свет").id;
+  const added = addType(base.project, { code: "ПОДСВЕТКА", name: "Подсветка", categoryId: light });
+  let project = added.project;
+  for (let i = 0; i < count; i += 1) {
+    project = addMark(project, {
+      schemeId: base.schemeId,
+      typeId: added.type.id,
+      points: [{ x: 0.5, y: 0.5 }],
+    }).project;
+  }
+  return { project, scheme: project.schemes[0] };
+};
+
+test("подписи меток, стоящих вплотную, не наезжают друг на друга", () => {
+  const { project, scheme } = rowOfThree();
+  const boxes = labelBoxes(project, scheme, viewOf());
+
+  assert.deepEqual(boxes.map((box) => box.text), ["ПОДСВЕТКА1", "ПОДСВЕТКА2", "ПОДСВЕТКА3"]);
+  // Шаг между метками — 45 пикселей плана, подпись шире: без разведения
+  // прямоугольники пересекались бы попарно.
+  assert.ok(boxes[0].width > 45, "подпись уже шага между метками, пример не тот: " + boxes[0].width);
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      assert.ok(!boxesOverlap(boxes[i], boxes[j]), `подписи ${i + 1} и ${j + 1} наложились`);
+    }
+  }
+});
+
+test("подпись, оттащенную руками, раскладка не двигает — соседи обходят её", () => {
+  const row = rowOfThree();
+  // Пользователь оттащил подпись средней метки вниз и влево: это его решение,
+  // и никакая раскладка не вправе его пересчитать.
+  const own = { dx: -60, dy: 30 };
+  const moved = updateMark(row.project, row.project.marks[1].id, { labelOffset: own }).project;
+  const boxes = labelBoxes(moved, row.scheme, viewOf());
+  const mine = boxes.find((box) => box.text === "ПОДСВЕТКА2");
+
+  assert.deepEqual({ dx: mine.dx, dy: mine.dy }, own, "смещение подписи пересчитали за пользователя");
+  assert.equal(mine.x, 245 + own.dx, "подпись уехала с места, куда её поставили");
+  assert.equal(mine.y, 200 + own.dy);
+  for (const other of boxes) {
+    if (other === mine) continue;
+    assert.ok(!boxesOverlap(mine, other), "соседняя подпись наехала на оттащенную: " + other.text);
+  }
+});
+
+// Инженер размечает на экране, а монтажник держит в руках распечатку. Если
+// раскладка считается «по случаю» — по экранным пикселям, — то выгрузка в
+// двойном разрешении разойдётся с тем, что видели на экране. Поэтому места
+// считаются в координатах плана, а масштаб только умножает.
+test("раскладка подписей одна и та же на экране и в выгрузке", () => {
+  const { project, scheme } = rowOfThree();
+  const screen = labelBoxes(project, scheme, viewOf({ zoom: 1 }));
+  const shot = labelBoxes(project, scheme, viewOf({ zoom: 2, offsetX: 17, offsetY: -9 }));
+
+  assert.equal(shot.length, screen.length);
+  for (let i = 0; i < screen.length; i += 1) {
+    assert.equal(shot[i].text, screen[i].text);
+    assert.deepEqual(
+      { dx: shot[i].dx, dy: shot[i].dy },
+      { dx: screen[i].dx, dy: screen[i].dy },
+      "подпись «" + screen[i].text + "» отведена по-разному на экране и в выгрузке",
+    );
+    // Выгрузка «весь план» в масштабе 2: сдвиг подписи от метки ровно вдвое.
+    const anchor = planToScreen(project.marks[i].points[0], scheme, viewOf({ zoom: 2, offsetX: 17, offsetY: -9 }));
+    near(shot[i].x - anchor.x, 2 * screen[i].dx, "подпись «" + shot[i].text + "» по горизонтали");
+    near(shot[i].y - anchor.y, 2 * screen[i].dy, "подпись «" + shot[i].text + "» по вертикали");
+  }
+});
+
+// Одна и та же схема, открытая дважды, обязана выглядеть одинаково: раскладка
+// зависит от того, где метки стоят, а не от того, в каком порядке их ставили
+// и сколько раз её успели пересчитать.
+test("раскладка повторяется: она от геометрии, а не от порядка постановки меток", () => {
+  const straight = rowOfThree();
+  const first = labelBoxes(straight.project, straight.scheme, viewOf());
+  const again = labelBoxes(straight.project, straight.scheme, viewOf());
+  assert.deepEqual(again, first, "второй расчёт той же схемы дал другую раскладку");
+
+  // Те же три места на плане, размеченные справа налево: подписи достанутся
+  // другим номерам, но стоять они будут там же.
+  const reversed = rowOfThree("ПОДСВЕТКА", [0.29, 0.245, 0.2]);
+  const places = (boxes) => boxes.map((box) => box.x + ":" + box.y).sort();
+  assert.deepEqual(places(labelBoxes(reversed.project, reversed.scheme, viewOf())), places(first));
+});
+
+test("отведённая подпись остаётся рядом со своей меткой", () => {
+  const { project, scheme } = pileOf(12);
+  const boxes = labelBoxes(project, scheme, viewOf());
+  assert.equal(boxes.length, 12);
+  for (const box of boxes) {
+    // Метка одна на всех — пиксели (500, 250) на плане 1000×500.
+    const away = Math.max(0, Math.abs(box.y - 250) - box.height / 2);
+    // Дальше пяти строк подпись перестаёт читаться как «эта, у этой метки»:
+    // монтажник с листом в руках приписывает её соседнему устройству.
+    assert.ok(away <= box.height * 5, "подпись «" + box.text + "» ушла от метки на " + away);
+    const side = box.x < 500 ? 500 - (box.x + box.width) : box.x - 500;
+    assert.ok(side >= 0 && side < 40, "подпись «" + box.text + "» отъехала вбок на " + side);
+  }
+});
+
+// Двадцать меток в одной точке развести некуда: свободных мест вокруг метки
+// меньше, чем подписей. Здесь важно, что именно происходит — подписи не
+// пропадают и метки не разъезжаются, а последним достаётся место с наименьшим
+// наложением, и они честно помечены `crowded`.
+test("когда разводить некуда — подписи остаются на месте меток, а не пропадают", () => {
+  const { project, scheme } = pileOf(20);
+  const boxes = labelBoxes(project, scheme, viewOf());
+
+  assert.equal(boxes.length, 20, "подпись пропала с плана");
+  assert.ok(boxes.every((box) => box.text.length > 0), "подпись осталась без текста");
+  assert.equal(new Set(boxes.map((box) => box.text)).size, 20, "две подписи слились в одну");
+  assert.ok(boxes.some((box) => box.crowded), "теснота не помечена: разбирать выгрузку будет нечем");
+  // Метка стоит там, где стоит железка: раскладка двигает только подпись.
+  for (const mark of project.marks) assert.deepEqual(mark.points, [{ x: 0.5, y: 0.5 }]);
 });
 
 // ——— легенда ——————————————————————————————————————————————————————————

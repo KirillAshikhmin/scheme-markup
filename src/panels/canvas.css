@@ -120,17 +120,6 @@
   border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
-.rooms__color {
-  flex: none;
-  width: 32px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--panel-line);
-  border-radius: 6px;
-  background: #21262d;
-  cursor: pointer;
-}
-
 .tools__row {
   display: flex;
   flex-wrap: wrap;

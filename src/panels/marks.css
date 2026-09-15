@@ -210,16 +210,6 @@
   font-weight: 700;
 }
 
-.dict__color {
-  flex: none;
-  width: 32px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--panel-line);
-  border-radius: 6px;
-  background: var(--panel-bg-deep);
-}
-
 .dict__count {
   flex: none;
   min-width: 28px;
