@@ -4,7 +4,7 @@
 // Почему список, а не карточка метки: заказчик заполняет «Расположение» и
 // «В оригинальной схеме» не в момент постановки, а потом, разом, по списку.
 // Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
-import { PANEL_IDS, registerPanel } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   MARK_NUMBER_MAX,
@@ -230,6 +230,12 @@ function mountMarksPanel(host, api) {
       if (event.target.closest("input, select, button, option")) return;
       selectMark(mark.id);
     });
+    // Режим просмотра: строка читается и подводит к метке на плане, но поля
+    // в ней не правятся — правка живёт на широком экране.
+    if (!layoutAllows("editMarks", state.layout)) {
+      for (const field of node.querySelectorAll("input")) field.readOnly = true;
+      for (const field of node.querySelectorAll("select")) field.disabled = true;
+    }
     return node;
   }
 
@@ -274,7 +280,17 @@ function mountMarksPanel(host, api) {
     }, 0);
   });
   api.subscribe((state, changed) => {
-    if (!("project" in changed || "schemeId" in changed || "filter" in changed || "selectedMarkIds" in changed)) return;
+    if (
+      !(
+        "project" in changed ||
+        "schemeId" in changed ||
+        "filter" in changed ||
+        "selectedMarkIds" in changed ||
+        "layout" in changed
+      )
+    ) {
+      return;
+    }
     if (typing()) {
       pending = true;
       return;

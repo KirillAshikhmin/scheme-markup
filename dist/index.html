@@ -853,6 +853,34 @@
   display: block;
 }
 
+/* ——— список меток в режиме просмотра ————————————————————————————————————
+   Поля в строке только читаются, поэтому и выглядеть должны текстом, а не
+   полями ввода: на телефоне четыре рамки в строке съедали список целиком.
+   Пустое поле прячется совсем — в нём нечего смотреть. */
+#app.is-mobile .mark-row {
+  padding: 6px 8px;
+  gap: 2px;
+}
+
+#app.is-mobile .mark-row .ui-input,
+#app.is-mobile .mark-row .ui-select {
+  min-height: 0;
+  padding: 2px 4px;
+  font-size: 14px;
+  border-color: transparent;
+  background: transparent;
+  appearance: none;
+}
+
+#app.is-mobile .mark-row .ui-input:placeholder-shown {
+  display: none;
+}
+
+#app.is-mobile .mark-row__number {
+  width: 64px;
+  text-align: left;
+}
+
 /* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
 
 .ui-btn {
@@ -1481,6 +1509,13 @@
   box-sizing: border-box;
 }
 
+/* Скрытое скрыто везде. Панели прячут кнопки атрибутом `hidden`, а у многих из
+   них класс задаёт `display` — и без этого правила «скрытая» кнопка режима
+   просмотра оставалась на экране. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;
@@ -1776,6 +1811,194 @@ body {
   margin: 4px 0 0;
 }
 
+/* ——— узкий экран: раскладка просмотра —————————————————————————————————
+   Правила колонок выше не трогаются: они описывают широкий экран и остаются
+   единственным местом, где делится высота колонки. Здесь — только то, что
+   добавляется, когда экран сам выбрал просмотр.
+
+   Устройство простое: план во весь экран, снизу три крупные кнопки, а колонки
+   приходят листом поверх плана по одной. Две колонки рядом на телефон не лезут,
+   вкладки поверх плана съели бы сам план, а лист снизу открывается большим
+   пальцем и закрывается той же кнопкой. */
+
+#mobile-bar,
+#scheme-name {
+  display: none;
+}
+
+#app.is-mobile {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "header"
+    "canvas"
+    "bar";
+}
+
+@supports (height: 100dvh) {
+  #app.is-mobile {
+    height: 100dvh;
+  }
+}
+
+#app.is-mobile #app-header {
+  height: auto;
+  min-height: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  row-gap: 2px;
+  padding: 6px 10px;
+}
+
+/* Название сервиса на объекте не нужно: место дороже. */
+#app.is-mobile #app-brand,
+#app.is-mobile #project-label {
+  display: none;
+}
+
+#app.is-mobile #project-name {
+  max-width: 55vw;
+}
+
+#app.is-mobile #scheme-name {
+  display: block;
+  width: 100%;
+  order: 9;
+  font-size: 12px;
+  color: var(--panel-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#app.is-mobile #header-actions {
+  margin-left: auto;
+}
+
+#mobile-bar {
+  grid-area: bar;
+}
+
+#app.is-mobile #mobile-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--panel-line);
+  border-top: 1px solid var(--panel-line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-bar__btn {
+  font: inherit;
+  font-size: 13px;
+  min-height: 52px;
+  border: 0;
+  background: var(--panel-bg);
+  color: var(--panel-text);
+  cursor: pointer;
+}
+
+.mobile-bar__btn.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Колонка становится листом снизу: поверх плана, на высоту большого пальца. */
+#app.is-mobile #panel-left,
+#app.is-mobile #panel-right {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  top: auto;
+  height: min(58vh, 460px);
+  z-index: 30;
+  display: none;
+  border: 0;
+  border-top: 1px solid var(--panel-line);
+  box-shadow: 0 -12px 32px rgba(1, 4, 9, 0.55);
+}
+
+#app.is-mobile[data-sheet="schemes"] #panel-left,
+#app.is-mobile[data-sheet="marks"] #panel-right {
+  display: flex;
+}
+
+/* В листе только то, на что можно смотреть: постановка меток, помещения,
+   размеры и справочник в режиме просмотра не живут. */
+#app.is-mobile [data-section-id="marks"],
+#app.is-mobile [data-section-id="rooms"],
+#app.is-mobile [data-section-id="sizes"],
+#app.is-mobile [data-section-id="properties"] {
+  display: none;
+}
+
+/* Лист назван кнопкой снизу, второй заголовок внутри — потерянная строка.
+   Свёрнутость с десктопа здесь тоже не в счёт: лист открывают, чтобы смотреть. */
+#app.is-mobile .panel__head {
+  display: none;
+}
+
+#app.is-mobile .panel__section {
+  flex: 1 1 auto;
+  max-height: none;
+  border-bottom: 0;
+}
+
+#app.is-mobile .panel__section.is-collapsed > .panel__body {
+  display: block;
+}
+
+/* Цели под палец. 16 px в полях — иначе iOS приближает страницу при фокусе. */
+#app.is-mobile .ui-btn {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+#app.is-mobile .ui-select,
+#app.is-mobile .ui-input {
+  min-height: 40px;
+  font-size: 16px;
+}
+
+#app.is-mobile .scheme-row {
+  padding: 8px;
+  gap: 4px;
+}
+
+#app.is-mobile .scheme-row__name {
+  font-size: 15px;
+  padding: 4px 0;
+}
+
+#app.is-mobile #canvas-empty {
+  max-width: 82vw;
+}
+
+/* Подсказка холста рассказывает, как ставить метки и рисовать контуры: в
+   режиме просмотра это про то, чего здесь нет, и она же занимает верх плана. */
+#app.is-mobile #canvas-overlay {
+  display: none;
+}
+
+/* Имя объекта на узком экране показывает сам список объектов — второй раз
+   рядом оно только съедает строку. */
+#app.is-mobile #project-name {
+  display: none;
+}
+
+#app.is-mobile #project-actions .ui-select {
+  max-width: 46vw;
+}
+
+/* Уведомления не должны ложиться на нижнюю панель. */
+#app.is-mobile #notifications {
+  left: 12px;
+  right: 12px;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  max-width: none;
+}
+
     </style>
 </head>
   <body>
@@ -1790,7 +2013,13 @@ body {
           <span id="project-name" data-text="header.noProject"></span>
           <div id="project-actions" class="mount"></div>
         </div>
+        <!-- Имя открытой схемы: на узком экране списка схем на виду нет,
+             и без этой строки непонятно, что вообще открыто. -->
+        <span id="scheme-name"></span>
         <div id="header-actions" class="mount"></div>
+        <!-- Переход к полной версии показывается только там, где экран сам
+             выбрал просмотр: на десктопе кнопки нет. -->
+        <button id="layout-toggle" class="ui-btn" type="button" hidden></button>
       </header>
 
       <!-- Разделы обеих колонок устроены одинаково: кликабельный заголовок
@@ -1869,6 +2098,14 @@ body {
         </section>
       </aside>
 
+      <!-- Узкий экран: план во весь экран, колонки приходят листом снизу по
+           одной. Кнопки крупные — с телефоном в одной руке иначе не попасть. -->
+      <nav id="mobile-bar">
+        <button class="mobile-bar__btn" type="button" data-sheet-button="none" data-text="mobile.plan"></button>
+        <button class="mobile-bar__btn" type="button" data-sheet-button="schemes" data-text="mobile.schemes"></button>
+        <button class="mobile-bar__btn" type="button" data-sheet-button="marks" data-text="mobile.marks"></button>
+      </nav>
+
       <div id="dialog-host" class="mount"></div>
       <div id="notifications"></div>
     </div>
@@ -1894,6 +2131,17 @@ const strings = {
     properties: "Справочник типов",
     canvasEmpty: "Загрузите план схемы, чтобы начать разметку",
     marksEmpty: "Меток пока нет — выберите тип и щёлкните по плану",
+  },
+  mobile: {
+    plan: "План",
+    schemes: "Схемы",
+    marks: "Метки",
+    noScheme: "Схема не выбрана",
+    full: "Полная версия",
+    fullHint: "Открыть полную раскладку с панелями правки",
+    view: "Режим просмотра",
+    viewHint: "Вернуться к просмотру: план во весь экран",
+    viewOnly: "Режим просмотра — правка на компьютере",
   },
   project: {
     untitled: "Новый объект",
@@ -4970,6 +5218,7 @@ function autosaveAgoText(at, now) {
 // и не правят ни этот файл, ни разметку.
 
 
+
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 const PANEL_IDS = {
   tools: "panel-tools",
@@ -4986,6 +5235,7 @@ const PANEL_IDS = {
 };
 
 const appState = {
+  layout: "desktop",
   project: null,
   schemeId: null,
   selectedMarkIds: [],
@@ -5012,7 +5262,61 @@ const SECTIONS_SETTING = "collapsedSections";
 // пользователь ищет, куда делись инструменты.
 const SECTION_DEFAULT_COLLAPSED = [SECTION_IDS.sizes];
 
+// ——— раскладка: широкий экран правит, узкий смотрит ————————————————————
+//
+// На объекте в руке телефон: нужно открыть план, найти метку, свериться с
+// таблицей. Размечать пальцем пользователь не собирался с самого брифинга,
+// поэтому узкий экран получает не урезанный редактор, а режим просмотра.
+// Решение о режиме — чистое, его и проверяют тесты: разъехаться оно может
+// незаметно, а цена — панель, которой на экране нет.
+const LAYOUT_MODES = ["desktop", "mobile"];
+// Окно уже этого — раскладка просмотра. На десктопе это же и есть способ
+// посмотреть мобильный вид: сузить окно.
+const LAYOUT_NARROW_WIDTH = 860;
+// Короткая сторона телефона: поворот её не меняет, поэтому альбомная
+// ориентация остаётся просмотром, а не превращается в редактор на 844 px.
+const LAYOUT_PHONE_SIDE = 560;
+
+// Что доступно в каждой раскладке. Список нарочно перечислен целиком: новое
+// умение нужно назвать здесь, иначе оно считается правкой и на телефон не идёт.
+const LAYOUT_ABILITIES = {
+  viewPlan: ["desktop", "mobile"],
+  switchProject: ["desktop", "mobile"],
+  switchScheme: ["desktop", "mobile"],
+  markList: ["desktop", "mobile"],
+  filters: ["desktop", "mobile"],
+  tables: ["desktop", "mobile"],
+  exportFiles: ["desktop", "mobile"],
+  openFile: ["desktop", "mobile"],
+  saveFile: ["desktop"],
+  editMarks: ["desktop"],
+  editSchemes: ["desktop"],
+  editRooms: ["desktop"],
+  editProject: ["desktop"],
+  dictionary: ["desktop"],
+  viewSizes: ["desktop"],
+};
+function layoutModeFor(view, override) {
+  if (override === "mobile" || override === "desktop") return override;
+  const source = view || {};
+  const width = Number(source.width) || 0;
+  const height = Number(source.height) || 0;
+  const shortSide = height > 0 ? Math.min(width, height) : width;
+  if (source.coarsePointer && shortSide > 0 && shortSide <= LAYOUT_PHONE_SIDE) return "mobile";
+  if (width > 0 && width <= LAYOUT_NARROW_WIDTH) return "mobile";
+  return "desktop";
+}
+
+// Неизвестное умение доступным не считается: опечатка в имени спрячет кнопку,
+// а не пустит правку в режим просмотра.
+function layoutAllows(ability, mode) {
+  const modes = LAYOUT_ABILITIES[ability];
+  return Array.isArray(modes) && modes.includes(mode);
+}
+
 const appCollapsed = new Set();
+let appLayoutOverride = null;
+let appSheet = "none";
 
 // Что кладётся в настройки: список свёрнутых разделов. Мусор из хранилища
 // (чужая версия, битое значение) не должен схлопывать панель — он отбрасывается.
@@ -5070,6 +5374,7 @@ function setState(patch) {
   }
   syncCanvasClass();
   syncProjectName();
+  syncSchemeName();
   return snapshot;
 }
 function subscribe(listener) {
@@ -5132,10 +5437,113 @@ function syncProjectName() {
   node.textContent = appState.project ? appState.project.name : strings.header.noProject;
 }
 
+// На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
+// открыто, — списка схем на экране нет, он спрятан в лист.
+function syncSchemeName() {
+  const node = document.getElementById("scheme-name");
+  if (!node) return;
+  const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
+  node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
+}
+
 function syncCanvasClass() {
   const app = document.getElementById("app");
   if (!app) return;
   app.classList.toggle("has-scheme", Boolean(appState.schemeId));
+}
+
+function layoutViewport() {
+  if (typeof window === "undefined") return { width: 0, height: 0, coarsePointer: false };
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    coarsePointer:
+      typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches,
+  };
+}
+
+// Раскладка, которую выбрал бы сам экран: по ней видно, показывать ли переход
+// к полной версии. На настоящем десктопе кнопки нет вовсе — второго режима
+// работы там не заводим.
+function layoutAutoMode() {
+  return layoutModeFor(layoutViewport(), null);
+}
+function layoutMode() {
+  return appState.layout;
+}
+function layoutOverride() {
+  return appLayoutOverride;
+}
+function setLayoutOverride(mode) {
+  appLayoutOverride = mode === "mobile" || mode === "desktop" ? mode : null;
+  syncLayout();
+}
+
+// Лист снизу: на узком экране колонки показываются по одной и поверх плана.
+function openSheet(name) {
+  appSheet = name === "schemes" || name === "marks" ? name : "none";
+  syncSheet();
+}
+function currentSheet() {
+  return appSheet;
+}
+
+function syncSheet() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.dataset.sheet = appState.layout === "mobile" ? appSheet : "none";
+  for (const button of document.querySelectorAll("[data-sheet-button]")) {
+    const target = button.dataset.sheetButton;
+    const active = app.dataset.sheet === target || (target === "none" && app.dataset.sheet === "none");
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function syncLayout() {
+  const mode = layoutModeFor(layoutViewport(), appLayoutOverride);
+  const app = document.getElementById("app");
+  if (app) app.classList.toggle("is-mobile", mode === "mobile");
+  if (mode !== "mobile") appSheet = "none";
+  const toggle = document.getElementById("layout-toggle");
+  if (toggle) {
+    // Кнопка живёт только там, где экран сам выбрал просмотр: на телефоне —
+    // дорога к полной версии, на десктопе её нет и быть не должно.
+    toggle.hidden = layoutAutoMode() !== "mobile";
+    toggle.textContent = mode === "mobile" ? strings.mobile.full : strings.mobile.view;
+    toggle.title = mode === "mobile" ? strings.mobile.fullHint : strings.mobile.viewHint;
+  }
+  if (appState.layout !== mode) {
+    // Вход в просмотр снимает режим постановки: в суженном окне мышь никуда не
+    // делась, и оставленный «Точка» ставил бы метки там, где их не ждут.
+    setState(mode === "mobile" ? { layout: mode, mode: "select" } : { layout: mode });
+  }
+  syncSheet();
+  syncSchemeName();
+}
+
+function wireLayout() {
+  syncLayout();
+  const toggle = document.getElementById("layout-toggle");
+  if (toggle) {
+    toggle.addEventListener("click", () =>
+      setLayoutOverride(appState.layout === "mobile" ? "desktop" : null),
+    );
+  }
+  for (const button of document.querySelectorAll("[data-sheet-button]")) {
+    button.addEventListener("click", () => {
+      const target = button.dataset.sheetButton;
+      openSheet(appSheet === target ? "none" : target);
+    });
+  }
+  if (typeof window === "undefined") return;
+  let timer = null;
+  const later = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(syncLayout, 120);
+  };
+  window.addEventListener("resize", later);
+  window.addEventListener("orientationchange", later);
 }
 
 function sectionNode(id) {
@@ -5203,6 +5611,7 @@ function startApp() {
   wireSections();
   syncProjectName();
   syncCanvasClass();
+  wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
 }
 
@@ -10800,6 +11209,12 @@ function mountProjectsPanel(host, api) {
     const has = Boolean(id);
     renameButton.disabled = !has;
     removeButton.disabled = !has;
+    // Режим просмотра: объект выбирается, но не заводится, не переименовывается
+    // и не удаляется — на объекте с телефоном это только риск.
+    const editable = layoutAllows("editProject", getState().layout);
+    createButton.hidden = !editable;
+    renameButton.hidden = !editable;
+    removeButton.hidden = !editable;
   }
 
   async function refreshList() {
@@ -10923,6 +11338,7 @@ function mountProjectsPanel(host, api) {
   });
 
   subscribe((state, changed) => {
+    if ("layout" in changed) renderList();
     if (!("project" in changed)) return;
     renderList();
     if (state.project) scheduleSave(state.project);
@@ -11267,13 +11683,18 @@ function mountFilePanel(host, api) {
     const state = getState();
     const status = autosaveStatus();
     const projectId = state.project ? state.project.id : null;
+    // Режим просмотра: файл открывают, чтобы посмотреть. Сохранять нечего —
+    // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
+    const saving = layoutAllows("saveFile", state.layout);
+    saveButton.hidden = !saving;
+    statusNode.hidden = !saving;
     statusNode.textContent = text("file.exported", { ago: autosaveAgoText(autosaveLastExport(projectId)) });
     statusNode.title = status.supported ? "" : strings.autosave.unsupported;
     row.classList.toggle("is-busy", Boolean(status.busy));
     row.classList.toggle("is-dirty", Boolean(state.dirty));
 
-    folderButton.hidden = !status.supported;
-    if (!status.supported) return;
+    folderButton.hidden = !status.supported || !saving;
+    if (!status.supported || !saving) return;
     if (!status.folder) {
       folderButton.textContent = strings.autosave.pick;
       folderButton.title = strings.autosave.pickHint;
@@ -11316,6 +11737,7 @@ function mountFilePanel(host, api) {
   }
 
   subscribe((state, changed) => {
+    if ("layout" in changed) renderStatus();
     if (!("project" in changed)) {
       if ("dirty" in changed) row.classList.toggle("is-dirty", Boolean(state.dirty));
       return;
@@ -12141,6 +12563,12 @@ function mountMarksPanel(host, api) {
       if (event.target.closest("input, select, button, option")) return;
       selectMark(mark.id);
     });
+    // Режим просмотра: строка читается и подводит к метке на плане, но поля
+    // в ней не правятся — правка живёт на широком экране.
+    if (!layoutAllows("editMarks", state.layout)) {
+      for (const field of node.querySelectorAll("input")) field.readOnly = true;
+      for (const field of node.querySelectorAll("select")) field.disabled = true;
+    }
     return node;
   }
 
@@ -12185,7 +12613,17 @@ function mountMarksPanel(host, api) {
     }, 0);
   });
   api.subscribe((state, changed) => {
-    if (!("project" in changed || "schemeId" in changed || "filter" in changed || "selectedMarkIds" in changed)) return;
+    if (
+      !(
+        "project" in changed ||
+        "schemeId" in changed ||
+        "filter" in changed ||
+        "selectedMarkIds" in changed ||
+        "layout" in changed
+      )
+    ) {
+      return;
+    }
     if (typing()) {
       pending = true;
       return;
@@ -12426,12 +12864,19 @@ function mountSchemesPanel(host, api) {
   function render() {
     const state = getState();
     const project = state.project;
+    // Режим просмотра: схему выбирают, но не грузят, не правят и не удаляют.
+    const editable = layoutAllows("editSchemes", state.layout);
     list.replaceChildren();
     addButton.disabled = !project;
+    addButton.hidden = !editable;
     // Счётчик в заголовке: свёрнутый раздел не путается с пустым.
     setSectionBadge(SECTION_IDS.schemes, project && project.schemes.length ? project.schemes.length : "");
     if (!project || project.schemes.length === 0) {
-      hint.textContent = project ? strings.schemes.addHint : strings.projects.empty;
+      hint.textContent = editable
+        ? project
+          ? strings.schemes.addHint
+          : strings.projects.empty
+        : strings.mobile.viewOnly;
       return;
     }
     hint.textContent = "";
@@ -12455,7 +12900,7 @@ function mountSchemesPanel(host, api) {
             ? text("schemes.size", { width: scheme.width, height: scheme.height })
             : strings.schemes.noImage,
         }),
-        uiEl("div", { class: "scheme-row__tools" }, [
+        uiEl("div", { class: "scheme-row__tools", attrs: editable ? {} : { hidden: "hidden" } }, [
           uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
           uiButton("⇄", {
             title: strings.schemes.replace,
@@ -12745,6 +13190,7 @@ function mountSchemesPanel(host, api) {
   // безопасно. Мусор, нажитый за сеанс, уйдёт при следующем запуске.
   let swept = false;
   subscribe((state, changed) => {
+    if ("layout" in changed) render();
     if ("project" in changed || "schemeId" in changed) {
       render();
       loadSchemeImage(false);

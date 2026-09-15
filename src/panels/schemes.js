@@ -2,7 +2,7 @@
 // и обрезка, переименование, порядок, удаление.
 // Холст рисует другой модуль — сюда он приходит только за картинкой:
 // подготовленный план и его размер кладутся в состояние сеанса (`schemeImage`).
-import { PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
 import {
   addScheme,
   deleteScheme,
@@ -249,12 +249,19 @@ function mountSchemesPanel(host, api) {
   function render() {
     const state = getState();
     const project = state.project;
+    // Режим просмотра: схему выбирают, но не грузят, не правят и не удаляют.
+    const editable = layoutAllows("editSchemes", state.layout);
     list.replaceChildren();
     addButton.disabled = !project;
+    addButton.hidden = !editable;
     // Счётчик в заголовке: свёрнутый раздел не путается с пустым.
     setSectionBadge(SECTION_IDS.schemes, project && project.schemes.length ? project.schemes.length : "");
     if (!project || project.schemes.length === 0) {
-      hint.textContent = project ? strings.schemes.addHint : strings.projects.empty;
+      hint.textContent = editable
+        ? project
+          ? strings.schemes.addHint
+          : strings.projects.empty
+        : strings.mobile.viewOnly;
       return;
     }
     hint.textContent = "";
@@ -278,7 +285,7 @@ function mountSchemesPanel(host, api) {
             ? text("schemes.size", { width: scheme.width, height: scheme.height })
             : strings.schemes.noImage,
         }),
-        uiEl("div", { class: "scheme-row__tools" }, [
+        uiEl("div", { class: "scheme-row__tools", attrs: editable ? {} : { hidden: "hidden" } }, [
           uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
           uiButton("⇄", {
             title: strings.schemes.replace,
@@ -568,6 +575,7 @@ function mountSchemesPanel(host, api) {
   // безопасно. Мусор, нажитый за сеанс, уйдёт при следующем запуске.
   let swept = false;
   subscribe((state, changed) => {
+    if ("layout" in changed) render();
     if ("project" in changed || "schemeId" in changed) {
       render();
       loadSchemeImage(false);

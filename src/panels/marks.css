@@ -363,3 +363,31 @@
 .shapes__icon {
   display: block;
 }
+
+/* ——— список меток в режиме просмотра ————————————————————————————————————
+   Поля в строке только читаются, поэтому и выглядеть должны текстом, а не
+   полями ввода: на телефоне четыре рамки в строке съедали список целиком.
+   Пустое поле прячется совсем — в нём нечего смотреть. */
+#app.is-mobile .mark-row {
+  padding: 6px 8px;
+  gap: 2px;
+}
+
+#app.is-mobile .mark-row .ui-input,
+#app.is-mobile .mark-row .ui-select {
+  min-height: 0;
+  padding: 2px 4px;
+  font-size: 14px;
+  border-color: transparent;
+  background: transparent;
+  appearance: none;
+}
+
+#app.is-mobile .mark-row .ui-input:placeholder-shown {
+  display: none;
+}
+
+#app.is-mobile .mark-row__number {
+  width: 64px;
+  text-align: left;
+}

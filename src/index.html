@@ -18,7 +18,13 @@
           <span id="project-name" data-text="header.noProject"></span>
           <div id="project-actions" class="mount"></div>
         </div>
+        <!-- Имя открытой схемы: на узком экране списка схем на виду нет,
+             и без этой строки непонятно, что вообще открыто. -->
+        <span id="scheme-name"></span>
         <div id="header-actions" class="mount"></div>
+        <!-- Переход к полной версии показывается только там, где экран сам
+             выбрал просмотр: на десктопе кнопки нет. -->
+        <button id="layout-toggle" class="ui-btn" type="button" hidden></button>
       </header>
 
       <!-- Разделы обеих колонок устроены одинаково: кликабельный заголовок
@@ -96,6 +102,14 @@
           <div id="panel-properties" class="panel__body mount"></div>
         </section>
       </aside>
+
+      <!-- Узкий экран: план во весь экран, колонки приходят листом снизу по
+           одной. Кнопки крупные — с телефоном в одной руке иначе не попасть. -->
+      <nav id="mobile-bar">
+        <button class="mobile-bar__btn" type="button" data-sheet-button="none" data-text="mobile.plan"></button>
+        <button class="mobile-bar__btn" type="button" data-sheet-button="schemes" data-text="mobile.schemes"></button>
+        <button class="mobile-bar__btn" type="button" data-sheet-button="marks" data-text="mobile.marks"></button>
+      </nav>
 
       <div id="dialog-host" class="mount"></div>
       <div id="notifications"></div>

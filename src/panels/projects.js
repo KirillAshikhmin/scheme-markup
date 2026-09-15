@@ -1,6 +1,6 @@
 // Объекты: список в шапке, переключение, переименование, удаление,
 // первый запуск и автосохранение в браузер.
-import { PANEL_IDS, registerPanel } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { createProject, updateProject } from "../model.js";
 import {
   deleteImage,
@@ -80,6 +80,12 @@ function mountProjectsPanel(host, api) {
     const has = Boolean(id);
     renameButton.disabled = !has;
     removeButton.disabled = !has;
+    // Режим просмотра: объект выбирается, но не заводится, не переименовывается
+    // и не удаляется — на объекте с телефоном это только риск.
+    const editable = layoutAllows("editProject", getState().layout);
+    createButton.hidden = !editable;
+    renameButton.hidden = !editable;
+    removeButton.hidden = !editable;
   }
 
   async function refreshList() {
@@ -203,6 +209,7 @@ function mountProjectsPanel(host, api) {
   });
 
   subscribe((state, changed) => {
+    if ("layout" in changed) renderList();
     if (!("project" in changed)) return;
     renderList();
     if (state.project) scheduleSave(state.project);

@@ -18,6 +18,13 @@
   box-sizing: border-box;
 }
 
+/* Скрытое скрыто везде. Панели прячут кнопки атрибутом `hidden`, а у многих из
+   них класс задаёт `display` — и без этого правила «скрытая» кнопка режима
+   просмотра оставалась на экране. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;
@@ -311,4 +318,192 @@ body {
   color: var(--panel-muted);
   font-size: 12px;
   margin: 4px 0 0;
+}
+
+/* ——— узкий экран: раскладка просмотра —————————————————————————————————
+   Правила колонок выше не трогаются: они описывают широкий экран и остаются
+   единственным местом, где делится высота колонки. Здесь — только то, что
+   добавляется, когда экран сам выбрал просмотр.
+
+   Устройство простое: план во весь экран, снизу три крупные кнопки, а колонки
+   приходят листом поверх плана по одной. Две колонки рядом на телефон не лезут,
+   вкладки поверх плана съели бы сам план, а лист снизу открывается большим
+   пальцем и закрывается той же кнопкой. */
+
+#mobile-bar,
+#scheme-name {
+  display: none;
+}
+
+#app.is-mobile {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "header"
+    "canvas"
+    "bar";
+}
+
+@supports (height: 100dvh) {
+  #app.is-mobile {
+    height: 100dvh;
+  }
+}
+
+#app.is-mobile #app-header {
+  height: auto;
+  min-height: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  row-gap: 2px;
+  padding: 6px 10px;
+}
+
+/* Название сервиса на объекте не нужно: место дороже. */
+#app.is-mobile #app-brand,
+#app.is-mobile #project-label {
+  display: none;
+}
+
+#app.is-mobile #project-name {
+  max-width: 55vw;
+}
+
+#app.is-mobile #scheme-name {
+  display: block;
+  width: 100%;
+  order: 9;
+  font-size: 12px;
+  color: var(--panel-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#app.is-mobile #header-actions {
+  margin-left: auto;
+}
+
+#mobile-bar {
+  grid-area: bar;
+}
+
+#app.is-mobile #mobile-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--panel-line);
+  border-top: 1px solid var(--panel-line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-bar__btn {
+  font: inherit;
+  font-size: 13px;
+  min-height: 52px;
+  border: 0;
+  background: var(--panel-bg);
+  color: var(--panel-text);
+  cursor: pointer;
+}
+
+.mobile-bar__btn.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Колонка становится листом снизу: поверх плана, на высоту большого пальца. */
+#app.is-mobile #panel-left,
+#app.is-mobile #panel-right {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  top: auto;
+  height: min(58vh, 460px);
+  z-index: 30;
+  display: none;
+  border: 0;
+  border-top: 1px solid var(--panel-line);
+  box-shadow: 0 -12px 32px rgba(1, 4, 9, 0.55);
+}
+
+#app.is-mobile[data-sheet="schemes"] #panel-left,
+#app.is-mobile[data-sheet="marks"] #panel-right {
+  display: flex;
+}
+
+/* В листе только то, на что можно смотреть: постановка меток, помещения,
+   размеры и справочник в режиме просмотра не живут. */
+#app.is-mobile [data-section-id="marks"],
+#app.is-mobile [data-section-id="rooms"],
+#app.is-mobile [data-section-id="sizes"],
+#app.is-mobile [data-section-id="properties"] {
+  display: none;
+}
+
+/* Лист назван кнопкой снизу, второй заголовок внутри — потерянная строка.
+   Свёрнутость с десктопа здесь тоже не в счёт: лист открывают, чтобы смотреть. */
+#app.is-mobile .panel__head {
+  display: none;
+}
+
+#app.is-mobile .panel__section {
+  flex: 1 1 auto;
+  max-height: none;
+  border-bottom: 0;
+}
+
+#app.is-mobile .panel__section.is-collapsed > .panel__body {
+  display: block;
+}
+
+/* Цели под палец. 16 px в полях — иначе iOS приближает страницу при фокусе. */
+#app.is-mobile .ui-btn {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+#app.is-mobile .ui-select,
+#app.is-mobile .ui-input {
+  min-height: 40px;
+  font-size: 16px;
+}
+
+#app.is-mobile .scheme-row {
+  padding: 8px;
+  gap: 4px;
+}
+
+#app.is-mobile .scheme-row__name {
+  font-size: 15px;
+  padding: 4px 0;
+}
+
+#app.is-mobile #canvas-empty {
+  max-width: 82vw;
+}
+
+/* Подсказка холста рассказывает, как ставить метки и рисовать контуры: в
+   режиме просмотра это про то, чего здесь нет, и она же занимает верх плана. */
+#app.is-mobile #canvas-overlay {
+  display: none;
+}
+
+/* Имя объекта на узком экране показывает сам список объектов — второй раз
+   рядом оно только съедает строку. */
+#app.is-mobile #project-name {
+  display: none;
+}
+
+#app.is-mobile #project-actions .ui-select {
+  max-width: 46vw;
+}
+
+/* Уведомления не должны ложиться на нижнюю панель. */
+#app.is-mobile #notifications {
+  left: 12px;
+  right: 12px;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  max-width: none;
 }

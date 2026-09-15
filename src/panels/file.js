@@ -8,7 +8,7 @@
 // Своей точки монтирования в разметке у панели нет: она создаёт контейнер в
 // шапке сама, после того как каркас поднялся (`startApp` откладывается на конец
 // загрузки, и наш обработчик встаёт в очередь следом).
-import { panelApi } from "../app.js";
+import { layoutAllows, panelApi } from "../app.js";
 import { schemesInOrder } from "../model.js";
 import { unpackProject } from "../projectFile.js";
 import { deleteImage, putImage, saveProject, setSetting } from "../store.js";
@@ -341,13 +341,18 @@ function mountFilePanel(host, api) {
     const state = getState();
     const status = autosaveStatus();
     const projectId = state.project ? state.project.id : null;
+    // Режим просмотра: файл открывают, чтобы посмотреть. Сохранять нечего —
+    // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
+    const saving = layoutAllows("saveFile", state.layout);
+    saveButton.hidden = !saving;
+    statusNode.hidden = !saving;
     statusNode.textContent = text("file.exported", { ago: autosaveAgoText(autosaveLastExport(projectId)) });
     statusNode.title = status.supported ? "" : strings.autosave.unsupported;
     row.classList.toggle("is-busy", Boolean(status.busy));
     row.classList.toggle("is-dirty", Boolean(state.dirty));
 
-    folderButton.hidden = !status.supported;
-    if (!status.supported) return;
+    folderButton.hidden = !status.supported || !saving;
+    if (!status.supported || !saving) return;
     if (!status.folder) {
       folderButton.textContent = strings.autosave.pick;
       folderButton.title = strings.autosave.pickHint;
@@ -390,6 +395,7 @@ function mountFilePanel(host, api) {
   }
 
   subscribe((state, changed) => {
+    if ("layout" in changed) renderStatus();
     if (!("project" in changed)) {
       if ("dirty" in changed) row.classList.toggle("is-dirty", Boolean(state.dirty));
       return;

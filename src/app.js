@@ -3,6 +3,7 @@
 // и не правят ни этот файл, ни разметку.
 import { strings, text } from "./strings.js";
 import { getSetting, setSetting } from "./store.js";
+import { findScheme } from "./model.js";
 
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 export const PANEL_IDS = {
@@ -20,6 +21,7 @@ export const PANEL_IDS = {
 };
 
 const appState = {
+  layout: "desktop",
   project: null,
   schemeId: null,
   selectedMarkIds: [],
@@ -46,7 +48,62 @@ export const SECTIONS_SETTING = "collapsedSections";
 // пользователь ищет, куда делись инструменты.
 export const SECTION_DEFAULT_COLLAPSED = [SECTION_IDS.sizes];
 
+// ——— раскладка: широкий экран правит, узкий смотрит ————————————————————
+//
+// На объекте в руке телефон: нужно открыть план, найти метку, свериться с
+// таблицей. Размечать пальцем пользователь не собирался с самого брифинга,
+// поэтому узкий экран получает не урезанный редактор, а режим просмотра.
+// Решение о режиме — чистое, его и проверяют тесты: разъехаться оно может
+// незаметно, а цена — панель, которой на экране нет.
+export const LAYOUT_MODES = ["desktop", "mobile"];
+// Окно уже этого — раскладка просмотра. На десктопе это же и есть способ
+// посмотреть мобильный вид: сузить окно.
+export const LAYOUT_NARROW_WIDTH = 860;
+// Короткая сторона телефона: поворот её не меняет, поэтому альбомная
+// ориентация остаётся просмотром, а не превращается в редактор на 844 px.
+export const LAYOUT_PHONE_SIDE = 560;
+
+// Что доступно в каждой раскладке. Список нарочно перечислен целиком: новое
+// умение нужно назвать здесь, иначе оно считается правкой и на телефон не идёт.
+export const LAYOUT_ABILITIES = {
+  viewPlan: ["desktop", "mobile"],
+  switchProject: ["desktop", "mobile"],
+  switchScheme: ["desktop", "mobile"],
+  markList: ["desktop", "mobile"],
+  filters: ["desktop", "mobile"],
+  tables: ["desktop", "mobile"],
+  exportFiles: ["desktop", "mobile"],
+  openFile: ["desktop", "mobile"],
+  saveFile: ["desktop"],
+  editMarks: ["desktop"],
+  editSchemes: ["desktop"],
+  editRooms: ["desktop"],
+  editProject: ["desktop"],
+  dictionary: ["desktop"],
+  viewSizes: ["desktop"],
+};
+
+export function layoutModeFor(view, override) {
+  if (override === "mobile" || override === "desktop") return override;
+  const source = view || {};
+  const width = Number(source.width) || 0;
+  const height = Number(source.height) || 0;
+  const shortSide = height > 0 ? Math.min(width, height) : width;
+  if (source.coarsePointer && shortSide > 0 && shortSide <= LAYOUT_PHONE_SIDE) return "mobile";
+  if (width > 0 && width <= LAYOUT_NARROW_WIDTH) return "mobile";
+  return "desktop";
+}
+
+// Неизвестное умение доступным не считается: опечатка в имени спрячет кнопку,
+// а не пустит правку в режим просмотра.
+export function layoutAllows(ability, mode) {
+  const modes = LAYOUT_ABILITIES[ability];
+  return Array.isArray(modes) && modes.includes(mode);
+}
+
 const appCollapsed = new Set();
+let appLayoutOverride = null;
+let appSheet = "none";
 
 // Что кладётся в настройки: список свёрнутых разделов. Мусор из хранилища
 // (чужая версия, битое значение) не должен схлопывать панель — он отбрасывается.
@@ -106,6 +163,7 @@ export function setState(patch) {
   }
   syncCanvasClass();
   syncProjectName();
+  syncSchemeName();
   return snapshot;
 }
 
@@ -171,10 +229,117 @@ function syncProjectName() {
   node.textContent = appState.project ? appState.project.name : strings.header.noProject;
 }
 
+// На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
+// открыто, — списка схем на экране нет, он спрятан в лист.
+function syncSchemeName() {
+  const node = document.getElementById("scheme-name");
+  if (!node) return;
+  const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
+  node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
+}
+
 function syncCanvasClass() {
   const app = document.getElementById("app");
   if (!app) return;
   app.classList.toggle("has-scheme", Boolean(appState.schemeId));
+}
+
+function layoutViewport() {
+  if (typeof window === "undefined") return { width: 0, height: 0, coarsePointer: false };
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    coarsePointer:
+      typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches,
+  };
+}
+
+// Раскладка, которую выбрал бы сам экран: по ней видно, показывать ли переход
+// к полной версии. На настоящем десктопе кнопки нет вовсе — второго режима
+// работы там не заводим.
+export function layoutAutoMode() {
+  return layoutModeFor(layoutViewport(), null);
+}
+
+export function layoutMode() {
+  return appState.layout;
+}
+
+export function layoutOverride() {
+  return appLayoutOverride;
+}
+
+export function setLayoutOverride(mode) {
+  appLayoutOverride = mode === "mobile" || mode === "desktop" ? mode : null;
+  syncLayout();
+}
+
+// Лист снизу: на узком экране колонки показываются по одной и поверх плана.
+export function openSheet(name) {
+  appSheet = name === "schemes" || name === "marks" ? name : "none";
+  syncSheet();
+}
+
+export function currentSheet() {
+  return appSheet;
+}
+
+function syncSheet() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.dataset.sheet = appState.layout === "mobile" ? appSheet : "none";
+  for (const button of document.querySelectorAll("[data-sheet-button]")) {
+    const target = button.dataset.sheetButton;
+    const active = app.dataset.sheet === target || (target === "none" && app.dataset.sheet === "none");
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function syncLayout() {
+  const mode = layoutModeFor(layoutViewport(), appLayoutOverride);
+  const app = document.getElementById("app");
+  if (app) app.classList.toggle("is-mobile", mode === "mobile");
+  if (mode !== "mobile") appSheet = "none";
+  const toggle = document.getElementById("layout-toggle");
+  if (toggle) {
+    // Кнопка живёт только там, где экран сам выбрал просмотр: на телефоне —
+    // дорога к полной версии, на десктопе её нет и быть не должно.
+    toggle.hidden = layoutAutoMode() !== "mobile";
+    toggle.textContent = mode === "mobile" ? strings.mobile.full : strings.mobile.view;
+    toggle.title = mode === "mobile" ? strings.mobile.fullHint : strings.mobile.viewHint;
+  }
+  if (appState.layout !== mode) {
+    // Вход в просмотр снимает режим постановки: в суженном окне мышь никуда не
+    // делась, и оставленный «Точка» ставил бы метки там, где их не ждут.
+    setState(mode === "mobile" ? { layout: mode, mode: "select" } : { layout: mode });
+  }
+  syncSheet();
+  syncSchemeName();
+}
+
+function wireLayout() {
+  syncLayout();
+  const toggle = document.getElementById("layout-toggle");
+  if (toggle) {
+    toggle.addEventListener("click", () =>
+      setLayoutOverride(appState.layout === "mobile" ? "desktop" : null),
+    );
+  }
+  for (const button of document.querySelectorAll("[data-sheet-button]")) {
+    button.addEventListener("click", () => {
+      const target = button.dataset.sheetButton;
+      openSheet(appSheet === target ? "none" : target);
+    });
+  }
+  if (typeof window === "undefined") return;
+  let timer = null;
+  const later = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(syncLayout, 120);
+  };
+  window.addEventListener("resize", later);
+  window.addEventListener("orientationchange", later);
 }
 
 function sectionNode(id) {
@@ -245,6 +410,7 @@ export function startApp() {
   wireSections();
   syncProjectName();
   syncCanvasClass();
+  wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
 }
 
