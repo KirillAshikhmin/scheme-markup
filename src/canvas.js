@@ -12,22 +12,33 @@ import { PANEL_IDS, registerPanel } from "./app.js";
 import { strings, text } from "./strings.js";
 import {
   BLOCK_STEP_PX,
+  OUTLINE_MIN_POINTS,
   addMark,
+  addOutline,
   addToGroup,
+  applyRoomOutlines,
   deleteMark,
+  deleteOutline,
   findScheme,
   findType,
   findMark,
   findGroup,
+  findOutline,
+  findRoom,
+  insertOutlinePoint,
   labelOf,
+  moveOutlinePoint,
+  removeOutlinePoint,
   styleOf,
   updateMark,
 } from "./model.js";
 import {
   drawHandles,
+  drawOutlineHandles,
   drawScheme,
   fitView,
   hitHandle,
+  hitOutline,
   hitTest,
   labelOffsetOf,
   markRadius,
@@ -118,7 +129,7 @@ function canvasPaint() {
   if (!scheme) return;
   const project = canvasProject(state);
   const view = canvasViewOf(state);
-  const draftColor = state.activeTypeId ? styleOf(project, state.activeTypeId).color : "#0969da";
+  const draftColor = canvasDraftColor(state, project);
   drawScheme(canvasCtx, {
     project,
     scheme,
@@ -126,9 +137,16 @@ function canvasPaint() {
     filter: state.filter,
     view,
     selectedIds: state.selectedMarkIds,
+    selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     draftColor,
   });
+  // Ручки контура — у выделенного помещения: вершину двигают, «+» на стенке
+  // добавляет новую. Обводка по стенам с первого раза не выходит.
+  const outline = state.selectedOutlineId ? findOutline(project, state.selectedOutlineId) : null;
+  if (outline && outline.schemeId === scheme.id && !canvasDrag) {
+    drawOutlineHandles(canvasCtx, scheme, outline, view);
+  }
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
   if (state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
@@ -138,6 +156,15 @@ function canvasPaint() {
   }
 }
 
+// Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа.
+function canvasDraftColor(state, project) {
+  if (state.mode === "room") {
+    const room = state.activeRoomId ? findRoom(project, state.activeRoomId) : null;
+    return (room && room.color) || "#0969da";
+  }
+  return state.activeTypeId ? styleOf(project, state.activeTypeId).color : "#0969da";
+}
+
 // ——— изменения объекта ————————————————————————————————————————————————
 
 // Любая правка объекта проходит здесь — и с холста, и из панели инструментов:
@@ -145,25 +172,69 @@ function canvasPaint() {
 // схему и выделение, на которых действие произошло. Иначе Ctrl+Z после
 // переключения схемы правит метки на той, которую не видно.
 // Своего мутатора объекта в холсте нет.
+// Ключи, которые понимает команда. Список закрытый нарочно: четвёртым
+// аргументом когда-то был список выделения, потом стал объект опций — и массив
+// от старого вызова молча превращался в опции без `selection`. Поставленная
+// метка переставала выделяться: ни ручек «+» рядом с ней, ни живой кнопки
+// «Сменить тип», и так четыре таска. Опечатка `selecton:` дала бы то же самое
+// молчание, поэтому неизвестный ключ — отказ, а не подстановка по умолчанию.
+const CANVAS_COMMIT_KEYS = ["selection", "schemeId", "patch"];
+
+export function canvasCommitOptions(options) {
+  if (options == null) return {};
+  if (typeof options !== "object" || Array.isArray(options)) {
+    throw canvasOptionError("commitOptionsNotObject", { keys: CANVAS_COMMIT_KEYS.join(", ") });
+  }
+  const unknown = Object.keys(options).filter((key) => !CANVAS_COMMIT_KEYS.includes(key));
+  if (unknown.length > 0) {
+    throw canvasOptionError("unknownCommitOption", { keys: unknown.join(", "), known: CANVAS_COMMIT_KEYS.join(", ") });
+  }
+  return options;
+}
+
+function canvasOptionError(key, vars) {
+  const error = new Error(text("errors." + key, vars));
+  error.code = key;
+  return error;
+}
+
 export function canvasCommit(before, after, label, options = {}) {
   const { setState } = canvasApi;
+  let settings;
+  try {
+    settings = canvasCommitOptions(options);
+  } catch (error) {
+    // Отказ виден и в интерфейсе: ошибка в опциях — это правка, которая не
+    // случилась, и промолчать о ней значит повторить ту же историю.
+    canvasFail(error);
+    throw error;
+  }
   const state = canvasState();
   const selectionBefore = state.selectedMarkIds;
   const schemeBefore = state.schemeId;
-  const keep = options.selection || selectionBefore;
-  const schemeAfter = options.schemeId || schemeBefore;
+  const keep = settings.selection || selectionBefore;
+  const schemeAfter = settings.schemeId || schemeBefore;
   // Правка сеансовых полей (активный тип, режим) едет вместе с командой:
   // возвращать объект без них — значит оставить панель показывать то, чего нет.
   // «До» для них снимается здесь же, по именам переданных полей, — вызывающий
   // передаёт только «после», иначе две половинки пары разъедутся молча.
-  const patch = options.patch || {};
+  const patch = settings.patch || {};
   const patchBefore = {};
   for (const key of Object.keys(patch)) patchBefore[key] = state[key];
+  // Единственное место, где срабатывает автопривязка меток к помещениям:
+  // любая правка объекта проходит здесь, поэтому и поставленная метка, и
+  // перерисованный контур доводят поля «Помещение» до порядка одним шагом
+  // истории. Метка с вписанным руками помещением автоматике не достаётся.
+  const binding = after && Array.isArray(after.marks) ? applyRoomOutlines(after) : { project: after, changed: [] };
+  const bound = binding.project;
+  // Ярлык шага называет и автопривязку, когда она что-то поменяла: «смена типа»
+  // в списке отмены, за которой переехали помещения полудюжины меток, врёт.
+  const step = binding.changed.length > 0 ? text("history.withRooms", { label }) : label;
   const apply = () =>
-    setState({ project: after, schemeId: schemeAfter, selectedMarkIds: canvasAlive(after, keep), ...patch });
+    setState({ project: bound, schemeId: schemeAfter, selectedMarkIds: canvasAlive(bound, keep), ...patch });
   apply();
   pushCommand({
-    label,
+    label: step,
     undo: () =>
       setState({
         project: before,
@@ -196,7 +267,7 @@ function canvasPlacePoint(plan) {
       kind: "point",
       points: [plan],
     });
-    canvasCommit(state.project, result.project, strings.history.addMark, [result.mark.id]);
+    canvasCommit(state.project, result.project, strings.history.addMark, { selection: [result.mark.id] });
   } catch (error) {
     canvasFail(error);
   }
@@ -235,7 +306,7 @@ function canvasBlockPoint(markId, side) {
       step: canvasBlockStep(state),
       typeId: canvasPlacedTypeId(state),
     });
-    canvasCommit(state.project, result.project, strings.history.addBlock, [result.mark.id]);
+    canvasCommit(state.project, result.project, strings.history.addBlock, { selection: [result.mark.id] });
   } catch (error) {
     canvasFail(error);
   }
@@ -254,6 +325,24 @@ function canvasLineClick(plan, screen) {
     canvasApi.notify(strings.canvas.needType);
     return;
   }
+  canvasDraftClick(plan, screen);
+}
+
+// Контур помещения рисуется той же рукой, что и ломаная: клик — вершина,
+// двойной клик по первой замыкает, Backspace убирает последнюю, Esc отменяет.
+// Отличается только то, чем это заканчивается: замкнутым многоугольником
+// помещения, а не линией-меткой.
+function canvasOutlineClick(plan, screen) {
+  const state = canvasState();
+  if (!state.activeRoomId || !findRoom(state.project, state.activeRoomId)) {
+    canvasApi.notify(strings.canvas.needRoom);
+    return;
+  }
+  canvasDraftClick(plan, screen);
+}
+
+function canvasDraftClick(plan, screen) {
+  const state = canvasState();
   if (!canvasDraft) {
     canvasDraft = { points: [plan], cursor: plan };
     canvasRedraw();
@@ -292,9 +381,86 @@ function canvasLineFinish(closed) {
     let project = result.project;
     if (closed) project = updateMark(project, result.mark.id, { closed: true }).project;
     canvasDraft = null;
-    canvasCommit(state.project, project, strings.history.addLine, [result.mark.id]);
+    canvasCommit(state.project, project, strings.history.addLine, { selection: [result.mark.id] });
   } catch (error) {
     canvasCancelDraft();
+    canvasFail(error);
+  }
+}
+
+function canvasOutlineFinish() {
+  if (!canvasDraft) return;
+  const points = canvasDraft.points;
+  const state = canvasState();
+  if (points.length < OUTLINE_MIN_POINTS) {
+    canvasApi.notify(strings.canvas.outlineTooShort);
+    return;
+  }
+  try {
+    const result = addOutline(state.project, {
+      schemeId: state.schemeId,
+      roomId: state.activeRoomId,
+      points,
+    });
+    canvasDraft = null;
+    // Контур нарисован — дальше его правят, а не рисуют второй: режим
+    // переключается на выделение, и ручки вершин сразу под рукой.
+    canvasCommit(state.project, result.project, strings.history.addOutline, {
+      selection: [],
+      patch: { mode: "select", selectedOutlineId: result.outline.id },
+    });
+  } catch (error) {
+    canvasCancelDraft();
+    canvasFail(error);
+  }
+}
+
+// Правка вершин выделенного контура: «+» на стенке добавляет вершину,
+// двойной клик по вершине убирает её. Перетаскивание вершины — в canvasDragTo.
+function canvasOutlineInsert(outlineId, index, plan) {
+  const state = canvasState();
+  try {
+    const result = insertOutlinePoint(state.project, outlineId, index, plan);
+    canvasCommit(state.project, result.project, strings.history.outlineVertexAdd, {
+      patch: { selectedOutlineId: outlineId },
+    });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+function canvasOutlineRemovePoint(outlineId, index) {
+  const state = canvasState();
+  try {
+    const result = removeOutlinePoint(state.project, outlineId, index);
+    canvasCommit(state.project, result.project, strings.history.outlineVertexRemove, {
+      patch: { selectedOutlineId: outlineId },
+    });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+async function canvasDeleteOutline() {
+  const state = canvasState();
+  const outline = state.selectedOutlineId ? findOutline(state.project, state.selectedOutlineId) : null;
+  // Контур с другой схемы удалять нечего: выделение могло остаться с прошлой.
+  if (!outline || outline.schemeId !== state.schemeId) return;
+  const room = findRoom(state.project, outline.roomId);
+  const agreed = await uiConfirm({
+    title: strings.canvas.deleteOutlineTitle,
+    message: text("canvas.deleteOutlineMessage", { name: room ? room.name : "" }),
+    confirmLabel: strings.canvas.deleteOutlineConfirm,
+  });
+  if (!agreed) return;
+  const fresh = canvasState().project;
+  if (!findOutline(fresh, outline.id)) return;
+  try {
+    const result = deleteOutline(fresh, outline.id);
+    canvasCommit(fresh, result.project, strings.history.removeOutline, {
+      patch: { selectedOutlineId: null },
+    });
+  } catch (error) {
     canvasFail(error);
   }
 }
@@ -320,7 +486,7 @@ async function canvasDeleteSelected() {
   if (!findMark(fresh, markId)) return;
   try {
     const result = deleteMark(fresh, markId);
-    canvasCommit(fresh, result.project, strings.history.remove, []);
+    canvasCommit(fresh, result.project, strings.history.remove, { selection: [] });
   } catch (error) {
     canvasFail(error);
   }
@@ -454,14 +620,46 @@ function canvasPointerDown(event) {
     }
   }
 
-  if (state.mode === "line") {
-    canvasDrag = { kind: "line", start: point, view: { ...state.view }, moved: false };
+  if (state.mode === "line" || state.mode === "room") {
+    canvasDrag = { kind: state.mode, start: point, view: { ...state.view }, moved: false };
     return;
   }
 
+  // Клик по метке важнее клика по контуру: попадание по меткам считается
+  // первым, и контур перехватывает клик только там, где метки нет.
   const hit = hitTest(state.project, scheme, point, view, state.filter);
+  if (!hit && state.mode === "select") {
+    const outlineHit = hitOutline(state.project, scheme, point, view, state.filter, state.selectedOutlineId || null);
+    if (outlineHit) {
+      if (outlineHit.part === "vertex") {
+        canvasDrag = {
+          kind: "outlineVertex",
+          outlineId: outlineHit.outlineId,
+          index: outlineHit.index,
+          start: point,
+          before: state.project,
+          moved: false,
+        };
+        return;
+      }
+      if (outlineHit.part === "insert") {
+        canvasOutlineInsert(outlineHit.outlineId, outlineHit.index, screenToPlan(point, scheme, view));
+        canvasDrag = { kind: "done", start: point, moved: false };
+        return;
+      }
+      if (state.selectedOutlineId !== outlineHit.outlineId || state.selectedMarkIds.length > 0) {
+        canvasApi.setState({ selectedOutlineId: outlineHit.outlineId, selectedMarkIds: [] });
+      }
+      canvasDrag = { kind: "outline", start: point, view: { ...state.view }, moved: false };
+      return;
+    }
+  }
   if (hit) {
-    if (state.selectedMarkIds[0] !== hit.markId) canvasApi.setState({ selectedMarkIds: [hit.markId] });
+    // Выделили метку — выделение контура снимается: две пары ручек рядом
+    // означали бы, что непонятно, чью вершину сейчас потащат.
+    if (state.selectedMarkIds[0] !== hit.markId || state.selectedOutlineId) {
+      canvasApi.setState({ selectedMarkIds: [hit.markId], selectedOutlineId: null });
+    }
     canvasDrag = {
       kind: hit.part === "label" ? "label" : "mark",
       markId: hit.markId,
@@ -487,12 +685,19 @@ function canvasDragTo(point) {
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   const before = canvasDrag.before;
-  const origin = screenToPlan(canvasDrag.start, scheme, view);
+  const from = screenToPlan(canvasDrag.start, scheme, view);
   const now = screenToPlan(point, scheme, view);
-  const dx = now.x - origin.x;
-  const dy = now.y - origin.y;
+  const dx = now.x - from.x;
+  const dy = now.y - from.y;
   try {
-    if (canvasDrag.kind === "label") {
+    if (canvasDrag.kind === "outlineVertex") {
+      const outline = findOutline(before, canvasDrag.outlineId);
+      const origin = outline.points[canvasDrag.index];
+      canvasPreview = moveOutlinePoint(before, canvasDrag.outlineId, canvasDrag.index, {
+        x: origin.x + dx,
+        y: origin.y + dy,
+      }).project;
+    } else if (canvasDrag.kind === "label") {
       const target = canvasDrag.groupId ? findGroup(before, canvasDrag.groupId) : findMark(before, canvasDrag.markId);
       const current = target ? labelOffsetOf(before, target) : null;
       const size = view.markSize || 10;
@@ -546,11 +751,11 @@ function canvasPointerMove(event) {
   if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
   if (!canvasDrag.moved) return;
 
-  if (canvasDrag.kind === "mark" || canvasDrag.kind === "label") {
+  if (canvasDrag.kind === "mark" || canvasDrag.kind === "label" || canvasDrag.kind === "outlineVertex") {
     canvasDragTo(point);
     return;
   }
-  if (canvasDrag.kind === "pan" || canvasDrag.kind === "empty" || canvasDrag.kind === "place" || canvasDrag.kind === "line") {
+  if (["pan", "empty", "place", "line", "room", "outline"].includes(canvasDrag.kind)) {
     canvasApi.setState({
       view: {
         ...state.view,
@@ -575,7 +780,14 @@ function canvasPointerUp(event) {
       const label = drag.kind === "label" ? strings.history.moveLabel : strings.history.move;
       const after = canvasPreview;
       canvasPreview = null;
-      canvasCommit(drag.before, after, label, [drag.markId]);
+      canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+    }
+    if (drag.kind === "outlineVertex" && canvasPreview) {
+      const after = canvasPreview;
+      canvasPreview = null;
+      canvasCommit(drag.before, after, strings.history.outlineVertexMove, {
+        patch: { selectedOutlineId: drag.outlineId },
+      });
     }
     canvasPreview = null;
     canvasRedraw();
@@ -590,20 +802,34 @@ function canvasPointerUp(event) {
     canvasLineClick(plan, point);
     return;
   }
+  if (drag.kind === "room") {
+    canvasOutlineClick(plan, point);
+    return;
+  }
   if (drag.kind === "place") {
     canvasPlacePoint(plan);
     return;
   }
-  if (drag.kind === "empty" && state.selectedMarkIds.length > 0) {
-    canvasApi.setState({ selectedMarkIds: [] });
+  if (drag.kind === "empty" && (state.selectedMarkIds.length > 0 || state.selectedOutlineId)) {
+    canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null });
   }
 }
 
 function canvasDoubleClick(event) {
   const state = canvasState();
-  if (state.mode !== "line" || !canvasDraft) return;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
+  // Двойной клик по вершине выделенного контура убирает её: обводка по стенам
+  // с первого раза не выходит, и лишняя вершина — обычное дело.
+  if (state.mode === "select" && state.selectedOutlineId) {
+    const hit = hitOutline(state.project, scheme, canvasPointOf(event), view, state.filter, state.selectedOutlineId);
+    if (hit && hit.part === "vertex" && hit.outlineId === state.selectedOutlineId) {
+      event.preventDefault();
+      canvasOutlineRemovePoint(hit.outlineId, hit.index);
+      return;
+    }
+  }
+  if ((state.mode !== "line" && state.mode !== "room") || !canvasDraft) return;
   const point = canvasPointOf(event);
   const threshold = markRadius(view) + 6;
   const points = canvasDraft.points;
@@ -615,6 +841,11 @@ function canvasDoubleClick(event) {
   // продолжается, ничего не теряется и не замыкается.
   if (!onFirst && !onLast) return;
   event.preventDefault();
+  // Контур помещения замкнут всегда: комната с открытой стенкой — не комната.
+  if (state.mode === "room") {
+    canvasOutlineFinish();
+    return;
+  }
   // По первой точке — замкнутый контур (лента по периметру комнаты),
   // по последней — открытая линия, ровно как в брифе.
   canvasLineFinish(onFirst && !onLast && points.length >= 3);
@@ -663,6 +894,10 @@ function canvasKeyDown(event) {
   }
   if (event.key === "Escape") {
     if (canvasCancelDraft()) return;
+    if (state.selectedOutlineId) {
+      canvasApi.setState({ selectedOutlineId: null });
+      return;
+    }
     // Первый Esc снимает выделение: пока метка выделена, вокруг неё ручки «+»,
     // и отдельную метку вплотную к блоку не поставить. Второй — выходит из режима.
     if (state.selectedMarkIds.length > 0) {
@@ -682,6 +917,11 @@ function canvasKeyDown(event) {
   if ((event.key === "Delete" || event.key === "Backspace") && state.selectedMarkIds.length > 0) {
     event.preventDefault();
     canvasDeleteSelected();
+    return;
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && state.selectedOutlineId) {
+    event.preventDefault();
+    canvasDeleteOutline();
   }
 }
 
@@ -739,7 +979,7 @@ function mountCanvas(host, api) {
       canvasPreview = null;
     }
     if ("mode" in changed) {
-      if (state.mode !== "line") canvasCancelDraft();
+      if (state.mode !== "line" && state.mode !== "room") canvasCancelDraft();
       canvasSyncCursor();
     }
     if ("schemeId" in changed || "schemeImage" in changed) canvasAutoFit(state);
@@ -776,15 +1016,26 @@ function mountCanvasHint(host, api) {
     }
     const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
     const label = type ? type.code + " — " + type.name : "";
-    if (state.mode === "point" && type) hint.textContent = text("canvas.hintPoint", { label });
+    const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
+    if (state.mode === "room") hint.textContent = text("canvas.hintRoom", { name: room ? room.name : "" });
+    else if (state.mode === "point" && type) hint.textContent = text("canvas.hintPoint", { label });
     else if (state.mode === "line" && type) hint.textContent = strings.canvas.hintLine;
     else if (type) hint.textContent = strings.canvas.hintSelectMode;
     else hint.textContent = strings.canvas.hintSelect;
     hint.hidden = false;
-    if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
+    if (state.mode === "room" && room) hint.style.borderColor = room.color;
+    else if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
   };
   api.subscribe((state, changed) => {
-    if ("mode" in changed || "activeTypeId" in changed || "schemeId" in changed || "project" in changed) render();
+    if (
+      "mode" in changed ||
+      "activeTypeId" in changed ||
+      "activeRoomId" in changed ||
+      "schemeId" in changed ||
+      "project" in changed
+    ) {
+      render();
+    }
   });
   render();
 }

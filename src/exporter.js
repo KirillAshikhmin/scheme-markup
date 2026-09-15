@@ -82,7 +82,8 @@ function exportArea(scheme, area) {
 
 /**
  * PNG схемы с метками. `area` — «all» или прямоугольник в пикселях плана,
- * `scale` — множитель, `legend` — рисовать ли легенду в углу, `filter` —
+ * `scale` — множитель, `legend` — рисовать ли легенду в углу, `outlines` —
+ * печатать ли контуры помещений (по умолчанию да, бледной линией), `filter` —
  * тот же фильтр, что на экране: скрытое им не попадает ни в картинку,
  * ни в легенду.
  */
@@ -108,6 +109,9 @@ export async function schemePng(project, scheme, image, options = {}) {
     filter: options.filter || null,
     view,
     legend: options.legend ? { x: 16 * scale, y: 16 * scale } : null,
+    // Контуры помещений на бумаге — бледной линией: на листе главное метки,
+    // а обводка комнаты подсказывает, где они стоят. Галочка в диалоге её снимает.
+    outlines: options.outlines === false ? false : "pale",
   });
   return exportBlob(canvas);
 }

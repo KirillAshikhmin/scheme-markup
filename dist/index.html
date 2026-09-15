@@ -65,6 +65,24 @@
   border-color: var(--panel-muted);
 }
 
+/* Подпись «Выбрать» у плашки: по ней видно, что плашка нажимается. */
+.tools__pick {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--panel-line);
+  background: #30363d;
+  color: var(--panel-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tools__type:hover .tools__pick,
+.tools__room:hover .tools__pick {
+  border-color: var(--accent);
+}
+
 .tools__code {
   font-weight: 700;
   font-size: 15px;
@@ -75,6 +93,49 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Помещение для обводки — та же плитка, что и выбранный тип метки. */
+.tools__room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tools__room.is-set {
+  border-color: var(--accent);
+}
+
+.tools__room:hover {
+  border-color: var(--panel-muted);
+}
+
+/* Кружок цвета помещения: им же обводится контур на схеме. */
+.rooms__swatch {
+  flex: none;
+  display: inline-block;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.rooms__color {
+  flex: none;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: #21262d;
+  cursor: pointer;
 }
 
 .tools__row {
@@ -558,6 +619,11 @@
 .rooms__add .ui-input {
   flex: 1;
   min-width: 0;
+}
+
+/* Вписанное руками помещение подчёркнуто: по контуру оно больше не меняется. */
+.marks__room.is-manual {
+  border-color: var(--accent);
 }
 
 .rooms__count {
@@ -1682,12 +1748,19 @@ const strings = {
     noType: "Тип не выбран",
     chooseType: "Выбрать тип",
     changeType: "Сменить тип",
+    changeTypeOf: "Сменить тип у {label}",
     changeTypeHint: "Сменить тип выделенной метки — номер выдастся новый",
+    pick: "Выбрать",
     kind: "Что ставим",
     kindPoint: "Точка",
     kindLine: "Линия",
     kindPointHint: "Клик по плану ставит точку выбранного типа",
     kindLineHint: "Клики рисуют ломаную: лента или трек",
+    kindOutline: "Контур",
+    kindOutlineHint: "Обвести помещение по стенам: клик — вершина, двойной клик по первой замыкает",
+    room: "Помещение для обводки",
+    chooseRoom: "Выбрать помещение",
+    noRoom: "Помещение не выбрано",
     block: "Блок точек",
     blockHint: "Режим блока хранится у типа: так встают его метки, когда их ставят ручкой «+»",
     sizes: "Размеры",
@@ -1703,7 +1776,6 @@ const strings = {
     undoTitle: "Отменить: {label} (Ctrl+Z)",
     redoTitle: "Вернуть: {label} (Ctrl+Y)",
     selectMode: "Выделение",
-    noSelection: "Метка не выделена",
   },
   picker: {
     title: "Тип метки",
@@ -1718,13 +1790,22 @@ const strings = {
     codeHint: "Код типа — одна или две буквы",
   },
   canvas: {
-    hintSelect: "Выберите тип метки, чтобы ставить метки по плану",
+    hintSelect:
+      "Выберите тип метки, чтобы ставить метки по плану. Клик по стенке контура выделяет помещение.",
     hintPoint:
       "Клик ставит {label}. Ручки «+» у выделенной метки ставят рядом {label} — так в одной рамке собираются выключатель и розетка. Esc снимает выделение и прячет ручки, второй Esc выходит из режима.",
     hintSelectMode:
-      "Клик выбирает метку, перетаскивание двигает её или подпись, Delete удаляет, Esc снимает выделение.",
+      "Клик выбирает метку, перетаскивание двигает её или подпись, Delete удаляет, Esc снимает выделение. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает.",
     hintLine: "Клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить.",
     lineTooShort: "Линия из одной точки не сохраняется — поставьте ещё хотя бы одну вершину",
+    hintRoom:
+      "Обводим помещение «{name}»: клик — вершина по стене, двойной клик по первой замыкает контур. Backspace — убрать вершину, Esc — отменить.",
+    outlineTooShort: "Контур помещения — не меньше трёх вершин",
+    needRoom: "Сначала выберите помещение, которое обводим",
+    deleteOutlineTitle: "Удалить контур помещения?",
+    deleteOutlineMessage:
+      "Контур «{name}» будет убран со схемы. Само помещение и метки останутся, но подстановка по контуру для них перестанет работать.",
+    deleteOutlineConfirm: "Удалить контур",
     needType: "Сначала выберите тип метки",
     needScheme: "Сначала загрузите план схемы",
     deleteBlockTitle: "Удалить метку из блока?",
@@ -1752,6 +1833,14 @@ const strings = {
     markNumber: "правка номера метки",
     compact: "уплотнение нумерации",
     markRoom: "помещение метки",
+    markRoomAuto: "помещение по контуру",
+    withRooms: "{label} + помещения по контуру",
+    addOutline: "контур помещения",
+    removeOutline: "удаление контура",
+    outlineVertexMove: "вершина контура",
+    outlineVertexAdd: "новая вершина контура",
+    outlineVertexRemove: "удаление вершины контура",
+    roomColor: "цвет помещения",
     addRoom: "новое помещение",
     renameRoom: "переименование помещения",
     removeRoom: "удаление помещения",
@@ -1769,6 +1858,9 @@ const strings = {
     roomNotFound: "Помещение не найдено",
     noPoints: "Нужна хотя бы одна точка",
     shortLine: "Линия короче двух вершин не сохраняется",
+    shortOutline: "Контур помещения — не меньше трёх вершин",
+    outlineNotFound: "Контур помещения не найден",
+    outlinePointNotFound: "Вершина контура не найдена",
     codeRequired: "Нужен код типа — одна или две буквы",
     codeTooLong: "Код типа — не больше двух букв",
     codeLetters: "Код типа — только буквы, одна или две",
@@ -1781,6 +1873,8 @@ const strings = {
     unknownBlockMode: "Неизвестный режим блока",
     unknownSide: "Неизвестная сторона блока",
     unknownKind: "Неизвестный вид метки",
+    unknownCommitOption: "Правка не выполнена: в опциях команды неизвестный ключ {keys}. Известны: {known}",
+    commitOptionsNotObject: "Правка не выполнена: опции команды — объект с ключами {keys}, а не список",
     badNumber: "Номер метки — целое число больше нуля",
     numberTooBig: "Номер метки — не больше {max}",
     notAProject: "Файл не похож на проект разметки схем",
@@ -1801,6 +1895,9 @@ const strings = {
     repeatedNumber: "{label} — таких меток {count}",
     emptyPoints: "У метки нет точек",
     shortLine: "У линии меньше двух вершин",
+    shortOutline: "У контура помещения меньше трёх вершин",
+    outlineWithoutScheme: "Контур помещения ссылается на несуществующую схему",
+    outlineWithoutRoom: "Контур ссылается на несуществующее помещение",
     smallGroup: "В группе меньше двух меток",
     groupAcrossSchemes: "Метки одной группы лежат на разных схемах",
     counterBehind: "Счётчик типа {code} меньше выданных номеров",
@@ -1947,6 +2044,8 @@ const strings = {
   marks: {
     count: "Показано {shown} из {total}",
     room: "Помещение",
+    roomAuto: "Помещение подставлено по контуру на схеме",
+    roomManual: "Помещение вписано вручную — по контуру оно больше не меняется",
     number: "Номер метки — правится вручную, повтор разрешён",
     repeatBadge: "×{count}",
     location: "Расположение",
@@ -1973,6 +2072,10 @@ const strings = {
     newRoom: "Новое помещение…",
     newTitle: "Название помещения",
     none: "Без помещения",
+    auto: "По контуру",
+    autoOf: "По контуру: {name}",
+    color: "Цвет контура помещения",
+    pickTitle: "Какое помещение обводим?",
     empty: "Помещений пока нет — впишите помещение в строке метки",
     marks: "меток: {count}",
     remove: "Удалить помещение",
@@ -2053,6 +2156,7 @@ const strings = {
     areaAll: "Вся схема",
     areaView: "Как вижу на экране",
     withLegend: "С легендой в углу",
+    withRooms: "С контурами помещений",
     scale: "Множитель",
     size: "{width} × {height} px · {mmWidth} × {mmHeight} мм при 300 dpi",
     rows: "Строк: {count}",
@@ -2105,7 +2209,19 @@ function text(key, vars) {
 // Правила объекта: справочники, метки, группы, нумерация.
 // Чистый модуль: ни DOM, ни хранилища. Все функции возвращают новый объект,
 // исходный не меняется.
-const FORMAT_VERSION = 1;
+
+// Версия формата объекта. Поднимается, когда в project.json появляются поля,
+// без которых работа теряется. История:
+//   1 — схемы, метки, блоки, группы, помещения списком;
+//   2 — контуры помещений (`project.outlines`), признак ручной правки
+//       помещения у метки (`mark.roomManual`) и цвет помещения (`room.color`).
+// Совместимости вперёд нет сознательно: страница версии 1 не знает о контурах
+// и, открыв такой файл, молча потеряла бы их вместе с ручной правкой —
+// поэтому она честно откажется («файл сделан более новой версией»).
+// Назад совместимость обязательна: файл версии 1 читается и дополняется
+// умолчаниями в `projectFile.migrateProject`, а метка без `roomManual`
+// считается правленной руками (`markRoomManual`).
+const FORMAT_VERSION = 2;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -2145,6 +2261,28 @@ const BLOCK_FALLBACK_SIZE_PX = 1000;
 // Цвет метки, когда категория недоступна.
 const FALLBACK_COLOR = "#8B949E";
 const BLOCK_SIDES = ["left", "right", "up", "down"];
+
+// Цвета помещений: контур обводится цветом комнаты, и на одном плане их видно
+// сразу десяток — поэтому палитра разведена по тону, а не по яркости, и
+// не повторяет цвета категорий меток (метка на контуре не должна теряться).
+// Цвет назначается при создании комнаты и правится вручную.
+const ROOM_PALETTE = [
+  "#0F766E",
+  "#B45309",
+  "#7E22CE",
+  "#0369A1",
+  "#BE123C",
+  "#4D7C0F",
+  "#A16207",
+  "#1D4ED8",
+  "#9D174D",
+  "#15803D",
+  "#C2410C",
+  "#4338CA",
+];
+
+// Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
+const OUTLINE_MIN_POINTS = 3;
 
 const DEFAULT_VIEW = { markSize: 10, labelSize: 12 };
 
@@ -2235,6 +2373,10 @@ function createProject(template) {
     schemes: [],
     marks: [],
     groups: [],
+    // Контуры помещений на схемах: у одной комнаты на разных схемах свои
+    // обводки или ни одной. Объект старого формата их не знает — читается
+    // список везде через `outlinesOf`, поэтому пустого поля здесь достаточно.
+    outlines: [],
     counters: {},
     view: { ...DEFAULT_VIEW, ...(source.view || {}) },
   };
@@ -2255,6 +2397,9 @@ function findMark(project, markId) {
 }
 function findGroup(project, groupId) {
   return project.groups.find((group) => group.id === groupId) || null;
+}
+function findOutline(project, outlineId) {
+  return outlinesOf(project).find((outline) => outline.id === outlineId) || null;
 }
 function findRoom(project, roomId) {
   return project.rooms.find((room) => room.id === roomId) || null;
@@ -2314,10 +2459,12 @@ function deleteScheme(project, schemeId) {
   requireScheme(project, schemeId);
   const marks = project.marks.filter((mark) => mark.schemeId !== schemeId);
   const groups = project.groups.filter((group) => group.schemeId !== schemeId);
+  // Контуры помещений живут на схеме — вместе с ней и уходят.
+  const outlines = outlinesOf(project).filter((outline) => outline.schemeId !== schemeId);
   const schemes = project.schemes
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
-  return { project: withProject(project, { schemes, marks, groups }) };
+  return { project: withProject(project, { schemes, marks, groups, outlines }) };
 }
 
 // Единственный порядок справочника: категории по своему order, типы внутри —
@@ -2405,6 +2552,9 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
     groupId,
     labelOffset: null,
     roomId: null,
+    // Помещение проставляет автоматика по контуру, пока пользователь не вписал
+    // его руками: после этого метка принадлежит ему, а не сервису.
+    roomManual: false,
     location: "",
     original: "",
   };
@@ -2592,7 +2742,7 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-const MARK_PATCH_FIELDS = ["points", "closed", "labelOffset", "roomId", "location", "original"];
+const MARK_PATCH_FIELDS = ["points", "closed", "labelOffset", "roomId", "roomManual", "location", "original"];
 function updateMark(project, markId, patch) {
   requireMark(project, markId);
   const changes = pick(patch, MARK_PATCH_FIELDS);
@@ -2854,26 +3004,206 @@ function deleteCategory(project, categoryId) {
     .map((item, index) => ({ ...item, order: index }));
   return { project: withProject(project, { categories }), deleted: current };
 }
+
+// Цвет новой комнаты: первый из палитры, которым ещё не обведена ни одна
+// комната объекта. Кончилась палитра — идём по кругу: десяток разных контуров
+// на одном плане уже различим, а совпадение цвета через двенадцать комнат
+// пользователь поправит руками.
+function nextRoomColor(project) {
+  const used = new Set(project.rooms.map((room) => room.color).filter(Boolean));
+  const free = ROOM_PALETTE.find((color) => !used.has(color));
+  return free || ROOM_PALETTE[project.rooms.length % ROOM_PALETTE.length];
+}
+
+function normalizeColor(value, fallback) {
+  const color = String(value == null ? "" : value).trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toUpperCase() : fallback;
+}
 function addRoom(project, room) {
   const name = normalizeName(typeof room === "string" ? room : room && room.name);
-  const created = { id: newId(), name };
+  const wanted = typeof room === "object" && room ? room.color : null;
+  const created = { id: newId(), name, color: normalizeColor(wanted, nextRoomColor(project)) };
   return { project: withProject(project, { rooms: [...project.rooms, created] }), room: created };
 }
 function updateRoom(project, roomId, patch = {}) {
-  if (!findRoom(project, roomId)) throw modelError("roomNotFound");
-  const rooms = project.rooms.map((room) =>
-    room.id === roomId && Object.prototype.hasOwnProperty.call(patch, "name")
-      ? { ...room, name: normalizeName(patch.name) }
-      : room,
-  );
+  const current = findRoom(project, roomId);
+  if (!current) throw modelError("roomNotFound");
+  const rooms = project.rooms.map((room) => {
+    if (room.id !== roomId) return room;
+    const next = { ...room };
+    if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
+    if (Object.prototype.hasOwnProperty.call(patch, "color")) {
+      next.color = normalizeColor(patch.color, room.color || nextRoomColor(project));
+    }
+    return next;
+  });
   return { project: withProject(project, { rooms }), room: rooms.find((room) => room.id === roomId) };
 }
 function deleteRoom(project, roomId) {
   const room = findRoom(project, roomId);
   if (!room) throw modelError("roomNotFound");
   const rooms = project.rooms.filter((item) => item.id !== roomId);
+  // Метка теряет помещение, но не признак ручной правки: вписанное руками
+  // «без помещения» остаётся решением пользователя, и контур его не перебьёт.
   const marks = project.marks.map((mark) => (mark.roomId === roomId ? { ...mark, roomId: null } : mark));
-  return { project: withProject(project, { rooms, marks }), deleted: room };
+  const outlines = outlinesOf(project).filter((outline) => outline.roomId !== roomId);
+  return { project: withProject(project, { rooms, marks, outlines }), deleted: room };
+}
+
+// ——— контуры помещений ————————————————————————————————————————————————
+//
+// План загружается на весь объект одной картинкой, а комната обводится по
+// стенам замкнутым многоугольником — с эркерами, нишами и Г-образной формой.
+// Контур принадлежит схеме: у одной комнаты на разных этажах свои обводки.
+
+function outlinesOf(project) {
+  return project && Array.isArray(project.outlines) ? project.outlines : [];
+}
+
+// Площадь многоугольника (формула шнурков) в долях плана. Знак обхода не важен:
+// сравнивать площади надо и у контура, нарисованного по часовой, и против.
+function outlineArea(points) {
+  const list = Array.isArray(points) ? points : [];
+  if (list.length < OUTLINE_MIN_POINTS) return 0;
+  let sum = 0;
+  for (let i = 0, j = list.length - 1; i < list.length; j = i, i += 1) {
+    sum += (list[j].x + list[i].x) * (list[j].y - list[i].y);
+  }
+  return Math.abs(sum) / 2;
+}
+
+// Точка внутри многоугольника — луч вправо и счёт пересечений. Форма любая:
+// для невыпуклой комнаты вырез считается наружной частью, ради чего всё и
+// затевалось (рамка Г-образной комнаты накрывает вырез, контур — нет).
+function pointInOutline(point, points) {
+  const list = Array.isArray(points) ? points : [];
+  if (!point || list.length < OUTLINE_MIN_POINTS) return false;
+  let inside = false;
+  for (let i = 0, j = list.length - 1; i < list.length; j = i, i += 1) {
+    const a = list[i];
+    const b = list[j];
+    const crosses = a.y > point.y !== b.y > point.y;
+    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+// Порядок контуров схемы — от большего к меньшему. Один порядок на всё:
+// рисование (меньший ложится поверх большего) и попадание точки (комната
+// внутри комнаты выигрывает). Своей сортировки заводить негде.
+function outlinesInOrder(project, schemeId) {
+  return outlinesOf(project)
+    .filter((outline) => !schemeId || outline.schemeId === schemeId)
+    .map((outline) => ({ outline, area: outlineArea(outline.points) }))
+    .sort((a, b) => b.area - a.area)
+    .map((item) => item.outline);
+}
+
+// Контур под точкой: последний из порядка, то есть наименьший по площади.
+function outlineAtPoint(project, schemeId, point) {
+  const found = outlinesInOrder(project, schemeId).filter((outline) => pointInOutline(point, outline.points));
+  return found.length > 0 ? found[found.length - 1] : null;
+}
+function roomAtPoint(project, schemeId, point) {
+  const outline = outlineAtPoint(project, schemeId, point);
+  return outline ? outline.roomId : null;
+}
+
+function normalizeOutlinePoints(points) {
+  const list = normalizePoints(points);
+  if (list.length < OUTLINE_MIN_POINTS) throw modelError("shortOutline");
+  return list;
+}
+function addOutline(project, { schemeId, roomId, points } = {}) {
+  requireScheme(project, schemeId);
+  if (!findRoom(project, roomId)) throw modelError("roomNotFound");
+  const outline = { id: newId(), schemeId, roomId, points: normalizeOutlinePoints(points) };
+  return { project: withProject(project, { outlines: [...outlinesOf(project), outline] }), outline };
+}
+
+const OUTLINE_PATCH_FIELDS = ["points", "roomId"];
+function updateOutline(project, outlineId, patch) {
+  if (!findOutline(project, outlineId)) throw modelError("outlineNotFound");
+  const changes = pick(patch, OUTLINE_PATCH_FIELDS);
+  if (Object.prototype.hasOwnProperty.call(changes, "points")) {
+    changes.points = normalizeOutlinePoints(changes.points);
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, "roomId") && !findRoom(project, changes.roomId)) {
+    throw modelError("roomNotFound");
+  }
+  const outlines = outlinesOf(project).map((outline) =>
+    outline.id === outlineId ? { ...outline, ...changes } : outline,
+  );
+  return { project: withProject(project, { outlines }), outline: outlines.find((item) => item.id === outlineId) };
+}
+function deleteOutline(project, outlineId) {
+  const outline = findOutline(project, outlineId);
+  if (!outline) throw modelError("outlineNotFound");
+  const outlines = outlinesOf(project).filter((item) => item.id !== outlineId);
+  return { project: withProject(project, { outlines }), deleted: outline };
+}
+
+// ——— правка вершин контура ————————————————————————————————————————————
+//
+// Обводка по стенам с первого раза не выходит: вершину двигают, добавляют
+// между соседними и удаляют. Всё через updateOutline — второго места, где
+// меняются точки контура, нет.
+
+function outlinePointsAt(project, outlineId) {
+  const outline = findOutline(project, outlineId);
+  if (!outline) throw modelError("outlineNotFound");
+  return [...outline.points];
+}
+function moveOutlinePoint(project, outlineId, index, point) {
+  const points = outlinePointsAt(project, outlineId);
+  if (!(index >= 0 && index < points.length)) throw modelError("outlinePointNotFound");
+  points[index] = { x: point.x, y: point.y };
+  return updateOutline(project, outlineId, { points });
+}
+
+// Новая вершина встаёт после `index` — на сегменте от неё к следующей,
+// замыкающий сегмент считается таким же (последняя → первая).
+function insertOutlinePoint(project, outlineId, index, point) {
+  const points = outlinePointsAt(project, outlineId);
+  if (!(index >= 0 && index < points.length)) throw modelError("outlinePointNotFound");
+  points.splice(index + 1, 0, { x: point.x, y: point.y });
+  return updateOutline(project, outlineId, { points });
+}
+function removeOutlinePoint(project, outlineId, index) {
+  const points = outlinePointsAt(project, outlineId);
+  if (!(index >= 0 && index < points.length)) throw modelError("outlinePointNotFound");
+  if (points.length <= OUTLINE_MIN_POINTS) throw modelError("shortOutline");
+  points.splice(index, 1);
+  return updateOutline(project, outlineId, { points });
+}
+
+// ——— автопривязка метки к помещению ——————————————————————————————————
+//
+// Решение заказчика: «Подставлять автоматически, ручная правка главнее».
+// Метка внутри контура получает его помещение сама, вне всех контуров — поле
+// пустое. Метку, которой помещение вписали руками (`roomManual`), автоматика
+// не трогает больше никогда: ни при перемещении, ни при перерисовке контура.
+// Вписано ли помещение метки руками. Объекты, размеченные до появления
+// контуров, признака не знают вовсе — и там помещение могло взяться только
+// из рук: такую метку автоматика тоже не трогает, иначе первая же правка
+// старого объекта стёрла бы всю работу со списком меток.
+function markRoomManual(mark) {
+  if (!mark) return false;
+  return mark.roomManual === undefined ? Boolean(mark.roomId) : Boolean(mark.roomManual);
+}
+function applyRoomOutlines(project, schemeId) {
+  const changed = [];
+  const marks = project.marks.map((mark) => {
+    if (markRoomManual(mark)) return mark;
+    if (schemeId && mark.schemeId !== schemeId) return mark;
+    const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+    const roomId = point ? roomAtPoint(project, mark.schemeId, point) : null;
+    if ((mark.roomId || null) === roomId) return mark;
+    changed.push(mark.id);
+    return { ...mark, roomId };
+  });
+  if (changed.length === 0) return { project, changed };
+  return { project: withProject(project, { marks }), changed };
 }
 function updateProject(project, patch = {}) {
   const next = {};
@@ -2933,6 +3263,14 @@ function validate(project) {
   // обозначение, с числом меток, чтобы случайный дубль было видно.
   for (const item of repeatedNumbers(project)) {
     problems.push(problem("repeatedNumber", { label: item.label, count: item.count }, item.markIds[0], "warning"));
+  }
+
+  for (const outline of outlinesOf(project)) {
+    if (!findScheme(project, outline.schemeId)) problems.push(problem("outlineWithoutScheme", null, outline.id));
+    if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", null, outline.id));
+    if (!Array.isArray(outline.points) || outline.points.length < OUTLINE_MIN_POINTS) {
+      problems.push(problem("shortOutline", null, outline.id));
+    }
   }
 
   for (const group of project.groups) {
@@ -3293,6 +3631,9 @@ function migrateProject(loaded) {
     ...loaded,
     formatVersion: FORMAT_VERSION,
     rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
+    // Файл версии 1 контуров не знает: поле дописывается здесь, чтобы дальше
+    // по коду `project.outlines` всегда был списком, а не «иногда undefined».
+    outlines: Array.isArray(loaded.outlines) ? loaded.outlines : [],
     groups: Array.isArray(loaded.groups) ? loaded.groups : [],
     counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
   };
@@ -3892,6 +4233,19 @@ const HANDLE_RADIUS = 9;
 
 const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
 
+// Контур помещения: тонкая линия цветом комнаты и полупрозрачная заливка.
+// На бумаге («pale») и линия, и заливка бледнее — контур там подсказка,
+// а не главное на листе: главное — метки.
+const OUTLINE_STYLE = {
+  normal: { line: 1.6, fill: 0.1, label: 0.95 },
+  pale: { line: 1, fill: 0.05, label: 0.6 },
+};
+// Запас в пикселях, с которым попадают по стенке контура.
+const OUTLINE_HIT_PX = 6;
+// Радиус ручки вершины и ручки «+» на середине стенки.
+const OUTLINE_HANDLE_PX = 6;
+const OUTLINE_COLOR_FALLBACK = "#57606a";
+
 // Углы вершин, градусы от «вверх». Все фигуры вписаны в окружность радиуса size.
 const SHAPE_ANGLES = {
   square: [-135, -45, 45, 135],
@@ -4269,6 +4623,190 @@ function labelTargets(project, scheme, filter) {
   return targets;
 }
 
+// ——— контуры помещений ————————————————————————————————————————————————
+
+// Цвет комнаты с прозрачностью: заливка контура не должна перебивать план,
+// поэтому она всегда полупрозрачна, а линия — нет.
+function outlineTint(color, alpha) {
+  const hex = /^#[0-9a-fA-F]{6}$/.test(String(color || "")) ? color : OUTLINE_COLOR_FALLBACK;
+  const value = parseInt(hex.slice(1), 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+}
+
+function outlineScreen(scheme, outline, view) {
+  return outline.points.map((point) => planToScreen(point, scheme, view));
+}
+
+// Середина многоугольника для подписи: центр по площади, а не по вершинам, —
+// у Г-образной комнаты он ближе к её телу, чем среднее углов.
+function outlineCenter(points) {
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const cross = points[j].x * points[i].y - points[i].x * points[j].y;
+    area += cross;
+    cx += (points[j].x + points[i].x) * cross;
+    cy += (points[j].y + points[i].y) * cross;
+  }
+  if (Math.abs(area) < 1e-9) {
+    const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+    return { x: sum.x / points.length, y: sum.y / points.length };
+  }
+  return { x: cx / (3 * area), y: cy / (3 * area) };
+}
+
+// Контуры схемы, прошедшие фильтр: сужение списка меток до одного помещения
+// оставляет на плане и его контур — иначе лист по комнате обещает не ту комнату.
+function visibleOutlines(project, scheme, filter) {
+  if (!project || !scheme) return [];
+  const roomId = filter && filter.roomId ? filter.roomId : null;
+  return outlinesInOrder(project, scheme.id).filter((outline) => !roomId || outline.roomId === roomId);
+}
+
+function outlineColor(project, outline) {
+  const room = findRoom(project, outline.roomId);
+  return (room && room.color) || OUTLINE_COLOR_FALLBACK;
+}
+
+// Ручки правки: вершины (их двигают и удаляют) и «+» на середине каждой стенки
+// (по нему вершина добавляется). Замыкающая стенка — такая же, как все.
+function outlineHandles(scheme, outline, view) {
+  const state = renderView(view);
+  const screen = outlineScreen(scheme, outline, state);
+  const handles = [];
+  screen.forEach((point, index) => {
+    handles.push({ kind: "vertex", index, x: point.x, y: point.y, r: OUTLINE_HANDLE_PX });
+    const next = screen[(index + 1) % screen.length];
+    handles.push({
+      kind: "insert",
+      index,
+      x: (point.x + next.x) / 2,
+      y: (point.y + next.y) / 2,
+      r: OUTLINE_HANDLE_PX - 1,
+    });
+  });
+  return handles;
+}
+
+/**
+ * Попадание по контуру. Клик по метке всегда важнее — поэтому холст зовёт
+ * сперва `hitTest`, и только потом это. Внутренность контура не ловится:
+ * иначе заливка комнаты перехватывала бы клики по пустому плану.
+ * `selectedOutlineId` — у выделенного контура ловятся ещё и ручки вершин.
+ */
+function hitOutline(project, scheme, point, view, filter, selectedOutlineId) {
+  if (!project || !scheme) return null;
+  const state = renderView(view);
+  const outlines = visibleOutlines(project, scheme, filter);
+  const selected = outlines.find((outline) => outline.id === selectedOutlineId);
+  if (selected) {
+    for (const handle of outlineHandles(scheme, selected, state)) {
+      if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) {
+        return { outlineId: selected.id, part: handle.kind, index: handle.index };
+      }
+    }
+  }
+  // Меньший контур лежит в порядке последним и ловится первым: у комнаты
+  // внутри комнаты стенки могут совпасть со стенками большей.
+  for (let index = outlines.length - 1; index >= 0; index -= 1) {
+    const outline = outlines[index];
+    const screen = outlineScreen(scheme, outline, state);
+    for (let i = 0; i < screen.length; i += 1) {
+      const a = screen[i];
+      const b = screen[(i + 1) % screen.length];
+      if (distanceToSegment(point, a, b) <= OUTLINE_HIT_PX) {
+        return { outlineId: outline.id, part: "edge", index: i };
+      }
+    }
+    const label = outlineLabelBox(project, scheme, outline, state);
+    if (label && insideBox(point, label)) return { outlineId: outline.id, part: "label", index: 0 };
+  }
+  return null;
+}
+
+function outlineLabelBox(project, scheme, outline, view) {
+  const room = findRoom(project, outline.roomId);
+  if (!room || !room.name) return null;
+  const state = renderView(view);
+  const font = Math.max(9, labelFontSize(state) * 0.95);
+  const center = planToScreen(outlineCenter(outline.points), scheme, state);
+  const width = room.name.length * font * LABEL_CHAR_RATIO;
+  return { text: room.name, x: center.x - width / 2, y: center.y, width, height: font * 1.2, font };
+}
+
+/**
+ * Контуры помещений под метками: тонкая линия цветом комнаты, полупрозрачная
+ * заливка и название внутри. `mode` — `"pale"` для бумаги.
+ */
+function drawOutlines(ctx, { project, scheme, filter, view, mode, selectedOutlineId }) {
+  const outlines = visibleOutlines(project, scheme, filter);
+  if (outlines.length === 0) return;
+  const state = renderView(view);
+  const style = OUTLINE_STYLE[mode === "pale" ? "pale" : "normal"];
+  for (const outline of outlines) {
+    const color = outlineColor(project, outline);
+    const screen = outlineScreen(scheme, outline, state);
+    ctx.save();
+    ctx.beginPath();
+    screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    ctx.closePath();
+    ctx.fillStyle = outlineTint(color, style.fill);
+    ctx.fill();
+    ctx.lineJoin = "round";
+    ctx.lineWidth = style.line;
+    ctx.strokeStyle = outline.id === selectedOutlineId ? "#0969da" : outlineTint(color, 0.9);
+    if (outline.id === selectedOutlineId) ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.restore();
+
+    const label = outlineLabelBox(project, scheme, outline, state);
+    if (!label) continue;
+    ctx.save();
+    ctx.font = `600 ${label.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = Math.max(2, label.font * 0.3);
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.strokeText(label.text, label.x + label.width / 2, label.y);
+    ctx.fillStyle = outlineTint(color, style.label);
+    ctx.fillText(label.text, label.x + label.width / 2, label.y);
+    ctx.restore();
+  }
+}
+
+// Ручки выделенного контура: квадрат на вершине, «+» на середине стенки.
+function drawOutlineHandles(ctx, scheme, outline, view, color) {
+  const tint = color || "#0969da";
+  for (const handle of outlineHandles(scheme, outline, renderView(view))) {
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = 1.5;
+    if (handle.kind === "vertex") {
+      ctx.beginPath();
+      ctx.rect(handle.x - handle.r, handle.y - handle.r, handle.r * 2, handle.r * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      const arm = handle.r * 0.55;
+      ctx.moveTo(handle.x - arm, handle.y);
+      ctx.lineTo(handle.x + arm, handle.y);
+      ctx.moveTo(handle.x, handle.y - arm);
+      ctx.lineTo(handle.x, handle.y + arm);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 // ——— попадание ———————————————————————————————————————————————————————
 
 function pointInPolygon(point, points) {
@@ -4522,7 +5060,19 @@ function drawLegend(ctx, { project, scheme, filter, view, box }) {
 
 // Весь кадр: план, метки, подписи, при надобности легенда. Тот же код и на
 // экране, и в экспорте — меняется только масштаб во `view`.
-function drawScheme(ctx, { project, scheme, image, filter, view, legend, selectedIds, draft, draftColor }) {
+function drawScheme(ctx, {
+  project,
+  scheme,
+  image,
+  filter,
+  view,
+  legend,
+  selectedIds,
+  draft,
+  draftColor,
+  outlines,
+  selectedOutlineId,
+}) {
   const state = renderView(view);
   if (image) {
     ctx.save();
@@ -4537,6 +5087,10 @@ function drawScheme(ctx, { project, scheme, image, filter, view, legend, selecte
     ctx.restore();
   }
   if (!project || !scheme) return;
+  // Контуры ложатся под метки: метка на стене комнаты должна остаться видна.
+  if (outlines !== false && outlines !== null) {
+    drawOutlines(ctx, { project, scheme, filter, view: state, mode: outlines, selectedOutlineId });
+  }
   const selected = new Set(selectedIds || []);
   for (const mark of visibleMarks(project, scheme, filter)) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
@@ -4554,6 +5108,9 @@ function drawScheme(ctx, { project, scheme, image, filter, view, legend, selecte
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 const renderInternals = {
   shapeGeometry,
+  outlineCenter,
+  outlineTint,
+  outlineLabelBox,
   shapeInternals,
   labelFontSize,
   labelTargets,
@@ -4927,7 +5484,7 @@ function canvasPaint() {
   if (!scheme) return;
   const project = canvasProject(state);
   const view = canvasViewOf(state);
-  const draftColor = state.activeTypeId ? styleOf(project, state.activeTypeId).color : "#0969da";
+  const draftColor = canvasDraftColor(state, project);
   drawScheme(canvasCtx, {
     project,
     scheme,
@@ -4935,9 +5492,16 @@ function canvasPaint() {
     filter: state.filter,
     view,
     selectedIds: state.selectedMarkIds,
+    selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     draftColor,
   });
+  // Ручки контура — у выделенного помещения: вершину двигают, «+» на стенке
+  // добавляет новую. Обводка по стенам с первого раза не выходит.
+  const outline = state.selectedOutlineId ? findOutline(project, state.selectedOutlineId) : null;
+  if (outline && outline.schemeId === scheme.id && !canvasDrag) {
+    drawOutlineHandles(canvasCtx, scheme, outline, view);
+  }
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
   if (state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
@@ -4947,6 +5511,15 @@ function canvasPaint() {
   }
 }
 
+// Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа.
+function canvasDraftColor(state, project) {
+  if (state.mode === "room") {
+    const room = state.activeRoomId ? findRoom(project, state.activeRoomId) : null;
+    return (room && room.color) || "#0969da";
+  }
+  return state.activeTypeId ? styleOf(project, state.activeTypeId).color : "#0969da";
+}
+
 // ——— изменения объекта ————————————————————————————————————————————————
 
 // Любая правка объекта проходит здесь — и с холста, и из панели инструментов:
@@ -4954,25 +5527,67 @@ function canvasPaint() {
 // схему и выделение, на которых действие произошло. Иначе Ctrl+Z после
 // переключения схемы правит метки на той, которую не видно.
 // Своего мутатора объекта в холсте нет.
+// Ключи, которые понимает команда. Список закрытый нарочно: четвёртым
+// аргументом когда-то был список выделения, потом стал объект опций — и массив
+// от старого вызова молча превращался в опции без `selection`. Поставленная
+// метка переставала выделяться: ни ручек «+» рядом с ней, ни живой кнопки
+// «Сменить тип», и так четыре таска. Опечатка `selecton:` дала бы то же самое
+// молчание, поэтому неизвестный ключ — отказ, а не подстановка по умолчанию.
+const CANVAS_COMMIT_KEYS = ["selection", "schemeId", "patch"];
+function canvasCommitOptions(options) {
+  if (options == null) return {};
+  if (typeof options !== "object" || Array.isArray(options)) {
+    throw canvasOptionError("commitOptionsNotObject", { keys: CANVAS_COMMIT_KEYS.join(", ") });
+  }
+  const unknown = Object.keys(options).filter((key) => !CANVAS_COMMIT_KEYS.includes(key));
+  if (unknown.length > 0) {
+    throw canvasOptionError("unknownCommitOption", { keys: unknown.join(", "), known: CANVAS_COMMIT_KEYS.join(", ") });
+  }
+  return options;
+}
+
+function canvasOptionError(key, vars) {
+  const error = new Error(text("errors." + key, vars));
+  error.code = key;
+  return error;
+}
 function canvasCommit(before, after, label, options = {}) {
   const { setState } = canvasApi;
+  let settings;
+  try {
+    settings = canvasCommitOptions(options);
+  } catch (error) {
+    // Отказ виден и в интерфейсе: ошибка в опциях — это правка, которая не
+    // случилась, и промолчать о ней значит повторить ту же историю.
+    canvasFail(error);
+    throw error;
+  }
   const state = canvasState();
   const selectionBefore = state.selectedMarkIds;
   const schemeBefore = state.schemeId;
-  const keep = options.selection || selectionBefore;
-  const schemeAfter = options.schemeId || schemeBefore;
+  const keep = settings.selection || selectionBefore;
+  const schemeAfter = settings.schemeId || schemeBefore;
   // Правка сеансовых полей (активный тип, режим) едет вместе с командой:
   // возвращать объект без них — значит оставить панель показывать то, чего нет.
   // «До» для них снимается здесь же, по именам переданных полей, — вызывающий
   // передаёт только «после», иначе две половинки пары разъедутся молча.
-  const patch = options.patch || {};
+  const patch = settings.patch || {};
   const patchBefore = {};
   for (const key of Object.keys(patch)) patchBefore[key] = state[key];
+  // Единственное место, где срабатывает автопривязка меток к помещениям:
+  // любая правка объекта проходит здесь, поэтому и поставленная метка, и
+  // перерисованный контур доводят поля «Помещение» до порядка одним шагом
+  // истории. Метка с вписанным руками помещением автоматике не достаётся.
+  const binding = after && Array.isArray(after.marks) ? applyRoomOutlines(after) : { project: after, changed: [] };
+  const bound = binding.project;
+  // Ярлык шага называет и автопривязку, когда она что-то поменяла: «смена типа»
+  // в списке отмены, за которой переехали помещения полудюжины меток, врёт.
+  const step = binding.changed.length > 0 ? text("history.withRooms", { label }) : label;
   const apply = () =>
-    setState({ project: after, schemeId: schemeAfter, selectedMarkIds: canvasAlive(after, keep), ...patch });
+    setState({ project: bound, schemeId: schemeAfter, selectedMarkIds: canvasAlive(bound, keep), ...patch });
   apply();
   pushCommand({
-    label,
+    label: step,
     undo: () =>
       setState({
         project: before,
@@ -5005,7 +5620,7 @@ function canvasPlacePoint(plan) {
       kind: "point",
       points: [plan],
     });
-    canvasCommit(state.project, result.project, strings.history.addMark, [result.mark.id]);
+    canvasCommit(state.project, result.project, strings.history.addMark, { selection: [result.mark.id] });
   } catch (error) {
     canvasFail(error);
   }
@@ -5044,7 +5659,7 @@ function canvasBlockPoint(markId, side) {
       step: canvasBlockStep(state),
       typeId: canvasPlacedTypeId(state),
     });
-    canvasCommit(state.project, result.project, strings.history.addBlock, [result.mark.id]);
+    canvasCommit(state.project, result.project, strings.history.addBlock, { selection: [result.mark.id] });
   } catch (error) {
     canvasFail(error);
   }
@@ -5063,6 +5678,24 @@ function canvasLineClick(plan, screen) {
     canvasApi.notify(strings.canvas.needType);
     return;
   }
+  canvasDraftClick(plan, screen);
+}
+
+// Контур помещения рисуется той же рукой, что и ломаная: клик — вершина,
+// двойной клик по первой замыкает, Backspace убирает последнюю, Esc отменяет.
+// Отличается только то, чем это заканчивается: замкнутым многоугольником
+// помещения, а не линией-меткой.
+function canvasOutlineClick(plan, screen) {
+  const state = canvasState();
+  if (!state.activeRoomId || !findRoom(state.project, state.activeRoomId)) {
+    canvasApi.notify(strings.canvas.needRoom);
+    return;
+  }
+  canvasDraftClick(plan, screen);
+}
+
+function canvasDraftClick(plan, screen) {
+  const state = canvasState();
   if (!canvasDraft) {
     canvasDraft = { points: [plan], cursor: plan };
     canvasRedraw();
@@ -5101,9 +5734,86 @@ function canvasLineFinish(closed) {
     let project = result.project;
     if (closed) project = updateMark(project, result.mark.id, { closed: true }).project;
     canvasDraft = null;
-    canvasCommit(state.project, project, strings.history.addLine, [result.mark.id]);
+    canvasCommit(state.project, project, strings.history.addLine, { selection: [result.mark.id] });
   } catch (error) {
     canvasCancelDraft();
+    canvasFail(error);
+  }
+}
+
+function canvasOutlineFinish() {
+  if (!canvasDraft) return;
+  const points = canvasDraft.points;
+  const state = canvasState();
+  if (points.length < OUTLINE_MIN_POINTS) {
+    canvasApi.notify(strings.canvas.outlineTooShort);
+    return;
+  }
+  try {
+    const result = addOutline(state.project, {
+      schemeId: state.schemeId,
+      roomId: state.activeRoomId,
+      points,
+    });
+    canvasDraft = null;
+    // Контур нарисован — дальше его правят, а не рисуют второй: режим
+    // переключается на выделение, и ручки вершин сразу под рукой.
+    canvasCommit(state.project, result.project, strings.history.addOutline, {
+      selection: [],
+      patch: { mode: "select", selectedOutlineId: result.outline.id },
+    });
+  } catch (error) {
+    canvasCancelDraft();
+    canvasFail(error);
+  }
+}
+
+// Правка вершин выделенного контура: «+» на стенке добавляет вершину,
+// двойной клик по вершине убирает её. Перетаскивание вершины — в canvasDragTo.
+function canvasOutlineInsert(outlineId, index, plan) {
+  const state = canvasState();
+  try {
+    const result = insertOutlinePoint(state.project, outlineId, index, plan);
+    canvasCommit(state.project, result.project, strings.history.outlineVertexAdd, {
+      patch: { selectedOutlineId: outlineId },
+    });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+function canvasOutlineRemovePoint(outlineId, index) {
+  const state = canvasState();
+  try {
+    const result = removeOutlinePoint(state.project, outlineId, index);
+    canvasCommit(state.project, result.project, strings.history.outlineVertexRemove, {
+      patch: { selectedOutlineId: outlineId },
+    });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+async function canvasDeleteOutline() {
+  const state = canvasState();
+  const outline = state.selectedOutlineId ? findOutline(state.project, state.selectedOutlineId) : null;
+  // Контур с другой схемы удалять нечего: выделение могло остаться с прошлой.
+  if (!outline || outline.schemeId !== state.schemeId) return;
+  const room = findRoom(state.project, outline.roomId);
+  const agreed = await uiConfirm({
+    title: strings.canvas.deleteOutlineTitle,
+    message: text("canvas.deleteOutlineMessage", { name: room ? room.name : "" }),
+    confirmLabel: strings.canvas.deleteOutlineConfirm,
+  });
+  if (!agreed) return;
+  const fresh = canvasState().project;
+  if (!findOutline(fresh, outline.id)) return;
+  try {
+    const result = deleteOutline(fresh, outline.id);
+    canvasCommit(fresh, result.project, strings.history.removeOutline, {
+      patch: { selectedOutlineId: null },
+    });
+  } catch (error) {
     canvasFail(error);
   }
 }
@@ -5129,7 +5839,7 @@ async function canvasDeleteSelected() {
   if (!findMark(fresh, markId)) return;
   try {
     const result = deleteMark(fresh, markId);
-    canvasCommit(fresh, result.project, strings.history.remove, []);
+    canvasCommit(fresh, result.project, strings.history.remove, { selection: [] });
   } catch (error) {
     canvasFail(error);
   }
@@ -5258,14 +5968,46 @@ function canvasPointerDown(event) {
     }
   }
 
-  if (state.mode === "line") {
-    canvasDrag = { kind: "line", start: point, view: { ...state.view }, moved: false };
+  if (state.mode === "line" || state.mode === "room") {
+    canvasDrag = { kind: state.mode, start: point, view: { ...state.view }, moved: false };
     return;
   }
 
+  // Клик по метке важнее клика по контуру: попадание по меткам считается
+  // первым, и контур перехватывает клик только там, где метки нет.
   const hit = hitTest(state.project, scheme, point, view, state.filter);
+  if (!hit && state.mode === "select") {
+    const outlineHit = hitOutline(state.project, scheme, point, view, state.filter, state.selectedOutlineId || null);
+    if (outlineHit) {
+      if (outlineHit.part === "vertex") {
+        canvasDrag = {
+          kind: "outlineVertex",
+          outlineId: outlineHit.outlineId,
+          index: outlineHit.index,
+          start: point,
+          before: state.project,
+          moved: false,
+        };
+        return;
+      }
+      if (outlineHit.part === "insert") {
+        canvasOutlineInsert(outlineHit.outlineId, outlineHit.index, screenToPlan(point, scheme, view));
+        canvasDrag = { kind: "done", start: point, moved: false };
+        return;
+      }
+      if (state.selectedOutlineId !== outlineHit.outlineId || state.selectedMarkIds.length > 0) {
+        canvasApi.setState({ selectedOutlineId: outlineHit.outlineId, selectedMarkIds: [] });
+      }
+      canvasDrag = { kind: "outline", start: point, view: { ...state.view }, moved: false };
+      return;
+    }
+  }
   if (hit) {
-    if (state.selectedMarkIds[0] !== hit.markId) canvasApi.setState({ selectedMarkIds: [hit.markId] });
+    // Выделили метку — выделение контура снимается: две пары ручек рядом
+    // означали бы, что непонятно, чью вершину сейчас потащат.
+    if (state.selectedMarkIds[0] !== hit.markId || state.selectedOutlineId) {
+      canvasApi.setState({ selectedMarkIds: [hit.markId], selectedOutlineId: null });
+    }
     canvasDrag = {
       kind: hit.part === "label" ? "label" : "mark",
       markId: hit.markId,
@@ -5291,12 +6033,19 @@ function canvasDragTo(point) {
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   const before = canvasDrag.before;
-  const origin = screenToPlan(canvasDrag.start, scheme, view);
+  const from = screenToPlan(canvasDrag.start, scheme, view);
   const now = screenToPlan(point, scheme, view);
-  const dx = now.x - origin.x;
-  const dy = now.y - origin.y;
+  const dx = now.x - from.x;
+  const dy = now.y - from.y;
   try {
-    if (canvasDrag.kind === "label") {
+    if (canvasDrag.kind === "outlineVertex") {
+      const outline = findOutline(before, canvasDrag.outlineId);
+      const origin = outline.points[canvasDrag.index];
+      canvasPreview = moveOutlinePoint(before, canvasDrag.outlineId, canvasDrag.index, {
+        x: origin.x + dx,
+        y: origin.y + dy,
+      }).project;
+    } else if (canvasDrag.kind === "label") {
       const target = canvasDrag.groupId ? findGroup(before, canvasDrag.groupId) : findMark(before, canvasDrag.markId);
       const current = target ? labelOffsetOf(before, target) : null;
       const size = view.markSize || 10;
@@ -5350,11 +6099,11 @@ function canvasPointerMove(event) {
   if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
   if (!canvasDrag.moved) return;
 
-  if (canvasDrag.kind === "mark" || canvasDrag.kind === "label") {
+  if (canvasDrag.kind === "mark" || canvasDrag.kind === "label" || canvasDrag.kind === "outlineVertex") {
     canvasDragTo(point);
     return;
   }
-  if (canvasDrag.kind === "pan" || canvasDrag.kind === "empty" || canvasDrag.kind === "place" || canvasDrag.kind === "line") {
+  if (["pan", "empty", "place", "line", "room", "outline"].includes(canvasDrag.kind)) {
     canvasApi.setState({
       view: {
         ...state.view,
@@ -5379,7 +6128,14 @@ function canvasPointerUp(event) {
       const label = drag.kind === "label" ? strings.history.moveLabel : strings.history.move;
       const after = canvasPreview;
       canvasPreview = null;
-      canvasCommit(drag.before, after, label, [drag.markId]);
+      canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+    }
+    if (drag.kind === "outlineVertex" && canvasPreview) {
+      const after = canvasPreview;
+      canvasPreview = null;
+      canvasCommit(drag.before, after, strings.history.outlineVertexMove, {
+        patch: { selectedOutlineId: drag.outlineId },
+      });
     }
     canvasPreview = null;
     canvasRedraw();
@@ -5394,20 +6150,34 @@ function canvasPointerUp(event) {
     canvasLineClick(plan, point);
     return;
   }
+  if (drag.kind === "room") {
+    canvasOutlineClick(plan, point);
+    return;
+  }
   if (drag.kind === "place") {
     canvasPlacePoint(plan);
     return;
   }
-  if (drag.kind === "empty" && state.selectedMarkIds.length > 0) {
-    canvasApi.setState({ selectedMarkIds: [] });
+  if (drag.kind === "empty" && (state.selectedMarkIds.length > 0 || state.selectedOutlineId)) {
+    canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null });
   }
 }
 
 function canvasDoubleClick(event) {
   const state = canvasState();
-  if (state.mode !== "line" || !canvasDraft) return;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
+  // Двойной клик по вершине выделенного контура убирает её: обводка по стенам
+  // с первого раза не выходит, и лишняя вершина — обычное дело.
+  if (state.mode === "select" && state.selectedOutlineId) {
+    const hit = hitOutline(state.project, scheme, canvasPointOf(event), view, state.filter, state.selectedOutlineId);
+    if (hit && hit.part === "vertex" && hit.outlineId === state.selectedOutlineId) {
+      event.preventDefault();
+      canvasOutlineRemovePoint(hit.outlineId, hit.index);
+      return;
+    }
+  }
+  if ((state.mode !== "line" && state.mode !== "room") || !canvasDraft) return;
   const point = canvasPointOf(event);
   const threshold = markRadius(view) + 6;
   const points = canvasDraft.points;
@@ -5419,6 +6189,11 @@ function canvasDoubleClick(event) {
   // продолжается, ничего не теряется и не замыкается.
   if (!onFirst && !onLast) return;
   event.preventDefault();
+  // Контур помещения замкнут всегда: комната с открытой стенкой — не комната.
+  if (state.mode === "room") {
+    canvasOutlineFinish();
+    return;
+  }
   // По первой точке — замкнутый контур (лента по периметру комнаты),
   // по последней — открытая линия, ровно как в брифе.
   canvasLineFinish(onFirst && !onLast && points.length >= 3);
@@ -5467,6 +6242,10 @@ function canvasKeyDown(event) {
   }
   if (event.key === "Escape") {
     if (canvasCancelDraft()) return;
+    if (state.selectedOutlineId) {
+      canvasApi.setState({ selectedOutlineId: null });
+      return;
+    }
     // Первый Esc снимает выделение: пока метка выделена, вокруг неё ручки «+»,
     // и отдельную метку вплотную к блоку не поставить. Второй — выходит из режима.
     if (state.selectedMarkIds.length > 0) {
@@ -5486,6 +6265,11 @@ function canvasKeyDown(event) {
   if ((event.key === "Delete" || event.key === "Backspace") && state.selectedMarkIds.length > 0) {
     event.preventDefault();
     canvasDeleteSelected();
+    return;
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && state.selectedOutlineId) {
+    event.preventDefault();
+    canvasDeleteOutline();
   }
 }
 
@@ -5543,7 +6327,7 @@ function mountCanvas(host, api) {
       canvasPreview = null;
     }
     if ("mode" in changed) {
-      if (state.mode !== "line") canvasCancelDraft();
+      if (state.mode !== "line" && state.mode !== "room") canvasCancelDraft();
       canvasSyncCursor();
     }
     if ("schemeId" in changed || "schemeImage" in changed) canvasAutoFit(state);
@@ -5580,15 +6364,26 @@ function mountCanvasHint(host, api) {
     }
     const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
     const label = type ? type.code + " — " + type.name : "";
-    if (state.mode === "point" && type) hint.textContent = text("canvas.hintPoint", { label });
+    const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
+    if (state.mode === "room") hint.textContent = text("canvas.hintRoom", { name: room ? room.name : "" });
+    else if (state.mode === "point" && type) hint.textContent = text("canvas.hintPoint", { label });
     else if (state.mode === "line" && type) hint.textContent = strings.canvas.hintLine;
     else if (type) hint.textContent = strings.canvas.hintSelectMode;
     else hint.textContent = strings.canvas.hintSelect;
     hint.hidden = false;
-    if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
+    if (state.mode === "room" && room) hint.style.borderColor = room.color;
+    else if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
   };
   api.subscribe((state, changed) => {
-    if ("mode" in changed || "activeTypeId" in changed || "schemeId" in changed || "project" in changed) render();
+    if (
+      "mode" in changed ||
+      "activeTypeId" in changed ||
+      "activeRoomId" in changed ||
+      "schemeId" in changed ||
+      "project" in changed
+    ) {
+      render();
+    }
   });
   render();
 }
@@ -6003,7 +6798,8 @@ function exportArea(scheme, area) {
 
 /**
  * PNG схемы с метками. `area` — «all» или прямоугольник в пикселях плана,
- * `scale` — множитель, `legend` — рисовать ли легенду в углу, `filter` —
+ * `scale` — множитель, `legend` — рисовать ли легенду в углу, `outlines` —
+ * печатать ли контуры помещений (по умолчанию да, бледной линией), `filter` —
  * тот же фильтр, что на экране: скрытое им не попадает ни в картинку,
  * ни в легенду.
  */
@@ -6029,6 +6825,9 @@ async function schemePng(project, scheme, image, options = {}) {
     filter: options.filter || null,
     view,
     legend: options.legend ? { x: 16 * scale, y: 16 * scale } : null,
+    // Контуры помещений на бумаге — бледной линией: на листе главное метки,
+    // а обводка комнаты подсказывает, где они стоят. Галочка в диалоге её снимает.
+    outlines: options.outlines === false ? false : "pale",
   });
   return exportBlob(canvas);
 }
@@ -6729,6 +7528,7 @@ const exportChoice = {
   currentScheme: false,
   area: "all",
   legend: true,
+  outlines: true,
   tableScale: 2,
   schemeScale: 2,
 };
@@ -7012,6 +7812,9 @@ function exportSchemeDialog(api) {
     exportCheck(strings.exportPanel.withLegend, exportChoice.legend, (on) => {
       exportChoice.legend = on;
     }),
+    exportCheck(strings.exportPanel.withRooms, exportChoice.outlines, (on) => {
+      exportChoice.outlines = on;
+    }),
   ]);
 
   const guard = async (run) => {
@@ -7032,6 +7835,7 @@ function exportSchemeDialog(api) {
         area: exportChoice.area === "view" ? exportViewArea(state, scheme) : "all",
         scale: exportChoice.schemeScale,
         legend: exportChoice.legend,
+        outlines: exportChoice.outlines,
         filter: state.filter,
       });
     } finally {
@@ -7054,6 +7858,7 @@ function exportSchemeDialog(api) {
             const zip = await allSchemesZip(state.project, images, {
               scale: exportChoice.schemeScale,
               legend: exportChoice.legend,
+              outlines: exportChoice.outlines,
               filter: state.filter,
             });
             const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
@@ -7137,6 +7942,27 @@ registerPanel(PANEL_IDS.headerActions, mountExportPanel);
 
 
 
+// Кружок цвета помещения: тем же цветом обводится его контур на схеме.
+function roomSwatch(color, size = 14) {
+  return uiEl("span", {
+    class: "rooms__swatch",
+    attrs: { style: `width:${size}px;height:${size}px;background:${color || "#8B949E"}` },
+  });
+}
+
+// Поле цвета помещения: палитра модели плюс произвольный цвет — контуров на
+// плане бывает десяток, и повтор цвета пользователь правит сам.
+function roomColorField(value, onChange) {
+  const input = uiEl("input", {
+    class: "rooms__color",
+    type: "color",
+    value: value || ROOM_PALETTE[0],
+    title: strings.rooms.color,
+    on: { change: (event) => onChange(event.target.value) },
+  });
+  return input;
+}
+
 function roomsKey(name) {
   return String(name == null ? "" : name).trim().toLowerCase();
 }
@@ -7213,6 +8039,19 @@ function openRoomsEditor(api) {
     }
   }
 
+  function recolor(roomId, color) {
+    const current = findRoom(project(), roomId);
+    // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
+    // сравнение без учёта регистра бережёт историю от пустого шага.
+    if (!current || String(current.color || "").toUpperCase() === String(color).toUpperCase()) return;
+    try {
+      commit(updateRoom(project(), roomId, { color }).project, strings.history.roomColor);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
   async function remove(roomId) {
     const current = findRoom(project(), roomId);
     if (!current) return;
@@ -7240,6 +8079,7 @@ function openRoomsEditor(api) {
             value: room.name,
             on: { change: (event) => rename(room.id, event.target.value) },
           }),
+          roomColorField(room.color, (color) => recolor(room.id, color)),
           uiEl("span", {
             class: "rooms__count",
             text: text("rooms.marks", { count: roomsUsage(project(), room.id) }),
@@ -7275,6 +8115,82 @@ function openRoomsEditor(api) {
     modal.close();
   }
   return { close };
+}
+
+// Окно выбора помещения для обводки: список комнат объекта плюс поле «новое».
+// Устроено как выбор типа метки — по той же причине: выбранное помещение
+// «залипает», и следующий контур рисуется без диалога.
+function openRoomPicker(project, options = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    let current = project;
+    const done = (result) => {
+      modal.close();
+      resolve(result || null);
+    };
+
+    const list = uiEl("div", { class: "picker__list" });
+    const input = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.rooms.namePlaceholder,
+      on: {
+        keydown: (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          create();
+        },
+      },
+    });
+
+    function create() {
+      const name = input.value.trim();
+      if (!name) return;
+      const found = roomsFind(current, name);
+      if (found) {
+        done({ roomId: found.id, project: current, created: false });
+        return;
+      }
+      const result = addRoom(current, name);
+      done({ roomId: result.room.id, project: result.project, created: true });
+    }
+
+    function renderList() {
+      const rooms = roomsInOrder(current);
+      if (rooms.length === 0) {
+        list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
+        return;
+      }
+      list.replaceChildren(
+        ...rooms.map((room) =>
+          uiEl(
+            "button",
+            {
+              class: "picker__row" + (room.id === options.activeRoomId ? " is-active" : ""),
+              type: "button",
+              on: { click: () => done({ roomId: room.id, project: current, created: false }) },
+            },
+            [roomSwatch(room.color, 16), uiEl("span", { class: "picker__name", text: room.name })],
+          ),
+        ),
+      );
+    }
+
+    renderList();
+    modal = uiModal({
+      title: options.title || strings.rooms.pickTitle,
+      body: uiEl("div", { class: "picker" }, [
+        list,
+        uiEl("div", { class: "rooms__add" }, [
+          input,
+          uiButton(strings.rooms.add, { class: "ui-btn ui-btn--accent", on: { click: () => create() } }),
+        ]),
+      ]),
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      dismissable: true,
+      onCancel: () => resolve(null),
+    });
+  });
 }
 
 // src/panels/types.js
@@ -8761,6 +9677,10 @@ function filtersBox(api) {
 
 
 const MARKS_NEW_ROOM = "--new-room--";
+// «По контуру» — метка отдана автоматике: помещение подставляется по контуру
+// на схеме. Любой другой выбор в этом поле — ручная правка, и она главнее:
+// такую метку автоматика больше не трогает.
+const MARKS_AUTO_ROOM = "--auto-room--";
 
 // Холст подводится к метке переводом координат из render.js: доли плана в
 // пиксели экрана здесь руками не пересчитываются.
@@ -8843,8 +9763,30 @@ function mountMarksPanel(host, api) {
     try {
       const ensured = roomsEnsure(state.project, name);
       const roomId = ensured.room ? ensured.room.id : null;
-      if (roomId === (mark.roomId || null) && ensured.project === state.project) return;
-      canvasCommit(state.project, updateMark(ensured.project, markId, { roomId }).project, strings.history.markRoom);
+      if (roomId === (mark.roomId || null) && markRoomManual(mark) && ensured.project === state.project) return;
+      canvasCommit(
+        state.project,
+        updateMark(ensured.project, markId, { roomId, roomManual: true }).project,
+        strings.history.markRoom,
+      );
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  // Возврат метки автоматике: снимаем признак ручной правки, а помещение
+  // подставит по контуру canvasCommit — тем же шагом истории.
+  function setAutoRoom(markId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark || !markRoomManual(mark)) return;
+    try {
+      canvasCommit(
+        state.project,
+        updateMark(state.project, markId, { roomManual: false }).project,
+        strings.history.markRoomAuto,
+      );
     } catch (error) {
       fail(error);
       render();
@@ -8861,16 +9803,31 @@ function mountMarksPanel(host, api) {
   }
 
   function roomField(state, mark) {
-    const select = uiEl("select", { class: "ui-select marks__room", title: strings.marks.room });
+    const manual = markRoomManual(mark);
+    const select = uiEl("select", {
+      class: "ui-select marks__room" + (manual ? " is-manual" : ""),
+      title: manual ? strings.marks.roomManual : strings.marks.roomAuto,
+    });
+    const auto = mark.roomId ? findRoom(state.project, mark.roomId) : null;
+    select.append(
+      uiEl("option", {
+        value: MARKS_AUTO_ROOM,
+        text: auto ? text("rooms.autoOf", { name: auto.name }) : strings.rooms.auto,
+      }),
+    );
     select.append(uiEl("option", { value: "", text: strings.rooms.none }));
     for (const room of roomsInOrder(state.project)) {
       select.append(uiEl("option", { value: room.id, text: room.name }));
     }
     select.append(uiEl("option", { value: MARKS_NEW_ROOM, text: strings.rooms.newRoom }));
-    select.value = mark.roomId || "";
+    select.value = manual ? mark.roomId || "" : MARKS_AUTO_ROOM;
     select.addEventListener("change", () => {
       if (select.value === MARKS_NEW_ROOM) {
         askNewRoom(mark.id);
+        return;
+      }
+      if (select.value === MARKS_AUTO_ROOM) {
+        setAutoRoom(mark.id);
         return;
       }
       const room = select.value ? roomsInOrder(state.project).find((item) => item.id === select.value) : null;
@@ -9610,6 +10567,7 @@ function openTypePicker(project, options = {}) {
 
 
 
+
 const TOOLS_MARK_SIZE = { min: 4, max: 36 };
 const TOOLS_LABEL_SIZE = { min: 8, max: 40 };
 // Крупный значок выбранного типа: цвет категории и форма из справочника,
@@ -9686,10 +10644,41 @@ function mountToolsPanel(host, api) {
     }
   }
 
+  function activeRoom(state) {
+    return state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
+  }
+
+  // Помещение для обводки выбирается так же, как тип метки: один раз на серию.
+  // Новая комната, заведённая прямо здесь, — правка объекта, значит и шаг
+  // истории, иначе Ctrl+Z вернул бы объект без неё молча.
+  async function chooseRoom(nextMode) {
+    const state = getState();
+    if (!state.project) return;
+    const picked = await openRoomPicker(state.project, { activeRoomId: state.activeRoomId });
+    if (!picked) return;
+    const fresh = getState();
+    const mode = nextMode || fresh.mode;
+    if (!picked.created) {
+      setState({ activeRoomId: picked.roomId, mode });
+      return;
+    }
+    canvasCommit(fresh.project, picked.project, strings.history.addRoom, {
+      patch: { activeRoomId: picked.roomId, mode },
+    });
+  }
+
   function setMode(mode) {
     const state = getState();
     if (mode !== "select" && !state.schemeId) {
       notify(strings.canvas.needScheme);
+      return;
+    }
+    if (mode === "room") {
+      if (!activeRoom(state)) {
+        chooseRoom("room");
+        return;
+      }
+      setState({ mode });
       return;
     }
     if (mode !== "select" && !state.activeTypeId) {
@@ -9727,7 +10716,10 @@ function mountToolsPanel(host, api) {
     const state = getState();
     const type = activeType(state);
     const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
-    const selected = state.selectedMarkIds.length > 0;
+    // Метка, у которой можно сменить тип: пока её нет, кнопки нет тоже —
+    // серая кнопка, которая никогда не оживает, хуже её отсутствия.
+    const selectedId = state.selectedMarkIds[0];
+    const selectedMark = state.project && selectedId ? findMark(state.project, selectedId) : null;
 
     const typeButton = uiEl(
       "button",
@@ -9742,8 +10734,14 @@ function mountToolsPanel(host, api) {
             toolsTypeIcon(state.project, type.id),
             uiEl("span", { class: "tools__code", text: type.code }),
             uiEl("span", { class: "tools__typeName", text: type.name }),
+            // Плашка и есть кнопка выбора типа — и должна выглядеть кнопкой:
+            // пользователь нажимал её вслепую, а рядом серела мёртвая кнопка.
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
           ]
-        : [uiEl("span", { class: "tools__typeName", text: strings.tools.noType })],
+        : [
+            uiEl("span", { class: "tools__typeName", text: strings.tools.noType }),
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
+          ],
     );
 
     const modeRow = uiEl("div", { class: "tools__row tools__row--modes" }, [
@@ -9761,7 +10759,34 @@ function mountToolsPanel(host, api) {
         title: strings.tools.kindLineHint,
         on: { click: () => setMode("line") },
       }),
+      uiButton(strings.tools.kindOutline, {
+        class: "ui-btn" + (state.mode === "room" ? " is-active" : ""),
+        title: strings.tools.kindOutlineHint,
+        on: { click: () => setMode("room") },
+      }),
     ]);
+
+    // Помещение для обводки: показано рядом с режимом, как выбранный тип метки.
+    const room = activeRoom(state);
+    const roomButton = uiEl(
+      "button",
+      {
+        class: "tools__room" + (room ? " is-set" : ""),
+        type: "button",
+        title: strings.tools.chooseRoom,
+        on: { click: () => chooseRoom() },
+      },
+      room
+        ? [
+            roomSwatch(room.color, 14),
+            uiEl("span", { class: "tools__typeName", text: room.name }),
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
+          ]
+        : [
+            uiEl("span", { class: "tools__typeName", text: strings.tools.noRoom }),
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
+          ],
+    );
 
     const blockSelect = uiEl(
       "select",
@@ -9788,17 +10813,22 @@ function mountToolsPanel(host, api) {
     undoButton.disabled = !canUndo();
     redoButton.disabled = !canRedo();
 
-    box.replaceChildren(
+    // Пустые места отсеиваются: «Сменить тип» появляется только при выделенной
+    // метке, а replaceChildren на null вставил бы в панель слово «null».
+    const parts = [
       uiEl("p", { class: "tools__label", text: strings.tools.type }),
       typeButton,
-      uiButton(strings.tools.changeType, {
-        class: "ui-btn ui-btn--wide",
-        title: selected ? strings.tools.changeTypeHint : strings.tools.noSelection,
-        on: { click: () => changeSelectedType() },
-        attrs: selected ? {} : { disabled: "disabled" },
-      }),
+      selectedMark
+        ? uiButton(text("tools.changeTypeOf", { label: labelOf(state.project, selectedMark.id) }), {
+            class: "ui-btn ui-btn--wide",
+            title: strings.tools.changeTypeHint,
+            on: { click: () => changeSelectedType() },
+          })
+        : null,
       uiEl("p", { class: "tools__label", text: strings.tools.kind }),
       modeRow,
+      uiEl("p", { class: "tools__label", text: strings.tools.room }),
+      roomButton,
       uiEl("p", { class: "tools__label", text: strings.tools.block }),
       blockSelect,
       uiEl("p", { class: "tools__label", text: strings.tools.sizes }),
@@ -9818,7 +10848,8 @@ function mountToolsPanel(host, api) {
         uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
       ]),
       uiEl("div", { class: "tools__row" }, [undoButton, redoButton]),
-    );
+    ];
+    box.replaceChildren(...parts.filter(Boolean));
   }
 
   subscribe((state, changed) => {
@@ -9826,6 +10857,7 @@ function mountToolsPanel(host, api) {
     if (
       "project" in changed ||
       "activeTypeId" in changed ||
+      "activeRoomId" in changed ||
       "mode" in changed ||
       "selectedMarkIds" in changed ||
       "schemeId" in changed

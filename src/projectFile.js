@@ -350,6 +350,9 @@ function migrateProject(loaded) {
     ...loaded,
     formatVersion: FORMAT_VERSION,
     rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
+    // Файл версии 1 контуров не знает: поле дописывается здесь, чтобы дальше
+    // по коду `project.outlines` всегда был списком, а не «иногда undefined».
+    outlines: Array.isArray(loaded.outlines) ? loaded.outlines : [],
     groups: Array.isArray(loaded.groups) ? loaded.groups : [],
     counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
   };

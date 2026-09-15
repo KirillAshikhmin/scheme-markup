@@ -299,6 +299,11 @@
   min-width: 0;
 }
 
+/* Вписанное руками помещение подчёркнуто: по контуру оно больше не меняется. */
+.marks__room.is-manual {
+  border-color: var(--accent);
+}
+
 .rooms__count {
   flex: none;
   color: var(--panel-muted);

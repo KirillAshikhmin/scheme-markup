@@ -441,3 +441,15 @@ test("картинки не Map — отказ, а не молча пустой 
   assert.equal(empty.images.size, 0);
   assert.deepEqual(empty.project, project);
 });
+
+test("файл версии 1 читается: контуров в нём нет, и поле дописывается пустым", async () => {
+  const project = sampleProject();
+  // Так выглядел project.json до контуров помещений: ни outlines, ни roomManual.
+  const old = { ...project, formatVersion: 1 };
+  delete old.outlines;
+  const file = await writeZip([{ name: "project.json", data: JSON.stringify(old) }]);
+  const restored = await unpackProject(file);
+  assert.equal(restored.project.formatVersion, FORMAT_VERSION);
+  assert.deepEqual(restored.project.outlines, []);
+  assert.equal(restored.project.marks.length, project.marks.length);
+});

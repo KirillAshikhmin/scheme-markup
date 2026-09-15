@@ -9,6 +9,8 @@ import { strings, text } from "../strings.js";
 import {
   MARK_NUMBER_MAX,
   findMark,
+  findRoom,
+  markRoomManual,
   findScheme,
   repeatedNumbers,
   roomsInOrder,
@@ -23,6 +25,10 @@ import { filtersBox, filtersMarkRows } from "./filters.js";
 import { roomsEnsure } from "./rooms.js";
 
 const MARKS_NEW_ROOM = "--new-room--";
+// «По контуру» — метка отдана автоматике: помещение подставляется по контуру
+// на схеме. Любой другой выбор в этом поле — ручная правка, и она главнее:
+// такую метку автоматика больше не трогает.
+const MARKS_AUTO_ROOM = "--auto-room--";
 
 // Холст подводится к метке переводом координат из render.js: доли плана в
 // пиксели экрана здесь руками не пересчитываются.
@@ -105,8 +111,30 @@ function mountMarksPanel(host, api) {
     try {
       const ensured = roomsEnsure(state.project, name);
       const roomId = ensured.room ? ensured.room.id : null;
-      if (roomId === (mark.roomId || null) && ensured.project === state.project) return;
-      canvasCommit(state.project, updateMark(ensured.project, markId, { roomId }).project, strings.history.markRoom);
+      if (roomId === (mark.roomId || null) && markRoomManual(mark) && ensured.project === state.project) return;
+      canvasCommit(
+        state.project,
+        updateMark(ensured.project, markId, { roomId, roomManual: true }).project,
+        strings.history.markRoom,
+      );
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  // Возврат метки автоматике: снимаем признак ручной правки, а помещение
+  // подставит по контуру canvasCommit — тем же шагом истории.
+  function setAutoRoom(markId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark || !markRoomManual(mark)) return;
+    try {
+      canvasCommit(
+        state.project,
+        updateMark(state.project, markId, { roomManual: false }).project,
+        strings.history.markRoomAuto,
+      );
     } catch (error) {
       fail(error);
       render();
@@ -123,16 +151,31 @@ function mountMarksPanel(host, api) {
   }
 
   function roomField(state, mark) {
-    const select = uiEl("select", { class: "ui-select marks__room", title: strings.marks.room });
+    const manual = markRoomManual(mark);
+    const select = uiEl("select", {
+      class: "ui-select marks__room" + (manual ? " is-manual" : ""),
+      title: manual ? strings.marks.roomManual : strings.marks.roomAuto,
+    });
+    const auto = mark.roomId ? findRoom(state.project, mark.roomId) : null;
+    select.append(
+      uiEl("option", {
+        value: MARKS_AUTO_ROOM,
+        text: auto ? text("rooms.autoOf", { name: auto.name }) : strings.rooms.auto,
+      }),
+    );
     select.append(uiEl("option", { value: "", text: strings.rooms.none }));
     for (const room of roomsInOrder(state.project)) {
       select.append(uiEl("option", { value: room.id, text: room.name }));
     }
     select.append(uiEl("option", { value: MARKS_NEW_ROOM, text: strings.rooms.newRoom }));
-    select.value = mark.roomId || "";
+    select.value = manual ? mark.roomId || "" : MARKS_AUTO_ROOM;
     select.addEventListener("change", () => {
       if (select.value === MARKS_NEW_ROOM) {
         askNewRoom(mark.id);
+        return;
+      }
+      if (select.value === MARKS_AUTO_ROOM) {
+        setAutoRoom(mark.id);
         return;
       }
       const room = select.value ? roomsInOrder(state.project).find((item) => item.id === select.value) : null;

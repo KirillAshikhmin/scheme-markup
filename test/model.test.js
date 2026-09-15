@@ -73,7 +73,8 @@ test("стартовый справочник: 5 категорий и 13 тип
 
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
   const project = createProject();
-  assert.equal(project.formatVersion, 1);
+  // Версия 2: контуры помещений, ручная правка помещения, цвет помещения.
+  assert.equal(project.formatVersion, 2);
   assert.equal(project.categories.length, 5);
   assert.equal(project.markTypes.length, 13);
   assert.deepEqual(project.marks, []);

@@ -10,7 +10,19 @@
 // объекта (`project.view`), их двигает ползунок в панели инструментов. Размер
 // метки задан в пикселях плана, поэтому метка живёт на плане как наклейка:
 // приближение увеличивает и её, а экспорт в двойном разрешении даёт тот же вид.
-import { SHAPE_NAMES, blockLabel, blockMembers, findType, findGroup, styleOf, labelOf, typesInOrder } from "./model.js";
+import {
+  SHAPE_NAMES,
+  blockLabel,
+  blockMembers,
+  findRoom,
+  findType,
+  findGroup,
+  outlinesInOrder,
+  pointInOutline,
+  styleOf,
+  labelOf,
+  typesInOrder,
+} from "./model.js";
 
 export const SHAPES = SHAPE_NAMES;
 
@@ -27,6 +39,19 @@ const HANDLE_GAP = 2.4;
 const HANDLE_RADIUS = 9;
 
 const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
+
+// Контур помещения: тонкая линия цветом комнаты и полупрозрачная заливка.
+// На бумаге («pale») и линия, и заливка бледнее — контур там подсказка,
+// а не главное на листе: главное — метки.
+const OUTLINE_STYLE = {
+  normal: { line: 1.6, fill: 0.1, label: 0.95 },
+  pale: { line: 1, fill: 0.05, label: 0.6 },
+};
+// Запас в пикселях, с которым попадают по стенке контура.
+const OUTLINE_HIT_PX = 6;
+// Радиус ручки вершины и ручки «+» на середине стенки.
+const OUTLINE_HANDLE_PX = 6;
+const OUTLINE_COLOR_FALLBACK = "#57606a";
 
 // Углы вершин, градусы от «вверх». Все фигуры вписаны в окружность радиуса size.
 const SHAPE_ANGLES = {
@@ -409,6 +434,190 @@ function labelTargets(project, scheme, filter) {
   return targets;
 }
 
+// ——— контуры помещений ————————————————————————————————————————————————
+
+// Цвет комнаты с прозрачностью: заливка контура не должна перебивать план,
+// поэтому она всегда полупрозрачна, а линия — нет.
+function outlineTint(color, alpha) {
+  const hex = /^#[0-9a-fA-F]{6}$/.test(String(color || "")) ? color : OUTLINE_COLOR_FALLBACK;
+  const value = parseInt(hex.slice(1), 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+}
+
+function outlineScreen(scheme, outline, view) {
+  return outline.points.map((point) => planToScreen(point, scheme, view));
+}
+
+// Середина многоугольника для подписи: центр по площади, а не по вершинам, —
+// у Г-образной комнаты он ближе к её телу, чем среднее углов.
+function outlineCenter(points) {
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const cross = points[j].x * points[i].y - points[i].x * points[j].y;
+    area += cross;
+    cx += (points[j].x + points[i].x) * cross;
+    cy += (points[j].y + points[i].y) * cross;
+  }
+  if (Math.abs(area) < 1e-9) {
+    const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+    return { x: sum.x / points.length, y: sum.y / points.length };
+  }
+  return { x: cx / (3 * area), y: cy / (3 * area) };
+}
+
+// Контуры схемы, прошедшие фильтр: сужение списка меток до одного помещения
+// оставляет на плане и его контур — иначе лист по комнате обещает не ту комнату.
+export function visibleOutlines(project, scheme, filter) {
+  if (!project || !scheme) return [];
+  const roomId = filter && filter.roomId ? filter.roomId : null;
+  return outlinesInOrder(project, scheme.id).filter((outline) => !roomId || outline.roomId === roomId);
+}
+
+function outlineColor(project, outline) {
+  const room = findRoom(project, outline.roomId);
+  return (room && room.color) || OUTLINE_COLOR_FALLBACK;
+}
+
+// Ручки правки: вершины (их двигают и удаляют) и «+» на середине каждой стенки
+// (по нему вершина добавляется). Замыкающая стенка — такая же, как все.
+export function outlineHandles(scheme, outline, view) {
+  const state = renderView(view);
+  const screen = outlineScreen(scheme, outline, state);
+  const handles = [];
+  screen.forEach((point, index) => {
+    handles.push({ kind: "vertex", index, x: point.x, y: point.y, r: OUTLINE_HANDLE_PX });
+    const next = screen[(index + 1) % screen.length];
+    handles.push({
+      kind: "insert",
+      index,
+      x: (point.x + next.x) / 2,
+      y: (point.y + next.y) / 2,
+      r: OUTLINE_HANDLE_PX - 1,
+    });
+  });
+  return handles;
+}
+
+/**
+ * Попадание по контуру. Клик по метке всегда важнее — поэтому холст зовёт
+ * сперва `hitTest`, и только потом это. Внутренность контура не ловится:
+ * иначе заливка комнаты перехватывала бы клики по пустому плану.
+ * `selectedOutlineId` — у выделенного контура ловятся ещё и ручки вершин.
+ */
+export function hitOutline(project, scheme, point, view, filter, selectedOutlineId) {
+  if (!project || !scheme) return null;
+  const state = renderView(view);
+  const outlines = visibleOutlines(project, scheme, filter);
+  const selected = outlines.find((outline) => outline.id === selectedOutlineId);
+  if (selected) {
+    for (const handle of outlineHandles(scheme, selected, state)) {
+      if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) {
+        return { outlineId: selected.id, part: handle.kind, index: handle.index };
+      }
+    }
+  }
+  // Меньший контур лежит в порядке последним и ловится первым: у комнаты
+  // внутри комнаты стенки могут совпасть со стенками большей.
+  for (let index = outlines.length - 1; index >= 0; index -= 1) {
+    const outline = outlines[index];
+    const screen = outlineScreen(scheme, outline, state);
+    for (let i = 0; i < screen.length; i += 1) {
+      const a = screen[i];
+      const b = screen[(i + 1) % screen.length];
+      if (distanceToSegment(point, a, b) <= OUTLINE_HIT_PX) {
+        return { outlineId: outline.id, part: "edge", index: i };
+      }
+    }
+    const label = outlineLabelBox(project, scheme, outline, state);
+    if (label && insideBox(point, label)) return { outlineId: outline.id, part: "label", index: 0 };
+  }
+  return null;
+}
+
+function outlineLabelBox(project, scheme, outline, view) {
+  const room = findRoom(project, outline.roomId);
+  if (!room || !room.name) return null;
+  const state = renderView(view);
+  const font = Math.max(9, labelFontSize(state) * 0.95);
+  const center = planToScreen(outlineCenter(outline.points), scheme, state);
+  const width = room.name.length * font * LABEL_CHAR_RATIO;
+  return { text: room.name, x: center.x - width / 2, y: center.y, width, height: font * 1.2, font };
+}
+
+/**
+ * Контуры помещений под метками: тонкая линия цветом комнаты, полупрозрачная
+ * заливка и название внутри. `mode` — `"pale"` для бумаги.
+ */
+export function drawOutlines(ctx, { project, scheme, filter, view, mode, selectedOutlineId }) {
+  const outlines = visibleOutlines(project, scheme, filter);
+  if (outlines.length === 0) return;
+  const state = renderView(view);
+  const style = OUTLINE_STYLE[mode === "pale" ? "pale" : "normal"];
+  for (const outline of outlines) {
+    const color = outlineColor(project, outline);
+    const screen = outlineScreen(scheme, outline, state);
+    ctx.save();
+    ctx.beginPath();
+    screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    ctx.closePath();
+    ctx.fillStyle = outlineTint(color, style.fill);
+    ctx.fill();
+    ctx.lineJoin = "round";
+    ctx.lineWidth = style.line;
+    ctx.strokeStyle = outline.id === selectedOutlineId ? "#0969da" : outlineTint(color, 0.9);
+    if (outline.id === selectedOutlineId) ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.restore();
+
+    const label = outlineLabelBox(project, scheme, outline, state);
+    if (!label) continue;
+    ctx.save();
+    ctx.font = `600 ${label.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = Math.max(2, label.font * 0.3);
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.strokeText(label.text, label.x + label.width / 2, label.y);
+    ctx.fillStyle = outlineTint(color, style.label);
+    ctx.fillText(label.text, label.x + label.width / 2, label.y);
+    ctx.restore();
+  }
+}
+
+// Ручки выделенного контура: квадрат на вершине, «+» на середине стенки.
+export function drawOutlineHandles(ctx, scheme, outline, view, color) {
+  const tint = color || "#0969da";
+  for (const handle of outlineHandles(scheme, outline, renderView(view))) {
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = 1.5;
+    if (handle.kind === "vertex") {
+      ctx.beginPath();
+      ctx.rect(handle.x - handle.r, handle.y - handle.r, handle.r * 2, handle.r * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      const arm = handle.r * 0.55;
+      ctx.moveTo(handle.x - arm, handle.y);
+      ctx.lineTo(handle.x + arm, handle.y);
+      ctx.moveTo(handle.x, handle.y - arm);
+      ctx.lineTo(handle.x, handle.y + arm);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 // ——— попадание ———————————————————————————————————————————————————————
 
 function pointInPolygon(point, points) {
@@ -663,7 +872,19 @@ export function drawLegend(ctx, { project, scheme, filter, view, box }) {
 
 // Весь кадр: план, метки, подписи, при надобности легенда. Тот же код и на
 // экране, и в экспорте — меняется только масштаб во `view`.
-export function drawScheme(ctx, { project, scheme, image, filter, view, legend, selectedIds, draft, draftColor }) {
+export function drawScheme(ctx, {
+  project,
+  scheme,
+  image,
+  filter,
+  view,
+  legend,
+  selectedIds,
+  draft,
+  draftColor,
+  outlines,
+  selectedOutlineId,
+}) {
   const state = renderView(view);
   if (image) {
     ctx.save();
@@ -678,6 +899,10 @@ export function drawScheme(ctx, { project, scheme, image, filter, view, legend, 
     ctx.restore();
   }
   if (!project || !scheme) return;
+  // Контуры ложатся под метки: метка на стене комнаты должна остаться видна.
+  if (outlines !== false && outlines !== null) {
+    drawOutlines(ctx, { project, scheme, filter, view: state, mode: outlines, selectedOutlineId });
+  }
   const selected = new Set(selectedIds || []);
   for (const mark of visibleMarks(project, scheme, filter)) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
@@ -695,6 +920,9 @@ export function drawScheme(ctx, { project, scheme, image, filter, view, legend, 
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 export const renderInternals = {
   shapeGeometry,
+  outlineCenter,
+  outlineTint,
+  outlineLabelBox,
   shapeInternals,
   labelFontSize,
   labelTargets,

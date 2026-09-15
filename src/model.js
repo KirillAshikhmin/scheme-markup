@@ -3,7 +3,18 @@
 // исходный не меняется.
 import { strings, text } from "./strings.js";
 
-export const FORMAT_VERSION = 1;
+// Версия формата объекта. Поднимается, когда в project.json появляются поля,
+// без которых работа теряется. История:
+//   1 — схемы, метки, блоки, группы, помещения списком;
+//   2 — контуры помещений (`project.outlines`), признак ручной правки
+//       помещения у метки (`mark.roomManual`) и цвет помещения (`room.color`).
+// Совместимости вперёд нет сознательно: страница версии 1 не знает о контурах
+// и, открыв такой файл, молча потеряла бы их вместе с ручной правкой —
+// поэтому она честно откажется («файл сделан более новой версией»).
+// Назад совместимость обязательна: файл версии 1 читается и дополняется
+// умолчаниями в `projectFile.migrateProject`, а метка без `roomManual`
+// считается правленной руками (`markRoomManual`).
+export const FORMAT_VERSION = 2;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -43,6 +54,28 @@ const BLOCK_FALLBACK_SIZE_PX = 1000;
 // Цвет метки, когда категория недоступна.
 const FALLBACK_COLOR = "#8B949E";
 export const BLOCK_SIDES = ["left", "right", "up", "down"];
+
+// Цвета помещений: контур обводится цветом комнаты, и на одном плане их видно
+// сразу десяток — поэтому палитра разведена по тону, а не по яркости, и
+// не повторяет цвета категорий меток (метка на контуре не должна теряться).
+// Цвет назначается при создании комнаты и правится вручную.
+export const ROOM_PALETTE = [
+  "#0F766E",
+  "#B45309",
+  "#7E22CE",
+  "#0369A1",
+  "#BE123C",
+  "#4D7C0F",
+  "#A16207",
+  "#1D4ED8",
+  "#9D174D",
+  "#15803D",
+  "#C2410C",
+  "#4338CA",
+];
+
+// Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
+export const OUTLINE_MIN_POINTS = 3;
 
 const DEFAULT_VIEW = { markSize: 10, labelSize: 12 };
 
@@ -135,6 +168,10 @@ export function createProject(template) {
     schemes: [],
     marks: [],
     groups: [],
+    // Контуры помещений на схемах: у одной комнаты на разных схемах свои
+    // обводки или ни одной. Объект старого формата их не знает — читается
+    // список везде через `outlinesOf`, поэтому пустого поля здесь достаточно.
+    outlines: [],
     counters: {},
     view: { ...DEFAULT_VIEW, ...(source.view || {}) },
   };
@@ -160,6 +197,10 @@ export function findMark(project, markId) {
 
 export function findGroup(project, groupId) {
   return project.groups.find((group) => group.id === groupId) || null;
+}
+
+export function findOutline(project, outlineId) {
+  return outlinesOf(project).find((outline) => outline.id === outlineId) || null;
 }
 
 export function findRoom(project, roomId) {
@@ -223,10 +264,12 @@ export function deleteScheme(project, schemeId) {
   requireScheme(project, schemeId);
   const marks = project.marks.filter((mark) => mark.schemeId !== schemeId);
   const groups = project.groups.filter((group) => group.schemeId !== schemeId);
+  // Контуры помещений живут на схеме — вместе с ней и уходят.
+  const outlines = outlinesOf(project).filter((outline) => outline.schemeId !== schemeId);
   const schemes = project.schemes
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
-  return { project: withProject(project, { schemes, marks, groups }) };
+  return { project: withProject(project, { schemes, marks, groups, outlines }) };
 }
 
 // Единственный порядок справочника: категории по своему order, типы внутри —
@@ -314,6 +357,9 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
     groupId,
     labelOffset: null,
     roomId: null,
+    // Помещение проставляет автоматика по контуру, пока пользователь не вписал
+    // его руками: после этого метка принадлежит ему, а не сервису.
+    roomManual: false,
     location: "",
     original: "",
   };
@@ -503,7 +549,7 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-const MARK_PATCH_FIELDS = ["points", "closed", "labelOffset", "roomId", "location", "original"];
+const MARK_PATCH_FIELDS = ["points", "closed", "labelOffset", "roomId", "roomManual", "location", "original"];
 
 export function updateMark(project, markId, patch) {
   requireMark(project, markId);
@@ -773,19 +819,40 @@ export function deleteCategory(project, categoryId) {
   return { project: withProject(project, { categories }), deleted: current };
 }
 
+// Цвет новой комнаты: первый из палитры, которым ещё не обведена ни одна
+// комната объекта. Кончилась палитра — идём по кругу: десяток разных контуров
+// на одном плане уже различим, а совпадение цвета через двенадцать комнат
+// пользователь поправит руками.
+function nextRoomColor(project) {
+  const used = new Set(project.rooms.map((room) => room.color).filter(Boolean));
+  const free = ROOM_PALETTE.find((color) => !used.has(color));
+  return free || ROOM_PALETTE[project.rooms.length % ROOM_PALETTE.length];
+}
+
+function normalizeColor(value, fallback) {
+  const color = String(value == null ? "" : value).trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toUpperCase() : fallback;
+}
+
 export function addRoom(project, room) {
   const name = normalizeName(typeof room === "string" ? room : room && room.name);
-  const created = { id: newId(), name };
+  const wanted = typeof room === "object" && room ? room.color : null;
+  const created = { id: newId(), name, color: normalizeColor(wanted, nextRoomColor(project)) };
   return { project: withProject(project, { rooms: [...project.rooms, created] }), room: created };
 }
 
 export function updateRoom(project, roomId, patch = {}) {
-  if (!findRoom(project, roomId)) throw modelError("roomNotFound");
-  const rooms = project.rooms.map((room) =>
-    room.id === roomId && Object.prototype.hasOwnProperty.call(patch, "name")
-      ? { ...room, name: normalizeName(patch.name) }
-      : room,
-  );
+  const current = findRoom(project, roomId);
+  if (!current) throw modelError("roomNotFound");
+  const rooms = project.rooms.map((room) => {
+    if (room.id !== roomId) return room;
+    const next = { ...room };
+    if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
+    if (Object.prototype.hasOwnProperty.call(patch, "color")) {
+      next.color = normalizeColor(patch.color, room.color || nextRoomColor(project));
+    }
+    return next;
+  });
   return { project: withProject(project, { rooms }), room: rooms.find((room) => room.id === roomId) };
 }
 
@@ -793,8 +860,174 @@ export function deleteRoom(project, roomId) {
   const room = findRoom(project, roomId);
   if (!room) throw modelError("roomNotFound");
   const rooms = project.rooms.filter((item) => item.id !== roomId);
+  // Метка теряет помещение, но не признак ручной правки: вписанное руками
+  // «без помещения» остаётся решением пользователя, и контур его не перебьёт.
   const marks = project.marks.map((mark) => (mark.roomId === roomId ? { ...mark, roomId: null } : mark));
-  return { project: withProject(project, { rooms, marks }), deleted: room };
+  const outlines = outlinesOf(project).filter((outline) => outline.roomId !== roomId);
+  return { project: withProject(project, { rooms, marks, outlines }), deleted: room };
+}
+
+// ——— контуры помещений ————————————————————————————————————————————————
+//
+// План загружается на весь объект одной картинкой, а комната обводится по
+// стенам замкнутым многоугольником — с эркерами, нишами и Г-образной формой.
+// Контур принадлежит схеме: у одной комнаты на разных этажах свои обводки.
+
+function outlinesOf(project) {
+  return project && Array.isArray(project.outlines) ? project.outlines : [];
+}
+
+// Площадь многоугольника (формула шнурков) в долях плана. Знак обхода не важен:
+// сравнивать площади надо и у контура, нарисованного по часовой, и против.
+export function outlineArea(points) {
+  const list = Array.isArray(points) ? points : [];
+  if (list.length < OUTLINE_MIN_POINTS) return 0;
+  let sum = 0;
+  for (let i = 0, j = list.length - 1; i < list.length; j = i, i += 1) {
+    sum += (list[j].x + list[i].x) * (list[j].y - list[i].y);
+  }
+  return Math.abs(sum) / 2;
+}
+
+// Точка внутри многоугольника — луч вправо и счёт пересечений. Форма любая:
+// для невыпуклой комнаты вырез считается наружной частью, ради чего всё и
+// затевалось (рамка Г-образной комнаты накрывает вырез, контур — нет).
+export function pointInOutline(point, points) {
+  const list = Array.isArray(points) ? points : [];
+  if (!point || list.length < OUTLINE_MIN_POINTS) return false;
+  let inside = false;
+  for (let i = 0, j = list.length - 1; i < list.length; j = i, i += 1) {
+    const a = list[i];
+    const b = list[j];
+    const crosses = a.y > point.y !== b.y > point.y;
+    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+// Порядок контуров схемы — от большего к меньшему. Один порядок на всё:
+// рисование (меньший ложится поверх большего) и попадание точки (комната
+// внутри комнаты выигрывает). Своей сортировки заводить негде.
+export function outlinesInOrder(project, schemeId) {
+  return outlinesOf(project)
+    .filter((outline) => !schemeId || outline.schemeId === schemeId)
+    .map((outline) => ({ outline, area: outlineArea(outline.points) }))
+    .sort((a, b) => b.area - a.area)
+    .map((item) => item.outline);
+}
+
+// Контур под точкой: последний из порядка, то есть наименьший по площади.
+export function outlineAtPoint(project, schemeId, point) {
+  const found = outlinesInOrder(project, schemeId).filter((outline) => pointInOutline(point, outline.points));
+  return found.length > 0 ? found[found.length - 1] : null;
+}
+
+export function roomAtPoint(project, schemeId, point) {
+  const outline = outlineAtPoint(project, schemeId, point);
+  return outline ? outline.roomId : null;
+}
+
+function normalizeOutlinePoints(points) {
+  const list = normalizePoints(points);
+  if (list.length < OUTLINE_MIN_POINTS) throw modelError("shortOutline");
+  return list;
+}
+
+export function addOutline(project, { schemeId, roomId, points } = {}) {
+  requireScheme(project, schemeId);
+  if (!findRoom(project, roomId)) throw modelError("roomNotFound");
+  const outline = { id: newId(), schemeId, roomId, points: normalizeOutlinePoints(points) };
+  return { project: withProject(project, { outlines: [...outlinesOf(project), outline] }), outline };
+}
+
+const OUTLINE_PATCH_FIELDS = ["points", "roomId"];
+
+export function updateOutline(project, outlineId, patch) {
+  if (!findOutline(project, outlineId)) throw modelError("outlineNotFound");
+  const changes = pick(patch, OUTLINE_PATCH_FIELDS);
+  if (Object.prototype.hasOwnProperty.call(changes, "points")) {
+    changes.points = normalizeOutlinePoints(changes.points);
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, "roomId") && !findRoom(project, changes.roomId)) {
+    throw modelError("roomNotFound");
+  }
+  const outlines = outlinesOf(project).map((outline) =>
+    outline.id === outlineId ? { ...outline, ...changes } : outline,
+  );
+  return { project: withProject(project, { outlines }), outline: outlines.find((item) => item.id === outlineId) };
+}
+
+export function deleteOutline(project, outlineId) {
+  const outline = findOutline(project, outlineId);
+  if (!outline) throw modelError("outlineNotFound");
+  const outlines = outlinesOf(project).filter((item) => item.id !== outlineId);
+  return { project: withProject(project, { outlines }), deleted: outline };
+}
+
+// ——— правка вершин контура ————————————————————————————————————————————
+//
+// Обводка по стенам с первого раза не выходит: вершину двигают, добавляют
+// между соседними и удаляют. Всё через updateOutline — второго места, где
+// меняются точки контура, нет.
+
+function outlinePointsAt(project, outlineId) {
+  const outline = findOutline(project, outlineId);
+  if (!outline) throw modelError("outlineNotFound");
+  return [...outline.points];
+}
+
+export function moveOutlinePoint(project, outlineId, index, point) {
+  const points = outlinePointsAt(project, outlineId);
+  if (!(index >= 0 && index < points.length)) throw modelError("outlinePointNotFound");
+  points[index] = { x: point.x, y: point.y };
+  return updateOutline(project, outlineId, { points });
+}
+
+// Новая вершина встаёт после `index` — на сегменте от неё к следующей,
+// замыкающий сегмент считается таким же (последняя → первая).
+export function insertOutlinePoint(project, outlineId, index, point) {
+  const points = outlinePointsAt(project, outlineId);
+  if (!(index >= 0 && index < points.length)) throw modelError("outlinePointNotFound");
+  points.splice(index + 1, 0, { x: point.x, y: point.y });
+  return updateOutline(project, outlineId, { points });
+}
+
+export function removeOutlinePoint(project, outlineId, index) {
+  const points = outlinePointsAt(project, outlineId);
+  if (!(index >= 0 && index < points.length)) throw modelError("outlinePointNotFound");
+  if (points.length <= OUTLINE_MIN_POINTS) throw modelError("shortOutline");
+  points.splice(index, 1);
+  return updateOutline(project, outlineId, { points });
+}
+
+// ——— автопривязка метки к помещению ——————————————————————————————————
+//
+// Решение заказчика: «Подставлять автоматически, ручная правка главнее».
+// Метка внутри контура получает его помещение сама, вне всех контуров — поле
+// пустое. Метку, которой помещение вписали руками (`roomManual`), автоматика
+// не трогает больше никогда: ни при перемещении, ни при перерисовке контура.
+// Вписано ли помещение метки руками. Объекты, размеченные до появления
+// контуров, признака не знают вовсе — и там помещение могло взяться только
+// из рук: такую метку автоматика тоже не трогает, иначе первая же правка
+// старого объекта стёрла бы всю работу со списком меток.
+export function markRoomManual(mark) {
+  if (!mark) return false;
+  return mark.roomManual === undefined ? Boolean(mark.roomId) : Boolean(mark.roomManual);
+}
+
+export function applyRoomOutlines(project, schemeId) {
+  const changed = [];
+  const marks = project.marks.map((mark) => {
+    if (markRoomManual(mark)) return mark;
+    if (schemeId && mark.schemeId !== schemeId) return mark;
+    const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+    const roomId = point ? roomAtPoint(project, mark.schemeId, point) : null;
+    if ((mark.roomId || null) === roomId) return mark;
+    changed.push(mark.id);
+    return { ...mark, roomId };
+  });
+  if (changed.length === 0) return { project, changed };
+  return { project: withProject(project, { marks }), changed };
 }
 
 export function updateProject(project, patch = {}) {
@@ -856,6 +1089,14 @@ export function validate(project) {
   // обозначение, с числом меток, чтобы случайный дубль было видно.
   for (const item of repeatedNumbers(project)) {
     problems.push(problem("repeatedNumber", { label: item.label, count: item.count }, item.markIds[0], "warning"));
+  }
+
+  for (const outline of outlinesOf(project)) {
+    if (!findScheme(project, outline.schemeId)) problems.push(problem("outlineWithoutScheme", null, outline.id));
+    if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", null, outline.id));
+    if (!Array.isArray(outline.points) || outline.points.length < OUTLINE_MIN_POINTS) {
+      problems.push(problem("shortOutline", null, outline.id));
+    }
   }
 
   for (const group of project.groups) {

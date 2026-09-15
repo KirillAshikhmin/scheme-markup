@@ -3,9 +3,20 @@
 // следующий клик по плану поставит именно его.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
-import { BLOCK_MODES, changeMarkType, findMark, findType, labelOf, styleOf, updateProject, updateType } from "../model.js";
+import {
+  BLOCK_MODES,
+  changeMarkType,
+  findMark,
+  findRoom,
+  findType,
+  labelOf,
+  styleOf,
+  updateProject,
+  updateType,
+} from "../model.js";
 import { uiEl, uiButton } from "./ui.js";
 import { openTypePicker } from "./typePicker.js";
+import { openRoomPicker, roomSwatch } from "./rooms.js";
 import { shapeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
 import {
@@ -93,10 +104,41 @@ function mountToolsPanel(host, api) {
     }
   }
 
+  function activeRoom(state) {
+    return state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
+  }
+
+  // Помещение для обводки выбирается так же, как тип метки: один раз на серию.
+  // Новая комната, заведённая прямо здесь, — правка объекта, значит и шаг
+  // истории, иначе Ctrl+Z вернул бы объект без неё молча.
+  async function chooseRoom(nextMode) {
+    const state = getState();
+    if (!state.project) return;
+    const picked = await openRoomPicker(state.project, { activeRoomId: state.activeRoomId });
+    if (!picked) return;
+    const fresh = getState();
+    const mode = nextMode || fresh.mode;
+    if (!picked.created) {
+      setState({ activeRoomId: picked.roomId, mode });
+      return;
+    }
+    canvasCommit(fresh.project, picked.project, strings.history.addRoom, {
+      patch: { activeRoomId: picked.roomId, mode },
+    });
+  }
+
   function setMode(mode) {
     const state = getState();
     if (mode !== "select" && !state.schemeId) {
       notify(strings.canvas.needScheme);
+      return;
+    }
+    if (mode === "room") {
+      if (!activeRoom(state)) {
+        chooseRoom("room");
+        return;
+      }
+      setState({ mode });
       return;
     }
     if (mode !== "select" && !state.activeTypeId) {
@@ -134,7 +176,10 @@ function mountToolsPanel(host, api) {
     const state = getState();
     const type = activeType(state);
     const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
-    const selected = state.selectedMarkIds.length > 0;
+    // Метка, у которой можно сменить тип: пока её нет, кнопки нет тоже —
+    // серая кнопка, которая никогда не оживает, хуже её отсутствия.
+    const selectedId = state.selectedMarkIds[0];
+    const selectedMark = state.project && selectedId ? findMark(state.project, selectedId) : null;
 
     const typeButton = uiEl(
       "button",
@@ -149,8 +194,14 @@ function mountToolsPanel(host, api) {
             toolsTypeIcon(state.project, type.id),
             uiEl("span", { class: "tools__code", text: type.code }),
             uiEl("span", { class: "tools__typeName", text: type.name }),
+            // Плашка и есть кнопка выбора типа — и должна выглядеть кнопкой:
+            // пользователь нажимал её вслепую, а рядом серела мёртвая кнопка.
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
           ]
-        : [uiEl("span", { class: "tools__typeName", text: strings.tools.noType })],
+        : [
+            uiEl("span", { class: "tools__typeName", text: strings.tools.noType }),
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
+          ],
     );
 
     const modeRow = uiEl("div", { class: "tools__row tools__row--modes" }, [
@@ -168,7 +219,34 @@ function mountToolsPanel(host, api) {
         title: strings.tools.kindLineHint,
         on: { click: () => setMode("line") },
       }),
+      uiButton(strings.tools.kindOutline, {
+        class: "ui-btn" + (state.mode === "room" ? " is-active" : ""),
+        title: strings.tools.kindOutlineHint,
+        on: { click: () => setMode("room") },
+      }),
     ]);
+
+    // Помещение для обводки: показано рядом с режимом, как выбранный тип метки.
+    const room = activeRoom(state);
+    const roomButton = uiEl(
+      "button",
+      {
+        class: "tools__room" + (room ? " is-set" : ""),
+        type: "button",
+        title: strings.tools.chooseRoom,
+        on: { click: () => chooseRoom() },
+      },
+      room
+        ? [
+            roomSwatch(room.color, 14),
+            uiEl("span", { class: "tools__typeName", text: room.name }),
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
+          ]
+        : [
+            uiEl("span", { class: "tools__typeName", text: strings.tools.noRoom }),
+            uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
+          ],
+    );
 
     const blockSelect = uiEl(
       "select",
@@ -195,17 +273,22 @@ function mountToolsPanel(host, api) {
     undoButton.disabled = !canUndo();
     redoButton.disabled = !canRedo();
 
-    box.replaceChildren(
+    // Пустые места отсеиваются: «Сменить тип» появляется только при выделенной
+    // метке, а replaceChildren на null вставил бы в панель слово «null».
+    const parts = [
       uiEl("p", { class: "tools__label", text: strings.tools.type }),
       typeButton,
-      uiButton(strings.tools.changeType, {
-        class: "ui-btn ui-btn--wide",
-        title: selected ? strings.tools.changeTypeHint : strings.tools.noSelection,
-        on: { click: () => changeSelectedType() },
-        attrs: selected ? {} : { disabled: "disabled" },
-      }),
+      selectedMark
+        ? uiButton(text("tools.changeTypeOf", { label: labelOf(state.project, selectedMark.id) }), {
+            class: "ui-btn ui-btn--wide",
+            title: strings.tools.changeTypeHint,
+            on: { click: () => changeSelectedType() },
+          })
+        : null,
       uiEl("p", { class: "tools__label", text: strings.tools.kind }),
       modeRow,
+      uiEl("p", { class: "tools__label", text: strings.tools.room }),
+      roomButton,
       uiEl("p", { class: "tools__label", text: strings.tools.block }),
       blockSelect,
       uiEl("p", { class: "tools__label", text: strings.tools.sizes }),
@@ -225,7 +308,8 @@ function mountToolsPanel(host, api) {
         uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
       ]),
       uiEl("div", { class: "tools__row" }, [undoButton, redoButton]),
-    );
+    ];
+    box.replaceChildren(...parts.filter(Boolean));
   }
 
   subscribe((state, changed) => {
@@ -233,6 +317,7 @@ function mountToolsPanel(host, api) {
     if (
       "project" in changed ||
       "activeTypeId" in changed ||
+      "activeRoomId" in changed ||
       "mode" in changed ||
       "selectedMarkIds" in changed ||
       "schemeId" in changed

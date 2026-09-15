@@ -4,10 +4,31 @@
 // Своего справочника комнат пользователь не заполняет заранее — он пишет
 // «Спальная Оли» в строке метки, и комната появляется. Поэтому главное здесь —
 // не окно, а `roomsEnsure`: одно и то же название не должно плодить двойников.
-import { addRoom, deleteRoom, findRoom, roomsInOrder, updateRoom } from "../model.js";
+import { ROOM_PALETTE, addRoom, deleteRoom, findRoom, roomsInOrder, updateRoom } from "../model.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
 import { canvasCommit } from "../canvas.js";
+
+// Кружок цвета помещения: тем же цветом обводится его контур на схеме.
+export function roomSwatch(color, size = 14) {
+  return uiEl("span", {
+    class: "rooms__swatch",
+    attrs: { style: `width:${size}px;height:${size}px;background:${color || "#8B949E"}` },
+  });
+}
+
+// Поле цвета помещения: палитра модели плюс произвольный цвет — контуров на
+// плане бывает десяток, и повтор цвета пользователь правит сам.
+function roomColorField(value, onChange) {
+  const input = uiEl("input", {
+    class: "rooms__color",
+    type: "color",
+    value: value || ROOM_PALETTE[0],
+    title: strings.rooms.color,
+    on: { change: (event) => onChange(event.target.value) },
+  });
+  return input;
+}
 
 function roomsKey(name) {
   return String(name == null ? "" : name).trim().toLowerCase();
@@ -88,6 +109,19 @@ export function openRoomsEditor(api) {
     }
   }
 
+  function recolor(roomId, color) {
+    const current = findRoom(project(), roomId);
+    // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
+    // сравнение без учёта регистра бережёт историю от пустого шага.
+    if (!current || String(current.color || "").toUpperCase() === String(color).toUpperCase()) return;
+    try {
+      commit(updateRoom(project(), roomId, { color }).project, strings.history.roomColor);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
   async function remove(roomId) {
     const current = findRoom(project(), roomId);
     if (!current) return;
@@ -115,6 +149,7 @@ export function openRoomsEditor(api) {
             value: room.name,
             on: { change: (event) => rename(room.id, event.target.value) },
           }),
+          roomColorField(room.color, (color) => recolor(room.id, color)),
           uiEl("span", {
             class: "rooms__count",
             text: text("rooms.marks", { count: roomsUsage(project(), room.id) }),
@@ -150,4 +185,80 @@ export function openRoomsEditor(api) {
     modal.close();
   }
   return { close };
+}
+
+// Окно выбора помещения для обводки: список комнат объекта плюс поле «новое».
+// Устроено как выбор типа метки — по той же причине: выбранное помещение
+// «залипает», и следующий контур рисуется без диалога.
+export function openRoomPicker(project, options = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    let current = project;
+    const done = (result) => {
+      modal.close();
+      resolve(result || null);
+    };
+
+    const list = uiEl("div", { class: "picker__list" });
+    const input = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.rooms.namePlaceholder,
+      on: {
+        keydown: (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          create();
+        },
+      },
+    });
+
+    function create() {
+      const name = input.value.trim();
+      if (!name) return;
+      const found = roomsFind(current, name);
+      if (found) {
+        done({ roomId: found.id, project: current, created: false });
+        return;
+      }
+      const result = addRoom(current, name);
+      done({ roomId: result.room.id, project: result.project, created: true });
+    }
+
+    function renderList() {
+      const rooms = roomsInOrder(current);
+      if (rooms.length === 0) {
+        list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
+        return;
+      }
+      list.replaceChildren(
+        ...rooms.map((room) =>
+          uiEl(
+            "button",
+            {
+              class: "picker__row" + (room.id === options.activeRoomId ? " is-active" : ""),
+              type: "button",
+              on: { click: () => done({ roomId: room.id, project: current, created: false }) },
+            },
+            [roomSwatch(room.color, 16), uiEl("span", { class: "picker__name", text: room.name })],
+          ),
+        ),
+      );
+    }
+
+    renderList();
+    modal = uiModal({
+      title: options.title || strings.rooms.pickTitle,
+      body: uiEl("div", { class: "picker" }, [
+        list,
+        uiEl("div", { class: "rooms__add" }, [
+          input,
+          uiButton(strings.rooms.add, { class: "ui-btn ui-btn--accent", on: { click: () => create() } }),
+        ]),
+      ]),
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      dismissable: true,
+      onCancel: () => resolve(null),
+    });
+  });
 }

@@ -58,6 +58,24 @@
   border-color: var(--panel-muted);
 }
 
+/* Подпись «Выбрать» у плашки: по ней видно, что плашка нажимается. */
+.tools__pick {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--panel-line);
+  background: #30363d;
+  color: var(--panel-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tools__type:hover .tools__pick,
+.tools__room:hover .tools__pick {
+  border-color: var(--accent);
+}
+
 .tools__code {
   font-weight: 700;
   font-size: 15px;
@@ -68,6 +86,49 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Помещение для обводки — та же плитка, что и выбранный тип метки. */
+.tools__room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tools__room.is-set {
+  border-color: var(--accent);
+}
+
+.tools__room:hover {
+  border-color: var(--panel-muted);
+}
+
+/* Кружок цвета помещения: им же обводится контур на схеме. */
+.rooms__swatch {
+  flex: none;
+  display: inline-block;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.rooms__color {
+  flex: none;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: #21262d;
+  cursor: pointer;
 }
 
 .tools__row {

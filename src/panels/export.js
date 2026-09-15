@@ -35,6 +35,7 @@ const exportChoice = {
   currentScheme: false,
   area: "all",
   legend: true,
+  outlines: true,
   tableScale: 2,
   schemeScale: 2,
 };
@@ -318,6 +319,9 @@ function exportSchemeDialog(api) {
     exportCheck(strings.exportPanel.withLegend, exportChoice.legend, (on) => {
       exportChoice.legend = on;
     }),
+    exportCheck(strings.exportPanel.withRooms, exportChoice.outlines, (on) => {
+      exportChoice.outlines = on;
+    }),
   ]);
 
   const guard = async (run) => {
@@ -338,6 +342,7 @@ function exportSchemeDialog(api) {
         area: exportChoice.area === "view" ? exportViewArea(state, scheme) : "all",
         scale: exportChoice.schemeScale,
         legend: exportChoice.legend,
+        outlines: exportChoice.outlines,
         filter: state.filter,
       });
     } finally {
@@ -360,6 +365,7 @@ function exportSchemeDialog(api) {
             const zip = await allSchemesZip(state.project, images, {
               scale: exportChoice.schemeScale,
               legend: exportChoice.legend,
+              outlines: exportChoice.outlines,
               filter: state.filter,
             });
             const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
