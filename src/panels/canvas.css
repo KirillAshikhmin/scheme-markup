@@ -150,7 +150,10 @@
   border-color: var(--panel-line);
 }
 
-.picker__swatch {
+/* Значок фигуры (`render.shapeIcon`) в строке списка и на кнопке типа
+   не сжимается вместе с текстом. */
+.picker__row .shape-icon,
+.tools__type .shape-icon {
   flex: 0 0 auto;
 }
 

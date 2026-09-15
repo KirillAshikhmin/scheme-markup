@@ -83,7 +83,14 @@ function shapeGeometry(shape, x, y, size) {
   const radius = Math.max(1, size);
   const base = SHAPE_BASE[shape] || shape;
   const decor = SHAPE_DECOR[shape] || null;
-  const shell = { cx: x, cy: y, r: radius, cross: decor === "cross", decor: decor === "cross" ? null : decor };
+  const shell = {
+    cx: x,
+    cy: y,
+    r: radius,
+    line: Math.max(1, radius * 0.22),
+    cross: decor === "cross",
+    decor: decor === "cross" ? null : decor,
+  };
 
   if (base === "star") {
     const points = [];
@@ -120,13 +127,61 @@ function shapeGeometry(shape, x, y, size) {
   return { kind: "circle", points: [], ...shell };
 }
 
+// Начинка знака: что закрашивается внутри контура и чем. Единственное описание
+// закраски в сборке — по нему рисует `drawShape`, по нему же тест снимает
+// отпечаток, так что разойтись правилам негде.
+// `role` — смысл («сплошная», «половина», «точка», «крест»), `mask` — область
+// краски: вся внутренность, прямоугольник, круг или линии заданной толщины.
+function shapeInternals(geometry) {
+  const parts = [];
+  if (geometry.decor === "fill") {
+    parts.push({ role: "fill", mask: "interior" });
+  } else if (geometry.decor === "half") {
+    // Залита нижняя половина: прямоугольник от центра вниз, обрезанный контуром.
+    parts.push({
+      role: "half",
+      mask: "rect",
+      x: geometry.cx - geometry.r,
+      y: geometry.cy,
+      width: geometry.r * 2,
+      height: geometry.r,
+    });
+  } else if (geometry.decor === "dot") {
+    parts.push({
+      role: "dot",
+      mask: "disc",
+      cx: geometry.cx,
+      cy: geometry.cy,
+      r: Math.max(1, geometry.r * DOT_RADIUS),
+    });
+  }
+  if (geometry.cross) {
+    const arm = geometry.r * Math.SQRT1_2;
+    parts.push({
+      role: "cross",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx - arm, y: geometry.cy - arm },
+          { x: geometry.cx + arm, y: geometry.cy + arm },
+        ],
+        [
+          { x: geometry.cx + arm, y: geometry.cy - arm },
+          { x: geometry.cx - arm, y: geometry.cy + arm },
+        ],
+      ],
+    });
+  }
+  return parts;
+}
+
 // Одна фигура — одним кодом и на экране, и в экспорте.
 export function drawShape(ctx, shape, x, y, size, color) {
   const geometry = shapeGeometry(shape, x, y, size);
-  const line = Math.max(1, size * 0.22);
   ctx.save();
   ctx.lineJoin = "round";
-  ctx.lineWidth = line;
+  ctx.lineWidth = geometry.line;
   ctx.fillStyle = "#ffffff";
   ctx.strokeStyle = color;
   ctx.beginPath();
@@ -143,31 +198,32 @@ export function drawShape(ctx, shape, x, y, size, color) {
   ctx.stroke();
   // Заливка и засечка идут поверх белой подложки, контур — поверх них: так
   // фигура читается и на тёмной линии плана, и на чёрно-белой распечатке.
-  if (geometry.decor === "fill") {
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.stroke();
-  } else if (geometry.decor === "half") {
-    ctx.save();
-    ctx.clip();
-    ctx.fillStyle = color;
-    ctx.fillRect(geometry.cx - geometry.r, geometry.cy, geometry.r * 2, geometry.r);
-    ctx.restore();
-    ctx.stroke();
-  } else if (geometry.decor === "dot") {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(geometry.cx, geometry.cy, Math.max(1, geometry.r * DOT_RADIUS), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  if (geometry.cross) {
-    const arm = geometry.r * Math.SQRT1_2;
-    ctx.beginPath();
-    ctx.moveTo(geometry.cx - arm, geometry.cy - arm);
-    ctx.lineTo(geometry.cx + arm, geometry.cy + arm);
-    ctx.moveTo(geometry.cx + arm, geometry.cy - arm);
-    ctx.lineTo(geometry.cx - arm, geometry.cy + arm);
-    ctx.stroke();
+  for (const part of shapeInternals(geometry)) {
+    if (part.mask === "interior") {
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.stroke();
+    } else if (part.mask === "rect") {
+      ctx.save();
+      ctx.clip();
+      ctx.fillStyle = color;
+      ctx.fillRect(part.x, part.y, part.width, part.height);
+      ctx.restore();
+      ctx.stroke();
+    } else if (part.mask === "disc") {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(part.cx, part.cy, part.r, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (part.mask === "lines") {
+      ctx.lineWidth = part.width;
+      ctx.beginPath();
+      for (const [from, to] of part.segments) {
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+      }
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -610,6 +666,7 @@ export function drawScheme(ctx, { project, scheme, image, filter, view, legend, 
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 export const renderInternals = {
   shapeGeometry,
+  shapeInternals,
   labelFontSize,
   labelTargets,
   labelOrigin,

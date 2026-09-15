@@ -1,15 +1,17 @@
 // Палитра условных обозначений. Смысл фигуры — чтобы монтажник различил её на
 // чёрно-белой распечатке в размере метки, поэтому проверка идёт не по списку
 // имён, а по отпечатку: знак рисуется в настоящем размере на сетку пикселей, и
-// отпечатки сравниваются так, как их видит глаз на бумаге. Правила закраски
-// здесь те же, что в `drawShape`, — иначе проверять было бы нечем: холста
-// в Node нет.
+// отпечатки сравниваются так, как их видит глаз на бумаге. Холста в Node нет,
+// поэтому краску кладёт тест — но по тому же описанию начинки
+// (`renderInternals.shapeInternals`), по которому рисует `drawShape`:
+// правила закраски записаны в сборке один раз.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SHAPES, renderInternals } from "../src/render.js";
 import { SHAPE_LEGACY, SHAPE_NAMES, SHAPE_PALETTE } from "../src/model.js";
 
 const shapeGeometry = (...args) => renderInternals.shapeGeometry(...args);
+const shapeInternals = (...args) => renderInternals.shapeInternals(...args);
 
 // Радиус метки на распечатке — около пяти пикселей: в этом размере заказчик
 // смотрит на план, а не в крупном предпросмотре.
@@ -60,12 +62,27 @@ function outlineDistance(point, geometry) {
   return best;
 }
 
+// Попадает ли точка под элемент начинки. Где и чем красить — сказано в самом
+// элементе; тест только кладёт краску по этому описанию.
+function coveredBy(part, point) {
+  if (part.mask === "interior") return true;
+  if (part.mask === "rect") {
+    return (
+      point.x >= part.x && point.x <= part.x + part.width && point.y >= part.y && point.y <= part.y + part.height
+    );
+  }
+  if (part.mask === "disc") return Math.hypot(point.x - part.cx, point.y - part.cy) <= part.r;
+  if (part.mask === "lines") {
+    return part.segments.some(([from, to]) => distanceToSegment(point, from, to) <= part.width / 2);
+  }
+  return false;
+}
+
 // Отпечаток знака: единица там, где на бумаге останется краска.
 // `outlineOnly` даёт силуэт без начинки — им проверяется, не совпал ли контур.
 function inkOf(shape, outlineOnly = false) {
   const geometry = shapeGeometry(shape, CENTER, CENTER, GLYPH_RADIUS);
-  const line = Math.max(1, GLYPH_RADIUS * 0.22);
-  const arm = geometry.r * Math.SQRT1_2;
+  const parts = outlineOnly ? [] : shapeInternals(geometry);
   const cells = [];
   for (let y = 0; y < GRID; y += 1) {
     for (let x = 0; x < GRID; x += 1) {
@@ -74,26 +91,8 @@ function inkOf(shape, outlineOnly = false) {
         geometry.kind === "circle"
           ? Math.hypot(point.x - geometry.cx, point.y - geometry.cy) <= geometry.r
           : insidePolygon(point, geometry.points);
-      let ink = outlineDistance(point, geometry) <= line / 2;
-      if (!ink && inside && !outlineOnly) {
-        if (geometry.decor === "fill") ink = true;
-        else if (geometry.decor === "half") ink = point.y >= geometry.cy;
-        else if (geometry.decor === "dot") {
-          ink = Math.hypot(point.x - geometry.cx, point.y - geometry.cy) <= Math.max(1, geometry.r * 0.42);
-        } else if (geometry.cross) {
-          const first = distanceToSegment(
-            point,
-            { x: geometry.cx - arm, y: geometry.cy - arm },
-            { x: geometry.cx + arm, y: geometry.cy + arm },
-          );
-          const second = distanceToSegment(
-            point,
-            { x: geometry.cx + arm, y: geometry.cy - arm },
-            { x: geometry.cx - arm, y: geometry.cy + arm },
-          );
-          ink = Math.min(first, second) <= line / 2;
-        }
-      }
+      let ink = outlineDistance(point, geometry) <= geometry.line / 2;
+      if (!ink && inside) ink = parts.some((part) => coveredBy(part, point));
       cells.push(ink ? 1 : 0);
     }
   }
@@ -103,9 +102,8 @@ function inkOf(shape, outlineOnly = false) {
 // Начинка знака: то, что видно внутри контура. Два обозначения с одинаковым
 // силуэтом различает только она.
 function interiorKind(shape) {
-  const geometry = shapeGeometry(shape, CENTER, CENTER, GLYPH_RADIUS);
-  if (geometry.cross) return "cross";
-  return geometry.decor || "empty";
+  const parts = shapeInternals(shapeGeometry(shape, CENTER, CENTER, GLYPH_RADIUS));
+  return parts.length === 0 ? "empty" : parts.map((part) => part.role).join("+");
 }
 
 function area(cells) {

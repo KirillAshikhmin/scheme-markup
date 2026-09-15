@@ -6,22 +6,15 @@
 import { strings, text } from "../strings.js";
 import { uiEl, uiButton, uiModal } from "./ui.js";
 import { addType, styleOf, typesInOrder } from "../model.js";
-import { drawShape } from "../render.js";
+import { shapeIcon } from "../render.js";
 
 const PICKER_CODE_RE = /^[A-Za-zА-Яа-яЁё]{1,2}$/u;
 
-// Значок типа — та же функция рисования, что на холсте: в списке видно
-// и цвет категории, и форму.
-export function typeSwatch(project, typeId, size = 22) {
-  const canvas = uiEl("canvas", { class: "picker__swatch" });
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
-  if (ctx) {
-    const style = styleOf(project, typeId);
-    drawShape(ctx, style.shape, size / 2, size / 2, size * 0.36, style.color);
-  }
-  return canvas;
+// Значок типа — цвет категории и форма из справочника, нарисованные общим
+// `render.shapeIcon`: в списке видно ровно то, что попадёт на план.
+function pickerIcon(project, typeId, size = 22) {
+  const style = styleOf(project, typeId);
+  return shapeIcon(style.shape, style.color, size);
 }
 
 function pickerExact(type, query) {
@@ -144,7 +137,7 @@ export function openTypePicker(project, options = {}) {
               on: { click: () => done({ typeId: type.id, project: current }) },
             },
             [
-              typeSwatch(current, type.id),
+              pickerIcon(current, type.id),
               uiEl("span", { class: "picker__code", text: type.code }),
               uiEl("span", { class: "picker__name", text: type.name }),
             ],

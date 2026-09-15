@@ -157,7 +157,10 @@
   border-color: var(--panel-line);
 }
 
-.picker__swatch {
+/* Значок фигуры (`render.shapeIcon`) в строке списка и на кнопке типа
+   не сжимается вместе с текстом. */
+.picker__row .shape-icon,
+.tools__type .shape-icon {
   flex: 0 0 auto;
 }
 
@@ -1691,7 +1694,6 @@ const strings = {
     markNotFound: "Метка не найдена",
     categoryNotFound: "Категория не найдена",
     roomNotFound: "Помещение не найдено",
-    groupNotFound: "Группа не найдена",
     noPoints: "Нужна хотя бы одна точка",
     shortLine: "Линия короче двух вершин не сохраняется",
     codeRequired: "Нужен код типа — одна или две буквы",
@@ -3724,7 +3726,14 @@ function shapeGeometry(shape, x, y, size) {
   const radius = Math.max(1, size);
   const base = SHAPE_BASE[shape] || shape;
   const decor = SHAPE_DECOR[shape] || null;
-  const shell = { cx: x, cy: y, r: radius, cross: decor === "cross", decor: decor === "cross" ? null : decor };
+  const shell = {
+    cx: x,
+    cy: y,
+    r: radius,
+    line: Math.max(1, radius * 0.22),
+    cross: decor === "cross",
+    decor: decor === "cross" ? null : decor,
+  };
 
   if (base === "star") {
     const points = [];
@@ -3761,13 +3770,61 @@ function shapeGeometry(shape, x, y, size) {
   return { kind: "circle", points: [], ...shell };
 }
 
+// Начинка знака: что закрашивается внутри контура и чем. Единственное описание
+// закраски в сборке — по нему рисует `drawShape`, по нему же тест снимает
+// отпечаток, так что разойтись правилам негде.
+// `role` — смысл («сплошная», «половина», «точка», «крест»), `mask` — область
+// краски: вся внутренность, прямоугольник, круг или линии заданной толщины.
+function shapeInternals(geometry) {
+  const parts = [];
+  if (geometry.decor === "fill") {
+    parts.push({ role: "fill", mask: "interior" });
+  } else if (geometry.decor === "half") {
+    // Залита нижняя половина: прямоугольник от центра вниз, обрезанный контуром.
+    parts.push({
+      role: "half",
+      mask: "rect",
+      x: geometry.cx - geometry.r,
+      y: geometry.cy,
+      width: geometry.r * 2,
+      height: geometry.r,
+    });
+  } else if (geometry.decor === "dot") {
+    parts.push({
+      role: "dot",
+      mask: "disc",
+      cx: geometry.cx,
+      cy: geometry.cy,
+      r: Math.max(1, geometry.r * DOT_RADIUS),
+    });
+  }
+  if (geometry.cross) {
+    const arm = geometry.r * Math.SQRT1_2;
+    parts.push({
+      role: "cross",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx - arm, y: geometry.cy - arm },
+          { x: geometry.cx + arm, y: geometry.cy + arm },
+        ],
+        [
+          { x: geometry.cx + arm, y: geometry.cy - arm },
+          { x: geometry.cx - arm, y: geometry.cy + arm },
+        ],
+      ],
+    });
+  }
+  return parts;
+}
+
 // Одна фигура — одним кодом и на экране, и в экспорте.
 function drawShape(ctx, shape, x, y, size, color) {
   const geometry = shapeGeometry(shape, x, y, size);
-  const line = Math.max(1, size * 0.22);
   ctx.save();
   ctx.lineJoin = "round";
-  ctx.lineWidth = line;
+  ctx.lineWidth = geometry.line;
   ctx.fillStyle = "#ffffff";
   ctx.strokeStyle = color;
   ctx.beginPath();
@@ -3784,31 +3841,32 @@ function drawShape(ctx, shape, x, y, size, color) {
   ctx.stroke();
   // Заливка и засечка идут поверх белой подложки, контур — поверх них: так
   // фигура читается и на тёмной линии плана, и на чёрно-белой распечатке.
-  if (geometry.decor === "fill") {
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.stroke();
-  } else if (geometry.decor === "half") {
-    ctx.save();
-    ctx.clip();
-    ctx.fillStyle = color;
-    ctx.fillRect(geometry.cx - geometry.r, geometry.cy, geometry.r * 2, geometry.r);
-    ctx.restore();
-    ctx.stroke();
-  } else if (geometry.decor === "dot") {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(geometry.cx, geometry.cy, Math.max(1, geometry.r * DOT_RADIUS), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  if (geometry.cross) {
-    const arm = geometry.r * Math.SQRT1_2;
-    ctx.beginPath();
-    ctx.moveTo(geometry.cx - arm, geometry.cy - arm);
-    ctx.lineTo(geometry.cx + arm, geometry.cy + arm);
-    ctx.moveTo(geometry.cx + arm, geometry.cy - arm);
-    ctx.lineTo(geometry.cx - arm, geometry.cy + arm);
-    ctx.stroke();
+  for (const part of shapeInternals(geometry)) {
+    if (part.mask === "interior") {
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.stroke();
+    } else if (part.mask === "rect") {
+      ctx.save();
+      ctx.clip();
+      ctx.fillStyle = color;
+      ctx.fillRect(part.x, part.y, part.width, part.height);
+      ctx.restore();
+      ctx.stroke();
+    } else if (part.mask === "disc") {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(part.cx, part.cy, part.r, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (part.mask === "lines") {
+      ctx.lineWidth = part.width;
+      ctx.beginPath();
+      for (const [from, to] of part.segments) {
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+      }
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -4246,6 +4304,7 @@ function drawScheme(ctx, { project, scheme, image, filter, view, legend, selecte
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 const renderInternals = {
   shapeGeometry,
+  shapeInternals,
   labelFontSize,
   labelTargets,
   labelOrigin,
@@ -8956,18 +9015,11 @@ registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
 
 const PICKER_CODE_RE = /^[A-Za-zА-Яа-яЁё]{1,2}$/u;
 
-// Значок типа — та же функция рисования, что на холсте: в списке видно
-// и цвет категории, и форму.
-function typeSwatch(project, typeId, size = 22) {
-  const canvas = uiEl("canvas", { class: "picker__swatch" });
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
-  if (ctx) {
-    const style = styleOf(project, typeId);
-    drawShape(ctx, style.shape, size / 2, size / 2, size * 0.36, style.color);
-  }
-  return canvas;
+// Значок типа — цвет категории и форма из справочника, нарисованные общим
+// `render.shapeIcon`: в списке видно ровно то, что попадёт на план.
+function pickerIcon(project, typeId, size = 22) {
+  const style = styleOf(project, typeId);
+  return shapeIcon(style.shape, style.color, size);
 }
 
 function pickerExact(type, query) {
@@ -9089,7 +9141,7 @@ function openTypePicker(project, options = {}) {
               on: { click: () => done({ typeId: type.id, project: current }) },
             },
             [
-              typeSwatch(current, type.id),
+              pickerIcon(current, type.id),
               uiEl("span", { class: "picker__code", text: type.code }),
               uiEl("span", { class: "picker__name", text: type.name }),
             ],
@@ -9123,8 +9175,15 @@ function openTypePicker(project, options = {}) {
 
 
 
+
 const TOOLS_MARK_SIZE = { min: 4, max: 36 };
 const TOOLS_LABEL_SIZE = { min: 8, max: 40 };
+// Крупный значок выбранного типа: цвет категории и форма из справочника,
+// нарисованные тем же `render.shapeIcon`, что в списках и на плане.
+function toolsTypeIcon(project, typeId, size = 26) {
+  const style = styleOf(project, typeId);
+  return shapeIcon(style.shape, style.color, size);
+}
 
 // Ползунок двигается живьём, а в историю попадает одним действием на всё
 // перетаскивание: иначе стек забивался бы тридцатью шагами на один жест.
@@ -9246,7 +9305,7 @@ function mountToolsPanel(host, api) {
       },
       type
         ? [
-            typeSwatch(state.project, type.id, 26),
+            toolsTypeIcon(state.project, type.id),
             uiEl("span", { class: "tools__code", text: type.code }),
             uiEl("span", { class: "tools__typeName", text: type.name }),
           ]

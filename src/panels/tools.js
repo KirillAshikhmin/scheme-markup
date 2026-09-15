@@ -3,9 +3,10 @@
 // следующий клик по плану поставит именно его.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
-import { BLOCK_MODES, changeMarkType, findMark, findType, labelOf, updateProject, updateType } from "../model.js";
+import { BLOCK_MODES, changeMarkType, findMark, findType, labelOf, styleOf, updateProject, updateType } from "../model.js";
 import { uiEl, uiButton } from "./ui.js";
-import { openTypePicker, typeSwatch } from "./typePicker.js";
+import { openTypePicker } from "./typePicker.js";
+import { shapeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
 import {
   canvasCommit,
@@ -18,6 +19,12 @@ import {
 
 const TOOLS_MARK_SIZE = { min: 4, max: 36 };
 const TOOLS_LABEL_SIZE = { min: 8, max: 40 };
+// Крупный значок выбранного типа: цвет категории и форма из справочника,
+// нарисованные тем же `render.shapeIcon`, что в списках и на плане.
+function toolsTypeIcon(project, typeId, size = 26) {
+  const style = styleOf(project, typeId);
+  return shapeIcon(style.shape, style.color, size);
+}
 
 // Ползунок двигается живьём, а в историю попадает одним действием на всё
 // перетаскивание: иначе стек забивался бы тридцатью шагами на один жест.
@@ -139,7 +146,7 @@ function mountToolsPanel(host, api) {
       },
       type
         ? [
-            typeSwatch(state.project, type.id, 26),
+            toolsTypeIcon(state.project, type.id),
             uiEl("span", { class: "tools__code", text: type.code }),
             uiEl("span", { class: "tools__typeName", text: type.name }),
           ]

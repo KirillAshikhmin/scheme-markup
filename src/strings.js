@@ -152,7 +152,6 @@ export const strings = {
     markNotFound: "Метка не найдена",
     categoryNotFound: "Категория не найдена",
     roomNotFound: "Помещение не найдено",
-    groupNotFound: "Группа не найдена",
     noPoints: "Нужна хотя бы одна точка",
     shortLine: "Линия короче двух вершин не сохраняется",
     codeRequired: "Нужен код типа — одна или две буквы",
