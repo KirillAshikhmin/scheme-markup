@@ -13,7 +13,7 @@ import {
   sectionStartList,
   sectionsAfterToggle,
 } from "../src/app.js";
-import { roomsOutlineAction, roomsRows } from "../src/panels/rooms.js";
+import { roomsAddAction, roomsOutlineAction, roomsRows } from "../src/panels/rooms.js";
 import { addMark, addOutline, addRoom, addScheme, createProject, updateMark } from "../src/model.js";
 
 const SQUARE = [
@@ -107,4 +107,15 @@ test("кнопка контура ведёт в правку, когда кон�
   assert.equal(roomsOutlineAction(drawn), "edit");
   assert.equal(roomsOutlineAction(empty), "draw");
   assert.equal(roomsOutlineAction(null), "draw");
+});
+
+// Дорога, заменившая выбор помещения из раздела «Метки»: вписать название уже
+// заведённой комнаты — значит обвести её заново, а не завести двойника.
+test("поле добавления заводит новую комнату, а знакомую берёт в обводку", () => {
+  const { project, bedroom } = roomsFixture();
+  assert.deepEqual(roomsAddAction(project, "   "), { kind: "none", roomId: null, name: "" });
+  assert.deepEqual(roomsAddAction(project, " Гардероб "), { kind: "create", roomId: null, name: "Гардероб" });
+  const again = roomsAddAction(project, "  спальная оли ");
+  assert.equal(again.kind, "draw");
+  assert.equal(again.roomId, bedroom.id);
 });

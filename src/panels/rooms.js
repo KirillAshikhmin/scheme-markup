@@ -16,17 +16,9 @@ import {
   updateRoom,
 } from "../model.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiConfirm, uiEl } from "./ui.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { canvasCommit } from "../canvas.js";
-
-// Кружок цвета помещения: тем же цветом обводится его контур на схеме.
-export function roomSwatch(color, size = 14) {
-  return uiEl("span", {
-    class: "rooms__swatch",
-    attrs: { style: `width:${size}px;height:${size}px;background:${color || "#8B949E"}` },
-  });
-}
 
 // Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
 // и цвета соседних комнат, и цвета категорий: контуров на плане бывает
@@ -72,6 +64,18 @@ export function roomsRows(project, schemeId) {
     const outline = outlines.find((item) => item.roomId === room.id) || null;
     return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
   });
+}
+
+// Что делает поле добавления: завести комнату или — если такая уже есть —
+// сразу обвести её заново. Вторая ветка и заменяет прежний выбор помещения
+// из раздела «Метки»: там можно было взять комнату с контуром и обвести ещё раз.
+export function roomsAddAction(project, name) {
+  const trimmed = String(name == null ? "" : name).trim();
+  if (!trimmed) return { kind: "none", roomId: null, name: "" };
+  const found = roomsFind(project, trimmed);
+  return found
+    ? { kind: "draw", roomId: found.id, name: trimmed }
+    : { kind: "create", roomId: null, name: trimmed };
 }
 
 // Что делает кнопка контура: нарисовать новый или править вершины прежнего.
@@ -125,16 +129,16 @@ function mountRoomsPanel(host, api) {
   // же шагом истории, искать его отдельно не нужно.
   function addAndDraw() {
     const state = getState();
-    const name = input.value.trim();
-    if (!state.project || !name) return;
-    const found = roomsFind(state.project, name);
-    if (found) {
+    if (!state.project) return;
+    const action = roomsAddAction(state.project, input.value);
+    if (action.kind === "none") return;
+    if (action.kind === "draw") {
       input.value = "";
-      startOutline(found.id);
+      startDrawing(action.roomId);
       return;
     }
     try {
-      const created = addRoom(state.project, name);
+      const created = addRoom(state.project, action.name);
       input.value = "";
       canvasCommit(state.project, created.project, strings.history.addRoom, {
         patch: drawPatch(created.room.id),
@@ -152,6 +156,8 @@ function mountRoomsPanel(host, api) {
       : { activeRoomId: roomId };
   }
 
+  // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
+  // вершины на плане.
   function startOutline(roomId) {
     const state = getState();
     if (!state.schemeId) {
@@ -159,9 +165,19 @@ function mountRoomsPanel(host, api) {
       return;
     }
     const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
-    if (roomsOutlineAction(row) === "edit") {
-      setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
-      notify(strings.rooms.outlineEditing);
+    if (roomsOutlineAction(row) !== "edit") {
+      startDrawing(roomId);
+      return;
+    }
+    setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
+    notify(strings.rooms.outlineEditing);
+  }
+
+  // Обводка с нуля — та самая дорога, что была в разделе «Метки»: она осталась
+  // и для комнаты, у которой контур уже есть (вписать её название в поле).
+  function startDrawing(roomId) {
+    if (!getState().schemeId) {
+      notify(strings.canvas.needScheme);
       return;
     }
     setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
@@ -272,79 +288,3 @@ function mountRoomsPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
-
-// Окно выбора помещения для обводки: список комнат объекта плюс поле «новое».
-// Устроено как выбор типа метки — по той же причине: выбранное помещение
-// «залипает», и следующий контур рисуется без диалога.
-export function openRoomPicker(project, options = {}) {
-  return new Promise((resolve) => {
-    let modal;
-    let current = project;
-    const done = (result) => {
-      modal.close();
-      resolve(result || null);
-    };
-
-    const list = uiEl("div", { class: "picker__list" });
-    const input = uiEl("input", {
-      class: "ui-input",
-      type: "text",
-      placeholder: strings.rooms.namePlaceholder,
-      on: {
-        keydown: (event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          create();
-        },
-      },
-    });
-
-    function create() {
-      const name = input.value.trim();
-      if (!name) return;
-      const found = roomsFind(current, name);
-      if (found) {
-        done({ roomId: found.id, project: current, created: false });
-        return;
-      }
-      const result = addRoom(current, name);
-      done({ roomId: result.room.id, project: result.project, created: true });
-    }
-
-    function renderList() {
-      const rooms = roomsInOrder(current);
-      if (rooms.length === 0) {
-        list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
-        return;
-      }
-      list.replaceChildren(
-        ...rooms.map((room) =>
-          uiEl(
-            "button",
-            {
-              class: "picker__row" + (room.id === options.activeRoomId ? " is-active" : ""),
-              type: "button",
-              on: { click: () => done({ roomId: room.id, project: current, created: false }) },
-            },
-            [roomSwatch(room.color, 16), uiEl("span", { class: "picker__name", text: room.name })],
-          ),
-        ),
-      );
-    }
-
-    renderList();
-    modal = uiModal({
-      title: options.title || strings.rooms.pickTitle,
-      body: uiEl("div", { class: "picker" }, [
-        list,
-        uiEl("div", { class: "rooms__add" }, [
-          input,
-          uiButton(strings.rooms.add, { class: "ui-btn ui-btn--accent", on: { click: () => create() } }),
-        ]),
-      ]),
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
-      dismissable: true,
-      onCancel: () => resolve(null),
-    });
-  });
-}

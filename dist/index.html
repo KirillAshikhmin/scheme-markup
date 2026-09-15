@@ -1951,8 +1951,6 @@ const strings = {
     kindLine: "Линия",
     kindPointHint: "Клик по плану ставит точку выбранного типа",
     kindLineHint: "Клики рисуют ломаную: лента или трек",
-    kindOutline: "Контур",
-    kindOutlineHint: "Обвести помещение по стенам: клик — вершина, двойной клик по первой замыкает",
     block: "Блок точек",
     blockHint: "Режим блока хранится у типа: так встают его метки, когда их ставят ручкой «+»",
     markSize: "Метки",
@@ -2282,10 +2280,10 @@ const strings = {
     auto: "По контуру",
     autoOf: "По контуру: {name}",
     color: "Цвет контура помещения",
-    pickTitle: "Какое помещение обводим?",
     empty: "Помещений пока нет — впишите название и обведите контур",
     addAndDraw: "Добавить и обвести",
-    addAndDrawHint: "Заводит помещение и сразу включает обводку контура на плане",
+    addAndDrawHint:
+      "Заводит помещение и сразу включает обводку контура на плане. Название уже заведённого — обвести его заново",
     outlineDraw: "Обвести контур на плане",
     outlineEdit: "Править контур помещения",
     outlineEditing: "Контур выбран: тяните вершины, «+» на стенке добавляет, двойной клик убирает",
@@ -9870,14 +9868,6 @@ registerPanel(PANEL_IDS.headerActions, mountExportPanel);
 
 
 
-// Кружок цвета помещения: тем же цветом обводится его контур на схеме.
-function roomSwatch(color, size = 14) {
-  return uiEl("span", {
-    class: "rooms__swatch",
-    attrs: { style: `width:${size}px;height:${size}px;background:${color || "#8B949E"}` },
-  });
-}
-
 // Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
 // и цвета соседних комнат, и цвета категорий: контуров на плане бывает
 // десяток, а метка своей же комнаты не должна повторять цвет её заливки.
@@ -9920,6 +9910,18 @@ function roomsRows(project, schemeId) {
     const outline = outlines.find((item) => item.roomId === room.id) || null;
     return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
   });
+}
+
+// Что делает поле добавления: завести комнату или — если такая уже есть —
+// сразу обвести её заново. Вторая ветка и заменяет прежний выбор помещения
+// из раздела «Метки»: там можно было взять комнату с контуром и обвести ещё раз.
+function roomsAddAction(project, name) {
+  const trimmed = String(name == null ? "" : name).trim();
+  if (!trimmed) return { kind: "none", roomId: null, name: "" };
+  const found = roomsFind(project, trimmed);
+  return found
+    ? { kind: "draw", roomId: found.id, name: trimmed }
+    : { kind: "create", roomId: null, name: trimmed };
 }
 
 // Что делает кнопка контура: нарисовать новый или править вершины прежнего.
@@ -9973,16 +9975,16 @@ function mountRoomsPanel(host, api) {
   // же шагом истории, искать его отдельно не нужно.
   function addAndDraw() {
     const state = getState();
-    const name = input.value.trim();
-    if (!state.project || !name) return;
-    const found = roomsFind(state.project, name);
-    if (found) {
+    if (!state.project) return;
+    const action = roomsAddAction(state.project, input.value);
+    if (action.kind === "none") return;
+    if (action.kind === "draw") {
       input.value = "";
-      startOutline(found.id);
+      startDrawing(action.roomId);
       return;
     }
     try {
-      const created = addRoom(state.project, name);
+      const created = addRoom(state.project, action.name);
       input.value = "";
       canvasCommit(state.project, created.project, strings.history.addRoom, {
         patch: drawPatch(created.room.id),
@@ -10000,6 +10002,8 @@ function mountRoomsPanel(host, api) {
       : { activeRoomId: roomId };
   }
 
+  // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
+  // вершины на плане.
   function startOutline(roomId) {
     const state = getState();
     if (!state.schemeId) {
@@ -10007,9 +10011,19 @@ function mountRoomsPanel(host, api) {
       return;
     }
     const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
-    if (roomsOutlineAction(row) === "edit") {
-      setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
-      notify(strings.rooms.outlineEditing);
+    if (roomsOutlineAction(row) !== "edit") {
+      startDrawing(roomId);
+      return;
+    }
+    setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
+    notify(strings.rooms.outlineEditing);
+  }
+
+  // Обводка с нуля — та самая дорога, что была в разделе «Метки»: она осталась
+  // и для комнаты, у которой контур уже есть (вписать её название в поле).
+  function startDrawing(roomId) {
+    if (!getState().schemeId) {
+      notify(strings.canvas.needScheme);
       return;
     }
     setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
@@ -10120,82 +10134,6 @@ function mountRoomsPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
-
-// Окно выбора помещения для обводки: список комнат объекта плюс поле «новое».
-// Устроено как выбор типа метки — по той же причине: выбранное помещение
-// «залипает», и следующий контур рисуется без диалога.
-function openRoomPicker(project, options = {}) {
-  return new Promise((resolve) => {
-    let modal;
-    let current = project;
-    const done = (result) => {
-      modal.close();
-      resolve(result || null);
-    };
-
-    const list = uiEl("div", { class: "picker__list" });
-    const input = uiEl("input", {
-      class: "ui-input",
-      type: "text",
-      placeholder: strings.rooms.namePlaceholder,
-      on: {
-        keydown: (event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          create();
-        },
-      },
-    });
-
-    function create() {
-      const name = input.value.trim();
-      if (!name) return;
-      const found = roomsFind(current, name);
-      if (found) {
-        done({ roomId: found.id, project: current, created: false });
-        return;
-      }
-      const result = addRoom(current, name);
-      done({ roomId: result.room.id, project: result.project, created: true });
-    }
-
-    function renderList() {
-      const rooms = roomsInOrder(current);
-      if (rooms.length === 0) {
-        list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
-        return;
-      }
-      list.replaceChildren(
-        ...rooms.map((room) =>
-          uiEl(
-            "button",
-            {
-              class: "picker__row" + (room.id === options.activeRoomId ? " is-active" : ""),
-              type: "button",
-              on: { click: () => done({ roomId: room.id, project: current, created: false }) },
-            },
-            [roomSwatch(room.color, 16), uiEl("span", { class: "picker__name", text: room.name })],
-          ),
-        ),
-      );
-    }
-
-    renderList();
-    modal = uiModal({
-      title: options.title || strings.rooms.pickTitle,
-      body: uiEl("div", { class: "picker" }, [
-        list,
-        uiEl("div", { class: "rooms__add" }, [
-          input,
-          uiButton(strings.rooms.add, { class: "ui-btn ui-btn--accent", on: { click: () => create() } }),
-        ]),
-      ]),
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
-      dismissable: true,
-      onCancel: () => resolve(null),
-    });
-  });
-}
 
 // src/panels/types.js
 // Справочник объекта: типы меток, категории, помещения и шаблон для новых
@@ -12727,9 +12665,9 @@ function openTypePicker(project, options = {}) {
 // видно, что следующий клик по плану поставит именно его. «Размеры» — размер
 // меток и подписей и масштаб плана.
 //
-// Помещение для обводки больше не выбирается здесь: его показывает и выбирает
-// раздел «Помещения», где рядом список комнат и кнопки контуров.
-
+// Обводки помещений здесь нет вовсе: контур принадлежит комнате, а не метке,
+// и запускается из раздела «Помещения» — там и список комнат, и кнопки
+// контуров. В этом разделе остаются только режимы про метки.
 
 
 
@@ -12811,41 +12749,10 @@ function mountToolsPanel(host, api) {
     }
   }
 
-  function activeRoom(state) {
-    return state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
-  }
-
-  // Помещение для обводки выбирается так же, как тип метки: один раз на серию.
-  // Новая комната, заведённая прямо здесь, — правка объекта, значит и шаг
-  // истории, иначе Ctrl+Z вернул бы объект без неё молча.
-  async function chooseRoom(nextMode) {
-    const state = getState();
-    if (!state.project) return;
-    const picked = await openRoomPicker(state.project, { activeRoomId: state.activeRoomId });
-    if (!picked) return;
-    const fresh = getState();
-    const mode = nextMode || fresh.mode;
-    if (!picked.created) {
-      setState({ activeRoomId: picked.roomId, mode });
-      return;
-    }
-    canvasCommit(fresh.project, picked.project, strings.history.addRoom, {
-      patch: { activeRoomId: picked.roomId, mode },
-    });
-  }
-
   function setMode(mode) {
     const state = getState();
     if (mode !== "select" && !state.schemeId) {
       notify(strings.canvas.needScheme);
-      return;
-    }
-    if (mode === "room") {
-      if (!activeRoom(state)) {
-        chooseRoom("room");
-        return;
-      }
-      setState({ mode });
       return;
     }
     if (mode !== "select" && !state.activeTypeId) {
@@ -12908,11 +12815,6 @@ function mountToolsPanel(host, api) {
         title: strings.tools.kindLineHint,
         on: { click: () => setMode("line") },
       }),
-      uiButton(strings.tools.kindOutline, {
-        class: "ui-btn" + (state.mode === "room" ? " is-active" : ""),
-        title: strings.tools.kindOutlineHint,
-        on: { click: () => setMode("room") },
-      }),
     ]);
 
     const blockSelect = uiEl(
@@ -12965,7 +12867,6 @@ function mountToolsPanel(host, api) {
     if (
       "project" in changed ||
       "activeTypeId" in changed ||
-      "activeRoomId" in changed ||
       "mode" in changed ||
       "selectedMarkIds" in changed ||
       "schemeId" in changed

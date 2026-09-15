@@ -3,15 +3,15 @@
 // видно, что следующий клик по плану поставит именно его. «Размеры» — размер
 // меток и подписей и масштаб плана.
 //
-// Помещение для обводки больше не выбирается здесь: его показывает и выбирает
-// раздел «Помещения», где рядом список комнат и кнопки контуров.
+// Обводки помещений здесь нет вовсе: контур принадлежит комнате, а не метке,
+// и запускается из раздела «Помещения» — там и список комнат, и кнопки
+// контуров. В этом разделе остаются только режимы про метки.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   BLOCK_MODES,
   changeMarkType,
   findMark,
-  findRoom,
   findType,
   labelOf,
   styleOf,
@@ -20,7 +20,6 @@ import {
 } from "../model.js";
 import { uiEl, uiButton } from "./ui.js";
 import { openTypePicker } from "./typePicker.js";
-import { openRoomPicker } from "./rooms.js";
 import { shapeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
 import {
@@ -105,41 +104,10 @@ function mountToolsPanel(host, api) {
     }
   }
 
-  function activeRoom(state) {
-    return state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
-  }
-
-  // Помещение для обводки выбирается так же, как тип метки: один раз на серию.
-  // Новая комната, заведённая прямо здесь, — правка объекта, значит и шаг
-  // истории, иначе Ctrl+Z вернул бы объект без неё молча.
-  async function chooseRoom(nextMode) {
-    const state = getState();
-    if (!state.project) return;
-    const picked = await openRoomPicker(state.project, { activeRoomId: state.activeRoomId });
-    if (!picked) return;
-    const fresh = getState();
-    const mode = nextMode || fresh.mode;
-    if (!picked.created) {
-      setState({ activeRoomId: picked.roomId, mode });
-      return;
-    }
-    canvasCommit(fresh.project, picked.project, strings.history.addRoom, {
-      patch: { activeRoomId: picked.roomId, mode },
-    });
-  }
-
   function setMode(mode) {
     const state = getState();
     if (mode !== "select" && !state.schemeId) {
       notify(strings.canvas.needScheme);
-      return;
-    }
-    if (mode === "room") {
-      if (!activeRoom(state)) {
-        chooseRoom("room");
-        return;
-      }
-      setState({ mode });
       return;
     }
     if (mode !== "select" && !state.activeTypeId) {
@@ -202,11 +170,6 @@ function mountToolsPanel(host, api) {
         title: strings.tools.kindLineHint,
         on: { click: () => setMode("line") },
       }),
-      uiButton(strings.tools.kindOutline, {
-        class: "ui-btn" + (state.mode === "room" ? " is-active" : ""),
-        title: strings.tools.kindOutlineHint,
-        on: { click: () => setMode("room") },
-      }),
     ]);
 
     const blockSelect = uiEl(
@@ -259,7 +222,6 @@ function mountToolsPanel(host, api) {
     if (
       "project" in changed ||
       "activeTypeId" in changed ||
-      "activeRoomId" in changed ||
       "mode" in changed ||
       "selectedMarkIds" in changed ||
       "schemeId" in changed
