@@ -23,6 +23,8 @@ import {
   findScheme,
   labelOf,
   markByCode,
+  repeatedNumbers,
+  setMarkNumber,
   styleOf,
   updateCategory,
   updateMark,
@@ -691,4 +693,164 @@ test("режим блока берётся у типа ставящейся ме
   assert.equal(labelOf(back.project, back.mark.id), "В2");
   assert.equal(findMark(back.project, socket.mark.id).points.length, 3);
   assert.equal(labelOf(back.project, socket.group.id), "В1В2, Р1");
+});
+
+// ——— ручной номер ————————————————————————————————————————————————————
+// Несколько одинаковых светильников, подключённых к одной группе, носят на
+// схеме один номер. Номер выдаёт счётчик, но последнее слово — за инженером.
+test("номер метки ставится вручную, мусор отвергается", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 2);
+
+  const result = setMarkNumber(filled, ids[1], 7);
+  assert.equal(labelOf(result.project, ids[1]), "Т7");
+  assert.equal(result.mark.number, 7);
+  // исходный объект не тронут: правка возвращается новым объектом
+  assert.equal(labelOf(filled, ids[1]), "Т2");
+
+  for (const bad of [0, -3, 2.5, "", "восемь", null]) {
+    assert.throws(
+      () => setMarkNumber(filled, ids[0], bad),
+      (error) => error.code === "badNumber",
+      "принят мусор вместо номера: " + String(bad),
+    );
+  }
+  assert.throws(() => setMarkNumber(filled, ids[0], 100000), (error) => error.code === "numberTooBig");
+});
+
+// Повтор номера — осознанный приём: три точечных светильника одной группы
+// подписаны Т1. Счётчик при этом обязан остаться впереди занятых номеров,
+// иначе следующая новая метка молча заберёт чужое обозначение.
+test("повтор номера разрешён, а счётчик типа не выдаёт дубль следующей метке", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 3);
+
+  let project = setMarkNumber(filled, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project;
+  assert.deepEqual(ids.map((id) => labelOf(project, id)), ["Т1", "Т1", "Т1"]);
+
+  const next = putPoint(project, first.id, "Т");
+  assert.equal(labelOf(next.project, next.mark.id), "Т4");
+
+  // Номер выше счётчика двигает счётчик вперёд — иначе Т20 выдадут второй раз.
+  const ahead = setMarkNumber(next.project, next.mark.id, 20).project;
+  assert.equal(ahead.counters["Т"], 20);
+  const afterAhead = putPoint(ahead, first.id, "Т");
+  assert.equal(labelOf(afterAhead.project, afterAhead.mark.id), "Т21");
+
+  // Счётчики, потерянные при переносе объекта, не заставляют выдать дубль.
+  const lost = structuredClone(afterAhead.project);
+  lost.counters = {};
+  const rescued = putPoint(lost, first.id, "Т");
+  assert.equal(labelOf(rescued.project, rescued.mark.id), "Т22");
+});
+
+// Уплотнение смыкает ряд номеров, но намеренный повтор — часть разметки:
+// метки с одним номером обязаны остаться с одним и после уплотнения.
+test("уплотнение сохраняет повторы: одинаковые номера остаются одинаковыми", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 4);
+  let project = setMarkNumber(filled, ids[1], 1).project; // Т1 Т1 Т3 Т4
+  project = deleteMark(project, ids[2]).project; // Т1 Т1 Т4
+  project = setMarkNumber(project, ids[3], 9).project; // Т1 Т1 Т9
+
+  const result = compactNumbers(project, typeId(project, "Т"));
+  assert.deepEqual(result.changes.map((change) => [change.fromLabel, change.toLabel]), [["Т9", "Т2"]]);
+  assert.deepEqual(
+    [ids[0], ids[1], ids[3]].map((id) => labelOf(result.project, id)),
+    ["Т1", "Т1", "Т2"],
+  );
+  assert.equal(result.project.counters["Т"], 2);
+  // После уплотнения новая метка идёт следующим номером, а не третьим Т1.
+  const next = putPoint(result.project, first.id, "Т");
+  assert.equal(labelOf(next.project, next.mark.id), "Т3");
+});
+
+// Повторы не обязаны стоять рядом: номер выдаётся первому появлению в порядке
+// обхода, а вернувшийся тот же номер забирает его же.
+test("уплотнение узнаёт повтор, даже когда между метками стоит чужой номер", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 3);
+  let project = setMarkNumber(filled, ids[0], 5).project;
+  project = setMarkNumber(project, ids[1], 2).project;
+  project = setMarkNumber(project, ids[2], 5).project;
+
+  const result = compactNumbers(project, typeId(project, "Т"));
+  assert.deepEqual(ids.map((id) => labelOf(result.project, id)), ["Т1", "Т2", "Т1"]);
+  assert.equal(result.project.counters["Т"], 2);
+});
+
+// Повтор разрешён, но не молчит: случайный дубль обязан быть виден. Это
+// предупреждение, а не ошибка — «Т1 — таких меток 3».
+test("validate предупреждает о повторе номера и считает метки", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 4);
+  let project = setMarkNumber(filled, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project;
+
+  const problems = validate(project);
+  assert.deepEqual(problems.map((problem) => problem.code), ["repeatedNumber"]);
+  assert.equal(problems[0].kind, "warning");
+  assert.equal(problems[0].message, "Т1 — таких меток 3");
+  assert.equal(problems[0].ref, ids[0]);
+  assert.deepEqual(
+    repeatedNumbers(project).map((item) => [item.label, item.count, item.markIds.length]),
+    [["Т1", 3, 3]],
+  );
+
+  // Один номер у разных типов — не повтор: Т1 и В1 живут каждый в своём ряду.
+  const mixed = putPoint(project, first.id, "В").project;
+  assert.deepEqual(validate(mixed).map((problem) => problem.code), ["repeatedNumber"]);
+
+  // Настоящая поломка объекта остаётся ошибкой, а не предупреждением.
+  const broken = structuredClone(project);
+  broken.marks[3].schemeId = "нет-такой-схемы";
+  const scheme = validate(broken).find((problem) => problem.code === "markWithoutScheme");
+  assert.equal(scheme.kind, "error");
+});
+
+// Подпись блока перечисляет обозначения, а обозначение — не метка: два Т1
+// в одной рамке названы одним «Т1», а не «Т1, Т1» и тем более не «Т1Т1».
+test("подпись блока называет обозначение один раз, даже если номер повторили", () => {
+  const { project: base, first } = projectWithSchemes();
+  const step = addMark(base, {
+    schemeId: first.id,
+    typeId: typeId(base, "Т"),
+    kind: "point",
+    points: [
+      { x: 0.2, y: 0.3 },
+      { x: 0.25, y: 0.3 },
+      { x: 0.3, y: 0.3 },
+    ],
+  });
+  assert.equal(labelOf(step.project, step.group.id), "Т1Т2Т3");
+
+  let project = setMarkNumber(step.project, step.marks[1].id, 1).project; // Т1 Т1 Т3
+  assert.equal(labelOf(project, step.group.id), "Т1, Т3");
+
+  project = setMarkNumber(project, step.marks[2].id, 2).project; // Т1 Т1 Т2
+  assert.equal(labelOf(project, step.group.id), "Т1Т2");
+
+  project = setMarkNumber(project, step.marks[2].id, 1).project; // Т1 Т1 Т1
+  assert.equal(labelOf(project, step.group.id), "Т1");
+});
+
+// Смена типа — дорогая операция по ADR 003: она всегда выдаёт новый номер по
+// новому типу. Ручной номер этого не меняет, а повтор в старом типе становится
+// на метку меньше — и предупреждение считает по факту, а не по памяти.
+test("смена типа у метки с ручным номером берёт свободный номер нового типа", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 3);
+  let project = setMarkNumber(filled, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project; // Т1 Т1 Т1
+
+  const moved = changeMarkType(project, ids[2], typeId(project, "С")).project;
+  assert.equal(labelOf(moved, ids[2]), "С1");
+  assert.deepEqual(validate(moved).map((problem) => problem.message), ["Т1 — таких меток 2"]);
+
+  // Номер, поставленный руками выше счётчика, не уезжает в новый тип.
+  const manual = setMarkNumber(moved, ids[0], 40).project;
+  const again = changeMarkType(manual, ids[0], typeId(manual, "С")).project;
+  assert.equal(labelOf(again, ids[0]), "С2");
+  assert.equal(again.counters["Т"], 40);
 });

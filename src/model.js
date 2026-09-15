@@ -166,6 +166,9 @@ export function findRoom(project, roomId) {
   return project.rooms.find((room) => room.id === roomId) || null;
 }
 
+// Первая метка с таким обозначением. Номер может повторяться намеренно
+// (три светильника одной группы — Т1), и тогда это первая из них в порядке
+// объекта; все повторы перечисляет `repeatedNumbers`.
 export function markByCode(project, code, number) {
   return (
     project.marks.find((mark) => {
@@ -281,8 +284,22 @@ function normalizePoints(points) {
   return points.map((point) => ({ x: Number(point.x), y: Number(point.y) }));
 }
 
-function nextNumber(counters, code) {
-  return (counters[code] || 0) + 1;
+// Самый большой номер, выданный меткам этого кода типа.
+function highestNumber(project, code) {
+  let top = 0;
+  for (const mark of project.marks) {
+    const type = findType(project, mark.typeId);
+    if (type && type.code === code && mark.number > top) top = mark.number;
+  }
+  return top;
+}
+
+// Следующий свободный номер типа. Счётчик ведёт нумерацию и только растёт, но
+// выше него может оказаться номер, поставленный вручную, или счётчик, потерянный
+// при переносе объекта, — поэтому на занятые номера смотрим тоже: новая метка
+// получает свободный номер, а не молчаливый дубль.
+function nextNumber(project, counters, code) {
+  return Math.max(counters[code] || 0, highestNumber(project, code)) + 1;
 }
 
 function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
@@ -317,12 +334,12 @@ export function addMark(project, { schemeId, typeId, kind = "point", points, blo
 
   if (kind === "point" && vertices.length > 1 && mode === "each") {
     for (const point of vertices) {
-      const number = nextNumber(counters, type.code);
+      const number = nextNumber(project, counters, type.code);
       counters[type.code] = number;
       created.push(makeMark({ schemeId, typeId, kind, points: [point], number }));
     }
   } else {
-    const number = nextNumber(counters, type.code);
+    const number = nextNumber(project, counters, type.code);
     counters[type.code] = number;
     created.push(makeMark({ schemeId, typeId, kind, points: vertices, number }));
   }
@@ -387,9 +404,15 @@ export function blockMembers(project, markIds) {
 export function blockLabel(project, markIds) {
   const runs = [];
   let previous = null;
+  // Повторённый номер называется один раз: подпись перечисляет обозначения,
+  // а не метки, и «Т1, Т1» на плане говорит о двух точках ровно то же, что «Т1».
+  const named = new Set();
   for (const mark of blockMembers(project, markIds)) {
     const type = findType(project, mark.typeId);
     const code = type ? type.code : "?";
+    const key = code + "\u0000" + mark.number;
+    if (named.has(key)) continue;
+    named.add(key);
     const sameRun = previous && previous.code === code && mark.number === previous.number + 1;
     if (sameRun) runs[runs.length - 1] += code + mark.number;
     else runs.push(code + mark.number);
@@ -448,7 +471,7 @@ export function addToGroup(project, markId, side, options = {}) {
   }
 
   const counters = { ...project.counters };
-  const number = nextNumber(counters, type.code);
+  const number = nextNumber(project, counters, type.code);
   counters[type.code] = number;
   const created = makeMark({
     schemeId: mark.schemeId,
@@ -514,6 +537,34 @@ export function deleteMark(project, markId) {
 
 // ——— нумерация ———————————————————————————————————————————————————————
 
+// Верхняя граница ручного номера: опечатка в поле не должна унести счётчик типа
+// в тысячи и выдать следующей метке Т100001.
+export const MARK_NUMBER_MAX = 9999;
+
+function normalizeNumber(value) {
+  const number = typeof value === "string" ? Number(value.trim()) : Number(value);
+  if (!Number.isInteger(number) || number < 1) throw modelError("badNumber");
+  if (number > MARK_NUMBER_MAX) throw modelError("numberTooBig", { max: MARK_NUMBER_MAX });
+  return number;
+}
+
+// Номер ставится руками: несколько одинаковых светильников, подключённых к одной
+// группе, носят на схеме один номер — Т1, Т1, Т1. Повтор здесь приём, а не
+// ошибка, поэтому он не запрещён; видимым его делает `validate`.
+export function setMarkNumber(project, markId, number) {
+  const mark = requireMark(project, markId);
+  const value = normalizeNumber(number);
+  if (mark.number === value) return { project, mark };
+  const marks = project.marks.map((item) => (item.id === markId ? { ...item, number: value } : item));
+  // Счётчик не опускается ниже занятого номера: следующая новая метка типа
+  // должна получить свободный номер, а не повторить поставленный вручную.
+  const type = findType(project, mark.typeId);
+  const counters = type
+    ? { ...project.counters, [type.code]: Math.max(project.counters[type.code] || 0, value) }
+    : project.counters;
+  return { project: withProject(project, { marks, counters }), mark: marks.find((item) => item.id === markId) };
+}
+
 // Порядок обхода: схемы по order, внутри схемы — порядок постановки меток.
 function marksInOrder(project, filter) {
   const schemeOrder = new Map(schemesInOrder(project).map((scheme, index) => [scheme.id, index]));
@@ -535,8 +586,17 @@ export function compactNumbers(project, typeId) {
   const ordered = marksInOrder(project, (mark) => mark.typeId === typeId);
   const changes = [];
   const numbers = new Map();
-  ordered.forEach((mark, index) => {
-    const number = index + 1;
+  // Номер выдаётся не метке, а номеру: первое появление старого номера в порядке
+  // обхода забирает следующий свободный, а всякий его повтор получает тот же
+  // новый. Так намеренный повтор (три светильника одной группы — Т1) переживает
+  // уплотнение, а ряд номеров смыкается без дыр.
+  const renumbered = new Map();
+  for (const mark of ordered) {
+    let number = renumbered.get(mark.number);
+    if (number === undefined) {
+      number = renumbered.size + 1;
+      renumbered.set(mark.number, number);
+    }
     numbers.set(mark.id, number);
     if (mark.number !== number) {
       changes.push({
@@ -548,12 +608,40 @@ export function compactNumbers(project, typeId) {
         toLabel: type.code + number,
       });
     }
-  });
+  }
   const marks = project.marks.map((mark) =>
     numbers.has(mark.id) ? { ...mark, number: numbers.get(mark.id) } : mark,
   );
-  const counters = { ...project.counters, [type.code]: ordered.length };
+  const counters = { ...project.counters, [type.code]: renumbered.size };
   return { changes, project: withProject(project, { marks, counters }) };
+}
+
+// Повторяющиеся обозначения: метки одного типа с одним номером. Повтор
+// разрешён — три точечных светильника одной группы носят Т1, — но собирается
+// сюда, чтобы список меток и `validate` показали его, а случайный дубль не
+// остался незамеченным. Порядок — порядок справочника, потом номер.
+export function repeatedNumbers(project) {
+  const order = new Map();
+  let index = 0;
+  for (const { types } of typesInOrder(project)) for (const type of types) order.set(type.id, index++);
+  const rank = (typeId) => (order.has(typeId) ? order.get(typeId) : Number.MAX_SAFE_INTEGER);
+
+  const byNumber = new Map();
+  for (const mark of project.marks) {
+    const type = findType(project, mark.typeId);
+    if (!type) continue;
+    const key = mark.typeId + "#" + mark.number;
+    let item = byNumber.get(key);
+    if (!item) {
+      item = { typeId: type.id, code: type.code, number: mark.number, label: type.code + mark.number, markIds: [] };
+      byNumber.set(key, item);
+    }
+    item.markIds.push(mark.id);
+  }
+  return [...byNumber.values()]
+    .filter((item) => item.markIds.length > 1)
+    .map((item) => ({ ...item, count: item.markIds.length }))
+    .sort((a, b) => (rank(a.typeId) === rank(b.typeId) ? a.number - b.number : rank(a.typeId) - rank(b.typeId)));
 }
 
 // Новый номер по новому типу; старый номер остаётся дырой.
@@ -562,7 +650,7 @@ export function changeMarkType(project, markId, typeId) {
   const type = requireType(project, typeId);
   if (mark.typeId === typeId) return { project, mark };
   const counters = { ...project.counters };
-  const number = nextNumber(counters, type.code);
+  const number = nextNumber(project, counters, type.code);
   counters[type.code] = number;
   const marks = project.marks.map((item) =>
     item.id === markId ? { ...item, typeId, number } : item,
@@ -728,8 +816,11 @@ export function styleOf(project, typeId) {
 
 // ——— проверка объекта —————————————————————————————————————————————————
 
-function problem(code, vars, ref) {
-  return { code, message: text("problems." + code, vars), ref: ref || null };
+// Вид проблемы: «error» — объект поломан, «warning» — сделано намеренно, но
+// стоит увидеть. Повтор номера — единственное предупреждение: запрещать его
+// нельзя, молчать о нём тоже.
+function problem(code, vars, ref, kind) {
+  return { code, message: text("problems." + code, vars), ref: ref || null, kind: kind || "error" };
 }
 
 export function validate(project) {
@@ -743,7 +834,6 @@ export function validate(project) {
     if (!findCategory(project, type.categoryId)) problems.push(problem("typeWithoutCategory", null, type.id));
   }
 
-  const used = new Map();
   const behindTypes = new Map();
   for (const mark of project.marks) {
     const type = findType(project, mark.typeId);
@@ -754,9 +844,6 @@ export function validate(project) {
     else if (mark.kind === "line" && mark.points.length < 2) problems.push(problem("shortLine", null, mark.id));
 
     if (type) {
-      const label = type.code + mark.number;
-      if (used.has(label)) problems.push(problem("duplicateNumber", { label }, mark.id));
-      else used.set(label, mark.id);
       const counter = project.counters[type.code] || 0;
       if (mark.number > counter) behindTypes.set(type.id, type.code);
     }
@@ -764,6 +851,12 @@ export function validate(project) {
 
   // Отставший счётчик — свойство типа, а не каждой его метки.
   for (const [id, code] of behindTypes) problems.push(problem("counterBehind", { code }, id));
+
+  // Повтор номера — приём заказчика, а не поломка: одно предупреждение на
+  // обозначение, с числом меток, чтобы случайный дубль было видно.
+  for (const item of repeatedNumbers(project)) {
+    problems.push(problem("repeatedNumber", { label: item.label, count: item.count }, item.markIds[0], "warning"));
+  }
 
   for (const group of project.groups) {
     const members = group.markIds.map((markId) => findMark(project, markId)).filter(Boolean);

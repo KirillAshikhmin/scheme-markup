@@ -3,7 +3,7 @@
 // текстовых формата; картинку и печать проверяет приёмка.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addMark, addRoom, addScheme, addToGroup, createProject, updateMark } from "../src/model.js";
+import { addMark, addRoom, addScheme, addToGroup, createProject, setMarkNumber, updateMark } from "../src/model.js";
 import { marksTable, toCsv, toMarkdown, toTsv, typesTable } from "../src/tables.js";
 
 // Комната с рукописного листа: свет, выключатели и розетки одной спальни.
@@ -289,4 +289,24 @@ test("лист, сужённый галочками или поиском, го�
     "",
   );
   assert.equal(marksTable(box.project, { roomId: box.rooms.bedroom }, "category").note, "");
+});
+
+// Повтор номера — приём заказчика: несколько точечных светильников одной группы
+// подписаны Т1. Блок остаётся одной строкой и называет обозначение один раз.
+test("блок с повторённым номером даёт одну строку и одно обозначение", () => {
+  const box = tablesFixture();
+  const added = addToGroup(box.project, box.marks.spot1, "right");
+  box.project = setMarkNumber(added.project, added.mark.id, 1).project;
+  box.project = updateMark(box.project, added.mark.id, { location: "вторая в группе" }).project;
+
+  const table = marksTable(box.project, null, "category");
+  assert.deepEqual(
+    table.groups[0].rows.map((row) => row.cells[0]),
+    ["Т1", "Т2", "С1"],
+  );
+  assert.deepEqual(table.groups[0].rows[0].cells.slice(1, 4), [
+    "Точечный светильник",
+    "Спальная Оли",
+    "точка под зеркалом; вторая в группе",
+  ]);
 });

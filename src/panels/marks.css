@@ -122,6 +122,25 @@
   color: var(--panel-text);
 }
 
+/* Номер правится в строке: поле узкое, но цифру видно и попасть в него легко. */
+.mark-row__number {
+  width: 56px;
+  padding: 2px 4px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Повтор номера — приём, а не ошибка: жёлтая пометка, а не красная. */
+.mark-row__repeat {
+  color: #e36209;
+  border: 1px solid #e36209;
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .mark-row__type {
   color: var(--panel-muted);
   font-size: 12px;

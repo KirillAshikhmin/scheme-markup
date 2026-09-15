@@ -6,7 +6,16 @@
 // Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
-import { findMark, findScheme, roomsInOrder, styleOf, updateMark } from "../model.js";
+import {
+  MARK_NUMBER_MAX,
+  findMark,
+  findScheme,
+  repeatedNumbers,
+  roomsInOrder,
+  setMarkNumber,
+  styleOf,
+  updateMark,
+} from "../model.js";
 import { planToScreen, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { uiEl, uiPrompt } from "./ui.js";
@@ -37,9 +46,12 @@ function mountMarksPanel(host, api) {
   let pending = false;
   let shownSelection = "";
 
+  // Номер правится числовым полем — оно тоже держит список от пересборки,
+  // иначе набранная цифра выбрасывала бы курсор из поля.
   function typing() {
     const active = document.activeElement;
-    return Boolean(active && list.contains(active) && active.tagName === "INPUT" && active.type === "text");
+    if (!active || !list.contains(active) || active.tagName !== "INPUT") return false;
+    return active.type === "text" || active.type === "number";
   }
 
   function fail(error) {
@@ -64,6 +76,23 @@ function mountMarksPanel(host, api) {
       canvasCommit(state.project, updateMark(state.project, markId, { [field]: next }).project, strings.history.markField);
     } catch (error) {
       fail(error);
+    }
+  }
+
+  // Номер метки ставится руками: несколько одинаковых светильников одной группы
+  // носят один номер. Повтор модель разрешает и помечает предупреждением —
+  // здесь он только доезжает до истории одним шагом отмены.
+  function setNumber(markId, value) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    try {
+      const next = setMarkNumber(state.project, markId, value);
+      if (next.project === state.project) return;
+      canvasCommit(state.project, next.project, strings.history.markNumber);
+    } catch (error) {
+      fail(error);
+      render();
     }
   }
 
@@ -112,12 +141,28 @@ function mountMarksPanel(host, api) {
     return select;
   }
 
-  function markRow(state, row, selected) {
+  function markRow(state, row, selected, repeats) {
     const mark = row.mark;
+    const repeat = repeats.get(mark.id) || 0;
     const node = uiEl("div", { class: "mark-row" + (selected ? " is-current" : ""), title: strings.marks.focus }, [
       uiEl("div", { class: "mark-row__head" }, [
         shapeIcon(row.style.shape, row.style.color, 20),
-        uiEl("span", { class: "mark-row__label", text: row.label }),
+        uiEl("span", { class: "mark-row__label", text: row.type ? row.type.code : "?" }),
+        uiEl("input", {
+          class: "ui-input mark-row__number",
+          type: "number",
+          value: String(mark.number),
+          title: strings.marks.number,
+          attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
+          on: { change: (event) => setNumber(mark.id, event.target.value) },
+        }),
+        repeat > 1
+          ? uiEl("span", {
+              class: "mark-row__repeat",
+              text: text("marks.repeatBadge", { count: repeat }),
+              title: text("problems.repeatedNumber", { label: row.label, count: repeat }),
+            })
+          : null,
         uiEl("span", { class: "mark-row__type", text: row.type ? row.type.name : "" }),
       ]),
       roomField(state, mark),
@@ -163,7 +208,13 @@ function mountMarksPanel(host, api) {
       return;
     }
     const selected = new Set(state.selectedMarkIds);
-    list.replaceChildren(...rows.map((row) => markRow(state, row, selected.has(row.mark.id))));
+    // Повтор номера ищется по всему объекту, а не по видимым строкам: два Т1 на
+    // разных схемах — такой же повтор, и предупредить о нём надо в обеих.
+    const repeats = new Map();
+    for (const item of repeatedNumbers(state.project)) {
+      for (const markId of item.markIds) repeats.set(markId, item.count);
+    }
+    list.replaceChildren(...rows.map((row) => markRow(state, row, selected.has(row.mark.id), repeats)));
     // Подводим список к выделенной строке только когда выделение сменилось:
     // иначе правка поля в одной строке уводила бы список к другой.
     const selection = state.selectedMarkIds.join(",");
