@@ -167,6 +167,7 @@ export const strings = {
     replaceImage: "замена плана",
     compact: "уплотнение нумерации",
     markRoom: "помещение метки",
+    markControls: "связь «чем управляет»",
     markRoomAuto: "помещение по контуру",
     withRooms: "{label} + помещения по контуру",
     addOutline: "контур помещения",
@@ -185,6 +186,7 @@ export const strings = {
     removeCategory: "удаление категории",
   },
   errors: {
+    controlsSelf: "Метка не управляет сама собой",
     schemeNotFound: "Схема не найдена",
     typeNotFound: "Тип метки не найден",
     markNotFound: "Метка не найдена",
@@ -224,6 +226,7 @@ export const strings = {
     futureVersion: "Файл сделан более новой версией программы (формат {version}, здесь {current}) — обновите страницу",
   },
   problems: {
+    controlsMissing: "Метка управляет меткой, которой больше нет",
     duplicateCode: "Код типа {code} встречается больше одного раза",
     markWithoutType: "У метки нет типа из справочника",
     markWithoutScheme: "Метка ссылается на несуществующую схему",
@@ -397,6 +400,10 @@ export const strings = {
     original: "В оригинальной схеме",
     originalPlaceholder: "Например: В31",
     nothingFound: "Под фильтр ничего не подошло",
+    controls: "Чем управляет",
+    controlsOf: "Управляет: {labels}",
+    controlsTitle: "Выбрать метки, которыми управляет эта",
+    controlledBy: "Управляется: {labels}",
     focus: "Показать метку на плане",
   },
   filters: {
@@ -407,6 +414,15 @@ export const strings = {
     types: "Категории и типы",
     hidden: "скрыто: {count}",
     showAll: "Показать все",
+  },
+  controls: {
+    title: "Чем управляет {label}",
+    hint: "Отметьте метки, которые включает эта. Список сужается помещением.",
+    room: "Помещение",
+    empty: "Других меток на объекте пока нет",
+    nothingFound: "В этом помещении других меток нет",
+    chosen: "Отмечено: {count}",
+    save: "Сохранить связь",
   },
   rooms: {
     namePlaceholder: "Спальная Оли",

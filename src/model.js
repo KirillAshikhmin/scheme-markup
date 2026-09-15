@@ -543,7 +543,11 @@ export function usedImageIds(project) {
 
 export function deleteScheme(project, schemeId) {
   requireScheme(project, schemeId);
-  const marks = project.marks.filter((mark) => mark.schemeId !== schemeId);
+  const removed = new Set(project.marks.filter((mark) => mark.schemeId === schemeId).map((mark) => mark.id));
+  const marks = dropControls(
+    project.marks.filter((mark) => mark.schemeId !== schemeId),
+    removed,
+  );
   const groups = project.groups.filter((group) => group.schemeId !== schemeId);
   // Контуры помещений живут на схеме — вместе с ней и уходят.
   const outlines = outlinesOf(project).filter((outline) => outline.schemeId !== schemeId);
@@ -671,6 +675,10 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
     roomManual: false,
     location: "",
     original: "",
+    // Чем управляет: ссылки на другие метки объекта. Именно ссылки, а не текст, —
+    // смена типа и уплотнение номеров переписывают обозначения, а связь должна
+    // это пережить.
+    controls: [],
   };
 }
 
@@ -812,6 +820,58 @@ function blockModeOf(mark, type) {
 // `options.typeId` — тип ставящейся метки (в одной рамке подрозетника рядом
 // с выключателем стоит розетка); по умолчанию — тип соседней метки.
 // Номер новая метка получает по счётчику своего типа.
+// ——— «чем управляет» —————————————————————————————————————————————————
+
+// Поле появилось не сразу: у метки из старого файла или из браузерного
+// хранилища его просто нет, и это не поломка. Читают связь только отсюда.
+export function markControlIds(mark) {
+  return mark && Array.isArray(mark.controls) ? mark.controls : [];
+}
+
+// Метки, которыми управляет эта, — в порядке объекта, а не в порядке кликов:
+// строка списка и таблица должны читаться одинаково после каждой правки.
+export function markControls(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark) return [];
+  const wanted = new Set(markControlIds(mark));
+  return wanted.size === 0 ? [] : marksInOrder(project, (item) => wanted.has(item.id));
+}
+
+// Обратная сторона: кто управляет этой меткой. Отдельного поля у неё нет —
+// хранить связь с двух концов значит однажды их разойтись.
+export function markControlledBy(project, markId) {
+  if (!findMark(project, markId)) return [];
+  return marksInOrder(project, (item) => markControlIds(item).includes(markId));
+}
+
+// Список переписывается целиком: окно выбора отдаёт то, что отмечено галочками.
+export function setMarkControls(project, markId, controlled) {
+  requireMark(project, markId);
+  const wanted = [];
+  for (const id of Array.isArray(controlled) ? controlled : []) {
+    if (id === markId) throw modelError("controlsSelf");
+    requireMark(project, id);
+    if (!wanted.includes(id)) wanted.push(id);
+  }
+  // Хранится в порядке объекта — тогда и файл, и таблица, и строка списка
+  // показывают одно и то же независимо от того, в каком порядке щёлкали.
+  const order = new Map(marksInOrder(project).map((mark, index) => [mark.id, index]));
+  wanted.sort((first, second) => order.get(first) - order.get(second));
+  const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, controls: wanted } : mark));
+  return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
+}
+
+// Ссылки на исчезнувшие метки снимаются одним проходом: висячая связь — это
+// пустое место в таблице и вопрос «а что это было».
+function dropControls(marks, removed) {
+  if (removed.size === 0) return marks;
+  return marks.map((mark) => {
+    const ids = markControlIds(mark);
+    if (!ids.some((id) => removed.has(id))) return mark;
+    return { ...mark, controls: ids.filter((id) => !removed.has(id)) };
+  });
+}
+
 export function addToGroup(project, markId, side, options = {}) {
   const mark = requireMark(project, markId);
   if (mark.kind !== "point") throw modelError("blockOnlyForPoints");
@@ -896,7 +956,10 @@ export function deleteMark(project, markId) {
   }
   const freed = new Set(dissolved.flatMap((group) => group.markIds));
   const cleaned = marks.map((item) => (freed.has(item.id) ? { ...item, groupId: null } : item));
-  return { project: withProject(project, { marks: cleaned, groups }), deleted: mark };
+  // Метка ушла — и из чужих списков «чем управляет» тоже: висячая ссылка
+  // доехала бы до файла и до таблицы связей.
+  const linked = dropControls(cleaned, new Set([markId]));
+  return { project: withProject(project, { marks: linked, groups }), deleted: mark };
 }
 
 // ——— нумерация ———————————————————————————————————————————————————————
@@ -1426,6 +1489,10 @@ export function validate(project) {
     if (mark.roomId && !findRoom(project, mark.roomId)) problems.push(problem("markWithoutRoom", null, mark.id));
     if (!Array.isArray(mark.points) || mark.points.length === 0) problems.push(problem("emptyPoints", null, mark.id));
     else if (mark.kind === "line" && mark.points.length < 2) problems.push(problem("shortLine", null, mark.id));
+
+    for (const controlled of markControlIds(mark)) {
+      if (!findMark(project, controlled)) problems.push(problem("controlsMissing", null, mark.id));
+    }
 
     if (type) {
       const counter = project.counters[type.code] || 0;

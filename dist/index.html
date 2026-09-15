@@ -881,6 +881,92 @@
   text-align: left;
 }
 
+/* «Чем управляет»: кнопка в строке метки и окно выбора. */
+
+.mark-row__controls {
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.mark-row__controls.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+.mark-row__by {
+  margin: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.controls-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 420px;
+  max-width: 560px;
+}
+
+.controls-pick__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: var(--panel-bg-deep);
+}
+
+.controls-pick__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.controls-pick__row:hover {
+  background: #21262d;
+}
+
+.controls-pick__check {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.controls-pick__label {
+  min-width: 56px;
+  font-weight: 700;
+  color: var(--panel-text);
+}
+
+.controls-pick__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--panel-text);
+}
+
+.controls-pick__room {
+  color: var(--panel-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+.controls-pick__note {
+  margin: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
 /* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
 
 .ui-btn {
@@ -2275,6 +2361,7 @@ const strings = {
     replaceImage: "замена плана",
     compact: "уплотнение нумерации",
     markRoom: "помещение метки",
+    markControls: "связь «чем управляет»",
     markRoomAuto: "помещение по контуру",
     withRooms: "{label} + помещения по контуру",
     addOutline: "контур помещения",
@@ -2293,6 +2380,7 @@ const strings = {
     removeCategory: "удаление категории",
   },
   errors: {
+    controlsSelf: "Метка не управляет сама собой",
     schemeNotFound: "Схема не найдена",
     typeNotFound: "Тип метки не найден",
     markNotFound: "Метка не найдена",
@@ -2332,6 +2420,7 @@ const strings = {
     futureVersion: "Файл сделан более новой версией программы (формат {version}, здесь {current}) — обновите страницу",
   },
   problems: {
+    controlsMissing: "Метка управляет меткой, которой больше нет",
     duplicateCode: "Код типа {code} встречается больше одного раза",
     markWithoutType: "У метки нет типа из справочника",
     markWithoutScheme: "Метка ссылается на несуществующую схему",
@@ -2505,6 +2594,10 @@ const strings = {
     original: "В оригинальной схеме",
     originalPlaceholder: "Например: В31",
     nothingFound: "Под фильтр ничего не подошло",
+    controls: "Чем управляет",
+    controlsOf: "Управляет: {labels}",
+    controlsTitle: "Выбрать метки, которыми управляет эта",
+    controlledBy: "Управляется: {labels}",
     focus: "Показать метку на плане",
   },
   filters: {
@@ -2515,6 +2608,15 @@ const strings = {
     types: "Категории и типы",
     hidden: "скрыто: {count}",
     showAll: "Показать все",
+  },
+  controls: {
+    title: "Чем управляет {label}",
+    hint: "Отметьте метки, которые включает эта. Список сужается помещением.",
+    room: "Помещение",
+    empty: "Других меток на объекте пока нет",
+    nothingFound: "В этом помещении других меток нет",
+    chosen: "Отмечено: {count}",
+    save: "Сохранить связь",
   },
   rooms: {
     namePlaceholder: "Спальная Оли",
@@ -3208,7 +3310,11 @@ function usedImageIds(project) {
 }
 function deleteScheme(project, schemeId) {
   requireScheme(project, schemeId);
-  const marks = project.marks.filter((mark) => mark.schemeId !== schemeId);
+  const removed = new Set(project.marks.filter((mark) => mark.schemeId === schemeId).map((mark) => mark.id));
+  const marks = dropControls(
+    project.marks.filter((mark) => mark.schemeId !== schemeId),
+    removed,
+  );
   const groups = project.groups.filter((group) => group.schemeId !== schemeId);
   // Контуры помещений живут на схеме — вместе с ней и уходят.
   const outlines = outlinesOf(project).filter((outline) => outline.schemeId !== schemeId);
@@ -3335,6 +3441,10 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
     roomManual: false,
     location: "",
     original: "",
+    // Чем управляет: ссылки на другие метки объекта. Именно ссылки, а не текст, —
+    // смена типа и уплотнение номеров переписывают обозначения, а связь должна
+    // это пережить.
+    controls: [],
   };
 }
 function addMark(project, { schemeId, typeId, kind = "point", points, blockMode } = {}) {
@@ -3474,6 +3584,57 @@ function blockModeOf(mark, type) {
 // `options.typeId` — тип ставящейся метки (в одной рамке подрозетника рядом
 // с выключателем стоит розетка); по умолчанию — тип соседней метки.
 // Номер новая метка получает по счётчику своего типа.
+// ——— «чем управляет» —————————————————————————————————————————————————
+
+// Поле появилось не сразу: у метки из старого файла или из браузерного
+// хранилища его просто нет, и это не поломка. Читают связь только отсюда.
+function markControlIds(mark) {
+  return mark && Array.isArray(mark.controls) ? mark.controls : [];
+}
+
+// Метки, которыми управляет эта, — в порядке объекта, а не в порядке кликов:
+// строка списка и таблица должны читаться одинаково после каждой правки.
+function markControls(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark) return [];
+  const wanted = new Set(markControlIds(mark));
+  return wanted.size === 0 ? [] : marksInOrder(project, (item) => wanted.has(item.id));
+}
+
+// Обратная сторона: кто управляет этой меткой. Отдельного поля у неё нет —
+// хранить связь с двух концов значит однажды их разойтись.
+function markControlledBy(project, markId) {
+  if (!findMark(project, markId)) return [];
+  return marksInOrder(project, (item) => markControlIds(item).includes(markId));
+}
+
+// Список переписывается целиком: окно выбора отдаёт то, что отмечено галочками.
+function setMarkControls(project, markId, controlled) {
+  requireMark(project, markId);
+  const wanted = [];
+  for (const id of Array.isArray(controlled) ? controlled : []) {
+    if (id === markId) throw modelError("controlsSelf");
+    requireMark(project, id);
+    if (!wanted.includes(id)) wanted.push(id);
+  }
+  // Хранится в порядке объекта — тогда и файл, и таблица, и строка списка
+  // показывают одно и то же независимо от того, в каком порядке щёлкали.
+  const order = new Map(marksInOrder(project).map((mark, index) => [mark.id, index]));
+  wanted.sort((first, second) => order.get(first) - order.get(second));
+  const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, controls: wanted } : mark));
+  return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
+}
+
+// Ссылки на исчезнувшие метки снимаются одним проходом: висячая связь — это
+// пустое место в таблице и вопрос «а что это было».
+function dropControls(marks, removed) {
+  if (removed.size === 0) return marks;
+  return marks.map((mark) => {
+    const ids = markControlIds(mark);
+    if (!ids.some((id) => removed.has(id))) return mark;
+    return { ...mark, controls: ids.filter((id) => !removed.has(id)) };
+  });
+}
 function addToGroup(project, markId, side, options = {}) {
   const mark = requireMark(project, markId);
   if (mark.kind !== "point") throw modelError("blockOnlyForPoints");
@@ -3557,7 +3718,10 @@ function deleteMark(project, markId) {
   }
   const freed = new Set(dissolved.flatMap((group) => group.markIds));
   const cleaned = marks.map((item) => (freed.has(item.id) ? { ...item, groupId: null } : item));
-  return { project: withProject(project, { marks: cleaned, groups }), deleted: mark };
+  // Метка ушла — и из чужих списков «чем управляет» тоже: висячая ссылка
+  // доехала бы до файла и до таблицы связей.
+  const linked = dropControls(cleaned, new Set([markId]));
+  return { project: withProject(project, { marks: linked, groups }), deleted: mark };
 }
 
 // ——— нумерация ———————————————————————————————————————————————————————
@@ -4069,6 +4233,10 @@ function validate(project) {
     if (mark.roomId && !findRoom(project, mark.roomId)) problems.push(problem("markWithoutRoom", null, mark.id));
     if (!Array.isArray(mark.points) || mark.points.length === 0) problems.push(problem("emptyPoints", null, mark.id));
     else if (mark.kind === "line" && mark.points.length < 2) problems.push(problem("shortLine", null, mark.id));
+
+    for (const controlled of markControlIds(mark)) {
+      if (!findMark(project, controlled)) problems.push(problem("controlsMissing", null, mark.id));
+    }
 
     if (type) {
       const counter = project.counters[type.code] || 0;
@@ -12422,6 +12590,103 @@ function marksCenteredView(scheme, mark, view) {
   return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
 }
 
+// Кандидаты в подчинённые: все метки объекта, кроме самой, в том же порядке,
+// что и список сбоку, — схема за схемой, внутри по справочнику и номеру.
+// Помещение сужает список: с рукописного листа «В3 — на В33 (Т1, Т2, Т3)»
+// видно, что выключатель ищут среди светильников своей комнаты.
+function marksControlsCandidates(project, markId, roomId) {
+  const rows = [];
+  for (const scheme of schemesInOrder(project)) {
+    for (const row of filtersMarkRows(project, scheme.id, { roomId: roomId || null })) {
+      if (row.mark.id !== markId) rows.push({ ...row, scheme });
+    }
+  }
+  return rows;
+}
+
+// Окно выбора — кирпичами из ui.js: стопка диалогов, Escape и возврат фокуса
+// у них общие. Отвечает списком отмеченных меток или null, если передумали.
+function marksControlsPicker(project, markId) {
+  return new Promise((resolve) => {
+    const mark = findMark(project, markId);
+    const chosen = new Set(markControlIds(mark));
+    const manySchemes = schemesInOrder(project).length > 1;
+    const list = uiEl("div", { class: "controls-pick__list" });
+    const note = uiEl("p", { class: "controls-pick__note" });
+    const rooms = uiEl("select", {
+      class: "ui-select",
+      title: strings.controls.room,
+      on: { change: () => renderList() },
+    });
+    rooms.append(uiEl("option", { value: "", text: strings.filters.allRooms }));
+    for (const room of roomsInOrder(project)) {
+      rooms.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+
+    function renderNote() {
+      note.textContent = text("controls.chosen", { count: chosen.size });
+    }
+
+    function renderList() {
+      const rows = marksControlsCandidates(project, markId, rooms.value);
+      if (rows.length === 0) {
+        const others = project.marks.some((item) => item.id !== markId);
+        list.replaceChildren(
+          uiEl("p", { class: "panel__empty", text: others ? strings.controls.nothingFound : strings.controls.empty }),
+        );
+        return;
+      }
+      list.replaceChildren(
+        ...rows.map((row) => {
+          const box = uiEl("input", { class: "controls-pick__check", type: "checkbox" });
+          box.checked = chosen.has(row.mark.id);
+          box.addEventListener("change", () => {
+            if (box.checked) chosen.add(row.mark.id);
+            else chosen.delete(row.mark.id);
+            renderNote();
+          });
+          const room = row.mark.roomId ? findRoom(project, row.mark.roomId) : null;
+          // Где метка стоит: помещение, а для многоэтажного объекта — и схема.
+          const where = [room ? room.name : "", manySchemes ? row.scheme.name : ""].filter(Boolean).join(" · ");
+          return uiEl("label", { class: "controls-pick__row" }, [
+            box,
+            // Метка узнаётся так же, как на плане: обозначение, цвет, форма.
+            shapeIcon(row.style.shape, row.style.color, 20),
+            uiEl("span", { class: "controls-pick__label", text: row.label }),
+            uiEl("span", { class: "controls-pick__name", text: row.type ? row.type.name : "" }),
+            uiEl("span", { class: "controls-pick__room", text: where }),
+          ]);
+        }),
+      );
+    }
+
+    renderList();
+    renderNote();
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    modal = uiModal({
+      title: text("controls.title", { label: labelOf(project, markId) }),
+      body: uiEl("div", { class: "controls-pick" }, [
+        uiEl("p", { class: "modal__hint", text: strings.controls.hint }),
+        rooms,
+        list,
+        note,
+      ]),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(strings.controls.save, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: () => done([...chosen]) },
+        }),
+      ],
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
 function mountMarksPanel(host, api) {
   const { getState, setState, notify } = api;
   const filters = filtersBox(api);
@@ -12524,6 +12789,24 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // Пока окно открыто, объект мог уехать (отмена, чужая правка): список
+  // отмеченного сверяется со свежим снимком, прежде чем стать шагом истории.
+  async function editControls(markId) {
+    const state = getState();
+    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    const picked = await marksControlsPicker(state.project, markId);
+    if (!picked) return;
+    const fresh = getState();
+    if (!fresh.project || !findMark(fresh.project, markId)) return;
+    try {
+      const alive = picked.filter((id) => findMark(fresh.project, id));
+      const next = setMarkControls(fresh.project, markId, alive);
+      canvasCommit(fresh.project, next.project, strings.history.markControls);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   async function askNewRoom(markId) {
     const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
     if (!name) {
@@ -12567,9 +12850,19 @@ function mountMarksPanel(host, api) {
     return select;
   }
 
-  function markRow(state, row, selected, repeats) {
+  function markRow(state, row, selected, repeats, controllers) {
     const mark = row.mark;
     const repeat = repeats.get(mark.id) || 0;
+    const controlled = markControls(state.project, mark.id).map((item) => labelOf(state.project, item.id));
+    const controlledBy = (controllers.get(mark.id) || []).join(", ");
+    const controlsButton = uiButton(
+      controlled.length > 0 ? text("marks.controlsOf", { labels: controlled.join(", ") }) : strings.marks.controls,
+      {
+        class: "ui-btn ui-btn--wide mark-row__controls" + (controlled.length > 0 ? " is-set" : ""),
+        title: strings.marks.controlsTitle,
+        on: { click: () => editControls(mark.id) },
+      },
+    );
     const node = uiEl("div", { class: "mark-row" + (selected ? " is-current" : ""), title: strings.marks.focus }, [
       uiEl("div", { class: "mark-row__head" }, [
         shapeIcon(row.style.shape, row.style.color, 20),
@@ -12608,6 +12901,13 @@ function mountMarksPanel(host, api) {
         title: strings.marks.original,
         on: { change: (event) => setField(mark.id, "original", event.target.value) },
       }),
+      controlsButton,
+      // Обратная сторона связи — строкой и только для чтения: стоя у
+      // светильника, надо видеть, какой выключатель его включает, а правится
+      // связь там, где её завели, — у выключателя.
+      controlledBy
+        ? uiEl("p", { class: "mark-row__by", text: text("marks.controlledBy", { labels: controlledBy }) })
+        : null,
     ]);
     node.addEventListener("pointerdown", (event) => {
       if (event.target.closest("input, select, button, option")) return;
@@ -12618,6 +12918,8 @@ function mountMarksPanel(host, api) {
     if (!layoutAllows("editMarks", state.layout)) {
       for (const field of node.querySelectorAll("input")) field.readOnly = true;
       for (const field of node.querySelectorAll("select")) field.disabled = true;
+      // Кнопка связи — тоже правка: в режиме просмотра она не нажимается.
+      for (const button of node.querySelectorAll("button")) button.disabled = true;
     }
     return node;
   }
@@ -12646,7 +12948,18 @@ function mountMarksPanel(host, api) {
     for (const item of repeatedNumbers(state.project)) {
       for (const markId of item.markIds) repeats.set(markId, item.count);
     }
-    list.replaceChildren(...rows.map((row) => markRow(state, row, selected.has(row.mark.id), repeats)));
+    // Кто кем управляет — одним проходом по объекту: спрашивать модель на
+    // каждую строку значило бы пересортировать все метки полтысячи раз.
+    const controllers = new Map();
+    for (const item of state.project.marks) {
+      for (const id of markControlIds(item)) {
+        if (!controllers.has(id)) controllers.set(id, []);
+        controllers.get(id).push(labelOf(state.project, item.id));
+      }
+    }
+    list.replaceChildren(
+      ...rows.map((row) => markRow(state, row, selected.has(row.mark.id), repeats, controllers)),
+    );
     // Подводим список к выделенной строке только когда выделение сменилось:
     // иначе правка поля в одной строке уводила бы список к другой.
     const selection = state.selectedMarkIds.join(",");

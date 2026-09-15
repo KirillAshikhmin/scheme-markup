@@ -391,3 +391,89 @@
   width: 64px;
   text-align: left;
 }
+
+/* «Чем управляет»: кнопка в строке метки и окно выбора. */
+
+.mark-row__controls {
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.mark-row__controls.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+.mark-row__by {
+  margin: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.controls-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 420px;
+  max-width: 560px;
+}
+
+.controls-pick__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: var(--panel-bg-deep);
+}
+
+.controls-pick__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.controls-pick__row:hover {
+  background: #21262d;
+}
+
+.controls-pick__check {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.controls-pick__label {
+  min-width: 56px;
+  font-weight: 700;
+  color: var(--panel-text);
+}
+
+.controls-pick__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--panel-text);
+}
+
+.controls-pick__room {
+  color: var(--panel-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+.controls-pick__note {
+  margin: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
