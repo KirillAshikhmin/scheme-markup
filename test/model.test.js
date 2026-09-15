@@ -293,6 +293,34 @@ test("compactNumbers показывает замены и не применяе�
   assert.equal(result.project.counters["В"], 3);
 });
 
+// Порядок обхода задаёт поле order, а не порядок добавления схем: панель схем
+// умеет их переставлять, и уплотнение обязано идти по новому порядку.
+test("уплотнение следует полю order схем, а не порядку их добавления", () => {
+  const { project: base, first, second } = projectWithSchemes();
+  let step = putPoint(base, first.id, "Т");
+  const onFirst = step.mark.id;
+  step = putPoint(step.project, second.id, "Т");
+  const onSecond = step.mark.id;
+  assert.equal(labelOf(step.project, onFirst), "Т1");
+  assert.equal(labelOf(step.project, onSecond), "Т2");
+
+  // Вторую схему подняли над первой; в самом массиве порядок прежний.
+  let project = updateScheme(step.project, second.id, { order: 0 }).project;
+  project = updateScheme(project, first.id, { order: 1 }).project;
+  assert.equal(project.schemes[0].id, first.id);
+
+  const result = compactNumbers(project, typeId(project, "Т"));
+  assert.deepEqual(
+    result.changes.map((change) => [change.fromLabel, change.toLabel]),
+    [
+      ["Т2", "Т1"],
+      ["Т1", "Т2"],
+    ],
+  );
+  assert.equal(labelOf(result.project, onSecond), "Т1");
+  assert.equal(labelOf(result.project, onFirst), "Т2");
+});
+
 test("уплотнение идёт по порядку схем и не трогает другие типы", () => {
   const { project: base, first, second } = projectWithSchemes();
   let step = putPoint(base, second.id, "Т");

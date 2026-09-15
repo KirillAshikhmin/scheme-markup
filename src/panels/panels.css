@@ -1,0 +1,202 @@
+/* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
+
+.ui-btn {
+  font: inherit;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ui-btn:hover:not(:disabled) {
+  border-color: var(--panel-muted);
+}
+
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ui-btn--accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.ui-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: #ff9aa2;
+}
+
+.ui-btn--wide {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  margin-bottom: 10px;
+}
+
+.ui-select,
+.ui-input {
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  max-width: 220px;
+}
+
+.ui-input {
+  width: 100%;
+  max-width: none;
+}
+
+#project-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ——— диалоги ——————————————————————————————————————————————————————— */
+
+.modal {
+  width: min(92vw, 720px);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: var(--panel-bg);
+  color: var(--panel-text);
+  box-shadow: 0 24px 64px rgba(1, 4, 9, 0.6);
+}
+
+.modal__title {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.modal__text {
+  margin: 0;
+  color: var(--panel-text);
+}
+
+.modal__hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ——— правка плана ——————————————————————————————————————————————————— */
+
+.plan-editor__tools {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.plan-stage {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  background: var(--panel-bg-deep);
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  padding: 8px;
+  user-select: none;
+  touch-action: none;
+}
+
+.plan-stage__img {
+  max-width: 100%;
+  max-height: 58vh;
+  display: block;
+  cursor: crosshair;
+}
+
+.plan-frame {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  background: rgba(31, 111, 235, 0.18);
+  pointer-events: none;
+}
+
+/* ——— список схем ————————————————————————————————————————————————————— */
+
+.scheme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheme-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #1c2129;
+}
+
+.scheme-row--current {
+  border-color: var(--accent);
+}
+
+.scheme-row__name {
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--panel-text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheme-row__meta {
+  grid-column: 1;
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
+.scheme-row__tools {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  gap: 2px;
+}
+
+.scheme-row__tools .ui-btn {
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
+#canvas-area.is-dropping::after {
+  content: attr(data-drop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0b4ea2;
+  font-weight: 600;
+  position: absolute;
+  inset: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: rgba(31, 111, 235, 0.08);
+  pointer-events: none;
+  z-index: 5;
+}

@@ -5,6 +5,209 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title data-text="app.title"></title>
     <style>
+/* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
+
+.ui-btn {
+  font: inherit;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ui-btn:hover:not(:disabled) {
+  border-color: var(--panel-muted);
+}
+
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ui-btn--accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.ui-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: #ff9aa2;
+}
+
+.ui-btn--wide {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  margin-bottom: 10px;
+}
+
+.ui-select,
+.ui-input {
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  max-width: 220px;
+}
+
+.ui-input {
+  width: 100%;
+  max-width: none;
+}
+
+#project-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ——— диалоги ——————————————————————————————————————————————————————— */
+
+.modal {
+  width: min(92vw, 720px);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: var(--panel-bg);
+  color: var(--panel-text);
+  box-shadow: 0 24px 64px rgba(1, 4, 9, 0.6);
+}
+
+.modal__title {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.modal__text {
+  margin: 0;
+  color: var(--panel-text);
+}
+
+.modal__hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ——— правка плана ——————————————————————————————————————————————————— */
+
+.plan-editor__tools {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.plan-stage {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  background: var(--panel-bg-deep);
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  padding: 8px;
+  user-select: none;
+  touch-action: none;
+}
+
+.plan-stage__img {
+  max-width: 100%;
+  max-height: 58vh;
+  display: block;
+  cursor: crosshair;
+}
+
+.plan-frame {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  background: rgba(31, 111, 235, 0.18);
+  pointer-events: none;
+}
+
+/* ——— список схем ————————————————————————————————————————————————————— */
+
+.scheme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheme-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #1c2129;
+}
+
+.scheme-row--current {
+  border-color: var(--accent);
+}
+
+.scheme-row__name {
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--panel-text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheme-row__meta {
+  grid-column: 1;
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
+.scheme-row__tools {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  gap: 2px;
+}
+
+.scheme-row__tools .ui-btn {
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
+#canvas-area.is-dropping::after {
+  content: attr(data-drop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0b4ea2;
+  font-weight: 600;
+  position: absolute;
+  inset: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: rgba(31, 111, 235, 0.08);
+  pointer-events: none;
+  z-index: 5;
+}
+
 :root {
   --panel-bg: #161b22;
   --panel-bg-deep: #0d1117;
@@ -277,6 +480,247 @@ body {
     </div>
     <script>
 (function () {
+// src/imagePrep.js
+// Подготовка плана: проверка файла, поворот на четверть оборота и обрезка рамкой.
+// Координаты меток — доли от размера плана, поэтому вместе с картинкой нужно
+// пересчитать и доли: метка обязана остаться на том же месте изображения.
+// Арифметика здесь чистая (проверяется тестами), браузерные части — ниже.
+const PLAN_IMAGE_TYPES = ["image/png", "image/jpeg"];
+const PLAN_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
+const ROTATION_STEPS = [0, 90, 180, 270];
+
+// Тип у перетащенного файла иногда пустой — тогда решает расширение.
+function isPlanImageFile(file) {
+  if (!file) return false;
+  const type = String(file.type || "").toLowerCase();
+  if (PLAN_IMAGE_TYPES.includes(type)) return true;
+  if (type && type !== "application/octet-stream") return false;
+  const name = String(file.name || "").toLowerCase();
+  return PLAN_IMAGE_EXTENSIONS.some((extension) => name.endsWith(extension));
+}
+
+// Тип берётся из расширения, когда браузер его не назвал: у перетащенного
+// файла type часто пуст, и JPEG иначе уехал бы в хранилище и в zip как png.
+function planTypeOf(file) {
+  const type = String((file && file.type) || "").toLowerCase();
+  if (PLAN_IMAGE_TYPES.includes(type)) return type;
+  const name = String((file && file.name) || "").toLowerCase();
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  return "image/png";
+}
+function identityTransform() {
+  return { rotate: 0, crop: null };
+}
+
+function clampUnit(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(1, Math.max(0, number));
+}
+
+// Поворот приводится к четверти оборота, рамка — к прямоугольнику внутри плана.
+function normalizeTransform(transform) {
+  const source = transform || {};
+  const turns = Math.round(Number(source.rotate || 0) / 90);
+  const rotate = ((turns % 4) + 4) % 4 * 90;
+  const raw = source.crop;
+  if (!raw) return { rotate, crop: null };
+  const x = clampUnit(raw.x, 0);
+  const y = clampUnit(raw.y, 0);
+  const width = Math.min(clampUnit(raw.width, 1), 1 - x);
+  const height = Math.min(clampUnit(raw.height, 1), 1 - y);
+  if (width <= 0 || height <= 0) return { rotate, crop: null };
+  if (x === 0 && y === 0 && width === 1 && height === 1) return { rotate, crop: null };
+  return { rotate, crop: { x, y, width, height } };
+}
+
+// Доли в системе повёрнутого плана: вправо (x,y) -> (1−y, x), влево -> (y, 1−x).
+function rotateFraction(point, rotate) {
+  if (rotate === 90) return { x: 1 - point.y, y: point.x };
+  if (rotate === 180) return { x: 1 - point.x, y: 1 - point.y };
+  if (rotate === 270) return { x: point.y, y: 1 - point.x };
+  return { x: point.x, y: point.y };
+}
+
+// Поворот и обрезка копятся в одно преобразование: (поворот на R, затем рамка
+// в долях повёрнутого плана). Так исходник пережимается один раз, а метки
+// пересчитываются одним шагом — и считаются один раз, а не на каждом шаге.
+function rotateTransform(transform, degrees) {
+  const current = normalizeTransform(transform);
+  const turns = ((Math.round(Number(degrees || 0) / 90) % 4) + 4) % 4;
+  const rotate = (current.rotate + turns * 90) % 360;
+  if (!current.crop) return { rotate, crop: null };
+  const a = rotateFraction({ x: current.crop.x, y: current.crop.y }, turns * 90);
+  const b = rotateFraction(
+    { x: current.crop.x + current.crop.width, y: current.crop.y + current.crop.height },
+    turns * 90,
+  );
+  return {
+    rotate,
+    crop: {
+      x: Math.min(a.x, b.x),
+      y: Math.min(a.y, b.y),
+      width: Math.abs(a.x - b.x),
+      height: Math.abs(a.y - b.y),
+    },
+  };
+}
+
+// Рамка задаётся в долях того, что видно сейчас, — то есть внутри прежней рамки.
+function cropTransform(transform, frame) {
+  const current = normalizeTransform(transform);
+  const box = normalizeTransform({ crop: frame }).crop;
+  if (!box) return current;
+  const base = current.crop || { x: 0, y: 0, width: 1, height: 1 };
+  return normalizeTransform({
+    rotate: current.rotate,
+    crop: {
+      x: base.x + box.x * base.width,
+      y: base.y + box.y * base.height,
+      width: box.width * base.width,
+      height: box.height * base.height,
+    },
+  });
+}
+function transformPoint(point, transform) {
+  const { rotate, crop } = normalizeTransform(transform);
+  const turned = rotateFraction({ x: Number(point.x), y: Number(point.y) }, rotate);
+  if (!crop) return turned;
+  return { x: (turned.x - crop.x) / crop.width, y: (turned.y - crop.y) / crop.height };
+}
+
+// Смещение подписи задано в пикселях экрана: обрезка его не трогает, поворот —
+// поворачивает так же, как саму картинку, иначе подпись уедет на другую сторону.
+function transformOffset(offset, transform) {
+  if (!offset) return offset;
+  const { rotate } = normalizeTransform(transform);
+  const dx = Number(offset.dx) || 0;
+  const dy = Number(offset.dy) || 0;
+  if (rotate === 90) return { dx: -dy, dy: dx };
+  if (rotate === 180) return { dx: -dx, dy: -dy };
+  if (rotate === 270) return { dx: dy, dy: -dx };
+  return { dx, dy };
+}
+
+// Ничего не менялось — значит и переписывать план незачем.
+function isIdentityTransform(transform) {
+  const settings = normalizeTransform(transform);
+  return settings.rotate === 0 && !settings.crop;
+}
+function transformSize(size, transform) {
+  const { rotate, crop } = normalizeTransform(transform);
+  const turned =
+    rotate === 90 || rotate === 270
+      ? { width: Number(size.height), height: Number(size.width) }
+      : { width: Number(size.width), height: Number(size.height) };
+  if (!crop) return { width: Math.round(turned.width), height: Math.round(turned.height) };
+  return {
+    width: Math.max(1, Math.round(turned.width * crop.width)),
+    height: Math.max(1, Math.round(turned.height * crop.height)),
+  };
+}
+
+// Пересчёт всех точек одной метки: используется панелью схем перед updateMark.
+function transformMarkPoints(points, transform) {
+  return (points || []).map((point) => {
+    const next = transformPoint(point, transform);
+    return { x: Math.min(1, Math.max(0, next.x)), y: Math.min(1, Math.max(0, next.y)) };
+  });
+}
+
+// Метка за рамкой обрезки была бы потеряна: считаем такие, чтобы предупредить.
+function countPointsOutside(points, transform) {
+  let outside = 0;
+  for (const point of points || []) {
+    const next = transformPoint(point, transform);
+    if (next.x < 0 || next.x > 1 || next.y < 0 || next.y > 1) outside += 1;
+  }
+  return outside;
+}
+
+// ——— браузерная часть ————————————————————————————————————————————————
+
+function planOutputType(blob) {
+  return planTypeOf(blob);
+}
+
+// createImageBitmap есть не везде (и не всегда по file://) — запасной путь <img>.
+async function decodePlanImage(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(blob);
+      return { image: bitmap, width: bitmap.width, height: bitmap.height, url };
+    }
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("decode"));
+      element.src = url;
+    });
+    return { image, width: image.naturalWidth, height: image.naturalHeight, url };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+function releasePlanImage(decoded) {
+  if (!decoded) return;
+  if (decoded.url) URL.revokeObjectURL(decoded.url);
+  if (decoded.image && typeof decoded.image.close === "function") decoded.image.close();
+}
+
+// Файл плана: проверка типа и настоящий размер картинки в пикселях.
+async function readPlanImage(file) {
+  const blob = file.slice ? file.slice(0, file.size, planTypeOf(file)) : file;
+  const decoded = await decodePlanImage(blob);
+  const size = { width: decoded.width, height: decoded.height };
+  releasePlanImage(decoded);
+  return { blob, width: size.width, height: size.height };
+}
+
+function blobFromCanvas(canvas, type) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("toBlob"))),
+      type,
+      type === "image/jpeg" ? 0.92 : undefined,
+    );
+  });
+}
+
+// Новая картинка плана по тому же преобразованию, что и доли меток.
+async function renderPlanImage(blob, transform) {
+  const settings = normalizeTransform(transform);
+  const decoded = await decodePlanImage(blob);
+  try {
+    const turned = transformSize({ width: decoded.width, height: decoded.height }, { rotate: settings.rotate });
+    const size = transformSize({ width: decoded.width, height: decoded.height }, settings);
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext("2d");
+    if (settings.crop) {
+      ctx.translate(-Math.round(turned.width * settings.crop.x), -Math.round(turned.height * settings.crop.y));
+    }
+    if (settings.rotate === 90) {
+      ctx.translate(turned.width, 0);
+      ctx.rotate(Math.PI / 2);
+    } else if (settings.rotate === 180) {
+      ctx.translate(turned.width, turned.height);
+      ctx.rotate(Math.PI);
+    } else if (settings.rotate === 270) {
+      ctx.translate(0, turned.height);
+      ctx.rotate(-Math.PI / 2);
+    }
+    ctx.drawImage(decoded.image, 0, 0);
+    const out = await blobFromCanvas(canvas, planOutputType(blob));
+    return { blob: out, width: size.width, height: size.height };
+  } finally {
+    releasePlanImage(decoded);
+  }
+}
+
 // src/strings.js
 // Единственный словарь видимых строк. В остальных файлах русских текстов нет.
 const strings = {
@@ -360,6 +804,15 @@ const strings = {
     unknownBlockMode: "Неизвестный режим блока",
     unknownSide: "Неизвестная сторона блока",
     unknownKind: "Неизвестный вид метки",
+    notAProject: "Файл не похож на проект разметки схем",
+    archiveBroken: "Архив повреждён — не удалось прочитать содержимое",
+    noProjectJson: "В архиве нет project.json — это не файл разметки схем",
+    brokenProjectJson: "Данные проекта в архиве повреждены и не читаются",
+    archiveTooBig: "Проект слишком большой для одного файла — больше 4 ГБ",
+    zip64Unsupported: "Архив в формате zip64 — такие файлы здесь не читаются, пересоберите обычным zip",
+    imagesNotMap: "Картинки для упаковки передаются Map «идентификатор → файл»",
+    foreignProject: "Данные в файле не похожи на объект разметки схем",
+    futureVersion: "Файл сделан более новой версией программы (формат {version}, здесь {current}) — обновите страницу",
   },
   problems: {
     duplicateCode: "Код типа {code} встречается больше одного раза",
@@ -373,6 +826,107 @@ const strings = {
     groupAcrossSchemes: "Метки одной группы лежат на разных схемах",
     counterBehind: "Счётчик типа {code} меньше выданных номеров",
     typeWithoutCategory: "У типа нет категории из справочника",
+  },
+  file: {
+    readme: `Разметка схем — файл проекта
+
+Объект: {name}
+Выгружено: {date}
+Схем: {schemes}, меток: {marks}
+Версия формата: {version}
+
+Что это
+  Обычный zip-архив с разметкой планов помещений: цветные метки с обозначениями
+  (Т1, В3, Р7) поверх картинок планов.
+
+Что внутри
+  project.json   — весь объект: категории, типы меток, помещения, схемы, метки,
+                   группы и счётчики номеров. Координаты меток — доли от размера
+                   плана (0…1), поэтому не зависят от масштаба картинки.
+  schemes/       — изображения планов как есть, без пережатия. Имя файла —
+                   идентификатор изображения, на него ссылается поле imageId
+                   схемы в project.json.
+  README.txt     — этот файл.
+
+Чем открыть
+  Страницей «Разметка схем»: «Открыть файл» и выбрать этот архив. Загрузится
+  весь объект вместе с планами — на любом компьютере и в любом браузере,
+  подключение к сети не нужно.
+  Содержимое можно посмотреть и обычным распаковщиком: планы лежат картинками,
+  данные — текстом в JSON.
+
+Если страницы под рукой нет
+  project.json читается любым текстовым редактором, а схемы открываются как
+  обычные картинки: данные не пропадут, даже если программы не окажется.`,
+  },
+  projects: {
+    switch: "Переключить объект",
+    create: "Новый объект",
+    createTitle: "Создать объект",
+    rename: "Переименовать объект",
+    renameTitle: "Имя объекта",
+    namePlaceholder: "Квартира на Ленина",
+    remove: "Удалить объект",
+    removeTitle: "Удалить объект?",
+    removeMessage:
+      "Объект «{name}» со всеми схемами, метками и планами будет удалён. Вернуть его будет неоткуда.",
+    created: "Объект «{name}» создан",
+    removed: "Объект «{name}» удалён",
+    welcomeTitle: "Начнём с объекта",
+    welcomeText:
+      "Объект — это дом или квартира. Внутри — схемы этажей, на них метки. Всё хранится в вашем браузере.",
+    empty: "Объектов пока нет",
+  },
+  schemes: {
+    add: "Загрузить план",
+    addHint: "Перетащите PNG или JPG на план — или нажмите «Загрузить план»",
+    dropHere: "Отпустите — план загрузится",
+    edit: "Править план",
+    rename: "Переименовать схему",
+    renameTitle: "Имя схемы",
+    remove: "Удалить схему",
+    removeTitle: "Удалить схему?",
+    removeMessage: "Схема «{name}» будет удалена вместе с метками ({marks}). Вернуть её будет неоткуда.",
+    up: "Выше",
+    down: "Ниже",
+    defaultName: "Схема {number}",
+    size: "{width} × {height}",
+    added: "Схема «{name}» добавлена",
+    removed: "Схема «{name}» удалена",
+    loading: "Читаем план…",
+    noImage: "План не загружен",
+  },
+  image: {
+    editTitle: "План схемы",
+    rotateLeft: "Повернуть влево",
+    rotateRight: "Повернуть вправо",
+    cropHint: "Обведите рамкой то, что оставить, и нажмите «Обрезать»",
+    crop: "Обрезать",
+    cropReset: "Снять рамку",
+    apply: "Готово",
+    wrongType: "Нужен PNG или JPG",
+    broken: "Не удалось прочитать картинку — попробуйте другой файл",
+    working: "Готовим план…",
+    applied: "План обновлён, метки остались на своих местах",
+    outsideTitle: "Метки за рамкой",
+    marksOutsideAsk:
+      "За рамкой останется меток: {count}. Их прижмёт к краю плана, прежних мест уже не вернуть. Обрезать так?",
+    cropAnyway: "Обрезать так",
+    appliedClamped: "План обновлён; меток прижато к краю: {count}",
+  },
+  storage: {
+    memory: "Браузер не дал открыть хранилище — работаем в памяти. Выгрузите объект в файл, иначе работа пропадёт при закрытии вкладки.",
+    writeFailed: "Браузер не дал записать данные — работа осталась в памяти. Выгрузите объект в файл.",
+    lowSpace: "В браузере осталось меньше {free} свободного места — выгрузите объект в файл.",
+  },
+  dialog: {
+    confirm: "Да, удалить",
+    cancel: "Отмена",
+    save: "Сохранить",
+    close: "Закрыть",
+  },
+  units: {
+    megabytes: "{value} МБ",
   },
   notify: {
     close: "Закрыть",
@@ -576,6 +1130,19 @@ function deleteScheme(project, schemeId) {
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
   return { project: withProject(project, { schemes, marks, groups }) };
+}
+
+// Порядок схем объекта — одно правило на всех: нумерация, панели и выгрузки
+// обходят схемы одинаково.
+function schemesInOrder(project) {
+  return project.schemes
+    .map((scheme, index) => ({ scheme, index }))
+    .sort((a, b) => {
+      const orderA = a.scheme.order ?? a.index;
+      const orderB = b.scheme.order ?? b.index;
+      return orderA === orderB ? a.index - b.index : orderA - orderB;
+    })
+    .map((item) => item.scheme);
 }
 
 function pick(source, allowed) {
@@ -788,7 +1355,7 @@ function deleteMark(project, markId) {
 
 // Порядок обхода: схемы по order, внутри схемы — порядок постановки меток.
 function marksInOrder(project, filter) {
-  const schemeOrder = new Map(project.schemes.map((scheme, index) => [scheme.id, scheme.order ?? index]));
+  const schemeOrder = new Map(schemesInOrder(project).map((scheme, index) => [scheme.id, index]));
   return project.marks
     .map((mark, index) => ({ mark, index }))
     .filter((item) => (filter ? filter(item.mark) : true))
@@ -1185,6 +1752,1579 @@ if (typeof document !== "undefined") {
   } else {
     setTimeout(startApp, 0);
   }
+}
+
+// src/store.js
+// Хранение в браузере: IndexedDB своими руками, без единой зависимости.
+// База `scheme-markup`, хранилища `projects` (документ объекта), `images`
+// (Blob планов) и `settings` (ключ-значение).
+//
+// Правило файла: потеря хранилища не должна ронять приложение. По file://
+// IndexedDB доступен не везде, в приватном окне запись может отказать в любой
+// момент — тогда store переходит в память, сообщает о беде подписчикам
+// (панель показывает строку и советует выгрузить проект в файл) и продолжает
+// работать. Данные сеанса живут в памяти в любом случае.
+const STORE_DB_NAME = "scheme-markup";
+const STORE_DB_VERSION = 1;
+const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
+// Ниже этого порога свободного места пользователя предупреждают заранее.
+const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
+// Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
+// вкладка): ждём ограниченное время и уходим в память.
+const STORE_OPEN_TIMEOUT_MS = 4000;
+
+const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
+const storeListeners = new Set();
+let storeDb = null;
+let storeModeValue = "unknown";
+let storeOpening = null;
+let storeReported = false;
+let storeWriteReported = false;
+function storeMode() {
+  return storeModeValue;
+}
+function onStoreProblem(listener) {
+  storeListeners.add(listener);
+  return () => storeListeners.delete(listener);
+}
+
+function reportStoreProblem(kind, error) {
+  const problem = { kind, error: error || null };
+  for (const listener of [...storeListeners]) {
+    try {
+      listener(problem);
+    } catch (ignored) {
+      /* подписчик не должен ломать запись */
+    }
+  }
+}
+
+function newStoreId() {
+  return crypto.randomUUID();
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("indexeddb-failed"));
+  });
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined" || indexedDB === null) {
+      reject(new Error("indexeddb-unavailable"));
+      return;
+    }
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
+    let request;
+    try {
+      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
+    } catch (error) {
+      clearTimeout(timer);
+      finish(reject, error);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
+        db.createObjectStore(STORE_NAMES.projects, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.images)) {
+        db.createObjectStore(STORE_NAMES.images, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
+        db.createObjectStore(STORE_NAMES.settings, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      finish(resolve, request.result);
+    };
+    request.onerror = () => {
+      clearTimeout(timer);
+      finish(reject, request.error || new Error("indexeddb-failed"));
+    };
+    request.onblocked = () => {
+      clearTimeout(timer);
+      finish(reject, new Error("indexeddb-blocked"));
+    };
+  });
+}
+async function openStore() {
+  if (storeModeValue !== "unknown") return storeModeValue;
+  if (!storeOpening) {
+    storeOpening = openDatabase()
+      .then((db) => {
+        storeDb = db;
+        storeModeValue = "idb";
+        db.onclose = () => degradeToMemory(new Error("indexeddb-closed"));
+        return storeModeValue;
+      })
+      .catch((error) => {
+        degradeToMemory(error);
+        return storeModeValue;
+      });
+  }
+  return storeOpening;
+}
+
+function degradeToMemory(error) {
+  storeDb = null;
+  storeModeValue = "memory";
+  if (storeReported) return;
+  storeReported = true;
+  reportStoreProblem("unavailable", error);
+}
+
+// Одна транзакция — одно действие: запись документа объекта атомарна, вкладка,
+// закрытая посреди сохранения, оставляет прежнее состояние, а не половину.
+async function runTransaction(name, mode, action) {
+  await openStore();
+  if (storeModeValue !== "idb" || !storeDb) return { ok: false, memory: true };
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = storeDb.transaction(name, mode);
+      let result;
+      tx.oncomplete = () => {
+        if (mode === "readwrite") storeWriteReported = false;
+        resolve({ ok: true, result });
+      };
+      tx.onerror = () => reject(tx.error || new Error("indexeddb-failed"));
+      tx.onabort = () => reject(tx.error || new Error("indexeddb-aborted"));
+      Promise.resolve(action(tx.objectStore(name)))
+        .then((value) => {
+          result = value;
+        })
+        .catch((error) => {
+          try {
+            tx.abort();
+          } catch (ignored) {
+            /* транзакция уже завершилась */
+          }
+          reject(error);
+        });
+    });
+  } catch (error) {
+    // Автосохранение идёт на каждую правку: об отказавшей записи говорим один
+    // раз — до тех пор, пока запись снова не пройдёт.
+    if (mode === "readwrite" && !storeWriteReported) {
+      storeWriteReported = true;
+      reportStoreProblem("writeFailed", error);
+    }
+    return { ok: false, error };
+  }
+}
+
+// ——— объекты ——————————————————————————————————————————————————————————
+async function listProjects() {
+  const summaries = new Map();
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+  if (read.ok) {
+    for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
+  }
+  for (const doc of storeMemory.projects.values()) summaries.set(doc.id, summaryOf(doc));
+  return [...summaries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+function summaryOf(project) {
+  return {
+    id: project.id,
+    name: project.name,
+    updatedAt: project.updatedAt,
+    schemes: (project.schemes || []).length,
+    marks: (project.marks || []).length,
+  };
+}
+async function loadProject(id) {
+  if (!id) return null;
+  if (storeMemory.projects.has(id)) return storeMemory.projects.get(id);
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result : null;
+}
+
+// Отказ записи не теряет работу: документ остаётся в памяти сеанса, а панель
+// получает повод предложить выгрузку в файл.
+async function saveProject(project) {
+  if (!project || !project.id) return { ok: false };
+  const written = await runTransaction(STORE_NAMES.projects, "readwrite", (store) =>
+    idbRequest(store.put(project)),
+  );
+  if (written.ok) {
+    storeMemory.projects.delete(project.id);
+    return { ok: true, mode: "idb" };
+  }
+  storeMemory.projects.set(project.id, project);
+  return { ok: false, mode: "memory", error: written.error || null };
+}
+async function deleteProject(id) {
+  storeMemory.projects.delete(id);
+  const removed = await runTransaction(STORE_NAMES.projects, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— изображения ——————————————————————————————————————————————————————
+async function putImage(blob) {
+  const id = newStoreId();
+  const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
+    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
+  );
+  if (!written.ok) storeMemory.images.set(id, blob);
+  return id;
+}
+async function getImage(id) {
+  if (!id) return null;
+  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
+  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result.blob : null;
+}
+async function deleteImage(id) {
+  if (!id) return { ok: true };
+  storeMemory.images.delete(id);
+  const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— настройки ————————————————————————————————————————————————————————
+async function getSetting(key) {
+  if (storeMemory.settings.has(key)) return storeMemory.settings.get(key);
+  const read = await runTransaction(STORE_NAMES.settings, "readonly", (store) => idbRequest(store.get(key)));
+  return read.ok && read.result ? read.result.value : null;
+}
+async function setSetting(key, value) {
+  const written = await runTransaction(STORE_NAMES.settings, "readwrite", (store) =>
+    idbRequest(store.put({ key, value })),
+  );
+  if (written.ok) storeMemory.settings.delete(key);
+  else storeMemory.settings.set(key, value);
+  return { ok: written.ok };
+}
+
+// ——— место ————————————————————————————————————————————————————————————
+async function estimateSpace() {
+  const empty = { usage: null, quota: null, free: null, low: false };
+  if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.estimate) return empty;
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (typeof quota !== "number" || typeof usage !== "number") return empty;
+    const free = Math.max(0, quota - usage);
+    return { usage, quota, free, low: free < STORE_LOW_SPACE_BYTES };
+  } catch (error) {
+    return empty;
+  }
+}
+
+// src/panels/ui.js
+// Общие кирпичи панелей: элементы, кнопки, модальные диалоги.
+// Отдельный модуль, потому что ими пользуются все панели: тянуть их из чужой
+// панели значило бы тянуть вместе с ней её регистрацию и подписки.
+function uiEl(tag, options = {}, children = []) {
+  const node = document.createElement(tag);
+  if (options.class) node.className = options.class;
+  if (options.text != null) node.textContent = options.text;
+  if (options.title) node.title = options.title;
+  if (options.type) node.type = options.type;
+  if (options.value != null) node.value = options.value;
+  if (options.placeholder) node.placeholder = options.placeholder;
+  if (options.attrs) {
+    for (const [name, value] of Object.entries(options.attrs)) node.setAttribute(name, value);
+  }
+  if (options.on) {
+    for (const [name, handler] of Object.entries(options.on)) node.addEventListener(name, handler);
+  }
+  for (const child of Array.isArray(children) ? children : [children]) {
+    if (child) node.append(child);
+  }
+  return node;
+}
+function uiButton(label, options = {}) {
+  return uiEl("button", {
+    class: options.class || "ui-btn",
+    text: label,
+    title: options.title || "",
+    type: "button",
+    on: options.on,
+    attrs: options.attrs,
+  });
+}
+
+// Диалоги складываются стопкой: подтверждение поверх редактора плана —
+// обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
+// основное действие, нижние ждут своей очереди и закрываются своими же close().
+// Пока стопка не пуста, #dialog-host не пустой — значит затемнение на месте
+// (правило `:empty` из styles.css). Клавиатура не должна оставаться в панели
+// под затемнением: диалог забирает фокус, а закрываясь — возвращает его тому,
+// кто его открыл.
+const uiDialogs = [];
+let uiEscapeListener = null;
+function uiDialogDepth() {
+  return uiDialogs.length;
+}
+
+function uiRefreshDialogs() {
+  const host = document.getElementById("dialog-host");
+  uiDialogs.forEach((entry, index) => {
+    entry.card.hidden = index !== uiDialogs.length - 1;
+  });
+  if (uiDialogs.length === 0) {
+    if (host) host.replaceChildren();
+    if (uiEscapeListener) {
+      document.removeEventListener("keydown", uiEscapeListener);
+      uiEscapeListener = null;
+    }
+    return;
+  }
+  if (uiEscapeListener) return;
+  uiEscapeListener = (event) => {
+    const top = uiDialogs[uiDialogs.length - 1];
+    if (!top) return;
+    if (event.key === "Escape") {
+      if (top.dismissable === false) return;
+      event.preventDefault();
+      top.close();
+      if (top.onCancel) top.onCancel();
+      return;
+    }
+    // Enter подтверждает основное действие. Поле ввода, которое обработало
+    // Enter само (uiPrompt), помечает событие — второй раз не срабатываем.
+    if (event.key !== "Enter" || event.defaultPrevented || !top.primary) return;
+    const target = event.target;
+    if (target && (target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    event.preventDefault();
+    top.primary.click();
+  };
+  document.addEventListener("keydown", uiEscapeListener);
+}
+
+function uiFocusEntry(entry) {
+  const target = entry.card.querySelector("input, select, textarea") || entry.primary || entry.card;
+  if (target && typeof target.focus === "function") target.focus();
+}
+
+// Фокус возвращается открывшему, если он ещё на странице (кнопка панели могла
+// исчезнуть при перерисовке); иначе — диалогу, который снова стал верхним.
+function uiReturnFocus(entry) {
+  const opener = entry.opener;
+  if (opener && typeof opener.focus === "function" && opener.isConnected) {
+    opener.focus();
+    return;
+  }
+  const top = uiDialogs[uiDialogs.length - 1];
+  if (top) uiFocusEntry(top);
+}
+function uiModal(options) {
+  const host = document.getElementById("dialog-host");
+  const actions = options.actions || [];
+  const card = uiEl("div", { class: "modal", attrs: { tabindex: "-1" } }, [
+    uiEl("h3", { class: "modal__title", text: options.title || "" }),
+    uiEl("div", { class: "modal__body" }, options.body || null),
+    uiEl("div", { class: "modal__actions" }, actions),
+  ]);
+  const entry = {
+    card,
+    dismissable: options.dismissable,
+    onCancel: options.onCancel,
+    // Основное действие — последняя кнопка в ряду (в uiConfirm и uiPrompt это
+    // подтверждение, в редакторе плана — «Готово»).
+    primary: options.primary || [...actions].reverse().find((node) => node && node.tagName === "BUTTON") || null,
+    opener: typeof document !== "undefined" ? document.activeElement : null,
+    close() {
+      const index = uiDialogs.indexOf(entry);
+      if (index < 0) return;
+      uiDialogs.splice(index, 1);
+      card.remove();
+      uiRefreshDialogs();
+      uiReturnFocus(entry);
+    },
+  };
+  if (!host) return { close() {}, card };
+  uiDialogs.push(entry);
+  host.append(card);
+  uiRefreshDialogs();
+  uiFocusEntry(entry);
+  return { close: entry.close, card };
+}
+function uiConfirm({ title, message, confirmLabel }) {
+  return new Promise((resolve) => {
+    let modal;
+    const answer = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    modal = uiModal({
+      title,
+      body: uiEl("p", { class: "modal__text", text: message }),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => answer(false) } }),
+        uiButton(confirmLabel || strings.dialog.confirm, {
+          class: "ui-btn ui-btn--danger",
+          on: { click: () => answer(true) },
+        }),
+      ],
+      onCancel: () => resolve(false),
+    });
+  });
+}
+function uiPrompt({ title, value, placeholder, submitLabel }) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (result) => {
+      modal.close();
+      resolve(result || null);
+    };
+    const input = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      value: value || "",
+      placeholder: placeholder || "",
+      on: {
+        keydown: (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          done(input.value.trim());
+        },
+      },
+    });
+    modal = uiModal({
+      title,
+      body: input,
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(submitLabel || strings.dialog.save, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: () => done(input.value.trim()) },
+        }),
+      ],
+      onCancel: () => resolve(null),
+    });
+    input.select();
+  });
+}
+function formatMegabytes(bytes) {
+  return text("units.megabytes", { value: Math.round(bytes / (1024 * 1024)) });
+}
+
+// src/panels/projects.js
+// Объекты: список в шапке, переключение, переименование, удаление,
+// первый запуск и автосохранение в браузер.
+const LAST_PROJECT_KEY = "lastProjectId";
+const SAVE_DELAY_MS = 400;
+
+function uniqueProjectName(list) {
+  const base = strings.project.untitled;
+  const taken = new Set(list.map((item) => item.name));
+  if (!taken.has(base)) return base;
+  let index = 2;
+  while (taken.has(base + " " + index)) index += 1;
+  return base + " " + index;
+}
+
+function mountProjectsPanel(host, api) {
+  const { getState, setState, notify, subscribe } = api;
+  let known = [];
+  let saveTimer = null;
+  let lowSpaceReported = false;
+
+  const select = uiEl("select", {
+    class: "ui-select",
+    title: strings.projects.switch,
+    on: {
+      change: () => {
+        const id = select.value;
+        if (id && id !== currentId()) openProjectById(id);
+      },
+    },
+  });
+  const renameButton = uiButton("✎", {
+    title: strings.projects.rename,
+    on: { click: () => renameCurrent() },
+  });
+  const createButton = uiButton("＋", {
+    title: strings.projects.create,
+    on: { click: () => createAndOpen() },
+  });
+  const removeButton = uiButton("🗑", {
+    class: "ui-btn ui-btn--danger",
+    title: strings.projects.remove,
+    on: { click: () => removeCurrent() },
+  });
+  host.replaceChildren(select, createButton, renameButton, removeButton);
+
+  function currentId() {
+    const state = getState();
+    return state.project ? state.project.id : "";
+  }
+
+  function renderList() {
+    const id = currentId();
+    select.replaceChildren();
+    if (known.length === 0) {
+      select.append(uiEl("option", { value: "", text: strings.projects.empty }));
+    }
+    for (const item of known) {
+      select.append(uiEl("option", { value: item.id, text: item.name }));
+    }
+    select.value = id;
+    const has = Boolean(id);
+    renameButton.disabled = !has;
+    removeButton.disabled = !has;
+  }
+
+  async function refreshList() {
+    known = await listProjects();
+    renderList();
+  }
+
+  async function openProjectById(id) {
+    const project = await loadProject(id);
+    if (!project) {
+      await refreshList();
+      return;
+    }
+    setState({
+      project,
+      schemeId: project.schemes.length > 0 ? project.schemes[0].id : null,
+      selectedMarkIds: [],
+      activeTypeId: null,
+    });
+    await setSetting(LAST_PROJECT_KEY, id);
+    renderList();
+  }
+
+  async function createAndOpen() {
+    const project = createProject({ name: uniqueProjectName(known) });
+    await saveProject(project);
+    await refreshList();
+    setState({ project, schemeId: null, selectedMarkIds: [], activeTypeId: null });
+    await setSetting(LAST_PROJECT_KEY, project.id);
+    renderList();
+    notify(text("projects.created", { name: project.name }), "success");
+    return project;
+  }
+
+  async function renameCurrent() {
+    const state = getState();
+    if (!state.project) return;
+    const name = await uiPrompt({
+      title: strings.projects.renameTitle,
+      value: state.project.name,
+      placeholder: strings.projects.namePlaceholder,
+    });
+    if (!name || name === state.project.name) return;
+    const next = updateProject(state.project, { name });
+    setState({ project: next.project });
+    await refreshList();
+  }
+
+  async function removeCurrent() {
+    const state = getState();
+    if (!state.project) return;
+    const project = state.project;
+    const agreed = await uiConfirm({
+      title: strings.projects.removeTitle,
+      message: text("projects.removeMessage", { name: project.name }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    for (const scheme of project.schemes) {
+      if (scheme.imageId) await deleteImage(scheme.imageId);
+    }
+    await deleteProject(project.id);
+    setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
+    notify(text("projects.removed", { name: project.name }), "success");
+    await refreshList();
+    if (known.length > 0) await openProjectById(known[0].id);
+    else showWelcome();
+  }
+
+  // Первый запуск: не пустая серая страница, а одна кнопка.
+  function showWelcome() {
+    const modal = uiModal({
+      title: strings.projects.welcomeTitle,
+      dismissable: false,
+      body: uiEl("p", { class: "modal__text", text: strings.projects.welcomeText }),
+      actions: [
+        uiButton(strings.projects.createTitle, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: async () => {
+              modal.close();
+              await createAndOpen();
+            },
+          },
+        }),
+      ],
+    });
+  }
+
+  function scheduleSave(project) {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      saveTimer = null;
+      const result = await saveProject(project);
+      if (result.ok) {
+        known = known.map((item) =>
+          item.id === project.id
+            ? { ...item, name: project.name, updatedAt: project.updatedAt, schemes: project.schemes.length, marks: project.marks.length }
+            : item,
+        );
+        renderList();
+        await checkSpace();
+      }
+    }, SAVE_DELAY_MS);
+  }
+
+  async function checkSpace() {
+    if (lowSpaceReported) return;
+    const space = await estimateSpace();
+    if (!space.low) return;
+    lowSpaceReported = true;
+    notify(text("storage.lowSpace", { free: formatMegabytes(space.free) }), "error");
+  }
+
+  onStoreProblem((problem) => {
+    notify(problem.kind === "unavailable" ? strings.storage.memory : strings.storage.writeFailed, "error");
+  });
+
+  subscribe((state, changed) => {
+    if (!("project" in changed)) return;
+    renderList();
+    if (state.project) scheduleSave(state.project);
+  });
+
+  (async () => {
+    await openStore();
+    await refreshList();
+    const lastId = await getSetting(LAST_PROJECT_KEY);
+    const target = known.find((item) => item.id === lastId) || known[0] || null;
+    if (target) await openProjectById(target.id);
+    else showWelcome();
+    await checkSpace();
+    if (storeMode() === "memory") renderList();
+  })();
+}
+
+registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
+
+// src/panels/schemes.js
+// Схемы объекта: список, загрузка плана кнопкой и перетаскиванием, поворот
+// и обрезка, переименование, порядок, удаление.
+// Холст рисует другой модуль — сюда он приходит только за картинкой:
+// подготовленный план и его размер кладутся в состояние сеанса (`schemeImage`).
+
+
+
+
+
+
+// Рамка меньше этой доли считается промахом мыши, а не обрезкой.
+const PLAN_FRAME_MIN = 0.02;
+
+function planNameFromFile(file, project) {
+  const raw = String((file && file.name) || "").replace(/\.[^.]+$/, "").trim();
+  if (raw) return raw.slice(0, 60);
+  return text("schemes.defaultName", { number: project.schemes.length + 1 });
+}
+
+// Метка держит доли плана: одно накопленное преобразование двигает и их,
+// иначе метки уедут с тех мест, куда их поставил инженер.
+function remapMarkForTransform(mark, transform) {
+  return {
+    points: transformMarkPoints(mark.points || [], transform),
+    labelOffset: mark.labelOffset ? transformOffset(mark.labelOffset, transform) : null,
+  };
+}
+
+function marksPushedOutside(marks, transform) {
+  return marks.filter((mark) => countPointsOutside(mark.points || [], transform) > 0).length;
+}
+
+// Диалог правки плана. Повороты и рамки копятся в одно преобразование и
+// применяются к исходнику: JPEG пережимается один раз, сколько бы шагов ни
+// сделал пользователь. `beforeApply` — последнее слово вызывающего перед
+// применением (например, спросить про метки, которые вынесет за рамку).
+function openPlanEditor({ blob, width, height, title, beforeApply }) {
+  return new Promise((resolve) => {
+    let transform = identityTransform();
+    let preview = { blob, width, height };
+    let url = URL.createObjectURL(blob);
+    let frame = null;
+    let busy = false;
+    let modal = null;
+
+    const image = uiEl("img", { class: "plan-stage__img", attrs: { src: url, alt: "" } });
+    const box = uiEl("div", { class: "plan-frame" });
+    box.hidden = true;
+    const stage = uiEl("div", { class: "plan-stage" }, [image, box]);
+    const hint = uiEl("p", { class: "modal__hint", text: strings.image.cropHint });
+
+    const rotateLeft = uiButton("⟲", {
+      title: strings.image.rotateLeft,
+      on: { click: () => apply(rotateTransform(transform, -90)) },
+    });
+    const rotateRight = uiButton("⟳", {
+      title: strings.image.rotateRight,
+      on: { click: () => apply(rotateTransform(transform, 90)) },
+    });
+    const cropButton = uiButton(strings.image.crop, {
+      on: { click: () => apply(cropTransform(transform, frame)) },
+    });
+    const resetButton = uiButton(strings.image.cropReset, { on: { click: () => setFrame(null) } });
+    const cancelButton = uiButton(strings.dialog.cancel, { on: { click: () => finish(null) } });
+    const applyButton = uiButton(strings.image.apply, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => requestApply() },
+    });
+
+    function setFrame(next) {
+      frame = next;
+      box.hidden = !next;
+      cropButton.disabled = !next || busy;
+      resetButton.disabled = !next || busy;
+      if (!next) return;
+      const rect = image.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      box.style.left = rect.left - stageRect.left + next.x * rect.width + "px";
+      box.style.top = rect.top - stageRect.top + next.y * rect.height + "px";
+      box.style.width = next.width * rect.width + "px";
+      box.style.height = next.height * rect.height + "px";
+    }
+
+    function setBusy(value) {
+      busy = value;
+      for (const button of [rotateLeft, rotateRight, applyButton, cancelButton]) button.disabled = value;
+      cropButton.disabled = value || !frame;
+      resetButton.disabled = value || !frame;
+      hint.textContent = value ? strings.image.working : strings.image.cropHint;
+    }
+
+    // Предпросмотр всегда пересобирается из исходника по накопленному
+    // преобразованию — что видно, то и получится, без цепочки пережатий.
+    async function apply(next) {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const result = await renderPlanImage(blob, next);
+        URL.revokeObjectURL(url);
+        preview = result;
+        transform = next;
+        url = URL.createObjectURL(result.blob);
+        image.src = url;
+        setFrame(null);
+        setBusy(false);
+      } catch (error) {
+        setBusy(false);
+        finish(null);
+      }
+    }
+
+    async function requestApply() {
+      if (busy) return;
+      if (beforeApply && !isIdentityTransform(transform)) {
+        setBusy(true);
+        const agreed = await beforeApply(transform);
+        setBusy(false);
+        if (!agreed) return;
+      }
+      finish({ blob: preview.blob, width: preview.width, height: preview.height, transform });
+    }
+
+    function finish(result) {
+      URL.revokeObjectURL(url);
+      if (modal) modal.close();
+      resolve(result);
+    }
+
+    // Рамка тянется мышью прямо по картинке.
+    stage.addEventListener("pointerdown", (event) => {
+      if (busy || event.button !== 0) return;
+      const rect = image.getBoundingClientRect();
+      const startX = Math.min(Math.max(event.clientX, rect.left), rect.right);
+      const startY = Math.min(Math.max(event.clientY, rect.top), rect.bottom);
+      const move = (moveEvent) => {
+        const x = Math.min(Math.max(moveEvent.clientX, rect.left), rect.right);
+        const y = Math.min(Math.max(moveEvent.clientY, rect.top), rect.bottom);
+        setFrame({
+          x: (Math.min(startX, x) - rect.left) / rect.width,
+          y: (Math.min(startY, y) - rect.top) / rect.height,
+          width: Math.abs(x - startX) / rect.width,
+          height: Math.abs(y - startY) / rect.height,
+        });
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        if (frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      event.preventDefault();
+    });
+
+    modal = uiModal({
+      title: title || strings.image.editTitle,
+      body: uiEl("div", { class: "plan-editor" }, [
+        uiEl("div", { class: "plan-editor__tools" }, [rotateLeft, rotateRight, cropButton, resetButton]),
+        stage,
+        hint,
+      ]),
+      actions: [cancelButton, applyButton],
+      onCancel: () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      },
+    });
+    setFrame(null);
+  });
+}
+
+function mountSchemesPanel(host, api) {
+  const { getState, setState, notify, subscribe } = api;
+  let decoded = null;
+  let imageToken = 0;
+
+  const list = uiEl("div", { class: "scheme-list" });
+  const fileInput = uiEl("input", {
+    class: "scheme-file",
+    type: "file",
+    attrs: { accept: "image/png,image/jpeg,.png,.jpg,.jpeg" },
+    on: {
+      change: async () => {
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = "";
+        if (file) await addPlanFromFile(file);
+      },
+    },
+  });
+  fileInput.hidden = true;
+  const addButton = uiButton(strings.schemes.add, {
+    class: "ui-btn ui-btn--accent ui-btn--wide",
+    on: { click: () => fileInput.click() },
+  });
+  const hint = uiEl("p", { class: "panel__empty", text: strings.schemes.addHint });
+  host.replaceChildren(addButton, fileInput, list, hint);
+
+  function render() {
+    const state = getState();
+    const project = state.project;
+    list.replaceChildren();
+    addButton.disabled = !project;
+    if (!project || project.schemes.length === 0) {
+      hint.textContent = project ? strings.schemes.addHint : strings.projects.empty;
+      return;
+    }
+    hint.textContent = "";
+    const ordered = schemesInOrder(project);
+    ordered.forEach((scheme, index) => {
+      const marks = project.marks.filter((mark) => mark.schemeId === scheme.id).length;
+      const row = uiEl("div", {
+        class: "scheme-row" + (scheme.id === state.schemeId ? " scheme-row--current" : ""),
+      });
+      row.append(
+        uiEl("button", {
+          class: "scheme-row__name",
+          type: "button",
+          text: scheme.name,
+          title: scheme.name,
+          on: { click: () => setState({ schemeId: scheme.id, selectedMarkIds: [] }) },
+        }),
+        uiEl("span", {
+          class: "scheme-row__meta",
+          text: scheme.imageId
+            ? text("schemes.size", { width: scheme.width, height: scheme.height })
+            : strings.schemes.noImage,
+        }),
+        uiEl("div", { class: "scheme-row__tools" }, [
+          uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
+          uiButton("✎", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
+          uiButton("↑", {
+            title: strings.schemes.up,
+            attrs: index === 0 ? { disabled: "disabled" } : {},
+            on: { click: () => moveScheme(scheme.id, -1) },
+          }),
+          uiButton("↓", {
+            title: strings.schemes.down,
+            attrs: index === ordered.length - 1 ? { disabled: "disabled" } : {},
+            on: { click: () => moveScheme(scheme.id, 1) },
+          }),
+          uiButton("🗑", {
+            class: "ui-btn ui-btn--danger",
+            title: strings.schemes.remove,
+            on: { click: () => removeScheme(scheme.id, marks) },
+          }),
+        ]),
+      );
+      list.append(row);
+    });
+  }
+
+  // Новый план: проверка файла, правка картинки, только потом запись.
+  async function addPlanFromFile(file) {
+    const state = getState();
+    if (!state.project) return;
+    if (!isPlanImageFile(file)) {
+      notify(strings.image.wrongType, "error");
+      return;
+    }
+    let plan;
+    hint.textContent = strings.schemes.loading;
+    addButton.disabled = true;
+    try {
+      plan = await readPlanImage(file);
+    } catch (error) {
+      notify(strings.image.broken, "error");
+      return;
+    } finally {
+      addButton.disabled = false;
+      render();
+    }
+    const edited = await openPlanEditor({
+      blob: plan.blob,
+      width: plan.width,
+      height: plan.height,
+      title: strings.image.editTitle,
+    });
+    if (!edited) return;
+    const imageId = await putImage(edited.blob);
+    const fresh = getState().project;
+    const added = addScheme(fresh, {
+      name: planNameFromFile(file, fresh),
+      imageId,
+      width: edited.width,
+      height: edited.height,
+    });
+    setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
+    notify(text("schemes.added", { name: added.scheme.name }), "success");
+  }
+
+  // Правка уже загруженного плана: метки пересчитываются тем же преобразованием.
+  // Про метки, которые уедут за рамку, спрашиваем до применения — потом
+  // прежних мест уже не вернуть.
+  async function editPlan(schemeId) {
+    const project = getState().project;
+    const scheme = findScheme(project, schemeId);
+    if (!scheme || !scheme.imageId) return;
+    const blob = await getImage(scheme.imageId);
+    if (!blob) {
+      notify(strings.image.broken, "error");
+      return;
+    }
+    const marksOfScheme = project.marks.filter((mark) => mark.schemeId === schemeId);
+    const edited = await openPlanEditor({
+      blob,
+      width: scheme.width,
+      height: scheme.height,
+      title: scheme.name,
+      beforeApply: async (transform) => {
+        const count = marksPushedOutside(marksOfScheme, transform);
+        if (count === 0) return true;
+        return uiConfirm({
+          title: strings.image.outsideTitle,
+          message: text("image.marksOutsideAsk", { count }),
+          confirmLabel: strings.image.cropAnyway,
+        });
+      },
+    });
+    if (!edited || isIdentityTransform(edited.transform)) return;
+    const imageId = await putImage(edited.blob);
+    let next = updateScheme(getState().project, schemeId, {
+      imageId,
+      width: edited.width,
+      height: edited.height,
+    }).project;
+    const moved = next.marks.filter((mark) => mark.schemeId === schemeId);
+    const pushed = marksPushedOutside(moved, edited.transform);
+    for (const mark of moved) {
+      const patch = remapMarkForTransform(mark, edited.transform);
+      next = updateMark(next, mark.id, patch.labelOffset ? patch : { points: patch.points }).project;
+    }
+    await deleteImage(scheme.imageId);
+    setState({ project: next, schemeImage: null });
+    notify(pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: pushed }), "success");
+  }
+
+  async function renameScheme(schemeId) {
+    const project = getState().project;
+    const scheme = findScheme(project, schemeId);
+    if (!scheme) return;
+    const name = await uiPrompt({ title: strings.schemes.renameTitle, value: scheme.name });
+    if (!name || name === scheme.name) return;
+    setState({ project: updateScheme(getState().project, schemeId, { name }).project });
+  }
+
+  function moveScheme(schemeId, delta) {
+    const project = getState().project;
+    const ordered = schemesInOrder(project);
+    const index = ordered.findIndex((scheme) => scheme.id === schemeId);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= ordered.length) return;
+    const moved = [...ordered];
+    moved.splice(target, 0, moved.splice(index, 1)[0]);
+    let next = project;
+    moved.forEach((scheme, position) => {
+      if (scheme.order !== position) next = updateScheme(next, scheme.id, { order: position }).project;
+    });
+    setState({ project: next });
+  }
+
+  async function removeScheme(schemeId, marks) {
+    const project = getState().project;
+    const scheme = findScheme(project, schemeId);
+    if (!scheme) return;
+    const agreed = await uiConfirm({
+      title: strings.schemes.removeTitle,
+      message: text("schemes.removeMessage", { name: scheme.name, marks }),
+    });
+    if (!agreed) return;
+    const fresh = getState().project;
+    const next = deleteScheme(fresh, schemeId).project;
+    if (scheme.imageId) await deleteImage(scheme.imageId);
+    const rest = schemesInOrder(next);
+    setState({
+      project: next,
+      schemeId: getState().schemeId === schemeId ? (rest[0] ? rest[0].id : null) : getState().schemeId,
+      selectedMarkIds: [],
+    });
+    notify(text("schemes.removed", { name: scheme.name }), "success");
+  }
+
+  // Картинка текущей схемы — единственное, что панель отдаёт холсту.
+  async function loadSchemeImage(force) {
+    const state = getState();
+    const scheme = state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
+    const token = ++imageToken;
+    if (!scheme || !scheme.imageId) {
+      if (decoded) releasePlanImage(decoded);
+      decoded = null;
+      if (state.schemeImage) setState({ schemeImage: null });
+      return;
+    }
+    const current = state.schemeImage;
+    if (!force && current && current.schemeId === scheme.id && current.imageId === scheme.imageId) return;
+    const blob = await getImage(scheme.imageId);
+    if (!blob || token !== imageToken) return;
+    let next;
+    try {
+      next = await decodePlanImage(blob);
+    } catch (error) {
+      notify(strings.image.broken, "error");
+      return;
+    }
+    if (token !== imageToken) {
+      releasePlanImage(next);
+      return;
+    }
+    if (decoded) releasePlanImage(decoded);
+    decoded = next;
+    setState({
+      schemeImage: {
+        schemeId: scheme.id,
+        imageId: scheme.imageId,
+        image: next.image,
+        url: next.url,
+        width: next.width,
+        height: next.height,
+      },
+    });
+  }
+
+  // Перетаскивание плана на холст — тот же путь, что и кнопка.
+  const area = document.getElementById("canvas-area");
+  if (area) {
+    area.dataset.drop = strings.schemes.dropHere;
+    area.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      area.classList.add("is-dropping");
+    });
+    area.addEventListener("dragleave", (event) => {
+      if (event.target === area) area.classList.remove("is-dropping");
+    });
+    area.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      area.classList.remove("is-dropping");
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      if (file) await addPlanFromFile(file);
+    });
+  }
+  // Файл, брошенный мимо холста, не должен уводить страницу в просмотр картинки.
+  document.addEventListener("dragover", (event) => event.preventDefault());
+  document.addEventListener("drop", (event) => event.preventDefault());
+
+  subscribe((state, changed) => {
+    if ("project" in changed || "schemeId" in changed) {
+      render();
+      loadSchemeImage(false);
+    }
+  });
+  render();
+  loadSchemeImage(false);
+}
+
+registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
+
+// src/projectFile.js
+// Формат файла проекта: один zip с project.json, планами в schemes/ и README.txt.
+// Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
+// там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
+const PROJECT_ENTRY = "project.json";
+const SCHEMES_DIR = "schemes/";
+const README_ENTRY = "README.txt";
+
+const LOCAL_SIGNATURE = 0x04034b50;
+const CENTRAL_SIGNATURE = 0x02014b50;
+const END_SIGNATURE = 0x06054b50;
+const LOCAL_HEADER_SIZE = 30;
+const CENTRAL_HEADER_SIZE = 46;
+const END_HEADER_SIZE = 22;
+const METHOD_STORED = 0;
+const METHOD_DEFLATE = 8;
+const UTF8_FLAG = 0x0800;
+const ZIP64_MARK = 0xffffffff;
+const MAX_ZIP_BYTES = 0xfffffffe;
+
+// Тип картинки восстанавливается по расширению: имя файла в архиве — всё,
+// что о ней известно после распаковки.
+const IMAGE_TYPES = [
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/jpeg", "jpeg"],
+];
+
+function fileError(key, vars) {
+  const error = new Error(text("errors." + key, vars));
+  error.code = key;
+  return error;
+}
+
+// ——— байты ———————————————————————————————————————————————————————————
+
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder("utf-8");
+
+function encodeText(value) {
+  return utf8Encoder.encode(value);
+}
+
+function decodeText(bytes) {
+  return utf8Decoder.decode(bytes);
+}
+
+async function toBytes(data) {
+  if (data == null) return new Uint8Array(0);
+  if (data instanceof Uint8Array) return data;
+  if (typeof data === "string") return encodeText(data);
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (typeof data.arrayBuffer === "function") return new Uint8Array(await data.arrayBuffer());
+  throw fileError("archiveBroken");
+}
+
+let crcTable = null;
+function crc32(bytes) {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let value = n;
+      for (let bit = 0; bit < 8; bit += 1) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      crcTable[n] = value >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xff];
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function hasCompression() {
+  return typeof CompressionStream === "function" && typeof DecompressionStream === "function";
+}
+
+async function collectStream(readable) {
+  const reader = readable.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const step = await reader.read();
+    if (step.done) break;
+    const chunk = step.value instanceof Uint8Array ? step.value : new Uint8Array(step.value);
+    chunks.push(chunk);
+    total += chunk.length;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
+// Поток, а не один кусок: большой план не держит вкладку — между чтениями
+// управление возвращается странице.
+async function pipeBytes(bytes, transform) {
+  const source = new Blob([bytes]).stream().pipeThrough(transform);
+  return collectStream(source);
+}
+
+async function deflateRaw(bytes) {
+  return pipeBytes(bytes, new CompressionStream("deflate-raw"));
+}
+
+async function inflateRaw(bytes) {
+  try {
+    return await pipeBytes(bytes, new DecompressionStream("deflate-raw"));
+  } catch {
+    throw fileError("archiveBroken");
+  }
+}
+
+// ——— запись zip ——————————————————————————————————————————————————————
+
+function dosStamp(date) {
+  const year = date.getUTCFullYear();
+  if (year < 1980) return { time: 0, date: (1 << 5) | 1 };
+  return {
+    time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | (date.getUTCSeconds() >> 1),
+    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
+  };
+}
+
+function headerBuffer(size) {
+  const bytes = new Uint8Array(size);
+  return { bytes, view: new DataView(bytes.buffer) };
+}
+
+/**
+ * Собирает zip из списка {name, data, compress}. `data` — Uint8Array, ArrayBuffer,
+ * строка или Blob. Размеры известны заранее, дескрипторов данных нет — архив
+ * открывается штатным распаковщиком ОС.
+ */
+async function writeZip(files, options = {}) {
+  const allowCompression = options.compress !== false && hasCompression();
+  const stamp = dosStamp(options.date instanceof Date ? options.date : new Date());
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const list = [...files];
+
+  const parts = [];
+  const central = [];
+  let offset = 0;
+
+  for (let index = 0; index < list.length; index += 1) {
+    const entry = list[index];
+    const nameBytes = encodeText(entry.name);
+    const source = await toBytes(entry.data);
+    const wantCompression = entry.compress === false ? false : allowCompression;
+
+    let method = METHOD_STORED;
+    let payload = source;
+    if (wantCompression && source.length > 0) {
+      const packed = await deflateRaw(source);
+      if (packed.length < source.length) {
+        method = METHOD_DEFLATE;
+        payload = packed;
+      }
+    }
+    const crc = crc32(source);
+
+    const local = headerBuffer(LOCAL_HEADER_SIZE + nameBytes.length);
+    local.view.setUint32(0, LOCAL_SIGNATURE, true);
+    local.view.setUint16(4, 20, true);
+    local.view.setUint16(6, UTF8_FLAG, true);
+    local.view.setUint16(8, method, true);
+    local.view.setUint16(10, stamp.time, true);
+    local.view.setUint16(12, stamp.date, true);
+    local.view.setUint32(14, crc, true);
+    local.view.setUint32(18, payload.length, true);
+    local.view.setUint32(22, source.length, true);
+    local.view.setUint16(26, nameBytes.length, true);
+    local.view.setUint16(28, 0, true);
+    local.bytes.set(nameBytes, LOCAL_HEADER_SIZE);
+
+    parts.push(local.bytes, payload);
+    central.push({ nameBytes, method, crc, packedSize: payload.length, size: source.length, offset });
+    offset += local.bytes.length + payload.length;
+    if (offset > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
+    if (onProgress) onProgress({ done: index + 1, total: list.length, name: entry.name });
+  }
+
+  const directoryOffset = offset;
+  let directorySize = 0;
+  for (const entry of central) {
+    const header = headerBuffer(CENTRAL_HEADER_SIZE + entry.nameBytes.length);
+    header.view.setUint32(0, CENTRAL_SIGNATURE, true);
+    header.view.setUint16(4, 20, true);
+    header.view.setUint16(6, 20, true);
+    header.view.setUint16(8, UTF8_FLAG, true);
+    header.view.setUint16(10, entry.method, true);
+    header.view.setUint16(12, stamp.time, true);
+    header.view.setUint16(14, stamp.date, true);
+    header.view.setUint32(16, entry.crc, true);
+    header.view.setUint32(20, entry.packedSize, true);
+    header.view.setUint32(24, entry.size, true);
+    header.view.setUint16(28, entry.nameBytes.length, true);
+    header.view.setUint32(42, entry.offset, true);
+    header.bytes.set(entry.nameBytes, CENTRAL_HEADER_SIZE);
+    parts.push(header.bytes);
+    directorySize += header.bytes.length;
+  }
+
+  const end = headerBuffer(END_HEADER_SIZE);
+  end.view.setUint32(0, END_SIGNATURE, true);
+  end.view.setUint16(8, central.length, true);
+  end.view.setUint16(10, central.length, true);
+  end.view.setUint32(12, directorySize, true);
+  end.view.setUint32(16, directoryOffset, true);
+  parts.push(end.bytes);
+  if (directoryOffset + directorySize + END_HEADER_SIZE > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
+
+  return new Blob(parts, { type: "application/zip" });
+}
+
+// ——— чтение zip ——————————————————————————————————————————————————————
+
+function findEndHeader(bytes, view) {
+  const limit = Math.max(0, bytes.length - 0xffff - END_HEADER_SIZE);
+  for (let at = bytes.length - END_HEADER_SIZE; at >= limit; at -= 1) {
+    if (view.getUint32(at, true) === END_SIGNATURE) return at;
+  }
+  return -1;
+}
+
+/** Распаковывает zip в Map «имя файла → байты». Понимает stored и deflate. */
+async function readZip(blob) {
+  const bytes = await toBytes(blob);
+  if (bytes.length < END_HEADER_SIZE) throw fileError("notAProject");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  const endAt = findEndHeader(bytes, view);
+  if (endAt < 0) throw fileError("notAProject");
+
+  const count = view.getUint16(endAt + 10, true);
+  const directorySize = view.getUint32(endAt + 12, true);
+  const directoryOffset = view.getUint32(endAt + 16, true);
+  if (directoryOffset === ZIP64_MARK || directorySize === ZIP64_MARK || count === 0xffff) {
+    throw fileError("zip64Unsupported");
+  }
+  if (directoryOffset + directorySize > bytes.length) throw fileError("archiveBroken");
+
+  const entries = new Map();
+  let at = directoryOffset;
+  for (let index = 0; index < count; index += 1) {
+    if (at + CENTRAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
+    if (view.getUint32(at, true) !== CENTRAL_SIGNATURE) throw fileError("archiveBroken");
+    const method = view.getUint16(at + 10, true);
+    const crc = view.getUint32(at + 16, true);
+    const packedSize = view.getUint32(at + 20, true);
+    const size = view.getUint32(at + 24, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const extraLength = view.getUint16(at + 30, true);
+    const commentLength = view.getUint16(at + 32, true);
+    const localOffset = view.getUint32(at + 42, true);
+    const name = decodeText(bytes.subarray(at + CENTRAL_HEADER_SIZE, at + CENTRAL_HEADER_SIZE + nameLength));
+    at += CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
+
+    if (name.endsWith("/")) continue;
+    if (packedSize === ZIP64_MARK || size === ZIP64_MARK || localOffset === ZIP64_MARK) {
+      throw fileError("zip64Unsupported");
+    }
+    if (localOffset + LOCAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
+    if (view.getUint32(localOffset, true) !== LOCAL_SIGNATURE) throw fileError("archiveBroken");
+
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataAt = localOffset + LOCAL_HEADER_SIZE + localNameLength + localExtraLength;
+    if (dataAt + packedSize > bytes.length) throw fileError("archiveBroken");
+
+    const payload = bytes.subarray(dataAt, dataAt + packedSize);
+    let content;
+    if (method === METHOD_STORED) content = payload.slice();
+    else if (method === METHOD_DEFLATE) content = await inflateRaw(payload);
+    else throw fileError("archiveBroken");
+
+    if (content.length !== size || crc32(content) !== crc) throw fileError("archiveBroken");
+    entries.set(name, content);
+  }
+  return entries;
+}
+
+// ——— файл проекта ————————————————————————————————————————————————————
+
+function extensionFor(type) {
+  const found = IMAGE_TYPES.find((pair) => pair[0] === String(type || "").toLowerCase());
+  return found ? found[1] : "bin";
+}
+
+function typeForExtension(extension) {
+  const found = IMAGE_TYPES.find((pair) => pair[1] === String(extension || "").toLowerCase());
+  return found ? found[0] : "";
+}
+
+// Идентификатор изображения попадает в имя файла: кодируем, чтобы «/» и прочее
+// не разъехались по папкам, и раскодируем обратно — id восстанавливается точно.
+function encodeImageId(id) {
+  return encodeURIComponent(String(id));
+}
+
+function decodeImageId(name) {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+// Поставщик один — store отдаёт Map. Всё остальное отвергается: тихо вернуть
+// пустой список значило бы упаковать объект без единого плана и промолчать.
+function imageEntries(images) {
+  if (images == null) return [];
+  if (!(images instanceof Map)) throw fileError("imagesNotMap");
+  return [...images.entries()];
+}
+
+function looksLikeProject(value) {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof value.id === "string" &&
+    Array.isArray(value.categories) &&
+    Array.isArray(value.markTypes) &&
+    Array.isArray(value.schemes) &&
+    Array.isArray(value.marks)
+  );
+}
+
+// Единственное место, где живут миграции формата: версия из будущего отвергается,
+// прошлые версии доводятся до текущей здесь.
+function migrateProject(loaded) {
+  const version = Number(loaded.formatVersion);
+  if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
+  if (version > FORMAT_VERSION) {
+    throw fileError("futureVersion", { version, current: FORMAT_VERSION });
+  }
+  return {
+    ...loaded,
+    formatVersion: FORMAT_VERSION,
+    rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
+    groups: Array.isArray(loaded.groups) ? loaded.groups : [],
+    counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
+  };
+}
+
+function readmeText(project, date) {
+  return text("file.readme", {
+    name: project.name || strings.project.untitled,
+    date: date.toISOString(),
+    schemes: project.schemes.length,
+    marks: project.marks.length,
+    version: FORMAT_VERSION,
+  }) + "\n";
+}
+
+/** Имя для выгрузки: «<объект>-<дата>.zip». */
+function projectFileName(project, now) {
+  const date = now instanceof Date ? now : new Date();
+  const day = date.toISOString().slice(0, 10);
+  const raw = String((project && project.name) || strings.project.untitled);
+  const safe = raw
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+  return (safe || strings.project.untitled) + "-" + day + ".zip";
+}
+
+/**
+ * Упаковывает объект и планы в один zip.
+ * `images` — Map «imageId → Blob» (или ничего, если планов нет); картинки кладутся
+ * как есть, без пережатия. `options.onProgress({done, total, name})`.
+ */
+async function packProject(project, images, options = {}) {
+  if (!looksLikeProject(project)) throw fileError("foreignProject");
+  const date = options.date instanceof Date ? options.date : new Date();
+  const forFile = { ...project, formatVersion: FORMAT_VERSION };
+
+  const files = [{ name: PROJECT_ENTRY, data: JSON.stringify(forFile, null, 2) }];
+  for (const [id, blob] of imageEntries(images)) {
+    if (!id || !blob) continue;
+    const extension = extensionFor(blob.type);
+    files.push({
+      name: SCHEMES_DIR + encodeImageId(id) + "." + extension,
+      data: blob,
+      compress: false,
+    });
+  }
+  files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
+
+  return writeZip(files, {
+    date,
+    compress: options.compress,
+    onProgress: options.onProgress,
+  });
+}
+
+// Свой архив кладёт project.json в корень; перепакованный вместе с папкой —
+// на уровень глубже. Из нескольких кандидатов берётся самый неглубокий:
+// сравниваются префиксы с префиксами, а не имя файла с префиксом.
+function projectPrefix(entries) {
+  let prefix = null;
+  for (const name of entries.keys()) {
+    if (name === PROJECT_ENTRY) return "";
+    if (name.endsWith("/" + PROJECT_ENTRY)) {
+      const candidate = name.slice(0, -PROJECT_ENTRY.length);
+      if (prefix === null || candidate.length < prefix.length) prefix = candidate;
+    }
+  }
+  return prefix;
+}
+
+/**
+ * Читает файл проекта: `{project, images}`, где images — Map «imageId → Blob».
+ * Чужой или битый файл отвергается ошибкой с `.code` из strings.errors,
+ * текущий объект при этом не трогается — вызывающий получает исключение
+ * до того, как что-то заменит.
+ */
+async function unpackProject(blob, options = {}) {
+  if (!blob) throw fileError("notAProject");
+  const entries = await readZip(blob);
+
+  const prefix = projectPrefix(entries);
+  if (prefix === null) throw fileError("noProjectJson");
+
+  let loaded;
+  try {
+    loaded = JSON.parse(decodeText(entries.get(prefix + PROJECT_ENTRY)));
+  } catch {
+    throw fileError("brokenProjectJson");
+  }
+  if (!looksLikeProject(loaded)) throw fileError("foreignProject");
+  const project = migrateProject(loaded);
+
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const imageNames = [...entries.keys()].filter(
+    (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
+  );
+  const images = new Map();
+  for (let index = 0; index < imageNames.length; index += 1) {
+    const name = imageNames[index];
+    const tail = name.slice((prefix + SCHEMES_DIR).length);
+    const dot = tail.lastIndexOf(".");
+    const id = decodeImageId(dot > 0 ? tail.slice(0, dot) : tail);
+    const type = typeForExtension(dot > 0 ? tail.slice(dot + 1) : "");
+    images.set(id, new Blob([entries.get(name)], type ? { type } : undefined));
+    if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
+  }
+
+  return { project, images };
 }
 })();
     </script>

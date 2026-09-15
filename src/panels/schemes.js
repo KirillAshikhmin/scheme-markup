@@ -1,0 +1,468 @@
+// Схемы объекта: список, загрузка плана кнопкой и перетаскиванием, поворот
+// и обрезка, переименование, порядок, удаление.
+// Холст рисует другой модуль — сюда он приходит только за картинкой:
+// подготовленный план и его размер кладутся в состояние сеанса (`schemeImage`).
+import { PANEL_IDS, registerPanel } from "../app.js";
+import { addScheme, deleteScheme, findScheme, schemesInOrder, updateMark, updateScheme } from "../model.js";
+import {
+  countPointsOutside,
+  cropTransform,
+  decodePlanImage,
+  identityTransform,
+  isPlanImageFile,
+  isIdentityTransform,
+  readPlanImage,
+  releasePlanImage,
+  renderPlanImage,
+  rotateTransform,
+  transformMarkPoints,
+  transformOffset,
+} from "../imagePrep.js";
+import { deleteImage, getImage, putImage } from "../store.js";
+import { strings, text } from "../strings.js";
+import { uiButton, uiConfirm, uiEl, uiModal, uiPrompt } from "./ui.js";
+
+// Рамка меньше этой доли считается промахом мыши, а не обрезкой.
+const PLAN_FRAME_MIN = 0.02;
+
+function planNameFromFile(file, project) {
+  const raw = String((file && file.name) || "").replace(/\.[^.]+$/, "").trim();
+  if (raw) return raw.slice(0, 60);
+  return text("schemes.defaultName", { number: project.schemes.length + 1 });
+}
+
+// Метка держит доли плана: одно накопленное преобразование двигает и их,
+// иначе метки уедут с тех мест, куда их поставил инженер.
+function remapMarkForTransform(mark, transform) {
+  return {
+    points: transformMarkPoints(mark.points || [], transform),
+    labelOffset: mark.labelOffset ? transformOffset(mark.labelOffset, transform) : null,
+  };
+}
+
+function marksPushedOutside(marks, transform) {
+  return marks.filter((mark) => countPointsOutside(mark.points || [], transform) > 0).length;
+}
+
+// Диалог правки плана. Повороты и рамки копятся в одно преобразование и
+// применяются к исходнику: JPEG пережимается один раз, сколько бы шагов ни
+// сделал пользователь. `beforeApply` — последнее слово вызывающего перед
+// применением (например, спросить про метки, которые вынесет за рамку).
+export function openPlanEditor({ blob, width, height, title, beforeApply }) {
+  return new Promise((resolve) => {
+    let transform = identityTransform();
+    let preview = { blob, width, height };
+    let url = URL.createObjectURL(blob);
+    let frame = null;
+    let busy = false;
+    let modal = null;
+
+    const image = uiEl("img", { class: "plan-stage__img", attrs: { src: url, alt: "" } });
+    const box = uiEl("div", { class: "plan-frame" });
+    box.hidden = true;
+    const stage = uiEl("div", { class: "plan-stage" }, [image, box]);
+    const hint = uiEl("p", { class: "modal__hint", text: strings.image.cropHint });
+
+    const rotateLeft = uiButton("⟲", {
+      title: strings.image.rotateLeft,
+      on: { click: () => apply(rotateTransform(transform, -90)) },
+    });
+    const rotateRight = uiButton("⟳", {
+      title: strings.image.rotateRight,
+      on: { click: () => apply(rotateTransform(transform, 90)) },
+    });
+    const cropButton = uiButton(strings.image.crop, {
+      on: { click: () => apply(cropTransform(transform, frame)) },
+    });
+    const resetButton = uiButton(strings.image.cropReset, { on: { click: () => setFrame(null) } });
+    const cancelButton = uiButton(strings.dialog.cancel, { on: { click: () => finish(null) } });
+    const applyButton = uiButton(strings.image.apply, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => requestApply() },
+    });
+
+    function setFrame(next) {
+      frame = next;
+      box.hidden = !next;
+      cropButton.disabled = !next || busy;
+      resetButton.disabled = !next || busy;
+      if (!next) return;
+      const rect = image.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      box.style.left = rect.left - stageRect.left + next.x * rect.width + "px";
+      box.style.top = rect.top - stageRect.top + next.y * rect.height + "px";
+      box.style.width = next.width * rect.width + "px";
+      box.style.height = next.height * rect.height + "px";
+    }
+
+    function setBusy(value) {
+      busy = value;
+      for (const button of [rotateLeft, rotateRight, applyButton, cancelButton]) button.disabled = value;
+      cropButton.disabled = value || !frame;
+      resetButton.disabled = value || !frame;
+      hint.textContent = value ? strings.image.working : strings.image.cropHint;
+    }
+
+    // Предпросмотр всегда пересобирается из исходника по накопленному
+    // преобразованию — что видно, то и получится, без цепочки пережатий.
+    async function apply(next) {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const result = await renderPlanImage(blob, next);
+        URL.revokeObjectURL(url);
+        preview = result;
+        transform = next;
+        url = URL.createObjectURL(result.blob);
+        image.src = url;
+        setFrame(null);
+        setBusy(false);
+      } catch (error) {
+        setBusy(false);
+        finish(null);
+      }
+    }
+
+    async function requestApply() {
+      if (busy) return;
+      if (beforeApply && !isIdentityTransform(transform)) {
+        setBusy(true);
+        const agreed = await beforeApply(transform);
+        setBusy(false);
+        if (!agreed) return;
+      }
+      finish({ blob: preview.blob, width: preview.width, height: preview.height, transform });
+    }
+
+    function finish(result) {
+      URL.revokeObjectURL(url);
+      if (modal) modal.close();
+      resolve(result);
+    }
+
+    // Рамка тянется мышью прямо по картинке.
+    stage.addEventListener("pointerdown", (event) => {
+      if (busy || event.button !== 0) return;
+      const rect = image.getBoundingClientRect();
+      const startX = Math.min(Math.max(event.clientX, rect.left), rect.right);
+      const startY = Math.min(Math.max(event.clientY, rect.top), rect.bottom);
+      const move = (moveEvent) => {
+        const x = Math.min(Math.max(moveEvent.clientX, rect.left), rect.right);
+        const y = Math.min(Math.max(moveEvent.clientY, rect.top), rect.bottom);
+        setFrame({
+          x: (Math.min(startX, x) - rect.left) / rect.width,
+          y: (Math.min(startY, y) - rect.top) / rect.height,
+          width: Math.abs(x - startX) / rect.width,
+          height: Math.abs(y - startY) / rect.height,
+        });
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        if (frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      event.preventDefault();
+    });
+
+    modal = uiModal({
+      title: title || strings.image.editTitle,
+      body: uiEl("div", { class: "plan-editor" }, [
+        uiEl("div", { class: "plan-editor__tools" }, [rotateLeft, rotateRight, cropButton, resetButton]),
+        stage,
+        hint,
+      ]),
+      actions: [cancelButton, applyButton],
+      onCancel: () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      },
+    });
+    setFrame(null);
+  });
+}
+
+function mountSchemesPanel(host, api) {
+  const { getState, setState, notify, subscribe } = api;
+  let decoded = null;
+  let imageToken = 0;
+
+  const list = uiEl("div", { class: "scheme-list" });
+  const fileInput = uiEl("input", {
+    class: "scheme-file",
+    type: "file",
+    attrs: { accept: "image/png,image/jpeg,.png,.jpg,.jpeg" },
+    on: {
+      change: async () => {
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = "";
+        if (file) await addPlanFromFile(file);
+      },
+    },
+  });
+  fileInput.hidden = true;
+  const addButton = uiButton(strings.schemes.add, {
+    class: "ui-btn ui-btn--accent ui-btn--wide",
+    on: { click: () => fileInput.click() },
+  });
+  const hint = uiEl("p", { class: "panel__empty", text: strings.schemes.addHint });
+  host.replaceChildren(addButton, fileInput, list, hint);
+
+  function render() {
+    const state = getState();
+    const project = state.project;
+    list.replaceChildren();
+    addButton.disabled = !project;
+    if (!project || project.schemes.length === 0) {
+      hint.textContent = project ? strings.schemes.addHint : strings.projects.empty;
+      return;
+    }
+    hint.textContent = "";
+    const ordered = schemesInOrder(project);
+    ordered.forEach((scheme, index) => {
+      const marks = project.marks.filter((mark) => mark.schemeId === scheme.id).length;
+      const row = uiEl("div", {
+        class: "scheme-row" + (scheme.id === state.schemeId ? " scheme-row--current" : ""),
+      });
+      row.append(
+        uiEl("button", {
+          class: "scheme-row__name",
+          type: "button",
+          text: scheme.name,
+          title: scheme.name,
+          on: { click: () => setState({ schemeId: scheme.id, selectedMarkIds: [] }) },
+        }),
+        uiEl("span", {
+          class: "scheme-row__meta",
+          text: scheme.imageId
+            ? text("schemes.size", { width: scheme.width, height: scheme.height })
+            : strings.schemes.noImage,
+        }),
+        uiEl("div", { class: "scheme-row__tools" }, [
+          uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
+          uiButton("✎", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
+          uiButton("↑", {
+            title: strings.schemes.up,
+            attrs: index === 0 ? { disabled: "disabled" } : {},
+            on: { click: () => moveScheme(scheme.id, -1) },
+          }),
+          uiButton("↓", {
+            title: strings.schemes.down,
+            attrs: index === ordered.length - 1 ? { disabled: "disabled" } : {},
+            on: { click: () => moveScheme(scheme.id, 1) },
+          }),
+          uiButton("🗑", {
+            class: "ui-btn ui-btn--danger",
+            title: strings.schemes.remove,
+            on: { click: () => removeScheme(scheme.id, marks) },
+          }),
+        ]),
+      );
+      list.append(row);
+    });
+  }
+
+  // Новый план: проверка файла, правка картинки, только потом запись.
+  async function addPlanFromFile(file) {
+    const state = getState();
+    if (!state.project) return;
+    if (!isPlanImageFile(file)) {
+      notify(strings.image.wrongType, "error");
+      return;
+    }
+    let plan;
+    hint.textContent = strings.schemes.loading;
+    addButton.disabled = true;
+    try {
+      plan = await readPlanImage(file);
+    } catch (error) {
+      notify(strings.image.broken, "error");
+      return;
+    } finally {
+      addButton.disabled = false;
+      render();
+    }
+    const edited = await openPlanEditor({
+      blob: plan.blob,
+      width: plan.width,
+      height: plan.height,
+      title: strings.image.editTitle,
+    });
+    if (!edited) return;
+    const imageId = await putImage(edited.blob);
+    const fresh = getState().project;
+    const added = addScheme(fresh, {
+      name: planNameFromFile(file, fresh),
+      imageId,
+      width: edited.width,
+      height: edited.height,
+    });
+    setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
+    notify(text("schemes.added", { name: added.scheme.name }), "success");
+  }
+
+  // Правка уже загруженного плана: метки пересчитываются тем же преобразованием.
+  // Про метки, которые уедут за рамку, спрашиваем до применения — потом
+  // прежних мест уже не вернуть.
+  async function editPlan(schemeId) {
+    const project = getState().project;
+    const scheme = findScheme(project, schemeId);
+    if (!scheme || !scheme.imageId) return;
+    const blob = await getImage(scheme.imageId);
+    if (!blob) {
+      notify(strings.image.broken, "error");
+      return;
+    }
+    const marksOfScheme = project.marks.filter((mark) => mark.schemeId === schemeId);
+    const edited = await openPlanEditor({
+      blob,
+      width: scheme.width,
+      height: scheme.height,
+      title: scheme.name,
+      beforeApply: async (transform) => {
+        const count = marksPushedOutside(marksOfScheme, transform);
+        if (count === 0) return true;
+        return uiConfirm({
+          title: strings.image.outsideTitle,
+          message: text("image.marksOutsideAsk", { count }),
+          confirmLabel: strings.image.cropAnyway,
+        });
+      },
+    });
+    if (!edited || isIdentityTransform(edited.transform)) return;
+    const imageId = await putImage(edited.blob);
+    let next = updateScheme(getState().project, schemeId, {
+      imageId,
+      width: edited.width,
+      height: edited.height,
+    }).project;
+    const moved = next.marks.filter((mark) => mark.schemeId === schemeId);
+    const pushed = marksPushedOutside(moved, edited.transform);
+    for (const mark of moved) {
+      const patch = remapMarkForTransform(mark, edited.transform);
+      next = updateMark(next, mark.id, patch.labelOffset ? patch : { points: patch.points }).project;
+    }
+    await deleteImage(scheme.imageId);
+    setState({ project: next, schemeImage: null });
+    notify(pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: pushed }), "success");
+  }
+
+  async function renameScheme(schemeId) {
+    const project = getState().project;
+    const scheme = findScheme(project, schemeId);
+    if (!scheme) return;
+    const name = await uiPrompt({ title: strings.schemes.renameTitle, value: scheme.name });
+    if (!name || name === scheme.name) return;
+    setState({ project: updateScheme(getState().project, schemeId, { name }).project });
+  }
+
+  function moveScheme(schemeId, delta) {
+    const project = getState().project;
+    const ordered = schemesInOrder(project);
+    const index = ordered.findIndex((scheme) => scheme.id === schemeId);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= ordered.length) return;
+    const moved = [...ordered];
+    moved.splice(target, 0, moved.splice(index, 1)[0]);
+    let next = project;
+    moved.forEach((scheme, position) => {
+      if (scheme.order !== position) next = updateScheme(next, scheme.id, { order: position }).project;
+    });
+    setState({ project: next });
+  }
+
+  async function removeScheme(schemeId, marks) {
+    const project = getState().project;
+    const scheme = findScheme(project, schemeId);
+    if (!scheme) return;
+    const agreed = await uiConfirm({
+      title: strings.schemes.removeTitle,
+      message: text("schemes.removeMessage", { name: scheme.name, marks }),
+    });
+    if (!agreed) return;
+    const fresh = getState().project;
+    const next = deleteScheme(fresh, schemeId).project;
+    if (scheme.imageId) await deleteImage(scheme.imageId);
+    const rest = schemesInOrder(next);
+    setState({
+      project: next,
+      schemeId: getState().schemeId === schemeId ? (rest[0] ? rest[0].id : null) : getState().schemeId,
+      selectedMarkIds: [],
+    });
+    notify(text("schemes.removed", { name: scheme.name }), "success");
+  }
+
+  // Картинка текущей схемы — единственное, что панель отдаёт холсту.
+  async function loadSchemeImage(force) {
+    const state = getState();
+    const scheme = state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
+    const token = ++imageToken;
+    if (!scheme || !scheme.imageId) {
+      if (decoded) releasePlanImage(decoded);
+      decoded = null;
+      if (state.schemeImage) setState({ schemeImage: null });
+      return;
+    }
+    const current = state.schemeImage;
+    if (!force && current && current.schemeId === scheme.id && current.imageId === scheme.imageId) return;
+    const blob = await getImage(scheme.imageId);
+    if (!blob || token !== imageToken) return;
+    let next;
+    try {
+      next = await decodePlanImage(blob);
+    } catch (error) {
+      notify(strings.image.broken, "error");
+      return;
+    }
+    if (token !== imageToken) {
+      releasePlanImage(next);
+      return;
+    }
+    if (decoded) releasePlanImage(decoded);
+    decoded = next;
+    setState({
+      schemeImage: {
+        schemeId: scheme.id,
+        imageId: scheme.imageId,
+        image: next.image,
+        url: next.url,
+        width: next.width,
+        height: next.height,
+      },
+    });
+  }
+
+  // Перетаскивание плана на холст — тот же путь, что и кнопка.
+  const area = document.getElementById("canvas-area");
+  if (area) {
+    area.dataset.drop = strings.schemes.dropHere;
+    area.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      area.classList.add("is-dropping");
+    });
+    area.addEventListener("dragleave", (event) => {
+      if (event.target === area) area.classList.remove("is-dropping");
+    });
+    area.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      area.classList.remove("is-dropping");
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      if (file) await addPlanFromFile(file);
+    });
+  }
+  // Файл, брошенный мимо холста, не должен уводить страницу в просмотр картинки.
+  document.addEventListener("dragover", (event) => event.preventDefault());
+  document.addEventListener("drop", (event) => event.preventDefault());
+
+  subscribe((state, changed) => {
+    if ("project" in changed || "schemeId" in changed) {
+      render();
+      loadSchemeImage(false);
+    }
+  });
+  render();
+  loadSchemeImage(false);
+}
+
+registerPanel(PANEL_IDS.schemes, mountSchemesPanel);

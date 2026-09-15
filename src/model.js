@@ -199,6 +199,19 @@ export function deleteScheme(project, schemeId) {
   return { project: withProject(project, { schemes, marks, groups }) };
 }
 
+// Порядок схем объекта — одно правило на всех: нумерация, панели и выгрузки
+// обходят схемы одинаково.
+export function schemesInOrder(project) {
+  return project.schemes
+    .map((scheme, index) => ({ scheme, index }))
+    .sort((a, b) => {
+      const orderA = a.scheme.order ?? a.index;
+      const orderB = b.scheme.order ?? b.index;
+      return orderA === orderB ? a.index - b.index : orderA - orderB;
+    })
+    .map((item) => item.scheme);
+}
+
 function pick(source, allowed) {
   const result = {};
   if (!source) return result;
@@ -412,7 +425,7 @@ export function deleteMark(project, markId) {
 
 // Порядок обхода: схемы по order, внутри схемы — порядок постановки меток.
 function marksInOrder(project, filter) {
-  const schemeOrder = new Map(project.schemes.map((scheme, index) => [scheme.id, scheme.order ?? index]));
+  const schemeOrder = new Map(schemesInOrder(project).map((scheme, index) => [scheme.id, index]));
   return project.marks
     .map((mark, index) => ({ mark, index }))
     .filter((item) => (filter ? filter(item.mark) : true))
