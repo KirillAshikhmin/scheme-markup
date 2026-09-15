@@ -6,8 +6,8 @@
 // нумерации у панели нет.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addMark, addScheme, createProject, deleteMark, setMarkNumber } from "../src/model.js";
-import { typesCompactPreview } from "../src/panels/types.js";
+import { addMark, addScheme, createProject, deleteMark, setMarkNumber, updateMark } from "../src/model.js";
+import { typesCompactPreview, typesCompactSignature } from "../src/panels/types.js";
 
 function compactFixture() {
   let project = createProject({ name: "Квартира" });
@@ -55,5 +55,33 @@ test("уплотнять нечего: дыр нет — замен нет", () 
   assert.deepEqual(
     preview.rows.map((row) => row.fromLabel + "→" + row.toLabel),
     ["Т1→Т1", "Т2→Т2", "Т3→Т3", "Т4→Т4"],
+  );
+});
+
+// Пользователь подтверждает список, а применяется пересчёт по свежему объекту.
+// Совпадают они или разошлись — решает подпись списка: по ней видно, что метку
+// поставили или чужой Ctrl+Z вернул номера, пока окно висело открытым.
+test("подпись списка замен ловит правку нумерации и не срабатывает на прочих", () => {
+  const box = compactFixture();
+  const project = deleteMark(box.project, box.ids[1]).project; // Т1 Т3 Т4
+  const approved = typesCompactPreview(project, box.typeOf("Т"));
+
+  // Пока окно открыто, поставили ещё одну метку — замены стали другими.
+  const grown = addMark(project, {
+    schemeId: box.schemeId,
+    typeId: box.typeOf("Т"),
+    kind: "point",
+    points: [{ x: 0.7, y: 0.7 }],
+  }).project;
+  assert.notEqual(
+    typesCompactSignature(typesCompactPreview(grown, box.typeOf("Т"))),
+    typesCompactSignature(approved),
+  );
+
+  // Правка, не трогающая номера, списка не меняет — переспрашивать не о чем.
+  const noted = updateMark(project, box.ids[0], { location: "у окна" }).project;
+  assert.equal(
+    typesCompactSignature(typesCompactPreview(noted, box.typeOf("Т"))),
+    typesCompactSignature(approved),
   );
 });

@@ -183,10 +183,18 @@ export function typesCompactPreview(project, typeId) {
   };
 }
 
+// Подпись списка замен: по ней окно и применение договариваются, что речь об
+// одном и том же. Сравниваются обозначения и число меток за каждым — ровно то,
+// что пользователь видел и одобрил; правка, не трогающая номера, подпись не
+// меняет и переспрашивать не заставляет.
+export function typesCompactSignature(preview) {
+  return [preview.code, ...preview.rows.map((row) => row.from + ">" + row.to + "*" + row.count)].join("|");
+}
+
 // Уплотнение разрушающее (ADR 003): после него распечатка на руках у монтажника
 // начинает врать. Поэтому окно показывает замены целиком и говорит о цене —
 // подтверждение здесь не украшение, а часть команды.
-function openTypesCompactPreview(preview) {
+function openTypesCompactPreview(preview, { stale } = {}) {
   return new Promise((resolve) => {
     let modal;
     const done = (value) => {
@@ -206,6 +214,7 @@ function openTypesCompactPreview(preview) {
     modal = uiModal({
       title: text("dictionary.compactTitle", { code: preview.code }),
       body: uiEl("div", { class: "compact" }, [
+        stale ? uiEl("p", { class: "compact__warning", text: strings.dictionary.compactStale }) : null,
         uiEl("p", { class: "modal__text", text: text("dictionary.compactSummary", { count: preview.changes.length }) }),
         uiEl("div", { class: "compact__rows" }, rows),
         uiEl("p", { class: "compact__warning", text: strings.dictionary.compactWarning }),
@@ -260,16 +269,27 @@ export function openTypesDictionary(api) {
   // Уплотнение — по одному типу, как просил заказчик: тип назван явно, строкой
   // справочника, а не «весь объект разом».
   async function compactType(type) {
-    const preview = typesCompactPreview(project(), type.id);
-    if (preview.changes.length === 0) {
-      api.notify(text("dictionary.compactNothing", { code: type.code }), "info");
-      return;
+    let preview = typesCompactPreview(project(), type.id);
+    let stale = false;
+    // Пока окно висит открытым, объект могли поменять — поставить метку, вернуть
+    // номера чужим Ctrl+Z. Применяем по свежему объекту (иначе уплотняли бы
+    // вчерашнее состояние), но молча подменить одобренный список нельзя: если
+    // замены разошлись, показываем новые и спрашиваем заново.
+    for (;;) {
+      if (preview.changes.length === 0) {
+        api.notify(text("dictionary.compactNothing", { code: type.code }), "info");
+        return;
+      }
+      const agreed = await openTypesCompactPreview(preview, { stale });
+      if (!agreed) return;
+      const fresh = typesCompactPreview(project(), type.id);
+      if (typesCompactSignature(fresh) === typesCompactSignature(preview)) {
+        commit((current) => compactNumbers(current, type.id).project, strings.history.compact);
+        return;
+      }
+      preview = fresh;
+      stale = true;
     }
-    const agreed = await openTypesCompactPreview(preview);
-    if (!agreed) return;
-    // Считаем заново по свежему объекту: пока окно было открыто, метку могли
-    // поставить или отменить чужим Ctrl+Z.
-    commit((current) => compactNumbers(current, type.id).project, strings.history.compact);
   }
 
   async function removeType(type) {
