@@ -8,7 +8,7 @@
 //
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
-import { PANEL_IDS, registerPanel } from "./app.js";
+import { layoutAllows, PANEL_IDS, registerPanel } from "./app.js";
 import { strings, text } from "./strings.js";
 import {
   BLOCK_STEP_PX,
@@ -154,6 +154,39 @@ export function canvasZoomFactor(event, pinch) {
   const step = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
   const factor = Math.exp(-step * (pinch ? CANVAS_PINCH_RATE : CANVAS_WHEEL_RATE));
   return Math.min(CANVAS_ZOOM_STEP_MAX, Math.max(1 / CANVAS_ZOOM_STEP_MAX, factor));
+}
+
+// ——— режим просмотра ——————————————————————————————————————————————————
+//
+// Узкий экран — не урезанный редактор, а просмотр: так решила раскладка, и
+// таблица умений в `app.js` — единственное место, где это записано. Панели по
+// ней прячут кнопки, но мышь в суженном окне десктопа никуда не делась, и без
+// этой проверки клик по плану ставил метку, перетаскивание двигало её, а Delete
+// удалял. Своего списка холст не заводит: спрашивает то же умение `editMarks`.
+export function canvasEditAllowed(state) {
+  return Boolean(state) && layoutAllows("editMarks", state.layout);
+}
+
+// Отказ вслух: правка, которая не случилась, должна быть видна. Молчаливый
+// отказ в этой сборке уже стоил четырёх тасков.
+function canvasViewOnly() {
+  if (canvasApi) canvasApi.notify(strings.mobile.viewOnly);
+  return false;
+}
+
+// Текст подсказки над планом — чистая функция от состояния. `null` значит, что
+// подсказки нет вовсе. В просмотре она не рассказывает, как ставить метки и
+// рисовать контуры: этого здесь нет, и обещать нечего.
+export function canvasHintText(state) {
+  if (!state || !state.schemeId) return null;
+  if (!canvasEditAllowed(state)) return strings.mobile.viewOnly;
+  const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
+  const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
+  if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
+  if (state.mode === "point" && type) return text("canvas.hintPoint", { label: type.code + " — " + type.name });
+  if (state.mode === "line" && type) return strings.canvas.hintLine;
+  if (type) return strings.canvas.hintSelectMode;
+  return strings.canvas.hintSelect;
 }
 
 // Пауза, после которой события колеса считаются новым жестом.
@@ -371,12 +404,13 @@ function canvasPaint() {
   });
   // Ручки контура — у выделенного помещения: вершину двигают, «+» на стенке
   // добавляет новую. Обводка по стенам с первого раза не выходит.
-  const outline = state.selectedOutlineId ? findOutline(project, state.selectedOutlineId) : null;
+  const editable = canvasEditAllowed(state);
+  const outline = editable && state.selectedOutlineId ? findOutline(project, state.selectedOutlineId) : null;
   if (outline && outline.schemeId === scheme.id && !canvasDrag) {
     drawOutlineHandles(canvasCtx, scheme, outline, view);
   }
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
-  if (state.selectedMarkIds.length === 1 && !canvasDrag) {
+  if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
     if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
       drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark));
@@ -438,6 +472,13 @@ export function canvasCommit(before, after, label, options = {}) {
     throw error;
   }
   const state = canvasState();
+  // Последняя дверь перед объектом. Выше стоят свои засовы на каждом входе
+  // холста, но правка приходит и из панелей, и пропустить её здесь — значит
+  // сделать режим просмотра украшением.
+  if (!canvasEditAllowed(state)) {
+    canvasViewOnly();
+    return;
+  }
   const selectionBefore = state.selectedMarkIds;
   const schemeBefore = state.schemeId;
   const keep = settings.selection || selectionBefore;
@@ -688,6 +729,7 @@ function canvasOutlineRemovePoint(outlineId, index) {
 
 async function canvasDeleteOutline() {
   const state = canvasState();
+  if (!canvasEditAllowed(state)) return canvasViewOnly();
   const outline = state.selectedOutlineId ? findOutline(state.project, state.selectedOutlineId) : null;
   // Контур с другой схемы удалять нечего: выделение могло остаться с прошлой.
   if (!outline || outline.schemeId !== state.schemeId) return;
@@ -712,6 +754,9 @@ async function canvasDeleteOutline() {
 
 async function canvasDeleteSelected() {
   const state = canvasState();
+  // Отказ до диалога: спрашивать «удалить метку?» там, где удалить нельзя, —
+  // обещание, которого холст не выполнит.
+  if (!canvasEditAllowed(state)) return canvasViewOnly();
   const markId = state.selectedMarkIds[0];
   const mark = markId ? findMark(state.project, markId) : null;
   if (!mark) return;
@@ -740,6 +785,7 @@ async function canvasDeleteSelected() {
 // ——— отмена ——————————————————————————————————————————————————————————
 
 export function canvasUndoStep() {
+  if (!canvasEditAllowed(canvasState())) return canvasViewOnly();
   if (!canUndo()) {
     canvasApi.notify(strings.canvas.nothingToUndo);
     return;
@@ -749,6 +795,7 @@ export function canvasUndoStep() {
 }
 
 export function canvasRedoStep() {
+  if (!canvasEditAllowed(canvasState())) return canvasViewOnly();
   if (!canRedo()) {
     canvasApi.notify(strings.canvas.nothingToRedo);
     return;
@@ -852,8 +899,13 @@ function canvasPointerDown(event) {
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
 
+  // В режиме просмотра открыты только две двери: выделить метку, чтобы прочитать
+  // её поля, и возить план. Всё остальное — правка, и начинаться она не должна:
+  // ни ручки блока, ни черновика, ни перетаскивания.
+  const editable = canvasEditAllowed(state);
+
   // Ручка «+» важнее всего остального: она и есть быстрый путь.
-  if (state.selectedMarkIds.length === 1) {
+  if (editable && state.selectedMarkIds.length === 1) {
     const selected = findMark(state.project, state.selectedMarkIds[0]);
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
       const side = hitHandle(scheme, selected, point, view);
@@ -865,7 +917,7 @@ function canvasPointerDown(event) {
     }
   }
 
-  if (state.mode === "line" || state.mode === "room") {
+  if (editable && (state.mode === "line" || state.mode === "room")) {
     canvasDrag = { kind: state.mode, start: point, view: { ...state.view }, moved: false };
     return;
   }
@@ -876,7 +928,7 @@ function canvasPointerDown(event) {
   if (!hit && state.mode === "select") {
     const outlineHit = hitOutline(state.project, scheme, point, view, state.filter, state.selectedOutlineId || null);
     if (outlineHit) {
-      if (outlineHit.part === "vertex") {
+      if (outlineHit.part === "vertex" && editable) {
         canvasDrag = {
           kind: "outlineVertex",
           outlineId: outlineHit.outlineId,
@@ -887,7 +939,7 @@ function canvasPointerDown(event) {
         };
         return;
       }
-      if (outlineHit.part === "insert") {
+      if (outlineHit.part === "insert" && editable) {
         canvasOutlineInsert(outlineHit.outlineId, outlineHit.index, screenToPlan(point, scheme, view));
         canvasDrag = { kind: "done", start: point, moved: false };
         return;
@@ -905,6 +957,12 @@ function canvasPointerDown(event) {
     if (state.selectedMarkIds[0] !== hit.markId || state.selectedOutlineId) {
       canvasApi.setState({ selectedMarkIds: [hit.markId], selectedOutlineId: null });
     }
+    if (!editable) {
+      // Метка выделена — её поля можно прочитать; тащить её при этом нельзя,
+      // и жест уходит в панораму, а не в перемещение.
+      canvasDrag = { kind: "pan", start: point, view: { ...state.view }, moved: false };
+      return;
+    }
     canvasDrag = {
       kind: hit.part === "label" ? "label" : "mark",
       markId: hit.markId,
@@ -916,7 +974,7 @@ function canvasPointerDown(event) {
     return;
   }
   canvasDrag = {
-    kind: state.mode === "point" ? "place" : "empty",
+    kind: state.mode === "point" && editable ? "place" : "empty",
     start: point,
     view: { ...state.view },
     moved: false,
@@ -1067,6 +1125,7 @@ function canvasPointerUp(event) {
 
 function canvasDoubleClick(event) {
   const state = canvasState();
+  if (!canvasEditAllowed(state)) return;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   // Двойной клик по вершине выделенного контура убирает её: обводка по стенам
@@ -1292,20 +1351,16 @@ function mountCanvasHint(host, api) {
   host.replaceChildren(hint);
   const render = () => {
     const state = api.getState();
-    if (!state.schemeId) {
-      hint.hidden = true;
-      return;
-    }
+    const value = canvasHintText(state);
+    // Условие показа живёт здесь, а не в чужих стилях: подсказки нет, когда
+    // нечего подсказывать, а в просмотре она говорит про просмотр.
+    hint.hidden = value === null;
+    if (value === null) return;
+    hint.textContent = value;
     const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
-    const label = type ? type.code + " — " + type.name : "";
     const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
-    if (state.mode === "room") hint.textContent = text("canvas.hintRoom", { name: room ? room.name : "" });
-    else if (state.mode === "point" && type) hint.textContent = text("canvas.hintPoint", { label });
-    else if (state.mode === "line" && type) hint.textContent = strings.canvas.hintLine;
-    else if (type) hint.textContent = strings.canvas.hintSelectMode;
-    else hint.textContent = strings.canvas.hintSelect;
-    hint.hidden = false;
-    if (state.mode === "room" && room) hint.style.borderColor = room.color;
+    if (!canvasEditAllowed(state)) hint.style.borderColor = "";
+    else if (state.mode === "room" && room) hint.style.borderColor = room.color;
     else if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
   };
   api.subscribe((state, changed) => {
@@ -1314,6 +1369,7 @@ function mountCanvasHint(host, api) {
       "activeTypeId" in changed ||
       "activeRoomId" in changed ||
       "schemeId" in changed ||
+      "layout" in changed ||
       "project" in changed
     ) {
       render();
