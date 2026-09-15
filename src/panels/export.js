@@ -17,6 +17,7 @@ import {
   exportCopy,
   exportDownload,
   exportFileName,
+  exportFitArea,
   exportRoomArea,
   exportRoomName,
   exportSizeText,
@@ -115,20 +116,15 @@ function exportAreaRoomId() {
   return exportChoice.area.startsWith("room:") ? exportChoice.area.slice(5) : null;
 }
 
+// Кадр листа вместе с полями под подписи — тот же расчёт, что и в выгрузке:
+// размер в диалоге обязан совпасть с тем, что ляжет на бумагу.
+function exportFittedOf(state, scheme) {
+  return exportFitArea(state.project, scheme, { area: exportAreaOf(state, scheme), filter: state.filter });
+}
+
 function exportAreaSize(state, scheme) {
-  const area = exportAreaOf(state, scheme);
-  if (area === "all") {
-    return {
-      width: scheme.width > 0 ? scheme.width : 1000,
-      height: scheme.height > 0 ? scheme.height : 1000,
-    };
-  }
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
-  return {
-    width: Math.min(width, Math.max(1, area.width)),
-    height: Math.min(height, Math.max(1, area.height)),
-  };
+  const { area } = exportFittedOf(state, scheme);
+  return { width: area.width, height: area.height };
 }
 
 // План схемы для рисования: уже разобранный на холсте — как есть, чужой —
@@ -460,6 +456,12 @@ function exportSchemeDialog(api) {
     // План может быть не загружен — метки тогда лягут на белый лист, и лучше
     // сказать об этом, чем отдать «пустую» на вид картинку молча.
     if (!image) notify(strings.exportPanel.noImage, "info");
+    // Подпись, оттащенную далеко от метки, поля не догоняют: о таких говорим
+    // до выгрузки — потерянное на бумаге обозначение молчать не должно.
+    const { missed } = exportFittedOf(state, scheme);
+    if (missed.length > 0) {
+      notify(text("exportPanel.labelsOutside", { names: missed.slice(0, 5).join(", ") }), "error");
+    }
     try {
       return await schemePng(state.project, scheme, image, {
         area: exportAreaOf(state, scheme),

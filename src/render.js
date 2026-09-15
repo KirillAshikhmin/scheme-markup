@@ -486,6 +486,37 @@ const LABEL_FILTER_ERROR = "label-layout-instead-of-filter";
 // вызывающий. Передать сюда готовую раскладку нельзя — `Map` молча сошла бы за
 // «фильтра нет», подписи разделили бы места со скрытыми, и клик разошёлся бы с
 // картинкой. Внутри модуля для уже посчитанной раскладки есть `labelBoxIn`.
+// Угол подписи: 0 — лежит, 90 — стоит вдоль стены. Хранится там же, где
+// смещение: у группы своего поля модель не заводит, поэтому поворот блока
+// живёт у его первой метки.
+export function labelAngleOf(project, target) {
+  if (!target) return 0;
+  if (target.labelAngle === 90 || target.labelAngle === 0) return target.labelAngle;
+  if (!target.markIds) return 0;
+  const first = project.marks.find((mark) => mark.id === target.markIds[0]);
+  return first && first.labelAngle === 90 ? 90 : 0;
+}
+
+// Габарит подписи от точки привязки текста. Лежачая идёт вправо и висит на
+// середине строки; повёрнутая читается снизу вверх, поэтому растёт вверх, а
+// вширь занимает высоту строки.
+export function labelSpan(width, height, angle) {
+  if (angle === 90) return { left: -height / 2, right: height / 2, top: -width, bottom: 0 };
+  return { left: 0, right: width, top: -height / 2, bottom: height / 2 };
+}
+
+// Прямоугольник подписи на экране: левый верхний угол и размеры. По нему
+// считаются и попадание по клику, и разведение — расходиться им нельзя.
+export function labelBounds(box) {
+  const span = labelSpan(box.width, box.height, box.angle);
+  return {
+    x: box.x + span.left,
+    y: box.y + span.top,
+    width: span.right - span.left,
+    height: span.bottom - span.top,
+  };
+}
+
 export function labelBox(project, scheme, target, view, filter) {
   if (filter instanceof Map) {
     const error = new Error(LABEL_FILTER_ERROR);
@@ -518,6 +549,7 @@ function labelBoxIn(project, scheme, target, state, layout) {
     dy: place.dy,
     row: place.row,
     crowded: place.crowded,
+    angle: labelAngleOf(project, target),
   };
 }
 
@@ -531,7 +563,7 @@ function labelPlaceOf(project, target, state, layout) {
   // Цели в раскладке нет — значит она в неё и не входила: метку спрятал фильтр
   // или она с другой схемы. Такая подпись не рисуется; место ей даётся
   // стандартное, то самое, где подпись стояла всегда.
-  const [slot] = labelSlots(labelPlanSizes(state).gap, 0, 0);
+  const [slot] = labelSlots(labelPlanSizes(state).gap, labelSpan(0, 0, 0), 0);
   return { dx: slot.dx, dy: slot.dy, row: 0, crowded: false };
 }
 
@@ -601,19 +633,25 @@ function labelPlanSizes(state) {
 // (справа сверху — то самое место, где подпись стояла всегда), потом те же
 // четыре ряд за рядом дальше по вертикали. `dx` — смещение левого края подписи,
 // `dy` — её середины: слева подпись отодвигается на всю свою ширину.
-function labelSlots(gap, width, height) {
+function labelSlots(gap, span, angle) {
+  const tall = span.bottom - span.top;
   // Шаг ряда — высота подписи и два просвета: соседние ряды обязаны разойтись
   // с запасом, иначе проверка наложения упирается в ноль и решает исход по
   // погрешности последнего разряда.
-  const step = height + LABEL_PAD * 2;
+  const step = tall + LABEL_PAD * 2;
+  const right = gap - span.left;
+  const left = -gap - span.right;
   const slots = [];
   for (let row = 0; row <= LABEL_ROWS; row += 1) {
     const up = -gap - row * step;
-    const down = gap + row * step;
-    slots.push({ dx: gap, dy: up, row });
-    slots.push({ dx: gap, dy: down, row });
-    slots.push({ dx: -gap - width, dy: up, row });
-    slots.push({ dx: -gap - width, dy: down, row });
+    // Лежачая подпись висит серединой строки у метки, повёрнутая растёт от
+    // точки привязки вверх — вниз её приходится опускать на всю высоту столбца,
+    // иначе она легла бы поверх своей же метки.
+    const down = gap + row * step + (angle === 90 ? tall : 0);
+    slots.push({ dx: right, dy: up, row });
+    slots.push({ dx: right, dy: down, row });
+    slots.push({ dx: left, dy: up, row });
+    slots.push({ dx: left, dy: down, row });
   }
   return slots;
 }
@@ -629,11 +667,18 @@ function labelPlanBox(project, scheme, target, sizes) {
     y: origin.y * schemeHeight(scheme),
     width: Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
     height: sizes.font * 1.2,
+    angle: labelAngleOf(project, target),
   };
 }
 
 function labelRect(box, offset) {
-  return { x: box.x + offset.dx, y: box.y + offset.dy, width: box.width, height: box.height };
+  const span = labelSpan(box.width, box.height, box.angle);
+  return {
+    x: box.x + offset.dx + span.left,
+    y: box.y + offset.dy + span.top,
+    width: span.right - span.left,
+    height: span.bottom - span.top,
+  };
 }
 
 // Площадь наложения двух подписей с учётом обязательного просвета. Ноль — место
@@ -641,17 +686,14 @@ function labelRect(box, offset) {
 // плохое место, когда свободных не осталось.
 function labelOverlap(a, b) {
   const wide = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + LABEL_PAD;
-  const tall =
-    Math.min(a.y + a.height / 2, b.y + b.height / 2) - Math.max(a.y - a.height / 2, b.y - b.height / 2) + LABEL_PAD;
+  const tall = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) + LABEL_PAD;
   return wide > 0 && tall > 0 ? wide * tall : 0;
 }
 
 // Подпись целиком на плане. Выгрузка «весь план» рисует ровно прямоугольник
 // плана — всё, что за его краем, на картинке просто отрезано.
 function labelInsidePlan(rect, width, height) {
-  return (
-    rect.x >= 0 && rect.x + rect.width <= width && rect.y - rect.height / 2 >= 0 && rect.y + rect.height / 2 <= height
-  );
+  return rect.x >= 0 && rect.x + rect.width <= width && rect.y >= 0 && rect.y + rect.height <= height;
 }
 
 // Фильтр меняет состав подписей, а значит и раскладку: ключ кэша обязан его
@@ -685,7 +727,7 @@ function labelPlaceAll(project, scheme, filter, sizes) {
 
   for (const entry of entries) {
     if (entry.offset) continue;
-    const slots = labelSlots(sizes.gap, entry.box.width, entry.box.height);
+    const slots = labelSlots(sizes.gap, labelSpan(entry.box.width, entry.box.height, entry.box.angle), entry.box.angle);
     let best = null;
     for (const slot of slots) {
       const rect = labelRect(entry.box, slot);
@@ -733,6 +775,76 @@ export function labelLayout(project, scheme, filter, view) {
     byKey.set(key, value);
   }
   return value;
+}
+
+// ——— ручка поворота подписи ———————————————————————————————————————————
+//
+// Кнопка живёт на холсте, у самой подписи выделенной метки, а не в панели:
+// поворачивают подпись, глядя на план — влезает она вдоль стены или нет, —
+// и уводить руку в колонку ради этого незачем. Панель к тому же скрыта на
+// узком экране, а холст виден всегда.
+
+// Радиус ручки: как у ручек блока, чтобы попадать по ней не целясь.
+const LABEL_TURN_RADIUS = 9;
+
+// Цель подписи, которой принадлежит метка: у блока — его группа (подпись одна
+// на всех), у одиночной метки — она сама. Скрытая фильтром метка цели не имеет.
+export function labelTargetOf(project, scheme, markId, filter) {
+  if (!project || !scheme || !markId) return null;
+  for (const target of labelTargets(project, scheme, filter)) {
+    if (target.markIds) {
+      if (labelMemberIds(target).includes(markId)) return target;
+    } else if (target.id === markId) {
+      return target;
+    }
+  }
+  return null;
+}
+
+// Ручка стоит у верхнего правого угла подписи — того самого, который не
+// заслоняет текст ни лежачей подписи, ни стоячей.
+export function labelTurnHandle(project, scheme, target, view, filter) {
+  if (!target) return null;
+  const box = labelBox(project, scheme, target, view, filter);
+  if (!box.text) return null;
+  const rect = labelBounds(box);
+  const radius = Math.max(7, Math.min(LABEL_TURN_RADIUS, markRadius(view) * 0.8));
+  return { x: rect.x + rect.width + radius * 0.6, y: rect.y - radius * 0.6, r: radius };
+}
+
+export function hitLabelTurn(project, scheme, target, point, view, filter) {
+  const handle = labelTurnHandle(project, scheme, target, view, filter);
+  if (!handle) return false;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+}
+
+// Значок — дуга со стрелкой: поворот, а не «плюс» и не «крест». Буквы здесь
+// нельзя: строки живут в словаре, а на холсте рисуется фигура.
+export function drawLabelTurn(ctx, handle, color) {
+  if (!handle) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  const inner = handle.r * 0.5;
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, inner, Math.PI * 0.75, Math.PI * 2.1);
+  ctx.lineWidth = Math.max(1.4, handle.r * 0.2);
+  ctx.stroke();
+  // Наконечник на конце дуги.
+  const tip = polarPoint(handle.x, handle.y, inner, 135);
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y - inner * 0.55);
+  ctx.lineTo(tip.x + inner * 0.55, tip.y);
+  ctx.lineTo(tip.x, tip.y + inner * 0.55);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
 }
 
 // ——— контуры помещений ————————————————————————————————————————————————
@@ -943,11 +1055,12 @@ function distanceToSegment(point, a, b) {
 }
 
 function insideBox(point, box) {
+  const rect = labelBounds(box);
   return (
-    point.x >= box.x - 2 &&
-    point.x <= box.x + box.width + 2 &&
-    point.y >= box.y - box.height / 2 &&
-    point.y <= box.y + box.height / 2
+    point.x >= rect.x - 2 &&
+    point.x <= rect.x + rect.width + 2 &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
   );
 }
 
@@ -1039,9 +1152,13 @@ function drawLabelLeader(ctx, anchor, box, color) {
   ctx.strokeStyle = color;
   ctx.globalAlpha = 0.5;
   ctx.lineWidth = Math.max(1, box.font * 0.08);
+  const rect = labelBounds(box);
   ctx.beginPath();
   ctx.moveTo(anchor.x, anchor.y);
-  ctx.lineTo(box.x < anchor.x ? box.x + box.width : box.x, box.y);
+  ctx.lineTo(
+    rect.x + rect.width < anchor.x ? rect.x + rect.width : Math.max(rect.x, Math.min(anchor.x, rect.x + rect.width)),
+    anchor.y < rect.y ? rect.y : rect.y + rect.height,
+  );
   ctx.stroke();
   ctx.restore();
 }
@@ -1056,8 +1173,19 @@ function drawLabel(ctx, box, color) {
   ctx.lineWidth = Math.max(2, box.font * 0.3);
   ctx.lineJoin = "round";
   ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-  ctx.strokeText(box.text, box.x, box.y);
   ctx.fillStyle = color;
+  // Повёрнутая подпись читается снизу вверх — так её пишут вдоль стен на
+  // чертежах. Рисование и габарит берут один и тот же угол, поэтому клик
+  // попадает туда, где текст виден.
+  if (box.angle === 90) {
+    ctx.translate(box.x, box.y);
+    ctx.rotate(-Math.PI / 2);
+    ctx.strokeText(box.text, 0, 0);
+    ctx.fillText(box.text, 0, 0);
+    ctx.restore();
+    return;
+  }
+  ctx.strokeText(box.text, box.x, box.y);
   ctx.fillText(box.text, box.x, box.y);
   ctx.restore();
 }

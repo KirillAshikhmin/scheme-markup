@@ -5,6 +5,7 @@ import {
   addCategory,
   BLOCK_STEP_PX,
   CODE_MAX_LENGTH,
+  LABEL_ANGLES,
   codeProblem,
   addMark,
   addRoom,
@@ -588,9 +589,11 @@ test("категория удаляется только пустой, тип б
 
 test("имя объекта, вид и помещения правятся", () => {
   const { project: base, first } = projectWithSchemes();
-  const named = updateProject(base, { name: "Квартира на Ленина", view: { markSize: 16 } }).project;
+  const named = updateProject(base, { name: "Квартира на Ленина", view: { markSize: 24 } }).project;
   assert.equal(named.name, "Квартира на Ленина");
-  assert.deepEqual(named.view, { markSize: 16, labelSize: 12 });
+  // Правка вида частичная: названное поле меняется, соседнее остаётся своим,
+  // а не подменяется умолчанием (числа умолчания проверяет отдельный тест).
+  assert.deepEqual(named.view, { markSize: 24, labelSize: base.view.labelSize });
 
   const withRoom = addRoom(named, { name: "Спальная" });
   const renamed = updateRoom(withRoom.project, withRoom.room.id, { name: "Спальная Оли" }).project;
@@ -944,4 +947,45 @@ test("годен ли код — отвечает модель, одной фу�
   // Свой же код у типа не занят: справочник правит название, не трогая код.
   const sw = project.markTypes.find((type) => type.code === "В");
   assert.equal(codeProblem(project, "В", sw.id), null);
+});
+
+// ——— поворот подписи и умолчания размера ——————————————————————————————
+
+// На рукописном эталоне подписи написаны вдоль стены: в узком коридоре
+// горизонтальная подпись не влезает. Угол — свойство метки, значит живёт в
+// объекте и уезжает в файл проекта вместе с ним.
+test("подпись метки поворачивается на 90° и обратно, чужие углы модель не берёт", () => {
+  const project = addScheme(createProject(), { name: "1", width: 1000, height: 500 });
+  const type = project.project.markTypes.find((item) => item.code === "Р");
+  const added = addMark(project.project, {
+    schemeId: project.scheme.id,
+    typeId: type.id,
+    points: [{ x: 0.5, y: 0.5 }],
+  });
+  assert.equal(added.mark.labelAngle, undefined, "у новой метки угла нет — подпись лежит как лежала");
+
+  const turned = updateMark(added.project, added.mark.id, { labelAngle: 90 });
+  assert.equal(turned.mark.labelAngle, 90);
+  assert.equal(updateMark(turned.project, added.mark.id, { labelAngle: 0 }).mark.labelAngle, 0);
+
+  // Угол — не произвольное число: 45° или строка означали бы, что подпись
+  // нарисована в одном месте, а ловится в другом.
+  assert.throws(() => updateMark(turned.project, added.mark.id, { labelAngle: 45 }), { code: "labelAngleUnknown" });
+  assert.throws(() => updateMark(turned.project, added.mark.id, { labelAngle: "90" }), { code: "labelAngleUnknown" });
+  assert.deepEqual(LABEL_ANGLES, [0, 90]);
+});
+
+// Проверяющий прошёл всю разметку и выгрузил схему, не узнав, что регулятор
+// размера существует: на листе 2568×4000 подпись «Т1» вышла около 12 пикселей —
+// меньше полутора миллиметров на бумаге, читать нечем.
+test("размер меток и подписей по умолчанию читается на распечатке", () => {
+  const view = createProject().view;
+  // План 2500 пикселей по большей стороне на A3 — это 0,16 мм на пиксель.
+  // Монтажник читает с расстояния вытянутой руки: подпись должна быть не
+  // мельче 2,5 мм, то есть от 16 пикселей плана.
+  assert.ok(view.labelSize * 0.16 >= 2.5, "подпись на A3 выходит " + view.labelSize * 0.16 + " мм");
+  // И не крупнее сантиметра — иначе подписи съедят план.
+  assert.ok(view.labelSize * 0.16 <= 10, "подпись раздута: " + view.labelSize * 0.16 + " мм");
+  // Значок метки — круг радиусом markSize: на бумаге не меньше трёх миллиметров.
+  assert.ok(view.markSize * 2 * 0.16 >= 3, "значок метки на A3 всего " + view.markSize * 2 * 0.16 + " мм");
 });

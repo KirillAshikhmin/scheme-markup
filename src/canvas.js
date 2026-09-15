@@ -37,9 +37,15 @@ import {
   drawOutlineHandles,
   drawScheme,
   fitView,
+  drawLabelTurn,
   hitHandle,
+  hitLabelTurn,
+  labelLead,
   hitOutline,
   hitTest,
+  labelAngleOf,
+  labelTargetOf,
+  labelTurnHandle,
   labelBox,
   markRadius,
   planToScreen,
@@ -410,6 +416,17 @@ function canvasPaint() {
     drawOutlineHandles(canvasCtx, scheme, outline, view);
   }
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
+  // Ручка поворота подписи — у самой подписи выделенной метки: подпись вдоль
+  // стены ставят, глядя на план, а не в панель.
+  if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
+    const target = labelTargetOf(project, scheme, state.selectedMarkIds[0], state.filter);
+    const lead = target ? labelLead(project, target) : null;
+    drawLabelTurn(
+      canvasCtx,
+      labelTurnHandle(project, scheme, target, view, state.filter),
+      styleOf(project, lead && lead.typeId).color,
+    );
+  }
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
     if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
@@ -568,6 +585,25 @@ function canvasBlockStep(state) {
 // Ручка «+» ставит метку выбранного типа: выбрана «Р» — рядом с выключателем
 // встаёт розетка со своим номером, как в настоящем подрозетнике. Активного типа
 // нет (режим выделения) — модель берёт тип соседней метки.
+// Поворот подписи на 90° и обратно. Угол — свойство метки: он уезжает в файл
+// проекта, отменяется по Ctrl+Z и одинаково виден на экране, в PNG и в печати.
+// У блока подпись одна на всех, и угол ей держит первая метка — там же, где
+// лежит смещение.
+function canvasRotateLabel(markId) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const target = labelTargetOf(state.project, scheme, markId, state.filter);
+  if (!target) return;
+  const holder = target.markIds ? target.markIds[0] : markId;
+  const angle = labelAngleOf(state.project, target) === 90 ? 0 : 90;
+  try {
+    const after = updateMark(state.project, holder, { labelAngle: angle }).project;
+    canvasCommit(state.project, after, strings.history.rotateLabel, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
 function canvasBlockPoint(markId, side) {
   const state = canvasState();
   try {
@@ -903,6 +939,15 @@ function canvasPointerDown(event) {
   // её поля, и возить план. Всё остальное — правка, и начинаться она не должна:
   // ни ручки блока, ни черновика, ни перетаскивания.
   const editable = canvasEditAllowed(state);
+
+  if (editable && state.selectedMarkIds.length === 1) {
+    const target = labelTargetOf(state.project, scheme, state.selectedMarkIds[0], state.filter);
+    if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter)) {
+      canvasRotateLabel(state.selectedMarkIds[0]);
+      canvasDrag = { kind: "done", start: point, moved: false };
+      return;
+    }
+  }
 
   // Ручка «+» важнее всего остального: она и есть быстрый путь.
   if (editable && state.selectedMarkIds.length === 1) {

@@ -6,8 +6,8 @@
 // Своего рисования меток здесь нет и быть не должно.
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
-import { findRoom, outlinesInOrder, schemesInOrder } from "./model.js";
-import { drawScheme } from "./render.js";
+import { findGroup, findRoom, outlinesInOrder, schemesInOrder } from "./model.js";
+import { drawScheme, labelBox, markRadius, visibleMarks } from "./render.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { tableSections, tableRowCount } from "./tables.js";
 import { strings, text } from "./strings.js";
@@ -124,6 +124,136 @@ export function exportRoomName(project, roomId) {
   return room ? room.name : "";
 }
 
+// ——— поля под подписи ——————————————————————————————————————————————————
+
+// Запас вокруг рамки, чтобы подпись не липла к обрезу (в пикселях плана).
+const EXPORT_FIT_PAD = 6;
+// Насколько лист может вырасти на сторону — доля стороны кадра. Подпись,
+// оттащенную мышью на полплана, догонять белым полем незачем: о ней лучше
+// предупредить.
+const EXPORT_FIT_MAX = 0.25;
+
+function exportPlanSize(scheme) {
+  return {
+    width: scheme && scheme.width > 0 ? scheme.width : 1000,
+    height: scheme && scheme.height > 0 ? scheme.height : 1000,
+  };
+}
+
+// Цели подписей: метка без группы — своя подпись, блок — одна на всех.
+// Правило то же, что у холста; для блока берётся сама группа, поэтому подпись
+// считается по всем её меткам — рамка выходит не уже настоящей.
+function exportLabelTargets(project, scheme, filter) {
+  const targets = [];
+  const seen = new Set();
+  for (const mark of visibleMarks(project, scheme, filter)) {
+    if (!mark.groupId) {
+      targets.push(mark);
+      continue;
+    }
+    if (seen.has(mark.groupId)) continue;
+    seen.add(mark.groupId);
+    targets.push(findGroup(project, mark.groupId) || mark);
+  }
+  return targets;
+}
+
+function exportUnion(box, rect) {
+  const right = Math.max(box.x + box.width, rect.x + rect.width);
+  const bottom = Math.max(box.y + box.height, rect.y + rect.height);
+  box.x = Math.min(box.x, rect.x);
+  box.y = Math.min(box.y, rect.y);
+  box.width = right - box.x;
+  box.height = bottom - box.y;
+}
+
+/**
+ * Кадр листа с полями под подписи.
+ *
+ * Холст, равный площади плана, срезал подписи меток у стен — а у стен их
+ * больше всего: розетки и выключатели стоят по периметру. Поэтому кадр растёт
+ * ровно настолько, чтобы поместились метки и подписи, попавшие в него: у края
+ * плана появляется белое поле, в середине не меняется ничего.
+ *
+ * Рамка подписи считается симметрично вокруг её точки: подпись бывает повёрнута
+ * на 90°, и «шире, чем выше» — не то, на что можно опираться.
+ *
+ * Возвращает `{area, missed}`; `missed` — подписи, которые не влезли и в
+ * выросший кадр (оттащены далеко): о них панель предупреждает до выгрузки,
+ * потому что молча потерянное обозначение хуже белого поля.
+ */
+export function exportFitArea(project, scheme, options = {}) {
+  const base = exportArea(scheme, options.area);
+  if (!project || !scheme || options.fit === false) return { area: base, missed: [] };
+
+  const plan = exportPlanSize(scheme);
+  const sizes = project.view || {};
+  const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
+  const filter = options.filter || null;
+  const radius = markRadius(view);
+  const inBase = (point) =>
+    point.x >= base.x - 1 &&
+    point.x <= base.x + base.width + 1 &&
+    point.y >= base.y - 1 &&
+    point.y <= base.y + base.height + 1;
+  const planPoints = (target) => {
+    const marks = target.markIds
+      ? target.markIds.map((id) => (project.marks || []).find((mark) => mark.id === id)).filter(Boolean)
+      : [target];
+    const points = [];
+    for (const mark of marks) {
+      for (const point of mark.points || []) points.push({ x: point.x * plan.width, y: point.y * plan.height });
+    }
+    return points;
+  };
+
+  const rects = [];
+  for (const mark of visibleMarks(project, scheme, filter)) {
+    for (const point of planPoints(mark)) {
+      if (!inBase(point)) continue;
+      rects.push({ text: "", x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2 });
+    }
+  }
+  for (const target of exportLabelTargets(project, scheme, filter)) {
+    if (!planPoints(target).some(inBase)) continue;
+    const box = labelBox(project, scheme, target, view, filter);
+    if (!box.text) continue;
+    // Подложка-обводка подписи шире самих букв — её тоже нельзя срезать.
+    const halo = Math.max(2, box.font * 0.3);
+    const reach = box.width + box.height / 2 + halo + EXPORT_FIT_PAD;
+    rects.push({ text: box.text, x: box.x - reach, y: box.y - reach, width: reach * 2, height: reach * 2 });
+  }
+
+  const area = { ...base };
+  for (const rect of rects) exportUnion(area, rect);
+
+  // Потолок роста: иначе одна оттащенная подпись раздувает лист вдвое.
+  const limitX = base.width * EXPORT_FIT_MAX;
+  const limitY = base.height * EXPORT_FIT_MAX;
+  const left = Math.min(base.x - area.x, limitX);
+  const top = Math.min(base.y - area.y, limitY);
+  const right = Math.min(area.x + area.width - (base.x + base.width), limitX);
+  const bottom = Math.min(area.y + area.height - (base.y + base.height), limitY);
+  const capped = {
+    x: base.x - left,
+    y: base.y - top,
+    width: base.width + left + right,
+    height: base.height + top + bottom,
+  };
+
+  const missed = [];
+  for (const rect of rects) {
+    if (!rect.text) continue;
+    const fits =
+      rect.x >= capped.x &&
+      rect.y >= capped.y &&
+      rect.x + rect.width <= capped.x + capped.width &&
+      rect.y + rect.height <= capped.y + capped.height;
+    if (!fits && !missed.includes(rect.text)) missed.push(rect.text);
+  }
+  return { area: capped, missed };
+}
+
 /**
  * PNG схемы с метками. `area` — «all» или прямоугольник в пикселях плана,
  * `scale` — множитель, `legend` — рисовать ли легенду в углу, `outlines` —
@@ -133,7 +263,13 @@ export function exportRoomName(project, roomId) {
  */
 export async function schemePng(project, scheme, image, options = {}) {
   const scale = options.scale > 0 ? options.scale : 1;
-  const area = exportArea(scheme, options.area);
+  // Кадр берётся с полями под подписи — тем же расчётом, что показал размер
+  // в диалоге, иначе на бумаге окажется не то, что обещали миллиметры.
+  const { area } = exportFitArea(project, scheme, {
+    area: options.area,
+    filter: options.filter,
+    fit: options.fit,
+  });
   const canvas = exportCanvas(area.width * scale, area.height * scale);
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#ffffff";

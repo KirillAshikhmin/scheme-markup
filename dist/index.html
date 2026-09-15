@@ -2537,6 +2537,7 @@ const strings = {
     addLine: "линия",
     move: "перемещение метки",
     moveLabel: "смещение подписи",
+    rotateLabel: "поворот подписи",
     remove: "удаление метки",
     changeType: "смена типа",
     addType: "новый тип",
@@ -2570,6 +2571,7 @@ const strings = {
     schemeNotFound: "Схема не найдена",
     typeNotFound: "Тип метки не найден",
     markNotFound: "Метка не найдена",
+    labelAngleUnknown: "Подпись поворачивается только на 90 градусов и обратно",
     categoryNotFound: "Категория не найдена",
     roomNotFound: "Помещение не найдено",
     noPoints: "Нужна хотя бы одна точка",
@@ -2928,6 +2930,7 @@ const strings = {
     noMarks: "Меток пока нет — выгружать нечего",
     noScheme: "Схема не выбрана",
     noImage: "У схемы нет плана",
+    labelsOutside: "Не поместились подписи: {names} — подтяните их ближе к меткам",
     schemesDone: "Схем в архиве: {count}",
     busy: "Готовим файл…",
     tooBig: "Слишком большая картинка — уменьшите множитель",
@@ -3284,7 +3287,21 @@ function randomColor(used, options = {}) {
 // Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
 const OUTLINE_MIN_POINTS = 3;
 
-const DEFAULT_VIEW = { markSize: 10, labelSize: 12 };
+// Углы подписи. Девяносто градусов — подпись вдоль стены: в узком коридоре и у
+// простенка горизонтальная не влезает, на рукописном эталоне заказчик поворачивал
+// её от руки. Третьего угла нет нарочно: 180° читается вверх ногами, а 270°
+// от 90° отличается только направлением чтения.
+const LABEL_ANGLES = [0, 90];
+
+// Размер метки и подписи в пикселях плана — с них начинается новый объект.
+// Считано от бумаги: план в 2500 пикселей по большей стороне на листе A3 это
+// 0,16 мм на пиксель, монтажник читает с расстояния вытянутой руки, значит
+// подпись должна быть от двух с половиной миллиметров. Прежние 12 пикселей
+// давали 1,9 мм, и проверяющий выгрузил схему, так и не узнав, что регулятор
+// вообще есть. Двадцать пикселей — это 3,2 мм подписи и 5 мм значка.
+// Регулятор никуда не делся: это только начальное значение нового объекта,
+// у размеченных объектов свои числа уже записаны.
+const DEFAULT_VIEW = { markSize: 16, labelSize: 20 };
 
 const TEMPLATE_CATEGORIES = [
   { key: "light", name: strings.categories.light, color: "#1F6FEB", shape: "circle-cross" },
@@ -3883,12 +3900,27 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-const MARK_PATCH_FIELDS = ["points", "closed", "labelOffset", "roomId", "roomManual", "location", "original"];
+const MARK_PATCH_FIELDS = [
+  "points",
+  "closed",
+  "labelOffset",
+  "labelAngle",
+  "roomId",
+  "roomManual",
+  "location",
+  "original",
+];
 function updateMark(project, markId, patch) {
   requireMark(project, markId);
   const changes = pick(patch, MARK_PATCH_FIELDS);
   if (Object.prototype.hasOwnProperty.call(changes, "points")) {
     changes.points = normalizePoints(changes.points);
+  }
+  // Угол подписи — из списка и числом. Сорок пять градусов или строка «90»
+  // означали бы, что подпись нарисована в одном месте, а ловится в другом:
+  // габарит и попадание по клику считаются по этому же числу.
+  if (Object.prototype.hasOwnProperty.call(changes, "labelAngle")) {
+    if (!LABEL_ANGLES.includes(changes.labelAngle)) throw modelError("labelAngleUnknown");
   }
   const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, ...changes } : mark));
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -5213,10 +5245,40 @@ function migrateProject(loaded) {
   };
 }
 
+// Календарный день пользователя, а не UTC: разметку правят вечером, и
+// `toISOString()` в UTC+3 после девяти вечера помечает файл вчерашним числом —
+// в папке загрузок это путает сильнее, чем кажется.
+function fileLocalDay(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+}
+
+// Отметка времени с местным смещением: «2026-09-16T01:19:00+03:00».
+// По-прежнему ISO-8601 с зоной, но читается тем, кто файл и сделал.
+function fileLocalStamp(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset < 0 ? "-" : "+";
+  const minutes = Math.abs(offset);
+  return (
+    fileLocalDay(date) +
+    "T" +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes()) +
+    ":" +
+    pad(date.getSeconds()) +
+    sign +
+    pad(Math.floor(minutes / 60)) +
+    ":" +
+    pad(minutes % 60)
+  );
+}
+
 function readmeText(project, date) {
   return text("file.readme", {
     name: project.name || strings.project.untitled,
-    date: date.toISOString(),
+    date: fileLocalStamp(date),
     schemes: project.schemes.length,
     marks: project.marks.length,
     version: FORMAT_VERSION,
@@ -5226,7 +5288,7 @@ function readmeText(project, date) {
 /** Имя для выгрузки: «<объект>-<дата>.zip». */
 function projectFileName(project, now) {
   const date = now instanceof Date ? now : new Date();
-  const day = date.toISOString().slice(0, 10);
+  const day = fileLocalDay(date);
   const raw = String((project && project.name) || strings.project.untitled);
   const safe = raw
     .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
@@ -6516,6 +6578,36 @@ const LABEL_FILTER_ERROR = "label-layout-instead-of-filter";
 // вызывающий. Передать сюда готовую раскладку нельзя — `Map` молча сошла бы за
 // «фильтра нет», подписи разделили бы места со скрытыми, и клик разошёлся бы с
 // картинкой. Внутри модуля для уже посчитанной раскладки есть `labelBoxIn`.
+// Угол подписи: 0 — лежит, 90 — стоит вдоль стены. Хранится там же, где
+// смещение: у группы своего поля модель не заводит, поэтому поворот блока
+// живёт у его первой метки.
+function labelAngleOf(project, target) {
+  if (!target) return 0;
+  if (target.labelAngle === 90 || target.labelAngle === 0) return target.labelAngle;
+  if (!target.markIds) return 0;
+  const first = project.marks.find((mark) => mark.id === target.markIds[0]);
+  return first && first.labelAngle === 90 ? 90 : 0;
+}
+
+// Габарит подписи от точки привязки текста. Лежачая идёт вправо и висит на
+// середине строки; повёрнутая читается снизу вверх, поэтому растёт вверх, а
+// вширь занимает высоту строки.
+function labelSpan(width, height, angle) {
+  if (angle === 90) return { left: -height / 2, right: height / 2, top: -width, bottom: 0 };
+  return { left: 0, right: width, top: -height / 2, bottom: height / 2 };
+}
+
+// Прямоугольник подписи на экране: левый верхний угол и размеры. По нему
+// считаются и попадание по клику, и разведение — расходиться им нельзя.
+function labelBounds(box) {
+  const span = labelSpan(box.width, box.height, box.angle);
+  return {
+    x: box.x + span.left,
+    y: box.y + span.top,
+    width: span.right - span.left,
+    height: span.bottom - span.top,
+  };
+}
 function labelBox(project, scheme, target, view, filter) {
   if (filter instanceof Map) {
     const error = new Error(LABEL_FILTER_ERROR);
@@ -6548,6 +6640,7 @@ function labelBoxIn(project, scheme, target, state, layout) {
     dy: place.dy,
     row: place.row,
     crowded: place.crowded,
+    angle: labelAngleOf(project, target),
   };
 }
 
@@ -6561,7 +6654,7 @@ function labelPlaceOf(project, target, state, layout) {
   // Цели в раскладке нет — значит она в неё и не входила: метку спрятал фильтр
   // или она с другой схемы. Такая подпись не рисуется; место ей даётся
   // стандартное, то самое, где подпись стояла всегда.
-  const [slot] = labelSlots(labelPlanSizes(state).gap, 0, 0);
+  const [slot] = labelSlots(labelPlanSizes(state).gap, labelSpan(0, 0, 0), 0);
   return { dx: slot.dx, dy: slot.dy, row: 0, crowded: false };
 }
 
@@ -6631,19 +6724,25 @@ function labelPlanSizes(state) {
 // (справа сверху — то самое место, где подпись стояла всегда), потом те же
 // четыре ряд за рядом дальше по вертикали. `dx` — смещение левого края подписи,
 // `dy` — её середины: слева подпись отодвигается на всю свою ширину.
-function labelSlots(gap, width, height) {
+function labelSlots(gap, span, angle) {
+  const tall = span.bottom - span.top;
   // Шаг ряда — высота подписи и два просвета: соседние ряды обязаны разойтись
   // с запасом, иначе проверка наложения упирается в ноль и решает исход по
   // погрешности последнего разряда.
-  const step = height + LABEL_PAD * 2;
+  const step = tall + LABEL_PAD * 2;
+  const right = gap - span.left;
+  const left = -gap - span.right;
   const slots = [];
   for (let row = 0; row <= LABEL_ROWS; row += 1) {
     const up = -gap - row * step;
-    const down = gap + row * step;
-    slots.push({ dx: gap, dy: up, row });
-    slots.push({ dx: gap, dy: down, row });
-    slots.push({ dx: -gap - width, dy: up, row });
-    slots.push({ dx: -gap - width, dy: down, row });
+    // Лежачая подпись висит серединой строки у метки, повёрнутая растёт от
+    // точки привязки вверх — вниз её приходится опускать на всю высоту столбца,
+    // иначе она легла бы поверх своей же метки.
+    const down = gap + row * step + (angle === 90 ? tall : 0);
+    slots.push({ dx: right, dy: up, row });
+    slots.push({ dx: right, dy: down, row });
+    slots.push({ dx: left, dy: up, row });
+    slots.push({ dx: left, dy: down, row });
   }
   return slots;
 }
@@ -6659,11 +6758,18 @@ function labelPlanBox(project, scheme, target, sizes) {
     y: origin.y * schemeHeight(scheme),
     width: Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
     height: sizes.font * 1.2,
+    angle: labelAngleOf(project, target),
   };
 }
 
 function labelRect(box, offset) {
-  return { x: box.x + offset.dx, y: box.y + offset.dy, width: box.width, height: box.height };
+  const span = labelSpan(box.width, box.height, box.angle);
+  return {
+    x: box.x + offset.dx + span.left,
+    y: box.y + offset.dy + span.top,
+    width: span.right - span.left,
+    height: span.bottom - span.top,
+  };
 }
 
 // Площадь наложения двух подписей с учётом обязательного просвета. Ноль — место
@@ -6671,17 +6777,14 @@ function labelRect(box, offset) {
 // плохое место, когда свободных не осталось.
 function labelOverlap(a, b) {
   const wide = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + LABEL_PAD;
-  const tall =
-    Math.min(a.y + a.height / 2, b.y + b.height / 2) - Math.max(a.y - a.height / 2, b.y - b.height / 2) + LABEL_PAD;
+  const tall = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) + LABEL_PAD;
   return wide > 0 && tall > 0 ? wide * tall : 0;
 }
 
 // Подпись целиком на плане. Выгрузка «весь план» рисует ровно прямоугольник
 // плана — всё, что за его краем, на картинке просто отрезано.
 function labelInsidePlan(rect, width, height) {
-  return (
-    rect.x >= 0 && rect.x + rect.width <= width && rect.y - rect.height / 2 >= 0 && rect.y + rect.height / 2 <= height
-  );
+  return rect.x >= 0 && rect.x + rect.width <= width && rect.y >= 0 && rect.y + rect.height <= height;
 }
 
 // Фильтр меняет состав подписей, а значит и раскладку: ключ кэша обязан его
@@ -6715,7 +6818,7 @@ function labelPlaceAll(project, scheme, filter, sizes) {
 
   for (const entry of entries) {
     if (entry.offset) continue;
-    const slots = labelSlots(sizes.gap, entry.box.width, entry.box.height);
+    const slots = labelSlots(sizes.gap, labelSpan(entry.box.width, entry.box.height, entry.box.angle), entry.box.angle);
     let best = null;
     for (const slot of slots) {
       const rect = labelRect(entry.box, slot);
@@ -6763,6 +6866,75 @@ function labelLayout(project, scheme, filter, view) {
     byKey.set(key, value);
   }
   return value;
+}
+
+// ——— ручка поворота подписи ———————————————————————————————————————————
+//
+// Кнопка живёт на холсте, у самой подписи выделенной метки, а не в панели:
+// поворачивают подпись, глядя на план — влезает она вдоль стены или нет, —
+// и уводить руку в колонку ради этого незачем. Панель к тому же скрыта на
+// узком экране, а холст виден всегда.
+
+// Радиус ручки: как у ручек блока, чтобы попадать по ней не целясь.
+const LABEL_TURN_RADIUS = 9;
+
+// Цель подписи, которой принадлежит метка: у блока — его группа (подпись одна
+// на всех), у одиночной метки — она сама. Скрытая фильтром метка цели не имеет.
+function labelTargetOf(project, scheme, markId, filter) {
+  if (!project || !scheme || !markId) return null;
+  for (const target of labelTargets(project, scheme, filter)) {
+    if (target.markIds) {
+      if (labelMemberIds(target).includes(markId)) return target;
+    } else if (target.id === markId) {
+      return target;
+    }
+  }
+  return null;
+}
+
+// Ручка стоит у верхнего правого угла подписи — того самого, который не
+// заслоняет текст ни лежачей подписи, ни стоячей.
+function labelTurnHandle(project, scheme, target, view, filter) {
+  if (!target) return null;
+  const box = labelBox(project, scheme, target, view, filter);
+  if (!box.text) return null;
+  const rect = labelBounds(box);
+  const radius = Math.max(7, Math.min(LABEL_TURN_RADIUS, markRadius(view) * 0.8));
+  return { x: rect.x + rect.width + radius * 0.6, y: rect.y - radius * 0.6, r: radius };
+}
+function hitLabelTurn(project, scheme, target, point, view, filter) {
+  const handle = labelTurnHandle(project, scheme, target, view, filter);
+  if (!handle) return false;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+}
+
+// Значок — дуга со стрелкой: поворот, а не «плюс» и не «крест». Буквы здесь
+// нельзя: строки живут в словаре, а на холсте рисуется фигура.
+function drawLabelTurn(ctx, handle, color) {
+  if (!handle) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  const inner = handle.r * 0.5;
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, inner, Math.PI * 0.75, Math.PI * 2.1);
+  ctx.lineWidth = Math.max(1.4, handle.r * 0.2);
+  ctx.stroke();
+  // Наконечник на конце дуги.
+  const tip = polarPoint(handle.x, handle.y, inner, 135);
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y - inner * 0.55);
+  ctx.lineTo(tip.x + inner * 0.55, tip.y);
+  ctx.lineTo(tip.x, tip.y + inner * 0.55);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
 }
 
 // ——— контуры помещений ————————————————————————————————————————————————
@@ -6973,11 +7145,12 @@ function distanceToSegment(point, a, b) {
 }
 
 function insideBox(point, box) {
+  const rect = labelBounds(box);
   return (
-    point.x >= box.x - 2 &&
-    point.x <= box.x + box.width + 2 &&
-    point.y >= box.y - box.height / 2 &&
-    point.y <= box.y + box.height / 2
+    point.x >= rect.x - 2 &&
+    point.x <= rect.x + rect.width + 2 &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
   );
 }
 
@@ -7068,9 +7241,13 @@ function drawLabelLeader(ctx, anchor, box, color) {
   ctx.strokeStyle = color;
   ctx.globalAlpha = 0.5;
   ctx.lineWidth = Math.max(1, box.font * 0.08);
+  const rect = labelBounds(box);
   ctx.beginPath();
   ctx.moveTo(anchor.x, anchor.y);
-  ctx.lineTo(box.x < anchor.x ? box.x + box.width : box.x, box.y);
+  ctx.lineTo(
+    rect.x + rect.width < anchor.x ? rect.x + rect.width : Math.max(rect.x, Math.min(anchor.x, rect.x + rect.width)),
+    anchor.y < rect.y ? rect.y : rect.y + rect.height,
+  );
   ctx.stroke();
   ctx.restore();
 }
@@ -7085,8 +7262,19 @@ function drawLabel(ctx, box, color) {
   ctx.lineWidth = Math.max(2, box.font * 0.3);
   ctx.lineJoin = "round";
   ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-  ctx.strokeText(box.text, box.x, box.y);
   ctx.fillStyle = color;
+  // Повёрнутая подпись читается снизу вверх — так её пишут вдоль стен на
+  // чертежах. Рисование и габарит берут один и тот же угол, поэтому клик
+  // попадает туда, где текст виден.
+  if (box.angle === 90) {
+    ctx.translate(box.x, box.y);
+    ctx.rotate(-Math.PI / 2);
+    ctx.strokeText(box.text, 0, 0);
+    ctx.fillText(box.text, 0, 0);
+    ctx.restore();
+    return;
+  }
+  ctx.strokeText(box.text, box.x, box.y);
   ctx.fillText(box.text, box.x, box.y);
   ctx.restore();
 }
@@ -7983,6 +8171,17 @@ function canvasPaint() {
     drawOutlineHandles(canvasCtx, scheme, outline, view);
   }
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
+  // Ручка поворота подписи — у самой подписи выделенной метки: подпись вдоль
+  // стены ставят, глядя на план, а не в панель.
+  if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
+    const target = labelTargetOf(project, scheme, state.selectedMarkIds[0], state.filter);
+    const lead = target ? labelLead(project, target) : null;
+    drawLabelTurn(
+      canvasCtx,
+      labelTurnHandle(project, scheme, target, view, state.filter),
+      styleOf(project, lead && lead.typeId).color,
+    );
+  }
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
     if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
@@ -8139,6 +8338,25 @@ function canvasBlockStep(state) {
 // Ручка «+» ставит метку выбранного типа: выбрана «Р» — рядом с выключателем
 // встаёт розетка со своим номером, как в настоящем подрозетнике. Активного типа
 // нет (режим выделения) — модель берёт тип соседней метки.
+// Поворот подписи на 90° и обратно. Угол — свойство метки: он уезжает в файл
+// проекта, отменяется по Ctrl+Z и одинаково виден на экране, в PNG и в печати.
+// У блока подпись одна на всех, и угол ей держит первая метка — там же, где
+// лежит смещение.
+function canvasRotateLabel(markId) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const target = labelTargetOf(state.project, scheme, markId, state.filter);
+  if (!target) return;
+  const holder = target.markIds ? target.markIds[0] : markId;
+  const angle = labelAngleOf(state.project, target) === 90 ? 0 : 90;
+  try {
+    const after = updateMark(state.project, holder, { labelAngle: angle }).project;
+    canvasCommit(state.project, after, strings.history.rotateLabel, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
 function canvasBlockPoint(markId, side) {
   const state = canvasState();
   try {
@@ -8469,6 +8687,15 @@ function canvasPointerDown(event) {
   // её поля, и возить план. Всё остальное — правка, и начинаться она не должна:
   // ни ручки блока, ни черновика, ни перетаскивания.
   const editable = canvasEditAllowed(state);
+
+  if (editable && state.selectedMarkIds.length === 1) {
+    const target = labelTargetOf(state.project, scheme, state.selectedMarkIds[0], state.filter);
+    if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter)) {
+      canvasRotateLabel(state.selectedMarkIds[0]);
+      canvasDrag = { kind: "done", start: point, moved: false };
+      return;
+    }
+  }
 
   // Ручка «+» важнее всего остального: она и есть быстрый путь.
   if (editable && state.selectedMarkIds.length === 1) {
@@ -9567,6 +9794,136 @@ function exportRoomName(project, roomId) {
   return room ? room.name : "";
 }
 
+// ——— поля под подписи ——————————————————————————————————————————————————
+
+// Запас вокруг рамки, чтобы подпись не липла к обрезу (в пикселях плана).
+const EXPORT_FIT_PAD = 6;
+// Насколько лист может вырасти на сторону — доля стороны кадра. Подпись,
+// оттащенную мышью на полплана, догонять белым полем незачем: о ней лучше
+// предупредить.
+const EXPORT_FIT_MAX = 0.25;
+
+function exportPlanSize(scheme) {
+  return {
+    width: scheme && scheme.width > 0 ? scheme.width : 1000,
+    height: scheme && scheme.height > 0 ? scheme.height : 1000,
+  };
+}
+
+// Цели подписей: метка без группы — своя подпись, блок — одна на всех.
+// Правило то же, что у холста; для блока берётся сама группа, поэтому подпись
+// считается по всем её меткам — рамка выходит не уже настоящей.
+function exportLabelTargets(project, scheme, filter) {
+  const targets = [];
+  const seen = new Set();
+  for (const mark of visibleMarks(project, scheme, filter)) {
+    if (!mark.groupId) {
+      targets.push(mark);
+      continue;
+    }
+    if (seen.has(mark.groupId)) continue;
+    seen.add(mark.groupId);
+    targets.push(findGroup(project, mark.groupId) || mark);
+  }
+  return targets;
+}
+
+function exportUnion(box, rect) {
+  const right = Math.max(box.x + box.width, rect.x + rect.width);
+  const bottom = Math.max(box.y + box.height, rect.y + rect.height);
+  box.x = Math.min(box.x, rect.x);
+  box.y = Math.min(box.y, rect.y);
+  box.width = right - box.x;
+  box.height = bottom - box.y;
+}
+
+/**
+ * Кадр листа с полями под подписи.
+ *
+ * Холст, равный площади плана, срезал подписи меток у стен — а у стен их
+ * больше всего: розетки и выключатели стоят по периметру. Поэтому кадр растёт
+ * ровно настолько, чтобы поместились метки и подписи, попавшие в него: у края
+ * плана появляется белое поле, в середине не меняется ничего.
+ *
+ * Рамка подписи считается симметрично вокруг её точки: подпись бывает повёрнута
+ * на 90°, и «шире, чем выше» — не то, на что можно опираться.
+ *
+ * Возвращает `{area, missed}`; `missed` — подписи, которые не влезли и в
+ * выросший кадр (оттащены далеко): о них панель предупреждает до выгрузки,
+ * потому что молча потерянное обозначение хуже белого поля.
+ */
+function exportFitArea(project, scheme, options = {}) {
+  const base = exportArea(scheme, options.area);
+  if (!project || !scheme || options.fit === false) return { area: base, missed: [] };
+
+  const plan = exportPlanSize(scheme);
+  const sizes = project.view || {};
+  const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
+  const filter = options.filter || null;
+  const radius = markRadius(view);
+  const inBase = (point) =>
+    point.x >= base.x - 1 &&
+    point.x <= base.x + base.width + 1 &&
+    point.y >= base.y - 1 &&
+    point.y <= base.y + base.height + 1;
+  const planPoints = (target) => {
+    const marks = target.markIds
+      ? target.markIds.map((id) => (project.marks || []).find((mark) => mark.id === id)).filter(Boolean)
+      : [target];
+    const points = [];
+    for (const mark of marks) {
+      for (const point of mark.points || []) points.push({ x: point.x * plan.width, y: point.y * plan.height });
+    }
+    return points;
+  };
+
+  const rects = [];
+  for (const mark of visibleMarks(project, scheme, filter)) {
+    for (const point of planPoints(mark)) {
+      if (!inBase(point)) continue;
+      rects.push({ text: "", x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2 });
+    }
+  }
+  for (const target of exportLabelTargets(project, scheme, filter)) {
+    if (!planPoints(target).some(inBase)) continue;
+    const box = labelBox(project, scheme, target, view, filter);
+    if (!box.text) continue;
+    // Подложка-обводка подписи шире самих букв — её тоже нельзя срезать.
+    const halo = Math.max(2, box.font * 0.3);
+    const reach = box.width + box.height / 2 + halo + EXPORT_FIT_PAD;
+    rects.push({ text: box.text, x: box.x - reach, y: box.y - reach, width: reach * 2, height: reach * 2 });
+  }
+
+  const area = { ...base };
+  for (const rect of rects) exportUnion(area, rect);
+
+  // Потолок роста: иначе одна оттащенная подпись раздувает лист вдвое.
+  const limitX = base.width * EXPORT_FIT_MAX;
+  const limitY = base.height * EXPORT_FIT_MAX;
+  const left = Math.min(base.x - area.x, limitX);
+  const top = Math.min(base.y - area.y, limitY);
+  const right = Math.min(area.x + area.width - (base.x + base.width), limitX);
+  const bottom = Math.min(area.y + area.height - (base.y + base.height), limitY);
+  const capped = {
+    x: base.x - left,
+    y: base.y - top,
+    width: base.width + left + right,
+    height: base.height + top + bottom,
+  };
+
+  const missed = [];
+  for (const rect of rects) {
+    if (!rect.text) continue;
+    const fits =
+      rect.x >= capped.x &&
+      rect.y >= capped.y &&
+      rect.x + rect.width <= capped.x + capped.width &&
+      rect.y + rect.height <= capped.y + capped.height;
+    if (!fits && !missed.includes(rect.text)) missed.push(rect.text);
+  }
+  return { area: capped, missed };
+}
+
 /**
  * PNG схемы с метками. `area` — «all» или прямоугольник в пикселях плана,
  * `scale` — множитель, `legend` — рисовать ли легенду в углу, `outlines` —
@@ -9576,7 +9933,13 @@ function exportRoomName(project, roomId) {
  */
 async function schemePng(project, scheme, image, options = {}) {
   const scale = options.scale > 0 ? options.scale : 1;
-  const area = exportArea(scheme, options.area);
+  // Кадр берётся с полями под подписи — тем же расчётом, что показал размер
+  // в диалоге, иначе на бумаге окажется не то, что обещали миллиметры.
+  const { area } = exportFitArea(project, scheme, {
+    area: options.area,
+    filter: options.filter,
+    fit: options.fit,
+  });
   const canvas = exportCanvas(area.width * scale, area.height * scale);
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#ffffff";
@@ -10748,20 +11111,15 @@ function exportAreaRoomId() {
   return exportChoice.area.startsWith("room:") ? exportChoice.area.slice(5) : null;
 }
 
+// Кадр листа вместе с полями под подписи — тот же расчёт, что и в выгрузке:
+// размер в диалоге обязан совпасть с тем, что ляжет на бумагу.
+function exportFittedOf(state, scheme) {
+  return exportFitArea(state.project, scheme, { area: exportAreaOf(state, scheme), filter: state.filter });
+}
+
 function exportAreaSize(state, scheme) {
-  const area = exportAreaOf(state, scheme);
-  if (area === "all") {
-    return {
-      width: scheme.width > 0 ? scheme.width : 1000,
-      height: scheme.height > 0 ? scheme.height : 1000,
-    };
-  }
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
-  return {
-    width: Math.min(width, Math.max(1, area.width)),
-    height: Math.min(height, Math.max(1, area.height)),
-  };
+  const { area } = exportFittedOf(state, scheme);
+  return { width: area.width, height: area.height };
 }
 
 // План схемы для рисования: уже разобранный на холсте — как есть, чужой —
@@ -11093,6 +11451,12 @@ function exportSchemeDialog(api) {
     // План может быть не загружен — метки тогда лягут на белый лист, и лучше
     // сказать об этом, чем отдать «пустую» на вид картинку молча.
     if (!image) notify(strings.exportPanel.noImage, "info");
+    // Подпись, оттащенную далеко от метки, поля не догоняют: о таких говорим
+    // до выгрузки — потерянное на бумаге обозначение молчать не должно.
+    const { missed } = exportFittedOf(state, scheme);
+    if (missed.length > 0) {
+      notify(text("exportPanel.labelsOutside", { names: missed.slice(0, 5).join(", ") }), "error");
+    }
     try {
       return await schemePng(state.project, scheme, image, {
         area: exportAreaOf(state, scheme),

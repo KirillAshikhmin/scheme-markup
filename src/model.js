@@ -312,7 +312,21 @@ export function randomColor(used, options = {}) {
 // Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
 export const OUTLINE_MIN_POINTS = 3;
 
-const DEFAULT_VIEW = { markSize: 10, labelSize: 12 };
+// Углы подписи. Девяносто градусов — подпись вдоль стены: в узком коридоре и у
+// простенка горизонтальная не влезает, на рукописном эталоне заказчик поворачивал
+// её от руки. Третьего угла нет нарочно: 180° читается вверх ногами, а 270°
+// от 90° отличается только направлением чтения.
+export const LABEL_ANGLES = [0, 90];
+
+// Размер метки и подписи в пикселях плана — с них начинается новый объект.
+// Считано от бумаги: план в 2500 пикселей по большей стороне на листе A3 это
+// 0,16 мм на пиксель, монтажник читает с расстояния вытянутой руки, значит
+// подпись должна быть от двух с половиной миллиметров. Прежние 12 пикселей
+// давали 1,9 мм, и проверяющий выгрузил схему, так и не узнав, что регулятор
+// вообще есть. Двадцать пикселей — это 3,2 мм подписи и 5 мм значка.
+// Регулятор никуда не делся: это только начальное значение нового объекта,
+// у размеченных объектов свои числа уже записаны.
+const DEFAULT_VIEW = { markSize: 16, labelSize: 20 };
 
 const TEMPLATE_CATEGORIES = [
   { key: "light", name: strings.categories.light, color: "#1F6FEB", shape: "circle-cross" },
@@ -927,13 +941,28 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-const MARK_PATCH_FIELDS = ["points", "closed", "labelOffset", "roomId", "roomManual", "location", "original"];
+const MARK_PATCH_FIELDS = [
+  "points",
+  "closed",
+  "labelOffset",
+  "labelAngle",
+  "roomId",
+  "roomManual",
+  "location",
+  "original",
+];
 
 export function updateMark(project, markId, patch) {
   requireMark(project, markId);
   const changes = pick(patch, MARK_PATCH_FIELDS);
   if (Object.prototype.hasOwnProperty.call(changes, "points")) {
     changes.points = normalizePoints(changes.points);
+  }
+  // Угол подписи — из списка и числом. Сорок пять градусов или строка «90»
+  // означали бы, что подпись нарисована в одном месте, а ловится в другом:
+  // габарит и попадание по клику считаются по этому же числу.
+  if (Object.prototype.hasOwnProperty.call(changes, "labelAngle")) {
+    if (!LABEL_ANGLES.includes(changes.labelAngle)) throw modelError("labelAngleUnknown");
   }
   const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, ...changes } : mark));
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };

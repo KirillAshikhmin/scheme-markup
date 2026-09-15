@@ -358,10 +358,40 @@ function migrateProject(loaded) {
   };
 }
 
+// Календарный день пользователя, а не UTC: разметку правят вечером, и
+// `toISOString()` в UTC+3 после девяти вечера помечает файл вчерашним числом —
+// в папке загрузок это путает сильнее, чем кажется.
+function fileLocalDay(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+}
+
+// Отметка времени с местным смещением: «2026-09-16T01:19:00+03:00».
+// По-прежнему ISO-8601 с зоной, но читается тем, кто файл и сделал.
+function fileLocalStamp(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset < 0 ? "-" : "+";
+  const minutes = Math.abs(offset);
+  return (
+    fileLocalDay(date) +
+    "T" +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes()) +
+    ":" +
+    pad(date.getSeconds()) +
+    sign +
+    pad(Math.floor(minutes / 60)) +
+    ":" +
+    pad(minutes % 60)
+  );
+}
+
 function readmeText(project, date) {
   return text("file.readme", {
     name: project.name || strings.project.untitled,
-    date: date.toISOString(),
+    date: fileLocalStamp(date),
     schemes: project.schemes.length,
     marks: project.marks.length,
     version: FORMAT_VERSION,
@@ -371,7 +401,7 @@ function readmeText(project, date) {
 /** Имя для выгрузки: «<объект>-<дата>.zip». */
 export function projectFileName(project, now) {
   const date = now instanceof Date ? now : new Date();
-  const day = date.toISOString().slice(0, 10);
+  const day = fileLocalDay(date);
   const raw = String((project && project.name) || strings.project.untitled);
   const safe = raw
     .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
