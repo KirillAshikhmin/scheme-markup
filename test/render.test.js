@@ -12,7 +12,16 @@ import {
   screenToPlan,
   visibleMarks,
 } from "../src/render.js";
-import { createProject, addScheme, addMark, updateMark, labelOf, typesInOrder } from "../src/model.js";
+import {
+  SHAPE_LEGACY,
+  SHAPE_PALETTE,
+  createProject,
+  addScheme,
+  addMark,
+  updateMark,
+  labelOf,
+  typesInOrder,
+} from "../src/model.js";
 
 const shapeGeometry = (...args) => renderInternals.shapeGeometry(...args);
 const handlePositions = (...args) => renderInternals.handlePositions(...args);
@@ -20,8 +29,13 @@ const handlePositions = (...args) => renderInternals.handlePositions(...args);
 const near = (actual, expected, message) =>
   assert.ok(Math.abs(actual - expected) < 1e-6, message + `: ${actual} ≈ ${expected}`);
 
-test("все семь фигур объявлены", () => {
-  assert.deepEqual(SHAPES, ["circle", "circle-cross", "square", "triangle", "star", "diamond", "hexagon"]);
+// Различимость фигур проверяет test/shapes.test.js; здесь — что холст берёт
+// список у модели и что прежние обозначения остались допустимыми.
+test("фигуры холст берёт у модели, старые обозначения из списка не пропали", () => {
+  assert.deepEqual(SHAPES, [...SHAPE_PALETTE, ...SHAPE_LEGACY]);
+  for (const shape of ["circle", "circle-cross", "square", "triangle", "star", "diamond", "hexagon"]) {
+    assert.ok(SHAPES.includes(shape), "обозначение пропало из списка: " + shape);
+  }
 });
 
 test("круг — это круг, у круга с крестом стоит признак креста", () => {

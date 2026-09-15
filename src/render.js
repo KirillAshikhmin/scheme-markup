@@ -32,9 +32,39 @@ const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, la
 const SHAPE_ANGLES = {
   square: [-135, -45, 45, 135],
   triangle: [-90, 30, 150],
+  "triangle-down": [90, 210, 330],
   diamond: [-90, 0, 90, 180],
   hexagon: [-90, -30, 30, 90, 150, 210],
 };
+
+// Родня фигур: контур берётся у базовой, а отличает их засечка внутри.
+// Так «розетка» и «розетка двойная» различаются в 14 пикселях, а на плане
+// по-прежнему рисуются одним `drawShape`.
+const SHAPE_BASE = {
+  "circle-cross": "circle",
+  "circle-dot": "circle",
+  "circle-fill": "circle",
+  "circle-half": "circle",
+  "square-cross": "square",
+  "square-fill": "square",
+  "diamond-fill": "diamond",
+};
+
+// Засечка внутри: перекрестье, точка, сплошная заливка, залитая нижняя половина.
+const SHAPE_DECOR = {
+  "circle-cross": "cross",
+  "square-cross": "cross",
+  "circle-dot": "dot",
+  "circle-fill": "fill",
+  "square-fill": "fill",
+  "diamond-fill": "fill",
+  "circle-half": "half",
+};
+
+// Доля радиуса, на которую отступает от края «талия» плюса.
+const PLUS_WAIST = 0.36;
+// Точка внутри знака: меньше — сливается с пустым кругом на распечатке.
+const DOT_RADIUS = 0.42;
 
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
@@ -47,29 +77,47 @@ function polarPoint(x, y, radius, degrees) {
   return { x: x + radius * Math.cos(angle), y: y + radius * Math.sin(angle) };
 }
 
-// Геометрия фигуры в экранных пикселях: круг или список вершин.
+// Геометрия фигуры в экранных пикселях: круг или список вершин плюс засечка,
+// которую рисуют поверх контура.
 function shapeGeometry(shape, x, y, size) {
   const radius = Math.max(1, size);
-  if (shape === "star") {
+  const base = SHAPE_BASE[shape] || shape;
+  const decor = SHAPE_DECOR[shape] || null;
+  const shell = { cx: x, cy: y, r: radius, cross: decor === "cross", decor: decor === "cross" ? null : decor };
+
+  if (base === "star") {
     const points = [];
     for (let index = 0; index < 10; index += 1) {
       const long = index % 2 === 0;
       points.push(polarPoint(x, y, long ? radius : radius * STAR_INNER, -90 + index * 36));
     }
-    return { kind: "polygon", points, cx: x, cy: y, r: radius, cross: false };
+    return { kind: "polygon", points, ...shell };
   }
-  const angles = SHAPE_ANGLES[shape];
+  if (base === "plus") {
+    // Двенадцать вершин: четыре конца по осям и «талия» между ними.
+    const arm = radius;
+    const waist = radius * PLUS_WAIST;
+    const points = [
+      { x: x - waist, y: y - arm },
+      { x: x + waist, y: y - arm },
+      { x: x + waist, y: y - waist },
+      { x: x + arm, y: y - waist },
+      { x: x + arm, y: y + waist },
+      { x: x + waist, y: y + waist },
+      { x: x + waist, y: y + arm },
+      { x: x - waist, y: y + arm },
+      { x: x - waist, y: y + waist },
+      { x: x - arm, y: y + waist },
+      { x: x - arm, y: y - waist },
+      { x: x - waist, y: y - waist },
+    ];
+    return { kind: "polygon", points, ...shell };
+  }
+  const angles = SHAPE_ANGLES[base];
   if (angles) {
-    return {
-      kind: "polygon",
-      points: angles.map((degrees) => polarPoint(x, y, radius, degrees)),
-      cx: x,
-      cy: y,
-      r: radius,
-      cross: false,
-    };
+    return { kind: "polygon", points: angles.map((degrees) => polarPoint(x, y, radius, degrees)), ...shell };
   }
-  return { kind: "circle", cx: x, cy: y, r: radius, points: [], cross: shape === "circle-cross" };
+  return { kind: "circle", points: [], ...shell };
 }
 
 // Одна фигура — одним кодом и на экране, и в экспорте.
@@ -93,6 +141,25 @@ export function drawShape(ctx, shape, x, y, size, color) {
   }
   ctx.fill();
   ctx.stroke();
+  // Заливка и засечка идут поверх белой подложки, контур — поверх них: так
+  // фигура читается и на тёмной линии плана, и на чёрно-белой распечатке.
+  if (geometry.decor === "fill") {
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.stroke();
+  } else if (geometry.decor === "half") {
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = color;
+    ctx.fillRect(geometry.cx - geometry.r, geometry.cy, geometry.r * 2, geometry.r);
+    ctx.restore();
+    ctx.stroke();
+  } else if (geometry.decor === "dot") {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(geometry.cx, geometry.cy, Math.max(1, geometry.r * DOT_RADIUS), 0, Math.PI * 2);
+    ctx.fill();
+  }
   if (geometry.cross) {
     const arm = geometry.r * Math.SQRT1_2;
     ctx.beginPath();
@@ -103,6 +170,19 @@ export function drawShape(ctx, shape, x, y, size, color) {
     ctx.stroke();
   }
   ctx.restore();
+}
+
+// Значок фигуры для списков и сеток: тот же `drawShape` на маленьком холсте.
+// Одна функция на весь интерфейс — в справочнике, в списке меток и в сетке
+// выбора видно ровно то, что попадёт на план и на распечатку.
+export function shapeIcon(shape, color, size = 22) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "shape-icon";
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
+  if (ctx) drawShape(ctx, shape, size / 2, size / 2, size * 0.34, color);
+  return canvas;
 }
 
 // ——— координаты —————————————————————————————————————————————————————

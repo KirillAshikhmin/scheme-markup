@@ -17,6 +17,7 @@ import {
 } from "../store.js";
 import { strings, text } from "../strings.js";
 import { formatMegabytes, uiButton, uiConfirm, uiEl, uiModal, uiPrompt } from "./ui.js";
+import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
 
 export const LAST_PROJECT_KEY = "lastProjectId";
 const SAVE_DELAY_MS = 400;
@@ -102,8 +103,12 @@ function mountProjectsPanel(host, api) {
     renderList();
   }
 
+  // Новый объект начинается с сохранённого справочника, если он есть: копия
+  // шаблона с новыми идентификаторами, дальше объект живёт своей жизнью.
   async function createAndOpen() {
-    const project = createProject({ name: uniqueProjectName(known) });
+    const saved = await getSetting(TYPE_TEMPLATE_KEY);
+    const template = typesTemplateFrom(saved);
+    const project = createProject({ name: uniqueProjectName(known), ...(template || {}) });
     await saveProject(project);
     await refreshList();
     setState({ project, schemeId: null, selectedMarkIds: [], activeTypeId: null });

@@ -213,6 +213,304 @@
   display: none;
 }
 
+/* Список меток, фильтры и справочник объекта. Панель узкая, поэтому поля
+   строки стоят столбиком: подписи заменяют подсказки-title. */
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.filters__details {
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: var(--panel-bg-deep);
+}
+
+.filters__summary {
+  cursor: pointer;
+  color: var(--panel-muted);
+  font-size: 12px;
+  list-style: none;
+}
+
+.filters__summary::before {
+  content: "▸ ";
+}
+
+.filters__details[open] .filters__summary::before {
+  content: "▾ ";
+}
+
+.filters__tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 0 2px;
+}
+
+.filters__category,
+.filters__type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--panel-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.filters__category {
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.filters__type {
+  padding-left: 16px;
+  color: var(--panel-muted);
+}
+
+.filters__check {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.filters__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.filters__code {
+  min-width: 22px;
+  font-weight: 600;
+  color: var(--panel-text);
+}
+
+.filters__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marks__count {
+  margin: 8px 0 4px;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.marks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mark-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: var(--panel-bg-deep);
+  cursor: pointer;
+}
+
+.mark-row.is-current {
+  border-color: var(--accent);
+}
+
+.mark-row__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mark-row__label {
+  font-weight: 700;
+  color: var(--panel-text);
+}
+
+.mark-row__type {
+  color: var(--panel-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Справочник объекта */
+
+.dict-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dict {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 520px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.dict__title {
+  margin: 10px 0 2px;
+  color: var(--panel-text);
+  font-size: 13px;
+}
+
+.dict__group {
+  margin: 8px 0 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.dict__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dict__row--add {
+  padding-top: 6px;
+  border-top: 1px dashed var(--panel-line);
+}
+
+.dict__row .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dict__code {
+  flex: none;
+  width: 52px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.dict__color {
+  flex: none;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: var(--panel-bg-deep);
+}
+
+.dict__count {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.rooms__box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 360px;
+}
+
+.rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.rooms__row,
+.rooms__add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rooms__row .ui-input,
+.rooms__add .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rooms__count {
+  flex: none;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+/* Выбор формы: сетка нарисованных обозначений вместо списка названий. */
+
+.dict__shape {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.dict__shape:hover {
+  border-color: var(--panel-muted);
+}
+
+.dict__shape--inherit {
+  border-style: dashed;
+}
+
+.shapes {
+  display: grid;
+  grid-template-columns: repeat(5, 52px);
+  gap: 6px;
+}
+
+.shapes__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.shapes__cell:hover {
+  border-color: var(--panel-muted);
+}
+
+.shapes__cell.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* «Как у категории»: та же фигура, но пунктиром — видно, что она не своя. */
+.shapes__cell--inherit {
+  border-style: dashed;
+  border-color: var(--panel-muted);
+}
+
+.shapes__icon {
+  display: block;
+}
+
 /* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
 
 .ui-btn {
@@ -698,8 +996,6 @@ const strings = {
   header: {
     project: "Объект",
     noProject: "Объект не выбран",
-    projects: "Объекты",
-    schemes: "Схемы",
   },
   panels: {
     tools: "Инструменты",
@@ -708,7 +1004,6 @@ const strings = {
     properties: "Свойства",
     canvasEmpty: "Загрузите план схемы, чтобы начать разметку",
     marksEmpty: "Меток пока нет — выберите тип и щёлкните по плану",
-    schemesEmpty: "Схем пока нет",
   },
   project: {
     untitled: "Новый объект",
@@ -739,11 +1034,19 @@ const strings = {
   shapes: {
     circle: "Круг",
     "circle-cross": "Круг с крестом",
+    "circle-dot": "Круг с точкой",
+    "circle-fill": "Круг закрашенный",
+    "circle-half": "Круг наполовину закрашенный",
     square: "Квадрат",
+    "square-cross": "Квадрат с крестом",
+    "square-fill": "Квадрат закрашенный",
     triangle: "Треугольник",
+    "triangle-down": "Треугольник вершиной вниз",
     star: "Звезда",
     diamond: "Ромб",
+    "diamond-fill": "Ромб закрашенный",
     hexagon: "Шестиугольник",
+    plus: "Крест",
     inherit: "Как у категории",
   },
   blockMode: {
@@ -821,6 +1124,16 @@ const strings = {
     addType: "новый тип",
     viewSize: "размер меток и подписей",
     blockMode: "режим блока",
+    markField: "правка полей метки",
+    markRoom: "помещение метки",
+    addRoom: "новое помещение",
+    renameRoom: "переименование помещения",
+    removeRoom: "удаление помещения",
+    editType: "правка типа",
+    removeType: "удаление типа",
+    addCategory: "новая категория",
+    editCategory: "правка категории",
+    removeCategory: "удаление категории",
   },
   errors: {
     schemeNotFound: "Схема не найдена",
@@ -957,6 +1270,68 @@ const strings = {
     memory: "Браузер не дал открыть хранилище — работаем в памяти. Выгрузите объект в файл, иначе работа пропадёт при закрытии вкладки.",
     writeFailed: "Браузер не дал записать данные — работа осталась в памяти. Выгрузите объект в файл.",
     lowSpace: "В браузере осталось меньше {free} свободного места — выгрузите объект в файл.",
+  },
+  marks: {
+    count: "Показано {shown} из {total}",
+    room: "Помещение",
+    location: "Расположение",
+    locationPlaceholder: "Например: над тумбой слева",
+    original: "В оригинальной схеме",
+    originalPlaceholder: "Например: В31",
+    nothingFound: "Под фильтр ничего не подошло",
+    focus: "Показать метку на плане",
+  },
+  filters: {
+    search: "Поиск по меткам",
+    searchPlaceholder: "Обозначение, расположение, оригинал",
+    room: "Помещение",
+    allRooms: "Все помещения",
+    types: "Категории и типы",
+    hidden: "скрыто: {count}",
+    showAll: "Показать все",
+  },
+  rooms: {
+    title: "Помещения объекта",
+    open: "Помещения",
+    add: "Добавить",
+    namePlaceholder: "Спальная Оли",
+    newRoom: "Новое помещение…",
+    newTitle: "Название помещения",
+    none: "Без помещения",
+    empty: "Помещений пока нет — впишите помещение в строке метки",
+    marks: "меток: {count}",
+    remove: "Удалить помещение",
+    removeTitle: "Удалить помещение?",
+    removeMessage: "Помещение «{name}» будет удалено, у меток ({count}) поле опустеет.",
+  },
+  dictionary: {
+    open: "Справочник типов",
+    title: "Справочник объекта",
+    categories: "Категории",
+    types: "Типы меток",
+    code: "Код типа",
+    name: "Название",
+    category: "Категория",
+    shape: "Форма",
+    color: "Цвет категории",
+    marks: "Меток этого типа",
+    noTypes: "Типов пока нет",
+    codePlaceholder: "В",
+    typeNamePlaceholder: "Выключатель",
+    categoryNamePlaceholder: "Шторы",
+    addType: "Добавить тип",
+    addCategory: "Добавить категорию",
+    removeType: "Удалить тип",
+    removeTypeTitle: "Удалить тип?",
+    removeTypeMessage: "Тип «{code} — {name}» исчезнет из справочника этого объекта.",
+    removeCategory: "Удалить категорию",
+    removeCategoryTitle: "Удалить категорию?",
+    removeCategoryMessage: "Категория «{name}» исчезнет из справочника этого объекта.",
+    saveTemplate: "Сохранить как шаблон",
+    saveTemplateHint: "Новые объекты начнутся с этого справочника; уже созданные останутся как есть",
+    templateSaved: "Справочник сохранён как шаблон для новых объектов",
+    resetTemplate: "Вернуть стандартный шаблон",
+    templateReset: "Новые объекты снова начнутся со стандартного справочника",
   },
   dialog: {
     confirm: "Да, удалить",
@@ -1139,7 +1514,35 @@ if (typeof document !== "undefined") {
 // Чистый модуль: ни DOM, ни хранилища. Все функции возвращают новый объект,
 // исходный не меняется.
 const FORMAT_VERSION = 1;
-const SHAPE_NAMES = ["circle", "circle-cross", "square", "triangle", "star", "diamond", "hexagon"];
+
+// Условные обозначения, которые предлагает сетка выбора. Их различают на
+// чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
+// а внутри семейства — засечкой: перекрестье, точка, сплошная заливка.
+// Порядок — порядок сетки. Различимость проверяет test/shapes.test.js:
+// фигура, которая сливается с соседкой в размере метки, красит его.
+const SHAPE_PALETTE = [
+  "circle",
+  "circle-cross",
+  "circle-dot",
+  "circle-fill",
+  "square",
+  "square-cross",
+  "square-fill",
+  "triangle",
+  "triangle-down",
+  "diamond",
+  "star",
+  "plus",
+];
+
+// Фигуры, которые ещё встречаются в объектах, но сетка их больше не предлагает:
+// в размере метки шестиугольник неотличим от круга, залитый ромб — от залитого
+// квадрата, а круг, залитый наполовину, — от залитого целиком. Рисоваться они
+// продолжают как раньше: объекты с ними уже существуют.
+const SHAPE_LEGACY = ["hexagon", "diamond-fill", "circle-half"];
+
+// Допустимые значения поля формы: палитра плюс старые значения.
+const SHAPE_NAMES = [...SHAPE_PALETTE, ...SHAPE_LEGACY];
 const BLOCK_MODES = ["each", "single"];
 const MARK_KINDS = ["point", "line"];
 
@@ -1338,6 +1741,13 @@ function typesInOrder(project) {
         .map((item) => item.type),
     }))
     .filter((group) => group.types.length > 0);
+}
+
+// Порядок помещений — порядок появления: их заводят по ходу разметки, и этот
+// порядок пользователю знаком. Живёт рядом со schemesInOrder и typesInOrder:
+// порядок сущностей объекта — правило объекта, а не панели.
+function roomsInOrder(project) {
+  return project && Array.isArray(project.rooms) ? [...project.rooms] : [];
 }
 
 // Порядок схем объекта — одно правило на всех: нумерация, панели и выгрузки
@@ -1845,9 +2255,39 @@ const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, la
 const SHAPE_ANGLES = {
   square: [-135, -45, 45, 135],
   triangle: [-90, 30, 150],
+  "triangle-down": [90, 210, 330],
   diamond: [-90, 0, 90, 180],
   hexagon: [-90, -30, 30, 90, 150, 210],
 };
+
+// Родня фигур: контур берётся у базовой, а отличает их засечка внутри.
+// Так «розетка» и «розетка двойная» различаются в 14 пикселях, а на плане
+// по-прежнему рисуются одним `drawShape`.
+const SHAPE_BASE = {
+  "circle-cross": "circle",
+  "circle-dot": "circle",
+  "circle-fill": "circle",
+  "circle-half": "circle",
+  "square-cross": "square",
+  "square-fill": "square",
+  "diamond-fill": "diamond",
+};
+
+// Засечка внутри: перекрестье, точка, сплошная заливка, залитая нижняя половина.
+const SHAPE_DECOR = {
+  "circle-cross": "cross",
+  "square-cross": "cross",
+  "circle-dot": "dot",
+  "circle-fill": "fill",
+  "square-fill": "fill",
+  "diamond-fill": "fill",
+  "circle-half": "half",
+};
+
+// Доля радиуса, на которую отступает от края «талия» плюса.
+const PLUS_WAIST = 0.36;
+// Точка внутри знака: меньше — сливается с пустым кругом на распечатке.
+const DOT_RADIUS = 0.42;
 
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
@@ -1860,29 +2300,47 @@ function polarPoint(x, y, radius, degrees) {
   return { x: x + radius * Math.cos(angle), y: y + radius * Math.sin(angle) };
 }
 
-// Геометрия фигуры в экранных пикселях: круг или список вершин.
+// Геометрия фигуры в экранных пикселях: круг или список вершин плюс засечка,
+// которую рисуют поверх контура.
 function shapeGeometry(shape, x, y, size) {
   const radius = Math.max(1, size);
-  if (shape === "star") {
+  const base = SHAPE_BASE[shape] || shape;
+  const decor = SHAPE_DECOR[shape] || null;
+  const shell = { cx: x, cy: y, r: radius, cross: decor === "cross", decor: decor === "cross" ? null : decor };
+
+  if (base === "star") {
     const points = [];
     for (let index = 0; index < 10; index += 1) {
       const long = index % 2 === 0;
       points.push(polarPoint(x, y, long ? radius : radius * STAR_INNER, -90 + index * 36));
     }
-    return { kind: "polygon", points, cx: x, cy: y, r: radius, cross: false };
+    return { kind: "polygon", points, ...shell };
   }
-  const angles = SHAPE_ANGLES[shape];
+  if (base === "plus") {
+    // Двенадцать вершин: четыре конца по осям и «талия» между ними.
+    const arm = radius;
+    const waist = radius * PLUS_WAIST;
+    const points = [
+      { x: x - waist, y: y - arm },
+      { x: x + waist, y: y - arm },
+      { x: x + waist, y: y - waist },
+      { x: x + arm, y: y - waist },
+      { x: x + arm, y: y + waist },
+      { x: x + waist, y: y + waist },
+      { x: x + waist, y: y + arm },
+      { x: x - waist, y: y + arm },
+      { x: x - waist, y: y + waist },
+      { x: x - arm, y: y + waist },
+      { x: x - arm, y: y - waist },
+      { x: x - waist, y: y - waist },
+    ];
+    return { kind: "polygon", points, ...shell };
+  }
+  const angles = SHAPE_ANGLES[base];
   if (angles) {
-    return {
-      kind: "polygon",
-      points: angles.map((degrees) => polarPoint(x, y, radius, degrees)),
-      cx: x,
-      cy: y,
-      r: radius,
-      cross: false,
-    };
+    return { kind: "polygon", points: angles.map((degrees) => polarPoint(x, y, radius, degrees)), ...shell };
   }
-  return { kind: "circle", cx: x, cy: y, r: radius, points: [], cross: shape === "circle-cross" };
+  return { kind: "circle", points: [], ...shell };
 }
 
 // Одна фигура — одним кодом и на экране, и в экспорте.
@@ -1906,6 +2364,25 @@ function drawShape(ctx, shape, x, y, size, color) {
   }
   ctx.fill();
   ctx.stroke();
+  // Заливка и засечка идут поверх белой подложки, контур — поверх них: так
+  // фигура читается и на тёмной линии плана, и на чёрно-белой распечатке.
+  if (geometry.decor === "fill") {
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.stroke();
+  } else if (geometry.decor === "half") {
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = color;
+    ctx.fillRect(geometry.cx - geometry.r, geometry.cy, geometry.r * 2, geometry.r);
+    ctx.restore();
+    ctx.stroke();
+  } else if (geometry.decor === "dot") {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(geometry.cx, geometry.cy, Math.max(1, geometry.r * DOT_RADIUS), 0, Math.PI * 2);
+    ctx.fill();
+  }
   if (geometry.cross) {
     const arm = geometry.r * Math.SQRT1_2;
     ctx.beginPath();
@@ -1916,6 +2393,19 @@ function drawShape(ctx, shape, x, y, size, color) {
     ctx.stroke();
   }
   ctx.restore();
+}
+
+// Значок фигуры для списков и сеток: тот же `drawShape` на маленьком холсте.
+// Одна функция на весь интерфейс — в справочнике, в списке меток и в сетке
+// выбора видно ровно то, что попадёт на план и на распечатку.
+function shapeIcon(shape, color, size = 22) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "shape-icon";
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
+  if (ctx) drawShape(ctx, shape, size / 2, size / 2, size * 0.34, color);
+  return canvas;
 }
 
 // ——— координаты —————————————————————————————————————————————————————
@@ -3598,6 +4088,604 @@ async function renderPlanImage(blob, transform) {
   }
 }
 
+// src/panels/filters.js
+// Фильтры списка меток: галочки категорий и типов, помещение и поиск.
+//
+// Фильтр живёт в состоянии сеанса (`state.filter`) и один на всех: по нему
+// рисует холст, по нему же строится список сбоку и легенда в выгрузке.
+// Поэтому здесь только чистые функции над ним — что видно, что отмечено и во
+// что превращается щелчок по галочке; сама панель собирается из них ниже.
+
+
+
+
+// Порядок строк списка — порядок справочника: категории по своему order, типы
+// внутри, метки по номеру. Тот же обход, что у легенды и таблиц.
+function filtersMarkRows(project, schemeId, filter) {
+  const scheme = project ? findScheme(project, schemeId) : null;
+  if (!scheme) return [];
+  const order = new Map();
+  const categoryOf = new Map();
+  let index = 0;
+  for (const group of typesInOrder(project)) {
+    for (const type of group.types) {
+      order.set(type.id, index);
+      categoryOf.set(type.id, group.category);
+      index += 1;
+    }
+  }
+  const last = index;
+  return visibleMarks(project, scheme, filter)
+    .map((mark) => ({
+      mark,
+      type: findType(project, mark.typeId),
+      category: categoryOf.get(mark.typeId) || null,
+      style: styleOf(project, mark.typeId),
+      label: labelOf(project, mark.id),
+    }))
+    .sort((a, b) => {
+      const orderA = order.has(a.mark.typeId) ? order.get(a.mark.typeId) : last;
+      const orderB = order.has(b.mark.typeId) ? order.get(b.mark.typeId) : last;
+      return orderA === orderB ? a.mark.number - b.mark.number : orderA - orderB;
+    });
+}
+
+// Видимые типы — одно множество, из которого собираются оба поля фильтра.
+// Галочка категории и галочка типа правят его, а `categoryIds`/`typeIds`
+// пересчитываются заново: держать две независимые истины — значит рано или
+// поздно показать метку, которую сняли галочкой, или наоборот.
+function filtersTypeSet(project, filter) {
+  const byType = filter && Array.isArray(filter.typeIds) ? new Set(filter.typeIds) : null;
+  const byCategory = filter && Array.isArray(filter.categoryIds) ? new Set(filter.categoryIds) : null;
+  const visible = new Set();
+  for (const type of project.markTypes) {
+    if (byType && !byType.has(type.id)) continue;
+    if (byCategory && !byCategory.has(type.categoryId)) continue;
+    visible.add(type.id);
+  }
+  return visible;
+}
+
+function filtersFromTypeSet(project, filter, visible) {
+  const types = project.markTypes;
+  const everyType = types.every((type) => visible.has(type.id));
+  // Категория без типов — всегда отмечена: прятать в ней нечего.
+  const categories = project.categories.filter((category) => {
+    const own = types.filter((type) => type.categoryId === category.id);
+    return own.length === 0 || own.some((type) => visible.has(type.id));
+  });
+  const everyCategory = categories.length === project.categories.length;
+  return {
+    ...(filter || {}),
+    categoryIds: everyCategory ? null : categories.map((category) => category.id),
+    typeIds: everyType ? null : types.filter((type) => visible.has(type.id)).map((type) => type.id),
+  };
+}
+function filtersTypeChecked(project, filter, typeId) {
+  return filtersTypeSet(project, filter).has(typeId);
+}
+
+// «on» — видны все типы категории, «off» — ни одного, «mixed» — часть.
+function filtersCategoryChecked(project, filter, categoryId) {
+  const visible = filtersTypeSet(project, filter);
+  const own = project.markTypes.filter((type) => type.categoryId === categoryId);
+  if (own.length === 0) return "on";
+  const shown = own.filter((type) => visible.has(type.id)).length;
+  if (shown === 0) return "off";
+  return shown === own.length ? "on" : "mixed";
+}
+function filtersToggleType(project, filter, typeId, on) {
+  const visible = filtersTypeSet(project, filter);
+  if (on) visible.add(typeId);
+  else visible.delete(typeId);
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersToggleCategory(project, filter, categoryId, on) {
+  const visible = filtersTypeSet(project, filter);
+  for (const type of project.markTypes) {
+    if (type.categoryId !== categoryId) continue;
+    if (on) visible.add(type.id);
+    else visible.delete(type.id);
+  }
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersSetAllTypes(project, filter, on) {
+  const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersActive(filter) {
+  if (!filter) return false;
+  return Boolean(
+    Array.isArray(filter.categoryIds) ||
+      Array.isArray(filter.typeIds) ||
+      filter.roomId ||
+      (filter.query || "").trim(),
+  );
+}
+
+// ——— панель фильтров ——————————————————————————————————————————————————
+
+function filtersSignature(project) {
+  if (!project) return "";
+  return [
+    project.categories.map((category) => [category.id, category.name, category.color, category.shape].join("~")).join("|"),
+    project.markTypes.map((type) => [type.id, type.code, type.name, type.categoryId, type.shape].join("~")).join("|"),
+    project.rooms.map((room) => [room.id, room.name].join("~")).join("|"),
+  ].join("#");
+}
+
+// Дерево галочек перестраивается только при правке справочника: щелчок по
+// галочке меняет фильтр, а не разметку панели — иначе чекбокс исчезал бы
+// из-под курсора вместе с фокусом.
+function filtersBox(api) {
+  const { getState, setState, subscribe } = api;
+  const node = uiEl("div", { class: "filters" });
+  const search = uiEl("input", {
+    class: "ui-input filters__search",
+    type: "text",
+    placeholder: strings.filters.searchPlaceholder,
+    title: strings.filters.search,
+    on: { input: () => patch({ query: search.value }) },
+  });
+  const rooms = uiEl("select", {
+    class: "ui-select",
+    title: strings.filters.room,
+    on: { change: () => patch({ roomId: rooms.value || null }) },
+  });
+  const tree = uiEl("div", { class: "filters__tree" });
+  const summary = uiEl("summary", { class: "filters__summary", text: strings.filters.types });
+  const details = uiEl("details", { class: "filters__details" }, [summary, tree]);
+  const reset = uiButton(strings.filters.showAll, {
+    class: "ui-btn ui-btn--wide",
+    on: {
+      click: () => {
+        const state = getState();
+        setState({ filter: { ...filtersSetAllTypes(state.project, state.filter, true), roomId: null, query: "" } });
+        search.value = "";
+      },
+    },
+  });
+  let signature = null;
+  let checks = [];
+
+  function patch(part) {
+    const state = getState();
+    setState({ filter: { ...state.filter, ...part } });
+  }
+
+  function toggle(state, next) {
+    setState({ filter: { ...next, roomId: state.filter.roomId, query: state.filter.query } });
+  }
+
+  function buildTree(project) {
+    checks = [];
+    tree.replaceChildren();
+    rooms.replaceChildren(uiEl("option", { value: "", text: strings.filters.allRooms }));
+    for (const room of roomsInOrder(project)) {
+      rooms.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+    for (const { category, types } of project ? typesInOrder(project) : []) {
+      const box = uiEl("input", { class: "filters__check", type: "checkbox" });
+      box.addEventListener("change", () => {
+        const state = getState();
+        toggle(state, filtersToggleCategory(state.project, state.filter, category.id, box.checked));
+      });
+      checks.push({ box, kind: "category", id: category.id });
+      const dot = uiEl("span", { class: "filters__dot" });
+      dot.style.background = category.color;
+      tree.append(
+        uiEl("label", { class: "filters__category" }, [
+          box,
+          dot,
+          uiEl("span", { class: "filters__name", text: category.name }),
+        ]),
+      );
+      for (const type of types) {
+        const typeBox = uiEl("input", { class: "filters__check", type: "checkbox" });
+        typeBox.addEventListener("change", () => {
+          const state = getState();
+          toggle(state, filtersToggleType(state.project, state.filter, type.id, typeBox.checked));
+        });
+        checks.push({ box: typeBox, kind: "type", id: type.id });
+        tree.append(
+          uiEl("label", { class: "filters__type" }, [
+            typeBox,
+            uiEl("span", { class: "filters__code", text: type.code }),
+            uiEl("span", { class: "filters__name", text: type.name }),
+          ]),
+        );
+      }
+    }
+  }
+
+  function syncChecks(state) {
+    const project = state.project;
+    if (!project) return;
+    let hidden = 0;
+    for (const item of checks) {
+      if (item.kind === "category") {
+        const mode = filtersCategoryChecked(project, state.filter, item.id);
+        item.box.checked = mode !== "off";
+        item.box.indeterminate = mode === "mixed";
+      } else {
+        const on = filtersTypeChecked(project, state.filter, item.id);
+        item.box.checked = on;
+        if (!on) hidden += 1;
+      }
+    }
+    summary.textContent = hidden > 0
+      ? strings.filters.types + " — " + text("filters.hidden", { count: hidden })
+      : strings.filters.types;
+    rooms.value = state.filter.roomId || "";
+    if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
+      search.value = state.filter.query || "";
+    }
+    reset.disabled = !filtersActive(state.filter);
+  }
+
+  function render() {
+    const state = getState();
+    const next = filtersSignature(state.project);
+    if (next !== signature) {
+      signature = next;
+      buildTree(state.project);
+    }
+    syncChecks(state);
+  }
+
+  node.replaceChildren(search, rooms, details, reset);
+  subscribe((state, changed) => {
+    if ("project" in changed || "filter" in changed) render();
+  });
+  render();
+  return { node, render };
+}
+
+// src/panels/rooms.js
+// Помещения объекта: заводятся на ходу из поля «Помещение» в списке меток,
+// правятся и удаляются в своём окне.
+//
+// Своего справочника комнат пользователь не заполняет заранее — он пишет
+// «Спальная Оли» в строке метки, и комната появляется. Поэтому главное здесь —
+// не окно, а `roomsEnsure`: одно и то же название не должно плодить двойников.
+
+
+
+
+function roomsKey(name) {
+  return String(name == null ? "" : name).trim().toLowerCase();
+}
+function roomsFind(project, name) {
+  const key = roomsKey(name);
+  if (!key) return null;
+  return project.rooms.find((room) => roomsKey(room.name) === key) || null;
+}
+
+// «Было или заведём»: пустое название — это «без помещения», а не комната
+// с пустым именем.
+function roomsEnsure(project, name) {
+  const found = roomsFind(project, name);
+  if (found) return { project, room: found };
+  if (!roomsKey(name)) return { project, room: null };
+  const created = addRoom(project, name);
+  return { project: created.project, room: created.room };
+}
+function roomsUsage(project, roomId) {
+  return project.marks.filter((mark) => mark.roomId === roomId).length;
+}
+function openRoomsEditor(api) {
+  const list = uiEl("div", { class: "rooms" });
+  const input = uiEl("input", {
+    class: "ui-input",
+    type: "text",
+    placeholder: strings.rooms.namePlaceholder,
+    on: {
+      keydown: (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        addFromInput();
+      },
+    },
+  });
+
+  function project() {
+    return api.getState().project;
+  }
+
+  // Перерисовка приходит подпиской на объект: так окно обновляется и от своей
+  // команды, и от чужой — например, от Ctrl+Z, пока оно открыто.
+  function commit(after, label) {
+    canvasCommit(project(), after, label);
+  }
+
+  function fail(error) {
+    api.notify(error && error.message ? error.message : String(error), "error");
+  }
+
+  function addFromInput() {
+    const name = input.value.trim();
+    if (!name) return;
+    if (roomsFind(project(), name)) {
+      input.value = "";
+      return;
+    }
+    try {
+      commit(addRoom(project(), name).project, strings.history.addRoom);
+      input.value = "";
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  function rename(roomId, name) {
+    const current = findRoom(project(), roomId);
+    if (!current || name.trim() === current.name) return;
+    try {
+      commit(updateRoom(project(), roomId, { name }).project, strings.history.renameRoom);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  async function remove(roomId) {
+    const current = findRoom(project(), roomId);
+    if (!current) return;
+    const agreed = await uiConfirm({
+      title: strings.rooms.removeTitle,
+      message: text("rooms.removeMessage", { name: current.name, count: roomsUsage(project(), roomId) }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    commit(deleteRoom(project(), roomId).project, strings.history.removeRoom);
+  }
+
+  function render() {
+    const rooms = roomsInOrder(project());
+    if (rooms.length === 0) {
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
+      return;
+    }
+    list.replaceChildren(
+      ...rooms.map((room) =>
+        uiEl("div", { class: "rooms__row" }, [
+          uiEl("input", {
+            class: "ui-input",
+            type: "text",
+            value: room.name,
+            on: { change: (event) => rename(room.id, event.target.value) },
+          }),
+          uiEl("span", {
+            class: "rooms__count",
+            text: text("rooms.marks", { count: roomsUsage(project(), room.id) }),
+          }),
+          uiButton("🗑", {
+            class: "ui-btn ui-btn--danger",
+            title: strings.rooms.remove,
+            on: { click: () => remove(room.id) },
+          }),
+        ]),
+      ),
+    );
+  }
+
+  render();
+  const unsubscribe = api.subscribe((state, changed) => {
+    if ("project" in changed) render();
+  });
+  const modal = uiModal({
+    title: strings.rooms.title,
+    body: uiEl("div", { class: "rooms__box" }, [
+      list,
+      uiEl("div", { class: "rooms__add" }, [
+        input,
+        uiButton(strings.rooms.add, { class: "ui-btn ui-btn--accent", on: { click: () => addFromInput() } }),
+      ]),
+    ]),
+    actions: [uiButton(strings.dialog.close, { on: { click: () => close() } })],
+    onCancel: () => unsubscribe(),
+  });
+  function close() {
+    unsubscribe();
+    modal.close();
+  }
+  return { close };
+}
+
+// src/panels/marks.js
+// Список меток схемы: обозначение, помещение, расположение и обозначение из
+// оригинального проекта — правятся прямо в строке.
+//
+// Почему список, а не карточка метки: заказчик заполняет «Расположение» и
+// «В оригинальной схеме» не в момент постановки, а потом, разом, по списку.
+// Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
+
+
+
+
+
+
+
+
+const MARKS_NEW_ROOM = "--new-room--";
+
+// Холст подводится к метке переводом координат из render.js: доли плана в
+// пиксели экрана здесь руками не пересчитываются.
+function marksCenteredView(scheme, mark, view) {
+  const host = document.getElementById(PANEL_IDS.canvas);
+  if (!host || !host.clientWidth || !host.clientHeight) return view;
+  const local = planToScreen(mark.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
+  return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
+}
+
+function mountMarksPanel(host, api) {
+  const { getState, setState, notify } = api;
+  const filters = filtersBox(api);
+  const list = uiEl("div", { class: "marks" });
+  const count = uiEl("p", { class: "marks__count" });
+  host.replaceChildren(filters.node, count, list);
+  // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
+  // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
+  // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
+  // перестраивать список по ходу — ради этого он и набирается.
+  let pending = false;
+  let shownSelection = "";
+
+  function typing() {
+    const active = document.activeElement;
+    return Boolean(active && list.contains(active) && active.tagName === "INPUT" && active.type === "text");
+  }
+
+  function fail(error) {
+    notify(error && error.message ? error.message : String(error), "error");
+  }
+
+  function selectMark(markId) {
+    const state = getState();
+    const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!scheme || !mark) return;
+    setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
+  }
+
+  function setField(markId, field, value) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    const next = value.trim();
+    if ((mark[field] || "") === next) return;
+    try {
+      canvasCommit(state.project, updateMark(state.project, markId, { [field]: next }).project, strings.history.markField);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // Комната заводится по ходу: новое название добавляется в справочник объекта
+  // и тем же шагом истории проставляется метке.
+  function setRoom(markId, name) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    try {
+      const ensured = roomsEnsure(state.project, name);
+      const roomId = ensured.room ? ensured.room.id : null;
+      if (roomId === (mark.roomId || null) && ensured.project === state.project) return;
+      canvasCommit(state.project, updateMark(ensured.project, markId, { roomId }).project, strings.history.markRoom);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  async function askNewRoom(markId) {
+    const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
+    if (!name) {
+      render();
+      return;
+    }
+    setRoom(markId, name);
+  }
+
+  function roomField(state, mark) {
+    const select = uiEl("select", { class: "ui-select marks__room", title: strings.marks.room });
+    select.append(uiEl("option", { value: "", text: strings.rooms.none }));
+    for (const room of roomsInOrder(state.project)) {
+      select.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+    select.append(uiEl("option", { value: MARKS_NEW_ROOM, text: strings.rooms.newRoom }));
+    select.value = mark.roomId || "";
+    select.addEventListener("change", () => {
+      if (select.value === MARKS_NEW_ROOM) {
+        askNewRoom(mark.id);
+        return;
+      }
+      const room = select.value ? roomsInOrder(state.project).find((item) => item.id === select.value) : null;
+      setRoom(mark.id, room ? room.name : "");
+    });
+    return select;
+  }
+
+  function markRow(state, row, selected) {
+    const mark = row.mark;
+    const node = uiEl("div", { class: "mark-row" + (selected ? " is-current" : ""), title: strings.marks.focus }, [
+      uiEl("div", { class: "mark-row__head" }, [
+        shapeIcon(row.style.shape, row.style.color, 20),
+        uiEl("span", { class: "mark-row__label", text: row.label }),
+        uiEl("span", { class: "mark-row__type", text: row.type ? row.type.name : "" }),
+      ]),
+      roomField(state, mark),
+      uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        value: mark.location || "",
+        placeholder: strings.marks.locationPlaceholder,
+        title: strings.marks.location,
+        on: { change: (event) => setField(mark.id, "location", event.target.value) },
+      }),
+      uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        value: mark.original || "",
+        placeholder: strings.marks.originalPlaceholder,
+        title: strings.marks.original,
+        on: { change: (event) => setField(mark.id, "original", event.target.value) },
+      }),
+    ]);
+    node.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("input, select, button, option")) return;
+      selectMark(mark.id);
+    });
+    return node;
+  }
+
+  function render() {
+    pending = false;
+    const state = getState();
+    if (!state.project || !state.schemeId) {
+      count.textContent = "";
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
+      return;
+    }
+    const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
+    const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
+    count.textContent = total > 0 ? text("marks.count", { shown: rows.length, total }) : "";
+    if (rows.length === 0) {
+      list.replaceChildren(
+        uiEl("p", { class: "panel__empty", text: total > 0 ? strings.marks.nothingFound : strings.panels.marksEmpty }),
+      );
+      return;
+    }
+    const selected = new Set(state.selectedMarkIds);
+    list.replaceChildren(...rows.map((row) => markRow(state, row, selected.has(row.mark.id))));
+    // Подводим список к выделенной строке только когда выделение сменилось:
+    // иначе правка поля в одной строке уводила бы список к другой.
+    const selection = state.selectedMarkIds.join(",");
+    const current = list.querySelector(".mark-row.is-current");
+    if (current && selection !== shownSelection) current.scrollIntoView({ block: "nearest" });
+    shownSelection = selection;
+  }
+
+  // Отложенная перерисовка: то, что накопилось, пока пользователь печатал.
+  host.addEventListener("focusout", () => {
+    if (!pending) return;
+    setTimeout(() => {
+      if (!typing()) render();
+    }, 0);
+  });
+  api.subscribe((state, changed) => {
+    if (!("project" in changed || "schemeId" in changed || "filter" in changed || "selectedMarkIds" in changed)) return;
+    if (typing()) {
+      pending = true;
+      return;
+    }
+    render();
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.marks, mountMarksPanel);
+
 // src/store.js
 // Хранение в браузере: IndexedDB своими руками, без единой зависимости.
 // База `scheme-markup`, хранилища `projects` (документ объекта), `images`
@@ -3864,6 +4952,452 @@ async function estimateSpace() {
   }
 }
 
+// src/panels/types.js
+// Справочник объекта: типы меток, категории, помещения и шаблон для новых
+// объектов.
+//
+// Справочник у каждого объекта свой — правка типов здесь не трогает соседние
+// объекты. Общим остаётся только шаблон: снимок справочника в настройках
+// браузера, с которого панель объектов создаёт следующий объект; уже
+// созданные остаются как были.
+const TYPE_TEMPLATE_KEY = "typeTemplate";
+const TYPES_SWATCH_SIZE = 34;
+
+function typesSnapshot(project) {
+  return {
+    categories: project.categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      color: category.color,
+      shape: category.shape,
+    })),
+    markTypes: project.markTypes.map((type) => ({
+      categoryId: type.categoryId,
+      code: type.code,
+      name: type.name,
+      shape: type.shape,
+      blockMode: type.blockMode,
+    })),
+  };
+}
+
+// Шаблон для `createProject`: те же категории и типы, но с новыми
+// идентификаторами — два объекта не должны делить ни одну запись справочника.
+// Форма и режим блока сверяются со списками модели: шаблон мог быть сохранён
+// давно, а неизвестное значение объект бы уже не принял.
+function typesTemplateFrom(template) {
+  if (!template || !Array.isArray(template.categories) || !Array.isArray(template.markTypes)) return null;
+  const ids = new Map();
+  const categories = template.categories.map((category, index) => {
+    const id = globalThis.crypto.randomUUID();
+    ids.set(category.id, id);
+    return {
+      id,
+      name: category.name,
+      color: category.color,
+      shape: SHAPE_NAMES.includes(category.shape) ? category.shape : SHAPE_NAMES[0],
+      order: index,
+    };
+  });
+  const markTypes = template.markTypes
+    .filter((type) => ids.has(type.categoryId))
+    .map((type, index) => ({
+      id: globalThis.crypto.randomUUID(),
+      categoryId: ids.get(type.categoryId),
+      code: type.code,
+      name: type.name,
+      shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
+      blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
+      order: index,
+    }));
+  if (categories.length === 0 || markTypes.length === 0) return null;
+  return { categories, markTypes };
+}
+
+function typesShapeCell({ shape, color, active, inherit, onPick }) {
+  const cell = uiEl(
+    "button",
+    {
+      class: "shapes__cell" + (active ? " is-active" : "") + (inherit ? " shapes__cell--inherit" : ""),
+      type: "button",
+      title: inherit ? strings.shapes.inherit : strings.shapes[shape] || shape,
+      on: { click: onPick },
+    },
+    [shapeIcon(shape, color, TYPES_SWATCH_SIZE)],
+  );
+  return cell;
+}
+
+// Выбор формы — сетка нарисованных фигур, а не список названий: обозначение
+// узнают в лицо, а не по слову. Вариант «как у категории» стоит первой ячейкой
+// и показывает фигуру категории с пометкой.
+function openTypesShapePicker({ shape, color, allowInherit, inheritShape }) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (result) => {
+      modal.close();
+      resolve(result);
+    };
+    const cells = [];
+    if (allowInherit) {
+      cells.push(
+        typesShapeCell({
+          shape: inheritShape || SHAPE_PALETTE[0],
+          color,
+          active: !shape,
+          inherit: true,
+          onPick: () => done({ shape: null }),
+        }),
+      );
+    }
+    for (const name of SHAPE_PALETTE) {
+      cells.push(
+        typesShapeCell({ shape: name, color, active: shape === name, onPick: () => done({ shape: name }) }),
+      );
+    }
+    modal = uiModal({
+      title: strings.dictionary.shape,
+      body: uiEl("div", { class: "shapes" }, cells),
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
+function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
+  const button = uiEl(
+    "button",
+    {
+      class: "dict__shape" + (allowInherit && !shape ? " dict__shape--inherit" : ""),
+      type: "button",
+      // В подсказке — имя того, что выбрано сейчас: у снятых с палитры фигур
+      // это единственное место, где видно, как называется старое значение.
+      title: shape ? strings.shapes[shape] || shape : allowInherit ? strings.shapes.inherit : strings.dictionary.shape,
+      on: {
+        click: async () => {
+          const picked = await openTypesShapePicker({ shape, color, allowInherit, inheritShape });
+          if (picked) onPick(picked.shape);
+        },
+      },
+    },
+    [shapeIcon(shape || inheritShape || SHAPE_PALETTE[0], color, 26)],
+  );
+  return button;
+}
+function openTypesDictionary(api) {
+  const body = uiEl("div", { class: "dict" });
+
+  function project() {
+    return api.getState().project;
+  }
+
+  function fail(error) {
+    api.notify(error && error.message ? error.message : String(error), "error");
+    render();
+  }
+
+  // Своей перерисовки после команды не нужно: правка объекта приходит подпиской,
+  // и тем же путём приходит чужая — Ctrl+Z при открытом окне.
+  function commit(build, label) {
+    try {
+      canvasCommit(project(), build(project()), label);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  function categorySelect(value, onPick) {
+    const select = uiEl("select", {
+      class: "ui-select",
+      title: strings.dictionary.category,
+      on: { change: (event) => onPick(event.target.value) },
+    });
+    for (const category of project().categories) {
+      select.append(uiEl("option", { value: category.id, text: category.name }));
+    }
+    select.value = value || "";
+    return select;
+  }
+
+  async function removeType(type) {
+    const agreed = await uiConfirm({
+      title: strings.dictionary.removeTypeTitle,
+      message: text("dictionary.removeTypeMessage", { code: type.code, name: type.name }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    commit((current) => deleteType(current, type.id).project, strings.history.removeType);
+  }
+
+  async function removeCategory(category) {
+    const agreed = await uiConfirm({
+      title: strings.dictionary.removeCategoryTitle,
+      message: text("dictionary.removeCategoryMessage", { name: category.name }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    commit((current) => deleteCategory(current, category.id).project, strings.history.removeCategory);
+  }
+
+  function typeRow(type, count) {
+    const category = findCategory(project(), type.categoryId);
+    const style = styleOf(project(), type.id);
+    // Невозможное действие видно невозможным: тип с метками не удаляется,
+    // и кнопка об этом говорит до нажатия, а не после.
+    const removeButton = uiButton("🗑", {
+      class: "ui-btn ui-btn--danger",
+      title: count > 0 ? text("errors.typeHasMarks", { code: type.code, count }) : strings.dictionary.removeType,
+      on: { click: () => removeType(type) },
+    });
+    removeButton.disabled = count > 0;
+    return uiEl("div", { class: "dict__row" }, [
+      shapeIcon(style.shape, style.color, 20),
+      uiEl("input", {
+        class: "ui-input dict__code",
+        type: "text",
+        value: type.code,
+        title: strings.dictionary.code,
+        attrs: { maxlength: "2" },
+        on: {
+          change: (event) =>
+            commit((current) => updateType(current, type.id, { code: event.target.value }).project, strings.history.editType),
+        },
+      }),
+      uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        value: type.name,
+        title: strings.dictionary.name,
+        on: {
+          change: (event) =>
+            commit((current) => updateType(current, type.id, { name: event.target.value }).project, strings.history.editType),
+        },
+      }),
+      categorySelect(type.categoryId, (categoryId) =>
+        commit((current) => updateType(current, type.id, { categoryId }).project, strings.history.editType),
+      ),
+      typesShapeButton({
+        shape: type.shape,
+        color: category ? category.color : "#57606A",
+        allowInherit: true,
+        inheritShape: category ? category.shape : SHAPE_PALETTE[0],
+        onPick: (shape) =>
+          commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
+      }),
+      uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
+      removeButton,
+    ]);
+  }
+
+  function categoryRow(category) {
+    const types = project().markTypes.filter((type) => type.categoryId === category.id).length;
+    const removeButton = uiButton("🗑", {
+      class: "ui-btn ui-btn--danger",
+      title: types > 0 ? strings.errors.categoryHasTypes : strings.dictionary.removeCategory,
+      on: { click: () => removeCategory(category) },
+    });
+    removeButton.disabled = types > 0;
+    return uiEl("div", { class: "dict__row" }, [
+      uiEl("input", {
+        class: "dict__color",
+        type: "color",
+        value: category.color,
+        title: strings.dictionary.color,
+        on: {
+          change: (event) =>
+            commit(
+              (current) => updateCategory(current, category.id, { color: event.target.value }).project,
+              strings.history.editCategory,
+            ),
+        },
+      }),
+      uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        value: category.name,
+        title: strings.dictionary.name,
+        on: {
+          change: (event) =>
+            commit(
+              (current) => updateCategory(current, category.id, { name: event.target.value }).project,
+              strings.history.editCategory,
+            ),
+        },
+      }),
+      typesShapeButton({
+        shape: category.shape,
+        color: category.color,
+        allowInherit: false,
+        onPick: (shape) =>
+          commit((current) => updateCategory(current, category.id, { shape }).project, strings.history.editCategory),
+      }),
+      removeButton,
+    ]);
+  }
+
+  function addTypeRow() {
+    const code = uiEl("input", {
+      class: "ui-input dict__code",
+      type: "text",
+      placeholder: strings.dictionary.codePlaceholder,
+      attrs: { maxlength: "2" },
+    });
+    const name = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.dictionary.typeNamePlaceholder,
+    });
+    let categoryId = project().categories.length > 0 ? project().categories[0].id : "";
+    const add = () =>
+      commit(
+        (current) => addType(current, { code: code.value, name: name.value, categoryId }).project,
+        strings.history.addType,
+      );
+    return uiEl("div", { class: "dict__row dict__row--add" }, [
+      code,
+      name,
+      categorySelect(categoryId, (value) => {
+        categoryId = value;
+      }),
+      uiButton(strings.dictionary.addType, { class: "ui-btn ui-btn--accent", on: { click: add } }),
+    ]);
+  }
+
+  function addCategoryRow() {
+    const name = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.dictionary.categoryNamePlaceholder,
+    });
+    const color = uiEl("input", { class: "dict__color", type: "color", value: "#57606A" });
+    let shape = SHAPE_PALETTE[0];
+    const shapeButton = typesShapeButton({
+      shape,
+      color: color.value,
+      allowInherit: false,
+      onPick: (picked) => {
+        shape = picked || SHAPE_PALETTE[0];
+        shapeButton.replaceChildren(shapeIcon(shape, color.value, 26));
+      },
+    });
+    const add = () =>
+      commit(
+        (current) => addCategory(current, { name: name.value, color: color.value, shape }).project,
+        strings.history.addCategory,
+      );
+    return uiEl("div", { class: "dict__row dict__row--add" }, [
+      color,
+      name,
+      shapeButton,
+      uiButton(strings.dictionary.addCategory, { class: "ui-btn ui-btn--accent", on: { click: add } }),
+    ]);
+  }
+
+  function render() {
+    const current = project();
+    if (!current) {
+      body.replaceChildren();
+      return;
+    }
+    const counts = new Map();
+    for (const mark of current.marks) counts.set(mark.typeId, (counts.get(mark.typeId) || 0) + 1);
+    const typeRows = [];
+    const shown = new Set();
+    for (const { category, types } of typesInOrder(current)) {
+      typeRows.push(uiEl("p", { class: "dict__group", text: category.name }));
+      for (const type of types) {
+        shown.add(type.id);
+        typeRows.push(typeRow(type, counts.get(type.id) || 0));
+      }
+    }
+    for (const type of current.markTypes) {
+      if (!shown.has(type.id)) typeRows.push(typeRow(type, counts.get(type.id) || 0));
+    }
+    if (typeRows.length === 0) typeRows.push(uiEl("p", { class: "panel__empty", text: strings.dictionary.noTypes }));
+
+    body.replaceChildren(
+      uiEl("h4", { class: "dict__title", text: strings.dictionary.categories }),
+      ...current.categories.map((category) => categoryRow(category)),
+      addCategoryRow(),
+      uiEl("h4", { class: "dict__title", text: strings.dictionary.types }),
+      ...typeRows,
+      addTypeRow(),
+    );
+  }
+
+  render();
+  // Окно живёт, пока его не закрыли, и показывает объект таким, какой он сейчас:
+  // отмена чужого действия обновляет список, а не оставляет вчерашний.
+  const unsubscribe = api.subscribe((state, changed) => {
+    if ("project" in changed) render();
+  });
+  const modal = uiModal({
+    title: strings.dictionary.title,
+    body,
+    actions: [uiButton(strings.dialog.close, { on: { click: () => close() } })],
+    onCancel: () => unsubscribe(),
+  });
+  function close() {
+    unsubscribe();
+    modal.close();
+  }
+  return { close };
+}
+
+function mountTypesPanel(host, api) {
+  const { getState, notify, subscribe } = api;
+
+  const dictionaryButton = uiButton(strings.dictionary.open, {
+    class: "ui-btn ui-btn--wide",
+    on: { click: () => openTypesDictionary(api) },
+  });
+  const roomsButton = uiButton(strings.rooms.open, {
+    class: "ui-btn ui-btn--wide",
+    on: { click: () => openRoomsEditor(api) },
+  });
+  const saveButton = uiButton(strings.dictionary.saveTemplate, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.dictionary.saveTemplateHint,
+    on: { click: () => saveTemplate() },
+  });
+  const resetButton = uiButton(strings.dictionary.resetTemplate, {
+    class: "ui-btn ui-btn--wide",
+    on: { click: () => resetTemplate() },
+  });
+  // Кнопка возврата показывается, только когда шаблон и правда сохранён.
+  resetButton.hidden = true;
+  host.replaceChildren(uiEl("div", { class: "dict-panel" }, [dictionaryButton, roomsButton, saveButton, resetButton]));
+
+  async function saveTemplate() {
+    const state = getState();
+    if (!state.project) return;
+    await setSetting(TYPE_TEMPLATE_KEY, typesSnapshot(state.project));
+    notify(strings.dictionary.templateSaved, "success");
+    syncButtons();
+  }
+
+  async function resetTemplate() {
+    await setSetting(TYPE_TEMPLATE_KEY, null);
+    notify(strings.dictionary.templateReset, "success");
+    syncButtons();
+  }
+
+  async function syncButtons() {
+    const template = await getSetting(TYPE_TEMPLATE_KEY);
+    resetButton.hidden = !template;
+    const state = getState();
+    dictionaryButton.disabled = !state.project;
+    saveButton.disabled = !state.project;
+  }
+
+  subscribe((state, changed) => {
+    if ("project" in changed) syncButtons();
+  });
+  syncButtons();
+}
+
+registerPanel(PANEL_IDS.properties, mountTypesPanel);
+
 // src/panels/projects.js
 // Объекты: список в шапке, переключение, переименование, удаление,
 // первый запуск и автосохранение в браузер.
@@ -3951,8 +5485,12 @@ function mountProjectsPanel(host, api) {
     renderList();
   }
 
+  // Новый объект начинается с сохранённого справочника, если он есть: копия
+  // шаблона с новыми идентификаторами, дальше объект живёт своей жизнью.
   async function createAndOpen() {
-    const project = createProject({ name: uniqueProjectName(known) });
+    const saved = await getSetting(TYPE_TEMPLATE_KEY);
+    const template = typesTemplateFrom(saved);
+    const project = createProject({ name: uniqueProjectName(known), ...(template || {}) });
     await saveProject(project);
     await refreshList();
     setState({ project, schemeId: null, selectedMarkIds: [], activeTypeId: null });

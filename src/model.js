@@ -5,7 +5,34 @@ import { strings, text } from "./strings.js";
 
 export const FORMAT_VERSION = 1;
 
-export const SHAPE_NAMES = ["circle", "circle-cross", "square", "triangle", "star", "diamond", "hexagon"];
+// Условные обозначения, которые предлагает сетка выбора. Их различают на
+// чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
+// а внутри семейства — засечкой: перекрестье, точка, сплошная заливка.
+// Порядок — порядок сетки. Различимость проверяет test/shapes.test.js:
+// фигура, которая сливается с соседкой в размере метки, красит его.
+export const SHAPE_PALETTE = [
+  "circle",
+  "circle-cross",
+  "circle-dot",
+  "circle-fill",
+  "square",
+  "square-cross",
+  "square-fill",
+  "triangle",
+  "triangle-down",
+  "diamond",
+  "star",
+  "plus",
+];
+
+// Фигуры, которые ещё встречаются в объектах, но сетка их больше не предлагает:
+// в размере метки шестиугольник неотличим от круга, залитый ромб — от залитого
+// квадрата, а круг, залитый наполовину, — от залитого целиком. Рисоваться они
+// продолжают как раньше: объекты с ними уже существуют.
+export const SHAPE_LEGACY = ["hexagon", "diamond-fill", "circle-half"];
+
+// Допустимые значения поля формы: палитра плюс старые значения.
+export const SHAPE_NAMES = [...SHAPE_PALETTE, ...SHAPE_LEGACY];
 export const BLOCK_MODES = ["each", "single"];
 export const MARK_KINDS = ["point", "line"];
 
@@ -216,6 +243,13 @@ export function typesInOrder(project) {
         .map((item) => item.type),
     }))
     .filter((group) => group.types.length > 0);
+}
+
+// Порядок помещений — порядок появления: их заводят по ходу разметки, и этот
+// порядок пользователю знаком. Живёт рядом со schemesInOrder и typesInOrder:
+// порядок сущностей объекта — правило объекта, а не панели.
+export function roomsInOrder(project) {
+  return project && Array.isArray(project.rooms) ? [...project.rooms] : [];
 }
 
 // Порядок схем объекта — одно правило на всех: нумерация, панели и выгрузки

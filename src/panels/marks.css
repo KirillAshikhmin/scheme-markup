@@ -1,0 +1,297 @@
+/* Список меток, фильтры и справочник объекта. Панель узкая, поэтому поля
+   строки стоят столбиком: подписи заменяют подсказки-title. */
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.filters__details {
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: var(--panel-bg-deep);
+}
+
+.filters__summary {
+  cursor: pointer;
+  color: var(--panel-muted);
+  font-size: 12px;
+  list-style: none;
+}
+
+.filters__summary::before {
+  content: "▸ ";
+}
+
+.filters__details[open] .filters__summary::before {
+  content: "▾ ";
+}
+
+.filters__tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 0 2px;
+}
+
+.filters__category,
+.filters__type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--panel-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.filters__category {
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.filters__type {
+  padding-left: 16px;
+  color: var(--panel-muted);
+}
+
+.filters__check {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.filters__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.filters__code {
+  min-width: 22px;
+  font-weight: 600;
+  color: var(--panel-text);
+}
+
+.filters__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marks__count {
+  margin: 8px 0 4px;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.marks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mark-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: var(--panel-bg-deep);
+  cursor: pointer;
+}
+
+.mark-row.is-current {
+  border-color: var(--accent);
+}
+
+.mark-row__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mark-row__label {
+  font-weight: 700;
+  color: var(--panel-text);
+}
+
+.mark-row__type {
+  color: var(--panel-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Справочник объекта */
+
+.dict-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dict {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 520px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.dict__title {
+  margin: 10px 0 2px;
+  color: var(--panel-text);
+  font-size: 13px;
+}
+
+.dict__group {
+  margin: 8px 0 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.dict__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dict__row--add {
+  padding-top: 6px;
+  border-top: 1px dashed var(--panel-line);
+}
+
+.dict__row .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dict__code {
+  flex: none;
+  width: 52px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.dict__color {
+  flex: none;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: var(--panel-bg-deep);
+}
+
+.dict__count {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.rooms__box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 360px;
+}
+
+.rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.rooms__row,
+.rooms__add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rooms__row .ui-input,
+.rooms__add .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rooms__count {
+  flex: none;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+/* Выбор формы: сетка нарисованных обозначений вместо списка названий. */
+
+.dict__shape {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.dict__shape:hover {
+  border-color: var(--panel-muted);
+}
+
+.dict__shape--inherit {
+  border-style: dashed;
+}
+
+.shapes {
+  display: grid;
+  grid-template-columns: repeat(5, 52px);
+  gap: 6px;
+}
+
+.shapes__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.shapes__cell:hover {
+  border-color: var(--panel-muted);
+}
+
+.shapes__cell.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* «Как у категории»: та же фигура, но пунктиром — видно, что она не своя. */
+.shapes__cell--inherit {
+  border-style: dashed;
+  border-color: var(--panel-muted);
+}
+
+.shapes__icon {
+  display: block;
+}
