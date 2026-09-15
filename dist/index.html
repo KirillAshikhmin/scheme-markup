@@ -714,6 +714,247 @@
   z-index: 5;
 }
 
+/* Печатная раскладка и предпросмотр таблицы.
+   Один и тот же узел .print-doc показывается в диалоге выгрузки и уходит в
+   печать: на бумаге оказывается ровно то, что видно на экране. Экран прячется
+   только на время нашей печати — по классу printing на body. */
+
+#print-root {
+  display: none;
+}
+
+.print-doc {
+  background: #ffffff;
+  color: #1f2328;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  padding: 4px 2px 12px;
+}
+
+.print-doc__head {
+  margin-bottom: 10px;
+}
+
+.print-doc__title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Комната — вторым заголовком под именем объекта: лист по одной комнате
+   должен отличаться от полного с первого взгляда. */
+.print-doc__room {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 2px 0 0;
+}
+
+/* Пометка о сужении фильтром: не украшение, а предупреждение о неполном листе. */
+.print-doc__note {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 2px 0 0;
+}
+
+.print-doc__swatch {
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+  display: inline-block;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  width: 10px;
+}
+
+.print-doc__sub {
+  color: #57606a;
+  font-size: 12px;
+  margin: 2px 0 0;
+}
+
+.print-doc__group {
+  margin-bottom: 14px;
+}
+
+/* Заголовок категории — её цветом, с полосой под ним: так же, как разделены
+   категории на рукописном листе заказчика. */
+.print-doc__group-title {
+  border-bottom: 2px solid var(--print-color, #d0d7de);
+  color: var(--print-color, #1f2328);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  padding-bottom: 3px;
+}
+
+.print-doc__table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.print-doc__table th {
+  border-bottom: 1px solid #d0d7de;
+  color: #57606a;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px 3px 0;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.print-doc__table td {
+  border-bottom: 1px solid #eaeef2;
+  padding: 3px 8px 3px 0;
+  vertical-align: top;
+}
+
+/* Цветная полоса слева у строки: по ней категория видна и там, где заголовок
+   группы остался на предыдущей странице. */
+.print-doc__row td:first-child {
+  border-left: 3px solid var(--print-row-color, transparent);
+  padding-left: 7px;
+}
+
+.print-doc__label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.print-doc__image {
+  display: block;
+  max-width: 100%;
+}
+
+.print-doc__foot {
+  color: #57606a;
+  font-size: 11px;
+  margin-top: 10px;
+}
+
+/* Предпросмотр в диалоге: лист в рамке, прокрутка внутри. */
+.export__preview {
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+/* Кнопки выгрузки в шапке и поля диалогов. */
+.export {
+  display: flex;
+  gap: 8px;
+}
+
+.export__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 520px;
+}
+
+.export__controls {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.export__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.export__field-label {
+  color: var(--muted, #8b949e);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.export__toggle {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.export__hint {
+  color: var(--muted, #8b949e);
+  font-size: 12px;
+  margin: 0;
+}
+
+@media print {
+  @page {
+    margin: 12mm 10mm 16mm;
+  }
+
+  body.printing #app,
+  body.printing #notifications {
+    display: none !important;
+  }
+
+  body.printing #print-root {
+    display: block;
+  }
+
+  body.printing {
+    background: #ffffff;
+  }
+
+  /* Цвета категорий — смысл листа, а не украшение: без этого принтер съедает
+     и заголовки, и полосы слева. */
+  .print-doc,
+  .print-doc * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-doc {
+    font-size: 10.5pt;
+    padding: 0;
+  }
+
+  .print-doc__title {
+    font-size: 15pt;
+  }
+
+  .print-doc__room {
+    font-size: 12.5pt;
+  }
+
+  .print-doc__group-title {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Шапка колонок повторяется на каждой странице, строка не рвётся пополам. */
+  .print-doc__table thead {
+    display: table-header-group;
+  }
+
+  .print-doc__row {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Имя объекта — в колонтитуле на каждой странице. */
+  .print-doc__foot {
+    bottom: 0;
+    left: 0;
+    position: fixed;
+    right: 0;
+    border-top: 1px solid #d0d7de;
+    padding-top: 3px;
+  }
+
+  .print-doc--scheme .print-doc__image {
+    max-height: 96vh;
+    object-fit: contain;
+  }
+}
+
 :root {
   --panel-bg: #161b22;
   --panel-bg-deep: #0d1117;
@@ -1332,6 +1573,61 @@ const strings = {
     templateSaved: "Справочник сохранён как шаблон для новых объектов",
     resetTemplate: "Вернуть стандартный шаблон",
     templateReset: "Новые объекты снова начнутся со стандартного справочника",
+  },
+  tables: {
+    label: "Обозначение",
+    type: "Тип",
+    room: "Помещение",
+    location: "Расположение",
+    original: "В оригинале",
+    code: "Код",
+    name: "Название",
+    category: "Категория",
+    color: "Цвет",
+    shape: "Форма",
+    marksTitle: "Метки объекта",
+    typesTitle: "Справочник типов",
+    noRoom: "Без помещения",
+    onlyShown: "Показаны только: {names}",
+    partial: "Часть меток скрыта фильтром — лист неполный",
+  },
+  exportPanel: {
+    tableTitle: "Таблица",
+    tableDialog: "Таблица меток",
+    schemeTitle: "Схема",
+    schemeDialog: "Выгрузить схему",
+    groupBy: "Разбивка",
+    groupByCategory: "По категориям",
+    groupByType: "По типам",
+    groupByRoom: "По помещениям",
+    kind: "Таблица",
+    kindMarks: "Метки",
+    kindTypes: "Справочник типов",
+    currentScheme: "Только текущая схема",
+    area: "Что выгружаем",
+    areaAll: "Вся схема",
+    areaView: "Как вижу на экране",
+    withLegend: "С легендой в углу",
+    scale: "Множитель",
+    size: "{width} × {height} px · {mmWidth} × {mmHeight} мм при 300 dpi",
+    rows: "Строк: {count}",
+    csv: "CSV для Excel",
+    markdown: "Markdown",
+    copy: "Копировать",
+    png: "Картинкой PNG",
+    print: "Печать",
+    download: "Скачать PNG",
+    allSchemes: "Все схемы (zip)",
+    copied: "Таблица скопирована — вставляйте в Таблицы",
+    copyFailed: "Браузер не дал доступ к буферу обмена",
+    saved: "Файл «{name}» выгружен",
+    noMarks: "Меток пока нет — выгружать нечего",
+    noScheme: "Схема не выбрана",
+    noImage: "У схемы нет плана",
+    schemesDone: "Схем в архиве: {count}",
+    busy: "Готовим файл…",
+    tooBig: "Слишком большая картинка — уменьшите множитель",
+    failed: "Не удалось собрать файл",
   },
   dialog: {
     confirm: "Да, удалить",
@@ -3847,6 +4143,1327 @@ function mountCanvasHint(host, api) {
 registerPanel(PANEL_IDS.canvas, mountCanvas);
 registerPanel(PANEL_IDS.overlay, mountCanvasHint);
 
+// src/projectFile.js
+// Формат файла проекта: один zip с project.json, планами в schemes/ и README.txt.
+// Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
+// там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
+const PROJECT_ENTRY = "project.json";
+const SCHEMES_DIR = "schemes/";
+const README_ENTRY = "README.txt";
+
+const LOCAL_SIGNATURE = 0x04034b50;
+const CENTRAL_SIGNATURE = 0x02014b50;
+const END_SIGNATURE = 0x06054b50;
+const LOCAL_HEADER_SIZE = 30;
+const CENTRAL_HEADER_SIZE = 46;
+const END_HEADER_SIZE = 22;
+const METHOD_STORED = 0;
+const METHOD_DEFLATE = 8;
+const UTF8_FLAG = 0x0800;
+const ZIP64_MARK = 0xffffffff;
+const MAX_ZIP_BYTES = 0xfffffffe;
+
+// Тип картинки восстанавливается по расширению: имя файла в архиве — всё,
+// что о ней известно после распаковки.
+const IMAGE_TYPES = [
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/jpeg", "jpeg"],
+];
+
+function fileError(key, vars) {
+  const error = new Error(text("errors." + key, vars));
+  error.code = key;
+  return error;
+}
+
+// ——— байты ———————————————————————————————————————————————————————————
+
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder("utf-8");
+
+function encodeText(value) {
+  return utf8Encoder.encode(value);
+}
+
+function decodeText(bytes) {
+  return utf8Decoder.decode(bytes);
+}
+
+async function toBytes(data) {
+  if (data == null) return new Uint8Array(0);
+  if (data instanceof Uint8Array) return data;
+  if (typeof data === "string") return encodeText(data);
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (typeof data.arrayBuffer === "function") return new Uint8Array(await data.arrayBuffer());
+  throw fileError("archiveBroken");
+}
+
+let crcTable = null;
+function crc32(bytes) {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let value = n;
+      for (let bit = 0; bit < 8; bit += 1) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      crcTable[n] = value >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xff];
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function hasCompression() {
+  return typeof CompressionStream === "function" && typeof DecompressionStream === "function";
+}
+
+async function collectStream(readable) {
+  const reader = readable.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const step = await reader.read();
+    if (step.done) break;
+    const chunk = step.value instanceof Uint8Array ? step.value : new Uint8Array(step.value);
+    chunks.push(chunk);
+    total += chunk.length;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
+// Поток, а не один кусок: большой план не держит вкладку — между чтениями
+// управление возвращается странице.
+async function pipeBytes(bytes, transform) {
+  const source = new Blob([bytes]).stream().pipeThrough(transform);
+  return collectStream(source);
+}
+
+async function deflateRaw(bytes) {
+  return pipeBytes(bytes, new CompressionStream("deflate-raw"));
+}
+
+async function inflateRaw(bytes) {
+  try {
+    return await pipeBytes(bytes, new DecompressionStream("deflate-raw"));
+  } catch {
+    throw fileError("archiveBroken");
+  }
+}
+
+// ——— запись zip ——————————————————————————————————————————————————————
+
+function dosStamp(date) {
+  const year = date.getUTCFullYear();
+  if (year < 1980) return { time: 0, date: (1 << 5) | 1 };
+  return {
+    time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | (date.getUTCSeconds() >> 1),
+    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
+  };
+}
+
+function headerBuffer(size) {
+  const bytes = new Uint8Array(size);
+  return { bytes, view: new DataView(bytes.buffer) };
+}
+
+/**
+ * Собирает zip из списка {name, data, compress}. `data` — Uint8Array, ArrayBuffer,
+ * строка или Blob. Размеры известны заранее, дескрипторов данных нет — архив
+ * открывается штатным распаковщиком ОС.
+ */
+async function writeZip(files, options = {}) {
+  const allowCompression = options.compress !== false && hasCompression();
+  const stamp = dosStamp(options.date instanceof Date ? options.date : new Date());
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const list = [...files];
+
+  const parts = [];
+  const central = [];
+  let offset = 0;
+
+  for (let index = 0; index < list.length; index += 1) {
+    const entry = list[index];
+    const nameBytes = encodeText(entry.name);
+    const source = await toBytes(entry.data);
+    const wantCompression = entry.compress === false ? false : allowCompression;
+
+    let method = METHOD_STORED;
+    let payload = source;
+    if (wantCompression && source.length > 0) {
+      const packed = await deflateRaw(source);
+      if (packed.length < source.length) {
+        method = METHOD_DEFLATE;
+        payload = packed;
+      }
+    }
+    const crc = crc32(source);
+
+    const local = headerBuffer(LOCAL_HEADER_SIZE + nameBytes.length);
+    local.view.setUint32(0, LOCAL_SIGNATURE, true);
+    local.view.setUint16(4, 20, true);
+    local.view.setUint16(6, UTF8_FLAG, true);
+    local.view.setUint16(8, method, true);
+    local.view.setUint16(10, stamp.time, true);
+    local.view.setUint16(12, stamp.date, true);
+    local.view.setUint32(14, crc, true);
+    local.view.setUint32(18, payload.length, true);
+    local.view.setUint32(22, source.length, true);
+    local.view.setUint16(26, nameBytes.length, true);
+    local.view.setUint16(28, 0, true);
+    local.bytes.set(nameBytes, LOCAL_HEADER_SIZE);
+
+    parts.push(local.bytes, payload);
+    central.push({ nameBytes, method, crc, packedSize: payload.length, size: source.length, offset });
+    offset += local.bytes.length + payload.length;
+    if (offset > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
+    if (onProgress) onProgress({ done: index + 1, total: list.length, name: entry.name });
+  }
+
+  const directoryOffset = offset;
+  let directorySize = 0;
+  for (const entry of central) {
+    const header = headerBuffer(CENTRAL_HEADER_SIZE + entry.nameBytes.length);
+    header.view.setUint32(0, CENTRAL_SIGNATURE, true);
+    header.view.setUint16(4, 20, true);
+    header.view.setUint16(6, 20, true);
+    header.view.setUint16(8, UTF8_FLAG, true);
+    header.view.setUint16(10, entry.method, true);
+    header.view.setUint16(12, stamp.time, true);
+    header.view.setUint16(14, stamp.date, true);
+    header.view.setUint32(16, entry.crc, true);
+    header.view.setUint32(20, entry.packedSize, true);
+    header.view.setUint32(24, entry.size, true);
+    header.view.setUint16(28, entry.nameBytes.length, true);
+    header.view.setUint32(42, entry.offset, true);
+    header.bytes.set(entry.nameBytes, CENTRAL_HEADER_SIZE);
+    parts.push(header.bytes);
+    directorySize += header.bytes.length;
+  }
+
+  const end = headerBuffer(END_HEADER_SIZE);
+  end.view.setUint32(0, END_SIGNATURE, true);
+  end.view.setUint16(8, central.length, true);
+  end.view.setUint16(10, central.length, true);
+  end.view.setUint32(12, directorySize, true);
+  end.view.setUint32(16, directoryOffset, true);
+  parts.push(end.bytes);
+  if (directoryOffset + directorySize + END_HEADER_SIZE > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
+
+  return new Blob(parts, { type: "application/zip" });
+}
+
+// ——— чтение zip ——————————————————————————————————————————————————————
+
+function findEndHeader(bytes, view) {
+  const limit = Math.max(0, bytes.length - 0xffff - END_HEADER_SIZE);
+  for (let at = bytes.length - END_HEADER_SIZE; at >= limit; at -= 1) {
+    if (view.getUint32(at, true) === END_SIGNATURE) return at;
+  }
+  return -1;
+}
+
+/** Распаковывает zip в Map «имя файла → байты». Понимает stored и deflate. */
+async function readZip(blob) {
+  const bytes = await toBytes(blob);
+  if (bytes.length < END_HEADER_SIZE) throw fileError("notAProject");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  const endAt = findEndHeader(bytes, view);
+  if (endAt < 0) throw fileError("notAProject");
+
+  const count = view.getUint16(endAt + 10, true);
+  const directorySize = view.getUint32(endAt + 12, true);
+  const directoryOffset = view.getUint32(endAt + 16, true);
+  if (directoryOffset === ZIP64_MARK || directorySize === ZIP64_MARK || count === 0xffff) {
+    throw fileError("zip64Unsupported");
+  }
+  if (directoryOffset + directorySize > bytes.length) throw fileError("archiveBroken");
+
+  const entries = new Map();
+  let at = directoryOffset;
+  for (let index = 0; index < count; index += 1) {
+    if (at + CENTRAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
+    if (view.getUint32(at, true) !== CENTRAL_SIGNATURE) throw fileError("archiveBroken");
+    const method = view.getUint16(at + 10, true);
+    const crc = view.getUint32(at + 16, true);
+    const packedSize = view.getUint32(at + 20, true);
+    const size = view.getUint32(at + 24, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const extraLength = view.getUint16(at + 30, true);
+    const commentLength = view.getUint16(at + 32, true);
+    const localOffset = view.getUint32(at + 42, true);
+    const name = decodeText(bytes.subarray(at + CENTRAL_HEADER_SIZE, at + CENTRAL_HEADER_SIZE + nameLength));
+    at += CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
+
+    if (name.endsWith("/")) continue;
+    if (packedSize === ZIP64_MARK || size === ZIP64_MARK || localOffset === ZIP64_MARK) {
+      throw fileError("zip64Unsupported");
+    }
+    if (localOffset + LOCAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
+    if (view.getUint32(localOffset, true) !== LOCAL_SIGNATURE) throw fileError("archiveBroken");
+
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataAt = localOffset + LOCAL_HEADER_SIZE + localNameLength + localExtraLength;
+    if (dataAt + packedSize > bytes.length) throw fileError("archiveBroken");
+
+    const payload = bytes.subarray(dataAt, dataAt + packedSize);
+    let content;
+    if (method === METHOD_STORED) content = payload.slice();
+    else if (method === METHOD_DEFLATE) content = await inflateRaw(payload);
+    else throw fileError("archiveBroken");
+
+    if (content.length !== size || crc32(content) !== crc) throw fileError("archiveBroken");
+    entries.set(name, content);
+  }
+  return entries;
+}
+
+// ——— файл проекта ————————————————————————————————————————————————————
+
+function extensionFor(type) {
+  const found = IMAGE_TYPES.find((pair) => pair[0] === String(type || "").toLowerCase());
+  return found ? found[1] : "bin";
+}
+
+function typeForExtension(extension) {
+  const found = IMAGE_TYPES.find((pair) => pair[1] === String(extension || "").toLowerCase());
+  return found ? found[0] : "";
+}
+
+// Идентификатор изображения попадает в имя файла: кодируем, чтобы «/» и прочее
+// не разъехались по папкам, и раскодируем обратно — id восстанавливается точно.
+function encodeImageId(id) {
+  return encodeURIComponent(String(id));
+}
+
+function decodeImageId(name) {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+// Поставщик один — store отдаёт Map. Всё остальное отвергается: тихо вернуть
+// пустой список значило бы упаковать объект без единого плана и промолчать.
+function imageEntries(images) {
+  if (images == null) return [];
+  if (!(images instanceof Map)) throw fileError("imagesNotMap");
+  return [...images.entries()];
+}
+
+function looksLikeProject(value) {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof value.id === "string" &&
+    Array.isArray(value.categories) &&
+    Array.isArray(value.markTypes) &&
+    Array.isArray(value.schemes) &&
+    Array.isArray(value.marks)
+  );
+}
+
+// Единственное место, где живут миграции формата: версия из будущего отвергается,
+// прошлые версии доводятся до текущей здесь.
+function migrateProject(loaded) {
+  const version = Number(loaded.formatVersion);
+  if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
+  if (version > FORMAT_VERSION) {
+    throw fileError("futureVersion", { version, current: FORMAT_VERSION });
+  }
+  return {
+    ...loaded,
+    formatVersion: FORMAT_VERSION,
+    rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
+    groups: Array.isArray(loaded.groups) ? loaded.groups : [],
+    counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
+  };
+}
+
+function readmeText(project, date) {
+  return text("file.readme", {
+    name: project.name || strings.project.untitled,
+    date: date.toISOString(),
+    schemes: project.schemes.length,
+    marks: project.marks.length,
+    version: FORMAT_VERSION,
+  }) + "\n";
+}
+
+/** Имя для выгрузки: «<объект>-<дата>.zip». */
+function projectFileName(project, now) {
+  const date = now instanceof Date ? now : new Date();
+  const day = date.toISOString().slice(0, 10);
+  const raw = String((project && project.name) || strings.project.untitled);
+  const safe = raw
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+  return (safe || strings.project.untitled) + "-" + day + ".zip";
+}
+
+/**
+ * Упаковывает объект и планы в один zip.
+ * `images` — Map «imageId → Blob» (или ничего, если планов нет); картинки кладутся
+ * как есть, без пережатия. `options.onProgress({done, total, name})`.
+ */
+async function packProject(project, images, options = {}) {
+  if (!looksLikeProject(project)) throw fileError("foreignProject");
+  const date = options.date instanceof Date ? options.date : new Date();
+  const forFile = { ...project, formatVersion: FORMAT_VERSION };
+
+  const files = [{ name: PROJECT_ENTRY, data: JSON.stringify(forFile, null, 2) }];
+  for (const [id, blob] of imageEntries(images)) {
+    if (!id || !blob) continue;
+    const extension = extensionFor(blob.type);
+    files.push({
+      name: SCHEMES_DIR + encodeImageId(id) + "." + extension,
+      data: blob,
+      compress: false,
+    });
+  }
+  files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
+
+  return writeZip(files, {
+    date,
+    compress: options.compress,
+    onProgress: options.onProgress,
+  });
+}
+
+// Свой архив кладёт project.json в корень; перепакованный вместе с папкой —
+// на уровень глубже. Из нескольких кандидатов берётся самый неглубокий:
+// сравниваются префиксы с префиксами, а не имя файла с префиксом.
+function projectPrefix(entries) {
+  let prefix = null;
+  for (const name of entries.keys()) {
+    if (name === PROJECT_ENTRY) return "";
+    if (name.endsWith("/" + PROJECT_ENTRY)) {
+      const candidate = name.slice(0, -PROJECT_ENTRY.length);
+      if (prefix === null || candidate.length < prefix.length) prefix = candidate;
+    }
+  }
+  return prefix;
+}
+
+/**
+ * Читает файл проекта: `{project, images}`, где images — Map «imageId → Blob».
+ * Чужой или битый файл отвергается ошибкой с `.code` из strings.errors,
+ * текущий объект при этом не трогается — вызывающий получает исключение
+ * до того, как что-то заменит.
+ */
+async function unpackProject(blob, options = {}) {
+  if (!blob) throw fileError("notAProject");
+  const entries = await readZip(blob);
+
+  const prefix = projectPrefix(entries);
+  if (prefix === null) throw fileError("noProjectJson");
+
+  let loaded;
+  try {
+    loaded = JSON.parse(decodeText(entries.get(prefix + PROJECT_ENTRY)));
+  } catch {
+    throw fileError("brokenProjectJson");
+  }
+  if (!looksLikeProject(loaded)) throw fileError("foreignProject");
+  const project = migrateProject(loaded);
+
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const imageNames = [...entries.keys()].filter(
+    (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
+  );
+  const images = new Map();
+  for (let index = 0; index < imageNames.length; index += 1) {
+    const name = imageNames[index];
+    const tail = name.slice((prefix + SCHEMES_DIR).length);
+    const dot = tail.lastIndexOf(".");
+    const id = decodeImageId(dot > 0 ? tail.slice(0, dot) : tail);
+    const type = typeForExtension(dot > 0 ? tail.slice(dot + 1) : "");
+    images.set(id, new Blob([entries.get(name)], type ? { type } : undefined));
+    if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
+  }
+
+  return { project, images };
+}
+
+// src/tables.js
+// Таблицы объекта: список меток и справочник типов.
+//
+// Чистый модуль без DOM — это тот шов, по которому проверяется, что в таблице
+// у заказчика окажется ровно то же, что инженер написал бы от руки: строка
+// «ПК1 — подсв. кровати — В31», разбивка цветными заголовками категорий,
+// справочник типов отдельным списком.
+//
+// Видимость меток берётся у `render.visibleMarks` — тем же кодом, что решает,
+// рисовать метку на холсте или нет. Своего фильтра здесь нет намеренно:
+// разойдись они, на картинке и в таблице оказалось бы разное.
+const TABLE_GROUP_BY = ["category", "type", "room"];
+
+// Колонки списка меток — дословно из спецификации.
+function tableMarkColumns() {
+  return [
+    strings.tables.label,
+    strings.tables.type,
+    strings.tables.room,
+    strings.tables.location,
+    strings.tables.original,
+  ];
+}
+
+// Плоский порядок типов: индекс типа в справочнике задаёт порядок строк
+// внутри любой группы. Порядок один на всё приложение — model.typesInOrder.
+function tableTypeOrder(project) {
+  const order = new Map();
+  let index = 0;
+  for (const { types } of typesInOrder(project)) {
+    for (const type of types) order.set(type.id, index++);
+  }
+  return order;
+}
+
+// Метки, прошедшие фильтр, по всем схемам объекта — или по одной, если
+// в фильтре назван `schemeId` (панель зовёт так для «только текущая схема»).
+function tableVisibleMarks(project, filter) {
+  const only = filter && filter.schemeId ? String(filter.schemeId) : null;
+  const marks = [];
+  for (const scheme of schemesInOrder(project)) {
+    if (only && scheme.id !== only) continue;
+    marks.push(...visibleMarks(project, scheme, filter));
+  }
+  return marks;
+}
+
+// Блок — одна строка. На рукописном листе «Р1,Р2 — розетки у кресла» стоит
+// одной строкой, и подпись у блока на плане тоже одна. Когда фильтр оставил
+// от блока часть, подпись собирается из оставшихся меток.
+function tableEntries(project, filter) {
+  const marks = tableVisibleMarks(project, filter);
+  const order = tableTypeOrder(project);
+  const byGroup = new Map();
+  const entries = [];
+
+  const sortKey = (mark) => [order.has(mark.typeId) ? order.get(mark.typeId) : 999, mark.number];
+
+  for (const mark of marks) {
+    if (!mark.groupId) {
+      entries.push({ id: mark.id, marks: [mark], groupId: null });
+      continue;
+    }
+    let entry = byGroup.get(mark.groupId);
+    if (!entry) {
+      entry = { id: mark.groupId, marks: [], groupId: mark.groupId };
+      byGroup.set(mark.groupId, entry);
+      entries.push(entry);
+    }
+    entry.marks.push(mark);
+  }
+
+  for (const entry of entries) {
+    entry.marks.sort((a, b) => {
+      const [orderA, numberA] = sortKey(a);
+      const [orderB, numberB] = sortKey(b);
+      return orderA === orderB ? numberA - numberB : orderA - orderB;
+    });
+    const [head] = entry.marks;
+    entry.head = head;
+    entry.order = sortKey(head);
+    entry.whole = entry.groupId
+      ? (project.groups.find((group) => group.id === entry.groupId) || { markIds: [] }).markIds.length ===
+        entry.marks.length
+      : true;
+  }
+
+  entries.sort((a, b) => (a.order[0] === b.order[0] ? a.order[1] - b.order[1] : a.order[0] - b.order[0]));
+  return entries;
+}
+
+// Несколько значений в одной ячейке (блок из разных типов или комнат) —
+// перечисление без повторов: пустая ячейка лучше, чем «, , ».
+function tableJoin(values, separator) {
+  const seen = [];
+  for (const value of values) {
+    const clean = (value || "").trim();
+    if (clean && !seen.includes(clean)) seen.push(clean);
+  }
+  return seen.join(separator);
+}
+
+function tableEntryLabel(project, entry) {
+  if (entry.groupId && entry.whole) return labelOf(project, entry.groupId);
+  return entry.marks.map((mark) => labelOf(project, mark.id)).join(", ");
+}
+
+function tableEntryRow(project, entry) {
+  const cells = [
+    tableEntryLabel(project, entry),
+    tableJoin(
+      entry.marks.map((mark) => {
+        const type = findType(project, mark.typeId);
+        return type ? type.name : "";
+      }),
+      ", ",
+    ),
+    tableJoin(
+      entry.marks.map((mark) => {
+        const room = mark.roomId ? findRoom(project, mark.roomId) : null;
+        return room ? room.name : "";
+      }),
+      ", ",
+    ),
+    tableJoin(entry.marks.map((mark) => mark.location), "; "),
+    tableJoin(entry.marks.map((mark) => mark.original), ", "),
+  ];
+  return { id: entry.id, cells, color: styleOf(project, entry.head.typeId).color };
+}
+
+function tableGroupOf(project, entry, groupBy) {
+  const type = findType(project, entry.head.typeId);
+  if (groupBy === "type") {
+    return type
+      ? { key: type.id, title: `${type.code} — ${type.name}`, color: styleOf(project, type.id).color }
+      : { key: "none", title: strings.tables.type, color: null };
+  }
+  if (groupBy === "room") {
+    const room = entry.head.roomId ? findRoom(project, entry.head.roomId) : null;
+    return room
+      ? { key: room.id, title: room.name, color: null }
+      : { key: "none", title: strings.tables.noRoom, color: null };
+  }
+  const category = type ? findCategory(project, type.categoryId) : null;
+  return category
+    ? { key: category.id, title: category.name, color: category.color }
+    : { key: "none", title: strings.tables.category, color: null };
+}
+
+// Порядок групп — порядок справочника и помещений объекта; группа без строк
+// на бумагу не попадает.
+function tableGroupOrder(project, groupBy) {
+  const keys = [];
+  if (groupBy === "room") {
+    for (const room of roomsInOrder(project)) keys.push(room.id);
+  } else {
+    for (const { category, types } of typesInOrder(project)) {
+      if (groupBy === "type") for (const type of types) keys.push(type.id);
+      else keys.push(category.id);
+    }
+  }
+  keys.push("none");
+  return keys;
+}
+
+// Помещение, по которому сужен лист. На рукописном листе заказчика комната
+// стоит сверху, и без неё распечатка по одной комнате внешне не отличается от
+// полной — монтажник не увидит, что лист неполный.
+function tableRoomTitle(project, filter) {
+  if (!filter || !filter.roomId) return "";
+  const room = findRoom(project, filter.roomId);
+  return room ? room.name : "";
+}
+
+function tableTypeAllowed(filter, type) {
+  if (Array.isArray(filter.typeIds) && !filter.typeIds.includes(type.id)) return false;
+  if (Array.isArray(filter.categoryIds) && !filter.categoryIds.includes(type.categoryId)) return false;
+  return true;
+}
+
+// Та же беда, что и с комнатой: лист, сужённый галочками или поиском, внешне
+// не отличается от полного, и монтажник не узнает, что часть меток скрыта.
+// Когда скрыты целые категории — лист называет оставшиеся; когда выключена
+// часть типов внутри категории или идёт поиск, перечислять нечестно, и лист
+// просто признаётся, что он неполный.
+function tableFilterNote(project, filter) {
+  if (!filter) return "";
+  const query = (filter.query || "").trim();
+  const byLists = Array.isArray(filter.typeIds) || Array.isArray(filter.categoryIds);
+  if (!query && !byLists) return "";
+  if (!query && byLists) {
+    const all = typesInOrder(project);
+    const names = [];
+    let whole = true;
+    for (const { category, types } of all) {
+      const shown = types.filter((type) => tableTypeAllowed(filter, type));
+      if (shown.length === 0) continue;
+      if (shown.length < types.length) whole = false;
+      names.push(category.name);
+    }
+    if (whole && names.length === all.length) return "";
+    if (whole && names.length > 0) return text("tables.onlyShown", { names: names.join(", ") });
+  }
+  return strings.tables.partial;
+}
+function marksTable(project, filter, groupBy) {
+  const kind = TABLE_GROUP_BY.includes(groupBy) ? groupBy : "category";
+  const columns = tableMarkColumns();
+  if (!project) return { kind: "marks", groupBy: kind, title: "", room: "", note: "", columns, groups: [] };
+
+  const buckets = new Map();
+  for (const entry of tableEntries(project, filter)) {
+    const group = tableGroupOf(project, entry, kind);
+    if (!buckets.has(group.key)) buckets.set(group.key, { id: group.key, title: group.title, color: group.color, rows: [] });
+    buckets.get(group.key).rows.push(tableEntryRow(project, entry));
+  }
+
+  const groups = tableGroupOrder(project, kind)
+    .map((key) => buckets.get(key))
+    .filter(Boolean);
+  return {
+    kind: "marks",
+    groupBy: kind,
+    title: project.name || strings.tables.marksTitle,
+    room: tableRoomTitle(project, filter),
+    note: tableFilterNote(project, filter),
+    columns,
+    groups,
+  };
+}
+function typesTable(project) {
+  const columns = [
+    strings.tables.code,
+    strings.tables.name,
+    strings.tables.category,
+    strings.tables.color,
+    strings.tables.shape,
+  ];
+  const rows = [];
+  if (project) {
+    for (const { category, types } of typesInOrder(project)) {
+      for (const type of types) {
+        const style = styleOf(project, type.id);
+        rows.push({
+          id: type.id,
+          cells: [type.code, type.name, category.name, style.color, strings.shapes[style.shape] || style.shape],
+          color: style.color,
+          shape: style.shape,
+        });
+      }
+    }
+  }
+  return { kind: "types", title: strings.tables.typesTitle, room: "", note: "", columns, rows };
+}
+
+// Обе таблицы читаются одинаково: список секций с заголовком и строками.
+// У справочника секция одна и без заголовка.
+function tableSections(table) {
+  if (!table) return [];
+  if (Array.isArray(table.groups)) return table.groups;
+  return [{ id: "all", title: "", color: null, rows: table.rows || [] }];
+}
+function tableRowCount(table) {
+  return tableSections(table).reduce((total, section) => total + section.rows.length, 0);
+}
+
+// ——— текстовые форматы ————————————————————————————————————————————————
+
+// CSV для русского Excel: BOM, точка с запятой, переводы строк CRLF.
+// Без BOM Excel читает кириллицу как «ÐŸÐš1», без «;» — валит строку в одну
+// колонку: обе пляски с кодировкой пользователь и просил убрать.
+const TABLE_CSV_BOM = "\uFEFF";
+const TABLE_CSV_SEPARATOR = ";";
+
+function tableCsvCell(value) {
+  const cell = value == null ? "" : String(value);
+  if (!/[;"\n\r]/.test(cell) && cell.trim() === cell) return cell;
+  return '"' + cell.split('"').join('""') + '"';
+}
+function toCsv(table) {
+  const lines = [];
+  if (table && table.title) lines.push(tableCsvCell(table.title));
+  if (table && table.room) lines.push(tableCsvCell(table.room));
+  if (table && table.note) lines.push(tableCsvCell(table.note));
+  lines.push(table.columns.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+  for (const section of tableSections(table)) {
+    if (section.title) lines.push(tableCsvCell(section.title));
+    for (const row of section.rows) lines.push(row.cells.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+  }
+  return TABLE_CSV_BOM + lines.join("\r\n") + "\r\n";
+}
+
+function tableMarkdownCell(value) {
+  return (value == null ? "" : String(value)).split("|").join("\\|").split("\n").join(" ");
+}
+function toMarkdown(table) {
+  const out = [];
+  if (table && table.title) out.push("# " + table.title, "");
+  if (table && table.room) out.push("**" + tableMarkdownCell(table.room) + "**", "");
+  if (table && table.note) out.push("_" + tableMarkdownCell(table.note) + "_", "");
+  const header = "| " + table.columns.map(tableMarkdownCell).join(" | ") + " |";
+  const divider = "| " + table.columns.map(() => "---").join(" | ") + " |";
+  for (const section of tableSections(table)) {
+    if (section.title) out.push("## " + tableMarkdownCell(section.title), "");
+    out.push(header, divider);
+    for (const row of section.rows) out.push("| " + row.cells.map(tableMarkdownCell).join(" | ") + " |");
+    out.push("");
+  }
+  return out.join("\n");
+}
+
+// Ячейка буфера — одна строка без табуляций: и перевод строки, и табуляция
+// внутри «Расположения» разорвали бы вставку в Таблицы на лишнюю строку
+// или на лишнюю колонку.
+function tableTsvCell(value) {
+  return (value == null ? "" : String(value)).replace(/[\t\r\n]+/g, " ").trim();
+}
+
+// Буфер обмена: табуляции вставляются в Google Таблицы колонками.
+function toTsv(table) {
+  const lines = [table.columns.join("\t")];
+  for (const section of tableSections(table)) {
+    if (section.title) lines.push(section.title);
+    for (const row of section.rows) {
+      lines.push(row.cells.map(tableTsvCell).join("\t"));
+    }
+  }
+  return lines.join("\n");
+}
+
+// src/exporter.js
+// Выгрузка на бумагу и в файлы: PNG схемы, PNG таблицы, zip всех схем, печать.
+//
+// Схема рисуется тем же `render.drawScheme`, что и холст: во `view` уходит
+// `zoom = scale`, поэтому метки и подписи на выгруженной картинке выглядят
+// ровно так, как их видел инженер на экране, только в большем разрешении.
+// Своего рисования меток здесь нет и быть не должно.
+//
+// Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
+const EXPORT_SCALES = [1, 2, 4];
+// Разрешение печати, по которому пиксели пересчитываются в миллиметры.
+const EXPORT_DPI = 300;
+// Предел стороны холста в браузерах: за ним toBlob молча отдаёт пустое.
+const EXPORT_MAX_SIDE = 16384;
+const EXPORT_MM_PER_INCH = 25.4;
+
+// ——— размеры ——————————————————————————————————————————————————————————
+function exportSize(width, height, scale) {
+  const factor = scale > 0 ? scale : 1;
+  const pixelWidth = Math.round(Math.max(1, width) * factor);
+  const pixelHeight = Math.round(Math.max(1, height) * factor);
+  return {
+    width: pixelWidth,
+    height: pixelHeight,
+    mmWidth: Math.round((pixelWidth / EXPORT_DPI) * EXPORT_MM_PER_INCH),
+    mmHeight: Math.round((pixelHeight / EXPORT_DPI) * EXPORT_MM_PER_INCH),
+  };
+}
+
+// «2560 × 3956 px · 217 × 335 мм при 300 dpi» — чтобы было видно, что
+// получится при печати, до того как файл выгружен.
+function exportSizeText(width, height, scale) {
+  return text("exportPanel.size", exportSize(width, height, scale));
+}
+
+// ——— холст ————————————————————————————————————————————————————————————
+
+function exportCanvas(width, height) {
+  const side = Math.max(width, height);
+  if (side > EXPORT_MAX_SIDE) throw new Error(strings.exportPanel.tooBig);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = Math.max(1, Math.round(height));
+  return canvas;
+}
+
+function exportBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    if (typeof canvas.toBlob !== "function") {
+      reject(new Error(strings.exportPanel.failed));
+      return;
+    }
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error(strings.exportPanel.failed));
+    }, "image/png");
+  });
+}
+
+// Область выгрузки в пикселях плана: вся схема или прямоугольник, который
+// панель сняла с экрана («как вижу»). Прямоугольник обрезается планом —
+// белые поля вокруг схемы на бумаге не нужны.
+function exportArea(scheme, area) {
+  const width = scheme && scheme.width > 0 ? scheme.width : 1000;
+  const height = scheme && scheme.height > 0 ? scheme.height : 1000;
+  if (!area || area === "all") return { x: 0, y: 0, width, height };
+  const x = Math.max(0, Math.min(width, area.x || 0));
+  const y = Math.max(0, Math.min(height, area.y || 0));
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(width - x, area.width || width)),
+    height: Math.max(1, Math.min(height - y, area.height || height)),
+  };
+}
+
+/**
+ * PNG схемы с метками. `area` — «all» или прямоугольник в пикселях плана,
+ * `scale` — множитель, `legend` — рисовать ли легенду в углу, `filter` —
+ * тот же фильтр, что на экране: скрытое им не попадает ни в картинку,
+ * ни в легенду.
+ */
+async function schemePng(project, scheme, image, options = {}) {
+  const scale = options.scale > 0 ? options.scale : 1;
+  const area = exportArea(scheme, options.area);
+  const canvas = exportCanvas(area.width * scale, area.height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const sizes = project && project.view ? project.view : {};
+  const view = {
+    zoom: scale,
+    offsetX: -area.x * scale,
+    offsetY: -area.y * scale,
+    markSize: sizes.markSize,
+    labelSize: sizes.labelSize,
+  };
+  drawScheme(ctx, {
+    project,
+    scheme,
+    image,
+    filter: options.filter || null,
+    view,
+    legend: options.legend ? { x: 16 * scale, y: 16 * scale } : null,
+  });
+  return exportBlob(canvas);
+}
+
+// ——— таблица картинкой ————————————————————————————————————————————————
+
+const EXPORT_TABLE = {
+  font: 14,
+  titleFont: 22,
+  roomFont: 17,
+  groupFont: 16,
+  rowHeight: 26,
+  padding: 24,
+  gap: 12,
+  stripe: 4,
+  swatch: 11,
+  cellGap: 18,
+  maxColumn: 420,
+  ink: "#1f2328",
+  muted: "#57606a",
+  line: "#d0d7de",
+};
+
+// Проба для measureText — одна на модуль: при выгрузке 4× замеров десятки,
+// и каждый свой <canvas> ничем не лучше одного общего.
+let exportProbeCtx = null;
+
+function exportProbe() {
+  if (!exportProbeCtx) exportProbeCtx = document.createElement("canvas").getContext("2d");
+  return exportProbeCtx;
+}
+
+// Прибавка к ячейке, в которой печатается код краски: квадратик плюс зазор.
+// Одна на замер ширины и на рисование — иначе колонка мерится по тексту,
+// а текст рисуется со сдвигом, и «#1F6FEB» уезжает в многоточие.
+function exportSwatchShift(rowColor, cell) {
+  return rowColor && String(cell) === rowColor ? EXPORT_TABLE.swatch + 6 : 0;
+}
+
+function exportMeasure(ctx, table) {
+  const widths = table.columns.map((column) => {
+    ctx.font = `600 ${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    return ctx.measureText(String(column)).width;
+  });
+  ctx.font = `${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  for (const section of tableSections(table)) {
+    for (const row of section.rows) {
+      row.cells.forEach((cell, index) => {
+        const value = String(cell == null ? "" : cell);
+        const width = ctx.measureText(value).width + exportSwatchShift(row.color, value);
+        if (width > widths[index]) widths[index] = width;
+      });
+    }
+  }
+  return widths.map((width) => Math.min(EXPORT_TABLE.maxColumn, Math.ceil(width) + EXPORT_TABLE.cellGap));
+}
+
+function exportClip(ctx, value, limit) {
+  const cell = value == null ? "" : String(value);
+  if (ctx.measureText(cell).width <= limit) return cell;
+  let cut = cell;
+  while (cut.length > 1 && ctx.measureText(cut + "…").width > limit) cut = cut.slice(0, -1);
+  return cut + "…";
+}
+
+// Раскладка таблицы в единицах вёрстки: ширины колонок по самому длинному
+// значению, высота — по числу строк и заголовков групп.
+function exportTableLayout(table, options = {}) {
+  const widths = exportMeasure(exportProbe(), table);
+  const sections = tableSections(table);
+  const title = options.title || table.title || "";
+  const room = options.room != null ? options.room : table.room || "";
+  const note = options.note != null ? options.note : table.note || "";
+  const subtitle = options.subtitle || "";
+
+  const bodyWidth = widths.reduce((sum, width) => sum + width, 0) + EXPORT_TABLE.stripe + EXPORT_TABLE.gap;
+  const width = bodyWidth + EXPORT_TABLE.padding * 2;
+  let height = EXPORT_TABLE.padding;
+  if (title) height += EXPORT_TABLE.titleFont * 1.6;
+  if (room) height += EXPORT_TABLE.roomFont * 1.6;
+  if (note) height += EXPORT_TABLE.font * 1.6;
+  if (subtitle) height += EXPORT_TABLE.font * 1.6;
+  height += EXPORT_TABLE.rowHeight; // строка названий колонок
+  for (const section of sections) {
+    if (section.title) height += EXPORT_TABLE.rowHeight + EXPORT_TABLE.gap;
+    height += section.rows.length * EXPORT_TABLE.rowHeight + EXPORT_TABLE.gap;
+  }
+  height += EXPORT_TABLE.padding;
+  return { width, height, bodyWidth, widths, sections, title, room, note, subtitle };
+}
+
+// Размер будущей картинки таблицы — чтобы множитель рядом с кнопкой показывал
+// пиксели и миллиметры до того, как файл собран.
+function exportTableSizeText(table, scale) {
+  const layout = exportTableLayout(table, {});
+  return exportSizeText(layout.width, layout.height, scale);
+}
+
+/**
+ * Таблица картинкой в большом разрешении: заголовок объекта, заголовки групп
+ * цветом категории, цветная полоса слева у строк — как на рукописном листе.
+ */
+async function tablePng(table, options = {}) {
+  const scale = options.scale > 0 ? options.scale : 1;
+  const layout = exportTableLayout(table, options);
+  const { widths, sections, title, room, note, subtitle, bodyWidth } = layout;
+  const layoutWidth = layout.width;
+  const layoutHeight = layout.height;
+
+  const canvas = exportCanvas(layoutWidth * scale, layoutHeight * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(scale, scale);
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+
+  const left = EXPORT_TABLE.padding;
+  let y = EXPORT_TABLE.padding;
+
+  if (title) {
+    ctx.fillStyle = EXPORT_TABLE.ink;
+    ctx.font = `600 ${EXPORT_TABLE.titleFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.fillText(title, left, y + EXPORT_TABLE.titleFont * 0.8);
+    y += EXPORT_TABLE.titleFont * 1.6;
+  }
+  // Комната — сразу под именем объекта и тем же весом, что заголовок: лист по
+  // одной комнате должен и на бумаге читаться как лист по комнате.
+  if (room) {
+    ctx.fillStyle = EXPORT_TABLE.ink;
+    ctx.font = `600 ${EXPORT_TABLE.roomFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.fillText(room, left, y + EXPORT_TABLE.roomFont * 0.8);
+    y += EXPORT_TABLE.roomFont * 1.6;
+  }
+  // Лист, сужённый фильтром, признаётся в этом на бумаге — иначе неполная
+  // таблица неотличима от полной.
+  if (note) {
+    ctx.fillStyle = EXPORT_TABLE.ink;
+    ctx.font = `600 ${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.fillText(note, left, y + EXPORT_TABLE.font * 0.8);
+    y += EXPORT_TABLE.font * 1.6;
+  }
+  if (subtitle) {
+    ctx.fillStyle = EXPORT_TABLE.muted;
+    ctx.font = `${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.fillText(subtitle, left, y + EXPORT_TABLE.font * 0.8);
+    y += EXPORT_TABLE.font * 1.6;
+  }
+
+  // Ячейка, в которой напечатан код краски («#1F6FEB»), показывает и саму
+  // краску: на бумаге монтажнику говорит квадратик, а не шестнадцатеричный код.
+  const drawCells = (cells, textLeft, bold, rowColor) => {
+    ctx.font = `${bold ? "600 " : ""}${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    let x = textLeft;
+    cells.forEach((cell, index) => {
+      const shift = exportSwatchShift(rowColor, cell);
+      if (shift) {
+        const ink = ctx.fillStyle;
+        ctx.fillStyle = rowColor;
+        ctx.fillRect(x, y + (EXPORT_TABLE.rowHeight - EXPORT_TABLE.swatch) / 2, EXPORT_TABLE.swatch, EXPORT_TABLE.swatch);
+        ctx.fillStyle = ink;
+      }
+      const limit = widths[index] - EXPORT_TABLE.cellGap - shift;
+      ctx.fillText(exportClip(ctx, cell, limit), x + shift, y + EXPORT_TABLE.rowHeight / 2);
+      x += widths[index];
+    });
+  };
+
+  ctx.fillStyle = EXPORT_TABLE.muted;
+  drawCells(table.columns, left + EXPORT_TABLE.stripe + EXPORT_TABLE.gap, true);
+  y += EXPORT_TABLE.rowHeight;
+  ctx.strokeStyle = EXPORT_TABLE.line;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left, y);
+  ctx.lineTo(left + bodyWidth, y);
+  ctx.stroke();
+
+  for (const section of sections) {
+    const color = section.color || EXPORT_TABLE.ink;
+    if (section.title) {
+      y += EXPORT_TABLE.gap;
+      ctx.fillStyle = color;
+      ctx.font = `600 ${EXPORT_TABLE.groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      ctx.fillText(section.title, left, y + EXPORT_TABLE.rowHeight / 2);
+      const lineY = y + EXPORT_TABLE.rowHeight - 2;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(left, lineY);
+      ctx.lineTo(left + bodyWidth, lineY);
+      ctx.stroke();
+      y += EXPORT_TABLE.rowHeight;
+    }
+    for (const row of section.rows) {
+      ctx.fillStyle = row.color || section.color || EXPORT_TABLE.line;
+      ctx.fillRect(left, y + 4, EXPORT_TABLE.stripe, EXPORT_TABLE.rowHeight - 8);
+      ctx.fillStyle = EXPORT_TABLE.ink;
+      drawCells(row.cells, left + EXPORT_TABLE.stripe + EXPORT_TABLE.gap, false, row.color);
+      y += EXPORT_TABLE.rowHeight;
+    }
+    y += EXPORT_TABLE.gap;
+  }
+
+  return exportBlob(canvas);
+}
+
+// ——— все схемы разом ——————————————————————————————————————————————————
+
+// Картинка для рисования: Blob декодируется, готовый ImageBitmap или <img>
+// берётся как есть.
+async function exportImageOf(source) {
+  if (!source) return null;
+  if (typeof Blob !== "undefined" && source instanceof Blob) {
+    if (typeof createImageBitmap === "function") return createImageBitmap(source);
+    return null;
+  }
+  return source;
+}
+
+// Хвост «-ГГГГ-ММ-ДД.zip», который ставит projectFileName.
+const EXPORT_DATED_TAIL = /-\d{4}-\d{2}-\d{2}\.zip$/;
+
+/**
+ * Имя файла с датой во всей сборке собирает `projectFile.projectFileName`:
+ * там же чистятся запрещённые символы и обрезается длина. Здесь у готового
+ * имени меняется расширение, а имя схемы приписывается к имени объекта.
+ */
+function exportFileName(project, scheme, extension) {
+  const base = (project && project.name) || "";
+  return projectFileName({ name: scheme ? base + " — " + scheme.name : base }).replace(/zip$/, extension);
+}
+
+// Имя записи внутри архива: та же чистка, но без даты — дата стоит на самом архиве.
+function exportEntryName(value) {
+  return projectFileName({ name: value }).replace(EXPORT_DATED_TAIL, "");
+}
+
+/**
+ * Zip с картинками всех схем объекта. `images` — Map «imageId → Blob»
+ * (или ImageBitmap). Zip пишется общим `writeZip`: PNG уже сжат, поэтому
+ * хранится как есть.
+ */
+async function allSchemesZip(project, images, options = {}) {
+  // Форма входа одна — Map «imageId → Blob», как у packProject: разбирать
+  // четыре формы одного и того же было бы вторым правилом на тот же вход.
+  if (images != null && !(images instanceof Map)) throw new Error(strings.errors.imagesNotMap);
+  const map = images || new Map();
+  const schemes = schemesInOrder(project);
+  const files = [];
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  for (let index = 0; index < schemes.length; index += 1) {
+    const scheme = schemes[index];
+    const image = await exportImageOf(map.get(scheme.imageId));
+    const blob = await schemePng(project, scheme, image, { ...options, area: "all" });
+    const name = String(index + 1).padStart(2, "0") + "-" + exportEntryName(scheme.name) + ".png";
+    files.push({ name, data: blob, compress: false });
+    if (onProgress) onProgress({ done: index + 1, total: schemes.length, name });
+  }
+  return writeZip(files, { compress: false });
+}
+
+// ——— печать ———————————————————————————————————————————————————————————
+
+function exportNode(tag, className, textValue) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (textValue != null) node.textContent = String(textValue);
+  return node;
+}
+
+/**
+ * Готовая раскладка таблицы: заголовок объекта, заголовки групп цветом
+ * категории, колонки шапкой. Один и тот же узел идёт и в предпросмотр
+ * диалога, и в печать — печатается ровно то, что видно.
+ */
+function exportTableNode(table, options = {}) {
+  const doc = exportNode("div", "print-doc");
+  const head = exportNode("header", "print-doc__head");
+  head.append(exportNode("h1", "print-doc__title", options.title || table.title || ""));
+  const room = options.room != null ? options.room : table.room || "";
+  if (room) head.append(exportNode("p", "print-doc__room", room));
+  const note = options.note != null ? options.note : table.note || "";
+  if (note) head.append(exportNode("p", "print-doc__note", note));
+  const subtitle = options.subtitle || text("exportPanel.rows", { count: tableRowCount(table) });
+  head.append(exportNode("p", "print-doc__sub", subtitle));
+  doc.append(head);
+
+  for (const section of tableSections(table)) {
+    const block = exportNode("section", "print-doc__group");
+    if (section.color) block.style.setProperty("--print-color", section.color);
+    if (section.title) block.append(exportNode("h2", "print-doc__group-title", section.title));
+    const tableNode = exportNode("table", "print-doc__table");
+    const thead = exportNode("thead");
+    const headRow = exportNode("tr");
+    for (const column of table.columns) headRow.append(exportNode("th", null, column));
+    thead.append(headRow);
+    tableNode.append(thead);
+    const tbody = exportNode("tbody");
+    for (const row of section.rows) {
+      const tr = exportNode("tr", "print-doc__row");
+      if (row.color) tr.style.setProperty("--print-row-color", row.color);
+      row.cells.forEach((cell, index) => {
+        const td = exportNode("td", index === 0 ? "print-doc__label" : null, cell);
+        if (row.color && String(cell) === row.color) {
+          const swatch = exportNode("span", "print-doc__swatch");
+          swatch.style.background = row.color;
+          td.prepend(swatch);
+        }
+        tr.append(td);
+      });
+      tbody.append(tr);
+    }
+    tableNode.append(tbody);
+    block.append(tableNode);
+    doc.append(block);
+  }
+
+  if (options.extra) doc.append(options.extra);
+  if (options.footer) doc.append(exportNode("footer", "print-doc__foot", options.footer));
+  return doc;
+}
+
+function exportPrintRoot() {
+  let root = document.getElementById("print-root");
+  if (!root) {
+    root = exportNode("div", null);
+    root.id = "print-root";
+    document.body.append(root);
+  }
+  return root;
+}
+
+function exportPrintRun(root) {
+  document.body.classList.add("printing");
+  const restore = () => document.body.classList.remove("printing");
+  const cleanup = () => {
+    restore();
+    root.replaceChildren();
+    window.removeEventListener("afterprint", cleanup);
+  };
+  window.addEventListener("afterprint", cleanup);
+  window.print();
+  // Раскладку убирает только afterprint: в Safari window.print() не держит
+  // поток, и уборка по таймеру вычистила бы лист из-под открытого диалога
+  // печати — на бумагу ушла бы пустая страница. Таймер возвращает экран,
+  // содержимое #print-root ждёт следующей печати (на экране оно скрыто).
+  setTimeout(restore, 2000);
+}
+
+/**
+ * Печать без второго окна: раскладка кладётся в #print-root, экран прячется
+ * правилами print.css. `kind` — «table» (данные: `{table, title, subtitle,
+ * extra}`) или «scheme» (данные: `{blob, title}`).
+ */
+async function printView(kind, data = {}) {
+  const root = exportPrintRoot();
+  if (kind === "scheme") {
+    const url = URL.createObjectURL(data.blob);
+    const wrap = exportNode("div", "print-doc print-doc--scheme");
+    if (data.title) wrap.append(exportNode("h1", "print-doc__title", data.title));
+    const image = document.createElement("img");
+    image.className = "print-doc__image";
+    image.src = url;
+    wrap.append(image);
+    root.replaceChildren(wrap);
+    await new Promise((resolve) => {
+      image.addEventListener("load", resolve, { once: true });
+      image.addEventListener("error", resolve, { once: true });
+    });
+    exportPrintRun(root);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return;
+  }
+  root.replaceChildren(
+    exportTableNode(data.table, {
+      title: data.title,
+      subtitle: data.subtitle,
+      extra: data.extra,
+      footer: data.footer,
+    }),
+  );
+  exportPrintRun(root);
+}
+
+// ——— скачивание ———————————————————————————————————————————————————————
+function exportDownload(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function exportText(value, name, type) {
+  exportDownload(new Blob([value], { type: type || "text/plain;charset=utf-8" }), name);
+}
+
+// Буфер обмена доступен не везде (file:// без разрешения) — запасной путь
+// через скрытое поле, иначе кнопка «Копировать» молча ничего не делает.
+async function exportCopy(value) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (error) {
+      // падаем в запасной путь ниже
+    }
+  }
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.setAttribute("readonly", "readonly");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (error) {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
 // src/imagePrep.js
 // Подготовка плана: проверка файла, поворот на четверть оборота и обрезка рамкой.
 // Координаты меток — доли от размера плана, поэтому вместе с картинкой нужно
@@ -4087,6 +5704,693 @@ async function renderPlanImage(blob, transform) {
     releasePlanImage(decoded);
   }
 }
+
+// src/store.js
+// Хранение в браузере: IndexedDB своими руками, без единой зависимости.
+// База `scheme-markup`, хранилища `projects` (документ объекта), `images`
+// (Blob планов) и `settings` (ключ-значение).
+//
+// Правило файла: потеря хранилища не должна ронять приложение. По file://
+// IndexedDB доступен не везде, в приватном окне запись может отказать в любой
+// момент — тогда store переходит в память, сообщает о беде подписчикам
+// (панель показывает строку и советует выгрузить проект в файл) и продолжает
+// работать. Данные сеанса живут в памяти в любом случае.
+const STORE_DB_NAME = "scheme-markup";
+const STORE_DB_VERSION = 1;
+const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
+// Ниже этого порога свободного места пользователя предупреждают заранее.
+const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
+// Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
+// вкладка): ждём ограниченное время и уходим в память.
+const STORE_OPEN_TIMEOUT_MS = 4000;
+
+const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
+const storeListeners = new Set();
+let storeDb = null;
+let storeModeValue = "unknown";
+let storeOpening = null;
+let storeReported = false;
+let storeWriteReported = false;
+function storeMode() {
+  return storeModeValue;
+}
+function onStoreProblem(listener) {
+  storeListeners.add(listener);
+  return () => storeListeners.delete(listener);
+}
+
+function reportStoreProblem(kind, error) {
+  const problem = { kind, error: error || null };
+  for (const listener of [...storeListeners]) {
+    try {
+      listener(problem);
+    } catch (ignored) {
+      /* подписчик не должен ломать запись */
+    }
+  }
+}
+
+function newStoreId() {
+  return crypto.randomUUID();
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("indexeddb-failed"));
+  });
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined" || indexedDB === null) {
+      reject(new Error("indexeddb-unavailable"));
+      return;
+    }
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
+    let request;
+    try {
+      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
+    } catch (error) {
+      clearTimeout(timer);
+      finish(reject, error);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
+        db.createObjectStore(STORE_NAMES.projects, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.images)) {
+        db.createObjectStore(STORE_NAMES.images, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
+        db.createObjectStore(STORE_NAMES.settings, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => {
+      clearTimeout(timer);
+      finish(resolve, request.result);
+    };
+    request.onerror = () => {
+      clearTimeout(timer);
+      finish(reject, request.error || new Error("indexeddb-failed"));
+    };
+    request.onblocked = () => {
+      clearTimeout(timer);
+      finish(reject, new Error("indexeddb-blocked"));
+    };
+  });
+}
+async function openStore() {
+  if (storeModeValue !== "unknown") return storeModeValue;
+  if (!storeOpening) {
+    storeOpening = openDatabase()
+      .then((db) => {
+        storeDb = db;
+        storeModeValue = "idb";
+        db.onclose = () => degradeToMemory(new Error("indexeddb-closed"));
+        return storeModeValue;
+      })
+      .catch((error) => {
+        degradeToMemory(error);
+        return storeModeValue;
+      });
+  }
+  return storeOpening;
+}
+
+function degradeToMemory(error) {
+  storeDb = null;
+  storeModeValue = "memory";
+  if (storeReported) return;
+  storeReported = true;
+  reportStoreProblem("unavailable", error);
+}
+
+// Одна транзакция — одно действие: запись документа объекта атомарна, вкладка,
+// закрытая посреди сохранения, оставляет прежнее состояние, а не половину.
+async function runTransaction(name, mode, action) {
+  await openStore();
+  if (storeModeValue !== "idb" || !storeDb) return { ok: false, memory: true };
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = storeDb.transaction(name, mode);
+      let result;
+      tx.oncomplete = () => {
+        if (mode === "readwrite") storeWriteReported = false;
+        resolve({ ok: true, result });
+      };
+      tx.onerror = () => reject(tx.error || new Error("indexeddb-failed"));
+      tx.onabort = () => reject(tx.error || new Error("indexeddb-aborted"));
+      Promise.resolve(action(tx.objectStore(name)))
+        .then((value) => {
+          result = value;
+        })
+        .catch((error) => {
+          try {
+            tx.abort();
+          } catch (ignored) {
+            /* транзакция уже завершилась */
+          }
+          reject(error);
+        });
+    });
+  } catch (error) {
+    // Автосохранение идёт на каждую правку: об отказавшей записи говорим один
+    // раз — до тех пор, пока запись снова не пройдёт.
+    if (mode === "readwrite" && !storeWriteReported) {
+      storeWriteReported = true;
+      reportStoreProblem("writeFailed", error);
+    }
+    return { ok: false, error };
+  }
+}
+
+// ——— объекты ——————————————————————————————————————————————————————————
+async function listProjects() {
+  const summaries = new Map();
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+  if (read.ok) {
+    for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
+  }
+  for (const doc of storeMemory.projects.values()) summaries.set(doc.id, summaryOf(doc));
+  return [...summaries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+function summaryOf(project) {
+  return {
+    id: project.id,
+    name: project.name,
+    updatedAt: project.updatedAt,
+    schemes: (project.schemes || []).length,
+    marks: (project.marks || []).length,
+  };
+}
+async function loadProject(id) {
+  if (!id) return null;
+  if (storeMemory.projects.has(id)) return storeMemory.projects.get(id);
+  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result : null;
+}
+
+// Отказ записи не теряет работу: документ остаётся в памяти сеанса, а панель
+// получает повод предложить выгрузку в файл.
+async function saveProject(project) {
+  if (!project || !project.id) return { ok: false };
+  const written = await runTransaction(STORE_NAMES.projects, "readwrite", (store) =>
+    idbRequest(store.put(project)),
+  );
+  if (written.ok) {
+    storeMemory.projects.delete(project.id);
+    return { ok: true, mode: "idb" };
+  }
+  storeMemory.projects.set(project.id, project);
+  return { ok: false, mode: "memory", error: written.error || null };
+}
+async function deleteProject(id) {
+  storeMemory.projects.delete(id);
+  const removed = await runTransaction(STORE_NAMES.projects, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— изображения ——————————————————————————————————————————————————————
+async function putImage(blob) {
+  const id = newStoreId();
+  const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
+    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
+  );
+  if (!written.ok) storeMemory.images.set(id, blob);
+  return id;
+}
+async function getImage(id) {
+  if (!id) return null;
+  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
+  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
+  return read.ok && read.result ? read.result.blob : null;
+}
+async function deleteImage(id) {
+  if (!id) return { ok: true };
+  storeMemory.images.delete(id);
+  const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
+  return { ok: removed.ok || storeModeValue === "memory" };
+}
+
+// ——— настройки ————————————————————————————————————————————————————————
+async function getSetting(key) {
+  if (storeMemory.settings.has(key)) return storeMemory.settings.get(key);
+  const read = await runTransaction(STORE_NAMES.settings, "readonly", (store) => idbRequest(store.get(key)));
+  return read.ok && read.result ? read.result.value : null;
+}
+async function setSetting(key, value) {
+  const written = await runTransaction(STORE_NAMES.settings, "readwrite", (store) =>
+    idbRequest(store.put({ key, value })),
+  );
+  if (written.ok) storeMemory.settings.delete(key);
+  else storeMemory.settings.set(key, value);
+  return { ok: written.ok };
+}
+
+// ——— место ————————————————————————————————————————————————————————————
+async function estimateSpace() {
+  const empty = { usage: null, quota: null, free: null, low: false };
+  if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.estimate) return empty;
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (typeof quota !== "number" || typeof usage !== "number") return empty;
+    const free = Math.max(0, quota - usage);
+    return { usage, quota, free, low: free < STORE_LOW_SPACE_BYTES };
+  } catch (error) {
+    return empty;
+  }
+}
+
+// src/panels/export.js
+// Панель выгрузки: две кнопки в шапке и два диалога — таблица и схема.
+//
+// Панель ничего не считает сама: таблицу строит `tables.js`, картинку и печать
+// делает `exporter.js`. Здесь — выбор разбивки, области и множителя, да связь
+// с состоянием сеанса: фильтр, схема и её план берутся ровно те, что на экране,
+// поэтому скрытое фильтром не попадает ни в таблицу, ни в картинку, ни в легенду.
+
+
+
+
+
+
+
+
+
+// Выбор пользователя живёт между открытиями диалога: разбивку и множитель
+// выставляют один раз на объект, а выгружают много раз.
+const exportChoice = {
+  kind: "marks",
+  groupBy: "category",
+  currentScheme: false,
+  area: "all",
+  legend: true,
+  tableScale: 2,
+  schemeScale: 2,
+};
+
+function exportField(labelText, control) {
+  return uiEl("label", { class: "export__field" }, [
+    uiEl("span", { class: "export__field-label", text: labelText }),
+    control,
+  ]);
+}
+
+function exportSelect(options, value, onChange) {
+  const select = uiEl("select", { class: "ui-input export__select", on: { change: () => onChange(select.value) } });
+  for (const option of options) {
+    const node = uiEl("option", { text: option.label, value: option.value });
+    node.value = option.value;
+    if (option.value === value) node.selected = true;
+    select.append(node);
+  }
+  return select;
+}
+
+function exportCheck(labelText, checked, onChange) {
+  const input = uiEl("input", { class: "export__check", type: "checkbox", on: { change: () => onChange(input.checked) } });
+  input.checked = checked;
+  return uiEl("label", { class: "export__toggle" }, [input, uiEl("span", { text: labelText })]);
+}
+
+function exportScaleSelect(value, onChange) {
+  return exportSelect(
+    EXPORT_SCALES.map((scale) => ({ value: String(scale), label: scale + "×" })),
+    String(value),
+    (next) => onChange(Number(next)),
+  );
+}
+
+// Прямоугольник «как вижу» в пикселях плана: углы холста переводятся в доли
+// плана тем же screenToPlan, что и клики по холсту.
+function exportViewArea(state, scheme) {
+  const host = document.getElementById("canvas-host");
+  if (!host) return "all";
+  const box = host.getBoundingClientRect();
+  if (box.width < 2 || box.height < 2) return "all";
+  const width = scheme.width > 0 ? scheme.width : 1000;
+  const height = scheme.height > 0 ? scheme.height : 1000;
+  const from = screenToPlan({ x: 0, y: 0 }, scheme, state.view);
+  const to = screenToPlan({ x: box.width, y: box.height }, scheme, state.view);
+  return {
+    x: from.x * width,
+    y: from.y * height,
+    width: (to.x - from.x) * width,
+    height: (to.y - from.y) * height,
+  };
+}
+
+function exportAreaSize(state, scheme) {
+  const area = exportChoice.area === "view" ? exportViewArea(state, scheme) : "all";
+  if (area === "all") {
+    return {
+      width: scheme.width > 0 ? scheme.width : 1000,
+      height: scheme.height > 0 ? scheme.height : 1000,
+    };
+  }
+  const width = scheme.width > 0 ? scheme.width : 1000;
+  const height = scheme.height > 0 ? scheme.height : 1000;
+  return {
+    width: Math.min(width, Math.max(1, area.width)),
+    height: Math.min(height, Math.max(1, area.height)),
+  };
+}
+
+// План схемы для рисования: уже разобранный на холсте — как есть, чужой —
+// из хранилища. Разобранный здесь план здесь же и освобождается.
+async function exportSchemeImage(state, scheme) {
+  const loaded = state.schemeImage;
+  if (loaded && loaded.schemeId === scheme.id && loaded.image) return { image: loaded.image, release: null };
+  if (!scheme.imageId) return { image: null, release: null };
+  const blob = await getImage(scheme.imageId);
+  if (!blob) return { image: null, release: null };
+  const decoded = await decodePlanImage(blob);
+  return { image: decoded.image, release: () => releasePlanImage(decoded) };
+}
+
+function exportFilterOf(state) {
+  return exportChoice.currentScheme && state.schemeId
+    ? { ...state.filter, schemeId: state.schemeId }
+    : state.filter;
+}
+
+function exportTableOf(state) {
+  if (exportChoice.kind === "types") return typesTable(state.project);
+  return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy);
+}
+
+function exportSubtitleOf(state, table) {
+  const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
+  const parts = [text("exportPanel.rows", { count: tableRowCount(table) })];
+  if (exportChoice.currentScheme && scheme) parts.push(scheme.name);
+  return parts.join(" · ");
+}
+
+function exportBaseName(state, suffix) {
+  const scheme = exportChoice.currentScheme && state.schemeId ? findScheme(state.project, state.schemeId) : null;
+  return exportFileName(state.project, scheme, suffix);
+}
+
+// ——— диалог таблицы ———————————————————————————————————————————————————
+
+function exportTableDialog(api) {
+  const { getState, notify } = api;
+  const state = getState();
+  const preview = uiEl("div", { class: "export__preview" });
+  const hint = uiEl("p", { class: "export__hint" });
+  let table = exportTableOf(state);
+
+  const refresh = () => {
+    table = exportTableOf(state);
+    preview.replaceChildren(
+      exportTableNode(table, { title: table.title || state.project.name, subtitle: exportSubtitleOf(state, table) }),
+    );
+    hint.textContent = exportTableSizeText(table, exportChoice.tableScale);
+  };
+
+  const groupSelect = exportSelect(
+    [
+      { value: "category", label: strings.exportPanel.groupByCategory },
+      { value: "type", label: strings.exportPanel.groupByType },
+      { value: "room", label: strings.exportPanel.groupByRoom },
+    ],
+    exportChoice.groupBy,
+    (value) => {
+      exportChoice.groupBy = value;
+      refresh();
+    },
+  );
+
+  const kindSelect = exportSelect(
+    [
+      { value: "marks", label: strings.exportPanel.kindMarks },
+      { value: "types", label: strings.exportPanel.kindTypes },
+    ],
+    exportChoice.kind,
+    (value) => {
+      exportChoice.kind = value;
+      groupSelect.disabled = value === "types";
+      refresh();
+    },
+  );
+  groupSelect.disabled = exportChoice.kind === "types";
+
+  const controls = uiEl("div", { class: "export__controls" }, [
+    exportField(strings.exportPanel.kind, kindSelect),
+    exportField(strings.exportPanel.groupBy, groupSelect),
+    exportField(
+      strings.exportPanel.scale,
+      exportScaleSelect(exportChoice.tableScale, (value) => {
+        exportChoice.tableScale = value;
+        hint.textContent = exportTableSizeText(table, value);
+      }),
+    ),
+    exportCheck(strings.exportPanel.currentScheme, exportChoice.currentScheme, (on) => {
+      exportChoice.currentScheme = on;
+      refresh();
+    }),
+  ]);
+
+  const saved = (name) => notify(text("exportPanel.saved", { name }), "success");
+  const guard = async (run) => {
+    try {
+      await run();
+    } catch (error) {
+      notify(error && error.message ? error.message : strings.exportPanel.failed, "error");
+    }
+  };
+
+  const actions = [
+    uiButton(strings.exportPanel.csv, {
+      on: {
+        click: () =>
+          guard(async () => {
+            const name = exportBaseName(state, "csv");
+            exportText(toCsv(table), name, "text/csv;charset=utf-8");
+            saved(name);
+          }),
+      },
+    }),
+    uiButton(strings.exportPanel.markdown, {
+      on: {
+        click: () =>
+          guard(async () => {
+            const name = exportBaseName(state, "md");
+            exportText(toMarkdown(table), name, "text/markdown;charset=utf-8");
+            saved(name);
+          }),
+      },
+    }),
+    uiButton(strings.exportPanel.copy, {
+      on: {
+        click: () =>
+          guard(async () => {
+            const ok = await exportCopy(toTsv(table));
+            notify(ok ? strings.exportPanel.copied : strings.exportPanel.copyFailed, ok ? "success" : "error");
+          }),
+      },
+    }),
+    uiButton(strings.exportPanel.png, {
+      on: {
+        click: () =>
+          guard(async () => {
+            const blob = await tablePng(table, {
+              scale: exportChoice.tableScale,
+              title: table.title || state.project.name,
+              subtitle: exportSubtitleOf(state, table),
+            });
+            const name = exportBaseName(state, "png");
+            exportDownload(blob, name);
+            saved(name);
+          }),
+      },
+    }),
+    uiButton(strings.exportPanel.print, {
+      class: "ui-btn ui-btn--accent",
+      on: {
+        click: () =>
+          guard(() =>
+            printView("table", {
+              table,
+              title: table.title || state.project.name,
+              subtitle: exportSubtitleOf(state, table),
+              footer: state.project.name,
+            }),
+          ),
+      },
+    }),
+  ];
+
+  const modal = uiModal({
+    title: strings.exportPanel.tableDialog,
+    body: uiEl("div", { class: "export__body" }, [controls, hint, preview]),
+    actions: [uiButton(strings.dialog.close, { on: { click: () => modal.close() } }), ...actions],
+    primary: actions[actions.length - 1],
+  });
+  refresh();
+}
+
+// ——— диалог схемы —————————————————————————————————————————————————————
+
+function exportSchemeDialog(api) {
+  const { getState, notify } = api;
+  const state = getState();
+  const scheme = findScheme(state.project, state.schemeId);
+  const hint = uiEl("p", { class: "export__hint" });
+
+  const refreshHint = () => {
+    const size = exportAreaSize(state, scheme);
+    hint.textContent = exportSizeText(size.width, size.height, exportChoice.schemeScale);
+  };
+
+  const controls = uiEl("div", { class: "export__controls" }, [
+    exportField(
+      strings.exportPanel.area,
+      exportSelect(
+        [
+          { value: "all", label: strings.exportPanel.areaAll },
+          { value: "view", label: strings.exportPanel.areaView },
+        ],
+        exportChoice.area,
+        (value) => {
+          exportChoice.area = value;
+          refreshHint();
+        },
+      ),
+    ),
+    exportField(
+      strings.exportPanel.scale,
+      exportScaleSelect(exportChoice.schemeScale, (value) => {
+        exportChoice.schemeScale = value;
+        refreshHint();
+      }),
+    ),
+    exportCheck(strings.exportPanel.withLegend, exportChoice.legend, (on) => {
+      exportChoice.legend = on;
+    }),
+  ]);
+
+  const guard = async (run) => {
+    try {
+      await run();
+    } catch (error) {
+      notify(error && error.message ? error.message : strings.exportPanel.failed, "error");
+    }
+  };
+
+  const renderScheme = async () => {
+    const { image, release } = await exportSchemeImage(state, scheme);
+    // План может быть не загружен — метки тогда лягут на белый лист, и лучше
+    // сказать об этом, чем отдать «пустую» на вид картинку молча.
+    if (!image) notify(strings.exportPanel.noImage, "info");
+    try {
+      return await schemePng(state.project, scheme, image, {
+        area: exportChoice.area === "view" ? exportViewArea(state, scheme) : "all",
+        scale: exportChoice.schemeScale,
+        legend: exportChoice.legend,
+        filter: state.filter,
+      });
+    } finally {
+      if (release) release();
+    }
+  };
+
+  const actions = [
+    uiButton(strings.exportPanel.allSchemes, {
+      on: {
+        click: () =>
+          guard(async () => {
+            notify(strings.exportPanel.busy, "info");
+            const images = new Map();
+            for (const item of schemesInOrder(state.project)) {
+              if (!item.imageId || images.has(item.imageId)) continue;
+              const blob = await getImage(item.imageId);
+              if (blob) images.set(item.imageId, blob);
+            }
+            const zip = await allSchemesZip(state.project, images, {
+              scale: exportChoice.schemeScale,
+              legend: exportChoice.legend,
+              filter: state.filter,
+            });
+            const name = exportFileName(state.project, null, "zip");
+            exportDownload(zip, name);
+            notify(text("exportPanel.schemesDone", { count: state.project.schemes.length }), "success");
+          }),
+      },
+    }),
+    uiButton(strings.exportPanel.print, {
+      on: {
+        click: () =>
+          guard(async () => {
+            const blob = await renderScheme();
+            await printView("scheme", { blob, title: state.project.name + " · " + scheme.name });
+          }),
+      },
+    }),
+    uiButton(strings.exportPanel.download, {
+      class: "ui-btn ui-btn--accent",
+      on: {
+        click: () =>
+          guard(async () => {
+            const blob = await renderScheme();
+            const name = exportFileName(state.project, scheme, "png");
+            exportDownload(blob, name);
+            notify(text("exportPanel.saved", { name }), "success");
+          }),
+      },
+    }),
+  ];
+
+  const modal = uiModal({
+    title: strings.exportPanel.schemeDialog,
+    body: uiEl("div", { class: "export__body" }, [controls, hint]),
+    actions: [uiButton(strings.dialog.close, { on: { click: () => modal.close() } }), ...actions],
+    primary: actions[actions.length - 1],
+  });
+  refreshHint();
+}
+
+// ——— панель ———————————————————————————————————————————————————————————
+
+function mountExportPanel(host, api) {
+  const { getState, subscribe } = api;
+  const tableButton = uiButton(strings.exportPanel.tableTitle, {
+    on: { click: () => exportTableDialog(api) },
+  });
+  const schemeButton = uiButton(strings.exportPanel.schemeTitle, {
+    on: { click: () => exportSchemeDialog(api) },
+  });
+  host.replaceChildren(uiEl("div", { class: "export" }, [tableButton, schemeButton]));
+
+  // Пустая выгрузка никому не нужна: без меток кнопки гаснут и говорят почему.
+  const sync = (state) => {
+    const marks = state.project ? state.project.marks.length : 0;
+    const scheme = state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
+    tableButton.disabled = marks === 0;
+    tableButton.title = marks === 0 ? strings.exportPanel.noMarks : strings.exportPanel.tableDialog;
+    schemeButton.disabled = marks === 0 || !scheme;
+    schemeButton.title = !scheme
+      ? strings.exportPanel.noScheme
+      : marks === 0
+        ? strings.exportPanel.noMarks
+        : strings.exportPanel.schemeDialog;
+  };
+
+  subscribe(sync);
+  sync(getState());
+}
+
+registerPanel(PANEL_IDS.headerActions, mountExportPanel);
 
 // src/panels/filters.js
 // Фильтры списка меток: галочки категорий и типов, помещение и поиск.
@@ -4685,272 +6989,6 @@ function mountMarksPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.marks, mountMarksPanel);
-
-// src/store.js
-// Хранение в браузере: IndexedDB своими руками, без единой зависимости.
-// База `scheme-markup`, хранилища `projects` (документ объекта), `images`
-// (Blob планов) и `settings` (ключ-значение).
-//
-// Правило файла: потеря хранилища не должна ронять приложение. По file://
-// IndexedDB доступен не везде, в приватном окне запись может отказать в любой
-// момент — тогда store переходит в память, сообщает о беде подписчикам
-// (панель показывает строку и советует выгрузить проект в файл) и продолжает
-// работать. Данные сеанса живут в памяти в любом случае.
-const STORE_DB_NAME = "scheme-markup";
-const STORE_DB_VERSION = 1;
-const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
-// Ниже этого порога свободного места пользователя предупреждают заранее.
-const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
-// Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
-// вкладка): ждём ограниченное время и уходим в память.
-const STORE_OPEN_TIMEOUT_MS = 4000;
-
-const storeMemory = { projects: new Map(), images: new Map(), settings: new Map() };
-const storeListeners = new Set();
-let storeDb = null;
-let storeModeValue = "unknown";
-let storeOpening = null;
-let storeReported = false;
-let storeWriteReported = false;
-function storeMode() {
-  return storeModeValue;
-}
-function onStoreProblem(listener) {
-  storeListeners.add(listener);
-  return () => storeListeners.delete(listener);
-}
-
-function reportStoreProblem(kind, error) {
-  const problem = { kind, error: error || null };
-  for (const listener of [...storeListeners]) {
-    try {
-      listener(problem);
-    } catch (ignored) {
-      /* подписчик не должен ломать запись */
-    }
-  }
-}
-
-function newStoreId() {
-  return crypto.randomUUID();
-}
-
-function idbRequest(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("indexeddb-failed"));
-  });
-}
-
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === "undefined" || indexedDB === null) {
-      reject(new Error("indexeddb-unavailable"));
-      return;
-    }
-    let settled = false;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      fn(value);
-    };
-    const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
-    let request;
-    try {
-      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
-    } catch (error) {
-      clearTimeout(timer);
-      finish(reject, error);
-      return;
-    }
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAMES.projects)) {
-        db.createObjectStore(STORE_NAMES.projects, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(STORE_NAMES.images)) {
-        db.createObjectStore(STORE_NAMES.images, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(STORE_NAMES.settings)) {
-        db.createObjectStore(STORE_NAMES.settings, { keyPath: "key" });
-      }
-    };
-    request.onsuccess = () => {
-      clearTimeout(timer);
-      finish(resolve, request.result);
-    };
-    request.onerror = () => {
-      clearTimeout(timer);
-      finish(reject, request.error || new Error("indexeddb-failed"));
-    };
-    request.onblocked = () => {
-      clearTimeout(timer);
-      finish(reject, new Error("indexeddb-blocked"));
-    };
-  });
-}
-async function openStore() {
-  if (storeModeValue !== "unknown") return storeModeValue;
-  if (!storeOpening) {
-    storeOpening = openDatabase()
-      .then((db) => {
-        storeDb = db;
-        storeModeValue = "idb";
-        db.onclose = () => degradeToMemory(new Error("indexeddb-closed"));
-        return storeModeValue;
-      })
-      .catch((error) => {
-        degradeToMemory(error);
-        return storeModeValue;
-      });
-  }
-  return storeOpening;
-}
-
-function degradeToMemory(error) {
-  storeDb = null;
-  storeModeValue = "memory";
-  if (storeReported) return;
-  storeReported = true;
-  reportStoreProblem("unavailable", error);
-}
-
-// Одна транзакция — одно действие: запись документа объекта атомарна, вкладка,
-// закрытая посреди сохранения, оставляет прежнее состояние, а не половину.
-async function runTransaction(name, mode, action) {
-  await openStore();
-  if (storeModeValue !== "idb" || !storeDb) return { ok: false, memory: true };
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = storeDb.transaction(name, mode);
-      let result;
-      tx.oncomplete = () => {
-        if (mode === "readwrite") storeWriteReported = false;
-        resolve({ ok: true, result });
-      };
-      tx.onerror = () => reject(tx.error || new Error("indexeddb-failed"));
-      tx.onabort = () => reject(tx.error || new Error("indexeddb-aborted"));
-      Promise.resolve(action(tx.objectStore(name)))
-        .then((value) => {
-          result = value;
-        })
-        .catch((error) => {
-          try {
-            tx.abort();
-          } catch (ignored) {
-            /* транзакция уже завершилась */
-          }
-          reject(error);
-        });
-    });
-  } catch (error) {
-    // Автосохранение идёт на каждую правку: об отказавшей записи говорим один
-    // раз — до тех пор, пока запись снова не пройдёт.
-    if (mode === "readwrite" && !storeWriteReported) {
-      storeWriteReported = true;
-      reportStoreProblem("writeFailed", error);
-    }
-    return { ok: false, error };
-  }
-}
-
-// ——— объекты ——————————————————————————————————————————————————————————
-async function listProjects() {
-  const summaries = new Map();
-  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
-  if (read.ok) {
-    for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
-  }
-  for (const doc of storeMemory.projects.values()) summaries.set(doc.id, summaryOf(doc));
-  return [...summaries.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-}
-
-function summaryOf(project) {
-  return {
-    id: project.id,
-    name: project.name,
-    updatedAt: project.updatedAt,
-    schemes: (project.schemes || []).length,
-    marks: (project.marks || []).length,
-  };
-}
-async function loadProject(id) {
-  if (!id) return null;
-  if (storeMemory.projects.has(id)) return storeMemory.projects.get(id);
-  const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.get(id)));
-  return read.ok && read.result ? read.result : null;
-}
-
-// Отказ записи не теряет работу: документ остаётся в памяти сеанса, а панель
-// получает повод предложить выгрузку в файл.
-async function saveProject(project) {
-  if (!project || !project.id) return { ok: false };
-  const written = await runTransaction(STORE_NAMES.projects, "readwrite", (store) =>
-    idbRequest(store.put(project)),
-  );
-  if (written.ok) {
-    storeMemory.projects.delete(project.id);
-    return { ok: true, mode: "idb" };
-  }
-  storeMemory.projects.set(project.id, project);
-  return { ok: false, mode: "memory", error: written.error || null };
-}
-async function deleteProject(id) {
-  storeMemory.projects.delete(id);
-  const removed = await runTransaction(STORE_NAMES.projects, "readwrite", (store) => idbRequest(store.delete(id)));
-  return { ok: removed.ok || storeModeValue === "memory" };
-}
-
-// ——— изображения ——————————————————————————————————————————————————————
-async function putImage(blob) {
-  const id = newStoreId();
-  const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
-    idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0 })),
-  );
-  if (!written.ok) storeMemory.images.set(id, blob);
-  return id;
-}
-async function getImage(id) {
-  if (!id) return null;
-  if (storeMemory.images.has(id)) return storeMemory.images.get(id);
-  const read = await runTransaction(STORE_NAMES.images, "readonly", (store) => idbRequest(store.get(id)));
-  return read.ok && read.result ? read.result.blob : null;
-}
-async function deleteImage(id) {
-  if (!id) return { ok: true };
-  storeMemory.images.delete(id);
-  const removed = await runTransaction(STORE_NAMES.images, "readwrite", (store) => idbRequest(store.delete(id)));
-  return { ok: removed.ok || storeModeValue === "memory" };
-}
-
-// ——— настройки ————————————————————————————————————————————————————————
-async function getSetting(key) {
-  if (storeMemory.settings.has(key)) return storeMemory.settings.get(key);
-  const read = await runTransaction(STORE_NAMES.settings, "readonly", (store) => idbRequest(store.get(key)));
-  return read.ok && read.result ? read.result.value : null;
-}
-async function setSetting(key, value) {
-  const written = await runTransaction(STORE_NAMES.settings, "readwrite", (store) =>
-    idbRequest(store.put({ key, value })),
-  );
-  if (written.ok) storeMemory.settings.delete(key);
-  else storeMemory.settings.set(key, value);
-  return { ok: written.ok };
-}
-
-// ——— место ————————————————————————————————————————————————————————————
-async function estimateSpace() {
-  const empty = { usage: null, quota: null, free: null, low: false };
-  if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.estimate) return empty;
-  try {
-    const { usage, quota } = await navigator.storage.estimate();
-    if (typeof quota !== "number" || typeof usage !== "number") return empty;
-    const free = Math.max(0, quota - usage);
-    return { usage, quota, free, low: free < STORE_LOW_SPACE_BYTES };
-  } catch (error) {
-    return empty;
-  }
-}
 
 // src/panels/types.js
 // Справочник объекта: типы меток, категории, помещения и шаблон для новых
@@ -6461,465 +8499,6 @@ function mountToolsPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
-
-// src/projectFile.js
-// Формат файла проекта: один zip с project.json, планами в schemes/ и README.txt.
-// Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
-// там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
-const PROJECT_ENTRY = "project.json";
-const SCHEMES_DIR = "schemes/";
-const README_ENTRY = "README.txt";
-
-const LOCAL_SIGNATURE = 0x04034b50;
-const CENTRAL_SIGNATURE = 0x02014b50;
-const END_SIGNATURE = 0x06054b50;
-const LOCAL_HEADER_SIZE = 30;
-const CENTRAL_HEADER_SIZE = 46;
-const END_HEADER_SIZE = 22;
-const METHOD_STORED = 0;
-const METHOD_DEFLATE = 8;
-const UTF8_FLAG = 0x0800;
-const ZIP64_MARK = 0xffffffff;
-const MAX_ZIP_BYTES = 0xfffffffe;
-
-// Тип картинки восстанавливается по расширению: имя файла в архиве — всё,
-// что о ней известно после распаковки.
-const IMAGE_TYPES = [
-  ["image/png", "png"],
-  ["image/jpeg", "jpg"],
-  ["image/jpeg", "jpeg"],
-];
-
-function fileError(key, vars) {
-  const error = new Error(text("errors." + key, vars));
-  error.code = key;
-  return error;
-}
-
-// ——— байты ———————————————————————————————————————————————————————————
-
-const utf8Encoder = new TextEncoder();
-const utf8Decoder = new TextDecoder("utf-8");
-
-function encodeText(value) {
-  return utf8Encoder.encode(value);
-}
-
-function decodeText(bytes) {
-  return utf8Decoder.decode(bytes);
-}
-
-async function toBytes(data) {
-  if (data == null) return new Uint8Array(0);
-  if (data instanceof Uint8Array) return data;
-  if (typeof data === "string") return encodeText(data);
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  if (typeof data.arrayBuffer === "function") return new Uint8Array(await data.arrayBuffer());
-  throw fileError("archiveBroken");
-}
-
-let crcTable = null;
-function crc32(bytes) {
-  if (!crcTable) {
-    crcTable = new Uint32Array(256);
-    for (let n = 0; n < 256; n += 1) {
-      let value = n;
-      for (let bit = 0; bit < 8; bit += 1) {
-        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-      }
-      crcTable[n] = value >>> 0;
-    }
-  }
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i += 1) {
-    crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xff];
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function hasCompression() {
-  return typeof CompressionStream === "function" && typeof DecompressionStream === "function";
-}
-
-async function collectStream(readable) {
-  const reader = readable.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const step = await reader.read();
-    if (step.done) break;
-    const chunk = step.value instanceof Uint8Array ? step.value : new Uint8Array(step.value);
-    chunks.push(chunk);
-    total += chunk.length;
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.length;
-  }
-  return out;
-}
-
-// Поток, а не один кусок: большой план не держит вкладку — между чтениями
-// управление возвращается странице.
-async function pipeBytes(bytes, transform) {
-  const source = new Blob([bytes]).stream().pipeThrough(transform);
-  return collectStream(source);
-}
-
-async function deflateRaw(bytes) {
-  return pipeBytes(bytes, new CompressionStream("deflate-raw"));
-}
-
-async function inflateRaw(bytes) {
-  try {
-    return await pipeBytes(bytes, new DecompressionStream("deflate-raw"));
-  } catch {
-    throw fileError("archiveBroken");
-  }
-}
-
-// ——— запись zip ——————————————————————————————————————————————————————
-
-function dosStamp(date) {
-  const year = date.getUTCFullYear();
-  if (year < 1980) return { time: 0, date: (1 << 5) | 1 };
-  return {
-    time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | (date.getUTCSeconds() >> 1),
-    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
-  };
-}
-
-function headerBuffer(size) {
-  const bytes = new Uint8Array(size);
-  return { bytes, view: new DataView(bytes.buffer) };
-}
-
-/**
- * Собирает zip из списка {name, data, compress}. `data` — Uint8Array, ArrayBuffer,
- * строка или Blob. Размеры известны заранее, дескрипторов данных нет — архив
- * открывается штатным распаковщиком ОС.
- */
-async function writeZip(files, options = {}) {
-  const allowCompression = options.compress !== false && hasCompression();
-  const stamp = dosStamp(options.date instanceof Date ? options.date : new Date());
-  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
-  const list = [...files];
-
-  const parts = [];
-  const central = [];
-  let offset = 0;
-
-  for (let index = 0; index < list.length; index += 1) {
-    const entry = list[index];
-    const nameBytes = encodeText(entry.name);
-    const source = await toBytes(entry.data);
-    const wantCompression = entry.compress === false ? false : allowCompression;
-
-    let method = METHOD_STORED;
-    let payload = source;
-    if (wantCompression && source.length > 0) {
-      const packed = await deflateRaw(source);
-      if (packed.length < source.length) {
-        method = METHOD_DEFLATE;
-        payload = packed;
-      }
-    }
-    const crc = crc32(source);
-
-    const local = headerBuffer(LOCAL_HEADER_SIZE + nameBytes.length);
-    local.view.setUint32(0, LOCAL_SIGNATURE, true);
-    local.view.setUint16(4, 20, true);
-    local.view.setUint16(6, UTF8_FLAG, true);
-    local.view.setUint16(8, method, true);
-    local.view.setUint16(10, stamp.time, true);
-    local.view.setUint16(12, stamp.date, true);
-    local.view.setUint32(14, crc, true);
-    local.view.setUint32(18, payload.length, true);
-    local.view.setUint32(22, source.length, true);
-    local.view.setUint16(26, nameBytes.length, true);
-    local.view.setUint16(28, 0, true);
-    local.bytes.set(nameBytes, LOCAL_HEADER_SIZE);
-
-    parts.push(local.bytes, payload);
-    central.push({ nameBytes, method, crc, packedSize: payload.length, size: source.length, offset });
-    offset += local.bytes.length + payload.length;
-    if (offset > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
-    if (onProgress) onProgress({ done: index + 1, total: list.length, name: entry.name });
-  }
-
-  const directoryOffset = offset;
-  let directorySize = 0;
-  for (const entry of central) {
-    const header = headerBuffer(CENTRAL_HEADER_SIZE + entry.nameBytes.length);
-    header.view.setUint32(0, CENTRAL_SIGNATURE, true);
-    header.view.setUint16(4, 20, true);
-    header.view.setUint16(6, 20, true);
-    header.view.setUint16(8, UTF8_FLAG, true);
-    header.view.setUint16(10, entry.method, true);
-    header.view.setUint16(12, stamp.time, true);
-    header.view.setUint16(14, stamp.date, true);
-    header.view.setUint32(16, entry.crc, true);
-    header.view.setUint32(20, entry.packedSize, true);
-    header.view.setUint32(24, entry.size, true);
-    header.view.setUint16(28, entry.nameBytes.length, true);
-    header.view.setUint32(42, entry.offset, true);
-    header.bytes.set(entry.nameBytes, CENTRAL_HEADER_SIZE);
-    parts.push(header.bytes);
-    directorySize += header.bytes.length;
-  }
-
-  const end = headerBuffer(END_HEADER_SIZE);
-  end.view.setUint32(0, END_SIGNATURE, true);
-  end.view.setUint16(8, central.length, true);
-  end.view.setUint16(10, central.length, true);
-  end.view.setUint32(12, directorySize, true);
-  end.view.setUint32(16, directoryOffset, true);
-  parts.push(end.bytes);
-  if (directoryOffset + directorySize + END_HEADER_SIZE > MAX_ZIP_BYTES) throw fileError("archiveTooBig");
-
-  return new Blob(parts, { type: "application/zip" });
-}
-
-// ——— чтение zip ——————————————————————————————————————————————————————
-
-function findEndHeader(bytes, view) {
-  const limit = Math.max(0, bytes.length - 0xffff - END_HEADER_SIZE);
-  for (let at = bytes.length - END_HEADER_SIZE; at >= limit; at -= 1) {
-    if (view.getUint32(at, true) === END_SIGNATURE) return at;
-  }
-  return -1;
-}
-
-/** Распаковывает zip в Map «имя файла → байты». Понимает stored и deflate. */
-async function readZip(blob) {
-  const bytes = await toBytes(blob);
-  if (bytes.length < END_HEADER_SIZE) throw fileError("notAProject");
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-
-  const endAt = findEndHeader(bytes, view);
-  if (endAt < 0) throw fileError("notAProject");
-
-  const count = view.getUint16(endAt + 10, true);
-  const directorySize = view.getUint32(endAt + 12, true);
-  const directoryOffset = view.getUint32(endAt + 16, true);
-  if (directoryOffset === ZIP64_MARK || directorySize === ZIP64_MARK || count === 0xffff) {
-    throw fileError("zip64Unsupported");
-  }
-  if (directoryOffset + directorySize > bytes.length) throw fileError("archiveBroken");
-
-  const entries = new Map();
-  let at = directoryOffset;
-  for (let index = 0; index < count; index += 1) {
-    if (at + CENTRAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
-    if (view.getUint32(at, true) !== CENTRAL_SIGNATURE) throw fileError("archiveBroken");
-    const method = view.getUint16(at + 10, true);
-    const crc = view.getUint32(at + 16, true);
-    const packedSize = view.getUint32(at + 20, true);
-    const size = view.getUint32(at + 24, true);
-    const nameLength = view.getUint16(at + 28, true);
-    const extraLength = view.getUint16(at + 30, true);
-    const commentLength = view.getUint16(at + 32, true);
-    const localOffset = view.getUint32(at + 42, true);
-    const name = decodeText(bytes.subarray(at + CENTRAL_HEADER_SIZE, at + CENTRAL_HEADER_SIZE + nameLength));
-    at += CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
-
-    if (name.endsWith("/")) continue;
-    if (packedSize === ZIP64_MARK || size === ZIP64_MARK || localOffset === ZIP64_MARK) {
-      throw fileError("zip64Unsupported");
-    }
-    if (localOffset + LOCAL_HEADER_SIZE > bytes.length) throw fileError("archiveBroken");
-    if (view.getUint32(localOffset, true) !== LOCAL_SIGNATURE) throw fileError("archiveBroken");
-
-    const localNameLength = view.getUint16(localOffset + 26, true);
-    const localExtraLength = view.getUint16(localOffset + 28, true);
-    const dataAt = localOffset + LOCAL_HEADER_SIZE + localNameLength + localExtraLength;
-    if (dataAt + packedSize > bytes.length) throw fileError("archiveBroken");
-
-    const payload = bytes.subarray(dataAt, dataAt + packedSize);
-    let content;
-    if (method === METHOD_STORED) content = payload.slice();
-    else if (method === METHOD_DEFLATE) content = await inflateRaw(payload);
-    else throw fileError("archiveBroken");
-
-    if (content.length !== size || crc32(content) !== crc) throw fileError("archiveBroken");
-    entries.set(name, content);
-  }
-  return entries;
-}
-
-// ——— файл проекта ————————————————————————————————————————————————————
-
-function extensionFor(type) {
-  const found = IMAGE_TYPES.find((pair) => pair[0] === String(type || "").toLowerCase());
-  return found ? found[1] : "bin";
-}
-
-function typeForExtension(extension) {
-  const found = IMAGE_TYPES.find((pair) => pair[1] === String(extension || "").toLowerCase());
-  return found ? found[0] : "";
-}
-
-// Идентификатор изображения попадает в имя файла: кодируем, чтобы «/» и прочее
-// не разъехались по папкам, и раскодируем обратно — id восстанавливается точно.
-function encodeImageId(id) {
-  return encodeURIComponent(String(id));
-}
-
-function decodeImageId(name) {
-  try {
-    return decodeURIComponent(name);
-  } catch {
-    return name;
-  }
-}
-
-// Поставщик один — store отдаёт Map. Всё остальное отвергается: тихо вернуть
-// пустой список значило бы упаковать объект без единого плана и промолчать.
-function imageEntries(images) {
-  if (images == null) return [];
-  if (!(images instanceof Map)) throw fileError("imagesNotMap");
-  return [...images.entries()];
-}
-
-function looksLikeProject(value) {
-  return (
-    Boolean(value) &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    typeof value.id === "string" &&
-    Array.isArray(value.categories) &&
-    Array.isArray(value.markTypes) &&
-    Array.isArray(value.schemes) &&
-    Array.isArray(value.marks)
-  );
-}
-
-// Единственное место, где живут миграции формата: версия из будущего отвергается,
-// прошлые версии доводятся до текущей здесь.
-function migrateProject(loaded) {
-  const version = Number(loaded.formatVersion);
-  if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
-  if (version > FORMAT_VERSION) {
-    throw fileError("futureVersion", { version, current: FORMAT_VERSION });
-  }
-  return {
-    ...loaded,
-    formatVersion: FORMAT_VERSION,
-    rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
-    groups: Array.isArray(loaded.groups) ? loaded.groups : [],
-    counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
-  };
-}
-
-function readmeText(project, date) {
-  return text("file.readme", {
-    name: project.name || strings.project.untitled,
-    date: date.toISOString(),
-    schemes: project.schemes.length,
-    marks: project.marks.length,
-    version: FORMAT_VERSION,
-  }) + "\n";
-}
-
-/** Имя для выгрузки: «<объект>-<дата>.zip». */
-function projectFileName(project, now) {
-  const date = now instanceof Date ? now : new Date();
-  const day = date.toISOString().slice(0, 10);
-  const raw = String((project && project.name) || strings.project.untitled);
-  const safe = raw
-    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 60);
-  return (safe || strings.project.untitled) + "-" + day + ".zip";
-}
-
-/**
- * Упаковывает объект и планы в один zip.
- * `images` — Map «imageId → Blob» (или ничего, если планов нет); картинки кладутся
- * как есть, без пережатия. `options.onProgress({done, total, name})`.
- */
-async function packProject(project, images, options = {}) {
-  if (!looksLikeProject(project)) throw fileError("foreignProject");
-  const date = options.date instanceof Date ? options.date : new Date();
-  const forFile = { ...project, formatVersion: FORMAT_VERSION };
-
-  const files = [{ name: PROJECT_ENTRY, data: JSON.stringify(forFile, null, 2) }];
-  for (const [id, blob] of imageEntries(images)) {
-    if (!id || !blob) continue;
-    const extension = extensionFor(blob.type);
-    files.push({
-      name: SCHEMES_DIR + encodeImageId(id) + "." + extension,
-      data: blob,
-      compress: false,
-    });
-  }
-  files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
-
-  return writeZip(files, {
-    date,
-    compress: options.compress,
-    onProgress: options.onProgress,
-  });
-}
-
-// Свой архив кладёт project.json в корень; перепакованный вместе с папкой —
-// на уровень глубже. Из нескольких кандидатов берётся самый неглубокий:
-// сравниваются префиксы с префиксами, а не имя файла с префиксом.
-function projectPrefix(entries) {
-  let prefix = null;
-  for (const name of entries.keys()) {
-    if (name === PROJECT_ENTRY) return "";
-    if (name.endsWith("/" + PROJECT_ENTRY)) {
-      const candidate = name.slice(0, -PROJECT_ENTRY.length);
-      if (prefix === null || candidate.length < prefix.length) prefix = candidate;
-    }
-  }
-  return prefix;
-}
-
-/**
- * Читает файл проекта: `{project, images}`, где images — Map «imageId → Blob».
- * Чужой или битый файл отвергается ошибкой с `.code` из strings.errors,
- * текущий объект при этом не трогается — вызывающий получает исключение
- * до того, как что-то заменит.
- */
-async function unpackProject(blob, options = {}) {
-  if (!blob) throw fileError("notAProject");
-  const entries = await readZip(blob);
-
-  const prefix = projectPrefix(entries);
-  if (prefix === null) throw fileError("noProjectJson");
-
-  let loaded;
-  try {
-    loaded = JSON.parse(decodeText(entries.get(prefix + PROJECT_ENTRY)));
-  } catch {
-    throw fileError("brokenProjectJson");
-  }
-  if (!looksLikeProject(loaded)) throw fileError("foreignProject");
-  const project = migrateProject(loaded);
-
-  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
-  const imageNames = [...entries.keys()].filter(
-    (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
-  );
-  const images = new Map();
-  for (let index = 0; index < imageNames.length; index += 1) {
-    const name = imageNames[index];
-    const tail = name.slice((prefix + SCHEMES_DIR).length);
-    const dot = tail.lastIndexOf(".");
-    const id = decodeImageId(dot > 0 ? tail.slice(0, dot) : tail);
-    const type = typeForExtension(dot > 0 ? tail.slice(dot + 1) : "");
-    images.set(id, new Blob([entries.get(name)], type ? { type } : undefined));
-    if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
-  }
-
-  return { project, images };
-}
 })();
     </script>
 </body>

@@ -1,0 +1,240 @@
+/* Печатная раскладка и предпросмотр таблицы.
+   Один и тот же узел .print-doc показывается в диалоге выгрузки и уходит в
+   печать: на бумаге оказывается ровно то, что видно на экране. Экран прячется
+   только на время нашей печати — по классу printing на body. */
+
+#print-root {
+  display: none;
+}
+
+.print-doc {
+  background: #ffffff;
+  color: #1f2328;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  padding: 4px 2px 12px;
+}
+
+.print-doc__head {
+  margin-bottom: 10px;
+}
+
+.print-doc__title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Комната — вторым заголовком под именем объекта: лист по одной комнате
+   должен отличаться от полного с первого взгляда. */
+.print-doc__room {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 2px 0 0;
+}
+
+/* Пометка о сужении фильтром: не украшение, а предупреждение о неполном листе. */
+.print-doc__note {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 2px 0 0;
+}
+
+.print-doc__swatch {
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+  display: inline-block;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  width: 10px;
+}
+
+.print-doc__sub {
+  color: #57606a;
+  font-size: 12px;
+  margin: 2px 0 0;
+}
+
+.print-doc__group {
+  margin-bottom: 14px;
+}
+
+/* Заголовок категории — её цветом, с полосой под ним: так же, как разделены
+   категории на рукописном листе заказчика. */
+.print-doc__group-title {
+  border-bottom: 2px solid var(--print-color, #d0d7de);
+  color: var(--print-color, #1f2328);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  padding-bottom: 3px;
+}
+
+.print-doc__table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.print-doc__table th {
+  border-bottom: 1px solid #d0d7de;
+  color: #57606a;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px 3px 0;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.print-doc__table td {
+  border-bottom: 1px solid #eaeef2;
+  padding: 3px 8px 3px 0;
+  vertical-align: top;
+}
+
+/* Цветная полоса слева у строки: по ней категория видна и там, где заголовок
+   группы остался на предыдущей странице. */
+.print-doc__row td:first-child {
+  border-left: 3px solid var(--print-row-color, transparent);
+  padding-left: 7px;
+}
+
+.print-doc__label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.print-doc__image {
+  display: block;
+  max-width: 100%;
+}
+
+.print-doc__foot {
+  color: #57606a;
+  font-size: 11px;
+  margin-top: 10px;
+}
+
+/* Предпросмотр в диалоге: лист в рамке, прокрутка внутри. */
+.export__preview {
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+/* Кнопки выгрузки в шапке и поля диалогов. */
+.export {
+  display: flex;
+  gap: 8px;
+}
+
+.export__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 520px;
+}
+
+.export__controls {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.export__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.export__field-label {
+  color: var(--muted, #8b949e);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.export__toggle {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.export__hint {
+  color: var(--muted, #8b949e);
+  font-size: 12px;
+  margin: 0;
+}
+
+@media print {
+  @page {
+    margin: 12mm 10mm 16mm;
+  }
+
+  body.printing #app,
+  body.printing #notifications {
+    display: none !important;
+  }
+
+  body.printing #print-root {
+    display: block;
+  }
+
+  body.printing {
+    background: #ffffff;
+  }
+
+  /* Цвета категорий — смысл листа, а не украшение: без этого принтер съедает
+     и заголовки, и полосы слева. */
+  .print-doc,
+  .print-doc * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-doc {
+    font-size: 10.5pt;
+    padding: 0;
+  }
+
+  .print-doc__title {
+    font-size: 15pt;
+  }
+
+  .print-doc__room {
+    font-size: 12.5pt;
+  }
+
+  .print-doc__group-title {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Шапка колонок повторяется на каждой странице, строка не рвётся пополам. */
+  .print-doc__table thead {
+    display: table-header-group;
+  }
+
+  .print-doc__row {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Имя объекта — в колонтитуле на каждой странице. */
+  .print-doc__foot {
+    bottom: 0;
+    left: 0;
+    position: fixed;
+    right: 0;
+    border-top: 1px solid #d0d7de;
+    padding-top: 3px;
+  }
+
+  .print-doc--scheme .print-doc__image {
+    max-height: 96vh;
+    object-fit: contain;
+  }
+}
