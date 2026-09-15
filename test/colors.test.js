@@ -8,9 +8,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  COLOR_SAME_DISTANCE,
   ROOM_PALETTE,
   addRoom,
+  colorBlend,
+  colorsInUse,
   colorDistance,
+  colorFieldToHsv,
+  colorHsvToField,
+  colorTaken,
   createProject,
   freeColor,
   hexToRgb,
@@ -18,6 +24,7 @@ import {
   randomColor,
   rgbToHex,
   rgbToHsv,
+  updateCategory,
   updateRoom,
 } from "../src/model.js";
 
@@ -168,4 +175,82 @@ test("случайный цвет воспроизводится: тот же г
   // Генератор-пустышка не даёт ни одного годного цвета — возвращается
   // свободный цвет палитры, а не мусор.
   assert.equal(randomColor([ROOM_PALETTE[0]], { random: () => 0 }), ROOM_PALETTE[1]);
+});
+
+// Два чистых куска окна выбора цвета: перевод курсора в цвет и проверка
+// «этот цвет уже занят». Ошибаются молча — курсор уезжает на пиксель,
+// а занятый цвет предлагается как свободный.
+test("курсор поля превращается в насыщенность и яркость, и обратно", () => {
+  // Левый верхний угол поля — белый (насыщенность 0, яркость 1),
+  // правый нижний — чёрный.
+  assert.deepEqual(colorFieldToHsv({ h: 216, x: 0, y: 0 }), { h: 216, s: 0, v: 1 });
+  assert.deepEqual(colorFieldToHsv({ h: 216, x: 1, y: 1 }), { h: 216, s: 1, v: 0 });
+  assert.deepEqual(colorFieldToHsv({ h: 216, x: 0.25, y: 0.75 }), { h: 216, s: 0.25, v: 0.25 });
+  // Курсор увели за край поля, оттенок — за круг: цвет остаётся цветом.
+  assert.deepEqual(colorFieldToHsv({ h: 400, x: -2, y: 5 }), { h: 40, s: 0, v: 0 });
+  // Кружок рисуется там, откуда щёлкнули.
+  assert.deepEqual(colorHsvToField({ h: 216, s: 0.25, v: 0.25 }), { x: 0.25, y: 0.75 });
+  assert.deepEqual(colorHsvToField(colorFieldToHsv({ h: 12, x: 0.625, y: 0.25 })), { x: 0.625, y: 0.25 });
+});
+
+test("«цвет уже занят» — про глаз, а не про совпадение байтов", () => {
+  assert.equal(colorTaken("#0F766E", []), false);
+  assert.equal(colorTaken("#0F766E", ["#B45309"]), false);
+  assert.equal(colorTaken("#0F766E", ["#B45309", "#0F766E"]), true);
+  assert.equal(colorTaken("#0F766E", ["#0f766f"]), true);
+  assert.equal(colorTaken("#0F766E", ["не цвет", null, ""]), false);
+  // Порог задаётся: при широком пороге занят и далёкий цвет палитры.
+  assert.equal(colorTaken(ROOM_PALETTE[0], [ROOM_PALETTE[1]], 200), true);
+});
+
+test("цвет смешивается с подложкой по доле", () => {
+  assert.equal(colorBlend("#000000", "#FFFFFF", 0), "#FFFFFF");
+  assert.equal(colorBlend("#000000", "#FFFFFF", 1), "#000000");
+  assert.equal(colorBlend("#000000", "#FFFFFF", 0.5), "#808080");
+  assert.equal(colorBlend("#FF0000", "#FFFFFF", 0.25), "#FFBFBF");
+  // Доля за пределами 0…1 цвет за края не выводит.
+  assert.equal(colorBlend("#FF0000", "#FFFFFF", 5), "#FF0000");
+});
+
+// Метка рисуется цветом своей категории поверх заливки комнаты. Совпали цвета —
+// метка исчезла в заливке. Приложение заливает контур едва заметно, но
+// полагаться на это нельзя: прозрачность правится одной строкой в стилях,
+// поэтому проверяется весь разброс плотности, вплоть до сплошной заливки.
+test("метка любой категории различима на заливке любой комнаты палитры", () => {
+  const categories = createProject({ name: "Тест" }).categories.map((category) => category.color);
+  for (const room of ROOM_PALETTE) {
+    for (const category of categories) {
+      for (const alpha of [0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 0.9, 1]) {
+        const fill = colorBlend(room, "#FFFFFF", alpha);
+        const distance = colorDistance(category, fill);
+        const about = category + " на заливке " + room + " (" + alpha + "): " + distance.toFixed(1);
+        assert.ok(distance >= COLOR_SAME_DISTANCE, "метка теряется в заливке — " + about);
+        // На той плотности, которой рисует приложение, запас кратный.
+        if (alpha <= 0.3) assert.ok(distance >= 40, "метка едва видна на заливке — " + about);
+      }
+    }
+  }
+});
+
+test("занятыми считаются цвета и комнат, и категорий", () => {
+  const added = addRoom(createProject({ name: "Тест" }), "Кухня");
+  const project = added.project;
+  const used = colorsInUse(project);
+  for (const category of project.categories) assert.ok(used.includes(category.color), category.name);
+  assert.ok(used.includes(added.room.color));
+  // Правимая строка себя не занимает — иначе свой же цвет выглядел бы чужим.
+  assert.ok(!colorsInUse(project, { exceptRoomId: added.room.id }).includes(added.room.color));
+  const first = project.categories[0];
+  assert.ok(!colorsInUse(project, { exceptCategoryId: first.id }).includes(first.color));
+});
+
+test("новая комната не берёт цвет чужой категории", () => {
+  const project = createProject({ name: "Тест" });
+  // Категорию перекрасили цветом из палитры — комнате он больше не достанется.
+  const painted = updateCategory(project, project.categories[0].id, { color: ROOM_PALETTE[0] }).project;
+  const added = addRoom(painted, "Кухня");
+  assert.equal(added.room.color, ROOM_PALETTE[1]);
+  for (const category of added.project.categories) {
+    assert.ok(colorDistance(category.color, added.room.color) >= COLOR_SAME_DISTANCE, category.name);
+  }
 });

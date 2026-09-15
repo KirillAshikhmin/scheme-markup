@@ -293,8 +293,9 @@ test("подпись смешанного блока: ведёт первая п
   // а стоит она у оставшейся метки, а не посередине между видимой и скрытой.
   const targets = renderInternals.labelTargets(mixed, scheme, { typeIds: [base.typeId] });
   assert.equal(targets.length, 1);
-  assert.equal(labelBox(mixed, scheme, targets[0], viewOf()).text, "Р1");
-  assert.equal(labelBox(mixed, scheme, targets[0], viewOf()).x, 500 + 10 * renderInternals.LABEL_GAP);
+  const shown = { typeIds: [base.typeId] };
+  assert.equal(labelBox(mixed, scheme, targets[0], viewOf(), shown).text, "Р1");
+  assert.equal(labelBox(mixed, scheme, targets[0], viewOf(), shown).x, 500 + 10 * renderInternals.LABEL_GAP);
   assert.equal(labelLead(mixed, targets[0]).typeId, base.typeId);
 });
 
@@ -391,12 +392,8 @@ test("ширина подписи считается с запасом на пр
 
 // Все подписи схемы разом — так их видит и холст, и выгрузка: раскладка
 // считается один раз на схему и передаётся в каждый прямоугольник.
-const labelBoxes = (project, scheme, view, filter = null) => {
-  const layout = labelLayout(project, scheme, filter, view);
-  return renderInternals
-    .labelTargets(project, scheme, filter)
-    .map((target) => labelBox(project, scheme, target, view, layout));
-};
+const labelBoxes = (project, scheme, view, filter = null) =>
+  renderInternals.labelTargets(project, scheme, filter).map((target) => labelBox(project, scheme, target, view, filter));
 
 const boxesOverlap = (a, b) =>
   a.x < b.x + b.width &&
@@ -538,6 +535,55 @@ test("когда разводить некуда — подписи остают
   assert.ok(boxes.some((box) => box.crowded), "теснота не помечена: разбирать выгрузку будет нечем");
   // Метка стоит там, где стоит железка: раскладка двигает только подпись.
   for (const mark of project.marks) assert.deepEqual(mark.points, [{ x: 0.5, y: 0.5 }]);
+});
+
+// Фильтр меняет состав подписей, а значит и места, которые они делят. Если
+// картинку считать с фильтром, а попадание по клику — без него, подпись
+// нарисуется в одном месте, а ловиться будет в другом: расхождение тихое, и
+// видно его только руками. Поэтому `labelBox` берёт фильтр — тот же, что
+// `hitTest` и `drawScheme`, — и своего «посчитаю без фильтра» у него нет.
+test("подпись считается по тому же фильтру, что и картинка: клик попадает туда, где нарисовано", () => {
+  const base = world();
+  const light = base.project.categories.find((item) => item.name === "Свет").id;
+  const wide = addType(base.project, { code: "ПОДСВЕТКА", name: "Подсветка", categoryId: light });
+  const tape = addType(wide.project, { code: "ЛЕНТА", name: "Лента", categoryId: light });
+  let project = addMark(tape.project, {
+    schemeId: base.schemeId,
+    typeId: wide.type.id,
+    points: [{ x: 0.2, y: 0.4 }],
+  }).project;
+  const added = addMark(project, { schemeId: base.schemeId, typeId: tape.type.id, points: [{ x: 0.23, y: 0.4 }] });
+  project = added.project;
+  const scheme = project.schemes[0];
+  const view = viewOf();
+  const shown = { typeIds: [tape.type.id] };
+
+  // Сосед виден — подписи делят места, и «ЛЕНТА1» отведена от своего места.
+  const crowded = labelBox(project, scheme, added.mark, view, null);
+  // Сосед скрыт — делить не с кем, подпись стоит где положено: метка (230, 200).
+  const free = labelBox(project, scheme, added.mark, view, shown);
+  assert.equal(free.x, 230 + 10 * renderInternals.LABEL_GAP);
+  assert.equal(free.y, 200 - 10 * renderInternals.LABEL_GAP);
+  assert.notEqual(crowded.y, free.y, "пример не тот: без фильтра подпись никуда не отводится");
+
+  // И там, и там клик ловит подпись ровно на её месте.
+  for (const [filter, box] of [[null, crowded], [shown, free]]) {
+    const hit = hitTest(project, scheme, { x: box.x + 2, y: box.y }, view, filter);
+    assert.equal(hit && hit.part, "label", "клик не нашёл подпись там, где она нарисована");
+    assert.equal(hit.markId, added.mark.id, "клик попал в чужую подпись");
+  }
+});
+
+test("раскладку вместо фильтра labelBox не принимает", () => {
+  const { project, scheme } = rowOfThree();
+  const layout = labelLayout(project, scheme, null, viewOf());
+  assert.ok(layout.size > 0, "раскладка пустая — проверять нечего");
+  // Map молча сошла бы за «фильтра нет»: подпись встала бы по одной раскладке,
+  // а ловилась по другой. Лучше отказ, чем тихое расхождение.
+  assert.throws(
+    () => labelBox(project, scheme, project.marks[0], viewOf(), layout),
+    (error) => error.code === "label-layout-instead-of-filter",
+  );
 });
 
 // ——— легенда ——————————————————————————————————————————————————————————

@@ -420,13 +420,33 @@ function labelKeyOf(target) {
   return (target.markIds ? "g:" : "m:") + target.id;
 }
 
-export function labelBox(project, scheme, target, view, layout) {
+// Технический код ошибки контракта — как в `store.js`, наружу он не выходит:
+// это промах вызывающего, а не сообщение пользователю.
+const LABEL_FILTER_ERROR = "label-layout-instead-of-filter";
+
+// Пятый аргумент — **фильтр**, ровно тот же, что у `hitTest`, `drawScheme` и
+// `visibleMarks`: раскладка считается по тем подписям, которые видит
+// вызывающий. Передать сюда готовую раскладку нельзя — `Map` молча сошла бы за
+// «фильтра нет», подписи разделили бы места со скрытыми, и клик разошёлся бы с
+// картинкой. Внутри модуля для уже посчитанной раскладки есть `labelBoxIn`.
+export function labelBox(project, scheme, target, view, filter) {
+  if (filter instanceof Map) {
+    const error = new Error(LABEL_FILTER_ERROR);
+    error.code = LABEL_FILTER_ERROR;
+    throw error;
+  }
   const state = renderView(view);
+  return labelBoxIn(project, scheme, target, state, labelLayout(project, scheme, filter, state));
+}
+
+// То же самое с уже посчитанной раскладкой: кадр холста и попадание по клику
+// считают её один раз на все подписи схемы, а не заново на каждую.
+function labelBoxIn(project, scheme, target, state, layout) {
   const font = labelFontSize(state);
   const anchor = planToScreen(labelOrigin(project, target), scheme, state);
   const value = labelTextOf(project, target);
   const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
-  const place = labelPlaceOf(project, scheme, target, state, layout);
+  const place = labelPlaceOf(project, target, state, layout);
   return {
     text: value,
     x: anchor.x + place.dx * state.zoom,
@@ -445,15 +465,16 @@ export function labelBox(project, scheme, target, view, layout) {
 }
 
 // Где стоит подпись. Оттащенная руками — строго по своему смещению: его задал
-// пользователь, и трогать его нельзя. Остальные — по месту, которое нашла им
-// раскладка; без раскладки (её не передали) берётся общая, без фильтра.
-function labelPlaceOf(project, scheme, target, state, layout) {
+// пользователь, и трогать его нельзя. Остальные — по месту из раскладки.
+function labelPlaceOf(project, target, state, layout) {
   const manual = labelOffsetOf(project, target);
   if (manual) return { dx: manual.dx, dy: manual.dy, row: 0, crowded: false };
-  const map = layout || labelLayout(project, scheme, null, state);
-  const place = map.get(labelKeyOf(target));
+  const place = layout.get(labelKeyOf(target));
   if (place) return place;
-  const slot = labelSlots(labelPlanSizes(state).gap, 0, 0)[0];
+  // Цели в раскладке нет — значит она в неё и не входила: метку спрятал фильтр
+  // или она с другой схемы. Такая подпись не рисуется; место ей даётся
+  // стандартное, то самое, где подпись стояла всегда.
+  const [slot] = labelSlots(labelPlanSizes(state).gap, 0, 0);
   return { dx: slot.dx, dy: slot.dy, row: 0, crowded: false };
 }
 
@@ -887,7 +908,7 @@ export function hitTest(project, scheme, point, view, filter) {
   const layout = labelLayout(project, scheme, filter, state);
   for (let index = targets.length - 1; index >= 0; index -= 1) {
     const target = targets[index];
-    const box = labelBox(project, scheme, target, state, layout);
+    const box = labelBoxIn(project, scheme, target, state, layout);
     if (box.text && insideBox(point, box)) {
       // Подпись блока выбирает первую из тех меток, что в ней перечислены:
       // под фильтром скрытая метка в подписи не стоит и выбираться не должна.
@@ -1160,7 +1181,7 @@ export function drawScheme(ctx, {
   // подписи и перечеркнёт её.
   const layout = labelLayout(project, scheme, filter, state);
   const labels = labelTargets(project, scheme, filter).map((target) => ({
-    box: labelBox(project, scheme, target, state, layout),
+    box: labelBoxIn(project, scheme, target, state, layout),
     anchor: planToScreen(labelOrigin(project, target), scheme, state),
     color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
   }));

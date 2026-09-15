@@ -509,6 +509,7 @@ export const strings = {
     random: "Случайный цвет",
     apply: "ОК",
     before: "Было",
+    onPlan: "Так цвет ляжет на план: линия контура и заливка",
     used: "цвет уже занят",
     red: "R",
     green: "G",

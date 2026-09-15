@@ -117,6 +117,18 @@
   opacity: 0.8;
 }
 
+/* Предпросмотр «как на плане»: белый лист, линия контура цветом и его же
+   разведённая заливка. Цвет линии и заливки проставляются на месте. */
+.colorpick__plan {
+  flex: none;
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
 .colorpick__value {
   font-size: 12px;
   color: var(--panel-muted);

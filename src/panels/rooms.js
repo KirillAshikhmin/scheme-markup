@@ -4,7 +4,7 @@
 // Своего справочника комнат пользователь не заполняет заранее — он пишет
 // «Спальная Оли» в строке метки, и комната появляется. Поэтому главное здесь —
 // не окно, а `roomsEnsure`: одно и то же название не должно плодить двойников.
-import { addRoom, deleteRoom, findRoom, roomsInOrder, updateRoom } from "../model.js";
+import { addRoom, colorsInUse, deleteRoom, findRoom, roomsInOrder, updateRoom } from "../model.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
 import { colorPickerButton } from "./colorPicker.js";
@@ -18,13 +18,13 @@ export function roomSwatch(color, size = 14) {
   });
 }
 
-// Кнопка цвета помещения: открывает своё окно выбора. Цвета соседних комнат
-// уходят в него занятыми — контуров на плане бывает десяток, и повтор цвета
-// виден сразу, ещё до выбора.
+// Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
+// и цвета соседних комнат, и цвета категорий: контуров на плане бывает
+// десяток, а метка своей же комнаты не должна повторять цвет её заливки.
 function roomColorField(project, room, onChange) {
   return colorPickerButton({
     value: room.color,
-    used: project.rooms.filter((item) => item.id !== room.id).map((item) => item.color),
+    used: colorsInUse(project, { exceptRoomId: room.id }),
     title: strings.rooms.color,
     onPick: onChange,
   });

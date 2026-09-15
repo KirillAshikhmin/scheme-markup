@@ -385,6 +385,18 @@
   opacity: 0.8;
 }
 
+/* Предпросмотр «как на плане»: белый лист, линия контура цветом и его же
+   разведённая заливка. Цвет линии и заливки проставляются на месте. */
+.colorpick__plan {
+  flex: none;
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
 .colorpick__value {
   font-size: 12px;
   color: var(--panel-muted);
@@ -2361,6 +2373,7 @@ const strings = {
     random: "Случайный цвет",
     apply: "ОК",
     before: "Было",
+    onPlan: "Так цвет ляжет на план: линия контура и заливка",
     used: "цвет уже занят",
     red: "R",
     green: "G",
@@ -2465,8 +2478,10 @@ const BLOCK_SIDES = ["left", "right", "up", "down"];
 //   — контраст к белому не ниже 2,9 (цвет не теряется на белом плане)
 //     и к чёрному не ниже 2,4 (не сливается с карандашными стенами);
 //   — насыщенность ограничена сверху: кислотный цвет поверх плана режет глаз;
-//   — цвета разведены и с цветами категорий шаблона, чтобы метка не терялась
-//     на контуре своей же комнаты.
+//   — каждый цвет разведён с цветами категорий шаблона при любой плотности
+//     заливки, вплоть до сплошной: метка рисуется поверх заливки своей же
+//     комнаты и не должна в ней раствориться (собственные категории
+//     пользователя стережёт `colorsInUse` — окно выбора считает их занятыми).
 // Порядок не случайный: каждый следующий цвет максимально далёк от всех
 // предыдущих, поэтому первые шесть комнат получают самые несхожие контуры,
 // а запаса хватает на квартиру целиком.
@@ -2490,7 +2505,7 @@ const ROOM_PALETTE = [
   "#5B6624",
   "#B38F59",
   "#D1247A",
-  "#244CD1",
+  "#4141C4",
   "#8C2F20",
   "#689C2D",
   "#8C1875",
@@ -2623,6 +2638,47 @@ function freeColor(used, options = {}) {
     }
   }
   return best ? best.color : palette[0];
+}
+
+// Заливка контура комнаты — её цвет, разведённый белизной плана. Метка
+// рисуется поверх этой заливки цветом своей категории, поэтому смешивание
+// нужно и окну выбора (показать, как цвет ляжет на план), и проверке
+// «не потеряется ли метка в заливке».
+function colorBlend(color, base, alpha) {
+  const over = hexToRgb(color);
+  const under = hexToRgb(base);
+  if (!over || !under) return rgbToHex(over || under || { r: 0, g: 0, b: 0 });
+  const share = Math.min(1, Math.max(0, Number(alpha) || 0));
+  return rgbToHex({
+    r: over.r * share + under.r * (1 - share),
+    g: over.g * share + under.g * (1 - share),
+    b: over.b * share + under.b * (1 - share),
+  });
+}
+
+// Поле «насыщенность/яркость» окна выбора цвета: курсор ходит по прямоугольнику
+// в долях от его размера — слева направо растёт насыщенность, сверху вниз
+// падает яркость. Перевод в обе стороны живёт здесь, а не в панели: от него
+// зависит, какой цвет получит пользователь, а ошибается он молча — цвет просто
+// оказывается не тем, куда щёлкнули.
+function colorFieldToHsv({ h, x, y }) {
+  return {
+    h: (((Number(h) || 0) % 360) + 360) % 360,
+    s: Math.min(1, Math.max(0, Number(x) || 0)),
+    v: 1 - Math.min(1, Math.max(0, Number(y) || 0)),
+  };
+}
+function colorHsvToField(hsv) {
+  return {
+    x: Math.min(1, Math.max(0, Number(hsv && hsv.s) || 0)),
+    y: 1 - Math.min(1, Math.max(0, Number(hsv && hsv.v) || 0)),
+  };
+}
+
+// «Цвет уже занят»: не побайтное совпадение, а близость на глаз — иначе
+// сосед, отличающийся на единицу в последнем разряде, считался бы свободным.
+function colorTaken(color, used, minDistance = COLOR_SAME_DISTANCE) {
+  return (Array.isArray(used) ? used : []).some((other) => colorDistance(color, other) < minDistance);
 }
 
 // Цвет, который глаз читает как «другой»: ΔE ниже — уже оттенок того же.
@@ -3406,10 +3462,30 @@ function deleteCategory(project, categoryId) {
   return { project: withProject(project, { categories }), deleted: current };
 }
 
-// Цвет новой комнаты: незанятый цвет палитры. Перекрашенная вручную комната
-// освобождает свой цвет — он снова первый в очереди.
+// Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.
+// Одним списком, потому что на плане они встречаются — метка категории лежит
+// поверх заливки комнаты, и повтор цвета там означает потерянную метку.
+// `exceptRoomId` и `exceptCategoryId` убирают из списка ту строку, цвет
+// которой правят: свой же цвет не должен выглядеть чужим.
+function colorsInUse(project, options = {}) {
+  if (!project) return [];
+  const colors = [];
+  for (const category of project.categories || []) {
+    if (category.id === options.exceptCategoryId) continue;
+    if (category.color) colors.push(category.color);
+  }
+  for (const room of project.rooms || []) {
+    if (room.id === options.exceptRoomId) continue;
+    if (room.color) colors.push(room.color);
+  }
+  return colors;
+}
+
+// Цвет новой комнаты: незанятый цвет палитры — незанятый и комнатами,
+// и категориями. Перекрашенная вручную комната освобождает свой цвет,
+// он снова первый в очереди.
 function nextRoomColor(project) {
-  return freeColor(project.rooms.map((room) => room.color));
+  return freeColor(colorsInUse(project));
 }
 
 function normalizeColor(value, fallback) {
@@ -5006,13 +5082,34 @@ function labelTextOf(project, target) {
 function labelKeyOf(target) {
   return (target.markIds ? "g:" : "m:") + target.id;
 }
-function labelBox(project, scheme, target, view, layout) {
+
+// Технический код ошибки контракта — как в `store.js`, наружу он не выходит:
+// это промах вызывающего, а не сообщение пользователю.
+const LABEL_FILTER_ERROR = "label-layout-instead-of-filter";
+
+// Пятый аргумент — **фильтр**, ровно тот же, что у `hitTest`, `drawScheme` и
+// `visibleMarks`: раскладка считается по тем подписям, которые видит
+// вызывающий. Передать сюда готовую раскладку нельзя — `Map` молча сошла бы за
+// «фильтра нет», подписи разделили бы места со скрытыми, и клик разошёлся бы с
+// картинкой. Внутри модуля для уже посчитанной раскладки есть `labelBoxIn`.
+function labelBox(project, scheme, target, view, filter) {
+  if (filter instanceof Map) {
+    const error = new Error(LABEL_FILTER_ERROR);
+    error.code = LABEL_FILTER_ERROR;
+    throw error;
+  }
   const state = renderView(view);
+  return labelBoxIn(project, scheme, target, state, labelLayout(project, scheme, filter, state));
+}
+
+// То же самое с уже посчитанной раскладкой: кадр холста и попадание по клику
+// считают её один раз на все подписи схемы, а не заново на каждую.
+function labelBoxIn(project, scheme, target, state, layout) {
   const font = labelFontSize(state);
   const anchor = planToScreen(labelOrigin(project, target), scheme, state);
   const value = labelTextOf(project, target);
   const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
-  const place = labelPlaceOf(project, scheme, target, state, layout);
+  const place = labelPlaceOf(project, target, state, layout);
   return {
     text: value,
     x: anchor.x + place.dx * state.zoom,
@@ -5031,15 +5128,16 @@ function labelBox(project, scheme, target, view, layout) {
 }
 
 // Где стоит подпись. Оттащенная руками — строго по своему смещению: его задал
-// пользователь, и трогать его нельзя. Остальные — по месту, которое нашла им
-// раскладка; без раскладки (её не передали) берётся общая, без фильтра.
-function labelPlaceOf(project, scheme, target, state, layout) {
+// пользователь, и трогать его нельзя. Остальные — по месту из раскладки.
+function labelPlaceOf(project, target, state, layout) {
   const manual = labelOffsetOf(project, target);
   if (manual) return { dx: manual.dx, dy: manual.dy, row: 0, crowded: false };
-  const map = layout || labelLayout(project, scheme, null, state);
-  const place = map.get(labelKeyOf(target));
+  const place = layout.get(labelKeyOf(target));
   if (place) return place;
-  const slot = labelSlots(labelPlanSizes(state).gap, 0, 0)[0];
+  // Цели в раскладке нет — значит она в неё и не входила: метку спрятал фильтр
+  // или она с другой схемы. Такая подпись не рисуется; место ей даётся
+  // стандартное, то самое, где подпись стояла всегда.
+  const [slot] = labelSlots(labelPlanSizes(state).gap, 0, 0);
   return { dx: slot.dx, dy: slot.dy, row: 0, crowded: false };
 }
 
@@ -5473,7 +5571,7 @@ function hitTest(project, scheme, point, view, filter) {
   const layout = labelLayout(project, scheme, filter, state);
   for (let index = targets.length - 1; index >= 0; index -= 1) {
     const target = targets[index];
-    const box = labelBox(project, scheme, target, state, layout);
+    const box = labelBoxIn(project, scheme, target, state, layout);
     if (box.text && insideBox(point, box)) {
       // Подпись блока выбирает первую из тех меток, что в ней перечислены:
       // под фильтром скрытая метка в подписи не стоит и выбираться не должна.
@@ -5745,7 +5843,7 @@ function drawScheme(ctx, {
   // подписи и перечеркнёт её.
   const layout = labelLayout(project, scheme, filter, state);
   const labels = labelTargets(project, scheme, filter).map((target) => ({
-    box: labelBox(project, scheme, target, state, layout),
+    box: labelBoxIn(project, scheme, target, state, layout),
     anchor: planToScreen(labelOrigin(project, target), scheme, state),
     color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
   }));
@@ -6085,13 +6183,6 @@ function canvasState() {
 function canvasViewOf(state) {
   const sizes = state.project && state.project.view ? state.project.view : {};
   return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize };
-}
-
-// Раскладка подписей — от фильтра: скрытые метки в разведении не участвуют.
-// Считается один раз на объект и схему, дальше берётся из кэша `render.js`.
-function canvasLabelLayout(project, scheme, view) {
-  const state = canvasState();
-  return labelLayout(project, scheme, state ? state.filter : null, view);
 }
 
 function canvasScheme(state) {
@@ -6712,7 +6803,7 @@ function canvasDragTo(point) {
       // подпись, отведённую раскладкой от соседа, нельзя дёргать обратно
       // в стандартное место в тот миг, когда за неё взялись мышью.
       const size = view.markSize || 10;
-      const seen = target ? labelBox(before, scheme, target, view, canvasLabelLayout(before, scheme, view)) : null;
+      const seen = target ? labelBox(before, scheme, target, view, state.filter) : null;
       const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: -size * 1.5 };
       const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
       // Подпись блока стоит по смещению его первой метки — своего поля у группы
@@ -8179,10 +8270,9 @@ const COLOR_HUE_HEIGHT = 18;
 // Шаг стрелок: мелкий для точной подгонки, крупный с Shift.
 const COLOR_STEP = { fine: 0.02, coarse: 0.1, hue: 2, hueCoarse: 12 };
 const COLOR_FALLBACK = "#8B949E";
-
-function colorClamp(value) {
-  return Math.min(1, Math.max(0, value));
-}
+// Плотность заливки контура на белом плане: окно показывает цвет и линией,
+// и заливкой — так видно, как он ляжет на схему.
+const COLOR_PLAN_ALPHA = 0.12;
 
 function colorHexOf(hsv) {
   return rgbToHex(hsvToRgb(hsv));
@@ -8209,8 +8299,9 @@ function colorDrawField(canvas, hsv) {
   ctx.fillStyle = black;
   ctx.fillRect(0, 0, width, height);
 
-  const x = colorClamp(hsv.s) * width;
-  const y = (1 - colorClamp(hsv.v)) * height;
+  const place = colorHsvToField(hsv);
+  const x = place.x * width;
+  const y = place.y * height;
   ctx.lineWidth = 2;
   ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
   ctx.beginPath();
@@ -8246,7 +8337,7 @@ function colorDrawHue(canvas, hsv) {
 function colorDrag(canvas, onPoint) {
   const at = (event) => {
     const box = canvas.getBoundingClientRect();
-    onPoint(colorClamp((event.clientX - box.left) / box.width), colorClamp((event.clientY - box.top) / box.height));
+    onPoint((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
   };
   canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
@@ -8266,12 +8357,6 @@ function colorDrag(canvas, onPoint) {
 
 function colorTakenList(used) {
   return (Array.isArray(used) ? used : []).filter((value) => hexToRgb(value)).map((value) => String(value).trim());
-}
-
-// Занят ли цвет: не побайтно, а на глаз — иначе «почти тот же» цвет соседней
-// комнаты выглядел бы свободным.
-function colorIsTaken(color, taken) {
-  return taken.some((other) => colorDistance(color, other) < COLOR_SAME_DISTANCE);
 }
 
 // Enter внутри диалога нажимает его основное действие («ОК»), и делает это
@@ -8324,6 +8409,7 @@ function openColorPicker(options = {}) {
       attrs: { style: "background:" + before },
     });
     const value = uiEl("span", { class: "colorpick__value" });
+    const onPlan = uiEl("span", { class: "colorpick__plan", title: strings.colorPicker.onPlan });
     const swatches = uiEl("div", {
       class: "colorpick__palette",
       attrs: { role: "group", "aria-label": strings.colorPicker.palette },
@@ -8364,6 +8450,11 @@ function openColorPicker(options = {}) {
       colorDrawHue(hue, hsv);
       chip.setAttribute("style", "background:" + color);
       chip.title = color;
+      // Так цвет ляжет на белый план: линия контура и заливка помещения.
+      onPlan.setAttribute(
+        "style",
+        "border-color:" + color + ";background:" + colorBlend(color, "#FFFFFF", COLOR_PLAN_ALPHA),
+      );
       value.textContent = color;
       for (const [key, input] of Object.entries(numbers)) {
         if (input === skip) continue;
@@ -8377,7 +8468,9 @@ function openColorPicker(options = {}) {
     }
 
     function setHsv(next, skip) {
-      hsv = { h: (((next.h % 360) + 360) % 360), s: colorClamp(next.s), v: colorClamp(next.v) };
+      // Стрелки и полоса оттенка выезжают за края так же, как мышь, поэтому
+      // и приводит их к цвету та же функция, что переводит курсор поля.
+      hsv = colorFieldToHsv({ h: next.h, x: next.s, y: 1 - next.v });
       sync(skip);
     }
 
@@ -8390,7 +8483,7 @@ function openColorPicker(options = {}) {
     }
 
     for (const color of ROOM_PALETTE) {
-      const busy = colorIsTaken(color, taken);
+      const busy = colorTaken(color, taken);
       const button = uiEl("button", {
         class: "colorpick__swatch" + (busy ? " is-used" : ""),
         type: "button",
@@ -8403,7 +8496,7 @@ function openColorPicker(options = {}) {
       swatches.append(button);
     }
 
-    colorDrag(field, (x, y) => setHsv({ h: hsv.h, s: x, v: 1 - y }));
+    colorDrag(field, (x, y) => setHsv(colorFieldToHsv({ h: hsv.h, x, y })));
     colorDrag(hue, (x) => setHsv({ h: x * 360, s: hsv.s, v: hsv.v }));
 
     field.addEventListener("keydown", (event) => {
@@ -8445,7 +8538,7 @@ function openColorPicker(options = {}) {
         field,
         hue,
         uiEl("div", { class: "colorpick__bottom" }, [
-          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, value]),
+          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, onPlan, value]),
           uiEl("div", { class: "colorpick__numbers" }, [
             numberField("r", strings.colorPicker.red),
             numberField("g", strings.colorPicker.green),
@@ -8945,13 +9038,13 @@ function roomSwatch(color, size = 14) {
   });
 }
 
-// Кнопка цвета помещения: открывает своё окно выбора. Цвета соседних комнат
-// уходят в него занятыми — контуров на плане бывает десяток, и повтор цвета
-// виден сразу, ещё до выбора.
+// Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
+// и цвета соседних комнат, и цвета категорий: контуров на плане бывает
+// десяток, а метка своей же комнаты не должна повторять цвет её заливки.
 function roomColorField(project, room, onChange) {
   return colorPickerButton({
     value: room.color,
-    used: project.rooms.filter((item) => item.id !== room.id).map((item) => item.color),
+    used: colorsInUse(project, { exceptRoomId: room.id }),
     title: strings.rooms.color,
     onPick: onChange,
   });
@@ -9549,9 +9642,7 @@ function openTypesDictionary(api) {
     return uiEl("div", { class: "dict__row" }, [
       colorPickerButton({
         value: category.color,
-        used: project()
-          .categories.filter((item) => item.id !== category.id)
-          .map((item) => item.color),
+        used: colorsInUse(project(), { exceptCategoryId: category.id }),
         title: strings.dictionary.color,
         onPick: (color) =>
           commit(
@@ -9618,8 +9709,8 @@ function openTypesDictionary(api) {
       placeholder: strings.dictionary.categoryNamePlaceholder,
     });
     // Цвет новой категории — незанятый цвет палитры: метки новой категории
-    // должны быть видны отдельно от соседних, а не повторять их цвет.
-    const busy = project().categories.map((item) => item.color);
+    // должны быть видны отдельно и от соседних меток, и от заливки помещений.
+    const busy = colorsInUse(project());
     let color = freeColor(busy);
     let shape = SHAPE_PALETTE[0];
     const colorButton = colorPickerButton({

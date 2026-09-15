@@ -9,9 +9,12 @@
 // «насыщенность/яркость» и полоса оттенка рисуются холстом, а любое движение
 // мыши здесь повторяется стрелками и полями R, G, B.
 import {
-  COLOR_SAME_DISTANCE,
   ROOM_PALETTE,
+  colorBlend,
   colorDistance,
+  colorFieldToHsv,
+  colorHsvToField,
+  colorTaken,
   hexToRgb,
   hsvToRgb,
   randomColor,
@@ -26,10 +29,9 @@ const COLOR_HUE_HEIGHT = 18;
 // Шаг стрелок: мелкий для точной подгонки, крупный с Shift.
 const COLOR_STEP = { fine: 0.02, coarse: 0.1, hue: 2, hueCoarse: 12 };
 const COLOR_FALLBACK = "#8B949E";
-
-function colorClamp(value) {
-  return Math.min(1, Math.max(0, value));
-}
+// Плотность заливки контура на белом плане: окно показывает цвет и линией,
+// и заливкой — так видно, как он ляжет на схему.
+const COLOR_PLAN_ALPHA = 0.12;
 
 function colorHexOf(hsv) {
   return rgbToHex(hsvToRgb(hsv));
@@ -56,8 +58,9 @@ function colorDrawField(canvas, hsv) {
   ctx.fillStyle = black;
   ctx.fillRect(0, 0, width, height);
 
-  const x = colorClamp(hsv.s) * width;
-  const y = (1 - colorClamp(hsv.v)) * height;
+  const place = colorHsvToField(hsv);
+  const x = place.x * width;
+  const y = place.y * height;
   ctx.lineWidth = 2;
   ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
   ctx.beginPath();
@@ -93,7 +96,7 @@ function colorDrawHue(canvas, hsv) {
 function colorDrag(canvas, onPoint) {
   const at = (event) => {
     const box = canvas.getBoundingClientRect();
-    onPoint(colorClamp((event.clientX - box.left) / box.width), colorClamp((event.clientY - box.top) / box.height));
+    onPoint((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
   };
   canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
@@ -113,12 +116,6 @@ function colorDrag(canvas, onPoint) {
 
 function colorTakenList(used) {
   return (Array.isArray(used) ? used : []).filter((value) => hexToRgb(value)).map((value) => String(value).trim());
-}
-
-// Занят ли цвет: не побайтно, а на глаз — иначе «почти тот же» цвет соседней
-// комнаты выглядел бы свободным.
-function colorIsTaken(color, taken) {
-  return taken.some((other) => colorDistance(color, other) < COLOR_SAME_DISTANCE);
 }
 
 // Enter внутри диалога нажимает его основное действие («ОК»), и делает это
@@ -172,6 +169,7 @@ export function openColorPicker(options = {}) {
       attrs: { style: "background:" + before },
     });
     const value = uiEl("span", { class: "colorpick__value" });
+    const onPlan = uiEl("span", { class: "colorpick__plan", title: strings.colorPicker.onPlan });
     const swatches = uiEl("div", {
       class: "colorpick__palette",
       attrs: { role: "group", "aria-label": strings.colorPicker.palette },
@@ -212,6 +210,11 @@ export function openColorPicker(options = {}) {
       colorDrawHue(hue, hsv);
       chip.setAttribute("style", "background:" + color);
       chip.title = color;
+      // Так цвет ляжет на белый план: линия контура и заливка помещения.
+      onPlan.setAttribute(
+        "style",
+        "border-color:" + color + ";background:" + colorBlend(color, "#FFFFFF", COLOR_PLAN_ALPHA),
+      );
       value.textContent = color;
       for (const [key, input] of Object.entries(numbers)) {
         if (input === skip) continue;
@@ -225,7 +228,9 @@ export function openColorPicker(options = {}) {
     }
 
     function setHsv(next, skip) {
-      hsv = { h: (((next.h % 360) + 360) % 360), s: colorClamp(next.s), v: colorClamp(next.v) };
+      // Стрелки и полоса оттенка выезжают за края так же, как мышь, поэтому
+      // и приводит их к цвету та же функция, что переводит курсор поля.
+      hsv = colorFieldToHsv({ h: next.h, x: next.s, y: 1 - next.v });
       sync(skip);
     }
 
@@ -238,7 +243,7 @@ export function openColorPicker(options = {}) {
     }
 
     for (const color of ROOM_PALETTE) {
-      const busy = colorIsTaken(color, taken);
+      const busy = colorTaken(color, taken);
       const button = uiEl("button", {
         class: "colorpick__swatch" + (busy ? " is-used" : ""),
         type: "button",
@@ -251,7 +256,7 @@ export function openColorPicker(options = {}) {
       swatches.append(button);
     }
 
-    colorDrag(field, (x, y) => setHsv({ h: hsv.h, s: x, v: 1 - y }));
+    colorDrag(field, (x, y) => setHsv(colorFieldToHsv({ h: hsv.h, x, y })));
     colorDrag(hue, (x) => setHsv({ h: x * 360, s: hsv.s, v: hsv.v }));
 
     field.addEventListener("keydown", (event) => {
@@ -293,7 +298,7 @@ export function openColorPicker(options = {}) {
         field,
         hue,
         uiEl("div", { class: "colorpick__bottom" }, [
-          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, value]),
+          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, onPlan, value]),
           uiEl("div", { class: "colorpick__numbers" }, [
             numberField("r", strings.colorPicker.red),
             numberField("g", strings.colorPicker.green),

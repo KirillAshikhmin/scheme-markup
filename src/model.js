@@ -71,8 +71,10 @@ export const BLOCK_SIDES = ["left", "right", "up", "down"];
 //   — контраст к белому не ниже 2,9 (цвет не теряется на белом плане)
 //     и к чёрному не ниже 2,4 (не сливается с карандашными стенами);
 //   — насыщенность ограничена сверху: кислотный цвет поверх плана режет глаз;
-//   — цвета разведены и с цветами категорий шаблона, чтобы метка не терялась
-//     на контуре своей же комнаты.
+//   — каждый цвет разведён с цветами категорий шаблона при любой плотности
+//     заливки, вплоть до сплошной: метка рисуется поверх заливки своей же
+//     комнаты и не должна в ней раствориться (собственные категории
+//     пользователя стережёт `colorsInUse` — окно выбора считает их занятыми).
 // Порядок не случайный: каждый следующий цвет максимально далёк от всех
 // предыдущих, поэтому первые шесть комнат получают самые несхожие контуры,
 // а запаса хватает на квартиру целиком.
@@ -96,7 +98,7 @@ export const ROOM_PALETTE = [
   "#5B6624",
   "#B38F59",
   "#D1247A",
-  "#244CD1",
+  "#4141C4",
   "#8C2F20",
   "#689C2D",
   "#8C1875",
@@ -232,6 +234,48 @@ export function freeColor(used, options = {}) {
     }
   }
   return best ? best.color : palette[0];
+}
+
+// Заливка контура комнаты — её цвет, разведённый белизной плана. Метка
+// рисуется поверх этой заливки цветом своей категории, поэтому смешивание
+// нужно и окну выбора (показать, как цвет ляжет на план), и проверке
+// «не потеряется ли метка в заливке».
+export function colorBlend(color, base, alpha) {
+  const over = hexToRgb(color);
+  const under = hexToRgb(base);
+  if (!over || !under) return rgbToHex(over || under || { r: 0, g: 0, b: 0 });
+  const share = Math.min(1, Math.max(0, Number(alpha) || 0));
+  return rgbToHex({
+    r: over.r * share + under.r * (1 - share),
+    g: over.g * share + under.g * (1 - share),
+    b: over.b * share + under.b * (1 - share),
+  });
+}
+
+// Поле «насыщенность/яркость» окна выбора цвета: курсор ходит по прямоугольнику
+// в долях от его размера — слева направо растёт насыщенность, сверху вниз
+// падает яркость. Перевод в обе стороны живёт здесь, а не в панели: от него
+// зависит, какой цвет получит пользователь, а ошибается он молча — цвет просто
+// оказывается не тем, куда щёлкнули.
+export function colorFieldToHsv({ h, x, y }) {
+  return {
+    h: (((Number(h) || 0) % 360) + 360) % 360,
+    s: Math.min(1, Math.max(0, Number(x) || 0)),
+    v: 1 - Math.min(1, Math.max(0, Number(y) || 0)),
+  };
+}
+
+export function colorHsvToField(hsv) {
+  return {
+    x: Math.min(1, Math.max(0, Number(hsv && hsv.s) || 0)),
+    y: 1 - Math.min(1, Math.max(0, Number(hsv && hsv.v) || 0)),
+  };
+}
+
+// «Цвет уже занят»: не побайтное совпадение, а близость на глаз — иначе
+// сосед, отличающийся на единицу в последнем разряде, считался бы свободным.
+export function colorTaken(color, used, minDistance = COLOR_SAME_DISTANCE) {
+  return (Array.isArray(used) ? used : []).some((other) => colorDistance(color, other) < minDistance);
 }
 
 // Цвет, который глаз читает как «другой»: ΔE ниже — уже оттенок того же.
@@ -1036,10 +1080,30 @@ export function deleteCategory(project, categoryId) {
   return { project: withProject(project, { categories }), deleted: current };
 }
 
-// Цвет новой комнаты: незанятый цвет палитры. Перекрашенная вручную комната
-// освобождает свой цвет — он снова первый в очереди.
+// Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.
+// Одним списком, потому что на плане они встречаются — метка категории лежит
+// поверх заливки комнаты, и повтор цвета там означает потерянную метку.
+// `exceptRoomId` и `exceptCategoryId` убирают из списка ту строку, цвет
+// которой правят: свой же цвет не должен выглядеть чужим.
+export function colorsInUse(project, options = {}) {
+  if (!project) return [];
+  const colors = [];
+  for (const category of project.categories || []) {
+    if (category.id === options.exceptCategoryId) continue;
+    if (category.color) colors.push(category.color);
+  }
+  for (const room of project.rooms || []) {
+    if (room.id === options.exceptRoomId) continue;
+    if (room.color) colors.push(room.color);
+  }
+  return colors;
+}
+
+// Цвет новой комнаты: незанятый цвет палитры — незанятый и комнатами,
+// и категориями. Перекрашенная вручную комната освобождает свой цвет,
+// он снова первый в очереди.
 function nextRoomColor(project) {
-  return freeColor(project.rooms.map((room) => room.color));
+  return freeColor(colorsInUse(project));
 }
 
 function normalizeColor(value, fallback) {

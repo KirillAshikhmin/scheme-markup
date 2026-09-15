@@ -19,6 +19,7 @@ import {
   deleteType,
   findCategory,
   findMark,
+  colorsInUse,
   findType,
   freeColor,
   styleOf,
@@ -388,9 +389,7 @@ export function openTypesDictionary(api) {
     return uiEl("div", { class: "dict__row" }, [
       colorPickerButton({
         value: category.color,
-        used: project()
-          .categories.filter((item) => item.id !== category.id)
-          .map((item) => item.color),
+        used: colorsInUse(project(), { exceptCategoryId: category.id }),
         title: strings.dictionary.color,
         onPick: (color) =>
           commit(
@@ -457,8 +456,8 @@ export function openTypesDictionary(api) {
       placeholder: strings.dictionary.categoryNamePlaceholder,
     });
     // Цвет новой категории — незанятый цвет палитры: метки новой категории
-    // должны быть видны отдельно от соседних, а не повторять их цвет.
-    const busy = project().categories.map((item) => item.color);
+    // должны быть видны отдельно и от соседних меток, и от заливки помещений.
+    const busy = colorsInUse(project());
     let color = freeColor(busy);
     let shape = SHAPE_PALETTE[0];
     const colorButton = colorPickerButton({
