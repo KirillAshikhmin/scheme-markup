@@ -38,10 +38,10 @@ import {
   validate,
 } from "../src/model.js";
 
-test("стартовый справочник: типы из брифа со своими формами плюс переключатель и витая пара", () => {
+test("стартовый справочник: типы из брифа, переключатель, витая пара и категория датчиков", () => {
   const template = defaultTemplate();
-  assert.equal(template.categories.length, 5);
-  assert.equal(template.markTypes.length, 15);
+  assert.equal(template.categories.length, 6);
+  assert.equal(template.markTypes.length, 19);
 
   const byName = Object.fromEntries(template.categories.map((c) => [c.name, c]));
   assert.deepEqual(
@@ -64,12 +64,17 @@ test("стартовый справочник: типы из брифа со с�
     { color: byName["Сетевое оборудование"].color, shape: byName["Сетевое оборудование"].shape },
     { color: "#8250DF", shape: "star" },
   );
+  // Датчики заведены по просьбе заказчика: свой цвет, своя форма по умолчанию.
+  assert.deepEqual(
+    { color: byName["Датчики"].color, shape: byName["Датчики"].shape },
+    { color: "#164E63", shape: "circle-ring" },
+  );
 
   assert.deepEqual(
     template.markTypes.map((t) => t.code),
     // «ВП» — проходной переключатель, добавлен по просьбе заказчика и стоит
     // в своей категории, рядом с выключателями. Остальные тринадцать — из брифа.
-    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "ВП", "Р", "Б", "К", "W", "RJ"],
+    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "ВП", "Р", "Б", "К", "W", "RJ", "ДВ", "ДО", "ДП", "ДД"],
   );
   // Названия — данные заказчика, поэтому пришпилены целиком: правка форм и
   // добавление типов не должны их задеть ни на букву.
@@ -91,6 +96,10 @@ test("стартовый справочник: типы из брифа со с�
       К: "Кондиционер",
       W: "WiFi точка",
       RJ: "Вывод витой пары (розетка RJ45)",
+      ДВ: "Датчик движения",
+      ДО: "Датчик открытия",
+      ДП: "Датчик протечки",
+      ДД: "Датчик дыма",
     },
   );
   assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
@@ -105,7 +114,7 @@ test("стартовый справочник: типы из брифа со с�
   // Своей формы нет там, где категория и так различает типы цветом.
   assert.deepEqual(
     template.markTypes.filter((t) => t.shape === null).map((t) => t.code),
-    ["В", "ВВ", "Р", "Б", "К", "W"],
+    ["В", "ВВ", "Р", "Б", "К", "W", "ДД"],
   );
 });
 
@@ -113,8 +122,8 @@ test("новый объект создаётся из стартового сп�
   const project = createProject();
   // Версия 2: контуры помещений, ручная правка помещения, цвет помещения.
   assert.equal(project.formatVersion, 2);
-  assert.equal(project.categories.length, 5);
-  assert.equal(project.markTypes.length, 15);
+  assert.equal(project.categories.length, 6);
+  assert.equal(project.markTypes.length, 19);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -428,10 +437,10 @@ test("код типа — от одной до шестнадцати букв �
   });
 
   const added = addType(project, { code: "Ш", name: "Шинопровод", categoryId: light });
-  assert.equal(added.project.markTypes.length, 16);
+  assert.equal(added.project.markTypes.length, 20);
   assert.equal(added.type.blockMode, "each");
   assert.equal(added.type.shape, null);
-  assert.equal(project.markTypes.length, 15);
+  assert.equal(project.markTypes.length, 19);
 });
 
 test("тип с метками не удаляется, свободный удаляется", () => {
@@ -441,7 +450,7 @@ test("тип с метками не удаляется, свободный уд�
 
   const freed = deleteMark(step.project, step.mark.id).project;
   const after = deleteType(freed, typeId(freed, "К")).project;
-  assert.equal(after.markTypes.length, 14);
+  assert.equal(after.markTypes.length, 18);
   assert.equal(after.markTypes.find((t) => t.code === "К"), undefined);
 });
 
@@ -480,8 +489,8 @@ test("цвет берётся у категории, форма — у типа,
 test("категории и помещения заводятся своими функциями", () => {
   const project = createProject();
   const withCategory = addCategory(project, { name: "Шторы", color: "#123456", shape: "square" });
-  assert.equal(withCategory.project.categories.length, 6);
-  assert.equal(withCategory.category.order, 5);
+  assert.equal(withCategory.project.categories.length, 7);
+  assert.equal(withCategory.category.order, 6);
 
   const withRoom = addRoom(withCategory.project, { name: "Спальная Оли" });
   assert.equal(withRoom.room.name, "Спальная Оли");
@@ -570,7 +579,7 @@ test("идентификаторы стартового справочника �
   const first = createProject();
   const second = createProject();
   const ids = [...first.categories.map((c) => c.id), ...first.markTypes.map((t) => t.id)];
-  assert.equal(new Set(ids).size, 20);
+  assert.equal(new Set(ids).size, 25);
   const otherIds = new Set([...second.categories.map((c) => c.id), ...second.markTypes.map((t) => t.id)]);
   assert.deepEqual(ids.filter((id) => otherIds.has(id)), []);
 });
@@ -623,7 +632,7 @@ test("категория удаляется только пустой, тип б
 
   const added = addCategory(project, { name: "Шторы", color: "#123456", shape: "square" });
   const after = deleteCategory(added.project, added.category.id).project;
-  assert.equal(after.categories.length, 5);
+  assert.equal(after.categories.length, 6);
 });
 
 test("имя объекта, вид и помещения правятся", () => {

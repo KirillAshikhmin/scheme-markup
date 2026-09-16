@@ -356,6 +356,13 @@ const TEMPLATE_CATEGORIES = [
   { key: "sockets", name: strings.categories.sockets, color: "#D1242F", shape: "square" },
   { key: "climate", name: strings.categories.climate, color: "#E36209", shape: "triangle" },
   { key: "network", name: strings.categories.network, color: "#8250DF", shape: "star" },
+  // Датчики заведены по просьбе заказчика отдельной категорией: в умном доме
+  // их на квартиру десяток, а цвет у нас читается как категория — раскладывать
+  // их по чужим («Климат», «Сетевое оборудование») значило бы красить чужим
+  // цветом. Тёмная бирюза выбрана не на глаз: до ближайшего из пяти прежних
+  // цветов 63,9 — вдвое больше, чем минимум между ними самими (29,0), и метка
+  // не теряется на заливке контуров помещений (проверено test/colors.test.js).
+  { key: "sensors", name: strings.categories.sensors, color: "#164E63", shape: "circle-ring" },
 ];
 
 const TEMPLATE_TYPES = [
@@ -385,6 +392,15 @@ const TEMPLATE_TYPES = [
   // кириллическая «Е» неотличима от латинской «E» на плане, а счётчики у них
   // разные — эта ловушка в сборке уже описана для «P» и «Р».
   { category: "network", code: "RJ", name: strings.types.ethernet, shape: "square-jack" },
+  // Коды датчиков — кириллица, как у большинства типов заказчика, и все с «Д»:
+  // на плане сразу видно семейство. Вторая буква у каждого своя, похожих пар
+  // нет — коды, различающиеся только раскладкой, дали бы два разных типа с
+  // разной нумерацией.
+  { category: "sensors", code: "ДВ", name: strings.types.motion, shape: "triangle-dot" },
+  { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split" },
+  { category: "sensors", code: "ДП", name: strings.types.leak, shape: "triangle-down-fill" },
+  // Датчик дыма — потолочный, ему и достаётся форма категории.
+  { category: "sensors", code: "ДД", name: strings.types.smoke },
 ];
 
 function newId() {

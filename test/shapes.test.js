@@ -265,3 +265,27 @@ test("у каждого обозначения есть человеческое
   const dead = Object.keys(strings.shapes).filter((key) => key !== "inherit" && !SHAPE_NAMES.includes(key));
   assert.deepEqual(dead, [], "название есть, а такой фигуры нет");
 });
+
+// Датчики сидят в одной категории и в одном цвете — на чёрно-белой распечатке
+// их различает только форма. Один из них берёт форму категории, остальные свои;
+// проверка считает форму так же, как холст, и гоняет её через тот же отпечаток.
+test("четыре датчика расходятся на бумаге, а не только по букве", () => {
+  const { categories, markTypes } = defaultTemplate();
+  const sensors = categories.find((category) => category.name === "Датчики");
+  assert.ok(sensors, "категории датчиков нет в шаблоне");
+  const types = markTypes.filter((type) => type.categoryId === sensors.id);
+  assert.deepEqual(types.map((type) => type.code), ["ДВ", "ДО", "ДП", "ДД"]);
+
+  const shapes = types.map((type) => type.shape || sensors.shape);
+  assert.equal(new Set(shapes).size, types.length, "два датчика рисуются одной формой: " + shapes.join(", "));
+  const prints = types.map((type, index) => ({ code: type.code, ink: inkOf(shapes[index]) }));
+  for (let i = 0; i < prints.length; i += 1) {
+    for (let j = i + 1; j < prints.length; j += 1) {
+      const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
+      assert.ok(
+        share >= MIN_DIFFERENCE,
+        prints[i].code + " и " + prints[j].code + " расходятся на " + Math.round(share * 100) + "% знака",
+      );
+    }
+  }
+});

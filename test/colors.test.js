@@ -254,3 +254,25 @@ test("новая комната не берёт цвет чужой катего
     assert.ok(colorDistance(category.color, added.room.color) >= COLOR_SAME_DISTANCE, category.name);
   }
 });
+
+// Цвет новой категории выбирается не на глаз: на плане рядом лежат метки всех
+// категорий, и новый цвет обязан расходиться с прежними не хуже, чем они
+// расходятся между собой.
+test("цвет каждой категории шаблона разведён с остальными", () => {
+  const categories = createProject({ name: "Тест" }).categories;
+  let nearest = Infinity;
+  let pair = "";
+  for (let i = 0; i < categories.length; i += 1) {
+    for (let j = i + 1; j < categories.length; j += 1) {
+      const distance = colorDistance(categories[i].color, categories[j].color);
+      if (distance < nearest) {
+        nearest = distance;
+        pair = categories[i].name + " / " + categories[j].name;
+      }
+    }
+  }
+  // Двадцать девять — то, на сколько расходятся самые близкие цвета из пяти
+  // категорий брифа (зелёный выключателей и оранжевый климата). Новая категория
+  // не должна оказаться ближе: иначе на плане прибавится путаницы.
+  assert.ok(nearest >= 29, "самые близкие цвета категорий — " + pair + ": " + nearest.toFixed(1));
+});

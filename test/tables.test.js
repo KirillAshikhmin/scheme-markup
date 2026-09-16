@@ -276,7 +276,7 @@ test("справочник типов — легенда листа: код, н�
   const box = tablesFixture();
   const table = typesTable(box.project);
   assert.deepEqual(table.columns, ["Код", "Название", "Категория", "Цвет", "Форма", "Линия"]);
-  assert.equal(table.rows.length, 15);
+  assert.equal(table.rows.length, 19);
   assert.deepEqual(table.rows[0].cells, [
     "Т",
     "Точечный светильник",
@@ -287,7 +287,7 @@ test("справочник типов — легенда листа: код, н�
   ]);
   assert.deepEqual(
     table.rows.map((row) => row.cells[0]),
-    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "ВП", "Р", "Б", "К", "W", "RJ"],
+    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "ВП", "Р", "Б", "К", "W", "RJ", "ДВ", "ДО", "ДП", "ДД"],
   );
   assert.equal(toTsv(table).split("\n")[1], "Т\tТочечный светильник\tСвет\t#1F6FEB\tКруг с крестом\tСплошная");
 });

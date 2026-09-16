@@ -46,6 +46,7 @@ export const strings = {
     sockets: "Розетки",
     climate: "Климат",
     network: "Сетевое оборудование",
+    sensors: "Датчики",
   },
   types: {
     spot: "Точечный светильник",
@@ -63,6 +64,10 @@ export const strings = {
     conditioner: "Кондиционер",
     wifi: "WiFi точка",
     ethernet: "Вывод витой пары (розетка RJ45)",
+    motion: "Датчик движения",
+    opening: "Датчик открытия",
+    leak: "Датчик протечки",
+    smoke: "Датчик дыма",
   },
   shapes: {
     circle: "Круг",
@@ -84,7 +89,7 @@ export const strings = {
     "square-hatch": "Квадрат со штриховкой (тёплый пол, обогрев)",
     "square-wave": "Квадрат с волнами (динамик, акустика)",
     triangle: "Треугольник",
-    "triangle-dot": "Треугольник с точкой (камера)",
+    "triangle-dot": "Треугольник с точкой (камера, датчик движения)",
     "triangle-down": "Треугольник вершиной вниз",
     "triangle-down-fill": "Треугольник вниз закрашенный (капля: протечка)",
     star: "Звезда",
