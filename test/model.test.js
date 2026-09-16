@@ -38,10 +38,10 @@ import {
   validate,
 } from "../src/model.js";
 
-test("стартовый справочник: 5 категорий и типы из брифа плюс проходной переключатель", () => {
+test("стартовый справочник: типы из брифа со своими формами плюс переключатель и витая пара", () => {
   const template = defaultTemplate();
   assert.equal(template.categories.length, 5);
-  assert.equal(template.markTypes.length, 14);
+  assert.equal(template.markTypes.length, 15);
 
   const byName = Object.fromEntries(template.categories.map((c) => [c.name, c]));
   assert.deepEqual(
@@ -69,15 +69,43 @@ test("стартовый справочник: 5 категорий и типы 
     template.markTypes.map((t) => t.code),
     // «ВП» — проходной переключатель, добавлен по просьбе заказчика и стоит
     // в своей категории, рядом с выключателями. Остальные тринадцать — из брифа.
-    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "ВП", "Р", "Б", "К", "W"],
+    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "ВП", "Р", "Б", "К", "W", "RJ"],
   );
-  assert.equal(template.markTypes.find((t) => t.code === "ПК").name, "Подсветка кровати");
-  assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
-  // Типы из брифа рисуются формой своей категории; свой значок задан только
-  // у проходного переключателя — иначе он сливался бы с соседними выключателями.
+  // Названия — данные заказчика, поэтому пришпилены целиком: правка форм и
+  // добавление типов не должны их задеть ни на букву.
   assert.deepEqual(
-    template.markTypes.filter((t) => t.shape !== null).map((t) => t.code),
-    ["ВП"],
+    Object.fromEntries(template.markTypes.map((t) => [t.code, t.name])),
+    {
+      Т: "Точечный светильник",
+      С: "Светильник",
+      ПК: "Подсветка кровати",
+      ТР: "Трек",
+      П: "Подсветка",
+      Л: "Лента",
+      ПШ: "Подсветка шкафа",
+      В: "Выключатель",
+      ВВ: "Выключатель двойной",
+      ВП: "Переключатель проходной",
+      Р: "Розетка",
+      Б: "Бризер",
+      К: "Кондиционер",
+      W: "WiFi точка",
+      RJ: "Вывод витой пары (розетка RJ45)",
+    },
+  );
+  assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
+  // Семь типов света сидят в одном синем цвете, поэтому у каждого своя форма:
+  // иначе тип читается только по букве. Цвета категорий при этом прежние —
+  // они проверены выше.
+  const lightShapes = template.markTypes
+    .filter((t) => ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ"].includes(t.code))
+    .map((t) => t.shape);
+  assert.deepEqual(lightShapes, ["circle-cross", "circle-fill", "circle-dot", "plus", "diamond", "triangle", "triangle-down"]);
+  assert.equal(new Set(lightShapes).size, 7, "два типа света рисуются одинаково");
+  // Своей формы нет там, где категория и так различает типы цветом.
+  assert.deepEqual(
+    template.markTypes.filter((t) => t.shape === null).map((t) => t.code),
+    ["В", "ВВ", "Р", "Б", "К", "W"],
   );
 });
 
@@ -86,7 +114,7 @@ test("новый объект создаётся из стартового сп�
   // Версия 2: контуры помещений, ручная правка помещения, цвет помещения.
   assert.equal(project.formatVersion, 2);
   assert.equal(project.categories.length, 5);
-  assert.equal(project.markTypes.length, 14);
+  assert.equal(project.markTypes.length, 15);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -400,10 +428,10 @@ test("код типа — от одной до шестнадцати букв �
   });
 
   const added = addType(project, { code: "Ш", name: "Шинопровод", categoryId: light });
-  assert.equal(added.project.markTypes.length, 15);
+  assert.equal(added.project.markTypes.length, 16);
   assert.equal(added.type.blockMode, "each");
   assert.equal(added.type.shape, null);
-  assert.equal(project.markTypes.length, 14);
+  assert.equal(project.markTypes.length, 15);
 });
 
 test("тип с метками не удаляется, свободный удаляется", () => {
@@ -413,7 +441,7 @@ test("тип с метками не удаляется, свободный уд�
 
   const freed = deleteMark(step.project, step.mark.id).project;
   const after = deleteType(freed, typeId(freed, "К")).project;
-  assert.equal(after.markTypes.length, 13);
+  assert.equal(after.markTypes.length, 14);
   assert.equal(after.markTypes.find((t) => t.code === "К"), undefined);
 });
 
@@ -441,7 +469,11 @@ test("цвет берётся у категории, форма — у типа,
   const light = project.categories.find((c) => c.name === "Свет").id;
   const repainted = updateCategory(shaped, light, { color: "#000000", shape: "hexagon" }).project;
   assert.deepEqual(styleOf(repainted, spot), { color: "#000000", shape: "diamond", lineStyle: "solid" });
-  assert.deepEqual(styleOf(repainted, typeId(repainted, "С")), { color: "#000000", shape: "hexagon", lineStyle: "solid" });
+  // Тип без своей формы берёт форму категории: у света формы теперь у всех,
+  // поэтому наследование видно на выключателе.
+  const switches = project.categories.find((c) => c.name === "Выключатели").id;
+  const switched = updateCategory(project, switches, { shape: "hexagon" }).project;
+  assert.deepEqual(styleOf(switched, typeId(switched, "В")), { color: "#2DA44E", shape: "hexagon", lineStyle: "solid" });
   assert.throws(() => updateCategory(repainted, light, { shape: "cloud" }), { code: "unknownShape" });
 });
 
@@ -538,7 +570,7 @@ test("идентификаторы стартового справочника �
   const first = createProject();
   const second = createProject();
   const ids = [...first.categories.map((c) => c.id), ...first.markTypes.map((t) => t.id)];
-  assert.equal(new Set(ids).size, 19);
+  assert.equal(new Set(ids).size, 20);
   const otherIds = new Set([...second.categories.map((c) => c.id), ...second.markTypes.map((t) => t.id)]);
   assert.deepEqual(ids.filter((id) => otherIds.has(id)), []);
 });

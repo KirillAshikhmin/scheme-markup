@@ -350,13 +350,17 @@ const TEMPLATE_CATEGORIES = [
 ];
 
 const TEMPLATE_TYPES = [
-  { category: "light", code: "Т", name: strings.types.spot },
-  { category: "light", code: "С", name: strings.types.lamp },
-  { category: "light", code: "ПК", name: strings.types.bedLight },
-  { category: "light", code: "ТР", name: strings.types.track },
-  { category: "light", code: "П", name: strings.types.backlight },
-  { category: "light", code: "Л", name: strings.types.strip },
-  { category: "light", code: "ПШ", name: strings.types.wardrobeLight },
+  // Семь типов света сидят в одной категории, а значит и в одном синем цвете:
+  // пока у них не было своих форм, все семь рисовались одинаковым кругом с
+  // крестом, и тип читался только по букве. Формы разведены по просьбе
+  // заказчика — цвет категории при этом не меняется, синий остаётся синим.
+  { category: "light", code: "Т", name: strings.types.spot, shape: "circle-cross" },
+  { category: "light", code: "С", name: strings.types.lamp, shape: "circle-fill" },
+  { category: "light", code: "ПК", name: strings.types.bedLight, shape: "circle-dot" },
+  { category: "light", code: "ТР", name: strings.types.track, shape: "plus" },
+  { category: "light", code: "П", name: strings.types.backlight, shape: "diamond" },
+  { category: "light", code: "Л", name: strings.types.strip, shape: "triangle" },
+  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, shape: "triangle-down" },
   { category: "switches", code: "В", name: strings.types.switch },
   { category: "switches", code: "ВВ", name: strings.types.switchDouble },
   // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
@@ -367,6 +371,11 @@ const TEMPLATE_TYPES = [
   { category: "climate", code: "Б", name: strings.types.breezer },
   { category: "climate", code: "К", name: strings.types.conditioner },
   { category: "network", code: "W", name: strings.types.wifi },
+  // Вывод витой пары. Код латинский, как соседний «W»: «RJ» читается как RJ45
+  // и ни с чем не путается. Одинокая «E» от Ethernet выглядела бы стройнее, но
+  // кириллическая «Е» неотличима от латинской «E» на плане, а счётчики у них
+  // разные — эта ловушка в сборке уже описана для «P» и «Р».
+  { category: "network", code: "RJ", name: strings.types.ethernet, shape: "square-jack" },
 ];
 
 function newId() {

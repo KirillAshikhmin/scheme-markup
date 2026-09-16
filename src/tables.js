@@ -9,13 +9,18 @@
 // рисовать метку на холсте или нет. Своего фильтра здесь нет намеренно:
 // разойдись они, на картинке и в таблице оказалось бы разное.
 import {
+  equipmentInOrder,
   findCategory,
+  findEquipment,
+  findMark,
   findRoom,
   findType,
   labelOf,
   markControlIds,
   markControlledBy,
   markControls,
+  placementLinkIds,
+  placementsInOrder,
   roomsInOrder,
   schemesInOrder,
   styleOf,
@@ -342,6 +347,8 @@ export function marksTable(project, filter, groupBy, options = {}) {
       byRoom,
       groupColumn: strings.tables.category,
       totals: [],
+      totalsColumns: [strings.tables.category, strings.tables.type, strings.tables.points],
+      totalLabel: strings.tables.totalAll,
       totalCount: 0,
       title: "",
       room: "",
@@ -362,6 +369,8 @@ export function marksTable(project, filter, groupBy, options = {}) {
     // уже стоят колонками, категория — нет.
     groupColumn: strings.tables.category,
     totals: totals.rows,
+    totalsColumns: [strings.tables.category, strings.tables.type, strings.tables.points],
+    totalLabel: strings.tables.totalAll,
     totalCount: totals.total,
     title: project.name || strings.tables.marksTitle,
     room: tableRoomTitle(project, filter),
@@ -512,6 +521,186 @@ export function linksTable(project, filter, options = {}) {
   };
 }
 
+// ——— оборудование —————————————————————————————————————————————————————
+
+// Название модели для закупки: с артикулом, если он заведён, — по нему заказ
+// и оформляют.
+function tableEquipmentName(item) {
+  if (!item) return "";
+  return item.code ? item.name + " (" + item.code + ")" : item.name;
+}
+
+// Сужен ли лист чем-нибудь, кроме схемы объекта. Размещение с потерянной
+// меткой отнести к помещению или категории нечем, поэтому на сужённом листе
+// его нет, а на полном — есть: чинить его всё равно придётся.
+function tableFilterNarrows(filter) {
+  if (!filter) return false;
+  return Boolean(
+    filter.roomId ||
+      filter.schemeId ||
+      (filter.query || "").trim() ||
+      Array.isArray(filter.typeIds) ||
+      Array.isArray(filter.categoryIds),
+  );
+}
+
+/**
+ * Таблица оборудования: строка на размещение — что и куда ставить, с чем
+ * связывать, — а подвал «Итого» отвечает на второй вопрос заказчика, сколько
+ * каких моделей закупать.
+ *
+ * Одна таблица, а не две: закупка — это те же размещения, посчитанные по
+ * моделям, и отдельным листом она разошлась бы с монтажным, как только лист
+ * сузили помещением. Подвал уже умеет доезжать в CSV, Markdown, PNG и печать,
+ * и сужение фильтром доезжает вместе с ним.
+ */
+export function equipmentTable(project, filter, options = {}) {
+  const byRoom = Boolean(options.byRoom);
+  const columns = [strings.tables.label, strings.tables.room, strings.tables.location, strings.tables.linked];
+  const empty = {
+    kind: "equipment",
+    byRoom,
+    groupColumn: strings.tables.model,
+    totals: [],
+    totalsColumns: [strings.tables.vendor, strings.tables.model, strings.tables.pieces],
+    totalLabel: strings.tables.totalItems,
+    totalCount: 0,
+    title: "",
+    room: "",
+    note: "",
+    columns,
+    groups: [],
+  };
+  if (!project) return empty;
+
+  const order = tableTypeOrder(project);
+  const visible = new Set(tableVisibleMarks(project, filter).map((mark) => mark.id));
+  const keepLost = !tableFilterNarrows(filter);
+  const counts = new Map();
+  const items = [];
+
+  for (const placement of placementsInOrder(project)) {
+    const mark = findMark(project, placement.markId);
+    if (mark ? !visible.has(mark.id) : !keepLost) continue;
+    const item = findEquipment(project, placement.equipmentId);
+    const room = mark && mark.roomId ? findRoom(project, mark.roomId) : null;
+    const links = [];
+    let broken = !mark || !item;
+    for (const id of placementLinkIds(placement)) {
+      const linked = findMark(project, id);
+      if (linked) links.push(tableLinkLabel(project, linked, mark ? mark.roomId : null));
+      else broken = true;
+    }
+    if (placementLinkIds(placement).length > links.length) links.push(strings.tables.brokenLink);
+    const row = {
+      id: placement.id,
+      cells: [
+        mark ? labelOf(project, mark.id) : strings.tables.brokenLink,
+        room ? room.name : "",
+        mark ? mark.location || "" : "",
+        links.join(", "),
+      ],
+      group: item ? item.name : strings.tables.equipmentLost,
+      color: mark ? styleOf(project, mark.typeId).color : null,
+      problem: broken,
+    };
+    items.push({
+      row,
+      mark,
+      item,
+      roomId: room ? room.id : "none",
+      sort: mark ? [order.has(mark.typeId) ? order.get(mark.typeId) : 999, mark.number] : [1e6, 0],
+    });
+    if (item) counts.set(item.id, (counts.get(item.id) || 0) + 1);
+  }
+
+  items.sort((a, b) => (a.sort[0] === b.sort[0] ? a.sort[1] - b.sort[1] : a.sort[0] - b.sort[0]));
+
+  const modelKeys = [...equipmentInOrder(project).map((item) => item.id), "none"];
+  const modelTitle = (key) => {
+    const item = key === "none" ? null : findEquipment(project, key);
+    return item ? item.name : strings.tables.equipmentLost;
+  };
+  const keyOf = (entry) => (entry.item ? entry.item.id : "none");
+
+  const groups = [];
+  if (byRoom) {
+    const byRoomKey = new Map();
+    for (const entry of items) {
+      if (!byRoomKey.has(entry.roomId)) byRoomKey.set(entry.roomId, []);
+      byRoomKey.get(entry.roomId).push(entry);
+    }
+    for (const roomKey of [...roomsInOrder(project).map((room) => room.id), "none"]) {
+      const list = byRoomKey.get(roomKey);
+      if (!list || list.length === 0) continue;
+      const room = roomKey === "none" ? null : findRoom(project, roomKey);
+      groups.push({
+        id: roomKey,
+        title: room ? room.name : strings.tables.noRoom,
+        color: room ? room.color || null : null,
+        rows: [],
+        level: 1,
+      });
+      for (const key of modelKeys) {
+        const rows = list.filter((entry) => keyOf(entry) === key);
+        if (rows.length === 0) continue;
+        groups.push({
+          id: roomKey + ":" + key,
+          title: modelTitle(key),
+          color: null,
+          rows: rows.map((entry) => entry.row),
+          level: 2,
+        });
+      }
+    }
+  } else {
+    for (const key of modelKeys) {
+      const rows = items.filter((entry) => keyOf(entry) === key);
+      if (rows.length === 0) continue;
+      groups.push({ id: key, title: modelTitle(key), color: null, rows: rows.map((entry) => entry.row), level: 1 });
+    }
+  }
+
+  // Закупка: производитель — заголовком, модели под ним. Размещения с
+  // потерянной моделью в закупку не попадают: заказывать по ним нечего,
+  // их видно строкой-проблемой.
+  const byVendor = new Map();
+  for (const item of equipmentInOrder(project)) {
+    const count = counts.get(item.id) || 0;
+    if (count === 0) continue;
+    const vendor = (item.vendor || "").trim() || strings.tables.noVendor;
+    if (!byVendor.has(vendor)) byVendor.set(vendor, []);
+    byVendor.get(vendor).push({ item, count });
+  }
+  const totals = [];
+  let totalCount = 0;
+  for (const [vendor, list] of byVendor) {
+    const sum = list.reduce((acc, entry) => acc + entry.count, 0);
+    totals.push({ id: "vendor:" + vendor, level: 1, title: vendor, category: vendor, count: sum, color: null });
+    for (const entry of list) {
+      totals.push({
+        id: entry.item.id,
+        level: 2,
+        title: tableEquipmentName(entry.item),
+        category: vendor,
+        count: entry.count,
+        color: null,
+      });
+    }
+    totalCount += sum;
+  }
+
+  return {
+    ...empty,
+    title: project.name || strings.tables.equipmentTitle,
+    room: tableRoomTitle(project, filter),
+    note: tableFilterNote(project, filter),
+    totals,
+    totalCount,
+    groups,
+  };
+}
+
 export function typesTable(project) {
   const columns = [
     strings.tables.code,
@@ -519,6 +708,7 @@ export function typesTable(project) {
     strings.tables.category,
     strings.tables.color,
     strings.tables.shape,
+    strings.tables.line,
   ];
   const rows = [];
   if (project) {
@@ -527,7 +717,15 @@ export function typesTable(project) {
         const style = styleOf(project, type.id);
         rows.push({
           id: type.id,
-          cells: [type.code, type.name, category.name, style.color, strings.shapes[style.shape] || style.shape],
+          cells: [
+            type.code,
+            type.name,
+            category.name,
+            style.color,
+            strings.shapes[style.shape] || style.shape,
+            // Начертание — часть обозначения: по распечатке видно, где пунктир.
+            strings.lineStyles[style.lineStyle] || style.lineStyle,
+          ],
           color: style.color,
           shape: style.shape,
         });
@@ -588,18 +786,23 @@ export function toCsv(table) {
 
   if (table && Array.isArray(table.totals) && table.totals.length > 0) {
     lines.push("", tableCsvCell(strings.tables.totals));
-    lines.push(
-      [strings.tables.category, strings.tables.type, strings.tables.points]
-        .map(tableCsvCell)
-        .join(TABLE_CSV_SEPARATOR),
-    );
+    const totalsColumns = table.totalsColumns || [
+      strings.tables.category,
+      strings.tables.type,
+      strings.tables.points,
+    ];
+    lines.push(totalsColumns.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
     // В Excel строками идут типы: по ним считают закупку, а подытог категории
     // там собирают сами. Двухуровневый список — для бумаги.
     for (const row of table.totals) {
       if (row.level !== 2) continue;
       lines.push([row.category, row.title, row.count].map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
     }
-    lines.push([strings.tables.totalAll, "", table.totalCount].map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+    lines.push(
+      [table.totalLabel || strings.tables.totalAll, "", table.totalCount]
+        .map(tableCsvCell)
+        .join(TABLE_CSV_SEPARATOR),
+    );
   }
   return TABLE_CSV_BOM + lines.join("\r\n") + "\r\n";
 }
@@ -626,12 +829,14 @@ export function toMarkdown(table) {
   }
   if (table && Array.isArray(table.totals) && table.totals.length > 0) {
     out.push("## " + strings.tables.totals, "");
-    out.push("| " + strings.tables.name + " | " + strings.tables.points + " |", "| --- | --- |");
+    // Заголовок счётной колонки — у таблицы: у меток это точки, у оборудования штуки.
+    const countTitle = (table.totalsColumns && table.totalsColumns[2]) || strings.tables.points;
+    out.push("| " + strings.tables.name + " | " + countTitle + " |", "| --- | --- |");
     for (const row of table.totals) {
       const title = row.level === 2 ? "— " + row.title : row.title;
       out.push("| " + tableMarkdownCell(title) + " | " + row.count + " |");
     }
-    out.push("| " + strings.tables.totalAll + " | " + table.totalCount + " |", "");
+    out.push("| " + (table.totalLabel || strings.tables.totalAll) + " | " + table.totalCount + " |", "");
   }
   return out.join("\n");
 }

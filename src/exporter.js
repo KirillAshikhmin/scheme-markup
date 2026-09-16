@@ -533,7 +533,7 @@ export async function tablePng(table, options = {}) {
       const sub = row.level === 2;
       line(row.title, row.count, !sub, sub ? EXPORT_TABLE.muted : row.color || EXPORT_TABLE.ink, sub ? EXPORT_TABLE.gap : 0);
     }
-    line(strings.tables.totalAll, table.totalCount, true, EXPORT_TABLE.ink, 0);
+    line(table.totalLabel || strings.tables.totalAll, table.totalCount, true, EXPORT_TABLE.ink, 0);
   }
 
   return exportBlob(canvas);
@@ -689,7 +689,12 @@ export function exportTableNode(table, options = {}) {
         row.level === 2 ? null : row.color,
       );
     }
-    line(strings.tables.totalAll, table.totalCount, "print-doc__totals-row print-doc__totals-row--all", null);
+    line(
+      table.totalLabel || strings.tables.totalAll,
+      table.totalCount,
+      "print-doc__totals-row print-doc__totals-row--all",
+      null,
+    );
     totalsTable.append(body);
     block.append(totalsTable);
     doc.append(block);

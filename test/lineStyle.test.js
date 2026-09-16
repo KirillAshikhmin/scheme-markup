@@ -62,10 +62,10 @@ test("в справочник добавлен проходной переклю
   // Тринадцать типов заказчика целы и идут в прежнем порядке; новый встал в
   // свою категорию, рядом с выключателями, а не в хвост списка.
   assert.deepEqual(
-    codes.filter((code) => code !== "ВП"),
+    codes.filter((code) => code !== "ВП" && code !== "RJ"),
     ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W"],
   );
-  assert.equal(codes.length, 14, "в шаблоне должен появиться ровно один новый тип");
+  assert.equal(codes.length, 15, "в шаблоне два новых типа: переключатель и витая пара");
 
   const project = createProject();
   const way = project.markTypes.find((type) => type.code === "ВП");

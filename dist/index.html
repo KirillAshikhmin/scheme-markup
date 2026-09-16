@@ -2590,6 +2590,7 @@ const strings = {
     breezer: "Бризер",
     conditioner: "Кондиционер",
     wifi: "WiFi точка",
+    ethernet: "Вывод витой пары (розетка RJ45)",
   },
   shapes: {
     circle: "Круг",
@@ -3124,6 +3125,14 @@ const strings = {
     color: "Цвет",
     shape: "Форма",
     points: "Точек",
+    model: "Модель",
+    vendor: "Производитель",
+    pieces: "Штук",
+    line: "Линия",
+    noVendor: "Без производителя",
+    equipmentLost: "Модель потеряна",
+    equipmentTitle: "Оборудование объекта",
+    totalItems: "Всего штук",
     totals: "Итого",
     totalAll: "Всего точек",
     linkSide: "Связь",
@@ -3157,6 +3166,7 @@ const strings = {
     kindMarks: "Метки",
     kindTypes: "Справочник типов",
     kindLinks: "Связи",
+    kindEquipment: "Оборудование",
     currentScheme: "Только текущая схема",
     area: "Что выгружаем",
     areaAll: "Вся схема",
@@ -3575,13 +3585,17 @@ const TEMPLATE_CATEGORIES = [
 ];
 
 const TEMPLATE_TYPES = [
-  { category: "light", code: "Т", name: strings.types.spot },
-  { category: "light", code: "С", name: strings.types.lamp },
-  { category: "light", code: "ПК", name: strings.types.bedLight },
-  { category: "light", code: "ТР", name: strings.types.track },
-  { category: "light", code: "П", name: strings.types.backlight },
-  { category: "light", code: "Л", name: strings.types.strip },
-  { category: "light", code: "ПШ", name: strings.types.wardrobeLight },
+  // Семь типов света сидят в одной категории, а значит и в одном синем цвете:
+  // пока у них не было своих форм, все семь рисовались одинаковым кругом с
+  // крестом, и тип читался только по букве. Формы разведены по просьбе
+  // заказчика — цвет категории при этом не меняется, синий остаётся синим.
+  { category: "light", code: "Т", name: strings.types.spot, shape: "circle-cross" },
+  { category: "light", code: "С", name: strings.types.lamp, shape: "circle-fill" },
+  { category: "light", code: "ПК", name: strings.types.bedLight, shape: "circle-dot" },
+  { category: "light", code: "ТР", name: strings.types.track, shape: "plus" },
+  { category: "light", code: "П", name: strings.types.backlight, shape: "diamond" },
+  { category: "light", code: "Л", name: strings.types.strip, shape: "triangle" },
+  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, shape: "triangle-down" },
   { category: "switches", code: "В", name: strings.types.switch },
   { category: "switches", code: "ВВ", name: strings.types.switchDouble },
   // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
@@ -3592,6 +3606,11 @@ const TEMPLATE_TYPES = [
   { category: "climate", code: "Б", name: strings.types.breezer },
   { category: "climate", code: "К", name: strings.types.conditioner },
   { category: "network", code: "W", name: strings.types.wifi },
+  // Вывод витой пары. Код латинский, как соседний «W»: «RJ» читается как RJ45
+  // и ни с чем не путается. Одинокая «E» от Ethernet выглядела бы стройнее, но
+  // кириллическая «Е» неотличима от латинской «E» на плане, а счётчики у них
+  // разные — эта ловушка в сборке уже описана для «P» и «Р».
+  { category: "network", code: "RJ", name: strings.types.ethernet, shape: "square-jack" },
 ];
 
 function newId() {
@@ -10767,6 +10786,8 @@ function marksTable(project, filter, groupBy, options = {}) {
       byRoom,
       groupColumn: strings.tables.category,
       totals: [],
+      totalsColumns: [strings.tables.category, strings.tables.type, strings.tables.points],
+      totalLabel: strings.tables.totalAll,
       totalCount: 0,
       title: "",
       room: "",
@@ -10787,6 +10808,8 @@ function marksTable(project, filter, groupBy, options = {}) {
     // уже стоят колонками, категория — нет.
     groupColumn: strings.tables.category,
     totals: totals.rows,
+    totalsColumns: [strings.tables.category, strings.tables.type, strings.tables.points],
+    totalLabel: strings.tables.totalAll,
     totalCount: totals.total,
     title: project.name || strings.tables.marksTitle,
     room: tableRoomTitle(project, filter),
@@ -10936,6 +10959,186 @@ function linksTable(project, filter, options = {}) {
     ],
   };
 }
+
+// ——— оборудование —————————————————————————————————————————————————————
+
+// Название модели для закупки: с артикулом, если он заведён, — по нему заказ
+// и оформляют.
+function tableEquipmentName(item) {
+  if (!item) return "";
+  return item.code ? item.name + " (" + item.code + ")" : item.name;
+}
+
+// Сужен ли лист чем-нибудь, кроме схемы объекта. Размещение с потерянной
+// меткой отнести к помещению или категории нечем, поэтому на сужённом листе
+// его нет, а на полном — есть: чинить его всё равно придётся.
+function tableFilterNarrows(filter) {
+  if (!filter) return false;
+  return Boolean(
+    filter.roomId ||
+      filter.schemeId ||
+      (filter.query || "").trim() ||
+      Array.isArray(filter.typeIds) ||
+      Array.isArray(filter.categoryIds),
+  );
+}
+
+/**
+ * Таблица оборудования: строка на размещение — что и куда ставить, с чем
+ * связывать, — а подвал «Итого» отвечает на второй вопрос заказчика, сколько
+ * каких моделей закупать.
+ *
+ * Одна таблица, а не две: закупка — это те же размещения, посчитанные по
+ * моделям, и отдельным листом она разошлась бы с монтажным, как только лист
+ * сузили помещением. Подвал уже умеет доезжать в CSV, Markdown, PNG и печать,
+ * и сужение фильтром доезжает вместе с ним.
+ */
+function equipmentTable(project, filter, options = {}) {
+  const byRoom = Boolean(options.byRoom);
+  const columns = [strings.tables.label, strings.tables.room, strings.tables.location, strings.tables.linked];
+  const empty = {
+    kind: "equipment",
+    byRoom,
+    groupColumn: strings.tables.model,
+    totals: [],
+    totalsColumns: [strings.tables.vendor, strings.tables.model, strings.tables.pieces],
+    totalLabel: strings.tables.totalItems,
+    totalCount: 0,
+    title: "",
+    room: "",
+    note: "",
+    columns,
+    groups: [],
+  };
+  if (!project) return empty;
+
+  const order = tableTypeOrder(project);
+  const visible = new Set(tableVisibleMarks(project, filter).map((mark) => mark.id));
+  const keepLost = !tableFilterNarrows(filter);
+  const counts = new Map();
+  const items = [];
+
+  for (const placement of placementsInOrder(project)) {
+    const mark = findMark(project, placement.markId);
+    if (mark ? !visible.has(mark.id) : !keepLost) continue;
+    const item = findEquipment(project, placement.equipmentId);
+    const room = mark && mark.roomId ? findRoom(project, mark.roomId) : null;
+    const links = [];
+    let broken = !mark || !item;
+    for (const id of placementLinkIds(placement)) {
+      const linked = findMark(project, id);
+      if (linked) links.push(tableLinkLabel(project, linked, mark ? mark.roomId : null));
+      else broken = true;
+    }
+    if (placementLinkIds(placement).length > links.length) links.push(strings.tables.brokenLink);
+    const row = {
+      id: placement.id,
+      cells: [
+        mark ? labelOf(project, mark.id) : strings.tables.brokenLink,
+        room ? room.name : "",
+        mark ? mark.location || "" : "",
+        links.join(", "),
+      ],
+      group: item ? item.name : strings.tables.equipmentLost,
+      color: mark ? styleOf(project, mark.typeId).color : null,
+      problem: broken,
+    };
+    items.push({
+      row,
+      mark,
+      item,
+      roomId: room ? room.id : "none",
+      sort: mark ? [order.has(mark.typeId) ? order.get(mark.typeId) : 999, mark.number] : [1e6, 0],
+    });
+    if (item) counts.set(item.id, (counts.get(item.id) || 0) + 1);
+  }
+
+  items.sort((a, b) => (a.sort[0] === b.sort[0] ? a.sort[1] - b.sort[1] : a.sort[0] - b.sort[0]));
+
+  const modelKeys = [...equipmentInOrder(project).map((item) => item.id), "none"];
+  const modelTitle = (key) => {
+    const item = key === "none" ? null : findEquipment(project, key);
+    return item ? item.name : strings.tables.equipmentLost;
+  };
+  const keyOf = (entry) => (entry.item ? entry.item.id : "none");
+
+  const groups = [];
+  if (byRoom) {
+    const byRoomKey = new Map();
+    for (const entry of items) {
+      if (!byRoomKey.has(entry.roomId)) byRoomKey.set(entry.roomId, []);
+      byRoomKey.get(entry.roomId).push(entry);
+    }
+    for (const roomKey of [...roomsInOrder(project).map((room) => room.id), "none"]) {
+      const list = byRoomKey.get(roomKey);
+      if (!list || list.length === 0) continue;
+      const room = roomKey === "none" ? null : findRoom(project, roomKey);
+      groups.push({
+        id: roomKey,
+        title: room ? room.name : strings.tables.noRoom,
+        color: room ? room.color || null : null,
+        rows: [],
+        level: 1,
+      });
+      for (const key of modelKeys) {
+        const rows = list.filter((entry) => keyOf(entry) === key);
+        if (rows.length === 0) continue;
+        groups.push({
+          id: roomKey + ":" + key,
+          title: modelTitle(key),
+          color: null,
+          rows: rows.map((entry) => entry.row),
+          level: 2,
+        });
+      }
+    }
+  } else {
+    for (const key of modelKeys) {
+      const rows = items.filter((entry) => keyOf(entry) === key);
+      if (rows.length === 0) continue;
+      groups.push({ id: key, title: modelTitle(key), color: null, rows: rows.map((entry) => entry.row), level: 1 });
+    }
+  }
+
+  // Закупка: производитель — заголовком, модели под ним. Размещения с
+  // потерянной моделью в закупку не попадают: заказывать по ним нечего,
+  // их видно строкой-проблемой.
+  const byVendor = new Map();
+  for (const item of equipmentInOrder(project)) {
+    const count = counts.get(item.id) || 0;
+    if (count === 0) continue;
+    const vendor = (item.vendor || "").trim() || strings.tables.noVendor;
+    if (!byVendor.has(vendor)) byVendor.set(vendor, []);
+    byVendor.get(vendor).push({ item, count });
+  }
+  const totals = [];
+  let totalCount = 0;
+  for (const [vendor, list] of byVendor) {
+    const sum = list.reduce((acc, entry) => acc + entry.count, 0);
+    totals.push({ id: "vendor:" + vendor, level: 1, title: vendor, category: vendor, count: sum, color: null });
+    for (const entry of list) {
+      totals.push({
+        id: entry.item.id,
+        level: 2,
+        title: tableEquipmentName(entry.item),
+        category: vendor,
+        count: entry.count,
+        color: null,
+      });
+    }
+    totalCount += sum;
+  }
+
+  return {
+    ...empty,
+    title: project.name || strings.tables.equipmentTitle,
+    room: tableRoomTitle(project, filter),
+    note: tableFilterNote(project, filter),
+    totals,
+    totalCount,
+    groups,
+  };
+}
 function typesTable(project) {
   const columns = [
     strings.tables.code,
@@ -10943,6 +11146,7 @@ function typesTable(project) {
     strings.tables.category,
     strings.tables.color,
     strings.tables.shape,
+    strings.tables.line,
   ];
   const rows = [];
   if (project) {
@@ -10951,7 +11155,15 @@ function typesTable(project) {
         const style = styleOf(project, type.id);
         rows.push({
           id: type.id,
-          cells: [type.code, type.name, category.name, style.color, strings.shapes[style.shape] || style.shape],
+          cells: [
+            type.code,
+            type.name,
+            category.name,
+            style.color,
+            strings.shapes[style.shape] || style.shape,
+            // Начертание — часть обозначения: по распечатке видно, где пунктир.
+            strings.lineStyles[style.lineStyle] || style.lineStyle,
+          ],
           color: style.color,
           shape: style.shape,
         });
@@ -11011,18 +11223,23 @@ function toCsv(table) {
 
   if (table && Array.isArray(table.totals) && table.totals.length > 0) {
     lines.push("", tableCsvCell(strings.tables.totals));
-    lines.push(
-      [strings.tables.category, strings.tables.type, strings.tables.points]
-        .map(tableCsvCell)
-        .join(TABLE_CSV_SEPARATOR),
-    );
+    const totalsColumns = table.totalsColumns || [
+      strings.tables.category,
+      strings.tables.type,
+      strings.tables.points,
+    ];
+    lines.push(totalsColumns.map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
     // В Excel строками идут типы: по ним считают закупку, а подытог категории
     // там собирают сами. Двухуровневый список — для бумаги.
     for (const row of table.totals) {
       if (row.level !== 2) continue;
       lines.push([row.category, row.title, row.count].map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
     }
-    lines.push([strings.tables.totalAll, "", table.totalCount].map(tableCsvCell).join(TABLE_CSV_SEPARATOR));
+    lines.push(
+      [table.totalLabel || strings.tables.totalAll, "", table.totalCount]
+        .map(tableCsvCell)
+        .join(TABLE_CSV_SEPARATOR),
+    );
   }
   return TABLE_CSV_BOM + lines.join("\r\n") + "\r\n";
 }
@@ -11048,12 +11265,14 @@ function toMarkdown(table) {
   }
   if (table && Array.isArray(table.totals) && table.totals.length > 0) {
     out.push("## " + strings.tables.totals, "");
-    out.push("| " + strings.tables.name + " | " + strings.tables.points + " |", "| --- | --- |");
+    // Заголовок счётной колонки — у таблицы: у меток это точки, у оборудования штуки.
+    const countTitle = (table.totalsColumns && table.totalsColumns[2]) || strings.tables.points;
+    out.push("| " + strings.tables.name + " | " + countTitle + " |", "| --- | --- |");
     for (const row of table.totals) {
       const title = row.level === 2 ? "— " + row.title : row.title;
       out.push("| " + tableMarkdownCell(title) + " | " + row.count + " |");
     }
-    out.push("| " + strings.tables.totalAll + " | " + table.totalCount + " |", "");
+    out.push("| " + (table.totalLabel || strings.tables.totalAll) + " | " + table.totalCount + " |", "");
   }
   return out.join("\n");
 }
@@ -11606,7 +11825,7 @@ async function tablePng(table, options = {}) {
       const sub = row.level === 2;
       line(row.title, row.count, !sub, sub ? EXPORT_TABLE.muted : row.color || EXPORT_TABLE.ink, sub ? EXPORT_TABLE.gap : 0);
     }
-    line(strings.tables.totalAll, table.totalCount, true, EXPORT_TABLE.ink, 0);
+    line(table.totalLabel || strings.tables.totalAll, table.totalCount, true, EXPORT_TABLE.ink, 0);
   }
 
   return exportBlob(canvas);
@@ -11762,7 +11981,12 @@ function exportTableNode(table, options = {}) {
         row.level === 2 ? null : row.color,
       );
     }
-    line(strings.tables.totalAll, table.totalCount, "print-doc__totals-row print-doc__totals-row--all", null);
+    line(
+      table.totalLabel || strings.tables.totalAll,
+      table.totalCount,
+      "print-doc__totals-row print-doc__totals-row--all",
+      null,
+    );
     totalsTable.append(body);
     block.append(totalsTable);
     doc.append(block);
@@ -13324,6 +13548,9 @@ function exportTableOf(state) {
   if (exportChoice.kind === "links") {
     return linksTable(state.project, exportFilterOf(state), { byRoom: exportChoice.byRoom });
   }
+  if (exportChoice.kind === "equipment") {
+    return equipmentTable(state.project, exportFilterOf(state), { byRoom: exportChoice.byRoom });
+  }
   return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy, { byRoom: exportChoice.byRoom });
 }
 
@@ -13350,6 +13577,7 @@ function exportBaseName(state, suffix) {
   // Три таблицы одного объекта иначе легли бы в папку загрузок одним именем:
   // лист связей затёр бы лист меток, и молча.
   if (exportChoice.kind === "links") parts.push(strings.exportPanel.kindLinks);
+  else if (exportChoice.kind === "equipment") parts.push(strings.exportPanel.kindEquipment);
   else if (exportChoice.kind === "types") parts.push(strings.exportPanel.kindTypes);
   return exportFileName(state.project, parts.join(" — "), suffix);
 }
@@ -13429,6 +13657,7 @@ function exportTableDialog(api) {
     [
       { value: "marks", label: strings.exportPanel.kindMarks },
       { value: "links", label: strings.exportPanel.kindLinks },
+      { value: "equipment", label: strings.exportPanel.kindEquipment },
       { value: "types", label: strings.exportPanel.kindTypes },
     ],
     exportChoice.kind,
@@ -13748,12 +13977,14 @@ function typesSnapshot(project) {
       name: category.name,
       color: category.color,
       shape: category.shape,
+      lineStyle: category.lineStyle,
     })),
     markTypes: project.markTypes.map((type) => ({
       categoryId: type.categoryId,
       code: type.code,
       name: type.name,
       shape: type.shape,
+      lineStyle: type.lineStyle,
       blockMode: type.blockMode,
     })),
   };
@@ -13774,6 +14005,7 @@ function typesTemplateFrom(template) {
       name: category.name,
       color: category.color,
       shape: SHAPE_NAMES.includes(category.shape) ? category.shape : SHAPE_NAMES[0],
+      lineStyle: LINE_STYLES.includes(category.lineStyle) ? category.lineStyle : LINE_STYLES[0],
       order: index,
     };
   });
@@ -13785,6 +14017,7 @@ function typesTemplateFrom(template) {
       code: type.code,
       name: type.name,
       shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
+      lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
       blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
       order: index,
     }));
@@ -13840,6 +14073,30 @@ function openTypesShapePicker({ shape, color, allowInherit, inheritShape }) {
       onCancel: () => resolve(null),
     });
   });
+}
+
+// Начертание линии: у типа — «как у категории» или своё, у категории — своё.
+// Список, а не сетка: значений два, и подпись объясняет, зачем пунктир, — по
+// нему условную линию отличают от трека и в легенде, и на распечатке.
+function typesLineSelect({ lineStyle, allowInherit, onPick }) {
+  const select = uiEl("select", {
+    class: "ui-input dict__line",
+    title: strings.lineStyles.hint,
+    attrs: { "aria-label": strings.lineStyles.title },
+    on: { change: () => onPick(select.value || null) },
+  });
+  // Ширина — по месту в строке справочника: «Как у категории» иначе растянет
+  // строку и отожмёт название типа (правило для .dict__line живёт в панели).
+  select.style.maxWidth = "9.5rem";
+  const options = allowInherit ? [{ value: "", label: strings.lineStyles.inherit }] : [];
+  for (const style of LINE_STYLES) options.push({ value: style, label: strings.lineStyles[style] || style });
+  for (const option of options) {
+    const node = uiEl("option", { text: option.label, value: option.value });
+    node.value = option.value;
+    if ((lineStyle || "") === option.value) node.selected = true;
+    select.append(node);
+  }
+  return select;
 }
 
 function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
@@ -14075,6 +14332,12 @@ function openTypesDictionary(api) {
         onPick: (shape) =>
           commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
       }),
+      typesLineSelect({
+        lineStyle: type.lineStyle,
+        allowInherit: true,
+        onPick: (lineStyle) =>
+          commit((current) => updateType(current, type.id, { lineStyle }).project, strings.history.editType),
+      }),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -14119,6 +14382,15 @@ function openTypesDictionary(api) {
         allowInherit: false,
         onPick: (shape) =>
           commit((current) => updateCategory(current, category.id, { shape }).project, strings.history.editCategory),
+      }),
+      typesLineSelect({
+        lineStyle: category.lineStyle || LINE_STYLES[0],
+        allowInherit: false,
+        onPick: (lineStyle) =>
+          commit(
+            (current) => updateCategory(current, category.id, { lineStyle }).project,
+            strings.history.editCategory,
+          ),
       }),
       removeButton,
     ]);

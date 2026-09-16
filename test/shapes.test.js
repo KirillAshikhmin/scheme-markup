@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SHAPES, renderInternals } from "../src/render.js";
-import { SHAPE_LEGACY, SHAPE_NAMES, SHAPE_PALETTE } from "../src/model.js";
+import { SHAPE_LEGACY, SHAPE_NAMES, SHAPE_PALETTE, defaultTemplate } from "../src/model.js";
 
 const shapeGeometry = (...args) => renderInternals.shapeGeometry(...args);
 const shapeInternals = (...args) => renderInternals.shapeInternals(...args);
@@ -225,4 +225,32 @@ test("новые фигуры устроены так, как обещано: к
   assert.equal(shapeGeometry("circle-dot", 0, 0, 10).decor, "dot");
   assert.equal(shapeGeometry("circle-half", 0, 0, 10).decor, "half");
   assert.equal(shapeGeometry("plus", 0, 0, 10).points.length, 12);
+});
+
+// Семь типов света сидят в одной категории и в одном синем цвете: на бумаге их
+// различает только форма. Круг с крестом, закрашенный круг и круг с точкой —
+// родня, и в размере метки они ближе всего друг к другу, поэтому проверка идёт
+// не по списку имён, а тем же отпечатком.
+test("семь типов света расходятся на бумаге, а не только по букве", () => {
+  const light = defaultTemplate().markTypes.filter((type) =>
+    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ"].includes(type.code),
+  );
+  assert.equal(light.length, 7, "типы света потерялись из шаблона");
+
+  const shapes = light.map((type) => type.shape);
+  assert.equal(new Set(shapes).size, 7, "два типа света рисуются одной формой: " + shapes.join(", "));
+  for (const shape of shapes) {
+    assert.ok(SHAPE_PALETTE.includes(shape), "форма типа света не из палитры: " + shape);
+  }
+
+  const prints = light.map((type) => ({ code: type.code, ink: inkOf(type.shape) }));
+  for (let i = 0; i < prints.length; i += 1) {
+    for (let j = i + 1; j < prints.length; j += 1) {
+      const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
+      assert.ok(
+        share >= MIN_DIFFERENCE,
+        prints[i].code + " и " + prints[j].code + " на бумаге расходятся на " + Math.round(share * 100) + "% знака",
+      );
+    }
+  }
 });

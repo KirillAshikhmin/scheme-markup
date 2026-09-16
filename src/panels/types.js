@@ -10,6 +10,7 @@ import { strings, text } from "../strings.js";
 import {
   CODE_MAX_LENGTH,
   BLOCK_MODES,
+  LINE_STYLES,
   SHAPE_NAMES,
   SHAPE_PALETTE,
   addCategory,
@@ -44,12 +45,14 @@ function typesSnapshot(project) {
       name: category.name,
       color: category.color,
       shape: category.shape,
+      lineStyle: category.lineStyle,
     })),
     markTypes: project.markTypes.map((type) => ({
       categoryId: type.categoryId,
       code: type.code,
       name: type.name,
       shape: type.shape,
+      lineStyle: type.lineStyle,
       blockMode: type.blockMode,
     })),
   };
@@ -70,6 +73,7 @@ export function typesTemplateFrom(template) {
       name: category.name,
       color: category.color,
       shape: SHAPE_NAMES.includes(category.shape) ? category.shape : SHAPE_NAMES[0],
+      lineStyle: LINE_STYLES.includes(category.lineStyle) ? category.lineStyle : LINE_STYLES[0],
       order: index,
     };
   });
@@ -81,6 +85,7 @@ export function typesTemplateFrom(template) {
       code: type.code,
       name: type.name,
       shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
+      lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
       blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
       order: index,
     }));
@@ -136,6 +141,30 @@ export function openTypesShapePicker({ shape, color, allowInherit, inheritShape 
       onCancel: () => resolve(null),
     });
   });
+}
+
+// Начертание линии: у типа — «как у категории» или своё, у категории — своё.
+// Список, а не сетка: значений два, и подпись объясняет, зачем пунктир, — по
+// нему условную линию отличают от трека и в легенде, и на распечатке.
+function typesLineSelect({ lineStyle, allowInherit, onPick }) {
+  const select = uiEl("select", {
+    class: "ui-input dict__line",
+    title: strings.lineStyles.hint,
+    attrs: { "aria-label": strings.lineStyles.title },
+    on: { change: () => onPick(select.value || null) },
+  });
+  // Ширина — по месту в строке справочника: «Как у категории» иначе растянет
+  // строку и отожмёт название типа (правило для .dict__line живёт в панели).
+  select.style.maxWidth = "9.5rem";
+  const options = allowInherit ? [{ value: "", label: strings.lineStyles.inherit }] : [];
+  for (const style of LINE_STYLES) options.push({ value: style, label: strings.lineStyles[style] || style });
+  for (const option of options) {
+    const node = uiEl("option", { text: option.label, value: option.value });
+    node.value = option.value;
+    if ((lineStyle || "") === option.value) node.selected = true;
+    select.append(node);
+  }
+  return select;
 }
 
 function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
@@ -372,6 +401,12 @@ export function openTypesDictionary(api) {
         onPick: (shape) =>
           commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
       }),
+      typesLineSelect({
+        lineStyle: type.lineStyle,
+        allowInherit: true,
+        onPick: (lineStyle) =>
+          commit((current) => updateType(current, type.id, { lineStyle }).project, strings.history.editType),
+      }),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -416,6 +451,15 @@ export function openTypesDictionary(api) {
         allowInherit: false,
         onPick: (shape) =>
           commit((current) => updateCategory(current, category.id, { shape }).project, strings.history.editCategory),
+      }),
+      typesLineSelect({
+        lineStyle: category.lineStyle || LINE_STYLES[0],
+        allowInherit: false,
+        onPick: (lineStyle) =>
+          commit(
+            (current) => updateCategory(current, category.id, { lineStyle }).project,
+            strings.history.editCategory,
+          ),
       }),
       removeButton,
     ]);

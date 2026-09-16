@@ -10,7 +10,7 @@ import { findRoom, findScheme, roomsInOrder, schemesInOrder } from "../model.js"
 import { screenToPlan } from "../render.js";
 import { getImage } from "../store.js";
 import { decodePlanImage, releasePlanImage } from "../imagePrep.js";
-import { linksTable, marksTable, tableRowCount, toCsv, toMarkdown, toTsv, typesTable } from "../tables.js";
+import { equipmentTable, linksTable, marksTable, tableRowCount, toCsv, toMarkdown, toTsv, typesTable } from "../tables.js";
 import {
   EXPORT_SCALES,
   allSchemesZip,
@@ -158,6 +158,9 @@ function exportTableOf(state) {
   if (exportChoice.kind === "links") {
     return linksTable(state.project, exportFilterOf(state), { byRoom: exportChoice.byRoom });
   }
+  if (exportChoice.kind === "equipment") {
+    return equipmentTable(state.project, exportFilterOf(state), { byRoom: exportChoice.byRoom });
+  }
   return marksTable(state.project, exportFilterOf(state), exportChoice.groupBy, { byRoom: exportChoice.byRoom });
 }
 
@@ -184,6 +187,7 @@ function exportBaseName(state, suffix) {
   // Три таблицы одного объекта иначе легли бы в папку загрузок одним именем:
   // лист связей затёр бы лист меток, и молча.
   if (exportChoice.kind === "links") parts.push(strings.exportPanel.kindLinks);
+  else if (exportChoice.kind === "equipment") parts.push(strings.exportPanel.kindEquipment);
   else if (exportChoice.kind === "types") parts.push(strings.exportPanel.kindTypes);
   return exportFileName(state.project, parts.join(" — "), suffix);
 }
@@ -263,6 +267,7 @@ function exportTableDialog(api) {
     [
       { value: "marks", label: strings.exportPanel.kindMarks },
       { value: "links", label: strings.exportPanel.kindLinks },
+      { value: "equipment", label: strings.exportPanel.kindEquipment },
       { value: "types", label: strings.exportPanel.kindTypes },
     ],
     exportChoice.kind,
