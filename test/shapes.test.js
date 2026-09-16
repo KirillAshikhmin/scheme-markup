@@ -9,6 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { SHAPES, renderInternals } from "../src/render.js";
 import { SHAPE_LEGACY, SHAPE_NAMES, SHAPE_PALETTE, defaultTemplate } from "../src/model.js";
+import { strings } from "../src/strings.js";
 
 const shapeGeometry = (...args) => renderInternals.shapeGeometry(...args);
 const shapeInternals = (...args) => renderInternals.shapeInternals(...args);
@@ -253,4 +254,14 @@ test("семь типов света расходятся на бумаге, а 
       );
     }
   }
+});
+
+// Название фигуры видит человек: оно стоит в выборе обозначения и в справочнике.
+// Новая фигура без строки показывала бы ключ вроде «square-bolt» — проверка
+// держит палитру и словарь вместе.
+test("у каждого обозначения есть человеческое название", () => {
+  const missing = SHAPE_NAMES.filter((shape) => typeof strings.shapes[shape] !== "string");
+  assert.deepEqual(missing, [], "обозначение без названия в словаре");
+  const dead = Object.keys(strings.shapes).filter((key) => key !== "inherit" && !SHAPE_NAMES.includes(key));
+  assert.deepEqual(dead, [], "название есть, а такой фигуры нет");
 });

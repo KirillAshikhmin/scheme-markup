@@ -101,7 +101,16 @@ const SHAPE_BASE = {
   "circle-slash-two": "circle",
   "circle-chevron": "circle",
   "circle-wave": "circle",
+  "circle-ring": "circle",
   "square-jack": "square",
+  "square-bolt": "square",
+  "square-split": "square",
+  "square-hatch": "square",
+  "square-wave": "square",
+  "triangle-dot": "triangle",
+  "triangle-down-fill": "triangle-down",
+  "diamond-dot": "diamond",
+  "diamond-cross": "diamond",
   "circle-dot": "circle",
   "circle-fill": "circle",
   "circle-half": "circle",
@@ -117,7 +126,16 @@ const SHAPE_DECOR = {
   "circle-slash-two": "slash-two",
   "circle-chevron": "chevron",
   "circle-wave": "wave",
+  "circle-ring": "ring",
   "square-jack": "jack",
+  "square-bolt": "bolt",
+  "square-split": "split",
+  "square-hatch": "hatch",
+  "square-wave": "wave",
+  "triangle-dot": "dot",
+  "triangle-down-fill": "fill",
+  "diamond-dot": "dot",
+  "diamond-cross": "cross",
   "square-cross": "cross",
   "circle-dot": "dot",
   "circle-fill": "fill",
@@ -161,6 +179,18 @@ const WAVE_RADII = [0.5, 0.92];
 const WAVE_FROM = 205;
 const WAVE_TO = 335;
 const WAVE_STEPS = 5;
+// Кольцо внутри знака: доля радиуса, на которой оно идёт.
+const RING_SHARE = 0.55;
+const RING_POINTS = 12;
+// Молния: полуразмах и полувысота в долях радиуса.
+const BOLT_WIDE = 0.6;
+const BOLT_TALL = 0.68;
+// Пара контактов: полудлина черты и просвет между ними в долях радиуса.
+const SPLIT_REACH = 0.62;
+const SPLIT_GAP = 0.22;
+// Штриховка: полудлина черты и её ряды в долях радиуса.
+const HATCH_REACH = 0.46;
+const HATCH_ROWS = [-0.3, 0, 0.3];
 // Разъём Ethernet: корпус вилки и шнур вниз.
 const JACK_WIDTH = 0.52;
 const JACK_TOP = -0.55;
@@ -232,6 +262,20 @@ function shapeGeometry(shape, x, y, size) {
 // отпечаток, так что разойтись правилам негде.
 // `role` — смысл («сплошная», «половина», «точка», «крест»), `mask` — область
 // краски: вся внутренность, прямоугольник, круг или линии заданной толщины.
+// Кольцо ломаной: настоящей дуги в описании начинки нет, а отрезков хватает —
+// на бумаге в размере метки двенадцать звеньев читаются кругом.
+function ringSegments(geometry, share) {
+  const radius = geometry.r * share;
+  const segments = [];
+  let previous = polarPoint(geometry.cx, geometry.cy, radius, 0);
+  for (let step = 1; step <= RING_POINTS; step += 1) {
+    const next = polarPoint(geometry.cx, geometry.cy, radius, (360 * step) / RING_POINTS);
+    segments.push([previous, next]);
+    previous = next;
+  }
+  return segments;
+}
+
 // Отрезок рычага: длина в долях радиуса, сдвиг поперёк. Наклон намеренно не
 // сорок пять градусов — под ним рычаг ложится на луч креста, и на бумаге
 // «круг с клавишей» перестаёт отличаться от «круга с крестом».
@@ -316,6 +360,63 @@ function shapeInternals(geometry) {
     }
     parts.push({ role: "wave", mask: "lines", width: geometry.line, segments });
     parts.push({ role: "wave-dot", mask: "disc", cx: base.x, cy: base.y, r: Math.max(1, geometry.r * 0.22) });
+  } else if (geometry.decor === "ring") {
+    // Кольцо внутри круга: потолочный датчик — дыма, движения, присутствия.
+    parts.push({ role: "ring", mask: "lines", width: geometry.line, segments: ringSegments(geometry, RING_SHARE) });
+  } else if (geometry.decor === "bolt") {
+    // Молния: силовая линия, автомат, вывод под мощную нагрузку.
+    const wide = geometry.r * BOLT_WIDE;
+    const tall = geometry.r * BOLT_TALL;
+    parts.push({
+      role: "bolt",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx + wide, y: geometry.cy - tall },
+          { x: geometry.cx - wide * 0.55, y: geometry.cy },
+        ],
+        [
+          { x: geometry.cx - wide * 0.55, y: geometry.cy },
+          { x: geometry.cx + wide * 0.55, y: geometry.cy },
+        ],
+        [
+          { x: geometry.cx + wide * 0.55, y: geometry.cy },
+          { x: geometry.cx - wide, y: geometry.cy + tall },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "split") {
+    // Знак разделён надвое: пара контактов — датчик открытия, геркон.
+    const reach = geometry.r * SPLIT_REACH;
+    const gap = geometry.r * SPLIT_GAP;
+    parts.push({
+      role: "split",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx - reach, y: geometry.cy - gap },
+          { x: geometry.cx + reach, y: geometry.cy - gap },
+        ],
+        [
+          { x: geometry.cx - reach, y: geometry.cy + gap },
+          { x: geometry.cx + reach, y: geometry.cy + gap },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "hatch") {
+    // Штриховка: греющая площадь — тёплый пол, обогрев.
+    const reach = geometry.r * HATCH_REACH;
+    const segments = [];
+    for (const share of HATCH_ROWS) {
+      const y = geometry.cy + geometry.r * share;
+      segments.push([
+        { x: geometry.cx - reach, y },
+        { x: geometry.cx + reach, y },
+      ]);
+    }
+    parts.push({ role: "hatch", mask: "lines", width: geometry.line, segments });
   } else if (geometry.decor === "jack") {
     // Разъём: корпус вилки и шнур вниз — знак сетевой розетки.
     parts.push({
