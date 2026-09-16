@@ -32,6 +32,7 @@ import { canvasCommit } from "../canvas.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { getSetting, setSetting } from "../store.js";
 import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
+import { openEquipmentWindow } from "./equipment.js";
 
 export const TYPE_TEMPLATE_KEY = "typeTemplate";
 const TYPES_SWATCH_SIZE = 34;
@@ -548,6 +549,11 @@ function mountTypesPanel(host, api) {
     class: "ui-btn ui-btn--wide",
     on: { click: () => openTypesDictionary(api) },
   });
+  const equipmentButton = uiButton(strings.equipment.open, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.equipment.title,
+    on: { click: () => openEquipmentWindow(api) },
+  });
   const saveButton = uiButton(strings.dictionary.saveTemplate, {
     class: "ui-btn ui-btn--wide",
     title: strings.dictionary.saveTemplateHint,
@@ -559,7 +565,9 @@ function mountTypesPanel(host, api) {
   });
   // Кнопка возврата показывается, только когда шаблон и правда сохранён.
   resetButton.hidden = true;
-  host.replaceChildren(uiEl("div", { class: "dict-panel" }, [dictionaryButton, saveButton, resetButton]));
+  host.replaceChildren(
+    uiEl("div", { class: "dict-panel" }, [dictionaryButton, equipmentButton, saveButton, resetButton]),
+  );
 
   async function saveTemplate() {
     const state = getState();
@@ -580,6 +588,7 @@ function mountTypesPanel(host, api) {
     resetButton.hidden = !template;
     const state = getState();
     dictionaryButton.disabled = !state.project;
+    equipmentButton.disabled = !state.project;
     saveButton.disabled = !state.project;
   }
 

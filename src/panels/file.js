@@ -13,6 +13,7 @@ import { schemesInOrder } from "../model.js";
 import { unpackProject } from "../projectFile.js";
 import { deleteImage, putImage, saveProject, setSetting } from "../store.js";
 import { exportDownload } from "../exporter.js";
+import { clearHistory } from "../history.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiModal } from "./ui.js";
 import { LAST_PROJECT_KEY } from "./projects.js";
@@ -32,6 +33,8 @@ import {
   autosaveSchedule,
   autosaveSnapshotName,
   autosaveStatus,
+  autosaveStopWatch,
+  autosaveWatch,
   autosaveWrite,
   onAutosaveChange,
 } from "../autosave.js";
@@ -83,6 +86,8 @@ function mountFilePanel(host, api) {
   // честнее флага — правка, пришедшая во время упаковки, оставит dirty.
   let fileSavedProject = null;
   let fileFailReported = false;
+  // Опрос общей папки заводится один раз на выбранную папку.
+  let fileWatching = false;
 
   const saveButton = uiButton(strings.file.save, {
     class: "ui-btn ui-btn--accent",
@@ -337,6 +342,77 @@ function mountFilePanel(host, api) {
     renderStatus();
   }
 
+  // ——— чужие правки в общей папке ————————————————————————————————————
+
+  // Что пришло со стороны, построчно. Показывается, только когда есть о чём
+  // говорить: тост сообщает факт, список — подробности.
+  function mergeReport(result) {
+    const body = [uiEl("p", { class: "modal__text", text: text("merge.from", { file: result.file }) })];
+    const sections = [
+      [
+        strings.merge.incoming,
+        result.changes.map((change) => text("merge." + change.action, { label: change.label || change.id })),
+      ],
+      [
+        strings.merge.conflicts,
+        result.conflicts.map((conflict) =>
+          text("merge." + conflict.code, {
+            label: conflict.label || conflict.id,
+            side: conflict.kept === "theirs" ? strings.merge.sideTheirs : strings.merge.sideOurs,
+          }),
+        ),
+      ],
+      [strings.merge.renumbered, result.renumbered.map((item) => text("merge.renumberedItem", item))],
+    ];
+    for (const [title, lines] of sections) {
+      if (lines.length === 0) continue;
+      body.push(uiEl("p", { class: "modal__text", text: title }));
+      const list = uiEl("ul", { class: "merge-list" });
+      for (const line of lines) list.append(uiEl("li", { text: line }));
+      body.push(list);
+    }
+    if (result.plans) {
+      body.push(uiEl("p", { class: "modal__text", text: text("merge.plans", { count: result.plans }) }));
+    }
+    body.push(uiEl("p", { class: "modal__text", text: strings.merge.historyCleared }));
+
+    const modal = uiModal({
+      title: strings.merge.title,
+      body,
+      actions: [uiButton(strings.merge.close, { on: { click: () => modal.close() } })],
+    });
+  }
+
+  // Слияние пришло со стороны — применяем его к сеансу и сразу публикуем
+  // обратно в папку: второй инженер должен увидеть сложенный объект, а не
+  // только свою половину.
+  function applyExternal(result) {
+    const state = getState();
+    if (!result || !result.project || !state.project) return;
+    // Пока читали папку, объект могли переключить — тогда это не его правка.
+    if (result.project.id !== state.project.id) return;
+    setState({ project: result.project, dirty: true });
+    // Ctrl+Z отменяет действия пользователя, а не чужие: откат поверх слияния
+    // стёр бы чужую работу молча, поэтому стек истории здесь обрывается.
+    clearHistory();
+    const loud = result.counts.conflicts > 0;
+    notify(loud ? strings.merge.toastConflicts : text("merge.toast", result.counts), loud ? "error" : "info");
+    if (loud || result.counts.renumbered > 0) mergeReport(result);
+    autosaveSchedule(result.project, { onDone: onFolderWritten });
+    renderStatus();
+  }
+
+  function syncWatch() {
+    const ready = autosaveReady();
+    if (ready && !fileWatching) {
+      fileWatching = true;
+      autosaveWatch({ getProject: () => getState().project, onExternal: applyExternal });
+    } else if (!ready && fileWatching) {
+      fileWatching = false;
+      autosaveStopWatch();
+    }
+  }
+
   // ——— состояние и строка в шапке ————————————————————————————————————
 
   function markSaved(project) {
@@ -449,11 +525,15 @@ function mountFilePanel(host, api) {
     event.returnValue = "";
   });
 
-  onAutosaveChange(() => renderStatus());
+  onAutosaveChange(() => {
+    renderStatus();
+    syncWatch();
+  });
   setInterval(() => renderStatus(), FILE_TICK_MS);
 
   (async () => {
     await autosaveRestore();
+    syncWatch();
     renderStatus();
   })();
   renderStatus();

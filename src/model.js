@@ -26,15 +26,28 @@ export const SHAPE_PALETTE = [
   "circle-cross",
   "circle-dot",
   "circle-fill",
+  // Узнаваемые значки: клавиша выключателя, две клавиши, переключатель на два
+  // направления, беспроводная точка. Рисуются своим кодом на холсте — ни шрифта,
+  // ни эмодзи, иначе распечатка разойдётся с экраном на чужой системе.
+  "circle-slash",
+  "circle-slash-two",
+  "circle-chevron",
+  "circle-wave",
   "square",
   "square-cross",
   "square-fill",
+  "square-jack",
   "triangle",
   "triangle-down",
   "diamond",
   "star",
   "plus",
 ];
+
+// Начертание линейной метки. Сплошная и пунктирная значат разное, поэтому
+// начертание — часть условного обозначения и живёт там же, где форма:
+// у категории, с перебивкой у типа. Третьего правила в сборке нет.
+export const LINE_STYLES = ["solid", "dashed"];
 
 // Фигуры, которые ещё встречаются в объектах, но сетка их больше не предлагает:
 // в размере метки шестиугольник неотличим от круга, залитый ромб — от залитого
@@ -346,6 +359,10 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "ПШ", name: strings.types.wardrobeLight },
   { category: "switches", code: "В", name: strings.types.switch },
   { category: "switches", code: "ВВ", name: strings.types.switchDouble },
+  // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
+  // Свой значок нужен сразу: без него он рисуется тем же зелёным кругом,
+  // что и соседние два выключателя.
+  { category: "switches", code: "ВП", name: strings.types.switchWay, shape: "circle-chevron" },
   { category: "sockets", code: "Р", name: strings.types.socket },
   { category: "climate", code: "Б", name: strings.types.breezer },
   { category: "climate", code: "К", name: strings.types.conditioner },
@@ -383,6 +400,7 @@ export function defaultTemplate() {
     name: category.name,
     color: category.color,
     shape: category.shape,
+    lineStyle: null,
     order: index,
   }));
   const markTypes = TEMPLATE_TYPES.map((type, index) => ({
@@ -390,7 +408,8 @@ export function defaultTemplate() {
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
-    shape: null,
+    shape: type.shape || null,
+    lineStyle: null,
     blockMode: "each",
     order: index,
   }));
@@ -421,6 +440,11 @@ export function createProject(template) {
     // обводки или ни одной. Объект старого формата их не знает — читается
     // список везде через `outlinesOf`, поэтому пустого поля здесь достаточно.
     outlines: [],
+    // Оборудование: справочник моделей объекта и размещённые единицы.
+    // Объект старого формата их не знает — читают списки через `equipmentOf`
+    // и `placementsOf`, поэтому пустых полей здесь достаточно.
+    equipment: [],
+    placements: [],
     counters: {},
     view: { ...DEFAULT_VIEW, ...(source.view || {}) },
   };
@@ -568,7 +592,8 @@ export function deleteScheme(project, schemeId) {
   const schemes = project.schemes
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
-  return { project: withProject(project, { schemes, marks, groups, outlines }) };
+  const placements = dropPlacements(project, removed);
+  return { project: withProject(project, { schemes, marks, groups, outlines, placements }) };
 }
 
 // Единственный порядок справочника: категории по своему order, типы внутри —
@@ -1011,8 +1036,10 @@ export function deleteMark(project, markId) {
   const cleaned = marks.map((item) => (freed.has(item.id) ? { ...item, groupId: null } : item));
   // Метка ушла — и из чужих списков «чем управляет» тоже: висячая ссылка
   // доехала бы до файла и до таблицы связей.
-  const linked = dropControls(cleaned, new Set([markId]));
-  return { project: withProject(project, { marks: linked, groups }), deleted: mark };
+  const gone = new Set([markId]);
+  const linked = dropControls(cleaned, gone);
+  const placements = dropPlacements(project, gone);
+  return { project: withProject(project, { marks: linked, groups, placements }), deleted: mark };
 }
 
 // ——— поиск по объекту ————————————————————————————————————————————————
@@ -1246,18 +1273,28 @@ function checkShape(shape, { allowNull }) {
   return shape;
 }
 
+function checkLineStyle(style, { allowNull }) {
+  if (style == null) {
+    if (allowNull) return null;
+    throw modelError("lineStyleUnknown");
+  }
+  if (!LINE_STYLES.includes(style)) throw modelError("lineStyleUnknown");
+  return style;
+}
+
 function checkBlockMode(mode) {
   if (!BLOCK_MODES.includes(mode)) throw modelError("unknownBlockMode");
   return mode;
 }
 
-export function addType(project, { code, name, categoryId, shape = null, blockMode = "each" } = {}) {
+export function addType(project, { code, name, categoryId, shape = null, lineStyle = null, blockMode = "each" } = {}) {
   const type = {
     id: newId(),
     categoryId,
     code: normalizeCode(code, project),
     name: normalizeName(name),
     shape: checkShape(shape, { allowNull: true }),
+    lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     blockMode: checkBlockMode(blockMode),
     order: project.markTypes.length,
   };
@@ -1271,6 +1308,9 @@ export function updateType(project, typeId, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, "code")) next.code = normalizeCode(patch.code, project, typeId);
   if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
   if (Object.prototype.hasOwnProperty.call(patch, "shape")) next.shape = checkShape(patch.shape, { allowNull: true });
+  if (Object.prototype.hasOwnProperty.call(patch, "lineStyle")) {
+    next.lineStyle = checkLineStyle(patch.lineStyle, { allowNull: true });
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "blockMode")) next.blockMode = checkBlockMode(patch.blockMode);
   if (Object.prototype.hasOwnProperty.call(patch, "categoryId")) {
     if (!findCategory(project, patch.categoryId)) throw modelError("categoryNotFound");
@@ -1299,12 +1339,13 @@ export function deleteType(project, typeId) {
   return { project: withProject(project, { markTypes }), deleted: type };
 }
 
-export function addCategory(project, { name, color, shape } = {}) {
+export function addCategory(project, { name, color, shape, lineStyle = null } = {}) {
   const category = {
     id: newId(),
     name: normalizeName(name),
     color: String(color || FALLBACK_COLOR),
     shape: checkShape(shape, { allowNull: false }),
+    lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     order: project.categories.length,
   };
   return { project: withProject(project, { categories: [...project.categories, category] }), category };
@@ -1317,6 +1358,9 @@ export function updateCategory(project, categoryId, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
   if (Object.prototype.hasOwnProperty.call(patch, "color")) next.color = String(patch.color);
   if (Object.prototype.hasOwnProperty.call(patch, "shape")) next.shape = checkShape(patch.shape, { allowNull: false });
+  if (Object.prototype.hasOwnProperty.call(patch, "lineStyle")) {
+    next.lineStyle = checkLineStyle(patch.lineStyle, { allowNull: true });
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
   const categories = project.categories.map((item) => (item.id === categoryId ? next : item));
   return { project: withProject(project, { categories }), category: next };
@@ -1573,7 +1617,176 @@ export function styleOf(project, typeId) {
   return {
     color: category ? category.color : FALLBACK_COLOR,
     shape: (type && type.shape) || (category && category.shape) || "circle",
+    // Пунктир — свойство обозначения, а не отдельной метки: по нему легенда и
+    // отличает условную линию от трека.
+    lineStyle: (type && type.lineStyle) || (category && category.lineStyle) || "solid",
   };
+}
+
+// ——— оборудование ————————————————————————————————————————————————————
+//
+// Две разные вещи, и заказчик их разделил сам. Модель — это товар в справочнике
+// объекта: «Shelly 1PM», одна модель стоит на многих метках, и по ней считается
+// закупка. Размещённая единица — «одна штука тут»: модель, метка места и связи
+// с другими метками (реле стоит в щите, а связано со светильниками и
+// выключателем). Поля модели — только то, чем заказывают: название,
+// производитель, артикул.
+
+function equipmentOf(project) {
+  return project && Array.isArray(project.equipment) ? project.equipment : [];
+}
+
+function placementsOf(project) {
+  return project && Array.isArray(project.placements) ? project.placements : [];
+}
+
+export function equipmentInOrder(project) {
+  return equipmentOf(project)
+    .map((item, index) => ({ item, order: item.order == null ? index : item.order, index }))
+    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
+    .map((entry) => entry.item);
+}
+
+export function findEquipment(project, equipmentId) {
+  return equipmentOf(project).find((item) => item.id === equipmentId) || null;
+}
+
+export function findPlacement(project, placementId) {
+  return placementsOf(project).find((item) => item.id === placementId) || null;
+}
+
+function requireEquipment(project, equipmentId) {
+  const item = findEquipment(project, equipmentId);
+  if (!item) throw modelError("equipmentNotFound");
+  return item;
+}
+
+function requirePlacement(project, placementId) {
+  const item = findPlacement(project, placementId);
+  if (!item) throw modelError("placementNotFound");
+  return item;
+}
+
+// Необязательное поле — пустая строка, а не «иногда undefined»: его печатают
+// в таблице закупки.
+function equipmentText(value) {
+  return String(value == null ? "" : value).trim();
+}
+
+export function addEquipment(project, { name, vendor, code } = {}) {
+  const item = {
+    id: newId(),
+    name: normalizeName(name),
+    vendor: equipmentText(vendor),
+    code: equipmentText(code),
+    order: equipmentOf(project).length,
+  };
+  return { project: withProject(project, { equipment: [...equipmentOf(project), item] }), equipment: item };
+}
+
+export function updateEquipment(project, equipmentId, patch = {}) {
+  const current = requireEquipment(project, equipmentId);
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
+  if (Object.prototype.hasOwnProperty.call(patch, "vendor")) next.vendor = equipmentText(patch.vendor);
+  if (Object.prototype.hasOwnProperty.call(patch, "code")) next.code = equipmentText(patch.code);
+  if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
+  const equipment = equipmentOf(project).map((item) => (item.id === equipmentId ? next : item));
+  return { project: withProject(project, { equipment }), equipment: next };
+}
+
+// Сколько штук этой модели размещено — это же и число к закупке.
+export function equipmentUsage(project, equipmentId) {
+  return placementsOf(project).filter((item) => item.equipmentId === equipmentId).length;
+}
+
+export function deleteEquipment(project, equipmentId) {
+  const item = requireEquipment(project, equipmentId);
+  const used = equipmentUsage(project, equipmentId);
+  if (used > 0) throw modelError("equipmentInUse", { name: item.name, count: used });
+  const equipment = equipmentOf(project)
+    .filter((entry) => entry.id !== equipmentId)
+    .map((entry, index) => ({ ...entry, order: index }));
+  return { project: withProject(project, { equipment }), deleted: item };
+}
+
+// Связи единицы читают только отсюда: у единицы из старого файла поля нет.
+export function placementLinkIds(placement) {
+  return placement && Array.isArray(placement.links) ? placement.links : [];
+}
+
+export function placementsInOrder(project) {
+  return placementsOf(project);
+}
+
+// Что стоит на этой метке и что с ней связано — два разных вопроса.
+export function placementsAt(project, markId) {
+  return placementsOf(project).filter((item) => item.markId === markId);
+}
+
+export function placementsLinkedTo(project, markId) {
+  return placementsOf(project).filter((item) => placementLinkIds(item).includes(markId));
+}
+
+function placementLinks(project, links, markId) {
+  const wanted = [];
+  for (const id of Array.isArray(links) ? links : []) {
+    requireMark(project, id);
+    if (id !== markId && !wanted.includes(id)) wanted.push(id);
+  }
+  return wanted;
+}
+
+export function addPlacement(project, { equipmentId, markId, links } = {}) {
+  requireEquipment(project, equipmentId);
+  requireMark(project, markId);
+  const placement = {
+    id: newId(),
+    equipmentId,
+    markId,
+    links: placementLinks(project, links, markId),
+  };
+  return {
+    project: withProject(project, { placements: [...placementsOf(project), placement] }),
+    placement,
+  };
+}
+
+export function updatePlacement(project, placementId, patch = {}) {
+  const current = requirePlacement(project, placementId);
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "equipmentId")) {
+    requireEquipment(project, patch.equipmentId);
+    next.equipmentId = patch.equipmentId;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "markId")) {
+    requireMark(project, patch.markId);
+    next.markId = patch.markId;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "links")) {
+    next.links = placementLinks(project, patch.links, next.markId);
+  }
+  const placements = placementsOf(project).map((item) => (item.id === placementId ? next : item));
+  return { project: withProject(project, { placements }), placement: next };
+}
+
+export function deletePlacement(project, placementId) {
+  const placement = requirePlacement(project, placementId);
+  const placements = placementsOf(project).filter((item) => item.id !== placementId);
+  return { project: withProject(project, { placements }), deleted: placement };
+}
+
+// Метка ушла — с ней уходят стоящие на ней единицы (стоять им негде) и ссылки
+// на неё в связях соседних единиц.
+function dropPlacements(project, removed) {
+  if (removed.size === 0) return placementsOf(project);
+  return placementsOf(project)
+    .filter((item) => !removed.has(item.markId))
+    .map((item) => {
+      const links = placementLinkIds(item);
+      if (!links.some((id) => removed.has(id))) return item;
+      return { ...item, links: links.filter((id) => !removed.has(id)) };
+    });
 }
 
 // ——— проверка объекта —————————————————————————————————————————————————
@@ -1629,6 +1842,16 @@ export function validate(project) {
     if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", null, outline.id));
     if (!Array.isArray(outline.points) || outline.points.length < OUTLINE_MIN_POINTS) {
       problems.push(problem("shortOutline", null, outline.id));
+    }
+  }
+
+  for (const placement of placementsOf(project)) {
+    if (!findEquipment(project, placement.equipmentId)) {
+      problems.push(problem("placementWithoutEquipment", null, placement.id));
+    }
+    if (!findMark(project, placement.markId)) problems.push(problem("placementWithoutMark", null, placement.id));
+    for (const link of placementLinkIds(placement)) {
+      if (!findMark(project, link)) problems.push(problem("placementLinkMissing", null, placement.id));
     }
   }
 

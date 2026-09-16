@@ -97,6 +97,11 @@ const SHAPE_ANGLES = {
 // по-прежнему рисуются одним `drawShape`.
 const SHAPE_BASE = {
   "circle-cross": "circle",
+  "circle-slash": "circle",
+  "circle-slash-two": "circle",
+  "circle-chevron": "circle",
+  "circle-wave": "circle",
+  "square-jack": "square",
   "circle-dot": "circle",
   "circle-fill": "circle",
   "circle-half": "circle",
@@ -108,6 +113,11 @@ const SHAPE_BASE = {
 // Засечка внутри: перекрестье, точка, сплошная заливка, залитая нижняя половина.
 const SHAPE_DECOR = {
   "circle-cross": "cross",
+  "circle-slash": "slash",
+  "circle-slash-two": "slash-two",
+  "circle-chevron": "chevron",
+  "circle-wave": "wave",
+  "square-jack": "jack",
   "square-cross": "cross",
   "circle-dot": "dot",
   "circle-fill": "fill",
@@ -120,6 +130,41 @@ const SHAPE_DECOR = {
 const PLUS_WAIST = 0.36;
 // Точка внутри знака: меньше — сливается с пустым кругом на распечатке.
 const DOT_RADIUS = 0.42;
+
+// Штрих и просвет пунктирной линии в долях радиуса метки: короче — на бумаге
+// пунктир сливается в сплошную, длиннее — линия рвётся на отдельные палки.
+const DASH_STROKE = 1.7;
+const DASH_GAP = 1.1;
+
+export function dashPattern(radius) {
+  return [Math.max(2, radius * DASH_STROKE), Math.max(2, radius * DASH_GAP)];
+}
+
+// Узнаваемые значки собраны из тех же кирпичей, что и старые засечки: отрезки,
+// круг, прямоугольник. Ни шрифтов, ни эмодзи — знак обязан выглядеть одинаково
+// на экране, в PNG и на распечатке, а чужой шрифт этого не обещает.
+// Числа подобраны под настоящий размер метки (радиус около пяти пикселей на
+// бумаге): в этом размере их и различает отпечаток из test/shapes.test.js.
+// Клавиша выключателя: наклонный рычаг во весь знак. Короче — и на бумаге
+// он перестаёт отличаться от пустого круга: отпечаток считает это слиянием.
+const LEVER_REACH = 1;
+// Наклон рычага, градусы от горизонтали.
+const LEVER_ANGLE = 70;
+// Две клавиши: два рычага короче, разведённые поперёк на столько радиусов.
+const LEVER_PAIR_GAP = 0.34;
+const LEVER_PAIR_REACH = 0.62;
+// Переключатель: уголок, раскрытый вправо.
+const CHEVRON_REACH = 0.62;
+// Беспроводная точка: волны над точкой у нижнего края знака.
+const WAVE_BASE = 0.5;
+const WAVE_RADII = [0.5, 0.92];
+const WAVE_FROM = 205;
+const WAVE_TO = 335;
+const WAVE_STEPS = 5;
+// Разъём Ethernet: корпус вилки и шнур вниз.
+const JACK_WIDTH = 0.52;
+const JACK_TOP = -0.55;
+const JACK_HEIGHT = 0.75;
 
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
@@ -187,6 +232,22 @@ function shapeGeometry(shape, x, y, size) {
 // отпечаток, так что разойтись правилам негде.
 // `role` — смысл («сплошная», «половина», «точка», «крест»), `mask` — область
 // краски: вся внутренность, прямоугольник, круг или линии заданной толщины.
+// Отрезок рычага: длина в долях радиуса, сдвиг поперёк. Наклон намеренно не
+// сорок пять градусов — под ним рычаг ложится на луч креста, и на бумаге
+// «круг с клавишей» перестаёт отличаться от «круга с крестом».
+function leverSegment(geometry, reach, shift) {
+  const angle = (LEVER_ANGLE * Math.PI) / 180;
+  const along = { x: Math.cos(angle), y: -Math.sin(angle) };
+  const across = { x: -along.y, y: along.x };
+  const cx = geometry.cx + across.x * geometry.r * shift;
+  const cy = geometry.cy + across.y * geometry.r * shift;
+  const reachPx = geometry.r * reach;
+  return [
+    { x: cx - along.x * reachPx, y: cy - along.y * reachPx },
+    { x: cx + along.x * reachPx, y: cy + along.y * reachPx },
+  ];
+}
+
 function shapeInternals(geometry) {
   const parts = [];
   if (geometry.decor === "fill") {
@@ -208,6 +269,73 @@ function shapeInternals(geometry) {
       cx: geometry.cx,
       cy: geometry.cy,
       r: Math.max(1, geometry.r * DOT_RADIUS),
+    });
+  }
+  if (geometry.decor === "slash" || geometry.decor === "slash-two") {
+    // Клавиша выключателя: наклонный рычаг. Две клавиши — два рычага рядом,
+    // и на бумаге видно, одна их или две, без чтения буквы.
+    const segments =
+      geometry.decor === "slash"
+        ? [leverSegment(geometry, LEVER_REACH, 0)]
+        : [
+            leverSegment(geometry, LEVER_PAIR_REACH, -LEVER_PAIR_GAP),
+            leverSegment(geometry, LEVER_PAIR_REACH, LEVER_PAIR_GAP),
+          ];
+    parts.push({ role: geometry.decor, mask: "lines", width: geometry.line, segments });
+  } else if (geometry.decor === "chevron") {
+    // Переключатель: свет из двух мест, и знак показывает две стороны.
+    const reach = geometry.r * CHEVRON_REACH;
+    parts.push({
+      role: "chevron",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx - reach, y: geometry.cy - reach },
+          { x: geometry.cx + reach, y: geometry.cy },
+        ],
+        [
+          { x: geometry.cx + reach, y: geometry.cy },
+          { x: geometry.cx - reach, y: geometry.cy + reach },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "wave") {
+    // Беспроводная точка: точка у нижнего края и волны над ней.
+    const base = { x: geometry.cx, y: geometry.cy + geometry.r * WAVE_BASE };
+    const segments = [];
+    for (const share of WAVE_RADII) {
+      const radius = geometry.r * share;
+      let previous = polarPoint(base.x, base.y, radius, WAVE_FROM);
+      for (let step = 1; step <= WAVE_STEPS; step += 1) {
+        const angle = WAVE_FROM + ((WAVE_TO - WAVE_FROM) * step) / WAVE_STEPS;
+        const next = polarPoint(base.x, base.y, radius, angle);
+        segments.push([previous, next]);
+        previous = next;
+      }
+    }
+    parts.push({ role: "wave", mask: "lines", width: geometry.line, segments });
+    parts.push({ role: "wave-dot", mask: "disc", cx: base.x, cy: base.y, r: Math.max(1, geometry.r * 0.22) });
+  } else if (geometry.decor === "jack") {
+    // Разъём: корпус вилки и шнур вниз — знак сетевой розетки.
+    parts.push({
+      role: "jack",
+      mask: "rect",
+      x: geometry.cx - geometry.r * JACK_WIDTH,
+      y: geometry.cy + geometry.r * JACK_TOP,
+      width: geometry.r * JACK_WIDTH * 2,
+      height: geometry.r * JACK_HEIGHT,
+    });
+    parts.push({
+      role: "jack-cord",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx, y: geometry.cy + geometry.r * (JACK_TOP + JACK_HEIGHT) },
+          { x: geometry.cx, y: geometry.cy + geometry.r * 0.72 },
+        ],
+      ],
     });
   }
   if (geometry.cross) {
@@ -1198,6 +1326,9 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected) {
     ctx.save();
     ctx.strokeStyle = style.color;
     ctx.lineWidth = Math.max(2, radius * 0.5);
+    // Пунктир задан в пикселях плана и растёт с масштабом вместе с меткой:
+    // на выгрузке в двойном разрешении штрих остаётся тем же, что на экране.
+    if (style.lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -1250,13 +1381,16 @@ export function drawHandles(ctx, scheme, mark, view, color) {
 }
 
 // Черновик линии: уже поставленные вершины плюс резинка до курсора.
-function drawDraft(ctx, scheme, draft, view, color) {
+function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
   if (!draft || draft.points.length === 0) return;
   const radius = markRadius(view);
   const screen = draft.points.map((point) => planToScreen(point, scheme, view));
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = Math.max(2, radius * 0.5);
+  // Черновик рисуется тем же начертанием, каким ляжет метка: пунктир видно
+  // ещё до того, как линия поставлена.
+  if (lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.beginPath();
@@ -1379,6 +1513,7 @@ export function drawScheme(ctx, {
   selectedIds,
   draft,
   draftColor,
+  draftLineStyle,
   outlines,
   selectedOutlineId,
 }) {
@@ -1417,7 +1552,7 @@ export function drawScheme(ctx, {
     if (item.box.row > 0) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
   for (const item of labels) drawLabel(ctx, item.box, item.color);
-  if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da");
+  if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da", draftLineStyle);
   if (legend) drawLegend(ctx, { project, scheme, filter, view: state, box: legend === true ? null : legend });
 }
 

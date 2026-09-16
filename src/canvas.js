@@ -407,6 +407,7 @@ function canvasPaint() {
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     draftColor,
+    draftLineStyle: state.activeTypeId ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
   // Ручки контура — у выделенного помещения: вершину двигают, «+» на стенке
   // добавляет новую. Обводка по стенам с первого раза не выходит.

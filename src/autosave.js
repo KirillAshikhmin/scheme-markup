@@ -4,8 +4,9 @@
 // Почему отдельно от панели: здесь нет ни одной строки DOM — значит, приёмку
 // загрузки (самое опасное место: чужие идентификаторы) можно проверить тестом,
 // а панель остаётся тонкой. Zip читает и пишет только `projectFile.js`.
-import { getImage, getSetting, setSetting } from "./store.js";
-import { packProject, projectFileName, verifyProjectFile } from "./projectFile.js";
+import { getImage, putImage, getSetting, setSetting } from "./store.js";
+import { packProject, projectFileName, unpackProject, verifyProjectFile } from "./projectFile.js";
+import { mergeProjects, areRelatedProjects } from "./merge.js";
 import { updateProject } from "./model.js";
 import { strings, text } from "./strings.js";
 
@@ -18,6 +19,12 @@ const AUTOSAVE_EXPORT_KEY = "lastFileExport";
 const AUTOSAVE_DELAY_MS = 1500;
 // Как часто снимок в папке перечитывается с диска и сверяется с объектом.
 const AUTOSAVE_VERIFY_MS = 10 * 60 * 1000;
+// Как часто заглядывать в папку за чужими правками. Пять секунд: синхронизацию
+// файлов делает не наш код (WebDAV, облачный диск), и до папки чужая правка
+// доезжает секундами; человек за это время не успевает уйти далеко, а сам опрос
+// читает только служебные данные о файлах — тела архивов не трогаются, пока не
+// изменилось время записи.
+const AUTOSAVE_WATCH_MS = 5000;
 
 let autosaveHandle = null;
 let autosavePermission = "none"; // none | prompt | granted | denied
@@ -27,6 +34,18 @@ let autosaveRunning = false;
 let autosavePending = null;
 let autosaveLastError = null;
 let autosaveVerified = null;
+// Последний снимок, который видели обе стороны: общий предок для слияния.
+let autosaveBase = null;
+// Время записи нашего снимка в папку. Всё, что старше, мы уже учли — и это
+// же защита от «протухшего» файла: вчерашний снимок, попавший в слияние как
+// чужая правка, откатил бы нашу работу.
+let autosaveSyncSince = 0;
+// Что мы уже прочитали из папки: имя файла -> время его записи. Общая
+// отметка времени тут не годится — в папке пишут трое, и файл второго,
+// прочитанный после файла третьего, иначе остался бы незамеченным.
+let autosaveSeen = new Map();
+let autosaveWatchTimer = null;
+let autosaveWatchBusy = false;
 const autosaveListeners = new Set();
 
 // ——— приёмка загруженного файла ———————————————————————————————————————
@@ -217,6 +236,7 @@ export async function autosavePickFolder() {
   if (autosavePermission !== "granted") await autosaveGrant();
   autosaveLastError = null;
   autosaveResetVerify();
+  autosaveResetSync();
   await setSetting(AUTOSAVE_FOLDER_KEY, handle);
   autosaveAnnounce();
   return autosaveStatus();
@@ -238,6 +258,8 @@ export async function autosaveForget() {
   autosavePermission = "none";
   autosaveLastError = null;
   autosaveResetVerify();
+  autosaveResetSync();
+  autosaveStopWatch();
   if (autosaveTimer) {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
@@ -275,6 +297,16 @@ export async function autosaveWrite(project, options = {}) {
       autosaveMarkVerified(project, packedFile.images, date);
     }
     autosaveLastError = null;
+    // Записанный снимок — новая общая точка отсчёта: с ней сливаются чужие
+    // правки, и по её времени отсекаются файлы, которые мы уже учли.
+    autosaveBase = project;
+    if (typeof fileHandle.getFile === "function") {
+      const stamp = await fileHandle.getFile();
+      autosaveSyncSince = Math.max(autosaveSyncSince, stamp.lastModified || 0);
+      autosaveSeen.set(name, stamp.lastModified || 0);
+    } else {
+      autosaveSyncSince = Math.max(autosaveSyncSince, date.getTime());
+    }
     const at = await autosaveNoteExport(project.id, options.at);
     // Объект возвращается вместе с результатом: пока шла запись, пользователь
     // мог успеть поправить ещё раз — панели надо знать, что именно легло в файл.
@@ -323,6 +355,121 @@ export async function autosaveFlush(options = {}) {
   // Пока писали, могла прийти новая правка — её запись ставим в очередь.
   if (autosavePending) autosaveSchedule(autosavePending, options);
   return result;
+}
+
+// ——— общая папка: чужие правки ————————————————————————————————————————
+//
+// Папку кладут в WebDAV или облачный диск, и над объектом работают вдвоём.
+// Синхронизацию файлов делает не наш код: наше дело — заметить, что файл в
+// папке изменился не нами, и слить чужую работу со своей, а не затереть.
+// У каждого браузера свой файл снимка (имя включает идентификатор объекта):
+// у файла ровно один писатель, а читают файлы все. Двум писателям в один файл
+// поверх WebDAV всё равно никто не даст договориться — блокировок там нет.
+
+export function autosaveBaseProject() {
+  return autosaveBase;
+}
+
+// Забыть общую точку: другая папка — другая история.
+export function autosaveResetSync() {
+  autosaveBase = null;
+  autosaveSyncSince = 0;
+  autosaveSeen = new Map();
+}
+
+async function autosaveFolderEntries() {
+  const entries = [];
+  if (!autosaveHandle || typeof autosaveHandle.values !== "function") return entries;
+  for await (const entry of autosaveHandle.values()) {
+    if (entry.kind === "file" && /\.zip$/i.test(entry.name)) entries.push(entry);
+  }
+  return entries;
+}
+
+// Планы из чужого файла кладутся в хранилище под своими идентификаторами:
+// схема ссылается на картинку по id из файла, и переименовать его значит
+// развести ссылки двух браузеров.
+async function autosaveAdoptImages(project, images) {
+  if (!(images instanceof Map)) return 0;
+  const needed = new Set((project.schemes || []).map((scheme) => scheme.imageId).filter(Boolean));
+  let added = 0;
+  for (const [id, blob] of images) {
+    if (!needed.has(id) || !blob) continue;
+    if (await getImage(id)) continue;
+    await putImage(blob, id);
+    added += 1;
+  }
+  return added;
+}
+
+/**
+ * Один проход по папке: ищет файлы, записанные после нашего снимка, и сливает
+ * первый, в котором действительно есть чужая работа. Возвращает результат
+ * слияния (`merge.js`) с именем файла и числом принятых планов — или `null`,
+ * если сливать нечего.
+ */
+export async function autosaveScanExternal(project, options = {}) {
+  if (!project || !autosaveReady() || autosaveRunning || autosaveWatchBusy) return null;
+  autosaveWatchBusy = true;
+  try {
+    const since = typeof options.since === "number" ? options.since : autosaveSyncSince;
+    for (const entry of await autosaveFolderEntries()) {
+      const file = await entry.getFile();
+      const at = file.lastModified || 0;
+      // Файл, который мы уже читали, интересен только если его переписали;
+      // незнакомый — только если он новее нашего снимка. Второе и есть защита
+      // от протухшего файла: всё, что старше, мы либо писали сами, либо учли.
+      const seenAt = autosaveSeen.get(entry.name);
+      if (seenAt !== undefined ? at <= seenAt : at <= since) continue;
+      autosaveSeen.set(entry.name, at);
+      let loaded = null;
+      try {
+        loaded = await unpackProject(file);
+      } catch (error) {
+        // В общей папке лежит и чужое: битый или посторонний архив — не повод
+        // ломать сеанс, просто не наш файл.
+        continue;
+      }
+      if (!areRelatedProjects(project, loaded.project)) continue;
+      const merged = mergeProjects(project, loaded.project, autosaveBase);
+      if (!merged.changed) continue;
+      const plans = await autosaveAdoptImages(merged.project, loaded.images);
+      return { ...merged, file: entry.name, at, plans };
+    }
+    return null;
+  } finally {
+    autosaveWatchBusy = false;
+  }
+}
+
+// Опрос папки. Останавливается сам, когда папку забыли или сменили.
+export function autosaveWatch(options = {}) {
+  const getProject = typeof options.getProject === "function" ? options.getProject : () => null;
+  const onExternal = typeof options.onExternal === "function" ? options.onExternal : () => {};
+  const delay = typeof options.interval === "number" ? options.interval : AUTOSAVE_WATCH_MS;
+  autosaveStopWatch();
+
+  const tick = async () => {
+    autosaveWatchTimer = null;
+    // Вкладка в фоне не опрашивает папку: вернётся — и сразу посмотрит.
+    const hidden = typeof document !== "undefined" && document.hidden;
+    if (!hidden) {
+      try {
+        const result = await autosaveScanExternal(getProject());
+        if (result) onExternal(result);
+      } catch (error) {
+        autosaveLastError = error;
+      }
+    }
+    autosaveWatchTimer = setTimeout(tick, delay);
+  };
+  autosaveWatchTimer = setTimeout(tick, delay);
+  return autosaveStopWatch;
+}
+
+export function autosaveStopWatch() {
+  if (autosaveWatchTimer) clearTimeout(autosaveWatchTimer);
+  autosaveWatchTimer = null;
 }
 
 // ——— «выгружено N назад» ———————————————————————————————————————————————

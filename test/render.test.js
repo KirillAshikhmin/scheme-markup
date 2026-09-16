@@ -337,7 +337,7 @@ test("справочник упорядочен один раз: категор�
     ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование"],
   );
   assert.deepEqual(groups[0].types.map((type) => type.code), ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ"]);
-  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ"]);
+  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "ВП"]);
 });
 
 // Код типа бывает и в шестнадцать букв. У правого края плана такая подпись

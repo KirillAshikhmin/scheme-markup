@@ -273,11 +273,11 @@ test("справочник типов — легенда листа: код, н�
   const box = tablesFixture();
   const table = typesTable(box.project);
   assert.deepEqual(table.columns, ["Код", "Название", "Категория", "Цвет", "Форма"]);
-  assert.equal(table.rows.length, 13);
+  assert.equal(table.rows.length, 14);
   assert.deepEqual(table.rows[0].cells, ["Т", "Точечный светильник", "Свет", "#1F6FEB", "Круг с крестом"]);
   assert.deepEqual(
     table.rows.map((row) => row.cells[0]),
-    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W"],
+    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "ВП", "Р", "Б", "К", "W"],
   );
   assert.equal(toTsv(table).split("\n")[1], "Т\tТочечный светильник\tСвет\t#1F6FEB\tКруг с крестом");
 });

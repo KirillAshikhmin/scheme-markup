@@ -1005,6 +1005,101 @@
   font-size: 12px;
 }
 
+/* Оборудование: справочник моделей и размещение. */
+
+.mark-row__equipment {
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.mark-row__equipment.is-set {
+  color: var(--panel-text);
+  border-color: var(--ok);
+}
+
+.equip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 560px;
+  max-width: 760px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.equip__title {
+  margin: 10px 0 2px;
+  color: var(--panel-text);
+  font-size: 13px;
+}
+
+.equip__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.equip__row--add {
+  padding-top: 6px;
+  border-top: 1px dashed var(--panel-line);
+}
+
+.equip__row .ui-input,
+.equip__row .ui-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.equip__name {
+  flex: 2 1 0;
+}
+
+.equip__code {
+  flex: none;
+  width: 110px;
+}
+
+.equip__used {
+  flex: none;
+  color: var(--panel-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.equip__place {
+  flex: none;
+  min-width: 64px;
+  font-weight: 700;
+}
+
+.equip__links {
+  flex: 2 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--panel-muted);
+}
+
+.equip__links.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+/* Выбор одной метки: строка — кнопка, галочки в ней нет. */
+.controls-pick__row--one {
+  width: 100%;
+  border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+}
+
+.controls-pick__row--one.is-active {
+  border-color: var(--accent);
+}
+
 /* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
 
 .ui-btn {
@@ -2490,6 +2585,7 @@ const strings = {
     wardrobeLight: "Подсветка шкафа",
     switch: "Выключатель",
     switchDouble: "Выключатель двойной",
+    switchWay: "Переключатель проходной",
     socket: "Розетка",
     breezer: "Бризер",
     conditioner: "Кондиционер",
@@ -2500,10 +2596,15 @@ const strings = {
     "circle-cross": "Круг с крестом",
     "circle-dot": "Круг с точкой",
     "circle-fill": "Круг закрашенный",
+    "circle-slash": "Круг с клавишей",
+    "circle-slash-two": "Круг с двумя клавишами",
+    "circle-chevron": "Круг с переключателем",
+    "circle-wave": "Круг с волнами (беспроводная точка)",
     "circle-half": "Круг наполовину закрашенный",
     square: "Квадрат",
     "square-cross": "Квадрат с крестом",
     "square-fill": "Квадрат закрашенный",
+    "square-jack": "Квадрат с разъёмом (Ethernet)",
     triangle: "Треугольник",
     "triangle-down": "Треугольник вершиной вниз",
     star: "Звезда",
@@ -2512,6 +2613,15 @@ const strings = {
     hexagon: "Шестиугольник",
     plus: "Крест",
     inherit: "Как у категории",
+  },
+  // Начертание линейной метки. Готово для переключателя в справочнике типов:
+  // модель и рисование пунктир уже понимают, панели — следующий таск.
+  lineStyles: {
+    solid: "Сплошная",
+    dashed: "Пунктирная",
+    inherit: "Как у категории",
+    title: "Линия",
+    hint: "Пунктиром отличают условную линию от трека — начертание видно в легенде и на распечатке",
   },
   blockMode: {
     each: "Каждая точка — своя метка",
@@ -2609,6 +2719,12 @@ const strings = {
     compact: "уплотнение нумерации",
     markRoom: "помещение метки",
     markControls: "связь «чем управляет»",
+    addEquipment: "новая модель оборудования",
+    editEquipment: "правка модели оборудования",
+    removeEquipment: "удаление модели оборудования",
+    addPlacement: "размещение оборудования",
+    editPlacement: "правка размещения",
+    removePlacement: "снятие оборудования",
     markRoomAuto: "помещение по контуру",
     withRooms: "{label} + помещения по контуру",
     addOutline: "контур помещения",
@@ -2628,6 +2744,9 @@ const strings = {
   },
   errors: {
     controlsSelf: "Метка не управляет сама собой",
+    equipmentNotFound: "Модель оборудования не найдена",
+    placementNotFound: "Размещённая единица не найдена",
+    equipmentInUse: "Модель «{name}» размещена ({count}) — сперва уберите единицы",
     schemeNotFound: "Схема не найдена",
     typeNotFound: "Тип метки не найден",
     markNotFound: "Метка не найдена",
@@ -2647,6 +2766,7 @@ const strings = {
     nameRequired: "Нужно название",
     typeHasMarks: "Тип {code} используют метки ({count}) — сперва смените им тип",
     categoryHasTypes: "В категории есть типы — сперва перенесите или удалите их",
+    lineStyleUnknown: "Линия бывает сплошной или пунктирной",
     unknownShape: "Неизвестная форма",
     unknownBlockMode: "Неизвестный режим блока",
     unknownSide: "Неизвестная сторона блока",
@@ -2671,6 +2791,9 @@ const strings = {
   },
   problems: {
     controlsMissing: "Метка управляет меткой, которой больше нет",
+    placementWithoutEquipment: "Единица оборудования ссылается на модель, которой нет в справочнике",
+    placementWithoutMark: "Единица оборудования стоит на метке, которой больше нет",
+    placementLinkMissing: "Единица оборудования связана с меткой, которой больше нет",
     duplicateCode: "Код типа {code} встречается больше одного раза",
     markWithoutType: "У метки нет типа из справочника",
     markWithoutScheme: "Метка ссылается на несуществующую схему",
@@ -2741,6 +2864,29 @@ const strings = {
     loaded: "Объект «{name}» загружен",
     exported: "в файл выгружено: {ago}",
     noProject: "Сначала создайте объект",
+  },
+  merge: {
+    title: "Объект изменён извне",
+    toast: "Объект изменён извне: принято {added}, изменено {updated}, удалено {removed}",
+    toastConflicts: "Объект изменён извне, и часть правок разошлась — посмотрите список",
+    from: "Файл в папке: {file}",
+    incoming: "Пришло со стороны",
+    conflicts: "Разошлось",
+    renumbered: "Номера совпали у двоих и были разведены",
+    renumberedItem: "{code}{from} → {code}{to}",
+    added: "добавлено: {label}",
+    updated: "изменено: {label}",
+    removed: "удалено: {label}",
+    plans: "Планов принято: {count}",
+    historyCleared:
+      "Отмена очищена: правка пришла со стороны, и откатывать её вашим Ctrl+Z нельзя — чужая работа исчезла бы молча.",
+    bothChanged: "{label}: правили с двух сторон — оставлен вариант {side}",
+    deletedElsewhere: "{label}: на другой стороне удалили, у вас правлено — оставлено ваше",
+    deletedHere: "{label}: удалили вы, на другой стороне правлено — вернулось",
+    danglingRef: "{label}: ссылка вела в никуда — снято",
+    sideOurs: "ваш",
+    sideTheirs: "со стороны",
+    close: "Понятно",
   },
   autosave: {
     checkFailed:
@@ -2861,6 +3007,41 @@ const strings = {
     types: "Категории и типы",
     hidden: "скрыто: {count}",
     showAll: "Показать все",
+  },
+  equipment: {
+    open: "Оборудование",
+    title: "Оборудование объекта",
+    atMarkTitle: "Оборудование на метке {label}",
+    models: "Справочник моделей",
+    placed: "Размещение",
+    name: "Модель",
+    vendor: "Производитель",
+    code: "Артикул",
+    namePlaceholder: "Shelly 1PM",
+    vendorPlaceholder: "Shelly",
+    codePlaceholder: "SH-1PM",
+    addModel: "Добавить модель",
+    modelsEmpty: "Моделей пока нет — заведите первую",
+    used: "размещено: {count}",
+    removeModel: "Удалить модель",
+    removeModelTitle: "Удалить модель?",
+    removeModelMessage: "Модель «{name}» исчезнет из справочника объекта.",
+    place: "Место",
+    placeChoose: "Метка места",
+    placeTitle: "Где стоит {name}",
+    links: "Связи",
+    linksChoose: "Связанные метки",
+    linksTitle: "С чем связана {name}",
+    linksHint: "Реле стоит в щите, а связано со светильниками и выключателем.",
+    linksEmpty: "связей нет",
+    addPlacement: "Разместить",
+    addPlacementHint: "Выберите модель — и метку, на которой она стоит",
+    removePlacement: "Убрать единицу",
+    placedEmpty: "Ничего не размещено",
+    placedEmptyAtMark: "На этой метке оборудования нет",
+    needModel: "Сначала заведите модель в справочнике",
+    count: "Оборудование: {count}",
+    onMark: "Оборудование на этой метке",
   },
   controls: {
     title: "Чем управляет {label}",
@@ -3074,15 +3255,28 @@ const SHAPE_PALETTE = [
   "circle-cross",
   "circle-dot",
   "circle-fill",
+  // Узнаваемые значки: клавиша выключателя, две клавиши, переключатель на два
+  // направления, беспроводная точка. Рисуются своим кодом на холсте — ни шрифта,
+  // ни эмодзи, иначе распечатка разойдётся с экраном на чужой системе.
+  "circle-slash",
+  "circle-slash-two",
+  "circle-chevron",
+  "circle-wave",
   "square",
   "square-cross",
   "square-fill",
+  "square-jack",
   "triangle",
   "triangle-down",
   "diamond",
   "star",
   "plus",
 ];
+
+// Начертание линейной метки. Сплошная и пунктирная значат разное, поэтому
+// начертание — часть условного обозначения и живёт там же, где форма:
+// у категории, с перебивкой у типа. Третьего правила в сборке нет.
+const LINE_STYLES = ["solid", "dashed"];
 
 // Фигуры, которые ещё встречаются в объектах, но сетка их больше не предлагает:
 // в размере метки шестиугольник неотличим от круга, залитый ромб — от залитого
@@ -3390,6 +3584,10 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "ПШ", name: strings.types.wardrobeLight },
   { category: "switches", code: "В", name: strings.types.switch },
   { category: "switches", code: "ВВ", name: strings.types.switchDouble },
+  // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
+  // Свой значок нужен сразу: без него он рисуется тем же зелёным кругом,
+  // что и соседние два выключателя.
+  { category: "switches", code: "ВП", name: strings.types.switchWay, shape: "circle-chevron" },
   { category: "sockets", code: "Р", name: strings.types.socket },
   { category: "climate", code: "Б", name: strings.types.breezer },
   { category: "climate", code: "К", name: strings.types.conditioner },
@@ -3426,6 +3624,7 @@ function defaultTemplate() {
     name: category.name,
     color: category.color,
     shape: category.shape,
+    lineStyle: null,
     order: index,
   }));
   const markTypes = TEMPLATE_TYPES.map((type, index) => ({
@@ -3433,7 +3632,8 @@ function defaultTemplate() {
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
-    shape: null,
+    shape: type.shape || null,
+    lineStyle: null,
     blockMode: "each",
     order: index,
   }));
@@ -3463,6 +3663,11 @@ function createProject(template) {
     // обводки или ни одной. Объект старого формата их не знает — читается
     // список везде через `outlinesOf`, поэтому пустого поля здесь достаточно.
     outlines: [],
+    // Оборудование: справочник моделей объекта и размещённые единицы.
+    // Объект старого формата их не знает — читают списки через `equipmentOf`
+    // и `placementsOf`, поэтому пустых полей здесь достаточно.
+    equipment: [],
+    placements: [],
     counters: {},
     view: { ...DEFAULT_VIEW, ...(source.view || {}) },
   };
@@ -3600,7 +3805,8 @@ function deleteScheme(project, schemeId) {
   const schemes = project.schemes
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
-  return { project: withProject(project, { schemes, marks, groups, outlines }) };
+  const placements = dropPlacements(project, removed);
+  return { project: withProject(project, { schemes, marks, groups, outlines, placements }) };
 }
 
 // Единственный порядок справочника: категории по своему order, типы внутри —
@@ -4038,8 +4244,10 @@ function deleteMark(project, markId) {
   const cleaned = marks.map((item) => (freed.has(item.id) ? { ...item, groupId: null } : item));
   // Метка ушла — и из чужих списков «чем управляет» тоже: висячая ссылка
   // доехала бы до файла и до таблицы связей.
-  const linked = dropControls(cleaned, new Set([markId]));
-  return { project: withProject(project, { marks: linked, groups }), deleted: mark };
+  const gone = new Set([markId]);
+  const linked = dropControls(cleaned, gone);
+  const placements = dropPlacements(project, gone);
+  return { project: withProject(project, { marks: linked, groups, placements }), deleted: mark };
 }
 
 // ——— поиск по объекту ————————————————————————————————————————————————
@@ -4272,17 +4480,27 @@ function checkShape(shape, { allowNull }) {
   return shape;
 }
 
+function checkLineStyle(style, { allowNull }) {
+  if (style == null) {
+    if (allowNull) return null;
+    throw modelError("lineStyleUnknown");
+  }
+  if (!LINE_STYLES.includes(style)) throw modelError("lineStyleUnknown");
+  return style;
+}
+
 function checkBlockMode(mode) {
   if (!BLOCK_MODES.includes(mode)) throw modelError("unknownBlockMode");
   return mode;
 }
-function addType(project, { code, name, categoryId, shape = null, blockMode = "each" } = {}) {
+function addType(project, { code, name, categoryId, shape = null, lineStyle = null, blockMode = "each" } = {}) {
   const type = {
     id: newId(),
     categoryId,
     code: normalizeCode(code, project),
     name: normalizeName(name),
     shape: checkShape(shape, { allowNull: true }),
+    lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     blockMode: checkBlockMode(blockMode),
     order: project.markTypes.length,
   };
@@ -4295,6 +4513,9 @@ function updateType(project, typeId, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, "code")) next.code = normalizeCode(patch.code, project, typeId);
   if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
   if (Object.prototype.hasOwnProperty.call(patch, "shape")) next.shape = checkShape(patch.shape, { allowNull: true });
+  if (Object.prototype.hasOwnProperty.call(patch, "lineStyle")) {
+    next.lineStyle = checkLineStyle(patch.lineStyle, { allowNull: true });
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "blockMode")) next.blockMode = checkBlockMode(patch.blockMode);
   if (Object.prototype.hasOwnProperty.call(patch, "categoryId")) {
     if (!findCategory(project, patch.categoryId)) throw modelError("categoryNotFound");
@@ -4321,12 +4542,13 @@ function deleteType(project, typeId) {
     .map((item, index) => ({ ...item, order: index }));
   return { project: withProject(project, { markTypes }), deleted: type };
 }
-function addCategory(project, { name, color, shape } = {}) {
+function addCategory(project, { name, color, shape, lineStyle = null } = {}) {
   const category = {
     id: newId(),
     name: normalizeName(name),
     color: String(color || FALLBACK_COLOR),
     shape: checkShape(shape, { allowNull: false }),
+    lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     order: project.categories.length,
   };
   return { project: withProject(project, { categories: [...project.categories, category] }), category };
@@ -4338,6 +4560,9 @@ function updateCategory(project, categoryId, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
   if (Object.prototype.hasOwnProperty.call(patch, "color")) next.color = String(patch.color);
   if (Object.prototype.hasOwnProperty.call(patch, "shape")) next.shape = checkShape(patch.shape, { allowNull: false });
+  if (Object.prototype.hasOwnProperty.call(patch, "lineStyle")) {
+    next.lineStyle = checkLineStyle(patch.lineStyle, { allowNull: true });
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
   const categories = project.categories.map((item) => (item.id === categoryId ? next : item));
   return { project: withProject(project, { categories }), category: next };
@@ -4582,7 +4807,165 @@ function styleOf(project, typeId) {
   return {
     color: category ? category.color : FALLBACK_COLOR,
     shape: (type && type.shape) || (category && category.shape) || "circle",
+    // Пунктир — свойство обозначения, а не отдельной метки: по нему легенда и
+    // отличает условную линию от трека.
+    lineStyle: (type && type.lineStyle) || (category && category.lineStyle) || "solid",
   };
+}
+
+// ——— оборудование ————————————————————————————————————————————————————
+//
+// Две разные вещи, и заказчик их разделил сам. Модель — это товар в справочнике
+// объекта: «Shelly 1PM», одна модель стоит на многих метках, и по ней считается
+// закупка. Размещённая единица — «одна штука тут»: модель, метка места и связи
+// с другими метками (реле стоит в щите, а связано со светильниками и
+// выключателем). Поля модели — только то, чем заказывают: название,
+// производитель, артикул.
+
+function equipmentOf(project) {
+  return project && Array.isArray(project.equipment) ? project.equipment : [];
+}
+
+function placementsOf(project) {
+  return project && Array.isArray(project.placements) ? project.placements : [];
+}
+function equipmentInOrder(project) {
+  return equipmentOf(project)
+    .map((item, index) => ({ item, order: item.order == null ? index : item.order, index }))
+    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
+    .map((entry) => entry.item);
+}
+function findEquipment(project, equipmentId) {
+  return equipmentOf(project).find((item) => item.id === equipmentId) || null;
+}
+function findPlacement(project, placementId) {
+  return placementsOf(project).find((item) => item.id === placementId) || null;
+}
+
+function requireEquipment(project, equipmentId) {
+  const item = findEquipment(project, equipmentId);
+  if (!item) throw modelError("equipmentNotFound");
+  return item;
+}
+
+function requirePlacement(project, placementId) {
+  const item = findPlacement(project, placementId);
+  if (!item) throw modelError("placementNotFound");
+  return item;
+}
+
+// Необязательное поле — пустая строка, а не «иногда undefined»: его печатают
+// в таблице закупки.
+function equipmentText(value) {
+  return String(value == null ? "" : value).trim();
+}
+function addEquipment(project, { name, vendor, code } = {}) {
+  const item = {
+    id: newId(),
+    name: normalizeName(name),
+    vendor: equipmentText(vendor),
+    code: equipmentText(code),
+    order: equipmentOf(project).length,
+  };
+  return { project: withProject(project, { equipment: [...equipmentOf(project), item] }), equipment: item };
+}
+function updateEquipment(project, equipmentId, patch = {}) {
+  const current = requireEquipment(project, equipmentId);
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
+  if (Object.prototype.hasOwnProperty.call(patch, "vendor")) next.vendor = equipmentText(patch.vendor);
+  if (Object.prototype.hasOwnProperty.call(patch, "code")) next.code = equipmentText(patch.code);
+  if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
+  const equipment = equipmentOf(project).map((item) => (item.id === equipmentId ? next : item));
+  return { project: withProject(project, { equipment }), equipment: next };
+}
+
+// Сколько штук этой модели размещено — это же и число к закупке.
+function equipmentUsage(project, equipmentId) {
+  return placementsOf(project).filter((item) => item.equipmentId === equipmentId).length;
+}
+function deleteEquipment(project, equipmentId) {
+  const item = requireEquipment(project, equipmentId);
+  const used = equipmentUsage(project, equipmentId);
+  if (used > 0) throw modelError("equipmentInUse", { name: item.name, count: used });
+  const equipment = equipmentOf(project)
+    .filter((entry) => entry.id !== equipmentId)
+    .map((entry, index) => ({ ...entry, order: index }));
+  return { project: withProject(project, { equipment }), deleted: item };
+}
+
+// Связи единицы читают только отсюда: у единицы из старого файла поля нет.
+function placementLinkIds(placement) {
+  return placement && Array.isArray(placement.links) ? placement.links : [];
+}
+function placementsInOrder(project) {
+  return placementsOf(project);
+}
+
+// Что стоит на этой метке и что с ней связано — два разных вопроса.
+function placementsAt(project, markId) {
+  return placementsOf(project).filter((item) => item.markId === markId);
+}
+function placementsLinkedTo(project, markId) {
+  return placementsOf(project).filter((item) => placementLinkIds(item).includes(markId));
+}
+
+function placementLinks(project, links, markId) {
+  const wanted = [];
+  for (const id of Array.isArray(links) ? links : []) {
+    requireMark(project, id);
+    if (id !== markId && !wanted.includes(id)) wanted.push(id);
+  }
+  return wanted;
+}
+function addPlacement(project, { equipmentId, markId, links } = {}) {
+  requireEquipment(project, equipmentId);
+  requireMark(project, markId);
+  const placement = {
+    id: newId(),
+    equipmentId,
+    markId,
+    links: placementLinks(project, links, markId),
+  };
+  return {
+    project: withProject(project, { placements: [...placementsOf(project), placement] }),
+    placement,
+  };
+}
+function updatePlacement(project, placementId, patch = {}) {
+  const current = requirePlacement(project, placementId);
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "equipmentId")) {
+    requireEquipment(project, patch.equipmentId);
+    next.equipmentId = patch.equipmentId;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "markId")) {
+    requireMark(project, patch.markId);
+    next.markId = patch.markId;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "links")) {
+    next.links = placementLinks(project, patch.links, next.markId);
+  }
+  const placements = placementsOf(project).map((item) => (item.id === placementId ? next : item));
+  return { project: withProject(project, { placements }), placement: next };
+}
+function deletePlacement(project, placementId) {
+  const placement = requirePlacement(project, placementId);
+  const placements = placementsOf(project).filter((item) => item.id !== placementId);
+  return { project: withProject(project, { placements }), deleted: placement };
+}
+
+// Метка ушла — с ней уходят стоящие на ней единицы (стоять им негде) и ссылки
+// на неё в связях соседних единиц.
+function dropPlacements(project, removed) {
+  if (removed.size === 0) return placementsOf(project);
+  return placementsOf(project)
+    .filter((item) => !removed.has(item.markId))
+    .map((item) => {
+      const links = placementLinkIds(item);
+      if (!links.some((id) => removed.has(id))) return item;
+      return { ...item, links: links.filter((id) => !removed.has(id)) };
+    });
 }
 
 // ——— проверка объекта —————————————————————————————————————————————————
@@ -4637,6 +5020,16 @@ function validate(project) {
     if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", null, outline.id));
     if (!Array.isArray(outline.points) || outline.points.length < OUTLINE_MIN_POINTS) {
       problems.push(problem("shortOutline", null, outline.id));
+    }
+  }
+
+  for (const placement of placementsOf(project)) {
+    if (!findEquipment(project, placement.equipmentId)) {
+      problems.push(problem("placementWithoutEquipment", null, placement.id));
+    }
+    if (!findMark(project, placement.markId)) problems.push(problem("placementWithoutMark", null, placement.id));
+    for (const link of placementLinkIds(placement)) {
+      if (!findMark(project, link)) problems.push(problem("placementLinkMissing", null, placement.id));
     }
   }
 
@@ -4871,8 +5264,12 @@ async function deleteProject(id) {
 }
 
 // ——— изображения ——————————————————————————————————————————————————————
-async function putImage(blob) {
-  const id = newStoreId();
+
+// `imageId` задаётся, когда план приехал из чужого файла: в общей папке схема
+// ссылается на картинку по идентификатору из файла, и переименовать его —
+// значит развести ссылки двух браузеров.
+async function putImage(blob, imageId) {
+  const id = typeof imageId === "string" && imageId ? imageId : newStoreId();
   const createdAt = Date.now();
   const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
     idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0, createdAt })),
@@ -5565,6 +5962,355 @@ function readProjectEntries(entries, onProgress) {
   return { project, images };
 }
 
+// src/merge.js
+// Слияние двух экземпляров одного объекта. Чистый модуль: ни DOM, ни файлов —
+// на вход два объекта и общий предок (если он есть), на выход слитый объект и
+// перечень того, что разошлось.
+//
+// Зачем оно вообще: общая папка (WebDAV, облачный диск) даёт двум инженерам
+// один проект, но синхронизацию файлов делает не наш код. Кто записал
+// последним, тот и затёр — если сливать по файлу целиком. Поэтому сливаем по
+// сущностям: чаще всего двое ставят **разные** метки, и такие правки обязаны
+// сложиться без единого вопроса; спорное — редкость, и о нём надо сказать.
+//
+// Правило на спор одно и симметричное: побеждает сторона, чей объект правился
+// позже (`updatedAt`), при равенстве — та, у кого меньше `id`. Симметричное
+// потому, что обе стороны считают его из одной и той же пары и приходят к
+// одному ответу: иначе файлы в папке ходили бы по кругу, переписывая друг
+// друга. Проигравший вариант не пропадает молча — он попадает в `conflicts`.
+//
+// Правка важнее удаления: если одна сторона сущность удалила, а вторая
+// правила, сущность остаётся (с пометкой в `conflicts`). Вернуть лишнюю метку
+// — минута работы, восстановить потерянную — некому.
+
+// Сущности объекта, которые сливаются поимённо, по `id`.
+const MERGE_ENTITIES = [
+  "categories",
+  "markTypes",
+  "rooms",
+  "schemes",
+  "marks",
+  "groups",
+  "outlines",
+  "equipment",
+  "placements",
+];
+
+// Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
+const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipment"];
+
+function mergeList(project, key) {
+  return project && Array.isArray(project[key]) ? project[key] : [];
+}
+
+function mergeIndex(list) {
+  const index = new Map();
+  for (const item of list) {
+    if (item && typeof item.id === "string") index.set(item.id, item);
+  }
+  return index;
+}
+
+// Сравнение по содержимому, устойчивое к порядку ключей: один и тот же объект,
+// прошедший через JSON и миграцию на другой машине, обязан считаться равным.
+function mergeText(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) || "null";
+  if (Array.isArray(value)) return "[" + value.map(mergeText).join(",") + "]";
+  const keys = Object.keys(value).sort();
+  return "{" + keys.map((key) => JSON.stringify(key) + ":" + mergeText(value[key])).join(",") + "}";
+}
+
+function mergeSame(a, b) {
+  return mergeText(a) === mergeText(b);
+}
+
+// Кто выигрывает спор. Обе стороны считают это из одной пары и получают один
+// ответ — иначе слияние не сходится.
+function mergeWinner(ours, theirs) {
+  const oursAt = String((ours && ours.updatedAt) || "");
+  const theirsAt = String((theirs && theirs.updatedAt) || "");
+  if (oursAt !== theirsAt) return theirsAt > oursAt ? "theirs" : "ours";
+  const oursId = String((ours && ours.id) || "");
+  const theirsId = String((theirs && theirs.id) || "");
+  return theirsId < oursId ? "theirs" : "ours";
+}
+
+/**
+ * Об одном ли объекте речь. Два человека получают проект из одного файла, и
+ * идентификаторы схем и меток у них общие (свой `id` объекта и свои id картинок
+ * каждый браузер выдаёт сам). Ничего общего — значит, это чужой файл, сливать
+ * его нельзя.
+ */
+function areRelatedProjects(ours, theirs) {
+  if (!ours || !theirs) return false;
+  if (ours.id && ours.id === theirs.id) return true;
+  for (const key of ["schemes", "marks", "rooms", "markTypes"]) {
+    const mine = mergeIndex(mergeList(ours, key));
+    for (const item of mergeList(theirs, key)) {
+      if (mine.has(item.id)) return true;
+    }
+  }
+  return false;
+}
+
+function mergeLabel(entity, item, typeCodes) {
+  if (!item) return "";
+  if (entity === "marks") {
+    const code = typeCodes.get(item.typeId) || "";
+    return code ? code + item.number : String(item.number || "");
+  }
+  if (entity === "markTypes") return item.code || item.name || "";
+  return item.name || "";
+}
+
+// Слияние одной коллекции. Возвращает список сущностей и дописывает в отчёт
+// то, что пришло со стороны и то, что разошлось.
+function mergeCollection(entity, ours, theirs, base, report, winner) {
+  const oursIndex = mergeIndex(mergeList(ours, entity));
+  const theirsIndex = mergeIndex(mergeList(theirs, entity));
+  const baseIndex = mergeIndex(mergeList(base, entity));
+  const ids = [...oursIndex.keys()];
+  for (const id of theirsIndex.keys()) {
+    if (!oursIndex.has(id)) ids.push(id);
+  }
+
+  const result = [];
+  for (const id of ids) {
+    const mine = oursIndex.get(id) || null;
+    const other = theirsIndex.get(id) || null;
+    const was = baseIndex.get(id) || null;
+
+    if (mine && other) {
+      if (mergeSame(mine, other)) {
+        result.push(mine);
+      } else if (was && mergeSame(was, mine)) {
+        result.push(other);
+        report.changes.push({ entity, id, action: "updated", item: other });
+      } else if (was && mergeSame(was, other)) {
+        result.push(mine);
+      } else {
+        const kept = winner === "theirs" ? other : mine;
+        result.push(kept);
+        report.conflicts.push({ code: "bothChanged", entity, id, kept: winner, item: kept, other: winner === "theirs" ? mine : other });
+        if (winner === "theirs") report.changes.push({ entity, id, action: "updated", item: other });
+      }
+      continue;
+    }
+
+    if (mine && !other) {
+      // У них сущности нет. Либо они её удалили, либо у нас она только появилась.
+      if (!was) {
+        result.push(mine);
+      } else if (mergeSame(was, mine)) {
+        report.changes.push({ entity, id, action: "removed", item: mine });
+      } else {
+        result.push(mine);
+        report.conflicts.push({ code: "deletedElsewhere", entity, id, kept: "ours", item: mine });
+      }
+      continue;
+    }
+
+    if (!mine && other) {
+      if (!was) {
+        result.push(other);
+        report.changes.push({ entity, id, action: "added", item: other });
+      } else if (mergeSame(was, other)) {
+        // Удалили мы, они не трогали — сущность остаётся удалённой.
+      } else {
+        result.push(other);
+        report.conflicts.push({ code: "deletedHere", entity, id, kept: "theirs", item: other });
+        report.changes.push({ entity, id, action: "added", item: other });
+      }
+    }
+  }
+
+  if (MERGE_ORDERED.includes(entity)) {
+    result.sort((a, b) => {
+      const byOrder = (Number(a.order) || 0) - (Number(b.order) || 0);
+      if (byOrder !== 0) return byOrder;
+      return String(a.id) < String(b.id) ? -1 : 1;
+    });
+    return result.map((item, index) => (item.order === index ? item : { ...item, order: index }));
+  }
+  return result;
+}
+
+// Счётчики номеров: номер не переиспользуется, поэтому берётся больший.
+function mergeCounters(ours, theirs) {
+  const counters = { ...((ours && ours.counters) || {}) };
+  for (const [code, value] of Object.entries((theirs && theirs.counters) || {})) {
+    const mine = Number(counters[code]) || 0;
+    const other = Number(value) || 0;
+    counters[code] = Math.max(mine, other);
+  }
+  return counters;
+}
+
+// Двое поставили по «Р15»: номер выдаётся счётчиком в пределах объекта, и в
+// разных браузерах он один и тот же. Разъезжаются такие метки здесь — тому,
+// кто был в общем предке, номер оставляем (его уже написали на схеме и в
+// таблице), новой метке выдаём следующий свободный.
+function mergeNumbers(marks, types, counters, base, report) {
+  const codes = new Map(types.map((type) => [type.id, type.code]));
+  const known = mergeIndex(mergeList(base, "marks"));
+  const order = marks.map((mark, index) => ({ mark, index }));
+  order.sort((a, b) => {
+    const mineFirst = (known.has(a.mark.id) ? 0 : 1) - (known.has(b.mark.id) ? 0 : 1);
+    if (mineFirst !== 0) return mineFirst;
+    return String(a.mark.id) < String(b.mark.id) ? -1 : 1;
+  });
+
+  const taken = new Set();
+  const fixed = new Map();
+  for (const { mark } of order) {
+    const code = codes.get(mark.typeId);
+    if (!code) continue;
+    const key = code + "|" + mark.number;
+    if (!taken.has(key)) {
+      taken.add(key);
+      continue;
+    }
+    let next = Math.max(Number(counters[code]) || 0, Number(mark.number) || 0);
+    let candidate;
+    do {
+      next += 1;
+      candidate = code + "|" + next;
+    } while (taken.has(candidate));
+    taken.add(candidate);
+    counters[code] = Math.max(Number(counters[code]) || 0, next);
+    fixed.set(mark.id, next);
+    report.renumbered.push({ markId: mark.id, code, from: mark.number, to: next });
+  }
+  if (fixed.size === 0) return marks;
+  return marks.map((mark) => (fixed.has(mark.id) ? { ...mark, number: fixed.get(mark.id) } : mark));
+}
+
+// Ссылки на то, чего в слитом объекте нет: висячая ссылка хуже отсутствующей.
+// Снимается одним проходом, каждая потеря — в отчёт.
+function mergeReferences(merged, report) {
+  const schemes = mergeIndex(merged.schemes);
+  const rooms = mergeIndex(merged.rooms);
+  const types = mergeIndex(merged.markTypes);
+  const categories = mergeIndex(merged.categories);
+
+  merged.markTypes = merged.markTypes.filter((type) => {
+    if (categories.has(type.categoryId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "markTypes", id: type.id, kept: "none", item: type });
+    return false;
+  });
+  const liveTypes = mergeIndex(merged.markTypes);
+
+  merged.marks = merged.marks.filter((mark) => {
+    if (schemes.has(mark.schemeId) && liveTypes.has(mark.typeId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "marks", id: mark.id, kept: "none", item: mark });
+    return false;
+  });
+  const marks = mergeIndex(merged.marks);
+
+  merged.groups = merged.groups
+    .map((group) => {
+      const markIds = (group.markIds || []).filter((id) => marks.has(id));
+      return markIds.length === group.markIds.length ? group : { ...group, markIds };
+    })
+    .filter((group) => {
+      if (schemes.has(group.schemeId) && (group.markIds || []).length > 1) return true;
+      report.conflicts.push({ code: "danglingRef", entity: "groups", id: group.id, kept: "none", item: group });
+      return false;
+    });
+  const groups = mergeIndex(merged.groups);
+
+  merged.outlines = merged.outlines.filter((outline) => {
+    if (schemes.has(outline.schemeId) && rooms.has(outline.roomId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "outlines", id: outline.id, kept: "none", item: outline });
+    return false;
+  });
+
+  const equipment = mergeIndex(merged.equipment);
+  merged.placements = merged.placements
+    .map((placement) => {
+      const links = Array.isArray(placement.links) ? placement.links.filter((id) => marks.has(id)) : placement.links;
+      return Array.isArray(links) && links.length !== placement.links.length ? { ...placement, links } : placement;
+    })
+    .filter((placement) => {
+      if (equipment.has(placement.equipmentId) && marks.has(placement.markId)) return true;
+      report.conflicts.push({ code: "danglingRef", entity: "placements", id: placement.id, kept: "none", item: placement });
+      return false;
+    });
+
+  merged.marks = merged.marks.map((mark) => {
+    const patch = {};
+    if (mark.groupId && !groups.has(mark.groupId)) patch.groupId = null;
+    if (mark.roomId && !rooms.has(mark.roomId)) patch.roomId = null;
+    const controls = Array.isArray(mark.controls) ? mark.controls.filter((id) => marks.has(id)) : mark.controls;
+    if (Array.isArray(controls) && controls.length !== mark.controls.length) patch.controls = controls;
+    return Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
+  });
+  // Типы после чистки могли уехать: `types` держим ради ясности сравнения выше.
+  void types;
+  return merged;
+}
+
+/**
+ * Сливает два экземпляра одного объекта.
+ *
+ * `base` — общий предок (последний снимок, который видели обе стороны); без
+ * него слияние становится объединением: удаления не видны, потому что «нет
+ * сущности» и «сущность удалили» снаружи выглядят одинаково.
+ *
+ * Возвращает `{project, changed, changes, conflicts, renumbered, counts}`:
+ * `changes` — что пришло со стороны (added | updated | removed) с подписью
+ * каждой сущности, `conflicts` — где стороны разошлись и чей вариант оставлен.
+ */
+function mergeProjects(ours, theirs, base, options = {}) {
+  if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0 } };
+
+  const winner = options.winner === "ours" || options.winner === "theirs" ? options.winner : mergeWinner(ours, theirs);
+  const ancestor = base && areRelatedProjects(ours, base) ? base : null;
+  const report = { changes: [], conflicts: [], renumbered: [] };
+
+  const merged = { ...ours };
+  for (const entity of MERGE_ENTITIES) {
+    merged[entity] = mergeCollection(entity, ours, theirs, ancestor, report, winner);
+  }
+
+  merged.counters = mergeCounters(ours, theirs);
+  merged.marks = mergeNumbers(merged.marks, merged.markTypes, merged.counters, ancestor, report);
+  mergeReferences(merged, report);
+
+  // Имя и настройки вида — те же правила, что и у сущностей.
+  if (!mergeSame(ours.name, theirs.name)) {
+    const keptName = winner === "theirs" ? theirs.name : ours.name;
+    merged.name = keptName;
+    report.conflicts.push({ code: "bothChanged", entity: "name", id: ours.id, kept: winner, item: { name: keptName }, other: { name: winner === "theirs" ? ours.name : theirs.name } });
+  }
+  if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
+  if (theirs.createdAt && (!merged.createdAt || theirs.createdAt < merged.createdAt)) merged.createdAt = theirs.createdAt;
+  merged.updatedAt = String(theirs.updatedAt || "") > String(ours.updatedAt || "") ? theirs.updatedAt : ours.updatedAt;
+
+  // Подписи для отчёта считаются по слитому справочнику: тип метки мог приехать
+  // тем же слиянием.
+  const typeCodes = new Map(merged.markTypes.map((type) => [type.id, type.code]));
+  for (const change of report.changes) change.label = mergeLabel(change.entity, change.item, typeCodes);
+  for (const conflict of report.conflicts) conflict.label = mergeLabel(conflict.entity, conflict.item, typeCodes);
+
+  const counts = {
+    added: report.changes.filter((change) => change.action === "added").length,
+    updated: report.changes.filter((change) => change.action === "updated").length,
+    removed: report.changes.filter((change) => change.action === "removed").length,
+    conflicts: report.conflicts.length,
+    renumbered: report.renumbered.length,
+  };
+
+  return {
+    project: merged,
+    changed: !mergeSame(ours, merged),
+    changes: report.changes,
+    conflicts: report.conflicts,
+    renumbered: report.renumbered,
+    counts,
+  };
+}
+
 // src/autosave.js
 // Файл проекта на диске: приёмка загруженного архива, автосохранение в папку
 // и отметка «когда в последний раз выгружали».
@@ -5572,6 +6318,7 @@ function readProjectEntries(entries, onProgress) {
 // Почему отдельно от панели: здесь нет ни одной строки DOM — значит, приёмку
 // загрузки (самое опасное место: чужие идентификаторы) можно проверить тестом,
 // а панель остаётся тонкой. Zip читает и пишет только `projectFile.js`.
+
 
 
 
@@ -5585,6 +6332,12 @@ const AUTOSAVE_EXPORT_KEY = "lastFileExport";
 const AUTOSAVE_DELAY_MS = 1500;
 // Как часто снимок в папке перечитывается с диска и сверяется с объектом.
 const AUTOSAVE_VERIFY_MS = 10 * 60 * 1000;
+// Как часто заглядывать в папку за чужими правками. Пять секунд: синхронизацию
+// файлов делает не наш код (WebDAV, облачный диск), и до папки чужая правка
+// доезжает секундами; человек за это время не успевает уйти далеко, а сам опрос
+// читает только служебные данные о файлах — тела архивов не трогаются, пока не
+// изменилось время записи.
+const AUTOSAVE_WATCH_MS = 5000;
 
 let autosaveHandle = null;
 let autosavePermission = "none"; // none | prompt | granted | denied
@@ -5594,6 +6347,18 @@ let autosaveRunning = false;
 let autosavePending = null;
 let autosaveLastError = null;
 let autosaveVerified = null;
+// Последний снимок, который видели обе стороны: общий предок для слияния.
+let autosaveBase = null;
+// Время записи нашего снимка в папку. Всё, что старше, мы уже учли — и это
+// же защита от «протухшего» файла: вчерашний снимок, попавший в слияние как
+// чужая правка, откатил бы нашу работу.
+let autosaveSyncSince = 0;
+// Что мы уже прочитали из папки: имя файла -> время его записи. Общая
+// отметка времени тут не годится — в папке пишут трое, и файл второго,
+// прочитанный после файла третьего, иначе остался бы незамеченным.
+let autosaveSeen = new Map();
+let autosaveWatchTimer = null;
+let autosaveWatchBusy = false;
 const autosaveListeners = new Set();
 
 // ——— приёмка загруженного файла ———————————————————————————————————————
@@ -5781,6 +6546,7 @@ async function autosavePickFolder() {
   if (autosavePermission !== "granted") await autosaveGrant();
   autosaveLastError = null;
   autosaveResetVerify();
+  autosaveResetSync();
   await setSetting(AUTOSAVE_FOLDER_KEY, handle);
   autosaveAnnounce();
   return autosaveStatus();
@@ -5800,6 +6566,8 @@ async function autosaveForget() {
   autosavePermission = "none";
   autosaveLastError = null;
   autosaveResetVerify();
+  autosaveResetSync();
+  autosaveStopWatch();
   if (autosaveTimer) {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
@@ -5836,6 +6604,16 @@ async function autosaveWrite(project, options = {}) {
       autosaveMarkVerified(project, packedFile.images, date);
     }
     autosaveLastError = null;
+    // Записанный снимок — новая общая точка отсчёта: с ней сливаются чужие
+    // правки, и по её времени отсекаются файлы, которые мы уже учли.
+    autosaveBase = project;
+    if (typeof fileHandle.getFile === "function") {
+      const stamp = await fileHandle.getFile();
+      autosaveSyncSince = Math.max(autosaveSyncSince, stamp.lastModified || 0);
+      autosaveSeen.set(name, stamp.lastModified || 0);
+    } else {
+      autosaveSyncSince = Math.max(autosaveSyncSince, date.getTime());
+    }
     const at = await autosaveNoteExport(project.id, options.at);
     // Объект возвращается вместе с результатом: пока шла запись, пользователь
     // мог успеть поправить ещё раз — панели надо знать, что именно легло в файл.
@@ -5883,6 +6661,119 @@ async function autosaveFlush(options = {}) {
   // Пока писали, могла прийти новая правка — её запись ставим в очередь.
   if (autosavePending) autosaveSchedule(autosavePending, options);
   return result;
+}
+
+// ——— общая папка: чужие правки ————————————————————————————————————————
+//
+// Папку кладут в WebDAV или облачный диск, и над объектом работают вдвоём.
+// Синхронизацию файлов делает не наш код: наше дело — заметить, что файл в
+// папке изменился не нами, и слить чужую работу со своей, а не затереть.
+// У каждого браузера свой файл снимка (имя включает идентификатор объекта):
+// у файла ровно один писатель, а читают файлы все. Двум писателям в один файл
+// поверх WebDAV всё равно никто не даст договориться — блокировок там нет.
+function autosaveBaseProject() {
+  return autosaveBase;
+}
+
+// Забыть общую точку: другая папка — другая история.
+function autosaveResetSync() {
+  autosaveBase = null;
+  autosaveSyncSince = 0;
+  autosaveSeen = new Map();
+}
+
+async function autosaveFolderEntries() {
+  const entries = [];
+  if (!autosaveHandle || typeof autosaveHandle.values !== "function") return entries;
+  for await (const entry of autosaveHandle.values()) {
+    if (entry.kind === "file" && /\.zip$/i.test(entry.name)) entries.push(entry);
+  }
+  return entries;
+}
+
+// Планы из чужого файла кладутся в хранилище под своими идентификаторами:
+// схема ссылается на картинку по id из файла, и переименовать его значит
+// развести ссылки двух браузеров.
+async function autosaveAdoptImages(project, images) {
+  if (!(images instanceof Map)) return 0;
+  const needed = new Set((project.schemes || []).map((scheme) => scheme.imageId).filter(Boolean));
+  let added = 0;
+  for (const [id, blob] of images) {
+    if (!needed.has(id) || !blob) continue;
+    if (await getImage(id)) continue;
+    await putImage(blob, id);
+    added += 1;
+  }
+  return added;
+}
+
+/**
+ * Один проход по папке: ищет файлы, записанные после нашего снимка, и сливает
+ * первый, в котором действительно есть чужая работа. Возвращает результат
+ * слияния (`merge.js`) с именем файла и числом принятых планов — или `null`,
+ * если сливать нечего.
+ */
+async function autosaveScanExternal(project, options = {}) {
+  if (!project || !autosaveReady() || autosaveRunning || autosaveWatchBusy) return null;
+  autosaveWatchBusy = true;
+  try {
+    const since = typeof options.since === "number" ? options.since : autosaveSyncSince;
+    for (const entry of await autosaveFolderEntries()) {
+      const file = await entry.getFile();
+      const at = file.lastModified || 0;
+      // Файл, который мы уже читали, интересен только если его переписали;
+      // незнакомый — только если он новее нашего снимка. Второе и есть защита
+      // от протухшего файла: всё, что старше, мы либо писали сами, либо учли.
+      const seenAt = autosaveSeen.get(entry.name);
+      if (seenAt !== undefined ? at <= seenAt : at <= since) continue;
+      autosaveSeen.set(entry.name, at);
+      let loaded = null;
+      try {
+        loaded = await unpackProject(file);
+      } catch (error) {
+        // В общей папке лежит и чужое: битый или посторонний архив — не повод
+        // ломать сеанс, просто не наш файл.
+        continue;
+      }
+      if (!areRelatedProjects(project, loaded.project)) continue;
+      const merged = mergeProjects(project, loaded.project, autosaveBase);
+      if (!merged.changed) continue;
+      const plans = await autosaveAdoptImages(merged.project, loaded.images);
+      return { ...merged, file: entry.name, at, plans };
+    }
+    return null;
+  } finally {
+    autosaveWatchBusy = false;
+  }
+}
+
+// Опрос папки. Останавливается сам, когда папку забыли или сменили.
+function autosaveWatch(options = {}) {
+  const getProject = typeof options.getProject === "function" ? options.getProject : () => null;
+  const onExternal = typeof options.onExternal === "function" ? options.onExternal : () => {};
+  const delay = typeof options.interval === "number" ? options.interval : AUTOSAVE_WATCH_MS;
+  autosaveStopWatch();
+
+  const tick = async () => {
+    autosaveWatchTimer = null;
+    // Вкладка в фоне не опрашивает папку: вернётся — и сразу посмотрит.
+    const hidden = typeof document !== "undefined" && document.hidden;
+    if (!hidden) {
+      try {
+        const result = await autosaveScanExternal(getProject());
+        if (result) onExternal(result);
+      } catch (error) {
+        autosaveLastError = error;
+      }
+    }
+    autosaveWatchTimer = setTimeout(tick, delay);
+  };
+  autosaveWatchTimer = setTimeout(tick, delay);
+  return autosaveStopWatch;
+}
+function autosaveStopWatch() {
+  if (autosaveWatchTimer) clearTimeout(autosaveWatchTimer);
+  autosaveWatchTimer = null;
 }
 
 // ——— «выгружено N назад» ———————————————————————————————————————————————
@@ -6430,6 +7321,11 @@ const SHAPE_ANGLES = {
 // по-прежнему рисуются одним `drawShape`.
 const SHAPE_BASE = {
   "circle-cross": "circle",
+  "circle-slash": "circle",
+  "circle-slash-two": "circle",
+  "circle-chevron": "circle",
+  "circle-wave": "circle",
+  "square-jack": "square",
   "circle-dot": "circle",
   "circle-fill": "circle",
   "circle-half": "circle",
@@ -6441,6 +7337,11 @@ const SHAPE_BASE = {
 // Засечка внутри: перекрестье, точка, сплошная заливка, залитая нижняя половина.
 const SHAPE_DECOR = {
   "circle-cross": "cross",
+  "circle-slash": "slash",
+  "circle-slash-two": "slash-two",
+  "circle-chevron": "chevron",
+  "circle-wave": "wave",
+  "square-jack": "jack",
   "square-cross": "cross",
   "circle-dot": "dot",
   "circle-fill": "fill",
@@ -6453,6 +7354,40 @@ const SHAPE_DECOR = {
 const PLUS_WAIST = 0.36;
 // Точка внутри знака: меньше — сливается с пустым кругом на распечатке.
 const DOT_RADIUS = 0.42;
+
+// Штрих и просвет пунктирной линии в долях радиуса метки: короче — на бумаге
+// пунктир сливается в сплошную, длиннее — линия рвётся на отдельные палки.
+const DASH_STROKE = 1.7;
+const DASH_GAP = 1.1;
+function dashPattern(radius) {
+  return [Math.max(2, radius * DASH_STROKE), Math.max(2, radius * DASH_GAP)];
+}
+
+// Узнаваемые значки собраны из тех же кирпичей, что и старые засечки: отрезки,
+// круг, прямоугольник. Ни шрифтов, ни эмодзи — знак обязан выглядеть одинаково
+// на экране, в PNG и на распечатке, а чужой шрифт этого не обещает.
+// Числа подобраны под настоящий размер метки (радиус около пяти пикселей на
+// бумаге): в этом размере их и различает отпечаток из test/shapes.test.js.
+// Клавиша выключателя: наклонный рычаг во весь знак. Короче — и на бумаге
+// он перестаёт отличаться от пустого круга: отпечаток считает это слиянием.
+const LEVER_REACH = 1;
+// Наклон рычага, градусы от горизонтали.
+const LEVER_ANGLE = 70;
+// Две клавиши: два рычага короче, разведённые поперёк на столько радиусов.
+const LEVER_PAIR_GAP = 0.34;
+const LEVER_PAIR_REACH = 0.62;
+// Переключатель: уголок, раскрытый вправо.
+const CHEVRON_REACH = 0.62;
+// Беспроводная точка: волны над точкой у нижнего края знака.
+const WAVE_BASE = 0.5;
+const WAVE_RADII = [0.5, 0.92];
+const WAVE_FROM = 205;
+const WAVE_TO = 335;
+const WAVE_STEPS = 5;
+// Разъём Ethernet: корпус вилки и шнур вниз.
+const JACK_WIDTH = 0.52;
+const JACK_TOP = -0.55;
+const JACK_HEIGHT = 0.75;
 
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
@@ -6520,6 +7455,22 @@ function shapeGeometry(shape, x, y, size) {
 // отпечаток, так что разойтись правилам негде.
 // `role` — смысл («сплошная», «половина», «точка», «крест»), `mask` — область
 // краски: вся внутренность, прямоугольник, круг или линии заданной толщины.
+// Отрезок рычага: длина в долях радиуса, сдвиг поперёк. Наклон намеренно не
+// сорок пять градусов — под ним рычаг ложится на луч креста, и на бумаге
+// «круг с клавишей» перестаёт отличаться от «круга с крестом».
+function leverSegment(geometry, reach, shift) {
+  const angle = (LEVER_ANGLE * Math.PI) / 180;
+  const along = { x: Math.cos(angle), y: -Math.sin(angle) };
+  const across = { x: -along.y, y: along.x };
+  const cx = geometry.cx + across.x * geometry.r * shift;
+  const cy = geometry.cy + across.y * geometry.r * shift;
+  const reachPx = geometry.r * reach;
+  return [
+    { x: cx - along.x * reachPx, y: cy - along.y * reachPx },
+    { x: cx + along.x * reachPx, y: cy + along.y * reachPx },
+  ];
+}
+
 function shapeInternals(geometry) {
   const parts = [];
   if (geometry.decor === "fill") {
@@ -6541,6 +7492,73 @@ function shapeInternals(geometry) {
       cx: geometry.cx,
       cy: geometry.cy,
       r: Math.max(1, geometry.r * DOT_RADIUS),
+    });
+  }
+  if (geometry.decor === "slash" || geometry.decor === "slash-two") {
+    // Клавиша выключателя: наклонный рычаг. Две клавиши — два рычага рядом,
+    // и на бумаге видно, одна их или две, без чтения буквы.
+    const segments =
+      geometry.decor === "slash"
+        ? [leverSegment(geometry, LEVER_REACH, 0)]
+        : [
+            leverSegment(geometry, LEVER_PAIR_REACH, -LEVER_PAIR_GAP),
+            leverSegment(geometry, LEVER_PAIR_REACH, LEVER_PAIR_GAP),
+          ];
+    parts.push({ role: geometry.decor, mask: "lines", width: geometry.line, segments });
+  } else if (geometry.decor === "chevron") {
+    // Переключатель: свет из двух мест, и знак показывает две стороны.
+    const reach = geometry.r * CHEVRON_REACH;
+    parts.push({
+      role: "chevron",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx - reach, y: geometry.cy - reach },
+          { x: geometry.cx + reach, y: geometry.cy },
+        ],
+        [
+          { x: geometry.cx + reach, y: geometry.cy },
+          { x: geometry.cx - reach, y: geometry.cy + reach },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "wave") {
+    // Беспроводная точка: точка у нижнего края и волны над ней.
+    const base = { x: geometry.cx, y: geometry.cy + geometry.r * WAVE_BASE };
+    const segments = [];
+    for (const share of WAVE_RADII) {
+      const radius = geometry.r * share;
+      let previous = polarPoint(base.x, base.y, radius, WAVE_FROM);
+      for (let step = 1; step <= WAVE_STEPS; step += 1) {
+        const angle = WAVE_FROM + ((WAVE_TO - WAVE_FROM) * step) / WAVE_STEPS;
+        const next = polarPoint(base.x, base.y, radius, angle);
+        segments.push([previous, next]);
+        previous = next;
+      }
+    }
+    parts.push({ role: "wave", mask: "lines", width: geometry.line, segments });
+    parts.push({ role: "wave-dot", mask: "disc", cx: base.x, cy: base.y, r: Math.max(1, geometry.r * 0.22) });
+  } else if (geometry.decor === "jack") {
+    // Разъём: корпус вилки и шнур вниз — знак сетевой розетки.
+    parts.push({
+      role: "jack",
+      mask: "rect",
+      x: geometry.cx - geometry.r * JACK_WIDTH,
+      y: geometry.cy + geometry.r * JACK_TOP,
+      width: geometry.r * JACK_WIDTH * 2,
+      height: geometry.r * JACK_HEIGHT,
+    });
+    parts.push({
+      role: "jack-cord",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx, y: geometry.cy + geometry.r * (JACK_TOP + JACK_HEIGHT) },
+          { x: geometry.cx, y: geometry.cy + geometry.r * 0.72 },
+        ],
+      ],
     });
   }
   if (geometry.cross) {
@@ -7525,6 +8543,9 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected) {
     ctx.save();
     ctx.strokeStyle = style.color;
     ctx.lineWidth = Math.max(2, radius * 0.5);
+    // Пунктир задан в пикселях плана и растёт с масштабом вместе с меткой:
+    // на выгрузке в двойном разрешении штрих остаётся тем же, что на экране.
+    if (style.lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -7577,13 +8598,16 @@ function drawHandles(ctx, scheme, mark, view, color) {
 }
 
 // Черновик линии: уже поставленные вершины плюс резинка до курсора.
-function drawDraft(ctx, scheme, draft, view, color) {
+function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
   if (!draft || draft.points.length === 0) return;
   const radius = markRadius(view);
   const screen = draft.points.map((point) => planToScreen(point, scheme, view));
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = Math.max(2, radius * 0.5);
+  // Черновик рисуется тем же начертанием, каким ляжет метка: пунктир видно
+  // ещё до того, как линия поставлена.
+  if (lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.beginPath();
@@ -7706,6 +8730,7 @@ function drawScheme(ctx, {
   selectedIds,
   draft,
   draftColor,
+  draftLineStyle,
   outlines,
   selectedOutlineId,
 }) {
@@ -7744,7 +8769,7 @@ function drawScheme(ctx, {
     if (item.box.row > 0) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
   for (const item of labels) drawLabel(ctx, item.box, item.color);
-  if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da");
+  if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da", draftLineStyle);
   if (legend) drawLegend(ctx, { project, scheme, filter, view: state, box: legend === true ? null : legend });
 }
 
@@ -8400,6 +9425,7 @@ function canvasPaint() {
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     draftColor,
+    draftLineStyle: state.activeTypeId ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
   // Ручки контура — у выделенного помещения: вершину двигают, «+» на стенке
   // добавляет новую. Обводка по стенам с первого раза не выходит.
@@ -11448,6 +12474,712 @@ function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
   return button;
 }
 
+// src/panels/filters.js
+// Фильтры списка меток: галочки категорий и типов, помещение и поиск.
+//
+// Фильтр живёт в состоянии сеанса (`state.filter`) и один на всех: по нему
+// рисует холст, по нему же строится список сбоку и легенда в выгрузке.
+// Поэтому здесь только чистые функции над ним — что видно, что отмечено и во
+// что превращается щелчок по галочке; сама панель собирается из них ниже.
+
+
+
+
+// Порядок строк списка — порядок справочника: категории по своему order, типы
+// внутри, метки по номеру. Тот же обход, что у легенды и таблиц.
+function filtersMarkRows(project, schemeId, filter) {
+  const scheme = project ? findScheme(project, schemeId) : null;
+  if (!scheme) return [];
+  const order = new Map();
+  const categoryOf = new Map();
+  let index = 0;
+  for (const group of typesInOrder(project)) {
+    for (const type of group.types) {
+      order.set(type.id, index);
+      categoryOf.set(type.id, group.category);
+      index += 1;
+    }
+  }
+  const last = index;
+  return visibleMarks(project, scheme, filter)
+    .map((mark) => ({
+      mark,
+      type: findType(project, mark.typeId),
+      category: categoryOf.get(mark.typeId) || null,
+      style: styleOf(project, mark.typeId),
+      label: labelOf(project, mark.id),
+    }))
+    .sort((a, b) => {
+      const orderA = order.has(a.mark.typeId) ? order.get(a.mark.typeId) : last;
+      const orderB = order.has(b.mark.typeId) ? order.get(b.mark.typeId) : last;
+      return orderA === orderB ? a.mark.number - b.mark.number : orderA - orderB;
+    });
+}
+
+// Видимые типы — одно множество, из которого собираются оба поля фильтра.
+// Галочка категории и галочка типа правят его, а `categoryIds`/`typeIds`
+// пересчитываются заново: держать две независимые истины — значит рано или
+// поздно показать метку, которую сняли галочкой, или наоборот.
+function filtersTypeSet(project, filter) {
+  const byType = filter && Array.isArray(filter.typeIds) ? new Set(filter.typeIds) : null;
+  const byCategory = filter && Array.isArray(filter.categoryIds) ? new Set(filter.categoryIds) : null;
+  const visible = new Set();
+  for (const type of project.markTypes) {
+    if (byType && !byType.has(type.id)) continue;
+    if (byCategory && !byCategory.has(type.categoryId)) continue;
+    visible.add(type.id);
+  }
+  return visible;
+}
+
+function filtersFromTypeSet(project, filter, visible) {
+  const types = project.markTypes;
+  const everyType = types.every((type) => visible.has(type.id));
+  // Категория без типов — всегда отмечена: прятать в ней нечего.
+  const categories = project.categories.filter((category) => {
+    const own = types.filter((type) => type.categoryId === category.id);
+    return own.length === 0 || own.some((type) => visible.has(type.id));
+  });
+  const everyCategory = categories.length === project.categories.length;
+  return {
+    ...(filter || {}),
+    categoryIds: everyCategory ? null : categories.map((category) => category.id),
+    typeIds: everyType ? null : types.filter((type) => visible.has(type.id)).map((type) => type.id),
+  };
+}
+function filtersTypeChecked(project, filter, typeId) {
+  return filtersTypeSet(project, filter).has(typeId);
+}
+
+// «on» — видны все типы категории, «off» — ни одного, «mixed» — часть.
+function filtersCategoryChecked(project, filter, categoryId) {
+  const visible = filtersTypeSet(project, filter);
+  const own = project.markTypes.filter((type) => type.categoryId === categoryId);
+  if (own.length === 0) return "on";
+  const shown = own.filter((type) => visible.has(type.id)).length;
+  if (shown === 0) return "off";
+  return shown === own.length ? "on" : "mixed";
+}
+function filtersToggleType(project, filter, typeId, on) {
+  const visible = filtersTypeSet(project, filter);
+  if (on) visible.add(typeId);
+  else visible.delete(typeId);
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersToggleCategory(project, filter, categoryId, on) {
+  const visible = filtersTypeSet(project, filter);
+  for (const type of project.markTypes) {
+    if (type.categoryId !== categoryId) continue;
+    if (on) visible.add(type.id);
+    else visible.delete(type.id);
+  }
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersSetAllTypes(project, filter, on) {
+  const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
+  return filtersFromTypeSet(project, filter, visible);
+}
+function filtersActive(filter) {
+  if (!filter) return false;
+  return Boolean(
+    Array.isArray(filter.categoryIds) ||
+      Array.isArray(filter.typeIds) ||
+      filter.roomId ||
+      (filter.query || "").trim(),
+  );
+}
+
+// ——— панель фильтров ——————————————————————————————————————————————————
+
+function filtersSignature(project) {
+  if (!project) return "";
+  return [
+    project.categories.map((category) => [category.id, category.name, category.color, category.shape].join("~")).join("|"),
+    project.markTypes.map((type) => [type.id, type.code, type.name, type.categoryId, type.shape].join("~")).join("|"),
+    project.rooms.map((room) => [room.id, room.name].join("~")).join("|"),
+  ].join("#");
+}
+
+// Дерево галочек перестраивается только при правке справочника: щелчок по
+// галочке меняет фильтр, а не разметку панели — иначе чекбокс исчезал бы
+// из-под курсора вместе с фокусом.
+function filtersBox(api) {
+  const { getState, setState, subscribe } = api;
+  const node = uiEl("div", { class: "filters" });
+  const search = uiEl("input", {
+    class: "ui-input filters__search",
+    type: "text",
+    placeholder: strings.filters.searchPlaceholder,
+    title: strings.filters.searchHint,
+    on: { input: () => patch({ query: search.value }) },
+  });
+  const rooms = uiEl("select", {
+    class: "ui-select",
+    title: strings.filters.room,
+    on: { change: () => patch({ roomId: rooms.value || null }) },
+  });
+  const tree = uiEl("div", { class: "filters__tree" });
+  const summary = uiEl("summary", { class: "filters__summary", text: strings.filters.types });
+  const details = uiEl("details", { class: "filters__details" }, [summary, tree]);
+  const reset = uiButton(strings.filters.showAll, {
+    class: "ui-btn ui-btn--wide",
+    on: {
+      click: () => {
+        const state = getState();
+        setState({ filter: { ...filtersSetAllTypes(state.project, state.filter, true), roomId: null, query: "" } });
+        search.value = "";
+      },
+    },
+  });
+  let signature = null;
+  let checks = [];
+
+  function patch(part) {
+    const state = getState();
+    setState({ filter: { ...state.filter, ...part } });
+  }
+
+  function toggle(state, next) {
+    setState({ filter: { ...next, roomId: state.filter.roomId, query: state.filter.query } });
+  }
+
+  function buildTree(project) {
+    checks = [];
+    tree.replaceChildren();
+    rooms.replaceChildren(uiEl("option", { value: "", text: strings.filters.allRooms }));
+    for (const room of roomsInOrder(project)) {
+      rooms.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+    for (const { category, types } of project ? typesInOrder(project) : []) {
+      const box = uiEl("input", { class: "filters__check", type: "checkbox" });
+      box.addEventListener("change", () => {
+        const state = getState();
+        toggle(state, filtersToggleCategory(state.project, state.filter, category.id, box.checked));
+      });
+      checks.push({ box, kind: "category", id: category.id });
+      const dot = uiEl("span", { class: "filters__dot" });
+      dot.style.background = category.color;
+      tree.append(
+        uiEl("label", { class: "filters__category" }, [
+          box,
+          dot,
+          uiEl("span", { class: "filters__name", text: category.name }),
+        ]),
+      );
+      for (const type of types) {
+        const typeBox = uiEl("input", { class: "filters__check", type: "checkbox" });
+        typeBox.addEventListener("change", () => {
+          const state = getState();
+          toggle(state, filtersToggleType(state.project, state.filter, type.id, typeBox.checked));
+        });
+        checks.push({ box: typeBox, kind: "type", id: type.id });
+        tree.append(
+          uiEl("label", { class: "filters__type" }, [
+            typeBox,
+            uiEl("span", { class: "filters__code", text: type.code }),
+            uiEl("span", { class: "filters__name", text: type.name }),
+          ]),
+        );
+      }
+    }
+  }
+
+  function syncChecks(state) {
+    const project = state.project;
+    if (!project) return;
+    let hidden = 0;
+    for (const item of checks) {
+      if (item.kind === "category") {
+        const mode = filtersCategoryChecked(project, state.filter, item.id);
+        item.box.checked = mode !== "off";
+        item.box.indeterminate = mode === "mixed";
+      } else {
+        const on = filtersTypeChecked(project, state.filter, item.id);
+        item.box.checked = on;
+        if (!on) hidden += 1;
+      }
+    }
+    summary.textContent = hidden > 0
+      ? strings.filters.types + " — " + text("filters.hidden", { count: hidden })
+      : strings.filters.types;
+    rooms.value = state.filter.roomId || "";
+    if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
+      search.value = state.filter.query || "";
+    }
+    reset.disabled = !filtersActive(state.filter);
+  }
+
+  function render() {
+    const state = getState();
+    const next = filtersSignature(state.project);
+    if (next !== signature) {
+      signature = next;
+      buildTree(state.project);
+    }
+    syncChecks(state);
+  }
+
+  node.replaceChildren(search, rooms, details, reset);
+  subscribe((state, changed) => {
+    if ("project" in changed || "filter" in changed) render();
+  });
+  render();
+  return { node, render };
+}
+
+// src/panels/markControls.js
+// Окно выбора метки: с фильтром по помещению, значком и обозначением — тем же,
+// что на плане. Одно на всю сборку: им выбирают и подчинённые метки для
+// «чем управляет», и метку места для единицы оборудования, и связанные с ней.
+//
+// Отдельный файл, потому что это диалог со своей жизнью: список меток сбоку
+// открывает его и получает ответ, а как он устроен внутри — его дело. В самом
+// списке этому коду тесно: строка метки и так собирает семь полей.
+
+
+
+
+
+// Кандидаты: метки объекта в том же порядке, что и список сбоку, — схема за
+// схемой, внутри по справочнику и номеру. Помещение сужает список: с
+// рукописного листа «В3 — на В33 (Т1, Т2, Т3)» видно, что выключатель ищут
+// среди светильников своей комнаты.
+function markControlsCandidates(project, excludeId, roomId) {
+  const rows = [];
+  for (const scheme of schemesInOrder(project)) {
+    for (const row of filtersMarkRows(project, scheme.id, { roomId: roomId || null })) {
+      if (row.mark.id !== excludeId) rows.push({ ...row, scheme });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Окно выбора меток — кирпичами из ui.js: стопка диалогов, Escape и возврат
+ * фокуса у них общие.
+ * `options`: `{title, hint, chosen: [markId], exclude: markId, multiple}`.
+ * Отвечает списком отмеченных меток (в режиме одной — списком из одной) или
+ * `null`, если передумали. В режиме одной выбор сразу закрывает окно: лишнее
+ * подтверждение там, где выбирают одну строку, только мешает.
+ */
+function openMarkPicker(project, options = {}) {
+  return new Promise((resolve) => {
+    const multiple = options.multiple !== false;
+    const excludeId = options.exclude || null;
+    const chosen = new Set(Array.isArray(options.chosen) ? options.chosen : []);
+    const manySchemes = schemesInOrder(project).length > 1;
+    const list = uiEl("div", { class: "controls-pick__list" });
+    const note = uiEl("p", { class: "controls-pick__note" });
+    const rooms = uiEl("select", {
+      class: "ui-select",
+      title: strings.controls.room,
+      on: { change: () => renderList() },
+    });
+    rooms.append(uiEl("option", { value: "", text: strings.filters.allRooms }));
+    for (const room of roomsInOrder(project)) {
+      rooms.append(uiEl("option", { value: room.id, text: room.name }));
+    }
+
+    function renderNote() {
+      note.textContent = multiple ? text("controls.chosen", { count: chosen.size }) : "";
+    }
+
+    function markLine(row) {
+      const room = row.mark.roomId ? findRoom(project, row.mark.roomId) : null;
+      // Где метка стоит: помещение, а для многоэтажного объекта — и схема.
+      const where = [room ? room.name : "", manySchemes ? row.scheme.name : ""].filter(Boolean).join(" · ");
+      return [
+        // Метка узнаётся так же, как на плане: обозначение, цвет, форма.
+        shapeIcon(row.style.shape, row.style.color, 20),
+        uiEl("span", { class: "controls-pick__label", text: row.label }),
+        uiEl("span", { class: "controls-pick__name", text: row.type ? row.type.name : "" }),
+        uiEl("span", { class: "controls-pick__room", text: where }),
+      ];
+    }
+
+    function renderList() {
+      const rows = markControlsCandidates(project, excludeId, rooms.value);
+      if (rows.length === 0) {
+        const others = project.marks.some((item) => item.id !== excludeId);
+        list.replaceChildren(
+          uiEl("p", { class: "panel__empty", text: others ? strings.controls.nothingFound : strings.controls.empty }),
+        );
+        return;
+      }
+      list.replaceChildren(
+        ...rows.map((row) => {
+          if (!multiple) {
+            return uiEl(
+              "button",
+              {
+                class: "controls-pick__row controls-pick__row--one" + (chosen.has(row.mark.id) ? " is-active" : ""),
+                type: "button",
+                on: { click: () => done([row.mark.id]) },
+              },
+              markLine(row),
+            );
+          }
+          const box = uiEl("input", { class: "controls-pick__check", type: "checkbox" });
+          box.checked = chosen.has(row.mark.id);
+          box.addEventListener("change", () => {
+            if (box.checked) chosen.add(row.mark.id);
+            else chosen.delete(row.mark.id);
+            renderNote();
+          });
+          return uiEl("label", { class: "controls-pick__row" }, [box, ...markLine(row)]);
+        }),
+      );
+    }
+
+    renderList();
+    renderNote();
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const actions = [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })];
+    if (multiple) {
+      actions.push(
+        uiButton(strings.controls.save, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: () => done([...chosen]) },
+        }),
+      );
+    }
+    modal = uiModal({
+      title: options.title || strings.controls.room,
+      body: uiEl("div", { class: "controls-pick" }, [
+        options.hint ? uiEl("p", { class: "modal__hint", text: options.hint }) : null,
+        rooms,
+        list,
+        note,
+      ]),
+      actions,
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
+// «Чем управляет» — тот же выбор, только список берётся у самой метки.
+function openMarkControlsPicker(project, markId) {
+  return openMarkPicker(project, {
+    title: text("controls.title", { label: labelOf(project, markId) }),
+    hint: strings.controls.hint,
+    chosen: markControlIds(findMark(project, markId)),
+    exclude: markId,
+    multiple: true,
+  });
+}
+
+// src/panels/equipment.js
+// Оборудование: справочник моделей объекта и планирование, что где стоит.
+//
+// Заказчик разделил две вещи, и окно держит их рядом, но не путает. Модель —
+// товар в справочнике: «Shelly 1PM», одна модель стоит на многих метках, и по
+// ней считается закупка. Размещённая единица — «одна штука тут»: модель, метка
+// места и связи с другими метками (реле стоит в щите, а связано со
+// светильниками и выключателем).
+//
+// Метку выбирает общее окно выбора из `markControls.js` — второго такого в
+// сборке нет: и место, и связи спрашиваются им же.
+
+
+
+
+
+
+// Подпись единицы для строки списка меток и для кнопки: модель плюс связи.
+function placementSummary(project, placement) {
+  const model = findEquipment(project, placement.equipmentId);
+  const links = placementLinkIds(placement)
+    .map((id) => labelOf(project, id))
+    .filter(Boolean);
+  return { name: model ? model.name : "", vendor: model ? model.vendor : "", links };
+}
+function openEquipmentWindow(api, options = {}) {
+  const markId = options.markId || null;
+  const body = uiEl("div", { class: "equip" });
+
+  function project() {
+    return api.getState().project;
+  }
+
+  function editable() {
+    return layoutAllows("editMarks", api.getState().layout);
+  }
+
+  function fail(error) {
+    api.notify(error && error.message ? error.message : String(error), "error");
+    render();
+  }
+
+  // Перерисовка приходит подпиской на объект: так окно обновляется и от своей
+  // команды, и от чужой — например, от Ctrl+Z, пока оно открыто.
+  function commit(build, label) {
+    try {
+      canvasCommit(project(), build(project()), label);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // ——— справочник моделей ———
+
+  function modelRow(item) {
+    const used = equipmentUsage(project(), item.id);
+    const remove = uiButton("🗑", {
+      class: "ui-btn ui-btn--danger",
+      title: used > 0 ? text("errors.equipmentInUse", { name: item.name, count: used }) : strings.equipment.removeModel,
+      on: { click: () => removeModel(item) },
+    });
+    remove.disabled = used > 0;
+    return uiEl("div", { class: "equip__row" }, [
+      uiEl("input", {
+        class: "ui-input equip__name",
+        type: "text",
+        value: item.name,
+        title: strings.equipment.name,
+        on: {
+          change: (event) =>
+            commit((current) => updateEquipment(current, item.id, { name: event.target.value }).project, strings.history.editEquipment),
+        },
+      }),
+      uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        value: item.vendor,
+        placeholder: strings.equipment.vendorPlaceholder,
+        title: strings.equipment.vendor,
+        on: {
+          change: (event) =>
+            commit((current) => updateEquipment(current, item.id, { vendor: event.target.value }).project, strings.history.editEquipment),
+        },
+      }),
+      uiEl("input", {
+        class: "ui-input equip__code",
+        type: "text",
+        value: item.code,
+        placeholder: strings.equipment.codePlaceholder,
+        title: strings.equipment.code,
+        on: {
+          change: (event) =>
+            commit((current) => updateEquipment(current, item.id, { code: event.target.value }).project, strings.history.editEquipment),
+        },
+      }),
+      uiEl("span", { class: "equip__used", text: text("equipment.used", { count: used }) }),
+      remove,
+    ]);
+  }
+
+  async function removeModel(item) {
+    const agreed = await uiConfirm({
+      title: strings.equipment.removeModelTitle,
+      message: text("equipment.removeModelMessage", { name: item.name }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    commit((current) => deleteEquipment(current, item.id).project, strings.history.removeEquipment);
+  }
+
+  function addModelRow() {
+    const name = uiEl("input", {
+      class: "ui-input equip__name",
+      type: "text",
+      placeholder: strings.equipment.namePlaceholder,
+      title: strings.equipment.name,
+    });
+    const vendor = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.equipment.vendorPlaceholder,
+      title: strings.equipment.vendor,
+    });
+    const code = uiEl("input", {
+      class: "ui-input equip__code",
+      type: "text",
+      placeholder: strings.equipment.codePlaceholder,
+      title: strings.equipment.code,
+    });
+    return uiEl("div", { class: "equip__row equip__row--add" }, [
+      name,
+      vendor,
+      code,
+      uiButton(strings.equipment.addModel, {
+        class: "ui-btn ui-btn--accent",
+        on: {
+          click: () =>
+            commit(
+              (current) => addEquipment(current, { name: name.value, vendor: vendor.value, code: code.value }).project,
+              strings.history.addEquipment,
+            ),
+        },
+      }),
+    ]);
+  }
+
+  // ——— размещение ———
+
+  function modelSelect(value, onPick) {
+    const select = uiEl("select", {
+      class: "ui-select",
+      title: strings.equipment.name,
+      on: { change: (event) => onPick(event.target.value) },
+    });
+    for (const item of equipmentInOrder(project())) {
+      select.append(uiEl("option", { value: item.id, text: item.name }));
+    }
+    select.value = value || "";
+    return select;
+  }
+
+  async function pickPlace(placement) {
+    const chosen = await openMarkPicker(project(), {
+      title: text("equipment.placeTitle", { name: placementSummary(project(), placement).name }),
+      chosen: [placement.markId],
+      multiple: false,
+    });
+    if (!chosen || chosen.length === 0) return;
+    commit((current) => updatePlacement(current, placement.id, { markId: chosen[0] }).project, strings.history.editPlacement);
+  }
+
+  async function pickLinks(placement) {
+    const chosen = await openMarkPicker(project(), {
+      title: text("equipment.linksTitle", { name: placementSummary(project(), placement).name }),
+      hint: strings.equipment.linksHint,
+      chosen: placementLinkIds(placement),
+      exclude: placement.markId,
+      multiple: true,
+    });
+    if (!chosen) return;
+    commit((current) => updatePlacement(current, placement.id, { links: chosen }).project, strings.history.editPlacement);
+  }
+
+  function placementRow(placement) {
+    const summary = placementSummary(project(), placement);
+    const place = findMark(project(), placement.markId);
+    return uiEl("div", { class: "equip__row" }, [
+      modelSelect(placement.equipmentId, (equipmentId) =>
+        commit((current) => updatePlacement(current, placement.id, { equipmentId }).project, strings.history.editPlacement),
+      ),
+      uiButton(place ? labelOf(project(), placement.markId) : strings.equipment.placeChoose, {
+        class: "ui-btn equip__place",
+        title: strings.equipment.place,
+        on: { click: () => pickPlace(placement) },
+      }),
+      uiButton(summary.links.length > 0 ? summary.links.join(", ") : strings.equipment.linksEmpty, {
+        class: "ui-btn ui-btn--wide equip__links" + (summary.links.length > 0 ? " is-set" : ""),
+        title: strings.equipment.links,
+        on: { click: () => pickLinks(placement) },
+      }),
+      uiButton("🗑", {
+        class: "ui-btn ui-btn--danger",
+        title: strings.equipment.removePlacement,
+        on: {
+          click: () =>
+            commit((current) => deletePlacement(current, placement.id).project, strings.history.removePlacement),
+        },
+      }),
+    ]);
+  }
+
+  function addPlacementRow() {
+    const models = equipmentInOrder(project());
+    let equipmentId = models.length > 0 ? models[0].id : "";
+    let placeId = markId;
+    const placeButton = uiButton(placeId ? labelOf(project(), placeId) : strings.equipment.placeChoose, {
+      class: "ui-btn equip__place",
+      title: strings.equipment.place,
+      on: {
+        click: async () => {
+          const chosen = await openMarkPicker(project(), {
+            title: strings.equipment.placeChoose,
+            chosen: placeId ? [placeId] : [],
+            multiple: false,
+          });
+          if (!chosen || chosen.length === 0) return;
+          placeId = chosen[0];
+          placeButton.textContent = labelOf(project(), placeId);
+        },
+      },
+    });
+    const add = uiButton(strings.equipment.addPlacement, {
+      class: "ui-btn ui-btn--accent",
+      title: strings.equipment.addPlacementHint,
+      on: {
+        click: () => {
+          if (!equipmentId) {
+            api.notify(strings.equipment.needModel);
+            return;
+          }
+          if (!placeId) {
+            api.notify(strings.equipment.addPlacementHint);
+            return;
+          }
+          commit((current) => addPlacement(current, { equipmentId, markId: placeId }).project, strings.history.addPlacement);
+        },
+      },
+    });
+    return uiEl("div", { class: "equip__row equip__row--add" }, [
+      modelSelect(equipmentId, (value) => {
+        equipmentId = value;
+      }),
+      placeButton,
+      add,
+    ]);
+  }
+
+  function render() {
+    const current = project();
+    if (!current) {
+      body.replaceChildren();
+      return;
+    }
+    const models = equipmentInOrder(current);
+    // На метке — только её единицы: окно открыто из строки этой метки.
+    const placed = markId ? placementsAt(current, markId) : placementsInOrder(current);
+    body.replaceChildren(
+      uiEl("h4", { class: "equip__title", text: strings.equipment.models }),
+      ...(models.length > 0
+        ? models.map((item) => modelRow(item))
+        : [uiEl("p", { class: "panel__empty", text: strings.equipment.modelsEmpty })]),
+      addModelRow(),
+      uiEl("h4", { class: "equip__title", text: strings.equipment.placed }),
+      ...(placed.length > 0
+        ? placed.map((placement) => placementRow(placement))
+        : [
+            uiEl("p", {
+              class: "panel__empty",
+              text: markId ? strings.equipment.placedEmptyAtMark : strings.equipment.placedEmpty,
+            }),
+          ]),
+      addPlacementRow(),
+    );
+    // Режим просмотра: окно читается, но ничего не правит — как и список меток.
+    if (!editable()) {
+      for (const field of body.querySelectorAll("input")) field.readOnly = true;
+      for (const field of body.querySelectorAll("select")) field.disabled = true;
+      for (const button of body.querySelectorAll("button")) button.disabled = true;
+    }
+  }
+
+  render();
+  const unsubscribe = api.subscribe((state, changed) => {
+    if ("project" in changed || "layout" in changed) render();
+  });
+  const modal = uiModal({
+    title: markId ? text("equipment.atMarkTitle", { label: labelOf(project(), markId) }) : strings.equipment.title,
+    body,
+    actions: [uiButton(strings.dialog.close, { on: { click: () => close() } })],
+    onCancel: () => unsubscribe(),
+  });
+  function close() {
+    unsubscribe();
+    modal.close();
+  }
+  return { close };
+}
+
 // src/panels/export.js
 // Панель выгрузки: две кнопки в шапке и два диалога — таблица и схема.
 //
@@ -12520,6 +14252,11 @@ function mountTypesPanel(host, api) {
     class: "ui-btn ui-btn--wide",
     on: { click: () => openTypesDictionary(api) },
   });
+  const equipmentButton = uiButton(strings.equipment.open, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.equipment.title,
+    on: { click: () => openEquipmentWindow(api) },
+  });
   const saveButton = uiButton(strings.dictionary.saveTemplate, {
     class: "ui-btn ui-btn--wide",
     title: strings.dictionary.saveTemplateHint,
@@ -12531,7 +14268,9 @@ function mountTypesPanel(host, api) {
   });
   // Кнопка возврата показывается, только когда шаблон и правда сохранён.
   resetButton.hidden = true;
-  host.replaceChildren(uiEl("div", { class: "dict-panel" }, [dictionaryButton, saveButton, resetButton]));
+  host.replaceChildren(
+    uiEl("div", { class: "dict-panel" }, [dictionaryButton, equipmentButton, saveButton, resetButton]),
+  );
 
   async function saveTemplate() {
     const state = getState();
@@ -12552,6 +14291,7 @@ function mountTypesPanel(host, api) {
     resetButton.hidden = !template;
     const state = getState();
     dictionaryButton.disabled = !state.project;
+    equipmentButton.disabled = !state.project;
     saveButton.disabled = !state.project;
   }
 
@@ -12796,6 +14536,7 @@ registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
 
 
+
 // Строка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
 const FILE_TICK_MS = 60000;
 
@@ -12843,6 +14584,8 @@ function mountFilePanel(host, api) {
   // честнее флага — правка, пришедшая во время упаковки, оставит dirty.
   let fileSavedProject = null;
   let fileFailReported = false;
+  // Опрос общей папки заводится один раз на выбранную папку.
+  let fileWatching = false;
 
   const saveButton = uiButton(strings.file.save, {
     class: "ui-btn ui-btn--accent",
@@ -13097,6 +14840,77 @@ function mountFilePanel(host, api) {
     renderStatus();
   }
 
+  // ——— чужие правки в общей папке ————————————————————————————————————
+
+  // Что пришло со стороны, построчно. Показывается, только когда есть о чём
+  // говорить: тост сообщает факт, список — подробности.
+  function mergeReport(result) {
+    const body = [uiEl("p", { class: "modal__text", text: text("merge.from", { file: result.file }) })];
+    const sections = [
+      [
+        strings.merge.incoming,
+        result.changes.map((change) => text("merge." + change.action, { label: change.label || change.id })),
+      ],
+      [
+        strings.merge.conflicts,
+        result.conflicts.map((conflict) =>
+          text("merge." + conflict.code, {
+            label: conflict.label || conflict.id,
+            side: conflict.kept === "theirs" ? strings.merge.sideTheirs : strings.merge.sideOurs,
+          }),
+        ),
+      ],
+      [strings.merge.renumbered, result.renumbered.map((item) => text("merge.renumberedItem", item))],
+    ];
+    for (const [title, lines] of sections) {
+      if (lines.length === 0) continue;
+      body.push(uiEl("p", { class: "modal__text", text: title }));
+      const list = uiEl("ul", { class: "merge-list" });
+      for (const line of lines) list.append(uiEl("li", { text: line }));
+      body.push(list);
+    }
+    if (result.plans) {
+      body.push(uiEl("p", { class: "modal__text", text: text("merge.plans", { count: result.plans }) }));
+    }
+    body.push(uiEl("p", { class: "modal__text", text: strings.merge.historyCleared }));
+
+    const modal = uiModal({
+      title: strings.merge.title,
+      body,
+      actions: [uiButton(strings.merge.close, { on: { click: () => modal.close() } })],
+    });
+  }
+
+  // Слияние пришло со стороны — применяем его к сеансу и сразу публикуем
+  // обратно в папку: второй инженер должен увидеть сложенный объект, а не
+  // только свою половину.
+  function applyExternal(result) {
+    const state = getState();
+    if (!result || !result.project || !state.project) return;
+    // Пока читали папку, объект могли переключить — тогда это не его правка.
+    if (result.project.id !== state.project.id) return;
+    setState({ project: result.project, dirty: true });
+    // Ctrl+Z отменяет действия пользователя, а не чужие: откат поверх слияния
+    // стёр бы чужую работу молча, поэтому стек истории здесь обрывается.
+    clearHistory();
+    const loud = result.counts.conflicts > 0;
+    notify(loud ? strings.merge.toastConflicts : text("merge.toast", result.counts), loud ? "error" : "info");
+    if (loud || result.counts.renumbered > 0) mergeReport(result);
+    autosaveSchedule(result.project, { onDone: onFolderWritten });
+    renderStatus();
+  }
+
+  function syncWatch() {
+    const ready = autosaveReady();
+    if (ready && !fileWatching) {
+      fileWatching = true;
+      autosaveWatch({ getProject: () => getState().project, onExternal: applyExternal });
+    } else if (!ready && fileWatching) {
+      fileWatching = false;
+      autosaveStopWatch();
+    }
+  }
+
   // ——— состояние и строка в шапке ————————————————————————————————————
 
   function markSaved(project) {
@@ -13209,11 +15023,15 @@ function mountFilePanel(host, api) {
     event.returnValue = "";
   });
 
-  onAutosaveChange(() => renderStatus());
+  onAutosaveChange(() => {
+    renderStatus();
+    syncWatch();
+  });
   setInterval(() => renderStatus(), FILE_TICK_MS);
 
   (async () => {
     await autosaveRestore();
+    syncWatch();
     renderStatus();
   })();
   renderStatus();
@@ -13236,367 +15054,6 @@ if (typeof document !== "undefined") {
   } else {
     setTimeout(startFilePanel, 0);
   }
-}
-
-// src/panels/filters.js
-// Фильтры списка меток: галочки категорий и типов, помещение и поиск.
-//
-// Фильтр живёт в состоянии сеанса (`state.filter`) и один на всех: по нему
-// рисует холст, по нему же строится список сбоку и легенда в выгрузке.
-// Поэтому здесь только чистые функции над ним — что видно, что отмечено и во
-// что превращается щелчок по галочке; сама панель собирается из них ниже.
-
-
-
-
-// Порядок строк списка — порядок справочника: категории по своему order, типы
-// внутри, метки по номеру. Тот же обход, что у легенды и таблиц.
-function filtersMarkRows(project, schemeId, filter) {
-  const scheme = project ? findScheme(project, schemeId) : null;
-  if (!scheme) return [];
-  const order = new Map();
-  const categoryOf = new Map();
-  let index = 0;
-  for (const group of typesInOrder(project)) {
-    for (const type of group.types) {
-      order.set(type.id, index);
-      categoryOf.set(type.id, group.category);
-      index += 1;
-    }
-  }
-  const last = index;
-  return visibleMarks(project, scheme, filter)
-    .map((mark) => ({
-      mark,
-      type: findType(project, mark.typeId),
-      category: categoryOf.get(mark.typeId) || null,
-      style: styleOf(project, mark.typeId),
-      label: labelOf(project, mark.id),
-    }))
-    .sort((a, b) => {
-      const orderA = order.has(a.mark.typeId) ? order.get(a.mark.typeId) : last;
-      const orderB = order.has(b.mark.typeId) ? order.get(b.mark.typeId) : last;
-      return orderA === orderB ? a.mark.number - b.mark.number : orderA - orderB;
-    });
-}
-
-// Видимые типы — одно множество, из которого собираются оба поля фильтра.
-// Галочка категории и галочка типа правят его, а `categoryIds`/`typeIds`
-// пересчитываются заново: держать две независимые истины — значит рано или
-// поздно показать метку, которую сняли галочкой, или наоборот.
-function filtersTypeSet(project, filter) {
-  const byType = filter && Array.isArray(filter.typeIds) ? new Set(filter.typeIds) : null;
-  const byCategory = filter && Array.isArray(filter.categoryIds) ? new Set(filter.categoryIds) : null;
-  const visible = new Set();
-  for (const type of project.markTypes) {
-    if (byType && !byType.has(type.id)) continue;
-    if (byCategory && !byCategory.has(type.categoryId)) continue;
-    visible.add(type.id);
-  }
-  return visible;
-}
-
-function filtersFromTypeSet(project, filter, visible) {
-  const types = project.markTypes;
-  const everyType = types.every((type) => visible.has(type.id));
-  // Категория без типов — всегда отмечена: прятать в ней нечего.
-  const categories = project.categories.filter((category) => {
-    const own = types.filter((type) => type.categoryId === category.id);
-    return own.length === 0 || own.some((type) => visible.has(type.id));
-  });
-  const everyCategory = categories.length === project.categories.length;
-  return {
-    ...(filter || {}),
-    categoryIds: everyCategory ? null : categories.map((category) => category.id),
-    typeIds: everyType ? null : types.filter((type) => visible.has(type.id)).map((type) => type.id),
-  };
-}
-function filtersTypeChecked(project, filter, typeId) {
-  return filtersTypeSet(project, filter).has(typeId);
-}
-
-// «on» — видны все типы категории, «off» — ни одного, «mixed» — часть.
-function filtersCategoryChecked(project, filter, categoryId) {
-  const visible = filtersTypeSet(project, filter);
-  const own = project.markTypes.filter((type) => type.categoryId === categoryId);
-  if (own.length === 0) return "on";
-  const shown = own.filter((type) => visible.has(type.id)).length;
-  if (shown === 0) return "off";
-  return shown === own.length ? "on" : "mixed";
-}
-function filtersToggleType(project, filter, typeId, on) {
-  const visible = filtersTypeSet(project, filter);
-  if (on) visible.add(typeId);
-  else visible.delete(typeId);
-  return filtersFromTypeSet(project, filter, visible);
-}
-function filtersToggleCategory(project, filter, categoryId, on) {
-  const visible = filtersTypeSet(project, filter);
-  for (const type of project.markTypes) {
-    if (type.categoryId !== categoryId) continue;
-    if (on) visible.add(type.id);
-    else visible.delete(type.id);
-  }
-  return filtersFromTypeSet(project, filter, visible);
-}
-function filtersSetAllTypes(project, filter, on) {
-  const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
-  return filtersFromTypeSet(project, filter, visible);
-}
-function filtersActive(filter) {
-  if (!filter) return false;
-  return Boolean(
-    Array.isArray(filter.categoryIds) ||
-      Array.isArray(filter.typeIds) ||
-      filter.roomId ||
-      (filter.query || "").trim(),
-  );
-}
-
-// ——— панель фильтров ——————————————————————————————————————————————————
-
-function filtersSignature(project) {
-  if (!project) return "";
-  return [
-    project.categories.map((category) => [category.id, category.name, category.color, category.shape].join("~")).join("|"),
-    project.markTypes.map((type) => [type.id, type.code, type.name, type.categoryId, type.shape].join("~")).join("|"),
-    project.rooms.map((room) => [room.id, room.name].join("~")).join("|"),
-  ].join("#");
-}
-
-// Дерево галочек перестраивается только при правке справочника: щелчок по
-// галочке меняет фильтр, а не разметку панели — иначе чекбокс исчезал бы
-// из-под курсора вместе с фокусом.
-function filtersBox(api) {
-  const { getState, setState, subscribe } = api;
-  const node = uiEl("div", { class: "filters" });
-  const search = uiEl("input", {
-    class: "ui-input filters__search",
-    type: "text",
-    placeholder: strings.filters.searchPlaceholder,
-    title: strings.filters.searchHint,
-    on: { input: () => patch({ query: search.value }) },
-  });
-  const rooms = uiEl("select", {
-    class: "ui-select",
-    title: strings.filters.room,
-    on: { change: () => patch({ roomId: rooms.value || null }) },
-  });
-  const tree = uiEl("div", { class: "filters__tree" });
-  const summary = uiEl("summary", { class: "filters__summary", text: strings.filters.types });
-  const details = uiEl("details", { class: "filters__details" }, [summary, tree]);
-  const reset = uiButton(strings.filters.showAll, {
-    class: "ui-btn ui-btn--wide",
-    on: {
-      click: () => {
-        const state = getState();
-        setState({ filter: { ...filtersSetAllTypes(state.project, state.filter, true), roomId: null, query: "" } });
-        search.value = "";
-      },
-    },
-  });
-  let signature = null;
-  let checks = [];
-
-  function patch(part) {
-    const state = getState();
-    setState({ filter: { ...state.filter, ...part } });
-  }
-
-  function toggle(state, next) {
-    setState({ filter: { ...next, roomId: state.filter.roomId, query: state.filter.query } });
-  }
-
-  function buildTree(project) {
-    checks = [];
-    tree.replaceChildren();
-    rooms.replaceChildren(uiEl("option", { value: "", text: strings.filters.allRooms }));
-    for (const room of roomsInOrder(project)) {
-      rooms.append(uiEl("option", { value: room.id, text: room.name }));
-    }
-    for (const { category, types } of project ? typesInOrder(project) : []) {
-      const box = uiEl("input", { class: "filters__check", type: "checkbox" });
-      box.addEventListener("change", () => {
-        const state = getState();
-        toggle(state, filtersToggleCategory(state.project, state.filter, category.id, box.checked));
-      });
-      checks.push({ box, kind: "category", id: category.id });
-      const dot = uiEl("span", { class: "filters__dot" });
-      dot.style.background = category.color;
-      tree.append(
-        uiEl("label", { class: "filters__category" }, [
-          box,
-          dot,
-          uiEl("span", { class: "filters__name", text: category.name }),
-        ]),
-      );
-      for (const type of types) {
-        const typeBox = uiEl("input", { class: "filters__check", type: "checkbox" });
-        typeBox.addEventListener("change", () => {
-          const state = getState();
-          toggle(state, filtersToggleType(state.project, state.filter, type.id, typeBox.checked));
-        });
-        checks.push({ box: typeBox, kind: "type", id: type.id });
-        tree.append(
-          uiEl("label", { class: "filters__type" }, [
-            typeBox,
-            uiEl("span", { class: "filters__code", text: type.code }),
-            uiEl("span", { class: "filters__name", text: type.name }),
-          ]),
-        );
-      }
-    }
-  }
-
-  function syncChecks(state) {
-    const project = state.project;
-    if (!project) return;
-    let hidden = 0;
-    for (const item of checks) {
-      if (item.kind === "category") {
-        const mode = filtersCategoryChecked(project, state.filter, item.id);
-        item.box.checked = mode !== "off";
-        item.box.indeterminate = mode === "mixed";
-      } else {
-        const on = filtersTypeChecked(project, state.filter, item.id);
-        item.box.checked = on;
-        if (!on) hidden += 1;
-      }
-    }
-    summary.textContent = hidden > 0
-      ? strings.filters.types + " — " + text("filters.hidden", { count: hidden })
-      : strings.filters.types;
-    rooms.value = state.filter.roomId || "";
-    if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
-      search.value = state.filter.query || "";
-    }
-    reset.disabled = !filtersActive(state.filter);
-  }
-
-  function render() {
-    const state = getState();
-    const next = filtersSignature(state.project);
-    if (next !== signature) {
-      signature = next;
-      buildTree(state.project);
-    }
-    syncChecks(state);
-  }
-
-  node.replaceChildren(search, rooms, details, reset);
-  subscribe((state, changed) => {
-    if ("project" in changed || "filter" in changed) render();
-  });
-  render();
-  return { node, render };
-}
-
-// src/panels/markControls.js
-// Окно «чем управляет»: выбор других меток объекта с фильтром по помещению.
-//
-// Отдельный файл, потому что это диалог со своей жизнью: список меток сбоку
-// открывает его и получает ответ, а как он устроен внутри — его дело. В самом
-// списке этому коду тесно: строка метки и так собирает семь полей.
-
-
-
-
-
-// Кандидаты в подчинённые: все метки объекта, кроме самой, в том же порядке,
-// что и список сбоку, — схема за схемой, внутри по справочнику и номеру.
-// Помещение сужает список: с рукописного листа «В3 — на В33 (Т1, Т2, Т3)»
-// видно, что выключатель ищут среди светильников своей комнаты.
-function markControlsCandidates(project, markId, roomId) {
-  const rows = [];
-  for (const scheme of schemesInOrder(project)) {
-    for (const row of filtersMarkRows(project, scheme.id, { roomId: roomId || null })) {
-      if (row.mark.id !== markId) rows.push({ ...row, scheme });
-    }
-  }
-  return rows;
-}
-
-// Окно выбора — кирпичами из ui.js: стопка диалогов, Escape и возврат фокуса
-// у них общие. Отвечает списком отмеченных меток или null, если передумали.
-function openMarkControlsPicker(project, markId) {
-  return new Promise((resolve) => {
-    const mark = findMark(project, markId);
-    const chosen = new Set(markControlIds(mark));
-    const manySchemes = schemesInOrder(project).length > 1;
-    const list = uiEl("div", { class: "controls-pick__list" });
-    const note = uiEl("p", { class: "controls-pick__note" });
-    const rooms = uiEl("select", {
-      class: "ui-select",
-      title: strings.controls.room,
-      on: { change: () => renderList() },
-    });
-    rooms.append(uiEl("option", { value: "", text: strings.filters.allRooms }));
-    for (const room of roomsInOrder(project)) {
-      rooms.append(uiEl("option", { value: room.id, text: room.name }));
-    }
-
-    function renderNote() {
-      note.textContent = text("controls.chosen", { count: chosen.size });
-    }
-
-    function renderList() {
-      const rows = markControlsCandidates(project, markId, rooms.value);
-      if (rows.length === 0) {
-        const others = project.marks.some((item) => item.id !== markId);
-        list.replaceChildren(
-          uiEl("p", { class: "panel__empty", text: others ? strings.controls.nothingFound : strings.controls.empty }),
-        );
-        return;
-      }
-      list.replaceChildren(
-        ...rows.map((row) => {
-          const box = uiEl("input", { class: "controls-pick__check", type: "checkbox" });
-          box.checked = chosen.has(row.mark.id);
-          box.addEventListener("change", () => {
-            if (box.checked) chosen.add(row.mark.id);
-            else chosen.delete(row.mark.id);
-            renderNote();
-          });
-          const room = row.mark.roomId ? findRoom(project, row.mark.roomId) : null;
-          // Где метка стоит: помещение, а для многоэтажного объекта — и схема.
-          const where = [room ? room.name : "", manySchemes ? row.scheme.name : ""].filter(Boolean).join(" · ");
-          return uiEl("label", { class: "controls-pick__row" }, [
-            box,
-            // Метка узнаётся так же, как на плане: обозначение, цвет, форма.
-            shapeIcon(row.style.shape, row.style.color, 20),
-            uiEl("span", { class: "controls-pick__label", text: row.label }),
-            uiEl("span", { class: "controls-pick__name", text: row.type ? row.type.name : "" }),
-            uiEl("span", { class: "controls-pick__room", text: where }),
-          ]);
-        }),
-      );
-    }
-
-    renderList();
-    renderNote();
-    let modal;
-    const done = (value) => {
-      modal.close();
-      resolve(value);
-    };
-    modal = uiModal({
-      title: text("controls.title", { label: labelOf(project, markId) }),
-      body: uiEl("div", { class: "controls-pick" }, [
-        uiEl("p", { class: "modal__hint", text: strings.controls.hint }),
-        rooms,
-        list,
-        note,
-      ]),
-      actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
-        uiButton(strings.controls.save, {
-          class: "ui-btn ui-btn--accent",
-          on: { click: () => done([...chosen]) },
-        }),
-      ],
-      onCancel: () => resolve(null),
-    });
-  });
 }
 
 // src/panels/rooms.js
@@ -13891,6 +15348,7 @@ registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 
 
+
 const MARKS_NEW_ROOM = "--new-room--";
 // «По контуру» — метка отдана автоматике: помещение подставляется по контуру
 // на схеме. Любой другой выбор в этом поле — ручная правка, и она главнее:
@@ -13944,6 +15402,7 @@ function marksRowModel(project, row, options = {}) {
   const controllers = options.controllers instanceof Map ? options.controllers : new Map();
   head.fields = {
     number: mark.number,
+    equipment: placementsAt(project, mark.id).length,
     roomId: mark.roomId || null,
     roomManual: markRoomManual(mark),
     location: mark.location || "",
@@ -14164,6 +15623,19 @@ function mountMarksPanel(host, api) {
           uiEl("span", { class: "mark-row__label", text: view.label }),
           badge,
         ]);
+    // Оборудование на этой метке: своё окно планирования, открытое сразу на ней.
+    const equipmentButton = view.fields
+      ? uiButton(
+          view.fields.equipment > 0
+            ? text("equipment.count", { count: view.fields.equipment })
+            : strings.equipment.open,
+          {
+            class: "ui-btn ui-btn--wide mark-row__equipment" + (view.fields.equipment > 0 ? " is-set" : ""),
+            title: strings.equipment.onMark,
+            on: { click: () => openEquipmentWindow(api, { markId: mark.id }) },
+          },
+        )
+      : null;
     const controlsButton = view.fields
       ? uiButton(
           view.fields.controls.length > 0
@@ -14206,6 +15678,7 @@ function mountMarksPanel(host, api) {
             })
           : null,
         controlsButton,
+        equipmentButton,
         // Обратная сторона связи — строкой и только для чтения: стоя у
         // светильника, надо видеть, какой выключатель его включает, а правится
         // связь там, где её завели, — у выключателя.

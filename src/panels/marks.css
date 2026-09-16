@@ -515,3 +515,98 @@
   color: var(--panel-muted);
   font-size: 12px;
 }
+
+/* Оборудование: справочник моделей и размещение. */
+
+.mark-row__equipment {
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.mark-row__equipment.is-set {
+  color: var(--panel-text);
+  border-color: var(--ok);
+}
+
+.equip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 560px;
+  max-width: 760px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.equip__title {
+  margin: 10px 0 2px;
+  color: var(--panel-text);
+  font-size: 13px;
+}
+
+.equip__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.equip__row--add {
+  padding-top: 6px;
+  border-top: 1px dashed var(--panel-line);
+}
+
+.equip__row .ui-input,
+.equip__row .ui-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.equip__name {
+  flex: 2 1 0;
+}
+
+.equip__code {
+  flex: none;
+  width: 110px;
+}
+
+.equip__used {
+  flex: none;
+  color: var(--panel-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.equip__place {
+  flex: none;
+  min-width: 64px;
+  font-weight: 700;
+}
+
+.equip__links {
+  flex: 2 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--panel-muted);
+}
+
+.equip__links.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+/* Выбор одной метки: строка — кнопка, галочки в ней нет. */
+.controls-pick__row--one {
+  width: 100%;
+  border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+}
+
+.controls-pick__row--one.is-active {
+  border-color: var(--accent);
+}

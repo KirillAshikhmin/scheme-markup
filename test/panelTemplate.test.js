@@ -28,7 +28,7 @@ test("объект из шаблона повторяет справочник �
   assert.deepEqual(first.markTypes.map((type) => type.code), ["Т", "Ш"]);
   assert.equal(first.markTypes[1].blockMode, "single");
   const blinds = first.markTypes[1].id;
-  assert.deepEqual(styleOf(first, blinds), { color: "#8250DF", shape: "triangle-down" });
+  assert.deepEqual(styleOf(first, blinds), { color: "#8250DF", shape: "triangle-down", lineStyle: "solid" });
 
   // Ни одного общего идентификатора: правка справочника одного объекта не
   // должна ни при каких обстоятельствах указывать на записи другого.

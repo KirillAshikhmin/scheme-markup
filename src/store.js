@@ -227,8 +227,11 @@ export async function deleteProject(id) {
 
 // ——— изображения ——————————————————————————————————————————————————————
 
-export async function putImage(blob) {
-  const id = newStoreId();
+// `imageId` задаётся, когда план приехал из чужого файла: в общей папке схема
+// ссылается на картинку по идентификатору из файла, и переименовать его —
+// значит развести ссылки двух браузеров.
+export async function putImage(blob, imageId) {
+  const id = typeof imageId === "string" && imageId ? imageId : newStoreId();
   const createdAt = Date.now();
   const written = await runTransaction(STORE_NAMES.images, "readwrite", (store) =>
     idbRequest(store.put({ id, blob, type: blob.type || "", size: blob.size || 0, createdAt })),

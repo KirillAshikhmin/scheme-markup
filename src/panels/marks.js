@@ -14,6 +14,7 @@ import {
   markControlIds,
   markControls,
   markRoomManual,
+  placementsAt,
   findScheme,
   repeatedNumbers,
   roomsInOrder,
@@ -28,6 +29,7 @@ import { canvasCommit } from "../canvas.js";
 import { uiButton, uiEl, uiPrompt } from "./ui.js";
 import { filtersBox, filtersMarkRows } from "./filters.js";
 import { openMarkControlsPicker } from "./markControls.js";
+import { openEquipmentWindow } from "./equipment.js";
 import { roomsEnsure } from "./rooms.js";
 
 const MARKS_NEW_ROOM = "--new-room--";
@@ -83,6 +85,7 @@ export function marksRowModel(project, row, options = {}) {
   const controllers = options.controllers instanceof Map ? options.controllers : new Map();
   head.fields = {
     number: mark.number,
+    equipment: placementsAt(project, mark.id).length,
     roomId: mark.roomId || null,
     roomManual: markRoomManual(mark),
     location: mark.location || "",
@@ -303,6 +306,19 @@ function mountMarksPanel(host, api) {
           uiEl("span", { class: "mark-row__label", text: view.label }),
           badge,
         ]);
+    // Оборудование на этой метке: своё окно планирования, открытое сразу на ней.
+    const equipmentButton = view.fields
+      ? uiButton(
+          view.fields.equipment > 0
+            ? text("equipment.count", { count: view.fields.equipment })
+            : strings.equipment.open,
+          {
+            class: "ui-btn ui-btn--wide mark-row__equipment" + (view.fields.equipment > 0 ? " is-set" : ""),
+            title: strings.equipment.onMark,
+            on: { click: () => openEquipmentWindow(api, { markId: mark.id }) },
+          },
+        )
+      : null;
     const controlsButton = view.fields
       ? uiButton(
           view.fields.controls.length > 0
@@ -345,6 +361,7 @@ function mountMarksPanel(host, api) {
             })
           : null,
         controlsButton,
+        equipmentButton,
         // Обратная сторона связи — строкой и только для чтения: стоя у
         // светильника, надо видеть, какой выключатель его включает, а правится
         // связь там, где её завели, — у выключателя.

@@ -7,7 +7,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  addEquipment,
   addMark,
+  addPlacement,
   addRoom,
   addScheme,
   createProject,
@@ -75,6 +77,7 @@ test("выделенная метка раскрыта: помещение, ра
   const lamp = marksRowModel(box.project, rowOf(box, box.lampOne), { open: true, controllers });
   assert.deepEqual(lamp.fields, {
     number: 1,
+    equipment: 0,
     roomId: box.roomId,
     roomManual: true,
     location: "над тумбой слева",
@@ -105,4 +108,19 @@ test("обратная сторона связи собирается одним
   assert.deepEqual(index.get(box.lampTwo), ["В1"]);
   assert.equal(index.has(box.switchOne), false);
   assert.deepEqual(marksControllerIndex(null).size, 0);
+});
+
+test("в раскрытой строке видно, сколько оборудования стоит на метке", () => {
+  const box = flat();
+  const model = addEquipment(box.project, { name: "Shelly 1PM" });
+  box.project = model.project;
+  box.project = addPlacement(box.project, {
+    equipmentId: model.equipment.id,
+    markId: box.lampOne,
+    links: [box.switchOne],
+  }).project;
+  const view = marksRowModel(box.project, rowOf(box, box.lampOne), { open: true });
+  assert.equal(view.fields.equipment, 1);
+  // Связанная метка — не место: на выключателе ничего не стоит.
+  assert.equal(marksRowModel(box.project, rowOf(box, box.switchOne), { open: true }).fields.equipment, 0);
 });
