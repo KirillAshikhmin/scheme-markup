@@ -14,7 +14,9 @@ import {
   addType,
   addTypesFromCatalog,
   catalogOffer,
+  categoryNameKey,
   changeMarkType,
+  findCategoryByName,
   compactNumbers,
   createProject,
   defaultTemplate,
@@ -1203,4 +1205,71 @@ test("шаблон с мусором не ломает общую базу, а �
   const added = addTypesFromCatalog(withoutDictionary(), stale, ["Ш", "Я"]);
   assert.deepEqual(added.types.map((type) => type.code), ["Ш"]);
   assert.equal(added.project.categories.length, 1);
+});
+
+test("испорченный код из шаблона до окна не доходит, а не падает при добавлении", () => {
+  // Шаблон, сохранённый до правила «код — только буквы», несёт «Ш1». Покажи
+  // его окно — пользователь отметит его вместе с исправными, и `addType`
+  // уронит весь пакет. Годность строки решает та же функция, что разбирает
+  // код, введённый руками.
+  const stale = {
+    categories: [{ id: "c", name: "Шторы", color: "#8250DF", shape: "square" }],
+    markTypes: [
+      { categoryId: "c", code: "Ш1", name: "Штора с цифрой" },
+      { categoryId: "c", code: "  ", name: "Без кода" },
+      { categoryId: "c", code: "ОЧЕНЬДЛИННЫЙКОДТИПА", name: "Длиннее предела" },
+      { categoryId: "c", code: "Ш", name: "Штора" },
+    ],
+  };
+  const project = withoutDictionary();
+  const groups = catalogOffer(project, stale);
+  assert.deepEqual(groups.find((group) => group.category.name === "Шторы").types.map((type) => type.code), ["Ш"]);
+  // Ни одной строки, которую справочник откажется принять: окно и `addType`
+  // обязаны отвечать на вопрос о коде одинаково.
+  for (const group of groups) {
+    for (const type of group.types) {
+      assert.equal(codeProblem(project, type.code), null, "окно предлагает код, который модель не примет: " + type.code);
+    }
+  }
+});
+
+test("негодная строка выпадает из пакета одна и называется, годные добавляются", () => {
+  const stale = {
+    categories: [{ id: "c", name: "Шторы", color: "#8250DF", shape: "square" }],
+    markTypes: [
+      { categoryId: "c", code: "Ш", name: "Штора" },
+      { categoryId: "c", code: "Ш1", name: "Штора с цифрой" },
+      { categoryId: "c", code: "ШТ", name: "Штора вторая" },
+    ],
+  };
+  const result = addTypesFromCatalog(withoutDictionary(), stale, ["Ш", "Ш1", "ШТ"]);
+  assert.deepEqual(result.types.map((type) => type.code), ["Ш", "ШТ"], "бросок на негодной строке уносил весь набор");
+  assert.deepEqual(
+    result.skipped.map((row) => ({ code: row.code, reason: row.reason })),
+    [{ code: "Ш1", reason: "codeLetters" }],
+    "пропущенное должно быть названо — молчание читается как «добавил, а его нет»",
+  );
+  assert.equal(result.project.markTypes.length, 2);
+  assert.deepEqual(result.categories.map((category) => category.name), ["Шторы"]);
+
+  // Занятый код — не беда, а «такой тип и так есть»: в жалобы он не попадает.
+  const again = addTypesFromCatalog(result.project, stale, ["Ш"]);
+  assert.deepEqual(again.skipped, []);
+  assert.equal(again.project, result.project, "повторное добавление не должно ставить шаг истории");
+
+  // Категория, заведённая под тип, который так и не добавился, не остаётся.
+  const onlyBad = addTypesFromCatalog(withoutDictionary(), stale, ["Ш1"]);
+  assert.deepEqual(onlyBad.types, []);
+  assert.deepEqual(onlyBad.categories, []);
+  assert.deepEqual(onlyBad.project.categories, []);
+});
+
+test("правило «та же категория» одно на модель", () => {
+  const project = addCategory(withoutDictionary(), { name: " Датчики ", color: "#123456", shape: "square" }).project;
+  assert.equal(categoryNameKey("  ДаТчИкИ  "), categoryNameKey("датчики"));
+  assert.equal(findCategoryByName(project, "датчики"), project.categories[0]);
+  assert.equal(findCategoryByName(project, "Датчик"), null);
+  assert.equal(findCategoryByName(null, "Датчики"), null);
+  // Общая база кладёт типы в неё же, а не заводит шестую категорию.
+  assert.equal(addTypesFromCatalog(project, null, ["ДВ"]).project.categories.length, 1);
 });

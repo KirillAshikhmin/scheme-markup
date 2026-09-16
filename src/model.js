@@ -502,6 +502,21 @@ export function findMark(project, markId) {
   return project.marks.find((mark) => mark.id === markId) || null;
 }
 
+// Одно правило «та же категория» на всю модель: имя без краёв и без учёта
+// регистра. Правил тут должно быть ровно одно — «Датчики» и «датчики» обязаны
+// значить одну строку и общей базе, и шаблону нового объекта. Разойдись они —
+// в справочнике заводится двойник, и метки двух категорий с одним именем
+// красятся в разные цвета.
+export function categoryNameKey(name) {
+  return String(name == null ? "" : name).trim().toLowerCase();
+}
+
+export function findCategoryByName(project, name) {
+  const key = categoryNameKey(name);
+  if (!project || !key || !Array.isArray(project.categories)) return null;
+  return project.categories.find((category) => categoryNameKey(category.name) === key) || null;
+}
+
 export function findGroup(project, groupId) {
   return project.groups.find((group) => group.id === groupId) || null;
 }
@@ -1425,17 +1440,13 @@ export function deleteCategory(project, categoryId) {
 //
 // Хранилища модель не знает: шаблон достаёт и передаёт сюда панель.
 
-// Код сравнивается так же, как его проверяет `normalizeCode` на занятость:
-// по верхнему регистру и без краёв. Латинская «P» и кириллическая «Р» при этом
-// остаются разными кодами — ловушка справочника действует и здесь.
-function catalogCodeKey(code) {
+// Ключ строки общей базы — код в верхнем регистре и без краёв. Это ключ
+// строки, а **не** правило занятости кода: занятость спрашивается у
+// `codeProblem`, чтобы правило кода во всей сборке оставалось одно. Своя копия
+// правила здесь молча разошлась бы с `addType` — и окно предлагало бы то,
+// чего справочник не примет.
+function catalogRowKey(code) {
   return String(code == null ? "" : code).trim().toUpperCase();
-}
-
-// Категория опознаётся по имени: идентификаторы у каждого объекта свои, и
-// «Свет» шаблона — это «Свет» объекта, а не новая шестая категория.
-function catalogNameKey(name) {
-  return String(name == null ? "" : name).trim().toLowerCase();
 }
 
 function catalogSources(templates) {
@@ -1447,15 +1458,18 @@ function catalogSources(templates) {
 
 // Слияние источников в одну базу. `Map.set` по существующему ключу меняет
 // значение, но не место — отсюда и правило «позиция от первого источника,
-// содержимое от последнего». Форма и режим блока сверяются со списками модели:
-// шаблон мог быть сохранён давно, а неизвестное значение объект бы не принял.
+// содержимое от последнего». Форма, начертание, режим блока и цвет сверяются
+// со списками модели: шаблон мог быть сохранён давно, а неизвестное значение
+// объект бы не принял. Код при этом не правится: негодный код — негодная
+// строка целиком, и её судьбу решает `codeProblem`, а не догадка о том, что
+// пользователь имел в виду.
 function catalogMerge(templates) {
   const categories = new Map();
   const types = new Map();
   for (const source of catalogSources(templates)) {
     const byId = new Map(source.categories.map((category) => [category.id, category]));
     for (const category of source.categories) {
-      const key = catalogNameKey(category.name);
+      const key = categoryNameKey(category.name);
       if (!key) continue;
       categories.set(key, {
         name: String(category.name).trim(),
@@ -1465,9 +1479,9 @@ function catalogMerge(templates) {
       });
     }
     for (const type of source.markTypes) {
-      const key = catalogCodeKey(type.code);
+      const key = catalogRowKey(type.code);
       const category = byId.get(type.categoryId);
-      const categoryKey = category ? catalogNameKey(category.name) : "";
+      const categoryKey = category ? categoryNameKey(category.name) : "";
       if (!key || !categoryKey) continue;
       const code = String(type.code).trim();
       types.set(key, {
@@ -1484,13 +1498,24 @@ function catalogMerge(templates) {
   return { categories, types };
 }
 
+// Объект, по которому спрашивают правило кода: `codeProblem` смотрит в
+// `markTypes`, и объекта может ещё не быть вовсе.
+function catalogTarget(project) {
+  return project && Array.isArray(project.markTypes) ? project : { markTypes: [] };
+}
+
 /**
- * Что из общей базы можно добавить в справочник объекта: типы, чьего кода в
- * объекте нет, сгруппированные по категориям в порядке базы. Пустых групп в
- * ответе не бывает.
+ * Что из общей базы можно добавить в справочник объекта: строки, которые
+ * справочник и правда примет, сгруппированные по категориям в порядке базы.
+ * Пустых групп в ответе не бывает.
  *
  * `templates` — сохранённый шаблон (или список шаблонов) поверх встроенного;
  * `null` означает «только встроенный».
+ *
+ * Годность строки решает `codeProblem` — та же функция, что разбирает код,
+ * введённый руками. Поэтому из окна выпадают и занятые коды, и негодные:
+ * шаблон, сохранённый до правила «только буквы», несёт код вида «Т1», и
+ * показать его значило бы предложить то, на чём добавление споткнётся.
  *
  * Категория ответа — та, какой она станет: у знакомой объекту категории это
  * её собственные имя, цвет и форма (`existingId` — её идентификатор), у новой —
@@ -1498,15 +1523,10 @@ function catalogMerge(templates) {
  */
 export function catalogOffer(project, templates) {
   const { categories, types } = catalogMerge(templates);
-  const taken = new Set((project && project.markTypes ? project.markTypes : []).map((type) => catalogCodeKey(type.code)));
-  const known = new Map();
-  for (const category of (project && project.categories) || []) {
-    const key = catalogNameKey(category.name);
-    if (key && !known.has(key)) known.set(key, category);
-  }
+  const target = catalogTarget(project);
   const groups = new Map();
   for (const [key, base] of categories) {
-    const found = known.get(key) || null;
+    const found = findCategoryByName(project, base.name);
     groups.set(key, {
       category: {
         name: found ? found.name : base.name,
@@ -1519,7 +1539,7 @@ export function catalogOffer(project, templates) {
     });
   }
   for (const entry of types.values()) {
-    if (taken.has(entry.key)) continue;
+    if (codeProblem(target, entry.code)) continue;
     const group = groups.get(entry.categoryKey);
     if (!group) continue;
     group.types.push({
@@ -1535,53 +1555,82 @@ export function catalogOffer(project, templates) {
 }
 
 /**
- * Добавить в справочник объекта отмеченные типы общей базы. `typeKeys` — ключи
- * строк из `catalogOffer` (они же коды); порядок и повторы значения не имеют,
- * неизвестный ключ пропускается молча — окно могло устареть.
+ * Добавить в справочник объекта отмеченные строки общей базы. `typeKeys` —
+ * ключи строк из `catalogOffer` (они же коды в любом регистре); порядок и
+ * повторы значения не имеют.
  *
- * Существующее не трогается: тип с занятым кодом не предлагается и не
- * добавляется, а категория, знакомая объекту по имени, переиспользуется как
- * есть — ни цвет, ни форма её не меняются. Недостающая категория заводится
- * вместе с первым своим типом. Новые типы встают в конец своей категории.
+ * Годность каждой строки проверяется здесь заново и по живому объекту, а не
+ * по тому, что показало окно: окно могло устареть, а список ключей приходит
+ * снаружи. Негодная строка выпадает из пакета одна — остальные добавляются, и
+ * пропущенное названо в `skipped` (`{key, code, name, reason}`, `reason` — код
+ * ошибки модели). Иначе один шаблон с кодом «Т1» уносил бы весь набор, и шесть
+ * годных типов терялись бы молча. Занятый код в `skipped` не попадает: это не
+ * беда, а «такой тип и так есть».
+ *
+ * Существующее не трогается: категория, знакомая объекту по имени,
+ * переиспользуется как есть — ни цвет, ни форма её не меняются. Недостающая
+ * заводится вместе с первым своим типом (и убирается, если ни один его тип
+ * так и не добавился). Новые типы встают в конец своей категории.
  *
  * Добавлять нечего — возвращается тот же объект: пустого шага истории быть
  * не должно.
  */
 export function addTypesFromCatalog(project, templates, typeKeys) {
-  const wanted = new Set([...(typeKeys || [])].map(catalogCodeKey).filter(Boolean));
-  const groups = catalogOffer(project, templates);
+  const wanted = new Set([...(typeKeys || [])].map(catalogRowKey).filter(Boolean));
+  const base = catalogMerge(templates);
   let next = project;
   const types = [];
-  const categories = [];
-  for (const group of groups) {
-    const chosen = group.types.filter((type) => wanted.has(type.key));
-    if (chosen.length === 0) continue;
-    let categoryId = group.category.existingId;
-    if (!categoryId) {
-      const created = addCategory(next, {
-        name: group.category.name,
-        color: group.category.color,
-        shape: group.category.shape,
-        lineStyle: group.category.lineStyle,
-      });
-      next = created.project;
-      categoryId = created.category.id;
-      categories.push(created.category);
+  const created = [];
+  const skipped = [];
+  for (const entry of base.types.values()) {
+    if (!wanted.has(entry.key)) continue;
+    const trouble = codeProblem(catalogTarget(next), entry.code);
+    if (trouble) {
+      if (trouble.code !== "codeTaken") {
+        skipped.push({ key: entry.key, code: entry.code, name: entry.name, reason: trouble.code });
+      }
+      continue;
     }
-    for (const type of chosen) {
+    const source = base.categories.get(entry.categoryKey);
+    if (!source) continue;
+    try {
+      let category = findCategoryByName(next, source.name);
+      if (!category) {
+        const result = addCategory(next, {
+          name: source.name,
+          color: source.color,
+          shape: source.shape,
+          lineStyle: source.lineStyle,
+        });
+        next = result.project;
+        category = result.category;
+        created.push(category);
+      }
       const added = addType(next, {
-        code: type.code,
-        name: type.name,
-        categoryId,
-        shape: type.shape,
-        lineStyle: type.lineStyle,
-        blockMode: type.blockMode,
+        code: entry.code,
+        name: entry.name,
+        categoryId: category.id,
+        shape: entry.shape,
+        lineStyle: entry.lineStyle,
+        blockMode: entry.blockMode,
       });
       next = added.project;
       types.push(added.type);
+    } catch (failure) {
+      skipped.push({ key: entry.key, code: entry.code, name: entry.name, reason: failure.code });
     }
   }
-  return { project: next, types, categories };
+  // Категория, заведённая под тип, который так и не добавился, остаётся пустой.
+  // Пустая строка в справочнике — мусор, которого пользователь не заказывал.
+  const categories = [];
+  for (const category of created) {
+    if (next.markTypes.some((type) => type.categoryId === category.id)) {
+      categories.push(category);
+      continue;
+    }
+    next = deleteCategory(next, category.id).project;
+  }
+  return { project: next, types, categories, skipped };
 }
 
 // Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.

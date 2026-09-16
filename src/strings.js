@@ -587,6 +587,7 @@ export const strings = {
     catalogChosen: "Отмечено: {count}",
     catalogAdd: "Добавить",
     catalogAdded: "Типов добавлено: {count}",
+    catalogSkipped: "Не удалось добавить: {codes}. Такой код справочник не принимает.",
     addCategory: "Добавить категорию",
     removeType: "Удалить тип",
     removeTypeTitle: "Удалить тип?",

@@ -17,6 +17,7 @@ import {
   addType,
   addTypesFromCatalog,
   catalogOffer,
+  categoryNameKey,
   compactNumbers,
   deleteCategory,
   deleteType,
@@ -67,18 +68,30 @@ function typesSnapshot(project) {
 export function typesTemplateFrom(template) {
   if (!template || !Array.isArray(template.categories) || !Array.isArray(template.markTypes)) return null;
   const ids = new Map();
-  const categories = template.categories.map((category, index) => {
+  // «Та же категория» — правило модели (`categoryNameKey`), одно на всю сборку.
+  // Снимок мог принести и «Датчики», и «датчики»: заведи их по отдельности —
+  // и объект получил бы двойника той категории, в которую общая база кладёт
+  // типы, а метки двух одноимённых категорий красились бы в разные цвета.
+  const byName = new Map();
+  const categories = [];
+  for (const category of template.categories) {
+    const twin = byName.get(categoryNameKey(category.name));
+    if (twin) {
+      ids.set(category.id, twin);
+      continue;
+    }
     const id = globalThis.crypto.randomUUID();
     ids.set(category.id, id);
-    return {
+    byName.set(categoryNameKey(category.name), id);
+    categories.push({
       id,
       name: category.name,
       color: category.color,
       shape: SHAPE_NAMES.includes(category.shape) ? category.shape : SHAPE_NAMES[0],
       lineStyle: LINE_STYLES.includes(category.lineStyle) ? category.lineStyle : LINE_STYLES[0],
-      order: index,
-    };
-  });
+      order: categories.length,
+    });
+  }
   const markTypes = template.markTypes
     .filter((type) => ids.has(type.categoryId))
     .map((type, index) => ({
@@ -307,7 +320,7 @@ export function openTypesCatalog(project, template) {
       addButton.disabled = chosen.size === 0;
     }
 
-    const list = uiEl("div", { class: "compact__rows" });
+    const list = uiEl("div", { class: "catalog__rows" });
     for (const group of groups) {
       const keys = group.types.map((type) => type.key);
       const head = uiEl("input", {
@@ -327,7 +340,7 @@ export function openTypesCatalog(project, template) {
       const name = uiEl("span", { text: group.category.name });
       name.style.color = group.category.color;
       list.append(
-        uiEl("label", { class: "dict__row" }, [
+        uiEl("label", { class: "catalog__row catalog__row--group" }, [
           head,
           shapeIcon(group.category.shape, group.category.color, 18),
           name,
@@ -345,16 +358,16 @@ export function openTypesCatalog(project, template) {
           },
         });
         items.push({ node: box, key: type.key });
-        const row = uiEl("label", { class: "dict__row", title: type.code + " — " + type.name }, [
-          box,
-          // Форма типа, а если своей нет — форма категории: ровно то, что
-          // нарисует план. Цвет всегда категорийный, цвета у типа нет.
-          shapeIcon(type.shape || group.category.shape, group.category.color, 20),
-          uiEl("span", { class: "dict__code", text: type.code }),
-          uiEl("span", { text: type.name }),
-        ]);
-        row.style.paddingLeft = "18px";
-        list.append(row);
+        list.append(
+          uiEl("label", { class: "catalog__row catalog__row--type", title: type.code + " — " + type.name }, [
+            box,
+            // Форма типа, а если своей нет — форма категории: ровно то, что
+            // нарисует план. Цвет всегда категорийный, цвета у типа нет.
+            shapeIcon(type.shape || group.category.shape, group.category.color, 20),
+            uiEl("span", { class: "catalog__code", text: type.code }),
+            uiEl("span", { class: "catalog__name", text: type.name }),
+          ]),
+        );
       }
     }
 
@@ -362,7 +375,7 @@ export function openTypesCatalog(project, template) {
     // строка объясняет, почему список пуст.
     const body = uiEl(
       "div",
-      { class: "compact" },
+      { class: "catalog" },
       groups.length === 0
         ? [uiEl("p", { class: "panel__empty", text: strings.dictionary.catalogEmpty })]
         : [uiEl("p", { class: "modal__text", text: strings.dictionary.catalogHint }), list, counter],
@@ -589,9 +602,18 @@ export function openTypesDictionary(api) {
     if (!keys || keys.length === 0) return;
     try {
       const result = addTypesFromCatalog(project(), template, keys);
-      if (result.types.length === 0) return;
-      canvasCommit(project(), result.project, strings.history.addFromCatalog);
-      api.notify(text("dictionary.catalogAdded", { count: result.types.length }), "success");
+      if (result.types.length > 0) {
+        canvasCommit(project(), result.project, strings.history.addFromCatalog);
+        api.notify(text("dictionary.catalogAdded", { count: result.types.length }), "success");
+      }
+      // Пропущенное называется вслух: строка, которую справочник не принял,
+      // молча исчезнувшая из пакета, — это «добавил, а его нет».
+      if (result.skipped.length > 0) {
+        api.notify(
+          text("dictionary.catalogSkipped", { codes: result.skipped.map((row) => row.code).join(", ") }),
+          "error",
+        );
+      }
     } catch (error) {
       fail(error);
     }

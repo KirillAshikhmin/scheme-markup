@@ -256,6 +256,63 @@
   font-size: 12px;
 }
 
+/* Окно «Добавить из общей базы». Классы свои, хотя строки похожи на строки
+   справочника и на список уплотнения: отступ строки типа правится вместе с
+   каталогом, а не заодно с чужим окном. */
+.catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 360px;
+}
+
+.catalog__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.catalog__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.catalog__row:hover {
+  background: var(--panel-bg-deep);
+}
+
+/* Заголовок категории: её цвет задаёт панель, здесь только вес и воздух. */
+.catalog__row--group {
+  margin-top: 6px;
+  font-weight: 700;
+}
+
+/* Строка типа отступает от заголовка — видно, что она внутри категории. */
+.catalog__row--type {
+  padding-left: 22px;
+}
+
+.catalog__code {
+  flex: none;
+  min-width: 52px;
+  font-weight: 700;
+}
+
+/* Название ужимается первым: код и значок дороже. */
+.catalog__name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Предпросмотр уплотнения: список замен «было → стало». */
 .compact {
   display: flex;

@@ -2,7 +2,7 @@
 // копией, а не ссылкой. Два объекта не должны делить ни одну запись.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createProject, styleOf } from "../src/model.js";
+import { addCategory, addTypesFromCatalog, createProject, styleOf } from "../src/model.js";
 import { typesTemplateFrom } from "../src/panels/types.js";
 
 const snapshot = {
@@ -60,4 +60,50 @@ test("пустой или чужой шаблон — это «шаблона н
   assert.equal(typesTemplateFrom({ name: "не шаблон" }), null);
   // Тип без своей категории не переезжает: ссылаться ему будет не на что.
   assert.equal(typesTemplateFrom({ categories: snapshot.categories, markTypes: [{ categoryId: "нет", code: "Т", name: "Т" }] }), null);
+});
+
+// «Добавил из общей базы → создал объект по шаблону» — два пути к одному
+// справочнику. Понимай они совпадение имён по-разному, объект из шаблона
+// получил бы двойника той категории, в которую база кладёт типы: две строки
+// «Датчики» с разными цветами, и метки смотрят в разные.
+test("категория из общей базы и категория из шаблона — одна и та же, а не двойник", () => {
+  const bare = { ...createProject(), categories: [], markTypes: [] };
+  const own = addCategory(bare, { name: "датчики", color: "#123456", shape: "square" });
+  const filled = addTypesFromCatalog(own.project, null, ["ДВ"]).project;
+  assert.equal(filled.categories.length, 1, "база кладёт тип в знакомую категорию");
+
+  // Снимок такого справочника плюс строка «Датчики» из общей базы: имена
+  // совпадают, регистр разный.
+  const snapshot = {
+    categories: [
+      ...filled.categories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        color: category.color,
+        shape: category.shape,
+        lineStyle: category.lineStyle,
+      })),
+      { id: "from-catalog", name: "Датчики", color: "#164E63", shape: "circle-ring" },
+    ],
+    markTypes: [
+      ...filled.markTypes.map((type) => ({
+        categoryId: type.categoryId,
+        code: type.code,
+        name: type.name,
+        shape: type.shape,
+        lineStyle: type.lineStyle,
+        blockMode: type.blockMode,
+      })),
+      { categoryId: "from-catalog", code: "ДО", name: "Датчик открытия", shape: "square-split" },
+    ],
+  };
+
+  const next = createProject({ name: "Следующий", ...typesTemplateFrom(snapshot) });
+  assert.deepEqual(next.categories.map((category) => category.name), ["датчики"]);
+  assert.deepEqual(next.markTypes.map((type) => type.code), ["ДВ", "ДО"]);
+  assert.equal(new Set(next.markTypes.map((type) => type.categoryId)).size, 1, "типы разъехались по двойникам");
+  assert.equal(next.categories[0].color, "#123456", "выжившая категория — первая, со своим цветом");
+
+  // И общая база по-прежнему видит её своей: шестой категории не заводится.
+  assert.equal(addTypesFromCatalog(next, null, ["ДП"]).project.categories.length, 1);
 });
