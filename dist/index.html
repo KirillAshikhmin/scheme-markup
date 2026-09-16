@@ -2752,6 +2752,7 @@ const strings = {
     renameRoom: "переименование помещения",
     removeRoom: "удаление помещения",
     editType: "правка типа",
+    addFromCatalog: "типы из общей базы",
     removeType: "удаление типа",
     addCategory: "новая категория",
     editCategory: "правка категории",
@@ -3103,6 +3104,17 @@ const strings = {
     typeNamePlaceholder: "Выключатель",
     categoryNamePlaceholder: "Шторы",
     addType: "Добавить тип",
+    addFromCatalog: "Добавить из общей базы",
+    addFromCatalogHint: "Пополнить справочник объекта типами, которых в нём нет",
+    catalogTitle: "Добавить из общей базы",
+    catalogHint:
+      "Типы стандартного справочника и вашего шаблона, которых нет в этом объекте. " +
+      "Отмеченные добавятся; всё, что уже есть, останется как есть.",
+    catalogEmpty: "В справочнике объекта уже есть всё из общей базы",
+    catalogAll: "Отметить всю категорию",
+    catalogChosen: "Отмечено: {count}",
+    catalogAdd: "Добавить",
+    catalogAdded: "Типов добавлено: {count}",
     addCategory: "Добавить категорию",
     removeType: "Удалить тип",
     removeTypeTitle: "Удалить тип?",
@@ -4633,6 +4645,180 @@ function deleteCategory(project, categoryId) {
     .filter((item) => item.id !== categoryId)
     .map((item, index) => ({ ...item, order: index }));
   return { project: withProject(project, { categories }), deleted: current };
+}
+
+// ——— общая база типов ————————————————————————————————————————————————
+//
+// Справочник у каждого объекта свой, и это правильно: на одном объекте «Р» —
+// розетка, на другом её вовсе нет. Но когда в стартовый справочник добавляется
+// новый тип (проходной переключатель, вывод витой пары, целая категория
+// датчиков), уже размеченные объекты о нём не узнают: единственным путём был
+// возврат к стандартному шаблону, а он стирает и правки пользователя.
+//
+// Отсюда общая база: встроенный `defaultTemplate()` плюс сохранённый
+// пользователем шаблон, объединённые по коду. Один и тот же код в обоих —
+// побеждает сохранённый: его правили руками. Позиция строки при этом остаётся
+// от встроенного справочника, чтобы привычный порядок не перетасовывался.
+//
+// Хранилища модель не знает: шаблон достаёт и передаёт сюда панель.
+
+// Код сравнивается так же, как его проверяет `normalizeCode` на занятость:
+// по верхнему регистру и без краёв. Латинская «P» и кириллическая «Р» при этом
+// остаются разными кодами — ловушка справочника действует и здесь.
+function catalogCodeKey(code) {
+  return String(code == null ? "" : code).trim().toUpperCase();
+}
+
+// Категория опознаётся по имени: идентификаторы у каждого объекта свои, и
+// «Свет» шаблона — это «Свет» объекта, а не новая шестая категория.
+function catalogNameKey(name) {
+  return String(name == null ? "" : name).trim().toLowerCase();
+}
+
+function catalogSources(templates) {
+  const extra = Array.isArray(templates) ? templates : templates ? [templates] : [];
+  return [defaultTemplate(), ...extra].filter(
+    (source) => source && Array.isArray(source.categories) && Array.isArray(source.markTypes),
+  );
+}
+
+// Слияние источников в одну базу. `Map.set` по существующему ключу меняет
+// значение, но не место — отсюда и правило «позиция от первого источника,
+// содержимое от последнего». Форма и режим блока сверяются со списками модели:
+// шаблон мог быть сохранён давно, а неизвестное значение объект бы не принял.
+function catalogMerge(templates) {
+  const categories = new Map();
+  const types = new Map();
+  for (const source of catalogSources(templates)) {
+    const byId = new Map(source.categories.map((category) => [category.id, category]));
+    for (const category of source.categories) {
+      const key = catalogNameKey(category.name);
+      if (!key) continue;
+      categories.set(key, {
+        name: String(category.name).trim(),
+        color: normalizeColor(category.color, FALLBACK_COLOR),
+        shape: SHAPE_NAMES.includes(category.shape) ? category.shape : SHAPE_PALETTE[0],
+        lineStyle: LINE_STYLES.includes(category.lineStyle) ? category.lineStyle : null,
+      });
+    }
+    for (const type of source.markTypes) {
+      const key = catalogCodeKey(type.code);
+      const category = byId.get(type.categoryId);
+      const categoryKey = category ? catalogNameKey(category.name) : "";
+      if (!key || !categoryKey) continue;
+      const code = String(type.code).trim();
+      types.set(key, {
+        key,
+        code,
+        name: String(type.name == null ? "" : type.name).trim() || code,
+        shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
+        lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
+        blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
+        categoryKey,
+      });
+    }
+  }
+  return { categories, types };
+}
+
+/**
+ * Что из общей базы можно добавить в справочник объекта: типы, чьего кода в
+ * объекте нет, сгруппированные по категориям в порядке базы. Пустых групп в
+ * ответе не бывает.
+ *
+ * `templates` — сохранённый шаблон (или список шаблонов) поверх встроенного;
+ * `null` означает «только встроенный».
+ *
+ * Категория ответа — та, какой она станет: у знакомой объекту категории это
+ * её собственные имя, цвет и форма (`existingId` — её идентификатор), у новой —
+ * значения из базы. Окно рисует ровно то, что получится после добавления.
+ */
+function catalogOffer(project, templates) {
+  const { categories, types } = catalogMerge(templates);
+  const taken = new Set((project && project.markTypes ? project.markTypes : []).map((type) => catalogCodeKey(type.code)));
+  const known = new Map();
+  for (const category of (project && project.categories) || []) {
+    const key = catalogNameKey(category.name);
+    if (key && !known.has(key)) known.set(key, category);
+  }
+  const groups = new Map();
+  for (const [key, base] of categories) {
+    const found = known.get(key) || null;
+    groups.set(key, {
+      category: {
+        name: found ? found.name : base.name,
+        color: found ? found.color : base.color,
+        shape: found ? found.shape : base.shape,
+        lineStyle: (found ? found.lineStyle : base.lineStyle) || null,
+        existingId: found ? found.id : null,
+      },
+      types: [],
+    });
+  }
+  for (const entry of types.values()) {
+    if (taken.has(entry.key)) continue;
+    const group = groups.get(entry.categoryKey);
+    if (!group) continue;
+    group.types.push({
+      key: entry.key,
+      code: entry.code,
+      name: entry.name,
+      shape: entry.shape,
+      lineStyle: entry.lineStyle,
+      blockMode: entry.blockMode,
+    });
+  }
+  return [...groups.values()].filter((group) => group.types.length > 0);
+}
+
+/**
+ * Добавить в справочник объекта отмеченные типы общей базы. `typeKeys` — ключи
+ * строк из `catalogOffer` (они же коды); порядок и повторы значения не имеют,
+ * неизвестный ключ пропускается молча — окно могло устареть.
+ *
+ * Существующее не трогается: тип с занятым кодом не предлагается и не
+ * добавляется, а категория, знакомая объекту по имени, переиспользуется как
+ * есть — ни цвет, ни форма её не меняются. Недостающая категория заводится
+ * вместе с первым своим типом. Новые типы встают в конец своей категории.
+ *
+ * Добавлять нечего — возвращается тот же объект: пустого шага истории быть
+ * не должно.
+ */
+function addTypesFromCatalog(project, templates, typeKeys) {
+  const wanted = new Set([...(typeKeys || [])].map(catalogCodeKey).filter(Boolean));
+  const groups = catalogOffer(project, templates);
+  let next = project;
+  const types = [];
+  const categories = [];
+  for (const group of groups) {
+    const chosen = group.types.filter((type) => wanted.has(type.key));
+    if (chosen.length === 0) continue;
+    let categoryId = group.category.existingId;
+    if (!categoryId) {
+      const created = addCategory(next, {
+        name: group.category.name,
+        color: group.category.color,
+        shape: group.category.shape,
+        lineStyle: group.category.lineStyle,
+      });
+      next = created.project;
+      categoryId = created.category.id;
+      categories.push(created.category);
+    }
+    for (const type of chosen) {
+      const added = addType(next, {
+        code: type.code,
+        name: type.name,
+        categoryId,
+        shape: type.shape,
+        lineStyle: type.lineStyle,
+        blockMode: type.blockMode,
+      });
+      next = added.project;
+      types.push(added.type);
+    }
+  }
+  return { project: next, types, categories };
 }
 
 // Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.
@@ -14335,6 +14521,117 @@ function openTypesCompactPreview(preview, { stale } = {}) {
     });
   });
 }
+
+// Окно «Добавить из общей базы». Общая база — стандартный справочник плюс
+// сохранённый шаблон: то, чего в справочнике объекта нет, но что уже описано.
+// Появилось оттого, что новые типы стартового справочника (проходной
+// переключатель, витая пара, датчики) не доезжали до размеченных объектов:
+// единственным путём был возврат к шаблону, а он стирает правки пользователя.
+//
+// Что предлагать и что из этого выйдет, решает модель (`catalogOffer`): здесь
+// только отметки. Значок и цвет строки — те же, что окажутся на плане, поэтому
+// цвет берётся у категории объекта, когда она в нём уже есть.
+function openTypesCatalog(project, template) {
+  return new Promise((resolve) => {
+    const groups = catalogOffer(project, template);
+    const chosen = new Set();
+    const items = [];
+    const heads = [];
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+
+    const counter = uiEl("p", { class: "modal__text" });
+    const addButton = uiButton(strings.dictionary.catalogAdd, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => done([...chosen]) },
+    });
+
+    // Состояние всех флажков — от одного набора отметок: галочка категории
+    // ставится и снимается вместе со своими строками, а наполовину отмеченная
+    // категория показывается серым квадратом, а не пустой галочкой.
+    function sync() {
+      for (const item of items) item.node.checked = chosen.has(item.key);
+      for (const head of heads) {
+        const marked = head.keys.filter((key) => chosen.has(key)).length;
+        head.node.checked = marked === head.keys.length;
+        head.node.indeterminate = marked > 0 && marked < head.keys.length;
+      }
+      counter.textContent = text("dictionary.catalogChosen", { count: chosen.size });
+      addButton.disabled = chosen.size === 0;
+    }
+
+    const list = uiEl("div", { class: "compact__rows" });
+    for (const group of groups) {
+      const keys = group.types.map((type) => type.key);
+      const head = uiEl("input", {
+        type: "checkbox",
+        title: strings.dictionary.catalogAll,
+        on: {
+          change: () => {
+            for (const key of keys) {
+              if (head.checked) chosen.add(key);
+              else chosen.delete(key);
+            }
+            sync();
+          },
+        },
+      });
+      heads.push({ node: head, keys });
+      const name = uiEl("span", { text: group.category.name });
+      name.style.color = group.category.color;
+      list.append(
+        uiEl("label", { class: "dict__row" }, [
+          head,
+          shapeIcon(group.category.shape, group.category.color, 18),
+          name,
+        ]),
+      );
+      for (const type of group.types) {
+        const box = uiEl("input", {
+          type: "checkbox",
+          on: {
+            change: () => {
+              if (box.checked) chosen.add(type.key);
+              else chosen.delete(type.key);
+              sync();
+            },
+          },
+        });
+        items.push({ node: box, key: type.key });
+        const row = uiEl("label", { class: "dict__row", title: type.code + " — " + type.name }, [
+          box,
+          // Форма типа, а если своей нет — форма категории: ровно то, что
+          // нарисует план. Цвет всегда категорийный, цвета у типа нет.
+          shapeIcon(type.shape || group.category.shape, group.category.color, 20),
+          uiEl("span", { class: "dict__code", text: type.code }),
+          uiEl("span", { text: type.name }),
+        ]);
+        row.style.paddingLeft = "18px";
+        list.append(row);
+      }
+    }
+
+    // Добавлять нечего — это ответ, а не пустое окно: кнопка на месте, и
+    // строка объясняет, почему список пуст.
+    const body = uiEl(
+      "div",
+      { class: "compact" },
+      groups.length === 0
+        ? [uiEl("p", { class: "panel__empty", text: strings.dictionary.catalogEmpty })]
+        : [uiEl("p", { class: "modal__text", text: strings.dictionary.catalogHint }), list, counter],
+    );
+    sync();
+    modal = uiModal({
+      title: strings.dictionary.catalogTitle,
+      body,
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }), addButton],
+      onCancel: () => resolve(null),
+    });
+  });
+}
 function openTypesDictionary(api) {
   const body = uiEl("div", { class: "dict" });
 
@@ -14536,6 +14833,25 @@ function openTypesDictionary(api) {
     ]);
   }
 
+  // Общая база: стандартный справочник и сохранённый шаблон. Шаблон достаёт
+  // панель — модель хранилища не знает. Добавление идёт одним шагом истории:
+  // одна отмена возвращает весь набор. Через общий `commit` не идёт нарочно —
+  // нужно знать, сколько типов добавилось на самом деле, и не ставить пустой
+  // шаг истории, когда не добавилось ничего.
+  async function addFromCatalog() {
+    const template = await getSetting(TYPE_TEMPLATE_KEY);
+    const keys = await openTypesCatalog(project(), template);
+    if (!keys || keys.length === 0) return;
+    try {
+      const result = addTypesFromCatalog(project(), template, keys);
+      if (result.types.length === 0) return;
+      canvasCommit(project(), result.project, strings.history.addFromCatalog);
+      api.notify(text("dictionary.catalogAdded", { count: result.types.length }), "success");
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   function addTypeRow() {
     const code = uiEl("input", {
       class: "ui-input dict__code",
@@ -14561,6 +14877,13 @@ function openTypesDictionary(api) {
         categoryId = value;
       }),
       uiButton(strings.dictionary.addType, { class: "ui-btn ui-btn--accent", on: { click: add } }),
+      // Кнопка стоит рядом с «Добавить тип» и не прячется, даже когда общая
+      // база объекту уже нечего дать: исчезнувшая кнопка — это вопрос «куда
+      // она делась», а не ответ.
+      uiButton(strings.dictionary.addFromCatalog, {
+        title: strings.dictionary.addFromCatalogHint,
+        on: { click: () => addFromCatalog() },
+      }),
     ]);
   }
 

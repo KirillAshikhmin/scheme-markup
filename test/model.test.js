@@ -12,6 +12,8 @@ import {
   addScheme,
   addToGroup,
   addType,
+  addTypesFromCatalog,
+  catalogOffer,
   changeMarkType,
   compactNumbers,
   createProject,
@@ -28,7 +30,9 @@ import {
   markByCode,
   repeatedNumbers,
   setMarkNumber,
+  SHAPE_NAMES,
   styleOf,
+  typesInOrder,
   updateCategory,
   updateMark,
   updateProject,
@@ -1036,4 +1040,167 @@ test("размер меток и подписей по умолчанию чит
   assert.ok(view.labelSize * 0.16 <= 10, "подпись раздута: " + view.labelSize * 0.16 + " мм");
   // Значок метки — круг радиусом markSize: на бумаге не меньше трёх миллиметров.
   assert.ok(view.markSize * 2 * 0.16 >= 3, "значок метки на A3 всего " + view.markSize * 2 * 0.16 + " мм");
+});
+
+// ——— общая база типов ————————————————————————————————————————————————
+//
+// Справочник объекта живёт своей жизнью, но стартовый пополняется: сперва
+// проходной переключатель и витая пара, потом целая категория датчиков.
+// Уже размеченные объекты о них не узнают, а «Вернуть стандартный шаблон»
+// стирает правки пользователя. Общая база — способ донести новое, не тронув
+// старого, поэтому проверяется в обе стороны: что предлагается и что при этом
+// не меняется.
+
+// Объект с пустым справочником: у него нет ни одной категории и ни одного типа.
+function withoutDictionary() {
+  return { ...createProject(), categories: [], markTypes: [] };
+}
+
+function offeredCodes(groups) {
+  return groups.flatMap((group) => group.types.map((type) => type.code));
+}
+
+test("общая база: пустому справочнику предлагается всё, полному — ничего", () => {
+  const offer = catalogOffer(withoutDictionary(), null);
+  assert.deepEqual(
+    offer.map((group) => group.category.name),
+    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики"],
+  );
+  assert.equal(offeredCodes(offer).length, 19);
+  assert.equal(offer[0].types[0].code, "Т");
+  assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
+
+  // Объект, созданный со стартового справочника, уже знает всю базу: окно
+  // должно сказать это строкой, а не показать пустой список.
+  assert.deepEqual(catalogOffer(createProject(), null), []);
+});
+
+test("общая база предлагает только незанятые коды — при любом названии и раскладке", () => {
+  const project = createProject();
+  const light = project.categories.find((category) => category.name === "Свет").id;
+  const older = { ...project, markTypes: project.markTypes.filter((type) => type.code !== "ВП" && type.code !== "RJ") };
+  assert.deepEqual(offeredCodes(catalogOffer(older, null)), ["ВП", "RJ"]);
+
+  // Код занят — строки нет вовсе, даже когда за кодом стоит совсем другой тип:
+  // подменять чужой «ВП» базовым переключателем нельзя.
+  const mine = addType(older, { code: "ВП", name: "Верхний прожектор", categoryId: light }).project;
+  assert.deepEqual(offeredCodes(catalogOffer(mine, null)), ["RJ"]);
+
+  // Занятость кода считается так же, как её считает `addType`: по верхнему
+  // регистру. Иначе окно предложило бы «RJ» поверх собственного «rj».
+  const lower = addType(older, { code: "rj", name: "Витая пара", categoryId: light }).project;
+  assert.deepEqual(offeredCodes(catalogOffer(lower, null)), ["ВП"]);
+});
+
+test("из общей базы добавляются только отмеченные типы, остальной справочник не шевелится", () => {
+  const project = createProject();
+  const older = { ...project, markTypes: project.markTypes.filter((type) => type.code !== "ВП" && type.code !== "RJ") };
+  const result = addTypesFromCatalog(older, null, ["ВП"]);
+
+  assert.deepEqual(result.types.map((type) => type.code), ["ВП"]);
+  assert.equal(result.types[0].name, "Переключатель проходной");
+  assert.equal(result.types[0].shape, "circle-chevron", "форма приезжает из базы");
+  assert.equal(result.types[0].blockMode, "each");
+  assert.deepEqual(result.categories, [], "все категории у объекта уже есть");
+  assert.equal(result.project.markTypes.length, older.markTypes.length + 1);
+  assert.equal(result.project.markTypes.some((type) => type.code === "RJ"), false, "неотмеченный тип не добавился");
+  // Категории — тот же массив: добавление типов их не переписывает, а значит
+  // и цвета с формами остались как были.
+  assert.equal(result.project.categories, older.categories);
+
+  // Новый тип встаёт в конец своей категории, а не в начало справочника.
+  const switches = typesInOrder(result.project).find((group) => group.category.name === "Выключатели");
+  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "ВП"]);
+
+  // Добавлять нечего — тот же объект: пустого шага истории быть не должно.
+  assert.equal(addTypesFromCatalog(older, null, []).project, older);
+  assert.equal(addTypesFromCatalog(older, null, ["Т"]).project, older, "код занят — строки в базе нет");
+  assert.equal(addTypesFromCatalog(older, null, ["ЫЫ"]).project, older, "ключа в базе нет");
+});
+
+test("недостающая категория заводится вместе с типом, знакомая переиспользуется без перекраски", () => {
+  const added = addTypesFromCatalog(withoutDictionary(), null, ["дв", "ДО"]);
+  assert.deepEqual(added.categories.map((category) => category.name), ["Датчики"]);
+  assert.deepEqual(
+    { color: added.categories[0].color, shape: added.categories[0].shape },
+    { color: "#164E63", shape: "circle-ring" },
+  );
+  assert.deepEqual(added.types.map((type) => type.code), ["ДВ", "ДО"], "строчный ключ ловится тем же кодом");
+  assert.equal(added.project.categories.length, 1, "лишних категорий не завелось");
+
+  // Имя совпало — тип кладётся в чужую категорию как есть: перекрасить её
+  // значило бы переписать цвета уже расставленных меток.
+  const own = addCategory(withoutDictionary(), { name: "датчики", color: "#123456", shape: "square" });
+  const into = addTypesFromCatalog(own.project, null, ["ДД"]);
+  assert.deepEqual(into.categories, []);
+  assert.equal(into.project.categories.length, 1);
+  assert.deepEqual(
+    { color: into.project.categories[0].color, shape: into.project.categories[0].shape },
+    { color: "#123456", shape: "square" },
+  );
+  assert.equal(into.types[0].categoryId, own.category.id);
+  assert.deepEqual(styleOf(into.project, into.types[0].id), { color: "#123456", shape: "square", lineStyle: "solid" });
+
+  // И в окне видно будущий цвет, а не цвет базы: точка рядом с категорией
+  // обязана совпасть с тем, что выйдет на план.
+  const group = catalogOffer(own.project, null).find((item) => item.category.name === "датчики");
+  assert.deepEqual(
+    { color: group.category.color, shape: group.category.shape, existingId: group.category.existingId },
+    { color: "#123456", shape: "square", existingId: own.category.id },
+  );
+});
+
+test("сохранённый шаблон побеждает встроенный и приносит свои строки", () => {
+  const saved = {
+    categories: [
+      { id: "c-light", name: "Свет", color: "#000000", shape: "square" },
+      { id: "c-blinds", name: "Шторы", color: "#8250DF", shape: "square-fill" },
+    ],
+    markTypes: [
+      { categoryId: "c-light", code: "Т", name: "Точка своя", shape: "star", blockMode: "single" },
+      { categoryId: "c-blinds", code: "Ш", name: "Штора", shape: "triangle-down", blockMode: "single" },
+    ],
+  };
+  const offer = catalogOffer(withoutDictionary(), saved);
+  // Порядок остаётся порядком встроенной базы: правка в шаблоне меняет строку,
+  // а не место — привычный справочник не перетасовывается.
+  assert.deepEqual(
+    offer.map((group) => group.category.name),
+    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Шторы"],
+  );
+  const light = offer.find((group) => group.category.name === "Свет");
+  assert.deepEqual(light.types[0], {
+    key: "Т",
+    code: "Т",
+    name: "Точка своя",
+    shape: "star",
+    lineStyle: null,
+    blockMode: "single",
+  });
+  assert.equal(light.category.color, "#000000", "цвет категории тоже от сохранённого шаблона");
+
+  const added = addTypesFromCatalog(withoutDictionary(), saved, ["Т", "Ш"]);
+  assert.deepEqual(added.types.map((type) => type.name), ["Точка своя", "Штора"]);
+  assert.deepEqual(added.categories.map((category) => category.name), ["Свет", "Шторы"]);
+  assert.equal(added.types[0].blockMode, "single");
+});
+
+test("шаблон с мусором не ломает общую базу, а теряет только мусор", () => {
+  const stale = {
+    categories: [{ id: "c", name: "Шторы", color: "не цвет", shape: "cloud" }],
+    markTypes: [
+      { categoryId: "c", code: "Ш", name: "Штора", shape: "cloud", blockMode: "often" },
+      { categoryId: "нет такой", code: "Я", name: "Потеряшка" },
+    ],
+  };
+  const group = catalogOffer(withoutDictionary(), stale).find((item) => item.category.name === "Шторы");
+  assert.deepEqual(group.types.map((type) => type.code), ["Ш"], "тип без своей категории не предлагается");
+  assert.equal(group.types[0].shape, null, "неизвестная форма — это «как у категории»");
+  assert.equal(group.types[0].blockMode, "each");
+  assert.ok(/^#[0-9A-F]{6}$/.test(group.category.color), "цвет категории остаётся цветом: " + group.category.color);
+  assert.ok(SHAPE_NAMES.includes(group.category.shape));
+
+  const added = addTypesFromCatalog(withoutDictionary(), stale, ["Ш", "Я"]);
+  assert.deepEqual(added.types.map((type) => type.code), ["Ш"]);
+  assert.equal(added.project.categories.length, 1);
 });

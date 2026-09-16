@@ -15,6 +15,8 @@ import {
   SHAPE_PALETTE,
   addCategory,
   addType,
+  addTypesFromCatalog,
+  catalogOffer,
   compactNumbers,
   deleteCategory,
   deleteType,
@@ -264,6 +266,117 @@ function openTypesCompactPreview(preview, { stale } = {}) {
   });
 }
 
+// Окно «Добавить из общей базы». Общая база — стандартный справочник плюс
+// сохранённый шаблон: то, чего в справочнике объекта нет, но что уже описано.
+// Появилось оттого, что новые типы стартового справочника (проходной
+// переключатель, витая пара, датчики) не доезжали до размеченных объектов:
+// единственным путём был возврат к шаблону, а он стирает правки пользователя.
+//
+// Что предлагать и что из этого выйдет, решает модель (`catalogOffer`): здесь
+// только отметки. Значок и цвет строки — те же, что окажутся на плане, поэтому
+// цвет берётся у категории объекта, когда она в нём уже есть.
+export function openTypesCatalog(project, template) {
+  return new Promise((resolve) => {
+    const groups = catalogOffer(project, template);
+    const chosen = new Set();
+    const items = [];
+    const heads = [];
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+
+    const counter = uiEl("p", { class: "modal__text" });
+    const addButton = uiButton(strings.dictionary.catalogAdd, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => done([...chosen]) },
+    });
+
+    // Состояние всех флажков — от одного набора отметок: галочка категории
+    // ставится и снимается вместе со своими строками, а наполовину отмеченная
+    // категория показывается серым квадратом, а не пустой галочкой.
+    function sync() {
+      for (const item of items) item.node.checked = chosen.has(item.key);
+      for (const head of heads) {
+        const marked = head.keys.filter((key) => chosen.has(key)).length;
+        head.node.checked = marked === head.keys.length;
+        head.node.indeterminate = marked > 0 && marked < head.keys.length;
+      }
+      counter.textContent = text("dictionary.catalogChosen", { count: chosen.size });
+      addButton.disabled = chosen.size === 0;
+    }
+
+    const list = uiEl("div", { class: "compact__rows" });
+    for (const group of groups) {
+      const keys = group.types.map((type) => type.key);
+      const head = uiEl("input", {
+        type: "checkbox",
+        title: strings.dictionary.catalogAll,
+        on: {
+          change: () => {
+            for (const key of keys) {
+              if (head.checked) chosen.add(key);
+              else chosen.delete(key);
+            }
+            sync();
+          },
+        },
+      });
+      heads.push({ node: head, keys });
+      const name = uiEl("span", { text: group.category.name });
+      name.style.color = group.category.color;
+      list.append(
+        uiEl("label", { class: "dict__row" }, [
+          head,
+          shapeIcon(group.category.shape, group.category.color, 18),
+          name,
+        ]),
+      );
+      for (const type of group.types) {
+        const box = uiEl("input", {
+          type: "checkbox",
+          on: {
+            change: () => {
+              if (box.checked) chosen.add(type.key);
+              else chosen.delete(type.key);
+              sync();
+            },
+          },
+        });
+        items.push({ node: box, key: type.key });
+        const row = uiEl("label", { class: "dict__row", title: type.code + " — " + type.name }, [
+          box,
+          // Форма типа, а если своей нет — форма категории: ровно то, что
+          // нарисует план. Цвет всегда категорийный, цвета у типа нет.
+          shapeIcon(type.shape || group.category.shape, group.category.color, 20),
+          uiEl("span", { class: "dict__code", text: type.code }),
+          uiEl("span", { text: type.name }),
+        ]);
+        row.style.paddingLeft = "18px";
+        list.append(row);
+      }
+    }
+
+    // Добавлять нечего — это ответ, а не пустое окно: кнопка на месте, и
+    // строка объясняет, почему список пуст.
+    const body = uiEl(
+      "div",
+      { class: "compact" },
+      groups.length === 0
+        ? [uiEl("p", { class: "panel__empty", text: strings.dictionary.catalogEmpty })]
+        : [uiEl("p", { class: "modal__text", text: strings.dictionary.catalogHint }), list, counter],
+    );
+    sync();
+    modal = uiModal({
+      title: strings.dictionary.catalogTitle,
+      body,
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }), addButton],
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
 export function openTypesDictionary(api) {
   const body = uiEl("div", { class: "dict" });
 
@@ -465,6 +578,25 @@ export function openTypesDictionary(api) {
     ]);
   }
 
+  // Общая база: стандартный справочник и сохранённый шаблон. Шаблон достаёт
+  // панель — модель хранилища не знает. Добавление идёт одним шагом истории:
+  // одна отмена возвращает весь набор. Через общий `commit` не идёт нарочно —
+  // нужно знать, сколько типов добавилось на самом деле, и не ставить пустой
+  // шаг истории, когда не добавилось ничего.
+  async function addFromCatalog() {
+    const template = await getSetting(TYPE_TEMPLATE_KEY);
+    const keys = await openTypesCatalog(project(), template);
+    if (!keys || keys.length === 0) return;
+    try {
+      const result = addTypesFromCatalog(project(), template, keys);
+      if (result.types.length === 0) return;
+      canvasCommit(project(), result.project, strings.history.addFromCatalog);
+      api.notify(text("dictionary.catalogAdded", { count: result.types.length }), "success");
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   function addTypeRow() {
     const code = uiEl("input", {
       class: "ui-input dict__code",
@@ -490,6 +622,13 @@ export function openTypesDictionary(api) {
         categoryId = value;
       }),
       uiButton(strings.dictionary.addType, { class: "ui-btn ui-btn--accent", on: { click: add } }),
+      // Кнопка стоит рядом с «Добавить тип» и не прячется, даже когда общая
+      // база объекту уже нечего дать: исчезнувшая кнопка — это вопрос «куда
+      // она делась», а не ответ.
+      uiButton(strings.dictionary.addFromCatalog, {
+        title: strings.dictionary.addFromCatalogHint,
+        on: { click: () => addFromCatalog() },
+      }),
     ]);
   }
 

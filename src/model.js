@@ -1410,6 +1410,180 @@ export function deleteCategory(project, categoryId) {
   return { project: withProject(project, { categories }), deleted: current };
 }
 
+// ——— общая база типов ————————————————————————————————————————————————
+//
+// Справочник у каждого объекта свой, и это правильно: на одном объекте «Р» —
+// розетка, на другом её вовсе нет. Но когда в стартовый справочник добавляется
+// новый тип (проходной переключатель, вывод витой пары, целая категория
+// датчиков), уже размеченные объекты о нём не узнают: единственным путём был
+// возврат к стандартному шаблону, а он стирает и правки пользователя.
+//
+// Отсюда общая база: встроенный `defaultTemplate()` плюс сохранённый
+// пользователем шаблон, объединённые по коду. Один и тот же код в обоих —
+// побеждает сохранённый: его правили руками. Позиция строки при этом остаётся
+// от встроенного справочника, чтобы привычный порядок не перетасовывался.
+//
+// Хранилища модель не знает: шаблон достаёт и передаёт сюда панель.
+
+// Код сравнивается так же, как его проверяет `normalizeCode` на занятость:
+// по верхнему регистру и без краёв. Латинская «P» и кириллическая «Р» при этом
+// остаются разными кодами — ловушка справочника действует и здесь.
+function catalogCodeKey(code) {
+  return String(code == null ? "" : code).trim().toUpperCase();
+}
+
+// Категория опознаётся по имени: идентификаторы у каждого объекта свои, и
+// «Свет» шаблона — это «Свет» объекта, а не новая шестая категория.
+function catalogNameKey(name) {
+  return String(name == null ? "" : name).trim().toLowerCase();
+}
+
+function catalogSources(templates) {
+  const extra = Array.isArray(templates) ? templates : templates ? [templates] : [];
+  return [defaultTemplate(), ...extra].filter(
+    (source) => source && Array.isArray(source.categories) && Array.isArray(source.markTypes),
+  );
+}
+
+// Слияние источников в одну базу. `Map.set` по существующему ключу меняет
+// значение, но не место — отсюда и правило «позиция от первого источника,
+// содержимое от последнего». Форма и режим блока сверяются со списками модели:
+// шаблон мог быть сохранён давно, а неизвестное значение объект бы не принял.
+function catalogMerge(templates) {
+  const categories = new Map();
+  const types = new Map();
+  for (const source of catalogSources(templates)) {
+    const byId = new Map(source.categories.map((category) => [category.id, category]));
+    for (const category of source.categories) {
+      const key = catalogNameKey(category.name);
+      if (!key) continue;
+      categories.set(key, {
+        name: String(category.name).trim(),
+        color: normalizeColor(category.color, FALLBACK_COLOR),
+        shape: SHAPE_NAMES.includes(category.shape) ? category.shape : SHAPE_PALETTE[0],
+        lineStyle: LINE_STYLES.includes(category.lineStyle) ? category.lineStyle : null,
+      });
+    }
+    for (const type of source.markTypes) {
+      const key = catalogCodeKey(type.code);
+      const category = byId.get(type.categoryId);
+      const categoryKey = category ? catalogNameKey(category.name) : "";
+      if (!key || !categoryKey) continue;
+      const code = String(type.code).trim();
+      types.set(key, {
+        key,
+        code,
+        name: String(type.name == null ? "" : type.name).trim() || code,
+        shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
+        lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
+        blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
+        categoryKey,
+      });
+    }
+  }
+  return { categories, types };
+}
+
+/**
+ * Что из общей базы можно добавить в справочник объекта: типы, чьего кода в
+ * объекте нет, сгруппированные по категориям в порядке базы. Пустых групп в
+ * ответе не бывает.
+ *
+ * `templates` — сохранённый шаблон (или список шаблонов) поверх встроенного;
+ * `null` означает «только встроенный».
+ *
+ * Категория ответа — та, какой она станет: у знакомой объекту категории это
+ * её собственные имя, цвет и форма (`existingId` — её идентификатор), у новой —
+ * значения из базы. Окно рисует ровно то, что получится после добавления.
+ */
+export function catalogOffer(project, templates) {
+  const { categories, types } = catalogMerge(templates);
+  const taken = new Set((project && project.markTypes ? project.markTypes : []).map((type) => catalogCodeKey(type.code)));
+  const known = new Map();
+  for (const category of (project && project.categories) || []) {
+    const key = catalogNameKey(category.name);
+    if (key && !known.has(key)) known.set(key, category);
+  }
+  const groups = new Map();
+  for (const [key, base] of categories) {
+    const found = known.get(key) || null;
+    groups.set(key, {
+      category: {
+        name: found ? found.name : base.name,
+        color: found ? found.color : base.color,
+        shape: found ? found.shape : base.shape,
+        lineStyle: (found ? found.lineStyle : base.lineStyle) || null,
+        existingId: found ? found.id : null,
+      },
+      types: [],
+    });
+  }
+  for (const entry of types.values()) {
+    if (taken.has(entry.key)) continue;
+    const group = groups.get(entry.categoryKey);
+    if (!group) continue;
+    group.types.push({
+      key: entry.key,
+      code: entry.code,
+      name: entry.name,
+      shape: entry.shape,
+      lineStyle: entry.lineStyle,
+      blockMode: entry.blockMode,
+    });
+  }
+  return [...groups.values()].filter((group) => group.types.length > 0);
+}
+
+/**
+ * Добавить в справочник объекта отмеченные типы общей базы. `typeKeys` — ключи
+ * строк из `catalogOffer` (они же коды); порядок и повторы значения не имеют,
+ * неизвестный ключ пропускается молча — окно могло устареть.
+ *
+ * Существующее не трогается: тип с занятым кодом не предлагается и не
+ * добавляется, а категория, знакомая объекту по имени, переиспользуется как
+ * есть — ни цвет, ни форма её не меняются. Недостающая категория заводится
+ * вместе с первым своим типом. Новые типы встают в конец своей категории.
+ *
+ * Добавлять нечего — возвращается тот же объект: пустого шага истории быть
+ * не должно.
+ */
+export function addTypesFromCatalog(project, templates, typeKeys) {
+  const wanted = new Set([...(typeKeys || [])].map(catalogCodeKey).filter(Boolean));
+  const groups = catalogOffer(project, templates);
+  let next = project;
+  const types = [];
+  const categories = [];
+  for (const group of groups) {
+    const chosen = group.types.filter((type) => wanted.has(type.key));
+    if (chosen.length === 0) continue;
+    let categoryId = group.category.existingId;
+    if (!categoryId) {
+      const created = addCategory(next, {
+        name: group.category.name,
+        color: group.category.color,
+        shape: group.category.shape,
+        lineStyle: group.category.lineStyle,
+      });
+      next = created.project;
+      categoryId = created.category.id;
+      categories.push(created.category);
+    }
+    for (const type of chosen) {
+      const added = addType(next, {
+        code: type.code,
+        name: type.name,
+        categoryId,
+        shape: type.shape,
+        lineStyle: type.lineStyle,
+        blockMode: type.blockMode,
+      });
+      next = added.project;
+      types.push(added.type);
+    }
+  }
+  return { project: next, types, categories };
+}
+
 // Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.
 // Одним списком, потому что на плане они встречаются — метка категории лежит
 // поверх заливки комнаты, и повтор цвета там означает потерянную метку.
