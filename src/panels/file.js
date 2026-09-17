@@ -1,5 +1,5 @@
-// Файл проекта: «Сохранить в файл», «Открыть файл», папка автосохранения
-// и строка «в файл выгружено: N назад» в шапке.
+// Файл проекта: «Экспорт», «Открыть файл», папка автосохранения и отметка
+// свежести выгрузки в шапке.
 //
 // Панель тонкая: zip пишет и читает `projectFile.js`, переприсваивание
 // идентификаторов и работу с папкой держит `autosave.js`. Здесь — кнопки,
@@ -39,8 +39,19 @@ import {
   onAutosaveChange,
 } from "../autosave.js";
 
-// Строка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
+// Отметка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
 const FILE_TICK_MS = 60000;
+// Сутки без выгрузки — уже «давно»: работа целого дня живёт только в браузере.
+const FILE_OLD_MS = 24 * 60 * 60 * 1000;
+// Четыре состояния отметки у кнопки экспорта. Цвет различает три — «выгружено
+// и правок нет», «пора выгрузить», «ни разу», — а словами подсказка говорит,
+// что именно случилось.
+const FILE_EXPORT_STATE = {
+  fresh: "file.exportStateFresh",
+  stale: "file.exportStateStale",
+  old: "file.exportStateOld",
+  never: "file.exportStateNever",
+};
 
 // Выбор при загрузке: по умолчанию новый объект, перезапись — отдельной
 // кнопкой и с подтверждением. Возвращает "new" | "replace" | null.
@@ -94,6 +105,11 @@ function mountFilePanel(host, api) {
     title: strings.file.saveHint,
     on: { click: () => saveToFile() },
   });
+  // Состояние выгрузки — не кнопка, и кричать громче кнопок ему нечего: раньше
+  // жёлтая строка занимала полшапки, теперь это точка на самой кнопке
+  // экспорта, а словами состояние названо в её подсказке.
+  const exportDot = uiEl("span", { class: "file__dot", attrs: { "aria-hidden": "true" } });
+  saveButton.prepend(exportDot);
   const openButton = uiButton(strings.file.open, {
     title: strings.file.openHint,
     on: { click: () => picker.click() },
@@ -102,7 +118,6 @@ function mountFilePanel(host, api) {
     title: strings.autosave.pickHint,
     on: { click: () => folderClick() },
   });
-  const statusNode = uiEl("span", { class: "file__status" });
   const picker = uiEl("input", {
     class: "file__picker",
     type: "file",
@@ -116,7 +131,7 @@ function mountFilePanel(host, api) {
     },
   });
 
-  const row = uiEl("div", { class: "file" }, [statusNode, folderButton, openButton, saveButton, picker]);
+  const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveButton, picker]);
   host.replaceChildren(row);
 
   // ——— сохранение в файл ————————————————————————————————————————————
@@ -428,9 +443,19 @@ function mountFilePanel(host, api) {
     // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
     const saving = layoutAllows("saveFile", state.layout);
     saveButton.hidden = !saving;
-    statusNode.hidden = !saving;
-    statusNode.textContent = text("file.exported", { ago: autosaveAgoText(autosaveLastExport(projectId)) });
-    statusNode.title = status.supported ? "" : strings.autosave.unsupported;
+    const exported = autosaveLastExport(projectId);
+    const stamp = exported ? Date.parse(exported) : Number.NaN;
+    let mark = "never";
+    if (!Number.isNaN(stamp)) {
+      if (state.dirty) mark = "stale";
+      else mark = Date.now() - stamp > FILE_OLD_MS ? "old" : "fresh";
+    }
+    exportDot.className = "file__dot is-" + mark;
+    const said = text(FILE_EXPORT_STATE[mark], { ago: autosaveAgoText(exported) });
+    // Папка автосохранения бывает недоступна (страница открыта с диска) — и
+    // сказать об этом больше негде: кнопки папки в этом случае нет вовсе.
+    saveButton.title =
+      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported);
     row.classList.toggle("is-busy", Boolean(status.busy));
     row.classList.toggle("is-dirty", Boolean(state.dirty));
 
@@ -480,7 +505,9 @@ function mountFilePanel(host, api) {
   subscribe((state, changed) => {
     if ("layout" in changed) renderStatus();
     if (!("project" in changed)) {
-      if ("dirty" in changed) row.classList.toggle("is-dirty", Boolean(state.dirty));
+      // Отметка у кнопки экспорта живёт на том же признаке: правка, ещё не
+      // уехавшая в файл, обязана быть видна сразу.
+      if ("dirty" in changed) renderStatus();
       return;
     }
     syncProjectSelect(state.project);

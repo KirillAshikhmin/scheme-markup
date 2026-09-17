@@ -41,8 +41,10 @@ body {
 #app {
   display: grid;
   grid-template-columns: var(--panel-width) 1fr var(--panel-width);
-  /* Шапка не ниже своей высоты, но может перенести строку: в ней теперь и
-     поиск, и отмена, и файл — на узком ноутбуке иначе обрезалось правое. */
+  /* Шапка — одна строка: слова из неё убраны, поиск свёрнут в значок, а
+     состояние выгрузки стало отметкой на кнопке, и файловые действия встали
+     рядом с остальными. Перенос оставлен запасным выходом: на совсем узком
+     окне лучше вторая строка, чем обрезанное правое. */
   grid-template-rows: minmax(var(--header-height), auto) 1fr;
   grid-template-areas:
     "header header header"
@@ -56,43 +58,48 @@ body {
   align-items: center;
   flex-wrap: wrap;
   row-gap: 4px;
-  gap: 16px;
+  gap: 12px;
   padding: 0 12px;
   background: var(--panel-bg-deep);
   border-bottom: 1px solid var(--panel-line);
   color: var(--panel-text);
 }
 
-#app-brand {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  white-space: nowrap;
-}
-
 #app-title {
   font-weight: 600;
-}
-
-#app-subtitle,
-#project-label {
-  color: var(--panel-muted);
-  font-size: 12px;
-}
-
-#project-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-#project-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 40vw;
+}
+
+/* Окно уже полутора тысяч точек: название сервиса уходит первым. Оно
+   единственное в шапке ничего не говорит о работе — и уступает место тому,
+   ради чего шапку и чистили: одной строке вместо двух. Имя сервиса остаётся
+   во вкладке — там теперь и значок, и заголовок. */
+@media (max-width: 1060px) {
+  #app-title {
+    display: none;
+  }
+
+  /* Дальше шапка поджимается сама: промежутки и поля кнопок уже, слова те же.
+     Раскладка переключается на мобильную при 860 точках — до этой границы
+     шапка обязана оставаться одной строкой. */
+  #app-header {
+    gap: 8px;
+  }
+
+  #app-header .ui-btn {
+    padding: 4px 6px;
+  }
+
+  #file-actions {
+    margin-left: 8px;
+  }
+}
+
+/* Место счётчика предупреждений (таск 52). Пока панель не поднялась, точка
+   монтирования пуста, а у шапки есть промежуток между элементами — без этого
+   правила пустой контейнер оставлял бы в строке дыру. */
+#header-warnings:empty {
+  display: none;
 }
 
 #header-actions {
@@ -364,13 +371,8 @@ body {
 }
 
 /* Название сервиса на объекте не нужно: место дороже. */
-#app.is-mobile #app-brand,
-#app.is-mobile #project-label {
+#app.is-mobile #app-title {
   display: none;
-}
-
-#app.is-mobile #project-name {
-  max-width: 55vw;
 }
 
 #app.is-mobile #scheme-name {
@@ -486,12 +488,6 @@ body {
 
 #app.is-mobile #canvas-empty {
   max-width: 82vw;
-}
-
-/* Имя объекта на узком экране показывает сам список объектов — второй раз
-   рядом оно только съедает строку. */
-#app.is-mobile #project-name {
-  display: none;
 }
 
 #app.is-mobile #project-actions .ui-select {

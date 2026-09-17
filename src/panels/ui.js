@@ -34,6 +34,45 @@ export function uiButton(label, options = {}) {
   });
 }
 
+// Значки рисуются прямо здесь, своими линиями: внешних картинок и шрифтов в
+// сборке нет, а стрелки отмены в системном шрифте есть не на каждой машине —
+// на части из них вместо знака встал бы пустой прямоугольник. Рисунок задан
+// в клетке 24×24 и тянется за цветом кнопки (`currentColor` в стилях).
+const UI_SVG_NS = "http://www.w3.org/2000/svg";
+const UI_ICONS = {
+  undo: ["M7 10h9a4.5 4.5 0 0 1 0 9h-5", "M10.5 6 6.5 10l4 4"],
+  redo: ["M17 10H8a4.5 4.5 0 0 0 0 9h5", "M13.5 6 17.5 10l-4 4"],
+  search: ["M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0", "M15.2 15.2 20 20"],
+};
+
+export function uiIcon(name) {
+  const svg = document.createElementNS(UI_SVG_NS, "svg");
+  svg.setAttribute("class", "ui-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const line of UI_ICONS[name] || []) {
+    const path = document.createElementNS(UI_SVG_NS, "path");
+    path.setAttribute("d", line);
+    svg.append(path);
+  }
+  return svg;
+}
+
+// Кнопка-значок. Подпись словами у неё всё равно есть — в `title` и в
+// `aria-label`: значок без слова опознаётся не всеми, а экранный диктор
+// не читает рисунок вовсе.
+export function uiIconButton(name, options = {}) {
+  const button = uiButton("", {
+    class: (options.class || "ui-btn") + " ui-btn--icon",
+    title: options.title || options.label || "",
+    on: options.on,
+    attrs: { ...(options.attrs || {}), "aria-label": options.label || options.title || "" },
+  });
+  button.append(uiIcon(name));
+  return button;
+}
+
 // Диалоги складываются стопкой: подтверждение поверх редактора плана —
 // обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
 // основное действие, нижние ждут своей очереди и закрываются своими же close().

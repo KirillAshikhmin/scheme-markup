@@ -439,8 +439,11 @@ const HATCH_ROWS = [-0.3, 0, 0.3];
 // краски, чем нужно отпечатку, чтобы счесть знаки разными.
 const BAR_REACH = Math.SQRT1_2;
 const BAR_WIDTH = 1.6;
-// Две черты делят квадрат на три равные части: треть полустороны от центра.
-const BAR_THIRD = Math.SQRT1_2 / 3;
+// Пара клавиш рисуется тоньше одиночной: двум толстым чертам в размере метки
+// не остаётся просветов, и квадрат с двумя чертами сливается в полосатое пятно,
+// неотличимое от квадрата с одной. Краски у пары и так вдвое больше, поэтому
+// тонкая черта отпечатку не мешает — на распечатке знаки расходятся.
+const BAR_TWO_WIDTH = 1.0;
 // Евророзетка: два контактных отверстия по сторонам от центра.
 const SOCKET_GAP = 0.46;
 const SOCKET_DOT = 0.3;
@@ -684,11 +687,16 @@ function shapeInternals(geometry) {
     // равные части. Ровно так их и видят на стене, поэтому знак читается без
     // буквы рядом.
     const reach = geometry.r * BAR_REACH;
-    const offsets = geometry.decor === "bar" ? [0] : [-geometry.r * BAR_THIRD, geometry.r * BAR_THIRD];
+    const width = geometry.line * (geometry.decor === "bar" ? BAR_WIDTH : BAR_TWO_WIDTH);
+    // Две черты делят квадрат на три равные части — равные по просвету, а не по
+    // расстоянию между осями черт: считать от осей значило бы оставить средний
+    // просвет уже крайних, а именно он и схлопывается первым.
+    const third = (reach + width / 2) / 3;
+    const offsets = geometry.decor === "bar" ? [0] : [-third, third];
     parts.push({
       role: geometry.decor,
       mask: "lines",
-      width: geometry.line * BAR_WIDTH,
+      width,
       segments: offsets.map((offset) => [
         { x: geometry.cx + offset, y: geometry.cy - reach },
         { x: geometry.cx + offset, y: geometry.cy + reach },

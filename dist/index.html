@@ -4,6 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title data-text="app.title"></title>
+    <!-- Значок вкладки: план из двух помещений и метка на нём — то, что делает
+         сам инструмент. Нарисован здесь же: страница самодостаточна, внешних
+         ссылок в ней нет, поэтому рисунок лежит в самом адресе `data:`.
+         Проверен в размере вкладки (16×16), а не только крупно. -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230d1117'/%3E%3Crect%20x='6'%20y='6.5'%20width='20'%20height='19'%20fill='none'%20stroke='%23e6edf3'%20stroke-width='2.4'/%3E%3Cpath%20d='M6%2014h20'%20fill='none'%20stroke='%23e6edf3'%20stroke-width='2.4'/%3E%3Ccircle%20cx='18.5'%20cy='19.8'%20r='3.9'%20fill='%231f6feb'%20stroke='%230d1117'%20stroke-width='1.4'/%3E%3C/svg%3E" />
     <style>
 /* Холст разметки, подсказка поверх него и панель инструментов. */
 
@@ -466,8 +471,8 @@
   border-color: var(--panel-text);
 }
 
-/* Работа с файлом проекта в шапке: строка «выгружено N назад», папка
-   автосохранения, «Открыть файл» и «Сохранить в файл». */
+/* Работа с файлом проекта в шапке: папка автосохранения, «Открыть файл» и
+   «Экспорт» с отметкой свежести выгрузки. */
 
 #file-actions {
   display: flex;
@@ -481,22 +486,36 @@
   gap: 8px;
 }
 
-.file__status {
-  color: var(--panel-muted);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 28ch;
+/* Отметка свежести выгрузки: точка на кнопке экспорта. Зелёная — объект целиком
+   в файле, жёлтая — пора выгружать, пустая с жёлтым ободком — не выгружали ни
+   разу. Словами состояние названо в подсказке кнопки. */
+.file__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
 }
 
-/* Несохранённая работа заметна, но не кричит: цвет, а не модальное окно. */
-.file.is-dirty .file__status {
-  color: #d29922;
+.file__dot.is-fresh {
+  background: #56d364;
 }
 
-.file.is-busy .file__status {
-  opacity: 0.6;
+.file__dot.is-stale,
+.file__dot.is-old {
+  background: #ffd33d;
+}
+
+.file__dot.is-never {
+  border-color: #ffd33d;
+}
+
+/* Пока идёт запись, отметка ничего не утверждает. */
+.file.is-busy .file__dot {
+  opacity: 0.5;
 }
 
 /* Папка выбрана и разрешена — кнопка выглядит включённой. */
@@ -1384,6 +1403,28 @@
   color: #ff9aa2;
 }
 
+/* Кнопка-значок: рисунок вместо слова, размер — как у кнопки со словом, чтобы
+   в ряду ничего не проседало. */
+.ui-btn--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Поле подобрано так, чтобы кнопка-значок была ровно той же высоты, что
+     кнопка со словом: в одном ряду разнобой видно сразу. */
+  padding: 5px 7px;
+}
+
+.ui-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .ui-btn--wide {
   display: block;
   width: 100%;
@@ -1411,6 +1452,12 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Удаление стоит на отлёте: «＋» и корзина вплотную — это промах ценой всего
+   объекта. Отступ отделяет её от создания и переименования. */
+#project-actions .ui-btn--danger {
+  margin-left: 10px;
 }
 
 /* ——— диалоги ——————————————————————————————————————————————————————— */
@@ -1659,11 +1706,26 @@
   gap: 4px;
 }
 
-/* Поиск ужимается первым: рядом с ним в шапке живут отмена, выгрузка и файл.
-   Гибкость задаётся контейнеру-точке монтирования: именно он — элемент шапки. */
+/* Свёрнутый поиск — один значок; строка появляется, только когда её позвали
+   (клик по значку или клавиша «/»), и ужимается первой: рядом с ней в шапке
+   живут отмена, выгрузка и файл. Гибкость задаётся контейнеру-точке
+   монтирования: именно он — элемент шапки. */
 #header-search {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+#header-search .search {
+  display: none;
+}
+
+#header-search.is-open {
   flex: 0 1 auto;
   min-width: 110px;
+}
+
+#header-search.is-open .search {
+  display: block;
 }
 
 .search {
@@ -1755,9 +1817,10 @@
   background: var(--panel-bg);
 }
 
-/* На телефоне поиск занимает свою строку целиком: это главный способ найти
-   метку, когда панелей на экране нет. */
-#app.is-mobile #header-search {
+/* На телефоне раскрытый поиск занимает свою строку целиком: это главный способ
+   найти метку, когда панелей на экране нет. Свёрнутый — тот же значок, что и на
+   большом экране, и строки не занимает. */
+#app.is-mobile #header-search.is-open {
   flex: 1 0 100%;
   order: 8;
 }
@@ -2215,8 +2278,10 @@ body {
 #app {
   display: grid;
   grid-template-columns: var(--panel-width) 1fr var(--panel-width);
-  /* Шапка не ниже своей высоты, но может перенести строку: в ней теперь и
-     поиск, и отмена, и файл — на узком ноутбуке иначе обрезалось правое. */
+  /* Шапка — одна строка: слова из неё убраны, поиск свёрнут в значок, а
+     состояние выгрузки стало отметкой на кнопке, и файловые действия встали
+     рядом с остальными. Перенос оставлен запасным выходом: на совсем узком
+     окне лучше вторая строка, чем обрезанное правое. */
   grid-template-rows: minmax(var(--header-height), auto) 1fr;
   grid-template-areas:
     "header header header"
@@ -2230,43 +2295,48 @@ body {
   align-items: center;
   flex-wrap: wrap;
   row-gap: 4px;
-  gap: 16px;
+  gap: 12px;
   padding: 0 12px;
   background: var(--panel-bg-deep);
   border-bottom: 1px solid var(--panel-line);
   color: var(--panel-text);
 }
 
-#app-brand {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  white-space: nowrap;
-}
-
 #app-title {
   font-weight: 600;
-}
-
-#app-subtitle,
-#project-label {
-  color: var(--panel-muted);
-  font-size: 12px;
-}
-
-#project-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-#project-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 40vw;
+}
+
+/* Окно уже полутора тысяч точек: название сервиса уходит первым. Оно
+   единственное в шапке ничего не говорит о работе — и уступает место тому,
+   ради чего шапку и чистили: одной строке вместо двух. Имя сервиса остаётся
+   во вкладке — там теперь и значок, и заголовок. */
+@media (max-width: 1060px) {
+  #app-title {
+    display: none;
+  }
+
+  /* Дальше шапка поджимается сама: промежутки и поля кнопок уже, слова те же.
+     Раскладка переключается на мобильную при 860 точках — до этой границы
+     шапка обязана оставаться одной строкой. */
+  #app-header {
+    gap: 8px;
+  }
+
+  #app-header .ui-btn {
+    padding: 4px 6px;
+  }
+
+  #file-actions {
+    margin-left: 8px;
+  }
+}
+
+/* Место счётчика предупреждений (таск 52). Пока панель не поднялась, точка
+   монтирования пуста, а у шапки есть промежуток между элементами — без этого
+   правила пустой контейнер оставлял бы в строке дыру. */
+#header-warnings:empty {
+  display: none;
 }
 
 #header-actions {
@@ -2538,13 +2608,8 @@ body {
 }
 
 /* Название сервиса на объекте не нужно: место дороже. */
-#app.is-mobile #app-brand,
-#app.is-mobile #project-label {
+#app.is-mobile #app-title {
   display: none;
-}
-
-#app.is-mobile #project-name {
-  max-width: 55vw;
 }
 
 #app.is-mobile #scheme-name {
@@ -2662,12 +2727,6 @@ body {
   max-width: 82vw;
 }
 
-/* Имя объекта на узком экране показывает сам список объектов — второй раз
-   рядом оно только съедает строку. */
-#app.is-mobile #project-name {
-  display: none;
-}
-
 #app.is-mobile #project-actions .ui-select {
   max-width: 46vw;
 }
@@ -2685,15 +2744,10 @@ body {
   <body>
     <div id="app">
       <header id="app-header">
-        <div id="app-brand">
-          <span id="app-title" data-text="app.title"></span>
-          <span id="app-subtitle" data-text="app.subtitle"></span>
-        </div>
-        <div id="project-bar">
-          <span id="project-label" data-text="header.project"></span>
-          <span id="project-name" data-text="header.noProject"></span>
-          <div id="project-actions" class="mount"></div>
-        </div>
+        <span id="app-title" data-text="app.title"></span>
+        <!-- Имя объекта в шапке не пишется: рядом стоит список объектов, и
+             текстом оно повторяло бы выбранную строку списка. -->
+        <div id="project-actions" class="mount"></div>
         <!-- Имя открытой схемы: на узком экране списка схем на виду нет,
              и без этой строки непонятно, что вообще открыто. -->
         <span id="scheme-name"></span>
@@ -2701,6 +2755,10 @@ body {
              всему сразу, поэтому живёт в шапке, а не в разделе «Метки». -->
         <div id="header-search" class="mount"></div>
         <div id="header-history" class="mount"></div>
+        <!-- Место счётчика предупреждений (таск 52): последний в левой группе,
+             перед отступом, который разводит шапку на две стороны. Пустая точка
+             монтирования ничего не занимает — правило `:empty` в styles.css. -->
+        <div id="header-warnings" class="mount"></div>
         <div id="header-actions" class="mount"></div>
         <!-- Переход к полной версии показывается только там, где экран сам
              выбрал просмотр: на десктопе кнопки нет. -->
@@ -2801,11 +2859,6 @@ body {
 const strings = {
   app: {
     title: "Разметка схем",
-    subtitle: "Метки на планах помещений",
-  },
-  header: {
-    project: "Объект",
-    noProject: "Объект не выбран",
   },
   panels: {
     schemes: "Схемы",
@@ -2830,6 +2883,8 @@ const strings = {
   },
   search: {
     placeholder: "Поиск по объекту",
+    open: "Поиск по объекту",
+    openHint: "Найти метку по объекту: обозначение, расположение, помещение. Клавиша «/»",
     title: "Найти метку: обозначение, расположение, обозначение из оригинала или помещение",
     empty: "Ничего не нашлось",
     more: "Показано {shown} из {total}",
@@ -2960,6 +3015,8 @@ const strings = {
     redo: "Вернуть",
     undoTitle: "Отменить: {label} (Ctrl+Z)",
     redoTitle: "Вернуть: {label} (Ctrl+Y)",
+    undoTitlePlain: "Отменить (Ctrl+Z)",
+    redoTitlePlain: "Вернуть (Ctrl+Y)",
     selectMode: "Выделение",
   },
   picker: {
@@ -3163,8 +3220,12 @@ const strings = {
 Если страницы под рукой нет
   project.json читается любым текстовым редактором, а схемы открываются как
   обычные картинки: данные не пропадут, даже если программы не окажется.`,
-    save: "Сохранить в файл",
-    saveHint: "Скачать объект одним zip-архивом",
+    save: "Экспорт",
+    saveHint: "Скачать объект одним zip-архивом (Ctrl+S)",
+    exportStateFresh: "выгружено {ago}, невыгруженных правок нет",
+    exportStateStale: "выгружено {ago}, после этого объект правили",
+    exportStateOld: "выгружено {ago} — давно",
+    exportStateNever: "в файл ещё не выгружалось",
     open: "Открыть файл",
     openHint: "Загрузить объект из zip-архива: схемы, метки и планы",
     packingTitle: "Сохранение в файл",
@@ -3184,7 +3245,6 @@ const strings = {
       "Объект «{name}» со всеми схемами и метками будет заменён содержимым файла. Вернуть его будет неоткуда.",
     replaceConfirm: "Да, заменить",
     loaded: "Объект «{name}» загружен",
-    exported: "в файл выгружено: {ago}",
     noProject: "Сначала создайте объект",
   },
   merge: {
@@ -7741,6 +7801,7 @@ const PANEL_IDS = {
   headerActions: "header-actions",
   headerSearch: "header-search",
   headerHistory: "header-history",
+  headerWarnings: "header-warnings",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -7886,7 +7947,6 @@ function setState(patch) {
     }
   }
   syncCanvasClass();
-  syncProjectName();
   syncSchemeName();
   return snapshot;
 }
@@ -7942,12 +8002,6 @@ function applyStrings(root) {
   for (const node of scope.querySelectorAll("[data-title]")) {
     node.title = text(node.dataset.title);
   }
-}
-
-function syncProjectName() {
-  const node = document.getElementById("project-name");
-  if (!node) return;
-  node.textContent = appState.project ? appState.project.name : strings.header.noProject;
 }
 
 // На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
@@ -8122,7 +8176,6 @@ function startApp() {
   appStarted = true;
   applyStrings(document);
   wireSections();
-  syncProjectName();
   syncCanvasClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
@@ -8564,8 +8617,11 @@ const HATCH_ROWS = [-0.3, 0, 0.3];
 // краски, чем нужно отпечатку, чтобы счесть знаки разными.
 const BAR_REACH = Math.SQRT1_2;
 const BAR_WIDTH = 1.6;
-// Две черты делят квадрат на три равные части: треть полустороны от центра.
-const BAR_THIRD = Math.SQRT1_2 / 3;
+// Пара клавиш рисуется тоньше одиночной: двум толстым чертам в размере метки
+// не остаётся просветов, и квадрат с двумя чертами сливается в полосатое пятно,
+// неотличимое от квадрата с одной. Краски у пары и так вдвое больше, поэтому
+// тонкая черта отпечатку не мешает — на распечатке знаки расходятся.
+const BAR_TWO_WIDTH = 1.0;
 // Евророзетка: два контактных отверстия по сторонам от центра.
 const SOCKET_GAP = 0.46;
 const SOCKET_DOT = 0.3;
@@ -8809,11 +8865,16 @@ function shapeInternals(geometry) {
     // равные части. Ровно так их и видят на стене, поэтому знак читается без
     // буквы рядом.
     const reach = geometry.r * BAR_REACH;
-    const offsets = geometry.decor === "bar" ? [0] : [-geometry.r * BAR_THIRD, geometry.r * BAR_THIRD];
+    const width = geometry.line * (geometry.decor === "bar" ? BAR_WIDTH : BAR_TWO_WIDTH);
+    // Две черты делят квадрат на три равные части — равные по просвету, а не по
+    // расстоянию между осями черт: считать от осей значило бы оставить средний
+    // просвет уже крайних, а именно он и схлопывается первым.
+    const third = (reach + width / 2) / 3;
+    const offsets = geometry.decor === "bar" ? [0] : [-third, third];
     parts.push({
       role: geometry.decor,
       mask: "lines",
-      width: geometry.line * BAR_WIDTH,
+      width,
       segments: offsets.map((offset) => [
         { x: geometry.cx + offset, y: geometry.cy - reach },
         { x: geometry.cx + offset, y: geometry.cy + reach },
@@ -10173,6 +10234,44 @@ function uiButton(label, options = {}) {
     on: options.on,
     attrs: options.attrs,
   });
+}
+
+// Значки рисуются прямо здесь, своими линиями: внешних картинок и шрифтов в
+// сборке нет, а стрелки отмены в системном шрифте есть не на каждой машине —
+// на части из них вместо знака встал бы пустой прямоугольник. Рисунок задан
+// в клетке 24×24 и тянется за цветом кнопки (`currentColor` в стилях).
+const UI_SVG_NS = "http://www.w3.org/2000/svg";
+const UI_ICONS = {
+  undo: ["M7 10h9a4.5 4.5 0 0 1 0 9h-5", "M10.5 6 6.5 10l4 4"],
+  redo: ["M17 10H8a4.5 4.5 0 0 0 0 9h5", "M13.5 6 17.5 10l-4 4"],
+  search: ["M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0", "M15.2 15.2 20 20"],
+};
+function uiIcon(name) {
+  const svg = document.createElementNS(UI_SVG_NS, "svg");
+  svg.setAttribute("class", "ui-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const line of UI_ICONS[name] || []) {
+    const path = document.createElementNS(UI_SVG_NS, "path");
+    path.setAttribute("d", line);
+    svg.append(path);
+  }
+  return svg;
+}
+
+// Кнопка-значок. Подпись словами у неё всё равно есть — в `title` и в
+// `aria-label`: значок без слова опознаётся не всеми, а экранный диктор
+// не читает рисунок вовсе.
+function uiIconButton(name, options = {}) {
+  const button = uiButton("", {
+    class: (options.class || "ui-btn") + " ui-btn--icon",
+    title: options.title || options.label || "",
+    on: options.on,
+    attrs: { ...(options.attrs || {}), "aria-label": options.label || options.title || "" },
+  });
+  button.append(uiIcon(name));
+  return button;
 }
 
 // Диалоги складываются стопкой: подтверждение поверх редактора плана —
@@ -16538,8 +16637,8 @@ function mountProjectsPanel(host, api) {
 registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
 // src/panels/file.js
-// Файл проекта: «Сохранить в файл», «Открыть файл», папка автосохранения
-// и строка «в файл выгружено: N назад» в шапке.
+// Файл проекта: «Экспорт», «Открыть файл», папка автосохранения и отметка
+// свежести выгрузки в шапке.
 //
 // Панель тонкая: zip пишет и читает `projectFile.js`, переприсваивание
 // идентификаторов и работу с папкой держит `autosave.js`. Здесь — кнопки,
@@ -16558,8 +16657,19 @@ registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
 
 
-// Строка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
+// Отметка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
 const FILE_TICK_MS = 60000;
+// Сутки без выгрузки — уже «давно»: работа целого дня живёт только в браузере.
+const FILE_OLD_MS = 24 * 60 * 60 * 1000;
+// Четыре состояния отметки у кнопки экспорта. Цвет различает три — «выгружено
+// и правок нет», «пора выгрузить», «ни разу», — а словами подсказка говорит,
+// что именно случилось.
+const FILE_EXPORT_STATE = {
+  fresh: "file.exportStateFresh",
+  stale: "file.exportStateStale",
+  old: "file.exportStateOld",
+  never: "file.exportStateNever",
+};
 
 // Выбор при загрузке: по умолчанию новый объект, перезапись — отдельной
 // кнопкой и с подтверждением. Возвращает "new" | "replace" | null.
@@ -16613,6 +16723,11 @@ function mountFilePanel(host, api) {
     title: strings.file.saveHint,
     on: { click: () => saveToFile() },
   });
+  // Состояние выгрузки — не кнопка, и кричать громче кнопок ему нечего: раньше
+  // жёлтая строка занимала полшапки, теперь это точка на самой кнопке
+  // экспорта, а словами состояние названо в её подсказке.
+  const exportDot = uiEl("span", { class: "file__dot", attrs: { "aria-hidden": "true" } });
+  saveButton.prepend(exportDot);
   const openButton = uiButton(strings.file.open, {
     title: strings.file.openHint,
     on: { click: () => picker.click() },
@@ -16621,7 +16736,6 @@ function mountFilePanel(host, api) {
     title: strings.autosave.pickHint,
     on: { click: () => folderClick() },
   });
-  const statusNode = uiEl("span", { class: "file__status" });
   const picker = uiEl("input", {
     class: "file__picker",
     type: "file",
@@ -16635,7 +16749,7 @@ function mountFilePanel(host, api) {
     },
   });
 
-  const row = uiEl("div", { class: "file" }, [statusNode, folderButton, openButton, saveButton, picker]);
+  const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveButton, picker]);
   host.replaceChildren(row);
 
   // ——— сохранение в файл ————————————————————————————————————————————
@@ -16947,9 +17061,19 @@ function mountFilePanel(host, api) {
     // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
     const saving = layoutAllows("saveFile", state.layout);
     saveButton.hidden = !saving;
-    statusNode.hidden = !saving;
-    statusNode.textContent = text("file.exported", { ago: autosaveAgoText(autosaveLastExport(projectId)) });
-    statusNode.title = status.supported ? "" : strings.autosave.unsupported;
+    const exported = autosaveLastExport(projectId);
+    const stamp = exported ? Date.parse(exported) : Number.NaN;
+    let mark = "never";
+    if (!Number.isNaN(stamp)) {
+      if (state.dirty) mark = "stale";
+      else mark = Date.now() - stamp > FILE_OLD_MS ? "old" : "fresh";
+    }
+    exportDot.className = "file__dot is-" + mark;
+    const said = text(FILE_EXPORT_STATE[mark], { ago: autosaveAgoText(exported) });
+    // Папка автосохранения бывает недоступна (страница открыта с диска) — и
+    // сказать об этом больше негде: кнопки папки в этом случае нет вовсе.
+    saveButton.title =
+      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported);
     row.classList.toggle("is-busy", Boolean(status.busy));
     row.classList.toggle("is-dirty", Boolean(state.dirty));
 
@@ -16999,7 +17123,9 @@ function mountFilePanel(host, api) {
   subscribe((state, changed) => {
     if ("layout" in changed) renderStatus();
     if (!("project" in changed)) {
-      if ("dirty" in changed) row.classList.toggle("is-dirty", Boolean(state.dirty));
+      // Отметка у кнопки экспорта живёт на том же признаке: правка, ещё не
+      // уехавшая в файл, обязана быть видна сразу.
+      if ("dirty" in changed) renderStatus();
       return;
     }
     syncProjectSelect(state.project);
@@ -18422,13 +18548,41 @@ function mountSearchPanel(host, api) {
   const drop = uiEl("div", { class: "search__drop" });
   drop.hidden = true;
   const box = uiEl("div", { class: "search" }, [input, drop]);
-  host.replaceChildren(box);
+  // Поиск нужен изредка, а место в шапке занимал всегда: свёрнутый он — значок,
+  // развёрнутый — та же строка, что была. Клавиша та же, что в почте и в
+  // хранилищах кода: «/» на физической клавише (в русской раскладке — точка),
+  // у браузера она не отнята.
+  const toggle = uiIconButton("search", {
+    label: strings.search.open,
+    title: strings.search.openHint,
+    on: { click: () => openSearch() },
+  });
+  host.replaceChildren(toggle, box);
 
   function close() {
     drop.hidden = true;
     drop.replaceChildren();
     rows = [];
     active = 0;
+  }
+
+  // Свернуть — значит убрать строку с глаз. Ни выделение, ни схему, ни
+  // подведённый холст это не трогает: найденное остаётся найденным, а набранный
+  // запрос ждёт в поле следующего раза.
+  function closeSearch() {
+    close();
+    host.classList.remove("is-open");
+    toggle.hidden = false;
+    if (document.activeElement === input) input.blur();
+  }
+
+  function openSearch() {
+    if (host.hidden) return;
+    host.classList.add("is-open");
+    toggle.hidden = true;
+    input.focus();
+    input.select();
+    if (input.value.trim() !== "") search();
   }
 
   function render() {
@@ -18535,23 +18689,46 @@ function mountSearchPanel(host, api) {
     }
     if (event.key === "Escape") {
       event.preventDefault();
+      // Первый Esc убирает список вариантов, второй сворачивает поиск в значок.
       if (!drop.hidden) {
         close();
         return;
       }
-      input.value = "";
-      input.blur();
+      closeSearch();
     }
   });
   // Клик мимо списка закрывает его, но не мешает клику по строке.
   box.addEventListener("focusout", () => {
     setTimeout(() => {
-      if (!box.contains(document.activeElement)) drop.hidden = true;
+      if (!box.contains(document.activeElement)) closeSearch();
     }, 0);
   });
 
+  // Горячая клавиша: «/» без модификаторов, по физической клавише — раскладка
+  // роли не играет. Пока открыт диалог или курсор стоит в поле ввода, клавиша
+  // принадлежит им.
+  document.addEventListener("keydown", (event) => {
+    if (event.code !== "Slash" || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (host.hidden || uiDialogDepth() > 0) return;
+    const target = event.target;
+    if (
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    openSearch();
+  });
+
   subscribe((state, changed) => {
-    if ("layout" in changed) host.hidden = !layoutAllows("search", state.layout);
+    if ("layout" in changed) {
+      host.hidden = !layoutAllows("search", state.layout);
+      if (host.hidden) closeSearch();
+    }
     if ("project" in changed && state.project) {
       // Сменился объект — прежние находки к нему не относятся.
       if (!state.project.marks.some((mark) => rows.some((row) => row.markId === mark.id))) close();
@@ -19172,8 +19349,17 @@ function mountSizesPanel(host, api) {
 // просмотра её нет вовсе: отменять там нечего.
 function mountHistoryPanel(host, api) {
   const { getState, subscribe } = api;
-  const undoButton = uiButton(strings.tools.undo, { on: { click: () => canvasUndoStep() } });
-  const redoButton = uiButton(strings.tools.redo, { on: { click: () => canvasRedoStep() } });
+  // Значки вместо слов: в шапке рядом с ними живут объект, поиск, выгрузка и
+  // файл, и два слова забирали место у того, что словами не скажешь. Что
+  // именно отменится — в подсказке, она же называет горячую клавишу.
+  const undoButton = uiIconButton("undo", {
+    label: strings.tools.undo,
+    on: { click: () => canvasUndoStep() },
+  });
+  const redoButton = uiIconButton("redo", {
+    label: strings.tools.redo,
+    on: { click: () => canvasRedoStep() },
+  });
   host.replaceChildren(uiEl("div", { class: "history-actions" }, [undoButton, redoButton]));
 
   function render() {
@@ -19182,8 +19368,12 @@ function mountHistoryPanel(host, api) {
     if (!shown) return;
     undoButton.disabled = !canUndo();
     redoButton.disabled = !canRedo();
-    undoButton.title = text("tools.undoTitle", { label: undoLabel() });
-    redoButton.title = text("tools.redoTitle", { label: redoLabel() });
+    // Отменять нечего — называть нечего: подсказка остаётся действием и
+    // клавишей, без двоеточия в пустоту.
+    const undoWhat = undoLabel();
+    const redoWhat = redoLabel();
+    undoButton.title = undoWhat ? text("tools.undoTitle", { label: undoWhat }) : strings.tools.undoTitlePlain;
+    redoButton.title = redoWhat ? text("tools.redoTitle", { label: redoWhat }) : strings.tools.redoTitlePlain;
   }
 
   subscribe((state, changed) => {

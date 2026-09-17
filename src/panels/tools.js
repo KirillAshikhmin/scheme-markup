@@ -19,7 +19,7 @@ import {
   updateProject,
   updateType,
 } from "../model.js";
-import { uiEl, uiButton } from "./ui.js";
+import { uiEl, uiButton, uiIconButton } from "./ui.js";
 import { openTypePicker } from "./typePicker.js";
 import { shapeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
@@ -310,8 +310,17 @@ function mountSizesPanel(host, api) {
 // просмотра её нет вовсе: отменять там нечего.
 function mountHistoryPanel(host, api) {
   const { getState, subscribe } = api;
-  const undoButton = uiButton(strings.tools.undo, { on: { click: () => canvasUndoStep() } });
-  const redoButton = uiButton(strings.tools.redo, { on: { click: () => canvasRedoStep() } });
+  // Значки вместо слов: в шапке рядом с ними живут объект, поиск, выгрузка и
+  // файл, и два слова забирали место у того, что словами не скажешь. Что
+  // именно отменится — в подсказке, она же называет горячую клавишу.
+  const undoButton = uiIconButton("undo", {
+    label: strings.tools.undo,
+    on: { click: () => canvasUndoStep() },
+  });
+  const redoButton = uiIconButton("redo", {
+    label: strings.tools.redo,
+    on: { click: () => canvasRedoStep() },
+  });
   host.replaceChildren(uiEl("div", { class: "history-actions" }, [undoButton, redoButton]));
 
   function render() {
@@ -320,8 +329,12 @@ function mountHistoryPanel(host, api) {
     if (!shown) return;
     undoButton.disabled = !canUndo();
     redoButton.disabled = !canRedo();
-    undoButton.title = text("tools.undoTitle", { label: undoLabel() });
-    redoButton.title = text("tools.redoTitle", { label: redoLabel() });
+    // Отменять нечего — называть нечего: подсказка остаётся действием и
+    // клавишей, без двоеточия в пустоту.
+    const undoWhat = undoLabel();
+    const redoWhat = redoLabel();
+    undoButton.title = undoWhat ? text("tools.undoTitle", { label: undoWhat }) : strings.tools.undoTitlePlain;
+    redoButton.title = redoWhat ? text("tools.redoTitle", { label: redoWhat }) : strings.tools.redoTitlePlain;
   }
 
   subscribe((state, changed) => {

@@ -2,11 +2,6 @@
 export const strings = {
   app: {
     title: "Разметка схем",
-    subtitle: "Метки на планах помещений",
-  },
-  header: {
-    project: "Объект",
-    noProject: "Объект не выбран",
   },
   panels: {
     schemes: "Схемы",
@@ -31,6 +26,8 @@ export const strings = {
   },
   search: {
     placeholder: "Поиск по объекту",
+    open: "Поиск по объекту",
+    openHint: "Найти метку по объекту: обозначение, расположение, помещение. Клавиша «/»",
     title: "Найти метку: обозначение, расположение, обозначение из оригинала или помещение",
     empty: "Ничего не нашлось",
     more: "Показано {shown} из {total}",
@@ -161,6 +158,8 @@ export const strings = {
     redo: "Вернуть",
     undoTitle: "Отменить: {label} (Ctrl+Z)",
     redoTitle: "Вернуть: {label} (Ctrl+Y)",
+    undoTitlePlain: "Отменить (Ctrl+Z)",
+    redoTitlePlain: "Вернуть (Ctrl+Y)",
     selectMode: "Выделение",
   },
   picker: {
@@ -364,8 +363,12 @@ export const strings = {
 Если страницы под рукой нет
   project.json читается любым текстовым редактором, а схемы открываются как
   обычные картинки: данные не пропадут, даже если программы не окажется.`,
-    save: "Сохранить в файл",
-    saveHint: "Скачать объект одним zip-архивом",
+    save: "Экспорт",
+    saveHint: "Скачать объект одним zip-архивом (Ctrl+S)",
+    exportStateFresh: "выгружено {ago}, невыгруженных правок нет",
+    exportStateStale: "выгружено {ago}, после этого объект правили",
+    exportStateOld: "выгружено {ago} — давно",
+    exportStateNever: "в файл ещё не выгружалось",
     open: "Открыть файл",
     openHint: "Загрузить объект из zip-архива: схемы, метки и планы",
     packingTitle: "Сохранение в файл",
@@ -385,7 +388,6 @@ export const strings = {
       "Объект «{name}» со всеми схемами и метками будет заменён содержимым файла. Вернуть его будет неоткуда.",
     replaceConfirm: "Да, заменить",
     loaded: "Объект «{name}» загружен",
-    exported: "в файл выгружено: {ago}",
     noProject: "Сначала создайте объект",
   },
   merge: {

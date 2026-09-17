@@ -4,20 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title data-text="app.title"></title>
+    <!-- Значок вкладки: план из двух помещений и метка на нём — то, что делает
+         сам инструмент. Нарисован здесь же: страница самодостаточна, внешних
+         ссылок в ней нет, поэтому рисунок лежит в самом адресе `data:`.
+         Проверен в размере вкладки (16×16), а не только крупно. -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230d1117'/%3E%3Crect%20x='6'%20y='6.5'%20width='20'%20height='19'%20fill='none'%20stroke='%23e6edf3'%20stroke-width='2.4'/%3E%3Cpath%20d='M6%2014h20'%20fill='none'%20stroke='%23e6edf3'%20stroke-width='2.4'/%3E%3Ccircle%20cx='18.5'%20cy='19.8'%20r='3.9'%20fill='%231f6feb'%20stroke='%230d1117'%20stroke-width='1.4'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div id="app">
       <header id="app-header">
-        <div id="app-brand">
-          <span id="app-title" data-text="app.title"></span>
-          <span id="app-subtitle" data-text="app.subtitle"></span>
-        </div>
-        <div id="project-bar">
-          <span id="project-label" data-text="header.project"></span>
-          <span id="project-name" data-text="header.noProject"></span>
-          <div id="project-actions" class="mount"></div>
-        </div>
+        <span id="app-title" data-text="app.title"></span>
+        <!-- Имя объекта в шапке не пишется: рядом стоит список объектов, и
+             текстом оно повторяло бы выбранную строку списка. -->
+        <div id="project-actions" class="mount"></div>
         <!-- Имя открытой схемы: на узком экране списка схем на виду нет,
              и без этой строки непонятно, что вообще открыто. -->
         <span id="scheme-name"></span>
@@ -25,6 +25,10 @@
              всему сразу, поэтому живёт в шапке, а не в разделе «Метки». -->
         <div id="header-search" class="mount"></div>
         <div id="header-history" class="mount"></div>
+        <!-- Место счётчика предупреждений (таск 52): последний в левой группе,
+             перед отступом, который разводит шапку на две стороны. Пустая точка
+             монтирования ничего не занимает — правило `:empty` в styles.css. -->
+        <div id="header-warnings" class="mount"></div>
         <div id="header-actions" class="mount"></div>
         <!-- Переход к полной версии показывается только там, где экран сам
              выбрал просмотр: на десктопе кнопки нет. -->

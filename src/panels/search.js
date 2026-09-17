@@ -8,7 +8,7 @@
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { findMark, findScheme, searchProject, styleOf } from "../model.js";
 import { strings, text } from "../strings.js";
-import { uiEl } from "./ui.js";
+import { uiDialogDepth, uiEl, uiIconButton } from "./ui.js";
 import { shapeIcon } from "../render.js";
 // Подводит холст к метке — то же самое делает клик по строке списка меток.
 import { marksCenteredView } from "./marks.js";
@@ -57,13 +57,41 @@ function mountSearchPanel(host, api) {
   const drop = uiEl("div", { class: "search__drop" });
   drop.hidden = true;
   const box = uiEl("div", { class: "search" }, [input, drop]);
-  host.replaceChildren(box);
+  // Поиск нужен изредка, а место в шапке занимал всегда: свёрнутый он — значок,
+  // развёрнутый — та же строка, что была. Клавиша та же, что в почте и в
+  // хранилищах кода: «/» на физической клавише (в русской раскладке — точка),
+  // у браузера она не отнята.
+  const toggle = uiIconButton("search", {
+    label: strings.search.open,
+    title: strings.search.openHint,
+    on: { click: () => openSearch() },
+  });
+  host.replaceChildren(toggle, box);
 
   function close() {
     drop.hidden = true;
     drop.replaceChildren();
     rows = [];
     active = 0;
+  }
+
+  // Свернуть — значит убрать строку с глаз. Ни выделение, ни схему, ни
+  // подведённый холст это не трогает: найденное остаётся найденным, а набранный
+  // запрос ждёт в поле следующего раза.
+  function closeSearch() {
+    close();
+    host.classList.remove("is-open");
+    toggle.hidden = false;
+    if (document.activeElement === input) input.blur();
+  }
+
+  function openSearch() {
+    if (host.hidden) return;
+    host.classList.add("is-open");
+    toggle.hidden = true;
+    input.focus();
+    input.select();
+    if (input.value.trim() !== "") search();
   }
 
   function render() {
@@ -170,23 +198,46 @@ function mountSearchPanel(host, api) {
     }
     if (event.key === "Escape") {
       event.preventDefault();
+      // Первый Esc убирает список вариантов, второй сворачивает поиск в значок.
       if (!drop.hidden) {
         close();
         return;
       }
-      input.value = "";
-      input.blur();
+      closeSearch();
     }
   });
   // Клик мимо списка закрывает его, но не мешает клику по строке.
   box.addEventListener("focusout", () => {
     setTimeout(() => {
-      if (!box.contains(document.activeElement)) drop.hidden = true;
+      if (!box.contains(document.activeElement)) closeSearch();
     }, 0);
   });
 
+  // Горячая клавиша: «/» без модификаторов, по физической клавише — раскладка
+  // роли не играет. Пока открыт диалог или курсор стоит в поле ввода, клавиша
+  // принадлежит им.
+  document.addEventListener("keydown", (event) => {
+    if (event.code !== "Slash" || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (host.hidden || uiDialogDepth() > 0) return;
+    const target = event.target;
+    if (
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    openSearch();
+  });
+
   subscribe((state, changed) => {
-    if ("layout" in changed) host.hidden = !layoutAllows("search", state.layout);
+    if ("layout" in changed) {
+      host.hidden = !layoutAllows("search", state.layout);
+      if (host.hidden) closeSearch();
+    }
     if ("project" in changed && state.project) {
       // Сменился объект — прежние находки к нему не относятся.
       if (!state.project.marks.some((mark) => rows.some((row) => row.markId === mark.id))) close();

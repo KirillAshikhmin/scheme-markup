@@ -18,6 +18,7 @@ export const PANEL_IDS = {
   headerActions: "header-actions",
   headerSearch: "header-search",
   headerHistory: "header-history",
+  headerWarnings: "header-warnings",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -166,7 +167,6 @@ export function setState(patch) {
     }
   }
   syncCanvasClass();
-  syncProjectName();
   syncSchemeName();
   return snapshot;
 }
@@ -225,12 +225,6 @@ export function applyStrings(root) {
   for (const node of scope.querySelectorAll("[data-title]")) {
     node.title = text(node.dataset.title);
   }
-}
-
-function syncProjectName() {
-  const node = document.getElementById("project-name");
-  if (!node) return;
-  node.textContent = appState.project ? appState.project.name : strings.header.noProject;
 }
 
 // На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
@@ -412,7 +406,6 @@ export function startApp() {
   appStarted = true;
   applyStrings(document);
   wireSections();
-  syncProjectName();
   syncCanvasClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);

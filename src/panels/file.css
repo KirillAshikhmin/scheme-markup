@@ -1,5 +1,5 @@
-/* Работа с файлом проекта в шапке: строка «выгружено N назад», папка
-   автосохранения, «Открыть файл» и «Сохранить в файл». */
+/* Работа с файлом проекта в шапке: папка автосохранения, «Открыть файл» и
+   «Экспорт» с отметкой свежести выгрузки. */
 
 #file-actions {
   display: flex;
@@ -13,22 +13,36 @@
   gap: 8px;
 }
 
-.file__status {
-  color: var(--panel-muted);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 28ch;
+/* Отметка свежести выгрузки: точка на кнопке экспорта. Зелёная — объект целиком
+   в файле, жёлтая — пора выгружать, пустая с жёлтым ободком — не выгружали ни
+   разу. Словами состояние названо в подсказке кнопки. */
+.file__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
 }
 
-/* Несохранённая работа заметна, но не кричит: цвет, а не модальное окно. */
-.file.is-dirty .file__status {
-  color: #d29922;
+.file__dot.is-fresh {
+  background: #56d364;
 }
 
-.file.is-busy .file__status {
-  opacity: 0.6;
+.file__dot.is-stale,
+.file__dot.is-old {
+  background: #ffd33d;
+}
+
+.file__dot.is-never {
+  border-color: #ffd33d;
+}
+
+/* Пока идёт запись, отметка ничего не утверждает. */
+.file.is-busy .file__dot {
+  opacity: 0.5;
 }
 
 /* Папка выбрана и разрешена — кнопка выглядит включённой. */
