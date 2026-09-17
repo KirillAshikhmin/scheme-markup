@@ -276,6 +276,45 @@ test("каждое начертание оставляет свой отпеча
   assert.deepEqual(merged, [], "в толщине линии метки эти начертания сливаются");
 });
 
+// Заказчик: «добавь жирную линию ещё одним вариантом». Толщина в сборке
+// считается от радиуса метки, и жирная обязана отличаться от обычной сплошной
+// в размере метки на печати, а не только в крупной клетке окна.
+test("жирная линия толще сплошной и на бумаге с ней не сливается", () => {
+  const solid = lineStylePlan("solid", LINE_RADIUS);
+  const bold = lineStylePlan("bold", LINE_RADIUS);
+  assert.equal(bold.dash, null, "жирная — та же сплошная, узора у неё нет");
+  assert.ok(bold.pen > solid.pen * 1.6, "жирная едва толще сплошной: " + bold.pen + " против " + solid.pen);
+  const share = lineDifference(lineInkOf("bold"), lineInkOf("solid")) / LINE_AREA;
+  assert.ok(share > LINE_MIN_DIFFERENCE * 2, "жирная и сплошная расходятся на " + Math.round(share * 100) + "%");
+  // И не превращается в двойную: у той две тонкие нитки с просветом.
+  assert.equal(bold.rails.length, 1);
+
+  // Попадание мышью по линии считается от радиуса метки, а не от пера. Жирное
+  // перо обязано остаться внутри этого запаса — иначе нарисованная линия шире,
+  // чем ловится, и клик по её краю промахивается.
+  for (const radius of [4, 10, 40]) {
+    const pen = lineStylePlan("bold", radius).pen;
+    assert.ok(pen / 2 <= Math.max(4, radius * 0.6), "жирная шире запаса попадания: " + pen + " при радиусе " + radius);
+  }
+});
+
+// Змейка греющего контура: прямоугольная волна. От пилы её отличает ступень,
+// от синусоиды — угол.
+test("змейка — прямоугольная волна и с другими рисунками не сливается", () => {
+  const meander = lineStylePlan("meander", LINE_RADIUS).wave;
+  assert.equal(meander.kind, "meander");
+  const ink = lineInkOf("meander");
+  for (const other of ["wave", "zigzag", "solid", "double"]) {
+    const share = lineDifference(ink, lineInkOf(other)) / LINE_AREA;
+    assert.ok(share > LINE_MIN_DIFFERENCE, "змейка и " + other + " расходятся на " + Math.round(share * 100) + "%");
+  }
+  // Ступень: у прямоугольной волны нитка идёт поперёк линии, и её крайние
+  // точки стоят по обе стороны от оси на всю амплитуду.
+  const thread = lineStyleThreads(LINE_PROBE, false, lineStylePlan("meander", LINE_RADIUS))[0];
+  const levels = new Set(thread.map((point) => Math.round(point.y - LINE_FIELD_H / 2)));
+  assert.ok(levels.size === 2, "у змейки не два уровня, а " + levels.size);
+});
+
 // Волна и зигзаг — соседи по смыслу, и слить их проще всего: заказчик просил
 // обе, но одинаковая амплитуда с периодом дала бы одну мохнатую линию.
 test("волна и зигзаг разведены амплитудой и периодом, а не только названием", () => {

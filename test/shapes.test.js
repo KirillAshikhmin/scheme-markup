@@ -202,6 +202,35 @@ test("каждая фигура палитры оставляет свой от�
   assert.deepEqual(merged, [], "в размере метки эти обозначения сливаются");
 });
 
+// Заказчик перечислил оборудование, которому нужен свой знак: вода, воздух,
+// техника, свет. Знак каждого обязан быть в палитре — иначе тип помечать нечем,
+// — и это не про названия, а про то, что фигура вправду нарисована и прошла
+// общий отпечаток выше.
+test("у каждого названного заказчиком устройства есть свой знак в палитре", () => {
+  // prettier-ignore
+  const wanted = [
+    "drop", "drop-dot", "dome", "dome-dot",
+    "trapezoid", "trapezoid-dot", "trapezoid-bar",
+    "rect-horizontal", "rect-horizontal-ticks", "rect-vertical-ticks",
+    "circle-bolt", "circle-triple", "circle-antenna", "circle-valve", "circle-drain",
+    "circle-thermo", "circle-fan", "circle-rays", "circle-bar",
+    "square-ring", "square-grid", "diamond-ring",
+  ];
+  const missing = wanted.filter((shape) => !SHAPE_PALETTE.includes(shape));
+  assert.deepEqual(missing, [], "знак заказан, а в палитре его нет");
+  for (const shape of wanted) {
+    assert.ok(area(inkOf(shape)) > GLYPH_AREA * 0.2, "знак почти не виден в размере метки: " + shape);
+  }
+});
+
+// Отдельная проверка, названная в тикете: трёхфазную розетку и обычную нельзя
+// спутать на плане. Три отверстия по кругу против двух в ряд — расхождение
+// вдвое выше порога, и это видно на снимке, а не только в числе.
+test("трёхфазная розетка не спутается с обычной", () => {
+  const share = difference(inkOf("circle-socket"), inkOf("circle-triple")) / GLYPH_AREA;
+  assert.ok(share > MIN_DIFFERENCE * 2, "розетки расходятся всего на " + Math.round(share * 100) + "% знака");
+});
+
 test("старые обозначения рисуются как раньше: заливки и засечки у них не появилось", () => {
   assert.equal(shapeGeometry("circle-cross", 0, 0, 10).cross, true);
   assert.equal(shapeGeometry("circle", 0, 0, 10).cross, false);

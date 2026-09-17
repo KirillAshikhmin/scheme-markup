@@ -117,18 +117,32 @@ export function typesTemplateFrom(template) {
   return { categories, markTypes };
 }
 
+// Название фигуры в строке наследования — со строчной буквы: оно продолжает
+// фразу «как у категории», а не начинает свою.
+function typesLowerName(name) {
+  const value = String(name || "");
+  return value ? value[0].toLowerCase() + value.slice(1) : value;
+}
+
 function typesShapeCell({ shape, color, active, inherit, onPick }) {
-  const cell = uiEl(
+  // Клетка «как у категории» подписана прямо в сетке и занимает всю строку.
+  // Пользователь: «И чем отличаются 2 первых линии?» — у категории со сплошной
+  // линией и круглым знаком первые две клетки рисуют одно и то же, и одного
+  // пунктирного контура вокруг мало: подсказка при наведении на этот вопрос не
+  // ответила. Подпись называет и наследование, и то, что оно сейчас означает.
+  const label = inherit ? text("dictionary.inheritShape", { name: typesLowerName(strings.shapes[shape] || shape) }) : null;
+  return uiEl(
     "button",
     {
       class: "shapes__cell" + (active ? " is-active" : "") + (inherit ? " shapes__cell--inherit" : ""),
       type: "button",
-      title: inherit ? strings.shapes.inherit : strings.shapes[shape] || shape,
+      title: label || strings.shapes[shape] || shape,
       on: { click: onPick },
     },
-    [shapeIcon(shape, color, TYPES_SWATCH_SIZE)],
+    label
+      ? [shapeIcon(shape, color, TYPES_SWATCH_SIZE), uiEl("span", { class: "shapes__caption", text: label })]
+      : [shapeIcon(shape, color, TYPES_SWATCH_SIZE)],
   );
-  return cell;
 }
 
 // Выбор формы — сетка нарисованных фигур, а не список названий: обозначение
@@ -183,16 +197,26 @@ const TYPES_LINE_BUTTON = { size: 26, length: 56 };
 const TYPES_BADGE = { size: 20, length: 48 };
 
 function typesLineCell({ lineStyle, color, active, inherit, onPick }) {
+  // Та же подпись, что у сетки фигур: у категории со сплошной линией первая и
+  // вторая клетки рисуют один и тот же отрезок, и пунктирной рамки мало.
+  const label = inherit
+    ? text("dictionary.inheritLine", { name: typesLowerName(strings.lineStyles[lineStyle] || lineStyle) })
+    : null;
   return uiEl(
     "button",
     {
       class: "lines__cell" + (active ? " is-active" : "") + (inherit ? " lines__cell--inherit" : ""),
       type: "button",
       // Название — в подсказке, а не в клетке: выбирают по изображению.
-      title: inherit ? strings.lineStyles.inherit : strings.lineStyles[lineStyle] || lineStyle,
+      title: label || strings.lineStyles[lineStyle] || lineStyle,
       on: { click: onPick },
     },
-    [lineStyleIcon(lineStyle, color, TYPES_LINE_CELL.size, TYPES_LINE_CELL.length)],
+    label
+      ? [
+          lineStyleIcon(lineStyle, color, TYPES_LINE_CELL.size, TYPES_LINE_CELL.length),
+          uiEl("span", { class: "lines__caption", text: label }),
+        ]
+      : [lineStyleIcon(lineStyle, color, TYPES_LINE_CELL.size, TYPES_LINE_CELL.length)],
   );
 }
 

@@ -105,7 +105,25 @@ const SHAPE_ANGLES = {
   // в размере метки просвет между длинными сторонами ещё виден, а знак уже
   // читается полосой, а не квадратом.
   "rect-vertical": [-90 - RECT_VERTICAL_ANGLE, -90 + RECT_VERTICAL_ANGLE, 90 - RECT_VERTICAL_ANGLE, 90 + RECT_VERTICAL_ANGLE],
+  // Тот же прямоугольник лёжа: настенный блок — кондиционер, корпус техники.
+  "rect-horizontal": [-RECT_VERTICAL_ANGLE, RECT_VERTICAL_ANGLE, 180 - RECT_VERTICAL_ANGLE, 180 + RECT_VERTICAL_ANGLE],
 };
+
+// Трапеция раструбом вниз: зонт вытяжки, луч проектора. Доли радиуса —
+// полуширина верха, полуширина низа и половина высоты.
+const TRAPEZOID_TOP = 0.42;
+const TRAPEZOID_BOTTOM = 0.98;
+const TRAPEZOID_HEIGHT = 0.72;
+
+// Капля: остриё вверху, круглое тело внизу. Тело — окружность доли радиуса,
+// касательные к ней из острия сходятся в точку, поэтому знак читается каплей,
+// а не кругом с шипом.
+const DROP_BODY = 0.72;
+const DROP_STEPS = 16;
+
+// Полукруг плоской стороной вниз: бра на стене. Центр дуги опущен, чтобы
+// пятно стояло в середине знака, а не висело в его верхней половине.
+const DOME_BASE = 0.35;
 
 // Родня фигур: контур берётся у базовой, а отличает их засечка внутри.
 // Так «розетка» и «розетка двойная» различаются в 14 пикселях, а на плане
@@ -136,6 +154,25 @@ const SHAPE_BASE = {
   "square-cross": "square",
   "square-fill": "square",
   "diamond-fill": "diamond",
+  // Оборудование: те же контуры, новая засечка внутри.
+  "circle-bolt": "circle",
+  "circle-triple": "circle",
+  "circle-antenna": "circle",
+  "circle-valve": "circle",
+  "circle-drain": "circle",
+  "circle-thermo": "circle",
+  "circle-fan": "circle",
+  "circle-rays": "circle",
+  "circle-bar": "circle",
+  "dome-dot": "dome",
+  "rect-vertical-ticks": "rect-vertical",
+  "rect-horizontal-ticks": "rect-horizontal",
+  "square-ring": "square",
+  "square-grid": "square",
+  "drop-dot": "drop",
+  "diamond-ring": "diamond",
+  "trapezoid-dot": "trapezoid",
+  "trapezoid-bar": "trapezoid",
 };
 
 // Засечка внутри: перекрестье, точка, сплошная заливка, залитая нижняя половина.
@@ -165,7 +202,67 @@ const SHAPE_DECOR = {
   "square-fill": "fill",
   "diamond-fill": "fill",
   "circle-half": "half",
+  "circle-bolt": "bolt",
+  "circle-triple": "triple",
+  "circle-antenna": "antenna",
+  "circle-valve": "valve",
+  "circle-drain": "drain",
+  "circle-thermo": "thermo",
+  "circle-fan": "fan",
+  "circle-rays": "rays",
+  "circle-bar": "bar-flat",
+  "dome-dot": "dot",
+  "rect-vertical-ticks": "ticks-horizontal",
+  "rect-horizontal-ticks": "ticks-vertical",
+  "square-ring": "ring",
+  "square-grid": "grid",
+  "drop-dot": "dot",
+  "diamond-ring": "ring",
+  "trapezoid-dot": "dot",
+  "trapezoid-bar": "bar-flat",
 };
+
+// Засечки оборудования в долях радиуса. Числа подобраны по отпечатку в размере
+// метки: мельче — знак сливается с соседом по палитре, крупнее — упирается в
+// контур.
+// Три отверстия трёхфазной розетки: по кругу, чтобы не спорить с двумя
+// отверстиями обычной.
+const TRIPLE_REACH = 0.46;
+const TRIPLE_DOT = 0.3;
+// Антенна телевизионной розетки: мачта и два уса.
+const ANTENNA_FORK = -0.26;
+const ANTENNA_BOTTOM = 0.66;
+const ANTENNA_ARM = 0.54;
+const ANTENNA_LIFT = 0.5;
+// Бабочка запорного крана: два треугольника, сходящиеся в центре.
+const VALVE_REACH = 0.62;
+const VALVE_HALF = 0.46;
+// Сток канализации: мачта и стрелка вниз.
+const DRAIN_TOP = -0.7;
+const DRAIN_BOTTOM = 0.3;
+const DRAIN_ARM = 0.6;
+// Термометр: столбик и колба.
+const THERMO_TOP = -0.62;
+const THERMO_BOTTOM = 0.02;
+const THERMO_BULB = 0.4;
+// Лопасти вентилятора: три луча из центра.
+const FAN_REACH = 0.72;
+const FAN_ANGLES = [-90, 30, 150];
+// Люстра: подвес и три рожка.
+const RAYS_BAR = -0.34;
+const RAYS_REACH = 0.58;
+const RAYS_DROP = 0.42;
+// Черта поперёк знака: база робота, сушка.
+const BAR_FLAT_REACH = 0.72;
+const BAR_FLAT_WIDTH = 2.4;
+const BAR_FLAT_DROP = 0.34;
+// Четыре кнопки сценарной панели.
+const GRID_REACH = 0.36;
+const GRID_DOT = 0.22;
+// Две засечки поперёк узкого корпуса: решётка колонки, лоток медиацентра.
+const TICKS_REACH = 0.56;
+const TICKS_HALF = 0.3;
+const TICKS_WIDTH = 1.9;
 
 // Доля радиуса, на которую отступает от края «талия» плюса.
 const PLUS_WAIST = 0.36;
@@ -215,6 +312,13 @@ const LINE_STYLE_PLANS = {
   // низкий. Сблизь их — и на бумаге останется одна мохнатая линия.
   wave: { dash: null, wave: { kind: "sine", amplitude: 1.05, period: 4.4 } },
   zigzag: { dash: null, wave: { kind: "zigzag", amplitude: 0.5, period: 1.5 } },
+  // Жирная: та же сплошная, но перо почти вдвое толще. На бумаге она читается
+  // как «главная» линия — ствол трассы, магистраль.
+  bold: { dash: null, pen: 0.95 },
+  // Змейка: прямоугольная волна — греющий контур, уложенный петлями. От пилы
+  // её отличает ступень, от синусоиды — угол; на распечатке это три разных
+  // рисунка, а не один мохнатый.
+  meander: { dash: null, wave: { kind: "meander", amplitude: 1.0, period: 3.2 } },
 };
 
 // Толщина пера линейной метки: половина радиуса, но не тоньше двух пикселей —
@@ -303,6 +407,21 @@ function waveSpine(points, closed, wave) {
   const total = pathLength(points, closed);
   if (total <= 0 || wave.period <= 0) return points;
   const waves = Math.max(1, Math.round(total / wave.period));
+  if (wave.kind === "meander") {
+    // Прямоугольная волна: петля греющего контура. Каждый полупериод ведётся
+    // отдельным отрезком на своём уровне, а между ними перо идёт поперёк —
+    // отсюда ступень вместо пилы.
+    const steps = waves * 2;
+    const spine = [];
+    for (let index = 0; index < steps; index += 1) {
+      const level = (index % 2 === 0 ? 1 : -1) * wave.amplitude;
+      const from = pathAt(points, closed, (total * index) / steps);
+      const to = pathAt(points, closed, (total * (index + 1)) / steps);
+      spine.push({ x: from.x + from.nx * level, y: from.y + from.ny * level });
+      spine.push({ x: to.x + to.nx * level, y: to.y + to.ny * level });
+    }
+    return spine;
+  }
   const period = total / waves;
   // У зигзага пробы стоят ровно в вершинах пилы — иначе углы срезаются.
   const steps = wave.kind === "zigzag" ? waves * 2 : waves * LINE_WAVE_STEPS;
@@ -431,8 +550,8 @@ const WAVE_STEPS = 5;
 const RING_SHARE = 0.55;
 const RING_POINTS = 12;
 // Молния: полуразмах и полувысота в долях радиуса.
-const BOLT_WIDE = 0.6;
-const BOLT_TALL = 0.68;
+const BOLT_WIDE = 0.72;
+const BOLT_TALL = 0.82;
 // Пара контактов: полудлина черты и просвет между ними в долях радиуса.
 const SPLIT_REACH = 0.62;
 const SPLIT_GAP = 0.22;
@@ -512,6 +631,46 @@ function shapeGeometry(shape, x, y, size) {
       { x: x - waist, y: y - waist },
     ];
     return { kind: "polygon", points, ...shell };
+  }
+  if (base === "drop") {
+    // Остриё вверху и круглое тело внизу: касательные из острия к телу сходятся
+    // в точку, поэтому знак читается каплей, а не кругом с шипом.
+    const body = radius * DROP_BODY;
+    const center = { x, y: y + radius - body };
+    const apex = { x, y: y - radius };
+    const reach = center.y - apex.y;
+    const touch = (Math.asin(Math.min(1, body / reach)) * 180) / Math.PI;
+    const from = -90 + (90 - touch);
+    const to = from + (360 - 2 * (90 - touch));
+    const points = [apex];
+    for (let step = 0; step <= DROP_STEPS; step += 1) {
+      points.push(polarPoint(center.x, center.y, body, from + ((to - from) * step) / DROP_STEPS));
+    }
+    return { kind: "polygon", points, ...shell };
+  }
+  if (base === "dome") {
+    // Полукруг плоской стороной вниз: бра на стене.
+    const base_y = y + radius * DOME_BASE;
+    const points = [];
+    for (let step = 0; step <= DROP_STEPS; step += 1) {
+      points.push(polarPoint(x, base_y, radius, 180 + (180 * step) / DROP_STEPS));
+    }
+    return { kind: "polygon", points, ...shell };
+  }
+  if (base === "trapezoid") {
+    const top = radius * TRAPEZOID_TOP;
+    const bottom = radius * TRAPEZOID_BOTTOM;
+    const half = radius * TRAPEZOID_HEIGHT;
+    return {
+      kind: "polygon",
+      points: [
+        { x: x - top, y: y - half },
+        { x: x + top, y: y - half },
+        { x: x + bottom, y: y + half },
+        { x: x - bottom, y: y + half },
+      ],
+      ...shell,
+    };
   }
   const angles = SHAPE_ANGLES[base];
   if (angles) {
@@ -749,6 +908,197 @@ function shapeInternals(geometry) {
         ],
       ],
     });
+  } else if (geometry.decor === "triple") {
+    // Трёхфазная розетка: три отверстия по кругу. Обычная евророзетка — два в
+    // ряд, и на бумаге эти знаки не спутать.
+    const reach = geometry.r * TRIPLE_REACH;
+    const dot = Math.max(1, geometry.r * TRIPLE_DOT);
+    for (const angle of [-90, 30, 150]) {
+      const at = polarPoint(geometry.cx, geometry.cy, reach, angle);
+      parts.push({ role: "triple", mask: "disc", cx: at.x, cy: at.y, r: dot });
+    }
+  } else if (geometry.decor === "antenna") {
+    // Телевизионная розетка: мачта с усами.
+    // Вилка усов смотрит вверх — так рисуют антенну. Вниз она читалась бы
+    // стрелкой и спорила бы со стоком.
+    const fork = geometry.cy + geometry.r * ANTENNA_FORK;
+    const arm = geometry.r * ANTENNA_ARM;
+    const lift = geometry.r * ANTENNA_LIFT;
+    parts.push({
+      role: "antenna",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx, y: geometry.cy + geometry.r * ANTENNA_BOTTOM },
+          { x: geometry.cx, y: fork },
+        ],
+        [
+          { x: geometry.cx, y: fork },
+          { x: geometry.cx - arm, y: fork - lift },
+        ],
+        [
+          { x: geometry.cx, y: fork },
+          { x: geometry.cx + arm, y: fork - lift },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "valve") {
+    // Бабочка запорного крана: два треугольника, сошедшиеся в центре.
+    const reach = geometry.r * VALVE_REACH;
+    const half = geometry.r * VALVE_HALF;
+    parts.push({
+      role: "valve",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx - reach, y: geometry.cy - half },
+          { x: geometry.cx - reach, y: geometry.cy + half },
+        ],
+        [
+          { x: geometry.cx - reach, y: geometry.cy - half },
+          { x: geometry.cx + reach, y: geometry.cy + half },
+        ],
+        [
+          { x: geometry.cx - reach, y: geometry.cy + half },
+          { x: geometry.cx + reach, y: geometry.cy - half },
+        ],
+        [
+          { x: geometry.cx + reach, y: geometry.cy - half },
+          { x: geometry.cx + reach, y: geometry.cy + half },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "drain") {
+    // Сток канализации: мачта со стрелкой вниз.
+    const bottom = geometry.cy + geometry.r * DRAIN_BOTTOM;
+    const arm = geometry.r * DRAIN_ARM;
+    parts.push({
+      role: "drain",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx, y: geometry.cy + geometry.r * DRAIN_TOP },
+          { x: geometry.cx, y: bottom },
+        ],
+        [
+          { x: geometry.cx - arm, y: bottom - arm },
+          { x: geometry.cx, y: bottom },
+        ],
+        [
+          { x: geometry.cx + arm, y: bottom - arm },
+          { x: geometry.cx, y: bottom },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "thermo") {
+    // Термометр: столбик и колба.
+    parts.push({
+      role: "thermo",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx, y: geometry.cy + geometry.r * THERMO_TOP },
+          { x: geometry.cx, y: geometry.cy + geometry.r * THERMO_BOTTOM },
+        ],
+      ],
+    });
+    parts.push({
+      role: "thermo-bulb",
+      mask: "disc",
+      cx: geometry.cx,
+      cy: geometry.cy + geometry.r * (THERMO_BOTTOM + THERMO_BULB * 0.7),
+      r: Math.max(1, geometry.r * THERMO_BULB),
+    });
+  } else if (geometry.decor === "fan") {
+    // Три лопасти из центра: вентилятор.
+    const reach = geometry.r * FAN_REACH;
+    parts.push({
+      role: "fan",
+      mask: "lines",
+      width: geometry.line,
+      segments: FAN_ANGLES.map((angle) => [
+        { x: geometry.cx, y: geometry.cy },
+        polarPoint(geometry.cx, geometry.cy, reach, angle),
+      ]),
+    });
+  } else if (geometry.decor === "rays") {
+    // Люстра: подвес и три рожка вниз.
+    const bar = geometry.cy + geometry.r * RAYS_BAR;
+    const reach = geometry.r * RAYS_REACH;
+    const drop = geometry.cy + geometry.r * RAYS_DROP;
+    parts.push({
+      role: "rays",
+      mask: "lines",
+      width: geometry.line,
+      segments: [
+        [
+          { x: geometry.cx - reach, y: bar },
+          { x: geometry.cx + reach, y: bar },
+        ],
+        [
+          { x: geometry.cx - reach, y: bar },
+          { x: geometry.cx - reach, y: drop },
+        ],
+        [
+          { x: geometry.cx, y: bar },
+          { x: geometry.cx, y: drop },
+        ],
+        [
+          { x: geometry.cx + reach, y: bar },
+          { x: geometry.cx + reach, y: drop },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "bar-flat") {
+    // Черта поперёк знака: база робота-пылесоса, сушка.
+    const reach = geometry.r * BAR_FLAT_REACH;
+    parts.push({
+      role: "bar-flat",
+      mask: "lines",
+      width: geometry.line * BAR_FLAT_WIDTH,
+      segments: [
+        [
+          { x: geometry.cx - reach, y: geometry.cy + geometry.r * BAR_FLAT_DROP },
+          { x: geometry.cx + reach, y: geometry.cy + geometry.r * BAR_FLAT_DROP },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "ticks-vertical" || geometry.decor === "ticks-horizontal") {
+    // Две засечки поперёк узкого корпуса: решётка колонки, лоток медиацентра.
+    // Идут поперёк длинной стороны, поэтому засечка у лежачего корпуса стоит
+    // стоймя, а у стоячего — лёжа.
+    const reach = geometry.r * TICKS_REACH;
+    const half = geometry.r * TICKS_HALF;
+    const upright = geometry.decor === "ticks-vertical";
+    parts.push({
+      role: geometry.decor,
+      mask: "lines",
+      width: geometry.line * TICKS_WIDTH,
+      segments: [-reach, 0, reach].map((offset) =>
+        upright
+          ? [
+              { x: geometry.cx + offset, y: geometry.cy - half },
+              { x: geometry.cx + offset, y: geometry.cy + half },
+            ]
+          : [
+              { x: geometry.cx - half, y: geometry.cy + offset },
+              { x: geometry.cx + half, y: geometry.cy + offset },
+            ],
+      ),
+    });
+  } else if (geometry.decor === "grid") {
+    // Четыре кнопки сценарной панели.
+    const reach = geometry.r * GRID_REACH;
+    const dot = Math.max(1, geometry.r * GRID_DOT);
+    for (const dx of [-reach, reach]) {
+      for (const dy of [-reach, reach]) {
+        parts.push({ role: "grid", mask: "disc", cx: geometry.cx + dx, cy: geometry.cy + dy, r: dot });
+      }
+    }
   }
   if (geometry.cross) {
     const arm = geometry.r * Math.SQRT1_2;

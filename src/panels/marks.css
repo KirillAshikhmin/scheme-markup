@@ -469,9 +469,11 @@
   border-style: dashed;
 }
 
+/* Сетка фигур: восемь колонок. Палитра выросла за полсотни знаков, и при пяти
+   колонках окно вытягивалось в столбец высотой в экран. */
 .shapes {
   display: grid;
-  grid-template-columns: repeat(5, 52px);
+  grid-template-columns: repeat(8, 52px);
   gap: 6px;
 }
 
@@ -497,10 +499,24 @@
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-/* «Как у категории»: та же фигура, но пунктиром — видно, что она не своя. */
+/* «Как у категории»: та же фигура, но пунктиром — и с подписью на всю строку.
+   Одного пунктира мало: у категории с круглым знаком первая клетка рисует ровно
+   то же, что вторая, и без подписи непонятно, зачем их две. */
 .shapes__cell--inherit {
+  grid-column: 1 / -1;
+  width: auto;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 12px;
   border-style: dashed;
   border-color: var(--panel-muted);
+}
+
+.shapes__caption,
+.lines__caption {
+  color: var(--panel-muted);
+  font-size: 12px;
+  text-align: left;
 }
 
 .shapes__icon {
@@ -590,7 +606,13 @@
 
 /* «Как у категории»: то же начертание, но рамка пунктиром — видно, что оно
    не своё. */
+/* Та же строка наследования, что в сетке фигур: на всю ширину и с подписью. */
 .lines__cell--inherit {
+  grid-column: 1 / -1;
+  width: auto;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 12px;
   border-style: dashed;
   border-color: var(--panel-muted);
 }
