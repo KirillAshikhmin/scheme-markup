@@ -425,6 +425,9 @@ function mountMarksPanel(host, api) {
           // свёрнута строка или раскрыта, и куда нажать.
           uiEl("span", { class: "mark-row__toggle" }),
           shapeIcon(view.style.shape, view.style.color, 20),
+          // Код типа стоит там же, где в свёрнутой строке, — на раскрытии
+          // значок и код остаются на месте, меняется только номер: он
+          // становится полем правки.
           uiEl("span", { class: "mark-row__label", text: view.code }),
           uiEl("input", {
             class: "ui-input mark-row__number",
@@ -435,7 +438,10 @@ function mountMarksPanel(host, api) {
             on: { change: (event) => setNumber(mark.id, event.target.value) },
           }),
           badge,
-          uiEl("span", { class: "mark-row__type", text: view.typeName }),
+          // Название типа — второй строкой головы и приглушённо: по значку тип
+          // угадывается не всегда, а в справочнике легко заводятся два похожих.
+          // Подсказкой — оно же целиком: в узкой панели длинное имя обрезается.
+          uiEl("span", { class: "mark-row__type", text: view.typeName, title: view.typeName }),
         ])
       : uiEl("div", { class: "mark-row__head" }, [
           uiEl("span", { class: "mark-row__toggle" }),

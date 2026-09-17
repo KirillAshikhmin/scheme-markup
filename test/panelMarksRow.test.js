@@ -91,6 +91,18 @@ test("выделенная метка раскрыта: помещение, ра
   assert.equal(switchRow.label, "В1");
 });
 
+test("раскрытая строка знает код и название типа: по значку тип угадывается не всегда", () => {
+  const box = flat();
+  const open = marksRowModel(box.project, rowOf(box, box.lampOne), { open: true });
+  const shut = marksRowModel(box.project, rowOf(box, box.lampOne), { open: false });
+  assert.equal(open.code, "Т");
+  assert.equal(open.typeName, "Точечный светильник");
+  // Код тот же, что в свёрнутой строке: на раскрытии он остаётся на месте, а
+  // номер уходит в поле правки — вместе они дают прежнее обозначение «Т1».
+  assert.equal(open.code, shut.code);
+  assert.equal(shut.label, open.code + open.fields.number);
+});
+
 test("повтор номера виден и в свёрнутой строке: три «Т1» подряд иначе выглядят ошибкой", () => {
   const box = flat();
   box.project = setMarkNumber(box.project, box.lampTwo, 1).project;
