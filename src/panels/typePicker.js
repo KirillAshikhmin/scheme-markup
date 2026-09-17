@@ -4,10 +4,11 @@
 // Категории стоят колонками рядом — «Свет», «Выключатели», «Розетки» и так
 // далее, — а не одним длинным столбцом: окно открывается десятки раз за сеанс,
 // и цель — попасть в нужный тип одним взглядом и одним кликом, без листания.
-// Ширину окна задаёт число колонок (`--picker-columns`), поэтому справа не
-// остаётся пустого поля, а колонки не растягиваются, когда поиск оставил одну.
-// Колонок больше шести — переносятся во второй ряд и прокручиваются по
-// вертикали; горизонтальная прокрутка остаётся на крайний случай узкого окна.
+// В одной колонке категорий бывает несколько: короткие «Розетки» и «Климат»
+// встают друг под друга, а не держат каждая свою пустую колонку до низа окна.
+// Раскладку считает `pickerLayout`, ширину окна задаёт число получившихся
+// колонок (`--picker-columns`) — справа не остаётся пустого поля, и колонки не
+// растягиваются, когда поиск оставил одну.
 //
 // Окно открывается один раз на серию: выбранный тип «залипает» в панели
 // инструментов, и дальше метки ставятся кликами без единого диалога.
@@ -24,12 +25,81 @@ function pickerIcon(project, typeId, size = 22) {
 }
 
 // Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.
-// Лишние переносятся во второй ряд — вертикальная прокрутка удобнее
-// горизонтальной, когда справочник разросся.
+// Лишние категории уходят не во второй ряд, а вниз по колонкам — вторым рядом
+// сетка выравнивала всё по самой высокой категории и оставляла посреди окна
+// пустое поле.
 const PICKER_MAX_COLUMNS = 6;
 
-// Клавиатура по сетке: вверх-вниз — по колонке, вправо-влево — в соседнюю
-// колонку на ту же строку (короткая колонка прижимает к последней строке).
+// Меры окна, по которым считается, сколько колонок в него влезет. Те же числа
+// стоят в `typePicker.css`: ширина колонки (`minmax(150px, 1fr)`), просвет
+// между колонками (`gap`), доля экрана под карточку (`max-width: 96vw`) и её
+// собственные поля с рамкой (`.modal`: по 18px с каждой стороны плюс рамка,
+// здесь с запасом до 40). Считать нужно
+// всё это вместе: колонка, которая «почти влезла», даёт горизонтальную
+// прокрутку — а на узком экране колонок должно становиться меньше, только и
+// всего.
+const PICKER_COLUMN_MIN = 150;
+const PICKER_COLUMN_GAP = 14;
+const PICKER_MODAL_SHARE = 0.96;
+const PICKER_MODAL_CHROME = 40;
+
+// Сколько колонок помещается в экран шириной `width`.
+export function pickerColumnLimit(width) {
+  const usable = Math.max(0, Number(width) || 0) * PICKER_MODAL_SHARE - PICKER_MODAL_CHROME;
+  const fits = Math.floor((usable + PICKER_COLUMN_GAP) / (PICKER_COLUMN_MIN + PICKER_COLUMN_GAP));
+  return Math.max(1, Math.min(PICKER_MAX_COLUMNS, fits));
+}
+
+// Высота категории в строках: заголовок плюс её типы. Точные пиксели здесь не
+// нужны — раскладка решает, что с чем встанет в одну колонку, а не рисует.
+function pickerWeight(group) {
+  return 1 + (group && Array.isArray(group.types) ? group.types.length : 0);
+}
+
+// Категории кладутся в колонку подряд, пока та не станет выше `height`.
+// Порядок справочника сохраняется: колонка читается сверху вниз, колонки —
+// слева направо, «Свет» по-прежнему первый, «Щит» последний.
+function pickerFill(groups, height) {
+  const columns = [];
+  let filled = 0;
+  for (const group of groups) {
+    const weight = pickerWeight(group);
+    if (columns.length > 0 && filled + weight <= height) {
+      columns[columns.length - 1].push(group);
+      filled += weight;
+      continue;
+    }
+    columns.push([group]);
+    filled = weight;
+  }
+  return columns;
+}
+
+// Раскладка категорий по колонкам. Сетка выравнивала ряд по самой высокой
+// категории: «Свет» с девятью типами держал всю первую строку, и «Щит» с
+// «Датчиками» начинались только под ним — между выключателями и датчиками
+// зияла пустая половина окна. Здесь колонка набивается подряд до высоты самой
+// длинной категории: пустых мест между категориями не остаётся, а колонок
+// выходит ровно столько, сколько понадобилось, — не больше `limit`.
+export function pickerLayout(groups, limit = PICKER_MAX_COLUMNS) {
+  const list = Array.isArray(groups) ? groups.filter(Boolean) : [];
+  if (list.length === 0) return [];
+  const cap = Math.max(1, Math.floor(Number(limit)) || 1);
+  const total = list.reduce((sum, group) => sum + pickerWeight(group), 0);
+  let height = Math.max(...list.map(pickerWeight));
+  let columns = pickerFill(list, height);
+  // Категорий больше, чем колонок помещается в окно, — колонка становится
+  // выше, и лишние уходят под соседние, а не за край экрана.
+  while (columns.length > cap && height < total) {
+    height += 1;
+    columns = pickerFill(list, height);
+  }
+  return columns;
+}
+
+// Клавиатура по сетке: вверх-вниз — по колонке целиком, через границы
+// категорий, если их в колонке несколько; вправо-влево — в соседнюю колонку на
+// ту же строку (короткая колонка прижимает к последней строке).
 function pickerMove(box, row, dx, dy) {
   const columns = [...box.children].filter((node) => node.classList.contains("picker__column"));
   const rowsOf = (node) => [...node.querySelectorAll(".picker__row")];
@@ -158,23 +228,31 @@ export function openTypePicker(project, options = {}) {
       return row;
     }
 
+    // Категория — заголовок в её цвете и строки типов. Блок целиком, потому
+    // что в колонке их бывает несколько: заголовок должен липнуть к своим
+    // строкам и уезжать вместе с ними, а не наезжать на соседнюю категорию.
+    function categoryBlock(group) {
+      const head = uiEl("div", { class: "picker__group", text: group.category.name });
+      head.style.borderColor = group.category.color;
+      head.style.color = group.category.color;
+      return uiEl("div", { class: "picker__category" }, [head, ...group.types.map(typeRow)]);
+    }
+
     function renderList() {
       const query = search.value.trim();
       // Что за чем показывать, решает модель: поиск по коду и названию,
       // точное совпадение кода первым. Своей сортировки здесь нет.
       const groups = searchTypes(current, query);
+      const width = typeof window === "undefined" ? 0 : window.innerWidth;
+      const columns = pickerLayout(groups, pickerColumnLimit(width));
       box.replaceChildren(
-        ...groups.map((group) => {
-          const head = uiEl("div", { class: "picker__group", text: group.category.name });
-          head.style.borderColor = group.category.color;
-          head.style.color = group.category.color;
-          return uiEl("div", { class: "picker__column" }, [head, ...group.types.map(typeRow)]);
-        }),
+        ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
       );
       if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.picker.empty }));
-      // Ширину окна задаёт число колонок: пять категорий — пять колонок и
-      // никакого пустого поля справа, одна найденная — узкое окно.
-      body.style.setProperty("--picker-columns", String(Math.min(Math.max(groups.length, 1), PICKER_MAX_COLUMNS)));
+      // Ширину окна задаёт число колонок: уместились семь категорий в четыре —
+      // окно на четыре колонки и никакого пустого поля справа, одна найденная
+      // категория — узкое окно.
+      body.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
       renderCreate(query);
     }
 
