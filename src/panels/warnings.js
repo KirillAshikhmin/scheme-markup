@@ -18,6 +18,7 @@ import {
   findMark,
   findOutline,
   findPlacement,
+  findRoom,
   findScheme,
   findType,
   typeKindOf,
@@ -116,6 +117,20 @@ export function warningPlace(project, problem) {
   return null;
 }
 
+// Где это на объекте. Помещение — всегда, когда оно у метки есть; схему
+// называем, только если планов больше одного: на объекте с единственным планом
+// это слово в каждой строке и ни одного ответа.
+export function warningWhere(project, place) {
+  if (!project || !place) return "";
+  const mark = place.markId ? findMark(project, place.markId) : null;
+  const room = mark && mark.roomId ? findRoom(project, mark.roomId) : null;
+  const scheme = place.schemeId ? findScheme(project, place.schemeId) : null;
+  const parts = [];
+  if (room) parts.push(room.name);
+  if (scheme && project.schemes.length > 1) parts.push(scheme.name);
+  return parts.join(" · ");
+}
+
 /**
  * Список для панели: группы одинаковых предупреждений, внутри — по одной
  * строке на случай. Чистая функция от объекта — её и считает панель, один раз
@@ -131,12 +146,14 @@ export function warningsModel(project) {
     const key = level + ":" + problem.code;
     if (!byCode.has(key)) byCode.set(key, { key, code: problem.code, level, items: [] });
     const group = byCode.get(key);
+    const place = warningPlace(project, problem);
     group.items.push({
       key: key + ":" + (problem.ref || group.items.length),
       code: problem.code,
       level,
       message: problem.message,
-      place: warningPlace(project, problem),
+      place,
+      where: warningWhere(project, place),
     });
   }
   const groups = [...byCode.values()]
@@ -279,7 +296,13 @@ function mountWarningsPanel(host, api) {
         title: item.place ? strings.warnings.hint : item.message,
         on: { click: () => jump(item.place) },
       },
-      [levelDot(item.level), uiEl("span", { class: "warnings__text", text: item.message })],
+      [
+        levelDot(item.level),
+        uiEl("span", { class: "warnings__text", text: item.message }),
+        // Где это на плане — второй строкой: «Р3» на объекте с тремя планами
+        // глазами не находится, даже когда клик уже перенёс.
+        item.where ? uiEl("span", { class: "warnings__where", text: item.where }) : null,
+      ],
     );
     // Виновника уже нет — вести некуда, и обещать переход нечестно.
     row.disabled = !item.place;

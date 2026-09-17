@@ -18,7 +18,7 @@ import {
   updateType,
 } from "../src/model.js";
 import { strings } from "../src/strings.js";
-import { WARNING_TARGETS, warningPlace, warningsModel } from "../src/panels/warnings.js";
+import { WARNING_TARGETS, warningPlace, warningWhere, warningsModel } from "../src/panels/warnings.js";
 
 const LINE = [
   { x: 0.2, y: 0.4 },
@@ -91,6 +91,69 @@ test("ошибки сверху, предупреждения под ними", 
   // Одно предупреждение в группе — строка остаётся собой: сворачивать нечего.
   assert.equal(model.groups[1].count, 1);
   assert.equal(model.groups[1].items[0].message, "Т1 — таких меток 2");
+});
+
+test("каждая строка в группе называет виновника, а не повторяет соседку", () => {
+  const box = house();
+  const project = {
+    ...box.project,
+    marks: box.project.marks.map((mark) =>
+      box.lamps.includes(mark.id) ? { ...mark, roomId: "помещения-нет" } : mark,
+    ),
+  };
+  const group = warningsModel(project).groups.find((item) => item.code === "markWithoutRoom");
+  assert.deepEqual(
+    group.items.map((item) => item.message),
+    [
+      "Т1 — ссылается на несуществующее помещение",
+      "Т2 — ссылается на несуществующее помещение",
+      "Т3 — ссылается на несуществующее помещение",
+    ],
+    "три одинаковые строки: непонятно, о какой метке речь",
+  );
+  // Ни одна строка с переходом не должна быть безымянной.
+  for (const item of warningsModel(project).groups.flatMap((item) => item.items)) {
+    if (!item.place || item.code === "typeKind") continue;
+    assert.notEqual(item.message.trim(), "", item.code + ": строка без текста");
+    assert.ok(/^[^—]+ — |\{|[А-ЯЁ]/.test(item.message), item.code + ": строка не называет виновника");
+  }
+});
+
+test("контур зовётся помещением, группа — подписью блока, тип — кодом", () => {
+  const box = house();
+  const room = addRoom(box.project, { name: "Спальная" });
+  const outline = {
+    id: "контур-1",
+    schemeId: box.schemeId,
+    roomId: room.room.id,
+    points: [{ x: 0.1, y: 0.1 }],
+  };
+  const broken = {
+    ...room.project,
+    outlines: [outline],
+    groups: [{ id: "группа-1", schemeId: box.schemeId, markIds: [box.lamps[0]] }],
+    markTypes: room.project.markTypes.map((type) =>
+      type.code === "Т" ? { ...type, categoryId: "категории-нет" } : type,
+    ),
+  };
+  const messages = warningsModel(broken)
+    .groups.flatMap((group) => group.items)
+    .map((item) => item.message);
+  assert.ok(messages.includes("Спальная — в контуре помещения меньше трёх вершин"), messages.join(" | "));
+  assert.ok(messages.includes("Т1 — в группе меньше двух меток"), messages.join(" | "));
+  assert.ok(messages.includes("Т — у типа нет категории из справочника"), messages.join(" | "));
+});
+
+test("под строкой сказано, где это: помещение и схема", () => {
+  const box = house();
+  const room = addRoom(box.project, { name: "Спальная" });
+  let project = updateMark(room.project, box.lamps[0], { roomId: room.room.id }).project;
+  const place = { markId: box.lamps[0], schemeId: box.schemeId };
+  // План один — схему называть незачем, она в каждой строке одна и та же.
+  assert.equal(warningWhere(project, place), "Спальная");
+  project = addScheme(project, { name: "2 этаж", width: 800, height: 600 }).project;
+  assert.equal(warningWhere(project, place), "Спальная · 1 этаж");
+  assert.equal(warningWhere(project, null), "");
 });
 
 test("строка ведёт к виновнику: метка, её схема и точка на плане", () => {

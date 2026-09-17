@@ -547,13 +547,15 @@
 }
 
 /* Строка предупреждения и строка-счётчик устроены одинаково: точка уровня,
-   текст, справа — знак раскрытия у свёрнутых. */
+   текст, справа — знак раскрытия у свёрнутых. Где это на плане — второй
+   строкой под текстом, как место метки в поиске. */
 .warnings__row,
 .warnings__group,
 .warnings__jump {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 2px 8px;
   width: 100%;
   padding: 6px 8px;
   border: 0;
@@ -562,6 +564,12 @@
   color: var(--panel-text);
   font: inherit;
   text-align: left;
+}
+
+.warnings__where {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--panel-muted);
 }
 
 .warnings__row,
@@ -641,10 +649,7 @@
 }
 
 .warnings__jump {
-  display: grid;
   grid-template-columns: auto auto 1fr;
-  align-items: center;
-  gap: 2px 8px;
   padding: 4px 6px;
 }
 

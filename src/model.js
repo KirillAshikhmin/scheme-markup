@@ -2322,8 +2322,25 @@ function dropPlacements(project, removed) {
 // Вид проблемы: «error» — объект поломан, «warning» — сделано намеренно, но
 // стоит увидеть. Повтор номера — единственное предупреждение: запрещать его
 // нельзя, молчать о нём тоже.
+//
+// Проблема **называет виновника**: `{label}` в тексте — обозначение метки,
+// название помещения у контура, подпись блока у группы. Три одинаковые строки
+// «метка ссылается на несуществующее помещение» в списке предупреждений
+// неразличимы, и посмотреть, о какой из них речь, можно было только кликом.
 function problem(code, vars, ref, kind) {
   return { code, message: text("problems." + code, vars), ref: ref || null, kind: kind || "error" };
+}
+
+// Чем назвать виновника, у которого нет своего обозначения: метка без типа
+// обозначение всё-таки имеет («?7» — так её показывает и список меток), а вот
+// контур без помещения и группа без меток — нет.
+function problemSubject(kind) {
+  return strings.subjects[kind] || strings.subjects.mark;
+}
+
+function outlineLabel(project, outline) {
+  const room = outline && outline.roomId ? findRoom(project, outline.roomId) : null;
+  return room ? room.name : problemSubject("outline");
 }
 
 export function validate(project) {
@@ -2334,20 +2351,26 @@ export function validate(project) {
     const key = type.code.toUpperCase();
     if (seenCodes.has(key)) problems.push(problem("duplicateCode", { code: type.code }, type.id));
     else seenCodes.set(key, type.id);
-    if (!findCategory(project, type.categoryId)) problems.push(problem("typeWithoutCategory", null, type.id));
+    if (!findCategory(project, type.categoryId)) {
+      problems.push(problem("typeWithoutCategory", { code: type.code }, type.id));
+    }
   }
 
   const behindTypes = new Map();
   for (const mark of project.marks) {
     const type = findType(project, mark.typeId);
-    if (!type) problems.push(problem("markWithoutType", null, mark.id));
-    if (!findScheme(project, mark.schemeId)) problems.push(problem("markWithoutScheme", null, mark.id));
-    if (mark.roomId && !findRoom(project, mark.roomId)) problems.push(problem("markWithoutRoom", null, mark.id));
-    if (!Array.isArray(mark.points) || mark.points.length === 0) problems.push(problem("emptyPoints", null, mark.id));
-    else if (mark.kind === "line" && mark.points.length < 2) problems.push(problem("shortLine", null, mark.id));
+    const label = markLabel(project, mark);
+    if (!type) problems.push(problem("markWithoutType", { label }, mark.id));
+    if (!findScheme(project, mark.schemeId)) problems.push(problem("markWithoutScheme", { label }, mark.id));
+    if (mark.roomId && !findRoom(project, mark.roomId)) problems.push(problem("markWithoutRoom", { label }, mark.id));
+    if (!Array.isArray(mark.points) || mark.points.length === 0) {
+      problems.push(problem("emptyPoints", { label }, mark.id));
+    } else if (mark.kind === "line" && mark.points.length < 2) {
+      problems.push(problem("shortLine", { label }, mark.id));
+    }
 
     for (const controlled of markControlIds(mark)) {
-      if (!findMark(project, controlled)) problems.push(problem("controlsMissing", null, mark.id));
+      if (!findMark(project, controlled)) problems.push(problem("controlsMissing", { label }, mark.id));
     }
 
     if (type) {
@@ -2376,28 +2399,34 @@ export function validate(project) {
   }
 
   for (const outline of outlinesOf(project)) {
-    if (!findScheme(project, outline.schemeId)) problems.push(problem("outlineWithoutScheme", null, outline.id));
-    if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", null, outline.id));
+    const label = outlineLabel(project, outline);
+    if (!findScheme(project, outline.schemeId)) problems.push(problem("outlineWithoutScheme", { label }, outline.id));
+    if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", { label }, outline.id));
     if (!Array.isArray(outline.points) || outline.points.length < OUTLINE_MIN_POINTS) {
-      problems.push(problem("shortOutline", null, outline.id));
+      problems.push(problem("shortOutline", { label }, outline.id));
     }
   }
 
   for (const placement of placementsOf(project)) {
+    // Единицу оборудования называют меткой, на которой она стоит: своего
+    // обозначения у неё нет, а найти её пользователь будет по метке.
+    const mark = findMark(project, placement.markId);
+    const label = mark ? markLabel(project, mark) : problemSubject("placement");
     if (!findEquipment(project, placement.equipmentId)) {
-      problems.push(problem("placementWithoutEquipment", null, placement.id));
+      problems.push(problem("placementWithoutEquipment", { label }, placement.id));
     }
-    if (!findMark(project, placement.markId)) problems.push(problem("placementWithoutMark", null, placement.id));
+    if (!mark) problems.push(problem("placementWithoutMark", { label }, placement.id));
     for (const link of placementLinkIds(placement)) {
-      if (!findMark(project, link)) problems.push(problem("placementLinkMissing", null, placement.id));
+      if (!findMark(project, link)) problems.push(problem("placementLinkMissing", { label }, placement.id));
     }
   }
 
   for (const group of project.groups) {
     const members = group.markIds.map((markId) => findMark(project, markId)).filter(Boolean);
-    if (members.length < 2) problems.push(problem("smallGroup", null, group.id));
+    const label = blockLabel(project, group.markIds) || problemSubject("group");
+    if (members.length < 2) problems.push(problem("smallGroup", { label }, group.id));
     if (new Set(members.map((mark) => mark.schemeId)).size > 1) {
-      problems.push(problem("groupAcrossSchemes", null, group.id));
+      problems.push(problem("groupAcrossSchemes", { label }, group.id));
     }
   }
 

@@ -1919,13 +1919,15 @@
 }
 
 /* Строка предупреждения и строка-счётчик устроены одинаково: точка уровня,
-   текст, справа — знак раскрытия у свёрнутых. */
+   текст, справа — знак раскрытия у свёрнутых. Где это на плане — второй
+   строкой под текстом, как место метки в поиске. */
 .warnings__row,
 .warnings__group,
 .warnings__jump {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 2px 8px;
   width: 100%;
   padding: 6px 8px;
   border: 0;
@@ -1934,6 +1936,12 @@
   color: var(--panel-text);
   font: inherit;
   text-align: left;
+}
+
+.warnings__where {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--panel-muted);
 }
 
 .warnings__row,
@@ -2013,10 +2021,7 @@
 }
 
 .warnings__jump {
-  display: grid;
   grid-template-columns: auto auto 1fr;
-  align-items: center;
-  gap: 2px 8px;
   padding: 4px 6px;
 }
 
@@ -3399,25 +3404,36 @@ const strings = {
     foreignProject: "Данные в файле не похожи на объект разметки схем",
     futureVersion: "Файл сделан более новой версией программы (формат {version}, здесь {current}) — обновите страницу",
   },
+  // Чем назвать виновника, у которого своего обозначения нет: контур без
+  // помещения, группа без меток, единица оборудования без метки.
+  subjects: {
+    mark: "Метка",
+    outline: "Контур",
+    group: "Группа",
+    placement: "Единица оборудования",
+  },
+  // Каждая строка называет виновника: «{label} — …». Иначе в списке
+  // предупреждений три метки с потерянным помещением дают три одинаковые
+  // строки, и какая из них какая — видно только по клику.
   problems: {
-    controlsMissing: "Метка управляет меткой, которой больше нет",
-    placementWithoutEquipment: "Единица оборудования ссылается на модель, которой нет в справочнике",
-    placementWithoutMark: "Единица оборудования стоит на метке, которой больше нет",
-    placementLinkMissing: "Единица оборудования связана с меткой, которой больше нет",
+    controlsMissing: "{label} — управляет меткой, которой больше нет",
+    placementWithoutEquipment: "{label} — модели оборудования нет в справочнике",
+    placementWithoutMark: "{label} — оборудование стоит на метке, которой больше нет",
+    placementLinkMissing: "{label} — оборудование связано с меткой, которой больше нет",
     duplicateCode: "Код типа {code} встречается больше одного раза",
-    markWithoutType: "У метки нет типа из справочника",
-    markWithoutScheme: "Метка ссылается на несуществующую схему",
-    markWithoutRoom: "Метка ссылается на несуществующее помещение",
+    markWithoutType: "{label} — нет типа из справочника",
+    markWithoutScheme: "{label} — ссылается на несуществующую схему",
+    markWithoutRoom: "{label} — ссылается на несуществующее помещение",
     repeatedNumber: "{label} — таких меток {count}",
-    emptyPoints: "У метки нет точек",
-    shortLine: "У линии меньше двух вершин",
-    shortOutline: "У контура помещения меньше трёх вершин",
-    outlineWithoutScheme: "Контур помещения ссылается на несуществующую схему",
-    outlineWithoutRoom: "Контур ссылается на несуществующее помещение",
-    smallGroup: "В группе меньше двух меток",
-    groupAcrossSchemes: "Метки одной группы лежат на разных схемах",
+    emptyPoints: "{label} — нет ни одной точки",
+    shortLine: "{label} — в линии меньше двух вершин",
+    shortOutline: "{label} — в контуре помещения меньше трёх вершин",
+    outlineWithoutScheme: "{label} — контур ссылается на несуществующую схему",
+    outlineWithoutRoom: "{label} — ссылается на несуществующее помещение",
+    smallGroup: "{label} — в группе меньше двух меток",
+    groupAcrossSchemes: "{label} — метки группы лежат на разных схемах",
     counterBehind: "Счётчик типа {code} меньше выданных номеров",
-    typeWithoutCategory: "У типа нет категории из справочника",
+    typeWithoutCategory: "{code} — у типа нет категории из справочника",
     typeKindMixed: "У типа {code} есть метки другого вида",
   },
   // Панель предупреждений: список того, что нашёл `validate`, и вопросы о виде
@@ -6194,8 +6210,25 @@ function dropPlacements(project, removed) {
 // Вид проблемы: «error» — объект поломан, «warning» — сделано намеренно, но
 // стоит увидеть. Повтор номера — единственное предупреждение: запрещать его
 // нельзя, молчать о нём тоже.
+//
+// Проблема **называет виновника**: `{label}` в тексте — обозначение метки,
+// название помещения у контура, подпись блока у группы. Три одинаковые строки
+// «метка ссылается на несуществующее помещение» в списке предупреждений
+// неразличимы, и посмотреть, о какой из них речь, можно было только кликом.
 function problem(code, vars, ref, kind) {
   return { code, message: text("problems." + code, vars), ref: ref || null, kind: kind || "error" };
+}
+
+// Чем назвать виновника, у которого нет своего обозначения: метка без типа
+// обозначение всё-таки имеет («?7» — так её показывает и список меток), а вот
+// контур без помещения и группа без меток — нет.
+function problemSubject(kind) {
+  return strings.subjects[kind] || strings.subjects.mark;
+}
+
+function outlineLabel(project, outline) {
+  const room = outline && outline.roomId ? findRoom(project, outline.roomId) : null;
+  return room ? room.name : problemSubject("outline");
 }
 function validate(project) {
   const problems = [];
@@ -6205,20 +6238,26 @@ function validate(project) {
     const key = type.code.toUpperCase();
     if (seenCodes.has(key)) problems.push(problem("duplicateCode", { code: type.code }, type.id));
     else seenCodes.set(key, type.id);
-    if (!findCategory(project, type.categoryId)) problems.push(problem("typeWithoutCategory", null, type.id));
+    if (!findCategory(project, type.categoryId)) {
+      problems.push(problem("typeWithoutCategory", { code: type.code }, type.id));
+    }
   }
 
   const behindTypes = new Map();
   for (const mark of project.marks) {
     const type = findType(project, mark.typeId);
-    if (!type) problems.push(problem("markWithoutType", null, mark.id));
-    if (!findScheme(project, mark.schemeId)) problems.push(problem("markWithoutScheme", null, mark.id));
-    if (mark.roomId && !findRoom(project, mark.roomId)) problems.push(problem("markWithoutRoom", null, mark.id));
-    if (!Array.isArray(mark.points) || mark.points.length === 0) problems.push(problem("emptyPoints", null, mark.id));
-    else if (mark.kind === "line" && mark.points.length < 2) problems.push(problem("shortLine", null, mark.id));
+    const label = markLabel(project, mark);
+    if (!type) problems.push(problem("markWithoutType", { label }, mark.id));
+    if (!findScheme(project, mark.schemeId)) problems.push(problem("markWithoutScheme", { label }, mark.id));
+    if (mark.roomId && !findRoom(project, mark.roomId)) problems.push(problem("markWithoutRoom", { label }, mark.id));
+    if (!Array.isArray(mark.points) || mark.points.length === 0) {
+      problems.push(problem("emptyPoints", { label }, mark.id));
+    } else if (mark.kind === "line" && mark.points.length < 2) {
+      problems.push(problem("shortLine", { label }, mark.id));
+    }
 
     for (const controlled of markControlIds(mark)) {
-      if (!findMark(project, controlled)) problems.push(problem("controlsMissing", null, mark.id));
+      if (!findMark(project, controlled)) problems.push(problem("controlsMissing", { label }, mark.id));
     }
 
     if (type) {
@@ -6247,28 +6286,34 @@ function validate(project) {
   }
 
   for (const outline of outlinesOf(project)) {
-    if (!findScheme(project, outline.schemeId)) problems.push(problem("outlineWithoutScheme", null, outline.id));
-    if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", null, outline.id));
+    const label = outlineLabel(project, outline);
+    if (!findScheme(project, outline.schemeId)) problems.push(problem("outlineWithoutScheme", { label }, outline.id));
+    if (!findRoom(project, outline.roomId)) problems.push(problem("outlineWithoutRoom", { label }, outline.id));
     if (!Array.isArray(outline.points) || outline.points.length < OUTLINE_MIN_POINTS) {
-      problems.push(problem("shortOutline", null, outline.id));
+      problems.push(problem("shortOutline", { label }, outline.id));
     }
   }
 
   for (const placement of placementsOf(project)) {
+    // Единицу оборудования называют меткой, на которой она стоит: своего
+    // обозначения у неё нет, а найти её пользователь будет по метке.
+    const mark = findMark(project, placement.markId);
+    const label = mark ? markLabel(project, mark) : problemSubject("placement");
     if (!findEquipment(project, placement.equipmentId)) {
-      problems.push(problem("placementWithoutEquipment", null, placement.id));
+      problems.push(problem("placementWithoutEquipment", { label }, placement.id));
     }
-    if (!findMark(project, placement.markId)) problems.push(problem("placementWithoutMark", null, placement.id));
+    if (!mark) problems.push(problem("placementWithoutMark", { label }, placement.id));
     for (const link of placementLinkIds(placement)) {
-      if (!findMark(project, link)) problems.push(problem("placementLinkMissing", null, placement.id));
+      if (!findMark(project, link)) problems.push(problem("placementLinkMissing", { label }, placement.id));
     }
   }
 
   for (const group of project.groups) {
     const members = group.markIds.map((markId) => findMark(project, markId)).filter(Boolean);
-    if (members.length < 2) problems.push(problem("smallGroup", null, group.id));
+    const label = blockLabel(project, group.markIds) || problemSubject("group");
+    if (members.length < 2) problems.push(problem("smallGroup", { label }, group.id));
     if (new Set(members.map((mark) => mark.schemeId)).size > 1) {
-      problems.push(problem("groupAcrossSchemes", null, group.id));
+      problems.push(problem("groupAcrossSchemes", { label }, group.id));
     }
   }
 
@@ -19702,6 +19747,20 @@ function warningPlace(project, problem) {
   return null;
 }
 
+// Где это на объекте. Помещение — всегда, когда оно у метки есть; схему
+// называем, только если планов больше одного: на объекте с единственным планом
+// это слово в каждой строке и ни одного ответа.
+function warningWhere(project, place) {
+  if (!project || !place) return "";
+  const mark = place.markId ? findMark(project, place.markId) : null;
+  const room = mark && mark.roomId ? findRoom(project, mark.roomId) : null;
+  const scheme = place.schemeId ? findScheme(project, place.schemeId) : null;
+  const parts = [];
+  if (room) parts.push(room.name);
+  if (scheme && project.schemes.length > 1) parts.push(scheme.name);
+  return parts.join(" · ");
+}
+
 /**
  * Список для панели: группы одинаковых предупреждений, внутри — по одной
  * строке на случай. Чистая функция от объекта — её и считает панель, один раз
@@ -19717,12 +19776,14 @@ function warningsModel(project) {
     const key = level + ":" + problem.code;
     if (!byCode.has(key)) byCode.set(key, { key, code: problem.code, level, items: [] });
     const group = byCode.get(key);
+    const place = warningPlace(project, problem);
     group.items.push({
       key: key + ":" + (problem.ref || group.items.length),
       code: problem.code,
       level,
       message: problem.message,
-      place: warningPlace(project, problem),
+      place,
+      where: warningWhere(project, place),
     });
   }
   const groups = [...byCode.values()]
@@ -19865,7 +19926,13 @@ function mountWarningsPanel(host, api) {
         title: item.place ? strings.warnings.hint : item.message,
         on: { click: () => jump(item.place) },
       },
-      [levelDot(item.level), uiEl("span", { class: "warnings__text", text: item.message })],
+      [
+        levelDot(item.level),
+        uiEl("span", { class: "warnings__text", text: item.message }),
+        // Где это на плане — второй строкой: «Р3» на объекте с тремя планами
+        // глазами не находится, даже когда клик уже перенёс.
+        item.where ? uiEl("span", { class: "warnings__where", text: item.where }) : null,
+      ],
     );
     // Виновника уже нет — вести некуда, и обещать переход нечестно.
     row.disabled = !item.place;
