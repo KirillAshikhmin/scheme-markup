@@ -43,9 +43,12 @@ export const SHAPE_PALETTE = [
   "circle-socket",
   "square",
   // Клавиши выключателя: квадрат, квадрат с чертой, квадрат с двумя чертами —
-  // одна, две и три клавиши, как они выглядят на стене.
+  // одна, две и три клавиши, как они выглядят на стене. Следом переключатель:
+  // проходной выключатель стоит в том же ряду, что и обычные, и квадрат держит
+  // ряд — круг выпадал бы из него формой.
   "square-bar",
   "square-bar-two",
+  "square-chevron",
   "square-cross",
   "square-fill",
   "square-jack",
@@ -62,6 +65,10 @@ export const SHAPE_PALETTE = [
   "diamond-cross",
   "star",
   "plus",
+  // Узкий прямоугольник стоймя: кусок чего-то длинного, поставленный
+  // вертикально. Своё семейство контура — ни с круглыми, ни с квадратными
+  // знаками он не спорит даже без засечки внутри.
+  "rect-vertical",
 ];
 
 // Начертание линейной метки. Сплошная и пунктирная значат разное, поэтому
@@ -437,9 +444,12 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "П", name: strings.types.backlight, shape: "diamond" },
   { category: "light", code: "Л", name: strings.types.strip, shape: "triangle", kind: "line", lineStyle: "wave" },
   // Вертикальный кусок ленты ставится одной точкой, а не тянется по плану —
-  // слова заказчика: «тип лента вертикальная, который уже точка». Форма — из
-  // семьи ленты: тот же треугольник с засечкой, чтобы родство читалось.
-  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "triangle-dot" },
+  // слова заказчика: «тип лента вертикальная, который уже точка». Знак —
+  // узкий прямоугольник стоймя: это и есть кусок ленты, поставленный
+  // вертикально, и на плане он читается без буквы рядом. Прежний треугольник
+  // с точкой отдан обратно датчику движения: тот же знак в двух категориях на
+  // чёрно-белой распечатке различался только кодом.
+  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical" },
   {
     category: "light",
     code: "ПШ",
@@ -475,9 +485,10 @@ const TEMPLATE_TYPES = [
   { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar" },
   { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two" },
   // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
-  // Свой значок нужен сразу: без него он рисуется тем же зелёным кругом,
-  // что и соседние два выключателя.
-  { category: "switches", code: "ВП", name: strings.types.switchWay, shape: "circle-chevron" },
+  // Знак квадратный, как у соседей по категории: выключатель на стене
+  // выглядит клавишей, и круг выпадал бы из ряда. Внутри — уголок на две
+  // стороны, тот самый переключатель.
+  { category: "switches", code: "ВП", name: strings.types.switchWay, shape: "square-chevron" },
   // Розетка в своей категории одна, поэтому своей формы у неё нет: она берёт
   // форму категории — тот самый круг с двумя отверстиями.
   { category: "sockets", code: "Р", name: strings.types.socket },

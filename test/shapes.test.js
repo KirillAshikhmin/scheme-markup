@@ -358,7 +358,7 @@ test("выключатели, розетка, климат и щит нарис�
   };
   assert.deepEqual(
     ["В", "ВВ", "ВВВ", "ВП"].map(shapeOf),
-    ["square", "square-bar", "square-bar-two", "circle-chevron"],
+    ["square", "square-bar", "square-bar-two", "square-chevron"],
   );
   // Розетка своей формы не имеет: в своей категории она одна и берёт форму
   // категории — тот самый круг с двумя отверстиями.
@@ -370,4 +370,43 @@ test("выключатели, розетка, климат и щит нарис�
   const panel = categories.find((category) => category.name === "Щит");
   assert.ok(panel, "категории щита нет в шаблоне");
   assert.equal(panel.shape, "square-bolt");
+});
+
+// Цвет разводит категории только на экране: на чёрно-белой распечатке два
+// точечных типа с одним знаком различает лишь код рядом. Так и вышло у «ЛВ»
+// (лента вертикальная, свет) с «ДВ» (датчик движения) — обоим достался
+// треугольник с точкой, и заказчик попросил развести. Проверка идёт по всему
+// шаблону сразу, через категории: новый точечный тип обязан приезжать со
+// своим знаком. Линейные типы сюда не входят — их обозначение не форма, а
+// начертание, и разводит их `test/lineStyle.test.js`.
+test("точечные типы шаблона не повторяют знак друг за другом", () => {
+  const { categories, markTypes } = defaultTemplate();
+  const points = markTypes
+    .filter((type) => (type.kind || "point") === "point")
+    .map((type) => ({
+      code: type.code,
+      shape: type.shape || categories.find((category) => category.id === type.categoryId).shape,
+    }));
+  assert.ok(points.length >= 20, "точечные типы потерялись из шаблона");
+
+  const twins = [];
+  const seen = new Map();
+  for (const { code, shape } of points) {
+    if (seen.has(shape)) twins.push(seen.get(shape) + " и " + code + " — «" + strings.shapes[shape] + "»");
+    else seen.set(shape, code);
+  }
+  assert.deepEqual(twins, [], "два точечных типа шаблона рисуются одним знаком");
+
+  // Знак не только свой, но и различимый в размере метки — тем же отпечатком.
+  const merged = [];
+  const prints = points.map((item) => ({ code: item.code, ink: inkOf(item.shape) }));
+  for (let i = 0; i < prints.length; i += 1) {
+    for (let j = i + 1; j < prints.length; j += 1) {
+      const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
+      if (share < MIN_DIFFERENCE) {
+        merged.push(prints[i].code + " и " + prints[j].code + " — " + Math.round(share * 100) + "% знака");
+      }
+    }
+  }
+  assert.deepEqual(merged, [], "в размере метки эти типы сливаются");
 });

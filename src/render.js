@@ -83,6 +83,9 @@ const OUTLINE_HIT_PX = 6;
 const OUTLINE_HANDLE_PX = 6;
 const OUTLINE_COLOR_FALLBACK = "#57606a";
 
+// Полуширина узкого прямоугольника в градусах от полюса окружности.
+const RECT_VERTICAL_ANGLE = 18;
+
 // Углы вершин, градусы от «вверх». Все фигуры вписаны в окружность радиуса size.
 const SHAPE_ANGLES = {
   square: [-135, -45, 45, 135],
@@ -90,6 +93,11 @@ const SHAPE_ANGLES = {
   "triangle-down": [90, 210, 330],
   diamond: [-90, 0, 90, 180],
   hexagon: [-90, -30, 30, 90, 150, 210],
+  // Узкий прямоугольник стоймя: те же четыре вершины на окружности, но
+  // разведённые к полюсам. Угол в 18° даёт ширину примерно в треть высоты —
+  // в размере метки просвет между длинными сторонами ещё виден, а знак уже
+  // читается полосой, а не квадратом.
+  "rect-vertical": [-90 - RECT_VERTICAL_ANGLE, -90 + RECT_VERTICAL_ANGLE, 90 - RECT_VERTICAL_ANGLE, 90 + RECT_VERTICAL_ANGLE],
 };
 
 // Родня фигур: контур берётся у базовой, а отличает их засечка внутри.
@@ -109,6 +117,7 @@ const SHAPE_BASE = {
   "square-hatch": "square",
   "square-bar": "square",
   "square-bar-two": "square",
+  "square-chevron": "square",
   "square-wave": "square",
   "triangle-dot": "triangle",
   "triangle-down-fill": "triangle-down",
@@ -137,6 +146,7 @@ const SHAPE_DECOR = {
   "square-hatch": "hatch",
   "square-bar": "bar",
   "square-bar-two": "bar-two",
+  "square-chevron": "chevron-square",
   "square-wave": "wave",
   "triangle-dot": "dot",
   "triangle-down-fill": "fill",
@@ -395,6 +405,15 @@ const LEVER_PAIR_GAP = 0.34;
 const LEVER_PAIR_REACH = 0.62;
 // Переключатель: уголок, раскрытый вправо.
 const CHEVRON_REACH = 0.62;
+// Тот же уголок внутри квадрата. Числа свои и заданы в долях полустороны
+// (r/√2), а не радиуса: в квадрате места меньше, чем в круге, и уголок круга
+// упирался бы концами прямо в углы квадрата. Уголок квадрата короче, толще и
+// с просветом до края — на бумаге он читается знаком внутри рамки, а не
+// заливкой, которая срослась с контуром.
+const SQUARE_CHEVRON_BACK_X = 0.6;
+const SQUARE_CHEVRON_TIP_X = 0.62;
+const SQUARE_CHEVRON_REACH_Y = 0.64;
+const SQUARE_CHEVRON_WIDTH = 1.45;
 // Беспроводная точка: волны над точкой у нижнего края знака.
 const WAVE_BASE = 0.5;
 const WAVE_RADII = [0.5, 0.92];
@@ -575,6 +594,27 @@ function shapeInternals(geometry) {
         [
           { x: geometry.cx + reach, y: geometry.cy },
           { x: geometry.cx - reach, y: geometry.cy + reach },
+        ],
+      ],
+    });
+  } else if (geometry.decor === "chevron-square") {
+    // Тот же переключатель, вписанный в квадрат: уголок на две стороны.
+    const half = geometry.r * Math.SQRT1_2;
+    const back = half * SQUARE_CHEVRON_BACK_X;
+    const tip = half * SQUARE_CHEVRON_TIP_X;
+    const reach = half * SQUARE_CHEVRON_REACH_Y;
+    parts.push({
+      role: "chevron-square",
+      mask: "lines",
+      width: geometry.line * SQUARE_CHEVRON_WIDTH,
+      segments: [
+        [
+          { x: geometry.cx - back, y: geometry.cy - reach },
+          { x: geometry.cx + tip, y: geometry.cy },
+        ],
+        [
+          { x: geometry.cx + tip, y: geometry.cy },
+          { x: geometry.cx - back, y: geometry.cy + reach },
         ],
       ],
     });

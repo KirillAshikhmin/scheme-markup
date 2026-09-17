@@ -137,7 +137,7 @@ test("стартовый справочник: типы из брифа, пер�
   // prettier-ignore
   assert.deepEqual(lightShapes, [
     "circle-cross", "circle-fill", "circle-dot", "plus", "diamond",
-    "triangle", "triangle-dot", "triangle-down", "diamond-dot", "diamond-cross",
+    "triangle", "rect-vertical", "triangle-down", "diamond-dot", "diamond-cross",
   ]);
   assert.equal(new Set(lightShapes).size, lightCodes.length, "два типа света рисуются одинаково");
   // Своей формы нет у типа, которому хватает формы категории: в своей
@@ -153,7 +153,7 @@ test("стартовый справочник: типы из брифа, пер�
   // Что знаки и на бумаге не сливаются, проверяет отпечаток в test/shapes.test.js.
   assert.deepEqual(
     template.markTypes.filter((t) => ["В", "ВВ", "ВВВ", "ВП"].includes(t.code)).map((t) => t.shape),
-    [null, "square-bar", "square-bar-two", "circle-chevron"],
+    [null, "square-bar", "square-bar-two", "square-chevron"],
   );
   assert.equal(template.markTypes.find((t) => t.code === "К").shape, "square-wave");
 });
@@ -1137,7 +1137,7 @@ test("из общей базы добавляются только отмече�
 
   assert.deepEqual(result.types.map((type) => type.code), ["ВП"]);
   assert.equal(result.types[0].name, "Переключатель проходной");
-  assert.equal(result.types[0].shape, "circle-chevron", "форма приезжает из базы");
+  assert.equal(result.types[0].shape, "square-chevron", "форма приезжает из базы");
   assert.equal(result.types[0].blockMode, "each");
   assert.deepEqual(result.categories, [], "все категории у объекта уже есть");
   assert.equal(result.project.markTypes.length, older.markTypes.length + 1);
