@@ -3318,7 +3318,7 @@ const strings = {
     hintSelectMode:
       "Клик выбирает метку, перетаскивание двигает её или подпись, Delete удаляет, Esc снимает выделение. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб.",
     hintLine:
-      "Добавление линией: клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить, ещё раз — вернуться в «Выделение». Направление липнет к ровным углам, у курсора виден градус; Alt — рисовать свободно.",
+      "Добавление линией: клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить, ещё раз — вернуться в «Выделение». Направление липнет к ровным углам через 15°, а курсор — к прежним вершинам ломаной по пунктирным направляющим; у курсора виден градус, Alt — рисовать свободно.",
     // Градус тянущегося отрезка — у курсора. «Ровно» означает, что направление
     // дотянул магнит: иначе непонятно, почему линия не идёт за рукой.
     angleFree: "{deg}°",
@@ -3330,7 +3330,7 @@ const strings = {
     draftFinished: "Начатая линия дочерчена: {label}. Ctrl+Z отменит",
     draftDropped: "Незаконченный черновик убран: в нём была одна вершина",
     hintRoom:
-      "Обводим помещение «{name}»: клик — вершина по стене, двойной клик по первой замыкает контур. Backspace — убрать вершину, Esc — отменить. Направление липнет к ровным углам, у курсора виден градус; Alt — рисовать свободно.",
+      "Обводим помещение «{name}»: клик — вершина по стене, двойной клик по первой замыкает контур. Backspace — убрать вершину, Esc — отменить. Направление липнет к ровным углам через 15°, а курсор — к прежним вершинам ломаной по пунктирным направляющим; у курсора виден градус, Alt — рисовать свободно.",
     outlineTooShort: "Контур помещения — не меньше трёх вершин",
     needRoom: "Сначала выберите помещение, которое обводим",
     deleteOutlineTitle: "Удалить контур помещения?",
@@ -8633,6 +8633,13 @@ const DRAFT_ANGLE_FREE = "#57606a";
 // Короче этого отрезок ещё не направление, и градус у него случайный.
 const DRAFT_ANGLE_MIN_PX = 8;
 
+// Направляющая: мелкий пунктир в волос толщиной и вполсилы. Узор мельче любого
+// начертания метки — на пунктирной линии подсказку иначе не отличить от самого
+// черновика.
+const GUIDE_DASH = [2, 5];
+const GUIDE_WIDTH = 1;
+const GUIDE_ALPHA = 0.5;
+
 const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
 
 // Рамка легенды в высотах строки: отступ до текста, минимальная и предельная
@@ -9457,21 +9464,34 @@ function fitView(scheme, viewport) {
   };
 }
 
-// ——— магнит направления ————————————————————————————————————————————————
+// ——— магнит направления и направляющие ————————————————————————————————
 //
 // Линиями рисуют ленту по периметру комнаты и треки, контурами — сами комнаты.
 // Стены в квартире прямые, и от руки инженер каждый раз промахивается мимо
 // горизонтали на пару градусов — на распечатке это видно. Магнит дотягивает
 // почти ровное направление до ровного.
 //
-// Порог — 8°: промах «на пару градусов» он забирает с запасом, а наклонный
-// отрезок начинается с восьми градусов от оси и ставится свободно. Ближайшее
-// осмысленное наклонное направление (45°) от порога далеко, так что отобрать
-// его магнит не может. Совсем косые стены и эркеры рисуются при снятом магните
-// — это `free`, холст поднимает его с зажатого Alt.
+// Ровных направлений двенадцать пар: шаг 15°. Горизонталь и вертикаль — только
+// часть работы, скосы в квартире идут через 45°, а эркер — через 15°, и
+// рисовать их от руки так же неточно, как горизонталь. Порог — 4°: промах «на
+// пару градусов» он забирает, а между соседними ровными направлениями остаётся
+// 7° свободной руки, так что поставить отрезок мимо сетки по-прежнему можно.
+// Совсем косые стены рисуются при снятом магните — это `free`, холст поднимает
+// его с зажатого Alt.
+
+// Шаг сетки ровных направлений, градусы.
+const SNAP_STEP_DEG = 15;
 
 // Порог притяжения к ровному направлению, градусы.
-const SNAP_ANGLE_DEG = 8;
+const SNAP_ANGLE_DEG = 4;
+
+// Разброс, в пределах которого угол считается ровно ровным: проекция попадает
+// в него с точностью плавающей арифметики, а не буква в букву.
+const SNAP_ROUND_EPS = 0.01;
+
+// Направляющая ловит курсор в этом радиусе — в пикселях экрана, а не в долях
+// плана: иначе на разном масштабе притяжка вела бы себя по-разному.
+const GUIDE_SNAP_PX = 7;
 
 // Угол направления в градусах: 0 — вправо, 90 — вверх, дальше против часовой.
 // Экранный `y` растёт вниз, поэтому знак вертикали переворачивается здесь один
@@ -9479,6 +9499,30 @@ const SNAP_ANGLE_DEG = 8;
 function segmentAngle(dx, dy) {
   const degrees = (Math.atan2(-dy, dx) * 180) / Math.PI;
   return (degrees + 360) % 360;
+}
+
+// Ровный ли это угол — с точностью до плавающей ошибки.
+function roundAngle(angle) {
+  const step = Math.abs(angle - Math.round(angle / SNAP_STEP_DEG) * SNAP_STEP_DEG);
+  return step < SNAP_ROUND_EPS || Math.abs(step - SNAP_STEP_DEG) < SNAP_ROUND_EPS;
+}
+
+// Ортогональная проекция курсора на луч заданного направления, в пикселях
+// плана. Притяжение — это проекция, а не поворот с сохранением длины: поворот
+// увёл бы конец отрезка из-под руки.
+function rayProject(from, to, scheme, degrees) {
+  const straight = ((degrees % 360) + 360) % 360;
+  // Горизонталь и вертикаль считаются присваиванием: та же проекция, но без
+  // плавающей ошибки — продольная координата остаётся ровно под курсором.
+  if (straight % 180 === 0) return { x: to.x, y: from.y };
+  if (straight % 180 === 90) return { x: from.x, y: to.y };
+  const width = schemeWidth(scheme);
+  const height = schemeHeight(scheme);
+  const radians = (straight * Math.PI) / 180;
+  const ux = Math.cos(radians);
+  const uy = -Math.sin(radians);
+  const along = (to.x - from.x) * width * ux + (to.y - from.y) * height * uy;
+  return { x: from.x + (along * ux) / width, y: from.y + (along * uy) / height };
 }
 
 // Направление отрезка `from → to` и точка, притянутая к ровному направлению.
@@ -9492,17 +9536,102 @@ function snapSegment(from, to, scheme, options = {}) {
   const angle = segmentAngle(dx, dy);
   const limit = options.limit === undefined ? SNAP_ANGLE_DEG : options.limit;
   if (options.free || !(limit > 0)) return { point: to, angle, snapped: false };
-  const straight = Math.round(angle / 90) * 90;
+  const straight = Math.round(angle / SNAP_STEP_DEG) * SNAP_STEP_DEG;
   if (Math.abs(angle - straight) > limit) return { point: to, angle, snapped: false };
-  // Притяжение — это проекция на ось: продольная координата остаётся под
-  // курсором, поперечная возвращается к предыдущей вершине. Поворот с
-  // сохранением длины увёл бы конец отрезка из-под руки.
-  const horizontal = straight % 180 === 0;
-  return {
-    point: horizontal ? { x: to.x, y: from.y } : { x: from.x, y: to.y },
-    angle: straight % 360,
-    snapped: true,
-  };
+  return { point: rayProject(from, to, scheme, straight), angle: straight % 360, snapped: true };
+}
+
+/**
+ * Направляющие: пока ломаная рисуется, курсор ловится вершинами, которые в ней
+ * уже стоят. Ровно под прежней вершиной — значит через неё идёт направляющая, и
+ * точка садится на неё. Этим замыкают квадрат (направляющая от первой вершины) и
+ * ровняют верхи зигзага (направляющие от вершин прежних зубцов).
+ *
+ * Источник вершин — только текущая ломаная: на плане с сотней меток притяжка к
+ * чужим точкам превратилась бы в кашу. Последняя вершина в источники не входит —
+ * горизонталь и вертикаль от неё держит магнит направления, и вторая подсказка
+ * о том же только мигала бы под рукой в миг постановки точки.
+ *
+ * Направляющих не больше двух: ближайшая горизонтальная и ближайшая
+ * вертикальная. Возвращается `{point, guides}`, где `guides` — `{axis, at}`:
+ * `h` — горизонтальная через вершину `at`, `v` — вертикальная.
+ */
+function draftGuides(points, cursor, scheme, view, options = {}) {
+  const limit = options.guide === undefined ? GUIDE_SNAP_PX : options.guide;
+  const sources = Array.isArray(points) ? points.slice(0, -1) : [];
+  if (!(limit > 0) || sources.length === 0) return { point: cursor, guides: [] };
+  const state = renderView(view);
+  const at = planToScreen(cursor, scheme, state);
+  let horizontal = null;
+  let vertical = null;
+  for (const vertex of sources) {
+    const screen = planToScreen(vertex, scheme, state);
+    const gapY = Math.abs(screen.y - at.y);
+    if (gapY <= limit && (!horizontal || gapY < horizontal.gap)) horizontal = { gap: gapY, at: vertex };
+    const gapX = Math.abs(screen.x - at.x);
+    if (gapX <= limit && (!vertical || gapX < vertical.gap)) vertical = { gap: gapX, at: vertex };
+  }
+  const guides = [];
+  const point = { x: cursor.x, y: cursor.y };
+  if (horizontal) {
+    point.y = horizontal.at.y;
+    guides.push({ axis: "h", at: horizontal.at });
+  }
+  if (vertical) {
+    point.x = vertical.at.x;
+    guides.push({ axis: "v", at: vertical.at });
+  }
+  return { point, guides };
+}
+
+// Спор направляющей и угла решён так: **направляющая старше**. Ось, которую она
+// заняла, не двигает никто — точка обязана сидеть на том пунктире, который
+// пользователь перед собой видит. Угол доводит свободную ось, но применяется
+// целиком или не применяется вовсе: если его ровное направление трогает
+// занятую ось, магнит молчит.
+//
+// Отсюда обещанное в тикете поведение. Квадрат: вертикальная направляющая от
+// первой вершины держит `x`, магнит видит почти горизонталь и доводит `y` —
+// угол замыкается ровно, и точка стоит на пунктире. Зигзаг: горизонтальная
+// направляющая держит `y` на высоте прежнего зубца, а косой магнит тронул бы её
+// же — он молчит, и точка остаётся под курсором на направляющей. Заняты обе оси
+// — угол молчит всегда: точка уже определена полностью.
+function guidedPoint(from, guided, scheme, options) {
+  const point = guided.point;
+  const heldX = guided.guides.some((guide) => guide.axis === "v");
+  const heldY = guided.guides.some((guide) => guide.axis === "h");
+  if (heldX && heldY) return point;
+  const snap = snapSegment(from, point, scheme, options);
+  if (!snap.snapped) return point;
+  if (heldX && snap.point.x !== point.x) return point;
+  if (heldY && snap.point.y !== point.y) return point;
+  return snap.point;
+}
+
+/**
+ * Куда сядет следующая вершина ломаной: направляющие плюс магнит направления.
+ * Одна дверь и для предпросмотра, и для клика — разойтись им негде.
+ * `points` — уже поставленные вершины, `cursor` — точка под курсором в долях
+ * плана. `options.free` снимает и то и другое.
+ *
+ * `snapped` — итоговое направление ровное. Считается по готовой точке, а не по
+ * тому, кто её подвинул: квадрат, замкнутый направляющей, стоит ровно на 180°,
+ * и подсказка у курсора обязана это сказать.
+ */
+function draftSnap(points, cursor, scheme, view, options = {}) {
+  const from = Array.isArray(points) && points.length > 0 ? points[points.length - 1] : null;
+  if (!from) return { point: cursor, angle: 0, snapped: false, guides: [] };
+  if (options.free) {
+    return { point: cursor, angle: snapSegment(from, cursor, scheme, { free: true }).angle, snapped: false, guides: [] };
+  }
+  const guided = draftGuides(points, cursor, scheme, view, options);
+  const point =
+    guided.guides.length === 0
+      ? snapSegment(from, cursor, scheme, options).point
+      : guidedPoint(from, guided, scheme, options);
+  const shown = snapSegment(from, point, scheme, { free: true });
+  const moved = point.x !== from.x || point.y !== from.y;
+  return { point, angle: shown.angle, snapped: moved && roundAngle(shown.angle), guides: guided.guides };
 }
 
 // ——— видимость ———————————————————————————————————————————————————————
@@ -10346,10 +10475,53 @@ function drawHandles(ctx, scheme, mark, view, color) {
   }
 }
 
+// Видимая часть холста в его собственных единицах: по ней тянутся направляющие.
+// Ширину холста знает только `ctx`, и если он её не отдаёт (заглушка в тесте),
+// направляющая тянется по плану.
+function drawExtent(ctx, scheme, view) {
+  const scale = typeof ctx.getTransform === "function" ? ctx.getTransform() : null;
+  const ratio = scale && scale.a > 0 ? scale.a : 0;
+  const width = ctx.canvas && ctx.canvas.width > 0 && ratio > 0 ? ctx.canvas.width / ratio : 0;
+  const height = ctx.canvas && ctx.canvas.height > 0 && ratio > 0 ? ctx.canvas.height / ratio : 0;
+  if (width > 0 && height > 0) return { width, height };
+  return {
+    width: view.offsetX + schemeWidth(scheme) * view.zoom,
+    height: view.offsetY + schemeHeight(scheme) * view.zoom,
+  };
+}
+
+// Направляющие: полупрозрачный мелкий пунктир через вершину, которая поймала
+// курсор. Узор нарочно мельче любого начертания метки — иначе на пунктирной
+// линии не понять, где черновик, а где подсказка.
+function drawDraftGuides(ctx, scheme, guides, view, color) {
+  if (!guides || guides.length === 0) return;
+  const box = drawExtent(ctx, scheme, view);
+  ctx.save();
+  ctx.globalAlpha = GUIDE_ALPHA;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = GUIDE_WIDTH;
+  ctx.setLineDash(GUIDE_DASH);
+  for (const guide of guides) {
+    const at = planToScreen(guide.at, scheme, view);
+    ctx.beginPath();
+    if (guide.axis === "h") {
+      ctx.moveTo(0, at.y);
+      ctx.lineTo(box.width, at.y);
+    } else {
+      ctx.moveTo(at.x, 0);
+      ctx.lineTo(at.x, box.height);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // Черновик линии: уже поставленные вершины плюс резинка до курсора.
 function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
   if (!draft || draft.points.length === 0) return;
   const radius = markRadius(view);
+  // Направляющие — под черновиком: подсказка не должна перечёркивать линию.
+  drawDraftGuides(ctx, scheme, draft.guides, view, color);
   const screen = draft.points.map((point) => planToScreen(point, scheme, view));
   // Черновик рисуется тем же начертанием, каким ляжет метка: волну и пунктир
   // видно ещё до того, как линия поставлена. Резинка до курсора — часть той же
@@ -11444,16 +11616,18 @@ function canvasBlockPoint(markId, side) {
   }
 }
 
-// Магнит направления. Пока тянется следующая вершина, направление от предыдущей
-// липнет к ровным углам — стены в квартире прямые, и целиться в горизонталь от
-// руки инженеру больше не нужно. Зажатый Alt рисует свободно: косые стены и
+// Магнит направления и направляющие. Пока тянется следующая вершина, направление
+// от предыдущей липнет к ровным углам (шаг 15°) — стены в квартире прямые,
+// и целиться от руки инженеру больше не нужно; а сам курсор ловят вершины,
+// которые в этой же ломаной уже стоят: ровно под прежней вершиной через неё
+// видна пунктирная направляющая. Зажатый Alt рисует свободно: косые стены и
 // эркеры бывают, и выходить ради них из рисования нельзя.
 // Первая вершина не притягивается: тянуть её не от чего.
 function canvasDraftSnap(plan, free) {
-  if (!canvasDraft || canvasDraft.points.length === 0) return { point: plan, snapped: false };
-  const scheme = canvasScheme(canvasState());
-  const from = canvasDraft.points[canvasDraft.points.length - 1];
-  return snapSegment(from, plan, scheme, { free: Boolean(free) });
+  if (!canvasDraft || canvasDraft.points.length === 0) return { point: plan, snapped: false, guides: [] };
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  return draftSnap(canvasDraft.points, plan, scheme, canvasViewOf(state), { free: Boolean(free) });
 }
 
 function canvasCancelDraft() {
@@ -11499,6 +11673,7 @@ function canvasDraftClick(plan, screen, free) {
       points: [plan],
       cursor: plan,
       snapped: false,
+      guides: [],
     };
     canvasRedraw();
     return;
@@ -11519,6 +11694,9 @@ function canvasDraftClick(plan, screen, free) {
   points.push(snap.point);
   canvasDraft.cursor = snap.point;
   canvasDraft.snapped = false;
+  // Вершина поставлена — подсказки гаснут до следующего движения руки: висеть
+  // им не над чем, курсор стоит ровно на только что поставленной точке.
+  canvasDraft.guides = [];
   canvasRedraw();
 }
 
@@ -11994,6 +12172,7 @@ function canvasPointerMove(event) {
     const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), event.altKey);
     canvasDraft.cursor = snap.point;
     canvasDraft.snapped = snap.snapped;
+    canvasDraft.guides = snap.guides || [];
     canvasRedraw();
   }
   if (!canvasDrag) return;
@@ -12182,8 +12361,12 @@ function canvasKeyDown(event) {
     event.preventDefault();
     canvasDraft.points.pop();
     if (canvasDraft.points.length === 0) canvasDraft = null;
-    // Убрали вершину — прежняя пометка магнита относилась к прежнему отрезку.
-    else canvasDraft.snapped = false;
+    // Убрали вершину — прежняя пометка магнита и прежние направляющие
+    // относились к прежнему отрезку.
+    else {
+      canvasDraft.snapped = false;
+      canvasDraft.guides = [];
+    }
     canvasRedraw();
     return;
   }

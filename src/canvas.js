@@ -51,7 +51,7 @@ import {
   markRadius,
   planToScreen,
   screenToPlan,
-  snapSegment,
+  draftSnap,
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { uiConfirm, uiDialogDepth } from "./panels/ui.js";
@@ -637,16 +637,18 @@ function canvasBlockPoint(markId, side) {
   }
 }
 
-// Магнит направления. Пока тянется следующая вершина, направление от предыдущей
-// липнет к ровным углам — стены в квартире прямые, и целиться в горизонталь от
-// руки инженеру больше не нужно. Зажатый Alt рисует свободно: косые стены и
+// Магнит направления и направляющие. Пока тянется следующая вершина, направление
+// от предыдущей липнет к ровным углам (шаг 15°) — стены в квартире прямые,
+// и целиться от руки инженеру больше не нужно; а сам курсор ловят вершины,
+// которые в этой же ломаной уже стоят: ровно под прежней вершиной через неё
+// видна пунктирная направляющая. Зажатый Alt рисует свободно: косые стены и
 // эркеры бывают, и выходить ради них из рисования нельзя.
 // Первая вершина не притягивается: тянуть её не от чего.
 function canvasDraftSnap(plan, free) {
-  if (!canvasDraft || canvasDraft.points.length === 0) return { point: plan, snapped: false };
-  const scheme = canvasScheme(canvasState());
-  const from = canvasDraft.points[canvasDraft.points.length - 1];
-  return snapSegment(from, plan, scheme, { free: Boolean(free) });
+  if (!canvasDraft || canvasDraft.points.length === 0) return { point: plan, snapped: false, guides: [] };
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  return draftSnap(canvasDraft.points, plan, scheme, canvasViewOf(state), { free: Boolean(free) });
 }
 
 function canvasCancelDraft() {
@@ -692,6 +694,7 @@ function canvasDraftClick(plan, screen, free) {
       points: [plan],
       cursor: plan,
       snapped: false,
+      guides: [],
     };
     canvasRedraw();
     return;
@@ -712,6 +715,9 @@ function canvasDraftClick(plan, screen, free) {
   points.push(snap.point);
   canvasDraft.cursor = snap.point;
   canvasDraft.snapped = false;
+  // Вершина поставлена — подсказки гаснут до следующего движения руки: висеть
+  // им не над чем, курсор стоит ровно на только что поставленной точке.
+  canvasDraft.guides = [];
   canvasRedraw();
 }
 
@@ -1192,6 +1198,7 @@ function canvasPointerMove(event) {
     const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), event.altKey);
     canvasDraft.cursor = snap.point;
     canvasDraft.snapped = snap.snapped;
+    canvasDraft.guides = snap.guides || [];
     canvasRedraw();
   }
   if (!canvasDrag) return;
@@ -1380,8 +1387,12 @@ function canvasKeyDown(event) {
     event.preventDefault();
     canvasDraft.points.pop();
     if (canvasDraft.points.length === 0) canvasDraft = null;
-    // Убрали вершину — прежняя пометка магнита относилась к прежнему отрезку.
-    else canvasDraft.snapped = false;
+    // Убрали вершину — прежняя пометка магнита и прежние направляющие
+    // относились к прежнему отрезку.
+    else {
+      canvasDraft.snapped = false;
+      canvasDraft.guides = [];
+    }
     canvasRedraw();
     return;
   }
