@@ -289,3 +289,60 @@ test("четыре датчика расходятся на бумаге, а н�
     }
   }
 });
+
+// Внутри категории цвет общий, и на чёрно-белой распечатке типы различает
+// только форма. Проверка идёт по всему шаблону сразу, а не по списку кодов:
+// заказчик просил «значки разведи», и новая категория или новый тип обязаны
+// приезжать уже разведёнными, без правки теста.
+test("в каждой категории шаблона типы расходятся на бумаге", () => {
+  const { categories, markTypes } = defaultTemplate();
+  const merged = [];
+  for (const category of categories) {
+    const types = markTypes.filter((type) => type.categoryId === category.id);
+    assert.ok(types.length > 0, "категория без типов: " + category.name);
+    // Форма считается так же, как её считает холст: своя, иначе категорийная.
+    const prints = types.map((type) => ({
+      code: type.code,
+      shape: type.shape || category.shape,
+      ink: inkOf(type.shape || category.shape),
+    }));
+    for (const print of prints) {
+      assert.ok(SHAPE_PALETTE.includes(print.shape), "форма не из палитры: " + print.code + " — " + print.shape);
+    }
+    for (let i = 0; i < prints.length; i += 1) {
+      for (let j = i + 1; j < prints.length; j += 1) {
+        const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
+        if (share < MIN_DIFFERENCE) {
+          merged.push(
+            category.name + ": " + prints[i].code + " и " + prints[j].code +
+              " расходятся на " + Math.round(share * 100) + "% знака",
+          );
+        }
+      }
+    }
+  }
+  assert.deepEqual(merged, [], "в размере метки эти типы сливаются");
+});
+
+// Три выключателя и два климатических прибора — то, что заказчик назвал
+// поимённо: «значки разведи». Формы пришпилены, потому что они выбраны по
+// смыслу устройства (клавиша, две клавиши, переключатель; поток воздуха и
+// настенный блок), а не по свободному месту в палитре.
+test("выключатели, климат и щит нарисованы каждый своим знаком", () => {
+  const { categories, markTypes } = defaultTemplate();
+  const shapeOf = (code) => {
+    const type = markTypes.find((item) => item.code === code);
+    const category = categories.find((item) => item.id === type.categoryId);
+    return type.shape || category.shape;
+  };
+  assert.deepEqual(
+    ["В", "ВВ", "ВП"].map(shapeOf),
+    ["circle-slash", "circle-slash-two", "circle-chevron"],
+  );
+  assert.deepEqual(["Б", "К"].map(shapeOf), ["triangle", "square-wave"]);
+  assert.deepEqual(["Щ", "ЩС"].map(shapeOf), ["square-bolt", "square-cross"]);
+  // Щит — узел питания, и знак у него силовой: молния в квадрате.
+  const panel = categories.find((category) => category.name === "Щит");
+  assert.ok(panel, "категории щита нет в шаблоне");
+  assert.equal(panel.shape, "square-bolt");
+});

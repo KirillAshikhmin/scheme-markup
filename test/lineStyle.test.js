@@ -61,12 +61,12 @@ test("в справочник добавлен проходной переклю
   const codes = markTypes.map((type) => type.code);
   // Тринадцать типов заказчика целы и идут в прежнем порядке; новый встал в
   // свою категорию, рядом с выключателями, а не в хвост списка.
-  const added = ["ВП", "RJ", "ДВ", "ДО", "ДП", "ДД"];
+  const added = ["ВП", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС"];
   assert.deepEqual(
     codes.filter((code) => !added.includes(code)),
     ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W"],
   );
-  assert.equal(codes.length, 19, "в шаблоне переключатель, витая пара и четыре датчика");
+  assert.equal(codes.length, 21, "в шаблоне переключатель, витая пара, четыре датчика и два щита");
 
   const project = createProject();
   const way = project.markTypes.find((type) => type.code === "ВП");

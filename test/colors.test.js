@@ -276,3 +276,35 @@ test("цвет каждой категории шаблона разведён �
   // не должна оказаться ближе: иначе на плане прибавится путаницы.
   assert.ok(nearest >= 29, "самые близкие цвета категорий — " + pair + ": " + nearest.toFixed(1));
 });
+
+// Щит заведён отдельной категорией по просьбе заказчика, и цвет ему выбран
+// счётом, а не на глаз: на плане метки всех категорий лежат рядом, и новый
+// цвет обязан расходиться с каждым прежним не хуже, чем они расходятся между
+// собой. Проверка именная: общий тест выше говорит только про худшую пару.
+test("цвет щита разведён с каждой прежней категорией", () => {
+  const categories = createProject({ name: "Тест" }).categories;
+  const panel = categories.find((category) => category.name === "Щит");
+  assert.ok(panel, "категории щита нет в стартовом справочнике");
+  assert.equal(panel.color, "#6E4B1F");
+
+  let nearest = Infinity;
+  let neighbour = "";
+  for (const category of categories) {
+    if (category === panel) continue;
+    const distance = colorDistance(panel.color, category.color);
+    if (distance < nearest) {
+      nearest = distance;
+      neighbour = category.name;
+    }
+  }
+  // Двадцать девять — разрыв самой близкой пары прежних категорий (свет и
+  // сетевое оборудование). Щит не должен оказаться ближе.
+  assert.ok(nearest >= 29, "щит слишком похож на «" + neighbour + "»: " + nearest.toFixed(1));
+  // И на заливке помещений он не пропадает — иначе метку щита не найти.
+  for (const room of ROOM_PALETTE) {
+    for (const alpha of [0.05, 0.1, 0.2, 0.3]) {
+      const distance = colorDistance(panel.color, colorBlend(room, "#FFFFFF", alpha));
+      assert.ok(distance >= 40, "щит теряется на заливке " + room + " (" + alpha + "): " + distance.toFixed(1));
+    }
+  }
+});

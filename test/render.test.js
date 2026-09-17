@@ -334,11 +334,12 @@ test("справочник упорядочен один раз: категор�
   const groups = typesInOrder(base.project);
   assert.deepEqual(
     groups.map((group) => group.category.name),
-    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики"],
+    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит"],
   );
   assert.deepEqual(groups[0].types.map((type) => type.code), ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ"]);
   assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "ВП"]);
   assert.deepEqual(groups[5].types.map((type) => type.code), ["ДВ", "ДО", "ДП", "ДД"]);
+  assert.deepEqual(groups[6].types.map((type) => type.code), ["Щ", "ЩС"]);
 });
 
 // Код типа бывает и в шестнадцать букв. У правого края плана такая подпись

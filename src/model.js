@@ -363,6 +363,16 @@ const TEMPLATE_CATEGORIES = [
   // цветов 63,9 — вдвое больше, чем минимум между ними самими (29,0), и метка
   // не теряется на заливке контуров помещений (проверено test/colors.test.js).
   { key: "sensors", name: strings.categories.sensors, color: "#164E63", shape: "circle-ring" },
+  // Щит заказчик попросил отдельной категорией, и это не прихоть: щит — узел
+  // питания, а не устройство в комнате. В «Сетевом оборудовании» он читался бы
+  // как роутер, в «Датчиках» — как датчик (за это его туда и не положили).
+  // Цвет — коричневый: цвет фазного провода, то есть цвет питания, а не
+  // выдумка. Считан, а не выбран на глаз: до ближайшей из шести прежних
+  // категорий (тёмная бирюза датчиков) 53,0 — почти вдвое больше самой близкой
+  // пары среди них самих (29,0 у света с сетевым) и с запасом на заливке
+  // контуров помещений (test/colors.test.js). Молния в квадрате — то, чем щит
+  // обозначен в самой палитре («щит, автомат, силовой вывод»).
+  { key: "panel", name: strings.categories.panel, color: "#6E4B1F", shape: "square-bolt" },
 ];
 
 const TEMPLATE_TYPES = [
@@ -377,15 +387,23 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "П", name: strings.types.backlight, shape: "diamond" },
   { category: "light", code: "Л", name: strings.types.strip, shape: "triangle" },
   { category: "light", code: "ПШ", name: strings.types.wardrobeLight, shape: "triangle-down" },
-  { category: "switches", code: "В", name: strings.types.switch },
-  { category: "switches", code: "ВВ", name: strings.types.switchDouble },
+  // Три выключателя сидят в одном зелёном цвете, и до сих пор два из них
+  // рисовались одинаковым пустым кругом: на чёрно-белой распечатке «В» от «ВВ»
+  // отличала только буква рядом. Значки для них в палитре уже есть — клавиша,
+  // две клавиши и переключатель, — они для того и рисовались.
+  { category: "switches", code: "В", name: strings.types.switch, shape: "circle-slash" },
+  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "circle-slash-two" },
   // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
   // Свой значок нужен сразу: без него он рисуется тем же зелёным кругом,
   // что и соседние два выключателя.
   { category: "switches", code: "ВП", name: strings.types.switchWay, shape: "circle-chevron" },
   { category: "sockets", code: "Р", name: strings.types.socket },
+  // Бризер и кондиционер тоже рисовались одним треугольником. Треугольник
+  // (поток воздуха) остаётся бризеру — он и есть приточка, — а кондиционеру
+  // достаётся квадрат с волнами: настенный блок, из которого идёт воздух.
+  // Так в категории остаётся тип с формой категории, как у розеток и датчиков.
   { category: "climate", code: "Б", name: strings.types.breezer },
-  { category: "climate", code: "К", name: strings.types.conditioner },
+  { category: "climate", code: "К", name: strings.types.conditioner, shape: "square-wave" },
   { category: "network", code: "W", name: strings.types.wifi },
   // Вывод витой пары. Код латинский, как соседний «W»: «RJ» читается как RJ45
   // и ни с чем не путается. Одинокая «E» от Ethernet выглядела бы стройнее, но
@@ -401,6 +419,14 @@ const TEMPLATE_TYPES = [
   { category: "sensors", code: "ДП", name: strings.types.leak, shape: "triangle-down-fill" },
   // Датчик дыма — потолочный, ему и достаётся форма категории.
   { category: "sensors", code: "ДД", name: strings.types.smoke },
+  // Электрощит — форма категории: молния в квадрате и есть щит.
+  { category: "panel", code: "Щ", name: strings.types.panel },
+  // Слаботочный щит заведён не ради симметрии: в квартире с умным домом это
+  // отдельный шкаф в другом месте плана — там сходятся все выводы витой пары,
+  // стоят роутер, коммутатор и контроллеры. Без него его пришлось бы помечать
+  // электрощитом, то есть врать о том, что за дверцей. Перечёркнутый квадрат —
+  // шкаф, и с молнией силового щита он не спорит.
+  { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross" },
 ];
 
 function newId() {
