@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { addMark, addScheme, createProject, deleteMark, setMarkNumber, updateMark } from "../src/model.js";
 import { typesCompactPreview, typesCompactSignature } from "../src/panels/types.js";
+import { marksCompactPlan, marksCompactSignature, marksCompactTotals } from "../src/panels/marks.js";
 
 function compactFixture() {
   let project = createProject({ name: "Квартира" });
@@ -84,4 +85,64 @@ test("подпись списка замен ловит правку нумер�
     typesCompactSignature(typesCompactPreview(noted, box.typeOf("Т"))),
     typesCompactSignature(approved),
   );
+});
+
+// ——— план смыкания по всему объекту ——————————————————————————————————
+
+test("план смыкания: группа на тип, типы без дыр в него не попадают", () => {
+  const box = compactFixture();
+  let project = deleteMark(box.project, box.ids[1]).project; // Т1 Т3 Т4
+  // Второй тип с дырой и третий — целый.
+  const switchType = project.markTypes.find((type) => type.code === "В").id;
+  const socketType = project.markTypes.find((type) => type.code === "Р").id;
+  const put = (typeId, at) => {
+    const step = addMark(project, { schemeId: box.schemeId, typeId, kind: "point", points: [{ x: at, y: 0.5 }] });
+    project = step.project;
+    return step.mark.id;
+  };
+  const first = put(switchType, 0.2);
+  put(switchType, 0.4);
+  put(socketType, 0.6);
+  project = deleteMark(project, first).project; // В2
+
+  const plan = marksCompactPlan(project);
+  assert.deepEqual(
+    plan.map((group) => [group.code, group.changes.length]),
+    [
+      ["Т", 2],
+      ["В", 1],
+    ],
+    "в план попал тип без дыр или потерялся тип с дырами",
+  );
+  assert.deepEqual(marksCompactTotals(plan), { types: 2, changes: 3 });
+  // Строки — те же, что в окне одиночного уплотнения: своей нумерации у панели нет.
+  assert.deepEqual(
+    plan[0].rows.map((row) => [row.fromLabel, row.toLabel]),
+    [
+      ["Т1", "Т1"],
+      ["Т3", "Т2"],
+      ["Т4", "Т3"],
+    ],
+  );
+});
+
+test("подпись плана ловит правку объекта, сделанную при открытом окне", () => {
+  const box = compactFixture();
+  const project = deleteMark(box.project, box.ids[1]).project;
+  const plan = marksCompactPlan(project);
+  assert.equal(marksCompactSignature(marksCompactPlan(project)), marksCompactSignature(plan));
+
+  // Дыру закрыли руками, пока окно висело: подпись разошлась.
+  const renumbered = setMarkNumber(project, box.ids[2], 2).project;
+  assert.notEqual(marksCompactSignature(marksCompactPlan(renumbered)), marksCompactSignature(plan));
+  // Правка, не трогающая номера, переспрашивать не заставляет.
+  const renamed = updateMark(project, box.ids[0], { location: "у входа" }).project;
+  assert.equal(marksCompactSignature(marksCompactPlan(renamed)), marksCompactSignature(plan));
+});
+
+test("плана нет, когда дыр нет ни у одного типа", () => {
+  const box = compactFixture();
+  assert.deepEqual(marksCompactPlan(box.project), []);
+  assert.deepEqual(marksCompactPlan(null), []);
+  assert.deepEqual(marksCompactTotals([]), { types: 0, changes: 0 });
 });

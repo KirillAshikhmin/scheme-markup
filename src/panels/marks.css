@@ -839,3 +839,41 @@
 .controls-pick__row--one.is-active {
   border-color: var(--accent);
 }
+
+/* Кнопка под списком меток: смыкание номеров — команда про весь объект, и
+   стоит она после списка, а не среди фильтров. Список над ней листается сам,
+   кнопка с глаз не уходит. */
+.marks__foot {
+  position: sticky;
+  /* Нижнее поле тела раздела (12px) — часть прокрутки: без отрицательного
+     отступа под кнопкой оставалась щель, и в неё проглядывала уехавшая строка
+     списка. */
+  bottom: -12px;
+  padding: 8px 0 12px;
+  margin-bottom: -12px;
+  background: var(--panel-bg);
+}
+
+.marks__foot .ui-btn {
+  margin-bottom: 0;
+}
+
+/* Предпросмотр по всем типам: группа на тип, заголовок — код и название. */
+.compact--all .compact__rows {
+  max-height: none;
+}
+
+.compact__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compact__groupTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}

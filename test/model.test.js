@@ -15,8 +15,11 @@ import {
   addTypesFromCatalog,
   catalogOffer,
   categoryNameKey,
+  addEquipment,
+  addPlacement,
   changeMarkType,
   findCategoryByName,
+  compactAllNumbers,
   compactNumbers,
   createProject,
   defaultTemplate,
@@ -27,10 +30,13 @@ import {
   deleteType,
   findGroup,
   findMark,
+  findPlacement,
   findScheme,
+  markControls,
   labelOf,
   markByCode,
   repeatedNumbers,
+  setMarkControls,
   setMarkNumber,
   SHAPE_NAMES,
   styleOf,
@@ -1362,4 +1368,131 @@ test("щит доезжает до размеченного объекта, а �
   assert.equal(grown.markTypes.find((type) => type.code === "К").shape, null);
   assert.equal(grown.marks.length, 1);
   assert.equal(labelOf(grown, marked.mark.id), "В1");
+});
+
+// ——— смыкание номеров по всем типам ——————————————————————————————————
+
+// Объект с дырами в трёх типах сразу: так он выглядит после месяца правок —
+// метки удаляли, типы меняли, номера ставили руками.
+function holesFixture() {
+  let project = createProject({ name: "Квартира" });
+  const added = addScheme(project, { name: "1 этаж", width: 1000, height: 800 });
+  project = added.project;
+  const schemeId = added.scheme.id;
+  const typeOf = (code) => project.markTypes.find((type) => type.code === code).id;
+  const ids = {};
+  const put = (code, count) => {
+    ids[code] = [];
+    for (let i = 0; i < count; i += 1) {
+      const step = addMark(project, {
+        schemeId,
+        typeId: typeOf(code),
+        kind: "point",
+        points: [{ x: 0.1 * (i + 1), y: 0.2 }],
+      });
+      project = step.project;
+      ids[code].push(step.mark.id);
+    }
+  };
+  put("Т", 4); // Т1 Т2 Т3 Т4
+  put("В", 3); // В1 В2 В3
+  put("Р", 2); // Р1 Р2 — этот тип оставим без дыр
+  return { project, schemeId, typeOf, ids };
+}
+
+test("смыкание по всем типам: дыры уходят, типы без дыр не трогаются", () => {
+  const box = holesFixture();
+  let project = deleteMark(box.project, box.ids["Т"][1]).project; // Т1 Т3 Т4
+  project = deleteMark(project, box.ids["В"][0]).project; // В2 В3
+
+  const result = compactAllNumbers(project);
+  assert.deepEqual(
+    result.groups.map((group) => group.code),
+    ["Т", "В"],
+    "тип без дыр попал в уплотнение",
+  );
+  assert.equal(result.changes, 4);
+  const labels = (p, code) =>
+    p.marks.filter((mark) => mark.typeId === box.typeOf(code)).map((mark) => labelOf(p, mark.id));
+  assert.deepEqual(labels(result.project, "Т"), ["Т1", "Т2", "Т3"]);
+  assert.deepEqual(labels(result.project, "В"), ["В1", "В2"]);
+  // Розетки не трогали — ни номера, ни счётчик.
+  assert.deepEqual(labels(result.project, "Р"), ["Р1", "Р2"]);
+  assert.equal(result.project.counters["Р"], project.counters["Р"]);
+  assert.deepEqual(validate(result.project), []);
+});
+
+test("смыкать нечего — возвращается тот же объект", () => {
+  const box = holesFixture();
+  const result = compactAllNumbers(box.project);
+  assert.equal(result.project, box.project, "объект пересобрали без единой замены");
+  assert.equal(result.changes, 0);
+  assert.deepEqual(result.groups, []);
+});
+
+test("намеренный повтор номера переживает смыкание по всем типам", () => {
+  const box = holesFixture();
+  let project = setMarkNumber(box.project, box.ids["Т"][1], 1).project; // Т1 Т1 Т3 Т4
+  project = deleteMark(project, box.ids["Т"][2]).project; // Т1 Т1 Т4
+
+  const result = compactAllNumbers(project);
+  const numbers = result.project.marks
+    .filter((mark) => mark.typeId === box.typeOf("Т"))
+    .map((mark) => mark.number);
+  assert.deepEqual(numbers, [1, 1, 2], "повтор рассыпался на разные номера");
+  assert.equal(result.project.counters["Т"], 2);
+});
+
+test("связи меток и размещения оборудования переживают смыкание всех типов", () => {
+  const box = holesFixture();
+  let project = deleteMark(box.project, box.ids["Т"][1]).project; // Т1 Т3 Т4 -> Т1 Т2 Т3
+  project = deleteMark(project, box.ids["В"][0]).project; // В2 В3 -> В1 В2
+
+  const lamp = box.ids["Т"][3];
+  const lampTwo = box.ids["Т"][2];
+  const switchMark = box.ids["В"][2];
+  const socket = box.ids["Р"][0];
+  // Выключатель управляет двумя светильниками — связь по идентификаторам.
+  project = setMarkControls(project, switchMark, [lamp, lampTwo]).project;
+  const added = addEquipment(project, { name: "Реле", vendor: "Shelly" });
+  project = added.project;
+  const placed = addPlacement(project, {
+    equipmentId: added.equipment.id,
+    markId: socket,
+    links: [lamp],
+  });
+  project = placed.project;
+
+  const before = {
+    controls: markControls(project, switchMark).map((mark) => mark.id),
+    placementMark: findPlacement(project, placed.placement.id).markId,
+    placementLinks: findPlacement(project, placed.placement.id).links,
+  };
+  const result = compactAllNumbers(project);
+  const after = {
+    controls: markControls(result.project, switchMark).map((mark) => mark.id),
+    placementMark: findPlacement(result.project, placed.placement.id).markId,
+    placementLinks: findPlacement(result.project, placed.placement.id).links,
+  };
+  assert.deepEqual(after, before, "связь или размещение переехали на чужую метку");
+  // Те же метки, но уже под новыми обозначениями — связь осталась связью.
+  assert.deepEqual(
+    markControls(result.project, switchMark).map((mark) => labelOf(result.project, mark.id)),
+    ["Т2", "Т3"],
+  );
+  assert.deepEqual(validate(result.project), [], "после смыкания объект должен быть чист");
+});
+
+test("поля «Расположение» и «В оригинале» смыкание не правит", () => {
+  const box = holesFixture();
+  let project = updateMark(box.project, box.ids["Т"][3], {
+    location: "над тумбой слева",
+    original: "Т4 по проекту электрика",
+  }).project;
+  project = deleteMark(project, box.ids["Т"][1]).project;
+
+  const mark = findMark(compactAllNumbers(project).project, box.ids["Т"][3]);
+  assert.equal(mark.number, 3, "номер не сомкнулся");
+  assert.equal(mark.location, "над тумбой слева");
+  assert.equal(mark.original, "Т4 по проекту электрика", "текстовое поле правили — там обозначение из чужого проекта");
 });

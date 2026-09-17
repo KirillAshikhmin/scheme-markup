@@ -1363,6 +1363,36 @@ export function compactNumbers(project, typeId) {
   return { changes, project: withProject(project, { marks, counters }) };
 }
 
+/**
+ * Уплотнение по всем типам разом. Правил своих нет ни одного: считает та же
+ * `compactNumbers`, тип за типом по накапливающемуся объекту, — иначе окно
+ * обещало бы одно, а команда делала другое.
+ *
+ * Тип без дыр не трогается вовсе: его нет ни в ответе, ни в объекте. Это
+ * важнее, чем кажется, — `compactNumbers` заодно подтягивает счётчик типа, и
+ * прогон по всем типам «на всякий случай» сбросил бы счётчики там, где
+ * пользователь ничего не просил.
+ *
+ * Порядок — справочника (`typesInOrder`), тот же, что у легенды и таблиц.
+ * Возвращает `{project, groups:[{typeId, code, name, changes}], changes}`;
+ * когда уплотнять нечего, `project` — тот же объект, что пришёл.
+ */
+export function compactAllNumbers(project) {
+  const groups = [];
+  let next = project;
+  let changes = 0;
+  for (const { types } of typesInOrder(project)) {
+    for (const type of types) {
+      const result = compactNumbers(next, type.id);
+      if (result.changes.length === 0) continue;
+      next = result.project;
+      groups.push({ typeId: type.id, code: type.code, name: type.name, changes: result.changes });
+      changes += result.changes.length;
+    }
+  }
+  return { project: changes === 0 ? project : next, groups, changes };
+}
+
 // Повторяющиеся обозначения: метки одного типа с одним номером. Повтор
 // разрешён — три точечных светильника одной группы носят Т1, — но собирается
 // сюда, чтобы список меток и `validate` показали его, а случайный дубль не

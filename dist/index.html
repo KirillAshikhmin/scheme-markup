@@ -1370,6 +1370,44 @@
   border-color: var(--accent);
 }
 
+/* Кнопка под списком меток: смыкание номеров — команда про весь объект, и
+   стоит она после списка, а не среди фильтров. Список над ней листается сам,
+   кнопка с глаз не уходит. */
+.marks__foot {
+  position: sticky;
+  /* Нижнее поле тела раздела (12px) — часть прокрутки: без отрицательного
+     отступа под кнопкой оставалась щель, и в неё проглядывала уехавшая строка
+     списка. */
+  bottom: -12px;
+  padding: 8px 0 12px;
+  margin-bottom: -12px;
+  background: var(--panel-bg);
+}
+
+.marks__foot .ui-btn {
+  margin-bottom: 0;
+}
+
+/* Предпросмотр по всем типам: группа на тип, заголовок — код и название. */
+.compact--all .compact__rows {
+  max-height: none;
+}
+
+.compact__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compact__groupTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
 /* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
 
 .ui-btn {
@@ -3327,6 +3365,7 @@ const strings = {
     markNumber: "правка номера метки",
     replaceImage: "замена плана",
     compact: "уплотнение нумерации",
+    compactAll: "смыкание номеров по всем типам",
     markRoom: "помещение метки",
     markControls: "связь «чем управляет»",
     addEquipment: "новая модель оборудования",
@@ -3678,6 +3717,15 @@ const strings = {
     controlsTitle: "Выбрать метки, которыми управляет эта",
     controlledBy: "Управляется: {labels}",
     focus: "Показать метку на плане",
+    // Уплотнение по всему объекту: кнопка под списком меток. Одиночное, по
+    // типу, осталось в справочнике — здесь речь про все типы разом.
+    compactAll: "Сомкнуть номера",
+    compactAllHint: "Убрать дыры в нумерации у всех типов объекта разом",
+    compactAllTitle: "Сомкнуть номера — все типы",
+    compactAllSummary: "Сменят номер меток: {count}, типов: {types}. Остальные останутся как есть.",
+    compactAllGroup: "{code} · {name}",
+    compactAllNothing: "Дыр в нумерации нет ни у одного типа — смыкать нечего",
+    compactAllNoProject: "Объект не открыт",
   },
   filters: {
     searchPlaceholder: "Сузить список",
@@ -5277,6 +5325,36 @@ function compactNumbers(project, typeId) {
   );
   const counters = { ...project.counters, [type.code]: renumbered.size };
   return { changes, project: withProject(project, { marks, counters }) };
+}
+
+/**
+ * Уплотнение по всем типам разом. Правил своих нет ни одного: считает та же
+ * `compactNumbers`, тип за типом по накапливающемуся объекту, — иначе окно
+ * обещало бы одно, а команда делала другое.
+ *
+ * Тип без дыр не трогается вовсе: его нет ни в ответе, ни в объекте. Это
+ * важнее, чем кажется, — `compactNumbers` заодно подтягивает счётчик типа, и
+ * прогон по всем типам «на всякий случай» сбросил бы счётчики там, где
+ * пользователь ничего не просил.
+ *
+ * Порядок — справочника (`typesInOrder`), тот же, что у легенды и таблиц.
+ * Возвращает `{project, groups:[{typeId, code, name, changes}], changes}`;
+ * когда уплотнять нечего, `project` — тот же объект, что пришёл.
+ */
+function compactAllNumbers(project) {
+  const groups = [];
+  let next = project;
+  let changes = 0;
+  for (const { types } of typesInOrder(project)) {
+    for (const type of types) {
+      const result = compactNumbers(next, type.id);
+      if (result.changes.length === 0) continue;
+      next = result.project;
+      groups.push({ typeId: type.id, code: type.code, name: type.name, changes: result.changes });
+      changes += result.changes.length;
+    }
+  }
+  return { project: changes === 0 ? project : next, groups, changes };
 }
 
 // Повторяющиеся обозначения: метки одного типа с одним номером. Повтор
@@ -17750,6 +17828,10 @@ registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 
 
+// Строки замен считает справочник — там же, где их считает уплотнение по
+// одному типу. Второй нумерации в сборке быть не должно: окно обещало бы одно,
+// а команда делала другое.
+
 const MARKS_NEW_ROOM = "--new-room--";
 // «По контуру» — метка отдана автоматике: помещение подставляется по контуру
 // на схеме. Любой другой выбор в этом поле — ручная правка, и она главнее:
@@ -17814,14 +17896,109 @@ function marksRowModel(project, row, options = {}) {
   return head;
 }
 
+/**
+ * План уплотнения по всему объекту: по группе на тип, внутри — строки
+ * «было → стало» того же вида, что в окне одиночного уплотнения. Типы без дыр
+ * в план не попадают: на объекте с двадцатью типами список из сотни строк, где
+ * значимы три, не читают.
+ *
+ * Считается по исходному объекту потипно, и это сходится с `compactAllNumbers`:
+ * номера каждого типа зависят только от меток этого типа, а их уплотнение
+ * соседнего типа не трогает.
+ */
+function marksCompactPlan(project) {
+  if (!project) return [];
+  const plan = [];
+  for (const { types } of typesInOrder(project)) {
+    for (const type of types) {
+      const preview = typesCompactPreview(project, type.id);
+      if (preview.changes.length === 0) continue;
+      plan.push({ typeId: type.id, code: type.code, name: type.name, rows: preview.rows, changes: preview.changes });
+    }
+  }
+  return plan;
+}
+
+// Подпись плана: по ней окно и применение договариваются, что речь об одном и
+// том же наборе замен. Тот же приём, что у одиночного уплотнения.
+function marksCompactSignature(plan) {
+  return plan.map((group) => group.typeId + "=" + typesCompactSignature(group)).join("//");
+}
+function marksCompactTotals(plan) {
+  return { types: plan.length, changes: plan.reduce((sum, group) => sum + group.changes.length, 0) };
+}
+
+// Уплотнение разрушающее (ADR 003): распечатка на руках у монтажника после
+// него начинает врать. Поэтому окно показывает замены целиком, типами, и
+// говорит о цене — подтверждение здесь часть команды, а не украшение.
+function openMarksCompactAll(plan, { stale } = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const totals = marksCompactTotals(plan);
+    const groups = plan.map((group) =>
+      uiEl("div", { class: "compact__group" }, [
+        uiEl("p", {
+          class: "compact__groupTitle",
+          text: text("marks.compactAllGroup", { code: group.code, name: group.name }),
+        }),
+        uiEl(
+          "div",
+          { class: "compact__rows" },
+          group.rows.map((row) =>
+            uiEl("div", { class: "compact__row" + (row.from === row.to ? " is-same" : "") }, [
+              uiEl("span", { class: "compact__label", text: row.fromLabel }),
+              uiEl("span", { class: "compact__arrow", text: "→" }),
+              uiEl("span", { class: "compact__label", text: row.toLabel }),
+              row.count > 1
+                ? uiEl("span", { class: "compact__repeat", text: text("dictionary.compactRepeat", { count: row.count }) })
+                : null,
+            ]),
+          ),
+        ),
+      ]),
+    );
+    modal = uiModal({
+      title: strings.marks.compactAllTitle,
+      body: uiEl("div", { class: "compact compact--all" }, [
+        stale ? uiEl("p", { class: "compact__warning", text: strings.dictionary.compactStale }) : null,
+        uiEl("p", {
+          class: "modal__text",
+          text: text("marks.compactAllSummary", { count: totals.changes, types: totals.types }),
+        }),
+        ...groups,
+        uiEl("p", { class: "compact__warning", text: strings.dictionary.compactWarning }),
+      ]),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(false) } }),
+        uiButton(strings.dictionary.compactApply, {
+          class: "ui-btn ui-btn--danger",
+          on: { click: () => done(true) },
+        }),
+      ],
+      onCancel: () => resolve(false),
+    });
+  });
+}
+
 function mountMarksPanel(host, api) {
   const { getState, setState, notify } = api;
   const filters = filtersBox(api);
   const list = uiEl("div", { class: "marks" });
   const count = uiEl("p", { class: "marks__count" });
-  // Поиск и фильтры прибиты к верху панели: список из полусотни меток уносил
-  // их за край, и отменить фильтр было нечем, пока не пролистаешь обратно.
-  host.replaceChildren(uiEl("div", { class: "marks__top" }, [filters.node, count]), list);
+  // Смыкание номеров — под списком, как просил заказчик: команда про весь
+  // объект, а не про открытую схему, и место ей после списка, а не среди
+  // фильтров. Уплотнение по одному типу осталось в справочнике.
+  const compactButton = uiButton(strings.marks.compactAll, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.marks.compactAllHint,
+    on: { click: () => compactAll() },
+  });
+  const foot = uiEl("div", { class: "marks__foot" }, [compactButton]);
+  host.replaceChildren(uiEl("div", { class: "marks__top" }, [filters.node, count]), list, foot);
   // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
   // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
   // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
@@ -17847,6 +18024,41 @@ function mountMarksPanel(host, api) {
     const mark = state.project ? findMark(state.project, markId) : null;
     if (!scheme || !mark) return;
     setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
+  }
+
+  // Уплотнение по всему объекту. Считает и применяет модель
+  // (`compactAllNumbers`) — одним вызовом, поэтому и шаг истории один: отмена
+  // возвращает весь набор замен целиком, а не тип за типом.
+  async function compactAll() {
+    const state = getState();
+    if (!state.project) {
+      notify(strings.marks.compactAllNoProject, "info");
+      return;
+    }
+    let plan = marksCompactPlan(getState().project);
+    let stale = false;
+    // Пока окно висит открытым, объект могли поменять — поставить метку,
+    // вернуть номера чужим Ctrl+Z. Применяем по свежему объекту, но молча
+    // подменить одобренный список нельзя: разошлось — показываем новый и
+    // спрашиваем заново.
+    for (;;) {
+      if (plan.length === 0) {
+        notify(strings.marks.compactAllNothing, "info");
+        return;
+      }
+      const agreed = await openMarksCompactAll(plan, { stale });
+      if (!agreed) return;
+      const current = getState().project;
+      if (!current) return;
+      const fresh = marksCompactPlan(current);
+      if (marksCompactSignature(fresh) === marksCompactSignature(plan)) {
+        const result = compactAllNumbers(current);
+        if (result.project !== current) canvasCommit(current, result.project, strings.history.compactAll);
+        return;
+      }
+      plan = fresh;
+      stale = true;
+    }
   }
 
   function setField(markId, field, value) {
@@ -18106,9 +18318,18 @@ function mountMarksPanel(host, api) {
     return node;
   }
 
+  // Кнопка с места не исчезает, даже когда смыкать нечего: пользователь
+  // спрашивает у неё «а есть ли дыры?» — и получает ответ строкой, а не
+  // пустым окном. В режиме просмотра правок нет вовсе, там её не показываем.
+  function syncCompact(state) {
+    foot.hidden = !layoutAllows("editMarks", state.layout);
+    compactButton.disabled = !state.project;
+  }
+
   function render() {
     pending = false;
     const state = getState();
+    syncCompact(state);
     if (!state.project || !state.schemeId) {
       count.textContent = "";
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));

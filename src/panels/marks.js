@@ -8,6 +8,7 @@ import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   MARK_NUMBER_MAX,
+  compactAllNumbers,
   findMark,
   findRoom,
   labelOf,
@@ -22,15 +23,20 @@ import {
   setMarkControls,
   setMarkNumber,
   styleOf,
+  typesInOrder,
   updateMark,
 } from "../model.js";
 import { planToScreen, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
-import { uiButton, uiEl, uiPrompt } from "./ui.js";
+import { uiButton, uiEl, uiModal, uiPrompt } from "./ui.js";
 import { filtersBox, filtersMarkRows } from "./filters.js";
 import { openMarkControlsPicker } from "./markControls.js";
 import { openEquipmentWindow } from "./equipment.js";
 import { roomsEnsure } from "./rooms.js";
+// Строки замен считает справочник — там же, где их считает уплотнение по
+// одному типу. Второй нумерации в сборке быть не должно: окно обещало бы одно,
+// а команда делала другое.
+import { typesCompactPreview, typesCompactSignature } from "./types.js";
 
 const MARKS_NEW_ROOM = "--new-room--";
 // «По контуру» — метка отдана автоматике: помещение подставляется по контуру
@@ -96,14 +102,110 @@ export function marksRowModel(project, row, options = {}) {
   return head;
 }
 
+/**
+ * План уплотнения по всему объекту: по группе на тип, внутри — строки
+ * «было → стало» того же вида, что в окне одиночного уплотнения. Типы без дыр
+ * в план не попадают: на объекте с двадцатью типами список из сотни строк, где
+ * значимы три, не читают.
+ *
+ * Считается по исходному объекту потипно, и это сходится с `compactAllNumbers`:
+ * номера каждого типа зависят только от меток этого типа, а их уплотнение
+ * соседнего типа не трогает.
+ */
+export function marksCompactPlan(project) {
+  if (!project) return [];
+  const plan = [];
+  for (const { types } of typesInOrder(project)) {
+    for (const type of types) {
+      const preview = typesCompactPreview(project, type.id);
+      if (preview.changes.length === 0) continue;
+      plan.push({ typeId: type.id, code: type.code, name: type.name, rows: preview.rows, changes: preview.changes });
+    }
+  }
+  return plan;
+}
+
+// Подпись плана: по ней окно и применение договариваются, что речь об одном и
+// том же наборе замен. Тот же приём, что у одиночного уплотнения.
+export function marksCompactSignature(plan) {
+  return plan.map((group) => group.typeId + "=" + typesCompactSignature(group)).join("//");
+}
+
+export function marksCompactTotals(plan) {
+  return { types: plan.length, changes: plan.reduce((sum, group) => sum + group.changes.length, 0) };
+}
+
+// Уплотнение разрушающее (ADR 003): распечатка на руках у монтажника после
+// него начинает врать. Поэтому окно показывает замены целиком, типами, и
+// говорит о цене — подтверждение здесь часть команды, а не украшение.
+function openMarksCompactAll(plan, { stale } = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const totals = marksCompactTotals(plan);
+    const groups = plan.map((group) =>
+      uiEl("div", { class: "compact__group" }, [
+        uiEl("p", {
+          class: "compact__groupTitle",
+          text: text("marks.compactAllGroup", { code: group.code, name: group.name }),
+        }),
+        uiEl(
+          "div",
+          { class: "compact__rows" },
+          group.rows.map((row) =>
+            uiEl("div", { class: "compact__row" + (row.from === row.to ? " is-same" : "") }, [
+              uiEl("span", { class: "compact__label", text: row.fromLabel }),
+              uiEl("span", { class: "compact__arrow", text: "→" }),
+              uiEl("span", { class: "compact__label", text: row.toLabel }),
+              row.count > 1
+                ? uiEl("span", { class: "compact__repeat", text: text("dictionary.compactRepeat", { count: row.count }) })
+                : null,
+            ]),
+          ),
+        ),
+      ]),
+    );
+    modal = uiModal({
+      title: strings.marks.compactAllTitle,
+      body: uiEl("div", { class: "compact compact--all" }, [
+        stale ? uiEl("p", { class: "compact__warning", text: strings.dictionary.compactStale }) : null,
+        uiEl("p", {
+          class: "modal__text",
+          text: text("marks.compactAllSummary", { count: totals.changes, types: totals.types }),
+        }),
+        ...groups,
+        uiEl("p", { class: "compact__warning", text: strings.dictionary.compactWarning }),
+      ]),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(false) } }),
+        uiButton(strings.dictionary.compactApply, {
+          class: "ui-btn ui-btn--danger",
+          on: { click: () => done(true) },
+        }),
+      ],
+      onCancel: () => resolve(false),
+    });
+  });
+}
+
 function mountMarksPanel(host, api) {
   const { getState, setState, notify } = api;
   const filters = filtersBox(api);
   const list = uiEl("div", { class: "marks" });
   const count = uiEl("p", { class: "marks__count" });
-  // Поиск и фильтры прибиты к верху панели: список из полусотни меток уносил
-  // их за край, и отменить фильтр было нечем, пока не пролистаешь обратно.
-  host.replaceChildren(uiEl("div", { class: "marks__top" }, [filters.node, count]), list);
+  // Смыкание номеров — под списком, как просил заказчик: команда про весь
+  // объект, а не про открытую схему, и место ей после списка, а не среди
+  // фильтров. Уплотнение по одному типу осталось в справочнике.
+  const compactButton = uiButton(strings.marks.compactAll, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.marks.compactAllHint,
+    on: { click: () => compactAll() },
+  });
+  const foot = uiEl("div", { class: "marks__foot" }, [compactButton]);
+  host.replaceChildren(uiEl("div", { class: "marks__top" }, [filters.node, count]), list, foot);
   // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
   // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
   // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
@@ -129,6 +231,41 @@ function mountMarksPanel(host, api) {
     const mark = state.project ? findMark(state.project, markId) : null;
     if (!scheme || !mark) return;
     setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
+  }
+
+  // Уплотнение по всему объекту. Считает и применяет модель
+  // (`compactAllNumbers`) — одним вызовом, поэтому и шаг истории один: отмена
+  // возвращает весь набор замен целиком, а не тип за типом.
+  async function compactAll() {
+    const state = getState();
+    if (!state.project) {
+      notify(strings.marks.compactAllNoProject, "info");
+      return;
+    }
+    let plan = marksCompactPlan(getState().project);
+    let stale = false;
+    // Пока окно висит открытым, объект могли поменять — поставить метку,
+    // вернуть номера чужим Ctrl+Z. Применяем по свежему объекту, но молча
+    // подменить одобренный список нельзя: разошлось — показываем новый и
+    // спрашиваем заново.
+    for (;;) {
+      if (plan.length === 0) {
+        notify(strings.marks.compactAllNothing, "info");
+        return;
+      }
+      const agreed = await openMarksCompactAll(plan, { stale });
+      if (!agreed) return;
+      const current = getState().project;
+      if (!current) return;
+      const fresh = marksCompactPlan(current);
+      if (marksCompactSignature(fresh) === marksCompactSignature(plan)) {
+        const result = compactAllNumbers(current);
+        if (result.project !== current) canvasCommit(current, result.project, strings.history.compactAll);
+        return;
+      }
+      plan = fresh;
+      stale = true;
+    }
   }
 
   function setField(markId, field, value) {
@@ -388,9 +525,18 @@ function mountMarksPanel(host, api) {
     return node;
   }
 
+  // Кнопка с места не исчезает, даже когда смыкать нечего: пользователь
+  // спрашивает у неё «а есть ли дыры?» — и получает ответ строкой, а не
+  // пустым окном. В режиме просмотра правок нет вовсе, там её не показываем.
+  function syncCompact(state) {
+    foot.hidden = !layoutAllows("editMarks", state.layout);
+    compactButton.disabled = !state.project;
+  }
+
   function render() {
     pending = false;
     const state = getState();
+    syncCompact(state);
     if (!state.project || !state.schemeId) {
       count.textContent = "";
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));

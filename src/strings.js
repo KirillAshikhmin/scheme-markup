@@ -233,6 +233,7 @@ export const strings = {
     markNumber: "правка номера метки",
     replaceImage: "замена плана",
     compact: "уплотнение нумерации",
+    compactAll: "смыкание номеров по всем типам",
     markRoom: "помещение метки",
     markControls: "связь «чем управляет»",
     addEquipment: "новая модель оборудования",
@@ -584,6 +585,15 @@ export const strings = {
     controlsTitle: "Выбрать метки, которыми управляет эта",
     controlledBy: "Управляется: {labels}",
     focus: "Показать метку на плане",
+    // Уплотнение по всему объекту: кнопка под списком меток. Одиночное, по
+    // типу, осталось в справочнике — здесь речь про все типы разом.
+    compactAll: "Сомкнуть номера",
+    compactAllHint: "Убрать дыры в нумерации у всех типов объекта разом",
+    compactAllTitle: "Сомкнуть номера — все типы",
+    compactAllSummary: "Сменят номер меток: {count}, типов: {types}. Остальные останутся как есть.",
+    compactAllGroup: "{code} · {name}",
+    compactAllNothing: "Дыр в нумерации нет ни у одного типа — смыкать нечего",
+    compactAllNoProject: "Объект не открыт",
   },
   filters: {
     searchPlaceholder: "Сузить список",
