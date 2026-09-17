@@ -16,7 +16,7 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
-import { formatMegabytes, uiButton, uiConfirm, uiEl, uiModal, uiPrompt } from "./ui.js";
+import { formatMegabytes, uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
 import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
 
 export const LAST_PROJECT_KEY = "lastProjectId";
@@ -47,17 +47,23 @@ function mountProjectsPanel(host, api) {
       },
     },
   });
-  const renameButton = uiButton("✎", {
-    title: strings.projects.rename,
+  // Значки, а не символы шрифта: рядом в шапке стоят отмена, возврат и поиск,
+  // нарисованные линиями, и «＋» с корзиной-эмодзи выпадали из ряда — у них
+  // своя толщина, свой размер и свой цвет. Слово у каждой кнопки осталось:
+  // оно в подсказке и в `aria-label`.
+  const renameButton = uiIconButton("edit", {
+    label: strings.projects.rename,
     on: { click: () => renameCurrent() },
   });
-  const createButton = uiButton("＋", {
-    title: strings.projects.create,
+  const createButton = uiIconButton("plus", {
+    label: strings.projects.create,
     on: { click: () => createAndOpen() },
   });
-  const removeButton = uiButton("🗑", {
+  // Опасность удаления несла красная эмодзи; теперь её несёт сама кнопка —
+  // красной рамкой и подложкой под курсором (`.ui-btn--danger` в panels.css).
+  const removeButton = uiIconButton("trash", {
     class: "ui-btn ui-btn--danger",
-    title: strings.projects.remove,
+    label: strings.projects.remove,
     on: { click: () => removeCurrent() },
   });
   host.replaceChildren(select, createButton, renameButton, removeButton);
