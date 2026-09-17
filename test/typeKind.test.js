@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   MARK_KINDS,
   addMark,
+  changeMarkType,
   addScheme,
   addType,
   addTypesFromCatalog,
@@ -23,9 +24,11 @@ import {
   typeKindGuess,
   typeKindOf,
   typeKindReview,
+  searchTypes,
   updateType,
   validate,
 } from "../src/model.js";
+import { pickerGroupsOfKind } from "../src/panels/typePicker.js";
 import { FORMAT_VERSION, unpackProject, writeZip } from "../src/projectFile.js";
 
 const LINE = [
@@ -313,3 +316,90 @@ test("правка шаблона не трогает справочник ра�
 function typeIdOf(project, code) {
   return project.markTypes.find((type) => type.code === code).id;
 }
+
+// ——— смена типа метки идёт внутри её вида ——————————————————————————————
+//
+// Слова заказчика: «у метки если тип линия, то только на другой тип линии
+// можно сменить, а точки только на другой тип с типом точка». Окно выбора
+// показывает только свой вид, но стережёт правило модель: окно можно обойти,
+// объект — нельзя.
+
+test("точке дают точечные типы, линии — линейные, и не наоборот", () => {
+  const { project, idOf } = markedProject();
+  const pointMark = project.marks.find((mark) => mark.kind === "point" && mark.typeId === idOf("Т"));
+  const lineMark = project.marks.find((mark) => mark.kind === "line" && mark.typeId === idOf("ТР"));
+
+  // Внутри вида — обычная смена типа с новым номером.
+  const changedPoint = changeMarkType(project, pointMark.id, idOf("С")).project;
+  assert.equal(labelOf(changedPoint, pointMark.id).startsWith("С"), true, "точка не сменила тип на точечный");
+  const changedLine = changeMarkType(project, lineMark.id, idOf("ПШ")).project;
+  assert.equal(labelOf(changedLine, lineMark.id).startsWith("ПШ"), true, "линия не сменила тип на линейный");
+
+  // Поперёк вида — отказ с кодом, а не молчаливая порча метки.
+  assert.throws(() => changeMarkType(project, pointMark.id, idOf("ТР")), (error) => {
+    assert.equal(error.code, "typeKindNotPoint");
+    return true;
+  });
+  assert.throws(() => changeMarkType(project, lineMark.id, idOf("Т")), (error) => {
+    assert.equal(error.code, "typeKindNotLine");
+    return true;
+  });
+
+  // Отказ ничего не поменял: объект тот же, что был.
+  assert.deepEqual(changeMarkType(project, pointMark.id, pointMark.typeId).project.marks, project.marks);
+});
+
+test("метка-линия с точечным типом из старого объекта чинится линейным типом", () => {
+  // «Л» в этом объекте смешанный: им нарисована и линия, и точка. Миграция
+  // выводит ему точечный вид — значит у линии тип оказался чужого вида.
+  const { project, idOf } = markedProject();
+  const migrated = migrateTypeKinds(asOldFormat(project)).project;
+  assert.equal(typeKindOf(migrated, idOf("Л")), "point", "вид «Л» выведен не точкой — проверка потеряла смысл");
+  const stray = migrated.marks.find((mark) => mark.kind === "line" && mark.typeId === idOf("Л"));
+  assert.ok(stray, "метки-линии с точечным типом в объекте нет");
+
+  // Менять её есть на что: подходят линейные типы — те, что подходят самой
+  // метке, а не её нынешнему типу.
+  const fixed = changeMarkType(migrated, stray.id, idOf("ТР")).project;
+  assert.equal(labelOf(fixed, stray.id).startsWith("ТР"), true);
+  assert.throws(() => changeMarkType(migrated, stray.id, idOf("Т")), (error) => error.code === "typeKindNotLine");
+
+  // И сама она до правки не тронута: ни вида, ни номера, ни точек.
+  assert.deepEqual(migrated.marks, project.marks, "миграция вида переписала метки");
+});
+
+test("окно смены типа показывает только типы своего вида и не спотыкается о смешанный", () => {
+  const { project } = markedProject();
+  const codesOf = (source, kind) =>
+    pickerGroupsOfKind(source, searchTypes(source, ""), kind).flatMap((group) =>
+      group.types.map((type) => type.code),
+    );
+
+  // Свежий объект: вид записан у типов, и окно делит справочник ровно по нему.
+  const lines = codesOf(project, "line");
+  const points = codesOf(project, "point");
+  assert.deepEqual(lines, ["ТР", "Л", "ПШ", "ПКШ", "КШ"], "линейные типы показаны не те");
+  assert.equal(lines.some((code) => points.includes(code)), false, "тип попал в оба списка");
+  assert.equal(points.includes("Т"), true, "точечные типы потерялись");
+  for (const code of lines) assert.equal(typeKindOf(project, typeIdOf(project, code)), "line");
+  for (const code of points) assert.equal(typeKindOf(project, typeIdOf(project, code)), "point");
+
+  // Категория, где не осталось ни одного типа нужного вида, из окна уходит
+  // целиком — пустой заголовок держал бы колонку зря.
+  const groups = pickerGroupsOfKind(project, searchTypes(project, ""), "line");
+  assert.equal(groups.every((group) => group.types.length > 0), true, "в окне осталась пустая категория");
+  assert.deepEqual(groups.map((group) => group.category.name), ["Свет"], "линейные типы есть только у света");
+
+  // Объект прежнего формата: поля `kind` у типов нет, вид выведен по меткам —
+  // и окно спрашивает его у модели, а не у поля. «Л» вышел смешанным, значит
+  // точечным: у метки-линии с этим типом его в списке не будет, и это верно.
+  const migrated = migrateTypeKinds(asOldFormat(project)).project;
+  const migratedLines = codesOf(migrated, "line");
+  assert.deepEqual(migratedLines, ["ТР"], "вид в старом объекте выведен не по меткам");
+  assert.equal(migratedLines.includes("Л"), false, "точечный тип показан для метки-линии");
+  assert.ok(migratedLines.length >= 1, "для метки-линии не осталось ни одного типа");
+
+  // Без вида окно показывает справочник целиком — постановка новой метки
+  // ничего не сужает.
+  assert.deepEqual(pickerGroupsOfKind(project, searchTypes(project, ""), null), searchTypes(project, ""));
+});

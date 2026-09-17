@@ -6,7 +6,7 @@
 // а Delete удалял. Поэтому запрет живёт в самом холсте, а не в стилях.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canvasEditAllowed, canvasHintText } from "../src/canvas.js";
+import { canvasAddKind, canvasEditAllowed, canvasHintText } from "../src/canvas.js";
 import { LAYOUT_ABILITIES } from "../src/app.js";
 import { strings } from "../src/strings.js";
 import { addScheme, createProject } from "../src/model.js";
@@ -14,7 +14,9 @@ import { addScheme, createProject } from "../src/model.js";
 const world = () => {
   const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });
   const project = made.project;
-  return { project, schemeId: made.scheme.id, typeId: project.markTypes.find((item) => item.code === "Р").id };
+  const idOf = (code) => project.markTypes.find((item) => item.code === code).id;
+  // «Р» — розетка, тип точечный; «Л» — лента, тип линейный.
+  return { project, schemeId: made.scheme.id, typeId: idOf("Р"), lineTypeId: idOf("Л") };
 };
 
 // Один объект на все проверки: `defaultTemplate()` выдаёт свежие идентификаторы
@@ -64,8 +66,26 @@ test("в режиме просмотра подсказка не обещает 
 test("на десктопе подсказка прежняя — по режиму и выбранному типу", () => {
   assert.equal(canvasHintText(stateOf({})), strings.canvas.hintSelect, "без типа — общая подсказка");
   assert.equal(canvasHintText(stateOf({ activeTypeId: scene.typeId })), strings.canvas.hintSelectMode);
-  assert.equal(canvasHintText(stateOf({ mode: "line", activeTypeId: scene.typeId })), strings.canvas.hintLine);
-  assert.ok(canvasHintText(stateOf({ mode: "point", activeTypeId: scene.typeId })).includes("Р — "), "подсказка постановки без типа");
+  // Режим добавления один, а подсказка разная: её выбирает вид типа.
+  assert.equal(canvasHintText(stateOf({ mode: "add", activeTypeId: scene.lineTypeId })), strings.canvas.hintLine);
+  assert.ok(
+    canvasHintText(stateOf({ mode: "add", activeTypeId: scene.typeId })).includes("Р — "),
+    "подсказка постановки без типа",
+  );
   // Схемы нет — подсказывать нечего, подписи не будет вовсе.
   assert.equal(canvasHintText(stateOf({ schemeId: null })), null);
+});
+
+// Что ставит режим добавления, решает вид типа, а не вторая кнопка в панели.
+// Это тот самый шов, на котором сходятся панель инструментов и холст: разойдись
+// они — клик ставил бы точку линейным типом.
+test("режим добавления берёт вид у выбранного типа", () => {
+  assert.equal(canvasAddKind(stateOf({ mode: "add", activeTypeId: scene.typeId })), "point");
+  assert.equal(canvasAddKind(stateOf({ mode: "add", activeTypeId: scene.lineTypeId })), "line");
+  // Вне режима добавления не ставится ничего — ни точка, ни линия.
+  assert.equal(canvasAddKind(stateOf({ mode: "select", activeTypeId: scene.lineTypeId })), null);
+  assert.equal(canvasAddKind(stateOf({ mode: "room", activeTypeId: scene.lineTypeId })), null);
+  // Тип не выбран — добавлять нечего, и холст не должен считать это точкой.
+  assert.equal(canvasAddKind(stateOf({ mode: "add" })), null);
+  assert.equal(canvasAddKind(null), null);
 });

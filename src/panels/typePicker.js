@@ -14,7 +14,15 @@
 // инструментов, и дальше метки ставятся кликами без единого диалога.
 import { strings, text } from "../strings.js";
 import { uiEl, uiButton, uiModal } from "./ui.js";
-import { addType, codeProblem, matchTypeExactly, searchTypes, styleOf, CODE_MAX_LENGTH } from "../model.js";
+import {
+  addType,
+  codeProblem,
+  matchTypeExactly,
+  searchTypes,
+  styleOf,
+  typeKindOf,
+  CODE_MAX_LENGTH,
+} from "../model.js";
 import { shapeIcon } from "../render.js";
 
 // Значок типа — цвет категории и форма из справочника, нарисованные общим
@@ -111,6 +119,20 @@ function pickerMove(box, row, dx, dy) {
   if (next) next.focus();
 }
 
+// Смена типа у метки идёт внутри её вида: линии — линейные типы, точке —
+// точечные. Окно получает вид в `options.kind` и оставляет только свои типы;
+// постановка новой метки вид не задаёт и видит справочник целиком.
+//
+// Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
+// формата поля нет вовсе. Категория, в которой не осталось ни одного типа
+// нужного вида, из окна уходит — пустой заголовок держал бы колонку зря.
+export function pickerGroupsOfKind(project, groups, kind) {
+  if (kind !== "point" && kind !== "line") return groups;
+  return groups
+    .map((group) => ({ ...group, types: group.types.filter((type) => typeKindOf(project, type.id) === kind) }))
+    .filter((group) => group.types.length > 0);
+}
+
 export function openTypePicker(project, options = {}) {
   return new Promise((resolve) => {
     let modal;
@@ -160,6 +182,9 @@ export function openTypePicker(project, options = {}) {
           code,
           name: createName.value.trim() || code,
           categoryId: createCategory.value,
+          // Окно сужено до вида метки — заведённый здесь тип обязан быть того
+          // же вида, иначе его нечем будет выбрать в этом же окне.
+          ...(options.kind ? { kind: options.kind } : {}),
         });
         done({ typeId: result.type.id, project: result.project, created: true });
       } catch (failure) {
@@ -242,7 +267,7 @@ export function openTypePicker(project, options = {}) {
       const query = search.value.trim();
       // Что за чем показывать, решает модель: поиск по коду и названию,
       // точное совпадение кода первым. Своей сортировки здесь нет.
-      const groups = searchTypes(current, query);
+      const groups = pickerGroupsOfKind(current, searchTypes(current, query), options.kind);
       const width = typeof window === "undefined" ? 0 : window.innerWidth;
       const columns = pickerLayout(groups, pickerColumnLimit(width));
       box.replaceChildren(
@@ -274,7 +299,14 @@ export function openTypePicker(project, options = {}) {
     });
 
     renderList();
-    body.replaceChildren(search, box, createBox, error);
+    const note =
+      options.kind === "line" || options.kind === "point"
+        ? uiEl("p", {
+            class: "picker__note",
+            text: options.kind === "line" ? strings.picker.onlyLine : strings.picker.onlyPoint,
+          })
+        : null;
+    body.replaceChildren(...[search, note, box, createBox, error].filter(Boolean));
     modal = uiModal({
       title: options.title || strings.picker.title,
       body,

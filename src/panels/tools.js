@@ -15,6 +15,7 @@ import {
   findType,
   labelOf,
   styleOf,
+  typeKindOf,
   updateProject,
   updateType,
 } from "../model.js";
@@ -70,7 +71,9 @@ function mountToolsPanel(host, api) {
     const picked = await openTypePicker(state.project, { activeTypeId: state.activeTypeId });
     if (!picked) return;
     const fresh = getState();
-    const mode = nextMode || (fresh.mode === "line" ? "line" : "point");
+    // Выбрали тип — значит собрались ставить: режим добавления, а что именно
+    // встанет, решит вид типа. Отдельного выбора «точка или линия» больше нет.
+    const mode = nextMode || "add";
     if (!picked.created) {
       setState({ activeTypeId: picked.typeId, mode });
       return;
@@ -90,7 +93,17 @@ function mountToolsPanel(host, api) {
     const state = getState();
     const markId = state.selectedMarkIds[0];
     if (!state.project || !markId) return;
-    const picked = await openTypePicker(state.project, { title: strings.tools.changeType });
+    const mark = findMark(state.project, markId);
+    if (!mark) return;
+    // Сменить тип можно только внутри вида метки: нарисованной линии — другой
+    // линейный тип, точке — другой точечный. Окно показывает только их;
+    // метка прежнего объекта, чей тип оказался чужого вида, своего текущего
+    // типа в списке не увидит — это и правильно, менять его есть на что.
+    const picked = await openTypePicker(state.project, {
+      title: strings.tools.changeType,
+      kind: mark.kind === "line" ? "line" : "point",
+      activeTypeId: mark.typeId,
+    });
     if (!picked) return;
     const before = picked.created ? state.project : getState().project;
     const base = picked.created ? picked.project : before;
@@ -127,6 +140,10 @@ function mountToolsPanel(host, api) {
   function render() {
     const state = getState();
     const type = activeType(state);
+    // Вид выбранного типа — единственное, что решает, точку или ломаную
+    // поставит следующий клик. Спрашивается он у модели: у объекта прежнего
+    // формата поля `kind` у типа нет вовсе.
+    const kind = type ? typeKindOf(state.project, type.id) : null;
     // Метка, у которой можно сменить тип: пока её нет, кнопки нет тоже —
     // серая кнопка, которая никогда не оживает, хуже её отсутствия.
     const selectedId = state.selectedMarkIds[0];
@@ -155,28 +172,39 @@ function mountToolsPanel(host, api) {
           ],
     );
 
+    // Режимов два: выделение и добавление. Что именно добавится — точка или
+    // ломаная, — решает вид выбранного типа, и строка под кнопками говорит
+    // ровно это. Третьей кнопки нет: выбор вида руками пользователя только
+    // путал, когда он уже выбрал тип. Строка нужна именно словами: по одному
+    // значку типа не видно, ставится метка кликом или тянется линией.
+    const modeNote = !kind
+      ? strings.canvas.needType
+      : kind === "line"
+        ? strings.tools.kindLineHint
+        : strings.tools.kindPointHint;
     const modeRow = uiEl("div", { class: "tools__row tools__row--modes" }, [
       uiButton(strings.tools.selectMode, {
         class: "ui-btn" + (state.mode === "select" ? " is-active" : ""),
+        title: strings.tools.selectModeHint,
         on: { click: () => setMode("select") },
       }),
-      uiButton(strings.tools.kindPoint, {
-        class: "ui-btn" + (state.mode === "point" ? " is-active" : ""),
-        title: strings.tools.kindPointHint,
-        on: { click: () => setMode("point") },
-      }),
-      uiButton(strings.tools.kindLine, {
-        class: "ui-btn" + (state.mode === "line" ? " is-active" : ""),
-        title: strings.tools.kindLineHint,
-        on: { click: () => setMode("line") },
+      uiButton(strings.tools.addMode, {
+        class: "ui-btn" + (state.mode === "add" ? " is-active" : ""),
+        // Типа нет — кнопка откроет окно выбора, про точку ей обещать нечего.
+        title: modeNote,
+        on: { click: () => setMode("add") },
       }),
     ]);
 
+    // Блок собирается только из точек — ручки «+» у линии нет и быть не может.
+    // При линейном типе выбор гаснет и говорит почему: живой на вид список,
+    // который ни на что не влияет, — обещание, которого сборка не держит.
+    const blockOff = !type || kind === "line";
     const blockSelect = uiEl(
       "select",
       {
         class: "ui-select",
-        title: strings.tools.blockHint,
+        title: kind === "line" ? strings.tools.blockLineHint : strings.tools.blockHint,
         on: { change: (event) => setBlockMode(event.target.value) },
       },
       BLOCK_MODES.map((mode) =>
@@ -184,7 +212,7 @@ function mountToolsPanel(host, api) {
       ),
     );
     if (type) blockSelect.value = type.blockMode || "each";
-    blockSelect.disabled = !type;
+    blockSelect.disabled = blockOff;
 
     // Пустые места отсеиваются: «Сменить тип» появляется только при выделенной
     // метке, а replaceChildren на null вставил бы в панель слово «null».
@@ -198,9 +226,10 @@ function mountToolsPanel(host, api) {
             on: { click: () => changeSelectedType() },
           })
         : null,
-      uiEl("p", { class: "tools__label", text: strings.tools.kind }),
+      uiEl("p", { class: "tools__label", text: strings.tools.mode }),
       modeRow,
-      uiEl("p", { class: "tools__label", text: strings.tools.block }),
+      uiEl("p", { class: "tools__note", text: modeNote }),
+      uiEl("p", { class: "tools__label" + (blockOff ? " tools__label--off" : ""), text: strings.tools.block }),
       blockSelect,
     ];
     box.replaceChildren(...parts.filter(Boolean));

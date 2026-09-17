@@ -1392,10 +1392,25 @@ export function repeatedNumbers(project) {
 }
 
 // Новый номер по новому типу; старый номер остаётся дырой.
+//
+// Сменить тип можно только внутри вида метки — слова заказчика: «у метки если
+// тип линия, то только на другой тип линии можно сменить, а точки только на
+// другой тип с типом точка». Точка, которой достался линейный тип, рисовалась
+// бы точкой с начертанием вместо фигуры, а нарисованная ломаная — линией с
+// формой, которую негде показать. Правило живёт здесь, а не в окне выбора:
+// окно уже показывает только свой вид, но правку объекта стережёт модель.
+// Метка прежнего объекта, у которой вид разошёлся с типом (тип точечный,
+// а метка нарисована линией), под это правило не попадает: у неё меняется
+// именно тип, и разрешены ей линейные — те, что подходят самой метке.
 export function changeMarkType(project, markId, typeId) {
   const mark = requireMark(project, markId);
   const type = requireType(project, typeId);
   if (mark.typeId === typeId) return { project, mark };
+  const kind = MARK_KINDS.includes(mark.kind) ? mark.kind : "point";
+  if (typeKindOf(project, typeId) !== kind) {
+    if (kind === "line") throw modelError("typeKindNotLine", { code: type.code });
+    throw modelError("typeKindNotPoint", { code: type.code });
+  }
   const counters = { ...project.counters };
   const number = nextNumber(project, counters, type.code);
   counters[type.code] = number;

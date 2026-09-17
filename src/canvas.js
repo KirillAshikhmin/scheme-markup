@@ -30,6 +30,7 @@ import {
   moveOutlinePoint,
   removeOutlinePoint,
   styleOf,
+  typeKindOf,
   updateMark,
 } from "./model.js";
 import {
@@ -180,6 +181,23 @@ function canvasViewOnly() {
   return false;
 }
 
+// ——— что ставит режим добавления ——————————————————————————————————————
+//
+// Режимов у холста три: `select`, `add` и `room`. Отдельного «что ставим» —
+// точку или линию — у пользователя больше нет: это решает вид выбранного типа
+// (слова заказчика: «просто выделение и добавление, соответственно при выборе
+// типа ставится или одно или другое»). Спрашивать вид напрямую у `type.kind`
+// нельзя — у объекта прежнего формата его там нет; ответ даёт `typeKindOf`.
+//
+// Ответ считается на месте, а не хранится вторым полем состояния: тип
+// переключают на ходу, и вид ему меняют в справочнике тем же сеансом — второе
+// поле разошлось бы с первым молча, и клик поставил бы точку линейным типом.
+export function canvasAddKind(state) {
+  if (!state || state.mode !== "add") return null;
+  if (!state.project || !state.activeTypeId) return null;
+  return typeKindOf(state.project, state.activeTypeId);
+}
+
 // Текст подсказки над планом — чистая функция от состояния. `null` значит, что
 // подсказки нет вовсе. В просмотре она не рассказывает, как ставить метки и
 // рисовать контуры: этого здесь нет, и обещать нечего.
@@ -189,8 +207,9 @@ export function canvasHintText(state) {
   const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
   const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
   if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
-  if (state.mode === "point" && type) return text("canvas.hintPoint", { label: type.code + " — " + type.name });
-  if (state.mode === "line" && type) return strings.canvas.hintLine;
+  const adding = canvasAddKind(state);
+  if (adding === "point" && type) return text("canvas.hintPoint", { label: type.code + " — " + type.name });
+  if (adding === "line" && type) return strings.canvas.hintLine;
   if (type) return strings.canvas.hintSelectMode;
   return strings.canvas.hintSelect;
 }
@@ -662,7 +681,18 @@ function canvasOutlineClick(plan, screen, free) {
 function canvasDraftClick(plan, screen, free) {
   const state = canvasState();
   if (!canvasDraft) {
-    canvasDraft = { points: [plan], cursor: plan, snapped: false };
+    // Черновик помнит, чем его начали: ломаной линейного типа или контуром
+    // помещения. По этой памяти его и заканчивают, когда режим или вид типа
+    // сменились на ходу, — тип берётся тот, которым рисовали, а не тот,
+    // который выбран сейчас.
+    canvasDraft = {
+      kind: state.mode === "room" ? "room" : "line",
+      typeId: state.mode === "room" ? null : state.activeTypeId,
+      projectId: state.project ? state.project.id : null,
+      points: [plan],
+      cursor: plan,
+      snapped: false,
+    };
     canvasRedraw();
     return;
   }
@@ -685,19 +715,21 @@ function canvasDraftClick(plan, screen, free) {
   canvasRedraw();
 }
 
-function canvasLineFinish(closed) {
-  if (!canvasDraft) return;
+// `typeId` передаётся только тогда, когда линию дочерчивают не тем типом, что
+// выбран сейчас: черновик закончился, потому что тип на панели сменили.
+function canvasLineFinish(closed, typeId) {
+  if (!canvasDraft) return null;
   const points = canvasDraft.points;
   const state = canvasState();
   if (points.length < 2) {
     canvasApi.notify(strings.canvas.lineTooShort);
     canvasCancelDraft();
-    return;
+    return null;
   }
   try {
     const result = addMark(state.project, {
       schemeId: state.schemeId,
-      typeId: state.activeTypeId,
+      typeId: typeId || state.activeTypeId,
       kind: "line",
       points,
     });
@@ -705,10 +737,69 @@ function canvasLineFinish(closed) {
     if (closed) project = updateMark(project, result.mark.id, { closed: true }).project;
     canvasDraft = null;
     canvasCommit(state.project, project, strings.history.addLine, { selection: [result.mark.id] });
+    return result.mark.id;
   } catch (error) {
     canvasCancelDraft();
     canvasFail(error);
+    return null;
   }
+}
+
+// ——— незаконченный черновик при смене того, что рисуем ————————————————
+//
+// Пользователь ведёт ломаную и посреди неё выбирает точечный тип. Бросить
+// начатое молча нельзя: это его работа, а в стеке отмены её нет — черновик
+// живёт вне истории, и Ctrl+Z его не вернёт. Поэтому начатое **дочерчивается**
+// тем типом, которым рисовали: линия становится обычной меткой, попадает в
+// историю одним шагом и отменяется тем же Ctrl+Z, если была лишней. Пропадает
+// только черновик из одной вершины — линии в нём нет, сохранять нечего.
+//
+// Контур помещения так не спасти: комната с открытой стенкой — не комната,
+// и незамкнутый контур модель не примет. Его черновик отменяется.
+function canvasSettleDraft() {
+  if (!canvasDraft) return false;
+  const draft = canvasDraft;
+  if (draft.kind !== "line" || draft.points.length < 2) {
+    canvasCancelDraft();
+    canvasApi.notify(strings.canvas.draftDropped);
+    return true;
+  }
+  // `canvasLineFinish` обнуляет черновик до записи в историю, поэтому вложенная
+  // подписка, которую разбудит `canvasCommit`, сюда уже не вернётся.
+  const markId = canvasLineFinish(false, draft.typeId);
+  if (markId) {
+    canvasApi.notify(text("canvas.draftFinished", { label: labelOf(canvasState().project, markId) }), "success");
+  }
+  return true;
+}
+
+// Чем должен быть черновик при нынешнем состоянии: ломаной, контуром или
+// ничем. Одно место на весь холст — режим, тип и вид типа спрашиваются здесь.
+function canvasDraftWanted(state) {
+  if (state.mode === "room") return "room";
+  return canvasAddKind(state) === "line" ? "line" : null;
+}
+
+// Черновик приведён в согласие с тем, что рисуем сейчас. Вызывается на каждую
+// смену режима, типа и объекта: вид типа меняют и в справочнике, и это тоже
+// обязано долететь до руки, которая ведёт линию.
+function canvasSyncDraft(state) {
+  if (!canvasDraft) return;
+  // Объект сменился целиком — черновик остался от прежнего, и дочерчивать его
+  // в новый объект нельзя: там ему не место ни схемой, ни типом.
+  const projectId = state.project ? state.project.id : null;
+  if (canvasDraft.projectId !== projectId) {
+    canvasCancelDraft();
+    return;
+  }
+  const wanted = canvasDraftWanted(state);
+  if (canvasDraft.kind === wanted) {
+    // Линейный тип сменили на другой линейный — рисование продолжается, и
+    // линия достанется новому типу: так было и до двух режимов.
+    if (wanted === "line") canvasDraft.typeId = state.activeTypeId;
+    return;
+  }
+  canvasSettleDraft();
 }
 
 function canvasOutlineFinish() {
@@ -963,8 +1054,11 @@ function canvasPointerDown(event) {
     }
   }
 
-  if (editable && (state.mode === "line" || state.mode === "room")) {
-    canvasDrag = { kind: state.mode, start: point, view: { ...state.view }, moved: false };
+  // Ломаную рисует режим добавления с линейным типом; контур помещения — свой
+  // режим. Жест у них один, и дальше он разбирается по `canvasDrag.kind`.
+  const drawing = state.mode === "room" ? "room" : canvasAddKind(state) === "line" ? "line" : null;
+  if (editable && drawing) {
+    canvasDrag = { kind: drawing, start: point, view: { ...state.view }, moved: false };
     return;
   }
 
@@ -1020,7 +1114,7 @@ function canvasPointerDown(event) {
     return;
   }
   canvasDrag = {
-    kind: state.mode === "point" && editable ? "place" : "empty",
+    kind: canvasAddKind(state) === "point" && editable ? "place" : "empty",
     start: point,
     view: { ...state.view },
     moved: false,
@@ -1184,7 +1278,7 @@ function canvasDoubleClick(event) {
       return;
     }
   }
-  if ((state.mode !== "line" && state.mode !== "room") || !canvasDraft) return;
+  if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return;
   const point = canvasPointOf(event);
   const threshold = markRadius(view) + 6;
   const points = canvasDraft.points;
@@ -1365,10 +1459,11 @@ function mountCanvas(host, api) {
       canvasCancelDraft();
       canvasPreview = null;
     }
-    if ("mode" in changed) {
-      if (state.mode !== "line" && state.mode !== "room") canvasCancelDraft();
-      canvasSyncCursor();
-    }
+    // Режим, выбранный тип и его вид в справочнике — всё это меняет то, что
+    // рисует рука. Черновик подтягивается к новому положению дел здесь, в
+    // одном месте, а не на каждой кнопке, которая что-то из этого правит.
+    if ("mode" in changed || "activeTypeId" in changed || "project" in changed) canvasSyncDraft(state);
+    if ("mode" in changed) canvasSyncCursor();
     if ("schemeId" in changed || "schemeImage" in changed) canvasAutoFit(state);
     canvasRedraw();
   });
