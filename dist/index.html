@@ -1846,6 +1846,232 @@
   width: auto;
 }
 
+/* ——— предупреждения ————————————————————————————————————————————————— */
+
+/* Счётчик виден снаружи списка: открывать панель ради проверки не надо.
+   Уровень показан цветом самой кнопки — ошибка красным, предупреждение
+   жёлтым, вопрос о виде спокойным синим, «всё в порядке» — галочкой без
+   числа. */
+#header-warnings {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.warnings__toggle {
+  gap: 4px;
+  padding: 5px 7px;
+}
+
+.warnings__count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.warnings__count:empty {
+  display: none;
+}
+
+.warnings__toggle.is-error {
+  color: #ff9aa2;
+  border-color: rgba(209, 36, 47, 0.7);
+}
+
+.warnings__toggle.is-warning {
+  color: #e3b341;
+  border-color: rgba(210, 153, 34, 0.7);
+}
+
+.warnings__toggle.is-ask {
+  color: #79c0ff;
+}
+
+.warnings__toggle.is-ok {
+  color: var(--panel-muted);
+}
+
+.warnings__drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(460px, 92vw);
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  z-index: 40;
+  padding: 6px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 18px 44px rgba(1, 4, 9, 0.6);
+}
+
+.warnings__head {
+  margin: 2px 8px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+.warnings__section {
+  margin-bottom: 2px;
+}
+
+/* Строка предупреждения и строка-счётчик устроены одинаково: точка уровня,
+   текст, справа — знак раскрытия у свёрнутых. */
+.warnings__row,
+.warnings__group,
+.warnings__jump {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+}
+
+.warnings__row,
+.warnings__group,
+.warnings__jump {
+  cursor: pointer;
+}
+
+.warnings__row:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.warnings__row:hover:not(:disabled),
+.warnings__group:hover,
+.warnings__jump:hover {
+  background: #21262d;
+}
+
+.warnings__group .warnings__text {
+  font-weight: 600;
+}
+
+.warnings__items {
+  padding-left: 14px;
+  border-left: 1px solid var(--panel-line);
+  margin-left: 14px;
+}
+
+.warnings__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.warnings__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  align-self: center;
+}
+
+.warnings__dot--error {
+  background: var(--danger);
+}
+
+.warnings__dot--warning {
+  background: #d29922;
+}
+
+.warnings__dot--ask {
+  background: #58a6ff;
+}
+
+.warnings__chevron {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  align-self: center;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+
+.warnings__group.is-open .warnings__chevron {
+  transform: none;
+}
+
+/* Строка вопроса о виде: слева — тип и почему спрашиваем, справа —
+   переключатель, тот же, что в справочнике. Причина уходит второй строкой, как
+   место метки в поиске: названия типов бывают в два слова, и в одну строку
+   причина налезала на них. */
+.warnings__row--kind {
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+  padding: 2px 4px;
+}
+
+.warnings__jump {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 4px 6px;
+}
+
+.warnings__code {
+  font-weight: 600;
+}
+
+.warnings__why {
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.warnings__jump .warnings__why {
+  grid-column: 1 / -1;
+}
+
+.warnings__kindHint {
+  margin: 4px 6px 8px;
+}
+
+.warnings__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 6px 2px;
+}
+
+.warnings__hint {
+  margin: 6px 8px 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-line);
+}
+
+/* Пусто — хорошая новость, и выглядеть должна как новость, а не как пустая
+   панель. */
+.warnings__ok {
+  padding: 14px 10px 16px;
+  text-align: center;
+}
+
+.warnings__okIcon {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 6px;
+  color: var(--ok);
+}
+
+.warnings__okTitle {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.warnings__ok .warnings__why {
+  margin: 0;
+}
+
 /* ——— окно «Тип метки»: категории колонками ————————————————————————————
    Один длинный столбец заставлял листать: «Свет» занимал экран, а
    «Выключатели» уходили за нижний край, и справа половина окна пустовала.
@@ -3194,6 +3420,56 @@ const strings = {
     typeWithoutCategory: "У типа нет категории из справочника",
     typeKindMixed: "У типа {code} есть метки другого вида",
   },
+  // Панель предупреждений: список того, что нашёл `validate`, и вопросы о виде
+  // типов, которые раньше задавало окно при открытии объекта.
+  warnings: {
+    title: "Предупреждения",
+    open: "Предупреждения объекта",
+    openHint: "Что стоит посмотреть: повторы номеров, потерянные связи, вид типов",
+    okLabel: "Предупреждений нет",
+    okTitle: "Всё в порядке",
+    okText: "Ни повторов номеров, ни потерянных связей — смотреть нечего.",
+    hint: "Клик по строке — перейти к виновнику на плане. Панель ничего не правит сама.",
+    noProject: "Объект не открыт",
+    expand: "Показать по одному",
+    collapse: "Свернуть в строку",
+    // Свёрнутая строка на несколько одинаковых предупреждений: во множественном
+    // числе и с числом на конце. Ключи здесь — те же коды, что в `problems`,
+    // и сверяются с ними тестом.
+    groups: {
+      controlsMissing: "Меток с потерянной связью: {count}",
+      placementWithoutEquipment: "Единиц оборудования без модели: {count}",
+      placementWithoutMark: "Единиц оборудования без метки: {count}",
+      placementLinkMissing: "Единиц оборудования с потерянной связью: {count}",
+      duplicateCode: "Повторов кода типа: {count}",
+      markWithoutType: "Меток без типа: {count}",
+      markWithoutScheme: "Меток с потерянной схемой: {count}",
+      markWithoutRoom: "Меток с потерянным помещением: {count}",
+      repeatedNumber: "Повторов номера: {count}",
+      emptyPoints: "Меток без точек: {count}",
+      shortLine: "Коротких линий: {count}",
+      shortOutline: "Коротких контуров: {count}",
+      outlineWithoutScheme: "Контуров с потерянной схемой: {count}",
+      outlineWithoutRoom: "Контуров с потерянным помещением: {count}",
+      smallGroup: "Групп меньше чем из двух меток: {count}",
+      groupAcrossSchemes: "Групп с метками на разных схемах: {count}",
+      counterBehind: "Типов с отставшим счётчиком: {count}",
+      typeWithoutCategory: "Типов без категории: {count}",
+      typeKindMixed: "Типов с метками другого вида: {count}",
+    },
+    // Вопросы о виде типа: раньше их задавало модальное окно при открытии
+    // объекта, теперь это строки панели.
+    kindTitle: "Вид типов: точка или линия",
+    kindGroup: "Типов с выведенным видом: {count}",
+    kindHint:
+      "У этих типов вид не выведен, а выбран за вас: остальные переведены по их же меткам. " +
+      "Поправьте, если угадано не так, — метки при этом не меняются.",
+    kindNoMarks: "меток нет, взят вид по умолчанию",
+    kindMixed: "есть метки обоих видов, взята точка",
+    kindConfirm: "Вид выбран верно",
+    kindAll: "Все верны",
+    kindAllHint: "Считать выведенные виды верными и убрать вопросы из списка",
+  },
   file: {
     checking: "Проверяю архив: читаю обратно…",
     readme: `Разметка схем — файл проекта
@@ -3478,15 +3754,8 @@ const strings = {
     kindLine: "Линия",
     kindPointHint: "Точечный тип: метка ставится кликом, обозначение — фигура",
     kindLineHint: "Линейный тип: метка проводится линией, обозначение — начертание",
-    // Список выведенных видов: показывается один раз на объект, и только когда
-    // вид пришлось угадать.
-    kindReviewTitle: "Вид типов: точка или линия",
-    kindReviewHint:
-      "У этих типов вид не выведен, а выбран за вас: остальные переведены по их же меткам. " +
-      "Поправьте, если угадано не так, — метки при этом не меняются.",
-    kindReviewNoMarks: "меток нет, взят вид по умолчанию",
-    kindReviewMixed: "есть метки обоих видов, взята точка",
-    kindReviewClose: "Понятно",
+    // Список выведенных видов переехал в панель предупреждений (`warnings`):
+    // окном при открытии объекта он был простынёй на пятнадцать строк.
     add: "Добавить",
     noTypes: "Типов пока нет",
     codePlaceholder: "В",
@@ -7867,6 +8136,9 @@ const LAYOUT_ABILITIES = {
   exportFiles: ["desktop", "mobile"],
   openFile: ["desktop", "mobile"],
   search: ["desktop", "mobile"],
+  // Предупреждения — про правку объекта: в них отвечают на вопрос о виде типа
+  // и идут чинить найденное. В просмотре чинить нечем, а место в шапке дорого.
+  warnings: ["desktop"],
   undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],
@@ -10265,6 +10537,9 @@ const UI_ICONS = {
   // Всё в порядке — галочка. Отдельный значок, а не зачёркнутый треугольник:
   // хорошая новость не должна выглядеть как отменённая плохая.
   ok: ["M5 12.5 10 17.5 19 7"],
+  // Раскрытие списка. Повёрнутый влево — свёрнутый, вниз — раскрытый; поворот
+  // делают стили, рисунок один.
+  chevron: ["M7 10.5 12 15.5 17 10.5"],
 };
 function uiIcon(name) {
   const svg = document.createElementNS(UI_SVG_NS, "svg");
@@ -15657,12 +15932,18 @@ function typesLineButton({ lineStyle, color, allowInherit, inheritLineStyle, onP
 // Вид типа — переключатель в строке: точка или линия. Две кнопки, а не список:
 // значений всего два, и от выбранного зависит, что стоит рядом, — такое
 // переключают одним кликом, а не раскрытием списка.
-function typesKindSwitch({ kind, onPick }) {
+//
+// `allowSame` нужен панели предупреждений: там переключателем отвечают на
+// вопрос «вид выведен, так ли он?», и подтверждение того же вида — такой же
+// ответ, как смена. В справочнике нажатие на уже выбранное по-прежнему
+// ничего не делает: правки без изменения там не заводят шаг отмены.
+function typesKindSwitch({ kind, onPick, allowSame = false, sameTitle = "" }) {
   const cell = (value, label, hint) => {
+    const same = kind === value;
     const button = uiButton(label, {
-      class: "ui-btn dict__kindItem" + (kind === value ? " is-active" : ""),
-      title: hint,
-      on: { click: () => (kind === value ? null : onPick(value)) },
+      class: "ui-btn dict__kindItem" + (same ? " is-active" : ""),
+      title: same && allowSame && sameTitle ? sameTitle : hint,
+      on: { click: () => (same && !allowSame ? null : onPick(value)) },
     });
     button.setAttribute("aria-pressed", kind === value ? "true" : "false");
     return button;
@@ -15881,86 +16162,10 @@ function openTypesCatalog(project, template) {
   });
 }
 
-// Список выведенных видов. Показывается один раз на объект и только когда вид
-// пришлось угадать: у типа не было ни одной метки или метки были обоих видов.
-// Тип, у которого метки одного вида, переведён молча — там ответ однозначен, и
-// спрашивать не о чем.
-//
-// Догадка не применяется молча, но и объект не блокируется: пока список не
-// закрыт, всё работает как работало, а метки не двигаются ни от закрытия
-// списка, ни от смены вида в нём.
-function openTypeKindReview(api) {
-  const project = () => api.getState().project;
-  // Состав списка снимается один раз: ответ на строку снимает с типа отметку,
-  // и строки исчезали бы из-под руки по мере ответов.
-  const rows = typeKindReview(project());
-  if (rows.length === 0) return null;
-  // Список привязан к тому объекту, о котором спрашивает: пока он открыт,
-  // объект могли сменить, и снять отметку с чужих типов — значит потерять
-  // вопрос, который им ещё не задавали.
-  const ownerId = project().id;
-  const body = uiEl("div", { class: "dict kinds" });
-  let modal;
-
-  function render() {
-    const current = project();
-    if (!current) return;
-    body.replaceChildren(
-      uiEl("p", { class: "modal__text", text: strings.dictionary.kindReviewHint }),
-      ...rows.map((row) => {
-        const type = current.id === ownerId ? findType(current, row.typeId) : null;
-        if (!type) return null;
-        return uiEl("div", { class: "dict__row kinds__row" }, [
-          uiEl("span", { class: "dict__code kinds__code", text: type.code }),
-          uiEl("span", { class: "kinds__name", text: type.name }),
-          uiEl("span", {
-            class: "kinds__why",
-            text:
-              row.reason === "mixed"
-                ? strings.dictionary.kindReviewMixed
-                : strings.dictionary.kindReviewNoMarks,
-          }),
-          typesKindSwitch({
-            kind: typeKindOf(current, type.id),
-            onPick: (value) => {
-              try {
-                canvasCommit(current, updateType(current, type.id, { kind: value }).project, strings.history.typeKind);
-              } catch (error) {
-                api.notify(error && error.message ? error.message : String(error), "error");
-              }
-            },
-          }),
-        ]);
-      }),
-    );
-  }
-
-  render();
-  const unsubscribe = api.subscribe((state, changed) => {
-    if ("project" in changed) render();
-  });
-  // Закрыл — больше не показывается: отметка снимается с типов и уезжает в
-  // объект, а значит и в файл. Настройки браузера тут не годятся — файл
-  // переедет на другую машину, а список выскочит там заново.
-  function close() {
-    unsubscribe();
-    const current = project();
-    if (current && current.id === ownerId) {
-      const cleared = closeTypeKindReview(current);
-      if (cleared.project !== current) {
-        canvasCommit(current, cleared.project, strings.history.typeKindReview);
-      }
-    }
-    modal.close();
-  }
-  modal = uiModal({
-    title: strings.dictionary.kindReviewTitle,
-    body,
-    actions: [uiButton(strings.dictionary.kindReviewClose, { class: "ui-btn ui-btn--accent", on: { click: close } })],
-    onCancel: () => close(),
-  });
-  return { close };
-}
+// Список выведенных видов уехал в панель предупреждений (`panels/warnings.js`):
+// модальным окном при открытии объекта он перекрывал план простынёй на
+// полтора десятка строк. Отметка «разобрано» осталась там же, где была, — в
+// самом объекте (`type.kindGuessed`), и уезжает вместе с файлом.
 function openTypesDictionary(api) {
   const body = uiEl("div", { class: "dict" });
 
@@ -16408,32 +16613,10 @@ function mountTypesPanel(host, api) {
     saveButton.disabled = !state.project;
   }
 
-  // Список выведенных видов — один на объект: открывается при его появлении и
-  // больше не всплывает, пока не откроют другой. Живёт он здесь, а не в панели
-  // объектов: объект приходит и из базы браузера, и из файла, а справочник у
-  // обоих один.
-  let reviewed = null;
-  let review = null;
-  function syncReview(current) {
-    const id = current ? current.id : null;
-    if (id === reviewed) return;
-    reviewed = id;
-    if (review) {
-      review.close();
-      review = null;
-    }
-    if (!current) return;
-    review = openTypeKindReview(api);
-  }
-
   subscribe((state, changed) => {
-    if ("project" in changed) {
-      syncButtons();
-      syncReview(state.project);
-    }
+    if ("project" in changed) syncButtons();
   });
   syncButtons();
-  syncReview(getState().project);
 }
 
 registerPanel(PANEL_IDS.properties, mountTypesPanel);
@@ -19412,6 +19595,441 @@ function mountHistoryPanel(host, api) {
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
 registerPanel(PANEL_IDS.headerHistory, mountHistoryPanel);
 registerPanel(PANEL_IDS.sizes, mountSizesPanel);
+
+// src/panels/warnings.js
+// Предупреждения объекта: всё, что нашёл `model.validate`, одним списком со
+// счётчиком в шапке.
+//
+// До этого таска `validate` считался и выбрасывался: повторы номеров,
+// потерянные связи и типы со смешанными метками никто не видел. Панель их
+// показывает и приводит к виновнику на плане — но не правит: решение за
+// пользователем, и «починить всё» здесь нет и не будет.
+//
+// Здесь же живут вопросы о виде типа, которые до этого задавало модальное
+// окно при открытии объекта (таск 46). На слабо размеченном объекте это была
+// простыня на полтора десятка строк поверх плана; строкой панели тот же вопрос
+// ждёт, пока до него дойдут руки. Отметка «разобрано» как была в объекте
+// (`type.kindGuessed`), так и осталась: она уезжает вместе с файлом.
+
+
+
+
+
+// Подводит холст к метке — тем же занят поиск в шапке и список меток.
+
+// Переключатель вида типа — тот же, что в справочнике: два вида, две кнопки.
+
+// Кто виновник предупреждения. Код проблемы знает только `ref`, а что это за
+// идентификатор — знание здесь: в модели ссылка нарочно без типа, чтобы
+// `validate` оставался таблицей правил, а не картой интерфейса.
+const WARNING_TARGETS = {
+  duplicateCode: "type",
+  typeWithoutCategory: "type",
+  counterBehind: "type",
+  typeKindMixed: "type",
+  markWithoutType: "mark",
+  markWithoutScheme: "mark",
+  markWithoutRoom: "mark",
+  emptyPoints: "mark",
+  shortLine: "mark",
+  controlsMissing: "mark",
+  repeatedNumber: "mark",
+  outlineWithoutScheme: "outline",
+  outlineWithoutRoom: "outline",
+  shortOutline: "outline",
+  placementWithoutEquipment: "placement",
+  placementWithoutMark: "placement",
+  placementLinkMissing: "placement",
+  smallGroup: "group",
+  groupAcrossSchemes: "group",
+};
+
+// Ошибки сверху, вопросы о виде снизу: сперва то, что сломано, потом то, что
+// сделано намеренно, и только потом то, о чём спрашивают.
+const WARNING_LEVELS = ["error", "warning", "ask"];
+
+function warningMarkPlace(project, markId) {
+  const mark = markId ? findMark(project, markId) : null;
+  if (!mark) return null;
+  const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+  return { markId: mark.id, schemeId: mark.schemeId || null, typeId: mark.typeId || null, point };
+}
+
+// Тип: виновник — сам тип, но смотреть пользователю на метки. У смешанного
+// типа ведём к метке не того вида: она и есть то, о чём предупреждение.
+function warningTypePlace(project, typeId, code) {
+  const type = findType(project, typeId);
+  if (!type) return null;
+  const kind = typeKindOf(project, typeId);
+  const marks = project.marks.filter((mark) => mark.typeId === typeId);
+  const wrong = code === "typeKindMixed" ? marks.find((mark) => mark.kind !== kind) : null;
+  const place = warningMarkPlace(project, (wrong || marks[0] || {}).id);
+  return { markId: null, schemeId: null, point: null, ...(place || {}), typeId };
+}
+
+/**
+ * Где искать виновника предупреждения: метка, тип, контур и схема, на которой
+ * это лежит. Чистая функция — по ней и проверяется, что переход ведёт куда
+ * надо. `null` — перехода нет (виновник уже не существует).
+ */
+function warningPlace(project, problem) {
+  if (!project || !problem || !problem.ref) return null;
+  const target = WARNING_TARGETS[problem.code];
+  if (target === "mark") return warningMarkPlace(project, problem.ref);
+  if (target === "type") return warningTypePlace(project, problem.ref, problem.code);
+  if (target === "group") {
+    const group = findGroup(project, problem.ref);
+    if (!group) return null;
+    const first = (group.markIds || []).map((id) => warningMarkPlace(project, id)).find(Boolean);
+    return first || null;
+  }
+  if (target === "outline") {
+    const outline = findOutline(project, problem.ref);
+    if (!outline) return null;
+    const points = Array.isArray(outline.points) ? outline.points : [];
+    return {
+      markId: null,
+      typeId: null,
+      outlineId: outline.id,
+      schemeId: outline.schemeId || null,
+      point: points.length > 0 ? points[0] : null,
+    };
+  }
+  if (target === "placement") {
+    const placement = findPlacement(project, problem.ref);
+    return placement ? warningMarkPlace(project, placement.markId) : null;
+  }
+  return null;
+}
+
+/**
+ * Список для панели: группы одинаковых предупреждений, внутри — по одной
+ * строке на случай. Чистая функция от объекта — её и считает панель, один раз
+ * на правку объекта, а не на кадр отрисовки.
+ *
+ * `{ total, level, groups: [{ key, code, level, title, count, items }] }`
+ */
+function warningsModel(project) {
+  if (!project) return { total: 0, level: "ok", groups: [] };
+  const byCode = new Map();
+  for (const problem of validate(project)) {
+    const level = problem.kind === "warning" ? "warning" : "error";
+    const key = level + ":" + problem.code;
+    if (!byCode.has(key)) byCode.set(key, { key, code: problem.code, level, items: [] });
+    const group = byCode.get(key);
+    group.items.push({
+      key: key + ":" + (problem.ref || group.items.length),
+      code: problem.code,
+      level,
+      message: problem.message,
+      place: warningPlace(project, problem),
+    });
+  }
+  const groups = [...byCode.values()]
+    .sort((a, b) => WARNING_LEVELS.indexOf(a.level) - WARNING_LEVELS.indexOf(b.level))
+    .map((group) => ({
+      ...group,
+      count: group.items.length,
+      title: text("warnings.groups." + group.code, { count: group.items.length }),
+    }));
+
+  // Вопросы о виде — отдельной группой в конце: это не поломка объекта, а
+  // ответ, которого ждут от пользователя.
+  const kinds = typeKindReview(project);
+  if (kinds.length > 0) {
+    groups.push({
+      key: "ask:typeKind",
+      code: "typeKind",
+      level: "ask",
+      count: kinds.length,
+      title: text("warnings.kindGroup", { count: kinds.length }),
+      items: kinds.map((row) => ({
+        key: "ask:typeKind:" + row.typeId,
+        code: "typeKind",
+        level: "ask",
+        typeId: row.typeId,
+        typeCode: row.code,
+        typeName: row.name,
+        kind: typeKindOf(project, row.typeId),
+        message: row.reason === "mixed" ? strings.warnings.kindMixed : strings.warnings.kindNoMarks,
+        place: warningTypePlace(project, row.typeId, "typeKind"),
+      })),
+    });
+  }
+
+  const total = groups.reduce((sum, group) => sum + group.count, 0);
+  return { total, level: total === 0 ? "ok" : groups[0].level, groups };
+}
+
+function mountWarningsPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
+  let model = warningsModel(null);
+  let open = false;
+  // Раскрытые группы помнятся по ключу: правка объекта не должна схлопывать
+  // список, который пользователь только что раскрыл.
+  const expanded = new Set();
+  // Метка, к которой ведём: картинка новой схемы приходит не мгновенно, и
+  // холст вписывает план, когда её дождётся, — тогда центрируем ещё раз.
+  let pending = null;
+
+  const count = uiEl("span", { class: "warnings__count" });
+  const toggle = uiIconButton("warning", {
+    class: "ui-btn warnings__toggle",
+    label: strings.warnings.open,
+    title: strings.warnings.openHint,
+    on: { click: () => setOpen(!open) },
+  });
+  toggle.setAttribute("aria-expanded", "false");
+  const drop = uiEl("div", { class: "warnings__drop" });
+  drop.hidden = true;
+  host.replaceChildren(toggle, drop);
+
+  function setOpen(value) {
+    open = Boolean(value);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    drop.hidden = !open;
+    if (open) renderDrop();
+    else drop.replaceChildren();
+  }
+
+  // ——— переход к виновнику ————————————————————————————————————————————
+
+  function center(place) {
+    const state = getState();
+    if (!place || !place.point || !place.schemeId || state.schemeId !== place.schemeId) return false;
+    const scheme = findScheme(state.project, place.schemeId);
+    if (!scheme) return false;
+    setState({ view: marksCenteredView(scheme, { points: [place.point] }, state.view) });
+    return true;
+  }
+
+  function jump(place) {
+    if (!place) return;
+    const state = getState();
+    if (!state.project) return;
+    const patch = {};
+    if (place.markId) {
+      patch.selectedMarkIds = [place.markId];
+      patch.selectedOutlineId = null;
+    } else if (place.outlineId) {
+      patch.selectedOutlineId = place.outlineId;
+      patch.selectedMarkIds = [];
+    }
+    // Тип виновника делается выбранным: следующая правка в панели инструментов
+    // и в справочнике окажется про него.
+    if (place.typeId) patch.activeTypeId = place.typeId;
+    if (place.schemeId && state.schemeId !== place.schemeId) patch.schemeId = place.schemeId;
+    setState(patch);
+    // Список закрывается: он занимает середину экрана, а подведённая метка
+    // оказалась бы ровно под ним. Открыть его снова — один клик по счётчику,
+    // и он на прежнем месте.
+    setOpen(false);
+    pending = place;
+    queueMicrotask(() => {
+      if (pending === place && center(place)) pending = null;
+    });
+  }
+
+  // ——— правка вида типа ————————————————————————————————————————————————
+
+  function setKind(typeId, kind) {
+    const project = getState().project;
+    if (!project) return;
+    try {
+      canvasCommit(project, updateType(project, typeId, { kind }).project, strings.history.typeKind);
+    } catch (error) {
+      notify(error && error.message ? error.message : String(error), "error");
+    }
+  }
+
+  function dismissKinds() {
+    const project = getState().project;
+    if (!project) return;
+    const cleared = closeTypeKindReview(project);
+    if (cleared.project === project) return;
+    canvasCommit(project, cleared.project, strings.history.typeKindReview);
+  }
+
+  // ——— отрисовка ————————————————————————————————————————————————————————
+
+  function levelDot(level) {
+    return uiEl("span", { class: "warnings__dot warnings__dot--" + level, attrs: { "aria-hidden": "true" } });
+  }
+
+  function problemRow(item) {
+    const row = uiEl(
+      "button",
+      {
+        class: "warnings__row warnings__row--" + item.level,
+        type: "button",
+        title: item.place ? strings.warnings.hint : item.message,
+        on: { click: () => jump(item.place) },
+      },
+      [levelDot(item.level), uiEl("span", { class: "warnings__text", text: item.message })],
+    );
+    // Виновника уже нет — вести некуда, и обещать переход нечестно.
+    row.disabled = !item.place;
+    return row;
+  }
+
+  // Строка вопроса о виде: сам вопрос ведёт к меткам типа, переключатель
+  // отвечает на него. Ответ — команда справочника `updateType`, та же, что в
+  // окне до этого таска: панель своей правки объекта не знает.
+  function kindRow(item) {
+    return uiEl("div", { class: "warnings__row warnings__row--ask warnings__row--kind" }, [
+      uiEl(
+        "button",
+        {
+          class: "warnings__jump",
+          type: "button",
+          title: strings.warnings.hint,
+          on: { click: () => jump(item.place) },
+        },
+        [
+          levelDot(item.level),
+          uiEl("span", { class: "warnings__code", text: item.typeCode }),
+          uiEl("span", { class: "warnings__text", text: item.typeName }),
+          uiEl("span", { class: "warnings__why", text: item.message }),
+        ],
+      ),
+      typesKindSwitch({
+        kind: item.kind,
+        // Выбранное руками — уже не догадка, и подтверждение того же вида тоже
+        // ответ: строка уходит, отметка снимается с типа и уезжает в файл.
+        allowSame: true,
+        sameTitle: strings.warnings.kindConfirm,
+        onPick: (value) => setKind(item.typeId, value),
+      }),
+    ]);
+  }
+
+  function groupNode(group) {
+    const single = group.count === 1;
+    const items = group.items.map((item) => (item.code === "typeKind" ? kindRow(item) : problemRow(item)));
+    if (single && group.level !== "ask") return items[0];
+    // Свёрнуто по умолчанию — в том числе вопросы о виде: полтора десятка
+    // строк, развёрнутых самими собой, и были той простынёй, из-за которой
+    // список уехал из модального окна сюда.
+    const isOpen = expanded.has(group.key);
+    const body = uiEl("div", { class: "warnings__items" }, items);
+    body.hidden = !isOpen;
+    const chevron = uiIcon("chevron");
+    chevron.classList.add("warnings__chevron");
+    const head = uiEl(
+      "button",
+      {
+        class: "warnings__group warnings__row--" + group.level + (isOpen ? " is-open" : ""),
+        type: "button",
+        title: isOpen ? strings.warnings.collapse : strings.warnings.expand,
+        attrs: { "aria-expanded": isOpen ? "true" : "false" },
+        on: {
+          click: () => {
+            if (expanded.has(group.key)) expanded.delete(group.key);
+            else expanded.add(group.key);
+            renderDrop();
+          },
+        },
+      },
+      [levelDot(group.level), uiEl("span", { class: "warnings__text", text: group.title }), chevron],
+    );
+    // Вопросы о виде можно закрыть разом — тем же, чем их закрывала кнопка
+    // «Понятно» в прежнем окне. Кнопка живёт внутри раскрытой группы: закрыть
+    // разом то, чего не видел, — не ответ.
+    if (group.level === "ask") {
+      body.prepend(uiEl("p", { class: "warnings__why warnings__kindHint", text: strings.warnings.kindHint }));
+      body.append(
+        uiEl("div", { class: "warnings__foot" }, [
+          uiButton(strings.warnings.kindAll, {
+            title: strings.warnings.kindAllHint,
+            on: { click: () => dismissKinds() },
+          }),
+        ]),
+      );
+    }
+    return uiEl("div", { class: "warnings__section" }, [head, body]);
+  }
+
+  function renderDrop() {
+    if (!open) return;
+    // Список переписывается целиком на каждую правку объекта; место, до
+    // которого пользователь долистал, при этом не теряется.
+    const scroll = drop.scrollTop;
+    renderDropBody();
+    drop.scrollTop = scroll;
+  }
+
+  function renderDropBody() {
+    if (model.total === 0) {
+      const icon = uiIcon("ok");
+      icon.classList.add("warnings__okIcon");
+      drop.replaceChildren(
+        uiEl("div", { class: "warnings__ok" }, [
+          icon,
+          uiEl("p", { class: "warnings__okTitle", text: strings.warnings.okTitle }),
+          uiEl("p", { class: "warnings__why", text: strings.warnings.okText }),
+        ]),
+      );
+      return;
+    }
+    drop.replaceChildren(
+      uiEl("p", { class: "warnings__head", text: strings.warnings.title }),
+      ...model.groups.map((group) => groupNode(group)),
+      uiEl("p", { class: "warnings__why warnings__hint", text: strings.warnings.hint }),
+    );
+  }
+
+  function renderToggle() {
+    const level = model.level;
+    toggle.classList.toggle("is-error", level === "error");
+    toggle.classList.toggle("is-warning", level === "warning");
+    toggle.classList.toggle("is-ask", level === "ask");
+    toggle.classList.toggle("is-ok", level === "ok");
+    const icon = uiIcon(level === "ok" ? "ok" : "warning");
+    count.textContent = model.total > 0 ? String(model.total) : "";
+    toggle.replaceChildren(icon, count);
+    const label = model.total > 0 ? strings.warnings.open : strings.warnings.okLabel;
+    toggle.setAttribute("aria-label", label);
+    toggle.title = model.total > 0 ? strings.warnings.openHint : strings.warnings.okLabel;
+  }
+
+  // Пересчёт — только на смену объекта: на кадр отрисовки и на движение мыши
+  // счётчик не реагирует, иначе он мигал бы на каждый ход.
+  function refresh(state) {
+    model = warningsModel(state.project);
+    const shown = Boolean(state.project) && layoutAllows("warnings", state.layout);
+    host.hidden = !shown;
+    if (!shown && open) setOpen(false);
+    renderToggle();
+    if (open) renderDrop();
+  }
+
+  subscribe((state, changed) => {
+    if ("project" in changed || "layout" in changed) refresh(state);
+    // Картинка схемы доехала — холст вписал план и сбил наведение: повторяем.
+    if ("schemeImage" in changed && pending && center(pending)) pending = null;
+  });
+
+  // Закрывается тем же, чем открывается: повторным нажатием, кликом мимо и
+  // Escape. Диалогом панель не становится — клавиатура холста остаётся у
+  // холста, пока список не открыт.
+  document.addEventListener("pointerdown", (event) => {
+    if (!open || host.contains(event.target)) return;
+    setOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!open || event.key !== "Escape") return;
+    // Пока открыт диалог, клавиатура принадлежит ему: Escape закрывает окно,
+    // а не список под ним.
+    if (uiDialogDepth() > 0) return;
+    event.preventDefault();
+    setOpen(false);
+    toggle.focus();
+  });
+
+  refresh(getState());
+}
+
+registerPanel(PANEL_IDS.headerWarnings, mountWarningsPanel);
 })();
     </script>
 </body>

@@ -78,6 +78,9 @@ export const LAYOUT_ABILITIES = {
   exportFiles: ["desktop", "mobile"],
   openFile: ["desktop", "mobile"],
   search: ["desktop", "mobile"],
+  // Предупреждения — про правку объекта: в них отвечают на вопрос о виде типа
+  // и идут чинить найденное. В просмотре чинить нечем, а место в шапке дорого.
+  warnings: ["desktop"],
   undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],

@@ -19,7 +19,6 @@ import {
   addTypesFromCatalog,
   catalogOffer,
   categoryNameKey,
-  closeTypeKindReview,
   compactNumbers,
   deleteCategory,
   deleteType,
@@ -30,7 +29,6 @@ import {
   freeColor,
   styleOf,
   typeKindOf,
-  typeKindReview,
   typesInOrder,
   updateCategory,
   updateType,
@@ -278,12 +276,18 @@ function typesLineButton({ lineStyle, color, allowInherit, inheritLineStyle, onP
 // Вид типа — переключатель в строке: точка или линия. Две кнопки, а не список:
 // значений всего два, и от выбранного зависит, что стоит рядом, — такое
 // переключают одним кликом, а не раскрытием списка.
-function typesKindSwitch({ kind, onPick }) {
+//
+// `allowSame` нужен панели предупреждений: там переключателем отвечают на
+// вопрос «вид выведен, так ли он?», и подтверждение того же вида — такой же
+// ответ, как смена. В справочнике нажатие на уже выбранное по-прежнему
+// ничего не делает: правки без изменения там не заводят шаг отмены.
+export function typesKindSwitch({ kind, onPick, allowSame = false, sameTitle = "" }) {
   const cell = (value, label, hint) => {
+    const same = kind === value;
     const button = uiButton(label, {
-      class: "ui-btn dict__kindItem" + (kind === value ? " is-active" : ""),
-      title: hint,
-      on: { click: () => (kind === value ? null : onPick(value)) },
+      class: "ui-btn dict__kindItem" + (same ? " is-active" : ""),
+      title: same && allowSame && sameTitle ? sameTitle : hint,
+      on: { click: () => (same && !allowSame ? null : onPick(value)) },
     });
     button.setAttribute("aria-pressed", kind === value ? "true" : "false");
     return button;
@@ -502,86 +506,10 @@ export function openTypesCatalog(project, template) {
   });
 }
 
-// Список выведенных видов. Показывается один раз на объект и только когда вид
-// пришлось угадать: у типа не было ни одной метки или метки были обоих видов.
-// Тип, у которого метки одного вида, переведён молча — там ответ однозначен, и
-// спрашивать не о чем.
-//
-// Догадка не применяется молча, но и объект не блокируется: пока список не
-// закрыт, всё работает как работало, а метки не двигаются ни от закрытия
-// списка, ни от смены вида в нём.
-export function openTypeKindReview(api) {
-  const project = () => api.getState().project;
-  // Состав списка снимается один раз: ответ на строку снимает с типа отметку,
-  // и строки исчезали бы из-под руки по мере ответов.
-  const rows = typeKindReview(project());
-  if (rows.length === 0) return null;
-  // Список привязан к тому объекту, о котором спрашивает: пока он открыт,
-  // объект могли сменить, и снять отметку с чужих типов — значит потерять
-  // вопрос, который им ещё не задавали.
-  const ownerId = project().id;
-  const body = uiEl("div", { class: "dict kinds" });
-  let modal;
-
-  function render() {
-    const current = project();
-    if (!current) return;
-    body.replaceChildren(
-      uiEl("p", { class: "modal__text", text: strings.dictionary.kindReviewHint }),
-      ...rows.map((row) => {
-        const type = current.id === ownerId ? findType(current, row.typeId) : null;
-        if (!type) return null;
-        return uiEl("div", { class: "dict__row kinds__row" }, [
-          uiEl("span", { class: "dict__code kinds__code", text: type.code }),
-          uiEl("span", { class: "kinds__name", text: type.name }),
-          uiEl("span", {
-            class: "kinds__why",
-            text:
-              row.reason === "mixed"
-                ? strings.dictionary.kindReviewMixed
-                : strings.dictionary.kindReviewNoMarks,
-          }),
-          typesKindSwitch({
-            kind: typeKindOf(current, type.id),
-            onPick: (value) => {
-              try {
-                canvasCommit(current, updateType(current, type.id, { kind: value }).project, strings.history.typeKind);
-              } catch (error) {
-                api.notify(error && error.message ? error.message : String(error), "error");
-              }
-            },
-          }),
-        ]);
-      }),
-    );
-  }
-
-  render();
-  const unsubscribe = api.subscribe((state, changed) => {
-    if ("project" in changed) render();
-  });
-  // Закрыл — больше не показывается: отметка снимается с типов и уезжает в
-  // объект, а значит и в файл. Настройки браузера тут не годятся — файл
-  // переедет на другую машину, а список выскочит там заново.
-  function close() {
-    unsubscribe();
-    const current = project();
-    if (current && current.id === ownerId) {
-      const cleared = closeTypeKindReview(current);
-      if (cleared.project !== current) {
-        canvasCommit(current, cleared.project, strings.history.typeKindReview);
-      }
-    }
-    modal.close();
-  }
-  modal = uiModal({
-    title: strings.dictionary.kindReviewTitle,
-    body,
-    actions: [uiButton(strings.dictionary.kindReviewClose, { class: "ui-btn ui-btn--accent", on: { click: close } })],
-    onCancel: () => close(),
-  });
-  return { close };
-}
+// Список выведенных видов уехал в панель предупреждений (`panels/warnings.js`):
+// модальным окном при открытии объекта он перекрывал план простынёй на
+// полтора десятка строк. Отметка «разобрано» осталась там же, где была, — в
+// самом объекте (`type.kindGuessed`), и уезжает вместе с файлом.
 
 export function openTypesDictionary(api) {
   const body = uiEl("div", { class: "dict" });
@@ -1030,32 +958,10 @@ function mountTypesPanel(host, api) {
     saveButton.disabled = !state.project;
   }
 
-  // Список выведенных видов — один на объект: открывается при его появлении и
-  // больше не всплывает, пока не откроют другой. Живёт он здесь, а не в панели
-  // объектов: объект приходит и из базы браузера, и из файла, а справочник у
-  // обоих один.
-  let reviewed = null;
-  let review = null;
-  function syncReview(current) {
-    const id = current ? current.id : null;
-    if (id === reviewed) return;
-    reviewed = id;
-    if (review) {
-      review.close();
-      review = null;
-    }
-    if (!current) return;
-    review = openTypeKindReview(api);
-  }
-
   subscribe((state, changed) => {
-    if ("project" in changed) {
-      syncButtons();
-      syncReview(state.project);
-    }
+    if ("project" in changed) syncButtons();
   });
   syncButtons();
-  syncReview(getState().project);
 }
 
 registerPanel(PANEL_IDS.properties, mountTypesPanel);
