@@ -44,8 +44,13 @@ test("повёрнутая подпись меняет габарит: шири�
   assert.ok(lying.width > lying.height * 3, "пример не тот: лежачая подпись должна быть длинной");
   assert.ok(Math.abs(standing.height - lying.width) < 1e-6, "повёрнутая не вытянулась по вертикали");
   assert.ok(Math.abs(standing.width - lying.height) < 1e-6, "повёрнутая не сузилась по горизонтали");
-  // Подпись осталась при своей метке: (500, 250) на плане 1000×500.
-  assert.ok(Math.abs(standing.x - 500) < 40 && Math.abs(standing.y + standing.height - 250) < 40);
+  // Подпись осталась при своей метке: (500, 250) на плане 1000×500. Стоячая
+  // висит на уровне метки серединой — как и лежачая.
+  assert.ok(Math.abs(standing.x - 500) < 40, "стоячая подпись ушла от метки вбок: " + standing.x);
+  assert.ok(
+    Math.abs(standing.y + standing.height / 2 - 250) < 2,
+    "стоячая подпись не на уровне метки: " + (standing.y + standing.height / 2),
+  );
 });
 
 test("клик по повёрнутой подписи попадает туда, где она нарисована", () => {

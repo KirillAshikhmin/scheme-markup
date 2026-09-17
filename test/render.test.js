@@ -320,8 +320,10 @@ test("по метке попадают с запасом, но не за его 
   const scheme = added.project.schemes[0];
   const view = viewOf();
   // Метка — квадрат радиусом 10 в точке (500, 250); запас вокруг — HIT_SLACK_PX.
-  const edge = 500 + 10 + renderInternals.HIT_SLACK_PX - 1;
-  const beyond = 500 + 10 + renderInternals.HIT_SLACK_PX + 2;
+  // Щупаем слева: справа на уровне метки стоит её подпись, и там клик по праву
+  // достаётся подписи — её и таскают с этой стороны.
+  const edge = 500 - 10 - renderInternals.HIT_SLACK_PX + 1;
+  const beyond = 500 - 10 - renderInternals.HIT_SLACK_PX - 2;
   assert.ok(renderInternals.HIT_SLACK_PX > 0, "запас есть");
   assert.equal(hitTest(added.project, scheme, { x: edge, y: 250 }, view).part, "mark");
   assert.equal(hitTest(added.project, scheme, { x: beyond, y: 250 }, view), null);
@@ -555,7 +557,9 @@ test("подпись считается по тому же фильтру, чт�
     typeId: wide.type.id,
     points: [{ x: 0.2, y: 0.4 }],
   }).project;
-  const added = addMark(project, { schemeId: base.schemeId, typeId: tape.type.id, points: [{ x: 0.23, y: 0.4 }] });
+  // Вторая метка — прямо под первой: подпись соседа занимает то самое место
+  // справа, куда просится «ЛЕНТА1».
+  const added = addMark(project, { schemeId: base.schemeId, typeId: tape.type.id, points: [{ x: 0.2, y: 0.42 }] });
   project = added.project;
   const scheme = project.schemes[0];
   const view = viewOf();
@@ -563,11 +567,13 @@ test("подпись считается по тому же фильтру, чт�
 
   // Сосед виден — подписи делят места, и «ЛЕНТА1» отведена от своего места.
   const crowded = labelBox(project, scheme, added.mark, view, null);
-  // Сосед скрыт — делить не с кем, подпись стоит где положено: метка (230, 200).
+  // Сосед скрыт — делить не с кем, подпись стоит где положено: справа от метки
+  // (200, 210) и на её уровне.
   const free = labelBox(project, scheme, added.mark, view, shown);
-  assert.equal(free.x, 230 + 10 * renderInternals.LABEL_GAP);
-  assert.equal(free.y, 200 - 10 * renderInternals.LABEL_GAP);
-  assert.notEqual(crowded.y, free.y, "пример не тот: без фильтра подпись никуда не отводится");
+  assert.equal(free.x, 200 + 10 * renderInternals.LABEL_GAP);
+  assert.equal(free.y, 210);
+  // Отводится она влево от метки — место справа занял сосед.
+  assert.notEqual(crowded.x, free.x, "пример не тот: без фильтра подпись никуда не отводится");
 
   // И там, и там клик ловит подпись ровно на её месте.
   for (const [filter, box] of [[null, crowded], [shown, free]]) {
@@ -644,4 +650,65 @@ test("рамка легенды растёт с самой длинной стр
       "строка легенды вылезла из рамки: " + row.value,
     );
   }
+});
+
+// Заказчик: «подписи к меткам на схеме рисуй не сверху справа, а просто
+// справа». Ряд обозначений на одной высоте так и читается строкой, а не
+// лесенкой. Правило одно на всех: одиночная метка, блок и ломаная.
+test("подпись по умолчанию встаёт справа от метки и на её уровне", () => {
+  const base = world();
+  const one = addMark(base.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.5, y: 0.5 }] });
+  const scheme = one.project.schemes[0];
+  const view = viewOf();
+  const gap = 10 * renderInternals.LABEL_GAP;
+
+  const box = labelBox(one.project, scheme, one.mark, view);
+  assert.equal(box.x, 500 + gap, "подпись не справа от метки");
+  assert.equal(box.y, 250, "подпись не на уровне метки");
+  assert.equal(box.row, 0, "подпись отведена, хотя разводить не с кем");
+
+  // Блок: подпись-перечисление у середины между метками — и тоже справа.
+  const block = addMark(one.project, {
+    schemeId: base.schemeId,
+    typeId: base.typeId,
+    points: [{ x: 0.2, y: 0.8 }, { x: 0.24, y: 0.8 }],
+  });
+  const group = block.project.groups[block.project.groups.length - 1];
+  const blockBox = labelBox(block.project, scheme, group, view);
+  assert.equal(blockBox.y, 400, "подпись блока не на уровне его меток");
+  assert.equal(blockBox.x, 240 + gap, "подпись блока встала не за крайней его меткой");
+
+  // Ломаная: подпись у первой вершины, по тому же правилу.
+  const tape = addType(base.project, { code: "ЛЛ", name: "Лента", categoryId: base.project.categories[0].id, kind: "line" });
+  const line = addMark(tape.project, {
+    schemeId: base.schemeId,
+    typeId: tape.type.id,
+    kind: "line",
+    points: [{ x: 0.3, y: 0.2 }, { x: 0.6, y: 0.2 }],
+  });
+  const lineBox = labelBox(line.project, line.project.schemes[0], line.mark, view);
+  assert.equal(lineBox.y, 100, "подпись линии не на уровне её первой вершины");
+  assert.equal(lineBox.x, 300 + gap, "подпись линии не справа от первой вершины");
+});
+
+// Правка умолчания меняет вид уже размеченных планов — заказчик просит именно
+// этого. Но подписи, сдвинутые руками, она обходить обязана: их поставил
+// пользователь, и двигать их не может никто.
+test("объект прежней разметки: сдвинутые руками подписи не поехали, остальные встали справа", () => {
+  const base = world();
+  const first = addMark(base.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.3, y: 0.5 }] });
+  const second = addMark(first.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.7, y: 0.5 }] });
+  // Так подпись стояла раньше: справа сверху, на полтора размера метки.
+  const legacy = updateMark(second.project, first.mark.id, { labelOffset: { dx: 15, dy: -15 } }).project;
+  const scheme = legacy.schemes[0];
+  const view = viewOf();
+
+  const moved = labelBox(legacy, scheme, legacy.marks[0], view);
+  assert.equal(moved.dx, 15, "сдвинутая руками подпись поехала по горизонтали");
+  assert.equal(moved.dy, -15, "сдвинутая руками подпись поехала по вертикали");
+  assert.equal(moved.x, 300 + 15);
+  assert.equal(moved.y, 250 - 15);
+
+  const auto = labelBox(legacy, scheme, legacy.marks[1], view);
+  assert.equal(auto.y, 250, "нетронутая подпись не встала на уровень метки");
 });

@@ -7,7 +7,7 @@
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
 import { findGroup, findRoom, outlinesInOrder, schemesInOrder } from "./model.js";
-import { drawScheme, labelBox, markRadius, visibleMarks } from "./render.js";
+import { drawScheme, labelBox, markRadius, outlineLabelBox, visibleMarks, visibleOutlines } from "./render.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { tableSections, tableRowCount } from "./tables.js";
 import { strings, text } from "./strings.js";
@@ -219,6 +219,18 @@ export function exportFitArea(project, scheme, options = {}) {
     const box = labelBox(project, scheme, target, view, filter);
     if (!box.text) continue;
     // Подложка-обводка подписи шире самих букв — её тоже нельзя срезать.
+    const halo = Math.max(2, box.font * 0.3);
+    const reach = box.width + box.height / 2 + halo + EXPORT_FIT_PAD;
+    rects.push({ text: box.text, x: box.x - reach, y: box.y - reach, width: reach * 2, height: reach * 2 });
+  }
+
+  // Подпись комнаты считается так же: её тоже таскают руками, и срезать её
+  // обрезом листа нельзя. Контур, целиком лежащий вне кадра, в счёт не идёт.
+  for (const outline of visibleOutlines(project, scheme, filter)) {
+    const points = (outline.points || []).map((point) => ({ x: point.x * plan.width, y: point.y * plan.height }));
+    if (!points.some(inBase)) continue;
+    const box = outlineLabelBox(project, scheme, outline, view);
+    if (!box || !box.text) continue;
     const halo = Math.max(2, box.font * 0.3);
     const reach = box.width + box.height / 2 + halo + EXPORT_FIT_PAD;
     rects.push({ text: box.text, x: box.x - reach, y: box.y - reach, width: reach * 2, height: reach * 2 });

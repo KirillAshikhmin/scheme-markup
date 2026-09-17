@@ -5,7 +5,7 @@
 // у того же кода, который её рисует, а не пересчитывает своей формулой.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addMark, addScheme, createProject, findMark } from "../src/model.js";
+import { addMark, addOutline, addRoom, addScheme, createProject, findMark, updateOutline } from "../src/model.js";
 import { labelBox } from "../src/render.js";
 import { exportFitArea } from "../src/exporter.js";
 
@@ -69,4 +69,39 @@ test("на плане без меток поля не появляются, а �
 
   const near = exportFitArea(project, scheme, { area: { x: 400, y: 400, width: 200, height: 200 } });
   assert.ok(near.area.width > 200 || near.area.height > 200, "кадр вырос под подпись метки внутри него");
+});
+
+// Подпись комнаты таскают руками так же, как подпись метки, — и срезать её
+// обрезом листа нельзя. Кадр растёт под неё по тому же правилу.
+test("оттащенная к краю подпись комнаты растягивает кадр, а уехавшая далеко — попадает в предупреждение", () => {
+  let project = createProject({ name: "Квартира на Ленина" });
+  const added = addScheme(project, { name: "1 этаж", width: 1000, height: 800 });
+  project = added.project;
+  const scheme = added.scheme;
+  const room = addRoom(project, "Гостиная");
+  project = room.project;
+  const outlined = addOutline(project, {
+    schemeId: scheme.id,
+    roomId: room.room.id,
+    points: [
+      { x: 0.1, y: 0.1 },
+      { x: 0.9, y: 0.1 },
+      { x: 0.9, y: 0.9 },
+      { x: 0.1, y: 0.9 },
+    ],
+  });
+  project = outlined.project;
+
+  const plain = exportFitArea(project, scheme, { area: "all" });
+  assert.deepEqual(plain.missed, [], "подпись в середине комнаты кадру не мешает");
+  assert.equal(plain.area.x, 0, "подпись в середине раздвинула кадр");
+
+  // К самому правому краю плана: лист обязан вырасти белым полем.
+  const moved = updateOutline(project, outlined.outline.id, { labelOffset: { dx: 420, dy: 0 } }).project;
+  const grown = exportFitArea(moved, scheme, { area: "all" });
+  assert.ok(grown.area.width > plain.area.width, "кадр не вырос под оттащенную подпись комнаты");
+
+  // Уехавшая на полплана подпись кадром не догоняется — о ней предупреждают.
+  const far = updateOutline(project, outlined.outline.id, { labelOffset: { dx: 900, dy: 700 } }).project;
+  assert.deepEqual(exportFitArea(far, scheme, { area: "all" }).missed, ["Гостиная"]);
 });

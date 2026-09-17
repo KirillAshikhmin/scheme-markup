@@ -32,6 +32,7 @@ import {
   styleOf,
   typeKindOf,
   updateMark,
+  updateOutline,
 } from "./model.js";
 import {
   drawHandles,
@@ -49,6 +50,9 @@ import {
   labelTurnHandle,
   labelBox,
   markRadius,
+  outlineLabelBox,
+  outlineLabelTurn,
+  hitOutlineLabelTurn,
   planToScreen,
   screenToPlan,
   draftSnap,
@@ -434,6 +438,10 @@ function canvasPaint() {
   const outline = editable && state.selectedOutlineId ? findOutline(project, state.selectedOutlineId) : null;
   if (outline && outline.schemeId === scheme.id && !canvasDrag) {
     drawOutlineHandles(canvasCtx, scheme, outline, view);
+    // Ручка поворота — у самой подписи комнаты, как у подписи метки: подпись
+    // вдоль стены ставят, глядя на план, а не в панель.
+    const room = findRoom(project, outline.roomId);
+    drawLabelTurn(canvasCtx, outlineLabelTurn(project, scheme, outline, view), (room && room.color) || "#0969da");
   }
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
   // Ручка поворота подписи — у самой подписи выделенной метки: подпись вдоль
@@ -622,6 +630,66 @@ function canvasRotateLabel(markId) {
   } catch (error) {
     canvasFail(error);
   }
+}
+
+// Поворот подписи комнаты — тот же механизм, что у метки: угол лежит в данных
+// контура, уезжает в файл проекта, отменяется по Ctrl+Z и одинаково виден на
+// экране, в PNG и в печати.
+function canvasRotateOutlineLabel(outlineId) {
+  const state = canvasState();
+  const outline = findOutline(state.project, outlineId);
+  if (!outline) return;
+  const angle = outline.labelAngle === 90 ? 0 : 90;
+  try {
+    const after = updateOutline(state.project, outlineId, { labelAngle: angle }).project;
+    canvasCommit(state.project, after, strings.history.rotateOutlineLabel, {
+      patch: { selectedOutlineId: outlineId },
+    });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+// Подпись, оттащенную руками, автоматика не двигает никогда — вернуть её на
+// место может только рука. Двойной клик по подписи и возвращает: смещения
+// больше нет, подпись встаёт туда, где стояла бы сама.
+function canvasResetLabel(point) {
+  const state = canvasState();
+  if (!canvasEditAllowed(state)) return false;
+  const scheme = canvasScheme(state);
+  const view = canvasViewOf(state);
+  const hit = hitTest(state.project, scheme, point, view, state.filter);
+  if (hit && hit.part === "label") {
+    const group = hit.groupId ? findGroup(state.project, hit.groupId) : null;
+    const holder = group ? group.markIds[0] : hit.markId;
+    const mark = findMark(state.project, holder);
+    if (!mark || !mark.labelOffset) return false;
+    try {
+      const after = updateMark(state.project, holder, { labelOffset: null }).project;
+      canvasCommit(state.project, after, strings.history.resetLabel, { selection: [hit.markId] });
+    } catch (error) {
+      canvasFail(error);
+    }
+    return true;
+  }
+  if (hit) return false;
+  // Контур ловится только в выделении — там же, где его подпись и таскают:
+  // в добавлении клик по плану ставит метку, и отбирать у него двойной клик
+  // нельзя.
+  if (state.mode !== "select") return false;
+  const outlineHit = hitOutline(state.project, scheme, point, view, state.filter, state.selectedOutlineId || null);
+  if (!outlineHit || outlineHit.part !== "label") return false;
+  const outline = findOutline(state.project, outlineHit.outlineId);
+  if (!outline || !outline.labelOffset) return false;
+  try {
+    const after = updateOutline(state.project, outlineHit.outlineId, { labelOffset: null }).project;
+    canvasCommit(state.project, after, strings.history.resetLabel, {
+      patch: { selectedOutlineId: outlineHit.outlineId },
+    });
+  } catch (error) {
+    canvasFail(error);
+  }
+  return true;
 }
 
 function canvasBlockPoint(markId, side) {
@@ -1047,6 +1115,15 @@ function canvasPointerDown(event) {
     }
   }
 
+  if (editable && state.selectedOutlineId) {
+    const selected = findOutline(state.project, state.selectedOutlineId);
+    if (selected && selected.schemeId === scheme.id && hitOutlineLabelTurn(state.project, scheme, selected, point, view)) {
+      canvasRotateOutlineLabel(selected.id);
+      canvasDrag = { kind: "done", start: point, moved: false };
+      return;
+    }
+  }
+
   // Ручка «+» важнее всего остального: она и есть быстрый путь.
   if (editable && state.selectedMarkIds.length === 1) {
     const selected = findMark(state.project, state.selectedMarkIds[0]);
@@ -1092,6 +1169,18 @@ function canvasPointerDown(event) {
       }
       if (state.selectedOutlineId !== outlineHit.outlineId || state.selectedMarkIds.length > 0) {
         canvasApi.setState({ selectedOutlineId: outlineHit.outlineId, selectedMarkIds: [] });
+      }
+      // Подпись комнаты таскается отдельно от контура — тем же жестом, что
+      // подпись метки.
+      if (outlineHit.part === "label" && editable) {
+        canvasDrag = {
+          kind: "outlineLabel",
+          outlineId: outlineHit.outlineId,
+          start: point,
+          before: state.project,
+          moved: false,
+        };
+        return;
       }
       canvasDrag = { kind: "outline", start: point, view: { ...state.view }, moved: false };
       return;
@@ -1146,6 +1235,15 @@ function canvasDragTo(point) {
         x: origin.x + dx,
         y: origin.y + dy,
       }).project;
+    } else if (canvasDrag.kind === "outlineLabel") {
+      const outline = findOutline(before, canvasDrag.outlineId);
+      // База — там, где подпись видна сейчас: у неподвинутой это середина
+      // контура, у подвинутой — её смещение.
+      const seen = outline ? outlineLabelBox(before, scheme, outline, view) : null;
+      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: 0, dy: 0 };
+      canvasPreview = updateOutline(before, canvasDrag.outlineId, {
+        labelOffset: { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height },
+      }).project;
     } else if (canvasDrag.kind === "label") {
       const target = canvasDrag.groupId ? findGroup(before, canvasDrag.groupId) : findMark(before, canvasDrag.markId);
       // База — там, где подпись сейчас видна, а не там, где лежит её смещение:
@@ -1153,7 +1251,7 @@ function canvasDragTo(point) {
       // в стандартное место в тот миг, когда за неё взялись мышью.
       const size = view.markSize || 10;
       const seen = target ? labelBox(before, scheme, target, view, state.filter) : null;
-      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: -size * 1.5 };
+      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: 0 };
       const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
       // Подпись блока стоит по смещению его первой метки — своего поля у группы
       // модель не заводит, а собственной подписи у этой метки нет.
@@ -1206,7 +1304,7 @@ function canvasPointerMove(event) {
   if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
   if (!canvasDrag.moved) return;
 
-  if (canvasDrag.kind === "mark" || canvasDrag.kind === "label" || canvasDrag.kind === "outlineVertex") {
+  if (["mark", "label", "outlineLabel", "outlineVertex"].includes(canvasDrag.kind)) {
     canvasDragTo(point);
     return;
   }
@@ -1236,6 +1334,13 @@ function canvasPointerUp(event) {
       const after = canvasPreview;
       canvasPreview = null;
       canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+    }
+    if (drag.kind === "outlineLabel" && canvasPreview) {
+      const after = canvasPreview;
+      canvasPreview = null;
+      canvasCommit(drag.before, after, strings.history.moveOutlineLabel, {
+        patch: { selectedOutlineId: drag.outlineId },
+      });
     }
     if (drag.kind === "outlineVertex" && canvasPreview) {
       const after = canvasPreview;
@@ -1284,6 +1389,13 @@ function canvasDoubleClick(event) {
       canvasOutlineRemovePoint(hit.outlineId, hit.index);
       return;
     }
+  }
+  // Двойной клик по подписи возвращает её на место — там же, где её и таскают:
+  // в рисовании линии и контура двойной клик занят завершением ломаной.
+  const drawing = state.mode === "room" || canvasAddKind(state) === "line";
+  if (!drawing && canvasResetLabel(canvasPointOf(event))) {
+    event.preventDefault();
+    return;
   }
   if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return;
   const point = canvasPointOf(event);

@@ -1288,28 +1288,42 @@ const LABEL_PAD = 2;
 // Кегль и отступ в пикселях плана. Те же нижние границы, что у экранных
 // `labelFontSize` и `markRadius` при единичном масштабе.
 function labelPlanSizes(state) {
-  return { font: Math.max(6, state.labelSize), gap: Math.max(2, state.markSize) * LABEL_GAP };
+  const radius = Math.max(2, state.markSize);
+  return { font: Math.max(6, state.labelSize), gap: radius * LABEL_GAP, radius };
 }
 
-// Места вокруг метки в порядке убывания желанности: сперва четыре угла вплотную
-// (справа сверху — то самое место, где подпись стояла всегда), потом те же
-// четыре ряд за рядом дальше по вертикали. `dx` — смещение левого края подписи,
-// `dy` — её середины: слева подпись отодвигается на всю свою ширину.
-function labelSlots(gap, span, angle) {
+// Места вокруг метки в порядке убывания желанности.
+//
+// Первое — **справа, на уровне метки**: заказчик просил подпись «не сверху
+// справа, а просто справа». Ряд обозначений на одной высоте так и читается
+// строкой, а не лесенкой. Второе — слева на том же уровне, для метки у правого
+// края плана. Дальше — те же две стороны ряд за рядом вверх и вниз, для тех,
+// кому на своём уровне не хватило места.
+//
+// `dx` — смещение левого края подписи, `dy` — её середины: слева подпись
+// отодвигается на всю свою ширину.
+function labelSlots(gap, span, angle, reach = { left: 0, right: 0 }) {
   const tall = span.bottom - span.top;
   // Шаг ряда — высота подписи и два просвета: соседние ряды обязаны разойтись
   // с запасом, иначе проверка наложения упирается в ноль и решает исход по
   // погрешности последнего разряда.
   const step = tall + LABEL_PAD * 2;
-  const right = gap - span.left;
-  const left = -gap - span.right;
-  const slots = [];
-  for (let row = 0; row <= LABEL_ROWS; row += 1) {
-    const up = -gap - row * step;
-    // Лежачая подпись висит серединой строки у метки, повёрнутая растёт от
-    // точки привязки вверх — вниз её приходится опускать на всю высоту столбца,
-    // иначе она легла бы поверх своей же метки.
-    const down = gap + row * step + (angle === 90 ? tall : 0);
+  // Подпись отсчитывается от края цели, а не от её середины: у блока точка
+  // привязки — середина между метками, и подпись «В1В2В3», встав на уровень
+  // меток, легла бы поверх крайней из них.
+  const right = reach.right + gap - span.left;
+  const left = -reach.left - gap - span.right;
+  // Лежачая подпись висит серединой строки у точки привязки, повёрнутая растёт
+  // от неё вверх — её середина на полстолбца выше, и уровень метки для неё
+  // считается отсюда.
+  const middle = angle === 90 ? tall / 2 : 0;
+  const slots = [
+    { dx: right, dy: middle, row: 0 },
+    { dx: left, dy: middle, row: 0 },
+  ];
+  for (let row = 1; row <= LABEL_ROWS; row += 1) {
+    const up = middle - row * step;
+    const down = middle + row * step;
     slots.push({ dx: right, dy: up, row });
     slots.push({ dx: right, dy: down, row });
     slots.push({ dx: left, dy: up, row });
@@ -1318,18 +1332,44 @@ function labelSlots(gap, span, angle) {
   return slots;
 }
 
+// Насколько метки цели расходятся от точки привязки вправо и влево, в долях
+// плана. У одиночной точки это ноль, у блока — половина его ширины: подпись
+// обязана встать за крайней меткой блока, а не поверх неё. Вершины ломаной в
+// счёт не идут: её подпись стоит у первой вершины, и тянуть её за весь трек
+// через полплана незачем.
+function labelReach(project, target) {
+  const origin = labelOrigin(project, target);
+  const ids = target.markIds ? labelMemberIds(target) : null;
+  const marks = ids
+    ? ids.map((id) => project.marks.find((mark) => mark.id === id)).filter(Boolean)
+    : [target];
+  let left = 0;
+  let right = 0;
+  for (const mark of marks) {
+    if (!mark || mark.kind === "line") continue;
+    for (const point of mark.points || []) {
+      right = Math.max(right, point.x - origin.x);
+      left = Math.max(left, origin.x - point.x);
+    }
+  }
+  return { left, right };
+}
+
 // Подпись в пикселях плана: `x`, `y` — точка привязки (сама метка), размеры —
 // оценка по числу знаков, та же, что у экранного `labelBox`.
 function labelPlanBox(project, scheme, target, sizes) {
   const origin = labelOrigin(project, target);
   const text = labelTextOf(project, target);
+  const reach = labelReach(project, target);
+  const width = schemeWidth(scheme);
   return {
     text,
-    x: origin.x * schemeWidth(scheme),
+    x: origin.x * width,
     y: origin.y * schemeHeight(scheme),
     width: Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
     height: sizes.font * 1.2,
     angle: labelAngleOf(project, target),
+    reach: { left: reach.left * width, right: reach.right * width },
   };
 }
 
@@ -1387,9 +1427,28 @@ function labelPlaceAll(project, scheme, filter, sizes) {
   // их места заняты, и остальные их обходят.
   const placed = entries.filter((entry) => entry.offset).map((entry) => labelRect(entry.box, entry.offset));
 
+  // Сами метки — тоже занятые места. Подпись встала на уровень своей метки, и
+  // у плотно поставленных точек соседний знак оказывается ровно там, куда
+  // просится строка: без этого «Р6» легла бы на соседнюю розетку.
+  for (const mark of visibleMarks(project, scheme, filter)) {
+    for (const point of mark.points || []) {
+      placed.push({
+        x: point.x * planWidth - sizes.radius,
+        y: point.y * planHeight - sizes.radius,
+        width: sizes.radius * 2,
+        height: sizes.radius * 2,
+      });
+    }
+  }
+
   for (const entry of entries) {
     if (entry.offset) continue;
-    const slots = labelSlots(sizes.gap, labelSpan(entry.box.width, entry.box.height, entry.box.angle), entry.box.angle);
+    const slots = labelSlots(
+      sizes.gap,
+      labelSpan(entry.box.width, entry.box.height, entry.box.angle),
+      entry.box.angle,
+      entry.box.reach,
+    );
     let best = null;
     for (const slot of slots) {
       const rect = labelRect(entry.box, slot);
@@ -1464,14 +1523,18 @@ export function labelTargetOf(project, scheme, markId, filter) {
 }
 
 // Ручка стоит у верхнего правого угла подписи — того самого, который не
-// заслоняет текст ни лежачей подписи, ни стоячей.
+// заслоняет текст ни лежачей подписи, ни стоячей. Считается от габарита, а не
+// от метки: подпись комнаты берёт ту же ручку и тот же угол.
+function turnHandleAt(rect, view) {
+  const radius = Math.max(7, Math.min(LABEL_TURN_RADIUS, markRadius(view) * 0.8));
+  return { x: rect.x + rect.width + radius * 0.6, y: rect.y - radius * 0.6, r: radius };
+}
+
 export function labelTurnHandle(project, scheme, target, view, filter) {
   if (!target) return null;
   const box = labelBox(project, scheme, target, view, filter);
   if (!box.text) return null;
-  const rect = labelBounds(box);
-  const radius = Math.max(7, Math.min(LABEL_TURN_RADIUS, markRadius(view) * 0.8));
-  return { x: rect.x + rect.width + radius * 0.6, y: rect.y - radius * 0.6, r: radius };
+  return turnHandleAt(labelBounds(box), view);
 }
 
 export function hitLabelTurn(project, scheme, target, point, view, filter) {
@@ -1611,14 +1674,82 @@ export function hitOutline(project, scheme, point, view, filter, selectedOutline
   return null;
 }
 
-function outlineLabelBox(project, scheme, outline, view) {
+// Смещение подписи комнаты — в пикселях плана, ровно как `labelOffset` у метки
+// и у блока. Поля нет у контуров, размеченных до этого: «нет смещения» — это и
+// есть прежняя подпись в середине контура.
+export function outlineLabelOffsetOf(outline) {
+  return (outline && outline.labelOffset) || null;
+}
+
+// Угол подписи комнаты: 0 — лежит, 90 — стоит вдоль стены. Тот же список
+// углов, что у метки; всё, что не 90, читается как 0.
+export function outlineLabelAngleOf(outline) {
+  return outline && outline.labelAngle === 90 ? 90 : 0;
+}
+
+/**
+ * Габарит подписи комнаты. Кегль — тем же правилом, что у подписи метки: своего
+ * коэффициента и своего минимума у комнаты нет, иначе на одном плане стояли бы
+ * две разные меры.
+ *
+ * Подпись стоит **серединой** на своей точке — в середине контура или там, куда
+ * её оттащили руками. У метки точка привязки — сама метка, и подпись идёт от
+ * неё вбок; у комнаты привязка — её середина, и подпись обязана остаться на ней
+ * посередине, как бы её ни повернули. Отсюда и пересчёт в точку начала текста:
+ * `x`, `y` здесь — то же, что у подписи метки, и `labelBounds` считает габарит
+ * обоих одной формулой.
+ */
+export function outlineLabelBox(project, scheme, outline, view) {
   const room = findRoom(project, outline.roomId);
   if (!room || !room.name) return null;
   const state = renderView(view);
-  const font = Math.max(9, labelFontSize(state) * 0.95);
+  const font = labelFontSize(state);
+  const angle = outlineLabelAngleOf(outline);
+  const offset = outlineLabelOffsetOf(outline);
+  const dx = offset ? offset.dx : 0;
+  const dy = offset ? offset.dy : 0;
   const center = planToScreen(outlineCenter(outline.points), scheme, state);
-  const width = room.name.length * font * LABEL_CHAR_RATIO;
-  return { text: room.name, x: center.x - width / 2, y: center.y, width, height: font * 1.2, font };
+  const at = { x: center.x + dx * state.zoom, y: center.y + dy * state.zoom };
+  const width = Math.max(font * 0.8, room.name.length * font * LABEL_CHAR_RATIO);
+  const anchor = angle === 90 ? { x: at.x, y: at.y + width / 2 } : { x: at.x - width / 2, y: at.y };
+  return { text: room.name, x: anchor.x, y: anchor.y, width, height: font * 1.2, font, angle, dx, dy };
+}
+
+// Ручка поворота у подписи комнаты — та же, что у подписи метки, и стоит там же
+// относительно габарита.
+export function outlineLabelTurn(project, scheme, outline, view) {
+  if (!outline) return null;
+  const box = outlineLabelBox(project, scheme, outline, renderView(view));
+  if (!box) return null;
+  return turnHandleAt(labelBounds(box), renderView(view));
+}
+
+export function hitOutlineLabelTurn(project, scheme, outline, point, view) {
+  const handle = outlineLabelTurn(project, scheme, outline, view);
+  if (!handle) return false;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+}
+
+// Подпись комнаты рисуется серединой на своей точке — так она стояла всегда,
+// так же ложится и повёрнутая. Габарит для клика считает `labelBounds` того же
+// прямоугольника, поэтому подпись ловится там, где нарисована.
+function drawOutlineLabel(ctx, box, color) {
+  const rect = labelBounds(box);
+  ctx.save();
+  ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // Обводка-подложка: подпись читается и поверх линий плана.
+  ctx.lineWidth = Math.max(2, box.font * 0.3);
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.fillStyle = color;
+  ctx.translate(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  // Повёрнутая читается снизу вверх — так подписывают вдоль стен на чертежах.
+  if (box.angle === 90) ctx.rotate(-Math.PI / 2);
+  ctx.strokeText(box.text, 0, 0);
+  ctx.fillText(box.text, 0, 0);
+  ctx.restore();
 }
 
 /**
@@ -1648,17 +1779,7 @@ export function drawOutlines(ctx, { project, scheme, filter, view, mode, selecte
 
     const label = outlineLabelBox(project, scheme, outline, state);
     if (!label) continue;
-    ctx.save();
-    ctx.font = `600 ${label.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.lineWidth = Math.max(2, label.font * 0.3);
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-    ctx.strokeText(label.text, label.x + label.width / 2, label.y);
-    ctx.fillStyle = outlineTint(color, style.label);
-    ctx.fillText(label.text, label.x + label.width / 2, label.y);
-    ctx.restore();
+    drawOutlineLabel(ctx, label, outlineTint(color, style.label));
   }
 }
 

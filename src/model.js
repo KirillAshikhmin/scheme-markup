@@ -737,8 +737,15 @@ export function replaceSchemeImage(project, schemeId, { imageId, width, height }
       ? { ...group, labelOffset: scaleOffset(group.labelOffset) }
       : group,
   );
+  // Подпись комнаты держит своё смещение в тех же пикселях плана — и уезжает
+  // вместе с ними.
+  const outlines = outlinesOf(project).map((outline) =>
+    outline.schemeId === schemeId && outline.labelOffset
+      ? { ...outline, labelOffset: scaleOffset(outline.labelOffset) }
+      : outline,
+  );
   return {
-    project: withProject(project, { schemes, marks, groups }),
+    project: withProject(project, { schemes, marks, groups, outlines }),
     scheme: schemes.find((item) => item.id === schemeId),
   };
 }
@@ -1965,11 +1972,21 @@ function normalizeOutlinePoints(points) {
 export function addOutline(project, { schemeId, roomId, points } = {}) {
   requireScheme(project, schemeId);
   if (!findRoom(project, roomId)) throw modelError("roomNotFound");
-  const outline = { id: newId(), schemeId, roomId, points: normalizeOutlinePoints(points) };
+  // Смещение подписи — в пикселях плана, как у метки и у блока; угол — из
+  // `LABEL_ANGLES`. У контуров, размеченных до этого, полей нет вовсе: пустое
+  // смещение и нулевой угол — это и есть прежняя подпись в центре контура.
+  const outline = {
+    id: newId(),
+    schemeId,
+    roomId,
+    points: normalizeOutlinePoints(points),
+    labelOffset: null,
+    labelAngle: 0,
+  };
   return { project: withProject(project, { outlines: [...outlinesOf(project), outline] }), outline };
 }
 
-const OUTLINE_PATCH_FIELDS = ["points", "roomId"];
+const OUTLINE_PATCH_FIELDS = ["points", "roomId", "labelOffset", "labelAngle"];
 
 export function updateOutline(project, outlineId, patch) {
   if (!findOutline(project, outlineId)) throw modelError("outlineNotFound");
@@ -1979,6 +1996,11 @@ export function updateOutline(project, outlineId, patch) {
   }
   if (Object.prototype.hasOwnProperty.call(changes, "roomId") && !findRoom(project, changes.roomId)) {
     throw modelError("roomNotFound");
+  }
+  // Угол подписи — из списка и числом, ровно как у метки: габарит и попадание
+  // по клику считаются по этому же числу.
+  if (Object.prototype.hasOwnProperty.call(changes, "labelAngle")) {
+    if (!LABEL_ANGLES.includes(changes.labelAngle)) throw modelError("labelAngleUnknown");
   }
   const outlines = outlinesOf(project).map((outline) =>
     outline.id === outlineId ? { ...outline, ...changes } : outline,
