@@ -624,7 +624,6 @@ export const strings = {
     code: "Код",
     name: "Название",
     category: "Категория",
-    color: "Цвет",
     shape: "Форма",
     points: "Точек",
     model: "Модель",

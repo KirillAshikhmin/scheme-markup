@@ -307,7 +307,6 @@ const EXPORT_TABLE = {
   padding: 24,
   gap: 12,
   stripe: 4,
-  swatch: 11,
   cellGap: 18,
   maxColumn: 420,
   ink: "#1f2328",
@@ -324,13 +323,6 @@ function exportProbe() {
   return exportProbeCtx;
 }
 
-// Прибавка к ячейке, в которой печатается код краски: квадратик плюс зазор.
-// Одна на замер ширины и на рисование — иначе колонка мерится по тексту,
-// а текст рисуется со сдвигом, и «#1F6FEB» уезжает в многоточие.
-function exportSwatchShift(rowColor, cell) {
-  return rowColor && String(cell) === rowColor ? EXPORT_TABLE.swatch + 6 : 0;
-}
-
 function exportMeasure(ctx, table) {
   const widths = table.columns.map((column) => {
     ctx.font = `600 ${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
@@ -341,7 +333,7 @@ function exportMeasure(ctx, table) {
     for (const row of section.rows) {
       row.cells.forEach((cell, index) => {
         const value = String(cell == null ? "" : cell);
-        const width = ctx.measureText(value).width + exportSwatchShift(row.color, value);
+        const width = ctx.measureText(value).width;
         if (width > widths[index]) widths[index] = width;
       });
     }
@@ -443,21 +435,14 @@ export async function tablePng(table, options = {}) {
     y += EXPORT_TABLE.font * 1.6;
   }
 
-  // Ячейка, в которой напечатан код краски («#1F6FEB»), показывает и саму
-  // краску: на бумаге монтажнику говорит квадратик, а не шестнадцатеричный код.
-  const drawCells = (cells, textLeft, bold, rowColor) => {
+  // Цвет строки на бумаге показывает полоса слева, а не квадратик в ячейке:
+  // колонки с кодом краски в листах больше нет, и рисовать его негде.
+  const drawCells = (cells, textLeft, bold) => {
     ctx.font = `${bold ? "600 " : ""}${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
     let x = textLeft;
     cells.forEach((cell, index) => {
-      const shift = exportSwatchShift(rowColor, cell);
-      if (shift) {
-        const ink = ctx.fillStyle;
-        ctx.fillStyle = rowColor;
-        ctx.fillRect(x, y + (EXPORT_TABLE.rowHeight - EXPORT_TABLE.swatch) / 2, EXPORT_TABLE.swatch, EXPORT_TABLE.swatch);
-        ctx.fillStyle = ink;
-      }
-      const limit = widths[index] - EXPORT_TABLE.cellGap - shift;
-      ctx.fillText(exportClip(ctx, cell, limit), x + shift, y + EXPORT_TABLE.rowHeight / 2);
+      const limit = widths[index] - EXPORT_TABLE.cellGap;
+      ctx.fillText(exportClip(ctx, cell, limit), x, y + EXPORT_TABLE.rowHeight / 2);
       x += widths[index];
     });
   };
@@ -497,7 +482,7 @@ export async function tablePng(table, options = {}) {
       ctx.fillStyle = row.color || section.color || EXPORT_TABLE.line;
       ctx.fillRect(left, y + 4, EXPORT_TABLE.stripe, EXPORT_TABLE.rowHeight - 8);
       ctx.fillStyle = EXPORT_TABLE.ink;
-      drawCells(row.cells, left + EXPORT_TABLE.stripe + EXPORT_TABLE.gap, false, row.color);
+      drawCells(row.cells, left + EXPORT_TABLE.stripe + EXPORT_TABLE.gap, false);
       y += EXPORT_TABLE.rowHeight;
     }
     y += EXPORT_TABLE.gap;
@@ -653,13 +638,7 @@ export function exportTableNode(table, options = {}) {
       const tr = exportNode("tr", row.problem ? "print-doc__row print-doc__row--problem" : "print-doc__row");
       if (row.color) tr.style.setProperty("--print-row-color", row.color);
       row.cells.forEach((cell, index) => {
-        const td = exportNode("td", index === 0 ? "print-doc__label" : null, cell);
-        if (row.color && String(cell) === row.color) {
-          const swatch = exportNode("span", "print-doc__swatch");
-          swatch.style.background = row.color;
-          td.prepend(swatch);
-        }
-        tr.append(td);
+        tr.append(exportNode("td", index === 0 ? "print-doc__label" : null, cell));
       });
       tbody.append(tr);
     }

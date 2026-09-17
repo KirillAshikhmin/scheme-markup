@@ -702,12 +702,14 @@ export function equipmentTable(project, filter, options = {}) {
   };
 }
 
+// Колонки «Цвет» здесь нет: заказчик попросил её убрать. Шестнадцатеричный
+// код краски читателю листа ничего не говорил — цвет он видит полосой слева
+// у строки (`row.color`), а на плане меткой. Сам цвет никуда не делся.
 export function typesTable(project) {
   const columns = [
     strings.tables.code,
     strings.tables.name,
     strings.tables.category,
-    strings.tables.color,
     strings.tables.shape,
     strings.tables.line,
   ];
@@ -722,7 +724,6 @@ export function typesTable(project) {
             type.code,
             type.name,
             category.name,
-            style.color,
             strings.shapes[style.shape] || style.shape,
             // Начертание — часть обозначения: по распечатке видно, где пунктир.
             strings.lineStyles[style.lineStyle] || style.lineStyle,
