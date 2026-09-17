@@ -102,10 +102,13 @@ const SHAPE_BASE = {
   "circle-chevron": "circle",
   "circle-wave": "circle",
   "circle-ring": "circle",
+  "circle-socket": "circle",
   "square-jack": "square",
   "square-bolt": "square",
   "square-split": "square",
   "square-hatch": "square",
+  "square-bar": "square",
+  "square-bar-two": "square",
   "square-wave": "square",
   "triangle-dot": "triangle",
   "triangle-down-fill": "triangle-down",
@@ -127,10 +130,13 @@ const SHAPE_DECOR = {
   "circle-chevron": "chevron",
   "circle-wave": "wave",
   "circle-ring": "ring",
+  "circle-socket": "socket",
   "square-jack": "jack",
   "square-bolt": "bolt",
   "square-split": "split",
   "square-hatch": "hatch",
+  "square-bar": "bar",
+  "square-bar-two": "bar-two",
   "square-wave": "wave",
   "triangle-dot": "dot",
   "triangle-down-fill": "fill",
@@ -407,6 +413,18 @@ const SPLIT_GAP = 0.22;
 // Штриховка: полудлина черты и её ряды в долях радиуса.
 const HATCH_REACH = 0.46;
 const HATCH_ROWS = [-0.3, 0, 0.3];
+// Клавиши выключателя: вертикальные черты, делящие квадрат. Одна черта — две
+// клавиши, две черты — три; так выключатель и выглядит в жизни. Черта идёт от
+// края до края квадрата (полусторона — r/√2) и толще обычной засечки: в
+// размере метки тонкая короткая черта добавляет к пустому квадрату меньше
+// краски, чем нужно отпечатку, чтобы счесть знаки разными.
+const BAR_REACH = Math.SQRT1_2;
+const BAR_WIDTH = 1.6;
+// Две черты делят квадрат на три равные части: треть полустороны от центра.
+const BAR_THIRD = Math.SQRT1_2 / 3;
+// Евророзетка: два контактных отверстия по сторонам от центра.
+const SOCKET_GAP = 0.46;
+const SOCKET_DOT = 0.3;
 // Разъём Ethernet: корпус вилки и шнур вниз.
 const JACK_WIDTH = 0.52;
 const JACK_TOP = -0.55;
@@ -621,6 +639,28 @@ function shapeInternals(geometry) {
         ],
       ],
     });
+  } else if (geometry.decor === "bar" || geometry.decor === "bar-two") {
+    // Клавиши выключателя: черта делит квадрат пополам, две черты — на три
+    // равные части. Ровно так их и видят на стене, поэтому знак читается без
+    // буквы рядом.
+    const reach = geometry.r * BAR_REACH;
+    const offsets = geometry.decor === "bar" ? [0] : [-geometry.r * BAR_THIRD, geometry.r * BAR_THIRD];
+    parts.push({
+      role: geometry.decor,
+      mask: "lines",
+      width: geometry.line * BAR_WIDTH,
+      segments: offsets.map((offset) => [
+        { x: geometry.cx + offset, y: geometry.cy - reach },
+        { x: geometry.cx + offset, y: geometry.cy + reach },
+      ]),
+    });
+  } else if (geometry.decor === "socket") {
+    // Евророзетка: два отверстия под контакты. Знак узнают по ним, а не по
+    // букве рядом.
+    const gap = geometry.r * SOCKET_GAP;
+    const dot = Math.max(1, geometry.r * SOCKET_DOT);
+    parts.push({ role: "socket", mask: "disc", cx: geometry.cx - gap, cy: geometry.cy, r: dot });
+    parts.push({ role: "socket", mask: "disc", cx: geometry.cx + gap, cy: geometry.cy, r: dot });
   } else if (geometry.decor === "hatch") {
     // Штриховка: греющая площадь — тёплый пол, обогрев.
     const reach = geometry.r * HATCH_REACH;

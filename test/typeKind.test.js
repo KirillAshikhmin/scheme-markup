@@ -13,6 +13,8 @@ import {
   addMark,
   addScheme,
   addType,
+  addTypesFromCatalog,
+  catalogOffer,
   closeTypeKindReview,
   createProject,
   labelOf,
@@ -164,7 +166,13 @@ test("список на правку — только типы с догадко
 test("у нового объекта список не показывается: там нечего угадывать", () => {
   const project = createProject();
   assert.deepEqual(typeKindReview(project), []);
-  for (const type of project.markTypes) assert.equal(type.kind, "point");
+  // Вид у каждого типа проставлен, и это не догадка, а шаблон: пять типов
+  // света линейные по слову заказчика, остальные точечные.
+  for (const type of project.markTypes) assert.ok(MARK_KINDS.includes(type.kind), "тип без вида: " + type.code);
+  assert.deepEqual(
+    project.markTypes.filter((type) => type.kind === "line").map((type) => type.code),
+    ["ТР", "Л", "ПШ", "ПКШ", "КШ"],
+  );
 });
 
 test("тип с метками другого вида виден в проверке объекта предупреждением", () => {
@@ -255,3 +263,53 @@ test("вид и начертание доезжают в файл проекта
   assert.equal(styleOf(restored, idOf("ТР")).lineStyle, "wave");
   assert.deepEqual(restored.markTypes, wavy.markTypes);
 });
+
+// Правка стартового шаблона не трогает размеченный объект: у него свой
+// справочник, он скопирован при создании и с тех пор живёт отдельно. Знаки
+// выключателей и розетки, вид типов, начертания — всё остаётся тем, с чем
+// объект закрывали. А новое из шаблона доезжает до него по требованию —
+// кнопкой «Добавить из общей базы», и только отмеченное.
+test("правка шаблона не трогает справочник размеченного объекта", () => {
+  const { project } = markedProject();
+  // Так справочник выглядел до правки шаблона: круги-клавиши у выключателей,
+  // квадрат у розетки, все типы точечные.
+  const before = {
+    ...project,
+    markTypes: project.markTypes
+      .filter((type) => !["ЛВ", "ПКШ", "КШ", "ВВВ"].includes(type.code))
+      .map((type) => {
+        const copy = { ...type, kind: "point", lineStyle: null };
+        if (type.code === "В") copy.shape = "circle-slash";
+        if (type.code === "ВВ") copy.shape = "circle-slash-two";
+        if (type.code === "Р") copy.shape = null;
+        return copy;
+      }),
+    categories: project.categories.map((category) =>
+      category.name === "Розетки" ? { ...category, shape: "square" } : category,
+    ),
+  };
+
+  const offer = catalogOffer(before, null);
+  const offered = offer.flatMap((group) => group.types.map((type) => type.code));
+  assert.deepEqual(offered.sort(), ["ВВВ", "КШ", "ЛВ", "ПКШ"], "общая база предлагает ровно то, чего в объекте нет");
+
+  const added = addTypesFromCatalog(before, null, ["ЛВ", "КШ"]);
+  assert.deepEqual(added.types.map((type) => type.code), ["ЛВ", "КШ"]);
+  assert.equal(typeKindOf(added.project, added.types[0].id), "point", "лента вертикальная приехала точкой");
+  assert.equal(typeKindOf(added.project, added.types[1].id), "line", "карниз приехал линией");
+  assert.equal(styleOf(added.project, added.types[1].id).lineStyle, "double", "начертание приехало из базы");
+
+  // А то, что в объекте уже было, не шевельнулось: ни знак, ни вид, ни цвет.
+  for (const type of before.markTypes) {
+    const now = added.project.markTypes.find((item) => item.id === type.id);
+    assert.deepEqual(now, type, "тип объекта изменился от добавления из базы: " + type.code);
+  }
+  assert.deepEqual(added.project.categories, before.categories, "категории объекта перекрашены или переформлены");
+  assert.deepEqual(added.project.marks, before.marks, "метки тронуты");
+  assert.equal(styleOf(added.project, typeIdOf(before, "В")).shape, "circle-slash", "знак выключателя в объекте поехал");
+  assert.equal(styleOf(added.project, typeIdOf(before, "Р")).shape, "square", "знак розетки в объекте поехал");
+});
+
+function typeIdOf(project, code) {
+  return project.markTypes.find((type) => type.code === code).id;
+}

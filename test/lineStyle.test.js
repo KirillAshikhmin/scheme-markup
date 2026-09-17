@@ -65,21 +65,22 @@ test("чужое начертание модель не берёт", () => {
 test("в справочник добавлен проходной переключатель, прежние типы не тронуты", () => {
   const { markTypes } = defaultTemplate();
   const codes = markTypes.map((type) => type.code);
-  // Тринадцать типов заказчика целы и идут в прежнем порядке; новый встал в
-  // свою категорию, рядом с выключателями, а не в хвост списка.
-  const added = ["ВП", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС"];
+  // Тринадцать типов заказчика целы и идут в прежнем порядке; всё, что
+  // добавлено потом, встало в свою категорию, а не в хвост списка.
+  // prettier-ignore
+  const added = ["ВП", "ВВВ", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС", "ЛВ", "ПКШ", "КШ"];
   assert.deepEqual(
     codes.filter((code) => !added.includes(code)),
     ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W"],
   );
-  assert.equal(codes.length, 21, "в шаблоне переключатель, витая пара, четыре датчика и два щита");
+  assert.equal(codes.length, 25, "переключатель, тройной выключатель, витая пара, датчики, щиты и три типа света");
 
   const project = createProject();
   const way = project.markTypes.find((type) => type.code === "ВП");
   assert.ok(way, "проходного переключателя нет в шаблоне");
   assert.equal(way.name, strings.types.switchWay);
   const switches = typesInOrder(project).find((group) => group.category.name === "Выключатели");
-  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "ВП"]);
+  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "ВВВ", "ВП"]);
   // Свой значок: иначе он рисуется тем же зелёным кругом, что и остальные два.
   assert.ok(SHAPE_PALETTE.includes(styleOf(project, way.id).shape), "значок переключателя не из палитры");
   assert.notEqual(styleOf(project, way.id).shape, styleOf(project, project.markTypes.find((t) => t.code === "В").id).shape);
@@ -334,4 +335,58 @@ test("нитки начертания считаются по пути, а не 
   assert.ok(Math.hypot(waved[0][0].x - corner[0].x, waved[0][0].y - corner[0].y) < 0.001);
   const last = waved[0][waved[0].length - 1];
   assert.ok(Math.hypot(last.x - corner[2].x, last.y - corner[2].y) < 0.001);
+});
+
+// Линейные типы стартового шаблона. Они сидят в одной синей категории, а
+// значит и в одном цвете: на чёрно-белой распечатке начертание играет для них
+// ту же роль, что форма для точечных, — единственное отличие, кроме кода.
+// Поэтому проверка та же, что у форм, и тем же отпечатком.
+test("линейные типы шаблона названы заказчиком и расходятся начертанием", () => {
+  const { categories, markTypes } = defaultTemplate();
+  const lines = markTypes.filter((type) => type.kind === "line");
+  assert.deepEqual(lines.map((type) => type.code), ["ТР", "Л", "ПШ", "ПКШ", "КШ"], "линейные типы — ровно названные");
+  // Остальные точечные: заказчик назвал пять, и ни одного сверх того.
+  assert.equal(markTypes.filter((type) => type.kind === "point").length, markTypes.length - 5);
+
+  const byId = new Map(categories.map((category) => [category.id, category]));
+  const light = lines.filter((type) => byId.get(type.categoryId).name === "Свет");
+  assert.equal(light.length, 5, "все пять линейных сидят в «Свете», то есть в одном цвете");
+
+  // Начертание считается так же, как его считает холст: своё, иначе категорийное.
+  const styles = light.map((type) => type.lineStyle || byId.get(type.categoryId).lineStyle || "solid");
+  assert.equal(new Set(styles).size, styles.length, "два линейных типа одной категории рисуются одинаково: " + styles);
+  for (const style of styles) assert.ok(LINE_STYLES.includes(style), "начертание не из палитры: " + style);
+
+  const prints = light.map((type, index) => ({ code: type.code, ink: lineInkOf(styles[index]) }));
+  const merged = [];
+  for (let i = 0; i < prints.length; i += 1) {
+    for (let j = i + 1; j < prints.length; j += 1) {
+      const share = lineDifference(prints[i].ink, prints[j].ink) / LINE_AREA;
+      if (share < LINE_MIN_DIFFERENCE) {
+        merged.push(prints[i].code + " и " + prints[j].code + " — " + Math.round(share * 100) + "%");
+      }
+    }
+  }
+  assert.deepEqual(merged, [], "в толщине линии метки эти типы сливаются");
+
+  // Трек своего начертания не имеет: в своей категории он единственный, кому
+  // хватает категорийного, — то же правило, по которому форму категории берёт
+  // одинокий тип.
+  assert.equal(markTypes.find((type) => type.code === "ТР").lineStyle, null);
+  assert.equal(styleOf(createProject(), createProject().markTypes[0].id).lineStyle, "solid");
+});
+
+// Вертикальная лента — точка, а не линия: так сказал заказчик. Её знак должен
+// расходиться со знаком самой ленты, иначе на плане их не различить.
+test("лента вертикальная — точечный тип со своим знаком", () => {
+  const project = createProject();
+  const vertical = project.markTypes.find((type) => type.code === "ЛВ");
+  assert.ok(vertical, "типа «Лента вертикальная» нет в шаблоне");
+  assert.equal(vertical.name, strings.types.stripVertical);
+  assert.equal(vertical.kind, "point");
+  const strip = project.markTypes.find((type) => type.code === "Л");
+  assert.equal(project.categories.find((c) => c.id === vertical.categoryId).name, "Свет");
+  assert.equal(vertical.categoryId, strip.categoryId, "лента и лента вертикальная — одна категория");
+  assert.ok(SHAPE_PALETTE.includes(styleOf(project, vertical.id).shape), "знак не из палитры");
+  assert.notEqual(styleOf(project, vertical.id).shape, styleOf(project, strip.id).shape);
 });

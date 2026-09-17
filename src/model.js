@@ -39,7 +39,13 @@ export const SHAPE_PALETTE = [
   "circle-chevron",
   "circle-wave",
   "circle-ring",
+  // Евророзетка: круг с двумя отверстиями под контакты.
+  "circle-socket",
   "square",
+  // Клавиши выключателя: квадрат, квадрат с чертой, квадрат с двумя чертами —
+  // одна, две и три клавиши, как они выглядят на стене.
+  "square-bar",
+  "square-bar-two",
   "square-cross",
   "square-fill",
   "square-jack",
@@ -374,8 +380,13 @@ const DEFAULT_VIEW = { markSize: 16, labelSize: 20 };
 
 const TEMPLATE_CATEGORIES = [
   { key: "light", name: strings.categories.light, color: "#1F6FEB", shape: "circle-cross" },
-  { key: "switches", name: strings.categories.switches, color: "#2DA44E", shape: "circle" },
-  { key: "sockets", name: strings.categories.sockets, color: "#D1242F", shape: "square" },
+  // Квадрат у выключателей и круг с двумя точками у розеток — так их видит
+  // заказчик: «квадрат как у розетки для выключателя… а розетку сделаем кругом
+  // с 2 точками (как обычная евро розетка)». Формы поменялись местами
+  // осознанно: клавиши делят квадрат чертами, а евророзетку узнают по двум
+  // отверстиям. Цвета категорий при этом не тронуты.
+  { key: "switches", name: strings.categories.switches, color: "#2DA44E", shape: "square" },
+  { key: "sockets", name: strings.categories.sockets, color: "#D1242F", shape: "circle-socket" },
   { key: "climate", name: strings.categories.climate, color: "#E36209", shape: "triangle" },
   { key: "network", name: strings.categories.network, color: "#8250DF", shape: "star" },
   // Датчики заведены по просьбе заказчика отдельной категорией: в умном доме
@@ -398,27 +409,77 @@ const TEMPLATE_CATEGORIES = [
 ];
 
 const TEMPLATE_TYPES = [
-  // Семь типов света сидят в одной категории, а значит и в одном синем цвете:
-  // пока у них не было своих форм, все семь рисовались одинаковым кругом с
+  // Типы света сидят в одной категории, а значит и в одном синем цвете:
+  // пока у них не было своих форм, все они рисовались одинаковым кругом с
   // крестом, и тип читался только по букве. Формы разведены по просьбе
   // заказчика — цвет категории при этом не меняется, синий остаётся синим.
+  //
+  // Пять типов света — линейные: их не ставят точкой, а тянут по плану. Так
+  // сказал заказчик поимённо: «линия у тр, л, пш, пкш, кш». У линейного типа
+  // обозначение — не форма, а начертание, и внутри синей категории оно играет
+  // ту же роль, что форма у точечных: на чёрно-белой распечатке цвет общий, и
+  // одинаково нарисованные линии различал бы только код рядом. Поэтому
+  // начертания разведены так же, как формы, — по смыслу, а не по остатку:
+  //   ТР — сплошная (своего начертания нет, берёт категорийное): трек это
+  //        жёсткая шина, и сплошная линия — она и есть;
+  //   Л  — волнистая: лента гибкая, так её и рисуют от руки;
+  //   ПШ — пунктирная: подсветка внутри шкафа скрыта, а скрытое на чертежах
+  //        принято рисовать пунктиром;
+  //   ПКШ — штрихпунктирная: тоже скрытая подсветка, но своя;
+  //   КШ — двойная: карниз это не свет, а профиль-направляющая, у него две
+  //        грани.
+  // Форма у линейных типов остаётся: её показывает легенда, окно выбора типа
+  // и таблица справочника, и в синей категории она обязана быть своей.
   { category: "light", code: "Т", name: strings.types.spot, shape: "circle-cross" },
   { category: "light", code: "С", name: strings.types.lamp, shape: "circle-fill" },
   { category: "light", code: "ПК", name: strings.types.bedLight, shape: "circle-dot" },
-  { category: "light", code: "ТР", name: strings.types.track, shape: "plus" },
+  { category: "light", code: "ТР", name: strings.types.track, shape: "plus", kind: "line" },
   { category: "light", code: "П", name: strings.types.backlight, shape: "diamond" },
-  { category: "light", code: "Л", name: strings.types.strip, shape: "triangle" },
-  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, shape: "triangle-down" },
-  // Три выключателя сидят в одном зелёном цвете, и до сих пор два из них
-  // рисовались одинаковым пустым кругом: на чёрно-белой распечатке «В» от «ВВ»
-  // отличала только буква рядом. Значки для них в палитре уже есть — клавиша,
-  // две клавиши и переключатель, — они для того и рисовались.
-  { category: "switches", code: "В", name: strings.types.switch, shape: "circle-slash" },
-  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "circle-slash-two" },
+  { category: "light", code: "Л", name: strings.types.strip, shape: "triangle", kind: "line", lineStyle: "wave" },
+  // Вертикальный кусок ленты ставится одной точкой, а не тянется по плану —
+  // слова заказчика: «тип лента вертикальная, который уже точка». Форма — из
+  // семьи ленты: тот же треугольник с засечкой, чтобы родство читалось.
+  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "triangle-dot" },
+  {
+    category: "light",
+    code: "ПШ",
+    name: strings.types.wardrobeLight,
+    shape: "triangle-down",
+    kind: "line",
+    lineStyle: "dashed",
+  },
+  // Подсветка карниза и сам карниз штор: заказчик назвал их среди линейных,
+  // а в стартовом справочнике их не было вовсе — добавлены вместе с видом.
+  {
+    category: "light",
+    code: "ПКШ",
+    name: strings.types.corniceLight,
+    shape: "diamond-dot",
+    kind: "line",
+    lineStyle: "dash-dot",
+  },
+  {
+    category: "light",
+    code: "КШ",
+    name: strings.types.curtainRail,
+    shape: "diamond-cross",
+    kind: "line",
+    lineStyle: "double",
+  },
+  // Выключатели сидят в одном зелёном цвете, и на чёрно-белой распечатке их
+  // различает только знак. Знаки выбраны по тому, как выключатель выглядит на
+  // стене: одноклавишный — пустой квадрат (форма категории), двухклавишный —
+  // квадрат, поделённый чертой пополам, трёхклавишный — двумя чертами на три
+  // равные части. Считать клавиши на знаке проще, чем читать букву рядом.
+  { category: "switches", code: "В", name: strings.types.switch },
+  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar" },
+  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two" },
   // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
   // Свой значок нужен сразу: без него он рисуется тем же зелёным кругом,
   // что и соседние два выключателя.
   { category: "switches", code: "ВП", name: strings.types.switchWay, shape: "circle-chevron" },
+  // Розетка в своей категории одна, поэтому своей формы у неё нет: она берёт
+  // форму категории — тот самый круг с двумя отверстиями.
   { category: "sockets", code: "Р", name: strings.types.socket },
   // Бризер и кондиционер тоже рисовались одним треугольником. Треугольник
   // (поток воздуха) остаётся бризеру — он и есть приточка, — а кондиционеру
@@ -490,12 +551,14 @@ export function defaultTemplate() {
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
-    // Все типы шаблона — точечные: линией размечают ленту, трек и условные
-    // линии, и это выбор разметчика на конкретном объекте, а не свойство
-    // стартового справочника. Переключается строкой в справочнике.
-    kind: "point",
+    // Вид типа: точечных в шаблоне большинство, линейные названы поимённо в
+    // самом списке. Переключается строкой в справочнике.
+    kind: type.kind === "line" ? "line" : "point",
     shape: type.shape || null,
-    lineStyle: null,
+    // Начертание своё только там, где оно разводит линейные типы одной
+    // категории; остальные берут категорийное — как форму берёт тип, который
+    // в своей категории один такой.
+    lineStyle: type.lineStyle || null,
     blockMode: "each",
     order: index,
   }));

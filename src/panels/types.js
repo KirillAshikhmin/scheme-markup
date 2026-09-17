@@ -177,6 +177,12 @@ export function openTypesShapePicker({ shape, color, allowInherit, inheritShape 
 // видно полгорба и выбирать не из чего.
 const TYPES_LINE_CELL = { size: 30, length: 140 };
 const TYPES_LINE_BUTTON = { size: 26, length: 56 };
+// Значок в начале строки справочника: у точечного типа фигура, у линейного —
+// образец линии. Ширина у них общая и задана в CSS (`.dict__badge`), а холсту
+// нужны свои числа: сплющить отрезок до ширины фигуры нельзя — точечную линию
+// от штрихпунктирной в 26px не отличить. Поэтому образец рисуется во всю
+// клетку, а фигура садится в клетку той же ширины по центру.
+const TYPES_BADGE = { size: 20, length: 48 };
 
 function typesLineCell({ lineStyle, color, active, inherit, onPick }) {
   return uiEl(
@@ -685,10 +691,11 @@ export function openTypesDictionary(api) {
     compactButton.disabled = count === 0;
     // Значок строки — то, чем тип рисуется на плане: у точечного фигура,
     // у линейного отрезок его начертанием.
-    const badge =
+    const badge = uiEl("span", { class: "dict__badge" }, [
       kind === "line"
-        ? lineStyleIcon(style.lineStyle, style.color, 20, 34)
-        : shapeIcon(style.shape, style.color, 20);
+        ? lineStyleIcon(style.lineStyle, style.color, TYPES_BADGE.size, TYPES_BADGE.length)
+        : shapeIcon(style.shape, style.color, TYPES_BADGE.size),
+    ]);
     return uiEl("div", { class: "dict__row" }, [
       badge,
       uiEl("input", {
@@ -963,6 +970,9 @@ export function openTypesDictionary(api) {
     actions: [uiButton(strings.dialog.close, { on: { click: () => close() } })],
     onCancel: () => unsubscribe(),
   });
+  // Ширину карточки задаёт справочник: колонок в строке столько, что на общей
+  // мере диалогов название типа ужималось до трёх букв.
+  if (modal.card) modal.card.classList.add("modal--wide");
   function close() {
     unsubscribe();
     modal.close();

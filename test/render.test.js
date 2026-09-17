@@ -336,8 +336,9 @@ test("справочник упорядочен один раз: категор�
     groups.map((group) => group.category.name),
     ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит"],
   );
-  assert.deepEqual(groups[0].types.map((type) => type.code), ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ"]);
-  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "ВП"]);
+  // prettier-ignore
+  assert.deepEqual(groups[0].types.map((type) => type.code), ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ"]);
+  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "ВВВ", "ВП"]);
   assert.deepEqual(groups[5].types.map((type) => type.code), ["ДВ", "ДО", "ДП", "ДД"]);
   assert.deepEqual(groups[6].types.map((type) => type.code), ["Щ", "ЩС"]);
 });
