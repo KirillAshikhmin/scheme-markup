@@ -20,7 +20,7 @@ import {
   updateCategory,
   updateType,
 } from "../src/model.js";
-import { dashPattern, drawScheme } from "../src/render.js";
+import { dashPattern, drawScheme, lineStylePlan, lineStyleThreads } from "../src/render.js";
 import { strings } from "../src/strings.js";
 
 test("начертание линии живёт там же, где форма: у категории с перебивкой у типа", () => {
@@ -40,17 +40,23 @@ test("начертание линии живёт там же, где форма:
 
   const added = addType(project, { code: "УЛ", name: "Условная линия", categoryId: light.id, lineStyle: "dashed" });
   assert.equal(styleOf(added.project, added.type.id).lineStyle, "dashed");
-  assert.deepEqual(LINE_STYLES, ["solid", "dashed"]);
+  // Сплошная и пунктирная стоят первыми и на прежних местах: объекты с ними
+  // уже нарисованы, а `LINE_STYLES[0]` подставляется как умолчание.
+  assert.deepEqual(LINE_STYLES.slice(0, 2), ["solid", "dashed"]);
+  assert.equal(new Set(LINE_STYLES).size, LINE_STYLES.length);
 });
 
 test("чужое начертание модель не берёт", () => {
   const project = createProject();
   const light = project.categories.find((item) => item.name === "Свет").id;
-  // Точка-тире нарисована не будет: рисовать её нечем, и молчаливая подмена
+  // Начертание, которого нет в палитре, рисовать нечем, и молчаливая подмена
   // на сплошную означала бы линию не того смысла.
-  assert.throws(() => addType(project, { code: "ШТ", name: "Штрих", categoryId: light, lineStyle: "dash-dot" }), {
+  assert.throws(() => addType(project, { code: "ШТ", name: "Штрих", categoryId: light, lineStyle: "штрих" }), {
     code: "lineStyleUnknown",
   });
+  // Точка-тире, наоборот, теперь настоящая: её заказывал пользователь.
+  const dashDot = addType(project, { code: "ШТ", name: "Штрих", categoryId: light, lineStyle: "dash-dot" });
+  assert.equal(styleOf(dashDot.project, dashDot.type.id).lineStyle, "dash-dot");
   assert.throws(() => addCategory(project, { name: "Слаботочка", color: "#1F6FEB", shape: "circle", lineStyle: 2 }), {
     code: "lineStyleUnknown",
   });
@@ -125,4 +131,207 @@ test("пунктирный тип рисуется пунктиром, спло�
   assert.ok(pattern[0][0] >= 8 && pattern[0][1] >= 5, "узор пунктира: " + pattern[0].join("/"));
   // Узор растёт с масштабом вместе с меткой — иначе выгрузка разойдётся с экраном.
   assert.deepEqual(dashPattern(20), pattern[0].map((value) => value * 2));
+});
+
+// ——— отпечаток начертаний ————————————————————————————————————————————
+//
+// Начертание выбирают по изображению, и различать его должен глаз на
+// чёрно-белой распечатке — там же, где различают фигуры. Поэтому проверка
+// идёт не по списку имён, а по отпечатку: отрезок в толщине линии метки
+// раскладывается на сетку пикселей, и отпечатки сравниваются попарно.
+// Холста в Node нет, поэтому краску кладёт тест — но по тому же описанию
+// (`lineStylePlan` + `lineStyleThreads`), по которому ведёт перо холст:
+// правила записаны в сборке один раз.
+//
+// Начертание, неотличимое от соседа на бумаге, в палитру не попадает.
+
+// Радиус метки на распечатке — около пяти пикселей, как у фигур: в этом
+// размере заказчик смотрит на план.
+const LINE_RADIUS = 5;
+// Отрезок разумной длины: короче периода самой редкой волны сравнивать нечего.
+const LINE_LENGTH = 16 * LINE_RADIUS;
+const LINE_PAD = 8;
+const LINE_FIELD_W = LINE_LENGTH + LINE_PAD * 2;
+const LINE_FIELD_H = 26;
+// Проб на пиксель: мельче пикселя нужно, чтобы допуск задавался его долей.
+const LINE_SUB = 2;
+const LINE_GRID_W = LINE_FIELD_W * LINE_SUB;
+const LINE_GRID_H = LINE_FIELD_H * LINE_SUB;
+// Шаг пера вдоль нитки: реже — и пунктир начинает крошиться на отпечатке.
+const LINE_PEN_STEP = 0.25;
+const LINE_PROBE = [
+  { x: LINE_PAD, y: LINE_FIELD_H / 2 },
+  { x: LINE_PAD + LINE_LENGTH, y: LINE_FIELD_H / 2 },
+];
+// Площадь сплошной линии в пробах: доля от неё — мера расхождения.
+const LINE_AREA = LINE_LENGTH * Math.max(2, LINE_RADIUS * 0.5) * LINE_SUB * LINE_SUB;
+// Порог взят не с потолка: на столько расходятся сплошная и пунктирная —
+// пара, которая в сборке была с самого начала и которую заказчик принял.
+// Ближе них — значит на бумаге одно и то же.
+const LINE_MIN_DIFFERENCE = 0.3;
+
+function linePathLength(points) {
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    total += Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y);
+  }
+  return total;
+}
+
+function linePointAt(points, distance) {
+  let left = distance;
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1];
+    const to = points[index];
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (left <= length || index === points.length - 1) {
+      const t = length === 0 ? 0 : left / length;
+      return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+    }
+    left -= length;
+  }
+  return points[points.length - 1];
+}
+
+// Куски нитки, по которым перо и правда идёт: узор `setLineDash` разложен в
+// промежутки по пройденному пути. Кусок нулевой длины — точка: круглый торец
+// пера рисует её сам, и так задана точечная линия.
+function lineDashSpans(total, dash) {
+  const spans = [];
+  let position = 0;
+  let slot = 0;
+  let on = true;
+  let guard = 0;
+  while (position <= total && guard < 100000) {
+    guard += 1;
+    const length = dash[slot % dash.length];
+    if (on) spans.push([position, Math.min(position + length, total)]);
+    position += length;
+    slot += 1;
+    on = !on;
+  }
+  return spans;
+}
+
+function linePaint(cells, point, radius) {
+  const reach = radius * LINE_SUB;
+  const cx = point.x * LINE_SUB;
+  const cy = point.y * LINE_SUB;
+  for (let y = Math.max(0, Math.floor(cy - reach)); y <= Math.min(LINE_GRID_H - 1, Math.ceil(cy + reach)); y += 1) {
+    for (let x = Math.max(0, Math.floor(cx - reach)); x <= Math.min(LINE_GRID_W - 1, Math.ceil(cx + reach)); x += 1) {
+      if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= reach) cells[y * LINE_GRID_W + x] = 1;
+    }
+  }
+}
+
+// Отпечаток начертания: единица там, где на бумаге останется краска.
+function lineInkOf(style) {
+  const plan = lineStylePlan(style, LINE_RADIUS);
+  const threads = lineStyleThreads(LINE_PROBE, false, plan);
+  const cells = new Uint8Array(LINE_GRID_W * LINE_GRID_H);
+  for (const thread of threads) {
+    const total = linePathLength(thread);
+    const spans = plan.dash ? lineDashSpans(total, plan.dash) : [[0, total]];
+    for (const [from, to] of spans) {
+      const steps = Math.max(1, Math.ceil((to - from) / LINE_PEN_STEP));
+      for (let index = 0; index <= steps; index += 1) {
+        linePaint(cells, linePointAt(thread, from + ((to - from) * index) / steps), plan.pen / 2);
+      }
+    }
+  }
+  return cells;
+}
+
+const lineArea = (cells) => cells.reduce((sum, cell) => sum + cell, 0);
+
+function lineDifference(first, second) {
+  let count = 0;
+  for (let index = 0; index < first.length; index += 1) {
+    if (first[index] !== second[index]) count += 1;
+  }
+  return count;
+}
+
+test("каждое начертание оставляет свой отпечаток в толщине линии метки", () => {
+  assert.ok(LINE_STYLES.length >= 5, "начертаний меньше пяти: " + LINE_STYLES.length);
+  for (const must of ["solid", "dashed", "wave", "dash-dot"]) {
+    assert.ok(LINE_STYLES.includes(must), "начертание, названное пользователем, пропало: " + must);
+  }
+
+  const prints = LINE_STYLES.map((style) => ({ style, ink: lineInkOf(style) }));
+  for (const { style, ink } of prints) {
+    assert.ok(lineArea(ink) > LINE_AREA * 0.15, "начертание почти не видно: " + style);
+  }
+
+  const merged = [];
+  for (let i = 0; i < prints.length; i += 1) {
+    for (let j = i + 1; j < prints.length; j += 1) {
+      const share = lineDifference(prints[i].ink, prints[j].ink) / LINE_AREA;
+      if (share < LINE_MIN_DIFFERENCE) {
+        merged.push(prints[i].style + " / " + prints[j].style + " — расходятся на " + Math.round(share * 100) + "%");
+      }
+    }
+  }
+  assert.deepEqual(merged, [], "в толщине линии метки эти начертания сливаются");
+});
+
+// Волна и зигзаг — соседи по смыслу, и слить их проще всего: заказчик просил
+// обе, но одинаковая амплитуда с периодом дала бы одну мохнатую линию.
+test("волна и зигзаг разведены амплитудой и периодом, а не только названием", () => {
+  const wave = lineStylePlan("wave", LINE_RADIUS).wave;
+  const zigzag = lineStylePlan("zigzag", LINE_RADIUS).wave;
+  assert.equal(wave.kind, "sine");
+  assert.equal(zigzag.kind, "zigzag");
+  assert.ok(wave.amplitude > zigzag.amplitude * 1.8, "волна не выше зигзага: " + wave.amplitude + " / " + zigzag.amplitude);
+  assert.ok(wave.period > zigzag.period * 2, "волна не реже зигзага: " + wave.period + " / " + zigzag.period);
+  const share = lineDifference(lineInkOf("wave"), lineInkOf("zigzag")) / LINE_AREA;
+  assert.ok(share > 1, "волна и зигзаг расходятся всего на " + Math.round(share * 100) + "%");
+});
+
+// Начертание растёт вместе с меткой — иначе выгрузка разойдётся с экраном.
+// Пунктир при этом остался буквально прежним: объекты с ним уже нарисованы.
+test("узор растёт с меткой, а прежний пунктир не сдвинулся ни на волос", () => {
+  assert.deepEqual(lineStylePlan("dashed", 10).dash, dashPattern(10));
+  assert.deepEqual(lineStylePlan("dashed", 40).dash, dashPattern(40));
+  assert.equal(lineStylePlan("solid", 10).dash, null);
+  const small = lineStylePlan("wave", 5).wave;
+  const big = lineStylePlan("wave", 10).wave;
+  assert.equal(big.amplitude, small.amplitude * 2);
+  assert.equal(big.period, small.period * 2);
+});
+
+// Название начертания видит человек: оно стоит в подсказке клетки, в строке
+// справочника и в выгружаемой таблице типов. Новое начертание без строки
+// показало бы ключ вроде «dash-dot-dot».
+test("у каждого начертания есть человеческое название", () => {
+  const missing = LINE_STYLES.filter((style) => typeof strings.lineStyles[style] !== "string");
+  assert.deepEqual(missing, [], "начертание без названия в словаре");
+  const service = ["inherit", "title", "hint"];
+  const dead = Object.keys(strings.lineStyles).filter((key) => !service.includes(key) && !LINE_STYLES.includes(key));
+  assert.deepEqual(dead, [], "название есть, а такого начертания нет");
+});
+
+// Замкнутый контур и ломаная — те же нитки: волна ложится по пути, а двойная
+// линия расходится на две по обе стороны от него.
+test("нитки начертания считаются по пути, а не по прямой", () => {
+  const corner = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+    { x: 40, y: 30 },
+  ];
+  const solid = lineStyleThreads(corner, false, lineStylePlan("solid", 5));
+  assert.deepEqual(solid, [corner], "сплошная линия ведётся по самим вершинам");
+
+  const double = lineStyleThreads(corner, false, lineStylePlan("double", 5));
+  assert.equal(double.length, 2, "двойная линия — две нитки");
+  assert.equal(double[0].length, corner.length);
+  // Нитки расходятся по обе стороны пути и не сливаются.
+  assert.ok(Math.hypot(double[0][0].x - double[1][0].x, double[0][0].y - double[1][0].y) > 4);
+
+  const waved = lineStyleThreads(corner, false, lineStylePlan("wave", 5));
+  assert.ok(waved[0].length > corner.length * 4, "волна не разложена на пробы");
+  // Волна начинается и кончается на самом пути: период подогнан под длину.
+  assert.ok(Math.hypot(waved[0][0].x - corner[0].x, waved[0][0].y - corner[0].y) < 0.001);
+  const last = waved[0][waved[0].length - 1];
+  assert.ok(Math.hypot(last.x - corner[2].x, last.y - corner[2].y) < 0.001);
 });

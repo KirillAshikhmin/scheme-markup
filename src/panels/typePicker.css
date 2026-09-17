@@ -17,6 +17,9 @@
    вбок. */
 .picker--types {
   width: min(calc(96vw - 40px), calc(var(--picker-columns, 1) * 240px));
+  /* Пустая выдача («ничего не нашлось») оставляет одну колонку, и в 240px
+     селект «Категория» из строки создания упирается в край карточки. */
+  min-width: min(calc(96vw - 40px), 330px);
 }
 
 .picker__columns {

@@ -158,6 +158,222 @@ export function dashPattern(radius) {
   return [Math.max(2, radius * DASH_STROKE), Math.max(2, radius * DASH_GAP)];
 }
 
+// ——— начертания линии ————————————————————————————————————————————————
+//
+// Начертание выбирают по изображению, а значит различать его должен глаз, и
+// не на экране, а на чёрно-белой распечатке в толщине линии метки. Поэтому
+// каждое начертание описано числами в долях радиуса метки — и растёт вместе с
+// ней, как пунктир: на выгрузке в двойном разрешении штрих остаётся тем же,
+// что на экране.
+//
+// Описание — одно на всю сборку: по нему рисует холст и по нему же снимает
+// отпечаток `test/lineStyle.test.js`. Это тот же приём, что у фигур
+// (`shapeInternals`): правила закраски записаны один раз, и тест проверяет
+// ровно то, что увидит бумага.
+//
+//   dash  — узор пунктира в долях радиуса (null — сплошная нитка);
+//   rails — поперечные смещения ниток: одна нитка по центру или две у двойной;
+//   wave  — деформация нитки: синус или пила, амплитуда и период в радиусах;
+//   pen   — толщина пера в долях радиуса.
+const LINE_STYLE_PLANS = {
+  solid: { dash: null },
+  // Прежний пунктир не трогается ни на волос: объекты с ним уже нарисованы,
+  // и узор берётся из того же `dashPattern`.
+  dashed: { dash: [DASH_STROKE, DASH_GAP] },
+  // Длинный штрих вдвое длиннее обычного — на бумаге это видно сразу.
+  "long-dash": { dash: [3.6, 2.1] },
+  // Точка — штрих нулевой длины: круглый торец пера рисует её сам.
+  dotted: { dash: [0, 1.4] },
+  "dash-dot": { dash: [2, 1.2, 0, 1.2] },
+  "dash-dot-dot": { dash: [2, 1.1, 0, 1.1, 0, 1.1] },
+  // Двойная: две тонкие нитки с просветом между ними.
+  double: { dash: null, rails: [-0.5, 0.5], pen: 0.26 },
+  // Волна и зигзаг разведены нарочно: волна редкая и высокая, зигзаг частый и
+  // низкий. Сблизь их — и на бумаге останется одна мохнатая линия.
+  wave: { dash: null, wave: { kind: "sine", amplitude: 1.05, period: 4.4 } },
+  zigzag: { dash: null, wave: { kind: "zigzag", amplitude: 0.5, period: 1.5 } },
+};
+
+// Толщина пера линейной метки: половина радиуса, но не тоньше двух пикселей —
+// иначе на отдалении линия исчезает.
+const LINE_PEN = 0.5;
+const LINE_PEN_MIN = 2;
+// У двойной нитки тоньше и минимум свой: две нитки по два пикселя с просветом
+// в один слились бы в жирную полосу.
+const LINE_PEN_MIN_THIN = 1.2;
+
+/** Начертание в пикселях: узор, нитки и волна для метки радиуса `radius`. */
+export function lineStylePlan(style, radius) {
+  const base = LINE_STYLE_PLANS[style] || LINE_STYLE_PLANS.solid;
+  const rails = base.rails || [0];
+  const pen = Math.max(rails.length > 1 ? LINE_PEN_MIN_THIN : LINE_PEN_MIN, radius * (base.pen || LINE_PEN));
+  return {
+    // Пунктир считается тем же `dashPattern`, что и прежде: у «dashed» это
+    // буквально он, у остальных — тот же пересчёт долей в пиксели.
+    dash: base.dash ? base.dash.map((part) => (part === 0 ? 0 : Math.max(2, radius * part))) : null,
+    rails: rails.map((offset) => offset * radius),
+    wave: base.wave
+      ? { kind: base.wave.kind, amplitude: base.wave.amplitude * radius, period: base.wave.period * radius }
+      : null,
+    pen,
+  };
+}
+
+// Длина ломаной и точка на ней по пройденному пути — обе нужны и волне, и
+// отпечатку, поэтому считаются один раз.
+function pathLength(points, closed) {
+  let total = 0;
+  const last = closed ? points.length : points.length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    total += Math.hypot(to.x - from.x, to.y - from.y);
+  }
+  return total;
+}
+
+// Точка на ломаной по пройденному пути плюс направление в ней: по направлению
+// откладывается поперечное смещение нитки.
+function pathAt(points, closed, distance) {
+  let left = Math.max(0, distance);
+  const last = closed ? points.length : points.length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (length === 0) continue;
+    if (left <= length || index === last - 1) {
+      const t = length === 0 ? 0 : left / length;
+      return {
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+        nx: -(to.y - from.y) / length,
+        ny: (to.x - from.x) / length,
+      };
+    }
+    left -= length;
+  }
+  const only = points[0];
+  return { x: only.x, y: only.y, nx: 0, ny: 1 };
+}
+
+// Сколько проб на период волнистой линии: реже — и синус превращается в ломаную.
+const LINE_WAVE_STEPS = 12;
+
+/**
+ * Нитки начертания: по каждой холст ведёт перо одним `stroke`. Волна и зигзаг
+ * — не узор пера, а деформация самой нитки, поэтому считаются здесь, а не
+ * в `setLineDash`. Период подгоняется под длину линии целым числом волн:
+ * иначе линия обрывалась бы на полугорбе, и две одинаковые метки выглядели бы
+ * по-разному только оттого, что одну провели на пиксель длиннее.
+ */
+export function lineStyleThreads(points, closed, plan) {
+  const list = (points || []).filter(Boolean);
+  if (list.length < 2) return [];
+  const spine = plan && plan.wave ? waveSpine(list, closed, plan.wave) : list;
+  const rails = (plan && plan.rails) || [0];
+  if (rails.length === 1 && rails[0] === 0) return [spine];
+  return rails.map((offset) => railOf(spine, closed, offset));
+}
+
+function waveSpine(points, closed, wave) {
+  const total = pathLength(points, closed);
+  if (total <= 0 || wave.period <= 0) return points;
+  const waves = Math.max(1, Math.round(total / wave.period));
+  const period = total / waves;
+  // У зигзага пробы стоят ровно в вершинах пилы — иначе углы срезаются.
+  const steps = wave.kind === "zigzag" ? waves * 2 : waves * LINE_WAVE_STEPS;
+  const spine = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const distance = (total * index) / steps;
+    const at = pathAt(points, closed, distance);
+    const phase = (distance / period) * Math.PI * 2;
+    const shift =
+      wave.kind === "zigzag"
+        ? wave.amplitude * (index % 2 === 0 ? 0 : 1) * (Math.floor(index / 2) % 2 === 0 ? 1 : -1)
+        : wave.amplitude * Math.sin(phase);
+    spine.push({ x: at.x + at.nx * shift, y: at.y + at.ny * shift });
+  }
+  return spine;
+}
+
+// Нитка, сдвинутая поперёк на `offset`: вершина двигается по усреднённой
+// нормали соседних отрезков, поэтому на изломе нитки не расходятся.
+function railOf(points, closed, offset) {
+  if (offset === 0) return points;
+  const normals = [];
+  const last = closed ? points.length : points.length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    normals.push({ nx: -(to.y - from.y) / length, ny: (to.x - from.x) / length });
+  }
+  return points.map((point, index) => {
+    const before = normals[(index - 1 + normals.length) % normals.length];
+    const after = normals[Math.min(index, normals.length - 1)];
+    const first = index === 0 && !closed ? after : before;
+    const nx = (first.nx + after.nx) / 2;
+    const ny = (first.ny + after.ny) / 2;
+    const length = Math.hypot(nx, ny) || 1;
+    return { x: point.x + (nx / length) * offset, y: point.y + (ny / length) * offset };
+  });
+}
+
+// Линейная метка и её черновик рисуются одним кодом: начертание на плане, в
+// PNG и на распечатке обязано быть одним и тем же.
+function strokeStyledLine(ctx, points, closed, style, radius, color) {
+  const plan = lineStylePlan(style, radius);
+  const threads = lineStyleThreads(points, closed, plan);
+  if (threads.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = plan.pen;
+  // Пунктир задан в пикселях плана и растёт с масштабом вместе с меткой:
+  // на выгрузке в двойном разрешении штрих остаётся тем же, что на экране.
+  if (plan.dash) ctx.setLineDash(plan.dash);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const thread of threads) {
+    ctx.beginPath();
+    thread.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    // Волна замыкается сама: её последняя проба совпала с первой, поэтому
+    // замыкание здесь ничего не дорисовывает, а у прямой нитки — дорисовывает.
+    if (closed) ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/**
+ * Образец начертания для сетки выбора и строки справочника: тот же код, что
+ * рисует линию на плане, на маленьком холсте. Одна функция на весь интерфейс —
+ * в справочнике видно ровно то, что попадёт на план.
+ */
+export function lineStyleIcon(style, color, size = 22, length = size * 3) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "line-icon";
+  canvas.width = length;
+  canvas.height = size;
+  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
+  if (!ctx) return canvas;
+  const radius = size * 0.34;
+  const pad = Math.max(3, radius * 0.6);
+  strokeStyledLine(
+    ctx,
+    [
+      { x: pad, y: size / 2 },
+      { x: length - pad, y: size / 2 },
+    ],
+    false,
+    style,
+    radius,
+    color,
+  );
+  return canvas;
+}
+
 // Узнаваемые значки собраны из тех же кирпичей, что и старые засечки: отрезки,
 // круг, прямоугольник. Ни шрифтов, ни эмодзи — знак обязан выглядеть одинаково
 // на экране, в PNG и на распечатке, а чужой шрифт этого не обещает.
@@ -1424,19 +1640,7 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected) {
   const radius = markRadius(view);
   const screen = mark.points.map((point) => planToScreen(point, scheme, view));
   if (mark.kind === "line" && screen.length > 1) {
-    ctx.save();
-    ctx.strokeStyle = style.color;
-    ctx.lineWidth = Math.max(2, radius * 0.5);
-    // Пунктир задан в пикселях плана и растёт с масштабом вместе с меткой:
-    // на выгрузке в двойном разрешении штрих остаётся тем же, что на экране.
-    if (style.lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-    if (mark.closed) ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
+    strokeStyledLine(ctx, screen, mark.closed, style.lineStyle, radius, style.color);
     for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(2, radius * 0.45), style.color);
   } else {
     for (const point of screen) drawShape(ctx, style.shape, point.x, point.y, radius, style.color);
@@ -1486,23 +1690,11 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
   if (!draft || draft.points.length === 0) return;
   const radius = markRadius(view);
   const screen = draft.points.map((point) => planToScreen(point, scheme, view));
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(2, radius * 0.5);
-  // Черновик рисуется тем же начертанием, каким ляжет метка: пунктир видно
-  // ещё до того, как линия поставлена.
-  if (lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-  if (draft.cursor) {
-    const cursor = planToScreen(draft.cursor, scheme, view);
-    ctx.lineTo(cursor.x, cursor.y);
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
+  // Черновик рисуется тем же начертанием, каким ляжет метка: волну и пунктир
+  // видно ещё до того, как линия поставлена. Резинка до курсора — часть той же
+  // нитки, иначе узор на ней начинался бы заново.
+  const drawn = draft.cursor ? [...screen, planToScreen(draft.cursor, scheme, view)] : screen;
+  if (drawn.length > 1) strokeStyledLine(ctx, drawn, false, lineStyle, radius, color);
   for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(3, radius * 0.5), color);
   // Первая вершина крупнее: по ней замыкают контур.
   drawShape(ctx, "circle", screen[0].x, screen[0].y, Math.max(4, radius * 0.75), color);

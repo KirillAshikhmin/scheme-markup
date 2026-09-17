@@ -145,8 +145,9 @@ test("стартовый справочник: типы из брифа, пер�
 
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
   const project = createProject();
-  // Версия 2: контуры помещений, ручная правка помещения, цвет помещения.
-  assert.equal(project.formatVersion, 2);
+  // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
+  // вид типа — точка или линия.
+  assert.equal(project.formatVersion, 3);
   assert.equal(project.categories.length, 7);
   assert.equal(project.markTypes.length, 21);
   assert.deepEqual(project.marks, []);
@@ -1195,6 +1196,9 @@ test("сохранённый шаблон побеждает встроенны�
     key: "Т",
     code: "Т",
     name: "Точка своя",
+    // Шаблон сохранён до того, как у типа появился вид: строка базы берёт
+    // умолчание, а не уезжает в справочник с пустым полем.
+    kind: "point",
     shape: "star",
     lineStyle: null,
     blockMode: "single",

@@ -326,6 +326,9 @@ export function openColorPicker(options = {}) {
       dismissable: true,
       onCancel: () => resolve(null),
     });
+    // Ширину задаёт содержимое — палитра и поле оттенка: общая мера диалогов
+    // оставляла справа пустое поле. Та же мера, что у сеток формы и начертания.
+    if (modal.card) modal.card.classList.add("modal--fit");
     sync();
     field.focus();
   });

@@ -698,10 +698,21 @@
   min-width: 520px;
   max-height: 60vh;
   overflow: auto;
+  /* Полоса прокрутки идёт поверх содержимого: без этого поля кнопка строки
+     добавления уходит под неё — у строк типа запас даёт корзина, у этой нет. */
+  padding-right: 8px;
 }
 
+/* Заголовок раздела остаётся виден при прокрутке — тем же приёмом, каким
+   липнут заголовки секций левой колонки (`.panel__head`). Своего второго вида
+   заголовка в справочнике нет. */
 .dict__title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   margin: 10px 0 2px;
+  padding: 2px 0;
+  background: var(--panel-bg);
   color: var(--panel-text);
   font-size: 13px;
 }
@@ -946,6 +957,130 @@
 
 .shapes__icon {
   display: block;
+}
+
+/* Выбор начертания: та же сетка нарисованных образцов, что у фигур, только
+   клетка вытянута — в квадрат не поместился бы и один период волны. Классы
+   свои: отступ клетки правится вместе с начертаниями, а не заодно с фигурами. */
+
+.dict__line {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.dict__line:hover {
+  border-color: var(--panel-muted);
+}
+
+.dict__line--inherit {
+  border-style: dashed;
+}
+
+/* Вид типа: две кнопки одним переключателем, как сегменты, а не два отдельных
+   действия — выбран всегда ровно один. */
+.dict__kind {
+  flex: none;
+  display: inline-flex;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dict__kindItem {
+  border: 0;
+  border-radius: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #21262d;
+}
+
+.dict__kindItem + .dict__kindItem {
+  border-left: 1px solid var(--panel-line);
+}
+
+.dict__kindItem.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.lines {
+  display: grid;
+  grid-template-columns: repeat(3, 148px);
+  gap: 6px;
+}
+
+.lines__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 148px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.lines__cell:hover {
+  border-color: var(--panel-muted);
+}
+
+.lines__cell.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* «Как у категории»: то же начертание, но рамка пунктиром — видно, что оно
+   не своё. */
+.lines__cell--inherit {
+  border-style: dashed;
+  border-color: var(--panel-muted);
+}
+
+/* Список выведенных видов: строка объясняет, почему вид такой, и тут же
+   переключается. */
+.kinds {
+  min-width: 460px;
+}
+
+.kinds__row {
+  padding: 4px 0;
+  border-top: 1px solid var(--panel-line);
+}
+
+.kinds__code {
+  width: 96px;
+  flex: none;
+}
+
+.kinds__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kinds__why {
+  flex: none;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+/* Кнопка общей базы стоит под строками добавления и занимает строку целиком:
+   она относится к разделу, а не к строке типа. */
+.dict__row--catalog {
+  padding-top: 4px;
 }
 
 /* ——— список меток в режиме просмотра ————————————————————————————————————
@@ -1231,6 +1366,16 @@
   background: var(--panel-bg);
   color: var(--panel-text);
   box-shadow: 0 24px 64px rgba(1, 4, 9, 0.6);
+}
+
+/* Окно, ширину которого задаёт его содержимое, а не общая мера диалогов.
+   Общая мера (720px) подобрана под окна с текстом и списками; сетке выбора
+   она не нужна — фигуры занимают пять колонок по 52px, и остальные четыреста
+   пикселей карточки оставались пустым полем справа, с «Отменой», прижатой к
+   дальнему краю. Класс один на все окна-сетки: форма, цвет, начертание. */
+.modal--fit {
+  width: fit-content;
+  max-width: min(92vw, 720px);
 }
 
 .modal__title {
@@ -1592,6 +1737,9 @@
    вбок. */
 .picker--types {
   width: min(calc(96vw - 40px), calc(var(--picker-columns, 1) * 240px));
+  /* Пустая выдача («ничего не нашлось») оставляет одну колонку, и в 240px
+     селект «Категория» из строки создания упирается в край карточки. */
+  min-width: min(calc(96vw - 40px), 330px);
 }
 
 .picker__columns {
@@ -2672,38 +2820,46 @@ const strings = {
     "circle-slash": "Круг с клавишей",
     "circle-slash-two": "Круг с двумя клавишами",
     "circle-chevron": "Круг с переключателем",
-    "circle-wave": "Круг с волнами (беспроводная точка)",
-    "circle-ring": "Круг с кольцом (потолочный датчик: дым, движение)",
+    "circle-wave": "Круг с волнами",
+    "circle-ring": "Круг с кольцом",
     "circle-half": "Круг наполовину закрашенный",
     square: "Квадрат",
     "square-cross": "Квадрат с крестом",
     "square-fill": "Квадрат закрашенный",
-    "square-jack": "Квадрат с разъёмом (Ethernet)",
-    "square-bolt": "Квадрат с молнией (щит, автомат, силовой вывод)",
-    "square-split": "Квадрат с парой контактов (датчик открытия)",
-    "square-hatch": "Квадрат со штриховкой (тёплый пол, обогрев)",
-    "square-wave": "Квадрат с волнами (динамик, кондиционер)",
+    "square-jack": "Квадрат с разъёмом",
+    "square-bolt": "Квадрат с молнией",
+    "square-split": "Квадрат с парой контактов",
+    "square-hatch": "Квадрат со штриховкой",
+    "square-wave": "Квадрат с волнами",
     triangle: "Треугольник",
-    "triangle-dot": "Треугольник с точкой (камера, датчик движения)",
+    "triangle-dot": "Треугольник с точкой",
     "triangle-down": "Треугольник вершиной вниз",
-    "triangle-down-fill": "Треугольник вниз закрашенный (капля: протечка)",
+    "triangle-down-fill": "Треугольник вниз закрашенный",
     star: "Звезда",
     diamond: "Ромб",
-    "diamond-dot": "Ромб с точкой (термостат, регулятор)",
-    "diamond-cross": "Ромб с крестом (привод, мотор)",
+    "diamond-dot": "Ромб с точкой",
+    "diamond-cross": "Ромб с крестом",
     "diamond-fill": "Ромб закрашенный",
     hexagon: "Шестиугольник",
     plus: "Крест",
     inherit: "Как у категории",
   },
-  // Начертание линейной метки. Готово для переключателя в справочнике типов:
-  // модель и рисование пунктир уже понимают, панели — следующий таск.
+  // Начертание линейной метки. Выбирается по изображению — сеткой нарисованных
+  // отрезков, как фигура; названия нужны подсказке, таблице справочника и
+  // распечатке, а не самой сетке.
   lineStyles: {
     solid: "Сплошная",
     dashed: "Пунктирная",
+    "long-dash": "Длинный штрих",
+    dotted: "Точечная",
+    "dash-dot": "Штрихпунктирная (точка-тире)",
+    "dash-dot-dot": "Штрих с двумя точками",
+    double: "Двойная",
+    wave: "Волнистая",
+    zigzag: "Зигзаг",
     inherit: "Как у категории",
-    title: "Линия",
-    hint: "Пунктиром отличают условную линию от трека — начертание видно в легенде и на распечатке",
+    title: "Начертание",
+    hint: "Начертанием отличают условную линию от трека — оно видно в легенде и на распечатке",
   },
   blockMode: {
     each: "Каждая точка — своя метка",
@@ -2819,6 +2975,8 @@ const strings = {
     renameRoom: "переименование помещения",
     removeRoom: "удаление помещения",
     editType: "правка типа",
+    typeKind: "вид типа",
+    typeKindReview: "вид типов выбран",
     addFromCatalog: "типы из общей базы",
     removeType: "удаление типа",
     addCategory: "новая категория",
@@ -2891,6 +3049,7 @@ const strings = {
     groupAcrossSchemes: "Метки одной группы лежат на разных схемах",
     counterBehind: "Счётчик типа {code} меньше выданных номеров",
     typeWithoutCategory: "У типа нет категории из справочника",
+    typeKindMixed: "У типа {code} есть метки другого вида",
   },
   file: {
     checking: "Проверяю архив: читаю обратно…",
@@ -3166,6 +3325,23 @@ const strings = {
     shape: "Форма",
     color: "Цвет категории",
     marks: "Меток этого типа",
+    // Вид типа: точечным ставят метки, линейным проводят линии. От вида
+    // зависит, что выбирается рядом — фигура или начертание.
+    kind: "Вид",
+    kindPoint: "Точка",
+    kindLine: "Линия",
+    kindPointHint: "Точечный тип: метка ставится кликом, обозначение — фигура",
+    kindLineHint: "Линейный тип: метка проводится линией, обозначение — начертание",
+    // Список выведенных видов: показывается один раз на объект, и только когда
+    // вид пришлось угадать.
+    kindReviewTitle: "Вид типов: точка или линия",
+    kindReviewHint:
+      "У этих типов вид не выведен, а выбран за вас: остальные переведены по их же меткам. " +
+      "Поправьте, если угадано не так, — метки при этом не меняются.",
+    kindReviewNoMarks: "меток нет, взят вид по умолчанию",
+    kindReviewMixed: "есть метки обоих видов, взята точка",
+    kindReviewClose: "Понятно",
+    add: "Добавить",
     noTypes: "Типов пока нет",
     codePlaceholder: "В",
     typeNamePlaceholder: "Выключатель",
@@ -3340,13 +3516,18 @@ function text(key, vars) {
 //   1 — схемы, метки, блоки, группы, помещения списком;
 //   2 — контуры помещений (`project.outlines`), признак ручной правки
 //       помещения у метки (`mark.roomManual`) и цвет помещения (`room.color`).
+//   3 — вид типа (`type.kind`: точка или линия) и отметка выведенного вида
+//       (`type.kindGuessed`), по которой показывается список на правку.
 // Совместимости вперёд нет сознательно: страница версии 1 не знает о контурах
 // и, открыв такой файл, молча потеряла бы их вместе с ручной правкой —
-// поэтому она честно откажется («файл сделан более новой версией»).
+// поэтому она честно откажется («файл сделан более новой версией»). Со
+// страницей версии 2 та же история: вид типа она не знает, показывает у
+// линейного типа выбор фигуры и ставит его метки точками.
 // Назад совместимость обязательна: файл версии 1 читается и дополняется
-// умолчаниями в `projectFile.migrateProject`, а метка без `roomManual`
-// считается правленной руками (`markRoomManual`).
-const FORMAT_VERSION = 2;
+// умолчаниями в `projectFile.migrateProject`, метка без `roomManual`
+// считается правленной руками (`markRoomManual`), а вид типа выводится по его
+// меткам (`migrateTypeKinds`).
+const FORMAT_VERSION = 3;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -3388,7 +3569,24 @@ const SHAPE_PALETTE = [
 // Начертание линейной метки. Сплошная и пунктирная значат разное, поэтому
 // начертание — часть условного обозначения и живёт там же, где форма:
 // у категории, с перебивкой у типа. Третьего правила в сборке нет.
-const LINE_STYLES = ["solid", "dashed"];
+//
+// Выбирают начертание по изображению — сеткой нарисованных отрезков, как
+// фигуру. Поэтому список держит не число вариантов, а различимость: каждая
+// пара обязана разойтись на чёрно-белой распечатке в толщине линии метки,
+// и это проверяет отпечаток в `test/lineStyle.test.js` — тем же приёмом, каким
+// `test/shapes.test.js` разводит фигуры. Порядок — порядок сетки: сперва
+// штриховые (их различает длина штриха), потом двойная, потом волнистые.
+const LINE_STYLES = [
+  "solid",
+  "dashed",
+  "long-dash",
+  "dotted",
+  "dash-dot",
+  "dash-dot-dot",
+  "double",
+  "wave",
+  "zigzag",
+];
 
 // Фигуры, которые ещё встречаются в объектах, но сетка их больше не предлагает:
 // в размере метки шестиугольник неотличим от круга, залитый ромб — от залитого
@@ -3795,6 +3993,10 @@ function defaultTemplate() {
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
+    // Все типы шаблона — точечные: линией размечают ленту, трек и условные
+    // линии, и это выбор разметчика на конкретном объекте, а не свойство
+    // стартового справочника. Переключается строкой в справочнике.
+    kind: "point",
     shape: type.shape || null,
     lineStyle: null,
     blockMode: "each",
@@ -3815,6 +4017,9 @@ function createProject(template) {
     markTypes: source.markTypes.map((type, index) => ({
       shape: null,
       blockMode: "each",
+      // Шаблон мог быть сохранён до того, как у типа появился вид: без
+      // умолчания поле уехало бы в объект пустым.
+      kind: "point",
       ...type,
       order: index,
     })),
@@ -4670,12 +4875,26 @@ function checkBlockMode(mode) {
   if (!BLOCK_MODES.includes(mode)) throw modelError("unknownBlockMode");
   return mode;
 }
-function addType(project, { code, name, categoryId, shape = null, lineStyle = null, blockMode = "each" } = {}) {
+
+// Вид типа: точка или линия. Значения те же, что у метки (`MARK_KINDS`), и
+// это не совпадение — вид типа говорит, какие метки этим типом ставятся.
+function checkTypeKind(kind) {
+  if (!MARK_KINDS.includes(kind)) throw modelError("unknownKind");
+  return kind;
+}
+function addType(
+  project,
+  { code, name, categoryId, shape = null, lineStyle = null, blockMode = "each", kind = "point" } = {},
+) {
   const type = {
     id: newId(),
     categoryId,
     code: normalizeCode(code, project),
     name: normalizeName(name),
+    // Вид типа: у точечного выбирается фигура, у линейного — начертание.
+    // Умолчание — точка: их в разы больше, и заведённый руками тип почти
+    // всегда точечный.
+    kind: checkTypeKind(kind),
     shape: checkShape(shape, { allowNull: true }),
     lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     blockMode: checkBlockMode(blockMode),
@@ -4694,6 +4913,12 @@ function updateType(project, typeId, patch = {}) {
     next.lineStyle = checkLineStyle(patch.lineStyle, { allowNull: true });
   }
   if (Object.prototype.hasOwnProperty.call(patch, "blockMode")) next.blockMode = checkBlockMode(patch.blockMode);
+  // Вид, выбранный руками, больше не догадка: отметка снимается, и тип уходит
+  // из списка на правку — даже если пользователь подтвердил то же самое.
+  if (Object.prototype.hasOwnProperty.call(patch, "kind")) {
+    next.kind = checkTypeKind(patch.kind);
+    delete next.kindGuessed;
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "categoryId")) {
     if (!findCategory(project, patch.categoryId)) throw modelError("categoryNotFound");
     next.categoryId = patch.categoryId;
@@ -4817,6 +5042,9 @@ function catalogMerge(templates) {
         key,
         code,
         name: String(type.name == null ? "" : type.name).trim() || code,
+        // Шаблон мог быть сохранён до того, как у типа появился вид: без
+        // умолчания строка базы приехала бы в справочник с пустым полем.
+        kind: MARK_KINDS.includes(type.kind) ? type.kind : "point",
         shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
         lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
         blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
@@ -4875,6 +5103,7 @@ function catalogOffer(project, templates) {
       key: entry.key,
       code: entry.code,
       name: entry.name,
+      kind: entry.kind,
       shape: entry.shape,
       lineStyle: entry.lineStyle,
       blockMode: entry.blockMode,
@@ -4939,6 +5168,7 @@ function addTypesFromCatalog(project, templates, typeKeys) {
         code: entry.code,
         name: entry.name,
         categoryId: category.id,
+        kind: entry.kind,
         shape: entry.shape,
         lineStyle: entry.lineStyle,
         blockMode: entry.blockMode,
@@ -5185,6 +5415,108 @@ function updateProject(project, patch = {}) {
   return { project: withProject(project, next) };
 }
 
+// ——— вид типа: точка или линия ————————————————————————————————————————
+//
+// Поле `type.kind` появилось у типов позже самих типов, и объекты заказчика
+// его не знают. Молча подставить «точку» всем — значит перерисовать готовый
+// план: тип, которым размечали трек, стал бы точечным. Поэтому вид выводится
+// из того, что уже нарисовано, и только там, где ответ однозначен.
+
+// Виды меток этого типа: что из них есть на самом деле.
+function typeMarkKinds(project, typeId) {
+  const kinds = new Set();
+  for (const mark of (project && project.marks) || []) {
+    if (mark.typeId !== typeId) continue;
+    kinds.add(mark.kind === "line" ? "line" : "point");
+  }
+  return kinds;
+}
+
+/**
+ * Какой вид приписать типу, у которого его нет, и насколько это догадка.
+ * `reason`:
+ *   `marks`   — все метки типа одного вида, ответ однозначен (молча);
+ *   `noMarks` — меток нет, вид взят по умолчанию (точка);
+ *   `mixed`   — метки обоих видов; тип считается точечным, а метки-линии
+ *               остаются нарисованными как есть. Раздваивать тип нельзя:
+ *               нумерация сквозная по типу, и раздвоение её порвёт.
+ */
+function typeKindGuess(project, typeId) {
+  const kinds = typeMarkKinds(project, typeId);
+  if (kinds.size === 1) return { kind: [...kinds][0], reason: "marks" };
+  if (kinds.size === 0) return { kind: "point", reason: "noMarks" };
+  return { kind: "point", reason: "mixed" };
+}
+
+/** Вид типа: записанный, а у объекта прежнего формата — выведенный по меткам. */
+function typeKindOf(project, typeId) {
+  const type = findType(project, typeId);
+  if (type && MARK_KINDS.includes(type.kind)) return type.kind;
+  if (!type) return "point";
+  return typeKindGuess(project, typeId).kind;
+}
+
+/**
+ * Дописать вид всем типам, у которых его нет. Однозначное проставляется молча,
+ * догадка отмечается `kindGuessed` — по ней собирается список на правку.
+ * Дописывать нечего — возвращается **тот же** объект: ни `updatedAt`, ни шага
+ * истории миграция не трогает, иначе открытие объекта выглядело бы правкой.
+ */
+function migrateTypeKinds(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project, guessed: [] };
+  const guessed = [];
+  let changed = false;
+  const markTypes = project.markTypes.map((type) => {
+    if (MARK_KINDS.includes(type.kind)) return type;
+    const guess = typeKindGuess(project, type.id);
+    changed = true;
+    const next = { ...type, kind: guess.kind };
+    if (guess.reason !== "marks") {
+      next.kindGuessed = guess.reason;
+      guessed.push({ typeId: type.id, code: type.code, name: type.name, kind: guess.kind, reason: guess.reason });
+    }
+    return next;
+  });
+  if (!changed) return { project, guessed: [] };
+  return { project: { ...project, markTypes }, guessed };
+}
+
+/**
+ * Типы, вид которых не выведен, а угадан: показываются одним списком на правку.
+ * Пусто — список не показывается вовсе, и это обычный случай размеченного
+ * объекта.
+ */
+function typeKindReview(project) {
+  const rows = [];
+  for (const type of (project && project.markTypes) || []) {
+    if (!type.kindGuessed) continue;
+    rows.push({
+      typeId: type.id,
+      code: type.code,
+      name: type.name,
+      kind: MARK_KINDS.includes(type.kind) ? type.kind : "point",
+      reason: type.kindGuessed === "mixed" ? "mixed" : "noMarks",
+    });
+  }
+  return rows;
+}
+
+/**
+ * Список закрыт — больше не показывается. Отметка живёт в самом объекте, а не
+ * в настройках браузера: файл переедет на другую машину вместе с ней.
+ */
+function closeTypeKindReview(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project };
+  if (!project.markTypes.some((type) => type.kindGuessed)) return { project };
+  const markTypes = project.markTypes.map((type) => {
+    if (!type.kindGuessed) return type;
+    const next = { ...type };
+    delete next.kindGuessed;
+    return next;
+  });
+  return { project: withProject(project, { markTypes }) };
+}
+
 // Цвет — всегда у категории; форма у типа, если задана, иначе у категории.
 function styleOf(project, typeId) {
   const type = findType(project, typeId);
@@ -5393,6 +5725,16 @@ function validate(project) {
 
   // Отставший счётчик — свойство типа, а не каждой его метки.
   for (const [id, code] of behindTypes) problems.push(problem("counterBehind", { code }, id));
+
+  // Метка не того вида, что её тип. Это не поломка: так открывается объект,
+  // который размечали до того, как у типа появился вид, — линии остались
+  // нарисованными, и трогать их молча нельзя. Но и промолчать нельзя:
+  // предупреждение называет тип, а решает пользователь.
+  for (const type of project.markTypes) {
+    const kind = typeKindOf(project, type.id);
+    const other = [...typeMarkKinds(project, type.id)].some((item) => item !== kind);
+    if (other) problems.push(problem("typeKindMixed", { code: type.code }, type.id, "warning"));
+  }
 
   // Повтор номера — приём заказчика, а не поломка: одно предупреждение на
   // обозначение, с числом меток, чтобы случайный дубль было видно.
@@ -6114,7 +6456,7 @@ function migrateProject(loaded) {
   if (version > FORMAT_VERSION) {
     throw fileError("futureVersion", { version, current: FORMAT_VERSION });
   }
-  return {
+  const filled = {
     ...loaded,
     formatVersion: FORMAT_VERSION,
     rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
@@ -6124,6 +6466,12 @@ function migrateProject(loaded) {
     groups: Array.isArray(loaded.groups) ? loaded.groups : [],
     counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
   };
+  // Вид типа (точка или линия) в файлах версий 1 и 2 не записан. Правило вывода
+  // — в модели: тип с метками одного вида переводится молча, а догадка
+  // отмечается и показывается пользователю списком на правку. Миграция
+  // идемпотентна: у объекта, где вид уже проставлен, она возвращает тот же
+  // объект — иначе упаковка правила бы то, что сама же и сверяет.
+  return migrateTypeKinds(filled).project;
 }
 
 // Календарный день пользователя, а не UTC: разметку правят вечером, и
@@ -7766,6 +8114,222 @@ function dashPattern(radius) {
   return [Math.max(2, radius * DASH_STROKE), Math.max(2, radius * DASH_GAP)];
 }
 
+// ——— начертания линии ————————————————————————————————————————————————
+//
+// Начертание выбирают по изображению, а значит различать его должен глаз, и
+// не на экране, а на чёрно-белой распечатке в толщине линии метки. Поэтому
+// каждое начертание описано числами в долях радиуса метки — и растёт вместе с
+// ней, как пунктир: на выгрузке в двойном разрешении штрих остаётся тем же,
+// что на экране.
+//
+// Описание — одно на всю сборку: по нему рисует холст и по нему же снимает
+// отпечаток `test/lineStyle.test.js`. Это тот же приём, что у фигур
+// (`shapeInternals`): правила закраски записаны один раз, и тест проверяет
+// ровно то, что увидит бумага.
+//
+//   dash  — узор пунктира в долях радиуса (null — сплошная нитка);
+//   rails — поперечные смещения ниток: одна нитка по центру или две у двойной;
+//   wave  — деформация нитки: синус или пила, амплитуда и период в радиусах;
+//   pen   — толщина пера в долях радиуса.
+const LINE_STYLE_PLANS = {
+  solid: { dash: null },
+  // Прежний пунктир не трогается ни на волос: объекты с ним уже нарисованы,
+  // и узор берётся из того же `dashPattern`.
+  dashed: { dash: [DASH_STROKE, DASH_GAP] },
+  // Длинный штрих вдвое длиннее обычного — на бумаге это видно сразу.
+  "long-dash": { dash: [3.6, 2.1] },
+  // Точка — штрих нулевой длины: круглый торец пера рисует её сам.
+  dotted: { dash: [0, 1.4] },
+  "dash-dot": { dash: [2, 1.2, 0, 1.2] },
+  "dash-dot-dot": { dash: [2, 1.1, 0, 1.1, 0, 1.1] },
+  // Двойная: две тонкие нитки с просветом между ними.
+  double: { dash: null, rails: [-0.5, 0.5], pen: 0.26 },
+  // Волна и зигзаг разведены нарочно: волна редкая и высокая, зигзаг частый и
+  // низкий. Сблизь их — и на бумаге останется одна мохнатая линия.
+  wave: { dash: null, wave: { kind: "sine", amplitude: 1.05, period: 4.4 } },
+  zigzag: { dash: null, wave: { kind: "zigzag", amplitude: 0.5, period: 1.5 } },
+};
+
+// Толщина пера линейной метки: половина радиуса, но не тоньше двух пикселей —
+// иначе на отдалении линия исчезает.
+const LINE_PEN = 0.5;
+const LINE_PEN_MIN = 2;
+// У двойной нитки тоньше и минимум свой: две нитки по два пикселя с просветом
+// в один слились бы в жирную полосу.
+const LINE_PEN_MIN_THIN = 1.2;
+
+/** Начертание в пикселях: узор, нитки и волна для метки радиуса `radius`. */
+function lineStylePlan(style, radius) {
+  const base = LINE_STYLE_PLANS[style] || LINE_STYLE_PLANS.solid;
+  const rails = base.rails || [0];
+  const pen = Math.max(rails.length > 1 ? LINE_PEN_MIN_THIN : LINE_PEN_MIN, radius * (base.pen || LINE_PEN));
+  return {
+    // Пунктир считается тем же `dashPattern`, что и прежде: у «dashed» это
+    // буквально он, у остальных — тот же пересчёт долей в пиксели.
+    dash: base.dash ? base.dash.map((part) => (part === 0 ? 0 : Math.max(2, radius * part))) : null,
+    rails: rails.map((offset) => offset * radius),
+    wave: base.wave
+      ? { kind: base.wave.kind, amplitude: base.wave.amplitude * radius, period: base.wave.period * radius }
+      : null,
+    pen,
+  };
+}
+
+// Длина ломаной и точка на ней по пройденному пути — обе нужны и волне, и
+// отпечатку, поэтому считаются один раз.
+function pathLength(points, closed) {
+  let total = 0;
+  const last = closed ? points.length : points.length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    total += Math.hypot(to.x - from.x, to.y - from.y);
+  }
+  return total;
+}
+
+// Точка на ломаной по пройденному пути плюс направление в ней: по направлению
+// откладывается поперечное смещение нитки.
+function pathAt(points, closed, distance) {
+  let left = Math.max(0, distance);
+  const last = closed ? points.length : points.length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (length === 0) continue;
+    if (left <= length || index === last - 1) {
+      const t = length === 0 ? 0 : left / length;
+      return {
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+        nx: -(to.y - from.y) / length,
+        ny: (to.x - from.x) / length,
+      };
+    }
+    left -= length;
+  }
+  const only = points[0];
+  return { x: only.x, y: only.y, nx: 0, ny: 1 };
+}
+
+// Сколько проб на период волнистой линии: реже — и синус превращается в ломаную.
+const LINE_WAVE_STEPS = 12;
+
+/**
+ * Нитки начертания: по каждой холст ведёт перо одним `stroke`. Волна и зигзаг
+ * — не узор пера, а деформация самой нитки, поэтому считаются здесь, а не
+ * в `setLineDash`. Период подгоняется под длину линии целым числом волн:
+ * иначе линия обрывалась бы на полугорбе, и две одинаковые метки выглядели бы
+ * по-разному только оттого, что одну провели на пиксель длиннее.
+ */
+function lineStyleThreads(points, closed, plan) {
+  const list = (points || []).filter(Boolean);
+  if (list.length < 2) return [];
+  const spine = plan && plan.wave ? waveSpine(list, closed, plan.wave) : list;
+  const rails = (plan && plan.rails) || [0];
+  if (rails.length === 1 && rails[0] === 0) return [spine];
+  return rails.map((offset) => railOf(spine, closed, offset));
+}
+
+function waveSpine(points, closed, wave) {
+  const total = pathLength(points, closed);
+  if (total <= 0 || wave.period <= 0) return points;
+  const waves = Math.max(1, Math.round(total / wave.period));
+  const period = total / waves;
+  // У зигзага пробы стоят ровно в вершинах пилы — иначе углы срезаются.
+  const steps = wave.kind === "zigzag" ? waves * 2 : waves * LINE_WAVE_STEPS;
+  const spine = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const distance = (total * index) / steps;
+    const at = pathAt(points, closed, distance);
+    const phase = (distance / period) * Math.PI * 2;
+    const shift =
+      wave.kind === "zigzag"
+        ? wave.amplitude * (index % 2 === 0 ? 0 : 1) * (Math.floor(index / 2) % 2 === 0 ? 1 : -1)
+        : wave.amplitude * Math.sin(phase);
+    spine.push({ x: at.x + at.nx * shift, y: at.y + at.ny * shift });
+  }
+  return spine;
+}
+
+// Нитка, сдвинутая поперёк на `offset`: вершина двигается по усреднённой
+// нормали соседних отрезков, поэтому на изломе нитки не расходятся.
+function railOf(points, closed, offset) {
+  if (offset === 0) return points;
+  const normals = [];
+  const last = closed ? points.length : points.length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    normals.push({ nx: -(to.y - from.y) / length, ny: (to.x - from.x) / length });
+  }
+  return points.map((point, index) => {
+    const before = normals[(index - 1 + normals.length) % normals.length];
+    const after = normals[Math.min(index, normals.length - 1)];
+    const first = index === 0 && !closed ? after : before;
+    const nx = (first.nx + after.nx) / 2;
+    const ny = (first.ny + after.ny) / 2;
+    const length = Math.hypot(nx, ny) || 1;
+    return { x: point.x + (nx / length) * offset, y: point.y + (ny / length) * offset };
+  });
+}
+
+// Линейная метка и её черновик рисуются одним кодом: начертание на плане, в
+// PNG и на распечатке обязано быть одним и тем же.
+function strokeStyledLine(ctx, points, closed, style, radius, color) {
+  const plan = lineStylePlan(style, radius);
+  const threads = lineStyleThreads(points, closed, plan);
+  if (threads.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = plan.pen;
+  // Пунктир задан в пикселях плана и растёт с масштабом вместе с меткой:
+  // на выгрузке в двойном разрешении штрих остаётся тем же, что на экране.
+  if (plan.dash) ctx.setLineDash(plan.dash);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const thread of threads) {
+    ctx.beginPath();
+    thread.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    // Волна замыкается сама: её последняя проба совпала с первой, поэтому
+    // замыкание здесь ничего не дорисовывает, а у прямой нитки — дорисовывает.
+    if (closed) ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/**
+ * Образец начертания для сетки выбора и строки справочника: тот же код, что
+ * рисует линию на плане, на маленьком холсте. Одна функция на весь интерфейс —
+ * в справочнике видно ровно то, что попадёт на план.
+ */
+function lineStyleIcon(style, color, size = 22, length = size * 3) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "line-icon";
+  canvas.width = length;
+  canvas.height = size;
+  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
+  if (!ctx) return canvas;
+  const radius = size * 0.34;
+  const pad = Math.max(3, radius * 0.6);
+  strokeStyledLine(
+    ctx,
+    [
+      { x: pad, y: size / 2 },
+      { x: length - pad, y: size / 2 },
+    ],
+    false,
+    style,
+    radius,
+    color,
+  );
+  return canvas;
+}
+
 // Узнаваемые значки собраны из тех же кирпичей, что и старые засечки: отрезки,
 // круг, прямоугольник. Ни шрифтов, ни эмодзи — знак обязан выглядеть одинаково
 // на экране, в PNG и на распечатке, а чужой шрифт этого не обещает.
@@ -9026,19 +9590,7 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected) {
   const radius = markRadius(view);
   const screen = mark.points.map((point) => planToScreen(point, scheme, view));
   if (mark.kind === "line" && screen.length > 1) {
-    ctx.save();
-    ctx.strokeStyle = style.color;
-    ctx.lineWidth = Math.max(2, radius * 0.5);
-    // Пунктир задан в пикселях плана и растёт с масштабом вместе с меткой:
-    // на выгрузке в двойном разрешении штрих остаётся тем же, что на экране.
-    if (style.lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-    if (mark.closed) ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
+    strokeStyledLine(ctx, screen, mark.closed, style.lineStyle, radius, style.color);
     for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(2, radius * 0.45), style.color);
   } else {
     for (const point of screen) drawShape(ctx, style.shape, point.x, point.y, radius, style.color);
@@ -9088,23 +9640,11 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
   if (!draft || draft.points.length === 0) return;
   const radius = markRadius(view);
   const screen = draft.points.map((point) => planToScreen(point, scheme, view));
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(2, radius * 0.5);
-  // Черновик рисуется тем же начертанием, каким ляжет метка: пунктир видно
-  // ещё до того, как линия поставлена.
-  if (lineStyle === "dashed") ctx.setLineDash(dashPattern(radius));
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-  if (draft.cursor) {
-    const cursor = planToScreen(draft.cursor, scheme, view);
-    ctx.lineTo(cursor.x, cursor.y);
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
+  // Черновик рисуется тем же начертанием, каким ляжет метка: волну и пунктир
+  // видно ещё до того, как линия поставлена. Резинка до курсора — часть той же
+  // нитки, иначе узор на ней начинался бы заново.
+  const drawn = draft.cursor ? [...screen, planToScreen(draft.cursor, scheme, view)] : screen;
+  if (drawn.length > 1) strokeStyledLine(ctx, drawn, false, lineStyle, radius, color);
   for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(3, radius * 0.5), color);
   // Первая вершина крупнее: по ней замыкают контур.
   drawShape(ctx, "circle", screen[0].x, screen[0].y, Math.max(4, radius * 0.75), color);
@@ -13122,6 +13662,9 @@ function openColorPicker(options = {}) {
       dismissable: true,
       onCancel: () => resolve(null),
     });
+    // Ширину задаёт содержимое — палитра и поле оттенка: общая мера диалогов
+    // оставляла справа пустое поле. Та же мера, что у сеток формы и начертания.
+    if (modal.card) modal.card.classList.add("modal--fit");
     sync();
     field.focus();
   });
@@ -14432,6 +14975,10 @@ function typesSnapshot(project) {
       categoryId: type.categoryId,
       code: type.code,
       name: type.name,
+      // Вид едет в шаблон вместе с типом: линейный тип, заведённый руками,
+      // должен приезжать в новый объект линейным. Отметка `kindGuessed` —
+      // нет: она про один объект и один список на правку.
+      kind: typeKindOf(project, type.id),
       shape: type.shape,
       lineStyle: type.lineStyle,
       blockMode: type.blockMode,
@@ -14477,6 +15024,9 @@ function typesTemplateFrom(template) {
       categoryId: ids.get(type.categoryId),
       code: type.code,
       name: type.name,
+      // Шаблон мог быть сохранён до того, как у типа появился вид: неизвестное
+      // значение объект бы не принял, а пустое уехало бы в него как есть.
+      kind: MARK_KINDS.includes(type.kind) ? type.kind : "point",
       shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
       lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
       blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
@@ -14533,31 +15083,126 @@ function openTypesShapePicker({ shape, color, allowInherit, inheritShape }) {
       actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
       onCancel: () => resolve(null),
     });
+    // Ширину карточки задаёт сетка: общая мера диалогов рассчитана под окна с
+    // текстом, и рядом с пятью колонками фигур оставалась пустой на треть.
+    if (modal.card) modal.card.classList.add("modal--fit");
   });
 }
 
-// Начертание линии: у типа — «как у категории» или своё, у категории — своё.
-// Список, а не сетка: значений два, и подпись объясняет, зачем пунктир, — по
-// нему условную линию отличают от трека и в легенде, и на распечатке.
-function typesLineSelect({ lineStyle, allowInherit, onPick }) {
-  const select = uiEl("select", {
-    class: "ui-input dict__line",
-    title: strings.lineStyles.hint,
-    attrs: { "aria-label": strings.lineStyles.title },
-    on: { change: () => onPick(select.value || null) },
+// Размеры образца начертания: в сетке выбора и в строке справочника.
+// Отрезок должен быть длиннее периода самой редкой волны, иначе в клетке
+// видно полгорба и выбирать не из чего.
+const TYPES_LINE_CELL = { size: 30, length: 140 };
+const TYPES_LINE_BUTTON = { size: 26, length: 56 };
+
+function typesLineCell({ lineStyle, color, active, inherit, onPick }) {
+  return uiEl(
+    "button",
+    {
+      class: "lines__cell" + (active ? " is-active" : "") + (inherit ? " lines__cell--inherit" : ""),
+      type: "button",
+      // Название — в подсказке, а не в клетке: выбирают по изображению.
+      title: inherit ? strings.lineStyles.inherit : strings.lineStyles[lineStyle] || lineStyle,
+      on: { click: onPick },
+    },
+    [lineStyleIcon(lineStyle, color, TYPES_LINE_CELL.size, TYPES_LINE_CELL.length)],
+  );
+}
+
+// Выбор начертания — сетка нарисованных отрезков, ровно как сетка фигур:
+// пользователь просил «в таком же окне как выбор иконки… а выбираем по их
+// изображению». Слово «волнистая» в клетке ничего не добавляет к волне,
+// которую видно.
+function openTypesLinePicker({ lineStyle, color, allowInherit, inheritLineStyle }) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (result) => {
+      modal.close();
+      resolve(result);
+    };
+    const cells = [];
+    if (allowInherit) {
+      cells.push(
+        typesLineCell({
+          lineStyle: inheritLineStyle || LINE_STYLES[0],
+          color,
+          active: !lineStyle,
+          inherit: true,
+          onPick: () => done({ lineStyle: null }),
+        }),
+      );
+    }
+    for (const style of LINE_STYLES) {
+      cells.push(
+        typesLineCell({
+          lineStyle: style,
+          color,
+          active: lineStyle === style,
+          onPick: () => done({ lineStyle: style }),
+        }),
+      );
+    }
+    modal = uiModal({
+      title: strings.lineStyles.title,
+      body: uiEl("div", { class: "lines" }, cells),
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      onCancel: () => resolve(null),
+    });
+    // Та же мера, что у сетки фигур: ширину задаёт сетка, а не общая карточка.
+    if (modal.card) modal.card.classList.add("modal--fit");
   });
-  // Ширина — по месту в строке справочника: «Как у категории» иначе растянет
-  // строку и отожмёт название типа (правило для .dict__line живёт в панели).
-  select.style.maxWidth = "9.5rem";
-  const options = allowInherit ? [{ value: "", label: strings.lineStyles.inherit }] : [];
-  for (const style of LINE_STYLES) options.push({ value: style, label: strings.lineStyles[style] || style });
-  for (const option of options) {
-    const node = uiEl("option", { text: option.label, value: option.value });
-    node.value = option.value;
-    if ((lineStyle || "") === option.value) node.selected = true;
-    select.append(node);
-  }
-  return select;
+}
+
+// Начертание в строке справочника: кнопка с образцом, открывающая сетку.
+// Раньше здесь стоял список названий — с волной и штрихпунктиром он врал бы
+// сильнее, чем помогал: словом их не отличить, а рисунком отличают сразу.
+function typesLineButton({ lineStyle, color, allowInherit, inheritLineStyle, onPick }) {
+  const button = uiEl(
+    "button",
+    {
+      class: "dict__line" + (allowInherit && !lineStyle ? " dict__line--inherit" : ""),
+      type: "button",
+      title: lineStyle
+        ? strings.lineStyles[lineStyle] || lineStyle
+        : allowInherit
+          ? strings.lineStyles.inherit
+          : strings.lineStyles.hint,
+      on: {
+        click: async () => {
+          const picked = await openTypesLinePicker({ lineStyle, color, allowInherit, inheritLineStyle });
+          if (picked) onPick(picked.lineStyle);
+        },
+      },
+    },
+    [
+      lineStyleIcon(
+        lineStyle || inheritLineStyle || LINE_STYLES[0],
+        color,
+        TYPES_LINE_BUTTON.size,
+        TYPES_LINE_BUTTON.length,
+      ),
+    ],
+  );
+  return button;
+}
+
+// Вид типа — переключатель в строке: точка или линия. Две кнопки, а не список:
+// значений всего два, и от выбранного зависит, что стоит рядом, — такое
+// переключают одним кликом, а не раскрытием списка.
+function typesKindSwitch({ kind, onPick }) {
+  const cell = (value, label, hint) => {
+    const button = uiButton(label, {
+      class: "ui-btn dict__kindItem" + (kind === value ? " is-active" : ""),
+      title: hint,
+      on: { click: () => (kind === value ? null : onPick(value)) },
+    });
+    button.setAttribute("aria-pressed", kind === value ? "true" : "false");
+    return button;
+  };
+  return uiEl("div", { class: "dict__kind", title: strings.dictionary.kind }, [
+    cell("point", strings.dictionary.kindPoint, strings.dictionary.kindPointHint),
+    cell("line", strings.dictionary.kindLine, strings.dictionary.kindLineHint),
+  ]);
 }
 
 function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
@@ -14767,6 +15412,87 @@ function openTypesCatalog(project, template) {
     });
   });
 }
+
+// Список выведенных видов. Показывается один раз на объект и только когда вид
+// пришлось угадать: у типа не было ни одной метки или метки были обоих видов.
+// Тип, у которого метки одного вида, переведён молча — там ответ однозначен, и
+// спрашивать не о чем.
+//
+// Догадка не применяется молча, но и объект не блокируется: пока список не
+// закрыт, всё работает как работало, а метки не двигаются ни от закрытия
+// списка, ни от смены вида в нём.
+function openTypeKindReview(api) {
+  const project = () => api.getState().project;
+  // Состав списка снимается один раз: ответ на строку снимает с типа отметку,
+  // и строки исчезали бы из-под руки по мере ответов.
+  const rows = typeKindReview(project());
+  if (rows.length === 0) return null;
+  // Список привязан к тому объекту, о котором спрашивает: пока он открыт,
+  // объект могли сменить, и снять отметку с чужих типов — значит потерять
+  // вопрос, который им ещё не задавали.
+  const ownerId = project().id;
+  const body = uiEl("div", { class: "dict kinds" });
+  let modal;
+
+  function render() {
+    const current = project();
+    if (!current) return;
+    body.replaceChildren(
+      uiEl("p", { class: "modal__text", text: strings.dictionary.kindReviewHint }),
+      ...rows.map((row) => {
+        const type = current.id === ownerId ? findType(current, row.typeId) : null;
+        if (!type) return null;
+        return uiEl("div", { class: "dict__row kinds__row" }, [
+          uiEl("span", { class: "dict__code kinds__code", text: type.code }),
+          uiEl("span", { class: "kinds__name", text: type.name }),
+          uiEl("span", {
+            class: "kinds__why",
+            text:
+              row.reason === "mixed"
+                ? strings.dictionary.kindReviewMixed
+                : strings.dictionary.kindReviewNoMarks,
+          }),
+          typesKindSwitch({
+            kind: typeKindOf(current, type.id),
+            onPick: (value) => {
+              try {
+                canvasCommit(current, updateType(current, type.id, { kind: value }).project, strings.history.typeKind);
+              } catch (error) {
+                api.notify(error && error.message ? error.message : String(error), "error");
+              }
+            },
+          }),
+        ]);
+      }),
+    );
+  }
+
+  render();
+  const unsubscribe = api.subscribe((state, changed) => {
+    if ("project" in changed) render();
+  });
+  // Закрыл — больше не показывается: отметка снимается с типов и уезжает в
+  // объект, а значит и в файл. Настройки браузера тут не годятся — файл
+  // переедет на другую машину, а список выскочит там заново.
+  function close() {
+    unsubscribe();
+    const current = project();
+    if (current && current.id === ownerId) {
+      const cleared = closeTypeKindReview(current);
+      if (cleared.project !== current) {
+        canvasCommit(current, cleared.project, strings.history.typeKindReview);
+      }
+    }
+    modal.close();
+  }
+  modal = uiModal({
+    title: strings.dictionary.kindReviewTitle,
+    body,
+    actions: [uiButton(strings.dictionary.kindReviewClose, { class: "ui-btn ui-btn--accent", on: { click: close } })],
+    onCancel: () => close(),
+  });
+  return { close };
+}
 function openTypesDictionary(api) {
   const body = uiEl("div", { class: "dict" });
 
@@ -14851,6 +15577,9 @@ function openTypesDictionary(api) {
   function typeRow(type, count) {
     const category = findCategory(project(), type.categoryId);
     const style = styleOf(project(), type.id);
+    // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
+    // он одной функцией модели, чтобы справочник и холст не разошлись.
+    const kind = typeKindOf(project(), type.id);
     // Невозможное действие видно невозможным: тип с метками не удаляется,
     // и кнопка об этом говорит до нажатия, а не после.
     const removeButton = uiButton("🗑", {
@@ -14870,8 +15599,14 @@ function openTypesDictionary(api) {
       on: { click: () => compactType(type) },
     });
     compactButton.disabled = count === 0;
+    // Значок строки — то, чем тип рисуется на плане: у точечного фигура,
+    // у линейного отрезок его начертанием.
+    const badge =
+      kind === "line"
+        ? lineStyleIcon(style.lineStyle, style.color, 20, 34)
+        : shapeIcon(style.shape, style.color, 20);
     return uiEl("div", { class: "dict__row" }, [
-      shapeIcon(style.shape, style.color, 20),
+      badge,
       uiEl("input", {
         class: "ui-input dict__code",
         type: "text",
@@ -14896,20 +15631,31 @@ function openTypesDictionary(api) {
       categorySelect(type.categoryId, (categoryId) =>
         commit((current) => updateType(current, type.id, { categoryId }).project, strings.history.editType),
       ),
-      typesShapeButton({
-        shape: type.shape,
-        color: category ? category.color : "#57606A",
-        allowInherit: true,
-        inheritShape: category ? category.shape : SHAPE_PALETTE[0],
-        onPick: (shape) =>
-          commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
+      typesKindSwitch({
+        kind,
+        onPick: (value) =>
+          commit((current) => updateType(current, type.id, { kind: value }).project, strings.history.typeKind),
       }),
-      typesLineSelect({
-        lineStyle: type.lineStyle,
-        allowInherit: true,
-        onPick: (lineStyle) =>
-          commit((current) => updateType(current, type.id, { lineStyle }).project, strings.history.editType),
-      }),
+      // Лишнее не показывается: у точечного типа выбирается фигура, у
+      // линейного — начертание. Показать оба значило бы предложить выбрать то,
+      // чего на плане не будет.
+      kind === "line"
+        ? typesLineButton({
+            lineStyle: type.lineStyle,
+            color: category ? category.color : "#57606A",
+            allowInherit: true,
+            inheritLineStyle: category ? category.lineStyle : LINE_STYLES[0],
+            onPick: (lineStyle) =>
+              commit((current) => updateType(current, type.id, { lineStyle }).project, strings.history.editType),
+          })
+        : typesShapeButton({
+            shape: type.shape,
+            color: category ? category.color : "#57606A",
+            allowInherit: true,
+            inheritShape: category ? category.shape : SHAPE_PALETTE[0],
+            onPick: (shape) =>
+              commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
+          }),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -14955,8 +15701,11 @@ function openTypesDictionary(api) {
         onPick: (shape) =>
           commit((current) => updateCategory(current, category.id, { shape }).project, strings.history.editCategory),
       }),
-      typesLineSelect({
+      // У категории остаются оба: она задаёт умолчание и точечным своим типам,
+      // и линейным, а вида у самой категории нет.
+      typesLineButton({
         lineStyle: category.lineStyle || LINE_STYLES[0],
+        color: category.color,
         allowInherit: false,
         onPick: (lineStyle) =>
           commit(
@@ -15021,10 +15770,17 @@ function openTypesDictionary(api) {
         categoryId = value;
       }),
       uiButton(strings.dictionary.addType, { class: "ui-btn ui-btn--accent", on: { click: add } }),
-      // Кнопка стоит рядом с «Добавить тип» и не прячется, даже когда общая
-      // база объекту уже нечего дать: исчезнувшая кнопка — это вопрос «куда
-      // она делась», а не ответ.
+    ]);
+  }
+
+  // Кнопка общей базы стоит под строками добавления, как просил пользователь:
+  // «а ниже кнопка добавления из общей базы». Не прячется, даже когда общая
+  // база объекту уже нечего дать: исчезнувшая кнопка — это вопрос «куда она
+  // делась», а не ответ.
+  function catalogRow() {
+    return uiEl("div", { class: "dict__row dict__row--catalog" }, [
       uiButton(strings.dictionary.addFromCatalog, {
+        class: "ui-btn ui-btn--wide",
         title: strings.dictionary.addFromCatalogHint,
         on: { click: () => addFromCatalog() },
       }),
@@ -15095,13 +15851,19 @@ function openTypesDictionary(api) {
     }
     if (typeRows.length === 0) typeRows.push(uiEl("p", { class: "panel__empty", text: strings.dictionary.noTypes }));
 
+    // Сперва весь перечень — категории, потом типы, — и только после него
+    // раздел «Добавить»: пользователь просил «в справочнике после перечня
+    // добавь новый заголовок — добавить». Строки добавления, стоявшие внутри
+    // своих перечней, обрывали чтение списка на полпути.
     body.replaceChildren(
       uiEl("h4", { class: "dict__title", text: strings.dictionary.categories }),
       ...current.categories.map((category) => categoryRow(category)),
-      addCategoryRow(),
       uiEl("h4", { class: "dict__title", text: strings.dictionary.types }),
       ...typeRows,
+      uiEl("h4", { class: "dict__title", text: strings.dictionary.add }),
+      addCategoryRow(),
       addTypeRow(),
+      catalogRow(),
     );
   }
 
@@ -15174,10 +15936,32 @@ function mountTypesPanel(host, api) {
     saveButton.disabled = !state.project;
   }
 
+  // Список выведенных видов — один на объект: открывается при его появлении и
+  // больше не всплывает, пока не откроют другой. Живёт он здесь, а не в панели
+  // объектов: объект приходит и из базы браузера, и из файла, а справочник у
+  // обоих один.
+  let reviewed = null;
+  let review = null;
+  function syncReview(current) {
+    const id = current ? current.id : null;
+    if (id === reviewed) return;
+    reviewed = id;
+    if (review) {
+      review.close();
+      review = null;
+    }
+    if (!current) return;
+    review = openTypeKindReview(api);
+  }
+
   subscribe((state, changed) => {
-    if ("project" in changed) syncButtons();
+    if ("project" in changed) {
+      syncButtons();
+      syncReview(state.project);
+    }
   });
   syncButtons();
+  syncReview(getState().project);
 }
 
 registerPanel(PANEL_IDS.properties, mountTypesPanel);
@@ -15260,11 +16044,16 @@ function mountProjectsPanel(host, api) {
   }
 
   async function openProjectById(id) {
-    const project = await loadProject(id);
-    if (!project) {
+    const stored = await loadProject(id);
+    if (!stored) {
       await refreshList();
       return;
     }
+    // Объект из базы браузера мимо `projectFile.migrateProject` не проходит,
+    // а вид типа (точка или линия) у прежних объектов не записан. Дописывается
+    // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
+    // открывался бы по-разному из базы и из архива.
+    const project = migrateTypeKinds(stored).project;
     setState({
       project,
       schemeId: project.schemes.length > 0 ? project.schemes[0].id : null,

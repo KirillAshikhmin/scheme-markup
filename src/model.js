@@ -8,13 +8,18 @@ import { strings, text } from "./strings.js";
 //   1 — схемы, метки, блоки, группы, помещения списком;
 //   2 — контуры помещений (`project.outlines`), признак ручной правки
 //       помещения у метки (`mark.roomManual`) и цвет помещения (`room.color`).
+//   3 — вид типа (`type.kind`: точка или линия) и отметка выведенного вида
+//       (`type.kindGuessed`), по которой показывается список на правку.
 // Совместимости вперёд нет сознательно: страница версии 1 не знает о контурах
 // и, открыв такой файл, молча потеряла бы их вместе с ручной правкой —
-// поэтому она честно откажется («файл сделан более новой версией»).
+// поэтому она честно откажется («файл сделан более новой версией»). Со
+// страницей версии 2 та же история: вид типа она не знает, показывает у
+// линейного типа выбор фигуры и ставит его метки точками.
 // Назад совместимость обязательна: файл версии 1 читается и дополняется
-// умолчаниями в `projectFile.migrateProject`, а метка без `roomManual`
-// считается правленной руками (`markRoomManual`).
-export const FORMAT_VERSION = 2;
+// умолчаниями в `projectFile.migrateProject`, метка без `roomManual`
+// считается правленной руками (`markRoomManual`), а вид типа выводится по его
+// меткам (`migrateTypeKinds`).
+export const FORMAT_VERSION = 3;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -56,7 +61,24 @@ export const SHAPE_PALETTE = [
 // Начертание линейной метки. Сплошная и пунктирная значат разное, поэтому
 // начертание — часть условного обозначения и живёт там же, где форма:
 // у категории, с перебивкой у типа. Третьего правила в сборке нет.
-export const LINE_STYLES = ["solid", "dashed"];
+//
+// Выбирают начертание по изображению — сеткой нарисованных отрезков, как
+// фигуру. Поэтому список держит не число вариантов, а различимость: каждая
+// пара обязана разойтись на чёрно-белой распечатке в толщине линии метки,
+// и это проверяет отпечаток в `test/lineStyle.test.js` — тем же приёмом, каким
+// `test/shapes.test.js` разводит фигуры. Порядок — порядок сетки: сперва
+// штриховые (их различает длина штриха), потом двойная, потом волнистые.
+export const LINE_STYLES = [
+  "solid",
+  "dashed",
+  "long-dash",
+  "dotted",
+  "dash-dot",
+  "dash-dot-dot",
+  "double",
+  "wave",
+  "zigzag",
+];
 
 // Фигуры, которые ещё встречаются в объектах, но сетка их больше не предлагает:
 // в размере метки шестиугольник неотличим от круга, залитый ромб — от залитого
@@ -468,6 +490,10 @@ export function defaultTemplate() {
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
+    // Все типы шаблона — точечные: линией размечают ленту, трек и условные
+    // линии, и это выбор разметчика на конкретном объекте, а не свойство
+    // стартового справочника. Переключается строкой в справочнике.
+    kind: "point",
     shape: type.shape || null,
     lineStyle: null,
     blockMode: "each",
@@ -489,6 +515,9 @@ export function createProject(template) {
     markTypes: source.markTypes.map((type, index) => ({
       shape: null,
       blockMode: "each",
+      // Шаблон мог быть сохранён до того, как у типа появился вид: без
+      // умолчания поле уехало бы в объект пустым.
+      kind: "point",
       ...type,
       order: index,
     })),
@@ -1362,12 +1391,26 @@ function checkBlockMode(mode) {
   return mode;
 }
 
-export function addType(project, { code, name, categoryId, shape = null, lineStyle = null, blockMode = "each" } = {}) {
+// Вид типа: точка или линия. Значения те же, что у метки (`MARK_KINDS`), и
+// это не совпадение — вид типа говорит, какие метки этим типом ставятся.
+function checkTypeKind(kind) {
+  if (!MARK_KINDS.includes(kind)) throw modelError("unknownKind");
+  return kind;
+}
+
+export function addType(
+  project,
+  { code, name, categoryId, shape = null, lineStyle = null, blockMode = "each", kind = "point" } = {},
+) {
   const type = {
     id: newId(),
     categoryId,
     code: normalizeCode(code, project),
     name: normalizeName(name),
+    // Вид типа: у точечного выбирается фигура, у линейного — начертание.
+    // Умолчание — точка: их в разы больше, и заведённый руками тип почти
+    // всегда точечный.
+    kind: checkTypeKind(kind),
     shape: checkShape(shape, { allowNull: true }),
     lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     blockMode: checkBlockMode(blockMode),
@@ -1387,6 +1430,12 @@ export function updateType(project, typeId, patch = {}) {
     next.lineStyle = checkLineStyle(patch.lineStyle, { allowNull: true });
   }
   if (Object.prototype.hasOwnProperty.call(patch, "blockMode")) next.blockMode = checkBlockMode(patch.blockMode);
+  // Вид, выбранный руками, больше не догадка: отметка снимается, и тип уходит
+  // из списка на правку — даже если пользователь подтвердил то же самое.
+  if (Object.prototype.hasOwnProperty.call(patch, "kind")) {
+    next.kind = checkTypeKind(patch.kind);
+    delete next.kindGuessed;
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "categoryId")) {
     if (!findCategory(project, patch.categoryId)) throw modelError("categoryNotFound");
     next.categoryId = patch.categoryId;
@@ -1514,6 +1563,9 @@ function catalogMerge(templates) {
         key,
         code,
         name: String(type.name == null ? "" : type.name).trim() || code,
+        // Шаблон мог быть сохранён до того, как у типа появился вид: без
+        // умолчания строка базы приехала бы в справочник с пустым полем.
+        kind: MARK_KINDS.includes(type.kind) ? type.kind : "point",
         shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
         lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
         blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
@@ -1572,6 +1624,7 @@ export function catalogOffer(project, templates) {
       key: entry.key,
       code: entry.code,
       name: entry.name,
+      kind: entry.kind,
       shape: entry.shape,
       lineStyle: entry.lineStyle,
       blockMode: entry.blockMode,
@@ -1636,6 +1689,7 @@ export function addTypesFromCatalog(project, templates, typeKeys) {
         code: entry.code,
         name: entry.name,
         categoryId: category.id,
+        kind: entry.kind,
         shape: entry.shape,
         lineStyle: entry.lineStyle,
         blockMode: entry.blockMode,
@@ -1893,6 +1947,108 @@ export function updateProject(project, patch = {}) {
   return { project: withProject(project, next) };
 }
 
+// ——— вид типа: точка или линия ————————————————————————————————————————
+//
+// Поле `type.kind` появилось у типов позже самих типов, и объекты заказчика
+// его не знают. Молча подставить «точку» всем — значит перерисовать готовый
+// план: тип, которым размечали трек, стал бы точечным. Поэтому вид выводится
+// из того, что уже нарисовано, и только там, где ответ однозначен.
+
+// Виды меток этого типа: что из них есть на самом деле.
+function typeMarkKinds(project, typeId) {
+  const kinds = new Set();
+  for (const mark of (project && project.marks) || []) {
+    if (mark.typeId !== typeId) continue;
+    kinds.add(mark.kind === "line" ? "line" : "point");
+  }
+  return kinds;
+}
+
+/**
+ * Какой вид приписать типу, у которого его нет, и насколько это догадка.
+ * `reason`:
+ *   `marks`   — все метки типа одного вида, ответ однозначен (молча);
+ *   `noMarks` — меток нет, вид взят по умолчанию (точка);
+ *   `mixed`   — метки обоих видов; тип считается точечным, а метки-линии
+ *               остаются нарисованными как есть. Раздваивать тип нельзя:
+ *               нумерация сквозная по типу, и раздвоение её порвёт.
+ */
+export function typeKindGuess(project, typeId) {
+  const kinds = typeMarkKinds(project, typeId);
+  if (kinds.size === 1) return { kind: [...kinds][0], reason: "marks" };
+  if (kinds.size === 0) return { kind: "point", reason: "noMarks" };
+  return { kind: "point", reason: "mixed" };
+}
+
+/** Вид типа: записанный, а у объекта прежнего формата — выведенный по меткам. */
+export function typeKindOf(project, typeId) {
+  const type = findType(project, typeId);
+  if (type && MARK_KINDS.includes(type.kind)) return type.kind;
+  if (!type) return "point";
+  return typeKindGuess(project, typeId).kind;
+}
+
+/**
+ * Дописать вид всем типам, у которых его нет. Однозначное проставляется молча,
+ * догадка отмечается `kindGuessed` — по ней собирается список на правку.
+ * Дописывать нечего — возвращается **тот же** объект: ни `updatedAt`, ни шага
+ * истории миграция не трогает, иначе открытие объекта выглядело бы правкой.
+ */
+export function migrateTypeKinds(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project, guessed: [] };
+  const guessed = [];
+  let changed = false;
+  const markTypes = project.markTypes.map((type) => {
+    if (MARK_KINDS.includes(type.kind)) return type;
+    const guess = typeKindGuess(project, type.id);
+    changed = true;
+    const next = { ...type, kind: guess.kind };
+    if (guess.reason !== "marks") {
+      next.kindGuessed = guess.reason;
+      guessed.push({ typeId: type.id, code: type.code, name: type.name, kind: guess.kind, reason: guess.reason });
+    }
+    return next;
+  });
+  if (!changed) return { project, guessed: [] };
+  return { project: { ...project, markTypes }, guessed };
+}
+
+/**
+ * Типы, вид которых не выведен, а угадан: показываются одним списком на правку.
+ * Пусто — список не показывается вовсе, и это обычный случай размеченного
+ * объекта.
+ */
+export function typeKindReview(project) {
+  const rows = [];
+  for (const type of (project && project.markTypes) || []) {
+    if (!type.kindGuessed) continue;
+    rows.push({
+      typeId: type.id,
+      code: type.code,
+      name: type.name,
+      kind: MARK_KINDS.includes(type.kind) ? type.kind : "point",
+      reason: type.kindGuessed === "mixed" ? "mixed" : "noMarks",
+    });
+  }
+  return rows;
+}
+
+/**
+ * Список закрыт — больше не показывается. Отметка живёт в самом объекте, а не
+ * в настройках браузера: файл переедет на другую машину вместе с ней.
+ */
+export function closeTypeKindReview(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project };
+  if (!project.markTypes.some((type) => type.kindGuessed)) return { project };
+  const markTypes = project.markTypes.map((type) => {
+    if (!type.kindGuessed) return type;
+    const next = { ...type };
+    delete next.kindGuessed;
+    return next;
+  });
+  return { project: withProject(project, { markTypes }) };
+}
+
 // Цвет — всегда у категории; форма у типа, если задана, иначе у категории.
 export function styleOf(project, typeId) {
   const type = findType(project, typeId);
@@ -2113,6 +2269,16 @@ export function validate(project) {
 
   // Отставший счётчик — свойство типа, а не каждой его метки.
   for (const [id, code] of behindTypes) problems.push(problem("counterBehind", { code }, id));
+
+  // Метка не того вида, что её тип. Это не поломка: так открывается объект,
+  // который размечали до того, как у типа появился вид, — линии остались
+  // нарисованными, и трогать их молча нельзя. Но и промолчать нельзя:
+  // предупреждение называет тип, а решает пользователь.
+  for (const type of project.markTypes) {
+    const kind = typeKindOf(project, type.id);
+    const other = [...typeMarkKinds(project, type.id)].some((item) => item !== kind);
+    if (other) problems.push(problem("typeKindMixed", { code: type.code }, type.id, "warning"));
+  }
 
   // Повтор номера — приём заказчика, а не поломка: одно предупреждение на
   // обозначение, с числом меток, чтобы случайный дубль было видно.

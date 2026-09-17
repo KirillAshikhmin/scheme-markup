@@ -2,7 +2,7 @@
 // Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
 // там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
 import { strings, text } from "./strings.js";
-import { FORMAT_VERSION } from "./model.js";
+import { FORMAT_VERSION, migrateTypeKinds } from "./model.js";
 
 export { FORMAT_VERSION };
 
@@ -352,7 +352,7 @@ function migrateProject(loaded) {
   if (version > FORMAT_VERSION) {
     throw fileError("futureVersion", { version, current: FORMAT_VERSION });
   }
-  return {
+  const filled = {
     ...loaded,
     formatVersion: FORMAT_VERSION,
     rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
@@ -362,6 +362,12 @@ function migrateProject(loaded) {
     groups: Array.isArray(loaded.groups) ? loaded.groups : [],
     counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
   };
+  // Вид типа (точка или линия) в файлах версий 1 и 2 не записан. Правило вывода
+  // — в модели: тип с метками одного вида переводится молча, а догадка
+  // отмечается и показывается пользователю списком на правку. Миграция
+  // идемпотентна: у объекта, где вид уже проставлен, она возвращает тот же
+  // объект — иначе упаковка правила бы то, что сама же и сверяет.
+  return migrateTypeKinds(filled).project;
 }
 
 // Календарный день пользователя, а не UTC: разметку правят вечером, и

@@ -209,10 +209,21 @@
   min-width: 520px;
   max-height: 60vh;
   overflow: auto;
+  /* Полоса прокрутки идёт поверх содержимого: без этого поля кнопка строки
+     добавления уходит под неё — у строк типа запас даёт корзина, у этой нет. */
+  padding-right: 8px;
 }
 
+/* Заголовок раздела остаётся виден при прокрутке — тем же приёмом, каким
+   липнут заголовки секций левой колонки (`.panel__head`). Своего второго вида
+   заголовка в справочнике нет. */
 .dict__title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   margin: 10px 0 2px;
+  padding: 2px 0;
+  background: var(--panel-bg);
   color: var(--panel-text);
   font-size: 13px;
 }
@@ -457,6 +468,130 @@
 
 .shapes__icon {
   display: block;
+}
+
+/* Выбор начертания: та же сетка нарисованных образцов, что у фигур, только
+   клетка вытянута — в квадрат не поместился бы и один период волны. Классы
+   свои: отступ клетки правится вместе с начертаниями, а не заодно с фигурами. */
+
+.dict__line {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.dict__line:hover {
+  border-color: var(--panel-muted);
+}
+
+.dict__line--inherit {
+  border-style: dashed;
+}
+
+/* Вид типа: две кнопки одним переключателем, как сегменты, а не два отдельных
+   действия — выбран всегда ровно один. */
+.dict__kind {
+  flex: none;
+  display: inline-flex;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dict__kindItem {
+  border: 0;
+  border-radius: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #21262d;
+}
+
+.dict__kindItem + .dict__kindItem {
+  border-left: 1px solid var(--panel-line);
+}
+
+.dict__kindItem.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.lines {
+  display: grid;
+  grid-template-columns: repeat(3, 148px);
+  gap: 6px;
+}
+
+.lines__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 148px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: #21262d;
+  cursor: pointer;
+}
+
+.lines__cell:hover {
+  border-color: var(--panel-muted);
+}
+
+.lines__cell.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* «Как у категории»: то же начертание, но рамка пунктиром — видно, что оно
+   не своё. */
+.lines__cell--inherit {
+  border-style: dashed;
+  border-color: var(--panel-muted);
+}
+
+/* Список выведенных видов: строка объясняет, почему вид такой, и тут же
+   переключается. */
+.kinds {
+  min-width: 460px;
+}
+
+.kinds__row {
+  padding: 4px 0;
+  border-top: 1px solid var(--panel-line);
+}
+
+.kinds__code {
+  width: 96px;
+  flex: none;
+}
+
+.kinds__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kinds__why {
+  flex: none;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+/* Кнопка общей базы стоит под строками добавления и занимает строку целиком:
+   она относится к разделу, а не к строке типа. */
+.dict__row--catalog {
+  padding-top: 4px;
 }
 
 /* ——— список меток в режиме просмотра ————————————————————————————————————

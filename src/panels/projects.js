@@ -1,7 +1,7 @@
 // Объекты: список в шапке, переключение, переименование, удаление,
 // первый запуск и автосохранение в браузер.
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
-import { createProject, updateProject } from "../model.js";
+import { createProject, migrateTypeKinds, updateProject } from "../model.js";
 import {
   deleteImage,
   deleteProject,
@@ -94,11 +94,16 @@ function mountProjectsPanel(host, api) {
   }
 
   async function openProjectById(id) {
-    const project = await loadProject(id);
-    if (!project) {
+    const stored = await loadProject(id);
+    if (!stored) {
       await refreshList();
       return;
     }
+    // Объект из базы браузера мимо `projectFile.migrateProject` не проходит,
+    // а вид типа (точка или линия) у прежних объектов не записан. Дописывается
+    // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
+    // открывался бы по-разному из базы и из архива.
+    const project = migrateTypeKinds(stored).project;
     setState({
       project,
       schemeId: project.schemes.length > 0 ? project.schemes[0].id : null,

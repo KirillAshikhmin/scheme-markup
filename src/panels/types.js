@@ -11,6 +11,7 @@ import {
   CODE_MAX_LENGTH,
   BLOCK_MODES,
   LINE_STYLES,
+  MARK_KINDS,
   SHAPE_NAMES,
   SHAPE_PALETTE,
   addCategory,
@@ -18,6 +19,7 @@ import {
   addTypesFromCatalog,
   catalogOffer,
   categoryNameKey,
+  closeTypeKindReview,
   compactNumbers,
   deleteCategory,
   deleteType,
@@ -27,11 +29,13 @@ import {
   findType,
   freeColor,
   styleOf,
+  typeKindOf,
+  typeKindReview,
   typesInOrder,
   updateCategory,
   updateType,
 } from "../model.js";
-import { shapeIcon } from "../render.js";
+import { lineStyleIcon, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { getSetting, setSetting } from "../store.js";
@@ -54,6 +58,10 @@ function typesSnapshot(project) {
       categoryId: type.categoryId,
       code: type.code,
       name: type.name,
+      // Вид едет в шаблон вместе с типом: линейный тип, заведённый руками,
+      // должен приезжать в новый объект линейным. Отметка `kindGuessed` —
+      // нет: она про один объект и один список на правку.
+      kind: typeKindOf(project, type.id),
       shape: type.shape,
       lineStyle: type.lineStyle,
       blockMode: type.blockMode,
@@ -99,6 +107,9 @@ export function typesTemplateFrom(template) {
       categoryId: ids.get(type.categoryId),
       code: type.code,
       name: type.name,
+      // Шаблон мог быть сохранён до того, как у типа появился вид: неизвестное
+      // значение объект бы не принял, а пустое уехало бы в него как есть.
+      kind: MARK_KINDS.includes(type.kind) ? type.kind : "point",
       shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
       lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
       blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
@@ -155,31 +166,126 @@ export function openTypesShapePicker({ shape, color, allowInherit, inheritShape 
       actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
       onCancel: () => resolve(null),
     });
+    // Ширину карточки задаёт сетка: общая мера диалогов рассчитана под окна с
+    // текстом, и рядом с пятью колонками фигур оставалась пустой на треть.
+    if (modal.card) modal.card.classList.add("modal--fit");
   });
 }
 
-// Начертание линии: у типа — «как у категории» или своё, у категории — своё.
-// Список, а не сетка: значений два, и подпись объясняет, зачем пунктир, — по
-// нему условную линию отличают от трека и в легенде, и на распечатке.
-function typesLineSelect({ lineStyle, allowInherit, onPick }) {
-  const select = uiEl("select", {
-    class: "ui-input dict__line",
-    title: strings.lineStyles.hint,
-    attrs: { "aria-label": strings.lineStyles.title },
-    on: { change: () => onPick(select.value || null) },
+// Размеры образца начертания: в сетке выбора и в строке справочника.
+// Отрезок должен быть длиннее периода самой редкой волны, иначе в клетке
+// видно полгорба и выбирать не из чего.
+const TYPES_LINE_CELL = { size: 30, length: 140 };
+const TYPES_LINE_BUTTON = { size: 26, length: 56 };
+
+function typesLineCell({ lineStyle, color, active, inherit, onPick }) {
+  return uiEl(
+    "button",
+    {
+      class: "lines__cell" + (active ? " is-active" : "") + (inherit ? " lines__cell--inherit" : ""),
+      type: "button",
+      // Название — в подсказке, а не в клетке: выбирают по изображению.
+      title: inherit ? strings.lineStyles.inherit : strings.lineStyles[lineStyle] || lineStyle,
+      on: { click: onPick },
+    },
+    [lineStyleIcon(lineStyle, color, TYPES_LINE_CELL.size, TYPES_LINE_CELL.length)],
+  );
+}
+
+// Выбор начертания — сетка нарисованных отрезков, ровно как сетка фигур:
+// пользователь просил «в таком же окне как выбор иконки… а выбираем по их
+// изображению». Слово «волнистая» в клетке ничего не добавляет к волне,
+// которую видно.
+export function openTypesLinePicker({ lineStyle, color, allowInherit, inheritLineStyle }) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (result) => {
+      modal.close();
+      resolve(result);
+    };
+    const cells = [];
+    if (allowInherit) {
+      cells.push(
+        typesLineCell({
+          lineStyle: inheritLineStyle || LINE_STYLES[0],
+          color,
+          active: !lineStyle,
+          inherit: true,
+          onPick: () => done({ lineStyle: null }),
+        }),
+      );
+    }
+    for (const style of LINE_STYLES) {
+      cells.push(
+        typesLineCell({
+          lineStyle: style,
+          color,
+          active: lineStyle === style,
+          onPick: () => done({ lineStyle: style }),
+        }),
+      );
+    }
+    modal = uiModal({
+      title: strings.lineStyles.title,
+      body: uiEl("div", { class: "lines" }, cells),
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      onCancel: () => resolve(null),
+    });
+    // Та же мера, что у сетки фигур: ширину задаёт сетка, а не общая карточка.
+    if (modal.card) modal.card.classList.add("modal--fit");
   });
-  // Ширина — по месту в строке справочника: «Как у категории» иначе растянет
-  // строку и отожмёт название типа (правило для .dict__line живёт в панели).
-  select.style.maxWidth = "9.5rem";
-  const options = allowInherit ? [{ value: "", label: strings.lineStyles.inherit }] : [];
-  for (const style of LINE_STYLES) options.push({ value: style, label: strings.lineStyles[style] || style });
-  for (const option of options) {
-    const node = uiEl("option", { text: option.label, value: option.value });
-    node.value = option.value;
-    if ((lineStyle || "") === option.value) node.selected = true;
-    select.append(node);
-  }
-  return select;
+}
+
+// Начертание в строке справочника: кнопка с образцом, открывающая сетку.
+// Раньше здесь стоял список названий — с волной и штрихпунктиром он врал бы
+// сильнее, чем помогал: словом их не отличить, а рисунком отличают сразу.
+function typesLineButton({ lineStyle, color, allowInherit, inheritLineStyle, onPick }) {
+  const button = uiEl(
+    "button",
+    {
+      class: "dict__line" + (allowInherit && !lineStyle ? " dict__line--inherit" : ""),
+      type: "button",
+      title: lineStyle
+        ? strings.lineStyles[lineStyle] || lineStyle
+        : allowInherit
+          ? strings.lineStyles.inherit
+          : strings.lineStyles.hint,
+      on: {
+        click: async () => {
+          const picked = await openTypesLinePicker({ lineStyle, color, allowInherit, inheritLineStyle });
+          if (picked) onPick(picked.lineStyle);
+        },
+      },
+    },
+    [
+      lineStyleIcon(
+        lineStyle || inheritLineStyle || LINE_STYLES[0],
+        color,
+        TYPES_LINE_BUTTON.size,
+        TYPES_LINE_BUTTON.length,
+      ),
+    ],
+  );
+  return button;
+}
+
+// Вид типа — переключатель в строке: точка или линия. Две кнопки, а не список:
+// значений всего два, и от выбранного зависит, что стоит рядом, — такое
+// переключают одним кликом, а не раскрытием списка.
+function typesKindSwitch({ kind, onPick }) {
+  const cell = (value, label, hint) => {
+    const button = uiButton(label, {
+      class: "ui-btn dict__kindItem" + (kind === value ? " is-active" : ""),
+      title: hint,
+      on: { click: () => (kind === value ? null : onPick(value)) },
+    });
+    button.setAttribute("aria-pressed", kind === value ? "true" : "false");
+    return button;
+  };
+  return uiEl("div", { class: "dict__kind", title: strings.dictionary.kind }, [
+    cell("point", strings.dictionary.kindPoint, strings.dictionary.kindPointHint),
+    cell("line", strings.dictionary.kindLine, strings.dictionary.kindLineHint),
+  ]);
 }
 
 function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
@@ -390,6 +496,87 @@ export function openTypesCatalog(project, template) {
   });
 }
 
+// Список выведенных видов. Показывается один раз на объект и только когда вид
+// пришлось угадать: у типа не было ни одной метки или метки были обоих видов.
+// Тип, у которого метки одного вида, переведён молча — там ответ однозначен, и
+// спрашивать не о чем.
+//
+// Догадка не применяется молча, но и объект не блокируется: пока список не
+// закрыт, всё работает как работало, а метки не двигаются ни от закрытия
+// списка, ни от смены вида в нём.
+export function openTypeKindReview(api) {
+  const project = () => api.getState().project;
+  // Состав списка снимается один раз: ответ на строку снимает с типа отметку,
+  // и строки исчезали бы из-под руки по мере ответов.
+  const rows = typeKindReview(project());
+  if (rows.length === 0) return null;
+  // Список привязан к тому объекту, о котором спрашивает: пока он открыт,
+  // объект могли сменить, и снять отметку с чужих типов — значит потерять
+  // вопрос, который им ещё не задавали.
+  const ownerId = project().id;
+  const body = uiEl("div", { class: "dict kinds" });
+  let modal;
+
+  function render() {
+    const current = project();
+    if (!current) return;
+    body.replaceChildren(
+      uiEl("p", { class: "modal__text", text: strings.dictionary.kindReviewHint }),
+      ...rows.map((row) => {
+        const type = current.id === ownerId ? findType(current, row.typeId) : null;
+        if (!type) return null;
+        return uiEl("div", { class: "dict__row kinds__row" }, [
+          uiEl("span", { class: "dict__code kinds__code", text: type.code }),
+          uiEl("span", { class: "kinds__name", text: type.name }),
+          uiEl("span", {
+            class: "kinds__why",
+            text:
+              row.reason === "mixed"
+                ? strings.dictionary.kindReviewMixed
+                : strings.dictionary.kindReviewNoMarks,
+          }),
+          typesKindSwitch({
+            kind: typeKindOf(current, type.id),
+            onPick: (value) => {
+              try {
+                canvasCommit(current, updateType(current, type.id, { kind: value }).project, strings.history.typeKind);
+              } catch (error) {
+                api.notify(error && error.message ? error.message : String(error), "error");
+              }
+            },
+          }),
+        ]);
+      }),
+    );
+  }
+
+  render();
+  const unsubscribe = api.subscribe((state, changed) => {
+    if ("project" in changed) render();
+  });
+  // Закрыл — больше не показывается: отметка снимается с типов и уезжает в
+  // объект, а значит и в файл. Настройки браузера тут не годятся — файл
+  // переедет на другую машину, а список выскочит там заново.
+  function close() {
+    unsubscribe();
+    const current = project();
+    if (current && current.id === ownerId) {
+      const cleared = closeTypeKindReview(current);
+      if (cleared.project !== current) {
+        canvasCommit(current, cleared.project, strings.history.typeKindReview);
+      }
+    }
+    modal.close();
+  }
+  modal = uiModal({
+    title: strings.dictionary.kindReviewTitle,
+    body,
+    actions: [uiButton(strings.dictionary.kindReviewClose, { class: "ui-btn ui-btn--accent", on: { click: close } })],
+    onCancel: () => close(),
+  });
+  return { close };
+}
+
 export function openTypesDictionary(api) {
   const body = uiEl("div", { class: "dict" });
 
@@ -474,6 +661,9 @@ export function openTypesDictionary(api) {
   function typeRow(type, count) {
     const category = findCategory(project(), type.categoryId);
     const style = styleOf(project(), type.id);
+    // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
+    // он одной функцией модели, чтобы справочник и холст не разошлись.
+    const kind = typeKindOf(project(), type.id);
     // Невозможное действие видно невозможным: тип с метками не удаляется,
     // и кнопка об этом говорит до нажатия, а не после.
     const removeButton = uiButton("🗑", {
@@ -493,8 +683,14 @@ export function openTypesDictionary(api) {
       on: { click: () => compactType(type) },
     });
     compactButton.disabled = count === 0;
+    // Значок строки — то, чем тип рисуется на плане: у точечного фигура,
+    // у линейного отрезок его начертанием.
+    const badge =
+      kind === "line"
+        ? lineStyleIcon(style.lineStyle, style.color, 20, 34)
+        : shapeIcon(style.shape, style.color, 20);
     return uiEl("div", { class: "dict__row" }, [
-      shapeIcon(style.shape, style.color, 20),
+      badge,
       uiEl("input", {
         class: "ui-input dict__code",
         type: "text",
@@ -519,20 +715,31 @@ export function openTypesDictionary(api) {
       categorySelect(type.categoryId, (categoryId) =>
         commit((current) => updateType(current, type.id, { categoryId }).project, strings.history.editType),
       ),
-      typesShapeButton({
-        shape: type.shape,
-        color: category ? category.color : "#57606A",
-        allowInherit: true,
-        inheritShape: category ? category.shape : SHAPE_PALETTE[0],
-        onPick: (shape) =>
-          commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
+      typesKindSwitch({
+        kind,
+        onPick: (value) =>
+          commit((current) => updateType(current, type.id, { kind: value }).project, strings.history.typeKind),
       }),
-      typesLineSelect({
-        lineStyle: type.lineStyle,
-        allowInherit: true,
-        onPick: (lineStyle) =>
-          commit((current) => updateType(current, type.id, { lineStyle }).project, strings.history.editType),
-      }),
+      // Лишнее не показывается: у точечного типа выбирается фигура, у
+      // линейного — начертание. Показать оба значило бы предложить выбрать то,
+      // чего на плане не будет.
+      kind === "line"
+        ? typesLineButton({
+            lineStyle: type.lineStyle,
+            color: category ? category.color : "#57606A",
+            allowInherit: true,
+            inheritLineStyle: category ? category.lineStyle : LINE_STYLES[0],
+            onPick: (lineStyle) =>
+              commit((current) => updateType(current, type.id, { lineStyle }).project, strings.history.editType),
+          })
+        : typesShapeButton({
+            shape: type.shape,
+            color: category ? category.color : "#57606A",
+            allowInherit: true,
+            inheritShape: category ? category.shape : SHAPE_PALETTE[0],
+            onPick: (shape) =>
+              commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
+          }),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -578,8 +785,11 @@ export function openTypesDictionary(api) {
         onPick: (shape) =>
           commit((current) => updateCategory(current, category.id, { shape }).project, strings.history.editCategory),
       }),
-      typesLineSelect({
+      // У категории остаются оба: она задаёт умолчание и точечным своим типам,
+      // и линейным, а вида у самой категории нет.
+      typesLineButton({
         lineStyle: category.lineStyle || LINE_STYLES[0],
+        color: category.color,
         allowInherit: false,
         onPick: (lineStyle) =>
           commit(
@@ -644,10 +854,17 @@ export function openTypesDictionary(api) {
         categoryId = value;
       }),
       uiButton(strings.dictionary.addType, { class: "ui-btn ui-btn--accent", on: { click: add } }),
-      // Кнопка стоит рядом с «Добавить тип» и не прячется, даже когда общая
-      // база объекту уже нечего дать: исчезнувшая кнопка — это вопрос «куда
-      // она делась», а не ответ.
+    ]);
+  }
+
+  // Кнопка общей базы стоит под строками добавления, как просил пользователь:
+  // «а ниже кнопка добавления из общей базы». Не прячется, даже когда общая
+  // база объекту уже нечего дать: исчезнувшая кнопка — это вопрос «куда она
+  // делась», а не ответ.
+  function catalogRow() {
+    return uiEl("div", { class: "dict__row dict__row--catalog" }, [
       uiButton(strings.dictionary.addFromCatalog, {
+        class: "ui-btn ui-btn--wide",
         title: strings.dictionary.addFromCatalogHint,
         on: { click: () => addFromCatalog() },
       }),
@@ -718,13 +935,19 @@ export function openTypesDictionary(api) {
     }
     if (typeRows.length === 0) typeRows.push(uiEl("p", { class: "panel__empty", text: strings.dictionary.noTypes }));
 
+    // Сперва весь перечень — категории, потом типы, — и только после него
+    // раздел «Добавить»: пользователь просил «в справочнике после перечня
+    // добавь новый заголовок — добавить». Строки добавления, стоявшие внутри
+    // своих перечней, обрывали чтение списка на полпути.
     body.replaceChildren(
       uiEl("h4", { class: "dict__title", text: strings.dictionary.categories }),
       ...current.categories.map((category) => categoryRow(category)),
-      addCategoryRow(),
       uiEl("h4", { class: "dict__title", text: strings.dictionary.types }),
       ...typeRows,
+      uiEl("h4", { class: "dict__title", text: strings.dictionary.add }),
+      addCategoryRow(),
       addTypeRow(),
+      catalogRow(),
     );
   }
 
@@ -797,10 +1020,32 @@ function mountTypesPanel(host, api) {
     saveButton.disabled = !state.project;
   }
 
+  // Список выведенных видов — один на объект: открывается при его появлении и
+  // больше не всплывает, пока не откроют другой. Живёт он здесь, а не в панели
+  // объектов: объект приходит и из базы браузера, и из файла, а справочник у
+  // обоих один.
+  let reviewed = null;
+  let review = null;
+  function syncReview(current) {
+    const id = current ? current.id : null;
+    if (id === reviewed) return;
+    reviewed = id;
+    if (review) {
+      review.close();
+      review = null;
+    }
+    if (!current) return;
+    review = openTypeKindReview(api);
+  }
+
   subscribe((state, changed) => {
-    if ("project" in changed) syncButtons();
+    if ("project" in changed) {
+      syncButtons();
+      syncReview(state.project);
+    }
   });
   syncButtons();
+  syncReview(getState().project);
 }
 
 registerPanel(PANEL_IDS.properties, mountTypesPanel);
