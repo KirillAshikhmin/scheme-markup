@@ -13,12 +13,23 @@ import {
   addType,
   createProject,
   equipmentUsage,
+  findRoom,
   labelOf,
+  styleOf,
   setMarkControls,
   setMarkNumber,
   updateMark,
 } from "../src/model.js";
-import { equipmentTable, linksTable, marksTable, toCsv, toMarkdown, toTsv, typesTable } from "../src/tables.js";
+import {
+  equipmentTable,
+  linksTable,
+  marksTable,
+  tableRowCount,
+  toCsv,
+  toMarkdown,
+  toTsv,
+  typesTable,
+} from "../src/tables.js";
 
 // Комната с рукописного листа: свет, выключатели и розетки одной спальни.
 function tablesFixture() {
@@ -680,24 +691,61 @@ function tablesEquipmentFixture() {
   return { box, relay: relay.equipment.id, dimmer: dimmer.equipment.id };
 }
 
-test("таблица оборудования: строка на размещение, группа — модель, связи с меткой", () => {
+// Заказчик: «не объединяй по устройству, а так же как в таблице Метки —
+// отдельным столбцом указывай название оборудования». Объединение прятало
+// главное: подряд шли три строки одного реле, и чтобы узнать, что стоит в
+// этой точке, приходилось искать заголовок выше.
+test("таблица оборудования: строка на размещение, модель — колонкой", () => {
   const { box } = tablesEquipmentFixture();
   const table = equipmentTable(box.project, null);
 
-  assert.deepEqual(table.columns, ["Обозначение", "Помещение", "Расположение", "Связанные метки"]);
+  assert.deepEqual(table.columns, ["Обозначение", "Модель", "Помещение", "Расположение", "Связанные метки"]);
+  // Групп по модели больше нет: один список без заголовков.
+  assert.deepEqual(table.groups.map((group) => [group.level, group.title]), [[1, ""]]);
+  const rows = table.groups[0].rows;
+  assert.deepEqual(rows.map((row) => row.cells[0]), ["Т1", "Т2", "Р1"]);
+  assert.deepEqual(rows.map((row) => row.cells[1]), ["Реле двухканальное", "Реле двухканальное", "Диммер"]);
+  assert.deepEqual(rows[0].cells, ["Т1", "Реле двухканальное", "Спальная Оли", "точка под зеркалом", "С1"]);
+  assert.deepEqual(rows[2].cells, ["Р1", "Диммер", "Холл", "розетки у кресла", ""]);
+  // Цвет строки — цвет типа метки: по нему строка на бумаге узнаётся так же,
+  // как метка на плане.
+  assert.equal(rows[0].color, styleOf(box.project, box.project.marks[0].typeId).color);
+  // Колонки группы у этого листа нет — иначе в CSV встала бы пустая шестая.
+  assert.equal(table.groupColumn, "");
+  assert.equal(rows[0].group, undefined);
+  assert.equal(tableRowCount(table), 3);
+});
+
+// Разбивка по помещениям осталась одна и работает как в листе меток: секция
+// на помещение, строки внутри неё, без второго уровня по моделям.
+test("оборудование по помещениям: секция на помещение, строки внутри", () => {
+  const { box } = tablesEquipmentFixture();
+  const table = equipmentTable(box.project, null, { byRoom: true });
+
+  assert.equal(table.byRoom, true);
   assert.deepEqual(
-    table.groups.map((group) => [group.level, group.title]),
+    table.groups.map((group) => [group.level, group.title, group.rows.map((row) => row.cells[0])]),
     [
-      [1, "Реле двухканальное"],
-      [1, "Диммер"],
+      [1, "Спальная Оли", ["Т1", "Т2"]],
+      [1, "Холл", ["Р1"]],
     ],
   );
-  assert.deepEqual(table.groups[0].rows.map((row) => row.cells[0]), ["Т1", "Т2"]);
-  assert.deepEqual(table.groups[0].rows[0].cells, ["Т1", "Спальная Оли", "точка под зеркалом", "С1"]);
-  assert.deepEqual(table.groups[1].rows.map((row) => row.cells[0]), ["Р1"]);
-  // Модель в CSV становится колонкой — на бумаге она заголовок группы.
-  assert.equal(table.groups[0].rows[0].group, "Реле двухканальное");
-  assert.equal(table.groupColumn, "Модель");
+  assert.deepEqual(table.groups[0].rows.map((row) => row.cells[1]), ["Реле двухканальное", "Реле двухканальное"]);
+  assert.equal(table.groups[0].color, findRoom(box.project, box.rooms.bedroom).color);
+  // Подвал от разбивки не зависит: закупка считается по размещениям.
+  assert.deepEqual(
+    table.totals.map((row) => [row.title, row.count]),
+    equipmentTable(box.project, null).totals.map((row) => [row.title, row.count]),
+  );
+  assert.equal(table.totalCount, 3);
+});
+
+test("лист оборудования, сужённый помещением, показывает только его строки", () => {
+  const { box } = tablesEquipmentFixture();
+  const table = equipmentTable(box.project, { roomId: box.rooms.hall });
+  assert.deepEqual(table.groups[0].rows.map((row) => row.cells.slice(0, 3)), [["Р1", "Диммер", "Холл"]]);
+  assert.equal(table.room, "Холл");
+  assert.equal(tableRowCount(table), 1);
 });
 
 test("подвал оборудования — это закупка: штуки по моделям и производителям", () => {
@@ -738,26 +786,56 @@ test("размещение без модели, без метки и с поте
   };
   const table = equipmentTable(broken, null);
 
-  const relayGroup = table.groups.find((group) => group.title === "Реле двухканальное");
-  const lostMark = relayGroup.rows.find((row) => row.cells[0] === "ссылка потеряна");
+  const rows = table.groups[0].rows;
+  const lostMark = rows.find((row) => row.cells[0] === "ссылка потеряна");
   assert.equal(lostMark.problem, true);
+  assert.equal(lostMark.cells[1], "Реле двухканальное", "модель известна, потеряна метка");
 
-  const lostModel = table.groups[table.groups.length - 1];
-  assert.equal(lostModel.title, "Модель потеряна");
-  assert.equal(lostModel.rows[0].cells[0], "Р1");
-  assert.equal(lostModel.rows[0].problem, true);
-  assert.equal(lostModel.rows[0].cells[3], "ссылка потеряна");
+  // Потерянная модель — не пустая ячейка: оборудование там есть, пропала его
+  // запись, и строку надо чинить, а не читать как «тут ничего не стоит».
+  const lostModel = rows.find((row) => row.cells[1] === "Модель потеряна");
+  assert.equal(lostModel.cells[0], "Р1");
+  assert.equal(lostModel.problem, true);
+  assert.equal(lostModel.cells[4], "ссылка потеряна");
 });
 
-test("CSV оборудования — таблица для Excel: модель колонкой, закупка за пустой строкой", () => {
+// Плоский лист должен доехать плоским во все форматы: заголовков моделей
+// между строками больше нет нигде, а подвал закупки — везде.
+test("Markdown и буфер обмена: модель в строке, заголовков модели нет, подвал на месте", () => {
+  const { box } = tablesEquipmentFixture();
+  const table = equipmentTable(box.project, null);
+
+  const markdown = toMarkdown(table);
+  assert.ok(markdown.includes("| Обозначение | Модель | Помещение | Расположение | Связанные метки |"));
+  assert.ok(markdown.includes("| Т1 | Реле двухканальное | Спальная Оли | точка под зеркалом | С1 |"));
+  assert.equal(markdown.includes("## Реле двухканальное"), false, "модель снова стала заголовком группы");
+  assert.ok(markdown.includes("## Итого"));
+  assert.ok(markdown.includes("| — Реле двухканальное (RL-2) | 2 |"));
+  assert.ok(markdown.includes("| Всего штук | 3 |"));
+
+  const tsv = toTsv(table).split("\n");
+  assert.deepEqual(tsv, [
+    "Обозначение\tМодель\tПомещение\tРасположение\tСвязанные метки",
+    "Т1\tРеле двухканальное\tСпальная Оли\tточка под зеркалом\tС1",
+    "Т2\tРеле двухканальное\tСпальная Оли\tнад кроватью\t",
+    "Р1\tДиммер\tХолл\tрозетки у кресла\t",
+  ]);
+
+  // С разбивкой по помещениям заголовок один — помещение, как в листе меток.
+  const rooms = toTsv(equipmentTable(box.project, null, { byRoom: true })).split("\n");
+  assert.equal(rooms[1], "Спальная Оли");
+  assert.equal(rooms[4], "Холл");
+});
+
+test("CSV оборудования — таблица для Excel: те же пять колонок, закупка за пустой строкой", () => {
   const { box } = tablesEquipmentFixture();
   const csv = toCsv(equipmentTable(box.project, { roomId: box.rooms.hall }));
   assert.deepEqual(csv.replace(/^﻿/, "").split("\r\n"), [
     "Квартира на Ленина",
     "Холл",
     "",
-    "Модель;Обозначение;Помещение;Расположение;Связанные метки",
-    "Диммер;Р1;Холл;розетки у кресла;",
+    "Обозначение;Модель;Помещение;Расположение;Связанные метки",
+    "Р1;Диммер;Холл;розетки у кресла;",
     "",
     "Итого",
     "Производитель;Модель;Штук",

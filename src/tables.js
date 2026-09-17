@@ -549,6 +549,14 @@ function tableFilterNarrows(filter) {
  * связывать, — а подвал «Итого» отвечает на второй вопрос заказчика, сколько
  * каких моделей закупать.
  *
+ * Лист плоский, как лист меток: модель стоит **колонкой** в каждой строке, а не
+ * заголовком группы. Так просил заказчик — «не объединяй по устройству, а так
+ * же как в таблице Метки, отдельным столбцом». Объединение по модели прятало
+ * то, ради чего лист и печатают: подряд шли три строки одного реле, и чтобы
+ * узнать, что стоит в этой точке, приходилось искать заголовок выше. Закупку
+ * по моделям при этом никто не отменял — она в подвале, и считается по тем же
+ * размещениям, а не по группам.
+ *
  * Одна таблица, а не две: закупка — это те же размещения, посчитанные по
  * моделям, и отдельным листом она разошлась бы с монтажным, как только лист
  * сузили помещением. Подвал уже умеет доезжать в CSV, Markdown, PNG и печать,
@@ -556,11 +564,21 @@ function tableFilterNarrows(filter) {
  */
 export function equipmentTable(project, filter, options = {}) {
   const byRoom = Boolean(options.byRoom);
-  const columns = [strings.tables.label, strings.tables.room, strings.tables.location, strings.tables.linked];
+  // Модель — вторым столбцом, как «Тип» в листе меток: сперва обозначение,
+  // которым метку зовут на плане, сразу за ним — что именно там стоит.
+  const columns = [
+    strings.tables.label,
+    strings.tables.model,
+    strings.tables.room,
+    strings.tables.location,
+    strings.tables.linked,
+  ];
   const empty = {
     kind: "equipment",
     byRoom,
-    groupColumn: strings.tables.model,
+    // Колонки группы у этого листа нет: и модель, и помещение стоят столбцами,
+    // а `groupColumn` добавил бы в CSV шестую, пустую.
+    groupColumn: "",
     totals: [],
     totalsColumns: [strings.tables.vendor, strings.tables.model, strings.tables.pieces],
     totalLabel: strings.tables.totalItems,
@@ -596,11 +614,13 @@ export function equipmentTable(project, filter, options = {}) {
       id: placement.id,
       cells: [
         mark ? labelOf(project, mark.id) : strings.tables.brokenLink,
+        // Модель потеряна — так и написано в строке: пустая ячейка читалась бы
+        // как «оборудования тут нет», а оно есть, просто его запись пропала.
+        item ? item.name : strings.tables.equipmentLost,
         room ? room.name : "",
         mark ? mark.location || "" : "",
         links.join(", "),
       ],
-      group: item ? item.name : strings.tables.equipmentLost,
       color: mark ? styleOf(project, mark.typeId).color : null,
       problem: broken,
     };
@@ -616,13 +636,9 @@ export function equipmentTable(project, filter, options = {}) {
 
   items.sort((a, b) => (a.sort[0] === b.sort[0] ? a.sort[1] - b.sort[1] : a.sort[0] - b.sort[0]));
 
-  const modelKeys = [...equipmentInOrder(project).map((item) => item.id), "none"];
-  const modelTitle = (key) => {
-    const item = key === "none" ? null : findEquipment(project, key);
-    return item ? item.name : strings.tables.equipmentLost;
-  };
-  const keyOf = (entry) => (entry.item ? entry.item.id : "none");
-
+  // Разбивка осталась одна — по помещениям, и работает она как в листе меток:
+  // секция на помещение, метки без помещения последней секцией. Выключена —
+  // один список без заголовков, в порядке типов справочника.
   const groups = [];
   if (byRoom) {
     const byRoomKey = new Map();
@@ -638,27 +654,12 @@ export function equipmentTable(project, filter, options = {}) {
         id: roomKey,
         title: room ? room.name : strings.tables.noRoom,
         color: room ? room.color || null : null,
-        rows: [],
+        rows: list.map((entry) => entry.row),
         level: 1,
       });
-      for (const key of modelKeys) {
-        const rows = list.filter((entry) => keyOf(entry) === key);
-        if (rows.length === 0) continue;
-        groups.push({
-          id: roomKey + ":" + key,
-          title: modelTitle(key),
-          color: null,
-          rows: rows.map((entry) => entry.row),
-          level: 2,
-        });
-      }
     }
   } else {
-    for (const key of modelKeys) {
-      const rows = items.filter((entry) => keyOf(entry) === key);
-      if (rows.length === 0) continue;
-      groups.push({ id: key, title: modelTitle(key), color: null, rows: rows.map((entry) => entry.row), level: 1 });
-    }
+    groups.push({ id: "all", title: "", color: null, rows: items.map((entry) => entry.row), level: 1 });
   }
 
   // Закупка: производитель — заголовком, модели под ним. Размещения с
