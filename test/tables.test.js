@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  addCategory,
   addEquipment,
   addMark,
   addRoom,
@@ -283,25 +284,107 @@ test("буфер обмена — табуляции без BOM: вставля�
   );
 });
 
-test("справочник типов — легенда листа: код, название, категория, форма", () => {
+// Все строки справочника подряд, в порядке секций — прежний плоский список.
+function tablesTypeRows(table) {
+  return table.groups.flatMap((group) => group.rows);
+}
+
+test("справочник типов — легенда листа: код, название, форма, начертание", () => {
   const box = tablesFixture();
   const table = typesTable(box.project);
-  // Колонки «Цвет» больше нет: заказчик попросил её убрать — код краски
-  // читателю листа ничего не говорил.
-  assert.deepEqual(table.columns, ["Код", "Название", "Категория", "Форма", "Линия"]);
-  assert.equal(table.rows.length, 28);
-  assert.deepEqual(table.rows[0].cells, ["Т", "Точечный светильник", "Свет", "Круг с крестом", "Сплошная"]);
+  // Колонки «Цвет» нет — заказчик попросил её убрать. Колонки «Категория»
+  // тоже: она дублировала заголовок секции в каждой строке.
+  assert.deepEqual(table.columns, ["Код", "Название", "Форма", "Линия"]);
+  const rows = tablesTypeRows(table);
+  assert.equal(rows.length, 28);
+  assert.deepEqual(rows[0].cells, ["Т", "Точечный светильник", "Круг с крестом", "Сплошная"]);
   // Сам цвет никуда не делся: он остался полосой слева у строки.
-  assert.equal(table.rows[0].color, "#1F6FEB");
-  assert.equal(table.rows.every((row) => !row.cells.some((cell) => /^#[0-9A-F]{6}$/.test(cell))), true);
+  assert.equal(rows[0].color, "#1F6FEB");
+  assert.equal(rows.every((row) => !row.cells.some((cell) => /^#[0-9A-F]{6}$/.test(cell))), true);
   assert.deepEqual(
-    table.rows.map((row) => row.cells[0]),
+    rows.map((row) => row.cells[0]),
     // prettier-ignore
     ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ",
      "В", "ВВ", "ВВВ", "ВП", "Р", "Б", "К", "W", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС",
      "ВР", "КН", "КВ"],
   );
-  assert.equal(toTsv(table).split("\n")[1], "Т\tТочечный светильник\tСвет\tКруг с крестом\tСплошная");
+  assert.equal(tableRowCount(table), 28);
+});
+
+test("справочник типов разбит по категориям, в заголовке — цвет словами и кодом", () => {
+  const box = tablesFixture();
+  const table = typesTable(box.project);
+  // Слова заказчика: «у категории пиши её название, потом цвет: зелёный
+  // (#00FF00)». Тёмная бирюза датчиков и коричневый щита называются так, как
+  // их называет сам шаблон, — значит, счёт имени сходится с глазом.
+  assert.deepEqual(
+    table.groups.map((group) => group.title),
+    [
+      "Свет · синий (#1F6FEB)",
+      "Выключатели · зелёный (#2DA44E)",
+      "Розетки · красный (#D1242F)",
+      "Климат · оранжевый (#E36209)",
+      "Сетевое оборудование · фиолетовый (#8250DF)",
+      "Датчики · тёмно-бирюзовый (#164E63)",
+      "Щит · коричневый (#6E4B1F)",
+      "Сантехника · пурпурный (#E80098)",
+    ],
+  );
+  // Цвет секции — тот же, которым PNG и печать красят заголовок: своего
+  // способа рисовать полосу у справочника нет.
+  assert.deepEqual(table.groups.map((group) => group.color), [
+    "#1F6FEB",
+    "#2DA44E",
+    "#D1242F",
+    "#E36209",
+    "#8250DF",
+    "#164E63",
+    "#6E4B1F",
+    "#E80098",
+  ]);
+  assert.deepEqual(table.groups.map((group) => group.level), [1, 1, 1, 1, 1, 1, 1, 1]);
+  assert.equal(table.groups[2].rows[0].cells[0], "Р");
+
+  // Цвет, заведённый пользователем, называется так же, как цвета шаблона:
+  // словарь соответствий тут ничего бы не нашёл.
+  const own = addCategory(box.project, { name: "Слаботочка", color: "#7A3B12", shape: "circle" });
+  const custom = typesTable(
+    addType(own.project, { code: "СЛ", name: "Слаботочная линия", categoryId: own.category.id }).project,
+  );
+  assert.equal(custom.groups.at(-1).title, "Слаботочка · коричневый (#7A3B12)");
+});
+
+test("справочник типов: разбивка доезжает в Markdown и в буфер, а в CSV — колонкой", () => {
+  const box = tablesFixture();
+  const table = typesTable(box.project);
+
+  // CSV читают фильтром Excel, и заголовок-строка утаскивался бы в данные:
+  // категория возвращается колонкой — той самой, что ушла из строк.
+  const csv = toCsv(table).split("\r\n");
+  assert.equal(csv[0], "﻿Справочник типов");
+  assert.equal(csv[2], "Категория;Код;Название;Форма;Линия");
+  assert.equal(csv[3], "Свет;Т;Точечный светильник;Круг с крестом;Сплошная");
+  // Пустого столбца в CSV нет: шапка и каждая строка одной длины.
+  const width = csv[2].split(";").length;
+  assert.equal(width, 5);
+  for (const line of csv.slice(3)) {
+    if (line === "") continue;
+    assert.equal(line.split(";").length, width, "строка CSV другой ширины: " + line);
+  }
+  assert.equal(csv.join("\r\n").includes(";;"), false);
+
+  const markdown = toMarkdown(table).split("\n");
+  assert.equal(markdown[0], "# Справочник типов");
+  assert.equal(markdown[2], "## Свет · синий (#1F6FEB)");
+  assert.equal(markdown[4], "| Код | Название | Форма | Линия |");
+  assert.ok(markdown.includes("## Розетки · красный (#D1242F)"));
+
+  const tsv = toTsv(table).split("\n");
+  assert.deepEqual(tsv.slice(0, 3), [
+    "Код\tНазвание\tФорма\tЛиния",
+    "Свет · синий (#1F6FEB)",
+    "Т\tТочечный светильник\tКруг с крестом\tСплошная",
+  ]);
 });
 
 test("лист, сужённый фильтром по помещению, называет это помещение — как на рукописном листе", () => {

@@ -26,6 +26,7 @@ import {
   styleOf,
   typesInOrder,
 } from "./model.js";
+import { colorNameHex } from "./colorName.js";
 import { visibleMarks } from "./render.js";
 import { strings, text } from "./strings.js";
 
@@ -702,39 +703,63 @@ export function equipmentTable(project, filter, options = {}) {
   };
 }
 
-// Колонки «Цвет» здесь нет: заказчик попросил её убрать. Шестнадцатеричный
-// код краски читателю листа ничего не говорил — цвет он видит полосой слева
-// у строки (`row.color`), а на плане меткой. Сам цвет никуда не делся.
+// Справочник разбит по категориям, как остальные листы: категория —
+// заголовок секции, а не колонка в каждой строке. Колонка её дублировала —
+// двадцать восемь строк подряд повторяли «Свет», «Свет», «Свет».
+//
+// В заголовке рядом с названием стоит цвет категории словами и кодом —
+// «Розетки · красный (#D1242F)». Так просил заказчик: один hex читателю
+// листа ничего не говорил, а по слову цвет узнаётся и на чёрно-белой
+// распечатке, где цветной полосы попросту нет. Имя считает `colorName.js` —
+// оно находится и для цвета, который пользователь завёл сам.
+//
+// Отдельной колонки «Цвет» по-прежнему нет: у строки цвет остался полосой
+// слева (`row.color`), а у секции — полосой и чертой заголовка.
 export function typesTable(project) {
-  const columns = [
-    strings.tables.code,
-    strings.tables.name,
-    strings.tables.category,
-    strings.tables.shape,
-    strings.tables.line,
-  ];
-  const rows = [];
+  const columns = [strings.tables.code, strings.tables.name, strings.tables.shape, strings.tables.line];
+  const groups = [];
   if (project) {
     for (const { category, types } of typesInOrder(project)) {
-      for (const type of types) {
-        const style = styleOf(project, type.id);
-        rows.push({
-          id: type.id,
-          cells: [
-            type.code,
-            type.name,
-            category.name,
-            strings.shapes[style.shape] || style.shape,
-            // Начертание — часть обозначения: по распечатке видно, где пунктир.
-            strings.lineStyles[style.lineStyle] || style.lineStyle,
-          ],
-          color: style.color,
-          shape: style.shape,
-        });
-      }
+      const color = category.color || null;
+      const named = colorNameHex(color);
+      groups.push({
+        id: category.id,
+        title: named ? text("tables.groupColor", { title: category.name, color: named }) : category.name,
+        color,
+        level: 1,
+        rows: types.map((type) => {
+          const style = styleOf(project, type.id);
+          return {
+            id: type.id,
+            cells: [
+              type.code,
+              type.name,
+              strings.shapes[style.shape] || style.shape,
+              // Начертание — часть обозначения: по распечатке видно, где пунктир.
+              strings.lineStyles[style.lineStyle] || style.lineStyle,
+            ],
+            // Категория строкой — для CSV: там заголовков-секций нет, и
+            // категория возвращается колонкой. Название без цвета: в таблице
+            // Excel по ней фильтруют и сортируют, а «Свет · синий (#1F6FEB)»
+            // фильтровать неудобно.
+            group: category.name,
+            color: style.color,
+            shape: style.shape,
+          };
+        }),
+      });
     }
   }
-  return { kind: "types", title: strings.tables.typesTitle, byRoom: false, room: "", note: "", columns, rows };
+  return {
+    kind: "types",
+    title: strings.tables.typesTitle,
+    byRoom: false,
+    room: "",
+    note: "",
+    groupColumn: strings.tables.category,
+    columns,
+    groups,
+  };
 }
 
 // Обе таблицы читаются одинаково: список секций с заголовком и строками.
