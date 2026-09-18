@@ -1095,6 +1095,21 @@
   border-color: var(--panel-muted);
 }
 
+/* Заголовок раздела палитры: строка сетки целиком, поэтому следующая фигура
+   начинает новый ряд сама — без пустых клеток-заполнителей. Набран тем же
+   приглушённым размером, что подпись группы в справочнике: заголовок нужен,
+   чтобы глаз цеплялся за границу семьи, а не чтобы читать его вслух. */
+.shapes__head {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.shapes__head:first-child {
+  margin-top: 0;
+}
+
 .shapes__caption,
 .lines__caption {
   color: var(--panel-muted);
@@ -1533,15 +1548,22 @@
   padding: 5px 7px;
 }
 
+/* Мера значка одна на все панели и окна: строки списков плотные, и шапочные
+   18 px поднимали их на пару пикселей каждая. В самой шапке мера прежняя —
+   она подобрана под тамошние кнопки (таск 55) и менять её незачем. */
 .ui-icon {
-  width: 18px;
-  height: 18px;
+  width: var(--ui-icon, 16px);
+  height: var(--ui-icon, 16px);
   display: block;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+#app-header .ui-icon {
+  --ui-icon: 18px;
 }
 
 .ui-btn--wide {
@@ -1816,6 +1838,13 @@
 
 #panel-schemes .scheme-row__tools .ui-btn {
   padding: 1px 4px;
+}
+
+/* Шесть кнопок в строке схемы стоят вплотную: значок шире прежнего символа, и
+   без этого поля ряд кнопок отъедал у размеров плана треть строки. Меньше уже
+   нельзя — рисунок упрётся в рамку. */
+#panel-schemes .scheme-row__tools .ui-btn--icon {
+  padding: 1px 3px;
 }
 
 /* ——— поиск по объекту и отмена в шапке ——————————————————————————————— */
@@ -3337,6 +3366,16 @@ const strings = {
     waterOutlet: "Водорозетка",
     sewer: "Выход канализации",
     waterValve: "Кран воды с электроприводом",
+  },
+  // Разделы палитры фигур. Названы по силуэту: что видно, то и написано —
+  // заголовок по применению («Свет», «Датчики») обещал бы деление, которого в
+  // палитре нет, а один и тот же знак ставят на что угодно.
+  shapeGroups: {
+    circles: "Круги",
+    squares: "Квадраты",
+    angles: "Треугольники, ромбы, звезда и крест",
+    rects: "Прямоугольники и трапеции",
+    drops: "Капли и полукруги",
   },
   shapes: {
     circle: "Круг",
@@ -12151,6 +12190,33 @@ const UI_ICONS = {
   // Крестик: «убрать эту строку». Не корзина — ничего не удаляется насовсем,
   // и не галочка — она уже занята хорошей новостью.
   close: ["M7 7 17 17", "M17 7 7 17"],
+  // Минус — близнец плюса: та же черта, та же длина. Пара стоит рядом в
+  // масштабе, и разная длина черт была бы видна сразу.
+  minus: ["M5 12h14"],
+  // Порядок схем: стрелка с древком, а не «шеврон». Шеврон в наборе уже занят
+  // раскрытием списка, и в столбце кнопок «выше/ниже» рядом с ним читался бы
+  // как «развернуть».
+  up: ["M12 19V6", "M6.5 11.5 12 6l5.5 5.5"],
+  down: ["M12 5v13", "M6.5 12.5 12 18l5.5-5.5"],
+  // Замена плана: две стрелки навстречу друг другу — «одно вместо другого».
+  // Не крест-накрест: в клетке 16 px пересечение линий сливается в узел.
+  swap: ["M4.5 9h13", "M14.5 5.5 18 9l-3.5 3.5", "M19.5 15h-13", "M9.5 11.5 6 15l3.5 3.5"],
+  // Правка плана — рамка кадрирования: два угольника внахлёст. Ножницы,
+  // стоявшие здесь раньше, обещали «вырезать кусок», а окно поворачивает план
+  // и обрезает поля.
+  crop: ["M7.5 3v13.5H21", "M3 7.5h13.5V21"],
+  // Поворот плана: кольцо с разрывом и уголком на конце дуги. Левый и правый
+  // зеркальны, и сторона поворота читается только по уголку — поэтому он
+  // вынесен за кольцо, а не вписан в него: остриё внутри дуги в клетке 16 px
+  // сливалось с самим кольцом в утолщение.
+  rotateLeft: ["M5.5 12a6.5 6.5 0 1 1 3 5.5", "M9 8.5H5.5V5"],
+  rotateRight: ["M18.5 12a6.5 6.5 0 1 0-3 5.5", "M15 8.5h3.5V5"],
+  // Контур помещения: замкнутая ломаная с углами — то же, что обводят на
+  // плане. Прямоугольник не годится: обводят по стенам, а не по рамке.
+  outline: ["M4.5 8.5 12 4l7.5 4.5v7L12 20l-7.5-4.5z"],
+  // Уплотнение нумерации: две стрелки, сходящиеся к середине, — «сомкнуть».
+  // Прежнее «№» говорило про номера, но не про то, что с ними сделают.
+  compact: ["M4 12h6", "M7 9l3 3-3 3", "M20 12h-6", "M17 9l-3 3 3 3"],
 };
 function uiIcon(name) {
   const svg = document.createElementNS(UI_SVG_NS, "svg");
@@ -16992,7 +17058,7 @@ function openEquipmentWindow(api, options = {}) {
 
   function modelRow(item) {
     const used = equipmentUsage(project(), item.id);
-    const remove = uiButton("🗑", {
+    const remove = uiIconButton("trash", {
       class: "ui-btn ui-btn--danger",
       title: used > 0 ? text("errors.equipmentInUse", { name: item.name, count: used }) : strings.equipment.removeModel,
       on: { click: () => removeModel(item) },
@@ -17136,7 +17202,7 @@ function openEquipmentWindow(api, options = {}) {
         title: strings.equipment.links,
         on: { click: () => pickLinks(placement) },
       }),
-      uiButton("🗑", {
+      uiIconButton("trash", {
         class: "ui-btn ui-btn--danger",
         title: strings.equipment.removePlacement,
         on: {
@@ -17915,6 +17981,43 @@ function typesShapeCell({ shape, color, active, inherit, onPick }) {
   );
 }
 
+// Разделы палитры. Семьи силуэтов уже сложены в самой палитре (`SHAPE_PALETTE`),
+// здесь только границы — последняя фигура каждого раздела — и ключ названия.
+// Граница задана последней, а не первой фигурой: новую фигуру в середину семьи
+// добавляют чаще, чем в конец, и тогда правка палитры не требует правки границ.
+//
+// Разделы названы по силуэту, а не по применению («Свет», «Датчики»), и это
+// осознанно. Применение в названии фигуры запрещено отдельным правилом (G71):
+// один и тот же знак в шаблоне стоит и на датчике, и на светильнике, а меняют
+// их местами между категориями по мере надобности. Заголовок «Датчики» обещал
+// бы раздел, которого нет, и через полгода врал бы. Выбирают знак не «под
+// смысл», а чтобы он не повторял соседние по категории, — и тогда помогает
+// ровно то, что видно глазом: круг это или квадрат.
+const SHAPE_GROUPS = [
+  { key: "circles", last: "circle-bar" },
+  { key: "squares", last: "square-grid" },
+  { key: "angles", last: "plus" },
+  { key: "rects", last: "trapezoid-bar" },
+  { key: "drops", last: "dome-dot" },
+];
+
+// Палитра, разложенная по разделам, порядок — палитры. Фигура, не попавшая ни
+// в один раздел (добавили в палитру, а границы поправить забыли), не теряется:
+// она встаёт последней группой без заголовка — в сетке она есть, а тест на это
+// краснеет.
+function shapeGroups(names = SHAPE_PALETTE) {
+  const groups = [];
+  let rest = [...names];
+  for (const group of SHAPE_GROUPS) {
+    const edge = rest.indexOf(group.last);
+    if (edge < 0) continue;
+    groups.push({ key: group.key, shapes: rest.slice(0, edge + 1) });
+    rest = rest.slice(edge + 1);
+  }
+  if (rest.length > 0) groups.push({ key: null, shapes: rest });
+  return groups;
+}
+
 // Выбор формы — сетка нарисованных фигур, а не список названий: обозначение
 // узнают в лицо, а не по слову. Вариант «как у категории» стоит первой ячейкой
 // и показывает фигуру категории с пометкой.
@@ -17937,10 +18040,17 @@ function openTypesShapePicker({ shape, color, allowInherit, inheritShape }) {
         }),
       );
     }
-    for (const name of SHAPE_PALETTE) {
-      cells.push(
-        typesShapeCell({ shape: name, color, active: shape === name, onPick: () => done({ shape: name }) }),
-      );
+    // Заголовок — обычный абзац во всю строку сетки: клавиатура его не видит,
+    // и обход кнопок Tab'ом остаётся прежним.
+    for (const group of shapeGroups()) {
+      if (group.key) {
+        cells.push(uiEl("p", { class: "shapes__head", text: strings.shapeGroups[group.key] }));
+      }
+      for (const name of group.shapes) {
+        cells.push(
+          typesShapeCell({ shape: name, color, active: shape === name, onPick: () => done({ shape: name }) }),
+        );
+      }
     }
     modal = uiModal({
       title: strings.dictionary.shape,
@@ -18441,7 +18551,7 @@ function openTypesDictionary(api) {
     //
     // Невозможное действие видно невозможным: тип с метками не удаляется,
     // и кнопка об этом говорит до нажатия, а не после.
-    const removeButton = uiButton("🗑", {
+    const removeButton = uiIconButton("trash", {
       class: "ui-btn ui-btn--danger dict__act",
       title: count > 0 ? text("errors.typeHasMarks", { code: type.code, count }) : strings.dictionary.removeType,
       on: { click: () => removeType(type) },
@@ -18449,7 +18559,7 @@ function openTypesDictionary(api) {
     removeButton.disabled = count > 0;
     // Уплотнение живёт в строке типа: тип назван, и рядом видно, скольких меток
     // команда коснётся.
-    const compactButton = uiButton("№", {
+    const compactButton = uiIconButton("compact", {
       class: "ui-btn dict__act",
       title:
         count > 0
@@ -18524,7 +18634,7 @@ function openTypesDictionary(api) {
 
   function categoryRow(category) {
     const types = project().markTypes.filter((type) => type.categoryId === category.id).length;
-    const removeButton = uiButton("🗑", {
+    const removeButton = uiIconButton("trash", {
       class: "ui-btn ui-btn--danger",
       title: types > 0 ? strings.errors.categoryHasTypes : strings.dictionary.removeCategory,
       on: { click: () => removeCategory(category) },
@@ -19920,12 +20030,12 @@ function mountRoomsPanel(host, api) {
             text: String(row.marks),
             title: text("rooms.marks", { count: row.marks }),
           }),
-          uiButton("⬡", {
+          uiIconButton("outline", {
             class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
             title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
             on: { click: () => startOutline(row.room.id) },
           }),
-          uiButton("🗑", {
+          uiIconButton("trash", {
             class: "ui-btn ui-btn--danger",
             title: strings.rooms.remove,
             on: { click: () => remove(row.room.id) },
@@ -20601,11 +20711,11 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
     const stage = uiEl("div", { class: "plan-stage" }, [image, box]);
     const hint = uiEl("p", { class: "modal__hint", text: strings.image.cropHint });
 
-    const rotateLeft = uiButton("⟲", {
+    const rotateLeft = uiIconButton("rotateLeft", {
       title: strings.image.rotateLeft,
       on: { click: () => apply(rotateTransform(transform, -90)) },
     });
-    const rotateRight = uiButton("⟳", {
+    const rotateRight = uiIconButton("rotateRight", {
       title: strings.image.rotateRight,
       on: { click: () => apply(rotateTransform(transform, 90)) },
     });
@@ -20790,6 +20900,11 @@ function mountSchemesPanel(host, api) {
       const row = uiEl("div", {
         class: "scheme-row" + (scheme.id === state.schemeId ? " scheme-row--current" : ""),
       });
+      // Размеры плана стоят в узкой колонке рядом с рядом кнопок и при длинном
+      // числе ужимаются многоточием — поэтому то же самое лежит в подсказке.
+      const meta = scheme.imageId
+        ? text("schemes.size", { width: scheme.width, height: scheme.height })
+        : strings.schemes.noImage;
       row.append(
         uiEl("button", {
           class: "scheme-row__name",
@@ -20798,15 +20913,10 @@ function mountSchemesPanel(host, api) {
           title: scheme.name,
           on: { click: () => setState({ schemeId: scheme.id, selectedMarkIds: [] }) },
         }),
-        uiEl("span", {
-          class: "scheme-row__meta",
-          text: scheme.imageId
-            ? text("schemes.size", { width: scheme.width, height: scheme.height })
-            : strings.schemes.noImage,
-        }),
+        uiEl("span", { class: "scheme-row__meta", text: meta, title: meta }),
         uiEl("div", { class: "scheme-row__tools", attrs: editable ? {} : { hidden: "hidden" } }, [
-          uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
-          uiButton("⇄", {
+          uiIconButton("crop", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
+          uiIconButton("swap", {
             title: strings.schemes.replace,
             on: {
               click: () => {
@@ -20815,18 +20925,18 @@ function mountSchemesPanel(host, api) {
               },
             },
           }),
-          uiButton("✎", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
-          uiButton("↑", {
+          uiIconButton("edit", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
+          uiIconButton("up", {
             title: strings.schemes.up,
             attrs: index === 0 ? { disabled: "disabled" } : {},
             on: { click: () => moveScheme(scheme.id, -1) },
           }),
-          uiButton("↓", {
+          uiIconButton("down", {
             title: strings.schemes.down,
             attrs: index === ordered.length - 1 ? { disabled: "disabled" } : {},
             on: { click: () => moveScheme(scheme.id, 1) },
           }),
-          uiButton("🗑", {
+          uiIconButton("trash", {
             class: "ui-btn ui-btn--danger",
             title: strings.schemes.remove,
             on: { click: () => removeScheme(scheme.id, marks) },
@@ -21974,8 +22084,8 @@ function mountSizesPanel(host, api) {
       ]),
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       uiEl("div", { class: "tools__row" }, [
-        uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
-        uiButton("+", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
+        uiIconButton("minus", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
+        uiIconButton("plus", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
         uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
         uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
       ]),
