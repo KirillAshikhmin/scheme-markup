@@ -31,6 +31,8 @@ const appState = {
   // Путь в правке: у него видны ручки вершин. Режим руки, а не свойство
   // разметки, — в объект и в файл проекта он не попадает.
   editPathId: null,
+  // Линейка и направляющие видны, пока их не спрятали.
+  guidesShown: true,
   activeTypeId: null,
   mode: "select",
   filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
@@ -49,6 +51,9 @@ export const SECTION_IDS = {
   properties: "properties",
 };
 export const SECTIONS_SETTING = "collapsedSections";
+// Линейка и направляющие: отметка рабочего места, а не свойство объекта.
+// Живёт в настройках браузера и переживает перезагрузку.
+export const GUIDES_SETTING = "schemeGuidesShown";
 // На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
 // место они отнимают у списка схем. Всё остальное открыто — иначе новый
 // пользователь ищет, куда делись инструменты.
@@ -403,6 +408,13 @@ function wireSections() {
         appCollapsed.add(id);
         applySectionState(id);
       }
+    })
+    .catch(() => {});
+  // Та же история у линейки: страница стартует с ней, и она гаснет, когда
+  // хранилище ответит «спрятана».
+  Promise.resolve(getSetting(GUIDES_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ guidesShown: false });
     })
     .catch(() => {});
 }

@@ -25,8 +25,12 @@ import {
   findGroup,
   findOutline,
   findRoom,
+  addSchemeGuide,
+  deleteSchemeGuide,
   insertMarkPoint,
   insertOutlinePoint,
+  moveSchemeGuide,
+  schemeGuides,
   labelOf,
   moveMarkPoint,
   moveOutlinePoint,
@@ -58,6 +62,12 @@ import {
   pathVertexHandles,
   hitPathHandle,
   drawPathHandles,
+  drawRuler,
+  drawSchemeGuides,
+  guideFraction,
+  hitSchemeGuide,
+  snapToSchemeGuides,
+  RULER_SIZE,
   planToScreen,
   screenToPlan,
   draftSnap,
@@ -454,6 +464,27 @@ function canvasPaint() {
     const room = findRoom(project, outline.roomId);
     drawLabelTurn(canvasCtx, outlineLabelTurn(project, scheme, outline, view), (room && room.color) || "#0969da");
   }
+  // Направляющие пользователя — под ручками и над планом: их ставят, чтобы
+  // целиться, и терять их под меткой нельзя. В `drawScheme` их нет вовсе,
+  // поэтому в PNG, в печать и в лист «Схема» они не попадают.
+  const box = canvasBox();
+  const guidesOn = canvasGuidesShown(state);
+  if (guidesOn) {
+    const live = canvasDrag && canvasDrag.kind === "guideMove" ? canvasDrag.guideId : null;
+    drawSchemeGuides(canvasCtx, canvasSchemeGuides(state, scheme), scheme, view, box, { activeId: live });
+    // Новая направляющая, которую сейчас тянут с линейки: в объекте её ещё нет.
+    if (canvasDrag && canvasDrag.kind === "guideNew") {
+      drawSchemeGuides(
+        canvasCtx,
+        [{ id: "draft", axis: canvasDrag.axis, at: canvasDrag.at }],
+        scheme,
+        view,
+        box,
+        { activeId: "draft" },
+      );
+    }
+  }
+
   // Ручки вершин правимого пути — одни и те же у ломаной метки и у контура
   // помещения: обводка по стенам с первого раза не выходит, и ошибка на третьей
   // вершине из десяти правится третьей, а не перерисовкой всего.
@@ -478,6 +509,8 @@ function canvasPaint() {
       drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark));
     }
   }
+  // Линейка — последней: она поверх всего, и с неё тянут направляющие.
+  if (guidesOn) drawRuler(canvasCtx, scheme, view, box);
 }
 
 // Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа.
@@ -596,7 +629,9 @@ function canvasPlacePoint(plan) {
       schemeId: state.schemeId,
       typeId: state.activeTypeId,
       kind: "point",
-      points: [plan],
+      // Точка липнет к направляющим — ради этого их и ставят: «6 вертикальных,
+      // 2 горизонтальных и на перекрестия ставишь точки».
+      points: [canvasGuideSnap(plan)],
     });
     canvasCommit(state.project, result.project, strings.history.addMark, { selection: [result.mark.id] });
   } catch (error) {
@@ -718,6 +753,58 @@ function canvasResetLabel(point) {
 //
 // Разница между ними — только в пределе: линия живёт от двух вершин, контур от
 // трёх. Всё остальное считает один и тот же код.
+// Линейка и направляющие видны, пока пользователь их не спрятал. Отметка живёт
+// в настройках браузера, а не в объекте: это оснастка рабочего места, и в файл
+// проекта ей не за чем — зато переживает перезагрузку.
+function canvasGuidesShown(state) {
+  return !state || state.guidesShown !== false;
+}
+
+function canvasBox() {
+  return canvasNode
+    ? { width: Math.max(1, canvasNode.clientWidth), height: Math.max(1, canvasNode.clientHeight) }
+    : { width: 1, height: 1 };
+}
+
+// Полоса линейки: клик по ней вытягивает новую направляющую, а не идёт в план.
+function canvasOnRuler(point) {
+  return point.x <= RULER_SIZE || point.y <= RULER_SIZE;
+}
+
+function canvasSchemeGuides(state, scheme) {
+  if (!canvasGuidesShown(state) || !scheme) return [];
+  return schemeGuides(state.project, scheme.id);
+}
+
+// Притяжка к своим направляющим — одной дверью для всех рук: постановка точки,
+// перенос метки, перенос линии. Рисование и правка вершины идут через
+// `draftSnap`, который зовёт ту же функцию первой.
+function canvasGuideSnap(plan, free) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  if (!scheme) return plan;
+  const guides = canvasSchemeGuides(state, scheme);
+  if (guides.length === 0) return plan;
+  return snapToSchemeGuides(guides, plan, scheme, canvasViewOf(state), { free: Boolean(free) }).point;
+}
+
+// Вершина метки, ближайшая к точке клика: за неё и считается притяжка при
+// переносе. У точечной метки она одна, у ломаной — та, что под рукой.
+function canvasNearestVertex(mark, point, scheme, view) {
+  const points = (mark && mark.points) || [];
+  let best = 0;
+  let gap = Infinity;
+  points.forEach((item, index) => {
+    const at = planToScreen(item, scheme, view);
+    const distance = Math.hypot(at.x - point.x, at.y - point.y);
+    if (distance < gap) {
+      gap = distance;
+      best = index;
+    }
+  });
+  return best;
+}
+
 function canvasEditedPath(state, scheme) {
   if (!state || !state.editPathId || !scheme || !state.project) return null;
   const mark = findMark(state.project, state.editPathId);
@@ -744,7 +831,10 @@ function canvasVertexSnap(path, index, target, free) {
   if (points.length < 2) return { point: target, guides: [] };
   const anchor = index > 0 ? index - 1 : path.closed ? points.length - 1 : 1;
   const sources = points.filter((item, at) => at !== index && at !== anchor);
-  const snap = draftSnap([...sources, points[anchor]], target, scheme, canvasViewOf(state), { free: Boolean(free) });
+  const snap = draftSnap([...sources, points[anchor]], target, scheme, canvasViewOf(state), {
+    free: Boolean(free),
+    planGuides: canvasSchemeGuides(state, scheme),
+  });
   return { point: snap.point, guides: snap.guides || [] };
 }
 
@@ -804,6 +894,28 @@ function canvasRemoveMarkPoint(markId, index) {
   }
 }
 
+// Направляющую ставят, двигают и убирают — три шага истории, как у всего
+// остального на холсте.
+function canvasGuideAdd(axis, at) {
+  const state = canvasState();
+  try {
+    const result = addSchemeGuide(state.project, state.schemeId, { axis, at });
+    canvasCommit(state.project, result.project, strings.history.guideAdd);
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+function canvasGuideRemove(guideId) {
+  const state = canvasState();
+  try {
+    const result = deleteSchemeGuide(state.project, state.schemeId, guideId);
+    canvasCommit(state.project, result.project, strings.history.guideRemove);
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
 function canvasBlockPoint(markId, side) {
   const state = canvasState();
   try {
@@ -828,7 +940,10 @@ function canvasDraftSnap(plan, free) {
   if (!canvasDraft || canvasDraft.points.length === 0) return { point: plan, snapped: false, guides: [] };
   const state = canvasState();
   const scheme = canvasScheme(state);
-  return draftSnap(canvasDraft.points, plan, scheme, canvasViewOf(state), { free: Boolean(free) });
+  return draftSnap(canvasDraft.points, plan, scheme, canvasViewOf(state), {
+    free: Boolean(free),
+    planGuides: canvasSchemeGuides(state, scheme),
+  });
 }
 
 function canvasCancelDraft() {
@@ -1236,6 +1351,20 @@ function canvasPointerDown(event) {
     }
   }
 
+  // Линейка забирает клик себе: с неё тянут новую направляющую. Она лежит
+  // поверх плана, и отдавать её клик метке нельзя.
+  if (editable && canvasGuidesShown(state) && canvasOnRuler(point)) {
+    const axis = point.y <= RULER_SIZE ? "h" : "v";
+    canvasDrag = {
+      kind: "guideNew",
+      axis,
+      at: guideFraction(axis, axis === "h" ? point.y : point.x, scheme, view),
+      start: point,
+      moved: false,
+    };
+    return;
+  }
+
   // Вершина правимого пути важнее клика по самому объекту: пока ручки видны,
   // за вершину тащат её одну, а не всю линию и не весь контур.
   const editedPath = editable ? canvasEditedPath(state, scheme) : null;
@@ -1329,12 +1458,30 @@ function canvasPointerDown(event) {
       kind: hit.part === "label" ? "label" : "mark",
       markId: hit.markId,
       groupId: hit.groupId,
+      anchor: canvasNearestVertex(findMark(state.project, hit.markId), point, scheme, view),
       start: point,
       before: state.project,
       moved: false,
     };
     return;
   }
+  // Направляющую берут под руку только в выделении: в добавлении клик по плану
+  // ставит метку, и отбирать его у постановки нельзя — в перекрестия и целятся.
+  if (editable && canvasGuidesShown(state) && state.mode === "select") {
+    const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), point, scheme, view);
+    if (guide) {
+      canvasDrag = {
+        kind: "guideMove",
+        guideId: guide.id,
+        axis: guide.axis,
+        start: point,
+        before: state.project,
+        moved: false,
+      };
+      return;
+    }
+  }
+
   canvasDrag = {
     kind: canvasAddKind(state) === "point" && editable ? "place" : "empty",
     start: point,
@@ -1385,7 +1532,13 @@ function canvasDragTo(point, free) {
       canvasPreview = updateMark(before, holder, { labelOffset: offset }).project;
     } else {
       const mark = findMark(before, canvasDrag.markId);
-      const points = mark.points.map((item) => ({ x: item.x + dx, y: item.y + dy }));
+      const shifted = mark.points.map((item) => ({ x: item.x + dx, y: item.y + dy }));
+      // Притяжка к направляющим считается по той вершине, за которую взялись:
+      // её пользователь и ведёт глазами. Вся метка едет за ней, форма цела.
+      const anchor = shifted[canvasDrag.anchor] || shifted[0];
+      const snapped = canvasGuideSnap(anchor, free);
+      const fix = { x: snapped.x - anchor.x, y: snapped.y - anchor.y };
+      const points = shifted.map((item) => ({ x: item.x + fix.x, y: item.y + fix.y }));
       canvasPreview = updateMark(before, canvasDrag.markId, { points }).project;
     }
   } catch (error) {
@@ -1430,6 +1583,23 @@ function canvasPointerMove(event) {
   if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
   if (!canvasDrag.moved) return;
 
+  if (canvasDrag.kind === "guideNew" || canvasDrag.kind === "guideMove") {
+    const scheme = canvasScheme(state);
+    const view = canvasViewOf(state);
+    const at = guideFraction(canvasDrag.axis, canvasDrag.axis === "h" ? point.y : point.x, scheme, view);
+    if (canvasDrag.kind === "guideNew") canvasDrag.at = at;
+    else {
+      try {
+        canvasPreview = moveSchemeGuide(canvasDrag.before, state.schemeId, canvasDrag.guideId, at).project;
+      } catch (error) {
+        canvasPreview = null;
+      }
+    }
+    // Утащенная обратно на линейку направляющая снимается — это её «корзина».
+    canvasDrag.drop = canvasOnRuler(point);
+    canvasRedraw();
+    return;
+  }
   if (["mark", "label", "outlineLabel", "pathVertex"].includes(canvasDrag.kind)) {
     canvasDragTo(point, event.altKey);
     return;
@@ -1454,6 +1624,21 @@ function canvasPointerUp(event) {
   const point = canvasPointOf(event);
   const state = canvasState();
 
+  if (drag.kind === "guideNew") {
+    // Не вытянули с линейки — направляющей и не было: клик по самой линейке
+    // ничего не создаёт.
+    if (drag.moved && !canvasOnRuler(point)) canvasGuideAdd(drag.axis, drag.at);
+    canvasRedraw();
+    return;
+  }
+  if (drag.kind === "guideMove") {
+    const after = canvasPreview;
+    canvasPreview = null;
+    if (canvasOnRuler(point)) canvasGuideRemove(drag.guideId);
+    else if (drag.moved && after) canvasCommit(drag.before, after, strings.history.guideMove);
+    canvasRedraw();
+    return;
+  }
   if (drag.moved) {
     if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
       const label = drag.kind === "label" ? strings.history.moveLabel : strings.history.move;
@@ -1537,6 +1722,14 @@ function canvasDoubleClick(event) {
       if (mark && mark.kind === "line" && (!edited || hit.markId !== edited.id)) {
         event.preventDefault();
         canvasEditPath("mark", mark.id);
+        return;
+      }
+    }
+    if (!hit && canvasGuidesShown(state)) {
+      const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), at, scheme, view);
+      if (guide) {
+        event.preventDefault();
+        canvasGuideRemove(guide.id);
         return;
       }
     }

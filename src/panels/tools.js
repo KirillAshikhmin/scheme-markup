@@ -6,7 +6,7 @@
 // Обводки помещений здесь нет вовсе: контур принадлежит комнате, а не метке,
 // и запускается из раздела «Помещения» — там и список комнат, и кнопки
 // контуров. В этом разделе остаются только режимы про метки.
-import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { GUIDES_SETTING, layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   BLOCK_MODES,
@@ -20,6 +20,7 @@ import {
   updateType,
 } from "../model.js";
 import { uiEl, uiButton, uiIconButton } from "./ui.js";
+import { setSetting } from "../store.js";
 import { openTypePicker } from "./typePicker.js";
 import { shapeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
@@ -43,6 +44,23 @@ function toolsTypeIcon(project, typeId, size = 26) {
 
 // Ползунок двигается живьём, а в историю попадает одним действием на всё
 // перетаскивание: иначе стек забивался бы тридцатью шагами на один жест.
+// Отметка «линейка и направляющие»: состояние сеанса плюс запись в настройки —
+// оно переживает перезагрузку, но в объект не попадает.
+function toolsGuidesCheck(state, setState) {
+  const box = uiEl("input", {
+    class: "tools__check",
+    type: "checkbox",
+    on: {
+      change: () => {
+        setState({ guidesShown: box.checked });
+        setSetting(GUIDES_SETTING, box.checked);
+      },
+    },
+  });
+  box.checked = state.guidesShown !== false;
+  return box;
+}
+
 function toolsSlider(value, range, onInput, onCommit) {
   return uiEl("input", {
     class: "tools__slider",
@@ -288,6 +306,12 @@ function mountSizesPanel(host, api) {
         uiEl("span", { text: strings.tools.labelSize }),
         toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
       ]),
+      // Линейка и направляющие прячутся целиком, не удаляясь: оснастка нужна,
+      // пока целишься, и мешает, когда смотришь на план.
+      uiEl("label", { class: "tools__field tools__field--check" }, [
+        toolsGuidesCheck(state, setState),
+        uiEl("span", { text: strings.tools.guides }),
+      ]),
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       uiEl("div", { class: "tools__row" }, [
         uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
@@ -300,7 +324,7 @@ function mountSizesPanel(host, api) {
 
   subscribe((state, changed) => {
     if (sizeBefore) return;
-    if ("project" in changed) render();
+    if ("project" in changed || "guidesShown" in changed) render();
   });
   render();
 }

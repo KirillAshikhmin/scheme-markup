@@ -57,6 +57,10 @@ const DRAFT_ANGLE_MIN_PX = 8;
 // начертания метки — на пунктирной линии подсказку иначе не отличить от самого
 // черновика.
 const GUIDE_DASH = [2, 5];
+// Направляющая пользователя: тонкая сплошная, приглушённая. Взятая под руку —
+// ярче: двенадцать штук на плане не должны спорить с самим планом.
+const GUIDE_LINE = "rgba(9, 105, 218, 0.38)";
+const GUIDE_LINE_ACTIVE = "rgba(9, 105, 218, 0.85)";
 const GUIDE_WIDTH = 1;
 const GUIDE_ALPHA = 0.5;
 
@@ -1357,35 +1361,22 @@ export function draftGuides(points, cursor, scheme, view, options = {}) {
   return { point, guides };
 }
 
-// Спор направляющей и угла решён так: **направляющая старше**. Ось, которую она
-// заняла, не двигает никто — точка обязана сидеть на том пунктире, который
-// пользователь перед собой видит. Угол доводит свободную ось, но применяется
-// целиком или не применяется вовсе: если его ровное направление трогает
-// занятую ось, магнит молчит.
-//
-// Отсюда обещанное в тикете поведение. Квадрат: вертикальная направляющая от
-// первой вершины держит `x`, магнит видит почти горизонталь и доводит `y` —
-// угол замыкается ровно, и точка стоит на пунктире. Зигзаг: горизонтальная
-// направляющая держит `y` на высоте прежнего зубца, а косой магнит тронул бы её
-// же — он молчит, и точка остаётся под курсором на направляющей. Заняты обе оси
-// — угол молчит всегда: точка уже определена полностью.
-function guidedPoint(from, guided, scheme, options) {
-  const point = guided.point;
-  const heldX = guided.guides.some((guide) => guide.axis === "v");
-  const heldY = guided.guides.some((guide) => guide.axis === "h");
-  if (heldX && heldY) return point;
-  const snap = snapSegment(from, point, scheme, options);
-  if (!snap.snapped) return point;
-  if (heldX && snap.point.x !== point.x) return point;
-  if (heldY && snap.point.y !== point.y) return point;
-  return snap.point;
-}
-
 /**
- * Куда сядет следующая вершина ломаной: направляющие плюс магнит направления.
- * Одна дверь и для предпросмотра, и для клика — разойтись им негде.
- * `points` — уже поставленные вершины, `cursor` — точка под курсором в долях
- * плана. `options.free` снимает и то и другое.
+ * Куда сядет следующая вершина ломаной: свои направляющие, направляющие по
+ * вершинам и магнит направления. Одна дверь и для предпросмотра, и для клика —
+ * разойтись им негде. `points` — уже поставленные вершины, `cursor` — точка под
+ * курсором в долях плана. `options.free` снимает всё разом, `options.planGuides`
+ * — направляющие схемы, которые пользователь поставил с линейки.
+ *
+ * **Порядок разрешения споров — один на всю сборку: занятую ось не двигает
+ * никто, а старшинство идёт сверху вниз.**
+ *
+ *   1. Направляющие пользователя — он поставил их руками, это точное намерение.
+ *   2. Направляющие по вершинам текущей ломаной — подсказка программы.
+ *   3. Угол кратно 15° — самое приблизительное из трёх.
+ *
+ * Угол при этом применяется целиком или молчит: сдвинуть точку с пунктира,
+ * который пользователь перед собой видит, он не может.
  *
  * `snapped` — итоговое направление ровное. Считается по готовой точке, а не по
  * тому, кто её подвинул: квадрат, замкнутый направляющей, стоит ровно на 180°,
@@ -1393,18 +1384,243 @@ function guidedPoint(from, guided, scheme, options) {
  */
 export function draftSnap(points, cursor, scheme, view, options = {}) {
   const from = Array.isArray(points) && points.length > 0 ? points[points.length - 1] : null;
-  if (!from) return { point: cursor, angle: 0, snapped: false, guides: [] };
   if (options.free) {
-    return { point: cursor, angle: snapSegment(from, cursor, scheme, { free: true }).angle, snapped: false, guides: [] };
+    const angle = from ? snapSegment(from, cursor, scheme, { free: true }).angle : 0;
+    return { point: cursor, angle, snapped: false, guides: [], held: { h: null, v: null } };
   }
-  const guided = draftGuides(points, cursor, scheme, view, options);
-  const point =
-    guided.guides.length === 0
-      ? snapSegment(from, cursor, scheme, options).point
-      : guidedPoint(from, guided, scheme, options);
+  // 1. Своя направляющая старше всех: она уже нарисована на плане.
+  const own = snapToSchemeGuides(options.planGuides, cursor, scheme, view, options);
+  let point = own.point;
+  const heldX = Boolean(own.held.v);
+  const heldY = Boolean(own.held.h);
+  if (!from) return { point, angle: 0, snapped: false, guides: [], held: own.held };
+
+  // 2. Направляющие по вершинам — только по осям, которые ещё свободны.
+  const vertex = draftGuides(points, point, scheme, view, options).guides.filter(
+    (guide) => (guide.axis === "h" ? !heldY : !heldX),
+  );
+  const takenX = heldX || vertex.some((guide) => guide.axis === "v");
+  const takenY = heldY || vertex.some((guide) => guide.axis === "h");
+  for (const guide of vertex) {
+    if (guide.axis === "h") point = { x: point.x, y: guide.at.y };
+    else point = { x: guide.at.x, y: point.y };
+  }
+
+  // 3. Угол — по тому, что осталось свободным, и целиком или никак.
+  if (!(takenX && takenY)) {
+    const snap = snapSegment(from, point, scheme, options);
+    const disturbs = (takenX && snap.point.x !== point.x) || (takenY && snap.point.y !== point.y);
+    if (snap.snapped && !disturbs) point = snap.point;
+  }
+
   const shown = snapSegment(from, point, scheme, { free: true });
   const moved = point.x !== from.x || point.y !== from.y;
-  return { point, angle: shown.angle, snapped: moved && roundAngle(shown.angle), guides: guided.guides };
+  return {
+    point,
+    angle: shown.angle,
+    snapped: moved && roundAngle(shown.angle),
+    guides: vertex,
+    held: own.held,
+  };
+}
+
+// ——— линейка и направляющие схемы ————————————————————————————————————
+//
+// Заказчик: «добавь „линейку“ по бокам у схемы, просто шкала с метками, без
+// единиц измерения». Единиц у плана и правда нет: подложка — картинка,
+// масштаба она не знает, и подписать деления метрами значило бы соврать.
+// Шкала нужна, чтобы **ставить направляющие** и видеть, что они стоят ровно.
+//
+// Рисуется всё это только холстом: `drawScheme` о линейке и направляющих не
+// знает вовсе, поэтому в PNG, в печать и в лист «Схема» они не попадают —
+// монтажнику на бумаге они не нужны.
+
+// Ширина полосы линейки в пикселях экрана.
+export const RULER_SIZE = 18;
+// Реже этого деления на экране не ставятся: частая гребёнка читается заливкой.
+const RULER_STEP_MIN_PX = 48;
+// Каждое пятое деление — длинное: по ним глаз считает.
+const RULER_MAJOR_EVERY = 5;
+const RULER_TICK = 5;
+const RULER_TICK_MAJOR = 10;
+
+// Попадание по направляющей и порог притяжки — в пикселях экрана, как у
+// направляющих черновика: иначе на разном зуме всё ведёт себя по-разному.
+export const GUIDE_HIT_PX = 5;
+// Перекрестие ловит шире одиночной направляющей: главный приём пользователя —
+// ставить точки в перекрестия, и промахиваться по ним обидно.
+export const GUIDE_CROSS_PX = 13;
+
+// Шаг делений в пикселях плана: 1, 2, 5 и их десятки. Берётся самый мелкий, у
+// которого на экране остаётся разборчивый просвет.
+export function rulerStep(zoom) {
+  const scale = zoom > 0 ? zoom : 1;
+  let step = 1;
+  let guard = 0;
+  while (step * scale < RULER_STEP_MIN_PX && guard < 40) {
+    const digit = Number(String(step)[0]);
+    step = digit === 1 ? step * 2 : digit === 2 ? (step / 2) * 5 : step * 2;
+    guard += 1;
+  }
+  return step;
+}
+
+/**
+ * Деления линейки для видимой части холста. `box` — размер холста в его
+ * собственных пикселях. Возвращает `{step, top, left}`; в списках — экранная
+ * координата деления и признак длинного.
+ */
+export function rulerTicks(scheme, view, box) {
+  const state = renderView(view);
+  const step = rulerStep(state.zoom);
+  const ticks = (size, offset, planSize) => {
+    const list = [];
+    const first = Math.floor(-offset / (step * state.zoom));
+    const last = Math.ceil((size - offset) / (step * state.zoom));
+    for (let index = first; index <= last; index += 1) {
+      const at = index * step;
+      if (at < 0 || at > planSize) continue;
+      list.push({ at, screen: offset + at * state.zoom, major: index % RULER_MAJOR_EVERY === 0 });
+    }
+    return list;
+  };
+  return {
+    step,
+    top: ticks(box.width, state.offsetX, schemeWidth(scheme)),
+    left: ticks(box.height, state.offsetY, schemeHeight(scheme)),
+  };
+}
+
+// Линейка: полоса с делениями сверху и слева. Без чисел — подписывать деления
+// нечем, план масштаба не знает.
+export function drawRuler(ctx, scheme, view, box) {
+  const state = renderView(view);
+  const ticks = rulerTicks(scheme, state, box);
+  ctx.save();
+  ctx.fillStyle = "rgba(246, 248, 250, 0.94)";
+  ctx.fillRect(0, 0, box.width, RULER_SIZE);
+  ctx.fillRect(0, 0, RULER_SIZE, box.height);
+  ctx.strokeStyle = "#d0d7de";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, RULER_SIZE + 0.5);
+  ctx.lineTo(box.width, RULER_SIZE + 0.5);
+  ctx.moveTo(RULER_SIZE + 0.5, 0);
+  ctx.lineTo(RULER_SIZE + 0.5, box.height);
+  ctx.stroke();
+  ctx.strokeStyle = "#8c959f";
+  ctx.beginPath();
+  for (const tick of ticks.top) {
+    const x = Math.round(tick.screen) + 0.5;
+    if (x < RULER_SIZE) continue;
+    ctx.moveTo(x, RULER_SIZE);
+    ctx.lineTo(x, RULER_SIZE - (tick.major ? RULER_TICK_MAJOR : RULER_TICK));
+  }
+  for (const tick of ticks.left) {
+    const y = Math.round(tick.screen) + 0.5;
+    if (y < RULER_SIZE) continue;
+    ctx.moveTo(RULER_SIZE, y);
+    ctx.lineTo(RULER_SIZE - (tick.major ? RULER_TICK_MAJOR : RULER_TICK), y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Экранная координата направляющей: у горизонтальной это `y`, у вертикальной `x`.
+export function guideScreen(guide, scheme, view) {
+  const state = renderView(view);
+  return guide.axis === "h"
+    ? state.offsetY + guide.at * schemeHeight(scheme) * state.zoom
+    : state.offsetX + guide.at * schemeWidth(scheme) * state.zoom;
+}
+
+// Доля плана из экранной координаты — обратный ход для перетаскивания.
+export function guideFraction(axis, screen, scheme, view) {
+  const state = renderView(view);
+  const size = (axis === "h" ? schemeHeight(scheme) : schemeWidth(scheme)) * state.zoom;
+  const offset = axis === "h" ? state.offsetY : state.offsetX;
+  return size > 0 ? (screen - offset) / size : 0;
+}
+
+// Направляющие: тонкая приглушённая линия через весь холст, взятая под руку —
+// заметнее. Двенадцать штук не должны превратить план в сетку.
+export function drawSchemeGuides(ctx, guides, scheme, view, box, options = {}) {
+  if (!guides || guides.length === 0) return;
+  const state = renderView(view);
+  const active = options.activeId || null;
+  ctx.save();
+  ctx.setLineDash([]);
+  for (const guide of guides) {
+    const at = Math.round(guideScreen(guide, scheme, state)) + 0.5;
+    const live = guide.id === active;
+    ctx.strokeStyle = live ? GUIDE_LINE_ACTIVE : GUIDE_LINE;
+    ctx.lineWidth = live ? 1.6 : 1;
+    ctx.beginPath();
+    if (guide.axis === "h") {
+      ctx.moveTo(0, at);
+      ctx.lineTo(box.width, at);
+    } else {
+      ctx.moveTo(at, 0);
+      ctx.lineTo(at, box.height);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Направляющая под точкой экрана: по ней холст решает, что взяли под руку.
+export function hitSchemeGuide(guides, point, scheme, view) {
+  const state = renderView(view);
+  let best = null;
+  for (const guide of guides || []) {
+    const at = guideScreen(guide, scheme, state);
+    const gap = Math.abs((guide.axis === "h" ? point.y : point.x) - at);
+    if (gap <= GUIDE_HIT_PX && (!best || gap < best.gap)) best = { guide, gap };
+  }
+  return best ? best.guide : null;
+}
+
+/**
+ * Притяжка к направляющим схемы. Возвращает `{point, held}`; `held` — какие
+ * оси заняты и какими направляющими, по нему холст подсвечивает сработавшую.
+ *
+ * **Перекрестие тянет сильнее одиночной направляющей**: если рядом есть и
+ * горизонтальная, и вертикальная, ловятся обе по широкому порогу
+ * (`GUIDE_CROSS_PX`), а поодиночке — по обычному (`GUIDE_HIT_PX`). Главный приём
+ * пользователя — ставить точки в перекрестия, и промах по ним обиднее лишнего
+ * притяжения.
+ */
+export function snapToSchemeGuides(guides, point, scheme, view, options = {}) {
+  const empty = { point, held: { h: null, v: null } };
+  if (!guides || guides.length === 0 || options.free) return empty;
+  const state = renderView(view);
+  const at = planToScreen(point, scheme, state);
+  let horizontal = null;
+  let vertical = null;
+  for (const guide of guides) {
+    const screen = guideScreen(guide, scheme, state);
+    if (guide.axis === "h") {
+      const gap = Math.abs(screen - at.y);
+      if (!horizontal || gap < horizontal.gap) horizontal = { guide, gap };
+    } else {
+      const gap = Math.abs(screen - at.x);
+      if (!vertical || gap < vertical.gap) vertical = { guide, gap };
+    }
+  }
+  const cross =
+    horizontal && vertical && horizontal.gap <= GUIDE_CROSS_PX && vertical.gap <= GUIDE_CROSS_PX;
+  const limit = cross ? GUIDE_CROSS_PX : GUIDE_HIT_PX;
+  const next = { x: point.x, y: point.y };
+  const held = { h: null, v: null };
+  if (horizontal && horizontal.gap <= limit) {
+    next.y = horizontal.guide.at;
+    held.h = horizontal.guide.id;
+  }
+  if (vertical && vertical.gap <= limit) {
+    next.x = vertical.guide.at;
+    held.v = vertical.guide.id;
+  }
+  return { point: next, held };
 }
 
 // ——— видимость ———————————————————————————————————————————————————————

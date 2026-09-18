@@ -163,6 +163,21 @@
   min-width: 68px;
 }
 
+/* Отметка «линейка и направляющие»: галочка слева, подпись во всю строку —
+   у неё нет ползунка, и колонка под название ей не нужна. */
+.tools__field--check {
+  cursor: pointer;
+}
+
+.tools__field--check > span {
+  min-width: 0;
+}
+
+.tools__check {
+  flex: none;
+  accent-color: var(--accent);
+}
+
 .tools__slider {
   flex: 1 1 auto;
   min-width: 0;

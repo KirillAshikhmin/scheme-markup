@@ -2094,6 +2094,54 @@ export function removeOutlinePoint(project, outlineId, index) {
   return updateOutline(project, outlineId, { points });
 }
 
+// ——— направляющие схемы ————————————————————————————————————————————————
+//
+// Заказчик: «поставил 2 горизонтальных направляющих, 6 вертикальных и на
+// перекрестия ставишь точки». Направляющие — рабочая оснастка, а не часть
+// чертежа: на распечатку они не попадают, но лежат в объекте, потому что
+// переживают перезагрузку и уезжают с файлом проекта.
+//
+// Живут **у схемы**: у каждого плана свои. Координата — **доля 0…1** от размера
+// плана, как точки меток (ADR 002): при замене подложки они остаются там же,
+// где их поставили, а не разъезжаются в пикселях.
+export const GUIDE_AXES = ["h", "v"];
+
+export function schemeGuides(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  return scheme && Array.isArray(scheme.guides) ? scheme.guides : [];
+}
+
+function withGuides(project, schemeId, guides) {
+  const schemes = project.schemes.map((scheme) => (scheme.id === schemeId ? { ...scheme, guides } : scheme));
+  return withProject(project, { schemes });
+}
+
+export function addSchemeGuide(project, schemeId, { axis, at } = {}) {
+  requireScheme(project, schemeId);
+  if (!GUIDE_AXES.includes(axis)) throw modelError("guideAxisUnknown");
+  const guide = { id: newId(), axis, at: clampFraction(Number(at)) };
+  if (!Number.isFinite(guide.at)) throw modelError("guideAtInvalid");
+  return { project: withGuides(project, schemeId, [...schemeGuides(project, schemeId), guide]), guide };
+}
+
+export function moveSchemeGuide(project, schemeId, guideId, at) {
+  requireScheme(project, schemeId);
+  const guides = schemeGuides(project, schemeId);
+  if (!guides.some((guide) => guide.id === guideId)) throw modelError("guideNotFound");
+  const value = clampFraction(Number(at));
+  if (!Number.isFinite(value)) throw modelError("guideAtInvalid");
+  const next = guides.map((guide) => (guide.id === guideId ? { ...guide, at: value } : guide));
+  return { project: withGuides(project, schemeId, next), guide: next.find((guide) => guide.id === guideId) };
+}
+
+export function deleteSchemeGuide(project, schemeId, guideId) {
+  requireScheme(project, schemeId);
+  const guides = schemeGuides(project, schemeId);
+  const deleted = guides.find((guide) => guide.id === guideId);
+  if (!deleted) throw modelError("guideNotFound");
+  return { project: withGuides(project, schemeId, guides.filter((guide) => guide.id !== guideId)), deleted };
+}
+
 // ——— правка вершин ломаной ————————————————————————————————————————————
 //
 // Та же рука, что правит контур помещения: вершину двигают, добавляют между
