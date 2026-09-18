@@ -366,7 +366,6 @@ function exportTableDialog(api) {
               table,
               title: table.title || state.project.name,
               subtitle: exportSubtitleOf(state, table),
-              footer: state.project.name,
             }),
           ),
       },

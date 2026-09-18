@@ -692,7 +692,6 @@ export function exportTableNode(table, options = {}) {
   }
 
   if (options.extra) doc.append(options.extra);
-  if (options.footer) doc.append(exportNode("footer", "print-doc__foot", options.footer));
   return doc;
 }
 
@@ -752,7 +751,6 @@ export async function printView(kind, data = {}) {
       title: data.title,
       subtitle: data.subtitle,
       extra: data.extra,
-      footer: data.footer,
     }),
   );
   exportPrintRun(root);
