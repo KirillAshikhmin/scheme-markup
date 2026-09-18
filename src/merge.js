@@ -18,7 +18,14 @@
 // правила, сущность остаётся (с пометкой в `conflicts`). Вернуть лишнюю метку
 // — минута работы, восстановить потерянную — некому.
 
+import { renumberAcceptedRepeats } from "./model.js";
+
 // Сущности объекта, которые сливаются поимённо, по `id`.
+//
+// `equipmentTypes` здесь такой же справочник, как `categories` и `markTypes`:
+// без него слитый объект брал бы типы только у «нас», и заведённое вторым
+// участником («Реле 4 канала») пропадало бы молча вместе с колонкой типа у его
+// моделей.
 export const MERGE_ENTITIES = [
   "categories",
   "markTypes",
@@ -27,12 +34,18 @@ export const MERGE_ENTITIES = [
   "marks",
   "groups",
   "outlines",
+  "equipmentTypes",
   "equipment",
   "placements",
 ];
 
 // Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
-const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipment"];
+const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipmentTypes", "equipment"];
+
+// Коллекции, которых у объекта прежней разметки нет вовсе. Слияние двух таких
+// объектов не должно заводить их пустыми: это была бы правка на пустом месте,
+// и два одинаковых файла перестали бы сливаться в «ничего не изменилось».
+const MERGE_OPTIONAL = ["outlines", "equipmentTypes", "equipment", "placements"];
 
 /**
  * Принятые предупреждения: **объединение по ключу, а не конфликт.**
@@ -214,31 +227,134 @@ function mergeCounters(ours, theirs) {
   return counters;
 }
 
-// Двое поставили по «Р15»: номер выдаётся счётчиком в пределах объекта, и в
-// разных браузерах он один и тот же. Разъезжаются такие метки здесь — тому,
-// кто был в общем предке, номер оставляем (его уже написали на схеме и в
-// таблице), новой метке выдаём следующий свободный.
-function mergeNumbers(marks, types, counters, base, report) {
-  const codes = new Map(types.map((type) => [type.id, type.code]));
-  const known = mergeIndex(mergeList(base, "marks"));
-  const order = marks.map((mark, index) => ({ mark, index }));
-  order.sort((a, b) => {
-    const mineFirst = (known.has(a.mark.id) ? 0 : 1) - (known.has(b.mark.id) ? 0 : 1);
-    if (mineFirst !== 0) return mineFirst;
-    return String(a.mark.id) < String(b.mark.id) ? -1 : 1;
-  });
-
-  const taken = new Set();
-  const fixed = new Map();
-  for (const { mark } of order) {
-    const code = codes.get(mark.typeId);
-    if (!code) continue;
-    const key = code + "|" + mark.number;
-    if (!taken.has(key)) {
-      taken.add(key);
-      continue;
+/**
+ * Кластеры совместного номера.
+ *
+ * Метки, уже стоявшие под одним обозначением **в одном объекте** — у нас, у
+ * них или в общем предке, — спорить между собой не могут: это намеренный
+ * повтор, приём заказчика (G25, G96), а не столкновение двух счётчиков.
+ * Такие метки собираются в кластер и дальше живут одним номером на всех.
+ *
+ * Отношение считается по каждому обозначению отдельно: метки, делившие «Т1»,
+ * не становятся роднёй под «С5», куда одна из них потом переехала.
+ *
+ * Возвращает `(key, markId) -> id кластера`; одиночка сама себе кластер.
+ */
+function mergeNumberClusters(sources, codes) {
+  const byKey = new Map();
+  const find = (parent, id) => {
+    let root = id;
+    while (parent.get(root) !== root) root = parent.get(root);
+    let step = id;
+    while (parent.get(step) !== root) {
+      const next = parent.get(step);
+      parent.set(step, root);
+      step = next;
     }
-    let next = Math.max(Number(counters[code]) || 0, Number(mark.number) || 0);
+    return root;
+  };
+  for (const source of sources) {
+    if (!source) continue;
+    const groups = new Map();
+    for (const mark of mergeList(source, "marks")) {
+      const code = mark && codes.get(mark.typeId);
+      if (!code || typeof mark.id !== "string") continue;
+      const key = code + "|" + mark.number;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(mark.id);
+    }
+    for (const [key, ids] of groups) {
+      if (ids.length < 2) continue;
+      let parent = byKey.get(key);
+      if (!parent) {
+        parent = new Map();
+        byKey.set(key, parent);
+      }
+      for (const id of ids) if (!parent.has(id)) parent.set(id, id);
+      const root = find(parent, ids[0]);
+      for (const id of ids) {
+        const other = find(parent, id);
+        if (other !== root) parent.set(other, root);
+      }
+    }
+  }
+  return (key, markId) => {
+    const parent = byKey.get(key);
+    return parent && parent.has(markId) ? find(parent, markId) : markId;
+  };
+}
+
+/**
+ * Номера после слияния.
+ *
+ * Двое поставили по «Р15»: номер выдаётся счётчиком в пределах объекта, и в
+ * разных браузерах он один и тот же. Разводить надо ровно такие метки — и
+ * только их. Повтор номера сам по себе не поломка: несколько точечных
+ * светильников одной группы носят «Т1» нарочно, модель это бережёт
+ * (`compactNumbers`), и слияние обязано беречь тоже. Номер уже написан на
+ * схеме, в таблице и в голове у монтажника, а результат слияния применяется
+ * без спроса и обрывает историю — переписать его молча нельзя.
+ *
+ * Поэтому разводятся не метки, а **кластеры**: намеренная группа переезжает на
+ * новый номер целиком, оставаясь группой. На номере остаётся кластер из общего
+ * предка (его и написали на схеме), при равенстве — с меньшим id метки.
+ * Правило симметрично: обе стороны считают его из одной пары и приходят к
+ * одному ответу, иначе файлы в папке ходили бы по кругу.
+ *
+ * Возвращает `{marks, moves}`; `moves` — переезды намеренных повторов, по ним
+ * переселяются принятые предупреждения.
+ */
+function mergeNumbers(marks, types, counters, sources, report) {
+  const codes = new Map(types.map((type) => [type.id, type.code]));
+  const known = mergeIndex(mergeList(sources.base, "marks"));
+  const clusterOf = mergeNumberClusters([sources.base, sources.ours, sources.theirs], codes);
+
+  const byKey = new Map();
+  for (const mark of marks) {
+    const code = codes.get(mark.typeId);
+    if (!code || typeof mark.id !== "string") continue;
+    const key = code + "|" + mark.number;
+    let clusters = byKey.get(key);
+    if (!clusters) {
+      clusters = new Map();
+      byKey.set(key, clusters);
+    }
+    const id = clusterOf(key, mark.id);
+    let cluster = clusters.get(id);
+    if (!cluster) {
+      cluster = { key, code, number: mark.number, marks: [], inBase: false, minId: mark.id };
+      clusters.set(id, cluster);
+    }
+    cluster.marks.push(mark);
+    if (known.has(mark.id)) cluster.inBase = true;
+    if (mark.id < cluster.minId) cluster.minId = mark.id;
+  }
+
+  // Занято всё, что в слитом объекте уже стоит: на каждом обозначении кто-то
+  // да остаётся.
+  const taken = new Set(byKey.keys());
+  const moving = [];
+  const staying = new Map();
+  for (const [key, clusters] of byKey) {
+    const list = [...clusters.values()];
+    list.sort((a, b) => {
+      const byBase = (a.inBase ? 0 : 1) - (b.inBase ? 0 : 1);
+      if (byBase !== 0) return byBase;
+      return a.minId < b.minId ? -1 : 1;
+    });
+    staying.set(key, list[0]);
+    for (const cluster of list.slice(1)) moving.push(cluster);
+  }
+  if (moving.length === 0) return { marks, moves: [] };
+
+  // Порядок выдачи не зависит от того, чей файл назвали «нашим».
+  moving.sort((a, b) => (a.key === b.key ? (a.minId < b.minId ? -1 : 1) : a.key < b.key ? -1 : 1));
+
+  const fixed = new Map();
+  const moves = [];
+  for (const cluster of moving) {
+    const code = cluster.code;
+    let next = Math.max(Number(counters[code]) || 0, Number(cluster.number) || 0);
     let candidate;
     do {
       next += 1;
@@ -246,11 +362,35 @@ function mergeNumbers(marks, types, counters, base, report) {
     } while (taken.has(candidate));
     taken.add(candidate);
     counters[code] = Math.max(Number(counters[code]) || 0, next);
-    fixed.set(mark.id, next);
-    report.renumbered.push({ markId: mark.id, code, from: mark.number, to: next });
+    for (const mark of cluster.marks) fixed.set(mark.id, next);
+    report.renumbered.push({
+      markId: cluster.marks[0].id,
+      markIds: cluster.marks.map((mark) => mark.id),
+      code,
+      from: cluster.number,
+      to: next,
+    });
+    // Переехал намеренный повтор — вместе с ним переезжает и ответ «так и
+    // задумано». Одиночной метке переносить нечего: вопроса о повторе на её
+    // новом номере не возникнет.
+    const typeIds = new Set(cluster.marks.map((mark) => mark.typeId));
+    if (cluster.marks.length > 1 && typeIds.size === 1) {
+      const rest = staying.get(cluster.key);
+      moves.push({
+        typeId: cluster.marks[0].typeId,
+        code,
+        from: cluster.number,
+        to: next,
+        // Старый номер остаётся повтором — значит вопрос там не снят, и ответ
+        // не переезжает, а копируется.
+        keepFrom: rest.marks.length > 1 && rest.marks[0].typeId === cluster.marks[0].typeId,
+      });
+    }
   }
-  if (fixed.size === 0) return marks;
-  return marks.map((mark) => (fixed.has(mark.id) ? { ...mark, number: fixed.get(mark.id) } : mark));
+  return {
+    marks: marks.map((mark) => (fixed.has(mark.id) ? { ...mark, number: fixed.get(mark.id) } : mark)),
+    moves,
+  };
 }
 
 // Ссылки на то, чего в слитом объекте нет: висячая ссылка хуже отсутствующей.
@@ -291,6 +431,18 @@ function mergeReferences(merged, report) {
     if (schemes.has(outline.schemeId) && rooms.has(outline.roomId)) return true;
     report.conflicts.push({ code: "danglingRef", entity: "outlines", id: outline.id, kept: "none", item: outline });
     return false;
+  });
+
+  // Тип модели: у единицы он необязателен, и «тип не заполнен» — не поломка, а
+  // ссылка в никуда — поломка (модель читает тип через `findEquipmentType` и
+  // покажет пустую колонку, ничего не сказав). Тип могли удалить на одной
+  // стороне, пока на другой его вешали на новую модель: сам справочник
+  // сливается наравне с остальными, а вот такую ссылку снимаем — вслух.
+  const equipmentTypes = mergeIndex(merged.equipmentTypes);
+  merged.equipment = merged.equipment.map((item) => {
+    if (!item.typeId || equipmentTypes.has(item.typeId)) return item;
+    report.conflicts.push({ code: "danglingType", entity: "equipment", id: item.id, kept: "ours", item });
+    return { ...item, typeId: "" };
   });
 
   const equipment = mergeIndex(merged.equipment);
@@ -337,14 +489,32 @@ export function mergeProjects(ours, theirs, base, options = {}) {
   const report = { changes: [], conflicts: [], renumbered: [] };
 
   const merged = { ...ours };
+  // Коллекция, которой не знала ни одна сторона, так и остаётся незаведённой:
+  // список пуст и заводить его не на чем.
+  const absent = [];
   for (const entity of MERGE_ENTITIES) {
     merged[entity] = mergeCollection(entity, ours, theirs, ancestor, report, winner);
+    if (
+      MERGE_OPTIONAL.includes(entity) &&
+      !Array.isArray(ours[entity]) &&
+      !Array.isArray(theirs[entity])
+    ) {
+      absent.push(entity);
+    }
   }
 
   merged.counters = mergeCounters(ours, theirs);
   mergeAccepted(merged, ours, theirs);
-  merged.marks = mergeNumbers(merged.marks, merged.markTypes, merged.counters, ancestor, report);
+  const numbered = mergeNumbers(merged.marks, merged.markTypes, merged.counters, { ours, theirs, base: ancestor }, report);
+  merged.marks = numbered.marks;
+  // Ответы «так и задумано» едут за своими обозначениями: вопрос уже задан и
+  // закрыт, а переспросить слияние не может — оно применяется молча.
+  const accepted = renumberAcceptedRepeats(merged, numbered.moves);
+  if (accepted) merged.accepted = accepted;
   mergeReferences(merged, report);
+  for (const entity of absent) {
+    if (merged[entity].length === 0) delete merged[entity];
+  }
 
   // Имя и настройки вида — те же правила, что и у сущностей.
   if (!mergeSame(ours.name, theirs.name)) {

@@ -556,6 +556,7 @@ export const strings = {
     deletedElsewhere: "{label}: на другой стороне удалили, у вас правлено — оставлено ваше",
     deletedHere: "{label}: удалили вы, на другой стороне правлено — вернулось",
     danglingRef: "{label}: ссылка вела в никуда — снято",
+    danglingType: "{label}: тип этой модели удалён на другой стороне — поле типа очищено",
     sideOurs: "ваш",
     sideTheirs: "со стороны",
     close: "Понятно",

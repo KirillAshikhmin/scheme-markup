@@ -3008,6 +3008,51 @@ function renumberAccepted(project, typeId, code, renumbered) {
   return changed ? next : null;
 }
 
+/**
+ * Перенос принятого на номера, разведённые слиянием.
+ *
+ * Слияние двух экземпляров объекта иногда обязано развести номер: двое, не
+ * видя друг друга, выдали новым меткам одно обозначение. Если переезжает целая
+ * намеренная группа («три светильника Т4»), вместе с ней обязан переехать и
+ * ответ «так и задумано» — иначе на новом номере тот же вопрос задастся
+ * заново, и задастся молча, потому что слияние применяется без спроса.
+ *
+ * `moves` — `[{typeId, code, from, to, keepFrom}]`. `keepFrom` говорит, что на
+ * старом номере повтор остался (номер разошёлся надвое): тогда ответ не
+ * переезжает, а **копируется** — пользователь отвечал про эти метки, и обе
+ * половины несут тот же замысел. Без `keepFrom` запись переименовывается.
+ *
+ * Своя запись не подменяется: если на новом номере ответ уже есть, чужой
+ * поверх него не ложится. Переносить нечего — `null`: объект прежнего формата
+ * не обзаводится пустым списком принятых из-за чужого слияния.
+ */
+export function renumberAcceptedRepeats(project, moves) {
+  const list = acceptedOf(project);
+  if (list.length === 0 || !Array.isArray(moves) || moves.length === 0) return null;
+  const keys = new Set(list.map((record) => record.key));
+  const renamed = new Map();
+  const added = [];
+  for (const move of moves) {
+    if (!move || !move.typeId || move.from === move.to) continue;
+    const prefix = "repeatedNumber:" + move.typeId + "#";
+    const fromKey = prefix + move.from;
+    const toKey = prefix + move.to;
+    if (!keys.has(fromKey) || keys.has(toKey) || renamed.has(fromKey)) continue;
+    const record = list.find((item) => item.key === fromKey);
+    const next = {
+      ...record,
+      key: toKey,
+      label: relabelAccepted(record.label, move.code + move.from, move.code + move.to),
+    };
+    keys.add(toKey);
+    if (move.keepFrom) added.push(next);
+    else renamed.set(fromKey, next);
+  }
+  if (renamed.size === 0 && added.length === 0) return null;
+  const next = list.map((record) => renamed.get(record.key) || record);
+  return added.length === 0 ? next : [...next, ...added];
+}
+
 // Обозначение в запомненном тексте: «Т4 — таких меток 3» после смыкания читается
 // как «Т2 — таких меток 3». Меняется только обозначение в начале строки и только
 // целиком — «Т1» внутри «Т10» не тронется.

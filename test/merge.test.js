@@ -15,10 +15,13 @@ import {
   updateMark,
   deleteMark,
   addEquipment,
+  addEquipmentType,
   addPlacement,
   acceptProblem,
   problemAccepted,
+  repeatedNumbers,
   setMarkNumber,
+  updateEquipment,
   validate,
 } from "../src/model.js";
 
@@ -53,6 +56,14 @@ function stamp(project, updatedAt) {
 function markLabels(project) {
   const codes = new Map(project.markTypes.map((type) => [type.id, type.code]));
   return project.marks.map((mark) => codes.get(mark.typeId) + mark.number).sort();
+}
+
+// Обозначения в порядке постановки меток: для намеренного повтора важен не
+// только состав, но и то, что номер остался у той же метки.
+function numbersById(project) {
+  const codes = new Map(project.markTypes.map((type) => [type.id, type.code]));
+  const pairs = project.marks.map((mark) => [mark.id, codes.get(mark.typeId) + mark.number]);
+  return Object.fromEntries(pairs.sort((a, b) => (a[0] < b[0] ? -1 : 1)));
 }
 
 test("разные метки с двух сторон складываются без вопросов", () => {
@@ -305,7 +316,14 @@ test("принятое одной стороной приезжает ко вт�
   const toUs = mergeProjects(ours, theirs, start.project).project;
   assert.deepEqual(acceptedKeys(toUs), [problem.key], "принятое не приехало");
   assert.equal(problemAccepted(toUs, problem.key), true);
-  assert.ok(!validate(toUs).some((item) => item.key === problem.key), "принятое всё ещё спрашивают");
+  // Ключ принятия обязан по-прежнему указывать на живой повтор: пока он жив,
+  // утверждение выше что-то значит. Раньше повтор уничтожался самим слиянием,
+  // и «принятое не спрашивают» выполнялось оттого, что спрашивать стало не о
+  // чем, — такая проверка не могла покраснеть ни при какой поломке принятий.
+  const stillAsked = validate(toUs).find((item) => item.key === problem.key);
+  assert.ok(stillAsked, "повтор не пережил слияния — проверка принятия обессмыслилась");
+  assert.equal(stillAsked.code, "repeatedNumber");
+  assert.deepEqual(numbersById(toUs), numbersById(start.project), "слияние переписало номера");
 
   // И в обратную сторону — тот же ответ.
   const toThem = mergeProjects(theirs, ours, start.project).project;
@@ -341,4 +359,220 @@ test("объекты без принятых сливаются как рань�
   const merged = mergeProjects(stamp(bare, "2026-02-03T10:00:00.000Z"), stamp(other, "2026-02-03T11:00:00.000Z"), bare).project;
   assert.equal(merged.accepted, undefined, "поле завелось само у объекта, который его не знал");
   assert.deepEqual(acceptedKeys(merged), []);
+});
+
+// ——— намеренный повтор номера ————————————————————————————————————————
+//
+// Повтор номера — приём заказчика, а не поломка: «надо разрешить указание
+// цифры для метки (например несколько точечных светильников в 1 группе)»
+// (G25), «Повтор номера это не предупреждение тут, а специально сделано»
+// (G96). Модель это бережёт — `compactNumbers` намеренный повтор переживает, —
+// и слияние обязано беречь тоже: номер уже написан на схеме и в таблице,
+// применяется слияние без спроса, а следом обрывается история. Ctrl+Z не
+// вернёт.
+//
+// Общего предка при этом часто нет вовсе: `autosaveBase` до первой своей
+// записи в сеансе — `null`. Поэтому каждая проверка идёт и без предка тоже.
+function withLights(count, number) {
+  let project = createProject();
+  const scheme = addScheme(project, { name: "1 этаж", imageId: "plan-1", width: 1000, height: 800 });
+  project = scheme.project;
+  const typeId = project.markTypes[0].id;
+  const ids = [];
+  for (let i = 0; i < count; i += 1) {
+    const added = addMark(project, { schemeId: scheme.scheme.id, typeId, points: [{ x: 0.1 + i / 20, y: 0.3 }] });
+    project = added.project;
+    ids.push(added.mark.id);
+  }
+  // Номер правится своей командой: у `updateMark` его в белом списке нет.
+  for (const id of ids) project = setMarkNumber(project, id, number).project;
+  return { project, schemeId: scheme.scheme.id, typeId, ids };
+}
+
+test("шесть светильников одной группы носят один номер и после слияния", () => {
+  const start = withLights(6, 1);
+  const before = numbersById(start.project);
+  assert.deepEqual(Object.values(before), ["Т1", "Т1", "Т1", "Т1", "Т1", "Т1"], "пример не тот");
+
+  const ours = stamp(copyOf(start.project), "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(copyOf(start.project), "2026-09-17T10:00:05.000Z");
+
+  for (const base of [null, start.project]) {
+    const merged = mergeProjects(ours, theirs, base);
+    assert.deepEqual(numbersById(merged.project), before, "слияние развело намеренный повтор");
+    assert.deepEqual(merged.renumbered, [], "слияние переномеровало то, что никто не просил");
+    // И с другой стороны — тот же ответ.
+    assert.deepEqual(numbersById(mergeProjects(theirs, ours, base).project), before);
+  }
+});
+
+test("слияние двух копий одного файла без правок ничего не меняет", () => {
+  const start = withLights(4, 2);
+  const project = stamp(start.project, "2026-09-17T09:00:00.000Z");
+  const twin = copyOf(project);
+
+  // Общего предка нет — самый частый случай: `autosaveBase` в начале сеанса пуст.
+  const first = mergeProjects(project, twin, null);
+  assert.equal(first.changed, false, "слияние копии с копией объявило объект изменённым");
+  assert.deepEqual(first.renumbered, []);
+  assert.deepEqual(first.conflicts, []);
+
+  // Третья копия из той же папки — тоже ничего.
+  const third = mergeProjects(first.project, copyOf(project), null);
+  assert.equal(third.changed, false, "третий файл в папке снова переписал объект");
+  assert.deepEqual(numbersById(third.project), numbersById(project));
+});
+
+test("метка из общего предка номер сохраняет, а разъезжается новая", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+  const oldId = base.marks[1].id;
+
+  // У нас новая метка получила следующий номер; у них тот же номер поставили
+  // руками метке, которая была в общем предке.
+  const added = addMark(base, { schemeId, typeId, points: [{ x: 0.5, y: 0.5 }] });
+  const ours = stamp(added.project, "2026-09-17T10:00:00.000Z");
+  const newId = added.mark.id;
+  const theirs = stamp(setMarkNumber(copyOf(base), oldId, added.mark.number).project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  const numbers = numbersById(merged.project);
+  assert.equal(numbers[oldId], "Т" + added.mark.number, "метке из общего предка переписали номер");
+  assert.notEqual(numbers[newId], numbers[oldId], "номера остались одинаковыми");
+  assert.equal(merged.renumbered.length, 1);
+  assert.equal(merged.renumbered[0].markId, newId, "переехала не та метка");
+});
+
+test("столкнувшаяся группа переезжает целиком, и принятое едет за ней", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+
+  // У нас — намеренная группа из трёх светильников под одним номером, и ответ
+  // «так и задумано» на неё уже дан.
+  let mine = base;
+  const group = [];
+  for (let i = 0; i < 3; i += 1) {
+    const added = addMark(mine, { schemeId, typeId, points: [{ x: 0.4 + i / 20, y: 0.6 }] });
+    mine = added.project;
+    group.push(added.mark.id);
+  }
+  for (const id of group) mine = setMarkNumber(mine, id, 7).project;
+  const repeat = validate(mine).find((item) => item.code === "repeatedNumber");
+  assert.ok(repeat, "пример не тот: повтора нет");
+  const ours = stamp(acceptProblem(mine, repeat).project, "2026-09-17T10:00:00.000Z");
+
+  // У них под тем же номером — своя, ничего не знающая об этом метка.
+  const alien = addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.9, y: 0.9 }] });
+  const theirs = stamp(setMarkNumber(alien.project, alien.mark.id, 7).project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  const numbers = numbersById(merged.project);
+  const groupNumbers = new Set(group.map((id) => numbers[id]));
+  assert.equal(groupNumbers.size, 1, "группу разорвало по разным номерам: " + [...groupNumbers].join(", "));
+  assert.notEqual(numbers[alien.mark.id], [...groupNumbers][0], "чужая метка осталась в группе");
+
+  // Повтор уцелел, и ответ на него по-прежнему закрыт — на том номере, на
+  // котором группа оказалась.
+  const live = repeatedNumbers(merged.project).find((item) => item.markIds.length === 3);
+  assert.ok(live, "намеренный повтор из трёх меток не пережил слияния");
+  assert.equal(problemAccepted(merged.project, "repeatedNumber:" + typeId + "#" + live.number), true, "ответ «так и задумано» остался на номере, которого больше нет");
+  assert.equal(merged.project.accepted.length, 1, "список принятых вырос");
+});
+
+// ——— справочник типов оборудования ——————————————————————————————————
+//
+// Тип модели — такой же справочник объекта, как категории и типы меток. Не
+// сливайся он — «Реле 4 канала», заведённое вторым участником, пропадало бы у
+// обоих молча, а его модели оставались бы с пустой колонкой типа.
+test("типы оборудования сливаются в обе стороны, и модели не остаются без типа", () => {
+  const { project: base } = ancestor();
+
+  const myType = addEquipmentType(copyOf(base), { name: "Шина заземления" });
+  const ours = stamp(
+    addEquipment(myType.project, { name: "Шина ШЗ-12", vendor: "ABB", typeId: myType.equipmentType.id }).project,
+    "2026-09-17T10:00:00.000Z",
+  );
+  const theirType = addEquipmentType(copyOf(base), { name: "Реле 8 каналов" });
+  const theirs = stamp(
+    addEquipment(theirType.project, { name: "Реле Р8", vendor: "Wirenboard", typeId: theirType.equipmentType.id }).project,
+    "2026-09-17T11:00:00.000Z",
+  );
+
+  for (const [a, b] of [[ours, theirs], [theirs, ours]]) {
+    const merged = mergeProjects(a, b, base).project;
+    const names = merged.equipmentTypes.map((type) => type.name);
+    assert.ok(names.includes("Шина заземления"), "наш тип пропал: " + names.length + " типов");
+    assert.ok(names.includes("Реле 8 каналов"), "тип со стороны пропал: " + names.length + " типов");
+    assert.equal(merged.equipmentTypes.length, base.equipmentTypes.length + 2);
+    assert.equal(merged.equipment.length, 2, "модель потерялась");
+    for (const item of merged.equipment) {
+      assert.ok(
+        merged.equipmentTypes.some((type) => type.id === item.typeId),
+        "у модели «" + item.name + "» тип ведёт в никуда",
+      );
+    }
+    // Порядок справочника пересобирается без дыр — как у категорий и типов меток.
+    assert.deepEqual(
+      merged.equipmentTypes.map((type) => type.order),
+      merged.equipmentTypes.map((type, index) => index),
+    );
+  }
+});
+
+test("тип, удалённый на другой стороне, не оставляет висячей ссылки — и о нём сказано", () => {
+  const { project: base } = ancestor();
+  const seeded = addEquipmentType(base, { name: "Реле 8 каналов" });
+  const start = seeded.project;
+  const typeId = seeded.equipmentType.id;
+
+  // Мы тип убрали (моделей на нём не было), они в это же время завели на него модель.
+  const ours = stamp(
+    { ...start, equipmentTypes: start.equipmentTypes.filter((type) => type.id !== typeId) },
+    "2026-09-17T10:00:00.000Z",
+  );
+  const theirs = stamp(
+    addEquipment(copyOf(start), { name: "Реле Р8", typeId }).project,
+    "2026-09-17T11:00:00.000Z",
+  );
+
+  const merged = mergeProjects(ours, theirs, start);
+  const item = merged.project.equipment.find((entry) => entry.name === "Реле Р8");
+  assert.ok(item, "модель со стороны потерялась");
+  assert.equal(item.typeId, "", "ссылка на удалённый тип осталась висеть");
+  const said = merged.conflicts.find((conflict) => conflict.code === "danglingType");
+  assert.ok(said, "тип пропал молча");
+  assert.equal(said.entity, "equipment");
+  assert.equal(said.label, "Реле Р8", "в отчёте не названа модель");
+});
+
+test("правка модели не воскрешает пустой справочник у объекта прежнего формата", () => {
+  const { project: base } = ancestor();
+  const bare = copyOf(base);
+  delete bare.equipmentTypes;
+  delete bare.equipment;
+  delete bare.placements;
+  delete bare.outlines;
+  const twin = copyOf(bare);
+
+  const merged = mergeProjects(stamp(bare, "2026-02-03T10:00:00.000Z"), stamp(twin, "2026-02-03T10:00:00.000Z"), bare);
+  assert.equal(merged.changed, false, "слияние двух одинаковых старых файлов объявило объект изменённым");
+  for (const key of ["equipmentTypes", "equipment", "placements", "outlines"]) {
+    assert.equal(merged.project[key], undefined, "поле «" + key + "» завелось само");
+  }
+});
+
+test("модель, правленная с двух сторон, не теряет тип", () => {
+  const { project: base } = ancestor();
+  const seeded = addEquipmentType(base, { name: "Диммер DIN" });
+  const withGear = addEquipment(seeded.project, { name: "Диммер Д1", typeId: seeded.equipmentType.id });
+  const start = stamp(withGear.project, "2026-09-17T09:00:00.000Z");
+  const gearId = withGear.equipment.id;
+
+  const ours = stamp(updateEquipment(start, gearId, { vendor: "ABB" }).project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(updateEquipment(copyOf(start), gearId, { code: "D-1" }).project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, start).project;
+  const item = merged.equipment.find((entry) => entry.id === gearId);
+  assert.equal(item.typeId, seeded.equipmentType.id, "тип модели потерялся в споре");
+  assert.ok(merged.equipmentTypes.some((type) => type.id === item.typeId));
 });
