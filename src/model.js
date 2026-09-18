@@ -969,12 +969,16 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
   };
 }
 
+// Линия короче двух вершин не линия: одно правило и для постановки, и для
+// правки вершин.
+export const MARK_LINE_MIN_POINTS = 2;
+
 export function addMark(project, { schemeId, typeId, kind = "point", points, blockMode } = {}) {
   requireScheme(project, schemeId);
   const type = requireType(project, typeId);
   if (!MARK_KINDS.includes(kind)) throw modelError("unknownKind");
   const vertices = normalizePoints(points);
-  if (kind === "line" && vertices.length < 2) throw modelError("shortLine");
+  if (kind === "line" && vertices.length < MARK_LINE_MIN_POINTS) throw modelError("shortLine");
 
   const mode = blockMode || type.blockMode || "each";
   if (!BLOCK_MODES.includes(mode)) throw modelError("unknownBlockMode");
@@ -2088,6 +2092,44 @@ export function removeOutlinePoint(project, outlineId, index) {
   if (points.length <= OUTLINE_MIN_POINTS) throw modelError("shortOutline");
   points.splice(index, 1);
   return updateOutline(project, outlineId, { points });
+}
+
+// ——— правка вершин ломаной ————————————————————————————————————————————
+//
+// Та же рука, что правит контур помещения: вершину двигают, добавляют между
+// соседними и удаляют. Ошибся на третьей вершине из десяти — правится третья,
+// а не перерисовывается вся линия. Всё через `updateMark`: второго места, где
+// меняются точки метки, нет.
+
+function markPointsAt(project, markId) {
+  return [...requireMark(project, markId).points];
+}
+
+export function moveMarkPoint(project, markId, index, point) {
+  const points = markPointsAt(project, markId);
+  if (!(index >= 0 && index < points.length)) throw modelError("markPointNotFound");
+  points[index] = { x: point.x, y: point.y };
+  return updateMark(project, markId, { points });
+}
+
+// Новая вершина встаёт после `index` — на сегменте от неё к следующей. У
+// замкнутой линии замыкающий сегмент такой же, как все: последняя → первая.
+export function insertMarkPoint(project, markId, index, point) {
+  const points = markPointsAt(project, markId);
+  if (!(index >= 0 && index < points.length)) throw modelError("markPointNotFound");
+  points.splice(index + 1, 0, { x: point.x, y: point.y });
+  return updateMark(project, markId, { points });
+}
+
+export function removeMarkPoint(project, markId, index) {
+  const mark = requireMark(project, markId);
+  const points = [...mark.points];
+  if (!(index >= 0 && index < points.length)) throw modelError("markPointNotFound");
+  // Линия короче двух вершин не существует — модель её и не примет.
+  if (mark.kind === "line" && points.length <= MARK_LINE_MIN_POINTS) throw modelError("shortLine");
+  if (points.length <= 1) throw modelError("shortLine");
+  points.splice(index, 1);
+  return updateMark(project, markId, { points });
 }
 
 // ——— автопривязка метки к помещению ——————————————————————————————————

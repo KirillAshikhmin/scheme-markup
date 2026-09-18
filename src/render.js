@@ -1968,20 +1968,38 @@ function outlineColor(project, outline) {
   return (room && room.color) || OUTLINE_COLOR_FALLBACK;
 }
 
+// Ручки вершин пути: квадрат на каждой вершине. Одна мера и один вид у контура
+// помещения и у ломаной метки — правит их одна и та же рука.
+export function pathVertexHandles(scheme, points, view) {
+  const state = renderView(view);
+  return (points || []).map((point, index) => {
+    const at = planToScreen(point, scheme, state);
+    return { kind: "vertex", index, x: at.x, y: at.y, r: OUTLINE_HANDLE_PX };
+  });
+}
+
+// Ручка пути под точкой экрана — по ней холст решает, что потащили.
+export function hitPathHandle(handles, point) {
+  for (const handle of handles) {
+    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) return handle;
+  }
+  return null;
+}
+
 // Ручки правки: вершины (их двигают и удаляют) и «+» на середине каждой стенки
 // (по нему вершина добавляется). Замыкающая стенка — такая же, как все.
 export function outlineHandles(scheme, outline, view) {
   const state = renderView(view);
   const screen = outlineScreen(scheme, outline, state);
   const handles = [];
-  screen.forEach((point, index) => {
-    handles.push({ kind: "vertex", index, x: point.x, y: point.y, r: OUTLINE_HANDLE_PX });
+  pathVertexHandles(scheme, outline.points, state).forEach((handle, index) => {
+    handles.push(handle);
     const next = screen[(index + 1) % screen.length];
     handles.push({
       kind: "insert",
       index,
-      x: (point.x + next.x) / 2,
-      y: (point.y + next.y) / 2,
+      x: (screen[index].x + next.x) / 2,
+      y: (screen[index].y + next.y) / 2,
       r: OUTLINE_HANDLE_PX - 1,
     });
   });
@@ -2000,11 +2018,8 @@ export function hitOutline(project, scheme, point, view, filter, selectedOutline
   const outlines = visibleOutlines(project, scheme, filter);
   const selected = outlines.find((outline) => outline.id === selectedOutlineId);
   if (selected) {
-    for (const handle of outlineHandles(scheme, selected, state)) {
-      if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) {
-        return { outlineId: selected.id, part: handle.kind, index: handle.index };
-      }
-    }
+    const handle = hitPathHandle(outlineHandles(scheme, selected, state), point);
+    if (handle) return { outlineId: selected.id, part: handle.kind, index: handle.index };
   }
   // Меньший контур лежит в порядке последним и ловится первым: у комнаты
   // внутри комнаты стенки могут совпасть со стенками большей.
@@ -2135,8 +2150,14 @@ export function drawOutlines(ctx, { project, scheme, filter, view, mode, selecte
 
 // Ручки выделенного контура: квадрат на вершине, «+» на середине стенки.
 export function drawOutlineHandles(ctx, scheme, outline, view, color) {
+  drawPathHandles(ctx, outlineHandles(scheme, outline, renderView(view)), color);
+}
+
+// Рисование ручек пути. Квадрат — вершина, кружок с «+» — вставка: один вид у
+// контура помещения и у ломаной метки.
+export function drawPathHandles(ctx, handles, color) {
   const tint = color || "#0969da";
-  for (const handle of outlineHandles(scheme, outline, renderView(view))) {
+  for (const handle of handles) {
     ctx.save();
     ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
     ctx.strokeStyle = tint;
@@ -2538,6 +2559,7 @@ export function drawScheme(ctx, {
   draft,
   draftColor,
   draftLineStyle,
+  guides,
   outlines,
   selectedOutlineId,
 }) {
@@ -2577,6 +2599,9 @@ export function drawScheme(ctx, {
   }
   for (const item of labels) drawLabel(ctx, item.box, item.color);
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da", draftLineStyle);
+  // Направляющие без черновика: вершину правят той же рукой, что рисуют, и
+  // подсказки при этом те же. Черновика в этот момент нет, а пунктир нужен.
+  if (guides && !draft) drawDraftGuides(ctx, scheme, guides, state, draftColor || "#0969da");
   if (legend) drawLegend(ctx, { project, scheme, filter, view: state, box: legend === true ? null : legend });
 }
 

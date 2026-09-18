@@ -25,9 +25,12 @@ import {
   findGroup,
   findOutline,
   findRoom,
+  insertMarkPoint,
   insertOutlinePoint,
   labelOf,
+  moveMarkPoint,
   moveOutlinePoint,
+  removeMarkPoint,
   removeOutlinePoint,
   styleOf,
   typeKindOf,
@@ -53,9 +56,13 @@ import {
   outlineLabelBox,
   outlineLabelTurn,
   hitOutlineLabelTurn,
+  pathVertexHandles,
+  hitPathHandle,
+  drawPathHandles,
   planToScreen,
   screenToPlan,
   draftSnap,
+  visibleMarks,
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { uiConfirm, uiDialogDepth } from "./panels/ui.js";
@@ -208,6 +215,11 @@ export function canvasAddKind(state) {
 export function canvasHintText(state) {
   if (!state || !state.schemeId) return null;
   if (!canvasEditAllowed(state)) return strings.mobile.viewOnly;
+  // Правка ломаной — это режим руки, и подсказка обязана сказать, что сейчас
+  // делает двойной клик: он здесь занят вершинами, а не выделением.
+  if (state.editLineId && state.project && findMark(state.project, state.editLineId)) {
+    return strings.canvas.hintLineEdit;
+  }
   const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
   const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
   if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
@@ -429,6 +441,7 @@ function canvasPaint() {
     selectedIds: state.selectedMarkIds,
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
+    guides: canvasDrag && canvasDrag.kind === "markVertex" ? canvasDrag.guides : null,
     draftColor,
     draftLineStyle: state.activeTypeId ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
@@ -443,6 +456,11 @@ function canvasPaint() {
     const room = findRoom(project, outline.roomId);
     drawLabelTurn(canvasCtx, outlineLabelTurn(project, scheme, outline, view), (room && room.color) || "#0969da");
   }
+  // Ручки вершин правимой ломаной: квадраты на вершинах, как у контура
+  // помещения. Пока они видны, клик по вершине тащит её одну, а не всю линию.
+  const edited = editable && !canvasDrag ? canvasEditedLine(state, scheme) : null;
+  if (edited) drawPathHandles(canvasCtx, pathVertexHandles(scheme, edited.points, view));
+
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
   // Ручка поворота подписи — у самой подписи выделенной метки: подпись вдоль
   // стены ставят, глядя на план, а не в панель.
@@ -690,6 +708,56 @@ function canvasResetLabel(point) {
     canvasFail(error);
   }
   return true;
+}
+
+// Ломаная в правке: метка, у которой сейчас видны ручки вершин. Правка живёт
+// в состоянии сеанса (`editLineId`), а не в объекте: это режим руки, а не
+// свойство разметки, и в файл проекта ему не за чем.
+function canvasEditedLine(state, scheme) {
+  if (!state || !state.editLineId || !scheme || !state.project) return null;
+  const mark = findMark(state.project, state.editLineId);
+  if (!mark || mark.kind !== "line" || mark.schemeId !== scheme.id) return null;
+  // Скрытую фильтром линию не правят: её на плане нет.
+  return visibleMarks(state.project, scheme, state.filter).some((item) => item.id === mark.id) ? mark : null;
+}
+
+// Куда сядет вершина, которую тащат. Правка вершины ничем не отличается от
+// рисования: тот же магнит направления и те же направляющие по вершинам этой
+// же ломаной. Опора — соседняя вершина: от неё и считается угол.
+function canvasVertexSnap(mark, index, target, free) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const points = mark.points || [];
+  if (points.length < 2) return { point: target, guides: [] };
+  const anchor = index > 0 ? index - 1 : mark.closed ? points.length - 1 : 1;
+  const sources = points.filter((item, at) => at !== index && at !== anchor);
+  const snap = draftSnap([...sources, points[anchor]], target, scheme, canvasViewOf(state), { free: Boolean(free) });
+  return { point: snap.point, guides: snap.guides || [] };
+}
+
+function canvasEditLine(markId) {
+  canvasApi.setState({ selectedMarkIds: [markId], selectedOutlineId: null, editLineId: markId });
+  canvasApi.notify(strings.canvas.lineEditOn);
+}
+
+function canvasInsertMarkPoint(markId, index, plan) {
+  const state = canvasState();
+  try {
+    const result = insertMarkPoint(state.project, markId, index, plan);
+    canvasCommit(state.project, result.project, strings.history.markVertexAdd, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+function canvasRemoveMarkPoint(markId, index) {
+  const state = canvasState();
+  try {
+    const result = removeMarkPoint(state.project, markId, index);
+    canvasCommit(state.project, result.project, strings.history.markVertexRemove, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
 }
 
 function canvasBlockPoint(markId, side) {
@@ -1124,6 +1192,25 @@ function canvasPointerDown(event) {
     }
   }
 
+  // Вершина правимой ломаной важнее клика по самой линии: пока ручки видны,
+  // за вершину тащат её одну, а не всю линию.
+  const editedLine = editable ? canvasEditedLine(state, scheme) : null;
+  if (editedLine) {
+    const handle = hitPathHandle(pathVertexHandles(scheme, editedLine.points, view), point);
+    if (handle) {
+      canvasDrag = {
+        kind: "markVertex",
+        markId: editedLine.id,
+        index: handle.index,
+        start: point,
+        before: state.project,
+        guides: [],
+        moved: false,
+      };
+      return;
+    }
+  }
+
   // Ручка «+» важнее всего остального: она и есть быстрый путь.
   if (editable && state.selectedMarkIds.length === 1) {
     const selected = findMark(state.project, state.selectedMarkIds[0]);
@@ -1168,7 +1255,7 @@ function canvasPointerDown(event) {
         return;
       }
       if (state.selectedOutlineId !== outlineHit.outlineId || state.selectedMarkIds.length > 0) {
-        canvasApi.setState({ selectedOutlineId: outlineHit.outlineId, selectedMarkIds: [] });
+        canvasApi.setState({ selectedOutlineId: outlineHit.outlineId, selectedMarkIds: [], editLineId: null });
       }
       // Подпись комнаты таскается отдельно от контура — тем же жестом, что
       // подпись метки.
@@ -1190,7 +1277,12 @@ function canvasPointerDown(event) {
     // Выделили метку — выделение контура снимается: две пары ручек рядом
     // означали бы, что непонятно, чью вершину сейчас потащат.
     if (state.selectedMarkIds[0] !== hit.markId || state.selectedOutlineId) {
-      canvasApi.setState({ selectedMarkIds: [hit.markId], selectedOutlineId: null });
+      // Выбрали другой объект — правка прежней линии закончена.
+      canvasApi.setState({
+        selectedMarkIds: [hit.markId],
+        selectedOutlineId: null,
+        editLineId: state.editLineId === hit.markId ? hit.markId : null,
+      });
     }
     if (!editable) {
       // Метка выделена — её поля можно прочитать; тащить её при этом нельзя,
@@ -1218,7 +1310,7 @@ function canvasPointerDown(event) {
 
 // Перетаскивание метки: новые точки считаются от снимка «до», а не от
 // предыдущего кадра, — иначе метка уползает от курсора накопленной ошибкой.
-function canvasDragTo(point) {
+function canvasDragTo(point, free) {
   const state = canvasState();
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
@@ -1228,7 +1320,13 @@ function canvasDragTo(point) {
   const dx = now.x - from.x;
   const dy = now.y - from.y;
   try {
-    if (canvasDrag.kind === "outlineVertex") {
+    if (canvasDrag.kind === "markVertex") {
+      const mark = findMark(before, canvasDrag.markId);
+      const origin = mark.points[canvasDrag.index];
+      const snap = canvasVertexSnap(mark, canvasDrag.index, { x: origin.x + dx, y: origin.y + dy }, free);
+      canvasDrag.guides = snap.guides;
+      canvasPreview = moveMarkPoint(before, canvasDrag.markId, canvasDrag.index, snap.point).project;
+    } else if (canvasDrag.kind === "outlineVertex") {
       const outline = findOutline(before, canvasDrag.outlineId);
       const origin = outline.points[canvasDrag.index];
       canvasPreview = moveOutlinePoint(before, canvasDrag.outlineId, canvasDrag.index, {
@@ -1304,8 +1402,8 @@ function canvasPointerMove(event) {
   if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
   if (!canvasDrag.moved) return;
 
-  if (["mark", "label", "outlineLabel", "outlineVertex"].includes(canvasDrag.kind)) {
-    canvasDragTo(point);
+  if (["mark", "label", "outlineLabel", "outlineVertex", "markVertex"].includes(canvasDrag.kind)) {
+    canvasDragTo(point, event.altKey);
     return;
   }
   if (["pan", "empty", "place", "line", "room", "outline"].includes(canvasDrag.kind)) {
@@ -1334,6 +1432,11 @@ function canvasPointerUp(event) {
       const after = canvasPreview;
       canvasPreview = null;
       canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+    }
+    if (drag.kind === "markVertex" && canvasPreview) {
+      const after = canvasPreview;
+      canvasPreview = null;
+      canvasCommit(drag.before, after, strings.history.markVertexMove, { selection: [drag.markId] });
     }
     if (drag.kind === "outlineLabel" && canvasPreview) {
       const after = canvasPreview;
@@ -1370,8 +1473,8 @@ function canvasPointerUp(event) {
     canvasPlacePoint(plan);
     return;
   }
-  if (drag.kind === "empty" && (state.selectedMarkIds.length > 0 || state.selectedOutlineId)) {
-    canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null });
+  if (drag.kind === "empty" && (state.selectedMarkIds.length > 0 || state.selectedOutlineId || state.editLineId)) {
+    canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null, editLineId: null });
   }
 }
 
@@ -1388,6 +1491,36 @@ function canvasDoubleClick(event) {
       event.preventDefault();
       canvasOutlineRemovePoint(hit.outlineId, hit.index);
       return;
+    }
+  }
+  // Правка ломаной той же рукой, что правка контура: двойной клик по линии
+  // включает правку, по вершине — убирает её, по сегменту — добавляет новую в
+  // точке клика. Пользователь: «у линий при выделении позволь редактировать её,
+  // например двойным кликом на линию».
+  if (state.mode === "select") {
+    const at = canvasPointOf(event);
+    const edited = canvasEditedLine(state, scheme);
+    if (edited) {
+      const handle = hitPathHandle(pathVertexHandles(scheme, edited.points, view), at);
+      if (handle) {
+        event.preventDefault();
+        canvasRemoveMarkPoint(edited.id, handle.index);
+        return;
+      }
+    }
+    const hit = hitTest(state.project, scheme, at, view, state.filter);
+    if (hit && edited && hit.markId === edited.id && hit.part === "line") {
+      event.preventDefault();
+      canvasInsertMarkPoint(edited.id, hit.index, screenToPlan(at, scheme, view));
+      return;
+    }
+    if (hit && hit.part !== "label" && (!edited || hit.markId !== edited.id)) {
+      const mark = findMark(state.project, hit.markId);
+      if (mark && mark.kind === "line") {
+        event.preventDefault();
+        canvasEditLine(mark.id);
+        return;
+      }
     }
   }
   // Двойной клик по подписи возвращает её на место — там же, где её и таскают:
@@ -1482,6 +1615,12 @@ function canvasKeyDown(event) {
   }
   if (event.key === "Escape") {
     if (canvasCancelDraft()) return;
+    // Первый Esc заканчивает правку линии: выделение при этом остаётся — за ним
+    // стоят панель свойств и кнопки, и сносить его заодно нельзя.
+    if (state.editLineId) {
+      canvasApi.setState({ editLineId: null });
+      return;
+    }
     if (state.selectedOutlineId) {
       canvasApi.setState({ selectedOutlineId: null });
       return;
@@ -1634,6 +1773,9 @@ function mountCanvasHint(host, api) {
       "activeRoomId" in changed ||
       "schemeId" in changed ||
       "layout" in changed ||
+      // Правка ломаной — такой же режим руки, как «Добавление»: началась или
+      // закончилась, и подсказка обязана это сказать.
+      "editLineId" in changed ||
       "project" in changed
     ) {
       render();
