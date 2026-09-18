@@ -557,8 +557,10 @@ export const strings = {
     deletedHere: "{label}: удалили вы, на другой стороне правлено — вернулось",
     danglingRef: "{label}: ссылка вела в никуда — снято",
     danglingType: "{label}: тип этой модели удалён на другой стороне — поле типа очищено",
+    restoredRef: "{label}: удалено на одной стороне, но на другой этим пользуются — возвращено (версия {side})",
     sideOurs: "ваш",
     sideTheirs: "со стороны",
+    sideBase: "из общего снимка",
     close: "Понятно",
   },
   autosave: {

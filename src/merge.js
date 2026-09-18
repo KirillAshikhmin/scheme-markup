@@ -18,7 +18,7 @@
 // правила, сущность остаётся (с пометкой в `conflicts`). Вернуть лишнюю метку
 // — минута работы, восстановить потерянную — некому.
 
-import { renumberAcceptedRepeats } from "./model.js";
+import { MARK_NUMBER_MAX, renumberAcceptedRepeats } from "./model.js";
 
 // Сущности объекта, которые сливаются поимённо, по `id`.
 //
@@ -205,15 +205,81 @@ function mergeCollection(entity, ours, theirs, base, report, winner) {
     }
   }
 
-  if (MERGE_ORDERED.includes(entity)) {
-    result.sort((a, b) => {
-      const byOrder = (Number(a.order) || 0) - (Number(b.order) || 0);
-      if (byOrder !== 0) return byOrder;
-      return String(a.id) < String(b.id) ? -1 : 1;
-    });
-    return result.map((item, index) => (item.order === index ? item : { ...item, order: index }));
+  return MERGE_ORDERED.includes(entity) ? mergeReorder(result) : result;
+}
+
+// Порядок коллекции со своим `order`: сначала по нему, при равенстве — по `id`,
+// потом сплошная нумерация без дыр. Тем же порядком встаёт и запись, которую
+// вернуло `mergeRestore`.
+function mergeReorder(list) {
+  const sorted = [...list].sort((a, b) => {
+    const byOrder = (Number(a.order) || 0) - (Number(b.order) || 0);
+    if (byOrder !== 0) return byOrder;
+    return String(a.id) < String(b.id) ? -1 : 1;
+  });
+  return sorted.map((item, index) => (item.order === index ? item : { ...item, order: index }));
+}
+
+/**
+ * Возвращает запись справочника, на которую в слитом объекте осталась ссылка.
+ *
+ * Модель не даёт удалить то, чем пользуются: `deleteCategory` отказывает, пока
+ * у категории есть типы, `deleteType` — пока у типа есть метки,
+ * `deleteEquipmentType` и `deleteEquipment` — пока на них ссылаются модели и
+ * размещения. Через двух участников это правило обходится: у меня меток на
+ * типе нет, я его удаляю; у вас в это же время появляется пять меток этого
+ * типа. Раньше слияние соглашалось с удалением и сносило ваши метки — пять
+ * строк «ссылка вела в никуда» и `clearHistory()` следом, вернуть нечем.
+ *
+ * Правило теперь то же, что у правки против удаления: **ссылка важнее
+ * удаления.** Удалить запись на одной стороне было законно только потому, что
+ * чужой работы не было видно.
+ *
+ * Чья версия возвращается: той стороны, у которой запись ещё жива — только она
+ * могла её переименовать или перекрасить, у удалившей ничего нет. Живы обе
+ * (запись унесло цепочкой, а не удалением) — версия победителя спора, как
+ * везде. Не осталось ни у кого — из общего снимка. Каждое возвращение идёт в
+ * `conflicts` строкой `restoredRef` с указанием версии.
+ */
+function mergeRestore(merged, entity, needed, sources, report, winner) {
+  const live = mergeIndex(merged[entity]);
+  const missing = [...needed].filter((id) => id && !live.has(id));
+  if (missing.length === 0) return;
+  const oursIndex = mergeIndex(mergeList(sources.ours, entity));
+  const theirsIndex = mergeIndex(mergeList(sources.theirs, entity));
+  const baseIndex = mergeIndex(mergeList(sources.base, entity));
+
+  const restored = [];
+  for (const id of missing.sort()) {
+    const mine = oursIndex.get(id) || null;
+    const other = theirsIndex.get(id) || null;
+    let item = null;
+    let kept = "base";
+    if (mine && other) {
+      item = winner === "theirs" ? other : mine;
+      kept = winner;
+    } else if (mine || other) {
+      item = mine || other;
+      kept = mine ? "ours" : "theirs";
+    } else {
+      item = baseIndex.get(id) || null;
+    }
+    // Вернуть неоткуда: записи нет ни у кого. Дальше сработает обычная чистка
+    // висячих ссылок — она хотя бы скажет об этом вслух.
+    if (!item) continue;
+    restored.push(item);
+    report.conflicts.push({ code: "restoredRef", entity, id, kept, item });
   }
-  return result;
+  if (restored.length === 0) return;
+  const next = [...merged[entity], ...restored];
+  merged[entity] = MERGE_ORDERED.includes(entity) ? mergeReorder(next) : next;
+}
+
+// Чем пользуются: множество идентификаторов, на которые ссылается коллекция.
+function mergeRefs(list, key) {
+  const ids = new Set();
+  for (const item of list) if (item && item[key]) ids.add(item[key]);
+  return ids;
 }
 
 // Счётчики номеров: номер не переиспользуется, поэтому берётся больший.
@@ -359,7 +425,11 @@ function mergeNumbers(marks, types, counters, sources, report) {
     do {
       next += 1;
       candidate = code + "|" + next;
-    } while (taken.has(candidate));
+    } while (taken.has(candidate) && next <= MARK_NUMBER_MAX);
+    // Свободного номера в потолке `setMarkNumber` не нашлось. Выдать то, чего
+    // руками не поставить, слияние не вправе — метка остаётся на своём номере,
+    // а повтор покажет панель предупреждений.
+    if (next > MARK_NUMBER_MAX) continue;
     taken.add(candidate);
     counters[code] = Math.max(Number(counters[code]) || 0, next);
     for (const mark of cluster.marks) fixed.set(mark.id, next);
@@ -393,14 +463,41 @@ function mergeNumbers(marks, types, counters, sources, report) {
   };
 }
 
-// Ссылки на то, чего в слитом объекте нет: висячая ссылка хуже отсутствующей.
-// Снимается одним проходом, каждая потеря — в отчёт.
-function mergeReferences(merged, report) {
+/**
+ * Ссылки на то, чего в слитом объекте нет.
+ *
+ * Два разных случая, и путать их нельзя.
+ *
+ * **Справочник.** Категорию, тип метки, тип оборудования и модель модель
+ * удалить, пока на них ссылаются, не даёт вовсе. Значит такое удаление здесь
+ * не выполняется, а откатывается: запись возвращается (`mergeRestore`), и
+ * ручная работа второго участника остаётся на месте.
+ *
+ * **Схема и помещение.** Их модель удалять разрешает и сама описывает, что при
+ * этом уходит: `deleteScheme` уносит свои метки, блоки, контуры и размещения,
+ * `deleteRoom` — свои контуры, а меткам обнуляет помещение. Слияние повторяет
+ * её правило, а не выдумывает своё: воскрешать схему было бы гаданием ещё и
+ * потому, что подложка лежит вне объекта. Каждая потеря — в отчёт, и само
+ * удаление схемы или комнаты уже стоит там строкой «удалено: …».
+ */
+function mergeReferences(merged, report, sources, winner) {
   const schemes = mergeIndex(merged.schemes);
   const rooms = mergeIndex(merged.rooms);
-  const types = mergeIndex(merged.markTypes);
-  const categories = mergeIndex(merged.categories);
 
+  // Метка без схемы уходит вместе со схемой — по правилу `deleteScheme`.
+  merged.marks = merged.marks.filter((mark) => {
+    if (schemes.has(mark.schemeId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "marks", id: mark.id, kept: "none", item: mark });
+    return false;
+  });
+
+  // Тип, на котором остались метки, и категория, на которой остались типы,
+  // возвращаются: `typeHasMarks` и `categoryHasTypes` такого удаления не
+  // допускают. Порядок важен — у вернувшегося типа тоже должна быть категория.
+  mergeRestore(merged, "markTypes", mergeRefs(merged.marks, "typeId"), sources, report, winner);
+  mergeRestore(merged, "categories", mergeRefs(merged.markTypes, "categoryId"), sources, report, winner);
+
+  const categories = mergeIndex(merged.categories);
   merged.markTypes = merged.markTypes.filter((type) => {
     if (categories.has(type.categoryId)) return true;
     report.conflicts.push({ code: "danglingRef", entity: "markTypes", id: type.id, kept: "none", item: type });
@@ -409,7 +506,7 @@ function mergeReferences(merged, report) {
   const liveTypes = mergeIndex(merged.markTypes);
 
   merged.marks = merged.marks.filter((mark) => {
-    if (schemes.has(mark.schemeId) && liveTypes.has(mark.typeId)) return true;
+    if (liveTypes.has(mark.typeId)) return true;
     report.conflicts.push({ code: "danglingRef", entity: "marks", id: mark.id, kept: "none", item: mark });
     return false;
   });
@@ -433,11 +530,16 @@ function mergeReferences(merged, report) {
     return false;
   });
 
-  // Тип модели: у единицы он необязателен, и «тип не заполнен» — не поломка, а
-  // ссылка в никуда — поломка (модель читает тип через `findEquipmentType` и
-  // покажет пустую колонку, ничего не сказав). Тип могли удалить на одной
-  // стороне, пока на другой его вешали на новую модель: сам справочник
-  // сливается наравне с остальными, а вот такую ссылку снимаем — вслух.
+  // Тип модели и сама модель — такой же справочник: `equipmentTypeInUse` и
+  // `equipmentInUse` удалить их «под» чужой работой не дают. Модель возвращаем
+  // ради размещений, которые пережили чистку меток.
+  mergeRestore(merged, "equipmentTypes", mergeRefs(merged.equipment, "typeId"), sources, report, winner);
+  const placed = merged.placements.filter((placement) => marks.has(placement.markId));
+  mergeRestore(merged, "equipment", mergeRefs(placed, "equipmentId"), sources, report, winner);
+
+  // Вернуть тип модели оказалось неоткуда. Тип у единицы необязателен («тип не
+  // заполнен» — не поломка), а ссылка в никуда читается как пустая колонка и
+  // молчит, — поэтому поле чистим, но вслух.
   const equipmentTypes = mergeIndex(merged.equipmentTypes);
   merged.equipment = merged.equipment.map((item) => {
     if (!item.typeId || equipmentTypes.has(item.typeId)) return item;
@@ -465,8 +567,6 @@ function mergeReferences(merged, report) {
     if (Array.isArray(controls) && controls.length !== mark.controls.length) patch.controls = controls;
     return Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
   });
-  // Типы после чистки могли уехать: `types` держим ради ясности сравнения выше.
-  void types;
   return merged;
 }
 
@@ -503,15 +603,18 @@ export function mergeProjects(ours, theirs, base, options = {}) {
     }
   }
 
+  const sources = { ours, theirs, base: ancestor };
   merged.counters = mergeCounters(ours, theirs);
   mergeAccepted(merged, ours, theirs);
-  const numbered = mergeNumbers(merged.marks, merged.markTypes, merged.counters, { ours, theirs, base: ancestor }, report);
+  // Сначала состав, потом номера: вернувшийся тип приводит с собой свои метки,
+  // и разводить обозначения надо уже по окончательному списку.
+  mergeReferences(merged, report, sources, winner);
+  const numbered = mergeNumbers(merged.marks, merged.markTypes, merged.counters, sources, report);
   merged.marks = numbered.marks;
   // Ответы «так и задумано» едут за своими обозначениями: вопрос уже задан и
   // закрыт, а переспросить слияние не может — оно применяется молча.
   const accepted = renumberAcceptedRepeats(merged, numbered.moves);
   if (accepted) merged.accepted = accepted;
-  mergeReferences(merged, report);
   for (const entity of absent) {
     if (merged[entity].length === 0) delete merged[entity];
   }

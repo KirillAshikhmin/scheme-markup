@@ -359,6 +359,14 @@ function mountFilePanel(host, api) {
 
   // ——— чужие правки в общей папке ————————————————————————————————————
 
+  // Чей вариант оставлен. Сторон три, а не две: вернувшуюся запись справочника
+  // слияние берёт и из общего снимка, когда у живых её не осталось.
+  function mergeSideName(kept) {
+    if (kept === "theirs") return strings.merge.sideTheirs;
+    if (kept === "base") return strings.merge.sideBase;
+    return strings.merge.sideOurs;
+  }
+
   // Что пришло со стороны, построчно. Показывается, только когда есть о чём
   // говорить: тост сообщает факт, список — подробности.
   function mergeReport(result) {
@@ -373,7 +381,7 @@ function mountFilePanel(host, api) {
         result.conflicts.map((conflict) =>
           text("merge." + conflict.code, {
             label: conflict.label || conflict.id,
-            side: conflict.kept === "theirs" ? strings.merge.sideTheirs : strings.merge.sideOurs,
+            side: mergeSideName(conflict.kept),
           }),
         ),
       ],

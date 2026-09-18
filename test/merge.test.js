@@ -18,6 +18,12 @@ import {
   addEquipmentType,
   addPlacement,
   acceptProblem,
+  deleteCategory,
+  deleteEquipment,
+  deleteEquipmentType,
+  deleteScheme,
+  deleteType,
+  MARK_NUMBER_MAX,
   problemAccepted,
   repeatedNumbers,
   setMarkNumber,
@@ -519,30 +525,196 @@ test("типы оборудования сливаются в обе сторо�
   }
 });
 
-test("тип, удалённый на другой стороне, не оставляет висячей ссылки — и о нём сказано", () => {
+test("тип оборудования, удалённый на другой стороне, возвращается — на нём чужая модель", () => {
   const { project: base } = ancestor();
   const seeded = addEquipmentType(base, { name: "Реле 8 каналов" });
   const start = seeded.project;
   const typeId = seeded.equipmentType.id;
 
   // Мы тип убрали (моделей на нём не было), они в это же время завели на него модель.
-  const ours = stamp(
-    { ...start, equipmentTypes: start.equipmentTypes.filter((type) => type.id !== typeId) },
-    "2026-09-17T10:00:00.000Z",
-  );
+  const ours = stamp(deleteEquipmentType(start, typeId).project, "2026-09-17T10:00:00.000Z");
   const theirs = stamp(
     addEquipment(copyOf(start), { name: "Реле Р8", typeId }).project,
     "2026-09-17T11:00:00.000Z",
   );
 
+  for (const [name, a, b] of [["нам ← им", ours, theirs], ["им ← нам", theirs, ours]]) {
+    const merged = mergeProjects(a, b, start);
+    const item = merged.project.equipment.find((entry) => entry.name === "Реле Р8");
+    assert.ok(item, name + ": модель со стороны потерялась");
+    assert.equal(item.typeId, typeId, name + ": модель осталась без типа");
+    assert.ok(
+      merged.project.equipmentTypes.some((type) => type.id === typeId && type.name === "Реле 8 каналов"),
+      name + ": тип не вернулся",
+    );
+    const said = merged.conflicts.find((conflict) => conflict.code === "restoredRef");
+    assert.ok(said, name + ": тип вернулся молча");
+    assert.equal(said.entity, "equipmentTypes");
+    assert.equal(said.label, "Реле 8 каналов", name + ": в отчёте не названо, что вернулось");
+  }
+});
+
+// ——— ссылка важнее удаления ——————————————————————————————————————————
+//
+// Модель не даёт удалить то, чем пользуются: `typeHasMarks`, `categoryHasTypes`,
+// `equipmentTypeInUse`, `equipmentInUse`. Через двух участников это правило
+// обходилось — у меня меток на типе нет, я его удаляю; у вас в это же время
+// появляются метки этого типа, — и слияние сносило вашу работу. Рядом
+// `clearHistory()`: вернуть нечем.
+test("тип метки возвращается, а его метки не идут под нож", () => {
+  const { project: base, schemeId } = ancestor();
+  // Тип, на котором меток нет ни у кого: удалить его модель разрешает.
+  const spare = base.markTypes.find((type) => !base.marks.some((mark) => mark.typeId === type.id));
+
+  const ours = stamp(deleteType(base, spare.id).project, "2026-09-17T10:00:00.000Z");
+  let mine = copyOf(base);
+  for (let i = 0; i < 5; i += 1) {
+    mine = addMark(mine, { schemeId, typeId: spare.id, points: [{ x: 0.1 + i / 10, y: 0.8 }] }).project;
+  }
+  const theirs = stamp(mine, "2026-09-17T11:00:00.000Z");
+  assert.equal(theirs.marks.length, base.marks.length + 5, "пример не тот");
+
+  // Версия берётся у той стороны, которая тип не удаляла: только она могла его
+  // переименовать или перекрасить, у удалившей ничего нет.
+  for (const [name, a, b, side] of [["нам ← им", ours, theirs, "theirs"], ["им ← нам", theirs, ours, "ours"]]) {
+    const merged = mergeProjects(a, b, base);
+    assert.equal(merged.project.marks.length, base.marks.length + 5, name + ": метки снесены удалением типа");
+    const back = merged.project.markTypes.find((type) => type.id === spare.id);
+    assert.ok(back, name + ": тип не вернулся, метки остались без типа");
+    assert.equal(back.name, spare.name, name + ": вернулась не та версия типа");
+    const said = merged.conflicts.find((conflict) => conflict.code === "restoredRef" && conflict.entity === "markTypes");
+    assert.ok(said, name + ": тип вернулся молча");
+    assert.equal(said.kept, side, name + ": в отчёте названа не та сторона");
+    assert.equal(said.label, spare.code, name + ": в отчёте не названо, что вернулось");
+    // Порядок справочника — без дыр, как и после обычного слияния.
+    assert.deepEqual(
+      merged.project.markTypes.map((type) => type.order),
+      merged.project.markTypes.map((type, index) => index),
+    );
+  }
+});
+
+test("вместе с типом возвращается и его категория", () => {
+  const { project: base, schemeId } = ancestor();
+  // Категория, на типах которой меток нет ни у кого: только такую модель и даёт
+  // вычистить целиком.
+  const used = new Set(base.marks.map((mark) => mark.typeId));
+  const categoryId = base.categories
+    .map((category) => category.id)
+    .find((id) => base.markTypes.some((type) => type.categoryId === id) &&
+      !base.markTypes.some((type) => type.categoryId === id && used.has(type.id)));
+  const alone = base.markTypes.filter((type) => type.categoryId === categoryId);
+  const spare = alone[0];
+
+  // Мы вычистили целую категорию: сперва её типы, потом её саму.
+  let clean = base;
+  for (const type of alone) clean = deleteType(clean, type.id).project;
+  const ours = stamp(deleteCategory(clean, categoryId).project, "2026-09-17T10:00:00.000Z");
+  // Они в это время поставили метку одного из этих типов.
+  const theirs = stamp(
+    addMark(copyOf(base), { schemeId, typeId: spare.id, points: [{ x: 0.6, y: 0.9 }] }).project,
+    "2026-09-17T11:00:00.000Z",
+  );
+
+  const merged = mergeProjects(ours, theirs, base);
+  assert.equal(merged.project.marks.length, base.marks.length + 1, "метка со стороны снесена");
+  const type = merged.project.markTypes.find((item) => item.id === spare.id);
+  assert.ok(type, "тип не вернулся");
+  assert.ok(
+    merged.project.categories.some((category) => category.id === type.categoryId),
+    "тип вернулся без категории — он не покажется ни в справочнике, ни в легенде",
+  );
+  const restored = merged.conflicts.filter((conflict) => conflict.code === "restoredRef").map((item) => item.entity);
+  assert.ok(restored.includes("markTypes") && restored.includes("categories"), "о возврате сказано не про всё: " + restored.join(", "));
+});
+
+test("модель оборудования возвращается ради чужого размещения", () => {
+  const { project: base } = ancestor();
+  const gear = addEquipment(base, { name: "Щит 1", vendor: "ABB" });
+  const start = gear.project;
+
+  // Мы модель удалили (нигде не стояла), они её в это время поставили на метку.
+  const ours = stamp(deleteEquipment(start, gear.equipment.id).project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(
+    addPlacement(copyOf(start), { equipmentId: gear.equipment.id, markId: base.marks[0].id }).project,
+    "2026-09-17T11:00:00.000Z",
+  );
+
   const merged = mergeProjects(ours, theirs, start);
+  assert.equal(merged.project.placements.length, 1, "размещение снесено удалением модели");
+  assert.ok(merged.project.equipment.some((item) => item.id === gear.equipment.id), "модель не вернулась");
+  assert.ok(
+    merged.conflicts.some((conflict) => conflict.code === "restoredRef" && conflict.entity === "equipment"),
+    "модель вернулась молча",
+  );
+});
+
+test("вернуть неоткуда — ссылка снимается по-старому и об этом сказано", () => {
+  const { project: base } = ancestor();
+  const gear = addEquipment(base, { name: "Реле Р8" });
+  // Тип, которого нет ни у кого: такого объекта модель не соберёт, а вот
+  // правленный руками файл из общей папки — вполне.
+  const broken = copyOf(gear.project);
+  broken.equipment[0].typeId = "00000000-0000-4000-8000-000000000000";
+  const ours = stamp(broken, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(copyOf(broken), "2026-09-17T11:00:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, null);
   const item = merged.project.equipment.find((entry) => entry.name === "Реле Р8");
-  assert.ok(item, "модель со стороны потерялась");
-  assert.equal(item.typeId, "", "ссылка на удалённый тип осталась висеть");
+  assert.equal(item.typeId, "", "ссылка в никуда осталась висеть");
   const said = merged.conflicts.find((conflict) => conflict.code === "danglingType");
-  assert.ok(said, "тип пропал молча");
-  assert.equal(said.entity, "equipment");
-  assert.equal(said.label, "Реле Р8", "в отчёте не названа модель");
+  assert.ok(said, "поле очистили молча");
+  assert.equal(said.label, "Реле Р8");
+});
+
+// Схему и помещение модель удалять **разрешает** и сама говорит, что при этом
+// уходит (`deleteScheme` — свои метки, блоки и контуры; `deleteRoom` — свои
+// контуры). Слияние повторяет её правило, а не выдумывает своё: подложка лежит
+// вне объекта, и воскрешать схему значило бы гадать. Потеря должна быть
+// громкой — это и проверяется.
+test("схема удалением не воскресает, но о снятых метках сказано", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+
+  const ours = stamp(deleteScheme(base, schemeId).project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(
+    addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.5, y: 0.5 }] }).project,
+    "2026-09-17T11:00:00.000Z",
+  );
+
+  const merged = mergeProjects(ours, theirs, base);
+  assert.equal(merged.project.schemes.length, 0, "схема вернулась — а её подложки в базе картинок уже может не быть");
+  assert.equal(merged.project.marks.length, 0);
+  // Метки общего предка ушли вместе со схемой ещё в слиянии коллекций (мы их
+  // удалили, они не трогали), а вот новая метка со стороны обязана быть названа.
+  const dropped = merged.conflicts.filter((conflict) => conflict.code === "danglingRef" && conflict.entity === "marks");
+  assert.equal(dropped.length, 1, "о снятой метке со стороны не сказано");
+  assert.equal(dropped[0].id, theirs.marks[theirs.marks.length - 1].id);
+  // Нам удаление схемы не пересказывают — мы его сами и сделали. А вот второму
+  // участнику оно приезжает строкой «удалено: 1 этаж», и там причина видна.
+  const mirror = mergeProjects(theirs, ours, base);
+  assert.ok(
+    mirror.changes.some((change) => change.entity === "schemes" && change.action === "removed" && change.label === "1 этаж"),
+    "второй стороне про удалённую схему не сказано",
+  );
+});
+
+test("номер выше потолка слияние не выдаёт", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+
+  // Обе стороны поставили по метке и вручную довели номер до потолка.
+  const mine = addMark(base, { schemeId, typeId, points: [{ x: 0.5, y: 0.5 }] });
+  const ours = stamp(setMarkNumber(mine.project, mine.mark.id, MARK_NUMBER_MAX).project, "2026-09-17T10:00:00.000Z");
+  const alien = addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.9, y: 0.9 }] });
+  const theirs = stamp(setMarkNumber(alien.project, alien.mark.id, MARK_NUMBER_MAX).project, "2026-09-17T11:00:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  const numbers = merged.project.marks.map((mark) => mark.number);
+  assert.ok(Math.max(...numbers) <= MARK_NUMBER_MAX, "слияние выдало номер, которого руками не поставить: " + Math.max(...numbers));
+  assert.deepEqual(merged.renumbered, [], "разводить было некуда, а функция сделала вид, что развела");
+  // Повтор никуда не делся — о нём скажет панель предупреждений, как о любом другом.
+  assert.ok(validate(merged.project).some((item) => item.code === "repeatedNumber"));
 });
 
 test("правка модели не воскрешает пустой справочник у объекта прежнего формата", () => {
