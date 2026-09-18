@@ -35,7 +35,7 @@ import {
 } from "../model.js";
 import { canvasCommit } from "../canvas.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
-import { openMarkPicker } from "./markControls.js";
+import { markControlsInitialRoom, openMarkPicker } from "./markControls.js";
 import { openEquipmentPicker } from "./equipmentPicker.js";
 
 // Подпись единицы для строки списка меток и для кнопки: модель плюс связи.
@@ -320,6 +320,11 @@ export function openEquipmentWindow(api, options = {}) {
       chosen: placementLinkIds(placement),
       exclude: placement.markId,
       multiple: true,
+      // Реле стоит в щите, а связывают его с метками своей комнаты — тот же
+      // частый случай, что у «Чем управляет». Значение только начальное:
+      // «Все помещения» на месте, и уже отмеченные метки из других помещений
+      // фильтр прячет, но не теряет.
+      roomId: markControlsInitialRoom(project(), placement.markId),
     });
     if (!chosen) return;
     commit((current) => updatePlacement(current, placement.id, { links: chosen }).project, strings.history.editPlacement);
