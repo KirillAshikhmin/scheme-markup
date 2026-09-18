@@ -4137,6 +4137,11 @@ const strings = {
     // ломает русский — «длинный штрих линия», «зигзаг линия», «штрих с двумя
     // точками линия». С запятой читаются все одиннадцать.
     lineSign: "{name}, линия",
+    // Знак, взятый у категории. Название впереди, пометка следом — так просил
+    // заказчик: «пусть название будет первым». В сетке выбора справочника
+    // (`dictionary.inheritShape`) порядок обратный, и это осознанно: там
+    // клетка и есть наследование, а здесь — знак, который ищут глазом.
+    inheritSign: "{name} (как у категории)",
   },
   exportPanel: {
     tableTitle: "Таблица",
@@ -15283,14 +15288,6 @@ function equipmentTable(project, filter, options = {}) {
   };
 }
 
-// Первая буква со строчной: «Круг с крестом» → «как у категории: круг с
-// крестом». Своего `toLowerCase` на всю строку тут быть не должно — он съел
-// бы «RJ45» и «(точка-тире)».
-function tableLowerFirst(value) {
-  const name = String(value || "");
-  return name ? name[0].toLowerCase() + name.slice(1) : name;
-}
-
 // Знак типа одной строкой — то, чем тип узнают на плане.
 //
 // Что именно знак, решает вид типа, и спрашивается он у `typeKindOf`: у
@@ -15298,10 +15295,16 @@ function tableLowerFirst(value) {
 // у линейного — начертание, и к нему приписано слово «линия»: иначе
 // «Двойная» в колонке «Форма» читалась бы как ещё одна фигура.
 //
-// Унаследованный знак назван унаследованным — теми же словами, что и в
-// справочнике («Как у категории: круг с крестом»). Без этого правка формы
-// категории молча меняла бы восемь строк листа из двадцати восьми, а по
-// распечатке было бы не понять, какие именно.
+// Унаследованный знак назван унаследованным. Без этого правка формы категории
+// молча меняла бы восемь строк листа из двадцати восьми, а по распечатке было
+// бы не понять, какие именно.
+//
+// Сам знак идёт первым, пометка — следом в скобках: «Квадрат (как у
+// категории)». Слова заказчика: «пусть название будет первым». Колонку
+// читают сверху вниз, ища знак, и приставка отодвигала бы его вправо на
+// восьми строках из двадцати восьми — столбец переставал быть столбцом.
+// В сетке выбора справочника порядок обратный, и это не разнобой: там клетка
+// и есть наследование, а название объясняет, чем оно обернулось.
 function tableTypeSign(project, type) {
   const style = styleOf(project, type.id);
   const line = typeKindOf(project, type.id) === "line";
@@ -15309,8 +15312,7 @@ function tableTypeSign(project, type) {
   const name = line
     ? text("tables.lineSign", { name: strings.lineStyles[style.lineStyle] || style.lineStyle })
     : strings.shapes[style.shape] || style.shape;
-  if (own) return name;
-  return text(line ? "dictionary.inheritLine" : "dictionary.inheritShape", { name: tableLowerFirst(name) });
+  return own ? name : text("tables.inheritSign", { name });
 }
 
 // Справочник разбит по категориям, как остальные листы: категория —
@@ -17171,9 +17173,28 @@ function markControlsCandidates(project, excludeId, roomId) {
 }
 
 /**
+ * Помещение, с которым окно открывается «для метки».
+ *
+ * Слова заказчика: «при открытии окна Чем управляет у метки — сразу фильтруй
+ * по метке комнаты, для которой выбираем». Случай у него частый: выключатель
+ * включает свет в своей же комнате, и выбирать помещение руками каждый раз —
+ * лишнее движение.
+ *
+ * Пустая строка — «Все помещения»: у метки помещения нет, метка не нашлась
+ * или помещение успели удалить. Значение только начальное — фильтр остаётся
+ * живым, и на «Все помещения» пользователь переключается как раньше.
+ */
+function markControlsInitialRoom(project, markId) {
+  const mark = markId ? findMark(project, markId) : null;
+  if (!mark || !mark.roomId) return "";
+  return findRoom(project, mark.roomId) ? mark.roomId : "";
+}
+
+/**
  * Окно выбора меток — кирпичами из ui.js: стопка диалогов, Escape и возврат
  * фокуса у них общие.
- * `options`: `{title, hint, chosen: [markId], exclude: markId, multiple}`.
+ * `options`: `{title, hint, chosen: [markId], exclude: markId, multiple,
+ * roomId}`, где `roomId` — помещение, на котором фильтр стоит при открытии.
  * Отвечает списком отмеченных меток (в режиме одной — списком из одной) или
  * `null`, если передумали. В режиме одной выбор сразу закрывает окно: лишнее
  * подтверждение там, где выбирают одну строку, только мешает.
@@ -17195,6 +17216,10 @@ function openMarkPicker(project, options = {}) {
     for (const room of roomsInOrder(project)) {
       rooms.append(uiEl("option", { value: room.id, text: room.name }));
     }
+    // Начальное помещение ставится до первой отрисовки списка — иначе окно
+    // моргнуло бы полным списком и тут же сузило его. Значения без своего
+    // пункта select не примет и останется на «Все помещения».
+    rooms.value = options.roomId || "";
 
     function renderNote() {
       note.textContent = multiple ? text("controls.chosen", { count: chosen.size }) : "";
@@ -17277,7 +17302,12 @@ function openMarkPicker(project, options = {}) {
   });
 }
 
-// «Чем управляет» — тот же выбор, только список берётся у самой метки.
+// «Чем управляет» — тот же выбор, только список берётся у самой метки, а
+// фильтр при открытии стоит на её помещении.
+//
+// Уже отмеченные метки из других помещений фильтр с глаз убирает, но не
+// теряет: отмеченное живёт отдельно от списка, счётчик «Отмечено: N» считает
+// их все, и «Сохранить связь» возвращает их вместе с новыми.
 function openMarkControlsPicker(project, markId) {
   return openMarkPicker(project, {
     title: text("controls.title", { label: labelOf(project, markId) }),
@@ -17285,6 +17315,7 @@ function openMarkControlsPicker(project, markId) {
     chosen: markControlIds(findMark(project, markId)),
     exclude: markId,
     multiple: true,
+    roomId: markControlsInitialRoom(project, markId),
   });
 }
 
