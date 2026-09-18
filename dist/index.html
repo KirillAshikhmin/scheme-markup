@@ -2130,6 +2130,60 @@
   margin: 4px 6px 8px;
 }
 
+/* Строка и её крестик стоят в ряд: строка тянется, крестик держит правый край.
+   Кнопка в кнопке разметкой не бывает — поэтому обёртка, а не вложение. */
+.warnings__line {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.warnings__line .warnings__row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Крестик «так и задумано» и стрелка возврата: рисунок без рамки и подложки,
+   приглушённый, пока до строки не дошли. Кнопка-значок в строке списка с
+   рамкой выглядит главнее самой строки, а главная здесь строка. */
+.warnings__accept,
+.warnings__return {
+  flex: none;
+  align-self: center;
+  padding: 4px;
+  border-color: transparent;
+  background: none;
+  color: var(--panel-muted);
+}
+
+.warnings__accept:hover:not(:disabled),
+.warnings__accept:focus-visible,
+.warnings__return:hover:not(:disabled),
+.warnings__return:focus-visible {
+  border-color: var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+}
+
+.warnings__accept .ui-icon,
+.warnings__return .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Строка принятого: тот же вид, что у предупреждения, но вести по ней некуда —
+   это запись ответа, а не строка списка. Подсветки под курсором у неё нет:
+   она обещала бы переход, которого не будет. */
+.warnings__row--done,
+.warnings__row--done:hover {
+  cursor: default;
+  background: none;
+}
+
+.warnings__dot--accepted {
+  background: var(--panel-muted);
+}
+
 .warnings__foot {
   display: flex;
   justify-content: flex-end;
@@ -3481,6 +3535,8 @@ const strings = {
     editType: "правка типа",
     typeKind: "вид типа",
     typeKindReview: "вид типов выбран",
+    acceptProblem: "предупреждение принято",
+    unacceptProblem: "предупреждение возвращено в список",
     addFromCatalog: "типы из общей базы",
     removeType: "удаление типа",
     addCategory: "новая категория",
@@ -3585,6 +3641,17 @@ const strings = {
     noProject: "Объект не открыт",
     expand: "Показать по одному",
     collapse: "Свернуть в строку",
+    // Крестик в строке: «так и задумано». Повтор номера бывает приёмом —
+    // три светильника одной группы носят Т4 намеренно, — и ответ на это
+    // запоминается в самом объекте, а не в настройках браузера.
+    accept: "Так и задумано",
+    acceptHint: "Убрать из списка: так сделано намеренно",
+    acceptedGroup: "Принято: {count}",
+    acceptedHint:
+      "Принятое не показывается, даже если меток под ним стало больше: четвёртый светильник " +
+      "в группе не возвращает того, что вы уже закрыли. Вернуть в список — стрелкой справа.",
+    acceptedReturn: "Вернуть в список",
+    acceptedError: "принята ошибка, а не предупреждение: связь так и осталась порванной",
     // Свёрнутая строка на несколько одинаковых предупреждений: во множественном
     // числе и с числом на конце. Ключи здесь — те же коды, что в `problems`,
     // и сверяются с ними тестом.
@@ -4748,6 +4815,12 @@ function createProject(template) {
     // и `placementsOf`, поэтому пустых полей здесь достаточно.
     equipment: [],
     placements: [],
+    // Принятые предупреждения — ответы «так и задумано». Ответ живёт в объекте
+    // и уезжает вместе с файлом, а не в настройках браузера: файл открывают на
+    // другой машине и вторым человеком. Список читают через
+    // `acceptedProblems`, поэтому объект прежнего формата без него открывается
+    // как раньше.
+    accepted: [],
     counters: {},
     view: { ...DEFAULT_VIEW, ...(source.view || {}) },
   };
@@ -5494,7 +5567,14 @@ function compactNumbers(project, typeId) {
     numbers.has(mark.id) ? { ...mark, number: numbers.get(mark.id) } : mark,
   );
   const counters = { ...project.counters, [type.code]: renumbered.size };
-  return { changes, project: withProject(project, { marks, counters }) };
+  // Принятое «так и задумано» переезжает на новый номер здесь же: ответ на
+  // «Т4 повторяется намеренно» обязан пережить смыкание, иначе он повиснет на
+  // номере, которого больше нет, а на Т2 тот же вопрос задастся заново. Одна
+  // операция — один шаг истории: отмена возвращает и номера, и принятия.
+  const accepted = renumberAccepted(project, typeId, type.code, renumbered);
+  const patch = { marks, counters };
+  if (accepted) patch.accepted = accepted;
+  return { changes, project: withProject(project, patch) };
 }
 
 /**
@@ -6558,8 +6638,18 @@ function dropPlacements(project, removed) {
 // название помещения у контура, подпись блока у группы. Три одинаковые строки
 // «метка ссылается на несуществующее помещение» в списке предупреждений
 // неразличимы, и посмотреть, о какой из них речь, можно было только кликом.
-function problem(code, vars, ref, kind) {
-  return { code, message: text("problems." + code, vars), ref: ref || null, kind: kind || "error" };
+function problem(code, vars, ref, kind, subject) {
+  return {
+    code,
+    message: text("problems." + code, vars),
+    ref: ref || null,
+    kind: kind || "error",
+    // Ключ принятия: код проблемы и то, о чём она. По умолчанию это `ref` —
+    // метка, тип, контур; там, где `ref` только представитель набора,
+    // подставляется свой устойчивый признак (`subject`). От ключа зависит,
+    // вернётся ли принятое, когда набор под ним изменится.
+    key: code + ":" + (subject || ref || ""),
+  };
 }
 
 // Чем назвать виновника, у которого нет своего обозначения: метка без типа
@@ -6625,7 +6715,18 @@ function validate(project) {
   // Повтор номера — приём заказчика, а не поломка: одно предупреждение на
   // обозначение, с числом меток, чтобы случайный дубль было видно.
   for (const item of repeatedNumbers(project)) {
-    problems.push(problem("repeatedNumber", { label: item.label, count: item.count }, item.markIds[0], "warning"));
+    problems.push(
+      problem(
+        "repeatedNumber",
+        { label: item.label, count: item.count },
+        item.markIds[0],
+        "warning",
+        // Принимают не «вот эти три метки», а сам приём: тип и номер. Ключ по
+        // первой метке вернул бы уже принятое, стоило добавить к группе
+        // четвёртый светильник или убрать из неё первый.
+        item.typeId + "#" + item.number,
+      ),
+    );
   }
 
   for (const outline of outlinesOf(project)) {
@@ -6661,6 +6762,125 @@ function validate(project) {
   }
 
   return problems;
+}
+
+// ——— принятые предупреждения ————————————————————————————————————————
+//
+// Повтор номера — приём заказчика: три светильника одной группы носят Т4
+// намеренно. Программа об этом знать не может и обязана спросить один раз, а
+// потом помнить ответ. Помнить — в самом объекте, как отметку `kindGuessed` у
+// типа: файл переезжает на другую машину и открывается вторым человеком из
+// общей папки, и ответ должен ехать вместе с ним.
+//
+// **Ключ принятия** — `problem.key`: код проблемы и то, о чём она. Он нарочно
+// не считает меток: принято «Т4 повторяется намеренно», а не «таких меток
+// три». Четвёртый светильник в группе не возвращает того, что пользователь уже
+// закрыл, — иначе крестик пришлось бы нажимать после каждой новой метки.
+// Возвращает предупреждение в работу только сам пользователь, строкой
+// «Принято: N».
+//
+// Номер в ключе — не вечная величина: смыкание номеров меняет Т4 на Т2, и
+// принятое переезжает вместе с обозначением (`renumberAccepted` зовётся прямо
+// из `compactNumbers`). Слова заказчика: «по метке, типо Т4 — корректно. Но
+// это тоже должно переживать уплотнение меток».
+//
+// Отсюда же цена решения: принятое молчит и тогда, когда повтор сложился
+// заново — тем же номером, но из других меток. Поэтому ни одна запись не
+// пропадает молча: весь список виден в панели, и каждую строку можно вернуть.
+
+function acceptedOf(project) {
+  return project && Array.isArray(project.accepted) ? project.accepted : [];
+}
+
+/**
+ * Принятые предупреждения в порядке принятия:
+ * `[{key, code, kind, label, at}]`. `label` — текст на момент принятия: это
+ * то, на что пользователь ответил «так и задумано», и показывать в списке
+ * принятых надо именно его, даже когда виновника уже нет.
+ */
+function acceptedProblems(project) {
+  return acceptedOf(project).slice();
+}
+
+/** Принято ли предупреждение с таким ключом. */
+function problemAccepted(project, key) {
+  if (!key) return false;
+  return acceptedOf(project).some((item) => item.key === key);
+}
+
+/**
+ * «Так и задумано»: предупреждение уходит из списка, ответ остаётся в объекте.
+ * Принимается и ошибка — объект принадлежит пользователю, — но её вид
+ * запоминается, чтобы в списке принятых порванную связь было видно.
+ * Принято повторно — возвращается **тот же** объект: ни второй записи, ни
+ * лишнего шага истории.
+ */
+function acceptProblem(project, problem) {
+  if (!project || !problem || !problem.key) return { project };
+  if (problemAccepted(project, problem.key)) return { project };
+  const record = {
+    key: problem.key,
+    code: problem.code,
+    kind: problem.kind === "warning" ? "warning" : "error",
+    label: String(problem.message || ""),
+    at: nowIso(),
+  };
+  return { project: withProject(project, { accepted: [...acceptedOf(project), record] }) };
+}
+
+/**
+ * Вернуть принятое в работу: запись уходит, и предупреждение снова считается —
+ * если оно всё ещё есть. Нечего возвращать — тот же объект.
+ */
+function unacceptProblem(project, key) {
+  if (!project) return { project };
+  const list = acceptedOf(project);
+  const next = list.filter((item) => item.key !== key);
+  if (next.length === list.length) return { project };
+  return { project: withProject(project, { accepted: next }) };
+}
+
+/**
+ * Перенос принятого на новые номера. Смыкание меняет Т4 на Т2, и ответ «так и
+ * задумано» обязан переехать вместе с обозначением: иначе он повиснет на
+ * номере, которого больше нет, а на новом номере тот же вопрос задастся
+ * заново — пользователь ответит дважды на одно и то же.
+ *
+ * Зовётся из `compactNumbers` по её же таблице замен, поэтому работает и для
+ * «у всех типов» (`compactAllNumbers` считает той же функцией), и в том же
+ * шаге истории: отмена смыкания возвращает и номера, и принятия.
+ *
+ * Номер, под которым меток уже нет, смыкание не переносит — переносить его
+ * некуда; такая запись остаётся в списке принятых и видна пользователю.
+ *
+ * Переносить нечего — `null`: объект прежнего формата не должен обзавестись
+ * пустым списком принятых только потому, что в нём сомкнули номера.
+ */
+function renumberAccepted(project, typeId, code, renumbered) {
+  const list = acceptedOf(project);
+  if (list.length === 0) return null;
+  const prefix = "repeatedNumber:" + typeId + "#";
+  let changed = false;
+  const next = list.map((record) => {
+    if (typeof record.key !== "string" || !record.key.startsWith(prefix)) return record;
+    const was = Number(record.key.slice(prefix.length));
+    const now = renumbered.get(was);
+    if (!now || now === was) return record;
+    changed = true;
+    return { ...record, key: prefix + now, label: relabelAccepted(record.label, code + was, code + now) };
+  });
+  return changed ? next : null;
+}
+
+// Обозначение в запомненном тексте: «Т4 — таких меток 3» после смыкания читается
+// как «Т2 — таких меток 3». Меняется только обозначение в начале строки и только
+// целиком — «Т1» внутри «Т10» не тронется.
+function relabelAccepted(label, from, to) {
+  const value = String(label == null ? "" : label);
+  if (!value.startsWith(from)) return value;
+  const rest = value.slice(from.length);
+  if (/^\d/.test(rest)) return value;
+  return to + rest;
 }
 
 // src/store.js
@@ -11836,6 +12056,9 @@ const UI_ICONS = {
   // Раскрытие списка. Повёрнутый влево — свёрнутый, вниз — раскрытый; поворот
   // делают стили, рисунок один.
   chevron: ["M7 10.5 12 15.5 17 10.5"],
+  // Крестик: «убрать эту строку». Не корзина — ничего не удаляется насовсем,
+  // и не галочка — она уже занята хорошей новостью.
+  close: ["M7 7 17 17", "M17 7 7 17"],
 };
 function uiIcon(name) {
   const svg = document.createElementNS(UI_SVG_NS, "svg");
@@ -21577,6 +21800,12 @@ registerPanel(PANEL_IDS.sizes, mountSizesPanel);
 // показывает и приводит к виновнику на плане — но не правит: решение за
 // пользователем, и «починить всё» здесь нет и не будет.
 //
+// Строку можно закрыть крестиком «так и задумано»: повтор номера бывает
+// приёмом, и программа обязана запомнить ответ. Запоминает его модель —
+// `acceptProblem` кладёт запись в сам объект, а не в настройки браузера, —
+// панель только показывает крестик и строку «Принято: N», из которой принятое
+// возвращается в работу.
+//
 // Здесь же живут вопросы о виде типа, которые до этого задавало модальное
 // окно при открытии объекта (таск 46). На слабо размеченном объекте это была
 // простыня на полтора десятка строк поверх плана; строкой панели тот же вопрос
@@ -21693,12 +21922,20 @@ function warningWhere(project, place) {
  * строке на случай. Чистая функция от объекта — её и считает панель, один раз
  * на правку объекта, а не на кадр отрисовки.
  *
- * `{ total, level, groups: [{ key, code, level, title, count, items }] }`
+ * `{ total, level, groups: [{ key, code, level, title, count, items }], accepted }`
+ *
+ * Принятое («так и задумано») в группы не попадает и в `total` не считается:
+ * счётчик в шапке показывает то, что ещё ждёт ответа. Сами ответы — списком
+ * `accepted`, из него их и возвращают в работу.
  */
 function warningsModel(project) {
-  if (!project) return { total: 0, level: "ok", groups: [] };
+  if (!project) return { total: 0, level: "ok", groups: [], accepted: [] };
   const byCode = new Map();
   for (const problem of validate(project)) {
+    // Принятое не показывается вовсе — и не пересчитывается заново: ключ
+    // принятия нарочно не знает, сколько меток под предупреждением, иначе
+    // четвёртый светильник в группе вернул бы уже закрытую строку.
+    if (problemAccepted(project, problem.key)) continue;
     const level = problem.kind === "warning" ? "warning" : "error";
     const key = level + ":" + problem.code;
     if (!byCode.has(key)) byCode.set(key, { key, code: problem.code, level, items: [] });
@@ -21709,6 +21946,9 @@ function warningsModel(project) {
       code: problem.code,
       level,
       message: problem.message,
+      // Сама проблема — ею и принимают: в ней ключ, вид и текст, который
+      // пользователь видел, когда отвечал «так и задумано».
+      problem,
       place,
       where: warningWhere(project, place),
     });
@@ -21746,7 +21986,13 @@ function warningsModel(project) {
   }
 
   const total = groups.reduce((sum, group) => sum + group.count, 0);
-  return { total, level: total === 0 ? "ok" : groups[0].level, groups };
+  // Принятые ошибки видно отдельно от принятых предупреждений: «принял и
+  // забыл» не должно навсегда спрятать порванную связь.
+  const accepted = acceptedProblems(project).map((record) => ({
+    ...record,
+    level: record.kind === "warning" ? "warning" : "error",
+  }));
+  return { total, level: total === 0 ? "ok" : groups[0].level, groups, accepted };
 }
 
 function mountWarningsPanel(host, api) {
@@ -21830,6 +22076,28 @@ function mountWarningsPanel(host, api) {
     }
   }
 
+  // ——— «так и задумано» ————————————————————————————————————————————————
+  //
+  // Принятие — правка объекта: `canvasCommit`, шаг истории, Ctrl+Z. Ответ
+  // ложится в сам объект и уезжает с файлом; в настройках браузера ему делать
+  // нечего — файл откроют на другой машине и вторым человеком.
+
+  function accept(problem) {
+    const project = getState().project;
+    if (!project) return;
+    const next = acceptProblem(project, problem).project;
+    if (next === project) return;
+    canvasCommit(project, next, strings.history.acceptProblem);
+  }
+
+  function unaccept(key) {
+    const project = getState().project;
+    if (!project) return;
+    const next = unacceptProblem(project, key).project;
+    if (next === project) return;
+    canvasCommit(project, next, strings.history.unacceptProblem);
+  }
+
   function dismissKinds() {
     const project = getState().project;
     if (!project) return;
@@ -21863,7 +22131,82 @@ function mountWarningsPanel(host, api) {
     );
     // Виновника уже нет — вести некуда, и обещать переход нечестно.
     row.disabled = !item.place;
-    return row;
+    // Крестик — второй кнопкой рядом, а не внутри строки: кнопка в кнопке
+    // разметкой не бывает, и клик по ней всё равно уходил бы в переход.
+    // Принять можно и то, к чему уже некуда вести: ответ о самой проблеме.
+    return uiEl("div", { class: "warnings__line" }, [
+      row,
+      uiIconButton("close", {
+        class: "ui-btn warnings__accept",
+        label: strings.warnings.accept,
+        title: strings.warnings.acceptHint,
+        on: { click: () => accept(item.problem) },
+      }),
+    ]);
+  }
+
+  // ——— принятое —————————————————————————————————————————————————————————
+
+  // Строка принятого: текст — тот, который пользователь видел, когда отвечал.
+  // Пересчитывать его нечем и незачем: виновника может уже не быть, а ответ
+  // всё равно остаётся ответом.
+  function acceptedRow(record) {
+    return uiEl("div", { class: "warnings__line" }, [
+      uiEl("div", { class: "warnings__row warnings__row--done warnings__row--" + record.level }, [
+        levelDot(record.level),
+        uiEl("span", { class: "warnings__text", text: record.label }),
+        // Принятая ошибка помечена словами: точка уровня красная, но «принял и
+        // забыл» не должно навсегда спрятать порванную связь.
+        record.level === "error"
+          ? uiEl("span", { class: "warnings__where", text: strings.warnings.acceptedError })
+          : null,
+      ]),
+      uiIconButton("undo", {
+        class: "ui-btn warnings__return",
+        label: strings.warnings.acceptedReturn,
+        title: strings.warnings.acceptedReturn,
+        on: { click: () => unaccept(record.key) },
+      }),
+    ]);
+  }
+
+  // Строка «Принято: N» внизу панели. Свёрнута по умолчанию и раскрывается,
+  // как группа предупреждений: без неё случайный крестик был бы необратим.
+  function acceptedNode() {
+    const key = "accepted";
+    const isOpen = expanded.has(key);
+    const body = uiEl("div", { class: "warnings__items" }, [
+      uiEl("p", { class: "warnings__why warnings__kindHint", text: strings.warnings.acceptedHint }),
+      ...model.accepted.map((record) => acceptedRow(record)),
+    ]);
+    body.hidden = !isOpen;
+    const chevron = uiIcon("chevron");
+    chevron.classList.add("warnings__chevron");
+    const head = uiEl(
+      "button",
+      {
+        class: "warnings__group warnings__row--accepted" + (isOpen ? " is-open" : ""),
+        type: "button",
+        title: isOpen ? strings.warnings.collapse : strings.warnings.expand,
+        attrs: { "aria-expanded": isOpen ? "true" : "false" },
+        on: {
+          click: () => {
+            if (expanded.has(key)) expanded.delete(key);
+            else expanded.add(key);
+            renderDrop();
+          },
+        },
+      },
+      [
+        levelDot("accepted"),
+        uiEl("span", {
+          class: "warnings__text",
+          text: text("warnings.acceptedGroup", { count: model.accepted.length }),
+        }),
+        chevron,
+      ],
+    );
+    return uiEl("div", { class: "warnings__section" }, [head, body]);
   }
 
   // Строка вопроса о виде: сам вопрос ведёт к меткам типа, переключатель
@@ -21953,6 +22296,9 @@ function mountWarningsPanel(host, api) {
   }
 
   function renderDropBody() {
+    // Принятое показывается и тогда, когда смотреть больше нечего: иначе
+    // ответы «так и задумано» стали бы невидимыми, а вернуть их было бы нечем.
+    const accepted = model.accepted.length > 0 ? acceptedNode() : null;
     if (model.total === 0) {
       const icon = uiIcon("ok");
       icon.classList.add("warnings__okIcon");
@@ -21962,12 +22308,14 @@ function mountWarningsPanel(host, api) {
           uiEl("p", { class: "warnings__okTitle", text: strings.warnings.okTitle }),
           uiEl("p", { class: "warnings__why", text: strings.warnings.okText }),
         ]),
+        ...(accepted ? [accepted] : []),
       );
       return;
     }
     drop.replaceChildren(
       uiEl("p", { class: "warnings__head", text: strings.warnings.title }),
       ...model.groups.map((group) => groupNode(group)),
+      ...(accepted ? [accepted] : []),
       uiEl("p", { class: "warnings__why warnings__hint", text: strings.warnings.hint }),
     );
   }
