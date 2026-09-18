@@ -37,6 +37,12 @@ import {
   markControls,
   labelOf,
   markByCode,
+  MARK_DIMENSION_FIELDS,
+  MARK_DIMENSION_MAX,
+  markDimensionValue,
+  markDimensions,
+  markHasDimensions,
+  setMarkDimensions,
   problemAccepted,
   repeatedNumbers,
   setMarkControls,
@@ -1764,4 +1770,143 @@ test("объект без списка принятых открывается �
   assert.equal(acceptedProblems(accepted).length, 1);
   assert.deepEqual(accepted.marks, old.marks);
   assert.deepEqual(accepted.counters, old.counters);
+});
+
+// ——— размеры метки: длина, ширина и высота над полом ——————————————————
+//
+// Три необязательных числа в миллиметрах. Проверяется здесь не «поле
+// записалось», а три решения таска: пустое — не задано, ноль — значение,
+// мусор не принимается.
+
+test("размеры метки пишутся и читаются; порядок полей — порядок окна", () => {
+  const { project: base, first } = projectWithSchemes();
+  const step = putPoint(base, first.id, "Р");
+  assert.deepEqual(MARK_DIMENSION_FIELDS, ["length", "width", "heightAboveFloor"]);
+
+  const after = setMarkDimensions(step.project, step.mark.id, {
+    length: 600,
+    width: "400",
+    heightAboveFloor: 300,
+  }).project;
+  assert.deepEqual(markDimensions(findMark(after, step.mark.id)), {
+    length: 600,
+    width: 400,
+    heightAboveFloor: 300,
+  });
+  assert.equal(markHasDimensions(findMark(after, step.mark.id)), true);
+  // Объект прежний не тронут: команда чистая, как все остальные.
+  assert.equal(markHasDimensions(findMark(step.project, step.mark.id)), false);
+});
+
+test("пустое — «не задано», ноль — значение", () => {
+  const { project: base, first } = projectWithSchemes();
+  const step = putPoint(base, first.id, "Р");
+
+  // Метка в полу: высота над полом ноль — это ответ, а не пустота.
+  const zero = setMarkDimensions(step.project, step.mark.id, { heightAboveFloor: 0 }).project;
+  assert.equal(findMark(zero, step.mark.id).heightAboveFloor, 0);
+  assert.equal(markHasDimensions(findMark(zero, step.mark.id)), true);
+  assert.equal(markDimensions(findMark(zero, step.mark.id)).length, null);
+
+  // Пустая строка стирает обратно в «не задано» — и метка снова ничем не
+  // отличается от той, которой размеров не ставили.
+  const cleared = setMarkDimensions(zero, step.mark.id, { heightAboveFloor: "" }).project;
+  assert.equal(findMark(cleared, step.mark.id).heightAboveFloor, null);
+  assert.equal(markHasDimensions(findMark(cleared, step.mark.id)), false);
+
+  // Ноль и пустота — разные вещи и для самого разбора значения.
+  assert.equal(markDimensionValue(0), 0);
+  assert.equal(markDimensionValue("0"), 0);
+  assert.equal(markDimensionValue(""), null);
+  assert.equal(markDimensionValue("  "), null);
+  assert.equal(markDimensionValue(null), null);
+  assert.equal(markDimensionValue(undefined), null);
+  // Запятую набирают чаще точки — принимается и она.
+  assert.equal(markDimensionValue("1,5"), 1.5);
+});
+
+test("отрицательное, нечисловое и запредельное не принимаются", () => {
+  const { project: base, first } = projectWithSchemes();
+  const step = putPoint(base, first.id, "Р");
+  const markId = step.mark.id;
+
+  for (const bad of [-1, "-1", "абв", "12abc", NaN, Infinity]) {
+    assert.throws(
+      () => setMarkDimensions(step.project, markId, { length: bad }),
+      (error) => error.code === "badDimension",
+      "принято негодное значение: " + String(bad),
+    );
+  }
+  assert.throws(
+    () => setMarkDimensions(step.project, markId, { length: MARK_DIMENSION_MAX + 1 }),
+    (error) => error.code === "dimensionTooBig",
+  );
+  // Ровно потолок — законный размер.
+  assert.equal(
+    findMark(setMarkDimensions(step.project, markId, { length: MARK_DIMENSION_MAX }).project, markId).length,
+    MARK_DIMENSION_MAX,
+  );
+
+  // Правка через общий `updateMark` идёт по тем же правилам: второго входа
+  // для размеров в метку нет.
+  assert.throws(() => updateMark(step.project, markId, { width: -5 }), (error) => error.code === "badDimension");
+  assert.equal(findMark(updateMark(step.project, markId, { width: "70" }).project, markId).width, 70);
+});
+
+test("поля, которых в правке нет, остаются как были", () => {
+  const { project: base, first } = projectWithSchemes();
+  const step = putPoint(base, first.id, "Р");
+  const filled = setMarkDimensions(step.project, step.mark.id, { length: 600, width: 400 }).project;
+  const after = setMarkDimensions(filled, step.mark.id, { heightAboveFloor: 900 }).project;
+  assert.deepEqual(markDimensions(findMark(after, step.mark.id)), {
+    length: 600,
+    width: 400,
+    heightAboveFloor: 900,
+  });
+});
+
+// G68: старый объект открывается как раньше. Полей размеров у его меток нет
+// вовсе — и это не ошибка, а обычная разметка, сделанная до этого таска.
+test("метка без полей размеров открывается как раньше", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 3);
+  const project = updateMark(filled, ids[0], { location: "над тумбой", original: "В31" }).project;
+
+  // Объект прежней разметки: полей размеров у меток нет физически.
+  const old = {
+    ...project,
+    marks: project.marks.map((mark) => {
+      const copy = { ...mark };
+      for (const field of MARK_DIMENSION_FIELDS) delete copy[field];
+      return copy;
+    }),
+  };
+
+  for (const mark of old.marks) {
+    assert.deepEqual(markDimensions(mark), { length: null, width: null, heightAboveFloor: null });
+    assert.equal(markHasDimensions(mark), false);
+  }
+  // Ни одна метка, ни один номер, ни одна подпись не изменились.
+  assert.deepEqual(old.marks.map((mark) => mark.number), project.marks.map((mark) => mark.number));
+  assert.deepEqual(old.marks.map((mark) => labelOf(old, mark.id)), project.marks.map((mark) => labelOf(project, mark.id)));
+  assert.deepEqual(validate(old).map((item) => item.code), validate(project).map((item) => item.code));
+  assert.equal(labelOf(old, ids[2]), "Т3");
+  assert.equal(findMark(old, ids[0]).location, "над тумбой");
+
+  // Правка соседнего поля полей размеров не заводит: старая метка остаётся
+  // ровно такой, какой была.
+  const edited = updateMark(old, ids[1], { location: "у окна" }).project;
+  const untouched = findMark(edited, ids[1]);
+  for (const field of MARK_DIMENSION_FIELDS) {
+    assert.equal(Object.prototype.hasOwnProperty.call(untouched, field), false, "поле " + field + " завелось само");
+  }
+
+  // Первая же запись размеров заводит поля — и больше в метке не меняет ничего.
+  const sized = setMarkDimensions(old, ids[0], { heightAboveFloor: 300 }).project;
+  assert.equal(findMark(sized, ids[0]).heightAboveFloor, 300);
+  assert.deepEqual(
+    { ...findMark(sized, ids[0]), heightAboveFloor: undefined },
+    { ...findMark(old, ids[0]), heightAboveFloor: undefined },
+  );
+  assert.deepEqual(sized.counters, old.counters);
 });

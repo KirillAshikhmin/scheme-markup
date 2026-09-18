@@ -1620,6 +1620,48 @@
   color: var(--panel-muted);
 }
 
+/* Размеры метки: кнопка в строке и окно с тремя числами. */
+
+.mark-row__sizes {
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.mark-row__sizes.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+.sizes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 320px;
+  max-width: 420px;
+}
+
+/* Подпись слева, поле справа: три строки читаются столбиком, а не лесенкой. */
+.sizes__row {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  align-items: center;
+  gap: 10px;
+}
+
+.sizes__label {
+  color: var(--panel-text);
+}
+
+.sizes__input.is-bad {
+  border-color: var(--danger);
+}
+
+.sizes__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
 /* Кнопки, поля, диалоги и списки панелей. Тёмная панель — светлый холст. */
 
 .ui-btn {
@@ -3659,6 +3701,7 @@ const strings = {
     blockMode: "режим блока",
     markField: "правка полей метки",
     markNumber: "правка номера метки",
+    markSizes: "размеры метки",
     replaceImage: "замена плана",
     editImage: "правка плана",
     compact: "уплотнение нумерации",
@@ -3740,6 +3783,8 @@ const strings = {
     commitOptionsNotObject: "Правка не выполнена: опции команды — объект с ключами {keys}, а не список",
     badNumber: "Номер метки — целое число больше нуля",
     numberTooBig: "Номер метки — не больше {max}",
+    badDimension: "Размер — число не меньше нуля; пустое поле значит «не задано»",
+    dimensionTooBig: "Размер — не больше {max} {unit}",
     notAProject: "Файл не похож на проект разметки схем",
     archiveBroken: "Архив повреждён — не удалось прочитать содержимое",
     noProjectJson: "В архиве нет project.json — это не файл разметки схем",
@@ -4049,6 +4094,32 @@ const strings = {
     compactAllGroup: "{code} · {name}",
     compactAllNothing: "Дыр в нумерации нет ни у одного типа — смыкать нечего",
     compactAllNoProject: "Объект не открыт",
+  },
+  // Размеры метки: длина, ширина и высота над полом. Отдельное окно, третья
+  // кнопка в ряду свойств метки — рядом с «Чем управляет» и «Оборудованием».
+  //
+  // `unit` — единственное место, где единица написана словом: подписи полей и
+  // подпись кнопки складывают её подстановкой. В модели ей отвечает константа
+  // `MARK_DIMENSION_UNIT`; сменить меру — правка этих двух мест.
+  markSizes: {
+    unit: "мм",
+    // Кнопка в строке метки. Не просто «Размеры»: так уже называется панель
+    // величины меток и подписей на экране, и две разные вещи под одним словом
+    // в одном окне читались бы как одна.
+    open: "Размеры и высота",
+    onMark: "Длина, ширина и высота над полом — в отдельном окне",
+    title: "Размеры метки {label}",
+    hint: "Все три поля необязательные: пустое — «не задано». Ноль — значение: у метки в полу высота над полом равна нулю.",
+    length: "Длина, {unit}",
+    width: "Ширина, {unit}",
+    heightAboveFloor: "Высота над полом, {unit}",
+    // Короткие подписи для кнопки: «Д 600 · Ш 400 · В 900 мм» — так размеры
+    // пишут на чертеже, и в узкую кнопку это влезает.
+    lengthShort: "Д",
+    widthShort: "Ш",
+    heightAboveFloorShort: "В",
+    summary: "{values} {unit}",
+    save: "Сохранить размеры",
   },
   filters: {
     searchPlaceholder: "Сузить список",
@@ -5430,6 +5501,12 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
     roomManual: false,
     location: "",
     original: "",
+    // Размеры в миллиметрах (`MARK_DIMENSION_UNIT`): все три необязательные,
+    // `null` — «не задано». У метки из старого объекта этих полей нет вовсе,
+    // и читать их надо только через `markDimensions`.
+    length: null,
+    width: null,
+    heightAboveFloor: null,
     // Чем управляет: ссылки на другие метки объекта. Именно ссылки, а не текст, —
     // смена типа и уплотнение номеров переписывают обозначения, а связь должна
     // это пережить.
@@ -5683,6 +5760,81 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, value));
 }
 
+// ——— размеры метки ———————————————————————————————————————————————————
+//
+// Длина, ширина и высота над полом — три необязательных числа. Масштаба у
+// плана нет (доли, а не метры), вывести единицу неоткуда — поэтому она
+// объявлена здесь и означает, что в этих полях лежат **миллиметры**: так в
+// строительных чертежах пишут высоту установки («розетка на 300»). Смена
+// единицы — правка этой константы и строки `strings.markSizes.unit`, больше
+// нигде число в другую меру не переводится.
+const MARK_DIMENSION_UNIT = "mm";
+
+// Потолок разумного размера — сто метров в миллиметрах. Смысл тот же, что у
+// `MARK_NUMBER_MAX`: опечатка в поле не должна превратиться в размер, которого
+// не бывает, и молча уехать в файл.
+const MARK_DIMENSION_MAX = 100000;
+
+// Порядок здесь — порядок полей в окне и в подписи кнопки.
+const MARK_DIMENSION_FIELDS = ["length", "width", "heightAboveFloor"];
+
+/**
+ * Одно значение размера.
+ *
+ * Пусто (`""`, `null`, `undefined`) — «не задано»: такая метка ничем не
+ * отличается от размеченной до этого таска. Ноль — значение, а не пустота:
+ * у метки в полу высота над полом равна нулю, и стереть её обратно в «не
+ * задано» было бы враньём. Отрицательное и нечисловое не принимаются.
+ *
+ * Запятая принимается наравне с точкой: «1,5» набирают чаще, чем «1.5».
+ */
+function markDimensionValue(value) {
+  if (value === null || value === undefined) return null;
+  const raw = typeof value === "string" ? value.trim().replace(",", ".") : value;
+  if (raw === "") return null;
+  const number = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(number) || number < 0) throw modelError("badDimension");
+  if (number > MARK_DIMENSION_MAX) {
+    throw modelError("dimensionTooBig", { max: MARK_DIMENSION_MAX, unit: strings.markSizes.unit });
+  }
+  return number;
+}
+
+/**
+ * Размеры метки. У метки из старого файла этих полей нет вовсе — и это не
+ * поломка: читают их только отсюда, и отсутствие приходит тем же `null`, что
+ * и очищенное поле.
+ */
+function markDimensions(mark) {
+  const values = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    const value = mark ? mark[field] : null;
+    values[field] = typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  return values;
+}
+
+// Задан ли у метки хоть один размер: по этому строка списка показывает, что
+// в окно заглядывать есть зачем.
+function markHasDimensions(mark) {
+  const values = markDimensions(mark);
+  return MARK_DIMENSION_FIELDS.some((field) => values[field] !== null);
+}
+
+/**
+ * Записать размеры. Поля, которых в `patch` нет, остаются как были: окно
+ * отдаёт все три сразу, а команда не обязана.
+ */
+function setMarkDimensions(project, markId, patch) {
+  requireMark(project, markId);
+  const changes = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (!patch || !Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    changes[field] = patch[field];
+  }
+  return updateMark(project, markId, changes);
+}
+
 const MARK_PATCH_FIELDS = [
   "points",
   "closed",
@@ -5692,6 +5844,7 @@ const MARK_PATCH_FIELDS = [
   "roomManual",
   "location",
   "original",
+  ...MARK_DIMENSION_FIELDS,
 ];
 function updateMark(project, markId, patch) {
   requireMark(project, markId);
@@ -5704,6 +5857,13 @@ function updateMark(project, markId, patch) {
   // габарит и попадание по клику считаются по этому же числу.
   if (Object.prototype.hasOwnProperty.call(changes, "labelAngle")) {
     if (!LABEL_ANGLES.includes(changes.labelAngle)) throw modelError("labelAngleUnknown");
+  }
+  // Размеры приводятся к числу или к `null` здесь — второго места, где они
+  // попадают в метку, нет: `setMarkDimensions` идёт через эту же функцию.
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(changes, field)) {
+      changes[field] = markDimensionValue(changes[field]);
+    }
   }
   const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, ...changes } : mark));
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -21532,6 +21692,138 @@ if (typeof document !== "undefined") {
   }
 }
 
+// src/panels/markSizes.js
+// Окно размеров метки: длина, ширина и высота над полом.
+//
+// Отдельный файл по той же причине, что и `markControls.js`: в строке списка
+// этому тесно. Строка метки и так собирает семь полей, а три числа, которые
+// заполняют не в момент постановки, а потом и не у каждой метки, в неё не
+// помещаются — заказчик сам попросил «отдельное окно».
+//
+// Единицу окно не выбирает и не переводит: в модели лежат миллиметры
+// (`MARK_DIMENSION_UNIT`), словом их называет `strings.markSizes.unit`.
+// Здесь она только подставляется в подписи — чтобы была видна, а не
+// подразумевалась.
+
+
+
+// Подпись поля с единицей: «Длина, мм». Складывается подстановкой, чтобы
+// единица была написана в словаре один раз.
+function markSizesLabel(field) {
+  return text("markSizes." + field, { unit: strings.markSizes.unit });
+}
+
+// Число в подпись кнопки. Дробное пишется через запятую — так его и набирают;
+// в поле ввода оно остаётся с точкой, иначе `input[type=number]` его не примет.
+function markSizesNumber(value) {
+  return String(value).replace(".", ",");
+}
+
+/**
+ * Что показывает кнопка в строке метки: «Д 600 · Ш 400 · В 900 мм» по заданным
+ * размерам и пустая строка, если не задан ни один.
+ *
+ * Считается здесь, а не в разметке: «у метки размеров нет» должно быть видно
+ * без открытия окна — и проверяться без браузера. Соседние кнопки устроены так
+ * же: «Оборудование: 2» и «Управляет: Т1, Т2» тоже говорят содержимым.
+ */
+function markSizesSummary(mark) {
+  const values = markDimensions(mark);
+  const parts = [];
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (values[field] === null) continue;
+    parts.push(strings.markSizes[field + "Short"] + " " + markSizesNumber(values[field]));
+  }
+  if (parts.length === 0) return "";
+  return text("markSizes.summary", { values: parts.join(" · "), unit: strings.markSizes.unit });
+}
+
+/**
+ * Разбор трёх полей окна. Пустое — `null` («не задано»), ноль — значение,
+ * отрицательное и нечисловое — в `invalid`: окно на них не закрывается, а
+ * подсвечивает поле. Правило одно с моделью — это её же `markDimensionValue`.
+ */
+function markSizesParse(raw) {
+  const values = {};
+  const invalid = [];
+  for (const field of MARK_DIMENSION_FIELDS) {
+    try {
+      values[field] = markDimensionValue(raw ? raw[field] : null);
+    } catch (error) {
+      values[field] = null;
+      invalid.push({ field, message: error && error.message ? error.message : String(error) });
+    }
+  }
+  return { values, invalid };
+}
+
+/**
+ * Окно правки. Отвечает тремя значениями (`null` — «не задано») или `null`,
+ * если передумали. Сохраняет ответ в объект не оно, а список меток: правка
+ * идёт через `canvasCommit`, и место у неё одно — там же, где остальные
+ * правки строки.
+ */
+function openMarkSizesPicker(project, markId) {
+  return new Promise((resolve) => {
+    const mark = findMark(project, markId);
+    const current = markDimensions(mark);
+    const inputs = new Map();
+    const error = uiEl("p", { class: "sizes__error" });
+    error.hidden = true;
+
+    const rows = MARK_DIMENSION_FIELDS.map((field) => {
+      const label = markSizesLabel(field);
+      const input = uiEl("input", {
+        class: "ui-input sizes__input",
+        type: "number",
+        value: current[field] === null ? "" : String(current[field]),
+        title: label,
+        attrs: { min: "0", max: String(MARK_DIMENSION_MAX), step: "1", inputmode: "decimal" },
+      });
+      inputs.set(field, input);
+      return uiEl("label", { class: "sizes__row" }, [
+        uiEl("span", { class: "sizes__label", text: label }),
+        input,
+      ]);
+    });
+
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const save = () => {
+      const raw = {};
+      for (const [field, input] of inputs) raw[field] = input.value;
+      const parsed = markSizesParse(raw);
+      for (const [field, input] of inputs) {
+        input.classList.toggle("is-bad", parsed.invalid.some((item) => item.field === field));
+      }
+      if (parsed.invalid.length > 0) {
+        error.textContent = parsed.invalid[0].message;
+        error.hidden = false;
+        inputs.get(parsed.invalid[0].field).focus();
+        return;
+      }
+      done(parsed.values);
+    };
+
+    modal = uiModal({
+      title: text("markSizes.title", { label: labelOf(project, markId) }),
+      body: uiEl("div", { class: "sizes" }, [
+        uiEl("p", { class: "modal__hint", text: strings.markSizes.hint }),
+        ...rows,
+        error,
+      ]),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(strings.markSizes.save, { class: "ui-btn ui-btn--accent", on: { click: () => save() } }),
+      ],
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
 // src/panels/rooms.js
 // Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
 // меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
@@ -21825,6 +22117,7 @@ registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 
 
+
 // Строки замен считает справочник — там же, где их считает уплотнение по
 // одному типу. Второй нумерации в сборке быть не должно: окно обещало бы одно,
 // а команда делала другое.
@@ -21887,6 +22180,9 @@ function marksRowModel(project, row, options = {}) {
     roomManual: markRoomManual(mark),
     location: mark.location || "",
     original: mark.original || "",
+    // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
+    // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
+    sizes: markSizesSummary(mark),
     controls: markControls(project, mark.id).map((item) => labelOf(project, item.id)),
     controlledBy: controllers.get(mark.id) || [],
   };
@@ -22145,6 +22441,28 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // Размеры метки правятся в своём окне и сохраняются одним шагом истории.
+  // Пока окно открыто, объект мог уехать — как и у связей, ответ кладётся на
+  // свежий снимок, а не на тот, с которым окно открывали.
+  async function editSizes(markId) {
+    const state = getState();
+    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    const picked = await openMarkSizesPicker(state.project, markId);
+    if (!picked) return;
+    const fresh = getState();
+    const mark = fresh.project ? findMark(fresh.project, markId) : null;
+    if (!mark) return;
+    // Окно закрыли, ничего не изменив: шага истории быть не должно — иначе
+    // Ctrl+Z отменял бы пустоту.
+    const before = markDimensions(mark);
+    if (MARK_DIMENSION_FIELDS.every((field) => before[field] === picked[field])) return;
+    try {
+      canvasCommit(fresh.project, setMarkDimensions(fresh.project, markId, picked).project, strings.history.markSizes);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   async function askNewRoom(markId) {
     const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
     if (!name) {
@@ -22264,6 +22582,16 @@ function mountMarksPanel(host, api) {
           },
         )
       : null;
+    // Размеры метки: третья кнопка того же ряда. Заданные она показывает
+    // собой — «Д 600 · Ш 400 · В 900 мм», — как соседние показывают связи и
+    // число единиц оборудования.
+    const sizesButton = view.fields
+      ? uiButton(view.fields.sizes || strings.markSizes.open, {
+          class: "ui-btn ui-btn--wide mark-row__sizes" + (view.fields.sizes ? " is-set" : ""),
+          title: strings.markSizes.onMark,
+          on: { click: () => editSizes(mark.id) },
+        })
+      : null;
     const node = uiEl(
       "div",
       {
@@ -22295,6 +22623,7 @@ function mountMarksPanel(host, api) {
           : null,
         controlsButton,
         equipmentButton,
+        sizesButton,
         // Обратная сторона связи — строкой и только для чтения: стоя у
         // светильника, надо видеть, какой выключатель его включает, а правится
         // связь там, где её завели, — у выключателя.

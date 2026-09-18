@@ -14,6 +14,7 @@ import {
   addScheme,
   createProject,
   setMarkControls,
+  setMarkDimensions,
   setMarkNumber,
   updateMark,
 } from "../src/model.js";
@@ -82,6 +83,7 @@ test("выделенная метка раскрыта: помещение, ра
     roomManual: true,
     location: "над тумбой слева",
     original: "В31",
+    sizes: "",
     controls: [],
     controlledBy: ["В1"],
   });
@@ -135,4 +137,19 @@ test("в раскрытой строке видно, сколько оборуд
   assert.equal(view.fields.equipment, 1);
   // Связанная метка — не место: на выключателе ничего не стоит.
   assert.equal(marksRowModel(box.project, rowOf(box, box.switchOne), { open: true }).fields.equipment, 0);
+});
+
+// Размеры показываются в строке так же, как связи и оборудование у соседних
+// кнопок: по ней видно, заданы они или нет, до всякого окна.
+test("в раскрытой строке видно, заданы ли у метки размеры", () => {
+  const box = flat();
+  assert.equal(marksRowModel(box.project, rowOf(box, box.lampOne), { open: true }).fields.sizes, "");
+
+  box.project = setMarkDimensions(box.project, box.lampOne, { length: 600, heightAboveFloor: 0 }).project;
+  const view = marksRowModel(box.project, rowOf(box, box.lampOne), { open: true });
+  assert.equal(view.fields.sizes, "Д 600 · В 0 мм");
+  // Соседней метке чужие размеры не приписываются.
+  assert.equal(marksRowModel(box.project, rowOf(box, box.lampTwo), { open: true }).fields.sizes, "");
+  // В свёрнутой строке полей нет вовсе — размеры их не заводят.
+  assert.equal(marksRowModel(box.project, rowOf(box, box.lampOne), { open: false }).fields, null);
 });

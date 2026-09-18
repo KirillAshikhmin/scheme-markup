@@ -1007,6 +1007,12 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
     roomManual: false,
     location: "",
     original: "",
+    // Размеры в миллиметрах (`MARK_DIMENSION_UNIT`): все три необязательные,
+    // `null` — «не задано». У метки из старого объекта этих полей нет вовсе,
+    // и читать их надо только через `markDimensions`.
+    length: null,
+    width: null,
+    heightAboveFloor: null,
     // Чем управляет: ссылки на другие метки объекта. Именно ссылки, а не текст, —
     // смена типа и уплотнение номеров переписывают обозначения, а связь должна
     // это пережить.
@@ -1263,6 +1269,81 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, value));
 }
 
+// ——— размеры метки ———————————————————————————————————————————————————
+//
+// Длина, ширина и высота над полом — три необязательных числа. Масштаба у
+// плана нет (доли, а не метры), вывести единицу неоткуда — поэтому она
+// объявлена здесь и означает, что в этих полях лежат **миллиметры**: так в
+// строительных чертежах пишут высоту установки («розетка на 300»). Смена
+// единицы — правка этой константы и строки `strings.markSizes.unit`, больше
+// нигде число в другую меру не переводится.
+export const MARK_DIMENSION_UNIT = "mm";
+
+// Потолок разумного размера — сто метров в миллиметрах. Смысл тот же, что у
+// `MARK_NUMBER_MAX`: опечатка в поле не должна превратиться в размер, которого
+// не бывает, и молча уехать в файл.
+export const MARK_DIMENSION_MAX = 100000;
+
+// Порядок здесь — порядок полей в окне и в подписи кнопки.
+export const MARK_DIMENSION_FIELDS = ["length", "width", "heightAboveFloor"];
+
+/**
+ * Одно значение размера.
+ *
+ * Пусто (`""`, `null`, `undefined`) — «не задано»: такая метка ничем не
+ * отличается от размеченной до этого таска. Ноль — значение, а не пустота:
+ * у метки в полу высота над полом равна нулю, и стереть её обратно в «не
+ * задано» было бы враньём. Отрицательное и нечисловое не принимаются.
+ *
+ * Запятая принимается наравне с точкой: «1,5» набирают чаще, чем «1.5».
+ */
+export function markDimensionValue(value) {
+  if (value === null || value === undefined) return null;
+  const raw = typeof value === "string" ? value.trim().replace(",", ".") : value;
+  if (raw === "") return null;
+  const number = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(number) || number < 0) throw modelError("badDimension");
+  if (number > MARK_DIMENSION_MAX) {
+    throw modelError("dimensionTooBig", { max: MARK_DIMENSION_MAX, unit: strings.markSizes.unit });
+  }
+  return number;
+}
+
+/**
+ * Размеры метки. У метки из старого файла этих полей нет вовсе — и это не
+ * поломка: читают их только отсюда, и отсутствие приходит тем же `null`, что
+ * и очищенное поле.
+ */
+export function markDimensions(mark) {
+  const values = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    const value = mark ? mark[field] : null;
+    values[field] = typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  return values;
+}
+
+// Задан ли у метки хоть один размер: по этому строка списка показывает, что
+// в окно заглядывать есть зачем.
+export function markHasDimensions(mark) {
+  const values = markDimensions(mark);
+  return MARK_DIMENSION_FIELDS.some((field) => values[field] !== null);
+}
+
+/**
+ * Записать размеры. Поля, которых в `patch` нет, остаются как были: окно
+ * отдаёт все три сразу, а команда не обязана.
+ */
+export function setMarkDimensions(project, markId, patch) {
+  requireMark(project, markId);
+  const changes = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (!patch || !Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    changes[field] = patch[field];
+  }
+  return updateMark(project, markId, changes);
+}
+
 const MARK_PATCH_FIELDS = [
   "points",
   "closed",
@@ -1272,6 +1353,7 @@ const MARK_PATCH_FIELDS = [
   "roomManual",
   "location",
   "original",
+  ...MARK_DIMENSION_FIELDS,
 ];
 
 export function updateMark(project, markId, patch) {
@@ -1285,6 +1367,13 @@ export function updateMark(project, markId, patch) {
   // габарит и попадание по клику считаются по этому же числу.
   if (Object.prototype.hasOwnProperty.call(changes, "labelAngle")) {
     if (!LABEL_ANGLES.includes(changes.labelAngle)) throw modelError("labelAngleUnknown");
+  }
+  // Размеры приводятся к числу или к `null` здесь — второго места, где они
+  // попадают в метку, нет: `setMarkDimensions` идёт через эту же функцию.
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(changes, field)) {
+      changes[field] = markDimensionValue(changes[field]);
+    }
   }
   const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, ...changes } : mark));
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };

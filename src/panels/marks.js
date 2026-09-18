@@ -7,6 +7,7 @@
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
+  MARK_DIMENSION_FIELDS,
   MARK_NUMBER_MAX,
   compactAllNumbers,
   findMark,
@@ -14,6 +15,7 @@ import {
   labelOf,
   markControlIds,
   markControls,
+  markDimensions,
   markRoomManual,
   placementsAt,
   findScheme,
@@ -21,6 +23,7 @@ import {
   roomsInOrder,
   schemesInOrder,
   setMarkControls,
+  setMarkDimensions,
   setMarkNumber,
   styleOf,
   typesInOrder,
@@ -32,6 +35,7 @@ import { uiButton, uiEl, uiModal, uiPrompt } from "./ui.js";
 import { filtersBox, filtersMarkRows } from "./filters.js";
 import { openMarkControlsPicker } from "./markControls.js";
 import { openEquipmentWindow } from "./equipment.js";
+import { markSizesSummary, openMarkSizesPicker } from "./markSizes.js";
 import { roomsEnsure } from "./rooms.js";
 // Строки замен считает справочник — там же, где их считает уплотнение по
 // одному типу. Второй нумерации в сборке быть не должно: окно обещало бы одно,
@@ -96,6 +100,9 @@ export function marksRowModel(project, row, options = {}) {
     roomManual: markRoomManual(mark),
     location: mark.location || "",
     original: mark.original || "",
+    // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
+    // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
+    sizes: markSizesSummary(mark),
     controls: markControls(project, mark.id).map((item) => labelOf(project, item.id)),
     controlledBy: controllers.get(mark.id) || [],
   };
@@ -355,6 +362,28 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // Размеры метки правятся в своём окне и сохраняются одним шагом истории.
+  // Пока окно открыто, объект мог уехать — как и у связей, ответ кладётся на
+  // свежий снимок, а не на тот, с которым окно открывали.
+  async function editSizes(markId) {
+    const state = getState();
+    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    const picked = await openMarkSizesPicker(state.project, markId);
+    if (!picked) return;
+    const fresh = getState();
+    const mark = fresh.project ? findMark(fresh.project, markId) : null;
+    if (!mark) return;
+    // Окно закрыли, ничего не изменив: шага истории быть не должно — иначе
+    // Ctrl+Z отменял бы пустоту.
+    const before = markDimensions(mark);
+    if (MARK_DIMENSION_FIELDS.every((field) => before[field] === picked[field])) return;
+    try {
+      canvasCommit(fresh.project, setMarkDimensions(fresh.project, markId, picked).project, strings.history.markSizes);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   async function askNewRoom(markId) {
     const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
     if (!name) {
@@ -474,6 +503,16 @@ function mountMarksPanel(host, api) {
           },
         )
       : null;
+    // Размеры метки: третья кнопка того же ряда. Заданные она показывает
+    // собой — «Д 600 · Ш 400 · В 900 мм», — как соседние показывают связи и
+    // число единиц оборудования.
+    const sizesButton = view.fields
+      ? uiButton(view.fields.sizes || strings.markSizes.open, {
+          class: "ui-btn ui-btn--wide mark-row__sizes" + (view.fields.sizes ? " is-set" : ""),
+          title: strings.markSizes.onMark,
+          on: { click: () => editSizes(mark.id) },
+        })
+      : null;
     const node = uiEl(
       "div",
       {
@@ -505,6 +544,7 @@ function mountMarksPanel(host, api) {
           : null,
         controlsButton,
         equipmentButton,
+        sizesButton,
         // Обратная сторона связи — строкой и только для чтения: стоя у
         // светильника, надо видеть, какой выключатель его включает, а правится
         // связь там, где её завели, — у выключателя.

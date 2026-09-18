@@ -24,6 +24,8 @@ import {
   deleteScheme,
   deleteType,
   MARK_NUMBER_MAX,
+  markDimensions,
+  setMarkDimensions,
   problemAccepted,
   repeatedNumbers,
   setMarkNumber,
@@ -747,4 +749,77 @@ test("модель, правленная с двух сторон, не теря
   const item = merged.equipment.find((entry) => entry.id === gearId);
   assert.equal(item.typeId, seeded.equipmentType.id, "тип модели потерялся в споре");
   assert.ok(merged.equipmentTypes.some((type) => type.id === item.typeId));
+});
+
+// Размеры едут вместе с меткой: метка сливается целиком, но «целиком» стоит
+// проверить, а не предположить — потерялись бы они молча, как в D07/D09.
+test("размеры метки переживают слияние копий", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+  const oldId = base.marks[0].id;
+
+  // Мы дописали размеры существующей метке, они поставили свою — и сразу с
+  // размерами.
+  const ours = stamp(
+    setMarkDimensions(base, oldId, { length: 600, width: 400, heightAboveFloor: 0 }).project,
+    "2026-09-17T10:00:00.000Z",
+  );
+  const added = addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.8, y: 0.8 }] });
+  const theirs = stamp(
+    setMarkDimensions(added.project, added.mark.id, { heightAboveFloor: 900 }).project,
+    "2026-09-17T10:00:05.000Z",
+  );
+
+  const merged = mergeProjects(ours, theirs, base);
+  assert.deepEqual(merged.conflicts, []);
+  const mine = merged.project.marks.find((mark) => mark.id === oldId);
+  const yours = merged.project.marks.find((mark) => mark.id === added.mark.id);
+  // Ноль не потерялся по дороге: у метки в полу это ответ, а не пустота.
+  assert.deepEqual(markDimensions(mine), { length: 600, width: 400, heightAboveFloor: 0 });
+  assert.deepEqual(markDimensions(yours), { length: null, width: null, heightAboveFloor: 900 });
+
+  // Обратный порядок сторон даёт то же: файлы в общей папке не должны ходить
+  // по кругу, стирая размеры друг другу.
+  const mirror = mergeProjects(theirs, ours, base);
+  assert.deepEqual(markDimensions(mirror.project.marks.find((mark) => mark.id === oldId)), markDimensions(mine));
+  assert.deepEqual(markDimensions(mirror.project.marks.find((mark) => mark.id === added.mark.id)), markDimensions(yours));
+});
+
+test("размеры одной метки правили с двух сторон — остаётся вариант того, кто правил позже", () => {
+  const { project: base } = ancestor();
+  const markId = base.marks[0].id;
+
+  const ours = stamp(setMarkDimensions(base, markId, { heightAboveFloor: 300 }).project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(
+    setMarkDimensions(copyOf(base), markId, { heightAboveFloor: 900 }).project,
+    "2026-09-17T10:05:00.000Z",
+  );
+
+  const merged = mergeProjects(ours, theirs, base);
+  assert.equal(merged.project.marks.find((mark) => mark.id === markId).heightAboveFloor, 900);
+  assert.equal(merged.conflicts.length, 1);
+  assert.equal(merged.conflicts[0].code, "bothChanged");
+  assert.equal(merged.conflicts[0].other.heightAboveFloor, 300, "проигравший размер виден в отчёте");
+});
+
+// G68: два одинаковых старых файла обязаны слиться в «ничего не изменилось».
+test("слияние копий старого объекта не заводит полей размеров", () => {
+  const { project: base } = ancestor();
+  const old = {
+    ...base,
+    marks: base.marks.map((mark) => {
+      const copy = { ...mark };
+      for (const field of ["length", "width", "heightAboveFloor"]) delete copy[field];
+      return copy;
+    }),
+  };
+
+  const merged = mergeProjects(old, copyOf(old), old);
+  assert.equal(merged.changed, false, "два одинаковых старых файла — «ничего не изменилось»");
+  assert.deepEqual(merged.project.marks, old.marks);
+  for (const mark of merged.project.marks) {
+    for (const field of ["length", "width", "heightAboveFloor"]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(mark, field), false, "поле " + field + " завелось само");
+    }
+  }
 });

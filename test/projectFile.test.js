@@ -20,6 +20,9 @@ import {
   addScheme,
   addMark,
   addRoom,
+  MARK_DIMENSION_FIELDS,
+  markDimensions,
+  setMarkDimensions,
   updateMark,
   problemAccepted,
   setMarkNumber,
@@ -606,4 +609,71 @@ test("файл без списка принятых открывается ка�
   assert.equal(restored.project.accepted, undefined);
   assert.deepEqual(acceptedProblems(restored.project), []);
   assert.equal(restored.project.marks.length, project.marks.length);
+});
+
+// Размеры метки — те же три необязательных числа, что в модели. Проверяется
+// не «поле есть», а что в файл уезжает и ноль, и незаполненное поле: ноль,
+// прочитанный обратно как пустота, был бы потерей ответа.
+test("размеры метки доезжают до файла и обратно, ноль остаётся нулём", async () => {
+  let project = createProject();
+  const scheme = addScheme(project, { name: "1 этаж", imageId: "img-1", width: 1000, height: 800 });
+  project = scheme.project;
+  const sized = addMark(project, {
+    schemeId: scheme.scheme.id,
+    typeId: project.markTypes[0].id,
+    points: [{ x: 0.2, y: 0.3 }],
+  });
+  project = sized.project;
+  const plain = addMark(project, {
+    schemeId: scheme.scheme.id,
+    typeId: project.markTypes[0].id,
+    points: [{ x: 0.5, y: 0.5 }],
+  });
+  project = plain.project;
+  project = setMarkDimensions(project, sized.mark.id, {
+    length: 600,
+    width: 1.5,
+    heightAboveFloor: 0,
+  }).project;
+
+  const restored = (await unpackProject(await packProject(project, new Map([["img-1", fakePng(1)]])))).project;
+  assert.deepEqual(restored, project);
+  const back = restored.marks.find((mark) => mark.id === sized.mark.id);
+  assert.deepEqual(markDimensions(back), { length: 600, width: 1.5, heightAboveFloor: 0 });
+  // У метки, которой размеров не ставили, все три пусты — и пустыми и приехали.
+  assert.deepEqual(markDimensions(restored.marks.find((mark) => mark.id === plain.mark.id)), {
+    length: null,
+    width: null,
+    heightAboveFloor: null,
+  });
+});
+
+// G68: файл, сделанный до этого таска, полей размеров не знает вовсе.
+test("файл прежней версии без полей размеров читается как раньше", async () => {
+  let project = createProject();
+  const scheme = addScheme(project, { name: "1 этаж", imageId: "img-1", width: 1000, height: 800 });
+  project = scheme.project;
+  for (let i = 0; i < 3; i += 1) {
+    project = addMark(project, {
+      schemeId: scheme.scheme.id,
+      typeId: project.markTypes[i].id,
+      points: [{ x: 0.1 * (i + 1), y: 0.3 }],
+    }).project;
+  }
+  const old = {
+    ...project,
+    marks: project.marks.map((mark) => {
+      const copy = { ...mark };
+      for (const field of MARK_DIMENSION_FIELDS) delete copy[field];
+      return copy;
+    }),
+  };
+
+  const restored = (await unpackProject(await packProject(old, new Map([["img-1", fakePng(2)]])))).project;
+  // Упаковка ничего не дописала: метки вернулись ровно такими, какими уходили.
+  assert.deepEqual(restored.marks, old.marks);
+  assert.deepEqual(restored.marks.map((mark) => mark.number), project.marks.map((mark) => mark.number));
+  for (const mark of restored.marks) {
+    assert.deepEqual(markDimensions(mark), { length: null, width: null, heightAboveFloor: null });
+  }
 });

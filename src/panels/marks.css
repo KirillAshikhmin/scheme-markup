@@ -975,3 +975,45 @@
   text-transform: uppercase;
   color: var(--panel-muted);
 }
+
+/* Размеры метки: кнопка в строке и окно с тремя числами. */
+
+.mark-row__sizes {
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.mark-row__sizes.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+.sizes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 320px;
+  max-width: 420px;
+}
+
+/* Подпись слева, поле справа: три строки читаются столбиком, а не лесенкой. */
+.sizes__row {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  align-items: center;
+  gap: 10px;
+}
+
+.sizes__label {
+  color: var(--panel-text);
+}
+
+.sizes__input.is-bad {
+  border-color: var(--danger);
+}
+
+.sizes__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
