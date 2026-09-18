@@ -13,6 +13,7 @@ import {
   addToGroup,
   addType,
   createProject,
+  equipmentTypesInOrder,
   equipmentUsage,
   findRoom,
   labelOf,
@@ -807,7 +808,16 @@ test("CSV — таблица для Excel: шапка сверху, катего
 
 function tablesEquipmentFixture() {
   const box = tablesFixture();
-  const relay = addEquipment(box.project, { name: "Реле двухканальное", vendor: "Aqara", code: "RL-2" });
+  // Тип берётся из стартового справочника объекта — того самого, что копируется
+  // в новый объект вместе с типами меток. У диммера типа нет намеренно: пустой
+  // тип законен, и лист обязан это пережить.
+  const relayType = equipmentTypesInOrder(box.project).find((item) => item.name === "Реле 2 канала");
+  const relay = addEquipment(box.project, {
+    name: "Реле двухканальное",
+    vendor: "Aqara",
+    code: "RL-2",
+    typeId: relayType.id,
+  });
   box.project = relay.project;
   const dimmer = addEquipment(box.project, { name: "Диммер", vendor: "Shelly" });
   box.project = dimmer.project;
@@ -830,14 +840,22 @@ test("таблица оборудования: строка на размеще�
   const { box } = tablesEquipmentFixture();
   const table = equipmentTable(box.project, null);
 
-  assert.deepEqual(table.columns, ["Обозначение", "Модель", "Помещение", "Расположение", "Связанные метки"]);
+  assert.deepEqual(table.columns, [
+    "Обозначение",
+    "Модель",
+    "Тип оборудования",
+    "Помещение",
+    "Расположение",
+    "Связанные метки",
+  ]);
   // Групп по модели больше нет: один список без заголовков.
   assert.deepEqual(table.groups.map((group) => [group.level, group.title]), [[1, ""]]);
   const rows = table.groups[0].rows;
   assert.deepEqual(rows.map((row) => row.cells[0]), ["Т1", "Т2", "Р1"]);
   assert.deepEqual(rows.map((row) => row.cells[1]), ["Реле двухканальное", "Реле двухканальное", "Диммер"]);
-  assert.deepEqual(rows[0].cells, ["Т1", "Реле двухканальное", "Спальная Оли", "точка под зеркалом", "С1"]);
-  assert.deepEqual(rows[2].cells, ["Р1", "Диммер", "Холл", "розетки у кресла", ""]);
+  assert.deepEqual(rows[0].cells, ["Т1", "Реле двухканальное", "Реле 2 канала", "Спальная Оли", "точка под зеркалом", "С1"]);
+  // Тип у модели не заполнен — ячейка пустая, и это не поломка.
+  assert.deepEqual(rows[2].cells, ["Р1", "Диммер", "", "Холл", "розетки у кресла", ""]);
   // Цвет строки — цвет типа метки: по нему строка на бумаге узнаётся так же,
   // как метка на плане.
   assert.equal(rows[0].color, styleOf(box.project, box.project.marks[0].typeId).color);
@@ -874,7 +892,7 @@ test("оборудование по помещениям: секция на по
 test("лист оборудования, сужённый помещением, показывает только его строки", () => {
   const { box } = tablesEquipmentFixture();
   const table = equipmentTable(box.project, { roomId: box.rooms.hall });
-  assert.deepEqual(table.groups[0].rows.map((row) => row.cells.slice(0, 3)), [["Р1", "Диммер", "Холл"]]);
+  assert.deepEqual(table.groups[0].rows.map((row) => row.cells.slice(0, 4)), [["Р1", "Диммер", "", "Холл"]]);
   assert.equal(table.room, "Холл");
   assert.equal(tableRowCount(table), 1);
 });
@@ -927,7 +945,7 @@ test("размещение без модели, без метки и с поте
   const lostModel = rows.find((row) => row.cells[1] === "Модель потеряна");
   assert.equal(lostModel.cells[0], "Р1");
   assert.equal(lostModel.problem, true);
-  assert.equal(lostModel.cells[4], "ссылка потеряна");
+  assert.equal(lostModel.cells[5], "ссылка потеряна");
 });
 
 // Плоский лист должен доехать плоским во все форматы: заголовков моделей
@@ -937,8 +955,8 @@ test("Markdown и буфер обмена: модель в строке, заг�
   const table = equipmentTable(box.project, null);
 
   const markdown = toMarkdown(table);
-  assert.ok(markdown.includes("| Обозначение | Модель | Помещение | Расположение | Связанные метки |"));
-  assert.ok(markdown.includes("| Т1 | Реле двухканальное | Спальная Оли | точка под зеркалом | С1 |"));
+  assert.ok(markdown.includes("| Обозначение | Модель | Тип оборудования | Помещение | Расположение | Связанные метки |"));
+  assert.ok(markdown.includes("| Т1 | Реле двухканальное | Реле 2 канала | Спальная Оли | точка под зеркалом | С1 |"));
   assert.equal(markdown.includes("## Реле двухканальное"), false, "модель снова стала заголовком группы");
   assert.ok(markdown.includes("## Итого"));
   assert.ok(markdown.includes("| — Реле двухканальное (RL-2) | 2 |"));
@@ -946,10 +964,10 @@ test("Markdown и буфер обмена: модель в строке, заг�
 
   const tsv = toTsv(table).split("\n");
   assert.deepEqual(tsv, [
-    "Обозначение\tМодель\tПомещение\tРасположение\tСвязанные метки",
-    "Т1\tРеле двухканальное\tСпальная Оли\tточка под зеркалом\tС1",
-    "Т2\tРеле двухканальное\tСпальная Оли\tнад кроватью\t",
-    "Р1\tДиммер\tХолл\tрозетки у кресла\t",
+    "Обозначение\tМодель\tТип оборудования\tПомещение\tРасположение\tСвязанные метки",
+    "Т1\tРеле двухканальное\tРеле 2 канала\tСпальная Оли\tточка под зеркалом\tС1",
+    "Т2\tРеле двухканальное\tРеле 2 канала\tСпальная Оли\tнад кроватью\t",
+    "Р1\tДиммер\t\tХолл\tрозетки у кресла\t",
   ]);
 
   // С разбивкой по помещениям заголовок один — помещение, как в листе меток.
@@ -958,15 +976,15 @@ test("Markdown и буфер обмена: модель в строке, заг�
   assert.equal(rooms[4], "Холл");
 });
 
-test("CSV оборудования — таблица для Excel: те же пять колонок, закупка за пустой строкой", () => {
+test("CSV оборудования — таблица для Excel: те же колонки, закупка за пустой строкой", () => {
   const { box } = tablesEquipmentFixture();
   const csv = toCsv(equipmentTable(box.project, { roomId: box.rooms.hall }));
   assert.deepEqual(csv.replace(/^﻿/, "").split("\r\n"), [
     "Квартира на Ленина",
     "Холл",
     "",
-    "Обозначение;Модель;Помещение;Расположение;Связанные метки",
-    "Р1;Диммер;Холл;розетки у кресла;",
+    "Обозначение;Модель;Тип оборудования;Помещение;Расположение;Связанные метки",
+    "Р1;Диммер;;Холл;розетки у кресла;",
     "",
     "Итого",
     "Производитель;Модель;Штук",

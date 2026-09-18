@@ -644,7 +644,7 @@ export function defaultTemplate() {
     blockMode: "each",
     order: index,
   }));
-  return { categories, markTypes };
+  return { categories, markTypes, equipmentTypes: equipmentTypeTemplate() };
 }
 
 export function createProject(template) {
@@ -679,6 +679,13 @@ export function createProject(template) {
     // и `placementsOf`, поэтому пустых полей здесь достаточно.
     equipment: [],
     placements: [],
+    // Справочник типов оборудования — часть шаблона, как категории и типы
+    // меток. Шаблон, сохранённый до появления типов, их не несёт: новый объект
+    // тогда получает встроенный стартовый набор, а не пустой справочник.
+    equipmentTypes: (Array.isArray(source.equipmentTypes) && source.equipmentTypes.length > 0
+      ? source.equipmentTypes
+      : equipmentTypeTemplate()
+    ).map((type, index) => ({ ...type, order: index })),
     // Принятые предупреждения — ответы «так и задумано». Ответ живёт в объекте
     // и уезжает вместе с файлом, а не в настройках браузера: файл открывают на
     // другой машине и вторым человеком. Список читают через
@@ -2386,6 +2393,132 @@ export function styleOf(project, typeId) {
 // выключателем). Поля модели — только то, чем заказывают: название,
 // производитель, артикул.
 
+// ——— типы оборудования ————————————————————————————————————————————————
+//
+// Свой справочник, не тот, что у меток. Слова заказчика: «для оборудования
+// добавь поле Тип, которое можно расширять, но по умолчанию добавь все что
+// есть по меткам, а так же всё, что может применяться в умном доме».
+//
+// Два справочника, а не один, потому что они отвечают на разные вопросы. Тип
+// метки — чем точка обозначена на плане: у него есть код, цвет, форма и
+// номер. Тип оборудования — что за железка куплена: реле на четыре канала и
+// блок питания на плане не помечаются ничем, а закупаются и ставятся в щит.
+// Свести их в один справочник значило бы завести «тип метки без метки».
+//
+// Стартовый набор — две части: то, что размечено метками (светильники,
+// розетки, датчики, климат, сеть), и начинка щита с обвязкой. Живёт он в
+// шаблоне и копируется в объект при создании: дальше объект правит свой
+// справочник сам, и правка шаблона до него больше не доезжает — ровно как у
+// типов меток.
+const TEMPLATE_EQUIPMENT_TYPES = [
+  // Размечается меткой на плане.
+  "spot",
+  "lamp",
+  "strip",
+  "track",
+  "switchUnit",
+  "socket",
+  "breezer",
+  "conditioner",
+  "wifi",
+  "ethernet",
+  "motion",
+  "opening",
+  "leak",
+  "smoke",
+  "climate",
+  "waterValve",
+  // Ставится, но меткой на плане не помечается: щит и обвязка.
+  "relay1",
+  "relay2",
+  "relay3",
+  "relay4",
+  "dimmer",
+  "ledSingle",
+  "ledRgb",
+  "ledRgbw",
+  "ledCct",
+  "power",
+  "button",
+  "scenePanel",
+  "gateway",
+  "hub",
+  "module",
+  "curtainDrive",
+  "thermostat",
+  "irBlaster",
+  "netSwitch",
+  "router",
+  "breaker",
+  "rcd",
+  "contactor",
+  "enclosure",
+];
+
+// Свежие идентификаторы на каждый вызов — как у `defaultTemplate`: два объекта
+// не должны делить id справочника.
+export function equipmentTypeTemplate() {
+  return TEMPLATE_EQUIPMENT_TYPES.map((key, index) => ({
+    id: newId(),
+    name: strings.equipmentTypes[key] || key,
+    order: index,
+  }));
+}
+
+// Справочник объекта прежнего формата пуст — это не ошибка: тип у единицы
+// необязателен, и старый объект открывается как раньше.
+function equipmentTypesOf(project) {
+  return project && Array.isArray(project.equipmentTypes) ? project.equipmentTypes : [];
+}
+
+export function equipmentTypesInOrder(project) {
+  return equipmentTypesOf(project)
+    .map((item, index) => ({ item, order: item.order == null ? index : item.order, index }))
+    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
+    .map((entry) => entry.item);
+}
+
+export function findEquipmentType(project, typeId) {
+  if (!typeId) return null;
+  return equipmentTypesOf(project).find((item) => item.id === typeId) || null;
+}
+
+export function addEquipmentType(project, { name } = {}) {
+  const item = { id: newId(), name: normalizeName(name), order: equipmentTypesOf(project).length };
+  return {
+    project: withProject(project, { equipmentTypes: [...equipmentTypesOf(project), item] }),
+    equipmentType: item,
+  };
+}
+
+export function updateEquipmentType(project, typeId, patch = {}) {
+  const current = findEquipmentType(project, typeId);
+  if (!current) throw modelError("equipmentTypeNotFound");
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
+  if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
+  const equipmentTypes = equipmentTypesOf(project).map((item) => (item.id === typeId ? next : item));
+  return { project: withProject(project, { equipmentTypes }), equipmentType: next };
+}
+
+// Сколько моделей этого типа — и заодно ответ, можно ли тип удалить.
+export function equipmentTypeUsage(project, typeId) {
+  return equipmentOf(project).filter((item) => item.typeId === typeId).length;
+}
+
+// Тип с моделями не удаляется молча: иначе у модели осталась бы ссылка в
+// никуда, и в таблице она читалась бы как «тип не заполнен».
+export function deleteEquipmentType(project, typeId) {
+  const item = findEquipmentType(project, typeId);
+  if (!item) throw modelError("equipmentTypeNotFound");
+  const used = equipmentTypeUsage(project, typeId);
+  if (used > 0) throw modelError("equipmentTypeInUse", { name: item.name, count: used });
+  const equipmentTypes = equipmentTypesOf(project)
+    .filter((entry) => entry.id !== typeId)
+    .map((entry, index) => ({ ...entry, order: index }));
+  return { project: withProject(project, { equipmentTypes }), deleted: item };
+}
+
 function equipmentOf(project) {
   return project && Array.isArray(project.equipment) ? project.equipment : [];
 }
@@ -2427,12 +2560,21 @@ function equipmentText(value) {
   return String(value == null ? "" : value).trim();
 }
 
-export function addEquipment(project, { name, vendor, code } = {}) {
+// Тип у модели необязателен, и пустой тип — не ошибка: у единиц, заведённых до
+// появления справочника, его нет вовсе. Ссылка в никуда сюда не проходит:
+// несуществующий тип превращается в пустой, а не остаётся висеть.
+function equipmentTypeRef(project, value) {
+  const id = value == null ? "" : String(value);
+  return id && findEquipmentType(project, id) ? id : "";
+}
+
+export function addEquipment(project, { name, vendor, code, typeId } = {}) {
   const item = {
     id: newId(),
     name: normalizeName(name),
     vendor: equipmentText(vendor),
     code: equipmentText(code),
+    typeId: equipmentTypeRef(project, typeId),
     order: equipmentOf(project).length,
   };
   return { project: withProject(project, { equipment: [...equipmentOf(project), item] }), equipment: item };
@@ -2444,9 +2586,87 @@ export function updateEquipment(project, equipmentId, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
   if (Object.prototype.hasOwnProperty.call(patch, "vendor")) next.vendor = equipmentText(patch.vendor);
   if (Object.prototype.hasOwnProperty.call(patch, "code")) next.code = equipmentText(patch.code);
+  if (Object.prototype.hasOwnProperty.call(patch, "typeId")) next.typeId = equipmentTypeRef(project, patch.typeId);
   if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
   const equipment = equipmentOf(project).map((item) => (item.id === equipmentId ? next : item));
   return { project: withProject(project, { equipment }), equipment: next };
+}
+
+// Тип единицы читают только отсюда: у модели из старого файла поля нет вовсе,
+// а ссылка могла остаться от типа, которого уже нет.
+export function equipmentTypeOf(project, equipmentId) {
+  const item = findEquipment(project, equipmentId);
+  return item ? findEquipmentType(project, item.typeId) : null;
+}
+
+// ——— поиск модели ——————————————————————————————————————————————————————
+//
+// Окно выбора ищет так же, как окно выбора типа метки: строка совпадает с
+// названием, производителем или артикулом, точное совпадение идёт первым.
+// Правило поиска живёт здесь, а не в панели: разойдись они — Enter в окне
+// брал бы не ту строку, что стоит первой.
+function equipmentMatches(item, needle) {
+  if (!needle) return true;
+  return [item.name, item.vendor, item.code].some((value) => String(value || "").toLowerCase().includes(needle));
+}
+
+function equipmentExactRank(item, needle) {
+  if (!needle || !item) return 0;
+  const name = String(item.name || "").toLowerCase();
+  if (name === needle) return 3;
+  if (String(item.code || "").toLowerCase() === needle) return 2;
+  return name.startsWith(needle) ? 1 : 0;
+}
+
+/**
+ * Модели под фильтр окна выбора. `query` — строка поиска, `typeId` — тип
+ * («» — любой), `vendor` — производитель как он записан у модели («» — любой,
+ * причём модели без производителя отбираются пустой строкой отдельным
+ * признаком `noVendor`).
+ *
+ * Порядок: точное совпадение первым, дальше порядок справочника — тот же, что
+ * в таблице закупки, чтобы список не перетасовывался от одной буквы.
+ */
+export function searchEquipment(project, { query, typeId, vendor, noVendor } = {}) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  const wantType = typeId == null ? "" : String(typeId);
+  const wantVendor = vendor == null ? "" : String(vendor).trim().toLowerCase();
+  return equipmentInOrder(project)
+    .filter((item) => equipmentMatches(item, needle))
+    .filter((item) => (wantType ? item.typeId === wantType : true))
+    .filter((item) => {
+      if (noVendor) return !String(item.vendor || "").trim();
+      return wantVendor ? String(item.vendor || "").trim().toLowerCase() === wantVendor : true;
+    })
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const rank = equipmentExactRank(b.item, needle) - equipmentExactRank(a.item, needle);
+      return rank === 0 ? a.index - b.index : rank;
+    })
+    .map((entry) => entry.item);
+}
+
+// Такая модель уже заведена — заводить вторую незачем: она стоит первой в
+// списке, и Enter берёт именно её.
+export function matchEquipmentExactly(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!needle) return null;
+  return (
+    equipmentOf(project).find(
+      (item) => String(item.name || "").toLowerCase() === needle || String(item.code || "").toLowerCase() === needle,
+    ) || null
+  );
+}
+
+// Производители, встреченные у моделей, — список для фильтра окна выбора.
+// Порядок справочника, без повторов и без пустых.
+export function equipmentVendors(project) {
+  const seen = [];
+  for (const item of equipmentInOrder(project)) {
+    const vendor = String(item.vendor || "").trim();
+    if (vendor && !seen.includes(vendor)) seen.push(vendor);
+  }
+  return seen;
 }
 
 // Сколько штук этой модели размещено — это же и число к закупке.

@@ -12,6 +12,7 @@ import {
   equipmentInOrder,
   findCategory,
   findEquipment,
+  findEquipmentType,
   findMark,
   findRoom,
   findType,
@@ -568,9 +569,14 @@ export function equipmentTable(project, filter, options = {}) {
   const byRoom = Boolean(options.byRoom);
   // Модель — вторым столбцом, как «Тип» в листе меток: сперва обозначение,
   // которым метку зовут на плане, сразу за ним — что именно там стоит.
+  // Тип стоит сразу за моделью: он про неё и отвечает на вопрос «что это
+  // вообще за железка» раньше, чем «где она стоит». В подвале «Итого» типа
+  // нет намеренно — там закупка, и она разложена по производителям: заказ
+  // оформляют у поставщика, а не у «реле на два канала».
   const columns = [
     strings.tables.label,
     strings.tables.model,
+    strings.tables.equipmentType,
     strings.tables.room,
     strings.tables.location,
     strings.tables.linked,
@@ -612,6 +618,7 @@ export function equipmentTable(project, filter, options = {}) {
       else broken = true;
     }
     if (placementLinkIds(placement).length > links.length) links.push(strings.tables.brokenLink);
+    const kind = item ? findEquipmentType(project, item.typeId) : null;
     const row = {
       id: placement.id,
       cells: [
@@ -619,6 +626,9 @@ export function equipmentTable(project, filter, options = {}) {
         // Модель потеряна — так и написано в строке: пустая ячейка читалась бы
         // как «оборудования тут нет», а оно есть, просто его запись пропала.
         item ? item.name : strings.tables.equipmentLost,
+        // Пустой тип — пустая ячейка, а не пометка: у моделей, заведённых до
+        // появления справочника, типа нет, и это не поломка.
+        kind ? kind.name : "",
         room ? room.name : "",
         mark ? mark.location || "" : "",
         links.join(", "),

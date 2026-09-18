@@ -12,23 +12,31 @@ import { layoutAllows } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   addEquipment,
+  addEquipmentType,
   addPlacement,
   deleteEquipment,
+  deleteEquipmentType,
   deletePlacement,
   equipmentInOrder,
+  equipmentTypeTemplate,
+  equipmentTypeUsage,
+  equipmentTypesInOrder,
   equipmentUsage,
   findEquipment,
+  findEquipmentType,
   findMark,
   labelOf,
   placementLinkIds,
   placementsAt,
   placementsInOrder,
   updateEquipment,
+  updateEquipmentType,
   updatePlacement,
 } from "../model.js";
 import { canvasCommit } from "../canvas.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { openMarkPicker } from "./markControls.js";
+import { openEquipmentPicker } from "./equipmentPicker.js";
 
 // Подпись единицы для строки списка меток и для кнопки: модель плюс связи.
 export function placementSummary(project, placement) {
@@ -109,8 +117,112 @@ export function openEquipmentWindow(api, options = {}) {
             commit((current) => updateEquipment(current, item.id, { code: event.target.value }).project, strings.history.editEquipment),
         },
       }),
+      typeSelect(item.typeId, (typeId) =>
+        commit((current) => updateEquipment(current, item.id, { typeId }).project, strings.history.editEquipment),
+      ),
       uiEl("span", { class: "equip__used", text: text("equipment.used", { count: used }) }),
       remove,
+    ]);
+  }
+
+  // ——— типы оборудования ———
+
+  // Выбор типа у модели. Пустой тип — законное значение: у моделей, заведённых
+  // до появления справочника, типа нет, и заставлять его выбирать не за что.
+  function typeSelect(value, onPick) {
+    const select = uiEl("select", {
+      class: "ui-select",
+      title: strings.equipment.type,
+      on: { change: (event) => onPick(event.target.value) },
+    });
+    select.append(uiEl("option", { value: "", text: strings.equipment.typeNone }));
+    for (const item of equipmentTypesInOrder(project())) {
+      select.append(uiEl("option", { value: item.id, text: item.name }));
+    }
+    select.value = value && findEquipmentType(project(), value) ? value : "";
+    return select;
+  }
+
+  function typeRow(item) {
+    const used = equipmentTypeUsage(project(), item.id);
+    const remove = uiIconButton("trash", {
+      class: "ui-btn ui-btn--danger",
+      title:
+        used > 0
+          ? text("errors.equipmentTypeInUse", { name: item.name, count: used })
+          : strings.equipment.removeType,
+      on: { click: () => removeType(item) },
+    });
+    remove.disabled = used > 0;
+    return uiEl("div", { class: "equip__row" }, [
+      uiEl("input", {
+        class: "ui-input equip__name",
+        type: "text",
+        value: item.name,
+        title: strings.equipment.typeName,
+        on: {
+          change: (event) =>
+            commit(
+              (current) => updateEquipmentType(current, item.id, { name: event.target.value }).project,
+              strings.history.editEquipmentType,
+            ),
+        },
+      }),
+      uiEl("span", { class: "equip__used", text: text("equipment.typesUsed", { count: used }) }),
+      remove,
+    ]);
+  }
+
+  async function removeType(item) {
+    const agreed = await uiConfirm({
+      title: strings.equipment.removeTypeTitle,
+      message: text("equipment.removeTypeMessage", { name: item.name }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    commit((current) => deleteEquipmentType(current, item.id).project, strings.history.removeEquipmentType);
+  }
+
+  function addTypeRow() {
+    const name = uiEl("input", {
+      class: "ui-input equip__name",
+      type: "text",
+      placeholder: strings.equipment.typeNamePlaceholder,
+      title: strings.equipment.typeName,
+    });
+    return uiEl("div", { class: "equip__row equip__row--add" }, [
+      name,
+      uiButton(strings.equipment.addType, {
+        class: "ui-btn ui-btn--accent",
+        on: {
+          click: () =>
+            commit((current) => addEquipmentType(current, { name: name.value }).project, strings.history.addEquipmentType),
+        },
+      }),
+    ]);
+  }
+
+  // Объект, размеченный до появления типов, открывается с пустым справочником:
+  // стартовый набор в него не заезжает сам — правка шаблона до размеченного
+  // объекта не доходит никогда. Но и оставлять человека набивать сорок строк
+  // руками незачем: кнопка предлагает готовый список, решение за ним.
+  function seedTypesRow() {
+    return uiEl("div", { class: "equip__row equip__row--add" }, [
+      uiEl("span", { class: "equip__used", text: strings.equipment.typesSeedHint }),
+      uiButton(strings.equipment.typesSeed, {
+        class: "ui-btn ui-btn--accent",
+        on: {
+          click: () => {
+            const seeds = equipmentTypeTemplate();
+            commit((current) => {
+              let next = current;
+              for (const seed of seeds) next = addEquipmentType(next, { name: seed.name }).project;
+              return next;
+            }, strings.history.seedEquipmentTypes);
+            api.notify(text("equipment.typesSeedDone", { count: seeds.length }), "success");
+          },
+        },
+      }),
     ]);
   }
 
@@ -143,16 +255,21 @@ export function openEquipmentWindow(api, options = {}) {
       placeholder: strings.equipment.codePlaceholder,
       title: strings.equipment.code,
     });
+    let typeId = "";
     return uiEl("div", { class: "equip__row equip__row--add" }, [
       name,
       vendor,
       code,
+      typeSelect("", (value) => {
+        typeId = value;
+      }),
       uiButton(strings.equipment.addModel, {
         class: "ui-btn ui-btn--accent",
         on: {
           click: () =>
             commit(
-              (current) => addEquipment(current, { name: name.value, vendor: vendor.value, code: code.value }).project,
+              (current) =>
+                addEquipment(current, { name: name.value, vendor: vendor.value, code: code.value, typeId }).project,
               strings.history.addEquipment,
             ),
         },
@@ -162,17 +279,28 @@ export function openEquipmentWindow(api, options = {}) {
 
   // ——— размещение ———
 
-  function modelSelect(value, onPick) {
-    const select = uiEl("select", {
-      class: "ui-select",
+  // Модель выбирают окном выбора, а не выпадающим списком. Слова заказчика:
+  // «не показывай Справочник моделей, просто выбор, но выбор сделай красивым
+  // окном, с фильтрацией по модели, типом и т.д.». Список из сорока моделей в
+  // `select` нельзя ни отфильтровать, ни найти в нём по производителю — а
+  // именно это и нужно в момент, когда выбирают.
+  //
+  // Окно одно на всю сборку, как окно выбора метки: и в строке размещения, и
+  // в строке добавления спрашивается им же.
+  function modelButton(value, title, onPick) {
+    const chosen = value ? findEquipment(project(), value) : null;
+    const button = uiButton(chosen ? chosen.name : strings.equipmentPicker.choose, {
+      class: "ui-btn ui-btn--wide equip__name" + (chosen ? " is-set" : ""),
       title: strings.equipment.name,
-      on: { change: (event) => onPick(event.target.value) },
+      on: {
+        click: async () => {
+          const picked = await openEquipmentPicker(project(), { activeId: value || null, title });
+          if (!picked) return;
+          onPick(picked);
+        },
+      },
     });
-    for (const item of equipmentInOrder(project())) {
-      select.append(uiEl("option", { value: item.id, text: item.name }));
-    }
-    select.value = value || "";
-    return select;
+    return button;
   }
 
   async function pickPlace(placement) {
@@ -201,8 +329,18 @@ export function openEquipmentWindow(api, options = {}) {
     const summary = placementSummary(project(), placement);
     const place = findMark(project(), placement.markId);
     return uiEl("div", { class: "equip__row" }, [
-      modelSelect(placement.equipmentId, (equipmentId) =>
-        commit((current) => updatePlacement(current, placement.id, { equipmentId }).project, strings.history.editPlacement),
+      modelButton(placement.equipmentId, text("equipment.placeTitle", { name: summary.name }), (picked) =>
+        // Модель могли завести прямо в окне выбора: тогда объект берётся
+        // оттуда, и оба изменения — новая модель и её подстановка в единицу —
+        // ложатся одним шагом истории. Двумя шагами Ctrl+Z сперва отцеплял бы
+        // модель, а потом удалял её же.
+        commit(
+          (current) =>
+            updatePlacement(picked.created ? picked.project : current, placement.id, {
+              equipmentId: picked.equipmentId,
+            }).project,
+          picked.created ? strings.history.addEquipment : strings.history.editPlacement,
+        ),
       ),
       uiButton(place ? labelOf(project(), placement.markId) : strings.equipment.placeChoose, {
         class: "ui-btn equip__place",
@@ -225,50 +363,71 @@ export function openEquipmentWindow(api, options = {}) {
     ]);
   }
 
+  // Набранное в строке добавления живёт дольше одной отрисовки. Окно
+  // перерисовывается от любой правки объекта — в том числе от своей же, — и
+  // выбранная модель с меткой иначе слетали бы на каждый чужой шаг.
+  const draft = { equipmentId: "", placeId: markId || "" };
+
   function addPlacementRow() {
-    const models = equipmentInOrder(project());
-    let equipmentId = models.length > 0 ? models[0].id : "";
-    let placeId = markId;
-    const placeButton = uiButton(placeId ? labelOf(project(), placeId) : strings.equipment.placeChoose, {
-      class: "ui-btn equip__place",
-      title: strings.equipment.place,
-      on: {
-        click: async () => {
-          const chosen = await openMarkPicker(project(), {
-            title: strings.equipment.placeChoose,
-            chosen: placeId ? [placeId] : [],
-            multiple: false,
-          });
-          if (!chosen || chosen.length === 0) return;
-          placeId = chosen[0];
-          placeButton.textContent = labelOf(project(), placeId);
+    const modelPick = modelButton(draft.equipmentId, strings.equipmentPicker.choose, (picked) => {
+      draft.equipmentId = picked.equipmentId;
+      // Модель, заведённая в окне выбора, попадает в справочник сразу, не
+      // дожидаясь «Разместить». Человек её завёл — значит, она у него есть; а
+      // передумай он размещать, модель осталась бы потерянной вместе с
+      // нажатием, которого он не сделал.
+      if (picked.created) {
+        commit(() => picked.project, strings.history.addEquipment);
+        return;
+      }
+      render();
+    });
+    const placeButton = uiButton(
+      draft.placeId ? labelOf(project(), draft.placeId) : strings.equipment.placeChoose,
+      {
+        class: "ui-btn equip__place",
+        title: strings.equipment.place,
+        on: {
+          click: async () => {
+            const chosen = await openMarkPicker(project(), {
+              title: strings.equipment.placeChoose,
+              chosen: draft.placeId ? [draft.placeId] : [],
+              multiple: false,
+            });
+            if (!chosen || chosen.length === 0) return;
+            draft.placeId = chosen[0];
+            placeButton.textContent = labelOf(project(), draft.placeId);
+          },
         },
       },
-    });
+    );
     const add = uiButton(strings.equipment.addPlacement, {
       class: "ui-btn ui-btn--accent",
       title: strings.equipment.addPlacementHint,
       on: {
         click: () => {
-          if (!equipmentId) {
+          if (!draft.equipmentId) {
             api.notify(strings.equipment.needModel);
             return;
           }
-          if (!placeId) {
+          if (!draft.placeId) {
             api.notify(strings.equipment.addPlacementHint);
             return;
           }
-          commit((current) => addPlacement(current, { equipmentId, markId: placeId }).project, strings.history.addPlacement);
+          // Строка добавления чистится до записи, а не после: перерисовка
+          // приходит подпиской прямо изнутри `commit`, и очистка следом
+          // досталась бы уже мёртвой строке — на экране осталась бы прежняя
+          // модель. Следующая единица почти всегда другая, и оставшаяся модель
+          // подсовывала бы не ту.
+          const chosen = draft.equipmentId;
+          draft.equipmentId = "";
+          commit(
+            (current) => addPlacement(current, { equipmentId: chosen, markId: draft.placeId }).project,
+            strings.history.addPlacement,
+          );
         },
       },
     });
-    return uiEl("div", { class: "equip__row equip__row--add" }, [
-      modelSelect(equipmentId, (value) => {
-        equipmentId = value;
-      }),
-      placeButton,
-      add,
-    ]);
+    return uiEl("div", { class: "equip__row equip__row--add" }, [modelPick, placeButton, add]);
   }
 
   function render() {
@@ -278,14 +437,31 @@ export function openEquipmentWindow(api, options = {}) {
       return;
     }
     const models = equipmentInOrder(current);
+    const kinds = equipmentTypesInOrder(current);
     // На метке — только её единицы: окно открыто из строки этой метки.
     const placed = markId ? placementsAt(current, markId) : placementsInOrder(current);
+    // У метки справочников нет вовсе — ни моделей, ни типов. Слова заказчика:
+    // «при нажатии у метки Оборудование — не показывай Справочник моделей,
+    // просто выбор». Здесь отвечают на один вопрос: что стоит на этой метке.
+    // Модель выбирают окном выбора, а заводят и правят по-прежнему в
+    // справочнике объекта — он открывается кнопкой «Оборудование» без метки.
+    const catalog = markId
+      ? []
+      : [
+          uiEl("h4", { class: "equip__title", text: strings.equipment.models }),
+          ...(models.length > 0
+            ? models.map((item) => modelRow(item))
+            : [uiEl("p", { class: "panel__empty", text: strings.equipment.modelsEmpty })]),
+          addModelRow(),
+          uiEl("h4", { class: "equip__title", text: strings.equipment.types }),
+          ...(kinds.length > 0
+            ? kinds.map((item) => typeRow(item))
+            : [uiEl("p", { class: "panel__empty", text: strings.equipment.typesEmpty })]),
+          addTypeRow(),
+          ...(kinds.length === 0 ? [seedTypesRow()] : []),
+        ];
     body.replaceChildren(
-      uiEl("h4", { class: "equip__title", text: strings.equipment.models }),
-      ...(models.length > 0
-        ? models.map((item) => modelRow(item))
-        : [uiEl("p", { class: "panel__empty", text: strings.equipment.modelsEmpty })]),
-      addModelRow(),
+      ...catalog,
       uiEl("h4", { class: "equip__title", text: strings.equipment.placed }),
       ...(placed.length > 0
         ? placed.map((placement) => placementRow(placement))
