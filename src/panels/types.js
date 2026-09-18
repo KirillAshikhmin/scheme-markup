@@ -148,6 +148,43 @@ function typesShapeCell({ shape, color, active, inherit, onPick }) {
   );
 }
 
+// Разделы палитры. Семьи силуэтов уже сложены в самой палитре (`SHAPE_PALETTE`),
+// здесь только границы — последняя фигура каждого раздела — и ключ названия.
+// Граница задана последней, а не первой фигурой: новую фигуру в середину семьи
+// добавляют чаще, чем в конец, и тогда правка палитры не требует правки границ.
+//
+// Разделы названы по силуэту, а не по применению («Свет», «Датчики»), и это
+// осознанно. Применение в названии фигуры запрещено отдельным правилом (G71):
+// один и тот же знак в шаблоне стоит и на датчике, и на светильнике, а меняют
+// их местами между категориями по мере надобности. Заголовок «Датчики» обещал
+// бы раздел, которого нет, и через полгода врал бы. Выбирают знак не «под
+// смысл», а чтобы он не повторял соседние по категории, — и тогда помогает
+// ровно то, что видно глазом: круг это или квадрат.
+export const SHAPE_GROUPS = [
+  { key: "circles", last: "circle-bar" },
+  { key: "squares", last: "square-grid" },
+  { key: "angles", last: "plus" },
+  { key: "rects", last: "trapezoid-bar" },
+  { key: "drops", last: "dome-dot" },
+];
+
+// Палитра, разложенная по разделам, порядок — палитры. Фигура, не попавшая ни
+// в один раздел (добавили в палитру, а границы поправить забыли), не теряется:
+// она встаёт последней группой без заголовка — в сетке она есть, а тест на это
+// краснеет.
+export function shapeGroups(names = SHAPE_PALETTE) {
+  const groups = [];
+  let rest = [...names];
+  for (const group of SHAPE_GROUPS) {
+    const edge = rest.indexOf(group.last);
+    if (edge < 0) continue;
+    groups.push({ key: group.key, shapes: rest.slice(0, edge + 1) });
+    rest = rest.slice(edge + 1);
+  }
+  if (rest.length > 0) groups.push({ key: null, shapes: rest });
+  return groups;
+}
+
 // Выбор формы — сетка нарисованных фигур, а не список названий: обозначение
 // узнают в лицо, а не по слову. Вариант «как у категории» стоит первой ячейкой
 // и показывает фигуру категории с пометкой.
@@ -170,10 +207,17 @@ export function openTypesShapePicker({ shape, color, allowInherit, inheritShape 
         }),
       );
     }
-    for (const name of SHAPE_PALETTE) {
-      cells.push(
-        typesShapeCell({ shape: name, color, active: shape === name, onPick: () => done({ shape: name }) }),
-      );
+    // Заголовок — обычный абзац во всю строку сетки: клавиатура его не видит,
+    // и обход кнопок Tab'ом остаётся прежним.
+    for (const group of shapeGroups()) {
+      if (group.key) {
+        cells.push(uiEl("p", { class: "shapes__head", text: strings.shapeGroups[group.key] }));
+      }
+      for (const name of group.shapes) {
+        cells.push(
+          typesShapeCell({ shape: name, color, active: shape === name, onPick: () => done({ shape: name }) }),
+        );
+      }
     }
     modal = uiModal({
       title: strings.dictionary.shape,

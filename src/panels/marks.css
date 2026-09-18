@@ -550,6 +550,21 @@
   border-color: var(--panel-muted);
 }
 
+/* Заголовок раздела палитры: строка сетки целиком, поэтому следующая фигура
+   начинает новый ряд сама — без пустых клеток-заполнителей. Набран тем же
+   приглушённым размером, что подпись группы в справочнике: заголовок нужен,
+   чтобы глаз цеплялся за границу семьи, а не чтобы читать его вслух. */
+.shapes__head {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.shapes__head:first-child {
+  margin-top: 0;
+}
+
 .shapes__caption,
 .lines__caption {
   color: var(--panel-muted);
