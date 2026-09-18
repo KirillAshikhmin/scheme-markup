@@ -66,6 +66,7 @@ import {
   drawSchemeGuides,
   guideFraction,
   hitSchemeGuide,
+  rulerAxis,
   snapToSchemeGuides,
   RULER_SIZE,
   planToScreen,
@@ -768,7 +769,12 @@ function canvasBox() {
 
 // Полоса линейки: клик по ней вытягивает новую направляющую, а не идёт в план.
 function canvasOnRuler(point) {
-  return point.x <= RULER_SIZE || point.y <= RULER_SIZE;
+  return rulerAxis(point) !== null;
+}
+
+// Доля плана, в которую сядет направляющая, вытянутая из-под этой точки.
+function canvasGuideAt(axis, point, scheme, view) {
+  return guideFraction(axis, axis === "h" ? point.y : point.x, scheme, view);
 }
 
 function canvasSchemeGuides(state, scheme) {
@@ -1353,12 +1359,13 @@ function canvasPointerDown(event) {
 
   // Линейка забирает клик себе: с неё тянут новую направляющую. Она лежит
   // поверх плана, и отдавать её клик метке нельзя.
-  if (editable && canvasGuidesShown(state) && canvasOnRuler(point)) {
-    const axis = point.y <= RULER_SIZE ? "h" : "v";
+  const rulerUnder = editable && canvasGuidesShown(state) ? rulerAxis(point) : null;
+  if (rulerUnder) {
+    const axis = rulerUnder;
     canvasDrag = {
       kind: "guideNew",
       axis,
-      at: guideFraction(axis, axis === "h" ? point.y : point.x, scheme, view),
+      at: canvasGuideAt(axis, point, scheme, view),
       start: point,
       moved: false,
     };
@@ -1542,7 +1549,10 @@ function canvasDragTo(point, free) {
       canvasPreview = updateMark(before, canvasDrag.markId, { points }).project;
     }
   } catch (error) {
+    // Модель отказала на полпути — картинка замерла бы под рукой, а по
+    // отпусканию перенос потерялся бы молча. Пусть скажет, в чём дело.
     canvasPreview = null;
+    canvasFail(error);
   }
   canvasRedraw();
 }
@@ -1586,7 +1596,7 @@ function canvasPointerMove(event) {
   if (canvasDrag.kind === "guideNew" || canvasDrag.kind === "guideMove") {
     const scheme = canvasScheme(state);
     const view = canvasViewOf(state);
-    const at = guideFraction(canvasDrag.axis, canvasDrag.axis === "h" ? point.y : point.x, scheme, view);
+    const at = canvasGuideAt(canvasDrag.axis, point, scheme, view);
     if (canvasDrag.kind === "guideNew") canvasDrag.at = at;
     else {
       try {
@@ -1693,6 +1703,18 @@ function canvasDoubleClick(event) {
   if (!canvasEditAllowed(state)) return;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
+  // Двойной клик по линейке ставит направляющую в точке клика — это второй
+  // способ к перетаскиванию, и просил его пользователь: «двойной клик по
+  // линейке должен создавать линию».
+  if (canvasGuidesShown(state)) {
+    const at = canvasPointOf(event);
+    const axis = rulerAxis(at);
+    if (axis) {
+      event.preventDefault();
+      canvasGuideAdd(axis, canvasGuideAt(axis, at, scheme, view));
+      return;
+    }
+  }
   // Правка пути — один жест на ломаную метки и на контур помещения. Двойной
   // клик по объекту включает правку, по вершине — убирает её, по сегменту или
   // стенке — добавляет новую в точке клика. Пользователь: «у линий при

@@ -32,6 +32,7 @@ import {
   drawSchemeGuides,
   guideFraction,
   hitSchemeGuide,
+  rulerAxis,
   rulerStep,
   rulerTicks,
   draftSnap,
@@ -276,4 +277,23 @@ test("направляющих нет в том, что уходит в PNG, в 
   const screen = strokeProbe();
   drawSchemeGuides(screen.ctx, base.guides, scheme, viewOf(), BOX);
   assert.equal(screen.seen.length, 2, "холст не нарисовал направляющие");
+});
+
+// Заказчик: «по вертикальной линейке горизонтальную линию, а по горизонтальной
+// — вертикальную». В тикете 59 это было записано наоборот, и перетаскивание
+// работало зеркально — правило считает `rulerAxis`, и оно одно на
+// перетаскивание и на двойной клик.
+test("левая линейка даёт горизонтальную направляющую, верхняя — вертикальную", () => {
+  // Верхняя полоса: клик где угодно по ширине ставит вертикальную.
+  assert.equal(rulerAxis({ x: 300, y: 4 }), "v");
+  assert.equal(rulerAxis({ x: 300, y: RULER_SIZE }), "v");
+  // Левая полоса: горизонтальную.
+  assert.equal(rulerAxis({ x: 4, y: 300 }), "h");
+  assert.equal(rulerAxis({ x: RULER_SIZE, y: 300 }), "h");
+  // Угол, где полосы сходятся, отдан верхней — решать его пополам было бы
+  // гаданием.
+  assert.equal(rulerAxis({ x: 3, y: 3 }), "v");
+  // Сам план линейке не принадлежит.
+  assert.equal(rulerAxis({ x: RULER_SIZE + 1, y: RULER_SIZE + 1 }), null);
+  assert.equal(rulerAxis(null), null);
 });

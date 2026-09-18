@@ -34,6 +34,39 @@ export const MERGE_ENTITIES = [
 // Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
 const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipment"];
 
+/**
+ * Принятые предупреждения: **объединение по ключу, а не конфликт.**
+ *
+ * «Так и задумано» — это ответ на вопрос, а не правка разметки. Если один
+ * ответил, а второй нет, вопрос уже отвечен, и повторно спрашивать второго
+ * незачем: никто при этом не теряет работу, у обоих остаётся тот же объект.
+ *
+ * **Чего эта механика не умеет и почему.** Запись принятия либо есть, либо её
+ * нет — следа от снятия не остаётся. Значит «второй ещё не принимал» и «второй
+ * вернул принятое в работу» для слияния выглядят одинаково, и объединение в
+ * обоих случаях оставит принятие. Сторона выбрана сознательно: лишняя строка
+ * «принято» снимается одним нажатием и видна в панели целиком, а потерянные
+ * ответы пришлось бы давать заново по всему объекту — и молча. Тому, кто
+ * вернул строку в работу, достаточно вернуть её ещё раз после обмена файлами.
+ *
+ * Дублей не появляется: ключ у записи один, и повторный обмен файлами ничего
+ * не добавляет. Своя запись при совпадении ключа остаётся своей — у неё своё
+ * время принятия и свой текст на момент ответа.
+ */
+function mergeAccepted(merged, ours, theirs) {
+  const mine = mergeList(ours, "accepted");
+  const other = mergeList(theirs, "accepted");
+  // Ни у кого нет даже поля — объект прежней разметки остаётся как был.
+  if (mine.length === 0 && other.length === 0) {
+    if (!Array.isArray(ours.accepted) && !Array.isArray(theirs.accepted)) return;
+    merged.accepted = Array.isArray(ours.accepted) ? ours.accepted : [];
+    return;
+  }
+  const keys = new Set(mine.map((item) => item && item.key).filter(Boolean));
+  const added = other.filter((item) => item && item.key && !keys.has(item.key));
+  merged.accepted = added.length === 0 ? mine : [...mine, ...added];
+}
+
 function mergeList(project, key) {
   return project && Array.isArray(project[key]) ? project[key] : [];
 }
@@ -309,6 +342,7 @@ export function mergeProjects(ours, theirs, base, options = {}) {
   }
 
   merged.counters = mergeCounters(ours, theirs);
+  mergeAccepted(merged, ours, theirs);
   merged.marks = mergeNumbers(merged.marks, merged.markTypes, merged.counters, ancestor, report);
   mergeReferences(merged, report);
 

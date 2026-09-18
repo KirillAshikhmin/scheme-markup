@@ -16,6 +16,10 @@ import {
   deleteMark,
   addEquipment,
   addPlacement,
+  acceptProblem,
+  problemAccepted,
+  setMarkNumber,
+  validate,
 } from "../src/model.js";
 
 // Общий предок: объект с одной схемой, комнатой и парой меток.
@@ -266,4 +270,75 @@ test("оборудование и его привязки сливаются, п
   const cleaned = mergeProjects(without, theirs, base);
   assert.equal(cleaned.project.placements.length, 0, "привязка ведёт в никуда");
   assert.ok(cleaned.conflicts.some((conflict) => conflict.entity === "placements" && conflict.code === "danglingRef"));
+});
+
+// ——— принятые предупреждения ——————————————————————————————————————————
+//
+// Пользователь: «добавь слияние списка принятых». Принятие — не правка
+// разметки, а ответ на вопрос: «так и задумано». Значит слияние здесь не выбор
+// стороны, а объединение — иначе второй человек из общей папки отвечает на те
+// же повторы заново.
+function acceptedKeys(project) {
+  return (project.accepted || []).map((item) => item.key).sort();
+}
+
+// Повтор номера с двух сторон: у нас принят один, у них другой.
+function withRepeats(base) {
+  const [first, second] = base.project.marks;
+  // Номер правится своей функцией: у `updateMark` его в белом списке нет.
+  const project = setMarkNumber(base.project, second.id, first.number).project;
+  const problems = validate(project);
+  return { project, problems };
+}
+
+test("принятое одной стороной приезжает ко второй, и обмен не плодит дублей", () => {
+  const base = ancestor();
+  const start = withRepeats(base);
+  const problem = start.problems.find((item) => item.code === "repeatedNumber");
+  assert.ok(problem, "пример не тот: повтора номера нет");
+
+  const ours = stamp(copyOf(start.project), "2026-02-01T10:00:00.000Z");
+  const theirs = stamp(acceptProblem(copyOf(start.project), problem).project, "2026-02-01T11:00:00.000Z");
+  assert.deepEqual(acceptedKeys(ours), [], "пример не тот: у нас принятого быть не должно");
+
+  // Приехало к нам.
+  const toUs = mergeProjects(ours, theirs, start.project).project;
+  assert.deepEqual(acceptedKeys(toUs), [problem.key], "принятое не приехало");
+  assert.equal(problemAccepted(toUs, problem.key), true);
+  assert.ok(!validate(toUs).some((item) => item.key === problem.key), "принятое всё ещё спрашивают");
+
+  // И в обратную сторону — тот же ответ.
+  const toThem = mergeProjects(theirs, ours, start.project).project;
+  assert.deepEqual(acceptedKeys(toThem), [problem.key], "своё принятое потерялось");
+
+  // Повторный обмен файлами ничего не добавляет: ключ у записи один.
+  const again = mergeProjects(toUs, toThem, start.project).project;
+  assert.deepEqual(acceptedKeys(again), [problem.key], "список принятых вырос дублями");
+  assert.equal(mergeProjects(again, again, start.project).project.accepted.length, 1);
+});
+
+test("принятое своё при совпадении ключа остаётся своим — со своим временем", () => {
+  const base = ancestor();
+  const start = withRepeats(base);
+  const problem = start.problems.find((item) => item.code === "repeatedNumber");
+  const mine = acceptProblem(copyOf(start.project), problem).project;
+  const other = acceptProblem(copyOf(start.project), problem).project;
+  other.accepted[0] = { ...other.accepted[0], at: "2020-01-01T00:00:00.000Z", label: "чужой текст" };
+
+  const merged = mergeProjects(stamp(mine, "2026-02-02T10:00:00.000Z"), stamp(other, "2026-02-02T11:00:00.000Z"), start.project).project;
+  assert.equal(merged.accepted.length, 1, "одна и та же строка приехала дважды");
+  assert.equal(merged.accepted[0].at, mine.accepted[0].at, "своё время принятия подменили чужим");
+  assert.equal(merged.accepted[0].label, mine.accepted[0].label);
+});
+
+// Объект прежней разметки поля не знает вовсе, и слияние не должно его заводить
+// на пустом месте.
+test("объекты без принятых сливаются как раньше", () => {
+  const base = ancestor();
+  const bare = copyOf(base.project);
+  delete bare.accepted;
+  const other = copyOf(bare);
+  const merged = mergeProjects(stamp(bare, "2026-02-03T10:00:00.000Z"), stamp(other, "2026-02-03T11:00:00.000Z"), bare).project;
+  assert.equal(merged.accepted, undefined, "поле завелось само у объекта, который его не знал");
+  assert.deepEqual(acceptedKeys(merged), []);
 });

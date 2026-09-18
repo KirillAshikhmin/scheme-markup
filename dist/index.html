@@ -7844,6 +7844,39 @@ const MERGE_ENTITIES = [
 // Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
 const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipment"];
 
+/**
+ * Принятые предупреждения: **объединение по ключу, а не конфликт.**
+ *
+ * «Так и задумано» — это ответ на вопрос, а не правка разметки. Если один
+ * ответил, а второй нет, вопрос уже отвечен, и повторно спрашивать второго
+ * незачем: никто при этом не теряет работу, у обоих остаётся тот же объект.
+ *
+ * **Чего эта механика не умеет и почему.** Запись принятия либо есть, либо её
+ * нет — следа от снятия не остаётся. Значит «второй ещё не принимал» и «второй
+ * вернул принятое в работу» для слияния выглядят одинаково, и объединение в
+ * обоих случаях оставит принятие. Сторона выбрана сознательно: лишняя строка
+ * «принято» снимается одним нажатием и видна в панели целиком, а потерянные
+ * ответы пришлось бы давать заново по всему объекту — и молча. Тому, кто
+ * вернул строку в работу, достаточно вернуть её ещё раз после обмена файлами.
+ *
+ * Дублей не появляется: ключ у записи один, и повторный обмен файлами ничего
+ * не добавляет. Своя запись при совпадении ключа остаётся своей — у неё своё
+ * время принятия и свой текст на момент ответа.
+ */
+function mergeAccepted(merged, ours, theirs) {
+  const mine = mergeList(ours, "accepted");
+  const other = mergeList(theirs, "accepted");
+  // Ни у кого нет даже поля — объект прежней разметки остаётся как был.
+  if (mine.length === 0 && other.length === 0) {
+    if (!Array.isArray(ours.accepted) && !Array.isArray(theirs.accepted)) return;
+    merged.accepted = Array.isArray(ours.accepted) ? ours.accepted : [];
+    return;
+  }
+  const keys = new Set(mine.map((item) => item && item.key).filter(Boolean));
+  const added = other.filter((item) => item && item.key && !keys.has(item.key));
+  merged.accepted = added.length === 0 ? mine : [...mine, ...added];
+}
+
 function mergeList(project, key) {
   return project && Array.isArray(project[key]) ? project[key] : [];
 }
@@ -8119,6 +8152,7 @@ function mergeProjects(ours, theirs, base, options = {}) {
   }
 
   merged.counters = mergeCounters(ours, theirs);
+  mergeAccepted(merged, ours, theirs);
   merged.marks = mergeNumbers(merged.marks, merged.markTypes, merged.counters, ancestor, report);
   mergeReferences(merged, report);
 
@@ -10603,6 +10637,24 @@ function drawRuler(ctx, scheme, view, box) {
   ctx.restore();
 }
 
+/**
+ * Какая линейка лежит под точкой экрана и какую направляющую она ставит.
+ *
+ * **Левая (вертикальная) линейка задаёт высоту — значит ставит горизонтальную
+ * направляющую; верхняя задаёт положение по ширине — значит вертикальную.**
+ * Слова заказчика: «по вертикальной линейке горизонтальную линию, а по
+ * горизонтальной — вертикальную». Угол, где полосы сходятся, отдан верхней:
+ * решать его пополам было бы гаданием, а так правило одно и предсказуемое.
+ *
+ * `null` — точка не на линейке.
+ */
+function rulerAxis(point) {
+  if (!point) return null;
+  if (point.y <= RULER_SIZE) return "v";
+  if (point.x <= RULER_SIZE) return "h";
+  return null;
+}
+
 // Экранная координата направляющей: у горизонтальной это `y`, у вертикальной `x`.
 function guideScreen(guide, scheme, view) {
   const state = renderView(view);
@@ -12950,7 +13002,12 @@ function canvasBox() {
 
 // Полоса линейки: клик по ней вытягивает новую направляющую, а не идёт в план.
 function canvasOnRuler(point) {
-  return point.x <= RULER_SIZE || point.y <= RULER_SIZE;
+  return rulerAxis(point) !== null;
+}
+
+// Доля плана, в которую сядет направляющая, вытянутая из-под этой точки.
+function canvasGuideAt(axis, point, scheme, view) {
+  return guideFraction(axis, axis === "h" ? point.y : point.x, scheme, view);
 }
 
 function canvasSchemeGuides(state, scheme) {
@@ -13530,12 +13587,13 @@ function canvasPointerDown(event) {
 
   // Линейка забирает клик себе: с неё тянут новую направляющую. Она лежит
   // поверх плана, и отдавать её клик метке нельзя.
-  if (editable && canvasGuidesShown(state) && canvasOnRuler(point)) {
-    const axis = point.y <= RULER_SIZE ? "h" : "v";
+  const rulerUnder = editable && canvasGuidesShown(state) ? rulerAxis(point) : null;
+  if (rulerUnder) {
+    const axis = rulerUnder;
     canvasDrag = {
       kind: "guideNew",
       axis,
-      at: guideFraction(axis, axis === "h" ? point.y : point.x, scheme, view),
+      at: canvasGuideAt(axis, point, scheme, view),
       start: point,
       moved: false,
     };
@@ -13719,7 +13777,10 @@ function canvasDragTo(point, free) {
       canvasPreview = updateMark(before, canvasDrag.markId, { points }).project;
     }
   } catch (error) {
+    // Модель отказала на полпути — картинка замерла бы под рукой, а по
+    // отпусканию перенос потерялся бы молча. Пусть скажет, в чём дело.
     canvasPreview = null;
+    canvasFail(error);
   }
   canvasRedraw();
 }
@@ -13763,7 +13824,7 @@ function canvasPointerMove(event) {
   if (canvasDrag.kind === "guideNew" || canvasDrag.kind === "guideMove") {
     const scheme = canvasScheme(state);
     const view = canvasViewOf(state);
-    const at = guideFraction(canvasDrag.axis, canvasDrag.axis === "h" ? point.y : point.x, scheme, view);
+    const at = canvasGuideAt(canvasDrag.axis, point, scheme, view);
     if (canvasDrag.kind === "guideNew") canvasDrag.at = at;
     else {
       try {
@@ -13870,6 +13931,18 @@ function canvasDoubleClick(event) {
   if (!canvasEditAllowed(state)) return;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
+  // Двойной клик по линейке ставит направляющую в точке клика — это второй
+  // способ к перетаскиванию, и просил его пользователь: «двойной клик по
+  // линейке должен создавать линию».
+  if (canvasGuidesShown(state)) {
+    const at = canvasPointOf(event);
+    const axis = rulerAxis(at);
+    if (axis) {
+      event.preventDefault();
+      canvasGuideAdd(axis, canvasGuideAt(axis, at, scheme, view));
+      return;
+    }
+  }
   // Правка пути — один жест на ломаную метки и на контур помещения. Двойной
   // клик по объекту включает правку, по вершине — убирает её, по сегменту или
   // стенке — добавляет новую в точке клика. Пользователь: «у линий при
