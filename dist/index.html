@@ -2629,12 +2629,6 @@
   max-width: 100%;
 }
 
-.print-doc__foot {
-  color: #57606a;
-  font-size: 11px;
-  margin-top: 10px;
-}
-
 /* Предпросмотр в диалоге: лист в рамке, прокрутка внутри. */
 .export__preview {
   background: #ffffff;
@@ -2744,47 +2738,7 @@
     page-break-inside: avoid;
   }
 
-  /* Имя объекта — в колонтитуле на каждой странице. */
-  .print-doc__foot {
-    bottom: 0;
-    left: 0;
-    position: fixed;
-    right: 0;
-    border-top: 1px solid #d0d7de;
-    padding-top: 3px;
-  }
-
-  .print-doc--scheme /* Подвал «сколько чего»: числа справа, подытог типа приглушён и сдвинут. */
-.print-doc__totals .print-doc__table {
-  max-width: 420px;
-}
-
-.print-doc__count {
-  text-align: right;
-  white-space: nowrap;
-}
-
-.print-doc__totals-row td:first-child {
-  border-left: 3px solid var(--print-row-color, transparent);
-  font-weight: 600;
-  padding-left: 7px;
-}
-
-.print-doc__totals-row--sub td {
-  color: #57606a;
-  font-weight: 400;
-}
-
-.print-doc__totals-row--sub td:first-child {
-  padding-left: 20px;
-}
-
-.print-doc__totals-row--all td {
-  border-top: 1px solid #d0d7de;
-  font-weight: 600;
-}
-
-.print-doc__image {
+  .print-doc--scheme .print-doc__image {
     max-height: 96vh;
     object-fit: contain;
   }
@@ -17063,7 +17017,6 @@ function exportTableNode(table, options = {}) {
   }
 
   if (options.extra) doc.append(options.extra);
-  if (options.footer) doc.append(exportNode("footer", "print-doc__foot", options.footer));
   return doc;
 }
 
@@ -17123,7 +17076,6 @@ async function printView(kind, data = {}) {
       title: data.title,
       subtitle: data.subtitle,
       extra: data.extra,
-      footer: data.footer,
     }),
   );
   exportPrintRun(root);
@@ -19385,7 +19337,6 @@ function exportTableDialog(api) {
               table,
               title: table.title || state.project.name,
               subtitle: exportSubtitleOf(state, table),
-              footer: state.project.name,
             }),
           ),
       },
