@@ -76,7 +76,8 @@ import {
   visibleOutlines,
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
-import { uiConfirm, uiDialogDepth } from "./panels/ui.js";
+import { getSetting, setSetting } from "./store.js";
+import { uiConfirm, uiDialogDepth, uiEl, uiIcon } from "./panels/ui.js";
 
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
 //
@@ -241,6 +242,36 @@ export function canvasHintText(state) {
   if (type) return strings.canvas.hintSelectMode;
   return strings.canvas.hintSelect;
 }
+
+// ——— подсказка: отступ от края и знак «текст сменился» ————————————————
+//
+// Линейка (таск 59) занимает полосу в `RULER_SIZE` пикселей сверху и слева
+// холста, и подсказка, стоявшая в самом углу, наехала на неё. Отступ считается
+// здесь, а не в стилях: линейку прячут отметкой в «Размерах», и вместе с ней
+// обязан уходить отступ — иначе подсказка висит с пустым полем сверху.
+export function canvasHintInset(state) {
+  return canvasGuidesShown(state) ? RULER_SIZE : 0;
+}
+
+// Текст подсказки меняется по ходу работы и иногда говорит важное («второй Esc
+// возвращает в „Выделение“»). Когда подсказка свёрнута, разворачивать её за
+// пользователя нельзя: он свернул её осознанно, и она выпрыгивала бы под рукой
+// на каждую смену типа — ровно то, от чего он избавился. Но и молча съесть
+// новый текст нельзя, поэтому кнопка получает точку и другую подпись.
+//
+// `seen` — текст, который пользователь видел последним (подсказка была
+// развёрнута). Ничего не видел — знака нет: точка на первой же подсказке после
+// перезагрузки была бы шумом.
+export function canvasHintUnseen(seen, current) {
+  if (seen === null || current === null) return false;
+  return seen !== current;
+}
+
+// Свёрнутость — оснастка рабочего места, как и отметка линейки: живёт в
+// настройках браузера, в объект и в файл проекта не попадает.
+const CANVAS_HINT_SETTING = "canvasHintCollapsed";
+let canvasHintCollapsed = false;
+let canvasHintSeen = null;
 
 // Пауза, после которой события колеса считаются новым жестом.
 const CANVAS_WHEEL_STREAK_MS = 220;
@@ -2017,24 +2048,64 @@ function canvasAutoFit(state) {
   });
 }
 
-// Подсказка поверх холста: что сейчас ставим и чем это закончить.
+// Подсказка поверх холста: что сейчас ставим и чем это закончить. Сворачивается
+// в одну кнопку со значком — текст её читают один раз, а место она занимает всё
+// время работы.
 function mountCanvasHint(host, api) {
   const hint = document.createElement("div");
   hint.className = "canvas-hint";
+  const body = uiEl("p", { class: "canvas-hint__text" });
+  const toggle = uiEl(
+    "button",
+    {
+      class: "canvas-hint__toggle",
+      type: "button",
+      on: {
+        click: () => {
+          canvasHintCollapsed = !canvasHintCollapsed;
+          setSetting(CANVAS_HINT_SETTING, canvasHintCollapsed);
+          render();
+        },
+      },
+    },
+    uiIcon("hint"),
+  );
+  hint.append(toggle, body);
   host.replaceChildren(hint);
   const render = () => {
     const state = api.getState();
     const value = canvasHintText(state);
+    // Отступ от линейки — до проверки на пустоту: он нужен подсказке в любом
+    // виде, и свёрнутой тоже.
+    hint.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
     // Условие показа живёт здесь, а не в чужих стилях: подсказки нет, когда
     // нечего подсказывать, а в просмотре она говорит про просмотр.
     hint.hidden = value === null;
     if (value === null) return;
-    hint.textContent = value;
+    body.textContent = value;
+    hint.classList.toggle("is-collapsed", canvasHintCollapsed);
+    body.hidden = canvasHintCollapsed;
+    // Развёрнутую подсказку пользователь видит — значит, этот текст прочитан.
+    if (!canvasHintCollapsed) canvasHintSeen = value;
+    const unseen = canvasHintCollapsed && canvasHintUnseen(canvasHintSeen, value);
+    toggle.classList.toggle("is-new", unseen);
+    let label = strings.canvas.hintCollapse;
+    if (canvasHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
+    toggle.title = label;
+    toggle.setAttribute("aria-label", label);
+    toggle.setAttribute("aria-expanded", canvasHintCollapsed ? "false" : "true");
     const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
     const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
-    if (!canvasEditAllowed(state)) hint.style.borderColor = "";
-    else if (state.mode === "room" && room) hint.style.borderColor = room.color;
-    else if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
+    // Цвет достаётся и кнопке: свёрнутой подсказки, кроме неё, не видно, а
+    // цвет типа — единственное, что говорит, чем сейчас размечают. В просмотре
+    // цвета нет вовсе: размечать там нечем.
+    let color = "";
+    if (canvasEditAllowed(state)) {
+      if (state.mode === "room" && room) color = room.color;
+      else if (type) color = styleOf(state.project, type.id).color;
+    }
+    hint.style.borderColor = color;
+    toggle.style.borderColor = color;
   };
   api.subscribe((state, changed) => {
     if (
@@ -2043,6 +2114,8 @@ function mountCanvasHint(host, api) {
       "activeRoomId" in changed ||
       "schemeId" in changed ||
       "layout" in changed ||
+      // Линейка пришла или ушла — отступ подсказки меняется вместе с ней.
+      "guidesShown" in changed ||
       // Правка ломаной — такой же режим руки, как «Добавление»: началась или
       // закончилась, и подсказка обязана это сказать.
       "editPathId" in changed ||
@@ -2052,6 +2125,18 @@ function mountCanvasHint(host, api) {
     }
   });
   render();
+  // Настройка читается асинхронно: подсказка стартует развёрнутой и
+  // схлопывается, когда хранилище ответит. Ждать его с пустым углом хуже.
+  Promise.resolve(getSetting(CANVAS_HINT_SETTING))
+    .then((saved) => {
+      if (saved !== true) return;
+      canvasHintCollapsed = true;
+      // То, что пользователь успел увидеть до ответа хранилища, прочитанным не
+      // считается: он на подсказку не смотрел, она мигнула сама.
+      canvasHintSeen = null;
+      render();
+    })
+    .catch(() => {});
 }
 
 registerPanel(PANEL_IDS.canvas, mountCanvas);
