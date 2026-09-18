@@ -21,7 +21,8 @@ import {
   rgbToHex,
   rgbToHsv,
 } from "../model.js";
-import { strings } from "../strings.js";
+import { colorNameHex } from "../colorName.js";
+import { strings, text } from "../strings.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
 
 const COLOR_FIELD_SIZE = { width: 232, height: 168 };
@@ -35,6 +36,29 @@ const COLOR_PLAN_ALPHA = 0.12;
 
 function colorHexOf(hsv) {
   return rgbToHex(hsvToRgb(hsv));
+}
+
+// Подсказка цвета — одним местом на всё окно и на кнопку. Голый hex человеку
+// не говорит ничего: «#164E63» узнаётся только сверкой кодов, а «тёмно-
+// бирюзовый» — с первого взгляда. Код при этом остаётся: по нему тот же цвет
+// ищут в другом окне и в таблице.
+//
+// Имя есть у любого цвета, включая заведённый пользователем (`colorName.js`),
+// но `colorNameHex` возвращает пустую строку на мусоре вместо кода — тогда
+// подсказка остаётся прежней подписью, а не превращается в «Цвет: ».
+export function colorLabel(label, value) {
+  const named = colorNameHex(value);
+  if (!named) return label || "";
+  if (!label) return named;
+  return text("colorPicker.named", { label, color: named });
+}
+
+// Подсказка плитки палитры. Занятость дописывается к имени, а не заменяет его:
+// у занятого цвета человеку нужно и то и другое — как он называется и почему
+// он помечен. Поэтому и пометка здесь же, а не отдельной веткой у плитки.
+export function colorSwatchTitle(color, busy) {
+  const named = colorLabel("", color);
+  return busy ? text("colorPicker.taken", { color: named }) : named;
 }
 
 // Поле насыщенности и яркости: заливка чистым оттенком, поверх — белый
@@ -163,9 +187,11 @@ export function openColorPicker(options = {}) {
       },
     });
     const chip = uiEl("span", { class: "colorpick__chip" });
+    // «Было» называет прежний цвет словом: рядом с новым сразу видно, что
+    // меняешь, — а не два кружка, отличие которых надо угадывать.
     const chipBefore = uiEl("span", {
       class: "colorpick__chip colorpick__chip--before",
-      title: strings.colorPicker.before,
+      title: colorLabel(strings.colorPicker.before, before),
       attrs: { style: "background:" + before },
     });
     const value = uiEl("span", { class: "colorpick__value" });
@@ -209,7 +235,9 @@ export function openColorPicker(options = {}) {
       colorDrawField(field, hsv);
       colorDrawHue(hue, hsv);
       chip.setAttribute("style", "background:" + color);
-      chip.title = color;
+      // Кружок нового цвета зовётся так же, как прежний, — иначе «Было»
+      // называлось бы словом, а «стало» оставалось кодом.
+      chip.title = colorLabel("", color);
       // Так цвет ляжет на белый план: линия контура и заливка помещения.
       onPlan.setAttribute(
         "style",
@@ -244,11 +272,13 @@ export function openColorPicker(options = {}) {
 
     for (const color of ROOM_PALETTE) {
       const busy = colorTaken(color, taken);
+      // Плитка называется словом и кодом — и занятая тоже.
+      const hint = colorSwatchTitle(color, busy);
       const button = uiEl("button", {
         class: "colorpick__swatch" + (busy ? " is-used" : ""),
         type: "button",
-        title: busy ? color + " — " + strings.colorPicker.used : color,
-        attrs: { style: "background:" + color, "aria-label": color, "aria-pressed": "false" },
+        title: hint,
+        attrs: { style: "background:" + color, "aria-label": hint, "aria-pressed": "false" },
         on: { click: () => setColor(color) },
       });
       button.dataset.color = color;
@@ -336,17 +366,31 @@ export function openColorPicker(options = {}) {
 
 // Кнопка цвета в строке справочника или помещения: показывает текущий цвет
 // и открывает окно выбора. Никаких `<input type="color">` в сборке больше нет.
+//
+// Подсказка называет не только назначение кнопки, но и сам цвет — «Цвет
+// категории: пурпурный (#E80098)»: цветного квадратика хватает, чтобы отличить
+// две строки друг от друга, и не хватает, чтобы назвать цвет вслух или найти
+// тот же в другом окне. Кнопка от этого не растёт: подсказка живёт в `title`,
+// а ширину квадратику задаёт CSS.
 export function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
+  const label = title || strings.colorPicker.title;
+  let color = value;
+  const hint = () => colorLabel(label, color);
   const button = uiEl("button", {
     class: "colorpick__button",
     type: "button",
-    title: title || strings.colorPicker.title,
-    attrs: { style: "background:" + (value || COLOR_FALLBACK), "aria-label": title || strings.colorPicker.title },
+    title: hint(),
+    attrs: { style: "background:" + (color || COLOR_FALLBACK), "aria-label": hint() },
     on: {
       click: async () => {
-        const picked = await openColorPicker({ color: value, used, title: dialogTitle || title });
+        const picked = await openColorPicker({ color, used, title: dialogTitle || title });
         if (!picked) return;
+        color = picked;
         button.setAttribute("style", "background:" + picked);
+        // Имя в подсказке держится выбранного цвета: кнопку после выбора никто
+        // не перестраивает, и без этой строки она называла бы прежний.
+        button.title = hint();
+        button.setAttribute("aria-label", button.title);
         onPick(picked);
       },
     },

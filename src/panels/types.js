@@ -378,6 +378,23 @@ export function typesAddDraft(categoryId = "") {
   return { categoryId, kind: MARK_KINDS[0], shape: null, lineStyle: null };
 }
 
+// Какое поле строки добавления модель не приняла. Отказ строку больше не
+// перерисовывает — набранное остаётся, — и вместо пустой строки пользователю
+// нужно показать место правки: коды ловит `normalizeCode`, пустое название —
+// `normalizeName`, и `error.code` разводит их. Незнакомый код — ничей: строка
+// всё равно цела, а ошибка названа уведомлением.
+const TYPES_ADD_ERROR_FIELDS = {
+  codeRequired: "code",
+  codeTooLong: "code",
+  codeLetters: "code",
+  codeTaken: "code",
+  nameRequired: "name",
+};
+
+export function typesAddErrorField(code) {
+  return TYPES_ADD_ERROR_FIELDS[code] || null;
+}
+
 // Смена вида ничего не стирает: знаки двух видов лежат в черновике порознь,
 // и вернувшийся к «Точке» получает обратно свою фигуру. Так же устроен и
 // заведённый тип — `updateType({kind})` не трогает ни `shape`, ни `lineStyle`;
@@ -649,6 +666,29 @@ export function openTypesDictionary(api) {
     }
   }
 
+  // Команда строки добавления. От `commit` отличается одним: неудача не зовёт
+  // `render()`. Пользователь набрал код, название, выбрал вид и знак, нажал
+  // «Добавить», получил «Код В уже занят» — и вся строка перерисовывалась
+  // пустой. Править нужно один код, а набирать приходилось всё заново.
+  //
+  // Перерисовывать после отказа и нечего: объект не менялся, а строка держит
+  // только черновик. Взамен ошибка называется вслух и курсор встаёт в то поле,
+  // которое модель не приняла (`typesAddErrorField`).
+  function commitDraft(build, label, fields = {}) {
+    for (const input of Object.values(fields)) input.classList.remove("is-wrong");
+    try {
+      canvasCommit(project(), build(project()), label);
+    } catch (error) {
+      api.notify(error && error.message ? error.message : String(error), "error");
+      const input = fields[typesAddErrorField(error && error.code)];
+      if (input) {
+        input.classList.add("is-wrong");
+        input.focus();
+        input.select();
+      }
+    }
+  }
+
   function categorySelect(value, onPick) {
     const select = uiEl("select", {
       class: "ui-select",
@@ -802,8 +842,11 @@ export function openTypesDictionary(api) {
 
   function categoryRow(category) {
     const types = project().markTypes.filter((type) => type.categoryId === category.id).length;
+    // Корзина идёт общей мерой конца строки (`dict__act`), как у строки типа:
+    // по ширине глифа хвост строки был несчитаемым, и строке добавления не с
+    // чем было равняться.
     const removeButton = uiIconButton("trash", {
-      class: "ui-btn ui-btn--danger",
+      class: "ui-btn ui-btn--danger dict__act",
       title: types > 0 ? strings.errors.categoryHasTypes : strings.dictionary.removeCategory,
       on: { click: () => removeCategory(category) },
     });
@@ -894,11 +937,15 @@ export function openTypesDictionary(api) {
       type: "text",
       placeholder: strings.dictionary.codePlaceholder,
       attrs: { maxlength: String(CODE_MAX_LENGTH) },
+      // Пометка «это поле не приняли» снимается с первой буквой правки:
+      // красная рамка над полем, которое уже исправляют, врёт.
+      on: { input: () => code.classList.remove("is-wrong") },
     });
     const name = uiEl("input", {
       class: "ui-input",
       type: "text",
       placeholder: strings.dictionary.typeNamePlaceholder,
+      on: { input: () => name.classList.remove("is-wrong") },
     });
     let draft = typesAddDraft(project().categories.length > 0 ? project().categories[0].id : "");
     const category = () => findCategory(project(), draft.categoryId);
@@ -963,11 +1010,13 @@ export function openTypesDictionary(api) {
 
     // Черновик отдаётся модели как есть: вид и знак приезжают с типом сразу,
     // без второго захода. Сбрасывать строку руками не нужно — после команды
-    // справочник перерисовывается подпиской и строит её заново.
+    // справочник перерисовывается подпиской и строит её заново; после отказа
+    // (`commitDraft`) строка остаётся с набранным.
     const add = () =>
-      commit(
+      commitDraft(
         (current) => addType(current, { ...draft, code: code.value, name: name.value }).project,
         strings.history.addType,
+        { code, name },
       );
     return uiEl("div", { class: "dict__row dict__row--add" }, [
       badge,
@@ -1007,6 +1056,7 @@ export function openTypesDictionary(api) {
       class: "ui-input",
       type: "text",
       placeholder: strings.dictionary.categoryNamePlaceholder,
+      on: { input: () => name.classList.remove("is-wrong") },
     });
     // Цвет новой категории — незанятый цвет палитры: метки новой категории
     // должны быть видны отдельно и от соседних меток, и от заливки помещений.
@@ -1031,16 +1081,32 @@ export function openTypesDictionary(api) {
         shapeButton.replaceChildren(shapeIcon(shape, color, 26));
       },
     });
+    // Пустое название теряться тоже не должно — правило то же, что у строки
+    // добавления типа.
     const add = () =>
-      commit(
+      commitDraft(
         (current) => addCategory(current, { name: name.value, color, shape }).project,
         strings.history.addCategory,
+        { name },
       );
     return uiEl("div", { class: "dict__row dict__row--add" }, [
       colorButton,
       name,
       shapeButton,
-      uiButton(strings.dictionary.addCategory, { class: "ui-btn ui-btn--accent", on: { click: add } }),
+      // Подпись кнопки короткая, и это не экономия слов. Кнопка занимает
+      // хвост строки категории — начертание и корзину, — а он считается в
+      // 106 px; «Добавить категорию» набирается 158, и на этой разнице строка
+      // добавления разъезжалась со строками категорий: цвет, название и знак
+      // стояли не под теми же колонками. Полное «Добавить категорию» осталось
+      // подсказкой и именем для экранного диктора: заголовок раздела над
+      // строкой и так говорит «Добавить», а что именно — видно по самой
+      // строке, где стоят цвет, название категории и её знак.
+      uiButton(strings.dictionary.add, {
+        class: "ui-btn ui-btn--accent dict__addCategory",
+        title: strings.dictionary.addCategory,
+        attrs: { "aria-label": strings.dictionary.addCategory },
+        on: { click: add },
+      }),
     ]);
   }
 

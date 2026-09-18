@@ -7,7 +7,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { addCategory, addType, createProject, styleOf, typeKindOf } from "../src/model.js";
-import { typesAddDraft, typesDraftKind, typesDraftSign, typesDraftStyle } from "../src/panels/types.js";
+import {
+  typesAddDraft,
+  typesAddErrorField,
+  typesDraftKind,
+  typesDraftSign,
+  typesDraftStyle,
+} from "../src/panels/types.js";
 
 // Объект с двумя категориями: у одной свой знак и своё начертание, у другой —
 // другие. Наследование должно ходить за категорией, а не за первой попавшейся.
@@ -111,4 +117,49 @@ test("черновик неизменяем, а чужой вид его не п
     shape: "circle",
     lineStyle: "solid",
   });
+});
+
+// Отказ модели строку добавления больше не перерисовывает: набранное остаётся
+// на месте, а курсор идёт в то поле, которое не приняли. Разводит их `error.code`
+// — здесь проверяется, что коды, которые модель и правда бросает, доходят до
+// своего поля, а не теряются по дороге.
+test("отказ добавления называет поле, которое править", () => {
+  const { project, light } = objectWithCategories();
+  const withType = addType(project, { code: "В", name: "Выключатель", categoryId: light.id }).project;
+
+  const refusal = (patch) => {
+    try {
+      addType(withType, { code: "Св", name: "Светильник", categoryId: light.id, ...patch });
+    } catch (error) {
+      return { code: error.code, field: typesAddErrorField(error.code) };
+    }
+    return null;
+  };
+
+  assert.deepEqual(refusal({ code: "В" }), { code: "codeTaken", field: "code" });
+  assert.deepEqual(refusal({ code: "в" }), { code: "codeTaken", field: "code" });
+  assert.deepEqual(refusal({ code: "" }), { code: "codeRequired", field: "code" });
+  assert.deepEqual(refusal({ code: "  " }), { code: "codeRequired", field: "code" });
+  assert.deepEqual(refusal({ code: "В1" }), { code: "codeLetters", field: "code" });
+  assert.deepEqual(refusal({ code: "Выключательподсветки" }), { code: "codeTooLong", field: "code" });
+  assert.deepEqual(refusal({ name: "" }), { code: "nameRequired", field: "name" });
+
+  // Чужой код поля не назначает: подсвечивать нечего, а ошибку человек всё
+  // равно прочтёт уведомлением.
+  assert.equal(typesAddErrorField("categoryNotFound"), null);
+  assert.equal(typesAddErrorField(undefined), null);
+});
+
+// Главное в отказе — не подсветка, а то, что перерисовывать нечего: объект
+// после неудачной команды тот же самый, и строка вправе остаться с набранным.
+test("неудачное добавление не трогает объект", () => {
+  const { project, light } = objectWithCategories();
+  const withType = addType(project, { code: "В", name: "Выключатель", categoryId: light.id }).project;
+
+  assert.throws(() => addType(withType, { code: "В", name: "Второй", categoryId: light.id }));
+  assert.equal(withType.markTypes.length, 1);
+  assert.deepEqual(
+    withType.markTypes.map((type) => type.code),
+    ["В"],
+  );
 });
