@@ -771,6 +771,10 @@
   --dict-gap: 6px;
   --dict-act: 36px;
   --dict-count: 28px;
+  /* Клетка знака: кнопка формы и кнопка начертания стоят в одной колонке и
+     потому одной ширины. Мерой, а не числом в трёх местах, — по ней считает
+     ширину и кнопка строки добавления категории. */
+  --dict-sign: 64px;
   /* Колонок в строке стало больше — значок, код, название, категория,
      переключатель вида, обозначение, счётчик и три кнопки, — и на общей мере
      диалогов название типа ужималось до «Точеч». Ширину задаёт справочник, а
@@ -863,9 +867,28 @@
   width: calc(var(--dict-count) + var(--dict-act) * 2 + var(--dict-gap) * 2);
 }
 
+/* То же самое для строки добавления категории, только хвост у строки категории
+   другой: начертание и корзина. Считается мерами, а не подбирается под подпись,
+   — поэтому подпись кнопки и укорочена до «Добавить»: «Добавить категорию»
+   набиралось 158 px при 106 доступных, и цвет с названием стояли не под теми
+   же колонками, что у строк категорий. */
+.dict__addCategory {
+  flex: none;
+  width: calc(var(--dict-sign) + var(--dict-gap) + var(--dict-act));
+}
+
 .dict__row .ui-input {
   flex: 1;
   min-width: 0;
+}
+
+/* Поле, которое модель не приняла: строка добавления остаётся с набранным, и
+   пометка говорит, что править. Снимается с первой буквой правки.
+   Рамки мало: курсор встаёт в это же поле, и родное кольцо фокуса рамку
+   перекрывает — поэтому ещё и подложка. */
+.dict__row .ui-input.is-wrong {
+  border-color: var(--danger);
+  background: rgba(209, 36, 47, 0.18);
 }
 
 /* Код типа — до шестнадцати букв (`CODE_MAX_LENGTH`), поэтому поле шире
@@ -1035,7 +1058,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
+  width: var(--dict-sign);
   height: 30px;
   padding: 0;
   border: 1px solid var(--panel-line);
@@ -1130,7 +1153,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
+  width: var(--dict-sign);
   height: 30px;
   padding: 0;
   border: 1px solid var(--panel-line);
@@ -4201,7 +4224,11 @@ const strings = {
     apply: "ОК",
     before: "Было",
     onPlan: "Так цвет ляжет на план: линия контура и заливка",
-    used: "цвет уже занят",
+    // Подпись цвета в окне и на кнопке: слово и код вместе — «Цвет категории:
+    // пурпурный (#E80098)». Имя считает `colorName.js`, а порядок слов и
+    // двоеточие живут здесь — правятся в одном месте на все подсказки.
+    named: "{label}: {color}",
+    taken: "{color} — цвет уже занят",
     red: "R",
     green: "G",
     blue: "B",
@@ -16563,6 +16590,7 @@ async function renderPlanImage(blob, transform) {
 
 
 
+
 const COLOR_FIELD_SIZE = { width: 232, height: 168 };
 const COLOR_HUE_HEIGHT = 18;
 // Шаг стрелок: мелкий для точной подгонки, крупный с Shift.
@@ -16574,6 +16602,29 @@ const COLOR_PLAN_ALPHA = 0.12;
 
 function colorHexOf(hsv) {
   return rgbToHex(hsvToRgb(hsv));
+}
+
+// Подсказка цвета — одним местом на всё окно и на кнопку. Голый hex человеку
+// не говорит ничего: «#164E63» узнаётся только сверкой кодов, а «тёмно-
+// бирюзовый» — с первого взгляда. Код при этом остаётся: по нему тот же цвет
+// ищут в другом окне и в таблице.
+//
+// Имя есть у любого цвета, включая заведённый пользователем (`colorName.js`),
+// но `colorNameHex` возвращает пустую строку на мусоре вместо кода — тогда
+// подсказка остаётся прежней подписью, а не превращается в «Цвет: ».
+function colorLabel(label, value) {
+  const named = colorNameHex(value);
+  if (!named) return label || "";
+  if (!label) return named;
+  return text("colorPicker.named", { label, color: named });
+}
+
+// Подсказка плитки палитры. Занятость дописывается к имени, а не заменяет его:
+// у занятого цвета человеку нужно и то и другое — как он называется и почему
+// он помечен. Поэтому и пометка здесь же, а не отдельной веткой у плитки.
+function colorSwatchTitle(color, busy) {
+  const named = colorLabel("", color);
+  return busy ? text("colorPicker.taken", { color: named }) : named;
 }
 
 // Поле насыщенности и яркости: заливка чистым оттенком, поверх — белый
@@ -16701,9 +16752,11 @@ function openColorPicker(options = {}) {
       },
     });
     const chip = uiEl("span", { class: "colorpick__chip" });
+    // «Было» называет прежний цвет словом: рядом с новым сразу видно, что
+    // меняешь, — а не два кружка, отличие которых надо угадывать.
     const chipBefore = uiEl("span", {
       class: "colorpick__chip colorpick__chip--before",
-      title: strings.colorPicker.before,
+      title: colorLabel(strings.colorPicker.before, before),
       attrs: { style: "background:" + before },
     });
     const value = uiEl("span", { class: "colorpick__value" });
@@ -16747,7 +16800,9 @@ function openColorPicker(options = {}) {
       colorDrawField(field, hsv);
       colorDrawHue(hue, hsv);
       chip.setAttribute("style", "background:" + color);
-      chip.title = color;
+      // Кружок нового цвета зовётся так же, как прежний, — иначе «Было»
+      // называлось бы словом, а «стало» оставалось кодом.
+      chip.title = colorLabel("", color);
       // Так цвет ляжет на белый план: линия контура и заливка помещения.
       onPlan.setAttribute(
         "style",
@@ -16782,11 +16837,13 @@ function openColorPicker(options = {}) {
 
     for (const color of ROOM_PALETTE) {
       const busy = colorTaken(color, taken);
+      // Плитка называется словом и кодом — и занятая тоже.
+      const hint = colorSwatchTitle(color, busy);
       const button = uiEl("button", {
         class: "colorpick__swatch" + (busy ? " is-used" : ""),
         type: "button",
-        title: busy ? color + " — " + strings.colorPicker.used : color,
-        attrs: { style: "background:" + color, "aria-label": color, "aria-pressed": "false" },
+        title: hint,
+        attrs: { style: "background:" + color, "aria-label": hint, "aria-pressed": "false" },
         on: { click: () => setColor(color) },
       });
       button.dataset.color = color;
@@ -16874,17 +16931,31 @@ function openColorPicker(options = {}) {
 
 // Кнопка цвета в строке справочника или помещения: показывает текущий цвет
 // и открывает окно выбора. Никаких `<input type="color">` в сборке больше нет.
+//
+// Подсказка называет не только назначение кнопки, но и сам цвет — «Цвет
+// категории: пурпурный (#E80098)»: цветного квадратика хватает, чтобы отличить
+// две строки друг от друга, и не хватает, чтобы назвать цвет вслух или найти
+// тот же в другом окне. Кнопка от этого не растёт: подсказка живёт в `title`,
+// а ширину квадратику задаёт CSS.
 function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
+  const label = title || strings.colorPicker.title;
+  let color = value;
+  const hint = () => colorLabel(label, color);
   const button = uiEl("button", {
     class: "colorpick__button",
     type: "button",
-    title: title || strings.colorPicker.title,
-    attrs: { style: "background:" + (value || COLOR_FALLBACK), "aria-label": title || strings.colorPicker.title },
+    title: hint(),
+    attrs: { style: "background:" + (color || COLOR_FALLBACK), "aria-label": hint() },
     on: {
       click: async () => {
-        const picked = await openColorPicker({ color: value, used, title: dialogTitle || title });
+        const picked = await openColorPicker({ color, used, title: dialogTitle || title });
         if (!picked) return;
+        color = picked;
         button.setAttribute("style", "background:" + picked);
+        // Имя в подсказке держится выбранного цвета: кнопку после выбора никто
+        // не перестраивает, и без этой строки она называла бы прежний.
+        button.title = hint();
+        button.setAttribute("aria-label", button.title);
         onPick(picked);
       },
     },
@@ -18528,6 +18599,22 @@ function typesAddDraft(categoryId = "") {
   return { categoryId, kind: MARK_KINDS[0], shape: null, lineStyle: null };
 }
 
+// Какое поле строки добавления модель не приняла. Отказ строку больше не
+// перерисовывает — набранное остаётся, — и вместо пустой строки пользователю
+// нужно показать место правки: коды ловит `normalizeCode`, пустое название —
+// `normalizeName`, и `error.code` разводит их. Незнакомый код — ничей: строка
+// всё равно цела, а ошибка названа уведомлением.
+const TYPES_ADD_ERROR_FIELDS = {
+  codeRequired: "code",
+  codeTooLong: "code",
+  codeLetters: "code",
+  codeTaken: "code",
+  nameRequired: "name",
+};
+function typesAddErrorField(code) {
+  return TYPES_ADD_ERROR_FIELDS[code] || null;
+}
+
 // Смена вида ничего не стирает: знаки двух видов лежат в черновике порознь,
 // и вернувшийся к «Точке» получает обратно свою фигуру. Так же устроен и
 // заведённый тип — `updateType({kind})` не трогает ни `shape`, ни `lineStyle`;
@@ -18798,6 +18885,29 @@ function openTypesDictionary(api) {
     }
   }
 
+  // Команда строки добавления. От `commit` отличается одним: неудача не зовёт
+  // `render()`. Пользователь набрал код, название, выбрал вид и знак, нажал
+  // «Добавить», получил «Код В уже занят» — и вся строка перерисовывалась
+  // пустой. Править нужно один код, а набирать приходилось всё заново.
+  //
+  // Перерисовывать после отказа и нечего: объект не менялся, а строка держит
+  // только черновик. Взамен ошибка называется вслух и курсор встаёт в то поле,
+  // которое модель не приняла (`typesAddErrorField`).
+  function commitDraft(build, label, fields = {}) {
+    for (const input of Object.values(fields)) input.classList.remove("is-wrong");
+    try {
+      canvasCommit(project(), build(project()), label);
+    } catch (error) {
+      api.notify(error && error.message ? error.message : String(error), "error");
+      const input = fields[typesAddErrorField(error && error.code)];
+      if (input) {
+        input.classList.add("is-wrong");
+        input.focus();
+        input.select();
+      }
+    }
+  }
+
   function categorySelect(value, onPick) {
     const select = uiEl("select", {
       class: "ui-select",
@@ -18951,8 +19061,11 @@ function openTypesDictionary(api) {
 
   function categoryRow(category) {
     const types = project().markTypes.filter((type) => type.categoryId === category.id).length;
+    // Корзина идёт общей мерой конца строки (`dict__act`), как у строки типа:
+    // по ширине глифа хвост строки был несчитаемым, и строке добавления не с
+    // чем было равняться.
     const removeButton = uiIconButton("trash", {
-      class: "ui-btn ui-btn--danger",
+      class: "ui-btn ui-btn--danger dict__act",
       title: types > 0 ? strings.errors.categoryHasTypes : strings.dictionary.removeCategory,
       on: { click: () => removeCategory(category) },
     });
@@ -19043,11 +19156,15 @@ function openTypesDictionary(api) {
       type: "text",
       placeholder: strings.dictionary.codePlaceholder,
       attrs: { maxlength: String(CODE_MAX_LENGTH) },
+      // Пометка «это поле не приняли» снимается с первой буквой правки:
+      // красная рамка над полем, которое уже исправляют, врёт.
+      on: { input: () => code.classList.remove("is-wrong") },
     });
     const name = uiEl("input", {
       class: "ui-input",
       type: "text",
       placeholder: strings.dictionary.typeNamePlaceholder,
+      on: { input: () => name.classList.remove("is-wrong") },
     });
     let draft = typesAddDraft(project().categories.length > 0 ? project().categories[0].id : "");
     const category = () => findCategory(project(), draft.categoryId);
@@ -19112,11 +19229,13 @@ function openTypesDictionary(api) {
 
     // Черновик отдаётся модели как есть: вид и знак приезжают с типом сразу,
     // без второго захода. Сбрасывать строку руками не нужно — после команды
-    // справочник перерисовывается подпиской и строит её заново.
+    // справочник перерисовывается подпиской и строит её заново; после отказа
+    // (`commitDraft`) строка остаётся с набранным.
     const add = () =>
-      commit(
+      commitDraft(
         (current) => addType(current, { ...draft, code: code.value, name: name.value }).project,
         strings.history.addType,
+        { code, name },
       );
     return uiEl("div", { class: "dict__row dict__row--add" }, [
       badge,
@@ -19156,6 +19275,7 @@ function openTypesDictionary(api) {
       class: "ui-input",
       type: "text",
       placeholder: strings.dictionary.categoryNamePlaceholder,
+      on: { input: () => name.classList.remove("is-wrong") },
     });
     // Цвет новой категории — незанятый цвет палитры: метки новой категории
     // должны быть видны отдельно и от соседних меток, и от заливки помещений.
@@ -19180,16 +19300,32 @@ function openTypesDictionary(api) {
         shapeButton.replaceChildren(shapeIcon(shape, color, 26));
       },
     });
+    // Пустое название теряться тоже не должно — правило то же, что у строки
+    // добавления типа.
     const add = () =>
-      commit(
+      commitDraft(
         (current) => addCategory(current, { name: name.value, color, shape }).project,
         strings.history.addCategory,
+        { name },
       );
     return uiEl("div", { class: "dict__row dict__row--add" }, [
       colorButton,
       name,
       shapeButton,
-      uiButton(strings.dictionary.addCategory, { class: "ui-btn ui-btn--accent", on: { click: add } }),
+      // Подпись кнопки короткая, и это не экономия слов. Кнопка занимает
+      // хвост строки категории — начертание и корзину, — а он считается в
+      // 106 px; «Добавить категорию» набирается 158, и на этой разнице строка
+      // добавления разъезжалась со строками категорий: цвет, название и знак
+      // стояли не под теми же колонками. Полное «Добавить категорию» осталось
+      // подсказкой и именем для экранного диктора: заголовок раздела над
+      // строкой и так говорит «Добавить», а что именно — видно по самой
+      // строке, где стоят цвет, название категории и её знак.
+      uiButton(strings.dictionary.add, {
+        class: "ui-btn ui-btn--accent dict__addCategory",
+        title: strings.dictionary.addCategory,
+        attrs: { "aria-label": strings.dictionary.addCategory },
+        on: { click: add },
+      }),
     ]);
   }
 
