@@ -7,15 +7,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  acceptProblem,
   addMark,
   addRoom,
   addScheme,
   closeTypeKindReview,
+  compactAllNumbers,
   createProject,
   migrateTypeKinds,
   setMarkNumber,
+  unacceptProblem,
   updateMark,
   updateType,
+  validate,
 } from "../src/model.js";
 import { strings } from "../src/strings.js";
 import { WARNING_TARGETS, warningPlace, warningWhere, warningsModel } from "../src/panels/warnings.js";
@@ -47,8 +51,9 @@ test("чистый объект: смотреть нечего, и это вид
   assert.equal(model.total, 0);
   assert.equal(model.level, "ok");
   assert.deepEqual(model.groups, []);
+  assert.deepEqual(model.accepted, []);
   // Объекта нет вовсе — та же хорошая новость, а не поломка.
-  assert.deepEqual(warningsModel(null), { total: 0, level: "ok", groups: [] });
+  assert.deepEqual(warningsModel(null), { total: 0, level: "ok", groups: [], accepted: [] });
 });
 
 test("одинаковые предупреждения сворачиваются в строку со счётчиком", () => {
@@ -275,4 +280,102 @@ test("метка без помещения — это метка без ссыл
   const room = addRoom(box.project, { name: "Спальная" });
   const project = updateMark(room.project, box.lamps[0], { roomId: room.room.id }).project;
   assert.equal(warningsModel(project).total, 0);
+});
+
+// ——— «так и задумано» —————————————————————————————————————————————————
+//
+// Три светильника одной группы носят Т4 намеренно. Крестик в строке убирает
+// её из списка, ответ ложится в объект, а внизу панели остаётся строка
+// «Принято: N», из которой принятое возвращается в работу.
+
+function withRepeat() {
+  const box = house();
+  // Т1 Т1 Т1: повтор номера, тот самый приём заказчика.
+  let project = setMarkNumber(box.project, box.lamps[1], 1).project;
+  project = setMarkNumber(project, box.lamps[2], 1).project;
+  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  return { ...box, project, problem };
+}
+
+test("принятое уходит из списка, счётчик уменьшается, а строка «Принято» остаётся", () => {
+  const box = withRepeat();
+  const before = warningsModel(box.project);
+  assert.equal(before.total, 1);
+  assert.equal(before.level, "warning");
+  // Строка знает свою проблему — ею и принимают: в ней ключ, вид и текст.
+  assert.equal(before.groups[0].items[0].problem.key, box.problem.key);
+
+  const accepted = acceptProblem(box.project, box.problem).project;
+  const after = warningsModel(accepted);
+  assert.equal(after.total, 0, "счётчик в шапке считает то, что ещё ждёт ответа");
+  assert.equal(after.level, "ok");
+  assert.deepEqual(after.groups, []);
+  assert.equal(after.accepted.length, 1);
+  assert.equal(after.accepted[0].label, "Т1 — таких меток 3");
+  assert.equal(after.accepted[0].level, "warning");
+
+  // Вернули в работу — предупреждение снова в списке, принятых нет.
+  const back = unacceptProblem(accepted, after.accepted[0].key).project;
+  assert.equal(warningsModel(back).total, 1);
+  assert.deepEqual(warningsModel(back).accepted, []);
+});
+
+test("принятое не возвращается, когда в группе становится ещё одна метка", () => {
+  const box = withRepeat();
+  const accepted = acceptProblem(box.project, box.problem).project;
+  // Четвёртый светильник той же группы: номер повторяется у четырёх меток —
+  // вопрос тот же, ответ на него уже дан.
+  const more = addMark(accepted, {
+    schemeId: box.schemeId,
+    typeId: box.idOf("Т"),
+    kind: "point",
+    points: [{ x: 0.8, y: 0.3 }],
+  });
+  const grown = setMarkNumber(more.project, more.mark.id, 1).project;
+  assert.equal(validate(grown).find((item) => item.code === "repeatedNumber").message, "Т1 — таких меток 4");
+  assert.equal(warningsModel(grown).total, 0, "четвёртая метка вернула закрытую строку");
+  assert.equal(warningsModel(grown).accepted.length, 1);
+});
+
+test("смыкание номеров не возвращает принятого", () => {
+  const box = withRepeat();
+  // Дыра в нумерации: Т2 удалён, смыкание сдвинет Т3 на Т2.
+  const other = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: box.idOf("Т"),
+    kind: "point",
+    points: [{ x: 0.9, y: 0.3 }],
+  });
+  const project = setMarkNumber(other.project, other.mark.id, 5).project;
+  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  const accepted = acceptProblem(project, problem).project;
+  assert.equal(warningsModel(accepted).total, 0);
+
+  const compacted = compactAllNumbers(accepted).project;
+  assert.equal(warningsModel(compacted).total, 0, "после смыкания тот же вопрос задан заново");
+  assert.equal(warningsModel(compacted).accepted.length, 1);
+});
+
+test("принятая ошибка видна в списке принятых отдельно от предупреждения", () => {
+  const box = withRepeat();
+  const broken = {
+    ...box.project,
+    marks: box.project.marks.map((mark) =>
+      mark.id === box.track ? { ...mark, roomId: "помещения-нет" } : mark,
+    ),
+  };
+  const error = validate(broken).find((item) => item.code === "markWithoutRoom");
+  let project = acceptProblem(broken, error).project;
+  project = acceptProblem(project, box.problem).project;
+
+  const model = warningsModel(project);
+  assert.equal(model.total, 0);
+  assert.deepEqual(
+    model.accepted.map((record) => [record.level, record.code]),
+    [
+      ["error", "markWithoutRoom"],
+      ["warning", "repeatedNumber"],
+    ],
+    "принятая ошибка обязана отличаться от принятого предупреждения",
+  );
 });

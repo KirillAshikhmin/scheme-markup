@@ -665,6 +665,12 @@ export function createProject(template) {
     // и `placementsOf`, поэтому пустых полей здесь достаточно.
     equipment: [],
     placements: [],
+    // Принятые предупреждения — ответы «так и задумано». Ответ живёт в объекте
+    // и уезжает вместе с файлом, а не в настройках браузера: файл открывают на
+    // другой машине и вторым человеком. Список читают через
+    // `acceptedProblems`, поэтому объект прежнего формата без него открывается
+    // как раньше.
+    accepted: [],
     counters: {},
     view: { ...DEFAULT_VIEW, ...(source.view || {}) },
   };
@@ -1428,7 +1434,14 @@ export function compactNumbers(project, typeId) {
     numbers.has(mark.id) ? { ...mark, number: numbers.get(mark.id) } : mark,
   );
   const counters = { ...project.counters, [type.code]: renumbered.size };
-  return { changes, project: withProject(project, { marks, counters }) };
+  // Принятое «так и задумано» переезжает на новый номер здесь же: ответ на
+  // «Т4 повторяется намеренно» обязан пережить смыкание, иначе он повиснет на
+  // номере, которого больше нет, а на Т2 тот же вопрос задастся заново. Одна
+  // операция — один шаг истории: отмена возвращает и номера, и принятия.
+  const accepted = renumberAccepted(project, typeId, type.code, renumbered);
+  const patch = { marks, counters };
+  if (accepted) patch.accepted = accepted;
+  return { changes, project: withProject(project, patch) };
 }
 
 /**
@@ -2526,8 +2539,18 @@ function dropPlacements(project, removed) {
 // название помещения у контура, подпись блока у группы. Три одинаковые строки
 // «метка ссылается на несуществующее помещение» в списке предупреждений
 // неразличимы, и посмотреть, о какой из них речь, можно было только кликом.
-function problem(code, vars, ref, kind) {
-  return { code, message: text("problems." + code, vars), ref: ref || null, kind: kind || "error" };
+function problem(code, vars, ref, kind, subject) {
+  return {
+    code,
+    message: text("problems." + code, vars),
+    ref: ref || null,
+    kind: kind || "error",
+    // Ключ принятия: код проблемы и то, о чём она. По умолчанию это `ref` —
+    // метка, тип, контур; там, где `ref` только представитель набора,
+    // подставляется свой устойчивый признак (`subject`). От ключа зависит,
+    // вернётся ли принятое, когда набор под ним изменится.
+    key: code + ":" + (subject || ref || ""),
+  };
 }
 
 // Чем назвать виновника, у которого нет своего обозначения: метка без типа
@@ -2594,7 +2617,18 @@ export function validate(project) {
   // Повтор номера — приём заказчика, а не поломка: одно предупреждение на
   // обозначение, с числом меток, чтобы случайный дубль было видно.
   for (const item of repeatedNumbers(project)) {
-    problems.push(problem("repeatedNumber", { label: item.label, count: item.count }, item.markIds[0], "warning"));
+    problems.push(
+      problem(
+        "repeatedNumber",
+        { label: item.label, count: item.count },
+        item.markIds[0],
+        "warning",
+        // Принимают не «вот эти три метки», а сам приём: тип и номер. Ключ по
+        // первой метке вернул бы уже принятое, стоило добавить к группе
+        // четвёртый светильник или убрать из неё первый.
+        item.typeId + "#" + item.number,
+      ),
+    );
   }
 
   for (const outline of outlinesOf(project)) {
@@ -2630,4 +2664,123 @@ export function validate(project) {
   }
 
   return problems;
+}
+
+// ——— принятые предупреждения ————————————————————————————————————————
+//
+// Повтор номера — приём заказчика: три светильника одной группы носят Т4
+// намеренно. Программа об этом знать не может и обязана спросить один раз, а
+// потом помнить ответ. Помнить — в самом объекте, как отметку `kindGuessed` у
+// типа: файл переезжает на другую машину и открывается вторым человеком из
+// общей папки, и ответ должен ехать вместе с ним.
+//
+// **Ключ принятия** — `problem.key`: код проблемы и то, о чём она. Он нарочно
+// не считает меток: принято «Т4 повторяется намеренно», а не «таких меток
+// три». Четвёртый светильник в группе не возвращает того, что пользователь уже
+// закрыл, — иначе крестик пришлось бы нажимать после каждой новой метки.
+// Возвращает предупреждение в работу только сам пользователь, строкой
+// «Принято: N».
+//
+// Номер в ключе — не вечная величина: смыкание номеров меняет Т4 на Т2, и
+// принятое переезжает вместе с обозначением (`renumberAccepted` зовётся прямо
+// из `compactNumbers`). Слова заказчика: «по метке, типо Т4 — корректно. Но
+// это тоже должно переживать уплотнение меток».
+//
+// Отсюда же цена решения: принятое молчит и тогда, когда повтор сложился
+// заново — тем же номером, но из других меток. Поэтому ни одна запись не
+// пропадает молча: весь список виден в панели, и каждую строку можно вернуть.
+
+function acceptedOf(project) {
+  return project && Array.isArray(project.accepted) ? project.accepted : [];
+}
+
+/**
+ * Принятые предупреждения в порядке принятия:
+ * `[{key, code, kind, label, at}]`. `label` — текст на момент принятия: это
+ * то, на что пользователь ответил «так и задумано», и показывать в списке
+ * принятых надо именно его, даже когда виновника уже нет.
+ */
+export function acceptedProblems(project) {
+  return acceptedOf(project).slice();
+}
+
+/** Принято ли предупреждение с таким ключом. */
+export function problemAccepted(project, key) {
+  if (!key) return false;
+  return acceptedOf(project).some((item) => item.key === key);
+}
+
+/**
+ * «Так и задумано»: предупреждение уходит из списка, ответ остаётся в объекте.
+ * Принимается и ошибка — объект принадлежит пользователю, — но её вид
+ * запоминается, чтобы в списке принятых порванную связь было видно.
+ * Принято повторно — возвращается **тот же** объект: ни второй записи, ни
+ * лишнего шага истории.
+ */
+export function acceptProblem(project, problem) {
+  if (!project || !problem || !problem.key) return { project };
+  if (problemAccepted(project, problem.key)) return { project };
+  const record = {
+    key: problem.key,
+    code: problem.code,
+    kind: problem.kind === "warning" ? "warning" : "error",
+    label: String(problem.message || ""),
+    at: nowIso(),
+  };
+  return { project: withProject(project, { accepted: [...acceptedOf(project), record] }) };
+}
+
+/**
+ * Вернуть принятое в работу: запись уходит, и предупреждение снова считается —
+ * если оно всё ещё есть. Нечего возвращать — тот же объект.
+ */
+export function unacceptProblem(project, key) {
+  if (!project) return { project };
+  const list = acceptedOf(project);
+  const next = list.filter((item) => item.key !== key);
+  if (next.length === list.length) return { project };
+  return { project: withProject(project, { accepted: next }) };
+}
+
+/**
+ * Перенос принятого на новые номера. Смыкание меняет Т4 на Т2, и ответ «так и
+ * задумано» обязан переехать вместе с обозначением: иначе он повиснет на
+ * номере, которого больше нет, а на новом номере тот же вопрос задастся
+ * заново — пользователь ответит дважды на одно и то же.
+ *
+ * Зовётся из `compactNumbers` по её же таблице замен, поэтому работает и для
+ * «у всех типов» (`compactAllNumbers` считает той же функцией), и в том же
+ * шаге истории: отмена смыкания возвращает и номера, и принятия.
+ *
+ * Номер, под которым меток уже нет, смыкание не переносит — переносить его
+ * некуда; такая запись остаётся в списке принятых и видна пользователю.
+ *
+ * Переносить нечего — `null`: объект прежнего формата не должен обзавестись
+ * пустым списком принятых только потому, что в нём сомкнули номера.
+ */
+function renumberAccepted(project, typeId, code, renumbered) {
+  const list = acceptedOf(project);
+  if (list.length === 0) return null;
+  const prefix = "repeatedNumber:" + typeId + "#";
+  let changed = false;
+  const next = list.map((record) => {
+    if (typeof record.key !== "string" || !record.key.startsWith(prefix)) return record;
+    const was = Number(record.key.slice(prefix.length));
+    const now = renumbered.get(was);
+    if (!now || now === was) return record;
+    changed = true;
+    return { ...record, key: prefix + now, label: relabelAccepted(record.label, code + was, code + now) };
+  });
+  return changed ? next : null;
+}
+
+// Обозначение в запомненном тексте: «Т4 — таких меток 3» после смыкания читается
+// как «Т2 — таких меток 3». Меняется только обозначение в начале строки и только
+// целиком — «Т1» внутри «Т10» не тронется.
+function relabelAccepted(label, from, to) {
+  const value = String(label == null ? "" : label);
+  if (!value.startsWith(from)) return value;
+  const rest = value.slice(from.length);
+  if (/^\d/.test(rest)) return value;
+  return to + rest;
 }

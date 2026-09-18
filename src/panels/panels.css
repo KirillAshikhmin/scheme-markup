@@ -670,6 +670,60 @@
   margin: 4px 6px 8px;
 }
 
+/* Строка и её крестик стоят в ряд: строка тянется, крестик держит правый край.
+   Кнопка в кнопке разметкой не бывает — поэтому обёртка, а не вложение. */
+.warnings__line {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.warnings__line .warnings__row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Крестик «так и задумано» и стрелка возврата: рисунок без рамки и подложки,
+   приглушённый, пока до строки не дошли. Кнопка-значок в строке списка с
+   рамкой выглядит главнее самой строки, а главная здесь строка. */
+.warnings__accept,
+.warnings__return {
+  flex: none;
+  align-self: center;
+  padding: 4px;
+  border-color: transparent;
+  background: none;
+  color: var(--panel-muted);
+}
+
+.warnings__accept:hover:not(:disabled),
+.warnings__accept:focus-visible,
+.warnings__return:hover:not(:disabled),
+.warnings__return:focus-visible {
+  border-color: var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+}
+
+.warnings__accept .ui-icon,
+.warnings__return .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Строка принятого: тот же вид, что у предупреждения, но вести по ней некуда —
+   это запись ответа, а не строка списка. Подсветки под курсором у неё нет:
+   она обещала бы переход, которого не будет. */
+.warnings__row--done,
+.warnings__row--done:hover {
+  cursor: default;
+  background: none;
+}
+
+.warnings__dot--accepted {
+  background: var(--panel-muted);
+}
+
 .warnings__foot {
   display: flex;
   justify-content: flex-end;

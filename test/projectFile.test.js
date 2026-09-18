@@ -13,7 +13,18 @@ import {
   projectFileName,
   FORMAT_VERSION,
 } from "../src/projectFile.js";
-import { createProject, addScheme, addMark, addRoom, updateMark } from "../src/model.js";
+import {
+  acceptProblem,
+  acceptedProblems,
+  createProject,
+  addScheme,
+  addMark,
+  addRoom,
+  updateMark,
+  problemAccepted,
+  setMarkNumber,
+  validate,
+} from "../src/model.js";
 
 // ——— вспомогательное ————————————————————————————————————————————————
 
@@ -553,4 +564,46 @@ test("сломанное сжатие не отдаёт битый архив н
   } finally {
     globalThis.CompressionStream = saved;
   }
+});
+
+// ——— принятые предупреждения едут с файлом ————————————————————————————
+//
+// Ответ «так и задумано» живёт в объекте, а не в настройках браузера: файл
+// открывают на другой машине и вторым человеком из общей папки.
+
+test("принятое предупреждение переезжает вместе с файлом", async () => {
+  let project = createProject();
+  project = addScheme(project, { name: "1 этаж", imageId: "img-1", width: 1000, height: 600 }).project;
+  const schemeId = project.schemes[0].id;
+  const typeId = project.markTypes.find((type) => type.code === "Т").id;
+  const ids = [];
+  for (const at of [0.2, 0.4, 0.6]) {
+    const added = addMark(project, { schemeId, typeId, kind: "point", points: [{ x: at, y: 0.3 }] });
+    project = added.project;
+    ids.push(added.mark.id);
+  }
+  project = setMarkNumber(project, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project;
+
+  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  project = acceptProblem(project, problem).project;
+
+  const file = await packProject(project, new Map([["img-1", fakePng(5, 700)]]));
+  const restored = await unpackProject(file);
+  assert.deepEqual(acceptedProblems(restored.project), acceptedProblems(project));
+  assert.equal(problemAccepted(restored.project, problem.key), true);
+  // Ключ считается по типу и номеру, а они пережили упаковку без правок.
+  assert.equal(validate(restored.project).find((item) => item.code === "repeatedNumber").key, problem.key);
+});
+
+// G68: файл, сделанный до этого таска, списка принятых не знает — открывается
+// он как раньше, и пустого поля у него не появляется.
+test("файл без списка принятых открывается как раньше", async () => {
+  const project = sampleProject();
+  const old = { ...project };
+  delete old.accepted;
+  const restored = await unpackProject(await packProject(old, sampleImages()));
+  assert.equal(restored.project.accepted, undefined);
+  assert.deepEqual(acceptedProblems(restored.project), []);
+  assert.equal(restored.project.marks.length, project.marks.length);
 });

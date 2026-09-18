@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  acceptProblem,
+  acceptedProblems,
   addCategory,
   BLOCK_STEP_PX,
   CODE_MAX_LENGTH,
@@ -35,6 +37,7 @@ import {
   markControls,
   labelOf,
   markByCode,
+  problemAccepted,
   repeatedNumbers,
   setMarkControls,
   setMarkNumber,
@@ -45,6 +48,7 @@ import {
   updateMark,
   updateProject,
   updateRoom,
+  unacceptProblem,
   updateScheme,
   updateType,
   validate,
@@ -1558,4 +1562,168 @@ test("сантехника доезжает до прежнего объекта
     result.project.markTypes.slice(0, older.markTypes.length).map((type) => type.code),
     older.markTypes.map((type) => type.code),
   );
+});
+
+// ——— принятые предупреждения ————————————————————————————————————————
+//
+// «Повтор номера это не предупреждение тут, а специально сделано» — слова
+// заказчика. Ответ на такое живёт в объекте, а ключ ответа выбран так, чтобы
+// четвёртая метка в группе не вернула уже закрытую строку.
+
+test("ключ принятия у повтора номера — тип и номер, а не первая метка", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 4);
+  let project = setMarkNumber(filled, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project; // Т1 Т1 Т1 Т4
+
+  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  assert.equal(problem.key, "repeatedNumber:" + typeId(project, "Т") + "#1");
+  // Ссылка на виновника — по-прежнему метка: по ней панель ведёт на план.
+  assert.equal(problem.ref, ids[0]);
+
+  // Четвёртый светильник в той же группе: меток стало больше, ключ тот же.
+  const more = setMarkNumber(project, ids[3], 1).project;
+  const grown = validate(more).find((item) => item.code === "repeatedNumber");
+  assert.equal(grown.message, "Т1 — таких меток 4");
+  assert.equal(grown.key, problem.key);
+
+  // Первую метку убрали — ключ и это переживает: принимали приём, а не метку.
+  const shorter = deleteMark(more, ids[0]).project;
+  assert.equal(validate(shorter).find((item) => item.code === "repeatedNumber").key, problem.key);
+
+  // Другой номер того же типа — другое предупреждение и другой ключ.
+  let other = setMarkNumber(shorter, ids[1], 7).project;
+  other = setMarkNumber(other, ids[2], 7).project;
+  assert.notEqual(validate(other).find((item) => item.code === "repeatedNumber").key, problem.key);
+});
+
+test("принятое предупреждение помнится в объекте и возвращается в работу", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 3);
+  let project = setMarkNumber(filled, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project;
+
+  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  assert.equal(problemAccepted(project, problem.key), false);
+
+  const accepted = acceptProblem(project, problem).project;
+  assert.equal(problemAccepted(accepted, problem.key), true);
+  const records = acceptedProblems(accepted);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].key, problem.key);
+  assert.equal(records[0].code, "repeatedNumber");
+  assert.equal(records[0].kind, "warning");
+  // Текст запоминается тот, который пользователь видел, когда отвечал.
+  assert.equal(records[0].label, "Т1 — таких меток 3");
+  assert.ok(records[0].at);
+  // Сам объект не тронут: принятие ничего не чинит и меток не правит.
+  assert.deepEqual(accepted.marks, project.marks);
+  // `validate` осталась таблицей правил: она по-прежнему называет повтор,
+  // а прячет его панель — по ключу.
+  assert.ok(validate(accepted).some((item) => item.key === problem.key));
+
+  // Принято повторно — тот же объект: ни второй записи, ни лишнего шага истории.
+  assert.equal(acceptProblem(accepted, problem).project, accepted);
+  assert.equal(acceptProblem(accepted, { code: "repeatedNumber" }).project, accepted);
+
+  // Вернули в работу — записи нет.
+  const back = unacceptProblem(accepted, problem.key).project;
+  assert.deepEqual(acceptedProblems(back), []);
+  assert.equal(problemAccepted(back, problem.key), false);
+  // Возвращать нечего — тот же объект.
+  assert.equal(unacceptProblem(back, problem.key).project, back);
+  assert.equal(unacceptProblem(back, "нет-такого-ключа").project, back);
+});
+
+test("принять можно и ошибку, но вид ответа запоминается", () => {
+  const { project: base, first } = projectWithSchemes();
+  const step = putPoint(base, first.id, "Т");
+  const broken = {
+    ...step.project,
+    marks: step.project.marks.map((mark) => ({ ...mark, roomId: "помещения-нет" })),
+  };
+  const problem = validate(broken).find((item) => item.code === "markWithoutRoom");
+  const accepted = acceptProblem(broken, problem).project;
+  assert.equal(acceptedProblems(accepted)[0].kind, "error");
+  assert.equal(acceptedProblems(accepted)[0].key, "markWithoutRoom:" + step.mark.id);
+});
+
+// G97, слова заказчика: «по метке, типо Т4 — корректно. Но это тоже должно
+// переживать уплотнение меток». Смыкание меняет Т4 на Т2 — принятое обязано
+// переехать вместе с обозначением, иначе тот же вопрос задастся заново.
+function houseWithAcceptedRepeat() {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 5);
+  // Т4 Т4 Т4 плюс дыры до них: удаляем первые две метки и повторяем номер.
+  let project = setMarkNumber(filled, ids[3], 4).project;
+  project = setMarkNumber(project, ids[4], 4).project;
+  project = deleteMark(project, ids[0]).project;
+  project = deleteMark(project, ids[1]).project; // Т3 Т4 Т4 → после смыкания Т1 Т2 Т2
+  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  assert.equal(problem.message, "Т4 — таких меток 2");
+  return { project: acceptProblem(project, problem).project, problem, ids };
+}
+
+test("смыкание номеров переносит принятое на новый номер", () => {
+  const { project, problem } = houseWithAcceptedRepeat();
+  const code = typeId(project, "Т");
+
+  const compacted = compactNumbers(project, code).project;
+  assert.deepEqual(validate(compacted).map((item) => item.message), ["Т2 — таких меток 2"]);
+  const records = acceptedProblems(compacted);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].key, "repeatedNumber:" + code + "#2");
+  // Запомненный текст читается по новому обозначению, а не по исчезнувшему.
+  assert.equal(records[0].label, "Т2 — таких меток 2");
+  // Принято по-прежнему то же самое: повтор после смыкания не всплывает заново.
+  assert.equal(problemAccepted(compacted, validate(compacted)[0].key), true);
+  assert.equal(problemAccepted(compacted, problem.key), false, "старый ключ не остаётся висеть");
+
+  // Отмена смыкания — это прежний объект целиком: в нём и номера, и принятия
+  // те, что были. Ctrl+Z возвращает его одним шагом.
+  assert.equal(acceptedProblems(project)[0].key, problem.key);
+  assert.deepEqual(validate(project).map((item) => item.message), ["Т4 — таких меток 2"]);
+});
+
+test("смыкание по всем типам переносит принятое так же", () => {
+  const { project, problem } = houseWithAcceptedRepeat();
+  const code = typeId(project, "Т");
+
+  const result = compactAllNumbers(project);
+  assert.ok(result.changes > 0);
+  assert.deepEqual(validate(result.project).map((item) => item.message), ["Т2 — таких меток 2"]);
+  assert.equal(problemAccepted(result.project, "repeatedNumber:" + code + "#2"), true);
+  assert.equal(problemAccepted(result.project, problem.key), false);
+});
+
+test("смыкание чужого типа принятого не трогает", () => {
+  const { project } = houseWithAcceptedRepeat();
+  const before = acceptedProblems(project);
+  const other = compactNumbers(project, typeId(project, "В")).project;
+  assert.deepEqual(acceptedProblems(other), before);
+});
+
+// G68: старый объект открывается как раньше. Списка принятых в нём нет вовсе —
+// и это не ошибка, а обычный объект, размеченный до этого таска.
+test("объект без списка принятых открывается как раньше", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 2);
+  const project = setMarkNumber(filled, ids[1], 1).project;
+  const old = { ...project };
+  delete old.accepted;
+
+  assert.deepEqual(acceptedProblems(old), []);
+  assert.equal(problemAccepted(old, "repeatedNumber:что-угодно"), false);
+  assert.deepEqual(validate(old).map((item) => item.code), validate(project).map((item) => item.code));
+  // Смыкание такого объекта — как раньше: переносить нечего, поля не заводится.
+  const compacted = compactNumbers(old, typeId(old, "Т")).project;
+  assert.equal(compacted.accepted, undefined);
+  assert.deepEqual(acceptedProblems(compacted), []);
+
+  // Первое же принятие заводит список, и остальное в объекте не меняется.
+  const problem = validate(old).find((item) => item.code === "repeatedNumber");
+  const accepted = acceptProblem(old, problem).project;
+  assert.equal(acceptedProblems(accepted).length, 1);
+  assert.deepEqual(accepted.marks, old.marks);
+  assert.deepEqual(accepted.counters, old.counters);
 });

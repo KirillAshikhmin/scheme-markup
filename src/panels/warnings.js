@@ -6,6 +6,12 @@
 // показывает и приводит к виновнику на плане — но не правит: решение за
 // пользователем, и «починить всё» здесь нет и не будет.
 //
+// Строку можно закрыть крестиком «так и задумано»: повтор номера бывает
+// приёмом, и программа обязана запомнить ответ. Запоминает его модель —
+// `acceptProblem` кладёт запись в сам объект, а не в настройки браузера, —
+// панель только показывает крестик и строку «Принято: N», из которой принятое
+// возвращается в работу.
+//
 // Здесь же живут вопросы о виде типа, которые до этого задавало модальное
 // окно при открытии объекта (таск 46). На слабо размеченном объекте это была
 // простыня на полтора десятка строк поверх плана; строкой панели тот же вопрос
@@ -13,6 +19,8 @@
 // (`type.kindGuessed`), так и осталась: она уезжает вместе с файлом.
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import {
+  acceptProblem,
+  acceptedProblems,
   closeTypeKindReview,
   findGroup,
   findMark,
@@ -21,8 +29,10 @@ import {
   findRoom,
   findScheme,
   findType,
+  problemAccepted,
   typeKindOf,
   typeKindReview,
+  unacceptProblem,
   updateType,
   validate,
 } from "../model.js";
@@ -136,12 +146,20 @@ export function warningWhere(project, place) {
  * строке на случай. Чистая функция от объекта — её и считает панель, один раз
  * на правку объекта, а не на кадр отрисовки.
  *
- * `{ total, level, groups: [{ key, code, level, title, count, items }] }`
+ * `{ total, level, groups: [{ key, code, level, title, count, items }], accepted }`
+ *
+ * Принятое («так и задумано») в группы не попадает и в `total` не считается:
+ * счётчик в шапке показывает то, что ещё ждёт ответа. Сами ответы — списком
+ * `accepted`, из него их и возвращают в работу.
  */
 export function warningsModel(project) {
-  if (!project) return { total: 0, level: "ok", groups: [] };
+  if (!project) return { total: 0, level: "ok", groups: [], accepted: [] };
   const byCode = new Map();
   for (const problem of validate(project)) {
+    // Принятое не показывается вовсе — и не пересчитывается заново: ключ
+    // принятия нарочно не знает, сколько меток под предупреждением, иначе
+    // четвёртый светильник в группе вернул бы уже закрытую строку.
+    if (problemAccepted(project, problem.key)) continue;
     const level = problem.kind === "warning" ? "warning" : "error";
     const key = level + ":" + problem.code;
     if (!byCode.has(key)) byCode.set(key, { key, code: problem.code, level, items: [] });
@@ -152,6 +170,9 @@ export function warningsModel(project) {
       code: problem.code,
       level,
       message: problem.message,
+      // Сама проблема — ею и принимают: в ней ключ, вид и текст, который
+      // пользователь видел, когда отвечал «так и задумано».
+      problem,
       place,
       where: warningWhere(project, place),
     });
@@ -189,7 +210,13 @@ export function warningsModel(project) {
   }
 
   const total = groups.reduce((sum, group) => sum + group.count, 0);
-  return { total, level: total === 0 ? "ok" : groups[0].level, groups };
+  // Принятые ошибки видно отдельно от принятых предупреждений: «принял и
+  // забыл» не должно навсегда спрятать порванную связь.
+  const accepted = acceptedProblems(project).map((record) => ({
+    ...record,
+    level: record.kind === "warning" ? "warning" : "error",
+  }));
+  return { total, level: total === 0 ? "ok" : groups[0].level, groups, accepted };
 }
 
 function mountWarningsPanel(host, api) {
@@ -273,6 +300,28 @@ function mountWarningsPanel(host, api) {
     }
   }
 
+  // ——— «так и задумано» ————————————————————————————————————————————————
+  //
+  // Принятие — правка объекта: `canvasCommit`, шаг истории, Ctrl+Z. Ответ
+  // ложится в сам объект и уезжает с файлом; в настройках браузера ему делать
+  // нечего — файл откроют на другой машине и вторым человеком.
+
+  function accept(problem) {
+    const project = getState().project;
+    if (!project) return;
+    const next = acceptProblem(project, problem).project;
+    if (next === project) return;
+    canvasCommit(project, next, strings.history.acceptProblem);
+  }
+
+  function unaccept(key) {
+    const project = getState().project;
+    if (!project) return;
+    const next = unacceptProblem(project, key).project;
+    if (next === project) return;
+    canvasCommit(project, next, strings.history.unacceptProblem);
+  }
+
   function dismissKinds() {
     const project = getState().project;
     if (!project) return;
@@ -306,7 +355,82 @@ function mountWarningsPanel(host, api) {
     );
     // Виновника уже нет — вести некуда, и обещать переход нечестно.
     row.disabled = !item.place;
-    return row;
+    // Крестик — второй кнопкой рядом, а не внутри строки: кнопка в кнопке
+    // разметкой не бывает, и клик по ней всё равно уходил бы в переход.
+    // Принять можно и то, к чему уже некуда вести: ответ о самой проблеме.
+    return uiEl("div", { class: "warnings__line" }, [
+      row,
+      uiIconButton("close", {
+        class: "ui-btn warnings__accept",
+        label: strings.warnings.accept,
+        title: strings.warnings.acceptHint,
+        on: { click: () => accept(item.problem) },
+      }),
+    ]);
+  }
+
+  // ——— принятое —————————————————————————————————————————————————————————
+
+  // Строка принятого: текст — тот, который пользователь видел, когда отвечал.
+  // Пересчитывать его нечем и незачем: виновника может уже не быть, а ответ
+  // всё равно остаётся ответом.
+  function acceptedRow(record) {
+    return uiEl("div", { class: "warnings__line" }, [
+      uiEl("div", { class: "warnings__row warnings__row--done warnings__row--" + record.level }, [
+        levelDot(record.level),
+        uiEl("span", { class: "warnings__text", text: record.label }),
+        // Принятая ошибка помечена словами: точка уровня красная, но «принял и
+        // забыл» не должно навсегда спрятать порванную связь.
+        record.level === "error"
+          ? uiEl("span", { class: "warnings__where", text: strings.warnings.acceptedError })
+          : null,
+      ]),
+      uiIconButton("undo", {
+        class: "ui-btn warnings__return",
+        label: strings.warnings.acceptedReturn,
+        title: strings.warnings.acceptedReturn,
+        on: { click: () => unaccept(record.key) },
+      }),
+    ]);
+  }
+
+  // Строка «Принято: N» внизу панели. Свёрнута по умолчанию и раскрывается,
+  // как группа предупреждений: без неё случайный крестик был бы необратим.
+  function acceptedNode() {
+    const key = "accepted";
+    const isOpen = expanded.has(key);
+    const body = uiEl("div", { class: "warnings__items" }, [
+      uiEl("p", { class: "warnings__why warnings__kindHint", text: strings.warnings.acceptedHint }),
+      ...model.accepted.map((record) => acceptedRow(record)),
+    ]);
+    body.hidden = !isOpen;
+    const chevron = uiIcon("chevron");
+    chevron.classList.add("warnings__chevron");
+    const head = uiEl(
+      "button",
+      {
+        class: "warnings__group warnings__row--accepted" + (isOpen ? " is-open" : ""),
+        type: "button",
+        title: isOpen ? strings.warnings.collapse : strings.warnings.expand,
+        attrs: { "aria-expanded": isOpen ? "true" : "false" },
+        on: {
+          click: () => {
+            if (expanded.has(key)) expanded.delete(key);
+            else expanded.add(key);
+            renderDrop();
+          },
+        },
+      },
+      [
+        levelDot("accepted"),
+        uiEl("span", {
+          class: "warnings__text",
+          text: text("warnings.acceptedGroup", { count: model.accepted.length }),
+        }),
+        chevron,
+      ],
+    );
+    return uiEl("div", { class: "warnings__section" }, [head, body]);
   }
 
   // Строка вопроса о виде: сам вопрос ведёт к меткам типа, переключатель
@@ -396,6 +520,9 @@ function mountWarningsPanel(host, api) {
   }
 
   function renderDropBody() {
+    // Принятое показывается и тогда, когда смотреть больше нечего: иначе
+    // ответы «так и задумано» стали бы невидимыми, а вернуть их было бы нечем.
+    const accepted = model.accepted.length > 0 ? acceptedNode() : null;
     if (model.total === 0) {
       const icon = uiIcon("ok");
       icon.classList.add("warnings__okIcon");
@@ -405,12 +532,14 @@ function mountWarningsPanel(host, api) {
           uiEl("p", { class: "warnings__okTitle", text: strings.warnings.okTitle }),
           uiEl("p", { class: "warnings__why", text: strings.warnings.okText }),
         ]),
+        ...(accepted ? [accepted] : []),
       );
       return;
     }
     drop.replaceChildren(
       uiEl("p", { class: "warnings__head", text: strings.warnings.title }),
       ...model.groups.map((group) => groupNode(group)),
+      ...(accepted ? [accepted] : []),
       uiEl("p", { class: "warnings__why warnings__hint", text: strings.warnings.hint }),
     );
   }
