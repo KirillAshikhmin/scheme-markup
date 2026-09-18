@@ -997,12 +997,31 @@ function canvasBlockPoint(markId, side) {
 // которые в этой же ломаной уже стоят: ровно под прежней вершиной через неё
 // видна пунктирная направляющая. Зажатый Alt рисует свободно: косые стены и
 // эркеры бывают, и выходить ради них из рисования нельзя.
-// Первая вершина не притягивается: тянуть её не от чего.
+
+/**
+ * Куда сядет вершина черновика — одной дверью на первую и на все следующие.
+ *
+ * Магнита угла у первой вершины и правда нет: тянуть её не от чего. Но
+ * направляющие пользователя к этому отношения не имеют — они нарисованы на
+ * плане до всякого черновика, и главный его приём начинается как раз с первой
+ * вершины: «6 вертикальных, 2 горизонтальных и на перекрестия ставишь точки».
+ * Пока пустой черновик выходил раньше, чем дело доходило до `draftSnap`,
+ * первая вершина садилась под сырой курсор — промах до порога перекрестия
+ * (13 px), и увидеть его было нечем: предпросмотра до первого клика нет.
+ *
+ * Разбирается всё это в `draftSnap`: без предыдущей вершины он применяет
+ * только направляющие и возвращает точку без угла. Чистая и вынесена наружу
+ * нарочно — что первая вершина идёт той же дверью, проверяется тестом.
+ */
+export function canvasDraftPoint(draft, cursor, scheme, view, options) {
+  const points = draft && Array.isArray(draft.points) ? draft.points : [];
+  return draftSnap(points, cursor, scheme, view, options);
+}
+
 function canvasDraftSnap(plan, free) {
-  if (!canvasDraft || canvasDraft.points.length === 0) return { point: plan, snapped: false, guides: [] };
   const state = canvasState();
   const scheme = canvasScheme(state);
-  return draftSnap(canvasDraft.points, plan, scheme, canvasViewOf(state), {
+  return canvasDraftPoint(canvasDraft, plan, scheme, canvasViewOf(state), {
     free: Boolean(free),
     planGuides: canvasSchemeGuides(state, scheme),
   });
@@ -1040,6 +1059,10 @@ function canvasOutlineClick(plan, screen, free) {
 function canvasDraftClick(plan, screen, free) {
   const state = canvasState();
   if (!canvasDraft) {
+    // Первая вершина садится на направляющие пользователя так же, как все
+    // следующие: перекрестия он ставил именно под неё. Ломаная и контур
+    // помещения начинаются здесь оба — значит и притяжка у них одна.
+    const start = canvasDraftSnap(plan, free);
     // Черновик помнит, чем его начали: ломаной линейного типа или контуром
     // помещения. По этой памяти его и заканчивают, когда режим или вид типа
     // сменились на ходу, — тип берётся тот, которым рисовали, а не тот,
@@ -1048,8 +1071,8 @@ function canvasDraftClick(plan, screen, free) {
       kind: state.mode === "room" ? "room" : "line",
       typeId: state.mode === "room" ? null : state.activeTypeId,
       projectId: state.project ? state.project.id : null,
-      points: [plan],
-      cursor: plan,
+      points: [start.point],
+      cursor: start.point,
       snapped: false,
       guides: [],
     };

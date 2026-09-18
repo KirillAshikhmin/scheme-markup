@@ -294,6 +294,7 @@ export const strings = {
     markField: "правка полей метки",
     markNumber: "правка номера метки",
     replaceImage: "замена плана",
+    editImage: "правка плана",
     compact: "уплотнение нумерации",
     compactAll: "смыкание номеров по всем типам",
     markRoom: "помещение метки",

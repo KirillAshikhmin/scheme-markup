@@ -10,6 +10,7 @@ import {
   replaceSchemeImage,
   schemesInOrder,
   updateMark,
+  updateOutline,
   updateScheme,
 } from "../model.js";
 import { canvasCommit } from "../canvas.js";
@@ -51,16 +52,51 @@ function planNameFromFile(file, project) {
 }
 
 // Метка держит доли плана: одно накопленное преобразование двигает и их,
-// иначе метки уедут с тех мест, куда их поставил инженер.
-function remapMarkForTransform(mark, transform) {
+// иначе метки уедут с тех мест, куда их поставил инженер. Контур помещения
+// устроен так же — точки в долях, смещение подписи в пикселях плана, — поэтому
+// пересчитывается он той же функцией.
+function remapForTransform(item, transform) {
   return {
-    points: transformMarkPoints(mark.points || [], transform),
-    labelOffset: mark.labelOffset ? transformOffset(mark.labelOffset, transform) : null,
+    points: transformMarkPoints(item.points || [], transform),
+    labelOffset: item.labelOffset ? transformOffset(item.labelOffset, transform) : null,
   };
 }
 
 function marksPushedOutside(marks, transform) {
   return marks.filter((mark) => countPointsOutside(mark.points || [], transform) > 0).length;
+}
+
+function outlinesOfScheme(project, schemeId) {
+  const list = project && Array.isArray(project.outlines) ? project.outlines : [];
+  return list.filter((outline) => outline.schemeId === schemeId);
+}
+
+/**
+ * Правка плана одним куском: новая подложка, её размер и пересчёт всего, что
+ * задано в координатах этого плана, — точки меток, смещения их подписей,
+ * контуры помещений и смещения подписей комнат. Контуры двигаются вместе с
+ * метками не для красоты: помещение метки подставляется по контуру на каждом
+ * шаге истории, и оставь контур лежать поперёк повёрнутых стен — половина
+ * меток молча уедет в чужие комнаты.
+ *
+ * Чистая и вынесена наружу нарочно: «до» и «после» одного и того же объекта —
+ * это и есть шаг отмены, и проверяется он тестом, без DOM и без хранилища.
+ * `pushed` — сколько меток рамка прижала к краю плана: их прежних мест не
+ * вернёт уже ничто, кроме отмены, и сказать об этом надо вслух.
+ */
+export function applyPlanEdit(project, schemeId, { imageId, width, height, transform } = {}) {
+  const marks = project.marks.filter((mark) => mark.schemeId === schemeId);
+  const pushed = marksPushedOutside(marks, transform);
+  let next = updateScheme(project, schemeId, { imageId, width, height }).project;
+  for (const mark of marks) {
+    const patch = remapForTransform(mark, transform);
+    next = updateMark(next, mark.id, patch.labelOffset ? patch : { points: patch.points }).project;
+  }
+  for (const outline of outlinesOfScheme(project, schemeId)) {
+    const patch = remapForTransform(outline, transform);
+    next = updateOutline(next, outline.id, patch.labelOffset ? patch : { points: patch.points }).project;
+  }
+  return { project: next, pushed };
 }
 
 // Диалог правки плана. Повороты и рамки копятся в одно преобразование и
@@ -357,9 +393,9 @@ function mountSchemesPanel(host, api) {
     notify(text("schemes.added", { name: added.scheme.name }), "success");
   }
 
-  // Правка уже загруженного плана: метки пересчитываются тем же преобразованием.
-  // Про метки, которые уедут за рамку, спрашиваем до применения — потом
-  // прежних мест уже не вернуть.
+  // Правка уже загруженного плана: метки и контуры пересчитываются тем же
+  // преобразованием. Про метки, которые уедут за рамку, спрашиваем до
+  // применения — рамка прижимает их к краю, и прежних мест в них не остаётся.
   async function editPlan(schemeId) {
     const project = getState().project;
     const scheme = findScheme(project, schemeId);
@@ -387,20 +423,31 @@ function mountSchemesPanel(host, api) {
     });
     if (!edited || isIdentityTransform(edited.transform)) return;
     const imageId = await putImage(edited.blob);
-    let next = updateScheme(getState().project, schemeId, {
-      imageId,
-      width: edited.width,
-      height: edited.height,
-    }).project;
-    const moved = next.marks.filter((mark) => mark.schemeId === schemeId);
-    const pushed = marksPushedOutside(moved, edited.transform);
-    for (const mark of moved) {
-      const patch = remapMarkForTransform(mark, edited.transform);
-      next = updateMark(next, mark.id, patch.labelOffset ? patch : { points: patch.points }).project;
+    const before = getState().project;
+    if (!findScheme(before, schemeId)) return;
+    let result;
+    try {
+      result = applyPlanEdit(before, schemeId, {
+        imageId,
+        width: edited.width,
+        height: edited.height,
+        transform: edited.transform,
+      });
+    } catch (error) {
+      notify(error.message, "error");
+      return;
     }
-    await deleteImage(scheme.imageId);
-    setState({ project: next, schemeImage: null });
-    notify(pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: pushed }), "success");
+    // Через canvasCommit — тем же способом, что и «Заменить план». Поворот и
+    // обрезка двигают координаты всех меток схемы разом: это самая
+    // разрушительная правка в сборке, и отменяться она обязана раньше любой
+    // другой. Прежняя картинка поэтому остаётся в хранилище: без неё отмена
+    // вернула бы координаты на план, которого уже нет. Уберёт её уборка при
+    // следующем запуске — тогда, когда отменять будет нечего.
+    canvasCommit(before, result.project, strings.history.editImage, { schemeId });
+    notify(
+      result.pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: result.pushed }),
+      "success",
+    );
   }
 
   // Замена подложки: картинка другая, разметка остаётся вся. Координаты — доли

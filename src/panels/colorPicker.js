@@ -61,6 +61,22 @@ export function colorSwatchTitle(color, busy) {
   return busy ? text("colorPicker.taken", { color: named }) : named;
 }
 
+// Единственная надпись окна, которую видно без наведения мыши. Раньше в ней
+// стоял голый hex, и имя цвета жило только в `title` — то есть у человека с
+// мышью в руке и нигде больше. Теперь она называет цвет словом и кодом сразу:
+// слово читается, код остаётся для того, кто ищет тот же цвет в другом окне.
+//
+// Ширина окна от длины имени не зависит — надпись стоит своей строкой под
+// кружками и растянута по колонке (`colorpick__value` в CSS). Иначе она
+// раздвигала бы окно на ходу: «красный» и «светло-фиолетовый (#B07AD1)»
+// отличаются вдвое, а курсор по цветовому полю ходит непрерывно.
+//
+// На мусоре вместо цвета остаётся сам код: пустая строка на этом месте
+// смотрелась бы поломкой окна, а не отсутствием имени.
+export function colorValueLabel(value) {
+  return colorNameHex(value) || String(value || "").trim();
+}
+
 // Поле насыщенности и яркости: заливка чистым оттенком, поверх — белый
 // градиент слева направо и чёрный сверху вниз. Кружок-курсор рисуется тем же
 // холстом: отдельный слой поверх canvas пришлось бы двигать вручную.
@@ -194,7 +210,7 @@ export function openColorPicker(options = {}) {
       title: colorLabel(strings.colorPicker.before, before),
       attrs: { style: "background:" + before },
     });
-    const value = uiEl("span", { class: "colorpick__value" });
+    const value = uiEl("p", { class: "colorpick__value" });
     const onPlan = uiEl("span", { class: "colorpick__plan", title: strings.colorPicker.onPlan });
     const swatches = uiEl("div", {
       class: "colorpick__palette",
@@ -243,7 +259,7 @@ export function openColorPicker(options = {}) {
         "style",
         "border-color:" + color + ";background:" + colorBlend(color, "#FFFFFF", COLOR_PLAN_ALPHA),
       );
-      value.textContent = color;
+      value.textContent = colorValueLabel(color);
       for (const [key, input] of Object.entries(numbers)) {
         if (input === skip) continue;
         input.value = String(rgb[key]);
@@ -328,13 +344,16 @@ export function openColorPicker(options = {}) {
         field,
         hue,
         uiEl("div", { class: "colorpick__bottom" }, [
-          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, onPlan, value]),
+          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, onPlan]),
           uiEl("div", { class: "colorpick__numbers" }, [
             numberField("r", strings.colorPicker.red),
             numberField("g", strings.colorPicker.green),
             numberField("b", strings.colorPicker.blue),
           ]),
         ]),
+        // Имя цвета — отдельной строкой под кружками, а не припиской сбоку:
+        // сбоку оно раздвигало бы окно на каждом движении мыши по полю.
+        value,
         shuffle,
       ]),
     ]);

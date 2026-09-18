@@ -14,8 +14,8 @@ import assert from "node:assert/strict";
 
 import { ROOM_PALETTE, colorTaken } from "../src/model.js";
 import { colorName } from "../src/colorName.js";
-import { colorLabel, colorSwatchTitle } from "../src/panels/colorPicker.js";
-import { strings } from "../src/strings.js";
+import { colorLabel, colorSwatchTitle, colorValueLabel } from "../src/panels/colorPicker.js";
+import { strings, text } from "../src/strings.js";
 
 test("подпись складывается из названия кнопки, имени цвета и кода", () => {
   assert.equal(colorLabel("Цвет категории", "#E80098"), "Цвет категории: пурпурный (#E80098)");
@@ -56,4 +56,44 @@ test("каждая плитка палитры называет цвет сло�
     assert.ok(title.includes(name), "в подсказке нет имени: " + color + " → " + title);
     assert.ok(title.includes(color.toUpperCase()), "в подсказке нет кода: " + color + " → " + title);
   }
+});
+
+// ——— надпись, которую видно без мыши ————————————————————————————————
+//
+// Подсказки выше живут в `title`: их видит тот, у кого мышь в руке, и не видит
+// никто больше. Требование заказчика было «давай имя цвета в палитре выбора и
+// кнопке», а единственная всегда видимая надпись окна показывала голый hex —
+// то есть имени не было видно нигде.
+
+test("видимая надпись окна называет цвет словом и кодом", () => {
+  assert.equal(colorValueLabel("#164E63"), "тёмно-бирюзовый (#164E63)");
+  assert.equal(colorValueLabel("#be123c"), "красный (#BE123C)");
+  // Это надпись, а не подсказка: названия кнопки к ней не приписывается.
+  assert.ok(!colorValueLabel("#164E63").includes(":"));
+  // И цвет она называет теми же словами, что подсказка рядом.
+  for (const color of ROOM_PALETTE) {
+    assert.equal(colorValueLabel(color), colorLabel("", color));
+  }
+});
+
+test("на мусоре вместо цвета остаётся сам код, а не пустое место", () => {
+  // Пустая строка на месте надписи читалась бы как поломка окна.
+  assert.equal(colorValueLabel("  не цвет  "), "не цвет");
+  assert.equal(colorValueLabel(""), "");
+  assert.equal(colorValueLabel(null), "");
+});
+
+// Надпись стоит своей строкой под кружками и растянута по колонке, поэтому
+// длина имени ширину окна не двигает. Чтобы это осталось правдой и после новых
+// имён, у неё есть потолок: надпись обязана оставаться строкой.
+test("самое длинное имя цвета с кодом умещается в одну строку", () => {
+  const bases = Object.entries(strings.colors)
+    .filter(([key]) => !["dark", "light", "withHex"].includes(key))
+    .map(([, name]) => name);
+  const longest = Math.max(
+    ...bases.map((name) =>
+      Math.max(name.length, text("colors.dark", { name }).length, text("colors.light", { name }).length),
+    ),
+  );
+  assert.ok(longest + " (#FFFFFF)".length <= 30, "имя цвета выросло до " + longest + " знаков");
 });

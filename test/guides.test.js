@@ -24,7 +24,7 @@ import {
   schemeGuides,
 } from "../src/model.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
-import { canvasFrameGuides } from "../src/canvas.js";
+import { canvasDraftPoint, canvasFrameGuides } from "../src/canvas.js";
 import {
   GUIDE_CROSS_PX,
   GUIDE_HIT_PX,
@@ -212,6 +212,45 @@ test("рука пользователя старше подсказки прог
   const plain = draftSnap(points, cursor, PLAN, view, {});
   assert.equal(plain.point.y, 0.2);
   assert.notEqual(plain.point.x, 0.3, "без направляющих ось держать нечем");
+});
+
+// Первая вершина ломаной и контура. Магнита угла у неё нет и быть не может —
+// тянуть её не от чего, — но направляющие пользователя к этому отношения не
+// имеют: они нарисованы на плане ещё до первого клика, и приём заказчика
+// начинается как раз с первой точки. Пока пустой черновик выходил раньше, чем
+// дело доходило до `draftSnap`, она садилась под сырой курсор: промах до порога
+// перекрестия, и увидеть его нечем — предпросмотра до первого клика нет.
+test("первая вершина садится на перекрестие так же, как все следующие", () => {
+  const base = withGuides(scene());
+  const view = viewOf();
+  // Мимо перекрестия на 12 px по обеим осям: дальше порога одиночной
+  // направляющей и ближе порога перекрестия — ровно тот промах, который
+  // пользователь считает попаданием.
+  const gap = 12;
+  assert.ok(gap > GUIDE_HIT_PX && gap < GUIDE_CROSS_PX, "пример не тот: " + gap);
+  const miss = { x: 0.3 + gap / PLAN.width, y: 0.4 + gap / PLAN.height };
+
+  const first = canvasDraftPoint(null, miss, PLAN, view, { planGuides: base.guides });
+  assert.equal(first.point.x, 0.3, "первая вершина не села на вертикальную направляющую");
+  assert.equal(first.point.y, 0.4, "первая вершина не села на горизонтальную направляющую");
+  // Пустой черновик — то же самое: дверь одна.
+  assert.deepEqual(canvasDraftPoint({ points: [] }, miss, PLAN, view, { planGuides: base.guides }).point, first.point);
+  // Магнит угла у неё по-прежнему молчит: угла нет, пока нет предыдущей вершины.
+  assert.equal(first.angle, 0);
+  assert.equal(first.snapped, false);
+  assert.deepEqual(first.guides, []);
+
+  // Alt — свободная рука, и первая вершина слушается его так же, как остальные.
+  const free = canvasDraftPoint(null, miss, PLAN, view, { planGuides: base.guides, free: true });
+  assert.deepEqual(free.point, miss);
+  // Направляющих нет вовсе — первой вершине садиться не на что, и это не ошибка.
+  assert.deepEqual(canvasDraftPoint(null, miss, PLAN, view, {}).point, miss);
+
+  // Остальные пути притяжки не изменились: у второй вершины работает и
+  // направляющая пользователя, и магнит угла.
+  const next = canvasDraftPoint({ points: [{ x: 0.1, y: 0.4 }] }, miss, PLAN, view, { planGuides: base.guides });
+  assert.equal(next.point.x, 0.3);
+  assert.equal(next.point.y, 0.4);
 });
 
 test("свободная рука снимает и направляющие пользователя", () => {
