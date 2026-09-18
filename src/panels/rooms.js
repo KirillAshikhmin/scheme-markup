@@ -17,7 +17,7 @@ import {
   updateRoom,
 } from "../model.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiConfirm, uiEl } from "./ui.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton } from "./ui.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { canvasCommit } from "../canvas.js";
 
@@ -253,12 +253,12 @@ function mountRoomsPanel(host, api) {
             text: String(row.marks),
             title: text("rooms.marks", { count: row.marks }),
           }),
-          uiButton("⬡", {
+          uiIconButton("outline", {
             class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
             title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
             on: { click: () => startOutline(row.room.id) },
           }),
-          uiButton("🗑", {
+          uiIconButton("trash", {
             class: "ui-btn ui-btn--danger",
             title: strings.rooms.remove,
             on: { click: () => remove(row.room.id) },

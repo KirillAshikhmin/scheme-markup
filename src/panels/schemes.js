@@ -31,7 +31,7 @@ import {
 } from "../imagePrep.js";
 import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiConfirm, uiEl, uiModal, uiPrompt } from "./ui.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
@@ -82,11 +82,11 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
     const stage = uiEl("div", { class: "plan-stage" }, [image, box]);
     const hint = uiEl("p", { class: "modal__hint", text: strings.image.cropHint });
 
-    const rotateLeft = uiButton("⟲", {
+    const rotateLeft = uiIconButton("rotateLeft", {
       title: strings.image.rotateLeft,
       on: { click: () => apply(rotateTransform(transform, -90)) },
     });
-    const rotateRight = uiButton("⟳", {
+    const rotateRight = uiIconButton("rotateRight", {
       title: strings.image.rotateRight,
       on: { click: () => apply(rotateTransform(transform, 90)) },
     });
@@ -271,6 +271,11 @@ function mountSchemesPanel(host, api) {
       const row = uiEl("div", {
         class: "scheme-row" + (scheme.id === state.schemeId ? " scheme-row--current" : ""),
       });
+      // Размеры плана стоят в узкой колонке рядом с рядом кнопок и при длинном
+      // числе ужимаются многоточием — поэтому то же самое лежит в подсказке.
+      const meta = scheme.imageId
+        ? text("schemes.size", { width: scheme.width, height: scheme.height })
+        : strings.schemes.noImage;
       row.append(
         uiEl("button", {
           class: "scheme-row__name",
@@ -279,15 +284,10 @@ function mountSchemesPanel(host, api) {
           title: scheme.name,
           on: { click: () => setState({ schemeId: scheme.id, selectedMarkIds: [] }) },
         }),
-        uiEl("span", {
-          class: "scheme-row__meta",
-          text: scheme.imageId
-            ? text("schemes.size", { width: scheme.width, height: scheme.height })
-            : strings.schemes.noImage,
-        }),
+        uiEl("span", { class: "scheme-row__meta", text: meta, title: meta }),
         uiEl("div", { class: "scheme-row__tools", attrs: editable ? {} : { hidden: "hidden" } }, [
-          uiButton("✂", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
-          uiButton("⇄", {
+          uiIconButton("crop", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
+          uiIconButton("swap", {
             title: strings.schemes.replace,
             on: {
               click: () => {
@@ -296,18 +296,18 @@ function mountSchemesPanel(host, api) {
               },
             },
           }),
-          uiButton("✎", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
-          uiButton("↑", {
+          uiIconButton("edit", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
+          uiIconButton("up", {
             title: strings.schemes.up,
             attrs: index === 0 ? { disabled: "disabled" } : {},
             on: { click: () => moveScheme(scheme.id, -1) },
           }),
-          uiButton("↓", {
+          uiIconButton("down", {
             title: strings.schemes.down,
             attrs: index === ordered.length - 1 ? { disabled: "disabled" } : {},
             on: { click: () => moveScheme(scheme.id, 1) },
           }),
-          uiButton("🗑", {
+          uiIconButton("trash", {
             class: "ui-btn ui-btn--danger",
             title: strings.schemes.remove,
             on: { click: () => removeScheme(scheme.id, marks) },

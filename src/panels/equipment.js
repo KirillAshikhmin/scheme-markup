@@ -27,7 +27,7 @@ import {
   updatePlacement,
 } from "../model.js";
 import { canvasCommit } from "../canvas.js";
-import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { openMarkPicker } from "./markControls.js";
 
 // Подпись единицы для строки списка меток и для кнопки: модель плюс связи.
@@ -70,7 +70,7 @@ export function openEquipmentWindow(api, options = {}) {
 
   function modelRow(item) {
     const used = equipmentUsage(project(), item.id);
-    const remove = uiButton("🗑", {
+    const remove = uiIconButton("trash", {
       class: "ui-btn ui-btn--danger",
       title: used > 0 ? text("errors.equipmentInUse", { name: item.name, count: used }) : strings.equipment.removeModel,
       on: { click: () => removeModel(item) },
@@ -214,7 +214,7 @@ export function openEquipmentWindow(api, options = {}) {
         title: strings.equipment.links,
         on: { click: () => pickLinks(placement) },
       }),
-      uiButton("🗑", {
+      uiIconButton("trash", {
         class: "ui-btn ui-btn--danger",
         title: strings.equipment.removePlacement,
         on: {

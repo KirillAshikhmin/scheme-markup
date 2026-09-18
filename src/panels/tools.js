@@ -314,8 +314,8 @@ function mountSizesPanel(host, api) {
       ]),
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       uiEl("div", { class: "tools__row" }, [
-        uiButton("−", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
-        uiButton("+", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
+        uiIconButton("minus", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
+        uiIconButton("plus", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
         uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
         uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
       ]),

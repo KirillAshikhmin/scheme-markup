@@ -37,7 +37,7 @@ import { lineStyleIcon, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { getSetting, setSetting } from "../store.js";
-import { uiButton, uiConfirm, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { openEquipmentWindow } from "./equipment.js";
 
 export const TYPE_TEMPLATE_KEY = "typeTemplate";
@@ -675,7 +675,7 @@ export function openTypesDictionary(api) {
     //
     // Невозможное действие видно невозможным: тип с метками не удаляется,
     // и кнопка об этом говорит до нажатия, а не после.
-    const removeButton = uiButton("🗑", {
+    const removeButton = uiIconButton("trash", {
       class: "ui-btn ui-btn--danger dict__act",
       title: count > 0 ? text("errors.typeHasMarks", { code: type.code, count }) : strings.dictionary.removeType,
       on: { click: () => removeType(type) },
@@ -683,7 +683,7 @@ export function openTypesDictionary(api) {
     removeButton.disabled = count > 0;
     // Уплотнение живёт в строке типа: тип назван, и рядом видно, скольких меток
     // команда коснётся.
-    const compactButton = uiButton("№", {
+    const compactButton = uiIconButton("compact", {
       class: "ui-btn dict__act",
       title:
         count > 0
@@ -758,7 +758,7 @@ export function openTypesDictionary(api) {
 
   function categoryRow(category) {
     const types = project().markTypes.filter((type) => type.categoryId === category.id).length;
-    const removeButton = uiButton("🗑", {
+    const removeButton = uiIconButton("trash", {
       class: "ui-btn ui-btn--danger",
       title: types > 0 ? strings.errors.categoryHasTypes : strings.dictionary.removeCategory,
       on: { click: () => removeCategory(category) },
