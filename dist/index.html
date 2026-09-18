@@ -18,11 +18,19 @@
   background: transparent;
 }
 
+/* Отступ от края холста считает `canvas.canvasHintInset`: линейка занимает
+   полосу в RULER_SIZE пикселей сверху и слева, и подсказка начинается за ней.
+   Спрятали линейку отметкой в «Размерах» — отступ уходит вместе с ней, пустого
+   поля сверху не остаётся. Мера приходит из JS, чтобы размер линейки жил в
+   одном месте (`render.RULER_SIZE`), а не двоился здесь числом. */
 .canvas-hint {
   position: absolute;
-  left: 12px;
-  top: 12px;
-  max-width: 460px;
+  left: calc(12px + var(--canvas-hint-inset, 0px));
+  top: calc(12px + var(--canvas-hint-inset, 0px));
+  max-width: min(460px, calc(100% - 24px - var(--canvas-hint-inset, 0px)));
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 6px 10px;
   border: 1px solid var(--canvas-line);
   border-left-width: 4px;
@@ -31,6 +39,83 @@
   color: #57606a;
   font-size: 12px;
   line-height: 1.35;
+}
+
+/* Свёрнутая подсказка — одна кнопка: рамка, поле и подложка уходят к ней. */
+.canvas-hint.is-collapsed {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.canvas-hint__text {
+  margin: 0;
+}
+
+.canvas-hint__text[hidden] {
+  display: none;
+}
+
+/* Единственное место подсказки, которое берёт клики. Само поле подсказки их
+   не берёт (`#canvas-overlay` — `pointer-events: none`): под ней план, и метка
+   обязана вставать сквозь неё, как вставала до сворачивания. */
+.canvas-hint__toggle {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -1px 0;
+  padding: 0;
+  border: 1px solid var(--canvas-line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #57606a;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.canvas-hint__toggle:hover,
+.canvas-hint__toggle:focus-visible {
+  color: var(--accent);
+}
+
+.canvas-hint__toggle .ui-icon {
+  --ui-icon: 14px;
+}
+
+.canvas-hint.is-collapsed .canvas-hint__toggle {
+  width: 26px;
+  height: 26px;
+  margin: 0;
+}
+
+.canvas-hint.is-collapsed .canvas-hint__toggle .ui-icon {
+  --ui-icon: 16px;
+}
+
+/* Текст сменился, пока подсказка была свёрнута: точка на кнопке. Разворачивать
+   подсказку самим нельзя — её свернули осознанно, и она выпрыгивала бы под
+   рукой на каждую смену типа; но и молча съесть «второй Esc возвращает в
+   „Выделение“» нельзя. */
+.canvas-hint__toggle.is-new::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Палец крупнее курсора: в просмотре кнопка подрастает вместе с остальными. */
+#app.is-mobile .canvas-hint__toggle {
+  width: 30px;
+  height: 30px;
 }
 
 .tools {
@@ -3539,6 +3624,14 @@ const strings = {
       "Клик выбирает метку, перетаскивание двигает её или подпись, двойной клик по подписи возвращает её на место, Delete удаляет, Esc снимает выделение. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб.",
     hintLine:
       "Добавление линией: клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить, ещё раз — вернуться в «Выделение». Направление липнет к ровным углам через 15°, а курсор — к прежним вершинам ломаной по пунктирным направляющим; у курсора виден градус, Alt — рисовать свободно.",
+    // Подсказку можно свернуть в одну кнопку со значком: текст её читают
+    // один раз, а место она занимает всё время работы.
+    hintCollapse: "Свернуть подсказку",
+    hintExpand: "Показать подсказку",
+    // Текст сменился, пока подсказка свёрнута. Разворачивать её за
+    // пользователя нельзя — он свернул её сам; кнопка просто говорит, что там
+    // теперь другое.
+    hintExpandNew: "Подсказка изменилась — нажмите, чтобы прочитать",
     // Градус тянущегося отрезка — у курсора. «Ровно» означает, что направление
     // дотянул магнит: иначе непонятно, почему линия не идёт за рукой.
     angleFree: "{deg}°",
@@ -12593,6 +12686,10 @@ const UI_ICONS = {
   // Контур помещения: замкнутая ломаная с углами — то же, что обводят на
   // плане. Прямоугольник не годится: обводят по стенам, а не по рамке.
   outline: ["M4.5 8.5 12 4l7.5 4.5v7L12 20l-7.5-4.5z"],
+  // Подсказка холста в свёрнутом виде: вопрос в кольце. Не лампочка и не «i» —
+  // кольцо с вопросом читается как «здесь написано, что делать», и в клетке
+  // 16 px у него узнаётся сам знак, а не пятно.
+  hint: ["M12 4.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15", "M9.8 9.6a2.3 2.3 0 0 1 4.4.9c0 1.6-2.2 1.9-2.2 3.3", "M12 16.8v.2"],
   // Уплотнение нумерации: две стрелки, сходящиеся к середине, — «сомкнуть».
   // Прежнее «№» говорило про номера, но не про то, что с ними сделают.
   compact: ["M4 12h6", "M7 9l3 3-3 3", "M20 12h-6", "M17 9l-3 3 3 3"],
@@ -12798,6 +12895,7 @@ function formatMegabytes(bytes) {
 
 
 
+
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
 //
 // Стрелки листают план, как прокрутка: камера едет в сторону стрелки, а не
@@ -12961,6 +13059,36 @@ function canvasHintText(state) {
   if (type) return strings.canvas.hintSelectMode;
   return strings.canvas.hintSelect;
 }
+
+// ——— подсказка: отступ от края и знак «текст сменился» ————————————————
+//
+// Линейка (таск 59) занимает полосу в `RULER_SIZE` пикселей сверху и слева
+// холста, и подсказка, стоявшая в самом углу, наехала на неё. Отступ считается
+// здесь, а не в стилях: линейку прячут отметкой в «Размерах», и вместе с ней
+// обязан уходить отступ — иначе подсказка висит с пустым полем сверху.
+function canvasHintInset(state) {
+  return canvasGuidesShown(state) ? RULER_SIZE : 0;
+}
+
+// Текст подсказки меняется по ходу работы и иногда говорит важное («второй Esc
+// возвращает в „Выделение“»). Когда подсказка свёрнута, разворачивать её за
+// пользователя нельзя: он свернул её осознанно, и она выпрыгивала бы под рукой
+// на каждую смену типа — ровно то, от чего он избавился. Но и молча съесть
+// новый текст нельзя, поэтому кнопка получает точку и другую подпись.
+//
+// `seen` — текст, который пользователь видел последним (подсказка была
+// развёрнута). Ничего не видел — знака нет: точка на первой же подсказке после
+// перезагрузки была бы шумом.
+function canvasHintUnseen(seen, current) {
+  if (seen === null || current === null) return false;
+  return seen !== current;
+}
+
+// Свёрнутость — оснастка рабочего места, как и отметка линейки: живёт в
+// настройках браузера, в объект и в файл проекта не попадает.
+const CANVAS_HINT_SETTING = "canvasHintCollapsed";
+let canvasHintCollapsed = false;
+let canvasHintSeen = null;
 
 // Пауза, после которой события колеса считаются новым жестом.
 const CANVAS_WHEEL_STREAK_MS = 220;
@@ -14730,24 +14858,64 @@ function canvasAutoFit(state) {
   });
 }
 
-// Подсказка поверх холста: что сейчас ставим и чем это закончить.
+// Подсказка поверх холста: что сейчас ставим и чем это закончить. Сворачивается
+// в одну кнопку со значком — текст её читают один раз, а место она занимает всё
+// время работы.
 function mountCanvasHint(host, api) {
   const hint = document.createElement("div");
   hint.className = "canvas-hint";
+  const body = uiEl("p", { class: "canvas-hint__text" });
+  const toggle = uiEl(
+    "button",
+    {
+      class: "canvas-hint__toggle",
+      type: "button",
+      on: {
+        click: () => {
+          canvasHintCollapsed = !canvasHintCollapsed;
+          setSetting(CANVAS_HINT_SETTING, canvasHintCollapsed);
+          render();
+        },
+      },
+    },
+    uiIcon("hint"),
+  );
+  hint.append(toggle, body);
   host.replaceChildren(hint);
   const render = () => {
     const state = api.getState();
     const value = canvasHintText(state);
+    // Отступ от линейки — до проверки на пустоту: он нужен подсказке в любом
+    // виде, и свёрнутой тоже.
+    hint.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
     // Условие показа живёт здесь, а не в чужих стилях: подсказки нет, когда
     // нечего подсказывать, а в просмотре она говорит про просмотр.
     hint.hidden = value === null;
     if (value === null) return;
-    hint.textContent = value;
+    body.textContent = value;
+    hint.classList.toggle("is-collapsed", canvasHintCollapsed);
+    body.hidden = canvasHintCollapsed;
+    // Развёрнутую подсказку пользователь видит — значит, этот текст прочитан.
+    if (!canvasHintCollapsed) canvasHintSeen = value;
+    const unseen = canvasHintCollapsed && canvasHintUnseen(canvasHintSeen, value);
+    toggle.classList.toggle("is-new", unseen);
+    let label = strings.canvas.hintCollapse;
+    if (canvasHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
+    toggle.title = label;
+    toggle.setAttribute("aria-label", label);
+    toggle.setAttribute("aria-expanded", canvasHintCollapsed ? "false" : "true");
     const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
     const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
-    if (!canvasEditAllowed(state)) hint.style.borderColor = "";
-    else if (state.mode === "room" && room) hint.style.borderColor = room.color;
-    else if (type) hint.style.borderColor = styleOf(state.project, type.id).color;
+    // Цвет достаётся и кнопке: свёрнутой подсказки, кроме неё, не видно, а
+    // цвет типа — единственное, что говорит, чем сейчас размечают. В просмотре
+    // цвета нет вовсе: размечать там нечем.
+    let color = "";
+    if (canvasEditAllowed(state)) {
+      if (state.mode === "room" && room) color = room.color;
+      else if (type) color = styleOf(state.project, type.id).color;
+    }
+    hint.style.borderColor = color;
+    toggle.style.borderColor = color;
   };
   api.subscribe((state, changed) => {
     if (
@@ -14756,6 +14924,8 @@ function mountCanvasHint(host, api) {
       "activeRoomId" in changed ||
       "schemeId" in changed ||
       "layout" in changed ||
+      // Линейка пришла или ушла — отступ подсказки меняется вместе с ней.
+      "guidesShown" in changed ||
       // Правка ломаной — такой же режим руки, как «Добавление»: началась или
       // закончилась, и подсказка обязана это сказать.
       "editPathId" in changed ||
@@ -14765,6 +14935,18 @@ function mountCanvasHint(host, api) {
     }
   });
   render();
+  // Настройка читается асинхронно: подсказка стартует развёрнутой и
+  // схлопывается, когда хранилище ответит. Ждать его с пустым углом хуже.
+  Promise.resolve(getSetting(CANVAS_HINT_SETTING))
+    .then((saved) => {
+      if (saved !== true) return;
+      canvasHintCollapsed = true;
+      // То, что пользователь успел увидеть до ответа хранилища, прочитанным не
+      // считается: он на подсказку не смотрел, она мигнула сама.
+      canvasHintSeen = null;
+      render();
+    })
+    .catch(() => {});
 }
 
 registerPanel(PANEL_IDS.canvas, mountCanvas);
