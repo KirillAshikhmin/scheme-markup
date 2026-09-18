@@ -289,15 +289,16 @@ function tablesTypeRows(table) {
   return table.groups.flatMap((group) => group.rows);
 }
 
-test("справочник типов — легенда листа: код, название, форма, начертание", () => {
+test("справочник типов — легенда листа: код, название, знак", () => {
   const box = tablesFixture();
   const table = typesTable(box.project);
   // Колонки «Цвет» нет — заказчик попросил её убрать. Колонки «Категория»
-  // тоже: она дублировала заголовок секции в каждой строке.
-  assert.deepEqual(table.columns, ["Код", "Название", "Форма", "Линия"]);
+  // тоже: она дублировала заголовок секции в каждой строке. И колонки
+  // «Линия» нет: знак у типа один, и колонка знака одна.
+  assert.deepEqual(table.columns, ["Код", "Название", "Форма"]);
   const rows = tablesTypeRows(table);
   assert.equal(rows.length, 28);
-  assert.deepEqual(rows[0].cells, ["Т", "Точечный светильник", "Круг с крестом", "Сплошная"]);
+  assert.deepEqual(rows[0].cells, ["Т", "Точечный светильник", "Круг с крестом"]);
   // Сам цвет никуда не делся: он остался полосой слева у строки.
   assert.equal(rows[0].color, "#1F6FEB");
   assert.equal(rows.every((row) => !row.cells.some((cell) => /^#[0-9A-F]{6}$/.test(cell))), true);
@@ -309,6 +310,41 @@ test("справочник типов — легенда листа: код, н�
      "ВР", "КН", "КВ"],
   );
   assert.equal(tableRowCount(table), 28);
+});
+
+test("знак типа — одна колонка: у точечного фигура, у линейного начертание со словом «линия»", () => {
+  const box = tablesFixture();
+  const rows = tablesTypeRows(typesTable(box.project));
+  const signOf = (code) => rows.find((row) => row.cells[0] === code).cells[2];
+
+  // Точечный тип со своей фигурой — фигура и есть.
+  assert.equal(signOf("ВВ"), "Квадрат с чертой");
+  assert.equal(signOf("RJ"), "Квадрат с разъёмом");
+
+  // Линейный: начертание, и в конце «линия» — иначе «Двойная» в колонке
+  // «Форма» читалась бы как ещё одна фигура.
+  assert.equal(signOf("Л"), "Волнистая, линия");
+  assert.equal(signOf("ПШ"), "Пунктирная, линия");
+  assert.equal(signOf("КШ"), "Двойная, линия");
+  assert.equal(signOf("ПКШ"), "Штрихпунктирная (точка-тире), линия");
+
+  // Знак, взятый у категории, назван унаследованным — теми же словами, что
+  // и в справочнике. Правка формы категории меняет восемь строк листа из
+  // двадцати восьми, и по распечатке должно быть видно, какие именно.
+  assert.equal(signOf("В"), "Как у категории: квадрат");
+  assert.equal(signOf("Р"), "Как у категории: круг с двумя точками");
+  assert.equal(signOf("ТР"), "Как у категории: сплошная, линия");
+
+  // Строчной делается только первая буква: «RJ45» и «(точка-тире)» внутри
+  // названия остаются как есть.
+  const own = addCategory(box.project, { name: "Слаботочка", color: "#7A3B12", shape: "square-jack" });
+  const withType = addType(own.project, { code: "СЛ", name: "Слаботочная линия", categoryId: own.category.id });
+  const custom = tablesTypeRows(typesTable(withType.project));
+  assert.equal(custom.at(-1).cells[2], "Как у категории: квадрат с разъёмом");
+
+  // Вид у типа один, и колонок знака тоже одна: пустых ячеек в ней нет.
+  assert.equal(rows.every((row) => row.cells[2].trim().length > 0), true);
+  assert.equal(rows.every((row) => row.cells.length === 3), true);
 });
 
 test("справочник типов разбит по категориям, в заголовке — цвет словами и кодом", () => {
@@ -362,11 +398,14 @@ test("справочник типов: разбивка доезжает в Mark
   // категория возвращается колонкой — той самой, что ушла из строк.
   const csv = toCsv(table).split("\r\n");
   assert.equal(csv[0], "﻿Справочник типов");
-  assert.equal(csv[2], "Категория;Код;Название;Форма;Линия");
-  assert.equal(csv[3], "Свет;Т;Точечный светильник;Круг с крестом;Сплошная");
+  assert.equal(csv[2], "Категория;Код;Название;Форма");
+  assert.equal(csv[3], "Свет;Т;Точечный светильник;Круг с крестом");
+  // Начертание с запятой внутри ячейки CSV не разъезжается на две колонки:
+  // разделитель здесь «;», и «Волнистая, линия» остаётся одной ячейкой.
+  assert.ok(csv.includes("Свет;Л;Лента;Волнистая, линия"));
   // Пустого столбца в CSV нет: шапка и каждая строка одной длины.
   const width = csv[2].split(";").length;
-  assert.equal(width, 5);
+  assert.equal(width, 4);
   for (const line of csv.slice(3)) {
     if (line === "") continue;
     assert.equal(line.split(";").length, width, "строка CSV другой ширины: " + line);
@@ -376,15 +415,18 @@ test("справочник типов: разбивка доезжает в Mark
   const markdown = toMarkdown(table).split("\n");
   assert.equal(markdown[0], "# Справочник типов");
   assert.equal(markdown[2], "## Свет · синий (#1F6FEB)");
-  assert.equal(markdown[4], "| Код | Название | Форма | Линия |");
+  assert.equal(markdown[4], "| Код | Название | Форма |");
   assert.ok(markdown.includes("## Розетки · красный (#D1242F)"));
+  assert.ok(markdown.includes("| ТР | Трек | Как у категории: сплошная, линия |"));
 
   const tsv = toTsv(table).split("\n");
   assert.deepEqual(tsv.slice(0, 3), [
-    "Код\tНазвание\tФорма\tЛиния",
+    "Код\tНазвание\tФорма",
     "Свет · синий (#1F6FEB)",
-    "Т\tТочечный светильник\tКруг с крестом\tСплошная",
+    "Т\tТочечный светильник\tКруг с крестом",
   ]);
+  // Запятая в буфер обмена едет как есть: на колонки там режет табуляция.
+  assert.ok(tsv.includes("Л\tЛента\tВолнистая, линия"));
 });
 
 test("лист, сужённый фильтром по помещению, называет это помещение — как на рукописном листе", () => {

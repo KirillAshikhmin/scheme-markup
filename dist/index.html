@@ -4110,7 +4110,6 @@ const strings = {
     model: "Модель",
     vendor: "Производитель",
     pieces: "Штук",
-    line: "Линия",
     noVendor: "Без производителя",
     equipmentLost: "Модель потеряна",
     equipmentTitle: "Оборудование объекта",
@@ -4133,6 +4132,11 @@ const strings = {
     // Точка-разделитель та же, что в «{code} · {name}», — тире здесь читалось
     // бы как тире внутри строки «Т — Точечный светильник».
     groupColor: "{title} · {color}",
+    // Начертание в колонке «Форма»: слово «линия» в конце говорит, что знак
+    // у типа — не фигура. Запятая не украшение: без неё половина начертаний
+    // ломает русский — «длинный штрих линия», «зигзаг линия», «штрих с двумя
+    // точками линия». С запятой читаются все одиннадцать.
+    lineSign: "{name}, линия",
   },
   exportPanel: {
     tableTitle: "Таблица",
@@ -15246,6 +15250,36 @@ function equipmentTable(project, filter, options = {}) {
   };
 }
 
+// Первая буква со строчной: «Круг с крестом» → «как у категории: круг с
+// крестом». Своего `toLowerCase` на всю строку тут быть не должно — он съел
+// бы «RJ45» и «(точка-тире)».
+function tableLowerFirst(value) {
+  const name = String(value || "");
+  return name ? name[0].toLowerCase() + name.slice(1) : name;
+}
+
+// Знак типа одной строкой — то, чем тип узнают на плане.
+//
+// Что именно знак, решает вид типа, и спрашивается он у `typeKindOf`: у
+// объекта прежнего формата поля `kind` нет вовсе. У точечного знак — фигура,
+// у линейного — начертание, и к нему приписано слово «линия»: иначе
+// «Двойная» в колонке «Форма» читалась бы как ещё одна фигура.
+//
+// Унаследованный знак назван унаследованным — теми же словами, что и в
+// справочнике («Как у категории: круг с крестом»). Без этого правка формы
+// категории молча меняла бы восемь строк листа из двадцати восьми, а по
+// распечатке было бы не понять, какие именно.
+function tableTypeSign(project, type) {
+  const style = styleOf(project, type.id);
+  const line = typeKindOf(project, type.id) === "line";
+  const own = line ? type.lineStyle : type.shape;
+  const name = line
+    ? text("tables.lineSign", { name: strings.lineStyles[style.lineStyle] || style.lineStyle })
+    : strings.shapes[style.shape] || style.shape;
+  if (own) return name;
+  return text(line ? "dictionary.inheritLine" : "dictionary.inheritShape", { name: tableLowerFirst(name) });
+}
+
 // Справочник разбит по категориям, как остальные листы: категория —
 // заголовок секции, а не колонка в каждой строке. Колонка её дублировала —
 // двадцать восемь строк подряд повторяли «Свет», «Свет», «Свет».
@@ -15258,8 +15292,13 @@ function equipmentTable(project, filter, options = {}) {
 //
 // Отдельной колонки «Цвет» по-прежнему нет: у строки цвет остался полосой
 // слева (`row.color`), а у секции — полосой и чертой заголовка.
+//
+// Колонка знака одна, и это не экономия места. Слова заказчика: «зачем в
+// таблице справочника типов указывать у типа и форму и тип линии, если оно
+// что-то одно?» У типа либо вид «точка» — и работает фигура, либо «линия» —
+// и работает начертание; при двух колонках одна в каждой строке пустовала.
 function typesTable(project) {
-  const columns = [strings.tables.code, strings.tables.name, strings.tables.shape, strings.tables.line];
+  const columns = [strings.tables.code, strings.tables.name, strings.tables.shape];
   const groups = [];
   if (project) {
     for (const { category, types } of typesInOrder(project)) {
@@ -15274,13 +15313,7 @@ function typesTable(project) {
           const style = styleOf(project, type.id);
           return {
             id: type.id,
-            cells: [
-              type.code,
-              type.name,
-              strings.shapes[style.shape] || style.shape,
-              // Начертание — часть обозначения: по распечатке видно, где пунктир.
-              strings.lineStyles[style.lineStyle] || style.lineStyle,
-            ],
+            cells: [type.code, type.name, tableTypeSign(project, type)],
             // Категория строкой — для CSV: там заголовков-секций нет, и
             // категория возвращается колонкой. Название без цвета: в таблице
             // Excel по ней фильтруют и сортируют, а «Свет · синий (#1F6FEB)»
