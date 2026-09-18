@@ -472,7 +472,13 @@ function canvasPaint() {
   const guidesOn = canvasGuidesShown(state);
   if (guidesOn) {
     const live = canvasDrag && canvasDrag.kind === "guideMove" ? canvasDrag.guideId : null;
-    drawSchemeGuides(canvasCtx, canvasSchemeGuides(state, scheme), scheme, view, box, { activeId: live });
+    // Утащенная на линейку направляющая по отпусканию снимется — пусть это
+    // будет видно до того, как кнопка отпущена, а не после.
+    const dropping = canvasDrag && canvasDrag.kind === "guideMove" && canvasDrag.drop ? canvasDrag.guideId : null;
+    drawSchemeGuides(canvasCtx, canvasFrameGuides(state, canvasPreview, scheme), scheme, view, box, {
+      activeId: live,
+      dropId: dropping,
+    });
     // Новая направляющая, которую сейчас тянут с линейки: в объекте её ещё нет.
     if (canvasDrag && canvasDrag.kind === "guideNew") {
       drawSchemeGuides(
@@ -777,9 +783,28 @@ function canvasGuideAt(axis, point, scheme, view) {
   return guideFraction(axis, axis === "h" ? point.y : point.x, scheme, view);
 }
 
-function canvasSchemeGuides(state, scheme) {
+/**
+ * Направляющие, которые холст отдаёт кадру.
+ *
+ * **Берутся оттуда же, откуда метки: из промежуточного объекта, пока идёт
+ * перенос, и из состояния, когда переноса нет.** Отсюда дефект, который здесь
+ * и чинится: пока направляющая читалась прямо из `state.project`, она во время
+ * переноса рисовалась на старом месте — толстела под рукой, но за курсором не
+ * ехала, а по отпусканию прыгала туда, где он был. Третьего пути у переноса
+ * нет и не должно быть: у меток он один, и у направляющих тот же.
+ *
+ * Чистая и вынесенная наружу нарочно: промежуточное положение обязано быть
+ * видно в том, что уходит в кадр, а не только в итоговом объекте, — и это
+ * проверяется тестом без глаз.
+ */
+export function canvasFrameGuides(state, preview, scheme) {
   if (!canvasGuidesShown(state) || !scheme) return [];
-  return schemeGuides(state.project, scheme.id);
+  const project = preview || (state && state.project);
+  return schemeGuides(project, scheme.id);
+}
+
+function canvasSchemeGuides(state, scheme) {
+  return canvasFrameGuides(state, canvasPreview, scheme);
 }
 
 // Притяжка к своим направляющим — одной дверью для всех рук: постановка точки,

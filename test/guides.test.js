@@ -24,6 +24,7 @@ import {
   schemeGuides,
 } from "../src/model.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
+import { canvasFrameGuides } from "../src/canvas.js";
 import {
   GUIDE_CROSS_PX,
   GUIDE_HIT_PX,
@@ -296,4 +297,44 @@ test("левая линейка даёт горизонтальную напра
   // Сам план линейке не принадлежит.
   assert.equal(rulerAxis({ x: RULER_SIZE + 1, y: RULER_SIZE + 1 }), null);
   assert.equal(rulerAxis(null), null);
+});
+
+// ——— что уходит в кадр ————————————————————————————————————————————————
+//
+// Дефект, ради которого этот тест написан: направляющую под рукой было видно
+// толще, но за курсором она не ехала — прыгала на место только по отпусканию.
+// Причина — кадр читал направляющие прямо из состояния, а промежуточное
+// положение переноса лежит в отдельном объекте, том же, что у меток. Итоговое
+// положение при этом было верным, поэтому проверка «по объекту» дефект и
+// пропустила: смотреть надо на то, что холст отдаёт кадру.
+test("кадр берёт направляющие из промежуточного объекта, пока идёт перенос", () => {
+  const base = withGuides(scene());
+  const scheme = base.scheme;
+  const state = { project: base.project, guidesShown: true };
+  const horizontal = base.guides.find((guide) => guide.axis === "h");
+
+  // Переноса нет — кадр видит то же, что объект.
+  assert.deepEqual(
+    canvasFrameGuides(state, null, scheme).map((guide) => [guide.axis, guide.at]),
+    [
+      ["h", 0.4],
+      ["v", 0.3],
+    ],
+  );
+
+  // Идёт перенос: промежуточный объект — тот же, что у переноса метки.
+  const preview = moveSchemeGuide(base.project, base.schemeId, horizontal.id, 0.75).project;
+  const framed = canvasFrameGuides(state, preview, scheme);
+  assert.equal(
+    framed.find((guide) => guide.id === horizontal.id).at,
+    0.75,
+    "кадр показывает направляющую на старом месте — значит за курсором она не поедет",
+  );
+  // Соседняя при этом не поехала, а состояние не тронуто: перенос ещё не принят.
+  assert.equal(framed.find((guide) => guide.axis === "v").at, 0.3);
+  assert.equal(schemeGuides(state.project, base.schemeId).find((guide) => guide.id === horizontal.id).at, 0.4);
+
+  // Спрятанные направляющие в кадр не уходят вовсе — ни свои, ни промежуточные.
+  assert.deepEqual(canvasFrameGuides({ project: base.project, guidesShown: false }, preview, scheme), []);
+  assert.deepEqual(canvasFrameGuides(state, preview, null), []);
 });

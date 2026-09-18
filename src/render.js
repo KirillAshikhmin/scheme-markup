@@ -61,6 +61,9 @@ const GUIDE_DASH = [2, 5];
 // ярче: двенадцать штук на плане не должны спорить с самим планом.
 const GUIDE_LINE = "rgba(9, 105, 218, 0.38)";
 const GUIDE_LINE_ACTIVE = "rgba(9, 105, 218, 0.85)";
+// Направляющая, утащенная обратно на линейку: гаснет и рвётся — её снимут.
+const GUIDE_DROP_DASH = [3, 4];
+const GUIDE_DROP_ALPHA = 0.45;
 const GUIDE_WIDTH = 1;
 const GUIDE_ALPHA = 0.5;
 
@@ -1566,13 +1569,18 @@ export function drawSchemeGuides(ctx, guides, scheme, view, box, options = {}) {
   if (!guides || guides.length === 0) return;
   const state = renderView(view);
   const active = options.activeId || null;
+  const dropping = options.dropId || null;
   ctx.save();
-  ctx.setLineDash([]);
   for (const guide of guides) {
     const at = Math.round(guideScreen(guide, scheme, state)) + 0.5;
     const live = guide.id === active;
-    ctx.strokeStyle = live ? GUIDE_LINE_ACTIVE : GUIDE_LINE;
-    ctx.lineWidth = live ? 1.6 : 1;
+    const drop = guide.id === dropping;
+    // Утащенная обратно на линейку гаснет и рвётся пунктиром: по отпусканию её
+    // снимут, и знать об этом надо до, а не после.
+    ctx.setLineDash(drop ? GUIDE_DROP_DASH : []);
+    ctx.strokeStyle = drop ? GUIDE_LINE : live ? GUIDE_LINE_ACTIVE : GUIDE_LINE;
+    ctx.globalAlpha = drop ? GUIDE_DROP_ALPHA : 1;
+    ctx.lineWidth = live && !drop ? 1.6 : 1;
     ctx.beginPath();
     if (guide.axis === "h") {
       ctx.moveTo(0, at);
