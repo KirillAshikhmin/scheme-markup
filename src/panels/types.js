@@ -42,6 +42,9 @@ import { openEquipmentWindow } from "./equipment.js";
 
 export const TYPE_TEMPLATE_KEY = "typeTemplate";
 const TYPES_SWATCH_SIZE = 34;
+// Цвет строки, у которой категории нет: справочник без категорий — это пустой
+// справочник, но рисовать знак ему всё равно чем-то нужно.
+const TYPES_NO_COLOR = "#57606A";
 
 function typesSnapshot(project) {
   return {
@@ -320,6 +323,51 @@ export function typesKindSwitch({ kind, onPick, allowSame = false, sameTitle = "
     cell("point", strings.dictionary.kindPoint, strings.dictionary.kindPointHint),
     cell("line", strings.dictionary.kindLine, strings.dictionary.kindLineHint),
   ]);
+}
+
+// Черновик строки добавления: вид и знак, выбранные до нажатия «Добавить тип».
+// Поля названы как у `addType` — строка отдаёт их модели как есть, своего
+// перевода между ними нет. Умолчание — точка со знаком категории: точечных
+// типов в разы больше, а наследование знака и было прежним поведением нового
+// типа, которому ничего не выбрали.
+export function typesAddDraft(categoryId = "") {
+  return { categoryId, kind: MARK_KINDS[0], shape: null, lineStyle: null };
+}
+
+// Смена вида ничего не стирает: знаки двух видов лежат в черновике порознь,
+// и вернувшийся к «Точке» получает обратно свою фигуру. Так же устроен и
+// заведённый тип — `updateType({kind})` не трогает ни `shape`, ни `lineStyle`;
+// строка добавления не должна вести себя иначе, чем строка того же типа
+// минутой позже.
+export function typesDraftKind(draft, kind) {
+  return MARK_KINDS.includes(kind) ? { ...draft, kind } : draft;
+}
+
+// Выбранный знак ложится в ячейку текущего вида: фигура у точечного,
+// начертание у линейного. `null` — «как у категории».
+export function typesDraftSign(draft, sign) {
+  return draft.kind === "line" ? { ...draft, lineStyle: sign } : { ...draft, shape: sign };
+}
+
+// Чем новый тип встанет на план, пока его ещё нет. `styleOf` здесь не спросить:
+// он отвечает по типу объекта, а тип появится только после «Добавить» — поэтому
+// наследование разворачивается здесь, по той же цепочке «своё, иначе
+// категорийное, иначе первое в палитре».
+export function typesDraftStyle(draft, category) {
+  return {
+    kind: draft.kind,
+    color: category ? category.color : TYPES_NO_COLOR,
+    shape: draft.shape || (category && category.shape) || SHAPE_PALETTE[0],
+    lineStyle: draft.lineStyle || (category && category.lineStyle) || LINE_STYLES[0],
+  };
+}
+
+// Замена узла на месте: строка добавления перерисовывает только то, что
+// зависит от выбора, — поля кода и названия остаются теми же узлами, иначе
+// набранное пропадало бы вместе с фокусом при каждом переключении вида.
+function typesSwap(current, next) {
+  current.replaceWith(next);
+  return next;
 }
 
 function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
@@ -622,10 +670,13 @@ export function openTypesDictionary(api) {
     // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
     // он одной функцией модели, чтобы справочник и холст не разошлись.
     const kind = typeKindOf(project(), type.id);
+    // Кнопки конца строки идут своей мерой (`dict__act`), а не по ширине глифа:
+    // из них складывается хвост, с которым равняется строка добавления.
+    //
     // Невозможное действие видно невозможным: тип с метками не удаляется,
     // и кнопка об этом говорит до нажатия, а не после.
     const removeButton = uiButton("🗑", {
-      class: "ui-btn ui-btn--danger",
+      class: "ui-btn ui-btn--danger dict__act",
       title: count > 0 ? text("errors.typeHasMarks", { code: type.code, count }) : strings.dictionary.removeType,
       on: { click: () => removeType(type) },
     });
@@ -633,7 +684,7 @@ export function openTypesDictionary(api) {
     // Уплотнение живёт в строке типа: тип назван, и рядом видно, скольких меток
     // команда коснётся.
     const compactButton = uiButton("№", {
-      class: "ui-btn",
+      class: "ui-btn dict__act",
       title:
         count > 0
           ? text("dictionary.compactHint", { code: type.code })
@@ -685,7 +736,7 @@ export function openTypesDictionary(api) {
       kind === "line"
         ? typesLineButton({
             lineStyle: type.lineStyle,
-            color: category ? category.color : "#57606A",
+            color: category ? category.color : TYPES_NO_COLOR,
             allowInherit: true,
             inheritLineStyle: category ? category.lineStyle : LINE_STYLES[0],
             onPick: (lineStyle) =>
@@ -693,7 +744,7 @@ export function openTypesDictionary(api) {
           })
         : typesShapeButton({
             shape: type.shape,
-            color: category ? category.color : "#57606A",
+            color: category ? category.color : TYPES_NO_COLOR,
             allowInherit: true,
             inheritShape: category ? category.shape : SHAPE_PALETTE[0],
             onPick: (shape) =>
@@ -788,6 +839,11 @@ export function openTypesDictionary(api) {
     }
   }
 
+  // Строка добавления держит вид и знак сама, теми же элементами, что строка
+  // заведённого типа: пользователь просил «при добавлении нового типа сразу
+  // добавь переключатель точка/линия и выбор иконки или типа линии». Прежде
+  // линейный тип заводился в два захода — создал строкой добавления, потом
+  // переключил вид в строке созданного.
   function addTypeRow() {
     const code = uiEl("input", {
       class: "ui-input dict__code",
@@ -800,19 +856,91 @@ export function openTypesDictionary(api) {
       type: "text",
       placeholder: strings.dictionary.typeNamePlaceholder,
     });
-    let categoryId = project().categories.length > 0 ? project().categories[0].id : "";
+    let draft = typesAddDraft(project().categories.length > 0 ? project().categories[0].id : "");
+    const category = () => findCategory(project(), draft.categoryId);
+
+    // Значок строки — предпросмотр: то, чем новый тип встанет на план. Он же
+    // показывает, во что обернулось умолчание «как у категории», до того как
+    // пользователь откроет сетку знаков.
+    function badgeNode() {
+      const style = typesDraftStyle(draft, category());
+      return uiEl("span", { class: "dict__badge" }, [
+        style.kind === "line"
+          ? lineStyleIcon(style.lineStyle, style.color, TYPES_BADGE.size, TYPES_BADGE.length)
+          : shapeIcon(style.shape, style.color, TYPES_BADGE.size),
+      ]);
+    }
+
+    function kindNode() {
+      return typesKindSwitch({
+        kind: draft.kind,
+        onPick: (value) => {
+          draft = typesDraftKind(draft, value);
+          refresh();
+        },
+      });
+    }
+
+    // Рядом с переключателем — только нужное, как и в строке типа: фигура у
+    // точечного, начертание у линейного. Вторых элементов выбора у строки
+    // добавления нет — это те же `typesShapeButton` и `typesLineButton`.
+    function signNode() {
+      const own = category();
+      const pick = (value) => {
+        draft = typesDraftSign(draft, value);
+        refresh();
+      };
+      const color = own ? own.color : TYPES_NO_COLOR;
+      return draft.kind === "line"
+        ? typesLineButton({
+            lineStyle: draft.lineStyle,
+            color,
+            allowInherit: true,
+            inheritLineStyle: (own && own.lineStyle) || LINE_STYLES[0],
+            onPick: pick,
+          })
+        : typesShapeButton({
+            shape: draft.shape,
+            color,
+            allowInherit: true,
+            inheritShape: (own && own.shape) || SHAPE_PALETTE[0],
+            onPick: pick,
+          });
+    }
+
+    let badge = badgeNode();
+    let kind = kindNode();
+    let sign = signNode();
+    function refresh() {
+      badge = typesSwap(badge, badgeNode());
+      kind = typesSwap(kind, kindNode());
+      sign = typesSwap(sign, signNode());
+    }
+
+    // Черновик отдаётся модели как есть: вид и знак приезжают с типом сразу,
+    // без второго захода. Сбрасывать строку руками не нужно — после команды
+    // справочник перерисовывается подпиской и строит её заново.
     const add = () =>
       commit(
-        (current) => addType(current, { code: code.value, name: name.value, categoryId }).project,
+        (current) => addType(current, { ...draft, code: code.value, name: name.value }).project,
         strings.history.addType,
       );
     return uiEl("div", { class: "dict__row dict__row--add" }, [
+      badge,
       code,
       name,
-      categorySelect(categoryId, (value) => {
-        categoryId = value;
+      categorySelect(draft.categoryId, (value) => {
+        draft = { ...draft, categoryId: value };
+        // Знак наследуется у категории — значит смена категории меняет и то,
+        // что нарисовано в строке: и предпросмотр, и цвет кнопки знака.
+        refresh();
       }),
-      uiButton(strings.dictionary.addType, { class: "ui-btn ui-btn--accent", on: { click: add } }),
+      kind,
+      sign,
+      uiButton(strings.dictionary.addType, {
+        class: "ui-btn ui-btn--accent dict__add",
+        on: { click: add },
+      }),
     ]);
   }
 
