@@ -3227,6 +3227,7 @@ const strings = {
     network: "Сетевое оборудование",
     sensors: "Датчики",
     panel: "Щит",
+    plumbing: "Сантехника",
   },
   types: {
     spot: "Точечный светильник",
@@ -3254,6 +3255,8 @@ const strings = {
     smoke: "Датчик дыма",
     panel: "Электрощит",
     panelLow: "Слаботочный щит",
+    waterOutlet: "Водорозетка",
+    sewer: "Выход канализации",
   },
   shapes: {
     circle: "Круг",
@@ -4534,6 +4537,19 @@ const TEMPLATE_CATEGORIES = [
   // контуров помещений (test/colors.test.js). Молния в квадрате — то, чем щит
   // обозначен в самой палитре («щит, автомат, силовой вывод»).
   { key: "panel", name: strings.categories.panel, color: "#6E4B1F", shape: "square-bolt" },
+  // Сантехника заведена отдельной категорией по просьбе заказчика: водорозетка
+  // и выход канализации — не электрика, и в «Климате» или «Розетках» они
+  // читались бы как электрика и красились бы её цветом.
+  //
+  // Цвет — тёмный морской. По ГОСТ 14202-69 вода на схемах зелёная, но чистый
+  // зелёный занят выключателями, поэтому взят тёмный морской: до ближайшей из
+  // семи прежних категорий (тёмная бирюза датчиков) 36,3, до зелени
+  // выключателей 37,2 — обе дальше самой близкой пары среди прежних (29,0
+  // у света с сетевым), и метка не теряется на заливке контуров помещений
+  // (test/colors.test.js). Голубой и бирюзовый, как ни просятся к воде, не
+  // проходят: между синим света, тёмной бирюзой датчиков и бледными заливками
+  // комнат там уже не остаётся места.
+  { key: "plumbing", name: strings.categories.plumbing, color: "#0A6E52", shape: "drop-dot" },
 ];
 
 const TEMPLATE_TYPES = [
@@ -4642,6 +4658,11 @@ const TEMPLATE_TYPES = [
   // электрощитом, то есть врать о том, что за дверцей. Перечёркнутый квадрат —
   // шкаф, и с молнией силового щита он не спорит.
   { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross" },
+  // Водорозетка — форма категории: капля с точкой и есть подвод воды.
+  { category: "plumbing", code: "ВР", name: strings.types.waterOutlet },
+  // Выход канализации — стрелка вниз: сток. «К» занят кондиционером, поэтому
+  // код «КН»: в подписи «КН1» читается, и ни с чем в справочнике не спорит.
+  { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain" },
 ];
 
 function newId() {
@@ -10596,7 +10617,7 @@ function labelBoxIn(project, scheme, target, state, layout) {
   const anchor = planToScreen(labelOrigin(project, target), scheme, state);
   const value = labelTextOf(project, target);
   const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
-  const place = labelPlaceOf(project, target, state, layout);
+  const place = labelPlaceOf(project, scheme, target, state, layout);
   return {
     text: value,
     x: anchor.x + place.dx * state.zoom,
@@ -10617,7 +10638,7 @@ function labelBoxIn(project, scheme, target, state, layout) {
 
 // Где стоит подпись. Оттащенная руками — строго по своему смещению: его задал
 // пользователь, и трогать его нельзя. Остальные — по месту из раскладки.
-function labelPlaceOf(project, target, state, layout) {
+function labelPlaceOf(project, scheme, target, state, layout) {
   const manual = labelOffsetOf(project, target);
   if (manual) return { dx: manual.dx, dy: manual.dy, row: 0, crowded: false };
   const place = layout.get(labelKeyOf(target));
@@ -10625,7 +10646,13 @@ function labelPlaceOf(project, target, state, layout) {
   // Цели в раскладке нет — значит она в неё и не входила: метку спрятал фильтр
   // или она с другой схемы. Такая подпись не рисуется; место ей даётся
   // стандартное, то самое, где подпись стояла всегда.
-  const [slot] = labelSlots(labelPlanSizes(state).gap, labelSpan(0, 0, 0), 0);
+  const [slot] = labelSlots(
+    labelPlanSizes(state).gap,
+    labelSpan(0, 0, 0),
+    0,
+    { left: 0, right: 0 },
+    labelLeadSide(project, scheme, target),
+  );
   return { dx: slot.dx, dy: slot.dy, row: 0, crowded: false };
 }
 
@@ -10692,6 +10719,29 @@ function labelPlanSizes(state) {
   return { font: Math.max(6, state.labelSize), gap: radius * LABEL_GAP, radius };
 }
 
+// Куда уходить подписи линии. У точки подпись встаёт справа и ни с чем не
+// спорит, а у ломаной справа от первой вершины лежит она сама: линия, идущая
+// вправо, проходит ровно под своей подписью. Заказчик: «по направлению первого
+// сегмента» — значит подпись уходит **поперёк** этого направления.
+//
+// Почти вертикальная первая сторона правила не меняет: подпись справа от неё
+// и так в стороне от линии. Почти горизонтальная уводит подпись по вертикали —
+// вверх, а если сегмент сам идёт вверх, то вниз: в обе стороны от линии
+// одинаково свободно, и выбирается та, куда линия не пошла.
+//
+// Считается в пикселях плана: план бывает 1000×500, и «горизонтальнее ли»
+// решается тем же счётом, что угол отрезка.
+function labelLeadSide(project, scheme, target) {
+  const lead = labelLead(project, target);
+  const points = (lead && lead.kind === "line" && lead.points) || [];
+  if (points.length < 2) return null;
+  const dx = (points[1].x - points[0].x) * schemeWidth(scheme);
+  const dy = (points[1].y - points[0].y) * schemeHeight(scheme);
+  if (Math.abs(dx) < Math.abs(dy)) return null;
+  if (dx === 0 && dy === 0) return null;
+  return { sign: dy >= 0 ? -1 : 1 };
+}
+
 // Места вокруг метки в порядке убывания желанности.
 //
 // Первое — **справа, на уровне метки**: заказчик просил подпись «не сверху
@@ -10702,7 +10752,7 @@ function labelPlanSizes(state) {
 //
 // `dx` — смещение левого края подписи, `dy` — её середины: слева подпись
 // отодвигается на всю свою ширину.
-function labelSlots(gap, span, angle, reach = { left: 0, right: 0 }) {
+function labelSlots(gap, span, angle, reach = { left: 0, right: 0 }, lead = null) {
   const tall = span.bottom - span.top;
   // Шаг ряда — высота подписи и два просвета: соседние ряды обязаны разойтись
   // с запасом, иначе проверка наложения упирается в ноль и решает исход по
@@ -10721,6 +10771,19 @@ function labelSlots(gap, span, angle, reach = { left: 0, right: 0 }) {
     { dx: right, dy: middle, row: 0 },
     { dx: left, dy: middle, row: 0 },
   ];
+  // У линии первыми пробуются места над началом и под ним: вбок от первой
+  // вершины идёт сама линия. Ближний край подписи отстоит от точки привязки на
+  // тот же просвет `gap`, что и у боковых мест, — мера одна.
+  if (lead) {
+    const away = { dy: lead.sign < 0 ? -gap - span.bottom : gap - span.top };
+    const back = { dy: lead.sign < 0 ? gap - span.top : -gap - span.bottom };
+    slots.unshift(
+      { dx: right, dy: away.dy, row: 0 },
+      { dx: left, dy: away.dy, row: 0 },
+      { dx: right, dy: back.dy, row: 0 },
+      { dx: left, dy: back.dy, row: 0 },
+    );
+  }
   for (let row = 1; row <= LABEL_ROWS; row += 1) {
     const up = middle - row * step;
     const down = middle + row * step;
@@ -10761,6 +10824,7 @@ function labelPlanBox(project, scheme, target, sizes) {
   const origin = labelOrigin(project, target);
   const text = labelTextOf(project, target);
   const reach = labelReach(project, target);
+  const lead = labelLeadSide(project, scheme, target);
   const width = schemeWidth(scheme);
   return {
     text,
@@ -10770,6 +10834,7 @@ function labelPlanBox(project, scheme, target, sizes) {
     height: sizes.font * 1.2,
     angle: labelAngleOf(project, target),
     reach: { left: reach.left * width, right: reach.right * width },
+    lead,
   };
 }
 
@@ -10848,6 +10913,7 @@ function labelPlaceAll(project, scheme, filter, sizes) {
       labelSpan(entry.box.width, entry.box.height, entry.box.angle),
       entry.box.angle,
       entry.box.reach,
+      entry.box.lead,
     );
     let best = null;
     for (const slot of slots) {

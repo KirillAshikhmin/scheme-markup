@@ -308,3 +308,30 @@ test("цвет щита разведён с каждой прежней кате
     }
   }
 });
+
+// Сантехника заведена отдельной категорией по просьбе заказчика: водорозетка и
+// выход канализации — не электрика. Цвет ей, как и щиту, выбран счётом.
+// По ГОСТ 14202-69 вода на схемах зелёная, но чистый зелёный занят
+// выключателями, поэтому взят тёмный морской.
+test("цвет сантехники разведён с каждой прежней категорией", () => {
+  const categories = createProject({ name: "Тест" }).categories;
+  const plumbing = categories.find((category) => category.name === "Сантехника");
+  assert.ok(plumbing, "категории сантехники нет в стартовом справочнике");
+  assert.equal(plumbing.color, "#0A6E52");
+
+  let nearest = Infinity;
+  let neighbour = "";
+  for (const category of categories) {
+    if (category === plumbing) continue;
+    const distance = colorDistance(plumbing.color, category.color);
+    if (distance < nearest) {
+      nearest = distance;
+      neighbour = category.name;
+    }
+  }
+  // Двадцать девять — разрыв самой близкой пары прежних категорий. Новый цвет
+  // обязан быть не ближе; ближайшие соседи — тёмная бирюза датчиков (36,3) и
+  // зелень выключателей (37,2), и оба дальше этого разрыва.
+  assert.ok(nearest >= 29, "сантехника ближе всех к «" + neighbour + "»: " + nearest.toFixed(1));
+  assert.equal(neighbour, "Датчики", "ближайшим соседом стал не тот цвет: " + neighbour);
+});

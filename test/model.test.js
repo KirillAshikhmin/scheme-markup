@@ -52,8 +52,8 @@ import {
 
 test("стартовый справочник: типы из брифа, переключатель, витая пара и категория датчиков", () => {
   const template = defaultTemplate();
-  assert.equal(template.categories.length, 7);
-  assert.equal(template.markTypes.length, 25);
+  assert.equal(template.categories.length, 8);
+  assert.equal(template.markTypes.length, 27);
 
   const byName = Object.fromEntries(template.categories.map((c) => [c.name, c]));
   assert.deepEqual(
@@ -99,7 +99,8 @@ test("стартовый справочник: типы из брифа, пер�
     // шкафа, а не в хвосте списка. Остальные тринадцать — из брифа.
     // prettier-ignore
     ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ",
-     "В", "ВВ", "ВВВ", "ВП", "Р", "Б", "К", "W", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС"],
+     "В", "ВВ", "ВВВ", "ВП", "Р", "Б", "К", "W", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС",
+     "ВР", "КН"],
   );
   // Названия — данные заказчика, поэтому пришпилены целиком: правка форм и
   // добавление типов не должны их задеть ни на букву.
@@ -131,6 +132,8 @@ test("стартовый справочник: типы из брифа, пер�
       ДД: "Датчик дыма",
       Щ: "Электрощит",
       ЩС: "Слаботочный щит",
+      ВР: "Водорозетка",
+      КН: "Выход канализации",
     },
   );
   assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
@@ -152,7 +155,7 @@ test("стартовый справочник: типы из брифа, пер�
   // «В» ушёл туда же по той же причине: квадрат теперь форма выключателей.
   assert.deepEqual(
     template.markTypes.filter((t) => t.shape === null).map((t) => t.code),
-    ["В", "Р", "Б", "W", "ДД", "Щ"],
+    ["В", "Р", "Б", "W", "ДД", "Щ", "ВР"],
   );
   // Выключатели и климат — разными знаками, как просил заказчик. У «В» своего
   // знака нет: он берёт квадрат категории, а клавиши на нём считают по чертам.
@@ -169,8 +172,8 @@ test("новый объект создаётся из стартового сп�
   // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
   // вид типа — точка или линия.
   assert.equal(project.formatVersion, 3);
-  assert.equal(project.categories.length, 7);
-  assert.equal(project.markTypes.length, 25);
+  assert.equal(project.categories.length, 8);
+  assert.equal(project.markTypes.length, 27);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -484,10 +487,10 @@ test("код типа — от одной до шестнадцати букв �
   });
 
   const added = addType(project, { code: "Ш", name: "Шинопровод", categoryId: light });
-  assert.equal(added.project.markTypes.length, 26);
+  assert.equal(added.project.markTypes.length, 28);
   assert.equal(added.type.blockMode, "each");
   assert.equal(added.type.shape, null);
-  assert.equal(project.markTypes.length, 25);
+  assert.equal(project.markTypes.length, 27);
 });
 
 test("тип с метками не удаляется, свободный удаляется", () => {
@@ -497,7 +500,7 @@ test("тип с метками не удаляется, свободный уд�
 
   const freed = deleteMark(step.project, step.mark.id).project;
   const after = deleteType(freed, typeId(freed, "К")).project;
-  assert.equal(after.markTypes.length, 24);
+  assert.equal(after.markTypes.length, 26);
   assert.equal(after.markTypes.find((t) => t.code === "К"), undefined);
 });
 
@@ -537,8 +540,8 @@ test("цвет берётся у категории, форма — у типа,
 test("категории и помещения заводятся своими функциями", () => {
   const project = createProject();
   const withCategory = addCategory(project, { name: "Шторы", color: "#123456", shape: "square" });
-  assert.equal(withCategory.project.categories.length, 8);
-  assert.equal(withCategory.category.order, 7);
+  assert.equal(withCategory.project.categories.length, 9);
+  assert.equal(withCategory.category.order, 8);
 
   const withRoom = addRoom(withCategory.project, { name: "Спальная Оли" });
   assert.equal(withRoom.room.name, "Спальная Оли");
@@ -627,7 +630,7 @@ test("идентификаторы стартового справочника �
   const first = createProject();
   const second = createProject();
   const ids = [...first.categories.map((c) => c.id), ...first.markTypes.map((t) => t.id)];
-  assert.equal(new Set(ids).size, 32);
+  assert.equal(new Set(ids).size, 35);
   const otherIds = new Set([...second.categories.map((c) => c.id), ...second.markTypes.map((t) => t.id)]);
   assert.deepEqual(ids.filter((id) => otherIds.has(id)), []);
 });
@@ -680,7 +683,7 @@ test("категория удаляется только пустой, тип б
 
   const added = addCategory(project, { name: "Шторы", color: "#123456", shape: "square" });
   const after = deleteCategory(added.project, added.category.id).project;
-  assert.equal(after.categories.length, 7);
+  assert.equal(after.categories.length, 8);
 });
 
 test("имя объекта, вид и помещения правятся", () => {
@@ -1108,9 +1111,9 @@ test("общая база: пустому справочнику предлаг�
   const offer = catalogOffer(withoutDictionary(), null);
   assert.deepEqual(
     offer.map((group) => group.category.name),
-    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит"],
+    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Сантехника"],
   );
-  assert.equal(offeredCodes(offer).length, 25);
+  assert.equal(offeredCodes(offer).length, 27);
   assert.equal(offer[0].types[0].code, "Т");
   assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
 
@@ -1210,7 +1213,7 @@ test("сохранённый шаблон побеждает встроенны�
   // а не место — привычный справочник не перетасовывается.
   assert.deepEqual(
     offer.map((group) => group.category.name),
-    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Шторы"],
+    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Сантехника", "Шторы"],
   );
   const light = offer.find((group) => group.category.name === "Свет");
   assert.deepEqual(light.types[0], {
@@ -1495,4 +1498,64 @@ test("поля «Расположение» и «В оригинале» смы�
   assert.equal(mark.number, 3, "номер не сомкнулся");
   assert.equal(mark.location, "над тумбой слева");
   assert.equal(mark.original, "Т4 по проекту электрика", "текстовое поле правили — там обозначение из чужого проекта");
+});
+
+// Заказчик: «сантехнику отдельной категорией». Водорозетка и выход канализации
+// нарисованы в палитре, но в электрике им не место: цвет у нас читается как
+// категория, и в «Розетках» они красились бы красным силовой розетки.
+test("сантехника — своя категория шаблона с водорозеткой и выходом канализации", () => {
+  const template = defaultTemplate();
+  const plumbing = template.categories.find((category) => category.name === "Сантехника");
+  assert.ok(plumbing, "категории сантехники нет в шаблоне");
+  assert.equal(plumbing.shape, "drop-dot", "у категории не тот знак");
+  // Стоит последней: прежние категории не перетасованы, привычный порядок цел.
+  assert.equal(template.categories[template.categories.length - 1].name, "Сантехника");
+
+  const types = template.markTypes.filter((type) => type.categoryId === plumbing.id);
+  assert.deepEqual(
+    types.map((type) => [type.code, type.name, type.shape]),
+    [
+      ["ВР", "Водорозетка", null],
+      ["КН", "Выход канализации", "circle-drain"],
+    ],
+  );
+  // Коды свободны: «К» занят кондиционером, «В» и «ВВ» — выключателями.
+  assert.equal(template.markTypes.filter((type) => type.code === "ВР").length, 1);
+  assert.equal(template.markTypes.filter((type) => type.code === "КН").length, 1);
+  // Оба типа точечные: сантехнику ставят точкой, а не тянут линией.
+  assert.deepEqual(types.map((type) => type.kind), ["point", "point"]);
+});
+
+// Правка стартового шаблона не доезжает до размеченного объекта сама — справочник
+// копируется при создании. Новая категория попадает туда кнопкой «Добавить из
+// общей базы», и вместе с типом заводится сама категория со своим цветом.
+test("сантехника доезжает до прежнего объекта через общую базу", () => {
+  const project = createProject();
+  const plumbing = project.categories.find((category) => category.name === "Сантехника");
+  // Объект прежней разметки: сантехники в справочнике нет вовсе.
+  const older = {
+    ...project,
+    categories: project.categories.filter((category) => category.id !== plumbing.id),
+    markTypes: project.markTypes.filter((type) => type.categoryId !== plumbing.id),
+  };
+  assert.equal(older.markTypes.length, 25, "пример не тот: в прежнем объекте 25 типов");
+
+  const offered = catalogOffer(older, null).find((group) => group.category.name === "Сантехника");
+  assert.ok(offered, "общая база не предлагает сантехнику объекту, где её нет");
+  assert.deepEqual(offered.types.map((type) => type.code), ["ВР", "КН"]);
+  assert.equal(offered.category.existingId, null, "категории в объекте ещё нет");
+
+  const result = addTypesFromCatalog(older, null, ["ВР", "КН"]);
+  const added = result.project.categories.find((category) => category.name === "Сантехника");
+  assert.ok(added, "категория не завелась вместе с типами");
+  assert.equal(added.color, "#0A6E52", "категория приехала с чужим цветом");
+  assert.deepEqual(
+    result.project.markTypes.filter((type) => type.categoryId === added.id).map((type) => type.code),
+    ["ВР", "КН"],
+  );
+  // Прежний справочник не тронут: ни один старый тип не поехал.
+  assert.deepEqual(
+    result.project.markTypes.slice(0, older.markTypes.length).map((type) => type.code),
+    older.markTypes.map((type) => type.code),
+  );
 });

@@ -7,6 +7,7 @@ import {
   hitHandle,
   hitTest,
   drawLegend,
+  labelBounds,
   labelBox,
   labelLayout,
   labelLead,
@@ -336,7 +337,7 @@ test("справочник упорядочен один раз: категор�
   const groups = typesInOrder(base.project);
   assert.deepEqual(
     groups.map((group) => group.category.name),
-    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит"],
+    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Сантехника"],
   );
   // prettier-ignore
   assert.deepEqual(groups[0].types.map((type) => type.code), ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ"]);
@@ -678,17 +679,84 @@ test("подпись по умолчанию встаёт справа от ме
   assert.equal(blockBox.y, 400, "подпись блока не на уровне его меток");
   assert.equal(blockBox.x, 240 + gap, "подпись блока встала не за крайней его меткой");
 
-  // Ломаная: подпись у первой вершины, по тому же правилу.
+  // Ломаная — исключение, и оно разобрано отдельным тестом ниже: вбок от
+  // первой вершины у неё идёт сама линия.
+});
+
+// Заказчик: «да, по направлению первого сегмента». Подпись линии уходит
+// **поперёк** направления, которым линия началась, — иначе линия, идущая
+// вправо, проходит ровно под своей подписью.
+test("подпись линии уходит в сторону от направления первого сегмента", () => {
+  const base = world();
   const tape = addType(base.project, { code: "ЛЛ", name: "Лента", categoryId: base.project.categories[0].id, kind: "line" });
-  const line = addMark(tape.project, {
+  const view = viewOf();
+  const gap = 10 * renderInternals.LABEL_GAP;
+  const drawn = (points) => {
+    const line = addMark(tape.project, { schemeId: base.schemeId, typeId: tape.type.id, kind: "line", points });
+    return labelBox(line.project, line.project.schemes[0], line.mark, view);
+  };
+  // Метка стоит в (300, 100) на плане 1000×500.
+  const start = { x: 0.3, y: 0.2 };
+
+  // Линия вправо — подпись над началом, и её нижний край в просвете от него.
+  const right = drawn([start, { x: 0.6, y: 0.2 }]);
+  const lying = labelBounds(right);
+  assert.ok(lying.y + lying.height <= 100 - gap + 0.001, "подпись легла на линию, идущую вправо");
+  assert.equal(right.x, 300 + gap, "подпись линии ушла не вбок от начала");
+
+  // Линия вверх-вправо — подпись снизу: туда линия не пошла.
+  const up = labelBounds(drawn([start, { x: 0.6, y: 0.05 }]));
+  assert.ok(up.y >= 100 + gap - 0.001, "подпись линии, идущей вверх, осталась сверху");
+
+  // Почти вертикальная — правило прежнее, вбок: там линии нет.
+  const down = drawn([start, { x: 0.32, y: 0.8 }]);
+  assert.equal(down.y, 100, "у вертикальной линии подпись съехала с уровня вершины");
+  assert.equal(down.x, 300 + gap);
+
+  // Линия из двух точек и замкнутая считаются по тому же первому сегменту.
+  const two = labelBounds(drawn([start, { x: 0.5, y: 0.21 }]));
+  assert.ok(two.y + two.height <= 100 - gap + 0.001, "линия из двух точек считается иначе");
+  const closed = addMark(tape.project, {
+    schemeId: base.schemeId,
+    typeId: tape.type.id,
+    kind: "line",
+    points: [start, { x: 0.6, y: 0.2 }, { x: 0.6, y: 0.5 }, { x: 0.3, y: 0.5 }],
+  });
+  const ring = updateMark(closed.project, closed.mark.id, { closed: true }).project;
+  const ringBox = labelBounds(labelBox(ring, ring.schemes[0], ring.marks[0], view));
+  assert.ok(ringBox.y + ringBox.height <= 100 - gap + 0.001, "у замкнутой линии подпись легла на неё");
+});
+
+// Правило про сторону не отменяет ни раскладку, ни ручное смещение.
+test("подпись линии, сдвинутая рукой, не двигается, а тесная — разводится", () => {
+  const base = world();
+  const tape = addType(base.project, { code: "ЛЛ", name: "Лента", categoryId: base.project.categories[0].id, kind: "line" });
+  const view = viewOf();
+  const first = addMark(tape.project, {
     schemeId: base.schemeId,
     typeId: tape.type.id,
     kind: "line",
     points: [{ x: 0.3, y: 0.2 }, { x: 0.6, y: 0.2 }],
   });
-  const lineBox = labelBox(line.project, line.project.schemes[0], line.mark, view);
-  assert.equal(lineBox.y, 100, "подпись линии не на уровне её первой вершины");
-  assert.equal(lineBox.x, 300 + gap, "подпись линии не справа от первой вершины");
+  // Вторая линия начинается там же: их подписям придётся разойтись.
+  const second = addMark(first.project, {
+    schemeId: base.schemeId,
+    typeId: tape.type.id,
+    kind: "line",
+    points: [{ x: 0.31, y: 0.205 }, { x: 0.62, y: 0.205 }],
+  });
+  const scheme = second.project.schemes[0];
+  const boxes = second.project.marks.map((mark) => labelBounds(labelBox(second.project, scheme, mark, view)));
+  const overlap =
+    Math.min(boxes[0].x + boxes[0].width, boxes[1].x + boxes[1].width) - Math.max(boxes[0].x, boxes[1].x) > 0 &&
+    Math.min(boxes[0].y + boxes[0].height, boxes[1].y + boxes[1].height) - Math.max(boxes[0].y, boxes[1].y) > 0;
+  assert.equal(overlap, false, "подписи двух линий наехали друг на друга");
+
+  // Сдвинутая рукой стоит там, куда её поставили, и правило стороны ей не указ.
+  const moved = updateMark(second.project, first.mark.id, { labelOffset: { dx: 40, dy: 60 } }).project;
+  const hand = labelBox(moved, scheme, moved.marks[0], view);
+  assert.equal(hand.x, 300 + 40);
+  assert.equal(hand.y, 100 + 60);
 });
 
 // Правка умолчания меняет вид уже размеченных планов — заказчик просит именно

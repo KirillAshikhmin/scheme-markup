@@ -45,6 +45,7 @@ export const strings = {
     network: "Сетевое оборудование",
     sensors: "Датчики",
     panel: "Щит",
+    plumbing: "Сантехника",
   },
   types: {
     spot: "Точечный светильник",
@@ -72,6 +73,8 @@ export const strings = {
     smoke: "Датчик дыма",
     panel: "Электрощит",
     panelLow: "Слаботочный щит",
+    waterOutlet: "Водорозетка",
+    sewer: "Выход канализации",
   },
   shapes: {
     circle: "Круг",
