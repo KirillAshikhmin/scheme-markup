@@ -20,12 +20,15 @@ import {
   createProject,
   findMark,
   insertMarkPoint,
+  insertOutlinePoint,
   moveMarkPoint,
   moveOutlinePoint,
   removeMarkPoint,
+  removeOutlinePoint,
   updateMark,
 } from "../src/model.js";
 import { canvasHintText } from "../src/canvas.js";
+import { hitPathHandle, outlineHandles, pathVertexHandles } from "../src/render.js";
 import { strings } from "../src/strings.js";
 
 const LINE = [
@@ -143,9 +146,93 @@ test("в правке линии подсказка рассказывает п�
     layout: "desktop",
     ...patch,
   });
-  assert.equal(canvasHintText(stateOf({ editLineId: base.markId })), strings.canvas.hintLineEdit);
+  assert.equal(canvasHintText(stateOf({ editPathId: base.markId })), strings.canvas.hintLineEdit);
   // Линии уже нет — подсказка возвращается к обычной: обещать правку нечему.
-  assert.equal(canvasHintText(stateOf({ editLineId: "нет-такой-метки" })), strings.canvas.hintSelect);
+  assert.equal(canvasHintText(stateOf({ editPathId: "нет-такой-метки" })), strings.canvas.hintSelect);
   // В просмотре правки нет вовсе.
-  assert.equal(canvasHintText(stateOf({ editLineId: base.markId, layout: "mobile" })), strings.mobile.viewOnly);
+  assert.equal(canvasHintText(stateOf({ editPathId: base.markId, layout: "mobile" })), strings.mobile.viewOnly);
+});
+
+// G95: «двойной клик по контуру комнаты — тоже давай править его». Жест один на
+// оба объекта, и разница между ними осталась ровно одна — предел вершин.
+test("у контура те же три действия, но меньше трёх вершин он не живёт", () => {
+  const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });
+  const room = addRoom(made.project, "Гостиная");
+  const outlined = addOutline(room.project, {
+    schemeId: made.scheme.id,
+    roomId: room.room.id,
+    points: [
+      { x: 0.1, y: 0.1 },
+      { x: 0.6, y: 0.1 },
+      { x: 0.6, y: 0.5 },
+      { x: 0.1, y: 0.5 },
+    ],
+  });
+  const id = outlined.outline.id;
+  const pointsOfOutline = (project) => project.outlines[0].points;
+
+  const moved = moveOutlinePoint(outlined.project, id, 1, { x: 0.7, y: 0.12 }).project;
+  assert.deepEqual(pointsOfOutline(moved)[1], { x: 0.7, y: 0.12 });
+
+  const added = insertOutlinePoint(moved, id, 0, { x: 0.35, y: 0.1 }).project;
+  assert.equal(pointsOfOutline(added).length, 5);
+
+  let shorter = removeOutlinePoint(added, id, 0).project;
+  shorter = removeOutlinePoint(shorter, id, 0).project;
+  assert.equal(pointsOfOutline(shorter).length, 3);
+  // Дальше нельзя: линия живёт от двух вершин, контур от трёх.
+  assert.throws(() => removeOutlinePoint(shorter, id, 0), { code: "shortOutline" });
+});
+
+test("ручки вершин у контура и у линии считаются одним кодом", () => {
+  const base = scene();
+  const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
+  const points = findMark(base.project, base.markId).points;
+  const handles = pathVertexHandles(base.scheme, points, view);
+  assert.equal(handles.length, points.length, "ручек не по вершине на каждую");
+  assert.deepEqual(
+    handles.map((handle) => handle.kind),
+    points.map(() => "vertex"),
+  );
+  // Контур спрашивает те же ручки — его собственных больше нет.
+  const outlinePoints = [
+    { x: 0.1, y: 0.1 },
+    { x: 0.6, y: 0.1 },
+    { x: 0.6, y: 0.5 },
+  ];
+  assert.deepEqual(
+    outlineHandles(base.scheme, { points: outlinePoints }, view),
+    pathVertexHandles(base.scheme, outlinePoints, view),
+  );
+  // Ручка ловится по своему квадрату и не ловит клик в стороне.
+  const first = handles[0];
+  assert.equal(hitPathHandle(handles, { x: first.x + 1, y: first.y - 1 }), first);
+  assert.equal(hitPathHandle(handles, { x: first.x + first.r * 4, y: first.y }), null);
+});
+
+// Подсказка у контура своя: предел вершин у него другой, и обещать «от двух»
+// было бы враньём.
+test("в правке контура подсказка своя", () => {
+  const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });
+  const room = addRoom(made.project, "Гостиная");
+  const outlined = addOutline(room.project, {
+    schemeId: made.scheme.id,
+    roomId: room.room.id,
+    points: [
+      { x: 0.1, y: 0.1 },
+      { x: 0.6, y: 0.1 },
+      { x: 0.6, y: 0.5 },
+    ],
+  });
+  const state = {
+    project: outlined.project,
+    schemeId: made.scheme.id,
+    activeTypeId: null,
+    activeRoomId: null,
+    mode: "select",
+    layout: "desktop",
+    editPathId: outlined.outline.id,
+  };
+  assert.equal(canvasHintText(state), strings.canvas.hintOutlineEdit);
+  assert.notEqual(strings.canvas.hintOutlineEdit, strings.canvas.hintLineEdit);
 });

@@ -1986,24 +1986,10 @@ export function hitPathHandle(handles, point) {
   return null;
 }
 
-// Ручки правки: вершины (их двигают и удаляют) и «+» на середине каждой стенки
-// (по нему вершина добавляется). Замыкающая стенка — такая же, как все.
+// Ручки правки контура — те же квадраты на вершинах, что у ломаной метки:
+// после того, как правка свелась в один жест, своих ручек у контура нет.
 export function outlineHandles(scheme, outline, view) {
-  const state = renderView(view);
-  const screen = outlineScreen(scheme, outline, state);
-  const handles = [];
-  pathVertexHandles(scheme, outline.points, state).forEach((handle, index) => {
-    handles.push(handle);
-    const next = screen[(index + 1) % screen.length];
-    handles.push({
-      kind: "insert",
-      index,
-      x: (screen[index].x + next.x) / 2,
-      y: (screen[index].y + next.y) / 2,
-      r: OUTLINE_HANDLE_PX - 1,
-    });
-  });
-  return handles;
+  return pathVertexHandles(scheme, outline.points, renderView(view));
 }
 
 /**
@@ -2148,41 +2134,21 @@ export function drawOutlines(ctx, { project, scheme, filter, view, mode, selecte
   }
 }
 
-// Ручки выделенного контура: квадрат на вершине, «+» на середине стенки.
-export function drawOutlineHandles(ctx, scheme, outline, view, color) {
-  drawPathHandles(ctx, outlineHandles(scheme, outline, renderView(view)), color);
-}
-
 // Рисование ручек пути. Квадрат — вершина, кружок с «+» — вставка: один вид у
 // контура помещения и у ломаной метки.
 export function drawPathHandles(ctx, handles, color) {
   const tint = color || "#0969da";
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.strokeStyle = tint;
+  ctx.lineWidth = 1.5;
   for (const handle of handles) {
-    ctx.save();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-    ctx.strokeStyle = tint;
-    ctx.lineWidth = 1.5;
-    if (handle.kind === "vertex") {
-      ctx.beginPath();
-      ctx.rect(handle.x - handle.r, handle.y - handle.r, handle.r * 2, handle.r * 2);
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
-      ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      const arm = handle.r * 0.55;
-      ctx.moveTo(handle.x - arm, handle.y);
-      ctx.lineTo(handle.x + arm, handle.y);
-      ctx.moveTo(handle.x, handle.y - arm);
-      ctx.lineTo(handle.x, handle.y + arm);
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-    ctx.restore();
+    ctx.beginPath();
+    ctx.rect(handle.x - handle.r, handle.y - handle.r, handle.r * 2, handle.r * 2);
+    ctx.fill();
+    ctx.stroke();
   }
+  ctx.restore();
 }
 
 // ——— попадание ———————————————————————————————————————————————————————

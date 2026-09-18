@@ -28,9 +28,9 @@ const appState = {
   project: null,
   schemeId: null,
   selectedMarkIds: [],
-  // Ломаная в правке: у неё видны ручки вершин. Режим руки, а не свойство
+  // Путь в правке: у него видны ручки вершин. Режим руки, а не свойство
   // разметки, — в объект и в файл проекта он не попадает.
-  editLineId: null,
+  editPathId: null,
   activeTypeId: null,
   mode: "select",
   filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
