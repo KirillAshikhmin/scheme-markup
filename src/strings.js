@@ -75,6 +75,7 @@ export const strings = {
     panelLow: "Слаботочный щит",
     waterOutlet: "Водорозетка",
     sewer: "Выход канализации",
+    waterValve: "Кран воды с электроприводом",
   },
   shapes: {
     circle: "Круг",

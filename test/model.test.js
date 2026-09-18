@@ -57,7 +57,7 @@ import {
 test("стартовый справочник: типы из брифа, переключатель, витая пара и категория датчиков", () => {
   const template = defaultTemplate();
   assert.equal(template.categories.length, 8);
-  assert.equal(template.markTypes.length, 27);
+  assert.equal(template.markTypes.length, 28);
 
   const byName = Object.fromEntries(template.categories.map((c) => [c.name, c]));
   assert.deepEqual(
@@ -104,7 +104,7 @@ test("стартовый справочник: типы из брифа, пер�
     // prettier-ignore
     ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ",
      "В", "ВВ", "ВВВ", "ВП", "Р", "Б", "К", "W", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС",
-     "ВР", "КН"],
+     "ВР", "КН", "КВ"],
   );
   // Названия — данные заказчика, поэтому пришпилены целиком: правка форм и
   // добавление типов не должны их задеть ни на букву.
@@ -138,6 +138,7 @@ test("стартовый справочник: типы из брифа, пер�
       ЩС: "Слаботочный щит",
       ВР: "Водорозетка",
       КН: "Выход канализации",
+      КВ: "Кран воды с электроприводом",
     },
   );
   assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
@@ -177,7 +178,7 @@ test("новый объект создаётся из стартового сп�
   // вид типа — точка или линия.
   assert.equal(project.formatVersion, 3);
   assert.equal(project.categories.length, 8);
-  assert.equal(project.markTypes.length, 27);
+  assert.equal(project.markTypes.length, 28);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -491,10 +492,10 @@ test("код типа — от одной до шестнадцати букв �
   });
 
   const added = addType(project, { code: "Ш", name: "Шинопровод", categoryId: light });
-  assert.equal(added.project.markTypes.length, 28);
+  assert.equal(added.project.markTypes.length, 29);
   assert.equal(added.type.blockMode, "each");
   assert.equal(added.type.shape, null);
-  assert.equal(project.markTypes.length, 27);
+  assert.equal(project.markTypes.length, 28);
 });
 
 test("тип с метками не удаляется, свободный удаляется", () => {
@@ -504,7 +505,7 @@ test("тип с метками не удаляется, свободный уд�
 
   const freed = deleteMark(step.project, step.mark.id).project;
   const after = deleteType(freed, typeId(freed, "К")).project;
-  assert.equal(after.markTypes.length, 26);
+  assert.equal(after.markTypes.length, 27);
   assert.equal(after.markTypes.find((t) => t.code === "К"), undefined);
 });
 
@@ -634,7 +635,7 @@ test("идентификаторы стартового справочника �
   const first = createProject();
   const second = createProject();
   const ids = [...first.categories.map((c) => c.id), ...first.markTypes.map((t) => t.id)];
-  assert.equal(new Set(ids).size, 35);
+  assert.equal(new Set(ids).size, 36);
   const otherIds = new Set([...second.categories.map((c) => c.id), ...second.markTypes.map((t) => t.id)]);
   assert.deepEqual(ids.filter((id) => otherIds.has(id)), []);
 });
@@ -1117,7 +1118,7 @@ test("общая база: пустому справочнику предлаг�
     offer.map((group) => group.category.name),
     ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Сантехника"],
   );
-  assert.equal(offeredCodes(offer).length, 27);
+  assert.equal(offeredCodes(offer).length, 28);
   assert.equal(offer[0].types[0].code, "Т");
   assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
 
@@ -1507,7 +1508,7 @@ test("поля «Расположение» и «В оригинале» смы�
 // Заказчик: «сантехнику отдельной категорией». Водорозетка и выход канализации
 // нарисованы в палитре, но в электрике им не место: цвет у нас читается как
 // категория, и в «Розетках» они красились бы красным силовой розетки.
-test("сантехника — своя категория шаблона с водорозеткой и выходом канализации", () => {
+test("сантехника — своя категория шаблона с водорозеткой, канализацией и краном", () => {
   const template = defaultTemplate();
   const plumbing = template.categories.find((category) => category.name === "Сантехника");
   assert.ok(plumbing, "категории сантехники нет в шаблоне");
@@ -1521,13 +1522,19 @@ test("сантехника — своя категория шаблона с в�
     [
       ["ВР", "Водорозетка", null],
       ["КН", "Выход канализации", "circle-drain"],
+      // Кран воды с электроприводом — по просьбе заказчика («кран в
+      // сантехнику»). Знак в палитре уже был: круг с бабочкой — так рисуют
+      // запорный кран.
+      ["КВ", "Кран воды с электроприводом", "circle-valve"],
     ],
   );
-  // Коды свободны: «К» занят кондиционером, «В» и «ВВ» — выключателями.
+  // Коды свободны: «К» занят кондиционером, «В» и «ВВ» — выключателями,
+  // «КШ» — карнизом штор.
   assert.equal(template.markTypes.filter((type) => type.code === "ВР").length, 1);
   assert.equal(template.markTypes.filter((type) => type.code === "КН").length, 1);
-  // Оба типа точечные: сантехнику ставят точкой, а не тянут линией.
-  assert.deepEqual(types.map((type) => type.kind), ["point", "point"]);
+  assert.equal(template.markTypes.filter((type) => type.code === "КВ").length, 1);
+  // Все три типа точечные: сантехнику ставят точкой, а не тянут линией.
+  assert.deepEqual(types.map((type) => type.kind), ["point", "point", "point"]);
 });
 
 // Правка стартового шаблона не доезжает до размеченного объекта сама — справочник
@@ -1546,22 +1553,53 @@ test("сантехника доезжает до прежнего объекта
 
   const offered = catalogOffer(older, null).find((group) => group.category.name === "Сантехника");
   assert.ok(offered, "общая база не предлагает сантехнику объекту, где её нет");
-  assert.deepEqual(offered.types.map((type) => type.code), ["ВР", "КН"]);
+  assert.deepEqual(offered.types.map((type) => type.code), ["ВР", "КН", "КВ"]);
   assert.equal(offered.category.existingId, null, "категории в объекте ещё нет");
 
-  const result = addTypesFromCatalog(older, null, ["ВР", "КН"]);
+  const result = addTypesFromCatalog(older, null, ["ВР", "КН", "КВ"]);
   const added = result.project.categories.find((category) => category.name === "Сантехника");
   assert.ok(added, "категория не завелась вместе с типами");
-  assert.equal(added.color, "#0A6E52", "категория приехала с чужим цветом");
+  assert.equal(added.color, "#E80098", "категория приехала с чужим цветом");
   assert.deepEqual(
     result.project.markTypes.filter((type) => type.categoryId === added.id).map((type) => type.code),
-    ["ВР", "КН"],
+    ["ВР", "КН", "КВ"],
   );
   // Прежний справочник не тронут: ни один старый тип не поехал.
   assert.deepEqual(
     result.project.markTypes.slice(0, older.markTypes.length).map((type) => type.code),
     older.markTypes.map((type) => type.code),
   );
+});
+
+// Цвет категории в шаблоне сменили — но шаблон правит только новые объекты.
+// Слова заказчика: «все изменения не должны ломать текущий проект». У кого
+// сантехника уже заведена, тот открывает объект в своём прежнем цвете, и
+// кнопка «Добавить из общей базы» приносит новый тип, ничего не перекрашивая.
+test("новый цвет сантехники не трогает объект, где она уже заведена", () => {
+  const { project: base, first } = projectWithSchemes();
+  const plumbing = findCategoryByName(base, "Сантехника");
+  // Объект прежней разметки: сантехника заведена тёмным морским, крана в
+  // справочнике ещё нет, водорозетка уже поставлена на план.
+  let older = updateCategory(base, plumbing.id, { color: "#0A6E52" }).project;
+  older = { ...older, markTypes: older.markTypes.filter((type) => type.code !== "КВ") };
+  const placed = putPoint(older, first.id, "ВР");
+  older = placed.project;
+  assert.equal(styleOf(older, typeId(older, "ВР")).color, "#0A6E52");
+
+  const after = addTypesFromCatalog(older, null, ["КВ"]).project;
+  const category = findCategoryByName(after, "Сантехника");
+  assert.equal(category.id, plumbing.id, "категория завелась второй раз");
+  assert.equal(category.color, "#0A6E52", "объект перекрасило вслед за шаблоном");
+  assert.equal(styleOf(after, typeId(after, "ВР")).color, "#0A6E52", "водорозетка сменила цвет");
+  assert.equal(labelOf(after, placed.mark.id), "ВР1", "подпись метки поехала");
+
+  // Кран приехал в ту же категорию и красится её цветом, а не шаблонным.
+  const valve = after.markTypes.find((type) => type.code === "КВ");
+  assert.equal(valve.categoryId, category.id);
+  assert.deepEqual(styleOf(after, valve.id), { color: "#0A6E52", shape: "circle-valve", lineStyle: "solid" });
+
+  // А новый объект заводится уже с новым цветом: шаблон и объект живут порознь.
+  assert.equal(findCategoryByName(createProject(), "Сантехника").color, "#E80098");
 });
 
 // ——— принятые предупреждения ————————————————————————————————————————
