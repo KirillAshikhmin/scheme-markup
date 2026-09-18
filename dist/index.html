@@ -3606,6 +3606,10 @@ const strings = {
     addEquipment: "новая модель оборудования",
     editEquipment: "правка модели оборудования",
     removeEquipment: "удаление модели оборудования",
+    addEquipmentType: "новый тип оборудования",
+    editEquipmentType: "правка типа оборудования",
+    removeEquipmentType: "удаление типа оборудования",
+    seedEquipmentTypes: "стартовые типы оборудования",
     addPlacement: "размещение оборудования",
     editPlacement: "правка размещения",
     removePlacement: "снятие оборудования",
@@ -3636,6 +3640,8 @@ const strings = {
     equipmentNotFound: "Модель оборудования не найдена",
     placementNotFound: "Размещённая единица не найдена",
     equipmentInUse: "Модель «{name}» размещена ({count}) — сперва уберите единицы",
+    equipmentTypeNotFound: "Тип оборудования не найден",
+    equipmentTypeInUse: "Тип «{name}» стоит у моделей ({count}) — сперва смените им тип",
     schemeNotFound: "Схема не найдена",
     typeNotFound: "Тип метки не найден",
     markNotFound: "Метка не найдена",
@@ -4022,6 +4028,87 @@ const strings = {
     needModel: "Сначала заведите модель в справочнике",
     count: "Оборудование: {count}",
     onMark: "Оборудование на этой метке",
+    // ——— тип оборудования ———
+    type: "Тип",
+    typeNone: "Без типа",
+    typeAll: "Все типы",
+    types: "Типы оборудования",
+    typeName: "Название типа",
+    typeNamePlaceholder: "Реле 2 канала",
+    addType: "Добавить тип",
+    removeType: "Удалить тип",
+    removeTypeTitle: "Удалить тип?",
+    removeTypeMessage: "Тип «{name}» исчезнет из справочника объекта.",
+    typesEmpty: "Типов пока нет",
+    typesUsed: "моделей: {count}",
+    // Объект, размеченный до появления типов, открывается с пустым
+    // справочником: стартовый набор в него не заезжает сам. Кнопка предлагает
+    // его завести — решение остаётся за инженером.
+    typesSeed: "Завести стартовый набор",
+    typesSeedHint: "В объекте типов нет — можно взять готовый список и править его дальше",
+    typesSeedDone: "Типов заведено: {count}",
+  },
+  // Стартовый справочник типов оборудования. Две части: то, что на плане
+  // размечено меткой, и то, что ставят, но меткой не помечают, — начинка щита
+  // и обвязка. Список копируется в новый объект и дальше живёт в нём.
+  equipmentTypes: {
+    spot: "Светильник точечный",
+    lamp: "Светильник",
+    strip: "Светодиодная лента",
+    track: "Трековый светильник",
+    switchUnit: "Выключатель",
+    socket: "Розетка",
+    breezer: "Бризер",
+    conditioner: "Кондиционер",
+    wifi: "Точка доступа WiFi",
+    ethernet: "Розетка RJ45",
+    motion: "Датчик движения",
+    opening: "Датчик открытия",
+    leak: "Датчик протечки",
+    smoke: "Датчик дыма",
+    climate: "Датчик температуры и влажности",
+    waterValve: "Кран с электроприводом",
+    relay1: "Реле 1 канал",
+    relay2: "Реле 2 канала",
+    relay3: "Реле 3 канала",
+    relay4: "Реле 4 канала",
+    dimmer: "Диммер",
+    ledSingle: "Контроллер одноцветной ленты",
+    ledRgb: "Контроллер ленты RGB",
+    ledRgbw: "Контроллер ленты RGBW",
+    ledCct: "Контроллер ленты CCT",
+    power: "Блок питания",
+    button: "Беспроводная кнопка",
+    scenePanel: "Сценарная панель",
+    gateway: "Шлюз Zigbee или Z-Wave",
+    hub: "Контроллер умного дома",
+    module: "Встраиваемый модуль",
+    curtainDrive: "Привод штор",
+    thermostat: "Термостат",
+    irBlaster: "ИК-передатчик",
+    netSwitch: "Коммутатор",
+    router: "Роутер",
+    breaker: "Автоматический выключатель",
+    rcd: "УЗО или дифавтомат",
+    contactor: "Контактор",
+    enclosure: "Щит (корпус)",
+  },
+  // Окно выбора модели. Не справочник: здесь модель находят и берут, а правят
+  // её по-прежнему в справочнике объекта.
+  equipmentPicker: {
+    title: "Оборудование на метке {label}",
+    search: "Поиск: модель, производитель, артикул",
+    anyType: "Все типы",
+    anyVendor: "Все производители",
+    noVendor: "Без производителя",
+    empty: "Ничего не нашлось",
+    emptyAll: "Моделей пока нет — заведите первую прямо здесь",
+    createTitle: "Такой модели нет — завести «{name}»?",
+    createVendor: "Производитель",
+    createCode: "Артикул",
+    createType: "Тип",
+    create: "Завести и выбрать",
+    choose: "Выбрать модель",
   },
   controls: {
     title: "Чем управляет {label}",
@@ -4131,6 +4218,7 @@ const strings = {
     shape: "Форма",
     points: "Точек",
     model: "Модель",
+    equipmentType: "Тип оборудования",
     vendor: "Производитель",
     pieces: "Штук",
     noVendor: "Без производителя",
@@ -4927,7 +5015,7 @@ function defaultTemplate() {
     blockMode: "each",
     order: index,
   }));
-  return { categories, markTypes };
+  return { categories, markTypes, equipmentTypes: equipmentTypeTemplate() };
 }
 function createProject(template) {
   const source = template && template.categories && template.markTypes ? clone(template) : defaultTemplate();
@@ -4961,6 +5049,13 @@ function createProject(template) {
     // и `placementsOf`, поэтому пустых полей здесь достаточно.
     equipment: [],
     placements: [],
+    // Справочник типов оборудования — часть шаблона, как категории и типы
+    // меток. Шаблон, сохранённый до появления типов, их не несёт: новый объект
+    // тогда получает встроенный стартовый набор, а не пустой справочник.
+    equipmentTypes: (Array.isArray(source.equipmentTypes) && source.equipmentTypes.length > 0
+      ? source.equipmentTypes
+      : equipmentTypeTemplate()
+    ).map((type, index) => ({ ...type, order: index })),
     // Принятые предупреждения — ответы «так и задумано». Ответ живёт в объекте
     // и уезжает вместе с файлом, а не в настройках браузера: файл открывают на
     // другой машине и вторым человеком. Список читают через
@@ -6628,6 +6723,128 @@ function styleOf(project, typeId) {
 // выключателем). Поля модели — только то, чем заказывают: название,
 // производитель, артикул.
 
+// ——— типы оборудования ————————————————————————————————————————————————
+//
+// Свой справочник, не тот, что у меток. Слова заказчика: «для оборудования
+// добавь поле Тип, которое можно расширять, но по умолчанию добавь все что
+// есть по меткам, а так же всё, что может применяться в умном доме».
+//
+// Два справочника, а не один, потому что они отвечают на разные вопросы. Тип
+// метки — чем точка обозначена на плане: у него есть код, цвет, форма и
+// номер. Тип оборудования — что за железка куплена: реле на четыре канала и
+// блок питания на плане не помечаются ничем, а закупаются и ставятся в щит.
+// Свести их в один справочник значило бы завести «тип метки без метки».
+//
+// Стартовый набор — две части: то, что размечено метками (светильники,
+// розетки, датчики, климат, сеть), и начинка щита с обвязкой. Живёт он в
+// шаблоне и копируется в объект при создании: дальше объект правит свой
+// справочник сам, и правка шаблона до него больше не доезжает — ровно как у
+// типов меток.
+const TEMPLATE_EQUIPMENT_TYPES = [
+  // Размечается меткой на плане.
+  "spot",
+  "lamp",
+  "strip",
+  "track",
+  "switchUnit",
+  "socket",
+  "breezer",
+  "conditioner",
+  "wifi",
+  "ethernet",
+  "motion",
+  "opening",
+  "leak",
+  "smoke",
+  "climate",
+  "waterValve",
+  // Ставится, но меткой на плане не помечается: щит и обвязка.
+  "relay1",
+  "relay2",
+  "relay3",
+  "relay4",
+  "dimmer",
+  "ledSingle",
+  "ledRgb",
+  "ledRgbw",
+  "ledCct",
+  "power",
+  "button",
+  "scenePanel",
+  "gateway",
+  "hub",
+  "module",
+  "curtainDrive",
+  "thermostat",
+  "irBlaster",
+  "netSwitch",
+  "router",
+  "breaker",
+  "rcd",
+  "contactor",
+  "enclosure",
+];
+
+// Свежие идентификаторы на каждый вызов — как у `defaultTemplate`: два объекта
+// не должны делить id справочника.
+function equipmentTypeTemplate() {
+  return TEMPLATE_EQUIPMENT_TYPES.map((key, index) => ({
+    id: newId(),
+    name: strings.equipmentTypes[key] || key,
+    order: index,
+  }));
+}
+
+// Справочник объекта прежнего формата пуст — это не ошибка: тип у единицы
+// необязателен, и старый объект открывается как раньше.
+function equipmentTypesOf(project) {
+  return project && Array.isArray(project.equipmentTypes) ? project.equipmentTypes : [];
+}
+function equipmentTypesInOrder(project) {
+  return equipmentTypesOf(project)
+    .map((item, index) => ({ item, order: item.order == null ? index : item.order, index }))
+    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
+    .map((entry) => entry.item);
+}
+function findEquipmentType(project, typeId) {
+  if (!typeId) return null;
+  return equipmentTypesOf(project).find((item) => item.id === typeId) || null;
+}
+function addEquipmentType(project, { name } = {}) {
+  const item = { id: newId(), name: normalizeName(name), order: equipmentTypesOf(project).length };
+  return {
+    project: withProject(project, { equipmentTypes: [...equipmentTypesOf(project), item] }),
+    equipmentType: item,
+  };
+}
+function updateEquipmentType(project, typeId, patch = {}) {
+  const current = findEquipmentType(project, typeId);
+  if (!current) throw modelError("equipmentTypeNotFound");
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
+  if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
+  const equipmentTypes = equipmentTypesOf(project).map((item) => (item.id === typeId ? next : item));
+  return { project: withProject(project, { equipmentTypes }), equipmentType: next };
+}
+
+// Сколько моделей этого типа — и заодно ответ, можно ли тип удалить.
+function equipmentTypeUsage(project, typeId) {
+  return equipmentOf(project).filter((item) => item.typeId === typeId).length;
+}
+
+// Тип с моделями не удаляется молча: иначе у модели осталась бы ссылка в
+// никуда, и в таблице она читалась бы как «тип не заполнен».
+function deleteEquipmentType(project, typeId) {
+  const item = findEquipmentType(project, typeId);
+  if (!item) throw modelError("equipmentTypeNotFound");
+  const used = equipmentTypeUsage(project, typeId);
+  if (used > 0) throw modelError("equipmentTypeInUse", { name: item.name, count: used });
+  const equipmentTypes = equipmentTypesOf(project)
+    .filter((entry) => entry.id !== typeId)
+    .map((entry, index) => ({ ...entry, order: index }));
+  return { project: withProject(project, { equipmentTypes }), deleted: item };
+}
+
 function equipmentOf(project) {
   return project && Array.isArray(project.equipment) ? project.equipment : [];
 }
@@ -6665,12 +6882,21 @@ function requirePlacement(project, placementId) {
 function equipmentText(value) {
   return String(value == null ? "" : value).trim();
 }
-function addEquipment(project, { name, vendor, code } = {}) {
+
+// Тип у модели необязателен, и пустой тип — не ошибка: у единиц, заведённых до
+// появления справочника, его нет вовсе. Ссылка в никуда сюда не проходит:
+// несуществующий тип превращается в пустой, а не остаётся висеть.
+function equipmentTypeRef(project, value) {
+  const id = value == null ? "" : String(value);
+  return id && findEquipmentType(project, id) ? id : "";
+}
+function addEquipment(project, { name, vendor, code, typeId } = {}) {
   const item = {
     id: newId(),
     name: normalizeName(name),
     vendor: equipmentText(vendor),
     code: equipmentText(code),
+    typeId: equipmentTypeRef(project, typeId),
     order: equipmentOf(project).length,
   };
   return { project: withProject(project, { equipment: [...equipmentOf(project), item] }), equipment: item };
@@ -6681,9 +6907,87 @@ function updateEquipment(project, equipmentId, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
   if (Object.prototype.hasOwnProperty.call(patch, "vendor")) next.vendor = equipmentText(patch.vendor);
   if (Object.prototype.hasOwnProperty.call(patch, "code")) next.code = equipmentText(patch.code);
+  if (Object.prototype.hasOwnProperty.call(patch, "typeId")) next.typeId = equipmentTypeRef(project, patch.typeId);
   if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
   const equipment = equipmentOf(project).map((item) => (item.id === equipmentId ? next : item));
   return { project: withProject(project, { equipment }), equipment: next };
+}
+
+// Тип единицы читают только отсюда: у модели из старого файла поля нет вовсе,
+// а ссылка могла остаться от типа, которого уже нет.
+function equipmentTypeOf(project, equipmentId) {
+  const item = findEquipment(project, equipmentId);
+  return item ? findEquipmentType(project, item.typeId) : null;
+}
+
+// ——— поиск модели ——————————————————————————————————————————————————————
+//
+// Окно выбора ищет так же, как окно выбора типа метки: строка совпадает с
+// названием, производителем или артикулом, точное совпадение идёт первым.
+// Правило поиска живёт здесь, а не в панели: разойдись они — Enter в окне
+// брал бы не ту строку, что стоит первой.
+function equipmentMatches(item, needle) {
+  if (!needle) return true;
+  return [item.name, item.vendor, item.code].some((value) => String(value || "").toLowerCase().includes(needle));
+}
+
+function equipmentExactRank(item, needle) {
+  if (!needle || !item) return 0;
+  const name = String(item.name || "").toLowerCase();
+  if (name === needle) return 3;
+  if (String(item.code || "").toLowerCase() === needle) return 2;
+  return name.startsWith(needle) ? 1 : 0;
+}
+
+/**
+ * Модели под фильтр окна выбора. `query` — строка поиска, `typeId` — тип
+ * («» — любой), `vendor` — производитель как он записан у модели («» — любой,
+ * причём модели без производителя отбираются пустой строкой отдельным
+ * признаком `noVendor`).
+ *
+ * Порядок: точное совпадение первым, дальше порядок справочника — тот же, что
+ * в таблице закупки, чтобы список не перетасовывался от одной буквы.
+ */
+function searchEquipment(project, { query, typeId, vendor, noVendor } = {}) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  const wantType = typeId == null ? "" : String(typeId);
+  const wantVendor = vendor == null ? "" : String(vendor).trim().toLowerCase();
+  return equipmentInOrder(project)
+    .filter((item) => equipmentMatches(item, needle))
+    .filter((item) => (wantType ? item.typeId === wantType : true))
+    .filter((item) => {
+      if (noVendor) return !String(item.vendor || "").trim();
+      return wantVendor ? String(item.vendor || "").trim().toLowerCase() === wantVendor : true;
+    })
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const rank = equipmentExactRank(b.item, needle) - equipmentExactRank(a.item, needle);
+      return rank === 0 ? a.index - b.index : rank;
+    })
+    .map((entry) => entry.item);
+}
+
+// Такая модель уже заведена — заводить вторую незачем: она стоит первой в
+// списке, и Enter берёт именно её.
+function matchEquipmentExactly(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!needle) return null;
+  return (
+    equipmentOf(project).find(
+      (item) => String(item.name || "").toLowerCase() === needle || String(item.code || "").toLowerCase() === needle,
+    ) || null
+  );
+}
+
+// Производители, встреченные у моделей, — список для фильтра окна выбора.
+// Порядок справочника, без повторов и без пустых.
+function equipmentVendors(project) {
+  const seen = [];
+  for (const item of equipmentInOrder(project)) {
+    const vendor = String(item.vendor || "").trim();
+    if (vendor && !seen.includes(vendor)) seen.push(vendor);
+  }
+  return seen;
 }
 
 // Сколько штук этой модели размещено — это же и число к закупке.
@@ -15179,9 +15483,14 @@ function equipmentTable(project, filter, options = {}) {
   const byRoom = Boolean(options.byRoom);
   // Модель — вторым столбцом, как «Тип» в листе меток: сперва обозначение,
   // которым метку зовут на плане, сразу за ним — что именно там стоит.
+  // Тип стоит сразу за моделью: он про неё и отвечает на вопрос «что это
+  // вообще за железка» раньше, чем «где она стоит». В подвале «Итого» типа
+  // нет намеренно — там закупка, и она разложена по производителям: заказ
+  // оформляют у поставщика, а не у «реле на два канала».
   const columns = [
     strings.tables.label,
     strings.tables.model,
+    strings.tables.equipmentType,
     strings.tables.room,
     strings.tables.location,
     strings.tables.linked,
@@ -15223,6 +15532,7 @@ function equipmentTable(project, filter, options = {}) {
       else broken = true;
     }
     if (placementLinkIds(placement).length > links.length) links.push(strings.tables.brokenLink);
+    const kind = item ? findEquipmentType(project, item.typeId) : null;
     const row = {
       id: placement.id,
       cells: [
@@ -15230,6 +15540,9 @@ function equipmentTable(project, filter, options = {}) {
         // Модель потеряна — так и написано в строке: пустая ячейка читалась бы
         // как «оборудования тут нет», а оно есть, просто его запись пропала.
         item ? item.name : strings.tables.equipmentLost,
+        // Пустой тип — пустая ячейка, а не пометка: у моделей, заведённых до
+        // появления справочника, типа нет, и это не поломка.
+        kind ? kind.name : "",
         room ? room.name : "",
         mark ? mark.location || "" : "",
         links.join(", "),
@@ -17390,6 +17703,296 @@ function openMarkControlsPicker(project, markId) {
   });
 }
 
+// src/panels/equipmentPicker.js
+// Окно выбора модели оборудования: поиск, фильтры по типу и производителю,
+// строки с клавиатурой.
+//
+// Слова заказчика: «при нажатии у метки Оборудование — не показывай Справочник
+// моделей, просто выбор, но выбор сделай красивым окном, с фильтрацией по
+// модели, типом и т.д.». Человек у метки пришёл выбрать, а не править: в
+// справочнике он видел поля ввода, кнопки удаления и чужие модели — всё, что
+// на этом шаге только мешает.
+//
+// Отдельный файл по той же причине, что `markControls.js` и `typePicker.js`:
+// это диалог со своей жизнью. Третьего вида окна здесь нет — приёмы взяты у
+// уже существующих: поиск сверху, Enter берёт первую строку, стрелка вниз
+// уводит в список, Escape и возврат фокуса общие от `uiModal`. Разметка та же
+// (`picker`, `picker__list`, `picker__group`, `picker__row`) — своего набора
+// классов и своего CSS у окна нет намеренно.
+//
+// ——— дорога к заведению новой модели ———
+//
+// Человек часто понимает, что модели ещё нет, ровно в момент выбора. Возвращать
+// его в справочник значило бы потерять шаг, ради которого окно и заведено.
+// Поэтому строка заведения живёт прямо здесь — ровно тем же приёмом, что в
+// окне выбора типа метки: она **появляется только тогда, когда набранного в
+// поиске среди моделей нет**, называет то, что будет заведено, и по кнопке
+// заводит модель и сразу её выбирает.
+//
+// Справочником окно от этого не становится, и разница не на словах: заводить
+// можно только то, чего нет, — правки чужих моделей, удаления и списка всех
+// полей здесь не появляется. Пустой поиск строки заведения не показывает
+// вовсе: «Завести» без названия — это и есть справочник.
+
+
+
+// Значение пункта «Без производителя» в фильтре. Один пробел, а не пустая
+// строка: пустая уже занята пунктом «Все производители». Совпасть с настоящим
+// производителем он не может — у модели тот обрезан по краям (`equipmentText`),
+// и одним пробелом быть не бывает.
+const PICKER_NO_VENDOR = " ";
+
+// Производитель и артикул в одной строке под названием: по ним модель узнают
+// в прайсе, и в списке они нужны рядом, а не вместо названия.
+function equipmentPickerAbout(item) {
+  return [item.vendor, item.code].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+}
+
+/**
+ * Окно выбора модели. Отвечает `{equipmentId, project}` — `project` новый,
+ * если модель завели прямо здесь, — или `null`, если передумали.
+ *
+ * `options`: `{title, activeId}`.
+ */
+function openEquipmentPicker(project, options = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    let current = project;
+    const done = (result) => {
+      modal.close();
+      resolve(result || null);
+    };
+
+    const list = uiEl("div", { class: "picker__list" });
+    const body = uiEl("div", { class: "picker" });
+    const error = uiEl("p", { class: "picker__error" });
+    const createBox = uiEl("div", { class: "picker__create" });
+
+    const search = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.equipmentPicker.search,
+      on: {
+        input: () => renderList(),
+        keydown: (event) => {
+          // Стрелка вниз из поиска — в первую строку списка: дальше по нему
+          // ходят стрелками, не хватаясь за мышь.
+          if (event.key === "ArrowDown") {
+            const first = list.querySelector(".picker__row");
+            if (!first) return;
+            event.preventDefault();
+            first.focus();
+            return;
+          }
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          const first = list.querySelector(".picker__row");
+          if (first) first.click();
+          else if (createBox.firstChild) createModel();
+        },
+      },
+    });
+
+    // Фильтры — те же `ui-select`, что фильтр помещения в окне выбора метки.
+    const typeFilter = uiEl("select", {
+      class: "ui-select",
+      title: strings.equipment.type,
+      on: { change: () => renderList() },
+    });
+    const vendorFilter = uiEl("select", {
+      class: "ui-select",
+      title: strings.equipment.vendor,
+      on: { change: () => renderList() },
+    });
+
+    // Список фильтров пересобирается вместе со списком: модель, заведённая
+    // прямо здесь, могла принести и новый тип, и нового производителя.
+    function renderFilters() {
+      const type = typeFilter.value;
+      typeFilter.replaceChildren(uiEl("option", { value: "", text: strings.equipmentPicker.anyType }));
+      for (const item of equipmentTypesInOrder(current)) {
+        typeFilter.append(uiEl("option", { value: item.id, text: item.name }));
+      }
+      typeFilter.value = type;
+
+      const vendor = vendorFilter.value;
+      vendorFilter.replaceChildren(uiEl("option", { value: "", text: strings.equipmentPicker.anyVendor }));
+      for (const name of equipmentVendors(current)) {
+        vendorFilter.append(uiEl("option", { value: name, text: name }));
+      }
+      // Модели без производителя отбираются отдельным пунктом: иначе найти их
+      // в объекте, где у остальных производитель заполнен, было бы нечем.
+      vendorFilter.append(uiEl("option", { value: PICKER_NO_VENDOR, text: strings.equipmentPicker.noVendor }));
+      vendorFilter.value = vendor;
+    }
+
+    function createModel() {
+      const name = search.value.trim();
+      if (!name) return;
+      try {
+        const result = addEquipment(current, {
+          name,
+          vendor: createVendor ? createVendor.value : "",
+          code: createCode ? createCode.value : "",
+          typeId: createType ? createType.value : "",
+        });
+        done({ equipmentId: result.equipment.id, project: result.project, created: true });
+      } catch (failure) {
+        error.textContent = failure.message;
+      }
+    }
+
+    let createVendor = null;
+    let createCode = null;
+    let createType = null;
+
+    function renderCreate(query) {
+      createBox.replaceChildren();
+      error.textContent = "";
+      // Заводить нечего: строка пуста или такая модель уже есть — она стоит
+      // первой в списке, и Enter берёт именно её.
+      if (!query || matchEquipmentExactly(current, query)) return;
+      createVendor = uiEl("input", { class: "ui-input", type: "text", placeholder: strings.equipment.vendorPlaceholder });
+      createCode = uiEl("input", { class: "ui-input", type: "text", placeholder: strings.equipment.codePlaceholder });
+      createType = uiEl(
+        "select",
+        { class: "ui-select" },
+        [
+          uiEl("option", { value: "", text: strings.equipment.typeNone }),
+          ...equipmentTypesInOrder(current).map((item) => uiEl("option", { value: item.id, text: item.name })),
+        ],
+      );
+      // Тип из фильтра подставляется в новую модель: если человек сузил список
+      // до «Реле 2 канала» и не нашёл свою, она почти наверняка того же типа.
+      createType.value = typeFilter.value || "";
+      createBox.append(
+        uiEl("p", { class: "picker__createTitle", text: text("equipmentPicker.createTitle", { name: query }) }),
+        uiEl("label", { class: "picker__field" }, [
+          uiEl("span", { text: strings.equipmentPicker.createType }),
+          createType,
+        ]),
+        uiEl("label", { class: "picker__field" }, [
+          uiEl("span", { text: strings.equipmentPicker.createVendor }),
+          createVendor,
+        ]),
+        uiEl("label", { class: "picker__field" }, [
+          uiEl("span", { text: strings.equipmentPicker.createCode }),
+          createCode,
+        ]),
+        uiButton(strings.equipmentPicker.create, { class: "ui-btn ui-btn--accent", on: { click: createModel } }),
+      );
+    }
+
+    function modelRow(item) {
+      const kind = findEquipmentType(current, item.typeId);
+      const about = equipmentPickerAbout(item);
+      return uiEl(
+        "button",
+        {
+          class: "picker__row" + (item.id === options.activeId ? " is-active" : ""),
+          type: "button",
+          title: [item.name, kind ? kind.name : "", about].filter(Boolean).join(" · "),
+          on: { click: () => done({ equipmentId: item.id, project: current }) },
+        },
+        [
+          uiEl("span", { class: "picker__code", text: item.name }),
+          uiEl("span", { class: "picker__name", text: about }),
+        ],
+      );
+    }
+
+    // Группировка по типу: моделей в объекте немного, но лежат они кучей — с
+    // заголовком видно, что реле кончились и пошли блоки питания. Порядок
+    // групп — порядок справочника (`equipmentTypesInOrder`), а не порядок
+    // заведения моделей: иначе один тип выходил бы двумя заголовками, стоило
+    // завести реле, блок питания и снова реле. Модели без типа идут последней
+    // группой: спрятать их было бы хуже, чем показать отдельно.
+    //
+    // Группы только при пустом поиске и без фильтра по типу. Поиск ранжирует
+    // список — точное совпадение первым, и его берёт Enter; разложи такой
+    // список по группам, и первой строкой оказалась бы не та. Фильтр по типу
+    // заголовок и вовсе повторял бы: он уже стоит в самом фильтре.
+    function renderList() {
+      renderFilters();
+      const query = search.value.trim();
+      const vendorPick = vendorFilter.value;
+      const rows = searchEquipment(current, {
+        query,
+        typeId: typeFilter.value,
+        vendor: vendorPick === PICKER_NO_VENDOR ? "" : vendorPick,
+        noVendor: vendorPick === PICKER_NO_VENDOR,
+      });
+      list.replaceChildren();
+      if (rows.length === 0) {
+        const hasAny = (current.equipment || []).length > 0;
+        list.append(
+          uiEl("p", {
+            class: "panel__empty",
+            text: hasAny ? strings.equipmentPicker.empty : strings.equipmentPicker.emptyAll,
+          }),
+        );
+        renderCreate(query);
+        return;
+      }
+      if (!query && typeFilter.value === "") {
+        const byType = new Map();
+        for (const item of rows) {
+          const key = findEquipmentType(current, item.typeId) ? item.typeId : "";
+          if (!byType.has(key)) byType.set(key, []);
+          byType.get(key).push(item);
+        }
+        for (const kind of [...equipmentTypesInOrder(current), null]) {
+          const key = kind ? kind.id : "";
+          const group = byType.get(key);
+          if (!group || group.length === 0) continue;
+          list.append(
+            uiEl("div", { class: "picker__group", text: kind ? kind.name : strings.equipment.typeNone }),
+          );
+          for (const item of group) list.append(modelRow(item));
+        }
+      } else {
+        for (const item of rows) list.append(modelRow(item));
+      }
+      renderCreate(query);
+    }
+
+    // Клавиатура по списку. Enter здесь обязателен свой: основное действие
+    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
+    // Enter в клик по строке, — то есть выбор терялся бы.
+    list.addEventListener("keydown", (event) => {
+      const row = event.target;
+      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        row.click();
+        return;
+      }
+      const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const rows = [...list.querySelectorAll(".picker__row")];
+      const next = rows[Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + step))];
+      if (next) next.focus();
+    });
+
+    renderList();
+    body.replaceChildren(
+      search,
+      uiEl("div", { class: "picker__field" }, [typeFilter, vendorFilter]),
+      list,
+      createBox,
+      error,
+    );
+    modal = uiModal({
+      title: options.title || strings.equipmentPicker.choose,
+      body,
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      onCancel: () => resolve(null),
+    });
+    search.focus();
+  });
+}
+
 // src/panels/equipment.js
 // Оборудование: справочник моделей объекта и планирование, что где стоит.
 //
@@ -17401,6 +18004,7 @@ function openMarkControlsPicker(project, markId) {
 //
 // Метку выбирает общее окно выбора из `markControls.js` — второго такого в
 // сборке нет: и место, и связи спрашиваются им же.
+
 
 
 
@@ -17485,8 +18089,112 @@ function openEquipmentWindow(api, options = {}) {
             commit((current) => updateEquipment(current, item.id, { code: event.target.value }).project, strings.history.editEquipment),
         },
       }),
+      typeSelect(item.typeId, (typeId) =>
+        commit((current) => updateEquipment(current, item.id, { typeId }).project, strings.history.editEquipment),
+      ),
       uiEl("span", { class: "equip__used", text: text("equipment.used", { count: used }) }),
       remove,
+    ]);
+  }
+
+  // ——— типы оборудования ———
+
+  // Выбор типа у модели. Пустой тип — законное значение: у моделей, заведённых
+  // до появления справочника, типа нет, и заставлять его выбирать не за что.
+  function typeSelect(value, onPick) {
+    const select = uiEl("select", {
+      class: "ui-select",
+      title: strings.equipment.type,
+      on: { change: (event) => onPick(event.target.value) },
+    });
+    select.append(uiEl("option", { value: "", text: strings.equipment.typeNone }));
+    for (const item of equipmentTypesInOrder(project())) {
+      select.append(uiEl("option", { value: item.id, text: item.name }));
+    }
+    select.value = value && findEquipmentType(project(), value) ? value : "";
+    return select;
+  }
+
+  function typeRow(item) {
+    const used = equipmentTypeUsage(project(), item.id);
+    const remove = uiIconButton("trash", {
+      class: "ui-btn ui-btn--danger",
+      title:
+        used > 0
+          ? text("errors.equipmentTypeInUse", { name: item.name, count: used })
+          : strings.equipment.removeType,
+      on: { click: () => removeType(item) },
+    });
+    remove.disabled = used > 0;
+    return uiEl("div", { class: "equip__row" }, [
+      uiEl("input", {
+        class: "ui-input equip__name",
+        type: "text",
+        value: item.name,
+        title: strings.equipment.typeName,
+        on: {
+          change: (event) =>
+            commit(
+              (current) => updateEquipmentType(current, item.id, { name: event.target.value }).project,
+              strings.history.editEquipmentType,
+            ),
+        },
+      }),
+      uiEl("span", { class: "equip__used", text: text("equipment.typesUsed", { count: used }) }),
+      remove,
+    ]);
+  }
+
+  async function removeType(item) {
+    const agreed = await uiConfirm({
+      title: strings.equipment.removeTypeTitle,
+      message: text("equipment.removeTypeMessage", { name: item.name }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    commit((current) => deleteEquipmentType(current, item.id).project, strings.history.removeEquipmentType);
+  }
+
+  function addTypeRow() {
+    const name = uiEl("input", {
+      class: "ui-input equip__name",
+      type: "text",
+      placeholder: strings.equipment.typeNamePlaceholder,
+      title: strings.equipment.typeName,
+    });
+    return uiEl("div", { class: "equip__row equip__row--add" }, [
+      name,
+      uiButton(strings.equipment.addType, {
+        class: "ui-btn ui-btn--accent",
+        on: {
+          click: () =>
+            commit((current) => addEquipmentType(current, { name: name.value }).project, strings.history.addEquipmentType),
+        },
+      }),
+    ]);
+  }
+
+  // Объект, размеченный до появления типов, открывается с пустым справочником:
+  // стартовый набор в него не заезжает сам — правка шаблона до размеченного
+  // объекта не доходит никогда. Но и оставлять человека набивать сорок строк
+  // руками незачем: кнопка предлагает готовый список, решение за ним.
+  function seedTypesRow() {
+    return uiEl("div", { class: "equip__row equip__row--add" }, [
+      uiEl("span", { class: "equip__used", text: strings.equipment.typesSeedHint }),
+      uiButton(strings.equipment.typesSeed, {
+        class: "ui-btn ui-btn--accent",
+        on: {
+          click: () => {
+            const seeds = equipmentTypeTemplate();
+            commit((current) => {
+              let next = current;
+              for (const seed of seeds) next = addEquipmentType(next, { name: seed.name }).project;
+              return next;
+            }, strings.history.seedEquipmentTypes);
+            api.notify(text("equipment.typesSeedDone", { count: seeds.length }), "success");
+          },
+        },
+      }),
     ]);
   }
 
@@ -17519,16 +18227,21 @@ function openEquipmentWindow(api, options = {}) {
       placeholder: strings.equipment.codePlaceholder,
       title: strings.equipment.code,
     });
+    let typeId = "";
     return uiEl("div", { class: "equip__row equip__row--add" }, [
       name,
       vendor,
       code,
+      typeSelect("", (value) => {
+        typeId = value;
+      }),
       uiButton(strings.equipment.addModel, {
         class: "ui-btn ui-btn--accent",
         on: {
           click: () =>
             commit(
-              (current) => addEquipment(current, { name: name.value, vendor: vendor.value, code: code.value }).project,
+              (current) =>
+                addEquipment(current, { name: name.value, vendor: vendor.value, code: code.value, typeId }).project,
               strings.history.addEquipment,
             ),
         },
@@ -17538,17 +18251,28 @@ function openEquipmentWindow(api, options = {}) {
 
   // ——— размещение ———
 
-  function modelSelect(value, onPick) {
-    const select = uiEl("select", {
-      class: "ui-select",
+  // Модель выбирают окном выбора, а не выпадающим списком. Слова заказчика:
+  // «не показывай Справочник моделей, просто выбор, но выбор сделай красивым
+  // окном, с фильтрацией по модели, типом и т.д.». Список из сорока моделей в
+  // `select` нельзя ни отфильтровать, ни найти в нём по производителю — а
+  // именно это и нужно в момент, когда выбирают.
+  //
+  // Окно одно на всю сборку, как окно выбора метки: и в строке размещения, и
+  // в строке добавления спрашивается им же.
+  function modelButton(value, title, onPick) {
+    const chosen = value ? findEquipment(project(), value) : null;
+    const button = uiButton(chosen ? chosen.name : strings.equipmentPicker.choose, {
+      class: "ui-btn ui-btn--wide equip__name" + (chosen ? " is-set" : ""),
       title: strings.equipment.name,
-      on: { change: (event) => onPick(event.target.value) },
+      on: {
+        click: async () => {
+          const picked = await openEquipmentPicker(project(), { activeId: value || null, title });
+          if (!picked) return;
+          onPick(picked);
+        },
+      },
     });
-    for (const item of equipmentInOrder(project())) {
-      select.append(uiEl("option", { value: item.id, text: item.name }));
-    }
-    select.value = value || "";
-    return select;
+    return button;
   }
 
   async function pickPlace(placement) {
@@ -17568,6 +18292,11 @@ function openEquipmentWindow(api, options = {}) {
       chosen: placementLinkIds(placement),
       exclude: placement.markId,
       multiple: true,
+      // Реле стоит в щите, а связывают его с метками своей комнаты — тот же
+      // частый случай, что у «Чем управляет». Значение только начальное:
+      // «Все помещения» на месте, и уже отмеченные метки из других помещений
+      // фильтр прячет, но не теряет.
+      roomId: markControlsInitialRoom(project(), placement.markId),
     });
     if (!chosen) return;
     commit((current) => updatePlacement(current, placement.id, { links: chosen }).project, strings.history.editPlacement);
@@ -17577,8 +18306,18 @@ function openEquipmentWindow(api, options = {}) {
     const summary = placementSummary(project(), placement);
     const place = findMark(project(), placement.markId);
     return uiEl("div", { class: "equip__row" }, [
-      modelSelect(placement.equipmentId, (equipmentId) =>
-        commit((current) => updatePlacement(current, placement.id, { equipmentId }).project, strings.history.editPlacement),
+      modelButton(placement.equipmentId, text("equipment.placeTitle", { name: summary.name }), (picked) =>
+        // Модель могли завести прямо в окне выбора: тогда объект берётся
+        // оттуда, и оба изменения — новая модель и её подстановка в единицу —
+        // ложатся одним шагом истории. Двумя шагами Ctrl+Z сперва отцеплял бы
+        // модель, а потом удалял её же.
+        commit(
+          (current) =>
+            updatePlacement(picked.created ? picked.project : current, placement.id, {
+              equipmentId: picked.equipmentId,
+            }).project,
+          picked.created ? strings.history.addEquipment : strings.history.editPlacement,
+        ),
       ),
       uiButton(place ? labelOf(project(), placement.markId) : strings.equipment.placeChoose, {
         class: "ui-btn equip__place",
@@ -17601,50 +18340,71 @@ function openEquipmentWindow(api, options = {}) {
     ]);
   }
 
+  // Набранное в строке добавления живёт дольше одной отрисовки. Окно
+  // перерисовывается от любой правки объекта — в том числе от своей же, — и
+  // выбранная модель с меткой иначе слетали бы на каждый чужой шаг.
+  const draft = { equipmentId: "", placeId: markId || "" };
+
   function addPlacementRow() {
-    const models = equipmentInOrder(project());
-    let equipmentId = models.length > 0 ? models[0].id : "";
-    let placeId = markId;
-    const placeButton = uiButton(placeId ? labelOf(project(), placeId) : strings.equipment.placeChoose, {
-      class: "ui-btn equip__place",
-      title: strings.equipment.place,
-      on: {
-        click: async () => {
-          const chosen = await openMarkPicker(project(), {
-            title: strings.equipment.placeChoose,
-            chosen: placeId ? [placeId] : [],
-            multiple: false,
-          });
-          if (!chosen || chosen.length === 0) return;
-          placeId = chosen[0];
-          placeButton.textContent = labelOf(project(), placeId);
+    const modelPick = modelButton(draft.equipmentId, strings.equipmentPicker.choose, (picked) => {
+      draft.equipmentId = picked.equipmentId;
+      // Модель, заведённая в окне выбора, попадает в справочник сразу, не
+      // дожидаясь «Разместить». Человек её завёл — значит, она у него есть; а
+      // передумай он размещать, модель осталась бы потерянной вместе с
+      // нажатием, которого он не сделал.
+      if (picked.created) {
+        commit(() => picked.project, strings.history.addEquipment);
+        return;
+      }
+      render();
+    });
+    const placeButton = uiButton(
+      draft.placeId ? labelOf(project(), draft.placeId) : strings.equipment.placeChoose,
+      {
+        class: "ui-btn equip__place",
+        title: strings.equipment.place,
+        on: {
+          click: async () => {
+            const chosen = await openMarkPicker(project(), {
+              title: strings.equipment.placeChoose,
+              chosen: draft.placeId ? [draft.placeId] : [],
+              multiple: false,
+            });
+            if (!chosen || chosen.length === 0) return;
+            draft.placeId = chosen[0];
+            placeButton.textContent = labelOf(project(), draft.placeId);
+          },
         },
       },
-    });
+    );
     const add = uiButton(strings.equipment.addPlacement, {
       class: "ui-btn ui-btn--accent",
       title: strings.equipment.addPlacementHint,
       on: {
         click: () => {
-          if (!equipmentId) {
+          if (!draft.equipmentId) {
             api.notify(strings.equipment.needModel);
             return;
           }
-          if (!placeId) {
+          if (!draft.placeId) {
             api.notify(strings.equipment.addPlacementHint);
             return;
           }
-          commit((current) => addPlacement(current, { equipmentId, markId: placeId }).project, strings.history.addPlacement);
+          // Строка добавления чистится до записи, а не после: перерисовка
+          // приходит подпиской прямо изнутри `commit`, и очистка следом
+          // досталась бы уже мёртвой строке — на экране осталась бы прежняя
+          // модель. Следующая единица почти всегда другая, и оставшаяся модель
+          // подсовывала бы не ту.
+          const chosen = draft.equipmentId;
+          draft.equipmentId = "";
+          commit(
+            (current) => addPlacement(current, { equipmentId: chosen, markId: draft.placeId }).project,
+            strings.history.addPlacement,
+          );
         },
       },
     });
-    return uiEl("div", { class: "equip__row equip__row--add" }, [
-      modelSelect(equipmentId, (value) => {
-        equipmentId = value;
-      }),
-      placeButton,
-      add,
-    ]);
+    return uiEl("div", { class: "equip__row equip__row--add" }, [modelPick, placeButton, add]);
   }
 
   function render() {
@@ -17654,14 +18414,31 @@ function openEquipmentWindow(api, options = {}) {
       return;
     }
     const models = equipmentInOrder(current);
+    const kinds = equipmentTypesInOrder(current);
     // На метке — только её единицы: окно открыто из строки этой метки.
     const placed = markId ? placementsAt(current, markId) : placementsInOrder(current);
+    // У метки справочников нет вовсе — ни моделей, ни типов. Слова заказчика:
+    // «при нажатии у метки Оборудование — не показывай Справочник моделей,
+    // просто выбор». Здесь отвечают на один вопрос: что стоит на этой метке.
+    // Модель выбирают окном выбора, а заводят и правят по-прежнему в
+    // справочнике объекта — он открывается кнопкой «Оборудование» без метки.
+    const catalog = markId
+      ? []
+      : [
+          uiEl("h4", { class: "equip__title", text: strings.equipment.models }),
+          ...(models.length > 0
+            ? models.map((item) => modelRow(item))
+            : [uiEl("p", { class: "panel__empty", text: strings.equipment.modelsEmpty })]),
+          addModelRow(),
+          uiEl("h4", { class: "equip__title", text: strings.equipment.types }),
+          ...(kinds.length > 0
+            ? kinds.map((item) => typeRow(item))
+            : [uiEl("p", { class: "panel__empty", text: strings.equipment.typesEmpty })]),
+          addTypeRow(),
+          ...(kinds.length === 0 ? [seedTypesRow()] : []),
+        ];
     body.replaceChildren(
-      uiEl("h4", { class: "equip__title", text: strings.equipment.models }),
-      ...(models.length > 0
-        ? models.map((item) => modelRow(item))
-        : [uiEl("p", { class: "panel__empty", text: strings.equipment.modelsEmpty })]),
-      addModelRow(),
+      ...catalog,
       uiEl("h4", { class: "equip__title", text: strings.equipment.placed }),
       ...(placed.length > 0
         ? placed.map((placement) => placementRow(placement))
