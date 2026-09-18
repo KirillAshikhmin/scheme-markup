@@ -26,9 +26,28 @@ export function markControlsCandidates(project, excludeId, roomId) {
 }
 
 /**
+ * Помещение, с которым окно открывается «для метки».
+ *
+ * Слова заказчика: «при открытии окна Чем управляет у метки — сразу фильтруй
+ * по метке комнаты, для которой выбираем». Случай у него частый: выключатель
+ * включает свет в своей же комнате, и выбирать помещение руками каждый раз —
+ * лишнее движение.
+ *
+ * Пустая строка — «Все помещения»: у метки помещения нет, метка не нашлась
+ * или помещение успели удалить. Значение только начальное — фильтр остаётся
+ * живым, и на «Все помещения» пользователь переключается как раньше.
+ */
+export function markControlsInitialRoom(project, markId) {
+  const mark = markId ? findMark(project, markId) : null;
+  if (!mark || !mark.roomId) return "";
+  return findRoom(project, mark.roomId) ? mark.roomId : "";
+}
+
+/**
  * Окно выбора меток — кирпичами из ui.js: стопка диалогов, Escape и возврат
  * фокуса у них общие.
- * `options`: `{title, hint, chosen: [markId], exclude: markId, multiple}`.
+ * `options`: `{title, hint, chosen: [markId], exclude: markId, multiple,
+ * roomId}`, где `roomId` — помещение, на котором фильтр стоит при открытии.
  * Отвечает списком отмеченных меток (в режиме одной — списком из одной) или
  * `null`, если передумали. В режиме одной выбор сразу закрывает окно: лишнее
  * подтверждение там, где выбирают одну строку, только мешает.
@@ -50,6 +69,10 @@ export function openMarkPicker(project, options = {}) {
     for (const room of roomsInOrder(project)) {
       rooms.append(uiEl("option", { value: room.id, text: room.name }));
     }
+    // Начальное помещение ставится до первой отрисовки списка — иначе окно
+    // моргнуло бы полным списком и тут же сузило его. Значения без своего
+    // пункта select не примет и останется на «Все помещения».
+    rooms.value = options.roomId || "";
 
     function renderNote() {
       note.textContent = multiple ? text("controls.chosen", { count: chosen.size }) : "";
@@ -132,7 +155,12 @@ export function openMarkPicker(project, options = {}) {
   });
 }
 
-// «Чем управляет» — тот же выбор, только список берётся у самой метки.
+// «Чем управляет» — тот же выбор, только список берётся у самой метки, а
+// фильтр при открытии стоит на её помещении.
+//
+// Уже отмеченные метки из других помещений фильтр с глаз убирает, но не
+// теряет: отмеченное живёт отдельно от списка, счётчик «Отмечено: N» считает
+// их все, и «Сохранить связь» возвращает их вместе с новыми.
 export function openMarkControlsPicker(project, markId) {
   return openMarkPicker(project, {
     title: text("controls.title", { label: labelOf(project, markId) }),
@@ -140,5 +168,6 @@ export function openMarkControlsPicker(project, markId) {
     chosen: markControlIds(findMark(project, markId)),
     exclude: markId,
     multiple: true,
+    roomId: markControlsInitialRoom(project, markId),
   });
 }
