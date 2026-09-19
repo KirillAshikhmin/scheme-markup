@@ -1202,6 +1202,68 @@ export function markControlledBy(project, markId) {
   return marksInOrder(project, (item) => markControlIds(item).includes(markId));
 }
 
+/**
+ * Вся связная группа метки — транзитивное замыкание по трём родам отношений:
+ * управление в обе стороны, общая цепь (у меток есть общий подопечный) и общий
+ * номер (тип и номер совпали).
+ *
+ * Слова заказчика: «если выделили выключатель, у которого есть ещё один
+ * переключатель и управляет группой светильников, то и группу света выделяй и
+ * между выключателями связь и стрелки. Если хоть 1 элемент из цепочки
+ * выделен». То есть выделение поднимает не соседей метки, а **всю цепочку**, в
+ * какой бы её точке ни начали.
+ *
+ * Отношения здесь симметричны все три: управление берётся в обе стороны
+ * нарочно — выделив светильник, пользователь хочет увидеть тех, кто его
+ * включает, ровно так же, как выделив выключатель, хочет увидеть, что тот
+ * включает.
+ *
+ * Считается по всему объекту, а не по схеме: связная группа — свойство
+ * разметки, а какую её часть видно на открытом листе, решает уже холст.
+ * Возвращает идентификаторы **в порядке объекта**, вместе с самой меткой;
+ * несуществующая метка — пустой список.
+ */
+export function linkedMarkIds(project, markId) {
+  if (!project || !findMark(project, markId)) return [];
+  // Три карты на один обход всех меток: дальше замыкание ходит по ним, а не
+  // перебирает объект заново на каждом шаге.
+  const controls = new Map();
+  const controlledBy = new Map();
+  const byNumber = new Map();
+  const add = (map, key, value) => {
+    let list = map.get(key);
+    if (!list) map.set(key, (list = new Set()));
+    list.add(value);
+  };
+  for (const mark of project.marks) {
+    add(byNumber, mark.typeId + "#" + mark.number, mark.id);
+    for (const id of markControlIds(mark)) {
+      add(controls, mark.id, id);
+      add(controlledBy, id, mark.id);
+    }
+  }
+  const seen = new Set([markId]);
+  const queue = [markId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const neighbours = new Set();
+    for (const id of controls.get(current) || []) neighbours.add(id);
+    for (const id of controlledBy.get(current) || []) neighbours.add(id);
+    // Общая цепь: у метки и соседа есть общий подопечный.
+    for (const target of controls.get(current) || []) {
+      for (const id of controlledBy.get(target) || []) neighbours.add(id);
+    }
+    const mark = findMark(project, current);
+    if (mark) for (const id of byNumber.get(mark.typeId + "#" + mark.number) || []) neighbours.add(id);
+    for (const id of neighbours) {
+      if (seen.has(id) || !findMark(project, id)) continue;
+      seen.add(id);
+      queue.push(id);
+    }
+  }
+  return project.marks.filter((mark) => seen.has(mark.id)).map((mark) => mark.id);
+}
+
 // Список переписывается целиком: окно выбора отдаёт то, что отмечено галочками.
 export function setMarkControls(project, markId, controlled) {
   requireMark(project, markId);

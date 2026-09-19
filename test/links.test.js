@@ -18,7 +18,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addMark, addScheme, createProject, setMarkControls, setMarkNumber } from "../src/model.js";
+import {
+  ROOM_PALETTE,
+  addMark,
+  addScheme,
+  colorBlend,
+  colorDistance,
+  createProject,
+  linkedMarkIds,
+  setMarkControls,
+  setMarkNumber,
+} from "../src/model.js";
 import { canvasFrameLinks } from "../src/canvas.js";
 import { convexHull, drawMarkLinks, drawScheme, linkHullOutline, markLinkAnchor, markLinks } from "../src/render.js";
 import { linksHint, linksNotice } from "../src/panels/links.js";
@@ -331,9 +341,15 @@ test("дуга выделенной метки не прыгает при пер
 
   const narrow = canvasFrameLinks({ ...state, linksShown: false }, null, scheme).lines;
   const wide = canvasFrameLinks({ ...state, linksShown: true }, null, scheme).lines;
+  const geometry = ({ near, ...rest }) => rest;
   const mine = wide.find((line) => line.fromId === second.mark.id);
-  assert.equal(narrow.length, 1);
-  assert.deepEqual(narrow[0], mine, "в узком режиме дуга считается иначе — на переключении она прыгнет");
+  const same = narrow.find((line) => line.fromId === second.mark.id);
+  assert.ok(same, "своей дуги в узком режиме нет вовсе");
+  assert.deepEqual(geometry(same), geometry(mine), "в узком режиме дуга считается иначе — на переключении она прыгнет");
+  // Обе метки держат один светильник, значит они в одной цепи, и узкий режим
+  // поднимает всю связную группу — вторую дугу тоже.
+  assert.equal(narrow.length, 2, "связная группа поднялась не целиком");
+  assert.equal(narrow.filter((line) => line.near).length, 1, "в полную силу идёт только дуга самой выделенной метки");
 });
 
 // Заметность выделенному даётся порядком, а не другим цветом: цвет и толщина
@@ -935,4 +951,198 @@ test("отметка выгрузки поднимает все три рода 
   assert.ok(with_.arcs > 0, "дуг управления на листе нет");
   assert.equal(with_.hulls, 1, "оболочки на листе нет");
   assert.ok(with_.ticks > without.ticks, "цепи равных на листе нет");
+});
+
+// ——— цвет цепи ————————————————————————————————————————————————————————
+//
+// «Цепь другим цветом сделай». Прежнее «один служебный цвет на все роды» было
+// ставкой, и её сняли. Требование к новому цвету то же, что ко всем цветам
+// сборки: он не принадлежит ни одной категории справочника, не теряется на
+// заливке помещения и не сливается с управлением. Проверяется счётом, а не
+// глазами, — как цвета категорий.
+test("цвет цепи разведён с категориями, с заливками и с управлением", () => {
+  const project = createProject({ name: "Тест" });
+  const probe = drawProbe();
+  const base = scene();
+  const second = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.3, y: 0.7 }],
+  });
+  let tiedProject = setMarkControls(second.project, base.switchId, [base.stripId]).project;
+  tiedProject = setMarkControls(tiedProject, second.mark.id, [base.stripId]).project;
+  const scheme = tiedProject.schemes[0];
+  drawMarkLinks(probe.ctx, markLinks(tiedProject, scheme, null), scheme, viewOf());
+  const arc = probe.strokes.find((item) => item.curves > 0);
+  const tie = probe.strokes.find((item) => item.curves === 0 && item.points.length === 2 && item.color !== arc.color);
+  assert.ok(tie, "цепь рисуется цветом управления — заказчик просил другой");
+
+  for (const category of project.categories) {
+    const distance = colorDistance(tie.color, category.color);
+    assert.ok(distance >= 29, "цвет цепи похож на категорию «" + category.name + "»: " + distance.toFixed(1));
+  }
+  // До управления — с запасом: два служебных цвета рядом на одном плане.
+  assert.ok(colorDistance(tie.color, arc.color) >= 45, "цепь и управление слишком близки");
+  // На заливке помещения при рабочей плотности цепь видна.
+  for (const room of ROOM_PALETTE) {
+    for (const alpha of [0.05, 0.1, 0.2, 0.3]) {
+      const fill = colorBlend(room, "#FFFFFF", alpha);
+      const distance = colorDistance(tie.color, fill);
+      assert.ok(distance >= 40, "цепь теряется на заливке " + room + " (" + alpha + "): " + distance.toFixed(1));
+    }
+  }
+  // И не сливается с тушью самого чертежа: волосок держится светлотой.
+  for (const ink of ["#000000", "#1F2328", "#3A3A3A", "#555555"]) {
+    assert.ok(colorDistance(tie.color, ink) >= 30, "цепь сливается с линиями плана: " + ink);
+  }
+});
+
+// Оболочка нарочно осталась на цвете управления: цвет здесь означает сторону,
+// а не род. Малиновый — всё про нагрузку (дуга к управляемому и оболочка
+// вокруг группы, которая включается как одно), тёмно-синий — цепь управляющих
+// между собой.
+test("оболочка остаётся на цвете управления, а не берёт третий", () => {
+  const base = ceiling(4);
+  const second = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.12, y: 0.2 }],
+  });
+  let project = setMarkControls(second.project, base.switchId, [base.stripId]).project;
+  project = setMarkControls(project, second.mark.id, [base.stripId]).project;
+  const scheme = project.schemes[0];
+  const probe = drawProbe();
+  drawMarkLinks(probe.ctx, markLinks(project, scheme, null), scheme, viewOf());
+  const arc = probe.strokes.find((item) => item.curves > 0);
+  const hull = probe.strokes.find((item) => item.dash.length > 0);
+  const tie = probe.strokes.find((item) => item.curves === 0 && item.points.length === 2 && item.color !== arc.color);
+  assert.equal(hull.color, arc.color, "оболочка взяла третий цвет");
+  assert.notEqual(tie.color, arc.color);
+  // Служебных цветов на плане ровно два.
+  const service = new Set(probe.strokes.map((item) => item.color));
+  assert.equal(service.size, 2, "служебных цветов стало " + service.size + ": " + [...service].join(", "));
+});
+
+// ——— связная группа ————————————————————————————————————————————————————
+//
+// Дословный пример заказчика: «если выделили выключатель, у которого есть ещё
+// один переключатель и управляет группой светильников, то и группу света
+// выделяй и между выключателями связь и стрелки».
+
+// В1 и ВП1 управляют всеми шестью Т16.
+function flat() {
+  const base = ceiling(6);
+  const pass = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.1, y: 0.5 }],
+  });
+  let project = setMarkControls(pass.project, base.switchId, base.ids).project;
+  project = setMarkControls(project, pass.mark.id, base.ids).project;
+  return { ...base, project, scheme: project.schemes[0], passId: pass.mark.id };
+}
+
+test("выделенный выключатель поднимает второй, цепь и всю группу света", () => {
+  const base = flat();
+  const linked = linkedMarkIds(base.project, base.switchId);
+  // Сам В1, второй выключатель ВП1 и шесть светильников — восемь.
+  assert.equal(linked.length, 8);
+  assert.ok(linked.includes(base.passId), "второй переключатель не поднялся");
+  for (const id of base.ids) assert.ok(linked.includes(id), "светильник группы не поднялся");
+
+  const frame = canvasFrameLinks(
+    { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] },
+    null,
+    base.scheme,
+  );
+  assert.equal(frame.ties.length, 1, "цепи между выключателями нет");
+  assert.equal(frame.groups.length, 1, "оболочки группы нет");
+  assert.equal(frame.groups[0].markIds.length, 6);
+  assert.equal(frame.lines.length, 12, "дуг обоих выключателей ко всем шести светильникам нет");
+});
+
+test("замыкание не зависит от того, с какого конца начали", () => {
+  const base = flat();
+  const fromSwitch = linkedMarkIds(base.project, base.switchId).slice().sort();
+  const fromLamp = linkedMarkIds(base.project, base.ids[3]).slice().sort();
+  const fromPass = linkedMarkIds(base.project, base.passId).slice().sort();
+  assert.deepEqual(fromLamp, fromSwitch, "со светильника поднялось не то же самое");
+  assert.deepEqual(fromPass, fromSwitch, "с переключателя поднялось не то же самое");
+});
+
+test("метка без связей поднимает только себя", () => {
+  const base = scene();
+  assert.deepEqual(linkedMarkIds(base.project, base.switchId), [base.switchId]);
+  assert.deepEqual(linkedMarkIds(base.project, "нет такой метки"), []);
+});
+
+// Замыкание ходит по всему объекту, а не по схеме: выключатель на первом этаже
+// и светильник на втором — одна цепочка, даже если на листе видно не всё.
+test("связная группа считается по объекту, а холст показывает свою часть", () => {
+  const base = scene();
+  const upstairs = addScheme(base.project, { name: "2 этаж", width: PLAN.width, height: PLAN.height });
+  const lamp = addMark(upstairs.project, {
+    schemeId: upstairs.scheme.id,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.5, y: 0.5 }],
+  });
+  const project = setMarkControls(lamp.project, base.switchId, [lamp.mark.id]).project;
+  assert.equal(linkedMarkIds(project, base.switchId).length, 2, "чужая схема из замыкания выпала");
+  const scheme = project.schemes.find((item) => item.id === base.schemeId);
+  const frame = canvasFrameLinks(
+    { project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] },
+    null,
+    scheme,
+  );
+  assert.deepEqual(frame.lines, [], "линию через границу листа не провести");
+  assert.equal(frame.offScheme.length, 1, "обрывок про ушедшую связь пропал");
+});
+
+// «Человек выделил одну, а подсветилось двенадцать» — и по яркости должно быть
+// видно, с чего началось.
+test("связи самой выделенной метки идут в полную силу, остальная цепочка — вполсилы", () => {
+  const base = flat();
+  const frame = canvasFrameLinks(
+    { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] },
+    null,
+    base.scheme,
+  );
+  const near = frame.lines.filter((line) => line.near);
+  const far = frame.lines.filter((line) => line.near === false);
+  assert.equal(near.length, 6, "в полную силу должны идти шесть дуг самой метки");
+  assert.equal(far.length, 6, "остальные шесть — вполсилы");
+  assert.equal(frame.ties[0].near, true, "цепь касается выделенной метки — она ближняя");
+  assert.equal(frame.groups[0].near, false, "оболочка выделенной метки не касается — она дальняя");
+
+  // И это доезжает до холста: приглушённое рисуется бледнее.
+  const probe = drawProbe();
+  drawMarkLinks(probe.ctx, frame, base.scheme, viewOf());
+  const arcs = probe.strokes.filter((item) => item.curves > 0);
+  const bright = new Set(arcs.map((item) => item.alpha));
+  assert.equal(bright.size, 2, "все дуги нарисованы одинаково — с чего началось, не видно");
+  assert.ok(Math.min(...bright) < Math.max(...bright) * 0.6, "приглушение слишком слабое, чтобы его заметить");
+});
+
+// В общем режиме глушения нет: там нет «начала», там весь объект.
+test("во включённом режиме ничего не глушится", () => {
+  const base = flat();
+  const frame = canvasFrameLinks(
+    { project: base.project, filter: null, linksShown: true, selectedMarkIds: [base.switchId] },
+    null,
+    base.scheme,
+  );
+  assert.ok(frame.lines.every((line) => line.near === undefined), "в общем режиме появилось приглушение");
+});
+
+test("кадр связной группы берётся из промежуточного объекта", () => {
+  const base = flat();
+  const state = { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] };
+  const moved = {
+    ...base.project,
+    marks: base.project.marks.map((mark) => (mark.id === base.passId ? { ...mark, points: [{ x: 0.95, y: 0.05 }] } : mark)),
+  };
+  const frame = canvasFrameLinks(state, moved, base.scheme);
+  const tie = frame.ties[0];
+  const end = tie.fromId === base.passId ? tie.from : tie.to;
+  assert.deepEqual(end, { x: 0.95, y: 0.05 }, "связная группа читает объект из состояния");
 });

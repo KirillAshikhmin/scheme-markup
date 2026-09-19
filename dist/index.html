@@ -5908,6 +5908,68 @@ function markControlledBy(project, markId) {
   return marksInOrder(project, (item) => markControlIds(item).includes(markId));
 }
 
+/**
+ * Вся связная группа метки — транзитивное замыкание по трём родам отношений:
+ * управление в обе стороны, общая цепь (у меток есть общий подопечный) и общий
+ * номер (тип и номер совпали).
+ *
+ * Слова заказчика: «если выделили выключатель, у которого есть ещё один
+ * переключатель и управляет группой светильников, то и группу света выделяй и
+ * между выключателями связь и стрелки. Если хоть 1 элемент из цепочки
+ * выделен». То есть выделение поднимает не соседей метки, а **всю цепочку**, в
+ * какой бы её точке ни начали.
+ *
+ * Отношения здесь симметричны все три: управление берётся в обе стороны
+ * нарочно — выделив светильник, пользователь хочет увидеть тех, кто его
+ * включает, ровно так же, как выделив выключатель, хочет увидеть, что тот
+ * включает.
+ *
+ * Считается по всему объекту, а не по схеме: связная группа — свойство
+ * разметки, а какую её часть видно на открытом листе, решает уже холст.
+ * Возвращает идентификаторы **в порядке объекта**, вместе с самой меткой;
+ * несуществующая метка — пустой список.
+ */
+function linkedMarkIds(project, markId) {
+  if (!project || !findMark(project, markId)) return [];
+  // Три карты на один обход всех меток: дальше замыкание ходит по ним, а не
+  // перебирает объект заново на каждом шаге.
+  const controls = new Map();
+  const controlledBy = new Map();
+  const byNumber = new Map();
+  const add = (map, key, value) => {
+    let list = map.get(key);
+    if (!list) map.set(key, (list = new Set()));
+    list.add(value);
+  };
+  for (const mark of project.marks) {
+    add(byNumber, mark.typeId + "#" + mark.number, mark.id);
+    for (const id of markControlIds(mark)) {
+      add(controls, mark.id, id);
+      add(controlledBy, id, mark.id);
+    }
+  }
+  const seen = new Set([markId]);
+  const queue = [markId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const neighbours = new Set();
+    for (const id of controls.get(current) || []) neighbours.add(id);
+    for (const id of controlledBy.get(current) || []) neighbours.add(id);
+    // Общая цепь: у метки и соседа есть общий подопечный.
+    for (const target of controls.get(current) || []) {
+      for (const id of controlledBy.get(target) || []) neighbours.add(id);
+    }
+    const mark = findMark(project, current);
+    if (mark) for (const id of byNumber.get(mark.typeId + "#" + mark.number) || []) neighbours.add(id);
+    for (const id of neighbours) {
+      if (seen.has(id) || !findMark(project, id)) continue;
+      seen.add(id);
+      queue.push(id);
+    }
+  }
+  return project.marks.filter((mark) => seen.has(mark.id)).map((mark) => mark.id);
+}
+
 // Список переписывается целиком: окно выбора отдаёт то, что отмечено галочками.
 function setMarkControls(project, markId, controlled) {
   requireMark(project, markId);
@@ -12074,7 +12136,22 @@ const LINK_AWAY_DEG = -45;
 
 // Общее управление — отношение равных: ни стрелки, ни точки, засечки на обоих
 // концах. Тоньше и бледнее управления: это следствие связей, а не своя запись.
-const LINK_TIE_ALPHA = 0.5;
+//
+// **Свой цвет, тёмно-синий.** Прежнее «один служебный цвет на все роды» было
+// ставкой, и заказчик её снял: «цепь другим цветом сделай». Цвет посчитан, а не
+// подобран на глаз, по тому же `colorDistance`, что цвета категорий: до
+// ближайшей категории (Свет `#1F6FEB`) 35,6, до управления 56,5, до заливок
+// помещений при рабочей плотности 63,5 и не меньше 21,3 при любой, до туши
+// плана 47,9. Контраст к белому листу 12,4 — волосок в полтора пикселя
+// держится светлотой, а не оттенком, и жёлтый с бирюзовым отпали именно здесь.
+//
+// **Смысл разделения цветов — сторона, а не род.** Малиновый это всё, что про
+// нагрузку: дуга к управляемому и оболочка вокруг группы, которая включается
+// как одно. Тёмно-синий — цепь **управляющих** между собой. Поэтому оболочка
+// третьего цвета не получила: она на стороне нагрузки, а не рядом с цепью, и
+// третий оттенок вернул бы ту самую паутину.
+const LINK_TIE_COLOR = "#0F2E7A";
+const LINK_TIE_ALPHA = 0.62;
 const LINK_TIE_WIDTH = 1.2;
 const LINK_TIE_TICK = 4.5;
 
@@ -12085,6 +12162,11 @@ const LINK_HULL_ALPHA = 0.45;
 const LINK_HULL_WIDTH = 1.1;
 const LINK_HULL_DASH = [5, 4];
 const LINK_HULL_PAD = 7;
+
+// Насколько глушится то, что в связной группе есть, но выделенной метки не
+// касается. Человек выделил одну, а поднялось двенадцать — и по яркости должно
+// быть видно, с чего началось: от самой метки связи идут в полную силу.
+const LINK_FAR_FADE = 0.4;
 
 // Точка, к которой связь приходит. У точечной метки — середина её точек (у
 // блока «одна метка на блок» их несколько), у ломаной — середина серединного
@@ -12385,6 +12467,10 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   const state = renderView(view);
   const pad = markRadius(state) + LINK_GAP_PX;
   const color = options.color || LINK_COLOR;
+  const tieColor = options.tieColor || LINK_TIE_COLOR;
+  // `near === false` ставит холст, когда поднята связная группа: всё, что не
+  // касается выделенной метки, глушится, и видно, с чего началось.
+  const fade = (item, alpha) => (item && item.near === false ? alpha * LINK_FAR_FADE : alpha);
   ctx.save();
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
@@ -12393,10 +12479,10 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
 
   // Тождество — в самом низу и без заливки: оболочка обводит свои метки, а не
   // закрывает то, что под ней.
-  ctx.globalAlpha = LINK_HULL_ALPHA;
   ctx.lineWidth = LINK_HULL_WIDTH;
   ctx.setLineDash(LINK_HULL_DASH);
   for (const group of groups) {
+    ctx.globalAlpha = fade(group, LINK_HULL_ALPHA);
     const screen = (group.points || []).map((point) => planToScreen(point, scheme, state));
     const outline = linkHullOutline(screen, markRadius(state) + LINK_HULL_PAD);
     if (outline.length < 2) continue;
@@ -12407,12 +12493,14 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     ctx.stroke();
   }
 
-  // Равные — прямой с засечками на обоих концах. Ни стрелки, ни точки: у этой
-  // связи нет начала и конца, и любой знак направления был бы враньём.
-  ctx.globalAlpha = LINK_TIE_ALPHA;
+  // Равные — прямой с засечками на обоих концах, своим цветом. Ни стрелки, ни
+  // точки: у этой связи нет начала и конца, и любой знак направления был бы
+  // враньём.
+  ctx.strokeStyle = tieColor;
   ctx.lineWidth = LINK_TIE_WIDTH;
   ctx.setLineDash([]);
   for (const tie of ties) {
+    ctx.globalAlpha = fade(tie, LINK_TIE_ALPHA);
     const from = planToScreen(tie.from, scheme, state);
     const to = planToScreen(tie.to, scheme, state);
     const dx = to.x - from.x;
@@ -12436,10 +12524,11 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     }
   }
 
-  ctx.globalAlpha = LINK_ALPHA;
+  ctx.strokeStyle = color;
   ctx.lineWidth = LINK_WIDTH;
   ctx.setLineDash([]);
   for (const line of lines) {
+    ctx.globalAlpha = fade(line, LINK_ALPHA);
     const curve = linkCurve(
       planToScreen(line.from, scheme, state),
       planToScreen(line.to, scheme, state),
@@ -12462,6 +12551,7 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
   // листа не провести, но пустота у метки соврала бы.
   for (const item of away) {
+    ctx.globalAlpha = fade(item, LINK_ALPHA);
     const at = planToScreen(item.at, scheme, state);
     const angle = (LINK_AWAY_DEG * Math.PI) / 180;
     const ux = Math.cos(angle);
@@ -15003,9 +15093,15 @@ function canvasLinksShown(state) {
  * при выделении метки да, пусть показываются её связи, это удобно будет»):
  *
  * - переключатель **включён** — все связи схемы;
- * - переключатель **выключен** — связи выделенной метки: и чем управляет она,
- *   и кто управляет ею, и с кем она в одной цепи, и её группа одного номера.
+ * - переключатель **выключен** — **вся связная группа** выделенной метки:
+ *   транзитивное замыкание по всем трём родам (`model.linkedMarkIds`), а не
+ *   только её соседи. Выделили выключатель — поднялись и второй переключатель,
+ *   и цепь между ними, и вся группа светильников, которой они управляют.
  *   Ничего не выделено — не рисуется ничего.
+ *
+ * В этом режиме у каждой связи стоит `near`: касается ли она **самой**
+ * выделенной метки. Всё остальное в поднятой группе рисуется вполсилы — иначе
+ * человек выделил одну метку, увидел двенадцать и не понял, с чего началось.
  *
  * Отсюда же ответ на «три рода под одной кнопкой или у каждого своя»: кнопка
  * одна. Три кнопки в шапке — приборная панель, а частями паутина выключается
@@ -15030,18 +15126,32 @@ function canvasFrameLinks(state, preview, scheme) {
   if (!all && selected.length === 0) return empty;
   const project = preview || (state && state.project);
   const links = markLinks(project, scheme, state && state.filter);
-  const focus = new Set(selected);
-  const mine = (line) => focus.has(line.fromId) || focus.has(line.toId);
+  const picked = new Set(selected);
+  const touches = (item, set) => set.has(item.fromId) || set.has(item.toId);
   if (!all) {
+    // Поднимается **вся связная группа**, а не соседи выделенной метки: от неё
+    // идём по всем трём родам отношений до конца цепочки. Слова заказчика:
+    // «если хоть 1 элемент из цепочки выделен».
+    const cluster = new Set();
+    for (const id of selected) for (const linked of linkedMarkIds(project, id)) cluster.add(linked);
+    if (cluster.size === 0) return empty;
+    // `near` отвечает на «с чего началось»: связи самой выделенной метки идут в
+    // полную силу, остальная поднятая цепочка — вполсилы.
+    const mark = (item, near) => ({ ...item, near });
     return {
-      lines: links.lines.filter(mine),
-      ties: links.ties.filter(mine),
+      lines: links.lines.filter((line) => touches(line, cluster)).map((line) => mark(line, touches(line, picked))),
+      ties: links.ties.filter((tie) => touches(tie, cluster)).map((tie) => mark(tie, touches(tie, picked))),
       // Оболочка показывается целиком или не показывается вовсе: это
       // тождество, и половина группы — неправда.
-      groups: links.groups.filter((group) => group.markIds.some((id) => focus.has(id))),
-      offScheme: links.offScheme.filter((item) => focus.has(item.markId)),
+      groups: links.groups
+        .filter((group) => group.markIds.some((id) => cluster.has(id)))
+        .map((group) => mark(group, group.markIds.some((id) => picked.has(id)))),
+      offScheme: links.offScheme
+        .filter((item) => cluster.has(item.markId))
+        .map((item) => ({ ...item, near: picked.has(item.markId) })),
     };
   }
+  const mine = (item) => touches(item, picked);
   return {
     lines: [...links.lines.filter((line) => !mine(line)), ...links.lines.filter(mine)],
     ties: [...links.ties.filter((tie) => !mine(tie)), ...links.ties.filter(mine)],

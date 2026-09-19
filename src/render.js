@@ -1716,7 +1716,22 @@ const LINK_AWAY_DEG = -45;
 
 // Общее управление — отношение равных: ни стрелки, ни точки, засечки на обоих
 // концах. Тоньше и бледнее управления: это следствие связей, а не своя запись.
-const LINK_TIE_ALPHA = 0.5;
+//
+// **Свой цвет, тёмно-синий.** Прежнее «один служебный цвет на все роды» было
+// ставкой, и заказчик её снял: «цепь другим цветом сделай». Цвет посчитан, а не
+// подобран на глаз, по тому же `colorDistance`, что цвета категорий: до
+// ближайшей категории (Свет `#1F6FEB`) 35,6, до управления 56,5, до заливок
+// помещений при рабочей плотности 63,5 и не меньше 21,3 при любой, до туши
+// плана 47,9. Контраст к белому листу 12,4 — волосок в полтора пикселя
+// держится светлотой, а не оттенком, и жёлтый с бирюзовым отпали именно здесь.
+//
+// **Смысл разделения цветов — сторона, а не род.** Малиновый это всё, что про
+// нагрузку: дуга к управляемому и оболочка вокруг группы, которая включается
+// как одно. Тёмно-синий — цепь **управляющих** между собой. Поэтому оболочка
+// третьего цвета не получила: она на стороне нагрузки, а не рядом с цепью, и
+// третий оттенок вернул бы ту самую паутину.
+const LINK_TIE_COLOR = "#0F2E7A";
+const LINK_TIE_ALPHA = 0.62;
 const LINK_TIE_WIDTH = 1.2;
 const LINK_TIE_TICK = 4.5;
 
@@ -1727,6 +1742,11 @@ const LINK_HULL_ALPHA = 0.45;
 const LINK_HULL_WIDTH = 1.1;
 const LINK_HULL_DASH = [5, 4];
 const LINK_HULL_PAD = 7;
+
+// Насколько глушится то, что в связной группе есть, но выделенной метки не
+// касается. Человек выделил одну, а поднялось двенадцать — и по яркости должно
+// быть видно, с чего началось: от самой метки связи идут в полную силу.
+const LINK_FAR_FADE = 0.4;
 
 // Точка, к которой связь приходит. У точечной метки — середина её точек (у
 // блока «одна метка на блок» их несколько), у ломаной — середина серединного
@@ -2027,6 +2047,10 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   const state = renderView(view);
   const pad = markRadius(state) + LINK_GAP_PX;
   const color = options.color || LINK_COLOR;
+  const tieColor = options.tieColor || LINK_TIE_COLOR;
+  // `near === false` ставит холст, когда поднята связная группа: всё, что не
+  // касается выделенной метки, глушится, и видно, с чего началось.
+  const fade = (item, alpha) => (item && item.near === false ? alpha * LINK_FAR_FADE : alpha);
   ctx.save();
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
@@ -2035,10 +2059,10 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
 
   // Тождество — в самом низу и без заливки: оболочка обводит свои метки, а не
   // закрывает то, что под ней.
-  ctx.globalAlpha = LINK_HULL_ALPHA;
   ctx.lineWidth = LINK_HULL_WIDTH;
   ctx.setLineDash(LINK_HULL_DASH);
   for (const group of groups) {
+    ctx.globalAlpha = fade(group, LINK_HULL_ALPHA);
     const screen = (group.points || []).map((point) => planToScreen(point, scheme, state));
     const outline = linkHullOutline(screen, markRadius(state) + LINK_HULL_PAD);
     if (outline.length < 2) continue;
@@ -2049,12 +2073,14 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     ctx.stroke();
   }
 
-  // Равные — прямой с засечками на обоих концах. Ни стрелки, ни точки: у этой
-  // связи нет начала и конца, и любой знак направления был бы враньём.
-  ctx.globalAlpha = LINK_TIE_ALPHA;
+  // Равные — прямой с засечками на обоих концах, своим цветом. Ни стрелки, ни
+  // точки: у этой связи нет начала и конца, и любой знак направления был бы
+  // враньём.
+  ctx.strokeStyle = tieColor;
   ctx.lineWidth = LINK_TIE_WIDTH;
   ctx.setLineDash([]);
   for (const tie of ties) {
+    ctx.globalAlpha = fade(tie, LINK_TIE_ALPHA);
     const from = planToScreen(tie.from, scheme, state);
     const to = planToScreen(tie.to, scheme, state);
     const dx = to.x - from.x;
@@ -2078,10 +2104,11 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     }
   }
 
-  ctx.globalAlpha = LINK_ALPHA;
+  ctx.strokeStyle = color;
   ctx.lineWidth = LINK_WIDTH;
   ctx.setLineDash([]);
   for (const line of lines) {
+    ctx.globalAlpha = fade(line, LINK_ALPHA);
     const curve = linkCurve(
       planToScreen(line.from, scheme, state),
       planToScreen(line.to, scheme, state),
@@ -2104,6 +2131,7 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
   // листа не провести, но пустота у метки соврала бы.
   for (const item of away) {
+    ctx.globalAlpha = fade(item, LINK_ALPHA);
     const at = planToScreen(item.at, scheme, state);
     const angle = (LINK_AWAY_DEG * Math.PI) / 180;
     const ux = Math.cos(angle);

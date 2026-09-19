@@ -32,6 +32,7 @@ import {
   moveSchemeGuide,
   schemeGuides,
   labelOf,
+  linkedMarkIds,
   moveMarkPoint,
   moveOutlinePoint,
   removeMarkPoint,
@@ -904,9 +905,15 @@ function canvasLinksShown(state) {
  * при выделении метки да, пусть показываются её связи, это удобно будет»):
  *
  * - переключатель **включён** — все связи схемы;
- * - переключатель **выключен** — связи выделенной метки: и чем управляет она,
- *   и кто управляет ею, и с кем она в одной цепи, и её группа одного номера.
+ * - переключатель **выключен** — **вся связная группа** выделенной метки:
+ *   транзитивное замыкание по всем трём родам (`model.linkedMarkIds`), а не
+ *   только её соседи. Выделили выключатель — поднялись и второй переключатель,
+ *   и цепь между ними, и вся группа светильников, которой они управляют.
  *   Ничего не выделено — не рисуется ничего.
+ *
+ * В этом режиме у каждой связи стоит `near`: касается ли она **самой**
+ * выделенной метки. Всё остальное в поднятой группе рисуется вполсилы — иначе
+ * человек выделил одну метку, увидел двенадцать и не понял, с чего началось.
  *
  * Отсюда же ответ на «три рода под одной кнопкой или у каждого своя»: кнопка
  * одна. Три кнопки в шапке — приборная панель, а частями паутина выключается
@@ -931,18 +938,32 @@ export function canvasFrameLinks(state, preview, scheme) {
   if (!all && selected.length === 0) return empty;
   const project = preview || (state && state.project);
   const links = markLinks(project, scheme, state && state.filter);
-  const focus = new Set(selected);
-  const mine = (line) => focus.has(line.fromId) || focus.has(line.toId);
+  const picked = new Set(selected);
+  const touches = (item, set) => set.has(item.fromId) || set.has(item.toId);
   if (!all) {
+    // Поднимается **вся связная группа**, а не соседи выделенной метки: от неё
+    // идём по всем трём родам отношений до конца цепочки. Слова заказчика:
+    // «если хоть 1 элемент из цепочки выделен».
+    const cluster = new Set();
+    for (const id of selected) for (const linked of linkedMarkIds(project, id)) cluster.add(linked);
+    if (cluster.size === 0) return empty;
+    // `near` отвечает на «с чего началось»: связи самой выделенной метки идут в
+    // полную силу, остальная поднятая цепочка — вполсилы.
+    const mark = (item, near) => ({ ...item, near });
     return {
-      lines: links.lines.filter(mine),
-      ties: links.ties.filter(mine),
+      lines: links.lines.filter((line) => touches(line, cluster)).map((line) => mark(line, touches(line, picked))),
+      ties: links.ties.filter((tie) => touches(tie, cluster)).map((tie) => mark(tie, touches(tie, picked))),
       // Оболочка показывается целиком или не показывается вовсе: это
       // тождество, и половина группы — неправда.
-      groups: links.groups.filter((group) => group.markIds.some((id) => focus.has(id))),
-      offScheme: links.offScheme.filter((item) => focus.has(item.markId)),
+      groups: links.groups
+        .filter((group) => group.markIds.some((id) => cluster.has(id)))
+        .map((group) => mark(group, group.markIds.some((id) => picked.has(id)))),
+      offScheme: links.offScheme
+        .filter((item) => cluster.has(item.markId))
+        .map((item) => ({ ...item, near: picked.has(item.markId) })),
     };
   }
+  const mine = (item) => touches(item, picked);
   return {
     lines: [...links.lines.filter((line) => !mine(line)), ...links.lines.filter(mine)],
     ties: [...links.ties.filter((tie) => !mine(tie)), ...links.ties.filter(mine)],
