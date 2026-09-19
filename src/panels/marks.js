@@ -5,6 +5,7 @@
 // «В оригинальной схеме» не в момент постановки, а потом, разом, по списку.
 // Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
   MARK_DIMENSION_FIELDS,
@@ -32,7 +33,7 @@ import {
 import { planToScreen, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { uiButton, uiEl, uiModal, uiPrompt } from "./ui.js";
-import { filtersBox, filtersMarkRows } from "./filters.js";
+import { filtersActive, filtersBox, filtersMarkRows } from "./filters.js";
 import { openMarkControlsPicker } from "./markControls.js";
 import { openEquipmentWindow } from "./equipment.js";
 import { markSizesSummary, openMarkSizesPicker } from "./markSizes.js";
@@ -140,6 +141,43 @@ export function marksScrollTop(row, area, align = MARKS_ALIGN_TOP) {
   // Ушла вверх — подводим верх, ушла вниз — низ. И там и там минимально.
   if (row.top < now + head) return top;
   return fit(row.top + row.height + MARKS_SCROLL_GAP - area.clientHeight + foot);
+}
+
+// Отметка в настройках браузера: свёрнут ли блок фильтров. Оснастка рабочего
+// места, а не свойство объекта, — в файл проекта ей не за чем, как отметке
+// линейки и связей. Ключ живёт здесь, а не в общих настройках вида: состояние
+// нужно одной этой панели, наружу в состояние сеанса оно не выносится.
+export const MARKS_FILTERS_SETTING = "marksFiltersCollapsed";
+
+/**
+ * Что показывает заголовок блока фильтров.
+ *
+ * Заказчик: «фильтры сделай сворачиваемыми». Свернуть их просто, а вот спрятать
+ * вместе с ними включённый фильтр — значит подложить свинью: метки пропали со
+ * схемы и из списка, а почему — не видно нигде. Поэтому заголовок отвечает на
+ * два вопроса сразу.
+ *
+ * — **Сужен ли список.** `narrowed` поднимает заголовок в акцентный цвет и
+ *   дописывает в подсказку, что метки прячет фильтр. Считает это
+ *   `filtersActive` — та же функция, по которой гаснет кнопка «Показать все»,
+ *   второй такой проверки в сборке быть не должно.
+ *
+ * — **Сколько меток видно.** Счётчик — про список, а не про фильтры, поэтому
+ *   он остаётся на виду и свёрнутым: переехал в строку заголовка, где не стоит
+ *   ни пикселя лишней высоты. Не сужен — там просто число меток на схеме
+ *   («36»), сужен — полное «Показано 12 из 36»: в этот момент важны оба числа.
+ */
+export function marksFiltersHead({ collapsed, filter, shown, total }) {
+  const narrowed = filtersActive(filter);
+  const hint = [
+    collapsed ? strings.filters.expand : strings.filters.collapse,
+    narrowed ? strings.filters.narrowed : null,
+  ]
+    .filter(Boolean)
+    .join(". ");
+  let count = "";
+  if (total > 0) count = narrowed ? text("marks.count", { shown, total }) : String(total);
+  return { narrowed, count, hint };
 }
 
 // Кто из предков строки прокручивается. Своего прокручиваемого ящика у списка
@@ -318,7 +356,9 @@ function mountMarksPanel(host, api) {
   const { getState, setState, notify } = api;
   const filters = filtersBox(api);
   const list = uiEl("div", { class: "marks" });
-  const count = uiEl("p", { class: "marks__count" });
+  // Счётчик — внутри кнопки заголовка, поэтому строчный: абзацу в кнопке не
+  // место. Та же связка, что у разделов панели: значок числа в заголовке.
+  const count = uiEl("span", { class: "marks__count" });
   // Смыкание номеров — под списком, как просил заказчик: команда про весь
   // объект, а не про открытую схему, и место ей после списка, а не среди
   // фильтров. Уплотнение по одному типу осталось в справочнике.
@@ -328,11 +368,24 @@ function mountMarksPanel(host, api) {
     on: { click: () => compactAll() },
   });
   const foot = uiEl("div", { class: "marks__foot" }, [compactButton]);
+  // Заголовок фильтров собран по образцу заголовков разделов панели: галочка,
+  // имя, счётчик справа. Язык у сворачивания в приложении один, и заводить
+  // второй ради блока внутри раздела незачем.
+  const filtersChevron = uiEl("span", { class: "marks__chevron" });
+  const filtersName = uiEl("span", { class: "marks__filtersName", text: strings.filters.title });
+  const filtersTitle = uiEl(
+    "button",
+    { class: "marks__filtersTitle", attrs: { type: "button" }, on: { click: () => flipFilters() } },
+    [filtersChevron, filtersName, count],
+  );
+  const filtersBody = uiEl("div", { class: "marks__filtersBody" }, [filters.node]);
   // Фильтры сверху и кнопка смыкания снизу прилипшие и непрозрачные: они
   // закрывают собой часть списка, и прокрутка обязана это знать — иначе
-  // подведённая строка уезжает под фильтры.
-  const top = uiEl("div", { class: "marks__top" }, [filters.node, count]);
+  // подведённая строка уезжает под фильтры. Свёрнутые фильтры ужимаются до
+  // строки заголовка — ради этого заказчик их сворачивать и просил.
+  const top = uiEl("div", { class: "marks__top" }, [filtersTitle, filtersBody]);
   host.replaceChildren(top, list, foot);
+  let filtersCollapsed = false;
   // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
   // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
   // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
@@ -584,18 +637,26 @@ function mountMarksPanel(host, api) {
           // свёрнута строка или раскрыта, и куда нажать.
           uiEl("span", { class: "mark-row__toggle" }),
           shapeIcon(view.style.shape, view.style.color, 20),
-          // Код типа стоит там же, где в свёрнутой строке, — на раскрытии
-          // значок и код остаются на месте, меняется только номер: он
-          // становится полем правки.
-          uiEl("span", { class: "mark-row__label", text: view.code }),
-          uiEl("input", {
-            class: "ui-input mark-row__number",
-            type: "number",
-            value: String(view.fields.number),
-            title: strings.marks.number,
-            attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
-            on: { change: (event) => setNumber(mark.id, event.target.value) },
-          }),
+          // Код и номер — одним куском, вплотную. Слова заказчика: «в
+          // развёрнутой карточке метки цифру метки прижми к её букве, а то там
+          // большое расстояние». Раньше поле номера стояло у правого края, и
+          // «Р» с «3» читались как два разных поля, хотя в свёрнутой строке
+          // обозначение слитное — «Р3». Своя обёртка, а не зазор в голове:
+          // ужиматься на длинном коде должна пара целиком, а не голова.
+          uiEl("div", { class: "mark-row__ident" }, [
+            // Код до шестнадцати букв в панель не влезает и жмётся многоточием
+            // — целиком он остаётся в подсказке. Номер при этом не уезжает:
+            // ужимается код, а поле номера своей меры не отдаёт.
+            uiEl("span", { class: "mark-row__label", text: view.code, title: view.code }),
+            uiEl("input", {
+              class: "ui-input mark-row__number",
+              type: "number",
+              value: String(view.fields.number),
+              title: strings.marks.number,
+              attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
+              on: { change: (event) => setNumber(mark.id, event.target.value) },
+            }),
+          ]),
           badge,
           // Название типа — второй строкой головы и приглушённо: по значку тип
           // угадывается не всегда, а в справочнике легко заводятся два похожих.
@@ -714,12 +775,30 @@ function mountMarksPanel(host, api) {
     compactButton.disabled = !state.project;
   }
 
+  // Заголовок фильтров: галочка, акцент на суженном списке и счётчик. Что
+  // именно в нём написано, решает `marksFiltersHead` — её и проверяет тест.
+  function syncFilters(state, shown, total) {
+    const head = marksFiltersHead({ collapsed: filtersCollapsed, filter: state.filter, shown, total });
+    filtersBody.hidden = filtersCollapsed;
+    top.classList.toggle("is-collapsed", filtersCollapsed);
+    top.classList.toggle("is-narrowed", head.narrowed);
+    filtersTitle.title = head.hint;
+    filtersTitle.setAttribute("aria-expanded", filtersCollapsed ? "false" : "true");
+    count.textContent = head.count;
+  }
+
+  function flipFilters() {
+    filtersCollapsed = !filtersCollapsed;
+    setSetting(MARKS_FILTERS_SETTING, filtersCollapsed);
+    render();
+  }
+
   function render() {
     pending = false;
     const state = getState();
     syncCompact(state);
     if (!state.project || !state.schemeId) {
-      count.textContent = "";
+      syncFilters(state, 0, 0);
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
       return;
     }
@@ -729,7 +808,7 @@ function mountMarksPanel(host, api) {
     // и таблицей, у которых порядок тот же.
     const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
     const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
-    count.textContent = total > 0 ? text("marks.count", { shown: rows.length, total }) : "";
+    syncFilters(state, rows.length, total);
     if (rows.length === 0) {
       list.replaceChildren(
         uiEl("p", { class: "panel__empty", text: total > 0 ? strings.marks.nothingFound : strings.panels.marksEmpty }),
@@ -785,6 +864,17 @@ function mountMarksPanel(host, api) {
     render();
   });
   render();
+  // Настройки читаются асинхронно, как у разделов панели: блок стартует
+  // развёрнутым и схлопывается, когда хранилище ответит. Ждать его с пустой
+  // панелью хуже, а по умолчанию фильтры открыты — иначе новый пользователь
+  // ищет, куда делся поиск по списку.
+  Promise.resolve(getSetting(MARKS_FILTERS_SETTING))
+    .then((saved) => {
+      if (saved !== true || filtersCollapsed) return;
+      filtersCollapsed = true;
+      render();
+    })
+    .catch(() => {});
 }
 
 registerPanel(PANEL_IDS.marks, mountMarksPanel);
