@@ -339,12 +339,13 @@ function mountMarksPanel(host, api) {
   // перестраивать список по ходу — ради этого он и набирается.
   let pending = false;
   let shownSelection = "";
-  // Откуда пришло выделение, которое сейчас поедет на экран. Отличить можно
-  // только здесь: наружу, в состояние сеанса, источник не выносится — холсту,
-  // поиску и предупреждениям до него дела нет, а знать его надо ровно одному
-  // месту, этой прокрутке. Клик по строке ставит метку сам (`selectMark`), всё
-  // остальное приходит со стороны — и считается выделением на схеме.
-  let nextAlign = MARKS_ALIGN_TOP;
+  // Какая метка выделена кликом по своей же строке. Источник выделения знает
+  // только эта панель: наружу, в состояние сеанса, он не выносится — холсту,
+  // поиску и предупреждениям до него дела нет, а нужен он ровно одному месту,
+  // прокрутке. Хранится именно метка, а не признак: перерисовка могла
+  // отложиться (пользователь печатал), и голый признак достался бы чужому,
+  // пришедшему со схемы выделению — оно бы тогда не подвелось к верху.
+  let clickedRow = null;
 
   // Номер правится числовым полем — оно тоже держит список от пересборки,
   // иначе набранная цифра выбрасывала бы курсор из поля.
@@ -364,9 +365,8 @@ function mountMarksPanel(host, api) {
     const mark = state.project ? findMark(state.project, markId) : null;
     if (!scheme || !mark) return;
     // Выделение из самого списка: строка уже под пальцем, выдёргивать её
-    // наверх нельзя — уедет из-под курсора. Отметка снимается в `render`, так
-    // что на следующее выделение со схемы она не перейдёт.
-    nextAlign = MARKS_ALIGN_LEAST;
+    // наверх нельзя — уедет из-под курсора.
+    clickedRow = markId;
     setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
   }
 
@@ -752,8 +752,9 @@ function mountMarksPanel(host, api) {
     // тот возвращается к выделенной метке после каждой перерисовки.
     const selection = state.selectedMarkIds.join(",");
     const current = list.querySelector(".mark-row.is-current");
-    const align = nextAlign;
-    nextAlign = MARKS_ALIGN_TOP;
+    // «Не поднимать» причитается ровно той метке, по строке которой нажали.
+    const align = clickedRow && selection === clickedRow ? MARKS_ALIGN_LEAST : MARKS_ALIGN_TOP;
+    clickedRow = null;
     if (current && selection !== shownSelection) marksScrollToRow(current, align, { head: top, foot });
     shownSelection = selection;
   }
