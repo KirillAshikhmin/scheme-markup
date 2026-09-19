@@ -838,6 +838,33 @@
   white-space: nowrap;
 }
 
+/* «Расположение» и «В оригинале» — в одну строку, рядом. Заполняются они
+   парой, и порознь занимали две строки из четырёх в раскрытой карточке.
+   Сетка, а не флексы: доли колонок живут на обёртке, и поля не уносят с собой
+   `flex-basis: 0` туда, где обёртка распущена (`display: contents` в режиме
+   просмотра) — иначе в колонке они схлопнулись бы в нулевую высоту и налезли
+   друг на друга. `min-width: 0` на полях обязателен: без него `.ui-input
+   { width: 100% }` из общих стилей панелей распирает колонки шире панели.
+   Делится ширина не поровну, а 8 к 7: слева подсказка длиннее
+   («Расположение» против «В оригинале»), и при ровной половине её обрезало бы
+   на последней букве. В панель шириной 264 обе подсказки влезают целиком.
+   Многоточие — на случай чужого шрифта пошире и длинной записи: обрезанное
+   с многоточием читается, обрезанное по букве — нет. */
+.mark-row__fields {
+  display: grid;
+  grid-template-columns: 8fr 7fr;
+  gap: 4px;
+}
+
+.mark-row__fields .ui-input {
+  min-width: 0;
+  /* Отступы по бокам ужаты с шести до четырёх: в паре узких полей эти четыре
+     пикселя — разница между подсказкой целиком и подсказкой с многоточием. */
+  padding-left: 4px;
+  padding-right: 4px;
+  text-overflow: ellipsis;
+}
+
 /* Название типа — второй строкой раскрытой головы, под кодом: по значку тип
    угадывается не всегда. Приглушённое и на своей строке, отступ — ровно под
    код, чтобы читалось продолжением обозначения, а не отдельной подписью. */
@@ -1394,6 +1421,14 @@
 
 #app.is-mobile .mark-row .ui-input:placeholder-shown {
   display: none;
+}
+
+/* Пара «Расположение — В оригинале» на телефоне снова идёт в столбик: рядом
+   два читаемых текста без рамок слились бы в один. `display: contents` убирает
+   саму обёртку — поля становятся строками карточки, и пустое по-прежнему
+   прячется целиком, вместе со своим местом. */
+#app.is-mobile .mark-row__fields {
+  display: contents;
 }
 
 #app.is-mobile .mark-row__number {
@@ -4117,9 +4152,19 @@ const strings = {
     number: "Номер метки — правится вручную, повтор разрешён",
     repeatBadge: "×{count}",
     location: "Расположение",
-    locationPlaceholder: "Например: над тумбой слева",
+    // Подсказка пустого поля — название поля, а не пример. Слова заказчика:
+    // «не „например“ пиши в подсказке, а название поля». Своей подписи у этих
+    // полей нет и не будет — панель узкая, — так что подсказка в пустом поле
+    // остаётся единственным местом, где написано, что в него класть. Пример
+    // («над тумбой слева») отвечал на другой вопрос — «как писать», — а на
+    // главный, «что это за поле», не отвечал вовсе.
+    locationPlaceholder: "Расположение",
     original: "В оригинальной схеме",
-    originalPlaceholder: "Например: В31",
+    // Короткое имя того же поля: в подсказку рядом с «Расположением» влезает
+    // «В оригинале», а полное «В оригинальной схеме» уезжает многоточием.
+    // Полное осталось подсказкой при наведении — у заполненного поля это
+    // единственное напоминание, что в нём лежит.
+    originalPlaceholder: "В оригинале",
     nothingFound: "Под фильтр ничего не подошло",
     controls: "Чем управляет",
     controlsOf: "Управляет: {labels}",
@@ -22814,6 +22859,122 @@ function marksControllerIndex(project) {
   return index;
 }
 
+// Зазор у прижатой к кромке строки: по нему видно, что список прокручен, а не
+// кончился, и закруглённый угол строки не режется краем.
+const MARKS_SCROLL_GAP = 6;
+// Выделение пришло со схемы: пользователь смотрел на план, строку в списке ему
+// надо найти глазами — она встаёт вверху видимой части.
+const MARKS_ALIGN_TOP = "top";
+// Выделение пришло кликом по самой строке: она уже под курсором, и двигать её
+// незачем. Прокрутка включается, только если раскрытая карточка не поместилась,
+// и тогда она минимальна — ровно до видимой нижней границы.
+const MARKS_ALIGN_LEAST = "least";
+
+/**
+ * Куда прокрутить список после смены выделения.
+ *
+ * Заказчик поправил первую попытку дословно: «скроллится список должен так,
+ * что бы метка показывалась целиком сверху, а позиция её не должна меняться»
+ * — и отдельно про источник: «при чём при выделении на схеме только, а при
+ * ручном выделении не поднимай вверх, только если развёрнутый вид метки
+ * уходит за пределы экрана, то подними чуть выше, что бы поместился… Короче
+ * что бы при выделении вся развёрнутая метка была на экране».
+ *
+ * Порядок строк при этом не трогается вовсе: двигается только прокрутка.
+ *
+ * `row` — положение строки внутри содержимого списка (`top` от его начала,
+ * `height` — вся высота, у выделенной она раскрыта и высока). `area` — что
+ * сейчас прокручено (`scrollTop`), высота ящика (`clientHeight`), всё
+ * содержимое (`scrollHeight`) и **накладки**: `headInset` — сколько сверху
+ * занимает прилипший блок фильтров, `footInset` — сколько снизу занимает
+ * прилипшая кнопка смыкания. Обе непрозрачные и прокруткой не убираются, так
+ * что видно строки только в полосе между ними; считать «видимым» то, что под
+ * ними, — значит честно прокрутить строку под фильтры и оставить её там.
+ * `align` — откуда пришло выделение.
+ *
+ * Случаи, ради которых это считается здесь, а не отдаётся `scrollIntoView`
+ * (он про накладки не знает вовсе):
+ *
+ * — **Строка выше полосы** (раскрытая карточка со связями, размерами и
+ *   оборудованием в невысоком окне). Целиком её не показать никакой
+ *   прокруткой, поэтому зазор снимается и верх подводится к нижней кромке
+ *   фильтров: читать сверху вниз естественнее, чем видеть хвост. Одинаково
+ *   для обоих источников — это и есть «подними чуть выше, чтобы поместился»,
+ *   доведённое до предела.
+ *
+ * — **Выделение в списке, карточка видна целиком.** Не двигаем ничего.
+ *
+ * — **Выделение в списке, карточка вылезла вниз** (свёрнутая строка была
+ *   видна, раскрытая — уже нет). Опускаем ровно до её нижней границы.
+ *
+ * — **Последние метки списка.** Прокрутить их к верху нельзя — снизу
+ *   кончается содержимое. Упираемся в конец и стоим: отыгрывать назад нечем,
+ *   а строка там и так видна целиком.
+ */
+function marksScrollTop(row, area, align = MARKS_ALIGN_TOP) {
+  const head = area.headInset || 0;
+  const foot = area.footInset || 0;
+  const limit = Math.max(0, (area.scrollHeight || 0) - (area.clientHeight || 0));
+  const fit = (value) => Math.min(Math.max(0, value), limit);
+  const now = fit(area.scrollTop || 0);
+  // Полоса, в которой строку действительно видно.
+  const strip = area.clientHeight - head - foot;
+  if (row.height > strip) return fit(row.top - head);
+  const top = fit(row.top - head - MARKS_SCROLL_GAP);
+  if (align !== MARKS_ALIGN_LEAST) return top;
+  if (row.top >= now + head && row.top + row.height <= now + area.clientHeight - foot) return now;
+  // Ушла вверх — подводим верх, ушла вниз — низ. И там и там минимально.
+  if (row.top < now + head) return top;
+  return fit(row.top + row.height + MARKS_SCROLL_GAP - area.clientHeight + foot);
+}
+
+// Кто из предков строки прокручивается. Своего прокручиваемого ящика у списка
+// нет: прокрутку держит точка монтирования панели, а на телефоне — лист, в
+// который её кладут. Поэтому не имя узла, а первый предок, которому есть что
+// прокручивать.
+function marksScrollBox(node) {
+  for (let box = node.parentElement; box; box = box.parentElement) {
+    const overflow = getComputedStyle(box).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && box.scrollHeight > box.clientHeight) return box;
+  }
+  return null;
+}
+
+// Прокрутка к строке. Не `scrollIntoView`: он норовит подвинуть заодно всех
+// прокручиваемых предков — уехала бы вся панель, — и не умеет ни зазора, ни
+// оговорки про строку выше видимой части, ни разницы между выделением на
+// схеме и в списке. Куда именно прокрутить, считает `marksScrollTop`, и это
+// единственное место, где её ответ доезжает до экрана.
+function marksScrollToRow(node, align, chrome) {
+  const box = marksScrollBox(node);
+  if (!box) return;
+  const row = node.getBoundingClientRect();
+  const frame = box.getBoundingClientRect();
+  // Накладки меряем по месту, а не по числам из стилей: прилипший блок
+  // сдвинут отрицательным отступом, у кнопки смыкания свой, и оба меняются
+  // от раскладки. Сколько ящика закрыто — видно по самим прямоугольникам.
+  const cover = (element, side) => {
+    if (!element || element.hidden) return 0;
+    const rect = element.getBoundingClientRect();
+    if (rect.height === 0) return 0;
+    return Math.max(0, side === "head" ? rect.bottom - frame.top : frame.bottom - rect.top);
+  };
+  // Положение строки в содержимом: от верха видимой части плюс то, что уже
+  // прокручено. `clientTop` — рамка ящика, она в счёт содержимого не идёт.
+  const top = row.top - frame.top - box.clientTop + box.scrollTop;
+  box.scrollTop = marksScrollTop(
+    { top, height: row.height },
+    {
+      scrollTop: box.scrollTop,
+      clientHeight: box.clientHeight,
+      scrollHeight: box.scrollHeight,
+      headInset: cover(chrome && chrome.head, "head"),
+      footInset: cover(chrome && chrome.foot, "foot"),
+    },
+    align,
+  );
+}
+
 // Что показывает строка списка. Свёрнутая — ровно то, что просил заказчик:
 // значок и обозначение (плюс отметка повтора номера: три строки «Т1» подряд
 // иначе выглядят ошибкой). Раскрытая — прежний вид со всеми полями.
@@ -22952,13 +23113,24 @@ function mountMarksPanel(host, api) {
     on: { click: () => compactAll() },
   });
   const foot = uiEl("div", { class: "marks__foot" }, [compactButton]);
-  host.replaceChildren(uiEl("div", { class: "marks__top" }, [filters.node, count]), list, foot);
+  // Фильтры сверху и кнопка смыкания снизу прилипшие и непрозрачные: они
+  // закрывают собой часть списка, и прокрутка обязана это знать — иначе
+  // подведённая строка уезжает под фильтры.
+  const top = uiEl("div", { class: "marks__top" }, [filters.node, count]);
+  host.replaceChildren(top, list, foot);
   // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
   // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
   // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
   // перестраивать список по ходу — ради этого он и набирается.
   let pending = false;
   let shownSelection = "";
+  // Какая метка выделена кликом по своей же строке. Источник выделения знает
+  // только эта панель: наружу, в состояние сеанса, он не выносится — холсту,
+  // поиску и предупреждениям до него дела нет, а нужен он ровно одному месту,
+  // прокрутке. Хранится именно метка, а не признак: перерисовка могла
+  // отложиться (пользователь печатал), и голый признак достался бы чужому,
+  // пришедшему со схемы выделению — оно бы тогда не подвелось к верху.
+  let clickedRow = null;
 
   // Номер правится числовым полем — оно тоже держит список от пересборки,
   // иначе набранная цифра выбрасывала бы курсор из поля.
@@ -22977,6 +23149,9 @@ function mountMarksPanel(host, api) {
     const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
     const mark = state.project ? findMark(state.project, markId) : null;
     if (!scheme || !mark) return;
+    // Выделение из самого списка: строка уже под пальцем, выдёргивать её
+    // наверх нельзя — уедет из-под курсора.
+    clickedRow = markId;
     setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
   }
 
@@ -23262,25 +23437,30 @@ function mountMarksPanel(host, api) {
       [
         head,
         view.fields ? roomField(state, mark) : null,
+        // «Расположение» и «В оригинале» — рядом, в одну строку: заказчик
+        // заполняет их парой, идя по списку, и две узкие строки читаются как
+        // одна запись о метке, а не как два разных дела. Подписи у полей нет:
+        // что это за поле, говорит подсказка в пустом, а у заполненного —
+        // подсказка при наведении.
         view.fields
-          ? uiEl("input", {
-              class: "ui-input",
-              type: "text",
-              value: view.fields.location,
-              placeholder: strings.marks.locationPlaceholder,
-              title: strings.marks.location,
-              on: { change: (event) => setField(mark.id, "location", event.target.value) },
-            })
-          : null,
-        view.fields
-          ? uiEl("input", {
-              class: "ui-input",
-              type: "text",
-              value: view.fields.original,
-              placeholder: strings.marks.originalPlaceholder,
-              title: strings.marks.original,
-              on: { change: (event) => setField(mark.id, "original", event.target.value) },
-            })
+          ? uiEl("div", { class: "mark-row__fields" }, [
+              uiEl("input", {
+                class: "ui-input mark-row__location",
+                type: "text",
+                value: view.fields.location,
+                placeholder: strings.marks.locationPlaceholder,
+                title: strings.marks.location,
+                on: { change: (event) => setField(mark.id, "location", event.target.value) },
+              }),
+              uiEl("input", {
+                class: "ui-input mark-row__original",
+                type: "text",
+                value: view.fields.original,
+                placeholder: strings.marks.originalPlaceholder,
+                title: strings.marks.original,
+                on: { change: (event) => setField(mark.id, "original", event.target.value) },
+              }),
+            ])
           : null,
         controlsButton,
         equipmentButton,
@@ -23328,6 +23508,10 @@ function mountMarksPanel(host, api) {
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
       return;
     }
+    // Порядок строк — только из фильтров, и никакой своей перестановки:
+    // выделенную показывает прокрутка, а место в списке у метки остаётся
+    // прежним. Сдвинь его — и список перестанет сходиться с легендой
+    // и таблицей, у которых порядок тот же.
     const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
     const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
     count.textContent = total > 0 ? text("marks.count", { shown: rows.length, total }) : "";
@@ -23349,10 +23533,14 @@ function mountMarksPanel(host, api) {
       ...rows.map((row) => markRow(state, row, selected.has(row.mark.id), repeats, controllers)),
     );
     // Подводим список к выделенной строке только когда выделение сменилось:
-    // иначе правка поля в одной строке уводила бы список к другой.
+    // иначе прокрутка дралась бы с рукой — пользователь листает список сам, а
+    // тот возвращается к выделенной метке после каждой перерисовки.
     const selection = state.selectedMarkIds.join(",");
     const current = list.querySelector(".mark-row.is-current");
-    if (current && selection !== shownSelection) current.scrollIntoView({ block: "nearest" });
+    // «Не поднимать» причитается ровно той метке, по строке которой нажали.
+    const align = clickedRow && selection === clickedRow ? MARKS_ALIGN_LEAST : MARKS_ALIGN_TOP;
+    clickedRow = null;
+    if (current && selection !== shownSelection) marksScrollToRow(current, align, { head: top, foot });
     shownSelection = selection;
   }
 
