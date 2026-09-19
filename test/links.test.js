@@ -18,9 +18,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addMark, addScheme, createProject, setMarkControls } from "../src/model.js";
+import { addMark, addScheme, createProject, setMarkControls, setMarkNumber } from "../src/model.js";
 import { canvasFrameLinks } from "../src/canvas.js";
-import { drawMarkLinks, drawScheme, markLinkAnchor, markLinks } from "../src/render.js";
+import { convexHull, drawMarkLinks, drawScheme, linkHullOutline, markLinkAnchor, markLinks } from "../src/render.js";
 import { linksHint, linksNotice } from "../src/panels/links.js";
 import { strings } from "../src/strings.js";
 
@@ -40,6 +40,7 @@ function drawProbe() {
     globalAlpha: 1,
     strokeStyle: "",
     fillStyle: "",
+    dash: [],
     getTransform: () => ({ a: 1 }),
     measureText: (value) => ({ width: String(value).length * 7 }),
     beginPath() {
@@ -60,9 +61,18 @@ function drawProbe() {
     arc(x, y, r) {
       if (path) path.arc = { x, y, r };
     },
+    setLineDash(value) {
+      impl.dash = Array.isArray(value) ? value.slice() : [];
+    },
     stroke() {
       if (path) {
-        strokes.push({ ...path, width: impl.lineWidth, alpha: impl.globalAlpha, color: impl.strokeStyle });
+        strokes.push({
+          ...path,
+          width: impl.lineWidth,
+          alpha: impl.globalAlpha,
+          color: impl.strokeStyle,
+          dash: impl.dash.slice(),
+        });
       }
       path = null;
     },
@@ -82,6 +92,19 @@ function drawProbe() {
       },
     }),
   };
+}
+
+// Точка внутри замкнутой ломаной: лучевой тест. Нужен, чтобы проверить, что
+// оболочка обходит свои метки, а не режет их.
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i];
+    const b = polygon[j];
+    const crosses = a.y > point.y !== b.y > point.y;
+    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
 }
 
 // Сцена: выключатель слева, лента справа, выключатель управляет лентой.
@@ -548,4 +571,368 @@ test("пустой план и связи на другие схемы не ос
   const scheme = tied.project.schemes.find((item) => item.id === base.schemeId);
   const notice = linksNotice(tied.project, scheme, null);
   assert.ok(notice && notice.includes("1"), "сколько связей ушло на другие схемы — сказано числом: " + notice);
+});
+
+// ——— общее управление: отношение равных ————————————————————————————————
+//
+// Проходная схема: В1 и ВП1 оба управляют Т1 — значит они в одной цепи. Слова
+// заказчика: «ещё надо бы сделать соединение между управляемыми устройствами
+// (например выключатели и переключатели)». Направления у этого отношения нет,
+// и полного графа быть не должно: трое дали бы три линии, шестеро пятнадцать.
+
+// Сцена проходной схемы: три выключателя слева и один светильник справа.
+function circuit() {
+  const base = scene();
+  const second = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.3, y: 0.7 }],
+  });
+  const third = addMark(second.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.1, y: 0.9 }],
+  });
+  let project = setMarkControls(third.project, base.switchId, [base.stripId]).project;
+  project = setMarkControls(project, second.mark.id, [base.stripId]).project;
+  project = setMarkControls(project, third.mark.id, [base.stripId]).project;
+  return { ...base, project, scheme: project.schemes[0], ids: [base.switchId, second.mark.id, third.mark.id] };
+}
+
+test("метки, управляющие одним объектом, связаны между собой", () => {
+  const base = linked(scene());
+  const second = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.3, y: 0.7 }],
+  });
+  const project = setMarkControls(second.project, second.mark.id, [base.stripId]).project;
+  const links = markLinks(project, project.schemes[0], null);
+  assert.equal(links.ties.length, 1);
+  const ids = [links.ties[0].fromId, links.ties[0].toId].sort();
+  assert.deepEqual(ids, [base.switchId, second.mark.id].sort());
+});
+
+test("трое на одном объекте дают цепочку, а не каждого с каждым", () => {
+  const base = circuit();
+  const links = markLinks(base.project, base.scheme, null);
+  assert.equal(links.ties.length, 2, "полный граф на троих — это три линии; должна быть цепочка из двух");
+  // Цепь идёт слева направо: крайние в ней не соседи.
+  const pairs = links.ties.map((tie) => [tie.fromId, tie.toId]);
+  const seen = new Map();
+  for (const [a, b] of pairs) {
+    seen.set(a, (seen.get(a) || 0) + 1);
+    seen.set(b, (seen.get(b) || 0) + 1);
+  }
+  assert.deepEqual([...seen.values()].sort(), [1, 1, 2], "это не цепочка: у звеньев не те степени");
+});
+
+test("одна пара не удваивается, управляй они хоть двумя объектами", () => {
+  const base = scene();
+  const second = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.3, y: 0.7 }],
+  });
+  const lamp = addMark(second.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.9, y: 0.7 }],
+  });
+  let project = setMarkControls(lamp.project, base.switchId, [base.stripId, lamp.mark.id]).project;
+  project = setMarkControls(project, second.mark.id, [base.stripId, lamp.mark.id]).project;
+  assert.equal(markLinks(project, project.schemes[0], null).ties.length, 1);
+});
+
+// Цепь остаётся цепью, даже если сам светильник спрятан фильтром или лежит на
+// другом этаже: выключатель с переключателем связаны друг с другом, а не через
+// видимость подопечного.
+test("общая цепь не зависит от того, виден ли подопечный", () => {
+  const base = scene();
+  const upstairs = addScheme(base.project, { name: "2 этаж", width: PLAN.width, height: PLAN.height });
+  const lamp = addMark(upstairs.project, {
+    schemeId: upstairs.scheme.id,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.5, y: 0.5 }],
+  });
+  const second = addMark(lamp.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.3, y: 0.7 }],
+  });
+  let project = setMarkControls(second.project, base.switchId, [lamp.mark.id]).project;
+  project = setMarkControls(project, second.mark.id, [lamp.mark.id]).project;
+  const scheme = project.schemes.find((item) => item.id === base.schemeId);
+  const links = markLinks(project, scheme, null);
+  assert.equal(links.ties.length, 1, "светильник на другом этаже, а цепь между выключателями всё та же");
+  assert.equal(links.lines.length, 0, "линию через границу листа не провести");
+});
+
+// ——— общий номер: тождество ————————————————————————————————————————————
+//
+// «Ещё между метками с одной меткой. Например группа светильников Т16». Это не
+// отношение, а одна сущность, разнесённая по потолку, — и рисуется она не
+// линией, а оболочкой. Полного графа тут нет по устройству: оболочка одна на
+// всю группу, сколько бы меток в неё ни входило.
+
+// Шесть светильников с одним номером — тот самый случай, ради которого
+// оболочка и выбрана вместо линий.
+function ceiling(count = 6) {
+  const base = scene();
+  let project = base.project;
+  const ids = [];
+  const type = project.markTypes.find((item) => item.code === "Т");
+  for (let index = 0; index < count; index += 1) {
+    const made = addMark(project, {
+      schemeId: base.schemeId,
+      typeId: type.id,
+      points: [{ x: 0.3 + (index % 3) * 0.12, y: 0.6 + Math.floor(index / 3) * 0.14 }],
+    });
+    project = made.project;
+    ids.push(made.mark.id);
+  }
+  // Все шесть под одним номером — намеренный повтор, приём заказчика.
+  for (const id of ids.slice(1)) project = setMarkNumber(project, id, 16).project;
+  project = setMarkNumber(project, ids[0], 16).project;
+  return { ...base, project, scheme: project.schemes[0], ids, typeId: type.id };
+}
+
+test("метки с одним номером собираются в одну оболочку, а не в сеть линий", () => {
+  const base = ceiling(6);
+  const links = markLinks(base.project, base.scheme, null);
+  assert.equal(links.groups.length, 1, "шесть светильников — одна группа");
+  assert.equal(links.groups[0].markIds.length, 6);
+  assert.equal(links.groups[0].label, "Т16");
+  assert.equal(links.ties.length, 0, "общий номер — не общее управление");
+  assert.equal(links.lines.length, 0);
+});
+
+test("непарный номер группы не заводит", () => {
+  const base = scene();
+  assert.deepEqual(markLinks(base.project, base.scheme, null).groups, []);
+});
+
+test("одинаковый номер у разных типов — это разные сущности", () => {
+  const base = scene();
+  const lamp = base.project.markTypes.find((item) => item.code === "Т");
+  const first = addMark(base.project, { schemeId: base.schemeId, typeId: lamp.id, points: [{ x: 0.4, y: 0.4 }] });
+  const project = setMarkNumber(first.project, first.mark.id, 1).project;
+  // У выключателя В1 из сцены номер тоже 1, но тип другой.
+  assert.deepEqual(markLinks(project, project.schemes[0], null).groups, []);
+});
+
+// ——— оболочка обходит метки, а не режет их ——————————————————————————————
+
+test("оболочка двух меток — капсула, шести — замкнутый обход", () => {
+  const pair = linkHullOutline(
+    [
+      { x: 100, y: 100 },
+      { x: 300, y: 100 },
+    ],
+    20,
+  );
+  assert.ok(pair.length >= 8, "капсула вышла слишком грубой: " + pair.length);
+  const box = (points) => ({
+    left: Math.min(...points.map((p) => p.x)),
+    right: Math.max(...points.map((p) => p.x)),
+    top: Math.min(...points.map((p) => p.y)),
+    bottom: Math.max(...points.map((p) => p.y)),
+  });
+  const around = box(pair);
+  assert.ok(around.left <= 80.5 && around.right >= 319.5, "капсула не обошла метки: " + JSON.stringify(around));
+  assert.ok(around.top <= 80.5 && around.bottom >= 119.5, "капсула не обошла метки по высоте");
+
+  // Каждая метка группы обязана оказаться внутри оболочки — иначе линия режет
+  // знак, и «это одно и то же» читаться перестаёт.
+  const marks = [
+    { x: 100, y: 100 },
+    { x: 260, y: 90 },
+    { x: 400, y: 160 },
+    { x: 330, y: 300 },
+    { x: 150, y: 280 },
+    { x: 90, y: 200 },
+  ];
+  const outline = linkHullOutline(marks, 18);
+  for (const mark of marks) {
+    assert.ok(pointInPolygon(mark, outline), "метка оказалась снаружи оболочки: " + JSON.stringify(mark));
+  }
+  // И запас от знака есть: точка в полутора десятках пикселей за меткой наружу
+  // всё ещё под оболочкой.
+  assert.ok(pointInPolygon({ x: 90 - 12, y: 200 }, outline), "оболочка прошла вплотную по знаку");
+});
+
+test("выпуклая оболочка отбрасывает внутренние точки и не путается в прямой", () => {
+  const hull = convexHull([
+    { x: 0, y: 0 },
+    { x: 10, y: 10 },
+    { x: 20, y: 0 },
+    { x: 10, y: 20 },
+  ]);
+  assert.equal(hull.length, 3, "точка внутри треугольника попала в оболочку");
+  const line = convexHull([
+    { x: 0, y: 0 },
+    { x: 5, y: 5 },
+    { x: 10, y: 10 },
+  ]);
+  assert.equal(line.length, 2, "три точки на одной прямой — это отрезок, а не многоугольник");
+});
+
+// ——— чем новые роды отличаются от управления и друг от друга ——————————————
+
+test("у цепи равных нет ни стрелки, ни точки — и она прямая", () => {
+  const base = scene();
+  const second = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.3, y: 0.7 }],
+  });
+  const project = setMarkControls(
+    setMarkControls(second.project, base.switchId, [base.stripId]).project,
+    second.mark.id,
+    [base.stripId],
+  ).project;
+  const scheme = project.schemes[0];
+
+  const only = { lines: [], ties: markLinks(project, scheme, null).ties, groups: [], offScheme: [] };
+  const probe = drawProbe();
+  drawMarkLinks(probe.ctx, only, scheme, viewOf());
+  assert.equal(probe.strokes.filter((item) => item.curves > 0).length, 0, "связь равных выгнулась дугой");
+  assert.deepEqual(probe.fills, [], "у связи равных появился наконечник или точка — это знак направления");
+  // Сама линия и две засечки на концах.
+  assert.equal(probe.strokes.length, 3, "засечек на концах не видно: " + probe.strokes.length);
+  const [line, first, last] = probe.strokes;
+  const along = { x: line.points[1].x - line.points[0].x, y: line.points[1].y - line.points[0].y };
+  for (const tick of [first, last]) {
+    const across = { x: tick.points[1].x - tick.points[0].x, y: tick.points[1].y - tick.points[0].y };
+    const dot = along.x * across.x + along.y * across.y;
+    assert.ok(Math.abs(dot) < 1e-6, "засечка не поперёк линии");
+  }
+});
+
+test("оболочка бледнее и тоньше связей и ведена пунктиром", () => {
+  const base = ceiling(4);
+  const links = markLinks(base.project, base.scheme, null);
+  const probe = drawProbe();
+  drawMarkLinks(probe.ctx, links, base.scheme, viewOf());
+  const hull = probe.strokes.find((item) => item.points.length > 8);
+  assert.ok(hull, "оболочка не нарисована");
+  assert.deepEqual(hull.dash, [5, 4], "оболочка ведена сплошной — тождество перепутается с отношением");
+
+  // Против управления: там сплошная, толще и ярче.
+  const control = linked(scene());
+  const other = drawProbe();
+  drawMarkLinks(other.ctx, markLinks(control.project, control.scheme, null), control.scheme, viewOf());
+  const arc = other.strokes.find((item) => item.curves > 0);
+  assert.ok(hull.width < arc.width, "оболочка не тоньше управления");
+  assert.ok(hull.alpha < arc.alpha, "оболочка не бледнее управления");
+  assert.deepEqual(arc.dash, [], "управление стало пунктирным");
+});
+
+// ——— кадр и выделение ——————————————————————————————————————————————————
+
+test("выделенная метка показывает свою цепь и свою группу целиком", () => {
+  const base = ceiling(4);
+  const links = markLinks(base.project, base.scheme, null);
+  assert.equal(links.groups[0].markIds.length, 4, "пример не тот");
+  const frame = canvasFrameLinks(
+    { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.ids[2]] },
+    null,
+    base.scheme,
+  );
+  assert.equal(frame.groups.length, 1);
+  assert.equal(frame.groups[0].markIds.length, 4, "показана половина группы — это неправда про тождество");
+});
+
+test("кадр берёт цепь и оболочку из промежуточного объекта, пока идёт перенос", () => {
+  const base = ceiling(3);
+  const state = { project: base.project, filter: null, linksShown: true, selectedMarkIds: [] };
+  const moved = {
+    ...base.project,
+    marks: base.project.marks.map((mark) => (mark.id === base.ids[0] ? { ...mark, points: [{ x: 0.9, y: 0.1 }] } : mark)),
+  };
+  const frame = canvasFrameLinks(state, moved, base.scheme);
+  const group = frame.groups[0];
+  const index = group.markIds.indexOf(base.ids[0]);
+  assert.deepEqual(group.points[index], { x: 0.9, y: 0.1 }, "оболочка читает объект из состояния и отстанет от метки");
+
+  const chain = circuit();
+  const chainState = { project: chain.project, filter: null, linksShown: true, selectedMarkIds: [] };
+  const chainMoved = {
+    ...chain.project,
+    marks: chain.project.marks.map((mark) => (mark.id === chain.ids[0] ? { ...mark, points: [{ x: 0.05, y: 0.05 }] } : mark)),
+  };
+  const ties = canvasFrameLinks(chainState, chainMoved, chain.scheme).ties;
+  const touching = ties.filter((tie) => tie.fromId === chain.ids[0] || tie.toId === chain.ids[0]);
+  assert.ok(touching.length > 0, "пример не тот: метка должна быть в цепи");
+  for (const tie of touching) {
+    const end = tie.fromId === chain.ids[0] ? tie.from : tie.to;
+    assert.deepEqual(end, { x: 0.05, y: 0.05 }, "цепь отстала от метки под рукой");
+  }
+});
+
+// ——— другие схемы: тем же способом, а не третьим ————————————————————————
+
+test("собеседник любого рода с другой схемы даёт один обрывок, а не три", () => {
+  const base = scene();
+  const upstairs = addScheme(base.project, { name: "2 этаж", width: PLAN.width, height: PLAN.height });
+  // Наверху: подопечный, напарник по цепи и тёзка по номеру.
+  const lamp = addMark(upstairs.project, {
+    schemeId: upstairs.scheme.id,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.5, y: 0.5 }],
+  });
+  const mate = addMark(lamp.project, {
+    schemeId: upstairs.scheme.id,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.6, y: 0.5 }],
+  });
+  let project = setMarkControls(mate.project, base.switchId, [lamp.mark.id]).project;
+  project = setMarkControls(project, mate.mark.id, [lamp.mark.id]).project;
+  // И тёзка: тот же тип, тот же номер, что у В1.
+  const twin = addMark(project, {
+    schemeId: upstairs.scheme.id,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.7, y: 0.5 }],
+  });
+  project = twin.project;
+  const number = project.marks.find((mark) => mark.id === base.switchId).number;
+  project = setMarkNumber(project, twin.mark.id, number).project;
+
+  const scheme = project.schemes.find((item) => item.id === base.schemeId);
+  const links = markLinks(project, scheme, null);
+  assert.equal(links.offScheme.length, 1, "обрывок у метки один, сколько бы родов связи через границу ни ушло");
+  assert.equal(links.offScheme[0].markId, base.switchId);
+  assert.equal(links.offScheme[0].count, 3, "подопечный, напарник и тёзка — три собеседника");
+  assert.deepEqual(links.groups, [], "группа из одной метки — не группа");
+  assert.deepEqual(links.ties, [], "цепь из одной метки — не цепь");
+});
+
+// Отметка в выгрузке одна на все три рода: «Со связями меток» — это и дуги, и
+// цепь равных, и оболочка. Трёх отметок в диалоге быть не должно.
+test("отметка выгрузки поднимает все три рода разом", () => {
+  const base = ceiling(4);
+  const second = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.pointTypeId,
+    points: [{ x: 0.12, y: 0.2 }],
+  });
+  let project = setMarkControls(second.project, base.switchId, [base.stripId]).project;
+  project = setMarkControls(project, second.mark.id, [base.stripId]).project;
+  const scheme = project.schemes[0];
+  const sheet = (links) => {
+    const probe = drawProbe();
+    drawScheme(probe.ctx, { project, scheme, image: null, filter: null, view: viewOf(), legend: false, links });
+    return {
+      arcs: probe.strokes.filter((item) => item.curves > 0).length,
+      hulls: probe.strokes.filter((item) => item.dash && item.dash.length > 0 && item.points.length > 8).length,
+      ticks: probe.strokes.filter((item) => item.points.length === 2 && item.dash && item.dash.length === 0).length,
+    };
+  };
+  const without = sheet(undefined);
+  assert.equal(without.arcs, 0, "связь попала на лист без отметки");
+  assert.equal(without.hulls, 0, "оболочка попала на лист без отметки");
+  const with_ = sheet(true);
+  assert.ok(with_.arcs > 0, "дуг управления на листе нет");
+  assert.equal(with_.hulls, 1, "оболочки на листе нет");
+  assert.ok(with_.ticks > without.ticks, "цепи равных на листе нет");
 });

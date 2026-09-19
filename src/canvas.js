@@ -904,8 +904,14 @@ function canvasLinksShown(state) {
  * при выделении метки да, пусть показываются её связи, это удобно будет»):
  *
  * - переключатель **включён** — все связи схемы;
- * - переключатель **выключен** — связи выделенной метки, в обе стороны: и чем
- *   управляет она, и кто управляет ею. Ничего не выделено — не рисуется ничего.
+ * - переключатель **выключен** — связи выделенной метки: и чем управляет она,
+ *   и кто управляет ею, и с кем она в одной цепи, и её группа одного номера.
+ *   Ничего не выделено — не рисуется ничего.
+ *
+ * Отсюда же ответ на «три рода под одной кнопкой или у каждого своя»: кнопка
+ * одна. Три кнопки в шапке — приборная панель, а частями паутина выключается
+ * жестом, который у пользователя уже есть: выделил метку — видишь её разбор и
+ * ничего больше.
  *
  * Рисуются они **одинаково**: тот же цвет, та же толщина, тот же прогиб. Вид
  * не должен прыгать на переключении — иначе одна и та же дуга у одной и той же
@@ -918,7 +924,7 @@ function canvasLinksShown(state) {
  * тестом, а не глазами.
  */
 export function canvasFrameLinks(state, preview, scheme) {
-  const empty = { lines: [], offScheme: [] };
+  const empty = { lines: [], ties: [], groups: [], offScheme: [] };
   if (!scheme) return empty;
   const selected = (state && state.selectedMarkIds) || [];
   const all = canvasLinksShown(state);
@@ -930,11 +936,17 @@ export function canvasFrameLinks(state, preview, scheme) {
   if (!all) {
     return {
       lines: links.lines.filter(mine),
+      ties: links.ties.filter(mine),
+      // Оболочка показывается целиком или не показывается вовсе: это
+      // тождество, и половина группы — неправда.
+      groups: links.groups.filter((group) => group.markIds.some((id) => focus.has(id))),
       offScheme: links.offScheme.filter((item) => focus.has(item.markId)),
     };
   }
   return {
     lines: [...links.lines.filter((line) => !mine(line)), ...links.lines.filter(mine)],
+    ties: [...links.ties.filter((tie) => !mine(tie)), ...links.ties.filter(mine)],
+    groups: links.groups,
     offScheme: links.offScheme,
   };
 }

@@ -16,6 +16,7 @@ import {
   blockMembers,
   findMark,
   findRoom,
+  repeatedNumbers,
   findType,
   findGroup,
   markControlIds,
@@ -1713,6 +1714,20 @@ const LINK_AWAY_BREAK = 4;
 // Куда смотрит обрывок: вверх-вправо, туда же, куда уходит подпись метки.
 const LINK_AWAY_DEG = -45;
 
+// Общее управление — отношение равных: ни стрелки, ни точки, засечки на обоих
+// концах. Тоньше и бледнее управления: это следствие связей, а не своя запись.
+const LINK_TIE_ALPHA = 0.5;
+const LINK_TIE_WIDTH = 1.2;
+const LINK_TIE_TICK = 4.5;
+
+// Общий номер — не линия, а оболочка: тождество, а не отношение. Пунктир,
+// самая бледная из трёх, отступ от знака метки — чтобы обойти его, а не
+// перечеркнуть.
+const LINK_HULL_ALPHA = 0.45;
+const LINK_HULL_WIDTH = 1.1;
+const LINK_HULL_DASH = [5, 4];
+const LINK_HULL_PAD = 7;
+
 // Точка, к которой связь приходит. У точечной метки — середина её точек (у
 // блока «одна метка на блок» их несколько), у ломаной — середина серединного
 // отрезка: она всегда лежит **на** линии, а центр тяжести вершин у Г-образного
@@ -1734,12 +1749,22 @@ export function markLinkAnchor(mark) {
  * Связи, которые можно показать на этой схеме. Чистая: доли плана, как точки
  * меток, — ни зума, ни экрана.
  *
- * Возвращает `{lines, offScheme}`:
- * - `lines` — `{fromId, toId, from, to}` для пар, обе метки которых видны здесь;
- * - `offScheme` — `{markId, at, count}` для меток, чьи подопечные лежат на
- *   **другой схеме**: линию через границу листа не провести, но и промолчать
- *   нельзя — иначе пустота у метки читается как «эта ничем не управляет».
- *   Такая метка помечается обрывком (`drawMarkLinks`).
+ * Родов связи три, и различаются они **природой отношения**, а не цветом:
+ *
+ * - `lines` — **управление**, `{fromId, toId, from, to, spread}`. Отношение
+ *   направленное: кто кем. Рисуется дугой со стрелкой.
+ * - `ties` — **общее управление**, `{fromId, toId, from, to}`. В1 и ВП1 оба
+ *   управляют Т1 — значит они в одной цепи. Отношение **равных**: направления
+ *   нет, и стрелка тут была бы враньём. Рисуется прямой с засечками на концах.
+ * - `groups` — **общий номер**, `{key, label, markIds, points}`. Это вообще не
+ *   отношение, а **тождество**: шесть светильников с одним Т16 — в учёте
+ *   заказчика один светильник, разнесённый по потолку (G25, G96). Рисуется не
+ *   линией, а замкнутой оболочкой вокруг своих меток.
+ * - `offScheme` — `{markId, at, count}` для меток, чей собеседник любого из
+ *   трёх родов лежит на **другой схеме**: линию через границу листа не
+ *   провести, но и промолчать нельзя — пустота у метки читается как «эта ни с
+ *   чем не связана». Такая метка помечается обрывком (`drawMarkLinks`), и
+ *   способ этот один на все три рода.
  *
  * Метка, спрятанная **фильтром**, — случай другой: её убрала рука
  * пользователя, и рассказывать ему о том, что он сам только что скрыл, незачем.
@@ -1750,42 +1775,200 @@ export function markLinkAnchor(mark) {
  * мешанины не будет» — в его работе связь короткая, от выключателя к
  * светильнику в той же комнате, а не через весь план в щит.
  *
- * `spread` у линии — её очередь среди дуг, приходящих в **ту же** метку.
- * Считается здесь, а не при рисовании: разведение проходной схемы обязано
- * проверяться без холста.
+ * **Полного графа здесь нет нигде.** Трое управляющих одним объектом дали бы
+ * три линии, шестеро — пятнадцать: это не «показать цепь», а закрасить план.
+ * Равные соединяются **цепочкой** (n−1 звеньев, порядок — слева направо и
+ * сверху вниз, чтобы цепь читалась как обход), а тождество — **одной
+ * оболочкой** на всю группу.
+ *
+ * `spread` у линии управления — её очередь среди дуг, приходящих в **ту же**
+ * метку. Считается здесь, а не при рисовании: разведение проходной схемы
+ * обязано проверяться без холста.
  */
 export function markLinks(project, scheme, filter) {
-  const result = { lines: [], offScheme: [] };
+  const result = { lines: [], ties: [], groups: [], offScheme: [] };
   if (!project || !scheme) return result;
   const shown = visibleMarks(project, scheme, filter);
   const here = new Map(shown.map((mark) => [mark.id, mark]));
+  // Собеседники, оказавшиеся на другой схеме, — по метке и без повторов: у
+  // метки один обрывок, сколько бы родов связи через границу ни ушло.
+  const away = new Map();
+  const noteAway = (markId, otherId) => {
+    const other = findMark(project, otherId);
+    if (!other || !other.schemeId || other.schemeId === scheme.id) return;
+    let set = away.get(markId);
+    if (!set) away.set(markId, (set = new Set()));
+    set.add(otherId);
+  };
+
+  // ——— управление ———
   // Сколько дуг уже пришло в эту метку: порядок обхода — порядок объекта,
   // поэтому одна и та же схема разводится одинаково при каждой отрисовке.
   const incoming = new Map();
   for (const mark of shown) {
-    let away = 0;
     for (const id of markControlIds(mark)) {
       const target = here.get(id);
-      if (target) {
-        const spread = incoming.get(id) || 0;
-        incoming.set(id, spread + 1);
-        result.lines.push({
-          fromId: mark.id,
-          toId: id,
-          from: markLinkAnchor(mark),
-          to: markLinkAnchor(target),
-          spread,
-        });
+      if (!target) {
+        noteAway(mark.id, id);
         continue;
       }
-      const other = findMark(project, id);
-      if (other && other.schemeId && other.schemeId !== scheme.id) away += 1;
+      const spread = incoming.get(id) || 0;
+      incoming.set(id, spread + 1);
+      result.lines.push({
+        fromId: mark.id,
+        toId: id,
+        from: markLinkAnchor(mark),
+        to: markLinkAnchor(target),
+        spread,
+      });
     }
-    if (away > 0) {
-      result.offScheme.push({ markId: mark.id, at: markLinkAnchor(mark), count: away });
+  }
+
+  // ——— общее управление ———
+  // Управляющие собираются по подопечному, а сам подопечный при этом не нужен
+  // видимым: выключатель и переключатель остаются одной цепью и тогда, когда
+  // светильник спрятан фильтром или лежит на другом этаже.
+  const byTarget = new Map();
+  for (const mark of project.marks) {
+    for (const id of markControlIds(mark)) {
+      let list = byTarget.get(id);
+      if (!list) byTarget.set(id, (list = []));
+      list.push(mark);
+    }
+  }
+  const tied = new Set();
+  for (const [, controllers] of byTarget) {
+    if (controllers.length < 2) continue;
+    const mine = controllers.filter((mark) => here.has(mark.id));
+    for (const mark of mine) {
+      for (const other of controllers) {
+        if (other.id !== mark.id) noteAway(mark.id, other.id);
+      }
+    }
+    if (mine.length < 2) continue;
+    // Цепочка, а не каждый с каждым: слева направо, сверху вниз.
+    const chain = mine
+      .map((mark) => ({ mark, at: markLinkAnchor(mark) }))
+      .sort((a, b) => a.at.x - b.at.x || a.at.y - b.at.y || (a.mark.id < b.mark.id ? -1 : 1));
+    for (let index = 0; index + 1 < chain.length; index += 1) {
+      const a = chain[index];
+      const b = chain[index + 1];
+      const key = a.mark.id < b.mark.id ? a.mark.id + "|" + b.mark.id : b.mark.id + "|" + a.mark.id;
+      if (tied.has(key)) continue;
+      tied.add(key);
+      result.ties.push({ fromId: a.mark.id, toId: b.mark.id, from: a.at, to: b.at });
+    }
+  }
+
+  // ——— общий номер ———
+  // Группировку считает модель (`repeatedNumbers`): что считать повтором —
+  // правило объекта, а не рисования. Здесь остаётся выбрать своих.
+  for (const repeat of repeatedNumbers(project)) {
+    const mine = repeat.markIds.filter((id) => here.has(id));
+    for (const id of mine) {
+      for (const other of repeat.markIds) {
+        if (other !== id) noteAway(id, other);
+      }
+    }
+    if (mine.length < 2) continue;
+    result.groups.push({
+      key: repeat.typeId + "#" + repeat.number,
+      label: repeat.label,
+      markIds: mine,
+      points: mine.map((id) => markLinkAnchor(here.get(id))),
+    });
+  }
+
+  for (const mark of shown) {
+    const set = away.get(mark.id);
+    if (set && set.size > 0) {
+      result.offScheme.push({ markId: mark.id, at: markLinkAnchor(mark), count: set.size });
     }
   }
   return result;
+}
+
+/**
+ * Выпуклая оболочка набора точек (обход Эндрю). Возвращает вершины по кругу;
+ * при одной точке — её саму, при двух и при лежащих на одной прямой — только
+ * концы. Чистая и вынесенная наружу ради теста: оболочка группы считается по
+ * ней, и ошибка здесь видна только глазами.
+ */
+export function convexHull(points) {
+  const list = (points || []).filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (list.length <= 2) return list.slice();
+  const sorted = list.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (source) => {
+    const out = [];
+    for (const point of source) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], point) <= 0) out.pop();
+      out.push(point);
+    }
+    out.pop();
+    return out;
+  };
+  const hull = [...half(sorted), ...half(sorted.slice().reverse())];
+  return hull.length >= 3 ? hull : [sorted[0], sorted[sorted.length - 1]];
+}
+
+/**
+ * Оболочка группы одного номера: выпуклая оболочка её меток, отодвинутая
+ * наружу на `pad` и скруглённая по углам, — замкнутая ломаная в тех же
+ * единицах, что пришли.
+ *
+ * Отодвинутый контур с круглыми углами — это сумма Минковского оболочки с
+ * кругом: у двух меток выходит капсула, у трёх и больше — скруглённый
+ * многоугольник, и в обоих случаях линия обходит знаки, а не режет их.
+ * Считается ломаной, а не дугами холста, ровно затем, чтобы проверяться без
+ * холста.
+ */
+export function linkHullOutline(points, pad, options = {}) {
+  const hull = convexHull(points);
+  const radius = Math.max(1, pad);
+  const step = Math.max(2, Math.min(24, Math.round(options.corner || 6)));
+  if (hull.length === 0) return [];
+  if (hull.length === 1) {
+    const out = [];
+    for (let i = 0; i < step * 4; i += 1) {
+      const angle = (i / (step * 4)) * Math.PI * 2;
+      out.push({ x: hull[0].x + Math.cos(angle) * radius, y: hull[0].y + Math.sin(angle) * radius });
+    }
+    return out;
+  }
+  // Обход по кругу; у двух вершин рёбер тоже два — туда и обратно, и из этого
+  // сам собой выходит капсула.
+  const out = [];
+  const count = hull.length;
+  const normals = [];
+  for (let i = 0; i < count; i += 1) {
+    const a = hull[i];
+    const b = hull[(i + 1) % count];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const span = Math.hypot(dx, dy) || 1;
+    // Наружу — вправо от хода обхода: `convexHull` отдаёт вершины по часовой
+    // стрелке в экранных осях (ось Y вниз).
+    normals.push({ x: dy / span, y: -dx / span });
+  }
+  for (let i = 0; i < count; i += 1) {
+    const a = hull[i];
+    const b = hull[(i + 1) % count];
+    const n = normals[i];
+    out.push({ x: a.x + n.x * radius, y: a.y + n.y * radius });
+    out.push({ x: b.x + n.x * radius, y: b.y + n.y * radius });
+    // Угол: дуга радиусом `pad` от нормали этого ребра до нормали следующего.
+    const next = normals[(i + 1) % count];
+    let from = Math.atan2(n.y, n.x);
+    let to = Math.atan2(next.y, next.x);
+    while (to < from) to += Math.PI * 2;
+    const turns = Math.max(1, Math.ceil(((to - from) / (Math.PI / 2)) * step));
+    for (let k = 1; k <= turns; k += 1) {
+      const angle = from + ((to - from) * k) / turns;
+      out.push({ x: b.x + Math.cos(angle) * radius, y: b.y + Math.sin(angle) * radius });
+    }
+  }
+  return out;
 }
 
 // Дуга связи в экранных пикселях: концы отодвинуты от знаков меток, середина
@@ -1837,18 +2020,66 @@ function drawLinkArrow(ctx, at, dx, dy, size) {
 export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   if (!links) return;
   const lines = links.lines || [];
+  const ties = links.ties || [];
+  const groups = links.groups || [];
   const away = links.offScheme || [];
-  if (lines.length === 0 && away.length === 0) return;
+  if (lines.length === 0 && ties.length === 0 && groups.length === 0 && away.length === 0) return;
   const state = renderView(view);
   const pad = markRadius(state) + LINK_GAP_PX;
   const color = options.color || LINK_COLOR;
   ctx.save();
-  ctx.globalAlpha = LINK_ALPHA;
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
-  ctx.lineWidth = LINK_WIDTH;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+
+  // Тождество — в самом низу и без заливки: оболочка обводит свои метки, а не
+  // закрывает то, что под ней.
+  ctx.globalAlpha = LINK_HULL_ALPHA;
+  ctx.lineWidth = LINK_HULL_WIDTH;
+  ctx.setLineDash(LINK_HULL_DASH);
+  for (const group of groups) {
+    const screen = (group.points || []).map((point) => planToScreen(point, scheme, state));
+    const outline = linkHullOutline(screen, markRadius(state) + LINK_HULL_PAD);
+    if (outline.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(outline[0].x, outline[0].y);
+    for (let i = 1; i < outline.length; i += 1) ctx.lineTo(outline[i].x, outline[i].y);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // Равные — прямой с засечками на обоих концах. Ни стрелки, ни точки: у этой
+  // связи нет начала и конца, и любой знак направления был бы враньём.
+  ctx.globalAlpha = LINK_TIE_ALPHA;
+  ctx.lineWidth = LINK_TIE_WIDTH;
+  ctx.setLineDash([]);
+  for (const tie of ties) {
+    const from = planToScreen(tie.from, scheme, state);
+    const to = planToScreen(tie.to, scheme, state);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const span = Math.hypot(dx, dy);
+    if (!(span > 0)) continue;
+    const ux = dx / span;
+    const uy = dy / span;
+    const trim = Math.min(pad, (span - 1) / 2);
+    const a = { x: from.x + ux * trim, y: from.y + uy * trim };
+    const b = { x: to.x - ux * trim, y: to.y - uy * trim };
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    for (const end of [a, b]) {
+      ctx.beginPath();
+      ctx.moveTo(end.x - uy * LINK_TIE_TICK, end.y + ux * LINK_TIE_TICK);
+      ctx.lineTo(end.x + uy * LINK_TIE_TICK, end.y - ux * LINK_TIE_TICK);
+      ctx.stroke();
+    }
+  }
+
+  ctx.globalAlpha = LINK_ALPHA;
+  ctx.lineWidth = LINK_WIDTH;
   ctx.setLineDash([]);
   for (const line of lines) {
     const curve = linkCurve(
