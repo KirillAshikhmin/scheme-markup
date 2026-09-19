@@ -73,6 +73,49 @@ export function marksControllerIndex(project) {
   return index;
 }
 
+/**
+ * Выделенные строки — первыми, остальные в прежнем порядке.
+ *
+ * Заказчик: «в списке меток каждую метку при выделении поднимай вверх» —
+ * ткнул метку на плане и сразу видит её строку, а не ищет прокруткой.
+ *
+ * Что здесь решено и почему:
+ *
+ * — **Остальные не пересортировываются.** Выделенная выдёргивается, прочие
+ *   сохраняют относительный порядок — тот же, что даёт `filtersMarkRows`: по
+ *   типам, внутри типа по номеру. Другого порядка в сборке нет: по нему же
+ *   собраны легенда и таблица, и расходиться им нельзя.
+ *
+ * — **Снятие выделения возвращает строку на место.** Иначе список копил бы
+ *   наверху «недавно потроганные» и переставал быть списком по типам: чтобы
+ *   вернуть привычный вид, пришлось бы гадать, что нажать. Правило остаётся
+ *   обратимым одним Esc.
+ *
+ * — **Выделено несколько (блок, рамка) — наверх идут все, в своём порядке.**
+ *   Не в порядке нажатий: блок из трёх меток должен читаться сверху так же,
+ *   как читался бы в списке, иначе «Т1 Т3 Т2» выглядит ошибкой нумерации.
+ *
+ * — **Мельтешение при переборе.** Главный риск: если каждое движение
+ *   перекладывает список, читать его станет нельзя. Поэтому переезд ровно
+ *   один — одна строка уходит наверх, одна возвращается на место, — и у
+ *   соседних меток это один и тот же слот: перебирая метки подряд, ниже
+ *   ничего не двигается вовсе. Прыжок через полсписка сдвигает на одну строку
+ *   только то, что лежит между прежней и новой меткой; всё остальное стоит.
+ *   Это свойство закреплено тестом, а не глазами.
+ */
+export function marksSelectedFirst(rows, selectedIds) {
+  const selected = new Set(Array.isArray(selectedIds) ? selectedIds : []);
+  if (selected.size === 0) return rows;
+  const raised = [];
+  const rest = [];
+  for (const row of rows) {
+    if (selected.has(row.mark.id)) raised.push(row);
+    else rest.push(row);
+  }
+  if (raised.length === 0) return rows;
+  return [...raised, ...rest];
+}
+
 // Что показывает строка списка. Свёрнутая — ровно то, что просил заказчик:
 // значок и обозначение (плюс отметка повтора номера: три строки «Т1» подряд
 // иначе выглядят ошибкой). Раскрытая — прежний вид со всеми полями.
@@ -522,25 +565,30 @@ function mountMarksPanel(host, api) {
       [
         head,
         view.fields ? roomField(state, mark) : null,
+        // «Расположение» и «В оригинале» — рядом, в одну строку: заказчик
+        // заполняет их парой, идя по списку, и две узкие строки читаются как
+        // одна запись о метке, а не как два разных дела. Подписи у полей нет:
+        // что это за поле, говорит подсказка в пустом, а у заполненного —
+        // подсказка при наведении.
         view.fields
-          ? uiEl("input", {
-              class: "ui-input",
-              type: "text",
-              value: view.fields.location,
-              placeholder: strings.marks.locationPlaceholder,
-              title: strings.marks.location,
-              on: { change: (event) => setField(mark.id, "location", event.target.value) },
-            })
-          : null,
-        view.fields
-          ? uiEl("input", {
-              class: "ui-input",
-              type: "text",
-              value: view.fields.original,
-              placeholder: strings.marks.originalPlaceholder,
-              title: strings.marks.original,
-              on: { change: (event) => setField(mark.id, "original", event.target.value) },
-            })
+          ? uiEl("div", { class: "mark-row__fields" }, [
+              uiEl("input", {
+                class: "ui-input mark-row__location",
+                type: "text",
+                value: view.fields.location,
+                placeholder: strings.marks.locationPlaceholder,
+                title: strings.marks.location,
+                on: { change: (event) => setField(mark.id, "location", event.target.value) },
+              }),
+              uiEl("input", {
+                class: "ui-input mark-row__original",
+                type: "text",
+                value: view.fields.original,
+                placeholder: strings.marks.originalPlaceholder,
+                title: strings.marks.original,
+                on: { change: (event) => setField(mark.id, "original", event.target.value) },
+              }),
+            ])
           : null,
         controlsButton,
         equipmentButton,
@@ -588,7 +636,13 @@ function mountMarksPanel(host, api) {
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
       return;
     }
-    const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
+    // Порядок списка — из фильтров, а поверх него одно правило: выделенная
+    // метка встаёт первой. Считает его чистая функция — её и проверяет тест на
+    // мельтешение при переборе.
+    const rows = marksSelectedFirst(
+      filtersMarkRows(state.project, state.schemeId, state.filter),
+      state.selectedMarkIds,
+    );
     const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
     count.textContent = total > 0 ? text("marks.count", { shown: rows.length, total }) : "";
     if (rows.length === 0) {
@@ -609,7 +663,9 @@ function mountMarksPanel(host, api) {
       ...rows.map((row) => markRow(state, row, selected.has(row.mark.id), repeats, controllers)),
     );
     // Подводим список к выделенной строке только когда выделение сменилось:
-    // иначе правка поля в одной строке уводила бы список к другой.
+    // иначе правка поля в одной строке уводила бы список к другой. Строка
+    // теперь первая, так что это ставит список в начало и там же и оставляет:
+    // при переборе меток прокрутка больше не прыгает.
     const selection = state.selectedMarkIds.join(",");
     const current = list.querySelector(".mark-row.is-current");
     if (current && selection !== shownSelection) current.scrollIntoView({ block: "nearest" });
