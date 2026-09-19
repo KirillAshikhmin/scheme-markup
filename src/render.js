@@ -13,6 +13,7 @@
 import {
   SHAPE_NAMES,
   blockLabel,
+  blockLabelParts,
   blockMembers,
   findMark,
   findRoom,
@@ -3167,8 +3168,65 @@ function drawLabelLeader(ctx, anchor, box, color) {
   ctx.restore();
 }
 
-function drawLabel(ctx, box, color) {
+/**
+ * Куски подписи со своими цветами: `[{text, color}]`.
+ *
+ * У одиночной метки кусок один — её обозначение. У блока их столько, сколько
+ * склеила `blockLabelParts`: смешанный блок (выключатель и розетка в одной
+ * рамке, G22) читается «В37, Р77Р78», и красился он целиком цветом первого
+ * типа. Слова заказчика: «если в группе метки разных типов, то цвет группы
+ * целиком первого типа, а должны быть так же разным».
+ *
+ * **Разделитель берёт цвет куска слева.** Своего типа у запятой нет, и выбор
+ * тут между нейтральным цветом и цветом соседа. Сосед слева выигрывает по двум
+ * причинам. Во-первых, так работает пунктуация в наборе: знак принадлежит тому
+ * слову, которое заканчивает, а не тому, что начинается. Во-вторых и главное —
+ * запятая стоит **и в одноцветном блоке** («В1, В5» — тот же тип, номера не
+ * подряд), и нейтральный серый перекрасил бы то, что заказчик не просил
+ * трогать: самый частый блок обязан выглядеть ровно как раньше.
+ *
+ * Склейка кусков обязана совпасть с самой подписью — иначе обводка ляжет по
+ * одной строке, а буквы по другой. Разошлись — возвращается один кусок,
+ * прежним цветом: лучше прежний вид, чем рваная подпись.
+ */
+export function labelRuns(project, target, fallback) {
+  if (!target || !target.markIds) return null;
+  const parts = blockLabelParts(project, labelMemberIds(target));
+  if (parts.length === 0) return null;
+  const runs = [];
+  let previous = fallback;
+  for (const part of parts) {
+    const color = part.typeId ? styleOf(project, part.typeId).color : previous;
+    runs.push({ text: part.text, color });
+    if (part.typeId) previous = color;
+  }
+  return runs;
+}
+
+// Обводка одна на всю подпись, буквы — кусками. Порядок именно такой: обведи
+// каждый кусок по отдельности, и белая подложка легла бы поверх соседней буквы,
+// разорвав подпись на плане.
+function paintLabel(ctx, box, runs, x, y) {
+  ctx.strokeText(box.text, x, y);
+  // Одноцветная подпись рисуется одним вызовом — ровно тем же, что и до правки.
+  if (!runs || runs.every((run) => run.color === runs[0].color)) {
+    if (runs && runs.length > 0) ctx.fillStyle = runs[0].color;
+    ctx.fillText(box.text, x, y);
+    return;
+  }
+  // Сдвиг куска меряется по **накопленной строке**, а не суммой кусков: так
+  // учитывается подгонка пар букв, и части встают вплотную, как в одном вызове.
+  let done = "";
+  for (const run of runs) {
+    ctx.fillStyle = run.color;
+    ctx.fillText(run.text, x + (done ? ctx.measureText(done).width : 0), y);
+    done += run.text;
+  }
+}
+
+function drawLabel(ctx, box, color, runs) {
   if (!box.text) return;
+  const parts = runs && runs.map((run) => run.text).join("") === box.text ? runs : null;
   ctx.save();
   ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
   ctx.textAlign = "left";
@@ -3180,17 +3238,16 @@ function drawLabel(ctx, box, color) {
   ctx.fillStyle = color;
   // Повёрнутая подпись читается снизу вверх — так её пишут вдоль стен на
   // чертежах. Рисование и габарит берут один и тот же угол, поэтому клик
-  // попадает туда, где текст виден.
+  // попадает туда, где текст виден. Куски красятся тем же кодом: после поворота
+  // сдвиг куска идёт по той же оси, что и сама строка.
   if (box.angle === 90) {
     ctx.translate(box.x, box.y);
     ctx.rotate(-Math.PI / 2);
-    ctx.strokeText(box.text, 0, 0);
-    ctx.fillText(box.text, 0, 0);
+    paintLabel(ctx, box, parts, 0, 0);
     ctx.restore();
     return;
   }
-  ctx.strokeText(box.text, box.x, box.y);
-  ctx.fillText(box.text, box.x, box.y);
+  paintLabel(ctx, box, parts, box.x, box.y);
   ctx.restore();
 }
 
@@ -3449,10 +3506,14 @@ export function drawScheme(ctx, {
   const layout = labelLayout(project, scheme, filter, state);
   const labels = labelTargets(project, scheme, filter).map((target) => {
     const box = labelBoxIn(project, scheme, target, state, layout);
+    // Цвет подписи — цвет ведущей метки; у смешанного блока это только цвет
+    // первого куска и поводка, а буквы каждого куска красятся своим типом.
+    const color = styleOf(project, (labelLead(project, target) || {}).typeId).color;
     return {
       box,
       anchor: planToScreen(labelOrigin(project, target), scheme, state),
-      color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
+      color,
+      runs: labelRuns(project, target, color),
       // Поводок: правило раскладки, если метка не сказала иначе. Перебивка
       // лежит в объекте, поэтому одинаково видна на экране, в PNG и в печати.
       leader: labelLeaderShown(project, target, box),
@@ -3461,7 +3522,7 @@ export function drawScheme(ctx, {
   for (const item of labels) {
     if (item.leader) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
-  for (const item of labels) drawLabel(ctx, item.box, item.color);
+  for (const item of labels) drawLabel(ctx, item.box, item.color, item.runs);
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da", draftLineStyle);
   // Направляющие без черновика: вершину правят той же рукой, что рисуют, и
   // подсказки при этом те же. Черновика в этот момент нет, а пунктир нужен.

@@ -1118,15 +1118,38 @@ export function blockMembers(project, markIds) {
     .map((item) => item.mark);
 }
 
+// Разделитель кусков подписи блока. Объявлен отдельно, потому что теперь он
+// ещё и **кусок без типа**: рисование красит его цветом соседа слева, и обе
+// стороны должны говорить об одной и той же строке.
+export const BLOCK_LABEL_SEPARATOR = ", ";
+
 // Подпись блока: подряд идущие номера одного типа склеиваются слитно,
 // разнородные — через запятую («В1, Р1» — выключатель и розетка в одной рамке).
 // Список меток задаёт вызывающий: у группы это её метки, а на плане под
 // фильтром — только видимые, иначе подпись обещает то, чего на листе нет.
 export function blockLabel(project, markIds) {
+  return blockLabelParts(project, markIds)
+    .map((part) => part.text)
+    .join("");
+}
+
+/**
+ * Та же подпись блока, но кусками: `[{text, typeId}]`.
+ *
+ * Понадобилось оттого, что блок бывает **смешанным** — выключатель и розетка в
+ * одной рамке (G22), — и подпись «В37, Р77Р78» красилась целиком цветом
+ * первого типа. Слова заказчика: «если в группе метки разных типов, то цвет
+ * группы целиком первого типа, а должны быть так же разным».
+ *
+ * Разделитель — отдельный кусок **без типа** (`typeId: null`): своего типа у
+ * запятой нет, и решение, чем её красить, принимает рисование, а не модель.
+ *
+ * `blockLabel` склеивается **отсюда же**. Двух правил склейки быть не должно:
+ * разойдись они — на плане и в таблице оказались бы разные подписи.
+ */
+export function blockLabelParts(project, markIds) {
   const runs = [];
   let previous = null;
-  // Повторённый номер называется один раз: подпись перечисляет обозначения,
-  // а не метки, и «Т1, Т1» на плане говорит о двух точках ровно то же, что «Т1».
   const named = new Set();
   for (const mark of blockMembers(project, markIds)) {
     const type = findType(project, mark.typeId);
@@ -1136,10 +1159,15 @@ export function blockLabel(project, markIds) {
     named.add(key);
     const sameRun = previous && previous.code === code && mark.number === previous.number + 1;
     if (sameRun) runs[runs.length - 1].numbers.push(mark.number);
-    else runs.push({ code, numbers: [mark.number] });
+    else runs.push({ code, numbers: [mark.number], typeId: mark.typeId });
     previous = { code, number: mark.number };
   }
-  return runs.map(blockRunLabel).join(", ");
+  const parts = [];
+  for (const run of runs) {
+    if (parts.length > 0) parts.push({ text: BLOCK_LABEL_SEPARATOR, typeId: null });
+    parts.push({ text: blockRunLabel(run), typeId: run.typeId });
+  }
+  return parts;
 }
 
 // Подряд идущие номера одного типа: короткий код склеивается слитно («В1В2В3»),
