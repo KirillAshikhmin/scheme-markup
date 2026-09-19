@@ -2152,6 +2152,22 @@
   width: auto;
 }
 
+/* ——— связи меток ———————————————————————————————————————————————————— */
+
+/* Переключатель связей — сосед счётчика предупреждений справа. Включённый
+   горит тем же малиновым, каким связи нарисованы на плане: кнопка и то, что
+   она зажгла, обязаны читаться как одно. Цвет служебный — ни одной категории
+   справочника он не принадлежит. */
+#header-links {
+  flex: 0 0 auto;
+}
+
+.links__toggle.is-on {
+  color: #ff7ac0;
+  border-color: rgba(191, 57, 137, 0.75);
+  background: rgba(191, 57, 137, 0.18);
+}
+
 /* ——— предупреждения ————————————————————————————————————————————————— */
 
 /* Счётчик виден снаружи списка: открывать панель ради проверки не надо.
@@ -3310,6 +3326,10 @@ body {
              перед отступом, который разводит шапку на две стороны. Пустая точка
              монтирования ничего не занимает — правило `:empty` в styles.css. -->
         <div id="header-warnings" class="mount"></div>
+        <!-- Переключатель связей (таск 79): сосед счётчика предупреждений
+             справа — заказчик просил именно там. Связи ничего не правят, это
+             разбор, поэтому кнопка есть и в режиме просмотра. -->
+        <div id="header-links" class="mount"></div>
         <div id="header-actions" class="mount"></div>
         <!-- Переход к полной версии показывается только там, где экран сам
              выбрал просмотр: на десктопе кнопки нет. -->
@@ -3691,6 +3711,7 @@ const strings = {
     markVertexRemove: "удаление вершины линии",
     moveLabel: "смещение подписи",
     rotateLabel: "поворот подписи",
+    labelLeader: "поводок подписи",
     resetLabel: "подпись на место",
     moveOutlineLabel: "смещение подписи комнаты",
     rotateOutlineLabel: "поворот подписи комнаты",
@@ -3751,6 +3772,7 @@ const strings = {
     typeNotFound: "Тип метки не найден",
     markNotFound: "Метка не найдена",
     labelAngleUnknown: "Подпись поворачивается только на 90 градусов и обратно",
+    labelLeaderUnknown: "Поводок подписи или показан, или скрыт, или оставлен раскладке",
     categoryNotFound: "Категория не найдена",
     roomNotFound: "Помещение не найдено",
     noPoints: "Нужна хотя бы одна точка",
@@ -3831,6 +3853,25 @@ const strings = {
   },
   // Панель предупреждений: список того, что нашёл `validate`, и вопросы о виде
   // типов, которые раньше задавало окно при открытии объекта.
+  // Связи меток на плане: переключатель в шапке, справа от счётчика
+  // предупреждений. Кнопка ничего не правит — она меняет только то, что видно.
+  links: {
+    show: "Показать все связи",
+    hide: "Скрыть общие связи",
+    showHint:
+      "Соединить линиями метки и то, чем они управляют. Связь идёт дугой со стрелкой " +
+      "к управляемому и своим цветом — с меткой-линией её не спутать",
+    hideHint: "Убрать с плана связи всего объекта",
+    // Вторая строка подсказки объясняет, что выключенный переключатель не
+    // значит «связей не видно вовсе»: разбор одной метки остаётся под рукой.
+    scopeOff: "Пока выключено, связи видны у выделенной метки",
+    scopeOn: "Сейчас видны все связи схемы",
+    // Связь на другую схему линией не провести: у метки рисуется обрывок со
+    // стрелкой, а сколько их — сказано здесь.
+    away: "Связей на другие схемы: {count} — они помечены обрывком",
+    none: "Связей на этой схеме нет",
+    inExport: "В PNG и на печать связи идут по отметке в панели выгрузки",
+  },
   warnings: {
     title: "Предупреждения",
     open: "Предупреждения объекта",
@@ -4415,6 +4456,10 @@ const strings = {
     areaView: "Как вижу на экране",
     withLegend: "С легендой в углу",
     withRooms: "С контурами помещений",
+    // Связи на бумаге — по отметке, и умолчание «нет»: лист остаётся чертежом,
+    // пока разбор не попросили. Заказчик: «для печати надо галкой разрешать
+    // показ связей».
+    withLinks: "Со связями меток",
     scale: "Множитель",
     size: "{width} × {height} px · {mmWidth} × {mmHeight} мм при 300 dpi",
     rows: "Строк: {count}",
@@ -4921,6 +4966,22 @@ const OUTLINE_MIN_POINTS = 3;
 // её от руки. Третьего угла нет нарочно: 180° читается вверх ногами, а 270°
 // от 90° отличается только направлением чтения.
 const LABEL_ANGLES = [0, 90];
+
+// Поводок подписи — та самая полоска от метки к отведённой подписи. Правило по
+// умолчанию считает раскладка: подпись, которую увели на ряд и дальше, поводок
+// получает, а стоящая вплотную — нет; оттащенной рукой поводка не полагалось
+// вовсе. Заказчику этого мало: «у тех, которые подвинул — пропадают».
+//
+// Поэтому у метки есть **перебивка**: `true` — поводок рисуется всегда,
+// `false` — не рисуется никогда, поля нет вовсе — работает прежнее правило.
+// Третьего значения нет: `null` в поле значит ровно то же, что отсутствие
+// поля, и записывается, когда пользователь возвращает метку к правилу.
+// У метки прежней разметки поля нет — и это не поломка: читать перебивку
+// самому, минуя `markLabelLeader`, нельзя (G68).
+function markLabelLeader(mark) {
+  if (!mark) return null;
+  return mark.labelLeader === true || mark.labelLeader === false ? mark.labelLeader : null;
+}
 
 // Размер метки и подписи в пикселях плана — с них начинается новый объект.
 // Считано от бумаги: план в 2500 пикселей по большей стороне на листе A3 это
@@ -5840,6 +5901,7 @@ const MARK_PATCH_FIELDS = [
   "closed",
   "labelOffset",
   "labelAngle",
+  "labelLeader",
   "roomId",
   "roomManual",
   "location",
@@ -5857,6 +5919,17 @@ function updateMark(project, markId, patch) {
   // габарит и попадание по клику считаются по этому же числу.
   if (Object.prototype.hasOwnProperty.call(changes, "labelAngle")) {
     if (!LABEL_ANGLES.includes(changes.labelAngle)) throw modelError("labelAngleUnknown");
+  }
+  // Перебивка поводка — только да, нет или «как решит раскладка». Пустое
+  // значение приводится к `null`: метка без поля и метка с `labelLeader: null`
+  // обязаны читаться одинаково, иначе упаковка старого объекта дописала бы ему
+  // поле, которого там не было.
+  if (Object.prototype.hasOwnProperty.call(changes, "labelLeader")) {
+    const value = changes.labelLeader;
+    if (value !== true && value !== false && value !== null && value !== undefined) {
+      throw modelError("labelLeaderUnknown");
+    }
+    changes.labelLeader = value === true || value === false ? value : null;
   }
   // Размеры приводятся к числу или к `null` здесь — второго места, где они
   // попадают в метку, нет: `setMarkDimensions` идёт через эту же функцию.
@@ -9710,6 +9783,7 @@ const PANEL_IDS = {
   headerSearch: "header-search",
   headerHistory: "header-history",
   headerWarnings: "header-warnings",
+  headerLinks: "header-links",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -9724,6 +9798,9 @@ const appState = {
   editPathId: null,
   // Линейка и направляющие видны, пока их не спрятали.
   guidesShown: true,
+  // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
+  // встречать пользователя дугами поверх плана никто не просил.
+  linksShown: false,
   activeTypeId: null,
   mode: "select",
   filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
@@ -9745,6 +9822,10 @@ const SECTIONS_SETTING = "collapsedSections";
 // Линейка и направляющие: отметка рабочего места, а не свойство объекта.
 // Живёт в настройках браузера и переживает перезагрузку.
 const GUIDES_SETTING = "schemeGuidesShown";
+// Связи меток: та же природа, что у линейки, — оснастка разбора, а не свойство
+// разметки. Живёт в настройках браузера, переживает перезагрузку, в объект и в
+// файл проекта не попадает.
+const LINKS_SETTING = "markLinksShown";
 // На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
 // место они отнимают у списка схем. Всё остальное открыто — иначе новый
 // пользователь ищет, куда делись инструменты.
@@ -9780,6 +9861,9 @@ const LAYOUT_ABILITIES = {
   // Предупреждения — про правку объекта: в них отвечают на вопрос о виде типа
   // и идут чинить найденное. В просмотре чинить нечем, а место в шапке дорого.
   warnings: ["desktop"],
+  // Связи — чтение, а не правка: «что включает этот выключатель» спрашивают и
+  // с телефона, стоя перед щитом. Ничего не меняют, поэтому идут в оба вида.
+  markLinks: ["desktop", "mobile"],
   undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],
@@ -10094,6 +10178,13 @@ function wireSections() {
   Promise.resolve(getSetting(GUIDES_SETTING))
     .then((saved) => {
       if (saved === false) setState({ guidesShown: false });
+    })
+    .catch(() => {});
+  // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище
+  // ответит «показаны».
+  Promise.resolve(getSetting(LINKS_SETTING))
+    .then((saved) => {
+      if (saved === true) setState({ linksShown: true });
     })
     .catch(() => {});
 }
@@ -11751,6 +11842,248 @@ function snapToSchemeGuides(guides, point, scheme, view, options = {}) {
   return { point: next, held };
 }
 
+// ——— связи меток ——————————————————————————————————————————————————————
+//
+// «Чем управляет» (`mark.controls`) — единственное место в объекте, где одна
+// метка знает про другую. На плане это разбор, а не чертёж: выключатель у двери
+// и лента в нише — вещи в разных концах комнаты, и по одному плану не видно,
+// что они про один сценарий.
+//
+// **Главная опасность — спутать связь с меткой-линией.** Начертаний у линий
+// девять, и десятое ничего бы не решило: любая прямая на плане читается как
+// проложенная трасса. Поэтому связь говорит на другом языке сразу по четырём
+// признакам, и каждый из них по отдельности линии недоступен:
+//
+// 1. **Дуга, а не ломаная.** Метка-линия состоит из прямых отрезков — она
+//    повторяет стену или кабель. Плавный лук между двумя метками ни одной
+//    линией нарисовать нельзя (волнистое начертание — это частая рябь вдоль
+//    прямой, а не один прогиб).
+// 2. **Свой служебный цвет** (`LINK_COLOR`), малиновый: он не принадлежит ни
+//    одной категории справочника и в легенде его нет. Цвет метки говорит
+//    «свет», «розетки», «щит»; цвет связи не говорит ни о чём, кроме связи.
+// 3. **Волос толщиной и вполсилы** — и, в отличие от метки, **не растёт с
+//    масштабом**: метка задана в пикселях плана и на приближении толстеет,
+//    связь остаётся ниткой. На любом зуме она тоньше самой тонкой линии.
+// 4. **Наконечник у управляемого и точка у управляющего.** У метки-линии концы
+//    одинаковы: у неё нет направления. У связи направление есть, и оно и есть
+//    её содержание — «эта включает ту».
+//
+// **Связь бывает не парой.** Проходная схема — В1 и ВП1 на одном Т1, и в одну
+// метку приходит несколько дуг. Слова заказчика: «может быть связь не только
+// выключатель-лампочка, но ещё и несколько дополнительных переключателей».
+// Поэтому дуги к общей метке разводятся: каждая следующая выгибается сильнее и
+// приходит чуть дальше от знака (`LINK_SPREAD`, `LINK_SPREAD_PAD`). Без этого
+// два выключателя, стоящие в одной рамке, дали бы две дуги одна под другой —
+// и три связи читались бы как одна.
+const LINK_COLOR = "#BF3989";
+// Полупрозрачность: связь лежит поверх плана и меток, и перебивать их она не
+// должна — читается поверху, а не вместо.
+const LINK_ALPHA = 0.72;
+// Толщина в пикселях экрана. Не в пикселях плана: см. признак 3 выше.
+const LINK_WIDTH = 1.6;
+// Прогиб дуги — доля длины хорды, с потолком в пикселях экрана: у короткой
+// связи лук должен быть заметен, у длинной — не улетать через полплана.
+const LINK_BOW = 0.16;
+const LINK_BOW_MAX_PX = 54;
+// Разведение дуг, приходящих в одну метку: насколько сильнее выгибается каждая
+// следующая и насколько дальше от знака садится её наконечник.
+const LINK_SPREAD = 0.62;
+const LINK_SPREAD_PAD = 2.5;
+// Просвет между меткой и концом связи: наконечник не должен прятаться под
+// знаком, а точка начала — сливаться с ним.
+const LINK_GAP_PX = 3;
+// Наконечник и точка начала в пикселях экрана.
+const LINK_ARROW_PX = 7.5;
+const LINK_DOT_PX = 2.4;
+// Обрывок «связь уходит на другую схему»: длина всего знака, длина первого
+// куска и разрыв после него — по этому разрыву знак и читается как обрыв.
+const LINK_AWAY_PX = 17;
+const LINK_AWAY_HEAD = 6;
+const LINK_AWAY_BREAK = 4;
+// Куда смотрит обрывок: вверх-вправо, туда же, куда уходит подпись метки.
+const LINK_AWAY_DEG = -45;
+
+// Точка, к которой связь приходит. У точечной метки — середина её точек (у
+// блока «одна метка на блок» их несколько), у ломаной — середина серединного
+// отрезка: она всегда лежит **на** линии, а центр тяжести вершин у Г-образного
+// трека оказался бы в стороне от неё.
+function markLinkAnchor(mark) {
+  const points = (mark && mark.points) || [];
+  if (points.length === 0) return { x: 0, y: 0 };
+  if (mark.kind === "line" && points.length >= 2) {
+    const index = Math.floor((points.length - 1) / 2);
+    const from = points[index];
+    const to = points[index + 1];
+    return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  }
+  const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+  return { x: sum.x / points.length, y: sum.y / points.length };
+}
+
+/**
+ * Связи, которые можно показать на этой схеме. Чистая: доли плана, как точки
+ * меток, — ни зума, ни экрана.
+ *
+ * Возвращает `{lines, offScheme}`:
+ * - `lines` — `{fromId, toId, from, to}` для пар, обе метки которых видны здесь;
+ * - `offScheme` — `{markId, at, count}` для меток, чьи подопечные лежат на
+ *   **другой схеме**: линию через границу листа не провести, но и промолчать
+ *   нельзя — иначе пустота у метки читается как «эта ничем не управляет».
+ *   Такая метка помечается обрывком (`drawMarkLinks`).
+ *
+ * Метка, спрятанная **фильтром**, — случай другой: её убрала рука
+ * пользователя, и рассказывать ему о том, что он сам только что скрыл, незачем.
+ * Такие связи пропускаются молча.
+ *
+ * Показываются **все** связи схемы, а не только выделенной метки. Так решил
+ * заказчик: «если на объекте не из щита связи, а через умные реле и т.д. то
+ * мешанины не будет» — в его работе связь короткая, от выключателя к
+ * светильнику в той же комнате, а не через весь план в щит.
+ *
+ * `spread` у линии — её очередь среди дуг, приходящих в **ту же** метку.
+ * Считается здесь, а не при рисовании: разведение проходной схемы обязано
+ * проверяться без холста.
+ */
+function markLinks(project, scheme, filter) {
+  const result = { lines: [], offScheme: [] };
+  if (!project || !scheme) return result;
+  const shown = visibleMarks(project, scheme, filter);
+  const here = new Map(shown.map((mark) => [mark.id, mark]));
+  // Сколько дуг уже пришло в эту метку: порядок обхода — порядок объекта,
+  // поэтому одна и та же схема разводится одинаково при каждой отрисовке.
+  const incoming = new Map();
+  for (const mark of shown) {
+    let away = 0;
+    for (const id of markControlIds(mark)) {
+      const target = here.get(id);
+      if (target) {
+        const spread = incoming.get(id) || 0;
+        incoming.set(id, spread + 1);
+        result.lines.push({
+          fromId: mark.id,
+          toId: id,
+          from: markLinkAnchor(mark),
+          to: markLinkAnchor(target),
+          spread,
+        });
+        continue;
+      }
+      const other = findMark(project, id);
+      if (other && other.schemeId && other.schemeId !== scheme.id) away += 1;
+    }
+    if (away > 0) {
+      result.offScheme.push({ markId: mark.id, at: markLinkAnchor(mark), count: away });
+    }
+  }
+  return result;
+}
+
+// Дуга связи в экранных пикселях: концы отодвинуты от знаков меток, середина
+// уведена вбок от хорды. Сторона прогиба — всегда слева по ходу движения,
+// поэтому встречная пара (A управляет B, B управляет A) расходится двумя
+// луками и обе стрелки видны.
+function linkCurve(from, to, pad, spread = 0) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const span = Math.hypot(dx, dy);
+  if (!(span > 0)) return null;
+  const ux = dx / span;
+  const uy = dy / span;
+  const trim = Math.min(pad, (span - 1) / 2);
+  // Наконечники дуг, сходящихся в одну метку, садятся на разном отдалении от
+  // знака: у проходной схемы иначе три стрелки упёрлись бы в одну точку.
+  const tail = Math.min(pad + spread * LINK_SPREAD_PAD, (span - 1) / 2);
+  const start = { x: from.x + ux * trim, y: from.y + uy * trim };
+  const end = { x: to.x - ux * tail, y: to.y - uy * tail };
+  const bow = Math.min(span * LINK_BOW, LINK_BOW_MAX_PX) * (1 + spread * LINK_SPREAD);
+  const control = {
+    x: (start.x + end.x) / 2 + uy * bow,
+    y: (start.y + end.y) / 2 - ux * bow,
+  };
+  return { start, end, control };
+}
+
+function drawLinkArrow(ctx, at, dx, dy, size) {
+  const span = Math.hypot(dx, dy);
+  if (!(span > 0)) return;
+  const ux = dx / span;
+  const uy = dy / span;
+  const back = { x: at.x - ux * size, y: at.y - uy * size };
+  const wing = size * 0.42;
+  ctx.beginPath();
+  ctx.moveTo(at.x, at.y);
+  ctx.lineTo(back.x - uy * wing, back.y + ux * wing);
+  ctx.lineTo(back.x + uy * wing, back.y - ux * wing);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * Связи на плане. Зовётся из `drawScheme` — и на экране, и в выгрузке, но в
+ * выгрузке только по отметке: `drawScheme` получает `links` и без него не
+ * рисует ничего. Заказчик: «для печати надо галкой разрешать показ связей» —
+ * значит на бумаге они бывают нужны, но по умолчанию лист остаётся чертежом.
+ */
+function drawMarkLinks(ctx, links, scheme, view, options = {}) {
+  if (!links) return;
+  const lines = links.lines || [];
+  const away = links.offScheme || [];
+  if (lines.length === 0 && away.length === 0) return;
+  const state = renderView(view);
+  const pad = markRadius(state) + LINK_GAP_PX;
+  const color = options.color || LINK_COLOR;
+  ctx.save();
+  ctx.globalAlpha = LINK_ALPHA;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = LINK_WIDTH;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash([]);
+  for (const line of lines) {
+    const curve = linkCurve(
+      planToScreen(line.from, scheme, state),
+      planToScreen(line.to, scheme, state),
+      pad,
+      line.spread || 0,
+    );
+    if (!curve) continue;
+    ctx.beginPath();
+    ctx.moveTo(curve.start.x, curve.start.y);
+    ctx.quadraticCurveTo(curve.control.x, curve.control.y, curve.end.x, curve.end.y);
+    ctx.stroke();
+    // Точка у управляющей метки: с какого конца читать дугу.
+    ctx.beginPath();
+    ctx.arc(curve.start.x, curve.start.y, LINK_DOT_PX, 0, Math.PI * 2);
+    ctx.fill();
+    // Наконечник смотрит по касательной к дуге в её конце — от опорной точки к
+    // концу, иначе стрелка у выгнутой связи целится мимо метки.
+    drawLinkArrow(ctx, curve.end, curve.end.x - curve.control.x, curve.end.y - curve.control.y, LINK_ARROW_PX);
+  }
+  // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
+  // листа не провести, но пустота у метки соврала бы.
+  for (const item of away) {
+    const at = planToScreen(item.at, scheme, state);
+    const angle = (LINK_AWAY_DEG * Math.PI) / 180;
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const base = pad;
+    const breakAt = base + LINK_AWAY_PX - LINK_AWAY_HEAD - LINK_AWAY_BREAK;
+    const tail = base + LINK_AWAY_PX - LINK_AWAY_HEAD;
+    const tip = base + LINK_AWAY_PX;
+    ctx.beginPath();
+    ctx.moveTo(at.x + ux * base, at.y + uy * base);
+    ctx.lineTo(at.x + ux * breakAt, at.y + uy * breakAt);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(at.x + ux * tail, at.y + uy * tail);
+    ctx.lineTo(at.x + ux * tip, at.y + uy * tip);
+    ctx.stroke();
+    drawLinkArrow(ctx, { x: at.x + ux * tip, y: at.y + uy * tip }, ux, uy, LINK_ARROW_PX);
+  }
+  ctx.restore();
+}
+
 // ——— видимость ———————————————————————————————————————————————————————
 
 // Фильтр панели меток: скрытая метка не рисуется и по ней не кликается.
@@ -12276,6 +12609,98 @@ function hitLabelTurn(project, scheme, target, point, view, filter) {
   const handle = labelTurnHandle(project, scheme, target, view, filter);
   if (!handle) return false;
   return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+}
+
+// ——— переключатель поводка ————————————————————————————————————————————
+//
+// Вторая ручка того же ряда, сразу за поворотом. Место у неё то же по той же
+// причине: смотрят на поводок, глядя на план, — виден он на этом фоне или
+// теряется, дотягивается до своей метки или упирается в соседнюю.
+//
+// **Переключатель на метку, а не на схему.** Поводок — часть чертежа: он
+// рисуется `drawScheme`, значит уезжает в PNG, в печать и в лист «Схема».
+// Общая настройка вида (как линейка) живёт в браузере и в файл не попадает —
+// значит, распечатка у второго участника вышла бы другой. И жалоба заказчика
+// адресная: пропадает поводок у той подписи, которую он только что оттащил, —
+// вернуть его нужно ей, а не всем сразу.
+
+// Держатель перебивки — там же, где смещение и угол подписи: у блока подпись
+// одна на всех, и поле ей держит первая метка.
+function labelLeaderHolder(target) {
+  if (!target) return null;
+  return target.markIds ? target.markIds[0] : target.id;
+}
+
+/**
+ * Рисуется ли поводок у этой подписи.
+ *
+ * Правило по умолчанию — прежнее: поводок есть у той подписи, которую
+ * раскладка увела на ряд и дальше (`row > 0`), и его нет ни у стоящей вплотную,
+ * ни у оттащенной рукой. Перебивка метки (`markLabelLeader`) отвечает раньше
+ * правила — и `true`, и `false`.
+ */
+function labelLeaderShown(project, target, box) {
+  const holder = labelLeaderHolder(target);
+  const mark = holder ? findMark(project, holder) : null;
+  const forced = markLabelLeader(mark);
+  if (forced !== null) return forced;
+  return Boolean(box && box.row > 0);
+}
+
+// Ручка стоит справа от поворота, вплотную: две кнопки одного ряда у одного
+// угла подписи. Считается от ручки поворота, чтобы ряд не разъехался, когда у
+// поворота поменяется радиус.
+function labelLeaderHandle(project, scheme, target, view, filter) {
+  const turn = labelTurnHandle(project, scheme, target, view, filter);
+  if (!turn) return null;
+  return { x: turn.x + turn.r * 2.35, y: turn.y, r: turn.r };
+}
+function hitLabelLeader(project, scheme, target, point, view, filter) {
+  const handle = labelLeaderHandle(project, scheme, target, view, filter);
+  if (!handle) return false;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+}
+
+// Значок — сам поводок: точка метки слева и пологая черта от неё к подписи.
+// Выключенный приглушён и перечёркнут косой чертой сверху вниз — тем же знаком
+// запрета, что на дорожных. Черта поводка нарочно **пологая**: будь она под
+// 45°, запрет лёг бы к ней перпендикуляром и вместе они читались бы крестиком
+// «закрыть», а не «поводка нет».
+//
+// Кнопка показывает, **что сейчас**, а не что случится по нажатию: это
+// отметка, а не действие, — и соседний поворот подписи тут ей не пример.
+function drawLabelLeaderSwitch(ctx, handle, color, shown) {
+  if (!handle) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  const inner = handle.r * 0.56;
+  const dot = { x: handle.x - inner, y: handle.y + inner * 0.42 };
+  ctx.globalAlpha = shown ? 1 : 0.4;
+  ctx.lineWidth = Math.max(1.2, handle.r * 0.17);
+  ctx.beginPath();
+  ctx.moveTo(dot.x, dot.y);
+  ctx.lineTo(handle.x + inner, handle.y - inner * 0.42);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(dot.x, dot.y, Math.max(1.2, handle.r * 0.2), 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  if (!shown) {
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1.3, handle.r * 0.22);
+    ctx.beginPath();
+    ctx.moveTo(handle.x - handle.r * 0.62, handle.y - handle.r * 0.62);
+    ctx.lineTo(handle.x + handle.r * 0.62, handle.y + handle.r * 0.62);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // Значок — дуга со стрелкой: поворот, а не «плюс» и не «крест». Буквы здесь
@@ -12909,6 +13334,7 @@ function drawScheme(ctx, {
   draftColor,
   draftLineStyle,
   guides,
+  links,
   outlines,
   selectedOutlineId,
 }) {
@@ -12934,17 +13360,30 @@ function drawScheme(ctx, {
   for (const mark of visibleMarks(project, scheme, filter)) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
   }
+  // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
+  // дугу разбора. `links` — либо готовый кадр (его считает холст из того же
+  // промежуточного объекта, что и метки), либо `true`: посчитать самому. Так
+  // выгрузка получает связи по отметке в диалоге, ничего не зная про холст.
+  if (links) {
+    drawMarkLinks(ctx, links === true ? markLinks(project, scheme, filter) : links, scheme, state);
+  }
   // Подписи — после меток и в два прохода: сперва поводки у тех, кого развели
   // от соседа, потом сам текст. Иначе поводок ляжет поверх уже нарисованной
   // подписи и перечеркнёт её.
   const layout = labelLayout(project, scheme, filter, state);
-  const labels = labelTargets(project, scheme, filter).map((target) => ({
-    box: labelBoxIn(project, scheme, target, state, layout),
-    anchor: planToScreen(labelOrigin(project, target), scheme, state),
-    color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
-  }));
+  const labels = labelTargets(project, scheme, filter).map((target) => {
+    const box = labelBoxIn(project, scheme, target, state, layout);
+    return {
+      box,
+      anchor: planToScreen(labelOrigin(project, target), scheme, state),
+      color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
+      // Поводок: правило раскладки, если метка не сказала иначе. Перебивка
+      // лежит в объекте, поэтому одинаково видна на экране, в PNG и в печати.
+      leader: labelLeaderShown(project, target, box),
+    };
+  });
   for (const item of labels) {
-    if (item.box.row > 0) drawLabelLeader(ctx, item.anchor, item.box, item.color);
+    if (item.leader) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
   for (const item of labels) drawLabel(ctx, item.box, item.color);
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da", draftLineStyle);
@@ -13141,6 +13580,10 @@ const UI_ICONS = {
   // Уплотнение нумерации: две стрелки, сходящиеся к середине, — «сомкнуть».
   // Прежнее «№» говорило про номера, но не про то, что с ними сделают.
   compact: ["M4 12h6", "M7 9l3 3-3 3", "M20 12h-6", "M17 9l-3 3 3 3"],
+  // Связи меток: звено цепи — два полукольца и перемычка между ними. Стрелка
+  // не годится: стрелками в наборе уже сказано «отмена», «порядок» и «замена»,
+  // а здесь речь не о действии, а о том, что две вещи держатся друг за друга.
+  link: ["M10.6 7.4 12.4 5.6a3.9 3.9 0 0 1 5.5 5.5l-1.8 1.8", "M13.4 16.6l-1.8 1.8a3.9 3.9 0 0 1-5.5-5.5l1.8-1.8", "M9.6 14.4 14.4 9.6"],
 };
 function uiIcon(name) {
   const svg = document.createElementNS(UI_SVG_NS, "svg");
@@ -13750,6 +14193,10 @@ function canvasPaint() {
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     guides: canvasDrag && canvasDrag.kind === "pathVertex" ? canvasDrag.guides : null,
+    // Готовый кадр связей, а не `true`: холст считает их из того же
+    // промежуточного объекта, что и метки, — иначе дуга отстанет от метки,
+    // которую ведут мышью. Выгрузка передаёт сюда `true` и считает сама.
+    links: canvasFrameLinks(state, canvasPreview, scheme),
     draftColor,
     draftLineStyle: state.activeTypeId ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
@@ -13800,11 +14247,18 @@ function canvasPaint() {
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const target = labelTargetOf(project, scheme, state.selectedMarkIds[0], state.filter);
     const lead = target ? labelLead(project, target) : null;
-    drawLabelTurn(
-      canvasCtx,
-      labelTurnHandle(project, scheme, target, view, state.filter),
-      styleOf(project, lead && lead.typeId).color,
-    );
+    const color = styleOf(project, lead && lead.typeId).color;
+    drawLabelTurn(canvasCtx, labelTurnHandle(project, scheme, target, view, state.filter), color);
+    // Вторая ручка того же ряда — поводок подписи. Показывает, что сейчас:
+    // включённый поводок нарисован, выключенный зачёркнут.
+    if (target) {
+      drawLabelLeaderSwitch(
+        canvasCtx,
+        labelLeaderHandle(project, scheme, target, view, state.filter),
+        color,
+        labelLeaderShown(project, target, labelBox(project, scheme, target, view, state.filter)),
+      );
+    }
   }
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
@@ -13985,6 +14439,33 @@ function canvasRotateLabel(markId) {
   }
 }
 
+// Поводок подписи: показывать его или нет. Перебивка — свойство метки, как и
+// угол подписи: она уезжает в файл проекта, отменяется по Ctrl+Z и одинаково
+// видна на экране, в PNG и в печати. Общей настройкой вида её делать нельзя
+// именно поэтому — поводок часть чертежа, а не оснастка рабочего места.
+//
+// Записывается всегда явное «да» или «нет», а не «как решит раскладка»:
+// пользователь нажал кнопку, глядя на подпись, и ответ должен остаться таким,
+// каким он его увидел, даже если подпись потом переедет.
+function canvasToggleLabelLeader(markId) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const target = labelTargetOf(state.project, scheme, markId, state.filter);
+  if (!target) return;
+  const holder = labelLeaderHolder(target);
+  const shown = labelLeaderShown(
+    state.project,
+    target,
+    labelBox(state.project, scheme, target, canvasViewOf(state), state.filter),
+  );
+  try {
+    const after = updateMark(state.project, holder, { labelLeader: !shown }).project;
+    canvasCommit(state.project, after, strings.history.labelLeader, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
 // Поворот подписи комнаты — тот же механизм, что у метки: угол лежит в данных
 // контура, уезжает в файл проекта, отменяется по Ctrl+Z и одинаково виден на
 // экране, в PNG и в печати.
@@ -14099,6 +14580,63 @@ function canvasFrameGuides(state, preview, scheme) {
 
 function canvasSchemeGuides(state, scheme) {
   return canvasFrameGuides(state, canvasPreview, scheme);
+}
+
+// Общий показ связей: отметка в шапке. Умолчание — «нет». Это не значит, что
+// связей не видно вовсе: выключенный переключатель оставляет связи выделенной
+// метки (см. `canvasFrameLinks`).
+function canvasLinksShown(state) {
+  return Boolean(state && state.linksShown === true);
+}
+
+/**
+ * Связи, которые холст отдаёт кадру.
+ *
+ * **Берутся оттуда же, откуда метки: из промежуточного объекта, пока идёт
+ * перенос, и из состояния, когда переноса нет.** Ровно то же правило, что у
+ * `canvasFrameGuides`, и ровно по той же причине: у направляющих однажды завёлся
+ * свой, укороченный путь до кадра — они рисовались из `state.project` и во
+ * время переноса стояли на старом месте, а прыгали только по отпусканию. Связь
+ * держится за метку обоими концами, и читай она объект из состояния — дуга
+ * отставала бы от метки, которую в этот миг ведут мышью.
+ *
+ * **Режима два, и они не спорят** (слова заказчика: «если связи не включены, то
+ * при выделении метки да, пусть показываются её связи, это удобно будет»):
+ *
+ * - переключатель **включён** — все связи схемы;
+ * - переключатель **выключен** — связи выделенной метки, в обе стороны: и чем
+ *   управляет она, и кто управляет ею. Ничего не выделено — не рисуется ничего.
+ *
+ * Рисуются они **одинаково**: тот же цвет, та же толщина, тот же прогиб. Вид
+ * не должен прыгать на переключении — иначе одна и та же дуга у одной и той же
+ * метки читалась бы как две разные вещи. Прогиб считает `markLinks` по всем
+ * связям схемы разом, поэтому в узком режиме дуга лежит ровно там же, где
+ * лежала в общем. Заметность выделенному даётся **порядком**: его связи
+ * рисуются последними и ложатся поверх остальных.
+ *
+ * Чистая и вынесенная наружу нарочно: промежуточный кадр обязан проверяться
+ * тестом, а не глазами.
+ */
+function canvasFrameLinks(state, preview, scheme) {
+  const empty = { lines: [], offScheme: [] };
+  if (!scheme) return empty;
+  const selected = (state && state.selectedMarkIds) || [];
+  const all = canvasLinksShown(state);
+  if (!all && selected.length === 0) return empty;
+  const project = preview || (state && state.project);
+  const links = markLinks(project, scheme, state && state.filter);
+  const focus = new Set(selected);
+  const mine = (line) => focus.has(line.fromId) || focus.has(line.toId);
+  if (!all) {
+    return {
+      lines: links.lines.filter(mine),
+      offScheme: links.offScheme.filter((item) => focus.has(item.markId)),
+    };
+  }
+  return {
+    lines: [...links.lines.filter((line) => !mine(line)), ...links.lines.filter(mine)],
+    offScheme: links.offScheme,
+  };
 }
 
 // Притяжка к своим направляющим — одной дверью для всех рук: постановка точки,
@@ -14683,6 +15221,13 @@ function canvasPointerDown(event) {
       canvasDrag = { kind: "done", start: point, moved: false };
       return;
     }
+    // Вторая ручка того же ряда: поводок подписи. Стоит вплотную к повороту,
+    // поэтому и проверяется здесь же, сразу за ним.
+    if (target && hitLabelLeader(state.project, scheme, target, point, view, state.filter)) {
+      canvasToggleLabelLeader(state.selectedMarkIds[0]);
+      canvasDrag = { kind: "done", start: point, moved: false };
+      return;
+    }
   }
 
   if (editable && state.selectedOutlineId) {
@@ -15015,7 +15560,15 @@ function canvasPointerUp(event) {
   }
   canvasPreview = null;
 
-  if (event.pointerType === "touch" || drag.kind === "done") return;
+  if (event.pointerType === "touch") return;
+  // Нажатая ручка своё дело уже сделала — но рисовались ручки при `canvasDrag`
+  // пустом, и без этого кадра они оставались бы невидимыми до следующего хода
+  // мыши. Переключателю поводка это стоит дороже всех: он показывает состояние,
+  // и пропасть сразу после нажатия — значит не показать ничего.
+  if (drag.kind === "done") {
+    canvasRedraw();
+    return;
+  }
   const scheme = canvasScheme(state);
   const plan = screenToPlan(point, scheme, canvasViewOf(state));
   if (drag.kind === "line") {
@@ -16754,7 +17307,8 @@ function exportFitArea(project, scheme, options = {}) {
 /**
  * PNG схемы с метками. `area` — «all» или прямоугольник в пикселях плана,
  * `scale` — множитель, `legend` — рисовать ли легенду в углу, `outlines` —
- * печатать ли контуры помещений (по умолчанию да, бледной линией), `filter` —
+ * печатать ли контуры помещений (по умолчанию да, бледной линией), `links` —
+ * рисовать ли связи меток (по умолчанию нет: это разбор, а не чертёж), `filter` —
  * тот же фильтр, что на экране: скрытое им не попадает ни в картинку,
  * ни в легенду.
  */
@@ -16789,6 +17343,10 @@ async function schemePng(project, scheme, image, options = {}) {
     // Контуры помещений на бумаге — бледной линией: на листе главное метки,
     // а обводка комнаты подсказывает, где они стоят. Галочка в диалоге её снимает.
     outlines: options.outlines === false ? false : "pale",
+    // Связи — наоборот, по отметке и только по ней: умолчание «нет», лист
+    // остаётся чертежом. `true` значит «посчитай сам»: холста здесь нет, и
+    // передавать готовый кадр неоткуда.
+    links: options.links === true,
   });
   return exportBlob(canvas);
 }
@@ -19177,6 +19735,10 @@ const exportChoice = {
   area: "all",
   legend: true,
   outlines: true,
+  // Связи меток на бумаге. Умолчание — «нет»: лист по умолчанию остаётся
+  // чертежом, а связи это разбор. Отметка живёт между открытиями диалога, как
+  // и соседние, — поставил один раз и печатаешь с ней дальше.
+  links: false,
   tableScale: 2,
   schemeScale: 2,
 };
@@ -19576,6 +20138,9 @@ function exportSchemeDialog(api) {
     exportCheck(strings.exportPanel.withRooms, exportChoice.outlines, (on) => {
       exportChoice.outlines = on;
     }),
+    exportCheck(strings.exportPanel.withLinks, exportChoice.links, (on) => {
+      exportChoice.links = on;
+    }),
   ]);
 
   const guard = async (run) => {
@@ -19603,6 +20168,7 @@ function exportSchemeDialog(api) {
         scale: exportChoice.schemeScale,
         legend: exportChoice.legend,
         outlines: exportChoice.outlines,
+        links: exportChoice.links,
         filter: state.filter,
       });
     } finally {
@@ -19626,6 +20192,7 @@ function exportSchemeDialog(api) {
               scale: exportChoice.schemeScale,
               legend: exportChoice.legend,
               outlines: exportChoice.outlines,
+              links: exportChoice.links,
               filter: state.filter,
             });
             const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
@@ -21691,6 +22258,100 @@ if (typeof document !== "undefined") {
     setTimeout(startFilePanel, 0);
   }
 }
+
+// src/panels/links.js
+// Переключатель связей в шапке — сосед счётчика предупреждений справа.
+//
+// Связи («чем управляет») живут в объекте с давних пор, но на плане их до сих
+// пор не было видно: список меток говорил «Управляет: Т1, Т2», а где эти Т1 и
+// Т2 лежат — приходилось искать глазами. Кнопка зажигает на плане дуги от
+// управляющей метки к управляемым.
+//
+// **Выключенная кнопка не значит «связей не видно»**: выделенная метка свои
+// связи показывает и так. Кнопка добавляет к этому все остальные — она про
+// охват, а не про «рисовать или нет». Слова заказчика: «если связи не
+// включены, то при выделении метки да, пусть показываются её связи».
+//
+// Сама панель не рисует ничего: она правит одну отметку состояния, а рисует
+// холст (`canvas.canvasFrameLinks` → `render.drawMarkLinks`). Отметка живёт в
+// настройках браузера, как отметка линейки: это оснастка разбора, а не свойство
+// разметки, и в объект с файлом проекта ей не за чем.
+
+
+
+
+
+
+/**
+ * Что сказать пользователю в тот миг, когда он включил связи. Чистая: план
+ * подсказки считается от объекта, а не от DOM.
+ *
+ * Молчать нельзя в двух случаях. Первый — показывать нечего: связей на схеме
+ * нет вовсе, и погасший план читался бы как «кнопка сломана». Второй — часть
+ * связей ведёт на другую схему: линию через границу листа не провести, у метки
+ * рисуется обрывок, и про него надо сказать словами хотя бы раз.
+ */
+function linksNotice(project, scheme, filter) {
+  const links = markLinks(project, scheme, filter);
+  const away = links.offScheme.reduce((sum, item) => sum + item.count, 0);
+  if (links.lines.length === 0 && away === 0) return strings.links.none;
+  if (away > 0) return text("links.away", { count: away });
+  return null;
+}
+
+// Подсказка кнопки: что она сделает, что видно сейчас и как связи попадают в
+// выгрузку. Три строки — потому что отвечать на эти три вопроса больше негде:
+// кнопка одна, а режима у показа два.
+function linksHint(shown) {
+  const first = shown ? strings.links.hideHint : strings.links.showHint;
+  const scope = shown ? strings.links.scopeOn : strings.links.scopeOff;
+  return [first, scope, strings.links.inExport].join(". ");
+}
+
+function mountLinksPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
+
+  const toggle = uiIconButton("link", {
+    class: "ui-btn links__toggle",
+    label: strings.links.show,
+    title: strings.links.showHint,
+    on: { click: () => flip() },
+  });
+  toggle.setAttribute("aria-pressed", "false");
+  host.replaceChildren(toggle);
+
+  function flip() {
+    const state = getState();
+    const next = state.linksShown !== true;
+    setState({ linksShown: next });
+    setSetting(LINKS_SETTING, next);
+    if (!next) return;
+    // Сказать про пустоту и про связи на другие схемы — один раз, в момент
+    // включения. Держать это в подсказке кнопки бесполезно: на неё не наводят.
+    const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
+    if (!scheme) return;
+    const notice = linksNotice(state.project, scheme, state.filter);
+    if (notice) notify(notice, "info");
+  }
+
+  function refresh(state) {
+    const shown = Boolean(state.project) && layoutAllows("markLinks", state.layout);
+    host.hidden = !shown;
+    const on = state.linksShown === true;
+    toggle.classList.toggle("is-on", on);
+    toggle.setAttribute("aria-pressed", on ? "true" : "false");
+    toggle.setAttribute("aria-label", on ? strings.links.hide : strings.links.show);
+    toggle.title = linksHint(on);
+  }
+
+  subscribe((state, changed) => {
+    if ("project" in changed || "layout" in changed || "linksShown" in changed) refresh(state);
+  });
+
+  refresh(getState());
+}
+
+registerPanel(PANEL_IDS.headerLinks, mountLinksPanel);
 
 // src/panels/markSizes.js
 // Окно размеров метки: длина, ширина и высота над полом.

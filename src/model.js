@@ -414,6 +414,22 @@ export const OUTLINE_MIN_POINTS = 3;
 // от 90° отличается только направлением чтения.
 export const LABEL_ANGLES = [0, 90];
 
+// Поводок подписи — та самая полоска от метки к отведённой подписи. Правило по
+// умолчанию считает раскладка: подпись, которую увели на ряд и дальше, поводок
+// получает, а стоящая вплотную — нет; оттащенной рукой поводка не полагалось
+// вовсе. Заказчику этого мало: «у тех, которые подвинул — пропадают».
+//
+// Поэтому у метки есть **перебивка**: `true` — поводок рисуется всегда,
+// `false` — не рисуется никогда, поля нет вовсе — работает прежнее правило.
+// Третьего значения нет: `null` в поле значит ровно то же, что отсутствие
+// поля, и записывается, когда пользователь возвращает метку к правилу.
+// У метки прежней разметки поля нет — и это не поломка: читать перебивку
+// самому, минуя `markLabelLeader`, нельзя (G68).
+export function markLabelLeader(mark) {
+  if (!mark) return null;
+  return mark.labelLeader === true || mark.labelLeader === false ? mark.labelLeader : null;
+}
+
 // Размер метки и подписи в пикселях плана — с них начинается новый объект.
 // Считано от бумаги: план в 2500 пикселей по большей стороне на листе A3 это
 // 0,16 мм на пиксель, монтажник читает с расстояния вытянутой руки, значит
@@ -1349,6 +1365,7 @@ const MARK_PATCH_FIELDS = [
   "closed",
   "labelOffset",
   "labelAngle",
+  "labelLeader",
   "roomId",
   "roomManual",
   "location",
@@ -1367,6 +1384,17 @@ export function updateMark(project, markId, patch) {
   // габарит и попадание по клику считаются по этому же числу.
   if (Object.prototype.hasOwnProperty.call(changes, "labelAngle")) {
     if (!LABEL_ANGLES.includes(changes.labelAngle)) throw modelError("labelAngleUnknown");
+  }
+  // Перебивка поводка — только да, нет или «как решит раскладка». Пустое
+  // значение приводится к `null`: метка без поля и метка с `labelLeader: null`
+  // обязаны читаться одинаково, иначе упаковка старого объекта дописала бы ему
+  // поле, которого там не было.
+  if (Object.prototype.hasOwnProperty.call(changes, "labelLeader")) {
+    const value = changes.labelLeader;
+    if (value !== true && value !== false && value !== null && value !== undefined) {
+      throw modelError("labelLeaderUnknown");
+    }
+    changes.labelLeader = value === true || value === false ? value : null;
   }
   // Размеры приводятся к числу или к `null` здесь — второго места, где они
   // попадают в метку, нет: `setMarkDimensions` идёт через эту же функцию.

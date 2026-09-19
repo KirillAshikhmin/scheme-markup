@@ -19,6 +19,7 @@ export const PANEL_IDS = {
   headerSearch: "header-search",
   headerHistory: "header-history",
   headerWarnings: "header-warnings",
+  headerLinks: "header-links",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -33,6 +34,9 @@ const appState = {
   editPathId: null,
   // Линейка и направляющие видны, пока их не спрятали.
   guidesShown: true,
+  // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
+  // встречать пользователя дугами поверх плана никто не просил.
+  linksShown: false,
   activeTypeId: null,
   mode: "select",
   filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
@@ -54,6 +58,10 @@ export const SECTIONS_SETTING = "collapsedSections";
 // Линейка и направляющие: отметка рабочего места, а не свойство объекта.
 // Живёт в настройках браузера и переживает перезагрузку.
 export const GUIDES_SETTING = "schemeGuidesShown";
+// Связи меток: та же природа, что у линейки, — оснастка разбора, а не свойство
+// разметки. Живёт в настройках браузера, переживает перезагрузку, в объект и в
+// файл проекта не попадает.
+export const LINKS_SETTING = "markLinksShown";
 // На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
 // место они отнимают у списка схем. Всё остальное открыто — иначе новый
 // пользователь ищет, куда делись инструменты.
@@ -89,6 +97,9 @@ export const LAYOUT_ABILITIES = {
   // Предупреждения — про правку объекта: в них отвечают на вопрос о виде типа
   // и идут чинить найденное. В просмотре чинить нечем, а место в шапке дорого.
   warnings: ["desktop"],
+  // Связи — чтение, а не правка: «что включает этот выключатель» спрашивают и
+  // с телефона, стоя перед щитом. Ничего не меняют, поэтому идут в оба вида.
+  markLinks: ["desktop", "mobile"],
   undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],
@@ -415,6 +426,13 @@ function wireSections() {
   Promise.resolve(getSetting(GUIDES_SETTING))
     .then((saved) => {
       if (saved === false) setState({ guidesShown: false });
+    })
+    .catch(() => {});
+  // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище
+  // ответит «показаны».
+  Promise.resolve(getSetting(LINKS_SETTING))
+    .then((saved) => {
+      if (saved === true) setState({ linksShown: true });
     })
     .catch(() => {});
 }

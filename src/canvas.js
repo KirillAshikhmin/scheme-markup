@@ -46,8 +46,14 @@ import {
   drawScheme,
   fitView,
   drawLabelTurn,
+  drawLabelLeaderSwitch,
   hitHandle,
   hitLabelTurn,
+  hitLabelLeader,
+  labelLeaderHandle,
+  labelLeaderHolder,
+  labelLeaderShown,
+  markLinks,
   labelLead,
   hitOutline,
   hitTest,
@@ -485,6 +491,10 @@ function canvasPaint() {
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     guides: canvasDrag && canvasDrag.kind === "pathVertex" ? canvasDrag.guides : null,
+    // Готовый кадр связей, а не `true`: холст считает их из того же
+    // промежуточного объекта, что и метки, — иначе дуга отстанет от метки,
+    // которую ведут мышью. Выгрузка передаёт сюда `true` и считает сама.
+    links: canvasFrameLinks(state, canvasPreview, scheme),
     draftColor,
     draftLineStyle: state.activeTypeId ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
@@ -535,11 +545,18 @@ function canvasPaint() {
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const target = labelTargetOf(project, scheme, state.selectedMarkIds[0], state.filter);
     const lead = target ? labelLead(project, target) : null;
-    drawLabelTurn(
-      canvasCtx,
-      labelTurnHandle(project, scheme, target, view, state.filter),
-      styleOf(project, lead && lead.typeId).color,
-    );
+    const color = styleOf(project, lead && lead.typeId).color;
+    drawLabelTurn(canvasCtx, labelTurnHandle(project, scheme, target, view, state.filter), color);
+    // Вторая ручка того же ряда — поводок подписи. Показывает, что сейчас:
+    // включённый поводок нарисован, выключенный зачёркнут.
+    if (target) {
+      drawLabelLeaderSwitch(
+        canvasCtx,
+        labelLeaderHandle(project, scheme, target, view, state.filter),
+        color,
+        labelLeaderShown(project, target, labelBox(project, scheme, target, view, state.filter)),
+      );
+    }
   }
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
@@ -722,6 +739,33 @@ function canvasRotateLabel(markId) {
   }
 }
 
+// Поводок подписи: показывать его или нет. Перебивка — свойство метки, как и
+// угол подписи: она уезжает в файл проекта, отменяется по Ctrl+Z и одинаково
+// видна на экране, в PNG и в печати. Общей настройкой вида её делать нельзя
+// именно поэтому — поводок часть чертежа, а не оснастка рабочего места.
+//
+// Записывается всегда явное «да» или «нет», а не «как решит раскладка»:
+// пользователь нажал кнопку, глядя на подпись, и ответ должен остаться таким,
+// каким он его увидел, даже если подпись потом переедет.
+function canvasToggleLabelLeader(markId) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const target = labelTargetOf(state.project, scheme, markId, state.filter);
+  if (!target) return;
+  const holder = labelLeaderHolder(target);
+  const shown = labelLeaderShown(
+    state.project,
+    target,
+    labelBox(state.project, scheme, target, canvasViewOf(state), state.filter),
+  );
+  try {
+    const after = updateMark(state.project, holder, { labelLeader: !shown }).project;
+    canvasCommit(state.project, after, strings.history.labelLeader, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
 // Поворот подписи комнаты — тот же механизм, что у метки: угол лежит в данных
 // контура, уезжает в файл проекта, отменяется по Ctrl+Z и одинаково виден на
 // экране, в PNG и в печати.
@@ -836,6 +880,63 @@ export function canvasFrameGuides(state, preview, scheme) {
 
 function canvasSchemeGuides(state, scheme) {
   return canvasFrameGuides(state, canvasPreview, scheme);
+}
+
+// Общий показ связей: отметка в шапке. Умолчание — «нет». Это не значит, что
+// связей не видно вовсе: выключенный переключатель оставляет связи выделенной
+// метки (см. `canvasFrameLinks`).
+function canvasLinksShown(state) {
+  return Boolean(state && state.linksShown === true);
+}
+
+/**
+ * Связи, которые холст отдаёт кадру.
+ *
+ * **Берутся оттуда же, откуда метки: из промежуточного объекта, пока идёт
+ * перенос, и из состояния, когда переноса нет.** Ровно то же правило, что у
+ * `canvasFrameGuides`, и ровно по той же причине: у направляющих однажды завёлся
+ * свой, укороченный путь до кадра — они рисовались из `state.project` и во
+ * время переноса стояли на старом месте, а прыгали только по отпусканию. Связь
+ * держится за метку обоими концами, и читай она объект из состояния — дуга
+ * отставала бы от метки, которую в этот миг ведут мышью.
+ *
+ * **Режима два, и они не спорят** (слова заказчика: «если связи не включены, то
+ * при выделении метки да, пусть показываются её связи, это удобно будет»):
+ *
+ * - переключатель **включён** — все связи схемы;
+ * - переключатель **выключен** — связи выделенной метки, в обе стороны: и чем
+ *   управляет она, и кто управляет ею. Ничего не выделено — не рисуется ничего.
+ *
+ * Рисуются они **одинаково**: тот же цвет, та же толщина, тот же прогиб. Вид
+ * не должен прыгать на переключении — иначе одна и та же дуга у одной и той же
+ * метки читалась бы как две разные вещи. Прогиб считает `markLinks` по всем
+ * связям схемы разом, поэтому в узком режиме дуга лежит ровно там же, где
+ * лежала в общем. Заметность выделенному даётся **порядком**: его связи
+ * рисуются последними и ложатся поверх остальных.
+ *
+ * Чистая и вынесенная наружу нарочно: промежуточный кадр обязан проверяться
+ * тестом, а не глазами.
+ */
+export function canvasFrameLinks(state, preview, scheme) {
+  const empty = { lines: [], offScheme: [] };
+  if (!scheme) return empty;
+  const selected = (state && state.selectedMarkIds) || [];
+  const all = canvasLinksShown(state);
+  if (!all && selected.length === 0) return empty;
+  const project = preview || (state && state.project);
+  const links = markLinks(project, scheme, state && state.filter);
+  const focus = new Set(selected);
+  const mine = (line) => focus.has(line.fromId) || focus.has(line.toId);
+  if (!all) {
+    return {
+      lines: links.lines.filter(mine),
+      offScheme: links.offScheme.filter((item) => focus.has(item.markId)),
+    };
+  }
+  return {
+    lines: [...links.lines.filter((line) => !mine(line)), ...links.lines.filter(mine)],
+    offScheme: links.offScheme,
+  };
 }
 
 // Притяжка к своим направляющим — одной дверью для всех рук: постановка точки,
@@ -1425,6 +1526,13 @@ function canvasPointerDown(event) {
       canvasDrag = { kind: "done", start: point, moved: false };
       return;
     }
+    // Вторая ручка того же ряда: поводок подписи. Стоит вплотную к повороту,
+    // поэтому и проверяется здесь же, сразу за ним.
+    if (target && hitLabelLeader(state.project, scheme, target, point, view, state.filter)) {
+      canvasToggleLabelLeader(state.selectedMarkIds[0]);
+      canvasDrag = { kind: "done", start: point, moved: false };
+      return;
+    }
   }
 
   if (editable && state.selectedOutlineId) {
@@ -1757,7 +1865,15 @@ function canvasPointerUp(event) {
   }
   canvasPreview = null;
 
-  if (event.pointerType === "touch" || drag.kind === "done") return;
+  if (event.pointerType === "touch") return;
+  // Нажатая ручка своё дело уже сделала — но рисовались ручки при `canvasDrag`
+  // пустом, и без этого кадра они оставались бы невидимыми до следующего хода
+  // мыши. Переключателю поводка это стоит дороже всех: он показывает состояние,
+  // и пропасть сразу после нажатия — значит не показать ничего.
+  if (drag.kind === "done") {
+    canvasRedraw();
+    return;
+  }
   const scheme = canvasScheme(state);
   const plan = screenToPlan(point, scheme, canvasViewOf(state));
   if (drag.kind === "line") {

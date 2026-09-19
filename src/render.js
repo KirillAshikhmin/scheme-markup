@@ -14,9 +14,12 @@ import {
   SHAPE_NAMES,
   blockLabel,
   blockMembers,
+  findMark,
   findRoom,
   findType,
   findGroup,
+  markControlIds,
+  markLabelLeader,
   outlinesInOrder,
   pointInOutline,
   styleOf,
@@ -1649,6 +1652,248 @@ export function snapToSchemeGuides(guides, point, scheme, view, options = {}) {
   return { point: next, held };
 }
 
+// ——— связи меток ——————————————————————————————————————————————————————
+//
+// «Чем управляет» (`mark.controls`) — единственное место в объекте, где одна
+// метка знает про другую. На плане это разбор, а не чертёж: выключатель у двери
+// и лента в нише — вещи в разных концах комнаты, и по одному плану не видно,
+// что они про один сценарий.
+//
+// **Главная опасность — спутать связь с меткой-линией.** Начертаний у линий
+// девять, и десятое ничего бы не решило: любая прямая на плане читается как
+// проложенная трасса. Поэтому связь говорит на другом языке сразу по четырём
+// признакам, и каждый из них по отдельности линии недоступен:
+//
+// 1. **Дуга, а не ломаная.** Метка-линия состоит из прямых отрезков — она
+//    повторяет стену или кабель. Плавный лук между двумя метками ни одной
+//    линией нарисовать нельзя (волнистое начертание — это частая рябь вдоль
+//    прямой, а не один прогиб).
+// 2. **Свой служебный цвет** (`LINK_COLOR`), малиновый: он не принадлежит ни
+//    одной категории справочника и в легенде его нет. Цвет метки говорит
+//    «свет», «розетки», «щит»; цвет связи не говорит ни о чём, кроме связи.
+// 3. **Волос толщиной и вполсилы** — и, в отличие от метки, **не растёт с
+//    масштабом**: метка задана в пикселях плана и на приближении толстеет,
+//    связь остаётся ниткой. На любом зуме она тоньше самой тонкой линии.
+// 4. **Наконечник у управляемого и точка у управляющего.** У метки-линии концы
+//    одинаковы: у неё нет направления. У связи направление есть, и оно и есть
+//    её содержание — «эта включает ту».
+//
+// **Связь бывает не парой.** Проходная схема — В1 и ВП1 на одном Т1, и в одну
+// метку приходит несколько дуг. Слова заказчика: «может быть связь не только
+// выключатель-лампочка, но ещё и несколько дополнительных переключателей».
+// Поэтому дуги к общей метке разводятся: каждая следующая выгибается сильнее и
+// приходит чуть дальше от знака (`LINK_SPREAD`, `LINK_SPREAD_PAD`). Без этого
+// два выключателя, стоящие в одной рамке, дали бы две дуги одна под другой —
+// и три связи читались бы как одна.
+const LINK_COLOR = "#BF3989";
+// Полупрозрачность: связь лежит поверх плана и меток, и перебивать их она не
+// должна — читается поверху, а не вместо.
+const LINK_ALPHA = 0.72;
+// Толщина в пикселях экрана. Не в пикселях плана: см. признак 3 выше.
+const LINK_WIDTH = 1.6;
+// Прогиб дуги — доля длины хорды, с потолком в пикселях экрана: у короткой
+// связи лук должен быть заметен, у длинной — не улетать через полплана.
+const LINK_BOW = 0.16;
+const LINK_BOW_MAX_PX = 54;
+// Разведение дуг, приходящих в одну метку: насколько сильнее выгибается каждая
+// следующая и насколько дальше от знака садится её наконечник.
+const LINK_SPREAD = 0.62;
+const LINK_SPREAD_PAD = 2.5;
+// Просвет между меткой и концом связи: наконечник не должен прятаться под
+// знаком, а точка начала — сливаться с ним.
+const LINK_GAP_PX = 3;
+// Наконечник и точка начала в пикселях экрана.
+const LINK_ARROW_PX = 7.5;
+const LINK_DOT_PX = 2.4;
+// Обрывок «связь уходит на другую схему»: длина всего знака, длина первого
+// куска и разрыв после него — по этому разрыву знак и читается как обрыв.
+const LINK_AWAY_PX = 17;
+const LINK_AWAY_HEAD = 6;
+const LINK_AWAY_BREAK = 4;
+// Куда смотрит обрывок: вверх-вправо, туда же, куда уходит подпись метки.
+const LINK_AWAY_DEG = -45;
+
+// Точка, к которой связь приходит. У точечной метки — середина её точек (у
+// блока «одна метка на блок» их несколько), у ломаной — середина серединного
+// отрезка: она всегда лежит **на** линии, а центр тяжести вершин у Г-образного
+// трека оказался бы в стороне от неё.
+export function markLinkAnchor(mark) {
+  const points = (mark && mark.points) || [];
+  if (points.length === 0) return { x: 0, y: 0 };
+  if (mark.kind === "line" && points.length >= 2) {
+    const index = Math.floor((points.length - 1) / 2);
+    const from = points[index];
+    const to = points[index + 1];
+    return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  }
+  const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+  return { x: sum.x / points.length, y: sum.y / points.length };
+}
+
+/**
+ * Связи, которые можно показать на этой схеме. Чистая: доли плана, как точки
+ * меток, — ни зума, ни экрана.
+ *
+ * Возвращает `{lines, offScheme}`:
+ * - `lines` — `{fromId, toId, from, to}` для пар, обе метки которых видны здесь;
+ * - `offScheme` — `{markId, at, count}` для меток, чьи подопечные лежат на
+ *   **другой схеме**: линию через границу листа не провести, но и промолчать
+ *   нельзя — иначе пустота у метки читается как «эта ничем не управляет».
+ *   Такая метка помечается обрывком (`drawMarkLinks`).
+ *
+ * Метка, спрятанная **фильтром**, — случай другой: её убрала рука
+ * пользователя, и рассказывать ему о том, что он сам только что скрыл, незачем.
+ * Такие связи пропускаются молча.
+ *
+ * Показываются **все** связи схемы, а не только выделенной метки. Так решил
+ * заказчик: «если на объекте не из щита связи, а через умные реле и т.д. то
+ * мешанины не будет» — в его работе связь короткая, от выключателя к
+ * светильнику в той же комнате, а не через весь план в щит.
+ *
+ * `spread` у линии — её очередь среди дуг, приходящих в **ту же** метку.
+ * Считается здесь, а не при рисовании: разведение проходной схемы обязано
+ * проверяться без холста.
+ */
+export function markLinks(project, scheme, filter) {
+  const result = { lines: [], offScheme: [] };
+  if (!project || !scheme) return result;
+  const shown = visibleMarks(project, scheme, filter);
+  const here = new Map(shown.map((mark) => [mark.id, mark]));
+  // Сколько дуг уже пришло в эту метку: порядок обхода — порядок объекта,
+  // поэтому одна и та же схема разводится одинаково при каждой отрисовке.
+  const incoming = new Map();
+  for (const mark of shown) {
+    let away = 0;
+    for (const id of markControlIds(mark)) {
+      const target = here.get(id);
+      if (target) {
+        const spread = incoming.get(id) || 0;
+        incoming.set(id, spread + 1);
+        result.lines.push({
+          fromId: mark.id,
+          toId: id,
+          from: markLinkAnchor(mark),
+          to: markLinkAnchor(target),
+          spread,
+        });
+        continue;
+      }
+      const other = findMark(project, id);
+      if (other && other.schemeId && other.schemeId !== scheme.id) away += 1;
+    }
+    if (away > 0) {
+      result.offScheme.push({ markId: mark.id, at: markLinkAnchor(mark), count: away });
+    }
+  }
+  return result;
+}
+
+// Дуга связи в экранных пикселях: концы отодвинуты от знаков меток, середина
+// уведена вбок от хорды. Сторона прогиба — всегда слева по ходу движения,
+// поэтому встречная пара (A управляет B, B управляет A) расходится двумя
+// луками и обе стрелки видны.
+function linkCurve(from, to, pad, spread = 0) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const span = Math.hypot(dx, dy);
+  if (!(span > 0)) return null;
+  const ux = dx / span;
+  const uy = dy / span;
+  const trim = Math.min(pad, (span - 1) / 2);
+  // Наконечники дуг, сходящихся в одну метку, садятся на разном отдалении от
+  // знака: у проходной схемы иначе три стрелки упёрлись бы в одну точку.
+  const tail = Math.min(pad + spread * LINK_SPREAD_PAD, (span - 1) / 2);
+  const start = { x: from.x + ux * trim, y: from.y + uy * trim };
+  const end = { x: to.x - ux * tail, y: to.y - uy * tail };
+  const bow = Math.min(span * LINK_BOW, LINK_BOW_MAX_PX) * (1 + spread * LINK_SPREAD);
+  const control = {
+    x: (start.x + end.x) / 2 + uy * bow,
+    y: (start.y + end.y) / 2 - ux * bow,
+  };
+  return { start, end, control };
+}
+
+function drawLinkArrow(ctx, at, dx, dy, size) {
+  const span = Math.hypot(dx, dy);
+  if (!(span > 0)) return;
+  const ux = dx / span;
+  const uy = dy / span;
+  const back = { x: at.x - ux * size, y: at.y - uy * size };
+  const wing = size * 0.42;
+  ctx.beginPath();
+  ctx.moveTo(at.x, at.y);
+  ctx.lineTo(back.x - uy * wing, back.y + ux * wing);
+  ctx.lineTo(back.x + uy * wing, back.y - ux * wing);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * Связи на плане. Зовётся из `drawScheme` — и на экране, и в выгрузке, но в
+ * выгрузке только по отметке: `drawScheme` получает `links` и без него не
+ * рисует ничего. Заказчик: «для печати надо галкой разрешать показ связей» —
+ * значит на бумаге они бывают нужны, но по умолчанию лист остаётся чертежом.
+ */
+export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
+  if (!links) return;
+  const lines = links.lines || [];
+  const away = links.offScheme || [];
+  if (lines.length === 0 && away.length === 0) return;
+  const state = renderView(view);
+  const pad = markRadius(state) + LINK_GAP_PX;
+  const color = options.color || LINK_COLOR;
+  ctx.save();
+  ctx.globalAlpha = LINK_ALPHA;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = LINK_WIDTH;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash([]);
+  for (const line of lines) {
+    const curve = linkCurve(
+      planToScreen(line.from, scheme, state),
+      planToScreen(line.to, scheme, state),
+      pad,
+      line.spread || 0,
+    );
+    if (!curve) continue;
+    ctx.beginPath();
+    ctx.moveTo(curve.start.x, curve.start.y);
+    ctx.quadraticCurveTo(curve.control.x, curve.control.y, curve.end.x, curve.end.y);
+    ctx.stroke();
+    // Точка у управляющей метки: с какого конца читать дугу.
+    ctx.beginPath();
+    ctx.arc(curve.start.x, curve.start.y, LINK_DOT_PX, 0, Math.PI * 2);
+    ctx.fill();
+    // Наконечник смотрит по касательной к дуге в её конце — от опорной точки к
+    // концу, иначе стрелка у выгнутой связи целится мимо метки.
+    drawLinkArrow(ctx, curve.end, curve.end.x - curve.control.x, curve.end.y - curve.control.y, LINK_ARROW_PX);
+  }
+  // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
+  // листа не провести, но пустота у метки соврала бы.
+  for (const item of away) {
+    const at = planToScreen(item.at, scheme, state);
+    const angle = (LINK_AWAY_DEG * Math.PI) / 180;
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const base = pad;
+    const breakAt = base + LINK_AWAY_PX - LINK_AWAY_HEAD - LINK_AWAY_BREAK;
+    const tail = base + LINK_AWAY_PX - LINK_AWAY_HEAD;
+    const tip = base + LINK_AWAY_PX;
+    ctx.beginPath();
+    ctx.moveTo(at.x + ux * base, at.y + uy * base);
+    ctx.lineTo(at.x + ux * breakAt, at.y + uy * breakAt);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(at.x + ux * tail, at.y + uy * tail);
+    ctx.lineTo(at.x + ux * tip, at.y + uy * tip);
+    ctx.stroke();
+    drawLinkArrow(ctx, { x: at.x + ux * tip, y: at.y + uy * tip }, ux, uy, LINK_ARROW_PX);
+  }
+  ctx.restore();
+}
+
 // ——— видимость ———————————————————————————————————————————————————————
 
 // Фильтр панели меток: скрытая метка не рисуется и по ней не кликается.
@@ -2178,6 +2423,99 @@ export function hitLabelTurn(project, scheme, target, point, view, filter) {
   const handle = labelTurnHandle(project, scheme, target, view, filter);
   if (!handle) return false;
   return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+}
+
+// ——— переключатель поводка ————————————————————————————————————————————
+//
+// Вторая ручка того же ряда, сразу за поворотом. Место у неё то же по той же
+// причине: смотрят на поводок, глядя на план, — виден он на этом фоне или
+// теряется, дотягивается до своей метки или упирается в соседнюю.
+//
+// **Переключатель на метку, а не на схему.** Поводок — часть чертежа: он
+// рисуется `drawScheme`, значит уезжает в PNG, в печать и в лист «Схема».
+// Общая настройка вида (как линейка) живёт в браузере и в файл не попадает —
+// значит, распечатка у второго участника вышла бы другой. И жалоба заказчика
+// адресная: пропадает поводок у той подписи, которую он только что оттащил, —
+// вернуть его нужно ей, а не всем сразу.
+
+// Держатель перебивки — там же, где смещение и угол подписи: у блока подпись
+// одна на всех, и поле ей держит первая метка.
+export function labelLeaderHolder(target) {
+  if (!target) return null;
+  return target.markIds ? target.markIds[0] : target.id;
+}
+
+/**
+ * Рисуется ли поводок у этой подписи.
+ *
+ * Правило по умолчанию — прежнее: поводок есть у той подписи, которую
+ * раскладка увела на ряд и дальше (`row > 0`), и его нет ни у стоящей вплотную,
+ * ни у оттащенной рукой. Перебивка метки (`markLabelLeader`) отвечает раньше
+ * правила — и `true`, и `false`.
+ */
+export function labelLeaderShown(project, target, box) {
+  const holder = labelLeaderHolder(target);
+  const mark = holder ? findMark(project, holder) : null;
+  const forced = markLabelLeader(mark);
+  if (forced !== null) return forced;
+  return Boolean(box && box.row > 0);
+}
+
+// Ручка стоит справа от поворота, вплотную: две кнопки одного ряда у одного
+// угла подписи. Считается от ручки поворота, чтобы ряд не разъехался, когда у
+// поворота поменяется радиус.
+export function labelLeaderHandle(project, scheme, target, view, filter) {
+  const turn = labelTurnHandle(project, scheme, target, view, filter);
+  if (!turn) return null;
+  return { x: turn.x + turn.r * 2.35, y: turn.y, r: turn.r };
+}
+
+export function hitLabelLeader(project, scheme, target, point, view, filter) {
+  const handle = labelLeaderHandle(project, scheme, target, view, filter);
+  if (!handle) return false;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+}
+
+// Значок — сам поводок: точка метки слева и пологая черта от неё к подписи.
+// Выключенный приглушён и перечёркнут косой чертой сверху вниз — тем же знаком
+// запрета, что на дорожных. Черта поводка нарочно **пологая**: будь она под
+// 45°, запрет лёг бы к ней перпендикуляром и вместе они читались бы крестиком
+// «закрыть», а не «поводка нет».
+//
+// Кнопка показывает, **что сейчас**, а не что случится по нажатию: это
+// отметка, а не действие, — и соседний поворот подписи тут ей не пример.
+export function drawLabelLeaderSwitch(ctx, handle, color, shown) {
+  if (!handle) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  const inner = handle.r * 0.56;
+  const dot = { x: handle.x - inner, y: handle.y + inner * 0.42 };
+  ctx.globalAlpha = shown ? 1 : 0.4;
+  ctx.lineWidth = Math.max(1.2, handle.r * 0.17);
+  ctx.beginPath();
+  ctx.moveTo(dot.x, dot.y);
+  ctx.lineTo(handle.x + inner, handle.y - inner * 0.42);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(dot.x, dot.y, Math.max(1.2, handle.r * 0.2), 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  if (!shown) {
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1.3, handle.r * 0.22);
+    ctx.beginPath();
+    ctx.moveTo(handle.x - handle.r * 0.62, handle.y - handle.r * 0.62);
+    ctx.lineTo(handle.x + handle.r * 0.62, handle.y + handle.r * 0.62);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // Значок — дуга со стрелкой: поворот, а не «плюс» и не «крест». Буквы здесь
@@ -2813,6 +3151,7 @@ export function drawScheme(ctx, {
   draftColor,
   draftLineStyle,
   guides,
+  links,
   outlines,
   selectedOutlineId,
 }) {
@@ -2838,17 +3177,30 @@ export function drawScheme(ctx, {
   for (const mark of visibleMarks(project, scheme, filter)) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
   }
+  // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
+  // дугу разбора. `links` — либо готовый кадр (его считает холст из того же
+  // промежуточного объекта, что и метки), либо `true`: посчитать самому. Так
+  // выгрузка получает связи по отметке в диалоге, ничего не зная про холст.
+  if (links) {
+    drawMarkLinks(ctx, links === true ? markLinks(project, scheme, filter) : links, scheme, state);
+  }
   // Подписи — после меток и в два прохода: сперва поводки у тех, кого развели
   // от соседа, потом сам текст. Иначе поводок ляжет поверх уже нарисованной
   // подписи и перечеркнёт её.
   const layout = labelLayout(project, scheme, filter, state);
-  const labels = labelTargets(project, scheme, filter).map((target) => ({
-    box: labelBoxIn(project, scheme, target, state, layout),
-    anchor: planToScreen(labelOrigin(project, target), scheme, state),
-    color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
-  }));
+  const labels = labelTargets(project, scheme, filter).map((target) => {
+    const box = labelBoxIn(project, scheme, target, state, layout);
+    return {
+      box,
+      anchor: planToScreen(labelOrigin(project, target), scheme, state),
+      color: styleOf(project, (labelLead(project, target) || {}).typeId).color,
+      // Поводок: правило раскладки, если метка не сказала иначе. Перебивка
+      // лежит в объекте, поэтому одинаково видна на экране, в PNG и в печати.
+      leader: labelLeaderShown(project, target, box),
+    };
+  });
   for (const item of labels) {
-    if (item.box.row > 0) drawLabelLeader(ctx, item.anchor, item.box, item.color);
+    if (item.leader) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
   for (const item of labels) drawLabel(ctx, item.box, item.color);
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da", draftLineStyle);

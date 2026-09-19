@@ -46,6 +46,10 @@ const exportChoice = {
   area: "all",
   legend: true,
   outlines: true,
+  // Связи меток на бумаге. Умолчание — «нет»: лист по умолчанию остаётся
+  // чертежом, а связи это разбор. Отметка живёт между открытиями диалога, как
+  // и соседние, — поставил один раз и печатаешь с ней дальше.
+  links: false,
   tableScale: 2,
   schemeScale: 2,
 };
@@ -445,6 +449,9 @@ function exportSchemeDialog(api) {
     exportCheck(strings.exportPanel.withRooms, exportChoice.outlines, (on) => {
       exportChoice.outlines = on;
     }),
+    exportCheck(strings.exportPanel.withLinks, exportChoice.links, (on) => {
+      exportChoice.links = on;
+    }),
   ]);
 
   const guard = async (run) => {
@@ -472,6 +479,7 @@ function exportSchemeDialog(api) {
         scale: exportChoice.schemeScale,
         legend: exportChoice.legend,
         outlines: exportChoice.outlines,
+        links: exportChoice.links,
         filter: state.filter,
       });
     } finally {
@@ -495,6 +503,7 @@ function exportSchemeDialog(api) {
               scale: exportChoice.schemeScale,
               legend: exportChoice.legend,
               outlines: exportChoice.outlines,
+              links: exportChoice.links,
               filter: state.filter,
             });
             const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
