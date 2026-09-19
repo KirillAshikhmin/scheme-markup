@@ -728,10 +728,80 @@
   white-space: nowrap;
 }
 
-.marks__count {
-  margin: 8px 0 4px;
+/* ——— заголовок блока фильтров ———————————————————————————————————————————
+   Фильтры сворачиваются: прилипший непрозрачный блок отдавал списку всего
+   258 px полосы, и раскрытая карточка метки (282 px) в невысоком окне не
+   помещалась вовсе. Свёрнутый блок — одна строка заголовка.
+
+   Вид взят у заголовков разделов панели (`.panel__title`): та же мелкая
+   прописная подпись, та же галочка, тот же счётчик справа. Язык сворачивания
+   в приложении один, и второй ради блока внутри раздела заводить незачем;
+   свои правила — только из-за отступов: раздел отбивается от края колонки,
+   а этот заголовок стоит уже внутри тела раздела. */
+.marks__filtersTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 4px 0 6px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--panel-muted);
-  font-size: 12px;
+  text-align: left;
+}
+
+.marks__filtersTitle:hover,
+.marks__filtersTitle:focus-visible {
+  color: var(--panel-text);
+}
+
+.marks__chevron::before {
+  content: "▾";
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+
+.marks__top.is-collapsed .marks__chevron::before {
+  transform: rotate(-90deg);
+}
+
+/* Черта под свёрнутым блоком: у развёрнутого её рисует сам блок фильтров
+   (`.filters`), а свёрнутый иначе сливался бы с первой строкой списка. */
+.marks__top.is-collapsed {
+  border-bottom: 1px solid var(--panel-line);
+}
+
+/* Список сужен фильтром — заголовок в акцентном цвете. Свёрнутый блок обязан
+   сказать об этом сам: метки пропали со схемы и из списка, и если причина не
+   видна, пользователь пойдёт искать их, а не снимать фильтр. Второй признак —
+   счётчик рядом: он показывает «Показано 12 из 36» вместо простого числа. */
+.marks__top.is-narrowed .marks__filtersTitle {
+  color: var(--accent);
+}
+
+/* Счётчик переехал в строку заголовка: он про список, а не про фильтры, и
+   обязан остаться на виду и свёрнутым — лишней высоты при этом не занимает.
+   `margin-left: auto` прижимает его к правому краю, как значок у разделов. */
+.marks__count {
+  margin: 0 0 0 auto;
+  color: var(--panel-muted);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.marks__top.is-narrowed .marks__count {
+  color: var(--accent);
 }
 
 .marks {
@@ -813,6 +883,33 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Код и номер раскрытой строки — одним куском, как «Р3» в свёрнутой. Слова
+   заказчика: «цифру метки прижми к её букве, а то там большое расстояние».
+   Прежде номер стоял у правого края: код тянулся во всю ширину и отодвигал
+   поле. Теперь тянется обёртка, а внутри зазор 2 пикселя — рамка поля номера
+   и так отбивает цифру от буквы, больше не нужно.
+
+   Основа 0 — не украшение, а единственный способ удержать пару на одной
+   строке. Голова раскрытой строки переносит содержимое (`flex-wrap: wrap` —
+   так под код уходит вторая строка с названием типа), а перенос во флексах
+   случается по **исходному** размеру: обёртка шириной по содержимому (код в
+   шестнадцать букв плюс поле номера — за двести пикселей) в строку не влезала
+   и целиком уезжала под значок. С основой 0 обёртка занимает то, что осталось
+   от строки, и ужимается внутри: многоточием жмётся код, а поле номера своей
+   меры не отдаёт (`flex: none` ниже) и остаётся вплотную к букве. Полный код
+   при этом не теряется — он в подсказке. */
+.mark-row__ident {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.mark-row__ident .mark-row__label {
+  flex: 0 1 auto;
 }
 
 /* Номер правится в строке: поле по содержимому — четыре цифры потолка
@@ -3894,8 +3991,9 @@ const strings = {
     show: "Показать все связи",
     hide: "Скрыть общие связи",
     showHint:
-      "Соединить линиями метки и то, чем они управляют. Связь идёт дугой со стрелкой " +
-      "к управляемому и своим цветом — с меткой-линией её не спутать",
+      "Показать на плане три рода соединений: управление — дуга со стрелкой к управляемому, " +
+      "общая цепь — прямая с засечками между равными, группа одного номера — оболочка вокруг меток. " +
+      "Все три своего цвета и в волос толщиной: с меткой-линией не спутать",
     hideHint: "Убрать с плана связи всего объекта",
     // Вторая строка подсказки объясняет, что выключенный переключатель не
     // значит «связей не видно вовсе»: разбор одной метки остаётся под рукой.
@@ -4215,6 +4313,15 @@ const strings = {
     types: "Категории и типы",
     hidden: "скрыто: {count}",
     showAll: "Показать все",
+    // Заголовок сворачиваемого блока фильтров над списком меток. Блок прилип
+    // к верху списка и непрозрачен: свёрнутый, он отдаёт списку полтораста
+    // пикселей, и раскрытая карточка метки наконец помещается в невысоком окне.
+    title: "Фильтры",
+    collapse: "Свернуть фильтры",
+    expand: "Развернуть фильтры",
+    // Свёрнутый блок обязан сказать, что список сужен: иначе пользователь
+    // ищет пропавшие метки на плане и в списке, а спрятал их он сам.
+    narrowed: "Список сужен фильтром",
   },
   equipment: {
     open: "Оборудование",
@@ -4334,11 +4441,28 @@ const strings = {
   },
   controls: {
     title: "Чем управляет {label}",
-    hint: "Отметьте метки, которые включает эта. Список сужается помещением.",
+    hint: "Отметьте метки, которые включает эта. Список сужается помещением и поиском — отмеченное при этом не теряется.",
     room: "Помещение",
+    // Строка поиска окна. Подсказка называет все поля, по которым ищут, и
+    // единственное, что здесь неочевидно, — Enter: в соседних окнах он
+    // закрывает окно выбранным, а в этом отмечает и ждёт следующего запроса.
+    search: "Поиск: обозначение, тип, расположение",
+    searchHint:
+      "Ищет по обозначению, коду и названию типа, расположению и обозначению из оригинала. Enter отмечает первую строку и очищает поиск, стрелка вниз уводит в список.",
+    searchHintOne:
+      "Ищет по обозначению, коду и названию типа, расположению и обозначению из оригинала. Enter выбирает первую строку, стрелка вниз уводит в список.",
     empty: "Других меток на объекте пока нет",
     nothingFound: "В этом помещении других меток нет",
+    // Пустая выдача поиска. Две разные: «нет нигде» и «нет здесь, а в других
+    // помещениях есть» — во втором случае окно предлагает снять фильтр, а не
+    // оставляет гадать, какой из двух фильтров виноват.
+    searchEmpty: "По запросу ничего не нашлось",
+    foundElsewhere: "В этом помещении ничего не нашлось. В других помещениях — {count}",
+    allRooms: "Показать все помещения",
     chosen: "Отмечено: {count}",
+    // Часть отмеченного спрятана сужением. Без этой строки «Отмечено: 5» над
+    // списком из двух строк читается как ошибка счётчика.
+    chosenHidden: "Отмечено: {count} · из них скрыто сужением: {hidden}",
     save: "Сохранить связь",
   },
   rooms: {
@@ -11948,6 +12072,20 @@ const LINK_AWAY_BREAK = 4;
 // Куда смотрит обрывок: вверх-вправо, туда же, куда уходит подпись метки.
 const LINK_AWAY_DEG = -45;
 
+// Общее управление — отношение равных: ни стрелки, ни точки, засечки на обоих
+// концах. Тоньше и бледнее управления: это следствие связей, а не своя запись.
+const LINK_TIE_ALPHA = 0.5;
+const LINK_TIE_WIDTH = 1.2;
+const LINK_TIE_TICK = 4.5;
+
+// Общий номер — не линия, а оболочка: тождество, а не отношение. Пунктир,
+// самая бледная из трёх, отступ от знака метки — чтобы обойти его, а не
+// перечеркнуть.
+const LINK_HULL_ALPHA = 0.45;
+const LINK_HULL_WIDTH = 1.1;
+const LINK_HULL_DASH = [5, 4];
+const LINK_HULL_PAD = 7;
+
 // Точка, к которой связь приходит. У точечной метки — середина её точек (у
 // блока «одна метка на блок» их несколько), у ломаной — середина серединного
 // отрезка: она всегда лежит **на** линии, а центр тяжести вершин у Г-образного
@@ -11969,12 +12107,22 @@ function markLinkAnchor(mark) {
  * Связи, которые можно показать на этой схеме. Чистая: доли плана, как точки
  * меток, — ни зума, ни экрана.
  *
- * Возвращает `{lines, offScheme}`:
- * - `lines` — `{fromId, toId, from, to}` для пар, обе метки которых видны здесь;
- * - `offScheme` — `{markId, at, count}` для меток, чьи подопечные лежат на
- *   **другой схеме**: линию через границу листа не провести, но и промолчать
- *   нельзя — иначе пустота у метки читается как «эта ничем не управляет».
- *   Такая метка помечается обрывком (`drawMarkLinks`).
+ * Родов связи три, и различаются они **природой отношения**, а не цветом:
+ *
+ * - `lines` — **управление**, `{fromId, toId, from, to, spread}`. Отношение
+ *   направленное: кто кем. Рисуется дугой со стрелкой.
+ * - `ties` — **общее управление**, `{fromId, toId, from, to}`. В1 и ВП1 оба
+ *   управляют Т1 — значит они в одной цепи. Отношение **равных**: направления
+ *   нет, и стрелка тут была бы враньём. Рисуется прямой с засечками на концах.
+ * - `groups` — **общий номер**, `{key, label, markIds, points}`. Это вообще не
+ *   отношение, а **тождество**: шесть светильников с одним Т16 — в учёте
+ *   заказчика один светильник, разнесённый по потолку (G25, G96). Рисуется не
+ *   линией, а замкнутой оболочкой вокруг своих меток.
+ * - `offScheme` — `{markId, at, count}` для меток, чей собеседник любого из
+ *   трёх родов лежит на **другой схеме**: линию через границу листа не
+ *   провести, но и промолчать нельзя — пустота у метки читается как «эта ни с
+ *   чем не связана». Такая метка помечается обрывком (`drawMarkLinks`), и
+ *   способ этот один на все три рода.
  *
  * Метка, спрятанная **фильтром**, — случай другой: её убрала рука
  * пользователя, и рассказывать ему о том, что он сам только что скрыл, незачем.
@@ -11985,42 +12133,200 @@ function markLinkAnchor(mark) {
  * мешанины не будет» — в его работе связь короткая, от выключателя к
  * светильнику в той же комнате, а не через весь план в щит.
  *
- * `spread` у линии — её очередь среди дуг, приходящих в **ту же** метку.
- * Считается здесь, а не при рисовании: разведение проходной схемы обязано
- * проверяться без холста.
+ * **Полного графа здесь нет нигде.** Трое управляющих одним объектом дали бы
+ * три линии, шестеро — пятнадцать: это не «показать цепь», а закрасить план.
+ * Равные соединяются **цепочкой** (n−1 звеньев, порядок — слева направо и
+ * сверху вниз, чтобы цепь читалась как обход), а тождество — **одной
+ * оболочкой** на всю группу.
+ *
+ * `spread` у линии управления — её очередь среди дуг, приходящих в **ту же**
+ * метку. Считается здесь, а не при рисовании: разведение проходной схемы
+ * обязано проверяться без холста.
  */
 function markLinks(project, scheme, filter) {
-  const result = { lines: [], offScheme: [] };
+  const result = { lines: [], ties: [], groups: [], offScheme: [] };
   if (!project || !scheme) return result;
   const shown = visibleMarks(project, scheme, filter);
   const here = new Map(shown.map((mark) => [mark.id, mark]));
+  // Собеседники, оказавшиеся на другой схеме, — по метке и без повторов: у
+  // метки один обрывок, сколько бы родов связи через границу ни ушло.
+  const away = new Map();
+  const noteAway = (markId, otherId) => {
+    const other = findMark(project, otherId);
+    if (!other || !other.schemeId || other.schemeId === scheme.id) return;
+    let set = away.get(markId);
+    if (!set) away.set(markId, (set = new Set()));
+    set.add(otherId);
+  };
+
+  // ——— управление ———
   // Сколько дуг уже пришло в эту метку: порядок обхода — порядок объекта,
   // поэтому одна и та же схема разводится одинаково при каждой отрисовке.
   const incoming = new Map();
   for (const mark of shown) {
-    let away = 0;
     for (const id of markControlIds(mark)) {
       const target = here.get(id);
-      if (target) {
-        const spread = incoming.get(id) || 0;
-        incoming.set(id, spread + 1);
-        result.lines.push({
-          fromId: mark.id,
-          toId: id,
-          from: markLinkAnchor(mark),
-          to: markLinkAnchor(target),
-          spread,
-        });
+      if (!target) {
+        noteAway(mark.id, id);
         continue;
       }
-      const other = findMark(project, id);
-      if (other && other.schemeId && other.schemeId !== scheme.id) away += 1;
+      const spread = incoming.get(id) || 0;
+      incoming.set(id, spread + 1);
+      result.lines.push({
+        fromId: mark.id,
+        toId: id,
+        from: markLinkAnchor(mark),
+        to: markLinkAnchor(target),
+        spread,
+      });
     }
-    if (away > 0) {
-      result.offScheme.push({ markId: mark.id, at: markLinkAnchor(mark), count: away });
+  }
+
+  // ——— общее управление ———
+  // Управляющие собираются по подопечному, а сам подопечный при этом не нужен
+  // видимым: выключатель и переключатель остаются одной цепью и тогда, когда
+  // светильник спрятан фильтром или лежит на другом этаже.
+  const byTarget = new Map();
+  for (const mark of project.marks) {
+    for (const id of markControlIds(mark)) {
+      let list = byTarget.get(id);
+      if (!list) byTarget.set(id, (list = []));
+      list.push(mark);
+    }
+  }
+  const tied = new Set();
+  for (const [, controllers] of byTarget) {
+    if (controllers.length < 2) continue;
+    const mine = controllers.filter((mark) => here.has(mark.id));
+    for (const mark of mine) {
+      for (const other of controllers) {
+        if (other.id !== mark.id) noteAway(mark.id, other.id);
+      }
+    }
+    if (mine.length < 2) continue;
+    // Цепочка, а не каждый с каждым: слева направо, сверху вниз.
+    const chain = mine
+      .map((mark) => ({ mark, at: markLinkAnchor(mark) }))
+      .sort((a, b) => a.at.x - b.at.x || a.at.y - b.at.y || (a.mark.id < b.mark.id ? -1 : 1));
+    for (let index = 0; index + 1 < chain.length; index += 1) {
+      const a = chain[index];
+      const b = chain[index + 1];
+      const key = a.mark.id < b.mark.id ? a.mark.id + "|" + b.mark.id : b.mark.id + "|" + a.mark.id;
+      if (tied.has(key)) continue;
+      tied.add(key);
+      result.ties.push({ fromId: a.mark.id, toId: b.mark.id, from: a.at, to: b.at });
+    }
+  }
+
+  // ——— общий номер ———
+  // Группировку считает модель (`repeatedNumbers`): что считать повтором —
+  // правило объекта, а не рисования. Здесь остаётся выбрать своих.
+  for (const repeat of repeatedNumbers(project)) {
+    const mine = repeat.markIds.filter((id) => here.has(id));
+    for (const id of mine) {
+      for (const other of repeat.markIds) {
+        if (other !== id) noteAway(id, other);
+      }
+    }
+    if (mine.length < 2) continue;
+    result.groups.push({
+      key: repeat.typeId + "#" + repeat.number,
+      label: repeat.label,
+      markIds: mine,
+      points: mine.map((id) => markLinkAnchor(here.get(id))),
+    });
+  }
+
+  for (const mark of shown) {
+    const set = away.get(mark.id);
+    if (set && set.size > 0) {
+      result.offScheme.push({ markId: mark.id, at: markLinkAnchor(mark), count: set.size });
     }
   }
   return result;
+}
+
+/**
+ * Выпуклая оболочка набора точек (обход Эндрю). Возвращает вершины по кругу;
+ * при одной точке — её саму, при двух и при лежащих на одной прямой — только
+ * концы. Чистая и вынесенная наружу ради теста: оболочка группы считается по
+ * ней, и ошибка здесь видна только глазами.
+ */
+function convexHull(points) {
+  const list = (points || []).filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (list.length <= 2) return list.slice();
+  const sorted = list.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (source) => {
+    const out = [];
+    for (const point of source) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], point) <= 0) out.pop();
+      out.push(point);
+    }
+    out.pop();
+    return out;
+  };
+  const hull = [...half(sorted), ...half(sorted.slice().reverse())];
+  return hull.length >= 3 ? hull : [sorted[0], sorted[sorted.length - 1]];
+}
+
+/**
+ * Оболочка группы одного номера: выпуклая оболочка её меток, отодвинутая
+ * наружу на `pad` и скруглённая по углам, — замкнутая ломаная в тех же
+ * единицах, что пришли.
+ *
+ * Отодвинутый контур с круглыми углами — это сумма Минковского оболочки с
+ * кругом: у двух меток выходит капсула, у трёх и больше — скруглённый
+ * многоугольник, и в обоих случаях линия обходит знаки, а не режет их.
+ * Считается ломаной, а не дугами холста, ровно затем, чтобы проверяться без
+ * холста.
+ */
+function linkHullOutline(points, pad, options = {}) {
+  const hull = convexHull(points);
+  const radius = Math.max(1, pad);
+  const step = Math.max(2, Math.min(24, Math.round(options.corner || 6)));
+  if (hull.length === 0) return [];
+  if (hull.length === 1) {
+    const out = [];
+    for (let i = 0; i < step * 4; i += 1) {
+      const angle = (i / (step * 4)) * Math.PI * 2;
+      out.push({ x: hull[0].x + Math.cos(angle) * radius, y: hull[0].y + Math.sin(angle) * radius });
+    }
+    return out;
+  }
+  // Обход по кругу; у двух вершин рёбер тоже два — туда и обратно, и из этого
+  // сам собой выходит капсула.
+  const out = [];
+  const count = hull.length;
+  const normals = [];
+  for (let i = 0; i < count; i += 1) {
+    const a = hull[i];
+    const b = hull[(i + 1) % count];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const span = Math.hypot(dx, dy) || 1;
+    // Наружу — вправо от хода обхода: `convexHull` отдаёт вершины по часовой
+    // стрелке в экранных осях (ось Y вниз).
+    normals.push({ x: dy / span, y: -dx / span });
+  }
+  for (let i = 0; i < count; i += 1) {
+    const a = hull[i];
+    const b = hull[(i + 1) % count];
+    const n = normals[i];
+    out.push({ x: a.x + n.x * radius, y: a.y + n.y * radius });
+    out.push({ x: b.x + n.x * radius, y: b.y + n.y * radius });
+    // Угол: дуга радиусом `pad` от нормали этого ребра до нормали следующего.
+    const next = normals[(i + 1) % count];
+    let from = Math.atan2(n.y, n.x);
+    let to = Math.atan2(next.y, next.x);
+    while (to < from) to += Math.PI * 2;
+    const turns = Math.max(1, Math.ceil(((to - from) / (Math.PI / 2)) * step));
+    for (let k = 1; k <= turns; k += 1) {
+      const angle = from + ((to - from) * k) / turns;
+      out.push({ x: b.x + Math.cos(angle) * radius, y: b.y + Math.sin(angle) * radius });
+    }
+  }
+  return out;
 }
 
 // Дуга связи в экранных пикселях: концы отодвинуты от знаков меток, середина
@@ -12072,18 +12378,66 @@ function drawLinkArrow(ctx, at, dx, dy, size) {
 function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   if (!links) return;
   const lines = links.lines || [];
+  const ties = links.ties || [];
+  const groups = links.groups || [];
   const away = links.offScheme || [];
-  if (lines.length === 0 && away.length === 0) return;
+  if (lines.length === 0 && ties.length === 0 && groups.length === 0 && away.length === 0) return;
   const state = renderView(view);
   const pad = markRadius(state) + LINK_GAP_PX;
   const color = options.color || LINK_COLOR;
   ctx.save();
-  ctx.globalAlpha = LINK_ALPHA;
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
-  ctx.lineWidth = LINK_WIDTH;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+
+  // Тождество — в самом низу и без заливки: оболочка обводит свои метки, а не
+  // закрывает то, что под ней.
+  ctx.globalAlpha = LINK_HULL_ALPHA;
+  ctx.lineWidth = LINK_HULL_WIDTH;
+  ctx.setLineDash(LINK_HULL_DASH);
+  for (const group of groups) {
+    const screen = (group.points || []).map((point) => planToScreen(point, scheme, state));
+    const outline = linkHullOutline(screen, markRadius(state) + LINK_HULL_PAD);
+    if (outline.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(outline[0].x, outline[0].y);
+    for (let i = 1; i < outline.length; i += 1) ctx.lineTo(outline[i].x, outline[i].y);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // Равные — прямой с засечками на обоих концах. Ни стрелки, ни точки: у этой
+  // связи нет начала и конца, и любой знак направления был бы враньём.
+  ctx.globalAlpha = LINK_TIE_ALPHA;
+  ctx.lineWidth = LINK_TIE_WIDTH;
+  ctx.setLineDash([]);
+  for (const tie of ties) {
+    const from = planToScreen(tie.from, scheme, state);
+    const to = planToScreen(tie.to, scheme, state);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const span = Math.hypot(dx, dy);
+    if (!(span > 0)) continue;
+    const ux = dx / span;
+    const uy = dy / span;
+    const trim = Math.min(pad, (span - 1) / 2);
+    const a = { x: from.x + ux * trim, y: from.y + uy * trim };
+    const b = { x: to.x - ux * trim, y: to.y - uy * trim };
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    for (const end of [a, b]) {
+      ctx.beginPath();
+      ctx.moveTo(end.x - uy * LINK_TIE_TICK, end.y + ux * LINK_TIE_TICK);
+      ctx.lineTo(end.x + uy * LINK_TIE_TICK, end.y - ux * LINK_TIE_TICK);
+      ctx.stroke();
+    }
+  }
+
+  ctx.globalAlpha = LINK_ALPHA;
+  ctx.lineWidth = LINK_WIDTH;
   ctx.setLineDash([]);
   for (const line of lines) {
     const curve = linkCurve(
@@ -14649,8 +15003,14 @@ function canvasLinksShown(state) {
  * при выделении метки да, пусть показываются её связи, это удобно будет»):
  *
  * - переключатель **включён** — все связи схемы;
- * - переключатель **выключен** — связи выделенной метки, в обе стороны: и чем
- *   управляет она, и кто управляет ею. Ничего не выделено — не рисуется ничего.
+ * - переключатель **выключен** — связи выделенной метки: и чем управляет она,
+ *   и кто управляет ею, и с кем она в одной цепи, и её группа одного номера.
+ *   Ничего не выделено — не рисуется ничего.
+ *
+ * Отсюда же ответ на «три рода под одной кнопкой или у каждого своя»: кнопка
+ * одна. Три кнопки в шапке — приборная панель, а частями паутина выключается
+ * жестом, который у пользователя уже есть: выделил метку — видишь её разбор и
+ * ничего больше.
  *
  * Рисуются они **одинаково**: тот же цвет, та же толщина, тот же прогиб. Вид
  * не должен прыгать на переключении — иначе одна и та же дуга у одной и той же
@@ -14663,7 +15023,7 @@ function canvasLinksShown(state) {
  * тестом, а не глазами.
  */
 function canvasFrameLinks(state, preview, scheme) {
-  const empty = { lines: [], offScheme: [] };
+  const empty = { lines: [], ties: [], groups: [], offScheme: [] };
   if (!scheme) return empty;
   const selected = (state && state.selectedMarkIds) || [];
   const all = canvasLinksShown(state);
@@ -14675,11 +15035,17 @@ function canvasFrameLinks(state, preview, scheme) {
   if (!all) {
     return {
       lines: links.lines.filter(mine),
+      ties: links.ties.filter(mine),
+      // Оболочка показывается целиком или не показывается вовсе: это
+      // тождество, и половина группы — неправда.
+      groups: links.groups.filter((group) => group.markIds.some((id) => focus.has(id))),
       offScheme: links.offScheme.filter((item) => focus.has(item.markId)),
     };
   }
   return {
     lines: [...links.lines.filter((line) => !mine(line)), ...links.lines.filter(mine)],
+    ties: [...links.ties.filter((tie) => !mine(tie)), ...links.ties.filter(mine)],
+    groups: links.groups,
     offScheme: links.offScheme,
   };
 }
@@ -18803,7 +19169,7 @@ function filtersBox(api) {
 }
 
 // src/panels/markControls.js
-// Окно выбора метки: с фильтром по помещению, значком и обозначением — тем же,
+// Окно выбора метки: поиск, фильтр по помещению, значок и обозначение — то же,
 // что на плане. Одно на всю сборку: им выбирают и подчинённые метки для
 // «чем управляет», и метку места для единицы оборудования, и связанные с ней.
 //
@@ -18827,6 +19193,90 @@ function markControlsCandidates(project, excludeId, roomId) {
     }
   }
   return rows;
+}
+
+// По чему ищет строка поиска окна. В строке списка человек видит обозначение,
+// название типа и место — по ним и ищем, добавив код типа (его набирают
+// вместо названия: «В» вместо «выключатель») и две подписи, которые он сам же
+// и писал: расположение словами и обозначение из оригинального проекта.
+//
+// Помещение в запрос намеренно не входит, хотя поиск в шапке по нему ищет:
+// здесь у помещения свой фильтр рядом, и два способа сузить по комнате
+// дрались бы — «Кухня» в поиске при фильтре «Спальная» не нашла бы ничего, и
+// объяснить это было бы нечем.
+function markControlsHaystack(row) {
+  return [
+    row.label,
+    row.type ? row.type.code : "",
+    row.type ? row.type.name : "",
+    row.mark.location,
+    row.mark.original,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+// Буква или цифра — то, что считается серединой слова. Всё остальное
+// (пробел, дефис, точка) — граница: «12» обязано находить «L-12».
+const MARK_SEARCH_LETTER = /[0-9a-zа-яё]/;
+
+// Запрос ловится с начала слова, а не где попало в строке. Правило не
+// украшение: одна буква «В» при поиске серединой строки поднимала весь свет —
+// «с-в-етильник», — а Enter отмечает первую строку, и первой оказывалась не
+// та. С начала слова «В» — это выключатели, «свет» — светильники, «12» —
+// «L-12» из оригинала.
+function markControlsHit(haystack, needle) {
+  let at = haystack.indexOf(needle);
+  while (at >= 0) {
+    if (at === 0 || !MARK_SEARCH_LETTER.test(haystack[at - 1])) return true;
+    at = haystack.indexOf(needle, at + 1);
+  }
+  return false;
+}
+
+// Подходит ли строка под запрос. Пустой запрос подходит всему: поиск сужает
+// список, а не заменяет его.
+function markControlsMatches(row, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!needle) return true;
+  return markControlsHit(markControlsHaystack(row), needle);
+}
+
+// Сколько отмеченных меток не видно в показанных строках. Отдельной функцией,
+// потому что считают это двое: отрисовка списка и щелчок по галочке, а
+// разойдись они — счётчик «Отмечено» соврал бы ровно в тот момент, когда на
+// него и смотрят.
+function markControlsHiddenCount(rows, chosen) {
+  const shown = new Set((Array.isArray(rows) ? rows : []).map((row) => row.mark.id));
+  return [...new Set(Array.isArray(chosen) ? chosen : [])].filter((id) => !shown.has(id)).length;
+}
+
+/**
+ * Что показать в списке окна: помещение и поиск сужают его вместе, а не
+ * отменяют друг друга.
+ *
+ * Отвечает `{rows, elsewhere, hidden}`:
+ * - `rows` — строки списка;
+ * - `elsewhere` — сколько нашлось бы, сними фильтр помещения. Считается
+ *   только когда в помещении пусто: молча пустой список — плохой ответ, а
+ *   «здесь нет, в других — три» окно может и сказать, и предложить;
+ * - `hidden` — сколько уже отмеченных меток сейчас не видно. Отмеченное
+ *   живёт отдельно от списка и при сужении не теряется, но счётчик
+ *   «Отмечено: N» без этого числа выглядел бы соврамши.
+ */
+function markControlsView(project, options = {}) {
+  const exclude = options.exclude || null;
+  const roomId = options.roomId || "";
+  const query = options.query || "";
+  const chosen = Array.isArray(options.chosen) ? options.chosen : [];
+  const rows = markControlsCandidates(project, exclude, roomId).filter((row) => markControlsMatches(row, query));
+  const hidden = markControlsHiddenCount(rows, chosen);
+  const elsewhere =
+    rows.length === 0 && roomId
+      ? markControlsCandidates(project, exclude, "").filter((row) => markControlsMatches(row, query)).length
+      : 0;
+  return { rows, elsewhere, hidden };
 }
 
 /**
@@ -18855,6 +19305,10 @@ function markControlsInitialRoom(project, markId) {
  * Отвечает списком отмеченных меток (в режиме одной — списком из одной) или
  * `null`, если передумали. В режиме одной выбор сразу закрывает окно: лишнее
  * подтверждение там, где выбирают одну строку, только мешает.
+ *
+ * Поиск и фильтр помещения сужают список вместе; отмеченное живёт отдельно от
+ * списка и сужение его не теряет — что из него сейчас не видно, говорит
+ * счётчик под списком.
  */
 function openMarkPicker(project, options = {}) {
   return new Promise((resolve) => {
@@ -18878,8 +19332,36 @@ function openMarkPicker(project, options = {}) {
     // пункта select не примет и останется на «Все помещения».
     rooms.value = options.roomId || "";
 
-    function renderNote() {
-      note.textContent = multiple ? text("controls.chosen", { count: chosen.size }) : "";
+    // Поиск — тем же приёмом, что в окне типа и в окне модели: строка сверху,
+    // стрелка вниз уводит в список. `type: "search"` даёт крестик очистки —
+    // третьего вида окна здесь не заводим.
+    const search = uiEl("input", {
+      class: "ui-input",
+      type: "search",
+      placeholder: strings.controls.search,
+      title: multiple ? strings.controls.searchHint : strings.controls.searchHintOne,
+      on: {
+        input: () => renderList(),
+        keydown: (event) => onSearchKey(event),
+      },
+    });
+
+    // Строки последней отрисовки: Enter и стрелка берут метку отсюда, а не
+    // вычитывают её обратно из разметки.
+    let shownRows = [];
+
+    function renderNote(hidden = markControlsHiddenCount(shownRows, [...chosen])) {
+      if (!multiple) {
+        note.textContent = "";
+        return;
+      }
+      // Счётчик считает всё отмеченное, включая спрятанное сужением, — и
+      // прямо говорит, сколько его спрятано: иначе «Отмечено: 5» над списком
+      // из двух строк читается как ошибка.
+      note.textContent =
+        hidden > 0
+          ? text("controls.chosenHidden", { count: chosen.size, hidden })
+          : text("controls.chosen", { count: chosen.size });
     }
 
     function markLine(row) {
@@ -18895,13 +19377,47 @@ function openMarkPicker(project, options = {}) {
       ];
     }
 
+    // Пустая выдача объясняет себя: «в этом помещении нет, а в других —
+    // столько-то» и кнопка, которая снимает фильтр помещения. Молчаливый
+    // пустой список заставлял бы гадать, кто из двух фильтров виноват.
+    function emptyBox(query, elsewhere) {
+      const others = project.marks.some((item) => item.id !== excludeId);
+      if (!others) return [uiEl("p", { class: "panel__empty", text: strings.controls.empty })];
+      if (elsewhere > 0) {
+        return [
+          uiEl("p", {
+            class: "panel__empty",
+            text: query ? text("controls.foundElsewhere", { count: elsewhere }) : strings.controls.nothingFound,
+          }),
+          uiButton(strings.controls.allRooms, {
+            on: {
+              click: () => {
+                rooms.value = "";
+                renderList();
+                search.focus();
+              },
+            },
+          }),
+        ];
+      }
+      return [
+        uiEl("p", { class: "panel__empty", text: query ? strings.controls.searchEmpty : strings.controls.nothingFound }),
+      ];
+    }
+
     function renderList() {
-      const rows = markControlsCandidates(project, excludeId, rooms.value);
+      const query = search.value;
+      const view = markControlsView(project, {
+        exclude: excludeId,
+        roomId: rooms.value,
+        query,
+        chosen: [...chosen],
+      });
+      const rows = view.rows;
+      shownRows = rows;
+      renderNote(view.hidden);
       if (rows.length === 0) {
-        const others = project.marks.some((item) => item.id !== excludeId);
-        list.replaceChildren(
-          uiEl("p", { class: "panel__empty", text: others ? strings.controls.nothingFound : strings.controls.empty }),
-        );
+        list.replaceChildren(...emptyBox(query.trim(), view.elsewhere));
         return;
       }
       list.replaceChildren(
@@ -18929,8 +19445,82 @@ function openMarkPicker(project, options = {}) {
       );
     }
 
+    // Куда уводит стрелка вниз из поиска и по чему ходят стрелки в списке:
+    // галочка в режиме многих, кнопка строки — в режиме одной.
+    function rowStops() {
+      return [...list.querySelectorAll(".controls-pick__check, .controls-pick__row--one")];
+    }
+
+    /**
+     * Enter в поиске. В соседних окнах он берёт первую строку и закрывает
+     * окно — здесь выбор множественный, и «взять одну и закрыть» потеряло бы
+     * остальные. Поэтому Enter **отмечает первую строку и очищает поиск**:
+     * набрал «Т1» — Enter, «Т2» — Enter, и так весь список, не трогая мышь.
+     * Снять галочку он не может: повторный Enter по уже отмеченной оставляет
+     * её отмеченной — иначе быстрый набор молча снимал бы своё же.
+     *
+     * Пустой поиск Enter не перехватывает: там окно ведёт себя как раньше —
+     * `uiModal` нажимает основное действие, «Сохранить связь». Не нашлось
+     * ничего — Enter не делает ничего: закрывать окно посреди набранного
+     * запроса он не должен.
+     *
+     * В режиме одной метки окно ничем не отличается от соседних, и Enter в
+     * нём тоже берёт первую строку и закрывает окно.
+     */
+    function onSearchKey(event) {
+      if (event.key === "ArrowDown") {
+        const first = rowStops()[0];
+        if (!first) return;
+        event.preventDefault();
+        first.focus();
+        return;
+      }
+      if (event.key !== "Enter" || search.value.trim() === "") return;
+      event.preventDefault();
+      const first = shownRows[0];
+      if (!first) return;
+      if (!multiple) {
+        done([first.mark.id]);
+        return;
+      }
+      chosen.add(first.mark.id);
+      search.value = "";
+      renderList();
+      search.focus();
+    }
+
+    // Стрелки по списку — как в окне модели. Вверх с первой строки возвращает
+    // в поиск: оттуда пришли, туда и уходим.
+    list.addEventListener("keydown", (event) => {
+      // В режиме одной метки Enter по строке обязан её выбрать. Свой он здесь
+      // потому же, почему в соседних окнах: основное действие этого окна —
+      // «Отмена», и `uiModal` нажал бы её раньше, чем браузер превратит Enter
+      // в клик по строке, — выбор терялся бы. В режиме галочек Enter не
+      // перехватывается: там он по-прежнему «Сохранить связь», а ставит и
+      // снимает галочку пробел.
+      if (event.key === "Enter" && !multiple) {
+        const row = event.target;
+        if (!row || !row.classList || !row.classList.contains("controls-pick__row--one")) return;
+        event.preventDefault();
+        row.click();
+        return;
+      }
+      const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+      if (!step) return;
+      const stops = rowStops();
+      const index = stops.indexOf(event.target);
+      if (index < 0) return;
+      event.preventDefault();
+      if (index === 0 && step === -1) {
+        search.focus();
+        search.select();
+        return;
+      }
+      const next = stops[Math.min(stops.length - 1, index + step)];
+      if (next) next.focus();
+    });
+
     renderList();
-    renderNote();
     let modal;
     const done = (value) => {
       modal.close();
@@ -18947,8 +19537,12 @@ function openMarkPicker(project, options = {}) {
     }
     modal = uiModal({
       title: options.title || strings.controls.room,
+      // Поиск стоит первым полем окна — и потому, что так устроены соседние
+      // окна, и потому, что `uiModal` отдаёт фокус первому полю: открылось —
+      // можно набирать.
       body: uiEl("div", { class: "controls-pick" }, [
         options.hint ? uiEl("p", { class: "modal__hint", text: options.hint }) : null,
+        search,
         rooms,
         list,
         note,
@@ -18962,9 +19556,10 @@ function openMarkPicker(project, options = {}) {
 // «Чем управляет» — тот же выбор, только список берётся у самой метки, а
 // фильтр при открытии стоит на её помещении.
 //
-// Уже отмеченные метки из других помещений фильтр с глаз убирает, но не
-// теряет: отмеченное живёт отдельно от списка, счётчик «Отмечено: N» считает
-// их все, и «Сохранить связь» возвращает их вместе с новыми.
+// Уже отмеченные метки из других помещений фильтр и поиск с глаз убирают, но
+// не теряют: отмеченное живёт отдельно от списка, счётчик «Отмечено: N»
+// считает их все и говорит, сколько из них сейчас скрыто, а «Сохранить связь»
+// возвращает их вместе с новыми.
 function openMarkControlsPicker(project, markId) {
   return openMarkPicker(project, {
     title: text("controls.title", { label: labelOf(project, markId) }),
@@ -22309,8 +22904,13 @@ if (typeof document !== "undefined") {
 //
 // Связи («чем управляет») живут в объекте с давних пор, но на плане их до сих
 // пор не было видно: список меток говорил «Управляет: Т1, Т2», а где эти Т1 и
-// Т2 лежат — приходилось искать глазами. Кнопка зажигает на плане дуги от
-// управляющей метки к управляемым.
+// Т2 лежат — приходилось искать глазами. Кнопка зажигает на плане три рода
+// соединений сразу: управление (дуга со стрелкой), общее управление (прямая с
+// засечками между равными) и общий номер (оболочка вокруг группы).
+//
+// **Кнопка одна на все три рода.** Три кнопки в шапке — приборная панель, а
+// история у них одна: «покажи разбор». Выключать паутину частями есть чем и
+// без второй кнопки — выделением (см. `canvas.canvasFrameLinks`).
 //
 // **Выключенная кнопка не значит «связей не видно»**: выделенная метка свои
 // связи показывает и так. Кнопка добавляет к этому все остальные — она про
@@ -22339,7 +22939,8 @@ if (typeof document !== "undefined") {
 function linksNotice(project, scheme, filter) {
   const links = markLinks(project, scheme, filter);
   const away = links.offScheme.reduce((sum, item) => sum + item.count, 0);
-  if (links.lines.length === 0 && away === 0) return strings.links.none;
+  const drawn = links.lines.length + links.ties.length + links.groups.length;
+  if (drawn === 0 && away === 0) return strings.links.none;
   if (away > 0) return text("links.away", { count: away });
   return null;
 }
@@ -22824,6 +23425,7 @@ registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 
 
+
 // Строки замен считает справочник — там же, где их считает уплотнение по
 // одному типу. Второй нумерации в сборке быть не должно: окно обещало бы одно,
 // а команда делала другое.
@@ -22926,6 +23528,43 @@ function marksScrollTop(row, area, align = MARKS_ALIGN_TOP) {
   // Ушла вверх — подводим верх, ушла вниз — низ. И там и там минимально.
   if (row.top < now + head) return top;
   return fit(row.top + row.height + MARKS_SCROLL_GAP - area.clientHeight + foot);
+}
+
+// Отметка в настройках браузера: свёрнут ли блок фильтров. Оснастка рабочего
+// места, а не свойство объекта, — в файл проекта ей не за чем, как отметке
+// линейки и связей. Ключ живёт здесь, а не в общих настройках вида: состояние
+// нужно одной этой панели, наружу в состояние сеанса оно не выносится.
+const MARKS_FILTERS_SETTING = "marksFiltersCollapsed";
+
+/**
+ * Что показывает заголовок блока фильтров.
+ *
+ * Заказчик: «фильтры сделай сворачиваемыми». Свернуть их просто, а вот спрятать
+ * вместе с ними включённый фильтр — значит подложить свинью: метки пропали со
+ * схемы и из списка, а почему — не видно нигде. Поэтому заголовок отвечает на
+ * два вопроса сразу.
+ *
+ * — **Сужен ли список.** `narrowed` поднимает заголовок в акцентный цвет и
+ *   дописывает в подсказку, что метки прячет фильтр. Считает это
+ *   `filtersActive` — та же функция, по которой гаснет кнопка «Показать все»,
+ *   второй такой проверки в сборке быть не должно.
+ *
+ * — **Сколько меток видно.** Счётчик — про список, а не про фильтры, поэтому
+ *   он остаётся на виду и свёрнутым: переехал в строку заголовка, где не стоит
+ *   ни пикселя лишней высоты. Не сужен — там просто число меток на схеме
+ *   («36»), сужен — полное «Показано 12 из 36»: в этот момент важны оба числа.
+ */
+function marksFiltersHead({ collapsed, filter, shown, total }) {
+  const narrowed = filtersActive(filter);
+  const hint = [
+    collapsed ? strings.filters.expand : strings.filters.collapse,
+    narrowed ? strings.filters.narrowed : null,
+  ]
+    .filter(Boolean)
+    .join(". ");
+  let count = "";
+  if (total > 0) count = narrowed ? text("marks.count", { shown, total }) : String(total);
+  return { narrowed, count, hint };
 }
 
 // Кто из предков строки прокручивается. Своего прокручиваемого ящика у списка
@@ -23103,7 +23742,9 @@ function mountMarksPanel(host, api) {
   const { getState, setState, notify } = api;
   const filters = filtersBox(api);
   const list = uiEl("div", { class: "marks" });
-  const count = uiEl("p", { class: "marks__count" });
+  // Счётчик — внутри кнопки заголовка, поэтому строчный: абзацу в кнопке не
+  // место. Та же связка, что у разделов панели: значок числа в заголовке.
+  const count = uiEl("span", { class: "marks__count" });
   // Смыкание номеров — под списком, как просил заказчик: команда про весь
   // объект, а не про открытую схему, и место ей после списка, а не среди
   // фильтров. Уплотнение по одному типу осталось в справочнике.
@@ -23113,11 +23754,24 @@ function mountMarksPanel(host, api) {
     on: { click: () => compactAll() },
   });
   const foot = uiEl("div", { class: "marks__foot" }, [compactButton]);
+  // Заголовок фильтров собран по образцу заголовков разделов панели: галочка,
+  // имя, счётчик справа. Язык у сворачивания в приложении один, и заводить
+  // второй ради блока внутри раздела незачем.
+  const filtersChevron = uiEl("span", { class: "marks__chevron" });
+  const filtersName = uiEl("span", { class: "marks__filtersName", text: strings.filters.title });
+  const filtersTitle = uiEl(
+    "button",
+    { class: "marks__filtersTitle", attrs: { type: "button" }, on: { click: () => flipFilters() } },
+    [filtersChevron, filtersName, count],
+  );
+  const filtersBody = uiEl("div", { class: "marks__filtersBody" }, [filters.node]);
   // Фильтры сверху и кнопка смыкания снизу прилипшие и непрозрачные: они
   // закрывают собой часть списка, и прокрутка обязана это знать — иначе
-  // подведённая строка уезжает под фильтры.
-  const top = uiEl("div", { class: "marks__top" }, [filters.node, count]);
+  // подведённая строка уезжает под фильтры. Свёрнутые фильтры ужимаются до
+  // строки заголовка — ради этого заказчик их сворачивать и просил.
+  const top = uiEl("div", { class: "marks__top" }, [filtersTitle, filtersBody]);
   host.replaceChildren(top, list, foot);
+  let filtersCollapsed = false;
   // Пока курсор стоит в текстовом поле строки, список не пересобирается: иначе
   // буква, набранная в «Расположении», выбрасывала бы фокус после каждой правки.
   // Поле поиска сюда не входит: оно живёт над списком, и набор в нём обязан
@@ -23369,18 +24023,26 @@ function mountMarksPanel(host, api) {
           // свёрнута строка или раскрыта, и куда нажать.
           uiEl("span", { class: "mark-row__toggle" }),
           shapeIcon(view.style.shape, view.style.color, 20),
-          // Код типа стоит там же, где в свёрнутой строке, — на раскрытии
-          // значок и код остаются на месте, меняется только номер: он
-          // становится полем правки.
-          uiEl("span", { class: "mark-row__label", text: view.code }),
-          uiEl("input", {
-            class: "ui-input mark-row__number",
-            type: "number",
-            value: String(view.fields.number),
-            title: strings.marks.number,
-            attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
-            on: { change: (event) => setNumber(mark.id, event.target.value) },
-          }),
+          // Код и номер — одним куском, вплотную. Слова заказчика: «в
+          // развёрнутой карточке метки цифру метки прижми к её букве, а то там
+          // большое расстояние». Раньше поле номера стояло у правого края, и
+          // «Р» с «3» читались как два разных поля, хотя в свёрнутой строке
+          // обозначение слитное — «Р3». Своя обёртка, а не зазор в голове:
+          // ужиматься на длинном коде должна пара целиком, а не голова.
+          uiEl("div", { class: "mark-row__ident" }, [
+            // Код до шестнадцати букв в панель не влезает и жмётся многоточием
+            // — целиком он остаётся в подсказке. Номер при этом не уезжает:
+            // ужимается код, а поле номера своей меры не отдаёт.
+            uiEl("span", { class: "mark-row__label", text: view.code, title: view.code }),
+            uiEl("input", {
+              class: "ui-input mark-row__number",
+              type: "number",
+              value: String(view.fields.number),
+              title: strings.marks.number,
+              attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
+              on: { change: (event) => setNumber(mark.id, event.target.value) },
+            }),
+          ]),
           badge,
           // Название типа — второй строкой головы и приглушённо: по значку тип
           // угадывается не всегда, а в справочнике легко заводятся два похожих.
@@ -23499,12 +24161,30 @@ function mountMarksPanel(host, api) {
     compactButton.disabled = !state.project;
   }
 
+  // Заголовок фильтров: галочка, акцент на суженном списке и счётчик. Что
+  // именно в нём написано, решает `marksFiltersHead` — её и проверяет тест.
+  function syncFilters(state, shown, total) {
+    const head = marksFiltersHead({ collapsed: filtersCollapsed, filter: state.filter, shown, total });
+    filtersBody.hidden = filtersCollapsed;
+    top.classList.toggle("is-collapsed", filtersCollapsed);
+    top.classList.toggle("is-narrowed", head.narrowed);
+    filtersTitle.title = head.hint;
+    filtersTitle.setAttribute("aria-expanded", filtersCollapsed ? "false" : "true");
+    count.textContent = head.count;
+  }
+
+  function flipFilters() {
+    filtersCollapsed = !filtersCollapsed;
+    setSetting(MARKS_FILTERS_SETTING, filtersCollapsed);
+    render();
+  }
+
   function render() {
     pending = false;
     const state = getState();
     syncCompact(state);
     if (!state.project || !state.schemeId) {
-      count.textContent = "";
+      syncFilters(state, 0, 0);
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
       return;
     }
@@ -23514,7 +24194,7 @@ function mountMarksPanel(host, api) {
     // и таблицей, у которых порядок тот же.
     const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
     const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
-    count.textContent = total > 0 ? text("marks.count", { shown: rows.length, total }) : "";
+    syncFilters(state, rows.length, total);
     if (rows.length === 0) {
       list.replaceChildren(
         uiEl("p", { class: "panel__empty", text: total > 0 ? strings.marks.nothingFound : strings.panels.marksEmpty }),
@@ -23570,6 +24250,17 @@ function mountMarksPanel(host, api) {
     render();
   });
   render();
+  // Настройки читаются асинхронно, как у разделов панели: блок стартует
+  // развёрнутым и схлопывается, когда хранилище ответит. Ждать его с пустой
+  // панелью хуже, а по умолчанию фильтры открыты — иначе новый пользователь
+  // ищет, куда делся поиск по списку.
+  Promise.resolve(getSetting(MARKS_FILTERS_SETTING))
+    .then((saved) => {
+      if (saved !== true || filtersCollapsed) return;
+      filtersCollapsed = true;
+      render();
+    })
+    .catch(() => {});
 }
 
 registerPanel(PANEL_IDS.marks, mountMarksPanel);
