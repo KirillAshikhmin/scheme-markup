@@ -197,10 +197,70 @@ function marksScrollBox(node) {
 // оговорки про строку выше видимой части, ни разницы между выделением на
 // схеме и в списке. Куда именно прокрутить, считает `marksScrollTop`, и это
 // единственное место, где её ответ доезжает до экрана.
+// Поводы подвести список к выделенной строке. Их ровно два, и они разной
+// природы: сменилась метка — или сменилось место у той же метки.
+export const MARKS_SCROLL_SELECTION = "selection";
+export const MARKS_SCROLL_MOVED = "moved";
+
+/**
+ * Зачем подводить список к выделенной строке — и надо ли вообще.
+ *
+ * Прокрутка умела один повод: сменилось выделение. Заказчик нашёл дыру: «при
+ * смене типа метки в списке меток она оказывается где-то за видимой областью —
+ * скролль до неё». Список упорядочен по типам, и смена типа уносит строку в
+ * другой его конец; выделение при этом не меняется, и прокрутка молчала.
+ *
+ * Правило шире одного случая: **строка должна остаться на виду, если уехала
+ * она, а не пользователь.** Поэтому переезд считается не по списку поводов
+ * (сменили тип, сменили номер, сомкнули номера, удалили соседа, отменили,
+ * приехала чужая правка из папки) — их не перечислить и легко забыть новый, —
+ * а по самому месту строки в содержимом. Переехала на другое место или
+ * сменила рост — повод есть, чем бы это ни было вызвано.
+ *
+ * `before` и `after` — что было показано и что вышло сейчас:
+ * `{ selection, box }`, где `box` — `{ top, height }` строки внутри
+ * содержимого списка или `null`, если выделенной строки в выдаче нет.
+ * Место меряется от начала содержимого, а не от кромки экрана: прокрутка на
+ * него не влияет, и рука пользователя за переезд не принимается.
+ *
+ * Молчим в двух случаях:
+ *
+ * — **выделения нет** или **строки нет в выдаче** (метка на другой схеме, ушла
+ *   под фильтр — сменили ей помещение при фильтре по помещению). Подводить не
+ *   к чему, а дёрнуть список в никуда — хуже, чем не дёргать;
+ * — **ничего не сменилось**: то же выделение на том же месте. Это и есть
+ *   «пользователь листает сам» — перерисовка списка не повод возвращать его
+ *   к выделенной метке, даже если он отлистал от неё далеко.
+ *
+ * Отдельный случай — **строка вернулась в выдачу**: прежнего места у неё нет
+ * (`before.box` пуст), и это считается переездом. Иначе метка, вышедшая
+ * из-под снятого фильтра, осталась бы за кадром.
+ */
+export function marksScrollNeed(before, after) {
+  if (!after || !after.selection || !after.box) return null;
+  if (!before || after.selection !== before.selection) return MARKS_SCROLL_SELECTION;
+  if (!before.box) return MARKS_SCROLL_MOVED;
+  if (before.box.top !== after.box.top || before.box.height !== after.box.height) return MARKS_SCROLL_MOVED;
+  return null;
+}
+
+// Где строка лежит в содержимом списка и какой она высоты. Меряется от начала
+// содержимого, а не от кромки экрана: прокрутка на это число не влияет —
+// поэтому по нему и видно, что строка переехала сама, а не пользователь
+// отлистал от неё.
+function marksRowBox(node, scroller) {
+  const box = scroller || marksScrollBox(node);
+  if (!box) return null;
+  const row = node.getBoundingClientRect();
+  const frame = box.getBoundingClientRect();
+  // `clientTop` — рамка ящика, она в счёт содержимого не идёт.
+  return { top: row.top - frame.top - box.clientTop + box.scrollTop, height: row.height };
+}
+
 function marksScrollToRow(node, align, chrome) {
   const box = marksScrollBox(node);
   if (!box) return;
-  const row = node.getBoundingClientRect();
+  const place = marksRowBox(node, box);
   const frame = box.getBoundingClientRect();
   // Накладки меряем по месту, а не по числам из стилей: прилипший блок
   // сдвинут отрицательным отступом, у кнопки смыкания свой, и оба меняются
@@ -211,11 +271,8 @@ function marksScrollToRow(node, align, chrome) {
     if (rect.height === 0) return 0;
     return Math.max(0, side === "head" ? rect.bottom - frame.top : frame.bottom - rect.top);
   };
-  // Положение строки в содержимом: от верха видимой части плюс то, что уже
-  // прокручено. `clientTop` — рамка ящика, она в счёт содержимого не идёт.
-  const top = row.top - frame.top - box.clientTop + box.scrollTop;
   box.scrollTop = marksScrollTop(
-    { top, height: row.height },
+    place,
     {
       scrollTop: box.scrollTop,
       clientHeight: box.clientHeight,
@@ -392,6 +449,10 @@ function mountMarksPanel(host, api) {
   // перестраивать список по ходу — ради этого он и набирается.
   let pending = false;
   let shownSelection = "";
+  // Где стояла выделенная строка в прошлую перерисовку. По этому месту и видно,
+  // что она переехала: сменили метке тип — и она ушла к другому концу списка,
+  // а выделение осталось прежним.
+  let shownBox = null;
   // Какая метка выделена кликом по своей же строке. Источник выделения знает
   // только эта панель: наружу, в состояние сеанса, он не выносится — холсту,
   // поиску и предупреждениям до него дела нет, а нужен он ровно одному месту,
@@ -826,16 +887,30 @@ function mountMarksPanel(host, api) {
     list.replaceChildren(
       ...rows.map((row) => markRow(state, row, selected.has(row.mark.id), repeats, controllers)),
     );
-    // Подводим список к выделенной строке только когда выделение сменилось:
-    // иначе прокрутка дралась бы с рукой — пользователь листает список сам, а
-    // тот возвращается к выделенной метке после каждой перерисовки.
+    // Подводим список к выделенной строке по двум поводам: сменилось выделение
+    // или строка переехала сама. Всё остальное — рука пользователя, и трогать
+    // прокрутку нельзя: иначе список возвращался бы к выделенной метке после
+    // каждой перерисовки.
     const selection = state.selectedMarkIds.join(",");
     const current = list.querySelector(".mark-row.is-current");
+    const shown = { selection, box: current ? marksRowBox(current) : null };
+    const need = marksScrollNeed({ selection: shownSelection, box: shownBox }, shown);
     // «Не поднимать» причитается ровно той метке, по строке которой нажали.
-    const align = clickedRow && selection === clickedRow ? MARKS_ALIGN_LEAST : MARKS_ALIGN_TOP;
+    // Переезд же — всегда минимальная прокрутка: выделение не менялось, метка
+    // у пользователя перед глазами и часто под курсором (номер он правит прямо
+    // в строке). Подводить её к верху значило бы двигать список там, где
+    // двигать не просили; задача переезда — вернуть строку на экран, а не
+    // поставить её на новое место.
+    const align =
+      need === MARKS_SCROLL_MOVED
+        ? MARKS_ALIGN_LEAST
+        : clickedRow && selection === clickedRow
+          ? MARKS_ALIGN_LEAST
+          : MARKS_ALIGN_TOP;
     clickedRow = null;
-    if (current && selection !== shownSelection) marksScrollToRow(current, align, { head: top, foot });
+    if (need) marksScrollToRow(current, align, { head: top, foot });
     shownSelection = selection;
+    shownBox = shown.box;
   }
 
   // Отложенная перерисовка: то, что накопилось, пока пользователь печатал.
