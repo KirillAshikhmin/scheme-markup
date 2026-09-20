@@ -11,6 +11,7 @@ import {
   verifyProjectFile,
   crc32,
   projectFileName,
+  WRITER_ENTRY,
   FORMAT_VERSION,
 } from "../src/projectFile.js";
 import {
@@ -676,4 +677,71 @@ test("файл прежней версии без полей размеров ч
   for (const mark of restored.marks) {
     assert.deepEqual(markDimensions(mark), { length: null, width: null, heightAboveFloor: null });
   }
+});
+
+// ——— отметка участника ————————————————————————————————————————————————
+//
+// Кто записал архив, сказано отдельной записью `writer.json`, а не полем в
+// `project.json`: участник — свойство браузера, а не объекта, и ехать вместе с
+// данными ему нельзя. Записи может не быть вовсе.
+
+test("снимок помечен участником, а копия «на память» — нет", async () => {
+  const project = createProject({ name: "Квартира на Ленина" });
+  const member = "0191f2c3-aaaa-7000-8000-000000000001";
+
+  const snapshot = await unpackProject(await packProject(project, new Map(), { member }));
+  assert.equal(snapshot.member, member, "снимок не помечен участником");
+  assert.equal(snapshot.project.id, project.id, "объект от метки не пострадал");
+  assert.equal(JSON.stringify(snapshot.project).includes(member), false, "участник уехал в объект");
+
+  const copy = await unpackProject(await packProject(project, new Map()));
+  assert.equal(copy.member, null, "в копию «на память» попала метка браузера");
+  const entries = await readZip(await packProject(project, new Map()));
+  assert.equal(entries.has(WRITER_ENTRY), false);
+});
+
+test("файл прежней сборки без отметки участника открывается как раньше", async () => {
+  let project = createProject({ name: "Дом Иванова" });
+  const added = addScheme(project, { name: "1 этаж", imageId: "plan", width: 1000, height: 800 });
+  project = added.project;
+  project = addMark(project, {
+    schemeId: added.scheme.id,
+    typeId: project.markTypes[0].id,
+    points: [{ x: 0.3, y: 0.3 }],
+  }).project;
+  const images = new Map([["plan", new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/png" })]]);
+
+  // Архив собран без метки — ровно так, как его писала прежняя сборка.
+  const blob = await packProject(project, images);
+  const loaded = await unpackProject(blob);
+
+  assert.equal(loaded.member, null);
+  assert.deepEqual(loaded.project.marks, project.marks, "метки прежнего файла изменились");
+  assert.equal(loaded.project.schemes.length, 1);
+  assert.equal(loaded.images.size, 1);
+  await verifyProjectFile(blob, project, images);
+});
+
+test("сверка ловит пропавшую и чужую отметку участника", async () => {
+  const project = createProject({ name: "Офис" });
+  const member = "0191f2c3-aaaa-7000-8000-000000000001";
+  const stamped = await packProject(project, new Map(), { member });
+  const plain = await packProject(project, new Map());
+
+  await verifyProjectFile(stamped, project, new Map(), { member });
+  await assert.rejects(
+    () => verifyProjectFile(plain, project, new Map(), { member }),
+    (error) => error.code === "fileCheckFailed",
+    "потерянная метка прошла сверку",
+  );
+  await assert.rejects(
+    () => verifyProjectFile(stamped, project, new Map(), { member: "0191b7d4-bbbb-7000-8000-000000000002" }),
+    (error) => error.code === "fileCheckFailed",
+    "чужая метка прошла сверку",
+  );
+  await assert.rejects(
+    () => verifyProjectFile(stamped, project, new Map()),
+    (error) => error.code === "fileCheckFailed",
+    "лишняя метка прошла сверку",
+  );
 });

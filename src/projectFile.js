@@ -9,6 +9,10 @@ export { FORMAT_VERSION };
 export const PROJECT_ENTRY = "project.json";
 export const SCHEMES_DIR = "schemes/";
 export const README_ENTRY = "README.txt";
+// Кто записал этот архив. Отдельной записью, а не полем в `project.json`:
+// участник — свойство браузера, а не объекта, и ехать вместе с данными ему
+// нельзя. Записи может не быть вовсе — у файлов прежних сборок её нет.
+export const WRITER_ENTRY = "writer.json";
 
 const LOCAL_SIGNATURE = 0x04034b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -445,10 +449,18 @@ export function projectFileName(project, now) {
   return projectFileBase(project) + "-" + fileLocalDay(date) + ".zip";
 }
 
+// Текст writer.json. Формат нарочно скудный: одно поле опознаёт писателя,
+// второе говорит человеку, когда снимок записан.
+function writerJsonText(member, date) {
+  return JSON.stringify({ member: String(member), writtenAt: date.toISOString() }, null, 2) + "\n";
+}
+
 /**
  * Упаковывает объект и планы в один zip.
  * `images` — Map «imageId → Blob» (или ничего, если планов нет); картинки кладутся
  * как есть, без пережатия. `options.onProgress({done, total, name})`.
+ * `options.member` — идентификатор участника; с ним в архив кладётся
+ * `writer.json`, и файл опознаётся своим даже после переименования руками.
  */
 export async function packProject(project, images, options = {}) {
   if (!looksLikeProject(project)) throw fileError("foreignProject");
@@ -462,6 +474,12 @@ export async function packProject(project, images, options = {}) {
     files.push({ name: imageEntryName(id, blob), data: blob, compress: false });
   }
   files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
+  // Отметка участника — только у снимка в общей папке: его и надо узнавать
+  // среди чужих. В копию «на память», которую отдаёт «Сохранить в файл»,
+  // метка браузера не кладётся — эту копию уносят и передают.
+  if (typeof options.member === "string" && options.member) {
+    files.push({ name: WRITER_ENTRY, data: writerJsonText(options.member, date) });
+  }
 
   const blob = await writeZip(files, {
     date,
@@ -472,7 +490,9 @@ export async function packProject(project, images, options = {}) {
   // Файл проекта — единственная настоящая резервная копия объекта. Отдать его,
   // не прочитав обратно, значит узнать о сбое записи в день восстановления,
   // когда восстанавливать будет уже нечего.
-  if (options.verify !== false) await verifyProjectFile(blob, forFile, images, { onProgress });
+  if (options.verify !== false) {
+    await verifyProjectFile(blob, forFile, images, { onProgress, member: options.member });
+  }
   return blob;
 }
 
@@ -514,6 +534,12 @@ export async function verifyProjectFile(blob, project, images, options = {}) {
     throw fileError("fileCheckFailed", { part: PROJECT_ENTRY });
   }
   if (!entries.has(README_ENTRY)) throw fileError("fileCheckFailed", { part: README_ENTRY });
+  // Отметка участника сверяется наравне с остальным: по ней снимок узнают
+  // своим, и молча потерянная метка означала бы, что свой файл приедет как
+  // чужая работа.
+  const member = typeof options.member === "string" && options.member ? options.member : null;
+  if (member && restored.member !== member) throw fileError("fileCheckFailed", { part: WRITER_ENTRY });
+  if (!member && entries.has(WRITER_ENTRY)) throw fileError("fileCheckFailed", { part: WRITER_ENTRY });
 
   const packedNames = [...entries.keys()].filter((name) => name.startsWith(SCHEMES_DIR));
   if (packedNames.length !== expected.length || restored.images.size !== expected.length) {
@@ -599,5 +625,18 @@ function readProjectEntries(entries, onProgress) {
     if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
   }
 
-  return { project, images };
+  // Отметка участника необязательна: у файлов прежних сборок её нет, а битую
+  // читать как «ничей файл» честнее, чем ронять на ней открытие объекта.
+  let member = null;
+  const writer = entries.get(prefix + WRITER_ENTRY);
+  if (writer) {
+    try {
+      const parsed = JSON.parse(decodeText(writer));
+      if (parsed && typeof parsed.member === "string" && parsed.member) member = parsed.member;
+    } catch {
+      member = null;
+    }
+  }
+
+  return { project, images, member };
 }

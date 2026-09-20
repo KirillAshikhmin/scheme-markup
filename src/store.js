@@ -332,6 +332,69 @@ export async function setSetting(key, value) {
   return { ok: written.ok };
 }
 
+// ——— участник ——————————————————————————————————————————————————————————
+//
+// Кто пишет — этот браузер. Идентификатор нужен автосохранению в общую папку:
+// им помечается снимок, и по нему свой файл отличается от файла соседа. Здесь
+// он живёт потому, что это свойство браузера, а не объекта: попади он в
+// `project.json`, он поехал бы вместе с данными — и два человека, открывшие
+// один файл, снова стали бы одним участником.
+export const STORE_MEMBER_KEY = "memberId";
+// Запасная полка для того же идентификатора. Настройки лежат в IndexedDB, а он
+// бывает недоступен (приватное окно, запрет данных сайта) — тогда `setSetting`
+// уходит в память, и после перезагрузки идентификатор был бы новым. Для объекта
+// это не беда, а для имени файла беда: каждая перезагрузка заводила бы в папке
+// пользователя ещё один файл. Одна строка в localStorage дешевле такой беды.
+const STORE_MEMBER_BACKUP = "scheme-markup-member";
+
+let storeMemberCache = null;
+
+function readMemberBackup() {
+  try {
+    if (typeof localStorage === "undefined" || !localStorage) return null;
+    const saved = localStorage.getItem(STORE_MEMBER_BACKUP);
+    return typeof saved === "string" && saved ? saved : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeMemberBackup(id) {
+  try {
+    if (typeof localStorage === "undefined" || !localStorage) return;
+    localStorage.setItem(STORE_MEMBER_BACKUP, id);
+  } catch (error) {
+    /* не сохранилось — идентификатор всё равно живёт в настройках */
+  }
+}
+
+/**
+ * Идентификатор этого браузера: заводится один раз при первой надобности и
+ * дальше не меняется. Один на все вкладки — две вкладки одного человека над
+ * одним объектом это один участник, а не два.
+ */
+export async function storeMemberId() {
+  if (storeMemberCache) return storeMemberCache;
+  const saved = await getSetting(STORE_MEMBER_KEY);
+  if (typeof saved === "string" && saved) {
+    storeMemberCache = saved;
+    writeMemberBackup(saved);
+    return saved;
+  }
+  // Настроек нет — но идентификатор мог уцелеть на запасной полке: чистка
+  // IndexedDB не должна выдавать давнего участника за нового.
+  const id = readMemberBackup() || newStoreId();
+  storeMemberCache = id;
+  await setSetting(STORE_MEMBER_KEY, id);
+  writeMemberBackup(id);
+  return id;
+}
+
+// Только для тестов: следующий вызов `storeMemberId` снова пойдёт в настройки.
+export function storeForgetMember() {
+  storeMemberCache = null;
+}
+
 // ——— место ————————————————————————————————————————————————————————————
 
 export async function estimateSpace() {

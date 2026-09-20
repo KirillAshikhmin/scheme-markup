@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   autosaveAdoptFolder,
+  autosaveMemberId,
   autosaveOwnSnapshots,
   autosavePickFolder,
   autosaveRemoveSnapshots,
@@ -346,5 +347,113 @@ test("прежние файлы объекта видны списком и уд
   assert.ok(folder.files.has(written.name), "удалён текущий снимок");
   assert.ok(folder.files.has("коллега.zip"), "удалён чужой файл");
   assert.ok(folder.files.has("Подделка-" + tag + ".zip"), "удалён файл с чужим объектом внутри");
+  autosaveResetSync();
+});
+
+// ——— свой файл узнаётся по участнику (таск 89) ————————————————————————
+//
+// Прежде признаком своего файла был идентификатор объекта. Он едет вместе с
+// данными: копия профиля, восстановленная база, объект, открытый с заменой, — и
+// двое пишут в один файл, а работа соседа читается как своя и не приезжает
+// вовсе. Теперь признак — идентификатор участника: он живёт в настройках
+// браузера, в объект и в файл проекта не попадает.
+
+// Снимок, записанный соседом: тот же объект и тот же его идентификатор (так
+// бывает после копии профиля), но своя отметка участника.
+async function peerSnapshot(project, schemeId, member) {
+  const withMark = addMark(project, {
+    schemeId,
+    typeId: project.markTypes[1].id,
+    points: [{ x: 0.7, y: 0.7 }],
+  }).project;
+  const peer = { ...withMark, updatedAt: new Date(Date.now() + 60000).toISOString() };
+  const blob = await packProject(peer, new Map(), { member });
+  return { peer, bytes: new Uint8Array(await blob.arrayBuffer()) };
+}
+
+test("тот же объект у соседа — другой файл, и его правка приезжает", async () => {
+  folder.files.clear();
+  autosaveResetSync();
+  const { project, schemeId } = await objectWithPlan("Пентхаус");
+  await autosavePickFolder();
+
+  const mine = await autosaveWrite(project);
+  assert.equal(mine.ok, true, mine.error && mine.error.message);
+  const member = await autosaveMemberId();
+  assert.ok(member, "идентификатор участника не завёлся");
+  assert.equal(mine.name, autosaveSnapshotName(project, member));
+
+  // У соседа тот же объект с тем же идентификатором — и всё же свой файл.
+  const theirMember = "0191b7d4-bbbb-7000-8000-000000000002";
+  const theirName = autosaveSnapshotName(project, theirMember);
+  assert.notEqual(theirName, mine.name, "два участника пишут в один файл");
+
+  const { bytes } = await peerSnapshot(project, schemeId, theirMember);
+  folder.put(theirName, bytes, Date.now() + 5000);
+
+  const result = await autosaveScanExternal(project);
+  assert.ok(result, "правка соседа с тем же идентификатором объекта не замечена");
+  assert.equal(result.file, theirName);
+  assert.equal(result.project.marks.length, project.marks.length + 1, "чужая метка не пришла");
+  autosaveResetSync();
+});
+
+test("свой снимок не приезжает как чужая правка, даже переименованный руками", async () => {
+  folder.files.clear();
+  autosaveResetSync();
+  const { project } = await objectWithPlan("Лофт");
+  await autosavePickFolder();
+  const member = await autosaveMemberId();
+  await autosaveWrite(project);
+
+  // Тот же снимок под именем, которого наши правила не знают.
+  const copy = await packProject(project, new Map(), { member });
+  folder.put("снимок от вторника.zip", new Uint8Array(await copy.arrayBuffer()), Date.now() + 60000);
+
+  const today = deleteMark(project, project.marks[0].id).project;
+  assert.equal(await autosaveScanExternal(today), null, "свой снимок пошёл в слияние");
+  autosaveResetSync();
+});
+
+test("снимок прежней сборки опознан своим, принят предком и назван прежним файлом", async () => {
+  folder.files.clear();
+  autosaveResetSync();
+  const { project } = await objectWithPlan("Дом у озера");
+  await autosavePickFolder();
+  const member = await autosaveMemberId();
+
+  // То, что лежит у пользователя сейчас: имя с хвостом объекта, отметки
+  // участника внутри нет.
+  const legacyName = autosaveSnapshotName(project, null);
+  assert.doesNotMatch(legacyName, /-0191/, "имя прежней сборки собрано неверно");
+  const legacy = await packProject(project, new Map());
+  folder.put(legacyName, new Uint8Array(await legacy.arrayBuffer()), Date.now() - 60000);
+
+  // Открываем папку: прежний снимок узнан своим и стал общим предком.
+  const found = await autosaveAdoptFolder(project);
+  assert.ok(found && found.base, "прежний снимок не опознан своим");
+  assert.equal(found.base.id, project.id);
+  assert.equal(found.name, legacyName);
+  assert.deepEqual(
+    found.stale.map((item) => item.name),
+    [legacyName],
+    "про прежний файл человеку сказать нечего",
+  );
+
+  // Первая же запись заводит файл с новым именем, прежний остаётся лежать.
+  const written = await autosaveWrite(deleteMark(project, project.marks[0].id).project);
+  assert.equal(written.ok, true, written.error && written.error.message);
+  assert.equal(written.name, autosaveSnapshotName(project, member));
+  assert.notEqual(written.name, legacyName);
+  assert.ok(folder.files.has(legacyName), "прежний файл удалён сам");
+
+  // И в слияние он не идёт: иначе вернулась бы удалённая метка.
+  const after = deleteMark(project, project.marks[0].id).project;
+  assert.equal(await autosaveScanExternal(after), null, "прежний снимок пошёл в слияние");
+
+  // Удалить его можно — но только по просьбе.
+  const removed = await autosaveRemoveSnapshots(project, [legacyName]);
+  assert.deepEqual(removed.removed, [legacyName]);
+  assert.ok(folder.files.has(written.name), "удалён текущий снимок");
   autosaveResetSync();
 });

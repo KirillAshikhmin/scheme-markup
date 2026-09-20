@@ -4182,9 +4182,9 @@ const strings = {
       "Объект сам сохраняется в папку «{name}» файлом {file} — после каждой правки, с задержкой. Файл на объект один: он переписывается, а не заводится заново.",
     staleTitle: "Прежние файлы объекта",
     staleText:
-      "Теперь объект пишется в один файл — «{file}», он и обновляется. Прежних файлов этого же объекта в папке: {count}. Они остались от прежних дней или от прежнего имени объекта.",
+      "Теперь объект пишется в один файл — «{file}», он и обновляется. В имя снимка вошла метка этого браузера: так ваш файл не спутается с файлом коллеги, даже если объект у вас общий. Прежних файлов этого же объекта в папке: {count}. Они остались от прежнего имени файла, от прежних дней или от прежнего имени объекта.",
     staleSafe:
-      "Работе они не мешают: за чужую правку эти файлы больше не принимаются и в объект не приезжают. Их можно оставить как копии на память — или удалить, если не нужны.",
+      "Работе они не мешают: за чужую правку эти файлы больше не принимаются и в объект не приезжают, а всё, что в них было, уже в работе. Их можно оставить как копии на память — или удалить, если не нужны.",
     staleKeep: "Оставить",
     staleRemove: "Удалить прежние",
     staleRemoved: "Прежних файлов удалено: {count}",
@@ -8358,6 +8358,69 @@ async function setSetting(key, value) {
   return { ok: written.ok };
 }
 
+// ——— участник ——————————————————————————————————————————————————————————
+//
+// Кто пишет — этот браузер. Идентификатор нужен автосохранению в общую папку:
+// им помечается снимок, и по нему свой файл отличается от файла соседа. Здесь
+// он живёт потому, что это свойство браузера, а не объекта: попади он в
+// `project.json`, он поехал бы вместе с данными — и два человека, открывшие
+// один файл, снова стали бы одним участником.
+const STORE_MEMBER_KEY = "memberId";
+// Запасная полка для того же идентификатора. Настройки лежат в IndexedDB, а он
+// бывает недоступен (приватное окно, запрет данных сайта) — тогда `setSetting`
+// уходит в память, и после перезагрузки идентификатор был бы новым. Для объекта
+// это не беда, а для имени файла беда: каждая перезагрузка заводила бы в папке
+// пользователя ещё один файл. Одна строка в localStorage дешевле такой беды.
+const STORE_MEMBER_BACKUP = "scheme-markup-member";
+
+let storeMemberCache = null;
+
+function readMemberBackup() {
+  try {
+    if (typeof localStorage === "undefined" || !localStorage) return null;
+    const saved = localStorage.getItem(STORE_MEMBER_BACKUP);
+    return typeof saved === "string" && saved ? saved : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeMemberBackup(id) {
+  try {
+    if (typeof localStorage === "undefined" || !localStorage) return;
+    localStorage.setItem(STORE_MEMBER_BACKUP, id);
+  } catch (error) {
+    /* не сохранилось — идентификатор всё равно живёт в настройках */
+  }
+}
+
+/**
+ * Идентификатор этого браузера: заводится один раз при первой надобности и
+ * дальше не меняется. Один на все вкладки — две вкладки одного человека над
+ * одним объектом это один участник, а не два.
+ */
+async function storeMemberId() {
+  if (storeMemberCache) return storeMemberCache;
+  const saved = await getSetting(STORE_MEMBER_KEY);
+  if (typeof saved === "string" && saved) {
+    storeMemberCache = saved;
+    writeMemberBackup(saved);
+    return saved;
+  }
+  // Настроек нет — но идентификатор мог уцелеть на запасной полке: чистка
+  // IndexedDB не должна выдавать давнего участника за нового.
+  const id = readMemberBackup() || newStoreId();
+  storeMemberCache = id;
+  await setSetting(STORE_MEMBER_KEY, id);
+  writeMemberBackup(id);
+  return id;
+}
+
+// Только для тестов: следующий вызов `storeMemberId` снова пойдёт в настройки.
+function storeForgetMember() {
+  storeMemberCache = null;
+}
+
 // ——— место ————————————————————————————————————————————————————————————
 async function estimateSpace() {
   const empty = { usage: null, quota: null, free: null, low: false };
@@ -8379,6 +8442,10 @@ async function estimateSpace() {
 const PROJECT_ENTRY = "project.json";
 const SCHEMES_DIR = "schemes/";
 const README_ENTRY = "README.txt";
+// Кто записал этот архив. Отдельной записью, а не полем в `project.json`:
+// участник — свойство браузера, а не объекта, и ехать вместе с данными ему
+// нельзя. Записи может не быть вовсе — у файлов прежних сборок её нет.
+const WRITER_ENTRY = "writer.json";
 
 const LOCAL_SIGNATURE = 0x04034b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -8814,10 +8881,18 @@ function projectFileName(project, now) {
   return projectFileBase(project) + "-" + fileLocalDay(date) + ".zip";
 }
 
+// Текст writer.json. Формат нарочно скудный: одно поле опознаёт писателя,
+// второе говорит человеку, когда снимок записан.
+function writerJsonText(member, date) {
+  return JSON.stringify({ member: String(member), writtenAt: date.toISOString() }, null, 2) + "\n";
+}
+
 /**
  * Упаковывает объект и планы в один zip.
  * `images` — Map «imageId → Blob» (или ничего, если планов нет); картинки кладутся
  * как есть, без пережатия. `options.onProgress({done, total, name})`.
+ * `options.member` — идентификатор участника; с ним в архив кладётся
+ * `writer.json`, и файл опознаётся своим даже после переименования руками.
  */
 async function packProject(project, images, options = {}) {
   if (!looksLikeProject(project)) throw fileError("foreignProject");
@@ -8831,6 +8906,12 @@ async function packProject(project, images, options = {}) {
     files.push({ name: imageEntryName(id, blob), data: blob, compress: false });
   }
   files.push({ name: README_ENTRY, data: readmeText(forFile, date) });
+  // Отметка участника — только у снимка в общей папке: его и надо узнавать
+  // среди чужих. В копию «на память», которую отдаёт «Сохранить в файл»,
+  // метка браузера не кладётся — эту копию уносят и передают.
+  if (typeof options.member === "string" && options.member) {
+    files.push({ name: WRITER_ENTRY, data: writerJsonText(options.member, date) });
+  }
 
   const blob = await writeZip(files, {
     date,
@@ -8841,7 +8922,9 @@ async function packProject(project, images, options = {}) {
   // Файл проекта — единственная настоящая резервная копия объекта. Отдать его,
   // не прочитав обратно, значит узнать о сбое записи в день восстановления,
   // когда восстанавливать будет уже нечего.
-  if (options.verify !== false) await verifyProjectFile(blob, forFile, images, { onProgress });
+  if (options.verify !== false) {
+    await verifyProjectFile(blob, forFile, images, { onProgress, member: options.member });
+  }
   return blob;
 }
 
@@ -8883,6 +8966,12 @@ async function verifyProjectFile(blob, project, images, options = {}) {
     throw fileError("fileCheckFailed", { part: PROJECT_ENTRY });
   }
   if (!entries.has(README_ENTRY)) throw fileError("fileCheckFailed", { part: README_ENTRY });
+  // Отметка участника сверяется наравне с остальным: по ней снимок узнают
+  // своим, и молча потерянная метка означала бы, что свой файл приедет как
+  // чужая работа.
+  const member = typeof options.member === "string" && options.member ? options.member : null;
+  if (member && restored.member !== member) throw fileError("fileCheckFailed", { part: WRITER_ENTRY });
+  if (!member && entries.has(WRITER_ENTRY)) throw fileError("fileCheckFailed", { part: WRITER_ENTRY });
 
   const packedNames = [...entries.keys()].filter((name) => name.startsWith(SCHEMES_DIR));
   if (packedNames.length !== expected.length || restored.images.size !== expected.length) {
@@ -8968,7 +9057,20 @@ function readProjectEntries(entries, onProgress) {
     if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
   }
 
-  return { project, images };
+  // Отметка участника необязательна: у файлов прежних сборок её нет, а битую
+  // читать как «ничей файл» честнее, чем ронять на ней открытие объекта.
+  let member = null;
+  const writer = entries.get(prefix + WRITER_ENTRY);
+  if (writer) {
+    try {
+      const parsed = JSON.parse(decodeText(writer));
+      if (parsed && typeof parsed.member === "string" && parsed.member) member = parsed.member;
+    } catch {
+      member = null;
+    }
+  }
+
+  return { project, images, member };
 }
 
 // src/merge.js
@@ -9655,6 +9757,10 @@ const AUTOSAVE_WATCH_MS = 5000;
 
 let autosaveHandle = null;
 let autosavePermission = "none"; // none | prompt | granted | denied
+// Идентификатор участника — этого браузера. Читается из настроек один раз за
+// сеанс: имя снимка собирается на каждой записи, а ходить за ним в хранилище
+// каждый раз незачем.
+let autosaveMember = null;
 let autosaveExports = null;
 let autosaveTimer = null;
 let autosaveRunning = false;
@@ -9727,16 +9833,23 @@ async function autosaveCollectImages(project) {
   return images;
 }
 
-// Хвост имени снимка — восемь знаков идентификатора объекта. Идентификатор у
-// каждого браузера свой: файл, пришедший из папки, получает новый при приёмке
-// (`adoptLoadedProject`). Поэтому хвост говорит не «этот объект», а «этот файл
-// писали мы».
-function autosaveTag(project) {
-  return String((project && project.id) || "").replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
+// Восемь знаков идентификатора — хвост, годный для имени файла.
+function autosaveTag(value) {
+  return String(value || "").replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
 }
 
 /**
- * Имя снимка в папке автосохранения: «<объект>-<хвост>.zip», **без даты**.
+ * Идентификатор участника — этого браузера. Заводится при первой надобности и
+ * дальше не меняется; живёт в настройках хранилища, а не в объекте.
+ */
+async function autosaveMemberId() {
+  if (!autosaveMember) autosaveMember = await storeMemberId();
+  return autosaveMember;
+}
+
+/**
+ * Имя снимка в папке автосохранения: «<объект>-<хвост объекта>-<хвост
+ * участника>.zip», **без даты**.
  *
  * Дата тут была бы новым файлом на каждый день: за неделю в папке копилась
  * неделя снимков, и вчерашний приезжал в слияние как чужая работа — возвращал
@@ -9744,27 +9857,57 @@ function autosaveTag(project) {
  * видно по времени файла. Дата живёт в имени ручной выгрузки
  * (`projectFile.projectFileName`): это копия «на память», и там она полезна.
  *
- * Хвост-идентификатор остаётся: два объекта с одинаковым именем (а такие
- * заводятся сами — например, файл, загруженный дважды) иначе писали бы в один
- * файл и затирали друг друга.
+ * Хвостов два, и они про разное. Хвост объекта отвечает «какой объект»: два
+ * объекта с одинаковым именем заводятся сами (файл, загруженный дважды) и без
+ * него писали бы в один файл. Хвост участника отвечает «чья это копия» — он и
+ * есть признак своего файла. Раньше эту роль исполнял хвост объекта, но
+ * идентификатор объекта едет вместе с данными: копия профиля, восстановленная
+ * база, объект, открытый с заменой, — и два браузера писали бы в один файл, а
+ * работа соседа читалась бы как своя и не приезжала вовсе.
+ *
+ * Пока участник не прочитан (до `autosaveRestore`), имя собирается по-старому,
+ * без хвоста участника: так вызов не выдумывает третьего имени файла.
  */
-function autosaveSnapshotName(project) {
+function autosaveSnapshotName(project, member = autosaveMember) {
   const base = projectFileBase(project);
-  const tag = autosaveTag(project);
-  return tag ? base + "-" + tag + ".zip" : base + ".zip";
+  const object = autosaveTag(project && project.id);
+  // Участник — только строка: вторым доводом когда-то шла дата, и молчаливое
+  // «сойдёт за идентификатор» дало бы третье имя файла.
+  const writer = typeof member === "string" ? autosaveTag(member) : "";
+  const tail = [object, writer].filter(Boolean).join("-");
+  return tail ? base + "-" + tail + ".zip" : base + ".zip";
 }
 
 /**
- * Наш ли это файл в папке — по имени, без чтения архива. Хвост-идентификатор
- * стоит в имени снимка последним и стоял в прежних именах с датой, поэтому по
- * нему узнаются разом: сегодняшний снимок, снимки прежних дней и снимок,
- * оставшийся от прежнего имени объекта. Всё это писали мы, и в слияние как
- * чужая работа не идёт ничего из этого.
+ * Наш ли это файл в папке — по имени, без чтения архива. Узнаются разом:
+ * сегодняшний снимок, снимки прежних дней (у них в имени стояла ещё и дата),
+ * снимок от прежнего имени объекта и снимок прежней сборки, помеченный одним
+ * лишь хвостом объекта. Всё это писали мы, и ничего из этого не идёт в слияние
+ * как чужая работа.
+ *
+ * Хвост объекта здесь по-прежнему признак своего: у соседа тот же объект лежит
+ * под своим идентификатором — его выдаёт приёмка файла (`adoptLoadedProject`).
  */
-function autosaveOwnSnapshot(project, name) {
-  const tag = autosaveTag(project);
-  if (!tag || typeof name !== "string") return false;
-  return name.toLowerCase().endsWith("-" + tag + ".zip");
+function autosaveOwnSnapshot(project, name, member = autosaveMember) {
+  if (typeof name !== "string") return false;
+  const lower = name.toLowerCase();
+  const writer = typeof member === "string" ? autosaveTag(member) : "";
+  if (writer && lower.endsWith("-" + writer + ".zip")) return true;
+  const object = autosaveTag(project && project.id);
+  return Boolean(object) && lower.endsWith("-" + object + ".zip");
+}
+
+/**
+ * Наш ли это архив — по тому, что лежит внутри. Отметка участника отвечает
+ * прямо; у файла прежней сборки её нет, и тогда работает прежнее правило —
+ * идентификатор объекта. Чужая отметка перевешивает совпадение объекта: файл с
+ * нашим объектом внутри, но помеченный соседом, — это его работа, и раньше она
+ * молча пропадала.
+ */
+function autosaveOwnArchive(project, loaded, member = autosaveMember) {
+  if (!loaded || !loaded.project) return false;
+  if (loaded.member) return Boolean(member) && loaded.member === member;
+  return Boolean(project && project.id) && loaded.project.id === project.id;
 }
 
 function autosaveVerifyKey(project, images) {
@@ -9808,6 +9951,7 @@ async function autosavePack(project, options = {}) {
   const date = options.date instanceof Date ? options.date : new Date();
   const blob = await packProject(project, images, {
     date,
+    member: options.member,
     onProgress: options.onProgress,
     verify: options.verify,
   });
@@ -9861,6 +10005,10 @@ async function autosaveQueryPermission(handle) {
 // «остыть» — тогда панель покажет кнопку «Разрешить», и второй раз выбирать
 // папку не придётся.
 async function autosaveRestore() {
+  // Имя снимка собирается синхронно (панель показывает его в диалоге), а
+  // участник живёт в хранилище — значит, прочитать его надо до того, как имя
+  // кому-то понадобится. Старт панели ждёт `autosaveRestore`, и это место.
+  await autosaveMemberId();
   autosaveExports = (await getSetting(AUTOSAVE_EXPORT_KEY)) || {};
   if (!autosaveSupported()) return autosaveStatus();
   let handle = null;
@@ -9931,8 +10079,10 @@ async function autosaveWrite(project, options = {}) {
     const date = options.date instanceof Date ? options.date : new Date();
     // Сверку здесь делает не упаковка, а чтение уже записанного файла: так
     // проверка захватывает и запись на диск, а не только сборку в памяти.
-    const packedFile = await autosavePack(project, { ...options, date, verify: false });
-    const name = autosaveSnapshotName(project);
+    // Участник читается до имени файла: сперва «кто пишет», потом «куда».
+    const member = await autosaveMemberId();
+    const packedFile = await autosavePack(project, { ...options, date, member, verify: false });
+    const name = autosaveSnapshotName(project, member);
     const fileHandle = await autosaveHandle.getFileHandle(name, { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(packedFile.blob);
@@ -9943,7 +10093,7 @@ async function autosaveWrite(project, options = {}) {
     if (due) {
       const written =
         typeof fileHandle.getFile === "function" ? await fileHandle.getFile() : packedFile.blob;
-      await verifyProjectFile(written, project, packedFile.images);
+      await verifyProjectFile(written, project, packedFile.images, { member });
       autosaveMarkVerified(project, packedFile.images, date);
     }
     autosaveLastError = null;
@@ -10056,6 +10206,7 @@ async function autosaveOwnEntries(project) {
  */
 async function autosaveOwnSnapshots(project) {
   if (!project || !autosaveReady()) return [];
+  await autosaveMemberId();
   return (await autosaveOwnEntries(project)).map(({ name, at }) => ({ name, at }));
 }
 
@@ -10076,6 +10227,7 @@ async function autosaveOwnSnapshots(project) {
  */
 async function autosaveAdoptFolder(project) {
   if (!project || !autosaveReady()) return null;
+  await autosaveMemberId();
   const own = await autosaveOwnEntries(project);
   if (own.length === 0) return null;
   const current = autosaveSnapshotName(project);
@@ -10093,7 +10245,7 @@ async function autosaveAdoptFolder(project) {
       // Битый снимок — не повод ломать сеанс: просто не с чего брать предка.
       continue;
     }
-    if (!loaded.project || loaded.project.id !== project.id) continue;
+    if (!autosaveOwnArchive(project, loaded)) continue;
     base = loaded.project;
     from = item;
     autosaveBase = base;
@@ -10123,6 +10275,7 @@ async function autosaveRemoveSnapshots(project, names) {
     result.kept = [...(names || [])];
     return result;
   }
+  await autosaveMemberId();
   const wanted = new Set(Array.isArray(names) ? names : []);
   const current = autosaveSnapshotName(project);
   for (const item of await autosaveOwnEntries(project)) {
@@ -10134,7 +10287,7 @@ async function autosaveRemoveSnapshots(project, names) {
       result.kept.push(item.name);
       continue;
     }
-    if (!loaded.project || loaded.project.id !== project.id) {
+    if (!autosaveOwnArchive(project, loaded)) {
       result.kept.push(item.name);
       continue;
     }
@@ -10176,6 +10329,9 @@ async function autosaveScanExternal(project, options = {}) {
   if (!project || !autosaveReady() || autosaveRunning || autosaveWatchBusy) return null;
   autosaveWatchBusy = true;
   try {
+    // Кто мы — до первого решения «своё или чужое»: без участника свой же
+    // снимок выглядел бы чужим и поехал бы в слияние.
+    await autosaveMemberId();
     const since = typeof options.since === "number" ? options.since : autosaveSyncSince;
     for (const entry of await autosaveFolderEntries()) {
       // Свой снимок — и сегодняшний, и оставшийся от прежних дней или от
@@ -10200,9 +10356,9 @@ async function autosaveScanExternal(project, options = {}) {
         continue;
       }
       // Второй рубеж — на случай снимка, переименованного руками: хвоста в
-      // имени уже нет, но идентификатор объекта внутри остался нашим, а свой
-      // у каждого браузера один.
-      if (project.id && loaded.project && loaded.project.id === project.id) continue;
+      // имени уже нет, но отметка участника внутри осталась нашей (а у файла
+      // прежней сборки — идентификатор объекта).
+      if (autosaveOwnArchive(project, loaded)) continue;
       if (!areRelatedProjects(project, loaded.project)) continue;
       const merged = mergeProjects(project, loaded.project, autosaveBase);
       if (!merged.changed) continue;

@@ -9,9 +9,15 @@ import { packProject, projectFileName, unpackProject } from "../src/projectFile.
 import {
   adoptLoadedProject,
   autosaveAgoText,
+  autosaveOwnArchive,
   autosaveOwnSnapshot,
   autosaveSnapshotName,
 } from "../src/autosave.js";
+
+// Хвост идентификатора так, как его берёт `autosave`: восемь знаков.
+function autosaveTagOf(value) {
+  return String(value).replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
+}
 
 function pixels(byte) {
   return new Blob([new Uint8Array([byte, byte + 1, byte + 2, byte + 3])], { type: "image/png" });
@@ -159,21 +165,38 @@ test("картинка, общая для двух схем, остаётся о
   assert.ok(adopted.images.has(ids[0]));
 });
 
-// Снимок в папку автосохранения именуется по объекту и хвосту его
-// идентификатора — без даты. Двух объектов с одним именем достаточно, чтобы
-// один затёр другого, поэтому хвост нужен; дата же заводила бы по файлу на
-// каждый день, и вчерашний снимок приезжал бы как чужая работа.
+// Снимок в папку автосохранения именуется по объекту и двум хвостам — объекта
+// и участника, — без даты. Двух объектов с одним именем достаточно, чтобы один
+// затёр другого, поэтому хвост объекта нужен; хвост участника отвечает на
+// другой вопрос — чья это копия. Дата же заводила бы по файлу на каждый день,
+// и вчерашний снимок приезжал бы как чужая работа.
 test("снимки разных объектов не попадают в один файл", () => {
   const one = createProject({ name: "Квартира на Ленина" });
   const two = createProject({ name: "Квартира на Ленина" });
 
-  const nameOne = autosaveSnapshotName(one);
-  const nameTwo = autosaveSnapshotName(two);
+  const nameOne = autosaveSnapshotName(one, "0191f2c3-aaaa-7000-8000-000000000001");
+  const nameTwo = autosaveSnapshotName(two, "0191f2c3-aaaa-7000-8000-000000000001");
 
   assert.notEqual(one.id, two.id);
   assert.notEqual(nameOne, nameTwo, "одинаковые имена объектов дали один файл");
-  assert.match(nameOne, /^Квартира на Ленина-[0-9a-f]{8}\.zip$/);
-  assert.equal(autosaveSnapshotName(one), nameOne, "имя снимка обязано быть тем же");
+  assert.match(nameOne, /^Квартира на Ленина-[0-9a-f]{8}-0191f2c3\.zip$/);
+  assert.equal(
+    autosaveSnapshotName(one, "0191f2c3-aaaa-7000-8000-000000000001"),
+    nameOne,
+    "имя снимка обязано быть тем же",
+  );
+});
+
+// Один объект у двух участников — два файла: у каждого свой писатель, и это
+// защита от гонки, которой в общей папке помешать нечем.
+test("один и тот же объект у двух участников лежит в разных файлах", () => {
+  const project = createProject({ name: "Квартира на Ленина" });
+  const mine = autosaveSnapshotName(project, "0191f2c3-aaaa-7000-8000-000000000001");
+  const theirs = autosaveSnapshotName(project, "0191b7d4-bbbb-7000-8000-000000000002");
+
+  assert.notEqual(mine, theirs, "два участника пишут в один файл");
+  assert.ok(mine.startsWith("Квартира на Ленина-"), mine);
+  assert.equal(mine.slice(0, mine.length - 13), theirs.slice(0, theirs.length - 13), "хвост объекта разошёлся");
 });
 
 // Имя снимка не зависит от дня: работа неделю — по-прежнему один файл. Дата
@@ -182,31 +205,66 @@ test("имя снимка не двигается со дня на день, а 
   const project = createProject({ name: "Квартира на Ленина" });
   const monday = new Date("2026-09-14T10:00:00.000Z");
   const friday = new Date("2026-09-18T10:00:00.000Z");
+  const member = "0191f2c3-aaaa-7000-8000-000000000001";
 
-  assert.equal(autosaveSnapshotName(project, monday), autosaveSnapshotName(project, friday));
-  assert.doesNotMatch(autosaveSnapshotName(project), /\d{4}-\d{2}-\d{2}/, "дата в имени снимка");
+  assert.equal(autosaveSnapshotName(project, member), autosaveSnapshotName(project, member));
+  assert.doesNotMatch(autosaveSnapshotName(project, member), /\d{4}-\d{2}-\d{2}/, "дата в имени снимка");
+  // Вторым доводом когда-то шла дата: подсунутая по привычке, она не должна
+  // становиться хвостом участника.
+  assert.doesNotMatch(autosaveSnapshotName(project, friday), /sep/i, "дата ушла в хвост участника");
   assert.notEqual(projectFileName(project, monday), projectFileName(project, friday));
   assert.match(projectFileName(project, friday), /-2026-09-18\.zip$/);
 });
 
-// Свой снимок узнаётся по хвосту-идентификатору — под любым именем объекта и с
-// датой в имени, как его писали прежние сборки.
+// Свой снимок узнаётся по хвосту участника, а снимки прежних сборок — по
+// хвосту объекта, под любым именем объекта и с датой в имени.
 test("прежние снимки того же объекта узнаются своими, чужие — нет", () => {
   const project = createProject({ name: "Квартира на Ленина" });
   const stranger = createProject({ name: "Квартира на Ленина" });
-  const tag = autosaveSnapshotName(project).replace(/^.*-([0-9a-f]{8})\.zip$/, "$1");
+  const member = "0191f2c3-aaaa-7000-8000-000000000001";
+  const other = "0191b7d4-bbbb-7000-8000-000000000002";
+  const tag = autosaveTagOf(project.id);
 
-  assert.equal(autosaveOwnSnapshot(project, autosaveSnapshotName(project)), true);
+  assert.equal(autosaveOwnSnapshot(project, autosaveSnapshotName(project, member), member), true);
   assert.equal(
-    autosaveOwnSnapshot(project, "Квартира на Ленина-2026-09-15-" + tag + ".zip"),
+    autosaveOwnSnapshot(project, "Квартира на Ленина-2026-09-15-" + tag + ".zip", member),
     true,
     "снимок прежнего дня не узнан своим",
   );
   assert.equal(
-    autosaveOwnSnapshot(project, "Старое имя объекта-" + tag + ".zip"),
+    autosaveOwnSnapshot(project, "Старое имя объекта-" + tag + ".zip", member),
     true,
-    "снимок прежнего имени объекта не узнан своим",
+    "снимок прежней сборки не узнан своим",
   );
-  assert.equal(autosaveOwnSnapshot(project, autosaveSnapshotName(stranger)), false, "чужой файл принят за свой");
-  assert.equal(autosaveOwnSnapshot(project, "Квартира на Ленина-2026-09-15.zip"), false);
+  assert.equal(
+    autosaveOwnSnapshot(project, "Квартира на Ленина-" + tag + "-0191b7d4.zip", member),
+    false,
+    "файл соседа с нашим объектом внутри принят за свой",
+  );
+  assert.equal(
+    autosaveOwnSnapshot(project, autosaveSnapshotName(stranger, other), member),
+    false,
+    "чужой файл принят за свой",
+  );
+  assert.equal(autosaveOwnSnapshot(project, "Квартира на Ленина-2026-09-15.zip", member), false);
+});
+
+// Чьё содержимое внутри: отметка участника отвечает прямо, у файла прежней
+// сборки её нет — и тогда работает прежнее правило, идентификатор объекта.
+test("своё и чужое внутри архива различается отметкой участника", () => {
+  const project = createProject({ name: "Квартира на Ленина" });
+  const member = "0191f2c3-aaaa-7000-8000-000000000001";
+  const other = "0191b7d4-bbbb-7000-8000-000000000002";
+
+  assert.equal(autosaveOwnArchive(project, { project, member }, member), true);
+  assert.equal(autosaveOwnArchive(project, { project, member: null }, member), true, "прежний снимок не узнан");
+  assert.equal(
+    autosaveOwnArchive(project, { project, member: other }, member),
+    false,
+    "копия профиля выдала работу соседа за свою",
+  );
+  assert.equal(
+    autosaveOwnArchive(project, { project: createProject({ name: "Чужой" }), member: null }, member),
+    false,
+  );
 });
