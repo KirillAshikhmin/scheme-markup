@@ -18,6 +18,7 @@ import {
   addRoom,
   addScheme,
   createProject,
+  extendMarkLine,
   findMark,
   insertMarkPoint,
   insertOutlinePoint,
@@ -28,7 +29,16 @@ import {
   updateMark,
 } from "../src/model.js";
 import { canvasHintText } from "../src/canvas.js";
-import { hitPathHandle, outlineHandles, pathVertexHandles } from "../src/render.js";
+import {
+  hitPathHandle,
+  markRadius,
+  outlineHandles,
+  pathEditHandles,
+  pathExtendHandles,
+  pathInsertHandles,
+  pathVertexHandles,
+  samePathHandle,
+} from "../src/render.js";
 import { strings } from "../src/strings.js";
 
 const LINE = [
@@ -236,4 +246,162 @@ test("в правке контура подсказка своя", () => {
   };
   assert.equal(canvasHintText(state), strings.canvas.hintOutlineEdit);
   assert.notEqual(strings.canvas.hintOutlineEdit, strings.canvas.hintLineEdit);
+});
+
+// ——— таск 92: разбить отрезок и продлить конец ————————————————————————
+//
+// Заказчик: «надо добавить возможность разбивать прямую на несколько сегментов,
+// а так же, если линия не замкнутая, то по концам добавить возможность
+// продлить, добавив ещё точку». Вершину в отрезок двойной клик добавлял и
+// раньше (таск 58) — жеста было не видно; теперь на середине отрезка стоит
+// ручка, а за концами незамкнутой линии — ещё две.
+
+const VIEW = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
+
+test("линия продолжается с конца: вершина дописывается в хвост", () => {
+  const base = scene();
+  const grown = extendMarkLine(base.project, base.markId, "end", { x: 0.8, y: 0.9 }).project;
+  assert.deepEqual(pointsOf(grown, base.markId), [...LINE, { x: 0.8, y: 0.9 }]);
+  // Снимок «до» цел: одна отмена возвращает линию, какой она была.
+  assert.deepEqual(pointsOf(base.project, base.markId), LINE);
+});
+
+// Главная ловушка продолжения: порядок вершин у линии значащий — по первому
+// сегменту уходит подпись, за первую вершину держится стрелка связи. Значит,
+// продолжение с головы обязано дописывать вершину в голову, а не переворачивать
+// линию, чтобы дописать в хвост.
+test("продолжение с начала не переворачивает линию", () => {
+  const base = scene();
+  const grown = extendMarkLine(base.project, base.markId, "start", { x: 0.05, y: 0.1 }).project;
+  assert.deepEqual(pointsOf(grown, base.markId), [{ x: 0.05, y: 0.1 }, ...LINE]);
+  // Хвост остался хвостом, голова — головой: ни одна прежняя вершина местами
+  // не поменялась.
+  const after = pointsOf(grown, base.markId);
+  assert.deepEqual(after.slice(1), LINE);
+  assert.deepEqual(after[after.length - 1], LINE[LINE.length - 1]);
+});
+
+test("замкнутой линии и точке продолжения нет, а конец бывает только двух родов", () => {
+  const ring = scene(LINE, true);
+  assert.throws(() => extendMarkLine(ring.project, ring.markId, "end", { x: 0.1, y: 0.1 }), {
+    code: "extendClosedLine",
+  });
+  const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });
+  const socket = made.project.markTypes.find((type) => type.kind !== "line");
+  const point = addMark(made.project, {
+    schemeId: made.scheme.id,
+    typeId: socket.id,
+    kind: "point",
+    points: [{ x: 0.3, y: 0.3 }],
+  });
+  assert.throws(() => extendMarkLine(point.project, point.mark.id, "end", { x: 0.4, y: 0.4 }), {
+    code: "extendOnlyLine",
+  });
+  const base = scene();
+  assert.throws(() => extendMarkLine(base.project, base.markId, "middle", { x: 0.4, y: 0.4 }), {
+    code: "markEndUnknown",
+  });
+});
+
+test("на каждом отрезке — по ручке, и стоит она ровно на середине", () => {
+  const base = scene();
+  const handles = pathInsertHandles(base.scheme, LINE, VIEW, false);
+  assert.equal(handles.length, LINE.length - 1, "ручек не по отрезку на каждый");
+  assert.deepEqual(
+    handles.map((handle) => handle.index),
+    [0, 1],
+  );
+  const first = handles[0];
+  assert.equal(first.kind, "insert");
+  assert.equal(first.x, ((0.2 + 0.5) / 2) * 1000);
+  assert.equal(first.y, ((0.2 + 0.2) / 2) * 500);
+});
+
+test("у замкнутой линии ручка есть и на замыкающем отрезке", () => {
+  const base = scene(LINE, true);
+  const open = pathInsertHandles(base.scheme, LINE, VIEW, false);
+  const ring = pathInsertHandles(base.scheme, LINE, VIEW, true);
+  assert.equal(ring.length, open.length + 1, "замыкающий отрезок остался без ручки");
+  assert.equal(ring[ring.length - 1].index, LINE.length - 1);
+});
+
+// Ленту по периметру рисуют двумя десятками вершин. Если ручка вставала бы на
+// каждый отрезок, у коротких она села бы прямо на вершины — вместо выбора вышла
+// бы каша из трёх ручек в одной точке. Двойной клик по такому отрезку остаётся.
+test("короткий отрезок ручки середины не получает", () => {
+  const base = scene();
+  const tight = [
+    { x: 0.2, y: 0.2 },
+    { x: 0.205, y: 0.2 },
+    { x: 0.6, y: 0.2 },
+  ];
+  const handles = pathInsertHandles(base.scheme, tight, VIEW, false);
+  assert.deepEqual(
+    handles.map((handle) => handle.index),
+    [1],
+    "ручка села на пятипиксельный отрезок",
+  );
+});
+
+test("ручки продолжения — по одной на каждый конец, и стоят они за концом", () => {
+  const base = scene();
+  const handles = pathExtendHandles(base.scheme, LINE, VIEW, false);
+  assert.equal(handles.length, 2);
+  assert.deepEqual(
+    handles.map((handle) => handle.end),
+    ["start", "end"],
+  );
+  // Номера концов — те, что понадобятся модели: голова и хвост списка.
+  assert.deepEqual(
+    handles.map((handle) => handle.index),
+    [0, LINE.length - 1],
+  );
+  const head = pathVertexHandles(base.scheme, LINE, VIEW)[0];
+  const tail = pathVertexHandles(base.scheme, LINE, VIEW)[LINE.length - 1];
+  // Ручка стоит не на вершине, а за ней: на вершине уже сидит своя, и две в
+  // одной точке означали бы «непонятно, что потащат». Отступ — не меньше того,
+  // каким разведены ручки «+» блока от метки.
+  assert.ok(Math.hypot(handles[0].x - head.x, handles[0].y - head.y) >= markRadius(VIEW));
+  assert.ok(Math.hypot(handles[1].x - tail.x, handles[1].y - tail.y) >= markRadius(VIEW));
+  // Продолжение уходит наружу: от первой вершины влево (линия идёт вправо), от
+  // последней вниз (последний отрезок идёт вниз).
+  assert.ok(handles[0].x < head.x, "ручка начала смотрит внутрь линии");
+  assert.ok(handles[1].y > tail.y, "ручка конца смотрит внутрь линии");
+});
+
+test("замкнутой линии и контуру помещения ручек продолжения не полагается", () => {
+  const base = scene(LINE, true);
+  assert.deepEqual(pathExtendHandles(base.scheme, LINE, VIEW, true), []);
+  // Контур замкнут по своей природе — у него разбивка есть, продолжения нет.
+  const outline = { points: [...LINE, { x: 0.2, y: 0.6 }], closed: true };
+  const handles = pathEditHandles(base.scheme, outline, VIEW);
+  assert.equal(handles.filter((handle) => handle.kind === "extend").length, 0);
+  assert.ok(handles.some((handle) => handle.kind === "insert"), "контур остался без разбивки");
+});
+
+// Ручки стоят близко — вершина, середина соседнего отрезка, конец, — и спор за
+// клик разрешается порядком списка, один раз и в одном месте.
+test("вершины в списке ручек первые: по ним и попадают раньше прочих", () => {
+  const base = scene();
+  const handles = pathEditHandles(base.scheme, { points: LINE, closed: false }, VIEW);
+  const kinds = handles.map((handle) => handle.kind);
+  assert.deepEqual(kinds.slice(0, LINE.length), LINE.map(() => "vertex"));
+  assert.ok(kinds.includes("insert") && kinds.includes("extend"));
+  // Попадание считается по списку: под точкой вершины отвечает вершина.
+  const vertex = handles[0];
+  assert.equal(hitPathHandle(handles, { x: vertex.x, y: vertex.y }).kind, "vertex");
+  const insert = handles.find((handle) => handle.kind === "insert");
+  assert.equal(hitPathHandle(handles, { x: insert.x, y: insert.y }), insert);
+});
+
+test("ручки сравниваются по роду, номеру и концу, а не по ссылке", () => {
+  const base = scene();
+  const first = pathEditHandles(base.scheme, { points: LINE, closed: false }, VIEW);
+  const second = pathEditHandles(base.scheme, { points: LINE, closed: false }, VIEW);
+  // Кадр считает ручки заново, и подсветка обязана пережить пересчёт.
+  assert.ok(samePathHandle(first[0], second[0]));
+  assert.ok(!samePathHandle(first[0], second[1]));
+  const ends = second.filter((handle) => handle.kind === "extend");
+  assert.ok(!samePathHandle(ends[0], ends[1]), "оба конца линии сочлись за одну ручку");
+  assert.ok(!samePathHandle(null, second[0]));
 });

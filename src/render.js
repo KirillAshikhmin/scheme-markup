@@ -100,6 +100,21 @@ const OUTLINE_STYLE = {
 const OUTLINE_HIT_PX = 6;
 // Радиус ручки вершины и ручки «+» на середине стенки.
 const OUTLINE_HANDLE_PX = 6;
+// Ручка на середине отрезка — та, что разбивает его. Меньше вершинной: она
+// подсказка, а не вершина.
+const PATH_INSERT_HANDLE_PX = 6;
+// Короче этого отрезок ручки середины не получает — иначе три ручки сели бы
+// друг на друга.
+const PATH_INSERT_MIN_PX = 34;
+// Ручка продолжения: за концом линии, на длину поводка от него. Отступ берётся
+// тем же правилом, что у ручек «+» блока (`HANDLE_GAP` от размера метки), и не
+// меньше своего минимума: у выделенной метки вокруг вершины нарисован пунктирный
+// ореол, и ручка обязана выйти за него, а он растёт вместе с размером метки.
+const PATH_EXTEND_HANDLE_PX = 7;
+const PATH_EXTEND_GAP_PX = 26;
+// Бледность ручки, на которую не навели. Бледнеет только рисунок ручки — белая
+// подложка остаётся плотной, иначе на толстой линии ручку было бы не разглядеть.
+const PATH_HANDLE_PALE = 0.55;
 const OUTLINE_COLOR_FALLBACK = "#57606a";
 
 // Полуширина узкого прямоугольника в градусах от полюса окружности.
@@ -2863,6 +2878,103 @@ export function pathVertexHandles(scheme, points, view) {
   });
 }
 
+// Ручки середины отрезка: по одной на каждый отрезок, который на экране
+// достаточно длинный, чтобы ручка не села на вершины.
+//
+// Добавить вершину двойным кликом по отрезку можно было и раньше (таск 58) —
+// но об этом жесте на плане ничего не говорило, и заказчик просил «добавить
+// возможность», которая у него уже была. Ручка честнее двойного клика: её
+// видно, и по ней понятно, что будет. Бледная, пока на неё не навели: у ленты
+// по периметру их два десятка, и в полную силу они закрыли бы план.
+export function pathInsertHandles(scheme, points, view, closed) {
+  const state = renderView(view);
+  const list = points || [];
+  if (list.length < 2) return [];
+  const last = closed ? list.length : list.length - 1;
+  const handles = [];
+  for (let index = 0; index < last; index += 1) {
+    const a = planToScreen(list[index], scheme, state);
+    const b = planToScreen(list[(index + 1) % list.length], scheme, state);
+    // Короткий отрезок ручку не получает: она налезла бы на вершины, и вместо
+    // выбора вышла бы каша из трёх ручек в одной точке. Двойной клик по такому
+    // отрезку никуда не делся.
+    if (Math.hypot(b.x - a.x, b.y - a.y) < PATH_INSERT_MIN_PX) continue;
+    handles.push({
+      kind: "insert",
+      index,
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2,
+      r: PATH_INSERT_HANDLE_PX,
+    });
+  }
+  return handles;
+}
+
+// Ручки продолжения — по одной за каждым концом незамкнутой линии. Стоят не на
+// самой вершине, а за ней, по направлению последнего отрезка: на вершине уже
+// сидит своя ручка, и две в одной точке означали бы «непонятно, что потащат».
+//
+// Замкнутой линии и контуру помещения такие ручки не полагаются: у кольца
+// концов нет. Именно поэтому `closed` сюда и передаётся.
+export function pathExtendHandles(scheme, points, view, closed) {
+  const state = renderView(view);
+  const list = points || [];
+  if (closed || list.length < 2) return [];
+  const gap = Math.max(PATH_EXTEND_GAP_PX, markRadius(state) * HANDLE_GAP);
+  const beyond = (from, to, fallback) => {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy);
+    const step = length > 0.001 ? { x: dx / length, y: dy / length } : fallback;
+    return { x: to.x + step.x * gap, y: to.y + step.y * gap };
+  };
+  const head = planToScreen(list[0], scheme, state);
+  const second = planToScreen(list[1], scheme, state);
+  const tailIndex = list.length - 1;
+  const tail = planToScreen(list[tailIndex], scheme, state);
+  const previous = planToScreen(list[tailIndex - 1], scheme, state);
+  const first = beyond(second, head, { x: -1, y: 0 });
+  const lastOne = beyond(previous, tail, { x: 1, y: 0 });
+  return [
+    { kind: "extend", end: "start", index: 0, x: first.x, y: first.y, r: PATH_EXTEND_HANDLE_PX, from: head },
+    {
+      kind: "extend",
+      end: "end",
+      index: tailIndex,
+      x: lastOne.x,
+      y: lastOne.y,
+      r: PATH_EXTEND_HANDLE_PX,
+      from: tail,
+    },
+  ];
+}
+
+/**
+ * Все ручки правимого пути разом и в том порядке, в каком по ним попадают:
+ * вершины важнее середин, середины важнее продолжений.
+ *
+ * Порядок здесь — правило, а не мелочь. Ручки стоят близко (вершина, середина
+ * соседнего отрезка, конец), и спор за клик разрешается один раз и в одном
+ * месте: тем, что вершина в списке первая. Рисование идёт обратным порядком —
+ * см. `drawPathHandles`.
+ */
+export function pathEditHandles(scheme, path, view) {
+  const points = (path && path.points) || [];
+  const closed = Boolean(path && path.closed);
+  return [
+    ...pathVertexHandles(scheme, points, view),
+    ...pathInsertHandles(scheme, points, view, closed),
+    ...pathExtendHandles(scheme, points, view, closed),
+  ];
+}
+
+// Одна ручка равна другой: сравнение по роду, номеру и концу, а не по ссылке, —
+// кадр пересчитывает ручки каждый раз заново.
+export function samePathHandle(a, b) {
+  if (!a || !b) return false;
+  return a.kind === b.kind && a.index === b.index && (a.end || null) === (b.end || null);
+}
+
 // Ручка пути под точкой экрана — по ней холст решает, что потащили.
 export function hitPathHandle(handles, point) {
   for (const handle of handles) {
@@ -3019,19 +3131,82 @@ export function drawOutlines(ctx, { project, scheme, filter, view, mode, selecte
   }
 }
 
-// Рисование ручек пути. Квадрат — вершина, кружок с «+» — вставка: один вид у
-// контура помещения и у ломаной метки.
-export function drawPathHandles(ctx, handles, color) {
-  const tint = color || "#0969da";
-  ctx.save();
+function drawHandleSquare(ctx, handle, tint) {
+  ctx.beginPath();
+  ctx.rect(handle.x - handle.r, handle.y - handle.r, handle.r * 2, handle.r * 2);
   ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
   ctx.strokeStyle = tint;
   ctx.lineWidth = 1.5;
-  for (const handle of handles) {
-    ctx.beginPath();
-    ctx.rect(handle.x - handle.r, handle.y - handle.r, handle.r * 2, handle.r * 2);
-    ctx.fill();
-    ctx.stroke();
+  ctx.fill();
+  ctx.stroke();
+}
+
+// Кружок с «+». Подложка всегда плотная, бледнеет только рисунок: ручка сидит
+// на линии, и полупрозрачная насквозь она сливалась бы с ней.
+function drawHandlePlus(ctx, handle, tint, alpha) {
+  const arm = handle.r * 0.55;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.fill();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = tint;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(handle.x - arm, handle.y);
+  ctx.lineTo(handle.x + arm, handle.y);
+  ctx.moveTo(handle.x, handle.y - arm);
+  ctx.lineTo(handle.x, handle.y + arm);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Рисование ручек пути.
+ *
+ * Квадрат — вершина, кружок с «+» на середине отрезка — разбивка, кружок с «+»
+ * на поводке за концом — продолжение линии.
+ *
+ * **Бледное становится точкой под рукой.** Ручка разбивки нарисована вполсилы,
+ * пока на неё не навели, а под курсором превращается в такой же квадрат, какой
+ * встанет на её место: жест видно, и видно, что будет. Ручек на плане много —
+ * вершины, середины, концы, — и полная сила у всех сразу закрыла бы разметку.
+ *
+ * Порядок обратный порядку попадания (`pathEditHandles`): бледное рисуется
+ * первым, вершины ложатся поверх.
+ */
+export function drawPathHandles(ctx, handles, color, hovered) {
+  const tint = color || "#0969da";
+  const list = handles || [];
+  ctx.save();
+  for (const handle of list) {
+    if (handle.kind === "vertex") continue;
+    const under = samePathHandle(handle, hovered);
+    const alpha = under ? 1 : PATH_HANDLE_PALE;
+    if (handle.kind === "extend" && handle.from) {
+      // Поводок от конца линии к ручке: по нему видно, чей это конец и куда
+      // линия пойдёт.
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = tint;
+      ctx.lineWidth = 1;
+      ctx.moveTo(handle.from.x, handle.from.y);
+      ctx.lineTo(handle.x, handle.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Под рукой ручка показывает будущую вершину — тем же квадратом, каким она
+    // и встанет: жест видно, и видно, что будет.
+    if (under) drawHandleSquare(ctx, { ...handle, r: OUTLINE_HANDLE_PX }, tint);
+    else drawHandlePlus(ctx, handle, tint, alpha);
+  }
+  for (const handle of list) {
+    if (handle.kind !== "vertex") continue;
+    drawHandleSquare(ctx, handle, tint);
   }
   ctx.restore();
 }

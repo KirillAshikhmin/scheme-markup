@@ -659,8 +659,12 @@ function mountFilePanel(host, api) {
 
   // Ctrl+S — привычка, а не сюрприз: браузерное «сохранить страницу» здесь
   // бесполезно. Пока открыт диалог, горячие клавиши молчат.
+  //
+  // Клавиша физическая (`event.code`), как и всё остальное здесь: в русской
+  // раскладке на этой кнопке «ы», и сравнение по `event.key` молчало бы ровно
+  // у тех, кто размечает планы по-русски, — то есть у всех.
   document.addEventListener("keydown", (event) => {
-    if (!(event.ctrlKey || event.metaKey) || event.key !== "s") return;
+    if (!(event.ctrlKey || event.metaKey) || event.code !== "KeyS") return;
     if (uiDialogDepth() > 0) return;
     event.preventDefault();
     saveToFile();

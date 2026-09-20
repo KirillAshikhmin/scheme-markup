@@ -7,8 +7,13 @@
 // пикселей), к двум секундам — уже целый экран.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { canvasPanSpeed, canvasPanVector } from "../src/canvas.js";
 import { planToScreen } from "../src/render.js";
+
+const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
 // Путь за время удержания: скорость умножается на шаг и складывается —
 // так же, как это делают кадры холста.
@@ -80,4 +85,40 @@ test("стрелки листают план, как прокрутка: кам�
   assert.equal(moved("ArrowRight").dy, 0, "горизонтальная стрелка увела вид по вертикали");
   assert.equal(moved("ArrowDown").dx, 0, "вертикальная стрелка увела вид по горизонтали");
   assert.equal(canvasPanVector("KeyA"), null, "холст двигает не своей клавишей");
+});
+
+// ——— таск 92: горячие клавиши и раскладка —————————————————————————————
+//
+// D17: Ctrl+S ловился как `event.key !== "s"` — в русской раскладке на этой
+// кнопке «ы», и сохранение молчало ровно у тех, кто размечает планы по-русски,
+// то есть у всех. Чинится переходом на `event.code`, и чинится один раз: тест
+// сканирует исходники и красит прогон, если буква вернётся хоть где-нибудь.
+//
+// Знаки препинания и имена клавиш (`Enter`, `Escape`, `+`, `-`) по `key`
+// сравнивать можно и нужно: у них раскладки нет. Запрещена ровно буква.
+function sourceFiles(dir) {
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...sourceFiles(full));
+    else if (entry.name.endsWith(".js")) files.push({ name: full, text: readFileSync(full, "utf8") });
+  }
+  return files;
+}
+
+test("клавиша ловится по физической кнопке, а не по букве раскладки", () => {
+  const files = sourceFiles(SRC_DIR);
+  assert.ok(files.length > 10, "исходники не нашлись: " + files.length);
+  const byLetter = /\.key\s*[!=]==\s*"[A-Za-zА-Яа-яЁё]"/g;
+  const found = [];
+  for (const file of files) {
+    for (const match of file.text.matchAll(byLetter)) found.push(file.name + ": " + match[0]);
+  }
+  assert.deepEqual(found, [], "клавиша сравнивается с буквой — в чужой раскладке она промолчит");
+});
+
+test("сохранение в файл висит на физической KeyS", () => {
+  const file = sourceFiles(SRC_DIR).find((item) => item.name.endsWith("panels/file.js"));
+  assert.ok(file, "panels/file.js не нашёлся");
+  assert.match(file.text, /event\.code\s*!==\s*"KeyS"/, "Ctrl+S больше не ловится по коду клавиши");
 });

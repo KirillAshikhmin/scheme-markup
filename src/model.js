@@ -2594,6 +2594,27 @@ export function insertMarkPoint(project, markId, index, point) {
   return updateMark(project, markId, { points });
 }
 
+// Продолжение незамкнутой линии: новая вершина встаёт **за концом**, с любого
+// из двух концов. Отдельная функция, а не `insertMarkPoint`, ровно по одной
+// причине: продолжить линию с начала вставкой «после индекса» можно было бы
+// только перевернув её, а порядок вершин у линии значащий — по первому сегменту
+// уходит подпись, за первую вершину держится стрелка связи. Здесь порядок цел:
+// с начала вершина дописывается в голову списка, с конца — в хвост.
+export const MARK_LINE_ENDS = ["start", "end"];
+
+export function extendMarkLine(project, markId, end, point) {
+  const mark = requireMark(project, markId);
+  if (mark.kind !== "line") throw modelError("extendOnlyLine");
+  // Замкнутой линии расти некуда: у кольца концов нет.
+  if (mark.closed) throw modelError("extendClosedLine");
+  if (!MARK_LINE_ENDS.includes(end)) throw modelError("markEndUnknown");
+  const points = markPointsAt(project, markId);
+  const added = { x: point.x, y: point.y };
+  if (end === "start") points.unshift(added);
+  else points.push(added);
+  return updateMark(project, markId, { points });
+}
+
 export function removeMarkPoint(project, markId, index) {
   const mark = requireMark(project, markId);
   const points = [...mark.points];

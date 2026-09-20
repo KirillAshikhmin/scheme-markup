@@ -28,6 +28,7 @@ import {
   findRoom,
   addSchemeGuide,
   deleteSchemeGuide,
+  extendMarkLine,
   insertMarkPoint,
   insertOutlinePoint,
   moveSchemeGuide,
@@ -70,6 +71,8 @@ import {
   outlineLabelTurn,
   hitOutlineLabelTurn,
   pathVertexHandles,
+  pathEditHandles,
+  samePathHandle,
   hitPathHandle,
   drawPathHandles,
   drawRuler,
@@ -346,6 +349,17 @@ let canvasCursor = null;
 // Серия вставок подряд: `{schemeId, x, y, count}`. Пока вставляют в то же
 // место, каждая следующая копия отступает на шаг — иначе метки лягут стопкой.
 let canvasPasteRun = null;
+// Ручка правимого пути под курсором: по ней бледная ручка разбивки становится
+// точкой. Живёт в кадре, а не в состоянии сеанса: наведение мышью — не то, что
+// стоит гонять через `setState` и подписчиков панелей.
+let canvasHoverHandle = null;
+// Вершина, которую сию минуту поставила ручка: `{id, index, at}`. Нужна ровно
+// для одного — чтобы двойной клик по ручке разбивки не убирал ту вершину,
+// которую сам только что и поставил (первый клик ставит, второй попадает уже
+// по ней). Смотри `canvasDoubleClick`.
+let canvasFreshVertex = null;
+// Столько времени вершина считается «только что поставленной».
+const CANVAS_FRESH_VERTEX_MS = 600;
 
 function canvasNow() {
   const clock = typeof performance === "object" && performance !== null ? performance : null;
@@ -515,7 +529,7 @@ function canvasPaint() {
     selectedIds: state.selectedMarkIds,
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
-    guides: canvasDrag && canvasDrag.kind === "pathVertex" ? canvasDrag.guides : null,
+    guides: canvasDrag && (canvasDrag.kind === "pathVertex" || canvasDrag.kind === "pathAdd") ? canvasDrag.guides : null,
     // Готовый кадр связей, а не `true`: холст считает их из того же
     // промежуточного объекта, что и метки, — иначе дуга отстанет от метки,
     // которую ведут мышью. Выгрузка передаёт сюда `true` и считает сама.
@@ -562,7 +576,7 @@ function canvasPaint() {
   // помещения: обводка по стенам с первого раза не выходит, и ошибка на третьей
   // вершине из десяти правится третьей, а не перерисовкой всего.
   const edited = editable && !canvasDrag ? canvasEditedPath(state, scheme) : null;
-  if (edited) drawPathHandles(canvasCtx, pathVertexHandles(scheme, edited.points, view));
+  if (edited) drawPathHandles(canvasCtx, pathEditHandles(scheme, edited, view), null, canvasHoverHandle);
 
   // Ручки «+» — только у одной выделенной точки: у линии блока не бывает.
   // Ручка поворота подписи — у самой подписи выделенной метки: подпись вдоль
@@ -1222,21 +1236,37 @@ function canvasEditedPath(state, scheme) {
   return shown ? { kind: "outline", id: outline.id, points: outline.points, closed: true } : null;
 }
 
-// Куда сядет вершина, которую тащат. Правка вершины ничем не отличается от
+// Куда сядет вершина, которую ведут мышью. Правка ничем не отличается от
 // рисования: тот же магнит направления и те же направляющие по вершинам этой
-// же ломаной. Опора — соседняя вершина: от неё и считается угол.
-function canvasVertexSnap(path, index, target, free) {
+// же ломаной. Опора — вершина, от которой считается угол; её `draftSnap` берёт
+// последней в списке. Из источников она и правимая вершина исключены: угол
+// меряется от опоры, а сама с собой вершина не выравнивается.
+function canvasPathSnap(path, anchorIndex, skipIndex, target, free) {
   const state = canvasState();
   const scheme = canvasScheme(state);
   const points = path.points || [];
   if (points.length < 2) return { point: target, guides: [] };
-  const anchor = index > 0 ? index - 1 : path.closed ? points.length - 1 : 1;
-  const sources = points.filter((item, at) => at !== index && at !== anchor);
-  const snap = draftSnap([...sources, points[anchor]], target, scheme, canvasViewOf(state), {
+  const anchor = points[anchorIndex] || points[0];
+  const sources = points.filter((item, at) => at !== skipIndex && at !== anchorIndex);
+  const snap = draftSnap([...sources, anchor], target, scheme, canvasViewOf(state), {
     free: Boolean(free),
     planGuides: canvasSchemeGuides(state, scheme),
   });
   return { point: snap.point, guides: snap.guides || [] };
+}
+
+// Опора у правимой вершины — соседняя: `index - 1`, у замкнутой линии для
+// первой — последняя.
+function canvasVertexSnap(path, index, target, free) {
+  const points = path.points || [];
+  const anchor = index > 0 ? index - 1 : path.closed ? points.length - 1 : 1;
+  return canvasPathSnap(path, anchor, index, target, free);
+}
+
+// Опора у новой вершины — та, от которой она растёт: у разбивки начало
+// отрезка, у продолжения сам конец линии. Обе лежат в `drag.index`.
+function canvasAddSnap(drag, target, free) {
+  return canvasPathSnap(drag.path, drag.index, -1, target, free);
 }
 
 // Вход в правку — один жест на оба объекта. Выделение при этом встаёт то же,
@@ -1273,6 +1303,62 @@ function canvasPathVertexRemove(path, index) {
     return;
   }
   canvasRemoveMarkPoint(path.id, index);
+}
+
+/**
+ * Новая вершина от ручки: разбивка отрезка и продолжение линии — одна рука.
+ *
+ * Разница между ними одна: куда вершина встаёт. Разбивка ставит её внутрь, за
+ * `index`-й вершиной, продолжение — за концом, и для начала линии это отдельная
+ * функция модели (`extendMarkLine`), а не вставка «после индекса»: вставкой
+ * продолжить линию с головы можно было бы только перевернув её, а порядок
+ * вершин значащий — по первому сегменту уходит подпись, за первую вершину
+ * держится стрелка связи.
+ */
+function canvasPathAdded(drag, plan) {
+  const path = drag.path;
+  if (drag.end) return extendMarkLine(drag.before, path.id, drag.end, plan).project;
+  return path.kind === "outline"
+    ? insertOutlinePoint(drag.before, path.id, drag.index, plan).project
+    : insertMarkPoint(drag.before, path.id, drag.index, plan).project;
+}
+
+// Где окажется поставленная вершина: разбивка садится сразу за своим отрезком,
+// продолжение — в голову или в хвост списка.
+function canvasAddedIndex(drag) {
+  if (drag.end === "start") return 0;
+  if (drag.end === "end") return (drag.path.points || []).length;
+  return drag.index + 1;
+}
+
+// Нажали ручку или дотащили её — вершина ставится одним шагом истории на весь
+// жест: одна отмена возвращает и постановку, и место, куда её довели.
+function canvasPathAddCommit(drag, plan) {
+  const path = drag.path;
+  try {
+    const after = canvasPathAdded(drag, plan);
+    const label = drag.end
+      ? strings.history.markLineExtend
+      : path.kind === "outline"
+        ? strings.history.outlineVertexAdd
+        : strings.history.markVertexAdd;
+    canvasCommit(drag.before, after, label, {
+      ...(path.kind === "outline" ? { patch: { selectedOutlineId: path.id } } : { selection: [path.id] }),
+    });
+    // Двойной клик по ручке — жест человеческий: первый клик ставит вершину,
+    // второй попадает уже по ней, и без этой отметки он бы её и убрал.
+    canvasFreshVertex = { id: path.id, index: canvasAddedIndex(drag), at: canvasNow() };
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+// Вершина, поставленная только что этой же рукой: двойной клик по ней ничего
+// не убирает.
+function canvasVertexIsFresh(pathId, index) {
+  if (!canvasFreshVertex || canvasFreshVertex.id !== pathId) return false;
+  if (canvasFreshVertex.index !== index) return false;
+  return canvasNow() - canvasFreshVertex.at < CANVAS_FRESH_VERTEX_MS;
 }
 
 function canvasInsertMarkPoint(markId, index, plan) {
@@ -1797,16 +1883,34 @@ function canvasPointerDown(event) {
     return;
   }
 
-  // Вершина правимого пути важнее клика по самому объекту: пока ручки видны,
-  // за вершину тащат её одну, а не всю линию и не весь контур.
+  // Ручки правимого пути важнее клика по самому объекту: пока они видны, за
+  // вершину тащат её одну, а не всю линию и не весь контур. Ручка середины
+  // ставит новую вершину, ручка за концом продолжает линию — и тот и другой
+  // жест работает и нажатием, и перетаскиванием: нажали — вершина встала там,
+  // где ручка, потянули — там, куда довели.
   const editedPath = editable ? canvasEditedPath(state, scheme) : null;
   if (editedPath) {
-    const handle = hitPathHandle(pathVertexHandles(scheme, editedPath.points, view), point);
-    if (handle) {
+    const handle = hitPathHandle(pathEditHandles(scheme, editedPath, view), point);
+    if (handle && handle.kind === "vertex") {
       canvasDrag = {
         kind: "pathVertex",
         path: editedPath,
         index: handle.index,
+        start: point,
+        before: state.project,
+        guides: [],
+        moved: false,
+      };
+      return;
+    }
+    if (handle) {
+      canvasDrag = {
+        kind: "pathAdd",
+        path: editedPath,
+        index: handle.index,
+        end: handle.end || null,
+        // Точка, где вершина встанет без перетаскивания, — под самой ручкой.
+        point: screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
         start: point,
         before: state.project,
         guides: [],
@@ -1946,6 +2050,15 @@ function canvasDragTo(point, free) {
       const snap = canvasVertexSnap(path, canvasDrag.index, { x: origin.x + dx, y: origin.y + dy }, free);
       canvasDrag.guides = snap.guides;
       canvasPreview = canvasPathVertexMove(path, before, canvasDrag.index, snap.point);
+    } else if (canvasDrag.kind === "pathAdd") {
+      // Новая вершина ведётся от места ручки и притягивается ровно так же, как
+      // вершина рисуемой ломаной: разбитый отрезок и продолжение линии ложатся
+      // по тем же ровным углам и по тем же направляющим.
+      const origin = canvasDrag.point;
+      const snap = canvasAddSnap(canvasDrag, { x: origin.x + dx, y: origin.y + dy }, free);
+      canvasDrag.guides = snap.guides;
+      canvasDrag.landing = snap.point;
+      canvasPreview = canvasPathAdded(canvasDrag, snap.point);
     } else if (canvasDrag.kind === "outlineLabel") {
       const outline = findOutline(before, canvasDrag.outlineId);
       // База — там, где подпись видна сейчас: у неподвинутой это середина
@@ -1988,6 +2101,32 @@ function canvasDragTo(point, free) {
   canvasRedraw();
 }
 
+/**
+ * Ручка правимого пути под курсором.
+ *
+ * Вершины сюда не попадают нарочно: они и так нарисованы в полную силу, и
+ * подсвечивать в них нечего. Наведение нужно бледным — ручке разбивки и ручке
+ * продолжения: под рукой первая показывает будущую вершину тем же квадратом,
+ * какой на её месте и встанет.
+ */
+function canvasHoverAt(state, point) {
+  if (canvasDrag || !canvasEditAllowed(state)) return null;
+  const scheme = canvasScheme(state);
+  const path = canvasEditedPath(state, scheme);
+  if (!path) return null;
+  const handle = hitPathHandle(pathEditHandles(scheme, path, canvasViewOf(state)), point);
+  return handle && handle.kind !== "vertex" ? handle : null;
+}
+
+// Перерисовка — только когда ручка под курсором сменилась: ход мыши по плану
+// не должен гонять кадр впустую.
+function canvasHoverUpdate(state, point) {
+  const previous = canvasHoverHandle;
+  canvasHoverHandle = canvasHoverAt(state, point);
+  if (!previous && !canvasHoverHandle) return false;
+  return !samePathHandle(previous, canvasHoverHandle);
+}
+
 function canvasPointerMove(event) {
   if (!canvasNode) return;
   const point = canvasPointOf(event);
@@ -2022,6 +2161,7 @@ function canvasPointerMove(event) {
     canvasDraft.guides = snap.guides || [];
     canvasRedraw();
   }
+  if (canvasHoverUpdate(state, point)) canvasRedraw();
   if (!canvasDrag) return;
   const shift = Math.hypot(point.x - canvasDrag.start.x, point.y - canvasDrag.start.y);
   if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
@@ -2044,7 +2184,7 @@ function canvasPointerMove(event) {
     canvasRedraw();
     return;
   }
-  if (["mark", "label", "outlineLabel", "pathVertex"].includes(canvasDrag.kind)) {
+  if (["mark", "label", "outlineLabel", "pathVertex", "pathAdd"].includes(canvasDrag.kind)) {
     canvasDragTo(point, event.altKey);
     return;
   }
@@ -2080,6 +2220,15 @@ function canvasPointerUp(event) {
     canvasPreview = null;
     if (canvasOnRuler(point)) canvasGuideRemove(drag.guideId);
     else if (drag.moved && after) canvasCommit(drag.before, after, strings.history.guideMove);
+    canvasRedraw();
+    return;
+  }
+  // Ручка новой вершины: жест кончился — вершина встала. Нажали не сдвинув —
+  // под самой ручкой, дотащили — там, куда довели. Шаг истории один на весь
+  // жест, а не два: отмена возвращает линию, какой она была до нажатия.
+  if (drag.kind === "pathAdd") {
+    canvasPreview = null;
+    canvasPathAddCommit(drag, drag.moved && drag.landing ? drag.landing : drag.point);
     canvasRedraw();
     return;
   }
@@ -2170,7 +2319,11 @@ function canvasDoubleClick(event) {
       const handle = hitPathHandle(pathVertexHandles(scheme, edited.points, view), at);
       if (handle) {
         event.preventDefault();
-        canvasPathVertexRemove(edited, handle.index);
+        // Вершина, которую первый клик этого же двойного только что поставил
+        // ручкой, не убирается вторым: жест «ткнуть в ручку дважды» иначе
+        // ставил бы вершину и тут же её снимал, оставляя два шага истории и
+        // ничего на плане.
+        if (!canvasVertexIsFresh(edited.id, handle.index)) canvasPathVertexRemove(edited, handle.index);
         return;
       }
     }
@@ -2388,6 +2541,12 @@ function canvasKeyUp(event) {
 // известной», и копия садилась бы туда, где мыши давно нет.
 function canvasPointerLeave() {
   canvasCursor = null;
+  // Курсора над планом нет — и подсвеченной ручки быть не должно: иначе она
+  // осталась бы гореть на последнем месте, где мышь ушла с холста.
+  if (canvasHoverHandle) {
+    canvasHoverHandle = null;
+    canvasRedraw();
+  }
 }
 
 // Окно увели — зажатые клавиши отпустить некому: своего keyup они уже не
