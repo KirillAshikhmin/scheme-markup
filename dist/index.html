@@ -4659,6 +4659,13 @@ const strings = {
     area: "Что выгружаем",
     areaAll: "Вся схема",
     areaView: "Как вижу на экране",
+    // Пункт про состав архива, а не про область одного листа: «Все схемы»
+    // кладёт и общие листы, и по листу на каждое помещение с контуром.
+    areaRooms: "Все помещения отдельно",
+    areaRoomsNone: "Все помещения отдельно — контуров помещений нет",
+    roomsPlan: "«Все схемы»: листов {total}, из них по помещениям {rooms}",
+    roomsMissing: "Без контура на схеме: {names} — листа по ним не будет",
+    roomsSingle: "«Печать» и «Скачать PNG» дадут общий лист схемы",
     withLegend: "С легендой в углу",
     withRooms: "С контурами помещений",
     // Связи на бумаге — по отметке, и умолчание «нет»: лист остаётся чертежом,
@@ -4684,6 +4691,9 @@ const strings = {
     noImage: "У схемы нет плана",
     labelsOutside: "Не поместились подписи: {names} — подтяните их ближе к меткам",
     schemesDone: "Схем в архиве: {count}",
+    sheetsDone: "Листов в архиве: {total}, из них по помещениям: {rooms}",
+    sheetsProgress: "Лист {done} из {total}",
+    busyTitle: "Собираем архив",
     busy: "Готовим файл…",
     tooBig: "Слишком большая картинка — уменьшите множитель",
     failed: "Не удалось собрать файл",
@@ -18201,6 +18211,32 @@ function exportRoomName(project, roomId) {
   return room ? room.name : "";
 }
 
+/**
+ * Листы помещений одной схемы: по листу на каждую комнату, у которой на этой
+ * схеме нарисован контур. Возвращает `{sheets, missing}`.
+ *
+ * `sheets` — `{roomId, name, area}` в порядке справочника помещений: так листы
+ * в архиве идут тем же порядком, что комнаты в таблице.
+ *
+ * `missing` — имена комнат, у которых **на этой схеме есть метки, а контура
+ * нет**: листа для них не будет, и человеку об этом говорят. Комната, которой
+ * на схеме нет вовсе (спальня на втором этаже, когда выгружается первый), в
+ * `missing` не идёт — иначе список превратился бы в перечень всех комнат
+ * объекта на каждом этаже.
+ */
+function exportRoomSheets(project, scheme, filter) {
+  const sheets = [];
+  const missing = [];
+  if (!project || !scheme) return { sheets, missing };
+  const marked = new Set(visibleMarks(project, scheme, filter || null).map((mark) => mark.roomId).filter(Boolean));
+  for (const room of roomsInOrder(project)) {
+    const area = exportRoomArea(project, scheme, room.id);
+    if (area) sheets.push({ roomId: room.id, name: room.name, area });
+    else if (marked.has(room.id)) missing.push(room.name);
+  }
+  return { sheets, missing };
+}
+
 // ——— поля под подписи ——————————————————————————————————————————————————
 
 // Запас вокруг рамки, чтобы подпись не липла к обрезу (в пикселях плана).
@@ -18657,9 +18693,58 @@ function exportEntryName(value) {
 }
 
 /**
+ * Имя листа в архиве: «01-1 этаж.png» у схемы и «01.01-1 этаж — Кухня.png» у
+ * её помещения. Номер продолжает прежнюю логику общих листов, а точка делает
+ * лист комнаты подлистом своего этажа: в папке загрузок комнаты встают сразу
+ * за своим планом («-» раньше «.» в сортировке) и в порядке справочника.
+ * Два знака у номера комнаты — чтобы десятая не встала перед второй.
+ */
+function exportSheetName(scheme, index, room, at) {
+  const number = String(index + 1).padStart(2, "0");
+  const name = (scheme && scheme.name) || "";
+  if (!room) return number + "-" + exportEntryName(name) + ".png";
+  return number + "." + String(at + 1).padStart(2, "0") + "-" + exportEntryName(name + " — " + room) + ".png";
+}
+
+/**
+ * Сколько листов даст архив и о чём придётся сказать: `{schemes, rooms, total,
+ * missing}`. Считается без рисования — панель показывает это до выгрузки, а
+ * два десятка листов в высоком разрешении человек должен увидеть числом, а не
+ * почувствовать ожиданием.
+ */
+function allSchemesPlan(project, options = {}) {
+  const schemes = schemesInOrder(project);
+  const missing = [];
+  let rooms = 0;
+  if (options.rooms === true) {
+    for (const scheme of schemes) {
+      const plan = exportRoomSheets(project, scheme, options.filter);
+      rooms += plan.sheets.length;
+      for (const name of plan.missing) if (!missing.includes(name)) missing.push(name);
+    }
+  }
+  return { schemes: schemes.length, rooms, total: schemes.length + rooms, missing };
+}
+
+/**
  * Zip с картинками всех схем объекта. `images` — Map «imageId → Blob»
  * (или ImageBitmap). Zip пишется общим `writeZip`: PNG уже сжат, поэтому
  * хранится как есть.
+ *
+ * `options.rooms` — положить рядом с общим листом схемы ещё по листу на
+ * помещение: лист режется по контуру комнаты с полями. Монтажник идёт по
+ * квартире комнатами, и лист на комнату ему полезнее общего плана, где нужное —
+ * четверть листа; связь с квартирой при этом не теряется, потому что общие
+ * листы лежат в том же архиве.
+ *
+ * Множитель у всех листов один — тот, что выбран в диалоге. Подгонять каждую
+ * комнату под свой лист нельзя: листы читают рядом, и тогда два одинаковых
+ * стола на соседних листах были бы разной ширины. Поэтому у маленькой комнаты
+ * не мельче рисунок, а меньше лист.
+ *
+ * Метки в кадре не фильтруются по комнате (`exportRoomArea`): розетка соседней
+ * комнаты, стоящая у той же стены, монтажнику помогает, а «чья она» видно по
+ * её собственной подписи и по заголовку листа.
  */
 async function allSchemesZip(project, images, options = {}) {
   // Форма входа одна — Map «imageId → Blob», как у packProject: разбирать
@@ -18669,13 +18754,25 @@ async function allSchemesZip(project, images, options = {}) {
   const schemes = schemesInOrder(project);
   const files = [];
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const total = allSchemesPlan(project, options).total;
+  let done = 0;
+  const put = (name, data) => {
+    files.push({ name, data, compress: false });
+    done += 1;
+    if (onProgress) onProgress({ done, total, name });
+  };
   for (let index = 0; index < schemes.length; index += 1) {
     const scheme = schemes[index];
     const image = await exportImageOf(map.get(scheme.imageId));
-    const blob = await schemePng(project, scheme, image, { ...options, area: "all" });
-    const name = String(index + 1).padStart(2, "0") + "-" + exportEntryName(scheme.name) + ".png";
-    files.push({ name, data: blob, compress: false });
-    if (onProgress) onProgress({ done: index + 1, total: schemes.length, name });
+    const whole = await schemePng(project, scheme, image, { ...options, area: "all" });
+    put(exportSheetName(scheme, index), whole);
+    if (options.rooms !== true) continue;
+    const { sheets } = exportRoomSheets(project, scheme, options.filter);
+    for (let at = 0; at < sheets.length; at += 1) {
+      const sheet = sheets[at];
+      const page = await schemePng(project, scheme, image, { ...options, area: sheet.area });
+      put(exportSheetName(scheme, index, sheet.name, at), page);
+    }
   }
   return writeZip(files, { compress: false });
 }
@@ -21063,6 +21160,13 @@ function exportViewArea(state, scheme) {
   };
 }
 
+// Выбран ли пункт «все помещения отдельно». Это не область одного листа, а
+// состав архива: у кнопок «Печать» и «Скачать» одного листа он ничего не
+// меняет — им достаётся общий лист схемы, и подсказка об этом говорит прямо.
+function exportByRooms() {
+  return exportChoice.area === "rooms";
+}
+
 // Выбранная область: вся схема, видимое на экране или габариты помещения.
 // Комната без контура на этой схеме области не даёт — лист берётся целиком.
 function exportAreaOf(state, scheme) {
@@ -21359,10 +21463,31 @@ function exportSchemeDialog(api) {
   // Комната, выбранная раньше, могла остаться без контура на этой схеме —
   // тогда лист берётся целиком, а не молча по пустой рамке.
   if (exportAreaRoomId() && !exportRoomArea(state.project, scheme, exportAreaRoomId())) exportChoice.area = "all";
+  // Сколько листов по помещениям даст объект. Ноль — значит, контуров нет
+  // нигде: пункт остаётся в списке, но недоступен и говорит почему. Выбор,
+  // сохранившийся с прошлого объекта, тоже сбрасывается — иначе кнопка «Все
+  // схемы» молча делала бы прежний архив.
+  const roomsPlan = allSchemesPlan(state.project, { rooms: true, filter: state.filter });
+  if (exportChoice.area === "rooms" && roomsPlan.rooms === 0) exportChoice.area = "all";
 
   const refreshHint = () => {
     const size = exportAreaSize(state, scheme);
-    hint.textContent = exportSizeText(size.width, size.height, exportChoice.schemeScale);
+    const line = exportSizeText(size.width, size.height, exportChoice.schemeScale);
+    if (!exportByRooms()) {
+      hint.textContent = line;
+      return;
+    }
+    // Два десятка листов в высоком разрешении человек должен увидеть числом до
+    // того, как нажмёт: счёт готов ещё до открытия окна и рисования не требует.
+    const parts = [
+      text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }),
+      line,
+      strings.exportPanel.roomsSingle,
+    ];
+    if (roomsPlan.missing.length > 0) {
+      parts.push(text("exportPanel.roomsMissing", { names: roomsPlan.missing.join(", ") }));
+    }
+    hint.textContent = parts.join(" · ");
   };
 
   const controls = uiEl("div", { class: "export__controls" }, [
@@ -21372,6 +21497,14 @@ function exportSchemeDialog(api) {
         [
           { value: "all", label: strings.exportPanel.areaAll },
           { value: "view", label: strings.exportPanel.areaView },
+          // Не область, а состав архива: «Все схемы» положит и общие листы, и
+          // по листу на помещение. Пункт стоит здесь, потому что заказчик
+          // искал его здесь: «в раздел Что выгружаем добавь пункт».
+          {
+            value: "rooms",
+            label: roomsPlan.rooms > 0 ? strings.exportPanel.areaRooms : strings.exportPanel.areaRoomsNone,
+            disabled: roomsPlan.rooms === 0,
+          },
           // Помещение режет лист по габаритам контура с полями. Комната без
           // контура на этой схеме остаётся в списке, но недоступна — и строка
           // говорит, почему: искать пропавший вариант хуже, чем прочесть причину.
@@ -21449,23 +21582,52 @@ function exportSchemeDialog(api) {
       on: {
         click: () =>
           guard(async () => {
-            notify(strings.exportPanel.busy, "info");
-            const images = new Map();
-            for (const item of schemesInOrder(state.project)) {
-              if (!item.imageId || images.has(item.imageId)) continue;
-              const blob = await getImage(item.imageId);
-              if (blob) images.set(item.imageId, blob);
-            }
-            const zip = await allSchemesZip(state.project, images, {
-              scale: exportChoice.schemeScale,
-              legend: exportChoice.legend,
-              outlines: exportChoice.outlines,
-              links: exportChoice.links,
-              filter: state.filter,
+            const byRooms = exportByRooms();
+            const plan = allSchemesPlan(state.project, { rooms: byRooms, filter: state.filter });
+            // Два десятка листов рисуются заметно дольше одного, и молчащая
+            // вкладка на этом месте выглядит как зависшая. Строка прогресса —
+            // та же, что у упаковки файла проекта.
+            const line = uiEl("p", { class: "modal__text", text: strings.exportPanel.busy });
+            const busy = uiModal({
+              title: strings.exportPanel.busyTitle,
+              body: line,
+              actions: [],
+              dismissable: false,
             });
-            const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
-            exportDownload(zip, name);
-            notify(text("exportPanel.schemesDone", { count: state.project.schemes.length }), "success");
+            try {
+              const images = new Map();
+              for (const item of schemesInOrder(state.project)) {
+                if (!item.imageId || images.has(item.imageId)) continue;
+                const blob = await getImage(item.imageId);
+                if (blob) images.set(item.imageId, blob);
+              }
+              const zip = await allSchemesZip(state.project, images, {
+                rooms: byRooms,
+                scale: exportChoice.schemeScale,
+                legend: exportChoice.legend,
+                outlines: exportChoice.outlines,
+                links: exportChoice.links,
+                filter: state.filter,
+                onProgress: ({ done, total }) => {
+                  line.textContent = text("exportPanel.sheetsProgress", { done, total });
+                },
+              });
+              const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
+              exportDownload(zip, name);
+              notify(
+                byRooms
+                  ? text("exportPanel.sheetsDone", { total: plan.total, rooms: plan.rooms })
+                  : text("exportPanel.schemesDone", { count: plan.schemes }),
+                "success",
+              );
+              // Комната без контура листа не получила — сказать об этом надо
+              // после выгрузки тоже: подсказку в окне могли и не читать.
+              if (byRooms && plan.missing.length > 0) {
+                notify(text("exportPanel.roomsMissing", { names: plan.missing.join(", ") }), "info");
+              }
+            } finally {
+              busy.close();
+            }
           }),
       },
     }),

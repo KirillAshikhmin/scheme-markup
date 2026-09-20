@@ -6,7 +6,7 @@
 // Своего рисования меток здесь нет и быть не должно.
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
-import { findGroup, findRoom, outlinesInOrder, schemesInOrder } from "./model.js";
+import { findGroup, findRoom, outlinesInOrder, roomsInOrder, schemesInOrder } from "./model.js";
 import { drawScheme, labelBox, markRadius, outlineLabelBox, visibleMarks, visibleOutlines } from "./render.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { tableSections, tableRowCount } from "./tables.js";
@@ -122,6 +122,32 @@ export function exportRoomArea(project, scheme, roomId) {
 export function exportRoomName(project, roomId) {
   const room = roomId ? findRoom(project, roomId) : null;
   return room ? room.name : "";
+}
+
+/**
+ * Листы помещений одной схемы: по листу на каждую комнату, у которой на этой
+ * схеме нарисован контур. Возвращает `{sheets, missing}`.
+ *
+ * `sheets` — `{roomId, name, area}` в порядке справочника помещений: так листы
+ * в архиве идут тем же порядком, что комнаты в таблице.
+ *
+ * `missing` — имена комнат, у которых **на этой схеме есть метки, а контура
+ * нет**: листа для них не будет, и человеку об этом говорят. Комната, которой
+ * на схеме нет вовсе (спальня на втором этаже, когда выгружается первый), в
+ * `missing` не идёт — иначе список превратился бы в перечень всех комнат
+ * объекта на каждом этаже.
+ */
+export function exportRoomSheets(project, scheme, filter) {
+  const sheets = [];
+  const missing = [];
+  if (!project || !scheme) return { sheets, missing };
+  const marked = new Set(visibleMarks(project, scheme, filter || null).map((mark) => mark.roomId).filter(Boolean));
+  for (const room of roomsInOrder(project)) {
+    const area = exportRoomArea(project, scheme, room.id);
+    if (area) sheets.push({ roomId: room.id, name: room.name, area });
+    else if (marked.has(room.id)) missing.push(room.name);
+  }
+  return { sheets, missing };
 }
 
 // ——— поля под подписи ——————————————————————————————————————————————————
@@ -580,9 +606,58 @@ function exportEntryName(value) {
 }
 
 /**
+ * Имя листа в архиве: «01-1 этаж.png» у схемы и «01.01-1 этаж — Кухня.png» у
+ * её помещения. Номер продолжает прежнюю логику общих листов, а точка делает
+ * лист комнаты подлистом своего этажа: в папке загрузок комнаты встают сразу
+ * за своим планом («-» раньше «.» в сортировке) и в порядке справочника.
+ * Два знака у номера комнаты — чтобы десятая не встала перед второй.
+ */
+export function exportSheetName(scheme, index, room, at) {
+  const number = String(index + 1).padStart(2, "0");
+  const name = (scheme && scheme.name) || "";
+  if (!room) return number + "-" + exportEntryName(name) + ".png";
+  return number + "." + String(at + 1).padStart(2, "0") + "-" + exportEntryName(name + " — " + room) + ".png";
+}
+
+/**
+ * Сколько листов даст архив и о чём придётся сказать: `{schemes, rooms, total,
+ * missing}`. Считается без рисования — панель показывает это до выгрузки, а
+ * два десятка листов в высоком разрешении человек должен увидеть числом, а не
+ * почувствовать ожиданием.
+ */
+export function allSchemesPlan(project, options = {}) {
+  const schemes = schemesInOrder(project);
+  const missing = [];
+  let rooms = 0;
+  if (options.rooms === true) {
+    for (const scheme of schemes) {
+      const plan = exportRoomSheets(project, scheme, options.filter);
+      rooms += plan.sheets.length;
+      for (const name of plan.missing) if (!missing.includes(name)) missing.push(name);
+    }
+  }
+  return { schemes: schemes.length, rooms, total: schemes.length + rooms, missing };
+}
+
+/**
  * Zip с картинками всех схем объекта. `images` — Map «imageId → Blob»
  * (или ImageBitmap). Zip пишется общим `writeZip`: PNG уже сжат, поэтому
  * хранится как есть.
+ *
+ * `options.rooms` — положить рядом с общим листом схемы ещё по листу на
+ * помещение: лист режется по контуру комнаты с полями. Монтажник идёт по
+ * квартире комнатами, и лист на комнату ему полезнее общего плана, где нужное —
+ * четверть листа; связь с квартирой при этом не теряется, потому что общие
+ * листы лежат в том же архиве.
+ *
+ * Множитель у всех листов один — тот, что выбран в диалоге. Подгонять каждую
+ * комнату под свой лист нельзя: листы читают рядом, и тогда два одинаковых
+ * стола на соседних листах были бы разной ширины. Поэтому у маленькой комнаты
+ * не мельче рисунок, а меньше лист.
+ *
+ * Метки в кадре не фильтруются по комнате (`exportRoomArea`): розетка соседней
+ * комнаты, стоящая у той же стены, монтажнику помогает, а «чья она» видно по
+ * её собственной подписи и по заголовку листа.
  */
 export async function allSchemesZip(project, images, options = {}) {
   // Форма входа одна — Map «imageId → Blob», как у packProject: разбирать
@@ -592,13 +667,25 @@ export async function allSchemesZip(project, images, options = {}) {
   const schemes = schemesInOrder(project);
   const files = [];
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const total = allSchemesPlan(project, options).total;
+  let done = 0;
+  const put = (name, data) => {
+    files.push({ name, data, compress: false });
+    done += 1;
+    if (onProgress) onProgress({ done, total, name });
+  };
   for (let index = 0; index < schemes.length; index += 1) {
     const scheme = schemes[index];
     const image = await exportImageOf(map.get(scheme.imageId));
-    const blob = await schemePng(project, scheme, image, { ...options, area: "all" });
-    const name = String(index + 1).padStart(2, "0") + "-" + exportEntryName(scheme.name) + ".png";
-    files.push({ name, data: blob, compress: false });
-    if (onProgress) onProgress({ done: index + 1, total: schemes.length, name });
+    const whole = await schemePng(project, scheme, image, { ...options, area: "all" });
+    put(exportSheetName(scheme, index), whole);
+    if (options.rooms !== true) continue;
+    const { sheets } = exportRoomSheets(project, scheme, options.filter);
+    for (let at = 0; at < sheets.length; at += 1) {
+      const sheet = sheets[at];
+      const page = await schemePng(project, scheme, image, { ...options, area: sheet.area });
+      put(exportSheetName(scheme, index, sheet.name, at), page);
+    }
   }
   return writeZip(files, { compress: false });
 }

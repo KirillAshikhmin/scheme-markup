@@ -13,6 +13,7 @@ import { decodePlanImage, releasePlanImage } from "../imagePrep.js";
 import { equipmentTable, linksTable, marksTable, tableRowCount, toCsv, toMarkdown, toTsv, typesTable } from "../tables.js";
 import {
   EXPORT_SCALES,
+  allSchemesPlan,
   allSchemesZip,
   exportCopy,
   exportDownload,
@@ -104,6 +105,13 @@ function exportViewArea(state, scheme) {
     width: (to.x - from.x) * width,
     height: (to.y - from.y) * height,
   };
+}
+
+// Выбран ли пункт «все помещения отдельно». Это не область одного листа, а
+// состав архива: у кнопок «Печать» и «Скачать» одного листа он ничего не
+// меняет — им достаётся общий лист схемы, и подсказка об этом говорит прямо.
+function exportByRooms() {
+  return exportChoice.area === "rooms";
 }
 
 // Выбранная область: вся схема, видимое на экране или габариты помещения.
@@ -402,10 +410,31 @@ function exportSchemeDialog(api) {
   // Комната, выбранная раньше, могла остаться без контура на этой схеме —
   // тогда лист берётся целиком, а не молча по пустой рамке.
   if (exportAreaRoomId() && !exportRoomArea(state.project, scheme, exportAreaRoomId())) exportChoice.area = "all";
+  // Сколько листов по помещениям даст объект. Ноль — значит, контуров нет
+  // нигде: пункт остаётся в списке, но недоступен и говорит почему. Выбор,
+  // сохранившийся с прошлого объекта, тоже сбрасывается — иначе кнопка «Все
+  // схемы» молча делала бы прежний архив.
+  const roomsPlan = allSchemesPlan(state.project, { rooms: true, filter: state.filter });
+  if (exportChoice.area === "rooms" && roomsPlan.rooms === 0) exportChoice.area = "all";
 
   const refreshHint = () => {
     const size = exportAreaSize(state, scheme);
-    hint.textContent = exportSizeText(size.width, size.height, exportChoice.schemeScale);
+    const line = exportSizeText(size.width, size.height, exportChoice.schemeScale);
+    if (!exportByRooms()) {
+      hint.textContent = line;
+      return;
+    }
+    // Два десятка листов в высоком разрешении человек должен увидеть числом до
+    // того, как нажмёт: счёт готов ещё до открытия окна и рисования не требует.
+    const parts = [
+      text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }),
+      line,
+      strings.exportPanel.roomsSingle,
+    ];
+    if (roomsPlan.missing.length > 0) {
+      parts.push(text("exportPanel.roomsMissing", { names: roomsPlan.missing.join(", ") }));
+    }
+    hint.textContent = parts.join(" · ");
   };
 
   const controls = uiEl("div", { class: "export__controls" }, [
@@ -415,6 +444,14 @@ function exportSchemeDialog(api) {
         [
           { value: "all", label: strings.exportPanel.areaAll },
           { value: "view", label: strings.exportPanel.areaView },
+          // Не область, а состав архива: «Все схемы» положит и общие листы, и
+          // по листу на помещение. Пункт стоит здесь, потому что заказчик
+          // искал его здесь: «в раздел Что выгружаем добавь пункт».
+          {
+            value: "rooms",
+            label: roomsPlan.rooms > 0 ? strings.exportPanel.areaRooms : strings.exportPanel.areaRoomsNone,
+            disabled: roomsPlan.rooms === 0,
+          },
           // Помещение режет лист по габаритам контура с полями. Комната без
           // контура на этой схеме остаётся в списке, но недоступна — и строка
           // говорит, почему: искать пропавший вариант хуже, чем прочесть причину.
@@ -492,23 +529,52 @@ function exportSchemeDialog(api) {
       on: {
         click: () =>
           guard(async () => {
-            notify(strings.exportPanel.busy, "info");
-            const images = new Map();
-            for (const item of schemesInOrder(state.project)) {
-              if (!item.imageId || images.has(item.imageId)) continue;
-              const blob = await getImage(item.imageId);
-              if (blob) images.set(item.imageId, blob);
-            }
-            const zip = await allSchemesZip(state.project, images, {
-              scale: exportChoice.schemeScale,
-              legend: exportChoice.legend,
-              outlines: exportChoice.outlines,
-              links: exportChoice.links,
-              filter: state.filter,
+            const byRooms = exportByRooms();
+            const plan = allSchemesPlan(state.project, { rooms: byRooms, filter: state.filter });
+            // Два десятка листов рисуются заметно дольше одного, и молчащая
+            // вкладка на этом месте выглядит как зависшая. Строка прогресса —
+            // та же, что у упаковки файла проекта.
+            const line = uiEl("p", { class: "modal__text", text: strings.exportPanel.busy });
+            const busy = uiModal({
+              title: strings.exportPanel.busyTitle,
+              body: line,
+              actions: [],
+              dismissable: false,
             });
-            const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
-            exportDownload(zip, name);
-            notify(text("exportPanel.schemesDone", { count: state.project.schemes.length }), "success");
+            try {
+              const images = new Map();
+              for (const item of schemesInOrder(state.project)) {
+                if (!item.imageId || images.has(item.imageId)) continue;
+                const blob = await getImage(item.imageId);
+                if (blob) images.set(item.imageId, blob);
+              }
+              const zip = await allSchemesZip(state.project, images, {
+                rooms: byRooms,
+                scale: exportChoice.schemeScale,
+                legend: exportChoice.legend,
+                outlines: exportChoice.outlines,
+                links: exportChoice.links,
+                filter: state.filter,
+                onProgress: ({ done, total }) => {
+                  line.textContent = text("exportPanel.sheetsProgress", { done, total });
+                },
+              });
+              const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
+              exportDownload(zip, name);
+              notify(
+                byRooms
+                  ? text("exportPanel.sheetsDone", { total: plan.total, rooms: plan.rooms })
+                  : text("exportPanel.schemesDone", { count: plan.schemes }),
+                "success",
+              );
+              // Комната без контура листа не получила — сказать об этом надо
+              // после выгрузки тоже: подсказку в окне могли и не читать.
+              if (byRooms && plan.missing.length > 0) {
+                notify(text("exportPanel.roomsMissing", { names: plan.missing.join(", ") }), "info");
+              }
+            } finally {
+              busy.close();
+            }
           }),
       },
     }),
