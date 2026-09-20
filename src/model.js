@@ -1587,6 +1587,107 @@ export function deleteMark(project, markId) {
   return { project: withProject(project, { marks: linked, groups, placements }), deleted: mark };
 }
 
+// ——— копия метки —————————————————————————————————————————————————————
+//
+// Заказчик: «копируем тип и вставляем туда, где курсор». Тип — это минимум;
+// вопрос в том, что ещё переезжает в копию, и отвечает на него сам приём, ради
+// которого копируют: розетку у кровати слева копируют, чтобы поставить такую же
+// справа. У этой пары одинаково не только обозначение — одинаковы «Расположение»
+// («у кровати»), «В оригинале» (обозначение с чертежа заказчика) и высота над
+// полом. Копия без них заставляла бы вписывать всё это заново, и копировать было
+// бы незачем: тип и так ставится кликом.
+//
+// Что в копию **не** переезжает и почему:
+//   — номер: нумерация сквозная, копия — новая метка со следующим номером;
+//   — блок (`groupId`): блок — это соседство на плане, а копия встаёт в другом
+//     месте; пришлось бы тащить за ней и подпись-перечисление;
+//   — смещение, угол и поводок подписи: они про место подписи на плане, а не
+//     про метку, и в новой точке ничего не значат;
+//   — помещение: его проставляет автоматика по контуру в точке вставки, и
+//     чужое помещение из исходной метки было бы враньём про место;
+//   — «Чем управляет»: это утверждение инженера про конкретные светильники, а
+//     не свойство розетки. Копия, которая молча повторяет чужие связи, дорисует
+//     в таблице то, чего никто не говорил.
+export const MARK_COPY_FIELDS = ["location", "original", ...MARK_DIMENSION_FIELDS];
+
+/**
+ * Снимок метки для буфера обмена.
+ *
+ * Именно снимок, а не ссылка: между «скопировать» и «вставить» исходную метку
+ * успевают удалить, сменить ей тип или уйти на другую схему — буфер это
+ * переживает. В снимке лежит форма в долях плана: у точки одна вершина, у
+ * линии — вся ломаная, иначе «такая же линия» получилась бы другой формы.
+ */
+export function markSnapshot(project, markId) {
+  const mark = requireMark(project, markId);
+  const snapshot = {
+    typeId: mark.typeId,
+    kind: mark.kind,
+    points: mark.points.map((point) => ({ x: point.x, y: point.y })),
+    closed: mark.closed === true,
+    location: typeof mark.location === "string" ? mark.location : "",
+    original: typeof mark.original === "string" ? mark.original : "",
+  };
+  // Размеры читаются только через `markDimensions`: у метки из старого объекта
+  // этих полей нет вовсе, и `undefined` в снимке доехал бы до копии.
+  const sizes = markDimensions(mark);
+  for (const field of MARK_DIMENSION_FIELDS) snapshot[field] = sizes[field];
+  return snapshot;
+}
+
+/**
+ * Форма метки, перенесённая так, чтобы первая вершина легла в `point`.
+ *
+ * Сдвиг общий на все вершины и подрезан по краям плана целиком: подрезать
+ * каждую вершину порознь значило бы смять ломаную — лента по периметру комнаты,
+ * вставленная у края, вышла бы другой формы.
+ */
+function markShapeAt(points, point) {
+  const shape = normalizePoints(points);
+  const target = { x: Number(point && point.x), y: Number(point && point.y) };
+  if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) throw modelError("noPoints");
+  const from = shape[0];
+  const xs = shape.map((item) => item.x);
+  const ys = shape.map((item) => item.y);
+  const dx = Math.min(1 - Math.max(...xs), Math.max(-Math.min(...xs), target.x - from.x));
+  const dy = Math.min(1 - Math.max(...ys), Math.max(-Math.min(...ys), target.y - from.y));
+  return shape.map((item) => ({ x: item.x + dx, y: item.y + dy }));
+}
+
+/**
+ * Поставить копию из снимка: та же метка со следующим номером, первая вершина
+ * в точке `point`.
+ *
+ * Схема берётся от вызывающего, а не из снимка: копию ставят и на другой лист.
+ */
+export function pasteMark(project, snapshot, { schemeId, point } = {}) {
+  if (!snapshot || typeof snapshot !== "object") throw modelError("nothingToPaste");
+  requireScheme(project, schemeId);
+  requireType(project, snapshot.typeId);
+  const shape = markShapeAt(snapshot.points, point);
+  const kind = snapshot.kind === "line" ? "line" : "point";
+  const result = addMark(project, {
+    schemeId,
+    typeId: snapshot.typeId,
+    kind,
+    points: shape,
+    // Метка «одна на блок» держит несколько точек одним номером — копия обязана
+    // остаться одной меткой, а не рассыпаться на три самостоятельных.
+    blockMode: kind === "point" && shape.length > 1 ? "single" : undefined,
+  });
+  // Правятся только поля, в которых что-то есть: копия метки без расположения
+  // и размеров обязана получиться такой же, как метка, поставленная кликом.
+  const patch = {};
+  if (kind === "line" && snapshot.closed === true) patch.closed = true;
+  for (const field of MARK_COPY_FIELDS) {
+    const value = snapshot[field];
+    if (value !== null && value !== undefined && value !== "") patch[field] = value;
+  }
+  if (Object.keys(patch).length === 0) return { project: result.project, mark: result.mark };
+  const updated = updateMark(result.project, result.mark.id, patch);
+  return { project: updated.project, mark: updated.mark };
+}
+
 // ——— поиск по объекту ————————————————————————————————————————————————
 //
 // Ищем по всему объекту, а не по открытой схеме: «где Р14» — вопрос про дом,

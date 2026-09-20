@@ -34,6 +34,8 @@ import {
   schemeGuides,
   labelOf,
   linkedMarkIds,
+  markSnapshot,
+  pasteMark,
   moveMarkPoint,
   moveOutlinePoint,
   removeMarkPoint,
@@ -245,10 +247,20 @@ export function canvasHintText(state) {
   const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
   if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
   const adding = canvasAddKind(state);
-  if (adding === "point" && type) return text("canvas.hintPoint", { label: type.code + " — " + type.name });
+  if (adding === "point" && type) {
+    return canvasHintCopy(text("canvas.hintPoint", { label: type.code + " — " + type.name }));
+  }
   if (adding === "line" && type) return strings.canvas.hintLine;
-  if (type) return strings.canvas.hintSelectMode;
-  return strings.canvas.hintSelect;
+  if (type) return canvasHintCopy(strings.canvas.hintSelectMode);
+  return canvasHintCopy(strings.canvas.hintSelect);
+}
+
+// Q, Ctrl+C и Ctrl+V работают и в выделении, и в добавлении точки, и подсказка
+// обязана назвать их там же. В рисовании линии, в обводке помещения и в правке
+// ломаной о них молчим: там рука занята черновиком, а подсказка и без того
+// в три строки — в неё дописывают то, что нужно прямо сейчас.
+function canvasHintCopy(hint) {
+  return hint + " " + strings.canvas.hintCopy;
 }
 
 // ——— подсказка: отступ от края и знак «текст сменился» ————————————————
@@ -300,6 +312,8 @@ export function canvasWheelKind(event, streak) {
 
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
+// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
+const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
 
@@ -323,6 +337,15 @@ let canvasWheelStreak = null;
 let canvasPanHeld = new Map();
 let canvasPanFrame = 0;
 let canvasPanClock = 0;
+// Буфер метки: снимок из `markSnapshot` плюс имя исходной метки — по нему
+// вставка находит, рядом с чем встать, когда курсора над планом нет.
+let canvasClipboard = null;
+// Последняя точка курсора на холсте в экранных пикселях. `null` значит, что
+// курсор ушёл с холста: тогда вставка целится не под него.
+let canvasCursor = null;
+// Серия вставок подряд: `{schemeId, x, y, count}`. Пока вставляют в то же
+// место, каждая следующая копия отступает на шаг — иначе метки лягут стопкой.
+let canvasPasteRun = null;
 
 function canvasNow() {
   const clock = typeof performance === "object" && performance !== null ? performance : null;
@@ -702,6 +725,185 @@ function canvasPlacedTypeId(state) {
   const typeId = state.activeTypeId;
   if (!typeId || !state.project || !findType(state.project, typeId)) return null;
   return typeId;
+}
+
+// ——— пипетка, копирование и вставка ——————————————————————————————————
+//
+// Три жеста заказчика: «хоткей Q — скопировать тип метки, чтобы добавить новую
+// такую же, а также через command (control) C / V копировать и вставлять метки
+// (по сути копируем тип и вставляем туда, где курсор, если он на поле схемы,
+// или рядом, если за пределами, и выделяем его сразу)».
+//
+// Q и Ctrl+C — про разное, и объединять их нельзя. Q меняет **чем размечают
+// дальше**: тип уходит в панель, и следующий клик по плану ставит такую же
+// метку — это пипетка. Ctrl+C ничего не меняет в инструменте: он кладёт метку
+// в буфер, и поставит её Ctrl+V, не трогая выбранный тип. Скопировать розетку
+// «на потом», продолжая ставить выключатели, — обычное дело.
+//
+// Что переезжает в копию, решает `model.markSnapshot` — там же и объяснено.
+
+// Куда целится вставка **до** каскада. Три случая, по убыванию точности:
+//   1. Курсор над планом — точка под ним. Прямые слова заказчика; притяжка к
+//      направляющим та же, что у клика, иначе вставка мимо перекрестия.
+//   2. Курсора над планом нет (он на панели, на линейке, за краем плана) —
+//      рядом с исходной меткой, на шаг блока вправо-вниз. Её только что
+//      скопировали, она на виду, и копия встаёт у неё под боком: ровно жест
+//      «розетка у кровати слева — такую же справа», где копию потом оттащат.
+//   3. Исходной метки уже нет или она на другом листе — центр видимой области.
+//      Ставить копию за краем экрана нельзя: пользователь решит, что вставка
+//      не сработала, и нажмёт ещё раз.
+function canvasPasteBase(state, scheme, view, step) {
+  const cursor = canvasCursorPlan(state, scheme, view);
+  if (cursor) return canvasGuideSnap(cursor);
+  const source = canvasClipboard.markId ? findMark(state.project, canvasClipboard.markId) : null;
+  if (source && source.schemeId === state.schemeId && source.points.length > 0) {
+    const from = source.points[0];
+    return { x: from.x + step.x, y: from.y + step.y };
+  }
+  const box = canvasBox();
+  return screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
+}
+
+// Доли плана под курсором — или `null`, когда курсора над планом нет. Полоса
+// линейки планом не считается: там вытягивают направляющие, а не ставят метки.
+function canvasCursorPlan(state, scheme, view) {
+  if (!canvasCursor || !scheme) return null;
+  if (canvasGuidesShown(state) && canvasOnRuler(canvasCursor)) return null;
+  const plan = screenToPlan(canvasCursor, scheme, view);
+  if (!(plan.x >= 0 && plan.x <= 1 && plan.y >= 0 && plan.y <= 1)) return null;
+  return plan;
+}
+
+// Шаг каскада в долях плана — тот же, что у соседней точки блока: ближе знаки
+// сливаются в кляксу, дальше копия перестаёт читаться как пара исходной.
+function canvasPasteStep(state, scheme) {
+  const px = canvasBlockStep(state);
+  return {
+    x: px / (scheme && scheme.width > 0 ? scheme.width : CANVAS_PLAN_FALLBACK_PX),
+    y: px / (scheme && scheme.height > 0 ? scheme.height : CANVAS_PLAN_FALLBACK_PX),
+  };
+}
+
+/**
+ * Точка очередной вставки и состояние серии.
+ *
+ * Вставили дважды подряд, не двигая мышь, — вторая копия обязана отойти в
+ * сторону: стопка меток в одной точке выглядит как одна метка, и пользователь
+ * решит, что вставка не сработала (а на плане у него уже три розетки). Отсюда
+ * серия: пока целятся в то же место, каждая следующая копия отступает ещё на
+ * шаг вправо-вниз, лесенкой.
+ *
+ * «То же место» — ближе половины шага: ближе этого метки всё равно наложились
+ * бы, значит это продолжение серии, а не новая точка. Отодвинулись дальше —
+ * серия начинается заново, и копия встаёт ровно туда, куда показали.
+ *
+ * Чистая и вынесена наружу нарочно: лесенка — единственное здесь, что можно
+ * проверить числами, всё остальное проверяется руками над планом.
+ */
+export function canvasPasteSpot(base, run, step) {
+  const near = (a, b, size) => Math.abs(a - b) <= Math.abs(size) / 2;
+  const same = Boolean(run) && near(run.x, base.x, step.x) && near(run.y, base.y, step.y);
+  const count = same ? run.count + 1 : 1;
+  const shift = count - 1;
+  return {
+    point: {
+      x: canvasFraction(base.x + step.x * shift),
+      y: canvasFraction(base.y + step.y * shift),
+    },
+    run: { x: base.x, y: base.y, count },
+  };
+}
+
+function canvasFraction(value) {
+  return Math.min(1, Math.max(0, value));
+}
+
+// Метка, с которой работают жесты: первая из выделения. Выделен блок — берётся
+// его первая метка, и уведомление называет её по имени: буфер и правда получил
+// одну метку, обещать блок было бы враньём.
+function canvasGestureMark(state) {
+  if (!canvasEditAllowed(state)) {
+    canvasViewOnly();
+    return null;
+  }
+  const markId = state.selectedMarkIds[0];
+  const mark = markId && state.project ? findMark(state.project, markId) : null;
+  if (!mark) {
+    canvasApi.notify(strings.canvas.needMark);
+    return null;
+  }
+  return mark;
+}
+
+// Q — пипетка: тип выделенной метки становится текущим, и холст переходит в
+// добавление. Переход в режим — часть жеста: тип берут, чтобы ставить такие же,
+// и оставить пользователя в выделении значило бы потребовать второго нажатия.
+// В историю это не пишется: выбранный тип и режим — оснастка руки, а не объект.
+function canvasPickType() {
+  const state = canvasState();
+  const mark = canvasGestureMark(state);
+  if (!mark) return;
+  const type = findType(state.project, mark.typeId);
+  if (!type) {
+    canvasApi.notify(strings.errors.typeNotFound, "error");
+    return;
+  }
+  canvasApi.setState({ activeTypeId: mark.typeId, mode: "add" });
+  canvasApi.notify(text("canvas.typeTaken", { label: type.code + " — " + type.name }), "success");
+}
+
+// Ctrl+C — снимок выделенной метки в буфер. Серия вставок при этом обнуляется:
+// новая копия начинает свою лесенку с того места, куда её поставят.
+function canvasCopyMark() {
+  const state = canvasState();
+  const mark = canvasGestureMark(state);
+  if (!mark) return;
+  try {
+    canvasClipboard = { snapshot: markSnapshot(state.project, mark.id), markId: mark.id };
+    canvasPasteRun = null;
+    canvasApi.notify(text("canvas.copied", { label: labelOf(state.project, mark.id) }), "success");
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+// Ctrl+V — копия из буфера в объект. Правка объекта, значит через `canvasCommit`:
+// один шаг истории, Ctrl+Z возвращает всё как было. Поставленная метка сразу
+// выделена — так её видно, и её же ждут ручки «+» и панель свойств.
+function canvasPasteMark() {
+  const state = canvasState();
+  if (!canvasEditAllowed(state)) {
+    canvasViewOnly();
+    return;
+  }
+  if (!state.schemeId) {
+    canvasApi.notify(strings.canvas.needScheme);
+    return;
+  }
+  if (!canvasClipboard) {
+    canvasApi.notify(strings.canvas.pasteEmpty);
+    return;
+  }
+  const scheme = canvasScheme(state);
+  if (!scheme) {
+    canvasApi.notify(strings.canvas.needScheme);
+    return;
+  }
+  const view = canvasViewOf(state);
+  const step = canvasPasteStep(state, scheme);
+  const run = canvasPasteRun && canvasPasteRun.schemeId === state.schemeId ? canvasPasteRun : null;
+  const spot = canvasPasteSpot(canvasPasteBase(state, scheme, view, step), run, step);
+  try {
+    const result = pasteMark(state.project, canvasClipboard.snapshot, {
+      schemeId: state.schemeId,
+      point: spot.point,
+    });
+    canvasPasteRun = { schemeId: state.schemeId, ...spot.run };
+    canvasCommit(state.project, result.project, strings.history.pasteMark, { selection: [result.mark.id] });
+    canvasApi.notify(text("canvas.pasted", { label: labelOf(result.project, result.mark.id) }), "success");
+  } catch (error) {
+    canvasFail(error);
+  }
 }
 
 // Цвет ручек «+»: выбран тип, отличный от типа метки, — ручка красится в его
@@ -1789,6 +1991,9 @@ function canvasDragTo(point, free) {
 function canvasPointerMove(event) {
   if (!canvasNode) return;
   const point = canvasPointOf(event);
+  // Где курсор — помнит только это место: вставка по Ctrl+V целится под него,
+  // а своего «где мышь» у холста до сих пор не было.
+  canvasCursor = point;
   if (canvasPointers.has(event.pointerId)) canvasPointers.set(event.pointerId, point);
 
   if (canvasPinch && canvasPointers.size === 2) {
@@ -2050,6 +2255,13 @@ function canvasWheel(event) {
 
 // ——— клавиатура ——————————————————————————————————————————————————————
 
+// Выделенный на странице текст: пока он есть, Ctrl+C принадлежит браузеру.
+function canvasTextSelected() {
+  if (typeof window === "undefined" || typeof window.getSelection !== "function") return false;
+  const selection = window.getSelection();
+  return Boolean(selection && selection.isCollapsed === false && String(selection).length > 0);
+}
+
 function canvasTypingTarget(target) {
   if (!target || !target.tagName) return false;
   return (
@@ -2076,7 +2288,31 @@ function canvasKeyDown(event) {
     canvasRedoStep();
     return;
   }
+  // Ctrl+C и Ctrl+V — по физической клавише, как и всё здесь: в русской
+  // раскладке на них «с» и «м». Поля ввода и диалоги отсечены выше — там
+  // копирование и вставка текста остаются браузерными и никуда не деваются.
+  if (control && event.code === "KeyC") {
+    // Выделенный на странице текст забирать нельзя: пользователь выделил
+    // расположение в списке меток, чтобы перенести его в письмо, — Ctrl+C
+    // в этот момент про текст, а не про метку.
+    if (canvasTextSelected()) return;
+    event.preventDefault();
+    canvasCopyMark();
+    return;
+  }
+  if (control && event.code === "KeyV") {
+    event.preventDefault();
+    canvasPasteMark();
+    return;
+  }
   if (control) return;
+  // Q — тоже физическая клавиша: в русской раскладке это «й», и сравнение по
+  // `event.key` молчало бы ровно у тех, кто размечает планы по-русски.
+  if (event.code === "KeyQ" && !event.altKey) {
+    event.preventDefault();
+    canvasPickType();
+    return;
+  }
   // Ход и масштаб — до всего остального, но только когда клавиатура ничья.
   if (canvasKeyboardOwner(event)) {
     if (canvasPanKeyDown(event.code)) {
@@ -2147,11 +2383,20 @@ function canvasKeyUp(event) {
   canvasSyncCursor();
 }
 
+// Курсор ушёл с холста — вставке больше не под что целиться: она встанет рядом
+// с исходной меткой. Без этого запомненная точка оставалась бы «последней
+// известной», и копия садилась бы туда, где мыши давно нет.
+function canvasPointerLeave() {
+  canvasCursor = null;
+}
+
 // Окно увели — зажатые клавиши отпустить некому: своего keyup они уже не
-// пришлют, и план уехал бы дальше сам по себе.
+// пришлют, и план уехал бы дальше сам по себе. Курсор за это время тоже мог
+// уехать куда угодно, и его последняя точка больше ничего не значит.
 function canvasWindowBlur() {
   canvasPanRelease(null);
   canvasSpace = false;
+  canvasCursor = null;
   canvasSyncCursor();
 }
 
@@ -2176,6 +2421,7 @@ function mountCanvas(host, api) {
   canvasNode.addEventListener("pointermove", canvasPointerMove);
   canvasNode.addEventListener("pointerup", canvasPointerUp);
   canvasNode.addEventListener("pointercancel", canvasPointerUp);
+  canvasNode.addEventListener("pointerleave", canvasPointerLeave);
   canvasNode.addEventListener("dblclick", canvasDoubleClick);
   canvasNode.addEventListener("wheel", canvasWheel, { passive: false });
   canvasNode.addEventListener("contextmenu", (event) => event.preventDefault());

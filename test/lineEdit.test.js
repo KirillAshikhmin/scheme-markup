@@ -148,7 +148,8 @@ test("в правке линии подсказка рассказывает п�
   });
   assert.equal(canvasHintText(stateOf({ editPathId: base.markId })), strings.canvas.hintLineEdit);
   // Линии уже нет — подсказка возвращается к обычной: обещать правку нечему.
-  assert.equal(canvasHintText(stateOf({ editPathId: "нет-такой-метки" })), strings.canvas.hintSelect);
+  // Сверяется начало: к обычной подсказке приписаны жесты копирования (таск 90).
+  assert.ok(canvasHintText(stateOf({ editPathId: "нет-такой-метки" })).startsWith(strings.canvas.hintSelect));
   // В просмотре правки нет вовсе.
   assert.equal(canvasHintText(stateOf({ editPathId: base.markId, layout: "mobile" })), strings.mobile.viewOnly);
 });

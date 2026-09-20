@@ -64,8 +64,13 @@ test("в режиме просмотра подсказка не обещает 
 });
 
 test("на десктопе подсказка прежняя — по режиму и выбранному типу", () => {
-  assert.equal(canvasHintText(stateOf({})), strings.canvas.hintSelect, "без типа — общая подсказка");
-  assert.equal(canvasHintText(stateOf({ activeTypeId: scene.typeId })), strings.canvas.hintSelectMode);
+  // Подсказки выделения и добавления точки заканчиваются жестами копирования
+  // (таск 90), поэтому сверяется начало: важно, какая подсказка выбрана.
+  assert.ok(
+    canvasHintText(stateOf({})).startsWith(strings.canvas.hintSelect),
+    "без типа — общая подсказка",
+  );
+  assert.ok(canvasHintText(stateOf({ activeTypeId: scene.typeId })).startsWith(strings.canvas.hintSelectMode));
   // Режим добавления один, а подсказка разная: её выбирает вид типа.
   assert.equal(canvasHintText(stateOf({ mode: "add", activeTypeId: scene.lineTypeId })), strings.canvas.hintLine);
   assert.ok(
