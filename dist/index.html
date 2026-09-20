@@ -4156,7 +4156,17 @@ const strings = {
     pickHint: "Выбрать папку — дальше объект будет сохраняться туда сам после каждой правки",
     folder: "Папка: {name}",
     dialogTitle: "Автосохранение в папку",
-    dialogText: "Объект сам сохраняется в папку «{name}» файлом {file} — после каждой правки, с задержкой.",
+    dialogText:
+      "Объект сам сохраняется в папку «{name}» файлом {file} — после каждой правки, с задержкой. Файл на объект один: он переписывается, а не заводится заново.",
+    staleTitle: "Прежние файлы объекта",
+    staleText:
+      "Теперь объект пишется в один файл — «{file}», он и обновляется. Прежних файлов этого же объекта в папке: {count}. Они остались от прежних дней или от прежнего имени объекта.",
+    staleSafe:
+      "Работе они не мешают: за чужую правку эти файлы больше не принимаются и в объект не приезжают. Их можно оставить как копии на память — или удалить, если не нужны.",
+    staleKeep: "Оставить",
+    staleRemove: "Удалить прежние",
+    staleRemoved: "Прежних файлов удалено: {count}",
+    staleKept: "Не удалось удалить файлов: {count} — они остались в папке",
     change: "Сменить папку",
     off: "Выключить",
     offDone: "Автосохранение в папку выключено",
@@ -8689,17 +8699,28 @@ function projectJsonText(project) {
   return JSON.stringify(migrateProject({ ...project, formatVersion: FORMAT_VERSION }), null, 2);
 }
 
-/** Имя для выгрузки: «<объект>-<дата>.zip». */
-function projectFileName(project, now) {
-  const date = now instanceof Date ? now : new Date();
-  const day = fileLocalDay(date);
+/**
+ * Имя объекта, пригодное для файла: без запрещённых символов, в одну строку и
+ * не длиннее шестидесяти знаков. Отдельно от `projectFileName` потому, что
+ * имён у объекта два и различает их ровно дата: ручная выгрузка — копия «на
+ * память», и день в её имени полезен; снимок в папке автосохранения
+ * переписывается сам, и дата завела бы там по файлу на каждый день
+ * (`autosave.autosaveSnapshotName`).
+ */
+function projectFileBase(project) {
   const raw = String((project && project.name) || strings.project.untitled);
   const safe = raw
     .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 60);
-  return (safe || strings.project.untitled) + "-" + day + ".zip";
+  return safe || strings.project.untitled;
+}
+
+/** Имя для ручной выгрузки: «<объект>-<дата>.zip». */
+function projectFileName(project, now) {
+  const date = now instanceof Date ? now : new Date();
+  return projectFileBase(project) + "-" + fileLocalDay(date) + ".zip";
 }
 
 /**
@@ -9552,8 +9573,8 @@ let autosaveVerified = null;
 // Последний снимок, который видели обе стороны: общий предок для слияния.
 let autosaveBase = null;
 // Время записи нашего снимка в папку. Всё, что старше, мы уже учли — и это
-// же защита от «протухшего» файла: вчерашний снимок, попавший в слияние как
-// чужая правка, откатил бы нашу работу.
+// же защита от «протухшего» файла соседа: попади он в слияние, откатил бы нашу
+// работу. Свои снимки отсекаются раньше и по имени (`autosaveOwnSnapshot`).
 let autosaveSyncSince = 0;
 // Что мы уже прочитали из папки: имя файла -> время его записи. Общая
 // отметка времени тут не годится — в папке пишут трое, и файл второго,
@@ -9615,15 +9636,44 @@ async function autosaveCollectImages(project) {
   return images;
 }
 
-// Имя снимка в папке автосохранения. Файл в папке живёт рядом с чужими и
-// переписывается сам, поэтому одного имени объекта мало: два объекта с
-// одинаковым именем (а такие заводятся сами — например, файл, загруженный
-// дважды) писали бы в один файл и затирали друг друга. Имя строит всё тот же
-// `projectFileName`, идентификатор дописывается к нему.
-function autosaveSnapshotName(project, date) {
-  const base = projectFileName(project, date);
-  const tag = String((project && project.id) || "").replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
-  return tag ? base.replace(/\.zip$/, "-" + tag + ".zip") : base;
+// Хвост имени снимка — восемь знаков идентификатора объекта. Идентификатор у
+// каждого браузера свой: файл, пришедший из папки, получает новый при приёмке
+// (`adoptLoadedProject`). Поэтому хвост говорит не «этот объект», а «этот файл
+// писали мы».
+function autosaveTag(project) {
+  return String((project && project.id) || "").replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
+}
+
+/**
+ * Имя снимка в папке автосохранения: «<объект>-<хвост>.zip», **без даты**.
+ *
+ * Дата тут была бы новым файлом на каждый день: за неделю в папке копилась
+ * неделя снимков, и вчерашний приезжал в слияние как чужая работа — возвращал
+ * удалённое и путал номера. Файл один и переписывается сам, а когда он записан,
+ * видно по времени файла. Дата живёт в имени ручной выгрузки
+ * (`projectFile.projectFileName`): это копия «на память», и там она полезна.
+ *
+ * Хвост-идентификатор остаётся: два объекта с одинаковым именем (а такие
+ * заводятся сами — например, файл, загруженный дважды) иначе писали бы в один
+ * файл и затирали друг друга.
+ */
+function autosaveSnapshotName(project) {
+  const base = projectFileBase(project);
+  const tag = autosaveTag(project);
+  return tag ? base + "-" + tag + ".zip" : base + ".zip";
+}
+
+/**
+ * Наш ли это файл в папке — по имени, без чтения архива. Хвост-идентификатор
+ * стоит в имени снимка последним и стоял в прежних именах с датой, поэтому по
+ * нему узнаются разом: сегодняшний снимок, снимки прежних дней и снимок,
+ * оставшийся от прежнего имени объекта. Всё это писали мы, и в слияние как
+ * чужая работа не идёт ничего из этого.
+ */
+function autosaveOwnSnapshot(project, name) {
+  const tag = autosaveTag(project);
+  if (!tag || typeof name !== "string") return false;
+  return name.toLowerCase().endsWith("-" + tag + ".zip");
 }
 
 function autosaveVerifyKey(project, images) {
@@ -9791,7 +9841,7 @@ async function autosaveWrite(project, options = {}) {
     // Сверку здесь делает не упаковка, а чтение уже записанного файла: так
     // проверка захватывает и запись на диск, а не только сборку в памяти.
     const packedFile = await autosavePack(project, { ...options, date, verify: false });
-    const name = autosaveSnapshotName(project, date);
+    const name = autosaveSnapshotName(project);
     const fileHandle = await autosaveHandle.getFileHandle(name, { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(packedFile.blob);
@@ -9893,6 +9943,122 @@ async function autosaveFolderEntries() {
   return entries;
 }
 
+// Наши снимки этого объекта, что лежат в папке, от самого свежего к прежним.
+// Ручки файлов нужны и для чтения, и для удаления, поэтому наружу отдаётся
+// урезанный список (`autosaveOwnSnapshots`), а внутрь — вместе с ручками.
+async function autosaveOwnEntries(project) {
+  const own = [];
+  if (!project) return own;
+  for (const entry of await autosaveFolderEntries()) {
+    if (!autosaveOwnSnapshot(project, entry.name)) continue;
+    const file = await entry.getFile();
+    own.push({ entry, name: entry.name, at: file.lastModified || 0 });
+  }
+  own.sort((one, other) => other.at - one.at || (one.name < other.name ? -1 : 1));
+  return own;
+}
+
+/**
+ * Что из наших снимков лежит в папке: `[{name, at}]`, свежий первым. Панели
+ * это нужно, чтобы сказать человеку про файлы, оставшиеся от прежних дней и
+ * прежних имён объекта: удалять их сами мы не вправе — это его данные.
+ */
+async function autosaveOwnSnapshots(project) {
+  if (!project || !autosaveReady()) return [];
+  return (await autosaveOwnEntries(project)).map(({ name, at }) => ({ name, at }));
+}
+
+/**
+ * Открыли папку — поднимаем из неё общего предка. До первой своей записи
+ * `autosaveBase` пуст, а без предка слияние становится объединением: «сущности
+ * нет» и «сущность удалили» снаружи выглядят одинаково, и чужой файл возвращает
+ * удалённое. Наш собственный снимок на это годится ровно так же, как он годится
+ * после записи: это последнее, что мы отдали в папку, — и именно его видела
+ * вторая сторона.
+ *
+ * Заодно отдаёт список прежних снимков этого объекта (`stale`) — всё, что лежит
+ * в папке помимо текущего файла.
+ *
+ * Возвращает `{name, at, base, stale}` или `null`, если своих снимков в папке
+ * нет. Время записи (`autosaveSyncSince`) не двигается: оно значит «что мы уже
+ * учли», а учитывает правки соседей запись, а не чтение.
+ */
+async function autosaveAdoptFolder(project) {
+  if (!project || !autosaveReady()) return null;
+  const own = await autosaveOwnEntries(project);
+  if (own.length === 0) return null;
+  const current = autosaveSnapshotName(project);
+  // Предок чужого объекта предком не бывает: объект переключили — прежний
+  // снимок к этому спору отношения не имеет.
+  if (autosaveBase && autosaveBase.id !== project.id) autosaveBase = null;
+  let base = null;
+  let from = null;
+  for (const item of own) {
+    if (autosaveBase) break;
+    let loaded = null;
+    try {
+      loaded = await unpackProject(await item.entry.getFile());
+    } catch (error) {
+      // Битый снимок — не повод ломать сеанс: просто не с чего брать предка.
+      continue;
+    }
+    if (!loaded.project || loaded.project.id !== project.id) continue;
+    base = loaded.project;
+    from = item;
+    autosaveBase = base;
+  }
+  // Свои файлы в слияние не идут ни при каком времени записи, но отметка
+  // всё равно ставится: опрос не станет перечитывать их зря.
+  for (const item of own) autosaveSeen.set(item.name, item.at);
+  return {
+    base,
+    name: from ? from.name : null,
+    at: from ? from.at : 0,
+    stale: own.filter((item) => item.name !== current).map(({ name, at }) => ({ name, at })),
+  };
+}
+
+/**
+ * Удаляет названные снимки из папки. Только по просьбе человека: сами мы его
+ * файлы не трогаем. Трогается лишь то, что писали мы, — имя обязано нести наш
+ * хвост-идентификатор, а внутри должен лежать наш объект; текущий снимок не
+ * удаляется никогда. Возвращает `{removed, kept}` именами: что не прочиталось
+ * или оказалось чужим, остаётся на месте.
+ */
+async function autosaveRemoveSnapshots(project, names) {
+  const result = { removed: [], kept: [] };
+  if (!project || !autosaveReady()) return result;
+  if (typeof autosaveHandle.removeEntry !== "function") {
+    result.kept = [...(names || [])];
+    return result;
+  }
+  const wanted = new Set(Array.isArray(names) ? names : []);
+  const current = autosaveSnapshotName(project);
+  for (const item of await autosaveOwnEntries(project)) {
+    if (!wanted.has(item.name) || item.name === current) continue;
+    let loaded = null;
+    try {
+      loaded = await unpackProject(await item.entry.getFile());
+    } catch (error) {
+      result.kept.push(item.name);
+      continue;
+    }
+    if (!loaded.project || loaded.project.id !== project.id) {
+      result.kept.push(item.name);
+      continue;
+    }
+    try {
+      await autosaveHandle.removeEntry(item.name);
+      autosaveSeen.delete(item.name);
+      result.removed.push(item.name);
+    } catch (error) {
+      autosaveLastError = error;
+      result.kept.push(item.name);
+    }
+  }
+  return result;
+}
+
 // Планы из чужого файла кладутся в хранилище под своими идентификаторами:
 // схема ссылается на картинку по id из файла, и переименовать его значит
 // развести ссылки двух браузеров.
@@ -9921,6 +10087,11 @@ async function autosaveScanExternal(project, options = {}) {
   try {
     const since = typeof options.since === "number" ? options.since : autosaveSyncSince;
     for (const entry of await autosaveFolderEntries()) {
+      // Свой снимок — и сегодняшний, и оставшийся от прежних дней или от
+      // прежнего имени объекта. Это не чужая работа, а наша же вчерашняя:
+      // слияние с ней вернуло бы всё, что мы с тех пор удалили, а отменить
+      // было бы нечем. Узнаётся по имени, до чтения архива.
+      if (autosaveOwnSnapshot(project, entry.name)) continue;
       const file = await entry.getFile();
       const at = file.lastModified || 0;
       // Файл, который мы уже читали, интересен только если его переписали;
@@ -9937,6 +10108,10 @@ async function autosaveScanExternal(project, options = {}) {
         // ломать сеанс, просто не наш файл.
         continue;
       }
+      // Второй рубеж — на случай снимка, переименованного руками: хвоста в
+      // имени уже нет, но идентификатор объекта внутри остался нашим, а свой
+      // у каждого браузера один.
+      if (project.id && loaded.project && loaded.project.id === project.id) continue;
       if (!areRelatedProjects(project, loaded.project)) continue;
       const merged = mergeProjects(project, loaded.project, autosaveBase);
       if (!merged.changed) continue;
@@ -22603,6 +22778,13 @@ function mountFilePanel(host, api) {
   let fileFailReported = false;
   // Опрос общей папки заводится один раз на выбранную папку.
   let fileWatching = false;
+  // Имя, под которым объект лежит в папке. Сменилось после записи — значит,
+  // объект переименовали, и прежний файл больше не обновляется.
+  let fileSnapshotName = null;
+  // Про какие прежние файлы уже сказали и с какой парой «папка + объект» уже
+  // разбирались: дважды за сеанс спрашивать об одном и том же незачем.
+  const fileStaleTold = new Set();
+  let fileAdoptedKey = null;
 
   const saveButton = uiButton(strings.file.save, {
     class: "ui-btn ui-btn--accent",
@@ -22781,6 +22963,10 @@ function mountFilePanel(host, api) {
   }
 
   async function pickFolder() {
+    // Другая папка — другая история: и общий предок, и разговор о прежних
+    // файлах начинаются заново.
+    fileAdoptedKey = null;
+    fileSnapshotName = null;
     try {
       await autosavePickFolder();
     } catch (error) {
@@ -22850,6 +23036,14 @@ function mountFilePanel(host, api) {
     if (result && result.ok) {
       fileFailReported = false;
       if (result.project) markSaved(result.project);
+      // Имя снимка идёт за именем объекта: переименовали — записался новый
+      // файл, а прежний остался лежать. Молчать об этом нельзя, он ведь
+      // выглядит как рабочий.
+      if (result.name && result.name !== fileSnapshotName) {
+        const renamed = Boolean(fileSnapshotName);
+        fileSnapshotName = result.name;
+        if (renamed) folderStale();
+      }
     } else if (result && result.error && !fileFailReported) {
       fileFailReported = true;
       // Не прошедшая сверка — не то же, что «не смогли записать»: файл в папке
@@ -22859,6 +23053,104 @@ function mountFilePanel(host, api) {
       notify(failed, "error");
     }
     renderStatus();
+  }
+
+  // ——— прежние файлы объекта в папке ————————————————————————————————
+  //
+  // Раньше снимок звался «<объект>-<дата>-<хвост>.zip» и заводился заново
+  // каждый день, поэтому у тех, кто ведёт объект давно, в папке лежит стопка
+  // файлов. Теперь файл один, а прежние — данные пользователя: удалять их
+  // молча нельзя, промолчать тоже (он их видит и не понимает, какой рабочий).
+
+  // Папка открыта — берём из своего снимка общего предка для слияния и
+  // заодно смотрим, не осталось ли в ней прежних файлов этого объекта.
+  async function folderAdopt() {
+    const project = getState().project;
+    const status = autosaveStatus();
+    if (!project || !autosaveReady()) return;
+    const key = status.folder + "|" + project.id;
+    if (fileAdoptedKey === key) return;
+    fileAdoptedKey = key;
+    fileSnapshotName = autosaveSnapshotName(project);
+    try {
+      const found = await autosaveAdoptFolder(project);
+      if (found) tellAboutStale(found.stale);
+    } catch (error) {
+      // Папка могла стать недоступной — об этом скажет первая же запись.
+    }
+  }
+
+  // То же самое, но без предка: после переименования объекта предок у нас уже
+  // свой, а список прежних файлов надо перечитать.
+  async function folderStale() {
+    const project = getState().project;
+    if (!project || !autosaveReady()) return;
+    try {
+      const own = await autosaveOwnSnapshots(project);
+      const current = autosaveSnapshotName(project);
+      tellAboutStale(own.filter((item) => item.name !== current));
+    } catch (error) {
+      /* папка недоступна — тем более не о чем говорить */
+    }
+  }
+
+  function tellAboutStale(stale) {
+    const list = (stale || []).filter((item) => !fileStaleTold.has(item.name));
+    if (list.length === 0) return;
+    for (const item of list) fileStaleTold.add(item.name);
+    staleDialog(list);
+  }
+
+  function staleDialog(stale) {
+    const names = uiEl("ul", { class: "merge-list" });
+    for (const item of stale) names.append(uiEl("li", { text: item.name }));
+    let modal;
+    const remove = uiButton(strings.autosave.staleRemove, {
+      class: "ui-btn ui-btn--danger",
+      on: {
+        click: async () => {
+          modal.close();
+          await removeStale(stale.map((item) => item.name));
+        },
+      },
+    });
+    // Окно всплывает само, без просьбы, — поэтому по Enter файлы остаются, а
+    // не удаляются: основное действие здесь безопасное.
+    const keep = uiButton(strings.autosave.staleKeep, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => modal.close() },
+    });
+    modal = uiModal({
+      title: strings.autosave.staleTitle,
+      body: [
+        uiEl("p", {
+          class: "modal__text",
+          text: text("autosave.staleText", { file: currentFileName(), count: stale.length }),
+        }),
+        names,
+        uiEl("p", { class: "modal__hint", text: strings.autosave.staleSafe }),
+      ],
+      actions: [remove, keep],
+      primary: keep,
+    });
+  }
+
+  async function removeStale(names) {
+    const project = getState().project;
+    if (!project) return;
+    let result = null;
+    try {
+      result = await autosaveRemoveSnapshots(project, names);
+    } catch (error) {
+      notify(strings.autosave.failed, "error");
+      return;
+    }
+    if (result.removed.length > 0) {
+      notify(text("autosave.staleRemoved", { count: result.removed.length }), "success");
+    }
+    if (result.kept.length > 0) {
+      notify(text("autosave.staleKept", { count: result.kept.length }), "error");
+    }
   }
 
   // ——— чужие правки в общей папке ————————————————————————————————————
@@ -22938,6 +23230,9 @@ function mountFilePanel(host, api) {
       fileWatching = false;
       autosaveStopWatch();
     }
+    // Не однажды: объект на экране появляется позже папки, а сам разбор
+    // повторного вызова не боится — он идёт один раз на пару «папка + объект».
+    if (ready) folderAdopt();
   }
 
   // ——— состояние и строка в шапке ————————————————————————————————————
@@ -23023,6 +23318,9 @@ function mountFilePanel(host, api) {
       return;
     }
     syncProjectSelect(state.project);
+    // Объект переключили — предок слияния берётся из его снимка, а не из
+    // чужого; заодно видно, не осталось ли в папке его прежних файлов.
+    syncWatch();
     if (state.project && state.project !== fileSavedProject) {
       // Не вложенным вызовом: подписчики сейчас в середине обхода.
       queueMicrotask(() => {

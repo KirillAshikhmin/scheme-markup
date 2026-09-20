@@ -421,17 +421,28 @@ function projectJsonText(project) {
   return JSON.stringify(migrateProject({ ...project, formatVersion: FORMAT_VERSION }), null, 2);
 }
 
-/** Имя для выгрузки: «<объект>-<дата>.zip». */
-export function projectFileName(project, now) {
-  const date = now instanceof Date ? now : new Date();
-  const day = fileLocalDay(date);
+/**
+ * Имя объекта, пригодное для файла: без запрещённых символов, в одну строку и
+ * не длиннее шестидесяти знаков. Отдельно от `projectFileName` потому, что
+ * имён у объекта два и различает их ровно дата: ручная выгрузка — копия «на
+ * память», и день в её имени полезен; снимок в папке автосохранения
+ * переписывается сам, и дата завела бы там по файлу на каждый день
+ * (`autosave.autosaveSnapshotName`).
+ */
+export function projectFileBase(project) {
   const raw = String((project && project.name) || strings.project.untitled);
   const safe = raw
     .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 60);
-  return (safe || strings.project.untitled) + "-" + day + ".zip";
+  return safe || strings.project.untitled;
+}
+
+/** Имя для ручной выгрузки: «<объект>-<дата>.zip». */
+export function projectFileName(project, now) {
+  const date = now instanceof Date ? now : new Date();
+  return projectFileBase(project) + "-" + fileLocalDay(date) + ".zip";
 }
 
 /**

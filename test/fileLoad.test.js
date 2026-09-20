@@ -5,8 +5,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { addMark, addScheme, createProject } from "../src/model.js";
-import { packProject, unpackProject } from "../src/projectFile.js";
-import { adoptLoadedProject, autosaveAgoText, autosaveSnapshotName } from "../src/autosave.js";
+import { packProject, projectFileName, unpackProject } from "../src/projectFile.js";
+import {
+  adoptLoadedProject,
+  autosaveAgoText,
+  autosaveOwnSnapshot,
+  autosaveSnapshotName,
+} from "../src/autosave.js";
 
 function pixels(byte) {
   return new Blob([new Uint8Array([byte, byte + 1, byte + 2, byte + 3])], { type: "image/png" });
@@ -154,19 +159,54 @@ test("картинка, общая для двух схем, остаётся о
   assert.ok(adopted.images.has(ids[0]));
 });
 
-// Снимок в папку автосохранения именуется по объекту и дате. Двух объектов с
-// одним именем достаточно, чтобы один затёр другого, — поэтому в имя входит и
-// идентификатор объекта.
+// Снимок в папку автосохранения именуется по объекту и хвосту его
+// идентификатора — без даты. Двух объектов с одним именем достаточно, чтобы
+// один затёр другого, поэтому хвост нужен; дата же заводила бы по файлу на
+// каждый день, и вчерашний снимок приезжал бы как чужая работа.
 test("снимки разных объектов не попадают в один файл", () => {
-  const day = new Date("2026-09-15T10:00:00.000Z");
   const one = createProject({ name: "Квартира на Ленина" });
   const two = createProject({ name: "Квартира на Ленина" });
 
-  const nameOne = autosaveSnapshotName(one, day);
-  const nameTwo = autosaveSnapshotName(two, day);
+  const nameOne = autosaveSnapshotName(one);
+  const nameTwo = autosaveSnapshotName(two);
 
   assert.notEqual(one.id, two.id);
   assert.notEqual(nameOne, nameTwo, "одинаковые имена объектов дали один файл");
-  assert.match(nameOne, /^Квартира на Ленина-2026-09-15-[0-9a-f]{8}\.zip$/);
-  assert.equal(autosaveSnapshotName(one, day), nameOne, "имя снимка за день обязано быть тем же");
+  assert.match(nameOne, /^Квартира на Ленина-[0-9a-f]{8}\.zip$/);
+  assert.equal(autosaveSnapshotName(one), nameOne, "имя снимка обязано быть тем же");
+});
+
+// Имя снимка не зависит от дня: работа неделю — по-прежнему один файл. Дата
+// остаётся в имени ручной выгрузки, это копия «на память».
+test("имя снимка не двигается со дня на день, а имя выгрузки — двигается", () => {
+  const project = createProject({ name: "Квартира на Ленина" });
+  const monday = new Date("2026-09-14T10:00:00.000Z");
+  const friday = new Date("2026-09-18T10:00:00.000Z");
+
+  assert.equal(autosaveSnapshotName(project, monday), autosaveSnapshotName(project, friday));
+  assert.doesNotMatch(autosaveSnapshotName(project), /\d{4}-\d{2}-\d{2}/, "дата в имени снимка");
+  assert.notEqual(projectFileName(project, monday), projectFileName(project, friday));
+  assert.match(projectFileName(project, friday), /-2026-09-18\.zip$/);
+});
+
+// Свой снимок узнаётся по хвосту-идентификатору — под любым именем объекта и с
+// датой в имени, как его писали прежние сборки.
+test("прежние снимки того же объекта узнаются своими, чужие — нет", () => {
+  const project = createProject({ name: "Квартира на Ленина" });
+  const stranger = createProject({ name: "Квартира на Ленина" });
+  const tag = autosaveSnapshotName(project).replace(/^.*-([0-9a-f]{8})\.zip$/, "$1");
+
+  assert.equal(autosaveOwnSnapshot(project, autosaveSnapshotName(project)), true);
+  assert.equal(
+    autosaveOwnSnapshot(project, "Квартира на Ленина-2026-09-15-" + tag + ".zip"),
+    true,
+    "снимок прежнего дня не узнан своим",
+  );
+  assert.equal(
+    autosaveOwnSnapshot(project, "Старое имя объекта-" + tag + ".zip"),
+    true,
+    "снимок прежнего имени объекта не узнан своим",
+  );
+  assert.equal(autosaveOwnSnapshot(project, autosaveSnapshotName(stranger)), false, "чужой файл принят за свой");
+  assert.equal(autosaveOwnSnapshot(project, "Квартира на Ленина-2026-09-15.zip"), false);
 });

@@ -5,7 +5,13 @@
 // загрузки (самое опасное место: чужие идентификаторы) можно проверить тестом,
 // а панель остаётся тонкой. Zip читает и пишет только `projectFile.js`.
 import { getImage, putImage, getSetting, setSetting } from "./store.js";
-import { packProject, projectFileName, unpackProject, verifyProjectFile } from "./projectFile.js";
+import {
+  packProject,
+  projectFileBase,
+  projectFileName,
+  unpackProject,
+  verifyProjectFile,
+} from "./projectFile.js";
 import { mergeProjects, areRelatedProjects } from "./merge.js";
 import { updateProject } from "./model.js";
 import { strings, text } from "./strings.js";
@@ -37,8 +43,8 @@ let autosaveVerified = null;
 // Последний снимок, который видели обе стороны: общий предок для слияния.
 let autosaveBase = null;
 // Время записи нашего снимка в папку. Всё, что старше, мы уже учли — и это
-// же защита от «протухшего» файла: вчерашний снимок, попавший в слияние как
-// чужая правка, откатил бы нашу работу.
+// же защита от «протухшего» файла соседа: попади он в слияние, откатил бы нашу
+// работу. Свои снимки отсекаются раньше и по имени (`autosaveOwnSnapshot`).
 let autosaveSyncSince = 0;
 // Что мы уже прочитали из папки: имя файла -> время его записи. Общая
 // отметка времени тут не годится — в папке пишут трое, и файл второго,
@@ -100,15 +106,44 @@ async function autosaveCollectImages(project) {
   return images;
 }
 
-// Имя снимка в папке автосохранения. Файл в папке живёт рядом с чужими и
-// переписывается сам, поэтому одного имени объекта мало: два объекта с
-// одинаковым именем (а такие заводятся сами — например, файл, загруженный
-// дважды) писали бы в один файл и затирали друг друга. Имя строит всё тот же
-// `projectFileName`, идентификатор дописывается к нему.
-export function autosaveSnapshotName(project, date) {
-  const base = projectFileName(project, date);
-  const tag = String((project && project.id) || "").replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
-  return tag ? base.replace(/\.zip$/, "-" + tag + ".zip") : base;
+// Хвост имени снимка — восемь знаков идентификатора объекта. Идентификатор у
+// каждого браузера свой: файл, пришедший из папки, получает новый при приёмке
+// (`adoptLoadedProject`). Поэтому хвост говорит не «этот объект», а «этот файл
+// писали мы».
+function autosaveTag(project) {
+  return String((project && project.id) || "").replace(/[^0-9a-z]/gi, "").slice(0, 8).toLowerCase();
+}
+
+/**
+ * Имя снимка в папке автосохранения: «<объект>-<хвост>.zip», **без даты**.
+ *
+ * Дата тут была бы новым файлом на каждый день: за неделю в папке копилась
+ * неделя снимков, и вчерашний приезжал в слияние как чужая работа — возвращал
+ * удалённое и путал номера. Файл один и переписывается сам, а когда он записан,
+ * видно по времени файла. Дата живёт в имени ручной выгрузки
+ * (`projectFile.projectFileName`): это копия «на память», и там она полезна.
+ *
+ * Хвост-идентификатор остаётся: два объекта с одинаковым именем (а такие
+ * заводятся сами — например, файл, загруженный дважды) иначе писали бы в один
+ * файл и затирали друг друга.
+ */
+export function autosaveSnapshotName(project) {
+  const base = projectFileBase(project);
+  const tag = autosaveTag(project);
+  return tag ? base + "-" + tag + ".zip" : base + ".zip";
+}
+
+/**
+ * Наш ли это файл в папке — по имени, без чтения архива. Хвост-идентификатор
+ * стоит в имени снимка последним и стоял в прежних именах с датой, поэтому по
+ * нему узнаются разом: сегодняшний снимок, снимки прежних дней и снимок,
+ * оставшийся от прежнего имени объекта. Всё это писали мы, и в слияние как
+ * чужая работа не идёт ничего из этого.
+ */
+export function autosaveOwnSnapshot(project, name) {
+  const tag = autosaveTag(project);
+  if (!tag || typeof name !== "string") return false;
+  return name.toLowerCase().endsWith("-" + tag + ".zip");
 }
 
 function autosaveVerifyKey(project, images) {
@@ -282,7 +317,7 @@ export async function autosaveWrite(project, options = {}) {
     // Сверку здесь делает не упаковка, а чтение уже записанного файла: так
     // проверка захватывает и запись на диск, а не только сборку в памяти.
     const packedFile = await autosavePack(project, { ...options, date, verify: false });
-    const name = autosaveSnapshotName(project, date);
+    const name = autosaveSnapshotName(project);
     const fileHandle = await autosaveHandle.getFileHandle(name, { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(packedFile.blob);
@@ -386,6 +421,122 @@ async function autosaveFolderEntries() {
   return entries;
 }
 
+// Наши снимки этого объекта, что лежат в папке, от самого свежего к прежним.
+// Ручки файлов нужны и для чтения, и для удаления, поэтому наружу отдаётся
+// урезанный список (`autosaveOwnSnapshots`), а внутрь — вместе с ручками.
+async function autosaveOwnEntries(project) {
+  const own = [];
+  if (!project) return own;
+  for (const entry of await autosaveFolderEntries()) {
+    if (!autosaveOwnSnapshot(project, entry.name)) continue;
+    const file = await entry.getFile();
+    own.push({ entry, name: entry.name, at: file.lastModified || 0 });
+  }
+  own.sort((one, other) => other.at - one.at || (one.name < other.name ? -1 : 1));
+  return own;
+}
+
+/**
+ * Что из наших снимков лежит в папке: `[{name, at}]`, свежий первым. Панели
+ * это нужно, чтобы сказать человеку про файлы, оставшиеся от прежних дней и
+ * прежних имён объекта: удалять их сами мы не вправе — это его данные.
+ */
+export async function autosaveOwnSnapshots(project) {
+  if (!project || !autosaveReady()) return [];
+  return (await autosaveOwnEntries(project)).map(({ name, at }) => ({ name, at }));
+}
+
+/**
+ * Открыли папку — поднимаем из неё общего предка. До первой своей записи
+ * `autosaveBase` пуст, а без предка слияние становится объединением: «сущности
+ * нет» и «сущность удалили» снаружи выглядят одинаково, и чужой файл возвращает
+ * удалённое. Наш собственный снимок на это годится ровно так же, как он годится
+ * после записи: это последнее, что мы отдали в папку, — и именно его видела
+ * вторая сторона.
+ *
+ * Заодно отдаёт список прежних снимков этого объекта (`stale`) — всё, что лежит
+ * в папке помимо текущего файла.
+ *
+ * Возвращает `{name, at, base, stale}` или `null`, если своих снимков в папке
+ * нет. Время записи (`autosaveSyncSince`) не двигается: оно значит «что мы уже
+ * учли», а учитывает правки соседей запись, а не чтение.
+ */
+export async function autosaveAdoptFolder(project) {
+  if (!project || !autosaveReady()) return null;
+  const own = await autosaveOwnEntries(project);
+  if (own.length === 0) return null;
+  const current = autosaveSnapshotName(project);
+  // Предок чужого объекта предком не бывает: объект переключили — прежний
+  // снимок к этому спору отношения не имеет.
+  if (autosaveBase && autosaveBase.id !== project.id) autosaveBase = null;
+  let base = null;
+  let from = null;
+  for (const item of own) {
+    if (autosaveBase) break;
+    let loaded = null;
+    try {
+      loaded = await unpackProject(await item.entry.getFile());
+    } catch (error) {
+      // Битый снимок — не повод ломать сеанс: просто не с чего брать предка.
+      continue;
+    }
+    if (!loaded.project || loaded.project.id !== project.id) continue;
+    base = loaded.project;
+    from = item;
+    autosaveBase = base;
+  }
+  // Свои файлы в слияние не идут ни при каком времени записи, но отметка
+  // всё равно ставится: опрос не станет перечитывать их зря.
+  for (const item of own) autosaveSeen.set(item.name, item.at);
+  return {
+    base,
+    name: from ? from.name : null,
+    at: from ? from.at : 0,
+    stale: own.filter((item) => item.name !== current).map(({ name, at }) => ({ name, at })),
+  };
+}
+
+/**
+ * Удаляет названные снимки из папки. Только по просьбе человека: сами мы его
+ * файлы не трогаем. Трогается лишь то, что писали мы, — имя обязано нести наш
+ * хвост-идентификатор, а внутри должен лежать наш объект; текущий снимок не
+ * удаляется никогда. Возвращает `{removed, kept}` именами: что не прочиталось
+ * или оказалось чужим, остаётся на месте.
+ */
+export async function autosaveRemoveSnapshots(project, names) {
+  const result = { removed: [], kept: [] };
+  if (!project || !autosaveReady()) return result;
+  if (typeof autosaveHandle.removeEntry !== "function") {
+    result.kept = [...(names || [])];
+    return result;
+  }
+  const wanted = new Set(Array.isArray(names) ? names : []);
+  const current = autosaveSnapshotName(project);
+  for (const item of await autosaveOwnEntries(project)) {
+    if (!wanted.has(item.name) || item.name === current) continue;
+    let loaded = null;
+    try {
+      loaded = await unpackProject(await item.entry.getFile());
+    } catch (error) {
+      result.kept.push(item.name);
+      continue;
+    }
+    if (!loaded.project || loaded.project.id !== project.id) {
+      result.kept.push(item.name);
+      continue;
+    }
+    try {
+      await autosaveHandle.removeEntry(item.name);
+      autosaveSeen.delete(item.name);
+      result.removed.push(item.name);
+    } catch (error) {
+      autosaveLastError = error;
+      result.kept.push(item.name);
+    }
+  }
+  return result;
+}
+
 // Планы из чужого файла кладутся в хранилище под своими идентификаторами:
 // схема ссылается на картинку по id из файла, и переименовать его значит
 // развести ссылки двух браузеров.
@@ -414,6 +565,11 @@ export async function autosaveScanExternal(project, options = {}) {
   try {
     const since = typeof options.since === "number" ? options.since : autosaveSyncSince;
     for (const entry of await autosaveFolderEntries()) {
+      // Свой снимок — и сегодняшний, и оставшийся от прежних дней или от
+      // прежнего имени объекта. Это не чужая работа, а наша же вчерашняя:
+      // слияние с ней вернуло бы всё, что мы с тех пор удалили, а отменить
+      // было бы нечем. Узнаётся по имени, до чтения архива.
+      if (autosaveOwnSnapshot(project, entry.name)) continue;
       const file = await entry.getFile();
       const at = file.lastModified || 0;
       // Файл, который мы уже читали, интересен только если его переписали;
@@ -430,6 +586,10 @@ export async function autosaveScanExternal(project, options = {}) {
         // ломать сеанс, просто не наш файл.
         continue;
       }
+      // Второй рубеж — на случай снимка, переименованного руками: хвоста в
+      // имени уже нет, но идентификатор объекта внутри остался нашим, а свой
+      // у каждого браузера один.
+      if (project.id && loaded.project && loaded.project.id === project.id) continue;
       if (!areRelatedProjects(project, loaded.project)) continue;
       const merged = mergeProjects(project, loaded.project, autosaveBase);
       if (!merged.changed) continue;

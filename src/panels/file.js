@@ -19,16 +19,19 @@ import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiModal } from "./ui.js";
 import { LAST_PROJECT_KEY } from "./projects.js";
 import {
   adoptLoadedProject,
+  autosaveAdoptFolder,
   autosaveAgoText,
   autosaveFlush,
   autosaveForget,
   autosaveGrant,
   autosaveLastExport,
   autosaveNoteExport,
+  autosaveOwnSnapshots,
   autosavePack,
   autosavePendingWrite,
   autosavePickFolder,
   autosaveReady,
+  autosaveRemoveSnapshots,
   autosaveRestore,
   autosaveSchedule,
   autosaveSnapshotName,
@@ -99,6 +102,13 @@ function mountFilePanel(host, api) {
   let fileFailReported = false;
   // Опрос общей папки заводится один раз на выбранную папку.
   let fileWatching = false;
+  // Имя, под которым объект лежит в папке. Сменилось после записи — значит,
+  // объект переименовали, и прежний файл больше не обновляется.
+  let fileSnapshotName = null;
+  // Про какие прежние файлы уже сказали и с какой парой «папка + объект» уже
+  // разбирались: дважды за сеанс спрашивать об одном и том же незачем.
+  const fileStaleTold = new Set();
+  let fileAdoptedKey = null;
 
   const saveButton = uiButton(strings.file.save, {
     class: "ui-btn ui-btn--accent",
@@ -277,6 +287,10 @@ function mountFilePanel(host, api) {
   }
 
   async function pickFolder() {
+    // Другая папка — другая история: и общий предок, и разговор о прежних
+    // файлах начинаются заново.
+    fileAdoptedKey = null;
+    fileSnapshotName = null;
     try {
       await autosavePickFolder();
     } catch (error) {
@@ -346,6 +360,14 @@ function mountFilePanel(host, api) {
     if (result && result.ok) {
       fileFailReported = false;
       if (result.project) markSaved(result.project);
+      // Имя снимка идёт за именем объекта: переименовали — записался новый
+      // файл, а прежний остался лежать. Молчать об этом нельзя, он ведь
+      // выглядит как рабочий.
+      if (result.name && result.name !== fileSnapshotName) {
+        const renamed = Boolean(fileSnapshotName);
+        fileSnapshotName = result.name;
+        if (renamed) folderStale();
+      }
     } else if (result && result.error && !fileFailReported) {
       fileFailReported = true;
       // Не прошедшая сверка — не то же, что «не смогли записать»: файл в папке
@@ -355,6 +377,104 @@ function mountFilePanel(host, api) {
       notify(failed, "error");
     }
     renderStatus();
+  }
+
+  // ——— прежние файлы объекта в папке ————————————————————————————————
+  //
+  // Раньше снимок звался «<объект>-<дата>-<хвост>.zip» и заводился заново
+  // каждый день, поэтому у тех, кто ведёт объект давно, в папке лежит стопка
+  // файлов. Теперь файл один, а прежние — данные пользователя: удалять их
+  // молча нельзя, промолчать тоже (он их видит и не понимает, какой рабочий).
+
+  // Папка открыта — берём из своего снимка общего предка для слияния и
+  // заодно смотрим, не осталось ли в ней прежних файлов этого объекта.
+  async function folderAdopt() {
+    const project = getState().project;
+    const status = autosaveStatus();
+    if (!project || !autosaveReady()) return;
+    const key = status.folder + "|" + project.id;
+    if (fileAdoptedKey === key) return;
+    fileAdoptedKey = key;
+    fileSnapshotName = autosaveSnapshotName(project);
+    try {
+      const found = await autosaveAdoptFolder(project);
+      if (found) tellAboutStale(found.stale);
+    } catch (error) {
+      // Папка могла стать недоступной — об этом скажет первая же запись.
+    }
+  }
+
+  // То же самое, но без предка: после переименования объекта предок у нас уже
+  // свой, а список прежних файлов надо перечитать.
+  async function folderStale() {
+    const project = getState().project;
+    if (!project || !autosaveReady()) return;
+    try {
+      const own = await autosaveOwnSnapshots(project);
+      const current = autosaveSnapshotName(project);
+      tellAboutStale(own.filter((item) => item.name !== current));
+    } catch (error) {
+      /* папка недоступна — тем более не о чем говорить */
+    }
+  }
+
+  function tellAboutStale(stale) {
+    const list = (stale || []).filter((item) => !fileStaleTold.has(item.name));
+    if (list.length === 0) return;
+    for (const item of list) fileStaleTold.add(item.name);
+    staleDialog(list);
+  }
+
+  function staleDialog(stale) {
+    const names = uiEl("ul", { class: "merge-list" });
+    for (const item of stale) names.append(uiEl("li", { text: item.name }));
+    let modal;
+    const remove = uiButton(strings.autosave.staleRemove, {
+      class: "ui-btn ui-btn--danger",
+      on: {
+        click: async () => {
+          modal.close();
+          await removeStale(stale.map((item) => item.name));
+        },
+      },
+    });
+    // Окно всплывает само, без просьбы, — поэтому по Enter файлы остаются, а
+    // не удаляются: основное действие здесь безопасное.
+    const keep = uiButton(strings.autosave.staleKeep, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => modal.close() },
+    });
+    modal = uiModal({
+      title: strings.autosave.staleTitle,
+      body: [
+        uiEl("p", {
+          class: "modal__text",
+          text: text("autosave.staleText", { file: currentFileName(), count: stale.length }),
+        }),
+        names,
+        uiEl("p", { class: "modal__hint", text: strings.autosave.staleSafe }),
+      ],
+      actions: [remove, keep],
+      primary: keep,
+    });
+  }
+
+  async function removeStale(names) {
+    const project = getState().project;
+    if (!project) return;
+    let result = null;
+    try {
+      result = await autosaveRemoveSnapshots(project, names);
+    } catch (error) {
+      notify(strings.autosave.failed, "error");
+      return;
+    }
+    if (result.removed.length > 0) {
+      notify(text("autosave.staleRemoved", { count: result.removed.length }), "success");
+    }
+    if (result.kept.length > 0) {
+      notify(text("autosave.staleKept", { count: result.kept.length }), "error");
+    }
   }
 
   // ——— чужие правки в общей папке ————————————————————————————————————
@@ -434,6 +554,9 @@ function mountFilePanel(host, api) {
       fileWatching = false;
       autosaveStopWatch();
     }
+    // Не однажды: объект на экране появляется позже папки, а сам разбор
+    // повторного вызова не боится — он идёт один раз на пару «папка + объект».
+    if (ready) folderAdopt();
   }
 
   // ——— состояние и строка в шапке ————————————————————————————————————
@@ -519,6 +642,9 @@ function mountFilePanel(host, api) {
       return;
     }
     syncProjectSelect(state.project);
+    // Объект переключили — предок слияния берётся из его снимка, а не из
+    // чужого; заодно видно, не осталось ли в папке его прежних файлов.
+    syncWatch();
     if (state.project && state.project !== fileSavedProject) {
       // Не вложенным вызовом: подписчики сейчас в середине обхода.
       queueMicrotask(() => {
