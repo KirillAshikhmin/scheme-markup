@@ -13,6 +13,7 @@ import {
   compactAllNumbers,
   findMark,
   findRoom,
+  labelCounts,
   labelOf,
   markControlIds,
   markControls,
@@ -58,6 +59,24 @@ export function marksCenteredView(scheme, mark, view) {
   if (!host || !host.clientWidth || !host.clientHeight) return view;
   const local = planToScreen(mark.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
   return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
+}
+
+/**
+ * Перечень обозначений для строки свойств: повторы названы один раз и с числом.
+ *
+ * Заказчик нарочно вешает на один номер группу светильников, и перечень связей
+ * превращался в «Т3, Т3, Т3, ППл1, ППл1, ППл2, ППл1…». Его слова: «если метки
+ * с одинаковым номером, то в интерфейсе указывай только 1 раз».
+ *
+ * Число повторов показывается, а не выбрасывается: связей у метки больше, чем
+ * имён в строке, и без «×3» строка обещала бы один светильник вместо трёх.
+ * Знак взят тот же, что у отметки повтора номера в строке списка, — «×N» в
+ * этой панели уже значит «столько же меток».
+ */
+export function marksLabelList(labels) {
+  return labelCounts(labels).map((item) =>
+    item.count > 1 ? text("marks.labelTimes", { label: item.label, count: item.count }) : item.label,
+  );
 }
 
 // Кто кем управляет — одним проходом по объекту: спрашивать модель на каждую
@@ -314,8 +333,11 @@ export function marksRowModel(project, row, options = {}) {
     // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
     // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
     sizes: markSizesSummary(mark),
-    controls: markControls(project, mark.id).map((item) => labelOf(project, item.id)),
-    controlledBy: controllers.get(mark.id) || [],
+    // Обе стороны связи — свёрнутым перечнем: повторы номера есть и у
+    // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
+    // одной группы носят один номер.
+    controls: marksLabelList(markControls(project, mark.id).map((item) => labelOf(project, item.id))),
+    controlledBy: marksLabelList(controllers.get(mark.id) || []),
   };
   return head;
 }

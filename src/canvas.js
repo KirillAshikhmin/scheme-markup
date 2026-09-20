@@ -11,12 +11,13 @@
 import { layoutAllows, PANEL_IDS, registerPanel } from "./app.js";
 import { strings, text } from "./strings.js";
 import {
-  BLOCK_STEP_PX,
+  DEFAULT_MARK_SIZE,
   OUTLINE_MIN_POINTS,
   addMark,
   addOutline,
   addToGroup,
   applyRoomOutlines,
+  blockStepPx,
   deleteMark,
   deleteOutline,
   findScheme,
@@ -711,11 +712,13 @@ function canvasHandleColor(state, mark) {
   return typeId && typeId !== mark.typeId ? styleOf(state.project, typeId).color : null;
 }
 
-// Шаг блока — не меньше умолчания модели и не меньше двух радиусов метки,
-// иначе соседние точки блока сливаются в одну кляксу.
+// Шаг блока считается от величины знака метки — той самой, что стоит у
+// пользователя в ползунке: метки в блоке должны стоять как розетки в одной
+// рамке при любой величине. Прежний нижний порог в пикселях это ломал —
+// у мелкой метки он разносил блок на семь радиусов.
 function canvasBlockStep(state) {
-  const size = state.project && state.project.view ? state.project.view.markSize : 10;
-  return Math.max(BLOCK_STEP_PX, size * 2.6);
+  const view = state.project ? state.project.view : null;
+  return blockStepPx(view ? view.markSize : DEFAULT_MARK_SIZE);
 }
 
 // Ручка «+» ставит метку выбранного типа: выбрана «Р» — рядом с выключателем
@@ -1611,12 +1614,18 @@ function canvasPointerDown(event) {
     }
   }
 
-  // Ручка «+» важнее всего остального: она и есть быстрый путь.
+  // Ручка «+» важнее всего остального: она и есть быстрый путь. Важнее всего,
+  // кроме уже стоящей под ней метки: ручка висит ровно на шаге блока, то есть
+  // накрывает соседа по блоку, и без этой оговорки клик по соседу ставил бы
+  // третью метку поверх него вместо того, чтобы его выделить. Своя метка не в
+  // счёт — её ручки на то и ручки.
   if (editable && state.selectedMarkIds.length === 1) {
     const selected = findMark(state.project, state.selectedMarkIds[0]);
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
       const side = hitHandle(scheme, selected, point, view);
-      if (side) {
+      const covered = side ? hitTest(state.project, scheme, point, view, state.filter) : null;
+      const neighbour = covered && covered.part === "mark" && covered.markId !== selected.id;
+      if (side && !neighbour) {
         canvasBlockPoint(selected.id, side);
         canvasDrag = { kind: "done", start: point, moved: false };
         return;

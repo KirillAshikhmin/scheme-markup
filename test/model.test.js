@@ -6,6 +6,8 @@ import {
   acceptedProblems,
   addCategory,
   BLOCK_STEP_PX,
+  BLOCK_STEP_RATIO,
+  DEFAULT_MARK_SIZE,
   CODE_MAX_LENGTH,
   LABEL_ANGLES,
   codeProblem,
@@ -35,6 +37,7 @@ import {
   findPlacement,
   findScheme,
   markControls,
+  labelCounts,
   labelOf,
   markByCode,
   MARK_DIMENSION_FIELDS,
@@ -355,11 +358,11 @@ test("соседняя точка блока встаёт рядом по выб
   const step = putPoint(base, first.id, "В", { x: 0.5, y: 0.5 });
   const right = addToGroup(step.project, step.mark.id, "right");
   assert.equal(right.project.marks.length, 2);
-  assert.deepEqual(right.mark.points[0], { x: 0.5 + 28 / 1000, y: 0.5 });
+  assert.deepEqual(right.mark.points[0], { x: 0.5 + BLOCK_STEP_PX / 1000, y: 0.5 });
   assert.equal(labelOf(right.project, right.group.id), "В1В2");
 
   const up = addToGroup(right.project, right.mark.id, "up");
-  assert.deepEqual(up.mark.points[0], { x: 0.5 + 28 / 1000, y: 0.5 - 28 / 2000 });
+  assert.deepEqual(up.mark.points[0], { x: 0.5 + BLOCK_STEP_PX / 1000, y: 0.5 - BLOCK_STEP_PX / 2000 });
   assert.equal(findGroup(up.project, right.group.id).markIds.length, 3);
   assert.equal(labelOf(up.project, right.group.id), "В1В2В3");
 });
@@ -742,14 +745,16 @@ test("у схемы без размеров шаг блока считается
     points: [{ x: 0.5, y: 0.5 }],
   });
 
-  // запасной размер плана — 1000 px, шаг BLOCK_STEP_PX = 28 px, то есть 0,028 доли
-  assert.equal(BLOCK_STEP_PX, 28);
+  // Запасной размер плана — 1000 px, шаг — 2,4 радиуса знака метки по
+  // умолчанию, то есть 38,4 px и 0,0384 доли.
+  assert.equal(BLOCK_STEP_PX, DEFAULT_MARK_SIZE * BLOCK_STEP_RATIO);
+  const far = 0.5 + BLOCK_STEP_PX / 1000;
   const right = addToGroup(step.project, step.mark.id, "right");
-  assert.ok(Math.abs(right.mark.points[0].x - 0.528) < 1e-12, String(right.mark.points[0].x));
+  assert.ok(Math.abs(right.mark.points[0].x - far) < 1e-12, String(right.mark.points[0].x));
   assert.equal(right.mark.points[0].y, 0.5);
 
   const down = addToGroup(right.project, right.mark.id, "down");
-  assert.ok(Math.abs(down.mark.points[0].y - 0.528) < 1e-12, String(down.mark.points[0].y));
+  assert.ok(Math.abs(down.mark.points[0].y - far) < 1e-12, String(down.mark.points[0].y));
 });
 
 // Настоящий подрозетник: в одной рамке рядом стоят выключатель и розетка.
@@ -766,7 +771,7 @@ test("«+» ставит метку выбранного типа: в блоке
   assert.deepEqual(findGroup(socket.project, socket.group.id).markIds, [step.mark.id, socket.mark.id]);
   assert.equal(findMark(socket.project, socket.mark.id).groupId, socket.group.id);
   assert.equal(findMark(socket.project, socket.mark.id).schemeId, first.id);
-  assert.deepEqual(socket.mark.points[0], { x: 0.5 + 28 / 1000, y: 0.5 });
+  assert.deepEqual(socket.mark.points[0], { x: 0.5 + BLOCK_STEP_PX / 1000, y: 0.5 });
   // Цвет и форма — свои у каждой метки блока: он и должен быть разноцветным.
   assert.notDeepEqual(styleOf(socket.project, typeId(base, "Р")), styleOf(socket.project, typeId(base, "В")));
 
@@ -866,6 +871,26 @@ test("повтор номера разрешён, а счётчик типа н�
   lost.counters = {};
   const rescued = putPoint(lost, first.id, "Т");
   assert.equal(labelOf(rescued.project, rescued.mark.id), "Т22");
+});
+
+// Повтор номера намеренный, а перечень связей от него разбухал: «Т3, Т3, Т3,
+// ППл1, ППл1, ППл2, ППл1…». Модель считает повторы, словами распоряжается
+// панель.
+test("перечень обозначений сворачивает повторы и считает их", () => {
+  assert.deepEqual(labelCounts(["Т3", "Т3", "Т3", "ППл1", "ППл1", "ППл2", "ППл1"]), [
+    { label: "Т3", count: 3 },
+    { label: "ППл1", count: 3 },
+    { label: "ППл2", count: 1 },
+  ]);
+  // Порядок — по первому появлению: перечень читается так же, как список меток.
+  assert.deepEqual(labelCounts(["Р2", "Р1", "Р2"]), [
+    { label: "Р2", count: 2 },
+    { label: "Р1", count: 1 },
+  ]);
+  // Пустого имени в перечне не бывает: метка без типа называется «?N».
+  assert.deepEqual(labelCounts(["", null, undefined, "В1"]), [{ label: "В1", count: 1 }]);
+  assert.deepEqual(labelCounts([]), []);
+  assert.deepEqual(labelCounts(null), []);
 });
 
 // Уплотнение смыкает ряд номеров, но намеренный повтор — часть разметки:

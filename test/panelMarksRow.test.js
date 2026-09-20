@@ -19,7 +19,7 @@ import {
   updateMark,
 } from "../src/model.js";
 import { filtersMarkRows } from "../src/panels/filters.js";
-import { marksControllerIndex, marksRowModel } from "../src/panels/marks.js";
+import { marksControllerIndex, marksLabelList, marksRowModel } from "../src/panels/marks.js";
 
 function flat() {
   let project = createProject({ name: "Квартира" });
@@ -152,4 +152,64 @@ test("в раскрытой строке видно, заданы ли у мет
   assert.equal(marksRowModel(box.project, rowOf(box, box.lampTwo), { open: true }).fields.sizes, "");
   // В свёрнутой строке полей нет вовсе — размеры их не заводят.
   assert.equal(marksRowModel(box.project, rowOf(box, box.lampOne), { open: false }).fields, null);
+});
+
+// ——— перечень связей ——————————————————————————————————————————————————
+//
+// Заказчик вешает на один номер группу светильников, и перечень в строке
+// свойств выглядел так: «Управляет: Т3, Т3, Т3, ППл1, ППл1, ППл2, ППл1…».
+// Его слова: «если метки с одинаковым номером, то в интерфейсе указывай
+// только 1 раз».
+test("повторяющиеся обозначения в перечне связей названы один раз и с числом", () => {
+  const box = flat();
+  // Третий светильник — чтобы под номером «Т1» их стало три.
+  const third = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: box.project.markTypes.find((type) => type.code === "Т").id,
+    kind: "point",
+    points: [{ x: 0.4, y: 0.5 }],
+  });
+  box.project = third.project;
+  box.project = setMarkNumber(box.project, box.lampTwo, 1).project;
+  box.project = setMarkNumber(box.project, third.mark.id, 1).project;
+  box.project = setMarkControls(box.project, box.switchOne, [box.lampOne, box.lampTwo, third.mark.id]).project;
+
+  const view = marksRowModel(box.project, rowOf(box, box.switchOne), { open: true });
+  assert.deepEqual(view.fields.controls, ["Т1 ×3"], "повторы в перечне не свернулись");
+
+  // Разные номера остаются перечнем, одиночный номер числа не получает.
+  box.project = setMarkNumber(box.project, third.mark.id, 5).project;
+  assert.deepEqual(marksRowModel(box.project, rowOf(box, box.switchOne), { open: true }).fields.controls, [
+    "Т1 ×2",
+    "Т5",
+  ]);
+});
+
+test("обратная сторона связи сворачивается так же: два проходных под одним номером", () => {
+  const box = flat();
+  const twin = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: box.project.markTypes.find((type) => type.code === "В").id,
+    kind: "point",
+    points: [{ x: 0.15, y: 0.5 }],
+  });
+  box.project = twin.project;
+  // Проходные выключатели одной группы носят один номер — это приём заказчика.
+  box.project = setMarkNumber(box.project, twin.mark.id, 1).project;
+  box.project = setMarkControls(box.project, twin.mark.id, [box.lampOne]).project;
+
+  const controllers = marksControllerIndex(box.project);
+  const view = marksRowModel(box.project, rowOf(box, box.lampOne), { open: true, controllers });
+  assert.deepEqual(view.fields.controlledBy, ["В1 ×2"]);
+  // У метки без управляющих строка по-прежнему пуста.
+  assert.deepEqual(
+    marksRowModel(box.project, rowOf(box, box.switchOne), { open: true, controllers }).fields.controlledBy,
+    [],
+  );
+});
+
+test("перечень обозначений считается отдельно от строки: пустой список — пустой перечень", () => {
+  assert.deepEqual(marksLabelList([]), []);
+  assert.deepEqual(marksLabelList(null), []);
+  assert.deepEqual(marksLabelList(["Р1", "Р2", "Р1", "Р1"]), ["Р1 ×3", "Р2"]);
 });
