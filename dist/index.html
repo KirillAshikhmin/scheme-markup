@@ -1540,6 +1540,24 @@
   color: var(--panel-muted);
 }
 
+/* Перечень связей переносится, а не уезжает за край. Кнопки панели по общему
+   правилу не переносят строку (`.ui-btn { white-space: nowrap }`), и десяток
+   связей растягивал строку метки настолько, что в списке появлялась
+   горизонтальная прокрутка. Слова заказчика: «поле становится длинным, пусть
+   переносится, а то появляется горизонтальный скролл».
+
+   Класс кнопки в селекторе дописан нарочно: в собранном файле стили склеены
+   по именам файлов, `panels.css` идёт после `marks.css`, и при равном весе
+   селекторов общее `nowrap` перебило бы перенос.
+   `min-width: 0` — чтобы кнопка считала ширину по колонке, а не по своему
+   содержимому: без него перенос не спасает от растянутой строки. */
+.mark-row__controls.ui-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  line-height: 1.35;
+}
+
 .mark-row__controls.is-set {
   color: var(--panel-text);
   border-color: var(--accent);
@@ -1549,6 +1567,10 @@
   margin: 0;
   color: var(--panel-muted);
   font-size: 12px;
+  /* Та же беда, что у кнопки связей: длинный перечень управляющих не должен
+     растягивать строку метки. */
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .controls-pick {
@@ -4278,6 +4300,10 @@ const strings = {
     controlsOf: "Управляет: {labels}",
     controlsTitle: "Выбрать метки, которыми управляет эта",
     controlledBy: "Управляется: {labels}",
+    // Повтор в перечне связей: «Т3 ×3» — одно имя и число меток под ним.
+    // Знак тот же, что у отметки повтора номера в строке списка
+    // (`repeatBadge`): одна привычка на обе — «×N» значит «столько же меток».
+    labelTimes: "{label} ×{count}",
     focus: "Показать метку на плане",
     // Уплотнение по всему объекту: кнопка под списком меток. Одиночное, по
     // типу, осталось в справочнике — здесь речь про все типы разом.
@@ -4886,8 +4912,40 @@ const CODE_MAX_LENGTH = 16;
 // листе; длинный код так превращается в кашу и сворачивается в диапазон.
 const CODE_GLUE_MAX = 2;
 
-// Шаг соседней точки блока в пикселях плана (доля считается от размера схемы).
-const BLOCK_STEP_PX = 28;
+// Величина знака метки нового объекта — радиус в пикселях плана. Объявлена
+// здесь, а не в `DEFAULT_VIEW`, потому что от неё считается шаг блока, и обе
+// величины обязаны читаться рядом: разойдись они — соседняя метка встанет не
+// там, где нарисована ручка «+».
+const DEFAULT_MARK_SIZE = 16;
+
+/**
+ * Шаг соседней точки блока — **в радиусах знака метки**, а не в пикселях.
+ *
+ * Слова заказчика: «добавляй метку прям рядом с текущей, а то сейчас на
+ * большом расстоянии». Рядом — это как розетки в одной рамке, и мерить такое
+ * абсолютным числом нельзя: у метки есть настройка величины, и при мелком
+ * знаке прежние 28 пикселей разносили блок на семь радиусов.
+ *
+ * Откуда 2,4:
+ *   — знак рисуется радиусом `markSize`, обводка добавляет ещё 0,11 радиуса,
+ *     то есть два соседних знака касаются на 2,22 радиуса — ближе нельзя,
+ *     иначе блок сливается в кляксу;
+ *   — ручка «+» стоит ровно на 2,4 радиуса от центра метки (`HANDLE_GAP`
+ *     в `render.js`), и новая метка встаёт **ровно туда, куда нажали**;
+ *   — просвет между знаками получается 0,18 радиуса: знаки не сливаются,
+ *     но читаются как одна рамка.
+ * Согласие с ручкой проверено `test/blockStep.test.js` через `hitHandle`.
+ */
+const BLOCK_STEP_RATIO = 2.4;
+
+// Шаг блока в пикселях плана для заданной величины метки.
+function blockStepPx(markSize) {
+  const size = Number.isFinite(markSize) && markSize > 0 ? markSize : DEFAULT_MARK_SIZE;
+  return size * BLOCK_STEP_RATIO;
+}
+
+// Шаг для величины метки по умолчанию: им пользуется тот, кто величины не знает.
+const BLOCK_STEP_PX = blockStepPx(DEFAULT_MARK_SIZE);
 // Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
 const BLOCK_FALLBACK_SIZE_PX = 1000;
 // Цвет метки, когда категория недоступна.
@@ -5170,7 +5228,7 @@ function markLabelLeader(mark) {
 // вообще есть. Двадцать пикселей — это 3,2 мм подписи и 5 мм значка.
 // Регулятор никуда не делся: это только начальное значение нового объекта,
 // у размеченных объектов свои числа уже записаны.
-const DEFAULT_VIEW = { markSize: 16, labelSize: 20 };
+const DEFAULT_VIEW = { markSize: DEFAULT_MARK_SIZE, labelSize: 20 };
 
 const TEMPLATE_CATEGORIES = [
   { key: "light", name: strings.categories.light, color: "#1F6FEB", shape: "circle-cross" },
@@ -5811,6 +5869,39 @@ function labelOf(project, id) {
 function markLabel(project, mark) {
   const type = findType(project, mark.typeId);
   return (type ? type.code : "?") + mark.number;
+}
+
+/**
+ * Перечень обозначений без повторов: `[{label, count}]` в порядке первого
+ * появления.
+ *
+ * Повтор номера — приём заказчика: группа светильников под одним номером это
+ * несколько меток «Т3». В перечне связей они превращались в «Т3, Т3, Т3, ППл1,
+ * ППл1, ППл2, ППл1…» — строка уезжала за край панели. Его слова: «если метки
+ * с одинаковым номером, то в интерфейсе указывай только 1 раз».
+ *
+ * Число повторов возвращается вместе с именем, а не выбрасывается: связей
+ * больше, чем имён, и сказать об этом больше нечем. Как его показать, решает
+ * панель — модель словами не распоряжается.
+ *
+ * Тем же правилом живёт подпись блока (`blockLabelParts`): одинаковые
+ * обозначения в ней тоже названы один раз.
+ */
+function labelCounts(labels) {
+  const known = new Map();
+  const order = [];
+  for (const label of Array.isArray(labels) ? labels : []) {
+    if (!label) continue;
+    const seen = known.get(label);
+    if (seen) {
+      seen.count += 1;
+      continue;
+    }
+    const entry = { label, count: 1 };
+    known.set(label, entry);
+    order.push(entry);
+  }
+  return order;
 }
 
 // Порядок меток внутри блока — один на всё приложение: сперва порядок типа
@@ -15162,11 +15253,13 @@ function canvasHandleColor(state, mark) {
   return typeId && typeId !== mark.typeId ? styleOf(state.project, typeId).color : null;
 }
 
-// Шаг блока — не меньше умолчания модели и не меньше двух радиусов метки,
-// иначе соседние точки блока сливаются в одну кляксу.
+// Шаг блока считается от величины знака метки — той самой, что стоит у
+// пользователя в ползунке: метки в блоке должны стоять как розетки в одной
+// рамке при любой величине. Прежний нижний порог в пикселях это ломал —
+// у мелкой метки он разносил блок на семь радиусов.
 function canvasBlockStep(state) {
-  const size = state.project && state.project.view ? state.project.view.markSize : 10;
-  return Math.max(BLOCK_STEP_PX, size * 2.6);
+  const view = state.project ? state.project.view : null;
+  return blockStepPx(view ? view.markSize : DEFAULT_MARK_SIZE);
 }
 
 // Ручка «+» ставит метку выбранного типа: выбрана «Р» — рядом с выключателем
@@ -16057,12 +16150,18 @@ function canvasPointerDown(event) {
     }
   }
 
-  // Ручка «+» важнее всего остального: она и есть быстрый путь.
+  // Ручка «+» важнее всего остального: она и есть быстрый путь. Важнее всего,
+  // кроме уже стоящей под ней метки: ручка висит ровно на шаге блока, то есть
+  // накрывает соседа по блоку, и без этой оговорки клик по соседу ставил бы
+  // третью метку поверх него вместо того, чтобы его выделить. Своя метка не в
+  // счёт — её ручки на то и ручки.
   if (editable && state.selectedMarkIds.length === 1) {
     const selected = findMark(state.project, state.selectedMarkIds[0]);
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
       const side = hitHandle(scheme, selected, point, view);
-      if (side) {
+      const covered = side ? hitTest(state.project, scheme, point, view, state.filter) : null;
+      const neighbour = covered && covered.part === "mark" && covered.markId !== selected.id;
+      if (side && !neighbour) {
         canvasBlockPoint(selected.id, side);
         canvasDrag = { kind: "done", start: point, moved: false };
         return;
@@ -23943,6 +24042,24 @@ function marksCenteredView(scheme, mark, view) {
   return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
 }
 
+/**
+ * Перечень обозначений для строки свойств: повторы названы один раз и с числом.
+ *
+ * Заказчик нарочно вешает на один номер группу светильников, и перечень связей
+ * превращался в «Т3, Т3, Т3, ППл1, ППл1, ППл2, ППл1…». Его слова: «если метки
+ * с одинаковым номером, то в интерфейсе указывай только 1 раз».
+ *
+ * Число повторов показывается, а не выбрасывается: связей у метки больше, чем
+ * имён в строке, и без «×3» строка обещала бы один светильник вместо трёх.
+ * Знак взят тот же, что у отметки повтора номера в строке списка, — «×N» в
+ * этой панели уже значит «столько же меток».
+ */
+function marksLabelList(labels) {
+  return labelCounts(labels).map((item) =>
+    item.count > 1 ? text("marks.labelTimes", { label: item.label, count: item.count }) : item.label,
+  );
+}
+
 // Кто кем управляет — одним проходом по объекту: спрашивать модель на каждую
 // строку значило бы пересортировать все метки полтысячи раз.
 function marksControllerIndex(project) {
@@ -24197,8 +24314,11 @@ function marksRowModel(project, row, options = {}) {
     // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
     // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
     sizes: markSizesSummary(mark),
-    controls: markControls(project, mark.id).map((item) => labelOf(project, item.id)),
-    controlledBy: controllers.get(mark.id) || [],
+    // Обе стороны связи — свёрнутым перечнем: повторы номера есть и у
+    // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
+    // одной группы носят один номер.
+    controls: marksLabelList(markControls(project, mark.id).map((item) => labelOf(project, item.id))),
+    controlledBy: marksLabelList(controllers.get(mark.id) || []),
   };
   return head;
 }
