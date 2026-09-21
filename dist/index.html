@@ -3654,7 +3654,6 @@ const strings = {
     network: "Сетевое оборудование",
     intercom: "Домофон",
     curtains: "Карнизы",
-    unassigned: "Не назначено",
     appliances: "Электроприборы",
     cinema: "Кинотеатр",
     sensors: "Датчики",
@@ -3683,7 +3682,6 @@ const strings = {
     switchToggle: "Переключатель",
     switchToggleDouble: "Переключатель двойной",
     nightLight: "Ночник",
-    unassigned: "Не определено",
     socket380: "Розетка 380",
     presence: "Датчик присутствия",
     dryer: "Сушилка Электрическая",
@@ -5386,24 +5384,32 @@ const DEFAULT_VIEW = { markSize: DEFAULT_MARK_SIZE, labelSize: 20 };
 // «справочник типов в общий возьми из этого проекта». Комнаты он прислал
 // вместе с ним и тут же добавил «Комнаты не нужны» — в шаблон они не попали.
 //
-// Тринадцать категорий и сорок восемь типов приехали как есть, включая коды,
+// Двенадцать категорий и сорок семь типов приехали как есть, включая коды,
 // которые разошлись с прежним шаблоном: `П` теперь переключатель (был
 // подсветкой), `ВП` — витая пара (был проходным переключателем), а подсветка
 // зовётся `ПС`. Размеченный объект от этого не меняется: справочник копируется
 // при создании и дальше живёт отдельно (G68), новые типы попадают в старый
 // объект только кнопкой «Добавить из общей базы».
 //
+// Категорию «Не назначено» (`#FF007F`, крест) с единственным типом `ВОПРОС` он
+// потом попросил убрать — «категорию „Не назначено“ удали», — и она ушла
+// вместе с типом: тип без категории в модели не живёт. Заодно ушла самая
+// тесная пара цветов, 21,4 с «Сантехникой».
+//
 // Справочник **нарушает два наших правила** — повтор знака у точечных типов и
 // близкий цвет у категорий, — и нарушает сознательно: заказчику показали числа
 // (семь типов «Света» под одним кругом с крестом, ещё четыре пары знаков,
-// пять пар цветов ближе порога 29), и он выбрал «взять как есть». Довод его
+// пары цветов ближе порога 29), и он выбрал «взять как есть». Довод его
 // сильный: рядом со знаком на плане **всегда стоит подпись** — Т1, С2, ПК1, —
 // и монтажник читает её, а не форму; правило заводилось, воображая знак без
 // подписи, а такого на плане не бывает.
 //
 // Поэтому оба правила стали предупреждением, а не запретом: `validate` собирает
-// их через `sharedShapes` и `closeCategoryColors`, и панель предупреждений
-// показывает их как сведения об объекте. Строгими остались отпечаток самих
+// их через `sharedShapes` и `closeCategoryColors`. На новом объекте эти
+// предупреждения сразу же принимаются за пользователя (`acceptFromDictionary`):
+// его слова — «в стандартной схеме не должно быть предупреждений», — и он прав,
+// пустой объект обязан встречать тишиной. Ничего при этом не прячется: список
+// принятых виден в панели, и любая строка возвращается одним нажатием. Строгими остались отпечаток самих
 // фигур и начертаний (`test/shapes.test.js`, `test/lineStyle.test.js` — они про
 // палитру, а не про справочник) и пометка занятых и близких цветов в окне
 // выбора цвета: заводя новую категорию, человек по-прежнему видит, куда не
@@ -5420,9 +5426,6 @@ const TEMPLATE_CATEGORIES = [
   { key: "network", name: strings.categories.network, color: "#8250DF", shape: "star" },
   { key: "intercom", name: strings.categories.intercom, color: "#D901C4", shape: "triangle-down" },
   { key: "curtains", name: strings.categories.curtains, color: "#9d4c01", shape: "diamond" },
-  // «Не назначено» — категория для точки, про которую на объекте ещё не решили,
-  // что это. Розовый крест заметен нарочно: такую метку надо доразобрать.
-  { key: "unassigned", name: strings.categories.unassigned, color: "#FF007F", shape: "plus" },
   { key: "appliances", name: strings.categories.appliances, color: "#1DAB1D", shape: "square-bolt" },
   { key: "cinema", name: strings.categories.cinema, color: "#001BDD", shape: "square-wave" },
   { key: "sensors", name: strings.categories.sensors, color: "#164E63", shape: "circle-ring" },
@@ -5461,7 +5464,6 @@ const TEMPLATE_TYPES = [
   { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1 },
   { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2 },
   { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain" },
-  { category: "unassigned", code: "ВОПРОС", name: strings.types.unassigned },
   // Розетка 380: три отверстия по кругу против двух у обычной — на плане их
   // не спутать.
   { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple" },
@@ -5549,7 +5551,7 @@ function defaultTemplate() {
 function createProject(template) {
   const source = template && template.categories && template.markTypes ? clone(template) : defaultTemplate();
   const stamp = nowIso();
-  return {
+  const project = {
     formatVersion: FORMAT_VERSION,
     id: newId(),
     // Постоянный ключ объекта: заводится здесь и не меняется никогда — ни при
@@ -5601,6 +5603,12 @@ function createProject(template) {
     counters: {},
     view: { ...DEFAULT_VIEW, ...(source.view || {}) },
   };
+  // Всё, о чём справочник нового объекта мог бы предупредить, он принёс с
+  // собой: человек этих знаков и цветов не выбирал, он только что нажал
+  // «Создать объект». Поэтому ответ «так и задумано» даётся сразу — иначе
+  // пустой объект встречал бы десятком жёлтых строк. Список принятых при этом
+  // виден, и любую строку возвращают одним нажатием.
+  return acceptFromDictionary(project, new Set());
 }
 
 // ——— поиск ———————————————————————————————————————————————————————————
@@ -7314,6 +7322,10 @@ function catalogOffer(project, templates) {
 function addTypesFromCatalog(project, templates, typeKeys) {
   const wanted = new Set([...(typeKeys || [])].map(catalogRowKey).filter(Boolean));
   const base = catalogMerge(templates);
+  // Что объект знал о своём справочнике до добавления: повторы и близкие цвета,
+  // которые человек уже видел, останутся видимыми, а то, что принесёт с собой
+  // общая база, примется молча — знаков в ней он не выбирал.
+  const known = openDictionarySubjects(project);
   let next = project;
   const types = [];
   const created = [];
@@ -7368,7 +7380,7 @@ function addTypesFromCatalog(project, templates, typeKeys) {
     }
     next = deleteCategory(next, category.id).project;
   }
-  return { project: next, types, categories, skipped };
+  return { project: acceptFromDictionary(next, known), types, categories, skipped };
 }
 
 // Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.
@@ -8401,8 +8413,9 @@ function validate(project) {
   // Повтор знака и похожий цвет категорий — сведения об объекте, а не поломка.
   // Справочник заказчика держит и то и другое сознательно (см. `sharedShapes`),
   // и панель показывает это строкой, которую можно закрыть «так и задумано».
-  // Ключ принятия — сам знак и сама пара категорий, а не список типов под ними:
-  // восьмой светильник под кругом с крестом не должен возвращать закрытое.
+  // Ключ принятия — не сам знак, а **состав** под ним: принято «вот эти семь
+  // типов носят круг с крестом». Развёл человек знаки руками и завёл новый
+  // повтор тем же кругом — состав другой, и он об этом узнает.
   for (const group of sharedShapes(project)) {
     problems.push(
       problem(
@@ -8410,7 +8423,7 @@ function validate(project) {
         { shape: group.name, codes: group.codes.join(", ") },
         group.typeIds[0],
         "warning",
-        group.shape,
+        sharedShapeSubject(group),
       ),
     );
   }
@@ -8421,7 +8434,7 @@ function validate(project) {
         { first: pair.first, second: pair.second, distance: colorDistanceText(pair.distance) },
         pair.categoryIds[0],
         "warning",
-        pair.categoryIds.join("+"),
+        closeColorsSubject(pair),
       ),
     );
   }
@@ -8484,6 +8497,99 @@ function validate(project) {
 // Отсюда же цена решения: принятое молчит и тогда, когда повтор сложился
 // заново — тем же номером, но из других меток. Поэтому ни одна запись не
 // пропадает молча: весь список виден в панели, и каждую строку можно вернуть.
+
+// ——— предупреждения, пришедшие не из рук человека ————————————————————
+//
+// Два предупреждения говорят не о разметке, а о самом справочнике: один знак
+// на нескольких типах и похожий цвет у двух категорий. Справочник заказчика
+// держит и то и другое сознательно, и на новом объекте он же и приезжает —
+// значит на пустом объекте эти строки говорили бы человеку о том, чего он не
+// делал. Слова заказчика: «в стандартной схеме не должно быть предупреждений».
+//
+// Правило при этом не выброшено. Развёл человек знаки руками, а потом завёл
+// новый повтор — предупреждение он получит: принимается только то, что
+// приехало со справочником, и только в тот момент, когда справочник приехал —
+// при создании объекта и при «Добавить из общей базы». Всё, что появилось
+// потом, считается как считалось.
+//
+// Выбран путь «принять за пользователя», а не «не считать шаблонное
+// предупреждением»: второй требует признака «из шаблона» у каждого типа, а
+// такой признак поехал бы в данные и начал бы врать при первой же правке
+// знака. Принятие — механизм, который в сборке уже есть, и главное: оно
+// ничего не прячет. Список принятых виден в панели, каждая строка называет
+// то, на что ответили, и возвращается в работу одним нажатием.
+const DICTIONARY_PROBLEM_CODES = ["sharedShape", "closeColors"];
+
+// Предмет предупреждения и его нынешний состав — две разные вещи, и обе нужны.
+//
+// **Состав** идёт в ключ принятия: принято не «круг с крестом», а «вот эти семь
+// типов носят круг с крестом». Состав считается по идентификаторам типов, а не
+// по кодам: переименование кода — не повод спрашивать заново, а вот другой
+// набор типов под тем же знаком — уже другой вопрос. Отсюда и требование
+// тикета: развёл человек знаки руками, а потом завёл новый повтор тем же
+// кругом — состав другой, и он получит предупреждение.
+//
+// **Предмет** (сам знак, сама пара категорий) нужен, чтобы решить, можно ли
+// молча принять новый состав: если про этот знак у человека уже висит открытое
+// предупреждение, добавление типа из общей базы не имеет права его погасить.
+function sharedShapeSubject(group) {
+  return group.shape + "#" + [...group.typeIds].sort().join(",");
+}
+
+function closeColorsSubject(pair) {
+  return [...pair.categoryIds].sort().join("+");
+}
+
+// Нынешние строки справочника: ключ принятия → предмет.
+function dictionaryRows(project) {
+  const rows = new Map();
+  for (const group of sharedShapes(project)) {
+    rows.set("sharedShape:" + sharedShapeSubject(group), "sharedShape:" + group.shape);
+  }
+  for (const pair of closeCategoryColors(project)) {
+    const subject = closeColorsSubject(pair);
+    rows.set("closeColors:" + subject, "closeColors:" + subject);
+  }
+  return rows;
+}
+
+/**
+ * Предметы, о которых у человека прямо сейчас висит **открытое** предупреждение
+ * справочника: знак, повтор которого он ещё не закрыл, пара категорий, про
+ * которую ему ещё не ответили. Снимок берут до операции, приносящей типы из
+ * общей базы, — чтобы та не погасила вопрос, который уже задан.
+ */
+function openDictionarySubjects(project) {
+  const open = new Set();
+  for (const [key, subject] of dictionaryRows(project)) {
+    if (!problemAccepted(project, key)) open.add(subject);
+  }
+  return open;
+}
+
+// Принять строки справочника, предмет которых в `known` ещё не значился.
+// Принимать нечего — возвращается **тот же** объект: ни `updatedAt`, ни лишнего
+// шага истории эта тишина не стоит.
+function acceptFromDictionary(project, known) {
+  const rows = dictionaryRows(project);
+  const fresh = validate(project).filter(
+    (problem) =>
+      DICTIONARY_PROBLEM_CODES.includes(problem.code) &&
+      rows.has(problem.key) &&
+      !known.has(rows.get(problem.key)) &&
+      !problemAccepted(project, problem.key),
+  );
+  if (fresh.length === 0) return project;
+  const stamp = nowIso();
+  const records = fresh.map((problem) => ({
+    key: problem.key,
+    code: problem.code,
+    kind: "warning",
+    label: String(problem.message || ""),
+    at: stamp,
+  }));
+  return { ...project, accepted: [...acceptedOf(project), ...records] };
+}
 
 function acceptedOf(project) {
   return project && Array.isArray(project.accepted) ? project.accepted : [];
