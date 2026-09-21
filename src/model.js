@@ -356,6 +356,13 @@ export function colorDistance(first, second) {
 // рядом с которым уже стоит чужой, свободным не считается.
 export const COLOR_SAME_DISTANCE = 10;
 
+// А ближе этого два цвета категорий на плане ещё различимы, но уже похожи:
+// двадцать девять — разрыв самой близкой пары из пяти категорий первого брифа
+// (зелень выключателей и оранжевый климата). Число не запрет: справочник
+// заказчика держит пять пар ближе порога, и он об этом знает. Оно нужно, чтобы
+// об этом было сказано вслух — предупреждением в панели (`closeCategoryColors`).
+export const COLOR_NEAR_DISTANCE = 29;
+
 // Свободный цвет: первый в палитре, рядом с которым ещё ничего не покрашено.
 // Палитра кончилась — берём тот, что стоит дальше всех от занятых, а при
 // равенстве самый редкий: слепой круг «следующий по счёту» повторял бы цвет
@@ -492,176 +499,115 @@ export function markLabelLeader(mark) {
 // у размеченных объектов свои числа уже записаны.
 const DEFAULT_VIEW = { markSize: DEFAULT_MARK_SIZE, labelSize: 20 };
 
+// Стартовый справочник — справочник рабочего объекта заказчика. Его слова:
+// «справочник типов в общий возьми из этого проекта». Комнаты он прислал
+// вместе с ним и тут же добавил «Комнаты не нужны» — в шаблон они не попали.
+//
+// Тринадцать категорий и сорок восемь типов приехали как есть, включая коды,
+// которые разошлись с прежним шаблоном: `П` теперь переключатель (был
+// подсветкой), `ВП` — витая пара (был проходным переключателем), а подсветка
+// зовётся `ПС`. Размеченный объект от этого не меняется: справочник копируется
+// при создании и дальше живёт отдельно (G68), новые типы попадают в старый
+// объект только кнопкой «Добавить из общей базы».
+//
+// Справочник **нарушает два наших правила** — повтор знака у точечных типов и
+// близкий цвет у категорий, — и нарушает сознательно: заказчику показали числа
+// (семь типов «Света» под одним кругом с крестом, ещё четыре пары знаков,
+// пять пар цветов ближе порога 29), и он выбрал «взять как есть». Довод его
+// сильный: рядом со знаком на плане **всегда стоит подпись** — Т1, С2, ПК1, —
+// и монтажник читает её, а не форму; правило заводилось, воображая знак без
+// подписи, а такого на плане не бывает.
+//
+// Поэтому оба правила стали предупреждением, а не запретом: `validate` собирает
+// их через `sharedShapes` и `closeCategoryColors`, и панель предупреждений
+// показывает их как сведения об объекте. Строгими остались отпечаток самих
+// фигур и начертаний (`test/shapes.test.js`, `test/lineStyle.test.js` — они про
+// палитру, а не про справочник) и пометка занятых и близких цветов в окне
+// выбора цвета: заводя новую категорию, человек по-прежнему видит, куда не
+// стоит целиться.
 const TEMPLATE_CATEGORIES = [
   { key: "light", name: strings.categories.light, color: "#1F6FEB", shape: "circle-cross" },
-  // Квадрат у выключателей и круг с двумя точками у розеток — так их видит
-  // заказчик: «квадрат как у розетки для выключателя… а розетку сделаем кругом
-  // с 2 точками (как обычная евро розетка)». Формы поменялись местами
-  // осознанно: клавиши делят квадрат чертами, а евророзетку узнают по двум
-  // отверстиям. Цвета категорий при этом не тронуты.
-  { key: "switches", name: strings.categories.switches, color: "#2DA44E", shape: "square" },
-  { key: "sockets", name: strings.categories.sockets, color: "#D1242F", shape: "circle-socket" },
+  // Форма категории у выключателей и розеток не используется ни одним типом:
+  // у всех пяти выключателей и у обеих розеток знак свой. Круг и квадрат здесь
+  // стоят так, как их оставил заказчик, — это умолчание для типа, который он
+  // заведёт потом.
+  { key: "switches", name: strings.categories.switches, color: "#2DA44E", shape: "circle" },
+  { key: "sockets", name: strings.categories.sockets, color: "#D1242F", shape: "square" },
   { key: "climate", name: strings.categories.climate, color: "#E36209", shape: "triangle" },
   { key: "network", name: strings.categories.network, color: "#8250DF", shape: "star" },
-  // Датчики заведены по просьбе заказчика отдельной категорией: в умном доме
-  // их на квартиру десяток, а цвет у нас читается как категория — раскладывать
-  // их по чужим («Климат», «Сетевое оборудование») значило бы красить чужим
-  // цветом. Тёмная бирюза выбрана не на глаз: до ближайшего из пяти прежних
-  // цветов 63,9 — вдвое больше, чем минимум между ними самими (29,0), и метка
-  // не теряется на заливке контуров помещений (проверено test/colors.test.js).
+  { key: "intercom", name: strings.categories.intercom, color: "#D901C4", shape: "triangle-down" },
+  { key: "curtains", name: strings.categories.curtains, color: "#9d4c01", shape: "diamond" },
+  // «Не назначено» — категория для точки, про которую на объекте ещё не решили,
+  // что это. Розовый крест заметен нарочно: такую метку надо доразобрать.
+  { key: "unassigned", name: strings.categories.unassigned, color: "#FF007F", shape: "plus" },
+  { key: "appliances", name: strings.categories.appliances, color: "#1DAB1D", shape: "square-bolt" },
+  { key: "cinema", name: strings.categories.cinema, color: "#001BDD", shape: "square-wave" },
   { key: "sensors", name: strings.categories.sensors, color: "#164E63", shape: "circle-ring" },
-  // Щит заказчик попросил отдельной категорией, и это не прихоть: щит — узел
-  // питания, а не устройство в комнате. В «Сетевом оборудовании» он читался бы
-  // как роутер, в «Датчиках» — как датчик (за это его туда и не положили).
-  // Цвет — коричневый: цвет фазного провода, то есть цвет питания, а не
-  // выдумка. Считан, а не выбран на глаз: до ближайшей из шести прежних
-  // категорий (тёмная бирюза датчиков) 53,0 — почти вдвое больше самой близкой
-  // пары среди них самих (29,0 у света с сетевым) и с запасом на заливке
-  // контуров помещений (test/colors.test.js). Молния в квадрате — то, чем щит
-  // обозначен в самой палитре («щит, автомат, силовой вывод»).
   { key: "panel", name: strings.categories.panel, color: "#6E4B1F", shape: "square-bolt" },
-  // Сантехника заведена отдельной категорией по просьбе заказчика: водорозетка,
-  // выход канализации и кран воды — не электрика, и в «Климате» или «Розетках»
-  // они читались бы как электрика и красились бы её цветом.
-  //
-  // Цвет — пурпур. Числа у прежнего тёмного морского сходились (до датчиков
-  // 36,3, до выключателей 37,2 — обе пары дальше порога 29,0), а на плане он
-  // проиграл: рядом с зеленью выключателей получались два зелёных пятна, и на
-  // быстром взгляде они путались. Слова заказчика — «цвет сантехники меняем».
-  //
-  // По ГОСТ 14202-69 вода на схемах зелёная, но зелёный занят выключателями;
-  // синий занят светом, бирюза — датчиками, и оба к тому же садятся на бледную
-  // заливку синих комнат. Отсылки к воде в оставшемся круге не найти вовсе,
-  // поэтому цвет выбран не по смыслу, а по разнице — и свой смысл у этого есть:
-  // сантехника единственная неэлектрическая категория справочника, и ей
-  // досталась единственная краска, которую электрика не занимает. До ближайшей
-  // из семи прежних категорий (сетевое оборудование) 58,0 — вдвое дальше
-  // прежнего морского, а до той самой зелени выключателей 142,9 против 37,2:
-  // спутать их больше нечем. На заливке контуров помещений метка не теряется
-  // (test/colors.test.js).
   { key: "plumbing", name: strings.categories.plumbing, color: "#E80098", shape: "drop-dot" },
 ];
 
+// Порядок — порядок справочника заказчика, а не наша перекладка по категориям:
+// он этим списком работает, и привычка искать тип глазами дороже стройности.
 const TEMPLATE_TYPES = [
-  // Типы света сидят в одной категории, а значит и в одном синем цвете:
-  // пока у них не было своих форм, все они рисовались одинаковым кругом с
-  // крестом, и тип читался только по букве. Формы разведены по просьбе
-  // заказчика — цвет категории при этом не меняется, синий остаётся синим.
-  //
-  // Пять типов света — линейные: их не ставят точкой, а тянут по плану. Так
-  // сказал заказчик поимённо: «линия у тр, л, пш, пкш, кш». У линейного типа
-  // обозначение — не форма, а начертание, и внутри синей категории оно играет
-  // ту же роль, что форма у точечных: на чёрно-белой распечатке цвет общий, и
-  // одинаково нарисованные линии различал бы только код рядом. Поэтому
-  // начертания разведены так же, как формы, — по смыслу, а не по остатку:
-  //   ТР — сплошная (своего начертания нет, берёт категорийное): трек это
-  //        жёсткая шина, и сплошная линия — она и есть;
-  //   Л  — волнистая: лента гибкая, так её и рисуют от руки;
-  //   ПШ — пунктирная: подсветка внутри шкафа скрыта, а скрытое на чертежах
-  //        принято рисовать пунктиром;
-  //   ПКШ — штрихпунктирная: тоже скрытая подсветка, но своя;
-  //   КШ — двойная: карниз это не свет, а профиль-направляющая, у него две
-  //        грани.
-  // Форма у линейных типов остаётся: её показывает легенда, окно выбора типа
-  // и таблица справочника, и в синей категории она обязана быть своей.
-  { category: "light", code: "Т", name: strings.types.spot, shape: "circle-cross" },
-  { category: "light", code: "С", name: strings.types.lamp, shape: "circle-fill" },
-  { category: "light", code: "ПК", name: strings.types.bedLight, shape: "circle-dot" },
-  { category: "light", code: "ТР", name: strings.types.track, shape: "plus", kind: "line" },
-  { category: "light", code: "П", name: strings.types.backlight, shape: "diamond" },
-  { category: "light", code: "Л", name: strings.types.strip, shape: "triangle", kind: "line", lineStyle: "wave" },
-  // Вертикальный кусок ленты ставится одной точкой, а не тянется по плану —
-  // слова заказчика: «тип лента вертикальная, который уже точка». Знак —
-  // узкий прямоугольник стоймя: это и есть кусок ленты, поставленный
-  // вертикально, и на плане он читается без буквы рядом. Прежний треугольник
-  // с точкой отдан обратно датчику движения: тот же знак в двух категориях на
-  // чёрно-белой распечатке различался только кодом.
-  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical" },
-  {
-    category: "light",
-    code: "ПШ",
-    name: strings.types.wardrobeLight,
-    shape: "triangle-down",
-    kind: "line",
-    lineStyle: "dashed",
-  },
-  // Подсветка карниза и сам карниз штор: заказчик назвал их среди линейных,
-  // а в стартовом справочнике их не было вовсе — добавлены вместе с видом.
-  {
-    category: "light",
-    code: "ПКШ",
-    name: strings.types.corniceLight,
-    shape: "diamond-dot",
-    kind: "line",
-    lineStyle: "dash-dot",
-  },
-  {
-    category: "light",
-    code: "КШ",
-    name: strings.types.curtainRail,
-    shape: "diamond-cross",
-    kind: "line",
-    lineStyle: "double",
-  },
-  // Выключатели сидят в одном зелёном цвете, и на чёрно-белой распечатке их
-  // различает только знак. Знаки выбраны по тому, как выключатель выглядит на
-  // стене: одноклавишный — пустой квадрат (форма категории), двухклавишный —
-  // квадрат, поделённый чертой пополам, трёхклавишный — двумя чертами на три
-  // равные части. Считать клавиши на знаке проще, чем читать букву рядом.
-  // Число каналов — столько же, сколько клавиш на знаке: связь с нагрузкой
-  // получает номер клавиши, и на плане у дуги видно, какая из них.
-  { category: "switches", code: "В", name: strings.types.switch },
+  // Свет. Семь точечных типов идут без своей формы и берут круг с крестом у
+  // категории — тот самый повтор, на который заказчик согласился сознательно.
+  { category: "light", code: "Т", name: strings.types.spot },
+  { category: "light", code: "С", name: strings.types.lamp },
+  { category: "light", code: "ПК", name: strings.types.bedLight },
+  // Линейные типы света разведены начертанием: цвет в категории общий, и на
+  // чёрно-белой распечатке линию от линии отличает только рисунок.
+  { category: "light", code: "ТР", name: strings.types.track, kind: "line", lineStyle: "double" },
+  { category: "light", code: "ПС", name: strings.types.backlight },
+  // Лента своего начертания не имеет: берёт категорийное, то есть сплошную.
+  { category: "light", code: "Л", name: strings.types.strip, kind: "line" },
+  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, kind: "line", lineStyle: "dashed" },
+  // Выключатели: число каналов — число клавиш, связь с нагрузкой получает номер
+  // клавиши. Каналы приехали из объекта заказчика вместе со справочником.
+  { category: "switches", code: "В", name: strings.types.switch, shape: "square", channels: 1 },
   { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2 },
+  { category: "sockets", code: "Р", name: strings.types.socket, shape: "circle-socket" },
+  { category: "climate", code: "Б", name: strings.types.breezer, shape: "dome-dot" },
+  { category: "climate", code: "К", name: strings.types.conditioner, shape: "circle-thermo" },
+  { category: "network", code: "W", name: strings.types.wifi, shape: "circle-wave" },
+  { category: "intercom", code: "Д", name: strings.types.intercom },
+  { category: "curtains", code: "КШ", name: strings.types.curtainRail },
+  { category: "light", code: "ППл", name: strings.types.floorLight },
+  { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave" },
+  { category: "light", code: "ЛЮ", name: strings.types.chandelier },
+  { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1 },
+  { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2 },
+  { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain" },
+  { category: "unassigned", code: "ВОПРОС", name: strings.types.unassigned },
+  // Розетка 380: три отверстия по кругу против двух у обычной — на плане их
+  // не спутать.
+  { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple" },
+  { category: "sensors", code: "ДП", name: strings.types.presence, shape: "circle-fan" },
+  { category: "appliances", code: "СУШ", name: strings.types.dryer },
+  { category: "panel", code: "Щ", name: strings.types.panel, shape: "square-hatch" },
+  { category: "climate", code: "ВЫТ", name: strings.types.hood, shape: "circle-fill" },
+  { category: "light", code: "Бр", name: strings.types.sconce },
+  { category: "appliances", code: "ДЭП", name: strings.types.cabinetDoor },
+  { category: "network", code: "ПУ", name: strings.types.controlPanel, shape: "square-jack" },
+  { category: "climate", code: "ОВ", name: strings.types.dehumidifier, shape: "drop-dot" },
+  { category: "network", code: "ВП", name: strings.types.ethernet, shape: "square-cross" },
+  { category: "cinema", code: "РЕС", name: strings.types.receiver },
+  { category: "cinema", code: "ПРО", name: strings.types.projector, shape: "diamond-dot" },
+  { category: "network", code: "УК", name: strings.types.smartSpeaker, shape: "circle-antenna" },
+  // Вертикальный кусок ленты ставится одной точкой, а не тянется по плану.
+  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical" },
   { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3 },
-  // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
-  // Знак квадратный, как у соседей по категории: выключатель на стене
-  // выглядит клавишей, и круг выпадал бы из ряда. Внутри — уголок на две
-  // стороны, тот самый переключатель.
-  { category: "switches", code: "ВП", name: strings.types.switchWay, shape: "square-chevron" },
-  // Розетка в своей категории одна, поэтому своей формы у неё нет: она берёт
-  // форму категории — тот самый круг с двумя отверстиями.
-  { category: "sockets", code: "Р", name: strings.types.socket },
-  // Бризер и кондиционер тоже рисовались одним треугольником. Треугольник
-  // (поток воздуха) остаётся бризеру — он и есть приточка, — а кондиционеру
-  // достаётся квадрат с волнами: настенный блок, из которого идёт воздух.
-  // Так в категории остаётся тип с формой категории, как у розеток и датчиков.
-  { category: "climate", code: "Б", name: strings.types.breezer },
-  { category: "climate", code: "К", name: strings.types.conditioner, shape: "square-wave" },
-  { category: "network", code: "W", name: strings.types.wifi },
-  // Вывод витой пары. Код латинский, как соседний «W»: «RJ» читается как RJ45
-  // и ни с чем не путается. Одинокая «E» от Ethernet выглядела бы стройнее, но
-  // кириллическая «Е» неотличима от латинской «E» на плане, а счётчики у них
-  // разные — эта ловушка в сборке уже описана для «P» и «Р».
-  { category: "network", code: "RJ", name: strings.types.ethernet, shape: "square-jack" },
-  // Коды датчиков — кириллица, как у большинства типов заказчика, и все с «Д»:
-  // на плане сразу видно семейство. Вторая буква у каждого своя, похожих пар
-  // нет — коды, различающиеся только раскладкой, дали бы два разных типа с
-  // разной нумерацией.
-  { category: "sensors", code: "ДВ", name: strings.types.motion, shape: "triangle-dot" },
+  { category: "sensors", code: "ДД", name: strings.types.motion, shape: "triangle-dot" },
   { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split" },
-  { category: "sensors", code: "ДП", name: strings.types.leak, shape: "triangle-down-fill" },
-  // Датчик дыма — потолочный, ему и достаётся форма категории.
-  { category: "sensors", code: "ДД", name: strings.types.smoke },
-  // Электрощит — форма категории: молния в квадрате и есть щит.
-  { category: "panel", code: "Щ", name: strings.types.panel },
-  // Слаботочный щит заведён не ради симметрии: в квартире с умным домом это
-  // отдельный шкаф в другом месте плана — там сходятся все выводы витой пары,
-  // стоят роутер, коммутатор и контроллеры. Без него его пришлось бы помечать
-  // электрощитом, то есть врать о том, что за дверцей. Перечёркнутый квадрат —
-  // шкаф, и с молнией силового щита он не спорит.
+  { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop" },
   { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross" },
-  // Водорозетка — форма категории: капля с точкой и есть подвод воды.
+  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar" },
   { category: "plumbing", code: "ВР", name: strings.types.waterOutlet },
-  // Выход канализации — стрелка вниз: сток. «К» занят кондиционером, поэтому
-  // код «КН»: в подписи «КН1» читается, и ни с чем в справочнике не спорит.
   { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain" },
-  // Кран воды с электроприводом — третий тип сантехники, по просьбе заказчика
-  // («кран в сантехнику»). Знак в палитре уже был: круг с бабочкой — так
-  // запорный кран рисуют на схемах, и в размере метки он узнаётся без буквы
-  // рядом. Код «КВ» — кран воды: «К» занят кондиционером, «КШ» карнизом штор,
-  // «КН» канализацией, а «КВ» свободен и в подписи «КВ1» читается. Обе буквы
-  // кириллические, как у соседей по категории.
   { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve" },
+  { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander" },
+  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring" },
+  { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring" },
 ];
 
 function newId() {
@@ -3468,6 +3414,74 @@ function outlineLabel(project, outline) {
   return room ? room.name : problemSubject("outline");
 }
 
+/**
+ * Знаки, которые носят несколько точечных типов справочника.
+ *
+ * Правило «у каждого точечного типа свой знак» держалось с первого брифа и
+ * было запретом: тест шаблона краснел на повторе. Справочник заказчика его
+ * нарушает семь раз подряд — под кругом с крестом сидят Т, С, ПК, ПС, ППл, ЛЮ
+ * и Бр, — и нарушает сознательно. Его довод: рядом со знаком на плане
+ * **всегда стоит подпись** — Т1, С2, ПК1, — и монтажник читает её, а не форму;
+ * правило заводилось, воображая знак без подписи, а такого на плане не бывает.
+ *
+ * Поэтому повтор стал предупреждением, а не запретом: здесь он собирается,
+ * `validate` его называет, панель показывает, а пользователь закрывает строку
+ * «так и задумано». Линейные типы сюда не входят — их обозначение не форма, а
+ * начертание, и разводит их своя проверка.
+ *
+ * Возвращает `[{ shape, name, codes, typeIds }]` в порядке справочника.
+ */
+export function sharedShapes(project) {
+  const groups = new Map();
+  for (const { types } of typesInOrder(project)) {
+    for (const type of types) {
+      if (typeKindOf(project, type.id) !== "point") continue;
+      const shape = styleOf(project, type.id).shape;
+      if (!groups.has(shape)) groups.set(shape, { shape, name: strings.shapes[shape] || shape, codes: [], typeIds: [] });
+      const group = groups.get(shape);
+      group.codes.push(type.code);
+      group.typeIds.push(type.id);
+    }
+  }
+  return [...groups.values()].filter((group) => group.typeIds.length > 1);
+}
+
+/**
+ * Пары категорий, чьи цвета на плане похожи (ближе `COLOR_NEAR_DISTANCE`).
+ *
+ * История та же, что у знаков: порог был запретом в тесте шаблона, а справочник
+ * заказчика держит пять пар ближе него — и это его выбор, сделанный по числам.
+ * Окно выбора цвета при этом строгим и осталось: заводя новую категорию, человек
+ * видит занятые и близкие цвета помеченными. Здесь — только рассказать о том,
+ * что уже есть в объекте.
+ *
+ * Возвращает `[{ first, second, distance, categoryIds }]`, ближайшая пара первой.
+ */
+export function closeCategoryColors(project) {
+  // Порядок — тот, в котором категории лежат в объекте: своей сортировки
+  // сущностей здесь не заводится, а пары в конце выстраиваются по близости.
+  const categories = project && Array.isArray(project.categories) ? project.categories : [];
+  const pairs = [];
+  for (let i = 0; i < categories.length; i += 1) {
+    for (let j = i + 1; j < categories.length; j += 1) {
+      const distance = colorDistance(categories[i].color, categories[j].color);
+      if (!(distance < COLOR_NEAR_DISTANCE)) continue;
+      pairs.push({
+        first: categories[i].name,
+        second: categories[j].name,
+        distance,
+        categoryIds: [categories[i].id, categories[j].id],
+      });
+    }
+  }
+  return pairs.sort((a, b) => a.distance - b.distance);
+}
+
+// Расстояние цвета — число с запятой, как его читает пользователь.
+function colorDistanceText(distance) {
+  return distance.toFixed(1).replace(".", ",");
+}
+
 export function validate(project) {
   const problems = [];
 
@@ -3556,6 +3570,34 @@ export function validate(project) {
         // первой метке вернул бы уже принятое, стоило добавить к группе
         // четвёртый светильник или убрать из неё первый.
         item.typeId + "#" + item.number,
+      ),
+    );
+  }
+
+  // Повтор знака и похожий цвет категорий — сведения об объекте, а не поломка.
+  // Справочник заказчика держит и то и другое сознательно (см. `sharedShapes`),
+  // и панель показывает это строкой, которую можно закрыть «так и задумано».
+  // Ключ принятия — сам знак и сама пара категорий, а не список типов под ними:
+  // восьмой светильник под кругом с крестом не должен возвращать закрытое.
+  for (const group of sharedShapes(project)) {
+    problems.push(
+      problem(
+        "sharedShape",
+        { shape: group.name, codes: group.codes.join(", ") },
+        group.typeIds[0],
+        "warning",
+        group.shape,
+      ),
+    );
+  }
+  for (const pair of closeCategoryColors(project)) {
+    problems.push(
+      problem(
+        "closeColors",
+        { first: pair.first, second: pair.second, distance: colorDistanceText(pair.distance) },
+        pair.categoryIds[0],
+        "warning",
+        pair.categoryIds.join("+"),
       ),
     );
   }

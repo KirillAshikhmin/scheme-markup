@@ -335,15 +335,21 @@ test("по метке попадают с запасом, но не за его 
 test("справочник упорядочен один раз: категории и типы идут как у пользователя", () => {
   const base = world();
   const groups = typesInOrder(base.project);
+  // prettier-ignore
   assert.deepEqual(
     groups.map((group) => group.category.name),
-    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Сантехника"],
+    [
+      "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
+      "Не назначено", "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
+    ],
   );
   // prettier-ignore
-  assert.deepEqual(groups[0].types.map((type) => type.code), ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ"]);
-  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "ВВВ", "ВП"]);
-  assert.deepEqual(groups[5].types.map((type) => type.code), ["ДВ", "ДО", "ДП", "ДД"]);
-  assert.deepEqual(groups[6].types.map((type) => type.code), ["Щ", "ЩС"]);
+  assert.deepEqual(groups[0].types.map((type) => type.code), [
+    "Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "ППл", "ПКШ", "ЛЮ", "Н", "Бр", "ЛВ", "ПЛ", "ПЗ",
+  ]);
+  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "П", "ПП", "ВВВ"]);
+  assert.deepEqual(groups[10].types.map((type) => type.code), ["ДП", "ДД", "ДО", "ДПр"]);
+  assert.deepEqual(groups[11].types.map((type) => type.code), ["Щ", "ЩС"]);
 });
 
 // Код типа бывает и в шестнадцать букв. У правого края плана такая подпись

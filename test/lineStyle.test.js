@@ -26,17 +26,21 @@ import { strings } from "../src/strings.js";
 test("начертание линии живёт там же, где форма: у категории с перебивкой у типа", () => {
   const project = createProject();
   const light = project.categories.find((item) => item.name === "Свет");
-  const track = project.markTypes.find((item) => item.code === "ТР");
+  // Лента своего начертания не имеет и берёт категорийное — на ней и видно
+  // правило. Трек в справочнике заказчика рисуется двойной линией, то есть
+  // своей: перебивку у типа показывает он.
+  const strip = project.markTypes.find((item) => item.code === "Л");
+  assert.equal(project.markTypes.find((item) => item.code === "ТР").lineStyle, "double");
 
   // По умолчанию линия сплошная — как было до пунктира.
-  assert.equal(styleOf(project, track.id).lineStyle, "solid");
+  assert.equal(styleOf(project, strip.id).lineStyle, "solid");
 
   // Категория задаёт начертание своим типам, тип его перебивает — тем же
   // правилом, что и форма. Третьего правила в сборке нет.
   const dashedCategory = updateCategory(project, light.id, { lineStyle: "dashed" }).project;
-  assert.equal(styleOf(dashedCategory, track.id).lineStyle, "dashed");
-  const solidType = updateType(dashedCategory, track.id, { lineStyle: "solid" }).project;
-  assert.equal(styleOf(solidType, track.id).lineStyle, "solid");
+  assert.equal(styleOf(dashedCategory, strip.id).lineStyle, "dashed");
+  const solidType = updateType(dashedCategory, strip.id, { lineStyle: "solid" }).project;
+  assert.equal(styleOf(solidType, strip.id).lineStyle, "solid");
 
   const added = addType(project, { code: "УЛ", name: "Условная линия", categoryId: light.id, lineStyle: "dashed" });
   assert.equal(styleOf(added.project, added.type.id).lineStyle, "dashed");
@@ -62,32 +66,54 @@ test("чужое начертание модель не берёт", () => {
   });
 });
 
-test("в справочник добавлен проходной переключатель, прежние типы не тронуты", () => {
-  const { markTypes } = defaultTemplate();
-  const codes = markTypes.map((type) => type.code);
-  // Тринадцать типов заказчика целы и идут в прежнем порядке; всё, что
-  // добавлено потом, встало в свою категорию, а не в хвост списка.
-  // prettier-ignore
-  const added = ["ВП", "ВВВ", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС", "ЛВ", "ПКШ", "КШ", "ВР", "КН", "КВ"];
-  assert.deepEqual(
-    codes.filter((code) => !added.includes(code)),
-    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W"],
-  );
-  assert.equal(
-    codes.length,
-    28,
-    "переключатель, тройной выключатель, витая пара, датчики, щиты, три типа света и сантехника",
-  );
-
+// Переключатели заказчика. Коды у него разошлись с прежним шаблоном, и это не
+// опечатка разбора: `П` теперь переключатель (был подсветкой), `ВП` — витая
+// пара (был проходным переключателем), а подсветка зовётся `ПС`. Справочник
+// взят целиком, вместе с кодами.
+test("переключатели заказчика стоят в своей категории и рисуются каждый своим знаком", () => {
   const project = createProject();
-  const way = project.markTypes.find((type) => type.code === "ВП");
-  assert.ok(way, "проходного переключателя нет в шаблоне");
-  assert.equal(way.name, strings.types.switchWay);
+  const toggle = project.markTypes.find((type) => type.code === "П");
+  assert.ok(toggle, "переключателя нет в шаблоне");
+  assert.equal(toggle.name, strings.types.switchToggle);
+  assert.equal(project.markTypes.find((type) => type.code === "ВП").name, strings.types.ethernet);
+  assert.equal(project.markTypes.find((type) => type.code === "ПС").name, strings.types.backlight);
+
   const switches = typesInOrder(project).find((group) => group.category.name === "Выключатели");
-  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "ВВВ", "ВП"]);
-  // Свой значок: иначе он рисуется тем же зелёным кругом, что и остальные два.
-  assert.ok(SHAPE_PALETTE.includes(styleOf(project, way.id).shape), "значок переключателя не из палитры");
-  assert.notEqual(styleOf(project, way.id).shape, styleOf(project, project.markTypes.find((t) => t.code === "В").id).shape);
+  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "П", "ПП", "ВВВ"]);
+  // Знаки все свои: иначе на плане пять выключателей одного зелёного цвета
+  // различал бы только код.
+  const shapes = switches.types.map((type) => styleOf(project, type.id).shape);
+  assert.equal(new Set(shapes).size, shapes.length, "два выключателя рисуются одним знаком: " + shapes.join(", "));
+  for (const shape of shapes) assert.ok(SHAPE_PALETTE.includes(shape), "значок выключателя не из палитры: " + shape);
+
+  // Каналы приехали из объекта заказчика вместе со справочником.
+  assert.deepEqual(
+    switches.types.map((type) => [type.code, type.channels]),
+    [["В", 1], ["ВВ", 2], ["П", 1], ["ПП", 2], ["ВВВ", 3]],
+  );
+});
+
+test("стартовый справочник — справочник заказчика: тринадцать категорий и сорок восемь типов", () => {
+  const { categories, markTypes } = defaultTemplate();
+  assert.equal(categories.length, 13, "категории справочника заказчика потерялись");
+  assert.equal(markTypes.length, 48, "типы справочника заказчика потерялись");
+  // Порядок — его порядок, а не наша перекладка по категориям.
+  // prettier-ignore
+  assert.deepEqual(markTypes.map((type) => type.code), [
+    "Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
+    "ПКШ", "ЛЮ", "П", "ПП", "Н", "ВОПРОС", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
+    "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
+    "КВ", "ПЛ", "ПЗ", "КАМ",
+  ]);
+  // prettier-ignore
+  assert.deepEqual(categories.map((category) => category.name), [
+    "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
+    "Не назначено", "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
+  ]);
+  // Комнаты он прислал вместе со справочником и тут же сказал «Комнаты не
+  // нужны» — в шаблоне их нет.
+  assert.equal(defaultTemplate().rooms, undefined, "комнаты заказчика попали в шаблон");
+  assert.deepEqual(createProject().rooms, []);
 });
 
 // Холста в Node нет, поэтому рисованию подставляется заглушка: она принимает
@@ -387,8 +413,12 @@ test("нитки начертания считаются по пути, а не 
 test("линейные типы шаблона названы заказчиком и расходятся начертанием", () => {
   const { categories, markTypes } = defaultTemplate();
   const lines = markTypes.filter((type) => type.kind === "line");
-  assert.deepEqual(lines.map((type) => type.code), ["ТР", "Л", "ПШ", "ПКШ", "КШ"], "линейные типы — ровно названные");
-  // Остальные точечные: заказчик назвал пять, и ни одного сверх того.
+  // Пять линейных типов справочника заказчика: трек, лента, подсветка шкафа,
+  // подсветка карниза штор, подсветка лестницы. Карниз штор у него, наоборот,
+  // точка — линейным он его не держит.
+  assert.deepEqual(lines.map((type) => type.code), ["ТР", "Л", "ПШ", "ПКШ", "ПЛ"], "линейные типы — ровно названные");
+  assert.equal(markTypes.find((type) => type.code === "КШ").kind, "point");
+  // Остальные точечные: линейных пять, и ни одного сверх того.
   assert.equal(markTypes.filter((type) => type.kind === "point").length, markTypes.length - 5);
 
   const byId = new Map(categories.map((category) => [category.id, category]));
@@ -412,10 +442,9 @@ test("линейные типы шаблона названы заказчико
   }
   assert.deepEqual(merged, [], "в толщине линии метки эти типы сливаются");
 
-  // Трек своего начертания не имеет: в своей категории он единственный, кому
-  // хватает категорийного, — то же правило, по которому форму категории берёт
-  // одинокий тип.
-  assert.equal(markTypes.find((type) => type.code === "ТР").lineStyle, null);
+  // Лента своего начертания не имеет и берёт категорийное — то же правило, по
+  // которому форму категории берёт тип, который в ней один такой.
+  assert.equal(markTypes.find((type) => type.code === "Л").lineStyle, null);
   assert.equal(styleOf(createProject(), createProject().markTypes[0].id).lineStyle, "solid");
 });
 

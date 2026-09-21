@@ -1,6 +1,10 @@
 // Панель предупреждений: список того, что нашёл `validate`, и переход к
 // виновнику.
 //
+// Со стартовым справочником заказчика панель показывает ещё и сведения о самом
+// справочнике: повторы знака и похожие цвета категорий. Их проверяет свой тест,
+// а остальные смотрят на объект через `panelModel` — без этих строк.
+//
 // Проверяется чистая часть панели — состав списка, группировка одинаковых
 // строк в счётчик и адрес виновника. Сам выпадающий список, клик и наведение
 // холста — DOM, его проверяет приёмка.
@@ -45,15 +49,77 @@ function house() {
   return { project, schemeId, idOf, lamps, track: track.mark.id };
 }
 
+// Стартовый справочник — справочник рабочего объекта заказчика, и он приезжает
+// со своими сведениями: пять знаков, которые носят по нескольку типов, и пять
+// пар категорий с похожим цветом. Это выбор заказчика, сделанный по числам, в
+// каждом новом объекте он один и тот же, и отдельный тест ниже смотрит именно
+// на него. Остальные тесты этого файла — про метки, связи и виды, поэтому
+// строки справочника снимаются с модели одним местом.
+const DICTIONARY_CODES = ["sharedShape", "closeColors"];
+
+function panelModel(project) {
+  const model = warningsModel(project);
+  const groups = model.groups.filter((group) => !DICTIONARY_CODES.includes(group.code));
+  const total = groups.reduce((sum, group) => sum + group.count, 0);
+  return { ...model, groups, total, level: total === 0 ? "ok" : groups[0].level };
+}
+
+// Справочник заказчика — в панели предупреждений, как и просил тикет: строками,
+// которые видно, а не падением сборки. Каждую можно закрыть «так и задумано» —
+// и тогда панель у нового объекта снова говорит «смотреть нечего».
+test("новый объект рассказывает о своём справочнике: повторы знака и похожие цвета", () => {
+  const model = warningsModel(createProject());
+  const shapes = model.groups.find((group) => group.code === "sharedShape");
+  const colors = model.groups.find((group) => group.code === "closeColors");
+  assert.ok(shapes, "повторы знака не доехали до панели");
+  assert.ok(colors, "похожие цвета не доехали до панели");
+  assert.equal(shapes.level, "warning", "повтор знака — не ошибка объекта");
+  assert.equal(colors.level, "warning", "похожий цвет — не ошибка объекта");
+  assert.equal(shapes.count, 5, "знаков, которые носят несколько типов: " + shapes.count);
+  assert.equal(colors.count, 5, "пар категорий с похожим цветом: " + colors.count);
+  assert.equal(shapes.title, "Знаков, которые носят несколько типов: 5");
+  assert.equal(colors.title, "Пар категорий с похожим цветом: 5");
+  // Семь типов света названы поимённо: строку читают, а не считают.
+  assert.ok(shapes.items.some((item) => item.message.includes("Т, С, ПК, ПС, ППл, ЛЮ, Бр")));
+  assert.ok(colors.items.some((item) => item.message.includes("Не назначено") && item.message.includes("21,4")));
+  // Ошибок среди них нет: объект цел.
+  assert.equal(model.groups.every((group) => group.level !== "error"), true);
+
+  // Переход ведёт к виновнику на плане: у знака — к метке его типа, у цвета —
+  // к метке любого типа этой категории. Меток нет — перехода нет, и это не
+  // поломка: строку всё равно читают.
+  // На пустом объекте адрес есть, но метки в нём нет: идти на плане не к чему.
+  assert.equal(shapes.items[0].place.markId, null);
+  const box = house();
+  const placed = warningsModel(box.project);
+  const shapeRow = placed.groups.find((group) => group.code === "sharedShape").items[0];
+  assert.equal(shapeRow.place.markId, box.lamps[0], "повтор знака не ведёт к метке этого типа");
+  const colorRow = placed.groups
+    .find((group) => group.code === "closeColors")
+    .items.find((item) => item.message.includes("Домофон"));
+  assert.equal(colorRow.place, null, "у домофона на этом объекте меток нет");
+
+  // «Так и задумано» закрывает строку и больше её не показывает.
+  let project = createProject();
+  for (const problem of validate(project)) {
+    if (DICTIONARY_CODES.includes(problem.code)) project = acceptProblem(project, problem).project;
+  }
+  const after = warningsModel(project);
+  assert.equal(after.total, 0, "закрытая строка справочника вернулась");
+  assert.equal(after.level, "ok");
+  assert.equal(after.accepted.length, 10);
+  assert.equal(after.accepted.every((record) => record.level === "warning"), true);
+});
+
 test("чистый объект: смотреть нечего, и это видно", () => {
   const box = house();
-  const model = warningsModel(box.project);
+  const model = panelModel(box.project);
   assert.equal(model.total, 0);
   assert.equal(model.level, "ok");
   assert.deepEqual(model.groups, []);
   assert.deepEqual(model.accepted, []);
   // Объекта нет вовсе — та же хорошая новость, а не поломка.
-  assert.deepEqual(warningsModel(null), { total: 0, level: "ok", groups: [], accepted: [] });
+  assert.deepEqual(panelModel(null), { total: 0, level: "ok", groups: [], accepted: [] });
 });
 
 test("одинаковые предупреждения сворачиваются в строку со счётчиком", () => {
@@ -65,7 +131,7 @@ test("одинаковые предупреждения сворачиваютс
       box.lamps.includes(mark.id) ? { ...mark, roomId: "помещения-нет" } : mark,
     ),
   };
-  const model = warningsModel(broken);
+  const model = panelModel(broken);
   const group = model.groups.find((item) => item.code === "markWithoutRoom");
   assert.equal(group.count, 3);
   assert.equal(group.items.length, 3);
@@ -84,7 +150,7 @@ test("ошибки сверху, предупреждения под ними", 
       mark.id === box.lamps[0] ? { ...mark, controls: ["потерянная-метка"] } : mark,
     ),
   };
-  const model = warningsModel(project);
+  const model = panelModel(project);
   assert.deepEqual(
     model.groups.map((group) => [group.level, group.code]),
     [
@@ -106,7 +172,7 @@ test("каждая строка в группе называет виновни�
       box.lamps.includes(mark.id) ? { ...mark, roomId: "помещения-нет" } : mark,
     ),
   };
-  const group = warningsModel(project).groups.find((item) => item.code === "markWithoutRoom");
+  const group = panelModel(project).groups.find((item) => item.code === "markWithoutRoom");
   assert.deepEqual(
     group.items.map((item) => item.message),
     [
@@ -117,7 +183,7 @@ test("каждая строка в группе называет виновни�
     "три одинаковые строки: непонятно, о какой метке речь",
   );
   // Ни одна строка с переходом не должна быть безымянной.
-  for (const item of warningsModel(project).groups.flatMap((item) => item.items)) {
+  for (const item of panelModel(project).groups.flatMap((item) => item.items)) {
     if (!item.place || item.code === "typeKind") continue;
     assert.notEqual(item.message.trim(), "", item.code + ": строка без текста");
     assert.ok(/^[^—]+ — |\{|[А-ЯЁ]/.test(item.message), item.code + ": строка не называет виновника");
@@ -141,7 +207,7 @@ test("контур зовётся помещением, группа — под�
       type.code === "Т" ? { ...type, categoryId: "категории-нет" } : type,
     ),
   };
-  const messages = warningsModel(broken)
+  const messages = panelModel(broken)
     .groups.flatMap((group) => group.items)
     .map((item) => item.message);
   assert.ok(messages.includes("Спальная — в контуре помещения меньше трёх вершин"), messages.join(" | "));
@@ -169,7 +235,7 @@ test("строка ведёт к виновнику: метка, её схема
       mark.id === box.lamps[2] ? { ...mark, roomId: "помещения-нет" } : mark,
     ),
   };
-  const place = warningsModel(project).groups[0].items[0].place;
+  const place = panelModel(project).groups[0].items[0].place;
   assert.equal(place.markId, box.lamps[2]);
   assert.equal(place.schemeId, box.schemeId);
   assert.deepEqual(place.point, { x: 0.6, y: 0.3 });
@@ -186,7 +252,7 @@ test("предупреждение о типе ведёт к метке не т�
     points: [{ x: 0.7, y: 0.7 }],
   });
   const project = updateType(dot.project, box.idOf("Л"), { kind: "line" }).project;
-  const group = warningsModel(project).groups.find((item) => item.code === "typeKindMixed");
+  const group = panelModel(project).groups.find((item) => item.code === "typeKindMixed");
   assert.equal(group.count, 1);
   assert.equal(group.items[0].place.typeId, box.idOf("Л"));
   // Виновник — точка у линейного типа, а не первая метка типа подряд.
@@ -199,7 +265,7 @@ test("виновника уже нет — перехода нет, а не пе
     ...box.project,
     groups: [{ id: "группа-призрак", schemeId: box.schemeId, markIds: ["нет-такой-метки"] }],
   };
-  const group = warningsModel(project).groups.find((item) => item.code === "smallGroup");
+  const group = panelModel(project).groups.find((item) => item.code === "smallGroup");
   assert.equal(group.items[0].place, null);
   // Ссылки без цели у проблемы быть не должно: код без адресата — это строка,
   // по которой некуда идти.
@@ -233,7 +299,7 @@ test("типы с выведенным видом — строки панели;
     }),
   };
   const migrated = migrateTypeKinds(old).project;
-  const model = warningsModel(migrated);
+  const model = panelModel(migrated);
   const ask = model.groups[model.groups.length - 1];
   assert.equal(ask.level, "ask");
   assert.equal(ask.code, "typeKind");
@@ -245,13 +311,13 @@ test("типы с выведенным видом — строки панели;
 
   // Ответ — та же команда справочника: вид записан, отметка снята, строка ушла.
   const answered = updateType(migrated, ask.items[0].typeId, { kind: "point" }).project;
-  const after = warningsModel(answered).groups[warningsModel(answered).groups.length - 1];
+  const after = panelModel(answered).groups[panelModel(answered).groups.length - 1];
   assert.equal(after.count, ask.count - 1);
   assert.ok(!after.items.some((item) => item.typeId === ask.items[0].typeId));
 
   // «Все верны» убирает остаток — и на этом вопросы кончаются.
   const closed = closeTypeKindReview(answered).project;
-  assert.equal(warningsModel(closed).total, 0);
+  assert.equal(panelModel(closed).total, 0);
 });
 
 test("панель ничего не правит сама: объект после подсчёта тот же", () => {
@@ -268,18 +334,18 @@ test("панель ничего не правит сама: объект пос�
   };
   const migrated = migrateTypeKinds(old).project;
   const before = JSON.stringify(migrated);
-  warningsModel(migrated);
-  warningsModel(box.project);
+  panelModel(migrated);
+  panelModel(box.project);
   assert.equal(JSON.stringify(migrated), before, "подсчёт предупреждений тронул объект");
 });
 
 test("метка без помещения — это метка без ссылки, а не предупреждение", () => {
   const box = house();
   // Пустое помещение — норма разметки: половина меток так и стоит.
-  assert.equal(warningsModel(box.project).total, 0);
+  assert.equal(panelModel(box.project).total, 0);
   const room = addRoom(box.project, { name: "Спальная" });
   const project = updateMark(room.project, box.lamps[0], { roomId: room.room.id }).project;
-  assert.equal(warningsModel(project).total, 0);
+  assert.equal(panelModel(project).total, 0);
 });
 
 // ——— «так и задумано» —————————————————————————————————————————————————
@@ -299,14 +365,14 @@ function withRepeat() {
 
 test("принятое уходит из списка, счётчик уменьшается, а строка «Принято» остаётся", () => {
   const box = withRepeat();
-  const before = warningsModel(box.project);
+  const before = panelModel(box.project);
   assert.equal(before.total, 1);
   assert.equal(before.level, "warning");
   // Строка знает свою проблему — ею и принимают: в ней ключ, вид и текст.
   assert.equal(before.groups[0].items[0].problem.key, box.problem.key);
 
   const accepted = acceptProblem(box.project, box.problem).project;
-  const after = warningsModel(accepted);
+  const after = panelModel(accepted);
   assert.equal(after.total, 0, "счётчик в шапке считает то, что ещё ждёт ответа");
   assert.equal(after.level, "ok");
   assert.deepEqual(after.groups, []);
@@ -316,8 +382,8 @@ test("принятое уходит из списка, счётчик умень
 
   // Вернули в работу — предупреждение снова в списке, принятых нет.
   const back = unacceptProblem(accepted, after.accepted[0].key).project;
-  assert.equal(warningsModel(back).total, 1);
-  assert.deepEqual(warningsModel(back).accepted, []);
+  assert.equal(panelModel(back).total, 1);
+  assert.deepEqual(panelModel(back).accepted, []);
 });
 
 test("принятое не возвращается, когда в группе становится ещё одна метка", () => {
@@ -333,8 +399,8 @@ test("принятое не возвращается, когда в группе
   });
   const grown = setMarkNumber(more.project, more.mark.id, 1).project;
   assert.equal(validate(grown).find((item) => item.code === "repeatedNumber").message, "Т1 — таких меток 4");
-  assert.equal(warningsModel(grown).total, 0, "четвёртая метка вернула закрытую строку");
-  assert.equal(warningsModel(grown).accepted.length, 1);
+  assert.equal(panelModel(grown).total, 0, "четвёртая метка вернула закрытую строку");
+  assert.equal(panelModel(grown).accepted.length, 1);
 });
 
 test("смыкание номеров не возвращает принятого", () => {
@@ -349,11 +415,11 @@ test("смыкание номеров не возвращает принятог
   const project = setMarkNumber(other.project, other.mark.id, 5).project;
   const problem = validate(project).find((item) => item.code === "repeatedNumber");
   const accepted = acceptProblem(project, problem).project;
-  assert.equal(warningsModel(accepted).total, 0);
+  assert.equal(panelModel(accepted).total, 0);
 
   const compacted = compactAllNumbers(accepted).project;
-  assert.equal(warningsModel(compacted).total, 0, "после смыкания тот же вопрос задан заново");
-  assert.equal(warningsModel(compacted).accepted.length, 1);
+  assert.equal(panelModel(compacted).total, 0, "после смыкания тот же вопрос задан заново");
+  assert.equal(panelModel(compacted).accepted.length, 1);
 });
 
 test("принятая ошибка видна в списке принятых отдельно от предупреждения", () => {
@@ -368,7 +434,7 @@ test("принятая ошибка видна в списке принятых 
   let project = acceptProblem(broken, error).project;
   project = acceptProblem(project, box.problem).project;
 
-  const model = warningsModel(project);
+  const model = panelModel(project);
   assert.equal(model.total, 0);
   assert.deepEqual(
     model.accepted.map((record) => [record.level, record.code]),

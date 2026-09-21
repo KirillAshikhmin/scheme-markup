@@ -170,11 +170,11 @@ test("у нового объекта список не показывается:
   const project = createProject();
   assert.deepEqual(typeKindReview(project), []);
   // Вид у каждого типа проставлен, и это не догадка, а шаблон: пять типов
-  // света линейные по слову заказчика, остальные точечные.
+  // света линейные по справочнику заказчика, остальные точечные.
   for (const type of project.markTypes) assert.ok(MARK_KINDS.includes(type.kind), "тип без вида: " + type.code);
   assert.deepEqual(
     project.markTypes.filter((type) => type.kind === "line").map((type) => type.code),
-    ["ТР", "Л", "ПШ", "ПКШ", "КШ"],
+    ["ТР", "Л", "ПШ", "ПКШ", "ПЛ"],
   );
 });
 
@@ -296,11 +296,12 @@ test("правка шаблона не трогает справочник ра�
   const offered = offer.flatMap((group) => group.types.map((type) => type.code));
   assert.deepEqual(offered.sort(), ["ВВВ", "КШ", "ЛВ", "ПКШ"], "общая база предлагает ровно то, чего в объекте нет");
 
-  const added = addTypesFromCatalog(before, null, ["ЛВ", "КШ"]);
-  assert.deepEqual(added.types.map((type) => type.code), ["ЛВ", "КШ"]);
-  assert.equal(typeKindOf(added.project, added.types[0].id), "point", "лента вертикальная приехала точкой");
-  assert.equal(typeKindOf(added.project, added.types[1].id), "line", "карниз приехал линией");
-  assert.equal(styleOf(added.project, added.types[1].id).lineStyle, "double", "начертание приехало из базы");
+  const added = addTypesFromCatalog(before, null, ["ЛВ", "ПКШ"]);
+  // Порядок — порядок общей базы, а не порядок отметок.
+  assert.deepEqual(added.types.map((type) => type.code), ["ПКШ", "ЛВ"]);
+  assert.equal(typeKindOf(added.project, added.types[1].id), "point", "лента вертикальная приехала точкой");
+  assert.equal(typeKindOf(added.project, added.types[0].id), "line", "подсветка карниза приехала линией");
+  assert.equal(styleOf(added.project, added.types[0].id).lineStyle, "wave", "начертание приехало из базы");
 
   // А то, что в объекте уже было, не шевельнулось: ни знак, ни вид, ни цвет.
   for (const type of before.markTypes) {
@@ -378,7 +379,7 @@ test("окно смены типа показывает только типы с
   // Свежий объект: вид записан у типов, и окно делит справочник ровно по нему.
   const lines = codesOf(project, "line");
   const points = codesOf(project, "point");
-  assert.deepEqual(lines, ["ТР", "Л", "ПШ", "ПКШ", "КШ"], "линейные типы показаны не те");
+  assert.deepEqual(lines, ["ТР", "Л", "ПШ", "ПКШ", "ПЛ"], "линейные типы показаны не те");
   assert.equal(lines.some((code) => points.includes(code)), false, "тип попал в оба списка");
   assert.equal(points.includes("Т"), true, "точечные типы потерялись");
   for (const code of lines) assert.equal(typeKindOf(project, typeIdOf(project, code)), "line");

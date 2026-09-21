@@ -25,6 +25,7 @@ import {
   findCategoryByName,
   compactAllNumbers,
   compactNumbers,
+  closeCategoryColors,
   createProject,
   defaultTemplate,
   deleteCategory,
@@ -60,125 +61,193 @@ import {
   unacceptProblem,
   updateScheme,
   updateType,
+  sharedShapes,
   validate,
 } from "../src/model.js";
 
-test("стартовый справочник: типы из брифа, переключатель, витая пара и категория датчиков", () => {
-  const template = defaultTemplate();
-  assert.equal(template.categories.length, 8);
-  assert.equal(template.markTypes.length, 28);
+// Стартовый справочник — справочник рабочего объекта заказчика. Его слова:
+// «справочник типов в общий возьми из этого проекта». Тринадцать категорий и
+// сорок восемь типов пришпилены целиком: это данные пользователя, и правка
+// сборки не должна задеть их ни на букву, ни на знак.
+//
+// Коды у него разошлись с прежним шаблоном, и это не ошибка разбора: `П` —
+// переключатель (был подсветкой), `ВП` — витая пара (был проходным
+// переключателем), подсветка зовётся `ПС`, датчик движения — `ДД`, а протечки —
+// `ДПр`. Взято как есть.
+// Стартовый справочник — справочник рабочего объекта заказчика, и `validate`
+// рассказывает о нём: пять знаков, которые носят по нескольку типов, и пять пар
+// категорий с похожим цветом. Это сведения о справочнике, одни и те же в каждом
+// объекте; тесты ниже — про метки, номера и связи, поэтому смотрят на объект
+// через этот фильтр. Сам рассказ проверяет отдельный тест.
+const DICTIONARY_CODES = ["sharedShape", "closeColors"];
 
-  const byName = Object.fromEntries(template.categories.map((c) => [c.name, c]));
+function objectProblems(project) {
+  return validate(project).filter((problem) => !DICTIONARY_CODES.includes(problem.code));
+}
+
+// Повтор знака и похожий цвет категорий были запретом в тестах шаблона, а стали
+// предупреждением: заказчику показали числа, и он выбрал «взять как есть».
+// Довод его сильный — рядом со знаком на плане всегда стоит подпись, Т1 или С2,
+// и монтажник читает её, а не форму. Молчать об этом всё-таки нельзя, и молчания
+// нет: `validate` называет каждый повтор и каждую близкую пару предупреждением.
+test("повтор знака и похожий цвет категорий — предупреждения, а не ошибки", () => {
+  const project = createProject();
+  const shapes = sharedShapes(project);
   assert.deepEqual(
-    { color: byName["Свет"].color, shape: byName["Свет"].shape },
-    { color: "#1F6FEB", shape: "circle-cross" },
+    shapes.map((group) => [group.shape, group.codes.join(", ")]),
+    // Порядок — порядок справочника: сперва «Свет», потом остальные категории.
+    [
+      ["circle-cross", "Т, С, ПК, ПС, ППл, ЛЮ, Бр"],
+      ["circle-drain", "Н, КН"],
+      ["square-cross", "ПП, ВП, ЩС"],
+      ["drop-dot", "ОВ, ВР"],
+      ["square-bolt", "СУШ, ДЭП"],
+    ],
   );
+  // Линейные типы сюда не входят: их разводит начертание, а не форма.
+  assert.equal(shapes.every((group) => !group.codes.includes("ТР")), true);
+
+  const colors = closeCategoryColors(project);
   assert.deepEqual(
-    { color: byName["Выключатели"].color, shape: byName["Выключатели"].shape },
-    // Квадрат — знак выключателя: клавиши делят его чертами.
-    { color: "#2DA44E", shape: "square" },
+    colors.map((pair) => [pair.first, pair.second, pair.distance.toFixed(1)]),
+    [
+      ["Не назначено", "Сантехника", "21.4"],
+      ["Выключатели", "Электроприборы", "23.7"],
+      ["Климат", "Карнизы", "26.3"],
+      ["Домофон", "Сантехника", "27.4"],
+      ["Карнизы", "Щит", "28.9"],
+    ],
   );
+
+  const problems = validate(project).filter((problem) => DICTIONARY_CODES.includes(problem.code));
+  assert.equal(problems.length, shapes.length + colors.length);
+  assert.equal(problems.every((problem) => problem.kind === "warning"), true, "сведения о справочнике — не ошибка");
+  // Ошибок на новом объекте нет вовсе: он цел.
+  assert.deepEqual(objectProblems(project), []);
+  // Виновник назван: по ссылке идут к типу и к категории.
+  const shape = problems.find((problem) => problem.code === "sharedShape");
+  assert.ok(project.markTypes.some((type) => type.id === shape.ref));
+  const color = problems.find((problem) => problem.code === "closeColors");
+  assert.ok(project.categories.some((category) => category.id === color.ref));
+  // Ключ принятия не считает типов под знаком: восьмой светильник не вернёт
+  // того, что пользователь уже закрыл.
+  assert.equal(shape.key, "sharedShape:circle-cross");
+});
+
+test("стартовый справочник — справочник заказчика: тринадцать категорий и сорок восемь типов", () => {
+  const template = defaultTemplate();
+  assert.equal(template.categories.length, 13);
+  assert.equal(template.markTypes.length, 48);
+
+  // prettier-ignore
   assert.deepEqual(
-    { color: byName["Розетки"].color, shape: byName["Розетки"].shape },
-    // Круг с двумя точками — евророзетка, как её и рисуют.
-    { color: "#D1242F", shape: "circle-socket" },
-  );
-  assert.deepEqual(
-    { color: byName["Климат"].color, shape: byName["Климат"].shape },
-    { color: "#E36209", shape: "triangle" },
-  );
-  assert.deepEqual(
-    { color: byName["Сетевое оборудование"].color, shape: byName["Сетевое оборудование"].shape },
-    { color: "#8250DF", shape: "star" },
-  );
-  // Датчики заведены по просьбе заказчика: свой цвет, своя форма по умолчанию.
-  assert.deepEqual(
-    { color: byName["Датчики"].color, shape: byName["Датчики"].shape },
-    { color: "#164E63", shape: "circle-ring" },
-  );
-  // Щит — своя категория по просьбе заказчика: узел питания, а не устройство
-  // в комнате. Коричневый — цвет фазного провода; отличимость от шести прежних
-  // считает test/colors.test.js, здесь пришпилены сами значения.
-  assert.deepEqual(
-    { color: byName["Щит"].color, shape: byName["Щит"].shape },
-    { color: "#6E4B1F", shape: "square-bolt" },
+    template.categories.map((category) => [category.name, category.color, category.shape]),
+    [
+      ["Свет", "#1F6FEB", "circle-cross"],
+      ["Выключатели", "#2DA44E", "circle"],
+      ["Розетки", "#D1242F", "square"],
+      ["Климат", "#E36209", "triangle"],
+      ["Сетевое оборудование", "#8250DF", "star"],
+      ["Домофон", "#D901C4", "triangle-down"],
+      ["Карнизы", "#9d4c01", "diamond"],
+      ["Не назначено", "#FF007F", "plus"],
+      ["Электроприборы", "#1DAB1D", "square-bolt"],
+      ["Кинотеатр", "#001BDD", "square-wave"],
+      ["Датчики", "#164E63", "circle-ring"],
+      ["Щит", "#6E4B1F", "square-bolt"],
+      ["Сантехника", "#E80098", "drop-dot"],
+    ],
   );
 
   assert.deepEqual(
     template.markTypes.map((t) => t.code),
-    // «ВП» — проходной переключатель, добавлен по просьбе заказчика и стоит
-    // в своей категории, рядом с выключателями. «ЛВ», «ПКШ» и «КШ» — тоже по
-    // просьбе заказчика, и тоже в своей категории: рядом с лентой и подсветкой
-    // шкафа, а не в хвосте списка. Остальные тринадцать — из брифа.
+    // Порядок — порядок заказчика, а не наша перекладка по категориям.
     // prettier-ignore
-    ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ",
-     "В", "ВВ", "ВВВ", "ВП", "Р", "Б", "К", "W", "RJ", "ДВ", "ДО", "ДП", "ДД", "Щ", "ЩС",
-     "ВР", "КН", "КВ"],
+    ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
+     "ПКШ", "ЛЮ", "П", "ПП", "Н", "ВОПРОС", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
+     "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
+     "КВ", "ПЛ", "ПЗ", "КАМ"],
   );
-  // Названия — данные заказчика, поэтому пришпилены целиком: правка форм и
-  // добавление типов не должны их задеть ни на букву.
-  assert.deepEqual(
-    Object.fromEntries(template.markTypes.map((t) => [t.code, t.name])),
-    {
-      Т: "Точечный светильник",
-      С: "Светильник",
-      ПК: "Подсветка кровати",
-      ТР: "Трек",
-      П: "Подсветка",
-      Л: "Лента",
-      ЛВ: "Лента вертикальная",
-      ПШ: "Подсветка шкафа",
-      ПКШ: "Подсветка карниза",
-      КШ: "Карниз штор",
-      В: "Выключатель",
-      ВВ: "Выключатель двойной",
-      ВВВ: "Выключатель тройной",
-      ВП: "Переключатель проходной",
-      Р: "Розетка",
-      Б: "Бризер",
-      К: "Кондиционер",
-      W: "WiFi точка",
-      RJ: "Вывод витой пары (розетка RJ45)",
-      ДВ: "Датчик движения",
-      ДО: "Датчик открытия",
-      ДП: "Датчик протечки",
-      ДД: "Датчик дыма",
-      Щ: "Электрощит",
-      ЩС: "Слаботочный щит",
-      ВР: "Водорозетка",
-      КН: "Выход канализации",
-      КВ: "Кран воды с электроприводом",
-    },
-  );
+  // Названия — данные заказчика, поэтому пришпилены целиком, вместе с его
+  // заглавными буквами посреди названия и сокращением «эл приводом».
+  assert.deepEqual(Object.fromEntries(template.markTypes.map((t) => [t.code, t.name])), {
+    Т: "Точечный светильник",
+    С: "Светильник",
+    ПК: "Подсветка кровати",
+    ТР: "Трек",
+    ПС: "Подсветка",
+    Л: "Лента",
+    ПШ: "Подсветка шкафа",
+    В: "Выключатель",
+    ВВ: "Выключатель двойной",
+    Р: "Розетка",
+    Б: "Бризер",
+    К: "Кондиционер",
+    W: "WiFi точка",
+    Д: "Домофон",
+    КШ: "Карниз штор",
+    ППл: "Подсветка пола",
+    ПКШ: "Подсветка карниза штор",
+    ЛЮ: "Люстра",
+    П: "Переключатель",
+    ПП: "Переключатель двойной",
+    Н: "Ночник",
+    ВОПРОС: "Не определено",
+    РC: "Розетка 380",
+    ДП: "Датчик присутствия",
+    СУШ: "Сушилка Электрическая",
+    Щ: "Электрощит",
+    ВЫТ: "Вытяжка",
+    Бр: "Бра",
+    ДЭП: "Дверца в мебели с эл приводом",
+    ПУ: "Панель Управления",
+    ОВ: "Осушитель",
+    ВП: "Витая пара Интер",
+    РЕС: "Ресивер",
+    ПРО: "Проектор",
+    УК: "Умная Колонка",
+    ЛВ: "Лента вертикальная",
+    ВВВ: "Выключатель тройной",
+    ДД: "Датчик движения",
+    ДО: "Датчик открытия",
+    ДПр: "Датчик протечки",
+    ЩС: "Слаботочный щит",
+    РП: "Робот пылесос",
+    ВР: "Водорозетка",
+    КН: "Выход канализации",
+    КВ: "Кран воды с электроприводом",
+    ПЛ: "Подсветка лестницы",
+    ПЗ: "Подсветка зеркала",
+    КАМ: "Камера",
+  });
   assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
-  // Типы света сидят в одном синем цвете, поэтому у каждого своя форма:
-  // иначе тип читается только по букве. Цвета категорий при этом прежние —
-  // они проверены выше.
-  // prettier-ignore
-  const lightCodes = ["Т", "С", "ПК", "ТР", "П", "Л", "ЛВ", "ПШ", "ПКШ", "КШ"];
-  const lightShapes = template.markTypes.filter((t) => lightCodes.includes(t.code)).map((t) => t.shape);
-  // prettier-ignore
-  assert.deepEqual(lightShapes, [
-    "circle-cross", "circle-fill", "circle-dot", "plus", "diamond",
-    "triangle", "rect-vertical", "triangle-down", "diamond-dot", "diamond-cross",
-  ]);
-  assert.equal(new Set(lightShapes).size, lightCodes.length, "два типа света рисуются одинаково");
-  // Своей формы нет у типа, которому хватает формы категории: в своей
-  // категории он один такой. «Р» вернулась в этот список — её знаком стал
-  // круг с двумя точками, и он же стал формой категории «Розетки»;
-  // «В» ушёл туда же по той же причине: квадрат теперь форма выключателей.
+
+  // Своей формы нет у типа, которому хватает формы категории. Семь из них —
+  // типы света: заказчик оставил их под одним кругом с крестом сознательно.
   assert.deepEqual(
     template.markTypes.filter((t) => t.shape === null).map((t) => t.code),
-    ["В", "Р", "Б", "W", "ДД", "Щ", "ВР"],
+    // prettier-ignore
+    ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "Д", "КШ", "ППл", "ПКШ", "ЛЮ", "ВОПРОС", "СУШ",
+     "Бр", "ДЭП", "РЕС", "ВР", "ПЛ"],
   );
-  // Выключатели и климат — разными знаками, как просил заказчик. У «В» своего
-  // знака нет: он берёт квадрат категории, а клавиши на нём считают по чертам.
-  // Что знаки и на бумаге не сливаются, проверяет отпечаток в test/shapes.test.js.
+  // Выключатели — каждый своим квадратом: клавиши на знаке считают глазами.
+  // Порядок здесь — порядок справочника заказчика, а не порядок числа клавиш.
   assert.deepEqual(
-    template.markTypes.filter((t) => ["В", "ВВ", "ВВВ", "ВП"].includes(t.code)).map((t) => t.shape),
-    [null, "square-bar", "square-bar-two", "square-chevron"],
+    template.markTypes.filter((t) => ["В", "ВВ", "ВВВ", "П", "ПП"].includes(t.code)).map((t) => [t.code, t.shape]),
+    [
+      ["В", "square"],
+      ["ВВ", "square-bar"],
+      ["П", "square-chevron"],
+      ["ПП", "square-cross"],
+      ["ВВВ", "square-bar-two"],
+    ],
   );
-  assert.equal(template.markTypes.find((t) => t.code === "К").shape, "square-wave");
+  // Каналы приехали из объекта заказчика: у остальных типов один.
+  assert.deepEqual(
+    template.markTypes.filter((t) => t.channels !== 1).map((t) => [t.code, t.channels]),
+    [["ВВ", 2], ["ПП", 2], ["ВВВ", 3]],
+  );
+  assert.equal(template.markTypes.find((t) => t.code === "К").shape, "circle-thermo");
 });
 
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
@@ -186,8 +255,8 @@ test("новый объект создаётся из стартового сп�
   // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
   // вид типа — точка или линия.
   assert.equal(project.formatVersion, 4);
-  assert.equal(project.categories.length, 8);
-  assert.equal(project.markTypes.length, 28);
+  assert.equal(project.categories.length, 13);
+  assert.equal(project.markTypes.length, 48);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -501,10 +570,10 @@ test("код типа — от одной до шестнадцати букв �
   });
 
   const added = addType(project, { code: "Ш", name: "Шинопровод", categoryId: light });
-  assert.equal(added.project.markTypes.length, 29);
+  assert.equal(added.project.markTypes.length, project.markTypes.length + 1);
   assert.equal(added.type.blockMode, "each");
   assert.equal(added.type.shape, null);
-  assert.equal(project.markTypes.length, 28);
+  assert.equal(project.markTypes.length, createProject().markTypes.length, "исходный объект тронут");
 });
 
 test("тип с метками не удаляется, свободный удаляется", () => {
@@ -514,7 +583,7 @@ test("тип с метками не удаляется, свободный уд�
 
   const freed = deleteMark(step.project, step.mark.id).project;
   const after = deleteType(freed, typeId(freed, "К")).project;
-  assert.equal(after.markTypes.length, 27);
+  assert.equal(after.markTypes.length, freed.markTypes.length - 1);
   assert.equal(after.markTypes.find((t) => t.code === "К"), undefined);
 });
 
@@ -542,20 +611,20 @@ test("цвет берётся у категории, форма — у типа,
   const light = project.categories.find((c) => c.name === "Свет").id;
   const repainted = updateCategory(shaped, light, { color: "#000000", shape: "hexagon" }).project;
   assert.deepEqual(styleOf(repainted, spot), { color: "#000000", shape: "diamond", lineStyle: "solid" });
-  // Тип без своей формы берёт форму категории. У света и выключателей формы
-  // теперь у всех — наследование видно на розетке: она в своей категории одна,
-  // и форма категории ей и достаётся.
-  const sockets = project.categories.find((c) => c.name === "Розетки").id;
-  const reshaped = updateCategory(project, sockets, { shape: "hexagon" }).project;
-  assert.deepEqual(styleOf(reshaped, typeId(reshaped, "Р")), { color: "#D1242F", shape: "hexagon", lineStyle: "solid" });
+  // Тип без своей формы берёт форму категории. В справочнике заказчика форма
+  // своя у обеих розеток, зато её нет у типов «Света» — на них наследование и
+  // видно: перекрасили категорию, и знак поехал у всех семи сразу.
+  const reshaped = updateCategory(project, light, { shape: "hexagon" }).project;
+  assert.deepEqual(styleOf(reshaped, typeId(reshaped, "Т")), { color: "#1F6FEB", shape: "hexagon", lineStyle: "solid" });
+  assert.deepEqual(styleOf(reshaped, typeId(reshaped, "ЛЮ")), { color: "#1F6FEB", shape: "hexagon", lineStyle: "solid" });
   assert.throws(() => updateCategory(repainted, light, { shape: "cloud" }), { code: "unknownShape" });
 });
 
 test("категории и помещения заводятся своими функциями", () => {
   const project = createProject();
   const withCategory = addCategory(project, { name: "Шторы", color: "#123456", shape: "square" });
-  assert.equal(withCategory.project.categories.length, 9);
-  assert.equal(withCategory.category.order, 8);
+  assert.equal(withCategory.project.categories.length, project.categories.length + 1);
+  assert.equal(withCategory.category.order, project.categories.length);
 
   const withRoom = addRoom(withCategory.project, { name: "Спальная Оли" });
   assert.equal(withRoom.room.name, "Спальная Оли");
@@ -598,7 +667,7 @@ test("линия хранится вершинами, из одной верши
 test("validate молчит на здоровом объекте и называет проблемы на битом", () => {
   const { project: base, first } = projectWithSchemes();
   const { project: healthy } = putSeries(base, first.id, "В", 2);
-  assert.deepEqual(validate(healthy), []);
+  assert.deepEqual(objectProblems(healthy), []);
 
   const broken = structuredClone(healthy);
   broken.markTypes[1].code = "В";
@@ -606,12 +675,12 @@ test("validate молчит на здоровом объекте и называ
   broken.counters["В"] = 1;
   broken.groups.push({ id: "g1", schemeId: first.id, markIds: [broken.marks[0].id], labelOffset: null });
 
-  const codes = validate(broken).map((problem) => problem.code);
+  const codes = objectProblems(broken).map((problem) => problem.code);
   assert.ok(codes.includes("duplicateCode"), codes.join(","));
   assert.ok(codes.includes("markWithoutScheme"), codes.join(","));
   assert.ok(codes.includes("counterBehind"), codes.join(","));
   assert.ok(codes.includes("smallGroup"), codes.join(","));
-  assert.ok(validate(broken).every((problem) => typeof problem.message === "string" && problem.message));
+  assert.ok(objectProblems(broken).every((problem) => typeof problem.message === "string" && problem.message));
 });
 
 test("удаление схемы уносит её метки и группы, чужие не трогает", () => {
@@ -637,14 +706,14 @@ test("удаление схемы уносит её метки и группы, 
   assert.deepEqual(after.marks.map((m) => m.id), [kept]);
   assert.deepEqual(after.groups, []);
   assert.equal(after.counters["В"], 3);
-  assert.deepEqual(validate(after), []);
+  assert.deepEqual(objectProblems(after), []);
 });
 
 test("идентификаторы стартового справочника уникальны у каждого объекта", () => {
   const first = createProject();
   const second = createProject();
   const ids = [...first.categories.map((c) => c.id), ...first.markTypes.map((t) => t.id)];
-  assert.equal(new Set(ids).size, 36);
+  assert.equal(new Set(ids).size, first.categories.length + first.markTypes.length);
   const otherIds = new Set([...second.categories.map((c) => c.id), ...second.markTypes.map((t) => t.id)]);
   assert.deepEqual(ids.filter((id) => otherIds.has(id)), []);
 });
@@ -697,7 +766,7 @@ test("категория удаляется только пустой, тип б
 
   const added = addCategory(project, { name: "Шторы", color: "#123456", shape: "square" });
   const after = deleteCategory(added.project, added.category.id).project;
-  assert.equal(after.categories.length, 8);
+  assert.equal(after.categories.length, project.categories.length);
 });
 
 test("имя объекта, вид и помещения правятся", () => {
@@ -714,12 +783,12 @@ test("имя объекта, вид и помещения правятся", () 
 
   const step = putPoint(renamed, first.id, "В");
   const linked = updateMark(step.project, step.mark.id, { roomId: withRoom.room.id }).project;
-  assert.deepEqual(validate(linked), []);
+  assert.deepEqual(objectProblems(linked), []);
 
   const dropped = deleteRoom(linked, withRoom.room.id).project;
   assert.deepEqual(dropped.rooms, []);
   assert.equal(findMark(dropped, step.mark.id).roomId, null);
-  assert.deepEqual(validate(dropped), []);
+  assert.deepEqual(objectProblems(dropped), []);
 });
 
 test("отставший счётчик — одна проблема на тип", () => {
@@ -728,7 +797,7 @@ test("отставший счётчик — одна проблема на ти�
   const broken = structuredClone(filled);
   broken.counters["В"] = 0;
 
-  const behind = validate(broken).filter((problem) => problem.code === "counterBehind");
+  const behind = objectProblems(broken).filter((problem) => problem.code === "counterBehind");
   assert.equal(behind.length, 1);
   assert.equal(behind[0].ref, filled.markTypes.find((t) => t.code === "В").id);
 });
@@ -936,7 +1005,7 @@ test("validate предупреждает о повторе номера и сч
   let project = setMarkNumber(filled, ids[1], 1).project;
   project = setMarkNumber(project, ids[2], 1).project;
 
-  const problems = validate(project);
+  const problems = objectProblems(project);
   assert.deepEqual(problems.map((problem) => problem.code), ["repeatedNumber"]);
   assert.equal(problems[0].kind, "warning");
   assert.equal(problems[0].message, "Т1 — таких меток 3");
@@ -948,12 +1017,12 @@ test("validate предупреждает о повторе номера и сч
 
   // Один номер у разных типов — не повтор: Т1 и В1 живут каждый в своём ряду.
   const mixed = putPoint(project, first.id, "В").project;
-  assert.deepEqual(validate(mixed).map((problem) => problem.code), ["repeatedNumber"]);
+  assert.deepEqual(objectProblems(mixed).map((problem) => problem.code), ["repeatedNumber"]);
 
   // Настоящая поломка объекта остаётся ошибкой, а не предупреждением.
   const broken = structuredClone(project);
   broken.marks[3].schemeId = "нет-такой-схемы";
-  const scheme = validate(broken).find((problem) => problem.code === "markWithoutScheme");
+  const scheme = objectProblems(broken).find((problem) => problem.code === "markWithoutScheme");
   assert.equal(scheme.kind, "error");
 });
 
@@ -994,7 +1063,7 @@ test("смена типа у метки с ручным номером берё�
 
   const moved = changeMarkType(project, ids[2], typeId(project, "С")).project;
   assert.equal(labelOf(moved, ids[2]), "С1");
-  assert.deepEqual(validate(moved).map((problem) => problem.message), ["Т1 — таких меток 2"]);
+  assert.deepEqual(objectProblems(moved).map((problem) => problem.message), ["Т1 — таких меток 2"]);
 
   // Номер, поставленный руками выше счётчика, не уезжает в новый тип.
   const manual = setMarkNumber(moved, ids[0], 40).project;
@@ -1064,7 +1133,7 @@ test("переименование короткого кода в длинный
   assert.equal(labelOf(renamed, ids[2]), "ПОДСВЕТКА3");
   assert.equal(renamed.counters["ПОДСВЕТКА"], 3);
   assert.equal(renamed.counters["П"], undefined);
-  assert.deepEqual(validate(renamed), []);
+  assert.deepEqual(objectProblems(renamed), []);
 });
 
 // Годность кода спрашивают у модели. Копия правила в окне выбора типа уже
@@ -1145,11 +1214,15 @@ function offeredCodes(groups) {
 
 test("общая база: пустому справочнику предлагается всё, полному — ничего", () => {
   const offer = catalogOffer(withoutDictionary(), null);
+  // prettier-ignore
   assert.deepEqual(
     offer.map((group) => group.category.name),
-    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Сантехника"],
+    [
+      "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
+      "Не назначено", "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
+    ],
   );
-  assert.equal(offeredCodes(offer).length, 28);
+  assert.equal(offeredCodes(offer).length, 48);
   assert.equal(offer[0].types[0].code, "Т");
   assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
 
@@ -1161,39 +1234,39 @@ test("общая база: пустому справочнику предлаг�
 test("общая база предлагает только незанятые коды — при любом названии и раскладке", () => {
   const project = createProject();
   const light = project.categories.find((category) => category.name === "Свет").id;
-  const older = { ...project, markTypes: project.markTypes.filter((type) => type.code !== "ВП" && type.code !== "RJ") };
-  assert.deepEqual(offeredCodes(catalogOffer(older, null)), ["ВП", "RJ"]);
+  const older = { ...project, markTypes: project.markTypes.filter((type) => type.code !== "ВП" && type.code !== "УК") };
+  assert.deepEqual(offeredCodes(catalogOffer(older, null)), ["ВП", "УК"]);
 
   // Код занят — строки нет вовсе, даже когда за кодом стоит совсем другой тип:
-  // подменять чужой «ВП» базовым переключателем нельзя.
+  // подменять чужой «ВП» базовой витой парой нельзя.
   const mine = addType(older, { code: "ВП", name: "Верхний прожектор", categoryId: light }).project;
-  assert.deepEqual(offeredCodes(catalogOffer(mine, null)), ["RJ"]);
+  assert.deepEqual(offeredCodes(catalogOffer(mine, null)), ["УК"]);
 
   // Занятость кода считается так же, как её считает `addType`: по верхнему
-  // регистру. Иначе окно предложило бы «RJ» поверх собственного «rj».
-  const lower = addType(older, { code: "rj", name: "Витая пара", categoryId: light }).project;
+  // регистру. Иначе окно предложило бы «УК» поверх собственного «ук».
+  const lower = addType(older, { code: "ук", name: "Угловая колонна", categoryId: light }).project;
   assert.deepEqual(offeredCodes(catalogOffer(lower, null)), ["ВП"]);
 });
 
 test("из общей базы добавляются только отмеченные типы, остальной справочник не шевелится", () => {
   const project = createProject();
-  const older = { ...project, markTypes: project.markTypes.filter((type) => type.code !== "ВП" && type.code !== "RJ") };
+  const older = { ...project, markTypes: project.markTypes.filter((type) => type.code !== "ВП" && type.code !== "УК") };
   const result = addTypesFromCatalog(older, null, ["ВП"]);
 
   assert.deepEqual(result.types.map((type) => type.code), ["ВП"]);
-  assert.equal(result.types[0].name, "Переключатель проходной");
-  assert.equal(result.types[0].shape, "square-chevron", "форма приезжает из базы");
+  assert.equal(result.types[0].name, "Витая пара Интер");
+  assert.equal(result.types[0].shape, "square-cross", "форма приезжает из базы");
   assert.equal(result.types[0].blockMode, "each");
   assert.deepEqual(result.categories, [], "все категории у объекта уже есть");
   assert.equal(result.project.markTypes.length, older.markTypes.length + 1);
-  assert.equal(result.project.markTypes.some((type) => type.code === "RJ"), false, "неотмеченный тип не добавился");
+  assert.equal(result.project.markTypes.some((type) => type.code === "УК"), false, "неотмеченный тип не добавился");
   // Категории — тот же массив: добавление типов их не переписывает, а значит
   // и цвета с формами остались как были.
   assert.equal(result.project.categories, older.categories);
 
   // Новый тип встаёт в конец своей категории, а не в начало справочника.
-  const switches = typesInOrder(result.project).find((group) => group.category.name === "Выключатели");
-  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "ВВВ", "ВП"]);
+  const network = typesInOrder(result.project).find((group) => group.category.name === "Сетевое оборудование");
+  assert.deepEqual(network.types.map((type) => type.code), ["W", "ПУ", "ВП"]);
 
   // Добавлять нечего — тот же объект: пустого шага истории быть не должно.
   assert.equal(addTypesFromCatalog(older, null, []).project, older);
@@ -1202,13 +1275,13 @@ test("из общей базы добавляются только отмече�
 });
 
 test("недостающая категория заводится вместе с типом, знакомая переиспользуется без перекраски", () => {
-  const added = addTypesFromCatalog(withoutDictionary(), null, ["дв", "ДО"]);
+  const added = addTypesFromCatalog(withoutDictionary(), null, ["дд", "ДО"]);
   assert.deepEqual(added.categories.map((category) => category.name), ["Датчики"]);
   assert.deepEqual(
     { color: added.categories[0].color, shape: added.categories[0].shape },
     { color: "#164E63", shape: "circle-ring" },
   );
-  assert.deepEqual(added.types.map((type) => type.code), ["ДВ", "ДО"], "строчный ключ ловится тем же кодом");
+  assert.deepEqual(added.types.map((type) => type.code), ["ДД", "ДО"], "строчный ключ ловится тем же кодом");
   assert.equal(added.project.categories.length, 1, "лишних категорий не завелось");
 
   // Имя совпало — тип кладётся в чужую категорию как есть: перекрасить её
@@ -1222,7 +1295,12 @@ test("недостающая категория заводится вместе 
     { color: "#123456", shape: "square" },
   );
   assert.equal(into.types[0].categoryId, own.category.id);
-  assert.deepEqual(styleOf(into.project, into.types[0].id), { color: "#123456", shape: "square", lineStyle: "solid" });
+  // Цвет — у категории объекта, а не у базы; знак тип приносит свой, как он и
+  // записан в общей базе.
+  assert.deepEqual(
+    styleOf(into.project, into.types[0].id),
+    { color: "#123456", shape: "triangle-dot", lineStyle: "solid" },
+  );
 
   // И в окне видно будущий цвет, а не цвет базы: точка рядом с категорией
   // обязана совпасть с тем, что выйдет на план.
@@ -1247,9 +1325,13 @@ test("сохранённый шаблон побеждает встроенны�
   const offer = catalogOffer(withoutDictionary(), saved);
   // Порядок остаётся порядком встроенной базы: правка в шаблоне меняет строку,
   // а не место — привычный справочник не перетасовывается.
+  // prettier-ignore
   assert.deepEqual(
     offer.map((group) => group.category.name),
-    ["Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Датчики", "Щит", "Сантехника", "Шторы"],
+    [
+      "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
+      "Не назначено", "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника", "Шторы",
+    ],
   );
   const light = offer.find((group) => group.category.name === "Свет");
   assert.deepEqual(light.types[0], {
@@ -1395,7 +1477,7 @@ test("щит доезжает до размеченного объекта, а �
   );
   assert.deepEqual(
     styleOf(grown, grown.markTypes.find((type) => type.code === "Щ").id),
-    { color: "#6E4B1F", shape: "square-bolt", lineStyle: "solid" },
+    { color: "#6E4B1F", shape: "square-hatch", lineStyle: "solid" },
   );
   assert.equal(styleOf(grown, grown.markTypes.find((type) => type.code === "ЩС").id).shape, "square-cross");
 
@@ -1458,7 +1540,7 @@ test("смыкание по всем типам: дыры уходят, типы
   // Розетки не трогали — ни номера, ни счётчик.
   assert.deepEqual(labels(result.project, "Р"), ["Р1", "Р2"]);
   assert.equal(result.project.counters["Р"], project.counters["Р"]);
-  assert.deepEqual(validate(result.project), []);
+  assert.deepEqual(objectProblems(result.project), []);
 });
 
 test("смыкать нечего — возвращается тот же объект", () => {
@@ -1519,7 +1601,7 @@ test("связи меток и размещения оборудования п�
     markControls(result.project, switchMark).map((mark) => labelOf(result.project, mark.id)),
     ["Т2", "Т3"],
   );
-  assert.deepEqual(validate(result.project), [], "после смыкания объект должен быть чист");
+  assert.deepEqual(objectProblems(result.project), [], "после смыкания объект должен быть чист");
 });
 
 test("поля «Расположение» и «В оригинале» смыкание не правит", () => {
@@ -1580,7 +1662,7 @@ test("сантехника доезжает до прежнего объекта
     categories: project.categories.filter((category) => category.id !== plumbing.id),
     markTypes: project.markTypes.filter((type) => type.categoryId !== plumbing.id),
   };
-  assert.equal(older.markTypes.length, 25, "пример не тот: в прежнем объекте 25 типов");
+  assert.equal(older.markTypes.length, project.markTypes.length - 3, "пример не тот: сантехники три типа");
 
   const offered = catalogOffer(older, null).find((group) => group.category.name === "Сантехника");
   assert.ok(offered, "общая база не предлагает сантехнику объекту, где её нет");
@@ -1645,25 +1727,25 @@ test("ключ принятия у повтора номера — тип и н�
   let project = setMarkNumber(filled, ids[1], 1).project;
   project = setMarkNumber(project, ids[2], 1).project; // Т1 Т1 Т1 Т4
 
-  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  const problem = objectProblems(project).find((item) => item.code === "repeatedNumber");
   assert.equal(problem.key, "repeatedNumber:" + typeId(project, "Т") + "#1");
   // Ссылка на виновника — по-прежнему метка: по ней панель ведёт на план.
   assert.equal(problem.ref, ids[0]);
 
   // Четвёртый светильник в той же группе: меток стало больше, ключ тот же.
   const more = setMarkNumber(project, ids[3], 1).project;
-  const grown = validate(more).find((item) => item.code === "repeatedNumber");
+  const grown = objectProblems(more).find((item) => item.code === "repeatedNumber");
   assert.equal(grown.message, "Т1 — таких меток 4");
   assert.equal(grown.key, problem.key);
 
   // Первую метку убрали — ключ и это переживает: принимали приём, а не метку.
   const shorter = deleteMark(more, ids[0]).project;
-  assert.equal(validate(shorter).find((item) => item.code === "repeatedNumber").key, problem.key);
+  assert.equal(objectProblems(shorter).find((item) => item.code === "repeatedNumber").key, problem.key);
 
   // Другой номер того же типа — другое предупреждение и другой ключ.
   let other = setMarkNumber(shorter, ids[1], 7).project;
   other = setMarkNumber(other, ids[2], 7).project;
-  assert.notEqual(validate(other).find((item) => item.code === "repeatedNumber").key, problem.key);
+  assert.notEqual(objectProblems(other).find((item) => item.code === "repeatedNumber").key, problem.key);
 });
 
 test("принятое предупреждение помнится в объекте и возвращается в работу", () => {
@@ -1672,7 +1754,7 @@ test("принятое предупреждение помнится в объе
   let project = setMarkNumber(filled, ids[1], 1).project;
   project = setMarkNumber(project, ids[2], 1).project;
 
-  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  const problem = objectProblems(project).find((item) => item.code === "repeatedNumber");
   assert.equal(problemAccepted(project, problem.key), false);
 
   const accepted = acceptProblem(project, problem).project;
@@ -1689,7 +1771,7 @@ test("принятое предупреждение помнится в объе
   assert.deepEqual(accepted.marks, project.marks);
   // `validate` осталась таблицей правил: она по-прежнему называет повтор,
   // а прячет его панель — по ключу.
-  assert.ok(validate(accepted).some((item) => item.key === problem.key));
+  assert.ok(objectProblems(accepted).some((item) => item.key === problem.key));
 
   // Принято повторно — тот же объект: ни второй записи, ни лишнего шага истории.
   assert.equal(acceptProblem(accepted, problem).project, accepted);
@@ -1711,7 +1793,7 @@ test("принять можно и ошибку, но вид ответа зап
     ...step.project,
     marks: step.project.marks.map((mark) => ({ ...mark, roomId: "помещения-нет" })),
   };
-  const problem = validate(broken).find((item) => item.code === "markWithoutRoom");
+  const problem = objectProblems(broken).find((item) => item.code === "markWithoutRoom");
   const accepted = acceptProblem(broken, problem).project;
   assert.equal(acceptedProblems(accepted)[0].kind, "error");
   assert.equal(acceptedProblems(accepted)[0].key, "markWithoutRoom:" + step.mark.id);
@@ -1728,7 +1810,7 @@ function houseWithAcceptedRepeat() {
   project = setMarkNumber(project, ids[4], 4).project;
   project = deleteMark(project, ids[0]).project;
   project = deleteMark(project, ids[1]).project; // Т3 Т4 Т4 → после смыкания Т1 Т2 Т2
-  const problem = validate(project).find((item) => item.code === "repeatedNumber");
+  const problem = objectProblems(project).find((item) => item.code === "repeatedNumber");
   assert.equal(problem.message, "Т4 — таких меток 2");
   return { project: acceptProblem(project, problem).project, problem, ids };
 }
@@ -1738,20 +1820,20 @@ test("смыкание номеров переносит принятое на �
   const code = typeId(project, "Т");
 
   const compacted = compactNumbers(project, code).project;
-  assert.deepEqual(validate(compacted).map((item) => item.message), ["Т2 — таких меток 2"]);
+  assert.deepEqual(objectProblems(compacted).map((item) => item.message), ["Т2 — таких меток 2"]);
   const records = acceptedProblems(compacted);
   assert.equal(records.length, 1);
   assert.equal(records[0].key, "repeatedNumber:" + code + "#2");
   // Запомненный текст читается по новому обозначению, а не по исчезнувшему.
   assert.equal(records[0].label, "Т2 — таких меток 2");
   // Принято по-прежнему то же самое: повтор после смыкания не всплывает заново.
-  assert.equal(problemAccepted(compacted, validate(compacted)[0].key), true);
+  assert.equal(problemAccepted(compacted, objectProblems(compacted)[0].key), true);
   assert.equal(problemAccepted(compacted, problem.key), false, "старый ключ не остаётся висеть");
 
   // Отмена смыкания — это прежний объект целиком: в нём и номера, и принятия
   // те, что были. Ctrl+Z возвращает его одним шагом.
   assert.equal(acceptedProblems(project)[0].key, problem.key);
-  assert.deepEqual(validate(project).map((item) => item.message), ["Т4 — таких меток 2"]);
+  assert.deepEqual(objectProblems(project).map((item) => item.message), ["Т4 — таких меток 2"]);
 });
 
 test("смыкание по всем типам переносит принятое так же", () => {
@@ -1760,7 +1842,7 @@ test("смыкание по всем типам переносит принят�
 
   const result = compactAllNumbers(project);
   assert.ok(result.changes > 0);
-  assert.deepEqual(validate(result.project).map((item) => item.message), ["Т2 — таких меток 2"]);
+  assert.deepEqual(objectProblems(result.project).map((item) => item.message), ["Т2 — таких меток 2"]);
   assert.equal(problemAccepted(result.project, "repeatedNumber:" + code + "#2"), true);
   assert.equal(problemAccepted(result.project, problem.key), false);
 });
@@ -1783,14 +1865,14 @@ test("объект без списка принятых открывается �
 
   assert.deepEqual(acceptedProblems(old), []);
   assert.equal(problemAccepted(old, "repeatedNumber:что-угодно"), false);
-  assert.deepEqual(validate(old).map((item) => item.code), validate(project).map((item) => item.code));
+  assert.deepEqual(objectProblems(old).map((item) => item.code), objectProblems(project).map((item) => item.code));
   // Смыкание такого объекта — как раньше: переносить нечего, поля не заводится.
   const compacted = compactNumbers(old, typeId(old, "Т")).project;
   assert.equal(compacted.accepted, undefined);
   assert.deepEqual(acceptedProblems(compacted), []);
 
   // Первое же принятие заводит список, и остальное в объекте не меняется.
-  const problem = validate(old).find((item) => item.code === "repeatedNumber");
+  const problem = objectProblems(old).find((item) => item.code === "repeatedNumber");
   const accepted = acceptProblem(old, problem).project;
   assert.equal(acceptedProblems(accepted).length, 1);
   assert.deepEqual(accepted.marks, old.marks);
@@ -1914,7 +1996,7 @@ test("метка без полей размеров открывается ка�
   // Ни одна метка, ни один номер, ни одна подпись не изменились.
   assert.deepEqual(old.marks.map((mark) => mark.number), project.marks.map((mark) => mark.number));
   assert.deepEqual(old.marks.map((mark) => labelOf(old, mark.id)), project.marks.map((mark) => labelOf(project, mark.id)));
-  assert.deepEqual(validate(old).map((item) => item.code), validate(project).map((item) => item.code));
+  assert.deepEqual(objectProblems(old).map((item) => item.code), objectProblems(project).map((item) => item.code));
   assert.equal(labelOf(old, ids[2]), "Т3");
   assert.equal(findMark(old, ids[0]).location, "над тумбой");
 

@@ -69,7 +69,7 @@ test("пустой или чужой шаблон — это «шаблона н
 test("категория из общей базы и категория из шаблона — одна и та же, а не двойник", () => {
   const bare = { ...createProject(), categories: [], markTypes: [] };
   const own = addCategory(bare, { name: "датчики", color: "#123456", shape: "square" });
-  const filled = addTypesFromCatalog(own.project, null, ["ДВ"]).project;
+  const filled = addTypesFromCatalog(own.project, null, ["ДД"]).project;
   assert.equal(filled.categories.length, 1, "база кладёт тип в знакомую категорию");
 
   // Снимок такого справочника плюс строка «Датчики» из общей базы: имена
@@ -100,7 +100,7 @@ test("категория из общей базы и категория из ш�
 
   const next = createProject({ name: "Следующий", ...typesTemplateFrom(snapshot) });
   assert.deepEqual(next.categories.map((category) => category.name), ["датчики"]);
-  assert.deepEqual(next.markTypes.map((type) => type.code), ["ДВ", "ДО"]);
+  assert.deepEqual(next.markTypes.map((type) => type.code), ["ДД", "ДО"]);
   assert.equal(new Set(next.markTypes.map((type) => type.categoryId)).size, 1, "типы разъехались по двойникам");
   assert.equal(next.categories[0].color, "#123456", "выжившая категория — первая, со своим цветом");
 

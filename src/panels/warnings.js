@@ -52,6 +52,10 @@ export const WARNING_TARGETS = {
   typeWithoutCategory: "type",
   counterBehind: "type",
   typeKindMixed: "type",
+  // Повтор знака ведёт к первому типу под ним, похожий цвет — к категории:
+  // смотреть пользователю на метки, а не на строку справочника.
+  sharedShape: "type",
+  closeColors: "category",
   markWithoutType: "mark",
   markWithoutScheme: "mark",
   markWithoutRoom: "mark",
@@ -121,6 +125,14 @@ export function warningPlace(project, problem) {
       schemeId: outline.schemeId || null,
       point: points.length > 0 ? points[0] : null,
     };
+  }
+  if (target === "category") {
+    // У категории своих меток нет — ведём к первой метке любого её типа.
+    const types = new Set(
+      project.markTypes.filter((type) => type.categoryId === problem.ref).map((type) => type.id),
+    );
+    const first = project.marks.find((mark) => types.has(mark.typeId));
+    return first ? warningMarkPlace(project, first.id) : null;
   }
   if (target === "placement") {
     const placement = findPlacement(project, problem.ref);

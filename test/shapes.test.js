@@ -8,7 +8,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SHAPES, renderInternals } from "../src/render.js";
-import { SHAPE_LEGACY, SHAPE_NAMES, SHAPE_PALETTE, defaultTemplate } from "../src/model.js";
+import {
+  SHAPE_LEGACY,
+  SHAPE_NAMES,
+  SHAPE_PALETTE,
+  createProject,
+  defaultTemplate,
+  sharedShapes,
+  validate,
+} from "../src/model.js";
 import { strings } from "../src/strings.js";
 
 const shapeGeometry = (...args) => renderInternals.shapeGeometry(...args);
@@ -257,32 +265,34 @@ test("новые фигуры устроены так, как обещано: к
   assert.equal(shapeGeometry("plus", 0, 0, 10).points.length, 12);
 });
 
-// Семь типов света сидят в одной категории и в одном синем цвете: на бумаге их
-// различает только форма. Круг с крестом, закрашенный круг и круг с точкой —
-// родня, и в размере метки они ближе всего друг к другу, поэтому проверка идёт
-// не по списку имён, а тем же отпечатком.
-test("семь типов света расходятся на бумаге, а не только по букве", () => {
-  const light = defaultTemplate().markTypes.filter((type) =>
-    ["Т", "С", "ПК", "ТР", "П", "Л", "ПШ"].includes(type.code),
+// Семь типов света сидят в одной категории, в одном синем цвете **и под одним
+// знаком** — кругом с крестом. Раньше это запрещалось: свет был первым, кому
+// формы развели по просьбе заказчика. Стартовый справочник — теперь справочник
+// его рабочего объекта, и в нём Т, С, ПК, ПС, ППл, ЛЮ и Бр снова рисуются
+// одинаково. Ему показали числа, он ответил «взять как есть», и довод у него
+// сильный: рядом со знаком на плане **всегда стоит подпись** — Т1, С2, ПК1, —
+// и монтажник читает её, а не форму. Правило заводилось, воображая знак без
+// подписи, а такого на плане не бывает.
+//
+// Поэтому проверка стала не запретом, а требованием сказать вслух: повтор
+// обязан доехать до панели предупреждений строкой, которую видно.
+test("семь типов света носят один знак — и об этом сказано вслух", (t) => {
+  const project = createProject({ name: "Тест" });
+  const light = project.categories.find((category) => category.name === "Свет");
+  const points = project.markTypes.filter(
+    (type) => type.categoryId === light.id && (type.kind || "point") === "point",
   );
-  assert.equal(light.length, 7, "типы света потерялись из шаблона");
+  const shared = points.filter((type) => (type.shape || light.shape) === "circle-cross").map((type) => type.code);
+  assert.deepEqual(shared, ["Т", "С", "ПК", "ПС", "ППл", "ЛЮ", "Бр"], "состав типов света разошёлся со справочником");
+  t.diagnostic("под кругом с крестом: " + shared.join(", "));
 
-  const shapes = light.map((type) => type.shape);
-  assert.equal(new Set(shapes).size, 7, "два типа света рисуются одной формой: " + shapes.join(", "));
-  for (const shape of shapes) {
-    assert.ok(SHAPE_PALETTE.includes(shape), "форма типа света не из палитры: " + shape);
-  }
-
-  const prints = light.map((type) => ({ code: type.code, ink: inkOf(type.shape) }));
-  for (let i = 0; i < prints.length; i += 1) {
-    for (let j = i + 1; j < prints.length; j += 1) {
-      const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
-      assert.ok(
-        share >= MIN_DIFFERENCE,
-        prints[i].code + " и " + prints[j].code + " на бумаге расходятся на " + Math.round(share * 100) + "% знака",
-      );
-    }
-  }
+  const group = sharedShapes(project).find((item) => item.shape === "circle-cross");
+  assert.ok(group, "повтор знака не собрался");
+  assert.deepEqual(group.codes, shared);
+  const problem = validate(project).find((item) => item.code === "sharedShape" && item.message.includes("крестом"));
+  assert.ok(problem, "повтор знака не доехал до панели предупреждений");
+  assert.equal(problem.kind, "warning", "повтор знака — не ошибка объекта");
+  for (const code of shared) assert.ok(problem.message.includes(code), "в предупреждении нет типа " + code);
 });
 
 // Название фигуры видит человек: оно стоит в выборе обозначения и в справочнике.
@@ -323,7 +333,9 @@ test("четыре датчика расходятся на бумаге, а н�
   const sensors = categories.find((category) => category.name === "Датчики");
   assert.ok(sensors, "категории датчиков нет в шаблоне");
   const types = markTypes.filter((type) => type.categoryId === sensors.id);
-  assert.deepEqual(types.map((type) => type.code), ["ДВ", "ДО", "ДП", "ДД"]);
+  // Коды заказчика: присутствие, движение, открытие, протечка. Своей формы нет
+  // ни у одного — кольцо категории досталось подсветке зеркала из «Света».
+  assert.deepEqual(types.map((type) => type.code), ["ДП", "ДД", "ДО", "ДПр"]);
 
   const shapes = types.map((type) => type.shape || sensors.shape);
   assert.equal(new Set(shapes).size, types.length, "два датчика рисуются одной формой: " + shapes.join(", "));
@@ -339,38 +351,46 @@ test("четыре датчика расходятся на бумаге, а н�
   }
 });
 
-// Внутри категории цвет общий, и на чёрно-белой распечатке типы различает
-// только форма. Проверка идёт по всему шаблону сразу, а не по списку кодов:
-// заказчик просил «значки разведи», и новая категория или новый тип обязаны
-// приезжать уже разведёнными, без правки теста.
-test("в каждой категории шаблона типы расходятся на бумаге", () => {
+// Внутри категории цвет общий, и на чёрно-белой распечатке точечные типы
+// различает только форма. Проверка идёт по всему шаблону сразу, а не по списку
+// кодов, но запрещает теперь не всякое совпадение, а только **тихое**: два
+// разных знака, которые в размере метки читаются как один. Прямой повтор знака
+// (у типов один и тот же `shape`) — выбор заказчика, и разбирается он отдельным
+// тестом ниже, через предупреждение.
+test("в каждой категории шаблона разные знаки остаются разными", (t) => {
   const { categories, markTypes } = defaultTemplate();
   const merged = [];
+  const twins = [];
   for (const category of categories) {
     const types = markTypes.filter((type) => type.categoryId === category.id);
     assert.ok(types.length > 0, "категория без типов: " + category.name);
     // Форма считается так же, как её считает холст: своя, иначе категорийная.
-    const prints = types.map((type) => ({
-      code: type.code,
-      shape: type.shape || category.shape,
-      ink: inkOf(type.shape || category.shape),
-    }));
+    // Линейные типы сюда не входят: их обозначение — начертание, и разводит их
+    // `test/lineStyle.test.js`.
+    const prints = types
+      .filter((type) => (type.kind || "point") === "point")
+      .map((type) => ({
+        code: type.code,
+        shape: type.shape || category.shape,
+        ink: inkOf(type.shape || category.shape),
+      }));
     for (const print of prints) {
       assert.ok(SHAPE_PALETTE.includes(print.shape), "форма не из палитры: " + print.code + " — " + print.shape);
     }
     for (let i = 0; i < prints.length; i += 1) {
       for (let j = i + 1; j < prints.length; j += 1) {
-        const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
-        if (share < MIN_DIFFERENCE) {
-          merged.push(
-            category.name + ": " + prints[i].code + " и " + prints[j].code +
-              " расходятся на " + Math.round(share * 100) + "% знака",
-          );
+        const pair = category.name + ": " + prints[i].code + " и " + prints[j].code;
+        if (prints[i].shape === prints[j].shape) {
+          twins.push(pair + " — «" + strings.shapes[prints[i].shape] + "»");
+          continue;
         }
+        const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
+        if (share < MIN_DIFFERENCE) merged.push(pair + " расходятся на " + Math.round(share * 100) + "% знака");
       }
     }
   }
-  assert.deepEqual(merged, [], "в размере метки эти типы сливаются");
+  assert.deepEqual(merged, [], "в размере метки эти разные знаки сливаются");
+  if (twins.length > 0) t.diagnostic("один знак на несколько типов: " + twins.join("; "));
 });
 
 // Выключатели, розетка и два климатических прибора — то, что заказчик назвал
@@ -385,57 +405,72 @@ test("выключатели, розетка, климат и щит нарис�
     const category = categories.find((item) => item.id === type.categoryId);
     return type.shape || category.shape;
   };
+  // Пять выключателей заказчика: одна, две и три клавиши, переключатель и
+  // двойной переключатель. Знак у каждого свой и квадратный — выключатель на
+  // стене выглядит клавишей.
   assert.deepEqual(
-    ["В", "ВВ", "ВВВ", "ВП"].map(shapeOf),
-    ["square", "square-bar", "square-bar-two", "square-chevron"],
+    ["В", "ВВ", "ВВВ", "П", "ПП"].map(shapeOf),
+    ["square", "square-bar", "square-bar-two", "square-chevron", "square-cross"],
   );
-  // Розетка своей формы не имеет: в своей категории она одна и берёт форму
-  // категории — тот самый круг с двумя отверстиями.
-  assert.equal(shapeOf("Р"), "circle-socket");
-  assert.equal(markTypes.find((item) => item.code === "Р").shape, null);
-  assert.deepEqual(["Б", "К"].map(shapeOf), ["triangle", "square-wave"]);
-  assert.deepEqual(["Щ", "ЩС"].map(shapeOf), ["square-bolt", "square-cross"]);
-  // Щит — узел питания, и знак у него силовой: молния в квадрате.
+  // Розетки: евророзетка — круг с двумя отверстиями, трёхфазная — с тремя.
+  assert.deepEqual(["Р", "РC"].map(shapeOf), ["circle-socket", "circle-triple"]);
+  // Климат: бризер — полукруг с точкой, кондиционер — круг с термометром,
+  // вытяжка — закрашенный круг, осушитель — капля с точкой.
+  assert.deepEqual(["Б", "К", "ВЫТ", "ОВ"].map(shapeOf), ["dome-dot", "circle-thermo", "circle-fill", "drop-dot"]);
+  // Щиты: силовой — штриховка, слаботочный — перечёркнутый квадрат.
+  assert.deepEqual(["Щ", "ЩС"].map(shapeOf), ["square-hatch", "square-cross"]);
+  // Щит — узел питания, и знак категории у него силовой: молния в квадрате.
   const panel = categories.find((category) => category.name === "Щит");
   assert.ok(panel, "категории щита нет в шаблоне");
   assert.equal(panel.shape, "square-bolt");
 });
 
 // Цвет разводит категории только на экране: на чёрно-белой распечатке два
-// точечных типа с одним знаком различает лишь код рядом. Так и вышло у «ЛВ»
-// (лента вертикальная, свет) с «ДВ» (датчик движения) — обоим достался
-// треугольник с точкой, и заказчик попросил развести. Проверка идёт по всему
-// шаблону сразу, через категории: новый точечный тип обязан приезжать со
-// своим знаком. Линейные типы сюда не входят — их обозначение не форма, а
-// начертание, и разводит их `test/lineStyle.test.js`.
-test("точечные типы шаблона не повторяют знак друг за другом", () => {
-  const { categories, markTypes } = defaultTemplate();
-  const points = markTypes
+// точечных типа с одним знаком различает лишь код рядом. Раньше это было
+// запретом — новый точечный тип обязан был приезжать со своим знаком. Теперь
+// стартовый справочник пришёл от заказчика, и повторов в нём пять: круг с
+// крестом на семи типах света, перечёркнутый квадрат на ПП, ВП и ЩС, сток на
+// Н и КН, молния на СУШ и ДЭП, капля с точкой на ОВ и ВР.
+//
+// Запретом осталась вторая половина правила — та, что про палитру, а не про
+// справочник: **два разных знака не имеют права слиться в размере метки**.
+// Прямой повтор одного и того же знака заказчик выбрал сам, и сборка о нём не
+// молчит — говорит предупреждением.
+test("разные знаки точечных типов не сливаются, а повторы видно в предупреждениях", (t) => {
+  const project = createProject({ name: "Тест" });
+  const byId = new Map(project.categories.map((category) => [category.id, category]));
+  const points = project.markTypes
     .filter((type) => (type.kind || "point") === "point")
-    .map((type) => ({
-      code: type.code,
-      shape: type.shape || categories.find((category) => category.id === type.categoryId).shape,
-    }));
+    .map((type) => ({ code: type.code, shape: type.shape || byId.get(type.categoryId).shape }));
   assert.ok(points.length >= 20, "точечные типы потерялись из шаблона");
 
-  const twins = [];
-  const seen = new Map();
-  for (const { code, shape } of points) {
-    if (seen.has(shape)) twins.push(seen.get(shape) + " и " + code + " — «" + strings.shapes[shape] + "»");
-    else seen.set(shape, code);
-  }
-  assert.deepEqual(twins, [], "два точечных типа шаблона рисуются одним знаком");
-
-  // Знак не только свой, но и различимый в размере метки — тем же отпечатком.
   const merged = [];
-  const prints = points.map((item) => ({ code: item.code, ink: inkOf(item.shape) }));
+  const prints = points.map((item) => ({ code: item.code, shape: item.shape, ink: inkOf(item.shape) }));
   for (let i = 0; i < prints.length; i += 1) {
     for (let j = i + 1; j < prints.length; j += 1) {
+      if (prints[i].shape === prints[j].shape) continue;
       const share = difference(prints[i].ink, prints[j].ink) / GLYPH_AREA;
       if (share < MIN_DIFFERENCE) {
         merged.push(prints[i].code + " и " + prints[j].code + " — " + Math.round(share * 100) + "% знака");
       }
     }
   }
-  assert.deepEqual(merged, [], "в размере метки эти типы сливаются");
+  assert.deepEqual(merged, [], "в размере метки эти разные знаки сливаются");
+
+  // Повторы собраны моделью и доходят до панели предупреждений — по строке на
+  // знак, с перечислением типов под ним.
+  const groups = sharedShapes(project);
+  t.diagnostic(groups.map((group) => group.name + ": " + group.codes.join(", ")).join("; ") || "повторов знака нет");
+  const seen = new Map();
+  const expected = [];
+  for (const { code, shape } of points) {
+    if (seen.has(shape)) {
+      if (!expected.includes(shape)) expected.push(shape);
+    } else seen.set(shape, code);
+  }
+  assert.deepEqual(groups.map((group) => group.shape).sort(), [...expected].sort(), "повтор знака собран не весь");
+
+  const problems = validate(project).filter((problem) => problem.code === "sharedShape");
+  assert.equal(problems.length, groups.length, "не каждый повтор доехал до панели предупреждений");
+  for (const problem of problems) assert.equal(problem.kind, "warning", "повтор знака — не ошибка объекта");
 });
