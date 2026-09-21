@@ -26,7 +26,9 @@ import {
   autosaveGrant,
   autosaveLastExport,
   autosaveNoteExport,
+  autosaveNoteStaleKept,
   autosaveOwnSnapshots,
+  autosaveStaleKeptNames,
   autosavePack,
   autosavePendingWrite,
   autosavePickFolder,
@@ -106,7 +108,9 @@ function mountFilePanel(host, api) {
   // объект переименовали, и прежний файл больше не обновляется.
   let fileSnapshotName = null;
   // Про какие прежние файлы уже сказали и с какой парой «папка + объект» уже
-  // разбирались: дважды за сеанс спрашивать об одном и том же незачем.
+  // разбирались: дважды за сеанс спрашивать об одном и том же незачем. Счёт
+  // идёт по именам файлов, а не по объектам: у человека их несколько, и
+  // переключение туда-сюда не должно поднимать одно и то же окно.
   const fileStaleTold = new Set();
   let fileAdoptedKey = null;
 
@@ -398,7 +402,7 @@ function mountFilePanel(host, api) {
     fileSnapshotName = autosaveSnapshotName(project);
     try {
       const found = await autosaveAdoptFolder(project);
-      if (found) tellAboutStale(found.stale);
+      if (found) await tellAboutStale(found.stale);
     } catch (error) {
       // Папка могла стать недоступной — об этом скажет первая же запись.
     }
@@ -412,14 +416,15 @@ function mountFilePanel(host, api) {
     try {
       const own = await autosaveOwnSnapshots(project);
       const current = autosaveSnapshotName(project);
-      tellAboutStale(own.filter((item) => item.name !== current));
+      await tellAboutStale(own.filter((item) => item.name !== current));
     } catch (error) {
       /* папка недоступна — тем более не о чем говорить */
     }
   }
 
-  function tellAboutStale(stale) {
-    const list = (stale || []).filter((item) => !fileStaleTold.has(item.name));
+  async function tellAboutStale(stale) {
+    const answered = await autosaveStaleKeptNames();
+    const list = (stale || []).filter((item) => !fileStaleTold.has(item.name) && !answered.includes(item.name));
     if (list.length === 0) return;
     for (const item of list) fileStaleTold.add(item.name);
     staleDialog(list);
@@ -439,10 +444,16 @@ function mountFilePanel(host, api) {
       },
     });
     // Окно всплывает само, без просьбы, — поэтому по Enter файлы остаются, а
-    // не удаляются: основное действие здесь безопасное.
+    // не удаляются: основное действие здесь безопасное. Ответ «оставить»
+    // запоминается: человек уже решил, и в следующем сеансе его не переспросят.
     const keep = uiButton(strings.autosave.staleKeep, {
       class: "ui-btn ui-btn--accent",
-      on: { click: () => modal.close() },
+      on: {
+        click: () => {
+          modal.close();
+          autosaveNoteStaleKept(stale.map((item) => item.name));
+        },
+      },
     });
     modal = uiModal({
       title: strings.autosave.staleTitle,
