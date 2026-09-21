@@ -85,10 +85,15 @@ test("выделенная метка раскрыта: помещение, ра
     original: "В31",
     sizes: "",
     controls: [],
+    // Тот же перечень строкой, сгруппированный по каналам: связей нет —
+    // и строка пуста.
+    controlsText: "",
     controlledBy: ["В1"],
   });
   const switchRow = marksRowModel(box.project, rowOf(box, box.switchOne), { open: true, controllers });
   assert.deepEqual(switchRow.fields.controls, ["Т1", "Т2"]);
+  // Каналы не назначены — перечень читается ровно как читался до них.
+  assert.equal(switchRow.fields.controlsText, "Т1, Т2");
   assert.deepEqual(switchRow.fields.controlledBy, []);
   assert.equal(switchRow.label, "В1");
 });

@@ -646,7 +646,7 @@ test("таблица связей: обе стороны, обозначение
   const { box } = tablesLinksFixture();
   const table = linksTable(box.project, null);
 
-  assert.deepEqual(table.columns, ["Обозначение", "Тип", "Помещение", "Расположение", "Связанные метки"]);
+  assert.deepEqual(table.columns, ["Обозначение", "Тип", "Помещение", "Расположение", "Канал", "Связанные метки"]);
   assert.deepEqual(
     table.groups.map((group) => [group.level, group.title]),
     [
@@ -657,15 +657,17 @@ test("таблица связей: обе стороны, обозначение
 
   const forward = table.groups[0];
   assert.deepEqual(forward.rows.map((row) => row.cells[0]), ["В1", "В2"]);
-  assert.deepEqual(forward.rows[0].cells, ["В1", "Выключатель", "Спальная Оли", "у входа", "Т1, Т2"]);
+  // Канал не указан — колонка пустая: связь без канала законна, и лист
+  // объекта, размеченного до каналов, читается как читался.
+  assert.deepEqual(forward.rows[0].cells, ["В1", "Выключатель", "Спальная Оли", "у входа", "", "Т1, Т2"]);
   // Метка из другой комнаты названа вместе с комнатой: на объекте в три этажа
   // «С1» без помещения ничего не говорит.
-  assert.deepEqual(forward.rows[1].cells, ["В2", "Выключатель", "Холл", "", "С1 (Спальная Оли)"]);
+  assert.deepEqual(forward.rows[1].cells, ["В2", "Выключатель", "Холл", "", "", "С1 (Спальная Оли)"]);
 
   const back = table.groups[1];
   assert.deepEqual(back.rows.map((row) => row.cells[0]), ["Т1", "Т2", "С1"]);
-  assert.equal(back.rows[0].cells[4], "В1");
-  assert.equal(back.rows[2].cells[4], "В2 (Холл)");
+  assert.equal(back.rows[0].cells[5], "В1");
+  assert.equal(back.rows[2].cells[5], "В2 (Холл)");
 });
 
 test("в таблице связей нет меток без связей, а висящая ссылка не выглядит нормальной строкой", () => {
@@ -687,7 +689,7 @@ test("в таблице связей нет меток без связей, а �
     ),
   };
   const row = linksTable(broken, null).groups[0].rows[0];
-  assert.equal(row.cells[4], "Т1, Т2, ссылка потеряна");
+  assert.equal(row.cells[5], "Т1, Т2, ссылка потеряна");
   assert.equal(row.problem, true);
 });
 

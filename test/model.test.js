@@ -185,7 +185,7 @@ test("новый объект создаётся из стартового сп�
   const project = createProject();
   // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
   // вид типа — точка или линия.
-  assert.equal(project.formatVersion, 3);
+  assert.equal(project.formatVersion, 4);
   assert.equal(project.categories.length, 8);
   assert.equal(project.markTypes.length, 28);
   assert.deepEqual(project.marks, []);

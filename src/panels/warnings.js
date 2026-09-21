@@ -58,6 +58,8 @@ export const WARNING_TARGETS = {
   emptyPoints: "mark",
   shortLine: "mark",
   controlsMissing: "mark",
+  controlsChannelMissing: "mark",
+  controlsChannelBeyond: "mark",
   repeatedNumber: "mark",
   outlineWithoutScheme: "outline",
   outlineWithoutRoom: "outline",

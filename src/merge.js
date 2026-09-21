@@ -563,7 +563,13 @@ function mergeReferences(merged, report, sources, winner) {
     const patch = {};
     if (mark.groupId && !groups.has(mark.groupId)) patch.groupId = null;
     if (mark.roomId && !rooms.has(mark.roomId)) patch.roomId = null;
-    const controls = Array.isArray(mark.controls) ? mark.controls.filter((id) => marks.has(id)) : mark.controls;
+    // Канал — часть связи, и записи перекладываются **как есть**: связь без
+    // канала записана строкой, связь с каналом — объектом `{id, channel}`, и
+    // пересборка списка из одних идентификаторов теряла бы канал на каждом
+    // слиянии. Отсюда же и `id` берётся из обеих форм, а не прямо из элемента.
+    const controls = Array.isArray(mark.controls)
+      ? mark.controls.filter((item) => marks.has(typeof item === "string" ? item : item && item.id))
+      : mark.controls;
     if (Array.isArray(controls) && controls.length !== mark.controls.length) patch.controls = controls;
     return Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
   });

@@ -6,7 +6,16 @@
 // открывает его и получает ответ, а как он устроен внутри — его дело. В самом
 // списке этому коду тесно: строка метки и так собирает семь полей.
 import { strings, text } from "../strings.js";
-import { findMark, findRoom, labelOf, markControlIds, roomsInOrder, schemesInOrder } from "../model.js";
+import {
+  TYPE_CHANNELS_MAX,
+  findMark,
+  findRoom,
+  labelOf,
+  markControlLinks,
+  roomsInOrder,
+  schemesInOrder,
+  typeChannels,
+} from "../model.js";
 import { shapeIcon } from "../render.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
 import { filtersMarkRows } from "./filters.js";
@@ -131,10 +140,17 @@ export function markControlsInitialRoom(project, markId) {
  * Окно выбора меток — кирпичами из ui.js: стопка диалогов, Escape и возврат
  * фокуса у них общие.
  * `options`: `{title, hint, chosen: [markId], exclude: markId, multiple,
- * roomId}`, где `roomId` — помещение, на котором фильтр стоит при открытии.
+ * roomId, channels, channelOf}`, где `roomId` — помещение, на котором фильтр
+ * стоит при открытии, `channels` — сколько каналов у метки, для которой
+ * выбирают, а `channelOf` — уже назначенные каналы (`Map` или функция).
  * Отвечает списком отмеченных меток (в режиме одной — списком из одной) или
  * `null`, если передумали. В режиме одной выбор сразу закрывает окно: лишнее
  * подтверждение там, где выбирают одну строку, только мешает.
+ *
+ * **Канал спрашивается только там, где он есть.** `channels` больше одного —
+ * у каждой строки появляется выбор клавиши; один канал (и любое окно выбора
+ * места или связи оборудования) — окно выглядит ровно как раньше, и отвечает
+ * оно тогда списком идентификаторов, а не связей с каналом.
  *
  * Поиск и фильтр помещения сужают список вместе; отмеченное живёт отдельно от
  * списка и сужение его не теряет — что из него сейчас не видно, говорит
@@ -145,6 +161,19 @@ export function openMarkPicker(project, options = {}) {
     const multiple = options.multiple !== false;
     const excludeId = options.exclude || null;
     const chosen = new Set(Array.isArray(options.chosen) ? options.chosen : []);
+    // Каналов больше одного — у строк появляется выбор клавиши. Один канал:
+    // окно то же, что было, и отвечает оно идентификаторами.
+    const channelCount = Number.isInteger(options.channels) && options.channels > 1 ? options.channels : 1;
+    const pickChannel = multiple && channelCount > 1;
+    // Уже назначенные каналы. Живут отдельно от галочек: снял и вернул
+    // галочку — канал остался тем же, а не обнулился под рукой.
+    const channels = new Map();
+    if (typeof options.channelOf === "function") {
+      for (const id of chosen) {
+        const value = options.channelOf(id);
+        if (Number.isInteger(value) && value >= 1) channels.set(id, value);
+      }
+    }
     const manySchemes = schemesInOrder(project).length > 1;
     const list = uiEl("div", { class: "controls-pick__list" });
     const note = uiEl("p", { class: "controls-pick__note" });
@@ -235,6 +264,49 @@ export function openMarkPicker(project, options = {}) {
       ];
     }
 
+    /**
+     * Выбор канала в строке. Пустой пункт — «канал не указан»: связь без
+     * канала законна, и умолчание остаётся за ней.
+     *
+     * **Канал сверх числа каналов типа в списке остаётся.** Уменьшили число
+     * каналов у типа, а связь на третьем осталась: не окажись третьего пункта
+     * в списке, окно молча свело бы её к «не указан» — то есть потеряло бы
+     * работу, которую никто не просил терять. О таком канале говорит панель
+     * предупреждений, а снимает его пользователь руками.
+     */
+    function channelSelect(row, box) {
+      const current = channels.get(row.mark.id) || null;
+      const select = uiEl("select", {
+        class: "ui-select controls-pick__channel",
+        title: strings.controls.channelTitle,
+        attrs: { "aria-label": strings.controls.channel },
+      });
+      select.append(uiEl("option", { value: "", text: strings.controls.channelNone }));
+      const values = [];
+      for (let value = 1; value <= Math.min(channelCount, TYPE_CHANNELS_MAX); value += 1) values.push(value);
+      if (current !== null && !values.includes(current)) values.push(current);
+      for (const value of values.sort((first, second) => first - second)) {
+        select.append(uiEl("option", { value: String(value), text: text("controls.channelOne", { channel: value }) }));
+      }
+      select.value = current === null ? "" : String(current);
+      // Щелчок по выбору не должен считаться щелчком по строке: строка — это
+      // `label`, и она переключила бы галочку заодно.
+      select.addEventListener("click", (event) => event.stopPropagation());
+      select.addEventListener("change", () => {
+        const value = select.value === "" ? null : Number(select.value);
+        if (value === null) channels.delete(row.mark.id);
+        else channels.set(row.mark.id, value);
+        // Назвали клавишу — значит нагрузка эта. Отмечать её ещё и галочкой
+        // было бы вторым движением на одно решение.
+        if (value !== null && !box.checked) {
+          box.checked = true;
+          chosen.add(row.mark.id);
+          renderNote();
+        }
+      });
+      return select;
+    }
+
     function renderList() {
       const query = search.value;
       const view = markControlsView(project, {
@@ -270,7 +342,11 @@ export function openMarkPicker(project, options = {}) {
             else chosen.delete(row.mark.id);
             renderNote();
           });
-          return uiEl("label", { class: "controls-pick__row" }, [box, ...markLine(row)]);
+          return uiEl("label", { class: "controls-pick__row" }, [
+            box,
+            ...markLine(row),
+            pickChannel ? channelSelect(row, box) : null,
+          ]);
         }),
       );
     }
@@ -361,7 +437,14 @@ export function openMarkPicker(project, options = {}) {
       actions.push(
         uiButton(strings.controls.save, {
           class: "ui-btn ui-btn--accent",
-          on: { click: () => done([...chosen]) },
+          on: {
+            click: () =>
+              done(
+                pickChannel
+                  ? [...chosen].map((id) => ({ id, channel: channels.get(id) || null }))
+                  : [...chosen],
+              ),
+          },
         }),
       );
     }
@@ -390,13 +473,27 @@ export function openMarkPicker(project, options = {}) {
 // не теряют: отмеченное живёт отдельно от списка, счётчик «Отмечено: N»
 // считает их все и говорит, сколько из них сейчас скрыто, а «Сохранить связь»
 // возвращает их вместе с новыми.
-export function openMarkControlsPicker(project, markId) {
-  return openMarkPicker(project, {
+export async function openMarkControlsPicker(project, markId) {
+  const mark = findMark(project, markId);
+  const links = markControlLinks(mark);
+  const channels = mark ? typeChannels(project, mark.typeId) : 1;
+  const picked = await openMarkPicker(project, {
     title: text("controls.title", { label: labelOf(project, markId) }),
-    hint: strings.controls.hint,
-    chosen: markControlIds(findMark(project, markId)),
+    // Подсказка у многоканального типа своя: она объясняет колонку, которой
+    // у одноканального нет вовсе.
+    hint: channels > 1 ? strings.controls.hint + " " + text("controls.channelHint", { count: channels }) : strings.controls.hint,
+    chosen: links.map((link) => link.id),
     exclude: markId,
     multiple: true,
     roomId: markControlsInitialRoom(project, markId),
+    channels,
+    channelOf: (id) => {
+      const link = links.find((item) => item.id === id);
+      return link ? link.channel : null;
+    },
   });
+  if (!picked) return null;
+  // Наружу всегда связи, а не идентификаторы: вызывающему не надо помнить, с
+  // каким типом он открыл окно.
+  return picked.map((item) => (typeof item === "string" ? { id: item, channel: null } : item));
 }

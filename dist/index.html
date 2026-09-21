@@ -1131,6 +1131,17 @@
   font-size: 12px;
 }
 
+/* Число каналов у типа: узкая колонка перед счётчиком меток. Мера своя, а не
+   отнятая у названия, и правило записано через строку (`.dict__row
+   .dict__channels`) нарочно — иначе общее `.dict__row .ui-input { flex: 1 }`
+   растянуло бы поле на всю свободную ширину. */
+.dict__row .dict__channels {
+  flex: none;
+  width: 56px;
+  min-width: 56px;
+  text-align: center;
+}
+
 /* Окно «Добавить из общей базы». Классы свои, хотя строки похожи на строки
    справочника и на список уплотнения: отступ строки типа правится вместе с
    каталогом, а не заодно с чужим окном. */
@@ -1633,6 +1644,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 40%;
+}
+
+/* Выбор канала в строке окна «Чем управляет». Появляется только у типа, у
+   которого каналов больше одного, поэтому мера у него своя, а не отнятая у
+   названия типа: у одноклавишного выключателя эта колонка не съедает ничего,
+   потому что её нет. */
+.controls-pick__channel {
+  flex: none;
+  width: 104px;
+  padding: 2px 4px;
+  font-size: 12px;
 }
 
 .controls-pick__note {
@@ -3928,6 +3950,8 @@ const strings = {
   },
   errors: {
     controlsSelf: "Метка не управляет сама собой",
+    channelInvalid: "Канал связи — целое число от 1 до {max}",
+    channelsInvalid: "Каналов у типа — целое число от 1 до {max}",
     equipmentNotFound: "Модель оборудования не найдена",
     placementNotFound: "Размещённая единица не найдена",
     equipmentInUse: "Модель «{name}» размещена ({count}) — сперва уберите единицы",
@@ -4001,6 +4025,10 @@ const strings = {
   // строки, и какая из них какая — видно только по клику.
   problems: {
     controlsMissing: "{label} — управляет меткой, которой больше нет",
+    // Канал связи. Оба — предупреждения: объект цел, но читается
+    // неоднозначно, и решает пользователь.
+    controlsChannelMissing: "{label} — нагрузок {count}, канал не указан",
+    controlsChannelBeyond: "{label} — связь на канале {over}, а у типа {code} каналов {channels}",
     placementWithoutEquipment: "{label} — модели оборудования нет в справочнике",
     placementWithoutMark: "{label} — оборудование стоит на метке, которой больше нет",
     placementLinkMissing: "{label} — оборудование связано с меткой, которой больше нет",
@@ -4069,6 +4097,8 @@ const strings = {
     // и сверяются с ними тестом.
     groups: {
       controlsMissing: "Меток с потерянной связью: {count}",
+      controlsChannelMissing: "Меток, где канал связи не указан: {count}",
+      controlsChannelBeyond: "Меток со связью на канале сверх числа каналов типа: {count}",
       placementWithoutEquipment: "Единиц оборудования без модели: {count}",
       placementWithoutMark: "Единиц оборудования без метки: {count}",
       placementLinkMissing: "Единиц оборудования с потерянной связью: {count}",
@@ -4515,6 +4545,29 @@ const strings = {
     // списком из двух строк читается как ошибка счётчика.
     chosenHidden: "Отмечено: {count} · из них скрыто сужением: {hidden}",
     save: "Сохранить связь",
+    // Канал связи. Выбор стоит в строке метки и показывается только у типа,
+    // у которого каналов больше одного: у одноклавишного выключателя выбирать
+    // нечего, и лишний столбец в окне спрашивал бы ни о чём.
+    channel: "Канал",
+    channelTitle: "Какая клавиша (какой выход) ведёт к этой нагрузке",
+    // Пустой выбор законен и остаётся умолчанием: связь без канала — не
+    // недоделка, а способ, которым размечали до сих пор.
+    channelNone: "—",
+    channelOne: "Канал {channel}",
+    channelHint: "У типа каналов {count}: отметьте нагрузку и укажите, какая клавиша её включает.",
+  },
+  // Канал связи в перечнях: кружок с цифрой — «① Т16 ×6 · ② С1». Кружки взяты
+  // ради краткости: перечень стоит в кнопке строки метки и в ячейке таблицы,
+  // где «канал 2» съел бы место, отведённое обозначениям. Дальше двадцатого
+  // канала кружков в наборе нет — там цифра в скобках.
+  channels: {
+    digits: "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳",
+    over: "({channel})",
+    // Группа перечня: значок канала и обозначения нагрузок этой клавиши.
+    group: "{channel} {labels}",
+    // Между группами — точка на середине строки, как между обозначением и
+    // помещением в окне выбора: запятая внутри групп уже занята.
+    separator: " · ",
   },
   rooms: {
     namePlaceholder: "Спальная Оли",
@@ -4557,6 +4610,10 @@ const strings = {
     kind: "Вид",
     kindPoint: "Точка",
     kindLine: "Линия",
+    // Число каналов у типа: одна клавиша у В, две у ВВ, четыре у реле, шесть
+    // у сценарной панели. От него зависит одно — спрашивают ли канал у связи.
+    channels: "Каналов",
+    channelsHint: "Сколько каналов у типа: клавиш у выключателя, выходов у реле, кнопок у панели. Один канал — канал у связей не спрашивается",
     kindPointHint: "Точечный тип: метка ставится кликом, обозначение — фигура",
     kindLineHint: "Линейный тип: метка проводится линией, обозначение — начертание",
     // Список выведенных видов переехал в панель предупреждений (`warnings`):
@@ -4629,6 +4686,9 @@ const strings = {
     linksTitle: "Связи меток",
     linked: "Связанные метки",
     controls: "Управляет",
+    // Канал связи: какая клавиша выключателя (какой выход реле) ведёт к этой
+    // нагрузке. Колонка пустая — канал не указан, и это законно.
+    channel: "Канал",
     controlledBy: "Управляется от",
     brokenLink: "ссылка потеряна",
     unlinked: "Меток без связей: {count}",
@@ -4797,16 +4857,22 @@ function text(key, vars) {
 //       помещения у метки (`mark.roomManual`) и цвет помещения (`room.color`).
 //   3 — вид типа (`type.kind`: точка или линия) и отметка выведенного вида
 //       (`type.kindGuessed`), по которой показывается список на правку.
+//   4 — канал связи: запись в `mark.controls` бывает и объектом
+//       `{id, channel}`, и число каналов у типа (`type.channels`).
 // Совместимости вперёд нет сознательно: страница версии 1 не знает о контурах
 // и, открыв такой файл, молча потеряла бы их вместе с ручной правкой —
 // поэтому она честно откажется («файл сделан более новой версией»). Со
 // страницей версии 2 та же история: вид типа она не знает, показывает у
-// линейного типа выбор фигуры и ставит его метки точками.
+// линейного типа выбор фигуры и ставит его метки точками. Со страницей версии
+// 3 — третья: связь с каналом она прочитать не умеет, и на её плане такая
+// связь превратилась бы в потерянную.
 // Назад совместимость обязательна: файл версии 1 читается и дополняется
 // умолчаниями в `projectFile.migrateProject`, метка без `roomManual`
 // считается правленной руками (`markRoomManual`), а вид типа выводится по его
-// меткам (`migrateTypeKinds`).
-const FORMAT_VERSION = 3;
+// меткам (`migrateTypeKinds`), а тип без `channels` — одноканальным
+// (`typeChannels`). Связь строкой и связь объектом с каналом законны обе —
+// старая запись не переписывается (`markControlLinks`).
+const FORMAT_VERSION = 4;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -4929,6 +4995,20 @@ const SHAPE_LEGACY = ["hexagon", "diamond-fill", "circle-half"];
 const SHAPE_NAMES = [...SHAPE_PALETTE, ...SHAPE_LEGACY];
 const BLOCK_MODES = ["each", "single"];
 const MARK_KINDS = ["point", "line"];
+
+/**
+ * Сколько каналов у типа: одна клавиша у В, две у ВВ, три у ВВВ, четыре у
+ * реле, шесть у сценарной панели. Канал — понятие, а не частный случай
+ * двойного выключателя, поэтому число живёт у типа, а не выводится из кода.
+ *
+ * **У типа прежнего объекта поля нет, и это один канал.** Выводить число из
+ * кода («ВВ — значит два») нельзя: код в справочнике заводит пользователь, и
+ * догадка молча включила бы ему выбор канала там, где его не просили.
+ * Потолок — здравый смысл: панелей больше чем на два десятка кнопок не бывает,
+ * а список выбора на сотню строк был бы не выбором, а свалкой.
+ */
+const TYPE_CHANNELS_DEFAULT = 1;
+const TYPE_CHANNELS_MAX = 24;
 
 // Код типа: от одной буквы до шестнадцати. Заказчик снял прежний предел в две
 // буквы, чтобы писать «ПОДСВЕТКА», а не «П».
@@ -5371,9 +5451,11 @@ const TEMPLATE_TYPES = [
   // стене: одноклавишный — пустой квадрат (форма категории), двухклавишный —
   // квадрат, поделённый чертой пополам, трёхклавишный — двумя чертами на три
   // равные части. Считать клавиши на знаке проще, чем читать букву рядом.
+  // Число каналов — столько же, сколько клавиш на знаке: связь с нагрузкой
+  // получает номер клавиши, и на плане у дуги видно, какая из них.
   { category: "switches", code: "В", name: strings.types.switch },
-  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar" },
-  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two" },
+  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2 },
+  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3 },
   // Проходной переключатель: свет из двух мест — в квартире вещь обычная.
   // Знак квадратный, как у соседей по категории: выключатель на стене
   // выглядит клавишей, и круг выпадал бы из ряда. Внутри — уголок на две
@@ -5472,6 +5554,8 @@ function defaultTemplate() {
     // в своей категории один такой.
     lineStyle: type.lineStyle || null,
     blockMode: "each",
+    // Каналы: у выключателей столько, сколько клавиш, у остальных один.
+    channels: type.channels || TYPE_CHANNELS_DEFAULT,
     order: index,
   }));
   return { categories, markTypes, equipmentTypes: equipmentTypeTemplate() };
@@ -5490,8 +5574,9 @@ function createProject(template) {
       shape: null,
       blockMode: "each",
       // Шаблон мог быть сохранён до того, как у типа появился вид: без
-      // умолчания поле уехало бы в объект пустым.
+      // умолчания поле уехало бы в объект пустым. То же и с каналами.
       kind: "point",
+      channels: TYPE_CHANNELS_DEFAULT,
       ...type,
       order: index,
     })),
@@ -6039,11 +6124,87 @@ function blockModeOf(mark, type) {
 // с выключателем стоит розетка); по умолчанию — тип соседней метки.
 // Номер новая метка получает по счётчику своего типа.
 // ——— «чем управляет» —————————————————————————————————————————————————
+//
+// **Канал — свойство связи.** Слова заказчика: «если выключатель одинарный, то
+// он управляет своей нагрузкой и связь 1 к 1. а вот если двойной, то связи
+// получаются к 2 нагрузкам сразу и фактически какой канал выключателя к какой
+// нагрузке идёт — не понятно». Канал мог бы стоять у метки списком клавиш, но
+// связей у метки много, а нагрузок у одной клавиши бывает шесть: канал живёт
+// на самой связи и больше нигде.
+//
+// Поэтому запись в `mark.controls` бывает двух видов, и оба законны:
+//
+//   "id"                — канал не указан (так писали до появления каналов);
+//   { id, channel: 2 }  — вторая клавиша, второй выход реле.
+//
+// **Старая запись читается как «канал не указан» и не переписывается.**
+// Миграции значений здесь нет и быть не должно: объект заказчика обязан
+// открыться ровно тем, чем закрывался, — те же дуги на плане, те же строки в
+// таблице, ни одного вопроса при открытии. Поэтому и обратно: связь без канала
+// пишется строкой, а не объектом с пустым полем.
+
+// Номер канала, каким его можно прочитать. Верхнего предела при чтении нет
+// нарочно: `TYPE_CHANNELS_MAX` ограничивает то, что кладут руками, а прочитать
+// объект надо любой — иначе правка файла снаружи молча съела бы связь.
+function channelValue(value) {
+  return Number.isInteger(value) && value >= 1 ? value : null;
+}
+
+// Номер канала на запись: здесь предел уже есть.
+function checkChannel(value) {
+  const number = typeof value === "string" ? Number(value.trim()) : value;
+  if (!Number.isInteger(number) || number < 1 || number > TYPE_CHANNELS_MAX) {
+    throw modelError("channelInvalid", { max: TYPE_CHANNELS_MAX });
+  }
+  return number;
+}
+
+/**
+ * Связи метки как есть: `[{id, channel}]`, где `channel` — число или `null`
+ * («канал не указан»). Единственное место, где разбираются две формы записи;
+ * всё остальное читает связь отсюда и про формы не знает.
+ */
+function markControlLinks(mark) {
+  const list = mark && Array.isArray(mark.controls) ? mark.controls : [];
+  const links = [];
+  for (const item of list) {
+    if (typeof item === "string") {
+      links.push({ id: item, channel: null });
+      continue;
+    }
+    if (item && typeof item === "object" && typeof item.id === "string") {
+      links.push({ id: item.id, channel: channelValue(item.channel) });
+    }
+  }
+  return links;
+}
 
 // Поле появилось не сразу: у метки из старого файла или из браузерного
 // хранилища его просто нет, и это не поломка. Читают связь только отсюда.
 function markControlIds(mark) {
-  return mark && Array.isArray(mark.controls) ? mark.controls : [];
+  return markControlLinks(mark).map((link) => link.id);
+}
+
+// Канал связи с этой меткой: число или `null`. Дубли в списке не заводятся
+// (`setMarkControls` их снимает), поэтому берётся первое совпадение.
+function markControlChannel(mark, id) {
+  const link = markControlLinks(mark).find((item) => item.id === id);
+  return link ? link.channel : null;
+}
+
+/**
+ * Как канал зовётся в перечне: «①», «②». Канал не указан — пустая строка, и
+ * перечень у объекта прежнего формата выглядит ровно как раньше.
+ *
+ * Кружок, а не «канал 2», — потому что перечень стоит в кнопке строки метки и
+ * в ячейке таблицы, где слово съело бы место, отведённое обозначениям. Дальше
+ * двадцатого кружков в наборе нет: там цифра в скобках.
+ */
+function channelLabel(channel) {
+  const value = channelValue(channel);
+  if (value === null) return "";
+  const digits = [...strings.channels.digits];
+  return value <= digits.length ? digits[value - 1] : text("channels.over", { channel: value });
 }
 
 // Метки, которыми управляет эта, — в порядке объекта, а не в порядке кликов:
@@ -6053,6 +6214,42 @@ function markControls(project, markId) {
   if (!mark) return [];
   const wanted = new Set(markControlIds(mark));
   return wanted.size === 0 ? [] : marksInOrder(project, (item) => wanted.has(item.id));
+}
+
+// Порядок каналов в перечне: сперва названные по возрастанию, «канал не
+// указан» — хвостом. Так читается «① Т16 ×6 · ② С1 · Р3»: сперва разложенное
+// по клавишам, потом то, что ещё не разложили.
+function channelOrder(channel) {
+  return channelValue(channel) === null ? Number.POSITIVE_INFINITY : channel;
+}
+
+/**
+ * Нагрузки метки, сгруппированные по каналам: `[{channel, marks}]`.
+ *
+ * Группа с `channel: null` — связи без канала; у объекта прежнего формата
+ * группа ровно одна, и перечень в строке метки выглядит в точности как
+ * раньше. Метки внутри группы — в порядке объекта, как у `markControls`:
+ * перечень не должен зависеть от того, в каком порядке щёлкали.
+ *
+ * Потерянные связи сюда не попадают — о них говорит `validate` и отдельная
+ * пометка в таблице; здесь их не отличить от живых.
+ */
+function markControlsByChannel(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark) return [];
+  const channels = new Map();
+  for (const link of markControlLinks(mark)) {
+    if (!channels.has(link.id)) channels.set(link.id, link.channel);
+  }
+  if (channels.size === 0) return [];
+  const groups = new Map();
+  for (const item of marksInOrder(project, (candidate) => channels.has(candidate.id))) {
+    const channel = channels.get(item.id);
+    const key = channel === null ? "" : channel;
+    if (!groups.has(key)) groups.set(key, { channel, marks: [] });
+    groups.get(key).marks.push(item);
+  }
+  return [...groups.values()].sort((first, second) => channelOrder(first.channel) - channelOrder(second.channel));
 }
 
 // Обратная сторона: кто управляет этой меткой. Отдельного поля у неё нет —
@@ -6124,31 +6321,50 @@ function linkedMarkIds(project, markId) {
   return project.marks.filter((mark) => seen.has(mark.id)).map((mark) => mark.id);
 }
 
-// Список переписывается целиком: окно выбора отдаёт то, что отмечено галочками.
+/**
+ * Список переписывается целиком: окно выбора отдаёт то, что отмечено
+ * галочками. На вход принимаются обе формы записи — идентификатор строкой и
+ * `{id, channel}`; наружу уходит та же пара форм.
+ *
+ * **Канал не указан — пишется строкой.** Объект `{id, channel: null}` был бы
+ * той же связью, но другим байтом в файле: открыв и сохранив объект прежнего
+ * формата, пользователь получил бы «правку», которой не делал.
+ */
 function setMarkControls(project, markId, controlled) {
   requireMark(project, markId);
   const wanted = [];
-  for (const id of Array.isArray(controlled) ? controlled : []) {
+  const seen = new Set();
+  for (const item of Array.isArray(controlled) ? controlled : []) {
+    const id = typeof item === "string" ? item : item && typeof item === "object" ? item.id : null;
+    if (typeof id !== "string") throw modelError("markNotFound");
     if (id === markId) throw modelError("controlsSelf");
     requireMark(project, id);
-    if (!wanted.includes(id)) wanted.push(id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const raw = typeof item === "string" ? null : item.channel;
+    const channel = raw === null || raw === undefined || raw === "" ? null : checkChannel(raw);
+    wanted.push(channel === null ? id : { id, channel });
   }
   // Хранится в порядке объекта — тогда и файл, и таблица, и строка списка
   // показывают одно и то же независимо от того, в каком порядке щёлкали.
   const order = new Map(marksInOrder(project).map((mark, index) => [mark.id, index]));
-  wanted.sort((first, second) => order.get(first) - order.get(second));
+  const idOf = (item) => (typeof item === "string" ? item : item.id);
+  wanted.sort((first, second) => order.get(idOf(first)) - order.get(idOf(second)));
   const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, controls: wanted } : mark));
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
 }
 
 // Ссылки на исчезнувшие метки снимаются одним проходом: висячая связь — это
-// пустое место в таблице и вопрос «а что это было».
+// пустое место в таблице и вопрос «а что это было». Уцелевшие записи
+// перекладываются **как есть**: канал — часть связи, и пересобирать список из
+// одних идентификаторов значило бы терять его на каждом удалении метки.
 function dropControls(marks, removed) {
   if (removed.size === 0) return marks;
   return marks.map((mark) => {
-    const ids = markControlIds(mark);
-    if (!ids.some((id) => removed.has(id))) return mark;
-    return { ...mark, controls: ids.filter((id) => !removed.has(id)) };
+    const list = Array.isArray(mark.controls) ? mark.controls : [];
+    const kept = list.filter((item) => !removed.has(typeof item === "string" ? item : item && item.id));
+    if (kept.length === list.length) return mark;
+    return { ...mark, controls: kept };
   });
 }
 function addToGroup(project, markId, side, options = {}) {
@@ -6755,9 +6971,41 @@ function checkTypeKind(kind) {
   if (!MARK_KINDS.includes(kind)) throw modelError("unknownKind");
   return kind;
 }
+
+// Число каналов на запись. Пустое поле справочника — один канал: у типа
+// каналов не бывает ноль, а «не знаю» здесь означает «один».
+function checkChannels(value) {
+  if (value === null || value === undefined || value === "") return TYPE_CHANNELS_DEFAULT;
+  const number = typeof value === "string" ? Number(value.trim()) : value;
+  if (!Number.isInteger(number) || number < 1 || number > TYPE_CHANNELS_MAX) {
+    throw modelError("channelsInvalid", { max: TYPE_CHANNELS_MAX });
+  }
+  return number;
+}
+
+/**
+ * Сколько каналов у типа. У типа объекта прежнего формата поля нет — это один
+ * канал, и окно «Чем управляет» у такого типа выглядит ровно как раньше.
+ * Считать это самому нельзя: разойдись справочник с окном — канал спрашивали
+ * бы там, где его негде показать.
+ */
+function typeChannels(project, typeId) {
+  const type = findType(project, typeId);
+  const value = type ? type.channels : null;
+  return Number.isInteger(value) && value >= 1 ? value : TYPE_CHANNELS_DEFAULT;
+}
 function addType(
   project,
-  { code, name, categoryId, shape = null, lineStyle = null, blockMode = "each", kind = "point" } = {},
+  {
+    code,
+    name,
+    categoryId,
+    shape = null,
+    lineStyle = null,
+    blockMode = "each",
+    kind = "point",
+    channels = TYPE_CHANNELS_DEFAULT,
+  } = {},
 ) {
   const type = {
     id: newId(),
@@ -6771,6 +7019,9 @@ function addType(
     shape: checkShape(shape, { allowNull: true }),
     lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     blockMode: checkBlockMode(blockMode),
+    // Каналов у заведённого руками типа один: клавиша, выход, кнопка — их
+    // число знает только пользователь, и умолчание не должно за него гадать.
+    channels: checkChannels(channels),
     order: project.markTypes.length,
   };
   if (!findCategory(project, categoryId)) throw modelError("categoryNotFound");
@@ -6786,6 +7037,10 @@ function updateType(project, typeId, patch = {}) {
     next.lineStyle = checkLineStyle(patch.lineStyle, { allowNull: true });
   }
   if (Object.prototype.hasOwnProperty.call(patch, "blockMode")) next.blockMode = checkBlockMode(patch.blockMode);
+  // Число каналов уменьшают так же легко, как увеличивают, и связи на
+  // отпавшем канале при этом остаются: терять их молча нельзя — о них говорит
+  // `validate` предупреждением, а решает пользователь.
+  if (Object.prototype.hasOwnProperty.call(patch, "channels")) next.channels = checkChannels(patch.channels);
   // Вид, выбранный руками, больше не догадка: отметка снимается, и тип уходит
   // из списка на правку — даже если пользователь подтвердил то же самое.
   if (Object.prototype.hasOwnProperty.call(patch, "kind")) {
@@ -6921,6 +7176,11 @@ function catalogMerge(templates) {
         shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
         lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
         blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
+        // Каналы едут из общей базы вместе с типом: ВВ, взятый из неё, — это
+        // двухклавишный выключатель, а не «такой же, но без клавиш». Шаблон
+        // мог быть сохранён до появления каналов — тогда их один.
+        channels:
+          Number.isInteger(type.channels) && type.channels >= 1 ? Math.min(type.channels, TYPE_CHANNELS_MAX) : TYPE_CHANNELS_DEFAULT,
         categoryKey,
       });
     }
@@ -7045,6 +7305,7 @@ function addTypesFromCatalog(project, templates, typeKeys) {
         shape: entry.shape,
         lineStyle: entry.lineStyle,
         blockMode: entry.blockMode,
+        channels: entry.channels,
       });
       next = added.project;
       types.push(added.type);
@@ -7945,6 +8206,32 @@ function validate(project) {
 
     for (const controlled of markControlIds(mark)) {
       if (!findMark(project, controlled)) problems.push(problem("controlsMissing", { label }, mark.id));
+    }
+
+    // Каналы связей. Оба случая — предупреждения, а не ошибки: объект цел, но
+    // читается неоднозначно, и решает пользователь.
+    if (type) {
+      const channels = typeChannels(project, mark.typeId);
+      const links = markControlLinks(mark).filter((link) => findMark(project, link.id));
+      // «У ВВ3 две нагрузки, канал не указан» — какая клавиша какую включает,
+      // по плану не видно. Одна нагрузка без канала загадки не создаёт, а один
+      // канал на шесть светильников — приём заказчика, а не оплошность.
+      if (channels > 1 && links.length > 1 && links.some((link) => link.channel === null)) {
+        problems.push(problem("controlsChannelMissing", { label, count: links.length }, mark.id, "warning"));
+      }
+      // Уменьшили число каналов у типа, а связь на третьем осталась. Связь
+      // цела и работает как работала — но об этом надо сказать вслух.
+      const beyond = [...new Set(links.map((link) => link.channel).filter((value) => value !== null && value > channels))];
+      if (beyond.length > 0) {
+        problems.push(
+          problem(
+            "controlsChannelBeyond",
+            { label, code: type.code, channels, over: beyond.sort((first, second) => first - second).join(", ") },
+            mark.id,
+            "warning",
+          ),
+        );
+      }
     }
 
     if (type) {
@@ -9783,7 +10070,13 @@ function mergeReferences(merged, report, sources, winner) {
     const patch = {};
     if (mark.groupId && !groups.has(mark.groupId)) patch.groupId = null;
     if (mark.roomId && !rooms.has(mark.roomId)) patch.roomId = null;
-    const controls = Array.isArray(mark.controls) ? mark.controls.filter((id) => marks.has(id)) : mark.controls;
+    // Канал — часть связи, и записи перекладываются **как есть**: связь без
+    // канала записана строкой, связь с каналом — объектом `{id, channel}`, и
+    // пересборка списка из одних идентификаторов теряла бы канал на каждом
+    // слиянии. Отсюда же и `id` берётся из обеих форм, а не прямо из элемента.
+    const controls = Array.isArray(mark.controls)
+      ? mark.controls.filter((item) => marks.has(typeof item === "string" ? item : item && item.id))
+      : mark.controls;
     if (Array.isArray(controls) && controls.length !== mark.controls.length) patch.controls = controls;
     return Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
   });
@@ -12774,6 +13067,21 @@ const LINK_HULL_WIDTH = 1.1;
 const LINK_HULL_DASH = [5, 4];
 const LINK_HULL_PAD = 7;
 
+// Канал связи у основания дуги: маленькая цифра возле управляющей метки.
+// Целиком «ВВ3.1» не подписывается — дуга и так начинается у своей метки, и
+// обозначение рядом с ней стояло бы дважды. Кегль в пикселях экрана, как и
+// толщина связи: это разбор поверх плана, а не часть чертежа.
+const LINK_CHANNEL_FONT = 10;
+// Куда цифра садится от начала дуги: чуть вперёд по ходу и вбок — в ту
+// сторону, куда дуга не выгибается. На самой линии цифра читалась бы как
+// часть знака метки.
+const LINK_CHANNEL_ALONG = 7;
+const LINK_CHANNEL_ASIDE = 7;
+// Светлая обводка под цифрой: волосок в десять пикселей на тёмном месте
+// картинки плана пропадает без неё.
+const LINK_CHANNEL_HALO = 2.5;
+const LINK_CHANNEL_HALO_COLOR = "#FFFFFF";
+
 // Насколько глушится то, что в связной группе есть, но выделенной метки не
 // касается. Человек выделил одну, а поднялось двенадцать — и по яркости должно
 // быть видно, с чего началось: от самой метки связи идут в полную силу.
@@ -12857,20 +13165,25 @@ function markLinks(project, scheme, filter) {
   // поэтому одна и та же схема разводится одинаково при каждой отрисовке.
   const incoming = new Map();
   for (const mark of shown) {
-    for (const id of markControlIds(mark)) {
-      const target = here.get(id);
+    for (const link of markControlLinks(mark)) {
+      const target = here.get(link.id);
       if (!target) {
-        noteAway(mark.id, id);
+        noteAway(mark.id, link.id);
         continue;
       }
-      const spread = incoming.get(id) || 0;
-      incoming.set(id, spread + 1);
+      const spread = incoming.get(link.id) || 0;
+      incoming.set(link.id, spread + 1);
       result.lines.push({
         fromId: mark.id,
-        toId: id,
+        toId: link.id,
         from: markLinkAnchor(mark),
         to: markLinkAnchor(target),
         spread,
+        // Канал — свойство связи, и на плане он стоит у её основания: у метки
+        // с двумя клавишами две дуги, и без цифры не видно, какая куда.
+        // `null` — канал не указан: так размечали до сих пор, и дуга рисуется
+        // ровно как раньше.
+        channel: link.channel,
       });
     }
   }
@@ -13047,6 +13360,37 @@ function linkCurve(from, to, pad, spread = 0) {
   return { start, end, control };
 }
 
+// Цифра канала у основания дуги. Канал не указан — не рисуется ничего: план
+// объекта, размеченного до появления каналов, обязан остаться прежним.
+function drawLinkChannel(ctx, curve, channel, color, alpha) {
+  if (!Number.isInteger(channel) || channel < 1) return;
+  const dx = curve.end.x - curve.start.x;
+  const dy = curve.end.y - curve.start.y;
+  const span = Math.hypot(dx, dy);
+  if (!(span > 0)) return;
+  const ux = dx / span;
+  const uy = dy / span;
+  // Дуга выгибается в сторону `(uy, -ux)` (см. `linkCurve`), поэтому цифра
+  // садится в противоположную — она не ляжет на линию ни при каком прогибе.
+  const at = {
+    x: curve.start.x + ux * LINK_CHANNEL_ALONG - uy * LINK_CHANNEL_ASIDE,
+    y: curve.start.y + uy * LINK_CHANNEL_ALONG + ux * LINK_CHANNEL_ASIDE,
+  };
+  const value = String(channel);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `700 ${LINK_CHANNEL_FONT}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = LINK_CHANNEL_HALO;
+  ctx.strokeStyle = LINK_CHANNEL_HALO_COLOR;
+  ctx.strokeText(value, at.x, at.y);
+  ctx.fillStyle = color;
+  ctx.fillText(value, at.x, at.y);
+  ctx.restore();
+}
+
 function drawLinkArrow(ctx, at, dx, dy, size) {
   const span = Math.hypot(dx, dy);
   if (!(span > 0)) return;
@@ -13138,6 +13482,11 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   ctx.strokeStyle = color;
   ctx.lineWidth = LINK_WIDTH;
   ctx.setLineDash([]);
+  // Цифра канала — **одна на клавишу**, а не на дугу. Клавиша на группу из
+  // шести светильников — обычное дело, и шесть одинаковых цифр у одного знака
+  // легли бы друг на друга кляксой. Кому принадлежат остальные дуги той же
+  // клавиши, видно по тому, что они выходят из одной точки.
+  const channelsShown = new Set();
   for (const line of lines) {
     ctx.globalAlpha = fade(line, LINK_ALPHA);
     const curve = linkCurve(
@@ -13158,6 +13507,14 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     // Наконечник смотрит по касательной к дуге в её конце — от опорной точки к
     // концу, иначе стрелка у выгнутой связи целится мимо метки.
     drawLinkArrow(ctx, curve.end, curve.end.x - curve.control.x, curve.end.y - curve.control.y, LINK_ARROW_PX);
+    // Канал — у основания дуги, а не у наконечника: он свойство управляющей
+    // стороны («вторая клавиша этого выключателя»), и у метки с тремя дугами
+    // цифры стоят рядом, где их и сравнивают.
+    const channelKey = line.fromId + "#" + line.channel;
+    if (!channelsShown.has(channelKey)) {
+      channelsShown.add(channelKey);
+      drawLinkChannel(ctx, curve, line.channel, color, fade(line, 1));
+    }
   }
   // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
   // листа не провести, но пустота у метки соврала бы.
@@ -18274,12 +18631,56 @@ function tableLinkLabel(project, mark, roomId) {
   return room ? label + " (" + room.name + ")" : label;
 }
 
-function tableLinkRow(project, mark, related, broken, side) {
+/**
+ * Связи стороны «управляет», разложенные по каналам: строка листа — на канал.
+ *
+ * Канал — свойство связи, и колонка «Канал» одна на строку: сведи три клавиши
+ * в одну строку — и колонка стала бы перечислением «1, 2, 3», по которому не
+ * видно, какая нагрузка на какой клавише. Связь без канала даёт группу с
+ * `channel: null` — у объекта прежнего формата она единственная, и лист
+ * выглядит ровно как раньше, только с пустой колонкой.
+ *
+ * Потерянные связи считаются **по своему каналу**: связь в никуда с третьей
+ * клавиши и должна стоять в строке третьей клавиши.
+ */
+function tableLinkGroups(project, mark) {
+  const groups = markControlsByChannel(project, mark.id).map((group) => ({ ...group, broken: 0 }));
+  const byKey = new Map(groups.map((group) => [group.channel === null ? "" : group.channel, group]));
+  for (const link of markControlLinks(mark)) {
+    if (findMark(project, link.id)) continue;
+    const key = link.channel === null ? "" : link.channel;
+    let group = byKey.get(key);
+    if (!group) {
+      group = { channel: link.channel, marks: [], broken: 0 };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.broken += 1;
+  }
+  return groups.sort((first, second) => channelOrder(first.channel) - channelOrder(second.channel));
+}
+
+// Обратная сторона: кто управляет этой меткой и с какого своего канала.
+// Проходная схема сходится в одну строку сама — у В1 и ВП1 канал первый у
+// обоих, и «Т1 ← В1, ВП1» остаётся одной строкой, как было.
+function tableLinkBackGroups(project, mark) {
+  const groups = new Map();
+  for (const other of markControlledBy(project, mark.id)) {
+    const channel = markControlChannel(other, mark.id);
+    const key = channel === null ? "" : channel;
+    if (!groups.has(key)) groups.set(key, { channel, marks: [], broken: 0 });
+    groups.get(key).marks.push(other);
+  }
+  return [...groups.values()].sort((first, second) => channelOrder(first.channel) - channelOrder(second.channel));
+}
+
+function tableLinkRow(project, mark, group, side) {
   const type = findType(project, mark.typeId);
   const room = mark.roomId ? findRoom(project, mark.roomId) : null;
-  const linked = related.map((item) => tableLinkLabel(project, item, mark.roomId));
+  const linked = group.marks.map((item) => tableLinkLabel(project, item, mark.roomId));
   // Ссылка в никуда не должна выглядеть обычной строкой: её видно словами,
   // а не только в проверке объекта.
+  const broken = group.broken > 0;
   if (broken) linked.push(strings.tables.brokenLink);
   return {
     id: mark.id,
@@ -18288,6 +18689,9 @@ function tableLinkRow(project, mark, related, broken, side) {
       type ? type.name : "",
       room ? room.name : "",
       mark.location || "",
+      // Канал числом, а не кружком: в колонке под своим заголовком кружок был
+      // бы ребусом, а в CSV — знаком, который откроется не везде.
+      group.channel === null ? "" : String(group.channel),
       linked.join(", "),
     ],
     color: styleOf(project, mark.typeId).color,
@@ -18346,6 +18750,7 @@ function linksTable(project, filter, options = {}) {
     strings.tables.type,
     strings.tables.room,
     strings.tables.location,
+    strings.tables.channel,
     strings.tables.linked,
   ];
   if (!project) {
@@ -18373,17 +18778,13 @@ function linksTable(project, filter, options = {}) {
   const back = [];
   let unlinked = 0;
   for (const mark of marks) {
-    const wanted = markControlIds(mark);
-    const controls = wanted.length > 0 ? markControls(project, mark.id) : [];
+    const wanted = markControlLinks(mark);
     const controlledBy = markControlledBy(project, mark.id);
-    if (wanted.length > 0) {
-      forward.push({
-        mark,
-        row: tableLinkRow(project, mark, controls, wanted.length > controls.length, strings.tables.controls),
-      });
+    for (const group of wanted.length > 0 ? tableLinkGroups(project, mark) : []) {
+      forward.push({ mark, row: tableLinkRow(project, mark, group, strings.tables.controls) });
     }
-    if (controlledBy.length > 0) {
-      back.push({ mark, row: tableLinkRow(project, mark, controlledBy, false, strings.tables.controlledBy) });
+    for (const group of tableLinkBackGroups(project, mark)) {
+      back.push({ mark, row: tableLinkRow(project, mark, group, strings.tables.controlledBy) });
     }
     if (wanted.length === 0 && controlledBy.length === 0) unlinked += 1;
   }
@@ -20781,10 +21182,17 @@ function markControlsInitialRoom(project, markId) {
  * Окно выбора меток — кирпичами из ui.js: стопка диалогов, Escape и возврат
  * фокуса у них общие.
  * `options`: `{title, hint, chosen: [markId], exclude: markId, multiple,
- * roomId}`, где `roomId` — помещение, на котором фильтр стоит при открытии.
+ * roomId, channels, channelOf}`, где `roomId` — помещение, на котором фильтр
+ * стоит при открытии, `channels` — сколько каналов у метки, для которой
+ * выбирают, а `channelOf` — уже назначенные каналы (`Map` или функция).
  * Отвечает списком отмеченных меток (в режиме одной — списком из одной) или
  * `null`, если передумали. В режиме одной выбор сразу закрывает окно: лишнее
  * подтверждение там, где выбирают одну строку, только мешает.
+ *
+ * **Канал спрашивается только там, где он есть.** `channels` больше одного —
+ * у каждой строки появляется выбор клавиши; один канал (и любое окно выбора
+ * места или связи оборудования) — окно выглядит ровно как раньше, и отвечает
+ * оно тогда списком идентификаторов, а не связей с каналом.
  *
  * Поиск и фильтр помещения сужают список вместе; отмеченное живёт отдельно от
  * списка и сужение его не теряет — что из него сейчас не видно, говорит
@@ -20795,6 +21203,19 @@ function openMarkPicker(project, options = {}) {
     const multiple = options.multiple !== false;
     const excludeId = options.exclude || null;
     const chosen = new Set(Array.isArray(options.chosen) ? options.chosen : []);
+    // Каналов больше одного — у строк появляется выбор клавиши. Один канал:
+    // окно то же, что было, и отвечает оно идентификаторами.
+    const channelCount = Number.isInteger(options.channels) && options.channels > 1 ? options.channels : 1;
+    const pickChannel = multiple && channelCount > 1;
+    // Уже назначенные каналы. Живут отдельно от галочек: снял и вернул
+    // галочку — канал остался тем же, а не обнулился под рукой.
+    const channels = new Map();
+    if (typeof options.channelOf === "function") {
+      for (const id of chosen) {
+        const value = options.channelOf(id);
+        if (Number.isInteger(value) && value >= 1) channels.set(id, value);
+      }
+    }
     const manySchemes = schemesInOrder(project).length > 1;
     const list = uiEl("div", { class: "controls-pick__list" });
     const note = uiEl("p", { class: "controls-pick__note" });
@@ -20885,6 +21306,49 @@ function openMarkPicker(project, options = {}) {
       ];
     }
 
+    /**
+     * Выбор канала в строке. Пустой пункт — «канал не указан»: связь без
+     * канала законна, и умолчание остаётся за ней.
+     *
+     * **Канал сверх числа каналов типа в списке остаётся.** Уменьшили число
+     * каналов у типа, а связь на третьем осталась: не окажись третьего пункта
+     * в списке, окно молча свело бы её к «не указан» — то есть потеряло бы
+     * работу, которую никто не просил терять. О таком канале говорит панель
+     * предупреждений, а снимает его пользователь руками.
+     */
+    function channelSelect(row, box) {
+      const current = channels.get(row.mark.id) || null;
+      const select = uiEl("select", {
+        class: "ui-select controls-pick__channel",
+        title: strings.controls.channelTitle,
+        attrs: { "aria-label": strings.controls.channel },
+      });
+      select.append(uiEl("option", { value: "", text: strings.controls.channelNone }));
+      const values = [];
+      for (let value = 1; value <= Math.min(channelCount, TYPE_CHANNELS_MAX); value += 1) values.push(value);
+      if (current !== null && !values.includes(current)) values.push(current);
+      for (const value of values.sort((first, second) => first - second)) {
+        select.append(uiEl("option", { value: String(value), text: text("controls.channelOne", { channel: value }) }));
+      }
+      select.value = current === null ? "" : String(current);
+      // Щелчок по выбору не должен считаться щелчком по строке: строка — это
+      // `label`, и она переключила бы галочку заодно.
+      select.addEventListener("click", (event) => event.stopPropagation());
+      select.addEventListener("change", () => {
+        const value = select.value === "" ? null : Number(select.value);
+        if (value === null) channels.delete(row.mark.id);
+        else channels.set(row.mark.id, value);
+        // Назвали клавишу — значит нагрузка эта. Отмечать её ещё и галочкой
+        // было бы вторым движением на одно решение.
+        if (value !== null && !box.checked) {
+          box.checked = true;
+          chosen.add(row.mark.id);
+          renderNote();
+        }
+      });
+      return select;
+    }
+
     function renderList() {
       const query = search.value;
       const view = markControlsView(project, {
@@ -20920,7 +21384,11 @@ function openMarkPicker(project, options = {}) {
             else chosen.delete(row.mark.id);
             renderNote();
           });
-          return uiEl("label", { class: "controls-pick__row" }, [box, ...markLine(row)]);
+          return uiEl("label", { class: "controls-pick__row" }, [
+            box,
+            ...markLine(row),
+            pickChannel ? channelSelect(row, box) : null,
+          ]);
         }),
       );
     }
@@ -21011,7 +21479,14 @@ function openMarkPicker(project, options = {}) {
       actions.push(
         uiButton(strings.controls.save, {
           class: "ui-btn ui-btn--accent",
-          on: { click: () => done([...chosen]) },
+          on: {
+            click: () =>
+              done(
+                pickChannel
+                  ? [...chosen].map((id) => ({ id, channel: channels.get(id) || null }))
+                  : [...chosen],
+              ),
+          },
         }),
       );
     }
@@ -21040,15 +21515,29 @@ function openMarkPicker(project, options = {}) {
 // не теряют: отмеченное живёт отдельно от списка, счётчик «Отмечено: N»
 // считает их все и говорит, сколько из них сейчас скрыто, а «Сохранить связь»
 // возвращает их вместе с новыми.
-function openMarkControlsPicker(project, markId) {
-  return openMarkPicker(project, {
+async function openMarkControlsPicker(project, markId) {
+  const mark = findMark(project, markId);
+  const links = markControlLinks(mark);
+  const channels = mark ? typeChannels(project, mark.typeId) : 1;
+  const picked = await openMarkPicker(project, {
     title: text("controls.title", { label: labelOf(project, markId) }),
-    hint: strings.controls.hint,
-    chosen: markControlIds(findMark(project, markId)),
+    // Подсказка у многоканального типа своя: она объясняет колонку, которой
+    // у одноканального нет вовсе.
+    hint: channels > 1 ? strings.controls.hint + " " + text("controls.channelHint", { count: channels }) : strings.controls.hint,
+    chosen: links.map((link) => link.id),
     exclude: markId,
     multiple: true,
     roomId: markControlsInitialRoom(project, markId),
+    channels,
+    channelOf: (id) => {
+      const link = links.find((item) => item.id === id);
+      return link ? link.channel : null;
+    },
   });
+  if (!picked) return null;
+  // Наружу всегда связи, а не идентификаторы: вызывающему не надо помнить, с
+  // каким типом он открыл окно.
+  return picked.map((item) => (typeof item === "string" ? { id: item, channel: null } : item));
 }
 
 // src/panels/equipmentPicker.js
@@ -22495,6 +22984,9 @@ function typesSnapshot(project) {
       shape: type.shape,
       lineStyle: type.lineStyle,
       blockMode: type.blockMode,
+      // Каналы едут в шаблон вместе с типом: заведя у себя «ВВ — 2 канала»,
+      // пользователь ждёт их и в следующем объекте.
+      channels: typeChannels(project, type.id),
     })),
   };
 }
@@ -22543,6 +23035,11 @@ function typesTemplateFrom(template) {
       shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
       lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
       blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
+      // Шаблон мог быть сохранён до появления каналов — тогда их один.
+      channels:
+        Number.isInteger(type.channels) && type.channels >= 1 && type.channels <= TYPE_CHANNELS_MAX
+          ? type.channels
+          : TYPE_CHANNELS_DEFAULT,
       order: index,
     }));
   if (categories.length === 0 || markTypes.length === 0) return null;
@@ -22804,7 +23301,9 @@ function typesKindSwitch({ kind, onPick, allowSame = false, sameTitle = "" }) {
 // типов в разы больше, а наследование знака и было прежним поведением нового
 // типа, которому ничего не выбрали.
 function typesAddDraft(categoryId = "") {
-  return { categoryId, kind: MARK_KINDS[0], shape: null, lineStyle: null };
+  // Каналов у нового типа один: сколько клавиш у выключателя, знает только
+  // пользователь, а умолчание гадать не должно.
+  return { categoryId, kind: MARK_KINDS[0], shape: null, lineStyle: null, channels: TYPE_CHANNELS_DEFAULT };
 }
 
 // Какое поле строки добавления модель не приняла. Отказ строку больше не
@@ -22857,6 +23356,31 @@ function typesDraftStyle(draft, category) {
 function typesSwap(current, next) {
   current.replaceWith(next);
   return next;
+}
+
+/**
+ * Число каналов у типа — узкое числовое поле строки справочника.
+ *
+ * Стоит и в строке заведённого типа, и в строке добавления: колонки строк
+ * заданы мерами, и поле, появившееся в одной строке из двух, развалило бы
+ * выравнивание всего справочника.
+ *
+ * Поле видно у любого типа, а не только у выключателей: что считать
+ * многоканальным, решает пользователь. У светильника оно так и останется
+ * единицей, и никакого выбора канала это не включает.
+ */
+function typesChannelsInput({ value, onChange }) {
+  return uiEl("input", {
+    class: "ui-input dict__channels",
+    type: "number",
+    value: String(value),
+    title: strings.dictionary.channelsHint,
+    // Подписи у поля нет — в строке справочника её нет ни у кого, — но
+    // соседняя колонка тоже число (меток этого типа), поэтому имя поля
+    // объявлено хотя бы разметкой.
+    attrs: { min: "1", max: String(TYPE_CHANNELS_MAX), step: "1", "aria-label": strings.dictionary.channels },
+    on: { change: (event) => onChange(event.target.value) },
+  });
 }
 
 function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
@@ -23261,6 +23785,11 @@ function openTypesDictionary(api) {
             onPick: (shape) =>
               commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
           }),
+      typesChannelsInput({
+        value: typeChannels(project(), type.id),
+        onChange: (value) =>
+          commit((current) => updateType(current, type.id, { channels: value }).project, strings.history.editType),
+      }),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -23426,6 +23955,15 @@ function openTypesDictionary(api) {
           });
     }
 
+    // Число каналов у новой строки: узел постоянный, `refresh` его не
+    // подменяет — набранное не должно пропадать при переключении вида.
+    const channels = typesChannelsInput({
+      value: draft.channels,
+      onChange: (value) => {
+        const number = Number(String(value).trim());
+        draft = { ...draft, channels: Number.isInteger(number) && number >= 1 ? number : TYPE_CHANNELS_DEFAULT };
+      },
+    });
     let badge = badgeNode();
     let kind = kindNode();
     let sign = signNode();
@@ -23457,6 +23995,7 @@ function openTypesDictionary(api) {
       }),
       kind,
       sign,
+      channels,
       uiButton(strings.dictionary.addType, {
         class: "ui-btn ui-btn--accent dict__add",
         on: { click: add },
@@ -25147,6 +25686,29 @@ function marksLabelList(labels) {
   );
 }
 
+/**
+ * Перечень нагрузок строкой — сгруппированный по каналам: «① Т16 ×6 · ② С1».
+ *
+ * Слова заказчика: «фактически какой канал выключателя к какой нагрузке идёт —
+ * не понятно». В строке метки на это отвечает группировка: клавиша названа
+ * один раз, а под ней стоит всё, что она включает, — в том числе группа из
+ * шести светильников одним «Т16 ×6».
+ *
+ * **Связь без канала группы не получает.** У объекта прежнего формата группа
+ * ровно одна и без значка, и строка читается ровно как раньше — «Т1, Т2».
+ */
+function marksControlsText(project, markId) {
+  const groups = markControlsByChannel(project, markId);
+  if (groups.length === 0) return "";
+  return groups
+    .map((group) => {
+      const labels = marksLabelList(group.marks.map((item) => labelOf(project, item.id))).join(", ");
+      const channel = channelLabel(group.channel);
+      return channel ? text("channels.group", { channel, labels }) : labels;
+    })
+    .join(strings.channels.separator);
+}
+
 // Кто кем управляет — одним проходом по объекту: спрашивать модель на каждую
 // строку значило бы пересортировать все метки полтысячи раз.
 function marksControllerIndex(project) {
@@ -25405,6 +25967,9 @@ function marksRowModel(project, row, options = {}) {
     // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
     // одной группы носят один номер.
     controls: marksLabelList(markControls(project, mark.id).map((item) => labelOf(project, item.id))),
+    // Тот же перечень строкой, но разложенный по каналам: кнопка показывает
+    // не только «чем управляет», но и «какой клавишей».
+    controlsText: marksControlsText(project, mark.id),
     controlledBy: marksLabelList(controllers.get(mark.id) || []),
   };
   return head;
@@ -25687,7 +26252,10 @@ function mountMarksPanel(host, api) {
     const fresh = getState();
     if (!fresh.project || !findMark(fresh.project, markId)) return;
     try {
-      const alive = picked.filter((id) => findMark(fresh.project, id));
+      // Канал едет вместе со связью: окно отдаёт `{id, channel}`, и модель
+      // кладёт канал на саму связь. Метку, исчезнувшую, пока окно висело,
+      // отсеиваем здесь — вместе с её каналом.
+      const alive = picked.filter((item) => findMark(fresh.project, item && item.id));
       const next = setMarkControls(fresh.project, markId, alive);
       canvasCommit(fresh.project, next.project, strings.history.markControls);
     } catch (error) {
@@ -25835,7 +26403,7 @@ function mountMarksPanel(host, api) {
     const controlsButton = view.fields
       ? uiButton(
           view.fields.controls.length > 0
-            ? text("marks.controlsOf", { labels: view.fields.controls.join(", ") })
+            ? text("marks.controlsOf", { labels: view.fields.controlsText })
             : strings.marks.controls,
           {
             class: "ui-btn ui-btn--wide mark-row__controls" + (view.fields.controls.length > 0 ? " is-set" : ""),
@@ -27625,6 +28193,8 @@ const WARNING_TARGETS = {
   emptyPoints: "mark",
   shortLine: "mark",
   controlsMissing: "mark",
+  controlsChannelMissing: "mark",
+  controlsChannelBeyond: "mark",
   repeatedNumber: "mark",
   outlineWithoutScheme: "outline",
   outlineWithoutRoom: "outline",

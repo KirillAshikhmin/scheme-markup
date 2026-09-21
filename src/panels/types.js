@@ -14,6 +14,8 @@ import {
   MARK_KINDS,
   SHAPE_NAMES,
   SHAPE_PALETTE,
+  TYPE_CHANNELS_DEFAULT,
+  TYPE_CHANNELS_MAX,
   addCategory,
   addType,
   addTypesFromCatalog,
@@ -28,6 +30,7 @@ import {
   findType,
   freeColor,
   styleOf,
+  typeChannels,
   typeKindOf,
   typesInOrder,
   updateCategory,
@@ -66,6 +69,9 @@ function typesSnapshot(project) {
       shape: type.shape,
       lineStyle: type.lineStyle,
       blockMode: type.blockMode,
+      // Каналы едут в шаблон вместе с типом: заведя у себя «ВВ — 2 канала»,
+      // пользователь ждёт их и в следующем объекте.
+      channels: typeChannels(project, type.id),
     })),
   };
 }
@@ -114,6 +120,11 @@ export function typesTemplateFrom(template) {
       shape: SHAPE_NAMES.includes(type.shape) ? type.shape : null,
       lineStyle: LINE_STYLES.includes(type.lineStyle) ? type.lineStyle : null,
       blockMode: BLOCK_MODES.includes(type.blockMode) ? type.blockMode : BLOCK_MODES[0],
+      // Шаблон мог быть сохранён до появления каналов — тогда их один.
+      channels:
+        Number.isInteger(type.channels) && type.channels >= 1 && type.channels <= TYPE_CHANNELS_MAX
+          ? type.channels
+          : TYPE_CHANNELS_DEFAULT,
       order: index,
     }));
   if (categories.length === 0 || markTypes.length === 0) return null;
@@ -375,7 +386,9 @@ export function typesKindSwitch({ kind, onPick, allowSame = false, sameTitle = "
 // типов в разы больше, а наследование знака и было прежним поведением нового
 // типа, которому ничего не выбрали.
 export function typesAddDraft(categoryId = "") {
-  return { categoryId, kind: MARK_KINDS[0], shape: null, lineStyle: null };
+  // Каналов у нового типа один: сколько клавиш у выключателя, знает только
+  // пользователь, а умолчание гадать не должно.
+  return { categoryId, kind: MARK_KINDS[0], shape: null, lineStyle: null, channels: TYPE_CHANNELS_DEFAULT };
 }
 
 // Какое поле строки добавления модель не приняла. Отказ строку больше не
@@ -429,6 +442,31 @@ export function typesDraftStyle(draft, category) {
 function typesSwap(current, next) {
   current.replaceWith(next);
   return next;
+}
+
+/**
+ * Число каналов у типа — узкое числовое поле строки справочника.
+ *
+ * Стоит и в строке заведённого типа, и в строке добавления: колонки строк
+ * заданы мерами, и поле, появившееся в одной строке из двух, развалило бы
+ * выравнивание всего справочника.
+ *
+ * Поле видно у любого типа, а не только у выключателей: что считать
+ * многоканальным, решает пользователь. У светильника оно так и останется
+ * единицей, и никакого выбора канала это не включает.
+ */
+function typesChannelsInput({ value, onChange }) {
+  return uiEl("input", {
+    class: "ui-input dict__channels",
+    type: "number",
+    value: String(value),
+    title: strings.dictionary.channelsHint,
+    // Подписи у поля нет — в строке справочника её нет ни у кого, — но
+    // соседняя колонка тоже число (меток этого типа), поэтому имя поля
+    // объявлено хотя бы разметкой.
+    attrs: { min: "1", max: String(TYPE_CHANNELS_MAX), step: "1", "aria-label": strings.dictionary.channels },
+    on: { change: (event) => onChange(event.target.value) },
+  });
 }
 
 function typesShapeButton({ shape, color, allowInherit, inheritShape, onPick }) {
@@ -834,6 +872,11 @@ export function openTypesDictionary(api) {
             onPick: (shape) =>
               commit((current) => updateType(current, type.id, { shape }).project, strings.history.editType),
           }),
+      typesChannelsInput({
+        value: typeChannels(project(), type.id),
+        onChange: (value) =>
+          commit((current) => updateType(current, type.id, { channels: value }).project, strings.history.editType),
+      }),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -999,6 +1042,15 @@ export function openTypesDictionary(api) {
           });
     }
 
+    // Число каналов у новой строки: узел постоянный, `refresh` его не
+    // подменяет — набранное не должно пропадать при переключении вида.
+    const channels = typesChannelsInput({
+      value: draft.channels,
+      onChange: (value) => {
+        const number = Number(String(value).trim());
+        draft = { ...draft, channels: Number.isInteger(number) && number >= 1 ? number : TYPE_CHANNELS_DEFAULT };
+      },
+    });
     let badge = badgeNode();
     let kind = kindNode();
     let sign = signNode();
@@ -1030,6 +1082,7 @@ export function openTypesDictionary(api) {
       }),
       kind,
       sign,
+      channels,
       uiButton(strings.dictionary.addType, {
         class: "ui-btn ui-btn--accent dict__add",
         on: { click: add },

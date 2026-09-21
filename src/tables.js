@@ -13,13 +13,15 @@ import {
   findCategory,
   findEquipment,
   findEquipmentType,
+  channelOrder,
   findMark,
   findRoom,
   findType,
   labelOf,
-  markControlIds,
+  markControlChannel,
+  markControlLinks,
   markControlledBy,
-  markControls,
+  markControlsByChannel,
   placementLinkIds,
   placementsInOrder,
   roomsInOrder,
@@ -394,12 +396,56 @@ function tableLinkLabel(project, mark, roomId) {
   return room ? label + " (" + room.name + ")" : label;
 }
 
-function tableLinkRow(project, mark, related, broken, side) {
+/**
+ * Связи стороны «управляет», разложенные по каналам: строка листа — на канал.
+ *
+ * Канал — свойство связи, и колонка «Канал» одна на строку: сведи три клавиши
+ * в одну строку — и колонка стала бы перечислением «1, 2, 3», по которому не
+ * видно, какая нагрузка на какой клавише. Связь без канала даёт группу с
+ * `channel: null` — у объекта прежнего формата она единственная, и лист
+ * выглядит ровно как раньше, только с пустой колонкой.
+ *
+ * Потерянные связи считаются **по своему каналу**: связь в никуда с третьей
+ * клавиши и должна стоять в строке третьей клавиши.
+ */
+function tableLinkGroups(project, mark) {
+  const groups = markControlsByChannel(project, mark.id).map((group) => ({ ...group, broken: 0 }));
+  const byKey = new Map(groups.map((group) => [group.channel === null ? "" : group.channel, group]));
+  for (const link of markControlLinks(mark)) {
+    if (findMark(project, link.id)) continue;
+    const key = link.channel === null ? "" : link.channel;
+    let group = byKey.get(key);
+    if (!group) {
+      group = { channel: link.channel, marks: [], broken: 0 };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.broken += 1;
+  }
+  return groups.sort((first, second) => channelOrder(first.channel) - channelOrder(second.channel));
+}
+
+// Обратная сторона: кто управляет этой меткой и с какого своего канала.
+// Проходная схема сходится в одну строку сама — у В1 и ВП1 канал первый у
+// обоих, и «Т1 ← В1, ВП1» остаётся одной строкой, как было.
+function tableLinkBackGroups(project, mark) {
+  const groups = new Map();
+  for (const other of markControlledBy(project, mark.id)) {
+    const channel = markControlChannel(other, mark.id);
+    const key = channel === null ? "" : channel;
+    if (!groups.has(key)) groups.set(key, { channel, marks: [], broken: 0 });
+    groups.get(key).marks.push(other);
+  }
+  return [...groups.values()].sort((first, second) => channelOrder(first.channel) - channelOrder(second.channel));
+}
+
+function tableLinkRow(project, mark, group, side) {
   const type = findType(project, mark.typeId);
   const room = mark.roomId ? findRoom(project, mark.roomId) : null;
-  const linked = related.map((item) => tableLinkLabel(project, item, mark.roomId));
+  const linked = group.marks.map((item) => tableLinkLabel(project, item, mark.roomId));
   // Ссылка в никуда не должна выглядеть обычной строкой: её видно словами,
   // а не только в проверке объекта.
+  const broken = group.broken > 0;
   if (broken) linked.push(strings.tables.brokenLink);
   return {
     id: mark.id,
@@ -408,6 +454,9 @@ function tableLinkRow(project, mark, related, broken, side) {
       type ? type.name : "",
       room ? room.name : "",
       mark.location || "",
+      // Канал числом, а не кружком: в колонке под своим заголовком кружок был
+      // бы ребусом, а в CSV — знаком, который откроется не везде.
+      group.channel === null ? "" : String(group.channel),
       linked.join(", "),
     ],
     color: styleOf(project, mark.typeId).color,
@@ -466,6 +515,7 @@ export function linksTable(project, filter, options = {}) {
     strings.tables.type,
     strings.tables.room,
     strings.tables.location,
+    strings.tables.channel,
     strings.tables.linked,
   ];
   if (!project) {
@@ -493,17 +543,13 @@ export function linksTable(project, filter, options = {}) {
   const back = [];
   let unlinked = 0;
   for (const mark of marks) {
-    const wanted = markControlIds(mark);
-    const controls = wanted.length > 0 ? markControls(project, mark.id) : [];
+    const wanted = markControlLinks(mark);
     const controlledBy = markControlledBy(project, mark.id);
-    if (wanted.length > 0) {
-      forward.push({
-        mark,
-        row: tableLinkRow(project, mark, controls, wanted.length > controls.length, strings.tables.controls),
-      });
+    for (const group of wanted.length > 0 ? tableLinkGroups(project, mark) : []) {
+      forward.push({ mark, row: tableLinkRow(project, mark, group, strings.tables.controls) });
     }
-    if (controlledBy.length > 0) {
-      back.push({ mark, row: tableLinkRow(project, mark, controlledBy, false, strings.tables.controlledBy) });
+    for (const group of tableLinkBackGroups(project, mark)) {
+      back.push({ mark, row: tableLinkRow(project, mark, group, strings.tables.controlledBy) });
     }
     if (wanted.length === 0 && controlledBy.length === 0) unlinked += 1;
   }

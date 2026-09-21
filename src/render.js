@@ -21,6 +21,7 @@ import {
   findType,
   findGroup,
   markControlIds,
+  markControlLinks,
   markLabelLeader,
   outlinesInOrder,
   pointInOutline,
@@ -1759,6 +1760,21 @@ const LINK_HULL_WIDTH = 1.1;
 const LINK_HULL_DASH = [5, 4];
 const LINK_HULL_PAD = 7;
 
+// Канал связи у основания дуги: маленькая цифра возле управляющей метки.
+// Целиком «ВВ3.1» не подписывается — дуга и так начинается у своей метки, и
+// обозначение рядом с ней стояло бы дважды. Кегль в пикселях экрана, как и
+// толщина связи: это разбор поверх плана, а не часть чертежа.
+const LINK_CHANNEL_FONT = 10;
+// Куда цифра садится от начала дуги: чуть вперёд по ходу и вбок — в ту
+// сторону, куда дуга не выгибается. На самой линии цифра читалась бы как
+// часть знака метки.
+const LINK_CHANNEL_ALONG = 7;
+const LINK_CHANNEL_ASIDE = 7;
+// Светлая обводка под цифрой: волосок в десять пикселей на тёмном месте
+// картинки плана пропадает без неё.
+const LINK_CHANNEL_HALO = 2.5;
+const LINK_CHANNEL_HALO_COLOR = "#FFFFFF";
+
 // Насколько глушится то, что в связной группе есть, но выделенной метки не
 // касается. Человек выделил одну, а поднялось двенадцать — и по яркости должно
 // быть видно, с чего началось: от самой метки связи идут в полную силу.
@@ -1842,20 +1858,25 @@ export function markLinks(project, scheme, filter) {
   // поэтому одна и та же схема разводится одинаково при каждой отрисовке.
   const incoming = new Map();
   for (const mark of shown) {
-    for (const id of markControlIds(mark)) {
-      const target = here.get(id);
+    for (const link of markControlLinks(mark)) {
+      const target = here.get(link.id);
       if (!target) {
-        noteAway(mark.id, id);
+        noteAway(mark.id, link.id);
         continue;
       }
-      const spread = incoming.get(id) || 0;
-      incoming.set(id, spread + 1);
+      const spread = incoming.get(link.id) || 0;
+      incoming.set(link.id, spread + 1);
       result.lines.push({
         fromId: mark.id,
-        toId: id,
+        toId: link.id,
         from: markLinkAnchor(mark),
         to: markLinkAnchor(target),
         spread,
+        // Канал — свойство связи, и на плане он стоит у её основания: у метки
+        // с двумя клавишами две дуги, и без цифры не видно, какая куда.
+        // `null` — канал не указан: так размечали до сих пор, и дуга рисуется
+        // ровно как раньше.
+        channel: link.channel,
       });
     }
   }
@@ -2032,6 +2053,37 @@ function linkCurve(from, to, pad, spread = 0) {
   return { start, end, control };
 }
 
+// Цифра канала у основания дуги. Канал не указан — не рисуется ничего: план
+// объекта, размеченного до появления каналов, обязан остаться прежним.
+function drawLinkChannel(ctx, curve, channel, color, alpha) {
+  if (!Number.isInteger(channel) || channel < 1) return;
+  const dx = curve.end.x - curve.start.x;
+  const dy = curve.end.y - curve.start.y;
+  const span = Math.hypot(dx, dy);
+  if (!(span > 0)) return;
+  const ux = dx / span;
+  const uy = dy / span;
+  // Дуга выгибается в сторону `(uy, -ux)` (см. `linkCurve`), поэтому цифра
+  // садится в противоположную — она не ляжет на линию ни при каком прогибе.
+  const at = {
+    x: curve.start.x + ux * LINK_CHANNEL_ALONG - uy * LINK_CHANNEL_ASIDE,
+    y: curve.start.y + uy * LINK_CHANNEL_ALONG + ux * LINK_CHANNEL_ASIDE,
+  };
+  const value = String(channel);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `700 ${LINK_CHANNEL_FONT}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = LINK_CHANNEL_HALO;
+  ctx.strokeStyle = LINK_CHANNEL_HALO_COLOR;
+  ctx.strokeText(value, at.x, at.y);
+  ctx.fillStyle = color;
+  ctx.fillText(value, at.x, at.y);
+  ctx.restore();
+}
+
 function drawLinkArrow(ctx, at, dx, dy, size) {
   const span = Math.hypot(dx, dy);
   if (!(span > 0)) return;
@@ -2123,6 +2175,11 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
   ctx.strokeStyle = color;
   ctx.lineWidth = LINK_WIDTH;
   ctx.setLineDash([]);
+  // Цифра канала — **одна на клавишу**, а не на дугу. Клавиша на группу из
+  // шести светильников — обычное дело, и шесть одинаковых цифр у одного знака
+  // легли бы друг на друга кляксой. Кому принадлежат остальные дуги той же
+  // клавиши, видно по тому, что они выходят из одной точки.
+  const channelsShown = new Set();
   for (const line of lines) {
     ctx.globalAlpha = fade(line, LINK_ALPHA);
     const curve = linkCurve(
@@ -2143,6 +2200,14 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     // Наконечник смотрит по касательной к дуге в её конце — от опорной точки к
     // концу, иначе стрелка у выгнутой связи целится мимо метки.
     drawLinkArrow(ctx, curve.end, curve.end.x - curve.control.x, curve.end.y - curve.control.y, LINK_ARROW_PX);
+    // Канал — у основания дуги, а не у наконечника: он свойство управляющей
+    // стороны («вторая клавиша этого выключателя»), и у метки с тремя дугами
+    // цифры стоят рядом, где их и сравнивают.
+    const channelKey = line.fromId + "#" + line.channel;
+    if (!channelsShown.has(channelKey)) {
+      channelsShown.add(channelKey);
+      drawLinkChannel(ctx, curve, line.channel, color, fade(line, 1));
+    }
   }
   // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
   // листа не провести, но пустота у метки соврала бы.

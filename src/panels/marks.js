@@ -10,6 +10,7 @@ import { strings, text } from "../strings.js";
 import {
   MARK_DIMENSION_FIELDS,
   MARK_NUMBER_MAX,
+  channelLabel,
   compactAllNumbers,
   findMark,
   findRoom,
@@ -17,6 +18,7 @@ import {
   labelOf,
   markControlIds,
   markControls,
+  markControlsByChannel,
   markDimensions,
   markRoomManual,
   placementsAt,
@@ -77,6 +79,29 @@ export function marksLabelList(labels) {
   return labelCounts(labels).map((item) =>
     item.count > 1 ? text("marks.labelTimes", { label: item.label, count: item.count }) : item.label,
   );
+}
+
+/**
+ * Перечень нагрузок строкой — сгруппированный по каналам: «① Т16 ×6 · ② С1».
+ *
+ * Слова заказчика: «фактически какой канал выключателя к какой нагрузке идёт —
+ * не понятно». В строке метки на это отвечает группировка: клавиша названа
+ * один раз, а под ней стоит всё, что она включает, — в том числе группа из
+ * шести светильников одним «Т16 ×6».
+ *
+ * **Связь без канала группы не получает.** У объекта прежнего формата группа
+ * ровно одна и без значка, и строка читается ровно как раньше — «Т1, Т2».
+ */
+export function marksControlsText(project, markId) {
+  const groups = markControlsByChannel(project, markId);
+  if (groups.length === 0) return "";
+  return groups
+    .map((group) => {
+      const labels = marksLabelList(group.marks.map((item) => labelOf(project, item.id))).join(", ");
+      const channel = channelLabel(group.channel);
+      return channel ? text("channels.group", { channel, labels }) : labels;
+    })
+    .join(strings.channels.separator);
 }
 
 // Кто кем управляет — одним проходом по объекту: спрашивать модель на каждую
@@ -337,6 +362,9 @@ export function marksRowModel(project, row, options = {}) {
     // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
     // одной группы носят один номер.
     controls: marksLabelList(markControls(project, mark.id).map((item) => labelOf(project, item.id))),
+    // Тот же перечень строкой, но разложенный по каналам: кнопка показывает
+    // не только «чем управляет», но и «какой клавишей».
+    controlsText: marksControlsText(project, mark.id),
     controlledBy: marksLabelList(controllers.get(mark.id) || []),
   };
   return head;
@@ -620,7 +648,10 @@ function mountMarksPanel(host, api) {
     const fresh = getState();
     if (!fresh.project || !findMark(fresh.project, markId)) return;
     try {
-      const alive = picked.filter((id) => findMark(fresh.project, id));
+      // Канал едет вместе со связью: окно отдаёт `{id, channel}`, и модель
+      // кладёт канал на саму связь. Метку, исчезнувшую, пока окно висело,
+      // отсеиваем здесь — вместе с её каналом.
+      const alive = picked.filter((item) => findMark(fresh.project, item && item.id));
       const next = setMarkControls(fresh.project, markId, alive);
       canvasCommit(fresh.project, next.project, strings.history.markControls);
     } catch (error) {
@@ -768,7 +799,7 @@ function mountMarksPanel(host, api) {
     const controlsButton = view.fields
       ? uiButton(
           view.fields.controls.length > 0
-            ? text("marks.controlsOf", { labels: view.fields.controls.join(", ") })
+            ? text("marks.controlsOf", { labels: view.fields.controlsText })
             : strings.marks.controls,
           {
             class: "ui-btn ui-btn--wide mark-row__controls" + (view.fields.controls.length > 0 ? " is-set" : ""),
