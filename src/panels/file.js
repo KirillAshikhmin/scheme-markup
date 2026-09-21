@@ -545,6 +545,16 @@ function mountFilePanel(host, api) {
     if (!result || !result.project || !state.project) return;
     // Пока читали папку, объект могли переключить — тогда это не его правка.
     if (result.project.id !== state.project.id) return;
+    // Тихое слияние: не изменилось ничего, кроме служебных полей — постоянного
+    // ключа проекта и отметки времени. Ключ до объекта доехать должен (после
+    // этого родство перестаёт быть догадкой), но работой это не является:
+    // ни отчёта, ни обрыва истории, ни строки «приехали правки: 0».
+    if (result.quiet) {
+      setState({ project: result.project, dirty: true });
+      autosaveSchedule(result.project, { onDone: onFolderWritten });
+      renderStatus();
+      return;
+    }
     setState({ project: result.project, dirty: true });
     // Ctrl+Z отменяет действия пользователя, а не чужие: откат поверх слияния
     // стёр бы чужую работу молча, поэтому стек истории здесь обрывается.

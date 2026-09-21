@@ -449,10 +449,15 @@ export function projectFileName(project, now) {
   return projectFileBase(project) + "-" + fileLocalDay(date) + ".zip";
 }
 
-// Текст writer.json. Формат нарочно скудный: одно поле опознаёт писателя,
-// второе говорит человеку, когда снимок записан.
-function writerJsonText(member, date) {
-  return JSON.stringify({ member: String(member), writtenAt: date.toISOString() }, null, 2) + "\n";
+// Текст writer.json. Формат нарочно скудный: кто писал, про какой проект и
+// когда. Ключ проекта здесь — копия того, что лежит в `project.json`: главным
+// остаётся объект, а эта запись делает файл понятным сам по себе, без разбора
+// всего архива. Слова заказчика: «надо в writer писать идентификатор объекта
+// постоянный».
+function writerJsonText(member, projectKey, date) {
+  const writer = { member: String(member), writtenAt: date.toISOString() };
+  if (projectKey) writer.projectKey = String(projectKey);
+  return JSON.stringify(writer, null, 2) + "\n";
 }
 
 /**
@@ -478,7 +483,7 @@ export async function packProject(project, images, options = {}) {
   // среди чужих. В копию «на память», которую отдаёт «Сохранить в файл»,
   // метка браузера не кладётся — эту копию уносят и передают.
   if (typeof options.member === "string" && options.member) {
-    files.push({ name: WRITER_ENTRY, data: writerJsonText(options.member, date) });
+    files.push({ name: WRITER_ENTRY, data: writerJsonText(options.member, forFile.key, date) });
   }
 
   const blob = await writeZip(files, {
@@ -540,6 +545,11 @@ export async function verifyProjectFile(blob, project, images, options = {}) {
   const member = typeof options.member === "string" && options.member ? options.member : null;
   if (member && restored.member !== member) throw fileError("fileCheckFailed", { part: WRITER_ENTRY });
   if (!member && entries.has(WRITER_ENTRY)) throw fileError("fileCheckFailed", { part: WRITER_ENTRY });
+  // Ключ в отметке — копия ключа объекта, и разойтись они не имеют права:
+  // файл, где эти два поля спорят, не опознать ни по одному из них.
+  if (member && (restored.projectKey || null) !== (project.key || null)) {
+    throw fileError("fileCheckFailed", { part: WRITER_ENTRY });
+  }
 
   const packedNames = [...entries.keys()].filter((name) => name.startsWith(SCHEMES_DIR));
   if (packedNames.length !== expected.length || restored.images.size !== expected.length) {
@@ -628,15 +638,20 @@ function readProjectEntries(entries, onProgress) {
   // Отметка участника необязательна: у файлов прежних сборок её нет, а битую
   // читать как «ничей файл» честнее, чем ронять на ней открытие объекта.
   let member = null;
+  let projectKey = null;
   const writer = entries.get(prefix + WRITER_ENTRY);
   if (writer) {
     try {
       const parsed = JSON.parse(decodeText(writer));
       if (parsed && typeof parsed.member === "string" && parsed.member) member = parsed.member;
+      if (parsed && typeof parsed.projectKey === "string" && parsed.projectKey) projectKey = parsed.projectKey;
     } catch {
       member = null;
+      projectKey = null;
     }
   }
 
-  return { project, images, member };
+  // `projectKey` — то, что записано в отметке; главный ключ живёт в объекте
+  // (`project.key`), и решения принимаются по нему.
+  return { project, images, member, projectKey };
 }

@@ -1,7 +1,7 @@
 // Объекты: список в шапке, переключение, переименование, удаление,
 // первый запуск и автосохранение в браузер.
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
-import { createProject, migrateTypeKinds, updateProject } from "../model.js";
+import { createProject, ensureProjectKey, migrateTypeKinds, updateProject } from "../model.js";
 import {
   deleteImage,
   deleteProject,
@@ -109,7 +109,14 @@ function mountProjectsPanel(host, api) {
     // а вид типа (точка или линия) у прежних объектов не записан. Дописывается
     // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
     // открывался бы по-разному из базы и из архива.
-    const project = migrateTypeKinds(stored).project;
+    const migrated = migrateTypeKinds(stored).project;
+    // Постоянный ключ у объектов, заведённых до его появления, дописывается
+    // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
+    // трогается, в истории отмены ничего не появляется, а в базу объект
+    // ложится сразу, чтобы ключ не заводился заново при каждом открытии.
+    const keyed = ensureProjectKey(migrated);
+    const project = keyed.project;
+    if (keyed.changed) await saveProject(project);
     setState({
       project,
       schemeId: project.schemes.length > 0 ? project.schemes[0].id : null,

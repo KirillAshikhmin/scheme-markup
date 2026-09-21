@@ -116,14 +116,31 @@ export function mergeWinner(ours, theirs) {
   return theirsId < oursId ? "theirs" : "ours";
 }
 
+// Постоянный ключ проекта, если он у объекта есть.
+function mergeKeyOf(project) {
+  const key = project && project.key;
+  return typeof key === "string" && key ? key : null;
+}
+
 /**
- * Об одном ли объекте речь. Два человека получают проект из одного файла, и
- * идентификаторы схем и меток у них общие (свой `id` объекта и свои id картинок
- * каждый браузер выдаёт сам). Ничего общего — значит, это чужой файл, сливать
- * его нельзя.
+ * Об одном ли объекте речь.
+ *
+ * Прямой ответ даёт постоянный ключ (`project.key`): он заводится при создании
+ * объекта и переживает и загрузку файла, и копирование, и переименование.
+ * Совпал — это один проект, и доказывать больше нечего.
+ *
+ * **Разные ключи «нет» не значат.** Две копии одного проекта, разошедшиеся до
+ * того, как ключи появились, получат каждая свой — и отказ по несовпадению
+ * оставил бы их без слияния навсегда. Поэтому дальше работает прежняя догадка:
+ * два человека получают проект из одного файла, и идентификаторы схем и меток
+ * у них общие (свой `id` объекта и свои id картинок каждый браузер выдаёт
+ * сам). Ничего общего — значит, это чужой файл, сливать его нельзя.
  */
 export function areRelatedProjects(ours, theirs) {
   if (!ours || !theirs) return false;
+  const ourKey = mergeKeyOf(ours);
+  const theirKey = mergeKeyOf(theirs);
+  if (ourKey && theirKey && ourKey === theirKey) return true;
   if (ours.id && ours.id === theirs.id) return true;
   for (const key of ["schemes", "marks", "rooms", "markTypes"]) {
     const mine = mergeIndex(mergeList(ours, key));
@@ -132,6 +149,13 @@ export function areRelatedProjects(ours, theirs) {
     }
   }
   return false;
+}
+
+// Какой ключ останется у слитого объекта. Правило симметрично: обе стороны
+// приходят к одному ответу, иначе ключи гуляли бы туда-сюда.
+function mergeMergeKeys(ourKey, theirKey) {
+  if (ourKey && theirKey) return ourKey < theirKey ? ourKey : theirKey;
+  return ourKey || theirKey || null;
 }
 
 function mergeLabel(entity, item, typeCodes) {
@@ -632,6 +656,14 @@ export function mergeProjects(ours, theirs, base, options = {}) {
     report.conflicts.push({ code: "bothChanged", entity: "name", id: ours.id, kept: winner, item: { name: keptName }, other: { name: winner === "theirs" ? ours.name : theirs.name } });
   }
   if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
+  // Ключ проекта сходится. Есть у одного — берут оба: это факт, а не мнение, и
+  // после первой же встречи родство перестаёт быть догадкой. Есть у обоих и
+  // разные (копии разошлись до появления ключей) — берётся меньший по строке:
+  // правило одинаково с обеих сторон, поэтому за один обмен файлами ключ у них
+  // становится общим. Нет ни у кого — поле не заводится, старый объект
+  // остаётся прежним.
+  const mergedKey = mergeMergeKeys(mergeKeyOf(ours), mergeKeyOf(theirs));
+  if (mergedKey) merged.key = mergedKey;
   if (theirs.createdAt && (!merged.createdAt || theirs.createdAt < merged.createdAt)) merged.createdAt = theirs.createdAt;
   merged.updatedAt = String(theirs.updatedAt || "") > String(ours.updatedAt || "") ? theirs.updatedAt : ours.updatedAt;
 
@@ -649,9 +681,16 @@ export function mergeProjects(ours, theirs, base, options = {}) {
     renumbered: report.renumbered.length,
   };
 
+  // Слияние, в котором не изменилось ничего, кроме служебных полей — ключа
+  // проекта и отметки времени, — применяется молча: показывать «приехали
+  // правки: 0» и обрывать историю не за что. Работой это не является ни в
+  // каком смысле, а ключ до объекта доехать должен.
+  const quiet = mergeSame({ ...ours, key: merged.key, updatedAt: merged.updatedAt }, merged);
+
   return {
     project: merged,
     changed: !mergeSame(ours, merged),
+    quiet,
     changes: report.changes,
     conflicts: report.conflicts,
     renumbered: report.renumbered,

@@ -13,7 +13,7 @@ import {
   verifyProjectFile,
 } from "./projectFile.js";
 import { mergeProjects, areRelatedProjects } from "./merge.js";
-import { updateProject } from "./model.js";
+import { ensureProjectKey, updateProject } from "./model.js";
 import { strings, text } from "./strings.js";
 
 // Ключи настроек: ручка папки (структурно клонируется в IndexedDB как есть)
@@ -101,8 +101,13 @@ export function adoptLoadedProject(loaded, options = {}) {
     id: mode === "replace" && options.currentId ? options.currentId : newId(),
     schemes,
   };
+  // Идентификатор объекта здесь перевыдаётся, а постоянный ключ — **нет**: он
+  // и существует затем, чтобы пережить загрузку файла. Файлу прежней сборки,
+  // у которого ключа нет вовсе, он заводится здесь: объект, пришедший извне,
+  // дальше живёт как свой.
+  const keyed = ensureProjectKey(base).project;
   // Отметку времени ставит модель: свой мутатор объекта в сборке не заводится.
-  return { project: updateProject(base).project, images, mode };
+  return { project: updateProject(keyed).project, images, mode };
 }
 
 // Картинки текущего объекта для упаковки: `packProject` принимает только Map.
@@ -223,6 +228,14 @@ function autosaveWroteArchive(project, loaded, member) {
 export function autosaveOwnArchive(project, loaded, member = autosaveMember) {
   if (!project || !project.id || !loaded || !loaded.project) return false;
   if (loaded.project.id !== project.id) return false;
+  // Постоянный ключ здесь не заменяет `id`, а страхует его. Заменить нельзя:
+  // у двух копий одного проекта в одном браузере (файл, загруженный дважды)
+  // ключ общий, а объекты разные — по ключу снимок соседней копии попал бы в
+  // список «прежних файлов» и под кнопку «Удалить». А вот разойтись ключи при
+  // совпавшем `id` могут только у чужого файла: тогда это не наш снимок.
+  const ourKey = project.key;
+  const theirKey = loaded.project.key;
+  if (ourKey && theirKey && ourKey !== theirKey) return false;
   return autosaveWroteArchive(project, loaded, member);
 }
 

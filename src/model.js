@@ -725,6 +725,12 @@ export function createProject(template) {
   return {
     formatVersion: FORMAT_VERSION,
     id: newId(),
+    // Постоянный ключ объекта: заводится здесь и не меняется никогда — ни при
+    // загрузке файла, ни при копировании, ни при переименовании. По нему два
+    // файла узнают друг в друге один проект. `id` для этого не годится: его
+    // перевыдаёт приёмка файла (`autosave.adoptLoadedProject`), иначе двое
+    // писали бы в один снимок, — и у участников одного проекта он разный.
+    key: newId(),
     name: (template && template.name) || strings.project.untitled,
     createdAt: stamp,
     updatedAt: stamp,
@@ -2908,6 +2914,21 @@ export function applyRoomOutlines(project, schemeId) {
   });
   if (changed.length === 0) return { project, changed };
   return { project: withProject(project, { marks }), changed };
+}
+
+/**
+ * Дописывает объекту постоянный ключ, если его ещё нет. Возвращает
+ * `{project, changed}`; `changed: false` — ключ уже был, объект тот же самый
+ * по ссылке.
+ *
+ * Это не правка данных, а недостающая метка: `updatedAt` не трогается, чтобы
+ * ключ, появившийся при открытии, не выглядел для второй стороны свежей
+ * работой. Идемпотентно: второй вызов ничего не делает.
+ */
+export function ensureProjectKey(project) {
+  if (!project) return { project, changed: false };
+  if (typeof project.key === "string" && project.key) return { project, changed: false };
+  return { project: { ...project, key: newId() }, changed: true };
 }
 
 export function updateProject(project, patch = {}) {
