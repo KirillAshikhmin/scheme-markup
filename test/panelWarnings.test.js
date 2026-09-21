@@ -12,6 +12,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   acceptProblem,
+  acceptedProblems,
   addMark,
   addRoom,
   addScheme,
@@ -50,65 +51,64 @@ function house() {
 }
 
 // Стартовый справочник — справочник рабочего объекта заказчика, и он приезжает
-// со своими сведениями: пять знаков, которые носят по нескольку типов, и пять
-// пар категорий с похожим цветом. Это выбор заказчика, сделанный по числам, в
-// каждом новом объекте он один и тот же, и отдельный тест ниже смотрит именно
-// на него. Остальные тесты этого файла — про метки, связи и виды, поэтому
-// строки справочника снимаются с модели одним местом.
+// со своими сведениями: пять знаков, которые носят по нескольку типов, и четыре
+// пары категорий с похожим цветом. Все они принимаются при создании объекта —
+// «в стандартной схеме не должно быть предупреждений», — и лежат в списке
+// принятых. Остальные тесты этого файла — про метки, связи и виды, поэтому
+// принятое справочника с модели снимается одним местом.
 const DICTIONARY_CODES = ["sharedShape", "closeColors"];
 
 function panelModel(project) {
   const model = warningsModel(project);
   const groups = model.groups.filter((group) => !DICTIONARY_CODES.includes(group.code));
   const total = groups.reduce((sum, group) => sum + group.count, 0);
-  return { ...model, groups, total, level: total === 0 ? "ok" : groups[0].level };
+  return {
+    ...model,
+    groups,
+    total,
+    level: total === 0 ? "ok" : groups[0].level,
+    accepted: model.accepted.filter((record) => !DICTIONARY_CODES.includes(record.code)),
+  };
 }
 
-// Справочник заказчика — в панели предупреждений, как и просил тикет: строками,
-// которые видно, а не падением сборки. Каждую можно закрыть «так и задумано» —
-// и тогда панель у нового объекта снова говорит «смотреть нечего».
-test("новый объект рассказывает о своём справочнике: повторы знака и похожие цвета", () => {
+// Слова заказчика: «в стандартной схеме не должно быть предупреждений».
+// Справочник он собирал сам, знаков и цветов в новом объекте человек не
+// выбирал — значок в шапке обязан молчать. Но ничего не прячется: строки лежат
+// в «Принято», каждая называет то, на что ответили, и возвращается нажатием.
+test("новый объект встречает тишиной, а справочник виден в принятом", () => {
   const model = warningsModel(createProject());
-  const shapes = model.groups.find((group) => group.code === "sharedShape");
-  const colors = model.groups.find((group) => group.code === "closeColors");
-  assert.ok(shapes, "повторы знака не доехали до панели");
-  assert.ok(colors, "похожие цвета не доехали до панели");
-  assert.equal(shapes.level, "warning", "повтор знака — не ошибка объекта");
-  assert.equal(colors.level, "warning", "похожий цвет — не ошибка объекта");
-  assert.equal(shapes.count, 5, "знаков, которые носят несколько типов: " + shapes.count);
-  assert.equal(colors.count, 5, "пар категорий с похожим цветом: " + colors.count);
-  assert.equal(shapes.title, "Знаков, которые носят несколько типов: 5");
-  assert.equal(colors.title, "Пар категорий с похожим цветом: 5");
-  // Семь типов света названы поимённо: строку читают, а не считают.
-  assert.ok(shapes.items.some((item) => item.message.includes("Т, С, ПК, ПС, ППл, ЛЮ, Бр")));
-  assert.ok(colors.items.some((item) => item.message.includes("Не назначено") && item.message.includes("21,4")));
-  // Ошибок среди них нет: объект цел.
-  assert.equal(model.groups.every((group) => group.level !== "error"), true);
+  assert.equal(model.total, 0, "новый объект показывает предупреждения");
+  assert.equal(model.level, "ok");
+  assert.deepEqual(model.groups, []);
+  assert.equal(model.accepted.length, 9, "строк справочника в принятом: " + model.accepted.length);
+  assert.equal(model.accepted.every((record) => record.level === "warning"), true, "принятое — не ошибка");
+  assert.ok(model.accepted.some((record) => record.label.includes("Т, С, ПК, ПС, ППл, ЛЮ, Бр")));
+  assert.ok(model.accepted.some((record) => record.label.includes("Карнизы") && record.label.includes("28,9")));
+});
 
-  // Переход ведёт к виновнику на плане: у знака — к метке его типа, у цвета —
-  // к метке любого типа этой категории. Меток нет — перехода нет, и это не
-  // поломка: строку всё равно читают.
-  // На пустом объекте адрес есть, но метки в нём нет: идти на плане не к чему.
-  assert.equal(shapes.items[0].place.markId, null);
+// Возвращённая строка ведёт себя как всякое предупреждение: своя группа, свой
+// заголовок со счётчиком и переход к виновнику на плане.
+test("возвращённая строка справочника — обычное предупреждение со своим переходом", () => {
   const box = house();
-  const placed = warningsModel(box.project);
-  const shapeRow = placed.groups.find((group) => group.code === "sharedShape").items[0];
-  assert.equal(shapeRow.place.markId, box.lamps[0], "повтор знака не ведёт к метке этого типа");
-  const colorRow = placed.groups
-    .find((group) => group.code === "closeColors")
-    .items.find((item) => item.message.includes("Домофон"));
-  assert.equal(colorRow.place, null, "у домофона на этом объекте меток нет");
+  const shape = acceptedProblems(box.project).find((record) => record.code === "sharedShape");
+  const back = unacceptProblem(box.project, shape.key).project;
 
-  // «Так и задумано» закрывает строку и больше её не показывает.
-  let project = createProject();
-  for (const problem of validate(project)) {
-    if (DICTIONARY_CODES.includes(problem.code)) project = acceptProblem(project, problem).project;
-  }
-  const after = warningsModel(project);
-  assert.equal(after.total, 0, "закрытая строка справочника вернулась");
-  assert.equal(after.level, "ok");
-  assert.equal(after.accepted.length, 10);
-  assert.equal(after.accepted.every((record) => record.level === "warning"), true);
+  const model = warningsModel(back);
+  const group = model.groups.find((item) => item.code === "sharedShape");
+  assert.ok(group, "возвращённая строка не вернулась в список");
+  assert.equal(model.total, 1);
+  assert.equal(group.level, "warning", "повтор знака — не ошибка объекта");
+  assert.equal(group.count, 1);
+  assert.equal(group.title, "Знаков, которые носят несколько типов: 1");
+  // Переход ведёт к виновнику: у знака — к метке его типа.
+  assert.equal(group.items[0].place.markId, box.lamps[0], "повтор знака не ведёт к метке этого типа");
+
+  // Похожий цвет ведёт к метке любого типа этой категории; меток нет — перехода
+  // нет, и это не поломка: строку всё равно читают.
+  const color = acceptedProblems(box.project).find((record) => record.label.includes("Домофон"));
+  const colors = warningsModel(unacceptProblem(box.project, color.key).project);
+  assert.equal(colors.groups[0].code, "closeColors");
+  assert.equal(colors.groups[0].items[0].place, null, "у домофона на этом объекте меток нет");
 });
 
 test("чистый объект: смотреть нечего, и это видно", () => {

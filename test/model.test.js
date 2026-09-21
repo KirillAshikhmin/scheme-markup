@@ -85,6 +85,12 @@ function objectProblems(project) {
   return validate(project).filter((problem) => !DICTIONARY_CODES.includes(problem.code));
 }
 
+// Принятое по объекту — без строк справочника, которые новый объект получает
+// при создании, чтобы встречать тишиной.
+function objectAccepted(project) {
+  return acceptedProblems(project).filter((record) => !DICTIONARY_CODES.includes(record.code));
+}
+
 // Повтор знака и похожий цвет категорий были запретом в тестах шаблона, а стали
 // предупреждением: заказчику показали числа, и он выбрал «взять как есть».
 // Довод его сильный — рядом со знаком на плане всегда стоит подпись, Т1 или С2,
@@ -110,8 +116,9 @@ test("повтор знака и похожий цвет категорий — 
   const colors = closeCategoryColors(project);
   assert.deepEqual(
     colors.map((pair) => [pair.first, pair.second, pair.distance.toFixed(1)]),
+    // Самой тесной пары, 21,4 между «Не назначено» и «Сантехникой», больше нет:
+    // категорию «Не назначено» заказчик попросил убрать.
     [
-      ["Не назначено", "Сантехника", "21.4"],
       ["Выключатели", "Электроприборы", "23.7"],
       ["Климат", "Карнизы", "26.3"],
       ["Домофон", "Сантехника", "27.4"],
@@ -129,15 +136,115 @@ test("повтор знака и похожий цвет категорий — 
   assert.ok(project.markTypes.some((type) => type.id === shape.ref));
   const color = problems.find((problem) => problem.code === "closeColors");
   assert.ok(project.categories.some((category) => category.id === color.ref));
-  // Ключ принятия не считает типов под знаком: восьмой светильник не вернёт
-  // того, что пользователь уже закрыл.
-  assert.equal(shape.key, "sharedShape:circle-cross");
+  // Ключ принятия — не сам знак, а состав под ним: принято «вот эти семь типов
+  // носят круг с крестом». Состав считается по идентификаторам типов, а не по
+  // кодам: переименование кода — не повод спрашивать заново, а другой набор
+  // типов под тем же знаком — уже другой вопрос.
+  const light = project.categories.find((category) => category.name === "Свет");
+  const ids = project.markTypes
+    .filter((type) => type.categoryId === light.id && type.shape === null && type.kind === "point")
+    .map((type) => type.id)
+    .sort();
+  assert.equal(ids.length, 7);
+  assert.equal(shape.key, "sharedShape:circle-cross#" + ids.join(","));
 });
 
-test("стартовый справочник — справочник заказчика: тринадцать категорий и сорок восемь типов", () => {
+// Слова заказчика: «в стандартной схеме не должно быть предупреждений». Всё, о
+// чём справочник нового объекта мог бы предупредить, он принёс с собой: человек
+// этих знаков и цветов не выбирал, он только что нажал «Создать объект».
+// Поэтому ответ «так и задумано» даётся сразу — но не молча: список принятых
+// виден в панели, и любая строка возвращается одним нажатием.
+test("новый объект встречает тишиной: строки справочника приняты за пользователя", () => {
+  const project = createProject();
+  const open = validate(project).filter((problem) => !problemAccepted(project, problem.key));
+  assert.deepEqual(open, [], "новый объект показывает предупреждения");
+
+  const records = acceptedProblems(project);
+  assert.equal(records.length, 9, "принято не то число строк: " + records.length);
+  assert.equal(records.every((record) => DICTIONARY_CODES.includes(record.code)), true);
+  assert.equal(records.every((record) => record.kind === "warning"), true, "принятое — не ошибка");
+  // Запомнен тот самый текст, который стоял бы в панели: ничего не спрятано.
+  assert.ok(records.some((record) => record.label.includes("Т, С, ПК, ПС, ППл, ЛЮ, Бр")));
+  assert.ok(records.every((record) => record.at));
+
+  // И возвращается одним нажатием — той же командой, что и любое принятое.
+  const shape = records.find((record) => record.code === "sharedShape");
+  const back = unacceptProblem(project, shape.key).project;
+  assert.deepEqual(
+    validate(back)
+      .filter((problem) => !problemAccepted(back, problem.key))
+      .map((problem) => problem.key),
+    [shape.key],
+    "возвращённая строка не вернулась в работу",
+  );
+});
+
+// Правило не выброшено: принимается только то, что приехало со справочником.
+// Развёл человек знаки руками, а потом завёл новый повтор — он об этом узнает.
+test("повтор, заведённый руками, предупреждение даёт", () => {
+  let project = createProject();
+  const light = project.categories.find((category) => category.name === "Свет");
+  const open = (source) => validate(source).filter((problem) => !problemAccepted(source, problem.key));
+
+  // Развёл шесть светов по своим знакам — под кругом с крестом остался один «Т».
+  const free = ["circle-slash", "circle-slash-two", "circle-chevron", "square-ring", "square-grid", "trapezoid"];
+  ["С", "ПК", "ПС", "ППл", "ЛЮ", "Бр"].forEach((code, index) => {
+    const type = project.markTypes.find((item) => item.code === code);
+    project = updateType(project, type.id, { shape: free[index] }).project;
+  });
+  assert.deepEqual(open(project), [], "разведение знаков само по себе о чём-то спросило");
+  assert.equal(sharedShapes(project).some((group) => group.shape === "circle-cross"), false);
+
+  // И завёл своим знаком новый тип — тем же кругом с крестом, что у «Т».
+  const mine = addType(project, { code: "НТ", name: "Мой светильник", categoryId: light.id, shape: "circle-cross" });
+  const asked = open(mine.project);
+  assert.equal(asked.length, 1, "ручной повтор промолчал");
+  assert.equal(asked[0].code, "sharedShape");
+  assert.equal(asked[0].message, "Знак «Круг с крестом» носят несколько типов: Т, НТ");
+
+  // Сближение цветов руками — тот же разговор.
+  const cinema = project.categories.find((category) => category.name === "Кинотеатр");
+  const painted = updateCategory(project, cinema.id, { color: "#2A6FE0" }).project;
+  assert.deepEqual(
+    open(painted).map((problem) => problem.code),
+    ["closeColors"],
+    "ручная перекраска промолчала",
+  );
+});
+
+// Типы из общей базы человек не рисовал: знак им дал справочник. Поэтому то,
+// что приехало вместе с ними, принимается так же молча — но открытый вопрос
+// про тот же знак добавление погасить не имеет права.
+test("общая база приносит типы тихо, а открытый вопрос не гасит", () => {
+  const open = (source) => validate(source).filter((problem) => !problemAccepted(source, problem.key));
+
+  // Пустой справочник: всё, что приехало из базы, принято сразу.
+  const bare = { ...createProject(), categories: [], markTypes: [], accepted: [] };
+  const filled = addTypesFromCatalog(bare, null, ["Т", "С", "ПК"]).project;
+  assert.equal(filled.markTypes.length, 3);
+  assert.deepEqual(open(filled), [], "типы из общей базы о себе предупредили");
+  // Добавлять нечего — тот же объект: тишина не стоит шага истории.
+  assert.equal(addTypesFromCatalog(bare, null, []).project, bare);
+
+  // У человека висит свой, руками заведённый повтор круга с крестом. Добавление
+  // из базы меняет состав под знаком — и вопрос обязан остаться открытым.
+  let mine = createProject();
+  const light = mine.categories.find((category) => category.name === "Свет");
+  mine = { ...mine, markTypes: mine.markTypes.filter((type) => type.code !== "ЛЮ") };
+  mine = addType(mine, { code: "НТ", name: "Мой светильник", categoryId: light.id }).project;
+  assert.equal(open(mine).length, 1, "ручной повтор не задан");
+
+  const grown = addTypesFromCatalog(mine, null, ["ЛЮ"]).project;
+  const asked = open(grown);
+  assert.equal(asked.length, 1, "добавление из базы погасило открытый вопрос");
+  assert.equal(asked[0].code, "sharedShape");
+  assert.ok(asked[0].message.includes("НТ") && asked[0].message.includes("ЛЮ"));
+});
+
+test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок семь типов", () => {
   const template = defaultTemplate();
-  assert.equal(template.categories.length, 13);
-  assert.equal(template.markTypes.length, 48);
+  assert.equal(template.categories.length, 12);
+  assert.equal(template.markTypes.length, 47);
 
   // prettier-ignore
   assert.deepEqual(
@@ -150,7 +257,6 @@ test("стартовый справочник — справочник зака�
       ["Сетевое оборудование", "#8250DF", "star"],
       ["Домофон", "#D901C4", "triangle-down"],
       ["Карнизы", "#9d4c01", "diamond"],
-      ["Не назначено", "#FF007F", "plus"],
       ["Электроприборы", "#1DAB1D", "square-bolt"],
       ["Кинотеатр", "#001BDD", "square-wave"],
       ["Датчики", "#164E63", "circle-ring"],
@@ -164,7 +270,7 @@ test("стартовый справочник — справочник зака�
     // Порядок — порядок заказчика, а не наша перекладка по категориям.
     // prettier-ignore
     ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
-     "ПКШ", "ЛЮ", "П", "ПП", "Н", "ВОПРОС", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
+     "ПКШ", "ЛЮ", "П", "ПП", "Н", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
      "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
      "КВ", "ПЛ", "ПЗ", "КАМ"],
   );
@@ -192,7 +298,6 @@ test("стартовый справочник — справочник зака�
     П: "Переключатель",
     ПП: "Переключатель двойной",
     Н: "Ночник",
-    ВОПРОС: "Не определено",
     РC: "Розетка 380",
     ДП: "Датчик присутствия",
     СУШ: "Сушилка Электрическая",
@@ -227,7 +332,7 @@ test("стартовый справочник — справочник зака�
   assert.deepEqual(
     template.markTypes.filter((t) => t.shape === null).map((t) => t.code),
     // prettier-ignore
-    ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "Д", "КШ", "ППл", "ПКШ", "ЛЮ", "ВОПРОС", "СУШ",
+    ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "Д", "КШ", "ППл", "ПКШ", "ЛЮ", "СУШ",
      "Бр", "ДЭП", "РЕС", "ВР", "ПЛ"],
   );
   // Выключатели — каждый своим квадратом: клавиши на знаке считают глазами.
@@ -255,8 +360,8 @@ test("новый объект создаётся из стартового сп�
   // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
   // вид типа — точка или линия.
   assert.equal(project.formatVersion, 4);
-  assert.equal(project.categories.length, 13);
-  assert.equal(project.markTypes.length, 48);
+  assert.equal(project.categories.length, 12);
+  assert.equal(project.markTypes.length, 47);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -1219,10 +1324,10 @@ test("общая база: пустому справочнику предлаг�
     offer.map((group) => group.category.name),
     [
       "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
-      "Не назначено", "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
+      "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
     ],
   );
-  assert.equal(offeredCodes(offer).length, 48);
+  assert.equal(offeredCodes(offer).length, 47);
   assert.equal(offer[0].types[0].code, "Т");
   assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
 
@@ -1330,7 +1435,7 @@ test("сохранённый шаблон побеждает встроенны�
     offer.map((group) => group.category.name),
     [
       "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
-      "Не назначено", "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника", "Шторы",
+      "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника", "Шторы",
     ],
   );
   const light = offer.find((group) => group.category.name === "Свет");
@@ -1759,7 +1864,7 @@ test("принятое предупреждение помнится в объе
 
   const accepted = acceptProblem(project, problem).project;
   assert.equal(problemAccepted(accepted, problem.key), true);
-  const records = acceptedProblems(accepted);
+  const records = objectAccepted(accepted);
   assert.equal(records.length, 1);
   assert.equal(records[0].key, problem.key);
   assert.equal(records[0].code, "repeatedNumber");
@@ -1779,7 +1884,7 @@ test("принятое предупреждение помнится в объе
 
   // Вернули в работу — записи нет.
   const back = unacceptProblem(accepted, problem.key).project;
-  assert.deepEqual(acceptedProblems(back), []);
+  assert.deepEqual(objectAccepted(back), []);
   assert.equal(problemAccepted(back, problem.key), false);
   // Возвращать нечего — тот же объект.
   assert.equal(unacceptProblem(back, problem.key).project, back);
@@ -1795,8 +1900,8 @@ test("принять можно и ошибку, но вид ответа зап
   };
   const problem = objectProblems(broken).find((item) => item.code === "markWithoutRoom");
   const accepted = acceptProblem(broken, problem).project;
-  assert.equal(acceptedProblems(accepted)[0].kind, "error");
-  assert.equal(acceptedProblems(accepted)[0].key, "markWithoutRoom:" + step.mark.id);
+  assert.equal(objectAccepted(accepted)[0].kind, "error");
+  assert.equal(objectAccepted(accepted)[0].key, "markWithoutRoom:" + step.mark.id);
 });
 
 // G97, слова заказчика: «по метке, типо Т4 — корректно. Но это тоже должно
@@ -1821,7 +1926,7 @@ test("смыкание номеров переносит принятое на �
 
   const compacted = compactNumbers(project, code).project;
   assert.deepEqual(objectProblems(compacted).map((item) => item.message), ["Т2 — таких меток 2"]);
-  const records = acceptedProblems(compacted);
+  const records = objectAccepted(compacted);
   assert.equal(records.length, 1);
   assert.equal(records[0].key, "repeatedNumber:" + code + "#2");
   // Запомненный текст читается по новому обозначению, а не по исчезнувшему.
@@ -1832,7 +1937,7 @@ test("смыкание номеров переносит принятое на �
 
   // Отмена смыкания — это прежний объект целиком: в нём и номера, и принятия
   // те, что были. Ctrl+Z возвращает его одним шагом.
-  assert.equal(acceptedProblems(project)[0].key, problem.key);
+  assert.equal(objectAccepted(project)[0].key, problem.key);
   assert.deepEqual(objectProblems(project).map((item) => item.message), ["Т4 — таких меток 2"]);
 });
 

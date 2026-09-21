@@ -297,8 +297,18 @@ test("оборудование и его привязки сливаются, п
 // разметки, а ответ на вопрос: «так и задумано». Значит слияние здесь не выбор
 // стороны, а объединение — иначе второй человек из общей папки отвечает на те
 // же повторы заново.
+// Принятые повторы номера. Строки справочника (повтор знака, похожий цвет)
+// новый объект получает при создании — чтобы встречать тишиной, — и к слиянию
+// принятых ответов они отношения не имеют: здесь смотрят на повторы номера.
 function acceptedKeys(project) {
-  return (project.accepted || []).map((item) => item.key).sort();
+  return (project.accepted || [])
+    .filter((item) => item.code === "repeatedNumber")
+    .map((item) => item.key)
+    .sort();
+}
+
+function acceptedRepeats(project) {
+  return (project.accepted || []).filter((item) => item.code === "repeatedNumber");
 }
 
 // Повтор номера с двух сторон: у нас принят один, у них другой.
@@ -340,7 +350,7 @@ test("принятое одной стороной приезжает ко вт�
   // Повторный обмен файлами ничего не добавляет: ключ у записи один.
   const again = mergeProjects(toUs, toThem, start.project).project;
   assert.deepEqual(acceptedKeys(again), [problem.key], "список принятых вырос дублями");
-  assert.equal(mergeProjects(again, again, start.project).project.accepted.length, 1);
+  assert.equal(acceptedRepeats(mergeProjects(again, again, start.project).project).length, 1);
 });
 
 test("принятое своё при совпадении ключа остаётся своим — со своим временем", () => {
@@ -352,9 +362,10 @@ test("принятое своё при совпадении ключа оста�
   other.accepted[0] = { ...other.accepted[0], at: "2020-01-01T00:00:00.000Z", label: "чужой текст" };
 
   const merged = mergeProjects(stamp(mine, "2026-02-02T10:00:00.000Z"), stamp(other, "2026-02-02T11:00:00.000Z"), start.project).project;
-  assert.equal(merged.accepted.length, 1, "одна и та же строка приехала дважды");
-  assert.equal(merged.accepted[0].at, mine.accepted[0].at, "своё время принятия подменили чужим");
-  assert.equal(merged.accepted[0].label, mine.accepted[0].label);
+  const mineRepeat = acceptedRepeats(mine)[0];
+  assert.equal(acceptedRepeats(merged).length, 1, "одна и та же строка приехала дважды");
+  assert.equal(acceptedRepeats(merged)[0].at, mineRepeat.at, "своё время принятия подменили чужим");
+  assert.equal(acceptedRepeats(merged)[0].label, mineRepeat.label);
 });
 
 // Объект прежней разметки поля не знает вовсе, и слияние не должно его заводить
@@ -484,7 +495,7 @@ test("столкнувшаяся группа переезжает целико�
   const live = repeatedNumbers(merged.project).find((item) => item.markIds.length === 3);
   assert.ok(live, "намеренный повтор из трёх меток не пережил слияния");
   assert.equal(problemAccepted(merged.project, "repeatedNumber:" + typeId + "#" + live.number), true, "ответ «так и задумано» остался на номере, которого больше нет");
-  assert.equal(merged.project.accepted.length, 1, "список принятых вырос");
+  assert.equal(acceptedRepeats(merged.project).length, 1, "список принятых вырос");
 });
 
 // ——— справочник типов оборудования ——————————————————————————————————

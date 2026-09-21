@@ -191,7 +191,13 @@ test("принятые предупреждения переезжают на н
   const fresh = validate(after).find((item) => item.code === "repeatedNumber");
   assert.equal(problemAccepted(after, fresh.key), true, "принятое не переехало на новый номер");
   assert.equal(problemAccepted(after, repeat.key), false, "старый ключ остался висеть");
-  assert.equal(acceptedProblems(after).length, 1);
+  // Кроме этой записи в объекте лежат принятые строки справочника — их новый
+  // объект получает при создании, чтобы встречать тишиной. Смыкание номеров их
+  // не касается: считаем только повторы номера.
+  assert.deepEqual(
+    acceptedProblems(after).filter((record) => record.code === "repeatedNumber").length,
+    1,
+  );
 });
 
 test("предпросмотр совпадает с результатом, а оба пути смыкания дают одно и то же", () => {
