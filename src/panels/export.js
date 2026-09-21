@@ -20,6 +20,7 @@ import {
   exportFileName,
   exportFitArea,
   exportRoomArea,
+  exportRoomFilter,
   exportRoomName,
   exportSizeText,
   exportTableNode,
@@ -128,10 +129,20 @@ function exportAreaRoomId() {
   return exportChoice.area.startsWith("room:") ? exportChoice.area.slice(5) : null;
 }
 
+// Фильтр листа: к выбранному на экране добавляется помещение, когда лист
+// режется по комнате. Одна дорога и у окна, и у архива — иначе лист, снятый
+// кнопкой «Скачать», отличался бы от такого же листа внутри zip.
+function exportFilterOfSheet(state) {
+  return exportRoomFilter(state.filter, exportAreaRoomId());
+}
+
 // Кадр листа вместе с полями под подписи — тот же расчёт, что и в выгрузке:
 // размер в диалоге обязан совпасть с тем, что ляжет на бумагу.
 function exportFittedOf(state, scheme) {
-  return exportFitArea(state.project, scheme, { area: exportAreaOf(state, scheme), filter: state.filter });
+  return exportFitArea(state.project, scheme, {
+    area: exportAreaOf(state, scheme),
+    filter: exportFilterOfSheet(state),
+  });
 }
 
 function exportAreaSize(state, scheme) {
@@ -517,7 +528,7 @@ function exportSchemeDialog(api) {
         legend: exportChoice.legend,
         outlines: exportChoice.outlines,
         links: exportChoice.links,
-        filter: state.filter,
+        filter: exportFilterOfSheet(state),
       });
     } finally {
       if (release) release();

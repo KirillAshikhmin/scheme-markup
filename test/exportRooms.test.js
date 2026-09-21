@@ -103,7 +103,7 @@ test("комната без контура названа, а комната с 
   assert.deepEqual(exportRoomSheets(project, second).missing, []);
 });
 
-test("кадр комнаты режет план и не теряет соседей у стены", () => {
+test("кадр комнаты режет план и держит поле тесным", () => {
   const { project, first, rooms, neighbour } = flat();
   const kitchen = exportRoomArea(project, first, rooms["Кухня"]);
 
@@ -117,11 +117,12 @@ test("кадр комнаты режет план и не теряет сосе�
   assert.ok(kitchen.x + kitchen.width > 0.4 * first.width, "справа обрезано по контуру");
   assert.ok(kitchen.y + kitchen.height > 0.4 * first.height, "снизу обрезано по контуру");
 
-  // Метка соседней комнаты у стены осталась в кадре: её не фильтруют.
+  // «Чуть вокруг»: метка соседней комнаты в сотой доле плана за стеной в кадр
+  // уже не попадает. Прежнее поле (6% длинной стороны) захватывало её и ещё
+  // столько же соседней квартиры — на это и жаловался заказчик.
   const mark = project.marks.find((item) => item.id === neighbour);
   const at = { x: mark.points[0].x * first.width, y: mark.points[0].y * first.height };
-  assert.ok(at.x >= kitchen.x && at.x <= kitchen.x + kitchen.width, "сосед у стены выпал из кадра");
-  assert.ok(at.y >= kitchen.y && at.y <= kitchen.y + kitchen.height);
+  assert.ok(at.x > kitchen.x + kitchen.width, "кадр всё ещё дотягивается до соседней комнаты");
 });
 
 test("масштаб у всех листов один: у маленькой комнаты меньше лист, а не рисунок", () => {
@@ -177,4 +178,156 @@ test("запрещённые знаки в имени комнаты не лом
   assert.equal(name.includes('"'), false, name);
   assert.ok(name.startsWith("01.01-"), name);
   assert.ok(name.endsWith(".png"), name);
+});
+
+// ——— лист комнаты: только её метки и «чуть вокруг» (таск 93) ——————————
+//
+// Заказчик посмотрел листы и снял два прежних решения: «оставляй только её
+// метки и обозначения комнаты только текущей, а так же не такой большой запас
+// вокруг контура комнаты, а то видно слишком много».
+
+import { exportFitArea, exportRoomFilter } from "../src/exporter.js";
+import { labelBox, visibleMarks, visibleOutlines } from "../src/render.js";
+import { updateMark } from "../src/model.js";
+
+// План 2480×1754 и три комнаты разной стати: узкий коридор, маленький санузел
+// и большая гостиная. Процент от размера ведёт себя на них по-разному — в этом
+// и была прежняя беда.
+function rooms() {
+  let project = createProject({ name: "Квартира на Ленина" });
+  const added = addScheme(project, { name: "1 этаж", width: 2480, height: 1754 });
+  project = added.project;
+  const scheme = added.scheme;
+  const boxes = {
+    Коридор: { x: 0.47, y: 0.06, width: 0.09, height: 0.86 },
+    Санузел: { x: 0.58, y: 0.06, width: 0.12, height: 0.2 },
+    Гостиная: { x: 0.04, y: 0.06, width: 0.42, height: 0.5 },
+  };
+  const ids = {};
+  for (const [name, box] of Object.entries(boxes)) {
+    const room = addRoom(project, { name });
+    project = room.project;
+    ids[name] = room.room.id;
+    project = addOutline(project, {
+      schemeId: scheme.id,
+      roomId: room.room.id,
+      points: [
+        { x: box.x, y: box.y },
+        { x: box.x + box.width, y: box.y },
+        { x: box.x + box.width, y: box.y + box.height },
+        { x: box.x, y: box.y + box.height },
+      ],
+    }).project;
+  }
+  return { project, scheme, ids, boxes };
+}
+
+function put(project, scheme, roomId, point) {
+  const added = addMark(project, {
+    schemeId: scheme.id,
+    typeId: project.markTypes[0].id,
+    kind: "point",
+    points: [point],
+  });
+  const marks = added.project.marks.map((mark) => (mark.id === added.mark.id ? { ...mark, roomId } : mark));
+  return { project: { ...added.project, marks }, markId: added.mark.id };
+}
+
+test("поле вокруг контура стало «чуть вокруг» на комнатах любой стати", () => {
+  const { project, scheme, ids, boxes } = rooms();
+  const plan = { width: scheme.width, height: scheme.height };
+  // Прежняя мера: 6% большей стороны комнаты, но не меньше 24 px плана.
+  const before = (box) => Math.max(24, Math.max(box.width * plan.width, box.height * plan.height) * 0.06);
+
+  for (const [name, box] of Object.entries(boxes)) {
+    const area = exportRoomArea(project, scheme, ids[name]);
+    const pad = box.x * plan.width - area.x;
+    const short = Math.min(box.width * plan.width, box.height * plan.height);
+
+    assert.ok(pad < before(box), name + ": поле не уменьшилось (" + pad + " против " + before(box) + ")");
+    // Стена видна: поле не меньше сотой доли плана.
+    assert.ok(pad >= plan.width * 0.0079, name + ": поле схлопнулось до " + pad);
+    // Половины квартиры не видно: поле не шире трети меньшей стороны комнаты
+    // и не больше двадцать пятой доли плана.
+    assert.ok(pad <= short / 3, name + ": поле шире трети комнаты — " + pad);
+    assert.ok(pad <= plan.width * 0.0401, name + ": поле больше двадцать пятой доли плана");
+  }
+
+  // На узком коридоре и большой гостиной прежняя мера была втрое-вдвое больше.
+  const corridorPad = boxes["Коридор"].x * plan.width - exportRoomArea(project, scheme, ids["Коридор"]).x;
+  const livingPad = boxes["Гостиная"].x * plan.width - exportRoomArea(project, scheme, ids["Гостиная"]).x;
+  assert.ok(corridorPad * 2 < before(boxes["Коридор"]), "у коридора поле не уполовинилось");
+  assert.ok(livingPad * 2 < before(boxes["Гостиная"]), "у гостиной поле не уполовинилось");
+});
+
+test("на листе комнаты только её метки, её контур и её название", () => {
+  let { project, scheme, ids } = rooms();
+  const mine = put(project, scheme, ids["Гостиная"], { x: 0.2, y: 0.2 });
+  project = mine.project;
+  // Розетка коридора у самой стены гостиной — в кадр попадает, а на лист нет.
+  const neighbour = put(project, scheme, ids["Коридор"], { x: 0.465, y: 0.2 });
+  project = neighbour.project;
+
+  const filter = exportRoomFilter(null, ids["Гостиная"]);
+  const marks = visibleMarks(project, scheme, filter);
+  assert.deepEqual(marks.map((mark) => mark.id), [mine.markId], "на листе чужие метки");
+
+  // Контур соседа уходит вместе с его метками: стены рисует сам план, а контур
+  // с заливкой цветом чужой комнаты — это и есть «видно слишком много».
+  const outlines = visibleOutlines(project, scheme, filter);
+  assert.equal(outlines.length, 1, "на листе чужие контуры");
+  assert.equal(outlines[0].roomId, ids["Гостиная"]);
+
+  // Без фильтра — как на общем листе: всё на месте.
+  assert.equal(visibleMarks(project, scheme, null).length, 2);
+  assert.equal(visibleOutlines(project, scheme, null).length, 3);
+});
+
+test("фильтр листа не отменяет выбранное на экране", () => {
+  const { ids } = rooms();
+  const screen = { typeIds: ["a", "b"], query: "щит" };
+  const sheet = exportRoomFilter(screen, ids["Кухня"] || "room-1");
+  assert.deepEqual(sheet.typeIds, ["a", "b"], "отметки окна потерялись");
+  assert.equal(sheet.query, "щит");
+  assert.equal(sheet.roomId, "room-1");
+  assert.equal(exportRoomFilter(screen, null), screen, "без комнаты фильтр не трогаем");
+});
+
+test("подпись метки у стены остаётся на листе комнаты, а не уезжает за обрез", () => {
+  let { project, scheme, ids } = rooms();
+  // Метка у правой стены санузла: подпись рисуется правее метки и при тесном
+  // поле ушла бы за обрез — ради таких мест лист и печатают.
+  const edge = put(project, scheme, ids["Санузел"], { x: 0.6985, y: 0.16 });
+  project = edge.project;
+
+  const filter = exportRoomFilter(null, ids["Санузел"]);
+  const area = exportRoomArea(project, scheme, ids["Санузел"]);
+  const fitted = exportFitArea(project, scheme, { area, filter });
+
+  const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: project.view.markSize, labelSize: project.view.labelSize };
+  const mark = project.marks.find((item) => item.id === edge.markId);
+  const box = labelBox(project, scheme, mark, view, filter);
+  assert.ok(box.text, "у метки нет подписи — проверять нечего");
+  assert.ok(
+    box.x + box.width <= fitted.area.x + fitted.area.width,
+    "подпись уехала за правый обрез: " + (box.x + box.width) + " > " + (fitted.area.x + fitted.area.width),
+  );
+  assert.deepEqual(fitted.missed, [], "подпись попала в потерянные");
+});
+
+test("общий лист не изменился: его кадр растёт по прежнему потолку", () => {
+  let { project, scheme, ids } = rooms();
+  const mine = put(project, scheme, ids["Гостиная"], { x: 0.2, y: 0.2 });
+  project = mine.project;
+  // Подпись, оттащенную на полплана, потолок обязан подрезать там же, где и
+  // раньше: на четверти стороны листа.
+  project = updateMark(project, mine.markId, { labelOffset: { dx: 4000, dy: 0 } }).project;
+
+  const fitted = exportFitArea(project, scheme, { area: "all" });
+  const grown = fitted.area.x + fitted.area.width - scheme.width;
+  assert.ok(grown > 0, "кадр общего листа не вырос вовсе");
+  assert.ok(
+    Math.abs(grown - scheme.width * 0.25) < 1,
+    "потолок роста общего листа сдвинулся: вырос на " + grown,
+  );
 });

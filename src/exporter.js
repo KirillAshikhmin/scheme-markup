@@ -80,18 +80,26 @@ function exportArea(scheme, area) {
   };
 }
 
-// Поля вокруг контура: доля большей стороны комнаты, но не меньше запаса
-// в пикселях плана — на узкой кладовке процент дал бы рамку в пару точек.
-const EXPORT_ROOM_PAD = 0.06;
-const EXPORT_ROOM_PAD_MIN = 24;
+// Поле вокруг контура — «чуть вокруг»: видно стену и кусок за ней, а не
+// половина квартиры (слова заказчика: «не такой большой запас, а то видно
+// слишком много»).
+//
+// Мера берётся от **меньшей** стороны комнаты, а не от большей: у коридора
+// 223 × 1509 процент от длины давал поле шире самого коридора, и лист выходил
+// втрое шире нужного. Снизу и сверху поле подпирают доли плана, а не комнаты:
+// толщина стены — свойство плана, и на чулане поле не должно схлопнуться в
+// пару точек, а на зале — разрастись.
+const EXPORT_ROOM_PAD = 0.03;
+const EXPORT_ROOM_PAD_MIN = 0.008;
+const EXPORT_ROOM_PAD_MAX = 0.04;
 
 /**
  * Габариты помещения на схеме в пикселях плана — рамка по контурам комнаты
  * плюс поля. `null`, когда контура этой комнаты на схеме нет.
  *
- * Метки внутри рамки при этом **не фильтруются**: лист режется по комнате, а
- * показывает всё, что попало в кадр. Иначе розетка соседней комнаты, физически
- * стоящая в кадре, исчезла бы с бумаги, и монтажник решил бы, что там пусто.
+ * Здесь только кадр. Что на нём видно — решает фильтр листа
+ * (`exportRoomFilter`): метки, контур и название — этой комнаты, остальное
+ * остаётся общему листу.
  */
 export function exportRoomArea(project, scheme, roomId) {
   if (!project || !scheme || !roomId) return null;
@@ -113,8 +121,33 @@ export function exportRoomArea(project, scheme, roomId) {
   }
   if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return null;
   const box = { x: minX * width, y: minY * height, width: (maxX - minX) * width, height: (maxY - minY) * height };
-  const pad = Math.max(EXPORT_ROOM_PAD_MIN, Math.max(box.width, box.height) * EXPORT_ROOM_PAD);
+  const side = Math.max(width, height);
+  const pad = Math.min(
+    side * EXPORT_ROOM_PAD_MAX,
+    Math.max(side * EXPORT_ROOM_PAD_MIN, Math.min(box.width, box.height) * EXPORT_ROOM_PAD),
+  );
   return { x: box.x - pad, y: box.y - pad, width: box.width + pad * 2, height: box.height + pad * 2 };
+}
+
+/**
+ * Фильтр листа комнаты: к тому, что выбрано на экране, добавляется помещение.
+ *
+ * Лист про эту комнату — значит, на нём её метки, её контур и её название.
+ * Слова заказчика: «оставляй только её метки и обозначения комнаты только
+ * текущей». Раньше в кадре оставались и соседи: довод был, что розетка у общей
+ * стены помогает, — но лист печатают ради одной комнаты, и чужое на нём шум.
+ *
+ * Контуры соседей уходят вместе с их метками, а не только их названия: стены
+ * нарисованы на самом плане, а контур — наша разметка поверх него, с заливкой
+ * цветом комнаты. Полоса чужого цвета у обреза — это и есть «видно слишком
+ * много»; кому нужна вся картина, у того в том же архиве лежит общий лист.
+ *
+ * Тем же фильтром отсекается легенда: на листе комнаты она перечисляет типы,
+ * которые на нём есть, а не весь справочник схемы.
+ */
+export function exportRoomFilter(filter, roomId) {
+  if (!roomId) return filter || null;
+  return { ...(filter || {}), roomId };
 }
 
 // Имя помещения для заголовка листа схемы: комната названа там же, где и на
@@ -158,6 +191,9 @@ const EXPORT_FIT_PAD = 6;
 // оттащенную мышью на полплана, догонять белым полем незачем: о ней лучше
 // предупредить.
 const EXPORT_FIT_MAX = 0.25;
+// ...но не меньше доли плана: у листа комнаты четверть его стороны мала, а
+// подпись метки — величина плана, а не кадра.
+const EXPORT_FIT_PLAN = 0.05;
 
 function exportPlanSize(scheme) {
   return {
@@ -265,9 +301,13 @@ export function exportFitArea(project, scheme, options = {}) {
   const area = { ...base };
   for (const rect of rects) exportUnion(area, rect);
 
-  // Потолок роста: иначе одна оттащенная подпись раздувает лист вдвое.
-  const limitX = base.width * EXPORT_FIT_MAX;
-  const limitY = base.height * EXPORT_FIT_MAX;
+  // Потолок роста: иначе одна оттащенная подпись раздувает лист вдвое. У
+  // маленького кадра (лист комнаты) доля от его же стороны — это несколько
+  // точек, и подпись у стены срезалась бы ровно там, ради чего лист и печатают.
+  // Поэтому потолок подпирает доля плана: на общем листе она меньше четверти
+  // кадра и ничего не меняет, на листе чулана — спасает подпись.
+  const limitX = Math.max(base.width * EXPORT_FIT_MAX, plan.width * EXPORT_FIT_PLAN);
+  const limitY = Math.max(base.height * EXPORT_FIT_MAX, plan.height * EXPORT_FIT_PLAN);
   const left = Math.min(base.x - area.x, limitX);
   const top = Math.min(base.y - area.y, limitY);
   const right = Math.min(area.x + area.width - (base.x + base.width), limitX);
@@ -655,9 +695,9 @@ export function allSchemesPlan(project, options = {}) {
  * стола на соседних листах были бы разной ширины. Поэтому у маленькой комнаты
  * не мельче рисунок, а меньше лист.
  *
- * Метки в кадре не фильтруются по комнате (`exportRoomArea`): розетка соседней
- * комнаты, стоящая у той же стены, монтажнику помогает, а «чья она» видно по
- * её собственной подписи и по заголовку листа.
+ * На листе комнаты — только её метки, её контур и её название
+ * (`exportRoomFilter`): лист печатают ради одной комнаты, и чужое на нём шум.
+ * Вся картина целиком лежит рядом, общим листом.
  */
 export async function allSchemesZip(project, images, options = {}) {
   // Форма входа одна — Map «imageId → Blob», как у packProject: разбирать
@@ -683,7 +723,11 @@ export async function allSchemesZip(project, images, options = {}) {
     const { sheets } = exportRoomSheets(project, scheme, options.filter);
     for (let at = 0; at < sheets.length; at += 1) {
       const sheet = sheets[at];
-      const page = await schemePng(project, scheme, image, { ...options, area: sheet.area });
+      const page = await schemePng(project, scheme, image, {
+        ...options,
+        area: sheet.area,
+        filter: exportRoomFilter(options.filter, sheet.roomId),
+      });
       put(exportSheetName(scheme, index, sheet.name, at), page);
     }
   }
