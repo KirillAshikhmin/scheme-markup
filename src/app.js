@@ -5,6 +5,8 @@ import { strings, text } from "./strings.js";
 import { getSetting, setSetting } from "./store.js";
 import { findScheme } from "./model.js";
 import { registerServiceWorker } from "./pwa.js";
+// Значок кнопки раскладки рисует общий набор — своего рисунка у каркаса нет.
+import { uiIcon } from "./panels/ui.js";
 
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 export const PANEL_IDS = {
@@ -332,8 +334,16 @@ function syncLayout() {
     // Кнопка живёт только там, где экран сам выбрал просмотр: на телефоне —
     // дорога к полной версии, на десктопе её нет и быть не должно.
     toggle.hidden = layoutAutoMode() !== "mobile";
-    toggle.textContent = mode === "mobile" ? strings.mobile.full : strings.mobile.view;
-    toggle.title = mode === "mobile" ? strings.mobile.fullHint : strings.mobile.viewHint;
+    // Значком, а не словом: «Полная версия» занимала в шапке 127 точек — на
+    // восьмидюймовом планшете это разница между одной строкой и двумя. Карандаш
+    // и глаз — пара «править / смотреть»; слово при этом не потеряно, оно в
+    // подсказке и в `aria-label`, как у остальных кнопок-значков.
+    const toEdit = mode === "mobile";
+    const label = toEdit ? strings.mobile.full : strings.mobile.view;
+    toggle.className = "ui-btn ui-btn--icon";
+    toggle.replaceChildren(toEdit ? uiIcon("edit") : uiIcon("view"));
+    toggle.title = toEdit ? strings.mobile.fullHint : strings.mobile.viewHint;
+    toggle.setAttribute("aria-label", label);
   }
   if (appState.layout !== mode) {
     // Вход в просмотр снимает режим постановки: в суженном окне мышь никуда не
