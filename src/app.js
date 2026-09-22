@@ -4,6 +4,7 @@
 import { strings, text } from "./strings.js";
 import { getSetting, setSetting } from "./store.js";
 import { findScheme } from "./model.js";
+import { registerServiceWorker } from "./pwa.js";
 
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 export const PANEL_IDS = {
@@ -445,6 +446,9 @@ export function startApp() {
   syncCanvasClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
+  // Веб-версия заодно просит служебный скрипт: установленное приложение
+  // обязано открываться и без сети. Со страницы на диске это ничего не делает.
+  registerServiceWorker();
 }
 
 // Старт откладывается за границу текущего скрипта: в собранном файле панели

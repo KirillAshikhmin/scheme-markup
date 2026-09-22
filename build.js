@@ -1,13 +1,34 @@
 // Сборка одного статического файла: src/*.js + styles.css + index.html -> dist/index.html.
 // Модули склеиваются в порядке зависимостей, строки import/export срезаются,
 // внешних ссылок в результате быть не должно.
+//
+// Рядом со страницей кладутся файлы веб-версии — манифест установки, значок и
+// служебный скрипт. Страницы они не касаются: `dist/index.html` остаётся одним
+// самодостаточным файлом и с диска открывается без них (браузер просто не
+// предложит установку). Установка с сайта без отдельного файла манифеста
+// невозможна в принципе — это требование браузера, а не выбор сборки.
+import { createHash } from "node:crypto";
 import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { strings } from "./src/strings.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.join(root, "src");
+const webDir = path.join(root, "web");
 const distDir = path.join(root, "dist");
+
+// Единственная ссылка на соседний файл, разрешённая в собранной странице.
+export const MANIFEST_FILE = "manifest.webmanifest";
+// Значок приложения: тот же рисунок, что во вкладке, — он не рисуется заново,
+// а достаётся из `<link rel="icon">` и кладётся файлом. Одна картинка на все
+// размеры: SVG тянется без потерь, и разъехаться двум рисункам негде.
+const ICON_FILE = "icon.svg";
+// Тот же рисунок с полями — под маску Android (круг, капля, скруглённый
+// квадрат). Обрез гарантированно не задевает только центральные 80%, а у
+// значка вкладки рамка плана идёт почти от края.
+const ICON_MASKABLE_FILE = "icon-maskable.svg";
+const WORKER_FILE = "sw.js";
 // Точка входа склеивается последней: к моменту её выполнения определены все модули.
 const entryFile = path.join(srcDir, "app.js");
 
@@ -201,6 +222,93 @@ function assertOffline(html) {
     const found = html.match(pattern);
     if (found) throw new Error("В собранной странице осталась внешняя ссылка: " + found[0]);
   }
+  assertSingleFile(html);
+}
+
+// «Один файл» — правило строже, чем «нет внешних ссылок»: сосед по папке
+// внешней ссылкой не выглядит, но страница без него уже не полна. Поэтому
+// проверяются все адреса разом, и разрешены ровно три вида: рисунок в самом
+// адресе (`data:`), якорь внутри страницы и манифест установки — поимённо и
+// только относительной ссылкой. Ни второй файл, ни абсолютный путь к манифесту
+// мимо этой проверки не пройдут.
+export function assertSingleFile(html) {
+  for (const [, value] of html.matchAll(/(?:src|href)\s*=\s*"([^"]*)"/gi)) {
+    const target = value.trim();
+    if (target === "" || target.startsWith("data:") || target.startsWith("#")) continue;
+    if (target === MANIFEST_FILE) continue;
+    throw new Error(
+      "В собранной странице появилась ссылка на соседний файл: " + target +
+        ". Страница обязана открываться с диска одна; исключение одно — " + MANIFEST_FILE,
+    );
+  }
+  if (!html.includes('href="' + MANIFEST_FILE + '"')) {
+    throw new Error("Пропала ссылка на " + MANIFEST_FILE + ": с сайта страницу перестанут предлагать к установке");
+  }
+}
+
+// Значок приложения достаётся из самой страницы: рисунок вкладки и рисунок на
+// домашнем экране — один и тот же файл, и разойтись им негде.
+export function iconSvgFrom(html) {
+  const found = html.match(/<link[^>]+rel="icon"[^>]+href="data:image\/svg\+xml,([^"]+)"/i);
+  if (!found) throw new Error("В странице нет значка `data:image/svg+xml` — из чего делать значок приложения?");
+  return decodeURIComponent(found[1]);
+}
+
+// Тот же значок, отодвинутый от краёв: не новый рисунок, а старый на подложке.
+// Доля 0,6 выбрана с запасом от 0,8 — обрез маской не заденет ни рамку плана,
+// ни метку на нём.
+export function maskableSvgFrom(svg) {
+  const inner = svg.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+  return (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+    '<rect width="32" height="32" fill="#0d1117"/>' +
+    '<g transform="translate(6.4 6.4) scale(0.6)">' +
+    inner +
+    "</g></svg>"
+  );
+}
+
+// Манифест установки. Имя и описание — из общего словаря: под значком на
+// домашнем экране это такая же видимая строка, как заголовок окна.
+//
+// `start_url` и `scope` относительные: на GitHub Pages приложение живёт в
+// подпапке, и «/» указывал бы в корень чужого сайта. Ориентация не задана
+// нарочно — работают и стоймя, и лёжа.
+export function manifestJson() {
+  return JSON.stringify(
+    {
+      name: strings.app.title,
+      short_name: strings.app.installShortName,
+      description: strings.app.installDescription,
+      lang: "ru",
+      start_url: ".",
+      scope: ".",
+      // `id` не задан нарочно: он считается от происхождения сайта, а не от
+      // папки манифеста, и «.» указал бы в корень — на GitHub Pages туда же,
+      // куда и соседний проект. Без него браузер берёт за опознание сам
+      // `start_url`, то есть папку приложения.
+      display: "standalone",
+      background_color: "#0d1117",
+      theme_color: "#0d1117",
+      icons: [
+        // Один рисунок на все размеры: `any` означает «тянется куда угодно».
+        { src: ICON_FILE, sizes: "any", type: "image/svg+xml", purpose: "any" },
+        // Под маску Android — тот же рисунок, но с полями.
+        { src: ICON_MASKABLE_FILE, sizes: "any", type: "image/svg+xml", purpose: "maskable" },
+      ],
+    },
+    null,
+    2,
+  );
+}
+
+// Служебный скрипт лежит отдельным файлом (в `src/` его держать нельзя — туда
+// смотрит сборщик бандла). Версия кэша — отпечаток собранной страницы: новая
+// сборка даёт новое имя кэша, старое сносится при активации.
+async function workerScript(html) {
+  const source = await readFile(path.join(webDir, WORKER_FILE), "utf8");
+  const version = createHash("sha256").update(html).digest("hex").slice(0, 12);
+  return source.replaceAll("__CACHE_VERSION__", version);
 }
 
 export async function build() {
@@ -233,7 +341,23 @@ export async function build() {
   await mkdir(distDir, { recursive: true });
   const out = path.join(distDir, "index.html");
   await writeFile(out, html, "utf8");
-  return { file: out, bytes: Buffer.byteLength(html, "utf8"), modules: jsFiles.length };
+
+  // Файлы веб-версии. Страница о них не знает ничего, кроме имени манифеста, и
+  // с диска работает без них.
+  const extras = [
+    [MANIFEST_FILE, manifestJson() + "\n"],
+    [ICON_FILE, iconSvgFrom(html) + "\n"],
+    [ICON_MASKABLE_FILE, maskableSvgFrom(iconSvgFrom(html)) + "\n"],
+    [WORKER_FILE, await workerScript(html)],
+  ];
+  for (const [name, content] of extras) await writeFile(path.join(distDir, name), content, "utf8");
+
+  return {
+    file: out,
+    bytes: Buffer.byteLength(html, "utf8"),
+    modules: jsFiles.length,
+    extras: extras.map(([name]) => name),
+  };
 }
 
 const runDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
@@ -242,4 +366,5 @@ if (runDirectly) {
   console.log(
     "dist/index.html: " + (result.bytes / 1024).toFixed(1) + " КБ, модулей: " + result.modules,
   );
+  console.log("рядом для веб-версии: " + result.extras.join(", "));
 }
