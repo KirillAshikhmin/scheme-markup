@@ -45,6 +45,9 @@ import {
   MARK_DIMENSION_MAX,
   markDimensionValue,
   markDimensions,
+  MARK_NUMBER_MAX,
+  freeMarkNumber,
+  setMarkFreeNumber,
   markHasDimensions,
   setMarkDimensions,
   problemAccepted,
@@ -1045,6 +1048,100 @@ test("повтор номера разрешён, а счётчик типа н�
   lost.counters = {};
   const rescued = putPoint(lost, first.id, "Т");
   assert.equal(labelOf(rescued.project, rescued.mark.id), "Т22");
+});
+
+// ——— свободный номер ————————————————————————————————————————————————
+// Повтор номера — приём заказчика, но одну метку из группы иногда надо
+// отделить, и тогда нужен номер, которого ещё нет. Раньше его искали глазами
+// по таблице.
+test("свободный номер — следующий за наибольшим, а дыра в середине остаётся дырой", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 4);
+  const light = typeId(base, "Т");
+
+  // Т2 удалена — в ряду дыра; Т4 переписана на Т3 — повтор.
+  let project = deleteMark(filled, ids[1]).project;
+  project = setMarkNumber(project, ids[3], 3).project;
+  assert.deepEqual([ids[0], ids[2], ids[3]].map((id) => labelOf(project, id)), ["Т1", "Т3", "Т3"]);
+
+  // Свободный — Т5, а не Т2: номер, однажды названный вслух, не достаётся
+  // второй точке (ADR 003). Счётчик уже на четвёрке, и он выше занятых.
+  assert.equal(freeMarkNumber(project, light), 5);
+
+  const result = setMarkFreeNumber(project, ids[3]);
+  assert.equal(labelOf(result.project, ids[3]), "Т5");
+  assert.equal(result.mark.number, 5);
+  // Соседи по группе своего номера не меняют: отделяется одна метка.
+  assert.equal(labelOf(result.project, ids[2]), "Т3");
+  // Дыра на месте: смыкает её отдельная ручная команда, а не эта кнопка.
+  assert.equal(result.project.marks.some((mark) => mark.number === 2), false);
+  // Исходный объект не тронут — правка возвращается новым объектом.
+  assert.equal(labelOf(project, ids[3]), "Т3");
+
+  // Счётчик уехал за выданным номером: следующая новая метка не повторит его.
+  assert.equal(result.project.counters["Т"], 5);
+  const next = putPoint(result.project, first.id, "Т");
+  assert.equal(labelOf(next.project, next.mark.id), "Т6");
+});
+
+test("отделённая метка уходит из повтора, и он становится меньше на одну", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 3);
+  let project = setMarkNumber(filled, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project; // Т1 Т1 Т1
+  assert.deepEqual(repeatedNumbers(project).map((item) => [item.label, item.count]), [["Т1", 3]]);
+
+  const result = setMarkFreeNumber(project, ids[2]);
+  assert.equal(labelOf(result.project, ids[2]), "Т4");
+  // «×3» у оставшихся стало «×2»: повтор не пропал, он просто меньше.
+  assert.deepEqual(repeatedNumbers(result.project).map((item) => [item.label, item.count]), [["Т1", 2]]);
+
+  // Двойка расходится тем же способом — и повтора не остаётся вовсе.
+  const alone = setMarkFreeNumber(result.project, ids[1]);
+  assert.equal(labelOf(alone.project, ids[1]), "Т5");
+  assert.deepEqual(repeatedNumbers(alone.project), []);
+});
+
+// Принятое «так и задумано» держится ключом за тип и номер. Метка ушла на свой
+// номер, оставшиеся своего не меняли — значит ключ тот же, и ответ не должен
+// ни слететь, ни всплыть заново вопросом.
+test("отделение метки не трогает принятое предупреждение о повторе", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 3);
+  let project = setMarkNumber(filled, ids[1], 1).project;
+  project = setMarkNumber(project, ids[2], 1).project; // Т1 Т1 Т1
+
+  const repeat = validate(project).find((item) => item.code === "repeatedNumber");
+  assert.equal(repeat.key, "repeatedNumber:" + typeId(base, "Т") + "#1");
+  project = acceptProblem(project, repeat).project;
+  assert.equal(problemAccepted(project, repeat.key), true);
+
+  const result = setMarkFreeNumber(project, ids[2]);
+  const after = validate(result.project).filter((item) => item.code === "repeatedNumber");
+  // Повтор остался тем же повтором — тот же ключ, на одну метку меньше.
+  assert.deepEqual(after.map((item) => item.key), [repeat.key]);
+  assert.equal(problemAccepted(result.project, repeat.key), true);
+  // Список принятых не пополнился и не опустел: ответ про повтор ровно один и
+  // прежний, а принятое про справочник объекта (повтор знака, близкие цвета)
+  // отделение метки не касается вовсе.
+  assert.deepEqual(
+    acceptedProblems(result.project).filter((item) => item.code === "repeatedNumber").map((item) => item.key),
+    [repeat.key],
+  );
+  assert.equal(acceptedProblems(result.project).length, acceptedProblems(project).length);
+  // Отделённая метка нового вопроса не приносит: на Т4 она одна.
+  assert.equal(after.some((item) => item.message.includes("Т4")), false);
+});
+
+test("свободного номера в потолке нет — метка остаётся на своём", () => {
+  const { project: base, first } = projectWithSchemes();
+  const { project: filled, ids } = putSeries(base, first.id, "Т", 2);
+  const project = structuredClone(filled);
+  project.counters["Т"] = MARK_NUMBER_MAX;
+
+  assert.throws(() => freeMarkNumber(project, typeId(base, "Т")), (error) => error.code === "noFreeNumber");
+  assert.throws(() => setMarkFreeNumber(project, ids[0]), (error) => error.code === "noFreeNumber");
+  assert.equal(labelOf(project, ids[0]), "Т1");
 });
 
 // Повтор номера намеренный, а перечень связей от него разбухал: «Т3, Т3, Т3,

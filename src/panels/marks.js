@@ -28,6 +28,7 @@ import {
   schemesInOrder,
   setMarkControls,
   setMarkDimensions,
+  setMarkFreeNumber,
   setMarkNumber,
   styleOf,
   typesInOrder,
@@ -35,7 +36,7 @@ import {
 } from "../model.js";
 import { planToScreen, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
-import { uiButton, uiEl, uiModal, uiPrompt } from "./ui.js";
+import { uiButton, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
 import { filtersActive, filtersBox, filtersMarkRows } from "./filters.js";
 import { openMarkControlsPicker } from "./markControls.js";
 import { openEquipmentWindow } from "./equipment.js";
@@ -599,6 +600,27 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // «Дать свободный номер»: метка уходит с общего номера на свой.
+  //
+  // Кнопка не чинит ошибку — повтор номера у заказчика намеренный, — а делает
+  // то, что он делал руками: искал по таблице номер, которого ещё нет. Какой
+  // номер считается свободным, решает модель (`freeMarkNumber`); панель только
+  // называет получившееся обозначение, чтобы номер не пришлось искать глазами
+  // уже в своей же строке.
+  function giveFreeNumber(markId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    try {
+      const next = setMarkFreeNumber(state.project, markId);
+      if (next.project === state.project) return;
+      canvasCommit(state.project, next.project, strings.history.markFreeNumber);
+      notify(text("marks.freeNumberDone", { label: labelOf(next.project, markId) }), "info");
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   // Комната заводится по ходу: новое название добавляется в справочник объекта
   // и тем же шагом истории проставляется метке.
   function setRoom(markId, name) {
@@ -769,6 +791,16 @@ function mountMarksPanel(host, api) {
               title: strings.marks.number,
               attrs: { min: "1", max: String(MARK_NUMBER_MAX), step: "1" },
               on: { change: (event) => setNumber(mark.id, event.target.value) },
+            }),
+            // Свободный номер — кнопкой рядом с полем, а не в отдельном окне:
+            // отделяют метку, глядя на её же номер и на отметку повтора, и
+            // рука уже здесь. Кнопка узкая и `flex: none` — раскладку пары
+            // «код + номер» она не двигает, ужимается по-прежнему код.
+            uiIconButton("split", {
+              class: "ui-btn mark-row__free",
+              label: strings.marks.freeNumber,
+              title: strings.marks.freeNumberTitle,
+              on: { click: () => giveFreeNumber(mark.id) },
             }),
           ]),
           badge,
