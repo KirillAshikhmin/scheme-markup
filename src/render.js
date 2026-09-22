@@ -36,6 +36,11 @@ export const SHAPES = SHAPE_NAMES;
 // Доля радиуса, на которую внутренние вершины звезды ближе к центру.
 const STAR_INNER = 0.45;
 // Запас в пикселях вокруг метки, чтобы попадать по ней не идеально точно.
+// Запас попадания мыши. Пальцу его мало: подушечка накрывает вчетверо больше
+// экрана, чем остриё курсора, и ручка вершины под ней просто не видна. Поэтому
+// каждая функция попадания берёт необязательный `slack` — сколько пикселей
+// добавить сверх своей меры; сколько именно, решает холст по роду указателя
+// (`canvasHitSlack`). Ноль по умолчанию — мышь считает как считала.
 const HIT_SLACK_PX = 4;
 // Ширина буквы относительно кегля — оценка, одинаковая в тесте и на холсте.
 // Доля кегля на знак в оценке ширины подписи. Мерить по-настоящему тут нечем:
@@ -1616,13 +1621,13 @@ export function drawSchemeGuides(ctx, guides, scheme, view, box, options = {}) {
 }
 
 // Направляющая под точкой экрана: по ней холст решает, что взяли под руку.
-export function hitSchemeGuide(guides, point, scheme, view) {
+export function hitSchemeGuide(guides, point, scheme, view, extra = 0) {
   const state = renderView(view);
   let best = null;
   for (const guide of guides || []) {
     const at = guideScreen(guide, scheme, state);
     const gap = Math.abs((guide.axis === "h" ? point.y : point.x) - at);
-    if (gap <= GUIDE_HIT_PX && (!best || gap < best.gap)) best = { guide, gap };
+    if (gap <= GUIDE_HIT_PX + extra && (!best || gap < best.gap)) best = { guide, gap };
   }
   return best ? best.guide : null;
 }
@@ -2759,10 +2764,10 @@ export function labelTurnHandle(project, scheme, target, view, filter) {
   return turnHandleAt(labelBounds(box), view);
 }
 
-export function hitLabelTurn(project, scheme, target, point, view, filter) {
+export function hitLabelTurn(project, scheme, target, point, view, filter, extra = 0) {
   const handle = labelTurnHandle(project, scheme, target, view, filter);
   if (!handle) return false;
-  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX + extra;
 }
 
 // ——— переключатель поводка ————————————————————————————————————————————
@@ -2810,10 +2815,10 @@ export function labelLeaderHandle(project, scheme, target, view, filter) {
   return { x: turn.x + turn.r * 2.35, y: turn.y, r: turn.r };
 }
 
-export function hitLabelLeader(project, scheme, target, point, view, filter) {
+export function hitLabelLeader(project, scheme, target, point, view, filter, extra = 0) {
   const handle = labelLeaderHandle(project, scheme, target, view, filter);
   if (!handle) return false;
-  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX + extra;
 }
 
 // Значок — сам поводок: точка метки слева и пологая черта от неё к подписи.
@@ -3041,9 +3046,9 @@ export function samePathHandle(a, b) {
 }
 
 // Ручка пути под точкой экрана — по ней холст решает, что потащили.
-export function hitPathHandle(handles, point) {
+export function hitPathHandle(handles, point, extra = 0) {
   for (const handle of handles) {
-    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) return handle;
+    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2 + extra) return handle;
   }
   return null;
 }
@@ -3060,13 +3065,13 @@ export function outlineHandles(scheme, outline, view) {
  * иначе заливка комнаты перехватывала бы клики по пустому плану.
  * `selectedOutlineId` — у выделенного контура ловятся ещё и ручки вершин.
  */
-export function hitOutline(project, scheme, point, view, filter, selectedOutlineId) {
+export function hitOutline(project, scheme, point, view, filter, selectedOutlineId, extra = 0) {
   if (!project || !scheme) return null;
   const state = renderView(view);
   const outlines = visibleOutlines(project, scheme, filter);
   const selected = outlines.find((outline) => outline.id === selectedOutlineId);
   if (selected) {
-    const handle = hitPathHandle(outlineHandles(scheme, selected, state), point);
+    const handle = hitPathHandle(outlineHandles(scheme, selected, state), point, extra);
     if (handle) return { outlineId: selected.id, part: handle.kind, index: handle.index };
   }
   // Меньший контур лежит в порядке последним и ловится первым: у комнаты
@@ -3077,7 +3082,7 @@ export function hitOutline(project, scheme, point, view, filter, selectedOutline
     for (let i = 0; i < screen.length; i += 1) {
       const a = screen[i];
       const b = screen[(i + 1) % screen.length];
-      if (distanceToSegment(point, a, b) <= OUTLINE_HIT_PX) {
+      if (distanceToSegment(point, a, b) <= OUTLINE_HIT_PX + extra) {
         return { outlineId: outline.id, part: "edge", index: i };
       }
     }
@@ -3137,10 +3142,10 @@ export function outlineLabelTurn(project, scheme, outline, view) {
   return turnHandleAt(labelBounds(box), renderView(view));
 }
 
-export function hitOutlineLabelTurn(project, scheme, outline, point, view) {
+export function hitOutlineLabelTurn(project, scheme, outline, point, view, extra = 0) {
   const handle = outlineLabelTurn(project, scheme, outline, view);
   if (!handle) return false;
-  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX + extra;
 }
 
 // Подпись комнаты рисуется серединой на своей точке — так она стояла всегда,
@@ -3224,6 +3229,36 @@ function drawHandlePlus(ctx, handle, tint, alpha) {
   ctx.lineTo(handle.x + arm, handle.y);
   ctx.moveTo(handle.x, handle.y - arm);
   ctx.lineTo(handle.x, handle.y + arm);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Кольцо ожидания под пальцем: отклик на долгое нажатие.
+ *
+ * Палец не умеет «навести и нажать», поэтому перенос метки начинается с
+ * выдержки — а выдержку надо показать, иначе человек уберёт палец раньше
+ * времени и решит, что не сработало. Кольцо замыкается за то же время, что
+ * отведено на нажатие (`progress` 0…1), и рисуется **только там, где есть что
+ * взять**: обещать перенос над пустым планом нельзя.
+ *
+ * Рисуется поверх всего, включая линейку: это ответ руке, а не часть чертежа.
+ * В PNG, в печать и в лист «Схема» не попадает — `drawScheme` о нём не знает.
+ */
+export function drawPressRing(ctx, at, progress, color) {
+  if (!ctx || !at) return;
+  const radius = at.r || 22;
+  const part = Math.max(0, Math.min(1, Number(progress) || 0));
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(1, 4, 9, 0.16)";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = color || "#0969da";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * part);
   ctx.stroke();
   ctx.restore();
 }
@@ -3313,11 +3348,11 @@ function insideBox(point, box) {
 // `part` — `label` (подпись, её таскают отдельно), `mark` (точка или вершина
 // линии), `line` (сегмент ломаной). Сверху вниз: подписи, потом метки в обратном
 // порядке постановки — поздняя метка лежит выше ранней.
-export function hitTest(project, scheme, point, view, filter) {
+export function hitTest(project, scheme, point, view, filter, extra = 0) {
   if (!project || !scheme) return null;
   const state = renderView(view);
   const radius = markRadius(state);
-  const slack = radius + HIT_SLACK_PX;
+  const slack = radius + HIT_SLACK_PX + extra;
 
   const targets = labelTargets(project, scheme, filter);
   const layout = labelLayout(project, scheme, filter, state);
@@ -3351,7 +3386,7 @@ export function hitTest(project, scheme, point, view, filter) {
       for (let segment = 0; segment < last; segment += 1) {
         const a = screen[segment];
         const b = screen[(segment + 1) % screen.length];
-        if (distanceToSegment(point, a, b) <= Math.max(4, radius * 0.6)) {
+        if (distanceToSegment(point, a, b) <= Math.max(4, radius * 0.6) + extra) {
           return { markId: mark.id, part: "line", groupId: mark.groupId, index: segment };
         }
       }
@@ -3379,9 +3414,9 @@ function handlePositions(scheme, mark, view) {
   ];
 }
 
-export function hitHandle(scheme, mark, point, view) {
+export function hitHandle(scheme, mark, point, view, extra = 0) {
   for (const handle of handlePositions(scheme, mark, view)) {
-    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) return handle.side;
+    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2 + extra) return handle.side;
   }
   return null;
 }

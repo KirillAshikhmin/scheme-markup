@@ -75,6 +75,7 @@ import {
   samePathHandle,
   hitPathHandle,
   drawPathHandles,
+  drawPressRing,
   drawRuler,
   drawSchemeGuides,
   guideFraction,
@@ -381,7 +382,32 @@ const CANVAS_DRAG_SLOP = 3;
 // почти всегда оказывался бы панорамой, а не выбором метки. Десять точек —
 // столько же, сколько отдают на «тап» системные жесты.
 const CANVAS_TOUCH_SLOP = 10;
+// Запас попадания пальца сверх мышиного. Подушечка накрывает вчетверо больше
+// экрана, чем остриё курсора, а ручка вершины — квадратик в семь пикселей:
+// без запаса за неё не взяться, и человек решит, что ручки не нажимаются.
+const CANVAS_TOUCH_HIT_PX = 8;
+// Долгое нажатие: сколько держать палец на месте, чтобы взять то, что под ним.
+// Слова заказчика про перенос: «зажали иконку и потом потащили на нужное
+// место». Порог выбран между двумя бедами: короче — и обычная панорама, начатая
+// с метки, утащит метку вместо плана; длиннее — рука устаёт ждать. Те же
+// полсекунды берут на долгое нажатие и системные жесты.
+const CANVAS_PRESS_MS = 450;
+// Двойной тап: окно и разброс. Палец возвращается в ту же точку хуже мыши,
+// поэтому разброс щедрее мышиного, а окно взято по верхней границе привычных
+// (системные жесты считают двойным тапом 300–400 мс): замкнуть ломаную двумя
+// неторопливыми тапами человек должен с первого раза, а не с третьего.
+const CANVAS_DOUBLE_TAP_MS = 400;
+const CANVAS_DOUBLE_TAP_PX = 28;
+// Сколько после касания не верить мышиным событиям. Браузер досылает вслед за
+// быстрым двойным тапом «призрачный» `dblclick` — мышиное событие, которого
+// пальцем никто не делал. Палец свой двойной тап уже разобрал сам, и второй
+// разбор того же жеста снял бы вершину, которую первый только что поставил.
+const CANVAS_GHOST_MS = 700;
 
+let canvasPress = null; // ожидание долгого нажатия: {point, pick, at}
+let canvasPressTimer = 0;
+let canvasLastTap = null; // последний тап пальцем: {point, at} — для двойного
+let canvasTouchAt = 0; // когда палец последний раз касался холста
 let canvasHost = null;
 let canvasNode = null;
 let canvasCtx = null;
@@ -667,6 +693,18 @@ function canvasPaint() {
   }
   // Линейка — последней: она поверх всего, и с неё тянут направляющие.
   if (guidesOn) drawRuler(canvasCtx, scheme, view, box);
+
+  // Кольцо ожидания под пальцем — поверх и линейки: это ответ руке, а не часть
+  // чертежа. Цвет — у того, что сейчас возьмут: по нему видно, что именно
+  // держат, ещё до того, как оно поедет.
+  if (canvasPress) {
+    const held = canvasPress.pick && canvasPress.pick.markId ? findMark(project, canvasPress.pick.markId) : null;
+    const color = held ? styleOf(project, held.typeId).color : "#0969da";
+    drawPressRing(canvasCtx, { ...canvasPress.point, r: markRadius(view) + 14 }, canvasPressProgress(canvasNow() - canvasPress.at), color);
+    // Кадр за кадром, пока палец держат: кольцо обязано закрываться на глазах,
+    // а своего хода у него нет — рисует его тот же кадр холста.
+    canvasRedraw();
+  }
 }
 
 // Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа.
@@ -1857,14 +1895,156 @@ export function canvasZoomReset() {
 
 // ——— указатель ———————————————————————————————————————————————————————
 
-// Что под пальцем: метка или пустое место. Ответ снимается в начале жеста —
-// по отпусканию план уже мог уехать, и попадание считалось бы по новым
-// координатам.
-function canvasTapPick(state, point) {
+/**
+ * Что под пальцем: ручка подписи, ручка пути, ручка блока, метка, контур,
+ * направляющая — или пустое место.
+ *
+ * Ответ снимается **в начале жеста**: по отпусканию план уже мог уехать, и
+ * попадание считалось бы по новым координатам.
+ *
+ * Порядок тот же, что у мыши в `canvasPointerDown`, и это не совпадение: два
+ * порядка на один план означали бы, что палец и мышь целятся в разное. Запас
+ * попадания пальцу даётся больше (`canvasHitSlack`) — ручки мелкие.
+ */
+function canvasTouchPick(state, point) {
   const scheme = canvasScheme(state);
-  if (!scheme || !state.project) return { markId: null };
-  const hit = hitTest(state.project, scheme, point, canvasViewOf(state), state.filter);
-  return { markId: hit ? hit.markId : null };
+  const pick = { markId: null, part: null, groupId: null };
+  if (!scheme || !state.project) return pick;
+  const view = canvasViewOf(state);
+  const slack = canvasHitSlack(true);
+  const editable = canvasEditAllowed(state);
+  const single = editable && state.selectedMarkIds.length === 1 ? state.selectedMarkIds[0] : null;
+
+  if (single) {
+    const target = labelTargetOf(state.project, scheme, single, state.filter);
+    if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter, slack)) {
+      pick.labelTurn = true;
+      return pick;
+    }
+    if (target && hitLabelLeader(state.project, scheme, target, point, view, state.filter, slack)) {
+      pick.labelLeader = true;
+      return pick;
+    }
+  }
+
+  const edited = editable ? canvasEditedPath(state, scheme) : null;
+  if (edited) {
+    const handle = hitPathHandle(pathEditHandles(scheme, edited, view), point, slack);
+    if (handle) {
+      pick.pathHandle = handle;
+      pick.path = edited;
+      return pick;
+    }
+  }
+
+  const hit = hitTest(state.project, scheme, point, view, state.filter, slack);
+  // Ручка «+» важнее всего, кроме уже стоящей под ней метки, — та же оговорка,
+  // что у мыши: ручка висит ровно на шаге блока и накрывает соседа по блоку.
+  if (single) {
+    const selected = findMark(state.project, single);
+    if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
+      const side = hitHandle(scheme, selected, point, view, slack);
+      const neighbour = hit && hit.part === "mark" && hit.markId !== selected.id;
+      if (side && !neighbour) {
+        pick.blockSide = side;
+        return pick;
+      }
+    }
+  }
+
+  if (hit) {
+    pick.markId = hit.markId;
+    pick.part = hit.part;
+    pick.groupId = hit.groupId || null;
+    return pick;
+  }
+
+  const outlineHit = hitOutline(state.project, scheme, point, view, state.filter, state.selectedOutlineId || null, slack);
+  if (outlineHit) {
+    pick.outlineId = outlineHit.outlineId;
+    pick.outlinePart = outlineHit.part;
+    return pick;
+  }
+
+  if (editable && canvasGuidesShown(state) && state.mode === "select") {
+    const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), point, scheme, view, slack);
+    if (guide) {
+      pick.guideId = guide.id;
+      pick.guideAxis = guide.axis;
+    }
+  }
+  return pick;
+}
+
+// Запас попадания: у пальца больше, чем у мыши. Отдельной функцией — как и
+// мерка сдвига: разницу должно быть видно тесту, а не только глазу в коде.
+export function canvasHitSlack(touch) {
+  return touch ? CANVAS_TOUCH_HIT_PX : 0;
+}
+
+/**
+ * Что делает одиночный тап пальцем.
+ *
+ * Главный вопрос таска: в режиме «Добавление» человек тапает, **чтобы
+ * поставить метку**, а до сих пор тап только выделял. Разведено тем же
+ * правилом, по которому живёт мышь: тап делает то же, что сделал бы клик в
+ * этой точке. Клик в добавлении по пустому месту ставит метку, по стоящей
+ * метке — выделяет её (иначе до соседа в блоке было бы не дотянуться), в
+ * рисовании ломаной и контура — ставит вершину, а ручки (поворот подписи,
+ * поводок, «+», разбивка пути) срабатывают раньше всего остального. Второго
+ * порядка заводить нельзя: палец и мышь целятся в один план.
+ *
+ * В просмотре ответ один — `"select"`: правка там запрещена, и тап только
+ * выделяет (таск 106).
+ */
+export function canvasTapKind(state, pick = {}) {
+  if (!canvasEditAllowed(state)) return "select";
+  if (pick.labelTurn) return "labelTurn";
+  if (pick.labelLeader) return "labelLeader";
+  // Ручка вершины — для переноса, а не для тапа: тапом по ней мышь тоже ничего
+  // не делает. Ручки разбивки и продолжения, наоборот, ставят вершину нажатием.
+  if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "none" : "pathAdd";
+  if (pick.blockSide) return "block";
+  if (state.mode === "room" || canvasAddKind(state) === "line") return "vertex";
+  if (pick.markId) return "select";
+  if (canvasAddKind(state) === "point") return "place";
+  return "select";
+}
+
+/**
+ * Что берёт долгое нажатие. `null` — ничего: жест остаётся панорамой.
+ *
+ * Слова заказчика: «зажали иконку и потом потащили на нужное место». Это же
+ * решает главную беду касания: палец не умеет «навести и нажать», а обычное
+ * ведение обязано остаться панорамой, иначе план перестанет листаться.
+ *
+ * В просмотре не берётся ничего — там правка запрещена. Во время рисования
+ * ломаной и контура тоже: рука там ставит вершины, и хватать соседнюю метку
+ * посреди линии — не то, чего ждут.
+ */
+export function canvasGrabKind(state, pick = {}) {
+  if (!canvasEditAllowed(state)) return null;
+  if (state.mode === "room" || canvasAddKind(state) === "line") return null;
+  if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "pathVertex" : "pathAdd";
+  if (pick.markId) return pick.part === "label" ? "label" : "mark";
+  if (pick.outlineId && pick.outlinePart === "label") return "outlineLabel";
+  if (pick.guideId) return "guideMove";
+  return null;
+}
+
+// Двойной тап: два тапа подряд рядом друг с другом. Мышь узнаёт двойной клик
+// сама, пальцу браузер о нём не сообщает — считаем здесь.
+export function canvasDoubleTap(previous, now) {
+  if (!previous || !now) return false;
+  if (now.at - previous.at > CANVAS_DOUBLE_TAP_MS) return false;
+  return Math.hypot(now.point.x - previous.point.x, now.point.y - previous.point.y) <= CANVAS_DOUBLE_TAP_PX;
+}
+
+// Насколько замкнулось кольцо ожидания под пальцем: 0 — только нажали, 1 —
+// пора брать.
+export function canvasPressProgress(elapsed) {
+  if (!(elapsed > 0)) return 0;
+  return Math.min(1, elapsed / CANVAS_PRESS_MS);
 }
 
 // Мерка «это был тап или перенос»: у пальца своя. Отдельной функцией, чтобы
@@ -1908,12 +2088,180 @@ export function canvasTapAction(state, drag, options = {}) {
   if (drag.kind === "pan" && drag.tap) {
     const markId = drag.tap.markId;
     if (!markId) return busy ? clear : null;
+    // Повторный тап по выделенной метке снимает выделение — но только в
+    // просмотре, где это единственный способ закрыть её карточку. В полной
+    // версии выделение — рабочее состояние: за выделенной меткой стоят ручки
+    // «+», поворот подписи и поводок, и снимать его тапом по самой метке
+    // значило бы отбирать их из-под пальца. Мышь там ведёт себя так же: клик
+    // по выделенной метке её не снимает.
     const same = selected.length === 1 && selected[0] === markId;
+    if (same && canvasEditAllowed(state)) return null;
     return { selectedMarkIds: same ? [] : [markId], selectedOutlineId: null };
   }
   if (drag.kind === "pan" && drag.tapSelected && selected.length > 0) return { selectedMarkIds: [] };
   if (drag.kind === "empty" && busy) return clear;
   return null;
+}
+
+/**
+ * Ожидание долгого нажатия. Кольцо под пальцем показывает, сколько осталось
+ * держать; без него человек решит, что не сработало, и уберёт палец раньше.
+ *
+ * Кольцо показывается **только там, где есть что взять**: обещать перенос над
+ * пустым планом значило бы врать. Пока ждём, жест остаётся панорамой — сдвиг
+ * дальше пальцевой мерки её и подтверждает, а ожидание снимает.
+ */
+function canvasPressStart(point, pick) {
+  canvasPressCancel();
+  if (!canvasGrabKind(canvasState(), pick)) return;
+  canvasPress = { point, pick, at: canvasNow() };
+  const later = typeof setTimeout === "function" ? setTimeout : null;
+  if (later) canvasPressTimer = later(canvasPressFire, CANVAS_PRESS_MS);
+  canvasRedraw();
+}
+
+function canvasPressCancel() {
+  if (canvasPressTimer) clearTimeout(canvasPressTimer);
+  canvasPressTimer = 0;
+  const had = Boolean(canvasPress);
+  canvasPress = null;
+  if (had) canvasRedraw();
+}
+
+// Долгое нажатие дождалось своего: то, что под пальцем, берётся в руку, и
+// дальше ведение переносит его, а отпускание ставит.
+function canvasPressFire() {
+  canvasPressTimer = 0;
+  const press = canvasPress;
+  canvasPress = null;
+  if (!press || !canvasDrag || canvasDrag.moved || canvasDrag.grabbed) return;
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const drag = canvasGrabDrag(state, scheme, canvasViewOf(state), press.point, press.pick);
+  if (!drag) return;
+  canvasDrag = { ...drag, start: press.point, touch: true, grabbed: true, moved: false };
+  // Взяли — это должно быть видно и слышно рукой: метка выделяется, как при
+  // нажатии мышью, и устройство коротко отзывается.
+  if (drag.selectId) {
+    canvasApi.setState({ selectedMarkIds: [drag.selectId], selectedOutlineId: null });
+  }
+  canvasBuzz();
+  canvasRedraw();
+}
+
+// Короткий отклик устройства на «взял». Есть не везде (в Safari на iPad его
+// нет вовсе), поэтому он — добавка к кольцу и выделению, а не единственный
+// ответ.
+function canvasBuzz() {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
+  try {
+    navigator.vibrate(12);
+  } catch (error) {
+    /* устройство не умеет — и не надо */
+  }
+}
+
+/**
+ * Жест переноса под то, что взяли долгим нажатием. Собирается ровно так же,
+ * как его собирает мышь в `canvasPointerDown`: снимок «до» для отмены, якорная
+ * вершина у метки, путь и номер вершины у ручки.
+ */
+function canvasGrabDrag(state, scheme, view, point, pick) {
+  const kind = canvasGrabKind(state, pick);
+  if (!kind) return null;
+  if (kind === "pathVertex") {
+    return { kind, path: pick.path, index: pick.pathHandle.index, before: state.project, guides: [] };
+  }
+  if (kind === "pathAdd") {
+    return {
+      kind,
+      path: pick.path,
+      index: pick.pathHandle.index,
+      end: pick.pathHandle.end || null,
+      // Точка, где вершина встанет без ведения, — под самой ручкой.
+      point: screenToPlan({ x: pick.pathHandle.x, y: pick.pathHandle.y }, scheme, view),
+      before: state.project,
+      guides: [],
+    };
+  }
+  if (kind === "label") {
+    return { kind, markId: pick.markId, groupId: pick.groupId || null, before: state.project, selectId: pick.markId };
+  }
+  if (kind === "mark") {
+    const mark = findMark(state.project, pick.markId);
+    if (!mark) return null;
+    return {
+      kind,
+      markId: pick.markId,
+      groupId: pick.groupId || null,
+      anchor: canvasNearestVertex(mark, point, scheme, view),
+      before: state.project,
+      selectId: pick.markId,
+    };
+  }
+  if (kind === "outlineLabel") {
+    return { kind, outlineId: pick.outlineId, before: state.project };
+  }
+  if (kind === "guideMove") {
+    return { kind, guideId: pick.guideId, axis: pick.guideAxis, before: state.project, guides: [] };
+  }
+  return null;
+}
+
+/**
+ * Отпускание пальца, когда ничего не тащили: тап.
+ *
+ * Что именно делает тап, решает `canvasTapKind` — чистое правило, одно на
+ * палец и на мышь. Здесь только исполнение и двойной тап, которого браузер
+ * пальцу не присылает.
+ */
+function canvasTouchUp(state, drag, point, cancelled) {
+  canvasTouchAt = canvasNow();
+  // Жест отобрала система или им уже взяли метку — тапа не было.
+  if (cancelled || drag.grabbed) {
+    canvasRedraw();
+    return;
+  }
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const view = canvasViewOf(state);
+  const pick = drag.pick || {};
+  const now = { point, at: canvasNow() };
+  const twice = canvasDoubleTap(canvasLastTap, now);
+  // Третий тап подряд — снова первый, а не второй двойного: иначе три тапа по
+  // ручке вершины поставили бы вершину и тут же её убрали.
+  canvasLastTap = twice ? null : now;
+  const kind = canvasTapKind(state, pick);
+  const plan = screenToPlan(point, scheme, view);
+  if (kind === "labelTurn") canvasRotateLabel(state.selectedMarkIds[0]);
+  else if (kind === "labelLeader") canvasToggleLabelLeader(state.selectedMarkIds[0]);
+  else if (kind === "pathAdd") {
+    const handle = pick.pathHandle;
+    canvasPathAddCommit(
+      {
+        path: pick.path,
+        index: handle.index,
+        end: handle.end || null,
+        point: screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
+        before: state.project,
+      },
+      screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
+    );
+  } else if (kind === "block") canvasBlockPoint(state.selectedMarkIds[0], pick.blockSide);
+  else if (kind === "vertex") {
+    if (state.mode === "room") canvasOutlineClick(plan, point, false);
+    else canvasLineClick(plan, point, false);
+  } else if (kind === "place") canvasPlacePoint(plan);
+  else if (kind === "select") {
+    const patch = canvasTapAction(state, drag, {});
+    if (patch) canvasApi.setState(patch);
+  }
+  // Второй тап того же двойного — то же, что второй клик мыши: замкнуть
+  // ломаную, включить правку пути, вернуть подпись на место. Первый тап при
+  // этом своё уже сделал — ровно как первый клик двойного у мыши.
+  if (twice) canvasDoubleAt(point, canvasHitSlack(true));
+  canvasRedraw();
 }
 
 function canvasStartPan(point) {
@@ -1932,11 +2280,17 @@ function canvasPointerDown(event) {
   }
   canvasPointers.set(event.pointerId, canvasPointOf(event));
 
-  // Планшет: разметка остаётся десктопной, пальцы только смотрят. Но
-  // «смотреть» — это ещё и выделить метку, чтобы прочитать её поля: до сих пор
-  // палец умел только возить план, и в просмотре метку нельзя было выбрать
-  // вовсе. Жест начинается панорамой, а тап это был или перенос — решает
-  // отпускание: сдвинули план — панорама, не сдвинули — выделение.
+  // Палец. Жест **всегда начинается панорамой** — иначе план перестанет
+  // листаться, — а чем он был на самом деле, решают время и сдвиг:
+  //
+  // - повели сразу → панорама (или новая направляющая, если начали с линейки);
+  // - подержали на месте `CANVAS_PRESS_MS` → взяли то, что под пальцем, и
+  //   дальше ведение переносит его («зажали иконку и потом потащили»);
+  // - отпустили, не сдвинув → тап, и что он делает, решает `canvasTapKind`.
+  //
+  // Раньше здесь всё кончалось панорамой: в просмотре палец не умел даже
+  // выделить метку (таск 106), а в полной версии — ни поставить, ни перенести
+  // (этот таск).
   if (event.pointerType === "touch") {
     if (canvasPointers.size === 2) {
       const [a, b] = [...canvasPointers.values()];
@@ -1944,16 +2298,38 @@ function canvasPointerDown(event) {
         distance: Math.hypot(a.x - b.x, a.y - b.y),
         center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
       };
+      canvasPressCancel();
       canvasDrag = null;
       return;
     }
     const at = canvasPointOf(event);
+    canvasTouchAt = canvasNow();
+    const touchState = canvasState();
+    const touchScheme = canvasScheme(touchState);
+    // Линейка отдаёт палец направляющей — ровно как мыши: полоса узкая и
+    // заведена для того, чтобы с неё тянули.
+    if (canvasEditAllowed(touchState) && canvasGuidesShown(touchState) && rulerAxis(at)) {
+      const axis = rulerAxis(at);
+      canvasDrag = {
+        kind: "guideNew",
+        axis,
+        at: canvasGuideAt(axis, at, touchScheme, canvasViewOf(touchState)),
+        start: at,
+        moved: false,
+        touch: true,
+      };
+      return;
+    }
     canvasStartPan(at);
     if (canvasDrag) {
       // Жест помечается пальцевым здесь: по этой отметке `canvasPointerMove`
       // берёт пальцевую мерку сдвига, а не мышиную.
       canvasDrag.touch = true;
-      canvasDrag.tap = canvasTapPick(canvasState(), at);
+      const pick = canvasTouchPick(touchState, at);
+      canvasDrag.pick = pick;
+      // `tap` держит выбор метки: его читает `canvasTapAction` (таск 106).
+      canvasDrag.tap = { markId: pick.markId };
+      canvasPressStart(at, pick);
     }
     return;
   }
@@ -2307,7 +2683,12 @@ function canvasPointerMove(event) {
   if (canvasHoverUpdate(state, point)) canvasRedraw();
   if (!canvasDrag) return;
   const shift = Math.hypot(point.x - canvasDrag.start.x, point.y - canvasDrag.start.y);
-  if (shift > canvasDragSlop(canvasDrag)) canvasDrag.moved = true;
+  if (shift > canvasDragSlop(canvasDrag)) {
+    canvasDrag.moved = true;
+    // Повели — значит, это панорама или уже начатый перенос: ждать долгого
+    // нажатия больше нечего, и кольцо под пальцем гаснет.
+    canvasPressCancel();
+  }
   if (!canvasDrag.moved) return;
 
   if (canvasDrag.kind === "guideNew" || canvasDrag.kind === "guideMove") {
@@ -2343,6 +2724,7 @@ function canvasPointerMove(event) {
 }
 
 function canvasPointerUp(event) {
+  canvasPressCancel();
   canvasPointers.delete(event.pointerId);
   if (canvasPointers.size < 2) canvasPinch = null;
   const drag = canvasDrag;
@@ -2410,15 +2792,20 @@ function canvasPointerUp(event) {
   // выхода `pointerType === "touch"`, и на планшете метка не выделялась вовсе.
   // Выделение — поле сеанса, объект оно не трогает; правка идёт дверью
   // `canvasCommit`, и та в просмотре закрыта.
+  // Палец разбирается своей дверью: тап делает то же, что сделал бы клик, а
+  // взятое долгим нажатием уже отпущено выше.
+  if (drag.touch) {
+    canvasTouchUp(state, drag, point, event.type === "pointercancel");
+    return;
+  }
+
   const tap = canvasTapAction(state, drag, { cancelled: event.type === "pointercancel" });
   if (tap) {
     canvasApi.setState(tap);
     return;
   }
 
-  // Ниже — только мышь: пальцем не ставят метки, не рисуют ломаные и не
-  // дотягивают ручки. Всё, что осталось, — жесты правки, и палец до них не
-  // доходит.
+  // Ниже — только мышь: у пальца свой разбор выше.
   if (event.pointerType === "touch") return;
   // Нажатая ручка своё дело уже сделала — но рисовались ручки при `canvasDrag`
   // пустом, и без этого кадра они оставались бы невидимыми до следующего хода
@@ -2445,20 +2832,41 @@ function canvasPointerUp(event) {
 }
 
 function canvasDoubleClick(event) {
+  // Призрачный `dblclick` вслед за двойным тапом — не жест, а эхо: палец свой
+  // двойной уже разобрал сам (`canvasTouchUp`), и разбирать его второй раз
+  // значит сделать два дела вместо одного.
+  if (canvasNow() - canvasTouchAt < CANVAS_GHOST_MS) return;
+  // Мышь гасит браузерное событие только тогда, когда жест и правда разобран:
+  // двойной клик в стороне — это просто два клика, и мешать браузеру незачем.
+  if (canvasDoubleAt(canvasPointOf(event), canvasHitSlack(false))) event.preventDefault();
+}
+
+/**
+ * Двойной жест по плану: замкнуть ломаную, включить правку пути, поставить или
+ * убрать вершину, снять направляющую, вернуть подпись на место.
+ *
+ * Одна рука на мышь и на палец. Пальцу `dblclick` браузер не присылает вовсе —
+ * проверено живьём: двойной тап по холсту с `touch-action: none` даёт два
+ * `click` и ни одного `dblclick`. Поэтому двойной тап холст считает сам
+ * (`canvasDoubleTap`) и зовёт эту же функцию: второй раз описать те же правила
+ * значило бы их развести.
+ *
+ * `slack` — запас попадания: у пальца он больше (`canvasHitSlack`).
+ * Возвращает `true`, если жест разобран.
+ */
+function canvasDoubleAt(at, slack = 0) {
   const state = canvasState();
-  if (!canvasEditAllowed(state)) return;
+  if (!canvasEditAllowed(state)) return false;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   // Двойной клик по линейке ставит направляющую в точке клика — это второй
   // способ к перетаскиванию, и просил его пользователь: «двойной клик по
   // линейке должен создавать линию».
   if (canvasGuidesShown(state)) {
-    const at = canvasPointOf(event);
     const axis = rulerAxis(at);
     if (axis) {
-      event.preventDefault();
       canvasGuideAdd(axis, canvasGuideAt(axis, at, scheme, view));
-      return;
+      return true;
     }
   }
   // Правка пути — один жест на ломаную метки и на контур помещения. Двойной
@@ -2467,84 +2875,74 @@ function canvasDoubleClick(event) {
   // выделении позволь редактировать её, например двойным кликом на линию» и
   // «двойной клик по контуру комнаты — тоже давай править его».
   if (state.mode === "select") {
-    const at = canvasPointOf(event);
     const plan = screenToPlan(at, scheme, view);
     const edited = canvasEditedPath(state, scheme);
     if (edited) {
-      const handle = hitPathHandle(pathVertexHandles(scheme, edited.points, view), at);
+      const handle = hitPathHandle(pathVertexHandles(scheme, edited.points, view), at, slack);
       if (handle) {
-        event.preventDefault();
         // Вершина, которую первый клик этого же двойного только что поставил
         // ручкой, не убирается вторым: жест «ткнуть в ручку дважды» иначе
         // ставил бы вершину и тут же её снимал, оставляя два шага истории и
         // ничего на плане.
         if (!canvasVertexIsFresh(edited.id, handle.index)) canvasPathVertexRemove(edited, handle.index);
-        return;
+        return true;
       }
     }
     // Метка важнее контура — тот же порядок, что у одиночного клика.
-    const hit = hitTest(state.project, scheme, at, view, state.filter);
+    const hit = hitTest(state.project, scheme, at, view, state.filter, slack);
     if (hit && edited && edited.kind === "mark" && hit.markId === edited.id && hit.part === "line") {
-      event.preventDefault();
       canvasPathVertexInsert(edited, hit.index, plan);
-      return;
+      return true;
     }
     if (hit && hit.part !== "label") {
       const mark = findMark(state.project, hit.markId);
       if (mark && mark.kind === "line" && (!edited || hit.markId !== edited.id)) {
-        event.preventDefault();
         canvasEditPath("mark", mark.id);
-        return;
+        return true;
       }
     }
     if (!hit && canvasGuidesShown(state)) {
-      const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), at, scheme, view);
+      const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), at, scheme, view, slack);
       if (guide) {
-        event.preventDefault();
         canvasGuideRemove(guide.id);
-        return;
+        return true;
       }
     }
     if (!hit) {
-      const outlineHit = hitOutline(state.project, scheme, at, view, state.filter, null);
+      const outlineHit = hitOutline(state.project, scheme, at, view, state.filter, null, slack);
       if (outlineHit && outlineHit.part === "edge") {
-        event.preventDefault();
         if (edited && edited.kind === "outline" && edited.id === outlineHit.outlineId) {
           canvasPathVertexInsert(edited, outlineHit.index, plan);
         } else {
           canvasEditPath("outline", outlineHit.outlineId);
         }
-        return;
+        return true;
       }
     }
   }
   // Двойной клик по подписи возвращает её на место — там же, где её и таскают:
   // в рисовании линии и контура двойной клик занят завершением ломаной.
   const drawing = state.mode === "room" || canvasAddKind(state) === "line";
-  if (!drawing && canvasResetLabel(canvasPointOf(event))) {
-    event.preventDefault();
-    return;
-  }
-  if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return;
-  const point = canvasPointOf(event);
-  const threshold = markRadius(view) + 6;
+  if (!drawing && canvasResetLabel(at)) return true;
+  if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return false;
+  const threshold = markRadius(view) + 6 + slack;
   const points = canvasDraft.points;
   const first = planToScreen(points[0], scheme, view);
   const last = planToScreen(points[points.length - 1], scheme, view);
-  const onFirst = Math.hypot(point.x - first.x, point.y - first.y) <= threshold;
-  const onLast = Math.hypot(point.x - last.x, point.y - last.y) <= threshold;
+  const onFirst = Math.hypot(at.x - first.x, at.y - first.y) <= threshold;
+  const onLast = Math.hypot(at.x - last.x, at.y - last.y) <= threshold;
   // Двойной клик в стороне — это просто две вершины подряд: рисование
   // продолжается, ничего не теряется и не замыкается.
-  if (!onFirst && !onLast) return;
-  event.preventDefault();
+  if (!onFirst && !onLast) return false;
   // Контур помещения замкнут всегда: комната с открытой стенкой — не комната.
   if (state.mode === "room") {
     canvasOutlineFinish();
-    return;
+    return true;
   }
   // По первой точке — замкнутый контур (лента по периметру комнаты),
   // по последней — открытая линия, ровно как в брифе.
   canvasLineFinish(onFirst && !onLast && points.length >= 3);
+  return true;
 }
 
 function canvasWheel(event) {
