@@ -376,6 +376,11 @@ const CANVAS_ZOOM_MAX = 24;
 const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
+// То же для пальца, и мера у него своя. Палец не стоит на месте: тап по метке
+// на планшете уезжает на несколько точек, и по мышиной мерке в три точки он
+// почти всегда оказывался бы панорамой, а не выбором метки. Десять точек —
+// столько же, сколько отдают на «тап» системные жесты.
+const CANVAS_TOUCH_SLOP = 10;
 
 let canvasHost = null;
 let canvasNode = null;
@@ -1862,6 +1867,55 @@ function canvasTapPick(state, point) {
   return { markId: hit ? hit.markId : null };
 }
 
+// Мерка «это был тап или перенос»: у пальца своя. Отдельной функцией, чтобы
+// разница была видна тесту: мышиные три точки пальцу не годятся.
+export function canvasDragSlop(drag) {
+  return drag && drag.touch ? CANVAS_TOUCH_SLOP : CANVAS_DRAG_SLOP;
+}
+
+/**
+ * Что делает отпускание, когда ничего не тащили: выделить метку, снять
+ * выделение или ничего.
+ *
+ * Вынесено из обработчика и проверяется без браузера не ради красоты. Правило
+ * жило в `canvasPointerUp` ветками, и одна из них — тап пальцем — стояла
+ * **ниже** выхода `if (event.pointerType === "touch") return;`: на планшете до
+ * неё не доходило вовсе, и метка не выделялась ни разу (D19). Ветку не видно
+ * ни одним тестом, потому что DOM-обработчики здесь не тестируются, — а
+ * функция видна.
+ *
+ * Возвращает патч состояния сеанса или `null` («ничего не делать»). В патче
+ * могут быть только поля выделения: выделение — это поле сеанса, как открытая
+ * схема или масштаб, и объекта оно не касается. Правка по-прежнему идёт одной
+ * дверью `canvasCommit`, и та в просмотре закрыта.
+ *
+ * - `pan` с `tap` — тап пальцем: пустое место снимает выделение, своя метка
+ *   снимает (карточка закрывается), чужая выделяется;
+ * - `pan` с `tapSelected` — то же мышью в просмотре: повторный клик по
+ *   выделенной метке закрывает карточку;
+ * - `empty` — клик мышью по пустому месту;
+ * - всё остальное (перенос метки, вершина, черновик, направляющая) — `null`:
+ *   этим распоряжается обработчик, и хватать чужой жест эта функция не должна.
+ */
+export function canvasTapAction(state, drag, options = {}) {
+  if (!state || !drag || drag.moved) return null;
+  // Жест отобрал браузер или система (`pointercancel`) — пальца на экране уже
+  // нет, и считать это тапом нельзя.
+  if (options.cancelled) return null;
+  const selected = state.selectedMarkIds || [];
+  const busy = selected.length > 0 || Boolean(state.selectedOutlineId) || Boolean(state.editPathId);
+  const clear = { selectedMarkIds: [], selectedOutlineId: null, editPathId: null };
+  if (drag.kind === "pan" && drag.tap) {
+    const markId = drag.tap.markId;
+    if (!markId) return busy ? clear : null;
+    const same = selected.length === 1 && selected[0] === markId;
+    return { selectedMarkIds: same ? [] : [markId], selectedOutlineId: null };
+  }
+  if (drag.kind === "pan" && drag.tapSelected && selected.length > 0) return { selectedMarkIds: [] };
+  if (drag.kind === "empty" && busy) return clear;
+  return null;
+}
+
 function canvasStartPan(point) {
   const state = canvasState();
   canvasDrag = { kind: "pan", start: point, view: { ...state.view }, moved: false };
@@ -1895,7 +1949,12 @@ function canvasPointerDown(event) {
     }
     const at = canvasPointOf(event);
     canvasStartPan(at);
-    if (canvasDrag) canvasDrag.tap = canvasTapPick(canvasState(), at);
+    if (canvasDrag) {
+      // Жест помечается пальцевым здесь: по этой отметке `canvasPointerMove`
+      // берёт пальцевую мерку сдвига, а не мышиную.
+      canvasDrag.touch = true;
+      canvasDrag.tap = canvasTapPick(canvasState(), at);
+    }
     return;
   }
   if (event.button === 2) return;
@@ -2248,7 +2307,7 @@ function canvasPointerMove(event) {
   if (canvasHoverUpdate(state, point)) canvasRedraw();
   if (!canvasDrag) return;
   const shift = Math.hypot(point.x - canvasDrag.start.x, point.y - canvasDrag.start.y);
-  if (shift > CANVAS_DRAG_SLOP) canvasDrag.moved = true;
+  if (shift > canvasDragSlop(canvasDrag)) canvasDrag.moved = true;
   if (!canvasDrag.moved) return;
 
   if (canvasDrag.kind === "guideNew" || canvasDrag.kind === "guideMove") {
@@ -2345,6 +2404,21 @@ function canvasPointerUp(event) {
   }
   canvasPreview = null;
 
+  // Выбор метки — первым делом и до пальцевого выхода ниже. Правило целиком в
+  // `canvasTapAction`: тап пальцем по метке, повторный клик по выделенной в
+  // просмотре и клик по пустому месту. Оно и есть D19: ветка тапа стояла ниже
+  // выхода `pointerType === "touch"`, и на планшете метка не выделялась вовсе.
+  // Выделение — поле сеанса, объект оно не трогает; правка идёт дверью
+  // `canvasCommit`, и та в просмотре закрыта.
+  const tap = canvasTapAction(state, drag, { cancelled: event.type === "pointercancel" });
+  if (tap) {
+    canvasApi.setState(tap);
+    return;
+  }
+
+  // Ниже — только мышь: пальцем не ставят метки, не рисуют ломаные и не
+  // дотягивают ручки. Всё, что осталось, — жесты правки, и палец до них не
+  // доходит.
   if (event.pointerType === "touch") return;
   // Нажатая ручка своё дело уже сделала — но рисовались ручки при `canvasDrag`
   // пустом, и без этого кадра они оставались бы невидимыми до следующего хода
@@ -2367,32 +2441,6 @@ function canvasPointerUp(event) {
   if (drag.kind === "place") {
     canvasPlacePoint(plan);
     return;
-  }
-  // Тап пальцем: план не уехал — значит, выбирали метку. Повторный тап по той
-  // же метке снимает выделение и закрывает карточку, тап по пустому месту —
-  // тоже. Сдвинули план — это была панорама, и выделение остаётся как было.
-  if (drag.kind === "pan" && drag.tap) {
-    const selected = state.selectedMarkIds || [];
-    const markId = drag.tap.markId;
-    if (!markId) {
-      if (selected.length > 0 || state.selectedOutlineId || state.editPathId) {
-        canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null, editPathId: null });
-      }
-      return;
-    }
-    const same = selected.length === 1 && selected[0] === markId;
-    canvasApi.setState({ selectedMarkIds: same ? [] : [markId], selectedOutlineId: null });
-    return;
-  }
-  // То же мышью: повторный клик по выделенной метке в просмотре закрывает
-  // карточку. В полной версии клик по выделенной метке ничего не меняет —
-  // там за ней тянутся ручки, и снимать выделение под рукой нельзя.
-  if (drag.kind === "pan" && drag.tapSelected && state.selectedMarkIds.length > 0) {
-    canvasApi.setState({ selectedMarkIds: [] });
-    return;
-  }
-  if (drag.kind === "empty" && (state.selectedMarkIds.length > 0 || state.selectedOutlineId || state.editPathId)) {
-    canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null, editPathId: null });
   }
 }
 
