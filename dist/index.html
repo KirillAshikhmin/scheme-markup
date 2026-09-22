@@ -264,6 +264,75 @@
   min-height: 32px;
 }
 
+/* ——— карточка на компьютере ————————————————————————————————————————
+   Те же поля, но в рядах, а не колонкой: в правой панели они уже показаны, и
+   вторая копия обязана занимать не пол-плана, а полосу внизу.
+
+   Главное здесь — `pointer-events: none`: на компьютере под карточкой рисуют,
+   и отнять у плана нижнюю полосу она не имеет права. Клик проходит насквозь,
+   ловят его только кнопки самой карточки. Цена названа вслух: текст из
+   карточки мышью не выделить — копировать «В оригинале» по-прежнему из поля в
+   панели, где это поле и правится. */
+.mark-card--compact {
+  width: min(760px, calc(100% - 24px));
+  max-height: 22vh;
+  pointer-events: none;
+}
+
+.mark-card--compact .ui-btn,
+.mark-card--compact .mark-card__mini {
+  pointer-events: auto;
+}
+
+.mark-card--compact .mark-card__body {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+}
+
+/* Пара «название — значение» в ряду: колонка в колонку их строить незачем —
+   рядов в строке несколько, и сетка растащила бы их по всей ширине. */
+.mark-card--compact .mark-card__row {
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+}
+
+/* Свёрнутая карточка — ярлычок с обозначением метки на месте карточки.
+   Пустоты вместо неё не остаётся: по ярлычку видно, что карточка свёрнута, а
+   не пропала, и куда нажать, чтобы вернуть. */
+.mark-card--mini {
+  width: auto;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.mark-card__mini {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mark-card__mini:hover,
+.mark-card__mini:focus-visible {
+  color: var(--accent);
+}
+
+/* Галочка ярлычка смотрит вверх — «развернуть»; у кнопки сворачивания вниз,
+   как у свёрнутого раздела панели. */
+.mark-card__mini .ui-icon {
+  --ui-icon: 14px;
+  transform: rotate(180deg);
+}
+
 .tools {
   display: flex;
   flex-direction: column;
@@ -1737,6 +1806,15 @@
      растягивать строку метки. */
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+/* Связка — вывод, а не запись: отделена от прямых связей волосяной чертой,
+   чтобы не читаться продолжением строки «Управляется». Числом имён её держит
+   панель (`MARKS_LINKED_SHOWN`), поэтому ни прокрутки, ни своей высоты у неё
+   нет — длинный перечень переносится по словам, как у соседней строки. */
+.mark-row__linked {
+  padding-top: 3px;
+  border-top: 1px dashed var(--panel-line);
 }
 
 .controls-pick {
@@ -3976,9 +4054,14 @@ const strings = {
     viewHint: "Вернуться к просмотру: план во весь экран",
     viewOnly: "Режим просмотра — правка на компьютере",
   },
-  // Карточка выделенной метки в просмотре: читать, не править.
+  // Карточка выделенной метки: читать, не править. В просмотре она
+  // единственный способ прочитать метку и закрывается снятием выделения; на
+  // компьютере то же самое есть в правой колонке, поэтому там карточка
+  // сворачивается в ярлычок и разворачивается обратно.
   markCard: {
     close: "Закрыть карточку метки",
+    collapse: "Свернуть карточку метки — останется ярлычок внизу плана",
+    expand: "Развернуть карточку метки",
     empty: "У метки записано только обозначение: ни помещения, ни расположения, ни связей",
   },
   search: {
@@ -4759,6 +4842,26 @@ const strings = {
     // парами «название — значение», и «Управляется: Т1» в колонке значений
     // повторяло бы название само себе.
     controlledByShort: "Чем управляется",
+    // Связная группа метки — то, что на плане поднимается при её выделении.
+    //
+    // Слова заказчика: «например когда 2 выключателя управляют одним светом,
+    // при этом напрямую выключатели не связаны. Но вот эта связь же известна и
+    // надо именно это указывать». Поэтому поле названо не «связями» — связями
+    // в этой панели уже зовутся прямые «Чем управляет» и «Чем управляется», —
+    // а связкой: это круг меток, в который метка входит, а не отношение между
+    // двумя. Слова «цепь», «группа» и «блок» заняты соседними вещами (цепь
+    // управляющих на плане, группа одного номера, блок точек), и брать их
+    // третий раз нельзя.
+    linked: "В одной связке: {labels}",
+    // То же поле названием — для карточки метки, где строки устроены парами
+    // «название — значение».
+    linkedShort: "В одной связке",
+    // Хвост длинного перечня. Считается метками, а не именами: имена свёрнуты
+    // «Т3 ×2», и «ещё 21» про имена соврало бы о числе меток.
+    linkedMore: "и ещё {count}",
+    linkedTitle:
+      "Метки, связанные с этой не напрямую: через общую нагрузку, общую цепь или общий номер. Два выключателя одного светильника связаны через него.",
+    linkedAll: "Вся связка: {labels}",
     // Повтор в перечне связей: «Т3 ×3» — одно имя и число меток под ним.
     // Знак тот же, что у отметки повтора номера в строке списка
     // (`repeatBadge`): одна привычка на обе — «×N» значит «столько же меток».
@@ -12682,6 +12785,11 @@ const SHAPES = SHAPE_NAMES;
 // Доля радиуса, на которую внутренние вершины звезды ближе к центру.
 const STAR_INNER = 0.45;
 // Запас в пикселях вокруг метки, чтобы попадать по ней не идеально точно.
+// Запас попадания мыши. Пальцу его мало: подушечка накрывает вчетверо больше
+// экрана, чем остриё курсора, и ручка вершины под ней просто не видна. Поэтому
+// каждая функция попадания берёт необязательный `slack` — сколько пикселей
+// добавить сверх своей меры; сколько именно, решает холст по роду указателя
+// (`canvasHitSlack`). Ноль по умолчанию — мышь считает как считала.
 const HIT_SLACK_PX = 4;
 // Ширина буквы относительно кегля — оценка, одинаковая в тесте и на холсте.
 // Доля кегля на знак в оценке ширины подписи. Мерить по-настоящему тут нечем:
@@ -14259,13 +14367,13 @@ function drawSchemeGuides(ctx, guides, scheme, view, box, options = {}) {
 }
 
 // Направляющая под точкой экрана: по ней холст решает, что взяли под руку.
-function hitSchemeGuide(guides, point, scheme, view) {
+function hitSchemeGuide(guides, point, scheme, view, extra = 0) {
   const state = renderView(view);
   let best = null;
   for (const guide of guides || []) {
     const at = guideScreen(guide, scheme, state);
     const gap = Math.abs((guide.axis === "h" ? point.y : point.x) - at);
-    if (gap <= GUIDE_HIT_PX && (!best || gap < best.gap)) best = { guide, gap };
+    if (gap <= GUIDE_HIT_PX + extra && (!best || gap < best.gap)) best = { guide, gap };
   }
   return best ? best.guide : null;
 }
@@ -15398,10 +15506,10 @@ function labelTurnHandle(project, scheme, target, view, filter) {
   if (!box.text) return null;
   return turnHandleAt(labelBounds(box), view);
 }
-function hitLabelTurn(project, scheme, target, point, view, filter) {
+function hitLabelTurn(project, scheme, target, point, view, filter, extra = 0) {
   const handle = labelTurnHandle(project, scheme, target, view, filter);
   if (!handle) return false;
-  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX + extra;
 }
 
 // ——— переключатель поводка ————————————————————————————————————————————
@@ -15448,10 +15556,10 @@ function labelLeaderHandle(project, scheme, target, view, filter) {
   if (!turn) return null;
   return { x: turn.x + turn.r * 2.35, y: turn.y, r: turn.r };
 }
-function hitLabelLeader(project, scheme, target, point, view, filter) {
+function hitLabelLeader(project, scheme, target, point, view, filter, extra = 0) {
   const handle = labelLeaderHandle(project, scheme, target, view, filter);
   if (!handle) return false;
-  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX + extra;
 }
 
 // Значок — сам поводок: точка метки слева и пологая черта от неё к подписи.
@@ -15679,9 +15787,9 @@ function samePathHandle(a, b) {
 }
 
 // Ручка пути под точкой экрана — по ней холст решает, что потащили.
-function hitPathHandle(handles, point) {
+function hitPathHandle(handles, point, extra = 0) {
   for (const handle of handles) {
-    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) return handle;
+    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2 + extra) return handle;
   }
   return null;
 }
@@ -15698,13 +15806,13 @@ function outlineHandles(scheme, outline, view) {
  * иначе заливка комнаты перехватывала бы клики по пустому плану.
  * `selectedOutlineId` — у выделенного контура ловятся ещё и ручки вершин.
  */
-function hitOutline(project, scheme, point, view, filter, selectedOutlineId) {
+function hitOutline(project, scheme, point, view, filter, selectedOutlineId, extra = 0) {
   if (!project || !scheme) return null;
   const state = renderView(view);
   const outlines = visibleOutlines(project, scheme, filter);
   const selected = outlines.find((outline) => outline.id === selectedOutlineId);
   if (selected) {
-    const handle = hitPathHandle(outlineHandles(scheme, selected, state), point);
+    const handle = hitPathHandle(outlineHandles(scheme, selected, state), point, extra);
     if (handle) return { outlineId: selected.id, part: handle.kind, index: handle.index };
   }
   // Меньший контур лежит в порядке последним и ловится первым: у комнаты
@@ -15715,7 +15823,7 @@ function hitOutline(project, scheme, point, view, filter, selectedOutlineId) {
     for (let i = 0; i < screen.length; i += 1) {
       const a = screen[i];
       const b = screen[(i + 1) % screen.length];
-      if (distanceToSegment(point, a, b) <= OUTLINE_HIT_PX) {
+      if (distanceToSegment(point, a, b) <= OUTLINE_HIT_PX + extra) {
         return { outlineId: outline.id, part: "edge", index: i };
       }
     }
@@ -15774,10 +15882,10 @@ function outlineLabelTurn(project, scheme, outline, view) {
   if (!box) return null;
   return turnHandleAt(labelBounds(box), renderView(view));
 }
-function hitOutlineLabelTurn(project, scheme, outline, point, view) {
+function hitOutlineLabelTurn(project, scheme, outline, point, view, extra = 0) {
   const handle = outlineLabelTurn(project, scheme, outline, view);
   if (!handle) return false;
-  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX;
+  return Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + HIT_SLACK_PX + extra;
 }
 
 // Подпись комнаты рисуется серединой на своей точке — так она стояла всегда,
@@ -15861,6 +15969,36 @@ function drawHandlePlus(ctx, handle, tint, alpha) {
   ctx.lineTo(handle.x + arm, handle.y);
   ctx.moveTo(handle.x, handle.y - arm);
   ctx.lineTo(handle.x, handle.y + arm);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Кольцо ожидания под пальцем: отклик на долгое нажатие.
+ *
+ * Палец не умеет «навести и нажать», поэтому перенос метки начинается с
+ * выдержки — а выдержку надо показать, иначе человек уберёт палец раньше
+ * времени и решит, что не сработало. Кольцо замыкается за то же время, что
+ * отведено на нажатие (`progress` 0…1), и рисуется **только там, где есть что
+ * взять**: обещать перенос над пустым планом нельзя.
+ *
+ * Рисуется поверх всего, включая линейку: это ответ руке, а не часть чертежа.
+ * В PNG, в печать и в лист «Схема» не попадает — `drawScheme` о нём не знает.
+ */
+function drawPressRing(ctx, at, progress, color) {
+  if (!ctx || !at) return;
+  const radius = at.r || 22;
+  const part = Math.max(0, Math.min(1, Number(progress) || 0));
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(1, 4, 9, 0.16)";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = color || "#0969da";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * part);
   ctx.stroke();
   ctx.restore();
 }
@@ -15950,11 +16088,11 @@ function insideBox(point, box) {
 // `part` — `label` (подпись, её таскают отдельно), `mark` (точка или вершина
 // линии), `line` (сегмент ломаной). Сверху вниз: подписи, потом метки в обратном
 // порядке постановки — поздняя метка лежит выше ранней.
-function hitTest(project, scheme, point, view, filter) {
+function hitTest(project, scheme, point, view, filter, extra = 0) {
   if (!project || !scheme) return null;
   const state = renderView(view);
   const radius = markRadius(state);
-  const slack = radius + HIT_SLACK_PX;
+  const slack = radius + HIT_SLACK_PX + extra;
 
   const targets = labelTargets(project, scheme, filter);
   const layout = labelLayout(project, scheme, filter, state);
@@ -15988,7 +16126,7 @@ function hitTest(project, scheme, point, view, filter) {
       for (let segment = 0; segment < last; segment += 1) {
         const a = screen[segment];
         const b = screen[(segment + 1) % screen.length];
-        if (distanceToSegment(point, a, b) <= Math.max(4, radius * 0.6)) {
+        if (distanceToSegment(point, a, b) <= Math.max(4, radius * 0.6) + extra) {
           return { markId: mark.id, part: "line", groupId: mark.groupId, index: segment };
         }
       }
@@ -16015,9 +16153,9 @@ function handlePositions(scheme, mark, view) {
     { side: "down", x: base.x, y: base.y + gap, r: handleRadius },
   ];
 }
-function hitHandle(scheme, mark, point, view) {
+function hitHandle(scheme, mark, point, view, extra = 0) {
   for (const handle of handlePositions(scheme, mark, view)) {
-    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2) return handle.side;
+    if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2 + extra) return handle.side;
   }
   return null;
 }
@@ -16806,7 +16944,32 @@ const CANVAS_DRAG_SLOP = 3;
 // почти всегда оказывался бы панорамой, а не выбором метки. Десять точек —
 // столько же, сколько отдают на «тап» системные жесты.
 const CANVAS_TOUCH_SLOP = 10;
+// Запас попадания пальца сверх мышиного. Подушечка накрывает вчетверо больше
+// экрана, чем остриё курсора, а ручка вершины — квадратик в семь пикселей:
+// без запаса за неё не взяться, и человек решит, что ручки не нажимаются.
+const CANVAS_TOUCH_HIT_PX = 8;
+// Долгое нажатие: сколько держать палец на месте, чтобы взять то, что под ним.
+// Слова заказчика про перенос: «зажали иконку и потом потащили на нужное
+// место». Порог выбран между двумя бедами: короче — и обычная панорама, начатая
+// с метки, утащит метку вместо плана; длиннее — рука устаёт ждать. Те же
+// полсекунды берут на долгое нажатие и системные жесты.
+const CANVAS_PRESS_MS = 450;
+// Двойной тап: окно и разброс. Палец возвращается в ту же точку хуже мыши,
+// поэтому разброс щедрее мышиного, а окно взято по верхней границе привычных
+// (системные жесты считают двойным тапом 300–400 мс): замкнуть ломаную двумя
+// неторопливыми тапами человек должен с первого раза, а не с третьего.
+const CANVAS_DOUBLE_TAP_MS = 400;
+const CANVAS_DOUBLE_TAP_PX = 28;
+// Сколько после касания не верить мышиным событиям. Браузер досылает вслед за
+// быстрым двойным тапом «призрачный» `dblclick` — мышиное событие, которого
+// пальцем никто не делал. Палец свой двойной тап уже разобрал сам, и второй
+// разбор того же жеста снял бы вершину, которую первый только что поставил.
+const CANVAS_GHOST_MS = 700;
 
+let canvasPress = null; // ожидание долгого нажатия: {point, pick, at}
+let canvasPressTimer = 0;
+let canvasLastTap = null; // последний тап пальцем: {point, at} — для двойного
+let canvasTouchAt = 0; // когда палец последний раз касался холста
 let canvasHost = null;
 let canvasNode = null;
 let canvasCtx = null;
@@ -17092,6 +17255,18 @@ function canvasPaint() {
   }
   // Линейка — последней: она поверх всего, и с неё тянут направляющие.
   if (guidesOn) drawRuler(canvasCtx, scheme, view, box);
+
+  // Кольцо ожидания под пальцем — поверх и линейки: это ответ руке, а не часть
+  // чертежа. Цвет — у того, что сейчас возьмут: по нему видно, что именно
+  // держат, ещё до того, как оно поедет.
+  if (canvasPress) {
+    const held = canvasPress.pick && canvasPress.pick.markId ? findMark(project, canvasPress.pick.markId) : null;
+    const color = held ? styleOf(project, held.typeId).color : "#0969da";
+    drawPressRing(canvasCtx, { ...canvasPress.point, r: markRadius(view) + 14 }, canvasPressProgress(canvasNow() - canvasPress.at), color);
+    // Кадр за кадром, пока палец держат: кольцо обязано закрываться на глазах,
+    // а своего хода у него нет — рисует его тот же кадр холста.
+    canvasRedraw();
+  }
 }
 
 // Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа.
@@ -18275,14 +18450,156 @@ function canvasZoomReset() {
 
 // ——— указатель ———————————————————————————————————————————————————————
 
-// Что под пальцем: метка или пустое место. Ответ снимается в начале жеста —
-// по отпусканию план уже мог уехать, и попадание считалось бы по новым
-// координатам.
-function canvasTapPick(state, point) {
+/**
+ * Что под пальцем: ручка подписи, ручка пути, ручка блока, метка, контур,
+ * направляющая — или пустое место.
+ *
+ * Ответ снимается **в начале жеста**: по отпусканию план уже мог уехать, и
+ * попадание считалось бы по новым координатам.
+ *
+ * Порядок тот же, что у мыши в `canvasPointerDown`, и это не совпадение: два
+ * порядка на один план означали бы, что палец и мышь целятся в разное. Запас
+ * попадания пальцу даётся больше (`canvasHitSlack`) — ручки мелкие.
+ */
+function canvasTouchPick(state, point) {
   const scheme = canvasScheme(state);
-  if (!scheme || !state.project) return { markId: null };
-  const hit = hitTest(state.project, scheme, point, canvasViewOf(state), state.filter);
-  return { markId: hit ? hit.markId : null };
+  const pick = { markId: null, part: null, groupId: null };
+  if (!scheme || !state.project) return pick;
+  const view = canvasViewOf(state);
+  const slack = canvasHitSlack(true);
+  const editable = canvasEditAllowed(state);
+  const single = editable && state.selectedMarkIds.length === 1 ? state.selectedMarkIds[0] : null;
+
+  if (single) {
+    const target = labelTargetOf(state.project, scheme, single, state.filter);
+    if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter, slack)) {
+      pick.labelTurn = true;
+      return pick;
+    }
+    if (target && hitLabelLeader(state.project, scheme, target, point, view, state.filter, slack)) {
+      pick.labelLeader = true;
+      return pick;
+    }
+  }
+
+  const edited = editable ? canvasEditedPath(state, scheme) : null;
+  if (edited) {
+    const handle = hitPathHandle(pathEditHandles(scheme, edited, view), point, slack);
+    if (handle) {
+      pick.pathHandle = handle;
+      pick.path = edited;
+      return pick;
+    }
+  }
+
+  const hit = hitTest(state.project, scheme, point, view, state.filter, slack);
+  // Ручка «+» важнее всего, кроме уже стоящей под ней метки, — та же оговорка,
+  // что у мыши: ручка висит ровно на шаге блока и накрывает соседа по блоку.
+  if (single) {
+    const selected = findMark(state.project, single);
+    if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
+      const side = hitHandle(scheme, selected, point, view, slack);
+      const neighbour = hit && hit.part === "mark" && hit.markId !== selected.id;
+      if (side && !neighbour) {
+        pick.blockSide = side;
+        return pick;
+      }
+    }
+  }
+
+  if (hit) {
+    pick.markId = hit.markId;
+    pick.part = hit.part;
+    pick.groupId = hit.groupId || null;
+    return pick;
+  }
+
+  const outlineHit = hitOutline(state.project, scheme, point, view, state.filter, state.selectedOutlineId || null, slack);
+  if (outlineHit) {
+    pick.outlineId = outlineHit.outlineId;
+    pick.outlinePart = outlineHit.part;
+    return pick;
+  }
+
+  if (editable && canvasGuidesShown(state) && state.mode === "select") {
+    const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), point, scheme, view, slack);
+    if (guide) {
+      pick.guideId = guide.id;
+      pick.guideAxis = guide.axis;
+    }
+  }
+  return pick;
+}
+
+// Запас попадания: у пальца больше, чем у мыши. Отдельной функцией — как и
+// мерка сдвига: разницу должно быть видно тесту, а не только глазу в коде.
+function canvasHitSlack(touch) {
+  return touch ? CANVAS_TOUCH_HIT_PX : 0;
+}
+
+/**
+ * Что делает одиночный тап пальцем.
+ *
+ * Главный вопрос таска: в режиме «Добавление» человек тапает, **чтобы
+ * поставить метку**, а до сих пор тап только выделял. Разведено тем же
+ * правилом, по которому живёт мышь: тап делает то же, что сделал бы клик в
+ * этой точке. Клик в добавлении по пустому месту ставит метку, по стоящей
+ * метке — выделяет её (иначе до соседа в блоке было бы не дотянуться), в
+ * рисовании ломаной и контура — ставит вершину, а ручки (поворот подписи,
+ * поводок, «+», разбивка пути) срабатывают раньше всего остального. Второго
+ * порядка заводить нельзя: палец и мышь целятся в один план.
+ *
+ * В просмотре ответ один — `"select"`: правка там запрещена, и тап только
+ * выделяет (таск 106).
+ */
+function canvasTapKind(state, pick = {}) {
+  if (!canvasEditAllowed(state)) return "select";
+  if (pick.labelTurn) return "labelTurn";
+  if (pick.labelLeader) return "labelLeader";
+  // Ручка вершины — для переноса, а не для тапа: тапом по ней мышь тоже ничего
+  // не делает. Ручки разбивки и продолжения, наоборот, ставят вершину нажатием.
+  if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "none" : "pathAdd";
+  if (pick.blockSide) return "block";
+  if (state.mode === "room" || canvasAddKind(state) === "line") return "vertex";
+  if (pick.markId) return "select";
+  if (canvasAddKind(state) === "point") return "place";
+  return "select";
+}
+
+/**
+ * Что берёт долгое нажатие. `null` — ничего: жест остаётся панорамой.
+ *
+ * Слова заказчика: «зажали иконку и потом потащили на нужное место». Это же
+ * решает главную беду касания: палец не умеет «навести и нажать», а обычное
+ * ведение обязано остаться панорамой, иначе план перестанет листаться.
+ *
+ * В просмотре не берётся ничего — там правка запрещена. Во время рисования
+ * ломаной и контура тоже: рука там ставит вершины, и хватать соседнюю метку
+ * посреди линии — не то, чего ждут.
+ */
+function canvasGrabKind(state, pick = {}) {
+  if (!canvasEditAllowed(state)) return null;
+  if (state.mode === "room" || canvasAddKind(state) === "line") return null;
+  if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "pathVertex" : "pathAdd";
+  if (pick.markId) return pick.part === "label" ? "label" : "mark";
+  if (pick.outlineId && pick.outlinePart === "label") return "outlineLabel";
+  if (pick.guideId) return "guideMove";
+  return null;
+}
+
+// Двойной тап: два тапа подряд рядом друг с другом. Мышь узнаёт двойной клик
+// сама, пальцу браузер о нём не сообщает — считаем здесь.
+function canvasDoubleTap(previous, now) {
+  if (!previous || !now) return false;
+  if (now.at - previous.at > CANVAS_DOUBLE_TAP_MS) return false;
+  return Math.hypot(now.point.x - previous.point.x, now.point.y - previous.point.y) <= CANVAS_DOUBLE_TAP_PX;
+}
+
+// Насколько замкнулось кольцо ожидания под пальцем: 0 — только нажали, 1 —
+// пора брать.
+function canvasPressProgress(elapsed) {
+  if (!(elapsed > 0)) return 0;
+  return Math.min(1, elapsed / CANVAS_PRESS_MS);
 }
 
 // Мерка «это был тап или перенос»: у пальца своя. Отдельной функцией, чтобы
@@ -18326,12 +18643,180 @@ function canvasTapAction(state, drag, options = {}) {
   if (drag.kind === "pan" && drag.tap) {
     const markId = drag.tap.markId;
     if (!markId) return busy ? clear : null;
+    // Повторный тап по выделенной метке снимает выделение — но только в
+    // просмотре, где это единственный способ закрыть её карточку. В полной
+    // версии выделение — рабочее состояние: за выделенной меткой стоят ручки
+    // «+», поворот подписи и поводок, и снимать его тапом по самой метке
+    // значило бы отбирать их из-под пальца. Мышь там ведёт себя так же: клик
+    // по выделенной метке её не снимает.
     const same = selected.length === 1 && selected[0] === markId;
+    if (same && canvasEditAllowed(state)) return null;
     return { selectedMarkIds: same ? [] : [markId], selectedOutlineId: null };
   }
   if (drag.kind === "pan" && drag.tapSelected && selected.length > 0) return { selectedMarkIds: [] };
   if (drag.kind === "empty" && busy) return clear;
   return null;
+}
+
+/**
+ * Ожидание долгого нажатия. Кольцо под пальцем показывает, сколько осталось
+ * держать; без него человек решит, что не сработало, и уберёт палец раньше.
+ *
+ * Кольцо показывается **только там, где есть что взять**: обещать перенос над
+ * пустым планом значило бы врать. Пока ждём, жест остаётся панорамой — сдвиг
+ * дальше пальцевой мерки её и подтверждает, а ожидание снимает.
+ */
+function canvasPressStart(point, pick) {
+  canvasPressCancel();
+  if (!canvasGrabKind(canvasState(), pick)) return;
+  canvasPress = { point, pick, at: canvasNow() };
+  const later = typeof setTimeout === "function" ? setTimeout : null;
+  if (later) canvasPressTimer = later(canvasPressFire, CANVAS_PRESS_MS);
+  canvasRedraw();
+}
+
+function canvasPressCancel() {
+  if (canvasPressTimer) clearTimeout(canvasPressTimer);
+  canvasPressTimer = 0;
+  const had = Boolean(canvasPress);
+  canvasPress = null;
+  if (had) canvasRedraw();
+}
+
+// Долгое нажатие дождалось своего: то, что под пальцем, берётся в руку, и
+// дальше ведение переносит его, а отпускание ставит.
+function canvasPressFire() {
+  canvasPressTimer = 0;
+  const press = canvasPress;
+  canvasPress = null;
+  if (!press || !canvasDrag || canvasDrag.moved || canvasDrag.grabbed) return;
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const drag = canvasGrabDrag(state, scheme, canvasViewOf(state), press.point, press.pick);
+  if (!drag) return;
+  canvasDrag = { ...drag, start: press.point, touch: true, grabbed: true, moved: false };
+  // Взяли — это должно быть видно и слышно рукой: метка выделяется, как при
+  // нажатии мышью, и устройство коротко отзывается.
+  if (drag.selectId) {
+    canvasApi.setState({ selectedMarkIds: [drag.selectId], selectedOutlineId: null });
+  }
+  canvasBuzz();
+  canvasRedraw();
+}
+
+// Короткий отклик устройства на «взял». Есть не везде (в Safari на iPad его
+// нет вовсе), поэтому он — добавка к кольцу и выделению, а не единственный
+// ответ.
+function canvasBuzz() {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
+  try {
+    navigator.vibrate(12);
+  } catch (error) {
+    /* устройство не умеет — и не надо */
+  }
+}
+
+/**
+ * Жест переноса под то, что взяли долгим нажатием. Собирается ровно так же,
+ * как его собирает мышь в `canvasPointerDown`: снимок «до» для отмены, якорная
+ * вершина у метки, путь и номер вершины у ручки.
+ */
+function canvasGrabDrag(state, scheme, view, point, pick) {
+  const kind = canvasGrabKind(state, pick);
+  if (!kind) return null;
+  if (kind === "pathVertex") {
+    return { kind, path: pick.path, index: pick.pathHandle.index, before: state.project, guides: [] };
+  }
+  if (kind === "pathAdd") {
+    return {
+      kind,
+      path: pick.path,
+      index: pick.pathHandle.index,
+      end: pick.pathHandle.end || null,
+      // Точка, где вершина встанет без ведения, — под самой ручкой.
+      point: screenToPlan({ x: pick.pathHandle.x, y: pick.pathHandle.y }, scheme, view),
+      before: state.project,
+      guides: [],
+    };
+  }
+  if (kind === "label") {
+    return { kind, markId: pick.markId, groupId: pick.groupId || null, before: state.project, selectId: pick.markId };
+  }
+  if (kind === "mark") {
+    const mark = findMark(state.project, pick.markId);
+    if (!mark) return null;
+    return {
+      kind,
+      markId: pick.markId,
+      groupId: pick.groupId || null,
+      anchor: canvasNearestVertex(mark, point, scheme, view),
+      before: state.project,
+      selectId: pick.markId,
+    };
+  }
+  if (kind === "outlineLabel") {
+    return { kind, outlineId: pick.outlineId, before: state.project };
+  }
+  if (kind === "guideMove") {
+    return { kind, guideId: pick.guideId, axis: pick.guideAxis, before: state.project, guides: [] };
+  }
+  return null;
+}
+
+/**
+ * Отпускание пальца, когда ничего не тащили: тап.
+ *
+ * Что именно делает тап, решает `canvasTapKind` — чистое правило, одно на
+ * палец и на мышь. Здесь только исполнение и двойной тап, которого браузер
+ * пальцу не присылает.
+ */
+function canvasTouchUp(state, drag, point, cancelled) {
+  canvasTouchAt = canvasNow();
+  // Жест отобрала система или им уже взяли метку — тапа не было.
+  if (cancelled || drag.grabbed) {
+    canvasRedraw();
+    return;
+  }
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const view = canvasViewOf(state);
+  const pick = drag.pick || {};
+  const now = { point, at: canvasNow() };
+  const twice = canvasDoubleTap(canvasLastTap, now);
+  // Третий тап подряд — снова первый, а не второй двойного: иначе три тапа по
+  // ручке вершины поставили бы вершину и тут же её убрали.
+  canvasLastTap = twice ? null : now;
+  const kind = canvasTapKind(state, pick);
+  const plan = screenToPlan(point, scheme, view);
+  if (kind === "labelTurn") canvasRotateLabel(state.selectedMarkIds[0]);
+  else if (kind === "labelLeader") canvasToggleLabelLeader(state.selectedMarkIds[0]);
+  else if (kind === "pathAdd") {
+    const handle = pick.pathHandle;
+    canvasPathAddCommit(
+      {
+        path: pick.path,
+        index: handle.index,
+        end: handle.end || null,
+        point: screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
+        before: state.project,
+      },
+      screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
+    );
+  } else if (kind === "block") canvasBlockPoint(state.selectedMarkIds[0], pick.blockSide);
+  else if (kind === "vertex") {
+    if (state.mode === "room") canvasOutlineClick(plan, point, false);
+    else canvasLineClick(plan, point, false);
+  } else if (kind === "place") canvasPlacePoint(plan);
+  else if (kind === "select") {
+    const patch = canvasTapAction(state, drag, {});
+    if (patch) canvasApi.setState(patch);
+  }
+  // Второй тап того же двойного — то же, что второй клик мыши: замкнуть
+  // ломаную, включить правку пути, вернуть подпись на место. Первый тап при
+  // этом своё уже сделал — ровно как первый клик двойного у мыши.
+  if (twice) canvasDoubleAt(point, canvasHitSlack(true));
+  canvasRedraw();
 }
 
 function canvasStartPan(point) {
@@ -18350,11 +18835,17 @@ function canvasPointerDown(event) {
   }
   canvasPointers.set(event.pointerId, canvasPointOf(event));
 
-  // Планшет: разметка остаётся десктопной, пальцы только смотрят. Но
-  // «смотреть» — это ещё и выделить метку, чтобы прочитать её поля: до сих пор
-  // палец умел только возить план, и в просмотре метку нельзя было выбрать
-  // вовсе. Жест начинается панорамой, а тап это был или перенос — решает
-  // отпускание: сдвинули план — панорама, не сдвинули — выделение.
+  // Палец. Жест **всегда начинается панорамой** — иначе план перестанет
+  // листаться, — а чем он был на самом деле, решают время и сдвиг:
+  //
+  // - повели сразу → панорама (или новая направляющая, если начали с линейки);
+  // - подержали на месте `CANVAS_PRESS_MS` → взяли то, что под пальцем, и
+  //   дальше ведение переносит его («зажали иконку и потом потащили»);
+  // - отпустили, не сдвинув → тап, и что он делает, решает `canvasTapKind`.
+  //
+  // Раньше здесь всё кончалось панорамой: в просмотре палец не умел даже
+  // выделить метку (таск 106), а в полной версии — ни поставить, ни перенести
+  // (этот таск).
   if (event.pointerType === "touch") {
     if (canvasPointers.size === 2) {
       const [a, b] = [...canvasPointers.values()];
@@ -18362,16 +18853,38 @@ function canvasPointerDown(event) {
         distance: Math.hypot(a.x - b.x, a.y - b.y),
         center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
       };
+      canvasPressCancel();
       canvasDrag = null;
       return;
     }
     const at = canvasPointOf(event);
+    canvasTouchAt = canvasNow();
+    const touchState = canvasState();
+    const touchScheme = canvasScheme(touchState);
+    // Линейка отдаёт палец направляющей — ровно как мыши: полоса узкая и
+    // заведена для того, чтобы с неё тянули.
+    if (canvasEditAllowed(touchState) && canvasGuidesShown(touchState) && rulerAxis(at)) {
+      const axis = rulerAxis(at);
+      canvasDrag = {
+        kind: "guideNew",
+        axis,
+        at: canvasGuideAt(axis, at, touchScheme, canvasViewOf(touchState)),
+        start: at,
+        moved: false,
+        touch: true,
+      };
+      return;
+    }
     canvasStartPan(at);
     if (canvasDrag) {
       // Жест помечается пальцевым здесь: по этой отметке `canvasPointerMove`
       // берёт пальцевую мерку сдвига, а не мышиную.
       canvasDrag.touch = true;
-      canvasDrag.tap = canvasTapPick(canvasState(), at);
+      const pick = canvasTouchPick(touchState, at);
+      canvasDrag.pick = pick;
+      // `tap` держит выбор метки: его читает `canvasTapAction` (таск 106).
+      canvasDrag.tap = { markId: pick.markId };
+      canvasPressStart(at, pick);
     }
     return;
   }
@@ -18725,7 +19238,12 @@ function canvasPointerMove(event) {
   if (canvasHoverUpdate(state, point)) canvasRedraw();
   if (!canvasDrag) return;
   const shift = Math.hypot(point.x - canvasDrag.start.x, point.y - canvasDrag.start.y);
-  if (shift > canvasDragSlop(canvasDrag)) canvasDrag.moved = true;
+  if (shift > canvasDragSlop(canvasDrag)) {
+    canvasDrag.moved = true;
+    // Повели — значит, это панорама или уже начатый перенос: ждать долгого
+    // нажатия больше нечего, и кольцо под пальцем гаснет.
+    canvasPressCancel();
+  }
   if (!canvasDrag.moved) return;
 
   if (canvasDrag.kind === "guideNew" || canvasDrag.kind === "guideMove") {
@@ -18761,6 +19279,7 @@ function canvasPointerMove(event) {
 }
 
 function canvasPointerUp(event) {
+  canvasPressCancel();
   canvasPointers.delete(event.pointerId);
   if (canvasPointers.size < 2) canvasPinch = null;
   const drag = canvasDrag;
@@ -18828,15 +19347,20 @@ function canvasPointerUp(event) {
   // выхода `pointerType === "touch"`, и на планшете метка не выделялась вовсе.
   // Выделение — поле сеанса, объект оно не трогает; правка идёт дверью
   // `canvasCommit`, и та в просмотре закрыта.
+  // Палец разбирается своей дверью: тап делает то же, что сделал бы клик, а
+  // взятое долгим нажатием уже отпущено выше.
+  if (drag.touch) {
+    canvasTouchUp(state, drag, point, event.type === "pointercancel");
+    return;
+  }
+
   const tap = canvasTapAction(state, drag, { cancelled: event.type === "pointercancel" });
   if (tap) {
     canvasApi.setState(tap);
     return;
   }
 
-  // Ниже — только мышь: пальцем не ставят метки, не рисуют ломаные и не
-  // дотягивают ручки. Всё, что осталось, — жесты правки, и палец до них не
-  // доходит.
+  // Ниже — только мышь: у пальца свой разбор выше.
   if (event.pointerType === "touch") return;
   // Нажатая ручка своё дело уже сделала — но рисовались ручки при `canvasDrag`
   // пустом, и без этого кадра они оставались бы невидимыми до следующего хода
@@ -18863,20 +19387,41 @@ function canvasPointerUp(event) {
 }
 
 function canvasDoubleClick(event) {
+  // Призрачный `dblclick` вслед за двойным тапом — не жест, а эхо: палец свой
+  // двойной уже разобрал сам (`canvasTouchUp`), и разбирать его второй раз
+  // значит сделать два дела вместо одного.
+  if (canvasNow() - canvasTouchAt < CANVAS_GHOST_MS) return;
+  // Мышь гасит браузерное событие только тогда, когда жест и правда разобран:
+  // двойной клик в стороне — это просто два клика, и мешать браузеру незачем.
+  if (canvasDoubleAt(canvasPointOf(event), canvasHitSlack(false))) event.preventDefault();
+}
+
+/**
+ * Двойной жест по плану: замкнуть ломаную, включить правку пути, поставить или
+ * убрать вершину, снять направляющую, вернуть подпись на место.
+ *
+ * Одна рука на мышь и на палец. Пальцу `dblclick` браузер не присылает вовсе —
+ * проверено живьём: двойной тап по холсту с `touch-action: none` даёт два
+ * `click` и ни одного `dblclick`. Поэтому двойной тап холст считает сам
+ * (`canvasDoubleTap`) и зовёт эту же функцию: второй раз описать те же правила
+ * значило бы их развести.
+ *
+ * `slack` — запас попадания: у пальца он больше (`canvasHitSlack`).
+ * Возвращает `true`, если жест разобран.
+ */
+function canvasDoubleAt(at, slack = 0) {
   const state = canvasState();
-  if (!canvasEditAllowed(state)) return;
+  if (!canvasEditAllowed(state)) return false;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   // Двойной клик по линейке ставит направляющую в точке клика — это второй
   // способ к перетаскиванию, и просил его пользователь: «двойной клик по
   // линейке должен создавать линию».
   if (canvasGuidesShown(state)) {
-    const at = canvasPointOf(event);
     const axis = rulerAxis(at);
     if (axis) {
-      event.preventDefault();
       canvasGuideAdd(axis, canvasGuideAt(axis, at, scheme, view));
-      return;
+      return true;
     }
   }
   // Правка пути — один жест на ломаную метки и на контур помещения. Двойной
@@ -18885,84 +19430,74 @@ function canvasDoubleClick(event) {
   // выделении позволь редактировать её, например двойным кликом на линию» и
   // «двойной клик по контуру комнаты — тоже давай править его».
   if (state.mode === "select") {
-    const at = canvasPointOf(event);
     const plan = screenToPlan(at, scheme, view);
     const edited = canvasEditedPath(state, scheme);
     if (edited) {
-      const handle = hitPathHandle(pathVertexHandles(scheme, edited.points, view), at);
+      const handle = hitPathHandle(pathVertexHandles(scheme, edited.points, view), at, slack);
       if (handle) {
-        event.preventDefault();
         // Вершина, которую первый клик этого же двойного только что поставил
         // ручкой, не убирается вторым: жест «ткнуть в ручку дважды» иначе
         // ставил бы вершину и тут же её снимал, оставляя два шага истории и
         // ничего на плане.
         if (!canvasVertexIsFresh(edited.id, handle.index)) canvasPathVertexRemove(edited, handle.index);
-        return;
+        return true;
       }
     }
     // Метка важнее контура — тот же порядок, что у одиночного клика.
-    const hit = hitTest(state.project, scheme, at, view, state.filter);
+    const hit = hitTest(state.project, scheme, at, view, state.filter, slack);
     if (hit && edited && edited.kind === "mark" && hit.markId === edited.id && hit.part === "line") {
-      event.preventDefault();
       canvasPathVertexInsert(edited, hit.index, plan);
-      return;
+      return true;
     }
     if (hit && hit.part !== "label") {
       const mark = findMark(state.project, hit.markId);
       if (mark && mark.kind === "line" && (!edited || hit.markId !== edited.id)) {
-        event.preventDefault();
         canvasEditPath("mark", mark.id);
-        return;
+        return true;
       }
     }
     if (!hit && canvasGuidesShown(state)) {
-      const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), at, scheme, view);
+      const guide = hitSchemeGuide(canvasSchemeGuides(state, scheme), at, scheme, view, slack);
       if (guide) {
-        event.preventDefault();
         canvasGuideRemove(guide.id);
-        return;
+        return true;
       }
     }
     if (!hit) {
-      const outlineHit = hitOutline(state.project, scheme, at, view, state.filter, null);
+      const outlineHit = hitOutline(state.project, scheme, at, view, state.filter, null, slack);
       if (outlineHit && outlineHit.part === "edge") {
-        event.preventDefault();
         if (edited && edited.kind === "outline" && edited.id === outlineHit.outlineId) {
           canvasPathVertexInsert(edited, outlineHit.index, plan);
         } else {
           canvasEditPath("outline", outlineHit.outlineId);
         }
-        return;
+        return true;
       }
     }
   }
   // Двойной клик по подписи возвращает её на место — там же, где её и таскают:
   // в рисовании линии и контура двойной клик занят завершением ломаной.
   const drawing = state.mode === "room" || canvasAddKind(state) === "line";
-  if (!drawing && canvasResetLabel(canvasPointOf(event))) {
-    event.preventDefault();
-    return;
-  }
-  if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return;
-  const point = canvasPointOf(event);
-  const threshold = markRadius(view) + 6;
+  if (!drawing && canvasResetLabel(at)) return true;
+  if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return false;
+  const threshold = markRadius(view) + 6 + slack;
   const points = canvasDraft.points;
   const first = planToScreen(points[0], scheme, view);
   const last = planToScreen(points[points.length - 1], scheme, view);
-  const onFirst = Math.hypot(point.x - first.x, point.y - first.y) <= threshold;
-  const onLast = Math.hypot(point.x - last.x, point.y - last.y) <= threshold;
+  const onFirst = Math.hypot(at.x - first.x, at.y - first.y) <= threshold;
+  const onLast = Math.hypot(at.x - last.x, at.y - last.y) <= threshold;
   // Двойной клик в стороне — это просто две вершины подряд: рисование
   // продолжается, ничего не теряется и не замыкается.
-  if (!onFirst && !onLast) return;
-  event.preventDefault();
+  if (!onFirst && !onLast) return false;
   // Контур помещения замкнут всегда: комната с открытой стенкой — не комната.
   if (state.mode === "room") {
     canvasOutlineFinish();
-    return;
+    return true;
   }
   // По первой точке — замкнутый контур (лента по периметру комнаты),
   // по последней — открытая линия, ровно как в брифе.
   canvasLineFinish(onFirst && !onLast && points.length >= 3);
+  return true;
 }
 
 function canvasWheel(event) {
@@ -26767,9 +27302,81 @@ function marksCenteredView(scheme, mark, view) {
  * этой панели уже значит «столько же меток».
  */
 function marksLabelList(labels) {
-  return labelCounts(labels).map((item) =>
-    item.count > 1 ? text("marks.labelTimes", { label: item.label, count: item.count }) : item.label,
-  );
+  return labelCounts(labels).map(marksLabelText);
+}
+
+// Одно имя перечня: «Т3» или «Т3 ×3». Отдельной функцией — потому что перечень
+// связки считает повторы сам (ему нужно число меток в свёрнутом хвосте), а
+// писаться имя обязано одним правилом с перечнем связей.
+function marksLabelText(item) {
+  return item.count > 1 ? text("marks.labelTimes", { label: item.label, count: item.count }) : item.label;
+}
+
+// Сколько имён показывает перечень связки, прежде чем свернуться числом.
+//
+// Замыкание поднимает столько меток, сколько их в связке на самом деле: у реле
+// на пять групп — три десятка (замерено в таске 84). Строка списка живёт в
+// колонке 264 точки, и тридцать имён в ней — семь строк текста под каждой
+// раскрытой меткой. Шесть имён занимают две строки и оставляют хвост числом;
+// целиком перечень остаётся в подсказке при наведении, а на плане — дугами и
+// оболочкой вокруг всей связки (она и так рисуется при выделении).
+const MARKS_LINKED_SHOWN = 6;
+
+/**
+ * Вся связная группа метки — словами.
+ *
+ * Считает её модель (`linkedMarkIds`, таск 84): транзитивное замыкание по трём
+ * родам отношений — управление в обе стороны, общая цепь и общий номер. Второй
+ * реализации здесь быть не должно: перечень обязан совпадать с тем, что
+ * подсвечивается на плане при выделении той же метки.
+ *
+ * **Прямые связи из перечня выбрасываются.** Метка, уже названная в «Чем
+ * управляет» или «Чем управляется», появилась бы в строке второй раз — и
+ * перечень читался бы как повтор, а не как новость. После вычитания в нём
+ * остаётся ровно то, чего больше нигде не написано: второй выключатель того же
+ * светильника, тёзка по номеру, сосед по цепи.
+ *
+ * **Вычитается по метке, а не по имени.** Заказчик нарочно вешает на группу
+ * светильников один номер: выключатель может управлять одним Т3 из трёх, и два
+ * оставшихся связаны с ним через номер. Выброси их по имени — и связка
+ * промолчала бы о двух метках; выброшенные по идентификатору, они честно
+ * встают в перечень как «Т3 ×2».
+ *
+ * Порядок — тот, что дала модель: своей сортировки здесь не заводится.
+ */
+function marksLinkedList(project, markId, limit = MARKS_LINKED_SHOWN) {
+  const mark = project ? findMark(project, markId) : null;
+  if (!mark) return { entries: [], all: [], more: 0, total: 0 };
+  const named = new Set([markId]);
+  for (const id of markControlIds(mark)) named.add(id);
+  for (const item of markControlledBy(project, markId)) named.add(item.id);
+  const rest = linkedMarkIds(project, markId).filter((id) => !named.has(id));
+  const counts = labelCounts(rest.map((id) => labelOf(project, id)));
+  const shown = limit > 0 ? counts.slice(0, limit) : counts;
+  return {
+    entries: shown.map(marksLabelText),
+    all: counts.map(marksLabelText),
+    more: counts.slice(shown.length).reduce((sum, item) => sum + item.count, 0),
+    total: rest.length,
+  };
+}
+
+// Перечень связки строкой: «В2, Т3 ×2 и ещё 21». Пустая строка значит, что
+// показывать нечего, — поле в этом случае не рисуется вовсе, как и остальные
+// пустые поля метки.
+function marksLinkedText(list) {
+  if (!list || list.entries.length === 0) return "";
+  const line = list.entries.join(", ");
+  return list.more > 0 ? line + " " + text("marks.linkedMore", { count: list.more }) : line;
+}
+
+// Подсказка перечня: чем эта связь отличается от прямой, а у свёрнутого
+// перечня — ещё и весь список целиком. Свернуть в строке и потерять насовсем —
+// разные вещи.
+function marksLinkedTitle(list) {
+  if (!list || list.entries.length === 0) return strings.marks.linkedTitle;
+  if (list.more === 0) return strings.marks.linkedTitle;
+  return strings.marks.linkedTitle + "\n" + text("marks.linkedAll", { labels: list.all.join(", ") });
 }
 
 /**
@@ -27057,6 +27664,10 @@ function marksRowModel(project, row, options = {}) {
     // не только «чем управляет», но и «какой клавишей».
     controlsText: marksControlsText(project, mark.id),
     controlledBy: marksLabelList(controllers.get(mark.id) || []),
+    // Вся связка метки — то, что поднимается на плане при её выделении.
+    // Считается только у раскрытой строки: замыкание ходит по всему объекту, а
+    // раскрыта в списке всегда одна метка.
+    linked: marksLinkedList(project, mark.id),
   };
   return head;
 }
@@ -27585,6 +28196,17 @@ function mountMarksPanel(host, api) {
               text: text("marks.controlledBy", { labels: view.fields.controlledBy.join(", ") }),
             })
           : null,
+        // Связка — последней строкой и тоже только для чтения: это вывод из
+        // уже записанных связей, а не ещё одно поле метки. Стоит после обеих
+        // прямых связей нарочно: сперва названо то, что записано у метки
+        // руками, потом то, что из этого следует.
+        view.fields && view.fields.linked.entries.length > 0
+          ? uiEl("p", {
+              class: "mark-row__by mark-row__linked",
+              text: text("marks.linked", { labels: marksLinkedText(view.fields.linked) }),
+              title: marksLinkedTitle(view.fields.linked),
+            })
+          : null,
       ],
     );
     node.addEventListener("pointerdown", (event) => {
@@ -27729,12 +28351,16 @@ function mountMarksPanel(host, api) {
 registerPanel(PANEL_IDS.marks, mountMarksPanel);
 
 // src/panels/markCard.js
-// Карточка выделенной метки — в режиме просмотра, снизу поверх плана.
+// Карточка выделенной метки — снизу поверх плана, во всех раскладках.
 //
 // Заказчик: «в режиме просмотра выделение меток сделай, чтобы снизу появлялось
 // окошко с её информацией и сразу отображались на схеме связи». В просмотре
 // панели правки нет вовсе, и прочитать, что это за метка, было негде: список
 // меток лежит листом снизу и про выделенную метку ничего не говорит.
+//
+// Потом он попросил её и на компьютере: «ту плашку с информацией по метке
+// отображай и в других режимах и с компа тоже». Как она уживается с правой
+// колонкой, где те же поля уже показаны, — см. `markCardState`.
 //
 // Карточка только читает. Все поля она берёт у той же `marksRowModel`, что
 // рисует раскрытую строку списка: второй правды о метке в сборке быть не
@@ -27750,9 +28376,58 @@ registerPanel(PANEL_IDS.marks, mountMarksPanel);
 
 
 
+
 // Отступ между меткой и верхним краем карточки: метка должна остаться видна
 // вместе с подписью, а не впритык.
 const MARK_CARD_GAP = 24;
+
+// Свёрнута ли карточка на компьютере. Оснастка рабочего места, а не свойство
+// разметки: живёт в настройках браузера, переживает перезагрузку, в объект и в
+// файл проекта не попадает — как отметка линейки и свёрнутые колонки.
+const MARK_CARD_SETTING = "markCardCollapsed";
+
+// Что показано поверх плана: ничего, карточка целиком или ярлычок.
+const MARK_CARD_NONE = "none";
+const MARK_CARD_FULL = "full";
+const MARK_CARD_MINI = "mini";
+
+/**
+ * Показывать ли карточку — и в каком виде.
+ *
+ * Заказчик попросил её «и с компа тоже», и это ровно то место, где легко
+ * сделать навязчиво: на компьютере те же поля уже показаны в раскрытой строке
+ * списка меток, а карточка лежит поверх плана — там, где рисуют.
+ *
+ * Решение — **показывать во всех раскладках, но на компьютере в один-два ряда
+ * и сквозной для мыши** (`mark-card--compact`: клик проходит на план, ловят
+ * его только кнопки карточки). Два других варианта отвергнуты:
+ *
+ * — **«только когда правая колонка скрыта»** — заказчик работает с открытыми
+ *   колонками, и карточки он бы просто не увидел; просьба «и с компа тоже»
+ *   осталась бы невыполненной, а разбираться, почему она то есть, то нет,
+ *   пришлось бы ему;
+ * — **переключатель в шапке** — пятая кнопка в ряду, который на восьмидюймовом
+ *   планшете и так считает точки (таск 101).
+ *
+ * Отказаться от карточки всё равно можно, и ручка для этого стоит там же, где
+ * сама карточка: её кнопка сворачивает карточку в ярлычок с обозначением
+ * метки, а ярлычок разворачивает обратно. Это идиома колонок — «свёрнутая
+ * ужимается до ручки у края и не уезжает с места», — и тупика в ней нет:
+ * пустого места вместо карточки не остаётся никогда.
+ *
+ * В просмотре сворачивания нет вовсе: там карточка — единственный способ
+ * прочитать метку, а её крестик снимает выделение (так закрывать её научили в
+ * таске 104, и тап по пустому месту делает то же самое).
+ */
+function markCardState(state, collapsed = false) {
+  const source = state || {};
+  const selected = source.selectedMarkIds || [];
+  // Карточка про одну метку: у выделенных пачкой общих полей нет, а
+  // показывать первую попавшуюся — врать.
+  if (!source.project || selected.length !== 1) return MARK_CARD_NONE;
+  if (!layoutAllows("editMarks", source.layout)) return MARK_CARD_FULL;
+  return collapsed ? MARK_CARD_MINI : MARK_CARD_FULL;
+}
 
 /**
  * Что показывает карточка. Чистая функция: поля решаются здесь, а не в разметке,
@@ -27772,9 +28447,9 @@ function markCardModel(project, markId) {
   const fields = view.fields || {};
   const room = fields.roomId ? findRoom(project, fields.roomId) : null;
   const rows = [];
-  const add = (label, value) => {
+  const add = (label, value, title) => {
     if (value === null || value === undefined || value === "") return;
-    rows.push({ label, value: String(value) });
+    rows.push({ label, value: String(value), title: title || "" });
   };
   add(strings.marks.room, room ? room.name : "");
   add(strings.marks.location, fields.location);
@@ -27785,6 +28460,10 @@ function markCardModel(project, markId) {
   // на вопрос «какая клавиша к какой нагрузке».
   add(strings.marks.controls, fields.controlsText || (fields.controls || []).join(", "));
   add(strings.marks.controlledByShort, (fields.controlledBy || []).join(", "));
+  // Вся связка — то же, что в строке списка, и тем же перечнем: косвенно
+  // связанные метки (второй выключатель того же светильника) названы словами,
+  // а не оставлены на догадку по дугам на плане.
+  add(strings.marks.linkedShort, marksLinkedText(fields.linked), marksLinkedTitle(fields.linked));
   if (fields.equipment > 0) add(strings.equipment.open, fields.equipment);
   return {
     id: mark.id,
@@ -27814,28 +28493,72 @@ function mountMarkCard(host, api) {
   const card = uiEl("div", { class: "mark-card" });
   host.replaceChildren(card);
   let shownFor = null;
+  let collapsed = false;
+
+  const flip = (value) => {
+    collapsed = value;
+    setSetting(MARK_CARD_SETTING, collapsed);
+    render();
+  };
 
   const render = () => {
     const state = getState();
-    // Карточка живёт только в просмотре: в полной версии то же самое (и с
-    // правкой) показывает раскрытая строка списка меток.
-    const viewing = !layoutAllows("editMarks", state.layout);
-    const selected = state.selectedMarkIds || [];
-    const model = viewing && selected.length === 1 ? markCardModel(state.project, selected[0]) : null;
+    const mode = markCardState(state, collapsed);
+    const model = mode === MARK_CARD_NONE ? null : markCardModel(state.project, state.selectedMarkIds[0]);
     card.hidden = !model;
+    // В просмотре карточка показывает метку целиком и стоит колонкой; на
+    // компьютере она ужата в ряды и пропускает клик на план под собой.
+    const viewing = !layoutAllows("editMarks", state.layout);
+    card.classList.toggle("mark-card--compact", !viewing);
+    card.classList.toggle("mark-card--mini", mode === MARK_CARD_MINI);
     if (!model) {
       shownFor = null;
       return;
     }
+    if (mode === MARK_CARD_MINI) {
+      // Свёрнутая карточка — ярлычок с обозначением выделенной метки: по нему
+      // видно, что карточка не пропала, а свёрнута, и что она про эту метку.
+      shownFor = null;
+      card.replaceChildren(
+        uiEl(
+          "button",
+          {
+            class: "mark-card__mini",
+            type: "button",
+            title: strings.markCard.expand,
+            attrs: { "aria-label": strings.markCard.expand, "aria-expanded": "false" },
+            on: { click: () => flip(false) },
+          },
+          [
+            uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 16)),
+            uiEl("span", { class: "mark-card__label", text: model.label }),
+            uiIcon("chevron"),
+          ],
+        ),
+      );
+      return;
+    }
+    // Кнопка головы говорит на разных раскладках разное — и значок у неё
+    // поэтому разный. В просмотре карточку закрывают, снимая выделение (тем же
+    // занят тап по пустому месту); на компьютере выделение нужно самому
+    // пользователю — он метку правит, — и карточка сворачивается в ярлычок.
+    const headButton = viewing
+      ? uiIconButton("close", {
+          class: "ui-btn mark-card__close",
+          label: strings.markCard.close,
+          on: { click: () => setState({ selectedMarkIds: [] }) },
+        })
+      : uiIconButton("chevron", {
+          class: "ui-btn mark-card__close mark-card__fold",
+          label: strings.markCard.collapse,
+          attrs: { "aria-expanded": "true" },
+          on: { click: () => flip(true) },
+        });
     const head = uiEl("div", { class: "mark-card__head" }, [
       uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 20)),
       uiEl("span", { class: "mark-card__label", text: model.label }),
       uiEl("span", { class: "mark-card__type", text: model.code + " — " + model.typeName }),
-      uiIconButton("close", {
-        class: "ui-btn mark-card__close",
-        label: strings.markCard.close,
-        on: { click: () => setState({ selectedMarkIds: [] }) },
-      }),
+      headButton,
     ]);
     const body = uiEl("div", { class: "mark-card__body" });
     if (model.rows.length === 0) {
@@ -27843,14 +28566,19 @@ function mountMarkCard(host, api) {
     }
     for (const row of model.rows) {
       body.append(
-        uiEl("div", { class: "mark-card__row" }, [
+        uiEl("div", { class: "mark-card__row", title: row.title }, [
           uiEl("span", { class: "mark-card__name", text: row.label }),
           uiEl("span", { class: "mark-card__value", text: row.value }),
         ]),
       );
     }
     card.replaceChildren(head, body);
-    if (shownFor !== model.id) {
+    // План подвигается только в просмотре: там карточка высокая и метка
+    // действительно уходит под неё. На компьютере выделение случается на
+    // каждый клик по метке, и сдвиг плана из-под руки — прямая дорога к
+    // промаху при переносе: метка едет вместе с планом между нажатием и
+    // ведением.
+    if (viewing && shownFor !== model.id) {
       shownFor = model.id;
       liftMark(state, model.id);
     }
@@ -27883,6 +28611,15 @@ function mountMarkCard(host, api) {
     }
   });
   render();
+  // Настройка читается асинхронно, как у свёрнутых колонок и разделов:
+  // карточка стартует развёрнутой и сворачивается, когда хранилище ответит.
+  Promise.resolve(getSetting(MARK_CARD_SETTING))
+    .then((saved) => {
+      if (saved !== true || collapsed) return;
+      collapsed = true;
+      render();
+    })
+    .catch(() => {});
 }
 
 registerPanel(PANEL_IDS.canvasCard, mountMarkCard);
