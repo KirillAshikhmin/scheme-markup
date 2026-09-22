@@ -15,7 +15,7 @@ import { deleteImage, putImage, saveProject, setSetting } from "../store.js";
 import { exportDownload } from "../exporter.js";
 import { clearHistory } from "../history.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiButtonLabel, uiConfirm, uiDialogDepth, uiEl, uiIconLabelButton, uiModal } from "./ui.js";
 import { LAST_PROJECT_KEY } from "./projects.js";
 import {
   adoptLoadedProject,
@@ -114,7 +114,10 @@ function mountFilePanel(host, api) {
   const fileStaleTold = new Set();
   let fileAdoptedKey = null;
 
-  const saveButton = uiButton(strings.file.save, {
+  // Файловые кнопки — значок и слово рядом: на планшете слово прячется стилями,
+  // и три кнопки перестают выдавливать шапку на вторую строку. Слово при этом
+  // остаётся в подсказке и в `aria-label`.
+  const saveButton = uiIconLabelButton("fileSave", strings.file.save, {
     class: "ui-btn ui-btn--accent",
     title: strings.file.saveHint,
     on: { click: () => saveToFile() },
@@ -124,11 +127,11 @@ function mountFilePanel(host, api) {
   // экспорта, а словами состояние названо в её подсказке.
   const exportDot = uiEl("span", { class: "file__dot", attrs: { "aria-hidden": "true" } });
   saveButton.prepend(exportDot);
-  const openButton = uiButton(strings.file.open, {
+  const openButton = uiIconLabelButton("fileOpen", strings.file.open, {
     title: strings.file.openHint,
     on: { click: () => picker.click() },
   });
-  const folderButton = uiButton(strings.autosave.pick, {
+  const folderButton = uiIconLabelButton("folder", strings.autosave.pick, {
     title: strings.autosave.pickHint,
     on: { click: () => folderClick() },
   });
@@ -606,27 +609,27 @@ function mountFilePanel(host, api) {
     const said = text(FILE_EXPORT_STATE[mark], { ago: autosaveAgoText(exported) });
     // Папка автосохранения бывает недоступна (страница открыта с диска) — и
     // сказать об этом больше негде: кнопки папки в этом случае нет вовсе.
-    saveButton.title =
-      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported);
+    uiButtonLabel(
+      saveButton,
+      strings.file.save,
+      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported),
+    );
     row.classList.toggle("is-busy", Boolean(status.busy));
     row.classList.toggle("is-dirty", Boolean(state.dirty));
 
     folderButton.hidden = !status.supported || !saving;
     if (!status.supported || !saving) return;
     if (!status.folder) {
-      folderButton.textContent = strings.autosave.pick;
-      folderButton.title = strings.autosave.pickHint;
+      uiButtonLabel(folderButton, strings.autosave.pick, strings.autosave.pickHint);
       folderButton.classList.remove("is-on");
       return;
     }
     if (status.permission !== "granted") {
-      folderButton.textContent = strings.autosave.allow;
-      folderButton.title = text("autosave.allowHint", { name: status.folder });
+      uiButtonLabel(folderButton, strings.autosave.allow, text("autosave.allowHint", { name: status.folder }));
       folderButton.classList.remove("is-on");
       return;
     }
-    folderButton.textContent = text("autosave.folder", { name: status.folder });
-    folderButton.title = strings.autosave.dialogTitle;
+    uiButtonLabel(folderButton, text("autosave.folder", { name: status.folder }), strings.autosave.dialogTitle);
     folderButton.classList.add("is-on");
   }
 

@@ -290,6 +290,63 @@ export function canvasHintUnseen(seen, current) {
   return seen !== current;
 }
 
+// ——— полный экран ————————————————————————————————————————————————————
+//
+// Кнопка стоит зеркально подсказке — в правом верхнем углу холста — и
+// разворачивает во весь экран страницу целиком, а не один холст: панели и
+// шапка нужны и там, а убрать надо адресную строку, которая на планшете
+// съедает полосу плана.
+//
+// Дверь к полному экрану у браузеров называется по-разному: у всех
+// `requestFullscreen`, у Safari — `webkitRequestFullscreen`; так же двоятся
+// выход, признак «мы внутри» и само событие. Имена перечислены здесь, и
+// разбор их — чистые функции: в тесте вместо документа стоит простой объект.
+const FULLSCREEN_ENTER = ["requestFullscreen", "webkitRequestFullscreen"];
+const FULLSCREEN_EXIT = ["exitFullscreen", "webkitExitFullscreen"];
+const FULLSCREEN_ELEMENT = ["fullscreenElement", "webkitFullscreenElement"];
+const FULLSCREEN_ALLOWED = ["fullscreenEnabled", "webkitFullscreenEnabled"];
+// Выход бывает мимо кнопки — Esc, жест, переключение вкладки, — и кнопка
+// обязана об этом узнать. Слушаются оба имени события: у Safari своё.
+export const FULLSCREEN_EVENTS = ["fullscreenchange", "webkitfullscreenchange"];
+
+// Даёт ли эта страница полный экран вообще. Установленное приложение (оно и
+// так во весь экран) и часть планшетных браузеров его не дают — тогда кнопки
+// нет вовсе: кнопка, которая ничего не делает, хуже отсутствующей.
+// `fullscreenEnabled === false` — это прямой отказ браузера, а отсутствие
+// признака у старого Safari означает только то, что спросить его нечем.
+export function canvasFullscreenSupported(doc, element) {
+  if (!doc || !element) return false;
+  for (const name of FULLSCREEN_ALLOWED) {
+    if (name in doc && doc[name] === false) return false;
+  }
+  return FULLSCREEN_ENTER.some((name) => typeof element[name] === "function");
+}
+
+// Мы сейчас в полном экране? Спрашивается у документа, а не хранится флагом:
+// выйти можно мимо кнопки, и запомненное состояние разошлось бы с настоящим
+// молча — кнопка показывала бы «свернуть» на развёрнутом обратно окне.
+export function canvasFullscreenOn(doc) {
+  if (!doc) return false;
+  return FULLSCREEN_ELEMENT.some((name) => Boolean(doc[name]));
+}
+
+// Подпись кнопки говорит, что случится по нажатию, а не то, что сейчас:
+// текущее состояние видно по рисунку уголков.
+export function canvasFullscreenLabel(on) {
+  return on ? strings.canvas.fullscreenExit : strings.canvas.fullscreenEnter;
+}
+
+// Переключение. Возвращает обещание: браузер вправе отказать, и отказ надо
+// показать, а не проглотить.
+function canvasFullscreenToggle(doc, element) {
+  if (canvasFullscreenOn(doc)) {
+    const exit = FULLSCREEN_EXIT.find((name) => typeof doc[name] === "function");
+    return exit ? Promise.resolve(doc[exit]()) : Promise.reject(new Error("no exit"));
+  }
+  const enter = FULLSCREEN_ENTER.find((name) => typeof element[name] === "function");
+  return enter ? Promise.resolve(element[enter]()) : Promise.reject(new Error("no enter"));
+}
+
 // Свёрнутость — оснастка рабочего места, как и отметка линейки: живёт в
 // настройках браузера, в объект и в файл проекта не попадает.
 const CANVAS_HINT_SETTING = "canvasHintCollapsed";
@@ -2657,7 +2714,7 @@ function mountCanvasHint(host, api) {
     uiIcon("hint"),
   );
   hint.append(toggle, body);
-  host.replaceChildren(hint);
+  host.append(hint);
   const render = () => {
     const state = api.getState();
     const value = canvasHintText(state);
@@ -2725,5 +2782,72 @@ function mountCanvasHint(host, api) {
     .catch(() => {});
 }
 
+// Кнопка полного экрана: правый верхний угол холста, зеркально подсказке в
+// левом. Тот же приём — рисованный значок поверх плана, клики берёт только
+// сама кнопка (поле наложения сквозное), — и та же мера отступа от линейки.
+function mountCanvasFullscreen(host, api) {
+  const doc = typeof document === "undefined" ? null : document;
+  // Разворачивается страница целиком: полный экран одного холста оставил бы
+  // пользователя без панелей и без шапки посреди работы.
+  const target = doc ? doc.documentElement : null;
+  // Браузер отказал — кнопка уходит до перезагрузки. Это тот случай, о котором
+  // предупреждал тикет: висеть мёртвой ей незачем, а спрашивать браузер ещё
+  // раз тем же жестом нечем.
+  let denied = false;
+  const button = uiEl("button", {
+    class: "canvas-full",
+    type: "button",
+    on: {
+      click: () => {
+        Promise.resolve()
+          .then(() => canvasFullscreenToggle(doc, target))
+          .then(() => render())
+          .catch(() => {
+            denied = true;
+            api.notify(strings.canvas.fullscreenDenied, "error");
+            render();
+          });
+      },
+    },
+  });
+  host.append(button);
+  const render = () => {
+    const state = api.getState();
+    // Кнопка живёт над планом: без открытой схемы разворачивать нечего, и в
+    // пустом холсте она была бы единственной вещью на экране.
+    const shown = Boolean(state.schemeId) && !denied && canvasFullscreenSupported(doc, target);
+    button.hidden = !shown;
+    if (!shown) return;
+    const on = canvasFullscreenOn(doc);
+    const label = canvasFullscreenLabel(on);
+    button.replaceChildren(on ? uiIcon("fullscreenExit") : uiIcon("fullscreen"));
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    // Линейка занимает полосу сверху — кнопка начинается за ней, как и
+    // подсказка, и мера у них общая.
+    button.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
+  };
+  api.subscribe((state, changed) => {
+    if ("schemeId" in changed || "guidesShown" in changed || "layout" in changed) render();
+  });
+  // Из полного экрана выходят и мимо кнопки: Esc, жест, системная кнопка. Своё
+  // состояние кнопка не помнит, но перерисоваться обязана — иначе на обратно
+  // свёрнутом окне у неё останется значок «свернуть».
+  if (doc) {
+    for (const name of FULLSCREEN_EVENTS) doc.addEventListener(name, render);
+  }
+  render();
+}
+
+// Поверх холста живут двое: подсказка слева и полный экран справа. Точка
+// монтирования одна, поэтому и монтируются они вместе — панель чистит поле
+// один раз, а не каждый за себя.
+function mountCanvasOverlay(host, api) {
+  host.replaceChildren();
+  mountCanvasHint(host, api);
+  mountCanvasFullscreen(host, api);
+}
+
 registerPanel(PANEL_IDS.canvas, mountCanvas);
-registerPanel(PANEL_IDS.overlay, mountCanvasHint);
+registerPanel(PANEL_IDS.overlay, mountCanvasOverlay);

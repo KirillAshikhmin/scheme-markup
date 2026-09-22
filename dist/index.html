@@ -27,7 +27,9 @@
   position: absolute;
   left: calc(12px + var(--canvas-hint-inset, 0px));
   top: calc(12px + var(--canvas-hint-inset, 0px));
-  max-width: min(460px, calc(100% - 24px - var(--canvas-hint-inset, 0px)));
+  /* Справа в том же ряду стоит кнопка полного экрана — её полоса вычтена из
+     ширины подсказки, иначе развёрнутый текст лёг бы под неё. */
+  max-width: min(460px, calc(100% - 62px - var(--canvas-hint-inset, 0px)));
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -114,6 +116,41 @@
 
 /* Палец крупнее курсора: в просмотре кнопка подрастает вместе с остальными. */
 #app.is-mobile .canvas-hint__toggle {
+  width: 30px;
+  height: 30px;
+}
+
+/* Полный экран — зеркало свёрнутой подсказки: тот же размер, та же рамка, тот
+   же отступ от края. Линейка идёт сверху и слева, поэтому правому краю
+   поправка не нужна, а верхнему — та же, что у подсказки. */
+.canvas-full {
+  position: absolute;
+  right: 12px;
+  top: calc(12px + var(--canvas-hint-inset, 0px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--canvas-line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #57606a;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.canvas-full:hover,
+.canvas-full:focus-visible {
+  color: var(--accent);
+}
+
+.canvas-full .ui-icon {
+  --ui-icon: 16px;
+}
+
+#app.is-mobile .canvas-full {
   width: 30px;
   height: 30px;
 }
@@ -1888,6 +1925,27 @@
   padding: 5px 7px;
 }
 
+/* Кнопка со значком и словом: значок слева, слово справа. Слово прячется
+   стилями на узком экране (см. шапку в styles.css) — тогда кнопка становится
+   обычной кнопкой-значком, а слово остаётся в подсказке. */
+.ui-btn--label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Имя папки автосохранения бывает длинным («Папка: Проекты 2026, этаж 3»), и
+   на широком экране оно одно могло вытолкнуть шапку на вторую строку. Слово
+   обрезается многоточием, целиком оно есть в подсказке. */
+.ui-btn__word {
+  display: block;
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Мера значка одна на все панели и окна: строки списков плотные, и шапочные
    18 px поднимали их на пару пикселей каждая. В самой шапке мера прежняя —
    она подобрана под тамошние кнопки (таск 55) и менять её незачем. */
@@ -3050,6 +3108,37 @@ body {
   white-space: nowrap;
 }
 
+/* Планшет стоймя — 768, 820 и 1024 точки — это полоса, на которой шапка
+   расходилась на две строки (жалоба заказчика: «на планшете шапка
+   разъезжается на 2 строки в вертикальной ориентации»). Считать там нечего:
+   три файловые кнопки словами занимали 349 точек, а список объектов с длинным
+   именем — ещё три с половиной сотни. Слово у кнопки со значком уходит в
+   подсказку, а список объектов ужимается — значок, отметка выгрузки и
+   подсказка остаются на месте, строка остаётся одна: в таком виде шапке
+   хватает 780 точек, то есть всей полосы, где раскладка ещё настольная.
+
+   Порог — не «чуть ниже планшета», а ширина, на которой слова помещаются в
+   худшем случае. Худший случай — выбранная папка автосохранения: её имя стоит
+   в кнопке, и со словами всё вместе занимает ровно 1366 точек (замерено).
+   Порог взят с запасом от этого числа, а не от 1024: шапка не должна ломаться
+   оттого, что человек выбрал папку с длинным именем или у объекта появилось
+   третье предупреждение. */
+@media (max-width: 1400px) {
+  #app-header .ui-btn--label .ui-btn__word {
+    display: none;
+  }
+
+  #app-header .ui-btn--label {
+    gap: 0;
+  }
+
+  /* Имя объекта в списке — то же слово, что и в самом списке: ужимается до
+     половины прежнего, целиком видно при раскрытии. */
+  #app-header .ui-select {
+    max-width: 170px;
+  }
+}
+
 /* Окно уже полутора тысяч точек: название сервиса уходит первым. Оно
    единственное в шапке ничего не говорит о работе — и уступает место тому,
    ради чего шапку и чистили: одной строке вместо двух. Имя сервиса остаётся
@@ -3366,6 +3455,31 @@ body {
   white-space: nowrap;
 }
 
+/* Планшет стоймя (744, 768, 820, 1024) выбирает просмотр — так решил заказчик
+   («десктоп, а с планшета смотреть»), — но и в просмотре шапка обязана быть
+   одной строкой: именно там её видели расходящейся надвое. Имя схемы встаёт в
+   ряд с остальным и ужимается многоточием. На телефоне ему в ряду места нет,
+   и своя строка у него остаётся: имя открытой схемы больше показать негде.
+
+   Вместе с ним ужимаются поля кнопок — до настольных. Высота под палец
+   остаётся прежней (40 точек), а лишние восемь точек по краям каждой кнопки
+   на планшете не дают ничего, кроме второй строки: на 768 их набиралось
+   почти полсотни. */
+@media (min-width: 740px) {
+  #app.is-mobile #scheme-name {
+    width: auto;
+    order: 0;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 14vw;
+  }
+
+  #app.is-mobile #app-header .ui-btn {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+
 #app.is-mobile #header-actions {
   margin-left: auto;
 }
@@ -3470,8 +3584,11 @@ body {
   max-width: 82vw;
 }
 
+/* На телефоне список объектов занимает почти половину строки — иначе от имени
+   останется огрызок. На планшете половина строки ему не нужна: там рядом стоит
+   имя схемы, кнопки просмотра и файл, и потолок оставляет место всем. */
 #app.is-mobile #project-actions .ui-select {
-  max-width: 46vw;
+  max-width: min(46vw, 180px);
 }
 
 /* Уведомления не должны ложиться на нижнюю панель. */
@@ -3910,6 +4027,15 @@ const strings = {
     redone: "Возвращено: {label}",
     nothingToUndo: "Отменять нечего",
     nothingToRedo: "Возвращать нечего",
+    // Полный экран: кнопка в правом верхнем углу холста, зеркально подсказке.
+    // Подпись говорит, что случится по нажатию, а не то, что сейчас: по
+    // рисунку уголков состояние и так видно.
+    fullscreenEnter: "Во весь экран",
+    fullscreenExit: "Выйти из полного экрана",
+    // Браузер отказал (бывает в установленном приложении и когда экран уже
+    // отдан кому-то другому). Кнопка после отказа уходит: висеть мёртвой ей
+    // незачем.
+    fullscreenDenied: "Браузер не отдал полный экран",
   },
   history: {
     addMark: "постановка метки",
@@ -15692,6 +15818,18 @@ const UI_ICONS = {
   // не годится: стрелками в наборе уже сказано «отмена», «порядок» и «замена»,
   // а здесь речь не о действии, а о том, что две вещи держатся друг за друга.
   link: ["M10.6 7.4 12.4 5.6a3.9 3.9 0 0 1 5.5 5.5l-1.8 1.8", "M13.4 16.6l-1.8 1.8a3.9 3.9 0 0 1-5.5-5.5l1.8-1.8", "M9.6 14.4 14.4 9.6"],
+  // Папка автосохранения: папка с язычком — тот же знак, что в проводнике.
+  folder: ["M3.5 19.5V5.5h5l2 2.5h10v11.5z"],
+  // Открыть файл и выгрузить в файл — пара: лоток один и тот же, стрелка
+  // наружу и стрелка внутрь. Порознь каждая стрелка двусмысленна, парой они
+  // читаются сразу, а в шапке они и стоят рядом.
+  fileOpen: ["M12 15.5V4.5", "M8 8.5 12 4.5l4 4", "M4.5 15.5v4h15v-4"],
+  fileSave: ["M12 4.5v11", "M8 11.5 12 15.5l4-4", "M4.5 15.5v4h15v-4"],
+  // Полный экран: четыре уголка, расходящиеся к краям клетки, и они же,
+  // сведённые внутрь, — выход. Рисунок общепринятый, и состояние по нему
+  // видно без слова: уголки наружу — «развернуть», внутрь — «свернуть».
+  fullscreen: ["M4 9.5V4h5.5", "M20 9.5V4h-5.5", "M4 14.5V20h5.5", "M20 14.5V20h-5.5"],
+  fullscreenExit: ["M9.5 4v5.5H4", "M14.5 4v5.5H20", "M9.5 20v-5.5H4", "M14.5 20v-5.5H20"],
 };
 function uiIcon(name) {
   const svg = document.createElementNS(UI_SVG_NS, "svg");
@@ -15718,6 +15856,35 @@ function uiIconButton(name, options = {}) {
     attrs: { ...(options.attrs || {}), "aria-label": options.label || options.title || "" },
   });
   button.append(uiIcon(name));
+  return button;
+}
+
+// Кнопка со значком и словом рядом. Слово лежит в своём `span`, и это не
+// мелочь: на узком экране его прячут стилями, а кнопка остаётся узнаваемой по
+// значку — так файловые действия влезают в одну строку шапки на планшете.
+// Слово при этом не теряется: оно уходит в подсказку и в `aria-label`, как и у
+// кнопки-значка. Подпись меняют через `uiButtonLabel`, а не `textContent`:
+// присваивание текста кнопке стёрло бы и значок.
+function uiIconLabelButton(name, label, options = {}) {
+  const button = uiButton("", {
+    class: (options.class || "ui-btn") + " ui-btn--label",
+    on: options.on,
+    attrs: options.attrs,
+  });
+  button.append(uiIcon(name), uiEl("span", { class: "ui-btn__word", text: label }));
+  uiButtonLabel(button, label, options.title);
+  return button;
+}
+
+// Новая подпись кнопки со значком: слово в строке, оно же в подсказке и в
+// `aria-label`. `title` задаётся отдельно, когда подсказка длиннее подписи.
+function uiButtonLabel(button, label, title) {
+  if (!button) return button;
+  const word = button.querySelector(".ui-btn__word");
+  if (word) word.textContent = label;
+  else button.textContent = label;
+  button.title = title || label;
+  button.setAttribute("aria-label", label);
   return button;
 }
 
@@ -16091,6 +16258,63 @@ function canvasHintInset(state) {
 function canvasHintUnseen(seen, current) {
   if (seen === null || current === null) return false;
   return seen !== current;
+}
+
+// ——— полный экран ————————————————————————————————————————————————————
+//
+// Кнопка стоит зеркально подсказке — в правом верхнем углу холста — и
+// разворачивает во весь экран страницу целиком, а не один холст: панели и
+// шапка нужны и там, а убрать надо адресную строку, которая на планшете
+// съедает полосу плана.
+//
+// Дверь к полному экрану у браузеров называется по-разному: у всех
+// `requestFullscreen`, у Safari — `webkitRequestFullscreen`; так же двоятся
+// выход, признак «мы внутри» и само событие. Имена перечислены здесь, и
+// разбор их — чистые функции: в тесте вместо документа стоит простой объект.
+const FULLSCREEN_ENTER = ["requestFullscreen", "webkitRequestFullscreen"];
+const FULLSCREEN_EXIT = ["exitFullscreen", "webkitExitFullscreen"];
+const FULLSCREEN_ELEMENT = ["fullscreenElement", "webkitFullscreenElement"];
+const FULLSCREEN_ALLOWED = ["fullscreenEnabled", "webkitFullscreenEnabled"];
+// Выход бывает мимо кнопки — Esc, жест, переключение вкладки, — и кнопка
+// обязана об этом узнать. Слушаются оба имени события: у Safari своё.
+const FULLSCREEN_EVENTS = ["fullscreenchange", "webkitfullscreenchange"];
+
+// Даёт ли эта страница полный экран вообще. Установленное приложение (оно и
+// так во весь экран) и часть планшетных браузеров его не дают — тогда кнопки
+// нет вовсе: кнопка, которая ничего не делает, хуже отсутствующей.
+// `fullscreenEnabled === false` — это прямой отказ браузера, а отсутствие
+// признака у старого Safari означает только то, что спросить его нечем.
+function canvasFullscreenSupported(doc, element) {
+  if (!doc || !element) return false;
+  for (const name of FULLSCREEN_ALLOWED) {
+    if (name in doc && doc[name] === false) return false;
+  }
+  return FULLSCREEN_ENTER.some((name) => typeof element[name] === "function");
+}
+
+// Мы сейчас в полном экране? Спрашивается у документа, а не хранится флагом:
+// выйти можно мимо кнопки, и запомненное состояние разошлось бы с настоящим
+// молча — кнопка показывала бы «свернуть» на развёрнутом обратно окне.
+function canvasFullscreenOn(doc) {
+  if (!doc) return false;
+  return FULLSCREEN_ELEMENT.some((name) => Boolean(doc[name]));
+}
+
+// Подпись кнопки говорит, что случится по нажатию, а не то, что сейчас:
+// текущее состояние видно по рисунку уголков.
+function canvasFullscreenLabel(on) {
+  return on ? strings.canvas.fullscreenExit : strings.canvas.fullscreenEnter;
+}
+
+// Переключение. Возвращает обещание: браузер вправе отказать, и отказ надо
+// показать, а не проглотить.
+function canvasFullscreenToggle(doc, element) {
+  if (canvasFullscreenOn(doc)) {
+    const exit = FULLSCREEN_EXIT.find((name) => typeof doc[name] === "function");
+    return exit ? Promise.resolve(doc[exit]()) : Promise.reject(new Error("no exit"));
+  }
+  const enter = FULLSCREEN_ENTER.find((name) => typeof element[name] === "function");
+  return enter ? Promise.resolve(element[enter]()) : Promise.reject(new Error("no enter"));
 }
 
 // Свёрнутость — оснастка рабочего места, как и отметка линейки: живёт в
@@ -18453,7 +18677,7 @@ function mountCanvasHint(host, api) {
     uiIcon("hint"),
   );
   hint.append(toggle, body);
-  host.replaceChildren(hint);
+  host.append(hint);
   const render = () => {
     const state = api.getState();
     const value = canvasHintText(state);
@@ -18521,8 +18745,75 @@ function mountCanvasHint(host, api) {
     .catch(() => {});
 }
 
+// Кнопка полного экрана: правый верхний угол холста, зеркально подсказке в
+// левом. Тот же приём — рисованный значок поверх плана, клики берёт только
+// сама кнопка (поле наложения сквозное), — и та же мера отступа от линейки.
+function mountCanvasFullscreen(host, api) {
+  const doc = typeof document === "undefined" ? null : document;
+  // Разворачивается страница целиком: полный экран одного холста оставил бы
+  // пользователя без панелей и без шапки посреди работы.
+  const target = doc ? doc.documentElement : null;
+  // Браузер отказал — кнопка уходит до перезагрузки. Это тот случай, о котором
+  // предупреждал тикет: висеть мёртвой ей незачем, а спрашивать браузер ещё
+  // раз тем же жестом нечем.
+  let denied = false;
+  const button = uiEl("button", {
+    class: "canvas-full",
+    type: "button",
+    on: {
+      click: () => {
+        Promise.resolve()
+          .then(() => canvasFullscreenToggle(doc, target))
+          .then(() => render())
+          .catch(() => {
+            denied = true;
+            api.notify(strings.canvas.fullscreenDenied, "error");
+            render();
+          });
+      },
+    },
+  });
+  host.append(button);
+  const render = () => {
+    const state = api.getState();
+    // Кнопка живёт над планом: без открытой схемы разворачивать нечего, и в
+    // пустом холсте она была бы единственной вещью на экране.
+    const shown = Boolean(state.schemeId) && !denied && canvasFullscreenSupported(doc, target);
+    button.hidden = !shown;
+    if (!shown) return;
+    const on = canvasFullscreenOn(doc);
+    const label = canvasFullscreenLabel(on);
+    button.replaceChildren(on ? uiIcon("fullscreenExit") : uiIcon("fullscreen"));
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    // Линейка занимает полосу сверху — кнопка начинается за ней, как и
+    // подсказка, и мера у них общая.
+    button.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
+  };
+  api.subscribe((state, changed) => {
+    if ("schemeId" in changed || "guidesShown" in changed || "layout" in changed) render();
+  });
+  // Из полного экрана выходят и мимо кнопки: Esc, жест, системная кнопка. Своё
+  // состояние кнопка не помнит, но перерисоваться обязана — иначе на обратно
+  // свёрнутом окне у неё останется значок «свернуть».
+  if (doc) {
+    for (const name of FULLSCREEN_EVENTS) doc.addEventListener(name, render);
+  }
+  render();
+}
+
+// Поверх холста живут двое: подсказка слева и полный экран справа. Точка
+// монтирования одна, поэтому и монтируются они вместе — панель чистит поле
+// один раз, а не каждый за себя.
+function mountCanvasOverlay(host, api) {
+  host.replaceChildren();
+  mountCanvasHint(host, api);
+  mountCanvasFullscreen(host, api);
+}
+
 registerPanel(PANEL_IDS.canvas, mountCanvas);
-registerPanel(PANEL_IDS.overlay, mountCanvasHint);
+registerPanel(PANEL_IDS.overlay, mountCanvasOverlay);
 
 // src/colorName.js
 // Русское имя цвета — вычислением, а не таблицей соответствий.
@@ -24947,7 +25238,10 @@ function mountFilePanel(host, api) {
   const fileStaleTold = new Set();
   let fileAdoptedKey = null;
 
-  const saveButton = uiButton(strings.file.save, {
+  // Файловые кнопки — значок и слово рядом: на планшете слово прячется стилями,
+  // и три кнопки перестают выдавливать шапку на вторую строку. Слово при этом
+  // остаётся в подсказке и в `aria-label`.
+  const saveButton = uiIconLabelButton("fileSave", strings.file.save, {
     class: "ui-btn ui-btn--accent",
     title: strings.file.saveHint,
     on: { click: () => saveToFile() },
@@ -24957,11 +25251,11 @@ function mountFilePanel(host, api) {
   // экспорта, а словами состояние названо в её подсказке.
   const exportDot = uiEl("span", { class: "file__dot", attrs: { "aria-hidden": "true" } });
   saveButton.prepend(exportDot);
-  const openButton = uiButton(strings.file.open, {
+  const openButton = uiIconLabelButton("fileOpen", strings.file.open, {
     title: strings.file.openHint,
     on: { click: () => picker.click() },
   });
-  const folderButton = uiButton(strings.autosave.pick, {
+  const folderButton = uiIconLabelButton("folder", strings.autosave.pick, {
     title: strings.autosave.pickHint,
     on: { click: () => folderClick() },
   });
@@ -25439,27 +25733,27 @@ function mountFilePanel(host, api) {
     const said = text(FILE_EXPORT_STATE[mark], { ago: autosaveAgoText(exported) });
     // Папка автосохранения бывает недоступна (страница открыта с диска) — и
     // сказать об этом больше негде: кнопки папки в этом случае нет вовсе.
-    saveButton.title =
-      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported);
+    uiButtonLabel(
+      saveButton,
+      strings.file.save,
+      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported),
+    );
     row.classList.toggle("is-busy", Boolean(status.busy));
     row.classList.toggle("is-dirty", Boolean(state.dirty));
 
     folderButton.hidden = !status.supported || !saving;
     if (!status.supported || !saving) return;
     if (!status.folder) {
-      folderButton.textContent = strings.autosave.pick;
-      folderButton.title = strings.autosave.pickHint;
+      uiButtonLabel(folderButton, strings.autosave.pick, strings.autosave.pickHint);
       folderButton.classList.remove("is-on");
       return;
     }
     if (status.permission !== "granted") {
-      folderButton.textContent = strings.autosave.allow;
-      folderButton.title = text("autosave.allowHint", { name: status.folder });
+      uiButtonLabel(folderButton, strings.autosave.allow, text("autosave.allowHint", { name: status.folder }));
       folderButton.classList.remove("is-on");
       return;
     }
-    folderButton.textContent = text("autosave.folder", { name: status.folder });
-    folderButton.title = strings.autosave.dialogTitle;
+    uiButtonLabel(folderButton, text("autosave.folder", { name: status.folder }), strings.autosave.dialogTitle);
     folderButton.classList.add("is-on");
   }
 

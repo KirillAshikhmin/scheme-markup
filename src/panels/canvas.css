@@ -15,7 +15,9 @@
   position: absolute;
   left: calc(12px + var(--canvas-hint-inset, 0px));
   top: calc(12px + var(--canvas-hint-inset, 0px));
-  max-width: min(460px, calc(100% - 24px - var(--canvas-hint-inset, 0px)));
+  /* Справа в том же ряду стоит кнопка полного экрана — её полоса вычтена из
+     ширины подсказки, иначе развёрнутый текст лёг бы под неё. */
+  max-width: min(460px, calc(100% - 62px - var(--canvas-hint-inset, 0px)));
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -102,6 +104,41 @@
 
 /* Палец крупнее курсора: в просмотре кнопка подрастает вместе с остальными. */
 #app.is-mobile .canvas-hint__toggle {
+  width: 30px;
+  height: 30px;
+}
+
+/* Полный экран — зеркало свёрнутой подсказки: тот же размер, та же рамка, тот
+   же отступ от края. Линейка идёт сверху и слева, поэтому правому краю
+   поправка не нужна, а верхнему — та же, что у подсказки. */
+.canvas-full {
+  position: absolute;
+  right: 12px;
+  top: calc(12px + var(--canvas-hint-inset, 0px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--canvas-line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #57606a;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.canvas-full:hover,
+.canvas-full:focus-visible {
+  color: var(--accent);
+}
+
+.canvas-full .ui-icon {
+  --ui-icon: 16px;
+}
+
+#app.is-mobile .canvas-full {
   width: 30px;
   height: 30px;
 }

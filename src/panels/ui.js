@@ -98,6 +98,18 @@ const UI_ICONS = {
   // не годится: стрелками в наборе уже сказано «отмена», «порядок» и «замена»,
   // а здесь речь не о действии, а о том, что две вещи держатся друг за друга.
   link: ["M10.6 7.4 12.4 5.6a3.9 3.9 0 0 1 5.5 5.5l-1.8 1.8", "M13.4 16.6l-1.8 1.8a3.9 3.9 0 0 1-5.5-5.5l1.8-1.8", "M9.6 14.4 14.4 9.6"],
+  // Папка автосохранения: папка с язычком — тот же знак, что в проводнике.
+  folder: ["M3.5 19.5V5.5h5l2 2.5h10v11.5z"],
+  // Открыть файл и выгрузить в файл — пара: лоток один и тот же, стрелка
+  // наружу и стрелка внутрь. Порознь каждая стрелка двусмысленна, парой они
+  // читаются сразу, а в шапке они и стоят рядом.
+  fileOpen: ["M12 15.5V4.5", "M8 8.5 12 4.5l4 4", "M4.5 15.5v4h15v-4"],
+  fileSave: ["M12 4.5v11", "M8 11.5 12 15.5l4-4", "M4.5 15.5v4h15v-4"],
+  // Полный экран: четыре уголка, расходящиеся к краям клетки, и они же,
+  // сведённые внутрь, — выход. Рисунок общепринятый, и состояние по нему
+  // видно без слова: уголки наружу — «развернуть», внутрь — «свернуть».
+  fullscreen: ["M4 9.5V4h5.5", "M20 9.5V4h-5.5", "M4 14.5V20h5.5", "M20 14.5V20h-5.5"],
+  fullscreenExit: ["M9.5 4v5.5H4", "M14.5 4v5.5H20", "M9.5 20v-5.5H4", "M14.5 20v-5.5H20"],
 };
 
 export function uiIcon(name) {
@@ -125,6 +137,35 @@ export function uiIconButton(name, options = {}) {
     attrs: { ...(options.attrs || {}), "aria-label": options.label || options.title || "" },
   });
   button.append(uiIcon(name));
+  return button;
+}
+
+// Кнопка со значком и словом рядом. Слово лежит в своём `span`, и это не
+// мелочь: на узком экране его прячут стилями, а кнопка остаётся узнаваемой по
+// значку — так файловые действия влезают в одну строку шапки на планшете.
+// Слово при этом не теряется: оно уходит в подсказку и в `aria-label`, как и у
+// кнопки-значка. Подпись меняют через `uiButtonLabel`, а не `textContent`:
+// присваивание текста кнопке стёрло бы и значок.
+export function uiIconLabelButton(name, label, options = {}) {
+  const button = uiButton("", {
+    class: (options.class || "ui-btn") + " ui-btn--label",
+    on: options.on,
+    attrs: options.attrs,
+  });
+  button.append(uiIcon(name), uiEl("span", { class: "ui-btn__word", text: label }));
+  uiButtonLabel(button, label, options.title);
+  return button;
+}
+
+// Новая подпись кнопки со значком: слово в строке, оно же в подсказке и в
+// `aria-label`. `title` задаётся отдельно, когда подсказка длиннее подписи.
+export function uiButtonLabel(button, label, title) {
+  if (!button) return button;
+  const word = button.querySelector(".ui-btn__word");
+  if (word) word.textContent = label;
+  else button.textContent = label;
+  button.title = title || label;
+  button.setAttribute("aria-label", label);
   return button;
 }
 

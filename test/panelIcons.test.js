@@ -34,7 +34,10 @@ for (const [, name, paths] of literal.slice(0, literal.indexOf("\n};")).matchAll
 
 const asked = new Set();
 for (const source of sources) {
-  for (const [, name] of source.matchAll(/\buiIcon(?:Button)?\(\s*"([A-Za-z]+)"/g)) asked.add(name);
+  // Три двери к набору: сам значок, кнопка-значок и кнопка со значком и словом.
+  // Имя значка в каждой — первым доводом и строкой: только так его видно
+  // отсюда, не поднимая DOM.
+  for (const [, name] of source.matchAll(/\buiIcon(?:Button|LabelButton)?\(\s*"([A-Za-z]+)"/g)) asked.add(name);
 }
 
 test("набор значков прочитан — иначе проверять было бы нечего", () => {
