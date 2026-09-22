@@ -1,6 +1,6 @@
 // Объекты: список в шапке, переключение, переименование, удаление,
 // первый запуск и автосохранение в браузер.
-import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { LAST_PROJECT_KEY, layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { createProject, ensureProjectKey, migrateTypeKinds, updateProject } from "../model.js";
 import {
   deleteImage,
@@ -18,8 +18,8 @@ import {
 import { strings, text } from "../strings.js";
 import { formatMegabytes, uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
 import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
+import { openProjectFileDialog } from "./file.js";
 
-export const LAST_PROJECT_KEY = "lastProjectId";
 const SAVE_DELAY_MS = 400;
 
 function uniqueProjectName(list) {
@@ -177,23 +177,50 @@ function mountProjectsPanel(host, api) {
     else showWelcome();
   }
 
-  // Первый запуск: не пустая серая страница, а одна кнопка.
+  // Первый запуск: не пустая серая страница, а две кнопки — завести объект и
+  // открыть принесённый файл. Человек с файлом от напарника до этого заводил
+  // пустой объект только затем, чтобы добраться до кнопки в шапке.
+  //
+  // Главное действие — «Создать объект»: оно акцентное и отвечает на Enter.
+  // «Открыть файл» стоит рядом обычной кнопкой: это равноправный вход, но
+  // выбирают его реже, а два акцента в ряду не оставили бы главного вовсе.
   function showWelcome() {
+    // Окно не знает, чем кончился выбор файла, и знать не должно: оно ждёт
+    // самого события — появился объект. Так оно закрывается и после открытия
+    // файла, и после создания, и если объект пришёл со стороны. Отказ от
+    // выбора, отмена в вопросе «каким объектом» и битый архив объекта не
+    // создают — окно остаётся стоять, и человек пробует снова.
+    let stopWatching = null;
+    const finish = () => {
+      if (stopWatching) stopWatching();
+      stopWatching = null;
+      modal.close();
+    };
     const modal = uiModal({
       title: strings.projects.welcomeTitle,
       dismissable: false,
-      body: uiEl("p", { class: "modal__text", text: strings.projects.welcomeText }),
+      body: [
+        uiEl("p", { class: "modal__text", text: strings.projects.welcomeText }),
+        uiEl("p", { class: "modal__hint", text: strings.projects.welcomeFile }),
+      ],
       actions: [
+        uiButton(strings.file.open, {
+          title: strings.file.openHint,
+          on: { click: () => openProjectFileDialog() },
+        }),
         uiButton(strings.projects.createTitle, {
           class: "ui-btn ui-btn--accent",
           on: {
             click: async () => {
-              modal.close();
+              finish();
               await createAndOpen();
             },
           },
         }),
       ],
+    });
+    stopWatching = subscribe((state, changed) => {
+      if ("project" in changed && state.project) finish();
     });
   }
 

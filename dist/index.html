@@ -4442,6 +4442,9 @@ const strings = {
     welcomeTitle: "Начнём с объекта",
     welcomeText:
       "Объект — это дом или квартира. Внутри — схемы этажей, на них метки. Всё хранится в вашем браузере.",
+    // Вторая строка появилась вместе с кнопкой «Открыть файл»: без неё кнопка
+    // выглядит как «открыть план», а не «принести объект целиком».
+    welcomeFile: "Объект с другой машины или от напарника приходит файлом проекта — откройте его.",
     empty: "Объектов пока нет",
   },
   schemes: {
@@ -11560,6 +11563,11 @@ const SECTIONS_SETTING = "collapsedSections";
 // Линейка и направляющие: отметка рабочего места, а не свойство объекта.
 // Живёт в настройках браузера и переживает перезагрузку.
 const GUIDES_SETTING = "schemeGuidesShown";
+// Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
+// здесь, рядом с остальными, а не в панели объектов: его пишет и панель
+// объектов, и панель файла (объект, пришедший из архива, тоже становится
+// последним), а панели друг друга не знают.
+const LAST_PROJECT_KEY = "lastProjectId";
 // Связи меток: та же природа, что у линейки, — оснастка разбора, а не свойство
 // разметки. Живёт в настройках браузера, переживает перезагрузку, в объект и в
 // файл проекта не попадает.
@@ -23736,6 +23744,1251 @@ function mountExportPanel(host, api) {
 
 registerPanel(PANEL_IDS.headerActions, mountExportPanel);
 
+// src/panels/file.js
+// Файл проекта: «Экспорт», «Открыть файл», папка автосохранения и отметка
+// свежести выгрузки в шапке.
+//
+// Панель тонкая: zip пишет и читает `projectFile.js`, переприсваивание
+// идентификаторов и работу с папкой держит `autosave.js`. Здесь — кнопки,
+// диалоги и связь с состоянием сеанса.
+//
+// Своей точки монтирования в разметке у панели нет: она создаёт контейнер в
+// шапке сама, после того как каркас поднялся (`startApp` откладывается на конец
+// загрузки, и наш обработчик встаёт в очередь следом).
+
+
+
+
+
+
+
+
+
+// Отметка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
+const FILE_TICK_MS = 60000;
+// Сутки без выгрузки — уже «давно»: работа целого дня живёт только в браузере.
+const FILE_OLD_MS = 24 * 60 * 60 * 1000;
+// Четыре состояния отметки у кнопки экспорта. Цвет различает три — «выгружено
+// и правок нет», «пора выгрузить», «ни разу», — а словами подсказка говорит,
+// что именно случилось.
+const FILE_EXPORT_STATE = {
+  fresh: "file.exportStateFresh",
+  stale: "file.exportStateStale",
+  old: "file.exportStateOld",
+  never: "file.exportStateNever",
+};
+
+// Выбор при загрузке: по умолчанию новый объект, перезапись — отдельной
+// кнопкой и с подтверждением. Возвращает "new" | "replace" | null.
+function fileAskMode(project, hasCurrent) {
+  return new Promise((resolve) => {
+    let modal;
+    const answer = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const asNew = uiButton(strings.file.loadAsNew, {
+      class: "ui-btn ui-btn--accent",
+      on: { click: () => answer("new") },
+    });
+    const actions = [uiButton(strings.dialog.cancel, { on: { click: () => answer(null) } })];
+    if (hasCurrent) {
+      actions.push(uiButton(strings.file.loadReplace, { on: { click: () => answer("replace") } }));
+    }
+    actions.push(asNew);
+    modal = uiModal({
+      title: strings.file.loadTitle,
+      body: [
+        uiEl("p", {
+          class: "modal__text",
+          text: text("file.loadSummary", {
+            name: project.name,
+            schemes: (project.schemes || []).length,
+            marks: (project.marks || []).length,
+          }),
+        }),
+        uiEl("p", { class: "modal__hint", text: strings.file.loadHint }),
+      ],
+      actions,
+      primary: asNew,
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
+// Единственная дверь к файлу проекта снаружи панели. Выбор файла, разбор
+// архива, вопрос «новым объектом или вместо текущего» и приёмка живут здесь, и
+// стартовое окно зовёт ровно это: второго пути к файлу в сборке быть не должно.
+// Кнопка появляется до монтирования панели (она поднимается по DOMContentLoaded
+// вместе с шапкой), поэтому вызов до готовности честно отвечает «нет».
+let fileOpenDialog = null;
+function openProjectFileDialog() {
+  if (!fileOpenDialog) return false;
+  fileOpenDialog();
+  return true;
+}
+
+function mountFilePanel(host, api) {
+  const { getState, setState, notify, subscribe } = api;
+  // Ссылка на объект, который целиком уехал в файл: сравнение по ссылке
+  // честнее флага — правка, пришедшая во время упаковки, оставит dirty.
+  let fileSavedProject = null;
+  let fileFailReported = false;
+  // Опрос общей папки заводится один раз на выбранную папку.
+  let fileWatching = false;
+  // Имя, под которым объект лежит в папке. Сменилось после записи — значит,
+  // объект переименовали, и прежний файл больше не обновляется.
+  let fileSnapshotName = null;
+  // Про какие прежние файлы уже сказали и с какой парой «папка + объект» уже
+  // разбирались: дважды за сеанс спрашивать об одном и том же незачем. Счёт
+  // идёт по именам файлов, а не по объектам: у человека их несколько, и
+  // переключение туда-сюда не должно поднимать одно и то же окно.
+  const fileStaleTold = new Set();
+  let fileAdoptedKey = null;
+
+  // Файловые кнопки — значок и слово рядом: на планшете слово прячется стилями,
+  // и три кнопки перестают выдавливать шапку на вторую строку. Слово при этом
+  // остаётся в подсказке и в `aria-label`.
+  const saveButton = uiIconLabelButton("fileSave", strings.file.save, {
+    class: "ui-btn ui-btn--accent",
+    title: strings.file.saveHint,
+    on: { click: () => saveToFile() },
+  });
+  // Состояние выгрузки — не кнопка, и кричать громче кнопок ему нечего: раньше
+  // жёлтая строка занимала полшапки, теперь это точка на самой кнопке
+  // экспорта, а словами состояние названо в её подсказке.
+  const exportDot = uiEl("span", { class: "file__dot", attrs: { "aria-hidden": "true" } });
+  saveButton.prepend(exportDot);
+  const openButton = uiIconLabelButton("fileOpen", strings.file.open, {
+    title: strings.file.openHint,
+    on: { click: () => picker.click() },
+  });
+  const folderButton = uiIconLabelButton("folder", strings.autosave.pick, {
+    title: strings.autosave.pickHint,
+    on: { click: () => folderClick() },
+  });
+  const picker = uiEl("input", {
+    class: "file__picker",
+    type: "file",
+    attrs: { accept: ".zip,application/zip", hidden: "hidden" },
+    on: {
+      change: async () => {
+        const chosen = picker.files && picker.files[0];
+        picker.value = "";
+        if (chosen) await openFromFile(chosen);
+      },
+    },
+  });
+
+  const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveButton, picker]);
+  host.replaceChildren(row);
+  // Тот же выбор файла, что по кнопке в шапке: стартовое окно нажимает её же.
+  fileOpenDialog = () => picker.click();
+
+  // ——— сохранение в файл ————————————————————————————————————————————
+
+  async function saveToFile() {
+    const project = getState().project;
+    if (!project) {
+      notify(strings.file.noProject, "error");
+      return;
+    }
+    const line = uiEl("p", { class: "modal__text", text: strings.file.packing });
+    const modal = uiModal({
+      title: strings.file.packingTitle,
+      body: line,
+      actions: [],
+      dismissable: false,
+    });
+    try {
+      // Упаковка идёт через await на каждой записи: вкладка остаётся живой,
+      // а строка прогресса успевает перерисоваться.
+      const packedFile = await autosavePack(project, {
+        onProgress: ({ done, total, phase }) => {
+          // Сверка идёт после упаковки и на большом объекте занимает заметное
+          // время: молчащее окно выглядело бы как зависшая вкладка.
+          line.textContent =
+            phase === "check" ? strings.file.checking : text("file.packingProgress", { done, total });
+        },
+      });
+      exportDownload(packedFile.blob, packedFile.name);
+      await autosaveNoteExport(project.id);
+      markSaved(project);
+      notify(text("file.saved", { name: packedFile.name }), "success");
+    } catch (error) {
+      notify((error && error.message) || strings.file.saveFailed, "error");
+    } finally {
+      modal.close();
+      renderStatus();
+    }
+  }
+
+  // ——— загрузка из файла ————————————————————————————————————————————
+
+  async function openFromFile(chosen) {
+    const line = uiEl("p", { class: "modal__text", text: strings.file.reading });
+    const modal = uiModal({
+      title: strings.file.readingTitle,
+      body: line,
+      actions: [],
+      dismissable: false,
+    });
+    let loaded = null;
+    try {
+      loaded = await unpackProject(chosen, {
+        onProgress: ({ done, total }) => {
+          line.textContent = text("file.packingProgress", { done, total });
+        },
+      });
+    } catch (error) {
+      // Отказ ничего не трогает: текущий объект на экране и в базе как был.
+      modal.close();
+      notify((error && error.message) || strings.errors.notAProject, "error");
+      return;
+    }
+    modal.close();
+
+    const current = getState().project;
+    const mode = await fileAskMode(loaded.project, Boolean(current));
+    if (!mode) return;
+    if (mode === "replace") {
+      const agreed = await uiConfirm({
+        title: strings.file.replaceTitle,
+        message: text("file.replaceMessage", { name: current.name }),
+        confirmLabel: strings.file.replaceConfirm,
+      });
+      if (!agreed) return;
+    }
+    await applyLoaded(loaded, mode, current);
+  }
+
+  async function applyLoaded(loaded, mode, current) {
+    const line = uiEl("p", { class: "modal__text", text: strings.file.reading });
+    const modal = uiModal({ title: strings.file.readingTitle, body: line, actions: [], dismissable: false });
+    try {
+      // Картинки сперва ложатся в хранилище — идентификаторы выдаёт оно,
+      // и ровно эти идентификаторы получает приёмка объекта. Второго
+      // переприсваивания в сборке нет: ссылки схем чинятся один раз.
+      const imageIds = new Map();
+      for (const [oldId, blob] of loaded.images) imageIds.set(oldId, await putImage(blob));
+      const adopted = adoptLoadedProject(loaded, {
+        mode,
+        currentId: current ? current.id : null,
+        imageIds,
+      });
+      await saveProject(adopted.project);
+      await setSetting(LAST_PROJECT_KEY, adopted.project.id);
+
+      const schemes = schemesInOrder(adopted.project);
+      setState({
+        project: adopted.project,
+        schemeId: schemes.length > 0 ? schemes[0].id : null,
+        selectedMarkIds: [],
+        activeTypeId: null,
+      });
+      // Объект только что пришёл из файла — он и есть копия файла,
+      // и отметка выгрузки принадлежит уже новому идентификатору.
+      await autosaveNoteExport(adopted.project.id);
+      markSaved(adopted.project);
+      // Заменённый объект унёс с собой свои планы: картинки под старыми
+      // идентификаторами больше никому не нужны.
+      if (mode === "replace" && current) {
+        for (const scheme of current.schemes || []) {
+          if (scheme.imageId) await deleteImage(scheme.imageId);
+        }
+      }
+      notify(text("file.loaded", { name: adopted.project.name }), "success");
+    } catch (error) {
+      notify((error && error.message) || strings.errors.notAProject, "error");
+    } finally {
+      modal.close();
+      renderStatus();
+    }
+  }
+
+  // ——— папка автосохранения ————————————————————————————————————————
+
+  async function folderClick() {
+    const status = autosaveStatus();
+    if (!status.supported) {
+      notify(strings.autosave.unsupported, "info");
+      return;
+    }
+    if (status.folder && status.permission !== "granted") {
+      await autosaveGrant();
+      if (autosaveReady()) await writeToFolder();
+      renderStatus();
+      return;
+    }
+    if (status.folder) {
+      folderDialog();
+      return;
+    }
+    await pickFolder();
+  }
+
+  async function pickFolder() {
+    // Другая папка — другая история: и общий предок, и разговор о прежних
+    // файлах начинаются заново.
+    fileAdoptedKey = null;
+    fileSnapshotName = null;
+    try {
+      await autosavePickFolder();
+    } catch (error) {
+      // Отмена в системном окне выбора папки — не ошибка. Отказ по file://
+      // (SecurityError) — не поломка, а известное ограничение: страница,
+      // открытая с диска, в папку сохранять не умеет.
+      const name = error && error.name;
+      if (name === "SecurityError" || name === "NotAllowedError") notify(strings.autosave.unsupported, "info");
+      else if (name !== "AbortError") notify(strings.autosave.failed, "error");
+      renderStatus();
+      return;
+    }
+    if (autosaveReady()) await writeToFolder();
+    renderStatus();
+  }
+
+  function folderDialog() {
+    const status = autosaveStatus();
+    let modal;
+    modal = uiModal({
+      title: strings.autosave.dialogTitle,
+      body: uiEl("p", {
+        class: "modal__text",
+        text: text("autosave.dialogText", { name: status.folder, file: currentFileName() }),
+      }),
+      actions: [
+        uiButton(strings.dialog.close, { on: { click: () => modal.close() } }),
+        uiButton(strings.autosave.off, {
+          class: "ui-btn ui-btn--danger",
+          on: {
+            click: async () => {
+              modal.close();
+              await autosaveForget();
+              notify(strings.autosave.offDone, "info");
+              renderStatus();
+            },
+          },
+        }),
+        uiButton(strings.autosave.change, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: async () => {
+              modal.close();
+              await pickFolder();
+            },
+          },
+        }),
+      ],
+    });
+  }
+
+  function currentFileName() {
+    const project = getState().project;
+    return project ? autosaveSnapshotName(project) : "";
+  }
+
+  // Первая запись сразу после выбора папки: пользователь должен увидеть файл
+  // на месте, а не ждать следующей правки.
+  async function writeToFolder() {
+    const project = getState().project;
+    if (!project || !autosaveReady()) return;
+    onFolderWritten(await autosaveWrite(project));
+  }
+
+  // Об отказавшей записи говорим один раз — правок много, а беда одна.
+  function onFolderWritten(result) {
+    if (result && result.ok) {
+      fileFailReported = false;
+      if (result.project) markSaved(result.project);
+      // Имя снимка идёт за именем объекта: переименовали — записался новый
+      // файл, а прежний остался лежать. Молчать об этом нельзя, он ведь
+      // выглядит как рабочий.
+      if (result.name && result.name !== fileSnapshotName) {
+        const renamed = Boolean(fileSnapshotName);
+        fileSnapshotName = result.name;
+        if (renamed) folderStale();
+      }
+    } else if (result && result.error && !fileFailReported) {
+      fileFailReported = true;
+      // Не прошедшая сверка — не то же, что «не смогли записать»: файл в папке
+      // есть, но верить ему нельзя, и сказать надо именно это.
+      const failed =
+        result.error.code === "fileCheckFailed" ? strings.autosave.checkFailed : strings.autosave.failed;
+      notify(failed, "error");
+    }
+    renderStatus();
+  }
+
+  // ——— прежние файлы объекта в папке ————————————————————————————————
+  //
+  // Раньше снимок звался «<объект>-<дата>-<хвост>.zip» и заводился заново
+  // каждый день, поэтому у тех, кто ведёт объект давно, в папке лежит стопка
+  // файлов. Теперь файл один, а прежние — данные пользователя: удалять их
+  // молча нельзя, промолчать тоже (он их видит и не понимает, какой рабочий).
+
+  // Папка открыта — берём из своего снимка общего предка для слияния и
+  // заодно смотрим, не осталось ли в ней прежних файлов этого объекта.
+  async function folderAdopt() {
+    const project = getState().project;
+    const status = autosaveStatus();
+    if (!project || !autosaveReady()) return;
+    const key = status.folder + "|" + project.id;
+    if (fileAdoptedKey === key) return;
+    fileAdoptedKey = key;
+    fileSnapshotName = autosaveSnapshotName(project);
+    try {
+      const found = await autosaveAdoptFolder(project);
+      if (found) await tellAboutStale(found.stale);
+    } catch (error) {
+      // Папка могла стать недоступной — об этом скажет первая же запись.
+    }
+  }
+
+  // То же самое, но без предка: после переименования объекта предок у нас уже
+  // свой, а список прежних файлов надо перечитать.
+  async function folderStale() {
+    const project = getState().project;
+    if (!project || !autosaveReady()) return;
+    try {
+      const own = await autosaveOwnSnapshots(project);
+      const current = autosaveSnapshotName(project);
+      await tellAboutStale(own.filter((item) => item.name !== current));
+    } catch (error) {
+      /* папка недоступна — тем более не о чем говорить */
+    }
+  }
+
+  async function tellAboutStale(stale) {
+    const answered = await autosaveStaleKeptNames();
+    const list = (stale || []).filter((item) => !fileStaleTold.has(item.name) && !answered.includes(item.name));
+    if (list.length === 0) return;
+    for (const item of list) fileStaleTold.add(item.name);
+    staleDialog(list);
+  }
+
+  function staleDialog(stale) {
+    const names = uiEl("ul", { class: "merge-list" });
+    for (const item of stale) names.append(uiEl("li", { text: item.name }));
+    let modal;
+    const remove = uiButton(strings.autosave.staleRemove, {
+      class: "ui-btn ui-btn--danger",
+      on: {
+        click: async () => {
+          modal.close();
+          await removeStale(stale.map((item) => item.name));
+        },
+      },
+    });
+    // Окно всплывает само, без просьбы, — поэтому по Enter файлы остаются, а
+    // не удаляются: основное действие здесь безопасное. Ответ «оставить»
+    // запоминается: человек уже решил, и в следующем сеансе его не переспросят.
+    const keep = uiButton(strings.autosave.staleKeep, {
+      class: "ui-btn ui-btn--accent",
+      on: {
+        click: () => {
+          modal.close();
+          autosaveNoteStaleKept(stale.map((item) => item.name));
+        },
+      },
+    });
+    modal = uiModal({
+      title: strings.autosave.staleTitle,
+      body: [
+        uiEl("p", {
+          class: "modal__text",
+          text: text("autosave.staleText", { file: currentFileName(), count: stale.length }),
+        }),
+        names,
+        uiEl("p", { class: "modal__hint", text: strings.autosave.staleSafe }),
+      ],
+      actions: [remove, keep],
+      primary: keep,
+    });
+  }
+
+  async function removeStale(names) {
+    const project = getState().project;
+    if (!project) return;
+    let result = null;
+    try {
+      result = await autosaveRemoveSnapshots(project, names);
+    } catch (error) {
+      notify(strings.autosave.failed, "error");
+      return;
+    }
+    if (result.removed.length > 0) {
+      notify(text("autosave.staleRemoved", { count: result.removed.length }), "success");
+    }
+    if (result.kept.length > 0) {
+      notify(text("autosave.staleKept", { count: result.kept.length }), "error");
+    }
+  }
+
+  // ——— чужие правки в общей папке ————————————————————————————————————
+
+  // Чей вариант оставлен. Сторон три, а не две: вернувшуюся запись справочника
+  // слияние берёт и из общего снимка, когда у живых её не осталось.
+  function mergeSideName(kept) {
+    if (kept === "theirs") return strings.merge.sideTheirs;
+    if (kept === "base") return strings.merge.sideBase;
+    return strings.merge.sideOurs;
+  }
+
+  // Что пришло со стороны, построчно. Показывается, только когда есть о чём
+  // говорить: тост сообщает факт, список — подробности.
+  function mergeReport(result) {
+    const body = [uiEl("p", { class: "modal__text", text: text("merge.from", { file: result.file }) })];
+    const sections = [
+      [
+        strings.merge.incoming,
+        result.changes.map((change) => text("merge." + change.action, { label: change.label || change.id })),
+      ],
+      [
+        strings.merge.conflicts,
+        result.conflicts.map((conflict) =>
+          text("merge." + conflict.code, {
+            label: conflict.label || conflict.id,
+            side: mergeSideName(conflict.kept),
+          }),
+        ),
+      ],
+      [strings.merge.renumbered, result.renumbered.map((item) => text("merge.renumberedItem", item))],
+    ];
+    for (const [title, lines] of sections) {
+      if (lines.length === 0) continue;
+      body.push(uiEl("p", { class: "modal__text", text: title }));
+      const list = uiEl("ul", { class: "merge-list" });
+      for (const line of lines) list.append(uiEl("li", { text: line }));
+      body.push(list);
+    }
+    if (result.plans) {
+      body.push(uiEl("p", { class: "modal__text", text: text("merge.plans", { count: result.plans }) }));
+    }
+    body.push(uiEl("p", { class: "modal__text", text: strings.merge.historyCleared }));
+
+    const modal = uiModal({
+      title: strings.merge.title,
+      body,
+      actions: [uiButton(strings.merge.close, { on: { click: () => modal.close() } })],
+    });
+  }
+
+  // Слияние пришло со стороны — применяем его к сеансу и сразу публикуем
+  // обратно в папку: второй инженер должен увидеть сложенный объект, а не
+  // только свою половину.
+  function applyExternal(result) {
+    const state = getState();
+    if (!result || !result.project || !state.project) return;
+    // Пока читали папку, объект могли переключить — тогда это не его правка.
+    if (result.project.id !== state.project.id) return;
+    // Тихое слияние: не изменилось ничего, кроме служебных полей — постоянного
+    // ключа проекта и отметки времени. Ключ до объекта доехать должен (после
+    // этого родство перестаёт быть догадкой), но работой это не является:
+    // ни отчёта, ни обрыва истории, ни строки «приехали правки: 0».
+    if (result.quiet) {
+      setState({ project: result.project, dirty: true });
+      autosaveSchedule(result.project, { onDone: onFolderWritten });
+      renderStatus();
+      return;
+    }
+    setState({ project: result.project, dirty: true });
+    // Ctrl+Z отменяет действия пользователя, а не чужие: откат поверх слияния
+    // стёр бы чужую работу молча, поэтому стек истории здесь обрывается.
+    clearHistory();
+    const loud = result.counts.conflicts > 0;
+    notify(loud ? strings.merge.toastConflicts : text("merge.toast", result.counts), loud ? "error" : "info");
+    if (loud || result.counts.renumbered > 0) mergeReport(result);
+    autosaveSchedule(result.project, { onDone: onFolderWritten });
+    renderStatus();
+  }
+
+  function syncWatch() {
+    const ready = autosaveReady();
+    if (ready && !fileWatching) {
+      fileWatching = true;
+      autosaveWatch({ getProject: () => getState().project, onExternal: applyExternal });
+    } else if (!ready && fileWatching) {
+      fileWatching = false;
+      autosaveStopWatch();
+    }
+    // Не однажды: объект на экране появляется позже папки, а сам разбор
+    // повторного вызова не боится — он идёт один раз на пару «папка + объект».
+    if (ready) folderAdopt();
+  }
+
+  // ——— состояние и строка в шапке ————————————————————————————————————
+
+  function markSaved(project) {
+    fileSavedProject = project;
+    if (getState().project === project) setState({ dirty: false });
+  }
+
+  function renderStatus() {
+    const state = getState();
+    const status = autosaveStatus();
+    const projectId = state.project ? state.project.id : null;
+    // Режим просмотра: файл открывают, чтобы посмотреть. Сохранять нечего —
+    // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
+    const saving = layoutAllows("saveFile", state.layout);
+    saveButton.hidden = !saving;
+    const exported = autosaveLastExport(projectId);
+    const stamp = exported ? Date.parse(exported) : Number.NaN;
+    let mark = "never";
+    if (!Number.isNaN(stamp)) {
+      if (state.dirty) mark = "stale";
+      else mark = Date.now() - stamp > FILE_OLD_MS ? "old" : "fresh";
+    }
+    exportDot.className = "file__dot is-" + mark;
+    const said = text(FILE_EXPORT_STATE[mark], { ago: autosaveAgoText(exported) });
+    // Папка автосохранения бывает недоступна (страница открыта с диска) — и
+    // сказать об этом больше негде: кнопки папки в этом случае нет вовсе.
+    uiButtonLabel(
+      saveButton,
+      strings.file.save,
+      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported),
+    );
+    row.classList.toggle("is-busy", Boolean(status.busy));
+    row.classList.toggle("is-dirty", Boolean(state.dirty));
+
+    folderButton.hidden = !status.supported || !saving;
+    if (!status.supported || !saving) return;
+    if (!status.folder) {
+      uiButtonLabel(folderButton, strings.autosave.pick, strings.autosave.pickHint);
+      folderButton.classList.remove("is-on");
+      return;
+    }
+    if (status.permission !== "granted") {
+      uiButtonLabel(folderButton, strings.autosave.allow, text("autosave.allowHint", { name: status.folder }));
+      folderButton.classList.remove("is-on");
+      return;
+    }
+    uiButtonLabel(folderButton, text("autosave.folder", { name: status.folder }), strings.autosave.dialogTitle);
+    folderButton.classList.add("is-on");
+  }
+
+  // Список объектов держит своя панель и перечитывает его по своим поводам:
+  // объект, пришедший из файла, ей неизвестен. Чиним ровно одно — чтобы в
+  // выпадающем списке стоял тот объект, который на экране.
+  function syncProjectSelect(project) {
+    const select = document.querySelector("#project-actions select");
+    if (!select || !project) return;
+    let option = [...select.options].find((item) => item.value === project.id);
+    if (!option) {
+      option = uiEl("option", { value: project.id, text: project.name });
+      select.append(option);
+    }
+    option.textContent = project.name;
+    select.value = project.id;
+  }
+
+  // Панель объектов перечитывает свой список только по своим поводам, в том
+  // числе отложенно, после сохранения в браузер, — и объект, пришедший из
+  // файла, ей неизвестен. Поэтому чиним не однажды, а на каждую перерисовку
+  // списка: в нём должен стоять тот объект, который сейчас на экране.
+  const projectSelect = document.querySelector("#project-actions select");
+  if (projectSelect && typeof MutationObserver === "function") {
+    new MutationObserver(() => syncProjectSelect(getState().project)).observe(projectSelect, { childList: true });
+  }
+
+  subscribe((state, changed) => {
+    if ("layout" in changed) renderStatus();
+    if (!("project" in changed)) {
+      // Отметка у кнопки экспорта живёт на том же признаке: правка, ещё не
+      // уехавшая в файл, обязана быть видна сразу.
+      if ("dirty" in changed) renderStatus();
+      return;
+    }
+    syncProjectSelect(state.project);
+    // Объект переключили — предок слияния берётся из его снимка, а не из
+    // чужого; заодно видно, не осталось ли в папке его прежних файлов.
+    syncWatch();
+    if (state.project && state.project !== fileSavedProject) {
+      // Не вложенным вызовом: подписчики сейчас в середине обхода.
+      queueMicrotask(() => {
+        if (getState().project !== fileSavedProject) setState({ dirty: true });
+      });
+      // Пока папка выбрана, «несохранённого» состояния почти не бывает:
+      // запись уходит сама, с задержкой и по одной за раз.
+      autosaveSchedule(state.project, { onDone: onFolderWritten });
+    }
+    renderStatus();
+  });
+
+  // Ctrl+S — привычка, а не сюрприз: браузерное «сохранить страницу» здесь
+  // бесполезно. Пока открыт диалог, горячие клавиши молчат.
+  //
+  // Клавиша физическая (`event.code`), как и всё остальное здесь: в русской
+  // раскладке на этой кнопке «ы», и сравнение по `event.key` молчало бы ровно
+  // у тех, кто размечает планы по-русски, — то есть у всех.
+  document.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.code !== "KeyS") return;
+    if (uiDialogDepth() > 0) return;
+    event.preventDefault();
+    saveToFile();
+  });
+
+  // Вкладку прячут чаще, чем закрывают, и это единственный момент, когда
+  // дослать отложенную запись можно по-настоящему: обработчик закрытия уже
+  // ничего не дождётся.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && autosavePendingWrite()) autosaveFlush({ onDone: onFolderWritten });
+  });
+
+  // Работа, которой нет ни в папке, ни в файле, не должна уезжать молча.
+  // Отложенную запись досылаем прямо здесь — она успеет, если пользователь
+  // задержится на вопросе или передумает закрывать. Пообещать это нельзя,
+  // поэтому, пока запись не легла, вопрос задаётся и при выбранной папке.
+  window.addEventListener("beforeunload", (event) => {
+    const waiting = autosavePendingWrite();
+    if (waiting) autosaveFlush({ onDone: onFolderWritten });
+    if (!getState().dirty) return;
+    if (autosaveReady() && !waiting) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  onAutosaveChange(() => {
+    renderStatus();
+    syncWatch();
+  });
+  setInterval(() => renderStatus(), FILE_TICK_MS);
+
+  (async () => {
+    await autosaveRestore();
+    syncWatch();
+    renderStatus();
+  })();
+  renderStatus();
+}
+
+// Контейнер в шапке панель заводит сама: точки монтирования для неё в разметке
+// нет, а править разметку последним таском — лишний повод сломать сборку.
+function startFilePanel() {
+  const header = document.getElementById("app-header");
+  if (!header || document.getElementById("file-actions")) return;
+  const host = uiEl("div", { class: "mount" });
+  host.id = "file-actions";
+  header.append(host);
+  mountFilePanel(host, panelApi());
+}
+
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startFilePanel, { once: true });
+  } else {
+    setTimeout(startFilePanel, 0);
+  }
+}
+
+// src/panels/links.js
+// Переключатель связей в шапке — сосед счётчика предупреждений справа.
+//
+// Связи («чем управляет») живут в объекте с давних пор, но на плане их до сих
+// пор не было видно: список меток говорил «Управляет: Т1, Т2», а где эти Т1 и
+// Т2 лежат — приходилось искать глазами. Кнопка зажигает на плане три рода
+// соединений сразу: управление (дуга со стрелкой), общее управление (прямая с
+// засечками между равными) и общий номер (оболочка вокруг группы).
+//
+// **Кнопка одна на все три рода.** Три кнопки в шапке — приборная панель, а
+// история у них одна: «покажи разбор». Выключать паутину частями есть чем и
+// без второй кнопки — выделением (см. `canvas.canvasFrameLinks`).
+//
+// **Выключенная кнопка не значит «связей не видно»**: выделенная метка свои
+// связи показывает и так. Кнопка добавляет к этому все остальные — она про
+// охват, а не про «рисовать или нет». Слова заказчика: «если связи не
+// включены, то при выделении метки да, пусть показываются её связи».
+//
+// Сама панель не рисует ничего: она правит одну отметку состояния, а рисует
+// холст (`canvas.canvasFrameLinks` → `render.drawMarkLinks`). Отметка живёт в
+// настройках браузера, как отметка линейки: это оснастка разбора, а не свойство
+// разметки, и в объект с файлом проекта ей не за чем.
+
+
+
+
+
+
+/**
+ * Что сказать пользователю в тот миг, когда он включил связи. Чистая: план
+ * подсказки считается от объекта, а не от DOM.
+ *
+ * Молчать нельзя в двух случаях. Первый — показывать нечего: связей на схеме
+ * нет вовсе, и погасший план читался бы как «кнопка сломана». Второй — часть
+ * связей ведёт на другую схему: линию через границу листа не провести, у метки
+ * рисуется обрывок, и про него надо сказать словами хотя бы раз.
+ */
+function linksNotice(project, scheme, filter) {
+  const links = markLinks(project, scheme, filter);
+  const away = links.offScheme.reduce((sum, item) => sum + item.count, 0);
+  const drawn = links.lines.length + links.ties.length + links.groups.length;
+  if (drawn === 0 && away === 0) return strings.links.none;
+  if (away > 0) return text("links.away", { count: away });
+  return null;
+}
+
+// Подсказка кнопки: что она сделает, что видно сейчас и как связи попадают в
+// выгрузку. Три строки — потому что отвечать на эти три вопроса больше негде:
+// кнопка одна, а режима у показа два.
+function linksHint(shown) {
+  const first = shown ? strings.links.hideHint : strings.links.showHint;
+  const scope = shown ? strings.links.scopeOn : strings.links.scopeOff;
+  return [first, scope, strings.links.inExport].join(". ");
+}
+
+function mountLinksPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
+
+  const toggle = uiIconButton("link", {
+    class: "ui-btn links__toggle",
+    label: strings.links.show,
+    title: strings.links.showHint,
+    on: { click: () => flip() },
+  });
+  toggle.setAttribute("aria-pressed", "false");
+  host.replaceChildren(toggle);
+
+  function flip() {
+    const state = getState();
+    const next = state.linksShown !== true;
+    setState({ linksShown: next });
+    setSetting(LINKS_SETTING, next);
+    if (!next) return;
+    // Сказать про пустоту и про связи на другие схемы — один раз, в момент
+    // включения. Держать это в подсказке кнопки бесполезно: на неё не наводят.
+    const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
+    if (!scheme) return;
+    const notice = linksNotice(state.project, scheme, state.filter);
+    if (notice) notify(notice, "info");
+  }
+
+  function refresh(state) {
+    const shown = Boolean(state.project) && layoutAllows("markLinks", state.layout);
+    host.hidden = !shown;
+    const on = state.linksShown === true;
+    toggle.classList.toggle("is-on", on);
+    toggle.setAttribute("aria-pressed", on ? "true" : "false");
+    toggle.setAttribute("aria-label", on ? strings.links.hide : strings.links.show);
+    toggle.title = linksHint(on);
+  }
+
+  subscribe((state, changed) => {
+    if ("project" in changed || "layout" in changed || "linksShown" in changed) refresh(state);
+  });
+
+  refresh(getState());
+}
+
+registerPanel(PANEL_IDS.headerLinks, mountLinksPanel);
+
+// src/panels/markSizes.js
+// Окно размеров метки: длина, ширина и высота над полом.
+//
+// Отдельный файл по той же причине, что и `markControls.js`: в строке списка
+// этому тесно. Строка метки и так собирает семь полей, а три числа, которые
+// заполняют не в момент постановки, а потом и не у каждой метки, в неё не
+// помещаются — заказчик сам попросил «отдельное окно».
+//
+// Единицу окно не выбирает и не переводит: в модели лежат миллиметры
+// (`MARK_DIMENSION_UNIT`), словом их называет `strings.markSizes.unit`.
+// Здесь она только подставляется в подписи — чтобы была видна, а не
+// подразумевалась.
+
+
+
+// Подпись поля с единицей: «Длина, мм». Складывается подстановкой, чтобы
+// единица была написана в словаре один раз.
+function markSizesLabel(field) {
+  return text("markSizes." + field, { unit: strings.markSizes.unit });
+}
+
+// Число в подпись кнопки. Дробное пишется через запятую — так его и набирают;
+// в поле ввода оно остаётся с точкой, иначе `input[type=number]` его не примет.
+function markSizesNumber(value) {
+  return String(value).replace(".", ",");
+}
+
+/**
+ * Что показывает кнопка в строке метки: «Д 600 · Ш 400 · В 900 мм» по заданным
+ * размерам и пустая строка, если не задан ни один.
+ *
+ * Считается здесь, а не в разметке: «у метки размеров нет» должно быть видно
+ * без открытия окна — и проверяться без браузера. Соседние кнопки устроены так
+ * же: «Оборудование: 2» и «Управляет: Т1, Т2» тоже говорят содержимым.
+ */
+function markSizesSummary(mark) {
+  const values = markDimensions(mark);
+  const parts = [];
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (values[field] === null) continue;
+    parts.push(strings.markSizes[field + "Short"] + " " + markSizesNumber(values[field]));
+  }
+  if (parts.length === 0) return "";
+  return text("markSizes.summary", { values: parts.join(" · "), unit: strings.markSizes.unit });
+}
+
+/**
+ * Разбор трёх полей окна. Пустое — `null` («не задано»), ноль — значение,
+ * отрицательное и нечисловое — в `invalid`: окно на них не закрывается, а
+ * подсвечивает поле. Правило одно с моделью — это её же `markDimensionValue`.
+ */
+function markSizesParse(raw) {
+  const values = {};
+  const invalid = [];
+  for (const field of MARK_DIMENSION_FIELDS) {
+    try {
+      values[field] = markDimensionValue(raw ? raw[field] : null);
+    } catch (error) {
+      values[field] = null;
+      invalid.push({ field, message: error && error.message ? error.message : String(error) });
+    }
+  }
+  return { values, invalid };
+}
+
+/**
+ * Окно правки. Отвечает тремя значениями (`null` — «не задано») или `null`,
+ * если передумали. Сохраняет ответ в объект не оно, а список меток: правка
+ * идёт через `canvasCommit`, и место у неё одно — там же, где остальные
+ * правки строки.
+ */
+function openMarkSizesPicker(project, markId) {
+  return new Promise((resolve) => {
+    const mark = findMark(project, markId);
+    const current = markDimensions(mark);
+    const inputs = new Map();
+    const error = uiEl("p", { class: "sizes__error" });
+    error.hidden = true;
+
+    const rows = MARK_DIMENSION_FIELDS.map((field) => {
+      const label = markSizesLabel(field);
+      const input = uiEl("input", {
+        class: "ui-input sizes__input",
+        type: "number",
+        value: current[field] === null ? "" : String(current[field]),
+        title: label,
+        attrs: { min: "0", max: String(MARK_DIMENSION_MAX), step: "1", inputmode: "decimal" },
+      });
+      inputs.set(field, input);
+      return uiEl("label", { class: "sizes__row" }, [
+        uiEl("span", { class: "sizes__label", text: label }),
+        input,
+      ]);
+    });
+
+    let modal;
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    const save = () => {
+      const raw = {};
+      for (const [field, input] of inputs) raw[field] = input.value;
+      const parsed = markSizesParse(raw);
+      for (const [field, input] of inputs) {
+        input.classList.toggle("is-bad", parsed.invalid.some((item) => item.field === field));
+      }
+      if (parsed.invalid.length > 0) {
+        error.textContent = parsed.invalid[0].message;
+        error.hidden = false;
+        inputs.get(parsed.invalid[0].field).focus();
+        return;
+      }
+      done(parsed.values);
+    };
+
+    modal = uiModal({
+      title: text("markSizes.title", { label: labelOf(project, markId) }),
+      body: uiEl("div", { class: "sizes" }, [
+        uiEl("p", { class: "modal__hint", text: strings.markSizes.hint }),
+        ...rows,
+        error,
+      ]),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(strings.markSizes.save, { class: "ui-btn ui-btn--accent", on: { click: () => save() } }),
+      ],
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
+// src/panels/rooms.js
+// Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
+// меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
+// меток, — поэтому главное здесь не список, а `roomsEnsure`: одно и то же
+// название не должно плодить двойников.
+//
+// Дом у помещений один — этот раздел. Ни окна, ни кнопки в правой колонке
+// больше нет: заводить, переименовывать, красить, считать метки и удалять
+// можно только здесь.
+
+
+
+
+
+
+// Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
+// и цвета соседних комнат, и цвета категорий: контуров на плане бывает
+// десяток, а метка своей же комнаты не должна повторять цвет её заливки.
+function roomColorField(project, room, onChange) {
+  return colorPickerButton({
+    value: room.color,
+    used: colorsInUse(project, { exceptRoomId: room.id }),
+    title: strings.rooms.color,
+    onPick: onChange,
+  });
+}
+
+function roomsKey(name) {
+  return String(name == null ? "" : name).trim().toLowerCase();
+}
+function roomsFind(project, name) {
+  const key = roomsKey(name);
+  if (!key) return null;
+  return project.rooms.find((room) => roomsKey(room.name) === key) || null;
+}
+
+// «Было или заведём»: пустое название — это «без помещения», а не комната
+// с пустым именем.
+function roomsEnsure(project, name) {
+  const found = roomsFind(project, name);
+  if (found) return { project, room: found };
+  if (!roomsKey(name)) return { project, room: null };
+  const created = addRoom(project, name);
+  return { project: created.project, room: created.room };
+}
+function roomsUsage(project, roomId) {
+  return project.marks.filter((mark) => mark.roomId === roomId).length;
+}
+
+// Строки списка: комната, сколько у неё меток и есть ли контур на этой схеме.
+// Чистая функция — на ней и стоят тесты раздела.
+function roomsRows(project, schemeId) {
+  const outlines = schemeId ? outlinesInOrder(project, schemeId) : [];
+  return roomsInOrder(project).map((room) => {
+    const outline = outlines.find((item) => item.roomId === room.id) || null;
+    return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
+  });
+}
+
+// Что делает поле добавления: завести комнату или — если такая уже есть —
+// сразу обвести её заново. Вторая ветка и заменяет прежний выбор помещения
+// из раздела «Метки»: там можно было взять комнату с контуром и обвести ещё раз.
+function roomsAddAction(project, name) {
+  const trimmed = String(name == null ? "" : name).trim();
+  if (!trimmed) return { kind: "none", roomId: null, name: "" };
+  const found = roomsFind(project, trimmed);
+  return found
+    ? { kind: "draw", roomId: found.id, name: trimmed }
+    : { kind: "create", roomId: null, name: trimmed };
+}
+
+// Что делает кнопка контура: нарисовать новый или править вершины прежнего.
+// Правка — это режим выбора с выделенным контуром: дальше вершины таскаются
+// на холсте, «+» на стенке добавляет, двойной клик убирает.
+function roomsOutlineAction(row) {
+  return row && row.outlineId ? "edit" : "draw";
+}
+
+function mountRoomsPanel(host, api) {
+  const { getState, setState, subscribe, notify } = api;
+  const list = uiEl("div", { class: "rooms" });
+  const input = uiEl("input", {
+    class: "ui-input",
+    type: "text",
+    placeholder: strings.rooms.namePlaceholder,
+    on: {
+      keydown: (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        addAndDraw();
+      },
+    },
+  });
+  const addButton = uiButton(strings.rooms.addAndDraw, {
+    class: "ui-btn ui-btn--accent",
+    title: strings.rooms.addAndDrawHint,
+    on: { click: () => addAndDraw() },
+  });
+  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton]));
+
+  function project() {
+    return getState().project;
+  }
+
+  function fail(error) {
+    notify(error && error.message ? error.message : String(error), "error");
+  }
+
+  function commit(after, label, options) {
+    canvasCommit(project(), after, label, options);
+  }
+
+  // Комната заводится и сразу берётся в обводку: режим рисования включается тем
+  // же шагом истории, искать его отдельно не нужно.
+  function addAndDraw() {
+    const state = getState();
+    if (!state.project) return;
+    const action = roomsAddAction(state.project, input.value);
+    if (action.kind === "none") return;
+    if (action.kind === "draw") {
+      input.value = "";
+      startDrawing(action.roomId);
+      return;
+    }
+    try {
+      const created = addRoom(state.project, action.name);
+      input.value = "";
+      canvasCommit(state.project, created.project, strings.history.addRoom, {
+        patch: drawPatch(created.room.id),
+      });
+      if (!state.schemeId) notify(strings.canvas.needScheme);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // Без схемы рисовать негде: комната заводится, режим остаётся прежним.
+  function drawPatch(roomId) {
+    return getState().schemeId
+      ? { activeRoomId: roomId, mode: "room", selectedOutlineId: null }
+      : { activeRoomId: roomId };
+  }
+
+  // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
+  // вершины на плане.
+  function startOutline(roomId) {
+    const state = getState();
+    if (!state.schemeId) {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
+    if (roomsOutlineAction(row) !== "edit") {
+      startDrawing(roomId);
+      return;
+    }
+    setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
+    notify(strings.rooms.outlineEditing);
+  }
+
+  // Обводка с нуля — та самая дорога, что была в разделе «Метки»: она осталась
+  // и для комнаты, у которой контур уже есть (вписать её название в поле).
+  function startDrawing(roomId) {
+    if (!getState().schemeId) {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
+  }
+
+  function rename(roomId, name) {
+    const current = findRoom(project(), roomId);
+    if (!current || name.trim() === current.name) return;
+    try {
+      commit(updateRoom(project(), roomId, { name }).project, strings.history.renameRoom);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  function recolor(roomId, color) {
+    const current = findRoom(project(), roomId);
+    // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
+    // сравнение без учёта регистра бережёт историю от пустого шага.
+    if (!current || String(current.color || "").toUpperCase() === String(color).toUpperCase()) return;
+    try {
+      commit(updateRoom(project(), roomId, { color }).project, strings.history.roomColor);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  async function remove(roomId) {
+    const current = findRoom(project(), roomId);
+    if (!current) return;
+    const agreed = await uiConfirm({
+      title: strings.rooms.removeTitle,
+      message: text("rooms.removeMessage", { name: current.name, count: roomsUsage(project(), roomId) }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    const fresh = project();
+    if (!findRoom(fresh, roomId)) return;
+    canvasCommit(fresh, deleteRoom(fresh, roomId).project, strings.history.removeRoom);
+  }
+
+  function render() {
+    const state = getState();
+    if (!state.project) {
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
+      setSectionBadge(SECTION_IDS.rooms, "");
+      input.disabled = true;
+      addButton.disabled = true;
+      return;
+    }
+    input.disabled = false;
+    addButton.disabled = false;
+    const rows = roomsRows(state.project, state.schemeId);
+    setSectionBadge(SECTION_IDS.rooms, rows.length || "");
+    if (rows.length === 0) {
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
+      return;
+    }
+    list.replaceChildren(
+      ...rows.map((row) => {
+        const drawing = state.mode === "room" && state.activeRoomId === row.room.id;
+        const editing = Boolean(row.outlineId) && state.selectedOutlineId === row.outlineId;
+        const action = roomsOutlineAction(row);
+        return uiEl("div", { class: "rooms__row" + (drawing || editing ? " is-active" : "") }, [
+          roomColorField(state.project, row.room, (color) => recolor(row.room.id, color)),
+          uiEl("input", {
+            class: "ui-input rooms__name",
+            type: "text",
+            value: row.room.name,
+            on: { change: (event) => rename(row.room.id, event.target.value) },
+          }),
+          // Счётчик числом: в узкой колонке «меток: 3» съедало имя комнаты,
+          // а пояснение живёт в подсказке.
+          uiEl("span", {
+            class: "rooms__count",
+            text: String(row.marks),
+            title: text("rooms.marks", { count: row.marks }),
+          }),
+          uiIconButton("outline", {
+            class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
+            title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
+            on: { click: () => startOutline(row.room.id) },
+          }),
+          uiIconButton("trash", {
+            class: "ui-btn ui-btn--danger",
+            title: strings.rooms.remove,
+            on: { click: () => remove(row.room.id) },
+          }),
+        ]);
+      }),
+    );
+  }
+
+  subscribe((state, changed) => {
+    if (
+      "project" in changed ||
+      "schemeId" in changed ||
+      "mode" in changed ||
+      "activeRoomId" in changed ||
+      "selectedOutlineId" in changed
+    ) {
+      render();
+    }
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
+
 // src/panels/types.js
 // Справочник объекта: типы меток, категории, помещения и шаблон для новых
 // объектов.
@@ -24980,1469 +26233,6 @@ function mountTypesPanel(host, api) {
 
 registerPanel(PANEL_IDS.properties, mountTypesPanel);
 
-// src/panels/projects.js
-// Объекты: список в шапке, переключение, переименование, удаление,
-// первый запуск и автосохранение в браузер.
-const LAST_PROJECT_KEY = "lastProjectId";
-const SAVE_DELAY_MS = 400;
-
-function uniqueProjectName(list) {
-  const base = strings.project.untitled;
-  const taken = new Set(list.map((item) => item.name));
-  if (!taken.has(base)) return base;
-  let index = 2;
-  while (taken.has(base + " " + index)) index += 1;
-  return base + " " + index;
-}
-
-function mountProjectsPanel(host, api) {
-  const { getState, setState, notify, subscribe } = api;
-  let known = [];
-  let saveTimer = null;
-  let lowSpaceReported = false;
-
-  const select = uiEl("select", {
-    class: "ui-select",
-    title: strings.projects.switch,
-    on: {
-      change: () => {
-        const id = select.value;
-        if (id && id !== currentId()) openProjectById(id);
-      },
-    },
-  });
-  // Значки, а не символы шрифта: рядом в шапке стоят отмена, возврат и поиск,
-  // нарисованные линиями, и «＋» с корзиной-эмодзи выпадали из ряда — у них
-  // своя толщина, свой размер и свой цвет. Слово у каждой кнопки осталось:
-  // оно в подсказке и в `aria-label`.
-  const renameButton = uiIconButton("edit", {
-    label: strings.projects.rename,
-    on: { click: () => renameCurrent() },
-  });
-  const createButton = uiIconButton("plus", {
-    label: strings.projects.create,
-    on: { click: () => createAndOpen() },
-  });
-  // Опасность удаления несла красная эмодзи; теперь её несёт сама кнопка —
-  // красной рамкой и подложкой под курсором (`.ui-btn--danger` в panels.css).
-  const removeButton = uiIconButton("trash", {
-    class: "ui-btn ui-btn--danger",
-    label: strings.projects.remove,
-    on: { click: () => removeCurrent() },
-  });
-  host.replaceChildren(select, createButton, renameButton, removeButton);
-
-  function currentId() {
-    const state = getState();
-    return state.project ? state.project.id : "";
-  }
-
-  function renderList() {
-    const id = currentId();
-    select.replaceChildren();
-    if (known.length === 0) {
-      select.append(uiEl("option", { value: "", text: strings.projects.empty }));
-    }
-    for (const item of known) {
-      select.append(uiEl("option", { value: item.id, text: item.name }));
-    }
-    select.value = id;
-    const has = Boolean(id);
-    renameButton.disabled = !has;
-    removeButton.disabled = !has;
-    // Режим просмотра: объект выбирается, но не заводится, не переименовывается
-    // и не удаляется — на объекте с телефоном это только риск.
-    const editable = layoutAllows("editProject", getState().layout);
-    createButton.hidden = !editable;
-    renameButton.hidden = !editable;
-    removeButton.hidden = !editable;
-  }
-
-  async function refreshList() {
-    known = await listProjects();
-    renderList();
-  }
-
-  async function openProjectById(id) {
-    const stored = await loadProject(id);
-    if (!stored) {
-      await refreshList();
-      return;
-    }
-    // Объект из базы браузера мимо `projectFile.migrateProject` не проходит,
-    // а вид типа (точка или линия) у прежних объектов не записан. Дописывается
-    // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
-    // открывался бы по-разному из базы и из архива.
-    const migrated = migrateTypeKinds(stored).project;
-    // Постоянный ключ у объектов, заведённых до его появления, дописывается
-    // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
-    // трогается, в истории отмены ничего не появляется, а в базу объект
-    // ложится сразу, чтобы ключ не заводился заново при каждом открытии.
-    const keyed = ensureProjectKey(migrated);
-    const project = keyed.project;
-    if (keyed.changed) await saveProject(project);
-    setState({
-      project,
-      schemeId: project.schemes.length > 0 ? project.schemes[0].id : null,
-      selectedMarkIds: [],
-      activeTypeId: null,
-    });
-    await setSetting(LAST_PROJECT_KEY, id);
-    renderList();
-  }
-
-  // Новый объект начинается с сохранённого справочника, если он есть: копия
-  // шаблона с новыми идентификаторами, дальше объект живёт своей жизнью.
-  async function createAndOpen() {
-    const saved = await getSetting(TYPE_TEMPLATE_KEY);
-    const template = typesTemplateFrom(saved);
-    const project = createProject({ name: uniqueProjectName(known), ...(template || {}) });
-    await saveProject(project);
-    await refreshList();
-    setState({ project, schemeId: null, selectedMarkIds: [], activeTypeId: null });
-    await setSetting(LAST_PROJECT_KEY, project.id);
-    renderList();
-    notify(text("projects.created", { name: project.name }), "success");
-    return project;
-  }
-
-  async function renameCurrent() {
-    const state = getState();
-    if (!state.project) return;
-    const name = await uiPrompt({
-      title: strings.projects.renameTitle,
-      value: state.project.name,
-      placeholder: strings.projects.namePlaceholder,
-    });
-    if (!name || name === state.project.name) return;
-    const next = updateProject(state.project, { name });
-    setState({ project: next.project });
-    await refreshList();
-  }
-
-  async function removeCurrent() {
-    const state = getState();
-    if (!state.project) return;
-    const project = state.project;
-    const agreed = await uiConfirm({
-      title: strings.projects.removeTitle,
-      message: text("projects.removeMessage", { name: project.name }),
-      confirmLabel: strings.dialog.confirm,
-    });
-    if (!agreed) return;
-    for (const scheme of project.schemes) {
-      if (scheme.imageId) await deleteImage(scheme.imageId);
-    }
-    await deleteProject(project.id);
-    setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
-    notify(text("projects.removed", { name: project.name }), "success");
-    await refreshList();
-    if (known.length > 0) await openProjectById(known[0].id);
-    else showWelcome();
-  }
-
-  // Первый запуск: не пустая серая страница, а одна кнопка.
-  function showWelcome() {
-    const modal = uiModal({
-      title: strings.projects.welcomeTitle,
-      dismissable: false,
-      body: uiEl("p", { class: "modal__text", text: strings.projects.welcomeText }),
-      actions: [
-        uiButton(strings.projects.createTitle, {
-          class: "ui-btn ui-btn--accent",
-          on: {
-            click: async () => {
-              modal.close();
-              await createAndOpen();
-            },
-          },
-        }),
-      ],
-    });
-  }
-
-  function scheduleSave(project) {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      saveTimer = null;
-      const result = await saveProject(project);
-      if (result.ok) {
-        known = known.map((item) =>
-          item.id === project.id
-            ? { ...item, name: project.name, updatedAt: project.updatedAt, schemes: project.schemes.length, marks: project.marks.length }
-            : item,
-        );
-        renderList();
-        await checkSpace();
-      }
-    }, SAVE_DELAY_MS);
-  }
-
-  async function checkSpace() {
-    if (lowSpaceReported) return;
-    const space = await estimateSpace();
-    if (!space.low) return;
-    lowSpaceReported = true;
-    notify(text("storage.lowSpace", { free: formatMegabytes(space.free) }), "error");
-  }
-
-  onStoreProblem((problem) => {
-    notify(problem.kind === "unavailable" ? strings.storage.memory : strings.storage.writeFailed, "error");
-  });
-
-  subscribe((state, changed) => {
-    if ("layout" in changed) renderList();
-    if (!("project" in changed)) return;
-    renderList();
-    if (state.project) scheduleSave(state.project);
-  });
-
-  (async () => {
-    await openStore();
-    await refreshList();
-    const lastId = await getSetting(LAST_PROJECT_KEY);
-    const target = known.find((item) => item.id === lastId) || known[0] || null;
-    if (target) await openProjectById(target.id);
-    else showWelcome();
-    await checkSpace();
-    if (storeMode() === "memory") renderList();
-  })();
-}
-
-registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
-
-// src/panels/file.js
-// Файл проекта: «Экспорт», «Открыть файл», папка автосохранения и отметка
-// свежести выгрузки в шапке.
-//
-// Панель тонкая: zip пишет и читает `projectFile.js`, переприсваивание
-// идентификаторов и работу с папкой держит `autosave.js`. Здесь — кнопки,
-// диалоги и связь с состоянием сеанса.
-//
-// Своей точки монтирования в разметке у панели нет: она создаёт контейнер в
-// шапке сама, после того как каркас поднялся (`startApp` откладывается на конец
-// загрузки, и наш обработчик встаёт в очередь следом).
-
-
-
-
-
-
-
-
-
-
-// Отметка «выгружено N назад» стареет сама по себе: раз в минуту обновляем.
-const FILE_TICK_MS = 60000;
-// Сутки без выгрузки — уже «давно»: работа целого дня живёт только в браузере.
-const FILE_OLD_MS = 24 * 60 * 60 * 1000;
-// Четыре состояния отметки у кнопки экспорта. Цвет различает три — «выгружено
-// и правок нет», «пора выгрузить», «ни разу», — а словами подсказка говорит,
-// что именно случилось.
-const FILE_EXPORT_STATE = {
-  fresh: "file.exportStateFresh",
-  stale: "file.exportStateStale",
-  old: "file.exportStateOld",
-  never: "file.exportStateNever",
-};
-
-// Выбор при загрузке: по умолчанию новый объект, перезапись — отдельной
-// кнопкой и с подтверждением. Возвращает "new" | "replace" | null.
-function fileAskMode(project, hasCurrent) {
-  return new Promise((resolve) => {
-    let modal;
-    const answer = (value) => {
-      modal.close();
-      resolve(value);
-    };
-    const asNew = uiButton(strings.file.loadAsNew, {
-      class: "ui-btn ui-btn--accent",
-      on: { click: () => answer("new") },
-    });
-    const actions = [uiButton(strings.dialog.cancel, { on: { click: () => answer(null) } })];
-    if (hasCurrent) {
-      actions.push(uiButton(strings.file.loadReplace, { on: { click: () => answer("replace") } }));
-    }
-    actions.push(asNew);
-    modal = uiModal({
-      title: strings.file.loadTitle,
-      body: [
-        uiEl("p", {
-          class: "modal__text",
-          text: text("file.loadSummary", {
-            name: project.name,
-            schemes: (project.schemes || []).length,
-            marks: (project.marks || []).length,
-          }),
-        }),
-        uiEl("p", { class: "modal__hint", text: strings.file.loadHint }),
-      ],
-      actions,
-      primary: asNew,
-      onCancel: () => resolve(null),
-    });
-  });
-}
-
-function mountFilePanel(host, api) {
-  const { getState, setState, notify, subscribe } = api;
-  // Ссылка на объект, который целиком уехал в файл: сравнение по ссылке
-  // честнее флага — правка, пришедшая во время упаковки, оставит dirty.
-  let fileSavedProject = null;
-  let fileFailReported = false;
-  // Опрос общей папки заводится один раз на выбранную папку.
-  let fileWatching = false;
-  // Имя, под которым объект лежит в папке. Сменилось после записи — значит,
-  // объект переименовали, и прежний файл больше не обновляется.
-  let fileSnapshotName = null;
-  // Про какие прежние файлы уже сказали и с какой парой «папка + объект» уже
-  // разбирались: дважды за сеанс спрашивать об одном и том же незачем. Счёт
-  // идёт по именам файлов, а не по объектам: у человека их несколько, и
-  // переключение туда-сюда не должно поднимать одно и то же окно.
-  const fileStaleTold = new Set();
-  let fileAdoptedKey = null;
-
-  // Файловые кнопки — значок и слово рядом: на планшете слово прячется стилями,
-  // и три кнопки перестают выдавливать шапку на вторую строку. Слово при этом
-  // остаётся в подсказке и в `aria-label`.
-  const saveButton = uiIconLabelButton("fileSave", strings.file.save, {
-    class: "ui-btn ui-btn--accent",
-    title: strings.file.saveHint,
-    on: { click: () => saveToFile() },
-  });
-  // Состояние выгрузки — не кнопка, и кричать громче кнопок ему нечего: раньше
-  // жёлтая строка занимала полшапки, теперь это точка на самой кнопке
-  // экспорта, а словами состояние названо в её подсказке.
-  const exportDot = uiEl("span", { class: "file__dot", attrs: { "aria-hidden": "true" } });
-  saveButton.prepend(exportDot);
-  const openButton = uiIconLabelButton("fileOpen", strings.file.open, {
-    title: strings.file.openHint,
-    on: { click: () => picker.click() },
-  });
-  const folderButton = uiIconLabelButton("folder", strings.autosave.pick, {
-    title: strings.autosave.pickHint,
-    on: { click: () => folderClick() },
-  });
-  const picker = uiEl("input", {
-    class: "file__picker",
-    type: "file",
-    attrs: { accept: ".zip,application/zip", hidden: "hidden" },
-    on: {
-      change: async () => {
-        const chosen = picker.files && picker.files[0];
-        picker.value = "";
-        if (chosen) await openFromFile(chosen);
-      },
-    },
-  });
-
-  const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveButton, picker]);
-  host.replaceChildren(row);
-
-  // ——— сохранение в файл ————————————————————————————————————————————
-
-  async function saveToFile() {
-    const project = getState().project;
-    if (!project) {
-      notify(strings.file.noProject, "error");
-      return;
-    }
-    const line = uiEl("p", { class: "modal__text", text: strings.file.packing });
-    const modal = uiModal({
-      title: strings.file.packingTitle,
-      body: line,
-      actions: [],
-      dismissable: false,
-    });
-    try {
-      // Упаковка идёт через await на каждой записи: вкладка остаётся живой,
-      // а строка прогресса успевает перерисоваться.
-      const packedFile = await autosavePack(project, {
-        onProgress: ({ done, total, phase }) => {
-          // Сверка идёт после упаковки и на большом объекте занимает заметное
-          // время: молчащее окно выглядело бы как зависшая вкладка.
-          line.textContent =
-            phase === "check" ? strings.file.checking : text("file.packingProgress", { done, total });
-        },
-      });
-      exportDownload(packedFile.blob, packedFile.name);
-      await autosaveNoteExport(project.id);
-      markSaved(project);
-      notify(text("file.saved", { name: packedFile.name }), "success");
-    } catch (error) {
-      notify((error && error.message) || strings.file.saveFailed, "error");
-    } finally {
-      modal.close();
-      renderStatus();
-    }
-  }
-
-  // ——— загрузка из файла ————————————————————————————————————————————
-
-  async function openFromFile(chosen) {
-    const line = uiEl("p", { class: "modal__text", text: strings.file.reading });
-    const modal = uiModal({
-      title: strings.file.readingTitle,
-      body: line,
-      actions: [],
-      dismissable: false,
-    });
-    let loaded = null;
-    try {
-      loaded = await unpackProject(chosen, {
-        onProgress: ({ done, total }) => {
-          line.textContent = text("file.packingProgress", { done, total });
-        },
-      });
-    } catch (error) {
-      // Отказ ничего не трогает: текущий объект на экране и в базе как был.
-      modal.close();
-      notify((error && error.message) || strings.errors.notAProject, "error");
-      return;
-    }
-    modal.close();
-
-    const current = getState().project;
-    const mode = await fileAskMode(loaded.project, Boolean(current));
-    if (!mode) return;
-    if (mode === "replace") {
-      const agreed = await uiConfirm({
-        title: strings.file.replaceTitle,
-        message: text("file.replaceMessage", { name: current.name }),
-        confirmLabel: strings.file.replaceConfirm,
-      });
-      if (!agreed) return;
-    }
-    await applyLoaded(loaded, mode, current);
-  }
-
-  async function applyLoaded(loaded, mode, current) {
-    const line = uiEl("p", { class: "modal__text", text: strings.file.reading });
-    const modal = uiModal({ title: strings.file.readingTitle, body: line, actions: [], dismissable: false });
-    try {
-      // Картинки сперва ложатся в хранилище — идентификаторы выдаёт оно,
-      // и ровно эти идентификаторы получает приёмка объекта. Второго
-      // переприсваивания в сборке нет: ссылки схем чинятся один раз.
-      const imageIds = new Map();
-      for (const [oldId, blob] of loaded.images) imageIds.set(oldId, await putImage(blob));
-      const adopted = adoptLoadedProject(loaded, {
-        mode,
-        currentId: current ? current.id : null,
-        imageIds,
-      });
-      await saveProject(adopted.project);
-      await setSetting(LAST_PROJECT_KEY, adopted.project.id);
-
-      const schemes = schemesInOrder(adopted.project);
-      setState({
-        project: adopted.project,
-        schemeId: schemes.length > 0 ? schemes[0].id : null,
-        selectedMarkIds: [],
-        activeTypeId: null,
-      });
-      // Объект только что пришёл из файла — он и есть копия файла,
-      // и отметка выгрузки принадлежит уже новому идентификатору.
-      await autosaveNoteExport(adopted.project.id);
-      markSaved(adopted.project);
-      // Заменённый объект унёс с собой свои планы: картинки под старыми
-      // идентификаторами больше никому не нужны.
-      if (mode === "replace" && current) {
-        for (const scheme of current.schemes || []) {
-          if (scheme.imageId) await deleteImage(scheme.imageId);
-        }
-      }
-      notify(text("file.loaded", { name: adopted.project.name }), "success");
-    } catch (error) {
-      notify((error && error.message) || strings.errors.notAProject, "error");
-    } finally {
-      modal.close();
-      renderStatus();
-    }
-  }
-
-  // ——— папка автосохранения ————————————————————————————————————————
-
-  async function folderClick() {
-    const status = autosaveStatus();
-    if (!status.supported) {
-      notify(strings.autosave.unsupported, "info");
-      return;
-    }
-    if (status.folder && status.permission !== "granted") {
-      await autosaveGrant();
-      if (autosaveReady()) await writeToFolder();
-      renderStatus();
-      return;
-    }
-    if (status.folder) {
-      folderDialog();
-      return;
-    }
-    await pickFolder();
-  }
-
-  async function pickFolder() {
-    // Другая папка — другая история: и общий предок, и разговор о прежних
-    // файлах начинаются заново.
-    fileAdoptedKey = null;
-    fileSnapshotName = null;
-    try {
-      await autosavePickFolder();
-    } catch (error) {
-      // Отмена в системном окне выбора папки — не ошибка. Отказ по file://
-      // (SecurityError) — не поломка, а известное ограничение: страница,
-      // открытая с диска, в папку сохранять не умеет.
-      const name = error && error.name;
-      if (name === "SecurityError" || name === "NotAllowedError") notify(strings.autosave.unsupported, "info");
-      else if (name !== "AbortError") notify(strings.autosave.failed, "error");
-      renderStatus();
-      return;
-    }
-    if (autosaveReady()) await writeToFolder();
-    renderStatus();
-  }
-
-  function folderDialog() {
-    const status = autosaveStatus();
-    let modal;
-    modal = uiModal({
-      title: strings.autosave.dialogTitle,
-      body: uiEl("p", {
-        class: "modal__text",
-        text: text("autosave.dialogText", { name: status.folder, file: currentFileName() }),
-      }),
-      actions: [
-        uiButton(strings.dialog.close, { on: { click: () => modal.close() } }),
-        uiButton(strings.autosave.off, {
-          class: "ui-btn ui-btn--danger",
-          on: {
-            click: async () => {
-              modal.close();
-              await autosaveForget();
-              notify(strings.autosave.offDone, "info");
-              renderStatus();
-            },
-          },
-        }),
-        uiButton(strings.autosave.change, {
-          class: "ui-btn ui-btn--accent",
-          on: {
-            click: async () => {
-              modal.close();
-              await pickFolder();
-            },
-          },
-        }),
-      ],
-    });
-  }
-
-  function currentFileName() {
-    const project = getState().project;
-    return project ? autosaveSnapshotName(project) : "";
-  }
-
-  // Первая запись сразу после выбора папки: пользователь должен увидеть файл
-  // на месте, а не ждать следующей правки.
-  async function writeToFolder() {
-    const project = getState().project;
-    if (!project || !autosaveReady()) return;
-    onFolderWritten(await autosaveWrite(project));
-  }
-
-  // Об отказавшей записи говорим один раз — правок много, а беда одна.
-  function onFolderWritten(result) {
-    if (result && result.ok) {
-      fileFailReported = false;
-      if (result.project) markSaved(result.project);
-      // Имя снимка идёт за именем объекта: переименовали — записался новый
-      // файл, а прежний остался лежать. Молчать об этом нельзя, он ведь
-      // выглядит как рабочий.
-      if (result.name && result.name !== fileSnapshotName) {
-        const renamed = Boolean(fileSnapshotName);
-        fileSnapshotName = result.name;
-        if (renamed) folderStale();
-      }
-    } else if (result && result.error && !fileFailReported) {
-      fileFailReported = true;
-      // Не прошедшая сверка — не то же, что «не смогли записать»: файл в папке
-      // есть, но верить ему нельзя, и сказать надо именно это.
-      const failed =
-        result.error.code === "fileCheckFailed" ? strings.autosave.checkFailed : strings.autosave.failed;
-      notify(failed, "error");
-    }
-    renderStatus();
-  }
-
-  // ——— прежние файлы объекта в папке ————————————————————————————————
-  //
-  // Раньше снимок звался «<объект>-<дата>-<хвост>.zip» и заводился заново
-  // каждый день, поэтому у тех, кто ведёт объект давно, в папке лежит стопка
-  // файлов. Теперь файл один, а прежние — данные пользователя: удалять их
-  // молча нельзя, промолчать тоже (он их видит и не понимает, какой рабочий).
-
-  // Папка открыта — берём из своего снимка общего предка для слияния и
-  // заодно смотрим, не осталось ли в ней прежних файлов этого объекта.
-  async function folderAdopt() {
-    const project = getState().project;
-    const status = autosaveStatus();
-    if (!project || !autosaveReady()) return;
-    const key = status.folder + "|" + project.id;
-    if (fileAdoptedKey === key) return;
-    fileAdoptedKey = key;
-    fileSnapshotName = autosaveSnapshotName(project);
-    try {
-      const found = await autosaveAdoptFolder(project);
-      if (found) await tellAboutStale(found.stale);
-    } catch (error) {
-      // Папка могла стать недоступной — об этом скажет первая же запись.
-    }
-  }
-
-  // То же самое, но без предка: после переименования объекта предок у нас уже
-  // свой, а список прежних файлов надо перечитать.
-  async function folderStale() {
-    const project = getState().project;
-    if (!project || !autosaveReady()) return;
-    try {
-      const own = await autosaveOwnSnapshots(project);
-      const current = autosaveSnapshotName(project);
-      await tellAboutStale(own.filter((item) => item.name !== current));
-    } catch (error) {
-      /* папка недоступна — тем более не о чем говорить */
-    }
-  }
-
-  async function tellAboutStale(stale) {
-    const answered = await autosaveStaleKeptNames();
-    const list = (stale || []).filter((item) => !fileStaleTold.has(item.name) && !answered.includes(item.name));
-    if (list.length === 0) return;
-    for (const item of list) fileStaleTold.add(item.name);
-    staleDialog(list);
-  }
-
-  function staleDialog(stale) {
-    const names = uiEl("ul", { class: "merge-list" });
-    for (const item of stale) names.append(uiEl("li", { text: item.name }));
-    let modal;
-    const remove = uiButton(strings.autosave.staleRemove, {
-      class: "ui-btn ui-btn--danger",
-      on: {
-        click: async () => {
-          modal.close();
-          await removeStale(stale.map((item) => item.name));
-        },
-      },
-    });
-    // Окно всплывает само, без просьбы, — поэтому по Enter файлы остаются, а
-    // не удаляются: основное действие здесь безопасное. Ответ «оставить»
-    // запоминается: человек уже решил, и в следующем сеансе его не переспросят.
-    const keep = uiButton(strings.autosave.staleKeep, {
-      class: "ui-btn ui-btn--accent",
-      on: {
-        click: () => {
-          modal.close();
-          autosaveNoteStaleKept(stale.map((item) => item.name));
-        },
-      },
-    });
-    modal = uiModal({
-      title: strings.autosave.staleTitle,
-      body: [
-        uiEl("p", {
-          class: "modal__text",
-          text: text("autosave.staleText", { file: currentFileName(), count: stale.length }),
-        }),
-        names,
-        uiEl("p", { class: "modal__hint", text: strings.autosave.staleSafe }),
-      ],
-      actions: [remove, keep],
-      primary: keep,
-    });
-  }
-
-  async function removeStale(names) {
-    const project = getState().project;
-    if (!project) return;
-    let result = null;
-    try {
-      result = await autosaveRemoveSnapshots(project, names);
-    } catch (error) {
-      notify(strings.autosave.failed, "error");
-      return;
-    }
-    if (result.removed.length > 0) {
-      notify(text("autosave.staleRemoved", { count: result.removed.length }), "success");
-    }
-    if (result.kept.length > 0) {
-      notify(text("autosave.staleKept", { count: result.kept.length }), "error");
-    }
-  }
-
-  // ——— чужие правки в общей папке ————————————————————————————————————
-
-  // Чей вариант оставлен. Сторон три, а не две: вернувшуюся запись справочника
-  // слияние берёт и из общего снимка, когда у живых её не осталось.
-  function mergeSideName(kept) {
-    if (kept === "theirs") return strings.merge.sideTheirs;
-    if (kept === "base") return strings.merge.sideBase;
-    return strings.merge.sideOurs;
-  }
-
-  // Что пришло со стороны, построчно. Показывается, только когда есть о чём
-  // говорить: тост сообщает факт, список — подробности.
-  function mergeReport(result) {
-    const body = [uiEl("p", { class: "modal__text", text: text("merge.from", { file: result.file }) })];
-    const sections = [
-      [
-        strings.merge.incoming,
-        result.changes.map((change) => text("merge." + change.action, { label: change.label || change.id })),
-      ],
-      [
-        strings.merge.conflicts,
-        result.conflicts.map((conflict) =>
-          text("merge." + conflict.code, {
-            label: conflict.label || conflict.id,
-            side: mergeSideName(conflict.kept),
-          }),
-        ),
-      ],
-      [strings.merge.renumbered, result.renumbered.map((item) => text("merge.renumberedItem", item))],
-    ];
-    for (const [title, lines] of sections) {
-      if (lines.length === 0) continue;
-      body.push(uiEl("p", { class: "modal__text", text: title }));
-      const list = uiEl("ul", { class: "merge-list" });
-      for (const line of lines) list.append(uiEl("li", { text: line }));
-      body.push(list);
-    }
-    if (result.plans) {
-      body.push(uiEl("p", { class: "modal__text", text: text("merge.plans", { count: result.plans }) }));
-    }
-    body.push(uiEl("p", { class: "modal__text", text: strings.merge.historyCleared }));
-
-    const modal = uiModal({
-      title: strings.merge.title,
-      body,
-      actions: [uiButton(strings.merge.close, { on: { click: () => modal.close() } })],
-    });
-  }
-
-  // Слияние пришло со стороны — применяем его к сеансу и сразу публикуем
-  // обратно в папку: второй инженер должен увидеть сложенный объект, а не
-  // только свою половину.
-  function applyExternal(result) {
-    const state = getState();
-    if (!result || !result.project || !state.project) return;
-    // Пока читали папку, объект могли переключить — тогда это не его правка.
-    if (result.project.id !== state.project.id) return;
-    // Тихое слияние: не изменилось ничего, кроме служебных полей — постоянного
-    // ключа проекта и отметки времени. Ключ до объекта доехать должен (после
-    // этого родство перестаёт быть догадкой), но работой это не является:
-    // ни отчёта, ни обрыва истории, ни строки «приехали правки: 0».
-    if (result.quiet) {
-      setState({ project: result.project, dirty: true });
-      autosaveSchedule(result.project, { onDone: onFolderWritten });
-      renderStatus();
-      return;
-    }
-    setState({ project: result.project, dirty: true });
-    // Ctrl+Z отменяет действия пользователя, а не чужие: откат поверх слияния
-    // стёр бы чужую работу молча, поэтому стек истории здесь обрывается.
-    clearHistory();
-    const loud = result.counts.conflicts > 0;
-    notify(loud ? strings.merge.toastConflicts : text("merge.toast", result.counts), loud ? "error" : "info");
-    if (loud || result.counts.renumbered > 0) mergeReport(result);
-    autosaveSchedule(result.project, { onDone: onFolderWritten });
-    renderStatus();
-  }
-
-  function syncWatch() {
-    const ready = autosaveReady();
-    if (ready && !fileWatching) {
-      fileWatching = true;
-      autosaveWatch({ getProject: () => getState().project, onExternal: applyExternal });
-    } else if (!ready && fileWatching) {
-      fileWatching = false;
-      autosaveStopWatch();
-    }
-    // Не однажды: объект на экране появляется позже папки, а сам разбор
-    // повторного вызова не боится — он идёт один раз на пару «папка + объект».
-    if (ready) folderAdopt();
-  }
-
-  // ——— состояние и строка в шапке ————————————————————————————————————
-
-  function markSaved(project) {
-    fileSavedProject = project;
-    if (getState().project === project) setState({ dirty: false });
-  }
-
-  function renderStatus() {
-    const state = getState();
-    const status = autosaveStatus();
-    const projectId = state.project ? state.project.id : null;
-    // Режим просмотра: файл открывают, чтобы посмотреть. Сохранять нечего —
-    // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
-    const saving = layoutAllows("saveFile", state.layout);
-    saveButton.hidden = !saving;
-    const exported = autosaveLastExport(projectId);
-    const stamp = exported ? Date.parse(exported) : Number.NaN;
-    let mark = "never";
-    if (!Number.isNaN(stamp)) {
-      if (state.dirty) mark = "stale";
-      else mark = Date.now() - stamp > FILE_OLD_MS ? "old" : "fresh";
-    }
-    exportDot.className = "file__dot is-" + mark;
-    const said = text(FILE_EXPORT_STATE[mark], { ago: autosaveAgoText(exported) });
-    // Папка автосохранения бывает недоступна (страница открыта с диска) — и
-    // сказать об этом больше негде: кнопки папки в этом случае нет вовсе.
-    uiButtonLabel(
-      saveButton,
-      strings.file.save,
-      strings.file.saveHint + " · " + said + (status.supported ? "" : " · " + strings.autosave.unsupported),
-    );
-    row.classList.toggle("is-busy", Boolean(status.busy));
-    row.classList.toggle("is-dirty", Boolean(state.dirty));
-
-    folderButton.hidden = !status.supported || !saving;
-    if (!status.supported || !saving) return;
-    if (!status.folder) {
-      uiButtonLabel(folderButton, strings.autosave.pick, strings.autosave.pickHint);
-      folderButton.classList.remove("is-on");
-      return;
-    }
-    if (status.permission !== "granted") {
-      uiButtonLabel(folderButton, strings.autosave.allow, text("autosave.allowHint", { name: status.folder }));
-      folderButton.classList.remove("is-on");
-      return;
-    }
-    uiButtonLabel(folderButton, text("autosave.folder", { name: status.folder }), strings.autosave.dialogTitle);
-    folderButton.classList.add("is-on");
-  }
-
-  // Список объектов держит своя панель и перечитывает его по своим поводам:
-  // объект, пришедший из файла, ей неизвестен. Чиним ровно одно — чтобы в
-  // выпадающем списке стоял тот объект, который на экране.
-  function syncProjectSelect(project) {
-    const select = document.querySelector("#project-actions select");
-    if (!select || !project) return;
-    let option = [...select.options].find((item) => item.value === project.id);
-    if (!option) {
-      option = uiEl("option", { value: project.id, text: project.name });
-      select.append(option);
-    }
-    option.textContent = project.name;
-    select.value = project.id;
-  }
-
-  // Панель объектов перечитывает свой список только по своим поводам, в том
-  // числе отложенно, после сохранения в браузер, — и объект, пришедший из
-  // файла, ей неизвестен. Поэтому чиним не однажды, а на каждую перерисовку
-  // списка: в нём должен стоять тот объект, который сейчас на экране.
-  const projectSelect = document.querySelector("#project-actions select");
-  if (projectSelect && typeof MutationObserver === "function") {
-    new MutationObserver(() => syncProjectSelect(getState().project)).observe(projectSelect, { childList: true });
-  }
-
-  subscribe((state, changed) => {
-    if ("layout" in changed) renderStatus();
-    if (!("project" in changed)) {
-      // Отметка у кнопки экспорта живёт на том же признаке: правка, ещё не
-      // уехавшая в файл, обязана быть видна сразу.
-      if ("dirty" in changed) renderStatus();
-      return;
-    }
-    syncProjectSelect(state.project);
-    // Объект переключили — предок слияния берётся из его снимка, а не из
-    // чужого; заодно видно, не осталось ли в папке его прежних файлов.
-    syncWatch();
-    if (state.project && state.project !== fileSavedProject) {
-      // Не вложенным вызовом: подписчики сейчас в середине обхода.
-      queueMicrotask(() => {
-        if (getState().project !== fileSavedProject) setState({ dirty: true });
-      });
-      // Пока папка выбрана, «несохранённого» состояния почти не бывает:
-      // запись уходит сама, с задержкой и по одной за раз.
-      autosaveSchedule(state.project, { onDone: onFolderWritten });
-    }
-    renderStatus();
-  });
-
-  // Ctrl+S — привычка, а не сюрприз: браузерное «сохранить страницу» здесь
-  // бесполезно. Пока открыт диалог, горячие клавиши молчат.
-  //
-  // Клавиша физическая (`event.code`), как и всё остальное здесь: в русской
-  // раскладке на этой кнопке «ы», и сравнение по `event.key` молчало бы ровно
-  // у тех, кто размечает планы по-русски, — то есть у всех.
-  document.addEventListener("keydown", (event) => {
-    if (!(event.ctrlKey || event.metaKey) || event.code !== "KeyS") return;
-    if (uiDialogDepth() > 0) return;
-    event.preventDefault();
-    saveToFile();
-  });
-
-  // Вкладку прячут чаще, чем закрывают, и это единственный момент, когда
-  // дослать отложенную запись можно по-настоящему: обработчик закрытия уже
-  // ничего не дождётся.
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden && autosavePendingWrite()) autosaveFlush({ onDone: onFolderWritten });
-  });
-
-  // Работа, которой нет ни в папке, ни в файле, не должна уезжать молча.
-  // Отложенную запись досылаем прямо здесь — она успеет, если пользователь
-  // задержится на вопросе или передумает закрывать. Пообещать это нельзя,
-  // поэтому, пока запись не легла, вопрос задаётся и при выбранной папке.
-  window.addEventListener("beforeunload", (event) => {
-    const waiting = autosavePendingWrite();
-    if (waiting) autosaveFlush({ onDone: onFolderWritten });
-    if (!getState().dirty) return;
-    if (autosaveReady() && !waiting) return;
-    event.preventDefault();
-    event.returnValue = "";
-  });
-
-  onAutosaveChange(() => {
-    renderStatus();
-    syncWatch();
-  });
-  setInterval(() => renderStatus(), FILE_TICK_MS);
-
-  (async () => {
-    await autosaveRestore();
-    syncWatch();
-    renderStatus();
-  })();
-  renderStatus();
-}
-
-// Контейнер в шапке панель заводит сама: точки монтирования для неё в разметке
-// нет, а править разметку последним таском — лишний повод сломать сборку.
-function startFilePanel() {
-  const header = document.getElementById("app-header");
-  if (!header || document.getElementById("file-actions")) return;
-  const host = uiEl("div", { class: "mount" });
-  host.id = "file-actions";
-  header.append(host);
-  mountFilePanel(host, panelApi());
-}
-
-if (typeof document !== "undefined") {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", startFilePanel, { once: true });
-  } else {
-    setTimeout(startFilePanel, 0);
-  }
-}
-
-// src/panels/links.js
-// Переключатель связей в шапке — сосед счётчика предупреждений справа.
-//
-// Связи («чем управляет») живут в объекте с давних пор, но на плане их до сих
-// пор не было видно: список меток говорил «Управляет: Т1, Т2», а где эти Т1 и
-// Т2 лежат — приходилось искать глазами. Кнопка зажигает на плане три рода
-// соединений сразу: управление (дуга со стрелкой), общее управление (прямая с
-// засечками между равными) и общий номер (оболочка вокруг группы).
-//
-// **Кнопка одна на все три рода.** Три кнопки в шапке — приборная панель, а
-// история у них одна: «покажи разбор». Выключать паутину частями есть чем и
-// без второй кнопки — выделением (см. `canvas.canvasFrameLinks`).
-//
-// **Выключенная кнопка не значит «связей не видно»**: выделенная метка свои
-// связи показывает и так. Кнопка добавляет к этому все остальные — она про
-// охват, а не про «рисовать или нет». Слова заказчика: «если связи не
-// включены, то при выделении метки да, пусть показываются её связи».
-//
-// Сама панель не рисует ничего: она правит одну отметку состояния, а рисует
-// холст (`canvas.canvasFrameLinks` → `render.drawMarkLinks`). Отметка живёт в
-// настройках браузера, как отметка линейки: это оснастка разбора, а не свойство
-// разметки, и в объект с файлом проекта ей не за чем.
-
-
-
-
-
-
-/**
- * Что сказать пользователю в тот миг, когда он включил связи. Чистая: план
- * подсказки считается от объекта, а не от DOM.
- *
- * Молчать нельзя в двух случаях. Первый — показывать нечего: связей на схеме
- * нет вовсе, и погасший план читался бы как «кнопка сломана». Второй — часть
- * связей ведёт на другую схему: линию через границу листа не провести, у метки
- * рисуется обрывок, и про него надо сказать словами хотя бы раз.
- */
-function linksNotice(project, scheme, filter) {
-  const links = markLinks(project, scheme, filter);
-  const away = links.offScheme.reduce((sum, item) => sum + item.count, 0);
-  const drawn = links.lines.length + links.ties.length + links.groups.length;
-  if (drawn === 0 && away === 0) return strings.links.none;
-  if (away > 0) return text("links.away", { count: away });
-  return null;
-}
-
-// Подсказка кнопки: что она сделает, что видно сейчас и как связи попадают в
-// выгрузку. Три строки — потому что отвечать на эти три вопроса больше негде:
-// кнопка одна, а режима у показа два.
-function linksHint(shown) {
-  const first = shown ? strings.links.hideHint : strings.links.showHint;
-  const scope = shown ? strings.links.scopeOn : strings.links.scopeOff;
-  return [first, scope, strings.links.inExport].join(". ");
-}
-
-function mountLinksPanel(host, api) {
-  const { getState, setState, subscribe, notify } = api;
-
-  const toggle = uiIconButton("link", {
-    class: "ui-btn links__toggle",
-    label: strings.links.show,
-    title: strings.links.showHint,
-    on: { click: () => flip() },
-  });
-  toggle.setAttribute("aria-pressed", "false");
-  host.replaceChildren(toggle);
-
-  function flip() {
-    const state = getState();
-    const next = state.linksShown !== true;
-    setState({ linksShown: next });
-    setSetting(LINKS_SETTING, next);
-    if (!next) return;
-    // Сказать про пустоту и про связи на другие схемы — один раз, в момент
-    // включения. Держать это в подсказке кнопки бесполезно: на неё не наводят.
-    const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    if (!scheme) return;
-    const notice = linksNotice(state.project, scheme, state.filter);
-    if (notice) notify(notice, "info");
-  }
-
-  function refresh(state) {
-    const shown = Boolean(state.project) && layoutAllows("markLinks", state.layout);
-    host.hidden = !shown;
-    const on = state.linksShown === true;
-    toggle.classList.toggle("is-on", on);
-    toggle.setAttribute("aria-pressed", on ? "true" : "false");
-    toggle.setAttribute("aria-label", on ? strings.links.hide : strings.links.show);
-    toggle.title = linksHint(on);
-  }
-
-  subscribe((state, changed) => {
-    if ("project" in changed || "layout" in changed || "linksShown" in changed) refresh(state);
-  });
-
-  refresh(getState());
-}
-
-registerPanel(PANEL_IDS.headerLinks, mountLinksPanel);
-
-// src/panels/markSizes.js
-// Окно размеров метки: длина, ширина и высота над полом.
-//
-// Отдельный файл по той же причине, что и `markControls.js`: в строке списка
-// этому тесно. Строка метки и так собирает семь полей, а три числа, которые
-// заполняют не в момент постановки, а потом и не у каждой метки, в неё не
-// помещаются — заказчик сам попросил «отдельное окно».
-//
-// Единицу окно не выбирает и не переводит: в модели лежат миллиметры
-// (`MARK_DIMENSION_UNIT`), словом их называет `strings.markSizes.unit`.
-// Здесь она только подставляется в подписи — чтобы была видна, а не
-// подразумевалась.
-
-
-
-// Подпись поля с единицей: «Длина, мм». Складывается подстановкой, чтобы
-// единица была написана в словаре один раз.
-function markSizesLabel(field) {
-  return text("markSizes." + field, { unit: strings.markSizes.unit });
-}
-
-// Число в подпись кнопки. Дробное пишется через запятую — так его и набирают;
-// в поле ввода оно остаётся с точкой, иначе `input[type=number]` его не примет.
-function markSizesNumber(value) {
-  return String(value).replace(".", ",");
-}
-
-/**
- * Что показывает кнопка в строке метки: «Д 600 · Ш 400 · В 900 мм» по заданным
- * размерам и пустая строка, если не задан ни один.
- *
- * Считается здесь, а не в разметке: «у метки размеров нет» должно быть видно
- * без открытия окна — и проверяться без браузера. Соседние кнопки устроены так
- * же: «Оборудование: 2» и «Управляет: Т1, Т2» тоже говорят содержимым.
- */
-function markSizesSummary(mark) {
-  const values = markDimensions(mark);
-  const parts = [];
-  for (const field of MARK_DIMENSION_FIELDS) {
-    if (values[field] === null) continue;
-    parts.push(strings.markSizes[field + "Short"] + " " + markSizesNumber(values[field]));
-  }
-  if (parts.length === 0) return "";
-  return text("markSizes.summary", { values: parts.join(" · "), unit: strings.markSizes.unit });
-}
-
-/**
- * Разбор трёх полей окна. Пустое — `null` («не задано»), ноль — значение,
- * отрицательное и нечисловое — в `invalid`: окно на них не закрывается, а
- * подсвечивает поле. Правило одно с моделью — это её же `markDimensionValue`.
- */
-function markSizesParse(raw) {
-  const values = {};
-  const invalid = [];
-  for (const field of MARK_DIMENSION_FIELDS) {
-    try {
-      values[field] = markDimensionValue(raw ? raw[field] : null);
-    } catch (error) {
-      values[field] = null;
-      invalid.push({ field, message: error && error.message ? error.message : String(error) });
-    }
-  }
-  return { values, invalid };
-}
-
-/**
- * Окно правки. Отвечает тремя значениями (`null` — «не задано») или `null`,
- * если передумали. Сохраняет ответ в объект не оно, а список меток: правка
- * идёт через `canvasCommit`, и место у неё одно — там же, где остальные
- * правки строки.
- */
-function openMarkSizesPicker(project, markId) {
-  return new Promise((resolve) => {
-    const mark = findMark(project, markId);
-    const current = markDimensions(mark);
-    const inputs = new Map();
-    const error = uiEl("p", { class: "sizes__error" });
-    error.hidden = true;
-
-    const rows = MARK_DIMENSION_FIELDS.map((field) => {
-      const label = markSizesLabel(field);
-      const input = uiEl("input", {
-        class: "ui-input sizes__input",
-        type: "number",
-        value: current[field] === null ? "" : String(current[field]),
-        title: label,
-        attrs: { min: "0", max: String(MARK_DIMENSION_MAX), step: "1", inputmode: "decimal" },
-      });
-      inputs.set(field, input);
-      return uiEl("label", { class: "sizes__row" }, [
-        uiEl("span", { class: "sizes__label", text: label }),
-        input,
-      ]);
-    });
-
-    let modal;
-    const done = (value) => {
-      modal.close();
-      resolve(value);
-    };
-    const save = () => {
-      const raw = {};
-      for (const [field, input] of inputs) raw[field] = input.value;
-      const parsed = markSizesParse(raw);
-      for (const [field, input] of inputs) {
-        input.classList.toggle("is-bad", parsed.invalid.some((item) => item.field === field));
-      }
-      if (parsed.invalid.length > 0) {
-        error.textContent = parsed.invalid[0].message;
-        error.hidden = false;
-        inputs.get(parsed.invalid[0].field).focus();
-        return;
-      }
-      done(parsed.values);
-    };
-
-    modal = uiModal({
-      title: text("markSizes.title", { label: labelOf(project, markId) }),
-      body: uiEl("div", { class: "sizes" }, [
-        uiEl("p", { class: "modal__hint", text: strings.markSizes.hint }),
-        ...rows,
-        error,
-      ]),
-      actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
-        uiButton(strings.markSizes.save, { class: "ui-btn ui-btn--accent", on: { click: () => save() } }),
-      ],
-      onCancel: () => resolve(null),
-    });
-  });
-}
-
-// src/panels/rooms.js
-// Помещения объекта: раздел левой колонки со списком комнат, цветом, числом
-// меток и контурами. Заводятся они и на ходу — из поля «Помещение» в списке
-// меток, — поэтому главное здесь не список, а `roomsEnsure`: одно и то же
-// название не должно плодить двойников.
-//
-// Дом у помещений один — этот раздел. Ни окна, ни кнопки в правой колонке
-// больше нет: заводить, переименовывать, красить, считать метки и удалять
-// можно только здесь.
-
-
-
-
-
-
-// Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
-// и цвета соседних комнат, и цвета категорий: контуров на плане бывает
-// десяток, а метка своей же комнаты не должна повторять цвет её заливки.
-function roomColorField(project, room, onChange) {
-  return colorPickerButton({
-    value: room.color,
-    used: colorsInUse(project, { exceptRoomId: room.id }),
-    title: strings.rooms.color,
-    onPick: onChange,
-  });
-}
-
-function roomsKey(name) {
-  return String(name == null ? "" : name).trim().toLowerCase();
-}
-function roomsFind(project, name) {
-  const key = roomsKey(name);
-  if (!key) return null;
-  return project.rooms.find((room) => roomsKey(room.name) === key) || null;
-}
-
-// «Было или заведём»: пустое название — это «без помещения», а не комната
-// с пустым именем.
-function roomsEnsure(project, name) {
-  const found = roomsFind(project, name);
-  if (found) return { project, room: found };
-  if (!roomsKey(name)) return { project, room: null };
-  const created = addRoom(project, name);
-  return { project: created.project, room: created.room };
-}
-function roomsUsage(project, roomId) {
-  return project.marks.filter((mark) => mark.roomId === roomId).length;
-}
-
-// Строки списка: комната, сколько у неё меток и есть ли контур на этой схеме.
-// Чистая функция — на ней и стоят тесты раздела.
-function roomsRows(project, schemeId) {
-  const outlines = schemeId ? outlinesInOrder(project, schemeId) : [];
-  return roomsInOrder(project).map((room) => {
-    const outline = outlines.find((item) => item.roomId === room.id) || null;
-    return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
-  });
-}
-
-// Что делает поле добавления: завести комнату или — если такая уже есть —
-// сразу обвести её заново. Вторая ветка и заменяет прежний выбор помещения
-// из раздела «Метки»: там можно было взять комнату с контуром и обвести ещё раз.
-function roomsAddAction(project, name) {
-  const trimmed = String(name == null ? "" : name).trim();
-  if (!trimmed) return { kind: "none", roomId: null, name: "" };
-  const found = roomsFind(project, trimmed);
-  return found
-    ? { kind: "draw", roomId: found.id, name: trimmed }
-    : { kind: "create", roomId: null, name: trimmed };
-}
-
-// Что делает кнопка контура: нарисовать новый или править вершины прежнего.
-// Правка — это режим выбора с выделенным контуром: дальше вершины таскаются
-// на холсте, «+» на стенке добавляет, двойной клик убирает.
-function roomsOutlineAction(row) {
-  return row && row.outlineId ? "edit" : "draw";
-}
-
-function mountRoomsPanel(host, api) {
-  const { getState, setState, subscribe, notify } = api;
-  const list = uiEl("div", { class: "rooms" });
-  const input = uiEl("input", {
-    class: "ui-input",
-    type: "text",
-    placeholder: strings.rooms.namePlaceholder,
-    on: {
-      keydown: (event) => {
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        addAndDraw();
-      },
-    },
-  });
-  const addButton = uiButton(strings.rooms.addAndDraw, {
-    class: "ui-btn ui-btn--accent",
-    title: strings.rooms.addAndDrawHint,
-    on: { click: () => addAndDraw() },
-  });
-  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton]));
-
-  function project() {
-    return getState().project;
-  }
-
-  function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
-  }
-
-  function commit(after, label, options) {
-    canvasCommit(project(), after, label, options);
-  }
-
-  // Комната заводится и сразу берётся в обводку: режим рисования включается тем
-  // же шагом истории, искать его отдельно не нужно.
-  function addAndDraw() {
-    const state = getState();
-    if (!state.project) return;
-    const action = roomsAddAction(state.project, input.value);
-    if (action.kind === "none") return;
-    if (action.kind === "draw") {
-      input.value = "";
-      startDrawing(action.roomId);
-      return;
-    }
-    try {
-      const created = addRoom(state.project, action.name);
-      input.value = "";
-      canvasCommit(state.project, created.project, strings.history.addRoom, {
-        patch: drawPatch(created.room.id),
-      });
-      if (!state.schemeId) notify(strings.canvas.needScheme);
-    } catch (error) {
-      fail(error);
-    }
-  }
-
-  // Без схемы рисовать негде: комната заводится, режим остаётся прежним.
-  function drawPatch(roomId) {
-    return getState().schemeId
-      ? { activeRoomId: roomId, mode: "room", selectedOutlineId: null }
-      : { activeRoomId: roomId };
-  }
-
-  // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
-  // вершины на плане.
-  function startOutline(roomId) {
-    const state = getState();
-    if (!state.schemeId) {
-      notify(strings.canvas.needScheme);
-      return;
-    }
-    const row = roomsRows(state.project, state.schemeId).find((item) => item.room.id === roomId);
-    if (roomsOutlineAction(row) !== "edit") {
-      startDrawing(roomId);
-      return;
-    }
-    setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
-    notify(strings.rooms.outlineEditing);
-  }
-
-  // Обводка с нуля — та самая дорога, что была в разделе «Метки»: она осталась
-  // и для комнаты, у которой контур уже есть (вписать её название в поле).
-  function startDrawing(roomId) {
-    if (!getState().schemeId) {
-      notify(strings.canvas.needScheme);
-      return;
-    }
-    setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
-  }
-
-  function rename(roomId, name) {
-    const current = findRoom(project(), roomId);
-    if (!current || name.trim() === current.name) return;
-    try {
-      commit(updateRoom(project(), roomId, { name }).project, strings.history.renameRoom);
-    } catch (error) {
-      fail(error);
-      render();
-    }
-  }
-
-  function recolor(roomId, color) {
-    const current = findRoom(project(), roomId);
-    // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
-    // сравнение без учёта регистра бережёт историю от пустого шага.
-    if (!current || String(current.color || "").toUpperCase() === String(color).toUpperCase()) return;
-    try {
-      commit(updateRoom(project(), roomId, { color }).project, strings.history.roomColor);
-    } catch (error) {
-      fail(error);
-      render();
-    }
-  }
-
-  async function remove(roomId) {
-    const current = findRoom(project(), roomId);
-    if (!current) return;
-    const agreed = await uiConfirm({
-      title: strings.rooms.removeTitle,
-      message: text("rooms.removeMessage", { name: current.name, count: roomsUsage(project(), roomId) }),
-      confirmLabel: strings.dialog.confirm,
-    });
-    if (!agreed) return;
-    const fresh = project();
-    if (!findRoom(fresh, roomId)) return;
-    canvasCommit(fresh, deleteRoom(fresh, roomId).project, strings.history.removeRoom);
-  }
-
-  function render() {
-    const state = getState();
-    if (!state.project) {
-      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
-      setSectionBadge(SECTION_IDS.rooms, "");
-      input.disabled = true;
-      addButton.disabled = true;
-      return;
-    }
-    input.disabled = false;
-    addButton.disabled = false;
-    const rows = roomsRows(state.project, state.schemeId);
-    setSectionBadge(SECTION_IDS.rooms, rows.length || "");
-    if (rows.length === 0) {
-      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.rooms.empty }));
-      return;
-    }
-    list.replaceChildren(
-      ...rows.map((row) => {
-        const drawing = state.mode === "room" && state.activeRoomId === row.room.id;
-        const editing = Boolean(row.outlineId) && state.selectedOutlineId === row.outlineId;
-        const action = roomsOutlineAction(row);
-        return uiEl("div", { class: "rooms__row" + (drawing || editing ? " is-active" : "") }, [
-          roomColorField(state.project, row.room, (color) => recolor(row.room.id, color)),
-          uiEl("input", {
-            class: "ui-input rooms__name",
-            type: "text",
-            value: row.room.name,
-            on: { change: (event) => rename(row.room.id, event.target.value) },
-          }),
-          // Счётчик числом: в узкой колонке «меток: 3» съедало имя комнаты,
-          // а пояснение живёт в подсказке.
-          uiEl("span", {
-            class: "rooms__count",
-            text: String(row.marks),
-            title: text("rooms.marks", { count: row.marks }),
-          }),
-          uiIconButton("outline", {
-            class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
-            title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
-            on: { click: () => startOutline(row.room.id) },
-          }),
-          uiIconButton("trash", {
-            class: "ui-btn ui-btn--danger",
-            title: strings.rooms.remove,
-            on: { click: () => remove(row.room.id) },
-          }),
-        ]);
-      }),
-    );
-  }
-
-  subscribe((state, changed) => {
-    if (
-      "project" in changed ||
-      "schemeId" in changed ||
-      "mode" in changed ||
-      "activeRoomId" in changed ||
-      "selectedOutlineId" in changed
-    ) {
-      render();
-    }
-  });
-  render();
-}
-
-registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
-
 // src/panels/marks.js
 // Список меток схемы: обозначение, помещение, расположение и обозначение из
 // оригинального проекта — правятся прямо в строке.
@@ -27425,6 +27215,270 @@ function mountMarksPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.marks, mountMarksPanel);
+
+// src/panels/projects.js
+// Объекты: список в шапке, переключение, переименование, удаление,
+// первый запуск и автосохранение в браузер.
+
+
+
+
+
+
+
+const SAVE_DELAY_MS = 400;
+
+function uniqueProjectName(list) {
+  const base = strings.project.untitled;
+  const taken = new Set(list.map((item) => item.name));
+  if (!taken.has(base)) return base;
+  let index = 2;
+  while (taken.has(base + " " + index)) index += 1;
+  return base + " " + index;
+}
+
+function mountProjectsPanel(host, api) {
+  const { getState, setState, notify, subscribe } = api;
+  let known = [];
+  let saveTimer = null;
+  let lowSpaceReported = false;
+
+  const select = uiEl("select", {
+    class: "ui-select",
+    title: strings.projects.switch,
+    on: {
+      change: () => {
+        const id = select.value;
+        if (id && id !== currentId()) openProjectById(id);
+      },
+    },
+  });
+  // Значки, а не символы шрифта: рядом в шапке стоят отмена, возврат и поиск,
+  // нарисованные линиями, и «＋» с корзиной-эмодзи выпадали из ряда — у них
+  // своя толщина, свой размер и свой цвет. Слово у каждой кнопки осталось:
+  // оно в подсказке и в `aria-label`.
+  const renameButton = uiIconButton("edit", {
+    label: strings.projects.rename,
+    on: { click: () => renameCurrent() },
+  });
+  const createButton = uiIconButton("plus", {
+    label: strings.projects.create,
+    on: { click: () => createAndOpen() },
+  });
+  // Опасность удаления несла красная эмодзи; теперь её несёт сама кнопка —
+  // красной рамкой и подложкой под курсором (`.ui-btn--danger` в panels.css).
+  const removeButton = uiIconButton("trash", {
+    class: "ui-btn ui-btn--danger",
+    label: strings.projects.remove,
+    on: { click: () => removeCurrent() },
+  });
+  host.replaceChildren(select, createButton, renameButton, removeButton);
+
+  function currentId() {
+    const state = getState();
+    return state.project ? state.project.id : "";
+  }
+
+  function renderList() {
+    const id = currentId();
+    select.replaceChildren();
+    if (known.length === 0) {
+      select.append(uiEl("option", { value: "", text: strings.projects.empty }));
+    }
+    for (const item of known) {
+      select.append(uiEl("option", { value: item.id, text: item.name }));
+    }
+    select.value = id;
+    const has = Boolean(id);
+    renameButton.disabled = !has;
+    removeButton.disabled = !has;
+    // Режим просмотра: объект выбирается, но не заводится, не переименовывается
+    // и не удаляется — на объекте с телефоном это только риск.
+    const editable = layoutAllows("editProject", getState().layout);
+    createButton.hidden = !editable;
+    renameButton.hidden = !editable;
+    removeButton.hidden = !editable;
+  }
+
+  async function refreshList() {
+    known = await listProjects();
+    renderList();
+  }
+
+  async function openProjectById(id) {
+    const stored = await loadProject(id);
+    if (!stored) {
+      await refreshList();
+      return;
+    }
+    // Объект из базы браузера мимо `projectFile.migrateProject` не проходит,
+    // а вид типа (точка или линия) у прежних объектов не записан. Дописывается
+    // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
+    // открывался бы по-разному из базы и из архива.
+    const migrated = migrateTypeKinds(stored).project;
+    // Постоянный ключ у объектов, заведённых до его появления, дописывается
+    // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
+    // трогается, в истории отмены ничего не появляется, а в базу объект
+    // ложится сразу, чтобы ключ не заводился заново при каждом открытии.
+    const keyed = ensureProjectKey(migrated);
+    const project = keyed.project;
+    if (keyed.changed) await saveProject(project);
+    setState({
+      project,
+      schemeId: project.schemes.length > 0 ? project.schemes[0].id : null,
+      selectedMarkIds: [],
+      activeTypeId: null,
+    });
+    await setSetting(LAST_PROJECT_KEY, id);
+    renderList();
+  }
+
+  // Новый объект начинается с сохранённого справочника, если он есть: копия
+  // шаблона с новыми идентификаторами, дальше объект живёт своей жизнью.
+  async function createAndOpen() {
+    const saved = await getSetting(TYPE_TEMPLATE_KEY);
+    const template = typesTemplateFrom(saved);
+    const project = createProject({ name: uniqueProjectName(known), ...(template || {}) });
+    await saveProject(project);
+    await refreshList();
+    setState({ project, schemeId: null, selectedMarkIds: [], activeTypeId: null });
+    await setSetting(LAST_PROJECT_KEY, project.id);
+    renderList();
+    notify(text("projects.created", { name: project.name }), "success");
+    return project;
+  }
+
+  async function renameCurrent() {
+    const state = getState();
+    if (!state.project) return;
+    const name = await uiPrompt({
+      title: strings.projects.renameTitle,
+      value: state.project.name,
+      placeholder: strings.projects.namePlaceholder,
+    });
+    if (!name || name === state.project.name) return;
+    const next = updateProject(state.project, { name });
+    setState({ project: next.project });
+    await refreshList();
+  }
+
+  async function removeCurrent() {
+    const state = getState();
+    if (!state.project) return;
+    const project = state.project;
+    const agreed = await uiConfirm({
+      title: strings.projects.removeTitle,
+      message: text("projects.removeMessage", { name: project.name }),
+      confirmLabel: strings.dialog.confirm,
+    });
+    if (!agreed) return;
+    for (const scheme of project.schemes) {
+      if (scheme.imageId) await deleteImage(scheme.imageId);
+    }
+    await deleteProject(project.id);
+    setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
+    notify(text("projects.removed", { name: project.name }), "success");
+    await refreshList();
+    if (known.length > 0) await openProjectById(known[0].id);
+    else showWelcome();
+  }
+
+  // Первый запуск: не пустая серая страница, а две кнопки — завести объект и
+  // открыть принесённый файл. Человек с файлом от напарника до этого заводил
+  // пустой объект только затем, чтобы добраться до кнопки в шапке.
+  //
+  // Главное действие — «Создать объект»: оно акцентное и отвечает на Enter.
+  // «Открыть файл» стоит рядом обычной кнопкой: это равноправный вход, но
+  // выбирают его реже, а два акцента в ряду не оставили бы главного вовсе.
+  function showWelcome() {
+    // Окно не знает, чем кончился выбор файла, и знать не должно: оно ждёт
+    // самого события — появился объект. Так оно закрывается и после открытия
+    // файла, и после создания, и если объект пришёл со стороны. Отказ от
+    // выбора, отмена в вопросе «каким объектом» и битый архив объекта не
+    // создают — окно остаётся стоять, и человек пробует снова.
+    let stopWatching = null;
+    const finish = () => {
+      if (stopWatching) stopWatching();
+      stopWatching = null;
+      modal.close();
+    };
+    const modal = uiModal({
+      title: strings.projects.welcomeTitle,
+      dismissable: false,
+      body: [
+        uiEl("p", { class: "modal__text", text: strings.projects.welcomeText }),
+        uiEl("p", { class: "modal__hint", text: strings.projects.welcomeFile }),
+      ],
+      actions: [
+        uiButton(strings.file.open, {
+          title: strings.file.openHint,
+          on: { click: () => openProjectFileDialog() },
+        }),
+        uiButton(strings.projects.createTitle, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: async () => {
+              finish();
+              await createAndOpen();
+            },
+          },
+        }),
+      ],
+    });
+    stopWatching = subscribe((state, changed) => {
+      if ("project" in changed && state.project) finish();
+    });
+  }
+
+  function scheduleSave(project) {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      saveTimer = null;
+      const result = await saveProject(project);
+      if (result.ok) {
+        known = known.map((item) =>
+          item.id === project.id
+            ? { ...item, name: project.name, updatedAt: project.updatedAt, schemes: project.schemes.length, marks: project.marks.length }
+            : item,
+        );
+        renderList();
+        await checkSpace();
+      }
+    }, SAVE_DELAY_MS);
+  }
+
+  async function checkSpace() {
+    if (lowSpaceReported) return;
+    const space = await estimateSpace();
+    if (!space.low) return;
+    lowSpaceReported = true;
+    notify(text("storage.lowSpace", { free: formatMegabytes(space.free) }), "error");
+  }
+
+  onStoreProblem((problem) => {
+    notify(problem.kind === "unavailable" ? strings.storage.memory : strings.storage.writeFailed, "error");
+  });
+
+  subscribe((state, changed) => {
+    if ("layout" in changed) renderList();
+    if (!("project" in changed)) return;
+    renderList();
+    if (state.project) scheduleSave(state.project);
+  });
+
+  (async () => {
+    await openStore();
+    await refreshList();
+    const lastId = await getSetting(LAST_PROJECT_KEY);
+    const target = known.find((item) => item.id === lastId) || known[0] || null;
+    if (target) await openProjectById(target.id);
+    else showWelcome();
+    await checkSpace();
+    if (storeMode() === "memory") renderList();
+  })();
+}
+
+registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
 // src/panels/schemes.js
 // Схемы объекта: список, загрузка плана кнопкой и перетаскиванием, поворот

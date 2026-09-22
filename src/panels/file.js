@@ -8,7 +8,7 @@
 // Своей точки монтирования в разметке у панели нет: она создаёт контейнер в
 // шапке сама, после того как каркас поднялся (`startApp` откладывается на конец
 // загрузки, и наш обработчик встаёт в очередь следом).
-import { layoutAllows, panelApi } from "../app.js";
+import { LAST_PROJECT_KEY, layoutAllows, panelApi } from "../app.js";
 import { schemesInOrder } from "../model.js";
 import { unpackProject } from "../projectFile.js";
 import { deleteImage, putImage, saveProject, setSetting } from "../store.js";
@@ -16,7 +16,6 @@ import { exportDownload } from "../exporter.js";
 import { clearHistory } from "../history.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiButtonLabel, uiConfirm, uiDialogDepth, uiEl, uiIconLabelButton, uiModal } from "./ui.js";
-import { LAST_PROJECT_KEY } from "./projects.js";
 import {
   adoptLoadedProject,
   autosaveAdoptFolder,
@@ -96,6 +95,19 @@ function fileAskMode(project, hasCurrent) {
   });
 }
 
+// Единственная дверь к файлу проекта снаружи панели. Выбор файла, разбор
+// архива, вопрос «новым объектом или вместо текущего» и приёмка живут здесь, и
+// стартовое окно зовёт ровно это: второго пути к файлу в сборке быть не должно.
+// Кнопка появляется до монтирования панели (она поднимается по DOMContentLoaded
+// вместе с шапкой), поэтому вызов до готовности честно отвечает «нет».
+let fileOpenDialog = null;
+
+export function openProjectFileDialog() {
+  if (!fileOpenDialog) return false;
+  fileOpenDialog();
+  return true;
+}
+
 function mountFilePanel(host, api) {
   const { getState, setState, notify, subscribe } = api;
   // Ссылка на объект, который целиком уехал в файл: сравнение по ссылке
@@ -150,6 +162,8 @@ function mountFilePanel(host, api) {
 
   const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveButton, picker]);
   host.replaceChildren(row);
+  // Тот же выбор файла, что по кнопке в шапке: стартовое окно нажимает её же.
+  fileOpenDialog = () => picker.click();
 
   // ——— сохранение в файл ————————————————————————————————————————————
 
