@@ -98,6 +98,10 @@
       <main id="canvas-area">
         <div id="canvas-host" class="mount"></div>
         <div id="canvas-overlay" class="mount"></div>
+        <!-- Карточка выделенной метки в просмотре: снизу, поверх плана.
+             Верхние углы заняты подсказкой и полным экраном, и драться с ними
+             ей незачем. -->
+        <div id="canvas-card" class="mount"></div>
         <p id="canvas-empty" data-text="panels.canvasEmpty"></p>
       </main>
 
@@ -123,6 +127,14 @@
           <div id="panel-properties" class="panel__body mount"></div>
         </section>
       </aside>
+
+      <!-- Ручки колонок: полоска у края самой колонки. Прячут её целиком —
+           на планшете две колонки по 264 точки не оставляли плану ничего.
+           Кнопки в шапке у этого нет нарочно: там и так тесно, а ручка стоит
+           ровно там, где колонка кончается, и после сворачивания остаётся на
+           том же месте у края экрана. -->
+      <button class="panel-handle panel-handle--left" type="button" data-panel-toggle="left"></button>
+      <button class="panel-handle panel-handle--right" type="button" data-panel-toggle="right"></button>
 
       <!-- Узкий экран: план во весь экран, колонки приходят листом снизу по
            одной. Кнопки крупные — с телефоном в одной руке иначе не попасть. -->

@@ -143,6 +143,106 @@
   height: 30px;
 }
 
+/* ——— карточка выделенной метки (просмотр) ————————————————————————————
+   Снизу и поверх плана: верхние углы заняты подсказкой и полным экраном.
+   Ширина ограничена — на планшете лёжа карточка во весь экран читается хуже,
+   чем колонка по центру. Высота ограничена тоже: под ней остаётся план, а
+   длинная карточка листается своим телом. */
+#canvas-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.mark-card {
+  pointer-events: auto;
+  width: min(560px, calc(100% - 24px));
+  max-height: 42vh;
+  overflow: auto;
+  margin: 0 12px 12px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--canvas-text);
+  box-shadow: 0 10px 28px rgba(1, 4, 9, 0.28);
+  font-size: 13px;
+}
+
+.mark-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--canvas-line);
+}
+
+.mark-card__icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.mark-card__label {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* Название типа уступает первым: обозначение метки читают, тип уточняют. */
+.mark-card__type {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #57606a;
+}
+
+.mark-card__close {
+  flex: none;
+  padding: 4px 6px;
+  background: transparent;
+  border-color: var(--canvas-line);
+  color: #57606a;
+}
+
+.mark-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+}
+
+/* Пара «название — значение» в две колонки: названия стоят колонка в колонку,
+   значения переносятся по словам. */
+.mark-card__row {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) 1fr;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.mark-card__name {
+  color: #57606a;
+}
+
+.mark-card__value {
+  overflow-wrap: anywhere;
+}
+
+.mark-card__empty {
+  margin: 0;
+  color: #57606a;
+}
+
+/* Палец крупнее курсора — крестик подрастает вместе с остальными кнопками. */
+#app.is-mobile .mark-card__close {
+  min-height: 32px;
+}
+
 .tools {
   display: flex;
   flex-direction: column;

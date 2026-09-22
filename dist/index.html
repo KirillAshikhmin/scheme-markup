@@ -164,6 +164,106 @@
   height: 30px;
 }
 
+/* ——— карточка выделенной метки (просмотр) ————————————————————————————
+   Снизу и поверх плана: верхние углы заняты подсказкой и полным экраном.
+   Ширина ограничена — на планшете лёжа карточка во весь экран читается хуже,
+   чем колонка по центру. Высота ограничена тоже: под ней остаётся план, а
+   длинная карточка листается своим телом. */
+#canvas-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.mark-card {
+  pointer-events: auto;
+  width: min(560px, calc(100% - 24px));
+  max-height: 42vh;
+  overflow: auto;
+  margin: 0 12px 12px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--canvas-text);
+  box-shadow: 0 10px 28px rgba(1, 4, 9, 0.28);
+  font-size: 13px;
+}
+
+.mark-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--canvas-line);
+}
+
+.mark-card__icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.mark-card__label {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* Название типа уступает первым: обозначение метки читают, тип уточняют. */
+.mark-card__type {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #57606a;
+}
+
+.mark-card__close {
+  flex: none;
+  padding: 4px 6px;
+  background: transparent;
+  border-color: var(--canvas-line);
+  color: #57606a;
+}
+
+.mark-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+}
+
+/* Пара «название — значение» в две колонки: названия стоят колонка в колонку,
+   значения переносятся по словам. */
+.mark-card__row {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) 1fr;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.mark-card__name {
+  color: #57606a;
+}
+
+.mark-card__value {
+  overflow-wrap: anywhere;
+}
+
+.mark-card__empty {
+  margin: 0;
+  color: #57606a;
+}
+
+/* Палец крупнее курсора — крестик подрастает вместе с остальными кнопками. */
+#app.is-mobile .mark-card__close {
+  min-height: 32px;
+}
+
 .tools {
   display: flex;
   flex-direction: column;
@@ -3058,6 +3158,7 @@
   --danger: #d1242f;
   --ok: #2da44e;
   --panel-width: 264px;
+  --handle-width: 18px;
   --header-height: 48px;
 }
 
@@ -3087,7 +3188,10 @@ body {
 
 #app {
   display: grid;
-  grid-template-columns: var(--panel-width) 1fr var(--panel-width);
+  /* Ширина колонки — переменная: свёрнутая ужимается до ручки, и холст
+     забирает её место. Мера ручки одна на обе стороны. */
+  position: relative;
+  grid-template-columns: var(--left-column, var(--panel-width)) 1fr var(--right-column, var(--panel-width));
   /* Шапка — одна строка: слова из неё убраны, поиск свёрнут в значок, а
      состояние выгрузки стало отметкой на кнопке, и файловые действия встали
      рядом с остальными. Перенос оставлен запасным выходом: на совсем узком
@@ -3171,6 +3275,86 @@ body {
   #file-actions {
     margin-left: 8px;
   }
+}
+
+/* ——— колонки целиком: ручка у края —————————————————————————————————
+   Заказчик: «сделай возможность скрывать обе панели в режиме редактирования на
+   планшетах». Причина считана: две колонки по 264 точки на 600 оставляли плану
+   72. Свёрнутая колонка ужимается до полоски ручки — холст забирает остальное,
+   а сама ручка остаётся на месте у края экрана: искать её не нужно, и вернуть
+   колонку — одно нажатие. Кнопки в шапке для этого нет нарочно: там тесно. */
+#app.is-left-hidden {
+  --left-column: var(--handle-width);
+}
+
+#app.is-right-hidden {
+  --right-column: var(--handle-width);
+}
+
+#app.is-left-hidden #panel-left,
+#app.is-right-hidden #panel-right {
+  display: none;
+}
+
+.panel-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--handle-width);
+  height: 72px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  background: var(--panel-bg);
+  color: var(--panel-muted);
+  cursor: pointer;
+}
+
+.panel-handle:hover,
+.panel-handle:focus-visible {
+  color: var(--panel-text);
+}
+
+.panel-handle .ui-icon {
+  --ui-icon: 14px;
+}
+
+/* Стрелка смотрит туда, куда уедет колонка: влево — «спрятать левую», вправо —
+   «вернуть её». Рисунок один (`chevron`), поворот делают стили. */
+.panel-handle--left {
+  left: calc(var(--left-column, var(--panel-width)) - var(--handle-width));
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.panel-handle--left .ui-icon {
+  transform: rotate(90deg);
+}
+
+#app.is-left-hidden .panel-handle--left .ui-icon {
+  transform: rotate(-90deg);
+}
+
+.panel-handle--right {
+  right: calc(var(--right-column, var(--panel-width)) - var(--handle-width));
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.panel-handle--right .ui-icon {
+  transform: rotate(-90deg);
+}
+
+#app.is-right-hidden .panel-handle--right .ui-icon {
+  transform: rotate(90deg);
+}
+
+/* В просмотре колонки приходят листом снизу, ручкам там делать нечего. */
+#app.is-mobile .panel-handle {
+  display: none;
 }
 
 /* Место счётчика предупреждений (таск 52). Пока панель не поднялась, точка
@@ -3693,6 +3877,10 @@ body {
       <main id="canvas-area">
         <div id="canvas-host" class="mount"></div>
         <div id="canvas-overlay" class="mount"></div>
+        <!-- Карточка выделенной метки в просмотре: снизу, поверх плана.
+             Верхние углы заняты подсказкой и полным экраном, и драться с ними
+             ей незачем. -->
+        <div id="canvas-card" class="mount"></div>
         <p id="canvas-empty" data-text="panels.canvasEmpty"></p>
       </main>
 
@@ -3718,6 +3906,14 @@ body {
           <div id="panel-properties" class="panel__body mount"></div>
         </section>
       </aside>
+
+      <!-- Ручки колонок: полоска у края самой колонки. Прячут её целиком —
+           на планшете две колонки по 264 точки не оставляли плану ничего.
+           Кнопки в шапке у этого нет нарочно: там и так тесно, а ручка стоит
+           ровно там, где колонка кончается, и после сворачивания остаётся на
+           том же месте у края экрана. -->
+      <button class="panel-handle panel-handle--left" type="button" data-panel-toggle="left"></button>
+      <button class="panel-handle panel-handle--right" type="button" data-panel-toggle="right"></button>
 
       <!-- Узкий экран: план во весь экран, колонки приходят листом снизу по
            одной. Кнопки крупные — с телефоном в одной руке иначе не попасть. -->
@@ -3751,6 +3947,13 @@ const strings = {
     markList: "Список меток",
     properties: "Справочник типов",
     canvasEmpty: "Загрузите план схемы, чтобы начать разметку",
+    // Ручки колонок. Слово у ручки-значка остаётся в подсказке и в aria-label:
+    // сама ручка — полоска со стрелкой, и без слова её назначение читается
+    // не всеми.
+    hideLeft: "Скрыть левую колонку",
+    showLeft: "Показать левую колонку",
+    hideRight: "Скрыть правую колонку",
+    showRight: "Показать правую колонку",
     marksEmpty: "Меток пока нет — выберите тип и щёлкните по плану",
   },
   mobile: {
@@ -3763,6 +3966,11 @@ const strings = {
     view: "Режим просмотра",
     viewHint: "Вернуться к просмотру: план во весь экран",
     viewOnly: "Режим просмотра — правка на компьютере",
+  },
+  // Карточка выделенной метки в просмотре: читать, не править.
+  markCard: {
+    close: "Закрыть карточку метки",
+    empty: "У метки записано только обозначение: ни помещения, ни расположения, ни связей",
   },
   search: {
     placeholder: "Поиск по объекту",
@@ -4528,6 +4736,10 @@ const strings = {
     controlsOf: "Управляет: {labels}",
     controlsTitle: "Выбрать метки, которыми управляет эта",
     controlledBy: "Управляется: {labels}",
+    // То же поле названием, а не фразой: в карточке метки строки устроены
+    // парами «название — значение», и «Управляется: Т1» в колонке значений
+    // повторяло бы название само себе.
+    controlledByShort: "Чем управляется",
     // Повтор в перечне связей: «Т3 ×3» — одно имя и число меток под ним.
     // Знак тот же, что у отметки повтора номера в строке списка
     // (`repeatBadge`): одна привычка на обе — «×N» значит «столько же меток».
@@ -11854,6 +12066,9 @@ const PANEL_IDS = {
   properties: "panel-properties",
   canvas: "canvas-host",
   overlay: "canvas-overlay",
+  // Карточка выделенной метки в просмотре: своя точка поверх холста, под
+  // подсказкой и кнопкой полного экрана — те в верхних углах, эта внизу.
+  canvasCard: "canvas-card",
   headerActions: "header-actions",
   headerSearch: "header-search",
   headerHistory: "header-history",
@@ -11894,6 +12109,12 @@ const SECTION_IDS = {
   properties: "properties",
 };
 const SECTIONS_SETTING = "collapsedSections";
+// Колонки целиком: на планшете две по 264 точки съедают весь экран, и холсту
+// на 600 оставалось 72. Свёрнутая колонка ужимается до ручки у края —
+// состояние живёт в настройках браузера и переживает перезагрузку, как
+// свёрнутые разделы и отметка линейки.
+const PANEL_SIDES = ["left", "right"];
+const PANELS_SETTING = "collapsedPanels";
 // Линейка и направляющие: отметка рабочего места, а не свойство объекта.
 // Живёт в настройках браузера и переживает перезагрузку.
 const GUIDES_SETTING = "schemeGuidesShown";
@@ -11972,6 +12193,7 @@ function layoutAllows(ability, mode) {
 }
 
 const appCollapsed = new Set();
+const appPanelsHidden = new Set();
 let appLayoutOverride = null;
 let appSheet = "none";
 
@@ -11987,6 +12209,20 @@ function sectionListFrom(value) {
 // сохранённый список означает «всё развёрнуто», а не «умолчание».
 function sectionStartList(saved) {
   return saved == null ? [...SECTION_DEFAULT_COLLAPSED] : sectionListFrom(saved);
+}
+
+// Что кладётся в настройки: список свёрнутых колонок. Мусор из хранилища
+// (чужая версия, битое значение) колонки не прячет.
+function panelListFrom(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((side) => PANEL_SIDES.includes(side)))];
+}
+function panelsAfterToggle(list, side, collapsed) {
+  const next = new Set(panelListFrom(list));
+  if (!PANEL_SIDES.includes(side)) return [...next];
+  if (collapsed) next.add(side);
+  else next.delete(side);
+  return [...next];
 }
 function sectionsAfterToggle(list, id, collapsed) {
   const next = new Set(sectionListFrom(list));
@@ -12228,6 +12464,57 @@ function toggleSection(id) {
   setSectionCollapsed(id, !appCollapsed.has(id));
 }
 
+// ——— колонки целиком: ручка у края ——————————————————————————————————
+//
+// Кнопки в шапке у этого нет нарочно: на восьмидюймовом планшете там уже тесно,
+// и прятать колонку должна ручка у её собственного края — она стоит там, где
+// колонка кончается, и после сворачивания остаётся на том же месте у края
+// экрана. Искать её не нужно: она не уезжает.
+function panelHidden(side) {
+  return appPanelsHidden.has(side);
+}
+
+function applyPanelState(side) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const hidden = appPanelsHidden.has(side);
+  app.classList.toggle(side === "left" ? "is-left-hidden" : "is-right-hidden", hidden);
+  const handle = document.querySelector('[data-panel-toggle="' + side + '"]');
+  if (!handle) return;
+  const label = strings.panels[(hidden ? "show" : "hide") + (side === "left" ? "Left" : "Right")];
+  handle.title = label;
+  handle.setAttribute("aria-label", label);
+  handle.setAttribute("aria-expanded", hidden ? "false" : "true");
+}
+function setPanelHidden(side, hidden) {
+  if (!PANEL_SIDES.includes(side)) return;
+  if (hidden) appPanelsHidden.add(side);
+  else appPanelsHidden.delete(side);
+  applyPanelState(side);
+  setSetting(PANELS_SETTING, [...appPanelsHidden]);
+}
+function togglePanel(side) {
+  setPanelHidden(side, !appPanelsHidden.has(side));
+}
+
+function wirePanels() {
+  for (const handle of document.querySelectorAll("[data-panel-toggle]")) {
+    handle.append(uiIcon("chevron"));
+    handle.addEventListener("click", () => togglePanel(handle.dataset.panelToggle));
+  }
+  for (const side of PANEL_SIDES) applyPanelState(side);
+  // Настройка читается асинхронно, как у разделов: страница стартует с обеими
+  // колонками и прячет их, когда хранилище ответит.
+  Promise.resolve(getSetting(PANELS_SETTING))
+    .then((saved) => {
+      for (const side of panelListFrom(saved)) {
+        appPanelsHidden.add(side);
+        applyPanelState(side);
+      }
+    })
+    .catch(() => {});
+}
+
 // Кто-то зовёт раздел со стороны (кнопка «Помещения» в справочнике): развернуть
 // и подвести к глазам — вместо второго окна, делающего то же самое.
 function revealSection(id) {
@@ -12281,6 +12568,7 @@ function startApp() {
   appStarted = true;
   applyStrings(document);
   wireSections();
+  wirePanels();
   syncCanvasClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
@@ -17905,6 +18193,16 @@ function canvasZoomReset() {
 
 // ——— указатель ———————————————————————————————————————————————————————
 
+// Что под пальцем: метка или пустое место. Ответ снимается в начале жеста —
+// по отпусканию план уже мог уехать, и попадание считалось бы по новым
+// координатам.
+function canvasTapPick(state, point) {
+  const scheme = canvasScheme(state);
+  if (!scheme || !state.project) return { markId: null };
+  const hit = hitTest(state.project, scheme, point, canvasViewOf(state), state.filter);
+  return { markId: hit ? hit.markId : null };
+}
+
 function canvasStartPan(point) {
   const state = canvasState();
   canvasDrag = { kind: "pan", start: point, view: { ...state.view }, moved: false };
@@ -17921,7 +18219,11 @@ function canvasPointerDown(event) {
   }
   canvasPointers.set(event.pointerId, canvasPointOf(event));
 
-  // Планшет: разметка остаётся десктопной, пальцы только смотрят.
+  // Планшет: разметка остаётся десктопной, пальцы только смотрят. Но
+  // «смотреть» — это ещё и выделить метку, чтобы прочитать её поля: до сих пор
+  // палец умел только возить план, и в просмотре метку нельзя было выбрать
+  // вовсе. Жест начинается панорамой, а тап это был или перенос — решает
+  // отпускание: сдвинули план — панорама, не сдвинули — выделение.
   if (event.pointerType === "touch") {
     if (canvasPointers.size === 2) {
       const [a, b] = [...canvasPointers.values()];
@@ -17932,7 +18234,9 @@ function canvasPointerDown(event) {
       canvasDrag = null;
       return;
     }
-    canvasStartPan(canvasPointOf(event));
+    const at = canvasPointOf(event);
+    canvasStartPan(at);
+    if (canvasDrag) canvasDrag.tap = canvasTapPick(canvasState(), at);
     return;
   }
   if (event.button === 2) return;
@@ -18103,7 +18407,18 @@ function canvasPointerDown(event) {
     if (!editable) {
       // Метка выделена — её поля можно прочитать; тащить её при этом нельзя,
       // и жест уходит в панораму, а не в перемещение.
-      canvasDrag = { kind: "pan", start: point, view: { ...state.view }, moved: false };
+      //
+      // `tapSelected` — тап по уже выделенной метке: по отпусканию без сдвига
+      // он снимает выделение и закрывает карточку. Решение принимается здесь,
+      // а применяется по отпусканию: с той же метки начинают и панораму, и
+      // снимать выделение под рукой было бы нельзя.
+      canvasDrag = {
+        kind: "pan",
+        start: point,
+        view: { ...state.view },
+        moved: false,
+        tapSelected: state.selectedMarkIds.length === 1 && state.selectedMarkIds[0] === hit.markId,
+      };
       return;
     }
     canvasDrag = {
@@ -18392,6 +18707,29 @@ function canvasPointerUp(event) {
   }
   if (drag.kind === "place") {
     canvasPlacePoint(plan);
+    return;
+  }
+  // Тап пальцем: план не уехал — значит, выбирали метку. Повторный тап по той
+  // же метке снимает выделение и закрывает карточку, тап по пустому месту —
+  // тоже. Сдвинули план — это была панорама, и выделение остаётся как было.
+  if (drag.kind === "pan" && drag.tap) {
+    const selected = state.selectedMarkIds || [];
+    const markId = drag.tap.markId;
+    if (!markId) {
+      if (selected.length > 0 || state.selectedOutlineId || state.editPathId) {
+        canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null, editPathId: null });
+      }
+      return;
+    }
+    const same = selected.length === 1 && selected[0] === markId;
+    canvasApi.setState({ selectedMarkIds: same ? [] : [markId], selectedOutlineId: null });
+    return;
+  }
+  // То же мышью: повторный клик по выделенной метке в просмотре закрывает
+  // карточку. В полной версии клик по выделенной метке ничего не меняет —
+  // там за ней тянутся ручки, и снимать выделение под рукой нельзя.
+  if (drag.kind === "pan" && drag.tapSelected && state.selectedMarkIds.length > 0) {
+    canvasApi.setState({ selectedMarkIds: [] });
     return;
   }
   if (drag.kind === "empty" && (state.selectedMarkIds.length > 0 || state.selectedOutlineId || state.editPathId)) {
@@ -27233,6 +27571,165 @@ function mountMarksPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.marks, mountMarksPanel);
+
+// src/panels/markCard.js
+// Карточка выделенной метки — в режиме просмотра, снизу поверх плана.
+//
+// Заказчик: «в режиме просмотра выделение меток сделай, чтобы снизу появлялось
+// окошко с её информацией и сразу отображались на схеме связи». В просмотре
+// панели правки нет вовсе, и прочитать, что это за метка, было негде: список
+// меток лежит листом снизу и про выделенную метку ничего не говорит.
+//
+// Карточка только читает. Все поля она берёт у той же `marksRowModel`, что
+// рисует раскрытую строку списка: второй правды о метке в сборке быть не
+// должно — разойдись они, список и карточка показывали бы разное.
+//
+// Связи на схеме поднимает не карточка, а холст: при выключенном общем показе
+// выделенная метка уже показывает свою связную группу (`canvasFrameLinks`,
+// таски 79 и 84). Правило от раскладки не зависит, и в просмотре работает так
+// же — карточке остаётся только назвать связи словами.
+
+
+
+
+
+
+// Отступ между меткой и верхним краем карточки: метка должна остаться видна
+// вместе с подписью, а не впритык.
+const MARK_CARD_GAP = 24;
+
+/**
+ * Что показывает карточка. Чистая функция: поля решаются здесь, а не в разметке,
+ * и проверяются без браузера.
+ *
+ * Пустые поля выпадают — на телефоне карточка из восьми строк «—» закрыла бы
+ * пол-плана. Остаётся голова: обозначение, код и название типа; по ним метку
+ * узнают, даже когда больше о ней ничего не записано.
+ */
+function markCardModel(project, markId) {
+  if (!project || !markId) return null;
+  const mark = findMark(project, markId);
+  if (!mark) return null;
+  const type = findType(project, mark.typeId);
+  const row = { mark, type, style: styleOf(project, mark.typeId), label: labelOf(project, markId) };
+  const view = marksRowModel(project, row, { open: true, controllers: marksControllerIndex(project) });
+  const fields = view.fields || {};
+  const room = fields.roomId ? findRoom(project, fields.roomId) : null;
+  const rows = [];
+  const add = (label, value) => {
+    if (value === null || value === undefined || value === "") return;
+    rows.push({ label, value: String(value) });
+  };
+  add(strings.marks.room, room ? room.name : "");
+  add(strings.marks.location, fields.location);
+  add(strings.marks.originalPlaceholder, fields.original);
+  add(strings.panels.sizes, fields.sizes);
+  // Связи — обе стороны и словами. «Чем управляет» идёт разложенным по каналам
+  // («① Т16 ×6 · ② С1»): это та же строка, что в списке меток, и она отвечает
+  // на вопрос «какая клавиша к какой нагрузке».
+  add(strings.marks.controls, fields.controlsText || (fields.controls || []).join(", "));
+  add(strings.marks.controlledByShort, (fields.controlledBy || []).join(", "));
+  if (fields.equipment > 0) add(strings.equipment.open, fields.equipment);
+  return {
+    id: mark.id,
+    label: view.label,
+    code: view.code,
+    typeName: view.typeName,
+    style: view.style,
+    kind: mark.kind === "line" ? "line" : "point",
+    rows,
+  };
+}
+
+/**
+ * На сколько подвинуть план, чтобы метка не осталась под карточкой.
+ *
+ * Ноль — метка и так выше карточки, трогать план незачем: рывок по каждому
+ * нажатию раздражает сильнее, чем закрытая метка.
+ */
+function markCardShift(markY, cardTop, gap = MARK_CARD_GAP) {
+  if (!Number.isFinite(markY) || !Number.isFinite(cardTop)) return 0;
+  const limit = cardTop - gap;
+  return markY > limit ? Math.round(markY - limit) : 0;
+}
+
+function mountMarkCard(host, api) {
+  const { getState, setState, subscribe } = api;
+  const card = uiEl("div", { class: "mark-card" });
+  host.replaceChildren(card);
+  let shownFor = null;
+
+  const render = () => {
+    const state = getState();
+    // Карточка живёт только в просмотре: в полной версии то же самое (и с
+    // правкой) показывает раскрытая строка списка меток.
+    const viewing = !layoutAllows("editMarks", state.layout);
+    const selected = state.selectedMarkIds || [];
+    const model = viewing && selected.length === 1 ? markCardModel(state.project, selected[0]) : null;
+    card.hidden = !model;
+    if (!model) {
+      shownFor = null;
+      return;
+    }
+    const head = uiEl("div", { class: "mark-card__head" }, [
+      uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 20)),
+      uiEl("span", { class: "mark-card__label", text: model.label }),
+      uiEl("span", { class: "mark-card__type", text: model.code + " — " + model.typeName }),
+      uiIconButton("close", {
+        class: "ui-btn mark-card__close",
+        label: strings.markCard.close,
+        on: { click: () => setState({ selectedMarkIds: [] }) },
+      }),
+    ]);
+    const body = uiEl("div", { class: "mark-card__body" });
+    if (model.rows.length === 0) {
+      body.append(uiEl("p", { class: "mark-card__empty", text: strings.markCard.empty }));
+    }
+    for (const row of model.rows) {
+      body.append(
+        uiEl("div", { class: "mark-card__row" }, [
+          uiEl("span", { class: "mark-card__name", text: row.label }),
+          uiEl("span", { class: "mark-card__value", text: row.value }),
+        ]),
+      );
+    }
+    card.replaceChildren(head, body);
+    if (shownFor !== model.id) {
+      shownFor = model.id;
+      liftMark(state, model.id);
+    }
+  };
+
+  // Метка под карточкой — половина беды: связи её группы тоже уходят под низ.
+  // План подвигается один раз, при появлении карточки, и только вверх и только
+  // если метка действительно под ней.
+  const liftMark = (state, markId) => {
+    const plan = document.getElementById(PANEL_IDS.canvas);
+    const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!plan || !scheme || !mark || !mark.points || mark.points.length === 0) return;
+    const at = planToScreen(mark.points[0], scheme, state.view);
+    const box = card.getBoundingClientRect();
+    const hostBox = plan.getBoundingClientRect();
+    const shift = markCardShift(at.y, box.top - hostBox.top);
+    if (shift === 0) return;
+    setState({ view: { ...state.view, offsetY: state.view.offsetY - shift } });
+  };
+
+  subscribe((state, changed) => {
+    if (
+      "selectedMarkIds" in changed ||
+      "project" in changed ||
+      "layout" in changed ||
+      "schemeId" in changed
+    ) {
+      render();
+    }
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.canvasCard, mountMarkCard);
 
 // src/panels/projects.js
 // Объекты: список в шапке, переключение, переименование, удаление,

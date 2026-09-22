@@ -18,6 +18,9 @@ export const PANEL_IDS = {
   properties: "panel-properties",
   canvas: "canvas-host",
   overlay: "canvas-overlay",
+  // Карточка выделенной метки в просмотре: своя точка поверх холста, под
+  // подсказкой и кнопкой полного экрана — те в верхних углах, эта внизу.
+  canvasCard: "canvas-card",
   headerActions: "header-actions",
   headerSearch: "header-search",
   headerHistory: "header-history",
@@ -58,6 +61,12 @@ export const SECTION_IDS = {
   properties: "properties",
 };
 export const SECTIONS_SETTING = "collapsedSections";
+// Колонки целиком: на планшете две по 264 точки съедают весь экран, и холсту
+// на 600 оставалось 72. Свёрнутая колонка ужимается до ручки у края —
+// состояние живёт в настройках браузера и переживает перезагрузку, как
+// свёрнутые разделы и отметка линейки.
+export const PANEL_SIDES = ["left", "right"];
+export const PANELS_SETTING = "collapsedPanels";
 // Линейка и направляющие: отметка рабочего места, а не свойство объекта.
 // Живёт в настройках браузера и переживает перезагрузку.
 export const GUIDES_SETTING = "schemeGuidesShown";
@@ -137,6 +146,7 @@ export function layoutAllows(ability, mode) {
 }
 
 const appCollapsed = new Set();
+const appPanelsHidden = new Set();
 let appLayoutOverride = null;
 let appSheet = "none";
 
@@ -152,6 +162,21 @@ export function sectionListFrom(value) {
 // сохранённый список означает «всё развёрнуто», а не «умолчание».
 export function sectionStartList(saved) {
   return saved == null ? [...SECTION_DEFAULT_COLLAPSED] : sectionListFrom(saved);
+}
+
+// Что кладётся в настройки: список свёрнутых колонок. Мусор из хранилища
+// (чужая версия, битое значение) колонки не прячет.
+export function panelListFrom(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((side) => PANEL_SIDES.includes(side)))];
+}
+
+export function panelsAfterToggle(list, side, collapsed) {
+  const next = new Set(panelListFrom(list));
+  if (!PANEL_SIDES.includes(side)) return [...next];
+  if (collapsed) next.add(side);
+  else next.delete(side);
+  return [...next];
 }
 
 export function sectionsAfterToggle(list, id, collapsed) {
@@ -404,6 +429,60 @@ export function toggleSection(id) {
   setSectionCollapsed(id, !appCollapsed.has(id));
 }
 
+// ——— колонки целиком: ручка у края ——————————————————————————————————
+//
+// Кнопки в шапке у этого нет нарочно: на восьмидюймовом планшете там уже тесно,
+// и прятать колонку должна ручка у её собственного края — она стоит там, где
+// колонка кончается, и после сворачивания остаётся на том же месте у края
+// экрана. Искать её не нужно: она не уезжает.
+
+export function panelHidden(side) {
+  return appPanelsHidden.has(side);
+}
+
+function applyPanelState(side) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const hidden = appPanelsHidden.has(side);
+  app.classList.toggle(side === "left" ? "is-left-hidden" : "is-right-hidden", hidden);
+  const handle = document.querySelector('[data-panel-toggle="' + side + '"]');
+  if (!handle) return;
+  const label = strings.panels[(hidden ? "show" : "hide") + (side === "left" ? "Left" : "Right")];
+  handle.title = label;
+  handle.setAttribute("aria-label", label);
+  handle.setAttribute("aria-expanded", hidden ? "false" : "true");
+}
+
+export function setPanelHidden(side, hidden) {
+  if (!PANEL_SIDES.includes(side)) return;
+  if (hidden) appPanelsHidden.add(side);
+  else appPanelsHidden.delete(side);
+  applyPanelState(side);
+  setSetting(PANELS_SETTING, [...appPanelsHidden]);
+}
+
+export function togglePanel(side) {
+  setPanelHidden(side, !appPanelsHidden.has(side));
+}
+
+function wirePanels() {
+  for (const handle of document.querySelectorAll("[data-panel-toggle]")) {
+    handle.append(uiIcon("chevron"));
+    handle.addEventListener("click", () => togglePanel(handle.dataset.panelToggle));
+  }
+  for (const side of PANEL_SIDES) applyPanelState(side);
+  // Настройка читается асинхронно, как у разделов: страница стартует с обеими
+  // колонками и прячет их, когда хранилище ответит.
+  Promise.resolve(getSetting(PANELS_SETTING))
+    .then((saved) => {
+      for (const side of panelListFrom(saved)) {
+        appPanelsHidden.add(side);
+        applyPanelState(side);
+      }
+    })
+    .catch(() => {});
+}
+
 // Кто-то зовёт раздел со стороны (кнопка «Помещения» в справочнике): развернуть
 // и подвести к глазам — вместо второго окна, делающего то же самое.
 export function revealSection(id) {
@@ -458,6 +537,7 @@ export function startApp() {
   appStarted = true;
   applyStrings(document);
   wireSections();
+  wirePanels();
   syncCanvasClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);

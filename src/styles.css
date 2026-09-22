@@ -11,6 +11,7 @@
   --danger: #d1242f;
   --ok: #2da44e;
   --panel-width: 264px;
+  --handle-width: 18px;
   --header-height: 48px;
 }
 
@@ -40,7 +41,10 @@ body {
 
 #app {
   display: grid;
-  grid-template-columns: var(--panel-width) 1fr var(--panel-width);
+  /* Ширина колонки — переменная: свёрнутая ужимается до ручки, и холст
+     забирает её место. Мера ручки одна на обе стороны. */
+  position: relative;
+  grid-template-columns: var(--left-column, var(--panel-width)) 1fr var(--right-column, var(--panel-width));
   /* Шапка — одна строка: слова из неё убраны, поиск свёрнут в значок, а
      состояние выгрузки стало отметкой на кнопке, и файловые действия встали
      рядом с остальными. Перенос оставлен запасным выходом: на совсем узком
@@ -124,6 +128,86 @@ body {
   #file-actions {
     margin-left: 8px;
   }
+}
+
+/* ——— колонки целиком: ручка у края —————————————————————————————————
+   Заказчик: «сделай возможность скрывать обе панели в режиме редактирования на
+   планшетах». Причина считана: две колонки по 264 точки на 600 оставляли плану
+   72. Свёрнутая колонка ужимается до полоски ручки — холст забирает остальное,
+   а сама ручка остаётся на месте у края экрана: искать её не нужно, и вернуть
+   колонку — одно нажатие. Кнопки в шапке для этого нет нарочно: там тесно. */
+#app.is-left-hidden {
+  --left-column: var(--handle-width);
+}
+
+#app.is-right-hidden {
+  --right-column: var(--handle-width);
+}
+
+#app.is-left-hidden #panel-left,
+#app.is-right-hidden #panel-right {
+  display: none;
+}
+
+.panel-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--handle-width);
+  height: 72px;
+  padding: 0;
+  border: 1px solid var(--panel-line);
+  background: var(--panel-bg);
+  color: var(--panel-muted);
+  cursor: pointer;
+}
+
+.panel-handle:hover,
+.panel-handle:focus-visible {
+  color: var(--panel-text);
+}
+
+.panel-handle .ui-icon {
+  --ui-icon: 14px;
+}
+
+/* Стрелка смотрит туда, куда уедет колонка: влево — «спрятать левую», вправо —
+   «вернуть её». Рисунок один (`chevron`), поворот делают стили. */
+.panel-handle--left {
+  left: calc(var(--left-column, var(--panel-width)) - var(--handle-width));
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.panel-handle--left .ui-icon {
+  transform: rotate(90deg);
+}
+
+#app.is-left-hidden .panel-handle--left .ui-icon {
+  transform: rotate(-90deg);
+}
+
+.panel-handle--right {
+  right: calc(var(--right-column, var(--panel-width)) - var(--handle-width));
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.panel-handle--right .ui-icon {
+  transform: rotate(-90deg);
+}
+
+#app.is-right-hidden .panel-handle--right .ui-icon {
+  transform: rotate(90deg);
+}
+
+/* В просмотре колонки приходят листом снизу, ручкам там делать нечего. */
+#app.is-mobile .panel-handle {
+  display: none;
 }
 
 /* Место счётчика предупреждений (таск 52). Пока панель не поднялась, точка

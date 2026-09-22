@@ -1852,6 +1852,16 @@ export function canvasZoomReset() {
 
 // ——— указатель ———————————————————————————————————————————————————————
 
+// Что под пальцем: метка или пустое место. Ответ снимается в начале жеста —
+// по отпусканию план уже мог уехать, и попадание считалось бы по новым
+// координатам.
+function canvasTapPick(state, point) {
+  const scheme = canvasScheme(state);
+  if (!scheme || !state.project) return { markId: null };
+  const hit = hitTest(state.project, scheme, point, canvasViewOf(state), state.filter);
+  return { markId: hit ? hit.markId : null };
+}
+
 function canvasStartPan(point) {
   const state = canvasState();
   canvasDrag = { kind: "pan", start: point, view: { ...state.view }, moved: false };
@@ -1868,7 +1878,11 @@ function canvasPointerDown(event) {
   }
   canvasPointers.set(event.pointerId, canvasPointOf(event));
 
-  // Планшет: разметка остаётся десктопной, пальцы только смотрят.
+  // Планшет: разметка остаётся десктопной, пальцы только смотрят. Но
+  // «смотреть» — это ещё и выделить метку, чтобы прочитать её поля: до сих пор
+  // палец умел только возить план, и в просмотре метку нельзя было выбрать
+  // вовсе. Жест начинается панорамой, а тап это был или перенос — решает
+  // отпускание: сдвинули план — панорама, не сдвинули — выделение.
   if (event.pointerType === "touch") {
     if (canvasPointers.size === 2) {
       const [a, b] = [...canvasPointers.values()];
@@ -1879,7 +1893,9 @@ function canvasPointerDown(event) {
       canvasDrag = null;
       return;
     }
-    canvasStartPan(canvasPointOf(event));
+    const at = canvasPointOf(event);
+    canvasStartPan(at);
+    if (canvasDrag) canvasDrag.tap = canvasTapPick(canvasState(), at);
     return;
   }
   if (event.button === 2) return;
@@ -2050,7 +2066,18 @@ function canvasPointerDown(event) {
     if (!editable) {
       // Метка выделена — её поля можно прочитать; тащить её при этом нельзя,
       // и жест уходит в панораму, а не в перемещение.
-      canvasDrag = { kind: "pan", start: point, view: { ...state.view }, moved: false };
+      //
+      // `tapSelected` — тап по уже выделенной метке: по отпусканию без сдвига
+      // он снимает выделение и закрывает карточку. Решение принимается здесь,
+      // а применяется по отпусканию: с той же метки начинают и панораму, и
+      // снимать выделение под рукой было бы нельзя.
+      canvasDrag = {
+        kind: "pan",
+        start: point,
+        view: { ...state.view },
+        moved: false,
+        tapSelected: state.selectedMarkIds.length === 1 && state.selectedMarkIds[0] === hit.markId,
+      };
       return;
     }
     canvasDrag = {
@@ -2339,6 +2366,29 @@ function canvasPointerUp(event) {
   }
   if (drag.kind === "place") {
     canvasPlacePoint(plan);
+    return;
+  }
+  // Тап пальцем: план не уехал — значит, выбирали метку. Повторный тап по той
+  // же метке снимает выделение и закрывает карточку, тап по пустому месту —
+  // тоже. Сдвинули план — это была панорама, и выделение остаётся как было.
+  if (drag.kind === "pan" && drag.tap) {
+    const selected = state.selectedMarkIds || [];
+    const markId = drag.tap.markId;
+    if (!markId) {
+      if (selected.length > 0 || state.selectedOutlineId || state.editPathId) {
+        canvasApi.setState({ selectedMarkIds: [], selectedOutlineId: null, editPathId: null });
+      }
+      return;
+    }
+    const same = selected.length === 1 && selected[0] === markId;
+    canvasApi.setState({ selectedMarkIds: same ? [] : [markId], selectedOutlineId: null });
+    return;
+  }
+  // То же мышью: повторный клик по выделенной метке в просмотре закрывает
+  // карточку. В полной версии клик по выделенной метке ничего не меняет —
+  // там за ней тянутся ручки, и снимать выделение под рукой нельзя.
+  if (drag.kind === "pan" && drag.tapSelected && state.selectedMarkIds.length > 0) {
+    canvasApi.setState({ selectedMarkIds: [] });
     return;
   }
   if (drag.kind === "empty" && (state.selectedMarkIds.length > 0 || state.selectedOutlineId || state.editPathId)) {
