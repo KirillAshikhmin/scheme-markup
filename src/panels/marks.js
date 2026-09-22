@@ -16,8 +16,10 @@ import {
   findRoom,
   labelCounts,
   labelOf,
+  linkedMarkIds,
   markControlIds,
   markControls,
+  markControlledBy,
   markControlsByChannel,
   markDimensions,
   markRoomManual,
@@ -77,9 +79,81 @@ export function marksCenteredView(scheme, mark, view) {
  * этой панели уже значит «столько же меток».
  */
 export function marksLabelList(labels) {
-  return labelCounts(labels).map((item) =>
-    item.count > 1 ? text("marks.labelTimes", { label: item.label, count: item.count }) : item.label,
-  );
+  return labelCounts(labels).map(marksLabelText);
+}
+
+// Одно имя перечня: «Т3» или «Т3 ×3». Отдельной функцией — потому что перечень
+// связки считает повторы сам (ему нужно число меток в свёрнутом хвосте), а
+// писаться имя обязано одним правилом с перечнем связей.
+function marksLabelText(item) {
+  return item.count > 1 ? text("marks.labelTimes", { label: item.label, count: item.count }) : item.label;
+}
+
+// Сколько имён показывает перечень связки, прежде чем свернуться числом.
+//
+// Замыкание поднимает столько меток, сколько их в связке на самом деле: у реле
+// на пять групп — три десятка (замерено в таске 84). Строка списка живёт в
+// колонке 264 точки, и тридцать имён в ней — семь строк текста под каждой
+// раскрытой меткой. Шесть имён занимают две строки и оставляют хвост числом;
+// целиком перечень остаётся в подсказке при наведении, а на плане — дугами и
+// оболочкой вокруг всей связки (она и так рисуется при выделении).
+export const MARKS_LINKED_SHOWN = 6;
+
+/**
+ * Вся связная группа метки — словами.
+ *
+ * Считает её модель (`linkedMarkIds`, таск 84): транзитивное замыкание по трём
+ * родам отношений — управление в обе стороны, общая цепь и общий номер. Второй
+ * реализации здесь быть не должно: перечень обязан совпадать с тем, что
+ * подсвечивается на плане при выделении той же метки.
+ *
+ * **Прямые связи из перечня выбрасываются.** Метка, уже названная в «Чем
+ * управляет» или «Чем управляется», появилась бы в строке второй раз — и
+ * перечень читался бы как повтор, а не как новость. После вычитания в нём
+ * остаётся ровно то, чего больше нигде не написано: второй выключатель того же
+ * светильника, тёзка по номеру, сосед по цепи.
+ *
+ * **Вычитается по метке, а не по имени.** Заказчик нарочно вешает на группу
+ * светильников один номер: выключатель может управлять одним Т3 из трёх, и два
+ * оставшихся связаны с ним через номер. Выброси их по имени — и связка
+ * промолчала бы о двух метках; выброшенные по идентификатору, они честно
+ * встают в перечень как «Т3 ×2».
+ *
+ * Порядок — тот, что дала модель: своей сортировки здесь не заводится.
+ */
+export function marksLinkedList(project, markId, limit = MARKS_LINKED_SHOWN) {
+  const mark = project ? findMark(project, markId) : null;
+  if (!mark) return { entries: [], all: [], more: 0, total: 0 };
+  const named = new Set([markId]);
+  for (const id of markControlIds(mark)) named.add(id);
+  for (const item of markControlledBy(project, markId)) named.add(item.id);
+  const rest = linkedMarkIds(project, markId).filter((id) => !named.has(id));
+  const counts = labelCounts(rest.map((id) => labelOf(project, id)));
+  const shown = limit > 0 ? counts.slice(0, limit) : counts;
+  return {
+    entries: shown.map(marksLabelText),
+    all: counts.map(marksLabelText),
+    more: counts.slice(shown.length).reduce((sum, item) => sum + item.count, 0),
+    total: rest.length,
+  };
+}
+
+// Перечень связки строкой: «В2, Т3 ×2 и ещё 21». Пустая строка значит, что
+// показывать нечего, — поле в этом случае не рисуется вовсе, как и остальные
+// пустые поля метки.
+export function marksLinkedText(list) {
+  if (!list || list.entries.length === 0) return "";
+  const line = list.entries.join(", ");
+  return list.more > 0 ? line + " " + text("marks.linkedMore", { count: list.more }) : line;
+}
+
+// Подсказка перечня: чем эта связь отличается от прямой, а у свёрнутого
+// перечня — ещё и весь список целиком. Свернуть в строке и потерять насовсем —
+// разные вещи.
+export function marksLinkedTitle(list) {
+  if (!list || list.entries.length === 0) return strings.marks.linkedTitle;
+  if (list.more === 0) return strings.marks.linkedTitle;
+  return strings.marks.linkedTitle + "\n" + text("marks.linkedAll", { labels: list.all.join(", ") });
 }
 
 /**
@@ -367,6 +441,10 @@ export function marksRowModel(project, row, options = {}) {
     // не только «чем управляет», но и «какой клавишей».
     controlsText: marksControlsText(project, mark.id),
     controlledBy: marksLabelList(controllers.get(mark.id) || []),
+    // Вся связка метки — то, что поднимается на плане при её выделении.
+    // Считается только у раскрытой строки: замыкание ходит по всему объекту, а
+    // раскрыта в списке всегда одна метка.
+    linked: marksLinkedList(project, mark.id),
   };
   return head;
 }
@@ -894,6 +972,17 @@ function mountMarksPanel(host, api) {
           ? uiEl("p", {
               class: "mark-row__by",
               text: text("marks.controlledBy", { labels: view.fields.controlledBy.join(", ") }),
+            })
+          : null,
+        // Связка — последней строкой и тоже только для чтения: это вывод из
+        // уже записанных связей, а не ещё одно поле метки. Стоит после обеих
+        // прямых связей нарочно: сперва названо то, что записано у метки
+        // руками, потом то, что из этого следует.
+        view.fields && view.fields.linked.entries.length > 0
+          ? uiEl("p", {
+              class: "mark-row__by mark-row__linked",
+              text: text("marks.linked", { labels: marksLinkedText(view.fields.linked) }),
+              title: marksLinkedTitle(view.fields.linked),
             })
           : null,
       ],

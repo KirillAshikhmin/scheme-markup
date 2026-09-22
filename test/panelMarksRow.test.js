@@ -89,6 +89,9 @@ test("выделенная метка раскрыта: помещение, ра
     // и строка пуста.
     controlsText: "",
     controlledBy: ["В1"],
+    // Связка: второй светильник того же выключателя. Напрямую с Т1 он не
+    // связан — связь идёт через В1, — и назвать её больше негде.
+    linked: { entries: ["Т2"], all: ["Т2"], more: 0, total: 1 },
   });
   const switchRow = marksRowModel(box.project, rowOf(box, box.switchOne), { open: true, controllers });
   assert.deepEqual(switchRow.fields.controls, ["Т1", "Т2"]);

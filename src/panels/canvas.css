@@ -243,6 +243,75 @@
   min-height: 32px;
 }
 
+/* ——— карточка на компьютере ————————————————————————————————————————
+   Те же поля, но в рядах, а не колонкой: в правой панели они уже показаны, и
+   вторая копия обязана занимать не пол-плана, а полосу внизу.
+
+   Главное здесь — `pointer-events: none`: на компьютере под карточкой рисуют,
+   и отнять у плана нижнюю полосу она не имеет права. Клик проходит насквозь,
+   ловят его только кнопки самой карточки. Цена названа вслух: текст из
+   карточки мышью не выделить — копировать «В оригинале» по-прежнему из поля в
+   панели, где это поле и правится. */
+.mark-card--compact {
+  width: min(760px, calc(100% - 24px));
+  max-height: 22vh;
+  pointer-events: none;
+}
+
+.mark-card--compact .ui-btn,
+.mark-card--compact .mark-card__mini {
+  pointer-events: auto;
+}
+
+.mark-card--compact .mark-card__body {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+}
+
+/* Пара «название — значение» в ряду: колонка в колонку их строить незачем —
+   рядов в строке несколько, и сетка растащила бы их по всей ширине. */
+.mark-card--compact .mark-card__row {
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+}
+
+/* Свёрнутая карточка — ярлычок с обозначением метки на месте карточки.
+   Пустоты вместо неё не остаётся: по ярлычку видно, что карточка свёрнута, а
+   не пропала, и куда нажать, чтобы вернуть. */
+.mark-card--mini {
+  width: auto;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.mark-card__mini {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mark-card__mini:hover,
+.mark-card__mini:focus-visible {
+  color: var(--accent);
+}
+
+/* Галочка ярлычка смотрит вверх — «развернуть»; у кнопки сворачивания вниз,
+   как у свёрнутого раздела панели. */
+.mark-card__mini .ui-icon {
+  --ui-icon: 14px;
+  transform: rotate(180deg);
+}
+
 .tools {
   display: flex;
   flex-direction: column;

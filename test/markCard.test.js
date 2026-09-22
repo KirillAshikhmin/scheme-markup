@@ -10,6 +10,8 @@
 //    на каждое нажатие нельзя.
 // 3. Список свёрнутых колонок: он уезжает в настройки браузера и возвращается
 //    оттуда, а мусор из хранилища не должен прятать колонки.
+// 4. Показывать ли карточку. Заказчик попросил её «и с компа тоже», и правило
+//    «где она есть и в каком виде» — единственное место, где это записано.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -23,7 +25,14 @@ import {
   setMarkDimensions,
   updateMark,
 } from "../src/model.js";
-import { markCardModel, markCardShift } from "../src/panels/markCard.js";
+import {
+  MARK_CARD_FULL,
+  MARK_CARD_MINI,
+  MARK_CARD_NONE,
+  markCardModel,
+  markCardShift,
+  markCardState,
+} from "../src/panels/markCard.js";
 import { PANEL_SIDES, panelListFrom, panelsAfterToggle } from "../src/app.js";
 import { strings } from "../src/strings.js";
 
@@ -81,6 +90,56 @@ test("карточка показывает поля метки и обе сто
   const other = markCardModel(project, made.switch.id);
   const switchRows = new Map(other.rows.map((row) => [row.label, row.value]));
   assert.ok(switchRows.get(strings.marks.controls).includes("Т1"));
+});
+
+test("в карточке названа вся связка — включая связанных не напрямую", () => {
+  const made = scene();
+  let project = made.project;
+  const typeOf = (code) => project.markTypes.find((type) => type.code === code).id;
+  const second = addMark(project, {
+    schemeId: made.schemeId,
+    typeId: typeOf("П"),
+    points: [{ x: 0.3, y: 0.6 }],
+  });
+  project = second.project;
+  // Два выключателя на одном светильнике: напрямую они не связаны.
+  project = setMarkControls(project, made.switch.id, [made.lamp.id]).project;
+  project = setMarkControls(project, second.mark.id, [made.lamp.id]).project;
+
+  const card = markCardModel(project, made.switch.id);
+  const named = new Map(card.rows.map((row) => [row.label, row.value]));
+  assert.equal(named.get(strings.marks.linkedShort), "П1");
+  // Светильник назван один раз — в «Чем управляет», а не дважды.
+  assert.equal(named.get(strings.marks.controls), "Т1");
+  // У светильника связка пуста: оба выключателя уже стоят в «Чем управляется».
+  const lampRows = new Map(markCardModel(project, made.lamp.id).rows.map((row) => [row.label, row.value]));
+  assert.equal(lampRows.has(strings.marks.linkedShort), false);
+  // Подсказка объясняет, чем эта связь отличается от прямой.
+  const linkedRow = card.rows.find((row) => row.label === strings.marks.linkedShort);
+  assert.ok(linkedRow.title.includes(strings.marks.linkedTitle));
+});
+
+test("карточка есть во всех раскладках, а сворачивается только на компьютере", () => {
+  const made = scene();
+  const desktop = { project: made.project, layout: "desktop", selectedMarkIds: [made.lamp.id] };
+  const mobile = { project: made.project, layout: "mobile", selectedMarkIds: [made.lamp.id] };
+  // Заказчик: «ту плашку с информацией по метке отображай и в других режимах и
+  // с компа тоже».
+  assert.equal(markCardState(desktop), MARK_CARD_FULL);
+  assert.equal(markCardState(mobile), MARK_CARD_FULL);
+  // На компьютере её можно свернуть в ярлычок — в просмотре нельзя: там
+  // карточка единственный способ прочитать метку, а закрывают её снятием
+  // выделения.
+  assert.equal(markCardState(desktop, true), MARK_CARD_MINI);
+  assert.equal(markCardState(mobile, true), MARK_CARD_FULL);
+  // Карточка про одну метку: пачка и пустое выделение её не поднимают.
+  assert.equal(markCardState({ ...desktop, selectedMarkIds: [] }), MARK_CARD_NONE);
+  assert.equal(
+    markCardState({ ...desktop, selectedMarkIds: [made.lamp.id, made.switch.id] }),
+    MARK_CARD_NONE,
+  );
+  assert.equal(markCardState({ ...desktop, project: null }), MARK_CARD_NONE);
+  assert.equal(markCardState(null), MARK_CARD_NONE);
 });
 
 test("карточка понимает линию и метку блока", () => {
