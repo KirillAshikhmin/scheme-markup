@@ -517,6 +517,13 @@
   accent-color: var(--accent);
 }
 
+/* Выбор шрифта подписей: занимает ту же колонку, что ползунки рядом, — иначе
+   ряд «Шрифт подписей» выбивался бы из строя «Метки / Подписи». */
+.tools__select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Окно выбора типа */
 
 .picker {
@@ -3391,12 +3398,28 @@
 }
 
 :root {
-  /* Единственная точка, через которую чертёжный шрифт попадает в интерфейс и
-     на схему (таск 114). Отказ от шрифта — правка этой строки: убрать из неё
-     `"GOST type A drawn", `, и интерфейс, и подписи на плане вернутся к системному
-     шрифту разом. Холст читает ту же переменную (`render.drawFont`), поэтому
-     второго выключателя в коде нет. */
+  /* ——— два шрифта, два выключателя, и больше нигде ———
+     Таск 114 свёл к одному; заказчик посмотрел и развёл обратно (G172):
+     «Шрифт для печати и сделай настройкой выбор шрифта для схемы». В
+     интерфейсе чертёжный мешал — строчные рукописного рисунка, одно
+     начертание, тонкий штрих на тёмной панели.
+
+     Кто какой берёт:
+       бумага (`.print-doc`, лист по ГОСТ, PNG схемы и таблиц) — всегда
+         чертёжный: это чертёж по ГОСТ, выбора тут нет;
+       интерфейс (`body`, дальше всё по `font: inherit`) — всегда системный;
+       схема на экране — что выбрал человек, умолчание чертёжное.
+     Третий случай живёт не здесь, а в личных настройках браузера, и холст
+     спрашивает ту из этих двух переменных, которую назвали (`render.drawFont`).
+     Своего списка семейств в коде нет ни одного — это проверено тестом. */
+
+  /* Чертёжный. Отказ от шрифта насовсем — правка этой строки: убрать из неё
+     `"GOST type A drawn", `, и бумага с чертёжной схемой вернутся к системному
+     шрифту разом, настройку при этом трогать не надо. */
   --font-gost: "GOST type A drawn", system-ui, -apple-system, Arial, sans-serif;
+  /* Системный. Он же запасной у чертёжного — список кончается одинаково, и
+     при незагрузке файла план с панелями не разъезжаются. */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --panel-bg: #161b22;
   --panel-bg-deep: #0d1117;
   --panel-line: #30363d;
@@ -3432,8 +3455,9 @@ body {
 
 body {
   /* Весь интерфейс наследует этот шрифт: кнопки, поля и списки объявлены
-     `font: inherit`, своего семейства не заводит никто. */
-  font: 14px/1.45 var(--font-gost);
+     `font: inherit`, своего семейства не заводит никто. Системный, а не
+     чертёжный: таблицы и списки чертёжным читаются хуже (G172). */
+  font: 14px/1.45 var(--font-ui);
   color: var(--canvas-text);
   background: var(--panel-bg-deep);
   overflow: hidden;
@@ -4433,6 +4457,10 @@ const strings = {
     blockCommentHint: "Блок собирается только из точек — у комментария его нет",
     markSize: "Метки",
     labelSize: "Подписи",
+    font: "Шрифт подписей",
+    fontDraft: "Чертёжный ГОСТ",
+    fontSystem: "Системный",
+    fontHint: "Только на экране: на печать и в выгрузку всегда идёт чертёжный",
     guides: "Линейка и направляющие",
     zoom: "Масштаб",
     zoomIn: "Приблизить",
@@ -12656,937 +12684,6 @@ function autosaveAgoText(at, now) {
   return text("autosave.ago.pattern", { count: days, word: autosavePlural(days, words.days) });
 }
 
-// src/pwa.js
-// Установка страницы как приложения — только для веб-версии.
-//
-// Со страницы на диске (`file://`) не работает ни установка, ни служебный
-// скрипт, и это не поломка: вся папка `dist/` там и так лежит рядом — и
-// страница, и её шрифт, — сеть ей не нужна. Поэтому регистрация тихо ничего
-// не делает везде, кроме сайта.
-//
-// Что делает служебный скрипт — в `web/sw.js`. Здесь только две вещи, которые
-// решают судьбу обновления:
-//
-//  1. Регистрация с `updateViaCache: "none"` — сам файл скрипта никогда не
-//     берётся из HTTP-кэша. Иначе новая сборка ждала бы, пока протухнет старый
-//     ответ, и «я починил» доезжало бы через сутки.
-//  2. Проверка обновления при возвращении на вкладку. Установленное приложение
-//     на планшете живёт неделями без перезагрузки: без этого толчка браузер
-//     заглядывает за новой версией только при переходе по адресу.
-
-// Путь скрипта относительно страницы: на GitHub Pages приложение живёт в
-// подпапке, и абсолютный «/sw.js» указывал бы в корень чужого сайта.
-const PWA_WORKER = "./sw.js";
-
-// Служебный скрипт живёт только в защищённом окружении. `file://` и открытая
-// по http страница из локальной сети его не получают — и не должны: там он
-// молча падал бы в консоль на каждой загрузке.
-function pwaSupported(view) {
-  const target = view || (typeof window === "undefined" ? null : window);
-  if (!target || !target.navigator || !("serviceWorker" in target.navigator)) return false;
-  return Boolean(target.isSecureContext) && target.location && target.location.protocol !== "file:";
-}
-function registerServiceWorker() {
-  if (!pwaSupported()) return null;
-  const promise = navigator.serviceWorker
-    .register(PWA_WORKER, { scope: "./", updateViaCache: "none" })
-    .then((registration) => {
-      // Возвращение на вкладку — единственный надёжный повод спросить о новой
-      // версии в приложении, которое не перезагружают. Ответ приходит в
-      // следующую навигацию: страница и так берётся из сети первой.
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") registration.update().catch(() => {});
-      });
-      return registration;
-    })
-    .catch(() => null);
-  return promise;
-}
-
-// src/panels/ui.js
-// Общие кирпичи панелей: элементы, кнопки, модальные диалоги.
-// Отдельный модуль, потому что ими пользуются все панели: тянуть их из чужой
-// панели значило бы тянуть вместе с ней её регистрацию и подписки.
-function uiEl(tag, options = {}, children = []) {
-  const node = document.createElement(tag);
-  if (options.class) node.className = options.class;
-  if (options.text != null) node.textContent = options.text;
-  if (options.title) node.title = options.title;
-  if (options.type) node.type = options.type;
-  if (options.value != null) node.value = options.value;
-  if (options.placeholder) node.placeholder = options.placeholder;
-  if (options.attrs) {
-    for (const [name, value] of Object.entries(options.attrs)) node.setAttribute(name, value);
-  }
-  if (options.on) {
-    for (const [name, handler] of Object.entries(options.on)) node.addEventListener(name, handler);
-  }
-  for (const child of Array.isArray(children) ? children : [children]) {
-    if (child) node.append(child);
-  }
-  return node;
-}
-function uiButton(label, options = {}) {
-  return uiEl("button", {
-    class: options.class || "ui-btn",
-    text: label,
-    title: options.title || "",
-    type: "button",
-    on: options.on,
-    attrs: options.attrs,
-  });
-}
-
-// Значки рисуются прямо здесь, своими линиями: внешних картинок и шрифтов в
-// сборке нет, а стрелки отмены в системном шрифте есть не на каждой машине —
-// на части из них вместо знака встал бы пустой прямоугольник. Рисунок задан
-// в клетке 24×24 и тянется за цветом кнопки (`currentColor` в стилях).
-const UI_SVG_NS = "http://www.w3.org/2000/svg";
-const UI_ICONS = {
-  undo: ["M7 10h9a4.5 4.5 0 0 1 0 9h-5", "M10.5 6 6.5 10l4 4"],
-  redo: ["M17 10H8a4.5 4.5 0 0 0 0 9h5", "M13.5 6 17.5 10l-4 4"],
-  search: ["M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0", "M15.2 15.2 20 20"],
-  plus: ["M12 5v14", "M5 12h14"],
-  // Карандаш ведён по той же диагонали, что стрелки отмены: круглый торец даёт
-  // дуга, поперечина отделяет остриё — без неё в размере кнопки это просто
-  // палка.
-  edit: ["M5 19v-3.5L15.5 5a2.5 2.5 0 0 1 3.5 3.5L8.5 19H5z", "M13.7 6.8 17.2 10.3"],
-  // Корзина: крышка, дужка и сужающийся к низу корпус. Полосок внутри нет —
-  // в клетке 18 px они сливаются с корпусом в пятно.
-  trash: ["M4.5 7.5h15", "M9.5 7.5V5.5h5v2", "M6.5 7.5l1 12a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5l1-12"],
-  // Предупреждения: восклицательный знак в треугольнике — тот же рисунок, что
-  // на дорожном знаке, и читается он раньше слова.
-  warning: ["M12 4.5 21 20H3z", "M12 10v4.5", "M12 17.4v.2"],
-  // Всё в порядке — галочка. Отдельный значок, а не зачёркнутый треугольник:
-  // хорошая новость не должна выглядеть как отменённая плохая.
-  ok: ["M5 12.5 10 17.5 19 7"],
-  // Раскрытие списка. Повёрнутый влево — свёрнутый, вниз — раскрытый; поворот
-  // делают стили, рисунок один.
-  chevron: ["M7 10.5 12 15.5 17 10.5"],
-  // Крестик: «убрать эту строку». Не корзина — ничего не удаляется насовсем,
-  // и не галочка — она уже занята хорошей новостью.
-  close: ["M7 7 17 17", "M17 7 7 17"],
-  // Минус — близнец плюса: та же черта, та же длина. Пара стоит рядом в
-  // масштабе, и разная длина черт была бы видна сразу.
-  minus: ["M5 12h14"],
-  // Порядок схем: стрелка с древком, а не «шеврон». Шеврон в наборе уже занят
-  // раскрытием списка, и в столбце кнопок «выше/ниже» рядом с ним читался бы
-  // как «развернуть».
-  up: ["M12 19V6", "M6.5 11.5 12 6l5.5 5.5"],
-  down: ["M12 5v13", "M6.5 12.5 12 18l5.5-5.5"],
-  // Замена плана: две стрелки навстречу друг другу — «одно вместо другого».
-  // Не крест-накрест: в клетке 16 px пересечение линий сливается в узел.
-  swap: ["M4.5 9h13", "M14.5 5.5 18 9l-3.5 3.5", "M19.5 15h-13", "M9.5 11.5 6 15l3.5 3.5"],
-  // Правка плана — рамка кадрирования: два угольника внахлёст. Ножницы,
-  // стоявшие здесь раньше, обещали «вырезать кусок», а окно поворачивает план
-  // и обрезает поля.
-  crop: ["M7.5 3v13.5H21", "M3 7.5h13.5V21"],
-  // Поворот плана: кольцо с разрывом и уголком на конце дуги. Левый и правый
-  // зеркальны, и сторона поворота читается только по уголку — поэтому он
-  // вынесен за кольцо, а не вписан в него: остриё внутри дуги в клетке 16 px
-  // сливалось с самим кольцом в утолщение.
-  rotateLeft: ["M5.5 12a6.5 6.5 0 1 1 3 5.5", "M9 8.5H5.5V5"],
-  rotateRight: ["M18.5 12a6.5 6.5 0 1 0-3 5.5", "M15 8.5h3.5V5"],
-  // Контур помещения: замкнутая ломаная с углами — то же, что обводят на
-  // плане. Прямоугольник не годится: обводят по стенам, а не по рамке.
-  outline: ["M4.5 8.5 12 4l7.5 4.5v7L12 20l-7.5-4.5z"],
-  // Подсказка холста в свёрнутом виде: вопрос в кольце. Не лампочка и не «i» —
-  // кольцо с вопросом читается как «здесь написано, что делать», и в клетке
-  // 16 px у него узнаётся сам знак, а не пятно.
-  hint: ["M12 4.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15", "M9.8 9.6a2.3 2.3 0 0 1 4.4.9c0 1.6-2.2 1.9-2.2 3.3", "M12 16.8v.2"],
-  // Уплотнение нумерации: две стрелки, сходящиеся к середине, — «сомкнуть».
-  // Прежнее «№» говорило про номера, но не про то, что с ними сделают.
-  compact: ["M4 12h6", "M7 9l3 3-3 3", "M20 12h-6", "M17 9l-3 3 3 3"],
-  // Связи меток: звено цепи — два полукольца и перемычка между ними. Стрелка
-  // не годится: стрелками в наборе уже сказано «отмена», «порядок» и «замена»,
-  // а здесь речь не о действии, а о том, что две вещи держатся друг за друга.
-  link: ["M10.6 7.4 12.4 5.6a3.9 3.9 0 0 1 5.5 5.5l-1.8 1.8", "M13.4 16.6l-1.8 1.8a3.9 3.9 0 0 1-5.5-5.5l1.8-1.8", "M9.6 14.4 14.4 9.6"],
-  // Свободный номер метке: развилка — одна линия расходится надвое, со
-  // стрелками на концах. Речь тут не о номере, а о том, что с меткой делают, —
-  // отделяют её от одинаковых. «№» не годится (это буква, а не рисунок),
-  // «плюс» уже значит «добавить», а «уплотнение» — стрелки навстречу; развилка
-  // читается им обратной: было одно обозначение, стало два.
-  split: ["M4 12h6", "M10 12 15 7h4", "M10 12 15 17h4", "M16.5 4.5 19 7l-2.5 2.5", "M16.5 14.5 19 17l-2.5 2.5"],
-  // Просмотр: глаз. Пара к карандашу на одной кнопке — «смотреть» против
-  // «править»; словами оба состояния названы в подсказке.
-  view: ["M3.5 12s3.4-5.5 8.5-5.5 8.5 5.5 8.5 5.5-3.4 5.5-8.5 5.5S3.5 12 3.5 12", "M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0"],
-  // Папка автосохранения: папка с язычком — тот же знак, что в проводнике.
-  folder: ["M3.5 19.5V5.5h5l2 2.5h10v11.5z"],
-  // Открыть файл и выгрузить в файл — пара: лоток один и тот же, стрелка
-  // наружу и стрелка внутрь. Порознь каждая стрелка двусмысленна, парой они
-  // читаются сразу, а в шапке они и стоят рядом.
-  fileOpen: ["M12 15.5V4.5", "M8 8.5 12 4.5l4 4", "M4.5 15.5v4h15v-4"],
-  fileSave: ["M12 4.5v11", "M8 11.5 12 15.5l4-4", "M4.5 15.5v4h15v-4"],
-  // Полный экран: четыре уголка, расходящиеся к краям клетки, и они же,
-  // сведённые внутрь, — выход. Рисунок общепринятый, и состояние по нему
-  // видно без слова: уголки наружу — «развернуть», внутрь — «свернуть».
-  fullscreen: ["M4 9.5V4h5.5", "M20 9.5V4h-5.5", "M4 14.5V20h5.5", "M20 14.5V20h-5.5"],
-  fullscreenExit: ["M9.5 4v5.5H4", "M14.5 4v5.5H20", "M9.5 20v-5.5H4", "M14.5 20v-5.5H20"],
-};
-function uiIcon(name) {
-  const svg = document.createElementNS(UI_SVG_NS, "svg");
-  svg.setAttribute("class", "ui-icon");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("focusable", "false");
-  for (const line of UI_ICONS[name] || []) {
-    const path = document.createElementNS(UI_SVG_NS, "path");
-    path.setAttribute("d", line);
-    svg.append(path);
-  }
-  return svg;
-}
-
-// Кнопка-значок. Подпись словами у неё всё равно есть — в `title` и в
-// `aria-label`: значок без слова опознаётся не всеми, а экранный диктор
-// не читает рисунок вовсе.
-function uiIconButton(name, options = {}) {
-  const button = uiButton("", {
-    class: (options.class || "ui-btn") + " ui-btn--icon",
-    title: options.title || options.label || "",
-    on: options.on,
-    attrs: { ...(options.attrs || {}), "aria-label": options.label || options.title || "" },
-  });
-  button.append(uiIcon(name));
-  return button;
-}
-
-// Кнопка со значком и словом рядом. Слово лежит в своём `span`, и это не
-// мелочь: на узком экране его прячут стилями, а кнопка остаётся узнаваемой по
-// значку — так файловые действия влезают в одну строку шапки на планшете.
-// Слово при этом не теряется: оно уходит в подсказку и в `aria-label`, как и у
-// кнопки-значка. Подпись меняют через `uiButtonLabel`, а не `textContent`:
-// присваивание текста кнопке стёрло бы и значок.
-function uiIconLabelButton(name, label, options = {}) {
-  const button = uiButton("", {
-    class: (options.class || "ui-btn") + " ui-btn--label",
-    on: options.on,
-    attrs: options.attrs,
-  });
-  button.append(uiIcon(name), uiEl("span", { class: "ui-btn__word", text: label }));
-  uiButtonLabel(button, label, options.title);
-  return button;
-}
-
-// Новая подпись кнопки со значком: слово в строке, оно же в подсказке и в
-// `aria-label`. `title` задаётся отдельно, когда подсказка длиннее подписи.
-function uiButtonLabel(button, label, title) {
-  if (!button) return button;
-  const word = button.querySelector(".ui-btn__word");
-  if (word) word.textContent = label;
-  else button.textContent = label;
-  button.title = title || label;
-  button.setAttribute("aria-label", label);
-  return button;
-}
-
-// Диалоги складываются стопкой: подтверждение поверх редактора плана —
-// обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
-// основное действие, нижние ждут своей очереди и закрываются своими же close().
-// Пока стопка не пуста, #dialog-host не пустой — значит затемнение на месте
-// (правило `:empty` из styles.css). Клавиатура не должна оставаться в панели
-// под затемнением: диалог забирает фокус, а закрываясь — возвращает его тому,
-// кто его открыл.
-const uiDialogs = [];
-let uiEscapeListener = null;
-function uiDialogDepth() {
-  return uiDialogs.length;
-}
-
-function uiRefreshDialogs() {
-  const host = document.getElementById("dialog-host");
-  uiDialogs.forEach((entry, index) => {
-    entry.card.hidden = index !== uiDialogs.length - 1;
-  });
-  if (uiDialogs.length === 0) {
-    if (host) host.replaceChildren();
-    if (uiEscapeListener) {
-      document.removeEventListener("keydown", uiEscapeListener);
-      uiEscapeListener = null;
-    }
-    return;
-  }
-  if (uiEscapeListener) return;
-  uiEscapeListener = (event) => {
-    const top = uiDialogs[uiDialogs.length - 1];
-    if (!top) return;
-    if (event.key === "Escape") {
-      if (top.dismissable === false) return;
-      event.preventDefault();
-      top.close();
-      if (top.onCancel) top.onCancel();
-      return;
-    }
-    // Enter подтверждает основное действие. Поле ввода, которое обработало
-    // Enter само (uiPrompt), помечает событие — второй раз не срабатываем.
-    if (event.key !== "Enter" || event.defaultPrevented || !top.primary) return;
-    const target = event.target;
-    if (target && (target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-    event.preventDefault();
-    top.primary.click();
-  };
-  document.addEventListener("keydown", uiEscapeListener);
-}
-
-function uiFocusEntry(entry) {
-  const target = entry.card.querySelector("input, select, textarea") || entry.primary || entry.card;
-  if (target && typeof target.focus === "function") target.focus();
-}
-
-// Фокус возвращается открывшему, если он ещё на странице (кнопка панели могла
-// исчезнуть при перерисовке); иначе — диалогу, который снова стал верхним.
-function uiReturnFocus(entry) {
-  const opener = entry.opener;
-  if (opener && typeof opener.focus === "function" && opener.isConnected) {
-    opener.focus();
-    return;
-  }
-  const top = uiDialogs[uiDialogs.length - 1];
-  if (top) uiFocusEntry(top);
-}
-function uiModal(options) {
-  const host = document.getElementById("dialog-host");
-  const actions = options.actions || [];
-  const card = uiEl("div", { class: "modal", attrs: { tabindex: "-1" } }, [
-    uiEl("h3", { class: "modal__title", text: options.title || "" }),
-    uiEl("div", { class: "modal__body" }, options.body || null),
-    uiEl("div", { class: "modal__actions" }, actions),
-  ]);
-  const entry = {
-    card,
-    dismissable: options.dismissable,
-    onCancel: options.onCancel,
-    // Основное действие — последняя кнопка в ряду (в uiConfirm и uiPrompt это
-    // подтверждение, в редакторе плана — «Готово»).
-    primary: options.primary || [...actions].reverse().find((node) => node && node.tagName === "BUTTON") || null,
-    opener: typeof document !== "undefined" ? document.activeElement : null,
-    close() {
-      const index = uiDialogs.indexOf(entry);
-      if (index < 0) return;
-      uiDialogs.splice(index, 1);
-      card.remove();
-      uiRefreshDialogs();
-      uiReturnFocus(entry);
-    },
-  };
-  if (!host) return { close() {}, card };
-  uiDialogs.push(entry);
-  host.append(card);
-  uiRefreshDialogs();
-  uiFocusEntry(entry);
-  return { close: entry.close, card };
-}
-function uiConfirm({ title, message, confirmLabel }) {
-  return new Promise((resolve) => {
-    let modal;
-    const answer = (value) => {
-      modal.close();
-      resolve(value);
-    };
-    modal = uiModal({
-      title,
-      body: uiEl("p", { class: "modal__text", text: message }),
-      actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => answer(false) } }),
-        uiButton(confirmLabel || strings.dialog.confirm, {
-          class: "ui-btn ui-btn--danger",
-          on: { click: () => answer(true) },
-        }),
-      ],
-      onCancel: () => resolve(false),
-    });
-  });
-}
-
-/**
- * Окно с одним полем. `null` в ответе значит «отказались».
- *
- * Пустая строка по умолчанию — тот же отказ: окно спрашивают про имя схемы,
- * про код типа, про расстояние — пустых ответов там не бывает. `allowEmpty`
- * включает обратное: пустой ответ — это ответ. Так правится текст
- * комментария (таск 116) — очистить плашку человек имеет право, и делать это
- * удалением всей метки он не обязан.
- */
-function uiPrompt({ title, value, placeholder, submitLabel, allowEmpty }) {
-  return new Promise((resolve) => {
-    let modal;
-    const done = (result) => {
-      modal.close();
-      resolve(allowEmpty ? (result === null ? null : result) : result || null);
-    };
-    const input = uiEl("input", {
-      class: "ui-input",
-      type: "text",
-      value: value || "",
-      placeholder: placeholder || "",
-      on: {
-        keydown: (event) => {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          done(input.value.trim());
-        },
-      },
-    });
-    modal = uiModal({
-      title,
-      body: input,
-      actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
-        uiButton(submitLabel || strings.dialog.save, {
-          class: "ui-btn ui-btn--accent",
-          on: { click: () => done(input.value.trim()) },
-        }),
-      ],
-      onCancel: () => resolve(null),
-    });
-    input.select();
-  });
-}
-function formatMegabytes(bytes) {
-  return text("units.megabytes", { value: Math.round(bytes / (1024 * 1024)) });
-}
-
-// src/app.js
-// Каркас сеанса: состояние, реестр панелей, уведомления.
-// Панели других тасков монтируются по идентификатору контейнера из index.html
-// и не правят ни этот файл, ни разметку.
-
-
-
-
-// Значок кнопки раскладки рисует общий набор — своего рисунка у каркаса нет.
-
-// Контейнеры-точки монтирования (идентификаторы из src/index.html).
-const PANEL_IDS = {
-  tools: "panel-tools",
-  rooms: "panel-rooms",
-  sizes: "panel-sizes",
-  schemes: "panel-schemes",
-  marks: "panel-marks",
-  properties: "panel-properties",
-  canvas: "canvas-host",
-  overlay: "canvas-overlay",
-  // Карточка выделенной метки в просмотре: своя точка поверх холста, под
-  // подсказкой и кнопкой полного экрана — те в верхних углах, эта внизу.
-  canvasCard: "canvas-card",
-  headerActions: "header-actions",
-  headerSearch: "header-search",
-  headerHistory: "header-history",
-  headerWarnings: "header-warnings",
-  headerLinks: "header-links",
-  projectActions: "project-actions",
-  dialogs: "dialog-host",
-};
-
-const appState = {
-  layout: "desktop",
-  project: null,
-  schemeId: null,
-  selectedMarkIds: [],
-  // Путь в правке: у него видны ручки вершин. Режим руки, а не свойство
-  // разметки, — в объект и в файл проекта он не попадает.
-  editPathId: null,
-  // Линейка и направляющие видны, пока их не спрятали.
-  guidesShown: true,
-  // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
-  // встречать пользователя дугами поверх плана никто не просил.
-  linksShown: false,
-  activeTypeId: null,
-  mode: "select",
-  filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
-  view: { zoom: 1, offsetX: 0, offsetY: 0 },
-  dirty: false,
-};
-
-// Разделы колонок: заголовок сворачивает свой раздел, состояние переживает
-// перезагрузку. Имена — из `data-section-id` в разметке.
-const SECTION_IDS = {
-  marks: "marks",
-  rooms: "rooms",
-  schemes: "schemes",
-  sizes: "sizes",
-  markList: "markList",
-  properties: "properties",
-};
-const SECTIONS_SETTING = "collapsedSections";
-// Колонки целиком: на планшете две по 264 точки съедают весь экран, и холсту
-// на 600 оставалось 72. Свёрнутая колонка ужимается до ручки у края —
-// состояние живёт в настройках браузера и переживает перезагрузку, как
-// свёрнутые разделы и отметка линейки.
-const PANEL_SIDES = ["left", "right"];
-const PANELS_SETTING = "collapsedPanels";
-// Линейка и направляющие: отметка рабочего места, а не свойство объекта.
-// Живёт в настройках браузера и переживает перезагрузку.
-const GUIDES_SETTING = "schemeGuidesShown";
-// Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
-// здесь, рядом с остальными, а не в панели объектов: его пишет и панель
-// объектов, и панель файла (объект, пришедший из архива, тоже становится
-// последним), а панели друг друга не знают.
-const LAST_PROJECT_KEY = "lastProjectId";
-// Связи меток: та же природа, что у линейки, — оснастка разбора, а не свойство
-// разметки. Живёт в настройках браузера, переживает перезагрузку, в объект и в
-// файл проекта не попадает.
-const LINKS_SETTING = "markLinksShown";
-// На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
-// место они отнимают у списка схем. Всё остальное открыто — иначе новый
-// пользователь ищет, куда делись инструменты.
-const SECTION_DEFAULT_COLLAPSED = [SECTION_IDS.sizes];
-
-// ——— раскладка: широкий экран правит, узкий смотрит ————————————————————
-//
-// На объекте в руке телефон: нужно открыть план, найти метку, свериться с
-// таблицей. Размечать пальцем пользователь не собирался с самого брифинга,
-// поэтому узкий экран получает не урезанный редактор, а режим просмотра.
-// Решение о режиме — чистое, его и проверяют тесты: разъехаться оно может
-// незаметно, а цена — панель, которой на экране нет.
-const LAYOUT_MODES = ["desktop", "mobile"];
-// Окно уже этого — раскладка просмотра. На десктопе это же и есть способ
-// посмотреть мобильный вид: сузить окно.
-const LAYOUT_NARROW_WIDTH = 860;
-// Короткая сторона телефона: поворот её не меняет, поэтому альбомная
-// ориентация остаётся просмотром, а не превращается в редактор на 844 px.
-const LAYOUT_PHONE_SIDE = 560;
-
-// Что доступно в каждой раскладке. Список нарочно перечислен целиком: новое
-// умение нужно назвать здесь, иначе оно считается правкой и на телефон не идёт.
-const LAYOUT_ABILITIES = {
-  viewPlan: ["desktop", "mobile"],
-  switchProject: ["desktop", "mobile"],
-  switchScheme: ["desktop", "mobile"],
-  markList: ["desktop", "mobile"],
-  filters: ["desktop", "mobile"],
-  tables: ["desktop", "mobile"],
-  exportFiles: ["desktop", "mobile"],
-  openFile: ["desktop", "mobile"],
-  search: ["desktop", "mobile"],
-  // Предупреждения — про правку объекта: в них отвечают на вопрос о виде типа
-  // и идут чинить найденное. В просмотре чинить нечем, а место в шапке дорого.
-  warnings: ["desktop"],
-  // Связи — чтение, а не правка: «что включает этот выключатель» спрашивают и
-  // с телефона, стоя перед щитом. Ничего не меняют, поэтому идут в оба вида.
-  markLinks: ["desktop", "mobile"],
-  undo: ["desktop"],
-  saveFile: ["desktop"],
-  editMarks: ["desktop"],
-  editSchemes: ["desktop"],
-  editRooms: ["desktop"],
-  editProject: ["desktop"],
-  dictionary: ["desktop"],
-  viewSizes: ["desktop"],
-};
-function layoutModeFor(view, override) {
-  if (override === "mobile" || override === "desktop") return override;
-  const source = view || {};
-  const width = Number(source.width) || 0;
-  const height = Number(source.height) || 0;
-  const shortSide = height > 0 ? Math.min(width, height) : width;
-  if (source.coarsePointer && shortSide > 0 && shortSide <= LAYOUT_PHONE_SIDE) return "mobile";
-  if (width > 0 && width <= LAYOUT_NARROW_WIDTH) return "mobile";
-  return "desktop";
-}
-
-// Неизвестное умение доступным не считается: опечатка в имени спрячет кнопку,
-// а не пустит правку в режим просмотра.
-function layoutAllows(ability, mode) {
-  const modes = LAYOUT_ABILITIES[ability];
-  return Array.isArray(modes) && modes.includes(mode);
-}
-
-const appCollapsed = new Set();
-const appPanelsHidden = new Set();
-let appLayoutOverride = null;
-let appSheet = "none";
-
-// Что кладётся в настройки: список свёрнутых разделов. Мусор из хранилища
-// (чужая версия, битое значение) не должен схлопывать панель — он отбрасывается.
-function sectionListFrom(value) {
-  if (!Array.isArray(value)) return [];
-  const known = new Set(Object.values(SECTION_IDS));
-  return [...new Set(value.filter((id) => typeof id === "string" && known.has(id)))];
-}
-
-// Чего ещё не выбирал пользователь — то показываем по умолчанию; пустой
-// сохранённый список означает «всё развёрнуто», а не «умолчание».
-function sectionStartList(saved) {
-  return saved == null ? [...SECTION_DEFAULT_COLLAPSED] : sectionListFrom(saved);
-}
-
-// Что кладётся в настройки: список свёрнутых колонок. Мусор из хранилища
-// (чужая версия, битое значение) колонки не прячет.
-function panelListFrom(value) {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((side) => PANEL_SIDES.includes(side)))];
-}
-function panelsAfterToggle(list, side, collapsed) {
-  const next = new Set(panelListFrom(list));
-  if (!PANEL_SIDES.includes(side)) return [...next];
-  if (collapsed) next.add(side);
-  else next.delete(side);
-  return [...next];
-}
-function sectionsAfterToggle(list, id, collapsed) {
-  const next = new Set(sectionListFrom(list));
-  if (!Object.values(SECTION_IDS).includes(id)) return [...next];
-  if (collapsed) next.add(id);
-  else next.delete(id);
-  return [...next];
-}
-
-const appSubscribers = new Set();
-const appPanels = new Map();
-const appMounted = new Map();
-let appStarted = false;
-
-// Снимок: вложенные filter/view/selectedMarkIds копируются, чтобы правка
-// на месте в панели не меняла состояние сеанса мимо setState.
-function getState() {
-  return {
-    ...appState,
-    selectedMarkIds: [...appState.selectedMarkIds],
-    filter: { ...appState.filter },
-    view: { ...appState.view },
-  };
-}
-function setState(patch) {
-  if (!patch) return getState();
-  const changed = {};
-  for (const [key, value] of Object.entries(patch)) {
-    if (appState[key] !== value) {
-      appState[key] = value;
-      changed[key] = value;
-    }
-  }
-  if (Object.keys(changed).length === 0) return getState();
-  const snapshot = getState();
-  for (const subscriber of [...appSubscribers]) {
-    try {
-      subscriber(snapshot, changed);
-    } catch (error) {
-      reportAppError(error);
-    }
-  }
-  syncCanvasClass();
-  syncSchemeName();
-  return snapshot;
-}
-function subscribe(listener) {
-  appSubscribers.add(listener);
-  return () => appSubscribers.delete(listener);
-}
-
-// Регистрация панели: если каркас уже поднят — монтируем сразу.
-function registerPanel(id, mountFn) {
-  if (typeof mountFn !== "function") return;
-  appPanels.set(id, mountFn);
-  if (appStarted) mountPanel(id);
-}
-function panelApi() {
-  return { getState, setState, subscribe, notify, strings, text };
-}
-
-function mountPanel(id) {
-  const mountFn = appPanels.get(id);
-  const host = document.getElementById(id);
-  if (!mountFn || !host || appMounted.get(id) === mountFn) return;
-  try {
-    mountFn(host, panelApi());
-    appMounted.set(id, mountFn);
-  } catch (error) {
-    reportAppError(error);
-  }
-}
-function notify(message, kind = "info") {
-  const host = typeof document === "undefined" ? null : document.getElementById("notifications");
-  if (!host) return null;
-  const toast = document.createElement("div");
-  toast.className = "toast toast--" + kind;
-  toast.textContent = String(message);
-  toast.title = strings.notify.close;
-  toast.addEventListener("click", () => toast.remove());
-  host.append(toast);
-  setTimeout(() => toast.remove(), kind === "error" ? 12000 : 6000);
-  return toast;
-}
-
-function reportAppError(error) {
-  notify(error && error.message ? error.message : String(error), "error");
-}
-
-// Все видимые строки приходят из словаря: разметка держит только ключи.
-function applyStrings(root) {
-  const scope = root || document;
-  for (const node of scope.querySelectorAll("[data-text]")) {
-    node.textContent = text(node.dataset.text);
-  }
-  for (const node of scope.querySelectorAll("[data-title]")) {
-    node.title = text(node.dataset.title);
-  }
-}
-
-// На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
-// открыто, — списка схем на экране нет, он спрятан в лист.
-function syncSchemeName() {
-  const node = document.getElementById("scheme-name");
-  if (!node) return;
-  const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
-  node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
-}
-
-function syncCanvasClass() {
-  const app = document.getElementById("app");
-  if (!app) return;
-  app.classList.toggle("has-scheme", Boolean(appState.schemeId));
-}
-
-function layoutViewport() {
-  if (typeof window === "undefined") return { width: 0, height: 0, coarsePointer: false };
-  return {
-    width: window.innerWidth,
-    height: window.innerHeight,
-    coarsePointer:
-      typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches,
-  };
-}
-
-// Раскладка, которую выбрал бы сам экран: по ней видно, показывать ли переход
-// к полной версии. На настоящем десктопе кнопки нет вовсе — второго режима
-// работы там не заводим.
-function layoutAutoMode() {
-  return layoutModeFor(layoutViewport(), null);
-}
-function layoutMode() {
-  return appState.layout;
-}
-function layoutOverride() {
-  return appLayoutOverride;
-}
-function setLayoutOverride(mode) {
-  appLayoutOverride = mode === "mobile" || mode === "desktop" ? mode : null;
-  syncLayout();
-}
-
-// Лист снизу: на узком экране колонки показываются по одной и поверх плана.
-function openSheet(name) {
-  appSheet = name === "schemes" || name === "marks" ? name : "none";
-  syncSheet();
-}
-function currentSheet() {
-  return appSheet;
-}
-
-function syncSheet() {
-  const app = document.getElementById("app");
-  if (!app) return;
-  app.dataset.sheet = appState.layout === "mobile" ? appSheet : "none";
-  for (const button of document.querySelectorAll("[data-sheet-button]")) {
-    const target = button.dataset.sheetButton;
-    const active = app.dataset.sheet === target || (target === "none" && app.dataset.sheet === "none");
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-pressed", active ? "true" : "false");
-  }
-}
-
-function syncLayout() {
-  const mode = layoutModeFor(layoutViewport(), appLayoutOverride);
-  const app = document.getElementById("app");
-  if (app) app.classList.toggle("is-mobile", mode === "mobile");
-  if (mode !== "mobile") appSheet = "none";
-  const toggle = document.getElementById("layout-toggle");
-  if (toggle) {
-    // Кнопка живёт только там, где экран сам выбрал просмотр: на телефоне —
-    // дорога к полной версии, на десктопе её нет и быть не должно.
-    toggle.hidden = layoutAutoMode() !== "mobile";
-    // Значком, а не словом: «Полная версия» занимала в шапке 127 точек — на
-    // восьмидюймовом планшете это разница между одной строкой и двумя. Карандаш
-    // и глаз — пара «править / смотреть»; слово при этом не потеряно, оно в
-    // подсказке и в `aria-label`, как у остальных кнопок-значков.
-    const toEdit = mode === "mobile";
-    const label = toEdit ? strings.mobile.full : strings.mobile.view;
-    toggle.className = "ui-btn ui-btn--icon";
-    toggle.replaceChildren(toEdit ? uiIcon("edit") : uiIcon("view"));
-    toggle.title = toEdit ? strings.mobile.fullHint : strings.mobile.viewHint;
-    toggle.setAttribute("aria-label", label);
-  }
-  if (appState.layout !== mode) {
-    // Вход в просмотр снимает режим постановки: в суженном окне мышь никуда не
-    // делась, и оставленный «Точка» ставил бы метки там, где их не ждут.
-    setState(mode === "mobile" ? { layout: mode, mode: "select" } : { layout: mode });
-  }
-  syncSheet();
-  syncSchemeName();
-}
-
-function wireLayout() {
-  syncLayout();
-  const toggle = document.getElementById("layout-toggle");
-  if (toggle) {
-    toggle.addEventListener("click", () =>
-      setLayoutOverride(appState.layout === "mobile" ? "desktop" : null),
-    );
-  }
-  for (const button of document.querySelectorAll("[data-sheet-button]")) {
-    button.addEventListener("click", () => {
-      const target = button.dataset.sheetButton;
-      openSheet(appSheet === target ? "none" : target);
-    });
-  }
-  if (typeof window === "undefined") return;
-  let timer = null;
-  const later = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(syncLayout, 120);
-  };
-  window.addEventListener("resize", later);
-  window.addEventListener("orientationchange", later);
-}
-
-function sectionNode(id) {
-  return typeof document === "undefined" ? null : document.querySelector('[data-section-id="' + id + '"]');
-}
-
-// Свёрнутый раздел — это только заголовок с повёрнутой галочкой: пустым он не
-// выглядит, и место соседям отдаёт целиком.
-function applySectionState(id) {
-  const node = sectionNode(id);
-  if (!node) return;
-  const collapsed = appCollapsed.has(id);
-  node.classList.toggle("is-collapsed", collapsed);
-  const button = node.querySelector("[data-section]");
-  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-}
-function setSectionCollapsed(id, collapsed) {
-  if (collapsed) appCollapsed.add(id);
-  else appCollapsed.delete(id);
-  applySectionState(id);
-  setSetting(SECTIONS_SETTING, [...appCollapsed]);
-}
-function toggleSection(id) {
-  setSectionCollapsed(id, !appCollapsed.has(id));
-}
-
-// ——— колонки целиком: ручка у края ——————————————————————————————————
-//
-// Кнопки в шапке у этого нет нарочно: на восьмидюймовом планшете там уже тесно,
-// и прятать колонку должна ручка у её собственного края — она стоит там, где
-// колонка кончается, и после сворачивания остаётся на том же месте у края
-// экрана. Искать её не нужно: она не уезжает.
-function panelHidden(side) {
-  return appPanelsHidden.has(side);
-}
-
-function applyPanelState(side) {
-  const app = document.getElementById("app");
-  if (!app) return;
-  const hidden = appPanelsHidden.has(side);
-  app.classList.toggle(side === "left" ? "is-left-hidden" : "is-right-hidden", hidden);
-  const handle = document.querySelector('[data-panel-toggle="' + side + '"]');
-  if (!handle) return;
-  const label = strings.panels[(hidden ? "show" : "hide") + (side === "left" ? "Left" : "Right")];
-  handle.title = label;
-  handle.setAttribute("aria-label", label);
-  handle.setAttribute("aria-expanded", hidden ? "false" : "true");
-}
-function setPanelHidden(side, hidden) {
-  if (!PANEL_SIDES.includes(side)) return;
-  if (hidden) appPanelsHidden.add(side);
-  else appPanelsHidden.delete(side);
-  applyPanelState(side);
-  setSetting(PANELS_SETTING, [...appPanelsHidden]);
-}
-function togglePanel(side) {
-  setPanelHidden(side, !appPanelsHidden.has(side));
-}
-
-function wirePanels() {
-  for (const handle of document.querySelectorAll("[data-panel-toggle]")) {
-    handle.append(uiIcon("chevron"));
-    handle.addEventListener("click", () => togglePanel(handle.dataset.panelToggle));
-  }
-  for (const side of PANEL_SIDES) applyPanelState(side);
-  // Настройка читается асинхронно, как у разделов: страница стартует с обеими
-  // колонками и прячет их, когда хранилище ответит.
-  Promise.resolve(getSetting(PANELS_SETTING))
-    .then((saved) => {
-      for (const side of panelListFrom(saved)) {
-        appPanelsHidden.add(side);
-        applyPanelState(side);
-      }
-    })
-    .catch(() => {});
-}
-
-// Кто-то зовёт раздел со стороны (кнопка «Помещения» в справочнике): развернуть
-// и подвести к глазам — вместо второго окна, делающего то же самое.
-function revealSection(id) {
-  setSectionCollapsed(id, false);
-  const node = sectionNode(id);
-  if (!node) return;
-  if (typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "nearest" });
-  node.classList.add("is-called");
-  setTimeout(() => node.classList.remove("is-called"), 1200);
-}
-
-// Счётчик в заголовке: по свёрнутому разделу видно, пуст он или там сорок схем.
-function setSectionBadge(id, value) {
-  const node = sectionNode(id);
-  if (!node) return;
-  const badge = node.querySelector(".panel__badge");
-  if (badge) badge.textContent = value == null || value === "" ? "" : String(value);
-}
-
-function wireSections() {
-  for (const button of document.querySelectorAll("[data-section]")) {
-    button.addEventListener("click", () => toggleSection(button.dataset.section));
-  }
-  // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
-  // когда хранилище ответит. Ждать его с пустым экраном хуже.
-  Promise.resolve(getSetting(SECTIONS_SETTING))
-    .then((saved) => {
-      for (const id of sectionStartList(saved)) {
-        appCollapsed.add(id);
-        applySectionState(id);
-      }
-    })
-    .catch(() => {});
-  // Та же история у линейки: страница стартует с ней, и она гаснет, когда
-  // хранилище ответит «спрятана».
-  Promise.resolve(getSetting(GUIDES_SETTING))
-    .then((saved) => {
-      if (saved === false) setState({ guidesShown: false });
-    })
-    .catch(() => {});
-  // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище
-  // ответит «показаны».
-  Promise.resolve(getSetting(LINKS_SETTING))
-    .then((saved) => {
-      if (saved === true) setState({ linksShown: true });
-    })
-    .catch(() => {});
-}
-function startApp() {
-  if (appStarted) return;
-  appStarted = true;
-  applyStrings(document);
-  wireSections();
-  wirePanels();
-  syncCanvasClass();
-  wireLayout();
-  for (const id of appPanels.keys()) mountPanel(id);
-  // Веб-версия заодно просит служебный скрипт: установленное приложение
-  // обязано открываться и без сети. Со страницы на диске это ничего не делает.
-  registerServiceWorker();
-}
-
-// Старт откладывается за границу текущего скрипта: в собранном файле панели
-// и модели определяются ниже по бандлу, и каркас не должен опережать их.
-if (typeof document !== "undefined") {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", startApp, { once: true });
-  } else {
-    setTimeout(startApp, 0);
-  }
-}
-
 // src/render.js
 // Рисование схемы и попадание по метке.
 //
@@ -13604,38 +12701,60 @@ const SHAPES = SHAPE_NAMES;
 
 // ——— шрифт холста —————————————————————————————————————————————————————
 //
-// Чертёжный шрифт попадает на схему тем же путём, что и в интерфейс: через
-// переменную `--font-gost` в `styles.css`. Своего списка семейств здесь нет
-// нарочно — иначе выключателей стало бы два, и отказ от шрифта оставил бы
-// подписи на плане чертёжными, а интерфейс вернул бы системным.
+// Ответов на «каким шрифтом» теперь два, и оба объявлены в `styles.css`
+// переменными — своего списка семейств здесь нет ни одного (G172):
 //
+//   `draft`  — чертёжный ГОСТ (`--font-gost`). Бумага и выгрузка всегда он:
+//              это чертёж по стандарту, выбора у него нет.
+//   `system` — системный (`--font-ui`). Им живёт интерфейс, и его же человек
+//              может поставить схеме на экране.
+//
+// **Умолчание — чертёжный, и это несущая часть замысла.** Выгрузка, печать и
+// лист по ГОСТ зовут `drawFont(size, weight)` без третьего довода и получают
+// чертёжный, ничего не зная про настройку. Чтобы бумага поехала за выбором
+// глаз, пришлось бы дописать довод руками в каждом месте — а не забыть его
+// вернуть, как было бы с глобальным переключателем.
+const FONT_DRAFT = "draft";
+const FONT_SYSTEM = "system";
+const FONT_KINDS = [FONT_DRAFT, FONT_SYSTEM];
+
+// Вид шрифта -> переменная стилей. Больше имён семейств в коде нет.
+const FONT_VARIABLE = {
+  [FONT_DRAFT]: "--font-gost",
+  [FONT_SYSTEM]: "--font-ui",
+};
+
 // Запасной список нужен там, где переменной взять негде: в Node (тесты
 // геометрии холста не имеют) и до того, как стили применились. Текст в этом
 // случае рисуется системным шрифтом, а не пропадает.
 const DRAW_FONT_FALLBACK = 'system-ui, -apple-system, "Segoe UI", Arial, sans-serif';
 
-let drawFontFamilyCache = "";
-
 /**
- * Семейства для `ctx.font` — значение `--font-gost` как есть.
+ * Семейства для `ctx.font` — значение переменной вида как есть.
  *
- * Пустое значение не запоминается: стили на странице уже есть к первому кадру,
- * но если переменную не прочитать, кадр рисуется запасным шрифтом и следующий
- * спросит заново, а не закрепит промах навсегда.
+ * Ответ не запоминается: кадр спрашивает его один раз (`renderView` кладёт
+ * результат во `view`, и дальше по кадру идёт уже готовая строка), а
+ * запомненный намертво промах пережил бы и смену настройки, и дозагрузку
+ * стилей. Незнакомый вид — чертёжный: чужое слово в настройке не должно
+ * оставлять схему без шрифта.
  */
-function drawFontFamily() {
-  if (drawFontFamilyCache) return drawFontFamilyCache;
+function fontFamilyOf(kind) {
+  const variable = FONT_VARIABLE[kind] || FONT_VARIABLE[FONT_DRAFT];
   if (typeof document === "undefined" || !document.documentElement) return DRAW_FONT_FALLBACK;
   if (typeof getComputedStyle !== "function") return DRAW_FONT_FALLBACK;
-  const value = getComputedStyle(document.documentElement).getPropertyValue("--font-gost").trim();
-  if (!value) return DRAW_FONT_FALLBACK;
-  drawFontFamilyCache = value;
-  return value;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  return value || DRAW_FONT_FALLBACK;
 }
 
-/** Строка для `ctx.font`: `drawFont(12)` или `drawFont(12, 600)`. */
-function drawFont(size, weight) {
-  return (weight ? weight + " " : "") + size + "px " + drawFontFamily();
+/**
+ * Строка для `ctx.font`: `drawFont(12)`, `drawFont(12, 600)` или
+ * `drawFont(12, 600, family)`.
+ *
+ * Третий довод — **уже разобранные семейства**, а не вид: кадр разбирает их
+ * один раз, а не на каждую подпись. Без него — чертёжный.
+ */
+function drawFont(size, weight, family) {
+  return (weight ? weight + " " : "") + size + "px " + (family || fontFamilyOf(FONT_DRAFT));
 }
 
 /**
@@ -13647,6 +12766,8 @@ function drawFont(size, weight) {
  * холст, чтобы перерисовать кадр, выгрузка, чтобы не положить в PNG не тот
  * шрифт. Не дождались (старый браузер, файла нет) — `false` и прежний вид:
  * падать из-за шрифта нельзя.
+ *
+ * Ждут всегда чертёжный: системный — это отказ от файла, ждать там нечего.
  */
 function drawFontReady() {
   const fonts = typeof document !== "undefined" && document ? document.fonts : null;
@@ -14241,9 +13362,21 @@ const JACK_WIDTH = 0.52;
 const JACK_TOP = -0.55;
 const JACK_HEIGHT = 0.75;
 
+/**
+ * `view` для рисования, приведённый к полному виду.
+ *
+ * Здесь же вид шрифта превращается в семейства — один раз на кадр: `drawScheme`
+ * зовёт `renderView` в начале и дальше передаёт готовый `state` вниз, а не
+ * спрашивает стили на каждую подпись. Уже разобранный `view` второй раз не
+ * разбирается (`fontFamily` на месте), поэтому вложенные вызовы бесплатны.
+ *
+ * `fontKind` — поле кадра, а не объекта: его кладёт холст из личных настроек
+ * браузера. Выгрузка его не передаёт и получает чертёжный.
+ */
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
   if (!(merged.zoom > 0)) merged.zoom = 1;
+  if (!merged.fontFamily) merged.fontFamily = fontFamilyOf(merged.fontKind || FONT_DRAFT);
   return merged;
 }
 
@@ -15691,7 +14824,7 @@ function linkCurve(from, to, pad, spread = 0) {
 
 // Цифра канала у основания дуги. Канал не указан — не рисуется ничего: план
 // объекта, размеченного до появления каналов, обязан остаться прежним.
-function drawLinkChannel(ctx, curve, channel, color, alpha) {
+function drawLinkChannel(ctx, curve, channel, color, alpha, family) {
   if (!Number.isInteger(channel) || channel < 1) return;
   const dx = curve.end.x - curve.start.x;
   const dy = curve.end.y - curve.start.y;
@@ -15708,7 +14841,7 @@ function drawLinkChannel(ctx, curve, channel, color, alpha) {
   const value = String(channel);
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.font = drawFont(LINK_CHANNEL_FONT, 700);
+  ctx.font = drawFont(LINK_CHANNEL_FONT, 700, family);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
@@ -15842,7 +14975,7 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     const channelKey = line.fromId + "#" + line.channel;
     if (!channelsShown.has(channelKey)) {
       channelsShown.add(channelKey);
-      drawLinkChannel(ctx, curve, line.channel, color, fade(line, 1));
+      drawLinkChannel(ctx, curve, line.channel, color, fade(line, 1), state.fontFamily);
     }
   }
   // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
@@ -16138,6 +15271,10 @@ function labelBoxIn(project, scheme, target, state, layout) {
     width,
     height: plate ? plate.height : font * 1.2,
     font,
+    // Семейства едут вместе с кеглем: рисует подпись тот, у кого на руках
+    // только `box`. Габарит от них не зависит — он считается по числу знаков
+    // (`LABEL_CHAR_RATIO`), — поэтому смена шрифта подпись не двигает.
+    family: state.fontFamily,
     // Плашка комментария: строки и поля внутри рамки — рисованию и попаданию
     // по клику достаётся один и тот же габарит. У обычной подписи этих полей
     // нет вовсе, и `plate: null` значит «рисуй как рисовал».
@@ -16907,7 +16044,18 @@ function outlineLabelBox(project, scheme, outline, view) {
   const at = { x: center.x + dx * state.zoom, y: center.y + dy * state.zoom };
   const width = Math.max(font * 0.8, room.name.length * font * LABEL_CHAR_RATIO);
   const anchor = angle === 90 ? { x: at.x, y: at.y + width / 2 } : { x: at.x - width / 2, y: at.y };
-  return { text: room.name, x: anchor.x, y: anchor.y, width, height: font * 1.2, font, angle, dx, dy };
+  return {
+    text: room.name,
+    x: anchor.x,
+    y: anchor.y,
+    width,
+    height: font * 1.2,
+    font,
+    family: state.fontFamily,
+    angle,
+    dx,
+    dy,
+  };
 }
 
 // Ручка поворота у подписи комнаты — та же, что у подписи метки, и стоит там же
@@ -16930,7 +16078,7 @@ function hitOutlineLabelTurn(project, scheme, outline, point, view, extra = 0) {
 function drawOutlineLabel(ctx, box, color) {
   const rect = labelBounds(box);
   ctx.save();
-  ctx.font = drawFont(box.font, 600);
+  ctx.font = drawFont(box.font, 600, box.family);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх линий плана.
@@ -17307,7 +16455,7 @@ function drawCommentPlate(ctx, box, color, selected) {
   if (empty) ctx.setLineDash([box.font * 0.4, box.font * 0.3]);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.font = drawFont(box.font);
+  ctx.font = drawFont(box.font, null, box.family);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = color;
@@ -17399,7 +16547,7 @@ function drawLabel(ctx, box, color, runs, selected) {
   }
   const parts = runs && runs.map((run) => run.text).join("") === box.text ? runs : null;
   ctx.save();
-  ctx.font = drawFont(box.font, 600);
+  ctx.font = drawFont(box.font, 600, box.family);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх тёмных линий плана.
@@ -17554,17 +16702,20 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
   // Угол берётся у уже нарисованного отрезка: точку под курсором холст к этому
   // времени притянул сам, и подсказка обязана показывать то, что видно.
   const shown = snapSegment(from, draft.cursor, scheme, { free: true });
-  drawDraftAngle(ctx, cursor, shown.angle, Boolean(draft.snapped), color);
+  // Подсказка живёт только на экране — черновика в выгрузке не бывает, — но
+  // шрифт ей всё равно даётся кадром, а не берётся по умолчанию: иначе на
+  // системной схеме один градус был бы чертёжным.
+  drawDraftAngle(ctx, cursor, shown.angle, Boolean(draft.snapped), color, renderView(view).fontFamily);
 }
 
 // Градус тянущегося отрезка — у курсора, а не в углу холста: инженер смотрит на
 // конец линии, и по углу холста не понять, к какому отрезку относится число.
 // Сработавший магнит виден по слову «ровно» и цвету — иначе непонятно, почему
 // линия не идёт за рукой.
-function drawDraftAngle(ctx, at, angle, snapped, color) {
+function drawDraftAngle(ctx, at, angle, snapped, color, family) {
   const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
   ctx.save();
-  ctx.font = drawFont(DRAFT_ANGLE_FONT, 600);
+  ctx.font = drawFont(DRAFT_ANGLE_FONT, 600, family);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.lineWidth = Math.max(2, DRAFT_ANGLE_FONT * 0.3);
@@ -17615,7 +16766,7 @@ function drawLegend(ctx, { project, scheme, filter, view, box }) {
   const x = box ? box.x : 12;
   const y = box ? box.y : 12;
   ctx.save();
-  ctx.font = drawFont(font);
+  ctx.font = drawFont(font, null, state.fontFamily);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Ширина рамки — по самой длинной строке: код типа бывает и в шестнадцать
@@ -17746,6 +16897,957 @@ const renderInternals = {
   LABEL_GAP,
   HANDLE_GAP,
 };
+
+// src/pwa.js
+// Установка страницы как приложения — только для веб-версии.
+//
+// Со страницы на диске (`file://`) не работает ни установка, ни служебный
+// скрипт, и это не поломка: вся папка `dist/` там и так лежит рядом — и
+// страница, и её шрифт, — сеть ей не нужна. Поэтому регистрация тихо ничего
+// не делает везде, кроме сайта.
+//
+// Что делает служебный скрипт — в `web/sw.js`. Здесь только две вещи, которые
+// решают судьбу обновления:
+//
+//  1. Регистрация с `updateViaCache: "none"` — сам файл скрипта никогда не
+//     берётся из HTTP-кэша. Иначе новая сборка ждала бы, пока протухнет старый
+//     ответ, и «я починил» доезжало бы через сутки.
+//  2. Проверка обновления при возвращении на вкладку. Установленное приложение
+//     на планшете живёт неделями без перезагрузки: без этого толчка браузер
+//     заглядывает за новой версией только при переходе по адресу.
+
+// Путь скрипта относительно страницы: на GitHub Pages приложение живёт в
+// подпапке, и абсолютный «/sw.js» указывал бы в корень чужого сайта.
+const PWA_WORKER = "./sw.js";
+
+// Служебный скрипт живёт только в защищённом окружении. `file://` и открытая
+// по http страница из локальной сети его не получают — и не должны: там он
+// молча падал бы в консоль на каждой загрузке.
+function pwaSupported(view) {
+  const target = view || (typeof window === "undefined" ? null : window);
+  if (!target || !target.navigator || !("serviceWorker" in target.navigator)) return false;
+  return Boolean(target.isSecureContext) && target.location && target.location.protocol !== "file:";
+}
+function registerServiceWorker() {
+  if (!pwaSupported()) return null;
+  const promise = navigator.serviceWorker
+    .register(PWA_WORKER, { scope: "./", updateViaCache: "none" })
+    .then((registration) => {
+      // Возвращение на вкладку — единственный надёжный повод спросить о новой
+      // версии в приложении, которое не перезагружают. Ответ приходит в
+      // следующую навигацию: страница и так берётся из сети первой.
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") registration.update().catch(() => {});
+      });
+      return registration;
+    })
+    .catch(() => null);
+  return promise;
+}
+
+// src/panels/ui.js
+// Общие кирпичи панелей: элементы, кнопки, модальные диалоги.
+// Отдельный модуль, потому что ими пользуются все панели: тянуть их из чужой
+// панели значило бы тянуть вместе с ней её регистрацию и подписки.
+function uiEl(tag, options = {}, children = []) {
+  const node = document.createElement(tag);
+  if (options.class) node.className = options.class;
+  if (options.text != null) node.textContent = options.text;
+  if (options.title) node.title = options.title;
+  if (options.type) node.type = options.type;
+  if (options.value != null) node.value = options.value;
+  if (options.placeholder) node.placeholder = options.placeholder;
+  if (options.attrs) {
+    for (const [name, value] of Object.entries(options.attrs)) node.setAttribute(name, value);
+  }
+  if (options.on) {
+    for (const [name, handler] of Object.entries(options.on)) node.addEventListener(name, handler);
+  }
+  for (const child of Array.isArray(children) ? children : [children]) {
+    if (child) node.append(child);
+  }
+  return node;
+}
+function uiButton(label, options = {}) {
+  return uiEl("button", {
+    class: options.class || "ui-btn",
+    text: label,
+    title: options.title || "",
+    type: "button",
+    on: options.on,
+    attrs: options.attrs,
+  });
+}
+
+// Значки рисуются прямо здесь, своими линиями: внешних картинок и шрифтов в
+// сборке нет, а стрелки отмены в системном шрифте есть не на каждой машине —
+// на части из них вместо знака встал бы пустой прямоугольник. Рисунок задан
+// в клетке 24×24 и тянется за цветом кнопки (`currentColor` в стилях).
+const UI_SVG_NS = "http://www.w3.org/2000/svg";
+const UI_ICONS = {
+  undo: ["M7 10h9a4.5 4.5 0 0 1 0 9h-5", "M10.5 6 6.5 10l4 4"],
+  redo: ["M17 10H8a4.5 4.5 0 0 0 0 9h5", "M13.5 6 17.5 10l-4 4"],
+  search: ["M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0", "M15.2 15.2 20 20"],
+  plus: ["M12 5v14", "M5 12h14"],
+  // Карандаш ведён по той же диагонали, что стрелки отмены: круглый торец даёт
+  // дуга, поперечина отделяет остриё — без неё в размере кнопки это просто
+  // палка.
+  edit: ["M5 19v-3.5L15.5 5a2.5 2.5 0 0 1 3.5 3.5L8.5 19H5z", "M13.7 6.8 17.2 10.3"],
+  // Корзина: крышка, дужка и сужающийся к низу корпус. Полосок внутри нет —
+  // в клетке 18 px они сливаются с корпусом в пятно.
+  trash: ["M4.5 7.5h15", "M9.5 7.5V5.5h5v2", "M6.5 7.5l1 12a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5l1-12"],
+  // Предупреждения: восклицательный знак в треугольнике — тот же рисунок, что
+  // на дорожном знаке, и читается он раньше слова.
+  warning: ["M12 4.5 21 20H3z", "M12 10v4.5", "M12 17.4v.2"],
+  // Всё в порядке — галочка. Отдельный значок, а не зачёркнутый треугольник:
+  // хорошая новость не должна выглядеть как отменённая плохая.
+  ok: ["M5 12.5 10 17.5 19 7"],
+  // Раскрытие списка. Повёрнутый влево — свёрнутый, вниз — раскрытый; поворот
+  // делают стили, рисунок один.
+  chevron: ["M7 10.5 12 15.5 17 10.5"],
+  // Крестик: «убрать эту строку». Не корзина — ничего не удаляется насовсем,
+  // и не галочка — она уже занята хорошей новостью.
+  close: ["M7 7 17 17", "M17 7 7 17"],
+  // Минус — близнец плюса: та же черта, та же длина. Пара стоит рядом в
+  // масштабе, и разная длина черт была бы видна сразу.
+  minus: ["M5 12h14"],
+  // Порядок схем: стрелка с древком, а не «шеврон». Шеврон в наборе уже занят
+  // раскрытием списка, и в столбце кнопок «выше/ниже» рядом с ним читался бы
+  // как «развернуть».
+  up: ["M12 19V6", "M6.5 11.5 12 6l5.5 5.5"],
+  down: ["M12 5v13", "M6.5 12.5 12 18l5.5-5.5"],
+  // Замена плана: две стрелки навстречу друг другу — «одно вместо другого».
+  // Не крест-накрест: в клетке 16 px пересечение линий сливается в узел.
+  swap: ["M4.5 9h13", "M14.5 5.5 18 9l-3.5 3.5", "M19.5 15h-13", "M9.5 11.5 6 15l3.5 3.5"],
+  // Правка плана — рамка кадрирования: два угольника внахлёст. Ножницы,
+  // стоявшие здесь раньше, обещали «вырезать кусок», а окно поворачивает план
+  // и обрезает поля.
+  crop: ["M7.5 3v13.5H21", "M3 7.5h13.5V21"],
+  // Поворот плана: кольцо с разрывом и уголком на конце дуги. Левый и правый
+  // зеркальны, и сторона поворота читается только по уголку — поэтому он
+  // вынесен за кольцо, а не вписан в него: остриё внутри дуги в клетке 16 px
+  // сливалось с самим кольцом в утолщение.
+  rotateLeft: ["M5.5 12a6.5 6.5 0 1 1 3 5.5", "M9 8.5H5.5V5"],
+  rotateRight: ["M18.5 12a6.5 6.5 0 1 0-3 5.5", "M15 8.5h3.5V5"],
+  // Контур помещения: замкнутая ломаная с углами — то же, что обводят на
+  // плане. Прямоугольник не годится: обводят по стенам, а не по рамке.
+  outline: ["M4.5 8.5 12 4l7.5 4.5v7L12 20l-7.5-4.5z"],
+  // Подсказка холста в свёрнутом виде: вопрос в кольце. Не лампочка и не «i» —
+  // кольцо с вопросом читается как «здесь написано, что делать», и в клетке
+  // 16 px у него узнаётся сам знак, а не пятно.
+  hint: ["M12 4.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15", "M9.8 9.6a2.3 2.3 0 0 1 4.4.9c0 1.6-2.2 1.9-2.2 3.3", "M12 16.8v.2"],
+  // Уплотнение нумерации: две стрелки, сходящиеся к середине, — «сомкнуть».
+  // Прежнее «№» говорило про номера, но не про то, что с ними сделают.
+  compact: ["M4 12h6", "M7 9l3 3-3 3", "M20 12h-6", "M17 9l-3 3 3 3"],
+  // Связи меток: звено цепи — два полукольца и перемычка между ними. Стрелка
+  // не годится: стрелками в наборе уже сказано «отмена», «порядок» и «замена»,
+  // а здесь речь не о действии, а о том, что две вещи держатся друг за друга.
+  link: ["M10.6 7.4 12.4 5.6a3.9 3.9 0 0 1 5.5 5.5l-1.8 1.8", "M13.4 16.6l-1.8 1.8a3.9 3.9 0 0 1-5.5-5.5l1.8-1.8", "M9.6 14.4 14.4 9.6"],
+  // Свободный номер метке: развилка — одна линия расходится надвое, со
+  // стрелками на концах. Речь тут не о номере, а о том, что с меткой делают, —
+  // отделяют её от одинаковых. «№» не годится (это буква, а не рисунок),
+  // «плюс» уже значит «добавить», а «уплотнение» — стрелки навстречу; развилка
+  // читается им обратной: было одно обозначение, стало два.
+  split: ["M4 12h6", "M10 12 15 7h4", "M10 12 15 17h4", "M16.5 4.5 19 7l-2.5 2.5", "M16.5 14.5 19 17l-2.5 2.5"],
+  // Просмотр: глаз. Пара к карандашу на одной кнопке — «смотреть» против
+  // «править»; словами оба состояния названы в подсказке.
+  view: ["M3.5 12s3.4-5.5 8.5-5.5 8.5 5.5 8.5 5.5-3.4 5.5-8.5 5.5S3.5 12 3.5 12", "M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0"],
+  // Папка автосохранения: папка с язычком — тот же знак, что в проводнике.
+  folder: ["M3.5 19.5V5.5h5l2 2.5h10v11.5z"],
+  // Открыть файл и выгрузить в файл — пара: лоток один и тот же, стрелка
+  // наружу и стрелка внутрь. Порознь каждая стрелка двусмысленна, парой они
+  // читаются сразу, а в шапке они и стоят рядом.
+  fileOpen: ["M12 15.5V4.5", "M8 8.5 12 4.5l4 4", "M4.5 15.5v4h15v-4"],
+  fileSave: ["M12 4.5v11", "M8 11.5 12 15.5l4-4", "M4.5 15.5v4h15v-4"],
+  // Полный экран: четыре уголка, расходящиеся к краям клетки, и они же,
+  // сведённые внутрь, — выход. Рисунок общепринятый, и состояние по нему
+  // видно без слова: уголки наружу — «развернуть», внутрь — «свернуть».
+  fullscreen: ["M4 9.5V4h5.5", "M20 9.5V4h-5.5", "M4 14.5V20h5.5", "M20 14.5V20h-5.5"],
+  fullscreenExit: ["M9.5 4v5.5H4", "M14.5 4v5.5H20", "M9.5 20v-5.5H4", "M14.5 20v-5.5H20"],
+};
+function uiIcon(name) {
+  const svg = document.createElementNS(UI_SVG_NS, "svg");
+  svg.setAttribute("class", "ui-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const line of UI_ICONS[name] || []) {
+    const path = document.createElementNS(UI_SVG_NS, "path");
+    path.setAttribute("d", line);
+    svg.append(path);
+  }
+  return svg;
+}
+
+// Кнопка-значок. Подпись словами у неё всё равно есть — в `title` и в
+// `aria-label`: значок без слова опознаётся не всеми, а экранный диктор
+// не читает рисунок вовсе.
+function uiIconButton(name, options = {}) {
+  const button = uiButton("", {
+    class: (options.class || "ui-btn") + " ui-btn--icon",
+    title: options.title || options.label || "",
+    on: options.on,
+    attrs: { ...(options.attrs || {}), "aria-label": options.label || options.title || "" },
+  });
+  button.append(uiIcon(name));
+  return button;
+}
+
+// Кнопка со значком и словом рядом. Слово лежит в своём `span`, и это не
+// мелочь: на узком экране его прячут стилями, а кнопка остаётся узнаваемой по
+// значку — так файловые действия влезают в одну строку шапки на планшете.
+// Слово при этом не теряется: оно уходит в подсказку и в `aria-label`, как и у
+// кнопки-значка. Подпись меняют через `uiButtonLabel`, а не `textContent`:
+// присваивание текста кнопке стёрло бы и значок.
+function uiIconLabelButton(name, label, options = {}) {
+  const button = uiButton("", {
+    class: (options.class || "ui-btn") + " ui-btn--label",
+    on: options.on,
+    attrs: options.attrs,
+  });
+  button.append(uiIcon(name), uiEl("span", { class: "ui-btn__word", text: label }));
+  uiButtonLabel(button, label, options.title);
+  return button;
+}
+
+// Новая подпись кнопки со значком: слово в строке, оно же в подсказке и в
+// `aria-label`. `title` задаётся отдельно, когда подсказка длиннее подписи.
+function uiButtonLabel(button, label, title) {
+  if (!button) return button;
+  const word = button.querySelector(".ui-btn__word");
+  if (word) word.textContent = label;
+  else button.textContent = label;
+  button.title = title || label;
+  button.setAttribute("aria-label", label);
+  return button;
+}
+
+// Диалоги складываются стопкой: подтверждение поверх редактора плана —
+// обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
+// основное действие, нижние ждут своей очереди и закрываются своими же close().
+// Пока стопка не пуста, #dialog-host не пустой — значит затемнение на месте
+// (правило `:empty` из styles.css). Клавиатура не должна оставаться в панели
+// под затемнением: диалог забирает фокус, а закрываясь — возвращает его тому,
+// кто его открыл.
+const uiDialogs = [];
+let uiEscapeListener = null;
+function uiDialogDepth() {
+  return uiDialogs.length;
+}
+
+function uiRefreshDialogs() {
+  const host = document.getElementById("dialog-host");
+  uiDialogs.forEach((entry, index) => {
+    entry.card.hidden = index !== uiDialogs.length - 1;
+  });
+  if (uiDialogs.length === 0) {
+    if (host) host.replaceChildren();
+    if (uiEscapeListener) {
+      document.removeEventListener("keydown", uiEscapeListener);
+      uiEscapeListener = null;
+    }
+    return;
+  }
+  if (uiEscapeListener) return;
+  uiEscapeListener = (event) => {
+    const top = uiDialogs[uiDialogs.length - 1];
+    if (!top) return;
+    if (event.key === "Escape") {
+      if (top.dismissable === false) return;
+      event.preventDefault();
+      top.close();
+      if (top.onCancel) top.onCancel();
+      return;
+    }
+    // Enter подтверждает основное действие. Поле ввода, которое обработало
+    // Enter само (uiPrompt), помечает событие — второй раз не срабатываем.
+    if (event.key !== "Enter" || event.defaultPrevented || !top.primary) return;
+    const target = event.target;
+    if (target && (target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    event.preventDefault();
+    top.primary.click();
+  };
+  document.addEventListener("keydown", uiEscapeListener);
+}
+
+function uiFocusEntry(entry) {
+  const target = entry.card.querySelector("input, select, textarea") || entry.primary || entry.card;
+  if (target && typeof target.focus === "function") target.focus();
+}
+
+// Фокус возвращается открывшему, если он ещё на странице (кнопка панели могла
+// исчезнуть при перерисовке); иначе — диалогу, который снова стал верхним.
+function uiReturnFocus(entry) {
+  const opener = entry.opener;
+  if (opener && typeof opener.focus === "function" && opener.isConnected) {
+    opener.focus();
+    return;
+  }
+  const top = uiDialogs[uiDialogs.length - 1];
+  if (top) uiFocusEntry(top);
+}
+function uiModal(options) {
+  const host = document.getElementById("dialog-host");
+  const actions = options.actions || [];
+  const card = uiEl("div", { class: "modal", attrs: { tabindex: "-1" } }, [
+    uiEl("h3", { class: "modal__title", text: options.title || "" }),
+    uiEl("div", { class: "modal__body" }, options.body || null),
+    uiEl("div", { class: "modal__actions" }, actions),
+  ]);
+  const entry = {
+    card,
+    dismissable: options.dismissable,
+    onCancel: options.onCancel,
+    // Основное действие — последняя кнопка в ряду (в uiConfirm и uiPrompt это
+    // подтверждение, в редакторе плана — «Готово»).
+    primary: options.primary || [...actions].reverse().find((node) => node && node.tagName === "BUTTON") || null,
+    opener: typeof document !== "undefined" ? document.activeElement : null,
+    close() {
+      const index = uiDialogs.indexOf(entry);
+      if (index < 0) return;
+      uiDialogs.splice(index, 1);
+      card.remove();
+      uiRefreshDialogs();
+      uiReturnFocus(entry);
+    },
+  };
+  if (!host) return { close() {}, card };
+  uiDialogs.push(entry);
+  host.append(card);
+  uiRefreshDialogs();
+  uiFocusEntry(entry);
+  return { close: entry.close, card };
+}
+function uiConfirm({ title, message, confirmLabel }) {
+  return new Promise((resolve) => {
+    let modal;
+    const answer = (value) => {
+      modal.close();
+      resolve(value);
+    };
+    modal = uiModal({
+      title,
+      body: uiEl("p", { class: "modal__text", text: message }),
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => answer(false) } }),
+        uiButton(confirmLabel || strings.dialog.confirm, {
+          class: "ui-btn ui-btn--danger",
+          on: { click: () => answer(true) },
+        }),
+      ],
+      onCancel: () => resolve(false),
+    });
+  });
+}
+
+/**
+ * Окно с одним полем. `null` в ответе значит «отказались».
+ *
+ * Пустая строка по умолчанию — тот же отказ: окно спрашивают про имя схемы,
+ * про код типа, про расстояние — пустых ответов там не бывает. `allowEmpty`
+ * включает обратное: пустой ответ — это ответ. Так правится текст
+ * комментария (таск 116) — очистить плашку человек имеет право, и делать это
+ * удалением всей метки он не обязан.
+ */
+function uiPrompt({ title, value, placeholder, submitLabel, allowEmpty }) {
+  return new Promise((resolve) => {
+    let modal;
+    const done = (result) => {
+      modal.close();
+      resolve(allowEmpty ? (result === null ? null : result) : result || null);
+    };
+    const input = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      value: value || "",
+      placeholder: placeholder || "",
+      on: {
+        keydown: (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          done(input.value.trim());
+        },
+      },
+    });
+    modal = uiModal({
+      title,
+      body: input,
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
+        uiButton(submitLabel || strings.dialog.save, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: () => done(input.value.trim()) },
+        }),
+      ],
+      onCancel: () => resolve(null),
+    });
+    input.select();
+  });
+}
+function formatMegabytes(bytes) {
+  return text("units.megabytes", { value: Math.round(bytes / (1024 * 1024)) });
+}
+
+// src/app.js
+// Каркас сеанса: состояние, реестр панелей, уведомления.
+// Панели других тасков монтируются по идентификатору контейнера из index.html
+// и не правят ни этот файл, ни разметку.
+
+
+
+// Виды шрифта объявлены там же, где их разбирают в семейства, — в `render.js`.
+// Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
+
+
+// Значок кнопки раскладки рисует общий набор — своего рисунка у каркаса нет.
+
+// Контейнеры-точки монтирования (идентификаторы из src/index.html).
+const PANEL_IDS = {
+  tools: "panel-tools",
+  rooms: "panel-rooms",
+  sizes: "panel-sizes",
+  schemes: "panel-schemes",
+  marks: "panel-marks",
+  properties: "panel-properties",
+  canvas: "canvas-host",
+  overlay: "canvas-overlay",
+  // Карточка выделенной метки в просмотре: своя точка поверх холста, под
+  // подсказкой и кнопкой полного экрана — те в верхних углах, эта внизу.
+  canvasCard: "canvas-card",
+  headerActions: "header-actions",
+  headerSearch: "header-search",
+  headerHistory: "header-history",
+  headerWarnings: "header-warnings",
+  headerLinks: "header-links",
+  projectActions: "project-actions",
+  dialogs: "dialog-host",
+};
+
+const appState = {
+  layout: "desktop",
+  project: null,
+  schemeId: null,
+  selectedMarkIds: [],
+  // Путь в правке: у него видны ручки вершин. Режим руки, а не свойство
+  // разметки, — в объект и в файл проекта он не попадает.
+  editPathId: null,
+  // Линейка и направляющие видны, пока их не спрятали.
+  guidesShown: true,
+  // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
+  // встречать пользователя дугами поверх плана никто не просил.
+  linksShown: false,
+  // Шрифт подписей на экране. Умолчание чертёжное: заказчик сам просил шрифт
+  // на схеме, и подписи там прописные, где претензий к нему нет.
+  schemeFont: FONT_DRAFT,
+  activeTypeId: null,
+  mode: "select",
+  filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
+  view: { zoom: 1, offsetX: 0, offsetY: 0 },
+  dirty: false,
+};
+
+// Разделы колонок: заголовок сворачивает свой раздел, состояние переживает
+// перезагрузку. Имена — из `data-section-id` в разметке.
+const SECTION_IDS = {
+  marks: "marks",
+  rooms: "rooms",
+  schemes: "schemes",
+  sizes: "sizes",
+  markList: "markList",
+  properties: "properties",
+};
+const SECTIONS_SETTING = "collapsedSections";
+// Колонки целиком: на планшете две по 264 точки съедают весь экран, и холсту
+// на 600 оставалось 72. Свёрнутая колонка ужимается до ручки у края —
+// состояние живёт в настройках браузера и переживает перезагрузку, как
+// свёрнутые разделы и отметка линейки.
+const PANEL_SIDES = ["left", "right"];
+const PANELS_SETTING = "collapsedPanels";
+// Линейка и направляющие: отметка рабочего места, а не свойство объекта.
+// Живёт в настройках браузера и переживает перезагрузку.
+const GUIDES_SETTING = "schemeGuidesShown";
+// Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
+// здесь, рядом с остальными, а не в панели объектов: его пишет и панель
+// объектов, и панель файла (объект, пришедший из архива, тоже становится
+// последним), а панели друг друга не знают.
+const LAST_PROJECT_KEY = "lastProjectId";
+// Связи меток: та же природа, что у линейки, — оснастка разбора, а не свойство
+// разметки. Живёт в настройках браузера, переживает перезагрузку, в объект и в
+// файл проекта не попадает.
+const LINKS_SETTING = "markLinksShown";
+// Шрифт подписей на экране: чертёжный или системный (G172). Той же природы,
+// что линейка и связи, — выбор глаз, а не свойство разметки. В объект не
+// попадает нарочно: уехав туда, он навязался бы напарнику и менял бы файл при
+// каждом переключении. Бумаги и выгрузки не касается вовсе — там чертёжный
+// всегда, это чертёж по ГОСТ.
+const SCHEME_FONT_SETTING = "schemeFontKind";
+// На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
+// место они отнимают у списка схем. Всё остальное открыто — иначе новый
+// пользователь ищет, куда делись инструменты.
+const SECTION_DEFAULT_COLLAPSED = [SECTION_IDS.sizes];
+
+// ——— раскладка: широкий экран правит, узкий смотрит ————————————————————
+//
+// На объекте в руке телефон: нужно открыть план, найти метку, свериться с
+// таблицей. Размечать пальцем пользователь не собирался с самого брифинга,
+// поэтому узкий экран получает не урезанный редактор, а режим просмотра.
+// Решение о режиме — чистое, его и проверяют тесты: разъехаться оно может
+// незаметно, а цена — панель, которой на экране нет.
+const LAYOUT_MODES = ["desktop", "mobile"];
+// Окно уже этого — раскладка просмотра. На десктопе это же и есть способ
+// посмотреть мобильный вид: сузить окно.
+const LAYOUT_NARROW_WIDTH = 860;
+// Короткая сторона телефона: поворот её не меняет, поэтому альбомная
+// ориентация остаётся просмотром, а не превращается в редактор на 844 px.
+const LAYOUT_PHONE_SIDE = 560;
+
+// Что доступно в каждой раскладке. Список нарочно перечислен целиком: новое
+// умение нужно назвать здесь, иначе оно считается правкой и на телефон не идёт.
+const LAYOUT_ABILITIES = {
+  viewPlan: ["desktop", "mobile"],
+  switchProject: ["desktop", "mobile"],
+  switchScheme: ["desktop", "mobile"],
+  markList: ["desktop", "mobile"],
+  filters: ["desktop", "mobile"],
+  tables: ["desktop", "mobile"],
+  exportFiles: ["desktop", "mobile"],
+  openFile: ["desktop", "mobile"],
+  search: ["desktop", "mobile"],
+  // Предупреждения — про правку объекта: в них отвечают на вопрос о виде типа
+  // и идут чинить найденное. В просмотре чинить нечем, а место в шапке дорого.
+  warnings: ["desktop"],
+  // Связи — чтение, а не правка: «что включает этот выключатель» спрашивают и
+  // с телефона, стоя перед щитом. Ничего не меняют, поэтому идут в оба вида.
+  markLinks: ["desktop", "mobile"],
+  undo: ["desktop"],
+  saveFile: ["desktop"],
+  editMarks: ["desktop"],
+  editSchemes: ["desktop"],
+  editRooms: ["desktop"],
+  editProject: ["desktop"],
+  dictionary: ["desktop"],
+  viewSizes: ["desktop"],
+};
+function layoutModeFor(view, override) {
+  if (override === "mobile" || override === "desktop") return override;
+  const source = view || {};
+  const width = Number(source.width) || 0;
+  const height = Number(source.height) || 0;
+  const shortSide = height > 0 ? Math.min(width, height) : width;
+  if (source.coarsePointer && shortSide > 0 && shortSide <= LAYOUT_PHONE_SIDE) return "mobile";
+  if (width > 0 && width <= LAYOUT_NARROW_WIDTH) return "mobile";
+  return "desktop";
+}
+
+// Неизвестное умение доступным не считается: опечатка в имени спрячет кнопку,
+// а не пустит правку в режим просмотра.
+function layoutAllows(ability, mode) {
+  const modes = LAYOUT_ABILITIES[ability];
+  return Array.isArray(modes) && modes.includes(mode);
+}
+
+const appCollapsed = new Set();
+const appPanelsHidden = new Set();
+let appLayoutOverride = null;
+let appSheet = "none";
+
+// Что кладётся в настройки: список свёрнутых разделов. Мусор из хранилища
+// (чужая версия, битое значение) не должен схлопывать панель — он отбрасывается.
+function sectionListFrom(value) {
+  if (!Array.isArray(value)) return [];
+  const known = new Set(Object.values(SECTION_IDS));
+  return [...new Set(value.filter((id) => typeof id === "string" && known.has(id)))];
+}
+
+// Чего ещё не выбирал пользователь — то показываем по умолчанию; пустой
+// сохранённый список означает «всё развёрнуто», а не «умолчание».
+function sectionStartList(saved) {
+  return saved == null ? [...SECTION_DEFAULT_COLLAPSED] : sectionListFrom(saved);
+}
+
+// Что кладётся в настройки: список свёрнутых колонок. Мусор из хранилища
+// (чужая версия, битое значение) колонки не прячет.
+function panelListFrom(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((side) => PANEL_SIDES.includes(side)))];
+}
+function panelsAfterToggle(list, side, collapsed) {
+  const next = new Set(panelListFrom(list));
+  if (!PANEL_SIDES.includes(side)) return [...next];
+  if (collapsed) next.add(side);
+  else next.delete(side);
+  return [...next];
+}
+function sectionsAfterToggle(list, id, collapsed) {
+  const next = new Set(sectionListFrom(list));
+  if (!Object.values(SECTION_IDS).includes(id)) return [...next];
+  if (collapsed) next.add(id);
+  else next.delete(id);
+  return [...next];
+}
+
+const appSubscribers = new Set();
+const appPanels = new Map();
+const appMounted = new Map();
+let appStarted = false;
+
+// Снимок: вложенные filter/view/selectedMarkIds копируются, чтобы правка
+// на месте в панели не меняла состояние сеанса мимо setState.
+function getState() {
+  return {
+    ...appState,
+    selectedMarkIds: [...appState.selectedMarkIds],
+    filter: { ...appState.filter },
+    view: { ...appState.view },
+  };
+}
+function setState(patch) {
+  if (!patch) return getState();
+  const changed = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (appState[key] !== value) {
+      appState[key] = value;
+      changed[key] = value;
+    }
+  }
+  if (Object.keys(changed).length === 0) return getState();
+  const snapshot = getState();
+  for (const subscriber of [...appSubscribers]) {
+    try {
+      subscriber(snapshot, changed);
+    } catch (error) {
+      reportAppError(error);
+    }
+  }
+  syncCanvasClass();
+  syncSchemeName();
+  return snapshot;
+}
+function subscribe(listener) {
+  appSubscribers.add(listener);
+  return () => appSubscribers.delete(listener);
+}
+
+// Регистрация панели: если каркас уже поднят — монтируем сразу.
+function registerPanel(id, mountFn) {
+  if (typeof mountFn !== "function") return;
+  appPanels.set(id, mountFn);
+  if (appStarted) mountPanel(id);
+}
+function panelApi() {
+  return { getState, setState, subscribe, notify, strings, text };
+}
+
+function mountPanel(id) {
+  const mountFn = appPanels.get(id);
+  const host = document.getElementById(id);
+  if (!mountFn || !host || appMounted.get(id) === mountFn) return;
+  try {
+    mountFn(host, panelApi());
+    appMounted.set(id, mountFn);
+  } catch (error) {
+    reportAppError(error);
+  }
+}
+function notify(message, kind = "info") {
+  const host = typeof document === "undefined" ? null : document.getElementById("notifications");
+  if (!host) return null;
+  const toast = document.createElement("div");
+  toast.className = "toast toast--" + kind;
+  toast.textContent = String(message);
+  toast.title = strings.notify.close;
+  toast.addEventListener("click", () => toast.remove());
+  host.append(toast);
+  setTimeout(() => toast.remove(), kind === "error" ? 12000 : 6000);
+  return toast;
+}
+
+function reportAppError(error) {
+  notify(error && error.message ? error.message : String(error), "error");
+}
+
+// Все видимые строки приходят из словаря: разметка держит только ключи.
+function applyStrings(root) {
+  const scope = root || document;
+  for (const node of scope.querySelectorAll("[data-text]")) {
+    node.textContent = text(node.dataset.text);
+  }
+  for (const node of scope.querySelectorAll("[data-title]")) {
+    node.title = text(node.dataset.title);
+  }
+}
+
+// На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
+// открыто, — списка схем на экране нет, он спрятан в лист.
+function syncSchemeName() {
+  const node = document.getElementById("scheme-name");
+  if (!node) return;
+  const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
+  node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
+}
+
+function syncCanvasClass() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.classList.toggle("has-scheme", Boolean(appState.schemeId));
+}
+
+function layoutViewport() {
+  if (typeof window === "undefined") return { width: 0, height: 0, coarsePointer: false };
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    coarsePointer:
+      typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches,
+  };
+}
+
+// Раскладка, которую выбрал бы сам экран: по ней видно, показывать ли переход
+// к полной версии. На настоящем десктопе кнопки нет вовсе — второго режима
+// работы там не заводим.
+function layoutAutoMode() {
+  return layoutModeFor(layoutViewport(), null);
+}
+function layoutMode() {
+  return appState.layout;
+}
+function layoutOverride() {
+  return appLayoutOverride;
+}
+function setLayoutOverride(mode) {
+  appLayoutOverride = mode === "mobile" || mode === "desktop" ? mode : null;
+  syncLayout();
+}
+
+// Лист снизу: на узком экране колонки показываются по одной и поверх плана.
+function openSheet(name) {
+  appSheet = name === "schemes" || name === "marks" ? name : "none";
+  syncSheet();
+}
+function currentSheet() {
+  return appSheet;
+}
+
+function syncSheet() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.dataset.sheet = appState.layout === "mobile" ? appSheet : "none";
+  for (const button of document.querySelectorAll("[data-sheet-button]")) {
+    const target = button.dataset.sheetButton;
+    const active = app.dataset.sheet === target || (target === "none" && app.dataset.sheet === "none");
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function syncLayout() {
+  const mode = layoutModeFor(layoutViewport(), appLayoutOverride);
+  const app = document.getElementById("app");
+  if (app) app.classList.toggle("is-mobile", mode === "mobile");
+  if (mode !== "mobile") appSheet = "none";
+  const toggle = document.getElementById("layout-toggle");
+  if (toggle) {
+    // Кнопка живёт только там, где экран сам выбрал просмотр: на телефоне —
+    // дорога к полной версии, на десктопе её нет и быть не должно.
+    toggle.hidden = layoutAutoMode() !== "mobile";
+    // Значком, а не словом: «Полная версия» занимала в шапке 127 точек — на
+    // восьмидюймовом планшете это разница между одной строкой и двумя. Карандаш
+    // и глаз — пара «править / смотреть»; слово при этом не потеряно, оно в
+    // подсказке и в `aria-label`, как у остальных кнопок-значков.
+    const toEdit = mode === "mobile";
+    const label = toEdit ? strings.mobile.full : strings.mobile.view;
+    toggle.className = "ui-btn ui-btn--icon";
+    toggle.replaceChildren(toEdit ? uiIcon("edit") : uiIcon("view"));
+    toggle.title = toEdit ? strings.mobile.fullHint : strings.mobile.viewHint;
+    toggle.setAttribute("aria-label", label);
+  }
+  if (appState.layout !== mode) {
+    // Вход в просмотр снимает режим постановки: в суженном окне мышь никуда не
+    // делась, и оставленный «Точка» ставил бы метки там, где их не ждут.
+    setState(mode === "mobile" ? { layout: mode, mode: "select" } : { layout: mode });
+  }
+  syncSheet();
+  syncSchemeName();
+}
+
+function wireLayout() {
+  syncLayout();
+  const toggle = document.getElementById("layout-toggle");
+  if (toggle) {
+    toggle.addEventListener("click", () =>
+      setLayoutOverride(appState.layout === "mobile" ? "desktop" : null),
+    );
+  }
+  for (const button of document.querySelectorAll("[data-sheet-button]")) {
+    button.addEventListener("click", () => {
+      const target = button.dataset.sheetButton;
+      openSheet(appSheet === target ? "none" : target);
+    });
+  }
+  if (typeof window === "undefined") return;
+  let timer = null;
+  const later = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(syncLayout, 120);
+  };
+  window.addEventListener("resize", later);
+  window.addEventListener("orientationchange", later);
+}
+
+function sectionNode(id) {
+  return typeof document === "undefined" ? null : document.querySelector('[data-section-id="' + id + '"]');
+}
+
+// Свёрнутый раздел — это только заголовок с повёрнутой галочкой: пустым он не
+// выглядит, и место соседям отдаёт целиком.
+function applySectionState(id) {
+  const node = sectionNode(id);
+  if (!node) return;
+  const collapsed = appCollapsed.has(id);
+  node.classList.toggle("is-collapsed", collapsed);
+  const button = node.querySelector("[data-section]");
+  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+function setSectionCollapsed(id, collapsed) {
+  if (collapsed) appCollapsed.add(id);
+  else appCollapsed.delete(id);
+  applySectionState(id);
+  setSetting(SECTIONS_SETTING, [...appCollapsed]);
+}
+function toggleSection(id) {
+  setSectionCollapsed(id, !appCollapsed.has(id));
+}
+
+// ——— колонки целиком: ручка у края ——————————————————————————————————
+//
+// Кнопки в шапке у этого нет нарочно: на восьмидюймовом планшете там уже тесно,
+// и прятать колонку должна ручка у её собственного края — она стоит там, где
+// колонка кончается, и после сворачивания остаётся на том же месте у края
+// экрана. Искать её не нужно: она не уезжает.
+function panelHidden(side) {
+  return appPanelsHidden.has(side);
+}
+
+function applyPanelState(side) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const hidden = appPanelsHidden.has(side);
+  app.classList.toggle(side === "left" ? "is-left-hidden" : "is-right-hidden", hidden);
+  const handle = document.querySelector('[data-panel-toggle="' + side + '"]');
+  if (!handle) return;
+  const label = strings.panels[(hidden ? "show" : "hide") + (side === "left" ? "Left" : "Right")];
+  handle.title = label;
+  handle.setAttribute("aria-label", label);
+  handle.setAttribute("aria-expanded", hidden ? "false" : "true");
+}
+function setPanelHidden(side, hidden) {
+  if (!PANEL_SIDES.includes(side)) return;
+  if (hidden) appPanelsHidden.add(side);
+  else appPanelsHidden.delete(side);
+  applyPanelState(side);
+  setSetting(PANELS_SETTING, [...appPanelsHidden]);
+}
+function togglePanel(side) {
+  setPanelHidden(side, !appPanelsHidden.has(side));
+}
+
+function wirePanels() {
+  for (const handle of document.querySelectorAll("[data-panel-toggle]")) {
+    handle.append(uiIcon("chevron"));
+    handle.addEventListener("click", () => togglePanel(handle.dataset.panelToggle));
+  }
+  for (const side of PANEL_SIDES) applyPanelState(side);
+  // Настройка читается асинхронно, как у разделов: страница стартует с обеими
+  // колонками и прячет их, когда хранилище ответит.
+  Promise.resolve(getSetting(PANELS_SETTING))
+    .then((saved) => {
+      for (const side of panelListFrom(saved)) {
+        appPanelsHidden.add(side);
+        applyPanelState(side);
+      }
+    })
+    .catch(() => {});
+}
+
+// Кто-то зовёт раздел со стороны (кнопка «Помещения» в справочнике): развернуть
+// и подвести к глазам — вместо второго окна, делающего то же самое.
+function revealSection(id) {
+  setSectionCollapsed(id, false);
+  const node = sectionNode(id);
+  if (!node) return;
+  if (typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "nearest" });
+  node.classList.add("is-called");
+  setTimeout(() => node.classList.remove("is-called"), 1200);
+}
+
+// Счётчик в заголовке: по свёрнутому разделу видно, пуст он или там сорок схем.
+function setSectionBadge(id, value) {
+  const node = sectionNode(id);
+  if (!node) return;
+  const badge = node.querySelector(".panel__badge");
+  if (badge) badge.textContent = value == null || value === "" ? "" : String(value);
+}
+
+function wireSections() {
+  for (const button of document.querySelectorAll("[data-section]")) {
+    button.addEventListener("click", () => toggleSection(button.dataset.section));
+  }
+  // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
+  // когда хранилище ответит. Ждать его с пустым экраном хуже.
+  Promise.resolve(getSetting(SECTIONS_SETTING))
+    .then((saved) => {
+      for (const id of sectionStartList(saved)) {
+        appCollapsed.add(id);
+        applySectionState(id);
+      }
+    })
+    .catch(() => {});
+  // Та же история у линейки: страница стартует с ней, и она гаснет, когда
+  // хранилище ответит «спрятана».
+  Promise.resolve(getSetting(GUIDES_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ guidesShown: false });
+    })
+    .catch(() => {});
+  // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище
+  // ответит «показаны».
+  Promise.resolve(getSetting(LINKS_SETTING))
+    .then((saved) => {
+      if (saved === true) setState({ linksShown: true });
+    })
+    .catch(() => {});
+  // Шрифт схемы: стартует чертёжным и меняется, если в настройках лежит другой
+  // известный вид. Чужое слово игнорируется — лучше умолчание, чем схема без
+  // шрифта из-за опечатки в хранилище.
+  Promise.resolve(getSetting(SCHEME_FONT_SETTING))
+    .then((saved) => {
+      if (FONT_KINDS.includes(saved) && saved !== FONT_DRAFT) setState({ schemeFont: saved });
+    })
+    .catch(() => {});
+}
+function startApp() {
+  if (appStarted) return;
+  appStarted = true;
+  applyStrings(document);
+  wireSections();
+  wirePanels();
+  syncCanvasClass();
+  wireLayout();
+  for (const id of appPanels.keys()) mountPanel(id);
+  // Веб-версия заодно просит служебный скрипт: установленное приложение
+  // обязано открываться и без сети. Со страницы на диске это ничего не делает.
+  registerServiceWorker();
+}
+
+// Старт откладывается за границу текущего скрипта: в собранном файле панели
+// и модели определяются ниже по бандлу, и каркас не должен опережать их.
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startApp, { once: true });
+  } else {
+    setTimeout(startApp, 0);
+  }
+}
 
 // src/history.js
 // Отмена — стек команд в памяти. В файл история не пишется: пользователь просил
@@ -18333,7 +18435,11 @@ function canvasState() {
 // размеры метки и подписи — из объекта (их двигает ползунок в панели).
 function canvasViewOf(state) {
   const sizes = state.project && state.project.view ? state.project.view : {};
-  return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize };
+  // Вид шрифта — третья половина `view`, рядом с сеансовым масштабом и
+  // объектными размерами: это выбор глаз из личных настроек браузера, в объект
+  // он не попадает. Выгрузка собирает свой `view` сама и этого поля не кладёт,
+  // поэтому на бумагу уходит чертёжный шрифт независимо от настройки (G172).
+  return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize, fontKind: state.schemeFont };
 }
 
 function canvasScheme(state) {
@@ -34119,6 +34225,45 @@ function toolsTypeIcon(project, typeId, size = 26) {
 // перетаскивание: иначе стек забивался бы тридцатью шагами на один жест.
 // Отметка «линейка и направляющие»: состояние сеанса плюс запись в настройки —
 // оно переживает перезагрузку, но в объект не попадает.
+// Выбор шрифта подписей на экране (G172).
+//
+// **Почему здесь, а не в своём окне настроек.** Окна настроек в сборке нет, и
+// заводить его ради одного выбора жалко — а раздел «Размеры» и так отвечает
+// ровно на этот вопрос: как схема выглядит на экране. Рядом уже стоят кегль
+// меток, кегль подписей и галка линейки, причём линейка — такая же личная
+// настройка браузера, а не свойство объекта. Шрифт встаёт прямо под «Подписи»:
+// там же, где их размер, выбирается и их рисунок.
+//
+// **Почему два пункта, а не три.** Моноширинный напрашивался третьим, но
+// своего файла у него не будет (второй шрифт в сборку не кладём), а системный
+// моноширинный у каждой машины свой — на двух компьютерах один объект выглядел
+// бы по-разному. Подписи к тому же короткие и прописные: выравнивать в них
+// нечего, пользы от моноширинного нет.
+function toolsFontSelect(state, setState) {
+  const options = [
+    { value: FONT_DRAFT, label: strings.tools.fontDraft },
+    { value: FONT_SYSTEM, label: strings.tools.fontSystem },
+  ];
+  const select = uiEl("select", {
+    class: "ui-input tools__select",
+    title: strings.tools.fontHint,
+    on: {
+      change: () => {
+        setState({ schemeFont: select.value });
+        setSetting(SCHEME_FONT_SETTING, select.value);
+      },
+    },
+  });
+  const current = state.schemeFont === FONT_SYSTEM ? FONT_SYSTEM : FONT_DRAFT;
+  for (const option of options) {
+    const node = uiEl("option", { text: option.label, value: option.value });
+    node.value = option.value;
+    if (option.value === current) node.selected = true;
+    select.append(node);
+  }
+  return select;
+}
+
 function toolsGuidesCheck(state, setState) {
   const box = uiEl("input", {
     class: "tools__check",
@@ -34390,6 +34535,14 @@ function mountSizesPanel(host, api) {
         uiEl("span", { text: strings.tools.labelSize }),
         toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
       ]),
+      // Шрифт подписей — сразу под их размером. Строкой ниже сказано, что это
+      // только экран: иначе выбор читался бы как «чем печатать», а печать
+      // всегда чертёжная и выбора не слушает.
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.font }),
+        toolsFontSelect(state, setState),
+      ]),
+      uiEl("p", { class: "tools__note", text: strings.tools.fontHint }),
       // Линейка и направляющие прячутся целиком, не удаляясь: оснастка нужна,
       // пока целишься, и мешает, когда смотришь на план.
       uiEl("label", { class: "tools__field tools__field--check" }, [
@@ -34408,7 +34561,7 @@ function mountSizesPanel(host, api) {
 
   subscribe((state, changed) => {
     if (sizeBefore) return;
-    if ("project" in changed || "guidesShown" in changed) render();
+    if ("project" in changed || "guidesShown" in changed || "schemeFont" in changed) render();
   });
   render();
 }
