@@ -12,7 +12,7 @@
 // самой страницы. Тест сверяет, что достаётся именно он.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +32,21 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const template = readFileSync(join(ROOT, "src", "index.html"), "utf8");
 const styles = readFileSync(join(ROOT, "src", "styles.css"), "utf8");
 const FONT_FILE = "assets/gost-type-a.ttf";
+// Имя семейства в `@font-face`. Оно же в `--font-gost` — и оно нарочно не
+// совпадает с именем файла, который у проектировщика стоит в системе.
+const FONT_FAMILY = "GOST type A drawn";
+
+// Все исходники страницы: по ним проверяется, что список семейств написан
+// ровно там, где ему положено, и больше нигде.
+function sourceTree(dir) {
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...sourceTree(full));
+    else if (/\.(js|css|html)$/.test(entry.name)) files.push(full);
+  }
+  return files;
+}
 
 // То, что сборка кладёт в `dist/`: по этому списку и проверяются ссылки.
 const DIST = [PAGE_FILE, MANIFEST_FILE, "icon.svg", "icon-maskable.svg", "sw.js", FONT_FILE];
@@ -102,10 +117,73 @@ test("в самой разметке ссылка на манифест стои
 test("шрифт подключён через @font-face относительной ссылкой на свой файл", () => {
   const face = styles.match(/@font-face\s*{[^}]*}/);
   assert.ok(face, "в стилях нет ни одного @font-face");
-  assert.match(face[0], /font-family:\s*"GOST type A"/);
+  assert.match(face[0], new RegExp("font-family:\\s*\"" + FONT_FAMILY + "\""));
   assert.match(face[0], new RegExp('url\\("' + FONT_FILE + '"\\)'));
   // Запасной шрифт обязателен: файл не дошёл — страница осталась читаемой.
-  assert.match(styles, /--font-gost:\s*"GOST type A",\s*[^;]+;/);
+  assert.match(styles, new RegExp("--font-gost:\\s*\"" + FONT_FAMILY + "\",\\s*[^;]+;"));
+});
+
+// Имя семейства не должно совпадать с именем шрифта, который проектировщик
+// ставит себе в систему ради CAD. Совпади оно — страница без своего файла рядом
+// (ADR 006 такую копию допускает) молча взяла бы системный **исходный** шрифт,
+// где `×` рисуется буквой «Ч»: подписи вышли бы похожими и неверными. Живой
+// прогон на машине с установленным `GOST type A` это показал.
+test("имя семейства — своё, а не как у шрифта в системе пользователя", () => {
+  assert.notEqual(FONT_FAMILY, "GOST type A", "имя семейства совпало с системным — подмена молчаливая");
+  assert.match(FONT_FAMILY, /^GOST type A /, "имя должно оставаться узнаваемым");
+  // Короткого имени нет нигде: ни в @font-face, ни в переменной.
+  const shortName = /"GOST type A"/.test(styles);
+  assert.equal(shortName, false, "в стилях осталось короткое имя семейства");
+});
+
+// Заказчик про чертёжный шрифт сказал «давай попробуем» — значит, отказ обязан
+// стоить одну правку. Выключатель один: строка `--font-gost` в `styles.css`.
+// Эти три проверки держат его единственным.
+test("интерфейс и печатный лист берут шрифт из переменной, а не свой", () => {
+  // Правил `body` в стилях несколько (габариты отдельно, вид отдельно) —
+  // шрифт обязан стоять хотя бы в одном: дальше его разносит `font: inherit`.
+  const bodyRules = [...styles.matchAll(/(^|[\s,}])body\s*{[^}]*}/g)].map(([rule]) => rule);
+  assert.ok(bodyRules.length > 0, "в стилях нет правила body");
+  assert.ok(
+    bodyRules.some((rule) => /font:\s*[^;]*var\(--font-gost\)/.test(rule)),
+    "body обязан наследовать --font-gost, иначе интерфейс живёт своим шрифтом",
+  );
+  const print = readFileSync(join(ROOT, "src", "print.css"), "utf8");
+  assert.match(print, /font:\s*[^;]*var\(--font-gost\)/, "печатный лист обязан брать --font-gost");
+});
+
+test("своего списка семейств в коде нет — холст спрашивает ту же переменную", () => {
+  // Холст не наследует ничего: `ctx.font` — строка, и семейство в неё кто-то
+  // вписывает. Пропиши его на месте — и выключателей станет два: отказ от
+  // шрифта оставил бы подписи на плане чертёжными.
+  const files = sourceTree(join(ROOT, "src"));
+  assert.ok(files.length > 20, "сканер исходников ничего не нашёл — проверка впустую");
+  const guilty = [];
+  for (const name of files) {
+    const source = readFileSync(name, "utf8");
+    for (const line of source.split("\n")) {
+      if (!/sans-serif/.test(line)) continue;
+      // Два места, где список семейств написан целиком и это правильно:
+      // сама переменная и запасной список для Node, где переменной нет.
+      if (/--font-gost:/.test(line)) continue;
+      if (/DRAW_FONT_FALLBACK\s*=/.test(line)) continue;
+      guilty.push(name.slice(ROOT.length + 1) + ": " + line.trim());
+    }
+  }
+  assert.deepEqual(guilty, []);
+});
+
+test("запасной список в коде и в переменной кончаются одинаково", () => {
+  // Если файл не дошёл, холст и разметка обязаны уйти в один и тот же шрифт:
+  // иначе подписи на плане и подписи в панели разъедутся на глазах.
+  const render = readFileSync(join(ROOT, "src", "render.js"), "utf8");
+  const fallback = render.match(/const DRAW_FONT_FALLBACK = '([^']+)'/);
+  assert.ok(fallback, "в render.js нет запасного списка семейств");
+  const variable = styles.match(new RegExp("--font-gost:\\s*\"" + FONT_FAMILY + "\",\\s*([^;]+);"));
+  assert.ok(variable, "в стилях нет --font-gost");
+  const tail = (value) => value.replace(/["']/g, "").replace(/\s+/g, " ").trim();
+  assert.equal(tail(fallback[1]).endsWith("sans-serif"), true);
+  assert.equal(tail(variable[1]).endsWith("sans-serif"), true);
 });
 
 test("каждая ссылка стилей ведёт в свои ресурсы", async () => {
