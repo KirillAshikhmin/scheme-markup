@@ -39,38 +39,60 @@ export const SHAPES = SHAPE_NAMES;
 
 // ——— шрифт холста —————————————————————————————————————————————————————
 //
-// Чертёжный шрифт попадает на схему тем же путём, что и в интерфейс: через
-// переменную `--font-gost` в `styles.css`. Своего списка семейств здесь нет
-// нарочно — иначе выключателей стало бы два, и отказ от шрифта оставил бы
-// подписи на плане чертёжными, а интерфейс вернул бы системным.
+// Ответов на «каким шрифтом» теперь два, и оба объявлены в `styles.css`
+// переменными — своего списка семейств здесь нет ни одного (G172):
 //
+//   `draft`  — чертёжный ГОСТ (`--font-gost`). Бумага и выгрузка всегда он:
+//              это чертёж по стандарту, выбора у него нет.
+//   `system` — системный (`--font-ui`). Им живёт интерфейс, и его же человек
+//              может поставить схеме на экране.
+//
+// **Умолчание — чертёжный, и это несущая часть замысла.** Выгрузка, печать и
+// лист по ГОСТ зовут `drawFont(size, weight)` без третьего довода и получают
+// чертёжный, ничего не зная про настройку. Чтобы бумага поехала за выбором
+// глаз, пришлось бы дописать довод руками в каждом месте — а не забыть его
+// вернуть, как было бы с глобальным переключателем.
+export const FONT_DRAFT = "draft";
+export const FONT_SYSTEM = "system";
+export const FONT_KINDS = [FONT_DRAFT, FONT_SYSTEM];
+
+// Вид шрифта -> переменная стилей. Больше имён семейств в коде нет.
+const FONT_VARIABLE = {
+  [FONT_DRAFT]: "--font-gost",
+  [FONT_SYSTEM]: "--font-ui",
+};
+
 // Запасной список нужен там, где переменной взять негде: в Node (тесты
 // геометрии холста не имеют) и до того, как стили применились. Текст в этом
 // случае рисуется системным шрифтом, а не пропадает.
 const DRAW_FONT_FALLBACK = 'system-ui, -apple-system, "Segoe UI", Arial, sans-serif';
 
-let drawFontFamilyCache = "";
-
 /**
- * Семейства для `ctx.font` — значение `--font-gost` как есть.
+ * Семейства для `ctx.font` — значение переменной вида как есть.
  *
- * Пустое значение не запоминается: стили на странице уже есть к первому кадру,
- * но если переменную не прочитать, кадр рисуется запасным шрифтом и следующий
- * спросит заново, а не закрепит промах навсегда.
+ * Ответ не запоминается: кадр спрашивает его один раз (`renderView` кладёт
+ * результат во `view`, и дальше по кадру идёт уже готовая строка), а
+ * запомненный намертво промах пережил бы и смену настройки, и дозагрузку
+ * стилей. Незнакомый вид — чертёжный: чужое слово в настройке не должно
+ * оставлять схему без шрифта.
  */
-export function drawFontFamily() {
-  if (drawFontFamilyCache) return drawFontFamilyCache;
+export function fontFamilyOf(kind) {
+  const variable = FONT_VARIABLE[kind] || FONT_VARIABLE[FONT_DRAFT];
   if (typeof document === "undefined" || !document.documentElement) return DRAW_FONT_FALLBACK;
   if (typeof getComputedStyle !== "function") return DRAW_FONT_FALLBACK;
-  const value = getComputedStyle(document.documentElement).getPropertyValue("--font-gost").trim();
-  if (!value) return DRAW_FONT_FALLBACK;
-  drawFontFamilyCache = value;
-  return value;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  return value || DRAW_FONT_FALLBACK;
 }
 
-/** Строка для `ctx.font`: `drawFont(12)` или `drawFont(12, 600)`. */
-export function drawFont(size, weight) {
-  return (weight ? weight + " " : "") + size + "px " + drawFontFamily();
+/**
+ * Строка для `ctx.font`: `drawFont(12)`, `drawFont(12, 600)` или
+ * `drawFont(12, 600, family)`.
+ *
+ * Третий довод — **уже разобранные семейства**, а не вид: кадр разбирает их
+ * один раз, а не на каждую подпись. Без него — чертёжный.
+ */
+export function drawFont(size, weight, family) {
+  return (weight ? weight + " " : "") + size + "px " + (family || fontFamilyOf(FONT_DRAFT));
 }
 
 /**
@@ -82,6 +104,8 @@ export function drawFont(size, weight) {
  * холст, чтобы перерисовать кадр, выгрузка, чтобы не положить в PNG не тот
  * шрифт. Не дождались (старый браузер, файла нет) — `false` и прежний вид:
  * падать из-за шрифта нельзя.
+ *
+ * Ждут всегда чертёжный: системный — это отказ от файла, ждать там нечего.
  */
 export function drawFontReady() {
   const fonts = typeof document !== "undefined" && document ? document.fonts : null;
@@ -677,9 +701,21 @@ const JACK_WIDTH = 0.52;
 const JACK_TOP = -0.55;
 const JACK_HEIGHT = 0.75;
 
+/**
+ * `view` для рисования, приведённый к полному виду.
+ *
+ * Здесь же вид шрифта превращается в семейства — один раз на кадр: `drawScheme`
+ * зовёт `renderView` в начале и дальше передаёт готовый `state` вниз, а не
+ * спрашивает стили на каждую подпись. Уже разобранный `view` второй раз не
+ * разбирается (`fontFamily` на месте), поэтому вложенные вызовы бесплатны.
+ *
+ * `fontKind` — поле кадра, а не объекта: его кладёт холст из личных настроек
+ * браузера. Выгрузка его не передаёт и получает чертёжный.
+ */
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
   if (!(merged.zoom > 0)) merged.zoom = 1;
+  if (!merged.fontFamily) merged.fontFamily = fontFamilyOf(merged.fontKind || FONT_DRAFT);
   return merged;
 }
 
@@ -2129,7 +2165,7 @@ function linkCurve(from, to, pad, spread = 0) {
 
 // Цифра канала у основания дуги. Канал не указан — не рисуется ничего: план
 // объекта, размеченного до появления каналов, обязан остаться прежним.
-function drawLinkChannel(ctx, curve, channel, color, alpha) {
+function drawLinkChannel(ctx, curve, channel, color, alpha, family) {
   if (!Number.isInteger(channel) || channel < 1) return;
   const dx = curve.end.x - curve.start.x;
   const dy = curve.end.y - curve.start.y;
@@ -2146,7 +2182,7 @@ function drawLinkChannel(ctx, curve, channel, color, alpha) {
   const value = String(channel);
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.font = drawFont(LINK_CHANNEL_FONT, 700);
+  ctx.font = drawFont(LINK_CHANNEL_FONT, 700, family);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
@@ -2280,7 +2316,7 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
     const channelKey = line.fromId + "#" + line.channel;
     if (!channelsShown.has(channelKey)) {
       channelsShown.add(channelKey);
-      drawLinkChannel(ctx, curve, line.channel, color, fade(line, 1));
+      drawLinkChannel(ctx, curve, line.channel, color, fade(line, 1), state.fontFamily);
     }
   }
   // Связь на другую схему: обрывок с разрывом посередине. Линию через границу
@@ -2578,6 +2614,10 @@ function labelBoxIn(project, scheme, target, state, layout) {
     width,
     height: plate ? plate.height : font * 1.2,
     font,
+    // Семейства едут вместе с кеглем: рисует подпись тот, у кого на руках
+    // только `box`. Габарит от них не зависит — он считается по числу знаков
+    // (`LABEL_CHAR_RATIO`), — поэтому смена шрифта подпись не двигает.
+    family: state.fontFamily,
     // Плашка комментария: строки и поля внутри рамки — рисованию и попаданию
     // по клику достаётся один и тот же габарит. У обычной подписи этих полей
     // нет вовсе, и `plate: null` значит «рисуй как рисовал».
@@ -3350,7 +3390,18 @@ export function outlineLabelBox(project, scheme, outline, view) {
   const at = { x: center.x + dx * state.zoom, y: center.y + dy * state.zoom };
   const width = Math.max(font * 0.8, room.name.length * font * LABEL_CHAR_RATIO);
   const anchor = angle === 90 ? { x: at.x, y: at.y + width / 2 } : { x: at.x - width / 2, y: at.y };
-  return { text: room.name, x: anchor.x, y: anchor.y, width, height: font * 1.2, font, angle, dx, dy };
+  return {
+    text: room.name,
+    x: anchor.x,
+    y: anchor.y,
+    width,
+    height: font * 1.2,
+    font,
+    family: state.fontFamily,
+    angle,
+    dx,
+    dy,
+  };
 }
 
 // Ручка поворота у подписи комнаты — та же, что у подписи метки, и стоит там же
@@ -3374,7 +3425,7 @@ export function hitOutlineLabelTurn(project, scheme, outline, point, view, extra
 function drawOutlineLabel(ctx, box, color) {
   const rect = labelBounds(box);
   ctx.save();
-  ctx.font = drawFont(box.font, 600);
+  ctx.font = drawFont(box.font, 600, box.family);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх линий плана.
@@ -3752,7 +3803,7 @@ function drawCommentPlate(ctx, box, color, selected) {
   if (empty) ctx.setLineDash([box.font * 0.4, box.font * 0.3]);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.font = drawFont(box.font);
+  ctx.font = drawFont(box.font, null, box.family);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = color;
@@ -3844,7 +3895,7 @@ function drawLabel(ctx, box, color, runs, selected) {
   }
   const parts = runs && runs.map((run) => run.text).join("") === box.text ? runs : null;
   ctx.save();
-  ctx.font = drawFont(box.font, 600);
+  ctx.font = drawFont(box.font, 600, box.family);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх тёмных линий плана.
@@ -3999,17 +4050,20 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
   // Угол берётся у уже нарисованного отрезка: точку под курсором холст к этому
   // времени притянул сам, и подсказка обязана показывать то, что видно.
   const shown = snapSegment(from, draft.cursor, scheme, { free: true });
-  drawDraftAngle(ctx, cursor, shown.angle, Boolean(draft.snapped), color);
+  // Подсказка живёт только на экране — черновика в выгрузке не бывает, — но
+  // шрифт ей всё равно даётся кадром, а не берётся по умолчанию: иначе на
+  // системной схеме один градус был бы чертёжным.
+  drawDraftAngle(ctx, cursor, shown.angle, Boolean(draft.snapped), color, renderView(view).fontFamily);
 }
 
 // Градус тянущегося отрезка — у курсора, а не в углу холста: инженер смотрит на
 // конец линии, и по углу холста не понять, к какому отрезку относится число.
 // Сработавший магнит виден по слову «ровно» и цвету — иначе непонятно, почему
 // линия не идёт за рукой.
-function drawDraftAngle(ctx, at, angle, snapped, color) {
+function drawDraftAngle(ctx, at, angle, snapped, color, family) {
   const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
   ctx.save();
-  ctx.font = drawFont(DRAFT_ANGLE_FONT, 600);
+  ctx.font = drawFont(DRAFT_ANGLE_FONT, 600, family);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.lineWidth = Math.max(2, DRAFT_ANGLE_FONT * 0.3);
@@ -4060,7 +4114,7 @@ export function drawLegend(ctx, { project, scheme, filter, view, box }) {
   const x = box ? box.x : 12;
   const y = box ? box.y : 12;
   ctx.save();
-  ctx.font = drawFont(font);
+  ctx.font = drawFont(font, null, state.fontFamily);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Ширина рамки — по самой длинной строке: код типа бывает и в шестнадцать
