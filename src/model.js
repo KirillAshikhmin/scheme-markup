@@ -147,7 +147,30 @@ export const SHAPE_LEGACY = ["hexagon", "diamond-fill", "circle-half"];
 // Допустимые значения поля формы: палитра плюс старые значения.
 export const SHAPE_NAMES = [...SHAPE_PALETTE, ...SHAPE_LEGACY];
 export const BLOCK_MODES = ["each", "single"];
-export const MARK_KINDS = ["point", "line"];
+/**
+ * Вид метки и вид типа — одни и те же значения: вид типа говорит, какие метки
+ * этим типом ставятся.
+ *
+ * Третий вид — **комментарий** (G163). Слова заказчика: «нужен отдельный тип
+ * меток - комментарий и комментарий с указателем. Просто комментарий -
+ * прямоугольник со скруглёнными углами и внутри текст». На плане он рисуется
+ * не знаком, а плашкой, и текст в плашке — поле «Комментарий» (`mark.original`,
+ * то самое, что переименовали в таске 117): «плашка - да, пусть текст из поля
+ * комментария будет».
+ *
+ * **Указатель — свойство метки, а не четвёртый вид** (его слова: «можно просто
+ * как свойство комментария»): `mark.pointer`. Без него плашка стоит на своей
+ * точке; с ним она отъезжает, а к точке идёт всегда видимая линия со стрелкой.
+ * Механизм отъезда — тот же `labelOffset`/`labelLeader`, что у подписи обычной
+ * метки: «Да, механизм тот же используем с поводком. Как раз это и правильно».
+ * Второго механизма в сборке нет.
+ *
+ * Комментарий **не позиция**, а подпись к чертежу (G167: «В список меток в
+ * таблицу и т.д. эти комментарии не должны попадать»), поэтому ни в списках,
+ * ни в листах, ни в подсчётах его нет — см. `listedMarks` и `listedTypes`.
+ */
+export const MARK_KIND_COMMENT = "comment";
+export const MARK_KINDS = ["point", "line", MARK_KIND_COMMENT];
 
 /**
  * Сколько каналов у типа: одна клавиша у В, две у ВВ, три у ВВВ, четыре у
@@ -489,6 +512,76 @@ export function markLabelLeader(mark) {
   return mark.labelLeader === true || mark.labelLeader === false ? mark.labelLeader : null;
 }
 
+// ——— комментарий ——————————————————————————————————————————————————————
+//
+// Три читалки на весь инструмент: вид метки, указатель и текст плашки. Считать
+// это самому нельзя по той же причине, по которой нельзя читать `type.kind`
+// мимо `typeKindOf`: у метки прежней разметки ни `pointer`, ни `kind:
+// "comment"` нет вовсе, и `undefined` разошёлся бы с «нет указателя».
+
+/** Метка-комментарий: плашка с текстом вместо знака. */
+export function markIsComment(mark) {
+  return Boolean(mark) && mark.kind === MARK_KIND_COMMENT;
+}
+
+/**
+ * Есть ли у комментария указатель. У метки без поля — нет: плашка стоит на
+ * своей точке, и это умолчание новой метки. У не-комментария указателя нет
+ * никогда, какое бы поле ему ни дописали чужие руки.
+ */
+export function markPointer(mark) {
+  return markIsComment(mark) && mark.pointer === true;
+}
+
+/**
+ * Текст плашки — поле «Комментарий» (`mark.original`), без краевых пробелов.
+ * Пустая строка значит «плашка пустая»: рисуется она подсказкой, а `validate`
+ * показывает это находкой — пустой комментарий на плане ничего не сообщает.
+ */
+export function markCommentText(mark) {
+  return mark && typeof mark.original === "string" ? mark.original.trim() : "";
+}
+
+/** Тип, которым ставятся комментарии. */
+export function typeIsComment(project, typeId) {
+  return typeKindOf(project, typeId) === MARK_KIND_COMMENT;
+}
+
+/**
+ * Метки, которые попадают в списки, листы и подсчёты, — то есть все, кроме
+ * комментариев (G167).
+ *
+ * Одно место на весь инструмент, а не фильтр в каждом списке: заказчик
+ * перечислил не одно место, а породу — «в список меток в таблицу и т.д.».
+ * Разойдись такие фильтры, счётчик «Показано N из M» разошёлся бы с тем, что
+ * видно в списке.
+ */
+export function listedMarks(marks) {
+  return (Array.isArray(marks) ? marks : []).filter((mark) => !markIsComment(mark));
+}
+
+/**
+ * Типы, которые попадают в листы и в легенду: комментарий — не позиция, его
+ * знак на плане не рисуется, и объяснять в легенде нечего.
+ */
+export function listedTypes(project, types) {
+  return (Array.isArray(types) ? types : []).filter((type) => !typeIsComment(project, type.id));
+}
+
+/**
+ * Включить или выключить указатель у комментария.
+ *
+ * Отдельная команда, а не поле в `updateMark`: указатель меняет не вид
+ * плашки, а её место на плане — без него плашка пришита к точке. Смещение
+ * плашки при этом не трогается: выключили указатель, передумали, включили —
+ * плашка вернулась туда, где её оставили рукой.
+ */
+export function setMarkPointer(project, markId, on) {
+  const mark = requireMark(project, markId);
+  if (!markIsComment(mark)) throw modelError("pointerOnlyComment");
+  return updateMark(project, markId, { pointer: on === true });
+}
+
 // Размер метки и подписи в пикселях плана — с них начинается новый объект.
 // Считано от бумаги: план в 2500 пикселей по большей стороне на листе A3 это
 // 0,16 мм на пиксель, монтажник читает с расстояния вытянутой руки, значит
@@ -550,6 +643,15 @@ const TEMPLATE_CATEGORIES = [
   { key: "sensors", name: strings.categories.sensors, color: "#164E63", shape: "circle-ring" },
   { key: "panel", name: strings.categories.panel, color: "#6E4B1F", shape: "square-bolt" },
   { key: "plumbing", name: strings.categories.plumbing, color: "#E80098", shape: "drop-dot" },
+  // Комментарии (G163). Цвет — чернильный, почти чёрный: это не условное
+  // обозначение железки, а надпись на чертеже, и в семье цветных категорий
+  // ей места нет. Выбран счётом, как велит правило: до каждой прежней
+  // категории ΔE больше порога `COLOR_NEAR_DISTANCE`, то есть новой пары
+  // «похожих цветов» в предупреждениях чистый объект не получает.
+  // Форма — лежачий прямоугольник, та же плашка: на плане знак категории у
+  // комментария не рисуется вовсе, но в сетке выбора типа и в карточке метки
+  // значок нужен, и плашка там узнаётся сразу.
+  { key: "comments", name: strings.categories.comments, color: "#111418", shape: "rect-horizontal" },
 ];
 
 // Порядок — порядок справочника заказчика, а не наша перекладка по категориям:
@@ -612,6 +714,11 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander" },
   { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring" },
   { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring" },
+  // Комментарий — последним: это не железка, и в привычном порядке справочника
+  // ему места нет. Код заказчик назвал сам: «Код и номер нужен. Пусть код
+  // будет „Коммент"». Номер сквозной, как у всех, и со чужими счётчиками не
+  // пересекается — счётчик ведётся на код типа.
+  { category: "comments", code: "Коммент", name: strings.types.comment, kind: MARK_KIND_COMMENT },
 ];
 
 function newId() {
@@ -653,9 +760,9 @@ export function defaultTemplate() {
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
-    // Вид типа: точечных в шаблоне большинство, линейные названы поимённо в
-    // самом списке. Переключается строкой в справочнике.
-    kind: type.kind === "line" ? "line" : "point",
+    // Вид типа: точечных в шаблоне большинство, линейные и комментарий
+    // названы поимённо в самом списке. Переключается строкой в справочнике.
+    kind: MARK_KINDS.includes(type.kind) ? type.kind : "point",
     shape: type.shape || null,
     // Начертание своё только там, где оно разводит линейные типы одной
     // категории; остальные берут категорийное — как форму берёт тип, который
@@ -1039,6 +1146,9 @@ function nextNumber(project, counters, code) {
 }
 
 function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
+  // Указатель есть только у комментария, и поле заводится только ему: розетке
+  // `pointer` ничего не значил бы, а в файле проекта лежал бы у каждой метки.
+  const comment = kind === MARK_KIND_COMMENT ? { pointer: false } : null;
   return {
     id: newId(),
     schemeId,
@@ -1065,6 +1175,7 @@ function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
     // смена типа и уплотнение номеров переписывают обозначения, а связь должна
     // это пережить.
     controls: [],
+    ...comment,
   };
 }
 
@@ -1078,6 +1189,9 @@ export function addMark(project, { schemeId, typeId, kind = "point", points, blo
   if (!MARK_KINDS.includes(kind)) throw modelError("unknownKind");
   const vertices = normalizePoints(points);
   if (kind === "line" && vertices.length < MARK_LINE_MIN_POINTS) throw modelError("shortLine");
+  // Комментарий — одна плашка в одном месте: вторая точка у него значила бы
+  // блок из плашек, а блока у комментария нет (см. `addToGroup`).
+  if (kind === MARK_KIND_COMMENT && vertices.length !== 1) throw modelError("commentOnePoint");
 
   const mode = blockMode || type.blockMode || "each";
   if (!BLOCK_MODES.includes(mode)) throw modelError("unknownBlockMode");
@@ -1479,7 +1593,11 @@ export function linkedMarkIds(project, markId) {
  * формата, пользователь получил бы «правку», которой не делал.
  */
 export function setMarkControls(project, markId, controlled) {
-  requireMark(project, markId);
+  const owner = requireMark(project, markId);
+  // Комментарий в связях не участвует (решение таска 116): «чем управляет» —
+  // утверждение инженера про железки, а плашка — надпись на чертеже. Пустить
+  // её в связи значило бы пустить её и в лист связей, откуда G167 её убирает.
+  if (markIsComment(owner)) throw modelError("commentNoLinks");
   const wanted = [];
   const seen = new Set();
   for (const item of Array.isArray(controlled) ? controlled : []) {
@@ -1656,6 +1774,7 @@ const MARK_PATCH_FIELDS = [
   "roomManual",
   "location",
   "original",
+  "pointer",
   ...MARK_DIMENSION_FIELDS,
 ];
 
@@ -1681,6 +1800,15 @@ export function updateMark(project, markId, patch) {
       throw modelError("labelLeaderUnknown");
     }
     changes.labelLeader = value === true || value === false ? value : null;
+  }
+  // Указатель — только у комментария и только «да» или «нет». Поле у чужой
+  // метки значило бы, что `markPointer` обязан разбираться, кому верить;
+  // проще не дать его записать. Правится он `setMarkPointer`, а здесь стоит
+  // та же стража, что у угла и поводка подписи: объект правит модель.
+  if (Object.prototype.hasOwnProperty.call(changes, "pointer")) {
+    const current = project.marks.find((mark) => mark.id === markId);
+    if (!markIsComment(current)) throw modelError("pointerOnlyComment");
+    if (changes.pointer !== true && changes.pointer !== false) throw modelError("pointerUnknown");
   }
   // Размеры приводятся к числу или к `null` здесь — второго места, где они
   // попадают в метку, нет: `setMarkDimensions` идёт через эту же функцию.
@@ -1796,7 +1924,9 @@ export function pasteMark(project, snapshot, { schemeId, point } = {}) {
   requireScheme(project, schemeId);
   requireType(project, snapshot.typeId);
   const shape = markShapeAt(snapshot.points, point);
-  const kind = snapshot.kind === "line" ? "line" : "point";
+  // Вид копии — вид исходной метки: копия комментария обязана остаться
+  // комментарием, иначе текст плашки уехал бы в поле розетки.
+  const kind = MARK_KINDS.includes(snapshot.kind) ? snapshot.kind : "point";
   const result = addMark(project, {
     schemeId,
     typeId: snapshot.typeId,
@@ -2093,7 +2223,11 @@ export function compactAllNumbers(project) {
   let next = project;
   let changes = 0;
   for (const { types } of typesInOrder(project)) {
-    for (const type of types) {
+    // «Сомкнуть у всех» идёт по обычным типам (G167): номер комментария не
+    // видно ни на плане, ни в листах, и список замен «Коммент3 → Коммент1»
+    // пользователю сверять не с чем. Нумерация комментария от этого не
+    // ломается — она сквозная по своему коду и с чужой не пересекается.
+    for (const type of listedTypes(project, types)) {
       const result = compactNumbers(next, type.id);
       if (result.changes.length === 0) continue;
       next = result.project;
@@ -2115,7 +2249,10 @@ export function repeatedNumbers(project) {
   const rank = (typeId) => (order.has(typeId) ? order.get(typeId) : Number.MAX_SAFE_INTEGER);
 
   const byNumber = new Map();
-  for (const mark of project.marks) {
+  // Комментарии в проверку дублей не идут (G167): их номер нигде не виден —
+  // ни на плане (там текст плашки), ни в списке, ни в листах, — и
+  // предупреждение о повторе невидимого номера было бы шумом.
+  for (const mark of listedMarks(project.marks)) {
     const type = findType(project, mark.typeId);
     if (!type) continue;
     const key = mark.typeId + "#" + mark.number;
@@ -2150,6 +2287,11 @@ export function changeMarkType(project, markId, typeId) {
   const kind = MARK_KINDS.includes(mark.kind) ? mark.kind : "point";
   if (typeKindOf(project, typeId) !== kind) {
     if (kind === "line") throw modelError("typeKindNotLine", { code: type.code });
+    // Комментарий меняется только на другой комментарий: плашку нельзя
+    // превратить в знак, не выбросив её текст, а знак в плашку — не выдумав
+    // текста. Обратная сторона того же правила: обычной метке комментарий тоже
+    // не достанется.
+    if (kind === MARK_KIND_COMMENT) throw modelError("typeKindNotComment", { code: type.code });
     throw modelError("typeKindNotPoint", { code: type.code });
   }
   const counters = { ...project.counters };
@@ -3172,7 +3314,7 @@ function typeMarkKinds(project, typeId) {
   const kinds = new Set();
   for (const mark of (project && project.marks) || []) {
     if (mark.typeId !== typeId) continue;
-    kinds.add(mark.kind === "line" ? "line" : "point");
+    kinds.add(MARK_KINDS.includes(mark.kind) ? mark.kind : "point");
   }
   return kinds;
 }
@@ -3604,7 +3746,10 @@ function placementLinks(project, links, markId) {
 
 export function addPlacement(project, { equipmentId, markId, links } = {}) {
   requireEquipment(project, equipmentId);
-  requireMark(project, markId);
+  const mark = requireMark(project, markId);
+  // Оборудование ставят в точку, а не в надпись: лист оборудования — это
+  // закупка, и комментария в нём нет (G167).
+  if (markIsComment(mark)) throw modelError("commentNoEquipment");
   const placement = {
     id: newId(),
     equipmentId,
@@ -3782,6 +3927,14 @@ export function validate(project) {
       problems.push(problem("emptyPoints", { label }, mark.id));
     } else if (mark.kind === "line" && mark.points.length < 2) {
       problems.push(problem("shortLine", { label }, mark.id));
+    }
+
+    // Пустая плашка — находка, а не поломка: комментарий без текста занимает
+    // место на плане и ничего не сообщает, и о нём стоит сказать вслух.
+    // Предупреждения «метка без подписи» у комментария, наоборот, быть не
+    // может: подписи у него нет вовсе — вместо неё плашка.
+    if (markIsComment(mark) && markCommentText(mark) === "") {
+      problems.push(problem("commentEmpty", { label }, mark.id, "warning"));
     }
 
     for (const controlled of markControlIds(mark)) {

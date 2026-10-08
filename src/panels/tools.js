@@ -10,6 +10,8 @@ import { GUIDES_SETTING, layoutAllows, PANEL_IDS, registerPanel } from "../app.j
 import { strings, text } from "../strings.js";
 import {
   BLOCK_MODES,
+  MARK_KINDS,
+  MARK_KIND_COMMENT,
   changeMarkType,
   findMark,
   findType,
@@ -119,7 +121,9 @@ function mountToolsPanel(host, api) {
     // типа в списке не увидит — это и правильно, менять его есть на что.
     const picked = await openTypePicker(state.project, {
       title: strings.tools.changeType,
-      kind: mark.kind === "line" ? "line" : "point",
+      // Комментарий — такой же вид, как точка и линия: плашку меняют только
+      // на плашку, иначе её текст было бы некуда девать.
+      kind: MARK_KINDS.includes(mark.kind) ? mark.kind : "point",
       activeTypeId: mark.typeId,
     });
     if (!picked) return;
@@ -199,7 +203,9 @@ function mountToolsPanel(host, api) {
       ? strings.canvas.needType
       : kind === "line"
         ? strings.tools.kindLineHint
-        : strings.tools.kindPointHint;
+        : kind === MARK_KIND_COMMENT
+          ? strings.tools.kindCommentHint
+          : strings.tools.kindPointHint;
     const modeRow = uiEl("div", { class: "tools__row tools__row--modes" }, [
       uiButton(strings.tools.selectMode, {
         class: "ui-btn" + (state.mode === "select" ? " is-active" : ""),
@@ -217,12 +223,19 @@ function mountToolsPanel(host, api) {
     // Блок собирается только из точек — ручки «+» у линии нет и быть не может.
     // При линейном типе выбор гаснет и говорит почему: живой на вид список,
     // который ни на что не влияет, — обещание, которого сборка не держит.
-    const blockOff = !type || kind === "line";
+    // Блока нет ни у линии, ни у комментария: ручки «+» ставят соседнюю точку
+    // блока, а плашек в блоке не бывает — это надпись, а не ряд розеток.
+    const blockOff = !type || kind === "line" || kind === MARK_KIND_COMMENT;
     const blockSelect = uiEl(
       "select",
       {
         class: "ui-select",
-        title: kind === "line" ? strings.tools.blockLineHint : strings.tools.blockHint,
+        title:
+          kind === "line"
+            ? strings.tools.blockLineHint
+            : kind === MARK_KIND_COMMENT
+              ? strings.tools.blockCommentHint
+              : strings.tools.blockHint,
         on: { change: (event) => setBlockMode(event.target.value) },
       },
       BLOCK_MODES.map((mode) =>

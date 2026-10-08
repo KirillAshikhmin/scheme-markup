@@ -12,6 +12,7 @@ import { layoutAllows, PANEL_IDS, registerPanel } from "./app.js";
 import { strings, text } from "./strings.js";
 import {
   DEFAULT_MARK_SIZE,
+  MARK_KIND_COMMENT,
   OUTLINE_MIN_POINTS,
   addMark,
   addOutline,
@@ -35,8 +36,12 @@ import {
   schemeGuides,
   labelOf,
   linkedMarkIds,
+  markCommentText,
+  markIsComment,
+  markPointer,
   markSnapshot,
   pasteMark,
+  setMarkPointer,
   moveMarkPoint,
   moveOutlinePoint,
   removeMarkPoint,
@@ -261,6 +266,16 @@ export function canvasAddKind(state) {
   return typeKindOf(state.project, state.activeTypeId);
 }
 
+// Ставится ли нынешний тип одним кликом. Точка и комментарий — да: оба встают
+// в одну точку, разница только в том, что нарисуется. Линия — нет, её ведут
+// вершинами. Отдельная функция, потому что спрашивают это трижды — тап,
+// начало ведения и подсказка, — и разойдись ответы, клик ставил бы метку там,
+// где подсказка обещала панораму.
+export function canvasPlacesByClick(state) {
+  const kind = canvasAddKind(state);
+  return kind === "point" || kind === MARK_KIND_COMMENT;
+}
+
 // Текст подсказки над планом — чистая функция от состояния. `null` значит, что
 // подсказки нет вовсе. В просмотре она не рассказывает, как ставить метки и
 // рисовать контуры: этого здесь нет, и обещать нечего.
@@ -282,6 +297,9 @@ export function canvasHintText(state) {
   const adding = canvasAddKind(state);
   if (adding === "point" && type) {
     return canvasHintCopy(text("canvas.hintPoint", { label: type.code + " — " + type.name }));
+  }
+  if (adding === MARK_KIND_COMMENT && type) {
+    return canvasHintCopy(text("canvas.hintComment", { label: type.code + " — " + type.name }));
   }
   if (adding === "line" && type) return strings.canvas.hintLine;
   if (type) return canvasHintCopy(strings.canvas.hintSelectMode);
@@ -858,7 +876,9 @@ function canvasPlacePoint(plan) {
     const result = addMark(state.project, {
       schemeId: state.schemeId,
       typeId: state.activeTypeId,
-      kind: "point",
+      // Вид метки берётся у типа, а не прибивается к точке: тип-комментарий
+      // ставит комментарий, и плашка появляется там, где щёлкнули.
+      kind: canvasAddKind(state) === MARK_KIND_COMMENT ? MARK_KIND_COMMENT : "point",
       // Точка липнет к направляющим — ради этого их и ставят: «6 вертикальных,
       // 2 горизонтальных и на перекрестия ставишь точки».
       points: [canvasGuideSnap(plan)],
@@ -1108,6 +1128,20 @@ function canvasToggleLabelLeader(markId) {
   const scheme = canvasScheme(state);
   const target = labelTargetOf(state.project, scheme, markId, state.filter);
   if (!target) return;
+  // У комментария эта кнопка включает **указатель**: поводок у плашки не
+  // отдельная настройка, а он и есть («соединительная линия… чтобы была
+  // всегда»). Кнопка одна и стоит на том же месте — у самой плашки, где на
+  // неё и смотрят; ручки поворота у комментария нет, и место первой ручки
+  // занимает она (`labelLeaderHandle` в render.js).
+  if (markIsComment(target)) {
+    try {
+      const after = setMarkPointer(state.project, markId, !markPointer(target)).project;
+      canvasCommit(state.project, after, strings.history.commentPointer, { selection: [markId] });
+    } catch (error) {
+      canvasFail(error);
+    }
+    return;
+  }
   const holder = labelLeaderHolder(target);
   const shown = labelLeaderShown(
     state.project,
@@ -1117,6 +1151,46 @@ function canvasToggleLabelLeader(markId) {
   try {
     const after = updateMark(state.project, holder, { labelLeader: !shown }).project;
     canvasCommit(state.project, after, strings.history.labelLeader, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+/**
+ * Правка текста комментария — одним окном, прямо с плана.
+ *
+ * Комментариев нет в списке меток (G167), и это главный вопрос, который
+ * создаёт их природа: откуда править текст. Ответ — там же, где плашка:
+ * двойной клик по ней и кнопка в карточке выделенной метки открывают это
+ * окно. Поле одно и то же — `original`, то самое «Комментарий» из таска 117,
+ * и второй правды о тексте в сборке нет.
+ *
+ * Пустой ответ — это ответ (`allowEmpty`): очистить плашку человек имеет
+ * право, и удалять ради этого всю метку он не обязан. О пустой плашке скажет
+ * панель предупреждений.
+ */
+export async function canvasEditCommentText(markId) {
+  const before = canvasState();
+  const mark = before.project ? findMark(before.project, markId) : null;
+  if (!markIsComment(mark)) return;
+  const raw = await uiPrompt({
+    title: strings.canvas.commentTextTitle,
+    value: markCommentText(mark),
+    placeholder: strings.marks.comment,
+    submitLabel: strings.dialog.save,
+    allowEmpty: true,
+  });
+  if (raw === null) return;
+  // Окно живёт дольше кадра: за это время метку могли удалить чужим Ctrl+Z
+  // или уйти на другой объект. Правим по свежему снимку, а если метки больше
+  // нет — молчим: писать некуда.
+  const state = canvasState();
+  const current = state.project ? findMark(state.project, markId) : null;
+  if (!markIsComment(current)) return;
+  if (markCommentText(current) === raw.trim()) return;
+  try {
+    const after = updateMark(state.project, markId, { original: raw.trim() }).project;
+    canvasCommit(state.project, after, strings.history.commentText, { selection: [markId] });
   } catch (error) {
     canvasFail(error);
   }
@@ -2197,7 +2271,7 @@ export function canvasTapKind(state, pick = {}) {
   if (pick.blockSide) return "block";
   if (state.mode === "room" || canvasAddKind(state) === "line") return "vertex";
   if (pick.markId) return "select";
-  if (canvasAddKind(state) === "point") return "place";
+  if (canvasPlacesByClick(state)) return "place";
   return "select";
 }
 
@@ -2749,7 +2823,7 @@ function canvasPointerDown(event) {
   }
 
   canvasDrag = {
-    kind: canvasAddKind(state) === "point" && editable ? "place" : "empty",
+    kind: canvasPlacesByClick(state) && editable ? "place" : "empty",
     start: point,
     view: { ...state.view },
     moved: false,
@@ -3108,6 +3182,14 @@ function canvasDoubleAt(at, slack = 0) {
     }
     // Метка важнее контура — тот же порядок, что у одиночного клика.
     const hit = hitTest(state.project, scheme, at, view, state.filter, slack);
+    // Двойной клик по плашке правит её текст — и это главный способ до него
+    // добраться: в списке меток комментариев нет (G167). Проверяется раньше
+    // возврата подписи на место: у плашки без указателя смещения нет вовсе, а
+    // у плашки с указателем текст нужнее, чем сброс места.
+    if (hit && markIsComment(findMark(state.project, hit.markId))) {
+      canvasEditCommentText(hit.markId);
+      return true;
+    }
     if (hit && edited && edited.kind === "mark" && hit.markId === edited.id && hit.part === "line") {
       canvasPathVertexInsert(edited, hit.index, plan);
       return true;

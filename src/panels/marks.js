@@ -15,6 +15,7 @@ import {
   findMark,
   findRoom,
   labelCounts,
+  listedMarks,
   formatMeters,
   labelOf,
   linkedMarkIds,
@@ -288,6 +289,18 @@ export const MARKS_FILTERS_SETTING = "marksFiltersCollapsed";
  *   ни пикселя лишней высоты. Не сужен — там просто число меток на схеме
  *   («36»), сужен — полное «Показано 12 из 36»: в этот момент важны оба числа.
  */
+/**
+ * Сколько меток на схеме всего — то самое `M` из «Показано N из M».
+ *
+ * Считается по тем же меткам, что попадают в список: комментариев (G167) нет
+ * ни в N, ни в M. Будь иначе, в пустом фильтре числа разошлись бы с тем, что
+ * видно в списке — «Показано 12 из 15» при двенадцати строках.
+ */
+export function marksSchemeTotal(project, schemeId) {
+  if (!project || !schemeId) return 0;
+  return listedMarks(project.marks).filter((mark) => mark.schemeId === schemeId).length;
+}
+
 export function marksFiltersHead({ collapsed, filter, shown, total }) {
   const narrowed = filtersActive(filter);
   const hint = [
@@ -1080,7 +1093,7 @@ function mountMarksPanel(host, api) {
     // прежним. Сдвинь его — и список перестанет сходиться с легендой
     // и таблицей, у которых порядок тот же.
     const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
-    const total = state.project.marks.filter((mark) => mark.schemeId === state.schemeId).length;
+    const total = marksSchemeTotal(state.project, state.schemeId);
     syncFilters(state, rows.length, total);
     if (rows.length === 0) {
       list.replaceChildren(

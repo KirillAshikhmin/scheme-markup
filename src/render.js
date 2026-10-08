@@ -21,15 +21,19 @@ import {
   findType,
   findGroup,
   markControlIds,
+  markCommentText,
   markControlLinks,
+  markIsComment,
   markLabelLeader,
+  markPointer,
+  listedTypes,
   outlinesInOrder,
   pointInOutline,
   styleOf,
   labelOf,
   typesInOrder,
 } from "./model.js";
-import { text } from "./strings.js";
+import { strings, text } from "./strings.js";
 
 export const SHAPES = SHAPE_NAMES;
 
@@ -2299,6 +2303,26 @@ export function labelLead(project, target) {
   return lead || null;
 }
 
+/**
+ * Куда встаёт подпись, минуя раскладку: `null` — раскладка решает сама.
+ *
+ * Два случая. Оттащенная рукой подпись стоит по своему `labelOffset` — это
+ * задал пользователь. **Плашка комментария без указателя стоит на своей
+ * точке** и своего смещения не слушает вовсе: «У простого комментария можно
+ * точку просто привязать к подписи». Смещение при этом не стирается — включат
+ * указатель, и плашка вернётся туда, где её оставили рукой.
+ *
+ * Единственное место, где это решается: раскладка (`labelPlaceAll`) обязана
+ * считать место плашки занятым ровно там, где его потом покажет `labelPlaceOf`.
+ */
+function labelFixedPlace(project, target, sizes) {
+  if (markIsComment(target) && !markPointer(target)) {
+    const size = commentPlateSize(labelTextOf(project, target), sizes.font);
+    return { dx: -size.width / 2, dy: 0 };
+  }
+  return labelOffsetOf(project, target);
+}
+
 // Смещение подписи. У группы своего поля модель не заводит — её подпись стоит
 // по смещению первой метки блока (собственной подписи у этой метки нет,
 // подпись у блока одна), и правится оно обычным updateMark.
@@ -2310,9 +2334,102 @@ export function labelOffsetOf(project, target) {
 }
 
 // Текст подписи: у блока — свёрнутый в диапазон список, у одиночной метки — её
-// обозначение.
+// обозначение, у комментария — его текст.
+//
+// Плашка комментария — это его подпись, и второго текста у метки нет: поле
+// «Комментарий» (`mark.original`) и плашка — одно и то же. Пустая плашка
+// показывает название поля, как пустое поле ввода: иначе комментарий без
+// текста стал бы невидимым и его нельзя было бы ни выделить, ни дописать, ни
+// удалить. О самой пустоте говорит `validate` — находкой, а не молчанием.
 function labelTextOf(project, target) {
+  if (markIsComment(target)) return markCommentText(target) || strings.marks.comment;
   return (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
+}
+
+// ——— плашка комментария ———————————————————————————————————————————————
+//
+// Плашка — прямоугольник со скруглёнными углами и текстом внутри (G163).
+// Размер — по тексту, но с потолком: заказчик пишет на плане замечание, а не
+// письмо, и длинный комментарий одной строкой закрыл бы полплана. Поэтому
+// строка переносится по словам на `COMMENT_PLATE_CHARS` знаков, а выше
+// `COMMENT_PLATE_ROWS` строк текст обрезается многоточием — целиком он
+// по-прежнему в поле и в карточке метки.
+//
+// Мера — знаки, а не пиксели, и это та же оценка, которой живут подписи
+// (`LABEL_CHAR_RATIO`): настоящей ширины текста здесь не измерить — `labelBox`
+// зовут и попадание по клику, и тесты, у которых холста нет.
+const COMMENT_PLATE_CHARS = 26;
+const COMMENT_PLATE_ROWS = 6;
+// Поля внутри плашки и высота строки — в долях кегля.
+const COMMENT_PLATE_PAD = 0.5;
+const COMMENT_PLATE_LINE = 1.25;
+// Скругление углов — в долях кегля, но не больше половины высоты плашки.
+const COMMENT_PLATE_RADIUS = 0.5;
+
+/**
+ * Текст плашки, разложенный по строкам. Перенос по словам; слово длиннее
+ * строки рубится, иначе плашка расползлась бы ради одного «ЩС-вводной-кабель».
+ */
+export function commentPlateLines(value, limit = COMMENT_PLATE_CHARS, rows = COMMENT_PLATE_ROWS) {
+  const source = String(value == null ? "" : value).trim();
+  if (!source) return [""];
+  const words = source.split(/\s+/);
+  const lines = [];
+  let line = "";
+  const push = () => {
+    lines.push(line);
+    line = "";
+  };
+  for (const word of words) {
+    let rest = word;
+    // Длинное слово рубится по месту: сперва добивается начатая строка, потом
+    // кусками по целой строке.
+    while (rest.length > limit) {
+      const room = limit - (line ? line.length + 1 : 0);
+      if (room <= 0) {
+        push();
+        continue;
+      }
+      line = (line ? line + " " : "") + rest.slice(0, room);
+      rest = rest.slice(room);
+      push();
+    }
+    if (!rest) continue;
+    if (!line) {
+      line = rest;
+      continue;
+    }
+    if (line.length + 1 + rest.length <= limit) {
+      line += " " + rest;
+      continue;
+    }
+    push();
+    line = rest;
+  }
+  if (line) push();
+  if (lines.length <= rows) return lines;
+  const kept = lines.slice(0, rows);
+  const last = kept[rows - 1];
+  kept[rows - 1] = (last.length >= limit ? last.slice(0, Math.max(0, limit - 1)) : last) + "…";
+  return kept;
+}
+
+/**
+ * Габарит плашки в тех же единицах, в каких дан кегль: `labelPlanBox` считает
+ * её в пикселях плана, `labelBoxIn` — в пикселях экрана. Одна функция на оба
+ * счёта намеренно: разойдись они, плашка рисовалась бы одного размера, а
+ * ловилась бы другого.
+ */
+function commentPlateSize(value, font) {
+  const lines = commentPlateLines(value);
+  const longest = lines.reduce((max, line) => Math.max(max, [...line].length), 0);
+  const pad = font * COMMENT_PLATE_PAD;
+  return {
+    lines,
+    width: Math.max(font, longest * font * LABEL_CHAR_RATIO) + pad * 2,
+    height: lines.length * font * COMMENT_PLATE_LINE + pad * 2,
+    pad,
+  };
 }
 
 // Ключ цели в раскладке. Группа и метка живут в разных пространствах
@@ -2335,6 +2452,9 @@ const LABEL_FILTER_ERROR = "label-layout-instead-of-filter";
 // живёт у его первой метки.
 export function labelAngleOf(project, target) {
   if (!target) return 0;
+  // Плашка комментария не поворачивается: вдоль стены пишут обозначение в две
+  // буквы, а не абзац текста в рамке. Ручку поворота у неё холст и не рисует.
+  if (markIsComment(target)) return 0;
   if (target.labelAngle === 90 || target.labelAngle === 0) return target.labelAngle;
   if (!target.markIds) return 0;
   const first = project.marks.find((mark) => mark.id === target.markIds[0]);
@@ -2377,15 +2497,21 @@ function labelBoxIn(project, scheme, target, state, layout) {
   const font = labelFontSize(state);
   const anchor = planToScreen(labelOrigin(project, target), scheme, state);
   const value = labelTextOf(project, target);
-  const width = Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
+  const plate = markIsComment(target) ? commentPlateSize(value, font) : null;
+  const width = plate ? plate.width : Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
   const place = labelPlaceOf(project, scheme, target, state, layout);
   return {
     text: value,
     x: anchor.x + place.dx * state.zoom,
     y: anchor.y + place.dy * state.zoom,
     width,
-    height: font * 1.2,
+    height: plate ? plate.height : font * 1.2,
     font,
+    // Плашка комментария: строки и поля внутри рамки — рисованию и попаданию
+    // по клику достаётся один и тот же габарит. У обычной подписи этих полей
+    // нет вовсе, и `plate: null` значит «рисуй как рисовал».
+    plate,
+    pointer: markPointer(target),
     // Смещение подписи в пикселях плана — в тех же единицах, что `labelOffset`
     // у метки. Отсюда его берёт перетаскивание: подпись, которую разводка
     // отодвинула, не прыгает обратно, когда за неё взялись мышью.
@@ -2400,7 +2526,7 @@ function labelBoxIn(project, scheme, target, state, layout) {
 // Где стоит подпись. Оттащенная руками — строго по своему смещению: его задал
 // пользователь, и трогать его нельзя. Остальные — по месту из раскладки.
 function labelPlaceOf(project, scheme, target, state, layout) {
-  const manual = labelOffsetOf(project, target);
+  const manual = labelFixedPlace(project, target, labelPlanSizes(state));
   if (manual) return { dx: manual.dx, dy: manual.dy, row: 0, crowded: false };
   const place = layout.get(labelKeyOf(target));
   if (place) return place;
@@ -2587,12 +2713,16 @@ function labelPlanBox(project, scheme, target, sizes) {
   const reach = labelReach(project, target);
   const lead = labelLeadSide(project, scheme, target);
   const width = schemeWidth(scheme);
+  // Плашка комментария шире и выше строки: её габарит считает `commentPlateSize`
+  // по тем же знакам и тому же кеглю. Раскладке она от этого не чужая — место
+  // ей ищется тем же перебором, и соседние подписи её обходят.
+  const plate = markIsComment(target) ? commentPlateSize(text, sizes.font) : null;
   return {
     text,
     x: origin.x * width,
     y: origin.y * schemeHeight(scheme),
-    width: Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
-    height: sizes.font * 1.2,
+    width: plate ? plate.width : Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
+    height: plate ? plate.height : sizes.font * 1.2,
     angle: labelAngleOf(project, target),
     reach: { left: reach.left * width, right: reach.right * width },
     lead,
@@ -2644,7 +2774,7 @@ function labelPlaceAll(project, scheme, filter, sizes) {
     .map((target) => ({
       key: labelKeyOf(target),
       box: labelPlanBox(project, scheme, target, sizes),
-      offset: labelOffsetOf(project, target),
+      offset: labelFixedPlace(project, target, sizes),
     }))
     .filter((entry) => entry.box.text);
   entries.sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
@@ -2759,6 +2889,10 @@ function turnHandleAt(rect, view) {
 
 export function labelTurnHandle(project, scheme, target, view, filter) {
   if (!target) return null;
+  // У плашки комментария поворота нет (`labelAngleOf` держит её лежачей), и
+  // ручки у неё быть не должно: мёртвая кнопка хуже отсутствующей. Место
+  // первой ручки занимает переключатель указателя — см. `labelLeaderHandle`.
+  if (markIsComment(target)) return null;
   const box = labelBox(project, scheme, target, view, filter);
   if (!box.text) return null;
   return turnHandleAt(labelBounds(box), view);
@@ -2799,6 +2933,12 @@ export function labelLeaderHolder(target) {
  * правила — и `true`, и `false`.
  */
 export function labelLeaderShown(project, target, box) {
+  // У комментария поводок — это указатель, и спорить с ним нечему: «но
+  // соединительная линия между точкой и подписью чтобы была всегда и более
+  // очевидная». Включён указатель — линия есть всегда, выключен — плашка стоит
+  // на точке, и соединять нечего. Перебивка поводка (`labelLeader`) тут не
+  // спрашивается нарочно: второго выключателя у одной линии быть не должно.
+  if (markIsComment(target)) return markPointer(target);
   const holder = labelLeaderHolder(target);
   const mark = holder ? findMark(project, holder) : null;
   const forced = markLabelLeader(mark);
@@ -2810,6 +2950,14 @@ export function labelLeaderShown(project, target, box) {
 // угла подписи. Считается от ручки поворота, чтобы ряд не разъехался, когда у
 // поворота поменяется радиус.
 export function labelLeaderHandle(project, scheme, target, view, filter) {
+  // У комментария эта кнопка одна — она включает указатель, — и стоит она на
+  // месте первой ручки: ряда из двух у плашки нет, а дырка от поворота
+  // читалась бы как пропавшая кнопка.
+  if (markIsComment(target)) {
+    const box = labelBox(project, scheme, target, view, filter);
+    if (!box.text) return null;
+    return turnHandleAt(labelBounds(box), view);
+  }
   const turn = labelTurnHandle(project, scheme, target, view, filter);
   if (!turn) return null;
   return { x: turn.x + turn.r * 2.35, y: turn.y, r: turn.r };
@@ -3363,6 +3511,14 @@ export function hitTest(project, scheme, point, view, filter, extra = 0) {
       // Подпись блока выбирает первую из тех меток, что в ней перечислены:
       // под фильтром скрытая метка в подписи не стоит и выбираться не должна.
       const markId = target.markIds ? labelMemberIds(target)[0] : target.id;
+      // Плашка без указателя — это и есть метка: отдельной подписи у
+      // комментария нет, и тащить её от своей точки некуда — точка пришита к
+      // плашке. Поэтому попадание в неё — `mark`, и ведение двигает весь
+      // комментарий, как двигают розетку. С указателем плашка и точка живут
+      // раздельно, и плашка снова обычная подпись: её таскают поводком.
+      if (box.plate && !box.pointer) {
+        return { markId, part: "mark", groupId: null, index: 0 };
+      }
       return { markId, part: "label", groupId: target.markIds ? target.id : null, index: 0 };
     }
   }
@@ -3428,6 +3584,15 @@ export function hitHandle(scheme, mark, point, view, extra = 0) {
 // вплотную к метке и так видно, чья она.
 function drawLabelLeader(ctx, anchor, box, color) {
   if (!box.text) return;
+  // Указатель комментария — тот же поводок, но заметный: не волосяная линия в
+  // полпрозрачности, а сплошная черта со стрелкой в точку. Слова заказчика:
+  // «соединительная линия между точкой и подписью чтобы была всегда и более
+  // очевидная». Рисуется он тем же проходом и тем же кодом — второго
+  // механизма у плашки нет.
+  if (box.plate) {
+    drawCommentPointer(ctx, anchor, box, color);
+    return;
+  }
   ctx.save();
   ctx.strokeStyle = color;
   ctx.globalAlpha = 0.5;
@@ -3438,6 +3603,106 @@ function drawLabelLeader(ctx, anchor, box, color) {
   ctx.lineTo(
     rect.x + rect.width < anchor.x ? rect.x + rect.width : Math.max(rect.x, Math.min(anchor.x, rect.x + rect.width)),
     anchor.y < rect.y ? rect.y : rect.y + rect.height,
+  );
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Ближняя к точке сторона плашки: откуда тянуть указатель, чтобы он не лёг
+// поверх текста. Та же выжимка, что у обычного поводка, только вынесена —
+// её спрашивают и черта, и стрелка.
+function commentPlateEdge(anchor, rect) {
+  return {
+    x: Math.max(rect.x, Math.min(anchor.x, rect.x + rect.width)),
+    y: Math.max(rect.y, Math.min(anchor.y, rect.y + rect.height)),
+  };
+}
+
+// Указатель: черта от края плашки к точке и стрелка в самой точке. Стрелка
+// ровно на точке, а не у плашки: показывает она место на плане, и упереться
+// обязана в него.
+function drawCommentPointer(ctx, anchor, box, color) {
+  const rect = labelBounds(box);
+  const from = commentPlateEdge(anchor, rect);
+  const dx = anchor.x - from.x;
+  const dy = anchor.y - from.y;
+  const span = Math.hypot(dx, dy);
+  const head = Math.max(4, box.font * 0.7);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineCap = "round";
+  ctx.lineWidth = Math.max(1.5, box.font * 0.16);
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(anchor.x, anchor.y);
+  ctx.stroke();
+  // Выродившийся указатель (плашка накрыла свою точку) стрелки не получает:
+  // направления у него нет, и стрелка показала бы случайную сторону.
+  if (span > head * 0.5) drawLinkArrow(ctx, anchor, dx, dy, head);
+  ctx.restore();
+}
+
+// Скруглённый прямоугольник своим путём, а не `ctx.roundRect`: тот есть не во
+// всяком движке, а молча пропавшая рамка плашки — это пропавший комментарий.
+function platePath(ctx, rect, radius) {
+  const r = Math.max(0, Math.min(radius, rect.width / 2, rect.height / 2));
+  ctx.beginPath();
+  ctx.moveTo(rect.x + r, rect.y);
+  ctx.lineTo(rect.x + rect.width - r, rect.y);
+  ctx.arcTo(rect.x + rect.width, rect.y, rect.x + rect.width, rect.y + r, r);
+  ctx.lineTo(rect.x + rect.width, rect.y + rect.height - r);
+  ctx.arcTo(rect.x + rect.width, rect.y + rect.height, rect.x + rect.width - r, rect.y + rect.height, r);
+  ctx.lineTo(rect.x + r, rect.y + rect.height);
+  ctx.arcTo(rect.x, rect.y + rect.height, rect.x, rect.y + rect.height - r, r);
+  ctx.lineTo(rect.x, rect.y + r);
+  ctx.arcTo(rect.x, rect.y, rect.x + r, rect.y, r);
+  ctx.closePath();
+}
+
+/**
+ * Плашка комментария: рамка со скруглёнными углами, внутри — строки текста.
+ *
+ * Подложка сплошная белая, а не обводка по буквам, как у подписи: внутри
+ * плашки лежит целый абзац, и белая обводка каждой буквы на плане читалась бы
+ * грязью. Пустая плашка (текст — название поля) рисуется приглушённо: так
+ * видно, что это заготовка, а не надпись.
+ */
+function drawCommentPlate(ctx, box, color, selected) {
+  const rect = labelBounds(box);
+  const empty = box.text === strings.marks.comment;
+  ctx.save();
+  platePath(ctx, rect, box.font * COMMENT_PLATE_RADIUS);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, box.font * 0.1);
+  if (empty) ctx.setLineDash([box.font * 0.4, box.font * 0.3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = `${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = color;
+  if (empty) ctx.globalAlpha = 0.55;
+  const step = box.font * COMMENT_PLATE_LINE;
+  const lines = box.plate.lines;
+  lines.forEach((line, index) => {
+    ctx.fillText(line, rect.x + box.plate.pad, rect.y + box.plate.pad + step * (index + 0.5));
+  });
+  ctx.restore();
+  if (!selected) return;
+  // Выделение рисуется вокруг плашки, а не вокруг точки: точка под плашкой, и
+  // обводка по ней была бы не видна из-под подложки.
+  ctx.save();
+  ctx.strokeStyle = "#0969da";
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 2;
+  const gap = Math.max(2, box.font * 0.25);
+  platePath(
+    ctx,
+    { x: rect.x - gap, y: rect.y - gap, width: rect.width + gap * 2, height: rect.height + gap * 2 },
+    box.font * COMMENT_PLATE_RADIUS + gap,
   );
   ctx.stroke();
   ctx.restore();
@@ -3499,8 +3764,12 @@ function paintLabel(ctx, box, runs, x, y) {
   }
 }
 
-function drawLabel(ctx, box, color, runs) {
+function drawLabel(ctx, box, color, runs, selected) {
   if (!box.text) return;
+  if (box.plate) {
+    drawCommentPlate(ctx, box, color, selected);
+    return;
+  }
   const parts = runs && runs.map((run) => run.text).join("") === box.text ? runs : null;
   ctx.save();
   ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
@@ -3530,6 +3799,24 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected) {
   const style = styleOf(project, mark.typeId);
   const radius = markRadius(view);
   const screen = mark.points.map((point) => planToScreen(point, scheme, view));
+  // Комментарий рисуется плашкой, а не знаком (G163), и плашку рисует проход
+  // подписей. Здесь остаётся только точка, в которую смотрит указатель: без
+  // указателя плашка стоит на ней сама, и рисовать под ней нечего.
+  if (markIsComment(mark)) {
+    if (!markPointer(mark)) return;
+    const at = screen[0];
+    drawShape(ctx, "circle-fill", at.x, at.y, Math.max(2, radius * 0.4), style.color);
+    if (!selected) return;
+    ctx.save();
+    ctx.strokeStyle = "#0969da";
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   if (mark.kind === "line" && screen.length > 1) {
     strokeStyledLine(ctx, screen, mark.closed, style.lineStyle, radius, style.color);
     for (const point of screen) drawShape(ctx, "circle", point.x, point.y, Math.max(2, radius * 0.45), style.color);
@@ -3681,7 +3968,9 @@ function legendRows(project, scheme, filter) {
   const used = new Set(visibleMarks(project, scheme, filter).map((mark) => mark.typeId));
   const rows = [];
   for (const group of typesInOrder(project)) {
-    for (const type of group.types) {
+    // Комментариев в легенде нет (G167): легенда объясняет знаки, а у плашки
+    // знака нет — она читается сама.
+    for (const type of listedTypes(project, group.types)) {
       if (!used.has(type.id)) continue;
       rows.push({ code: type.code, name: type.name, category: group.category.name, ...styleOf(project, type.id) });
     }
@@ -3792,12 +4081,17 @@ export function drawScheme(ctx, {
       // Поводок: правило раскладки, если метка не сказала иначе. Перебивка
       // лежит в объекте, поэтому одинаково видна на экране, в PNG и в печати.
       leader: labelLeaderShown(project, target, box),
+      // Выделение плашки рисуется вместе с ней: точка комментария лежит под
+      // подложкой, и обводка вокруг точки из-под неё не видна.
+      selected: target.markIds
+        ? labelMemberIds(target).some((id) => selected.has(id))
+        : selected.has(target.id),
     };
   });
   for (const item of labels) {
     if (item.leader) drawLabelLeader(ctx, item.anchor, item.box, item.color);
   }
-  for (const item of labels) drawLabel(ctx, item.box, item.color, item.runs);
+  for (const item of labels) drawLabel(ctx, item.box, item.color, item.runs, item.selected);
   if (draft) drawDraft(ctx, scheme, draft, state, draftColor || "#0969da", draftLineStyle);
   // Направляющие без черновика: вершину правят той же рукой, что рисуют, и
   // подсказки при этом те же. Черновика в этот момент нет, а пунктир нужен.

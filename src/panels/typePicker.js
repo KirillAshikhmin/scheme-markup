@@ -15,6 +15,7 @@
 import { strings, text } from "../strings.js";
 import { uiEl, uiButton, uiModal } from "./ui.js";
 import {
+  MARK_KIND_COMMENT,
   addType,
   codeProblem,
   matchTypeExactly,
@@ -119,15 +120,28 @@ function pickerMove(box, row, dx, dy) {
   if (next) next.focus();
 }
 
+// Виды, внутри которых окно сужает справочник. Комментарий здесь наравне с
+// точкой и линией: плашку меняют только на плашку — текст у неё есть, а у
+// знака его негде взять (`changeMarkType` стережёт то же правило).
+const PICKER_KINDS = ["point", "line", MARK_KIND_COMMENT];
+
+// Чем окно объясняет сужение. Строка одна на вид — иначе пользователь видел бы
+// короткий список и не знал, чего в нём не хватает.
+function pickerKindNote(kind) {
+  if (kind === "line") return strings.picker.onlyLine;
+  if (kind === MARK_KIND_COMMENT) return strings.picker.onlyComment;
+  return strings.picker.onlyPoint;
+}
+
 // Смена типа у метки идёт внутри её вида: линии — линейные типы, точке —
-// точечные. Окно получает вид в `options.kind` и оставляет только свои типы;
+// точечные, комментарию — комментарии. Окно получает вид в `options.kind` и оставляет только свои типы;
 // постановка новой метки вид не задаёт и видит справочник целиком.
 //
 // Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
 // формата поля нет вовсе. Категория, в которой не осталось ни одного типа
 // нужного вида, из окна уходит — пустой заголовок держал бы колонку зря.
 export function pickerGroupsOfKind(project, groups, kind) {
-  if (kind !== "point" && kind !== "line") return groups;
+  if (!PICKER_KINDS.includes(kind)) return groups;
   return groups
     .map((group) => ({ ...group, types: group.types.filter((type) => typeKindOf(project, type.id) === kind) }))
     .filter((group) => group.types.length > 0);
@@ -299,13 +313,9 @@ export function openTypePicker(project, options = {}) {
     });
 
     renderList();
-    const note =
-      options.kind === "line" || options.kind === "point"
-        ? uiEl("p", {
-            class: "picker__note",
-            text: options.kind === "line" ? strings.picker.onlyLine : strings.picker.onlyPoint,
-          })
-        : null;
+    const note = PICKER_KINDS.includes(options.kind)
+      ? uiEl("p", { class: "picker__note", text: pickerKindNote(options.kind) })
+      : null;
     body.replaceChildren(...[search, note, box, createBox, error].filter(Boolean));
     modal = uiModal({
       title: options.title || strings.picker.title,

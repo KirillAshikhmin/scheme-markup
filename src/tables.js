@@ -18,6 +18,8 @@ import {
   channelOrder,
   findMark,
   findRoom,
+  listedMarks,
+  listedTypes,
   findType,
   labelOf,
   markControlChannel,
@@ -95,14 +97,23 @@ function tableTypeOrder(project) {
   return order;
 }
 
-// Метки, прошедшие фильтр, по всем схемам объекта — или по одной, если
-// в фильтре назван `schemeId` (панель зовёт так для «только текущая схема»).
+/**
+ * Метки, прошедшие фильтр, по всем схемам объекта — или по одной, если
+ * в фильтре назван `schemeId` (панель зовёт так для «только текущая схема»).
+ *
+ * **Комментариев здесь нет вовсе** (G167). Слова заказчика: «В список меток в
+ * таблицу и т.д. эти комментарии не должны попадать». Отрезаются они в одном
+ * месте — отсюда кормятся все листы (метки, связи, оборудование) и все
+ * подсчёты вместе с подвалом «Итого»: разойдись такие фильтры, подвал считал
+ * бы одно, а строки показывали другое. Комментарий — подпись к чертежу, а не
+ * позиция, которую закупают и монтируют.
+ */
 function tableVisibleMarks(project, filter) {
   const only = filter && filter.schemeId ? String(filter.schemeId) : null;
   const marks = [];
   for (const scheme of schemesInOrder(project)) {
     if (only && scheme.id !== only) continue;
-    marks.push(...visibleMarks(project, scheme, filter));
+    marks.push(...listedMarks(visibleMarks(project, scheme, filter)));
   }
   return marks;
 }
@@ -854,6 +865,11 @@ export function typesTable(project) {
   const groups = [];
   if (project) {
     for (const { category, types } of typesInOrder(project)) {
+      // Комментарии в справочник листа не идут (G167): колонка знака у них
+      // пустая — на плане рисуется плашка с текстом, — а «Точек» считала бы
+      // метки, которых нет ни в одном другом листе.
+      const listed = listedTypes(project, types);
+      if (listed.length === 0) continue;
       const color = category.color || null;
       const named = colorNameHex(color);
       groups.push({
@@ -861,7 +877,7 @@ export function typesTable(project) {
         title: named ? text("tables.groupColor", { title: category.name, color: named }) : category.name,
         color,
         level: 1,
-        rows: types.map((type) => {
+        rows: listed.map((type) => {
           const style = styleOf(project, type.id);
           return {
             id: type.id,

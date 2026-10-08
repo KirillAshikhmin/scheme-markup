@@ -299,12 +299,21 @@ export function uiConfirm({ title, message, confirmLabel }) {
   });
 }
 
-export function uiPrompt({ title, value, placeholder, submitLabel }) {
+/**
+ * Окно с одним полем. `null` в ответе значит «отказались».
+ *
+ * Пустая строка по умолчанию — тот же отказ: окно спрашивают про имя схемы,
+ * про код типа, про расстояние — пустых ответов там не бывает. `allowEmpty`
+ * включает обратное: пустой ответ — это ответ. Так правится текст
+ * комментария (таск 116) — очистить плашку человек имеет право, и делать это
+ * удалением всей метки он не обязан.
+ */
+export function uiPrompt({ title, value, placeholder, submitLabel, allowEmpty }) {
   return new Promise((resolve) => {
     let modal;
     const done = (result) => {
       modal.close();
-      resolve(result || null);
+      resolve(allowEmpty ? (result === null ? null : result) : result || null);
     };
     const input = uiEl("input", {
       class: "ui-input",

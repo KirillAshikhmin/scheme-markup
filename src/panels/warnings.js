@@ -61,6 +61,9 @@ export const WARNING_TARGETS = {
   markWithoutRoom: "mark",
   emptyPoints: "mark",
   shortLine: "mark",
+  // Пустая плашка ведёт к самому комментарию: его правят на плане — в списке
+  // меток комментариев нет (G167).
+  commentEmpty: "mark",
   controlsMissing: "mark",
   controlsChannelMissing: "mark",
   controlsChannelBeyond: "mark",

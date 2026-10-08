@@ -244,10 +244,10 @@ test("общая база приносит типы тихо, а открыты�
   assert.ok(asked[0].message.includes("НТ") && asked[0].message.includes("ЛЮ"));
 });
 
-test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок семь типов", () => {
+test("стартовый справочник — справочник заказчика: тринадцать категорий и сорок восемь типов", () => {
   const template = defaultTemplate();
-  assert.equal(template.categories.length, 12);
-  assert.equal(template.markTypes.length, 47);
+  assert.equal(template.categories.length, 13);
+  assert.equal(template.markTypes.length, 48);
 
   // prettier-ignore
   assert.deepEqual(
@@ -265,6 +265,8 @@ test("стартовый справочник — справочник зака�
       ["Датчики", "#164E63", "circle-ring"],
       ["Щит", "#6E4B1F", "square-bolt"],
       ["Сантехника", "#E80098", "drop-dot"],
+      // Комментарии — не железка: чернильный цвет и плашка вместо знака.
+      ["Комментарии", "#111418", "rect-horizontal"],
     ],
   );
 
@@ -275,7 +277,7 @@ test("стартовый справочник — справочник зака�
     ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
      "ПКШ", "ЛЮ", "П", "ПП", "Н", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
      "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
-     "КВ", "ПЛ", "ПЗ", "КАМ"],
+     "КВ", "ПЛ", "ПЗ", "КАМ", "Коммент"],
   );
   // Названия — данные заказчика, поэтому пришпилены целиком, вместе с его
   // заглавными буквами посреди названия и сокращением «эл приводом».
@@ -327,6 +329,7 @@ test("стартовый справочник — справочник зака�
     ПЛ: "Подсветка лестницы",
     ПЗ: "Подсветка зеркала",
     КАМ: "Камера",
+    Коммент: "Комментарий",
   });
   assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
 
@@ -335,8 +338,10 @@ test("стартовый справочник — справочник зака�
   assert.deepEqual(
     template.markTypes.filter((t) => t.shape === null).map((t) => t.code),
     // prettier-ignore
+    // Последний в списке — комментарий: формы у него нет и быть не может,
+    // на плане он рисуется плашкой с текстом, а не знаком.
     ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "Д", "КШ", "ППл", "ПКШ", "ЛЮ", "СУШ",
-     "Бр", "ДЭП", "РЕС", "ВР", "ПЛ"],
+     "Бр", "ДЭП", "РЕС", "ВР", "ПЛ", "Коммент"],
   );
   // Выключатели — каждый своим квадратом: клавиши на знаке считают глазами.
   // Порядок здесь — порядок справочника заказчика, а не порядок числа клавиш.
@@ -363,8 +368,8 @@ test("новый объект создаётся из стартового сп�
   // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
   // вид типа — точка или линия.
   assert.equal(project.formatVersion, 4);
-  assert.equal(project.categories.length, 12);
-  assert.equal(project.markTypes.length, 47);
+  assert.equal(project.categories.length, 13);
+  assert.equal(project.markTypes.length, 48);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -1421,10 +1426,10 @@ test("общая база: пустому справочнику предлаг�
     offer.map((group) => group.category.name),
     [
       "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
-      "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
+      "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника", "Комментарии",
     ],
   );
-  assert.equal(offeredCodes(offer).length, 47);
+  assert.equal(offeredCodes(offer).length, 48);
   assert.equal(offer[0].types[0].code, "Т");
   assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
 
@@ -1532,7 +1537,7 @@ test("сохранённый шаблон побеждает встроенны�
     offer.map((group) => group.category.name),
     [
       "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
-      "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника", "Шторы",
+      "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника", "Комментарии", "Шторы",
     ],
   );
   const light = offer.find((group) => group.category.name === "Свет");
@@ -1828,8 +1833,10 @@ test("сантехника — своя категория шаблона с в�
   const plumbing = template.categories.find((category) => category.name === "Сантехника");
   assert.ok(plumbing, "категории сантехники нет в шаблоне");
   assert.equal(plumbing.shape, "drop-dot", "у категории не тот знак");
-  // Стоит последней: прежние категории не перетасованы, привычный порядок цел.
-  assert.equal(template.categories[template.categories.length - 1].name, "Сантехника");
+  // Стоит предпоследней: прежние категории не перетасованы, привычный порядок
+  // цел, а после неё встали «Комментарии» — они не железка и идут особняком.
+  assert.equal(template.categories[template.categories.length - 2].name, "Сантехника");
+  assert.equal(template.categories[template.categories.length - 1].name, "Комментарии");
 
   const types = template.markTypes.filter((type) => type.categoryId === plumbing.id);
   assert.deepEqual(

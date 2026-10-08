@@ -12,6 +12,7 @@ import {
   colorsInUse,
   deleteRoom,
   findRoom,
+  listedMarks,
   outlinesInOrder,
   roomsInOrder,
   updateRoom,
@@ -53,8 +54,18 @@ export function roomsEnsure(project, name) {
   return { project: created.project, room: created.room };
 }
 
+/**
+ * Сколько меток у комнаты. Комментарии не считаются (G167): число читают как
+ * «сколько тут позиций», а плашка — надпись на чертеже.
+ *
+ * Помещение комментарию при этом проставляется, как всем, — по контуру. Это
+ * нужно фильтру: сузив список комнатой, человек работает над ней, и
+ * замечания, которые он сам же к этой комнате и написал, должны остаться на
+ * плане. В карточке комментария помещение не показывается — там и без него
+ * видно, где плашка стоит.
+ */
 export function roomsUsage(project, roomId) {
-  return project.marks.filter((mark) => mark.roomId === roomId).length;
+  return listedMarks(project.marks).filter((mark) => mark.roomId === roomId).length;
 }
 
 // Строки списка: комната, сколько у неё меток и есть ли контур на этой схеме.

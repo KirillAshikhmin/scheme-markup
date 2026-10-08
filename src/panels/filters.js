@@ -4,13 +4,26 @@
 // рисует холст, по нему же строится список сбоку и легенда в выгрузке.
 // Поэтому здесь только чистые функции над ним — что видно, что отмечено и во
 // что превращается щелчок по галочке; сама панель собирается из них ниже.
-import { findScheme, findType, labelOf, roomsInOrder, styleOf, typesInOrder } from "../model.js";
+import { findScheme, findType, labelOf, listedMarks, roomsInOrder, styleOf, typesInOrder } from "../model.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiEl } from "./ui.js";
 import { visibleMarks } from "../render.js";
 
-// Порядок строк списка — порядок справочника: категории по своему order, типы
-// внутри, метки по номеру. Тот же обход, что у легенды и таблиц.
+/**
+ * Строки списка меток: порядок справочника — категории по своему order, типы
+ * внутри, метки по номеру. Тот же обход, что у легенды и таблиц.
+ *
+ * **Комментариев в списке нет** (G167): «В список меток в таблицу и т.д. эти
+ * комментарии не должны попадать». Отрезаются они здесь, в единственном
+ * источнике строк списка, — отсюда же их не видят окно «Чем управляет» и
+ * счётчик «Показано N из M» (панель меток считает его по этим же строкам).
+ * Правится комментарий не списком, а выделением на плане: карточка метки и
+ * кнопка «Изменить текст» в ней.
+ *
+ * На плане комментарий при этом живёт обычной жизнью: его прячет та же
+ * галочка типа в дереве фильтров, и тот же поиск по строке сужает план вместе
+ * со списком.
+ */
 export function filtersMarkRows(project, schemeId, filter) {
   const scheme = project ? findScheme(project, schemeId) : null;
   if (!scheme) return [];
@@ -25,7 +38,7 @@ export function filtersMarkRows(project, schemeId, filter) {
     }
   }
   const last = index;
-  return visibleMarks(project, scheme, filter)
+  return listedMarks(visibleMarks(project, scheme, filter))
     .map((mark) => ({
       mark,
       type: findType(project, mark.typeId),

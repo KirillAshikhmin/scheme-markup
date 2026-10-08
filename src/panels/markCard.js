@@ -18,11 +18,23 @@
 // таски 79 и 84). Правило от раскладки не зависит, и в просмотре работает так
 // же — карточке остаётся только назвать связи словами.
 import { PANEL_IDS, layoutAllows, registerPanel } from "../app.js";
-import { findMark, findRoom, findScheme, findType, labelOf, styleOf } from "../model.js";
+import {
+  MARK_KINDS,
+  findMark,
+  findRoom,
+  findScheme,
+  findType,
+  labelOf,
+  markCommentText,
+  markIsComment,
+  markPointer,
+  styleOf,
+} from "../model.js";
+import { canvasEditCommentText } from "../canvas.js";
 import { planToScreen, shapeIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings } from "../strings.js";
-import { uiEl, uiIcon, uiIconButton } from "./ui.js";
+import { uiButton, uiEl, uiIcon, uiIconButton } from "./ui.js";
 import { marksControllerIndex, marksLinkedText, marksLinkedTitle, marksRowModel } from "./marks.js";
 
 // Отступ между меткой и верхним краем карточки: метка должна остаться видна
@@ -99,6 +111,28 @@ export function markCardModel(project, markId) {
     if (value === null || value === undefined || value === "") return;
     rows.push({ label, value: String(value), title: title || "" });
   };
+  // Комментарий — короткая карточка: текст плашки и указатель, и больше
+  // ничего. Помещение, размеры, связи и оборудование к нему не относятся (их
+  // и в модели ему не завести), а длины у плашки нет — в колонку метров и в
+  // подсчёты метража она не идёт.
+  //
+  // Эта карточка — **единственный** способ добраться до комментария: в списке
+  // меток его нет (G167). Поэтому рядом с текстом стоит кнопка правки, и она
+  // же открывается двойным кликом по плашке на плане.
+  if (markIsComment(mark)) {
+    add(strings.marks.comment, markCommentText(mark));
+    return {
+      id: mark.id,
+      label: view.label,
+      code: view.code,
+      typeName: view.typeName,
+      style: view.style,
+      kind: mark.kind,
+      comment: true,
+      pointer: markPointer(mark),
+      rows,
+    };
+  }
   add(strings.marks.room, room ? room.name : "");
   add(strings.marks.location, fields.location);
   add(strings.marks.comment, fields.original);
@@ -122,7 +156,9 @@ export function markCardModel(project, markId) {
     code: view.code,
     typeName: view.typeName,
     style: view.style,
-    kind: mark.kind === "line" ? "line" : "point",
+    kind: MARK_KINDS.includes(mark.kind) ? mark.kind : "point",
+    comment: false,
+    pointer: false,
     rows,
   };
 }
@@ -212,7 +248,7 @@ function mountMarkCard(host, api) {
       headButton,
     ]);
     const body = uiEl("div", { class: "mark-card__body" });
-    if (model.rows.length === 0) {
+    if (model.rows.length === 0 && !model.comment) {
       body.append(uiEl("p", { class: "mark-card__empty", text: strings.markCard.empty }));
     }
     for (const row of model.rows) {
@@ -220,6 +256,26 @@ function mountMarkCard(host, api) {
         uiEl("div", { class: "mark-card__row", title: row.title }, [
           uiEl("span", { class: "mark-card__name", text: row.label }),
           uiEl("span", { class: "mark-card__value", text: row.value }),
+        ]),
+      );
+    }
+    // Кнопка правки текста — только у комментария и только в правке: в
+    // просмотре карточка ничего не меняет. На компьютере карточка сквозная для
+    // мыши (`pointer-events: none`), но кнопки в ней клик ловят — ради них
+    // исключение и сделано.
+    if (model.comment && layoutAllows("editMarks", state.layout)) {
+      body.append(
+        uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
+          uiButton(strings.markCard.editComment, {
+            class: "ui-btn mark-card__edit",
+            title: strings.markCard.editCommentHint,
+            on: { click: () => canvasEditCommentText(model.id) },
+          }),
+          uiEl("span", {
+            class: "mark-card__value mark-card__pointer",
+            text: model.pointer ? strings.markCard.pointerOn : strings.markCard.pointerOff,
+            title: strings.markCard.pointerHint,
+          }),
         ]),
       );
     }
