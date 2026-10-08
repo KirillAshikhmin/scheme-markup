@@ -10,7 +10,10 @@
 .print-doc {
   background: #ffffff;
   color: #1f2328;
-  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  /* Лист печатается чертёжным шрифтом — тем же, что подписи на плане: таблица
+     и схема приходят монтажнику одной парой. Семейство берётся из `--font-gost`,
+     своего у листа нет. */
+  font: 13px/1.45 var(--font-gost);
   padding: 4px 2px 12px;
 }
 
