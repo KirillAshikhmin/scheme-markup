@@ -3329,6 +3329,14 @@
     max-height: 96vh;
     object-fit: contain;
   }
+
+  /* Листы по ГОСТ: по листу на страницу. Миллиметры при такой печати всё
+     равно не свои — браузер ужимает лист под свои поля, и выверяют линейкой
+     скачанный PNG, напечатанный «как есть». Диалог об этом говорит. */
+  .print-doc--sheet + .print-doc--sheet {
+    break-before: page;
+    page-break-before: always;
+  }
 }
 
 /* Чертёжный шрифт ГОСТ тип А — отдельным файлом рядом со страницей, а не
@@ -4525,6 +4533,7 @@ const strings = {
     markSizes: "размеры метки",
     replaceImage: "замена плана",
     editImage: "правка плана",
+    stamp: "данные для штампа",
     scaleSet: "масштаб плана",
     scaleClear: "снятие масштаба плана",
     compact: "уплотнение нумерации",
@@ -5527,6 +5536,55 @@ const strings = {
     busy: "Готовим файл…",
     tooBig: "Слишком большая картинка — уменьшите множитель",
     failed: "Не удалось собрать файл",
+  },
+  // Лист по ГОСТ Р 21.1101-2013 (СПДС): рамка, основная надпись, данные штампа.
+  // Постоянные надписи форм (`labels`) напечатаны в самом стандарте и меняться
+  // не могут — они здесь, потому что это видимый текст, а не потому, что их
+  // правят.
+  gost: {
+    sheet: "Лист по ГОСТ",
+    sheetHint: "Рамка и основная надпись по ГОСТ Р 21.1101-2013 (СПДС)",
+    format: "Формат листа",
+    formatAuto: "Подобрать",
+    orientationPortrait: "книжная",
+    orientationLandscape: "альбомная",
+    // Подпись размера листа в диалоге: формат, ориентация, пиксели, миллиметры.
+    size: "{format}, {orientation} · {width} × {height} px · {mmWidth} × {mmHeight} мм при {dpi} dpi",
+    scaleValue: "М 1:{value}",
+    noScale: "Без масштаба",
+    // Калибровки нет — масштаба на листе нет тоже, и это говорится вслух:
+    // молча написать «1:100» значило бы соврать линейке.
+    noScaleHint: "Масштаб схемы не задан — в штампе будет «Без масштаба». Откалибруйте план по отрезку.",
+    tooSmall: "На бумаге подписи мельче 2,5 мм — на листе их не прочитать. Возьмите формат крупнее или уменьшите план.",
+    pages: "Листов: {count}",
+    stampButton: "Данные для штампа",
+    stampTitle: "Данные для штампа",
+    stampHint:
+      "Графы основной надписи. Пустые остаются пустыми — лист выходит и без них. Наименование объекта и чертежа берутся из имени объекта и схемы, лист и дата считаются при выгрузке.",
+    stampCode: "Обозначение (шифр) документа",
+    stampCodeHint: "например 2026-14-ЭОМ",
+    stampStage: "Стадия",
+    stampStageHint: "П — проектная, Р — рабочая",
+    stampAuthor: "Разработал",
+    stampChecker: "Проверил",
+    stampApprover: "Утвердил",
+    stampOrg: "Организация",
+    stampSaved: "Данные для штампа сохранены",
+    roleChecker: "Пров.",
+    roleApprover: "Утв.",
+    labels: {
+      changeNo: "Изм.",
+      changeArea: "Кол.уч.",
+      changeSheet: "Лист",
+      changeDoc: "№ док.",
+      changeSign: "Подп.",
+      changeDate: "Дата",
+      roleAuthor: "Разраб.",
+      roleControl: "Н. контр.",
+      stage: "Стадия",
+      sheet: "Лист",
+      sheets: "Листов",
+    },
   },
   colorPicker: {
     title: "Цвет",
@@ -8750,6 +8808,80 @@ function formatMeters(value) {
   return String(Math.round(number * 100) / 100).replace(".", ",");
 }
 
+// ——— данные для штампа ————————————————————————————————————————————————
+//
+// Графы основной надписи, которых в разметке не было: шифр документа, стадия,
+// фамилии и организация. Живут **у объекта** (а не у схемы): шифр и
+// организация одни на весь комплект, и переписывать их на каждом этаже
+// человек не должен.
+//
+// Поля нет у объектов прежней разметки, и `FORMAT_VERSION` ради него не
+// поднят: читают его только через `projectStamp`, который отсутствующее поле
+// отдаёт пустыми графами. Объект, который не трогали, открывается и
+// выгружается ровно как раньше — ни одного нового ключа в его `project.json`
+// не появляется (G68).
+const PROJECT_STAMP_FIELDS = ["code", "stage", "author", "checker", "approver", "org"];
+
+// Потолок строки графы: в ячейку шириной 50 мм и больше ста знаков не влезет,
+// а вставленный туда абзац раздул бы файл и ничего не показал.
+const PROJECT_STAMP_MAX = 120;
+
+function stampValue(raw) {
+  // Переводы строк из буфера обмена схлопываются в пробел: графа штампа —
+  // одна строка, а переносы в ней разложит уже отрисовка по ширине ячейки.
+  return String(raw == null ? "" : raw).replace(/\s+/g, " ").trim().slice(0, PROJECT_STAMP_MAX);
+}
+
+/**
+ * Данные штампа объекта: все графы строками, незаполненные — пустые.
+ * Читать `project.stamp` самому нельзя: у объекта прежней разметки поля нет
+ * вовсе, а мусор (число, строка вместо объекта) здесь же становится пустыми
+ * графами — лист выйдет, просто без этих надписей.
+ */
+function projectStamp(project) {
+  const raw = project && project.stamp && typeof project.stamp === "object" && !Array.isArray(project.stamp)
+    ? project.stamp
+    : {};
+  const stamp = {};
+  for (const field of PROJECT_STAMP_FIELDS) stamp[field] = stampValue(raw[field]);
+  return stamp;
+}
+
+// Заполнена ли хоть одна графа. Нужно диалогу и подсказке: пустой штамп — это
+// не ошибка, но сказать «графы не заполнены» честнее, чем промолчать.
+function projectHasStamp(project) {
+  const stamp = projectStamp(project);
+  return PROJECT_STAMP_FIELDS.some((field) => stamp[field] !== "");
+}
+
+/**
+ * Правка данных штампа. Пустые графы в объекте не хранятся, а когда пустыми
+ * стали все — поле `stamp` **убирается**: объект возвращается ровно в то
+ * состояние, в котором был до заполнения, и два одинаковых файла снова
+ * сливаются в «ничего не изменилось».
+ */
+function setProjectStamp(project, patch = {}) {
+  const before = projectStamp(project);
+  const next = { ...before };
+  for (const field of PROJECT_STAMP_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) next[field] = stampValue(patch[field]);
+  }
+  const stamp = {};
+  for (const field of PROJECT_STAMP_FIELDS) {
+    if (next[field] !== "") stamp[field] = next[field];
+  }
+  const filled = Object.keys(stamp).length > 0;
+  // Правка, ничего не изменившая, объект не трогает: иначе «Сохранить» в окне
+  // без единой правки переписывало бы время объекта и ломало сравнение файлов.
+  const same = PROJECT_STAMP_FIELDS.every((field) => next[field] === before[field]);
+  if (same) return { project, stamp: next, changed: false };
+  if (!filled) {
+    const { stamp: dropped, ...rest } = project;
+    return { project: withProject(rest, {}), stamp: next, changed: true };
+  }
+  return { project: withProject(project, { stamp }), stamp: next, changed: true };
+}
+
 // ——— правка вершин ломаной ————————————————————————————————————————————
 //
 // Та же рука, что правит контур помещения: вершину двигают, добавляют между
@@ -11020,6 +11152,33 @@ function mergeSame(a, b) {
   return mergeText(a) === mergeText(b);
 }
 
+/**
+ * Данные штампа: **графа к графе, а не поле целиком.**
+ *
+ * Графы заполняют разные люди и в разное время: один вписал шифр, другой —
+ * организацию и свою фамилию. Возьми слияние штамп победителя целиком — работа
+ * второго пропала бы молча, хотя спора между «шифром» и «организацией» нет.
+ * Спорит только одна и та же графа, заполненная по-разному, — там решает тот
+ * же победитель, что и везде.
+ *
+ * Поля нет ни у кого — оно и не заводится: объект прежней разметки остаётся
+ * прежним, и два одинаковых файла сходятся в «ничего не изменилось» (G68).
+ */
+function mergeStamp(merged, ours, theirs, winner) {
+  const mine = ours.stamp && typeof ours.stamp === "object" ? ours.stamp : null;
+  const other = theirs.stamp && typeof theirs.stamp === "object" ? theirs.stamp : null;
+  if (!mine && !other) return;
+  const stamp = {};
+  for (const field of new Set([...Object.keys(mine || {}), ...Object.keys(other || {})])) {
+    const left = mine ? mine[field] : "";
+    const right = other ? other[field] : "";
+    const value = !left ? right : !right ? left : winner === "theirs" ? right : left;
+    if (value) stamp[field] = value;
+  }
+  if (Object.keys(stamp).length > 0) merged.stamp = stamp;
+  else delete merged.stamp;
+}
+
 // Кто выигрывает спор. Обе стороны считают это из одной пары и получают один
 // ответ — иначе слияние не сходится.
 function mergeWinner(ours, theirs) {
@@ -11571,6 +11730,7 @@ function mergeProjects(ours, theirs, base, options = {}) {
     report.conflicts.push({ code: "bothChanged", entity: "name", id: ours.id, kept: winner, item: { name: keptName }, other: { name: winner === "theirs" ? ours.name : theirs.name } });
   }
   if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
+  mergeStamp(merged, ours, theirs, winner);
   // Ключ проекта сходится. Есть у одного — берут оба: это факт, а не мнение, и
   // после первой же встречи родство перестаёт быть догадкой. Есть у обоих и
   // разные (копии разошлись до появления ключей) — берётся меньший по строке:
@@ -14605,6 +14765,9 @@ function markRadius(view) {
   return Math.max(2, state.markSize * state.zoom);
 }
 
+// Высота подписи метки в пикселях плана — пара к `markRadius`. Наружу она
+// нужна листу по ГОСТ: формат бумаги подбирается по тому, останется ли подпись
+// на ней читаемой (не мельче 2,5 мм).
 function labelFontSize(view) {
   const state = renderView(view);
   return Math.max(6, state.labelSize * state.zoom);
@@ -22264,6 +22427,603 @@ function toTsv(table) {
   return lines.join("\n");
 }
 
+// src/gostSheet.js
+// Лист по ГОСТ Р 21.1101-2013 (СПДС): формат, рамка, основная надпись.
+//
+// Это новый вид выгрузки рядом с прежними, а не замена им: `schemePng` и
+// `tablePng` продолжают отдавать картинку «по размеру плана», без бумаги.
+//
+// **Откуда геометрия.** Размеры сняты с приложения Ж самого стандарта (формы
+// 3, 5, 6) и сверены с SVG-рамками репозитория `dell4valt/gost_template`,
+// которые заказчик разрешил использовать. Чужие файлы в продукт не положены:
+// в них нет ничего, кроме чисел, а числа лежат здесь — тогда рамка рисуется
+// тем же кодом, что и всё остальное, тянется в любой формат и не зависит от
+// шрифта и версии Visio, которыми тот экспорт делали.
+//
+// **Единицы — миллиметры.** Весь модуль считает в миллиметрах бумаги, и только
+// на отрисовке они умножаются на «пикселей в миллиметре». Иначе выверить лист
+// линейкой было бы нечем: заказчик меряет бумагу, а не пиксели.
+//
+// **Масштаб считается один раз.** `gostFit` возвращает `scale` — миллиметры
+// бумаги на пиксель плана. Этим же числом план рисуется и из него же выводится
+// отношение для графы «Масштаб» (`gostScaleDenominator`). Второй формулы для
+// того же числа в сборке нет и быть не должно: два пути расчёта разойдутся в
+// последнем знаке, а заказчик проверяет чертёж линейкой (G169).
+
+// ——— бумага ———————————————————————————————————————————————————————————
+
+// Форматы по ГОСТ 2.301. Книжная ориентация — размеры как здесь, альбомная
+// меняет стороны местами. Больше A1 не берём: при 300 dpi A1 — это 7016 × 9933
+// точек, запас до потолка холста ещё есть, у A0 его уже нет.
+const GOST_FORMATS = [
+  { id: "A4", width: 210, height: 297 },
+  { id: "A3", width: 297, height: 420 },
+  { id: "A2", width: 420, height: 594 },
+  { id: "A1", width: 594, height: 841 },
+];
+
+// Поле подшивки слева и обрез с трёх сторон.
+const GOST_BINDING_MM = 20;
+const GOST_EDGE_MM = 5;
+
+// Основная надпись: ширина у всех форм одна, высота своя.
+const GOST_STAMP_WIDTH_MM = 185;
+const GOST_STAMP_HEIGHT_MM = { form3: 55, form5: 40, form6: 15 };
+
+// Толщина линий: основная S = 0,7 мм, тонкая — S/2.
+const GOST_LINE_MM = 0.7;
+const GOST_THIN_MM = 0.3;
+
+// Наименьшая высота шрифта на чертеже по ГОСТ 2.304 — 2,5 мм. Ниже неё
+// подпись метки на бумаге не читается, и это мерка автоподбора формата.
+const GOST_MIN_TEXT_MM = 2.5;
+
+// Разрешение листа: множитель диалога (1×, 2×, 4×) переводится в dpi. 2× — это
+// привычные 300 dpi, на которых считалась подпись размера у прежних выгрузок.
+const GOST_DPI_BASE = 150;
+function gostDpi(scale) {
+  return GOST_DPI_BASE * (scale > 0 ? scale : 1);
+}
+
+// Пикселей в миллиметре при заданном разрешении.
+function gostPixelsPerMm(dpi) {
+  return (dpi > 0 ? dpi : 300) / 25.4;
+}
+
+/**
+ * Размер листа в миллиметрах. `orientation` — «portrait» (книжная) или
+ * «landscape» (альбомная); неизвестный формат читается как A4, потому что
+ * печатает заказчик только его.
+ */
+function gostSheetSize(format, orientation) {
+  const found = GOST_FORMATS.find((item) => item.id === format) || GOST_FORMATS[0];
+  const landscape = orientation === "landscape";
+  return {
+    format: found.id,
+    orientation: landscape ? "landscape" : "portrait",
+    width: landscape ? found.height : found.width,
+    height: landscape ? found.width : found.height,
+  };
+}
+
+// Внутренняя рамка листа: 20 мм слева под подшивку, по 5 мм с трёх сторон.
+function gostFrame(sheet) {
+  return {
+    x: GOST_BINDING_MM,
+    y: GOST_EDGE_MM,
+    width: sheet.width - GOST_BINDING_MM - GOST_EDGE_MM,
+    height: sheet.height - GOST_EDGE_MM * 2,
+  };
+}
+function gostStampHeight(form) {
+  return GOST_STAMP_HEIGHT_MM[form] || GOST_STAMP_HEIGHT_MM.form3;
+}
+
+// Основная надпись — в правом нижнем углу рамки.
+function gostStampRect(sheet, form) {
+  const frame = gostFrame(sheet);
+  const height = gostStampHeight(form);
+  return {
+    x: frame.x + frame.width - GOST_STAMP_WIDTH_MM,
+    y: frame.y + frame.height - height,
+    width: GOST_STAMP_WIDTH_MM,
+    height,
+  };
+}
+
+/**
+ * Поле чертежа: вся рамка минус полоса, занятая основной надписью.
+ *
+ * Полоса срезается во всю ширину, хотя надпись у́же рамки на больших форматах.
+ * Г-образное поле вместило бы план чуть крупнее, но план — прямоугольная
+ * картинка, и вписывать её пришлось бы в невыпуклую фигуру; на A4 — а это
+ * единственный формат, который заказчик печатает, — надпись занимает ширину
+ * рамки ровно, и терять нечего вовсе.
+ */
+function gostField(sheet, form) {
+  const frame = gostFrame(sheet);
+  const stamp = gostStampHeight(form);
+  return {
+    x: frame.x,
+    y: frame.y,
+    width: frame.width,
+    height: Math.max(1, frame.height - stamp),
+  };
+}
+
+/**
+ * Вписывание плана в поле чертежа: `scale` — **миллиметров бумаги на пиксель
+ * плана**. Это та самая единственная величина, из которой потом выводится и
+ * отрисовка, и число в графе «Масштаб».
+ *
+ * Пропорции плана и листа не совпадают почти никогда — одна сторона упирается
+ * раньше. Берётся меньший из двух множителей (план влезает целиком), остаток
+ * поля делится поровну: план встаёт по центру. Прижимать его к углу было бы
+ * тем же количеством белого, но несимметричным.
+ */
+function gostFit(plan, field) {
+  const width = plan && plan.width > 0 ? plan.width : 1;
+  const height = plan && plan.height > 0 ? plan.height : 1;
+  const scale = Math.min(field.width / width, field.height / height);
+  const planWidth = width * scale;
+  const planHeight = height * scale;
+  return {
+    scale,
+    width: planWidth,
+    height: planHeight,
+    x: field.x + (field.width - planWidth) / 2,
+    y: field.y + (field.height - planHeight) / 2,
+  };
+}
+
+/**
+ * Знаменатель настоящего масштаба: 1:N, где N считается из того же `scale`,
+ * которым план вписан в лист, и из калибровки схемы (пикселей плана на метр).
+ *
+ * Один пиксель плана — это `scale` мм на бумаге и `1000 / perMeter` мм на
+ * объекте; отношение второго к первому и есть N. Без калибровки масштаба нет
+ * вовсе — отвечаем `null`, а не выдумываем число.
+ */
+function gostScaleDenominator(scale, pixelsPerMeter) {
+  if (!(scale > 0) || !(pixelsPerMeter > 0)) return null;
+  const value = 1000 / (pixelsPerMeter * scale);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Число для графы «Масштаб» — **настоящее**, без подгонки к ряду 1:50/1:100
+ * (G169, слова заказчика: «Масштаб пишем реальный - округление тут не
+ * допустимо»). Знак после запятой ровно один, и вот почему: линейкой читают
+ * полмиллиметра, на листе шириной 180 мм это 0,3 % — у знаменателя 137 те же
+ * 0,3 % дают 0,4. Целое число врало бы на столько же, сколько сам замер, а
+ * второй знак обещал бы точность, которой нет у калибровки, поставленной
+ * пальцем по стене.
+ *
+ * Целое отношение остаётся целым: «1:100», а не «1:100,0».
+ */
+function gostScaleText(denominator) {
+  if (!(denominator > 0) || !Number.isFinite(denominator)) return strings.gost.noScale;
+  const rounded = Math.round(denominator * 10) / 10;
+  return text("gost.scaleValue", { value: String(rounded).replace(".", ",") });
+}
+
+/**
+ * Подбор формата и ориентации под план: `{sheet, field, fit, textMm, tooSmall}`.
+ *
+ * Правило простое и проверяемое: берётся **самый мелкий формат**, на котором
+ * подпись метки остаётся не мельче 2,5 мм (меньше на чертеже не ставят —
+ * ГОСТ 2.304). Заказчик печатает только A4, и уводить его на A3 без причины
+ * нельзя; причина же тут ровно одна — читаемость на бумаге.
+ *
+ * Ориентация выбирается по плану, а не по формату: из двух берётся та, где
+ * план вписывается крупнее. Квадратный план даёт одинаковый масштаб обеим —
+ * тогда остаётся книжная, как у бумаги по умолчанию.
+ *
+ * `textPx` — высота подписи в пикселях плана (её знает `render.labelBox`).
+ * Ни один формат не дал читаемого размера — возвращается самый крупный и
+ * `tooSmall: true`: молчать об этом нельзя, лист всё равно выйдет.
+ */
+function gostPickSheet(plan, options = {}) {
+  const form = options.form || "form3";
+  const textPx = options.textPx > 0 ? options.textPx : 0;
+  const minText = options.minTextMm > 0 ? options.minTextMm : GOST_MIN_TEXT_MM;
+  const choiceFor = (format) => {
+    const variants = ["portrait", "landscape"].map((orientation) => {
+      const sheet = gostSheetSize(format, orientation);
+      const field = gostField(sheet, form);
+      const fit = gostFit(plan, field);
+      return { sheet, field, fit, textMm: textPx * fit.scale, tooSmall: false };
+    });
+    return variants[1].fit.scale > variants[0].fit.scale ? variants[1] : variants[0];
+  };
+  let last = null;
+  for (const format of GOST_FORMATS) {
+    last = choiceFor(format.id);
+    if (textPx <= 0 || last.textMm >= minText) return last;
+  }
+  return { ...last, tooSmall: true };
+}
+
+/**
+ * Раскладка листа: либо подобранная (`format` пуст или «auto»), либо заданная
+ * руками. Ручной выбор оставлен сознательно — у заказчика один принтер, и
+ * «всегда A4» он должен уметь сказать сам; предупреждение о мелкоте при этом
+ * остаётся.
+ */
+function gostSheetLayout(plan, options = {}) {
+  const form = options.form || "form3";
+  if (!options.format || options.format === "auto") return gostPickSheet(plan, options);
+  const sheet = gostSheetSize(options.format, options.orientation);
+  const field = gostField(sheet, form);
+  const fit = gostFit(plan, field);
+  const textPx = options.textPx > 0 ? options.textPx : 0;
+  const textMm = textPx * fit.scale;
+  const minText = options.minTextMm > 0 ? options.minTextMm : GOST_MIN_TEXT_MM;
+  return { sheet, field, fit, textMm, tooSmall: textPx > 0 && textMm < minText };
+}
+
+// ——— листы текстового документа ————————————————————————————————————————
+
+// Шаг строки таблицы на бумаге. 8 мм — шаг таблиц СПДС (форма 7 «Спецификация»).
+const GOST_TABLE_ROW_MM = 8;
+
+/**
+ * Разбивка таблицы на листы: первый по форме 5, последующие по форме 6 — у
+ * них разная высота надписи, а значит и разное число строк. Возвращает
+ * `[{form, from, to}]`, и длина этого списка и есть «Листов M» в штампе:
+ * номер на бумаге считается тем же кодом, что и число файлов.
+ *
+ * Одна строка поля уходит под шапку колонок: она повторяется на каждом листе,
+ * иначе второй лист таблицы читать нечем.
+ *
+ * Пустая таблица даёт один лист, а не ноль: лист с одной шапкой — это ответ
+ * «строк нет», а отсутствие файла — это молчание.
+ */
+function gostPaginate(total, sheet, options = {}) {
+  const rowMm = options.rowMm > 0 ? options.rowMm : GOST_TABLE_ROW_MM;
+  const first = options.first || "form5";
+  const next = options.next || "form6";
+  const pages = [];
+  let at = 0;
+  do {
+    const form = pages.length === 0 ? first : next;
+    const room = Math.max(1, Math.floor(gostField(sheet, form).height / rowMm) - 1);
+    pages.push({ form, from: at, to: Math.min(total, at + room) });
+    at += room;
+  } while (at < total);
+  return pages;
+}
+
+// ——— основная надпись ——————————————————————————————————————————————————
+//
+// Ниже — сетка форм из приложения Ж. Координаты в миллиметрах от левого
+// верхнего угла самой надписи, поэтому их видно глазами и сверить с чертежом
+// стандарта можно построчно.
+//
+// Колонки блока изменений: Изм. | Кол.уч. | Лист | № док. | Подп. | Дата.
+const GOST_CHANGE_COLUMNS = [10, 10, 10, 10, 15, 10];
+// Колонки блока подписей: характер работы | фамилия | подпись | дата.
+const GOST_WORK_COLUMNS = [20, 20, 15, 10];
+// Левый блок у всех трёх форм одной ширины.
+const GOST_LEFT_WIDTH = 65;
+const GOST_ROW = 5;
+
+function gostRow(columns, x0, y, height, make) {
+  const cells = [];
+  let x = x0;
+  columns.forEach((width, index) => {
+    cells.push({ x, y, width, height, ...(make ? make(index) : {}) });
+    x += width;
+  });
+  return cells;
+}
+
+// Строки блока изменений: верхние пустые, нижняя — с названиями колонок.
+function gostChangeBlock(rows) {
+  const cells = [];
+  for (let index = 0; index < rows; index += 1) {
+    cells.push(...gostRow(GOST_CHANGE_COLUMNS, 0, index * GOST_ROW, GOST_ROW));
+  }
+  const titles = ["changeNo", "changeArea", "changeSheet", "changeDoc", "changeSign", "changeDate"];
+  cells.push(
+    ...gostRow(GOST_CHANGE_COLUMNS, 0, rows * GOST_ROW, GOST_ROW, (index) => ({
+      label: titles[index],
+      size: 2.5,
+    })),
+  );
+  return cells;
+}
+
+// Строки подписей: первая «Разраб.», последняя «Н. контр.» — так напечатано в
+// самом стандарте. Между ними свободные строки, и в них уходят «Пров.» и
+// «Утв.»: кто именно проверял и утверждал, решает организация, а не форма.
+function gostWorkBlock(top, rows) {
+  const cells = [];
+  for (let index = 0; index < rows; index += 1) {
+    const y = top + index * GOST_ROW;
+    const role = index === 0 ? "roleAuthor" : index === rows - 1 ? "roleControl" : null;
+    cells.push(
+      ...gostRow(GOST_WORK_COLUMNS, 0, y, GOST_ROW, (column) => {
+        if (column === 0) return role ? { label: role, size: 2.5, align: "left" } : { field: "role" + index, size: 2.5, align: "left" };
+        if (column === 1) return { field: "name" + index, size: 3.5 };
+        if (column === 2) return { field: "sign" + index, size: 3.5 };
+        return { field: "date" + index, size: 2.5 };
+      }),
+    );
+  }
+  return cells;
+}
+
+const GOST_FORM_BUILDERS = {
+  // Форма 3 — листы основных комплектов рабочих чертежей (у нас — схемы).
+  form3() {
+    const left = [...gostChangeBlock(4), ...gostWorkBlock(25, 6)];
+    const right = [
+      { x: 65, y: 0, width: 120, height: 10, field: "code", size: 7 },
+      { x: 65, y: 10, width: 120, height: 15, field: "object", size: 5, lines: 2 },
+      { x: 65, y: 25, width: 70, height: 15, field: "building", size: 3.5, lines: 2 },
+      { x: 135, y: 25, width: 15, height: 5, label: "stage", size: 2.5 },
+      { x: 150, y: 25, width: 15, height: 5, label: "sheet", size: 2.5 },
+      { x: 165, y: 25, width: 20, height: 5, label: "sheets", size: 2.5 },
+      { x: 135, y: 30, width: 15, height: 10, field: "stage", size: 3.5 },
+      { x: 150, y: 30, width: 15, height: 10, field: "sheet", size: 3.5 },
+      { x: 165, y: 30, width: 20, height: 10, field: "sheets", size: 3.5 },
+      { x: 65, y: 40, width: 70, height: 15, field: "drawing", size: 3.5, lines: 3 },
+      { x: 135, y: 40, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+    ];
+    return {
+      height: 55,
+      cells: [...left, ...right],
+      thick: [
+        [0, 25, 185, 25],
+        [0, 20, 65, 20],
+        [135, 30, 185, 30],
+        [65, 40, 185, 40],
+        [65, 0, 65, 55],
+      ],
+    };
+  },
+  // Форма 5 — первый (заглавный) лист текстового документа: у нас это таблица.
+  form5() {
+    const left = [...gostChangeBlock(2), ...gostWorkBlock(15, 5)];
+    const right = [
+      { x: 65, y: 0, width: 120, height: 15, field: "code", size: 7 },
+      { x: 65, y: 15, width: 70, height: 25, field: "document", size: 5, lines: 3 },
+      { x: 135, y: 15, width: 15, height: 5, label: "stage", size: 2.5 },
+      { x: 150, y: 15, width: 15, height: 5, label: "sheet", size: 2.5 },
+      { x: 165, y: 15, width: 20, height: 5, label: "sheets", size: 2.5 },
+      { x: 135, y: 20, width: 15, height: 5, field: "stage", size: 3.5 },
+      { x: 150, y: 20, width: 15, height: 5, field: "sheet", size: 3.5 },
+      { x: 165, y: 20, width: 20, height: 5, field: "sheets", size: 3.5 },
+      { x: 135, y: 25, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+    ];
+    return {
+      height: 40,
+      cells: [...left, ...right],
+      thick: [
+        [0, 15, 185, 15],
+        [0, 10, 65, 10],
+        [135, 20, 185, 20],
+        [135, 25, 185, 25],
+        [65, 0, 65, 40],
+      ],
+    };
+  },
+  // Форма 6 — последующие листы: обозначение документа и номер листа.
+  form6() {
+    const cells = [
+      ...gostChangeBlock(2),
+      { x: 65, y: 0, width: 110, height: 15, field: "code", size: 5 },
+      { x: 175, y: 0, width: 10, height: 7, label: "sheet", size: 2.5 },
+      { x: 175, y: 7, width: 10, height: 8, field: "sheet", size: 3.5 },
+    ];
+    return {
+      height: 15,
+      cells,
+      thick: [
+        [0, 10, 65, 10],
+        [65, 0, 65, 15],
+        [175, 0, 175, 15],
+      ],
+    };
+  },
+};
+
+const GOST_FORM_CACHE = new Map();
+
+/**
+ * Сетка основной надписи: `{height, cells, thick}` в миллиметрах от её левого
+ * верхнего угла. `cells` — тонкие ячейки, у каждой либо `label` (постоянная
+ * надпись формы), либо `field` (ключ значения), либо ничего (пустая клетка
+ * блока изменений). `thick` — отрезки основной линии.
+ */
+function gostStampForm(form) {
+  const key = GOST_FORM_BUILDERS[form] ? form : "form3";
+  if (!GOST_FORM_CACHE.has(key)) GOST_FORM_CACHE.set(key, GOST_FORM_BUILDERS[key]());
+  return GOST_FORM_CACHE.get(key);
+}
+
+/**
+ * Значения граф по данным штампа и по листу.
+ *
+ * Что куда ложится (номера граф — по приложению Ж):
+ * - (1) обозначение документа — шифр из данных штампа;
+ * - (2) наименование предприятия — имя объекта;
+ * - (3) наименование здания — помещение, когда лист режется по комнате, иначе
+ *   пусто: отдельного «здания» в данных нет, а лист по кухне — это и есть
+ *   часть объекта;
+ * - (4) наименование изображений — имя схемы и **масштаб** второй строкой.
+ *   Своей графы «Масштаб» у формы 3 нет (она есть у формы 4, для изделий), и
+ *   по СПДС масштаб пишут под наименованием изображения — туда он и идёт;
+ * - (6), (7), (8) — стадия, лист, листов;
+ * - (9) — организация.
+ *
+ * Пустое поле остаётся пустым: лист всё равно выходит, графа просто не
+ * заполнена — так же, как у чертежа, который ещё не подписали.
+ */
+function gostStampValues(stamp, sheetInfo = {}) {
+  const data = stamp || {};
+  const values = {
+    code: data.code || "",
+    object: sheetInfo.object || "",
+    building: sheetInfo.building || "",
+    drawing: [sheetInfo.drawing || "", sheetInfo.scale || ""].filter(Boolean).join("\n"),
+    // Форма 5 держит объект и название документа в одной графе; совпали —
+    // пишем один раз, строка-близнец в штампе выглядит опечаткой.
+    document: [...new Set([sheetInfo.object || "", sheetInfo.drawing || ""])].filter(Boolean).join("\n"),
+    stage: data.stage || "",
+    sheet: sheetInfo.sheet == null ? "" : String(sheetInfo.sheet),
+    sheets: sheetInfo.sheets == null ? "" : String(sheetInfo.sheets),
+    org: data.org || "",
+    // Строка 0 — «Разраб.»: её подпись напечатана в самой форме, сюда идёт
+    // только фамилия и дата.
+    name0: data.author || "",
+    date0: data.author ? sheetInfo.date || "" : "",
+  };
+  // Строки «Пров.» и «Утв.» — свободные строки формы (между «Разраб.» и
+  // «Н. контр.»): название работы в них печатается только тогда, когда есть
+  // фамилия. Пустая строка с подписью «Утв.» и без фамилии читалась бы как
+  // «не утверждено», а это не так: её просто не заполняли.
+  if (data.checker) {
+    values.role1 = strings.gost.roleChecker;
+    values.name1 = data.checker;
+    values.date1 = sheetInfo.date || "";
+  }
+  if (data.approver) {
+    values.role2 = strings.gost.roleApprover;
+    values.name2 = data.approver;
+    values.date2 = sheetInfo.date || "";
+  }
+  return values;
+}
+
+// ——— отрисовка ————————————————————————————————————————————————————————
+//
+// Рисование принимает готовый `ctx` и ничего не знает ни про DOM, ни про
+// выгрузку: холст заводит `exporter.js`, как и для всех прежних картинок.
+
+// Чертёжный шрифт — тот же, что подключён странице (`--font-gost` в стилях).
+// Имя семейства техническое, поэтому живёт здесь, а не в словаре строк.
+// Запасные шрифты обязательны: не дошёл файл — надпись всё равно читается.
+const GOST_FONT_NAME = "GOST type A";
+const GOST_FONT = '"' + GOST_FONT_NAME + '", system-ui, Arial, sans-serif';
+
+function gostSetFont(ctx, sizeMm, mm) {
+  ctx.font = Math.max(1, sizeMm * mm) + "px " + GOST_FONT;
+}
+
+// Текст, ужатый до ширины ячейки: сначала мельче шрифтом (но не мельче 2,5 мм),
+// потом с отточием. Обрезать молча нельзя — обозначение документа, не влезшее
+// в графу, человек должен увидеть хотя бы началом.
+function gostDrawText(ctx, value, cell, mm, sizeMm) {
+  const limit = (cell.width - 2) * mm;
+  let size = sizeMm;
+  gostSetFont(ctx, size, mm);
+  while (size > GOST_MIN_TEXT_MM && ctx.measureText(value).width > limit) {
+    size = Math.max(GOST_MIN_TEXT_MM, size - 0.25);
+    gostSetFont(ctx, size, mm);
+  }
+  let out = value;
+  if (ctx.measureText(out).width > limit) {
+    while (out.length > 1 && ctx.measureText(out + "…").width > limit) out = out.slice(0, -1);
+    out += "…";
+  }
+  return out;
+}
+
+// Разбивка значения на строки: сначала по переводам строки (их ставит
+// `gostStampValues`), потом по словам — сколько строк позволяет ячейка.
+function gostWrap(ctx, value, cell, mm, sizeMm) {
+  const limit = (cell.width - 2) * mm;
+  const maxLines = cell.lines || 1;
+  const out = [];
+  gostSetFont(ctx, sizeMm, mm);
+  for (const part of String(value).split("\n")) {
+    if (out.length >= maxLines) break;
+    const words = part.split(/\s+/).filter(Boolean);
+    let line = "";
+    for (const word of words) {
+      const next = line ? line + " " + word : word;
+      if (ctx.measureText(next).width <= limit || !line) {
+        line = next;
+        continue;
+      }
+      out.push(line);
+      line = word;
+      if (out.length >= maxLines) break;
+    }
+    if (line && out.length < maxLines) out.push(line);
+  }
+  return out.length > 0 ? out : [""];
+}
+
+function gostCellText(ctx, value, cell, mm) {
+  if (!value) return;
+  const sizeMm = cell.size || 3.5;
+  const lines = gostWrap(ctx, value, cell, mm, sizeMm);
+  const step = sizeMm * 1.25 * mm;
+  const top = (cell.y + cell.height / 2) * mm - ((lines.length - 1) * step) / 2;
+  ctx.textBaseline = "middle";
+  for (let index = 0; index < lines.length; index += 1) {
+    const drawn = gostDrawText(ctx, lines[index], cell, mm, sizeMm);
+    if (cell.align === "left") {
+      ctx.textAlign = "left";
+      ctx.fillText(drawn, (cell.x + 1) * mm, top + index * step);
+    } else {
+      ctx.textAlign = "center";
+      ctx.fillText(drawn, (cell.x + cell.width / 2) * mm, top + index * step);
+    }
+  }
+}
+
+function gostLine(ctx, x1, y1, x2, y2, mm, widthMm) {
+  ctx.lineWidth = Math.max(1, widthMm * mm);
+  ctx.beginPath();
+  ctx.moveTo(x1 * mm, y1 * mm);
+  ctx.lineTo(x2 * mm, y2 * mm);
+  ctx.stroke();
+}
+
+/**
+ * Рамка листа: поле подшивки слева, обрез с трёх сторон. Белая подложка листа
+ * заливается здесь же — лист обязан быть белым целиком, включая поля.
+ */
+function drawGostFrame(ctx, sheet, mm) {
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, sheet.width * mm, sheet.height * mm);
+  const frame = gostFrame(sheet);
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = Math.max(1, GOST_LINE_MM * mm);
+  ctx.strokeRect(frame.x * mm, frame.y * mm, frame.width * mm, frame.height * mm);
+  ctx.restore();
+}
+
+/**
+ * Основная надпись: сетка формы и значения граф. `values` — то, что отдал
+ * `gostStampValues`; постоянные надписи формы берутся из словаря.
+ */
+function drawGostStamp(ctx, sheet, form, values, mm) {
+  const rect = gostStampRect(sheet, form);
+  const grid = gostStampForm(form);
+  ctx.save();
+  ctx.translate(rect.x * mm, rect.y * mm);
+  ctx.strokeStyle = "#000000";
+  ctx.fillStyle = "#000000";
+  for (const cell of grid.cells) {
+    ctx.lineWidth = Math.max(1, GOST_THIN_MM * mm);
+    ctx.strokeRect(cell.x * mm, cell.y * mm, cell.width * mm, cell.height * mm);
+  }
+  for (const [x1, y1, x2, y2] of grid.thick) gostLine(ctx, x1, y1, x2, y2, mm, GOST_LINE_MM);
+  ctx.lineWidth = Math.max(1, GOST_LINE_MM * mm);
+  ctx.strokeRect(0, 0, GOST_STAMP_WIDTH_MM * mm, grid.height * mm);
+  for (const cell of grid.cells) {
+    if (cell.label) gostCellText(ctx, strings.gost.labels[cell.label] || "", cell, mm);
+    else if (cell.field) gostCellText(ctx, (values && values[cell.field]) || "", cell, mm);
+  }
+  ctx.restore();
+}
+
 // src/exporter.js
 // Выгрузка на бумагу и в файлы: PNG схемы, PNG таблицы, zip всех схем, печать.
 //
@@ -22974,19 +23734,27 @@ async function allSchemesZip(project, images, options = {}) {
     done += 1;
     if (onProgress) onProgress({ done, total, name });
   };
+  // Лист по ГОСТ или прежняя картинка — выбор один на весь архив. Нумерация
+  // «Лист N из M» идёт по всему архиву: листы одного объекта и считаются вместе,
+  // иначе каждый этаж объявлял бы себя единственным.
+  const draw = (scheme, extra) =>
+    options.gost === true
+      ? gostSchemePng(project, scheme, extra.image, { ...options, ...extra, sheet: done + 1, sheets: total })
+      : schemePng(project, scheme, extra.image, { ...options, ...extra });
   for (let index = 0; index < schemes.length; index += 1) {
     const scheme = schemes[index];
     const image = await exportImageOf(map.get(scheme.imageId));
-    const whole = await schemePng(project, scheme, image, { ...options, area: "all" });
+    const whole = await draw(scheme, { image, area: "all" });
     put(exportSheetName(scheme, index), whole);
     if (options.rooms !== true) continue;
     const { sheets } = exportRoomSheets(project, scheme, options.filter);
     for (let at = 0; at < sheets.length; at += 1) {
       const sheet = sheets[at];
-      const page = await schemePng(project, scheme, image, {
-        ...options,
+      const page = await draw(scheme, {
+        image,
         area: sheet.area,
         filter: exportRoomFilter(options.filter, sheet.roomId),
+        building: sheet.name,
       });
       put(exportSheetName(scheme, index, sheet.name, at), page);
     }
@@ -23193,6 +23961,412 @@ async function exportCopy(value) {
   }
   area.remove();
   return ok;
+}
+
+// ——— лист по ГОСТ —————————————————————————————————————————————————————
+//
+// Новый вид выгрузки рядом с прежними: тот же план и та же таблица, но на
+// бумаге с рамкой и основной надписью. Геометрия листа живёт в `gostSheet.js`
+// и считается в миллиметрах; здесь — холст, план и строки таблицы.
+
+// Чертёжный шрифт грузится до первой отрисовки: canvas не ждёт `@font-face`
+// сам, и первый лист вышел бы системным шрифтом, а второй — чертёжным.
+let gostFontLoading = null;
+
+function gostFontReady() {
+  if (typeof document === "undefined" || !document.fonts || typeof document.fonts.load !== "function") {
+    return Promise.resolve(false);
+  }
+  if (!gostFontLoading) {
+    gostFontLoading = document.fonts.load('10px "' + GOST_FONT_NAME + '"').then(
+      () => true,
+      () => false,
+    );
+  }
+  return gostFontLoading;
+}
+
+// Дата в штампе — календарный день того, кто выгружает, в чертёжном виде
+// «08.10.26». UTC здесь соврал бы на вечерней выгрузке так же, как в имени
+// файла проекта.
+function gostDate(date) {
+  const at = date instanceof Date ? date : new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return pad(at.getDate()) + "." + pad(at.getMonth() + 1) + "." + String(at.getFullYear()).slice(-2);
+}
+
+/**
+ * Раскладка листа схемы: формат, поле чертежа, вписанный план и **настоящий
+ * масштаб**.
+ *
+ * Кадр берётся тем же `exportFitArea`, что и у прежней выгрузки: на листе по
+ * ГОСТ подписи у стен обязаны быть целы ровно так же. Масштаб считается из
+ * `fit.scale` — из той самой величины, которой план вписан в поле, а не второй
+ * формулой: два расчёта разошлись бы в последнем знаке, и линейка это поймала
+ * бы (G169).
+ */
+function gostSchemeSheet(project, scheme, options = {}) {
+  const { area, missed } = exportFitArea(project, scheme, {
+    area: options.area,
+    filter: options.filter,
+    fit: options.fit,
+  });
+  const sizes = project && project.view ? project.view : {};
+  const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
+  const layout = gostSheetLayout(
+    { width: area.width, height: area.height },
+    {
+      form: "form3",
+      format: options.format,
+      orientation: options.orientation,
+      textPx: labelFontSize(view),
+    },
+  );
+  const perMeter = planPixelsPerMeter(project, scheme ? scheme.id : null);
+  const denominator = gostScaleDenominator(layout.fit.scale, perMeter);
+  return { ...layout, form: "form3", area, missed, denominator, scaleText: gostScaleText(denominator) };
+}
+
+// Подпись размера листа для диалога: формат, ориентация, пиксели и честные
+// миллиметры бумаги — не пересчитанные из пикселей, а те, что у формата.
+function gostSheetSizeText(sheet, scale) {
+  const dpi = gostDpi(scale);
+  const mm = gostPixelsPerMm(dpi);
+  return text("gost.size", {
+    format: sheet.format,
+    orientation:
+      sheet.orientation === "landscape" ? strings.gost.orientationLandscape : strings.gost.orientationPortrait,
+    width: Math.round(sheet.width * mm),
+    height: Math.round(sheet.height * mm),
+    mmWidth: sheet.width,
+    mmHeight: sheet.height,
+    dpi,
+  });
+}
+
+/**
+ * Лист схемы по ГОСТ: рамка, план в поле чертежа, основная надпись формы 3.
+ *
+ * План рисуется тем же `drawScheme`, что и холст, — своего рисования меток
+ * здесь нет и быть не должно. Поле чертежа обрезает: подпись, вылезшая за
+ * рамку, ушла бы в поле подшивки.
+ */
+async function gostSchemePng(project, scheme, image, options = {}) {
+  const plan = options.layout || gostSchemeSheet(project, scheme, options);
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  await gostFontReady();
+  const canvas = exportCanvas(plan.sheet.width * mm, plan.sheet.height * mm);
+  const ctx = canvas.getContext("2d");
+  drawGostFrame(ctx, plan.sheet, mm);
+
+  const sizes = project && project.view ? project.view : {};
+  const zoom = plan.fit.scale * mm;
+  const view = {
+    zoom,
+    offsetX: plan.fit.x * mm - plan.area.x * zoom,
+    offsetY: plan.fit.y * mm - plan.area.y * zoom,
+    markSize: sizes.markSize,
+    labelSize: sizes.labelSize,
+  };
+  const field = gostField(plan.sheet, plan.form);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(field.x * mm, field.y * mm, field.width * mm, field.height * mm);
+  ctx.clip();
+  drawScheme(ctx, {
+    project,
+    scheme,
+    image,
+    filter: options.filter || null,
+    view,
+    legend: options.legend ? { x: (field.x + 4) * mm, y: (field.y + 4) * mm } : null,
+    outlines: options.outlines === false ? false : "pale",
+    links: options.links === true,
+  });
+  ctx.restore();
+
+  drawGostStamp(
+    ctx,
+    plan.sheet,
+    plan.form,
+    gostStampValues(projectStamp(project), {
+      object: (project && project.name) || "",
+      building: options.building || "",
+      drawing: (scheme && scheme.name) || "",
+      scale: plan.scaleText,
+      sheet: options.sheet || 1,
+      sheets: options.sheets || 1,
+      date: gostDate(options.date),
+    }),
+    mm,
+  );
+  return exportBlob(canvas);
+}
+
+// ——— таблица листами по ГОСТ ———————————————————————————————————————————
+
+// Метрика таблицы на бумаге, в миллиметрах. Шаг строки живёт в `gostSheet.js`
+// (там же, где считается, сколько их влезет на лист); шрифт 3,5 мм — размер по
+// ГОСТ 2.304, ближайший к этому шагу.
+const GOST_TABLE = {
+  row: GOST_TABLE_ROW_MM,
+  font: 3.5,
+  groupFont: 4,
+  pad: 2,
+};
+
+// Строки будущих листов одним списком: заголовок разбивки, строка таблицы,
+// подвал «Итого». Разбивка по листам идёт по этому списку, поэтому «Лист N из
+// M» считается до рисования — как и число листов в архиве схем.
+function gostTableLines(table) {
+  const lines = [];
+  for (const section of tableSections(table)) {
+    if (section.title) lines.push({ kind: "group", title: section.title, color: section.color, level: section.level || 1 });
+    for (const row of section.rows) lines.push({ kind: "row", cells: row.cells, color: row.color });
+  }
+  const totals = Array.isArray(table.totals) ? table.totals : [];
+  if (totals.length > 0) {
+    lines.push({ kind: "group", title: strings.tables.totals });
+    for (const row of totals) lines.push({ kind: "total", title: row.title, count: row.count, level: row.level });
+    lines.push({ kind: "total", title: table.totalLabel || strings.tables.totalAll, count: table.totalCount, bold: true });
+  }
+  return lines;
+}
+
+// Ширины колонок в миллиметрах: по самому длинному значению, а дальше все
+// колонки тянутся (или ужимаются) к ширине рамки одной долей. Таблица на
+// чертеже идёт во всю рамку: узкая полоска посреди листа читалась бы как
+// обрыв, а отданный одной колонке остаток перекосил бы её на треть листа.
+function gostTableColumns(table, widthMm) {
+  const ctx = exportProbe();
+  const probe = 100;
+  const measure = (value, bold) => {
+    ctx.font = (bold ? "600 " : "") + probe + "px " + GOST_FONT;
+    return (ctx.measureText(String(value == null ? "" : value)).width / probe) * GOST_TABLE.font;
+  };
+  const widths = table.columns.map((column) => measure(column, true));
+  for (const section of tableSections(table)) {
+    for (const row of section.rows) {
+      row.cells.forEach((cell, index) => {
+        const width = measure(cell, false);
+        if (width > widths[index]) widths[index] = width;
+      });
+    }
+  }
+  const padded = widths.map((width) => width + GOST_TABLE.pad * 2);
+  const sum = padded.reduce((total, width) => total + width, 0);
+  if (sum <= 0) return padded;
+  return padded.map((width) => (width / sum) * widthMm);
+}
+
+/**
+ * Разбивка таблицы на листы: первый по форме 5, последующие по форме 6.
+ * Считать, сколько строк влезет, умеет `gostSheet.gostPaginate` — здесь только
+ * строки таблицы. Формат таблицы руками не подбирается: подбор — про план, а
+ * страница текста влезает в A4, который единственный и печатают.
+ */
+function gostTablePages(table, options = {}) {
+  const sheet = gostSheetSize(options.format === "auto" || !options.format ? "A4" : options.format, options.orientation);
+  const lines = gostTableLines(table);
+  const pages = gostPaginate(lines.length, sheet, { rowMm: GOST_TABLE.row }).map((page) => ({
+    form: page.form,
+    lines: lines.slice(page.from, page.to),
+  }));
+  return { sheet, pages };
+}
+
+function gostTableCell(ctx, value, limitPx) {
+  const cell = value == null ? "" : String(value);
+  if (ctx.measureText(cell).width <= limitPx) return cell;
+  let cut = cell;
+  while (cut.length > 1 && ctx.measureText(cut + "…").width > limitPx) cut = cut.slice(0, -1);
+  return cut + "…";
+}
+
+/**
+ * Один лист таблицы: рамка, шапка колонок, строки и основная надпись формы 5
+ * (первый лист) или 6 (последующие). Шапка повторяется на каждом листе —
+ * иначе второй лист таблицы читать нечем.
+ */
+async function gostTablePng(table, page, plan, options = {}) {
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  await gostFontReady();
+  const sheet = plan.sheet;
+  const canvas = exportCanvas(sheet.width * mm, sheet.height * mm);
+  const ctx = canvas.getContext("2d");
+  drawGostFrame(ctx, sheet, mm);
+
+  const field = gostField(sheet, page.form);
+  const widths = plan.columns;
+  const bodyWidth = widths.reduce((total, width) => total + width, 0);
+  ctx.strokeStyle = "#000000";
+  ctx.fillStyle = "#1f2328";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+
+  const line = (x1, y1, x2, y2, widthMm) => {
+    ctx.lineWidth = Math.max(1, widthMm * mm);
+    ctx.beginPath();
+    ctx.moveTo(x1 * mm, y1 * mm);
+    ctx.lineTo(x2 * mm, y2 * mm);
+    ctx.stroke();
+  };
+
+  let y = field.y;
+  const drawCells = (cells, bold) => {
+    ctx.font = (bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+    let x = field.x;
+    cells.forEach((cell, index) => {
+      const limit = (widths[index] - GOST_TABLE.pad * 2) * mm;
+      ctx.fillText(gostTableCell(ctx, cell, limit), (x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      x += widths[index];
+    });
+  };
+
+  // Разделители колонок внутри одной строки: таблица на чертеже — сетка, а не
+  // колонки текста. Через заголовки разбивки они не идут: там строка одна на
+  // всю ширину, и черта поперёк неё читалась бы как пустая ячейка.
+  const columnLines = (top) => {
+    let x = field.x;
+    for (const width of widths.slice(0, -1)) {
+      x += width;
+      line(x, top, x, top + GOST_TABLE.row, 0.3);
+    }
+    line(field.x, top, field.x, top + GOST_TABLE.row, 0.3);
+    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, 0.3);
+  };
+
+  // Шапка колонок: на каждом листе своя, и под ней основная линия.
+  drawCells(table.columns, true);
+  columnLines(y);
+  line(field.x, y, field.x + bodyWidth, y, 0.3);
+  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.7);
+  y += GOST_TABLE.row;
+
+  for (const item of page.lines) {
+    if (item.kind === "group") {
+      ctx.fillStyle = item.color || "#1f2328";
+      ctx.font = "600 " + (item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm + "px " + GOST_FONT;
+      ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.strokeStyle = item.color || "#1f2328";
+      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
+      ctx.strokeStyle = "#000000";
+      ctx.fillStyle = "#1f2328";
+      y += GOST_TABLE.row;
+      continue;
+    }
+    if (item.kind === "total") {
+      ctx.font = (item.bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+      ctx.fillText(item.title, (field.x + GOST_TABLE.pad + (item.level === 2 ? GOST_TABLE.pad * 2 : 0)) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.textAlign = "right";
+      ctx.fillText(String(item.count), (field.x + bodyWidth - GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.textAlign = "left";
+      y += GOST_TABLE.row;
+      continue;
+    }
+    // Цвет категории — полоской слева, как и на прежнем листе: колонки с кодом
+    // краски в таблице нет, и рисовать его негде.
+    if (item.color) {
+      ctx.fillStyle = item.color;
+      ctx.fillRect(field.x * mm, (y + 1) * mm, 1.2 * mm, (GOST_TABLE.row - 2) * mm);
+      ctx.fillStyle = "#1f2328";
+    }
+    drawCells(item.cells, false);
+    columnLines(y);
+    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.3);
+    y += GOST_TABLE.row;
+  }
+
+  drawGostStamp(
+    ctx,
+    sheet,
+    page.form,
+    gostStampValues(options.stamp || {}, {
+      object: options.object || "",
+      drawing: options.title || "",
+      sheet: options.sheet || 1,
+      sheets: options.sheets || 1,
+      date: gostDate(options.date),
+    }),
+    mm,
+  );
+  return exportBlob(canvas);
+}
+
+/**
+ * Архив готовых листов: порядковый номер в имени, чтобы листы в папке шли тем
+ * же порядком, что и в документе. Zip один на всю сборку — тот же `writeZip`.
+ */
+async function gostSheetsZip(blobs, name) {
+  const files = blobs.map((data, index) => ({
+    name: String(index + 1).padStart(2, "0") + "-" + name,
+    data,
+    compress: false,
+  }));
+  return writeZip(files, { compress: false });
+}
+
+/**
+ * Печать готовых листов: по картинке на страницу, без заголовка над ней —
+ * всё, что нужно, уже написано в основной надписи.
+ *
+ * **Миллиметры при такой печати не свои.** Браузер печатает со своими полями
+ * и ужимает лист под них; линейкой выверяют не это, а скачанный PNG,
+ * напечатанный «как есть» (100 %). Диалог говорит об этом вслух — молча
+ * отдать на замер ужатый лист было бы хуже, чем не печатать вовсе.
+ */
+async function gostPrintSheets(blobs) {
+  const root = exportPrintRoot();
+  const urls = [];
+  const images = [];
+  const nodes = [];
+  for (const blob of blobs) {
+    const url = URL.createObjectURL(blob);
+    urls.push(url);
+    const wrap = exportNode("div", "print-doc print-doc--scheme print-doc--sheet");
+    const image = document.createElement("img");
+    image.className = "print-doc__image";
+    image.src = url;
+    wrap.append(image);
+    images.push(image);
+    nodes.push(wrap);
+  }
+  root.replaceChildren(...nodes);
+  await Promise.all(
+    images.map(
+      (image) =>
+        new Promise((resolve) => {
+          image.addEventListener("load", resolve, { once: true });
+          image.addEventListener("error", resolve, { once: true });
+        }),
+    ),
+  );
+  exportPrintRun(root);
+  setTimeout(() => urls.forEach((url) => URL.revokeObjectURL(url)), 4000);
+}
+
+/**
+ * Все листы таблицы разом: массив PNG в порядке листов. «Лист N из M» считает
+ * сама разбивка, поэтому номер на бумаге не может разойтись с числом файлов.
+ */
+async function gostTableSheets(table, options = {}) {
+  const plan = gostTablePages(table, options);
+  // Ширины колонок считаются один раз на все листы: разные ширины на соседних
+  // листах одной таблицы читались бы как две разные таблицы.
+  const columns = gostTableColumns(table, gostField(plan.sheet, "form5").width);
+  const blobs = [];
+  for (let index = 0; index < plan.pages.length; index += 1) {
+    blobs.push(
+      await gostTablePng(table, plan.pages[index], { ...plan, columns }, {
+        ...options,
+        sheet: index + 1,
+        sheets: plan.pages.length,
+      }),
+    );
+  }
+  return blobs;
 }
 
 // src/imagePrep.js
@@ -25419,6 +26593,86 @@ function openEquipmentWindow(api, options = {}) {
   return { close };
 }
 
+// src/panels/stampForm.js
+// Окно «Данные для штампа»: графы основной надписи, которых в разметке нет.
+//
+// Отдельным файлом, а не внутри панели выгрузки: окно зовут из двух диалогов
+// (схема и таблица), и жить оно должно там, где его видно обоим. Своей панели
+// у него нет — это диалог, а не колонка.
+//
+// Правка объекта идёт через `canvasCommit`: Ctrl+Z возвращает прежние графы,
+// как и любую другую правку. Пустые графы не хранятся вовсе — объект, у
+// которого штамп не заполняли, остаётся побайтово прежним (G68).
+
+
+
+
+/**
+ * Подписи и подсказки граф. Ключ — поле модели, поэтому список строк окна
+ * не может разойтись с `PROJECT_STAMP_FIELDS`: порядок строк берётся оттуда,
+ * а не повторяется здесь вторым списком. Новое поле без подписи ловит тест.
+ */
+const STAMP_LABELS = {
+  code: { label: "stampCode", hint: "stampCodeHint" },
+  stage: { label: "stampStage", hint: "stampStageHint" },
+  author: { label: "stampAuthor" },
+  checker: { label: "stampChecker" },
+  approver: { label: "stampApprover" },
+  org: { label: "stampOrg" },
+};
+
+function stampField(field, value) {
+  const row = STAMP_LABELS[field] || { label: field };
+  const input = uiEl("input", {
+    class: "ui-input",
+    type: "text",
+    value,
+    placeholder: row.hint ? strings.gost[row.hint] : "",
+  });
+  return {
+    field,
+    input,
+    node: uiEl("label", { class: "export__field" }, [
+      uiEl("span", { class: "export__field-label", text: strings.gost[row.label] || field }),
+      input,
+    ]),
+  };
+}
+
+/**
+ * Окно с графами. Закрывается двумя способами: «Сохранить» кладёт правку в
+ * объект, «Отмена» не трогает ничего. `onSaved` зовут после сохранения —
+ * диалогу выгрузки надо обновить подсказку.
+ */
+function stampDialog(api, onSaved) {
+  const { getState, notify } = api;
+  const current = projectStamp(getState().project);
+  const rows = PROJECT_STAMP_FIELDS.map((field) => stampField(field, current[field]));
+
+  const save = () => {
+    const patch = {};
+    for (const row of rows) patch[row.field] = row.input.value;
+    const before = getState().project;
+    const result = setProjectStamp(before, patch);
+    if (result.changed) canvasCommit(before, result.project, strings.history.stamp);
+    modal.close();
+    notify(strings.gost.stampSaved, "success");
+    if (typeof onSaved === "function") onSaved();
+  };
+
+  const confirm = uiButton(strings.dialog.save, { class: "ui-btn ui-btn--accent", on: { click: save } });
+  const modal = uiModal({
+    title: strings.gost.stampTitle,
+    body: uiEl("div", { class: "export__body" }, [
+      uiEl("p", { class: "export__hint", text: strings.gost.stampHint }),
+      uiEl("div", { class: "export__controls" }, rows.map((row) => row.node)),
+    ]),
+    actions: [uiButton(strings.dialog.cancel, { on: { click: () => modal.close() } }), confirm],
+    primary: confirm,
+  });
+  return modal;
+}
+
 // src/panels/export.js
 // Панель выгрузки: две кнопки в шапке и два диалога — таблица и схема.
 //
@@ -25426,6 +26680,8 @@ function openEquipmentWindow(api, options = {}) {
 // делает `exporter.js`. Здесь — выбор разбивки, области и множителя, да связь
 // с состоянием сеанса: фильтр, схема и её план берутся ровно те, что на экране,
 // поэтому скрытое фильтром не попадает ни в таблицу, ни в картинку, ни в легенду.
+
+
 
 
 
@@ -25457,7 +26713,31 @@ const exportChoice = {
   links: false,
   tableScale: 2,
   schemeScale: 2,
+  // Лист по ГОСТ: рамка и основная надпись вместо голой картинки. Отметка одна
+  // на схемы и таблицы — заказчик просил «всё», и держать два переключателя
+  // для одного решения незачем. Умолчание «нет»: прежние выгрузки остаются
+  // тем, чем были.
+  gost: false,
+  // Формат листа: «auto» — подобрать под план, остальное — выбор руками.
+  gostFormat: "auto",
 };
+
+// Выбор формата: подбор плюс четыре формата. Ориентацию руками не выбирают —
+// её решает план (лежачий ложится на альбомный лист), и третий переключатель
+// рядом с двумя первыми только путал бы.
+function exportFormatSelect(onChange) {
+  return exportSelect(
+    [
+      { value: "auto", label: strings.gost.formatAuto },
+      ...GOST_FORMATS.map((format) => ({ value: format.id, label: format.id })),
+    ],
+    exportChoice.gostFormat,
+    (value) => {
+      exportChoice.gostFormat = value;
+      onChange();
+    },
+  );
+}
 
 function exportField(labelText, control) {
   return uiEl("label", { class: "export__field" }, [
@@ -25618,6 +26898,36 @@ function exportBaseName(state, suffix) {
   return exportFileName(state.project, parts.join(" — "), suffix);
 }
 
+// Что уходит в штамп листа таблицы: объект, название документа и данные,
+// заполненные в окне «Данные для штампа». Название собирается там же, где и
+// имя файла, — иначе лист и файл называли бы таблицу по-разному.
+function exportGostTableOptions(api, table) {
+  // Объект берётся свежим, а не из снимка, с которым открылся диалог: окно
+  // «Данные для штампа» правит его из-под этого же диалога, и снимок к моменту
+  // выгрузки уже без графы. Один раз на этом и попались — лист вышел с пустым
+  // штампом и без единой жалобы.
+  const project = api.getState().project;
+  const room = exportChoice.roomId ? findRoom(project, exportChoice.roomId) : null;
+  // Название документа — что это за таблица, а не имя объекта: имя объекта
+  // стоит в штампе выше, и повторять его второй строкой незачем.
+  const kind =
+    exportChoice.kind === "links"
+      ? strings.exportPanel.kindLinks
+      : exportChoice.kind === "equipment"
+        ? strings.exportPanel.kindEquipment
+        : exportChoice.kind === "types"
+          ? strings.exportPanel.kindTypes
+          : strings.exportPanel.kindMarks;
+  const title = [kind, room ? room.name : ""].filter(Boolean).join(". ");
+  return {
+    scale: exportChoice.tableScale,
+    format: exportChoice.gostFormat,
+    stamp: projectStamp(project),
+    object: project.name,
+    title,
+  };
+}
+
 // ——— диалог таблицы ———————————————————————————————————————————————————
 
 function exportTableDialog(api) {
@@ -25636,7 +26946,17 @@ function exportTableDialog(api) {
     preview.replaceChildren(
       exportTableNode(table, { title: table.title || state.project.name, subtitle: exportSubtitleOf(state, table) }),
     );
-    hint.textContent = exportTableSizeText(table, exportChoice.tableScale);
+    if (!exportChoice.gost) {
+      hint.textContent = exportTableSizeText(table, exportChoice.tableScale);
+      return;
+    }
+    // Сколько листов даст таблица, видно до выгрузки: разбивка считается по
+    // строкам, а не по нарисованному, и число листов тут же идёт в штамп.
+    const plan = gostTablePages(table, { format: exportChoice.gostFormat });
+    hint.textContent = [
+      gostSheetSizeText(plan.sheet, exportChoice.tableScale),
+      text("gost.pages", { count: plan.pages.length }),
+    ].join(" · ");
   };
 
   const groupSelect = exportSelect(
@@ -25729,6 +27049,22 @@ function exportTableDialog(api) {
     }),
   ]);
 
+  // Таблица листами по ГОСТ: первый лист формы 5, последующие — формы 6.
+  // Отметка и формат те же, что у схемы: вид выгрузки у объекта один.
+  const formatField = exportField(strings.gost.format, exportFormatSelect(() => refresh()));
+  const gostCheck = exportCheck(strings.gost.sheet, exportChoice.gost, (on) => {
+    exportChoice.gost = on;
+    formatField.hidden = !on;
+    refresh();
+  });
+  gostCheck.title = strings.gost.sheetHint;
+  formatField.hidden = !exportChoice.gost;
+  controls.append(
+    gostCheck,
+    formatField,
+    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refresh) } }),
+  );
+
   const saved = (name) => notify(text("exportPanel.saved", { name }), "success");
   const guard = async (run) => {
     try {
@@ -25772,13 +27108,23 @@ function exportTableDialog(api) {
       on: {
         click: () =>
           guard(async () => {
-            const blob = await tablePng(table, {
-              scale: exportChoice.tableScale,
-              title: table.title || state.project.name,
-              subtitle: exportSubtitleOf(state, table),
-            });
-            const name = exportBaseName(state, "png");
-            exportDownload(blob, name);
+            if (!exportChoice.gost) {
+              const blob = await tablePng(table, {
+                scale: exportChoice.tableScale,
+                title: table.title || state.project.name,
+                subtitle: exportSubtitleOf(state, table),
+              });
+              const name = exportBaseName(state, "png");
+              exportDownload(blob, name);
+              saved(name);
+              return;
+            }
+            // Таблица на несколько листов — это несколько файлов, и класть их
+            // в папку загрузок по одному нельзя: браузер второй и третий
+            // скачивает молча или не скачивает вовсе. Поэтому архив.
+            const sheets = await gostTableSheets(table, exportGostTableOptions(api, table));
+            const name = exportBaseName(state, sheets.length > 1 ? "zip" : "png");
+            exportDownload(sheets.length > 1 ? await gostSheetsZip(sheets, exportBaseName(state, "png")) : sheets[0], name);
             saved(name);
           }),
       },
@@ -25787,13 +27133,17 @@ function exportTableDialog(api) {
       class: "ui-btn ui-btn--accent",
       on: {
         click: () =>
-          guard(() =>
-            printView("table", {
+          guard(async () => {
+            if (exportChoice.gost) {
+              await gostPrintSheets(await gostTableSheets(table, exportGostTableOptions(api, table)));
+              return;
+            }
+            await printView("table", {
               table,
               title: table.title || state.project.name,
               subtitle: exportSubtitleOf(state, table),
-            }),
-          ),
+            });
+          }),
       },
     }),
   ];
@@ -25831,7 +27181,32 @@ function exportSchemeDialog(api) {
   const roomsPlan = allSchemesPlan(state.project, { rooms: true, filter: state.filter });
   if (exportChoice.area === "rooms" && roomsPlan.rooms === 0) exportChoice.area = "all";
 
+  // Раскладка листа по ГОСТ считается тем же вызовом, что и выгрузка: формат,
+  // поле чертежа и настоящий масштаб в подсказке обязаны совпасть с тем, что
+  // ляжет на бумагу.
+  //
+  // Объект берётся свежим (`getState()`), а не из снимка, с которым открылся
+  // диалог: окно «Данные для штампа» правит его из-под этого же диалога, и в
+  // снимке графы остались бы пустыми — лист вышел бы без штампа молча.
+  const gostPlanOf = () =>
+    gostSchemeSheet(getState().project, scheme, {
+      area: exportAreaOf(state, scheme),
+      filter: exportFilterOfSheet(state),
+      format: exportChoice.gostFormat,
+    });
+
   const refreshHint = () => {
+    if (exportChoice.gost) {
+      const plan = gostPlanOf();
+      const parts = [gostSheetSizeText(plan.sheet, exportChoice.schemeScale), plan.scaleText];
+      // Калибровки нет — в штампе будет «Без масштаба», и сказать об этом надо
+      // до выгрузки: чертёж без масштаба меряют линейкой впустую.
+      if (!plan.denominator) parts.push(strings.gost.noScaleHint);
+      if (plan.tooSmall) parts.push(strings.gost.tooSmall);
+      if (exportByRooms()) parts.push(text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }));
+      hint.textContent = parts.join(" · ");
+      return;
+    }
     const size = exportAreaSize(state, scheme);
     const line = exportSizeText(size.width, size.height, exportChoice.schemeScale);
     if (!exportByRooms()) {
@@ -25905,6 +27280,23 @@ function exportSchemeDialog(api) {
     }),
   ]);
 
+  // Лист по ГОСТ — отдельной строкой под остальными отметками: это не ещё одна
+  // галочка «с чем рисовать», а другой вид листа, и рядом с ним стоят формат и
+  // кнопка в окно штампа.
+  const formatField = exportField(strings.gost.format, exportFormatSelect(refreshHint));
+  const gostCheck = exportCheck(strings.gost.sheet, exportChoice.gost, (on) => {
+    exportChoice.gost = on;
+    formatField.hidden = !on;
+    refreshHint();
+  });
+  gostCheck.title = strings.gost.sheetHint;
+  formatField.hidden = !exportChoice.gost;
+  controls.append(
+    gostCheck,
+    formatField,
+    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+  );
+
   const guard = async (run) => {
     try {
       await run();
@@ -25924,14 +27316,25 @@ function exportSchemeDialog(api) {
     if (missed.length > 0) {
       notify(text("exportPanel.labelsOutside", { names: missed.slice(0, 5).join(", ") }), "error");
     }
+    const common = {
+      area: exportAreaOf(state, scheme),
+      scale: exportChoice.schemeScale,
+      legend: exportChoice.legend,
+      outlines: exportChoice.outlines,
+      links: exportChoice.links,
+      filter: exportFilterOfSheet(state),
+    };
     try {
-      return await schemePng(state.project, scheme, image, {
-        area: exportAreaOf(state, scheme),
-        scale: exportChoice.schemeScale,
-        legend: exportChoice.legend,
-        outlines: exportChoice.outlines,
-        links: exportChoice.links,
-        filter: exportFilterOfSheet(state),
+      if (!exportChoice.gost) return await schemePng(state.project, scheme, image, common);
+      const plan = gostPlanOf();
+      // О мелкоте говорим и здесь: подсказку в окне могли не прочесть, а лист
+      // с нечитаемыми подписями уже уйдёт в файл.
+      if (plan.tooSmall) notify(strings.gost.tooSmall, "error");
+      return await gostSchemePng(getState().project, scheme, image, {
+        ...common,
+        layout: plan,
+        format: exportChoice.gostFormat,
+        building: exportRoomName(state.project, exportAreaRoomId()),
       });
     } finally {
       if (release) release();
@@ -25962,8 +27365,12 @@ function exportSchemeDialog(api) {
                 const blob = await getImage(item.imageId);
                 if (blob) images.set(item.imageId, blob);
               }
-              const zip = await allSchemesZip(state.project, images, {
+              // Свежий объект — по той же причине, что и у одного листа: графы
+              // штампа могли заполнить из-под этого окна.
+              const zip = await allSchemesZip(getState().project, images, {
                 rooms: byRooms,
+                gost: exportChoice.gost,
+                format: exportChoice.gostFormat,
                 scale: exportChoice.schemeScale,
                 legend: exportChoice.legend,
                 outlines: exportChoice.outlines,
@@ -25997,7 +27404,10 @@ function exportSchemeDialog(api) {
         click: () =>
           guard(async () => {
             const blob = await renderScheme();
-            await printView("scheme", { blob, title: exportSchemeTitle(state, scheme) });
+            // У листа по ГОСТ заголовка над картинкой нет: всё, что нужно,
+            // написано в основной надписи, а строка сверху съела бы поле.
+            if (exportChoice.gost) await gostPrintSheets([blob]);
+            else await printView("scheme", { blob, title: exportSchemeTitle(state, scheme) });
           }),
       },
     }),
