@@ -39,10 +39,11 @@ import {
   validate,
 } from "../src/model.js";
 import { marksTable, typesTable, toCsv } from "../src/tables.js";
-import { filtersMarkRows } from "../src/panels/filters.js";
+import { filtersMarkRows, filtersToggleCategory, filtersTypeChecked } from "../src/panels/filters.js";
 import { marksSchemeTotal } from "../src/panels/marks.js";
 import { roomsUsage } from "../src/panels/rooms.js";
 import {
+  visibleMarks,
   commentPlateLines,
   drawLegend,
   hitTest,
@@ -304,6 +305,26 @@ test("карточка метки — единственная дверь к т�
   const plain = markCardModel(box.project, box.socket);
   assert.equal(plain.comment, false);
   assert.equal(plain.kind, "point");
+});
+
+// Фильтры — решение таска: тип «Коммент» стоит в дереве как все. Дерево
+// отвечает на «что рисуется на плане», а урезан у комментария список, и это
+// разные вопросы. Отдельная галочка рядом с «Показать все» была бы вторым
+// механизмом скрытия на ту же работу.
+test("галочка типа прячет плашку с плана, как любую метку", () => {
+  const box = fixture();
+  const scheme = box.project.schemes[0];
+  const comments = box.project.categories.find((category) => category.name === "Комментарии");
+  assert.equal(filtersTypeChecked(box.project, null, box.typeOf("Коммент")), true);
+  assert.equal(visibleMarks(box.project, scheme, null).length, 3);
+
+  const hidden = filtersToggleCategory(box.project, null, comments.id, false);
+  assert.equal(filtersTypeChecked(box.project, hidden, box.typeOf("Коммент")), false);
+  const shown = visibleMarks(box.project, scheme, hidden);
+  assert.equal(shown.length, 2);
+  assert.equal(shown.some((mark) => markIsComment(mark)), false);
+  // Обычные метки при этом на месте: галочка одного типа чужих не трогает.
+  assert.deepEqual(shown.map((mark) => labelOf(box.project, mark.id)).sort(), ["Р1", "Т1"]);
 });
 
 // ——— плашка на плане ——————————————————————————————————————————————
