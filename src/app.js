@@ -4,6 +4,9 @@
 import { strings, text } from "./strings.js";
 import { getSetting, setSetting } from "./store.js";
 import { findScheme } from "./model.js";
+// Виды шрифта объявлены там же, где их разбирают в семейства, — в `render.js`.
+// Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
+import { FONT_DRAFT, FONT_KINDS } from "./render.js";
 import { registerServiceWorker } from "./pwa.js";
 // Значок кнопки раскладки рисует общий набор — своего рисунка у каркаса нет.
 import { uiIcon } from "./panels/ui.js";
@@ -43,6 +46,9 @@ const appState = {
   // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
   // встречать пользователя дугами поверх плана никто не просил.
   linksShown: false,
+  // Шрифт подписей на экране. Умолчание чертёжное: заказчик сам просил шрифт
+  // на схеме, и подписи там прописные, где претензий к нему нет.
+  schemeFont: FONT_DRAFT,
   activeTypeId: null,
   mode: "select",
   filter: { categoryIds: null, typeIds: null, roomId: null, query: "" },
@@ -79,6 +85,12 @@ export const LAST_PROJECT_KEY = "lastProjectId";
 // разметки. Живёт в настройках браузера, переживает перезагрузку, в объект и в
 // файл проекта не попадает.
 export const LINKS_SETTING = "markLinksShown";
+// Шрифт подписей на экране: чертёжный или системный (G172). Той же природы,
+// что линейка и связи, — выбор глаз, а не свойство разметки. В объект не
+// попадает нарочно: уехав туда, он навязался бы напарнику и менял бы файл при
+// каждом переключении. Бумаги и выгрузки не касается вовсе — там чертёжный
+// всегда, это чертёж по ГОСТ.
+export const SCHEME_FONT_SETTING = "schemeFontKind";
 // На первом запуске свёрнуты «Размеры»: их трогают один раз и надолго, а
 // место они отнимают у списка схем. Всё остальное открыто — иначе новый
 // пользователь ищет, куда делись инструменты.
@@ -528,6 +540,14 @@ function wireSections() {
   Promise.resolve(getSetting(LINKS_SETTING))
     .then((saved) => {
       if (saved === true) setState({ linksShown: true });
+    })
+    .catch(() => {});
+  // Шрифт схемы: стартует чертёжным и меняется, если в настройках лежит другой
+  // известный вид. Чужое слово игнорируется — лучше умолчание, чем схема без
+  // шрифта из-за опечатки в хранилище.
+  Promise.resolve(getSetting(SCHEME_FONT_SETTING))
+    .then((saved) => {
+      if (FONT_KINDS.includes(saved) && saved !== FONT_DRAFT) setState({ schemeFont: saved });
     })
     .catch(() => {});
 }

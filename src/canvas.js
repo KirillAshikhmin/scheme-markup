@@ -601,7 +601,11 @@ function canvasState() {
 // размеры метки и подписи — из объекта (их двигает ползунок в панели).
 function canvasViewOf(state) {
   const sizes = state.project && state.project.view ? state.project.view : {};
-  return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize };
+  // Вид шрифта — третья половина `view`, рядом с сеансовым масштабом и
+  // объектными размерами: это выбор глаз из личных настроек браузера, в объект
+  // он не попадает. Выгрузка собирает свой `view` сама и этого поля не кладёт,
+  // поэтому на бумагу уходит чертёжный шрифт независимо от настройки (G172).
+  return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize, fontKind: state.schemeFont };
 }
 
 function canvasScheme(state) {

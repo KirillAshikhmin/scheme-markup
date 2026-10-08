@@ -6,7 +6,7 @@
 // Обводки помещений здесь нет вовсе: контур принадлежит комнате, а не метке,
 // и запускается из раздела «Помещения» — там и список комнат, и кнопки
 // контуров. В этом разделе остаются только режимы про метки.
-import { GUIDES_SETTING, layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { GUIDES_SETTING, SCHEME_FONT_SETTING, layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   BLOCK_MODES,
@@ -24,7 +24,7 @@ import {
 import { uiEl, uiButton, uiIconButton } from "./ui.js";
 import { setSetting } from "../store.js";
 import { openTypePicker } from "./typePicker.js";
-import { shapeIcon } from "../render.js";
+import { FONT_DRAFT, FONT_SYSTEM, shapeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
 import {
   canvasCommit,
@@ -48,6 +48,45 @@ function toolsTypeIcon(project, typeId, size = 26) {
 // перетаскивание: иначе стек забивался бы тридцатью шагами на один жест.
 // Отметка «линейка и направляющие»: состояние сеанса плюс запись в настройки —
 // оно переживает перезагрузку, но в объект не попадает.
+// Выбор шрифта подписей на экране (G172).
+//
+// **Почему здесь, а не в своём окне настроек.** Окна настроек в сборке нет, и
+// заводить его ради одного выбора жалко — а раздел «Размеры» и так отвечает
+// ровно на этот вопрос: как схема выглядит на экране. Рядом уже стоят кегль
+// меток, кегль подписей и галка линейки, причём линейка — такая же личная
+// настройка браузера, а не свойство объекта. Шрифт встаёт прямо под «Подписи»:
+// там же, где их размер, выбирается и их рисунок.
+//
+// **Почему два пункта, а не три.** Моноширинный напрашивался третьим, но
+// своего файла у него не будет (второй шрифт в сборку не кладём), а системный
+// моноширинный у каждой машины свой — на двух компьютерах один объект выглядел
+// бы по-разному. Подписи к тому же короткие и прописные: выравнивать в них
+// нечего, пользы от моноширинного нет.
+function toolsFontSelect(state, setState) {
+  const options = [
+    { value: FONT_DRAFT, label: strings.tools.fontDraft },
+    { value: FONT_SYSTEM, label: strings.tools.fontSystem },
+  ];
+  const select = uiEl("select", {
+    class: "ui-input tools__select",
+    title: strings.tools.fontHint,
+    on: {
+      change: () => {
+        setState({ schemeFont: select.value });
+        setSetting(SCHEME_FONT_SETTING, select.value);
+      },
+    },
+  });
+  const current = state.schemeFont === FONT_SYSTEM ? FONT_SYSTEM : FONT_DRAFT;
+  for (const option of options) {
+    const node = uiEl("option", { text: option.label, value: option.value });
+    node.value = option.value;
+    if (option.value === current) node.selected = true;
+    select.append(node);
+  }
+  return select;
+}
+
 function toolsGuidesCheck(state, setState) {
   const box = uiEl("input", {
     class: "tools__check",
@@ -319,6 +358,14 @@ function mountSizesPanel(host, api) {
         uiEl("span", { text: strings.tools.labelSize }),
         toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
       ]),
+      // Шрифт подписей — сразу под их размером. Строкой ниже сказано, что это
+      // только экран: иначе выбор читался бы как «чем печатать», а печать
+      // всегда чертёжная и выбора не слушает.
+      uiEl("label", { class: "tools__field" }, [
+        uiEl("span", { text: strings.tools.font }),
+        toolsFontSelect(state, setState),
+      ]),
+      uiEl("p", { class: "tools__note", text: strings.tools.fontHint }),
       // Линейка и направляющие прячутся целиком, не удаляясь: оснастка нужна,
       // пока целишься, и мешает, когда смотришь на план.
       uiEl("label", { class: "tools__field tools__field--check" }, [
@@ -337,7 +384,7 @@ function mountSizesPanel(host, api) {
 
   subscribe((state, changed) => {
     if (sizeBefore) return;
-    if ("project" in changed || "guidesShown" in changed) render();
+    if ("project" in changed || "guidesShown" in changed || "schemeFont" in changed) render();
   });
   render();
 }
