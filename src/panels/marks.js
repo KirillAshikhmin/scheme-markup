@@ -1096,8 +1096,22 @@ function mountMarksPanel(host, api) {
     const total = marksSchemeTotal(state.project, state.schemeId);
     syncFilters(state, rows.length, total);
     if (rows.length === 0) {
+      // Три разных пустоты, и путать их нельзя. «Под фильтр ничего не подошло»
+      // — метки есть, но скрыты. «Меток пока нет» — на схеме пусто. Третья
+      // появилась с комментариями (G167): плашки на схеме стоят, а в списке их
+      // нет по их природе, и без этой строки человек решил бы, что работа
+      // пропала.
+      const onlyComments =
+        total === 0 && state.project.marks.some((mark) => mark.schemeId === state.schemeId);
       list.replaceChildren(
-        uiEl("p", { class: "panel__empty", text: total > 0 ? strings.marks.nothingFound : strings.panels.marksEmpty }),
+        uiEl("p", {
+          class: "panel__empty",
+          text: total > 0
+            ? strings.marks.nothingFound
+            : onlyComments
+              ? strings.marks.onlyComments
+              : strings.panels.marksEmpty,
+        }),
       );
       return;
     }

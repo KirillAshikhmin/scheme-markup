@@ -2365,6 +2365,12 @@ const COMMENT_PLATE_PAD = 0.5;
 const COMMENT_PLATE_LINE = 1.25;
 // Скругление углов — в долях кегля, но не больше половины высоты плашки.
 const COMMENT_PLATE_RADIUS = 0.5;
+// Во сколько раз плашка с указателем отходит от своей точки дальше обычной
+// подписи. Слова заказчика про указатель: «соединительная линия между точкой и
+// подписью чтобы была… более очевидная». Встань плашка вплотную, как
+// обозначение, — линия вышла бы в десяток пикселей, и указателя было бы не
+// разглядеть. Отодвинутую рукой плашку это не трогает: у неё своё смещение.
+const COMMENT_POINTER_GAP = 3.5;
 
 /**
  * Текст плашки, разложенный по строкам. Перенос по словам; слово длиннее
@@ -2534,7 +2540,7 @@ function labelPlaceOf(project, scheme, target, state, layout) {
   // или она с другой схемы. Такая подпись не рисуется; место ей даётся
   // стандартное, то самое, где подпись стояла всегда.
   const [slot] = labelSlots(
-    labelPlanSizes(state).gap,
+    labelPlanSizes(state).gap * (markPointer(target) ? COMMENT_POINTER_GAP : 1),
     labelSpan(0, 0, 0),
     0,
     { left: 0, right: 0 },
@@ -2775,6 +2781,7 @@ function labelPlaceAll(project, scheme, filter, sizes) {
       key: labelKeyOf(target),
       box: labelPlanBox(project, scheme, target, sizes),
       offset: labelFixedPlace(project, target, sizes),
+      gap: markPointer(target) ? sizes.gap * COMMENT_POINTER_GAP : sizes.gap,
     }))
     .filter((entry) => entry.box.text);
   entries.sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
@@ -2800,7 +2807,7 @@ function labelPlaceAll(project, scheme, filter, sizes) {
   for (const entry of entries) {
     if (entry.offset) continue;
     const slots = labelSlots(
-      sizes.gap,
+      entry.gap,
       labelSpan(entry.box.width, entry.box.height, entry.box.angle),
       entry.box.angle,
       entry.box.reach,
