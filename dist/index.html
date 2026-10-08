@@ -2246,16 +2246,27 @@
 
 /* ——— правка плана ——————————————————————————————————————————————————— */
 
+/* Кнопок в ряду семь: поворот, масштаб и рамка. В узкое окно они не влезают
+   в одну строку — перенос честнее, чем сжатые до неузнаваемости кнопки. */
 .plan-editor__tools {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 10px;
 }
 
+/* Окно просмотра плана: высота задана, а не выведена из картинки. Раньше её
+   держал `max-height` у самой картинки, но увеличенный план в такое окно не
+   помещается — ему нужна прокрутка, а прокрутке нужно окно с собственной
+   высотой. Побочная выгода: окно не прыгает при повороте и обрезке. */
 .plan-stage {
   position: relative;
   display: flex;
-  justify-content: center;
+  overflow: auto;
+  overscroll-behavior: contain;
+  height: 58vh;
+  min-height: 180px;
   background: var(--panel-bg-deep);
   border: 1px solid var(--panel-line);
   border-radius: 6px;
@@ -2264,9 +2275,21 @@
   touch-action: none;
 }
 
+/* Коробка ровно по картинке: рамка обрезки лежит внутри неё и задана долями
+   картинки — поэтому при увеличении и прокрутке остаётся на том же месте
+   плана. Центруется автоотступами, а не `justify-content`: содержимое шире
+   окна флекс-центрирование обрезает слева, и до левого края уже не
+   доскроллить. */
+.plan-stage__inner {
+  position: relative;
+  flex: none;
+  margin: auto;
+  line-height: 0;
+}
+
+/* Размер картинке задаёт скрипт в пикселях: `max-width` упирал бы увеличенный
+   план в ширину окна. */
 .plan-stage__img {
-  max-width: 100%;
-  max-height: 58vh;
   display: block;
   cursor: crosshair;
 }
@@ -2276,6 +2299,16 @@
   border: 1px dashed var(--accent);
   background: rgba(31, 111, 235, 0.18);
   pointer-events: none;
+}
+
+/* Разрешение плана и размер выбранной области — под картинкой, как просил
+   заказчик. Цифры моноширинные: строка меняется на каждом движении рамки, и
+   прыгающая ширина цифр дёргала бы её целиком. */
+.plan-editor__meta {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ——— список схем ————————————————————————————————————————————————————— */
@@ -2430,6 +2463,24 @@
   grid-column: 2;
   grid-row: 2;
   justify-self: end;
+}
+
+/* Масштаб плана — третьей строкой во всю ширину: состояние читается словами,
+   и места рядом с шестью кнопками для него нет. Заданный масштаб помечен
+   рамкой, как «заданное» у кнопок строки метки. */
+#panel-schemes .scheme-row__scale {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  margin: 3px 0 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+#panel-schemes .scheme-row__scale.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
 }
 
 #panel-schemes .scheme-row__tools .ui-btn {
@@ -2883,6 +2934,21 @@
 
 .warnings__ok .warnings__why {
   margin: 0;
+}
+
+/* ——— кнопки блока фильтров ———————————————————————————————————————————
+   Остальные правила блока фильтров лежат в `marks.css`, рядом со списком
+   меток, который они сужают; эта пришла с кнопкой «Скрыть все». Пара кнопок
+   стоит в одну строку нарочно: блок фильтров сворачивают ради вертикали
+   панели, и второй ряд кнопок отнял бы её обратно. */
+.filters__buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.filters__buttons .ui-btn {
+  flex: 1;
+  padding: 7px 8px;
 }
 
 /* ——— окно «Тип метки»: категории колонками ————————————————————————————
@@ -4406,6 +4472,8 @@ const strings = {
     markSizes: "размеры метки",
     replaceImage: "замена плана",
     editImage: "правка плана",
+    scaleSet: "масштаб плана",
+    scaleClear: "снятие масштаба плана",
     compact: "уплотнение нумерации",
     compactAll: "смыкание номеров по всем типам",
     markRoom: "помещение метки",
@@ -4487,6 +4555,10 @@ const strings = {
     typeKindNotLine: "Метка нарисована линией, а тип {code} — точечный: линии подходят только линейные типы",
     imageRequired: "Нужна картинка плана",
     planSizeInvalid: "Размер плана должен быть больше нуля",
+    scalePointsInvalid: "Калибровке нужны две точки на плане",
+    scaleMetersInvalid: "Расстояние между точками — число больше нуля, в метрах",
+    scaleMetersTooBig: "Расстояние между точками — не больше {max} м",
+    scaleSegmentEmpty: "Отрезок калибровки выродился в точку — покажите две разные точки плана",
     unknownCommitOption: "Правка не выполнена: в опциях команды неизвестный ключ {keys}. Известны: {known}",
     commitOptionsNotObject: "Правка не выполнена: опции команды — объект с ключами {keys}, а не список",
     nothingToPaste: "Вставлять нечего: в буфере нет метки",
@@ -4808,6 +4880,18 @@ const strings = {
     rotateLeft: "Повернуть влево",
     rotateRight: "Повернуть вправо",
     cropHint: "Обведите рамкой то, что оставить, и нажмите «Обрезать»",
+    // Увеличение просили кнопками — «добавь функции уменьшения и увеличения
+    // изображения», — колесо и щипок идут в придачу и названы здесь: вписанный
+    // в окно большой план не даёт поставить рамку точно. Сами кнопки подписаны
+    // словами панели инструментов (`tools.zoomIn` и рядом): язык масштаба в
+    // приложении один, и второй ради диалога заводить незачем.
+    panHint: "Колесо — масштаб, перетаскивание с Shift или двумя пальцами — сдвиг",
+    // Строка под картинкой. Заказчик просил разрешение плана; размер
+    // выбранной области отвечает на тот же вопрос точнее — «что получится
+    // после обрезки», — поэтому стоит рядом и появляется вместе с рамкой.
+    sizeFull: "Картинка {size} px",
+    sizeFrame: "Выбрано {size} px",
+    zoomLevel: "Масштаб {percent} %",
     crop: "Обрезать",
     cropReset: "Снять рамку",
     apply: "Готово",
@@ -4820,6 +4904,48 @@ const strings = {
       "За рамкой останется меток: {count}. Их прижмёт к краю плана, прежних мест уже не вернуть. Обрезать так?",
     cropAnyway: "Обрезать так",
     appliedClamped: "План обновлён; меток прижато к краю: {count}",
+    // Поворот и обрезка пересчитывают доли — и доли калибровки вместе с ними.
+    // Но точка калибровки за рамкой обрезки прижимается к краю, как метка, и
+    // отрезок от этого укорачивается: масштаб из него вышел бы неверным молча,
+    // поэтому он снимается.
+    appliedScaleDropped: "План обновлён; масштаб снят — точка калибровки осталась за рамкой. Откалибруйте заново.",
+  },
+  // Масштаб плана: калибровка по отрезку. Заказчик: «давай делаем настоящий
+  // масштаб», способ назвал сам.
+  scale: {
+    notSet: "Масштаб не задан",
+    set: "Масштаб: план {width} × {height} м",
+    setTitle: "Масштаб плана «{name}»: {meters} м между точками калибровки",
+    notSetTitle: "Масштаб плана «{name}» не задан — длины линий не показываются",
+    dialogTitle: "Масштаб плана «{name}»",
+    dialogSet: "Сейчас задано: {meters} м между двумя точками. Весь план — {width} × {height} м.",
+    dialogNone: "Масштаба нет: длины линейных меток не показываются.",
+    dialogHint:
+      "Калибровка по отрезку: показываете на плане две точки и говорите, сколько между ними метров. Берите то, что известно точно и подлиннее — стену во всю длину или размерную линию чертежа.",
+    start: "Откалибровать по отрезку",
+    again: "Откалибровать заново",
+    clear: "Убрать масштаб",
+    needPlan: "Сначала загрузите план этой схемы",
+    // Подсказка над планом в режиме калибровки.
+    hint:
+      "Калибровка масштаба: клик — первая точка отрезка, второй клик — вторая, потом спросим расстояние в метрах. Берите отрезок подольше — короткий раздувает ошибку. Направление липнет к ровным углам, Alt — свободно. Esc — отмена.",
+    askTitle: "Сколько метров между точками?",
+    askPlaceholder: "например 4,2",
+    askSubmit: "Задать масштаб",
+    badMeters: "Расстояние — число больше нуля, в метрах: «4,2» или «4.2»",
+    shortTitle: "Короткий отрезок",
+    shortAsk:
+      "Отрезок короче {share}% диагонали плана. Промах мышью на пару пикселей обернётся на таком отрезке процентами ошибки — и во всех длинах сразу. Надёжнее показать стену во всю длину. Калибровать по этому отрезку?",
+    shortAnyway: "Калибровать так",
+    // Дописывается к известию о замене подложки: пиксели те же, метры другие.
+    replaceDropped: "Масштаб снят: план другой — откалибруйте заново.",
+    applied: "Масштаб задан: {meters} м между точками, весь план — {width} × {height} м",
+    cleared: "Масштаб снят — длины больше не показываются",
+    cancelled: "Калибровка отменена",
+    // Длина в метрах: единица приписывается здесь, число считает модель.
+    meters: "{value} м",
+    lengthLabel: "Длина по плану",
+    markLength: "Длина по плану: {value}",
   },
   storage: {
     memory: "Браузер не дал открыть хранилище — работаем в памяти. Выгрузите объект в файл, иначе работа пропадёт при закрытии вкладки.",
@@ -4931,6 +5057,16 @@ const strings = {
     types: "Категории и типы",
     hidden: "скрыто: {count}",
     showAll: "Показать все",
+    // Обратная кнопка к «Показать все», и стоит она рядом с ней. Слова
+    // заказчика: «сделай рядом с ней обратную кнопку „Скрыть все“» — снять все
+    // галочки разом, чтобы потом включить одну-две и смотреть только их.
+    // Раньше для этого снимали по одной.
+    hideAll: "Скрыть все",
+    hideAllHint: "Снять все галочки — дальше включить нужные",
+    // Все галочки сняты: список пуст, и объяснить это надо там, где стоит
+    // кнопка, которая всё вернёт. Список говорит «под фильтр ничего не
+    // подошло», но не говорит, что фильтр — это снятые галочки.
+    allHidden: "Все типы скрыты — ни в списке, ни на плане меток не осталось",
     // Заголовок сворачиваемого блока фильтров над списком меток. Блок прилип
     // к верху списка и непрозрачен: свёрнутый, он отдаёт списку полтораста
     // пикселей, и раскрытая карточка метки наконец помещается в невысоком окне.
@@ -5206,6 +5342,9 @@ const strings = {
     room: "Помещение",
     location: "Расположение",
     original: "В оригинале",
+    // Длина линейных меток в метрах. Колонка появляется только там, где есть
+    // что показать: на объекте без калибровки лист остаётся прежним.
+    length: "Длина, м",
     code: "Код",
     name: "Название",
     category: "Категория",
@@ -6206,6 +6345,15 @@ function updateScheme(project, schemeId, patch) {
 // разметка поедет, и спросить об этом обязан вызывающий, до правки.
 // Пересчитывается только то, что задано в пикселях плана, — смещения подписей:
 // на картинке вдвое крупнее прежние 12 px означали бы вдвое меньший отступ.
+//
+// **Калибровка масштаба снимается.** Доли указывают на то же место картинки,
+// но картинка другая: новый файл — это другой чертёж, снятый неизвестно с
+// какого кадра, и прежние «четыре метра между этими точками» на нём значат
+// неизвестно что. Пересчитать это нечем — кадр нового файла не сравнить со
+// старым ничем, кроме глаз, — а длина ленты из вранья уедет в закупку. Поэтому
+// масштаб честно сбрасывается (`scaleDropped`), об этом говорят вслух, и схема
+// возвращается в прежнее состояние «длин не показываем»; калибровка заново —
+// два клика. Отмена шага возвращает и её.
 function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) {
   const scheme = requireScheme(project, schemeId);
   if (typeof imageId !== "string" || imageId === "") throw modelError("imageRequired");
@@ -6216,9 +6364,12 @@ function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) 
   const scaleY = scheme.height > 0 ? nextHeight / scheme.height : 1;
   const scaleOffset = (offset) =>
     offset ? { dx: roundOffset(offset.dx * scaleX), dy: roundOffset(offset.dy * scaleY) } : offset;
-  const schemes = project.schemes.map((item) =>
-    item.id === schemeId ? { ...item, imageId, width: nextWidth, height: nextHeight } : item,
-  );
+  const scaleDropped = Boolean(planScaleOf(project, schemeId));
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    const { scale, ...rest } = item;
+    return { ...rest, imageId, width: nextWidth, height: nextHeight };
+  });
   const marks = project.marks.map((mark) =>
     mark.schemeId === schemeId && mark.labelOffset ? { ...mark, labelOffset: scaleOffset(mark.labelOffset) } : mark,
   );
@@ -6237,6 +6388,7 @@ function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) 
   return {
     project: withProject(project, { schemes, marks, groups, outlines }),
     scheme: schemes.find((item) => item.id === schemeId),
+    scaleDropped,
   };
 }
 
@@ -8182,6 +8334,202 @@ function deleteSchemeGuide(project, schemeId, guideId) {
   const deleted = guides.find((guide) => guide.id === guideId);
   if (!deleted) throw modelError("guideNotFound");
   return { project: withGuides(project, schemeId, guides.filter((guide) => guide.id !== guideId)), deleted };
+}
+
+// ——— масштаб плана: калибровка по отрезку ——————————————————————————————
+//
+// В первый день сборки заказчик сказал «масштаба и длин пока не надо» (G13),
+// теперь — «давай делаем настоящий масштаб», и способ назвал сам: **калибровка
+// по отрезку**. Показывают две точки на плане и говорят, сколько между ними
+// метров. Это работает со сканом, с фотографией чертежа и с выгрузкой из любой
+// программы — в отличие от «введите dpi», которого у фотографии нет вовсе.
+//
+// Масштаб живёт **у схемы**, а не у объекта: у этажей разные планы, снятые с
+// разных чертежей и в разном разрешении, и общего масштаба у них не бывает.
+//
+// Точки калибровки хранятся **долями** плана, как точки меток (ADR 002), а не
+// пикселями и не готовым «px на метр». Это и есть то, за что доли плачены:
+// поворот и обрезка пересчитывают доли тем же преобразованием, что и метки,
+// размер плана меняется вместе с ними — и метры остаются те же, без миграции
+// и без второго места, где живёт правда о масштабе. Готовое число px/м
+// приходилось бы пересчитывать на каждую правку картинки, и ошибка такого
+// пересчёта врала бы молча — в метрах, по которым закупают ленту.
+//
+// Поля нет у схем прежней разметки, и это не ошибка: без калибровки длины
+// просто не показываются, а всё остальное работает как раньше (G68).
+// `FORMAT_VERSION` не поднят — отсутствие поля даёт прежний вид.
+
+// Потолок разумного отрезка: сто километров между двумя точками одного плана
+// не бывает, а опечатка в поле не должна уехать в файл масштабом.
+const PLAN_SCALE_METERS_MAX = 100000;
+
+// Короткий отрезок калибровки. Ошибка в пару пикселей неизбежна — палец
+// целится не точнее, — и она делится на длину отрезка: откалибровал по
+// полуметровому проёму, получил проценты ошибки по всему плану. Мерка —
+// доля диагонали плана, а не метры: промах руки задан в пикселях, и
+// относительная ошибка считается в них же.
+const PLAN_SCALE_SHORT_SHARE = 0.08;
+
+function planDiagonalPx(scheme) {
+  const width = Number(scheme && scheme.width) || 0;
+  const height = Number(scheme && scheme.height) || 0;
+  return Math.hypot(width, height);
+}
+
+function scalePointOk(point) {
+  return Boolean(point) && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y));
+}
+
+function scaleFraction(point) {
+  return { x: clampFraction(Number(point.x)), y: clampFraction(Number(point.y)) };
+}
+
+// Длина отрезка в пикселях плана: доли умножаются на размер плана — тот самый
+// обратный перевод, которым рисуется всё остальное.
+function planSegmentPx(scheme, a, b) {
+  const width = Number(scheme && scheme.width) || 0;
+  const height = Number(scheme && scheme.height) || 0;
+  return Math.hypot((b.x - a.x) * width, (b.y - a.y) * height);
+}
+
+/**
+ * Калибровка схемы или `null`. Читать `scheme.scale` самому нельзя: у схемы
+ * прежней разметки поля нет вовсе, а испорченное (ноль метров, выродившийся
+ * в точку отрезок) здесь же превращается в «масштаба нет» — это честнее, чем
+ * показать длину, посчитанную из мусора.
+ */
+function planScaleOf(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  const raw = scheme && scheme.scale;
+  if (!raw || !scalePointOk(raw.a) || !scalePointOk(raw.b)) return null;
+  const meters = Number(raw.meters);
+  if (!(meters > 0) || !Number.isFinite(meters)) return null;
+  const a = scaleFraction(raw.a);
+  const b = scaleFraction(raw.b);
+  if (!(planSegmentPx(scheme, a, b) > 0)) return null;
+  return { a, b, meters, setAt: raw.setAt || null };
+}
+
+// Пикселей плана на метр — то число, через которое считается любая длина.
+// Ноль значит «масштаба нет»: ни одна длина наружу не выйдет.
+function planPixelsPerMeter(project, schemeId) {
+  const scale = planScaleOf(project, schemeId);
+  if (!scale) return 0;
+  const px = planSegmentPx(findScheme(project, schemeId), scale.a, scale.b);
+  return px > 0 ? px / scale.meters : 0;
+}
+function planHasScale(project, schemeId) {
+  return planPixelsPerMeter(project, schemeId) > 0;
+}
+
+/**
+ * Размер всего плана в метрах — или `null` без калибровки. Это ещё и способ
+ * проверить калибровку глазом: инженер знает, что дом по фасаду двенадцать
+ * метров, и «план 12,4 × 8,6 м» подтверждает масштаб, а «124 × 86» выдаёт
+ * запятую, поставленную не туда.
+ */
+function planSizeMeters(project, schemeId) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  if (!(perMeter > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  return { width: Number(scheme.width) / perMeter, height: Number(scheme.height) / perMeter };
+}
+
+// Слишком короткий отрезок калибровки. Не отказ, а повод спросить: решает
+// пользователь, но молча такое проходить не должно.
+function planScaleShort(project, schemeId, { a, b } = {}) {
+  const scheme = findScheme(project, schemeId);
+  if (!scheme || !scalePointOk(a) || !scalePointOk(b)) return false;
+  const px = planSegmentPx(scheme, scaleFraction(a), scaleFraction(b));
+  const diagonal = planDiagonalPx(scheme);
+  if (!(px > 0) || !(diagonal > 0)) return false;
+  return px < diagonal * PLAN_SCALE_SHORT_SHARE;
+}
+
+/**
+ * Калибровка: две точки плана (в долях) и расстояние между ними в метрах.
+ * Метры запоминаются как сказал человек, px/м считается из них и из размера
+ * плана на каждый вопрос — поэтому поворот и обрезка ничего здесь не портят.
+ */
+function setPlanScale(project, schemeId, { a, b, meters } = {}) {
+  const scheme = requireScheme(project, schemeId);
+  if (!scalePointOk(a) || !scalePointOk(b)) throw modelError("scalePointsInvalid");
+  const value = Number(meters);
+  if (!Number.isFinite(value) || !(value > 0)) throw modelError("scaleMetersInvalid");
+  if (value > PLAN_SCALE_METERS_MAX) throw modelError("scaleMetersTooBig", { max: PLAN_SCALE_METERS_MAX });
+  const first = scaleFraction(a);
+  const second = scaleFraction(b);
+  // Отрезок в один пиксель плана — это не калибровка, а промах мышью:
+  // масштаб из него вышел бы любым.
+  if (!(planSegmentPx(scheme, first, second) >= 1)) throw modelError("scaleSegmentEmpty");
+  const scale = {
+    a: first,
+    b: second,
+    // Три знака после запятой: миллиметры в метрах, дальше — шум ввода.
+    meters: Math.round(value * 1000) / 1000,
+    setAt: nowIso(),
+  };
+  const schemes = project.schemes.map((item) => (item.id === schemeId ? { ...item, scale } : item));
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), scale };
+}
+
+// Снятие масштаба: поле **убирается**, а не обнуляется, — схема становится
+// ровно такой, какой была до калибровки.
+function clearPlanScale(project, schemeId) {
+  const scheme = requireScheme(project, schemeId);
+  if (!Object.prototype.hasOwnProperty.call(scheme, "scale")) {
+    return { project, scheme, cleared: false };
+  }
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    const { scale, ...rest } = item;
+    return rest;
+  });
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), cleared: true };
+}
+
+/**
+ * Длина ломаной в метрах — или `null`, когда у схемы нет калибровки. Считается
+ * по тем же долям, что рисуются: сумма отрезков в пикселях плана, делённая на
+ * px/м. Замкнутая ломаная (лента по периметру комнаты) считается с последним
+ * отрезком — тем, который возвращается в первую вершину.
+ */
+function planLengthMeters(project, schemeId, points, closed = false) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  if (!(perMeter > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  const list = (Array.isArray(points) ? points : []).filter(scalePointOk).map(scaleFraction);
+  if (list.length < 2) return 0;
+  let px = 0;
+  for (let index = 1; index < list.length; index += 1) {
+    px += planSegmentPx(scheme, list[index - 1], list[index]);
+  }
+  if (closed && list.length > 2) px += planSegmentPx(scheme, list[list.length - 1], list[0]);
+  return px / perMeter;
+}
+
+/**
+ * Длина линейной метки в метрах — главный ответ этой задачи: сколько метров
+ * ленты, трека или тёплого пола заказывать. У точечной метки длины нет
+ * (`null`): её «длина» в карточке — размер изделия в миллиметрах, и путать их
+ * нельзя. Без калибровки — тоже `null`, и нигде ничего не показывается.
+ */
+function markLengthMeters(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark || mark.kind !== "line") return null;
+  return planLengthMeters(project, mark.schemeId, mark.points, mark.closed);
+}
+
+/**
+ * Метры числом для показа: запятая десятичным разделителем, как в чертеже,
+ * и не больше двух знаков — калибровка руками точнее сантиметра не бывает,
+ * а третий знак обещал бы точность, которой нет. Единицу приписывает строка
+ * словаря (`scale.meters`), здесь только число.
+ */
+function formatMeters(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return String(Math.round(number * 100) / 100).replace(".", ",");
 }
 
 // ——— правка вершин ломаной ————————————————————————————————————————————
@@ -16801,6 +17149,26 @@ function canvasViewOnly() {
   return false;
 }
 
+// ——— калибровка масштаба: имя режима ——————————————————————————————————
+//
+// Четвёртый режим холста, короткоживущий: рука показывает две точки отрезка,
+// дальше спрашивается расстояние в метрах, и режим сам возвращается в
+// «Выделение». Включает его панель схем — масштаб принадлежит схеме, и ручка
+// для него стоит там же, где сама схема.
+const CANVAS_MODE_SCALE = "scale";
+
+// Цвет отрезка калибровки. Он не часть чертежа и ничьим типом не окрашен —
+// поэтому свой, тот же синий, которым холст рисует всё «служебное».
+const CANVAS_SCALE_COLOR = "#0969da";
+
+// Видны ли ручки выделенного — поворот подписи, поводок, вершины пути, «+»
+// блока. Пока калибруют масштаб, их нет: рука показывает точки отрезка, и
+// ручка под курсором отобрала бы у него клик. Одно правило на рисование и на
+// попадание — разойдись они, пользователь нажимал бы на то, чего не видит.
+function canvasHandlesShown(state) {
+  return canvasEditAllowed(state) && state.mode !== CANVAS_MODE_SCALE;
+}
+
 // ——— что ставит режим добавления ——————————————————————————————————————
 //
 // Режимов у холста три: `select`, `add` и `room`. Отдельного «что ставим» —
@@ -16832,6 +17200,9 @@ function canvasHintText(state) {
   }
   const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
   const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
+  // Калибровка — поверх всего остального: рука в этот момент занята отрезком,
+  // и про метки с помещениями рассказывать нечего.
+  if (state.mode === CANVAS_MODE_SCALE) return strings.scale.hint;
   if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
   const adding = canvasAddKind(state);
   if (adding === "point" && type) {
@@ -17206,9 +17577,14 @@ function canvasPaint() {
     // которую ведут мышью. Выгрузка передаёт сюда `true` и считает сама.
     links: canvasFrameLinks(state, canvasPreview, scheme),
     draftColor,
-    draftLineStyle: state.activeTypeId ? styleOf(project, state.activeTypeId).lineStyle : "solid",
+    // Отрезок калибровки — всегда сплошной: начертание выбранного типа к нему
+    // отношения не имеет, а волна вместо прямой мешала бы целиться.
+    draftLineStyle:
+      state.activeTypeId && state.mode !== CANVAS_MODE_SCALE ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
-  const editable = canvasEditAllowed(state);
+  // Здесь `editable` отвечает только за ручки — поэтому и спрашивается про
+  // них: в калибровке их нет.
+  const editable = canvasHandlesShown(state);
   const outline = editable && state.selectedOutlineId ? findOutline(project, state.selectedOutlineId) : null;
   if (outline && outline.schemeId === scheme.id && !canvasDrag) {
     // Ручка поворота — у самой подписи комнаты, как у подписи метки: подпись
@@ -17290,8 +17666,10 @@ function canvasPaint() {
   }
 }
 
-// Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа.
+// Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа,
+// у отрезка калибровки — свой: он ничьего типа не несёт.
 function canvasDraftColor(state, project) {
+  if (state.mode === CANVAS_MODE_SCALE) return CANVAS_SCALE_COLOR;
   if (state.mode === "room") {
     const room = state.activeRoomId ? findRoom(project, state.activeRoomId) : null;
     return (room && room.color) || "#0969da";
@@ -18207,6 +18585,146 @@ function canvasDraftClick(plan, screen, free) {
   canvasRedraw();
 }
 
+// ——— калибровка масштаба ——————————————————————————————————————————————
+//
+// Два клика по плану и один вопрос. Отрезок — тот же черновик, которым
+// рисуется ломаная (и та же притяжка к направляющим и ровным углам: калибруют
+// по стене, а стена ровная), только кончается он не меткой, а масштабом схемы.
+
+/**
+ * Расстояние, набранное руками, числом в метрах — или `null`, если это не
+ * число. Запятая и точка равноправны: в чертёжной привычке «4,2», на
+ * клавиатуре нампада — «4.2», и спорить с рукой здесь незачем. Пробелы внутри
+ * («4 200»… нет, в метрах таких не бывает) просто убираются.
+ *
+ * Чистая и вынесена наружу ради теста: разбор ввода — то место, где молчаливая
+ * ошибка превращается в неверный масштаб по всему плану.
+ */
+function canvasScaleMeters(raw) {
+  const clean = String(raw == null ? "" : raw)
+    .replace(/\s/g, "")
+    .replace(",", ".");
+  if (clean === "") return null;
+  if (!/^\d*\.?\d+$/.test(clean)) return null;
+  const value = Number(clean);
+  if (!Number.isFinite(value) || !(value > 0) || value > PLAN_SCALE_METERS_MAX) return null;
+  return value;
+}
+
+// Первый клик ставит начало отрезка, второй — конец и открывает вопрос.
+function canvasScaleClick(plan, screen, free) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const snap = canvasDraftSnap(plan, free);
+  if (!canvasDraft || canvasDraft.kind !== "scale") {
+    canvasDraft = {
+      kind: "scale",
+      typeId: null,
+      projectId: state.project ? state.project.id : null,
+      // Схему черновик помнит сам: масштаб принадлежит ей, и дожидаться ответа
+      // в диалоге он обязан на той же схеме, на которой начинался.
+      schemeId: state.schemeId,
+      points: [snap.point],
+      cursor: snap.point,
+      snapped: false,
+      guides: [],
+    };
+    canvasRedraw();
+    return;
+  }
+  const view = canvasViewOf(state);
+  const first = planToScreen(canvasDraft.points[0], scheme, view);
+  // Второй клик в ту же точку — промах, а не отрезок: калибровать по нулю
+  // нельзя, и отказывать на это ошибкой было бы грубо.
+  if (Math.hypot(screen.x - first.x, screen.y - first.y) <= markRadius(view) + 6) return;
+  canvasDraft.points[1] = snap.point;
+  canvasDraft.cursor = snap.point;
+  canvasDraft.guides = [];
+  canvasRedraw();
+  canvasScaleAsk();
+}
+
+// Вопрос о расстоянии. Короткий отрезок не проходит молча: сперва
+// предупреждение, и только потом цифра.
+async function canvasScaleAsk() {
+  const draft = canvasDraft;
+  if (!draft || draft.kind !== "scale" || draft.points.length < 2) return;
+  const [a, b] = draft.points;
+  if (planScaleShort(canvasState().project, draft.schemeId, { a, b })) {
+    const go = await uiConfirm({
+      title: strings.scale.shortTitle,
+      message: text("scale.shortAsk", { share: Math.round(PLAN_SCALE_SHORT_SHARE * 100) }),
+      confirmLabel: strings.scale.shortAnyway,
+    });
+    // Диалог живёт дольше черновика: за это время могли сменить схему или
+    // объект, и тогда отрезок уже ничей.
+    if (canvasDraft !== draft) return;
+    if (!go) {
+      canvasCancelDraft();
+      canvasApi.notify(strings.scale.cancelled);
+      return;
+    }
+  }
+  let typed = "";
+  for (;;) {
+    const raw = await uiPrompt({
+      title: strings.scale.askTitle,
+      value: typed,
+      placeholder: strings.scale.askPlaceholder,
+      submitLabel: strings.scale.askSubmit,
+    });
+    if (canvasDraft !== draft) return;
+    if (raw === null) {
+      canvasCancelDraft();
+      canvasApi.notify(strings.scale.cancelled);
+      return;
+    }
+    typed = raw;
+    const meters = canvasScaleMeters(raw);
+    // Опечатку не проглатываем и работу не теряем: отрезок на месте, вопрос
+    // задаётся снова с тем, что было набрано.
+    if (meters === null) {
+      canvasApi.notify(strings.scale.badMeters, "error");
+      continue;
+    }
+    canvasScaleCommit(draft, meters);
+    return;
+  }
+}
+
+function canvasScaleCommit(draft, meters) {
+  const state = canvasState();
+  const [a, b] = draft.points;
+  if (!findScheme(state.project, draft.schemeId)) {
+    canvasCancelDraft();
+    return;
+  }
+  try {
+    const result = setPlanScale(state.project, draft.schemeId, { a, b, meters });
+    canvasDraft = null;
+    // Через ту же дверь, что и всё остальное: Ctrl+Z возвращает прежний
+    // масштаб (или прежнее «масштаба нет»). Режим сам уходит в «Выделение» —
+    // калибруют один раз, а не серией.
+    canvasCommit(state.project, result.project, strings.history.scaleSet, {
+      patch: { mode: "select" },
+      schemeId: draft.schemeId,
+    });
+    const size = planSizeMeters(canvasState().project, draft.schemeId);
+    canvasApi.notify(
+      text("scale.applied", {
+        meters: formatMeters(result.scale.meters),
+        width: size ? formatMeters(size.width) : "",
+        height: size ? formatMeters(size.height) : "",
+      }),
+      "success",
+    );
+  } catch (error) {
+    canvasCancelDraft();
+    canvasFail(error);
+  }
+}
+
 // `typeId` передаётся только тогда, когда линию дочерчивают не тем типом, что
 // выбран сейчас: черновик закончился, потому что тип на панели сменили.
 function canvasLineFinish(closed, typeId) {
@@ -18251,6 +18769,14 @@ function canvasLineFinish(closed, typeId) {
 function canvasSettleDraft() {
   if (!canvasDraft) return false;
   const draft = canvasDraft;
+  // Начатая калибровка не дочерчивается ничем: отрезок без расстояния в метрах
+  // — это не данные, а полдела, и в объекте ему места нет. Уходит он со
+  // словами: рука его начинала.
+  if (draft.kind === "scale") {
+    canvasCancelDraft();
+    canvasApi.notify(strings.scale.cancelled);
+    return true;
+  }
   if (draft.kind !== "line" || draft.points.length < 2) {
     canvasCancelDraft();
     canvasApi.notify(strings.canvas.draftDropped);
@@ -18265,9 +18791,11 @@ function canvasSettleDraft() {
   return true;
 }
 
-// Чем должен быть черновик при нынешнем состоянии: ломаной, контуром или
-// ничем. Одно место на весь холст — режим, тип и вид типа спрашиваются здесь.
+// Чем должен быть черновик при нынешнем состоянии: ломаной, контуром,
+// отрезком калибровки или ничем. Одно место на весь холст — режим, тип и вид
+// типа спрашиваются здесь.
 function canvasDraftWanted(state) {
+  if (state.mode === CANVAS_MODE_SCALE) return "scale";
   if (state.mode === "room") return "room";
   return canvasAddKind(state) === "line" ? "line" : null;
 }
@@ -18575,6 +19103,10 @@ function canvasHitSlack(touch) {
  */
 function canvasTapKind(state, pick = {}) {
   if (!canvasEditAllowed(state)) return "select";
+  // Калибровка забирает тап себе целиком и раньше всех ручек: рука показывает
+  // точку отрезка, и ручка выделенной метки под пальцем не должна отбирать
+  // жест у масштаба.
+  if (state && state.mode === CANVAS_MODE_SCALE) return "scalePoint";
   if (pick.labelTurn) return "labelTurn";
   if (pick.labelLeader) return "labelLeader";
   // Ручка вершины — для переноса, а не для тапа: тапом по ней мышь тоже ничего
@@ -18600,6 +19132,7 @@ function canvasTapKind(state, pick = {}) {
  */
 function canvasGrabKind(state, pick = {}) {
   if (!canvasEditAllowed(state)) return null;
+  if (state.mode === CANVAS_MODE_SCALE) return null;
   if (state.mode === "room" || canvasAddKind(state) === "line") return null;
   if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "pathVertex" : "pathAdd";
   if (pick.markId) return pick.part === "label" ? "label" : "mark";
@@ -18825,6 +19358,7 @@ function canvasTouchUp(state, drag, point, cancelled) {
       screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
     );
   } else if (kind === "block") canvasBlockPoint(state.selectedMarkIds[0], pick.blockSide);
+  else if (kind === "scalePoint") canvasScaleClick(plan, point, false);
   else if (kind === "vertex") {
     if (state.mode === "room") canvasOutlineClick(plan, point, false);
     else canvasLineClick(plan, point, false);
@@ -18926,8 +19460,11 @@ function canvasPointerDown(event) {
   // её поля, и возить план. Всё остальное — правка, и начинаться она не должна:
   // ни ручки блока, ни черновика, ни перетаскивания.
   const editable = canvasEditAllowed(state);
+  // Ручки спрашиваются отдельно: в калибровке их не видно, и ловить клик они
+  // не должны — иначе поворот подписи отобрал бы точку отрезка.
+  const handles = canvasHandlesShown(state);
 
-  if (editable && state.selectedMarkIds.length === 1) {
+  if (handles && state.selectedMarkIds.length === 1) {
     const target = labelTargetOf(state.project, scheme, state.selectedMarkIds[0], state.filter);
     if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter)) {
       canvasRotateLabel(state.selectedMarkIds[0]);
@@ -18943,7 +19480,7 @@ function canvasPointerDown(event) {
     }
   }
 
-  if (editable && state.selectedOutlineId) {
+  if (handles && state.selectedOutlineId) {
     const selected = findOutline(state.project, state.selectedOutlineId);
     if (selected && selected.schemeId === scheme.id && hitOutlineLabelTurn(state.project, scheme, selected, point, view)) {
       canvasRotateOutlineLabel(selected.id);
@@ -18964,6 +19501,15 @@ function canvasPointerDown(event) {
       start: point,
       moved: false,
     };
+    return;
+  }
+
+  // Калибровка забирает клик себе — раньше ручек, метки и контура: рука
+  // показывает точку отрезка, и всё, что обычно ловит клик, сейчас не при
+  // деле. Линейка выше не случайно: направляющую вдоль стены ставят как раз
+  // затем, чтобы по ней откалибровать.
+  if (editable && state.mode === CANVAS_MODE_SCALE) {
+    canvasDrag = { kind: "scale", start: point, view: { ...state.view }, moved: false };
     return;
   }
 
@@ -19025,6 +19571,7 @@ function canvasPointerDown(event) {
 
   // Ломаную рисует режим добавления с линейным типом; контур помещения — свой
   // режим. Жест у них один, и дальше он разбирается по `canvasDrag.kind`.
+  // Калибровка сюда не доходит — её жест начат выше.
   const drawing = state.mode === "room" ? "room" : canvasAddKind(state) === "line" ? "line" : null;
   if (editable && drawing) {
     canvasDrag = { kind: drawing, start: point, view: { ...state.view }, moved: false };
@@ -19288,7 +19835,9 @@ function canvasPointerMove(event) {
     canvasDragTo(point, event.altKey);
     return;
   }
-  if (["pan", "empty", "place", "line", "room", "outline"].includes(canvasDrag.kind)) {
+  // «scale» в этом списке не для красоты: отрезок калибровки берут во всю
+  // стену, и между первой и второй точкой план приходится возить.
+  if (["pan", "empty", "place", "line", "room", "outline", "scale"].includes(canvasDrag.kind)) {
     canvasApi.setState({
       view: {
         ...state.view,
@@ -19393,6 +19942,10 @@ function canvasPointerUp(event) {
   }
   const scheme = canvasScheme(state);
   const plan = screenToPlan(point, scheme, canvasViewOf(state));
+  if (drag.kind === "scale") {
+    canvasScaleClick(plan, point, event.altKey);
+    return;
+  }
   if (drag.kind === "line") {
     canvasLineClick(plan, point, event.altKey);
     return;
@@ -19408,6 +19961,10 @@ function canvasPointerUp(event) {
 }
 
 function canvasDoubleClick(event) {
+  // Пока открыт диалог, холст не слушает ни клавиатуру, ни указатель — и
+  // двойной клик тоже: вопрос о расстоянии калибровки открывается вторым
+  // кликом, и браузерный `dblclick` приходит уже поверх диалога.
+  if (uiDialogDepth() > 0) return;
   // Призрачный `dblclick` вслед за двойным тапом — не жест, а эхо: палец свой
   // двойной уже разобрал сам (`canvasTouchUp`), и разбирать его второй раз
   // значит сделать два дела вместо одного.
@@ -19433,6 +19990,9 @@ function canvasDoubleClick(event) {
 function canvasDoubleAt(at, slack = 0) {
   const state = canvasState();
   if (!canvasEditAllowed(state)) return false;
+  // В калибровке двойного жеста нет вовсе: два клика там — это две точки
+  // отрезка, и ни замыкать, ни возвращать подпись на место сейчас нечего.
+  if (state.mode === CANVAS_MODE_SCALE) return false;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   // Двойной клик по линейке ставит направляющую в точке клика — это второй
@@ -20102,16 +20662,50 @@ function colorNameHex(value) {
 // разойдись они, на картинке и в таблице оказалось бы разное.
 const TABLE_GROUP_BY = ["category", "type", "room"];
 
-// Колонки списка меток — дословно из спецификации.
-function tableMarkColumns() {
-  return [
-    strings.tables.label,
-    strings.tables.points,
-    strings.tables.type,
-    strings.tables.room,
-    strings.tables.location,
-    strings.tables.original,
-  ];
+// Колонки списка меток — дословно из спецификации, плюс одна приходящая.
+//
+// «Длина, м» появляется **только тогда, когда её есть чем заполнить**: хотя бы
+// у одной метки листа посчиталась длина по плану (линейная метка на схеме с
+// калибровкой масштаба). На объекте без масштаба лист остаётся прежним — та же
+// шапка, те же ячейки, та же ширина в печати и в PNG; пустая колонка «Длина»
+// там была бы обещанием, которое лист не выполняет.
+function tableMarkColumns(withLength) {
+  const columns = [strings.tables.label, strings.tables.points];
+  // Сразу за «Точек»: и то и другое — мера позиции, и читаются они парой.
+  if (withLength) columns.push(strings.tables.length);
+  columns.push(strings.tables.type, strings.tables.room, strings.tables.location, strings.tables.original);
+  return columns;
+}
+
+/**
+ * Длина позиции в метрах — или `null`, когда её неоткуда взять.
+ *
+ * Сведённые метки (один тип, один номер — например три куска ленты «Л1»)
+ * **складываются**: лист отвечает на вопрос закупки «сколько метров заказать»,
+ * а не «какой из кусков длиннее». Точки в сумму не входят вовсе — у них длины
+ * по плану нет.
+ */
+function tableEntryLength(project, entry) {
+  let total = 0;
+  let found = false;
+  for (const mark of entry.marks) {
+    const meters = markLengthMeters(project, mark.id);
+    if (meters === null) continue;
+    found = true;
+    total += meters;
+  }
+  return found ? total : null;
+}
+
+// Длины всех позиций листа: считаются один раз — по ним же решается, нужна ли
+// колонка. Пустая карта значит «масштаба нет нигде» и колонки не будет.
+function tableLengths(project, entries) {
+  const lengths = new Map();
+  for (const entry of entries) {
+    const meters = tableEntryLength(project, entry);
+    if (meters !== null) lengths.set(entry.id, meters);
+  }
+  return lengths;
 }
 
 // Плоский порядок типов: индекс типа в справочнике задаёт порядок строк
@@ -20205,13 +20799,17 @@ function tableEntryLabel(project, entry) {
 // Тип у строки один: обозначение назвало его однозначно. Склейка осталась
 // там, где сведённые метки правда расходятся, — помещение, расположение
 // и «в оригинале» у одного обозначения бывают разные.
-function tableEntryRow(project, entry) {
+function tableEntryRow(project, entry, lengths) {
   const type = findType(project, entry.head.typeId);
   const category = type ? findCategory(project, type.categoryId) : null;
   const count = tableEntryCount(entry);
+  const meters = lengths && lengths.size > 0 ? lengths.get(entry.id) : undefined;
   const cells = [
     tableEntryLabel(project, entry),
     String(count),
+    // Колонка либо есть у всего листа, либо её нет: у точечной позиции на
+    // листе с длинами ячейка пустая, а не «0».
+    ...(lengths && lengths.size > 0 ? [meters === undefined ? "" : formatMeters(meters)] : []),
     type ? type.name : "",
     tableJoin(
       entry.marks.map((mark) => {
@@ -20353,14 +20951,14 @@ function tableFilterNote(project, filter) {
 
 // Один уровень разбивки: категории, типы или помещения — как было и как
 // остаётся, когда галка «по помещениям» снята.
-function tableFlatGroups(project, entries, kind) {
+function tableFlatGroups(project, entries, kind, lengths) {
   const buckets = new Map();
   for (const entry of entries) {
     const group = tableGroupOf(project, entry, kind);
     if (!buckets.has(group.key)) {
       buckets.set(group.key, { id: group.key, title: group.title, color: group.color, rows: [], level: 1 });
     }
-    buckets.get(group.key).rows.push(tableEntryRow(project, entry));
+    buckets.get(group.key).rows.push(tableEntryRow(project, entry, lengths));
   }
   return tableGroupOrder(project, kind)
     .map((key) => buckets.get(key))
@@ -20373,7 +20971,7 @@ function tableFlatGroups(project, entries, kind) {
 // Заголовок помещения строк не несёт: строки живут во внутренних группах.
 // Метки без помещения — последней группой «Без помещения»: потерять их на
 // листе хуже, чем показать отдельно, и на плане они тоже никуда не делись.
-function tableRoomGroups(project, entries, kind) {
+function tableRoomGroups(project, entries, kind, lengths) {
   const byRoomKey = new Map();
   for (const entry of entries) {
     const room = entry.head.roomId ? findRoom(project, entry.head.roomId) : null;
@@ -20394,7 +20992,7 @@ function tableRoomGroups(project, entries, kind) {
       rows: [],
       level: 1,
     });
-    for (const inner of tableFlatGroups(project, list, kind)) {
+    for (const inner of tableFlatGroups(project, list, kind, lengths)) {
       groups.push({ ...inner, id: key + ":" + inner.id, level: 2 });
     }
   }
@@ -20410,7 +21008,6 @@ function tableRoomGroups(project, entries, kind) {
 function marksTable(project, filter, groupBy, options = {}) {
   const kind = TABLE_GROUP_BY.includes(groupBy) ? groupBy : "category";
   const byRoom = Boolean(options.byRoom) && kind !== "room";
-  const columns = tableMarkColumns();
   if (!project) {
     return {
       kind: "marks",
@@ -20424,13 +21021,19 @@ function marksTable(project, filter, groupBy, options = {}) {
       title: "",
       room: "",
       note: "",
-      columns,
+      columns: tableMarkColumns(false),
       groups: [],
     };
   }
 
   const entries = tableEntries(project, filter);
-  const groups = byRoom ? tableRoomGroups(project, entries, kind) : tableFlatGroups(project, entries, kind);
+  // Длины считаются до строк: по ним решается, появится ли колонка, и по ним
+  // же заполняются ячейки — второго счёта быть не должно.
+  const lengths = tableLengths(project, entries);
+  const columns = tableMarkColumns(lengths.size > 0);
+  const groups = byRoom
+    ? tableRoomGroups(project, entries, kind, lengths)
+    : tableFlatGroups(project, entries, kind, lengths);
   const totals = tableTotals(project, entries);
   return {
     kind: "marks",
@@ -22732,6 +23335,19 @@ function filtersSetAllTypes(project, filter, on) {
   const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
   return filtersFromTypeSet(project, filter, visible);
 }
+
+// Сколько типов показано, сколько скрыто — один ответ на три вопроса: гаснет
+// ли «Скрыть все», надо ли объяснять пустой список и что дописать в заголовок
+// блока. Считается по справочнику, а не по галочкам в дереве: тип, чья
+// категория потерялась, галочки не получает (`typesInOrder` такую группу
+// отбрасывает), но в фильтре живёт и метки его видны.
+function filtersTypeCounts(project, filter) {
+  const types = project && Array.isArray(project.markTypes) ? project.markTypes : [];
+  if (types.length === 0) return { total: 0, shown: 0, hidden: 0 };
+  const visible = filtersTypeSet(project, filter);
+  const shown = types.filter((type) => visible.has(type.id)).length;
+  return { total: types.length, shown, hidden: types.length - shown };
+}
 function filtersActive(filter) {
   if (!filter) return false;
   return Boolean(
@@ -22775,7 +23391,6 @@ function filtersBox(api) {
   const summary = uiEl("summary", { class: "filters__summary", text: strings.filters.types });
   const details = uiEl("details", { class: "filters__details" }, [summary, tree]);
   const reset = uiButton(strings.filters.showAll, {
-    class: "ui-btn ui-btn--wide",
     on: {
       click: () => {
         const state = getState();
@@ -22784,6 +23399,22 @@ function filtersBox(api) {
       },
     },
   });
+  // «Скрыть все» — обратная «Показать все» и стоит с ней в одной строке.
+  // Помещение и поиск она не трогает: снимает только галочки, остальные поля
+  // фильтра пользователь ставил отдельно и отменять их за него нечестно.
+  const hideAll = uiButton(strings.filters.hideAll, {
+    title: strings.filters.hideAllHint,
+    on: {
+      click: () => {
+        const state = getState();
+        toggle(state, filtersSetAllTypes(state.project, state.filter, false));
+      },
+    },
+  });
+  const buttons = uiEl("div", { class: "filters__buttons" }, [reset, hideAll]);
+  // Пустой список объясняет себя там, где стоит кнопка, которая всё вернёт.
+  const note = uiEl("p", { class: "panel__empty", text: strings.filters.allHidden });
+  note.hidden = true;
   let signature = null;
   let checks = [];
 
@@ -22839,27 +23470,31 @@ function filtersBox(api) {
 
   function syncChecks(state) {
     const project = state.project;
+    const counts = filtersTypeCounts(project, state.filter);
+    // «Показать все» гаснет, когда показано всё; «Скрыть все» — когда скрывать
+    // уже нечего. Один и тот же счёт на обе кнопки, на заметку о пустом списке
+    // и на подпись заголовка: разойдись они — кнопка осталась бы нажимаемой
+    // там, где она ничего не делает.
+    reset.disabled = !project || !filtersActive(state.filter);
+    hideAll.disabled = counts.shown === 0;
+    note.hidden = !(counts.total > 0 && counts.shown === 0);
     if (!project) return;
-    let hidden = 0;
     for (const item of checks) {
       if (item.kind === "category") {
         const mode = filtersCategoryChecked(project, state.filter, item.id);
         item.box.checked = mode !== "off";
         item.box.indeterminate = mode === "mixed";
       } else {
-        const on = filtersTypeChecked(project, state.filter, item.id);
-        item.box.checked = on;
-        if (!on) hidden += 1;
+        item.box.checked = filtersTypeChecked(project, state.filter, item.id);
       }
     }
-    summary.textContent = hidden > 0
-      ? strings.filters.types + " — " + text("filters.hidden", { count: hidden })
+    summary.textContent = counts.hidden > 0
+      ? strings.filters.types + " — " + text("filters.hidden", { count: counts.hidden })
       : strings.filters.types;
     rooms.value = state.filter.roomId || "";
     if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
       search.value = state.filter.query || "";
     }
-    reset.disabled = !filtersActive(state.filter);
   }
 
   function render() {
@@ -22872,7 +23507,7 @@ function filtersBox(api) {
     syncChecks(state);
   }
 
-  node.replaceChildren(search, rooms, details, reset);
+  node.replaceChildren(search, rooms, details, note, buttons);
   subscribe((state, changed) => {
     if ("project" in changed || "filter" in changed) render();
   });
@@ -27652,6 +28287,17 @@ function marksScrollToRow(node, align, chrome) {
 // иначе выглядят ошибкой). Раскрытая — прежний вид со всеми полями.
 // Решение о полях принимается здесь, а не в разметке: «в модели полей нет»
 // означает «в строке их не будет», и проверить это можно без браузера.
+/**
+ * Длина линейной метки словами — «12,4 м» — или пустая строка, когда её
+ * неоткуда взять: у точечной метки длины по плану нет, у схемы без калибровки
+ * нет масштаба. Пустую строку и список, и карточка показывать не станут, и
+ * объект без масштаба выглядит ровно как до этой задачи.
+ */
+function marksLengthText(project, mark) {
+  const meters = mark ? markLengthMeters(project, mark.id) : null;
+  if (meters === null || !(meters > 0)) return "";
+  return text("scale.meters", { value: formatMeters(meters) });
+}
 function marksRowModel(project, row, options = {}) {
   const mark = row.mark;
   const repeat = options.repeat > 1 ? options.repeat : 0;
@@ -27677,6 +28323,11 @@ function marksRowModel(project, row, options = {}) {
     // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
     // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
     sizes: markSizesSummary(mark),
+    // Длина линейной метки по плану — в метрах, и только когда у схемы есть
+    // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
+    // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
+    // в миллиметрах (`sizes`) — другое поле, и путать их нельзя.
+    lengthText: marksLengthText(project, mark),
     // Обе стороны связи — свёрнутым перечнем: повторы номера есть и у
     // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
     // одной группы носят один номер.
@@ -28205,6 +28856,15 @@ function mountMarksPanel(host, api) {
               }),
             ])
           : null,
+        // Длина по плану — строкой и только для чтения: это вывод из точек
+        // метки и масштаба схемы, а не поле, которое правят. Главный ответ
+        // закупке: сколько метров ленты заказывать. Без масштаба строки нет.
+        view.fields && view.fields.lengthText
+          ? uiEl("p", {
+              class: "mark-row__by mark-row__length",
+              text: text("scale.markLength", { value: view.fields.lengthText }),
+            })
+          : null,
         controlsButton,
         equipmentButton,
         sizesButton,
@@ -28475,6 +29135,9 @@ function markCardModel(project, markId) {
   add(strings.marks.room, room ? room.name : "");
   add(strings.marks.location, fields.location);
   add(strings.marks.originalPlaceholder, fields.original);
+  // Длина по плану — там же, где остальные поля, и из той же `marksRowModel`.
+  // Пустая (нет масштаба или метка точечная) строка выпадает, как все пустые.
+  add(strings.scale.lengthLabel, fields.lengthText);
   add(strings.panels.sizes, fields.sizes);
   // Связи — обе стороны и словами. «Чем управляет» идёт разложенным по каналам
   // («① Т16 ×6 · ② С1»): это та же строка, что в списке меток, и она отвечает
@@ -28971,10 +29634,19 @@ function outlinesOfScheme(project, schemeId) {
  * это и есть шаг отмены, и проверяется он тестом, без DOM и без хранилища.
  * `pushed` — сколько меток рамка прижала к краю плана: их прежних мест не
  * вернёт уже ничто, кроме отмены, и сказать об этом надо вслух.
+ *
+ * **Калибровка масштаба переживает поворот и обрезку** — за этим и хранятся
+ * доли (ADR 002): точки отрезка пересчитываются тем же преобразованием, что
+ * точки меток, метры остаются теми же, а px/м пересчитается сам из нового
+ * размера плана. Единственный случай, когда она не выживает, — точка отрезка
+ * осталась за рамкой обрезки: её прижало бы к краю, отрезок укоротился, и
+ * масштаб уехал бы молча. Тогда калибровка честно снимается (`scaleLost`).
  */
 function applyPlanEdit(project, schemeId, { imageId, width, height, transform } = {}) {
   const marks = project.marks.filter((mark) => mark.schemeId === schemeId);
   const pushed = marksPushedOutside(marks, transform);
+  const scale = planScaleOf(project, schemeId);
+  let scaleLost = Boolean(scale) && countPointsOutside([scale.a, scale.b], transform) > 0;
   let next = updateScheme(project, schemeId, { imageId, width, height }).project;
   for (const mark of marks) {
     const patch = remapForTransform(mark, transform);
@@ -28984,7 +29656,121 @@ function applyPlanEdit(project, schemeId, { imageId, width, height, transform } 
     const patch = remapForTransform(outline, transform);
     next = updateOutline(next, outline.id, patch.labelOffset ? patch : { points: patch.points }).project;
   }
-  return { project: next, pushed };
+  if (scale && !scaleLost) {
+    try {
+      next = setPlanScale(next, schemeId, {
+        a: transformPoint(scale.a, transform),
+        b: transformPoint(scale.b, transform),
+        meters: scale.meters,
+      }).project;
+    } catch (error) {
+      // Пересчёт не сошёлся (отрезок выродился) — показывать длины из такого
+      // масштаба нельзя. Снимаем и говорим вслух, а не угадываем.
+      scaleLost = true;
+    }
+  }
+  if (scale && scaleLost) next = clearPlanScale(next, schemeId).project;
+  return { project: next, pushed, scaleLost };
+}
+
+/**
+ * Что написано на кнопке масштаба. Чистая функция: решение о словах
+ * принимается здесь и проверяется без браузера.
+ *
+ * Кнопка показывает не «1 px = 0,02 м», а **размер всего плана в метрах** —
+ * это то, что инженер сверяет с чертежом глазом: дом по фасаду двенадцать
+ * метров, значит «план 12,4 × 8,6 м» подтверждает калибровку, а «124 × 86»
+ * выдаёт запятую не на том месте раньше, чем по этому масштабу закажут ленту.
+ */
+function schemesScaleView(project, schemeId, name) {
+  const scale = planScaleOf(project, schemeId);
+  const size = planSizeMeters(project, schemeId);
+  if (!scale || !size) {
+    return { set: false, label: strings.scale.notSet, title: text("scale.notSetTitle", { name }) };
+  }
+  return {
+    set: true,
+    label: text("scale.set", { width: formatMeters(size.width), height: formatMeters(size.height) }),
+    title: text("scale.setTitle", { name, meters: formatMeters(scale.meters) }),
+  };
+}
+
+// Масштаб в окне правки. Шаги считаются от «вписано в окно» (1): мельче
+// вписанного плана смотреть нечего, а вверх ступеньки идут всё крупнее —
+// шестнадцать крат нужны большому плану, у которого вписанный вид и так мелкий.
+const PLAN_ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16];
+function planZoomClamp(zoom) {
+  const value = Number(zoom);
+  if (!Number.isFinite(value)) return 1;
+  const last = PLAN_ZOOM_STEPS[PLAN_ZOOM_STEPS.length - 1];
+  return Math.min(last, Math.max(PLAN_ZOOM_STEPS[0], value));
+}
+
+// Кнопка ведёт к следующей ступеньке от текущего значения, каким бы дробным
+// его ни оставили колесо и щипок: иначе после щипка кнопка «+» возвращала бы
+// масштаб назад, к ближайшей ступеньке снизу.
+function planZoomStep(zoom, direction) {
+  const current = planZoomClamp(zoom);
+  const nudge = 1e-6;
+  if (direction > 0) {
+    const next = PLAN_ZOOM_STEPS.find((step) => step > current + nudge);
+    return next === undefined ? current : next;
+  }
+  const back = [...PLAN_ZOOM_STEPS].reverse().find((step) => step < current - nudge);
+  return back === undefined ? current : back;
+}
+
+// Масштаб «вписать в окно»: план целиком виден, мелкий не растягивается —
+// ровно то, что раньше делали `max-width: 100%` и `max-height` у картинки.
+// Размеров нет (окно ещё не измерено) — вписывать нечего, остаётся 1.
+function planFitScale(size, viewport) {
+  const width = Number(size && size.width);
+  const height = Number(size && size.height);
+  const boxWidth = Number(viewport && viewport.width);
+  const boxHeight = Number(viewport && viewport.height);
+  if (!(width > 0) || !(height > 0) || !(boxWidth > 0) || !(boxHeight > 0)) return 1;
+  return Math.min(1, boxWidth / width, boxHeight / height);
+}
+
+// Рамка обрезки задана долями картинки, а не пикселями экрана, — поэтому при
+// увеличении и прокрутке она остаётся на том же месте плана. Поворот её тоже
+// не сбрасывает: доли переносятся той же арифметикой, что и точки меток
+// (`transformPoint`), по двум углам, а не по всем четырём — прямоугольник
+// остаётся прямоугольником при повороте на четверть оборота.
+function planRotateFrame(frame, degrees) {
+  if (!frame) return null;
+  const spin = { rotate: degrees, crop: null };
+  const first = transformPoint({ x: frame.x, y: frame.y }, spin);
+  const second = transformPoint({ x: frame.x + frame.width, y: frame.y + frame.height }, spin);
+  return {
+    x: Math.min(first.x, second.x),
+    y: Math.min(first.y, second.y),
+    width: Math.abs(first.x - second.x),
+    height: Math.abs(first.y - second.y),
+  };
+}
+
+/**
+ * Строка под картинкой.
+ *
+ * Заказчик просил разрешение плана: «снизу отображай разрешение картинки».
+ * Рядом с ним стоит размер выбранной области — при обрезке именно он отвечает
+ * на вопрос «что получится», и считается он той же `transformSize`, что потом
+ * и нарежет картинку: число под рамкой обязано совпасть с размером файла, а
+ * не быть похожим на него. Без рамки его нет вовсе — нечего выбирать.
+ *
+ * Масштаб — в процентах от настоящих пикселей плана, а не от «вписано»: сотня
+ * означает «вижу пиксель в пиксель», и только она отвечает, точно ли встанет
+ * рамка.
+ */
+function planSizeLine({ width, height, frame, scale }) {
+  const parts = [text("image.sizeFull", { size: text("schemes.size", { width, height }) })];
+  if (frame) {
+    const size = transformSize({ width, height }, { rotate: 0, crop: frame });
+    parts.push(text("image.sizeFrame", { size: text("schemes.size", size) }));
+  }
+  parts.push(text("image.zoomLevel", { percent: Math.round(Number(scale || 0) * 100) }));
+  return parts.join(" · ");
 }
 
 // Диалог правки плана. Повороты и рамки копятся в одно преобразование и
@@ -28999,21 +29785,45 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
     let frame = null;
     let busy = false;
     let modal = null;
+    let closed = false;
+    // Что сейчас видно: масштаб к пикселям плана и размер картинки на экране.
+    // Рамка ставится по этим числам, а не по измерению картинки на лету: при
+    // повороте `img` ещё держит прежний рисунок, пока браузер не прочёл новый
+    // файл, и измерение дало бы размер предыдущего плана.
+    let zoom = 1;
+    let view = { scale: 1, width: 0, height: 0 };
+    let drag = null;
+    let streak = null;
+    const fingers = new Map();
+    let pinch = null;
 
     const image = uiEl("img", { class: "plan-stage__img", attrs: { src: url, alt: "" } });
     const box = uiEl("div", { class: "plan-frame" });
     box.hidden = true;
-    const stage = uiEl("div", { class: "plan-stage" }, [image, box]);
-    const hint = uiEl("p", { class: "modal__hint", text: strings.image.cropHint });
+    const inner = uiEl("div", { class: "plan-stage__inner" }, [image, box]);
+    const stage = uiEl("div", { class: "plan-stage" }, [inner]);
+    const meta = uiEl("p", { class: "plan-editor__meta" });
+    const hint = uiEl("p", { class: "modal__hint" });
 
     const rotateLeft = uiIconButton("rotateLeft", {
       title: strings.image.rotateLeft,
-      on: { click: () => apply(rotateTransform(transform, -90)) },
+      on: { click: () => turn(-90) },
     });
     const rotateRight = uiIconButton("rotateRight", {
       title: strings.image.rotateRight,
-      on: { click: () => apply(rotateTransform(transform, 90)) },
+      on: { click: () => turn(90) },
     });
+    // Кнопки масштаба — те же, что над холстом, и подписаны теми же словами:
+    // язык масштаба в приложении один.
+    const zoomOut = uiIconButton("minus", {
+      title: strings.tools.zoomOut,
+      on: { click: () => zoomTo(planZoomStep(zoom, -1)) },
+    });
+    const zoomIn = uiIconButton("plus", {
+      title: strings.tools.zoomIn,
+      on: { click: () => zoomTo(planZoomStep(zoom, 1)) },
+    });
+    const fitButton = uiButton(strings.tools.zoomFit, { on: { click: () => zoomTo(1) } });
     const cropButton = uiButton(strings.image.crop, {
       on: { click: () => apply(cropTransform(transform, frame)) },
     });
@@ -29024,18 +29834,112 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
       on: { click: () => requestApply() },
     });
 
-    function setFrame(next) {
-      frame = next;
-      box.hidden = !next;
-      cropButton.disabled = !next || busy;
-      resetButton.disabled = !next || busy;
-      if (!next) return;
+    // Окно просмотра за вычетом его отступов. Отступы читаются из стилей, а не
+    // повторяются числом: разойдись они — вписанный план вылез бы за край и
+    // окно заработало бы полосами прокрутки на пустом месте.
+    function viewport() {
+      const style = getComputedStyle(stage);
+      const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+      return { width: stage.clientWidth - padX, height: stage.clientHeight - padY };
+    }
+
+    function stageCenter() {
+      const rect = stage.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    // Какая доля картинки сейчас в середине окна — и обратно к ней. Этим
+    // держится положение при повороте и при смене масштаба.
+    function viewFraction() {
       const rect = image.getBoundingClientRect();
-      const stageRect = stage.getBoundingClientRect();
-      box.style.left = rect.left - stageRect.left + next.x * rect.width + "px";
-      box.style.top = rect.top - stageRect.top + next.y * rect.height + "px";
-      box.style.width = next.width * rect.width + "px";
-      box.style.height = next.height * rect.height + "px";
+      const center = stageCenter();
+      if (!rect.width || !rect.height) return { x: 0.5, y: 0.5 };
+      return { x: (center.x - rect.left) / rect.width, y: (center.y - rect.top) / rect.height };
+    }
+
+    function scrollToFraction(point) {
+      const rect = image.getBoundingClientRect();
+      const center = stageCenter();
+      stage.scrollLeft += rect.left + point.x * rect.width - center.x;
+      stage.scrollTop += rect.top + point.y * rect.height - center.y;
+    }
+
+    // Размер картинки на экране задаётся в пикселях, а не стилевыми
+    // ограничениями: иначе увеличенный план упирался бы в `max-width` окна.
+    // Вниз округляем: вписанный план, ставший на пиксель больше окна, дал бы
+    // полосу прокрутки, а та отняла бы ширину — и так по кругу.
+    function layout() {
+      const space = viewport();
+      // Окно спрятано (поверх лежит другой диалог) — измерять нечего, и
+      // мерить нельзя: нулевая ширина увела бы масштаб и прокрутку в сторону.
+      if (!(space.width > 0) || !(space.height > 0)) return;
+      const scale = planFitScale(preview, space) * zoom;
+      view = {
+        scale,
+        width: Math.max(1, Math.floor(preview.width * scale)),
+        height: Math.max(1, Math.floor(preview.height * scale)),
+      };
+      inner.style.width = view.width + "px";
+      inner.style.height = view.height + "px";
+      image.style.width = view.width + "px";
+      image.style.height = view.height + "px";
+      placeFrame();
+      syncZoom();
+      syncMeta();
+    }
+
+    function placeFrame() {
+      if (!frame) return;
+      box.style.left = frame.x * view.width + "px";
+      box.style.top = frame.y * view.height + "px";
+      box.style.width = frame.width * view.width + "px";
+      box.style.height = frame.height * view.height + "px";
+    }
+
+    function syncZoom() {
+      const first = PLAN_ZOOM_STEPS[0];
+      const last = PLAN_ZOOM_STEPS[PLAN_ZOOM_STEPS.length - 1];
+      zoomOut.disabled = busy || zoom <= first;
+      zoomIn.disabled = busy || zoom >= last;
+      fitButton.disabled = busy || zoom === 1;
+    }
+
+    function syncMeta() {
+      meta.textContent = planSizeLine({
+        width: preview.width,
+        height: preview.height,
+        frame,
+        scale: view.scale,
+      });
+    }
+
+    function zoomTo(next, anchor) {
+      const value = planZoomClamp(next);
+      if (busy || value === zoom) return;
+      // Точка, за которую держимся: середина окна у кнопок, курсор у колеса,
+      // середина между пальцами у щипка. Доля картинки под ней остаётся на
+      // месте — увеличивается то, на что смотрят, а не левый верхний угол.
+      const point = anchor || stageCenter();
+      const before = image.getBoundingClientRect();
+      const grip = {
+        x: before.width ? (point.x - before.left) / before.width : 0.5,
+        y: before.height ? (point.y - before.top) / before.height : 0.5,
+      };
+      zoom = value;
+      layout();
+      const after = image.getBoundingClientRect();
+      stage.scrollLeft += after.left + grip.x * after.width - point.x;
+      stage.scrollTop += after.top + grip.y * after.height - point.y;
+    }
+
+    function setFrame(next) {
+      frame = next || null;
+      box.hidden = !frame;
+      cropButton.disabled = !frame || busy;
+      resetButton.disabled = !frame || busy;
+      placeFrame();
+      syncMeta();
     }
 
     function setBusy(value) {
@@ -29043,12 +29947,17 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
       for (const button of [rotateLeft, rotateRight, applyButton, cancelButton]) button.disabled = value;
       cropButton.disabled = value || !frame;
       resetButton.disabled = value || !frame;
-      hint.textContent = value ? strings.image.working : strings.image.cropHint;
+      syncZoom();
+      hint.textContent = value ? strings.image.working : strings.image.cropHint + ". " + strings.image.panHint;
     }
 
     // Предпросмотр всегда пересобирается из исходника по накопленному
     // преобразованию — что видно, то и получится, без цепочки пережатий.
-    async function apply(next) {
+    // `keep` — доля картинки, которую надо оставить в середине окна, и рамка в
+    // долях нового вида: поворот не повод ни сбить масштаб, ни потерять
+    // обведённое место. Обрезка — повод: она сама себе масштаб, после неё
+    // выбранный кусок занимает окно целиком.
+    async function apply(next, keep) {
       if (busy) return;
       setBusy(true);
       try {
@@ -29058,7 +29967,10 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
         transform = next;
         url = URL.createObjectURL(result.blob);
         image.src = url;
-        setFrame(null);
+        if (!keep) zoom = 1;
+        setFrame(keep ? keep.frame : null);
+        layout();
+        if (keep) scrollToFraction(keep.center);
         setBusy(false);
       } catch (error) {
         setBusy(false);
@@ -29066,65 +29978,203 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
       }
     }
 
+    function turn(degrees) {
+      if (busy) return;
+      // Середину окна и рамку снимаем до поворота: после него картинка уже
+      // другая, а эти доли надо повернуть вместе с планом.
+      const center = transformPoint(viewFraction(), { rotate: degrees, crop: null });
+      apply(rotateTransform(transform, degrees), { center, frame: planRotateFrame(frame, degrees) });
+    }
+
     async function requestApply() {
       if (busy) return;
       // Спрашиваем всегда, а не только после правки: замене подложки важен
       // итоговый размер, даже когда картинку не крутили.
       if (beforeApply) {
+        // Вопрос приходит окном поверх этого, а спрятанный диалог теряет
+        // прокрутку: кто отказался — возвращается на то же место плана, а не
+        // в левый верхний угол.
+        const center = viewFraction();
         setBusy(true);
         const agreed = await beforeApply(transform, { width: preview.width, height: preview.height });
         setBusy(false);
-        if (!agreed) return;
+        if (!agreed) {
+          scrollToFraction(center);
+          return;
+        }
       }
       finish({ blob: preview.blob, width: preview.width, height: preview.height, transform });
     }
 
-    function finish(result) {
+    // Слушатели сняты до единого: окно закрывается и мышью, и Escape, и
+    // отказом от правки — брошенный `pointermove` на `window` переживает окно
+    // и шевелит рамку уже закрытого диалога.
+    function cleanup() {
+      if (closed) return;
+      closed = true;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
+      window.removeEventListener("resize", onResize);
       URL.revokeObjectURL(url);
+    }
+
+    function finish(result) {
+      cleanup();
       if (modal) modal.close();
       resolve(result);
     }
 
-    // Рамка тянется мышью прямо по картинке.
-    stage.addEventListener("pointerdown", (event) => {
-      if (busy || event.button !== 0) return;
+    // Окно изменилось — «вписано» стало другим; смотреть при этом остаёмся
+    // на то же место плана.
+    function onResize() {
+      if (closed) return;
+      const center = viewFraction();
+      layout();
+      scrollToFraction(center);
+    }
+
+    function pointFraction(event) {
       const rect = image.getBoundingClientRect();
-      const startX = Math.min(Math.max(event.clientX, rect.left), rect.right);
-      const startY = Math.min(Math.max(event.clientY, rect.top), rect.bottom);
-      const move = (moveEvent) => {
-        const x = Math.min(Math.max(moveEvent.clientX, rect.left), rect.right);
-        const y = Math.min(Math.max(moveEvent.clientY, rect.top), rect.bottom);
-        setFrame({
-          x: (Math.min(startX, x) - rect.left) / rect.width,
-          y: (Math.min(startY, y) - rect.top) / rect.height,
-          width: Math.abs(x - startX) / rect.width,
-          height: Math.abs(y - startY) / rect.height,
-        });
+      const x = rect.width ? (event.clientX - rect.left) / rect.width : 0;
+      const y = rect.height ? (event.clientY - rect.top) / rect.height : 0;
+      return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+    }
+
+    function frameBetween(first, second) {
+      return {
+        x: Math.min(first.x, second.x),
+        y: Math.min(first.y, second.y),
+        width: Math.abs(first.x - second.x),
+        height: Math.abs(first.y - second.y),
       };
-      const up = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        if (frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
+    }
+
+    function panBy(dx, dy) {
+      stage.scrollLeft -= dx;
+      stage.scrollTop -= dy;
+    }
+
+    function pinchNow() {
+      const [first, second] = [...fingers.values()];
+      return {
+        distance: Math.hypot(first.x - second.x, first.y - second.y),
+        center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
       };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
+    }
+
+    function stopDrag(keepFrame) {
+      if (!drag) return;
+      // Рамку, которую начали тянуть и бросили (пришёл второй палец), не
+      // оставляем: она случайная. Рамку, которую не трогали, — оставляем.
+      if (!keepFrame && drag.kind === "frame" && drag.moved) setFrame(null);
+      drag = null;
+    }
+
+    // Рамка тянется прямо по картинке — и остаётся в долях картинки, поэтому
+    // не зависит ни от масштаба, ни от прокрутки. Сдвиг увеличенного плана —
+    // перетаскивание с Shift или средней кнопкой; полосы прокрутки у окна есть
+    // и сами.
+    stage.addEventListener("pointerdown", (event) => {
+      if (busy) return;
+      if (event.pointerType === "touch") {
+        fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (fingers.size === 2) {
+          stopDrag(false);
+          pinch = { ...pinchNow(), zoom };
+          event.preventDefault();
+          return;
+        }
+        if (fingers.size > 2) return;
+      }
+      if (event.button !== 0 && event.button !== 1) return;
+      drag = event.button === 1 || event.shiftKey
+        ? { kind: "pan", x: event.clientX, y: event.clientY }
+        : { kind: "frame", start: pointFraction(event), moved: false };
       event.preventDefault();
     });
+
+    function onPointerMove(event) {
+      if (fingers.has(event.pointerId)) {
+        fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (pinch && fingers.size >= 2) {
+          const now = pinchNow();
+          panBy(now.center.x - pinch.center.x, now.center.y - pinch.center.y);
+          pinch.center = now.center;
+          if (pinch.distance > 0 && now.distance > 0) zoomTo(pinch.zoom * (now.distance / pinch.distance), now.center);
+          return;
+        }
+      }
+      if (!drag) return;
+      if (drag.kind === "pan") {
+        panBy(event.clientX - drag.x, event.clientY - drag.y);
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        return;
+      }
+      drag.moved = true;
+      setFrame(frameBetween(drag.start, pointFraction(event)));
+    }
+
+    function onPointerEnd(event) {
+      if (fingers.has(event.pointerId)) {
+        fingers.delete(event.pointerId);
+        if (fingers.size < 2) pinch = null;
+      }
+      if (!drag) return;
+      const wasFrame = drag.kind === "frame";
+      drag = null;
+      // Промах мышью вместо обрезки: рамка меньше сотой доли плана — не рамка.
+      if (wasFrame && frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
+    }
+
+    // Колесо и щипок разбираются теми же приметами, что на холсте: мышью
+    // заказчик зумит, двумя пальцами по трекпаду — листает. Своего разбора
+    // здесь быть не должно, иначе одно и то же колесо в двух местах
+    // приложения делало бы разное.
+    stage.addEventListener(
+      "wheel",
+      (event) => {
+        if (busy) return;
+        const kind = canvasWheelKind(event, streak);
+        streak = { kind, time: event.timeStamp };
+        if (kind === "pan") return;
+        event.preventDefault();
+        zoomTo(zoom * canvasZoomFactor(event, canvasPinchWheel(event)), { x: event.clientX, y: event.clientY });
+      },
+      { passive: false },
+    );
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+    window.addEventListener("resize", onResize);
 
     modal = uiModal({
       title: title || strings.image.editTitle,
       body: uiEl("div", { class: "plan-editor" }, [
-        uiEl("div", { class: "plan-editor__tools" }, [rotateLeft, rotateRight, cropButton, resetButton]),
+        uiEl("div", { class: "plan-editor__tools" }, [
+          rotateLeft,
+          rotateRight,
+          zoomOut,
+          zoomIn,
+          fitButton,
+          cropButton,
+          resetButton,
+        ]),
         stage,
+        meta,
         hint,
       ]),
       actions: [cancelButton, applyButton],
       onCancel: () => {
-        URL.revokeObjectURL(url);
+        cleanup();
         resolve(null);
       },
     });
     setFrame(null);
+    setBusy(false);
+    layout();
   });
 }
 
@@ -29238,6 +30288,19 @@ function mountSchemesPanel(host, api) {
           }),
         ]),
       );
+      // Масштаб — третьей строкой и словами, а не значком: состояние «задан или
+      // нет» должно читаться с панели, не наводя курсор. Без плана калибровать
+      // нечего, в просмотре правок нет вовсе — там кнопки не показываем.
+      if (editable && scheme.imageId) {
+        const view = schemesScaleView(project, scheme.id, scheme.name);
+        row.append(
+          uiButton(view.label, {
+            class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
+            title: view.title,
+            on: { click: () => editScale(scheme.id) },
+          }),
+        );
+      }
       list.append(row);
     });
   }
@@ -29332,8 +30395,14 @@ function mountSchemesPanel(host, api) {
     // вернула бы координаты на план, которого уже нет. Уберёт её уборка при
     // следующем запуске — тогда, когда отменять будет нечего.
     canvasCommit(before, result.project, strings.history.editImage, { schemeId });
+    // Снятая калибровка важнее прижатых меток: без неё с листа пропадут длины,
+    // и узнать об этом из таблицы — поздно.
     notify(
-      result.pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: result.pushed }),
+      result.scaleLost
+        ? strings.image.appliedScaleDropped
+        : result.pushed === 0
+          ? strings.image.applied
+          : text("image.appliedClamped", { count: result.pushed }),
       "success",
     );
   }
@@ -29380,13 +30449,13 @@ function mountSchemesPanel(host, api) {
     const imageId = await putImage(edited.blob);
     const before = getState().project;
     if (!findScheme(before, schemeId)) return;
-    let after;
+    let replaced;
     try {
-      after = replaceSchemeImage(before, schemeId, {
+      replaced = replaceSchemeImage(before, schemeId, {
         imageId,
         width: edited.width,
         height: edited.height,
-      }).project;
+      });
     } catch (error) {
       notify(error.message, "error");
       return;
@@ -29394,8 +30463,96 @@ function mountSchemesPanel(host, api) {
     // Через canvasCommit: замену отменяет Ctrl+Z, как и всё остальное. Прежняя
     // картинка поэтому и остаётся в хранилище — её убирает уборка при запуске,
     // когда отменять уже нечего.
-    canvasCommit(before, after, strings.history.replaceImage, { schemeId });
-    notify(sameAspect(wasSize, edited) ? strings.image.replaced : strings.image.replacedShifted, "success");
+    canvasCommit(before, replaced.project, strings.history.replaceImage, { schemeId });
+    // Два разных известия в одном: куда встала разметка и что стало с
+    // масштабом. Второе дописывается строкой словаря, а не вплетается в
+    // четыре варианта первого: масштаб снимается независимо от пропорций.
+    const placed = sameAspect(wasSize, edited) ? strings.image.replaced : strings.image.replacedShifted;
+    notify(replaced.scaleDropped ? placed + " " + strings.scale.replaceDropped : placed, "success");
+  }
+
+  // ——— масштаб плана ——————————————————————————————————————————————————
+  //
+  // Ручка стоит в строке схемы, а не в инструментах: масштаб принадлежит
+  // схеме. У этажей разные планы и разные калибровки, и кнопка у каждой свои.
+
+  // Клик по кнопке: масштаба нет — сразу калибруем (лишнее окно там ни о чём);
+  // есть — показываем, что задано, и спрашиваем, калибровать заново или снять.
+  async function editScale(schemeId) {
+    const state = getState();
+    const scheme = findScheme(state.project, schemeId);
+    if (!scheme) return;
+    if (!scheme.imageId) {
+      notify(strings.scale.needPlan, "error");
+      return;
+    }
+    const scale = planScaleOf(state.project, schemeId);
+    if (!scale) {
+      startScale(schemeId);
+      return;
+    }
+    const size = planSizeMeters(state.project, schemeId);
+    let modal = null;
+    const body = uiEl("div", {}, [
+      uiEl("p", {
+        text: text("scale.dialogSet", {
+          meters: formatMeters(scale.meters),
+          width: size ? formatMeters(size.width) : "",
+          height: size ? formatMeters(size.height) : "",
+        }),
+      }),
+      uiEl("p", { class: "modal__hint", text: strings.scale.dialogHint }),
+    ]);
+    modal = uiModal({
+      title: text("scale.dialogTitle", { name: scheme.name }),
+      body,
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => modal.close() } }),
+        uiButton(strings.scale.clear, {
+          class: "ui-btn ui-btn--danger",
+          on: {
+            click: () => {
+              modal.close();
+              dropScale(schemeId);
+            },
+          },
+        }),
+        uiButton(strings.scale.again, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: () => {
+              modal.close();
+              startScale(schemeId);
+            },
+          },
+        }),
+      ],
+    });
+  }
+
+  // Калибруют на холсте — там план и видно. Панель только открывает нужную
+  // схему и отдаёт холсту режим; выделение при этом снимается, чтобы ручки
+  // метки не стояли под рукой, которая целится в точку отрезка.
+  function startScale(schemeId) {
+    setState({
+      schemeId,
+      selectedMarkIds: [],
+      selectedOutlineId: null,
+      editPathId: null,
+      mode: CANVAS_MODE_SCALE,
+    });
+  }
+
+  function dropScale(schemeId) {
+    const before = getState().project;
+    try {
+      const result = clearPlanScale(before, schemeId);
+      if (!result.cleared) return;
+      canvasCommit(before, result.project, strings.history.scaleClear, { schemeId });
+      notify(strings.scale.cleared, "success");
+    } catch (error) {
+      notify(error.message, "error");
+    }
   }
 
   async function renameScheme(schemeId) {
