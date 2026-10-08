@@ -1255,7 +1255,10 @@ export function markRadius(view) {
   return Math.max(2, state.markSize * state.zoom);
 }
 
-function labelFontSize(view) {
+// Высота подписи метки в пикселях плана — пара к `markRadius`. Наружу она
+// нужна листу по ГОСТ: формат бумаги подбирается по тому, останется ли подпись
+// на ней читаемой (не мельче 2,5 мм).
+export function labelFontSize(view) {
   const state = renderView(view);
   return Math.max(6, state.labelSize * state.zoom);
 }

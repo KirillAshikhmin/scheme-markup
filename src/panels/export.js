@@ -6,7 +6,7 @@
 // поэтому скрытое фильтром не попадает ни в таблицу, ни в картинку, ни в легенду.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
-import { findRoom, findScheme, roomsInOrder, schemesInOrder } from "../model.js";
+import { findRoom, findScheme, projectStamp, roomsInOrder, schemesInOrder } from "../model.js";
 import { screenToPlan } from "../render.js";
 import { getImage } from "../store.js";
 import { decodePlanImage, releasePlanImage } from "../imagePrep.js";
@@ -26,10 +26,19 @@ import {
   exportTableNode,
   exportTableSizeText,
   exportText,
+  gostPrintSheets,
+  gostSchemePng,
+  gostSchemeSheet,
+  gostSheetSizeText,
+  gostSheetsZip,
+  gostTablePages,
+  gostTableSheets,
   printView,
   schemePng,
   tablePng,
 } from "../exporter.js";
+import { GOST_FORMATS } from "../gostSheet.js";
+import { stampDialog } from "./stampForm.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
 
 // Выбор пользователя живёт между открытиями диалога: разбивку и множитель
@@ -54,7 +63,31 @@ const exportChoice = {
   links: false,
   tableScale: 2,
   schemeScale: 2,
+  // Лист по ГОСТ: рамка и основная надпись вместо голой картинки. Отметка одна
+  // на схемы и таблицы — заказчик просил «всё», и держать два переключателя
+  // для одного решения незачем. Умолчание «нет»: прежние выгрузки остаются
+  // тем, чем были.
+  gost: false,
+  // Формат листа: «auto» — подобрать под план, остальное — выбор руками.
+  gostFormat: "auto",
 };
+
+// Выбор формата: подбор плюс четыре формата. Ориентацию руками не выбирают —
+// её решает план (лежачий ложится на альбомный лист), и третий переключатель
+// рядом с двумя первыми только путал бы.
+function exportFormatSelect(onChange) {
+  return exportSelect(
+    [
+      { value: "auto", label: strings.gost.formatAuto },
+      ...GOST_FORMATS.map((format) => ({ value: format.id, label: format.id })),
+    ],
+    exportChoice.gostFormat,
+    (value) => {
+      exportChoice.gostFormat = value;
+      onChange();
+    },
+  );
+}
 
 function exportField(labelText, control) {
   return uiEl("label", { class: "export__field" }, [
@@ -215,6 +248,21 @@ function exportBaseName(state, suffix) {
   return exportFileName(state.project, parts.join(" — "), suffix);
 }
 
+// Что уходит в штамп листа таблицы: объект, название документа и данные,
+// заполненные в окне «Данные для штампа». Название собирается там же, где и
+// имя файла, — иначе лист и файл называли бы таблицу по-разному.
+function exportGostTableOptions(state, table) {
+  const room = exportChoice.roomId ? findRoom(state.project, exportChoice.roomId) : null;
+  const title = [table.title || strings.exportPanel.tableDialog, room ? room.name : ""].filter(Boolean).join(". ");
+  return {
+    scale: exportChoice.tableScale,
+    format: exportChoice.gostFormat,
+    stamp: projectStamp(state.project),
+    object: state.project.name,
+    title,
+  };
+}
+
 // ——— диалог таблицы ———————————————————————————————————————————————————
 
 function exportTableDialog(api) {
@@ -233,7 +281,17 @@ function exportTableDialog(api) {
     preview.replaceChildren(
       exportTableNode(table, { title: table.title || state.project.name, subtitle: exportSubtitleOf(state, table) }),
     );
-    hint.textContent = exportTableSizeText(table, exportChoice.tableScale);
+    if (!exportChoice.gost) {
+      hint.textContent = exportTableSizeText(table, exportChoice.tableScale);
+      return;
+    }
+    // Сколько листов даст таблица, видно до выгрузки: разбивка считается по
+    // строкам, а не по нарисованному, и число листов тут же идёт в штамп.
+    const plan = gostTablePages(table, { format: exportChoice.gostFormat });
+    hint.textContent = [
+      gostSheetSizeText(plan.sheet, exportChoice.tableScale),
+      text("gost.pages", { count: plan.pages.length }),
+    ].join(" · ");
   };
 
   const groupSelect = exportSelect(
@@ -326,6 +384,22 @@ function exportTableDialog(api) {
     }),
   ]);
 
+  // Таблица листами по ГОСТ: первый лист формы 5, последующие — формы 6.
+  // Отметка и формат те же, что у схемы: вид выгрузки у объекта один.
+  const formatField = exportField(strings.gost.format, exportFormatSelect(() => refresh()));
+  const gostCheck = exportCheck(strings.gost.sheet, exportChoice.gost, (on) => {
+    exportChoice.gost = on;
+    formatField.hidden = !on;
+    refresh();
+  });
+  gostCheck.title = strings.gost.sheetHint;
+  formatField.hidden = !exportChoice.gost;
+  controls.append(
+    gostCheck,
+    formatField,
+    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refresh) } }),
+  );
+
   const saved = (name) => notify(text("exportPanel.saved", { name }), "success");
   const guard = async (run) => {
     try {
@@ -369,13 +443,23 @@ function exportTableDialog(api) {
       on: {
         click: () =>
           guard(async () => {
-            const blob = await tablePng(table, {
-              scale: exportChoice.tableScale,
-              title: table.title || state.project.name,
-              subtitle: exportSubtitleOf(state, table),
-            });
-            const name = exportBaseName(state, "png");
-            exportDownload(blob, name);
+            if (!exportChoice.gost) {
+              const blob = await tablePng(table, {
+                scale: exportChoice.tableScale,
+                title: table.title || state.project.name,
+                subtitle: exportSubtitleOf(state, table),
+              });
+              const name = exportBaseName(state, "png");
+              exportDownload(blob, name);
+              saved(name);
+              return;
+            }
+            // Таблица на несколько листов — это несколько файлов, и класть их
+            // в папку загрузок по одному нельзя: браузер второй и третий
+            // скачивает молча или не скачивает вовсе. Поэтому архив.
+            const sheets = await gostTableSheets(table, exportGostTableOptions(state, table));
+            const name = exportBaseName(state, sheets.length > 1 ? "zip" : "png");
+            exportDownload(sheets.length > 1 ? await gostSheetsZip(sheets, exportBaseName(state, "png")) : sheets[0], name);
             saved(name);
           }),
       },
@@ -384,13 +468,17 @@ function exportTableDialog(api) {
       class: "ui-btn ui-btn--accent",
       on: {
         click: () =>
-          guard(() =>
-            printView("table", {
+          guard(async () => {
+            if (exportChoice.gost) {
+              await gostPrintSheets(await gostTableSheets(table, exportGostTableOptions(state, table)));
+              return;
+            }
+            await printView("table", {
               table,
               title: table.title || state.project.name,
               subtitle: exportSubtitleOf(state, table),
-            }),
-          ),
+            });
+          }),
       },
     }),
   ];
@@ -428,7 +516,28 @@ function exportSchemeDialog(api) {
   const roomsPlan = allSchemesPlan(state.project, { rooms: true, filter: state.filter });
   if (exportChoice.area === "rooms" && roomsPlan.rooms === 0) exportChoice.area = "all";
 
+  // Раскладка листа по ГОСТ считается тем же вызовом, что и выгрузка: формат,
+  // поле чертежа и настоящий масштаб в подсказке обязаны совпасть с тем, что
+  // ляжет на бумагу.
+  const gostPlanOf = () =>
+    gostSchemeSheet(state.project, scheme, {
+      area: exportAreaOf(state, scheme),
+      filter: exportFilterOfSheet(state),
+      format: exportChoice.gostFormat,
+    });
+
   const refreshHint = () => {
+    if (exportChoice.gost) {
+      const plan = gostPlanOf();
+      const parts = [gostSheetSizeText(plan.sheet, exportChoice.schemeScale), plan.scaleText];
+      // Калибровки нет — в штампе будет «Без масштаба», и сказать об этом надо
+      // до выгрузки: чертёж без масштаба меряют линейкой впустую.
+      if (!plan.denominator) parts.push(strings.gost.noScaleHint);
+      if (plan.tooSmall) parts.push(strings.gost.tooSmall);
+      if (exportByRooms()) parts.push(text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }));
+      hint.textContent = parts.join(" · ");
+      return;
+    }
     const size = exportAreaSize(state, scheme);
     const line = exportSizeText(size.width, size.height, exportChoice.schemeScale);
     if (!exportByRooms()) {
@@ -502,6 +611,23 @@ function exportSchemeDialog(api) {
     }),
   ]);
 
+  // Лист по ГОСТ — отдельной строкой под остальными отметками: это не ещё одна
+  // галочка «с чем рисовать», а другой вид листа, и рядом с ним стоят формат и
+  // кнопка в окно штампа.
+  const formatField = exportField(strings.gost.format, exportFormatSelect(refreshHint));
+  const gostCheck = exportCheck(strings.gost.sheet, exportChoice.gost, (on) => {
+    exportChoice.gost = on;
+    formatField.hidden = !on;
+    refreshHint();
+  });
+  gostCheck.title = strings.gost.sheetHint;
+  formatField.hidden = !exportChoice.gost;
+  controls.append(
+    gostCheck,
+    formatField,
+    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+  );
+
   const guard = async (run) => {
     try {
       await run();
@@ -521,14 +647,25 @@ function exportSchemeDialog(api) {
     if (missed.length > 0) {
       notify(text("exportPanel.labelsOutside", { names: missed.slice(0, 5).join(", ") }), "error");
     }
+    const common = {
+      area: exportAreaOf(state, scheme),
+      scale: exportChoice.schemeScale,
+      legend: exportChoice.legend,
+      outlines: exportChoice.outlines,
+      links: exportChoice.links,
+      filter: exportFilterOfSheet(state),
+    };
     try {
-      return await schemePng(state.project, scheme, image, {
-        area: exportAreaOf(state, scheme),
-        scale: exportChoice.schemeScale,
-        legend: exportChoice.legend,
-        outlines: exportChoice.outlines,
-        links: exportChoice.links,
-        filter: exportFilterOfSheet(state),
+      if (!exportChoice.gost) return await schemePng(state.project, scheme, image, common);
+      const plan = gostPlanOf();
+      // О мелкоте говорим и здесь: подсказку в окне могли не прочесть, а лист
+      // с нечитаемыми подписями уже уйдёт в файл.
+      if (plan.tooSmall) notify(strings.gost.tooSmall, "error");
+      return await gostSchemePng(state.project, scheme, image, {
+        ...common,
+        layout: plan,
+        format: exportChoice.gostFormat,
+        building: exportRoomName(state.project, exportAreaRoomId()),
       });
     } finally {
       if (release) release();
@@ -561,6 +698,8 @@ function exportSchemeDialog(api) {
               }
               const zip = await allSchemesZip(state.project, images, {
                 rooms: byRooms,
+                gost: exportChoice.gost,
+                format: exportChoice.gostFormat,
                 scale: exportChoice.schemeScale,
                 legend: exportChoice.legend,
                 outlines: exportChoice.outlines,
@@ -594,7 +733,10 @@ function exportSchemeDialog(api) {
         click: () =>
           guard(async () => {
             const blob = await renderScheme();
-            await printView("scheme", { blob, title: exportSchemeTitle(state, scheme) });
+            // У листа по ГОСТ заголовка над картинкой нет: всё, что нужно,
+            // написано в основной надписи, а строка сверху съела бы поле.
+            if (exportChoice.gost) await gostPrintSheets([blob]);
+            else await printView("scheme", { blob, title: exportSchemeTitle(state, scheme) });
           }),
       },
     }),

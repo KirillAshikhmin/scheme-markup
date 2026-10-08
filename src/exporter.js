@@ -6,10 +6,26 @@
 // Своего рисования меток здесь нет и быть не должно.
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
-import { findGroup, findRoom, outlinesInOrder, roomsInOrder, schemesInOrder } from "./model.js";
-import { drawScheme, labelBox, markRadius, outlineLabelBox, visibleMarks, visibleOutlines } from "./render.js";
+import { findGroup, findRoom, outlinesInOrder, planPixelsPerMeter, projectStamp, roomsInOrder, schemesInOrder } from "./model.js";
+import { drawScheme, labelBox, labelFontSize, markRadius, outlineLabelBox, visibleMarks, visibleOutlines } from "./render.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { tableSections, tableRowCount } from "./tables.js";
+import {
+  GOST_FONT,
+  GOST_FONT_NAME,
+  GOST_TABLE_ROW_MM,
+  drawGostFrame,
+  drawGostStamp,
+  gostDpi,
+  gostField,
+  gostPaginate,
+  gostPixelsPerMm,
+  gostScaleDenominator,
+  gostScaleText,
+  gostSheetLayout,
+  gostSheetSize,
+  gostStampValues,
+} from "./gostSheet.js";
 import { strings, text } from "./strings.js";
 
 export const EXPORT_SCALES = [1, 2, 4];
@@ -714,19 +730,27 @@ export async function allSchemesZip(project, images, options = {}) {
     done += 1;
     if (onProgress) onProgress({ done, total, name });
   };
+  // Лист по ГОСТ или прежняя картинка — выбор один на весь архив. Нумерация
+  // «Лист N из M» идёт по всему архиву: листы одного объекта и считаются вместе,
+  // иначе каждый этаж объявлял бы себя единственным.
+  const draw = (scheme, extra) =>
+    options.gost === true
+      ? gostSchemePng(project, scheme, extra.image, { ...options, ...extra, sheet: done + 1, sheets: total })
+      : schemePng(project, scheme, extra.image, { ...options, ...extra });
   for (let index = 0; index < schemes.length; index += 1) {
     const scheme = schemes[index];
     const image = await exportImageOf(map.get(scheme.imageId));
-    const whole = await schemePng(project, scheme, image, { ...options, area: "all" });
+    const whole = await draw(scheme, { image, area: "all" });
     put(exportSheetName(scheme, index), whole);
     if (options.rooms !== true) continue;
     const { sheets } = exportRoomSheets(project, scheme, options.filter);
     for (let at = 0; at < sheets.length; at += 1) {
       const sheet = sheets[at];
-      const page = await schemePng(project, scheme, image, {
-        ...options,
+      const page = await draw(scheme, {
+        image,
         area: sheet.area,
         filter: exportRoomFilter(options.filter, sheet.roomId),
+        building: sheet.name,
       });
       put(exportSheetName(scheme, index, sheet.name, at), page);
     }
@@ -935,4 +959,395 @@ export async function exportCopy(value) {
   }
   area.remove();
   return ok;
+}
+
+// ——— лист по ГОСТ —————————————————————————————————————————————————————
+//
+// Новый вид выгрузки рядом с прежними: тот же план и та же таблица, но на
+// бумаге с рамкой и основной надписью. Геометрия листа живёт в `gostSheet.js`
+// и считается в миллиметрах; здесь — холст, план и строки таблицы.
+
+// Чертёжный шрифт грузится до первой отрисовки: canvas не ждёт `@font-face`
+// сам, и первый лист вышел бы системным шрифтом, а второй — чертёжным.
+let gostFontLoading = null;
+
+function gostFontReady() {
+  if (typeof document === "undefined" || !document.fonts || typeof document.fonts.load !== "function") {
+    return Promise.resolve(false);
+  }
+  if (!gostFontLoading) {
+    gostFontLoading = document.fonts.load('10px "' + GOST_FONT_NAME + '"').then(
+      () => true,
+      () => false,
+    );
+  }
+  return gostFontLoading;
+}
+
+// Дата в штампе — календарный день того, кто выгружает, в чертёжном виде
+// «08.10.26». UTC здесь соврал бы на вечерней выгрузке так же, как в имени
+// файла проекта.
+function gostDate(date) {
+  const at = date instanceof Date ? date : new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return pad(at.getDate()) + "." + pad(at.getMonth() + 1) + "." + String(at.getFullYear()).slice(-2);
+}
+
+/**
+ * Раскладка листа схемы: формат, поле чертежа, вписанный план и **настоящий
+ * масштаб**.
+ *
+ * Кадр берётся тем же `exportFitArea`, что и у прежней выгрузки: на листе по
+ * ГОСТ подписи у стен обязаны быть целы ровно так же. Масштаб считается из
+ * `fit.scale` — из той самой величины, которой план вписан в поле, а не второй
+ * формулой: два расчёта разошлись бы в последнем знаке, и линейка это поймала
+ * бы (G169).
+ */
+export function gostSchemeSheet(project, scheme, options = {}) {
+  const { area, missed } = exportFitArea(project, scheme, {
+    area: options.area,
+    filter: options.filter,
+    fit: options.fit,
+  });
+  const sizes = project && project.view ? project.view : {};
+  const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
+  const layout = gostSheetLayout(
+    { width: area.width, height: area.height },
+    {
+      form: "form3",
+      format: options.format,
+      orientation: options.orientation,
+      textPx: labelFontSize(view),
+    },
+  );
+  const perMeter = planPixelsPerMeter(project, scheme ? scheme.id : null);
+  const denominator = gostScaleDenominator(layout.fit.scale, perMeter);
+  return { ...layout, form: "form3", area, missed, denominator, scaleText: gostScaleText(denominator) };
+}
+
+// Подпись размера листа для диалога: формат, ориентация, пиксели и честные
+// миллиметры бумаги — не пересчитанные из пикселей, а те, что у формата.
+export function gostSheetSizeText(sheet, scale) {
+  const dpi = gostDpi(scale);
+  const mm = gostPixelsPerMm(dpi);
+  return text("gost.size", {
+    format: sheet.format,
+    orientation:
+      sheet.orientation === "landscape" ? strings.gost.orientationLandscape : strings.gost.orientationPortrait,
+    width: Math.round(sheet.width * mm),
+    height: Math.round(sheet.height * mm),
+    mmWidth: sheet.width,
+    mmHeight: sheet.height,
+    dpi,
+  });
+}
+
+/**
+ * Лист схемы по ГОСТ: рамка, план в поле чертежа, основная надпись формы 3.
+ *
+ * План рисуется тем же `drawScheme`, что и холст, — своего рисования меток
+ * здесь нет и быть не должно. Поле чертежа обрезает: подпись, вылезшая за
+ * рамку, ушла бы в поле подшивки.
+ */
+export async function gostSchemePng(project, scheme, image, options = {}) {
+  const plan = options.layout || gostSchemeSheet(project, scheme, options);
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  await gostFontReady();
+  const canvas = exportCanvas(plan.sheet.width * mm, plan.sheet.height * mm);
+  const ctx = canvas.getContext("2d");
+  drawGostFrame(ctx, plan.sheet, mm);
+
+  const sizes = project && project.view ? project.view : {};
+  const zoom = plan.fit.scale * mm;
+  const view = {
+    zoom,
+    offsetX: plan.fit.x * mm - plan.area.x * zoom,
+    offsetY: plan.fit.y * mm - plan.area.y * zoom,
+    markSize: sizes.markSize,
+    labelSize: sizes.labelSize,
+  };
+  const field = gostField(plan.sheet, plan.form);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(field.x * mm, field.y * mm, field.width * mm, field.height * mm);
+  ctx.clip();
+  drawScheme(ctx, {
+    project,
+    scheme,
+    image,
+    filter: options.filter || null,
+    view,
+    legend: options.legend ? { x: (field.x + 4) * mm, y: (field.y + 4) * mm } : null,
+    outlines: options.outlines === false ? false : "pale",
+    links: options.links === true,
+  });
+  ctx.restore();
+
+  drawGostStamp(
+    ctx,
+    plan.sheet,
+    plan.form,
+    gostStampValues(projectStamp(project), {
+      object: (project && project.name) || "",
+      building: options.building || "",
+      drawing: (scheme && scheme.name) || "",
+      scale: plan.scaleText,
+      sheet: options.sheet || 1,
+      sheets: options.sheets || 1,
+      date: gostDate(options.date),
+    }),
+    mm,
+  );
+  return exportBlob(canvas);
+}
+
+// ——— таблица листами по ГОСТ ———————————————————————————————————————————
+
+// Метрика таблицы на бумаге, в миллиметрах. Шаг строки живёт в `gostSheet.js`
+// (там же, где считается, сколько их влезет на лист); шрифт 3,5 мм — размер по
+// ГОСТ 2.304, ближайший к этому шагу.
+const GOST_TABLE = {
+  row: GOST_TABLE_ROW_MM,
+  font: 3.5,
+  groupFont: 4,
+  pad: 2,
+};
+
+// Строки будущих листов одним списком: заголовок разбивки, строка таблицы,
+// подвал «Итого». Разбивка по листам идёт по этому списку, поэтому «Лист N из
+// M» считается до рисования — как и число листов в архиве схем.
+function gostTableLines(table) {
+  const lines = [];
+  for (const section of tableSections(table)) {
+    if (section.title) lines.push({ kind: "group", title: section.title, color: section.color, level: section.level || 1 });
+    for (const row of section.rows) lines.push({ kind: "row", cells: row.cells, color: row.color });
+  }
+  const totals = Array.isArray(table.totals) ? table.totals : [];
+  if (totals.length > 0) {
+    lines.push({ kind: "group", title: strings.tables.totals });
+    for (const row of totals) lines.push({ kind: "total", title: row.title, count: row.count, level: row.level });
+    lines.push({ kind: "total", title: table.totalLabel || strings.tables.totalAll, count: table.totalCount, bold: true });
+  }
+  return lines;
+}
+
+// Ширины колонок в миллиметрах: по самому длинному значению, а остаток поля
+// отдаётся первой колонке — таблица на чертеже тянется во всю рамку, и узкая
+// полоска посреди листа читалась бы как обрыв.
+function gostTableColumns(table, widthMm) {
+  const ctx = exportProbe();
+  const probe = 100;
+  const measure = (value, bold) => {
+    ctx.font = (bold ? "600 " : "") + probe + "px " + GOST_FONT;
+    return (ctx.measureText(String(value == null ? "" : value)).width / probe) * GOST_TABLE.font;
+  };
+  const widths = table.columns.map((column) => measure(column, true));
+  for (const section of tableSections(table)) {
+    for (const row of section.rows) {
+      row.cells.forEach((cell, index) => {
+        const width = measure(cell, false);
+        if (width > widths[index]) widths[index] = width;
+      });
+    }
+  }
+  const padded = widths.map((width) => width + GOST_TABLE.pad * 2);
+  const sum = padded.reduce((total, width) => total + width, 0);
+  if (sum <= 0) return padded;
+  if (sum > widthMm) return padded.map((width) => (width / sum) * widthMm);
+  padded[0] += widthMm - sum;
+  return padded;
+}
+
+/**
+ * Разбивка таблицы на листы: первый по форме 5, последующие по форме 6.
+ * Считать, сколько строк влезет, умеет `gostSheet.gostPaginate` — здесь только
+ * строки таблицы. Формат таблицы руками не подбирается: подбор — про план, а
+ * страница текста влезает в A4, который единственный и печатают.
+ */
+export function gostTablePages(table, options = {}) {
+  const sheet = gostSheetSize(options.format === "auto" || !options.format ? "A4" : options.format, options.orientation);
+  const lines = gostTableLines(table);
+  const pages = gostPaginate(lines.length, sheet, { rowMm: GOST_TABLE.row }).map((page) => ({
+    form: page.form,
+    lines: lines.slice(page.from, page.to),
+  }));
+  return { sheet, pages };
+}
+
+function gostTableCell(ctx, value, limitPx) {
+  const cell = value == null ? "" : String(value);
+  if (ctx.measureText(cell).width <= limitPx) return cell;
+  let cut = cell;
+  while (cut.length > 1 && ctx.measureText(cut + "…").width > limitPx) cut = cut.slice(0, -1);
+  return cut + "…";
+}
+
+/**
+ * Один лист таблицы: рамка, шапка колонок, строки и основная надпись формы 5
+ * (первый лист) или 6 (последующие). Шапка повторяется на каждом листе —
+ * иначе второй лист таблицы читать нечем.
+ */
+export async function gostTablePng(table, page, plan, options = {}) {
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  await gostFontReady();
+  const sheet = plan.sheet;
+  const canvas = exportCanvas(sheet.width * mm, sheet.height * mm);
+  const ctx = canvas.getContext("2d");
+  drawGostFrame(ctx, sheet, mm);
+
+  const field = gostField(sheet, page.form);
+  const widths = plan.columns;
+  const bodyWidth = widths.reduce((total, width) => total + width, 0);
+  ctx.strokeStyle = "#000000";
+  ctx.fillStyle = "#1f2328";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+
+  const line = (x1, y1, x2, y2, widthMm) => {
+    ctx.lineWidth = Math.max(1, widthMm * mm);
+    ctx.beginPath();
+    ctx.moveTo(x1 * mm, y1 * mm);
+    ctx.lineTo(x2 * mm, y2 * mm);
+    ctx.stroke();
+  };
+
+  let y = field.y;
+  const drawCells = (cells, bold) => {
+    ctx.font = (bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+    let x = field.x;
+    cells.forEach((cell, index) => {
+      const limit = (widths[index] - GOST_TABLE.pad * 2) * mm;
+      ctx.fillText(gostTableCell(ctx, cell, limit), (x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      x += widths[index];
+    });
+  };
+
+  // Шапка колонок: на каждом листе своя, и под ней основная линия.
+  drawCells(table.columns, true);
+  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.7);
+  y += GOST_TABLE.row;
+
+  for (const item of page.lines) {
+    if (item.kind === "group") {
+      ctx.fillStyle = item.color || "#1f2328";
+      ctx.font = "600 " + (item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm + "px " + GOST_FONT;
+      ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.strokeStyle = item.color || "#1f2328";
+      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
+      ctx.strokeStyle = "#000000";
+      ctx.fillStyle = "#1f2328";
+      y += GOST_TABLE.row;
+      continue;
+    }
+    if (item.kind === "total") {
+      ctx.font = (item.bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+      ctx.fillText(item.title, (field.x + GOST_TABLE.pad + (item.level === 2 ? GOST_TABLE.pad * 2 : 0)) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.textAlign = "right";
+      ctx.fillText(String(item.count), (field.x + bodyWidth - GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.textAlign = "left";
+      y += GOST_TABLE.row;
+      continue;
+    }
+    // Цвет категории — полоской слева, как и на прежнем листе: колонки с кодом
+    // краски в таблице нет, и рисовать его негде.
+    if (item.color) {
+      ctx.fillStyle = item.color;
+      ctx.fillRect(field.x * mm, (y + 1) * mm, 1.2 * mm, (GOST_TABLE.row - 2) * mm);
+      ctx.fillStyle = "#1f2328";
+    }
+    drawCells(item.cells, false);
+    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.3);
+    y += GOST_TABLE.row;
+  }
+
+  drawGostStamp(
+    ctx,
+    sheet,
+    page.form,
+    gostStampValues(options.stamp || {}, {
+      object: options.object || "",
+      drawing: options.title || "",
+      sheet: options.sheet || 1,
+      sheets: options.sheets || 1,
+      date: gostDate(options.date),
+    }),
+    mm,
+  );
+  return exportBlob(canvas);
+}
+
+/**
+ * Архив готовых листов: порядковый номер в имени, чтобы листы в папке шли тем
+ * же порядком, что и в документе. Zip один на всю сборку — тот же `writeZip`.
+ */
+export async function gostSheetsZip(blobs, name) {
+  const files = blobs.map((data, index) => ({
+    name: String(index + 1).padStart(2, "0") + "-" + name,
+    data,
+    compress: false,
+  }));
+  return writeZip(files, { compress: false });
+}
+
+/**
+ * Печать готовых листов: по картинке на страницу, без заголовка над ней —
+ * всё, что нужно, уже написано в основной надписи.
+ *
+ * **Миллиметры при такой печати не свои.** Браузер печатает со своими полями
+ * и ужимает лист под них; линейкой выверяют не это, а скачанный PNG,
+ * напечатанный «как есть» (100 %). Диалог говорит об этом вслух — молча
+ * отдать на замер ужатый лист было бы хуже, чем не печатать вовсе.
+ */
+export async function gostPrintSheets(blobs) {
+  const root = exportPrintRoot();
+  const urls = [];
+  const images = [];
+  const nodes = [];
+  for (const blob of blobs) {
+    const url = URL.createObjectURL(blob);
+    urls.push(url);
+    const wrap = exportNode("div", "print-doc print-doc--scheme print-doc--sheet");
+    const image = document.createElement("img");
+    image.className = "print-doc__image";
+    image.src = url;
+    wrap.append(image);
+    images.push(image);
+    nodes.push(wrap);
+  }
+  root.replaceChildren(...nodes);
+  await Promise.all(
+    images.map(
+      (image) =>
+        new Promise((resolve) => {
+          image.addEventListener("load", resolve, { once: true });
+          image.addEventListener("error", resolve, { once: true });
+        }),
+    ),
+  );
+  exportPrintRun(root);
+  setTimeout(() => urls.forEach((url) => URL.revokeObjectURL(url)), 4000);
+}
+
+/**
+ * Все листы таблицы разом: массив PNG в порядке листов. «Лист N из M» считает
+ * сама разбивка, поэтому номер на бумаге не может разойтись с числом файлов.
+ */
+export async function gostTableSheets(table, options = {}) {
+  const plan = gostTablePages(table, options);
+  // Ширины колонок считаются один раз на все листы: разные ширины на соседних
+  // листах одной таблицы читались бы как две разные таблицы.
+  const columns = gostTableColumns(table, gostField(plan.sheet, "form5").width);
+  const blobs = [];
+  for (let index = 0; index < plan.pages.length; index += 1) {
+    blobs.push(
+      await gostTablePng(table, plan.pages[index], { ...plan, columns }, {
+        ...options,
+        sheet: index + 1,
+        sheets: plan.pages.length,
+      }),
+    );
+  }
+  return blobs;
 }
