@@ -251,14 +251,29 @@ function exportBaseName(state, suffix) {
 // Что уходит в штамп листа таблицы: объект, название документа и данные,
 // заполненные в окне «Данные для штампа». Название собирается там же, где и
 // имя файла, — иначе лист и файл называли бы таблицу по-разному.
-function exportGostTableOptions(state, table) {
-  const room = exportChoice.roomId ? findRoom(state.project, exportChoice.roomId) : null;
-  const title = [table.title || strings.exportPanel.tableDialog, room ? room.name : ""].filter(Boolean).join(". ");
+function exportGostTableOptions(api, table) {
+  // Объект берётся свежим, а не из снимка, с которым открылся диалог: окно
+  // «Данные для штампа» правит его из-под этого же диалога, и снимок к моменту
+  // выгрузки уже без графы. Один раз на этом и попались — лист вышел с пустым
+  // штампом и без единой жалобы.
+  const project = api.getState().project;
+  const room = exportChoice.roomId ? findRoom(project, exportChoice.roomId) : null;
+  // Название документа — что это за таблица, а не имя объекта: имя объекта
+  // стоит в штампе выше, и повторять его второй строкой незачем.
+  const kind =
+    exportChoice.kind === "links"
+      ? strings.exportPanel.kindLinks
+      : exportChoice.kind === "equipment"
+        ? strings.exportPanel.kindEquipment
+        : exportChoice.kind === "types"
+          ? strings.exportPanel.kindTypes
+          : strings.exportPanel.kindMarks;
+  const title = [kind, room ? room.name : ""].filter(Boolean).join(". ");
   return {
     scale: exportChoice.tableScale,
     format: exportChoice.gostFormat,
-    stamp: projectStamp(state.project),
-    object: state.project.name,
+    stamp: projectStamp(project),
+    object: project.name,
     title,
   };
 }
@@ -457,7 +472,7 @@ function exportTableDialog(api) {
             // Таблица на несколько листов — это несколько файлов, и класть их
             // в папку загрузок по одному нельзя: браузер второй и третий
             // скачивает молча или не скачивает вовсе. Поэтому архив.
-            const sheets = await gostTableSheets(table, exportGostTableOptions(state, table));
+            const sheets = await gostTableSheets(table, exportGostTableOptions(api, table));
             const name = exportBaseName(state, sheets.length > 1 ? "zip" : "png");
             exportDownload(sheets.length > 1 ? await gostSheetsZip(sheets, exportBaseName(state, "png")) : sheets[0], name);
             saved(name);
@@ -470,7 +485,7 @@ function exportTableDialog(api) {
         click: () =>
           guard(async () => {
             if (exportChoice.gost) {
-              await gostPrintSheets(await gostTableSheets(table, exportGostTableOptions(state, table)));
+              await gostPrintSheets(await gostTableSheets(table, exportGostTableOptions(api, table)));
               return;
             }
             await printView("table", {
@@ -519,8 +534,12 @@ function exportSchemeDialog(api) {
   // Раскладка листа по ГОСТ считается тем же вызовом, что и выгрузка: формат,
   // поле чертежа и настоящий масштаб в подсказке обязаны совпасть с тем, что
   // ляжет на бумагу.
+  //
+  // Объект берётся свежим (`getState()`), а не из снимка, с которым открылся
+  // диалог: окно «Данные для штампа» правит его из-под этого же диалога, и в
+  // снимке графы остались бы пустыми — лист вышел бы без штампа молча.
   const gostPlanOf = () =>
-    gostSchemeSheet(state.project, scheme, {
+    gostSchemeSheet(getState().project, scheme, {
       area: exportAreaOf(state, scheme),
       filter: exportFilterOfSheet(state),
       format: exportChoice.gostFormat,
@@ -661,7 +680,7 @@ function exportSchemeDialog(api) {
       // О мелкоте говорим и здесь: подсказку в окне могли не прочесть, а лист
       // с нечитаемыми подписями уже уйдёт в файл.
       if (plan.tooSmall) notify(strings.gost.tooSmall, "error");
-      return await gostSchemePng(state.project, scheme, image, {
+      return await gostSchemePng(getState().project, scheme, image, {
         ...common,
         layout: plan,
         format: exportChoice.gostFormat,
@@ -696,7 +715,9 @@ function exportSchemeDialog(api) {
                 const blob = await getImage(item.imageId);
                 if (blob) images.set(item.imageId, blob);
               }
-              const zip = await allSchemesZip(state.project, images, {
+              // Свежий объект — по той же причине, что и у одного листа: графы
+              // штампа могли заполнить из-под этого окна.
+              const zip = await allSchemesZip(getState().project, images, {
                 rooms: byRooms,
                 gost: exportChoice.gost,
                 format: exportChoice.gostFormat,

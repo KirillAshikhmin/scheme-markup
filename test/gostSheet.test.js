@@ -271,21 +271,42 @@ test("графы штампа заполняются данными объект
   // «Масштаб» у формы 3 нет, и по СПДС его пишут именно там.
   assert.equal(values.drawing, "1 этаж\nМ 1:137,4");
   assert.deepEqual([values.stage, values.sheet, values.sheets], ["Р", "2", "5"]);
-  assert.equal(values.name1, "Иванов");
-  assert.equal(values.date1, "08.10.26");
-  assert.deepEqual([values.role2, values.name2], [strings.gost.roleChecker, "Петров"]);
-  assert.deepEqual([values.role3, values.name3], [strings.gost.roleApprover, "Сидоров"]);
+  assert.equal(values.name0, "Иванов");
+  assert.equal(values.date0, "08.10.26");
+  assert.deepEqual([values.role1, values.name1], [strings.gost.roleChecker, "Петров"]);
+  assert.deepEqual([values.role2, values.name2], [strings.gost.roleApprover, "Сидоров"]);
   assert.equal(values.org, "ООО «Свет»");
+});
+
+test("фамилия разработчика встаёт в ту строку, где напечатано «Разраб.»", () => {
+  // Строка подписей — это четыре ячейки на одной высоте. Разойдись ключ
+  // значения со строкой формы — фамилия уехала бы на строку ниже подписи, и
+  // заметить это можно было бы только глазами на готовом листе.
+  for (const form of ["form3", "form5"]) {
+    const grid = gostStampForm(form);
+    const author = grid.cells.find((cell) => cell.label === "roleAuthor");
+    assert.ok(author, form + ": строки «Разраб.» нет");
+    const name = grid.cells.find((cell) => cell.y === author.y && cell.x === author.width);
+    assert.equal(name.field, "name0", form + ": фамилия не в строке «Разраб.»");
+    const date = grid.cells.filter((cell) => cell.y === author.y && cell.x < 65).pop();
+    assert.equal(date.field, "date0");
+    // «Пров.» и «Утв.» уходят в свободные строки между «Разраб.» и «Н. контр.».
+    const control = grid.cells.find((cell) => cell.label === "roleControl");
+    for (const index of [1, 2]) {
+      const row = grid.cells.find((cell) => cell.field === "role" + index);
+      assert.ok(row && row.y > author.y && row.y < control.y, form + ": строка " + index + " не свободная");
+    }
+  }
 });
 
 test("незаполненные графы остаются пустыми — лист всё равно выходит", () => {
   const values = gostStampValues(null, { drawing: "1 этаж", scale: strings.gost.noScale, sheet: 1, sheets: 1 });
   assert.equal(values.code, "");
   assert.equal(values.org, "");
-  assert.equal(values.name1, "");
+  assert.equal(values.name0, "");
   // Пустая строка «Утв.» не печатается вовсе: подпись без фамилии читалась бы
   // как «не утверждено», а графу просто не заполняли.
-  assert.equal(values.role3, undefined);
+  assert.equal(values.role2, undefined);
   assert.equal(values.drawing, "1 этаж\n" + strings.gost.noScale);
 });
 

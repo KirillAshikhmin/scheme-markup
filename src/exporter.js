@@ -1132,9 +1132,10 @@ function gostTableLines(table) {
   return lines;
 }
 
-// Ширины колонок в миллиметрах: по самому длинному значению, а остаток поля
-// отдаётся первой колонке — таблица на чертеже тянется во всю рамку, и узкая
-// полоска посреди листа читалась бы как обрыв.
+// Ширины колонок в миллиметрах: по самому длинному значению, а дальше все
+// колонки тянутся (или ужимаются) к ширине рамки одной долей. Таблица на
+// чертеже идёт во всю рамку: узкая полоска посреди листа читалась бы как
+// обрыв, а отданный одной колонке остаток перекосил бы её на треть листа.
 function gostTableColumns(table, widthMm) {
   const ctx = exportProbe();
   const probe = 100;
@@ -1154,9 +1155,7 @@ function gostTableColumns(table, widthMm) {
   const padded = widths.map((width) => width + GOST_TABLE.pad * 2);
   const sum = padded.reduce((total, width) => total + width, 0);
   if (sum <= 0) return padded;
-  if (sum > widthMm) return padded.map((width) => (width / sum) * widthMm);
-  padded[0] += widthMm - sum;
-  return padded;
+  return padded.map((width) => (width / sum) * widthMm);
 }
 
 /**
@@ -1224,8 +1223,23 @@ export async function gostTablePng(table, page, plan, options = {}) {
     });
   };
 
+  // Разделители колонок внутри одной строки: таблица на чертеже — сетка, а не
+  // колонки текста. Через заголовки разбивки они не идут: там строка одна на
+  // всю ширину, и черта поперёк неё читалась бы как пустая ячейка.
+  const columnLines = (top) => {
+    let x = field.x;
+    for (const width of widths.slice(0, -1)) {
+      x += width;
+      line(x, top, x, top + GOST_TABLE.row, 0.3);
+    }
+    line(field.x, top, field.x, top + GOST_TABLE.row, 0.3);
+    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, 0.3);
+  };
+
   // Шапка колонок: на каждом листе своя, и под ней основная линия.
   drawCells(table.columns, true);
+  columnLines(y);
+  line(field.x, y, field.x + bodyWidth, y, 0.3);
   line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.7);
   y += GOST_TABLE.row;
 
@@ -1258,6 +1272,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
       ctx.fillStyle = "#1f2328";
     }
     drawCells(item.cells, false);
+    columnLines(y);
     line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.3);
     y += GOST_TABLE.row;
   }

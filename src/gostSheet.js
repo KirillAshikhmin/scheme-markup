@@ -441,27 +441,31 @@ export function gostStampValues(stamp, sheetInfo = {}) {
     object: sheetInfo.object || "",
     building: sheetInfo.building || "",
     drawing: [sheetInfo.drawing || "", sheetInfo.scale || ""].filter(Boolean).join("\n"),
-    document: [sheetInfo.object || "", sheetInfo.drawing || ""].filter(Boolean).join("\n"),
+    // Форма 5 держит объект и название документа в одной графе; совпали —
+    // пишем один раз, строка-близнец в штампе выглядит опечаткой.
+    document: [...new Set([sheetInfo.object || "", sheetInfo.drawing || ""])].filter(Boolean).join("\n"),
     stage: data.stage || "",
     sheet: sheetInfo.sheet == null ? "" : String(sheetInfo.sheet),
     sheets: sheetInfo.sheets == null ? "" : String(sheetInfo.sheets),
     org: data.org || "",
-    name1: data.author || "",
-    date1: data.author ? sheetInfo.date || "" : "",
+    // Строка 0 — «Разраб.»: её подпись напечатана в самой форме, сюда идёт
+    // только фамилия и дата.
+    name0: data.author || "",
+    date0: data.author ? sheetInfo.date || "" : "",
   };
-  // Строки «Пров.» и «Утв.» — свободные строки формы: название работы в них
-  // печатается только тогда, когда есть фамилия. Пустая строка с подписью
-  // «Утв.» и без фамилии читалась бы как «не утверждено», а это не так: её
-  // просто не заполняли.
+  // Строки «Пров.» и «Утв.» — свободные строки формы (между «Разраб.» и
+  // «Н. контр.»): название работы в них печатается только тогда, когда есть
+  // фамилия. Пустая строка с подписью «Утв.» и без фамилии читалась бы как
+  // «не утверждено», а это не так: её просто не заполняли.
   if (data.checker) {
-    values.role2 = strings.gost.roleChecker;
-    values.name2 = data.checker;
-    values.date2 = sheetInfo.date || "";
+    values.role1 = strings.gost.roleChecker;
+    values.name1 = data.checker;
+    values.date1 = sheetInfo.date || "";
   }
   if (data.approver) {
-    values.role3 = strings.gost.roleApprover;
-    values.name3 = data.approver;
-    values.date3 = sheetInfo.date || "";
+    values.role2 = strings.gost.roleApprover;
+    values.name2 = data.approver;
+    values.date2 = sheetInfo.date || "";
   }
   return values;
 }
