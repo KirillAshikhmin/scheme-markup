@@ -18,6 +18,7 @@ import {
   visibleMarks,
   visibleOutlines,
 } from "./render.js";
+import { monoContext } from "./mono.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
@@ -73,6 +74,12 @@ function exportCanvas(width, height) {
   canvas.width = Math.max(1, Math.round(width));
   canvas.height = Math.max(1, Math.round(height));
   return canvas;
+}
+
+// Холст листа: настоящий или чёрно-белая подставка. Признак приходит из
+// диалога выгрузки и дальше листа не живёт — в объект он не попадает.
+function monoOf(ctx, mono) {
+  return mono === true ? monoContext(ctx) : ctx;
 }
 
 /**
@@ -378,9 +385,9 @@ export function exportFitArea(project, scheme, options = {}) {
  * PNG схемы с метками. `area` — «all» или прямоугольник в пикселях плана,
  * `scale` — множитель, `legend` — рисовать ли легенду в углу, `outlines` —
  * печатать ли контуры помещений (по умолчанию да, бледной линией), `links` —
- * рисовать ли связи меток (по умолчанию нет: это разбор, а не чертёж), `filter` —
- * тот же фильтр, что на экране: скрытое им не попадает ни в картинку,
- * ни в легенду.
+ * рисовать ли связи меток (по умолчанию нет: это разбор, а не чертёж),
+ * `mono` — чёрно-белый лист (G170), `filter` — тот же фильтр, что на экране:
+ * скрытое им не попадает ни в картинку, ни в легенду.
  */
 export async function schemePng(project, scheme, image, options = {}) {
   // Файл чертёжного шрифта мог ещё не дойти: холст в этом случае молча рисует
@@ -395,7 +402,11 @@ export async function schemePng(project, scheme, image, options = {}) {
     fit: options.fit,
   });
   const canvas = exportCanvas(area.width * scale, area.height * scale);
-  const ctx = canvas.getContext("2d");
+  // Чёрно-белый лист — подставка под холст, а не второй путь рисования
+  // (`mono.js`): рисует всё тот же `drawScheme`, а краска перекрашивается на
+  // входе в холст. Без отметки холст остаётся настоящим, и обычная выгрузка не
+  // меняется ни на пиксель.
+  const ctx = monoOf(canvas.getContext("2d"), options.mono);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const sizes = project && project.view ? project.view : {};
@@ -746,6 +757,9 @@ export function allSchemesPlan(project, options = {}) {
  * На листе комнаты — только её метки, её контур и её название
  * (`exportRoomFilter`): лист печатают ради одной комнаты, и чужое на нём шум.
  * Вся картина целиком лежит рядом, общим листом.
+ *
+ * `options.mono` и `options.gost` уходят каждому листу как есть: вид листа
+ * один на весь архив — выгружают его целиком, а не лист цветной, лист нет.
  */
 export async function allSchemesZip(project, images, options = {}) {
   // Форма входа одна — Map «imageId → Blob», как у packProject: разбирать
@@ -1075,7 +1089,9 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
   const mm = gostPixelsPerMm(dpi);
   await drawFontReady();
   const canvas = exportCanvas(plan.sheet.width * mm, plan.sheet.height * mm);
-  const ctx = canvas.getContext("2d");
+  // Отметка «чёрно-белый» работает и здесь: рамка со штампом и так чёрные, а
+  // план с метками проходит через ту же подставку, что и у прежнего листа.
+  const ctx = monoOf(canvas.getContext("2d"), options.mono);
   drawGostFrame(ctx, plan.sheet, mm);
 
   const sizes = project && project.view ? project.view : {};
