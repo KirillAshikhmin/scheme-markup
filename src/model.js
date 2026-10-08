@@ -3191,6 +3191,81 @@ export function formatMeters(value) {
   return String(Math.round(number * 100) / 100).replace(".", ",");
 }
 
+// ——— данные для штампа ————————————————————————————————————————————————
+//
+// Графы основной надписи, которых в разметке не было: шифр документа, стадия,
+// фамилии и организация. Живут **у объекта** (а не у схемы): шифр и
+// организация одни на весь комплект, и переписывать их на каждом этаже
+// человек не должен.
+//
+// Поля нет у объектов прежней разметки, и `FORMAT_VERSION` ради него не
+// поднят: читают его только через `projectStamp`, который отсутствующее поле
+// отдаёт пустыми графами. Объект, который не трогали, открывается и
+// выгружается ровно как раньше — ни одного нового ключа в его `project.json`
+// не появляется (G68).
+
+export const PROJECT_STAMP_FIELDS = ["code", "stage", "author", "checker", "approver", "org"];
+
+// Потолок строки графы: в ячейку шириной 50 мм и больше ста знаков не влезет,
+// а вставленный туда абзац раздул бы файл и ничего не показал.
+export const PROJECT_STAMP_MAX = 120;
+
+function stampValue(raw) {
+  // Переводы строк из буфера обмена схлопываются в пробел: графа штампа —
+  // одна строка, а переносы в ней разложит уже отрисовка по ширине ячейки.
+  return String(raw == null ? "" : raw).replace(/\s+/g, " ").trim().slice(0, PROJECT_STAMP_MAX);
+}
+
+/**
+ * Данные штампа объекта: все графы строками, незаполненные — пустые.
+ * Читать `project.stamp` самому нельзя: у объекта прежней разметки поля нет
+ * вовсе, а мусор (число, строка вместо объекта) здесь же становится пустыми
+ * графами — лист выйдет, просто без этих надписей.
+ */
+export function projectStamp(project) {
+  const raw = project && project.stamp && typeof project.stamp === "object" && !Array.isArray(project.stamp)
+    ? project.stamp
+    : {};
+  const stamp = {};
+  for (const field of PROJECT_STAMP_FIELDS) stamp[field] = stampValue(raw[field]);
+  return stamp;
+}
+
+// Заполнена ли хоть одна графа. Нужно диалогу и подсказке: пустой штамп — это
+// не ошибка, но сказать «графы не заполнены» честнее, чем промолчать.
+export function projectHasStamp(project) {
+  const stamp = projectStamp(project);
+  return PROJECT_STAMP_FIELDS.some((field) => stamp[field] !== "");
+}
+
+/**
+ * Правка данных штампа. Пустые графы в объекте не хранятся, а когда пустыми
+ * стали все — поле `stamp` **убирается**: объект возвращается ровно в то
+ * состояние, в котором был до заполнения, и два одинаковых файла снова
+ * сливаются в «ничего не изменилось».
+ */
+export function setProjectStamp(project, patch = {}) {
+  const before = projectStamp(project);
+  const next = { ...before };
+  for (const field of PROJECT_STAMP_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) next[field] = stampValue(patch[field]);
+  }
+  const stamp = {};
+  for (const field of PROJECT_STAMP_FIELDS) {
+    if (next[field] !== "") stamp[field] = next[field];
+  }
+  const filled = Object.keys(stamp).length > 0;
+  // Правка, ничего не изменившая, объект не трогает: иначе «Сохранить» в окне
+  // без единой правки переписывало бы время объекта и ломало сравнение файлов.
+  const same = PROJECT_STAMP_FIELDS.every((field) => next[field] === before[field]);
+  if (same) return { project, stamp: next, changed: false };
+  if (!filled) {
+    const { stamp: dropped, ...rest } = project;
+    return { project: withProject(rest, {}), stamp: next, changed: true };
+  }
+  return { project: withProject(project, { stamp }), stamp: next, changed: true };
+}
+
 // ——— правка вершин ломаной ————————————————————————————————————————————
 //
 // Та же рука, что правит контур помещения: вершину двигают, добавляют между

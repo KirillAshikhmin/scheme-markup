@@ -105,6 +105,33 @@ function mergeSame(a, b) {
   return mergeText(a) === mergeText(b);
 }
 
+/**
+ * Данные штампа: **графа к графе, а не поле целиком.**
+ *
+ * Графы заполняют разные люди и в разное время: один вписал шифр, другой —
+ * организацию и свою фамилию. Возьми слияние штамп победителя целиком — работа
+ * второго пропала бы молча, хотя спора между «шифром» и «организацией» нет.
+ * Спорит только одна и та же графа, заполненная по-разному, — там решает тот
+ * же победитель, что и везде.
+ *
+ * Поля нет ни у кого — оно и не заводится: объект прежней разметки остаётся
+ * прежним, и два одинаковых файла сходятся в «ничего не изменилось» (G68).
+ */
+function mergeStamp(merged, ours, theirs, winner) {
+  const mine = ours.stamp && typeof ours.stamp === "object" ? ours.stamp : null;
+  const other = theirs.stamp && typeof theirs.stamp === "object" ? theirs.stamp : null;
+  if (!mine && !other) return;
+  const stamp = {};
+  for (const field of new Set([...Object.keys(mine || {}), ...Object.keys(other || {})])) {
+    const left = mine ? mine[field] : "";
+    const right = other ? other[field] : "";
+    const value = !left ? right : !right ? left : winner === "theirs" ? right : left;
+    if (value) stamp[field] = value;
+  }
+  if (Object.keys(stamp).length > 0) merged.stamp = stamp;
+  else delete merged.stamp;
+}
+
 // Кто выигрывает спор. Обе стороны считают это из одной пары и получают один
 // ответ — иначе слияние не сходится.
 export function mergeWinner(ours, theirs) {
@@ -656,6 +683,7 @@ export function mergeProjects(ours, theirs, base, options = {}) {
     report.conflicts.push({ code: "bothChanged", entity: "name", id: ours.id, kept: winner, item: { name: keptName }, other: { name: winner === "theirs" ? ours.name : theirs.name } });
   }
   if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
+  mergeStamp(merged, ours, theirs, winner);
   // Ключ проекта сходится. Есть у одного — берут оба: это факт, а не мнение, и
   // после первой же встречи родство перестаёт быть догадкой. Есть у обоих и
   // разные (копии разошлись до появления ключей) — берётся меньший по строке:
