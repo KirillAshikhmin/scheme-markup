@@ -23,9 +23,32 @@ const TRAP_LAST = 0x00ff;
 // Кроме этих двух: они переназначены на настоящие знаки.
 const FIXED = new Set([0x00d7, 0x00d8]);
 
+// Ловушка шире сплошного диапазона: CP1251 держит кириллицу не только в
+// 0xC0-0xFF, и в верхней половине 0x80-0xBF тот же шрифт раздал ещё девять
+// кодов. Найдено глазами (таск 114): в плашке комментария «3×6 мм²» вторая
+// степень нарисовалась украинской «І» — молча, как и всё остальное в этой
+// ловушке. Степень в сечении кабеля и в объёме воздуха — знак рабочий, поэтому
+// коды перечислены поимённо, со своим двойником по CP1251.
+//
+// Сплошным диапазоном 0x80-0xBF их не закрыть: `°` (0x00B0) тоже отсюда, но он
+// дорисован и настоящий, а `±`, `«», `»`, `№`-подобные коды в шрифт не попали
+// вовсе — на них браузер честно подставит запасной шрифт, и видно сразу.
+const TRAP_SINGLES = new Map([
+  [0x00a8, "Ё"],
+  [0x00aa, "Є"],
+  [0x00af, "Ї"],
+  [0x00b2, "І"],
+  [0x00b3, "і"],
+  [0x00b8, "ё"],
+  [0x00b9, "№"],
+  [0x00ba, "є"],
+  [0x00bf, "ї"],
+]);
+
 function trapChars(value) {
   return [...value].filter((ch) => {
     const code = ch.codePointAt(0);
+    if (TRAP_SINGLES.has(code)) return true;
     return code >= TRAP_FIRST && code <= TRAP_LAST && !FIXED.has(code);
   });
 }
@@ -100,12 +123,26 @@ function fontCodepoints(path) {
   }
   assert.ok(best, "в шрифте нет юникодной подтаблицы cmap для Windows");
   const segCount = data.readUInt16BE(best + 6) / 2;
-  const codes = new Set();
+  // Код -> номер глифа. `Map` вместо `Set` нарочно: `has` у них одинаковый,
+  // поэтому проверки «знак в шрифте есть» не меняются, а проверка ловушки
+  // спрашивает ещё и номер — два кода на одном глифе и есть подмена.
+  const codes = new Map();
   for (let i = 0; i < segCount; i += 1) {
     const end = data.readUInt16BE(best + 14 + 2 * i);
     const start = data.readUInt16BE(best + 16 + segCount * 2 + 2 * i);
     if (end === 0xffff) continue;
-    for (let code = start; code <= end; code += 1) codes.add(code);
+    const delta = data.readInt16BE(best + 16 + segCount * 4 + 2 * i);
+    const rangeAt = best + 16 + segCount * 6 + 2 * i;
+    const rangeOffset = data.readUInt16BE(rangeAt);
+    for (let code = start; code <= end; code += 1) {
+      let glyph;
+      if (rangeOffset === 0) glyph = (code + delta) & 0xffff;
+      else {
+        glyph = data.readUInt16BE(rangeAt + rangeOffset + (code - start) * 2);
+        if (glyph !== 0) glyph = (glyph + delta) & 0xffff;
+      }
+      if (glyph !== 0) codes.set(code, glyph);
+    }
   }
   return codes;
 }
@@ -125,6 +162,30 @@ test("в шрифте есть знаки, дорисованные для че�
     needed.filter(([, code]) => !codes.has(code)).map(([sign]) => sign),
     [],
   );
+});
+
+// Список ловушек не на веру: каждый перечисленный код обязан вести на тот же
+// глиф, что и его кириллический двойник. Поправят шрифт — тест покраснеет и
+// список придётся пересмотреть, а не оставить «на всякий случай».
+test("перечисленные ловушки и правда ведут на кириллицу", () => {
+  const codes = fontCodepoints(FONT_PATH);
+  const wrong = [];
+  for (const [code, twin] of TRAP_SINGLES) {
+    const glyph = codes.get(code);
+    const twinGlyph = codes.get(twin.codePointAt(0));
+    if (!glyph || !twinGlyph || glyph !== twinGlyph) {
+      wrong.push(String.fromCodePoint(code) + " (ждали глиф «" + twin + "»)");
+    }
+  }
+  assert.deepEqual(wrong, []);
+});
+
+test("починенные коды на кириллицу больше не ведут", () => {
+  const codes = fontCodepoints(FONT_PATH);
+  // `×` стоял на «Ч», `Ø` — на «Ш». Разъехаться они обязаны: иначе дорисовка
+  // откатилась, а тест на наличие знаков этого не заметит — знаки-то есть.
+  assert.notEqual(codes.get(0x00d7), codes.get("Ч".codePointAt(0)));
+  assert.notEqual(codes.get(0x00d8), codes.get("Ш".codePointAt(0)));
 });
 
 test("кириллица в шрифте на месте — дорисовка её не задела", () => {
