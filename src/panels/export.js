@@ -38,6 +38,7 @@ import {
   tablePng,
 } from "../exporter.js";
 import { GOST_FORMATS } from "../gostSheet.js";
+import { monoSameShapes, monoSameText } from "../mono.js";
 import { stampDialog } from "./stampForm.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
 
@@ -61,6 +62,11 @@ const exportChoice = {
   // чертежом, а связи это разбор. Отметка живёт между открытиями диалога, как
   // и соседние, — поставил один раз и печатаешь с ней дальше.
   links: false,
+  // Чёрно-белый лист (G170). Отметка живёт между открытиями диалога, как и
+  // соседние, но **не в объекте**: это свойство печати, а не разметки, и
+  // открытый после выгрузки объект остаётся цветным. Умолчание «нет» — у
+  // прежних выгрузок ничего не меняется.
+  mono: false,
   tableScale: 2,
   schemeScale: 2,
   // Лист по ГОСТ: рамка и основная надпись вместо голой картинки. Отметка одна
@@ -531,6 +537,23 @@ function exportSchemeDialog(api) {
   const roomsPlan = allSchemesPlan(state.project, { rooms: true, filter: state.filter });
   if (exportChoice.area === "rooms" && roomsPlan.rooms === 0) exportChoice.area = "all";
 
+  // Что теряется вместе с цветом — отдельной строкой под отметками, и только
+  // при поднятой галке: совпадение знаков имеет значение, когда цвет снимают.
+  // Считает это `mono.monoSameShapes` по тому же фильтру, с которым рисуется
+  // лист, — область листа меняет и список, поэтому строка обновляется вместе с
+  // подсказкой о размере.
+  const monoNote = uiEl("p", { class: "export__hint export__hint--warn" });
+  const monoSync = () => {
+    const groups = exportChoice.mono ? monoSameShapes(state.project, scheme, exportFilterOfSheet(state)) : [];
+    monoNote.textContent = monoSameText(groups);
+    monoNote.hidden = groups.length === 0;
+  };
+  const monoToggle = exportCheck(strings.mono.sheet, exportChoice.mono, (on) => {
+    exportChoice.mono = on;
+    monoSync();
+  });
+  monoToggle.title = strings.mono.sheetHint;
+
   // Раскладка листа по ГОСТ считается тем же вызовом, что и выгрузка: формат,
   // поле чертежа и настоящий масштаб в подсказке обязаны совпасть с тем, что
   // ляжет на бумагу.
@@ -546,6 +569,7 @@ function exportSchemeDialog(api) {
     });
 
   const refreshHint = () => {
+    monoSync();
     if (exportChoice.gost) {
       const plan = gostPlanOf();
       const parts = [gostSheetSizeText(plan.sheet, exportChoice.schemeScale), plan.scaleText];
@@ -628,6 +652,7 @@ function exportSchemeDialog(api) {
     exportCheck(strings.exportPanel.withLinks, exportChoice.links, (on) => {
       exportChoice.links = on;
     }),
+    monoToggle,
   ]);
 
   // Лист по ГОСТ — отдельной строкой под остальными отметками: это не ещё одна
@@ -672,6 +697,7 @@ function exportSchemeDialog(api) {
       legend: exportChoice.legend,
       outlines: exportChoice.outlines,
       links: exportChoice.links,
+      mono: exportChoice.mono,
       filter: exportFilterOfSheet(state),
     };
     try {
@@ -725,6 +751,7 @@ function exportSchemeDialog(api) {
                 legend: exportChoice.legend,
                 outlines: exportChoice.outlines,
                 links: exportChoice.links,
+                mono: exportChoice.mono,
                 filter: state.filter,
                 onProgress: ({ done, total }) => {
                   line.textContent = text("exportPanel.sheetsProgress", { done, total });
@@ -778,7 +805,7 @@ function exportSchemeDialog(api) {
 
   const modal = uiModal({
     title: strings.exportPanel.schemeDialog,
-    body: uiEl("div", { class: "export__body" }, [controls, hint]),
+    body: uiEl("div", { class: "export__body" }, [controls, monoNote, hint]),
     actions: [uiButton(strings.dialog.close, { on: { click: () => modal.close() } }), ...actions],
     primary: actions[actions.length - 1],
   });
