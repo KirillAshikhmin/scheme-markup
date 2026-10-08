@@ -136,26 +136,30 @@ test("имя семейства — своё, а не как у шрифта в 
   assert.equal(shortName, false, "в стилях осталось короткое имя семейства");
 });
 
-// Заказчик про чертёжный шрифт сказал «давай попробуем» — значит, отказ обязан
-// стоить одну правку. Выключатель один: строка `--font-gost` в `styles.css`.
-// Эти три проверки держат его единственным.
-test("интерфейс и печатный лист берут шрифт из переменной, а не свой", () => {
+// Шрифтов стало два (G172), и выключателей обязано быть ровно два: чертёжный
+// `--font-gost` и системный `--font-ui`. Кто какой берёт — не на словах.
+test("интерфейс системным, печатный лист чертёжным — оба из переменной", () => {
   // Правил `body` в стилях несколько (габариты отдельно, вид отдельно) —
   // шрифт обязан стоять хотя бы в одном: дальше его разносит `font: inherit`.
   const bodyRules = [...styles.matchAll(/(^|[\s,}])body\s*{[^}]*}/g)].map(([rule]) => rule);
   assert.ok(bodyRules.length > 0, "в стилях нет правила body");
   assert.ok(
-    bodyRules.some((rule) => /font:\s*[^;]*var\(--font-gost\)/.test(rule)),
-    "body обязан наследовать --font-gost, иначе интерфейс живёт своим шрифтом",
+    bodyRules.some((rule) => /font:\s*[^;]*var\(--font-ui\)/.test(rule)),
+    "интерфейс обязан брать --font-ui: чертёжным таблицы и списки читаются хуже",
+  );
+  assert.ok(
+    bodyRules.every((rule) => !/var\(--font-gost\)/.test(rule)),
+    "интерфейсу чертёжный шрифт больше не положен",
   );
   const print = readFileSync(join(ROOT, "src", "print.css"), "utf8");
   assert.match(print, /font:\s*[^;]*var\(--font-gost\)/, "печатный лист обязан брать --font-gost");
+  assert.equal(/var\(--font-ui\)/.test(print), false, "бумага не слушает ни настройку, ни интерфейс");
 });
 
-test("своего списка семейств в коде нет — холст спрашивает ту же переменную", () => {
+test("своего списка семейств в коде нет — холст спрашивает те же переменные", () => {
   // Холст не наследует ничего: `ctx.font` — строка, и семейство в неё кто-то
-  // вписывает. Пропиши его на месте — и выключателей станет два: отказ от
-  // шрифта оставил бы подписи на плане чертёжными.
+  // вписывает. Пропиши его на месте — и выключателей станет три: правка
+  // переменной перестала бы отвечать за весь шрифт.
   const files = sourceTree(join(ROOT, "src"));
   assert.ok(files.length > 20, "сканер исходников ничего не нашёл — проверка впустую");
   const guilty = [];
@@ -163,14 +167,51 @@ test("своего списка семейств в коде нет — холс
     const source = readFileSync(name, "utf8");
     for (const line of source.split("\n")) {
       if (!/sans-serif/.test(line)) continue;
-      // Два места, где список семейств написан целиком и это правильно:
-      // сама переменная и запасной список для Node, где переменной нет.
+      // Три места, где список семейств написан целиком и это правильно: две
+      // переменные и запасной список для Node, где переменных нет.
       if (/--font-gost:/.test(line)) continue;
+      if (/--font-ui:/.test(line)) continue;
       if (/DRAW_FONT_FALLBACK\s*=/.test(line)) continue;
       guilty.push(name.slice(ROOT.length + 1) + ": " + line.trim());
     }
   }
   assert.deepEqual(guilty, []);
+});
+
+test("переменных со шрифтом ровно две — третья заводится не молча", () => {
+  const declared = [...styles.matchAll(/--font-[a-z-]+\s*:/g)].map(([found]) => found.replace(/\s*:$/, ""));
+  assert.deepEqual(declared.sort(), ["--font-gost", "--font-ui"]);
+});
+
+// Сломанная скобка в стилях — поломка, которую не видит ничто, кроме глаз:
+// сборка склеивает CSS как текст, тесты ищут в нём строки, и всё зелено, а
+// страница расползается. Поймано живым прогоном при правке `:root` (таск 120);
+// чтобы второй раз ловить не пришлось — проверка.
+test("скобки во всех стилях сходятся", () => {
+  const broken = [];
+  for (const name of sourceTree(join(ROOT, "src")).filter((file) => file.endsWith(".css"))) {
+    // Комментарии выкусываются: внутри них фигурные скобки ничего не значат.
+    const source = readFileSync(name, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    let depth = 0;
+    for (const sign of source) {
+      if (sign === "{") depth += 1;
+      else if (sign === "}") depth -= 1;
+      if (depth < 0) break;
+    }
+    if (depth !== 0) broken.push(name.slice(ROOT.length + 1) + ": перекос " + depth);
+  }
+  assert.deepEqual(broken, []);
+});
+
+test("переменные со шрифтом объявлены внутри :root, а не повисли в воздухе", () => {
+  const root = styles.match(/:root\s*{[\s\S]*?\n}/);
+  assert.ok(root, "в стилях нет блока :root");
+  assert.match(root[0], /--font-gost:/, "--font-gost оказался вне :root — каскад не донесёт его до холста");
+  assert.match(root[0], /--font-ui:/, "--font-ui оказался вне :root");
+  // И самое дешёвое из всего: первое правило стилей обязано начинаться с
+  // селектора, а не с объявления. Потерянная строка `:root {` выглядит именно так.
+  const firstRule = styles.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+  assert.equal(/^[.#:@a-zA-Z*[]/.test(firstRule), true, "стили начинаются не с селектора: " + firstRule.slice(0, 40));
 });
 
 test("запасной список в коде и в переменной кончаются одинаково", () => {
