@@ -108,6 +108,19 @@ export function filtersSetAllTypes(project, filter, on) {
   return filtersFromTypeSet(project, filter, visible);
 }
 
+// Сколько типов показано, сколько скрыто — один ответ на три вопроса: гаснет
+// ли «Скрыть все», надо ли объяснять пустой список и что дописать в заголовок
+// блока. Считается по справочнику, а не по галочкам в дереве: тип, чья
+// категория потерялась, галочки не получает (`typesInOrder` такую группу
+// отбрасывает), но в фильтре живёт и метки его видны.
+export function filtersTypeCounts(project, filter) {
+  const types = project && Array.isArray(project.markTypes) ? project.markTypes : [];
+  if (types.length === 0) return { total: 0, shown: 0, hidden: 0 };
+  const visible = filtersTypeSet(project, filter);
+  const shown = types.filter((type) => visible.has(type.id)).length;
+  return { total: types.length, shown, hidden: types.length - shown };
+}
+
 export function filtersActive(filter) {
   if (!filter) return false;
   return Boolean(
@@ -151,7 +164,6 @@ export function filtersBox(api) {
   const summary = uiEl("summary", { class: "filters__summary", text: strings.filters.types });
   const details = uiEl("details", { class: "filters__details" }, [summary, tree]);
   const reset = uiButton(strings.filters.showAll, {
-    class: "ui-btn ui-btn--wide",
     on: {
       click: () => {
         const state = getState();
@@ -160,6 +172,22 @@ export function filtersBox(api) {
       },
     },
   });
+  // «Скрыть все» — обратная «Показать все» и стоит с ней в одной строке.
+  // Помещение и поиск она не трогает: снимает только галочки, остальные поля
+  // фильтра пользователь ставил отдельно и отменять их за него нечестно.
+  const hideAll = uiButton(strings.filters.hideAll, {
+    title: strings.filters.hideAllHint,
+    on: {
+      click: () => {
+        const state = getState();
+        toggle(state, filtersSetAllTypes(state.project, state.filter, false));
+      },
+    },
+  });
+  const buttons = uiEl("div", { class: "filters__buttons" }, [reset, hideAll]);
+  // Пустой список объясняет себя там, где стоит кнопка, которая всё вернёт.
+  const note = uiEl("p", { class: "panel__empty", text: strings.filters.allHidden });
+  note.hidden = true;
   let signature = null;
   let checks = [];
 
@@ -215,27 +243,31 @@ export function filtersBox(api) {
 
   function syncChecks(state) {
     const project = state.project;
+    const counts = filtersTypeCounts(project, state.filter);
+    // «Показать все» гаснет, когда показано всё; «Скрыть все» — когда скрывать
+    // уже нечего. Один и тот же счёт на обе кнопки, на заметку о пустом списке
+    // и на подпись заголовка: разойдись они — кнопка осталась бы нажимаемой
+    // там, где она ничего не делает.
+    reset.disabled = !project || !filtersActive(state.filter);
+    hideAll.disabled = counts.shown === 0;
+    note.hidden = !(counts.total > 0 && counts.shown === 0);
     if (!project) return;
-    let hidden = 0;
     for (const item of checks) {
       if (item.kind === "category") {
         const mode = filtersCategoryChecked(project, state.filter, item.id);
         item.box.checked = mode !== "off";
         item.box.indeterminate = mode === "mixed";
       } else {
-        const on = filtersTypeChecked(project, state.filter, item.id);
-        item.box.checked = on;
-        if (!on) hidden += 1;
+        item.box.checked = filtersTypeChecked(project, state.filter, item.id);
       }
     }
-    summary.textContent = hidden > 0
-      ? strings.filters.types + " — " + text("filters.hidden", { count: hidden })
+    summary.textContent = counts.hidden > 0
+      ? strings.filters.types + " — " + text("filters.hidden", { count: counts.hidden })
       : strings.filters.types;
     rooms.value = state.filter.roomId || "";
     if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
       search.value = state.filter.query || "";
     }
-    reset.disabled = !filtersActive(state.filter);
   }
 
   function render() {
@@ -248,7 +280,7 @@ export function filtersBox(api) {
     syncChecks(state);
   }
 
-  node.replaceChildren(search, rooms, details, reset);
+  node.replaceChildren(search, rooms, details, note, buttons);
   subscribe((state, changed) => {
     if ("project" in changed || "filter" in changed) render();
   });

@@ -18,7 +18,13 @@ import {
   updateOutline,
   updateScheme,
 } from "../model.js";
-import { CANVAS_MODE_SCALE, canvasCommit } from "../canvas.js";
+import {
+  CANVAS_MODE_SCALE,
+  canvasCommit,
+  canvasPinchWheel,
+  canvasWheelKind,
+  canvasZoomFactor,
+} from "../canvas.js";
 import { canUndo } from "../history.js";
 import {
   countPointsOutside,
@@ -35,6 +41,7 @@ import {
   transformMarkPoints,
   transformOffset,
   transformPoint,
+  transformSize,
 } from "../imagePrep.js";
 import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
@@ -150,6 +157,85 @@ export function schemesScaleView(project, schemeId, name) {
   };
 }
 
+// Масштаб в окне правки. Шаги считаются от «вписано в окно» (1): мельче
+// вписанного плана смотреть нечего, а вверх ступеньки идут всё крупнее —
+// шестнадцать крат нужны большому плану, у которого вписанный вид и так мелкий.
+export const PLAN_ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16];
+
+export function planZoomClamp(zoom) {
+  const value = Number(zoom);
+  if (!Number.isFinite(value)) return 1;
+  const last = PLAN_ZOOM_STEPS[PLAN_ZOOM_STEPS.length - 1];
+  return Math.min(last, Math.max(PLAN_ZOOM_STEPS[0], value));
+}
+
+// Кнопка ведёт к следующей ступеньке от текущего значения, каким бы дробным
+// его ни оставили колесо и щипок: иначе после щипка кнопка «+» возвращала бы
+// масштаб назад, к ближайшей ступеньке снизу.
+export function planZoomStep(zoom, direction) {
+  const current = planZoomClamp(zoom);
+  const nudge = 1e-6;
+  if (direction > 0) {
+    const next = PLAN_ZOOM_STEPS.find((step) => step > current + nudge);
+    return next === undefined ? current : next;
+  }
+  const back = [...PLAN_ZOOM_STEPS].reverse().find((step) => step < current - nudge);
+  return back === undefined ? current : back;
+}
+
+// Масштаб «вписать в окно»: план целиком виден, мелкий не растягивается —
+// ровно то, что раньше делали `max-width: 100%` и `max-height` у картинки.
+// Размеров нет (окно ещё не измерено) — вписывать нечего, остаётся 1.
+export function planFitScale(size, viewport) {
+  const width = Number(size && size.width);
+  const height = Number(size && size.height);
+  const boxWidth = Number(viewport && viewport.width);
+  const boxHeight = Number(viewport && viewport.height);
+  if (!(width > 0) || !(height > 0) || !(boxWidth > 0) || !(boxHeight > 0)) return 1;
+  return Math.min(1, boxWidth / width, boxHeight / height);
+}
+
+// Рамка обрезки задана долями картинки, а не пикселями экрана, — поэтому при
+// увеличении и прокрутке она остаётся на том же месте плана. Поворот её тоже
+// не сбрасывает: доли переносятся той же арифметикой, что и точки меток
+// (`transformPoint`), по двум углам, а не по всем четырём — прямоугольник
+// остаётся прямоугольником при повороте на четверть оборота.
+export function planRotateFrame(frame, degrees) {
+  if (!frame) return null;
+  const spin = { rotate: degrees, crop: null };
+  const first = transformPoint({ x: frame.x, y: frame.y }, spin);
+  const second = transformPoint({ x: frame.x + frame.width, y: frame.y + frame.height }, spin);
+  return {
+    x: Math.min(first.x, second.x),
+    y: Math.min(first.y, second.y),
+    width: Math.abs(first.x - second.x),
+    height: Math.abs(first.y - second.y),
+  };
+}
+
+/**
+ * Строка под картинкой.
+ *
+ * Заказчик просил разрешение плана: «снизу отображай разрешение картинки».
+ * Рядом с ним стоит размер выбранной области — при обрезке именно он отвечает
+ * на вопрос «что получится», и считается он той же `transformSize`, что потом
+ * и нарежет картинку: число под рамкой обязано совпасть с размером файла, а
+ * не быть похожим на него. Без рамки его нет вовсе — нечего выбирать.
+ *
+ * Масштаб — в процентах от настоящих пикселей плана, а не от «вписано»: сотня
+ * означает «вижу пиксель в пиксель», и только она отвечает, точно ли встанет
+ * рамка.
+ */
+export function planSizeLine({ width, height, frame, scale }) {
+  const parts = [text("image.sizeFull", { size: text("schemes.size", { width, height }) })];
+  if (frame) {
+    const size = transformSize({ width, height }, { rotate: 0, crop: frame });
+    parts.push(text("image.sizeFrame", { size: text("schemes.size", size) }));
+  }
+  parts.push(text("image.zoomLevel", { percent: Math.round(Number(scale || 0) * 100) }));
+  return parts.join(" · ");
+}
+
 // Диалог правки плана. Повороты и рамки копятся в одно преобразование и
 // применяются к исходнику: JPEG пережимается один раз, сколько бы шагов ни
 // сделал пользователь. `beforeApply` — последнее слово вызывающего перед
@@ -162,21 +248,45 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
     let frame = null;
     let busy = false;
     let modal = null;
+    let closed = false;
+    // Что сейчас видно: масштаб к пикселям плана и размер картинки на экране.
+    // Рамка ставится по этим числам, а не по измерению картинки на лету: при
+    // повороте `img` ещё держит прежний рисунок, пока браузер не прочёл новый
+    // файл, и измерение дало бы размер предыдущего плана.
+    let zoom = 1;
+    let view = { scale: 1, width: 0, height: 0 };
+    let drag = null;
+    let streak = null;
+    const fingers = new Map();
+    let pinch = null;
 
     const image = uiEl("img", { class: "plan-stage__img", attrs: { src: url, alt: "" } });
     const box = uiEl("div", { class: "plan-frame" });
     box.hidden = true;
-    const stage = uiEl("div", { class: "plan-stage" }, [image, box]);
-    const hint = uiEl("p", { class: "modal__hint", text: strings.image.cropHint });
+    const inner = uiEl("div", { class: "plan-stage__inner" }, [image, box]);
+    const stage = uiEl("div", { class: "plan-stage" }, [inner]);
+    const meta = uiEl("p", { class: "plan-editor__meta" });
+    const hint = uiEl("p", { class: "modal__hint" });
 
     const rotateLeft = uiIconButton("rotateLeft", {
       title: strings.image.rotateLeft,
-      on: { click: () => apply(rotateTransform(transform, -90)) },
+      on: { click: () => turn(-90) },
     });
     const rotateRight = uiIconButton("rotateRight", {
       title: strings.image.rotateRight,
-      on: { click: () => apply(rotateTransform(transform, 90)) },
+      on: { click: () => turn(90) },
     });
+    // Кнопки масштаба — те же, что над холстом, и подписаны теми же словами:
+    // язык масштаба в приложении один.
+    const zoomOut = uiIconButton("minus", {
+      title: strings.tools.zoomOut,
+      on: { click: () => zoomTo(planZoomStep(zoom, -1)) },
+    });
+    const zoomIn = uiIconButton("plus", {
+      title: strings.tools.zoomIn,
+      on: { click: () => zoomTo(planZoomStep(zoom, 1)) },
+    });
+    const fitButton = uiButton(strings.tools.zoomFit, { on: { click: () => zoomTo(1) } });
     const cropButton = uiButton(strings.image.crop, {
       on: { click: () => apply(cropTransform(transform, frame)) },
     });
@@ -187,18 +297,112 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
       on: { click: () => requestApply() },
     });
 
-    function setFrame(next) {
-      frame = next;
-      box.hidden = !next;
-      cropButton.disabled = !next || busy;
-      resetButton.disabled = !next || busy;
-      if (!next) return;
+    // Окно просмотра за вычетом его отступов. Отступы читаются из стилей, а не
+    // повторяются числом: разойдись они — вписанный план вылез бы за край и
+    // окно заработало бы полосами прокрутки на пустом месте.
+    function viewport() {
+      const style = getComputedStyle(stage);
+      const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+      return { width: stage.clientWidth - padX, height: stage.clientHeight - padY };
+    }
+
+    function stageCenter() {
+      const rect = stage.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    // Какая доля картинки сейчас в середине окна — и обратно к ней. Этим
+    // держится положение при повороте и при смене масштаба.
+    function viewFraction() {
       const rect = image.getBoundingClientRect();
-      const stageRect = stage.getBoundingClientRect();
-      box.style.left = rect.left - stageRect.left + next.x * rect.width + "px";
-      box.style.top = rect.top - stageRect.top + next.y * rect.height + "px";
-      box.style.width = next.width * rect.width + "px";
-      box.style.height = next.height * rect.height + "px";
+      const center = stageCenter();
+      if (!rect.width || !rect.height) return { x: 0.5, y: 0.5 };
+      return { x: (center.x - rect.left) / rect.width, y: (center.y - rect.top) / rect.height };
+    }
+
+    function scrollToFraction(point) {
+      const rect = image.getBoundingClientRect();
+      const center = stageCenter();
+      stage.scrollLeft += rect.left + point.x * rect.width - center.x;
+      stage.scrollTop += rect.top + point.y * rect.height - center.y;
+    }
+
+    // Размер картинки на экране задаётся в пикселях, а не стилевыми
+    // ограничениями: иначе увеличенный план упирался бы в `max-width` окна.
+    // Вниз округляем: вписанный план, ставший на пиксель больше окна, дал бы
+    // полосу прокрутки, а та отняла бы ширину — и так по кругу.
+    function layout() {
+      const space = viewport();
+      // Окно спрятано (поверх лежит другой диалог) — измерять нечего, и
+      // мерить нельзя: нулевая ширина увела бы масштаб и прокрутку в сторону.
+      if (!(space.width > 0) || !(space.height > 0)) return;
+      const scale = planFitScale(preview, space) * zoom;
+      view = {
+        scale,
+        width: Math.max(1, Math.floor(preview.width * scale)),
+        height: Math.max(1, Math.floor(preview.height * scale)),
+      };
+      inner.style.width = view.width + "px";
+      inner.style.height = view.height + "px";
+      image.style.width = view.width + "px";
+      image.style.height = view.height + "px";
+      placeFrame();
+      syncZoom();
+      syncMeta();
+    }
+
+    function placeFrame() {
+      if (!frame) return;
+      box.style.left = frame.x * view.width + "px";
+      box.style.top = frame.y * view.height + "px";
+      box.style.width = frame.width * view.width + "px";
+      box.style.height = frame.height * view.height + "px";
+    }
+
+    function syncZoom() {
+      const first = PLAN_ZOOM_STEPS[0];
+      const last = PLAN_ZOOM_STEPS[PLAN_ZOOM_STEPS.length - 1];
+      zoomOut.disabled = busy || zoom <= first;
+      zoomIn.disabled = busy || zoom >= last;
+      fitButton.disabled = busy || zoom === 1;
+    }
+
+    function syncMeta() {
+      meta.textContent = planSizeLine({
+        width: preview.width,
+        height: preview.height,
+        frame,
+        scale: view.scale,
+      });
+    }
+
+    function zoomTo(next, anchor) {
+      const value = planZoomClamp(next);
+      if (busy || value === zoom) return;
+      // Точка, за которую держимся: середина окна у кнопок, курсор у колеса,
+      // середина между пальцами у щипка. Доля картинки под ней остаётся на
+      // месте — увеличивается то, на что смотрят, а не левый верхний угол.
+      const point = anchor || stageCenter();
+      const before = image.getBoundingClientRect();
+      const grip = {
+        x: before.width ? (point.x - before.left) / before.width : 0.5,
+        y: before.height ? (point.y - before.top) / before.height : 0.5,
+      };
+      zoom = value;
+      layout();
+      const after = image.getBoundingClientRect();
+      stage.scrollLeft += after.left + grip.x * after.width - point.x;
+      stage.scrollTop += after.top + grip.y * after.height - point.y;
+    }
+
+    function setFrame(next) {
+      frame = next || null;
+      box.hidden = !frame;
+      cropButton.disabled = !frame || busy;
+      resetButton.disabled = !frame || busy;
+      placeFrame();
+      syncMeta();
     }
 
     function setBusy(value) {
@@ -206,12 +410,17 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
       for (const button of [rotateLeft, rotateRight, applyButton, cancelButton]) button.disabled = value;
       cropButton.disabled = value || !frame;
       resetButton.disabled = value || !frame;
-      hint.textContent = value ? strings.image.working : strings.image.cropHint;
+      syncZoom();
+      hint.textContent = value ? strings.image.working : strings.image.cropHint + ". " + strings.image.panHint;
     }
 
     // Предпросмотр всегда пересобирается из исходника по накопленному
     // преобразованию — что видно, то и получится, без цепочки пережатий.
-    async function apply(next) {
+    // `keep` — доля картинки, которую надо оставить в середине окна, и рамка в
+    // долях нового вида: поворот не повод ни сбить масштаб, ни потерять
+    // обведённое место. Обрезка — повод: она сама себе масштаб, после неё
+    // выбранный кусок занимает окно целиком.
+    async function apply(next, keep) {
       if (busy) return;
       setBusy(true);
       try {
@@ -221,7 +430,10 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
         transform = next;
         url = URL.createObjectURL(result.blob);
         image.src = url;
-        setFrame(null);
+        if (!keep) zoom = 1;
+        setFrame(keep ? keep.frame : null);
+        layout();
+        if (keep) scrollToFraction(keep.center);
         setBusy(false);
       } catch (error) {
         setBusy(false);
@@ -229,65 +441,203 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
       }
     }
 
+    function turn(degrees) {
+      if (busy) return;
+      // Середину окна и рамку снимаем до поворота: после него картинка уже
+      // другая, а эти доли надо повернуть вместе с планом.
+      const center = transformPoint(viewFraction(), { rotate: degrees, crop: null });
+      apply(rotateTransform(transform, degrees), { center, frame: planRotateFrame(frame, degrees) });
+    }
+
     async function requestApply() {
       if (busy) return;
       // Спрашиваем всегда, а не только после правки: замене подложки важен
       // итоговый размер, даже когда картинку не крутили.
       if (beforeApply) {
+        // Вопрос приходит окном поверх этого, а спрятанный диалог теряет
+        // прокрутку: кто отказался — возвращается на то же место плана, а не
+        // в левый верхний угол.
+        const center = viewFraction();
         setBusy(true);
         const agreed = await beforeApply(transform, { width: preview.width, height: preview.height });
         setBusy(false);
-        if (!agreed) return;
+        if (!agreed) {
+          scrollToFraction(center);
+          return;
+        }
       }
       finish({ blob: preview.blob, width: preview.width, height: preview.height, transform });
     }
 
-    function finish(result) {
+    // Слушатели сняты до единого: окно закрывается и мышью, и Escape, и
+    // отказом от правки — брошенный `pointermove` на `window` переживает окно
+    // и шевелит рамку уже закрытого диалога.
+    function cleanup() {
+      if (closed) return;
+      closed = true;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
+      window.removeEventListener("resize", onResize);
       URL.revokeObjectURL(url);
+    }
+
+    function finish(result) {
+      cleanup();
       if (modal) modal.close();
       resolve(result);
     }
 
-    // Рамка тянется мышью прямо по картинке.
-    stage.addEventListener("pointerdown", (event) => {
-      if (busy || event.button !== 0) return;
+    // Окно изменилось — «вписано» стало другим; смотреть при этом остаёмся
+    // на то же место плана.
+    function onResize() {
+      if (closed) return;
+      const center = viewFraction();
+      layout();
+      scrollToFraction(center);
+    }
+
+    function pointFraction(event) {
       const rect = image.getBoundingClientRect();
-      const startX = Math.min(Math.max(event.clientX, rect.left), rect.right);
-      const startY = Math.min(Math.max(event.clientY, rect.top), rect.bottom);
-      const move = (moveEvent) => {
-        const x = Math.min(Math.max(moveEvent.clientX, rect.left), rect.right);
-        const y = Math.min(Math.max(moveEvent.clientY, rect.top), rect.bottom);
-        setFrame({
-          x: (Math.min(startX, x) - rect.left) / rect.width,
-          y: (Math.min(startY, y) - rect.top) / rect.height,
-          width: Math.abs(x - startX) / rect.width,
-          height: Math.abs(y - startY) / rect.height,
-        });
+      const x = rect.width ? (event.clientX - rect.left) / rect.width : 0;
+      const y = rect.height ? (event.clientY - rect.top) / rect.height : 0;
+      return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+    }
+
+    function frameBetween(first, second) {
+      return {
+        x: Math.min(first.x, second.x),
+        y: Math.min(first.y, second.y),
+        width: Math.abs(first.x - second.x),
+        height: Math.abs(first.y - second.y),
       };
-      const up = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        if (frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
+    }
+
+    function panBy(dx, dy) {
+      stage.scrollLeft -= dx;
+      stage.scrollTop -= dy;
+    }
+
+    function pinchNow() {
+      const [first, second] = [...fingers.values()];
+      return {
+        distance: Math.hypot(first.x - second.x, first.y - second.y),
+        center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
       };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
+    }
+
+    function stopDrag(keepFrame) {
+      if (!drag) return;
+      // Рамку, которую начали тянуть и бросили (пришёл второй палец), не
+      // оставляем: она случайная. Рамку, которую не трогали, — оставляем.
+      if (!keepFrame && drag.kind === "frame" && drag.moved) setFrame(null);
+      drag = null;
+    }
+
+    // Рамка тянется прямо по картинке — и остаётся в долях картинки, поэтому
+    // не зависит ни от масштаба, ни от прокрутки. Сдвиг увеличенного плана —
+    // перетаскивание с Shift или средней кнопкой; полосы прокрутки у окна есть
+    // и сами.
+    stage.addEventListener("pointerdown", (event) => {
+      if (busy) return;
+      if (event.pointerType === "touch") {
+        fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (fingers.size === 2) {
+          stopDrag(false);
+          pinch = { ...pinchNow(), zoom };
+          event.preventDefault();
+          return;
+        }
+        if (fingers.size > 2) return;
+      }
+      if (event.button !== 0 && event.button !== 1) return;
+      drag = event.button === 1 || event.shiftKey
+        ? { kind: "pan", x: event.clientX, y: event.clientY }
+        : { kind: "frame", start: pointFraction(event), moved: false };
       event.preventDefault();
     });
+
+    function onPointerMove(event) {
+      if (fingers.has(event.pointerId)) {
+        fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (pinch && fingers.size >= 2) {
+          const now = pinchNow();
+          panBy(now.center.x - pinch.center.x, now.center.y - pinch.center.y);
+          pinch.center = now.center;
+          if (pinch.distance > 0 && now.distance > 0) zoomTo(pinch.zoom * (now.distance / pinch.distance), now.center);
+          return;
+        }
+      }
+      if (!drag) return;
+      if (drag.kind === "pan") {
+        panBy(event.clientX - drag.x, event.clientY - drag.y);
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        return;
+      }
+      drag.moved = true;
+      setFrame(frameBetween(drag.start, pointFraction(event)));
+    }
+
+    function onPointerEnd(event) {
+      if (fingers.has(event.pointerId)) {
+        fingers.delete(event.pointerId);
+        if (fingers.size < 2) pinch = null;
+      }
+      if (!drag) return;
+      const wasFrame = drag.kind === "frame";
+      drag = null;
+      // Промах мышью вместо обрезки: рамка меньше сотой доли плана — не рамка.
+      if (wasFrame && frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
+    }
+
+    // Колесо и щипок разбираются теми же приметами, что на холсте: мышью
+    // заказчик зумит, двумя пальцами по трекпаду — листает. Своего разбора
+    // здесь быть не должно, иначе одно и то же колесо в двух местах
+    // приложения делало бы разное.
+    stage.addEventListener(
+      "wheel",
+      (event) => {
+        if (busy) return;
+        const kind = canvasWheelKind(event, streak);
+        streak = { kind, time: event.timeStamp };
+        if (kind === "pan") return;
+        event.preventDefault();
+        zoomTo(zoom * canvasZoomFactor(event, canvasPinchWheel(event)), { x: event.clientX, y: event.clientY });
+      },
+      { passive: false },
+    );
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+    window.addEventListener("resize", onResize);
 
     modal = uiModal({
       title: title || strings.image.editTitle,
       body: uiEl("div", { class: "plan-editor" }, [
-        uiEl("div", { class: "plan-editor__tools" }, [rotateLeft, rotateRight, cropButton, resetButton]),
+        uiEl("div", { class: "plan-editor__tools" }, [
+          rotateLeft,
+          rotateRight,
+          zoomOut,
+          zoomIn,
+          fitButton,
+          cropButton,
+          resetButton,
+        ]),
         stage,
+        meta,
         hint,
       ]),
       actions: [cancelButton, applyButton],
       onCancel: () => {
-        URL.revokeObjectURL(url);
+        cleanup();
         resolve(null);
       },
     });
     setFrame(null);
+    setBusy(false);
+    layout();
   });
 }
 
