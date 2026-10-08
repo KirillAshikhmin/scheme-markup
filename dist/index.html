@@ -3078,7 +3078,10 @@
 .print-doc {
   background: #ffffff;
   color: #1f2328;
-  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  /* Лист печатается чертёжным шрифтом — тем же, что подписи на плане: таблица
+     и схема приходят монтажнику одной парой. Семейство берётся из `--font-gost`,
+     своего у листа нет. */
+  font: 13px/1.45 var(--font-gost);
   padding: 4px 2px 12px;
 }
 
@@ -3343,9 +3346,18 @@
    встроенный в неё (ADR 006). Ссылка относительная: шрифт лежит в `dist/assets/`,
    рядом с самой страницей, и так же едет на Pages, как и с диска.
    Запасные шрифты — обязательная часть: не загрузится файл (или браузер
-   откажется от него), страница останется читаемой. */
+   откажется от него), страница останется читаемой.
+
+   Имя семейства — `GOST type A drawn`, а не `GOST type A`, и это не прихоть.
+   Проектировщик — первый, у кого исходный `GOST type A` стоит в системе: он
+   ставит его ради CAD. Назовись семейство так же — и страница без своего файла
+   рядом (ADR 006 прямо допускает такую копию) молча взяла бы **системный**
+   шрифт: исходный, с 260 знаками, где `×` рисуется буквой «Ч», а `Ø` — «Ш».
+   Проверено живым прогоном на машине с установленным шрифтом: «ввод 3×6»
+   выходило «ввод 3Ч6». Своё имя уводит эту подмену в обычный запасной шрифт,
+   где непохожесть видна сразу. */
 @font-face {
-  font-family: "GOST type A";
+  font-family: "GOST type A drawn";
   src: url("assets/gost-type-a.ttf") format("truetype");
   font-weight: normal;
   font-style: normal;
@@ -3356,8 +3368,11 @@
 
 :root {
   /* Единственная точка, через которую чертёжный шрифт попадает в интерфейс и
-     на схему (таск 114). Отказ от шрифта — правка этой строки. */
-  --font-gost: "GOST type A", system-ui, -apple-system, Arial, sans-serif;
+     на схему (таск 114). Отказ от шрифта — правка этой строки: убрать из неё
+     `"GOST type A drawn", `, и интерфейс, и подписи на плане вернутся к системному
+     шрифту разом. Холст читает ту же переменную (`render.drawFont`), поэтому
+     второго выключателя в коде нет. */
+  --font-gost: "GOST type A drawn", system-ui, -apple-system, Arial, sans-serif;
   --panel-bg: #161b22;
   --panel-bg-deep: #0d1117;
   --panel-line: #30363d;
@@ -3392,7 +3407,9 @@ body {
 }
 
 body {
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  /* Весь интерфейс наследует этот шрифт: кнопки, поля и списки объявлены
+     `font: inherit`, своего семейства не заводит никто. */
+  font: 14px/1.45 var(--font-gost);
   color: var(--canvas-text);
   background: var(--panel-bg-deep);
   overflow: hidden;
@@ -13550,6 +13567,68 @@ if (typeof document !== "undefined") {
 // приближение увеличивает и её, а экспорт в двойном разрешении даёт тот же вид.
 const SHAPES = SHAPE_NAMES;
 
+// ——— шрифт холста —————————————————————————————————————————————————————
+//
+// Чертёжный шрифт попадает на схему тем же путём, что и в интерфейс: через
+// переменную `--font-gost` в `styles.css`. Своего списка семейств здесь нет
+// нарочно — иначе выключателей стало бы два, и отказ от шрифта оставил бы
+// подписи на плане чертёжными, а интерфейс вернул бы системным.
+//
+// Запасной список нужен там, где переменной взять негде: в Node (тесты
+// геометрии холста не имеют) и до того, как стили применились. Текст в этом
+// случае рисуется системным шрифтом, а не пропадает.
+const DRAW_FONT_FALLBACK = 'system-ui, -apple-system, "Segoe UI", Arial, sans-serif';
+
+let drawFontFamilyCache = "";
+
+/**
+ * Семейства для `ctx.font` — значение `--font-gost` как есть.
+ *
+ * Пустое значение не запоминается: стили на странице уже есть к первому кадру,
+ * но если переменную не прочитать, кадр рисуется запасным шрифтом и следующий
+ * спросит заново, а не закрепит промах навсегда.
+ */
+function drawFontFamily() {
+  if (drawFontFamilyCache) return drawFontFamilyCache;
+  if (typeof document === "undefined" || !document.documentElement) return DRAW_FONT_FALLBACK;
+  if (typeof getComputedStyle !== "function") return DRAW_FONT_FALLBACK;
+  const value = getComputedStyle(document.documentElement).getPropertyValue("--font-gost").trim();
+  if (!value) return DRAW_FONT_FALLBACK;
+  drawFontFamilyCache = value;
+  return value;
+}
+
+/** Строка для `ctx.font`: `drawFont(12)` или `drawFont(12, 600)`. */
+function drawFont(size, weight) {
+  return (weight ? weight + " " : "") + size + "px " + drawFontFamily();
+}
+
+/**
+ * Готовность файла шрифта.
+ *
+ * Холсту `@font-face` сам по себе не помогает: пока файл не дошёл, `ctx.font`
+ * молча берёт запасной шрифт, и первый кадр плана остался бы системным до
+ * первого движения мышью. Поэтому и холст, и выгрузка ждут этого обещания —
+ * холст, чтобы перерисовать кадр, выгрузка, чтобы не положить в PNG не тот
+ * шрифт. Не дождались (старый браузер, файла нет) — `false` и прежний вид:
+ * падать из-за шрифта нельзя.
+ */
+function drawFontReady() {
+  const fonts = typeof document !== "undefined" && document ? document.fonts : null;
+  if (!fonts || typeof fonts.load !== "function") return Promise.resolve(false);
+  try {
+    // `load` разбирает строку как сокращение `font` и на кривой бросает сразу,
+    // не возвращая обещания, — отсюда try, а не только catch.
+    return fonts
+      .load(drawFont(16))
+      .then(() => fonts.ready)
+      .then(() => true)
+      .catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
 // Доля радиуса, на которую внутренние вершины звезды ближе к центру.
 const STAR_INNER = 0.45;
 // Запас в пикселях вокруг метки, чтобы попадать по ней не идеально точно.
@@ -15594,7 +15673,7 @@ function drawLinkChannel(ctx, curve, channel, color, alpha) {
   const value = String(channel);
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.font = `700 ${LINK_CHANNEL_FONT}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(LINK_CHANNEL_FONT, 700);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
@@ -16816,7 +16895,7 @@ function hitOutlineLabelTurn(project, scheme, outline, point, view, extra = 0) {
 function drawOutlineLabel(ctx, box, color) {
   const rect = labelBounds(box);
   ctx.save();
-  ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(box.font, 600);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх линий плана.
@@ -17193,7 +17272,7 @@ function drawCommentPlate(ctx, box, color, selected) {
   if (empty) ctx.setLineDash([box.font * 0.4, box.font * 0.3]);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.font = `${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(box.font);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = color;
@@ -17285,7 +17364,7 @@ function drawLabel(ctx, box, color, runs, selected) {
   }
   const parts = runs && runs.map((run) => run.text).join("") === box.text ? runs : null;
   ctx.save();
-  ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(box.font, 600);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх тёмных линий плана.
@@ -17450,7 +17529,7 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
 function drawDraftAngle(ctx, at, angle, snapped, color) {
   const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
   ctx.save();
-  ctx.font = `600 ${DRAFT_ANGLE_FONT}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(DRAFT_ANGLE_FONT, 600);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.lineWidth = Math.max(2, DRAFT_ANGLE_FONT * 0.3);
@@ -17501,7 +17580,7 @@ function drawLegend(ctx, { project, scheme, filter, view, box }) {
   const x = box ? box.x : 12;
   const y = box ? box.y : 12;
   ctx.save();
-  ctx.font = `${font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(font);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Ширина рамки — по самой длинной строке: код типа бывает и в шестнадцать
@@ -21052,6 +21131,11 @@ function mountCanvas(host, api) {
   document.addEventListener("keydown", canvasKeyDown);
   document.addEventListener("keyup", canvasKeyUp);
 
+  // Первый кадр может лечь до того, как дошёл файл чертёжного шрифта: холст в
+  // отличие от разметки сам ничего не перерисовывает, и подписи остались бы
+  // системным шрифтом до первого движения мышью. Один лишний кадр на загрузку.
+  drawFontReady().then(() => canvasRedraw());
+
   if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => canvasResize()).observe(host);
   } else {
@@ -22589,6 +22673,7 @@ function toTsv(table) {
 // того же числа в сборке нет и быть не должно: два пути расчёта разойдутся в
 // последнем знаке, а заказчик проверяет чертёж линейкой (G169).
 
+
 // ——— бумага ———————————————————————————————————————————————————————————
 
 // Форматы по ГОСТ 2.301. Книжная ориентация — размеры как здесь, альбомная
@@ -23041,14 +23126,13 @@ function gostStampValues(stamp, sheetInfo = {}) {
 // Рисование принимает готовый `ctx` и ничего не знает ни про DOM, ни про
 // выгрузку: холст заводит `exporter.js`, как и для всех прежних картинок.
 
-// Чертёжный шрифт — тот же, что подключён странице (`--font-gost` в стилях).
-// Имя семейства техническое, поэтому живёт здесь, а не в словаре строк.
-// Запасные шрифты обязательны: не дошёл файл — надпись всё равно читается.
-const GOST_FONT_NAME = "GOST type A";
-const GOST_FONT = '"' + GOST_FONT_NAME + '", system-ui, Arial, sans-serif';
-
+// Чертёжный шрифт берётся там же, где его берёт холст, — из `--font-gost`
+// через `render.drawFont`. Своего списка семейств здесь нет сознательно:
+// второй список разошёлся бы с первым молча, а на машине проектировщика
+// исходный «GOST type A» стоит в системе ради CAD, и надпись по старому
+// имени взяла бы системный файл — 260 знаков, где «×» нарисован буквой «Ч».
 function gostSetFont(ctx, sizeMm, mm) {
-  ctx.font = Math.max(1, sizeMm * mm) + "px " + GOST_FONT;
+  ctx.font = drawFont(Math.max(1, sizeMm * mm));
 }
 
 // Текст, ужатый до ширины ячейки: сначала мельче шрифтом (но не мельче 2,5 мм),
@@ -23517,6 +23601,9 @@ function exportFitArea(project, scheme, options = {}) {
  * ни в легенду.
  */
 async function schemePng(project, scheme, image, options = {}) {
+  // Файл чертёжного шрифта мог ещё не дойти: холст в этом случае молча рисует
+  // запасным, и в PNG уехал бы не тот шрифт. На бумаге это не поправить.
+  await drawFontReady();
   const scale = options.scale > 0 ? options.scale : 1;
   // Кадр берётся с полями под подписи — тем же расчётом, что показал размер
   // в диалоге, иначе на бумаге окажется не то, что обещали миллиметры.
@@ -23584,10 +23671,10 @@ function exportProbe() {
 
 function exportMeasure(ctx, table) {
   const widths = table.columns.map((column) => {
-    ctx.font = `600 ${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font, 600);
     return ctx.measureText(String(column)).width;
   });
-  ctx.font = `${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(EXPORT_TABLE.font);
   for (const section of tableSections(table)) {
     for (const row of section.rows) {
       row.cells.forEach((cell, index) => {
@@ -23648,6 +23735,9 @@ function exportTableSizeText(table, scale) {
  * цветом категории, цветная полоса слева у строк — как на рукописном листе.
  */
 async function tablePng(table, options = {}) {
+  // Ждать обязательно до раскладки: ширины колонок меряются `measureText`, и
+  // посчитанные запасным шрифтом они не сойдутся с тем, чем лист нарисуется.
+  await drawFontReady();
   const scale = options.scale > 0 ? options.scale : 1;
   const layout = exportTableLayout(table, options);
   const { widths, sections, title, room, note, subtitle, bodyWidth, totals } = layout;
@@ -23667,7 +23757,7 @@ async function tablePng(table, options = {}) {
 
   if (title) {
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.titleFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.titleFont, 600);
     ctx.fillText(title, left, y + EXPORT_TABLE.titleFont * 0.8);
     y += EXPORT_TABLE.titleFont * 1.6;
   }
@@ -23675,7 +23765,7 @@ async function tablePng(table, options = {}) {
   // одной комнате должен и на бумаге читаться как лист по комнате.
   if (room) {
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.roomFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.roomFont, 600);
     ctx.fillText(room, left, y + EXPORT_TABLE.roomFont * 0.8);
     y += EXPORT_TABLE.roomFont * 1.6;
   }
@@ -23683,13 +23773,13 @@ async function tablePng(table, options = {}) {
   // таблица неотличима от полной.
   if (note) {
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font, 600);
     ctx.fillText(note, left, y + EXPORT_TABLE.font * 0.8);
     y += EXPORT_TABLE.font * 1.6;
   }
   if (subtitle) {
     ctx.fillStyle = EXPORT_TABLE.muted;
-    ctx.font = `${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font);
     ctx.fillText(subtitle, left, y + EXPORT_TABLE.font * 0.8);
     y += EXPORT_TABLE.font * 1.6;
   }
@@ -23697,7 +23787,7 @@ async function tablePng(table, options = {}) {
   // Цвет строки на бумаге показывает полоса слева, а не квадратик в ячейке:
   // колонки с кодом краски в листах больше нет, и рисовать его негде.
   const drawCells = (cells, textLeft, bold) => {
-    ctx.font = `${bold ? "600 " : ""}${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font, bold ? 600 : 0);
     let x = textLeft;
     cells.forEach((cell, index) => {
       const limit = widths[index] - EXPORT_TABLE.cellGap;
@@ -23726,7 +23816,7 @@ async function tablePng(table, options = {}) {
       y += EXPORT_TABLE.gap;
       ctx.fillStyle = color;
       const groupFont = level === 2 ? EXPORT_TABLE.groupFont - 2 : EXPORT_TABLE.groupFont;
-      ctx.font = `600 ${groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      ctx.font = drawFont(groupFont, 600);
       ctx.fillText(section.title, left, y + EXPORT_TABLE.rowHeight / 2);
       const lineY = y + EXPORT_TABLE.rowHeight - 2;
       ctx.strokeStyle = color;
@@ -23752,7 +23842,7 @@ async function tablePng(table, options = {}) {
   if (totals.length > 0) {
     y += EXPORT_TABLE.gap;
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.groupFont, 600);
     ctx.fillText(strings.tables.totals, left, y + EXPORT_TABLE.rowHeight / 2);
     const lineY = y + EXPORT_TABLE.rowHeight - 2;
     ctx.strokeStyle = EXPORT_TABLE.ink;
@@ -23764,7 +23854,7 @@ async function tablePng(table, options = {}) {
     y += EXPORT_TABLE.rowHeight;
 
     const line = (label, value, bold, color, indent) => {
-      ctx.font = `${bold ? "600 " : ""}${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      ctx.font = drawFont(EXPORT_TABLE.font, bold ? 600 : 0);
       ctx.fillStyle = color || EXPORT_TABLE.ink;
       ctx.textAlign = "left";
       ctx.fillText(label, left + indent, y + EXPORT_TABLE.rowHeight / 2);
@@ -24127,20 +24217,8 @@ async function exportCopy(value) {
 
 // Чертёжный шрифт грузится до первой отрисовки: canvas не ждёт `@font-face`
 // сам, и первый лист вышел бы системным шрифтом, а второй — чертёжным.
-let gostFontLoading = null;
-
-function gostFontReady() {
-  if (typeof document === "undefined" || !document.fonts || typeof document.fonts.load !== "function") {
-    return Promise.resolve(false);
-  }
-  if (!gostFontLoading) {
-    gostFontLoading = document.fonts.load('10px "' + GOST_FONT_NAME + '"').then(
-      () => true,
-      () => false,
-    );
-  }
-  return gostFontLoading;
-}
+// Ждёт его `render.drawFontReady` — то же обещание, что у холста и у прежних
+// выгрузок; второго ожидания со своим именем семейства в сборке нет.
 
 // Дата в штампе — календарный день того, кто выгружает, в чертёжном виде
 // «08.10.26». UTC здесь соврал бы на вечерней выгрузке так же, как в имени
@@ -24211,7 +24289,7 @@ async function gostSchemePng(project, scheme, image, options = {}) {
   const plan = options.layout || gostSchemeSheet(project, scheme, options);
   const dpi = gostDpi(options.scale);
   const mm = gostPixelsPerMm(dpi);
-  await gostFontReady();
+  await drawFontReady();
   const canvas = exportCanvas(plan.sheet.width * mm, plan.sheet.height * mm);
   const ctx = canvas.getContext("2d");
   drawGostFrame(ctx, plan.sheet, mm);
@@ -24300,7 +24378,7 @@ function gostTableColumns(table, widthMm) {
   const ctx = exportProbe();
   const probe = 100;
   const measure = (value, bold) => {
-    ctx.font = (bold ? "600 " : "") + probe + "px " + GOST_FONT;
+    ctx.font = drawFont(probe, bold ? 600 : null);
     return (ctx.measureText(String(value == null ? "" : value)).width / probe) * GOST_TABLE.font;
   };
   const widths = table.columns.map((column) => measure(column, true));
@@ -24350,7 +24428,7 @@ function gostTableCell(ctx, value, limitPx) {
 async function gostTablePng(table, page, plan, options = {}) {
   const dpi = gostDpi(options.scale);
   const mm = gostPixelsPerMm(dpi);
-  await gostFontReady();
+  await drawFontReady();
   const sheet = plan.sheet;
   const canvas = exportCanvas(sheet.width * mm, sheet.height * mm);
   const ctx = canvas.getContext("2d");
@@ -24374,7 +24452,7 @@ async function gostTablePng(table, page, plan, options = {}) {
 
   let y = field.y;
   const drawCells = (cells, bold) => {
-    ctx.font = (bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+    ctx.font = drawFont(GOST_TABLE.font * mm, bold ? 600 : null);
     let x = field.x;
     cells.forEach((cell, index) => {
       const limit = (widths[index] - GOST_TABLE.pad * 2) * mm;
@@ -24406,7 +24484,7 @@ async function gostTablePng(table, page, plan, options = {}) {
   for (const item of page.lines) {
     if (item.kind === "group") {
       ctx.fillStyle = item.color || "#1f2328";
-      ctx.font = "600 " + (item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm + "px " + GOST_FONT;
+      ctx.font = drawFont((item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm, 600);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.strokeStyle = item.color || "#1f2328";
       line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
@@ -24416,7 +24494,7 @@ async function gostTablePng(table, page, plan, options = {}) {
       continue;
     }
     if (item.kind === "total") {
-      ctx.font = (item.bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+      ctx.font = drawFont(GOST_TABLE.font * mm, item.bold ? 600 : null);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad + (item.level === 2 ? GOST_TABLE.pad * 2 : 0)) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.textAlign = "right";
       ctx.fillText(String(item.count), (field.x + bodyWidth - GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);

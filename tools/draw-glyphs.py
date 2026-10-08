@@ -11,9 +11,11 @@ import math, sys
 from fontTools.ttLib import TTFont
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.cu2quPen import Cu2QuPen
+from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.recordingPen import RecordingPen
 
 K = 0.5523  # вынос контрольной точки для окружности кубическими кривыми
+SUPER_SCALE = 0.62  # доля от цифры у надстрочной степени
 
 def contour_area(points):
     s = 0.0
@@ -98,6 +100,22 @@ def main(src, out):
         bar(p, cx - r, cy - r, cx + r, cy + r, stroke, True)
         bar(p, cx - r, cy + r, cx + r, cy - r, stroke, True)
     put("multiply.sign", 0x00D7, 900, cross)
+    # надстрочные степени: цифра шрифта, уменьшенная и поднятая под верх
+    # заглавной. Нужны для сечения кабеля «мм²» и объёма воздуха «м³» —
+    # в исходном шрифте эти коды вели на украинские «І» и «і» (CP1251).
+    def superscript(digit):
+        name = cmap[ord(digit)]
+        glyph = glyphs[name]
+        def draw(pen):
+            rec = RecordingPen()
+            glyph.draw(rec, glyphs)
+            rec.replay(TransformPen(pen, (SUPER_SCALE, 0, 0, SUPER_SCALE, 0, cap - cap * SUPER_SCALE)))
+        return draw
+
+    for digit, code in (("2", 0x00B2), ("3", 0x00B3)):
+        name = cmap[ord(digit)]
+        put(f"uni00B{digit}", code, round(hmtx[name][0] * SUPER_SCALE), superscript(digit))
+
     # диаметр и пустое множество: кольцо «О» с перечёркиванием
     def slashed(p):
         rec = RecordingPen()
