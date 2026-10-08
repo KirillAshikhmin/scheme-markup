@@ -1,12 +1,15 @@
-// Сборка одного статического файла: src/*.js + styles.css + index.html -> dist/index.html.
-// Модули склеиваются в порядке зависимостей, строки import/export срезаются,
-// внешних ссылок в результате быть не должно.
+// Сборка страницы: src/*.js + styles.css + index.html -> dist/index.html, а рядом
+// её собственные файлы. Модули склеиваются в порядке зависимостей, строки
+// import/export срезаются.
 //
-// Рядом со страницей кладутся файлы веб-версии — манифест установки, значок и
-// служебный скрипт. Страницы они не касаются: `dist/index.html` остаётся одним
-// самодостаточным файлом и с диска открывается без них (браузер просто не
-// предложит установку). Установка с сайта без отдельного файла манифеста
-// невозможна в принципе — это требование браузера, а не выбор сборки.
+// Правило «результат сборки — единственный самодостаточный файл» снято
+// заказчиком (ADR 006): шрифт и будущую библиотеку PDF встраивать в страницу
+// незачем. Осталось то, что это правило защищало, и проверяется это здесь:
+// страница ссылается **только на свои файлы рядом в `dist/`**, каждый такой
+// файл сборка действительно положила, чужих хостов нет ни одного.
+//
+// `dist/` целиком — то, что выкладывает Pages и что нужно скопировать, чтобы
+// открыть страницу с диска.
 import { createHash } from "node:crypto";
 import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -15,10 +18,15 @@ import { strings } from "./src/strings.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.join(root, "src");
+// Ресурсы страницы: файлы, которые она тянет сама. Сборщик бандла сюда не
+// смотрит — он берёт из `src/` только `.js` и `.css`.
+const assetsDir = path.join(srcDir, "assets");
 const webDir = path.join(root, "web");
 const distDir = path.join(root, "dist");
 
-// Единственная ссылка на соседний файл, разрешённая в собранной странице.
+// Имя страницы в `dist/`: на неё тоже можно сослаться, и это не ошибка.
+export const PAGE_FILE = "index.html";
+// Манифест установки: единственный файл, ссылка на который обязательна.
 export const MANIFEST_FILE = "manifest.webmanifest";
 // Значок приложения: тот же рисунок, что во вкладке, — он не рисуется заново,
 // а достаётся из `<link rel="icon">` и кладётся файлом. Одна картинка на все
@@ -41,6 +49,25 @@ async function listFiles(dir, extension) {
     else if (entry.name.endsWith(extension)) files.push(full);
   }
   return files.sort();
+}
+
+// Ресурсы кладутся в `dist/assets/` под теми же именами: имя файла — часть
+// ссылки в стилях, и переименовывать его по дороге нельзя.
+export async function listAssets() {
+  let files = [];
+  try {
+    files = await listFiles(assetsDir, "");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return [];
+  }
+  return files
+    // Служебный мусор файловой системы (`.DS_Store`) ресурсом не считается.
+    .filter((file) => !path.basename(file).startsWith("."))
+    .map((file) => ({
+      name: path.relative(srcDir, file).split(path.sep).join("/"),
+      file,
+    }));
 }
 
 const IMPORT_RE = /^\s*import\s[\s\S]*?from\s*["']([^"']+)["'];?\s*$/gm;
@@ -210,36 +237,88 @@ function assertPlainText(html) {
   );
 }
 
-function assertOffline(html) {
+// Код и стили вклеиваются в саму страницу — это снятое правило «один файл» не
+// затронуло (ADR 006). Отдельным файлом рядом лежат ресурсы (шрифт), а не
+// бандл: `<script src>` в результате почти всегда значит, что подстановка в
+// `build()` не сработала и страница вышла пустой.
+function assertOffline(html, files) {
   const forbidden = [
     /<script[^>]+src=/i,
     /<link[^>]+rel=["']?stylesheet/i,
     /@import\s/i,
-    /url\(\s*["']?https?:/i,
-    /(?:src|href)=["']\s*(?:https?:)?\/\//i,
   ];
   for (const pattern of forbidden) {
     const found = html.match(pattern);
-    if (found) throw new Error("В собранной странице осталась внешняя ссылка: " + found[0]);
+    if (found) throw new Error("Код или стили не попали внутрь страницы: " + found[0]);
   }
-  assertSingleFile(html);
+  assertLocalLinks(html, files);
 }
 
-// «Один файл» — правило строже, чем «нет внешних ссылок»: сосед по папке
-// внешней ссылкой не выглядит, но страница без него уже не полна. Поэтому
-// проверяются все адреса разом, и разрешены ровно три вида: рисунок в самом
-// адресе (`data:`), якорь внутри страницы и манифест установки — поимённо и
-// только относительной ссылкой. Ни второй файл, ни абсолютный путь к манифесту
-// мимо этой проверки не пройдут.
-export function assertSingleFile(html) {
-  for (const [, value] of html.matchAll(/(?:src|href)\s*=\s*"([^"]*)"/gi)) {
-    const target = value.trim();
-    if (target === "" || target.startsWith("data:") || target.startsWith("#")) continue;
-    if (target === MANIFEST_FILE) continue;
-    throw new Error(
-      "В собранной странице появилась ссылка на соседний файл: " + target +
-        ". Страница обязана открываться с диска одна; исключение одно — " + MANIFEST_FILE,
-    );
+// Все адреса страницы: и атрибуты разметки, и `url()` стилей. Шрифт в
+// `@font-face` живёт именно в `url()` — не смотреть туда значило бы не
+// проверять самое новое место, откуда страница тянет файл.
+//
+// Страница — это ещё и весь склеенный код, поэтому имя не должно продолжать
+// чужое слово: без оговорки `(?<![-\w.$])` проверка спотыкалась на
+// `URL.createObjectURL(data.blob)` в `exporter.js` и считала выгрузку PNG
+// ссылкой на соседний файл.
+function pageLinks(html) {
+  const links = [];
+  for (const [, double, single] of html.matchAll(/(?<![-\w.$])(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    links.push(double ?? single ?? "");
+  }
+  // Адрес в `url()` бывает в кавычках любого вида и вовсе без них.
+  for (const [, double, single, bare] of html.matchAll(
+    /(?<![-\w.$])url\(\s*(?:"([^"]*)"|'([^']*)'|([^"')]*))\s*\)/gi,
+  )) {
+    links.push(double ?? single ?? bare ?? "");
+  }
+  return links;
+}
+
+// Правило «один файл» снято (ADR 006), но слабее проверка не стала — она просто
+// проверяет другое. Разрешено ровно одно: относительная ссылка на файл, который
+// сборка **положила рядом в `dist/`**. Всё остальное — ошибка сборки:
+//
+//  - чужой хост (`https://`, `//cdn…`) — страница перестала бы работать офлайн;
+//  - абсолютный путь (`/sw.js`) — на Pages приложение живёт в подпапке, и такой
+//    путь уводит в корень чужого сайта;
+//  - выход из папки (`../`) — за пределами `dist/` ничего не выкладывается;
+//  - **имя, которого в `dist/` нет** — опечатка иначе превратилась бы в молча
+//    неработающий шрифт: страница открылась, а знаки не те.
+//
+// `files` — список всего, что сборка пишет в `dist/`; его знает только `build()`,
+// поэтому он приходит аргументом, а не собирается здесь заново.
+export function assertLocalLinks(html, files) {
+  const own = new Set(files);
+  for (const raw of pageLinks(html)) {
+    const target = raw.trim();
+    // Пустой адрес, рисунок в самом адресе и якорь внутри страницы никуда не ведут.
+    if (target === "" || target.startsWith("#") || target.startsWith("data:")) continue;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) {
+      throw new Error(
+        "В собранной странице внешняя ссылка: " + target +
+          ". Рядом в dist/ могут лежать только свои файлы, чужих хостов нет ни одного.",
+      );
+    }
+    if (target.startsWith("/")) {
+      throw new Error(
+        "Абсолютный путь в собранной странице: " + target +
+          ". На GitHub Pages приложение живёт в подпапке — ссылка должна быть относительной.",
+      );
+    }
+    const name = target.replace(/[?#].*$/, "").replace(/^\.\//, "");
+    if (name.split("/").includes("..")) {
+      throw new Error(
+        "Ссылка уводит выше папки страницы: " + target + ". Pages выкладывает dist/ и ничего кроме.",
+      );
+    }
+    if (!own.has(name)) {
+      throw new Error(
+        "Ссылка на файл, которого в dist/ нет: " + name + " (опечатка в имени?). " +
+          "Сборка положила рядом: " + [...own].join(", "),
+      );
+    }
   }
   if (!html.includes('href="' + MANIFEST_FILE + '"')) {
     throw new Error("Пропала ссылка на " + MANIFEST_FILE + ": с сайта страницу перестанут предлагать к установке");
@@ -305,10 +384,19 @@ export function manifestJson() {
 // Служебный скрипт лежит отдельным файлом (в `src/` его держать нельзя — туда
 // смотрит сборщик бандла). Версия кэша — отпечаток собранной страницы: новая
 // сборка даёт новое имя кэша, старое сносится при активации.
-async function workerScript(html) {
+//
+// Список ресурсов подставляется сюда же: без шрифта в офлайн-кэше установленное
+// приложение на объекте без сети осталось бы с запасным шрифтом. Знает, что
+// положено рядом, только сборка — значит и список составляет она.
+export async function workerScript(html, assets) {
   const source = await readFile(path.join(webDir, WORKER_FILE), "utf8");
   const version = createHash("sha256").update(html).digest("hex").slice(0, 12);
-  return source.replaceAll("__CACHE_VERSION__", version);
+  const result = source
+    .replaceAll("__CACHE_VERSION__", version)
+    .replaceAll("__ASSETS__", JSON.stringify(assets.map((name) => "./" + name)));
+  const left = result.match(/__[A-Z_]+__/);
+  if (left) throw new Error("В служебном скрипте осталась незаполненная подстановка " + left[0]);
+  return result;
 }
 
 export async function build() {
@@ -336,27 +424,37 @@ export async function build() {
       "    <script>\n(function () {\n" + script + "\n})();\n    </script>\n",
     );
 
-  assertPlainText(html);
-  assertOffline(html);
-  await mkdir(distDir, { recursive: true });
-  const out = path.join(distDir, "index.html");
-  await writeFile(out, html, "utf8");
-
-  // Файлы веб-версии. Страница о них не знает ничего, кроме имени манифеста, и
-  // с диска работает без них.
+  // Ресурсы страницы (шрифт) и файлы веб-версии. Проверка ссылок идёт по этому
+  // же списку: страница вправе сослаться только на то, что сборка положила.
+  const assets = await listAssets();
+  const assetNames = assets.map((asset) => asset.name);
   const extras = [
     [MANIFEST_FILE, manifestJson() + "\n"],
     [ICON_FILE, iconSvgFrom(html) + "\n"],
     [ICON_MASKABLE_FILE, maskableSvgFrom(iconSvgFrom(html)) + "\n"],
-    [WORKER_FILE, await workerScript(html)],
+    [WORKER_FILE, await workerScript(html, assetNames)],
   ];
+
+  assertPlainText(html);
+  assertOffline(html, [PAGE_FILE, ...extras.map(([name]) => name), ...assetNames]);
+
+  await mkdir(distDir, { recursive: true });
+  const out = path.join(distDir, PAGE_FILE);
+  await writeFile(out, html, "utf8");
   for (const [name, content] of extras) await writeFile(path.join(distDir, name), content, "utf8");
+  for (const asset of assets) {
+    const target = path.join(distDir, asset.name);
+    await mkdir(path.dirname(target), { recursive: true });
+    // Побайтово: шрифт — двоичный файл, через utf8 он бы не выжил.
+    await writeFile(target, await readFile(asset.file));
+  }
 
   return {
     file: out,
     bytes: Buffer.byteLength(html, "utf8"),
     modules: jsFiles.length,
     extras: extras.map(([name]) => name),
+    assets: assetNames,
   };
 }
 
@@ -366,5 +464,6 @@ if (runDirectly) {
   console.log(
     "dist/index.html: " + (result.bytes / 1024).toFixed(1) + " КБ, модулей: " + result.modules,
   );
+  if (result.assets.length > 0) console.log("ресурсы страницы: " + result.assets.join(", "));
   console.log("рядом для веб-версии: " + result.extras.join(", "));
 }
