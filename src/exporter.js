@@ -18,7 +18,7 @@ import {
   visibleMarks,
   visibleOutlines,
 } from "./render.js";
-import { monoContext } from "./mono.js";
+import { monoContext, monoIsOn } from "./mono.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
@@ -526,6 +526,10 @@ export function exportTableSizeText(table, scale) {
 /**
  * Таблица картинкой в большом разрешении: заголовок объекта, заголовки групп
  * цветом категории, цветная полоса слева у строк — как на рукописном листе.
+ *
+ * `options.mono` — тот же чёрно-белый лист, что у схемы (G171): заказчик
+ * ответил «да, и таблицы тоже». Цвета на листе два — заголовок разбивки и
+ * полоска категории у строки.
  */
 export async function tablePng(table, options = {}) {
   // Ждать обязательно до раскладки: ширины колонок меряются `measureText`, и
@@ -538,7 +542,7 @@ export async function tablePng(table, options = {}) {
   const layoutHeight = layout.height;
 
   const canvas = exportCanvas(layoutWidth * scale, layoutHeight * scale);
-  const ctx = canvas.getContext("2d");
+  const ctx = monoOf(canvas.getContext("2d"), options.mono);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.scale(scale, scale);
@@ -621,8 +625,15 @@ export async function tablePng(table, options = {}) {
       y += EXPORT_TABLE.rowHeight;
     }
     for (const row of section.rows) {
-      ctx.fillStyle = row.color || section.color || EXPORT_TABLE.line;
-      ctx.fillRect(left, y + 4, EXPORT_TABLE.stripe, EXPORT_TABLE.rowHeight - 8);
+      // Полоска категории — чистый цвет и ничего кроме: тушью все полоски
+      // одинаковы и говорят только «тут строка», а столбик чёрных штрихов
+      // вдоль листа читается как брак печати. Поэтому на чёрно-белом листе её
+      // не рисуют вовсе; отступ под неё остаётся, и строки не съезжают —
+      // прежний лист и чёрно-белый ложатся колонка в колонку.
+      if (!monoIsOn(ctx)) {
+        ctx.fillStyle = row.color || section.color || EXPORT_TABLE.line;
+        ctx.fillRect(left, y + 4, EXPORT_TABLE.stripe, EXPORT_TABLE.rowHeight - 8);
+      }
       ctx.fillStyle = EXPORT_TABLE.ink;
       drawCells(row.cells, left + EXPORT_TABLE.stripe + EXPORT_TABLE.gap, false);
       y += EXPORT_TABLE.rowHeight;
@@ -819,7 +830,14 @@ function exportNode(tag, className, textValue) {
  * диалога, и в печать — печатается ровно то, что видно.
  */
 export function exportTableNode(table, options = {}) {
-  const doc = exportNode("div", "print-doc");
+  // Чёрно-белый лист (G171) и здесь: предпросмотр в диалоге и печать браузером
+  // — один и тот же узел, и отметка обязана быть видна **до** печати. Цвет
+  // категории не красится в чёрный, а просто не задаётся: `--print-color` и
+  // `--print-row-color` остаются без значения, и CSS берёт своё — тушь у
+  // заголовка, пусто у полоски. Ставить цвет и перебивать его правилом значило
+  // бы держать цвет в двух местах и спорить с самим собой.
+  const mono = options.mono === true;
+  const doc = exportNode("div", mono ? "print-doc print-doc--mono" : "print-doc");
   const head = exportNode("header", "print-doc__head");
   head.append(exportNode("h1", "print-doc__title", options.title || table.title || ""));
   const room = options.room != null ? options.room : table.room || "";
@@ -833,7 +851,7 @@ export function exportTableNode(table, options = {}) {
   for (const section of tableSections(table)) {
     const level = section.level || 1;
     const block = exportNode("section", level === 2 ? "print-doc__group print-doc__group--sub" : "print-doc__group");
-    if (section.color) block.style.setProperty("--print-color", section.color);
+    if (section.color && !mono) block.style.setProperty("--print-color", section.color);
     if (section.title) {
       block.append(exportNode(level === 2 ? "h3" : "h2", "print-doc__group-title", section.title));
     }
@@ -854,7 +872,7 @@ export function exportTableNode(table, options = {}) {
       // Строка с потерянной ссылкой помечена и на вид: на бумаге она не должна
       // читаться как обычная связь.
       const tr = exportNode("tr", row.problem ? "print-doc__row print-doc__row--problem" : "print-doc__row");
-      if (row.color) tr.style.setProperty("--print-row-color", row.color);
+      if (row.color && !mono) tr.style.setProperty("--print-row-color", row.color);
       row.cells.forEach((cell, index) => {
         tr.append(exportNode("td", index === 0 ? "print-doc__label" : null, cell));
       });
@@ -873,7 +891,7 @@ export function exportTableNode(table, options = {}) {
     const body = exportNode("tbody");
     const line = (title, count, className, color) => {
       const tr = exportNode("tr", className);
-      if (color) tr.style.setProperty("--print-row-color", color);
+      if (color && !mono) tr.style.setProperty("--print-row-color", color);
       tr.append(exportNode("td", null, title));
       tr.append(exportNode("td", "print-doc__count", count));
       body.append(tr);
@@ -931,7 +949,12 @@ function exportPrintRun(root) {
 /**
  * Печать без второго окна: раскладка кладётся в #print-root, экран прячется
  * правилами print.css. `kind` — «table» (данные: `{table, title, subtitle,
- * extra}`) или «scheme» (данные: `{blob, title}`).
+ * extra, mono}`) или «scheme» (данные: `{blob, title}`).
+ *
+ * У схемы отметка «чёрно-белый» уже в самой картинке — печатается то, что
+ * нарисовано. У таблицы раскладка собирается здесь и сейчас, поэтому отметку
+ * надо передать: иначе галка в окне молчала бы ровно на той кнопке, которой в
+ * этом окне пользуются чаще всего.
  */
 export async function printView(kind, data = {}) {
   const root = exportPrintRoot();
@@ -957,6 +980,7 @@ export async function printView(kind, data = {}) {
       title: data.title,
       subtitle: data.subtitle,
       extra: data.extra,
+      mono: data.mono,
     }),
   );
   exportPrintRun(root);
@@ -1231,7 +1255,9 @@ export async function gostTablePng(table, page, plan, options = {}) {
   await drawFontReady();
   const sheet = plan.sheet;
   const canvas = exportCanvas(sheet.width * mm, sheet.height * mm);
-  const ctx = canvas.getContext("2d");
+  // Отметка «чёрно-белый» и здесь та же: рамка со штампом и сетка таблицы и
+  // так чёрные, перекрашиваются заголовок разбивки и полоска категории.
+  const ctx = monoOf(canvas.getContext("2d"), options.mono);
   drawGostFrame(ctx, sheet, mm);
 
   const field = gostField(sheet, page.form);
@@ -1303,8 +1329,9 @@ export async function gostTablePng(table, page, plan, options = {}) {
       continue;
     }
     // Цвет категории — полоской слева, как и на прежнем листе: колонки с кодом
-    // краски в таблице нет, и рисовать его негде.
-    if (item.color) {
+    // краски в таблице нет, и рисовать его негде. На чёрно-белом листе полоски
+    // нет вовсе — тушью они все одинаковы (см. `tablePng`).
+    if (item.color && !monoIsOn(ctx)) {
       ctx.fillStyle = item.color;
       ctx.fillRect(field.x * mm, (y + 1) * mm, 1.2 * mm, (GOST_TABLE.row - 2) * mm);
       ctx.fillStyle = "#1f2328";
