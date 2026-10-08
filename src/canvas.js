@@ -99,6 +99,7 @@ import {
   draftSnap,
   visibleMarks,
   visibleOutlines,
+  drawFontReady,
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { getSetting, setSetting } from "./store.js";
@@ -3439,6 +3440,11 @@ function mountCanvas(host, api) {
   canvasNode.addEventListener("contextmenu", (event) => event.preventDefault());
   document.addEventListener("keydown", canvasKeyDown);
   document.addEventListener("keyup", canvasKeyUp);
+
+  // Первый кадр может лечь до того, как дошёл файл чертёжного шрифта: холст в
+  // отличие от разметки сам ничего не перерисовывает, и подписи остались бы
+  // системным шрифтом до первого движения мышью. Один лишний кадр на загрузку.
+  drawFontReady().then(() => canvasRedraw());
 
   if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => canvasResize()).observe(host);

@@ -7,7 +7,17 @@
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
 import { findGroup, findRoom, outlinesInOrder, planPixelsPerMeter, projectStamp, roomsInOrder, schemesInOrder } from "./model.js";
-import { drawScheme, labelBox, labelFontSize, markRadius, outlineLabelBox, visibleMarks, visibleOutlines } from "./render.js";
+import {
+  drawFont,
+  drawFontReady,
+  drawScheme,
+  labelBox,
+  labelFontSize,
+  markRadius,
+  outlineLabelBox,
+  visibleMarks,
+  visibleOutlines,
+} from "./render.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
@@ -375,6 +385,9 @@ export function exportFitArea(project, scheme, options = {}) {
  * ни в легенду.
  */
 export async function schemePng(project, scheme, image, options = {}) {
+  // Файл чертёжного шрифта мог ещё не дойти: холст в этом случае молча рисует
+  // запасным, и в PNG уехал бы не тот шрифт. На бумаге это не поправить.
+  await drawFontReady();
   const scale = options.scale > 0 ? options.scale : 1;
   // Кадр берётся с полями под подписи — тем же расчётом, что показал размер
   // в диалоге, иначе на бумаге окажется не то, что обещали миллиметры.
@@ -442,10 +455,10 @@ function exportProbe() {
 
 function exportMeasure(ctx, table) {
   const widths = table.columns.map((column) => {
-    ctx.font = `600 ${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font, 600);
     return ctx.measureText(String(column)).width;
   });
-  ctx.font = `${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(EXPORT_TABLE.font);
   for (const section of tableSections(table)) {
     for (const row of section.rows) {
       row.cells.forEach((cell, index) => {
@@ -506,6 +519,9 @@ export function exportTableSizeText(table, scale) {
  * цветом категории, цветная полоса слева у строк — как на рукописном листе.
  */
 export async function tablePng(table, options = {}) {
+  // Ждать обязательно до раскладки: ширины колонок меряются `measureText`, и
+  // посчитанные запасным шрифтом они не сойдутся с тем, чем лист нарисуется.
+  await drawFontReady();
   const scale = options.scale > 0 ? options.scale : 1;
   const layout = exportTableLayout(table, options);
   const { widths, sections, title, room, note, subtitle, bodyWidth, totals } = layout;
@@ -525,7 +541,7 @@ export async function tablePng(table, options = {}) {
 
   if (title) {
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.titleFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.titleFont, 600);
     ctx.fillText(title, left, y + EXPORT_TABLE.titleFont * 0.8);
     y += EXPORT_TABLE.titleFont * 1.6;
   }
@@ -533,7 +549,7 @@ export async function tablePng(table, options = {}) {
   // одной комнате должен и на бумаге читаться как лист по комнате.
   if (room) {
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.roomFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.roomFont, 600);
     ctx.fillText(room, left, y + EXPORT_TABLE.roomFont * 0.8);
     y += EXPORT_TABLE.roomFont * 1.6;
   }
@@ -541,13 +557,13 @@ export async function tablePng(table, options = {}) {
   // таблица неотличима от полной.
   if (note) {
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font, 600);
     ctx.fillText(note, left, y + EXPORT_TABLE.font * 0.8);
     y += EXPORT_TABLE.font * 1.6;
   }
   if (subtitle) {
     ctx.fillStyle = EXPORT_TABLE.muted;
-    ctx.font = `${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font);
     ctx.fillText(subtitle, left, y + EXPORT_TABLE.font * 0.8);
     y += EXPORT_TABLE.font * 1.6;
   }
@@ -555,7 +571,7 @@ export async function tablePng(table, options = {}) {
   // Цвет строки на бумаге показывает полоса слева, а не квадратик в ячейке:
   // колонки с кодом краски в листах больше нет, и рисовать его негде.
   const drawCells = (cells, textLeft, bold) => {
-    ctx.font = `${bold ? "600 " : ""}${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.font, bold ? 600 : 0);
     let x = textLeft;
     cells.forEach((cell, index) => {
       const limit = widths[index] - EXPORT_TABLE.cellGap;
@@ -584,7 +600,7 @@ export async function tablePng(table, options = {}) {
       y += EXPORT_TABLE.gap;
       ctx.fillStyle = color;
       const groupFont = level === 2 ? EXPORT_TABLE.groupFont - 2 : EXPORT_TABLE.groupFont;
-      ctx.font = `600 ${groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      ctx.font = drawFont(groupFont, 600);
       ctx.fillText(section.title, left, y + EXPORT_TABLE.rowHeight / 2);
       const lineY = y + EXPORT_TABLE.rowHeight - 2;
       ctx.strokeStyle = color;
@@ -610,7 +626,7 @@ export async function tablePng(table, options = {}) {
   if (totals.length > 0) {
     y += EXPORT_TABLE.gap;
     ctx.fillStyle = EXPORT_TABLE.ink;
-    ctx.font = `600 ${EXPORT_TABLE.groupFont}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+    ctx.font = drawFont(EXPORT_TABLE.groupFont, 600);
     ctx.fillText(strings.tables.totals, left, y + EXPORT_TABLE.rowHeight / 2);
     const lineY = y + EXPORT_TABLE.rowHeight - 2;
     ctx.strokeStyle = EXPORT_TABLE.ink;
@@ -622,7 +638,7 @@ export async function tablePng(table, options = {}) {
     y += EXPORT_TABLE.rowHeight;
 
     const line = (label, value, bold, color, indent) => {
-      ctx.font = `${bold ? "600 " : ""}${EXPORT_TABLE.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+      ctx.font = drawFont(EXPORT_TABLE.font, bold ? 600 : 0);
       ctx.fillStyle = color || EXPORT_TABLE.ink;
       ctx.textAlign = "left";
       ctx.fillText(label, left + indent, y + EXPORT_TABLE.rowHeight / 2);

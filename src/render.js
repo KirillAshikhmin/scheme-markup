@@ -37,6 +37,68 @@ import { strings, text } from "./strings.js";
 
 export const SHAPES = SHAPE_NAMES;
 
+// ——— шрифт холста —————————————————————————————————————————————————————
+//
+// Чертёжный шрифт попадает на схему тем же путём, что и в интерфейс: через
+// переменную `--font-gost` в `styles.css`. Своего списка семейств здесь нет
+// нарочно — иначе выключателей стало бы два, и отказ от шрифта оставил бы
+// подписи на плане чертёжными, а интерфейс вернул бы системным.
+//
+// Запасной список нужен там, где переменной взять негде: в Node (тесты
+// геометрии холста не имеют) и до того, как стили применились. Текст в этом
+// случае рисуется системным шрифтом, а не пропадает.
+const DRAW_FONT_FALLBACK = 'system-ui, -apple-system, "Segoe UI", Arial, sans-serif';
+
+let drawFontFamilyCache = "";
+
+/**
+ * Семейства для `ctx.font` — значение `--font-gost` как есть.
+ *
+ * Пустое значение не запоминается: стили на странице уже есть к первому кадру,
+ * но если переменную не прочитать, кадр рисуется запасным шрифтом и следующий
+ * спросит заново, а не закрепит промах навсегда.
+ */
+export function drawFontFamily() {
+  if (drawFontFamilyCache) return drawFontFamilyCache;
+  if (typeof document === "undefined" || !document.documentElement) return DRAW_FONT_FALLBACK;
+  if (typeof getComputedStyle !== "function") return DRAW_FONT_FALLBACK;
+  const value = getComputedStyle(document.documentElement).getPropertyValue("--font-gost").trim();
+  if (!value) return DRAW_FONT_FALLBACK;
+  drawFontFamilyCache = value;
+  return value;
+}
+
+/** Строка для `ctx.font`: `drawFont(12)` или `drawFont(12, 600)`. */
+export function drawFont(size, weight) {
+  return (weight ? weight + " " : "") + size + "px " + drawFontFamily();
+}
+
+/**
+ * Готовность файла шрифта.
+ *
+ * Холсту `@font-face` сам по себе не помогает: пока файл не дошёл, `ctx.font`
+ * молча берёт запасной шрифт, и первый кадр плана остался бы системным до
+ * первого движения мышью. Поэтому и холст, и выгрузка ждут этого обещания —
+ * холст, чтобы перерисовать кадр, выгрузка, чтобы не положить в PNG не тот
+ * шрифт. Не дождались (старый браузер, файла нет) — `false` и прежний вид:
+ * падать из-за шрифта нельзя.
+ */
+export function drawFontReady() {
+  const fonts = typeof document !== "undefined" && document ? document.fonts : null;
+  if (!fonts || typeof fonts.load !== "function") return Promise.resolve(false);
+  try {
+    // `load` разбирает строку как сокращение `font` и на кривой бросает сразу,
+    // не возвращая обещания, — отсюда try, а не только catch.
+    return fonts
+      .load(drawFont(16))
+      .then(() => fonts.ready)
+      .then(() => true)
+      .catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
 // Доля радиуса, на которую внутренние вершины звезды ближе к центру.
 const STAR_INNER = 0.45;
 // Запас в пикселях вокруг метки, чтобы попадать по ней не идеально точно.
@@ -2084,7 +2146,7 @@ function drawLinkChannel(ctx, curve, channel, color, alpha) {
   const value = String(channel);
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.font = `700 ${LINK_CHANNEL_FONT}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(LINK_CHANNEL_FONT, 700);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
@@ -3312,7 +3374,7 @@ export function hitOutlineLabelTurn(project, scheme, outline, point, view, extra
 function drawOutlineLabel(ctx, box, color) {
   const rect = labelBounds(box);
   ctx.save();
-  ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(box.font, 600);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх линий плана.
@@ -3690,7 +3752,7 @@ function drawCommentPlate(ctx, box, color, selected) {
   if (empty) ctx.setLineDash([box.font * 0.4, box.font * 0.3]);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.font = `${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(box.font);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = color;
@@ -3782,7 +3844,7 @@ function drawLabel(ctx, box, color, runs, selected) {
   }
   const parts = runs && runs.map((run) => run.text).join("") === box.text ? runs : null;
   ctx.save();
-  ctx.font = `600 ${box.font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(box.font, 600);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Обводка-подложка: подпись читается и поверх тёмных линий плана.
@@ -3947,7 +4009,7 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
 function drawDraftAngle(ctx, at, angle, snapped, color) {
   const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
   ctx.save();
-  ctx.font = `600 ${DRAFT_ANGLE_FONT}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(DRAFT_ANGLE_FONT, 600);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.lineWidth = Math.max(2, DRAFT_ANGLE_FONT * 0.3);
@@ -3998,7 +4060,7 @@ export function drawLegend(ctx, { project, scheme, filter, view, box }) {
   const x = box ? box.x : 12;
   const y = box ? box.y : 12;
   ctx.save();
-  ctx.font = `${font}px system-ui, -apple-system, "Segoe UI", Arial, sans-serif`;
+  ctx.font = drawFont(font);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   // Ширина рамки — по самой длинной строке: код типа бывает и в шестнадцать
