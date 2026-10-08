@@ -102,6 +102,9 @@ export function markCardModel(project, markId) {
   add(strings.marks.room, room ? room.name : "");
   add(strings.marks.location, fields.location);
   add(strings.marks.originalPlaceholder, fields.original);
+  // Длина по плану — там же, где остальные поля, и из той же `marksRowModel`.
+  // Пустая (нет масштаба или метка точечная) строка выпадает, как все пустые.
+  add(strings.scale.lengthLabel, fields.lengthText);
   add(strings.panels.sizes, fields.sizes);
   // Связи — обе стороны и словами. «Чем управляет» идёт разложенным по каналам
   // («① Т16 ×6 · ② С1»): это та же строка, что в списке меток, и она отвечает

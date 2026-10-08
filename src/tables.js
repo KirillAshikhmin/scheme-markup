@@ -11,6 +11,8 @@
 import {
   equipmentInOrder,
   findCategory,
+  formatMeters,
+  markLengthMeters,
   findEquipment,
   findEquipmentType,
   channelOrder,
@@ -36,16 +38,50 @@ import { strings, text } from "./strings.js";
 
 export const TABLE_GROUP_BY = ["category", "type", "room"];
 
-// Колонки списка меток — дословно из спецификации.
-function tableMarkColumns() {
-  return [
-    strings.tables.label,
-    strings.tables.points,
-    strings.tables.type,
-    strings.tables.room,
-    strings.tables.location,
-    strings.tables.original,
-  ];
+// Колонки списка меток — дословно из спецификации, плюс одна приходящая.
+//
+// «Длина, м» появляется **только тогда, когда её есть чем заполнить**: хотя бы
+// у одной метки листа посчиталась длина по плану (линейная метка на схеме с
+// калибровкой масштаба). На объекте без масштаба лист остаётся прежним — та же
+// шапка, те же ячейки, та же ширина в печати и в PNG; пустая колонка «Длина»
+// там была бы обещанием, которое лист не выполняет.
+function tableMarkColumns(withLength) {
+  const columns = [strings.tables.label, strings.tables.points];
+  // Сразу за «Точек»: и то и другое — мера позиции, и читаются они парой.
+  if (withLength) columns.push(strings.tables.length);
+  columns.push(strings.tables.type, strings.tables.room, strings.tables.location, strings.tables.original);
+  return columns;
+}
+
+/**
+ * Длина позиции в метрах — или `null`, когда её неоткуда взять.
+ *
+ * Сведённые метки (один тип, один номер — например три куска ленты «Л1»)
+ * **складываются**: лист отвечает на вопрос закупки «сколько метров заказать»,
+ * а не «какой из кусков длиннее». Точки в сумму не входят вовсе — у них длины
+ * по плану нет.
+ */
+function tableEntryLength(project, entry) {
+  let total = 0;
+  let found = false;
+  for (const mark of entry.marks) {
+    const meters = markLengthMeters(project, mark.id);
+    if (meters === null) continue;
+    found = true;
+    total += meters;
+  }
+  return found ? total : null;
+}
+
+// Длины всех позиций листа: считаются один раз — по ним же решается, нужна ли
+// колонка. Пустая карта значит «масштаба нет нигде» и колонки не будет.
+function tableLengths(project, entries) {
+  const lengths = new Map();
+  for (const entry of entries) {
+    const meters = tableEntryLength(project, entry);
+    if (meters !== null) lengths.set(entry.id, meters);
+  }
+  return lengths;
 }
 
 // Плоский порядок типов: индекс типа в справочнике задаёт порядок строк
@@ -139,13 +175,17 @@ function tableEntryLabel(project, entry) {
 // Тип у строки один: обозначение назвало его однозначно. Склейка осталась
 // там, где сведённые метки правда расходятся, — помещение, расположение
 // и «в оригинале» у одного обозначения бывают разные.
-function tableEntryRow(project, entry) {
+function tableEntryRow(project, entry, lengths) {
   const type = findType(project, entry.head.typeId);
   const category = type ? findCategory(project, type.categoryId) : null;
   const count = tableEntryCount(entry);
+  const meters = lengths && lengths.size > 0 ? lengths.get(entry.id) : undefined;
   const cells = [
     tableEntryLabel(project, entry),
     String(count),
+    // Колонка либо есть у всего листа, либо её нет: у точечной позиции на
+    // листе с длинами ячейка пустая, а не «0».
+    ...(lengths && lengths.size > 0 ? [meters === undefined ? "" : formatMeters(meters)] : []),
     type ? type.name : "",
     tableJoin(
       entry.marks.map((mark) => {
@@ -287,14 +327,14 @@ function tableFilterNote(project, filter) {
 
 // Один уровень разбивки: категории, типы или помещения — как было и как
 // остаётся, когда галка «по помещениям» снята.
-function tableFlatGroups(project, entries, kind) {
+function tableFlatGroups(project, entries, kind, lengths) {
   const buckets = new Map();
   for (const entry of entries) {
     const group = tableGroupOf(project, entry, kind);
     if (!buckets.has(group.key)) {
       buckets.set(group.key, { id: group.key, title: group.title, color: group.color, rows: [], level: 1 });
     }
-    buckets.get(group.key).rows.push(tableEntryRow(project, entry));
+    buckets.get(group.key).rows.push(tableEntryRow(project, entry, lengths));
   }
   return tableGroupOrder(project, kind)
     .map((key) => buckets.get(key))
@@ -307,7 +347,7 @@ function tableFlatGroups(project, entries, kind) {
 // Заголовок помещения строк не несёт: строки живут во внутренних группах.
 // Метки без помещения — последней группой «Без помещения»: потерять их на
 // листе хуже, чем показать отдельно, и на плане они тоже никуда не делись.
-function tableRoomGroups(project, entries, kind) {
+function tableRoomGroups(project, entries, kind, lengths) {
   const byRoomKey = new Map();
   for (const entry of entries) {
     const room = entry.head.roomId ? findRoom(project, entry.head.roomId) : null;
@@ -328,7 +368,7 @@ function tableRoomGroups(project, entries, kind) {
       rows: [],
       level: 1,
     });
-    for (const inner of tableFlatGroups(project, list, kind)) {
+    for (const inner of tableFlatGroups(project, list, kind, lengths)) {
       groups.push({ ...inner, id: key + ":" + inner.id, level: 2 });
     }
   }
@@ -344,7 +384,6 @@ function tableRoomGroups(project, entries, kind) {
 export function marksTable(project, filter, groupBy, options = {}) {
   const kind = TABLE_GROUP_BY.includes(groupBy) ? groupBy : "category";
   const byRoom = Boolean(options.byRoom) && kind !== "room";
-  const columns = tableMarkColumns();
   if (!project) {
     return {
       kind: "marks",
@@ -358,13 +397,19 @@ export function marksTable(project, filter, groupBy, options = {}) {
       title: "",
       room: "",
       note: "",
-      columns,
+      columns: tableMarkColumns(false),
       groups: [],
     };
   }
 
   const entries = tableEntries(project, filter);
-  const groups = byRoom ? tableRoomGroups(project, entries, kind) : tableFlatGroups(project, entries, kind);
+  // Длины считаются до строк: по ним решается, появится ли колонка, и по ним
+  // же заполняются ячейки — второго счёта быть не должно.
+  const lengths = tableLengths(project, entries);
+  const columns = tableMarkColumns(lengths.size > 0);
+  const groups = byRoom
+    ? tableRoomGroups(project, entries, kind, lengths)
+    : tableFlatGroups(project, entries, kind, lengths);
   const totals = tableTotals(project, entries);
   return {
     kind: "marks",

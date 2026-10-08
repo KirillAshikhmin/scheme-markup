@@ -835,6 +835,15 @@ export function updateScheme(project, schemeId, patch) {
 // разметка поедет, и спросить об этом обязан вызывающий, до правки.
 // Пересчитывается только то, что задано в пикселях плана, — смещения подписей:
 // на картинке вдвое крупнее прежние 12 px означали бы вдвое меньший отступ.
+//
+// **Калибровка масштаба снимается.** Доли указывают на то же место картинки,
+// но картинка другая: новый файл — это другой чертёж, снятый неизвестно с
+// какого кадра, и прежние «четыре метра между этими точками» на нём значат
+// неизвестно что. Пересчитать это нечем — кадр нового файла не сравнить со
+// старым ничем, кроме глаз, — а длина ленты из вранья уедет в закупку. Поэтому
+// масштаб честно сбрасывается (`scaleDropped`), об этом говорят вслух, и схема
+// возвращается в прежнее состояние «длин не показываем»; калибровка заново —
+// два клика. Отмена шага возвращает и её.
 export function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) {
   const scheme = requireScheme(project, schemeId);
   if (typeof imageId !== "string" || imageId === "") throw modelError("imageRequired");
@@ -845,9 +854,12 @@ export function replaceSchemeImage(project, schemeId, { imageId, width, height }
   const scaleY = scheme.height > 0 ? nextHeight / scheme.height : 1;
   const scaleOffset = (offset) =>
     offset ? { dx: roundOffset(offset.dx * scaleX), dy: roundOffset(offset.dy * scaleY) } : offset;
-  const schemes = project.schemes.map((item) =>
-    item.id === schemeId ? { ...item, imageId, width: nextWidth, height: nextHeight } : item,
-  );
+  const scaleDropped = Boolean(planScaleOf(project, schemeId));
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    const { scale, ...rest } = item;
+    return { ...rest, imageId, width: nextWidth, height: nextHeight };
+  });
   const marks = project.marks.map((mark) =>
     mark.schemeId === schemeId && mark.labelOffset ? { ...mark, labelOffset: scaleOffset(mark.labelOffset) } : mark,
   );
@@ -866,6 +878,7 @@ export function replaceSchemeImage(project, schemeId, { imageId, width, height }
   return {
     project: withProject(project, { schemes, marks, groups, outlines }),
     scheme: schemes.find((item) => item.id === schemeId),
+    scaleDropped,
   };
 }
 
@@ -2837,6 +2850,203 @@ export function deleteSchemeGuide(project, schemeId, guideId) {
   const deleted = guides.find((guide) => guide.id === guideId);
   if (!deleted) throw modelError("guideNotFound");
   return { project: withGuides(project, schemeId, guides.filter((guide) => guide.id !== guideId)), deleted };
+}
+
+// ——— масштаб плана: калибровка по отрезку ——————————————————————————————
+//
+// В первый день сборки заказчик сказал «масштаба и длин пока не надо» (G13),
+// теперь — «давай делаем настоящий масштаб», и способ назвал сам: **калибровка
+// по отрезку**. Показывают две точки на плане и говорят, сколько между ними
+// метров. Это работает со сканом, с фотографией чертежа и с выгрузкой из любой
+// программы — в отличие от «введите dpi», которого у фотографии нет вовсе.
+//
+// Масштаб живёт **у схемы**, а не у объекта: у этажей разные планы, снятые с
+// разных чертежей и в разном разрешении, и общего масштаба у них не бывает.
+//
+// Точки калибровки хранятся **долями** плана, как точки меток (ADR 002), а не
+// пикселями и не готовым «px на метр». Это и есть то, за что доли плачены:
+// поворот и обрезка пересчитывают доли тем же преобразованием, что и метки,
+// размер плана меняется вместе с ними — и метры остаются те же, без миграции
+// и без второго места, где живёт правда о масштабе. Готовое число px/м
+// приходилось бы пересчитывать на каждую правку картинки, и ошибка такого
+// пересчёта врала бы молча — в метрах, по которым закупают ленту.
+//
+// Поля нет у схем прежней разметки, и это не ошибка: без калибровки длины
+// просто не показываются, а всё остальное работает как раньше (G68).
+// `FORMAT_VERSION` не поднят — отсутствие поля даёт прежний вид.
+
+// Потолок разумного отрезка: сто километров между двумя точками одного плана
+// не бывает, а опечатка в поле не должна уехать в файл масштабом.
+export const PLAN_SCALE_METERS_MAX = 100000;
+
+// Короткий отрезок калибровки. Ошибка в пару пикселей неизбежна — палец
+// целится не точнее, — и она делится на длину отрезка: откалибровал по
+// полуметровому проёму, получил проценты ошибки по всему плану. Мерка —
+// доля диагонали плана, а не метры: промах руки задан в пикселях, и
+// относительная ошибка считается в них же.
+export const PLAN_SCALE_SHORT_SHARE = 0.08;
+
+function planDiagonalPx(scheme) {
+  const width = Number(scheme && scheme.width) || 0;
+  const height = Number(scheme && scheme.height) || 0;
+  return Math.hypot(width, height);
+}
+
+function scalePointOk(point) {
+  return Boolean(point) && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y));
+}
+
+function scaleFraction(point) {
+  return { x: clampFraction(Number(point.x)), y: clampFraction(Number(point.y)) };
+}
+
+// Длина отрезка в пикселях плана: доли умножаются на размер плана — тот самый
+// обратный перевод, которым рисуется всё остальное.
+function planSegmentPx(scheme, a, b) {
+  const width = Number(scheme && scheme.width) || 0;
+  const height = Number(scheme && scheme.height) || 0;
+  return Math.hypot((b.x - a.x) * width, (b.y - a.y) * height);
+}
+
+/**
+ * Калибровка схемы или `null`. Читать `scheme.scale` самому нельзя: у схемы
+ * прежней разметки поля нет вовсе, а испорченное (ноль метров, выродившийся
+ * в точку отрезок) здесь же превращается в «масштаба нет» — это честнее, чем
+ * показать длину, посчитанную из мусора.
+ */
+export function planScaleOf(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  const raw = scheme && scheme.scale;
+  if (!raw || !scalePointOk(raw.a) || !scalePointOk(raw.b)) return null;
+  const meters = Number(raw.meters);
+  if (!(meters > 0) || !Number.isFinite(meters)) return null;
+  const a = scaleFraction(raw.a);
+  const b = scaleFraction(raw.b);
+  if (!(planSegmentPx(scheme, a, b) > 0)) return null;
+  return { a, b, meters, setAt: raw.setAt || null };
+}
+
+// Пикселей плана на метр — то число, через которое считается любая длина.
+// Ноль значит «масштаба нет»: ни одна длина наружу не выйдет.
+export function planPixelsPerMeter(project, schemeId) {
+  const scale = planScaleOf(project, schemeId);
+  if (!scale) return 0;
+  const px = planSegmentPx(findScheme(project, schemeId), scale.a, scale.b);
+  return px > 0 ? px / scale.meters : 0;
+}
+
+export function planHasScale(project, schemeId) {
+  return planPixelsPerMeter(project, schemeId) > 0;
+}
+
+/**
+ * Размер всего плана в метрах — или `null` без калибровки. Это ещё и способ
+ * проверить калибровку глазом: инженер знает, что дом по фасаду двенадцать
+ * метров, и «план 12,4 × 8,6 м» подтверждает масштаб, а «124 × 86» выдаёт
+ * запятую, поставленную не туда.
+ */
+export function planSizeMeters(project, schemeId) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  if (!(perMeter > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  return { width: Number(scheme.width) / perMeter, height: Number(scheme.height) / perMeter };
+}
+
+// Слишком короткий отрезок калибровки. Не отказ, а повод спросить: решает
+// пользователь, но молча такое проходить не должно.
+export function planScaleShort(project, schemeId, { a, b } = {}) {
+  const scheme = findScheme(project, schemeId);
+  if (!scheme || !scalePointOk(a) || !scalePointOk(b)) return false;
+  const px = planSegmentPx(scheme, scaleFraction(a), scaleFraction(b));
+  const diagonal = planDiagonalPx(scheme);
+  if (!(px > 0) || !(diagonal > 0)) return false;
+  return px < diagonal * PLAN_SCALE_SHORT_SHARE;
+}
+
+/**
+ * Калибровка: две точки плана (в долях) и расстояние между ними в метрах.
+ * Метры запоминаются как сказал человек, px/м считается из них и из размера
+ * плана на каждый вопрос — поэтому поворот и обрезка ничего здесь не портят.
+ */
+export function setPlanScale(project, schemeId, { a, b, meters } = {}) {
+  const scheme = requireScheme(project, schemeId);
+  if (!scalePointOk(a) || !scalePointOk(b)) throw modelError("scalePointsInvalid");
+  const value = Number(meters);
+  if (!Number.isFinite(value) || !(value > 0)) throw modelError("scaleMetersInvalid");
+  if (value > PLAN_SCALE_METERS_MAX) throw modelError("scaleMetersTooBig", { max: PLAN_SCALE_METERS_MAX });
+  const first = scaleFraction(a);
+  const second = scaleFraction(b);
+  // Отрезок в один пиксель плана — это не калибровка, а промах мышью:
+  // масштаб из него вышел бы любым.
+  if (!(planSegmentPx(scheme, first, second) >= 1)) throw modelError("scaleSegmentEmpty");
+  const scale = {
+    a: first,
+    b: second,
+    // Три знака после запятой: миллиметры в метрах, дальше — шум ввода.
+    meters: Math.round(value * 1000) / 1000,
+    setAt: nowIso(),
+  };
+  const schemes = project.schemes.map((item) => (item.id === schemeId ? { ...item, scale } : item));
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), scale };
+}
+
+// Снятие масштаба: поле **убирается**, а не обнуляется, — схема становится
+// ровно такой, какой была до калибровки.
+export function clearPlanScale(project, schemeId) {
+  const scheme = requireScheme(project, schemeId);
+  if (!Object.prototype.hasOwnProperty.call(scheme, "scale")) {
+    return { project, scheme, cleared: false };
+  }
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    const { scale, ...rest } = item;
+    return rest;
+  });
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), cleared: true };
+}
+
+/**
+ * Длина ломаной в метрах — или `null`, когда у схемы нет калибровки. Считается
+ * по тем же долям, что рисуются: сумма отрезков в пикселях плана, делённая на
+ * px/м. Замкнутая ломаная (лента по периметру комнаты) считается с последним
+ * отрезком — тем, который возвращается в первую вершину.
+ */
+export function planLengthMeters(project, schemeId, points, closed = false) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  if (!(perMeter > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  const list = (Array.isArray(points) ? points : []).filter(scalePointOk).map(scaleFraction);
+  if (list.length < 2) return 0;
+  let px = 0;
+  for (let index = 1; index < list.length; index += 1) {
+    px += planSegmentPx(scheme, list[index - 1], list[index]);
+  }
+  if (closed && list.length > 2) px += planSegmentPx(scheme, list[list.length - 1], list[0]);
+  return px / perMeter;
+}
+
+/**
+ * Длина линейной метки в метрах — главный ответ этой задачи: сколько метров
+ * ленты, трека или тёплого пола заказывать. У точечной метки длины нет
+ * (`null`): её «длина» в карточке — размер изделия в миллиметрах, и путать их
+ * нельзя. Без калибровки — тоже `null`, и нигде ничего не показывается.
+ */
+export function markLengthMeters(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark || mark.kind !== "line") return null;
+  return planLengthMeters(project, mark.schemeId, mark.points, mark.closed);
+}
+
+/**
+ * Метры числом для показа: запятая десятичным разделителем, как в чертеже,
+ * и не больше двух знаков — калибровка руками точнее сантиметра не бывает,
+ * а третий знак обещал бы точность, которой нет. Единицу приписывает строка
+ * словаря (`scale.meters`), здесь только число.
+ */
+export function formatMeters(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return String(Math.round(number * 100) / 100).replace(".", ",");
 }
 
 // ——— правка вершин ломаной ————————————————————————————————————————————

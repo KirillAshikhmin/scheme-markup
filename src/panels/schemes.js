@@ -5,15 +5,20 @@
 import { layoutAllows, PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
 import {
   addScheme,
+  clearPlanScale,
   deleteScheme,
   findScheme,
+  formatMeters,
+  planScaleOf,
+  planSizeMeters,
   replaceSchemeImage,
   schemesInOrder,
+  setPlanScale,
   updateMark,
   updateOutline,
   updateScheme,
 } from "../model.js";
-import { canvasCommit } from "../canvas.js";
+import { CANVAS_MODE_SCALE, canvasCommit } from "../canvas.js";
 import { canUndo } from "../history.js";
 import {
   countPointsOutside,
@@ -29,6 +34,7 @@ import {
   sameAspect,
   transformMarkPoints,
   transformOffset,
+  transformPoint,
 } from "../imagePrep.js";
 import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
@@ -83,10 +89,19 @@ function outlinesOfScheme(project, schemeId) {
  * это и есть шаг отмены, и проверяется он тестом, без DOM и без хранилища.
  * `pushed` — сколько меток рамка прижала к краю плана: их прежних мест не
  * вернёт уже ничто, кроме отмены, и сказать об этом надо вслух.
+ *
+ * **Калибровка масштаба переживает поворот и обрезку** — за этим и хранятся
+ * доли (ADR 002): точки отрезка пересчитываются тем же преобразованием, что
+ * точки меток, метры остаются теми же, а px/м пересчитается сам из нового
+ * размера плана. Единственный случай, когда она не выживает, — точка отрезка
+ * осталась за рамкой обрезки: её прижало бы к краю, отрезок укоротился, и
+ * масштаб уехал бы молча. Тогда калибровка честно снимается (`scaleLost`).
  */
 export function applyPlanEdit(project, schemeId, { imageId, width, height, transform } = {}) {
   const marks = project.marks.filter((mark) => mark.schemeId === schemeId);
   const pushed = marksPushedOutside(marks, transform);
+  const scale = planScaleOf(project, schemeId);
+  let scaleLost = Boolean(scale) && countPointsOutside([scale.a, scale.b], transform) > 0;
   let next = updateScheme(project, schemeId, { imageId, width, height }).project;
   for (const mark of marks) {
     const patch = remapForTransform(mark, transform);
@@ -96,7 +111,43 @@ export function applyPlanEdit(project, schemeId, { imageId, width, height, trans
     const patch = remapForTransform(outline, transform);
     next = updateOutline(next, outline.id, patch.labelOffset ? patch : { points: patch.points }).project;
   }
-  return { project: next, pushed };
+  if (scale && !scaleLost) {
+    try {
+      next = setPlanScale(next, schemeId, {
+        a: transformPoint(scale.a, transform),
+        b: transformPoint(scale.b, transform),
+        meters: scale.meters,
+      }).project;
+    } catch (error) {
+      // Пересчёт не сошёлся (отрезок выродился) — показывать длины из такого
+      // масштаба нельзя. Снимаем и говорим вслух, а не угадываем.
+      scaleLost = true;
+    }
+  }
+  if (scale && scaleLost) next = clearPlanScale(next, schemeId).project;
+  return { project: next, pushed, scaleLost };
+}
+
+/**
+ * Что написано на кнопке масштаба. Чистая функция: решение о словах
+ * принимается здесь и проверяется без браузера.
+ *
+ * Кнопка показывает не «1 px = 0,02 м», а **размер всего плана в метрах** —
+ * это то, что инженер сверяет с чертежом глазом: дом по фасаду двенадцать
+ * метров, значит «план 12,4 × 8,6 м» подтверждает калибровку, а «124 × 86»
+ * выдаёт запятую не на том месте раньше, чем по этому масштабу закажут ленту.
+ */
+export function schemesScaleView(project, schemeId, name) {
+  const scale = planScaleOf(project, schemeId);
+  const size = planSizeMeters(project, schemeId);
+  if (!scale || !size) {
+    return { set: false, label: strings.scale.notSet, title: text("scale.notSetTitle", { name }) };
+  }
+  return {
+    set: true,
+    label: text("scale.set", { width: formatMeters(size.width), height: formatMeters(size.height) }),
+    title: text("scale.setTitle", { name, meters: formatMeters(scale.meters) }),
+  };
 }
 
 // Диалог правки плана. Повороты и рамки копятся в одно преобразование и
@@ -350,6 +401,19 @@ function mountSchemesPanel(host, api) {
           }),
         ]),
       );
+      // Масштаб — третьей строкой и словами, а не значком: состояние «задан или
+      // нет» должно читаться с панели, не наводя курсор. Без плана калибровать
+      // нечего, в просмотре правок нет вовсе — там кнопки не показываем.
+      if (editable && scheme.imageId) {
+        const view = schemesScaleView(project, scheme.id, scheme.name);
+        row.append(
+          uiButton(view.label, {
+            class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
+            title: view.title,
+            on: { click: () => editScale(scheme.id) },
+          }),
+        );
+      }
       list.append(row);
     });
   }
@@ -444,8 +508,14 @@ function mountSchemesPanel(host, api) {
     // вернула бы координаты на план, которого уже нет. Уберёт её уборка при
     // следующем запуске — тогда, когда отменять будет нечего.
     canvasCommit(before, result.project, strings.history.editImage, { schemeId });
+    // Снятая калибровка важнее прижатых меток: без неё с листа пропадут длины,
+    // и узнать об этом из таблицы — поздно.
     notify(
-      result.pushed === 0 ? strings.image.applied : text("image.appliedClamped", { count: result.pushed }),
+      result.scaleLost
+        ? strings.image.appliedScaleDropped
+        : result.pushed === 0
+          ? strings.image.applied
+          : text("image.appliedClamped", { count: result.pushed }),
       "success",
     );
   }
@@ -492,13 +562,13 @@ function mountSchemesPanel(host, api) {
     const imageId = await putImage(edited.blob);
     const before = getState().project;
     if (!findScheme(before, schemeId)) return;
-    let after;
+    let replaced;
     try {
-      after = replaceSchemeImage(before, schemeId, {
+      replaced = replaceSchemeImage(before, schemeId, {
         imageId,
         width: edited.width,
         height: edited.height,
-      }).project;
+      });
     } catch (error) {
       notify(error.message, "error");
       return;
@@ -506,8 +576,96 @@ function mountSchemesPanel(host, api) {
     // Через canvasCommit: замену отменяет Ctrl+Z, как и всё остальное. Прежняя
     // картинка поэтому и остаётся в хранилище — её убирает уборка при запуске,
     // когда отменять уже нечего.
-    canvasCommit(before, after, strings.history.replaceImage, { schemeId });
-    notify(sameAspect(wasSize, edited) ? strings.image.replaced : strings.image.replacedShifted, "success");
+    canvasCommit(before, replaced.project, strings.history.replaceImage, { schemeId });
+    // Два разных известия в одном: куда встала разметка и что стало с
+    // масштабом. Второе дописывается строкой словаря, а не вплетается в
+    // четыре варианта первого: масштаб снимается независимо от пропорций.
+    const placed = sameAspect(wasSize, edited) ? strings.image.replaced : strings.image.replacedShifted;
+    notify(replaced.scaleDropped ? placed + " " + strings.scale.replaceDropped : placed, "success");
+  }
+
+  // ——— масштаб плана ——————————————————————————————————————————————————
+  //
+  // Ручка стоит в строке схемы, а не в инструментах: масштаб принадлежит
+  // схеме. У этажей разные планы и разные калибровки, и кнопка у каждой свои.
+
+  // Клик по кнопке: масштаба нет — сразу калибруем (лишнее окно там ни о чём);
+  // есть — показываем, что задано, и спрашиваем, калибровать заново или снять.
+  async function editScale(schemeId) {
+    const state = getState();
+    const scheme = findScheme(state.project, schemeId);
+    if (!scheme) return;
+    if (!scheme.imageId) {
+      notify(strings.scale.needPlan, "error");
+      return;
+    }
+    const scale = planScaleOf(state.project, schemeId);
+    if (!scale) {
+      startScale(schemeId);
+      return;
+    }
+    const size = planSizeMeters(state.project, schemeId);
+    let modal = null;
+    const body = uiEl("div", {}, [
+      uiEl("p", {
+        text: text("scale.dialogSet", {
+          meters: formatMeters(scale.meters),
+          width: size ? formatMeters(size.width) : "",
+          height: size ? formatMeters(size.height) : "",
+        }),
+      }),
+      uiEl("p", { class: "modal__hint", text: strings.scale.dialogHint }),
+    ]);
+    modal = uiModal({
+      title: text("scale.dialogTitle", { name: scheme.name }),
+      body,
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => modal.close() } }),
+        uiButton(strings.scale.clear, {
+          class: "ui-btn ui-btn--danger",
+          on: {
+            click: () => {
+              modal.close();
+              dropScale(schemeId);
+            },
+          },
+        }),
+        uiButton(strings.scale.again, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: () => {
+              modal.close();
+              startScale(schemeId);
+            },
+          },
+        }),
+      ],
+    });
+  }
+
+  // Калибруют на холсте — там план и видно. Панель только открывает нужную
+  // схему и отдаёт холсту режим; выделение при этом снимается, чтобы ручки
+  // метки не стояли под рукой, которая целится в точку отрезка.
+  function startScale(schemeId) {
+    setState({
+      schemeId,
+      selectedMarkIds: [],
+      selectedOutlineId: null,
+      editPathId: null,
+      mode: CANVAS_MODE_SCALE,
+    });
+  }
+
+  function dropScale(schemeId) {
+    const before = getState().project;
+    try {
+      const result = clearPlanScale(before, schemeId);
+      if (!result.cleared) return;
+      canvasCommit(before, result.project, strings.history.scaleClear, { schemeId });
+      notify(strings.scale.cleared, "success");
+    } catch (error) {
+      notify(error.message, "error");
+    }
   }
 
   async function renameScheme(schemeId) {

@@ -15,6 +15,7 @@ import {
   findMark,
   findRoom,
   labelCounts,
+  formatMeters,
   labelOf,
   linkedMarkIds,
   markControlIds,
@@ -22,6 +23,7 @@ import {
   markControlledBy,
   markControlsByChannel,
   markDimensions,
+  markLengthMeters,
   markRoomManual,
   placementsAt,
   findScheme,
@@ -408,6 +410,18 @@ function marksScrollToRow(node, align, chrome) {
 // иначе выглядят ошибкой). Раскрытая — прежний вид со всеми полями.
 // Решение о полях принимается здесь, а не в разметке: «в модели полей нет»
 // означает «в строке их не будет», и проверить это можно без браузера.
+/**
+ * Длина линейной метки словами — «12,4 м» — или пустая строка, когда её
+ * неоткуда взять: у точечной метки длины по плану нет, у схемы без калибровки
+ * нет масштаба. Пустую строку и список, и карточка показывать не станут, и
+ * объект без масштаба выглядит ровно как до этой задачи.
+ */
+export function marksLengthText(project, mark) {
+  const meters = mark ? markLengthMeters(project, mark.id) : null;
+  if (meters === null || !(meters > 0)) return "";
+  return text("scale.meters", { value: formatMeters(meters) });
+}
+
 export function marksRowModel(project, row, options = {}) {
   const mark = row.mark;
   const repeat = options.repeat > 1 ? options.repeat : 0;
@@ -433,6 +447,11 @@ export function marksRowModel(project, row, options = {}) {
     // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
     // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
     sizes: markSizesSummary(mark),
+    // Длина линейной метки по плану — в метрах, и только когда у схемы есть
+    // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
+    // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
+    // в миллиметрах (`sizes`) — другое поле, и путать их нельзя.
+    lengthText: marksLengthText(project, mark),
     // Обе стороны связи — свёрнутым перечнем: повторы номера есть и у
     // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
     // одной группы носят один номер.
@@ -961,6 +980,15 @@ function mountMarksPanel(host, api) {
                 on: { change: (event) => setField(mark.id, "original", event.target.value) },
               }),
             ])
+          : null,
+        // Длина по плану — строкой и только для чтения: это вывод из точек
+        // метки и масштаба схемы, а не поле, которое правят. Главный ответ
+        // закупке: сколько метров ленты заказывать. Без масштаба строки нет.
+        view.fields && view.fields.lengthText
+          ? uiEl("p", {
+              class: "mark-row__by mark-row__length",
+              text: text("scale.markLength", { value: view.fields.lengthText }),
+            })
           : null,
         controlsButton,
         equipmentButton,

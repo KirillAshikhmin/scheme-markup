@@ -41,6 +41,12 @@ import {
   moveOutlinePoint,
   removeMarkPoint,
   removeOutlinePoint,
+  formatMeters,
+  planScaleShort,
+  planSizeMeters,
+  setPlanScale,
+  PLAN_SCALE_METERS_MAX,
+  PLAN_SCALE_SHORT_SHARE,
   styleOf,
   typeKindOf,
   updateMark,
@@ -91,7 +97,7 @@ import {
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { getSetting, setSetting } from "./store.js";
-import { uiConfirm, uiDialogDepth, uiEl, uiIcon } from "./panels/ui.js";
+import { uiConfirm, uiDialogDepth, uiEl, uiIcon, uiPrompt } from "./panels/ui.js";
 
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
 //
@@ -218,6 +224,26 @@ function canvasViewOnly() {
   return false;
 }
 
+// ——— калибровка масштаба: имя режима ——————————————————————————————————
+//
+// Четвёртый режим холста, короткоживущий: рука показывает две точки отрезка,
+// дальше спрашивается расстояние в метрах, и режим сам возвращается в
+// «Выделение». Включает его панель схем — масштаб принадлежит схеме, и ручка
+// для него стоит там же, где сама схема.
+export const CANVAS_MODE_SCALE = "scale";
+
+// Цвет отрезка калибровки. Он не часть чертежа и ничьим типом не окрашен —
+// поэтому свой, тот же синий, которым холст рисует всё «служебное».
+const CANVAS_SCALE_COLOR = "#0969da";
+
+// Видны ли ручки выделенного — поворот подписи, поводок, вершины пути, «+»
+// блока. Пока калибруют масштаб, их нет: рука показывает точки отрезка, и
+// ручка под курсором отобрала бы у него клик. Одно правило на рисование и на
+// попадание — разойдись они, пользователь нажимал бы на то, чего не видит.
+function canvasHandlesShown(state) {
+  return canvasEditAllowed(state) && state.mode !== CANVAS_MODE_SCALE;
+}
+
 // ——— что ставит режим добавления ——————————————————————————————————————
 //
 // Режимов у холста три: `select`, `add` и `room`. Отдельного «что ставим» —
@@ -249,6 +275,9 @@ export function canvasHintText(state) {
   }
   const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
   const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
+  // Калибровка — поверх всего остального: рука в этот момент занята отрезком,
+  // и про метки с помещениями рассказывать нечего.
+  if (state.mode === CANVAS_MODE_SCALE) return strings.scale.hint;
   if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
   const adding = canvasAddKind(state);
   if (adding === "point" && type) {
@@ -623,9 +652,14 @@ function canvasPaint() {
     // которую ведут мышью. Выгрузка передаёт сюда `true` и считает сама.
     links: canvasFrameLinks(state, canvasPreview, scheme),
     draftColor,
-    draftLineStyle: state.activeTypeId ? styleOf(project, state.activeTypeId).lineStyle : "solid",
+    // Отрезок калибровки — всегда сплошной: начертание выбранного типа к нему
+    // отношения не имеет, а волна вместо прямой мешала бы целиться.
+    draftLineStyle:
+      state.activeTypeId && state.mode !== CANVAS_MODE_SCALE ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
-  const editable = canvasEditAllowed(state);
+  // Здесь `editable` отвечает только за ручки — поэтому и спрашивается про
+  // них: в калибровке их нет.
+  const editable = canvasHandlesShown(state);
   const outline = editable && state.selectedOutlineId ? findOutline(project, state.selectedOutlineId) : null;
   if (outline && outline.schemeId === scheme.id && !canvasDrag) {
     // Ручка поворота — у самой подписи комнаты, как у подписи метки: подпись
@@ -707,8 +741,10 @@ function canvasPaint() {
   }
 }
 
-// Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа.
+// Цвет черновика: у контура помещения — цвет комнаты, у метки — цвет её типа,
+// у отрезка калибровки — свой: он ничьего типа не несёт.
 function canvasDraftColor(state, project) {
+  if (state.mode === CANVAS_MODE_SCALE) return CANVAS_SCALE_COLOR;
   if (state.mode === "room") {
     const room = state.activeRoomId ? findRoom(project, state.activeRoomId) : null;
     return (room && room.color) || "#0969da";
@@ -1626,6 +1662,146 @@ function canvasDraftClick(plan, screen, free) {
   canvasRedraw();
 }
 
+// ——— калибровка масштаба ——————————————————————————————————————————————
+//
+// Два клика по плану и один вопрос. Отрезок — тот же черновик, которым
+// рисуется ломаная (и та же притяжка к направляющим и ровным углам: калибруют
+// по стене, а стена ровная), только кончается он не меткой, а масштабом схемы.
+
+/**
+ * Расстояние, набранное руками, числом в метрах — или `null`, если это не
+ * число. Запятая и точка равноправны: в чертёжной привычке «4,2», на
+ * клавиатуре нампада — «4.2», и спорить с рукой здесь незачем. Пробелы внутри
+ * («4 200»… нет, в метрах таких не бывает) просто убираются.
+ *
+ * Чистая и вынесена наружу ради теста: разбор ввода — то место, где молчаливая
+ * ошибка превращается в неверный масштаб по всему плану.
+ */
+export function canvasScaleMeters(raw) {
+  const clean = String(raw == null ? "" : raw)
+    .replace(/\s/g, "")
+    .replace(",", ".");
+  if (clean === "") return null;
+  if (!/^\d*\.?\d+$/.test(clean)) return null;
+  const value = Number(clean);
+  if (!Number.isFinite(value) || !(value > 0) || value > PLAN_SCALE_METERS_MAX) return null;
+  return value;
+}
+
+// Первый клик ставит начало отрезка, второй — конец и открывает вопрос.
+function canvasScaleClick(plan, screen, free) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const snap = canvasDraftSnap(plan, free);
+  if (!canvasDraft || canvasDraft.kind !== "scale") {
+    canvasDraft = {
+      kind: "scale",
+      typeId: null,
+      projectId: state.project ? state.project.id : null,
+      // Схему черновик помнит сам: масштаб принадлежит ей, и дожидаться ответа
+      // в диалоге он обязан на той же схеме, на которой начинался.
+      schemeId: state.schemeId,
+      points: [snap.point],
+      cursor: snap.point,
+      snapped: false,
+      guides: [],
+    };
+    canvasRedraw();
+    return;
+  }
+  const view = canvasViewOf(state);
+  const first = planToScreen(canvasDraft.points[0], scheme, view);
+  // Второй клик в ту же точку — промах, а не отрезок: калибровать по нулю
+  // нельзя, и отказывать на это ошибкой было бы грубо.
+  if (Math.hypot(screen.x - first.x, screen.y - first.y) <= markRadius(view) + 6) return;
+  canvasDraft.points[1] = snap.point;
+  canvasDraft.cursor = snap.point;
+  canvasDraft.guides = [];
+  canvasRedraw();
+  canvasScaleAsk();
+}
+
+// Вопрос о расстоянии. Короткий отрезок не проходит молча: сперва
+// предупреждение, и только потом цифра.
+async function canvasScaleAsk() {
+  const draft = canvasDraft;
+  if (!draft || draft.kind !== "scale" || draft.points.length < 2) return;
+  const [a, b] = draft.points;
+  if (planScaleShort(canvasState().project, draft.schemeId, { a, b })) {
+    const go = await uiConfirm({
+      title: strings.scale.shortTitle,
+      message: text("scale.shortAsk", { share: Math.round(PLAN_SCALE_SHORT_SHARE * 100) }),
+      confirmLabel: strings.scale.shortAnyway,
+    });
+    // Диалог живёт дольше черновика: за это время могли сменить схему или
+    // объект, и тогда отрезок уже ничей.
+    if (canvasDraft !== draft) return;
+    if (!go) {
+      canvasCancelDraft();
+      canvasApi.notify(strings.scale.cancelled);
+      return;
+    }
+  }
+  let typed = "";
+  for (;;) {
+    const raw = await uiPrompt({
+      title: strings.scale.askTitle,
+      value: typed,
+      placeholder: strings.scale.askPlaceholder,
+      submitLabel: strings.scale.askSubmit,
+    });
+    if (canvasDraft !== draft) return;
+    if (raw === null) {
+      canvasCancelDraft();
+      canvasApi.notify(strings.scale.cancelled);
+      return;
+    }
+    typed = raw;
+    const meters = canvasScaleMeters(raw);
+    // Опечатку не проглатываем и работу не теряем: отрезок на месте, вопрос
+    // задаётся снова с тем, что было набрано.
+    if (meters === null) {
+      canvasApi.notify(strings.scale.badMeters, "error");
+      continue;
+    }
+    canvasScaleCommit(draft, meters);
+    return;
+  }
+}
+
+function canvasScaleCommit(draft, meters) {
+  const state = canvasState();
+  const [a, b] = draft.points;
+  if (!findScheme(state.project, draft.schemeId)) {
+    canvasCancelDraft();
+    return;
+  }
+  try {
+    const result = setPlanScale(state.project, draft.schemeId, { a, b, meters });
+    canvasDraft = null;
+    // Через ту же дверь, что и всё остальное: Ctrl+Z возвращает прежний
+    // масштаб (или прежнее «масштаба нет»). Режим сам уходит в «Выделение» —
+    // калибруют один раз, а не серией.
+    canvasCommit(state.project, result.project, strings.history.scaleSet, {
+      patch: { mode: "select" },
+      schemeId: draft.schemeId,
+    });
+    const size = planSizeMeters(canvasState().project, draft.schemeId);
+    canvasApi.notify(
+      text("scale.applied", {
+        meters: formatMeters(result.scale.meters),
+        width: size ? formatMeters(size.width) : "",
+        height: size ? formatMeters(size.height) : "",
+      }),
+      "success",
+    );
+  } catch (error) {
+    canvasCancelDraft();
+    canvasFail(error);
+  }
+}
+
 // `typeId` передаётся только тогда, когда линию дочерчивают не тем типом, что
 // выбран сейчас: черновик закончился, потому что тип на панели сменили.
 function canvasLineFinish(closed, typeId) {
@@ -1670,6 +1846,14 @@ function canvasLineFinish(closed, typeId) {
 function canvasSettleDraft() {
   if (!canvasDraft) return false;
   const draft = canvasDraft;
+  // Начатая калибровка не дочерчивается ничем: отрезок без расстояния в метрах
+  // — это не данные, а полдела, и в объекте ему места нет. Уходит он со
+  // словами: рука его начинала.
+  if (draft.kind === "scale") {
+    canvasCancelDraft();
+    canvasApi.notify(strings.scale.cancelled);
+    return true;
+  }
   if (draft.kind !== "line" || draft.points.length < 2) {
     canvasCancelDraft();
     canvasApi.notify(strings.canvas.draftDropped);
@@ -1684,9 +1868,11 @@ function canvasSettleDraft() {
   return true;
 }
 
-// Чем должен быть черновик при нынешнем состоянии: ломаной, контуром или
-// ничем. Одно место на весь холст — режим, тип и вид типа спрашиваются здесь.
+// Чем должен быть черновик при нынешнем состоянии: ломаной, контуром,
+// отрезком калибровки или ничем. Одно место на весь холст — режим, тип и вид
+// типа спрашиваются здесь.
 function canvasDraftWanted(state) {
+  if (state.mode === CANVAS_MODE_SCALE) return "scale";
   if (state.mode === "room") return "room";
   return canvasAddKind(state) === "line" ? "line" : null;
 }
@@ -1999,6 +2185,10 @@ export function canvasHitSlack(touch) {
  */
 export function canvasTapKind(state, pick = {}) {
   if (!canvasEditAllowed(state)) return "select";
+  // Калибровка забирает тап себе целиком и раньше всех ручек: рука показывает
+  // точку отрезка, и ручка выделенной метки под пальцем не должна отбирать
+  // жест у масштаба.
+  if (state && state.mode === CANVAS_MODE_SCALE) return "scalePoint";
   if (pick.labelTurn) return "labelTurn";
   if (pick.labelLeader) return "labelLeader";
   // Ручка вершины — для переноса, а не для тапа: тапом по ней мышь тоже ничего
@@ -2024,6 +2214,7 @@ export function canvasTapKind(state, pick = {}) {
  */
 export function canvasGrabKind(state, pick = {}) {
   if (!canvasEditAllowed(state)) return null;
+  if (state.mode === CANVAS_MODE_SCALE) return null;
   if (state.mode === "room" || canvasAddKind(state) === "line") return null;
   if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "pathVertex" : "pathAdd";
   if (pick.markId) return pick.part === "label" ? "label" : "mark";
@@ -2249,6 +2440,7 @@ function canvasTouchUp(state, drag, point, cancelled) {
       screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
     );
   } else if (kind === "block") canvasBlockPoint(state.selectedMarkIds[0], pick.blockSide);
+  else if (kind === "scalePoint") canvasScaleClick(plan, point, false);
   else if (kind === "vertex") {
     if (state.mode === "room") canvasOutlineClick(plan, point, false);
     else canvasLineClick(plan, point, false);
@@ -2350,8 +2542,11 @@ function canvasPointerDown(event) {
   // её поля, и возить план. Всё остальное — правка, и начинаться она не должна:
   // ни ручки блока, ни черновика, ни перетаскивания.
   const editable = canvasEditAllowed(state);
+  // Ручки спрашиваются отдельно: в калибровке их не видно, и ловить клик они
+  // не должны — иначе поворот подписи отобрал бы точку отрезка.
+  const handles = canvasHandlesShown(state);
 
-  if (editable && state.selectedMarkIds.length === 1) {
+  if (handles && state.selectedMarkIds.length === 1) {
     const target = labelTargetOf(state.project, scheme, state.selectedMarkIds[0], state.filter);
     if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter)) {
       canvasRotateLabel(state.selectedMarkIds[0]);
@@ -2367,7 +2562,7 @@ function canvasPointerDown(event) {
     }
   }
 
-  if (editable && state.selectedOutlineId) {
+  if (handles && state.selectedOutlineId) {
     const selected = findOutline(state.project, state.selectedOutlineId);
     if (selected && selected.schemeId === scheme.id && hitOutlineLabelTurn(state.project, scheme, selected, point, view)) {
       canvasRotateOutlineLabel(selected.id);
@@ -2388,6 +2583,15 @@ function canvasPointerDown(event) {
       start: point,
       moved: false,
     };
+    return;
+  }
+
+  // Калибровка забирает клик себе — раньше ручек, метки и контура: рука
+  // показывает точку отрезка, и всё, что обычно ловит клик, сейчас не при
+  // деле. Линейка выше не случайно: направляющую вдоль стены ставят как раз
+  // затем, чтобы по ней откалибровать.
+  if (editable && state.mode === CANVAS_MODE_SCALE) {
+    canvasDrag = { kind: "scale", start: point, view: { ...state.view }, moved: false };
     return;
   }
 
@@ -2449,6 +2653,7 @@ function canvasPointerDown(event) {
 
   // Ломаную рисует режим добавления с линейным типом; контур помещения — свой
   // режим. Жест у них один, и дальше он разбирается по `canvasDrag.kind`.
+  // Калибровка сюда не доходит — её жест начат выше.
   const drawing = state.mode === "room" ? "room" : canvasAddKind(state) === "line" ? "line" : null;
   if (editable && drawing) {
     canvasDrag = { kind: drawing, start: point, view: { ...state.view }, moved: false };
@@ -2712,7 +2917,9 @@ function canvasPointerMove(event) {
     canvasDragTo(point, event.altKey);
     return;
   }
-  if (["pan", "empty", "place", "line", "room", "outline"].includes(canvasDrag.kind)) {
+  // «scale» в этом списке не для красоты: отрезок калибровки берут во всю
+  // стену, и между первой и второй точкой план приходится возить.
+  if (["pan", "empty", "place", "line", "room", "outline", "scale"].includes(canvasDrag.kind)) {
     canvasApi.setState({
       view: {
         ...state.view,
@@ -2817,6 +3024,10 @@ function canvasPointerUp(event) {
   }
   const scheme = canvasScheme(state);
   const plan = screenToPlan(point, scheme, canvasViewOf(state));
+  if (drag.kind === "scale") {
+    canvasScaleClick(plan, point, event.altKey);
+    return;
+  }
   if (drag.kind === "line") {
     canvasLineClick(plan, point, event.altKey);
     return;
@@ -2832,6 +3043,10 @@ function canvasPointerUp(event) {
 }
 
 function canvasDoubleClick(event) {
+  // Пока открыт диалог, холст не слушает ни клавиатуру, ни указатель — и
+  // двойной клик тоже: вопрос о расстоянии калибровки открывается вторым
+  // кликом, и браузерный `dblclick` приходит уже поверх диалога.
+  if (uiDialogDepth() > 0) return;
   // Призрачный `dblclick` вслед за двойным тапом — не жест, а эхо: палец свой
   // двойной уже разобрал сам (`canvasTouchUp`), и разбирать его второй раз
   // значит сделать два дела вместо одного.
@@ -2857,6 +3072,9 @@ function canvasDoubleClick(event) {
 function canvasDoubleAt(at, slack = 0) {
   const state = canvasState();
   if (!canvasEditAllowed(state)) return false;
+  // В калибровке двойного жеста нет вовсе: два клика там — это две точки
+  // отрезка, и ни замыкать, ни возвращать подпись на место сейчас нечего.
+  if (state.mode === CANVAS_MODE_SCALE) return false;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   // Двойной клик по линейке ставит направляющую в точке клика — это второй
