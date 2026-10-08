@@ -9,6 +9,7 @@
 import { findGroup, findRoom, outlinesInOrder, planPixelsPerMeter, projectStamp, roomsInOrder, schemesInOrder } from "./model.js";
 import { drawScheme, labelBox, labelFontSize, markRadius, outlineLabelBox, visibleMarks, visibleOutlines } from "./render.js";
 import { projectFileName, writeZip } from "./projectFile.js";
+import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
 import {
   GOST_FONT,
@@ -66,17 +67,34 @@ function exportCanvas(width, height) {
   return canvas;
 }
 
-function exportBlob(canvas) {
-  return new Promise((resolve, reject) => {
+/**
+ * PNG из холста — **с записанным разрешением**.
+ *
+ * `canvas.toBlob` пишет только `IHDR`, `IDAT` и `IEND`: физического размера в
+ * файле нет. Программа печати тогда предполагает своё разрешение, получает
+ * лист вчетверо больше страницы и ужимает его «по размеру листа» — линейка на
+ * отпечатке показывает что угодно, кроме выверенных миллиметров. Поэтому в
+ * файл дописывается `pHYs` (`pngDpi.js`), и делается это **здесь**: через эту
+ * воронку проходят все PNG сборки, и второго места, где картинка становится
+ * файлом, нет.
+ *
+ * `dpi` по умолчанию — тот же `EXPORT_DPI`, по которому прежние выгрузки
+ * считают подпись в миллиметрах: обещание физического размера они давали и
+ * раньше, теперь его несёт и файл.
+ */
+async function exportBlob(canvas, dpi) {
+  const blob = await new Promise((resolve, reject) => {
     if (typeof canvas.toBlob !== "function") {
       reject(new Error(strings.exportPanel.failed));
       return;
     }
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
+    canvas.toBlob((data) => {
+      if (data) resolve(data);
       else reject(new Error(strings.exportPanel.failed));
     }, "image/png");
   });
+  const bytes = pngWithDpi(new Uint8Array(await blob.arrayBuffer()), dpi > 0 ? dpi : EXPORT_DPI);
+  return new Blob([bytes], { type: "image/png" });
 }
 
 // Область выгрузки в пикселях плана: вся схема или прямоугольник, который
@@ -1099,7 +1117,9 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
     }),
     mm,
   );
-  return exportBlob(canvas);
+  // Разрешение листа — то самое, которым он нарисован: лист по ГОСТ выверен в
+  // миллиметрах, и в файле это должно быть написано, а не подразумеваться.
+  return exportBlob(canvas, dpi);
 }
 
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
@@ -1290,7 +1310,9 @@ export async function gostTablePng(table, page, plan, options = {}) {
     }),
     mm,
   );
-  return exportBlob(canvas);
+  // Разрешение листа — то самое, которым он нарисован: лист по ГОСТ выверен в
+  // миллиметрах, и в файле это должно быть написано, а не подразумеваться.
+  return exportBlob(canvas, dpi);
 }
 
 /**
