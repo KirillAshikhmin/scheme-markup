@@ -278,6 +278,7 @@ function exportGostTableOptions(api, table) {
   return {
     scale: exportChoice.tableScale,
     format: exportChoice.gostFormat,
+    mono: exportChoice.mono,
     stamp: projectStamp(project),
     object: project.name,
     title,
@@ -299,8 +300,14 @@ function exportTableDialog(api) {
 
   const refresh = () => {
     table = exportTableOf(state);
+    // Предпросмотр рисуется тем же узлом, что уходит в печать, поэтому
+    // чёрно-белую отметку видно сразу: поднял галку — лист в окне побелел.
     preview.replaceChildren(
-      exportTableNode(table, { title: table.title || state.project.name, subtitle: exportSubtitleOf(state, table) }),
+      exportTableNode(table, {
+        title: table.title || state.project.name,
+        subtitle: exportSubtitleOf(state, table),
+        mono: exportChoice.mono,
+      }),
     );
     if (!exportChoice.gost) {
       hint.textContent = exportTableSizeText(table, exportChoice.tableScale);
@@ -314,6 +321,17 @@ function exportTableDialog(api) {
       text("gost.pages", { count: plan.pages.length }),
     ].join(" · ");
   };
+
+  // Чёрно-белая отметка — **одна на оба окна** (`exportChoice.mono`), как и
+  // «Лист по ГОСТ»: вопрос у неё один — «печатаю на чёрно-белом принтере», а
+  // принтер у человека один. Спрятанным это решение не остаётся: окно
+  // открывается с поднятой галкой, предпросмотр сразу белеет, а подсказка
+  // говорит, что отметка общая.
+  const monoTableToggle = exportCheck(strings.mono.sheet, exportChoice.mono, (on) => {
+    exportChoice.mono = on;
+    refresh();
+  });
+  monoTableToggle.title = strings.mono.sheetHint;
 
   const groupSelect = exportSelect(
     [
@@ -403,6 +421,7 @@ function exportTableDialog(api) {
       exportChoice.currentScheme = on;
       refresh();
     }),
+    monoTableToggle,
   ]);
 
   // Таблица листами по ГОСТ: первый лист формы 5, последующие — формы 6.
@@ -469,6 +488,7 @@ function exportTableDialog(api) {
                 scale: exportChoice.tableScale,
                 title: table.title || state.project.name,
                 subtitle: exportSubtitleOf(state, table),
+                mono: exportChoice.mono,
               });
               const name = exportBaseName(state, "png");
               exportDownload(blob, name);
@@ -498,6 +518,7 @@ function exportTableDialog(api) {
               table,
               title: table.title || state.project.name,
               subtitle: exportSubtitleOf(state, table),
+              mono: exportChoice.mono,
             });
           }),
       },
