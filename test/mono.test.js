@@ -20,6 +20,7 @@ import {
   MONO_INK,
   MONO_PAPER,
   monoContext,
+  monoIsOn,
   monoPaint,
   monoSameShapes,
   monoSameText,
@@ -243,6 +244,36 @@ test("объект от рисования чёрно-белого листа н
   const before = JSON.stringify(world.project);
   monoPaintsOf(monoContext(monoScribe()), world);
   assert.equal(JSON.stringify(world.project), before, "рисование листа поправило объект");
+});
+
+// ——— лист таблицы ——————————————————————————————————————————————————————
+//
+// Сам `tablePng` в Node не позвать — ему нужен холст, — поэтому здесь
+// проверяется то, на чём он держится: холст называет себя чёрно-белым (по
+// этому ответу не рисуется полоска категории) и все краски листа таблицы
+// уходят в тушь. Пиксели готового файла считает живой прогон.
+
+test("чёрно-белый холст называет себя — иначе полоску категории нечем не рисовать", () => {
+  const probe = {};
+  assert.equal(monoIsOn(probe), false, "обычный холст не должен называться чёрно-белым");
+  const painted = monoContext(probe);
+  assert.equal(monoIsOn(painted), true);
+  // Обёртка не заразна: сам холст под ней остаётся обычным, и прежняя выгрузка
+  // тем же холстом рисуется как рисовалась.
+  assert.equal(monoIsOn(probe), false);
+  assert.equal(monoIsOn(monoContext(painted)), true, "обёрнутое второй раз — та же подставка");
+  assert.equal(monoIsOn(null), false);
+  assert.equal(monoIsOn(undefined), false);
+});
+
+test("краски листа таблицы без цвета становятся тушью", () => {
+  // Чем красит `tablePng`: тон текста, приглушённый тон шапки и подытогов,
+  // тон линий (он же — запасной цвет полоски у строки без категории).
+  for (const color of ["#1f2328", "#57606a", "#d0d7de"]) {
+    assert.equal(monoPaint(color, "fill"), MONO_INK, color + " должен стать тушью");
+  }
+  // Бумага листа остаётся бумагой: лист таблицы заливается белым целиком.
+  assert.equal(monoPaint("#ffffff", "fill"), MONO_PAPER);
 });
 
 // ——— что теряется вместе с цветом ———————————————————————————————————————
