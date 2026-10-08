@@ -49,7 +49,7 @@ function tableMarkColumns(withLength) {
   const columns = [strings.tables.label, strings.tables.points];
   // Сразу за «Точек»: и то и другое — мера позиции, и читаются они парой.
   if (withLength) columns.push(strings.tables.length);
-  columns.push(strings.tables.type, strings.tables.room, strings.tables.location, strings.tables.original);
+  columns.push(strings.tables.type, strings.tables.room, strings.tables.location, strings.tables.comment);
   return columns;
 }
 
@@ -174,7 +174,7 @@ function tableEntryLabel(project, entry) {
 
 // Тип у строки один: обозначение назвало его однозначно. Склейка осталась
 // там, где сведённые метки правда расходятся, — помещение, расположение
-// и «в оригинале» у одного обозначения бывают разные.
+// и комментарий у одного обозначения бывают разные.
 function tableEntryRow(project, entry, lengths) {
   const type = findType(project, entry.head.typeId);
   const category = type ? findCategory(project, type.categoryId) : null;

@@ -1806,7 +1806,7 @@ test("связи меток и размещения оборудования п�
   assert.deepEqual(objectProblems(result.project), [], "после смыкания объект должен быть чист");
 });
 
-test("поля «Расположение» и «В оригинале» смыкание не правит", () => {
+test("поля «Расположение» и «Комментарий» смыкание не правит", () => {
   const box = holesFixture();
   let project = updateMark(box.project, box.ids["Т"][3], {
     location: "над тумбой слева",

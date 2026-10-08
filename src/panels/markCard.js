@@ -101,7 +101,7 @@ export function markCardModel(project, markId) {
   };
   add(strings.marks.room, room ? room.name : "");
   add(strings.marks.location, fields.location);
-  add(strings.marks.originalPlaceholder, fields.original);
+  add(strings.marks.comment, fields.original);
   // Длина по плану — там же, где остальные поля, и из той же `marksRowModel`.
   // Пустая (нет масштаба или метка точечная) строка выпадает, как все пустые.
   add(strings.scale.lengthLabel, fields.lengthText);

@@ -358,7 +358,7 @@ test("колонка «Длина, м» появляется только там
     strings.tables.type,
     strings.tables.room,
     strings.tables.location,
-    strings.tables.original,
+    strings.tables.comment,
   ]);
 
   const table = marksTable(calibrated(base), null, "category");
@@ -369,7 +369,7 @@ test("колонка «Длина, м» появляется только там
     strings.tables.type,
     strings.tables.room,
     strings.tables.location,
-    strings.tables.original,
+    strings.tables.comment,
   ]);
   const rows = table.groups.flatMap((group) => group.rows);
   const tape = rows.find((row) => row.cells[0] === "Л1");

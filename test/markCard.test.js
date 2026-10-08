@@ -80,7 +80,7 @@ test("карточка показывает поля метки и обе сто
   const named = new Map(card.rows.map((row) => [row.label, row.value]));
   assert.equal(named.get(strings.marks.room), "Спальня");
   assert.equal(named.get(strings.marks.location), "над кроватью");
-  assert.equal(named.get(strings.marks.originalPlaceholder), "L-12");
+  assert.equal(named.get(strings.marks.comment), "L-12");
   assert.ok(named.get(strings.panels.sizes).includes("600"));
   // Управляется — со стороны светильника; управляет — со стороны выключателя.
   assert.ok(named.get(strings.marks.controlledByShort).includes("В1"));
