@@ -22,8 +22,6 @@ import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
 import {
-  GOST_FONT,
-  GOST_FONT_NAME,
   GOST_TABLE_ROW_MM,
   drawGostFrame,
   drawGostStamp,
@@ -1003,20 +1001,8 @@ export async function exportCopy(value) {
 
 // Чертёжный шрифт грузится до первой отрисовки: canvas не ждёт `@font-face`
 // сам, и первый лист вышел бы системным шрифтом, а второй — чертёжным.
-let gostFontLoading = null;
-
-function gostFontReady() {
-  if (typeof document === "undefined" || !document.fonts || typeof document.fonts.load !== "function") {
-    return Promise.resolve(false);
-  }
-  if (!gostFontLoading) {
-    gostFontLoading = document.fonts.load('10px "' + GOST_FONT_NAME + '"').then(
-      () => true,
-      () => false,
-    );
-  }
-  return gostFontLoading;
-}
+// Ждёт его `render.drawFontReady` — то же обещание, что у холста и у прежних
+// выгрузок; второго ожидания со своим именем семейства в сборке нет.
 
 // Дата в штампе — календарный день того, кто выгружает, в чертёжном виде
 // «08.10.26». UTC здесь соврал бы на вечерней выгрузке так же, как в имени
@@ -1087,7 +1073,7 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
   const plan = options.layout || gostSchemeSheet(project, scheme, options);
   const dpi = gostDpi(options.scale);
   const mm = gostPixelsPerMm(dpi);
-  await gostFontReady();
+  await drawFontReady();
   const canvas = exportCanvas(plan.sheet.width * mm, plan.sheet.height * mm);
   const ctx = canvas.getContext("2d");
   drawGostFrame(ctx, plan.sheet, mm);
@@ -1176,7 +1162,7 @@ function gostTableColumns(table, widthMm) {
   const ctx = exportProbe();
   const probe = 100;
   const measure = (value, bold) => {
-    ctx.font = (bold ? "600 " : "") + probe + "px " + GOST_FONT;
+    ctx.font = drawFont(probe, bold ? 600 : null);
     return (ctx.measureText(String(value == null ? "" : value)).width / probe) * GOST_TABLE.font;
   };
   const widths = table.columns.map((column) => measure(column, true));
@@ -1226,7 +1212,7 @@ function gostTableCell(ctx, value, limitPx) {
 export async function gostTablePng(table, page, plan, options = {}) {
   const dpi = gostDpi(options.scale);
   const mm = gostPixelsPerMm(dpi);
-  await gostFontReady();
+  await drawFontReady();
   const sheet = plan.sheet;
   const canvas = exportCanvas(sheet.width * mm, sheet.height * mm);
   const ctx = canvas.getContext("2d");
@@ -1250,7 +1236,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
 
   let y = field.y;
   const drawCells = (cells, bold) => {
-    ctx.font = (bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+    ctx.font = drawFont(GOST_TABLE.font * mm, bold ? 600 : null);
     let x = field.x;
     cells.forEach((cell, index) => {
       const limit = (widths[index] - GOST_TABLE.pad * 2) * mm;
@@ -1282,7 +1268,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
   for (const item of page.lines) {
     if (item.kind === "group") {
       ctx.fillStyle = item.color || "#1f2328";
-      ctx.font = "600 " + (item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm + "px " + GOST_FONT;
+      ctx.font = drawFont((item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm, 600);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.strokeStyle = item.color || "#1f2328";
       line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
@@ -1292,7 +1278,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
       continue;
     }
     if (item.kind === "total") {
-      ctx.font = (item.bold ? "600 " : "") + GOST_TABLE.font * mm + "px " + GOST_FONT;
+      ctx.font = drawFont(GOST_TABLE.font * mm, item.bold ? 600 : null);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad + (item.level === 2 ? GOST_TABLE.pad * 2 : 0)) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.textAlign = "right";
       ctx.fillText(String(item.count), (field.x + bodyWidth - GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
