@@ -6,7 +6,15 @@
 // Обводки помещений здесь нет вовсе: контур принадлежит комнате, а не метке,
 // и запускается из раздела «Помещения» — там и список комнат, и кнопки
 // контуров. В этом разделе остаются только режимы про метки.
-import { GUIDES_SETTING, SCHEME_FONT_SETTING, layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import {
+  DRAWING_SETTING,
+  GUIDES_SETTING,
+  PLAN_SETTING,
+  SCHEME_FONT_SETTING,
+  layoutAllows,
+  PANEL_IDS,
+  registerPanel,
+} from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   BLOCK_MODES,
@@ -100,6 +108,30 @@ function toolsGuidesCheck(state, setState) {
     },
   });
   box.checked = state.guidesShown !== false;
+  return box;
+}
+
+/**
+ * Выключатель слоя плана: подложка и чертёж (таск 127).
+ *
+ * Стоят они здесь, в «Размерах», а не в строке схемы и не над холстом, по той
+ * же причине, что линейка и шрифт схемы: это **выбор глаз**, личная настройка
+ * браузера, и все такие выключатели собраны в одном разделе. В строке схемы
+ * они читались бы свойством схемы — то есть объекта, — а объект тут ни при чём:
+ * на одном компьютере размечают по фотографии, на другом по своему чертежу.
+ */
+function toolsLayerCheck(state, setState, key, setting) {
+  const box = uiEl("input", {
+    class: "tools__check",
+    type: "checkbox",
+    on: {
+      change: () => {
+        setState({ [key]: box.checked });
+        setSetting(setting, box.checked);
+      },
+    },
+  });
+  box.checked = state[key] !== false;
   return box;
 }
 
@@ -377,6 +409,19 @@ function mountSizesPanel(host, api) {
         toolsGuidesCheck(state, setState),
         uiEl("span", { text: strings.tools.guides }),
       ]),
+      // Подложка и чертёж — два слоя плана, и выключаются они порознь.
+      // Снял подложку — размечаешь по своему чертежу; снял чертёж —
+      // размечаешь по фотографии. Оба уходят и в выгрузку: лист обязан
+      // совпадать с тем, что человек на экране проверил.
+      uiEl("label", { class: "tools__field tools__field--check" }, [
+        toolsLayerCheck(state, setState, "planShown", PLAN_SETTING),
+        uiEl("span", { text: strings.tools.planLayer }),
+      ]),
+      uiEl("label", { class: "tools__field tools__field--check" }, [
+        toolsLayerCheck(state, setState, "drawingShown", DRAWING_SETTING),
+        uiEl("span", { text: strings.tools.drawingLayer }),
+      ]),
+      uiEl("p", { class: "tools__note", text: strings.tools.layersHint }),
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       uiEl("div", { class: "tools__row" }, [
         uiIconButton("minus", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
@@ -389,7 +434,15 @@ function mountSizesPanel(host, api) {
 
   subscribe((state, changed) => {
     if (sizeBefore) return;
-    if ("project" in changed || "guidesShown" in changed || "schemeFont" in changed) render();
+    if (
+      "project" in changed ||
+      "guidesShown" in changed ||
+      "planShown" in changed ||
+      "drawingShown" in changed ||
+      "schemeFont" in changed
+    ) {
+      render();
+    }
   });
   render();
 }

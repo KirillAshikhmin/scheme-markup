@@ -46,7 +46,9 @@ import {
   moveOutlinePoint,
   removeMarkPoint,
   removeOutlinePoint,
+  drawingBoundsMm,
   formatMeters,
+  planMmToFraction,
   planScaleShort,
   planSizeMeters,
   setPlanScale,
@@ -612,7 +614,11 @@ function canvasScheme(state) {
   return state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
 }
 
+// Подложка на кадре: картинка схемы, пока её не выключили. Выключатель —
+// личная настройка браузера (таск 127): скрыл фотографию — размечает по
+// своему чертежу.
 function canvasImage(state) {
+  if (state.planShown === false) return null;
   const loaded = state.schemeImage;
   return loaded && loaded.schemeId === state.schemeId ? loaded.image : null;
 }
@@ -664,6 +670,8 @@ function canvasPaint() {
     project,
     scheme,
     image: canvasImage(state),
+    // Чертёж — слой под метками; выключатель его прячет, а не удаляет.
+    drawing: state.drawingShown !== false,
     filter: state.filter,
     view,
     selectedIds: state.selectedMarkIds,
@@ -2138,9 +2146,11 @@ export function canvasFitPlan() {
   const state = canvasState();
   const scheme = canvasScheme(state);
   if (!scheme || !canvasNode) return;
-  canvasApi.setState({
-    view: fitView(scheme, { width: canvasNode.clientWidth, height: canvasNode.clientHeight }),
-  });
+  const box = { width: canvasNode.clientWidth, height: canvasNode.clientHeight };
+  // У схемы без подложки «вписать» значит вписать чертёж: листа под ним никто
+  // не видит, и вписывать его было бы вписыванием пустого поля.
+  const view = scheme.imageId ? fitView(scheme, box) : canvasFitDrawing(state.project, scheme, box);
+  canvasApi.setState({ view });
   canvasFitted = scheme.id;
 }
 
@@ -3476,7 +3486,11 @@ function mountCanvas(host, api) {
     // одном месте, а не на каждой кнопке, которая что-то из этого правит.
     if ("mode" in changed || "activeTypeId" in changed || "project" in changed) canvasSyncDraft(state);
     if ("mode" in changed) canvasSyncCursor();
-    if ("schemeId" in changed || "schemeImage" in changed) canvasAutoFit(state);
+    // Подгонка пробуется и на правке объекта: у схемы без подложки вписывать
+    // до первой стены нечего, и единственный случай, когда «вписать» впервые
+    // становится возможным, — появление чертежа. Повторов это не даёт:
+    // `canvasAutoFit` выходит сразу, как только схема подогнана.
+    if ("schemeId" in changed || "schemeImage" in changed || "project" in changed) canvasAutoFit(state);
     canvasRedraw();
   });
   canvasResize();
@@ -3490,11 +3504,50 @@ function canvasAutoFit(state) {
   const scheme = canvasScheme(state);
   if (!scheme || !canvasNode) return;
   if (canvasFitted === scheme.id) return;
-  if (!canvasImage(state)) return;
+  // Вписывать нечего, пока схема пуста: ни картинки, ни чертежа. У схемы без
+  // подложки (таск 127) подгонка идёт по чертежу — её лист вчетверо больше
+  // квартиры, и вписанный целиком он показал бы квартиру маркой на поле.
+  const image = state.schemeImage && state.schemeImage.schemeId === scheme.id;
+  const bounds = drawingBoundsMm(state.project, scheme.id);
+  if (!image && !bounds) return;
   canvasFitted = scheme.id;
-  canvasApi.setState({
-    view: fitView(scheme, { width: canvasNode.clientWidth, height: canvasNode.clientHeight }),
-  });
+  const box = { width: canvasNode.clientWidth, height: canvasNode.clientHeight };
+  canvasApi.setState({ view: image ? fitView(scheme, box) : canvasFitDrawing(state.project, scheme, box) });
+}
+
+/**
+ * Вписать **нарисованное**, а не лист: у схемы без подложки лист постоянный и
+ * заведомо больше квартиры (сорок на тридцать метров), и `fitView` показал бы
+ * чертёж марковой наклейкой посреди поля.
+ *
+ * Чистая и вынесена наружу ради теста: промах здесь — это «открыл схему, а там
+ * пусто», и ловить его глазами дорого.
+ */
+export function canvasFitDrawing(project, scheme, box) {
+  const bounds = drawingBoundsMm(project, scheme.id);
+  const corners = bounds
+    ? [
+        planMmToFraction(project, scheme.id, { x: bounds.minX, y: bounds.minY }),
+        planMmToFraction(project, scheme.id, { x: bounds.maxX, y: bounds.minY }),
+        planMmToFraction(project, scheme.id, { x: bounds.minX, y: bounds.maxY }),
+        planMmToFraction(project, scheme.id, { x: bounds.maxX, y: bounds.maxY }),
+      ].filter(Boolean)
+    : [];
+  if (corners.length < 4) return fitView(scheme, box);
+  const width = Math.max(1, scheme.width || 1000);
+  const height = Math.max(1, scheme.height || 1000);
+  const xs = corners.map((point) => point.x * width);
+  const ys = corners.map((point) => point.y * height);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const spanX = Math.max(1, Math.max(...xs) - left);
+  const spanY = Math.max(1, Math.max(...ys) - top);
+  const zoom = Math.min(Math.max(1, box.width) / spanX, Math.max(1, box.height) / spanY) * 0.92;
+  return {
+    zoom,
+    offsetX: Math.max(1, box.width) / 2 - (left + spanX / 2) * zoom,
+    offsetY: Math.max(1, box.height) / 2 - (top + spanY / 2) * zoom,
+  };
 }
 
 // Подсказка поверх холста: что сейчас ставим и чем это закончить. Сворачивается

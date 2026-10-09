@@ -43,6 +43,14 @@ const appState = {
   editPathId: null,
   // Линейка и направляющие видны, пока их не спрятали.
   guidesShown: true,
+  // Два выключателя слоёв плана (таск 127). Оба — **выбор глаз**, личная
+  // настройка браузера, а не свойство объекта: на одном компьютере размечают
+  // по фотографии, на другом по своему чертежу, и объект при этом один.
+  //
+  // Умолчание — показано и то и другое: человек, который чертил, хочет видеть
+  // чертёж, а человек без чертежа не увидит никакой разницы (G68).
+  planShown: true,
+  drawingShown: true,
   // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
   // встречать пользователя дугами поверх плана никто не просил.
   linksShown: false,
@@ -76,6 +84,9 @@ export const PANELS_SETTING = "collapsedPanels";
 // Линейка и направляющие: отметка рабочего места, а не свойство объекта.
 // Живёт в настройках браузера и переживает перезагрузку.
 export const GUIDES_SETTING = "schemeGuidesShown";
+// Подложка и чертёж: что видно на холсте и что уходит в выгрузку.
+export const PLAN_SETTING = "schemePlanShown";
+export const DRAWING_SETTING = "schemeDrawingShown";
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -533,6 +544,17 @@ function wireSections() {
   Promise.resolve(getSetting(GUIDES_SETTING))
     .then((saved) => {
       if (saved === false) setState({ guidesShown: false });
+    })
+    .catch(() => {});
+  // Подложка и чертёж: оба стартуют показанными и гаснут по настройке.
+  Promise.resolve(getSetting(PLAN_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ planShown: false });
+    })
+    .catch(() => {});
+  Promise.resolve(getSetting(DRAWING_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ drawingShown: false });
     })
     .catch(() => {});
   // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище
