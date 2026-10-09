@@ -19,6 +19,7 @@
 // — минута работы, восстановить потерянную — некому.
 
 import { COMMENT_TYPE_ID, MARK_NUMBER_MAX, commentCodeOf, renumberAcceptedRepeats } from "./model.js";
+import { strings } from "./strings.js";
 
 // Сущности объекта, которые сливаются поимённо, по `id`.
 //
@@ -26,6 +27,13 @@ import { COMMENT_TYPE_ID, MARK_NUMBER_MAX, commentCodeOf, renumberAcceptedRepeat
 // без него слитый объект брал бы типы только у «нас», и заведённое вторым
 // участником («Реле 4 канала») пропадало бы молча вместе с колонкой типа у его
 // моделей.
+//
+// Чертёж (таск 123) сливается здесь же и по тем же правилам. Это не
+// формальность: в таске 121 выяснилось, что слияние молча выбрасывает метки с
+// незнакомым типом, и без оговорки оно уносило бы все плашки разом. Стены,
+// проёмы, объекты схемы и справочник их видов перечислены поимённо ровно
+// поэтому — коллекция, которой здесь нет, в слитый объект не попадает вовсе,
+// и чертёж напарника пропал бы целиком и молча.
 export const MERGE_ENTITIES = [
   "categories",
   "markTypes",
@@ -37,15 +45,28 @@ export const MERGE_ENTITIES = [
   "equipmentTypes",
   "equipment",
   "placements",
+  "walls",
+  "openings",
+  "schemeObjects",
+  "schemeObjectKinds",
 ];
 
 // Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
-const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipmentTypes", "equipment"];
+const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipmentTypes", "equipment", "schemeObjectKinds"];
 
 // Коллекции, которых у объекта прежней разметки нет вовсе. Слияние двух таких
 // объектов не должно заводить их пустыми: это была бы правка на пустом месте,
 // и два одинаковых файла перестали бы сливаться в «ничего не изменилось».
-const MERGE_OPTIONAL = ["outlines", "equipmentTypes", "equipment", "placements"];
+const MERGE_OPTIONAL = [
+  "outlines",
+  "equipmentTypes",
+  "equipment",
+  "placements",
+  "walls",
+  "openings",
+  "schemeObjects",
+  "schemeObjectKinds",
+];
 
 /**
  * Принятые предупреждения: **объединение по ключу, а не конфликт.**
@@ -192,6 +213,13 @@ function mergeLabel(entity, item, typeCodes) {
     return code ? code + item.number : String(item.number || "");
   }
   if (entity === "markTypes") return item.code || item.name || "";
+  // У стены, проёма и объекта схемы своего обозначения нет — как у контура
+  // помещения. Но строка отчёта «ссылка вела в никуда — снято» без подлежащего
+  // не говорит ничего, а снимается ею чужая работа, поэтому род называется
+  // словом из словаря.
+  if (entity === "walls") return strings.subjects.wall;
+  if (entity === "openings") return strings.subjects.opening;
+  if (entity === "schemeObjects") return strings.subjects.schemeObject;
   return item.name || "";
 }
 
@@ -585,6 +613,54 @@ function mergeReferences(merged, report, sources, winner) {
     return false;
   });
 
+  /**
+   * Чертёж: стены, проёмы и объекты схемы. Правило каждой ссылки взято у
+   * модели, а не придумано здесь, — и ответы получаются **разные**:
+   *
+   *   — стена без схемы уходит вместе со схемой (`deleteScheme` уносит стены),
+   *     объект схемы — тоже;
+   *   — **проём без стены уходит вместе со стеной.** Воскрешать стену ради
+   *     проёма не станем, хотя с типами меток поступаем наоборот (D13): там
+   *     модель удалить занятую запись **не даёт**, а удалить стену вместе с её
+   *     окнами она разрешает — так рисуют, стену переставляют десять раз за
+   *     вечер. Возвращённая стена, которой человек решил не быть, молча
+   *     осталась бы в развёртке и соврала; потерянное окно, наоборот,
+   *     названо в отчёте вслух;
+   *   — **вид объекта возвращается**: `deleteSchemeObjectKind` занятый вид
+   *     удалить не даёт, и через двух участников это правило обходится ровно
+   *     как с категориями и типами меток.
+   */
+  mergeRestore(merged, "schemeObjectKinds", mergeRefs(merged.schemeObjects, "kindId"), sources, report, winner);
+  const objectKinds = mergeIndex(merged.schemeObjectKinds);
+
+  merged.walls = merged.walls.filter((wall) => {
+    if (schemes.has(wall.schemeId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "walls", id: wall.id, kept: "none", item: wall });
+    return false;
+  });
+  const walls = mergeIndex(merged.walls);
+
+  merged.openings = merged.openings.filter((opening) => {
+    if (walls.has(opening.wallId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "openings", id: opening.id, kept: "none", item: opening });
+    return false;
+  });
+
+  merged.schemeObjects = merged.schemeObjects.filter((object) => {
+    // Вид у объекта обязателен: безымянный прямоугольник на чертеже не значит
+    // ничего. Вернуть его не вышло — значит записи нет ни у кого и ни в общем
+    // снимке, и объект уходит вслед за ней, как тип без категории.
+    if (schemes.has(object.schemeId) && objectKinds.has(object.kindId)) return true;
+    report.conflicts.push({
+      code: "danglingRef",
+      entity: "schemeObjects",
+      id: object.id,
+      kept: "none",
+      item: object,
+    });
+    return false;
+  });
+
   // Тип модели и сама модель — такой же справочник: `equipmentTypeInUse` и
   // `equipmentInUse` удалить их «под» чужой работой не дают. Модель возвращаем
   // ради размещений, которые пережили чистку меток.
@@ -626,7 +702,18 @@ function mergeReferences(merged, report, sources, winner) {
       ? mark.controls.filter((item) => marks.has(typeof item === "string" ? item : item && item.id))
       : mark.controls;
     if (Array.isArray(controls) && controls.length !== mark.controls.length) patch.controls = controls;
-    return Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
+    const next = Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
+    // Привязка к стене, которой больше нет. Поля **убираются**, а не
+    // обнуляются: метка без привязки и метка со снятой привязкой обязаны
+    // читаться одинаково, иначе слияние дописало бы старой метке то, чего в
+    // ней не было (G68). Строки в отчёт не идёт — привязку проставляет
+    // автоматика по месту метки (таск 127), а не рука человека, и терять тут
+    // нечего, кроме догадки.
+    if (mark.wallId && !walls.has(mark.wallId)) {
+      const { wallId, wallAtMm, ...rest } = next;
+      return rest;
+    }
+    return next;
   });
   return merged;
 }

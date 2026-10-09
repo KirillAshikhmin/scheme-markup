@@ -9,10 +9,12 @@ import {
   deleteScheme,
   findScheme,
   formatMeters,
+  planOriginOf,
   planScaleOf,
   planSizeMeters,
   replaceSchemeImage,
   schemesInOrder,
+  setPlanOrigin,
   setPlanScale,
   updateMark,
   updateOutline,
@@ -33,6 +35,7 @@ import {
   identityTransform,
   isPlanImageFile,
   isIdentityTransform,
+  normalizeTransform,
   readPlanImage,
   releasePlanImage,
   renderPlanImage,
@@ -103,11 +106,21 @@ function outlinesOfScheme(project, schemeId) {
  * размера плана. Единственный случай, когда она не выживает, — точка отрезка
  * осталась за рамкой обрезки: её прижало бы к краю, отрезок укоротился, и
  * масштаб уехал бы молча. Тогда калибровка честно снимается (`scaleLost`).
+ *
+ * **Чертёж переживает их тоже, и не трогается ни одной стеной** (ADR 008).
+ * Миллиметры к картинке не привязаны — переносится только привязка
+ * (`scheme.origin`): точка начала координат пересчитывается тем же
+ * преобразованием, что точки меток, а `turn` получает прибавку поворота, иначе
+ * нарисованные стены легли бы поперёк тех, по которым их обводили. Точку
+ * начала координат, в отличие от точек меток, **не прижимаем** к краю плана:
+ * это якорь, а не место на плане, и зажатый якорь увёз бы весь чертёж целиком.
+ * Поэтому у чертежа нет случая «не выжил»: обрезка его не теряет никогда.
  */
 export function applyPlanEdit(project, schemeId, { imageId, width, height, transform } = {}) {
   const marks = project.marks.filter((mark) => mark.schemeId === schemeId);
   const pushed = marksPushedOutside(marks, transform);
   const scale = planScaleOf(project, schemeId);
+  const origin = planOriginOf(project, schemeId);
   let scaleLost = Boolean(scale) && countPointsOutside([scale.a, scale.b], transform) > 0;
   let next = updateScheme(project, schemeId, { imageId, width, height }).project;
   for (const mark of marks) {
@@ -132,6 +145,12 @@ export function applyPlanEdit(project, schemeId, { imageId, width, height, trans
     }
   }
   if (scale && scaleLost) next = clearPlanScale(next, schemeId).project;
+  if (origin) {
+    next = setPlanOrigin(next, schemeId, {
+      at: transformPoint(origin.at, transform),
+      turn: (origin.turn + normalizeTransform(transform).rotate) % 360,
+    }).project;
+  }
   return { project: next, pushed, scaleLost };
 }
 
