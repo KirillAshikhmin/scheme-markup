@@ -5624,7 +5624,7 @@ const strings = {
     // чертёж уехал.
     caseTurn: "оси чертежа повёрнуты к плану на {turn}°",
     caseNoScale: "Масштаб плана не задан",
-    caseNoOrigin: "Чертёж к плану не привязан",
+    caseNoOrigin: "Чертёж встанет на план с первой стеной — середина к середине",
     caseNoImage: "Схема без плана: размер берёт из чертежа",
     sizeEmpty: "чертёж пуст",
     size: "чертёж {width} × {height} мм",
@@ -35516,7 +35516,8 @@ function workshopRoundMm(point) {
  * Можно ли положить подложку под чертёж — и чем именно.
  *
  * Четыре ответа, и все четыре надо сказать вслух (см. голову файла):
- * `noScheme`, `noImage`, `noScale`, `noOrigin`, `ready`.
+ * Четыре ответа: `noScheme`, `noImage`, `noScale`, `ready`. У `ready` поле
+ * `pending` означает «место известно, но в объекте ещё не записано».
  * У `ready` в ответе лежит всё, что нужно одному преобразованию холста:
  * `mmPerPx` — миллиметров чертежа в пикселе плана, `at` — доля плана, в которую
  * попадает нуль чертежа, `turn` — поворот осей чертежа относительно осей плана.
@@ -35527,12 +35528,19 @@ function workshopPlacement(project, schemeId) {
   if (!scheme.imageId) return { kind: "noImage" };
   const perMeter = planPixelsPerMeter(project, schemeId);
   if (!(perMeter > 0) || !(Number(scheme.width) > 0) || !(Number(scheme.height) > 0)) return { kind: "noScale" };
+  // Привязки может ещё не быть: она записывается первой стеной, чтобы объект
+  // не менялся от одного открытия окна. Но **показать** подложку это не мешает:
+  // место известно заранее — та же середина плана, которую запишет первая
+  // стена, с теми же осями. Раньше здесь был отказ `noOrigin`, и выходил
+  // замкнутый круг: картинку не покажем, пока не обведёшь стену по картинке.
+  // Поэтому отказа нет, а `pending` говорит вызывающему, что в объекте
+  // привязки пока не записано.
   const origin = planOriginOf(project, schemeId);
-  if (!origin) return { kind: "noOrigin" };
   return {
     kind: "ready",
-    at: origin.at,
-    turn: origin.turn,
+    pending: !origin,
+    at: origin ? origin.at : WORKSHOP_ORIGIN_AT,
+    turn: origin ? origin.turn : 0,
     mmPerPx: 1000 / perMeter,
     width: Number(scheme.width),
     height: Number(scheme.height),
@@ -35713,7 +35721,7 @@ function workshopAddChain(project, schemeId, pointsMm, thicknessMm) {
   // незачем — он про него не думает.
   let next = workshopEnsureSheet(project, schemeId).project;
   let origin = false;
-  if (workshopPlacement(next, schemeId).kind === "noOrigin") {
+  if (workshopPlacement(next, schemeId).pending) {
     next = workshopAttachOrigin(next, schemeId).project;
     origin = true;
   }
@@ -36046,15 +36054,15 @@ function workshopHint(tool) {
  */
 function workshopStatus(project, schemeId, placement) {
   const parts = [];
-  if (placement.kind === "ready" || placement.kind === "noOrigin") {
+  if (placement.kind === "ready") {
     const size = planSizeMeters(project, schemeId);
     parts.push(
       size
         ? text("workshop.caseReady", { width: formatMeters(size.width), height: formatMeters(size.height) })
         : strings.workshop.caseReady,
     );
-    if (placement.kind === "noOrigin") parts.push(strings.workshop.caseNoOrigin);
-    if (placement.kind === "ready" && placement.turn) {
+    if (placement.pending) parts.push(strings.workshop.caseNoOrigin);
+    if (placement.turn) {
       parts.push(text("workshop.caseTurn", { turn: placement.turn }));
     }
   } else if (placement.kind === "noScale") {
@@ -37554,7 +37562,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
           ? strings.workshop.layerPlanNoScale
           : "";
     calibrateButton.hidden = spot.kind !== "noScale";
-    attachButton.hidden = spot.kind !== "noOrigin";
+    attachButton.hidden = !spot.pending;
     gridCheck.checked = workshopLayers.grid;
     wallsCheck.checked = workshopLayers.walls;
     objectsCheck.checked = workshopLayers.objects;

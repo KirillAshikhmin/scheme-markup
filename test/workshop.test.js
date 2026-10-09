@@ -330,20 +330,34 @@ test("мимо всего — ничего: клик по пустому мес�
 
 // ——— подложка под чертежом —————————————————————————————————————————————
 
-test("четыре случая подложки, и ни один не «просто не рисуем»", () => {
+test("три случая подложки, и ни один не «просто не рисуем»", () => {
   assert.equal(workshopPlacement(createProject(), "нет такой").kind, "noScheme");
   const blank = blankProject();
   assert.equal(workshopPlacement(blank.project, blank.schemeId).kind, "noImage");
   const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1000, height: 1000 });
   assert.equal(workshopPlacement(noScale.project, noScale.scheme.id).kind, "noScale");
+});
+
+// Заказчик открыл чертёж на своём доме и не увидел загруженной картинки:
+// слой «Подложка» стоял погашенным. Причина была в замкнутом круге — привязка
+// записывается первой стеной, а подложка показывалась только при записанной
+// привязке. То есть картинку не показывали, пока по ней не обведут стену.
+test("подложка видна до первой стены — место известно заранее", () => {
   const base = planProject();
-  assert.equal(workshopPlacement(base.project, base.schemeId).kind, "noOrigin");
+  const pending = workshopPlacement(base.project, base.schemeId);
+  assert.equal(pending.kind, "ready", "картинку показываем сразу, иначе обводить нечего");
+  assert.equal(pending.pending, true, "но в объекте привязки ещё нет");
+  assert.deepEqual(pending.at, WORKSHOP_ORIGIN_AT);
+  assert.equal(pending.turn, 0);
+  // Записанная привязка ставит картинку ровно туда же — обводка не прыгнет
+  // в тот миг, когда первая стена запишет привязку в объект.
   const attached = workshopAttachOrigin(base.project, base.schemeId).project;
   const ready = workshopPlacement(attached, base.schemeId);
   assert.equal(ready.kind, "ready");
+  assert.equal(ready.pending, false);
   assert.equal(ready.mmPerPx, 10, "в точке плана десять миллиметров — сто точек на метр");
-  assert.deepEqual(ready.at, WORKSHOP_ORIGIN_AT);
-  assert.equal(ready.turn, 0);
+  assert.deepEqual(ready.at, pending.at);
+  assert.equal(ready.turn, pending.turn);
 });
 
 test("преобразование подложки совпадает с мостом модели — на всех четырёх поворотах", () => {
