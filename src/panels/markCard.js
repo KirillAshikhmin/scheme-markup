@@ -139,6 +139,9 @@ export function markCardModel(project, markId) {
   // Длина по плану — там же, где остальные поля, и из той же `marksRowModel`.
   // Пустая (нет масштаба или метка точечная) строка выпадает, как все пустые.
   add(strings.scale.lengthLabel, fields.lengthText);
+  // Стена под меткой — из той же `marksRowModel`, что строка списка: второй
+  // правды о метке в сборке быть не должно.
+  add(strings.marks.wallLabel, fields.wallText);
   add(strings.panels.sizes, fields.sizes);
   // Связи — обе стороны и словами. «Чем управляет» идёт разложенным по каналам
   // («① Т16 ×6 · ② С1»): это та же строка, что в списке меток, и она отвечает

@@ -14,6 +14,7 @@ import {
   compactAllNumbers,
   findMark,
   findRoom,
+  findWall,
   labelCounts,
   listedMarks,
   formatMeters,
@@ -26,6 +27,7 @@ import {
   markDimensions,
   markLengthMeters,
   markRoomManual,
+  markWall,
   placementsAt,
   findScheme,
   repeatedNumbers,
@@ -435,6 +437,30 @@ export function marksLengthText(project, mark) {
   return text("scale.meters", { value: formatMeters(meters) });
 }
 
+/**
+ * Привязка метки к стене — по-человечески (таск 128).
+ *
+ * Не «wall #3, 1200», а «на стене, 1,2 м от угла»: расстояние меряется от
+ * того конца стены, который на чертеже первый, и для человека это угол. В
+ * миллиметрах его не пишем — метры читаются глазом, а миллиметры у метки уже
+ * заняты её собственными размерами.
+ *
+ * Сторона стены в строку не идёт: «слева» и «справа» считаются от направления
+ * стены, которого человек на плане не видит, и без развёртки это слово ему
+ * ничего не скажет. Для развёртки сторона есть (`markWallSide`), для глаза —
+ * нет.
+ *
+ * Пусто — привязки нет, и строки тоже: у объекта без чертежа карточка метки
+ * остаётся ровно такой, какой была (G68).
+ */
+export function marksWallText(project, mark) {
+  const binding = mark ? markWall(mark) : null;
+  if (!binding) return "";
+  const wall = findWall(project, binding.wallId);
+  if (!wall) return "";
+  return text("marks.onWall", { at: formatMeters(binding.atMm / 1000) });
+}
+
 export function marksRowModel(project, row, options = {}) {
   const mark = row.mark;
   const repeat = options.repeat > 1 ? options.repeat : 0;
@@ -465,6 +491,8 @@ export function marksRowModel(project, row, options = {}) {
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
     // в миллиметрах (`sizes`) — другое поле, и путать их нельзя.
     lengthText: marksLengthText(project, mark),
+    // Стена, к которой метка привязалась сама. Пусто — привязки нет.
+    wallText: marksWallText(project, mark),
     // Обе стороны связи — свёрнутым перечнем: повторы номера есть и у
     // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
     // одной группы носят один номер.
@@ -1012,6 +1040,11 @@ function mountMarksPanel(host, api) {
               class: "mark-row__by mark-row__length",
               text: text("scale.markLength", { value: view.fields.lengthText }),
             })
+          : null,
+        // Стена под меткой — строкой и только для чтения: её ставит
+        // автоматика по месту метки, и править её надо планом, а не списком.
+        view.fields && view.fields.wallText
+          ? uiEl("p", { class: "mark-row__by mark-row__wall", text: view.fields.wallText })
           : null,
         controlsButton,
         equipmentButton,
