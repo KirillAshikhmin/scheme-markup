@@ -4121,6 +4121,193 @@ export function setMarkWall(project, markId, binding) {
   return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
 }
 
+// ——— автопривязка метки к стене ———————————————————————————————————————
+//
+// Ради этого затевалась вся модель чертежа (таск 122, вопрос 3): у розетки
+// появляется стена, расстояние вдоль неё и высота над полом — всё, из чего
+// рисуется развёртка. Без привязки развёртка оказалась бы работой по
+// угадыванию «какая розетка к какой стене ближе», и угадывать пришлось бы
+// каждый раз заново.
+//
+// **Ставится она сама, по месту метки, и только так.** Кнопки «привязать» нет
+// и не будет: человек ставит розетки, а не ведёт учёт стен. Ручного
+// переопределения (как `roomManual` у помещения) здесь тоже нет — его и не
+// было в договоре таска 123: «привязку проставляет автоматика по месту метки,
+// а не рука человека». Поэтому привязка всегда равна тому, что видно на
+// плане, и расходиться с ним не может.
+//
+// **Порог — в миллиметрах чертежа, а не в пикселях экрана.** Пиксели привычнее
+// руке, но привязка пересчитывается на каждой правке объекта, а масштаб
+// экрана в эту минуту может быть любым: та же метка привязывалась бы или нет
+// в зависимости от того, насколько человек приблизил план. Данные зависели бы
+// от взгляда — ровно то, чего в этой сборке нет нигде.
+//
+// Триста миллиметров **от грани стены** (то есть сверх половины её толщины):
+// розетка рисуется точкой у стены и часто чуть внутри комнаты — подрозетник
+// выступает, а за радиатором в сотне миллиметров от стены розетка всё ещё на
+// стене. Полметра было бы много: в комнате три метра до середины, и метка
+// посреди неё не должна считаться настенной.
+export const MARK_WALL_REACH_MM = 300;
+
+/**
+ * Привязывается ли метка к стене вообще.
+ *
+ * Только **точка**. У линии два конца, и одним числом `wallAtMm` не сказать,
+ * где она на стене: лента вдоль стены — это отрезок развёртки, а поля под
+ * отрезок в модели нет. Плашка комментария — надпись на чертеже, а не
+ * изделие, и на развёртке ей места нет тем более.
+ */
+export function markWallBindable(mark) {
+  if (!mark) return false;
+  if (markIsComment(mark)) return false;
+  return mark.kind !== "line";
+}
+
+// Точка метки в миллиметрах чертежа — или `null`, если моста нет (ADR 008:
+// нужны и калибровка, и привязка чертежа к плану).
+function markPointMm(project, mark) {
+  const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+  if (!point) return null;
+  return planFractionToMm(project, mark.schemeId, point);
+}
+
+/**
+ * С какой стороны стены стоит метка: `"left"` — та, что слева, если идти от
+ * конца `a` к концу `b`, `"right"` — противоположная. То же слово и та же
+ * сторона, что у стороны открывания двери (ADR 008): других сторон у стены
+ * модель не знает, и заводить вторую систему названий нельзя.
+ *
+ * **Не хранится, а считается.** Сторона — чистая производная места метки и
+ * геометрии стены, и обе уже лежат в объекте. Храни её — и она начала бы врать
+ * при первом же переносе метки или стены, как врал бы незачем пересчитанный
+ * `wallAtMm`; лишнее поле в каждой привязанной метке файл тоже не красит.
+ *
+ * `null` — метка стоит ровно на оси стены, и стороны у неё нет. Случай
+ * вырожденный (доли плана — дробные, точное попадание на ось почти
+ * невозможно), но врать в нём «слева» нельзя: на развёртке это была бы
+ * розетка не на той стене.
+ */
+export function markWallSide(project, mark) {
+  const binding = markWall(mark);
+  if (!binding) return null;
+  const wall = findWall(project, binding.wallId);
+  const at = wall ? markPointMm(project, mark) : null;
+  if (!wall || !at) return null;
+  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
+  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return null;
+  // Левая нормаль в экранных осях (`y` вниз) — `(u.y, −u.x)`, та же, что у
+  // стороны открывания двери.
+  const side = ((at.x - wall.aMm.x) * dy - (at.y - wall.aMm.y) * dx) / len;
+  if (side === 0) return null;
+  return side > 0 ? "left" : "right";
+}
+
+/**
+ * Ближайшая стена под меткой — или `null`, если ни одна не ближе порога.
+ * Спорят стены расстоянием до **грани**: короб из двух перегородок в
+ * полуметре друг от друга иначе забирал бы метку то одной, то другой.
+ */
+export function markWallNear(project, mark, walls) {
+  if (!markWallBindable(mark)) return null;
+  const list = walls || wallsOnScheme(project, mark.schemeId);
+  if (list.length === 0) return null;
+  const at = markPointMm(project, mark);
+  if (!at) return null;
+  let best = null;
+  for (const wall of list) {
+    const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
+    const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
+    const len = Math.hypot(dx, dy);
+    if (!(len > 0)) continue;
+    const along = Math.min(len, Math.max(0, ((at.x - wall.aMm.x) * dx + (at.y - wall.aMm.y) * dy) / len));
+    const foot = { x: wall.aMm.x + (dx * along) / len, y: wall.aMm.y + (dy * along) / len };
+    const gap = Math.hypot(at.x - foot.x, at.y - foot.y) - Number(wall.thicknessMm) / 2;
+    if (gap > MARK_WALL_REACH_MM) continue;
+    if (!best || gap < best.gap) best = { gap, wallId: wall.id, atMm: Math.round(along) };
+  }
+  return best ? { wallId: best.wallId, atMm: best.atMm, gapMm: Math.round(Math.max(0, best.gap)) } : null;
+}
+
+/**
+ * Довести привязки меток до того, что видно на плане. Зовётся из
+ * `canvasCommit` на каждой правке объекта — тем же путём, что автопривязка
+ * помещения по контуру, и по той же причине: привязка обязана быть следствием
+ * места метки, а не отдельного действия.
+ *
+ * **Что происходит при правке стены**, решается этим же вызовом и поэтому не
+ * нуждается в отдельном правиле: стену подвинули — расстояние вдоль неё
+ * пересчиталось; стену увели далеко — привязка снялась; стену укоротили так,
+ * что метка осталась за её концом дальше порога, — снялась тоже. Метка не
+ * может молча оказаться «на стене» в полуметре от неё: правило одно, и
+ * проверяется оно после каждой правки.
+ *
+ * У объекта без чертежа не делается **ничего**: схем со стенами нет, и тот же
+ * объект возвращается по ссылке (G68).
+ */
+export function applyMarkWalls(project, schemeId) {
+  const changed = [];
+  const byScheme = new Map();
+  const wallsOf = (id) => {
+    if (!byScheme.has(id)) byScheme.set(id, wallsOnScheme(project, id));
+    return byScheme.get(id);
+  };
+  const marks = project.marks.map((mark) => {
+    if (schemeId && mark.schemeId !== schemeId) return mark;
+    if (!markWallBindable(mark)) return mark;
+    const walls = wallsOf(mark.schemeId);
+    if (walls.length === 0) return mark;
+    const next = markWallNear(project, mark, walls);
+    const now = markWall(mark);
+    if (!next) {
+      if (!now) return mark;
+      changed.push(mark.id);
+      return withoutWallBinding(mark);
+    }
+    if (now && now.wallId === next.wallId && now.atMm === next.atMm) return mark;
+    changed.push(mark.id);
+    return { ...mark, wallId: next.wallId, wallAtMm: next.atMm };
+  });
+  if (changed.length === 0) return { project, changed };
+  return { project: withProject(project, { marks }), changed };
+}
+
+/**
+ * Попала ли метка в проём — и в какой. Та самая проверка, ради которой
+ * заказчик просил чертёж на холсте: розетка в дверном проёме на монтаже стоит
+ * дорого.
+ *
+ * Вдоль стены пересечение считается точно: отступ проёма и его ширина
+ * известны. По высоте правило зависит от самого проёма, и это не осторожность,
+ * а то, как оно и есть:
+ *
+ *   — проём **от пола** (дверь, арка, проём без полотна) перекрывает стену во
+ *     всю её полосу, и высота метки не меняет ничего — розетке там не место
+ *     при любой высоте, даже если её не записали;
+ *   — проём **над полом** (окно) мешает только тому, что попадает в него по
+ *     высоте. Розетка под подоконником — обычное дело, и ругаться на неё
+ *     значило бы приучить закрывать панель не глядя. Высота метки не задана —
+ *     сказать нечего, и мы молчим.
+ */
+export function markOpeningHit(project, mark) {
+  const binding = markWall(mark);
+  if (!binding) return null;
+  const wall = findWall(project, binding.wallId);
+  if (!wall) return null;
+  const height = markDimensions(mark).heightAboveFloor;
+  for (const opening of openingsInWall(project, wall.id)) {
+    const from = Number(opening.atMm);
+    const to = from + Number(opening.widthMm);
+    if (binding.atMm < from || binding.atMm > to) continue;
+    const floor = Number(opening.heightAboveFloorMm) || 0;
+    if (floor === 0) return opening;
+    if (height === null) continue;
+    if (height >= floor && height <= floor + Number(opening.heightMm)) return opening;
+  }
+  return null;
+}
+
 // ——— данные для штампа ————————————————————————————————————————————————
 //
 // Графы основной надписи, которых в разметке не было: шифр документа, стадия,
@@ -5034,6 +5221,23 @@ export function validate(project) {
 
   // Отставший счётчик — свойство типа, а не каждой его метки.
   for (const [id, code] of behindTypes) problems.push(problem("counterBehind", { code }, id));
+
+  // **Метка в проёме** (таск 128). Та самая проверка, ради которой заказчик
+  // просил чертёж на холсте: розетка, попавшая в дверной проём, на монтаже
+  // стоит дорого. Это находка, а не поломка: данные целы, а права ли она —
+  // решает человек, иногда розетка у самого косяка и задумана.
+  for (const mark of project.marks) {
+    const opening = markOpeningHit(project, mark);
+    if (!opening) continue;
+    problems.push(
+      problem(
+        "markInOpening",
+        { label: markLabel(project, mark), kind: strings.openingKinds[opening.kind] || opening.kind },
+        mark.id,
+        "warning",
+      ),
+    );
+  }
 
   // **Чертёж есть, а на план его не положить** (таск 127). Чертёж виден на
   // подложке только при двух условиях сразу — калибровка и привязка (ADR 008),

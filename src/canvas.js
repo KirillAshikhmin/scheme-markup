@@ -17,6 +17,7 @@ import {
   addMark,
   addOutline,
   addToGroup,
+  applyMarkWalls,
   applyRoomOutlines,
   blockStepPx,
   deleteMark,
@@ -851,7 +852,17 @@ export function canvasCommit(before, after, label, options = {}) {
   // перерисованный контур доводят поля «Помещение» до порядка одним шагом
   // истории. Метка с вписанным руками помещением автоматике не достаётся.
   const binding = after && Array.isArray(after.marks) ? applyRoomOutlines(after) : { project: after, changed: [] };
-  const bound = binding.project;
+  // Вторая автоматика того же места и по той же причине (таск 128): привязка
+  // метки к стене обязана быть следствием её места на плане, а не отдельного
+  // действия. Здесь же она переживает и правку стены: подвинули стену —
+  // расстояние пересчиталось, увели далеко — привязка снялась.
+  //
+  // Ярлык шага от неё **не меняется**: про помещения говорится вслух, потому
+  // что их человек правит руками и ждёт увидеть своё; стену же метке никто не
+  // назначал, и «+ стены» в списке отмены было бы отчётом о том, чего он не
+  // делал.
+  const walls = applyMarkWalls(binding.project);
+  const bound = walls.project;
   // Ярлык шага называет и автопривязку, когда она что-то поменяла: «смена типа»
   // в списке отмены, за которой переехали помещения полудюжины меток, врёт.
   const step = binding.changed.length > 0 ? text("history.withRooms", { label }) : label;
