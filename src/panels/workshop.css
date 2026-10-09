@@ -93,8 +93,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Колонка подросла с 252 до 290: занятий в окне стало три, у проёма пять полей
+   с единицами в подписях, а у объекта — ещё и выбор вида с длинными именами.
+   Поле чертежа теряет 38 точек из полутора тысяч — цена, которую видно только
+   линейкой. */
 .workshop__side {
-  width: 252px;
+  width: 290px;
   flex: none;
   overflow: auto;
   display: flex;
@@ -189,6 +193,57 @@
   font-size: 11px;
   line-height: 1.35;
   color: var(--panel-muted);
+}
+
+/* Причина, по которой проём не сядет. Красным — потому что то же самое в эту
+   минуту краснеет под курсором: строка объясняет призрак, а не заменяет его. */
+.workshop__note.is-bad {
+  color: var(--danger);
+}
+
+/* Поля одного предмета. Видна всегда ровно одна такая пачка: занятий в окне
+   стало три, и показывать толщину стены над размерами двери значит растить
+   колонку вдвое ради того, что сейчас не нужно. */
+.workshop__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Ряд мелких кнопок: виды проёма, формы объекта, «плюс» у справочника. Они
+   выбирают, а не делают, поэтому и выглядят иначе — плотнее и без заливки,
+   пока не выбраны. */
+.workshop__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workshop__chip {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workshop__chip.is-on {
+  border-color: var(--accent);
+  color: var(--panel-text);
+  background: rgba(31, 111, 235, 0.18);
+}
+
+/* Выбор вида объекта забирает строку, «плюс» рядом — ровно свою ширину.
+   Основа нулевая, а не по содержимому: имя «Столешница (кухонный фронт)» шире
+   колонки, и при `auto` строка переносилась, оставляя «плюс» один на второй —
+   это видно на снимке живого прогона. */
+.workshop__chips select.ui-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.workshop__chips .workshop__chip:last-child:not(:first-child) {
+  flex: 0 0 auto;
 }
 
 .workshop__rooms {
