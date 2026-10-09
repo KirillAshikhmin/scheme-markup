@@ -13,12 +13,14 @@ import { decodePlanImage, releasePlanImage } from "../imagePrep.js";
 import { equipmentTable, linksTable, marksTable, tableRowCount, toCsv, toMarkdown, toTsv, typesTable } from "../tables.js";
 import {
   EXPORT_SCALES,
+  allSchemesPdf,
   allSchemesPlan,
   allSchemesZip,
   exportCopy,
   exportDownload,
   exportFileName,
   exportFitArea,
+  exportPdf,
   exportRoomArea,
   exportRoomFilter,
   exportRoomName,
@@ -76,7 +78,33 @@ const exportChoice = {
   gost: false,
   // Формат листа: «auto» — подобрать под план, остальное — выбор руками.
   gostFormat: "auto",
+  // Вид файла: "png" | "pdf". Живёт между открытиями, как соседние, и одна на
+  // оба окна — вопрос у неё один: «в чём отдаём файл». Умолчание «png»:
+  // прежние выгрузки остаются тем, чем были, а название формата стоит на самой
+  // кнопке, так что скрытым выбор не становится.
+  format: "png",
 };
+
+// Выгружаем документом, а не картинкой.
+function exportToPdf() {
+  return exportChoice.format === "pdf";
+}
+
+// Выбор вида файла. Два пункта, а не галочка «PDF»: список называет оба вида
+// словами, и «Картинка PNG» перестаёт быть умолчанием, о котором не сказано.
+function exportFileSelect(onChange) {
+  return exportSelect(
+    [
+      { value: "png", label: strings.exportPanel.filePng },
+      { value: "pdf", label: strings.exportPanel.filePdf },
+    ],
+    exportChoice.format,
+    (value) => {
+      exportChoice.format = value;
+      onChange();
+    },
+  );
+}
 
 // Выбор формата: подбор плюс четыре формата. Ориентацию руками не выбирают —
 // её решает план (лежачий ложится на альбомный лист), и третий переключатель
@@ -297,8 +325,12 @@ function exportTableDialog(api) {
   const preview = uiEl("div", { class: "export__preview" });
   const hint = uiEl("p", { class: "export__hint" });
   let table = exportTableOf(state);
+  // Название формата стоит на кнопке, и переключатель вида файла его меняет.
+  // Присваивается после создания кнопок — до тех пор обновлять нечего.
+  let syncLabels = () => {};
 
   const refresh = () => {
+    syncLabels();
     table = exportTableOf(state);
     // Предпросмотр рисуется тем же узлом, что уходит в печать, поэтому
     // чёрно-белую отметку видно сразу: поднял галку — лист в окне побелел.
@@ -316,10 +348,13 @@ function exportTableDialog(api) {
     // Сколько листов даст таблица, видно до выгрузки: разбивка считается по
     // строкам, а не по нарисованному, и число листов тут же идёт в штамп.
     const plan = gostTablePages(table, { format: exportChoice.gostFormat });
-    hint.textContent = [
-      gostSheetSizeText(plan.sheet, exportChoice.tableScale),
-      text("gost.pages", { count: plan.pages.length }),
-    ].join(" · ");
+    const parts = [gostSheetSizeText(plan.sheet, exportChoice.tableScale), text("gost.pages", { count: plan.pages.length })];
+    // Главное отличие документа от картинок — говорится там же, где число
+    // листов: в PNG несколько листов уходят архивом, в PDF одним файлом.
+    if (exportToPdf() && plan.pages.length > 1) {
+      parts.push(text("exportPanel.pdfPages", { count: plan.pages.length }));
+    }
+    hint.textContent = parts.join(" · ");
   };
 
   // Чёрно-белая отметка — **одна на оба окна** (`exportChoice.mono`), как и
@@ -405,6 +440,9 @@ function exportTableDialog(api) {
   roomSelect.disabled = exportChoice.kind === "types";
   byRoomInput.disabled = exportChoice.kind === "types";
 
+  const fileField = exportField(strings.exportPanel.file, exportFileSelect(refresh));
+  fileField.title = strings.exportPanel.fileHint;
+
   const controls = uiEl("div", { class: "export__controls" }, [
     exportField(strings.exportPanel.kind, kindSelect),
     exportField(strings.exportPanel.area, roomSelect),
@@ -414,9 +452,13 @@ function exportTableDialog(api) {
       strings.exportPanel.scale,
       exportScaleSelect(exportChoice.tableScale, (value) => {
         exportChoice.tableScale = value;
-        hint.textContent = exportTableSizeText(table, value);
+        // Через `refresh`, а не своей строкой: у листа по ГОСТ подпись другая
+        // (формат, миллиметры, число листов), и собранная здесь второй раз
+        // она перебивала бы её на размер голой картинки.
+        refresh();
       }),
     ),
+    fileField,
     exportCheck(strings.exportPanel.currentScheme, exportChoice.currentScheme, (on) => {
       exportChoice.currentScheme = on;
       refresh();
@@ -449,6 +491,50 @@ function exportTableDialog(api) {
     }
   };
 
+  // Лист таблицы файлом: картинкой или документом — по выбору вида файла.
+  // Рисование одно на оба вида, разными получаются только упаковка и имя.
+  const fileButton = uiButton(strings.exportPanel.png, {
+    on: {
+      click: () =>
+        guard(async () => {
+          const plain = {
+            scale: exportChoice.tableScale,
+            title: table.title || state.project.name,
+            subtitle: exportSubtitleOf(state, table),
+            mono: exportChoice.mono,
+          };
+          if (!exportToPdf()) {
+            if (!exportChoice.gost) {
+              const blob = await tablePng(table, plain);
+              const name = exportBaseName(state, "png");
+              exportDownload(blob, name);
+              saved(name);
+              return;
+            }
+            // Таблица на несколько листов — это несколько файлов, и класть их
+            // в папку загрузок по одному нельзя: браузер второй и третий
+            // скачивает молча или не скачивает вовсе. Поэтому архив.
+            const sheets = await gostTableSheets(table, exportGostTableOptions(api, table));
+            const name = exportBaseName(state, sheets.length > 1 ? "zip" : "png");
+            exportDownload(sheets.length > 1 ? await gostSheetsZip(sheets, exportBaseName(state, "png")) : sheets[0], name);
+            saved(name);
+            return;
+          }
+          // В документе несколько листов перестают быть несколькими файлами —
+          // архив здесь не нужен ни при одном числе листов.
+          const pages = exportChoice.gost
+            ? await gostTableSheets(table, { ...exportGostTableOptions(api, table), pdf: true })
+            : [await tablePng(table, { ...plain, pdf: true })];
+          const name = exportBaseName(state, "pdf");
+          exportDownload(exportPdf(pages, { title: plain.title }), name);
+          saved(name);
+        }),
+    },
+  });
+  syncLabels = () => {
+    fileButton.textContent = exportToPdf() ? strings.exportPanel.pdf : strings.exportPanel.png;
+  };
+
   const actions = [
     uiButton(strings.exportPanel.csv, {
       on: {
@@ -479,32 +565,7 @@ function exportTableDialog(api) {
           }),
       },
     }),
-    uiButton(strings.exportPanel.png, {
-      on: {
-        click: () =>
-          guard(async () => {
-            if (!exportChoice.gost) {
-              const blob = await tablePng(table, {
-                scale: exportChoice.tableScale,
-                title: table.title || state.project.name,
-                subtitle: exportSubtitleOf(state, table),
-                mono: exportChoice.mono,
-              });
-              const name = exportBaseName(state, "png");
-              exportDownload(blob, name);
-              saved(name);
-              return;
-            }
-            // Таблица на несколько листов — это несколько файлов, и класть их
-            // в папку загрузок по одному нельзя: браузер второй и третий
-            // скачивает молча или не скачивает вовсе. Поэтому архив.
-            const sheets = await gostTableSheets(table, exportGostTableOptions(api, table));
-            const name = exportBaseName(state, sheets.length > 1 ? "zip" : "png");
-            exportDownload(sheets.length > 1 ? await gostSheetsZip(sheets, exportBaseName(state, "png")) : sheets[0], name);
-            saved(name);
-          }),
-      },
-    }),
+    fileButton,
     uiButton(strings.exportPanel.print, {
       class: "ui-btn ui-btn--accent",
       on: {
@@ -589,7 +650,12 @@ function exportSchemeDialog(api) {
       format: exportChoice.gostFormat,
     });
 
+  // Название формата стоит на кнопках, и переключатель вида файла его меняет.
+  // Присваивается после создания кнопок — до тех пор обновлять нечего.
+  let syncLabels = () => {};
+
   const refreshHint = () => {
+    syncLabels();
     monoSync();
     if (exportChoice.gost) {
       const plan = gostPlanOf();
@@ -613,13 +679,16 @@ function exportSchemeDialog(api) {
     const parts = [
       text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }),
       line,
-      strings.exportPanel.roomsSingle,
+      exportToPdf() ? strings.exportPanel.roomsSinglePdf : strings.exportPanel.roomsSingle,
     ];
     if (roomsPlan.missing.length > 0) {
       parts.push(text("exportPanel.roomsMissing", { names: roomsPlan.missing.join(", ") }));
     }
     hint.textContent = parts.join(" · ");
   };
+
+  const fileField = exportField(strings.exportPanel.file, exportFileSelect(refreshHint));
+  fileField.title = strings.exportPanel.fileHint;
 
   const controls = uiEl("div", { class: "export__controls" }, [
     exportField(
@@ -664,6 +733,9 @@ function exportSchemeDialog(api) {
         refreshHint();
       }),
     ),
+    // Вид файла стоит рядом с множителем, а не среди отметок: это список, и
+    // два списка подряд читаются как один вопрос «чем и в чём выгружаем».
+    fileField,
     exportCheck(strings.exportPanel.withLegend, exportChoice.legend, (on) => {
       exportChoice.legend = on;
     }),
@@ -701,7 +773,11 @@ function exportSchemeDialog(api) {
     }
   };
 
-  const renderScheme = async () => {
+  // `pdf` — не «другой лист», а другой конец одного и того же: лист считается
+  // и рисуется тем же кодом, а дальше становится картинкой или страницей
+  // документа. Печать зовёт это **всегда с картинкой**: печатается узел
+  // страницы с PNG внутри, и страницы документа ей отдать нечем.
+  const renderScheme = async (pdf) => {
     const { image, release } = await exportSchemeImage(state, scheme);
     // План может быть не загружен — метки тогда лягут на белый лист, и лучше
     // сказать об этом, чем отдать «пустую» на вид картинку молча.
@@ -720,6 +796,7 @@ function exportSchemeDialog(api) {
       links: exportChoice.links,
       mono: exportChoice.mono,
       filter: exportFilterOfSheet(state),
+      pdf: pdf === true,
     };
     try {
       if (!exportChoice.gost) return await schemePng(state.project, scheme, image, common);
@@ -738,70 +815,110 @@ function exportSchemeDialog(api) {
     }
   };
 
-  const actions = [
-    uiButton(strings.exportPanel.allSchemes, {
-      on: {
-        click: () =>
-          guard(async () => {
-            const byRooms = exportByRooms();
-            const plan = allSchemesPlan(state.project, { rooms: byRooms, filter: state.filter });
-            // Два десятка листов рисуются заметно дольше одного, и молчащая
-            // вкладка на этом месте выглядит как зависшая. Строка прогресса —
-            // та же, что у упаковки файла проекта.
-            const line = uiEl("p", { class: "modal__text", text: strings.exportPanel.busy });
-            const busy = uiModal({
-              title: strings.exportPanel.busyTitle,
-              body: line,
-              actions: [],
-              dismissable: false,
-            });
-            try {
-              const images = new Map();
-              for (const item of schemesInOrder(state.project)) {
-                if (!item.imageId || images.has(item.imageId)) continue;
-                const blob = await getImage(item.imageId);
-                if (blob) images.set(item.imageId, blob);
-              }
-              // Свежий объект — по той же причине, что и у одного листа: графы
-              // штампа могли заполнить из-под этого окна.
-              const zip = await allSchemesZip(getState().project, images, {
-                rooms: byRooms,
-                gost: exportChoice.gost,
-                format: exportChoice.gostFormat,
-                scale: exportChoice.schemeScale,
-                legend: exportChoice.legend,
-                outlines: exportChoice.outlines,
-                links: exportChoice.links,
-                mono: exportChoice.mono,
-                filter: state.filter,
-                onProgress: ({ done, total }) => {
-                  line.textContent = text("exportPanel.sheetsProgress", { done, total });
-                },
-              });
-              const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
-              exportDownload(zip, name);
-              notify(
-                byRooms
-                  ? text("exportPanel.sheetsDone", { total: plan.total, rooms: plan.rooms })
-                  : text("exportPanel.schemesDone", { count: plan.schemes }),
-                "success",
-              );
-              // Комната без контура листа не получила — сказать об этом надо
-              // после выгрузки тоже: подсказку в окне могли и не читать.
-              if (byRooms && plan.missing.length > 0) {
-                notify(text("exportPanel.roomsMissing", { names: plan.missing.join(", ") }), "info");
-              }
-            } finally {
-              busy.close();
+  // Весь объект одним файлом: архивом картинок или документом. Обход листов,
+  // их состав и нумерация «Лист N из M» общие (`allSchemesSheets` в
+  // `exporter.js`) — иначе архив и документ разошлись бы содержимым.
+  const allButton = uiButton(strings.exportPanel.allSchemes, {
+    on: {
+      click: () =>
+        guard(async () => {
+          const pdf = exportToPdf();
+          const byRooms = exportByRooms();
+          const plan = allSchemesPlan(state.project, { rooms: byRooms, filter: state.filter });
+          // Два десятка листов рисуются заметно дольше одного, и молчащая
+          // вкладка на этом месте выглядит как зависшая. Строка прогресса —
+          // та же, что у упаковки файла проекта.
+          const line = uiEl("p", { class: "modal__text", text: strings.exportPanel.busy });
+          const busy = uiModal({
+            title: pdf ? strings.exportPanel.busyTitlePdf : strings.exportPanel.busyTitle,
+            body: line,
+            actions: [],
+            dismissable: false,
+          });
+          try {
+            const images = new Map();
+            for (const item of schemesInOrder(state.project)) {
+              if (!item.imageId || images.has(item.imageId)) continue;
+              const blob = await getImage(item.imageId);
+              if (blob) images.set(item.imageId, blob);
             }
-          }),
-      },
-    }),
+            // Свежий объект — по той же причине, что и у одного листа: графы
+            // штампа могли заполнить из-под этого окна.
+            const options = {
+              rooms: byRooms,
+              gost: exportChoice.gost,
+              format: exportChoice.gostFormat,
+              scale: exportChoice.schemeScale,
+              legend: exportChoice.legend,
+              outlines: exportChoice.outlines,
+              links: exportChoice.links,
+              mono: exportChoice.mono,
+              filter: state.filter,
+              onProgress: ({ done, total }) => {
+                line.textContent = text("exportPanel.sheetsProgress", { done, total });
+              },
+            };
+            const fresh = getState().project;
+            const file = pdf ? await allSchemesPdf(fresh, images, options) : await allSchemesZip(fresh, images, options);
+            const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, pdf ? "pdf" : "zip");
+            exportDownload(file, name);
+            notify(
+              byRooms
+                ? text(pdf ? "exportPanel.sheetsDonePdf" : "exportPanel.sheetsDone", {
+                    total: plan.total,
+                    rooms: plan.rooms,
+                  })
+                : text(pdf ? "exportPanel.schemesDonePdf" : "exportPanel.schemesDone", { count: plan.schemes }),
+              "success",
+            );
+            // Комната без контура листа не получила — сказать об этом надо
+            // после выгрузки тоже: подсказку в окне могли и не читать.
+            if (byRooms && plan.missing.length > 0) {
+              notify(text("exportPanel.roomsMissing", { names: plan.missing.join(", ") }), "info");
+            }
+          } finally {
+            busy.close();
+          }
+        }),
+    },
+  });
+
+  const downloadButton = uiButton(strings.exportPanel.download, {
+    class: "ui-btn ui-btn--accent",
+    on: {
+      click: () =>
+        guard(async () => {
+          const room = exportRoomName(state.project, exportAreaRoomId());
+          const part = room ? scheme.name + " — " + room : scheme.name;
+          if (!exportToPdf()) {
+            const name = exportFileName(state.project, part, "png");
+            exportDownload(await renderScheme(false), name);
+            notify(text("exportPanel.saved", { name }), "success");
+            return;
+          }
+          const name = exportFileName(state.project, part, "pdf");
+          exportDownload(exportPdf([await renderScheme(true)], { title: exportSchemeTitle(state, scheme) }), name);
+          notify(text("exportPanel.saved", { name }), "success");
+        }),
+    },
+  });
+
+  syncLabels = () => {
+    const pdf = exportToPdf();
+    allButton.textContent = pdf ? strings.exportPanel.allSchemesPdf : strings.exportPanel.allSchemes;
+    downloadButton.textContent = pdf ? strings.exportPanel.downloadPdf : strings.exportPanel.download;
+  };
+
+  const actions = [
+    allButton,
     uiButton(strings.exportPanel.print, {
       on: {
         click: () =>
           guard(async () => {
-            const blob = await renderScheme();
+            // Печать всегда идёт картинкой: печатается узел страницы с PNG
+            // внутри, и вид файла её не касается — браузер печатает страницу,
+            // а не выгруженный документ.
+            const blob = await renderScheme(false);
             // У листа по ГОСТ заголовка над картинкой нет: всё, что нужно,
             // написано в основной надписи, а строка сверху съела бы поле.
             if (exportChoice.gost) await gostPrintSheets([blob]);
@@ -809,19 +926,7 @@ function exportSchemeDialog(api) {
           }),
       },
     }),
-    uiButton(strings.exportPanel.download, {
-      class: "ui-btn ui-btn--accent",
-      on: {
-        click: () =>
-          guard(async () => {
-            const blob = await renderScheme();
-            const room = exportRoomName(state.project, exportAreaRoomId());
-            const name = exportFileName(state.project, room ? scheme.name + " — " + room : scheme.name, "png");
-            exportDownload(blob, name);
-            notify(text("exportPanel.saved", { name }), "success");
-          }),
-      },
-    }),
+    downloadButton,
   ];
 
   const modal = uiModal({

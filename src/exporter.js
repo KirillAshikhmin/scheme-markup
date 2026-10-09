@@ -19,6 +19,7 @@ import {
   visibleOutlines,
 } from "./render.js";
 import { monoContext } from "./mono.js";
+import { pdfDocument, pdfImage } from "./pdf.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
@@ -110,6 +111,60 @@ async function exportBlob(canvas, dpi) {
   });
   const bytes = pngWithDpi(new Uint8Array(await blob.arrayBuffer()), dpi > 0 ? dpi : EXPORT_DPI);
   return new Blob([bytes], { type: "image/png" });
+}
+
+/**
+ * Готовый холст — **в файл или в страницу документа**, и это единственная
+ * развилка между PNG и PDF во всей выгрузке.
+ *
+ * Рисование одно на оба вида: лист считается и рисуется тем же кодом, тем же
+ * шрифтом и с той же чёрно-белой подставкой, а здесь только решается, чем он
+ * станет. Второго пути отрисовки бумаги в сборке нет и быть не должно — он
+ * разошёлся бы с первым (G169), и разошёлся бы на распечатке.
+ *
+ * `mm` — настоящий размер бумаги. Лист по ГОСТ передаёт размер своего формата;
+ * прежние выгрузки размера бумаги не имеют вовсе, и для них он выводится из
+ * пикселей по тому же `EXPORT_DPI`, по которому окно обещает миллиметры в
+ * подписи «217 × 335 мм при 300 dpi». Обратно считать миллиметры у листа по
+ * ГОСТ нельзя: холст округляется до целой точки (A4 при 300 dpi — 2480 px
+ * вместо 2480,31), и страница вышла бы 209,97 мм вместо 210.
+ */
+async function exportOut(canvas, dpi, options, mm) {
+  if (!options || options.pdf !== true) return exportBlob(canvas, dpi);
+  return exportPage(canvas, mm || exportPaperMm(canvas, dpi));
+}
+
+// Размер бумаги, выведенный из пикселей и разрешения: тот же расчёт, что в
+// подписи диалога, только без округления до целых миллиметров — страницу
+// документа округлять незачем.
+function exportPaperMm(canvas, dpi) {
+  const perInch = dpi > 0 ? dpi : EXPORT_DPI;
+  return {
+    width: (canvas.width / perInch) * EXPORT_MM_PER_INCH,
+    height: (canvas.height / perInch) * EXPORT_MM_PER_INCH,
+  };
+}
+
+// Страница документа из холста: пиксели берутся у настоящего холста, а не у
+// чёрно-белой подставки (`monoOf` оборачивает только кисть, а рисунок к этому
+// моменту уже лежит в холсте).
+async function exportPage(canvas, mm) {
+  const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+  return {
+    widthMm: mm.width,
+    heightMm: mm.height,
+    image: await pdfImage(pixels.data, canvas.width, canvas.height),
+  };
+}
+
+/**
+ * Страницы — в один файл PDF. Это главное, чего нет у PNG: таблица на три
+ * листа и объект на двадцать схем уезжают заказчику одним документом, а не
+ * архивом, который надо распаковывать и открывать по одной картинке.
+ */
+export function exportPdf(pages, meta = {}) {
+  const bytes = pdfDocument(pages, { ...meta, producer: strings.app.title });
+  return new Blob([bytes], { type: "application/pdf" });
 }
 
 // Область выгрузки в пикселях плана: вся схема или прямоугольник, который
@@ -432,7 +487,7 @@ export async function schemePng(project, scheme, image, options = {}) {
     // передавать готовый кадр неоткуда.
     links: options.links === true,
   });
-  return exportBlob(canvas);
+  return exportOut(canvas, EXPORT_DPI, options);
 }
 
 // ——— таблица картинкой ————————————————————————————————————————————————
@@ -674,7 +729,7 @@ export async function tablePng(table, options = {}) {
     line(table.totalLabel || strings.tables.totalAll, table.totalCount, true, EXPORT_TABLE.ink, 0);
   }
 
-  return exportBlob(canvas);
+  return exportOut(canvas, EXPORT_DPI, options);
 }
 
 // ——— все схемы разом ——————————————————————————————————————————————————
@@ -773,6 +828,39 @@ export function allSchemesPlan(project, options = {}) {
  * один на весь архив — выгружают его целиком, а не лист цветной, лист нет.
  */
 export async function allSchemesZip(project, images, options = {}) {
+  const sheets = await allSchemesSheets(project, images, options);
+  return writeZip(
+    sheets.map(({ name, data }) => ({ name, data, compress: false })),
+    { compress: false },
+  );
+}
+
+/**
+ * Весь объект **одним документом PDF**: те же листы в том же порядке, что в
+ * архиве, но страницами одного файла.
+ *
+ * Это то, ради чего PDF и понадобился: архив из двадцати картинок получатель
+ * распаковывает и открывает по одной, а документ листает. Нумерация «Лист N из
+ * M» и состав листов считаются тем же обходом, что у архива, — разойдись они,
+ * и номер на бумаге перестал бы отвечать числу страниц.
+ */
+export async function allSchemesPdf(project, images, options = {}) {
+  const sheets = await allSchemesSheets(project, images, { ...options, pdf: true });
+  return exportPdf(
+    sheets.map((sheet) => sheet.data),
+    { title: (project && project.name) || "" },
+  );
+}
+
+/**
+ * Обход листов объекта — один на архив и на документ: `[{name, data}]` в
+ * порядке листов. `data` — PNG или страница PDF, смотря по `options.pdf`.
+ *
+ * Обход общий нарочно. Разведи архив и документ по двум циклам, и они начнут
+ * расходиться составом листов и нумерацией — а человек будет считать, что
+ * получил то же самое в другом файле.
+ */
+async function allSchemesSheets(project, images, options = {}) {
   // Форма входа одна — Map «imageId → Blob», как у packProject: разбирать
   // четыре формы одного и того же было бы вторым правилом на тот же вход.
   if (images != null && !(images instanceof Map)) throw new Error(strings.errors.imagesNotMap);
@@ -783,7 +871,7 @@ export async function allSchemesZip(project, images, options = {}) {
   const total = allSchemesPlan(project, options).total;
   let done = 0;
   const put = (name, data) => {
-    files.push({ name, data, compress: false });
+    files.push({ name, data });
     done += 1;
     if (onProgress) onProgress({ done, total, name });
   };
@@ -812,7 +900,7 @@ export async function allSchemesZip(project, images, options = {}) {
       put(exportSheetName(scheme, index, sheet.name, at), page);
     }
   }
-  return writeZip(files, { compress: false });
+  return files;
 }
 
 // ——— печать ———————————————————————————————————————————————————————————
@@ -1160,7 +1248,9 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
   );
   // Разрешение листа — то самое, которым он нарисован: лист по ГОСТ выверен в
   // миллиметрах, и в файле это должно быть написано, а не подразумеваться.
-  return exportBlob(canvas, dpi);
+  // Страница PDF берёт миллиметры у формата листа, а не у пикселей: формат —
+  // это то, что написано на коробке бумаги.
+  return exportOut(canvas, dpi, options, { width: plan.sheet.width, height: plan.sheet.height });
 }
 
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
@@ -1356,7 +1446,9 @@ export async function gostTablePng(table, page, plan, options = {}) {
   );
   // Разрешение листа — то самое, которым он нарисован: лист по ГОСТ выверен в
   // миллиметрах, и в файле это должно быть написано, а не подразумеваться.
-  return exportBlob(canvas, dpi);
+  // Страница PDF берёт миллиметры у формата листа, а не у пикселей: формат —
+  // это то, что написано на коробке бумаги.
+  return exportOut(canvas, dpi, options, { width: sheet.width, height: sheet.height });
 }
 
 /**
@@ -1412,8 +1504,11 @@ export async function gostPrintSheets(blobs) {
 }
 
 /**
- * Все листы таблицы разом: массив PNG в порядке листов. «Лист N из M» считает
- * сама разбивка, поэтому номер на бумаге не может разойтись с числом файлов.
+ * Все листы таблицы разом, в порядке листов. «Лист N из M» считает сама
+ * разбивка, поэтому номер на бумаге не может разойтись с числом листов.
+ *
+ * Что в списке — PNG или страницы PDF — решает `options.pdf`: рисуются листы
+ * одним и тем же `gostTablePng`, развилка у них одна и живёт в `exportOut`.
  */
 export async function gostTableSheets(table, options = {}) {
   const plan = gostTablePages(table, options);
