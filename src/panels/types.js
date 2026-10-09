@@ -83,6 +83,19 @@ function typesSnapshot(project) {
 // давно, а неизвестное значение объект бы уже не принял.
 export function typesTemplateFrom(template) {
   if (!template || !Array.isArray(template.categories) || !Array.isArray(template.markTypes)) return null;
+  // Снимок, сохранённый в сборке таска 116, мог унести с собой строку
+  // комментария: теперь он встроенный (G173), и второй такой же тип в новом
+  // объекте поделил бы с плашками нумерацию. Категория уходит вместе с
+  // последним своим типом.
+  if (template.markTypes.some((type) => type.kind === MARK_KIND_COMMENT)) {
+    const markTypes = template.markTypes.filter((type) => type.kind !== MARK_KIND_COMMENT);
+    const used = new Set(markTypes.map((type) => type.categoryId));
+    template = {
+      ...template,
+      markTypes,
+      categories: template.categories.filter((category) => used.has(category.id)),
+    };
+  }
   const ids = new Map();
   // «Та же категория» — правило модели (`categoryNameKey`), одно на всю сборку.
   // Снимок мог принести и «Датчики», и «датчики»: заведи их по отдельности —
@@ -378,27 +391,11 @@ export function typesKindSwitch({ kind, onPick, allowSame = false, sameTitle = "
   return uiEl("div", { class: "dict__kind", title: strings.dictionary.kind }, [
     cell("point", strings.dictionary.kindPoint, strings.dictionary.kindPointHint),
     cell("line", strings.dictionary.kindLine, strings.dictionary.kindLineHint),
-    // Третья клетка — комментарий (G163). Название короткое и ровно то, каким
-    // заказчик назвал код: «Пусть код будет „Коммент"». Полное «Комментарий»
-    // раздуло бы переключатель на треть строки справочника.
-    cell(MARK_KIND_COMMENT, strings.dictionary.kindComment, strings.dictionary.kindCommentHint),
+    // Клеток две, и третьей не будет. В таске 116 здесь стоял «Коммент», но
+    // заказчик решил иначе (G173): «так же у других меток оставь только Точка
+    // и линия». Комментарий теперь встроенный — выбирать его в справочнике
+    // негде и незачем, он живёт отдельной плашкой в окне выбора типа.
   ]);
-}
-
-/**
- * Пустая клетка знака — для типа-комментария.
- *
- * Знака у него нет: на плане он рисуется плашкой с текстом, и выбирать не из
- * чего. Клетка всё равно рисуется, и именно пустая: строки справочника стоят
- * колонка в колонку, и пропавший элемент увёл бы хвост строки влево у одной
- * строки из сорока восьми.
- */
-function typesSignNone() {
-  return uiEl("span", {
-    class: "dict__sign-none",
-    text: "—",
-    title: strings.dictionary.kindCommentHint,
-  });
 }
 
 // Черновик строки добавления: вид и знак, выбранные до нажатия «Добавить тип».
@@ -876,9 +873,7 @@ export function openTypesDictionary(api) {
       // Лишнее не показывается: у точечного типа выбирается фигура, у
       // линейного — начертание. Показать оба значило бы предложить выбрать то,
       // чего на плане не будет.
-      kind === MARK_KIND_COMMENT
-        ? typesSignNone()
-        : kind === "line"
+      kind === "line"
         ? typesLineButton({
             lineStyle: type.lineStyle,
             color: category ? category.color : TYPES_NO_COLOR,
@@ -1048,7 +1043,6 @@ export function openTypesDictionary(api) {
         refresh();
       };
       const color = own ? own.color : TYPES_NO_COLOR;
-      if (draft.kind === MARK_KIND_COMMENT) return typesSignNone();
       return draft.kind === "line"
         ? typesLineButton({
             lineStyle: draft.lineStyle,

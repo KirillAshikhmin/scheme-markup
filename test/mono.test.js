@@ -26,6 +26,7 @@ import {
 } from "../src/mono.js";
 import { drawScheme, markLinks } from "../src/render.js";
 import {
+  COMMENT_TYPE_ID,
   addMark,
   addOutline,
   addRoom,
@@ -134,7 +135,10 @@ function monoWorld() {
   const added = addScheme(project, { name: "1 этаж", width: 1000, height: 800 });
   project = added.project;
   const schemeId = added.scheme.id;
-  const idOf = (code) => project.markTypes.find((type) => type.code === code).id;
+  // Комментарий встроенный (G173) — в справочнике его нет, идентификатор
+  // зарезервирован моделью.
+  const idOf = (code) =>
+    code === "Коммент" ? COMMENT_TYPE_ID : project.markTypes.find((type) => type.code === code).id;
 
   // Помещение с контуром: заливка, линия и название.
   const room = addRoom(project, { name: "Кухня" });

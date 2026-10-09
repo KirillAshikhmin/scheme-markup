@@ -15,8 +15,10 @@
 import { strings, text } from "../strings.js";
 import { uiEl, uiButton, uiModal } from "./ui.js";
 import {
-  MARK_KIND_COMMENT,
+  COMMENT_TYPE_ID,
   addType,
+  commentCodeOf,
+  findType,
   codeProblem,
   matchTypeExactly,
   searchTypes,
@@ -123,18 +125,38 @@ function pickerMove(box, row, dx, dy) {
 // Виды, внутри которых окно сужает справочник. Комментарий здесь наравне с
 // точкой и линией: плашку меняют только на плашку — текст у неё есть, а у
 // знака его негде взять (`changeMarkType` стережёт то же правило).
-const PICKER_KINDS = ["point", "line", MARK_KIND_COMMENT];
+// Виды, внутри которых окно сужает справочник. Комментария здесь нет и быть
+// не может: тип у него встроенный и единственный (G173), менять его не на
+// что — кнопку «Сменить тип» панель инструментов такой метке и не показывает.
+const PICKER_KINDS = ["point", "line"];
 
 // Чем окно объясняет сужение. Строка одна на вид — иначе пользователь видел бы
 // короткий список и не знал, чего в нём не хватает.
 function pickerKindNote(kind) {
-  if (kind === "line") return strings.picker.onlyLine;
-  if (kind === MARK_KIND_COMMENT) return strings.picker.onlyComment;
-  return strings.picker.onlyPoint;
+  return kind === "line" ? strings.picker.onlyLine : strings.picker.onlyPoint;
+}
+
+/**
+ * Подходит ли встроенный комментарий под набранное в поиске.
+ *
+ * Плашка стоит под таблицей и ведёт себя как её строки: поиск сужает окно, и
+ * «розетка» не должна оставлять на экране комментарий. Правило то же, что у
+ * `searchTypes`, но своё: встроенного типа в справочнике нет, и спросить
+ * модель о нём нельзя.
+ */
+export function pickerCommentMatches(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!needle) return true;
+  const type = findType(project, COMMENT_TYPE_ID);
+  return (
+    type.code.toLowerCase().startsWith(needle) ||
+    type.name.toLowerCase().includes(needle) ||
+    strings.picker.builtinComment.toLowerCase().includes(needle)
+  );
 }
 
 // Смена типа у метки идёт внутри её вида: линии — линейные типы, точке —
-// точечные, комментарию — комментарии. Окно получает вид в `options.kind` и оставляет только свои типы;
+// точечные. Окно получает вид в `options.kind` и оставляет только свои типы;
 // постановка новой метки вид не задаёт и видит справочник целиком.
 //
 // Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
@@ -157,6 +179,7 @@ export function openTypePicker(project, options = {}) {
     };
 
     const box = uiEl("div", { class: "picker__columns" });
+    const builtin = uiEl("div", { class: "picker__builtin" });
     const body = uiEl("div", { class: "picker picker--types" });
     const error = uiEl("p", { class: "picker__error" });
     const createBox = uiEl("div", { class: "picker__create" });
@@ -169,8 +192,10 @@ export function openTypePicker(project, options = {}) {
         keydown: (event) => {
           // Стрелка вниз из поиска — в первую строку сетки: дальше по ней
           // ходят стрелками, не хватаясь за мышь.
+          // Плашка комментария стоит под сеткой и в обход её не остаётся:
+          // когда поиск оставил только её, и стрелка, и Enter ведут к ней.
           if (event.key === "ArrowDown") {
-            const first = box.querySelector(".picker__row");
+            const first = box.querySelector(".picker__row") || builtinRow();
             if (!first) return;
             event.preventDefault();
             first.focus();
@@ -178,7 +203,7 @@ export function openTypePicker(project, options = {}) {
           }
           if (event.key !== "Enter") return;
           event.preventDefault();
-          const first = box.querySelector(".picker__row");
+          const first = box.querySelector(".picker__row") || builtinRow();
           if (first) first.click();
           else if (createBox.firstChild) createType();
         },
@@ -277,6 +302,54 @@ export function openTypePicker(project, options = {}) {
       return uiEl("div", { class: "picker__category" }, [head, ...group.types.map(typeRow)]);
     }
 
+    /**
+     * Отдельная плашка «Комментарий» под основной таблицей (G173).
+     *
+     * Слова заказчика: «в окне добавления в выборе типа метки просто сделай
+     * снизу отдельную плашку Комментарий, под основной таблицей. То есть под
+     * капотом это такая же метка, но в интерфейсе отдельно выделяется».
+     *
+     * Почему не клетка сетки: сетка — это справочник объекта, который человек
+     * правит сам, а комментарий есть всегда и ни переименовать, ни удалить
+     * его нельзя. Отдельный блок под чертой и подпись «есть всегда, в
+     * справочнике его нет» говорят это прямо, а не намёком.
+     *
+     * Плашки нет, когда окно сужено видом метки (`options.kind`): там меняют
+     * тип у уже стоящей метки, а точку в комментарий не превращают — модель
+     * этого и не позволит.
+     */
+    function renderBuiltin(query) {
+      builtin.replaceChildren();
+      builtin.hidden = Boolean(options.kind) || !pickerCommentMatches(current, query);
+      if (builtin.hidden) return;
+      const type = findType(current, COMMENT_TYPE_ID);
+      const row = uiEl(
+        "button",
+        {
+          class: "picker__row picker__builtin-row" + (options.activeTypeId === COMMENT_TYPE_ID ? " is-active" : ""),
+          type: "button",
+          title: strings.picker.builtinCommentHint,
+          on: { click: () => done({ typeId: COMMENT_TYPE_ID, project: current }) },
+        },
+        [
+          pickerIcon(current, COMMENT_TYPE_ID),
+          uiEl("span", { class: "picker__code", text: commentCodeOf(current) }),
+          uiEl("span", { class: "picker__name", text: type.name }),
+        ],
+      );
+      builtin.append(
+        uiEl("p", { class: "picker__builtin-title", text: strings.picker.builtinComment }),
+        row,
+        uiEl("p", { class: "picker__builtin-hint", text: strings.picker.builtinCommentHint }),
+      );
+    }
+
+    // Строка плашки, когда она на экране. Отдельной функцией — её спрашивают
+    // и клавиатура, и проверка «а есть ли вообще что выбрать».
+    function builtinRow() {
+      return builtin.hidden ? null : builtin.querySelector(".picker__row");
+    }
+
     function renderList() {
       const query = search.value.trim();
       // Что за чем показывать, решает модель: поиск по коду и названию,
@@ -292,6 +365,7 @@ export function openTypePicker(project, options = {}) {
       // окно на четыре колонки и никакого пустого поля справа, одна найденная
       // категория — узкое окно.
       body.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
+      renderBuiltin(query);
       renderCreate(query);
     }
 
@@ -316,7 +390,7 @@ export function openTypePicker(project, options = {}) {
     const note = PICKER_KINDS.includes(options.kind)
       ? uiEl("p", { class: "picker__note", text: pickerKindNote(options.kind) })
       : null;
-    body.replaceChildren(...[search, note, box, createBox, error].filter(Boolean));
+    body.replaceChildren(...[search, note, box, builtin, createBox, error].filter(Boolean));
     modal = uiModal({
       title: options.title || strings.picker.title,
       body,

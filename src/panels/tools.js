@@ -12,6 +12,7 @@ import {
   BLOCK_MODES,
   MARK_KINDS,
   MARK_KIND_COMMENT,
+  markIsComment,
   changeMarkType,
   findMark,
   findType,
@@ -289,7 +290,11 @@ function mountToolsPanel(host, api) {
     const parts = [
       uiEl("p", { class: "tools__label", text: strings.tools.type }),
       typeButton,
-      selectedMark
+      // «Сменить тип» у комментария не показывается вовсе: тип у него один и
+      // встроенный (G173), менять его не на что, а окно выбора открылось бы
+      // пустым. Модель думает так же — `changeMarkType` держит комментарий
+      // внутри его вида.
+      selectedMark && !markIsComment(selectedMark)
         ? uiButton(text("tools.changeTypeOf", { label: labelOf(state.project, selectedMark.id) }), {
             class: "ui-btn ui-btn--wide",
             title: strings.tools.changeTypeHint,

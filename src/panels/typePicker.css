@@ -81,3 +81,41 @@
 .picker__columns > .panel__empty {
   grid-column: 1 / -1;
 }
+
+/* ——— плашка «Комментарий» под таблицей ————————————————————————————————
+   Заказчик: «в окне добавления в выборе типа метки просто сделай снизу
+   отдельную плашку Комментарий, под основной таблицей». Отделяет её черта во
+   всю ширину окна — та же мысль, что у разделителя в меню: ниже черты не
+   продолжение списка, а другое. Своей рамки у блока нет: вторая рамка внутри
+   карточки диалога читалась бы как вложенное окно. */
+.picker__builtin {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.picker__builtin-title {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+/* Сама строка — такая же, как строки сетки: под капотом это такая же метка,
+   и выбирают её тем же движением. Отличает её рамка — она есть всегда, а не
+   только под курсором: строка не из списка, и видно это до наведения. */
+.picker__builtin-row {
+  align-self: flex-start;
+  max-width: 100%;
+  border-color: var(--panel-line);
+}
+
+.picker__builtin-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--panel-muted);
+}

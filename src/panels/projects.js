@@ -1,7 +1,13 @@
 // Объекты: список в шапке, переключение, переименование, удаление,
 // первый запуск и автосохранение в браузер.
 import { LAST_PROJECT_KEY, layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
-import { createProject, ensureProjectKey, migrateTypeKinds, updateProject } from "../model.js";
+import {
+  createProject,
+  ensureProjectKey,
+  migrateCommentType,
+  migrateTypeKinds,
+  updateProject,
+} from "../model.js";
 import {
   deleteImage,
   deleteProject,
@@ -108,8 +114,9 @@ function mountProjectsPanel(host, api) {
     // Объект из базы браузера мимо `projectFile.migrateProject` не проходит,
     // а вид типа (точка или линия) у прежних объектов не записан. Дописывается
     // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
-    // открывался бы по-разному из базы и из архива.
-    const migrated = migrateTypeKinds(stored).project;
+    // открывался бы по-разному из базы и из архива. Тем же правилом и там же
+    // переезжает комментарий со строки справочника на встроенный тип (G173).
+    const migrated = migrateCommentType(migrateTypeKinds(stored).project).project;
     // Постоянный ключ у объектов, заведённых до его появления, дописывается
     // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
     // трогается, в истории отмены ничего не появляется, а в базу объект

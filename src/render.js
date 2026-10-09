@@ -2349,10 +2349,18 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
 // Фильтр панели меток: скрытая метка не рисуется и по ней не кликается.
 function markVisible(project, mark, filter) {
   if (!filter) return true;
-  if (Array.isArray(filter.typeIds) && !filter.typeIds.includes(mark.typeId)) return false;
-  if (Array.isArray(filter.categoryIds)) {
-    const type = findType(project, mark.typeId);
-    if (!type || !filter.categoryIds.includes(type.categoryId)) return false;
+  // Комментарий прячется своей галочкой, а не галочками справочника (G173):
+  // встроенного типа нет ни в `typeIds`, ни в `categoryIds`, и без этой ветки
+  // плашки исчезали бы с плана от любого сужения по типу — например стоило
+  // снять одну категорию.
+  if (markIsComment(mark)) {
+    if (filter.comments === false) return false;
+  } else {
+    if (Array.isArray(filter.typeIds) && !filter.typeIds.includes(mark.typeId)) return false;
+    if (Array.isArray(filter.categoryIds)) {
+      const type = findType(project, mark.typeId);
+      if (!type || !filter.categoryIds.includes(type.categoryId)) return false;
+    }
   }
   if (filter.roomId && mark.roomId !== filter.roomId) return false;
   const query = (filter.query || "").trim().toLowerCase();
@@ -2872,6 +2880,10 @@ function labelFilterKey(filter) {
   return [
     Array.isArray(filter.categoryIds) ? filter.categoryIds.join(",") : "*",
     Array.isArray(filter.typeIds) ? filter.typeIds.join(",") : "*",
+    // Скрытые комментарии меняют состав подписей так же, как снятая галочка
+    // типа: ключ кэша раскладки обязан их учитывать, иначе плашки исчезли бы
+    // с плана, а их места остались бы занятыми.
+    filter.comments === false ? "nc" : "*",
     filter.roomId || "",
     (filter.query || "").trim().toLowerCase(),
   ].join("|");

@@ -9,14 +9,26 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  COMMENT_TYPE_ID,
+  COMMENT_CATEGORY_ID,
+  COMMENT_TYPE_CODE,
   MARK_KIND_COMMENT,
+  commentCodeOf,
+  migrateCommentType,
   addMark,
   addPlacement,
   addEquipment,
   addRoom,
   addScheme,
   addToGroup,
+  addType,
+  catalogOffer,
   changeMarkType,
+  closeCategoryColors,
+  codeProblem,
+  findType,
+  sharedShapes,
+  typesInOrder,
   compactAllNumbers,
   createProject,
   deleteMark,
@@ -39,7 +51,15 @@ import {
   validate,
 } from "../src/model.js";
 import { marksTable, typesTable, toCsv } from "../src/tables.js";
-import { filtersMarkRows, filtersToggleCategory, filtersTypeChecked } from "../src/panels/filters.js";
+import {
+  filtersActive,
+  filtersCommentsShown,
+  filtersMarkRows,
+  filtersSetAllTypes,
+  filtersToggleCategory,
+  filtersToggleComments,
+  filtersTypeCounts,
+} from "../src/panels/filters.js";
 import { marksSchemeTotal } from "../src/panels/marks.js";
 import { roomsUsage } from "../src/panels/rooms.js";
 import {
@@ -52,6 +72,10 @@ import {
   planToScreen,
 } from "../src/render.js";
 import { markCardModel } from "../src/panels/markCard.js";
+import { typesTemplateFrom } from "../src/panels/types.js";
+import { pickerCommentMatches } from "../src/panels/typePicker.js";
+import { packProject, unpackProject } from "../src/projectFile.js";
+import { mergeProjects } from "../src/merge.js";
 import { strings } from "../src/strings.js";
 
 // Комната с двумя обычными метками и одним комментарием: этого достаточно,
@@ -61,7 +85,10 @@ function fixture() {
   const scheme = addScheme(project, { name: "1 этаж", width: 1000, height: 500 });
   project = scheme.project;
   const schemeId = scheme.scheme.id;
-  const typeOf = (code) => project.markTypes.find((type) => type.code === code).id;
+  // Встроенный комментарий (G173) в справочнике не лежит: его идентификатор
+  // зарезервирован, и спрашивать его у `markTypes` нельзя.
+  const typeOf = (code) =>
+    code === "Коммент" ? COMMENT_TYPE_ID : project.markTypes.find((type) => type.code === code).id;
   const put = (code, x, patch) => {
     const added = addMark(project, {
       schemeId,
@@ -307,24 +334,47 @@ test("карточка метки — единственная дверь к т�
   assert.equal(plain.kind, "point");
 });
 
-// Фильтры — решение таска: тип «Коммент» стоит в дереве как все. Дерево
-// отвечает на «что рисуется на плане», а урезан у комментария список, и это
-// разные вопросы. Отдельная галочка рядом с «Показать все» была бы вторым
-// механизмом скрытия на ту же работу.
-test("галочка типа прячет плашку с плана, как любую метку", () => {
+// Фильтры — решение таска 121: своя галочка под деревом, а не строка в нём.
+// Дерево строится по справочнику, а встроенного комментария там нет (G173);
+// возможность убрать плашки с плана при этом терять нельзя — чертёж печатают
+// и без замечаний.
+test("своя галочка прячет плашки с плана, галочки справочника их не трогают", () => {
   const box = fixture();
   const scheme = box.project.schemes[0];
-  const comments = box.project.categories.find((category) => category.name === "Комментарии");
-  assert.equal(filtersTypeChecked(box.project, null, box.typeOf("Коммент")), true);
+  assert.equal(filtersCommentsShown(null), true, "у фильтра прежней сборки поля нет — плашки видны");
   assert.equal(visibleMarks(box.project, scheme, null).length, 3);
 
-  const hidden = filtersToggleCategory(box.project, null, comments.id, false);
-  assert.equal(filtersTypeChecked(box.project, hidden, box.typeOf("Коммент")), false);
+  const hidden = filtersToggleComments(null, false);
+  assert.equal(filtersCommentsShown(hidden), false);
+  assert.equal(filtersActive(hidden), true, "скрытые комментарии — это суженный фильтр");
   const shown = visibleMarks(box.project, scheme, hidden);
-  assert.equal(shown.length, 2);
-  assert.equal(shown.some((mark) => markIsComment(mark)), false);
-  // Обычные метки при этом на месте: галочка одного типа чужих не трогает.
   assert.deepEqual(shown.map((mark) => labelOf(box.project, mark.id)).sort(), ["Р1", "Т1"]);
+
+  // Снятая категория справочника плашку не трогает: встроенного типа нет ни в
+  // `typeIds`, ни в `categoryIds`, и без своей ветки в `markVisible` плашки
+  // пропадали бы от любого сужения по типу.
+  const sockets = box.project.categories.find((category) => category.name === "Розетки");
+  const noSockets = filtersToggleCategory(box.project, null, sockets.id, false);
+  const left = visibleMarks(box.project, scheme, noSockets);
+  assert.deepEqual(left.map((mark) => labelOf(box.project, mark.id)).sort(), ["Коммент1", "Т1"]);
+
+  // «Скрыть все» — про план целиком: плашки уходят вместе со всеми.
+  const none = filtersSetAllTypes(box.project, null, false);
+  assert.equal(filtersCommentsShown(none), false);
+  assert.equal(visibleMarks(box.project, scheme, none).length, 0);
+  const all = filtersSetAllTypes(box.project, none, true);
+  assert.equal(visibleMarks(box.project, scheme, all).length, 3);
+});
+
+test("комментарии считаются в счёте показанного наравне с типами", () => {
+  const box = fixture();
+  const total = box.project.markTypes.length + 1;
+  assert.deepEqual(filtersTypeCounts(box.project, null), { total, shown: total, hidden: 0 });
+  const hidden = filtersToggleComments(null, false);
+  assert.deepEqual(filtersTypeCounts(box.project, hidden), { total, shown: total - 1, hidden: 1 });
+  // Сняты все типы, но плашки на плане — «Скрыть все» обязана остаться живой.
+  const noTypes = { ...filtersSetAllTypes(box.project, null, false), comments: true };
+  assert.equal(filtersTypeCounts(box.project, noTypes).shown, 1);
 });
 
 // ——— плашка на плане ——————————————————————————————————————————————
@@ -474,4 +524,265 @@ test("G68: объект прежней разметки открывается �
     assert.equal(markPointer(mark), false);
     assert.equal(markIsComment(mark), false);
   }
+});
+
+// ——— G173: комментарий больше не строка справочника ————————————————
+
+// Объект сборки таска 116: комментарий лежал в справочнике отдельной
+// категорией и типом, метки ссылались на них. Такие объекты есть и у
+// заказчика, и у напарника — и это главное, что проверяется в таске 121.
+function buildOf116({ code = "Коммент", plates = 1 } = {}) {
+  const base = createProject({ name: "Объект сборки 116" });
+  const category = {
+    id: "c-116",
+    name: "Комментарии",
+    color: "#111418",
+    shape: "rect-horizontal",
+    lineStyle: null,
+    order: base.categories.length,
+  };
+  const type = {
+    id: "t-116",
+    categoryId: category.id,
+    code,
+    name: "Комментарий",
+    kind: MARK_KIND_COMMENT,
+    shape: null,
+    lineStyle: null,
+    blockMode: "each",
+    channels: 1,
+    order: base.markTypes.length,
+  };
+  let project = {
+    ...base,
+    categories: [...base.categories, category],
+    markTypes: [...base.markTypes, type],
+  };
+  const scheme = addScheme(project, { name: "1 этаж", width: 1000, height: 500 });
+  project = scheme.project;
+  const schemeId = scheme.scheme.id;
+  const socket = addMark(project, {
+    schemeId,
+    typeId: project.markTypes.find((item) => item.code === "Р").id,
+    kind: "point",
+    points: [{ x: 0.2, y: 0.5 }],
+  });
+  project = updateMark(socket.project, socket.mark.id, { location: "у кресла" }).project;
+  const notes = [];
+  for (let index = 0; index < plates; index += 1) {
+    const added = addMark(project, {
+      schemeId,
+      typeId: type.id,
+      kind: MARK_KIND_COMMENT,
+      points: [{ x: 0.4 + index * 0.1, y: 0.3 }],
+    });
+    project = updateMark(added.project, added.mark.id, { original: "Замечание " + (index + 1) }).project;
+    notes.push(added.mark.id);
+  }
+  project = setMarkPointer(project, notes[0], true).project;
+  return { project, schemeId, socketId: socket.mark.id, notes, typeId: type.id, categoryId: category.id };
+}
+
+test("G68: объект сборки 116 переезжает на встроенный комментарий молча и без потерь", () => {
+  const old = buildOf116({ plates: 2 });
+  const before = old.project.marks.map((mark) => ({
+    id: mark.id,
+    number: mark.number,
+    label: labelOf(old.project, mark.id),
+    points: JSON.stringify(mark.points),
+    text: markCommentText(mark),
+    pointer: markPointer(mark),
+  }));
+
+  const result = migrateCommentType(old.project);
+  assert.equal(result.changed, true);
+  assert.equal(result.moved, 2, "переехали не все плашки");
+  const next = result.project;
+
+  // Справочник вернулся к чистому: ни строки, ни категории комментария.
+  assert.equal(next.markTypes.length, old.project.markTypes.length - 1);
+  assert.equal(next.categories.length, old.project.categories.length - 1);
+  assert.equal(next.markTypes.some((type) => type.kind === MARK_KIND_COMMENT), false);
+  assert.equal(next.categories.some((category) => category.name === "Комментарии"), false);
+  assert.equal(findType(next, old.typeId), null);
+
+  // Ни одна метка ничего не потеряла: тот же идентификатор, номер, подпись,
+  // точки, текст и указатель. Сменилось ровно одно поле — `typeId`.
+  assert.equal(next.marks.length, old.project.marks.length);
+  for (const was of before) {
+    const now = findMark(next, was.id);
+    assert.ok(now, "метка пропала при миграции: " + was.label);
+    assert.equal(now.number, was.number);
+    assert.equal(labelOf(next, was.id), was.label, "сменилась подпись: " + was.label);
+    assert.equal(JSON.stringify(now.points), was.points);
+    assert.equal(markCommentText(now), was.text);
+    assert.equal(markPointer(now), was.pointer);
+  }
+  for (const id of old.notes) assert.equal(findMark(next, id).typeId, COMMENT_TYPE_ID);
+  assert.equal(findMark(next, old.socketId).typeId, findMark(old.project, old.socketId).typeId);
+
+  // Объект после миграции цел и молчит: ни одной новой находки, кроме тех,
+  // что были и до неё.
+  const wasProblems = validate(old.project).map((problem) => problem.code).sort();
+  assert.deepEqual(validate(next).map((problem) => problem.code).sort(), wasProblems);
+
+  // Повторный прогон — тот же объект по ссылке: миграция идемпотентна и
+  // открытие объекта не выглядит правкой.
+  assert.equal(migrateCommentType(next).project, next);
+  assert.equal(migrateCommentType(next).changed, false);
+});
+
+test("G68: переименованный код переезжает вместе с метками — подписи не меняются", () => {
+  const old = buildOf116({ code: "Прим" });
+  assert.equal(labelOf(old.project, old.notes[0]), "Прим1");
+  const next = migrateCommentType(old.project).project;
+  assert.equal(commentCodeOf(next), "Прим");
+  assert.equal(labelOf(next, old.notes[0]), "Прим1", "плашка сменила подпись при переезде");
+  // Счётчик ведётся на код — нумерация продолжается с того же места.
+  const more = addMark(next, {
+    schemeId: old.schemeId,
+    typeId: COMMENT_TYPE_ID,
+    kind: MARK_KIND_COMMENT,
+    points: [{ x: 0.8, y: 0.8 }],
+  });
+  assert.equal(labelOf(more.project, more.mark.id), "Прим2");
+  // У обычного объекта поля нет вовсе — оно заводится только для переезда.
+  assert.equal(Object.prototype.hasOwnProperty.call(next, "commentCode"), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(createProject(), "commentCode"), false);
+  assert.equal(commentCodeOf(createProject()), COMMENT_TYPE_CODE);
+});
+
+test("G68: файл объекта сборки 116 открывается уже переехавшим", async () => {
+  const old = buildOf116({ plates: 2 });
+  const packed = await packProject(old.project, new Map());
+  const read = await unpackProject(packed);
+  assert.equal(read.project.markTypes.some((type) => type.kind === MARK_KIND_COMMENT), false);
+  for (const id of old.notes) {
+    const mark = findMark(read.project, id);
+    assert.ok(mark, "плашка потерялась в файле");
+    assert.equal(mark.typeId, COMMENT_TYPE_ID);
+    assert.equal(labelOf(read.project, id), labelOf(old.project, id));
+    assert.equal(markCommentText(mark), markCommentText(findMark(old.project, id)));
+  }
+  assert.equal(markPointer(findMark(read.project, old.notes[0])), true);
+
+  // Объект, уже переехавший, через файл проходит без единой правки: встроенный
+  // идентификатор упаковывается и читается как есть.
+  const again = await unpackProject(await packProject(read.project, new Map()));
+  assert.deepEqual(again.project.marks, read.project.marks);
+});
+
+test("G173: встроенного комментария нет ни в справочнике, ни в общей базе, ни в шаблоне", () => {
+  const project = createProject();
+  assert.equal(project.categories.length, 12);
+  assert.equal(project.markTypes.some((type) => type.kind === MARK_KIND_COMMENT), false);
+  // Справочник объекта перебирается одним обходом — комментария в нём нет.
+  const walked = typesInOrder(project).flatMap((group) => group.types.map((type) => type.id));
+  assert.equal(walked.includes(COMMENT_TYPE_ID), false);
+  assert.equal(typesInOrder(project).some((group) => group.category.id === COMMENT_CATEGORY_ID), false);
+  // «Добавить из общей базы» строится из того же шаблона — и там его нет.
+  assert.equal(
+    catalogOffer({ ...project, markTypes: [], categories: [] }, null)
+      .flatMap((group) => group.types)
+      .some((type) => type.code === COMMENT_TYPE_CODE),
+    false,
+  );
+  // Код занят, хотя строки нет: иначе второй тип поделил бы с плашками номера.
+  assert.throws(
+    () => addType(project, { code: COMMENT_TYPE_CODE, name: "Своё", categoryId: project.categories[0].id }),
+    /занят/i,
+  );
+  assert.ok(codeProblem(project, COMMENT_TYPE_CODE), "код встроенного типа должен считаться занятым");
+});
+
+test("G145: объект с комментариями встречает тишиной", () => {
+  const box = fixture();
+  // Ни одна проверка справочника не знает о встроенном типе — ни повтор
+  // знака, ни близость цветов: в `project.markTypes` и `project.categories`
+  // его нет вовсе.
+  assert.deepEqual(
+    sharedShapes(box.project).flatMap((group) => group.codes).filter((code) => code === COMMENT_TYPE_CODE),
+    [],
+  );
+  assert.equal(
+    closeCategoryColors(box.project).some((pair) => pair.first === "Комментарии" || pair.second === "Комментарии"),
+    false,
+  );
+  // Пустых плашек нет, значит и находок про комментарий быть не должно.
+  assert.equal(validate(box.project).some((problem) => problem.code === "commentEmpty"), false);
+  // Проблемы те же, что у объекта без единого комментария.
+  const bare = createProject({ name: "Без плашек" });
+  assert.deepEqual(
+    validate(box.project).map((problem) => problem.code).sort(),
+    validate(bare).map((problem) => problem.code).sort(),
+  );
+});
+
+test("снимок справочника не тащит комментарий обратно в новый объект", () => {
+  const old = buildOf116();
+  // «Сохранить как шаблон» в сборке 116 уносил строку комментария с собой.
+  const snapshot = { categories: old.project.categories, markTypes: old.project.markTypes };
+  const template = typesTemplateFrom(snapshot);
+  assert.equal(template.markTypes.some((type) => type.kind === MARK_KIND_COMMENT), false);
+  assert.equal(template.categories.some((category) => category.name === "Комментарии"), false);
+  const born = createProject({ name: "Новый", ...template });
+  assert.equal(born.markTypes.some((type) => type.kind === MARK_KIND_COMMENT), false);
+  // Комментарии в нём всё равно ставятся: тип встроенный.
+  const scheme = addScheme(born, { name: "1", width: 800, height: 600 });
+  const added = addMark(scheme.project, {
+    schemeId: scheme.scheme.id,
+    typeId: COMMENT_TYPE_ID,
+    kind: MARK_KIND_COMMENT,
+    points: [{ x: 0.5, y: 0.5 }],
+  });
+  assert.equal(labelOf(added.project, added.mark.id), "Коммент1");
+});
+
+test("плашка окна выбора отзывается на поиск, как строки таблицы", () => {
+  const project = createProject();
+  assert.equal(pickerCommentMatches(project, ""), true);
+  assert.equal(pickerCommentMatches(project, "комм"), true);
+  assert.equal(pickerCommentMatches(project, "Коммент"), true);
+  assert.equal(pickerCommentMatches(project, "коммент"), true);
+  assert.equal(pickerCommentMatches(project, "розет"), false);
+  assert.equal(pickerCommentMatches(project, "выключ"), false);
+});
+
+// Слияние двух файлов напарников. Встроенного типа нет ни в одном
+// справочнике, и без прямой оговорки слияние посчитало бы плашки метками с
+// висячей ссылкой на тип — то есть выбросило бы их все.
+test("G68: слияние файлов напарников не теряет плашек", () => {
+  let base = createProject({ name: "Общий объект" });
+  const scheme = addScheme(base, { name: "1 этаж", width: 1000, height: 500 });
+  base = scheme.project;
+  const schemeId = scheme.scheme.id;
+
+  const mine = addMark(base, {
+    schemeId,
+    typeId: COMMENT_TYPE_ID,
+    kind: MARK_KIND_COMMENT,
+    points: [{ x: 0.3, y: 0.3 }],
+  });
+  const ours = updateMark(mine.project, mine.mark.id, { original: "Моё замечание" }).project;
+
+  const partner = addMark(base, {
+    schemeId,
+    typeId: base.markTypes.find((type) => type.code === "Р").id,
+    kind: "point",
+    points: [{ x: 0.7, y: 0.7 }],
+  });
+
+  const result = mergeProjects(ours, partner.project, base);
+  const plate = findMark(result.project, mine.mark.id);
+  assert.ok(plate, "плашка выброшена слиянием как метка без типа");
+  assert.equal(plate.typeId, COMMENT_TYPE_ID);
+  assert.equal(markCommentText(plate), "Моё замечание");
+  assert.equal(labelOf(result.project, plate.id), "Коммент1");
+  assert.equal(
+    result.conflicts.some((item) => item.code === "danglingRef" && item.entity === "marks"),
+    false,
+    "встроенный тип принят за висячую ссылку",
+  );
+  // Розетка напарника приехала рядом — слияние отработало обычным порядком.
+  assert.equal(result.project.marks.length, 2);
 });

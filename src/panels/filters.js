@@ -118,7 +118,27 @@ export function filtersToggleCategory(project, filter, categoryId, on) {
 
 export function filtersSetAllTypes(project, filter, on) {
   const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
-  return filtersFromTypeSet(project, filter, visible);
+  // «Показать все» и «Скрыть все» — про план целиком, а не про справочник:
+  // комментарии уходят и приходят вместе со всеми, иначе «Скрыть все»
+  // оставляло бы на плане плашки и врало названием.
+  return { ...filtersFromTypeSet(project, filter, visible), comments: on };
+}
+
+/**
+ * Видны ли комментарии. Своей галочки в дереве у них нет и быть не может:
+ * дерево строится по справочнику, а встроенного комментария там нет (G173).
+ * Поэтому у фильтра своё поле, а у панели — своя строка под деревом.
+ *
+ * Умолчание — «видны»: у фильтра прежней сборки поля нет вовсе, и читать его
+ * отсутствие как «скрыты» значило бы прятать плашки у того, кто ничего не
+ * нажимал.
+ */
+export function filtersCommentsShown(filter) {
+  return !filter || filter.comments !== false;
+}
+
+export function filtersToggleComments(filter, on) {
+  return { ...(filter || {}), comments: on === true };
 }
 
 // Сколько типов показано, сколько скрыто — один ответ на три вопроса: гаснет
@@ -131,7 +151,16 @@ export function filtersTypeCounts(project, filter) {
   if (types.length === 0) return { total: 0, shown: 0, hidden: 0 };
   const visible = filtersTypeSet(project, filter);
   const shown = types.filter((type) => visible.has(type.id)).length;
-  return { total: types.length, shown, hidden: types.length - shown };
+  // Комментарии считаются наравне с типами — одной позицией. Счёт идёт на три
+  // вопроса сразу: гаснет ли «Скрыть все», пуст ли план и что дописать в
+  // заголовок. Оставь их за скобками — и «Скрыть все» погасла бы при живых
+  // плашках на плане, а заметка «всё скрыто» появилась бы поверх них.
+  const commentsShown = filtersCommentsShown(filter) ? 1 : 0;
+  return {
+    total: types.length + 1,
+    shown: shown + commentsShown,
+    hidden: types.length - shown + (1 - commentsShown),
+  };
 }
 
 export function filtersActive(filter) {
@@ -139,6 +168,7 @@ export function filtersActive(filter) {
   return Boolean(
     Array.isArray(filter.categoryIds) ||
       Array.isArray(filter.typeIds) ||
+      !filtersCommentsShown(filter) ||
       filter.roomId ||
       (filter.query || "").trim(),
   );
@@ -197,6 +227,25 @@ export function filtersBox(api) {
       },
     },
   });
+  // Галочка комментариев — своей строкой под деревом, а не в дереве.
+  //
+  // В таске 116 комментарий был строкой справочника и стоял в дереве как все.
+  // Теперь его там нет (G173), а скрывать плашки с плана по-прежнему надо:
+  // чертёж печатают и без замечаний. Строка стоит **снаружи** свёрнутого
+  // «Категории и типы» нарочно — дерево сворачивают, чтобы не мешало, и
+  // прятать за ним единственную галочку, которой в дереве нет, значит
+  // потерять её. Расположена она так же, как плашка в окне выбора типа:
+  // отдельно и под основным списком — один и тот же приём на оба окна.
+  const commentsBox = uiEl("input", { class: "filters__check", type: "checkbox" });
+  commentsBox.addEventListener("change", () => {
+    const state = getState();
+    setState({ filter: filtersToggleComments(state.filter, commentsBox.checked) });
+  });
+  const comments = uiEl(
+    "label",
+    { class: "filters__comments", title: strings.filters.commentsHint },
+    [commentsBox, uiEl("span", { class: "filters__name", text: strings.filters.comments })],
+  );
   const buttons = uiEl("div", { class: "filters__buttons" }, [reset, hideAll]);
   // Пустой список объясняет себя там, где стоит кнопка, которая всё вернёт.
   const note = uiEl("p", { class: "panel__empty", text: strings.filters.allHidden });
@@ -263,6 +312,7 @@ export function filtersBox(api) {
     // там, где она ничего не делает.
     reset.disabled = !project || !filtersActive(state.filter);
     hideAll.disabled = counts.shown === 0;
+    commentsBox.checked = filtersCommentsShown(state.filter);
     note.hidden = !(counts.total > 0 && counts.shown === 0);
     if (!project) return;
     for (const item of checks) {
@@ -293,7 +343,7 @@ export function filtersBox(api) {
     syncChecks(state);
   }
 
-  node.replaceChildren(search, rooms, details, note, buttons);
+  node.replaceChildren(search, rooms, details, comments, note, buttons);
   subscribe((state, changed) => {
     if ("project" in changed || "filter" in changed) render();
   });

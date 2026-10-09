@@ -111,7 +111,9 @@ const ALL = { categoryIds: null, typeIds: null, roomId: null, query: "" };
 test("счёт показанных типов: всё видно, половина снята, не видно ничего", () => {
   const box = fixture();
   const project = box.project;
-  const total = project.markTypes.length;
+  // Комментарии считаются наравне с типами, одной позицией: в справочнике их
+  // нет (G173), но на плане они есть, и «Скрыть все» обязана это знать.
+  const total = project.markTypes.length + 1;
   assert.ok(total > 1, "в шаблоне должно быть несколько типов");
 
   const everything = filtersTypeCounts(project, ALL);
@@ -122,6 +124,7 @@ test("счёт показанных типов: всё видно, полови�
 
   const nothing = filtersSetAllTypes(project, ALL, false);
   assert.deepEqual(filtersTypeCounts(project, nothing), { total, shown: 0, hidden: total });
+  assert.equal(nothing.comments, false, "«Скрыть все» оставила плашки на плане");
 
   // Объекта ещё нет (панель смонтирована раньше, чем он открыт) — скрывать
   // нечего, и обе кнопки обязаны быть погашены.

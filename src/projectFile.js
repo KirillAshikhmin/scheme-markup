@@ -2,7 +2,7 @@
 // Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
 // там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
 import { strings, text } from "./strings.js";
-import { FORMAT_VERSION, migrateTypeKinds } from "./model.js";
+import { FORMAT_VERSION, migrateCommentType, migrateTypeKinds } from "./model.js";
 
 export { FORMAT_VERSION };
 
@@ -371,7 +371,9 @@ function migrateProject(loaded) {
   // отмечается и показывается пользователю списком на правку. Миграция
   // идемпотентна: у объекта, где вид уже проставлен, она возвращает тот же
   // объект — иначе упаковка правила бы то, что сама же и сверяет.
-  return migrateTypeKinds(filled).project;
+  // Комментарий перестал быть строкой справочника (G173): объект сборки, где
+  // он ею был, переводится на встроенный тип — молча и без правки подписей.
+  return migrateCommentType(migrateTypeKinds(filled).project).project;
 }
 
 // Календарный день пользователя, а не UTC: разметку правят вечером, и

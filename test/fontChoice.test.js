@@ -13,7 +13,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addMark, addScheme, createProject, setMarkPointer, typeKindOf, updateMark } from "../src/model.js";
+import {
+  COMMENT_TYPE_ID,
+  addMark,
+  addScheme,
+  createProject,
+  setMarkPointer,
+  typeKindOf,
+  updateMark,
+} from "../src/model.js";
 import { drawScheme, drawFont, fontFamilyOf, labelBox, FONT_DRAFT, FONT_SYSTEM } from "../src/render.js";
 
 const PLAN = { width: 1000, height: 500 };
@@ -82,7 +90,9 @@ function scene() {
   const made = addScheme(createProject(), { name: "1 этаж", width: PLAN.width, height: PLAN.height });
   let project = made.project;
   const spot = project.markTypes.find((type) => type.code === "Т").id;
-  const comment = project.markTypes.find((type) => type.code === "Коммент").id;
+  // Комментарий встроенный (G173): в справочнике его нет, идентификатор
+  // зарезервирован моделью.
+  const comment = COMMENT_TYPE_ID;
   project = addMark(project, { schemeId: made.scheme.id, typeId: spot, points: [{ x: 0.3, y: 0.4 }] }).project;
   project = addMark(project, { schemeId: made.scheme.id, typeId: spot, points: [{ x: 0.5, y: 0.4 }] }).project;
   // Вид метки задаётся явно, как это делает холст: иначе плашка встала бы

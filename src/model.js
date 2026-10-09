@@ -168,9 +168,81 @@ export const BLOCK_MODES = ["each", "single"];
  * Комментарий **не позиция**, а подпись к чертежу (G167: «В список меток в
  * таблицу и т.д. эти комментарии не должны попадать»), поэтому ни в списках,
  * ни в листах, ни в подсчётах его нет — см. `listedMarks` и `listedTypes`.
+ *
+ * И он **не строка справочника** (G173): «давай комментарий сделаем не просто
+ * как отдельный тип метки, а всегда предустановленную, которая не помечается
+ * в справочнике, так же у других меток оставь только Точка и линия». Тип у
+ * него есть — метка без типа в этой модели не живёт, — но он **виртуальный**:
+ * лежит не в `project.markTypes`, а в коде, под зарезервированным
+ * идентификатором `COMMENT_TYPE_ID`. Отсюда вытекает всё остальное даром:
+ * справочник, дерево фильтров, сетка выбора, легенда, лист справочника,
+ * «Добавить из общей базы» и предупреждения перебирают `project.markTypes` —
+ * и комментария там просто нет, фильтровать его в каждом месте не нужно.
  */
 export const MARK_KIND_COMMENT = "comment";
 export const MARK_KINDS = ["point", "line", MARK_KIND_COMMENT];
+
+/**
+ * Зарезервированные идентификаторы встроенного типа-комментария и его
+ * категории.
+ *
+ * Не UUID намеренно: `crypto.randomUUID()` такого не выдаст никогда, значит
+ * столкнуться с типом пользователя невозможно. В файле проекта они читаются
+ * глазами — `"typeId": "comment"`, — и это тоже нарочно: разбирая чужой
+ * объект руками, видно, что это за метка.
+ */
+export const COMMENT_TYPE_ID = "comment";
+export const COMMENT_CATEGORY_ID = "comments";
+// Код по умолчанию назвал заказчик: «Пусть код будет „Коммент"». Номер
+// сквозной, счётчик ведётся на код — с чужими он не пересекается.
+export const COMMENT_TYPE_CODE = "Коммент";
+
+// Встроенная категория комментария. Цвет чернильный, почти чёрный: это не
+// условное обозначение железки, а надпись на чертеже. Выбран счётом — до
+// каждой категории шаблона ΔE больше `COLOR_NEAR_DISTANCE`, — хотя теперь это
+// и не проверяется предупреждениями: категории нет в объекте, и
+// `closeCategoryColors` её не видит. Знак — лежачий прямоугольник, та же
+// плашка: на плане знак комментария не рисуется вовсе, но в окне выбора и в
+// карточке метки значок нужен.
+const COMMENT_CATEGORY = {
+  id: COMMENT_CATEGORY_ID,
+  name: strings.categories.comments,
+  color: "#111418",
+  shape: "rect-horizontal",
+  lineStyle: null,
+  order: -1,
+};
+
+/**
+ * Код встроенного типа в этом объекте.
+ *
+ * Обычно это `COMMENT_TYPE_CODE`. Поле `project.commentCode` появляется
+ * только у объекта, который пришёл из сборки таска 116 с **переименованным**
+ * типом комментария: миграция переносит метки на встроенный тип и забирает
+ * с собой код, иначе у человека сменились бы подписи всех плашек, а счётчик
+ * начал бы нумерацию заново. У обычного объекта поля нет вовсе.
+ */
+export function commentCodeOf(project) {
+  const own = project && typeof project.commentCode === "string" ? project.commentCode.trim() : "";
+  return own || COMMENT_TYPE_CODE;
+}
+
+// Встроенный тип-комментарий этого объекта. Собирается на каждый вызов, как
+// и положено значению, которого нет в данных.
+function commentType(project) {
+  return {
+    id: COMMENT_TYPE_ID,
+    categoryId: COMMENT_CATEGORY_ID,
+    code: commentCodeOf(project),
+    name: strings.types.comment,
+    kind: MARK_KIND_COMMENT,
+    shape: null,
+    lineStyle: null,
+    blockMode: "each",
+    channels: TYPE_CHANNELS_DEFAULT,
+    order: -1,
+  };
+}
 
 /**
  * Сколько каналов у типа: одна клавиша у В, две у ВВ, три у ВВВ, четыре у
@@ -643,15 +715,6 @@ const TEMPLATE_CATEGORIES = [
   { key: "sensors", name: strings.categories.sensors, color: "#164E63", shape: "circle-ring" },
   { key: "panel", name: strings.categories.panel, color: "#6E4B1F", shape: "square-bolt" },
   { key: "plumbing", name: strings.categories.plumbing, color: "#E80098", shape: "drop-dot" },
-  // Комментарии (G163). Цвет — чернильный, почти чёрный: это не условное
-  // обозначение железки, а надпись на чертеже, и в семье цветных категорий
-  // ей места нет. Выбран счётом, как велит правило: до каждой прежней
-  // категории ΔE больше порога `COLOR_NEAR_DISTANCE`, то есть новой пары
-  // «похожих цветов» в предупреждениях чистый объект не получает.
-  // Форма — лежачий прямоугольник, та же плашка: на плане знак категории у
-  // комментария не рисуется вовсе, но в сетке выбора типа и в карточке метки
-  // значок нужен, и плашка там узнаётся сразу.
-  { key: "comments", name: strings.categories.comments, color: "#111418", shape: "rect-horizontal" },
 ];
 
 // Порядок — порядок справочника заказчика, а не наша перекладка по категориям:
@@ -714,11 +777,6 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander" },
   { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring" },
   { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring" },
-  // Комментарий — последним: это не железка, и в привычном порядке справочника
-  // ему места нет. Код заказчик назвал сам: «Код и номер нужен. Пусть код
-  // будет „Коммент"». Номер сквозной, как у всех, и со чужими счётчиками не
-  // пересекается — счётчик ведётся на код типа.
-  { category: "comments", code: "Коммент", name: strings.types.comment, kind: MARK_KIND_COMMENT },
 ];
 
 function newId() {
@@ -845,11 +903,19 @@ export function findScheme(project, schemeId) {
   return project.schemes.find((scheme) => scheme.id === schemeId) || null;
 }
 
+/**
+ * Тип по идентификатору — **единственная** дверь к типу во всей сборке, и
+ * поэтому именно здесь живёт встроенный комментарий (G173). Всё, что спрашивает
+ * тип у метки, — подпись, цвет, знак, вид, карточка, холст — получает его, не
+ * зная, что в справочнике такой строки нет.
+ */
 export function findType(project, typeId) {
+  if (typeId === COMMENT_TYPE_ID) return commentType(project);
   return project.markTypes.find((type) => type.id === typeId) || null;
 }
 
 export function findCategory(project, categoryId) {
+  if (categoryId === COMMENT_CATEGORY_ID) return COMMENT_CATEGORY;
   return project.categories.find((category) => category.id === categoryId) || null;
 }
 
@@ -2327,6 +2393,12 @@ function normalizeCode(code, project, exceptTypeId) {
   if (!value) throw modelError("codeRequired", limit);
   if ([...value].length > CODE_MAX_LENGTH) throw modelError("codeTooLong", limit);
   if (!/^[A-Za-zА-Яа-яЁё]+$/u.test(value)) throw modelError("codeLetters", limit);
+  // Код встроенного комментария занят, хотя строки в справочнике нет: счётчик
+  // номеров ведётся на код, и второй тип с тем же кодом поделил бы с плашками
+  // одну нумерацию.
+  if (value.toUpperCase() === commentCodeOf(project).toUpperCase()) {
+    throw modelError("codeTaken", { code: value });
+  }
   const taken = project.markTypes.some(
     (type) => type.id !== exceptTypeId && type.code.toUpperCase() === value.toUpperCase(),
   );
@@ -3441,6 +3513,60 @@ export function migrateTypeKinds(project) {
   });
   if (!changed) return { project, guessed: [] };
   return { project: { ...project, markTypes }, guessed };
+}
+
+/**
+ * Перевести объект сборки таска 116 на встроенный комментарий (G173).
+ *
+ * Тогда комментарий был обычной строкой справочника, и в объекты заказчика он
+ * попал двумя путями — из шаблона нового объекта и кнопкой «Добавить из общей
+ * базы». Теперь строки в справочнике нет, а метки на неё ссылаются: миграция
+ * переводит их на `COMMENT_TYPE_ID` и убирает из справочника сам тип и
+ * осиротевшую категорию.
+ *
+ * **Ни одна метка ничего не теряет.** Идентификатор метки, номер, точки,
+ * текст, указатель и смещение плашки не трогаются вовсе — меняется одно поле
+ * `typeId`. Подпись (`код + номер`) остаётся прежней, потому что миграция
+ * **забирает код с собой**: переименуй пользователь тип в «Прим», и плашки
+ * звались бы «Прим1» — после миграции они зовутся так же, код живёт в
+ * `project.commentCode`. Счётчик номеров ведётся на код и поэтому тоже цел.
+ *
+ * Миграция **молчалива и идемпотентна**: переводить нечего — возвращается тот
+ * же объект по ссылке, без `updatedAt` и без шага истории. Спрашивать у
+ * человека ей нечего: догадок здесь нет, вид типа записан в самих данных.
+ *
+ * Редкий случай, названный вслух: типов-комментариев в справочнике оказалось
+ * несколько (в сборке 116 переключатель вида позволял завести второй). Все их
+ * метки сходятся на одном встроенном типе — он на то и один, — а код берётся
+ * у того, где меток больше; у меток остальных сменится приставка подписи.
+ * Из двух путей, какими тип попадал в объект, так получиться не могло.
+ */
+export function migrateCommentType(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, moved: 0 };
+  const own = project.markTypes.filter((type) => type.kind === MARK_KIND_COMMENT);
+  if (own.length === 0) return { project, changed: false, moved: 0 };
+  const ids = new Set(own.map((type) => type.id));
+  const marks = Array.isArray(project.marks) ? project.marks : [];
+  const count = (typeId) => marks.filter((mark) => mark.typeId === typeId).length;
+  // Главный — тот, на котором больше меток: его код и переезжает. При равенстве
+  // выигрывает первый в справочнике, чтобы ответ не зависел от порядка обхода.
+  const main = own.reduce((best, type) => (count(type.id) > count(best.id) ? type : best), own[0]);
+  const next = { ...project };
+  let moved = 0;
+  next.marks = marks.map((mark) => {
+    if (!ids.has(mark.typeId)) return mark;
+    moved += 1;
+    return { ...mark, typeId: COMMENT_TYPE_ID };
+  });
+  next.markTypes = project.markTypes.filter((type) => !ids.has(type.id));
+  // Категория уходит только вместе с последним своим типом: заведи пользователь
+  // в «Комментариях» что-то своё — категория останется ему.
+  const orphan = new Set(own.map((type) => type.categoryId));
+  for (const type of next.markTypes) orphan.delete(type.categoryId);
+  next.categories = (project.categories || []).filter((category) => !orphan.has(category.id));
+  const code = String(main.code || "").trim();
+  if (code && code !== COMMENT_TYPE_CODE) next.commentCode = code;
+  return { project: next, changed: true, moved };
 }
 
 /**

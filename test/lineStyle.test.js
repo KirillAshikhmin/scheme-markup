@@ -93,22 +93,22 @@ test("переключатели заказчика стоят в своей к�
   );
 });
 
-test("стартовый справочник — справочник заказчика: тринадцать категорий и сорок восемь типов", () => {
+test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок семь типов", () => {
   const { categories, markTypes } = defaultTemplate();
-  assert.equal(categories.length, 13, "категории справочника заказчика потерялись");
-  assert.equal(markTypes.length, 48, "типы справочника заказчика потерялись");
+  assert.equal(categories.length, 12, "категории справочника заказчика потерялись");
+  assert.equal(markTypes.length, 47, "типы справочника заказчика потерялись");
   // Порядок — его порядок, а не наша перекладка по категориям.
   // prettier-ignore
   assert.deepEqual(markTypes.map((type) => type.code), [
     "Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
     "ПКШ", "ЛЮ", "П", "ПП", "Н", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
     "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
-    "КВ", "ПЛ", "ПЗ", "КАМ", "Коммент",
+    "КВ", "ПЛ", "ПЗ", "КАМ",
   ]);
   // prettier-ignore
   assert.deepEqual(categories.map((category) => category.name), [
     "Свет", "Выключатели", "Розетки", "Климат", "Сетевое оборудование", "Домофон", "Карнизы",
-    "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника", "Комментарии",
+    "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
   ]);
   // Комнаты он прислал вместе со справочником и тут же сказал «Комнаты не
   // нужны» — в шаблоне их нет.
@@ -418,13 +418,10 @@ test("линейные типы шаблона названы заказчико
   // точка — линейным он его не держит.
   assert.deepEqual(lines.map((type) => type.code), ["ТР", "Л", "ПШ", "ПКШ", "ПЛ"], "линейные типы — ровно названные");
   assert.equal(markTypes.find((type) => type.code === "КШ").kind, "point");
-  // Остальные точечные: линейных пять, комментарий один, и ни одного сверх того.
-  assert.deepEqual(
-    markTypes.filter((type) => type.kind === "comment").map((type) => type.code),
-    ["Коммент"],
-    "комментарий в шаблоне ровно один",
-  );
-  assert.equal(markTypes.filter((type) => type.kind === "point").length, markTypes.length - 6);
+  // Комментарий в шаблоне не живёт вовсе: он встроенный (G173).
+  assert.equal(markTypes.some((type) => type.kind === "comment"), false, "комментарий попал в шаблон");
+  // Остальные точечные: линейных пять, и ни одного сверх того.
+  assert.equal(markTypes.filter((type) => type.kind === "point").length, markTypes.length - 5);
 
   const byId = new Map(categories.map((category) => [category.id, category]));
   const light = lines.filter((type) => byId.get(type.categoryId).name === "Свет");

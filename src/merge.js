@@ -18,7 +18,7 @@
 // правила, сущность остаётся (с пометкой в `conflicts`). Вернуть лишнюю метку
 // — минута работы, восстановить потерянную — некому.
 
-import { MARK_NUMBER_MAX, renumberAcceptedRepeats } from "./model.js";
+import { COMMENT_TYPE_ID, MARK_NUMBER_MAX, commentCodeOf, renumberAcceptedRepeats } from "./model.js";
 
 // Сущности объекта, которые сливаются поимённо, по `id`.
 //
@@ -558,6 +558,10 @@ function mergeReferences(merged, report, sources, winner) {
 
   merged.marks = merged.marks.filter((mark) => {
     if (liveTypes.has(mark.typeId)) return true;
+    // Комментарий ссылается на встроенный тип (G173), и в справочнике его нет
+    // ни у одной из сторон — это не висячая ссылка. Без этой строки слияние
+    // двух файлов выбрасывало бы все плашки как метки без типа.
+    if (mark.typeId === COMMENT_TYPE_ID) return true;
     report.conflicts.push({ code: "danglingRef", entity: "marks", id: mark.id, kept: "none", item: mark });
     return false;
   });
@@ -697,7 +701,10 @@ export function mergeProjects(ours, theirs, base, options = {}) {
 
   // Подписи для отчёта считаются по слитому справочнику: тип метки мог приехать
   // тем же слиянием.
+  // Код встроенного комментария в отчёт подставляется отдельно: в справочнике
+  // его нет, и без этого плашка значилась бы в отчёте голым номером.
   const typeCodes = new Map(merged.markTypes.map((type) => [type.id, type.code]));
+  typeCodes.set(COMMENT_TYPE_ID, commentCodeOf(merged));
   for (const change of report.changes) change.label = mergeLabel(change.entity, change.item, typeCodes);
   for (const conflict of report.conflicts) conflict.label = mergeLabel(conflict.entity, conflict.item, typeCodes);
 
