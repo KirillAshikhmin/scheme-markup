@@ -68,6 +68,8 @@ export const WARNING_TARGETS = {
   controlsChannelMissing: "mark",
   controlsChannelBeyond: "mark",
   repeatedNumber: "mark",
+  // Метка в проёме ведёт к самой метке: смотреть надо на план, где она стоит.
+  markInOpening: "mark",
   outlineWithoutScheme: "outline",
   outlineWithoutRoom: "outline",
   shortOutline: "outline",
