@@ -3242,8 +3242,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Колонка подросла с 252 до 290: занятий в окне стало три, у проёма пять полей
+   с единицами в подписях, а у объекта — ещё и выбор вида с длинными именами.
+   Поле чертежа теряет 38 точек из полутора тысяч — цена, которую видно только
+   линейкой. */
 .workshop__side {
-  width: 252px;
+  width: 290px;
   flex: none;
   overflow: auto;
   display: flex;
@@ -3338,6 +3342,57 @@
   font-size: 11px;
   line-height: 1.35;
   color: var(--panel-muted);
+}
+
+/* Причина, по которой проём не сядет. Красным — потому что то же самое в эту
+   минуту краснеет под курсором: строка объясняет призрак, а не заменяет его. */
+.workshop__note.is-bad {
+  color: var(--danger);
+}
+
+/* Поля одного предмета. Видна всегда ровно одна такая пачка: занятий в окне
+   стало три, и показывать толщину стены над размерами двери значит растить
+   колонку вдвое ради того, что сейчас не нужно. */
+.workshop__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Ряд мелких кнопок: виды проёма, формы объекта, «плюс» у справочника. Они
+   выбирают, а не делают, поэтому и выглядят иначе — плотнее и без заливки,
+   пока не выбраны. */
+.workshop__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workshop__chip {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workshop__chip.is-on {
+  border-color: var(--accent);
+  color: var(--panel-text);
+  background: rgba(31, 111, 235, 0.18);
+}
+
+/* Выбор вида объекта забирает строку, «плюс» рядом — ровно свою ширину.
+   Основа нулевая, а не по содержимому: имя «Столешница (кухонный фронт)» шире
+   колонки, и при `auto` строка переносилась, оставляя «плюс» один на второй —
+   это видно на снимке живого прогона. */
+.workshop__chips select.ui-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.workshop__chips .workshop__chip:last-child:not(:first-child) {
+  flex: 0 0 auto;
 }
 
 .workshop__rooms {
@@ -4910,6 +4965,17 @@ const strings = {
     wallHeight: "высота стен схемы",
     roomWallHeight: "высота стен помещения",
     planOrigin: "привязка чертежа к плану",
+    openingAdd: "проём в стене",
+    openingEdit: "размеры проёма",
+    openingKind: "вид проёма",
+    openingSwing: "сторона открывания двери",
+    openingMove: "перенос проёма",
+    openingRemove: "удаление проёма",
+    objectAdd: "объект на чертеже",
+    objectEdit: "правка объекта чертежа",
+    objectMove: "перенос объекта чертежа",
+    objectRemove: "удаление объекта чертежа",
+    objectKindAdd: "новый вид объекта",
     stamp: "данные для штампа",
     scaleSet: "масштаб плана",
     scaleClear: "снятие масштаба плана",
@@ -5461,13 +5527,21 @@ const strings = {
     // полилинией) и правят. Проёмы и объекты — таск 126, меток здесь нет вовсе.
     toolWalls: "Стены",
     toolWallsHint: "Рисовать стены цепочкой: клик — вершина, двойной клик — конец цепочки",
+    // Порядок занятий — порядок работы, заданный заказчиком (G176): сперва
+    // стены, потом проёмы, потом объекты.
+    toolOpenings: "Проёмы",
+    toolOpeningsHint: "Поставить окно, дверь, проём или арку: покажите на стену — проём сядет в неё серединой под курсор",
+    toolObjects: "Объекты",
+    toolObjectsHint: "Поставить на пол радиатор, столешницу, колонну: клик — прямоугольник по умолчанию, полоса рисуется цепочкой",
     toolEdit: "Правка",
-    toolEditHint: "Выделять и двигать: вершина цепочки тянется за ручку, стена — за середину",
+    toolEditHint: "Выделять и двигать: вершина цепочки тянется за ручку, стена — за середину, проём — вдоль своей стены",
     fit: "Вписать",
     layers: "Слои",
     layerPlan: "Подложка",
     layerGrid: "Сетка",
     layerWalls: "Стены",
+    layerWallsHint: "Проёмы живут в стенах и гаснут вместе с ними: окно без своей стены — не чертёж",
+    layerObjects: "Объекты",
     layerPlanNone: "Подложки у этой схемы нет",
     // Без калибровки подложку под чертёж не положить не «потому что мы так
     // решили», а потому что нечем: миллиметру не от чего считаться в пикселях.
@@ -5481,9 +5555,43 @@ const strings = {
     thickness: "Толщина выделенной, мм",
     thicknessNew: "Толщина новых стен, мм",
     thicknessHint: "Выделите стену — поле задаст толщину ей; без выделения это толщина новых стен.",
-    remove: "Удалить стену",
+    remove: "Удалить",
     wallInfo: "Длина {length} мм",
     wallNone: "Стена не выделена",
+    // Удаление стены уносит её проёмы — так решено в модели (таск 123):
+    // возвращённая стена, которой человек решил не быть, молча осталась бы в
+    // развёртке. Спрашиваем только когда терять есть что.
+    removeWallTitle: "Удалить стену вместе с проёмами?",
+    removeWallAsk: "В этой стене проёмов: {count}. Они живут в ней и уйдут вместе с ней — вернуть их можно будет только отменой (Ctrl+Z).",
+    // ——— проёмы ———
+    opening: "Проём",
+    openingWidth: "Ширина, мм",
+    openingHeight: "Высота, мм",
+    openingFloor: "От пола, мм",
+    openingAt: "Отступ от начала стены, мм",
+    openingHint: "Покажите на стену — проём сядет в неё серединой под курсор. Призрак краснеет, если не влезает.",
+    openingNeedWall: "Сперва нарисуйте стены: проём живёт в стене, а не рядом с ней",
+    doorHinge: "Петли: {value}",
+    doorSwing: "Открывание: {value}",
+    doorHint: "Ручка у петли переставляет их на другой косяк, ручка на кончике полотна перекидывает его на другую сторону стены.",
+    // ——— объекты на полу ———
+    object: "Объект",
+    objectWidth: "Ширина, мм",
+    objectDepth: "Глубина, мм",
+    objectBand: "Ширина полосы, мм",
+    objectTurn: "Поворот, °",
+    objectHeight: "Высота, мм",
+    objectFloor: "От пола, мм",
+    objectHeightHint: "Пустая высота — «во всю высоту помещения»: так стоят колонна, ниша и короб.",
+    objectHint: "Клик ставит объект серединой под курсор, размеры — по виду.",
+    objectBandHint: "Полоса рисуется цепочкой, как стена: клик — вершина, двойной клик — конец.",
+    objectFullHeight: "Во всю высоту помещения",
+    objectTop: "верх {top} мм",
+    objectKindAdd: "+",
+    objectKindAddTitle: "Новый вид объекта",
+    objectKindAddHint: "Добавить свой вид в справочник: пополняется он отсюда, а переименование и удаление живут в модели",
+    shape_rect: "Прямоугольник",
+    shape_polyline: "Полоса",
     height: "Высота",
     heightScheme: "Высота стен схемы, мм",
     heightHint: "Общая высота этажа. Пусто — не задана.",
@@ -5506,13 +5614,24 @@ const strings = {
     sizeEmpty: "чертёж пуст",
     size: "чертёж {width} × {height} мм",
     wallCount: "стен {count}",
+    openingCount: "проёмов {count}",
+    objectCount: "объектов {count}",
     calibrate: "Откалибровать план",
     calibrateHint:
       "Закроет окно и переведёт холст в калибровку: показываете на плане отрезок и говорите, сколько в нём метров. Рисовать по плану до этого нельзя — миллиметры уже нарисованных стен калибровка не пересчитает.",
     attach: "Привязать чертёж к плану",
     attachHint: "Начало координат чертежа встанет в середину подложки",
+    // Подсказка под полем своя у каждого занятия. Одна на всех врала с той
+    // минуты, как занятий стало три: про «вершину цепочки» читал человек,
+    // который в это время ставил окно в стену.
     hint:
       "Клик — вершина стены, двойной клик — конец цепочки, Backspace — убрать последнюю, Esc — отменить цепочку. Alt — без притяжки. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
+    hintOpenings:
+      "Покажите на стену — проём сядет в неё серединой под курсор. Красный призрак не сядет, причина названа справа. Вид и размеры — в колонке. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
+    hintObjects:
+      "Клик ставит объект серединой под курсор, размеры — по виду. Полоса рисуется цепочкой: клик — вершина, двойной клик — конец. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
+    hintEdit:
+      "Клик выделяет. Вершина тянется за ручку, стена — за середину, проём — вдоль своей стены, объект — целиком. Delete убирает выделенное, Esc снимает выделение. Ctrl+Z — отмена.",
     chainAdded: "Цепочка из {count} стен",
     originSet: "Начало координат чертежа — середина подложки",
     // Дописывается к известию о замене подложки рядом с `scale.replaceDropped`:
@@ -5767,6 +5886,26 @@ const strings = {
   // не заводится. Радиатор и столешница здесь не для полноты — радиатор стоит
   // под окном ровно там, где хочется розетка, а высота столешницы задаёт
   // высоту розеток над ней.
+  // Виды проёмов и сторона открывания двери. Слова стоят рядом со
+  // справочником видов объектов: и то и другое — названия того, что рисуют на
+  // чертеже, и в коде они зовутся ключами модели.
+  openingKinds: {
+    window: "Окно",
+    door: "Дверь",
+    opening: "Проём",
+    arch: "Арка",
+  },
+  // «Начало» и «конец» — это концы стены `a` и `b`: сторона открывания задана
+  // через направление самой стены, а не «внутрь/наружу» (ADR 008). Там же и
+  // «левая» — та, что слева, если идти от начала стены к концу.
+  openingHinges: {
+    start: "у начала стены",
+    end: "у конца стены",
+  },
+  openingSwings: {
+    left: "налево",
+    right: "направо",
+  },
   schemeObjectKinds: {
     column: "Колонна",
     niche: "Ниша",
@@ -35008,31 +35147,296 @@ function workshopDistanceMm(point, from, to) {
   return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
 }
 
+// ——— проёмы: умолчания и геометрия ————————————————————————————————————
+//
+// **Умолчания обязательны, а не удобны.** Человек ставит десять окон подряд, и
+// вводить по четыре числа на каждое он не станет — он поставит их «как
+// обычно» и поправит те два, которые отличаются. Числа взяты из того, что
+// ставят в квартире: окно 1500 × 1400 с подоконником на 800 (при потолке 2700
+// над ним остаётся полметра), межкомнатная дверь — проём 900 × 2100 под
+// полотно 800 × 2000, проём без полотна такой же, арка пошире — 1200.
+//
+// Запоминаются они **на сеанс и по виду**: поправил окно на 1300 — следующее
+// окно встанет 1300, а дверь останется дверью.
+const WORKSHOP_OPENING_DEFAULTS = {
+  window: { widthMm: 1500, heightMm: 1400, heightAboveFloorMm: 800 },
+  door: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
+  opening: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
+  arch: { widthMm: 1200, heightMm: 2100, heightAboveFloorMm: 0 },
+};
+
 /**
- * Что под курсором: вершина, тело стены или ничего.
- *
- * Вершина старше тела — ею правят угол, и промах по ней обиднее. Среди тел
- * выигрывает нарисованное позже: оно лежит сверху. Порог тела растёт с
- * толщиной — толстую стену ловят по её ширине, а не по осевой линии.
+ * Единичные векторы стены: `u` — вдоль, от `a` к `b`; `n` — **влево** от него.
+ * «Влево» — то же слово, которым модель назвала сторону открывания двери: та,
+ * что слева, если идти от `a` к `b`. Ось `y` на экране растёт вниз, поэтому
+ * левая нормаль это `(u.y, −u.x)`, и перевёрнут этот знак ровно здесь, в одном
+ * месте на всё окно.
  */
-function workshopPick(project, schemeId, pointMm, view) {
+function workshopWallVectors(wall) {
+  if (!wall) return null;
+  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
+  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return null;
+  // `|| 0` — от **минус нуля**: у вертикальной стены `−dx / len` даёт `-0`, и
+  // он поехал бы дальше в координаты створки. В сборке это уже ловили
+  // (ADR 008, `drawingMmValue`), и второй раз наступать незачем.
+  return {
+    len,
+    u: { x: dx / len || 0, y: dy / len || 0 },
+    n: { x: dy / len || 0, y: -dx / len || 0 },
+  };
+}
+
+/** Сколько миллиметров от конца `a` до проекции точки на стену, зажато в стену. */
+function workshopAlongWall(wall, pointMm) {
+  const vectors = workshopWallVectors(wall);
+  if (!vectors) return 0;
+  const along = (pointMm.x - wall.aMm.x) * vectors.u.x + (pointMm.y - wall.aMm.y) * vectors.u.y;
+  return Math.max(0, Math.min(vectors.len, Math.round(along)));
+}
+
+/**
+ * Куда сядет проём, когда показали на стену: **серединой под курсор**, и
+ * прижатый к стене, если у конца не хватает места.
+ *
+ * Прижатие — не догадка: человек видит призрак проёма до клика и видит, что он
+ * упёрся в конец. Без прижатия каждый клик у угла отвечал бы отказом
+ * «не помещается», а поставить окно вплотную к углу — обычное дело.
+ */
+function workshopOpeningAt(wall, pointMm, widthMm) {
+  const vectors = workshopWallVectors(wall);
+  if (!vectors) return 0;
+  const width = Number(widthMm) || 0;
+  const middle = workshopAlongWall(wall, pointMm);
+  return Math.max(0, Math.min(Math.round(vectors.len - width), Math.round(middle - width / 2)));
+}
+
+/** Концы проёма на оси стены плюс её векторы — всё, чем он рисуется и ловится. */
+function workshopOpeningSpan(wall, opening) {
+  const vectors = workshopWallVectors(wall);
+  if (!vectors || !opening) return null;
+  const at = Number(opening.atMm) || 0;
+  const width = Number(opening.widthMm) || 0;
+  const point = (distance) => ({
+    x: wall.aMm.x + vectors.u.x * distance,
+    y: wall.aMm.y + vectors.u.y * distance,
+  });
+  return { from: point(at), to: point(at + width), u: vectors.u, n: vectors.n, len: vectors.len, width };
+}
+
+/**
+ * Створка двери: петля, закрытое положение и кончик открытого.
+ *
+ * Четыре сочетания петель и стороны — это четыре разные двери, и на чертеже их
+ * различают именно по створке: с какого косяка она растёт и в какую сторону
+ * стены открывается. Полотно рисуется раскрытым на четверть оборота — так его
+ * рисуют на планах, и так видно, какой кусок пола дверь занимает.
+ */
+function workshopDoorLeaf(wall, opening) {
+  const span = workshopOpeningSpan(wall, opening);
+  if (!span || !(span.width > 0)) return null;
+  const atStart = opening.hinge !== "end";
+  const hinge = atStart ? span.from : span.to;
+  const closed = atStart ? span.to : span.from;
+  const side = opening.swing === "right" ? -1 : 1;
+  const tip = { x: hinge.x + span.n.x * side * span.width, y: hinge.y + span.n.y * side * span.width };
+  return { hinge, closed, tip, radius: span.width, side, n: span.n };
+}
+
+/**
+ * Попробовать записать проём и честно сказать, что не так.
+ *
+ * Модель отказывает на проём шире стены, за её концом, внахлёст с соседним и
+ * выше потолка — и её собственные сообщения уже называют числа («Проём шире
+ * стены: проём 1500 мм, стена 1200 мм»). Поэтому проверка здесь не
+ * переписывается: окно **пробует настоящую правку** и берёт у модели её же
+ * слова. Призрак под курсором считается этой же функцией, поэтому красным он
+ * становится ровно тогда, когда клик не прошёл бы.
+ */
+function workshopTryOpening(project, draft, openingId) {
+  try {
+    const result = openingId ? updateOpening(project, openingId, draft) : addOpening(project, draft);
+    return { ok: true, project: result.project, opening: result.opening };
+  } catch (error) {
+    return { ok: false, message: error && error.message ? error.message : String(error) };
+  }
+}
+
+// ——— объекты на полу: умолчания по виду ————————————————————————————————
+//
+// Виды пополняются человеком, а умолчания привязаны к стартовым девяти —
+// сопоставление идёт **по имени** (к id справочника привязываться нельзя,
+// `schemeObjectKindTemplate` выдаёт свежие на каждый вызов). Незнакомому виду
+// достаётся `WORKSHOP_OBJECT_FALLBACK`: квадрат, который человек поправит.
+//
+// Числа — то, что стоит в квартире. Два вида выверены отдельно, потому что
+// ради них объекты и заведены (таск 122): **радиатор** 1200 × 100, высота 500,
+// от пола 150 — он висит под окном ровно там, где хочется розетка; и
+// **столешница** полосой 600 мм, верх на 900 (860 + 40) — от этого числа
+// отмеряют розетки над кухонным фронтом.
+const WORKSHOP_OBJECT_DEFAULTS = {
+  column: { shape: "rect", widthMm: 400, depthMm: 400, heightMm: null, heightAboveFloorMm: 0 },
+  niche: { shape: "rect", widthMm: 1000, depthMm: 300, heightMm: null, heightAboveFloorMm: 0 },
+  duct: { shape: "rect", widthMm: 300, depthMm: 300, heightMm: null, heightAboveFloorMm: 0 },
+  stairs: { shape: "rect", widthMm: 1100, depthMm: 2700, heightMm: null, heightAboveFloorMm: 0 },
+  panel: { shape: "rect", widthMm: 600, depthMm: 150, heightMm: 800, heightAboveFloorMm: 1000 },
+  radiator: { shape: "rect", widthMm: 1200, depthMm: 100, heightMm: 500, heightAboveFloorMm: 150 },
+  counter: { shape: "polyline", depthMm: 600, heightMm: 40, heightAboveFloorMm: 860 },
+  plumbing: { shape: "rect", widthMm: 700, depthMm: 400, heightMm: 400, heightAboveFloorMm: 0 },
+  cabinet: { shape: "rect", widthMm: 1000, depthMm: 600, heightMm: 2200, heightAboveFloorMm: 0 },
+};
+const WORKSHOP_OBJECT_FALLBACK = {
+  shape: "rect",
+  widthMm: 600,
+  depthMm: 600,
+  heightMm: null,
+  heightAboveFloorMm: 0,
+};
+
+function workshopKindKeyByName(name) {
+  const wanted = String(name == null ? "" : name).trim().toLowerCase();
+  for (const key of Object.keys(WORKSHOP_OBJECT_DEFAULTS)) {
+    if (String(strings.schemeObjectKinds[key] || "").toLowerCase() === wanted) return key;
+  }
+  return null;
+}
+
+/**
+ * Умолчания вида — **по имени**, а не по id: `schemeObjectKindTemplate` выдаёт
+ * свежие идентификаторы на каждый вызов, привязываться к ним нельзя (то же
+ * правило, что у `defaultTemplate`). Имени хватает: справочник пополняет
+ * человек, и своему виду он даст своё имя, а не чужое.
+ */
+function workshopObjectDefaultsByName(name) {
+  const key = workshopKindKeyByName(name);
+  return { ...(key ? WORKSHOP_OBJECT_DEFAULTS[key] : WORKSHOP_OBJECT_FALLBACK) };
+}
+function workshopObjectDefaults(project, kindId) {
+  const kind = findSchemeObjectKind(project, kindId);
+  return workshopObjectDefaultsByName(kind ? kind.name : null);
+}
+
+/**
+ * Углы габарита объекта в миллиметрах — то же, по чему модель считает размер
+ * чертежа: у прямоугольника четыре повёрнутых угла, у ломаной её вершины.
+ * Это геометрия отрисовки, а не вторая модель: наружу `schemeObjectCornersMm`
+ * модель не отдаёт, а рисовать и ловить объект чем-то надо.
+ */
+function workshopObjectCorners(object) {
+  if (!object) return [];
+  if (object.shape === "polyline") {
+    return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+  }
+  const at = object.atMm || { x: 0, y: 0 };
+  const halfWidth = Number(object.widthMm) / 2;
+  const halfDepth = Number(object.depthMm) / 2;
+  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return [
+    [-halfWidth, -halfDepth],
+    [halfWidth, -halfDepth],
+    [halfWidth, halfDepth],
+    [-halfWidth, halfDepth],
+  ].map(([x, y]) => ({ x: Number(at.x) + x * cos - y * sin, y: Number(at.y) + x * sin + y * cos }));
+}
+
+function workshopInsidePolygon(point, corners) {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+    const a = corners[i];
+    const b = corners[j];
+    const crosses = a.y > point.y !== b.y > point.y;
+    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/** Попал ли курсор в объект: внутрь прямоугольника или в полосу ломаной. */
+function workshopHitObject(object, pointMm, slackMm) {
+  const corners = workshopObjectCorners(object);
+  if (corners.length === 0) return false;
+  if (object.shape === "polyline") {
+    const limit = Math.max(Number(slackMm) || 0, Number(object.depthMm) / 2);
+    for (let index = 1; index < corners.length; index += 1) {
+      if (workshopDistanceMm(pointMm, corners[index - 1], corners[index]) <= limit) return true;
+    }
+    return false;
+  }
+  if (workshopInsidePolygon(pointMm, corners)) return true;
+  const limit = Number(slackMm) || 0;
+  for (let index = 0; index < corners.length; index += 1) {
+    if (workshopDistanceMm(pointMm, corners[index], corners[(index + 1) % corners.length]) <= limit) return true;
+  }
+  return false;
+}
+
+/**
+ * Что под курсором на чертеже. Старшинство названо здесь целиком, потому что
+ * спорят теперь четверо:
+ *
+ *   1. **ручки створки выделенной двери** — ими её и переключают, и стоят они
+ *      поверх самой двери;
+ *   2. **вершина стены** — ею правят угол, промах по ней обиднее всего;
+ *   3. **проём** — он лежит в стене, и клик по нему должен брать его, а не
+ *      стену под ним;
+ *   4. **объект на полу** — он внутри комнаты, стен там обычно нет;
+ *   5. **тело стены** — последнее, и порог растёт с толщиной.
+ */
+function workshopPick(project, schemeId, pointMm, view, selected) {
   const walls = wallsOnScheme(project, schemeId);
   const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
   const vertexMm = WORKSHOP_VERTEX_PX / zoom;
+  const slackMm = WORKSHOP_WALL_PX / zoom;
+  if (selected && selected.kind === "opening") {
+    const opening = findOpening(project, selected.id);
+    const wall = opening ? findWall(project, opening.wallId) : null;
+    const leaf = wall && opening.kind === OPENING_KIND_DOOR ? workshopDoorLeaf(wall, opening) : null;
+    if (leaf) {
+      if (Math.hypot(pointMm.x - leaf.hinge.x, pointMm.y - leaf.hinge.y) <= vertexMm) {
+        return { kind: "hinge", id: opening.id };
+      }
+      if (Math.hypot(pointMm.x - leaf.tip.x, pointMm.y - leaf.tip.y) <= vertexMm) {
+        return { kind: "swing", id: opening.id };
+      }
+    }
+  }
   let vertex = null;
   for (const wall of walls) {
     for (const end of ["aMm", "bMm"]) {
       const gap = Math.hypot(pointMm.x - wall[end].x, pointMm.y - wall[end].y);
       if (gap <= vertexMm && (!vertex || gap < vertex.gap)) {
-        vertex = { gap, kind: "vertex", wallId: wall.id, atMm: { x: wall[end].x, y: wall[end].y } };
+        vertex = { gap, wallId: wall.id, atMm: { x: wall[end].x, y: wall[end].y } };
       }
     }
   }
-  if (vertex) return { kind: "vertex", wallId: vertex.wallId, atMm: vertex.atMm };
+  if (vertex) return { kind: "vertex", id: vertex.wallId, wallId: vertex.wallId, atMm: vertex.atMm };
   for (let index = walls.length - 1; index >= 0; index -= 1) {
     const wall = walls[index];
-    const limit = Math.max(WORKSHOP_WALL_PX / zoom, Number(wall.thicknessMm) / 2);
-    if (workshopDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) return { kind: "wall", wallId: wall.id, atMm: null };
+    const limit = Math.max(slackMm, Number(wall.thicknessMm) / 2);
+    for (const opening of openingsInWall(project, wall.id)) {
+      const span = workshopOpeningSpan(wall, opening);
+      if (!span) continue;
+      const along = (pointMm.x - wall.aMm.x) * span.u.x + (pointMm.y - wall.aMm.y) * span.u.y;
+      const across = Math.abs((pointMm.x - wall.aMm.x) * span.n.x + (pointMm.y - wall.aMm.y) * span.n.y);
+      if (along >= opening.atMm && along <= opening.atMm + opening.widthMm && across <= limit) {
+        return { kind: "opening", id: opening.id, wallId: wall.id };
+      }
+    }
+  }
+  const objects = schemeObjectsOnScheme(project, schemeId);
+  for (let index = objects.length - 1; index >= 0; index -= 1) {
+    if (workshopHitObject(objects[index], pointMm, slackMm)) {
+      return { kind: "object", id: objects[index].id };
+    }
+  }
+  for (let index = walls.length - 1; index >= 0; index -= 1) {
+    const wall = walls[index];
+    const limit = Math.max(slackMm, Number(wall.thicknessMm) / 2);
+    if (workshopDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) {
+      return { kind: "wall", id: wall.id, wallId: wall.id, atMm: null };
+    }
   }
   return null;
 }
@@ -35100,6 +35504,19 @@ function workshopGridDrawStepMm(gridMm, zoom) {
 }
 
 /**
+ * Подсказка под полем — своя у каждого занятия. Одна на всех врала с той
+ * минуты, как занятий стало три: про «вершину цепочки» читал человек, который
+ * в это время ставил окно в стену. Чистая и вынесена наружу ради теста:
+ * пропущенное занятие молча показало бы чужие слова.
+ */
+function workshopHint(tool) {
+  if (tool === "openings") return strings.workshop.hintOpenings;
+  if (tool === "objects") return strings.workshop.hintObjects;
+  if (tool === "edit") return strings.workshop.hintEdit;
+  return strings.workshop.hint;
+}
+
+/**
  * Строка состояния схемы: какой это из трёх случаев, что в чертеже и сколько
  * стен. Чистая — слова про случай «молча рисовать в никуда нельзя» решаются
  * здесь и проверяются без браузера.
@@ -35129,6 +35546,13 @@ function workshopStatus(project, schemeId, placement) {
       : strings.workshop.sizeEmpty,
   );
   parts.push(text("workshop.wallCount", { count: wallsOnScheme(project, schemeId).length }));
+  const openings = wallsOnScheme(project, schemeId).reduce(
+    (total, wall) => total + openingsInWall(project, wall.id).length,
+    0,
+  );
+  if (openings > 0) parts.push(text("workshop.openingCount", { count: openings }));
+  const objects = schemeObjectsOnScheme(project, schemeId).length;
+  if (objects > 0) parts.push(text("workshop.objectCount", { count: objects }));
   return parts.join(" · ");
 }
 
@@ -35137,10 +35561,21 @@ function workshopStatus(project, schemeId, placement) {
 // Что человек выбрал в окне — его рабочее место, а не свойство объекта: слои,
 // шаг сетки, притяжка и толщина новых стен живут в памяти страницы и переживают
 // закрытие окна, но в `project.json` не попадают.
-let workshopLayers = { plan: true, grid: true, walls: true };
+let workshopLayers = { plan: true, grid: true, walls: true, objects: true };
 let workshopGridMm = WORKSHOP_GRID_DEFAULT_MM;
 let workshopGridSnap = true;
 let workshopThicknessMm = WORKSHOP_THICKNESS_DEFAULT_MM;
+// Умолчания проёмов — по виду и на сеанс: поправил окно на 1300, и следующее
+// окно встанет 1300, а дверь останется дверью.
+let workshopOpeningKind = OPENING_KINDS[0];
+let workshopOpeningSizes = JSON.parse(JSON.stringify(WORKSHOP_OPENING_DEFAULTS));
+let workshopDoorHinge = OPENING_HINGES[0];
+let workshopDoorSwing = OPENING_SWINGS[0];
+// Объекты: вид выбирается в колонке, размеры подставляются по виду, форма —
+// от вида же (столешница полосой, остальное прямоугольником).
+let workshopObjectKindName = strings.schemeObjectKinds.radiator;
+let workshopObjectShape = SCHEME_OBJECT_SHAPES[0];
+let workshopObjectSizes = {};
 let workshopOpened = false;
 
 const WORKSHOP_PAPER = "#f6f8fa";
@@ -35151,6 +35586,12 @@ const WORKSHOP_WALL_EDGE = "#0f1419";
 const WORKSHOP_ACCENT = "#1f6feb";
 const WORKSHOP_ORIGIN = "#d1242f";
 const WORKSHOP_HANDLE = "#ffffff";
+// Объект на полу — не стена: контур тоньше и другого цвета, заливка почти
+// прозрачная. Иначе радиатор под окном читался бы второй стеной.
+const WORKSHOP_OBJECT = "#6639ba";
+const WORKSHOP_OBJECT_FILL = "rgba(102, 57, 186, 0.12)";
+const WORKSHOP_BAD = "#d1242f";
+const WORKSHOP_CAPTION = "#57606a";
 
 /**
  * Открыть мастерскую для схемы.
@@ -35169,7 +35610,14 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
   let view = { zoom: 1, offsetX: 0, offsetY: 0 };
   let fitted = false;
   let draft = null; // {points: [мм], cursor: мм, snap: результат притяжки}
-  let selectedWallId = null;
+  // Выделено может быть одно из трёх: стена, проём или объект на полу.
+  // Одна переменная на всех — иначе «выделено два разных» стало бы состоянием,
+  // которого в окне не бывает.
+  let selected = null; // {kind: "wall"|"opening"|"object", id}
+  // Призрак проёма под курсором и причина, по которой он не сядет: считается
+  // той же попыткой записи, что и сам клик, поэтому красным он становится
+  // ровно тогда, когда клик не прошёл бы.
+  let ghost = null;
   let drag = null;
   let pan = null;
   let hover = null;
@@ -35195,6 +35643,16 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     title: strings.workshop.toolWallsHint,
     on: { click: () => setTool("walls") },
   });
+  // Порядок кнопок — порядок работы, заданный заказчиком (G176): сперва
+  // стены, потом проёмы, потом объекты. Правка последняя: ею пользуются после.
+  const openingsButton = uiButton(strings.workshop.toolOpenings, {
+    title: strings.workshop.toolOpeningsHint,
+    on: { click: () => setTool("openings") },
+  });
+  const objectsButton = uiButton(strings.workshop.toolObjects, {
+    title: strings.workshop.toolObjectsHint,
+    on: { click: () => setTool("objects") },
+  });
   const editButton = uiButton(strings.workshop.toolEdit, {
     title: strings.workshop.toolEditHint,
     on: { click: () => setTool("edit") },
@@ -35209,12 +35667,17 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
   });
   const fitButton = uiButton(strings.workshop.fit, { on: { click: () => fit() } });
   const meta = uiEl("p", { class: "workshop__meta" });
-  const hint = uiEl("p", { class: "modal__hint", text: strings.workshop.hint });
+  const hint = uiEl("p", { class: "modal__hint", text: workshopHint("walls") });
 
   // ——— правая часть: слои, сетка, стена, высоты ———
   const planCheck = uiEl("input", { type: "checkbox" });
   const gridCheck = uiEl("input", { type: "checkbox" });
   const wallsCheck = uiEl("input", { type: "checkbox" });
+  const objectsCheck = uiEl("input", { type: "checkbox" });
+  objectsCheck.addEventListener("change", () => {
+    workshopLayers = { ...workshopLayers, objects: objectsCheck.checked };
+    sync();
+  });
   planCheck.addEventListener("change", () => {
     workshopLayers = { ...workshopLayers, plan: planCheck.checked };
     sync();
@@ -35253,18 +35716,94 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     sync();
   });
 
+  // ——— одна колонка свойств на троих ———
+  //
+  // Групп в колонке было четыре, занятий стало три, и у каждого свои поля. Если
+  // показывать все сразу, колонка вырастет вдвое и толщина стены будет висеть
+  // над размерами двери. Поэтому группа одна, и её заголовок и поля меняются
+  // вместе с тем, что делают: инструмент задаёт умолчания для нового, выделение
+  // перебивает их свойствами выделенного. Это то же правило, по которому ещё в
+  // таске 125 одно поле толщины служило и новым стенам, и выделенной.
+  const subjectHead = uiEl("h4", { class: "workshop__head" });
+  const subjectNote = uiEl("p", { class: "workshop__note" });
+
   const thicknessInput = workshopNumber(1, WALL_THICKNESS_MM_MAX);
-  thicknessInput.addEventListener("change", () => applyThickness());
-  thicknessInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    applyThickness();
-  });
   const thicknessLabel = uiEl("span", { class: "workshop__label" });
-  const wallInfo = uiEl("p", { class: "workshop__note" });
+  workshopApply(thicknessInput, () => applyThickness());
+  const wallFields = uiEl("div", { class: "workshop__fields" }, [
+    uiEl("label", { class: "workshop__field" }, [thicknessLabel, thicknessInput]),
+  ]);
+
+  const kindButtons = OPENING_KINDS.map((kind) =>
+    uiButton(strings.openingKinds[kind], {
+      class: "ui-btn workshop__chip",
+      on: { click: () => setOpeningKind(kind) },
+    }),
+  );
+  const openingWidth = workshopNumber(1, DRAWING_MM_MAX);
+  const openingHeight = workshopNumber(1, DRAWING_MM_MAX);
+  const openingFloor = workshopNumber(0, DRAWING_MM_MAX);
+  const openingAt = workshopNumber(0, DRAWING_MM_MAX);
+  for (const input of [openingWidth, openingHeight, openingFloor, openingAt]) {
+    workshopApply(input, () => applyOpeningFields());
+  }
+  const hingeButton = uiButton("", {
+    class: "ui-btn ui-btn--wide",
+    on: { click: () => flipDoor("hinge") },
+  });
+  const swingButton = uiButton("", {
+    class: "ui-btn ui-btn--wide",
+    on: { click: () => flipDoor("swing") },
+  });
+  const atField = workshopField(strings.workshop.openingAt, openingAt);
+  const doorFields = uiEl("div", { class: "workshop__fields" }, [hingeButton, swingButton]);
+  const openingFields = uiEl("div", { class: "workshop__fields" }, [
+    uiEl("div", { class: "workshop__chips" }, kindButtons),
+    workshopField(strings.workshop.openingWidth, openingWidth),
+    workshopField(strings.workshop.openingHeight, openingHeight),
+    workshopField(strings.workshop.openingFloor, openingFloor),
+    atField,
+    doorFields,
+  ]);
+
+  const objectKindSelect = uiEl("select", { class: "ui-input" });
+  objectKindSelect.addEventListener("change", () => setObjectKind(objectKindSelect.value));
+  const objectKindAdd = uiButton(strings.workshop.objectKindAdd, {
+    class: "ui-btn workshop__chip",
+    title: strings.workshop.objectKindAddHint,
+    on: { click: () => addObjectKind() },
+  });
+  const shapeButtons = SCHEME_OBJECT_SHAPES.map((shape) =>
+    uiButton(strings.workshop["shape_" + shape], {
+      class: "ui-btn workshop__chip",
+      on: { click: () => setObjectShape(shape) },
+    }),
+  );
+  const objectWidth = workshopNumber(1, DRAWING_MM_MAX);
+  const objectDepth = workshopNumber(1, DRAWING_MM_MAX);
+  const objectTurn = workshopNumber(0, 359);
+  const objectHeight = workshopNumber(1, DRAWING_MM_MAX);
+  const objectFloor = workshopNumber(0, DRAWING_MM_MAX);
+  for (const input of [objectWidth, objectDepth, objectTurn, objectHeight, objectFloor]) {
+    workshopApply(input, () => applyObjectFields());
+  }
+  const widthField = workshopField(strings.workshop.objectWidth, objectWidth);
+  const depthField = workshopField(strings.workshop.objectDepth, objectDepth);
+  const turnField = workshopField(strings.workshop.objectTurn, objectTurn);
+  const objectFields = uiEl("div", { class: "workshop__fields" }, [
+    uiEl("div", { class: "workshop__chips" }, [objectKindSelect, objectKindAdd]),
+    uiEl("div", { class: "workshop__chips" }, shapeButtons),
+    widthField,
+    depthField,
+    turnField,
+    workshopField(strings.workshop.objectHeight, objectHeight),
+    workshopField(strings.workshop.objectFloor, objectFloor),
+    uiEl("p", { class: "workshop__note", text: strings.workshop.objectHeightHint }),
+  ]);
+
   const removeButton = uiButton(strings.workshop.remove, {
     class: "ui-btn ui-btn--danger ui-btn--wide",
-    on: { click: () => removeWall() },
+    on: { click: () => removeSelected() },
   });
 
   const heightInput = workshopNumber(0, DRAWING_MM_MAX);
@@ -35283,7 +35822,8 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       calibrateButton,
       attachButton,
       workshopCheckRow(gridCheck, strings.workshop.layerGrid),
-      workshopCheckRow(wallsCheck, strings.workshop.layerWalls),
+      workshopCheckRow(wallsCheck, strings.workshop.layerWalls, strings.workshop.layerWallsHint),
+      workshopCheckRow(objectsCheck, strings.workshop.layerObjects),
     ]),
     uiEl("div", { class: "workshop__group" }, [
       uiEl("h4", { class: "workshop__head", text: strings.workshop.grid }),
@@ -35295,9 +35835,11 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       uiEl("p", { class: "workshop__note", text: strings.workshop.gridSnapHint }),
     ]),
     uiEl("div", { class: "workshop__group" }, [
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.wall }),
-      uiEl("label", { class: "workshop__field" }, [thicknessLabel, thicknessInput]),
-      wallInfo,
+      subjectHead,
+      wallFields,
+      openingFields,
+      objectFields,
+      subjectNote,
       removeButton,
     ]),
     uiEl("div", { class: "workshop__group" }, [
@@ -35315,7 +35857,15 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
 
   const body = uiEl("div", { class: "workshop" }, [
     uiEl("div", { class: "workshop__main" }, [
-      uiEl("div", { class: "workshop__tools" }, [wallsButton, editButton, zoomOut, zoomIn, fitButton]),
+      uiEl("div", { class: "workshop__tools" }, [
+        wallsButton,
+        openingsButton,
+        objectsButton,
+        editButton,
+        zoomOut,
+        zoomIn,
+        fitButton,
+      ]),
       stage,
       meta,
       hint,
@@ -35429,18 +35979,40 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
   function setTool(next) {
     if (tool === next) return;
     draft = null;
+    ghost = null;
+    // Выделение снимается вместе со сменой занятия: иначе поля выделенной
+    // стены перебивали бы умолчания проёма, за которым человек и переключился.
+    selected = null;
     tool = next;
     sync();
   }
 
-  function select(wallId) {
-    if (selectedWallId === wallId) return;
-    selectedWallId = wallId;
+  function select(next) {
+    const same = Boolean(selected) === Boolean(next) && (!next || (selected.kind === next.kind && selected.id === next.id));
+    if (same) return;
+    selected = next;
     sync();
   }
 
   function selectedWall() {
-    return selectedWallId ? walls().find((wall) => wall.id === selectedWallId) || null : null;
+    return selected && selected.kind === "wall" ? findWall(project(), selected.id) : null;
+  }
+
+  function selectedOpening() {
+    return selected && selected.kind === "opening" ? findOpening(project(), selected.id) : null;
+  }
+
+  function selectedObject() {
+    return selected && selected.kind === "object" ? findSchemeObject(project(), selected.id) : null;
+  }
+
+  // Какой предмет сейчас в колонке свойств: выделенный, а без выделения — тот,
+  // который поставит следующий клик. Отсюда и заголовок группы.
+  function subject() {
+    if (selected) return selected.kind;
+    if (tool === "openings") return "opening";
+    if (tool === "objects") return "object";
+    return "wall";
   }
 
   function finishChain() {
@@ -35492,15 +36064,318 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     }
   }
 
-  function removeWall() {
+  /**
+   * Удаление выделенного — одной кнопкой на троих.
+   *
+   * **Стена уносит свои проёмы** (решение модели, таск 123: стену переставляют
+   * десять раз за вечер, и возвращённое окно соврало бы в развёртке). Молча
+   * этого делать нельзя: человек метит в стену, а теряет ещё и дверь. Поэтому
+   * вопрос — и только когда проёмы в ней есть: пустая стена сносится сразу,
+   * лишний вопрос на каждую стену раздражал бы.
+   */
+  async function removeSelected() {
     const wall = selectedWall();
-    if (!wall) return;
+    if (wall) {
+      const inside = openingsInWall(project(), wall.id).length;
+      if (inside > 0) {
+        const agreed = await uiConfirm({
+          title: strings.workshop.removeWallTitle,
+          message: text("workshop.removeWallAsk", { count: inside }),
+          confirmLabel: strings.workshop.remove,
+        });
+        if (!agreed) return;
+        if (!findWall(project(), wall.id)) return;
+      }
+      runRemove(() => deleteWall(project(), wall.id).project, strings.history.wallRemove);
+      return;
+    }
+    const opening = selectedOpening();
+    if (opening) {
+      runRemove(() => deleteOpening(project(), opening.id).project, strings.history.openingRemove);
+      return;
+    }
+    const object = selectedObject();
+    if (object) runRemove(() => deleteSchemeObject(project(), object.id).project, strings.history.objectRemove);
+  }
+
+  function runRemove(make, label) {
     try {
-      const next = deleteWall(project(), wall.id).project;
-      selectedWallId = null;
-      commit(next, strings.history.wallRemove);
+      const next = make();
+      selected = null;
+      commit(next, label);
     } catch (error) {
       fail(error);
+    }
+  }
+
+  // ——— проёмы ———————————————————————————————————————————————————————————
+
+  function openingDraft(kind) {
+    const sizes = workshopOpeningSizes[kind] || WORKSHOP_OPENING_DEFAULTS[kind];
+    const draftOpening = { kind, ...sizes };
+    if (kind === OPENING_KIND_DOOR) {
+      draftOpening.hinge = workshopDoorHinge;
+      draftOpening.swing = workshopDoorSwing;
+    }
+    return draftOpening;
+  }
+
+  function setOpeningKind(kind) {
+    const opening = selectedOpening();
+    if (opening) {
+      try {
+        const patch = { kind, ...(kind === OPENING_KIND_DOOR ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
+        commit(updateOpening(project(), opening.id, patch).project, strings.history.openingKind);
+      } catch (error) {
+        fail(error);
+        sync();
+      }
+      return;
+    }
+    workshopOpeningKind = kind;
+    sync();
+  }
+
+  // Призрак под курсором: что встанет и встанет ли. Считается той же попыткой
+  // записи, которой пойдёт клик, — значит красный призрак и отказ клика не
+  // могут разойтись.
+  function updateGhost(pointMm) {
+    const pick = wallUnder(pointMm);
+    if (!pick) {
+      ghost = null;
+      return;
+    }
+    const base = openingDraft(workshopOpeningKind);
+    const atMm = workshopOpeningAt(pick.wall, pointMm, base.widthMm);
+    const candidate = { wallId: pick.wall.id, atMm, ...base };
+    const attempt = workshopTryOpening(project(), candidate, null);
+    ghost = { wall: pick.wall, opening: candidate, ok: attempt.ok, message: attempt.ok ? "" : attempt.message };
+  }
+
+  function wallUnder(pointMm) {
+    const list = walls();
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const wall = list[index];
+      const limit = Math.max(WORKSHOP_WALL_PX / view.zoom, Number(wall.thicknessMm) / 2);
+      if (workshopDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) return { wall };
+    }
+    return null;
+  }
+
+  function placeOpening() {
+    if (!ghost) return;
+    if (!ghost.ok) {
+      // Отказ уже назван строкой под полем и красным призраком — повторять его
+      // плашкой на каждый промах мыши значит замучить человека.
+      return;
+    }
+    const attempt = workshopTryOpening(project(), ghost.opening, null);
+    if (!attempt.ok) {
+      ghost.ok = false;
+      ghost.message = attempt.message;
+      sync();
+      return;
+    }
+    // Поставленный проём **не выделяется**, и это поймано живым прогоном:
+    // выделенный проём перехватывает кнопки видов — следующее нажатие «Дверь»
+    // превращало в дверь только что поставленное окно вместо того, чтобы
+    // выбрать, чем будет следующий клик. Человек ставит десять окон подряд, а
+    // правит их потом и отдельным занятием — как и цепочку стен, которая себя
+    // тоже не выделяет.
+    commit(attempt.project, strings.history.openingAdd);
+  }
+
+  function applyOpeningFields() {
+    const kind = selectedOpening() ? selectedOpening().kind : workshopOpeningKind;
+    const sizes = {
+      widthMm: Number(openingWidth.value),
+      heightMm: Number(openingHeight.value),
+      heightAboveFloorMm: Number(openingFloor.value),
+    };
+    if (!(sizes.widthMm > 0) || !(sizes.heightMm > 0) || !(sizes.heightAboveFloorMm >= 0)) {
+      sync();
+      return;
+    }
+    const opening = selectedOpening();
+    if (!opening) {
+      workshopOpeningSizes[kind] = sizes;
+      sync();
+      return;
+    }
+    const patch = { ...sizes, atMm: Number(openingAt.value) };
+    const attempt = workshopTryOpening(project(), patch, opening.id);
+    if (!attempt.ok) {
+      // Набранное число — не движение мыши: призрака у него нет, и промолчать
+      // здесь значило бы просто вернуть прежнее значение без объяснения.
+      // Поэтому один отказ на одно нажатие Enter, плашкой.
+      notify(attempt.message, "error");
+      sync();
+      return;
+    }
+    workshopOpeningSizes[kind] = sizes;
+    commit(attempt.project, strings.history.openingEdit);
+  }
+
+  /**
+   * Переключить створку двери. Четыре сочетания — четыре разные двери, и
+   * различают их на плане по рисунку, а не по двум полям. Поэтому у выделенной
+   * двери на чертеже стоят две ручки: у петли и на кончике полотна. Кнопки в
+   * колонке делают то же самое словами — для тех, кто ищет глазами подпись.
+   */
+  function flipDoor(what) {
+    const opening = selectedOpening();
+    const flipHinge = (value) => (value === "end" ? "start" : "end");
+    const flipSwing = (value) => (value === "right" ? "left" : "right");
+    if (!opening || opening.kind !== OPENING_KIND_DOOR) {
+      if (what === "hinge") workshopDoorHinge = flipHinge(workshopDoorHinge);
+      else workshopDoorSwing = flipSwing(workshopDoorSwing);
+      sync();
+      return;
+    }
+    const patch =
+      what === "hinge" ? { hinge: flipHinge(opening.hinge) } : { swing: flipSwing(opening.swing) };
+    try {
+      commit(updateOpening(project(), opening.id, patch).project, strings.history.openingSwing);
+      workshopDoorHinge = patch.hinge || opening.hinge;
+      workshopDoorSwing = patch.swing || opening.swing;
+    } catch (error) {
+      fail(error);
+      sync();
+    }
+  }
+
+  // ——— объекты на полу ——————————————————————————————————————————————————
+
+  // Справочник видов заводится **по первой надобности и через canvasCommit**
+  // (договор таска 123): объект без чертежа не должен носить девять видов с
+  // собой. Поэтому `ensureSchemeObjectKinds` зовётся здесь, в минуту первого
+  // объекта, а не при открытии окна.
+  function withKinds() {
+    const ready = ensureSchemeObjectKinds(project());
+    return { project: ready.project, added: ready.added };
+  }
+
+  function currentKindId(source) {
+    const list = schemeObjectKindsInOrder(source);
+    if (list.length === 0) return null;
+    const found = list.find((kind) => kind.name === workshopObjectKindName);
+    return (found || list[0]).id;
+  }
+
+  function setObjectKind(name) {
+    workshopObjectKindName = name;
+    workshopObjectSizes = {};
+    const object = selectedObject();
+    if (!object) {
+      // Форма идёт за видом: столешницу тянут полосой, радиатор набирают
+      // прямоугольником — и спрашивать об этом отдельно незачем.
+      workshopObjectShape = workshopObjectDefaultsByName(name).shape;
+      sync();
+      return;
+    }
+    const kindId = currentKindId(project());
+    if (!kindId) return;
+    try {
+      commit(updateSchemeObject(project(), object.id, { kindId }).project, strings.history.objectEdit);
+    } catch (error) {
+      fail(error);
+      sync();
+    }
+  }
+
+  function setObjectShape(shape) {
+    if (selectedObject()) return;
+    workshopObjectShape = shape;
+    workshopObjectSizes = {};
+    draft = null;
+    sync();
+  }
+
+  async function addObjectKind() {
+    const name = await uiPrompt({ title: strings.workshop.objectKindAddTitle });
+    if (!name) return;
+    const ready = withKinds();
+    let next = ready.project;
+    try {
+      const added = addSchemeObjectKind(next, { name });
+      next = added.project;
+      workshopObjectKindName = added.schemeObjectKind.name;
+      workshopObjectSizes = {};
+      canvasCommit(project(), next, strings.history.objectKindAdd, { schemeId });
+    } catch (error) {
+      fail(error);
+    }
+    sync();
+  }
+
+  // Умолчания берутся по **имени** вида, а не по его id: до первого объекта
+  // справочника в объекте ещё нет (он заводится вместе с объектом), и id
+  // взяться неоткуда — а показать размеры радиатора надо уже сейчас.
+  function objectSizes(source, kindId) {
+    const kind = kindId ? findSchemeObjectKind(source, kindId) : null;
+    const defaults = workshopObjectDefaultsByName(kind ? kind.name : workshopObjectKindName);
+    return { ...defaults, ...workshopObjectSizes, shape: workshopObjectShape };
+  }
+
+  function placeObject(pointMm, pointsMm) {
+    const ready = withKinds();
+    const kindId = currentKindId(ready.project);
+    if (!kindId) return;
+    const sizes = objectSizes(ready.project, kindId);
+    const fields =
+      sizes.shape === "polyline"
+        ? { shape: "polyline", pointsMm, depthMm: sizes.depthMm }
+        : {
+            shape: "rect",
+            atMm: pointMm,
+            widthMm: sizes.widthMm,
+            depthMm: sizes.depthMm,
+            turnDeg: sizes.turnDeg || 0,
+          };
+    try {
+      const added = addSchemeObject(ready.project, {
+        schemeId,
+        kindId,
+        heightMm: sizes.heightMm,
+        heightAboveFloorMm: sizes.heightAboveFloorMm,
+        ...fields,
+      });
+      // Как и проём, поставленный объект себя не выделяет: иначе выбор вида в
+      // колонке стал бы правкой только что поставленного.
+      commit(added.project, strings.history.objectAdd);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  function applyObjectFields() {
+    const sizes = {
+      widthMm: Number(objectWidth.value),
+      depthMm: Number(objectDepth.value),
+      turnDeg: Number(objectTurn.value) || 0,
+      heightMm: objectHeight.value === "" ? null : Number(objectHeight.value),
+      heightAboveFloorMm: Number(objectFloor.value) || 0,
+    };
+    const object = selectedObject();
+    if (!object) {
+      workshopObjectSizes = sizes;
+      sync();
+      return;
+    }
+    const patch = {
+      depthMm: sizes.depthMm,
+      heightMm: sizes.heightMm,
+      heightAboveFloorMm: sizes.heightAboveFloorMm,
+    };
+    if (object.shape === "rect") {
+      patch.widthMm = sizes.widthMm;
+      patch.turnDeg = sizes.turnDeg;
+    }
+    try {
+      commit(updateSchemeObject(project(), object.id, patch).project, strings.history.objectEdit);
+    } catch (error) {
+      fail(error);
+      sync();
     }
   }
 
@@ -35570,14 +36445,38 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       addVertex(event);
       return;
     }
-    const pick = workshopPick(project(), schemeId, mmOf(event), view);
+    // Проём ставится **в готовую стену** (G176): человек показывает на стену,
+    // проём садится серединой под курсор. Отдельной фигуры рядом со стеной не
+    // бывает — проём живёт в стене и нигде больше (ADR 008).
+    if (tool === "openings") {
+      updateGhost(mmOf(event));
+      placeOpening();
+      return;
+    }
+    if (tool === "objects") {
+      if (workshopObjectShape === "polyline") {
+        addVertex(event);
+        return;
+      }
+      placeObject(snapOf(mmOf(event), event.altKey).point, null);
+      return;
+    }
+    const pick = workshopPick(project(), schemeId, mmOf(event), view, selected);
     if (!pick) {
       select(null);
       return;
     }
-    select(pick.wallId);
+    // Ручки створки ничего не таскают — они переключают дверь по нажатию:
+    // перетаскиванием дверь не «приоткроешь», у неё четыре положения, а не
+    // непрерывный угол.
+    if (pick.kind === "hinge" || pick.kind === "swing") {
+      flipDoor(pick.kind);
+      return;
+    }
+    select(pick.kind === "vertex" ? { kind: "wall", id: pick.wallId } : { kind: pick.kind, id: pick.id });
     drag = {
       kind: pick.kind,
+      id: pick.id,
       wallId: pick.wallId,
       atMm: pick.atMm,
       fromMm: pick.atMm,
@@ -35615,7 +36514,23 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
   stage.addEventListener("dblclick", (event) => {
     event.preventDefault();
     if (tool === "walls") finishChain();
+    else if (tool === "objects" && workshopObjectShape === "polyline") finishBand();
   });
+
+  // Полоса объекта — тот же росчерк, что цепочка стен, только кончается одним
+  // объектом с шириной полосы, а не чередой отрезков: кухонный фронт идёт по
+  // стене с поворотом, а глубина у него одна.
+  function finishBand() {
+    if (!draft) return;
+    const points = draft.points;
+    draft = null;
+    if (points.length < 2) {
+      sync();
+      return;
+    }
+    placeObject(null, points);
+    sync();
+  }
 
   function onPointerMove(event) {
     if (closed) return;
@@ -35645,7 +36560,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       dragTo(event);
       return;
     }
-    if (tool === "walls") {
+    if (tool === "walls" || (tool === "objects" && workshopObjectShape === "polyline")) {
       // Предпросмотра до первого клика нет — как и на холсте: тянуть резинку
       // не от чего.
       if (!draft) return;
@@ -35655,11 +36570,35 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       redraw();
       return;
     }
-    const pick = workshopPick(project(), schemeId, mmOf(event), view);
-    const next = pick ? pick.kind + ":" + pick.wallId : null;
+    if (tool === "openings") {
+      const before = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
+      updateGhost(mmOf(event));
+      const after = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
+      if (before !== after) {
+        // Причина отказа живёт в строке под полем, а не в плашке: курсор ходит
+        // по стене десятками шагов в секунду, и плашка на каждый шаг была бы
+        // не предупреждением, а помехой.
+        subjectNote.textContent = ghost && !ghost.ok ? ghost.message : openingHelp();
+        subjectNote.classList.toggle("is-bad", Boolean(ghost && !ghost.ok));
+        redraw();
+      }
+      return;
+    }
+    if (tool === "objects") {
+      ghost = null;
+      return;
+    }
+    const pick = workshopPick(project(), schemeId, mmOf(event), view, selected);
+    const next = pick ? pick.kind + ":" + pick.id : null;
     if (next !== hover) {
       hover = next;
-      node.style.cursor = pick ? (pick.kind === "vertex" ? "grab" : "move") : "default";
+      node.style.cursor = !pick
+        ? "default"
+        : pick.kind === "vertex"
+          ? "grab"
+          : pick.kind === "hinge" || pick.kind === "swing"
+            ? "pointer"
+            : "move";
     }
   }
 
@@ -35667,6 +36606,15 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
   // из предпросмотра, а в объект уходит только то место, где руку отпустили.
   // Иначе стек отмены набивался бы сотней шагов за одно движение мыши.
   function dragTo(event) {
+    // Проём ездит **вдоль своей стены** и никуда больше: из стены он не
+    // выходит, а поперёк её у него нет свободы — он в ней и живёт.
+    if (drag.kind === "opening") {
+      const opening = findOpening(project(), drag.id);
+      const wall = opening ? findWall(project(), opening.wallId) : null;
+      if (wall) drag.atMm = workshopOpeningAt(wall, mmOf(event), opening.widthMm);
+      redraw();
+      return;
+    }
     const snap = workshopSnapMm(
       drag.kind === "vertex" ? vertexAnchor(drag) : [],
       mmOf(event),
@@ -35676,6 +36624,17 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     if (drag.kind === "vertex") drag.toMm = snap.point;
     else drag.deltaMm = workshopRoundMm({ x: snap.point.x - drag.startMm.x, y: snap.point.y - drag.startMm.y });
     redraw();
+  }
+
+  // Объект едет целиком: у прямоугольника двигается середина, у полосы — все
+  // её вершины. Поворот при этом не трогается — вещь переставили, а не
+  // повернули.
+  function movedObject(object, deltaMm) {
+    const patch =
+      object.shape === "polyline"
+        ? { pointsMm: (object.pointsMm || []).map((point) => ({ x: point.x + deltaMm.x, y: point.y + deltaMm.y })) }
+        : { atMm: { x: object.atMm.x + deltaMm.x, y: object.atMm.y + deltaMm.y } };
+    return updateSchemeObject(project(), object.id, patch).project;
   }
 
   // Якорь для магнита угла при переносе вершины — противоположный конец той
@@ -35708,6 +36667,13 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       } else if (current.kind === "wall" && current.deltaMm) {
         const result = workshopMoveWall(project(), current.wallId, current.deltaMm);
         if (result.moved) commit(result.project, strings.history.wallMove);
+      } else if (current.kind === "opening" && current.atMm !== null && current.atMm !== undefined) {
+        const attempt = workshopTryOpening(project(), { atMm: current.atMm }, current.id);
+        if (attempt.ok) commit(attempt.project, strings.history.openingMove);
+        else notify(attempt.message, "error");
+      } else if (current.kind === "object" && current.deltaMm) {
+        const object = findSchemeObject(project(), current.id);
+        if (object) commit(movedObject(object, current.deltaMm), strings.history.objectMove);
       }
     } catch (error) {
       fail(error);
@@ -35774,7 +36740,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       sync();
       return;
     }
-    if (event.key === "Escape" && selectedWallId) {
+    if (event.key === "Escape" && selected) {
       event.preventDefault();
       event.stopPropagation();
       select(null);
@@ -35783,7 +36749,8 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     if (event.key === "Enter" && draft) {
       event.preventDefault();
       event.stopPropagation();
-      finishChain();
+      if (tool === "objects") finishBand();
+      else finishChain();
       return;
     }
     if (event.key === "Backspace" && draft) {
@@ -35794,10 +36761,10 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       paint();
       return;
     }
-    if ((event.key === "Delete" || event.key === "Backspace") && selectedWallId) {
+    if ((event.key === "Delete" || event.key === "Backspace") && selected) {
       event.preventDefault();
       event.stopPropagation();
-      removeWall();
+      removeSelected();
     }
   }
 
@@ -35850,6 +36817,9 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     if (workshopLayers.plan && spot.kind === "ready") paintPlan(spot, box);
     if (workshopLayers.grid) paintGrid(box);
     if (spot.kind === "ready") paintOrigin();
+    // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
+    // стена — главное на чертеже, и прятать её под габаритом нельзя.
+    if (workshopLayers.objects) paintObjects();
     if (workshopLayers.walls) paintWalls();
     paintDraft();
   }
@@ -35941,7 +36911,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       const width = Math.max(1, wall.thicknessMm * view.zoom);
       ctx.lineCap = "butt";
       ctx.lineWidth = width;
-      ctx.strokeStyle = wall.id === selectedWallId ? WORKSHOP_ACCENT : WORKSHOP_WALL;
+      ctx.strokeStyle = selected && selected.kind === "wall" && selected.id === wall.id ? WORKSHOP_ACCENT : WORKSHOP_WALL;
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
       ctx.lineTo(to.x, to.y);
@@ -35957,10 +36927,213 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
         ctx.stroke();
       }
     }
-    const selected = selectedWall();
-    if (!selected) return;
-    const ends = wallEnds(selected);
+    // Проёмы рисуются поверх стен и по стенам: проём — это дырка в стене, и
+    // рисуется он как дырка — разрывом с косяками, а не фигурой рядом.
+    for (const wall of list) {
+      const ends = wallEnds(wall);
+      for (const opening of openingsInWall(project(), wall.id)) {
+        paintOpening({ ...wall, aMm: ends.a, bMm: ends.b }, movedOpening(opening), {
+          active: selected && selected.kind === "opening" && selected.id === opening.id,
+        });
+      }
+    }
+    const wall = selectedWall();
+    if (!wall) return;
+    const ends = wallEnds(wall);
     for (const point of [ends.a, ends.b]) handle(screenOf(point));
+  }
+
+  // Проём под рукой: пока его тащат вдоль стены, он рисуется с нового места, а
+  // в объект уходит только то, где руку отпустили.
+  function movedOpening(opening) {
+    if (drag && drag.moved && drag.kind === "opening" && drag.id === opening.id && drag.atMm !== null) {
+      return { ...opening, atMm: drag.atMm };
+    }
+    return opening;
+  }
+
+  /**
+   * Проём в стене: разрыв до бумаги, два косяка поперёк стены и — по виду —
+   * то, что его называет. Окно — ниткой стекла вдоль середины, арка —
+   * пунктиром, проём без полотна — ничем, дверь — створкой с дугой.
+   */
+  function paintOpening(wall, opening, options = {}) {
+    const span = workshopOpeningSpan(wall, opening);
+    if (!span) return;
+    const half = Math.max(1, (Number(wall.thicknessMm) * view.zoom) / 2);
+    const from = screenOf(span.from);
+    const to = screenOf(span.to);
+    const nx = span.n.x;
+    const ny = span.n.y;
+    const colour = options.active ? WORKSHOP_ACCENT : options.bad ? WORKSHOP_BAD : WORKSHOP_WALL_EDGE;
+    // Дырка: стена в этом месте стирается до бумаги. Подложку под ней тоже —
+    // чертёж здесь главнее фотографии.
+    ctx.save();
+    if (options.ghost) ctx.globalAlpha = 0.65;
+    ctx.beginPath();
+    ctx.moveTo(from.x + nx * half, from.y + ny * half);
+    ctx.lineTo(to.x + nx * half, to.y + ny * half);
+    ctx.lineTo(to.x - nx * half, to.y - ny * half);
+    ctx.lineTo(from.x - nx * half, from.y - ny * half);
+    ctx.closePath();
+    ctx.fillStyle = WORKSHOP_PAPER;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = colour;
+    for (const jamb of [from, to]) {
+      ctx.beginPath();
+      ctx.moveTo(jamb.x + nx * half, jamb.y + ny * half);
+      ctx.lineTo(jamb.x - nx * half, jamb.y - ny * half);
+      ctx.stroke();
+    }
+    if (opening.kind === "window") {
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+    } else if (opening.kind === "arch") {
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (opening.kind === OPENING_KIND_DOOR) {
+      paintDoor(wall, opening, colour, Boolean(options.active));
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Створка двери: полотно, раскрытое на четверть оборота, и дуга от закрытого
+   * положения к открытому. Четыре сочетания петель и стороны дают четыре
+   * разных рисунка — по ним дверь и различают на плане, а не по двум полям в
+   * колонке.
+   *
+   * У выделенной двери на концах створки стоят две ручки: у петли — переставить
+   * петли на другой косяк, на кончике полотна — перекинуть его на другую
+   * сторону стены. Каждая стоит ровно там, что меняет.
+   */
+  function paintDoor(wall, opening, colour, active) {
+    const leaf = workshopDoorLeaf(wall, opening);
+    if (!leaf) return;
+    const hinge = screenOf(leaf.hinge);
+    const closed = screenOf(leaf.closed);
+    const tip = screenOf(leaf.tip);
+    const radius = Math.hypot(tip.x - hinge.x, tip.y - hinge.y);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = colour;
+    ctx.beginPath();
+    ctx.moveTo(hinge.x, hinge.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+    if (radius > 1) {
+      const start = Math.atan2(closed.y - hinge.y, closed.x - hinge.x);
+      const end = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
+      // Короткая сторона дуги — та, по которой полотно и ходит: четверть
+      // оборота, а не три четверти вокруг косяка.
+      let sweep = end - start;
+      while (sweep > Math.PI) sweep -= Math.PI * 2;
+      while (sweep < -Math.PI) sweep += Math.PI * 2;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(hinge.x, hinge.y, radius, start, start + sweep, sweep < 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (!active) return;
+    handle(hinge);
+    handle(tip);
+  }
+
+  function paintObjects() {
+    for (const object of schemeObjectsOnScheme(project(), schemeId)) {
+      const shifted =
+        drag && drag.moved && drag.kind === "object" && drag.id === object.id && drag.deltaMm
+          ? shiftObject(object, drag.deltaMm)
+          : object;
+      paintObject(shifted, selected && selected.kind === "object" && selected.id === object.id);
+    }
+  }
+
+  function shiftObject(object, deltaMm) {
+    if (object.shape === "polyline") {
+      return {
+        ...object,
+        pointsMm: (object.pointsMm || []).map((point) => ({ x: point.x + deltaMm.x, y: point.y + deltaMm.y })),
+      };
+    }
+    return { ...object, atMm: { x: object.atMm.x + deltaMm.x, y: object.atMm.y + deltaMm.y } };
+  }
+
+  function paintObject(object, active) {
+    const colour = active ? WORKSHOP_ACCENT : WORKSHOP_OBJECT;
+    if (object.shape === "polyline") {
+      const points = (object.pointsMm || []).map(screenOf);
+      if (points.length < 2) return;
+      ctx.lineCap = "butt";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = Math.max(2, Number(object.depthMm) * view.zoom);
+      ctx.strokeStyle = WORKSHOP_OBJECT_FILL;
+      ctx.beginPath();
+      points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = colour;
+      ctx.beginPath();
+      points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+      ctx.stroke();
+      paintObjectCaption(object, captionAt(points, Number(object.depthMm) * view.zoom));
+      if (active) for (const point of points) handle(point);
+      return;
+    }
+    const corners = workshopObjectCorners(object).map(screenOf);
+    if (corners.length < 3) return;
+    ctx.beginPath();
+    corners.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    ctx.closePath();
+    ctx.fillStyle = WORKSHOP_OBJECT_FILL;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = colour;
+    ctx.stroke();
+    paintObjectCaption(object, captionAt(corners, 0));
+    if (active) for (const point of corners) handle(point);
+  }
+
+  /**
+   * Подпись объекта: имя вида и верх над полом.
+   *
+   * Верх здесь не для красоты. Ради двух видов объекты и заведены: от верха
+   * **столешницы** отмеряют розетки над кухонным фронтом, а **радиатор** своей
+   * высотой говорит, куда розетку ставить нельзя. Читать это число, открывая
+   * правку, — значит не читать его вовсе, поэтому оно на чертеже.
+   */
+  // Подпись ставится **над** габаритом, а не поперёк него: радиатор глубиной
+  // сто миллиметров на экране тоньше самой строки, и надпись по его середине
+  // перечёркивалась контуром. Это видно только на снимке.
+  function captionAt(points, extra) {
+    const top = Math.min(...points.map((point) => point.y));
+    const middle = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+    return { x: middle, y: top - extra / 2 - 8 };
+  }
+
+  function paintObjectCaption(object, at) {
+    const kind = findSchemeObjectKind(project(), object.kindId);
+    if (!kind) return;
+    const top = schemeObjectTopMm(object);
+    ctx.font = drawFont(11, 600);
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    const line = top === null ? kind.name : kind.name + " · " + text("workshop.objectTop", { top });
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = WORKSHOP_PAPER;
+    ctx.strokeText(line, at.x, at.y);
+    ctx.fillStyle = WORKSHOP_CAPTION;
+    ctx.fillText(line, at.x, at.y);
+    ctx.textAlign = "start";
   }
 
   function handle(at) {
@@ -35974,11 +37147,19 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
   }
 
   function paintDraft() {
-    if (tool !== "walls" || !draft) return;
+    // Призрак проёма: что сядет по клику. Красный — не сядет, и причина уже
+    // стоит строкой под полем.
+    if (tool === "openings" && ghost) {
+      paintOpening(ghost.wall, ghost.opening, { ghost: true, bad: !ghost.ok });
+      return;
+    }
+    const band = tool === "objects" && workshopObjectShape === "polyline";
+    if ((tool !== "walls" && !band) || !draft) return;
     const points = [...draft.points, draft.cursor];
     ctx.lineCap = "butt";
-    ctx.lineWidth = Math.max(1, workshopThicknessMm * view.zoom);
-    ctx.strokeStyle = WORKSHOP_ACCENT;
+    ctx.lineJoin = "round";
+    ctx.lineWidth = Math.max(1, (band ? bandWidthMm() : workshopThicknessMm) * view.zoom);
+    ctx.strokeStyle = band ? WORKSHOP_OBJECT : WORKSHOP_ACCENT;
     ctx.globalAlpha = 0.5;
     ctx.beginPath();
     points.forEach((point, index) => {
@@ -36013,6 +37194,14 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     ctx.fillText(String(length), at.x + 10, at.y - 8);
   }
 
+  // Ширина полосы нового объекта: из умолчаний вида, пока его не поправили.
+  function bandWidthMm() {
+    const ready = project();
+    const kindId = currentKindId(ready);
+    const sizes = objectSizes(ready, kindId);
+    return Number(sizes.depthMm) || 600;
+  }
+
   // ——— панель: значения и доступность ———
 
   function sync() {
@@ -36033,24 +37222,124 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     attachButton.hidden = spot.kind !== "noOrigin";
     gridCheck.checked = workshopLayers.grid;
     wallsCheck.checked = workshopLayers.walls;
+    objectsCheck.checked = workshopLayers.objects;
     gridSelect.value = String(workshopGridMm);
     snapCheck.checked = workshopGridSnap;
-    thicknessLabel.textContent = wall ? strings.workshop.thickness : strings.workshop.thicknessNew;
-    if (document.activeElement !== thicknessInput) {
-      thicknessInput.value = String(wall ? wall.thicknessMm : workshopThicknessMm);
-    }
-    wallInfo.textContent = wall
-      ? text("workshop.wallInfo", { length: wallLengthMm(wall) })
-      : strings.workshop.wallNone;
-    removeButton.disabled = !wall;
+    openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
+    objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");
+    syncSubject(current, wall);
+    hint.textContent = workshopHint(tool);
     if (document.activeElement !== heightInput) {
       const own = findScheme(current, schemeId);
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
     }
     syncRooms(current);
     meta.textContent = workshopStatus(current, schemeId, spot);
-    node.style.cursor = tool === "walls" ? "crosshair" : "default";
+    node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
+  }
+
+  function fieldValue(input, value) {
+    if (document.activeElement === input) return;
+    input.value = value === null || value === undefined ? "" : String(value);
+  }
+
+  // Колонка свойств на троих: показывается ровно один набор полей — тот, о
+  // котором сейчас речь. Что именно, решает `subject()`: выделенное, а без
+  // выделения — то, что поставит следующий клик.
+  function syncSubject(current, wall) {
+    const kind = subject();
+    const opening = selectedOpening();
+    const object = selectedObject();
+    wallFields.hidden = kind !== "wall";
+    openingFields.hidden = kind !== "opening";
+    objectFields.hidden = kind !== "object";
+    removeButton.disabled = !selected;
+    removeButton.hidden = !selected;
+    subjectNote.classList.remove("is-bad");
+    if (kind === "wall") {
+      subjectHead.textContent = strings.workshop.wall;
+      thicknessLabel.textContent = wall ? strings.workshop.thickness : strings.workshop.thicknessNew;
+      fieldValue(thicknessInput, wall ? wall.thicknessMm : workshopThicknessMm);
+      subjectNote.textContent = wall
+        ? text("workshop.wallInfo", { length: wallLengthMm(wall) })
+        : strings.workshop.wallNone;
+      return;
+    }
+    if (kind === "opening") {
+      syncOpening(opening);
+      return;
+    }
+    syncObject(current, object);
+  }
+
+  function openingHelp() {
+    return walls().length === 0 ? strings.workshop.openingNeedWall : strings.workshop.openingHint;
+  }
+
+  function syncOpening(opening) {
+    const kind = opening ? opening.kind : workshopOpeningKind;
+    subjectHead.textContent = strings.workshop.opening;
+    kindButtons.forEach((button, index) => {
+      button.className = "ui-btn workshop__chip" + (OPENING_KINDS[index] === kind ? " is-on" : "");
+    });
+    const sizes = opening || workshopOpeningSizes[kind] || WORKSHOP_OPENING_DEFAULTS[kind];
+    fieldValue(openingWidth, sizes.widthMm);
+    fieldValue(openingHeight, sizes.heightMm);
+    fieldValue(openingFloor, sizes.heightAboveFloorMm);
+    atField.hidden = !opening;
+    if (opening) fieldValue(openingAt, opening.atMm);
+    doorFields.hidden = kind !== OPENING_KIND_DOOR;
+    const hinge = opening && opening.kind === OPENING_KIND_DOOR ? opening.hinge : workshopDoorHinge;
+    const swing = opening && opening.kind === OPENING_KIND_DOOR ? opening.swing : workshopDoorSwing;
+    hingeButton.textContent = text("workshop.doorHinge", { value: strings.openingHinges[hinge] });
+    swingButton.textContent = text("workshop.doorSwing", { value: strings.openingSwings[swing] });
+    subjectNote.textContent = opening ? strings.workshop.doorHint : openingHelp();
+  }
+
+  function syncObject(current, object) {
+    subjectHead.textContent = strings.workshop.object;
+    const kinds = schemeObjectKindsInOrder(current);
+    // Справочник видов заводится только когда объект появляется, поэтому до
+    // первого объекта выбирать не из чего — в списке стоят стартовые девять
+    // имён, а записаны они будут вместе с первым объектом.
+    const names = kinds.length > 0 ? kinds.map((item) => item.name) : Object.values(strings.schemeObjectKinds);
+    const listKey = names.join("|");
+    if (objectKindSelect.dataset.key !== listKey) {
+      objectKindSelect.dataset.key = listKey;
+      objectKindSelect.replaceChildren(
+        ...names.map((name) => uiEl("option", { value: name, text: name })),
+      );
+    }
+    const kindName = object
+      ? (findSchemeObjectKind(current, object.kindId) || { name: "" }).name
+      : workshopObjectKindName;
+    if (names.includes(kindName)) objectKindSelect.value = kindName;
+    const shape = object ? object.shape : workshopObjectShape;
+    shapeButtons.forEach((button, index) => {
+      button.className = "ui-btn workshop__chip" + (SCHEME_OBJECT_SHAPES[index] === shape ? " is-on" : "");
+      button.disabled = Boolean(object);
+    });
+    const sizes = object || objectSizes(current, currentKindId(current));
+    widthField.hidden = shape === "polyline";
+    turnField.hidden = shape === "polyline";
+    const depthLabel = depthField.querySelector(".workshop__label");
+    if (depthLabel) {
+      depthLabel.textContent = shape === "polyline" ? strings.workshop.objectBand : strings.workshop.objectDepth;
+    }
+    fieldValue(objectWidth, sizes.widthMm);
+    fieldValue(objectDepth, sizes.depthMm);
+    fieldValue(objectTurn, sizes.turnDeg || 0);
+    fieldValue(objectHeight, sizes.heightMm === null || sizes.heightMm === undefined ? "" : sizes.heightMm);
+    fieldValue(objectFloor, sizes.heightAboveFloorMm || 0);
+    const top = object ? schemeObjectTopMm(object) : null;
+    subjectNote.textContent = object
+      ? top === null
+        ? strings.workshop.objectFullHeight
+        : text("workshop.objectTop", { top })
+      : shape === "polyline"
+        ? strings.workshop.objectBandHint
+        : strings.workshop.objectHint;
   }
 
   // Список комнат перестраивается только когда он и правда другой: иначе
@@ -36104,11 +37393,18 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       return;
     }
     if ("project" in changed || "schemeImage" in changed) {
-      // Отмена могла унести стену, которая была выделена.
-      if (selectedWallId && !walls().some((wall) => wall.id === selectedWallId)) selectedWallId = null;
+      // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
+      if (selected && !aliveSelection()) selected = null;
       sync();
     }
   });
+
+  function aliveSelection() {
+    if (!selected) return false;
+    if (selected.kind === "wall") return Boolean(findWall(project(), selected.id));
+    if (selected.kind === "opening") return Boolean(findOpening(project(), selected.id));
+    return Boolean(findSchemeObject(project(), selected.id));
+  }
 
   function cleanup() {
     if (closed) return;
@@ -36147,6 +37443,27 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
 
 function workshopCheckRow(input, label, title) {
   return uiEl("label", { class: "workshop__check", title: title || "" }, [input, uiEl("span", { text: label })]);
+}
+
+// Поле с подписью над ним — тот же кирпич, что в таске 125: длинные подписи с
+// единицей измерения в узкой колонке рядом с полем ужимались до многоточия.
+function workshopField(label, input) {
+  return uiEl("label", { class: "workshop__field" }, [
+    uiEl("span", { class: "workshop__label", text: label }),
+    input,
+  ]);
+}
+
+// Поле отдаёт значение по Enter и по уходу фокуса — и только так: правка на
+// каждое нажатие клавиши набивала бы стек отмены на «1», «12», «120».
+function workshopApply(input, run) {
+  input.addEventListener("change", run);
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    run();
+  });
+  return input;
 }
 
 function workshopNumber(min, max) {
