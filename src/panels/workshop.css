@@ -1,0 +1,218 @@
+/* ——— мастерская чертежа ————————————————————————————————————————————————
+
+   Заказчик: «Само окно делаем побольше, что бы удобнее было». Насколько —
+   решено снимками живого прогона, и ответ вышел не «58vh плюс немного»:
+   карточка занимает почти весь экран, а поле чертежа забирает всё, что
+   осталось от заголовка, ряда инструментов, строки состояния и кнопки.
+
+   Почему так, а не «ещё десять процентов высоты»: стену рисуют цепочкой через
+   всю квартиру, и в прежнем окне (58vh при ширине 720) дальний угол уходил за
+   край — цепочку приходилось вести, подсматривая колесом. Ширина здесь важнее
+   высоты: план квартиры лежит поперёк, и четыреста лишних точек по ширине
+   стоят больше, чем сто по высоте.
+
+   Правую колонку забирают слои, сетка, толщина и высоты. Она узкая и своя:
+   поставь её над полем — и поле потеряет ту самую высоту, за которой окно и
+   увеличено. */
+
+.modal--workshop {
+  width: min(98vw, 1500px);
+  height: 94vh;
+  max-height: 94vh;
+  /* Карточка — столбец: заголовок и кнопки своей высоты, тело забирает
+     остаток. Без этого `max-height` отдавал бы остаток прокрутке карточки, а
+     поле чертежа осталось бы ростом в своё содержимое. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal--workshop .modal__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* «Закрыть» — слева, против правила остальных окон, и причина видна только на
+   снимке: уведомления живут в правом нижнем углу экрана (`#notifications`,
+   z-index выше затемнения), а окно почти во весь экран подводит свой ряд
+   кнопок ровно под них. Три плашки подряд — и кнопка не нажимается шесть
+   секунд. Сдвинуть плашки нельзя: по ним кликают, чтобы убрать. Кнопка в этом
+   ряду одна, старшинства «основное действие справа» ей не с кем делить. */
+.modal--workshop .modal__actions {
+  justify-content: flex-start;
+}
+
+.workshop {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  gap: 12px;
+}
+
+.workshop__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workshop__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+/* Поле чертежа — бумага, а не тёмная панель: чертёж чертят на бумаге, и те же
+   цвета берёт основной холст (`--canvas-bg`). На тёмном фоне стены пришлось бы
+   рисовать светлыми, а поверх сканированного плана (белая бумага) они бы
+   пропали. */
+.workshop__stage {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
+  overflow: hidden;
+  background: var(--canvas-bg);
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  user-select: none;
+  touch-action: none;
+}
+
+.workshop__canvas {
+  display: block;
+}
+
+.workshop__meta {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.workshop__side {
+  width: 252px;
+  flex: none;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+}
+
+.workshop__group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: #1c2129;
+}
+
+.workshop__head {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--panel-muted);
+}
+
+.workshop__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Погашенная отметка подложки — не поломка, а ответ: причина лежит в подсказке
+   строки, а под ней стоит кнопка, которая эту причину снимает. */
+.workshop__check input:disabled + span {
+  color: var(--panel-muted);
+}
+
+/* Подпись над полем, а не слева от него: «Толщина новых стен, мм» и «Высота
+   стен схемы, мм» в колонке на 250 точек рядом с полем ввода ужимались до
+   многоточия — это видно на снимке живого прогона. Единица измерения в конце
+   подписи, и обрезать её нельзя: без «мм» поле рядом с метрами масштаба и
+   долями разметки читается как угодно. */
+.workshop__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.workshop__label {
+  min-width: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.workshop__number {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.workshop__grid {
+  width: 100%;
+}
+
+/* Имя комнаты коротко, и её высота встаёт рядом строкой: столбиком список из
+   десятка комнат занял бы всю колонку. */
+.workshop__field--room {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workshop__field--room .workshop__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--panel-text);
+}
+
+.workshop__field--room .workshop__number {
+  width: 84px;
+  flex: none;
+}
+
+.workshop__note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--panel-muted);
+}
+
+.workshop__rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Узкое окно: правая колонка уезжает под поле. Размечать на телефоне заказчик
+   не собирался (там режим просмотра), но планшет в альбомной ориентации в
+   редактор попадает. */
+@media (max-width: 900px) {
+  .workshop {
+    flex-direction: column;
+  }
+
+  .workshop__side {
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .workshop__group {
+    flex: 1 1 200px;
+  }
+}
