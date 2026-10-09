@@ -960,6 +960,36 @@ test("вид объекта удалён на одной стороне, а на
   assert.ok(merged.conflicts.some((conflict) => conflict.code === "restoredRef" && conflict.entity === "schemeObjectKinds"));
 });
 
+test("вид не возвращается ради объекта, который сам уходит вместе со своей схемой", () => {
+  const { project: base, schemeId } = sharedDrawing();
+  const kindId = schemeObjectKindsInOrder(base)[5].id;
+  const added = addSchemeObject(base, {
+    schemeId,
+    kindId,
+    shape: "rect",
+    atMm: { x: 1000, y: 100 },
+    widthMm: 1200,
+    depthMm: 80,
+    heightMm: 500,
+    heightAboveFloorMm: 150,
+  });
+  const ancestor = added.project;
+  // Мы снесли схему целиком — её объект ушёл с ней, и вид стало можно удалить.
+  let ours = deleteScheme(ancestor, schemeId).project;
+  ours = stamped(deleteSchemeObjectKind(ours, kindId).project, "2026-10-09T10:05:00.000Z");
+  // Напарник в это время подвинул объект: правка важнее удаления, и в слиянии
+  // объект переживёт свою коллекцию — но не свою схему.
+  const theirs = stamped(
+    updateSchemeObject(copyOf(ancestor), added.schemeObject.id, { atMm: { x: 1500, y: 100 } }).project,
+    "2026-10-09T10:00:00.000Z",
+  );
+  const merged = mergeProjects(ours, theirs, ancestor);
+  assert.equal(merged.project.schemes.length, 0);
+  assert.deepEqual(merged.project.schemeObjects || [], []);
+  assert.equal(findSchemeObjectKind(merged.project, kindId), null, "вид вернулся ради объекта, которого уже нет");
+  assert.equal(merged.conflicts.some((conflict) => conflict.code === "restoredRef"), false);
+});
+
 test("схему удалили — её чертёж уходит с ней, а привязка метки снимается без новых полей", () => {
   const { project: base, schemeId, wallIds } = sharedDrawing();
   let withMark = addMark(base, { schemeId, typeId: base.markTypes[0].id, points: [{ x: 0.3, y: 0.2 }] });

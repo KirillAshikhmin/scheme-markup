@@ -630,9 +630,6 @@ function mergeReferences(merged, report, sources, winner) {
    *     удалить не даёт, и через двух участников это правило обходится ровно
    *     как с категориями и типами меток.
    */
-  mergeRestore(merged, "schemeObjectKinds", mergeRefs(merged.schemeObjects, "kindId"), sources, report, winner);
-  const objectKinds = mergeIndex(merged.schemeObjectKinds);
-
   merged.walls = merged.walls.filter((wall) => {
     if (schemes.has(wall.schemeId)) return true;
     report.conflicts.push({ code: "danglingRef", entity: "walls", id: wall.id, kept: "none", item: wall });
@@ -646,11 +643,7 @@ function mergeReferences(merged, report, sources, winner) {
     return false;
   });
 
-  merged.schemeObjects = merged.schemeObjects.filter((object) => {
-    // Вид у объекта обязателен: безымянный прямоугольник на чертеже не значит
-    // ничего. Вернуть его не вышло — значит записи нет ни у кого и ни в общем
-    // снимке, и объект уходит вслед за ней, как тип без категории.
-    if (schemes.has(object.schemeId) && objectKinds.has(object.kindId)) return true;
+  const dropObject = (object) => {
     report.conflicts.push({
       code: "danglingRef",
       entity: "schemeObjects",
@@ -659,7 +652,21 @@ function mergeReferences(merged, report, sources, winner) {
       item: object,
     });
     return false;
-  });
+  };
+  merged.schemeObjects = merged.schemeObjects.filter((object) =>
+    schemes.has(object.schemeId) ? true : dropObject(object),
+  );
+  // Вид возвращается уже по уцелевшим объектам: вернуть его ради объекта,
+  // который сам сейчас уйдёт вместе со своей схемой, — лишняя строка в отчёте
+  // и лишняя запись в справочнике.
+  mergeRestore(merged, "schemeObjectKinds", mergeRefs(merged.schemeObjects, "kindId"), sources, report, winner);
+  const objectKinds = mergeIndex(merged.schemeObjectKinds);
+  // Вид у объекта обязателен: безымянный прямоугольник на чертеже не значит
+  // ничего. Вернуть его не вышло — значит записи нет ни у кого и ни в общем
+  // снимке, и объект уходит вслед за ней, как тип без категории.
+  merged.schemeObjects = merged.schemeObjects.filter((object) =>
+    objectKinds.has(object.kindId) ? true : dropObject(object),
+  );
 
   // Тип модели и сама модель — такой же справочник: `equipmentTypeInUse` и
   // `equipmentInUse` удалить их «под» чужой работой не дают. Модель возвращаем

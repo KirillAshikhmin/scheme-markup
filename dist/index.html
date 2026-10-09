@@ -4744,6 +4744,36 @@ const strings = {
     scaleMetersInvalid: "Расстояние между точками — число больше нуля, в метрах",
     scaleMetersTooBig: "Расстояние между точками — не больше {max} м",
     scaleSegmentEmpty: "Отрезок калибровки выродился в точку — покажите две разные точки плана",
+    // Чертёж: стены, проёмы и объекты схемы. Всё мерится целыми миллиметрами,
+    // и числа, которых не бывает, модель отвергает вслух — молчание здесь
+    // уехало бы в развёртку стены и в закупку.
+    drawingMmInvalid: "Размер чертежа — число в миллиметрах: «2700» или «2,7» мм",
+    drawingMmTooBig: "Размер чертежа — не больше {max} мм",
+    drawingMmNotPositive: "Этот размер чертежа должен быть больше нуля",
+    drawingMmNegative: "Этот размер чертежа не может быть отрицательным",
+    drawingHeightTooBig: "Высота — не больше {max} {unit}",
+    originPointInvalid: "Начало координат чертежа ставится точкой на плане",
+    originTurnUnknown: "Чертёж поворачивается относительно плана четвертями оборота",
+    wallNotFound: "Стена не найдена",
+    wallPointsSame: "У стены два разных конца — из одной точки стены не бывает",
+    wallThicknessTooBig: "Толщина стены — не больше {max} мм; толще — это уже объект, а не стена",
+    wallOtherScheme: "Стена с другой схемы: метку привязывают к стене своего плана",
+    markWallAtOutside: "Метка привязана за концом стены: {at} мм при длине {length} мм",
+    openingNotFound: "Проём не найден",
+    openingKindUnknown: "Проём бывает окном, дверью, проёмом без полотна или аркой",
+    openingWiderThanWall: "Проём шире стены: проём {opening} мм, стена {wall} мм",
+    openingOutsideWall: "Проём не помещается в стене: {from}…{to} мм при длине стены {length} мм",
+    openingsOverlap: "Проёмы в стене не налезают друг на друга: {from}…{to} мм уже заняты",
+    openingAboveHeight: "Проём выше помещения: верх на {top} мм при высоте {height} мм",
+    openingHingeUnknown: "Петли двери — у начала проёма или у его конца",
+    openingSwingUnknown: "Дверь открывается на одну сторону стены или на другую",
+    openingSwingOnlyDoor: "Сторона открывания бывает только у двери: у окна и арки полотна нет",
+    schemeObjectNotFound: "Объект схемы не найден",
+    schemeObjectKindNotFound: "Вид объекта схемы не найден",
+    schemeObjectKindInUse: "Вид «{name}» стоит у объектов схемы ({count}) — сперва смените им вид",
+    schemeObjectShapeUnknown: "Объект схемы задаётся прямоугольником или ломаной",
+    schemeObjectShortLine: "Ломаная объекта схемы — не меньше двух вершин",
+    schemeObjectTurnInvalid: "Поворот объекта схемы — число градусов",
     unknownCommitOption: "Правка не выполнена: в опциях команды неизвестный ключ {keys}. Известны: {known}",
     commitOptionsNotObject: "Правка не выполнена: опции команды — объект с ключами {keys}, а не список",
     nothingToPaste: "Вставлять нечего: в буфере нет метки",
@@ -4773,6 +4803,11 @@ const strings = {
     outline: "Контур",
     group: "Группа",
     placement: "Единица оборудования",
+    // Чертёж: у стены, проёма и объекта схемы обозначения нет — в отчёте
+    // слияния их называет род.
+    wall: "Стена",
+    opening: "Проём",
+    schemeObject: "Объект схемы",
   },
   // Каждая строка называет виновника: «{label} — …». Иначе в списке
   // предупреждений три метки с потерянным помещением дают три одинаковые
@@ -5375,6 +5410,22 @@ const strings = {
     rcd: "УЗО или дифавтомат",
     contactor: "Контактор",
     enclosure: "Щит (корпус)",
+  },
+  // Виды объектов чертежа — стартовый набор справочника (таск 123). Список
+  // пополняется в справочнике объекта, как типы меток: правкой кода новый вид
+  // не заводится. Радиатор и столешница здесь не для полноты — радиатор стоит
+  // под окном ровно там, где хочется розетка, а высота столешницы задаёт
+  // высоту розеток над ней.
+  schemeObjectKinds: {
+    column: "Колонна",
+    niche: "Ниша",
+    duct: "Короб (стояк)",
+    stairs: "Лестница",
+    panel: "Щит",
+    radiator: "Радиатор",
+    counter: "Столешница (кухонный фронт)",
+    plumbing: "Сантехника",
+    cabinet: "Шкаф",
   },
   // Окно выбора модели. Не справочник: здесь модель находят и берут, а правят
   // её по-прежнему в справочнике объекта.
@@ -6819,9 +6870,17 @@ function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) 
   const scaleOffset = (offset) =>
     offset ? { dx: roundOffset(offset.dx * scaleX), dy: roundOffset(offset.dy * scaleY) } : offset;
   const scaleDropped = Boolean(planScaleOf(project, schemeId));
+  // **Привязка чертежа снимается вместе с масштабом, а сам чертёж цел.** Он в
+  // миллиметрах и от картинки не зависит — ни одна стена не трогается. А вот
+  // место, где лежало его начало координат, указывало на точку **прежней**
+  // картинки: на новой там неизвестно что, да и пикселей на метр больше нет,
+  // так что положить чертёж на подложку всё равно нечем. Оставь привязку —
+  // после новой калибровки чертёж молча встал бы не туда; снять её честнее,
+  // а привязать заново — два клика. Отмена шага возвращает и её.
+  const originDropped = Boolean(planOriginOf(project, schemeId));
   const schemes = project.schemes.map((item) => {
     if (item.id !== schemeId) return item;
-    const { scale, ...rest } = item;
+    const { scale, origin, ...rest } = item;
     return { ...rest, imageId, width: nextWidth, height: nextHeight };
   });
   const marks = project.marks.map((mark) =>
@@ -6843,6 +6902,7 @@ function replaceSchemeImage(project, schemeId, { imageId, width, height } = {}) 
     project: withProject(project, { schemes, marks, groups, outlines }),
     scheme: schemes.find((item) => item.id === schemeId),
     scaleDropped,
+    originDropped,
   };
 }
 
@@ -6862,8 +6922,14 @@ function usedImageIds(project) {
 function deleteScheme(project, schemeId) {
   requireScheme(project, schemeId);
   const removed = new Set(project.marks.filter((mark) => mark.schemeId === schemeId).map((mark) => mark.id));
+  // Чертёж принадлежит схеме так же, как метки и контуры: стены уходят вместе
+  // с ней, проёмы — вместе со стенами, а метки чужих схем теряют привязку к
+  // ушедшим стенам.
+  const goneWalls = new Set(wallsOnScheme(project, schemeId).map((wall) => wall.id));
   const marks = dropControls(
-    project.marks.filter((mark) => mark.schemeId !== schemeId),
+    project.marks
+      .filter((mark) => mark.schemeId !== schemeId)
+      .map((mark) => (goneWalls.has(mark.wallId) ? withoutWallBinding(mark) : mark)),
     removed,
   );
   const groups = project.groups.filter((group) => group.schemeId !== schemeId);
@@ -6873,7 +6939,18 @@ function deleteScheme(project, schemeId) {
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
   const placements = dropPlacements(project, removed);
-  return { project: withProject(project, { schemes, marks, groups, outlines, placements }) };
+  const patch = { schemes, marks, groups, outlines, placements };
+  // Списки чертежа попадают в патч только у того объекта, у которого они уже
+  // есть: иначе удаление схемы дописало бы старому объекту три пустых списка
+  // на пустом месте (G68).
+  if (Array.isArray(project.walls)) patch.walls = project.walls.filter((wall) => wall.schemeId !== schemeId);
+  if (Array.isArray(project.openings)) {
+    patch.openings = project.openings.filter((opening) => !goneWalls.has(opening.wallId));
+  }
+  if (Array.isArray(project.schemeObjects)) {
+    patch.schemeObjects = project.schemeObjects.filter((object) => object.schemeId !== schemeId);
+  }
+  return { project: withProject(project, patch) };
 }
 
 // Единственный порядок справочника: категории по своему order, типы внутри —
@@ -9025,6 +9102,817 @@ function formatMeters(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "";
   return String(Math.round(number * 100) / 100).replace(".", ",");
+}
+
+// ——— чертёж: единицы и начало координат ———————————————————————————————
+//
+// Требование G174: «реализуем слои… рисуем все стены с указанием толщины и
+// общая высота помещения задаётся, так же возможность разместить окна, двери…
+// схему эту не переводим в растр, должна быть векторная». Разбор затеи и
+// ответы заказчика — в таске 122; здесь только модель, без единой кнопки.
+//
+// **Это вторая система координат рядом с долями плана, и граница между ними
+// названа словами в ADR 008.** Коротко: доли (ADR 002) остаются у меток,
+// контуров, направляющих и калибровки — они живут **по чужой картинке**;
+// чертёж живёт в **целых миллиметрах** от своего начала координат, потому что
+// толщина стены 0,004 доли — это не толщина, а бессмыслица, а без подложки
+// долям не от чего считаться вовсе.
+//
+// Целые, а не дробные, нарочно: стена 3000 мм остаётся 3000 мм через любое
+// число правок, и — что важнее — **совпадение концов двух стен проверяется
+// равенством**, без допуска. Цепочка стен поэтому надёжный граф, а не
+// «почти сходится».
+//
+// Все поля с миллиметрами названы с хвостом `Mm` — ровно для того, чтобы в
+// коде не перепутать их с долями, у которых хвоста нет.
+
+// Потолок координаты и длины чертежа — километр. План больше километра
+// по стороне — это опечатка в поле, а не дом.
+const DRAWING_MM_MAX = 1000000;
+
+// Толще двух метров стен не бывает: это уже не стена, а объект схемы.
+const WALL_THICKNESS_MM_MAX = 2000;
+
+// Высоты чертежа (помещение, проём, объект) мерятся тем же потолком, что
+// высота у метки, — `MARK_DIMENSION_MAX`, сто метров. Иначе «розетка на 300»
+// и «потолок 2700» жили бы по разным правилам, и в одном окне рядом стояли бы
+// два разных предела.
+
+/**
+ * Координата чертежа: целые миллиметры, знак любой — начало координат внутри
+ * плана, и стена левее него имеет отрицательный `x`.
+ *
+ * Запятая принимается наравне с точкой, дробное округляется: клик по холсту
+ * даёт дробные миллиметры, и округлять их надо здесь, на границе модели, а не
+ * в каждом вызывающем.
+ */
+function drawingMmValue(value) {
+  const raw = typeof value === "string" ? value.trim().replace(",", ".") : value;
+  if (raw === "" || raw === null || raw === undefined) throw modelError("drawingMmInvalid");
+  const number = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(number)) throw modelError("drawingMmInvalid");
+  // `|| 0` здесь не от нуля, а от **минус нуля**: `Math.round(-0.4)` даёт
+  // `-0`, и такая координата сравнивалась бы с нулём неравной — а совпадение
+  // концов двух стен у нас проверяется именно равенством.
+  const mm = Math.round(number) || 0;
+  if (Math.abs(mm) > DRAWING_MM_MAX) throw modelError("drawingMmTooBig", { max: DRAWING_MM_MAX });
+  return mm;
+}
+
+/** Размер чертежа: то же, но строго больше нуля — толщина, ширина, высота. */
+function drawingPositiveMm(value) {
+  const mm = drawingMmValue(value);
+  if (!(mm > 0)) throw modelError("drawingMmNotPositive");
+  return mm;
+}
+
+/**
+ * Отступ чертежа: то же, но не меньше нуля. Ноль — значение, а не пустота:
+ * у двери высота от пола равна нулю, и стереть её в «не задано» было бы
+ * враньём (то же правило, что у размеров метки).
+ */
+function drawingOffsetMm(value) {
+  const mm = drawingMmValue(value);
+  if (mm < 0) throw modelError("drawingMmNegative");
+  return mm;
+}
+
+/**
+ * Необязательная высота: пусто (`""`, `null`, `undefined`) — «не задано».
+ * У объекта схемы это значит «во всю высоту помещения», у схемы и помещения —
+ * «высота не задана».
+ */
+function drawingHeightMm(value) {
+  if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return null;
+  const mm = drawingPositiveMm(value);
+  if (mm > MARK_DIMENSION_MAX) {
+    throw modelError("drawingHeightTooBig", { max: MARK_DIMENSION_MAX, unit: strings.markSizes.unit });
+  }
+  return mm;
+}
+
+// Четверти оборота — те же, что у правки плана (`imagePrep.ROTATION_STEPS`).
+// Повторены здесь, а не взяты оттуда: модель не знает ни о картинках, ни о
+// браузере, и зависеть от модуля подготовки изображений не должна.
+const PLAN_TURNS = [0, 90, 180, 270];
+
+/**
+ * Начало координат чертежа на подложке — или `null`, если чертёж к подложке не
+ * привязан (её нет, её заменили, или чертёж начали рисовать без неё).
+ *
+ * `at` — **доля** плана (ADR 002), куда попадает точка (0, 0) чертежа;
+ * `turn` — на сколько повёрнуты оси чертежа относительно осей плана, по
+ * часовой, четвертями оборота.
+ *
+ * Почему доля, а не пиксели: поворот и обрезка пересчитывают доли тем же
+ * преобразованием, что точки меток, — ровно за это доли и плачены (ADR 002).
+ * Почему ещё и `turn`: перенести одну точку мало. Повернули подложку на 90° —
+ * вместе с картинкой повернулись и её стены, и чертёж обязан повернуться с
+ * ними, иначе нарисованная стена ляжет поперёк той, по которой её обводили.
+ * Четверть оборота — целое число, поэтому поворот туда и обратно возвращает
+ * ровно прежнее значение, а миллиметры стен при этом **не трогаются вовсе**.
+ */
+function planOriginOf(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  const raw = scheme && scheme.origin;
+  if (!raw || !scalePointOk(raw.at)) return null;
+  const turn = Number(raw.turn) || 0;
+  return { at: { x: Number(raw.at.x), y: Number(raw.at.y) }, turn: PLAN_TURNS.includes(turn) ? turn : 0 };
+}
+function setPlanOrigin(project, schemeId, { at, turn = 0 } = {}) {
+  requireScheme(project, schemeId);
+  if (!scalePointOk(at)) throw modelError("originPointInvalid");
+  const quarter = Number(turn) || 0;
+  if (!PLAN_TURNS.includes(quarter)) throw modelError("originTurnUnknown");
+  // Доля **не** зажимается в 0…1, в отличие от точек меток: начало координат —
+  // якорь, а не место, на которое смотрят. Прижми его к краю при обрезке — и
+  // уехал бы весь чертёж целиком, все стены разом.
+  const origin = { at: { x: Number(at.x), y: Number(at.y) }, turn: quarter };
+  const schemes = project.schemes.map((item) => (item.id === schemeId ? { ...item, origin } : item));
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), origin };
+}
+
+/** Снятие привязки: поле **убирается**, а не обнуляется. */
+function clearPlanOrigin(project, schemeId) {
+  const scheme = requireScheme(project, schemeId);
+  if (!Object.prototype.hasOwnProperty.call(scheme, "origin")) return { project, scheme, cleared: false };
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    const { origin, ...rest } = item;
+    return rest;
+  });
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), cleared: true };
+}
+
+// Поворот вектора на четверть оборота по часовой — в экранных осях, где `y`
+// вниз. Та же арифметика, что у `imagePrep.transformOffset` для смещения
+// подписи: вектор внутри картинки едет вместе с картинкой.
+function turnVector(point, turn) {
+  if (turn === 90) return { x: -point.y, y: point.x };
+  if (turn === 180) return { x: -point.x, y: -point.y };
+  if (turn === 270) return { x: point.y, y: -point.x };
+  return { x: point.x, y: point.y };
+}
+
+/**
+ * Мост между системами: точка чертежа (мм) в доли плана — или `null`, если
+ * моста нет. Нужны обе половины: калибровка (таск 111) даёт пиксели на метр,
+ * привязка — начало координат и поворот. Нет хотя бы одной — чертёж на
+ * подложку не ложится, и показывать его там нельзя.
+ */
+function planMmToFraction(project, schemeId, pointMm) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  const origin = planOriginOf(project, schemeId);
+  if (!(perMeter > 0) || !origin || !pointMm) return null;
+  const scheme = findScheme(project, schemeId);
+  const width = Number(scheme.width) || 0;
+  const height = Number(scheme.height) || 0;
+  if (!(width > 0) || !(height > 0)) return null;
+  const px = turnVector(
+    { x: (Number(pointMm.x) / 1000) * perMeter, y: (Number(pointMm.y) / 1000) * perMeter },
+    origin.turn,
+  );
+  return { x: origin.at.x + px.x / width, y: origin.at.y + px.y / height };
+}
+
+/** Обратный перевод: доля плана в целые миллиметры чертежа. */
+function planFractionToMm(project, schemeId, point) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  const origin = planOriginOf(project, schemeId);
+  if (!(perMeter > 0) || !origin || !scalePointOk(point)) return null;
+  const scheme = findScheme(project, schemeId);
+  const width = Number(scheme.width) || 0;
+  const height = Number(scheme.height) || 0;
+  if (!(width > 0) || !(height > 0)) return null;
+  const px = { x: (Number(point.x) - origin.at.x) * width, y: (Number(point.y) - origin.at.y) * height };
+  const back = turnVector(px, (360 - origin.turn) % 360);
+  return { x: Math.round((back.x / perMeter) * 1000), y: Math.round((back.y / perMeter) * 1000) };
+}
+
+// ——— чертёж: стены —————————————————————————————————————————————————————
+//
+// **Стена — один отрезок, а не полилиния.** Решение объяснено развёрнуто,
+// потому что от него зависит всё остальное (таск 122, развилка 1):
+//
+//   — проём живёт в стене отступом от её начала. У полилинии «отступ вдоль»
+//     пересекал бы углы, и проём мог бы оказаться наполовину на одной стене,
+//     наполовину на другой — чего не бывает;
+//   — развёртка стены, ради которой всё затевается, — это одна плоская грань,
+//     то есть ровно один отрезок. Полилинию пришлось бы резать на отрезки при
+//     отрисовке и заново раздавать проёмы по кускам — угадывая;
+//   — толщина принадлежит куску: несущая 400 и перегородка 100 — разные стены,
+//     и правка толщины одного куска полилинии требовала бы её разрезать;
+//   — удаление куска из цепочки не рвёт её соседей.
+//
+// Полилиния при этом не потеряна: она остаётся **жестом рисования** — таск 124
+// заведёт из одного росчерка цепочку стен с общими концами. Соседство
+// выражено не ссылкой, а совпадением точек, и в целых миллиметрах это
+// совпадение точное.
+//
+// Стены лежат списком **у объекта**, а не внутри схемы: по `id` их сливает
+// `merge.js`, и вложенный в схему чертёж сливался бы одним куском — двое
+// рисовали бы по очереди, а не вместе.
+
+function wallsOf(project) {
+  return project && Array.isArray(project.walls) ? project.walls : [];
+}
+
+/** Стены схемы. Порядок — только отсюда, своей сортировки не заводить. */
+function wallsOnScheme(project, schemeId) {
+  return wallsOf(project).filter((wall) => wall.schemeId === schemeId);
+}
+function findWall(project, wallId) {
+  if (!wallId) return null;
+  return wallsOf(project).find((wall) => wall.id === wallId) || null;
+}
+
+function requireWall(project, wallId) {
+  const wall = findWall(project, wallId);
+  if (!wall) throw modelError("wallNotFound");
+  return wall;
+}
+
+function drawingPointMm(point) {
+  if (!point || typeof point !== "object") throw modelError("drawingMmInvalid");
+  return { x: drawingMmValue(point.x), y: drawingMmValue(point.y) };
+}
+
+function wallThicknessMm(value) {
+  const mm = drawingPositiveMm(value);
+  if (mm > WALL_THICKNESS_MM_MAX) throw modelError("wallThicknessTooBig", { max: WALL_THICKNESS_MM_MAX });
+  return mm;
+}
+
+/**
+ * Длина стены в целых миллиметрах. Корень из целых чисел целым не бывает,
+ * поэтому округляется здесь — и в одном месте, иначе проверка «проём влез» и
+ * подпись длины расходились бы на миллиметр.
+ */
+function wallLengthMm(wall) {
+  if (!wall || !wall.aMm || !wall.bMm) return 0;
+  return Math.round(Math.hypot(Number(wall.bMm.x) - Number(wall.aMm.x), Number(wall.bMm.y) - Number(wall.aMm.y)));
+}
+function addWall(project, { schemeId, aMm, bMm, thicknessMm } = {}) {
+  requireScheme(project, schemeId);
+  const a = drawingPointMm(aMm);
+  const b = drawingPointMm(bMm);
+  if (a.x === b.x && a.y === b.y) throw modelError("wallPointsSame");
+  const wall = { id: newId(), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
+  return { project: withProject(project, { walls: [...wallsOf(project), wall] }), wall };
+}
+
+/**
+ * Правка стены. Концы двигаются, толщина меняется — а проёмы остаются там,
+ * где стояли: отступ отсчитывается от конца `a`, поэтому проём едет вместе со
+ * стеной, как и задумано.
+ *
+ * Укоротить стену **под** проёмом нельзя: модель отказывает (`openingOutsideWall`).
+ * Прижать проём к новому концу значило бы угадать, что человек хотел, а
+ * промолчать — оставить проём, висящий в воздухе, и соврать в развёртке.
+ */
+function updateWall(project, wallId, patch = {}) {
+  const current = requireWall(project, wallId);
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "aMm")) next.aMm = drawingPointMm(patch.aMm);
+  if (Object.prototype.hasOwnProperty.call(patch, "bMm")) next.bMm = drawingPointMm(patch.bMm);
+  if (Object.prototype.hasOwnProperty.call(patch, "thicknessMm")) next.thicknessMm = wallThicknessMm(patch.thicknessMm);
+  if (next.aMm.x === next.bMm.x && next.aMm.y === next.bMm.y) throw modelError("wallPointsSame");
+  const length = wallLengthMm(next);
+  for (const opening of openingsInWall(project, wallId)) {
+    checkOpeningFits(opening, length);
+  }
+  const walls = wallsOf(project).map((wall) => (wall.id === wallId ? next : wall));
+  return { project: withProject(project, { walls }), wall: next };
+}
+
+/**
+ * Удаление стены уносит её проёмы — они живут в ней и нигде больше, — и
+ * снимает привязку к ней у меток. Метка при этом остаётся на месте: привязка
+ * говорит, на какой стене розетка, а не где она на плане.
+ */
+function deleteWall(project, wallId) {
+  const wall = requireWall(project, wallId);
+  const walls = wallsOf(project).filter((item) => item.id !== wallId);
+  const openings = openingsOf(project).filter((opening) => opening.wallId !== wallId);
+  const marks = project.marks.map((mark) => (mark.wallId === wallId ? withoutWallBinding(mark) : mark));
+  return { project: withProject(project, { walls, openings, marks }), deleted: wall };
+}
+
+/**
+ * Габарит нарисованного на схеме — в миллиметрах, или `null`, если не
+ * нарисовано ничего. Это и есть «размер схемы без подложки»: `scheme.width` и
+ * `height` у неё нули (подложки нет), и единственный размер, который у такой
+ * схемы бывает, — размер самого чертежа.
+ */
+function drawingBoundsMm(project, schemeId) {
+  const points = [];
+  for (const wall of wallsOnScheme(project, schemeId)) points.push(wall.aMm, wall.bMm);
+  for (const object of schemeObjectsOnScheme(project, schemeId)) points.push(...schemeObjectCornersMm(object));
+  if (points.length === 0) return null;
+  const xs = points.map((point) => Number(point.x));
+  const ys = points.map((point) => Number(point.y));
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  return { minX, minY, maxX, maxY, widthMm: maxX - minX, heightMm: maxY - minY };
+}
+
+// ——— чертёж: проёмы ———————————————————————————————————————————————————
+//
+// Проём — объект **на стене**, а не на плане: стена, отступ от её начала,
+// ширина, высота, высота от пола, вид. Тогда он сам едет со стеной, сам
+// исчезает с ней и сам встаёт в будущую развёртку; будь он самостоятельной
+// фигурой на плане — пришлось бы каждый раз заново угадывать, в какой он
+// стене и на каком расстоянии от её угла.
+//
+// **Сторона открывания двери — два независимых признака**, и четыре их
+// сочетания — это ровно четыре двери, какие рисуют на плане:
+//   `hinge` — петли у начала проёма (ближе к концу `a` стены) или у конца;
+//   `swing` — полотно открывается на левую сторону стены или на правую, где
+//   «левая» — та, что слева, если идти от `a` к `b`.
+// Обе названы через **направление самой стены**, а не «внутрь/наружу»: что
+// внутри, а что снаружи, модель не знает — помещения выводятся из контуров, а
+// не из стен (таск 122, развилка 2), и «внутрь» пришлось бы угадывать.
+const OPENING_KINDS = ["window", "door", "opening", "arch"];
+const OPENING_KIND_DOOR = "door";
+const OPENING_HINGES = ["start", "end"];
+const OPENING_SWINGS = ["left", "right"];
+
+function openingsOf(project) {
+  return project && Array.isArray(project.openings) ? project.openings : [];
+}
+
+/** Проёмы стены по порядку вдоль неё. Порядок — только отсюда. */
+function openingsInWall(project, wallId) {
+  return openingsOf(project)
+    .filter((opening) => opening.wallId === wallId)
+    .sort((first, second) => Number(first.atMm) - Number(second.atMm));
+}
+function findOpening(project, openingId) {
+  if (!openingId) return null;
+  return openingsOf(project).find((opening) => opening.id === openingId) || null;
+}
+
+// Проём влез в стену: шире стены не бывает, за её конец не торчит.
+function checkOpeningFits(opening, length) {
+  const width = Number(opening.widthMm);
+  const at = Number(opening.atMm);
+  if (width > length) throw modelError("openingWiderThanWall", { opening: width, wall: length });
+  if (at + width > length) throw modelError("openingOutsideWall", { from: at, to: at + width, length });
+}
+
+// Проёмы в одной стене не налезают друг на друга: дверь внахлёст с окном —
+// это не чертёж, а описка, и молча пустить её значит соврать в развёртке.
+function checkOpeningFree(project, opening) {
+  const from = Number(opening.atMm);
+  const to = from + Number(opening.widthMm);
+  for (const other of openingsInWall(project, opening.wallId)) {
+    if (other.id === opening.id) continue;
+    const otherFrom = Number(other.atMm);
+    const otherTo = otherFrom + Number(other.widthMm);
+    if (from < otherTo && otherFrom < to) {
+      throw modelError("openingsOverlap", { from: otherFrom, to: otherTo });
+    }
+  }
+}
+
+/**
+ * Проём не выше помещения. Сверяется с высотой **схемы**: в какой комнате
+ * стоит стена, модель не знает (стены помещениям не принадлежат), поэтому
+ * переопределённая высота комнаты здесь не участвует, а высоты у схемы может
+ * не быть вовсе — тогда и сверять нечего.
+ */
+function checkOpeningHeight(project, wall, opening) {
+  const height = Number(wallHeightOf(project, { schemeId: wall.schemeId })) || 0;
+  if (!(height > 0)) return;
+  const top = Number(opening.heightAboveFloorMm) + Number(opening.heightMm);
+  if (top > height) throw modelError("openingAboveHeight", { top, height });
+}
+
+function openingDoorFields(kind, patch, current) {
+  const has = (key) => patch && Object.prototype.hasOwnProperty.call(patch, key);
+  const value = (key) => (has(key) ? patch[key] : current ? current[key] : undefined);
+  if (kind !== OPENING_KIND_DOOR) {
+    // Сторона открывания у окна и у арки не значит ничего: полотна нет.
+    if ((has("hinge") && patch.hinge != null) || (has("swing") && patch.swing != null)) {
+      throw modelError("openingSwingOnlyDoor");
+    }
+    return {};
+  }
+  const hinge = value("hinge") == null ? OPENING_HINGES[0] : value("hinge");
+  const swing = value("swing") == null ? OPENING_SWINGS[0] : value("swing");
+  if (!OPENING_HINGES.includes(hinge)) throw modelError("openingHingeUnknown");
+  if (!OPENING_SWINGS.includes(swing)) throw modelError("openingSwingUnknown");
+  return { hinge, swing };
+}
+function addOpening(project, { wallId, kind, atMm, widthMm, heightMm, heightAboveFloorMm = 0, hinge, swing } = {}) {
+  const wall = requireWall(project, wallId);
+  if (!OPENING_KINDS.includes(kind)) throw modelError("openingKindUnknown");
+  const height = drawingHeightMm(heightMm);
+  if (height === null) throw modelError("drawingMmNotPositive");
+  const opening = {
+    id: newId(),
+    wallId,
+    kind,
+    atMm: drawingOffsetMm(atMm),
+    widthMm: drawingPositiveMm(widthMm),
+    heightMm: height,
+    heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
+    ...openingDoorFields(kind, { hinge, swing }, null),
+  };
+  checkOpeningFits(opening, wallLengthMm(wall));
+  checkOpeningFree(project, opening);
+  checkOpeningHeight(project, wall, opening);
+  return { project: withProject(project, { openings: [...openingsOf(project), opening] }), opening };
+}
+function updateOpening(project, openingId, patch = {}) {
+  const current = findOpening(project, openingId);
+  if (!current) throw modelError("openingNotFound");
+  const wall = requireWall(project, current.wallId);
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "kind")) {
+    if (!OPENING_KINDS.includes(patch.kind)) throw modelError("openingKindUnknown");
+    next.kind = patch.kind;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "atMm")) next.atMm = drawingOffsetMm(patch.atMm);
+  if (Object.prototype.hasOwnProperty.call(patch, "widthMm")) next.widthMm = drawingPositiveMm(patch.widthMm);
+  if (Object.prototype.hasOwnProperty.call(patch, "heightMm")) {
+    const height = drawingHeightMm(patch.heightMm);
+    if (height === null) throw modelError("drawingMmNotPositive");
+    next.heightMm = height;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "heightAboveFloorMm")) {
+    next.heightAboveFloorMm = drawingOffsetMm(patch.heightAboveFloorMm);
+  }
+  // Стала дверью — у неё появилась сторона открывания; перестала — поля
+  // убираются, а не остаются лежать соврать в развёртке.
+  delete next.hinge;
+  delete next.swing;
+  Object.assign(next, openingDoorFields(next.kind, patch, current));
+  checkOpeningFits(next, wallLengthMm(wall));
+  checkOpeningFree(project, next);
+  checkOpeningHeight(project, wall, next);
+  const openings = openingsOf(project).map((opening) => (opening.id === openingId ? next : opening));
+  return { project: withProject(project, { openings }), opening: next };
+}
+function deleteOpening(project, openingId) {
+  const opening = findOpening(project, openingId);
+  if (!opening) throw modelError("openingNotFound");
+  const openings = openingsOf(project).filter((item) => item.id !== openingId);
+  return { project: withProject(project, { openings }), deleted: opening };
+}
+
+// ——— чертёж: объекты схемы —————————————————————————————————————————————
+//
+// Заказчик просил «другие основные объекты для схемы дома» и список велел
+// придумать. Вместо того чтобы кодить каждый вид отдельно, здесь **один
+// механизм**: объект схемы — это габарит на полу с размерами в миллиметрах и
+// видом из своего справочника, а справочник пополняется как справочник типов
+// меток, а не правкой кода.
+//
+// Имя в коде — `schemeObject`, никогда просто `object`: «объектом» во всём
+// инструменте называется сам размеченный проект, и короткое имя читалось бы
+// как он.
+//
+// Две формы, и обе нужны:
+//   `rect` — середина, ширина, глубина и поворот. Так габарит **набирают**:
+//     радиатор 1200 × 80 вписывают числами, а не обводят мышью. Середина, а
+//     не угол, потому что поворот вокруг середины оставляет вещь там, где её
+//     поставили, и «радиатор по центру окна» — это про середину;
+//   `polyline` — ломаная и ширина полосы. Так задают кухонный фронт, короб и
+//     лестничный марш: длина идёт по стене с поворотом, а глубина одна.
+//
+// Высота необязательна: у колонны, ниши и короба она «во всю высоту
+// помещения», и выдумывать ей число — врать. Высота от пола, наоборот, всегда
+// есть и по умолчанию нулевая: вещь стоит на полу.
+//
+// Два вида из списка — самые ценные для электрика, и размеры выражают именно
+// то, ради чего они заведены: у **радиатора** есть высота от пола и высота
+// (он висит под окном ровно там, где хочется розетка), у **столешницы** верх
+// считается как `heightAboveFloorMm + heightMm` (`schemeObjectTopMm`) — это и
+// есть та высота, от которой отмеряют розетки над ней.
+const SCHEME_OBJECT_SHAPES = ["rect", "polyline"];
+
+// Стартовый набор видов: список заказчика плюс придуманное, утверждён в
+// таске 122. Порядок — порядок справочника.
+const TEMPLATE_SCHEME_OBJECT_KINDS = [
+  "column",
+  "niche",
+  "duct",
+  "stairs",
+  "panel",
+  "radiator",
+  "counter",
+  "plumbing",
+  "cabinet",
+];
+
+// Свежие идентификаторы на каждый вызов — как у `defaultTemplate`: два объекта
+// не должны делить id справочника.
+function schemeObjectKindTemplate() {
+  return TEMPLATE_SCHEME_OBJECT_KINDS.map((key, index) => ({
+    id: newId(),
+    name: strings.schemeObjectKinds[key] || key,
+    order: index,
+  }));
+}
+
+// Справочник объекта прежней разметки пуст, и это не ошибка: чертежа у него
+// нет, значит и видов ему не нужно. Заводится он `ensureSchemeObjectKinds` —
+// при первой правке чертежа, а не при открытии (G68).
+function schemeObjectKindsOf(project) {
+  return project && Array.isArray(project.schemeObjectKinds) ? project.schemeObjectKinds : [];
+}
+function schemeObjectKindsInOrder(project) {
+  return schemeObjectKindsOf(project)
+    .map((item, index) => ({ item, order: item.order == null ? index : item.order, index }))
+    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
+    .map((entry) => entry.item);
+}
+function findSchemeObjectKind(project, kindId) {
+  if (!kindId) return null;
+  return schemeObjectKindsOf(project).find((item) => item.id === kindId) || null;
+}
+
+/**
+ * Завести справочник видов, если его ещё нет. Отдельная команда, а не
+ * дописывание при открытии: объект, которого не трогали, обязан остаться
+ * прежним байт в байт (G68), а стартовый набор нужен ровно в ту минуту, когда
+ * человек впервые ставит объект на чертёж.
+ *
+ * Заводить нечего — возвращается **тот же** объект по ссылке: ни `updatedAt`,
+ * ни шага истории.
+ */
+function ensureSchemeObjectKinds(project) {
+  if (schemeObjectKindsOf(project).length > 0) return { project, added: false };
+  return { project: withProject(project, { schemeObjectKinds: schemeObjectKindTemplate() }), added: true };
+}
+function addSchemeObjectKind(project, { name } = {}) {
+  const item = { id: newId(), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
+  return {
+    project: withProject(project, { schemeObjectKinds: [...schemeObjectKindsOf(project), item] }),
+    schemeObjectKind: item,
+  };
+}
+function updateSchemeObjectKind(project, kindId, patch = {}) {
+  const current = findSchemeObjectKind(project, kindId);
+  if (!current) throw modelError("schemeObjectKindNotFound");
+  const next = { ...current };
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
+  if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
+  const schemeObjectKinds = schemeObjectKindsOf(project).map((item) => (item.id === kindId ? next : item));
+  return { project: withProject(project, { schemeObjectKinds }), schemeObjectKind: next };
+}
+function schemeObjectKindUsage(project, kindId) {
+  return schemeObjectsOf(project).filter((object) => object.kindId === kindId).length;
+}
+
+// Вид с объектами не удаляется молча: у объекта осталась бы ссылка в никуда, а
+// вид у него обязателен — безымянный прямоугольник на чертеже не значит ничего.
+function deleteSchemeObjectKind(project, kindId) {
+  const item = findSchemeObjectKind(project, kindId);
+  if (!item) throw modelError("schemeObjectKindNotFound");
+  const used = schemeObjectKindUsage(project, kindId);
+  if (used > 0) throw modelError("schemeObjectKindInUse", { name: item.name, count: used });
+  const schemeObjectKinds = schemeObjectKindsOf(project)
+    .filter((entry) => entry.id !== kindId)
+    .map((entry, index) => ({ ...entry, order: index }));
+  return { project: withProject(project, { schemeObjectKinds }), deleted: item };
+}
+
+function schemeObjectsOf(project) {
+  return project && Array.isArray(project.schemeObjects) ? project.schemeObjects : [];
+}
+
+/** Объекты схемы. Порядок — только отсюда. */
+function schemeObjectsOnScheme(project, schemeId) {
+  return schemeObjectsOf(project).filter((object) => object.schemeId === schemeId);
+}
+function findSchemeObject(project, objectId) {
+  if (!objectId) return null;
+  return schemeObjectsOf(project).find((object) => object.id === objectId) || null;
+}
+
+function schemeObjectTurnDeg(value) {
+  const number = Number(value === "" || value === null || value === undefined ? 0 : value);
+  if (!Number.isFinite(number)) throw modelError("schemeObjectTurnInvalid");
+  return ((Math.round(number) % 360) + 360) % 360;
+}
+
+/**
+ * Верх объекта над полом — высота от пола плюс своя высота, или `null`, если
+ * высота не задана («во всю высоту помещения»). Ради столешницы и заведено:
+ * розетки над кухонным фронтом отмеряют именно от этого числа.
+ */
+function schemeObjectTopMm(object) {
+  if (!object || typeof object.heightMm !== "number") return null;
+  return Number(object.heightAboveFloorMm || 0) + Number(object.heightMm);
+}
+
+// Углы габарита в миллиметрах: ими считается размер чертежа и по ним он
+// рисуется. У прямоугольника это четыре повёрнутых угла, у ломаной — её
+// вершины (полоса шириной `depthMm` ложится по ним).
+function schemeObjectCornersMm(object) {
+  if (!object) return [];
+  if (object.shape === "polyline") return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+  const at = object.atMm || { x: 0, y: 0 };
+  const halfWidth = Number(object.widthMm) / 2;
+  const halfDepth = Number(object.depthMm) / 2;
+  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return [
+    [-halfWidth, -halfDepth],
+    [halfWidth, -halfDepth],
+    [halfWidth, halfDepth],
+    [-halfWidth, halfDepth],
+  ].map(([x, y]) => ({
+    x: Math.round(Number(at.x) + x * cos - y * sin),
+    y: Math.round(Number(at.y) + x * sin + y * cos),
+  }));
+}
+
+function schemeObjectShapeFields(shape, source, current) {
+  const has = (key) => source && Object.prototype.hasOwnProperty.call(source, key);
+  const value = (key) => (has(key) ? source[key] : current ? current[key] : undefined);
+  if (shape === "polyline") {
+    const raw = value("pointsMm");
+    const points = Array.isArray(raw) ? raw.map(drawingPointMm) : [];
+    if (points.length < 2) throw modelError("schemeObjectShortLine");
+    return { pointsMm: points, depthMm: drawingPositiveMm(value("depthMm")) };
+  }
+  return {
+    atMm: drawingPointMm(value("atMm")),
+    widthMm: drawingPositiveMm(value("widthMm")),
+    depthMm: drawingPositiveMm(value("depthMm")),
+    turnDeg: schemeObjectTurnDeg(value("turnDeg")),
+  };
+}
+function addSchemeObject(project, { schemeId, kindId, shape = "rect", heightMm, heightAboveFloorMm = 0, ...rest } = {}) {
+  requireScheme(project, schemeId);
+  if (!findSchemeObjectKind(project, kindId)) throw modelError("schemeObjectKindNotFound");
+  if (!SCHEME_OBJECT_SHAPES.includes(shape)) throw modelError("schemeObjectShapeUnknown");
+  const object = {
+    id: newId(),
+    schemeId,
+    kindId,
+    shape,
+    ...schemeObjectShapeFields(shape, rest, null),
+    heightMm: drawingHeightMm(heightMm),
+    heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
+  };
+  return { project: withProject(project, { schemeObjects: [...schemeObjectsOf(project), object] }), schemeObject: object };
+}
+function updateSchemeObject(project, objectId, patch = {}) {
+  const current = findSchemeObject(project, objectId);
+  if (!current) throw modelError("schemeObjectNotFound");
+  const shape = Object.prototype.hasOwnProperty.call(patch, "shape") ? patch.shape : current.shape;
+  if (!SCHEME_OBJECT_SHAPES.includes(shape)) throw modelError("schemeObjectShapeUnknown");
+  if (Object.prototype.hasOwnProperty.call(patch, "kindId") && !findSchemeObjectKind(project, patch.kindId)) {
+    throw modelError("schemeObjectKindNotFound");
+  }
+  const next = {
+    id: current.id,
+    schemeId: current.schemeId,
+    kindId: Object.prototype.hasOwnProperty.call(patch, "kindId") ? patch.kindId : current.kindId,
+    shape,
+    ...schemeObjectShapeFields(shape, patch, current.shape === shape ? current : null),
+    heightMm: Object.prototype.hasOwnProperty.call(patch, "heightMm")
+      ? drawingHeightMm(patch.heightMm)
+      : current.heightMm,
+    heightAboveFloorMm: Object.prototype.hasOwnProperty.call(patch, "heightAboveFloorMm")
+      ? drawingOffsetMm(patch.heightAboveFloorMm)
+      : current.heightAboveFloorMm,
+  };
+  const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
+  return { project: withProject(project, { schemeObjects }), schemeObject: next };
+}
+function deleteSchemeObject(project, objectId) {
+  const object = findSchemeObject(project, objectId);
+  if (!object) throw modelError("schemeObjectNotFound");
+  const schemeObjects = schemeObjectsOf(project).filter((item) => item.id !== objectId);
+  return { project: withProject(project, { schemeObjects }), deleted: object };
+}
+
+// ——— чертёж: высота помещения ——————————————————————————————————————————
+//
+// Заказчик: «Задаётся общая высота, но у помещений можно менять и задавать
+// свою». Общая живёт **у схемы**, а не у объекта: схема — это этаж, а у
+// подвала, первого этажа и мансарды высота разная, и одно число на весь дом
+// было бы неверным с первой же минуты — его пришлось бы перебивать по каждой
+// комнате, ровно от чего переопределение и спасает. К тому же стены лежат на
+// схеме, и высоту стены находят, не выходя из её схемы.
+//
+// У помещения — необязательное переопределение. Поля нет ни у схем, ни у
+// комнат прежней разметки: читают высоту только через `wallHeightOf`, и
+// отсутствие приходит честным `null`.
+function wallHeightOf(project, { schemeId, roomId } = {}) {
+  const room = roomId ? findRoom(project, roomId) : null;
+  if (room && typeof room.wallHeightMm === "number") return room.wallHeightMm;
+  const scheme = schemeId ? findScheme(project, schemeId) : null;
+  if (scheme && typeof scheme.wallHeightMm === "number") return scheme.wallHeightMm;
+  return null;
+}
+
+// Снижать высоту под уже стоящим проёмом модель не даёт: промолчать значило бы
+// оставить окно выше потолка, а прижать его — угадать за человека.
+function checkHeightOverOpenings(project, schemeId, height) {
+  if (!(height > 0)) return;
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    for (const opening of openingsInWall(project, wall.id)) {
+      const top = Number(opening.heightAboveFloorMm) + Number(opening.heightMm);
+      if (top > height) throw modelError("openingAboveHeight", { top, height });
+    }
+  }
+}
+function setSchemeWallHeight(project, schemeId, value) {
+  const scheme = requireScheme(project, schemeId);
+  const height = drawingHeightMm(value);
+  if (height !== null) checkHeightOverOpenings(project, schemeId, height);
+  if (height === null && !Object.prototype.hasOwnProperty.call(scheme, "wallHeightMm")) {
+    return { project, scheme, changed: false };
+  }
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    if (height === null) {
+      const { wallHeightMm, ...rest } = item;
+      return rest;
+    }
+    return { ...item, wallHeightMm: height };
+  });
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), changed: true };
+}
+function setRoomWallHeight(project, roomId, value) {
+  const room = findRoom(project, roomId);
+  if (!room) throw modelError("roomNotFound");
+  const height = drawingHeightMm(value);
+  if (height === null && !Object.prototype.hasOwnProperty.call(room, "wallHeightMm")) {
+    return { project, room, changed: false };
+  }
+  const rooms = project.rooms.map((item) => {
+    if (item.id !== roomId) return item;
+    if (height === null) {
+      const { wallHeightMm, ...rest } = item;
+      return rest;
+    }
+    return { ...item, wallHeightMm: height };
+  });
+  return { project: withProject(project, { rooms }), room: rooms.find((item) => item.id === roomId), changed: true };
+}
+
+// ——— чертёж: метка на стене ————————————————————————————————————————————
+//
+// Для развёртки стены надо знать, **какие метки на этой стене и на какой
+// высоте**. Высота у метки уже есть (G118), привязки к стене не было.
+//
+// Привязка **необязательна** и пустой бывает чаще, чем заполненной: потолочный
+// светильник посреди комнаты стены не имеет и иметь не должен. В этом таске
+// только поле и его чтение с записью; проставлять её автоматически при
+// постановке метки — таск 127.
+//
+// Чего здесь сознательно нет: **стороны стены**. Для развёртки она нужна, но
+// выводится из места метки в ту же минуту, когда привязка проставляется
+// автоматикой, — то есть в таске 127, где привязка и записывается. Сторону
+// открывания двери, наоборот, не вывести никогда, поэтому она заведена сразу.
+
+function withoutWallBinding(mark) {
+  const { wallId, wallAtMm, ...rest } = mark;
+  return rest;
+}
+
+/**
+ * Привязка метки к стене — `{wallId, atMm}` или `null`. Читать поля самому
+ * нельзя: у метки прежней разметки их нет вовсе, и отсутствие обязано
+ * приходить тем же `null`, что и снятая привязка.
+ */
+function markWall(mark) {
+  if (!mark || typeof mark.wallId !== "string" || !mark.wallId) return null;
+  return { wallId: mark.wallId, atMm: typeof mark.wallAtMm === "number" ? mark.wallAtMm : 0 };
+}
+
+/**
+ * Привязать метку к стене или снять привязку (`null`). Снятие **убирает**
+ * поля, а не обнуляет их: метка без привязки и метка со снятой привязкой
+ * обязаны читаться одинаково, иначе упаковка дописала бы старой метке поля,
+ * которых в ней не было (G68).
+ */
+function setMarkWall(project, markId, binding) {
+  const mark = requireMark(project, markId);
+  if (binding === null || binding === undefined) {
+    if (!markWall(mark)) return { project, mark, changed: false };
+    const marks = project.marks.map((item) => (item.id === markId ? withoutWallBinding(item) : item));
+    return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
+  }
+  const wall = requireWall(project, binding.wallId);
+  if (wall.schemeId !== mark.schemeId) throw modelError("wallOtherScheme");
+  const at = drawingOffsetMm(binding.atMm);
+  const length = wallLengthMm(wall);
+  if (at > length) throw modelError("markWallAtOutside", { at, length });
+  const marks = project.marks.map((item) =>
+    item.id === markId ? { ...item, wallId: wall.id, wallAtMm: at } : item,
+  );
+  return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
 }
 
 // ——— данные для штампа ————————————————————————————————————————————————
@@ -11342,12 +12230,20 @@ function readProjectEntries(entries, onProgress) {
 // правила, сущность остаётся (с пометкой в `conflicts`). Вернуть лишнюю метку
 // — минута работы, восстановить потерянную — некому.
 
+
 // Сущности объекта, которые сливаются поимённо, по `id`.
 //
 // `equipmentTypes` здесь такой же справочник, как `categories` и `markTypes`:
 // без него слитый объект брал бы типы только у «нас», и заведённое вторым
 // участником («Реле 4 канала») пропадало бы молча вместе с колонкой типа у его
 // моделей.
+//
+// Чертёж (таск 123) сливается здесь же и по тем же правилам. Это не
+// формальность: в таске 121 выяснилось, что слияние молча выбрасывает метки с
+// незнакомым типом, и без оговорки оно уносило бы все плашки разом. Стены,
+// проёмы, объекты схемы и справочник их видов перечислены поимённо ровно
+// поэтому — коллекция, которой здесь нет, в слитый объект не попадает вовсе,
+// и чертёж напарника пропал бы целиком и молча.
 const MERGE_ENTITIES = [
   "categories",
   "markTypes",
@@ -11359,15 +12255,28 @@ const MERGE_ENTITIES = [
   "equipmentTypes",
   "equipment",
   "placements",
+  "walls",
+  "openings",
+  "schemeObjects",
+  "schemeObjectKinds",
 ];
 
 // Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
-const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipmentTypes", "equipment"];
+const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipmentTypes", "equipment", "schemeObjectKinds"];
 
 // Коллекции, которых у объекта прежней разметки нет вовсе. Слияние двух таких
 // объектов не должно заводить их пустыми: это была бы правка на пустом месте,
 // и два одинаковых файла перестали бы сливаться в «ничего не изменилось».
-const MERGE_OPTIONAL = ["outlines", "equipmentTypes", "equipment", "placements"];
+const MERGE_OPTIONAL = [
+  "outlines",
+  "equipmentTypes",
+  "equipment",
+  "placements",
+  "walls",
+  "openings",
+  "schemeObjects",
+  "schemeObjectKinds",
+];
 
 /**
  * Принятые предупреждения: **объединение по ключу, а не конфликт.**
@@ -11514,6 +12423,13 @@ function mergeLabel(entity, item, typeCodes) {
     return code ? code + item.number : String(item.number || "");
   }
   if (entity === "markTypes") return item.code || item.name || "";
+  // У стены, проёма и объекта схемы своего обозначения нет — как у контура
+  // помещения. Но строка отчёта «ссылка вела в никуда — снято» без подлежащего
+  // не говорит ничего, а снимается ею чужая работа, поэтому род называется
+  // словом из словаря.
+  if (entity === "walls") return strings.subjects.wall;
+  if (entity === "openings") return strings.subjects.opening;
+  if (entity === "schemeObjects") return strings.subjects.schemeObject;
   return item.name || "";
 }
 
@@ -11907,6 +12823,61 @@ function mergeReferences(merged, report, sources, winner) {
     return false;
   });
 
+  /**
+   * Чертёж: стены, проёмы и объекты схемы. Правило каждой ссылки взято у
+   * модели, а не придумано здесь, — и ответы получаются **разные**:
+   *
+   *   — стена без схемы уходит вместе со схемой (`deleteScheme` уносит стены),
+   *     объект схемы — тоже;
+   *   — **проём без стены уходит вместе со стеной.** Воскрешать стену ради
+   *     проёма не станем, хотя с типами меток поступаем наоборот (D13): там
+   *     модель удалить занятую запись **не даёт**, а удалить стену вместе с её
+   *     окнами она разрешает — так рисуют, стену переставляют десять раз за
+   *     вечер. Возвращённая стена, которой человек решил не быть, молча
+   *     осталась бы в развёртке и соврала; потерянное окно, наоборот,
+   *     названо в отчёте вслух;
+   *   — **вид объекта возвращается**: `deleteSchemeObjectKind` занятый вид
+   *     удалить не даёт, и через двух участников это правило обходится ровно
+   *     как с категориями и типами меток.
+   */
+  merged.walls = merged.walls.filter((wall) => {
+    if (schemes.has(wall.schemeId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "walls", id: wall.id, kept: "none", item: wall });
+    return false;
+  });
+  const walls = mergeIndex(merged.walls);
+
+  merged.openings = merged.openings.filter((opening) => {
+    if (walls.has(opening.wallId)) return true;
+    report.conflicts.push({ code: "danglingRef", entity: "openings", id: opening.id, kept: "none", item: opening });
+    return false;
+  });
+
+  const dropObject = (object) => {
+    report.conflicts.push({
+      code: "danglingRef",
+      entity: "schemeObjects",
+      id: object.id,
+      kept: "none",
+      item: object,
+    });
+    return false;
+  };
+  merged.schemeObjects = merged.schemeObjects.filter((object) =>
+    schemes.has(object.schemeId) ? true : dropObject(object),
+  );
+  // Вид возвращается уже по уцелевшим объектам: вернуть его ради объекта,
+  // который сам сейчас уйдёт вместе со своей схемой, — лишняя строка в отчёте
+  // и лишняя запись в справочнике.
+  mergeRestore(merged, "schemeObjectKinds", mergeRefs(merged.schemeObjects, "kindId"), sources, report, winner);
+  const objectKinds = mergeIndex(merged.schemeObjectKinds);
+  // Вид у объекта обязателен: безымянный прямоугольник на чертеже не значит
+  // ничего. Вернуть его не вышло — значит записи нет ни у кого и ни в общем
+  // снимке, и объект уходит вслед за ней, как тип без категории.
+  merged.schemeObjects = merged.schemeObjects.filter((object) =>
+    objectKinds.has(object.kindId) ? true : dropObject(object),
+  );
+
   // Тип модели и сама модель — такой же справочник: `equipmentTypeInUse` и
   // `equipmentInUse` удалить их «под» чужой работой не дают. Модель возвращаем
   // ради размещений, которые пережили чистку меток.
@@ -11948,7 +12919,18 @@ function mergeReferences(merged, report, sources, winner) {
       ? mark.controls.filter((item) => marks.has(typeof item === "string" ? item : item && item.id))
       : mark.controls;
     if (Array.isArray(controls) && controls.length !== mark.controls.length) patch.controls = controls;
-    return Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
+    const next = Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
+    // Привязка к стене, которой больше нет. Поля **убираются**, а не
+    // обнуляются: метка без привязки и метка со снятой привязкой обязаны
+    // читаться одинаково, иначе слияние дописало бы старой метке то, чего в
+    // ней не было (G68). Строки в отчёт не идёт — привязку проставляет
+    // автоматика по месту метки (таск 127), а не рука человека, и терять тут
+    // нечего, кроме догадки.
+    if (mark.wallId && !walls.has(mark.wallId)) {
+      const { wallId, wallAtMm, ...rest } = next;
+      return rest;
+    }
+    return next;
   });
   return merged;
 }
@@ -33406,11 +34388,21 @@ function outlinesOfScheme(project, schemeId) {
  * размера плана. Единственный случай, когда она не выживает, — точка отрезка
  * осталась за рамкой обрезки: её прижало бы к краю, отрезок укоротился, и
  * масштаб уехал бы молча. Тогда калибровка честно снимается (`scaleLost`).
+ *
+ * **Чертёж переживает их тоже, и не трогается ни одной стеной** (ADR 008).
+ * Миллиметры к картинке не привязаны — переносится только привязка
+ * (`scheme.origin`): точка начала координат пересчитывается тем же
+ * преобразованием, что точки меток, а `turn` получает прибавку поворота, иначе
+ * нарисованные стены легли бы поперёк тех, по которым их обводили. Точку
+ * начала координат, в отличие от точек меток, **не прижимаем** к краю плана:
+ * это якорь, а не место на плане, и зажатый якорь увёз бы весь чертёж целиком.
+ * Поэтому у чертежа нет случая «не выжил»: обрезка его не теряет никогда.
  */
 function applyPlanEdit(project, schemeId, { imageId, width, height, transform } = {}) {
   const marks = project.marks.filter((mark) => mark.schemeId === schemeId);
   const pushed = marksPushedOutside(marks, transform);
   const scale = planScaleOf(project, schemeId);
+  const origin = planOriginOf(project, schemeId);
   let scaleLost = Boolean(scale) && countPointsOutside([scale.a, scale.b], transform) > 0;
   let next = updateScheme(project, schemeId, { imageId, width, height }).project;
   for (const mark of marks) {
@@ -33435,6 +34427,12 @@ function applyPlanEdit(project, schemeId, { imageId, width, height, transform } 
     }
   }
   if (scale && scaleLost) next = clearPlanScale(next, schemeId).project;
+  if (origin) {
+    next = setPlanOrigin(next, schemeId, {
+      at: transformPoint(origin.at, transform),
+      turn: (origin.turn + normalizeTransform(transform).rotate) % 360,
+    }).project;
+  }
   return { project: next, pushed, scaleLost };
 }
 
