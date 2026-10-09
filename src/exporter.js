@@ -18,7 +18,7 @@ import {
   visibleMarks,
   visibleOutlines,
 } from "./render.js";
-import { monoContext, monoIsOn } from "./mono.js";
+import { monoContext } from "./mono.js";
 import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
@@ -625,15 +625,15 @@ export async function tablePng(table, options = {}) {
       y += EXPORT_TABLE.rowHeight;
     }
     for (const row of section.rows) {
-      // Полоска категории — чистый цвет и ничего кроме: тушью все полоски
-      // одинаковы и говорят только «тут строка», а столбик чёрных штрихов
-      // вдоль листа читается как брак печати. Поэтому на чёрно-белом листе её
-      // не рисуют вовсе; отступ под неё остаётся, и строки не съезжают —
-      // прежний лист и чёрно-белый ложатся колонка в колонку.
-      if (!monoIsOn(ctx)) {
-        ctx.fillStyle = row.color || section.color || EXPORT_TABLE.line;
-        ctx.fillRect(left, y + 4, EXPORT_TABLE.stripe, EXPORT_TABLE.rowHeight - 8);
-      }
+      // Полоска категории рисуется всегда, и на чёрно-белом листе тоже —
+      // тушью. Исполнитель G171 сперва убрал её там (тушью все полоски
+      // одинаковы и говорят только «тут строка»), но заказчик решил иначе:
+      // «полоску если убрал сейчас, то верни». В листе с разбивкой по
+      // помещениям под одним заголовком стоят строки разных категорий, и
+      // полоска — единственный значок категории у строки; без цвета она
+      // перестаёт называть категорию, но продолжает делить лист на строки.
+      ctx.fillStyle = row.color || section.color || EXPORT_TABLE.line;
+      ctx.fillRect(left, y + 4, EXPORT_TABLE.stripe, EXPORT_TABLE.rowHeight - 8);
       ctx.fillStyle = EXPORT_TABLE.ink;
       drawCells(row.cells, left + EXPORT_TABLE.stripe + EXPORT_TABLE.gap, false);
       y += EXPORT_TABLE.rowHeight;
@@ -832,10 +832,9 @@ function exportNode(tag, className, textValue) {
 export function exportTableNode(table, options = {}) {
   // Чёрно-белый лист (G171) и здесь: предпросмотр в диалоге и печать браузером
   // — один и тот же узел, и отметка обязана быть видна **до** печати. Цвет
-  // категории не красится в чёрный, а просто не задаётся: `--print-color` и
-  // `--print-row-color` остаются без значения, и CSS берёт своё — тушь у
-  // заголовка, пусто у полоски. Ставить цвет и перебивать его правилом значило
-  // бы держать цвет в двух местах и спорить с самим собой.
+  // категории в чёрно-белом становится тушью, а не пропадает: заказчик просил
+  // вернуть полоску («полоску если убрал сейчас, то верни»), и она делит лист
+  // на строки даже там, где уже не называет категорию.
   const mono = options.mono === true;
   const doc = exportNode("div", mono ? "print-doc print-doc--mono" : "print-doc");
   const head = exportNode("header", "print-doc__head");
@@ -851,7 +850,7 @@ export function exportTableNode(table, options = {}) {
   for (const section of tableSections(table)) {
     const level = section.level || 1;
     const block = exportNode("section", level === 2 ? "print-doc__group print-doc__group--sub" : "print-doc__group");
-    if (section.color && !mono) block.style.setProperty("--print-color", section.color);
+    if (section.color) block.style.setProperty("--print-color", mono ? "#000000" : section.color);
     if (section.title) {
       block.append(exportNode(level === 2 ? "h3" : "h2", "print-doc__group-title", section.title));
     }
@@ -872,7 +871,7 @@ export function exportTableNode(table, options = {}) {
       // Строка с потерянной ссылкой помечена и на вид: на бумаге она не должна
       // читаться как обычная связь.
       const tr = exportNode("tr", row.problem ? "print-doc__row print-doc__row--problem" : "print-doc__row");
-      if (row.color && !mono) tr.style.setProperty("--print-row-color", row.color);
+      if (row.color) tr.style.setProperty("--print-row-color", mono ? "#000000" : row.color);
       row.cells.forEach((cell, index) => {
         tr.append(exportNode("td", index === 0 ? "print-doc__label" : null, cell));
       });
@@ -891,7 +890,7 @@ export function exportTableNode(table, options = {}) {
     const body = exportNode("tbody");
     const line = (title, count, className, color) => {
       const tr = exportNode("tr", className);
-      if (color && !mono) tr.style.setProperty("--print-row-color", color);
+      if (color) tr.style.setProperty("--print-row-color", mono ? "#000000" : color);
       tr.append(exportNode("td", null, title));
       tr.append(exportNode("td", "print-doc__count", count));
       body.append(tr);
@@ -1329,9 +1328,9 @@ export async function gostTablePng(table, page, plan, options = {}) {
       continue;
     }
     // Цвет категории — полоской слева, как и на прежнем листе: колонки с кодом
-    // краски в таблице нет, и рисовать его негде. На чёрно-белом листе полоски
-    // нет вовсе — тушью они все одинаковы (см. `tablePng`).
-    if (item.color && !monoIsOn(ctx)) {
+    // краски в таблице нет, и рисовать его негде. На чёрно-белом листе полоска
+    // остаётся и чернеет — решение заказчика, см. `tablePng`.
+    if (item.color) {
       ctx.fillStyle = item.color;
       ctx.fillRect(field.x * mm, (y + 1) * mm, 1.2 * mm, (GOST_TABLE.row - 2) * mm);
       ctx.fillStyle = "#1f2328";
