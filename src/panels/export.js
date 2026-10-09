@@ -220,6 +220,10 @@ function exportAreaSize(state, scheme) {
 // План схемы для рисования: уже разобранный на холсте — как есть, чужой —
 // из хранилища. Разобранный здесь план здесь же и освобождается.
 async function exportSchemeImage(state, scheme) {
+  // Выключенная подложка не уходит и на бумагу (таск 127): человек скрыл
+  // фотографию, потому что размечает по своему чертежу, и печатать под
+  // метками то, чего он не видел, нельзя.
+  if (state.planShown === false) return { image: null, release: null };
   const loaded = state.schemeImage;
   if (loaded && loaded.schemeId === scheme.id && loaded.image) return { image: loaded.image, release: null };
   if (!scheme.imageId) return { image: null, release: null };
@@ -781,7 +785,9 @@ function exportSchemeDialog(api) {
     const { image, release } = await exportSchemeImage(state, scheme);
     // План может быть не загружен — метки тогда лягут на белый лист, и лучше
     // сказать об этом, чем отдать «пустую» на вид картинку молча.
-    if (!image) notify(strings.exportPanel.noImage, "info");
+    if (!image && state.planShown !== false && scheme.imageId) {
+      notify(strings.exportPanel.noImage, "info");
+    }
     // Подпись, оттащенную далеко от метки, поля не догоняют: о таких говорим
     // до выгрузки — потерянное на бумаге обозначение молчать не должно.
     const { missed } = exportFittedOf(state, scheme);
@@ -796,6 +802,7 @@ function exportSchemeDialog(api) {
       links: exportChoice.links,
       mono: exportChoice.mono,
       filter: exportFilterOfSheet(state),
+      drawing: state.drawingShown !== false,
       pdf: pdf === true,
     };
     try {

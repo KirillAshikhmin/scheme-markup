@@ -486,6 +486,10 @@ export async function schemePng(project, scheme, image, options = {}) {
     // остаётся чертежом. `true` значит «посчитай сам»: холста здесь нет, и
     // передавать готовый кадр неоткуда.
     links: options.links === true,
+    // Чертёж уходит на бумагу вместе с метками и гаснет тем же выключателем,
+    // что на экране (таск 127): лист обязан показывать то, что человек на
+    // экране проверил.
+    drawing: options.drawing !== false,
   });
   return exportOut(canvas, EXPORT_DPI, options);
 }
@@ -1228,6 +1232,7 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
     legend: options.legend ? { x: (field.x + 4) * mm, y: (field.y + 4) * mm } : null,
     outlines: options.outlines === false ? false : "pale",
     links: options.links === true,
+    drawing: options.drawing !== false,
   });
   ctx.restore();
 
