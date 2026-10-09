@@ -1,0 +1,264 @@
+{
+  "formatVersion": 4,
+  "id": "a35867bc-35a4-4d34-9b7f-97068c9a9d83",
+  "key": "b42e53d9-677a-4b60-8f43-d2616334aeac",
+  "name": "Квартира на Ленина",
+  "createdAt": "2026-10-09T10:48:39.582Z",
+  "updatedAt": "2026-10-09T10:48:39.588Z",
+  "categories": [
+    {
+      "id": "c-light",
+      "name": "Свет",
+      "color": "#f2b200",
+      "shape": "circle",
+      "lineStyle": null,
+      "order": 0
+    },
+    {
+      "id": "c-power",
+      "name": "Розетки",
+      "color": "#2f7fd1",
+      "shape": "square",
+      "lineStyle": null,
+      "order": 1
+    }
+  ],
+  "markTypes": [
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "t-lamp",
+      "categoryId": "c-light",
+      "code": "Т",
+      "name": "Светильник точечный",
+      "lineStyle": null,
+      "order": 0
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "line",
+      "channels": 1,
+      "id": "t-tape",
+      "categoryId": "c-light",
+      "code": "Л",
+      "name": "Лента",
+      "lineStyle": "dash",
+      "order": 1
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "t-socket",
+      "categoryId": "c-power",
+      "code": "Р",
+      "name": "Розетка",
+      "lineStyle": null,
+      "order": 2
+    }
+  ],
+  "rooms": [
+    {
+      "id": "c5eb1bb3-28b4-4562-8640-263c3d2e17f2",
+      "name": "Спальная",
+      "color": "#0F766E"
+    }
+  ],
+  "schemes": [
+    {
+      "id": "1578fd44-4527-4628-915f-7365fc9beb04",
+      "name": "1 этаж",
+      "imageId": "plan-1",
+      "width": 1200,
+      "height": 800,
+      "order": 0,
+      "scale": {
+        "a": {
+          "x": 0.1,
+          "y": 0.5
+        },
+        "b": {
+          "x": 0.6,
+          "y": 0.5
+        },
+        "meters": 6,
+        "setAt": "2026-10-09T10:48:39.587Z"
+      }
+    }
+  ],
+  "marks": [
+    {
+      "id": "e90fbf81-7d0f-4cae-a07b-c32036187f6e",
+      "schemeId": "1578fd44-4527-4628-915f-7365fc9beb04",
+      "typeId": "t-lamp",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.3,
+          "y": 0.2
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    },
+    {
+      "id": "e8b6facf-dd4c-499d-bd7e-3f20087798af",
+      "schemeId": "1578fd44-4527-4628-915f-7365fc9beb04",
+      "typeId": "t-socket",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.2,
+          "y": 0.55
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": 80,
+      "heightAboveFloor": 300,
+      "controls": []
+    },
+    {
+      "id": "02876802-6bd8-4b41-9fe0-41eb091396fc",
+      "schemeId": "1578fd44-4527-4628-915f-7365fc9beb04",
+      "typeId": "t-tape",
+      "number": 1,
+      "kind": "line",
+      "points": [
+        {
+          "x": 0.15,
+          "y": 0.15
+        },
+        {
+          "x": 0.5,
+          "y": 0.15
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    },
+    {
+      "id": "fc1ad1f8-0fb4-4bc5-8104-cc9b70a41f78",
+      "schemeId": "1578fd44-4527-4628-915f-7365fc9beb04",
+      "typeId": "comment",
+      "number": 1,
+      "kind": "comment",
+      "points": [
+        {
+          "x": 0.7,
+          "y": 0.7
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "щит в коридоре",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": [],
+      "pointer": false
+    }
+  ],
+  "groups": [],
+  "outlines": [
+    {
+      "id": "89822321-c9f3-4d4f-844c-147bea8b76ac",
+      "schemeId": "1578fd44-4527-4628-915f-7365fc9beb04",
+      "roomId": "c5eb1bb3-28b4-4562-8640-263c3d2e17f2",
+      "points": [
+        {
+          "x": 0.1,
+          "y": 0.1
+        },
+        {
+          "x": 0.6,
+          "y": 0.1
+        },
+        {
+          "x": 0.6,
+          "y": 0.6
+        },
+        {
+          "x": 0.1,
+          "y": 0.6
+        }
+      ],
+      "labelOffset": null,
+      "labelAngle": 0
+    }
+  ],
+  "equipment": [
+    {
+      "id": "eb2fef19-b023-4ea8-aa83-cea7f0c1a81b",
+      "name": "DL-07",
+      "vendor": "Arlight",
+      "code": "",
+      "typeId": "e-lamp",
+      "order": 0
+    }
+  ],
+  "placements": [
+    {
+      "id": "171b1d7f-99f4-418b-94e2-7ffed51c605b",
+      "equipmentId": "eb2fef19-b023-4ea8-aa83-cea7f0c1a81b",
+      "markId": "e90fbf81-7d0f-4cae-a07b-c32036187f6e",
+      "links": []
+    }
+  ],
+  "equipmentTypes": [
+    {
+      "id": "e-lamp",
+      "name": "Светильник",
+      "order": 0
+    }
+  ],
+  "accepted": [],
+  "counters": {
+    "Т": 1,
+    "Р": 1,
+    "Л": 1,
+    "Коммент": 1
+  },
+  "view": {
+    "markSize": 16,
+    "labelSize": 20
+  },
+  "stamp": {
+    "code": "2026-14-ЭОМ",
+    "org": "ООО «Свет»"
+  }
+}
