@@ -15,6 +15,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  COMMENT_TYPE_ID,
+  MARK_KIND_COMMENT,
   MARK_WALL_REACH_MM,
   addMark,
   addOpening,
@@ -46,10 +48,12 @@ import {
   styleOf,
   updateWall,
   validate,
+  schemeObjectCorners,
+  segmentDistanceMm,
   wallHeightOf,
   wallLengthMm,
+  wallVectors,
 } from "../src/model.js";
-import { drawingObjectCorners, drawingSegmentDistance, drawingWallVectors } from "../src/render.js";
 
 // План 1200 × 800 точек, сто точек на метр, нуль чертежа в середине: та же
 // сцена, что в тестах модели чертежа, мастерской и холста.
@@ -109,6 +113,7 @@ test("метка у стены привязывается, метка посре
   assert.deepEqual(markWall(bound.project.marks.find((mark) => mark.id === near.markId)), {
     wallId: box.wallIds[2],
     atMm: 2000,
+    toMm: null,
   });
   assert.deepEqual(bound.changed, [near.markId]);
 
@@ -135,7 +140,9 @@ test("спорят стены расстоянием: ближняя забир�
   assert.equal(markWall(bound.project.marks[0]).wallId, box.wallIds[2], "нижняя стена ближе");
 });
 
-test("линия и плашка комментария не привязываются никогда", () => {
+test("лента вдоль стены привязывается отрезком, а не точкой", () => {
+  // Дыра таска 128, закрытая в 129: у линии два конца, и одним отступом их не
+  // назвать — поэтому у привязки появился второй, `toMm`.
   const box = room();
   const line = addMark(box.project, {
     schemeId: box.schemeId,
@@ -146,9 +153,41 @@ test("линия и плашка комментария не привязыва�
       planMmToFraction(box.project, box.schemeId, { x: 1500, y: 1350 }),
     ],
   });
-  assert.equal(markWallBindable(line.mark), false, "у линии два конца, одним отступом их не назвать");
+  assert.equal(markWallBindable(line.mark), true);
   const bound = applyMarkWalls(line.project);
-  assert.equal(bound.project, line.project, "линия не повод трогать объект");
+  const binding = markWall(bound.project.marks[0]);
+  assert.equal(binding.wallId, box.wallIds[2]);
+  // Нижняя стена идёт справа налево: конец ленты в x = −1500 это 3500 от её
+  // начала, конец в x = 1500 — 500. Порядок сохранён тот, каким рисовали.
+  assert.deepEqual({ at: binding.atMm, to: binding.toMm }, { at: 3500, to: 500 });
+});
+
+test("лента, уходящая от стены в комнату, не привязывается", () => {
+  const box = room();
+  const line = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: typeId(box.project, "ТР"),
+    kind: "line",
+    points: [
+      planMmToFraction(box.project, box.schemeId, { x: -1500, y: 1350 }),
+      planMmToFraction(box.project, box.schemeId, { x: 1500, y: 0 }),
+    ],
+  });
+  const bound = applyMarkWalls(line.project);
+  assert.equal(markWall(bound.project.marks[0]), null, "один конец у стены — это не лента по стене");
+});
+
+test("плашка комментария не привязывается никогда", () => {
+  const box = room();
+  const plate = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: COMMENT_TYPE_ID,
+    kind: MARK_KIND_COMMENT,
+    points: [planMmToFraction(box.project, box.schemeId, { x: 0, y: 1300 })],
+  });
+  assert.equal(markWallBindable(plate.mark), false, "надпись на чертеже — не изделие");
+  const bound = applyMarkWalls(plate.project);
+  assert.equal(bound.project, plate.project);
 });
 
 // ——— жизнь привязки ———————————————————————————————————————————————————
@@ -379,7 +418,7 @@ function elevationScene() {
  */
 function elevationOf(project, schemeId, wallId) {
   const wall = findWall(project, wallId);
-  const vectors = drawingWallVectors(wall);
+  const vectors = wallVectors(wall);
   return {
     lengthMm: wallLengthMm(wall),
     thicknessMm: wall.thicknessMm,
@@ -414,11 +453,11 @@ function elevationOf(project, schemeId, wallId) {
     // названо в отчёте как находка, а не спрятано.
     objects: schemeObjectsOnScheme(project, schemeId)
       .map((object) => {
-        const corners = drawingObjectCorners(object);
+        const corners = schemeObjectCorners(object);
         const along = corners.map(
           (point) => (point.x - wall.aMm.x) * vectors.u.x + (point.y - wall.aMm.y) * vectors.u.y,
         );
-        const gap = Math.min(...corners.map((point) => drawingSegmentDistance(point, wall.aMm, wall.bMm)));
+        const gap = Math.min(...corners.map((point) => segmentDistanceMm(point, wall.aMm, wall.bMm)));
         if (gap - wall.thicknessMm / 2 > MARK_WALL_REACH_MM) return null;
         return {
           name: (findSchemeObjectKind(project, object.kindId) || {}).name || "",
@@ -507,10 +546,9 @@ test("чего в модели для развёртки нет — назван
   const object = schemeObjectsOnScheme(scene.project, scene.schemeId)[0];
   assert.ok(!Object.prototype.hasOwnProperty.call(object, "wallId"));
 
-  // 3. Линейная метка (лента вдоль стены) привязаться не может: `wallAtMm` —
-  //    одно число, а у ленты два конца.
+  // 3. Линейная метка привязывается отрезком — дыра закрыта в таске 129.
   assert.equal(
     markWallBindable({ id: "x", kind: "line", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] }),
-    false,
+    true,
   );
 });

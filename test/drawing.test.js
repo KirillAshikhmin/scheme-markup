@@ -684,7 +684,10 @@ test("привязка метки к стене необязательна и с
   assert.equal(Object.prototype.hasOwnProperty.call(added.mark, "wallId"), false);
 
   const bound = setMarkWall(project, markId, { wallId: base.wallIds[0], atMm: 1200 });
-  assert.deepEqual(markWall(bound.mark), { wallId: base.wallIds[0], atMm: 1200 });
+  // `toMm` у точки пустой: отрезком привязывается линия (таск 129), и поля
+  // `wallToMm` у точечной метки не появляется вовсе.
+  assert.deepEqual(markWall(bound.mark), { wallId: base.wallIds[0], atMm: 1200, toMm: null });
+  assert.equal(Object.prototype.hasOwnProperty.call(bound.mark, "wallToMm"), false);
 
   const free = setMarkWall(bound.project, markId, null);
   assert.equal(markWall(free.mark), null);

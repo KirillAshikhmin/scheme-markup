@@ -33,12 +33,15 @@ import {
   planOriginOf,
   planPixelsPerMeter,
   pointInOutline,
+  schemeObjectCorners,
   schemeObjectKindsInOrder,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
+  segmentDistanceMm,
   styleOf,
   labelOf,
   typesInOrder,
+  wallVectors,
   wallsOnScheme,
 } from "./model.js";
 import { strings, text } from "./strings.js";
@@ -4196,32 +4199,10 @@ export const DRAWING_CAPTION = "#57606a";
 // на общем виде квартиры десяток подписей превратился бы в кашу поверх меток.
 const DRAWING_CAPTION_MIN_PX = 70;
 
-/**
- * Единичные векторы стены: `u` — вдоль, от `a` к `b`; `n` — **влево** от него.
- * «Влево» — то же слово, которым модель назвала сторону открывания двери: та,
- * что слева, если идти от `a` к `b`. Ось `y` на экране растёт вниз, поэтому
- * левая нормаль это `(u.y, −u.x)`, и перевёрнут этот знак ровно здесь, в одном
- * месте на всю сборку.
- */
-export function drawingWallVectors(wall) {
-  if (!wall) return null;
-  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
-  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
-  const len = Math.hypot(dx, dy);
-  if (!(len > 0)) return null;
-  // `|| 0` — от **минус нуля**: у вертикальной стены `−dx / len` даёт `-0`, и
-  // он поехал бы дальше в координаты створки. В сборке это уже ловили
-  // (ADR 008, `drawingMmValue`), и второй раз наступать незачем.
-  return {
-    len,
-    u: { x: dx / len || 0, y: dy / len || 0 },
-    n: { x: dy / len || 0, y: -dx / len || 0 },
-  };
-}
 
 /** Концы проёма на оси стены плюс её векторы — всё, чем он рисуется и ловится. */
 export function drawingOpeningSpan(wall, opening) {
-  const vectors = drawingWallVectors(wall);
+  const vectors = wallVectors(wall);
   if (!vectors || !opening) return null;
   const at = Number(opening.atMm) || 0;
   const width = Number(opening.widthMm) || 0;
@@ -4251,40 +4232,7 @@ export function drawingDoorLeaf(wall, opening) {
   return { hinge, closed, tip, radius: span.width, side, n: span.n };
 }
 
-/**
- * Углы габарита объекта в миллиметрах — то же, по чему модель считает размер
- * чертежа: у прямоугольника четыре повёрнутых угла, у ломаной её вершины.
- * Это геометрия отрисовки, а не вторая модель: наружу `schemeObjectCornersMm`
- * модель не отдаёт, а рисовать и ловить объект чем-то надо.
- */
-export function drawingObjectCorners(object) {
-  if (!object) return [];
-  if (object.shape === "polyline") {
-    return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
-  }
-  const at = object.atMm || { x: 0, y: 0 };
-  const halfWidth = Number(object.widthMm) / 2;
-  const halfDepth = Number(object.depthMm) / 2;
-  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return [
-    [-halfWidth, -halfDepth],
-    [halfWidth, -halfDepth],
-    [halfWidth, halfDepth],
-    [-halfWidth, halfDepth],
-  ].map(([x, y]) => ({ x: Number(at.x) + x * cos - y * sin, y: Number(at.y) + x * sin + y * cos }));
-}
 
-export function drawingSegmentDistance(point, from, to) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = dx * dx + dy * dy;
-  if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
-  let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
-  t = Math.min(1, Math.max(0, t));
-  return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
-}
 
 function drawingInsidePolygon(point, corners) {
   let inside = false;
@@ -4299,19 +4247,19 @@ function drawingInsidePolygon(point, corners) {
 
 /** Попал ли курсор в объект: внутрь прямоугольника или в полосу ломаной. */
 export function drawingHitObject(object, pointMm, slackMm) {
-  const corners = drawingObjectCorners(object);
+  const corners = schemeObjectCorners(object);
   if (corners.length === 0) return false;
   if (object.shape === "polyline") {
     const limit = Math.max(Number(slackMm) || 0, Number(object.depthMm) / 2);
     for (let index = 1; index < corners.length; index += 1) {
-      if (drawingSegmentDistance(pointMm, corners[index - 1], corners[index]) <= limit) return true;
+      if (segmentDistanceMm(pointMm, corners[index - 1], corners[index]) <= limit) return true;
     }
     return false;
   }
   if (drawingInsidePolygon(pointMm, corners)) return true;
   const limit = Number(slackMm) || 0;
   for (let index = 0; index < corners.length; index += 1) {
-    if (drawingSegmentDistance(pointMm, corners[index], corners[(index + 1) % corners.length]) <= limit) return true;
+    if (segmentDistanceMm(pointMm, corners[index], corners[(index + 1) % corners.length]) <= limit) return true;
   }
   return false;
 }
@@ -4545,7 +4493,7 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
 
 function drawDrawingObject(ctx, bridge, object, options = {}) {
   const colour = options.active ? DRAWING_ACTIVE : DRAWING_OBJECT;
-  const corners = drawingObjectCorners(object).map((point) => bridge.toScreen(point));
+  const corners = schemeObjectCorners(object).map((point) => bridge.toScreen(point));
   if (corners.length < 2) return;
   if (object.shape === "polyline") {
     ctx.lineCap = "butt";
@@ -4612,6 +4560,208 @@ function drawDrawingCaption(ctx, object, corners, name, bridge) {
   ctx.textAlign = "start";
 }
 
+// ——— развёртка стены: отрисовка ———————————————————————————————————————
+//
+// Данные собирает `model.wallElevation`, здесь они только рисуются — и
+// рисуются **в любой прямоугольник любого холста**. Разделено это нарочно:
+// выгрузка развёртки в PNG и на лист по ГОСТ — следующий шаг, и ей достанется
+// тот же вызов с другим `ctx` и другой рамкой, без единой новой строки
+// отрисовки (тот же приём, что у чертежа в таске 127).
+
+// Поля рамки: слева — размер высоты, снизу — размер длины, под полом — полоса
+// для меток, у которых высота не задана.
+const ELEVATION_PAD = { left: 56, right: 18, top: 20, bottom: 42 };
+const ELEVATION_UNKNOWN_BAND = 22;
+const ELEVATION_FONT = 11;
+// Мельче этого подпись на развёртке не читается — тогда её просто нет.
+const ELEVATION_LABEL_MIN_PX = 26;
+
+function elevationTick(ctx, x, y, vertical) {
+  ctx.beginPath();
+  if (vertical) {
+    ctx.moveTo(x - 4, y);
+    ctx.lineTo(x + 4, y);
+  } else {
+    ctx.moveTo(x, y - 4);
+    ctx.lineTo(x, y + 4);
+  }
+  ctx.stroke();
+}
+
+function elevationText(ctx, value, x, y, align) {
+  ctx.textAlign = align || "center";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = DRAWING_PAPER;
+  ctx.strokeText(value, x, y);
+  ctx.fillStyle = DRAWING_CAPTION;
+  ctx.fillText(value, x, y);
+  ctx.textAlign = "start";
+}
+
+/**
+ * Нарисовать развёртку в заданный прямоугольник.
+ *
+ * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
+ * вызывающий попадает мышью в то, что нарисовано, и по ней же будущая
+ * выгрузка посчитает размер листа.
+ */
+export function drawElevation(ctx, elevation, box) {
+  if (!elevation) return null;
+  const inner = {
+    x: box.x + ELEVATION_PAD.left,
+    y: box.y + ELEVATION_PAD.top,
+    width: Math.max(1, box.width - ELEVATION_PAD.left - ELEVATION_PAD.right),
+    height: Math.max(1, box.height - ELEVATION_PAD.top - ELEVATION_PAD.bottom - ELEVATION_UNKNOWN_BAND),
+  };
+  const scale = Math.min(inner.width / Math.max(1, elevation.lengthMm), inner.height / Math.max(1, elevation.heightShownMm));
+  const wallWidth = elevation.lengthMm * scale;
+  const wallHeight = elevation.heightShownMm * scale;
+  // Стена прижата к низу поля: пол — это пол, и смотреть на него снизу вверх
+  // привычнее, чем искать его где-то посередине. По ширине, наоборот, она
+  // стоит по середине: короткая стена, прижатая влево, читается обрезанной.
+  const left = inner.x + Math.max(0, (inner.width - wallWidth) / 2);
+  const floor = inner.y + inner.height;
+  const atX = (mm) => left + mm * scale;
+  const atY = (mm) => floor - mm * scale;
+
+  ctx.save();
+  ctx.font = drawFont(ELEVATION_FONT, 600);
+  ctx.textBaseline = "middle";
+
+  // Поле стены.
+  ctx.fillStyle = DRAWING_PAPER;
+  ctx.fillRect(left, floor - wallHeight, wallWidth, wallHeight);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = DRAWING_WALL;
+  ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
+
+  // Объекты на полу — под всем остальным: розетка над столешницей обязана
+  // остаться видной поверх неё.
+  for (const object of elevation.objects) {
+    const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
+    const y = atY(top);
+    const height = Math.max(2, (top - object.floorMm) * scale);
+    ctx.fillStyle = DRAWING_OBJECT_FILL;
+    ctx.fillRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = DRAWING_OBJECT;
+    ctx.strokeRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
+    if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX) continue;
+    elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8);
+    if (object.topMm !== null) elevationText(ctx, String(object.topMm), atX(object.toMm) + 2, y + 9, "left");
+  }
+
+  // Проёмы: дырка в стене с косяками. У двери — засечка со стороны петель,
+  // как её рисуют на развёртке: наклонная от верхнего косяка к нижнему.
+  for (const opening of elevation.openings) {
+    const x = atX(opening.fromMm);
+    const width = Math.max(2, (opening.toMm - opening.fromMm) * scale);
+    const top = atY(opening.topMm);
+    const height = Math.max(2, (opening.topMm - opening.floorMm) * scale);
+    ctx.fillStyle = DRAWING_PAPER;
+    ctx.fillRect(x, top, width, height);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = DRAWING_EDGE;
+    ctx.strokeRect(x, top, width, height);
+    if (opening.hinge) {
+      const hingeX = opening.hinge === "start" ? x : x + width;
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(hingeX, top);
+      ctx.lineTo(opening.hinge === "start" ? x + width : x, top + height / 2);
+      ctx.lineTo(hingeX, top + height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (width < ELEVATION_LABEL_MIN_PX) continue;
+    // Низ и верх проёма — числами у его косяка: именно от них отмеряют.
+    elevationText(ctx, String(opening.topMm), x + width / 2, top - 8);
+    if (opening.floorMm > 0) elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9);
+  }
+
+  // Метки: знак на своём месте и высоте, подпись рядом. Линия — отрезком.
+  const unknown = [];
+  for (const mark of elevation.marks) {
+    if (mark.heightMm === null) {
+      unknown.push(mark);
+      continue;
+    }
+    const y = atY(mark.heightMm);
+    ctx.strokeStyle = mark.color;
+    ctx.fillStyle = mark.color;
+    if (mark.kind === "line" && mark.toMm !== null) {
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(atX(mark.fromMm), y);
+      ctx.lineTo(atX(mark.toMm), y);
+      ctx.stroke();
+      elevationText(ctx, mark.label + " · " + mark.heightMm, (atX(mark.fromMm) + atX(mark.toMm)) / 2, y - 9);
+      continue;
+    }
+    const x = atX(mark.fromMm);
+    drawShape(ctx, mark.shape, x, y, 9, mark.color);
+    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13);
+  }
+
+  // Метки без высоты — полосой под полом: на стене им места нет, но и
+  // потерять их нельзя. Выдуманная высота соврала бы развёртке.
+  if (unknown.length > 0) {
+    const y = floor + ELEVATION_UNKNOWN_BAND / 2 + 4;
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = DRAWING_CAPTION;
+    ctx.beginPath();
+    ctx.moveTo(left, floor + 3);
+    ctx.lineTo(left + wallWidth, floor + 3);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const mark of unknown) {
+      drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7, mark.color);
+      elevationText(ctx, mark.label, atX(mark.fromMm) + 11, y, "left");
+    }
+  }
+
+  // Пол толще стен: он опора всему, что на развёртке стоит.
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = DRAWING_WALL;
+  ctx.beginPath();
+  ctx.moveTo(left, floor);
+  ctx.lineTo(left + wallWidth, floor);
+  ctx.stroke();
+
+  // ——— размеры ———
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = DRAWING_CAPTION;
+  // Высота — слева, одной выносной.
+  const heightX = left - 26;
+  ctx.beginPath();
+  ctx.moveTo(heightX, floor);
+  ctx.lineTo(heightX, floor - wallHeight);
+  ctx.stroke();
+  elevationTick(ctx, heightX, floor, true);
+  elevationTick(ctx, heightX, floor - wallHeight, true);
+  elevationText(ctx, String(elevation.heightShownMm), heightX - 4, floor - wallHeight / 2, "right");
+  // Длина — снизу, и по ней же засечки проёмов: по этой цепочке проём и
+  // размечают на стене.
+  const lengthY = floor + ELEVATION_UNKNOWN_BAND + 14;
+  ctx.beginPath();
+  ctx.moveTo(left, lengthY);
+  ctx.lineTo(left + wallWidth, lengthY);
+  ctx.stroke();
+  elevationTick(ctx, left, lengthY);
+  elevationTick(ctx, left + wallWidth, lengthY);
+  elevationText(ctx, String(elevation.lengthMm), left + wallWidth / 2, lengthY + 12);
+  for (const opening of elevation.openings) {
+    for (const mm of [opening.fromMm, opening.toMm]) {
+      elevationTick(ctx, atX(mm), lengthY);
+      elevationText(ctx, String(mm), atX(mm), lengthY - 10);
+    }
+  }
+  ctx.restore();
+  return { x: left, y: floor - wallHeight, width: wallWidth, height: wallHeight, scale };
+}
+
 export function drawScheme(ctx, {
   project,
   scheme,
@@ -4628,6 +4778,7 @@ export function drawScheme(ctx, {
   outlines,
   selectedOutlineId,
   drawing,
+  selectedWallId,
 }) {
   const state = renderView(view);
   if (image) {
@@ -4652,7 +4803,14 @@ export function drawScheme(ctx, {
   // правило: у объекта, которого не чертили, этих полей нет вовсе, и кадр не
   // спрашивает про калибровку ни разу.
   if (drawing !== false && (project.walls || project.schemeObjects)) {
-    drawDrawing(ctx, { project, schemeId: scheme.id, bridge: drawingBridge(project, scheme, state) });
+    drawDrawing(ctx, {
+      project,
+      schemeId: scheme.id,
+      bridge: drawingBridge(project, scheme, state),
+      // Выделенная стена подсвечена и на холсте: её развёртка открыта полосой
+      // рядом, и видеть, о какой именно стене речь, обязательно.
+      active: selectedWallId ? { kind: "wall", id: selectedWallId } : null,
+    });
   }
   // Контуры ложатся под метки: метка на стене комнаты должна остаться видна.
   if (outlines !== false && outlines !== null) {

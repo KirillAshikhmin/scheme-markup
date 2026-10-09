@@ -90,9 +90,11 @@ import {
   planPixelsPerMeter,
   planSizeMeters,
   roomsInOrder,
+  schemeObjectCorners,
   schemeObjectKindsInOrder,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
+  segmentDistanceMm,
   setPlanOrigin,
   setPlanScale,
   setRoomWallHeight,
@@ -102,6 +104,7 @@ import {
   updateSchemeObject,
   updateWall,
   wallLengthMm,
+  wallVectors,
   wallsOnScheme,
 } from "../model.js";
 import {
@@ -121,17 +124,15 @@ import {
   drawDrawingOpening,
   drawingDoorLeaf,
   drawingHitObject,
-  drawingObjectCorners,
   drawingOpeningSpan,
-  drawingSegmentDistance,
   drawingUnitBridge,
-  drawingWallVectors,
   draftSnap,
   drawFont,
   planToScreen,
   screenToPlan,
 } from "../render.js";
 import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+import { createElevationStrip, elevationPlace } from "./elevation.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
@@ -484,7 +485,7 @@ export const WORKSHOP_OPENING_DEFAULTS = {
 
 /** Сколько миллиметров от конца `a` до проекции точки на стену, зажато в стену. */
 export function workshopAlongWall(wall, pointMm) {
-  const vectors = drawingWallVectors(wall);
+  const vectors = wallVectors(wall);
   if (!vectors) return 0;
   const along = (pointMm.x - wall.aMm.x) * vectors.u.x + (pointMm.y - wall.aMm.y) * vectors.u.y;
   return Math.max(0, Math.min(vectors.len, Math.round(along)));
@@ -499,7 +500,7 @@ export function workshopAlongWall(wall, pointMm) {
  * «не помещается», а поставить окно вплотную к углу — обычное дело.
  */
 export function workshopOpeningAt(wall, pointMm, widthMm) {
-  const vectors = drawingWallVectors(wall);
+  const vectors = wallVectors(wall);
   if (!vectors) return 0;
   const width = Number(widthMm) || 0;
   const middle = workshopAlongWall(wall, pointMm);
@@ -648,7 +649,7 @@ export function workshopPick(project, schemeId, pointMm, view, selected) {
   for (let index = walls.length - 1; index >= 0; index -= 1) {
     const wall = walls[index];
     const limit = Math.max(slackMm, Number(wall.thicknessMm) / 2);
-    if (drawingSegmentDistance(pointMm, wall.aMm, wall.bMm) <= limit) {
+    if (segmentDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) {
       return { kind: "wall", id: wall.id, wallId: wall.id, atMm: null };
     }
   }
@@ -840,12 +841,19 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
   const fingers = new Map();
   let pinch = null;
 
+  // Полоса развёртки — тот же кирпич, что над основным холстом: сторона у них
+  // общая (живёт в состоянии сеанса), и переключение в окне помнится, когда
+  // окно закроют.
+  const strip = createElevationStrip({
+    onSide: (side) => setState({ wallSide: side }),
+    onClose: () => select(null),
+  });
   const node = uiEl("canvas", { class: "workshop__canvas" });
   // Поле забирает фокус по нажатию: иначе после правки толщины фокус остаётся
   // в поле ввода, а Ctrl+Z там принадлежит браузеру — человек жмёт отмену над
   // чертежом и не получает ничего. То же правило, что у холста
   // (`canvasKeyboardOwner`): работают с чертежом — клавиатура его.
-  const stage = uiEl("div", { class: "workshop__stage", attrs: { tabindex: "-1" } }, [node]);
+  const stage = uiEl("div", { class: "workshop__stage", attrs: { tabindex: "-1" } }, [node, strip.node]);
   const ctx = node.getContext ? node.getContext("2d") : null;
 
   // ——— левая часть: инструменты над полем ———
@@ -1201,6 +1209,11 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     const same = Boolean(selected) === Boolean(next) && (!next || (selected.kind === next.kind && selected.id === next.id));
     if (same) return;
     selected = next;
+    // Выделенная стена попадает и в состояние сеанса: закрыли окно — её
+    // развёртка осталась открытой над основным холстом, и искать стену заново
+    // не надо.
+    const wallId = next && next.kind === "wall" ? next.id : null;
+    if (getState().selectedWallId !== wallId) setState({ selectedWallId: wallId });
     sync();
   }
 
@@ -1367,7 +1380,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     for (let index = list.length - 1; index >= 0; index -= 1) {
       const wall = list[index];
       const limit = Math.max(WORKSHOP_WALL_PX / view.zoom, Number(wall.thicknessMm) / 2);
-      if (drawingSegmentDistance(pointMm, wall.aMm, wall.bMm) <= limit) return { wall };
+      if (segmentDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) return { wall };
     }
     return null;
   }
@@ -2261,6 +2274,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
     }
     syncRooms(current);
+    syncElevation(current, wall);
     meta.textContent = workshopStatus(current, schemeId, spot);
     node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
@@ -2369,6 +2383,25 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
         : strings.workshop.objectHint;
   }
 
+  // Полоса развёртки в окне: у той же стены, что выделена, и у того края
+  // поля, который дальше от неё.
+  function syncElevation(current, wall) {
+    if (!wall) {
+      strip.update({ project: current, wallId: null });
+      return;
+    }
+    const box = viewport();
+    const a = screenOf(wall.aMm);
+    const b = screenOf(wall.bMm);
+    strip.update({
+      project: current,
+      wallId: wall.id,
+      side: getState().wallSide,
+      place: elevationPlace((a.y + b.y) / 2, box.height),
+      fieldHeight: box.height,
+    });
+  }
+
   // Список комнат перестраивается только когда он и правда другой: иначе
   // перерисовка на каждом шаге истории выбивала бы курсор из поля, в котором
   // в эту минуту набирают высоту.
@@ -2419,6 +2452,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
       finish();
       return;
     }
+    if ("wallSide" in changed) sync();
     if ("project" in changed || "schemeImage" in changed) {
       // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
       if (selected && !aliveSelection()) selected = null;
@@ -2435,6 +2469,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
 
   function cleanup() {
     if (closed) return;
+    strip.destroy();
     closed = true;
     workshopOpened = false;
     if (unsubscribe) unsubscribe();

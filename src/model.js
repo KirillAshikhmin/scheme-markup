@@ -3535,6 +3535,42 @@ function wallThicknessMm(value) {
  * поэтому округляется здесь — и в одном месте, иначе проверка «проём влез» и
  * подпись длины расходились бы на миллиметр.
  */
+/**
+ * Единичные векторы стены: `u` — вдоль, от `a` к `b`; `n` — **влево** от него.
+ * «Влево» — то же слово, которым названа сторона открывания двери: та, что
+ * слева, если идти от `a` к `b`. Ось `y` на экране растёт вниз, поэтому левая
+ * нормаль это `(u.y, −u.x)`, и перевёрнут этот знак ровно здесь, в одном месте
+ * на всю сборку.
+ *
+ * Живёт в модели, а не в отрисовке: это геометрия самой стены, и нужна она не
+ * только тому, кто рисует, — развёртка считает по ней стороны и проекции.
+ */
+export function wallVectors(wall) {
+  if (!wall) return null;
+  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
+  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return null;
+  // `|| 0` — от **минус нуля**: у вертикальной стены `−dx / len` даёт `-0`, и
+  // он поехал бы дальше в координаты створки (ADR 008, `drawingMmValue`).
+  return {
+    len,
+    u: { x: dx / len || 0, y: dy / len || 0 },
+    n: { x: dy / len || 0, y: -dx / len || 0 },
+  };
+}
+
+/** Расстояние от точки до отрезка — в тех же миллиметрах. */
+export function segmentDistanceMm(point, from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = dx * dx + dy * dy;
+  if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
+  let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
+  t = Math.min(1, Math.max(0, t));
+  return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
+}
+
 export function wallLengthMm(wall) {
   if (!wall || !wall.aMm || !wall.bMm) return 0;
   return Math.round(Math.hypot(Number(wall.bMm.x) - Number(wall.aMm.x), Number(wall.bMm.y) - Number(wall.aMm.y)));
@@ -3595,7 +3631,7 @@ export function deleteWall(project, wallId) {
 export function drawingBoundsMm(project, schemeId) {
   const points = [];
   for (const wall of wallsOnScheme(project, schemeId)) points.push(wall.aMm, wall.bMm);
-  for (const object of schemeObjectsOnScheme(project, schemeId)) points.push(...schemeObjectCornersMm(object));
+  for (const object of schemeObjectsOnScheme(project, schemeId)) points.push(...schemeObjectCorners(object));
   if (points.length === 0) return null;
   const xs = points.map((point) => Number(point.x));
   const ys = points.map((point) => Number(point.y));
@@ -3913,7 +3949,7 @@ export function schemeObjectTopMm(object) {
 // Углы габарита в миллиметрах: ими считается размер чертежа и по ним он
 // рисуется. У прямоугольника это четыре повёрнутых угла, у ломаной — её
 // вершины (полоса шириной `depthMm` ложится по ним).
-function schemeObjectCornersMm(object) {
+export function schemeObjectCorners(object) {
   if (!object) return [];
   if (object.shape === "polyline") return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
   const at = object.atMm || { x: 0, y: 0 };
@@ -4083,7 +4119,7 @@ export function setRoomWallHeight(project, roomId, value) {
 // открывания двери, наоборот, не вывести никогда, поэтому она заведена сразу.
 
 function withoutWallBinding(mark) {
-  const { wallId, wallAtMm, ...rest } = mark;
+  const { wallId, wallAtMm, wallToMm, ...rest } = mark;
   return rest;
 }
 
@@ -4094,7 +4130,15 @@ function withoutWallBinding(mark) {
  */
 export function markWall(mark) {
   if (!mark || typeof mark.wallId !== "string" || !mark.wallId) return null;
-  return { wallId: mark.wallId, atMm: typeof mark.wallAtMm === "number" ? mark.wallAtMm : 0 };
+  return {
+    wallId: mark.wallId,
+    atMm: typeof mark.wallAtMm === "number" ? mark.wallAtMm : 0,
+    // **Линия привязывается отрезком, а не точкой** (дыра, найденная таском
+    // 128): лента вдоль стены — обычное дело у этого заказчика, и одним
+    // отступом её не назвать. `toMm` есть только у линии; у точки он `null`, и
+    // у метки прежней разметки поля нет вовсе.
+    toMm: typeof mark.wallToMm === "number" ? mark.wallToMm : null,
+  };
 }
 
 /**
@@ -4115,9 +4159,14 @@ export function setMarkWall(project, markId, binding) {
   const at = drawingOffsetMm(binding.atMm);
   const length = wallLengthMm(wall);
   if (at > length) throw modelError("markWallAtOutside", { at, length });
-  const marks = project.marks.map((item) =>
-    item.id === markId ? { ...item, wallId: wall.id, wallAtMm: at } : item,
-  );
+  const next = { ...mark, wallId: wall.id, wallAtMm: at };
+  delete next.wallToMm;
+  if (binding.toMm !== null && binding.toMm !== undefined) {
+    const to = drawingOffsetMm(binding.toMm);
+    if (to > length) throw modelError("markWallAtOutside", { at: to, length });
+    next.wallToMm = to;
+  }
+  const marks = project.marks.map((item) => (item.id === markId ? next : item));
   return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
 }
 
@@ -4159,16 +4208,38 @@ export const MARK_WALL_REACH_MM = 300;
  */
 export function markWallBindable(mark) {
   if (!mark) return false;
-  if (markIsComment(mark)) return false;
-  return mark.kind !== "line";
+  // Плашка комментария — надпись на чертеже, а не изделие: на развёртке ей
+  // места нет. Линия, наоборот, привязывается — отрезком (`wallToMm`), и это
+  // закрытая дыра таска 128: лента вдоль стены у этого заказчика обычное дело,
+  // пять линейных типов в стартовом справочнике.
+  return !markIsComment(mark);
 }
 
-// Точка метки в миллиметрах чертежа — или `null`, если моста нет (ADR 008:
+// Точки метки в миллиметрах чертежа — или пусто, если моста нет (ADR 008:
 // нужны и калибровка, и привязка чертежа к плану).
+function markPointsMm(project, mark) {
+  const points = Array.isArray(mark.points) ? mark.points : [];
+  const out = [];
+  for (const point of points) {
+    const at = planFractionToMm(project, mark.schemeId, point);
+    if (!at) return [];
+    out.push(at);
+  }
+  return out;
+}
+
 function markPointMm(project, mark) {
-  const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
-  if (!point) return null;
-  return planFractionToMm(project, mark.schemeId, point);
+  const points = markPointsMm(project, mark);
+  return points.length > 0 ? points[0] : null;
+}
+
+// Середина метки: у точки она же, у линии — середина её габарита.
+function markMiddleMm(project, mark) {
+  const points = markPointsMm(project, mark);
+  if (points.length === 0) return null;
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
 }
 
 /**
@@ -4191,7 +4262,9 @@ export function markWallSide(project, mark) {
   const binding = markWall(mark);
   if (!binding) return null;
   const wall = findWall(project, binding.wallId);
-  const at = wall ? markPointMm(project, mark) : null;
+  // У линии сторону решает её середина: концы ленты лежат у самой стены, и
+  // первый из них может оказаться по другую сторону от оси на миллиметр.
+  const at = wall ? markMiddleMm(project, mark) : null;
   if (!wall || !at) return null;
   const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
   const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
@@ -4213,21 +4286,46 @@ export function markWallNear(project, mark, walls) {
   if (!markWallBindable(mark)) return null;
   const list = walls || wallsOnScheme(project, mark.schemeId);
   if (list.length === 0) return null;
-  const at = markPointMm(project, mark);
-  if (!at) return null;
+  const points = markPointsMm(project, mark);
+  if (points.length === 0) return null;
   let best = null;
   for (const wall of list) {
-    const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
-    const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
-    const len = Math.hypot(dx, dy);
-    if (!(len > 0)) continue;
-    const along = Math.min(len, Math.max(0, ((at.x - wall.aMm.x) * dx + (at.y - wall.aMm.y) * dy) / len));
-    const foot = { x: wall.aMm.x + (dx * along) / len, y: wall.aMm.y + (dy * along) / len };
-    const gap = Math.hypot(at.x - foot.x, at.y - foot.y) - Number(wall.thicknessMm) / 2;
-    if (gap > MARK_WALL_REACH_MM) continue;
-    if (!best || gap < best.gap) best = { gap, wallId: wall.id, atMm: Math.round(along) };
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    const half = Number(wall.thicknessMm) / 2;
+    let worst = 0;
+    const along = [];
+    for (const at of points) {
+      const distance = Math.min(
+        vectors.len,
+        Math.max(0, (at.x - wall.aMm.x) * vectors.u.x + (at.y - wall.aMm.y) * vectors.u.y),
+      );
+      along.push(distance);
+      const foot = {
+        x: wall.aMm.x + vectors.u.x * distance,
+        y: wall.aMm.y + vectors.u.y * distance,
+      };
+      worst = Math.max(worst, Math.hypot(at.x - foot.x, at.y - foot.y) - half);
+    }
+    // **У линии к стене обязаны быть близко все вершины.** Лента, которая
+    // идёт вдоль стены и уходит в комнату, на этой стене не лежит, и отрезок
+    // «от и до» по ней соврал бы.
+    if (worst > MARK_WALL_REACH_MM) continue;
+    if (best && worst >= best.gap) continue;
+    best = {
+      gap: worst,
+      wallId: wall.id,
+      atMm: Math.round(along[0]),
+      toMm: points.length > 1 ? Math.round(along[along.length - 1]) : null,
+    };
   }
-  return best ? { wallId: best.wallId, atMm: best.atMm, gapMm: Math.round(Math.max(0, best.gap)) } : null;
+  if (!best) return null;
+  return {
+    wallId: best.wallId,
+    atMm: best.atMm,
+    toMm: best.toMm,
+    gapMm: Math.round(Math.max(0, best.gap)),
+  };
 }
 
 /**
@@ -4265,9 +4363,12 @@ export function applyMarkWalls(project, schemeId) {
       changed.push(mark.id);
       return withoutWallBinding(mark);
     }
-    if (now && now.wallId === next.wallId && now.atMm === next.atMm) return mark;
+    if (now && now.wallId === next.wallId && now.atMm === next.atMm && now.toMm === next.toMm) return mark;
     changed.push(mark.id);
-    return { ...mark, wallId: next.wallId, wallAtMm: next.atMm };
+    const bound = { ...mark, wallId: next.wallId, wallAtMm: next.atMm };
+    if (next.toMm === null) delete bound.wallToMm;
+    else bound.wallToMm = next.toMm;
+    return bound;
   });
   if (changed.length === 0) return { project, changed };
   return { project: withProject(project, { marks }), changed };
@@ -4306,6 +4407,225 @@ export function markOpeningHit(project, mark) {
     if (height >= floor && height <= floor + Number(opening.heightMm)) return opening;
   }
   return null;
+}
+
+// ——— развёртка стены ———————————————————————————————————————————————————
+//
+// То, ради чего заводились стены, проёмы, высоты и привязка меток (G179).
+// Здесь собираются **данные** развёртки; рисует их `render.drawElevation`, и
+// разделены они нарочно: выгрузка развёртки в PNG и на лист по ГОСТ —
+// следующий шаг, и он должен стоить дёшево (тот же приём, что у чертежа в
+// таске 127: один слой, два моста).
+//
+// **Стороны у стены две, и они разные.** На одной розетки кухни, на другой —
+// прихожей; высота потолка у этих комнат тоже может не совпадать. Поэтому
+// сторона — довод каждой функции здесь, а не настройка: «развёртка стены» без
+// стороны не существует.
+
+export const WALL_SIDES = ["left", "right"];
+
+// Насколько отходим от грани стены, когда спрашиваем, в какой комнате эта
+// сторона. Сто миллиметров: ближе — и точка попадёт в сам контур, который
+// обводят по стене, дальше — и в узком коридоре мы окажемся за его дальней
+// стеной.
+const WALL_ROOM_PROBE_MM = 100;
+
+/**
+ * В какой комнате **эта сторона** стены.
+ *
+ * Считается на лету по контурам, а не хранится полем у стены. Помещения в этой
+ * сборке выводятся из контуров (решение таска 122, развилка 2), и поле `roomId`
+ * у стены завело бы вторую правду о том же: обвёл комнату заново — и поле
+ * врёт, а починить его нечем, кроме той же проверки по контуру. Считать
+ * дешевле и честнее: спрашивают об этом только развёртка и только для той
+ * стены, которую открыли.
+ *
+ * Пробная точка отходит от середины стены на её сторону: сама середина лежит
+ * внутри стены, то есть на границе контура, и ответ там был бы случайным.
+ */
+export function wallRoomId(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  const vectors = wallVectors(wall);
+  if (!wall || !vectors) return null;
+  const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM);
+  const middle = {
+    x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
+    y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
+  };
+  const point = planMmToFraction(project, wall.schemeId, middle);
+  return point ? roomAtPoint(project, wall.schemeId, point) : null;
+}
+
+/**
+ * Высота стены с этой стороны: переопределение комнаты, если сторона в ней
+ * лежит, иначе высота схемы. `null` — высота не задана вовсе.
+ *
+ * Это и есть закрытая дыра таска 128: `wallHeightOf` умеет брать
+ * переопределение по комнате, но у стены комнаты не было, и развёртка брала
+ * высоту этажа. Теперь комната находится по стороне, а не по стене целиком —
+ * у стены между кухней и прихожей две разные высоты, и обе верные.
+ */
+export function wallHeightOnSide(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side) });
+}
+
+// Отступ вдоль стены с нужной стороны.
+//
+// **Зеркалится левая сторона, а не правая** — и это не произвол. Левая
+// сторона та, что слева, если идти от `a` к `b`; встань на неё и повернись к
+// стене — направление `a → b` пойдёт справа налево, и отсчёт от `a` окажется
+// справа. С правой стороны, наоборот, `a → b` идёт слева направо, и отступы
+// ложатся на лист как есть.
+function sideAlong(lengthMm, atMm, side) {
+  return side === "left" ? lengthMm - atMm : atMm;
+}
+
+function sideSpan(lengthMm, fromMm, toMm, side) {
+  const first = sideAlong(lengthMm, fromMm, side);
+  const second = sideAlong(lengthMm, toMm, side);
+  return { fromMm: Math.min(first, second), toMm: Math.max(first, second) };
+}
+
+/**
+ * Объекты схемы, попавшие на эту стену, — спроецированные на неё.
+ *
+ * Привязки у объекта **нет и не заводится**, в отличие от метки, и это не
+ * недоделка. Метка — точка, и «какой стене она принадлежит» вопрос спорный:
+ * ответ нужно выбрать, запомнить и показать человеку в карточке. У объекта
+ * есть размер, и вопрос другой — «накрывает ли он полосу этой стены», а он
+ * решается однозначно и считается за десять строк. Хранить ответ значило бы
+ * завести поле, которое врёт после первого же переноса стены, — ровно то, от
+ * чего мы отказались у стороны метки.
+ */
+export function wallObjectsOn(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  const vectors = wallVectors(wall);
+  if (!wall || !vectors) return [];
+  const half = Number(wall.thicknessMm) / 2;
+  const found = [];
+  for (const object of schemeObjectsOnScheme(project, wall.schemeId)) {
+    const corners = schemeObjectCorners(object);
+    if (corners.length === 0) continue;
+    const gap = Math.min(...corners.map((point) => segmentDistanceMm(point, wall.aMm, wall.bMm)));
+    if (gap - half > MARK_WALL_REACH_MM) continue;
+    // Сторона объекта — та, где лежит его середина. Объект, который сидит в
+    // самой стене (колонна, ниша, короб), виден с обеих.
+    const across =
+      corners.reduce(
+        (sum, point) => sum + (point.x - wall.aMm.x) * vectors.n.x + (point.y - wall.aMm.y) * vectors.n.y,
+        0,
+      ) / corners.length;
+    const inside = Math.abs(across) <= half;
+    if (!inside && (across > 0 ? "left" : "right") !== side) continue;
+    const along = corners.map(
+      (point) => (point.x - wall.aMm.x) * vectors.u.x + (point.y - wall.aMm.y) * vectors.u.y,
+    );
+    const span = sideSpan(vectors.len, Math.min(...along), Math.max(...along), side);
+    found.push({
+      id: object.id,
+      name: (findSchemeObjectKind(project, object.kindId) || {}).name || "",
+      fromMm: Math.round(span.fromMm),
+      toMm: Math.round(span.toMm),
+      floorMm: Number(object.heightAboveFloorMm) || 0,
+      topMm: schemeObjectTopMm(object),
+    });
+  }
+  return found.sort((first, second) => first.fromMm - second.fromMm);
+}
+
+/**
+ * Развёртка стены с одной стороны — всё, что на ней есть, на своих местах.
+ *
+ * Отступы здесь уже **зеркальные по стороне**: рисующему остаётся отложить их
+ * слева направо и ничего не знать ни про стороны, ни про направление стены.
+ * `heightMm` — высота этой стороны (`null`, если её не задавали);
+ * `heightShownMm` — то, во что рисовать: заданная высота или выведенная из
+ * того, что на стене стоит. Без числа развёртка была бы картинкой, а с
+ * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
+ */
+export function wallElevation(project, wallId, side = "left") {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  const length = wallLengthMm(wall);
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const openings = openingsInWall(project, wallId).map((opening) => {
+    const span = sideSpan(length, Number(opening.atMm), Number(opening.atMm) + Number(opening.widthMm), view);
+    return {
+      id: opening.id,
+      kind: opening.kind,
+      fromMm: Math.round(span.fromMm),
+      toMm: Math.round(span.toMm),
+      floorMm: Number(opening.heightAboveFloorMm) || 0,
+      topMm: Number(opening.heightAboveFloorMm) + Number(opening.heightMm),
+      // Петли и сторона открывания названы **от направления стены**, и при
+      // взгляде с зеркальной стороны обе переворачиваются: дверь,
+      // открывающаяся налево, с обратной стороны открывается направо.
+      hinge: opening.hinge ? (view === "left" ? flipHinge(opening.hinge) : opening.hinge) : null,
+      swing: opening.swing ? (view === "left" ? flipSwing(opening.swing) : opening.swing) : null,
+    };
+  });
+  // Порядок — слева направо **на листе**, а не в модели: после зеркала проём,
+  // который в модели шёл первым, оказывается последним, и список, читаемый
+  // не по картинке, сбивал бы с толку и размерную цепочку.
+  openings.sort((first, second) => first.fromMm - second.fromMm);
+  const marks = [];
+  for (const mark of project.marks) {
+    const binding = markWall(mark);
+    if (!binding || binding.wallId !== wallId) continue;
+    if (markWallSide(project, mark) !== view) continue;
+    const style = styleOf(project, mark.typeId);
+    const span =
+      binding.toMm === null
+        ? { fromMm: sideAlong(length, binding.atMm, view), toMm: null }
+        : sideSpan(length, binding.atMm, binding.toMm, view);
+    marks.push({
+      id: mark.id,
+      label: labelOf(project, mark.id),
+      color: style.color,
+      shape: style.shape,
+      lineStyle: style.lineStyle,
+      kind: mark.kind === "line" ? "line" : "point",
+      fromMm: Math.round(span.fromMm),
+      toMm: span.toMm === null ? null : Math.round(span.toMm),
+      heightMm: markDimensions(mark).heightAboveFloor,
+    });
+  }
+  marks.sort((first, second) => first.fromMm - second.fromMm);
+  const objects = wallObjectsOn(project, wallId, view);
+  const known = wallHeightOnSide(project, wallId, view);
+  const tops = [
+    ...openings.map((opening) => opening.topMm),
+    ...objects.map((object) => (object.topMm === null ? 0 : object.topMm)),
+    ...marks.map((mark) => mark.heightMm || 0),
+  ];
+  const roomId = wallRoomId(project, wallId, view);
+  const room = roomId ? findRoom(project, roomId) : null;
+  return {
+    wallId,
+    side: view,
+    lengthMm: length,
+    thicknessMm: Number(wall.thicknessMm),
+    heightMm: known,
+    heightKnown: known !== null,
+    // Выведенная высота: самое высокое, что на стене стоит, плюс триста
+    // миллиметров воздуха — чтобы верхний косяк не упирался в потолок листа.
+    heightShownMm: known !== null ? known : Math.max(2000, Math.max(0, ...tops) + 300),
+    roomId,
+    roomName: room ? room.name : "",
+    openings,
+    marks,
+    objects,
+  };
+}
+
+function flipHinge(value) {
+  return value === "end" ? "start" : "end";
+}
+
+function flipSwing(value) {
+  return value === "right" ? "left" : "right";
 }
 
 // ——— данные для штампа ————————————————————————————————————————————————

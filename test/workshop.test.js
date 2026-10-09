@@ -43,13 +43,14 @@ import {
   setPlanOrigin,
   setPlanScale,
   setSchemeWallHeight,
+  schemeObjectCorners,
+  segmentDistanceMm,
+  wallVectors,
   wallsOnScheme,
 } from "../src/model.js";
 import {
   drawingDoorLeaf,
   drawingHitObject,
-  drawingObjectCorners,
-  drawingWallVectors,
   planToScreen,
 } from "../src/render.js";
 import { identityTransform, rotateTransform } from "../src/imagePrep.js";
@@ -585,12 +586,12 @@ test("отступ вдоль стены считается по проекци�
 
 test("левая нормаль стены — та, что слева, если идти от начала к концу", () => {
   // Экранный `y` растёт вниз: идём вправо — слева оказывается верх.
-  const right = drawingWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 1000, y: 0 } });
+  const right = wallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 1000, y: 0 } });
   assert.deepEqual(right.u, { x: 1, y: 0 });
   assert.deepEqual(right.n, { x: 0, y: -1 });
-  const down = drawingWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 0, y: 1000 } });
+  const down = wallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 0, y: 1000 } });
   assert.deepEqual(down.n, { x: 1, y: 0 }, "идём вниз — слева восток");
-  assert.equal(drawingWallVectors({ aMm: { x: 5, y: 5 }, bMm: { x: 5, y: 5 } }), null);
+  assert.equal(wallVectors({ aMm: { x: 5, y: 5 }, bMm: { x: 5, y: 5 } }), null);
 });
 
 test("четыре сочетания петель и стороны — четыре разные створки", () => {
@@ -727,11 +728,11 @@ test("незнакомому виду достаётся квадрат, а не
 
 test("углы прямоугольного объекта поворачиваются вокруг середины", () => {
   const object = { shape: "rect", atMm: { x: 1000, y: 500 }, widthMm: 1200, depthMm: 100, turnDeg: 0 };
-  const corners = drawingObjectCorners(object);
+  const corners = schemeObjectCorners(object);
   assert.equal(corners.length, 4);
   assert.deepEqual(corners[0], { x: 400, y: 450 });
   assert.deepEqual(corners[2], { x: 1600, y: 550 });
-  const turned = drawingObjectCorners({ ...object, turnDeg: 90 });
+  const turned = schemeObjectCorners({ ...object, turnDeg: 90 });
   // Поворот вокруг середины оставляет вещь там, где её поставили.
   const middle = turned.reduce((sum, point) => ({ x: sum.x + point.x / 4, y: sum.y + point.y / 4 }), { x: 0, y: 0 });
   assert.ok(Math.abs(middle.x - 1000) < 0.001 && Math.abs(middle.y - 500) < 0.001);
