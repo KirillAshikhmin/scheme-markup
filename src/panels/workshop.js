@@ -745,6 +745,19 @@ export function workshopGridDrawStepMm(gridMm, zoom) {
 }
 
 /**
+ * Подсказка под полем — своя у каждого занятия. Одна на всех врала с той
+ * минуты, как занятий стало три: про «вершину цепочки» читал человек, который
+ * в это время ставил окно в стену. Чистая и вынесена наружу ради теста:
+ * пропущенное занятие молча показало бы чужие слова.
+ */
+export function workshopHint(tool) {
+  if (tool === "openings") return strings.workshop.hintOpenings;
+  if (tool === "objects") return strings.workshop.hintObjects;
+  if (tool === "edit") return strings.workshop.hintEdit;
+  return strings.workshop.hint;
+}
+
+/**
  * Строка состояния схемы: какой это из трёх случаев, что в чертеже и сколько
  * стен. Чистая — слова про случай «молча рисовать в никуда нельзя» решаются
  * здесь и проверяются без браузера.
@@ -895,7 +908,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
   });
   const fitButton = uiButton(strings.workshop.fit, { on: { click: () => fit() } });
   const meta = uiEl("p", { class: "workshop__meta" });
-  const hint = uiEl("p", { class: "modal__hint", text: strings.workshop.hint });
+  const hint = uiEl("p", { class: "modal__hint", text: workshopHint("walls") });
 
   // ——— правая часть: слои, сетка, стена, высоты ———
   const planCheck = uiEl("input", { type: "checkbox" });
@@ -2456,6 +2469,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
     objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");
     syncSubject(current, wall);
+    hint.textContent = workshopHint(tool);
     if (document.activeElement !== heightInput) {
       const own = findScheme(current, schemeId);
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";

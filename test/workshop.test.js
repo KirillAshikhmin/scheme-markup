@@ -64,6 +64,7 @@ import {
   workshopExtentMm,
   workshopFitView,
   workshopGridDrawStepMm,
+  workshopHint,
   workshopHitObject,
   workshopMoveVertex,
   workshopMoveWall,
@@ -755,4 +756,18 @@ test("G68: объект с чертежом, но без проёмов, пус�
   assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "openings"));
   assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "schemeObjects"));
   assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "schemeObjectKinds"));
+});
+
+test("подсказка под полем своя у каждого занятия — чужих слов не показывает", () => {
+  const seen = new Set();
+  for (const tool of ["walls", "openings", "objects", "edit"]) {
+    const line = workshopHint(tool);
+    assert.ok(line && line.length > 20, tool + ": подсказки нет");
+    seen.add(line);
+  }
+  assert.equal(seen.size, 4, "у каждого занятия своя подсказка");
+  assert.match(workshopHint("openings"), /стену/, "проёмы говорят про стену, а не про вершину цепочки");
+  assert.match(workshopHint("walls"), /вершина стены/);
+  // Незнакомое занятие не оставляет человека без слов.
+  assert.equal(workshopHint("какое-то"), workshopHint("walls"));
 });
