@@ -1,4 +1,10 @@
-// Правка плана: поворот и обрезка уже загруженной подложки.
+// Правка плана: поворот и обрезка подложки.
+//
+// Поворот загруженной подложки — живое поведение (G178): две кнопки в строке
+// схемы, без окна и без вопроса. Обрезка размеченного плана, наоборот, закрыта
+// (G175) — окно с рамкой открывается только на новую картинку. Разбор здесь
+// общий: обе правки идут одной функцией, и тесты обрезки описывают запас, по
+// которому вход вернётся, если понадобится.
 //
 // Это самая разрушительная правка в сборке: она двигает координаты **всех**
 // меток схемы разом. Двести размеченных точек, поворот оказался не в ту
@@ -26,6 +32,10 @@ import {
   findMark,
   findOutline,
   findScheme,
+  planOriginOf,
+  planScaleOf,
+  setPlanOrigin,
+  setPlanScale,
   updateMark,
 } from "../src/model.js";
 import { applyPlanEdit } from "../src/panels/schemes.js";
@@ -187,4 +197,83 @@ test("объект без контуров правится так же", () => 
   });
   close(findMark(result.project, base.insideId).points[0].x, 0.5, "x метки");
   assert.equal(result.project.outlines, undefined);
+});
+
+// ——— чистый поворот: за это его и пустили к размеченному плану ——————————
+//
+// Кнопка поворота в строке схемы ничего не спрашивает перед работой, и это
+// решение держится ровно на одном: поворот не теряет **ничего**. Проверяем не
+// на удобном примере, а на том, где терять есть что: метки по всем четырём
+// углам и по краям, калибровка от угла до угла, привязка чертежа.
+function cornerScene() {
+  let step = createProject();
+  const scheme = addScheme(step, { name: "1 этаж", imageId: "старая", width: PLAN.width, height: PLAN.height });
+  step = scheme.project;
+  const schemeId = scheme.scheme.id;
+  const typeId = step.markTypes.find((type) => type.code === "В").id;
+  const corners = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+    { x: 0.5, y: 0 },
+    { x: 0.1, y: 0.9 },
+  ];
+  const ids = [];
+  for (const point of corners) {
+    const added = addMark(step, { schemeId, typeId, kind: "point", points: [point] });
+    step = added.project;
+    ids.push(added.mark.id);
+  }
+  step = setPlanScale(step, schemeId, { a: { x: 0, y: 0 }, b: { x: 1, y: 1 }, meters: 20 }).project;
+  step = setPlanOrigin(step, schemeId, { at: { x: 0.2, y: 0.8 }, turn: 90 }).project;
+  return { project: step, schemeId, ids, corners };
+}
+
+test("чистый поворот не прижимает ни одной метки и не снимает калибровку", () => {
+  const base = cornerScene();
+  for (const rotate of [90, 180, 270]) {
+    const result = applyPlanEdit(base.project, base.schemeId, {
+      imageId: "новая",
+      width: rotate === 180 ? PLAN.width : PLAN.height,
+      height: rotate === 180 ? PLAN.height : PLAN.width,
+      transform: { rotate, crop: null },
+    });
+    assert.equal(result.pushed, 0, "поворот на " + rotate + "° прижал метку к краю");
+    assert.equal(result.scaleLost, false, "поворот на " + rotate + "° снял калибровку");
+    assert.equal(planScaleOf(result.project, base.schemeId).meters, 20, "метры калибровки изменились");
+    // Привязка чертежа переносится вместе с планом и получает прибавку угла:
+    // стены нарисованы по подложке и обязаны повернуться с ней (ADR 008).
+    const origin = planOriginOf(result.project, base.schemeId);
+    assert.ok(origin, "привязка чертежа потерялась при повороте на " + rotate + "°");
+    assert.equal(origin.turn, (90 + rotate) % 360, "угол привязки чертежа не прибавился");
+  }
+});
+
+test("четыре поворота по кругу возвращают разметку туда, где она была", () => {
+  const base = cornerScene();
+  let step = base.project;
+  for (let turn = 0; turn < 4; turn += 1) {
+    const size = turn % 2 === 0 ? { width: PLAN.height, height: PLAN.width } : PLAN;
+    step = applyPlanEdit(step, base.schemeId, {
+      imageId: "круг-" + turn,
+      width: size.width,
+      height: size.height,
+      transform: { rotate: 90, crop: null },
+    }).project;
+  }
+  const scheme = findScheme(step, base.schemeId);
+  assert.equal(scheme.width, PLAN.width);
+  assert.equal(scheme.height, PLAN.height);
+  base.ids.forEach((id, index) => {
+    const point = findMark(step, id).points[0];
+    // Доли не возвращаются ровно: `1 − y` четыре раза подряд даёт 0,1 как
+    // 0,09999999999999998. Для метки это меньше пикселя, и сверка идёт с
+    // допуском — но сверка обязана быть: поворот, уводящий метку, бесполезен.
+    close(point.x, base.corners[index].x, "x метки " + index);
+    close(point.y, base.corners[index].y, "y метки " + index);
+  });
+  const origin = planOriginOf(step, base.schemeId);
+  assert.equal(origin.turn, 90, "угол привязки чертежа не вернулся");
+  assert.equal(planScaleOf(step, base.schemeId).meters, 20);
 });

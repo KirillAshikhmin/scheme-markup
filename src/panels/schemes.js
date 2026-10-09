@@ -3,13 +3,16 @@
 // Холст рисует другой модуль — сюда он приходит только за картинкой:
 // подготовленный план и его размер кладутся в состояние сеанса (`schemeImage`).
 //
-// **Поворот и обрезка живут только там, где картинка приходит** (G175): в окне
-// загрузки нового плана и в окне замены подложки. Отдельного входа «Править
-// план» у загруженной подложки нет — правка размеченного плана прижимала метки
-// к краю рамки, снимала калибровку и тащила за собой начало координат чертежа,
-// и каждую из этих бед приходилось обходить по отдельности. Запрет снимает их
-// разом: пока чертить нечего — правь сколько угодно; появилась разметка —
-// подложка больше не шевелится.
+// **Обрезка живёт только там, где картинка приходит** (G175): в окне загрузки
+// нового плана и в окне замены подложки. У загруженной подложки её нет — рамка
+// прижимает метки к краю, снимает калибровку и уносит начало координат
+// чертежа, и каждую из этих бед приходилось обходить по отдельности.
+//
+// **Поворот, наоборот, есть всегда** (G178): он ничего не теряет — доли меток
+// просто меняются местами, калибровка переживает его, привязка чертежа
+// переносится с прибавкой угла. Поэтому поворот стоит прямо в строке схемы
+// двумя кнопками и обходится без окна: нажал — повернулось, Ctrl+Z вернул.
+// Окно осталось за тем, ради чего и заведено, — за новой картинкой.
 import { layoutAllows, PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
 import {
   addScheme,
@@ -686,6 +689,8 @@ function mountSchemesPanel(host, api) {
     },
   });
   fileInput.hidden = true;
+  // Поворот идёт по одному: пока картинка режется, кнопки поворота неактивны.
+  let turning = false;
   let replaceTarget = null;
   const replaceInput = uiEl("input", {
     class: "scheme-file",
@@ -752,10 +757,9 @@ function mountSchemesPanel(host, api) {
         }),
         uiEl("span", { class: "scheme-row__meta", text: meta, title: meta }),
         uiEl("div", { class: "scheme-row__tools", attrs: editable ? {} : { hidden: "hidden" } }, [
-          // Поворота и обрезки здесь больше нет (G175) — осталась замена, и она
-          // же единственный путь повернуть уже загруженный план: выбрал тот же
-          // файл — открылось то же окно. Подсказка об этом длиннее подписи,
-          // поэтому слово кнопки и её подсказка разведены.
+          // Обрезка живёт только там, где картинка приходит (G175), и замена —
+          // одна из таких дверей. Подсказка об этом длиннее подписи, поэтому
+          // слово кнопки и её подсказка разведены.
           uiIconButton("swap", {
             label: strings.schemes.replace,
             title: strings.schemes.replaceHint,
@@ -784,17 +788,38 @@ function mountSchemesPanel(host, api) {
           }),
         ]),
       );
-      // Масштаб — третьей строкой и словами, а не значком: состояние «задан или
-      // нет» должно читаться с панели, не наводя курсор. Без плана калибровать
-      // нечего, в просмотре правок нет вовсе — там кнопки не показываем.
+      // Третья строка — всё, что про сам план: повернуть и откалибровать. Без
+      // плана ни того, ни другого не бывает, в просмотре правок нет вовсе —
+      // там строки нет совсем.
+      //
+      // Поворот стоит здесь, а не в ряду кнопок выше (G178): семь значков в
+      // одной строке ужимали размер плана до многоточия — это видно на снимке
+      // живого прогона, — а по смыслу поворот и масштаб ближе друг к другу,
+      // чем к «выше/ниже/удалить». Окна у поворота нет: нажал — повернулось,
+      // Ctrl+Z вернул; холст и есть предпросмотр.
+      //
+      // Масштаб — словами, а не значком: состояние «задан или нет» должно
+      // читаться с панели, не наводя курсор.
       if (editable && scheme.imageId) {
         const view = schemesScaleView(project, scheme.id, scheme.name);
         row.append(
-          uiButton(view.label, {
-            class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
-            title: view.title,
-            on: { click: () => editScale(scheme.id) },
-          }),
+          uiEl("div", { class: "scheme-row__plan" }, [
+            uiIconButton("rotateLeft", {
+              title: strings.schemes.turnLeft,
+              attrs: turning ? { disabled: "disabled" } : {},
+              on: { click: () => turnPlan(scheme.id, -90) },
+            }),
+            uiIconButton("rotateRight", {
+              title: strings.schemes.turnRight,
+              attrs: turning ? { disabled: "disabled" } : {},
+              on: { click: () => turnPlan(scheme.id, 90) },
+            }),
+            uiButton(view.label, {
+              class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
+              title: view.title,
+              on: { click: () => editScale(scheme.id) },
+            }),
+          ]),
         );
       }
       list.append(row);
@@ -838,6 +863,62 @@ function mountSchemesPanel(host, api) {
     });
     setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
     notify(text("schemes.added", { name: added.scheme.name }), "success");
+  }
+
+  /**
+   * Поворот загруженной подложки на четверть оборота (G178).
+   *
+   * Без окна: холст и есть предпросмотр, а поворот — единственная правка
+   * плана, которая ничего не теряет. Метка за край не выходит (доли просто
+   * меняются местами), калибровка переживает поворот, начало координат
+   * чертежа переносится с прибавкой угла — всё это делает `applyPlanEdit`,
+   * оставленный в таске 124 как раз на этот случай. Поэтому и спрашивать
+   * нечего: промах возвращает Ctrl+Z, а не вопрос перед действием.
+   *
+   * Картинка перерисовывается из той, что лежит в хранилище, — то есть JPEG
+   * пережимается на каждом повороте. Четыре поворота подряд по кругу вернут
+   * геометрию, но не исходное качество; PNG, которым планы приходят чаще
+   * всего, не теряет ничего.
+   */
+  async function turnPlan(schemeId, degrees) {
+    if (turning) return;
+    const scheme = findScheme(getState().project, schemeId);
+    if (!scheme || !scheme.imageId) return;
+    const blob = await getImage(scheme.imageId);
+    if (!blob) {
+      notify(strings.image.broken, "error");
+      return;
+    }
+    const transform = rotateTransform(identityTransform(), degrees);
+    // Пока браузер режет картинку, кнопки поворота неактивны: второе нажатие
+    // считало бы ту же подложку второй раз и потеряло бы первый поворот.
+    turning = true;
+    render();
+    try {
+      const turned = await renderPlanImage(blob, transform);
+      const imageId = await putImage(turned.blob);
+      const before = getState().project;
+      // Схему могли удалить, пока браузер перерисовывал картинку.
+      if (!findScheme(before, schemeId)) return;
+      const result = applyPlanEdit(before, schemeId, {
+        imageId,
+        width: turned.width,
+        height: turned.height,
+        transform,
+      });
+      // Через canvasCommit: поворот двигает координаты всех меток схемы разом
+      // и обязан отменяться первым же Ctrl+Z. Прежняя картинка остаётся в
+      // хранилище — без неё отмена вернула бы доли на план, которого уже нет;
+      // уберёт её уборка при следующем запуске, когда отменять будет нечего.
+      canvasCommit(before, result.project, strings.history.turnImage, { schemeId });
+    } catch (error) {
+      notify(error && error.message ? error.message : strings.image.broken, "error");
+      return;
+    } finally {
+      turning = false;
+      render();
+    }
+    notify(strings.image.turned, "success");
   }
 
   // Замена подложки: картинка другая, разметка остаётся вся. Координаты — доли
