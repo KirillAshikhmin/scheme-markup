@@ -952,6 +952,24 @@
   accent-color: var(--accent);
 }
 
+/* Галочка комментариев — под деревом и снаружи него: в дереве её нет, потому
+   что комментарий не строка справочника (G173), а прятать её внутри свёрнутых
+   «Категорий и типов» значило бы потерять единственный способ убрать плашки с
+   плана. Черта сверху — тот же приём, что у плашки в окне выбора типа: ниже
+   неё не продолжение списка, а другое. */
+.filters__comments {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-line);
+  color: var(--panel-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .filters__dot {
   width: 10px;
   height: 10px;
@@ -1559,18 +1577,6 @@
   border-style: dashed;
 }
 
-/* Пустая клетка знака — у типа-комментария: он рисуется плашкой с текстом, и
-   выбирать нечего. Мера та же, что у кнопки знака: строки справочника стоят
-   колонка в колонку, и хвост строки комментария не имеет права уехать влево. */
-.dict__sign-none {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--dict-sign);
-  height: 30px;
-  color: var(--panel-muted);
-}
 
 /* Сетка фигур: восемь колонок. Палитра выросла за полсотни знаков, и при пяти
    колонках окно вытягивалось в столбец высотой в экран. */
@@ -3073,6 +3079,44 @@
   grid-column: 1 / -1;
 }
 
+/* ——— плашка «Комментарий» под таблицей ————————————————————————————————
+   Заказчик: «в окне добавления в выборе типа метки просто сделай снизу
+   отдельную плашку Комментарий, под основной таблицей». Отделяет её черта во
+   всю ширину окна — та же мысль, что у разделителя в меню: ниже черты не
+   продолжение списка, а другое. Своей рамки у блока нет: вторая рамка внутри
+   карточки диалога читалась бы как вложенное окно. */
+.picker__builtin {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.picker__builtin-title {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+/* Сама строка — такая же, как строки сетки: под капотом это такая же метка,
+   и выбирают её тем же движением. Отличает её рамка — она есть всегда, а не
+   только под курсором: строка не из списка, и видно это до наведения. */
+.picker__builtin-row {
+  align-self: flex-start;
+  max-width: 100%;
+  border-color: var(--panel-line);
+}
+
+.picker__builtin-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
 /* Печатная раскладка и предпросмотр таблицы.
    Один и тот же узел .print-doc показывается в диалоге выгрузки и уходит в
    печать: на бумаге оказывается ровно то, что видно на экране. Экран прячется
@@ -4490,7 +4534,11 @@ const strings = {
     // окно выглядит потерявшим половину справочника.
     onlyPoint: "Метка стоит точкой — показаны точечные типы",
     onlyLine: "Метка нарисована линией — показаны линейные типы",
-    onlyComment: "Это комментарий — показаны типы-комментарии",
+    // Отдельная плашка под таблицей: комментарий не из справочника (G173).
+    // Заголовок блока и строка под ним говорят, почему он стоит особняком, —
+    // иначе это выглядело бы как категория, потерявшая своё место.
+    builtinComment: "Комментарий",
+    builtinCommentHint: "Есть всегда: в справочнике его нет, переименовать и удалить нельзя",
   },
   canvas: {
     hintSelect:
@@ -5203,6 +5251,10 @@ const strings = {
     room: "Помещение",
     allRooms: "Все помещения",
     types: "Категории и типы",
+    // Комментарии прячутся своей галочкой: в дереве их нет, они не строка
+    // справочника (G173). Стоит она под деревом и снаружи него.
+    comments: "Комментарии",
+    commentsHint: "Показывать плашки комментариев на плане. В справочнике их нет — комментарий есть всегда",
     hidden: "скрыто: {count}",
     showAll: "Показать все",
     // Обратная кнопка к «Показать все», и стоит она рядом с ней. Слова
@@ -5434,16 +5486,12 @@ const strings = {
     kind: "Вид",
     kindPoint: "Точка",
     kindLine: "Линия",
-    kindComment: "Коммент",
     // Число каналов у типа: одна клавиша у В, две у ВВ, четыре у реле, шесть
     // у сценарной панели. От него зависит одно — спрашивают ли канал у связи.
     channels: "Каналов",
     channelsHint: "Сколько каналов у типа: клавиш у выключателя, выходов у реле, кнопок у панели. Один канал — канал у связей не спрашивается",
     kindPointHint: "Точечный тип: метка ставится кликом, обозначение — фигура",
     kindLineHint: "Линейный тип: метка проводится линией, обозначение — начертание",
-    // У комментария обозначения нет вовсе: на плане он — плашка с текстом,
-    // поэтому ни фигуру, ни начертание справочник у него не спрашивает.
-    kindCommentHint: "Комментарий: на плане плашка с текстом, своего знака нет",
     // Список выведенных видов переехал в панель предупреждений (`warnings`):
     // окном при открытии объекта он был простынёй на пятнадцать строк.
     add: "Добавить",
@@ -5926,9 +5974,81 @@ const BLOCK_MODES = ["each", "single"];
  * Комментарий **не позиция**, а подпись к чертежу (G167: «В список меток в
  * таблицу и т.д. эти комментарии не должны попадать»), поэтому ни в списках,
  * ни в листах, ни в подсчётах его нет — см. `listedMarks` и `listedTypes`.
+ *
+ * И он **не строка справочника** (G173): «давай комментарий сделаем не просто
+ * как отдельный тип метки, а всегда предустановленную, которая не помечается
+ * в справочнике, так же у других меток оставь только Точка и линия». Тип у
+ * него есть — метка без типа в этой модели не живёт, — но он **виртуальный**:
+ * лежит не в `project.markTypes`, а в коде, под зарезервированным
+ * идентификатором `COMMENT_TYPE_ID`. Отсюда вытекает всё остальное даром:
+ * справочник, дерево фильтров, сетка выбора, легенда, лист справочника,
+ * «Добавить из общей базы» и предупреждения перебирают `project.markTypes` —
+ * и комментария там просто нет, фильтровать его в каждом месте не нужно.
  */
 const MARK_KIND_COMMENT = "comment";
 const MARK_KINDS = ["point", "line", MARK_KIND_COMMENT];
+
+/**
+ * Зарезервированные идентификаторы встроенного типа-комментария и его
+ * категории.
+ *
+ * Не UUID намеренно: `crypto.randomUUID()` такого не выдаст никогда, значит
+ * столкнуться с типом пользователя невозможно. В файле проекта они читаются
+ * глазами — `"typeId": "comment"`, — и это тоже нарочно: разбирая чужой
+ * объект руками, видно, что это за метка.
+ */
+const COMMENT_TYPE_ID = "comment";
+const COMMENT_CATEGORY_ID = "comments";
+// Код по умолчанию назвал заказчик: «Пусть код будет „Коммент"». Номер
+// сквозной, счётчик ведётся на код — с чужими он не пересекается.
+const COMMENT_TYPE_CODE = "Коммент";
+
+// Встроенная категория комментария. Цвет чернильный, почти чёрный: это не
+// условное обозначение железки, а надпись на чертеже. Выбран счётом — до
+// каждой категории шаблона ΔE больше `COLOR_NEAR_DISTANCE`, — хотя теперь это
+// и не проверяется предупреждениями: категории нет в объекте, и
+// `closeCategoryColors` её не видит. Знак — лежачий прямоугольник, та же
+// плашка: на плане знак комментария не рисуется вовсе, но в окне выбора и в
+// карточке метки значок нужен.
+const COMMENT_CATEGORY = {
+  id: COMMENT_CATEGORY_ID,
+  name: strings.categories.comments,
+  color: "#111418",
+  shape: "rect-horizontal",
+  lineStyle: null,
+  order: -1,
+};
+
+/**
+ * Код встроенного типа в этом объекте.
+ *
+ * Обычно это `COMMENT_TYPE_CODE`. Поле `project.commentCode` появляется
+ * только у объекта, который пришёл из сборки таска 116 с **переименованным**
+ * типом комментария: миграция переносит метки на встроенный тип и забирает
+ * с собой код, иначе у человека сменились бы подписи всех плашек, а счётчик
+ * начал бы нумерацию заново. У обычного объекта поля нет вовсе.
+ */
+function commentCodeOf(project) {
+  const own = project && typeof project.commentCode === "string" ? project.commentCode.trim() : "";
+  return own || COMMENT_TYPE_CODE;
+}
+
+// Встроенный тип-комментарий этого объекта. Собирается на каждый вызов, как
+// и положено значению, которого нет в данных.
+function commentType(project) {
+  return {
+    id: COMMENT_TYPE_ID,
+    categoryId: COMMENT_CATEGORY_ID,
+    code: commentCodeOf(project),
+    name: strings.types.comment,
+    kind: MARK_KIND_COMMENT,
+    shape: null,
+    lineStyle: null,
+    blockMode: "each",
+    channels: TYPE_CHANNELS_DEFAULT,
+    order: -1,
+  };
+}
 
 /**
  * Сколько каналов у типа: одна клавиша у В, две у ВВ, три у ВВВ, четыре у
@@ -6397,15 +6517,6 @@ const TEMPLATE_CATEGORIES = [
   { key: "sensors", name: strings.categories.sensors, color: "#164E63", shape: "circle-ring" },
   { key: "panel", name: strings.categories.panel, color: "#6E4B1F", shape: "square-bolt" },
   { key: "plumbing", name: strings.categories.plumbing, color: "#E80098", shape: "drop-dot" },
-  // Комментарии (G163). Цвет — чернильный, почти чёрный: это не условное
-  // обозначение железки, а надпись на чертеже, и в семье цветных категорий
-  // ей места нет. Выбран счётом, как велит правило: до каждой прежней
-  // категории ΔE больше порога `COLOR_NEAR_DISTANCE`, то есть новой пары
-  // «похожих цветов» в предупреждениях чистый объект не получает.
-  // Форма — лежачий прямоугольник, та же плашка: на плане знак категории у
-  // комментария не рисуется вовсе, но в сетке выбора типа и в карточке метки
-  // значок нужен, и плашка там узнаётся сразу.
-  { key: "comments", name: strings.categories.comments, color: "#111418", shape: "rect-horizontal" },
 ];
 
 // Порядок — порядок справочника заказчика, а не наша перекладка по категориям:
@@ -6468,11 +6579,6 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander" },
   { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring" },
   { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring" },
-  // Комментарий — последним: это не железка, и в привычном порядке справочника
-  // ему места нет. Код заказчик назвал сам: «Код и номер нужен. Пусть код
-  // будет „Коммент"». Номер сквозной, как у всех, и со чужими счётчиками не
-  // пересекается — счётчик ведётся на код типа.
-  { category: "comments", code: "Коммент", name: strings.types.comment, kind: MARK_KIND_COMMENT },
 ];
 
 function newId() {
@@ -6595,10 +6701,19 @@ function createProject(template) {
 function findScheme(project, schemeId) {
   return project.schemes.find((scheme) => scheme.id === schemeId) || null;
 }
+
+/**
+ * Тип по идентификатору — **единственная** дверь к типу во всей сборке, и
+ * поэтому именно здесь живёт встроенный комментарий (G173). Всё, что спрашивает
+ * тип у метки, — подпись, цвет, знак, вид, карточка, холст — получает его, не
+ * зная, что в справочнике такой строки нет.
+ */
 function findType(project, typeId) {
+  if (typeId === COMMENT_TYPE_ID) return commentType(project);
   return project.markTypes.find((type) => type.id === typeId) || null;
 }
 function findCategory(project, categoryId) {
+  if (categoryId === COMMENT_CATEGORY_ID) return COMMENT_CATEGORY;
   return project.categories.find((category) => category.id === categoryId) || null;
 }
 function findMark(project, markId) {
@@ -8062,6 +8177,12 @@ function normalizeCode(code, project, exceptTypeId) {
   if (!value) throw modelError("codeRequired", limit);
   if ([...value].length > CODE_MAX_LENGTH) throw modelError("codeTooLong", limit);
   if (!/^[A-Za-zА-Яа-яЁё]+$/u.test(value)) throw modelError("codeLetters", limit);
+  // Код встроенного комментария занят, хотя строки в справочнике нет: счётчик
+  // номеров ведётся на код, и второй тип с тем же кодом поделил бы с плашками
+  // одну нумерацию.
+  if (value.toUpperCase() === commentCodeOf(project).toUpperCase()) {
+    throw modelError("codeTaken", { code: value });
+  }
   const taken = project.markTypes.some(
     (type) => type.id !== exceptTypeId && type.code.toUpperCase() === value.toUpperCase(),
   );
@@ -9150,6 +9271,60 @@ function migrateTypeKinds(project) {
   });
   if (!changed) return { project, guessed: [] };
   return { project: { ...project, markTypes }, guessed };
+}
+
+/**
+ * Перевести объект сборки таска 116 на встроенный комментарий (G173).
+ *
+ * Тогда комментарий был обычной строкой справочника, и в объекты заказчика он
+ * попал двумя путями — из шаблона нового объекта и кнопкой «Добавить из общей
+ * базы». Теперь строки в справочнике нет, а метки на неё ссылаются: миграция
+ * переводит их на `COMMENT_TYPE_ID` и убирает из справочника сам тип и
+ * осиротевшую категорию.
+ *
+ * **Ни одна метка ничего не теряет.** Идентификатор метки, номер, точки,
+ * текст, указатель и смещение плашки не трогаются вовсе — меняется одно поле
+ * `typeId`. Подпись (`код + номер`) остаётся прежней, потому что миграция
+ * **забирает код с собой**: переименуй пользователь тип в «Прим», и плашки
+ * звались бы «Прим1» — после миграции они зовутся так же, код живёт в
+ * `project.commentCode`. Счётчик номеров ведётся на код и поэтому тоже цел.
+ *
+ * Миграция **молчалива и идемпотентна**: переводить нечего — возвращается тот
+ * же объект по ссылке, без `updatedAt` и без шага истории. Спрашивать у
+ * человека ей нечего: догадок здесь нет, вид типа записан в самих данных.
+ *
+ * Редкий случай, названный вслух: типов-комментариев в справочнике оказалось
+ * несколько (в сборке 116 переключатель вида позволял завести второй). Все их
+ * метки сходятся на одном встроенном типе — он на то и один, — а код берётся
+ * у того, где меток больше; у меток остальных сменится приставка подписи.
+ * Из двух путей, какими тип попадал в объект, так получиться не могло.
+ */
+function migrateCommentType(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, moved: 0 };
+  const own = project.markTypes.filter((type) => type.kind === MARK_KIND_COMMENT);
+  if (own.length === 0) return { project, changed: false, moved: 0 };
+  const ids = new Set(own.map((type) => type.id));
+  const marks = Array.isArray(project.marks) ? project.marks : [];
+  const count = (typeId) => marks.filter((mark) => mark.typeId === typeId).length;
+  // Главный — тот, на котором больше меток: его код и переезжает. При равенстве
+  // выигрывает первый в справочнике, чтобы ответ не зависел от порядка обхода.
+  const main = own.reduce((best, type) => (count(type.id) > count(best.id) ? type : best), own[0]);
+  const next = { ...project };
+  let moved = 0;
+  next.marks = marks.map((mark) => {
+    if (!ids.has(mark.typeId)) return mark;
+    moved += 1;
+    return { ...mark, typeId: COMMENT_TYPE_ID };
+  });
+  next.markTypes = project.markTypes.filter((type) => !ids.has(type.id));
+  // Категория уходит только вместе с последним своим типом: заведи пользователь
+  // в «Комментариях» что-то своё — категория останется ему.
+  const orphan = new Set(own.map((type) => type.categoryId));
+  for (const type of next.markTypes) orphan.delete(type.categoryId);
+  next.categories = (project.categories || []).filter((category) => !orphan.has(category.id));
+  const code = String(main.code || "").trim();
+  if (code && code !== COMMENT_TYPE_CODE) next.commentCode = code;
+  return { project: next, changed: true, moved };
 }
 
 /**
@@ -10859,7 +11034,9 @@ function migrateProject(loaded) {
   // отмечается и показывается пользователю списком на правку. Миграция
   // идемпотентна: у объекта, где вид уже проставлен, она возвращает тот же
   // объект — иначе упаковка правила бы то, что сама же и сверяет.
-  return migrateTypeKinds(filled).project;
+  // Комментарий перестал быть строкой справочника (G173): объект сборки, где
+  // он ею был, переводится на встроенный тип — молча и без правки подписей.
+  return migrateCommentType(migrateTypeKinds(filled).project).project;
 }
 
 // Календарный день пользователя, а не UTC: разметку правят вечером, и
@@ -11703,6 +11880,10 @@ function mergeReferences(merged, report, sources, winner) {
 
   merged.marks = merged.marks.filter((mark) => {
     if (liveTypes.has(mark.typeId)) return true;
+    // Комментарий ссылается на встроенный тип (G173), и в справочнике его нет
+    // ни у одной из сторон — это не висячая ссылка. Без этой строки слияние
+    // двух файлов выбрасывало бы все плашки как метки без типа.
+    if (mark.typeId === COMMENT_TYPE_ID) return true;
     report.conflicts.push({ code: "danglingRef", entity: "marks", id: mark.id, kept: "none", item: mark });
     return false;
   });
@@ -11842,7 +12023,10 @@ function mergeProjects(ours, theirs, base, options = {}) {
 
   // Подписи для отчёта считаются по слитому справочнику: тип метки мог приехать
   // тем же слиянием.
+  // Код встроенного комментария в отчёт подставляется отдельно: в справочнике
+  // его нет, и без этого плашка значилась бы в отчёте голым номером.
   const typeCodes = new Map(merged.markTypes.map((type) => [type.id, type.code]));
+  typeCodes.set(COMMENT_TYPE_ID, commentCodeOf(merged));
   for (const change of report.changes) change.label = mergeLabel(change.entity, change.item, typeCodes);
   for (const conflict of report.conflicts) conflict.label = mergeLabel(conflict.entity, conflict.item, typeCodes);
 
@@ -15026,10 +15210,18 @@ function drawMarkLinks(ctx, links, scheme, view, options = {}) {
 // Фильтр панели меток: скрытая метка не рисуется и по ней не кликается.
 function markVisible(project, mark, filter) {
   if (!filter) return true;
-  if (Array.isArray(filter.typeIds) && !filter.typeIds.includes(mark.typeId)) return false;
-  if (Array.isArray(filter.categoryIds)) {
-    const type = findType(project, mark.typeId);
-    if (!type || !filter.categoryIds.includes(type.categoryId)) return false;
+  // Комментарий прячется своей галочкой, а не галочками справочника (G173):
+  // встроенного типа нет ни в `typeIds`, ни в `categoryIds`, и без этой ветки
+  // плашки исчезали бы с плана от любого сужения по типу — например стоило
+  // снять одну категорию.
+  if (markIsComment(mark)) {
+    if (filter.comments === false) return false;
+  } else {
+    if (Array.isArray(filter.typeIds) && !filter.typeIds.includes(mark.typeId)) return false;
+    if (Array.isArray(filter.categoryIds)) {
+      const type = findType(project, mark.typeId);
+      if (!type || !filter.categoryIds.includes(type.categoryId)) return false;
+    }
   }
   if (filter.roomId && mark.roomId !== filter.roomId) return false;
   const query = (filter.query || "").trim().toLowerCase();
@@ -15547,6 +15739,10 @@ function labelFilterKey(filter) {
   return [
     Array.isArray(filter.categoryIds) ? filter.categoryIds.join(",") : "*",
     Array.isArray(filter.typeIds) ? filter.typeIds.join(",") : "*",
+    // Скрытые комментарии меняют состав подписей так же, как снятая галочка
+    // типа: ключ кэша раскладки обязан их учитывать, иначе плашки исчезли бы
+    // с плана, а их места остались бы занятыми.
+    filter.comments === false ? "nc" : "*",
     filter.roomId || "",
     (filter.query || "").trim().toLowerCase(),
   ].join("|");
@@ -26352,7 +26548,26 @@ function filtersToggleCategory(project, filter, categoryId, on) {
 }
 function filtersSetAllTypes(project, filter, on) {
   const visible = new Set(on ? project.markTypes.map((type) => type.id) : []);
-  return filtersFromTypeSet(project, filter, visible);
+  // «Показать все» и «Скрыть все» — про план целиком, а не про справочник:
+  // комментарии уходят и приходят вместе со всеми, иначе «Скрыть все»
+  // оставляло бы на плане плашки и врало названием.
+  return { ...filtersFromTypeSet(project, filter, visible), comments: on };
+}
+
+/**
+ * Видны ли комментарии. Своей галочки в дереве у них нет и быть не может:
+ * дерево строится по справочнику, а встроенного комментария там нет (G173).
+ * Поэтому у фильтра своё поле, а у панели — своя строка под деревом.
+ *
+ * Умолчание — «видны»: у фильтра прежней сборки поля нет вовсе, и читать его
+ * отсутствие как «скрыты» значило бы прятать плашки у того, кто ничего не
+ * нажимал.
+ */
+function filtersCommentsShown(filter) {
+  return !filter || filter.comments !== false;
+}
+function filtersToggleComments(filter, on) {
+  return { ...(filter || {}), comments: on === true };
 }
 
 // Сколько типов показано, сколько скрыто — один ответ на три вопроса: гаснет
@@ -26365,13 +26580,27 @@ function filtersTypeCounts(project, filter) {
   if (types.length === 0) return { total: 0, shown: 0, hidden: 0 };
   const visible = filtersTypeSet(project, filter);
   const shown = types.filter((type) => visible.has(type.id)).length;
-  return { total: types.length, shown, hidden: types.length - shown };
+  // Комментарии считаются наравне с типами — одной позицией. Счёт идёт на три
+  // вопроса сразу: гаснет ли «Скрыть все», пуст ли план и что дописать в
+  // заголовок. Оставь их за скобками — и «Скрыть все» погасла бы при живых
+  // плашках на плане, а заметка «всё скрыто» появилась бы поверх них.
+  const commentsShown = filtersCommentsShown(filter) ? 1 : 0;
+  return {
+    total: types.length + 1,
+    shown: shown + commentsShown,
+    hidden: types.length - shown + (1 - commentsShown),
+    // Отдельно — сколько скрыто **строк справочника**. Этим числом подписан
+    // заголовок дерева, и комментариям в нём места нет: их галочка стоит
+    // снаружи, и «скрыто: 1» над полным деревом сбивало бы с толку.
+    hiddenTypes: types.length - shown,
+  };
 }
 function filtersActive(filter) {
   if (!filter) return false;
   return Boolean(
     Array.isArray(filter.categoryIds) ||
       Array.isArray(filter.typeIds) ||
+      !filtersCommentsShown(filter) ||
       filter.roomId ||
       (filter.query || "").trim(),
   );
@@ -26430,6 +26659,25 @@ function filtersBox(api) {
       },
     },
   });
+  // Галочка комментариев — своей строкой под деревом, а не в дереве.
+  //
+  // В таске 116 комментарий был строкой справочника и стоял в дереве как все.
+  // Теперь его там нет (G173), а скрывать плашки с плана по-прежнему надо:
+  // чертёж печатают и без замечаний. Строка стоит **снаружи** свёрнутого
+  // «Категории и типы» нарочно — дерево сворачивают, чтобы не мешало, и
+  // прятать за ним единственную галочку, которой в дереве нет, значит
+  // потерять её. Расположена она так же, как плашка в окне выбора типа:
+  // отдельно и под основным списком — один и тот же приём на оба окна.
+  const commentsBox = uiEl("input", { class: "filters__check", type: "checkbox" });
+  commentsBox.addEventListener("change", () => {
+    const state = getState();
+    setState({ filter: filtersToggleComments(state.filter, commentsBox.checked) });
+  });
+  const comments = uiEl(
+    "label",
+    { class: "filters__comments", title: strings.filters.commentsHint },
+    [commentsBox, uiEl("span", { class: "filters__name", text: strings.filters.comments })],
+  );
   const buttons = uiEl("div", { class: "filters__buttons" }, [reset, hideAll]);
   // Пустой список объясняет себя там, где стоит кнопка, которая всё вернёт.
   const note = uiEl("p", { class: "panel__empty", text: strings.filters.allHidden });
@@ -26496,6 +26744,7 @@ function filtersBox(api) {
     // там, где она ничего не делает.
     reset.disabled = !project || !filtersActive(state.filter);
     hideAll.disabled = counts.shown === 0;
+    commentsBox.checked = filtersCommentsShown(state.filter);
     note.hidden = !(counts.total > 0 && counts.shown === 0);
     if (!project) return;
     for (const item of checks) {
@@ -26507,8 +26756,8 @@ function filtersBox(api) {
         item.box.checked = filtersTypeChecked(project, state.filter, item.id);
       }
     }
-    summary.textContent = counts.hidden > 0
-      ? strings.filters.types + " — " + text("filters.hidden", { count: counts.hidden })
+    summary.textContent = counts.hiddenTypes > 0
+      ? strings.filters.types + " — " + text("filters.hidden", { count: counts.hiddenTypes })
       : strings.filters.types;
     rooms.value = state.filter.roomId || "";
     if (search.value !== (state.filter.query || "") && document.activeElement !== search) {
@@ -26526,7 +26775,7 @@ function filtersBox(api) {
     syncChecks(state);
   }
 
-  node.replaceChildren(search, rooms, details, note, buttons);
+  node.replaceChildren(search, rooms, details, comments, note, buttons);
   subscribe((state, changed) => {
     if ("project" in changed || "filter" in changed) render();
   });
@@ -30126,6 +30375,19 @@ function typesSnapshot(project) {
 // давно, а неизвестное значение объект бы уже не принял.
 function typesTemplateFrom(template) {
   if (!template || !Array.isArray(template.categories) || !Array.isArray(template.markTypes)) return null;
+  // Снимок, сохранённый в сборке таска 116, мог унести с собой строку
+  // комментария: теперь он встроенный (G173), и второй такой же тип в новом
+  // объекте поделил бы с плашками нумерацию. Категория уходит вместе с
+  // последним своим типом.
+  if (template.markTypes.some((type) => type.kind === MARK_KIND_COMMENT)) {
+    const markTypes = template.markTypes.filter((type) => type.kind !== MARK_KIND_COMMENT);
+    const used = new Set(markTypes.map((type) => type.categoryId));
+    template = {
+      ...template,
+      markTypes,
+      categories: template.categories.filter((category) => used.has(category.id)),
+    };
+  }
   const ids = new Map();
   // «Та же категория» — правило модели (`categoryNameKey`), одно на всю сборку.
   // Снимок мог принести и «Датчики», и «датчики»: заведи их по отдельности —
@@ -30421,27 +30683,11 @@ function typesKindSwitch({ kind, onPick, allowSame = false, sameTitle = "" }) {
   return uiEl("div", { class: "dict__kind", title: strings.dictionary.kind }, [
     cell("point", strings.dictionary.kindPoint, strings.dictionary.kindPointHint),
     cell("line", strings.dictionary.kindLine, strings.dictionary.kindLineHint),
-    // Третья клетка — комментарий (G163). Название короткое и ровно то, каким
-    // заказчик назвал код: «Пусть код будет „Коммент"». Полное «Комментарий»
-    // раздуло бы переключатель на треть строки справочника.
-    cell(MARK_KIND_COMMENT, strings.dictionary.kindComment, strings.dictionary.kindCommentHint),
+    // Клеток две, и третьей не будет. В таске 116 здесь стоял «Коммент», но
+    // заказчик решил иначе (G173): «так же у других меток оставь только Точка
+    // и линия». Комментарий теперь встроенный — выбирать его в справочнике
+    // негде и незачем, он живёт отдельной плашкой в окне выбора типа.
   ]);
-}
-
-/**
- * Пустая клетка знака — для типа-комментария.
- *
- * Знака у него нет: на плане он рисуется плашкой с текстом, и выбирать не из
- * чего. Клетка всё равно рисуется, и именно пустая: строки справочника стоят
- * колонка в колонку, и пропавший элемент увёл бы хвост строки влево у одной
- * строки из сорока восьми.
- */
-function typesSignNone() {
-  return uiEl("span", {
-    class: "dict__sign-none",
-    text: "—",
-    title: strings.dictionary.kindCommentHint,
-  });
 }
 
 // Черновик строки добавления: вид и знак, выбранные до нажатия «Добавить тип».
@@ -30917,9 +31163,7 @@ function openTypesDictionary(api) {
       // Лишнее не показывается: у точечного типа выбирается фигура, у
       // линейного — начертание. Показать оба значило бы предложить выбрать то,
       // чего на плане не будет.
-      kind === MARK_KIND_COMMENT
-        ? typesSignNone()
-        : kind === "line"
+      kind === "line"
         ? typesLineButton({
             lineStyle: type.lineStyle,
             color: category ? category.color : TYPES_NO_COLOR,
@@ -31089,7 +31333,6 @@ function openTypesDictionary(api) {
         refresh();
       };
       const color = own ? own.color : TYPES_NO_COLOR;
-      if (draft.kind === MARK_KIND_COMMENT) return typesSignNone();
       return draft.kind === "line"
         ? typesLineButton({
             lineStyle: draft.lineStyle,
@@ -32927,8 +33170,9 @@ function mountProjectsPanel(host, api) {
     // Объект из базы браузера мимо `projectFile.migrateProject` не проходит,
     // а вид типа (точка или линия) у прежних объектов не записан. Дописывается
     // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
-    // открывался бы по-разному из базы и из архива.
-    const migrated = migrateTypeKinds(stored).project;
+    // открывался бы по-разному из базы и из архива. Тем же правилом и там же
+    // переезжает комментарий со строки справочника на встроенный тип (G173).
+    const migrated = migrateCommentType(migrateTypeKinds(stored).project).project;
     // Постоянный ключ у объектов, заведённых до его появления, дописывается
     // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
     // трогается, в истории отмены ничего не появляется, а в базу объект
@@ -34573,18 +34817,38 @@ function pickerMove(box, row, dx, dy) {
 // Виды, внутри которых окно сужает справочник. Комментарий здесь наравне с
 // точкой и линией: плашку меняют только на плашку — текст у неё есть, а у
 // знака его негде взять (`changeMarkType` стережёт то же правило).
-const PICKER_KINDS = ["point", "line", MARK_KIND_COMMENT];
+// Виды, внутри которых окно сужает справочник. Комментария здесь нет и быть
+// не может: тип у него встроенный и единственный (G173), менять его не на
+// что — кнопку «Сменить тип» панель инструментов такой метке и не показывает.
+const PICKER_KINDS = ["point", "line"];
 
 // Чем окно объясняет сужение. Строка одна на вид — иначе пользователь видел бы
 // короткий список и не знал, чего в нём не хватает.
 function pickerKindNote(kind) {
-  if (kind === "line") return strings.picker.onlyLine;
-  if (kind === MARK_KIND_COMMENT) return strings.picker.onlyComment;
-  return strings.picker.onlyPoint;
+  return kind === "line" ? strings.picker.onlyLine : strings.picker.onlyPoint;
+}
+
+/**
+ * Подходит ли встроенный комментарий под набранное в поиске.
+ *
+ * Плашка стоит под таблицей и ведёт себя как её строки: поиск сужает окно, и
+ * «розетка» не должна оставлять на экране комментарий. Правило то же, что у
+ * `searchTypes`, но своё: встроенного типа в справочнике нет, и спросить
+ * модель о нём нельзя.
+ */
+function pickerCommentMatches(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!needle) return true;
+  const type = findType(project, COMMENT_TYPE_ID);
+  return (
+    type.code.toLowerCase().startsWith(needle) ||
+    type.name.toLowerCase().includes(needle) ||
+    strings.picker.builtinComment.toLowerCase().includes(needle)
+  );
 }
 
 // Смена типа у метки идёт внутри её вида: линии — линейные типы, точке —
-// точечные, комментарию — комментарии. Окно получает вид в `options.kind` и оставляет только свои типы;
+// точечные. Окно получает вид в `options.kind` и оставляет только свои типы;
 // постановка новой метки вид не задаёт и видит справочник целиком.
 //
 // Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
@@ -34606,6 +34870,7 @@ function openTypePicker(project, options = {}) {
     };
 
     const box = uiEl("div", { class: "picker__columns" });
+    const builtin = uiEl("div", { class: "picker__builtin" });
     const body = uiEl("div", { class: "picker picker--types" });
     const error = uiEl("p", { class: "picker__error" });
     const createBox = uiEl("div", { class: "picker__create" });
@@ -34618,8 +34883,10 @@ function openTypePicker(project, options = {}) {
         keydown: (event) => {
           // Стрелка вниз из поиска — в первую строку сетки: дальше по ней
           // ходят стрелками, не хватаясь за мышь.
+          // Плашка комментария стоит под сеткой и в обход её не остаётся:
+          // когда поиск оставил только её, и стрелка, и Enter ведут к ней.
           if (event.key === "ArrowDown") {
-            const first = box.querySelector(".picker__row");
+            const first = box.querySelector(".picker__row") || builtinRow();
             if (!first) return;
             event.preventDefault();
             first.focus();
@@ -34627,7 +34894,7 @@ function openTypePicker(project, options = {}) {
           }
           if (event.key !== "Enter") return;
           event.preventDefault();
-          const first = box.querySelector(".picker__row");
+          const first = box.querySelector(".picker__row") || builtinRow();
           if (first) first.click();
           else if (createBox.firstChild) createType();
         },
@@ -34726,6 +34993,54 @@ function openTypePicker(project, options = {}) {
       return uiEl("div", { class: "picker__category" }, [head, ...group.types.map(typeRow)]);
     }
 
+    /**
+     * Отдельная плашка «Комментарий» под основной таблицей (G173).
+     *
+     * Слова заказчика: «в окне добавления в выборе типа метки просто сделай
+     * снизу отдельную плашку Комментарий, под основной таблицей. То есть под
+     * капотом это такая же метка, но в интерфейсе отдельно выделяется».
+     *
+     * Почему не клетка сетки: сетка — это справочник объекта, который человек
+     * правит сам, а комментарий есть всегда и ни переименовать, ни удалить
+     * его нельзя. Отдельный блок под чертой и подпись «есть всегда, в
+     * справочнике его нет» говорят это прямо, а не намёком.
+     *
+     * Плашки нет, когда окно сужено видом метки (`options.kind`): там меняют
+     * тип у уже стоящей метки, а точку в комментарий не превращают — модель
+     * этого и не позволит.
+     */
+    function renderBuiltin(query) {
+      builtin.replaceChildren();
+      builtin.hidden = Boolean(options.kind) || !pickerCommentMatches(current, query);
+      if (builtin.hidden) return;
+      const type = findType(current, COMMENT_TYPE_ID);
+      const row = uiEl(
+        "button",
+        {
+          class: "picker__row picker__builtin-row" + (options.activeTypeId === COMMENT_TYPE_ID ? " is-active" : ""),
+          type: "button",
+          title: strings.picker.builtinCommentHint,
+          on: { click: () => done({ typeId: COMMENT_TYPE_ID, project: current }) },
+        },
+        [
+          pickerIcon(current, COMMENT_TYPE_ID),
+          uiEl("span", { class: "picker__code", text: commentCodeOf(current) }),
+          uiEl("span", { class: "picker__name", text: type.name }),
+        ],
+      );
+      builtin.append(
+        uiEl("p", { class: "picker__builtin-title", text: strings.picker.builtinComment }),
+        row,
+        uiEl("p", { class: "picker__builtin-hint", text: strings.picker.builtinCommentHint }),
+      );
+    }
+
+    // Строка плашки, когда она на экране. Отдельной функцией — её спрашивают
+    // и клавиатура, и проверка «а есть ли вообще что выбрать».
+    function builtinRow() {
+      return builtin.hidden ? null : builtin.querySelector(".picker__row");
+    }
+
     function renderList() {
       const query = search.value.trim();
       // Что за чем показывать, решает модель: поиск по коду и названию,
@@ -34741,6 +35056,7 @@ function openTypePicker(project, options = {}) {
       // окно на четыре колонки и никакого пустого поля справа, одна найденная
       // категория — узкое окно.
       body.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
+      renderBuiltin(query);
       renderCreate(query);
     }
 
@@ -34765,7 +35081,7 @@ function openTypePicker(project, options = {}) {
     const note = PICKER_KINDS.includes(options.kind)
       ? uiEl("p", { class: "picker__note", text: pickerKindNote(options.kind) })
       : null;
-    body.replaceChildren(...[search, note, box, createBox, error].filter(Boolean));
+    body.replaceChildren(...[search, note, box, builtin, createBox, error].filter(Boolean));
     modal = uiModal({
       title: options.title || strings.picker.title,
       body,
@@ -35050,7 +35366,11 @@ function mountToolsPanel(host, api) {
     const parts = [
       uiEl("p", { class: "tools__label", text: strings.tools.type }),
       typeButton,
-      selectedMark
+      // «Сменить тип» у комментария не показывается вовсе: тип у него один и
+      // встроенный (G173), менять его не на что, а окно выбора открылось бы
+      // пустым. Модель думает так же — `changeMarkType` держит комментарий
+      // внутри его вида.
+      selectedMark && !markIsComment(selectedMark)
         ? uiButton(text("tools.changeTypeOf", { label: labelOf(state.project, selectedMark.id) }), {
             class: "ui-btn ui-btn--wide",
             title: strings.tools.changeTypeHint,
