@@ -5574,6 +5574,7 @@ const strings = {
     roomsPlan: "«Все схемы»: листов {total}, из них по помещениям {rooms}",
     roomsMissing: "Без контура на схеме: {names} — листа по ним не будет",
     roomsSingle: "«Печать» и «Скачать PNG» дадут общий лист схемы",
+    roomsSinglePdf: "«Печать» и «Скачать PDF» дадут общий лист схемы",
     withLegend: "С легендой в углу",
     withRooms: "С контурами помещений",
     // Связи на бумаге — по отметке, и умолчание «нет»: лист остаётся чертежом,
@@ -5590,6 +5591,18 @@ const strings = {
     print: "Печать",
     download: "Скачать PNG",
     allSchemes: "Все схемы (zip)",
+    // Вид файла: картинка или документ. Один выбор на оба окна и на обе
+    // кнопки выгрузки — название формата при этом остаётся на самой кнопке,
+    // чтобы нажимающий видел, что получит, не заглядывая в список.
+    file: "Файл",
+    filePng: "Картинка PNG",
+    filePdf: "Документ PDF",
+    fileHint:
+      "PDF задаёт размер страницы в самом документе: A4 — ровно 210 × 297 мм, и печать «как есть» (100 %) кладёт лист на бумагу один к одному. Несколько листов уходят одним файлом, а не архивом. Лист внутри — та же картинка, что в PNG: текст в PDF не выделяется и при увеличении виден растр. Без листа по ГОСТ страница равна тем миллиметрам, что показаны ниже.",
+    pdf: "Документом PDF",
+    downloadPdf: "Скачать PDF",
+    allSchemesPdf: "Все схемы (PDF)",
+    pdfPages: "Листов в PDF: {count} — одним файлом",
     schemesSuffix: "схемы",
     copied: "Таблица скопирована — вставляйте в Таблицы",
     copyFailed: "Браузер не дал доступ к буферу обмена",
@@ -5600,8 +5613,13 @@ const strings = {
     labelsOutside: "Не поместились подписи: {names} — подтяните их ближе к меткам",
     schemesDone: "Схем в архиве: {count}",
     sheetsDone: "Листов в архиве: {total}, из них по помещениям: {rooms}",
+    // То же самое про документ: сказать «в архиве» про PDF значило бы назвать
+    // выгрузку не тем, чем она вышла.
+    schemesDonePdf: "Схем в документе: {count}",
+    sheetsDonePdf: "Листов в документе: {total}, из них по помещениям: {rooms}",
     sheetsProgress: "Лист {done} из {total}",
     busyTitle: "Собираем архив",
+    busyTitlePdf: "Собираем документ",
     busy: "Готовим файл…",
     tooBig: "Слишком большая картинка — уменьшите множитель",
     failed: "Не удалось собрать файл",
@@ -21939,6 +21957,390 @@ function monoSameText(groups) {
   return text("mono.same", { count: groups.length, groups: lines.join("; ") });
 }
 
+// src/pdf.js
+// Документ PDF: страница в настоящих миллиметрах, лист — картинкой на всю страницу.
+//
+// **Зачем вообще PDF.** Слова заказчика: «И так и так. И экспорт в pdf».
+// Против PNG у документа два преимущества, и оба он обязан отдать целиком:
+//
+// 1. **Размер страницы задан в самом файле, в пунктах.** У PNG физический
+//    размер — подсказка (`pHYs`, см. `pngDpi.js`), которую программа печати
+//    может и перебить своим «подогнать под страницу». У PDF страница — часть
+//    документа: A4 это `[0 0 595.28 841.89]`, и печать «как есть» (100 %)
+//    кладёт её на бумагу один к одному. Заказчик печатает A4 и проверяет
+//    линейкой — ради этого формат и взят.
+// 2. **Несколько листов одним файлом.** Таблица на три листа и объект на
+//    двадцать схем перестают быть архивом картинок, который получателю надо
+//    распаковывать и открывать по одной.
+//
+// **Чем рисуется страница: картинкой, а не объектами PDF.** Выбор сознательный
+// и платный, поэтому цена названа здесь, а не в отчёте:
+//
+// - Лист по ГОСТ уже выверен в миллиметрах и нарисован `gostSheet.js` по
+//   холсту. Нарисовать его второй раз линиями и текстом PDF — это **второй
+//   путь отрисовки той же бумаги**, и он разойдётся с первым: ровно от этого
+//   предостерегает G169 («второй формулы для того же числа в сборке нет»).
+//   Разойдутся они не на экране, а на распечатке, которую уже отдали монтажнику.
+// - Картинке **не нужен шрифт в документе**. Знаки уже нарисованы холстом тем
+//   самым чертёжным шрифтом из `assets/gost-type-a.ttf`: кириллица не может
+//   «поехать на чужой машине» — её там попросту нечем подменить. Это сильнее
+//   встроенного шрифта и дешевле: ни кодировки, ни подмножества глифов, ни
+//   лицензии шрифта в публикуемом файле.
+// - Чёрно-белый режим (`mono.js`) достаётся даром: он живёт в холсте, а здесь
+//   холст уже готов.
+//
+// Чем платим: **текст в PDF не выделяется и не ищется**, а при увеличении
+// виден растр. Для чертежа, который печатают и читают глазами, это приемлемо;
+// для документа, из которого копируют строки, — нет. Если понадобится второе,
+// это отдельное решение с отдельным ADR, а не доработка «заодно».
+//
+// **Библиотеки здесь нет.** Правило «ноль зависимостей» (ADR 001) заказчик снял
+// для PDF, но покупать на эти деньги было нечего: страница с одной картинкой —
+// это несколько сотен байт служебных словарей вокруг готового потока пикселей.
+// `pdf-lib` 1.17.1 (MIT) весит 511 КБ минифицированной и 1 551 КБ исходником,
+// последний выпуск — ноябрь 2021; встраивание TrueType требует ещё
+// `@pdf-lib/fontkit` (698 КБ минифицированной). Это удвоило бы страницу ради
+// кода, который здесь уместился в один файл, — и, главное, библиотеку пришлось
+// бы подключать `<script src>`, а это в собранной странице ошибка сборки
+// (ADR 006 снял правило про ресурсы, а не про способ сборки бандла).
+//
+// Модуль чистый: ни DOM, ни холста, ни строк интерфейса. Вход — байты пикселей
+// и миллиметры, выход — байты файла. Поэтому он целиком проверяется в Node
+// (`test/pdf.test.js`): тест разбирает собранный документ своим кодом и
+// распаковывает поток своим `zlib`.
+
+const PDF_MM_PER_INCH = 25.4;
+// Пункт PDF — 1/72 дюйма. Это единица страницы, другой у документа нет.
+const PDF_POINTS_PER_INCH = 72;
+const PDF_POINTS_PER_MM = PDF_POINTS_PER_INCH / PDF_MM_PER_INCH;
+// Версия документа. 1.4 — всё, что нужно картинке со `FlateDecode`; выше
+// задирать версию нечем, а ниже `DecodeParms` с предсказателем уже не везде.
+const PDF_VERSION = "1.4";
+// Признак двоичного файла: четыре байта старше 127 в комментарии второй
+// строки. Без них программа передачи может решить, что файл текстовый, и
+// «починить» переводы строк — а это сломает смещения в таблице ссылок.
+const PDF_BINARY_MARK = [0xe2, 0xe3, 0xcf, 0xd3];
+// Запись таблицы ссылок — ровно 20 байт: десять цифр смещения, пробел, пять
+// цифр поколения, пробел, буква вида и два знака конца строки. Любая другая
+// длина — испорченный файл. Число вынесено наружу, потому что по нему тест
+// разбирает таблицу: разойдись запись со спецификацией, прогон покраснеет.
+const PDF_XREF_ENTRY = 20;
+
+/** Миллиметры в пункты, с точностью до сотой пункта (это 3,5 мкм бумаги). */
+function pdfPoints(mm) {
+  const value = Number(mm);
+  if (!Number.isFinite(value) || !(value > 0)) return 0;
+  return Math.round(value * PDF_POINTS_PER_MM * 100) / 100;
+}
+
+/**
+ * Число в записи PDF: максимум две цифры после запятой, без хвостовых нулей,
+ * всегда с точкой (в файле нет локали, и запятая в нём — разделитель массива).
+ */
+function pdfNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  const rounded = Math.round(number * 100) / 100;
+  if (rounded === 0) return "0";
+  return rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/**
+ * Строка документа в шестнадцатеричной записи UTF-16BE с меткой порядка байтов.
+ *
+ * Имя объекта по-русски, а однобайтовой кодировки, в которой его можно было бы
+ * написать прямо, у PDF нет: `PDFDocEncoding` кириллицу не содержит. Поэтому
+ * имя и название идут сюда — это единственный текст в документе, и шрифта он
+ * не требует (его рисует программа просмотра своим).
+ */
+function pdfTextString(value) {
+  const source = value == null ? "" : String(value);
+  let out = "FEFF";
+  for (const char of source) {
+    const code = char.codePointAt(0);
+    if (code > 0xffff) {
+      const rest = code - 0x10000;
+      out += pdfHex4(0xd800 + (rest >> 10)) + pdfHex4(0xdc00 + (rest & 0x3ff));
+    } else {
+      out += pdfHex4(code);
+    }
+  }
+  return "<" + out + ">";
+}
+
+function pdfHex4(code) {
+  return code.toString(16).toUpperCase().padStart(4, "0");
+}
+
+/**
+ * Дата документа: `D:20261009153000+03'00'`.
+ *
+ * День и час — местные, как и дата в основной надписи листа: UTC соврал бы на
+ * вечерней выгрузке так же, как в имени файла проекта.
+ */
+function pdfDate(date) {
+  const at = date instanceof Date ? date : new Date();
+  const pad = (value, size = 2) => String(Math.abs(value)).padStart(size, "0");
+  // getTimezoneOffset считает «сколько прибавить к местному, чтобы получить
+  // UTC» — знак обратный тому, что пишут в документе.
+  const offset = -at.getTimezoneOffset();
+  const sign = offset < 0 ? "-" : "+";
+  return (
+    "D:" +
+    pad(at.getFullYear(), 4) +
+    pad(at.getMonth() + 1) +
+    pad(at.getDate()) +
+    pad(at.getHours()) +
+    pad(at.getMinutes()) +
+    pad(at.getSeconds()) +
+    sign +
+    pad(Math.trunc(Math.abs(offset) / 60)) +
+    "'" +
+    pad(Math.abs(offset) % 60) +
+    "'"
+  );
+}
+
+/**
+ * Пиксели холста (RGBA) в поток для картинки PDF: по три байта на точку и
+ * **байт фильтра PNG перед каждой строкой**.
+ *
+ * Альфа отбрасывается, и это безопасно: все холсты выгрузки заливаются белым до
+ * первой линии (`schemePng`, `drawGostFrame`), прозрачных точек на листе нет.
+ * Четвёртого канала у `DeviceRGB` нет вовсе, а тащить его отдельной маской
+ * значило бы положить в файл вдвое больше ради заведомо непрозрачного листа.
+ *
+ * Фильтр — «Up» (код 2): из байта вычитается байт над ним. Это та же разность
+ * по вертикали, которой PNG сжимает чертёж, и `FlateDecode` умеет её разбирать
+ * сам (`/Predictor 15`). На листе с рамкой, таблицей и подписями она стоит
+ * одного вычитания на байт и отыгрывает кратную разницу в размере: ряды
+ * одинаковых строк и белые поля становятся нулями.
+ */
+function pdfImageRows(rgba, width, height) {
+  const columns = Math.max(0, Math.trunc(width));
+  const stride = columns * 3;
+  const rows = Math.max(0, Math.trunc(height));
+  const out = new Uint8Array(rows * (stride + 1));
+  const previous = new Uint8Array(stride);
+  const current = new Uint8Array(stride);
+  for (let y = 0; y < rows; y += 1) {
+    let from = y * columns * 4;
+    for (let x = 0; x < stride; x += 3) {
+      current[x] = rgba[from];
+      current[x + 1] = rgba[from + 1];
+      current[x + 2] = rgba[from + 2];
+      from += 4;
+    }
+    const at = y * (stride + 1);
+    out[at] = 2;
+    for (let i = 0; i < stride; i += 1) out[at + 1 + i] = (current[i] - previous[i]) & 0xff;
+    previous.set(current);
+  }
+  return out;
+}
+
+/**
+ * Те же пиксели без сжатия и без байтов фильтра — запасной путь для браузера
+ * без `CompressionStream`. Лист A4 при 300 dpi весит тогда 26 МБ вместо
+ * полумегабайта, но открывается и печатается: пустой файл был бы хуже.
+ */
+function pdfImageBytes(rgba, width, height) {
+  const points = Math.max(0, Math.trunc(width)) * Math.max(0, Math.trunc(height));
+  const out = new Uint8Array(points * 3);
+  for (let i = 0, from = 0, at = 0; i < points; i += 1) {
+    out[at] = rgba[from];
+    out[at + 1] = rgba[from + 1];
+    out[at + 2] = rgba[from + 2];
+    at += 3;
+    from += 4;
+  }
+  return out;
+}
+
+async function pdfCollect(readable) {
+  const reader = readable.getReader();
+  const parts = [];
+  let total = 0;
+  for (;;) {
+    const step = await reader.read();
+    if (step.done) break;
+    const chunk = step.value instanceof Uint8Array ? step.value : new Uint8Array(step.value);
+    parts.push(chunk);
+    total += chunk.length;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+/**
+ * Сжатие потока картинки. `null` — браузер не умеет, лист пойдёт как есть.
+ *
+ * Это **не вторая реализация zip**: своего сжатия в сборке по-прежнему одно —
+ * никакого, алгоритм в обоих местах браузерный. Отличается обёртка: zip
+ * требует «сырой» deflate (`deflate-raw`), `FlateDecode` в PDF — zlib
+ * (RFC 1950, с заголовком и контрольной суммой). Поэтому вызов свой, а не
+ * позаимствованный у `projectFile.js`: взять там значило бы отдать PDF поток
+ * без заголовка, и документ не открылся бы.
+ */
+async function pdfDeflate(bytes) {
+  if (typeof CompressionStream !== "function") return null;
+  return pdfCollect(new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate")));
+}
+
+/**
+ * Картинка страницы из пикселей холста: `{width, height, data, flate}`.
+ * Готова к укладке в документ — `pdfDocument` байтов больше не трогает.
+ */
+async function pdfImage(rgba, width, height) {
+  const rows = pdfImageRows(rgba, width, height);
+  const packed = await pdfDeflate(rows);
+  if (packed) return { width, height, data: packed, flate: true };
+  return { width, height, data: pdfImageBytes(rgba, width, height), flate: false };
+}
+
+function pdfLatin(value) {
+  const out = new Uint8Array(value.length);
+  for (let i = 0; i < value.length; i += 1) out[i] = value.charCodeAt(i) & 0xff;
+  return out;
+}
+
+function pdfImageDict(image) {
+  const parms = image.flate
+    ? " /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns " +
+      image.width +
+      " >>"
+    : "";
+  return (
+    "<< /Type /XObject /Subtype /Image /Width " +
+    image.width +
+    " /Height " +
+    image.height +
+    " /ColorSpace /DeviceRGB /BitsPerComponent 8" +
+    parms +
+    " /Length " +
+    image.data.length +
+    " >>"
+  );
+}
+
+/**
+ * Документ целиком: байты файла.
+ *
+ * `pages` — массив `{widthMm, heightMm, image}`, по странице на лист. Миллиметры
+ * берутся **у формата листа**, а не пересчитываются из пикселей: холст
+ * округляется до целой точки (A4 при 300 dpi — 2480 px вместо 2480,31), и
+ * обратный пересчёт дал бы 209,97 мм вместо 210. Картинка растягивается на
+ * страницу целиком — на 0,03 мм её никто не поймает, а бумага обязана быть
+ * ровно той, что написана на коробке.
+ *
+ * Строение простое и нарочно плоское: каталог, список страниц, словарь
+ * документа, а дальше по три объекта на страницу (страница, её содержимое,
+ * картинка). Таблица ссылок — классическая, со смещениями: поток ссылок
+ * (PDF 1.5) сэкономил бы десятки байт на файле в полмегабайта и потребовал бы
+ * сжатия там, где его может не быть.
+ */
+function pdfDocument(pages, meta = {}) {
+  const sheets = Array.isArray(pages) ? pages : [];
+  if (sheets.length === 0) throw new Error("PDF без страниц");
+  const parts = [];
+  let size = 0;
+  const put = (part) => {
+    const bytes = typeof part === "string" ? pdfLatin(part) : part;
+    parts.push(bytes);
+    size += bytes.length;
+  };
+  // Смещение каждого объекта от начала файла: именно их читает программа
+  // просмотра, и соврать в них нельзя — файл станет нечитаемым.
+  const offsets = [];
+  const object = (number, dict, stream) => {
+    offsets[number] = size;
+    put(number + " 0 obj\n" + dict + "\n");
+    if (stream) {
+      put("stream\n");
+      put(stream);
+      put("\nendstream\n");
+    }
+    put("endobj\n");
+  };
+
+  put("%PDF-" + PDF_VERSION + "\n");
+  put(new Uint8Array([0x25, ...PDF_BINARY_MARK, 0x0a]));
+
+  // Номера объектов: 1 — каталог, 2 — список страниц, 3 — словарь документа,
+  // дальше тройками. Считается это одной формулой, чтобы ссылки страницы на
+  // своё содержимое и свою картинку не могли разойтись с их номерами.
+  const first = 4;
+  const pageNumber = (index) => first + index * 3;
+  const last = first + sheets.length * 3;
+
+  object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  object(
+    2,
+    "<< /Type /Pages /Count " +
+      sheets.length +
+      " /Kids [" +
+      sheets.map((_, index) => pageNumber(index) + " 0 R").join(" ") +
+      "] >>",
+  );
+  object(
+    3,
+    "<< /Title " +
+      pdfTextString(meta.title) +
+      " /Producer " +
+      pdfTextString(meta.producer) +
+      " /CreationDate (" +
+      pdfDate(meta.date) +
+      ") >>",
+  );
+
+  for (let index = 0; index < sheets.length; index += 1) {
+    const sheet = sheets[index];
+    const image = sheet && sheet.image;
+    if (!image || !(image.width > 0) || !(image.height > 0)) throw new Error("Страница PDF без картинки");
+    const number = pageNumber(index);
+    const width = pdfNumber(pdfPoints(sheet.widthMm));
+    const height = pdfNumber(pdfPoints(sheet.heightMm));
+    // Картинка кладётся преобразованием «растянуть на страницу»: единичный
+    // квадрат картинки умножается на размер страницы в пунктах.
+    const content = pdfLatin("q\n" + width + " 0 0 " + height + " 0 0 cm\n/Im0 Do\nQ\n");
+    object(
+      number,
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
+        width +
+        " " +
+        height +
+        "] /Resources << /XObject << /Im0 " +
+        (number + 2) +
+        " 0 R >> >> /Contents " +
+        (number + 1) +
+        " 0 R >>",
+    );
+    object(number + 1, "<< /Length " + content.length + " >>", content);
+    object(number + 2, pdfImageDict(image), image.data);
+  }
+
+  const xrefAt = size;
+  let table = "xref\n0 " + last + "\n0000000000 65535 f \n";
+  for (let number = 1; number < last; number += 1) {
+    table += String(offsets[number]).padStart(10, "0") + " 00000 n \n";
+  }
+  put(table);
+  put("trailer\n<< /Size " + last + " /Root 1 0 R /Info 3 0 R >>\nstartxref\n" + xrefAt + "\n%%EOF\n");
+
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
 // src/pngDpi.js
 // Физический размер в самом файле PNG: chunk `pHYs`.
 //
@@ -23759,6 +24161,60 @@ async function exportBlob(canvas, dpi) {
   return new Blob([bytes], { type: "image/png" });
 }
 
+/**
+ * Готовый холст — **в файл или в страницу документа**, и это единственная
+ * развилка между PNG и PDF во всей выгрузке.
+ *
+ * Рисование одно на оба вида: лист считается и рисуется тем же кодом, тем же
+ * шрифтом и с той же чёрно-белой подставкой, а здесь только решается, чем он
+ * станет. Второго пути отрисовки бумаги в сборке нет и быть не должно — он
+ * разошёлся бы с первым (G169), и разошёлся бы на распечатке.
+ *
+ * `mm` — настоящий размер бумаги. Лист по ГОСТ передаёт размер своего формата;
+ * прежние выгрузки размера бумаги не имеют вовсе, и для них он выводится из
+ * пикселей по тому же `EXPORT_DPI`, по которому окно обещает миллиметры в
+ * подписи «217 × 335 мм при 300 dpi». Обратно считать миллиметры у листа по
+ * ГОСТ нельзя: холст округляется до целой точки (A4 при 300 dpi — 2480 px
+ * вместо 2480,31), и страница вышла бы 209,97 мм вместо 210.
+ */
+async function exportOut(canvas, dpi, options, mm) {
+  if (!options || options.pdf !== true) return exportBlob(canvas, dpi);
+  return exportPage(canvas, mm || exportPaperMm(canvas, dpi));
+}
+
+// Размер бумаги, выведенный из пикселей и разрешения: тот же расчёт, что в
+// подписи диалога, только без округления до целых миллиметров — страницу
+// документа округлять незачем.
+function exportPaperMm(canvas, dpi) {
+  const perInch = dpi > 0 ? dpi : EXPORT_DPI;
+  return {
+    width: (canvas.width / perInch) * EXPORT_MM_PER_INCH,
+    height: (canvas.height / perInch) * EXPORT_MM_PER_INCH,
+  };
+}
+
+// Страница документа из холста: пиксели берутся у настоящего холста, а не у
+// чёрно-белой подставки (`monoOf` оборачивает только кисть, а рисунок к этому
+// моменту уже лежит в холсте).
+async function exportPage(canvas, mm) {
+  const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+  return {
+    widthMm: mm.width,
+    heightMm: mm.height,
+    image: await pdfImage(pixels.data, canvas.width, canvas.height),
+  };
+}
+
+/**
+ * Страницы — в один файл PDF. Это главное, чего нет у PNG: таблица на три
+ * листа и объект на двадцать схем уезжают заказчику одним документом, а не
+ * архивом, который надо распаковывать и открывать по одной картинке.
+ */
+function exportPdf(pages, meta = {}) {
+  const bytes = pdfDocument(pages, { ...meta, producer: strings.app.title });
+  return new Blob([bytes], { type: "application/pdf" });
+}
+
 // Область выгрузки в пикселях плана: вся схема или прямоугольник, который
 // панель сняла с экрана («как вижу»). Прямоугольник обрезается планом —
 // белые поля вокруг схемы на бумаге не нужны.
@@ -24079,7 +24535,7 @@ async function schemePng(project, scheme, image, options = {}) {
     // передавать готовый кадр неоткуда.
     links: options.links === true,
   });
-  return exportBlob(canvas);
+  return exportOut(canvas, EXPORT_DPI, options);
 }
 
 // ——— таблица картинкой ————————————————————————————————————————————————
@@ -24321,7 +24777,7 @@ async function tablePng(table, options = {}) {
     line(table.totalLabel || strings.tables.totalAll, table.totalCount, true, EXPORT_TABLE.ink, 0);
   }
 
-  return exportBlob(canvas);
+  return exportOut(canvas, EXPORT_DPI, options);
 }
 
 // ——— все схемы разом ——————————————————————————————————————————————————
@@ -24420,6 +24876,39 @@ function allSchemesPlan(project, options = {}) {
  * один на весь архив — выгружают его целиком, а не лист цветной, лист нет.
  */
 async function allSchemesZip(project, images, options = {}) {
+  const sheets = await allSchemesSheets(project, images, options);
+  return writeZip(
+    sheets.map(({ name, data }) => ({ name, data, compress: false })),
+    { compress: false },
+  );
+}
+
+/**
+ * Весь объект **одним документом PDF**: те же листы в том же порядке, что в
+ * архиве, но страницами одного файла.
+ *
+ * Это то, ради чего PDF и понадобился: архив из двадцати картинок получатель
+ * распаковывает и открывает по одной, а документ листает. Нумерация «Лист N из
+ * M» и состав листов считаются тем же обходом, что у архива, — разойдись они,
+ * и номер на бумаге перестал бы отвечать числу страниц.
+ */
+async function allSchemesPdf(project, images, options = {}) {
+  const sheets = await allSchemesSheets(project, images, { ...options, pdf: true });
+  return exportPdf(
+    sheets.map((sheet) => sheet.data),
+    { title: (project && project.name) || "" },
+  );
+}
+
+/**
+ * Обход листов объекта — один на архив и на документ: `[{name, data}]` в
+ * порядке листов. `data` — PNG или страница PDF, смотря по `options.pdf`.
+ *
+ * Обход общий нарочно. Разведи архив и документ по двум циклам, и они начнут
+ * расходиться составом листов и нумерацией — а человек будет считать, что
+ * получил то же самое в другом файле.
+ */
+async function allSchemesSheets(project, images, options = {}) {
   // Форма входа одна — Map «imageId → Blob», как у packProject: разбирать
   // четыре формы одного и того же было бы вторым правилом на тот же вход.
   if (images != null && !(images instanceof Map)) throw new Error(strings.errors.imagesNotMap);
@@ -24430,7 +24919,7 @@ async function allSchemesZip(project, images, options = {}) {
   const total = allSchemesPlan(project, options).total;
   let done = 0;
   const put = (name, data) => {
-    files.push({ name, data, compress: false });
+    files.push({ name, data });
     done += 1;
     if (onProgress) onProgress({ done, total, name });
   };
@@ -24459,7 +24948,7 @@ async function allSchemesZip(project, images, options = {}) {
       put(exportSheetName(scheme, index, sheet.name, at), page);
     }
   }
-  return writeZip(files, { compress: false });
+  return files;
 }
 
 // ——— печать ———————————————————————————————————————————————————————————
@@ -24805,7 +25294,9 @@ async function gostSchemePng(project, scheme, image, options = {}) {
   );
   // Разрешение листа — то самое, которым он нарисован: лист по ГОСТ выверен в
   // миллиметрах, и в файле это должно быть написано, а не подразумеваться.
-  return exportBlob(canvas, dpi);
+  // Страница PDF берёт миллиметры у формата листа, а не у пикселей: формат —
+  // это то, что написано на коробке бумаги.
+  return exportOut(canvas, dpi, options, { width: plan.sheet.width, height: plan.sheet.height });
 }
 
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
@@ -25001,7 +25492,9 @@ async function gostTablePng(table, page, plan, options = {}) {
   );
   // Разрешение листа — то самое, которым он нарисован: лист по ГОСТ выверен в
   // миллиметрах, и в файле это должно быть написано, а не подразумеваться.
-  return exportBlob(canvas, dpi);
+  // Страница PDF берёт миллиметры у формата листа, а не у пикселей: формат —
+  // это то, что написано на коробке бумаги.
+  return exportOut(canvas, dpi, options, { width: sheet.width, height: sheet.height });
 }
 
 /**
@@ -25057,8 +25550,11 @@ async function gostPrintSheets(blobs) {
 }
 
 /**
- * Все листы таблицы разом: массив PNG в порядке листов. «Лист N из M» считает
- * сама разбивка, поэтому номер на бумаге не может разойтись с числом файлов.
+ * Все листы таблицы разом, в порядке листов. «Лист N из M» считает сама
+ * разбивка, поэтому номер на бумаге не может разойтись с числом листов.
+ *
+ * Что в списке — PNG или страницы PDF — решает `options.pdf`: рисуются листы
+ * одним и тем же `gostTablePng`, развилка у них одна и живёт в `exportOut`.
  */
 async function gostTableSheets(table, options = {}) {
   const plan = gostTablePages(table, options);
@@ -27435,7 +27931,33 @@ const exportChoice = {
   gost: false,
   // Формат листа: «auto» — подобрать под план, остальное — выбор руками.
   gostFormat: "auto",
+  // Вид файла: "png" | "pdf". Живёт между открытиями, как соседние, и одна на
+  // оба окна — вопрос у неё один: «в чём отдаём файл». Умолчание «png»:
+  // прежние выгрузки остаются тем, чем были, а название формата стоит на самой
+  // кнопке, так что скрытым выбор не становится.
+  format: "png",
 };
+
+// Выгружаем документом, а не картинкой.
+function exportToPdf() {
+  return exportChoice.format === "pdf";
+}
+
+// Выбор вида файла. Два пункта, а не галочка «PDF»: список называет оба вида
+// словами, и «Картинка PNG» перестаёт быть умолчанием, о котором не сказано.
+function exportFileSelect(onChange) {
+  return exportSelect(
+    [
+      { value: "png", label: strings.exportPanel.filePng },
+      { value: "pdf", label: strings.exportPanel.filePdf },
+    ],
+    exportChoice.format,
+    (value) => {
+      exportChoice.format = value;
+      onChange();
+    },
+  );
+}
 
 // Выбор формата: подбор плюс четыре формата. Ориентацию руками не выбирают —
 // её решает план (лежачий ложится на альбомный лист), и третий переключатель
@@ -27656,8 +28178,12 @@ function exportTableDialog(api) {
   const preview = uiEl("div", { class: "export__preview" });
   const hint = uiEl("p", { class: "export__hint" });
   let table = exportTableOf(state);
+  // Название формата стоит на кнопке, и переключатель вида файла его меняет.
+  // Присваивается после создания кнопок — до тех пор обновлять нечего.
+  let syncLabels = () => {};
 
   const refresh = () => {
+    syncLabels();
     table = exportTableOf(state);
     // Предпросмотр рисуется тем же узлом, что уходит в печать, поэтому
     // чёрно-белую отметку видно сразу: поднял галку — лист в окне побелел.
@@ -27675,10 +28201,13 @@ function exportTableDialog(api) {
     // Сколько листов даст таблица, видно до выгрузки: разбивка считается по
     // строкам, а не по нарисованному, и число листов тут же идёт в штамп.
     const plan = gostTablePages(table, { format: exportChoice.gostFormat });
-    hint.textContent = [
-      gostSheetSizeText(plan.sheet, exportChoice.tableScale),
-      text("gost.pages", { count: plan.pages.length }),
-    ].join(" · ");
+    const parts = [gostSheetSizeText(plan.sheet, exportChoice.tableScale), text("gost.pages", { count: plan.pages.length })];
+    // Главное отличие документа от картинок — говорится там же, где число
+    // листов: в PNG несколько листов уходят архивом, в PDF одним файлом.
+    if (exportToPdf() && plan.pages.length > 1) {
+      parts.push(text("exportPanel.pdfPages", { count: plan.pages.length }));
+    }
+    hint.textContent = parts.join(" · ");
   };
 
   // Чёрно-белая отметка — **одна на оба окна** (`exportChoice.mono`), как и
@@ -27764,6 +28293,9 @@ function exportTableDialog(api) {
   roomSelect.disabled = exportChoice.kind === "types";
   byRoomInput.disabled = exportChoice.kind === "types";
 
+  const fileField = exportField(strings.exportPanel.file, exportFileSelect(refresh));
+  fileField.title = strings.exportPanel.fileHint;
+
   const controls = uiEl("div", { class: "export__controls" }, [
     exportField(strings.exportPanel.kind, kindSelect),
     exportField(strings.exportPanel.area, roomSelect),
@@ -27773,9 +28305,13 @@ function exportTableDialog(api) {
       strings.exportPanel.scale,
       exportScaleSelect(exportChoice.tableScale, (value) => {
         exportChoice.tableScale = value;
-        hint.textContent = exportTableSizeText(table, value);
+        // Через `refresh`, а не своей строкой: у листа по ГОСТ подпись другая
+        // (формат, миллиметры, число листов), и собранная здесь второй раз
+        // она перебивала бы её на размер голой картинки.
+        refresh();
       }),
     ),
+    fileField,
     exportCheck(strings.exportPanel.currentScheme, exportChoice.currentScheme, (on) => {
       exportChoice.currentScheme = on;
       refresh();
@@ -27808,6 +28344,50 @@ function exportTableDialog(api) {
     }
   };
 
+  // Лист таблицы файлом: картинкой или документом — по выбору вида файла.
+  // Рисование одно на оба вида, разными получаются только упаковка и имя.
+  const fileButton = uiButton(strings.exportPanel.png, {
+    on: {
+      click: () =>
+        guard(async () => {
+          const plain = {
+            scale: exportChoice.tableScale,
+            title: table.title || state.project.name,
+            subtitle: exportSubtitleOf(state, table),
+            mono: exportChoice.mono,
+          };
+          if (!exportToPdf()) {
+            if (!exportChoice.gost) {
+              const blob = await tablePng(table, plain);
+              const name = exportBaseName(state, "png");
+              exportDownload(blob, name);
+              saved(name);
+              return;
+            }
+            // Таблица на несколько листов — это несколько файлов, и класть их
+            // в папку загрузок по одному нельзя: браузер второй и третий
+            // скачивает молча или не скачивает вовсе. Поэтому архив.
+            const sheets = await gostTableSheets(table, exportGostTableOptions(api, table));
+            const name = exportBaseName(state, sheets.length > 1 ? "zip" : "png");
+            exportDownload(sheets.length > 1 ? await gostSheetsZip(sheets, exportBaseName(state, "png")) : sheets[0], name);
+            saved(name);
+            return;
+          }
+          // В документе несколько листов перестают быть несколькими файлами —
+          // архив здесь не нужен ни при одном числе листов.
+          const pages = exportChoice.gost
+            ? await gostTableSheets(table, { ...exportGostTableOptions(api, table), pdf: true })
+            : [await tablePng(table, { ...plain, pdf: true })];
+          const name = exportBaseName(state, "pdf");
+          exportDownload(exportPdf(pages, { title: plain.title }), name);
+          saved(name);
+        }),
+    },
+  });
+  syncLabels = () => {
+    fileButton.textContent = exportToPdf() ? strings.exportPanel.pdf : strings.exportPanel.png;
+  };
+
   const actions = [
     uiButton(strings.exportPanel.csv, {
       on: {
@@ -27838,32 +28418,7 @@ function exportTableDialog(api) {
           }),
       },
     }),
-    uiButton(strings.exportPanel.png, {
-      on: {
-        click: () =>
-          guard(async () => {
-            if (!exportChoice.gost) {
-              const blob = await tablePng(table, {
-                scale: exportChoice.tableScale,
-                title: table.title || state.project.name,
-                subtitle: exportSubtitleOf(state, table),
-                mono: exportChoice.mono,
-              });
-              const name = exportBaseName(state, "png");
-              exportDownload(blob, name);
-              saved(name);
-              return;
-            }
-            // Таблица на несколько листов — это несколько файлов, и класть их
-            // в папку загрузок по одному нельзя: браузер второй и третий
-            // скачивает молча или не скачивает вовсе. Поэтому архив.
-            const sheets = await gostTableSheets(table, exportGostTableOptions(api, table));
-            const name = exportBaseName(state, sheets.length > 1 ? "zip" : "png");
-            exportDownload(sheets.length > 1 ? await gostSheetsZip(sheets, exportBaseName(state, "png")) : sheets[0], name);
-            saved(name);
-          }),
-      },
-    }),
+    fileButton,
     uiButton(strings.exportPanel.print, {
       class: "ui-btn ui-btn--accent",
       on: {
@@ -27948,7 +28503,12 @@ function exportSchemeDialog(api) {
       format: exportChoice.gostFormat,
     });
 
+  // Название формата стоит на кнопках, и переключатель вида файла его меняет.
+  // Присваивается после создания кнопок — до тех пор обновлять нечего.
+  let syncLabels = () => {};
+
   const refreshHint = () => {
+    syncLabels();
     monoSync();
     if (exportChoice.gost) {
       const plan = gostPlanOf();
@@ -27972,13 +28532,16 @@ function exportSchemeDialog(api) {
     const parts = [
       text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }),
       line,
-      strings.exportPanel.roomsSingle,
+      exportToPdf() ? strings.exportPanel.roomsSinglePdf : strings.exportPanel.roomsSingle,
     ];
     if (roomsPlan.missing.length > 0) {
       parts.push(text("exportPanel.roomsMissing", { names: roomsPlan.missing.join(", ") }));
     }
     hint.textContent = parts.join(" · ");
   };
+
+  const fileField = exportField(strings.exportPanel.file, exportFileSelect(refreshHint));
+  fileField.title = strings.exportPanel.fileHint;
 
   const controls = uiEl("div", { class: "export__controls" }, [
     exportField(
@@ -28023,6 +28586,9 @@ function exportSchemeDialog(api) {
         refreshHint();
       }),
     ),
+    // Вид файла стоит рядом с множителем, а не среди отметок: это список, и
+    // два списка подряд читаются как один вопрос «чем и в чём выгружаем».
+    fileField,
     exportCheck(strings.exportPanel.withLegend, exportChoice.legend, (on) => {
       exportChoice.legend = on;
     }),
@@ -28060,7 +28626,11 @@ function exportSchemeDialog(api) {
     }
   };
 
-  const renderScheme = async () => {
+  // `pdf` — не «другой лист», а другой конец одного и того же: лист считается
+  // и рисуется тем же кодом, а дальше становится картинкой или страницей
+  // документа. Печать зовёт это **всегда с картинкой**: печатается узел
+  // страницы с PNG внутри, и страницы документа ей отдать нечем.
+  const renderScheme = async (pdf) => {
     const { image, release } = await exportSchemeImage(state, scheme);
     // План может быть не загружен — метки тогда лягут на белый лист, и лучше
     // сказать об этом, чем отдать «пустую» на вид картинку молча.
@@ -28079,6 +28649,7 @@ function exportSchemeDialog(api) {
       links: exportChoice.links,
       mono: exportChoice.mono,
       filter: exportFilterOfSheet(state),
+      pdf: pdf === true,
     };
     try {
       if (!exportChoice.gost) return await schemePng(state.project, scheme, image, common);
@@ -28097,70 +28668,110 @@ function exportSchemeDialog(api) {
     }
   };
 
-  const actions = [
-    uiButton(strings.exportPanel.allSchemes, {
-      on: {
-        click: () =>
-          guard(async () => {
-            const byRooms = exportByRooms();
-            const plan = allSchemesPlan(state.project, { rooms: byRooms, filter: state.filter });
-            // Два десятка листов рисуются заметно дольше одного, и молчащая
-            // вкладка на этом месте выглядит как зависшая. Строка прогресса —
-            // та же, что у упаковки файла проекта.
-            const line = uiEl("p", { class: "modal__text", text: strings.exportPanel.busy });
-            const busy = uiModal({
-              title: strings.exportPanel.busyTitle,
-              body: line,
-              actions: [],
-              dismissable: false,
-            });
-            try {
-              const images = new Map();
-              for (const item of schemesInOrder(state.project)) {
-                if (!item.imageId || images.has(item.imageId)) continue;
-                const blob = await getImage(item.imageId);
-                if (blob) images.set(item.imageId, blob);
-              }
-              // Свежий объект — по той же причине, что и у одного листа: графы
-              // штампа могли заполнить из-под этого окна.
-              const zip = await allSchemesZip(getState().project, images, {
-                rooms: byRooms,
-                gost: exportChoice.gost,
-                format: exportChoice.gostFormat,
-                scale: exportChoice.schemeScale,
-                legend: exportChoice.legend,
-                outlines: exportChoice.outlines,
-                links: exportChoice.links,
-                mono: exportChoice.mono,
-                filter: state.filter,
-                onProgress: ({ done, total }) => {
-                  line.textContent = text("exportPanel.sheetsProgress", { done, total });
-                },
-              });
-              const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, "zip");
-              exportDownload(zip, name);
-              notify(
-                byRooms
-                  ? text("exportPanel.sheetsDone", { total: plan.total, rooms: plan.rooms })
-                  : text("exportPanel.schemesDone", { count: plan.schemes }),
-                "success",
-              );
-              // Комната без контура листа не получила — сказать об этом надо
-              // после выгрузки тоже: подсказку в окне могли и не читать.
-              if (byRooms && plan.missing.length > 0) {
-                notify(text("exportPanel.roomsMissing", { names: plan.missing.join(", ") }), "info");
-              }
-            } finally {
-              busy.close();
+  // Весь объект одним файлом: архивом картинок или документом. Обход листов,
+  // их состав и нумерация «Лист N из M» общие (`allSchemesSheets` в
+  // `exporter.js`) — иначе архив и документ разошлись бы содержимым.
+  const allButton = uiButton(strings.exportPanel.allSchemes, {
+    on: {
+      click: () =>
+        guard(async () => {
+          const pdf = exportToPdf();
+          const byRooms = exportByRooms();
+          const plan = allSchemesPlan(state.project, { rooms: byRooms, filter: state.filter });
+          // Два десятка листов рисуются заметно дольше одного, и молчащая
+          // вкладка на этом месте выглядит как зависшая. Строка прогресса —
+          // та же, что у упаковки файла проекта.
+          const line = uiEl("p", { class: "modal__text", text: strings.exportPanel.busy });
+          const busy = uiModal({
+            title: pdf ? strings.exportPanel.busyTitlePdf : strings.exportPanel.busyTitle,
+            body: line,
+            actions: [],
+            dismissable: false,
+          });
+          try {
+            const images = new Map();
+            for (const item of schemesInOrder(state.project)) {
+              if (!item.imageId || images.has(item.imageId)) continue;
+              const blob = await getImage(item.imageId);
+              if (blob) images.set(item.imageId, blob);
             }
-          }),
-      },
-    }),
+            // Свежий объект — по той же причине, что и у одного листа: графы
+            // штампа могли заполнить из-под этого окна.
+            const options = {
+              rooms: byRooms,
+              gost: exportChoice.gost,
+              format: exportChoice.gostFormat,
+              scale: exportChoice.schemeScale,
+              legend: exportChoice.legend,
+              outlines: exportChoice.outlines,
+              links: exportChoice.links,
+              mono: exportChoice.mono,
+              filter: state.filter,
+              onProgress: ({ done, total }) => {
+                line.textContent = text("exportPanel.sheetsProgress", { done, total });
+              },
+            };
+            const fresh = getState().project;
+            const file = pdf ? await allSchemesPdf(fresh, images, options) : await allSchemesZip(fresh, images, options);
+            const name = exportFileName(state.project, strings.exportPanel.schemesSuffix, pdf ? "pdf" : "zip");
+            exportDownload(file, name);
+            notify(
+              byRooms
+                ? text(pdf ? "exportPanel.sheetsDonePdf" : "exportPanel.sheetsDone", {
+                    total: plan.total,
+                    rooms: plan.rooms,
+                  })
+                : text(pdf ? "exportPanel.schemesDonePdf" : "exportPanel.schemesDone", { count: plan.schemes }),
+              "success",
+            );
+            // Комната без контура листа не получила — сказать об этом надо
+            // после выгрузки тоже: подсказку в окне могли и не читать.
+            if (byRooms && plan.missing.length > 0) {
+              notify(text("exportPanel.roomsMissing", { names: plan.missing.join(", ") }), "info");
+            }
+          } finally {
+            busy.close();
+          }
+        }),
+    },
+  });
+
+  const downloadButton = uiButton(strings.exportPanel.download, {
+    class: "ui-btn ui-btn--accent",
+    on: {
+      click: () =>
+        guard(async () => {
+          const room = exportRoomName(state.project, exportAreaRoomId());
+          const part = room ? scheme.name + " — " + room : scheme.name;
+          if (!exportToPdf()) {
+            const name = exportFileName(state.project, part, "png");
+            exportDownload(await renderScheme(false), name);
+            notify(text("exportPanel.saved", { name }), "success");
+            return;
+          }
+          const name = exportFileName(state.project, part, "pdf");
+          exportDownload(exportPdf([await renderScheme(true)], { title: exportSchemeTitle(state, scheme) }), name);
+          notify(text("exportPanel.saved", { name }), "success");
+        }),
+    },
+  });
+
+  syncLabels = () => {
+    const pdf = exportToPdf();
+    allButton.textContent = pdf ? strings.exportPanel.allSchemesPdf : strings.exportPanel.allSchemes;
+    downloadButton.textContent = pdf ? strings.exportPanel.downloadPdf : strings.exportPanel.download;
+  };
+
+  const actions = [
+    allButton,
     uiButton(strings.exportPanel.print, {
       on: {
         click: () =>
           guard(async () => {
-            const blob = await renderScheme();
+            // Печать всегда идёт картинкой: печатается узел страницы с PNG
+            // внутри, и вид файла её не касается — браузер печатает страницу,
+            // а не выгруженный документ.
+            const blob = await renderScheme(false);
             // У листа по ГОСТ заголовка над картинкой нет: всё, что нужно,
             // написано в основной надписи, а строка сверху съела бы поле.
             if (exportChoice.gost) await gostPrintSheets([blob]);
@@ -28168,19 +28779,7 @@ function exportSchemeDialog(api) {
           }),
       },
     }),
-    uiButton(strings.exportPanel.download, {
-      class: "ui-btn ui-btn--accent",
-      on: {
-        click: () =>
-          guard(async () => {
-            const blob = await renderScheme();
-            const room = exportRoomName(state.project, exportAreaRoomId());
-            const name = exportFileName(state.project, room ? scheme.name + " — " + room : scheme.name, "png");
-            exportDownload(blob, name);
-            notify(text("exportPanel.saved", { name }), "success");
-          }),
-      },
-    }),
+    downloadButton,
   ];
 
   const modal = uiModal({
