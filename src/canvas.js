@@ -24,6 +24,7 @@ import {
   deleteOutline,
   findScheme,
   findType,
+  findWall,
   findMark,
   findGroup,
   findOutline,
@@ -35,6 +36,8 @@ import {
   insertOutlinePoint,
   moveSchemeGuide,
   schemeGuides,
+  segmentDistanceMm,
+  wallsOnScheme,
   labelOf,
   linkedMarkIds,
   markCommentText,
@@ -49,6 +52,7 @@ import {
   removeOutlinePoint,
   drawingBoundsMm,
   formatMeters,
+  planFractionToMm,
   planMmToFraction,
   planScaleShort,
   planSizeMeters,
@@ -63,6 +67,7 @@ import {
 import {
   drawHandles,
   drawScheme,
+  drawingBridge,
   fitView,
   drawLabelTurn,
   drawLabelLeaderSwitch,
@@ -107,6 +112,7 @@ import {
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { getSetting, setSetting } from "./store.js";
 import { uiConfirm, uiDialogDepth, uiEl, uiIcon, uiPrompt } from "./panels/ui.js";
+import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
 //
@@ -673,6 +679,7 @@ function canvasPaint() {
     image: canvasImage(state),
     // Чертёж — слой под метками; выключатель его прячет, а не удаляет.
     drawing: state.drawingShown !== false,
+    selectedWallId: state.selectedWallId || null,
     filter: state.filter,
     view,
     selectedIds: state.selectedMarkIds,
@@ -2390,7 +2397,16 @@ export function canvasTapAction(state, drag, options = {}) {
     return { selectedMarkIds: same ? [] : [markId], selectedOutlineId: null };
   }
   if (drag.kind === "pan" && drag.tapSelected && selected.length > 0) return { selectedMarkIds: [] };
-  if (drag.kind === "empty" && busy) return clear;
+  if (drag.kind === "empty") {
+    // **Стена под меткой, и метка всегда главнее** (таск 129): сюда попадает
+    // только клик, который ничего другого не задел. Повторный клик по уже
+    // выделенной стене её не снимает — снимает клик мимо всего и крестик на
+    // полосе развёртки: выделение стены это открытая развёртка, и закрывать
+    // её случайным попаданием в ту же стену было бы обидно.
+    const wallId = drag.wallId || null;
+    if (wallId) return wallId === state.selectedWallId ? null : { ...clear, selectedWallId: wallId };
+    if (busy || state.selectedWallId) return { ...clear, selectedWallId: null };
+  }
   return null;
 }
 
@@ -2853,7 +2869,41 @@ function canvasPointerDown(event) {
     start: point,
     view: { ...state.view },
     moved: false,
+    // Стена под курсором запоминается здесь, на нажатии: по отпусканию решать
+    // будет `canvasTapAction`, и считать ей второй раз нечем — у неё нет ни
+    // плана, ни масштаба.
+    wallId: canvasWallAt(state, screenToPlan(point, scheme, view)),
   };
+}
+
+// Сколько пикселей экрана прощается промаху по стене. **Здесь пиксели
+// уместны**, в отличие от порога привязки метки (там миллиметры): это
+// попадание рукой, а не свойство данных, и оно обязано вести себя одинаково
+// на любом масштабе.
+const CANVAS_WALL_PICK_PX = 6;
+
+/**
+ * Стена чертежа под точкой плана — или `null`. Выключенный слой чертежа стену
+ * не отдаёт: кликать по тому, чего не видно, человек не может.
+ */
+function canvasWallAt(state, plan) {
+  if (!state || state.drawingShown === false) return null;
+  const scheme = canvasScheme(state);
+  if (!scheme) return null;
+  const project = canvasProject(state);
+  const walls = wallsOnScheme(project, scheme.id);
+  if (walls.length === 0) return null;
+  const at = planFractionToMm(project, scheme.id, plan);
+  const bridge = drawingBridge(project, scheme, canvasViewOf(state));
+  if (!at || !bridge || !(bridge.pxPerMm > 0)) return null;
+  const slack = CANVAS_WALL_PICK_PX / bridge.pxPerMm;
+  let best = null;
+  for (const wall of walls) {
+    const gap = segmentDistanceMm(at, wall.aMm, wall.bMm) - Number(wall.thicknessMm) / 2;
+    if (gap > slack) continue;
+    if (!best || gap < best.gap) best = { gap, id: wall.id };
+  }
+  return best ? best.id : null;
 }
 
 // Перетаскивание метки: новые точки считаются от снимка «до», а не от
@@ -3491,6 +3541,7 @@ function mountCanvas(host, api) {
     if ("schemeId" in changed) {
       canvasCancelDraft();
       canvasPreview = null;
+      if (state.selectedWallId) canvasApi.setState({ selectedWallId: null });
     }
     // Режим, выбранный тип и его вид в справочнике — всё это меняет то, что
     // рисует рука. Черновик подтягивается к новому положению дел здесь, в
@@ -3710,13 +3761,75 @@ function mountCanvasFullscreen(host, api) {
   render();
 }
 
-// Поверх холста живут двое: подсказка слева и полный экран справа. Точка
-// монтирования одна, поэтому и монтируются они вместе — панель чистит поле
-// один раз, а не каждый за себя.
+/**
+ * Полоса развёртки выделенной стены поверх холста (таск 129).
+ *
+ * Прижимается к тому краю поля, который **дальше от самой стены**: иначе она
+ * регулярно накрывала бы ровно то, ради чего её открыли. Сторона стены живёт
+ * в состоянии сеанса рядом с выделением — в объект она не попадает, это
+ * взгляд, а не свойство чертежа.
+ */
+function mountCanvasElevation(host, api) {
+  const strip = createElevationStrip({
+    onSide: (side) => api.setState({ wallSide: side }),
+    onClose: () => api.setState({ selectedWallId: null }),
+  });
+  host.append(strip.node);
+
+  function render() {
+    const state = api.getState();
+    const scheme = canvasScheme(state);
+    const project = state.project;
+    if (!project || !scheme || !state.selectedWallId || !canvasNode) {
+      strip.update({ project, wallId: null });
+      return;
+    }
+    const height = canvasNode.clientHeight || 0;
+    strip.update({
+      project,
+      wallId: state.selectedWallId,
+      side: state.wallSide,
+      place: elevationPlace(canvasWallMiddleY(state), height),
+      fieldHeight: height,
+    });
+  }
+
+  api.subscribe((state, changed) => {
+    if (
+      "selectedWallId" in changed ||
+      "wallSide" in changed ||
+      "project" in changed ||
+      "schemeId" in changed ||
+      "view" in changed ||
+      "layout" in changed
+    ) {
+      render();
+    }
+  });
+  if (typeof window !== "undefined") window.addEventListener("resize", () => strip.repaint());
+  render();
+}
+
+// Середина выделенной стены в пикселях поля — по ней решается, у какого края
+// встанет полоса.
+function canvasWallMiddleY(state) {
+  const scheme = canvasScheme(state);
+  const wall = scheme ? findWall(state.project, state.selectedWallId) : null;
+  const bridge = wall ? drawingBridge(state.project, scheme, canvasViewOf(state)) : null;
+  if (!wall || !bridge) return Number.NaN;
+  const a = bridge.toScreen(wall.aMm);
+  const b = bridge.toScreen(wall.bMm);
+  return (a.y + b.y) / 2;
+}
+
+// Поверх холста живут трое: подсказка слева, полный экран справа и полоса
+// развёртки у дальнего от стены края. Точка монтирования одна, поэтому и
+// монтируются они вместе — панель чистит поле один раз, а не каждый за себя.
 function mountCanvasOverlay(host, api) {
   host.replaceChildren();
   mountCanvasHint(host, api);
   mountCanvasFullscreen(host, api);
+  mountCanvasElevation(host, api);
 }
 
 registerPanel(PANEL_IDS.canvas, mountCanvas);

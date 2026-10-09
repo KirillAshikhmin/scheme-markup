@@ -75,18 +75,48 @@ test("мышью в просмотре: повторный клик по выд�
   assert.deepEqual(canvasTapAction(state, { kind: "pan", tapSelected: true, moved: false }), {
     selectedMarkIds: [],
   });
-  // Клик мышью по пустому месту — тот же ответ, что и тап.
+  // Клик мышью по пустому месту — тот же ответ, что и тап. Выделение стены
+  // снимается вместе с остальным: клик мимо всего закрывает и развёртку.
   assert.deepEqual(canvasTapAction(state, { kind: "empty", moved: false }), {
     selectedMarkIds: [],
     selectedOutlineId: null,
     editPathId: null,
+    selectedWallId: null,
   });
   assert.equal(canvasTapAction(stateOf(), { kind: "empty", moved: false }), null);
 });
 
+// Таск 129: стена под метками, и клик сперва предлагает метку.
+test("стена выделяется только кликом, который ничего другого не задел", () => {
+  // Клик по метке стену не трогает: она под меткой, и развёртка остаётся
+  // открытой, пока на ней работают.
+  const onWall = stateOf({ selectedWallId: "wall-1" });
+  assert.deepEqual(canvasTapAction(onWall, tapOn("mark-1")), {
+    selectedMarkIds: ["mark-1"],
+    selectedOutlineId: null,
+  });
+  // Клик по пустому месту со стеной под ним выделяет стену и снимает прежнее.
+  assert.deepEqual(canvasTapAction(stateOf({ selectedMarkIds: ["mark-1"] }), { kind: "empty", moved: false, wallId: "wall-2" }), {
+    selectedMarkIds: [],
+    selectedOutlineId: null,
+    editPathId: null,
+    selectedWallId: "wall-2",
+  });
+  // Повторный клик по уже выделенной стене её не снимает: закрывают развёртку
+  // крестиком или кликом мимо всего.
+  assert.equal(canvasTapAction(onWall, { kind: "empty", moved: false, wallId: "wall-1" }), null);
+  // Клик мимо всего — снимает.
+  assert.deepEqual(canvasTapAction(onWall, { kind: "empty", moved: false }), {
+    selectedMarkIds: [],
+    selectedOutlineId: null,
+    editPathId: null,
+    selectedWallId: null,
+  });
+});
+
 // Главная осторожность таска: разрешив выделение, не открыть щель для правки.
 test("выбор метки не может тронуть объект: в ответе только поля выделения", () => {
-  const SESSION_ONLY = ["selectedMarkIds", "selectedOutlineId", "editPathId"];
+  const SESSION_ONLY = ["selectedMarkIds", "selectedOutlineId", "editPathId", "selectedWallId"];
   const states = [stateOf(), stateOf({ selectedMarkIds: ["mark-1"] }), stateOf({ selectedOutlineId: "outline-1" })];
   const drags = [
     tapOn("mark-1"),
@@ -94,6 +124,7 @@ test("выбор метки не может тронуть объект: в от
     tapOn(null),
     { kind: "pan", tapSelected: true, moved: false },
     { kind: "empty", moved: false },
+    { kind: "empty", moved: false, wallId: "wall-1" },
   ];
   for (const state of states) {
     for (const drag of drags) {
