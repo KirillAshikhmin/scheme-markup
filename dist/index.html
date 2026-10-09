@@ -828,6 +828,116 @@
   border-color: var(--panel-text);
 }
 
+/* ——— полоса развёртки выделенной стены ————————————————————————————————
+
+   Лежит поверх плана — так просил заказчик («сверху схемы»), и так человек
+   видит стену и её развёртку одновременно. Прижимается к верхнему или нижнему
+   краю поля, и к какому именно, решает код: к тому, который дальше от самой
+   стены. Иначе полоса регулярно накрывала бы ровно то, ради чего её открыли.
+
+   Высота приходит переменной `--elev-height`: в большом окне это 220 точек, в
+   коротком — доля поля, и на планшете полоса не съедает план целиком. */
+
+.elev {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  height: var(--elev-height, 220px);
+  padding: 6px 8px 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  /* Бумага без прозрачности. Пара процентов, оставленных «чтобы было видно,
+     что под полосой что-то есть», на снимке живого прогона дали просвечивающую
+     тёмную подсказку холста прямо поверх размеров развёртки — читать её стало
+     тяжело. Чертёж печатают, а не подглядывают сквозь. */
+  background: var(--canvas-bg);
+  box-shadow: 0 10px 30px rgba(1, 4, 9, 0.35);
+  color: var(--canvas-text);
+}
+
+.elev--bottom {
+  bottom: 8px;
+}
+
+.elev--top {
+  top: 8px;
+}
+
+.elev__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.elev__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--canvas-text);
+}
+
+/* Кнопки на бумаге, а не на панели: полоса светлая, и тёмные кнопки панели в
+   ней читались бы дырами. */
+.elev .ui-btn {
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--canvas-text);
+  background: #ffffff;
+  border-color: var(--canvas-line);
+}
+
+.elev .ui-btn:hover {
+  border-color: var(--accent);
+}
+
+.elev__side.is-on {
+  border-color: var(--accent);
+  background: rgba(31, 111, 235, 0.14);
+}
+
+.elev__stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  /* Длинная стена не ужимается до нечитаемого: поле прокручивается вбок, а
+     развёртка рисуется в свою ширину. На планшете это единственный способ
+     оставить числа читаемыми. */
+  overflow: hidden;
+}
+
+.elev__canvas {
+  display: block;
+}
+
+.elev__note {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #57606a;
+}
+
+/* Узкое окно: полоса занимает больше доли экрана, но заголовок с кнопками
+   остаётся в одну строку — иначе на планшете пропадёт переключатель стороны. */
+@media (max-width: 860px) {
+  .elev {
+    left: 4px;
+    right: 4px;
+  }
+
+  .elev__title {
+    font-size: 11px;
+  }
+}
+
 /* Работа с файлом проекта в шапке: папка автосохранения, «Открыть файл» и
    «Экспорт» с отметкой свежести выгрузки. */
 
@@ -5658,6 +5768,25 @@ const strings = {
     // известия было не видно, а теперь есть кому.
     replaceDropped: "Привязка чертежа снята: план другой — привяжите заново в окне «Чертёж».",
   },
+  // Развёртка выделенной стены (таск 129, G179). Слова заказчика: «сделай
+  // функцию выделения стены и что бы её развёртка отображалась сверху схемы».
+  elevation: {
+    wall: "Стена {length} мм",
+    // Сторона названа «изнутри/снаружи»? Нет: что внутри, модель не знает —
+    // помещения выводятся из контуров, а не из стен (ADR 008). Поэтому
+    // стороны названы так же, как сторона открывания двери: слева и справа от
+    // направления самой стены. Комната, если контур её накрывает, стоит рядом
+    // в заголовке и отвечает на «какая это сторона» вернее любого слова.
+    side_left: "Слева",
+    side_right: "Справа",
+    sideHint: "С какой стороны смотрим на стену: на разных сторонах разные метки, и отсчёт зеркалится",
+    close: "Закрыть развёртку",
+    noHeight: "Высота стен не задана — показано {height} мм по тому, что на стене стоит.",
+    empty: "На этой стене пока ничего нет.",
+    blind: "Меток без высоты: {count} — они под полом полосой, выдумывать им высоту нельзя.",
+    // Подсказка холста про выделение стены.
+    pick: "Клик по стене чертежа открывает её развёртку; метка под курсором всегда главнее стены.",
+  },
   storage: {
     memory: "Браузер не дал открыть хранилище — работаем в памяти. Выгрузите объект в файл, иначе работа пропадёт при закрытии вкладки.",
     writeFailed: "Браузер не дал записать данные — работа осталась в памяти. Выгрузите объект в файл.",
@@ -9863,6 +9992,41 @@ function wallThicknessMm(value) {
  * поэтому округляется здесь — и в одном месте, иначе проверка «проём влез» и
  * подпись длины расходились бы на миллиметр.
  */
+/**
+ * Единичные векторы стены: `u` — вдоль, от `a` к `b`; `n` — **влево** от него.
+ * «Влево» — то же слово, которым названа сторона открывания двери: та, что
+ * слева, если идти от `a` к `b`. Ось `y` на экране растёт вниз, поэтому левая
+ * нормаль это `(u.y, −u.x)`, и перевёрнут этот знак ровно здесь, в одном месте
+ * на всю сборку.
+ *
+ * Живёт в модели, а не в отрисовке: это геометрия самой стены, и нужна она не
+ * только тому, кто рисует, — развёртка считает по ней стороны и проекции.
+ */
+function wallVectors(wall) {
+  if (!wall) return null;
+  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
+  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return null;
+  // `|| 0` — от **минус нуля**: у вертикальной стены `−dx / len` даёт `-0`, и
+  // он поехал бы дальше в координаты створки (ADR 008, `drawingMmValue`).
+  return {
+    len,
+    u: { x: dx / len || 0, y: dy / len || 0 },
+    n: { x: dy / len || 0, y: -dx / len || 0 },
+  };
+}
+
+/** Расстояние от точки до отрезка — в тех же миллиметрах. */
+function segmentDistanceMm(point, from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = dx * dx + dy * dy;
+  if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
+  let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
+  t = Math.min(1, Math.max(0, t));
+  return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
+}
 function wallLengthMm(wall) {
   if (!wall || !wall.aMm || !wall.bMm) return 0;
   return Math.round(Math.hypot(Number(wall.bMm.x) - Number(wall.aMm.x), Number(wall.bMm.y) - Number(wall.aMm.y)));
@@ -9922,7 +10086,7 @@ function deleteWall(project, wallId) {
 function drawingBoundsMm(project, schemeId) {
   const points = [];
   for (const wall of wallsOnScheme(project, schemeId)) points.push(wall.aMm, wall.bMm);
-  for (const object of schemeObjectsOnScheme(project, schemeId)) points.push(...schemeObjectCornersMm(object));
+  for (const object of schemeObjectsOnScheme(project, schemeId)) points.push(...schemeObjectCorners(object));
   if (points.length === 0) return null;
   const xs = points.map((point) => Number(point.x));
   const ys = points.map((point) => Number(point.y));
@@ -10228,7 +10392,7 @@ function schemeObjectTopMm(object) {
 // Углы габарита в миллиметрах: ими считается размер чертежа и по ним он
 // рисуется. У прямоугольника это четыре повёрнутых угла, у ломаной — её
 // вершины (полоса шириной `depthMm` ложится по ним).
-function schemeObjectCornersMm(object) {
+function schemeObjectCorners(object) {
   if (!object) return [];
   if (object.shape === "polyline") return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
   const at = object.atMm || { x: 0, y: 0 };
@@ -10392,7 +10556,7 @@ function setRoomWallHeight(project, roomId, value) {
 // открывания двери, наоборот, не вывести никогда, поэтому она заведена сразу.
 
 function withoutWallBinding(mark) {
-  const { wallId, wallAtMm, ...rest } = mark;
+  const { wallId, wallAtMm, wallToMm, ...rest } = mark;
   return rest;
 }
 
@@ -10403,7 +10567,15 @@ function withoutWallBinding(mark) {
  */
 function markWall(mark) {
   if (!mark || typeof mark.wallId !== "string" || !mark.wallId) return null;
-  return { wallId: mark.wallId, atMm: typeof mark.wallAtMm === "number" ? mark.wallAtMm : 0 };
+  return {
+    wallId: mark.wallId,
+    atMm: typeof mark.wallAtMm === "number" ? mark.wallAtMm : 0,
+    // **Линия привязывается отрезком, а не точкой** (дыра, найденная таском
+    // 128): лента вдоль стены — обычное дело у этого заказчика, и одним
+    // отступом её не назвать. `toMm` есть только у линии; у точки он `null`, и
+    // у метки прежней разметки поля нет вовсе.
+    toMm: typeof mark.wallToMm === "number" ? mark.wallToMm : null,
+  };
 }
 
 /**
@@ -10424,9 +10596,14 @@ function setMarkWall(project, markId, binding) {
   const at = drawingOffsetMm(binding.atMm);
   const length = wallLengthMm(wall);
   if (at > length) throw modelError("markWallAtOutside", { at, length });
-  const marks = project.marks.map((item) =>
-    item.id === markId ? { ...item, wallId: wall.id, wallAtMm: at } : item,
-  );
+  const next = { ...mark, wallId: wall.id, wallAtMm: at };
+  delete next.wallToMm;
+  if (binding.toMm !== null && binding.toMm !== undefined) {
+    const to = drawingOffsetMm(binding.toMm);
+    if (to > length) throw modelError("markWallAtOutside", { at: to, length });
+    next.wallToMm = to;
+  }
+  const marks = project.marks.map((item) => (item.id === markId ? next : item));
   return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
 }
 
@@ -10468,16 +10645,38 @@ const MARK_WALL_REACH_MM = 300;
  */
 function markWallBindable(mark) {
   if (!mark) return false;
-  if (markIsComment(mark)) return false;
-  return mark.kind !== "line";
+  // Плашка комментария — надпись на чертеже, а не изделие: на развёртке ей
+  // места нет. Линия, наоборот, привязывается — отрезком (`wallToMm`), и это
+  // закрытая дыра таска 128: лента вдоль стены у этого заказчика обычное дело,
+  // пять линейных типов в стартовом справочнике.
+  return !markIsComment(mark);
 }
 
-// Точка метки в миллиметрах чертежа — или `null`, если моста нет (ADR 008:
+// Точки метки в миллиметрах чертежа — или пусто, если моста нет (ADR 008:
 // нужны и калибровка, и привязка чертежа к плану).
+function markPointsMm(project, mark) {
+  const points = Array.isArray(mark.points) ? mark.points : [];
+  const out = [];
+  for (const point of points) {
+    const at = planFractionToMm(project, mark.schemeId, point);
+    if (!at) return [];
+    out.push(at);
+  }
+  return out;
+}
+
 function markPointMm(project, mark) {
-  const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
-  if (!point) return null;
-  return planFractionToMm(project, mark.schemeId, point);
+  const points = markPointsMm(project, mark);
+  return points.length > 0 ? points[0] : null;
+}
+
+// Середина метки: у точки она же, у линии — середина её габарита.
+function markMiddleMm(project, mark) {
+  const points = markPointsMm(project, mark);
+  if (points.length === 0) return null;
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
 }
 
 /**
@@ -10500,7 +10699,9 @@ function markWallSide(project, mark) {
   const binding = markWall(mark);
   if (!binding) return null;
   const wall = findWall(project, binding.wallId);
-  const at = wall ? markPointMm(project, mark) : null;
+  // У линии сторону решает её середина: концы ленты лежат у самой стены, и
+  // первый из них может оказаться по другую сторону от оси на миллиметр.
+  const at = wall ? markMiddleMm(project, mark) : null;
   if (!wall || !at) return null;
   const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
   const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
@@ -10522,21 +10723,46 @@ function markWallNear(project, mark, walls) {
   if (!markWallBindable(mark)) return null;
   const list = walls || wallsOnScheme(project, mark.schemeId);
   if (list.length === 0) return null;
-  const at = markPointMm(project, mark);
-  if (!at) return null;
+  const points = markPointsMm(project, mark);
+  if (points.length === 0) return null;
   let best = null;
   for (const wall of list) {
-    const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
-    const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
-    const len = Math.hypot(dx, dy);
-    if (!(len > 0)) continue;
-    const along = Math.min(len, Math.max(0, ((at.x - wall.aMm.x) * dx + (at.y - wall.aMm.y) * dy) / len));
-    const foot = { x: wall.aMm.x + (dx * along) / len, y: wall.aMm.y + (dy * along) / len };
-    const gap = Math.hypot(at.x - foot.x, at.y - foot.y) - Number(wall.thicknessMm) / 2;
-    if (gap > MARK_WALL_REACH_MM) continue;
-    if (!best || gap < best.gap) best = { gap, wallId: wall.id, atMm: Math.round(along) };
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    const half = Number(wall.thicknessMm) / 2;
+    let worst = 0;
+    const along = [];
+    for (const at of points) {
+      const distance = Math.min(
+        vectors.len,
+        Math.max(0, (at.x - wall.aMm.x) * vectors.u.x + (at.y - wall.aMm.y) * vectors.u.y),
+      );
+      along.push(distance);
+      const foot = {
+        x: wall.aMm.x + vectors.u.x * distance,
+        y: wall.aMm.y + vectors.u.y * distance,
+      };
+      worst = Math.max(worst, Math.hypot(at.x - foot.x, at.y - foot.y) - half);
+    }
+    // **У линии к стене обязаны быть близко все вершины.** Лента, которая
+    // идёт вдоль стены и уходит в комнату, на этой стене не лежит, и отрезок
+    // «от и до» по ней соврал бы.
+    if (worst > MARK_WALL_REACH_MM) continue;
+    if (best && worst >= best.gap) continue;
+    best = {
+      gap: worst,
+      wallId: wall.id,
+      atMm: Math.round(along[0]),
+      toMm: points.length > 1 ? Math.round(along[along.length - 1]) : null,
+    };
   }
-  return best ? { wallId: best.wallId, atMm: best.atMm, gapMm: Math.round(Math.max(0, best.gap)) } : null;
+  if (!best) return null;
+  return {
+    wallId: best.wallId,
+    atMm: best.atMm,
+    toMm: best.toMm,
+    gapMm: Math.round(Math.max(0, best.gap)),
+  };
 }
 
 /**
@@ -10574,9 +10800,12 @@ function applyMarkWalls(project, schemeId) {
       changed.push(mark.id);
       return withoutWallBinding(mark);
     }
-    if (now && now.wallId === next.wallId && now.atMm === next.atMm) return mark;
+    if (now && now.wallId === next.wallId && now.atMm === next.atMm && now.toMm === next.toMm) return mark;
     changed.push(mark.id);
-    return { ...mark, wallId: next.wallId, wallAtMm: next.atMm };
+    const bound = { ...mark, wallId: next.wallId, wallAtMm: next.atMm };
+    if (next.toMm === null) delete bound.wallToMm;
+    else bound.wallToMm = next.toMm;
+    return bound;
   });
   if (changed.length === 0) return { project, changed };
   return { project: withProject(project, { marks }), changed };
@@ -10615,6 +10844,224 @@ function markOpeningHit(project, mark) {
     if (height >= floor && height <= floor + Number(opening.heightMm)) return opening;
   }
   return null;
+}
+
+// ——— развёртка стены ———————————————————————————————————————————————————
+//
+// То, ради чего заводились стены, проёмы, высоты и привязка меток (G179).
+// Здесь собираются **данные** развёртки; рисует их `render.drawElevation`, и
+// разделены они нарочно: выгрузка развёртки в PNG и на лист по ГОСТ —
+// следующий шаг, и он должен стоить дёшево (тот же приём, что у чертежа в
+// таске 127: один слой, два моста).
+//
+// **Стороны у стены две, и они разные.** На одной розетки кухни, на другой —
+// прихожей; высота потолка у этих комнат тоже может не совпадать. Поэтому
+// сторона — довод каждой функции здесь, а не настройка: «развёртка стены» без
+// стороны не существует.
+const WALL_SIDES = ["left", "right"];
+
+// Насколько отходим от грани стены, когда спрашиваем, в какой комнате эта
+// сторона. Сто миллиметров: ближе — и точка попадёт в сам контур, который
+// обводят по стене, дальше — и в узком коридоре мы окажемся за его дальней
+// стеной.
+const WALL_ROOM_PROBE_MM = 100;
+
+/**
+ * В какой комнате **эта сторона** стены.
+ *
+ * Считается на лету по контурам, а не хранится полем у стены. Помещения в этой
+ * сборке выводятся из контуров (решение таска 122, развилка 2), и поле `roomId`
+ * у стены завело бы вторую правду о том же: обвёл комнату заново — и поле
+ * врёт, а починить его нечем, кроме той же проверки по контуру. Считать
+ * дешевле и честнее: спрашивают об этом только развёртка и только для той
+ * стены, которую открыли.
+ *
+ * Пробная точка отходит от середины стены на её сторону: сама середина лежит
+ * внутри стены, то есть на границе контура, и ответ там был бы случайным.
+ */
+function wallRoomId(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  const vectors = wallVectors(wall);
+  if (!wall || !vectors) return null;
+  const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM);
+  const middle = {
+    x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
+    y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
+  };
+  const point = planMmToFraction(project, wall.schemeId, middle);
+  return point ? roomAtPoint(project, wall.schemeId, point) : null;
+}
+
+/**
+ * Высота стены с этой стороны: переопределение комнаты, если сторона в ней
+ * лежит, иначе высота схемы. `null` — высота не задана вовсе.
+ *
+ * Это и есть закрытая дыра таска 128: `wallHeightOf` умеет брать
+ * переопределение по комнате, но у стены комнаты не было, и развёртка брала
+ * высоту этажа. Теперь комната находится по стороне, а не по стене целиком —
+ * у стены между кухней и прихожей две разные высоты, и обе верные.
+ */
+function wallHeightOnSide(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side) });
+}
+
+// Отступ вдоль стены с нужной стороны.
+//
+// **Зеркалится левая сторона, а не правая** — и это не произвол. Левая
+// сторона та, что слева, если идти от `a` к `b`; встань на неё и повернись к
+// стене — направление `a → b` пойдёт справа налево, и отсчёт от `a` окажется
+// справа. С правой стороны, наоборот, `a → b` идёт слева направо, и отступы
+// ложатся на лист как есть.
+function sideAlong(lengthMm, atMm, side) {
+  return side === "left" ? lengthMm - atMm : atMm;
+}
+
+function sideSpan(lengthMm, fromMm, toMm, side) {
+  const first = sideAlong(lengthMm, fromMm, side);
+  const second = sideAlong(lengthMm, toMm, side);
+  return { fromMm: Math.min(first, second), toMm: Math.max(first, second) };
+}
+
+/**
+ * Объекты схемы, попавшие на эту стену, — спроецированные на неё.
+ *
+ * Привязки у объекта **нет и не заводится**, в отличие от метки, и это не
+ * недоделка. Метка — точка, и «какой стене она принадлежит» вопрос спорный:
+ * ответ нужно выбрать, запомнить и показать человеку в карточке. У объекта
+ * есть размер, и вопрос другой — «накрывает ли он полосу этой стены», а он
+ * решается однозначно и считается за десять строк. Хранить ответ значило бы
+ * завести поле, которое врёт после первого же переноса стены, — ровно то, от
+ * чего мы отказались у стороны метки.
+ */
+function wallObjectsOn(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  const vectors = wallVectors(wall);
+  if (!wall || !vectors) return [];
+  const half = Number(wall.thicknessMm) / 2;
+  const found = [];
+  for (const object of schemeObjectsOnScheme(project, wall.schemeId)) {
+    const corners = schemeObjectCorners(object);
+    if (corners.length === 0) continue;
+    const gap = Math.min(...corners.map((point) => segmentDistanceMm(point, wall.aMm, wall.bMm)));
+    if (gap - half > MARK_WALL_REACH_MM) continue;
+    // Сторона объекта — та, где лежит его середина. Объект, который сидит в
+    // самой стене (колонна, ниша, короб), виден с обеих.
+    const across =
+      corners.reduce(
+        (sum, point) => sum + (point.x - wall.aMm.x) * vectors.n.x + (point.y - wall.aMm.y) * vectors.n.y,
+        0,
+      ) / corners.length;
+    const inside = Math.abs(across) <= half;
+    if (!inside && (across > 0 ? "left" : "right") !== side) continue;
+    const along = corners.map(
+      (point) => (point.x - wall.aMm.x) * vectors.u.x + (point.y - wall.aMm.y) * vectors.u.y,
+    );
+    const span = sideSpan(vectors.len, Math.min(...along), Math.max(...along), side);
+    found.push({
+      id: object.id,
+      name: (findSchemeObjectKind(project, object.kindId) || {}).name || "",
+      fromMm: Math.round(span.fromMm),
+      toMm: Math.round(span.toMm),
+      floorMm: Number(object.heightAboveFloorMm) || 0,
+      topMm: schemeObjectTopMm(object),
+    });
+  }
+  return found.sort((first, second) => first.fromMm - second.fromMm);
+}
+
+/**
+ * Развёртка стены с одной стороны — всё, что на ней есть, на своих местах.
+ *
+ * Отступы здесь уже **зеркальные по стороне**: рисующему остаётся отложить их
+ * слева направо и ничего не знать ни про стороны, ни про направление стены.
+ * `heightMm` — высота этой стороны (`null`, если её не задавали);
+ * `heightShownMm` — то, во что рисовать: заданная высота или выведенная из
+ * того, что на стене стоит. Без числа развёртка была бы картинкой, а с
+ * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
+ */
+function wallElevation(project, wallId, side = "left") {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  const length = wallLengthMm(wall);
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const openings = openingsInWall(project, wallId).map((opening) => {
+    const span = sideSpan(length, Number(opening.atMm), Number(opening.atMm) + Number(opening.widthMm), view);
+    return {
+      id: opening.id,
+      kind: opening.kind,
+      fromMm: Math.round(span.fromMm),
+      toMm: Math.round(span.toMm),
+      floorMm: Number(opening.heightAboveFloorMm) || 0,
+      topMm: Number(opening.heightAboveFloorMm) + Number(opening.heightMm),
+      // Петли и сторона открывания названы **от направления стены**, и при
+      // взгляде с зеркальной стороны обе переворачиваются: дверь,
+      // открывающаяся налево, с обратной стороны открывается направо.
+      hinge: opening.hinge ? (view === "left" ? flipHinge(opening.hinge) : opening.hinge) : null,
+      swing: opening.swing ? (view === "left" ? flipSwing(opening.swing) : opening.swing) : null,
+    };
+  });
+  // Порядок — слева направо **на листе**, а не в модели: после зеркала проём,
+  // который в модели шёл первым, оказывается последним, и список, читаемый
+  // не по картинке, сбивал бы с толку и размерную цепочку.
+  openings.sort((first, second) => first.fromMm - second.fromMm);
+  const marks = [];
+  for (const mark of project.marks) {
+    const binding = markWall(mark);
+    if (!binding || binding.wallId !== wallId) continue;
+    if (markWallSide(project, mark) !== view) continue;
+    const style = styleOf(project, mark.typeId);
+    const span =
+      binding.toMm === null
+        ? { fromMm: sideAlong(length, binding.atMm, view), toMm: null }
+        : sideSpan(length, binding.atMm, binding.toMm, view);
+    marks.push({
+      id: mark.id,
+      label: labelOf(project, mark.id),
+      color: style.color,
+      shape: style.shape,
+      lineStyle: style.lineStyle,
+      kind: mark.kind === "line" ? "line" : "point",
+      fromMm: Math.round(span.fromMm),
+      toMm: span.toMm === null ? null : Math.round(span.toMm),
+      heightMm: markDimensions(mark).heightAboveFloor,
+    });
+  }
+  marks.sort((first, second) => first.fromMm - second.fromMm);
+  const objects = wallObjectsOn(project, wallId, view);
+  const known = wallHeightOnSide(project, wallId, view);
+  const tops = [
+    ...openings.map((opening) => opening.topMm),
+    ...objects.map((object) => (object.topMm === null ? 0 : object.topMm)),
+    ...marks.map((mark) => mark.heightMm || 0),
+  ];
+  const roomId = wallRoomId(project, wallId, view);
+  const room = roomId ? findRoom(project, roomId) : null;
+  return {
+    wallId,
+    side: view,
+    lengthMm: length,
+    thicknessMm: Number(wall.thicknessMm),
+    heightMm: known,
+    heightKnown: known !== null,
+    // Выведенная высота: самое высокое, что на стене стоит, плюс триста
+    // миллиметров воздуха — чтобы верхний косяк не упирался в потолок листа.
+    heightShownMm: known !== null ? known : Math.max(2000, Math.max(0, ...tops) + 300),
+    roomId,
+    roomName: room ? room.name : "",
+    openings,
+    marks,
+    objects,
+  };
+}
+
+function flipHinge(value) {
+  return value === "end" ? "start" : "end";
+}
+
+function flipSwing(value) {
+  return value === "right" ? "left" : "right";
 }
 
 // ——— данные для штампа ————————————————————————————————————————————————
@@ -18763,32 +19210,10 @@ const DRAWING_CAPTION = "#57606a";
 // на общем виде квартиры десяток подписей превратился бы в кашу поверх меток.
 const DRAWING_CAPTION_MIN_PX = 70;
 
-/**
- * Единичные векторы стены: `u` — вдоль, от `a` к `b`; `n` — **влево** от него.
- * «Влево» — то же слово, которым модель назвала сторону открывания двери: та,
- * что слева, если идти от `a` к `b`. Ось `y` на экране растёт вниз, поэтому
- * левая нормаль это `(u.y, −u.x)`, и перевёрнут этот знак ровно здесь, в одном
- * месте на всю сборку.
- */
-function drawingWallVectors(wall) {
-  if (!wall) return null;
-  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
-  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
-  const len = Math.hypot(dx, dy);
-  if (!(len > 0)) return null;
-  // `|| 0` — от **минус нуля**: у вертикальной стены `−dx / len` даёт `-0`, и
-  // он поехал бы дальше в координаты створки. В сборке это уже ловили
-  // (ADR 008, `drawingMmValue`), и второй раз наступать незачем.
-  return {
-    len,
-    u: { x: dx / len || 0, y: dy / len || 0 },
-    n: { x: dy / len || 0, y: -dx / len || 0 },
-  };
-}
 
 /** Концы проёма на оси стены плюс её векторы — всё, чем он рисуется и ловится. */
 function drawingOpeningSpan(wall, opening) {
-  const vectors = drawingWallVectors(wall);
+  const vectors = wallVectors(wall);
   if (!vectors || !opening) return null;
   const at = Number(opening.atMm) || 0;
   const width = Number(opening.widthMm) || 0;
@@ -18818,39 +19243,7 @@ function drawingDoorLeaf(wall, opening) {
   return { hinge, closed, tip, radius: span.width, side, n: span.n };
 }
 
-/**
- * Углы габарита объекта в миллиметрах — то же, по чему модель считает размер
- * чертежа: у прямоугольника четыре повёрнутых угла, у ломаной её вершины.
- * Это геометрия отрисовки, а не вторая модель: наружу `schemeObjectCornersMm`
- * модель не отдаёт, а рисовать и ловить объект чем-то надо.
- */
-function drawingObjectCorners(object) {
-  if (!object) return [];
-  if (object.shape === "polyline") {
-    return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
-  }
-  const at = object.atMm || { x: 0, y: 0 };
-  const halfWidth = Number(object.widthMm) / 2;
-  const halfDepth = Number(object.depthMm) / 2;
-  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return [
-    [-halfWidth, -halfDepth],
-    [halfWidth, -halfDepth],
-    [halfWidth, halfDepth],
-    [-halfWidth, halfDepth],
-  ].map(([x, y]) => ({ x: Number(at.x) + x * cos - y * sin, y: Number(at.y) + x * sin + y * cos }));
-}
-function drawingSegmentDistance(point, from, to) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = dx * dx + dy * dy;
-  if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
-  let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
-  t = Math.min(1, Math.max(0, t));
-  return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
-}
+
 
 function drawingInsidePolygon(point, corners) {
   let inside = false;
@@ -18865,19 +19258,19 @@ function drawingInsidePolygon(point, corners) {
 
 /** Попал ли курсор в объект: внутрь прямоугольника или в полосу ломаной. */
 function drawingHitObject(object, pointMm, slackMm) {
-  const corners = drawingObjectCorners(object);
+  const corners = schemeObjectCorners(object);
   if (corners.length === 0) return false;
   if (object.shape === "polyline") {
     const limit = Math.max(Number(slackMm) || 0, Number(object.depthMm) / 2);
     for (let index = 1; index < corners.length; index += 1) {
-      if (drawingSegmentDistance(pointMm, corners[index - 1], corners[index]) <= limit) return true;
+      if (segmentDistanceMm(pointMm, corners[index - 1], corners[index]) <= limit) return true;
     }
     return false;
   }
   if (drawingInsidePolygon(pointMm, corners)) return true;
   const limit = Number(slackMm) || 0;
   for (let index = 0; index < corners.length; index += 1) {
-    if (drawingSegmentDistance(pointMm, corners[index], corners[(index + 1) % corners.length]) <= limit) return true;
+    if (segmentDistanceMm(pointMm, corners[index], corners[(index + 1) % corners.length]) <= limit) return true;
   }
   return false;
 }
@@ -19111,7 +19504,7 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
 
 function drawDrawingObject(ctx, bridge, object, options = {}) {
   const colour = options.active ? DRAWING_ACTIVE : DRAWING_OBJECT;
-  const corners = drawingObjectCorners(object).map((point) => bridge.toScreen(point));
+  const corners = schemeObjectCorners(object).map((point) => bridge.toScreen(point));
   if (corners.length < 2) return;
   if (object.shape === "polyline") {
     ctx.lineCap = "butt";
@@ -19177,6 +19570,208 @@ function drawDrawingCaption(ctx, object, corners, name, bridge) {
   ctx.fillText(line, at.x, at.y);
   ctx.textAlign = "start";
 }
+
+// ——— развёртка стены: отрисовка ———————————————————————————————————————
+//
+// Данные собирает `model.wallElevation`, здесь они только рисуются — и
+// рисуются **в любой прямоугольник любого холста**. Разделено это нарочно:
+// выгрузка развёртки в PNG и на лист по ГОСТ — следующий шаг, и ей достанется
+// тот же вызов с другим `ctx` и другой рамкой, без единой новой строки
+// отрисовки (тот же приём, что у чертежа в таске 127).
+
+// Поля рамки: слева — размер высоты, снизу — размер длины, под полом — полоса
+// для меток, у которых высота не задана.
+const ELEVATION_PAD = { left: 56, right: 18, top: 20, bottom: 42 };
+const ELEVATION_UNKNOWN_BAND = 22;
+const ELEVATION_FONT = 11;
+// Мельче этого подпись на развёртке не читается — тогда её просто нет.
+const ELEVATION_LABEL_MIN_PX = 26;
+
+function elevationTick(ctx, x, y, vertical) {
+  ctx.beginPath();
+  if (vertical) {
+    ctx.moveTo(x - 4, y);
+    ctx.lineTo(x + 4, y);
+  } else {
+    ctx.moveTo(x, y - 4);
+    ctx.lineTo(x, y + 4);
+  }
+  ctx.stroke();
+}
+
+function elevationText(ctx, value, x, y, align) {
+  ctx.textAlign = align || "center";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = DRAWING_PAPER;
+  ctx.strokeText(value, x, y);
+  ctx.fillStyle = DRAWING_CAPTION;
+  ctx.fillText(value, x, y);
+  ctx.textAlign = "start";
+}
+
+/**
+ * Нарисовать развёртку в заданный прямоугольник.
+ *
+ * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
+ * вызывающий попадает мышью в то, что нарисовано, и по ней же будущая
+ * выгрузка посчитает размер листа.
+ */
+function drawElevation(ctx, elevation, box) {
+  if (!elevation) return null;
+  const inner = {
+    x: box.x + ELEVATION_PAD.left,
+    y: box.y + ELEVATION_PAD.top,
+    width: Math.max(1, box.width - ELEVATION_PAD.left - ELEVATION_PAD.right),
+    height: Math.max(1, box.height - ELEVATION_PAD.top - ELEVATION_PAD.bottom - ELEVATION_UNKNOWN_BAND),
+  };
+  const scale = Math.min(inner.width / Math.max(1, elevation.lengthMm), inner.height / Math.max(1, elevation.heightShownMm));
+  const wallWidth = elevation.lengthMm * scale;
+  const wallHeight = elevation.heightShownMm * scale;
+  // Стена прижата к низу поля: пол — это пол, и смотреть на него снизу вверх
+  // привычнее, чем искать его где-то посередине. По ширине, наоборот, она
+  // стоит по середине: короткая стена, прижатая влево, читается обрезанной.
+  const left = inner.x + Math.max(0, (inner.width - wallWidth) / 2);
+  const floor = inner.y + inner.height;
+  const atX = (mm) => left + mm * scale;
+  const atY = (mm) => floor - mm * scale;
+
+  ctx.save();
+  ctx.font = drawFont(ELEVATION_FONT, 600);
+  ctx.textBaseline = "middle";
+
+  // Поле стены.
+  ctx.fillStyle = DRAWING_PAPER;
+  ctx.fillRect(left, floor - wallHeight, wallWidth, wallHeight);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = DRAWING_WALL;
+  ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
+
+  // Объекты на полу — под всем остальным: розетка над столешницей обязана
+  // остаться видной поверх неё.
+  for (const object of elevation.objects) {
+    const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
+    const y = atY(top);
+    const height = Math.max(2, (top - object.floorMm) * scale);
+    ctx.fillStyle = DRAWING_OBJECT_FILL;
+    ctx.fillRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = DRAWING_OBJECT;
+    ctx.strokeRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
+    if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX) continue;
+    elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8);
+    if (object.topMm !== null) elevationText(ctx, String(object.topMm), atX(object.toMm) + 2, y + 9, "left");
+  }
+
+  // Проёмы: дырка в стене с косяками. У двери — засечка со стороны петель,
+  // как её рисуют на развёртке: наклонная от верхнего косяка к нижнему.
+  for (const opening of elevation.openings) {
+    const x = atX(opening.fromMm);
+    const width = Math.max(2, (opening.toMm - opening.fromMm) * scale);
+    const top = atY(opening.topMm);
+    const height = Math.max(2, (opening.topMm - opening.floorMm) * scale);
+    ctx.fillStyle = DRAWING_PAPER;
+    ctx.fillRect(x, top, width, height);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = DRAWING_EDGE;
+    ctx.strokeRect(x, top, width, height);
+    if (opening.hinge) {
+      const hingeX = opening.hinge === "start" ? x : x + width;
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(hingeX, top);
+      ctx.lineTo(opening.hinge === "start" ? x + width : x, top + height / 2);
+      ctx.lineTo(hingeX, top + height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (width < ELEVATION_LABEL_MIN_PX) continue;
+    // Низ и верх проёма — числами у его косяка: именно от них отмеряют.
+    elevationText(ctx, String(opening.topMm), x + width / 2, top - 8);
+    if (opening.floorMm > 0) elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9);
+  }
+
+  // Метки: знак на своём месте и высоте, подпись рядом. Линия — отрезком.
+  const unknown = [];
+  for (const mark of elevation.marks) {
+    if (mark.heightMm === null) {
+      unknown.push(mark);
+      continue;
+    }
+    const y = atY(mark.heightMm);
+    ctx.strokeStyle = mark.color;
+    ctx.fillStyle = mark.color;
+    if (mark.kind === "line" && mark.toMm !== null) {
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(atX(mark.fromMm), y);
+      ctx.lineTo(atX(mark.toMm), y);
+      ctx.stroke();
+      elevationText(ctx, mark.label + " · " + mark.heightMm, (atX(mark.fromMm) + atX(mark.toMm)) / 2, y - 9);
+      continue;
+    }
+    const x = atX(mark.fromMm);
+    drawShape(ctx, mark.shape, x, y, 9, mark.color);
+    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13);
+  }
+
+  // Метки без высоты — полосой под полом: на стене им места нет, но и
+  // потерять их нельзя. Выдуманная высота соврала бы развёртке.
+  if (unknown.length > 0) {
+    const y = floor + ELEVATION_UNKNOWN_BAND / 2 + 4;
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = DRAWING_CAPTION;
+    ctx.beginPath();
+    ctx.moveTo(left, floor + 3);
+    ctx.lineTo(left + wallWidth, floor + 3);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const mark of unknown) {
+      drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7, mark.color);
+      elevationText(ctx, mark.label, atX(mark.fromMm) + 11, y, "left");
+    }
+  }
+
+  // Пол толще стен: он опора всему, что на развёртке стоит.
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = DRAWING_WALL;
+  ctx.beginPath();
+  ctx.moveTo(left, floor);
+  ctx.lineTo(left + wallWidth, floor);
+  ctx.stroke();
+
+  // ——— размеры ———
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = DRAWING_CAPTION;
+  // Высота — слева, одной выносной.
+  const heightX = left - 26;
+  ctx.beginPath();
+  ctx.moveTo(heightX, floor);
+  ctx.lineTo(heightX, floor - wallHeight);
+  ctx.stroke();
+  elevationTick(ctx, heightX, floor, true);
+  elevationTick(ctx, heightX, floor - wallHeight, true);
+  elevationText(ctx, String(elevation.heightShownMm), heightX - 4, floor - wallHeight / 2, "right");
+  // Длина — снизу, и по ней же засечки проёмов: по этой цепочке проём и
+  // размечают на стене.
+  const lengthY = floor + ELEVATION_UNKNOWN_BAND + 14;
+  ctx.beginPath();
+  ctx.moveTo(left, lengthY);
+  ctx.lineTo(left + wallWidth, lengthY);
+  ctx.stroke();
+  elevationTick(ctx, left, lengthY);
+  elevationTick(ctx, left + wallWidth, lengthY);
+  elevationText(ctx, String(elevation.lengthMm), left + wallWidth / 2, lengthY + 12);
+  for (const opening of elevation.openings) {
+    for (const mm of [opening.fromMm, opening.toMm]) {
+      elevationTick(ctx, atX(mm), lengthY);
+      elevationText(ctx, String(mm), atX(mm), lengthY - 10);
+    }
+  }
+  ctx.restore();
+  return { x: left, y: floor - wallHeight, width: wallWidth, height: wallHeight, scale };
+}
 function drawScheme(ctx, {
   project,
   scheme,
@@ -19193,6 +19788,7 @@ function drawScheme(ctx, {
   outlines,
   selectedOutlineId,
   drawing,
+  selectedWallId,
 }) {
   const state = renderView(view);
   if (image) {
@@ -19217,7 +19813,14 @@ function drawScheme(ctx, {
   // правило: у объекта, которого не чертили, этих полей нет вовсе, и кадр не
   // спрашивает про калибровку ни разу.
   if (drawing !== false && (project.walls || project.schemeObjects)) {
-    drawDrawing(ctx, { project, schemeId: scheme.id, bridge: drawingBridge(project, scheme, state) });
+    drawDrawing(ctx, {
+      project,
+      schemeId: scheme.id,
+      bridge: drawingBridge(project, scheme, state),
+      // Выделенная стена подсвечена и на холсте: её развёртка открыта полосой
+      // рядом, и видеть, о какой именно стене речь, обязательно.
+      active: selectedWallId ? { kind: "wall", id: selectedWallId } : null,
+    });
   }
   // Контуры ложатся под метки: метка на стене комнаты должна остаться видна.
   if (outlines !== false && outlines !== null) {
@@ -19723,6 +20326,11 @@ const appState = {
   // Путь в правке: у него видны ручки вершин. Режим руки, а не свойство
   // разметки, — в объект и в файл проекта он не попадает.
   editPathId: null,
+  // Выделенная стена чертежа и сторона, с которой смотрят её развёртку
+  // (таск 129). Тоже режим руки: в объект не попадает, при смене схемы
+  // снимается.
+  selectedWallId: null,
+  wallSide: "left",
   // Линейка и направляющие видны, пока их не спрятали.
   guidesShown: true,
   // Два выключателя слоёв плана (таск 127). Оба — **выбор глаз**, личная
@@ -20335,6 +20943,160 @@ function onHistoryChange(listener) {
   return () => historyListeners.delete(listener);
 }
 
+// src/panels/elevation.js
+// Полоса развёртки выделенной стены (таск 129, требование G179).
+//
+// Слова заказчика: «сделай функцию выделения стены и что бы её развёртка
+// отображалась сверху схемы и на чертеже и на основной схеме». Поэтому полоса
+// лежит **поверх плана**, а не в отдельном окне: человек смотрит на стену и на
+// её развёртку одновременно, не теряя из виду ни того ни другого.
+//
+// **Один кирпич на две поверхности.** Холст и мастерская создают по своей
+// полосе, но код у неё один — как у слоя чертежа в таске 127. Рисует её
+// `render.drawElevation` в любой прямоугольник любого холста, поэтому выгрузка
+// развёртки в PNG и на лист по ГОСТ (следующий таск) обойдётся тем же вызовом
+// с другим `ctx`.
+//
+// **Полоса не закрывает свою стену.** Где ей быть — решает вызывающий и
+// говорит словом `place`: стена в нижней половине поля — полоса сверху, и
+// наоборот. Правило простое, но без него полоса регулярно накрывала бы ровно
+// то, ради чего её открыли.
+
+
+
+
+// Высота полосы: столько нужно развёртке, чтобы в ней читались и размеры, и
+// подписи меток. Больше доли поля она не берёт — иначе план, над которым она
+// лежит, перестаёт быть виден.
+//
+// Триста точек, а не двести: у стены квартиры отношение сторон около трёх к
+// одному, и в двухстах точках высоты развёртка занимала треть ширины полосы, а
+// остальное пустовало — видно на снимке живого прогона.
+const ELEVATION_HEIGHT_PX = 300;
+const ELEVATION_MAX_SHARE = 0.42;
+
+/**
+ * Где показать полосу, чтобы она не закрыла свою стену: `"top"` или
+ * `"bottom"`. `at` — середина стены в пикселях поля, `height` — высота поля.
+ *
+ * Чистая и вынесена наружу ради теста: промах здесь — это полоса поверх той
+ * самой стены, которую открыли, и ловить его глазами на каждой стене дорого.
+ */
+function elevationPlace(at, height) {
+  if (!(height > 0) || !Number.isFinite(at)) return "bottom";
+  return at > height / 2 ? "top" : "bottom";
+}
+
+/** Сколько места займёт полоса в поле такой высоты. */
+function elevationHeight(fieldHeight) {
+  const limit = Math.max(1, Number(fieldHeight) || 0) * ELEVATION_MAX_SHARE;
+  return Math.max(120, Math.min(ELEVATION_HEIGHT_PX, limit));
+}
+
+/**
+ * Строка заголовка: что за стена, из какой она комнаты и какой стороной
+ * повёрнута. Чистая — слова проверяются без браузера.
+ */
+function elevationTitle(elevation) {
+  if (!elevation) return "";
+  const parts = [text("elevation.wall", { length: elevation.lengthMm })];
+  if (elevation.roomName) parts.push(elevation.roomName);
+  return parts.join(" · ");
+}
+
+/** Что сказать под развёрткой: про высоту и про пустую стену. */
+function elevationNote(elevation) {
+  if (!elevation) return "";
+  const notes = [];
+  if (!elevation.heightKnown) notes.push(text("elevation.noHeight", { height: elevation.heightShownMm }));
+  const empty =
+    elevation.openings.length === 0 && elevation.marks.length === 0 && elevation.objects.length === 0;
+  if (empty) notes.push(strings.elevation.empty);
+  const blind = elevation.marks.filter((mark) => mark.heightMm === null).length;
+  if (blind > 0) notes.push(text("elevation.blind", { count: blind }));
+  return notes.join(" ");
+}
+
+/**
+ * Создать полосу. Возвращает `{node, update, destroy}`; вызывающий сам кладёт
+ * `node` туда, где у него план, и зовёт `update` на каждой правке.
+ */
+function createElevationStrip({ onSide, onClose }) {
+  const canvas = uiEl("canvas", { class: "elev__canvas" });
+  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
+  const title = uiEl("span", { class: "elev__title" });
+  const note = uiEl("p", { class: "elev__note" });
+  const sideButtons = WALL_SIDES.map((side) =>
+    uiButton(strings.elevation["side_" + side], {
+      class: "ui-btn elev__side",
+      title: strings.elevation.sideHint,
+      on: { click: () => onSide && onSide(side) },
+    }),
+  );
+  const closeButton = uiIconButton("close", {
+    title: strings.elevation.close,
+    on: { click: () => onClose && onClose() },
+  });
+  const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
+  const node = uiEl("div", { class: "elev" }, [
+    uiEl("div", { class: "elev__head" }, [title, ...sideButtons, closeButton]),
+    stage,
+    note,
+  ]);
+  node.hidden = true;
+  let shown = null;
+
+  function paint() {
+    if (!ctx || !shown || node.hidden) return;
+    const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    const width = Math.max(1, stage.clientWidth);
+    const height = Math.max(1, stage.clientHeight);
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    drawElevation(ctx, shown, { x: 0, y: 0, width, height });
+  }
+
+  /**
+   * Показать развёртку выделенной стены. `wallId` пустой — полоса прячется:
+   * пустой развёртки на экране не бывает (G68).
+   */
+  function update({ project, wallId, side, place, fieldHeight }) {
+    const wall = wallId ? findWall(project, wallId) : null;
+    if (!wall) {
+      node.hidden = true;
+      shown = null;
+      return null;
+    }
+    const view = WALL_SIDES.includes(side) ? side : WALL_SIDES[0];
+    shown = wallElevation(project, wallId, view);
+    node.hidden = !shown;
+    if (!shown) return null;
+    node.classList.toggle("elev--top", place === "top");
+    node.classList.toggle("elev--bottom", place !== "top");
+    node.style.setProperty("--elev-height", Math.round(elevationHeight(fieldHeight)) + "px");
+    title.textContent = elevationTitle(shown);
+    note.textContent = elevationNote(shown);
+    note.hidden = note.textContent === "";
+    sideButtons.forEach((button, index) => {
+      button.className = "ui-btn elev__side" + (WALL_SIDES[index] === view ? " is-on" : "");
+    });
+    paint();
+    return shown;
+  }
+
+  function destroy() {
+    node.remove();
+    shown = null;
+  }
+
+  return { node, update, repaint: paint, destroy };
+}
+
 // src/canvas.js
 // Холст разметки: план, метки, блоки, ломаные, выделение и отмена.
 //
@@ -20346,6 +21108,7 @@ function onHistoryChange(listener) {
 //
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
+
 
 
 
@@ -20918,6 +21681,7 @@ function canvasPaint() {
     image: canvasImage(state),
     // Чертёж — слой под метками; выключатель его прячет, а не удаляет.
     drawing: state.drawingShown !== false,
+    selectedWallId: state.selectedWallId || null,
     filter: state.filter,
     view,
     selectedIds: state.selectedMarkIds,
@@ -22628,7 +23392,16 @@ function canvasTapAction(state, drag, options = {}) {
     return { selectedMarkIds: same ? [] : [markId], selectedOutlineId: null };
   }
   if (drag.kind === "pan" && drag.tapSelected && selected.length > 0) return { selectedMarkIds: [] };
-  if (drag.kind === "empty" && busy) return clear;
+  if (drag.kind === "empty") {
+    // **Стена под меткой, и метка всегда главнее** (таск 129): сюда попадает
+    // только клик, который ничего другого не задел. Повторный клик по уже
+    // выделенной стене её не снимает — снимает клик мимо всего и крестик на
+    // полосе развёртки: выделение стены это открытая развёртка, и закрывать
+    // её случайным попаданием в ту же стену было бы обидно.
+    const wallId = drag.wallId || null;
+    if (wallId) return wallId === state.selectedWallId ? null : { ...clear, selectedWallId: wallId };
+    if (busy || state.selectedWallId) return { ...clear, selectedWallId: null };
+  }
   return null;
 }
 
@@ -23091,7 +23864,41 @@ function canvasPointerDown(event) {
     start: point,
     view: { ...state.view },
     moved: false,
+    // Стена под курсором запоминается здесь, на нажатии: по отпусканию решать
+    // будет `canvasTapAction`, и считать ей второй раз нечем — у неё нет ни
+    // плана, ни масштаба.
+    wallId: canvasWallAt(state, screenToPlan(point, scheme, view)),
   };
+}
+
+// Сколько пикселей экрана прощается промаху по стене. **Здесь пиксели
+// уместны**, в отличие от порога привязки метки (там миллиметры): это
+// попадание рукой, а не свойство данных, и оно обязано вести себя одинаково
+// на любом масштабе.
+const CANVAS_WALL_PICK_PX = 6;
+
+/**
+ * Стена чертежа под точкой плана — или `null`. Выключенный слой чертежа стену
+ * не отдаёт: кликать по тому, чего не видно, человек не может.
+ */
+function canvasWallAt(state, plan) {
+  if (!state || state.drawingShown === false) return null;
+  const scheme = canvasScheme(state);
+  if (!scheme) return null;
+  const project = canvasProject(state);
+  const walls = wallsOnScheme(project, scheme.id);
+  if (walls.length === 0) return null;
+  const at = planFractionToMm(project, scheme.id, plan);
+  const bridge = drawingBridge(project, scheme, canvasViewOf(state));
+  if (!at || !bridge || !(bridge.pxPerMm > 0)) return null;
+  const slack = CANVAS_WALL_PICK_PX / bridge.pxPerMm;
+  let best = null;
+  for (const wall of walls) {
+    const gap = segmentDistanceMm(at, wall.aMm, wall.bMm) - Number(wall.thicknessMm) / 2;
+    if (gap > slack) continue;
+    if (!best || gap < best.gap) best = { gap, id: wall.id };
+  }
+  return best ? best.id : null;
 }
 
 // Перетаскивание метки: новые точки считаются от снимка «до», а не от
@@ -23729,6 +24536,7 @@ function mountCanvas(host, api) {
     if ("schemeId" in changed) {
       canvasCancelDraft();
       canvasPreview = null;
+      if (state.selectedWallId) canvasApi.setState({ selectedWallId: null });
     }
     // Режим, выбранный тип и его вид в справочнике — всё это меняет то, что
     // рисует рука. Черновик подтягивается к новому положению дел здесь, в
@@ -23948,13 +24756,75 @@ function mountCanvasFullscreen(host, api) {
   render();
 }
 
-// Поверх холста живут двое: подсказка слева и полный экран справа. Точка
-// монтирования одна, поэтому и монтируются они вместе — панель чистит поле
-// один раз, а не каждый за себя.
+/**
+ * Полоса развёртки выделенной стены поверх холста (таск 129).
+ *
+ * Прижимается к тому краю поля, который **дальше от самой стены**: иначе она
+ * регулярно накрывала бы ровно то, ради чего её открыли. Сторона стены живёт
+ * в состоянии сеанса рядом с выделением — в объект она не попадает, это
+ * взгляд, а не свойство чертежа.
+ */
+function mountCanvasElevation(host, api) {
+  const strip = createElevationStrip({
+    onSide: (side) => api.setState({ wallSide: side }),
+    onClose: () => api.setState({ selectedWallId: null }),
+  });
+  host.append(strip.node);
+
+  function render() {
+    const state = api.getState();
+    const scheme = canvasScheme(state);
+    const project = state.project;
+    if (!project || !scheme || !state.selectedWallId || !canvasNode) {
+      strip.update({ project, wallId: null });
+      return;
+    }
+    const height = canvasNode.clientHeight || 0;
+    strip.update({
+      project,
+      wallId: state.selectedWallId,
+      side: state.wallSide,
+      place: elevationPlace(canvasWallMiddleY(state), height),
+      fieldHeight: height,
+    });
+  }
+
+  api.subscribe((state, changed) => {
+    if (
+      "selectedWallId" in changed ||
+      "wallSide" in changed ||
+      "project" in changed ||
+      "schemeId" in changed ||
+      "view" in changed ||
+      "layout" in changed
+    ) {
+      render();
+    }
+  });
+  if (typeof window !== "undefined") window.addEventListener("resize", () => strip.repaint());
+  render();
+}
+
+// Середина выделенной стены в пикселях поля — по ней решается, у какого края
+// встанет полоса.
+function canvasWallMiddleY(state) {
+  const scheme = canvasScheme(state);
+  const wall = scheme ? findWall(state.project, state.selectedWallId) : null;
+  const bridge = wall ? drawingBridge(state.project, scheme, canvasViewOf(state)) : null;
+  if (!wall || !bridge) return Number.NaN;
+  const a = bridge.toScreen(wall.aMm);
+  const b = bridge.toScreen(wall.bMm);
+  return (a.y + b.y) / 2;
+}
+
+// Поверх холста живут трое: подсказка слева, полный экран справа и полоса
+// развёртки у дальнего от стены края. Точка монтирования одна, поэтому и
+// монтируются они вместе — панель чистит поле один раз, а не каждый за себя.
 function mountCanvasOverlay(host, api) {
   host.replaceChildren();
   mountCanvasHint(host, api);
   mountCanvasFullscreen(host, api);
+  mountCanvasElevation(host, api);
 }
 
 registerPanel(PANEL_IDS.canvas, mountCanvas);
@@ -35710,6 +36580,7 @@ registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
 
 
+
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
 // экрана на миллиметр», и пороги притяжки, заданные в пикселях экрана, остаются
@@ -36061,7 +36932,7 @@ const WORKSHOP_OPENING_DEFAULTS = {
 
 /** Сколько миллиметров от конца `a` до проекции точки на стену, зажато в стену. */
 function workshopAlongWall(wall, pointMm) {
-  const vectors = drawingWallVectors(wall);
+  const vectors = wallVectors(wall);
   if (!vectors) return 0;
   const along = (pointMm.x - wall.aMm.x) * vectors.u.x + (pointMm.y - wall.aMm.y) * vectors.u.y;
   return Math.max(0, Math.min(vectors.len, Math.round(along)));
@@ -36076,7 +36947,7 @@ function workshopAlongWall(wall, pointMm) {
  * «не помещается», а поставить окно вплотную к углу — обычное дело.
  */
 function workshopOpeningAt(wall, pointMm, widthMm) {
-  const vectors = drawingWallVectors(wall);
+  const vectors = wallVectors(wall);
   if (!vectors) return 0;
   const width = Number(widthMm) || 0;
   const middle = workshopAlongWall(wall, pointMm);
@@ -36223,7 +37094,7 @@ function workshopPick(project, schemeId, pointMm, view, selected) {
   for (let index = walls.length - 1; index >= 0; index -= 1) {
     const wall = walls[index];
     const limit = Math.max(slackMm, Number(wall.thicknessMm) / 2);
-    if (drawingSegmentDistance(pointMm, wall.aMm, wall.bMm) <= limit) {
+    if (segmentDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) {
       return { kind: "wall", id: wall.id, wallId: wall.id, atMm: null };
     }
   }
@@ -36414,12 +37285,19 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
   const fingers = new Map();
   let pinch = null;
 
+  // Полоса развёртки — тот же кирпич, что над основным холстом: сторона у них
+  // общая (живёт в состоянии сеанса), и переключение в окне помнится, когда
+  // окно закроют.
+  const strip = createElevationStrip({
+    onSide: (side) => setState({ wallSide: side }),
+    onClose: () => select(null),
+  });
   const node = uiEl("canvas", { class: "workshop__canvas" });
   // Поле забирает фокус по нажатию: иначе после правки толщины фокус остаётся
   // в поле ввода, а Ctrl+Z там принадлежит браузеру — человек жмёт отмену над
   // чертежом и не получает ничего. То же правило, что у холста
   // (`canvasKeyboardOwner`): работают с чертежом — клавиатура его.
-  const stage = uiEl("div", { class: "workshop__stage", attrs: { tabindex: "-1" } }, [node]);
+  const stage = uiEl("div", { class: "workshop__stage", attrs: { tabindex: "-1" } }, [node, strip.node]);
   const ctx = node.getContext ? node.getContext("2d") : null;
 
   // ——— левая часть: инструменты над полем ———
@@ -36775,6 +37653,11 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     const same = Boolean(selected) === Boolean(next) && (!next || (selected.kind === next.kind && selected.id === next.id));
     if (same) return;
     selected = next;
+    // Выделенная стена попадает и в состояние сеанса: закрыли окно — её
+    // развёртка осталась открытой над основным холстом, и искать стену заново
+    // не надо.
+    const wallId = next && next.kind === "wall" ? next.id : null;
+    if (getState().selectedWallId !== wallId) setState({ selectedWallId: wallId });
     sync();
   }
 
@@ -36941,7 +37824,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
     for (let index = list.length - 1; index >= 0; index -= 1) {
       const wall = list[index];
       const limit = Math.max(WORKSHOP_WALL_PX / view.zoom, Number(wall.thicknessMm) / 2);
-      if (drawingSegmentDistance(pointMm, wall.aMm, wall.bMm) <= limit) return { wall };
+      if (segmentDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) return { wall };
     }
     return null;
   }
@@ -37835,6 +38718,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
     }
     syncRooms(current);
+    syncElevation(current, wall);
     meta.textContent = workshopStatus(current, schemeId, spot);
     node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
@@ -37943,6 +38827,25 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
         : strings.workshop.objectHint;
   }
 
+  // Полоса развёртки в окне: у той же стены, что выделена, и у того края
+  // поля, который дальше от неё.
+  function syncElevation(current, wall) {
+    if (!wall) {
+      strip.update({ project: current, wallId: null });
+      return;
+    }
+    const box = viewport();
+    const a = screenOf(wall.aMm);
+    const b = screenOf(wall.bMm);
+    strip.update({
+      project: current,
+      wallId: wall.id,
+      side: getState().wallSide,
+      place: elevationPlace((a.y + b.y) / 2, box.height),
+      fieldHeight: box.height,
+    });
+  }
+
   // Список комнат перестраивается только когда он и правда другой: иначе
   // перерисовка на каждом шаге истории выбивала бы курсор из поля, в котором
   // в эту минуту набирают высоту.
@@ -37993,6 +38896,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
       finish();
       return;
     }
+    if ("wallSide" in changed) sync();
     if ("project" in changed || "schemeImage" in changed) {
       // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
       if (selected && !aliveSelection()) selected = null;
@@ -38009,6 +38913,7 @@ function openWorkshop({ schemeId, api, onCalibrate }) {
 
   function cleanup() {
     if (closed) return;
+    strip.destroy();
     closed = true;
     workshopOpened = false;
     if (unsubscribe) unsubscribe();
