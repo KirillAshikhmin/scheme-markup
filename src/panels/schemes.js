@@ -1,7 +1,15 @@
-// Схемы объекта: список, загрузка плана кнопкой и перетаскиванием, поворот
-// и обрезка, переименование, порядок, удаление.
+// Схемы объекта: список, загрузка плана кнопкой и перетаскиванием,
+// переименование, порядок, удаление.
 // Холст рисует другой модуль — сюда он приходит только за картинкой:
 // подготовленный план и его размер кладутся в состояние сеанса (`schemeImage`).
+//
+// **Поворот и обрезка живут только там, где картинка приходит** (G175): в окне
+// загрузки нового плана и в окне замены подложки. Отдельного входа «Править
+// план» у загруженной подложки нет — правка размеченного плана прижимала метки
+// к краю рамки, снимала калибровку и тащила за собой начало координат чертежа,
+// и каждую из этих бед приходилось обходить по отдельности. Запрет снимает их
+// разом: пока чертить нечего — правь сколько угодно; появилась разметка —
+// подложка больше не шевелится.
 import { layoutAllows, PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
 import {
   addScheme,
@@ -34,7 +42,6 @@ import {
   decodePlanImage,
   identityTransform,
   isPlanImageFile,
-  isIdentityTransform,
   normalizeTransform,
   readPlanImage,
   releasePlanImage,
@@ -720,7 +727,10 @@ function mountSchemesPanel(host, api) {
         : strings.mobile.viewOnly;
       return;
     }
-    hint.textContent = "";
+    // Кнопка правки плана была здесь, и молча исчезнувшая кнопка читается как
+    // поломка. Строка под списком говорит и куда она делась, и что делать
+    // вместо неё; в просмотре её нет — там не правят вовсе.
+    hint.textContent = editable ? strings.schemes.editOnLoad : "";
     const ordered = schemesInOrder(project);
     ordered.forEach((scheme, index) => {
       const marks = project.marks.filter((mark) => mark.schemeId === scheme.id).length;
@@ -742,9 +752,13 @@ function mountSchemesPanel(host, api) {
         }),
         uiEl("span", { class: "scheme-row__meta", text: meta, title: meta }),
         uiEl("div", { class: "scheme-row__tools", attrs: editable ? {} : { hidden: "hidden" } }, [
-          uiIconButton("crop", { title: strings.schemes.edit, on: { click: () => editPlan(scheme.id) } }),
+          // Поворота и обрезки здесь больше нет (G175) — осталась замена, и она
+          // же единственный путь повернуть уже загруженный план: выбрал тот же
+          // файл — открылось то же окно. Подсказка об этом длиннее подписи,
+          // поэтому слово кнопки и её подсказка разведены.
           uiIconButton("swap", {
-            title: strings.schemes.replace,
+            label: strings.schemes.replace,
+            title: strings.schemes.replaceHint,
             on: {
               click: () => {
                 replaceTarget = scheme.id;
@@ -826,75 +840,19 @@ function mountSchemesPanel(host, api) {
     notify(text("schemes.added", { name: added.scheme.name }), "success");
   }
 
-  // Правка уже загруженного плана: метки и контуры пересчитываются тем же
-  // преобразованием. Про метки, которые уедут за рамку, спрашиваем до
-  // применения — рамка прижимает их к краю, и прежних мест в них не остаётся.
-  async function editPlan(schemeId) {
-    const project = getState().project;
-    const scheme = findScheme(project, schemeId);
-    if (!scheme || !scheme.imageId) return;
-    const blob = await getImage(scheme.imageId);
-    if (!blob) {
-      notify(strings.image.broken, "error");
-      return;
-    }
-    const marksOfScheme = project.marks.filter((mark) => mark.schemeId === schemeId);
-    const edited = await openPlanEditor({
-      blob,
-      width: scheme.width,
-      height: scheme.height,
-      title: scheme.name,
-      beforeApply: async (transform) => {
-        const count = marksPushedOutside(marksOfScheme, transform);
-        if (count === 0) return true;
-        return uiConfirm({
-          title: strings.image.outsideTitle,
-          message: text("image.marksOutsideAsk", { count }),
-          confirmLabel: strings.image.cropAnyway,
-        });
-      },
-    });
-    if (!edited || isIdentityTransform(edited.transform)) return;
-    const imageId = await putImage(edited.blob);
-    const before = getState().project;
-    if (!findScheme(before, schemeId)) return;
-    let result;
-    try {
-      result = applyPlanEdit(before, schemeId, {
-        imageId,
-        width: edited.width,
-        height: edited.height,
-        transform: edited.transform,
-      });
-    } catch (error) {
-      notify(error.message, "error");
-      return;
-    }
-    // Через canvasCommit — тем же способом, что и «Заменить план». Поворот и
-    // обрезка двигают координаты всех меток схемы разом: это самая
-    // разрушительная правка в сборке, и отменяться она обязана раньше любой
-    // другой. Прежняя картинка поэтому остаётся в хранилище: без неё отмена
-    // вернула бы координаты на план, которого уже нет. Уберёт её уборка при
-    // следующем запуске — тогда, когда отменять будет нечего.
-    canvasCommit(before, result.project, strings.history.editImage, { schemeId });
-    // Снятая калибровка важнее прижатых меток: без неё с листа пропадут длины,
-    // и узнать об этом из таблицы — поздно.
-    notify(
-      result.scaleLost
-        ? strings.image.appliedScaleDropped
-        : result.pushed === 0
-          ? strings.image.applied
-          : text("image.appliedClamped", { count: result.pushed }),
-      "success",
-    );
-  }
-
   // Замена подложки: картинка другая, разметка остаётся вся. Координаты — доли
   // плана, поэтому при той же пропорции всё встаёт само; при другой разметка
   // поедет, и об этом спрашивают до применения, а не показывают кашу после.
   // Прежнее преобразование не переносится: поворот и обрезка запечены в старой
   // картинке, самого преобразования нигде нет. Новый файл правится тем же
   // редактором и теми же руками — с предпросмотром, а не вслепую.
+  //
+  // После запрета правки загруженной подложки (G175) это единственное окно, где
+  // у уже размеченной схемы ещё есть поворот и обрезка, — но поворот здесь
+  // относится к **новому файлу**, а не к разметке: доли меток не трогаются
+  // вовсе. Повернуть сам размеченный план этим не выйдет, и обещать такого
+  // нельзя: метки остались бы в прежних долях и разъехались бы с планом.
+  // Сказано об этом рамкой вопроса о пропорциях — она ровно про этот случай.
   async function replacePlanFromFile(schemeId, file) {
     const scheme = findScheme(getState().project, schemeId);
     if (!scheme) return;
