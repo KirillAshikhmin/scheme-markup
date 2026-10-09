@@ -59,6 +59,7 @@ import {
 import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+import { openWorkshop } from "./workshop.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
@@ -711,8 +712,16 @@ function mountSchemesPanel(host, api) {
     class: "ui-btn ui-btn--accent ui-btn--wide",
     on: { click: () => fileInput.click() },
   });
+  // Схема без подложки: заказчик просил такую прямо («но можно создавать схему
+  // без подложки»), а других дверей к `addScheme` в панели нет — загрузка плана
+  // всегда приходила с картинкой. Кнопка неяркая нарочно: обычный путь — план.
+  const blankButton = uiButton(strings.schemes.addBlank, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.schemes.addBlankHint,
+    on: { click: () => addBlankScheme() },
+  });
   const hint = uiEl("p", { class: "panel__empty", text: strings.schemes.addHint });
-  host.replaceChildren(addButton, fileInput, replaceInput, list, hint);
+  host.replaceChildren(addButton, blankButton, fileInput, replaceInput, list, hint);
 
   function render() {
     const state = getState();
@@ -722,6 +731,8 @@ function mountSchemesPanel(host, api) {
     list.replaceChildren();
     addButton.disabled = !project;
     addButton.hidden = !editable;
+    blankButton.disabled = !project;
+    blankButton.hidden = !editable;
     // Счётчик в заголовке: свёрнутый раздел не путается с пустым.
     setSectionBadge(SECTION_IDS.schemes, project && project.schemes.length ? project.schemes.length : "");
     if (!project || project.schemes.length === 0) {
@@ -788,9 +799,9 @@ function mountSchemesPanel(host, api) {
           }),
         ]),
       );
-      // Третья строка — всё, что про сам план: повернуть и откалибровать. Без
-      // плана ни того, ни другого не бывает, в просмотре правок нет вовсе —
-      // там строки нет совсем.
+      // Третья строка — всё, что про сам план и про чертёж по нему: повернуть,
+      // откалибровать, открыть мастерскую. В просмотре правок нет вовсе — там
+      // строки нет совсем.
       //
       // Поворот стоит здесь, а не в ряду кнопок выше (G178): семь значков в
       // одной строке ужимали размер плана до многоточия — это видно на снимке
@@ -800,24 +811,40 @@ function mountSchemesPanel(host, api) {
       //
       // Масштаб — словами, а не значком: состояние «задан или нет» должно
       // читаться с панели, не наводя курсор.
-      if (editable && scheme.imageId) {
-        const view = schemesScaleView(project, scheme.id, scheme.name);
+      //
+      // Мастерская чертежа (таск 125) — тоже словом и тоже здесь: чертёж
+      // принадлежит схеме, как и масштаб. Поворота и масштаба у схемы **без**
+      // подложки не бывает, а чертёж бывает — он сам себе план, и строка для
+      // такой схемы остаётся с одной кнопкой.
+      if (editable) {
+        const view = scheme.imageId ? schemesScaleView(project, scheme.id, scheme.name) : null;
         row.append(
           uiEl("div", { class: "scheme-row__plan" }, [
-            uiIconButton("rotateLeft", {
-              title: strings.schemes.turnLeft,
-              attrs: turning ? { disabled: "disabled" } : {},
-              on: { click: () => turnPlan(scheme.id, -90) },
-            }),
-            uiIconButton("rotateRight", {
-              title: strings.schemes.turnRight,
-              attrs: turning ? { disabled: "disabled" } : {},
-              on: { click: () => turnPlan(scheme.id, 90) },
-            }),
-            uiButton(view.label, {
-              class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
-              title: view.title,
-              on: { click: () => editScale(scheme.id) },
+            scheme.imageId
+              ? uiIconButton("rotateLeft", {
+                  title: strings.schemes.turnLeft,
+                  attrs: turning ? { disabled: "disabled" } : {},
+                  on: { click: () => turnPlan(scheme.id, -90) },
+                })
+              : null,
+            scheme.imageId
+              ? uiIconButton("rotateRight", {
+                  title: strings.schemes.turnRight,
+                  attrs: turning ? { disabled: "disabled" } : {},
+                  on: { click: () => turnPlan(scheme.id, 90) },
+                })
+              : null,
+            view
+              ? uiButton(view.label, {
+                  class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
+                  title: view.title,
+                  on: { click: () => editScale(scheme.id) },
+                })
+              : null,
+            uiButton(strings.workshop.open, {
+              class: "ui-btn scheme-row__drawing" + (scheme.imageId ? "" : " ui-btn--wide"),
+              title: strings.workshop.openHint,
+              on: { click: () => openDrawing(scheme.id) },
             }),
           ]),
         );
@@ -863,6 +890,39 @@ function mountSchemesPanel(host, api) {
     });
     setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
     notify(text("schemes.added", { name: added.scheme.name }), "success");
+  }
+
+  /**
+   * Схема без подложки. Модель её допускала с самого начала (`imageId` ничей,
+   * `width` и `height` нули), а завести было нечем: единственная дорога к
+   * `addScheme` шла через выбор файла. Заказчик просил такую схему прямо —
+   * «можно создавать схему без подложки», — и размер ей даёт сам чертёж
+   * (`drawingBoundsMm`), а не картинка.
+   *
+   * Заводится тем же путём, что схема с планом, — через `setState`: добавление
+   * схемы в этой панели никогда не было шагом истории, и заводить второй
+   * порядок ради одной кнопки не стоит.
+   */
+  async function addBlankScheme() {
+    const state = getState();
+    if (!state.project) return;
+    const added = addScheme(state.project, {
+      name: text("schemes.defaultName", { number: state.project.schemes.length + 1 }),
+    });
+    setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
+    notify(text("schemes.added", { name: added.scheme.name }), "success");
+    openDrawing(added.scheme.id);
+  }
+
+  // Мастерская чертежа — своё окно (`panels/workshop.js`). Калибровка живёт на
+  // холсте, поэтому окно её не знает, а просит сделать: иначе мастерская
+  // потянула бы за собой половину этой панели.
+  function openDrawing(schemeId) {
+    openWorkshop({
+      schemeId,
+      api: { getState, setState, notify, subscribe },
+      onCalibrate: (target) => startScale(target),
+    });
   }
 
   /**
@@ -985,11 +1045,20 @@ function mountSchemesPanel(host, api) {
     // картинка поэтому и остаётся в хранилище — её убирает уборка при запуске,
     // когда отменять уже нечего.
     canvasCommit(before, replaced.project, strings.history.replaceImage, { schemeId });
-    // Два разных известия в одном: куда встала разметка и что стало с
-    // масштабом. Второе дописывается строкой словаря, а не вплетается в
-    // четыре варианта первого: масштаб снимается независимо от пропорций.
+    // Три разных известия в одном: куда встала разметка, что стало с масштабом
+    // и что стало с привязкой чертежа. Второе и третье дописываются строками
+    // словаря, а не вплетаются в варианты первого: снимаются они независимо от
+    // пропорций и друг от друга.
+    //
+    // Про привязку сказать было нечем до этого таска: `replaceSchemeImage`
+    // возвращал `originDropped` с таска 123, но поставить привязку было некому,
+    // и известие было бы про невидимое. Теперь есть кому — и замена подложки
+    // перестала терять её молча (долг интерфейса из таска 123).
     const placed = sameAspect(wasSize, edited) ? strings.image.replaced : strings.image.replacedShifted;
-    notify(replaced.scaleDropped ? placed + " " + strings.scale.replaceDropped : placed, "success");
+    const notes = [placed];
+    if (replaced.scaleDropped) notes.push(strings.scale.replaceDropped);
+    if (replaced.originDropped) notes.push(strings.workshop.replaceDropped);
+    notify(notes.join(" "), "success");
   }
 
   // ——— масштаб плана ——————————————————————————————————————————————————
