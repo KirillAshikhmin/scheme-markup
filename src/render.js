@@ -11,6 +11,7 @@
 // метки задан в пикселях плана, поэтому метка живёт на плане как наклейка:
 // приближение увеличивает и её, а экспорт в двойном разрешении даёт тот же вид.
 import {
+  OPENING_KIND_DOOR,
   SHAPE_NAMES,
   blockLabel,
   blockLabelParts,
@@ -27,11 +28,18 @@ import {
   markLabelLeader,
   markPointer,
   listedTypes,
+  openingsInWall,
   outlinesInOrder,
+  planOriginOf,
+  planPixelsPerMeter,
   pointInOutline,
+  schemeObjectKindsInOrder,
+  schemeObjectTopMm,
+  schemeObjectsOnScheme,
   styleOf,
   labelOf,
   typesInOrder,
+  wallsOnScheme,
 } from "./model.js";
 import { strings, text } from "./strings.js";
 
@@ -4157,6 +4165,453 @@ export function drawLegend(ctx, { project, scheme, filter, view, box }) {
 
 // Весь кадр: план, метки, подписи, при надобности легенда. Тот же код и на
 // экране, и в экспорте — меняется только масштаб во `view`.
+// ——— чертёж: стены, проёмы и объекты ——————————————————————————————————
+//
+// Слой чертежа рисуется **одним кодом на две поверхности** — в мастерской
+// (таски 125–126) и на основном холсте вместе с метками (таск 127). Второй
+// отрисовки быть не должно: разойдись они, дверь на холсте открывалась бы не в
+// ту сторону, чем в окне, и заметили бы это на бумаге.
+//
+// Поверхности отличаются ровно одним — тем, как миллиметр превращается в
+// пиксель экрана, и это вынесено в **мост** (`bridge`):
+//   мастерская — миллиметр и есть «пиксель плана», мост тождественный;
+//   холст — миллиметры ложатся на доли плана через калибровку и привязку
+//     (ADR 008), и мост считает `drawingBridge`.
+// Больше ничего о поверхности этот код не знает.
+
+// Краска чертежа. Стена почти чёрная — на бумаге и поверх скана она должна
+// читаться стеной; объект на полу фиолетовый и тоньше — он не стена, и путать
+// их нельзя. В чёрно-белом листе всё это проходит через `mono.js` и становится
+// тушью, своей развилки здесь нет (G170).
+export const DRAWING_WALL = "#30363d";
+export const DRAWING_EDGE = "#0f1419";
+export const DRAWING_PAPER = "#f6f8fa";
+export const DRAWING_OBJECT = "#6639ba";
+export const DRAWING_OBJECT_FILL = "rgba(102, 57, 186, 0.12)";
+export const DRAWING_ACTIVE = "#1f6feb";
+export const DRAWING_BAD = "#d1242f";
+export const DRAWING_CAPTION = "#57606a";
+
+// Подпись объекта показывается, только когда объекту есть куда её принять:
+// на общем виде квартиры десяток подписей превратился бы в кашу поверх меток.
+const DRAWING_CAPTION_MIN_PX = 70;
+
+/**
+ * Единичные векторы стены: `u` — вдоль, от `a` к `b`; `n` — **влево** от него.
+ * «Влево» — то же слово, которым модель назвала сторону открывания двери: та,
+ * что слева, если идти от `a` к `b`. Ось `y` на экране растёт вниз, поэтому
+ * левая нормаль это `(u.y, −u.x)`, и перевёрнут этот знак ровно здесь, в одном
+ * месте на всю сборку.
+ */
+export function drawingWallVectors(wall) {
+  if (!wall) return null;
+  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
+  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return null;
+  // `|| 0` — от **минус нуля**: у вертикальной стены `−dx / len` даёт `-0`, и
+  // он поехал бы дальше в координаты створки. В сборке это уже ловили
+  // (ADR 008, `drawingMmValue`), и второй раз наступать незачем.
+  return {
+    len,
+    u: { x: dx / len || 0, y: dy / len || 0 },
+    n: { x: dy / len || 0, y: -dx / len || 0 },
+  };
+}
+
+/** Концы проёма на оси стены плюс её векторы — всё, чем он рисуется и ловится. */
+export function drawingOpeningSpan(wall, opening) {
+  const vectors = drawingWallVectors(wall);
+  if (!vectors || !opening) return null;
+  const at = Number(opening.atMm) || 0;
+  const width = Number(opening.widthMm) || 0;
+  const point = (distance) => ({
+    x: wall.aMm.x + vectors.u.x * distance,
+    y: wall.aMm.y + vectors.u.y * distance,
+  });
+  return { from: point(at), to: point(at + width), u: vectors.u, n: vectors.n, len: vectors.len, width };
+}
+
+/**
+ * Створка двери: петля, закрытое положение и кончик открытого.
+ *
+ * Четыре сочетания петель и стороны — это четыре разные двери, и различают их
+ * на чертеже именно по створке: с какого косяка она растёт и в какую сторону
+ * стены открывается. Полотно рисуется раскрытым на четверть оборота — так его
+ * рисуют на планах, и так видно, какой кусок пола дверь занимает.
+ */
+export function drawingDoorLeaf(wall, opening) {
+  const span = drawingOpeningSpan(wall, opening);
+  if (!span || !(span.width > 0)) return null;
+  const atStart = opening.hinge !== "end";
+  const hinge = atStart ? span.from : span.to;
+  const closed = atStart ? span.to : span.from;
+  const side = opening.swing === "right" ? -1 : 1;
+  const tip = { x: hinge.x + span.n.x * side * span.width, y: hinge.y + span.n.y * side * span.width };
+  return { hinge, closed, tip, radius: span.width, side, n: span.n };
+}
+
+/**
+ * Углы габарита объекта в миллиметрах — то же, по чему модель считает размер
+ * чертежа: у прямоугольника четыре повёрнутых угла, у ломаной её вершины.
+ * Это геометрия отрисовки, а не вторая модель: наружу `schemeObjectCornersMm`
+ * модель не отдаёт, а рисовать и ловить объект чем-то надо.
+ */
+export function drawingObjectCorners(object) {
+  if (!object) return [];
+  if (object.shape === "polyline") {
+    return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+  }
+  const at = object.atMm || { x: 0, y: 0 };
+  const halfWidth = Number(object.widthMm) / 2;
+  const halfDepth = Number(object.depthMm) / 2;
+  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return [
+    [-halfWidth, -halfDepth],
+    [halfWidth, -halfDepth],
+    [halfWidth, halfDepth],
+    [-halfWidth, halfDepth],
+  ].map(([x, y]) => ({ x: Number(at.x) + x * cos - y * sin, y: Number(at.y) + x * sin + y * cos }));
+}
+
+export function drawingSegmentDistance(point, from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = dx * dx + dy * dy;
+  if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
+  let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
+  t = Math.min(1, Math.max(0, t));
+  return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
+}
+
+function drawingInsidePolygon(point, corners) {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+    const a = corners[i];
+    const b = corners[j];
+    const crosses = a.y > point.y !== b.y > point.y;
+    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/** Попал ли курсор в объект: внутрь прямоугольника или в полосу ломаной. */
+export function drawingHitObject(object, pointMm, slackMm) {
+  const corners = drawingObjectCorners(object);
+  if (corners.length === 0) return false;
+  if (object.shape === "polyline") {
+    const limit = Math.max(Number(slackMm) || 0, Number(object.depthMm) / 2);
+    for (let index = 1; index < corners.length; index += 1) {
+      if (drawingSegmentDistance(pointMm, corners[index - 1], corners[index]) <= limit) return true;
+    }
+    return false;
+  }
+  if (drawingInsidePolygon(pointMm, corners)) return true;
+  const limit = Number(slackMm) || 0;
+  for (let index = 0; index < corners.length; index += 1) {
+    if (drawingSegmentDistance(pointMm, corners[index], corners[(index + 1) % corners.length]) <= limit) return true;
+  }
+  return false;
+}
+
+// Поворот вектора на четверть оборота по часовой в экранных осях — тот же, что
+// `turnVector` модели и что `ctx.rotate` при положительном угле. Повторён
+// здесь потому, что модель его наружу не отдаёт; согласие с моделью не
+// объявляется, а проверяется тестом (`drawingBridge` против `planMmToFraction`).
+function drawingTurn(point, turn) {
+  if (turn === 90) return { x: -point.y, y: point.x };
+  if (turn === 180) return { x: -point.x, y: -point.y };
+  if (turn === 270) return { x: point.y, y: -point.x };
+  return { x: point.x, y: point.y };
+}
+
+/**
+ * Мост «миллиметр чертежа → пиксель экрана» для основного холста.
+ *
+ * Считается **один раз на кадр**, а не вызовом `planMmToFraction` на каждую
+ * точку: у сотни стен это тысяча вызовов, каждый со своим поиском схемы и
+ * пересчётом калибровки. Преобразование аффинное, поэтому сводится к одному
+ * умножению на точку — и согласие этой арифметики с мостом модели проверяется
+ * тестом на всех четырёх поворотах подложки.
+ *
+ * `null` — моста нет: нет калибровки или нет привязки. Чертёж тогда не
+ * рисуется, и сказать об этом должен тот, кто звал (ADR 008: «чертёж виден на
+ * подложке только при двух условиях сразу»).
+ *
+ * **Угол привязки не кэшируется ни на миг**: кнопка поворота плана меняет его
+ * в любую минуту (G178), а мост живёт один кадр.
+ */
+export function drawingBridge(project, scheme, view) {
+  if (!project || !scheme) return null;
+  const perMeter = planPixelsPerMeter(project, scheme.id);
+  const origin = planOriginOf(project, scheme.id);
+  if (!(perMeter > 0) || !origin) return null;
+  const state = renderView(view);
+  const width = schemeWidth(scheme);
+  const height = schemeHeight(scheme);
+  const pxPerMm = perMeter / 1000;
+  const zeroX = state.offsetX + origin.at.x * width * state.zoom;
+  const zeroY = state.offsetY + origin.at.y * height * state.zoom;
+  const turn = origin.turn;
+  const scale = pxPerMm * state.zoom;
+  return {
+    pxPerMm: scale,
+    toScreen(pointMm) {
+      const px = drawingTurn({ x: Number(pointMm.x) * scale, y: Number(pointMm.y) * scale }, turn);
+      return { x: zeroX + px.x, y: zeroY + px.y };
+    },
+  };
+}
+
+/** Мост мастерской: там «пиксель плана» и есть миллиметр, поворота нет. */
+export function drawingUnitBridge(view) {
+  const state = renderView(view);
+  return {
+    pxPerMm: state.zoom,
+    toScreen(pointMm) {
+      return { x: state.offsetX + Number(pointMm.x) * state.zoom, y: state.offsetY + Number(pointMm.y) * state.zoom };
+    },
+  };
+}
+
+function drawingOpeningsByWall(project, schemeId) {
+  const byWall = new Map();
+  for (const wall of wallsOnScheme(project, schemeId)) byWall.set(wall.id, openingsInWall(project, wall.id));
+  return byWall;
+}
+
+/**
+ * Слой чертежа целиком. Рисует стены с толщиной, проёмы в них и объекты на
+ * полу — в этом порядке снизу вверх: объект на полу уходит под стену, потому
+ * что стена на чертеже главная, а проём ложится поверх своей стены, потому что
+ * он в ней дырка.
+ *
+ * `options.active` — что подсвечено и ручками (только мастерская).
+ * `options.wallAt` — подмена концов стены на время перетаскивания.
+ * `options.openingAt` — подмена отступа проёма на то же время.
+ * `options.handle` — чем рисовать ручку; без неё ручек нет.
+ */
+export function drawDrawing(ctx, options = {}) {
+  const { project, schemeId, bridge } = options;
+  if (!project || !schemeId || !bridge) return;
+  const walls = wallsOnScheme(project, schemeId);
+  const objects = options.objects === false ? [] : schemeObjectsOnScheme(project, schemeId);
+  if (walls.length === 0 && objects.length === 0) return;
+  const active = options.active || null;
+  const kinds = new Map(schemeObjectKindsInOrder(project).map((kind) => [kind.id, kind]));
+  for (const object of objects) {
+    drawDrawingObject(ctx, bridge, options.objectAt ? options.objectAt(object) : object, {
+      active: active && active.kind === "object" && active.id === object.id,
+      name: (kinds.get(object.kindId) || {}).name || "",
+      handle: options.handle,
+    });
+  }
+  if (options.walls === false) return;
+  const byWall = drawingOpeningsByWall(project, schemeId);
+  for (const wall of walls) {
+    const ends = options.wallAt ? options.wallAt(wall) : wall;
+    drawDrawingWall(ctx, bridge, ends, active && active.kind === "wall" && active.id === wall.id);
+  }
+  for (const wall of walls) {
+    const ends = options.wallAt ? options.wallAt(wall) : wall;
+    for (const opening of byWall.get(wall.id) || []) {
+      drawDrawingOpening(ctx, bridge, ends, options.openingAt ? options.openingAt(opening) : opening, {
+        active: active && active.kind === "opening" && active.id === opening.id,
+        handle: options.handle,
+      });
+    }
+  }
+  if (!active || active.kind !== "wall" || !options.handle) return;
+  const wall = walls.find((item) => item.id === active.id);
+  if (!wall) return;
+  const ends = options.wallAt ? options.wallAt(wall) : wall;
+  options.handle(ctx, bridge.toScreen(ends.aMm));
+  options.handle(ctx, bridge.toScreen(ends.bMm));
+}
+
+function drawDrawingWall(ctx, bridge, wall, active) {
+  const from = bridge.toScreen(wall.aMm);
+  const to = bridge.toScreen(wall.bMm);
+  const width = Math.max(1, Number(wall.thicknessMm) * bridge.pxPerMm);
+  ctx.lineCap = "butt";
+  ctx.lineWidth = width;
+  ctx.strokeStyle = active ? DRAWING_ACTIVE : DRAWING_WALL;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+  // Осевая линия у толстой стены: по ней видно, где проходит сама стена,
+  // когда её толщина на экране в полсантиметра.
+  if (width <= 6) return;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = DRAWING_PAPER;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+}
+
+/**
+ * Проём в стене: разрыв до бумаги, два косяка поперёк стены и — по виду — то,
+ * что его называет. Окно — ниткой стекла вдоль середины, арка — пунктиром,
+ * проём без полотна — ничем, дверь — створкой с дугой.
+ */
+export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
+  const span = drawingOpeningSpan(wall, opening);
+  if (!span) return;
+  const half = Math.max(1, (Number(wall.thicknessMm) * bridge.pxPerMm) / 2);
+  const from = bridge.toScreen(span.from);
+  const to = bridge.toScreen(span.to);
+  // Нормаль считается в экранных осях по самому отрезку: поворот подложки
+  // поворачивает и её, и выводить её из миллиметров пришлось бы дважды.
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = dy / len;
+  const ny = -dx / len;
+  const colour = options.active ? DRAWING_ACTIVE : options.bad ? DRAWING_BAD : DRAWING_EDGE;
+  ctx.save();
+  if (options.ghost) ctx.globalAlpha = 0.65;
+  // Дырка: стена в этом месте стирается до бумаги. Подложку под ней тоже —
+  // чертёж здесь главнее фотографии.
+  ctx.beginPath();
+  ctx.moveTo(from.x + nx * half, from.y + ny * half);
+  ctx.lineTo(to.x + nx * half, to.y + ny * half);
+  ctx.lineTo(to.x - nx * half, to.y - ny * half);
+  ctx.lineTo(from.x - nx * half, from.y - ny * half);
+  ctx.closePath();
+  ctx.fillStyle = DRAWING_PAPER;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = colour;
+  for (const jamb of [from, to]) {
+    ctx.beginPath();
+    ctx.moveTo(jamb.x + nx * half, jamb.y + ny * half);
+    ctx.lineTo(jamb.x - nx * half, jamb.y - ny * half);
+    ctx.stroke();
+  }
+  if (opening.kind === "window") {
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  } else if (opening.kind === "arch") {
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else if (opening.kind === OPENING_KIND_DOOR) {
+    drawDrawingDoor(ctx, bridge, wall, opening, colour, options);
+  }
+  ctx.restore();
+}
+
+function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
+  const leaf = drawingDoorLeaf(wall, opening);
+  if (!leaf) return;
+  const hinge = bridge.toScreen(leaf.hinge);
+  const closed = bridge.toScreen(leaf.closed);
+  const tip = bridge.toScreen(leaf.tip);
+  const radius = Math.hypot(tip.x - hinge.x, tip.y - hinge.y);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo(hinge.x, hinge.y);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.stroke();
+  if (radius > 1) {
+    const start = Math.atan2(closed.y - hinge.y, closed.x - hinge.x);
+    const end = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
+    // Короткая сторона дуги — та, по которой полотно и ходит: четверть
+    // оборота, а не три четверти вокруг косяка.
+    let sweep = end - start;
+    while (sweep > Math.PI) sweep -= Math.PI * 2;
+    while (sweep < -Math.PI) sweep += Math.PI * 2;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.arc(hinge.x, hinge.y, radius, start, start + sweep, sweep < 0);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (!options.active || !options.handle) return;
+  options.handle(ctx, hinge);
+  options.handle(ctx, tip);
+}
+
+function drawDrawingObject(ctx, bridge, object, options = {}) {
+  const colour = options.active ? DRAWING_ACTIVE : DRAWING_OBJECT;
+  const corners = drawingObjectCorners(object).map((point) => bridge.toScreen(point));
+  if (corners.length < 2) return;
+  if (object.shape === "polyline") {
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = Math.max(2, Number(object.depthMm) * bridge.pxPerMm);
+    ctx.strokeStyle = DRAWING_OBJECT_FILL;
+    drawDrawingPath(ctx, corners);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = colour;
+    drawDrawingPath(ctx, corners);
+  } else {
+    ctx.beginPath();
+    corners.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    ctx.closePath();
+    ctx.fillStyle = DRAWING_OBJECT_FILL;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = colour;
+    ctx.stroke();
+  }
+  drawDrawingCaption(ctx, object, corners, options.name, bridge);
+  if (!options.active || !options.handle) return;
+  for (const point of corners) options.handle(ctx, point);
+}
+
+function drawDrawingPath(ctx, points) {
+  ctx.beginPath();
+  points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+  ctx.stroke();
+}
+
+/**
+ * Подпись объекта: имя вида и верх над полом.
+ *
+ * Верх здесь не для красоты. Ради двух видов объекты и заведены (таск 122): от
+ * верха **столешницы** отмеряют розетки над кухонным фронтом, а **радиатор**
+ * своей высотой говорит, куда розетку ставить нельзя.
+ *
+ * Показывается она, только когда объекту есть куда её принять: на общем виде
+ * квартиры десяток подписей лёг бы поверх меток кашей, а в мастерской, где
+ * смотрят на один угол, место есть. Правило одно на обе поверхности — порог в
+ * экранных пикселях, а не отметка «тут показывать, а тут нет».
+ */
+function drawDrawingCaption(ctx, object, corners, name, bridge) {
+  if (!name) return;
+  const xs = corners.map((point) => point.x);
+  const ys = corners.map((point) => point.y);
+  const spread = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const band = object.shape === "polyline" ? Number(object.depthMm) * bridge.pxPerMm : 0;
+  if (spread < DRAWING_CAPTION_MIN_PX) return;
+  const top = object.shape === "polyline" ? Math.min(...ys) - band / 2 : Math.min(...ys);
+  const middle = xs.reduce((sum, value) => sum + value, 0) / xs.length;
+  const topMm = schemeObjectTopMm(object);
+  const line = topMm === null ? name : name + " · " + text("workshop.objectTop", { top: topMm });
+  const at = { x: middle, y: top - 8 };
+  ctx.font = drawFont(11, 600);
+  ctx.textBaseline = "bottom";
+  ctx.textAlign = "center";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = DRAWING_PAPER;
+  ctx.strokeText(line, at.x, at.y);
+  ctx.fillStyle = DRAWING_CAPTION;
+  ctx.fillText(line, at.x, at.y);
+  ctx.textAlign = "start";
+}
+
 export function drawScheme(ctx, {
   project,
   scheme,
@@ -4172,6 +4627,7 @@ export function drawScheme(ctx, {
   links,
   outlines,
   selectedOutlineId,
+  drawing,
 }) {
   const state = renderView(view);
   if (image) {
@@ -4187,6 +4643,17 @@ export function drawScheme(ctx, {
     ctx.restore();
   }
   if (!project || !scheme) return;
+  // Чертёж — слой **под разметкой и над подложкой** (таск 127): он часть
+  // плана, а не пометка на нём. Рисуется тем же кодом, что в мастерской, и
+  // только когда его попросили: `drawing !== false`. Кадр без чертежа у
+  // объекта, которого не чертили, не меняется ни на пиксель — `drawDrawing`
+  // выходит на пустых списках, не трогая ни `ctx`, ни единой настройки (G68).
+  // Условие `project.walls || project.schemeObjects` — не оптимизация, а то же
+  // правило: у объекта, которого не чертили, этих полей нет вовсе, и кадр не
+  // спрашивает про калибровку ни разу.
+  if (drawing !== false && (project.walls || project.schemeObjects)) {
+    drawDrawing(ctx, { project, schemeId: scheme.id, bridge: drawingBridge(project, scheme, state) });
+  }
   // Контуры ложатся под метки: метка на стене комнаты должна остаться видна.
   if (outlines !== false && outlines !== null) {
     drawOutlines(ctx, { project, scheme, filter, view: state, mode: outlines, selectedOutlineId });

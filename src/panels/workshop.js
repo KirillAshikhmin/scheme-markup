@@ -94,9 +94,11 @@ import {
   schemeObjectTopMm,
   schemeObjectsOnScheme,
   setPlanOrigin,
+  setPlanScale,
   setRoomWallHeight,
   setSchemeWallHeight,
   updateOpening,
+  updateScheme,
   updateSchemeObject,
   updateWall,
   wallLengthMm,
@@ -110,7 +112,25 @@ import {
   canvasZoomFactor,
   canvasCommit,
 } from "../canvas.js";
-import { draftSnap, drawFont, planToScreen, screenToPlan } from "../render.js";
+import {
+  DRAWING_ACTIVE,
+  DRAWING_EDGE,
+  DRAWING_OBJECT,
+  DRAWING_PAPER,
+  drawDrawing,
+  drawDrawingOpening,
+  drawingDoorLeaf,
+  drawingHitObject,
+  drawingObjectCorners,
+  drawingOpeningSpan,
+  drawingSegmentDistance,
+  drawingUnitBridge,
+  drawingWallVectors,
+  draftSnap,
+  drawFont,
+  planToScreen,
+  screenToPlan,
+} from "../render.js";
 import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
@@ -298,6 +318,62 @@ export function workshopAttachOrigin(project, schemeId) {
   return setPlanOrigin(project, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 });
 }
 
+// ——— лист схемы без подложки ——————————————————————————————————————————
+//
+// **Схема без картинки всё равно нуждается в плане** — не в картинке, а в
+// системе координат. Метки живут долями плана (ADR 002), и доля отсчитывается
+// от `scheme.width`/`height`; у схемы без подложки они нули, и доле не от чего
+// считаться. Пока чертёж не выходил из мастерской, это никому не мешало; на
+// холсте (таск 127) без этого не работает ничего — ни метки, ни линейка, ни
+// выгрузка.
+//
+// Поэтому у такой схемы заводится **лист**: размер в «пикселях плана»,
+// калибровка и привязка, выданные самой сборкой. Картинки за ними нет, но вся
+// прежняя арифметика — `planMmToFraction`, `fitView`, линейка, выгрузка —
+// работает с ним как с обычным откалиброванным планом, и ни одной развилки
+// «а если подложки нет» заводить не приходится.
+//
+// **Лист фиксированный, а не по размеру чертежа** — и это главное в решении.
+// Считай его от `drawingBoundsMm`, и каждая новая стена меняла бы смысл доли:
+// все уже поставленные метки поехали бы относительно стен. Поэтому лист
+// постоянный: сорок на тридцать метров, по сантиметру на пиксель плана, нуль
+// чертежа в середине. Сорок метров кроет любую квартиру и почти любой дом;
+// что не влезло — видно, но метку туда не поставить (доля зажимается в 0…1), и
+// это честная граница, а не молчание.
+//
+// Пиксель в сантиметр выбран не случайно: размер метки и смещение подписи
+// заданы в пикселях плана, и у фотографии плана квартиры их примерно тысяча на
+// десять метров. Возьми пиксель в миллиметр — метки стали бы в десять раз
+// мельче подписей, и раскладка подписей поехала бы на всех схемах разом.
+export const WORKSHOP_SHEET = { width: 4000, height: 3000, mmPerPx: 10 };
+
+/**
+ * Завести лист у схемы без подложки, если его ещё нет. Возвращает тот же
+ * объект по ссылке, когда заводить нечего: ни лишнего шага истории, ни
+ * `updatedAt` на пустом месте (G68).
+ */
+export function workshopEnsureSheet(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  if (!scheme || scheme.imageId) return { project, added: false };
+  if (Number(scheme.width) > 0 && Number(scheme.height) > 0 && planOriginOf(project, schemeId)) {
+    return { project, added: false };
+  }
+  let next = updateScheme(project, schemeId, {
+    width: WORKSHOP_SHEET.width,
+    height: WORKSHOP_SHEET.height,
+  }).project;
+  // Калибровка: четверть ширины листа объявлена десятью метрами. При ширине
+  // 4000 это 1000 пикселей на 10 м, то есть сто пикселей на метр и сантиметр
+  // на пиксель — ровно то, что обещано выше.
+  next = setPlanScale(next, schemeId, {
+    a: { x: 0.25, y: 0.5 },
+    b: { x: 0.5, y: 0.5 },
+    meters: (WORKSHOP_SHEET.width / 4) * (WORKSHOP_SHEET.mmPerPx / 1000),
+  }).project;
+  next = setPlanOrigin(next, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 }).project;
+  return { project: next, added: true };
+}
+
 /**
  * Записать росчерк: цепочка стен одним шагом истории.
  *
@@ -313,7 +389,10 @@ export function workshopAttachOrigin(project, schemeId) {
 export function workshopAddChain(project, schemeId, pointsMm, thicknessMm) {
   const segments = workshopChain(pointsMm);
   if (segments.length === 0) return { project, added: 0, origin: false };
-  let next = project;
+  // Лист схемы без подложки заводится тем же шагом, что первая стена: без него
+  // чертёж не выйдет на холст, а заводить его отдельной кнопкой человеку
+  // незачем — он про него не думает.
+  let next = workshopEnsureSheet(project, schemeId).project;
   let origin = false;
   if (workshopPlacement(next, schemeId).kind === "noOrigin") {
     next = workshopAttachOrigin(next, schemeId).project;
@@ -375,15 +454,6 @@ export function workshopMoveWall(project, wallId, deltaMm) {
   return { project: updateWall(project, wallId, patch).project, moved: true };
 }
 
-function workshopDistanceMm(point, from, to) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = dx * dx + dy * dy;
-  if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
-  let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
-  t = Math.min(1, Math.max(0, t));
-  return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
-}
 
 // ——— проёмы: умолчания и геометрия ————————————————————————————————————
 //
@@ -403,32 +473,10 @@ export const WORKSHOP_OPENING_DEFAULTS = {
   arch: { widthMm: 1200, heightMm: 2100, heightAboveFloorMm: 0 },
 };
 
-/**
- * Единичные векторы стены: `u` — вдоль, от `a` к `b`; `n` — **влево** от него.
- * «Влево» — то же слово, которым модель назвала сторону открывания двери: та,
- * что слева, если идти от `a` к `b`. Ось `y` на экране растёт вниз, поэтому
- * левая нормаль это `(u.y, −u.x)`, и перевёрнут этот знак ровно здесь, в одном
- * месте на всё окно.
- */
-export function workshopWallVectors(wall) {
-  if (!wall) return null;
-  const dx = Number(wall.bMm.x) - Number(wall.aMm.x);
-  const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
-  const len = Math.hypot(dx, dy);
-  if (!(len > 0)) return null;
-  // `|| 0` — от **минус нуля**: у вертикальной стены `−dx / len` даёт `-0`, и
-  // он поехал бы дальше в координаты створки. В сборке это уже ловили
-  // (ADR 008, `drawingMmValue`), и второй раз наступать незачем.
-  return {
-    len,
-    u: { x: dx / len || 0, y: dy / len || 0 },
-    n: { x: dy / len || 0, y: -dx / len || 0 },
-  };
-}
 
 /** Сколько миллиметров от конца `a` до проекции точки на стену, зажато в стену. */
 export function workshopAlongWall(wall, pointMm) {
-  const vectors = workshopWallVectors(wall);
+  const vectors = drawingWallVectors(wall);
   if (!vectors) return 0;
   const along = (pointMm.x - wall.aMm.x) * vectors.u.x + (pointMm.y - wall.aMm.y) * vectors.u.y;
   return Math.max(0, Math.min(vectors.len, Math.round(along)));
@@ -443,44 +491,14 @@ export function workshopAlongWall(wall, pointMm) {
  * «не помещается», а поставить окно вплотную к углу — обычное дело.
  */
 export function workshopOpeningAt(wall, pointMm, widthMm) {
-  const vectors = workshopWallVectors(wall);
+  const vectors = drawingWallVectors(wall);
   if (!vectors) return 0;
   const width = Number(widthMm) || 0;
   const middle = workshopAlongWall(wall, pointMm);
   return Math.max(0, Math.min(Math.round(vectors.len - width), Math.round(middle - width / 2)));
 }
 
-/** Концы проёма на оси стены плюс её векторы — всё, чем он рисуется и ловится. */
-export function workshopOpeningSpan(wall, opening) {
-  const vectors = workshopWallVectors(wall);
-  if (!vectors || !opening) return null;
-  const at = Number(opening.atMm) || 0;
-  const width = Number(opening.widthMm) || 0;
-  const point = (distance) => ({
-    x: wall.aMm.x + vectors.u.x * distance,
-    y: wall.aMm.y + vectors.u.y * distance,
-  });
-  return { from: point(at), to: point(at + width), u: vectors.u, n: vectors.n, len: vectors.len, width };
-}
 
-/**
- * Створка двери: петля, закрытое положение и кончик открытого.
- *
- * Четыре сочетания петель и стороны — это четыре разные двери, и на чертеже их
- * различают именно по створке: с какого косяка она растёт и в какую сторону
- * стены открывается. Полотно рисуется раскрытым на четверть оборота — так его
- * рисуют на планах, и так видно, какой кусок пола дверь занимает.
- */
-export function workshopDoorLeaf(wall, opening) {
-  const span = workshopOpeningSpan(wall, opening);
-  if (!span || !(span.width > 0)) return null;
-  const atStart = opening.hinge !== "end";
-  const hinge = atStart ? span.from : span.to;
-  const closed = atStart ? span.to : span.from;
-  const side = opening.swing === "right" ? -1 : 1;
-  const tip = { x: hinge.x + span.n.x * side * span.width, y: hinge.y + span.n.y * side * span.width };
-  return { hinge, closed, tip, radius: span.width, side, n: span.n };
-}
 
 /**
  * Попробовать записать проём и честно сказать, что не так.
@@ -557,60 +575,8 @@ export function workshopObjectDefaults(project, kindId) {
   return workshopObjectDefaultsByName(kind ? kind.name : null);
 }
 
-/**
- * Углы габарита объекта в миллиметрах — то же, по чему модель считает размер
- * чертежа: у прямоугольника четыре повёрнутых угла, у ломаной её вершины.
- * Это геометрия отрисовки, а не вторая модель: наружу `schemeObjectCornersMm`
- * модель не отдаёт, а рисовать и ловить объект чем-то надо.
- */
-export function workshopObjectCorners(object) {
-  if (!object) return [];
-  if (object.shape === "polyline") {
-    return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
-  }
-  const at = object.atMm || { x: 0, y: 0 };
-  const halfWidth = Number(object.widthMm) / 2;
-  const halfDepth = Number(object.depthMm) / 2;
-  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return [
-    [-halfWidth, -halfDepth],
-    [halfWidth, -halfDepth],
-    [halfWidth, halfDepth],
-    [-halfWidth, halfDepth],
-  ].map(([x, y]) => ({ x: Number(at.x) + x * cos - y * sin, y: Number(at.y) + x * sin + y * cos }));
-}
 
-function workshopInsidePolygon(point, corners) {
-  let inside = false;
-  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
-    const a = corners[i];
-    const b = corners[j];
-    const crosses = a.y > point.y !== b.y > point.y;
-    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
 
-/** Попал ли курсор в объект: внутрь прямоугольника или в полосу ломаной. */
-export function workshopHitObject(object, pointMm, slackMm) {
-  const corners = workshopObjectCorners(object);
-  if (corners.length === 0) return false;
-  if (object.shape === "polyline") {
-    const limit = Math.max(Number(slackMm) || 0, Number(object.depthMm) / 2);
-    for (let index = 1; index < corners.length; index += 1) {
-      if (workshopDistanceMm(pointMm, corners[index - 1], corners[index]) <= limit) return true;
-    }
-    return false;
-  }
-  if (workshopInsidePolygon(pointMm, corners)) return true;
-  const limit = Number(slackMm) || 0;
-  for (let index = 0; index < corners.length; index += 1) {
-    if (workshopDistanceMm(pointMm, corners[index], corners[(index + 1) % corners.length]) <= limit) return true;
-  }
-  return false;
-}
 
 /**
  * Что под курсором на чертеже. Старшинство названо здесь целиком, потому что
@@ -632,7 +598,7 @@ export function workshopPick(project, schemeId, pointMm, view, selected) {
   if (selected && selected.kind === "opening") {
     const opening = findOpening(project, selected.id);
     const wall = opening ? findWall(project, opening.wallId) : null;
-    const leaf = wall && opening.kind === OPENING_KIND_DOOR ? workshopDoorLeaf(wall, opening) : null;
+    const leaf = wall && opening.kind === OPENING_KIND_DOOR ? drawingDoorLeaf(wall, opening) : null;
     if (leaf) {
       if (Math.hypot(pointMm.x - leaf.hinge.x, pointMm.y - leaf.hinge.y) <= vertexMm) {
         return { kind: "hinge", id: opening.id };
@@ -656,7 +622,7 @@ export function workshopPick(project, schemeId, pointMm, view, selected) {
     const wall = walls[index];
     const limit = Math.max(slackMm, Number(wall.thicknessMm) / 2);
     for (const opening of openingsInWall(project, wall.id)) {
-      const span = workshopOpeningSpan(wall, opening);
+      const span = drawingOpeningSpan(wall, opening);
       if (!span) continue;
       const along = (pointMm.x - wall.aMm.x) * span.u.x + (pointMm.y - wall.aMm.y) * span.u.y;
       const across = Math.abs((pointMm.x - wall.aMm.x) * span.n.x + (pointMm.y - wall.aMm.y) * span.n.y);
@@ -667,14 +633,14 @@ export function workshopPick(project, schemeId, pointMm, view, selected) {
   }
   const objects = schemeObjectsOnScheme(project, schemeId);
   for (let index = objects.length - 1; index >= 0; index -= 1) {
-    if (workshopHitObject(objects[index], pointMm, slackMm)) {
+    if (drawingHitObject(objects[index], pointMm, slackMm)) {
       return { kind: "object", id: objects[index].id };
     }
   }
   for (let index = walls.length - 1; index >= 0; index -= 1) {
     const wall = walls[index];
     const limit = Math.max(slackMm, Number(wall.thicknessMm) / 2);
-    if (workshopDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) {
+    if (drawingSegmentDistance(pointMm, wall.aMm, wall.bMm) <= limit) {
       return { kind: "wall", id: wall.id, wallId: wall.id, atMm: null };
     }
   }
@@ -819,20 +785,15 @@ let workshopObjectShape = SCHEME_OBJECT_SHAPES[0];
 let workshopObjectSizes = {};
 let workshopOpened = false;
 
-const WORKSHOP_PAPER = "#f6f8fa";
+// Краска самого окна. Цвета чертежа сюда не входят: их держит общий слой
+// (`render.DRAWING_*`), и повтори их здесь — стена в окне и стена на холсте
+// разошлись бы оттенком в первую же правку.
+const WORKSHOP_PAPER = DRAWING_PAPER;
+const WORKSHOP_ACCENT = DRAWING_ACTIVE;
+const WORKSHOP_HANDLE = "#ffffff";
 const WORKSHOP_GRID_LINE = "#d0d7de";
 const WORKSHOP_GRID_MAJOR = "#aeb7c0";
-const WORKSHOP_WALL = "#30363d";
-const WORKSHOP_WALL_EDGE = "#0f1419";
-const WORKSHOP_ACCENT = "#1f6feb";
 const WORKSHOP_ORIGIN = "#d1242f";
-const WORKSHOP_HANDLE = "#ffffff";
-// Объект на полу — не стена: контур тоньше и другого цвета, заливка почти
-// прозрачная. Иначе радиатор под окном читался бы второй стеной.
-const WORKSHOP_OBJECT = "#6639ba";
-const WORKSHOP_OBJECT_FILL = "rgba(102, 57, 186, 0.12)";
-const WORKSHOP_BAD = "#d1242f";
-const WORKSHOP_CAPTION = "#57606a";
 
 /**
  * Открыть мастерскую для схемы.
@@ -1398,7 +1359,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     for (let index = list.length - 1; index >= 0; index -= 1) {
       const wall = list[index];
       const limit = Math.max(WORKSHOP_WALL_PX / view.zoom, Number(wall.thicknessMm) / 2);
-      if (workshopDistanceMm(pointMm, wall.aMm, wall.bMm) <= limit) return { wall };
+      if (drawingSegmentDistance(pointMm, wall.aMm, wall.bMm) <= limit) return { wall };
     }
     return null;
   }
@@ -1492,7 +1453,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
   // собой. Поэтому `ensureSchemeObjectKinds` зовётся здесь, в минуту первого
   // объекта, а не при открытии окна.
   function withKinds() {
-    const ready = ensureSchemeObjectKinds(project());
+    const ready = ensureSchemeObjectKinds(workshopEnsureSheet(project(), schemeId).project);
     return { project: ready.project, added: ready.added };
   }
 
@@ -2060,8 +2021,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     if (spot.kind === "ready") paintOrigin();
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
-    if (workshopLayers.objects) paintObjects();
-    if (workshopLayers.walls) paintWalls();
+    paintDrawing();
     paintDraft();
   }
 
@@ -2128,64 +2088,36 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     ctx.stroke();
   }
 
+  // ——— чертёж рисует общий слой ———
+  //
+  // Стены, проёмы и объекты рисует `render.drawDrawing` — **тот же код**, что
+  // на основном холсте (таск 127). Окно отдаёт ему свой мост (у мастерской
+  // пиксель равен миллиметру), то, что сейчас под рукой, и рисовальщик ручек;
+  // всё остальное общее. Второй отрисовки быть не должно: разойдись они, дверь
+  // в окне открывалась бы не в ту сторону, что на холсте, и увидели бы это на
+  // бумаге.
+  function bridge() {
+    return drawingUnitBridge(view);
+  }
+
+  // Что под рукой прямо сейчас: пока тащат, кадр рисуется из предпросмотра, а
+  // в объект уходит только то место, где руку отпустили.
   function wallEnds(wall) {
     if (drag && drag.moved && drag.kind === "vertex" && drag.toMm) {
       const a = wall.aMm.x === drag.fromMm.x && wall.aMm.y === drag.fromMm.y ? drag.toMm : wall.aMm;
       const b = wall.bMm.x === drag.fromMm.x && wall.bMm.y === drag.fromMm.y ? drag.toMm : wall.bMm;
-      return { a, b };
+      return { ...wall, aMm: a, bMm: b };
     }
     if (drag && drag.moved && drag.kind === "wall" && drag.deltaMm && drag.wallId === wall.id) {
       return {
-        a: { x: wall.aMm.x + drag.deltaMm.x, y: wall.aMm.y + drag.deltaMm.y },
-        b: { x: wall.bMm.x + drag.deltaMm.x, y: wall.bMm.y + drag.deltaMm.y },
+        ...wall,
+        aMm: { x: wall.aMm.x + drag.deltaMm.x, y: wall.aMm.y + drag.deltaMm.y },
+        bMm: { x: wall.bMm.x + drag.deltaMm.x, y: wall.bMm.y + drag.deltaMm.y },
       };
     }
-    return { a: wall.aMm, b: wall.bMm };
+    return wall;
   }
 
-  function paintWalls() {
-    const list = walls();
-    for (const wall of list) {
-      const ends = wallEnds(wall);
-      const from = screenOf(ends.a);
-      const to = screenOf(ends.b);
-      const width = Math.max(1, wall.thicknessMm * view.zoom);
-      ctx.lineCap = "butt";
-      ctx.lineWidth = width;
-      ctx.strokeStyle = selected && selected.kind === "wall" && selected.id === wall.id ? WORKSHOP_ACCENT : WORKSHOP_WALL;
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.stroke();
-      // Осевая линия у толстой стены: по ней видно, где проходит сама стена,
-      // когда её толщина на экране в полсантиметра.
-      if (width > 6) {
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = WORKSHOP_HANDLE;
-        ctx.beginPath();
-        ctx.moveTo(from.x, from.y);
-        ctx.lineTo(to.x, to.y);
-        ctx.stroke();
-      }
-    }
-    // Проёмы рисуются поверх стен и по стенам: проём — это дырка в стене, и
-    // рисуется он как дырка — разрывом с косяками, а не фигурой рядом.
-    for (const wall of list) {
-      const ends = wallEnds(wall);
-      for (const opening of openingsInWall(project(), wall.id)) {
-        paintOpening({ ...wall, aMm: ends.a, bMm: ends.b }, movedOpening(opening), {
-          active: selected && selected.kind === "opening" && selected.id === opening.id,
-        });
-      }
-    }
-    const wall = selectedWall();
-    if (!wall) return;
-    const ends = wallEnds(wall);
-    for (const point of [ends.a, ends.b]) handle(screenOf(point));
-  }
-
-  // Проём под рукой: пока его тащат вдоль стены, он рисуется с нового места, а
-  // в объект уходит только то, где руку отпустили.
   function movedOpening(opening) {
     if (drag && drag.moved && drag.kind === "opening" && drag.id === opening.id && drag.atMm !== null) {
       return { ...opening, atMm: drag.atMm };
@@ -2193,113 +2125,9 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     return opening;
   }
 
-  /**
-   * Проём в стене: разрыв до бумаги, два косяка поперёк стены и — по виду —
-   * то, что его называет. Окно — ниткой стекла вдоль середины, арка —
-   * пунктиром, проём без полотна — ничем, дверь — створкой с дугой.
-   */
-  function paintOpening(wall, opening, options = {}) {
-    const span = workshopOpeningSpan(wall, opening);
-    if (!span) return;
-    const half = Math.max(1, (Number(wall.thicknessMm) * view.zoom) / 2);
-    const from = screenOf(span.from);
-    const to = screenOf(span.to);
-    const nx = span.n.x;
-    const ny = span.n.y;
-    const colour = options.active ? WORKSHOP_ACCENT : options.bad ? WORKSHOP_BAD : WORKSHOP_WALL_EDGE;
-    // Дырка: стена в этом месте стирается до бумаги. Подложку под ней тоже —
-    // чертёж здесь главнее фотографии.
-    ctx.save();
-    if (options.ghost) ctx.globalAlpha = 0.65;
-    ctx.beginPath();
-    ctx.moveTo(from.x + nx * half, from.y + ny * half);
-    ctx.lineTo(to.x + nx * half, to.y + ny * half);
-    ctx.lineTo(to.x - nx * half, to.y - ny * half);
-    ctx.lineTo(from.x - nx * half, from.y - ny * half);
-    ctx.closePath();
-    ctx.fillStyle = WORKSHOP_PAPER;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = colour;
-    for (const jamb of [from, to]) {
-      ctx.beginPath();
-      ctx.moveTo(jamb.x + nx * half, jamb.y + ny * half);
-      ctx.lineTo(jamb.x - nx * half, jamb.y - ny * half);
-      ctx.stroke();
-    }
-    if (opening.kind === "window") {
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.stroke();
-    } else if (opening.kind === "arch") {
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    } else if (opening.kind === OPENING_KIND_DOOR) {
-      paintDoor(wall, opening, colour, Boolean(options.active));
-    }
-    ctx.restore();
-  }
-
-  /**
-   * Створка двери: полотно, раскрытое на четверть оборота, и дуга от закрытого
-   * положения к открытому. Четыре сочетания петель и стороны дают четыре
-   * разных рисунка — по ним дверь и различают на плане, а не по двум полям в
-   * колонке.
-   *
-   * У выделенной двери на концах створки стоят две ручки: у петли — переставить
-   * петли на другой косяк, на кончике полотна — перекинуть его на другую
-   * сторону стены. Каждая стоит ровно там, что меняет.
-   */
-  function paintDoor(wall, opening, colour, active) {
-    const leaf = workshopDoorLeaf(wall, opening);
-    if (!leaf) return;
-    const hinge = screenOf(leaf.hinge);
-    const closed = screenOf(leaf.closed);
-    const tip = screenOf(leaf.tip);
-    const radius = Math.hypot(tip.x - hinge.x, tip.y - hinge.y);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = colour;
-    ctx.beginPath();
-    ctx.moveTo(hinge.x, hinge.y);
-    ctx.lineTo(tip.x, tip.y);
-    ctx.stroke();
-    if (radius > 1) {
-      const start = Math.atan2(closed.y - hinge.y, closed.x - hinge.x);
-      const end = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
-      // Короткая сторона дуги — та, по которой полотно и ходит: четверть
-      // оборота, а не три четверти вокруг косяка.
-      let sweep = end - start;
-      while (sweep > Math.PI) sweep -= Math.PI * 2;
-      while (sweep < -Math.PI) sweep += Math.PI * 2;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.arc(hinge.x, hinge.y, radius, start, start + sweep, sweep < 0);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    if (!active) return;
-    handle(hinge);
-    handle(tip);
-  }
-
-  function paintObjects() {
-    for (const object of schemeObjectsOnScheme(project(), schemeId)) {
-      const shifted =
-        drag && drag.moved && drag.kind === "object" && drag.id === object.id && drag.deltaMm
-          ? shiftObject(object, drag.deltaMm)
-          : object;
-      paintObject(shifted, selected && selected.kind === "object" && selected.id === object.id);
-    }
-  }
-
-  function shiftObject(object, deltaMm) {
+  function shiftObject(object) {
+    if (!(drag && drag.moved && drag.kind === "object" && drag.id === object.id && drag.deltaMm)) return object;
+    const deltaMm = drag.deltaMm;
     if (object.shape === "polyline") {
       return {
         ...object,
@@ -2309,89 +2137,39 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     return { ...object, atMm: { x: object.atMm.x + deltaMm.x, y: object.atMm.y + deltaMm.y } };
   }
 
-  function paintObject(object, active) {
-    const colour = active ? WORKSHOP_ACCENT : WORKSHOP_OBJECT;
-    if (object.shape === "polyline") {
-      const points = (object.pointsMm || []).map(screenOf);
-      if (points.length < 2) return;
-      ctx.lineCap = "butt";
-      ctx.lineJoin = "round";
-      ctx.lineWidth = Math.max(2, Number(object.depthMm) * view.zoom);
-      ctx.strokeStyle = WORKSHOP_OBJECT_FILL;
-      ctx.beginPath();
-      points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-      ctx.stroke();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = colour;
-      ctx.beginPath();
-      points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-      ctx.stroke();
-      paintObjectCaption(object, captionAt(points, Number(object.depthMm) * view.zoom));
-      if (active) for (const point of points) handle(point);
-      return;
-    }
-    const corners = workshopObjectCorners(object).map(screenOf);
-    if (corners.length < 3) return;
-    ctx.beginPath();
-    corners.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-    ctx.closePath();
-    ctx.fillStyle = WORKSHOP_OBJECT_FILL;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = colour;
-    ctx.stroke();
-    paintObjectCaption(object, captionAt(corners, 0));
-    if (active) for (const point of corners) handle(point);
+  function paintDrawing() {
+    drawDrawing(ctx, {
+      project: project(),
+      schemeId,
+      bridge: bridge(),
+      active: selected,
+      walls: workshopLayers.walls,
+      objects: workshopLayers.objects,
+      wallAt: wallEnds,
+      openingAt: movedOpening,
+      objectAt: shiftObject,
+      handle,
+    });
   }
 
-  /**
-   * Подпись объекта: имя вида и верх над полом.
-   *
-   * Верх здесь не для красоты. Ради двух видов объекты и заведены: от верха
-   * **столешницы** отмеряют розетки над кухонным фронтом, а **радиатор** своей
-   * высотой говорит, куда розетку ставить нельзя. Читать это число, открывая
-   * правку, — значит не читать его вовсе, поэтому оно на чертеже.
-   */
-  // Подпись ставится **над** габаритом, а не поперёк него: радиатор глубиной
-  // сто миллиметров на экране тоньше самой строки, и надпись по его середине
-  // перечёркивалась контуром. Это видно только на снимке.
-  function captionAt(points, extra) {
-    const top = Math.min(...points.map((point) => point.y));
-    const middle = points.reduce((sum, point) => sum + point.x, 0) / points.length;
-    return { x: middle, y: top - extra / 2 - 8 };
-  }
-
-  function paintObjectCaption(object, at) {
-    const kind = findSchemeObjectKind(project(), object.kindId);
-    if (!kind) return;
-    const top = schemeObjectTopMm(object);
-    ctx.font = drawFont(11, 600);
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
-    const line = top === null ? kind.name : kind.name + " · " + text("workshop.objectTop", { top });
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = WORKSHOP_PAPER;
-    ctx.strokeText(line, at.x, at.y);
-    ctx.fillStyle = WORKSHOP_CAPTION;
-    ctx.fillText(line, at.x, at.y);
-    ctx.textAlign = "start";
-  }
-
-  function handle(at) {
-    ctx.beginPath();
-    ctx.arc(at.x, at.y, 4.5, 0, Math.PI * 2);
-    ctx.fillStyle = WORKSHOP_HANDLE;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = WORKSHOP_ACCENT;
-    ctx.stroke();
+  // Ручка правки. Принимает холст первым доводом, потому что её зовёт и общий
+  // слой чертежа: у него своего рисовальщика ручек нет и быть не должно —
+  // ручки есть только там, где правят.
+  function handle(target, at) {
+    target.beginPath();
+    target.arc(at.x, at.y, 4.5, 0, Math.PI * 2);
+    target.fillStyle = WORKSHOP_HANDLE;
+    target.fill();
+    target.lineWidth = 1.5;
+    target.strokeStyle = WORKSHOP_ACCENT;
+    target.stroke();
   }
 
   function paintDraft() {
     // Призрак проёма: что сядет по клику. Красный — не сядет, и причина уже
     // стоит строкой под полем.
     if (tool === "openings" && ghost) {
-      paintOpening(ghost.wall, ghost.opening, { ghost: true, bad: !ghost.ok });
+      drawDrawingOpening(ctx, bridge(), ghost.wall, ghost.opening, { ghost: true, bad: !ghost.ok });
       return;
     }
     const band = tool === "objects" && workshopObjectShape === "polyline";
@@ -2400,7 +2178,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     ctx.lineCap = "butt";
     ctx.lineJoin = "round";
     ctx.lineWidth = Math.max(1, (band ? bandWidthMm() : workshopThicknessMm) * view.zoom);
-    ctx.strokeStyle = band ? WORKSHOP_OBJECT : WORKSHOP_ACCENT;
+    ctx.strokeStyle = band ? DRAWING_OBJECT : WORKSHOP_ACCENT;
     ctx.globalAlpha = 0.5;
     ctx.beginPath();
     points.forEach((point, index) => {
@@ -2411,7 +2189,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.lineWidth = 1;
-    ctx.strokeStyle = WORKSHOP_WALL_EDGE;
+    ctx.strokeStyle = DRAWING_EDGE;
     ctx.beginPath();
     points.forEach((point, index) => {
       const at = screenOf(point);
@@ -2419,7 +2197,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
       else ctx.lineTo(at.x, at.y);
     });
     ctx.stroke();
-    for (const point of draft.points) handle(screenOf(point));
+    for (const point of draft.points) handle(ctx, screenOf(point));
     // Длина набираемого отрезка — у курсора: стену рисуют по размеру, и
     // смотреть на панель в этот момент некогда.
     const last = draft.points[draft.points.length - 1];
@@ -2431,7 +2209,7 @@ export function openWorkshop({ schemeId, api, onCalibrate }) {
     ctx.lineWidth = 3;
     ctx.strokeStyle = WORKSHOP_PAPER;
     ctx.strokeText(String(length), at.x + 10, at.y - 8);
-    ctx.fillStyle = WORKSHOP_WALL_EDGE;
+    ctx.fillStyle = DRAWING_EDGE;
     ctx.fillText(String(length), at.x + 10, at.y - 8);
   }
 

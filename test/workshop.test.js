@@ -37,13 +37,21 @@ import {
   findScheme,
   openingsInWall,
   planFractionToMm,
+  planMmToFraction,
   planOriginOf,
+  planPixelsPerMeter,
   setPlanOrigin,
   setPlanScale,
   setSchemeWallHeight,
   wallsOnScheme,
 } from "../src/model.js";
-import { planToScreen } from "../src/render.js";
+import {
+  drawingDoorLeaf,
+  drawingHitObject,
+  drawingObjectCorners,
+  drawingWallVectors,
+  planToScreen,
+} from "../src/render.js";
 import { identityTransform, rotateTransform } from "../src/imagePrep.js";
 import { applyPlanEdit } from "../src/panels/schemes.js";
 import {
@@ -52,6 +60,7 @@ import {
   WORKSHOP_OBJECT_FALLBACK,
   WORKSHOP_OPENING_DEFAULTS,
   WORKSHOP_ORIGIN_AT,
+  WORKSHOP_SHEET,
   WORKSHOP_UNIT,
   WORKSHOP_ZOOM_MAX,
   WORKSHOP_ZOOM_MIN,
@@ -60,20 +69,17 @@ import {
   workshopAttachOrigin,
   workshopChain,
   workshopClampZoom,
-  workshopDoorLeaf,
+  workshopEnsureSheet,
   workshopExtentMm,
   workshopFitView,
   workshopGridDrawStepMm,
   workshopHint,
-  workshopHitObject,
   workshopMoveVertex,
   workshopMoveWall,
-  workshopObjectCorners,
   workshopObjectDefaultsByName,
   workshopOpeningAt,
   workshopPick,
   workshopTryOpening,
-  workshopWallVectors,
   workshopPlacement,
   workshopPlanPointScreen,
   workshopRoundMm,
@@ -174,14 +180,21 @@ test("вторая цепочка привязку не переставляет
   assert.deepEqual(planOriginOf(second.project, base.schemeId), { at: { x: 0.2, y: 0.3 }, turn: 90 });
 });
 
-test("схема без подложки привязки не получает — привязывать не к чему", () => {
+test("схема без подложки получает лист — тем же шагом, что первая стена", () => {
+  // Привязывать не к чему, и «начало координат на подложке» здесь не
+  // ставится: ставится **лист** — система координат, без которой доля метки
+  // не от чего считаться (таск 127). Про подложку известие молчит.
   const base = blankProject();
   const result = workshopAddChain(base.project, base.schemeId, ROOM, 100);
-  assert.equal(result.origin, false);
-  assert.equal(planOriginOf(result.project, base.schemeId), null);
-  assert.ok(
-    !Object.prototype.hasOwnProperty.call(findScheme(result.project, base.schemeId), "origin"),
-    "поля `origin` у такой схемы не появляется вовсе",
+  assert.equal(result.origin, false, "про привязку к подложке не говорится — подложки нет");
+  const scheme = findScheme(result.project, base.schemeId);
+  assert.equal(scheme.width, WORKSHOP_SHEET.width);
+  assert.equal(scheme.height, WORKSHOP_SHEET.height);
+  assert.deepEqual(planOriginOf(result.project, base.schemeId), { at: WORKSHOP_ORIGIN_AT, turn: 0 });
+  assert.equal(
+    planPixelsPerMeter(result.project, base.schemeId),
+    1000 / WORKSHOP_SHEET.mmPerPx,
+    "сантиметр на пиксель плана",
   );
   assert.deepEqual(drawingBoundsMm(result.project, base.schemeId), {
     minX: 0,
@@ -191,6 +204,35 @@ test("схема без подложки привязки не получает 
     widthMm: 4000,
     heightMm: 3000,
   });
+});
+
+test("лист заводится один раз и не переставляется второй цепочкой", () => {
+  const base = blankProject();
+  const first = workshopAddChain(base.project, base.schemeId, ROOM, 100).project;
+  const moved = setPlanOrigin(first, base.schemeId, { at: { x: 0.2, y: 0.3 }, turn: 90 }).project;
+  const again = workshopEnsureSheet(moved, base.schemeId);
+  assert.equal(again.added, false);
+  assert.equal(again.project, moved, "тот же объект по ссылке — ни шага истории, ни updatedAt");
+});
+
+test("лист не трогает схему с подложкой", () => {
+  const base = planProject();
+  assert.equal(workshopEnsureSheet(base.project, base.schemeId).project, base.project);
+});
+
+test("метка на листе доезжает до тех же миллиметров, что стена", () => {
+  // Это и есть смысл листа: доля метки и миллиметр стены меряются одним
+  // планом. Промах здесь значил бы, что метка стоит не на той стене.
+  const base = blankProject();
+  const sheet = workshopEnsureSheet(base.project, base.schemeId).project;
+  for (const mm of [{ x: 0, y: 0 }, { x: 3500, y: -2000 }, { x: -12000, y: 9000 }]) {
+    const fraction = planMmToFraction(sheet, base.schemeId, mm);
+    assert.ok(fraction, "мост листа обязан работать");
+    assert.deepEqual(planFractionToMm(sheet, base.schemeId, fraction), mm);
+  }
+  // Сорок на тридцать метров вокруг нуля — граница листа названа числом.
+  assert.deepEqual(planMmToFraction(sheet, base.schemeId, { x: -20000, y: -15000 }), { x: 0, y: 0 });
+  assert.deepEqual(planMmToFraction(sheet, base.schemeId, { x: 20000, y: 15000 }), { x: 1, y: 1 });
 });
 
 test("G68: пустой росчерк не трогает объект — тот же объект по ссылке", () => {
@@ -529,12 +571,12 @@ test("отступ вдоль стены считается по проекци�
 
 test("левая нормаль стены — та, что слева, если идти от начала к концу", () => {
   // Экранный `y` растёт вниз: идём вправо — слева оказывается верх.
-  const right = workshopWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 1000, y: 0 } });
+  const right = drawingWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 1000, y: 0 } });
   assert.deepEqual(right.u, { x: 1, y: 0 });
   assert.deepEqual(right.n, { x: 0, y: -1 });
-  const down = workshopWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 0, y: 1000 } });
+  const down = drawingWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 0, y: 1000 } });
   assert.deepEqual(down.n, { x: 1, y: 0 }, "идём вниз — слева восток");
-  assert.equal(workshopWallVectors({ aMm: { x: 5, y: 5 }, bMm: { x: 5, y: 5 } }), null);
+  assert.equal(drawingWallVectors({ aMm: { x: 5, y: 5 }, bMm: { x: 5, y: 5 } }), null);
 });
 
 test("четыре сочетания петель и стороны — четыре разные створки", () => {
@@ -544,7 +586,7 @@ test("четыре сочетания петель и стороны — чет�
   const hinges = new Set();
   for (const hinge of ["start", "end"]) {
     for (const swing of ["left", "right"]) {
-      const leaf = workshopDoorLeaf(wall, { ...base, hinge, swing });
+      const leaf = drawingDoorLeaf(wall, { ...base, hinge, swing });
       tips.add(leaf.tip.x + "/" + leaf.tip.y);
       hinges.add(leaf.hinge.x + "/" + leaf.hinge.y);
       assert.equal(
@@ -565,7 +607,7 @@ test("четыре сочетания петель и стороны — чет�
 
 test("петли у начала — у ближнего к началу стены косяка, сторона — левая нормаль", () => {
   const wall = { aMm: { x: 0, y: 0 }, bMm: { x: 4000, y: 0 }, thicknessMm: 100 };
-  const leaf = workshopDoorLeaf(wall, {
+  const leaf = drawingDoorLeaf(wall, {
     kind: "door",
     atMm: 1000,
     widthMm: 900,
@@ -671,11 +713,11 @@ test("незнакомому виду достаётся квадрат, а не
 
 test("углы прямоугольного объекта поворачиваются вокруг середины", () => {
   const object = { shape: "rect", atMm: { x: 1000, y: 500 }, widthMm: 1200, depthMm: 100, turnDeg: 0 };
-  const corners = workshopObjectCorners(object);
+  const corners = drawingObjectCorners(object);
   assert.equal(corners.length, 4);
   assert.deepEqual(corners[0], { x: 400, y: 450 });
   assert.deepEqual(corners[2], { x: 1600, y: 550 });
-  const turned = workshopObjectCorners({ ...object, turnDeg: 90 });
+  const turned = drawingObjectCorners({ ...object, turnDeg: 90 });
   // Поворот вокруг середины оставляет вещь там, где её поставили.
   const middle = turned.reduce((sum, point) => ({ x: sum.x + point.x / 4, y: sum.y + point.y / 4 }), { x: 0, y: 0 });
   assert.ok(Math.abs(middle.x - 1000) < 0.001 && Math.abs(middle.y - 500) < 0.001);
@@ -684,12 +726,12 @@ test("углы прямоугольного объекта поворачива�
 
 test("попадание в объект: внутрь прямоугольника и в полосу ломаной", () => {
   const rect = { shape: "rect", atMm: { x: 0, y: 0 }, widthMm: 1000, depthMm: 400, turnDeg: 0 };
-  assert.equal(workshopHitObject(rect, { x: 100, y: 100 }, 0), true);
-  assert.equal(workshopHitObject(rect, { x: 100, y: 400 }, 0), false);
-  assert.equal(workshopHitObject(rect, { x: 100, y: 240 }, 50), true, "край ловится с припуском");
+  assert.equal(drawingHitObject(rect, { x: 100, y: 100 }, 0), true);
+  assert.equal(drawingHitObject(rect, { x: 100, y: 400 }, 0), false);
+  assert.equal(drawingHitObject(rect, { x: 100, y: 240 }, 50), true, "край ловится с припуском");
   const band = { shape: "polyline", pointsMm: [{ x: 0, y: 0 }, { x: 2000, y: 0 }], depthMm: 600 };
-  assert.equal(workshopHitObject(band, { x: 1000, y: 250 }, 0), true);
-  assert.equal(workshopHitObject(band, { x: 1000, y: 400 }, 0), false);
+  assert.equal(drawingHitObject(band, { x: 1000, y: 250 }, 0), true);
+  assert.equal(drawingHitObject(band, { x: 1000, y: 400 }, 0), false);
 });
 
 test("под курсором выигрывает проём, а не стена, в которой он стоит", () => {
@@ -724,7 +766,7 @@ test("у выделенной двери ручки створки старше 
     hinge: "start",
     swing: "left",
   });
-  const leaf = workshopDoorLeaf(wall, added.opening);
+  const leaf = drawingDoorLeaf(wall, added.opening);
   const view = viewOf({ zoom: 1 });
   const chosen = { kind: "opening", id: added.opening.id };
   assert.equal(workshopPick(added.project, base.schemeId, leaf.hinge, view, chosen).kind, "hinge");
