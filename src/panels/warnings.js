@@ -76,6 +76,10 @@ export const WARNING_TARGETS = {
   placementLinkMissing: "placement",
   smallGroup: "group",
   groupAcrossSchemes: "group",
+  // Чертёж, который не лёг на план, ведёт к самой схеме: править там нечего,
+  // кроме неё — задать масштаб или привязать чертёж.
+  drawingNoScale: "scheme",
+  drawingNotPlaced: "scheme",
 };
 
 // Ошибки сверху, вопросы о виде снизу: сперва то, что сломано, потом то, что
@@ -128,6 +132,10 @@ export function warningPlace(project, problem) {
       schemeId: outline.schemeId || null,
       point: points.length > 0 ? points[0] : null,
     };
+  }
+  if (target === "scheme") {
+    const scheme = findScheme(project, problem.ref);
+    return scheme ? { markId: null, typeId: null, schemeId: scheme.id, point: null } : null;
   }
   if (target === "category") {
     // У категории своих меток нет — ведём к первой метке любого её типа.

@@ -5035,6 +5035,26 @@ export function validate(project) {
   // Отставший счётчик — свойство типа, а не каждой его метки.
   for (const [id, code] of behindTypes) problems.push(problem("counterBehind", { code }, id));
 
+  // **Чертёж есть, а на план его не положить** (таск 127). Чертёж виден на
+  // подложке только при двух условиях сразу — калибровка и привязка (ADR 008),
+  // и когда одного не хватает, холст его просто не рисует. Молчать об этом
+  // нельзя: человек чертил и не видит нарисованного, а причина не в нём.
+  // Это находка, а не поломка: данные целы, и чинится она двумя кликами.
+  for (const scheme of project.schemes) {
+    if (wallsOnScheme(project, scheme.id).length === 0 && schemeObjectsOnScheme(project, scheme.id).length === 0) {
+      continue;
+    }
+    if (planMmToFraction(project, scheme.id, { x: 0, y: 0 })) continue;
+    // Код пишется словом, а не складывается из переменной: сверка словаря
+    // ищет его в исходниках буквально, и склеенный код прошёл бы мимо неё
+    // (тем самым путём, от которого `strings.test.js` и заведён).
+    if (planPixelsPerMeter(project, scheme.id) > 0) {
+      problems.push(problem("drawingNotPlaced", { name: scheme.name }, scheme.id, "warning"));
+    } else {
+      problems.push(problem("drawingNoScale", { name: scheme.name }, scheme.id, "warning"));
+    }
+  }
+
   // Метка не того вида, что её тип. Это не поломка: так открывается объект,
   // который размечали до того, как у типа появился вид, — линии остались
   // нарисованными, и трогать их молча нельзя. Но и промолчать нельзя:
