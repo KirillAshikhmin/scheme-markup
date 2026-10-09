@@ -27,11 +27,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  OPENING_KINDS,
+  SCHEME_OBJECT_SHAPES,
+  addOpening,
   addRoom,
   addScheme,
   createProject,
   drawingBoundsMm,
   findScheme,
+  openingsInWall,
   planFractionToMm,
   planOriginOf,
   setPlanOrigin,
@@ -45,20 +49,30 @@ import { applyPlanEdit } from "../src/panels/schemes.js";
 import {
   WORKSHOP_EMPTY_MM,
   WORKSHOP_GRID_STEPS_MM,
+  WORKSHOP_OBJECT_FALLBACK,
+  WORKSHOP_OPENING_DEFAULTS,
   WORKSHOP_ORIGIN_AT,
   WORKSHOP_UNIT,
   WORKSHOP_ZOOM_MAX,
   WORKSHOP_ZOOM_MIN,
   workshopAddChain,
+  workshopAlongWall,
   workshopAttachOrigin,
   workshopChain,
   workshopClampZoom,
+  workshopDoorLeaf,
   workshopExtentMm,
   workshopFitView,
   workshopGridDrawStepMm,
+  workshopHitObject,
   workshopMoveVertex,
   workshopMoveWall,
+  workshopObjectCorners,
+  workshopObjectDefaultsByName,
+  workshopOpeningAt,
   workshopPick,
+  workshopTryOpening,
+  workshopWallVectors,
   workshopPlacement,
   workshopPlanPointScreen,
   workshopRoundMm,
@@ -488,4 +502,257 @@ test("окно не заводит справочника видов объек�
   );
   assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "openings"));
   assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "schemeObjects"));
+});
+
+// ——— таск 126: проёмы в стенах ————————————————————————————————————————
+//
+// Проверяется то, чего не видно глазом на снимке: что окно **не переписывает
+// проверки модели** (призрак и клик считаются одной попыткой записи), что
+// створка двери различает все четыре сочетания, и что умолчания по виду
+// существуют и не врут.
+
+test("проём садится серединой под курсор и прижимается к концу стены", () => {
+  const wall = { aMm: { x: 0, y: 0 }, bMm: { x: 4000, y: 0 }, thicknessMm: 100 };
+  assert.equal(workshopOpeningAt(wall, { x: 2000, y: 0 }, 1500), 1250, "середина проёма под курсором");
+  assert.equal(workshopOpeningAt(wall, { x: 100, y: 0 }, 1500), 0, "у начала прижат к началу, а не отказ");
+  assert.equal(workshopOpeningAt(wall, { x: 3900, y: 0 }, 1500), 2500, "у конца прижат к концу");
+  assert.equal(workshopOpeningAt(wall, { x: 2000, y: 0 }, 9000), 0, "шире стены — прижат к началу, откажет модель");
+});
+
+test("отступ вдоль стены считается по проекции и не выходит за её концы", () => {
+  const wall = { aMm: { x: 0, y: 0 }, bMm: { x: 0, y: 3000 }, thicknessMm: 100 };
+  assert.equal(workshopAlongWall(wall, { x: 500, y: 1200 }), 1200, "поперечный промах не считается");
+  assert.equal(workshopAlongWall(wall, { x: 0, y: -500 }), 0);
+  assert.equal(workshopAlongWall(wall, { x: 0, y: 9000 }), 3000);
+});
+
+test("левая нормаль стены — та, что слева, если идти от начала к концу", () => {
+  // Экранный `y` растёт вниз: идём вправо — слева оказывается верх.
+  const right = workshopWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 1000, y: 0 } });
+  assert.deepEqual(right.u, { x: 1, y: 0 });
+  assert.deepEqual(right.n, { x: 0, y: -1 });
+  const down = workshopWallVectors({ aMm: { x: 0, y: 0 }, bMm: { x: 0, y: 1000 } });
+  assert.deepEqual(down.n, { x: 1, y: 0 }, "идём вниз — слева восток");
+  assert.equal(workshopWallVectors({ aMm: { x: 5, y: 5 }, bMm: { x: 5, y: 5 } }), null);
+});
+
+test("четыре сочетания петель и стороны — четыре разные створки", () => {
+  const wall = { aMm: { x: 0, y: 0 }, bMm: { x: 4000, y: 0 }, thicknessMm: 100 };
+  const base = { kind: "door", atMm: 1000, widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 };
+  const tips = new Set();
+  const hinges = new Set();
+  for (const hinge of ["start", "end"]) {
+    for (const swing of ["left", "right"]) {
+      const leaf = workshopDoorLeaf(wall, { ...base, hinge, swing });
+      tips.add(leaf.tip.x + "/" + leaf.tip.y);
+      hinges.add(leaf.hinge.x + "/" + leaf.hinge.y);
+      assert.equal(
+        Math.round(Math.hypot(leaf.tip.x - leaf.hinge.x, leaf.tip.y - leaf.hinge.y)),
+        900,
+        "полотно длиной в проём",
+      );
+      assert.equal(
+        Math.round(Math.hypot(leaf.closed.x - leaf.hinge.x, leaf.closed.y - leaf.hinge.y)),
+        900,
+        "закрытое положение — второй косяк",
+      );
+    }
+  }
+  assert.equal(tips.size, 4, "четыре разных кончика полотна — четыре разные двери");
+  assert.equal(hinges.size, 2, "петли бывают у двух косяков");
+});
+
+test("петли у начала — у ближнего к началу стены косяка, сторона — левая нормаль", () => {
+  const wall = { aMm: { x: 0, y: 0 }, bMm: { x: 4000, y: 0 }, thicknessMm: 100 };
+  const leaf = workshopDoorLeaf(wall, {
+    kind: "door",
+    atMm: 1000,
+    widthMm: 900,
+    hinge: "start",
+    swing: "left",
+  });
+  assert.deepEqual(leaf.hinge, { x: 1000, y: 0 });
+  assert.deepEqual(leaf.closed, { x: 1900, y: 0 });
+  assert.deepEqual(leaf.tip, { x: 1000, y: -900 }, "налево от направления стены — вверх по экрану");
+});
+
+test("призрак и клик считаются одной попыткой: проверки модели не переписаны", () => {
+  const base = drawnRoom();
+  const wall = wallsOnScheme(base.project, base.schemeId)[0];
+  const good = workshopTryOpening(
+    base.project,
+    { wallId: wall.id, kind: "window", atMm: 1000, widthMm: 1500, heightMm: 1400, heightAboveFloorMm: 800 },
+    null,
+  );
+  assert.equal(good.ok, true);
+  assert.equal(openingsInWall(good.project, wall.id).length, 1);
+
+  const wide = workshopTryOpening(
+    base.project,
+    { wallId: wall.id, kind: "window", atMm: 0, widthMm: 99000, heightMm: 1400, heightAboveFloorMm: 800 },
+    null,
+  );
+  assert.equal(wide.ok, false);
+  assert.match(wide.message, /шире стены/, "слова берутся у модели, а не придумываются заново: " + wide.message);
+
+  const overlap = workshopTryOpening(
+    good.project,
+    { wallId: wall.id, kind: "door", atMm: 1200, widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
+    null,
+  );
+  assert.equal(overlap.ok, false);
+  assert.match(overlap.message, /налезают/, overlap.message);
+
+  // Встык — законно, и окно обязано это пропустить.
+  const touching = workshopTryOpening(
+    good.project,
+    { wallId: wall.id, kind: "door", atMm: 2500, widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
+    null,
+  );
+  assert.equal(touching.ok, true, touching.message);
+});
+
+test("проём выше потолка не проходит, и сказано это высотой схемы", () => {
+  const base = drawnRoom();
+  const low = setSchemeWallHeight(base.project, base.schemeId, 2000).project;
+  const wall = wallsOnScheme(low, base.schemeId)[0];
+  const attempt = workshopTryOpening(
+    low,
+    { wallId: wall.id, kind: "window", atMm: 500, widthMm: 1500, heightMm: 1400, heightAboveFloorMm: 800 },
+    null,
+  );
+  assert.equal(attempt.ok, false);
+  assert.match(attempt.message, /2200/, attempt.message);
+});
+
+test("умолчания по виду заведены на все четыре и похожи на то, что ставят", () => {
+  for (const kind of OPENING_KINDS) {
+    const sizes = WORKSHOP_OPENING_DEFAULTS[kind];
+    assert.ok(sizes, "у вида «" + kind + "» нет умолчаний");
+    assert.ok(sizes.widthMm > 0 && sizes.heightMm > 0 && sizes.heightAboveFloorMm >= 0);
+    // Под потолок 2700 должно влезать всё: иначе первое же умолчание упрётся в
+    // отказ модели «проём выше помещения».
+    assert.ok(sizes.heightAboveFloorMm + sizes.heightMm <= 2700, kind + " не влезает под потолок 2700");
+  }
+  assert.equal(WORKSHOP_OPENING_DEFAULTS.door.heightAboveFloorMm, 0, "дверь стоит на полу");
+  assert.ok(WORKSHOP_OPENING_DEFAULTS.window.heightAboveFloorMm > 0, "у окна есть подоконник");
+});
+
+// ——— таск 126: объекты на полу ————————————————————————————————————————
+
+test("умолчания объектов заведены на все девять стартовых видов", () => {
+  for (const [key, name] of Object.entries(strings.schemeObjectKinds)) {
+    const defaults = workshopObjectDefaultsByName(name);
+    assert.ok(defaults, "у вида «" + name + "» нет умолчаний");
+    assert.ok(SCHEME_OBJECT_SHAPES.includes(defaults.shape), key + ": форма неизвестна");
+    assert.ok(defaults.depthMm > 0, key + ": глубина должна быть положительной");
+    if (defaults.shape === "rect") assert.ok(defaults.widthMm > 0, key + ": ширина должна быть положительной");
+  }
+});
+
+test("радиатор и столешница выражают то, ради чего объекты заведены", () => {
+  const radiator = workshopObjectDefaultsByName(strings.schemeObjectKinds.radiator);
+  assert.ok(radiator.heightMm > 0 && radiator.heightAboveFloorMm > 0, "радиатор висит, а не лежит");
+  const counter = workshopObjectDefaultsByName(strings.schemeObjectKinds.counter);
+  assert.equal(counter.shape, "polyline", "кухонный фронт идёт полосой по стене");
+  assert.equal(
+    counter.heightAboveFloorMm + counter.heightMm,
+    900,
+    "верх столешницы на 900 — от этого числа отмеряют розетки над ней",
+  );
+});
+
+test("незнакомому виду достаётся квадрат, а не пустота", () => {
+  const own = workshopObjectDefaultsByName("Аквариум");
+  assert.deepEqual(own, { ...WORKSHOP_OBJECT_FALLBACK });
+  assert.equal(workshopObjectDefaultsByName(null).shape, "rect");
+});
+
+test("углы прямоугольного объекта поворачиваются вокруг середины", () => {
+  const object = { shape: "rect", atMm: { x: 1000, y: 500 }, widthMm: 1200, depthMm: 100, turnDeg: 0 };
+  const corners = workshopObjectCorners(object);
+  assert.equal(corners.length, 4);
+  assert.deepEqual(corners[0], { x: 400, y: 450 });
+  assert.deepEqual(corners[2], { x: 1600, y: 550 });
+  const turned = workshopObjectCorners({ ...object, turnDeg: 90 });
+  // Поворот вокруг середины оставляет вещь там, где её поставили.
+  const middle = turned.reduce((sum, point) => ({ x: sum.x + point.x / 4, y: sum.y + point.y / 4 }), { x: 0, y: 0 });
+  assert.ok(Math.abs(middle.x - 1000) < 0.001 && Math.abs(middle.y - 500) < 0.001);
+  assert.ok(Math.abs(turned[0].x - 1050) < 0.001 && Math.abs(turned[0].y + 100) < 0.001);
+});
+
+test("попадание в объект: внутрь прямоугольника и в полосу ломаной", () => {
+  const rect = { shape: "rect", atMm: { x: 0, y: 0 }, widthMm: 1000, depthMm: 400, turnDeg: 0 };
+  assert.equal(workshopHitObject(rect, { x: 100, y: 100 }, 0), true);
+  assert.equal(workshopHitObject(rect, { x: 100, y: 400 }, 0), false);
+  assert.equal(workshopHitObject(rect, { x: 100, y: 240 }, 50), true, "край ловится с припуском");
+  const band = { shape: "polyline", pointsMm: [{ x: 0, y: 0 }, { x: 2000, y: 0 }], depthMm: 600 };
+  assert.equal(workshopHitObject(band, { x: 1000, y: 250 }, 0), true);
+  assert.equal(workshopHitObject(band, { x: 1000, y: 400 }, 0), false);
+});
+
+test("под курсором выигрывает проём, а не стена, в которой он стоит", () => {
+  const base = drawnRoom();
+  const wall = wallsOnScheme(base.project, base.schemeId)[0];
+  const added = addOpening(base.project, {
+    wallId: wall.id,
+    kind: "window",
+    atMm: 1000,
+    widthMm: 1500,
+    heightMm: 1400,
+    heightAboveFloorMm: 800,
+  });
+  const view = viewOf({ zoom: 1 });
+  const onOpening = workshopPick(added.project, base.schemeId, { x: wall.aMm.x + 1700, y: wall.aMm.y }, view, null);
+  assert.equal(onOpening.kind, "opening");
+  assert.equal(onOpening.id, added.opening.id);
+  const onWall = workshopPick(added.project, base.schemeId, { x: wall.aMm.x + 3000, y: wall.aMm.y }, view, null);
+  assert.equal(onWall.kind, "wall");
+});
+
+test("у выделенной двери ручки створки старше всего остального", () => {
+  const base = drawnRoom();
+  const wall = wallsOnScheme(base.project, base.schemeId)[0];
+  const added = addOpening(base.project, {
+    wallId: wall.id,
+    kind: "door",
+    atMm: 1000,
+    widthMm: 900,
+    heightMm: 2100,
+    heightAboveFloorMm: 0,
+    hinge: "start",
+    swing: "left",
+  });
+  const leaf = workshopDoorLeaf(wall, added.opening);
+  const view = viewOf({ zoom: 1 });
+  const chosen = { kind: "opening", id: added.opening.id };
+  assert.equal(workshopPick(added.project, base.schemeId, leaf.hinge, view, chosen).kind, "hinge");
+  assert.equal(workshopPick(added.project, base.schemeId, leaf.tip, view, chosen).kind, "swing");
+  // Без выделения ручек нет вовсе — кончик полотна висит в воздухе посреди
+  // комнаты, и ловить там нечего.
+  assert.equal(workshopPick(added.project, base.schemeId, leaf.tip, view, null), null);
+});
+
+test("состояние называет проёмы и объекты, когда они есть", () => {
+  const base = drawnRoom();
+  const wall = wallsOnScheme(base.project, base.schemeId)[0];
+  const quiet = workshopStatus(base.project, base.schemeId, workshopPlacement(base.project, base.schemeId));
+  assert.ok(!quiet.includes("проёмов"), "пустого счёта в строке нет: " + quiet);
+  const added = addOpening(base.project, {
+    wallId: wall.id,
+    kind: "window",
+    atMm: 1000,
+    widthMm: 1500,
+    heightMm: 1400,
+    heightAboveFloorMm: 800,
+  });
+  const line = workshopStatus(added.project, base.schemeId, workshopPlacement(added.project, base.schemeId));
+  assert.match(line, /проёмов 1/, line);
+});
+
+test("G68: объект с чертежом, но без проёмов, пустого списка не заводит", () => {
+  const base = drawnRoom();
+  assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "openings"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "schemeObjects"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(base.project, "schemeObjectKinds"));
 });
