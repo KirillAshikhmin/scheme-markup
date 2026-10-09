@@ -369,9 +369,11 @@ test("своя галочка прячет плашки с плана, гало�
 test("комментарии считаются в счёте показанного наравне с типами", () => {
   const box = fixture();
   const total = box.project.markTypes.length + 1;
-  assert.deepEqual(filtersTypeCounts(box.project, null), { total, shown: total, hidden: 0 });
+  assert.deepEqual(filtersTypeCounts(box.project, null), { total, shown: total, hidden: 0, hiddenTypes: 0 });
   const hidden = filtersToggleComments(null, false);
-  assert.deepEqual(filtersTypeCounts(box.project, hidden), { total, shown: total - 1, hidden: 1 });
+  // Скрытый комментарий считается в `hidden`, но не в `hiddenTypes`: заголовок
+  // дерева подписан вторым числом, и строк справочника там не убавилось.
+  assert.deepEqual(filtersTypeCounts(box.project, hidden), { total, shown: total - 1, hidden: 1, hiddenTypes: 0 });
   // Сняты все типы, но плашки на плане — «Скрыть все» обязана остаться живой.
   const noTypes = { ...filtersSetAllTypes(box.project, null, false), comments: true };
   assert.equal(filtersTypeCounts(box.project, noTypes).shown, 1);

@@ -160,6 +160,10 @@ export function filtersTypeCounts(project, filter) {
     total: types.length + 1,
     shown: shown + commentsShown,
     hidden: types.length - shown + (1 - commentsShown),
+    // Отдельно — сколько скрыто **строк справочника**. Этим числом подписан
+    // заголовок дерева, и комментариям в нём места нет: их галочка стоит
+    // снаружи, и «скрыто: 1» над полным деревом сбивало бы с толку.
+    hiddenTypes: types.length - shown,
   };
 }
 
@@ -324,8 +328,8 @@ export function filtersBox(api) {
         item.box.checked = filtersTypeChecked(project, state.filter, item.id);
       }
     }
-    summary.textContent = counts.hidden > 0
-      ? strings.filters.types + " — " + text("filters.hidden", { count: counts.hidden })
+    summary.textContent = counts.hiddenTypes > 0
+      ? strings.filters.types + " — " + text("filters.hidden", { count: counts.hiddenTypes })
       : strings.filters.types;
     rooms.value = state.filter.roomId || "";
     if (search.value !== (state.filter.query || "") && document.activeElement !== search) {

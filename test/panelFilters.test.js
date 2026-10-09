@@ -117,13 +117,14 @@ test("счёт показанных типов: всё видно, полови�
   assert.ok(total > 1, "в шаблоне должно быть несколько типов");
 
   const everything = filtersTypeCounts(project, ALL);
-  assert.deepEqual(everything, { total, shown: total, hidden: 0 });
+  assert.deepEqual(everything, { total, shown: total, hidden: 0, hiddenTypes: 0 });
 
+  // `hiddenTypes` — только строки справочника: им подписан заголовок дерева.
   const oneOff = filtersToggleType(project, ALL, box.typeOf("Р"), false);
-  assert.deepEqual(filtersTypeCounts(project, oneOff), { total, shown: total - 1, hidden: 1 });
+  assert.deepEqual(filtersTypeCounts(project, oneOff), { total, shown: total - 1, hidden: 1, hiddenTypes: 1 });
 
   const nothing = filtersSetAllTypes(project, ALL, false);
-  assert.deepEqual(filtersTypeCounts(project, nothing), { total, shown: 0, hidden: total });
+  assert.deepEqual(filtersTypeCounts(project, nothing), { total, shown: 0, hidden: total, hiddenTypes: total - 1 });
   assert.equal(nothing.comments, false, "«Скрыть все» оставила плашки на плане");
 
   // Объекта ещё нет (панель смонтирована раньше, чем он открыт) — скрывать
