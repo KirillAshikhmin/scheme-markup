@@ -8,7 +8,7 @@
 //      лестнице оставил бы стену с кружком вместо кондиционера, и заметить
 //      это можно было бы только на той стене, где такой тип стоит.
 //   2. **Размер решается числом, а не вкусом.** Крупная вещь рисуется в
-//      масштабе стены, мелкая — значком: ровно это и есть «рядом или прям
+//      масштабе стены, мелкая — уменьшённым изображением: ровно это и есть «рядом или прям
 //      поверх объекта, если большой».
 //   3. **Подрозетники вплотную и одна высота у ряда** — G190 и G191.
 //   4. **Умолчания размеров наследуются, а не подставляются** (G192): объект,
@@ -17,25 +17,31 @@
 //      тушью, и залитый значок стал бы чёрным пятном.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
+  MARK_DIMENSION_MAX,
+  MARK_DIMENSION_SIGNED,
   addMark,
   addScheme,
   addWall,
   createProject,
   defaultTemplate,
   findType,
+  markDimensionValue,
   markSizes,
   setMarkWall,
   setPlanOrigin,
   setPlanScale,
   setTypeSizes,
   styleOf,
+  typeSizes,
+  typeObjectView,
   wallElevation,
 } from "../src/model.js";
-import { drawIcon, iconByName, iconForShape, iconNames } from "../src/icons/registry.js";
+import { drawObjectView, objectViewByName, objectViewForShape, objectViewNames } from "../src/objectViews/registry.js";
 import { monoContext } from "../src/mono.js";
-import { ELEVATION_SCALE_MM, drawElevation, elevationIconOf, elevationMarkBox, elevationRows } from "../src/render.js";
+import { ELEVATION_SCALE_MM, drawElevation, elevationViewOf, elevationMarkBox, elevationRows } from "../src/render.js";
 
 // Холст-писец: записывает каждый вызов и каждое присваивание. Тем же приёмом
 // в таске 127 сверяли кадр чертежа — отпечаток контура снимается так же.
@@ -64,26 +70,26 @@ test("у каждого типа стартового справочника е�
   for (const type of template.markTypes) {
     const category = categories.get(type.categoryId);
     const shape = type.shape || (category ? category.shape : null);
-    const icon = iconByName(type.icon) || iconForShape(shape);
-    if (!icon) missing.push(type.code + " " + type.name + " [" + shape + "]");
+    const view = objectViewByName(typeObjectView(type)) || objectViewForShape(shape);
+    if (!view) missing.push(type.code + " " + type.name + " [" + shape + "]");
   }
   assert.deepEqual(missing, [], "тип без контура: развёртка нарисует ему кружок");
 });
 
-test("значок берётся сперва у типа, потом по форме, и ничем не ломается", () => {
+test("изображение берётся сперва у типа, потом по форме, и ничем не ломается", () => {
   // Имя у типа старше формы: ночник и выход канализации делят `circle-drain`,
   // и без имени один из них нарисовался бы чужой вещью.
-  assert.equal(elevationIconOf({ icon: "drain", shape: "circle-drain" }).name, "drain");
-  assert.equal(elevationIconOf({ icon: "nightLight", shape: "circle-drain" }).name, "nightLight");
+  assert.equal(elevationViewOf({ view: "drain", shape: "circle-drain" }).name, "drain");
+  assert.equal(elevationViewOf({ view: "nightLight", shape: "circle-drain" }).name, "nightLight");
   // Имени нет — решает форма.
-  assert.equal(elevationIconOf({ icon: null, shape: "circle-socket" }).name, "socket");
+  assert.equal(elevationViewOf({ view: null, shape: "circle-socket" }).name, "socket");
   // Нет ни того ни другого — значка нет, и развёртка рисует нынешний знак:
   // тип, заведённый руками, это обычная жизнь, а не исключение.
-  assert.equal(elevationIconOf({ icon: null, shape: "star" }), null);
-  assert.equal(elevationIconOf({ icon: "чепуха", shape: "звезда" }), null);
+  assert.equal(elevationViewOf({ view: null, shape: "star" }), null);
+  assert.equal(elevationViewOf({ view: "чепуха", shape: "звезда" }), null);
 });
 
-test("крупная вещь — в масштабе стены, мелкая — значком", () => {
+test("крупная вещь — в масштабе стены, мелкая — уменьшённым изображением", () => {
   const scale = 0.05; // точек холста на миллиметр стены
   const unit = 1;
   // Кондиционер 900 × 300: в масштабе это 45 × 15 точек, и влезет он или нет
@@ -112,7 +118,7 @@ test("крупная вещь — в масштабе стены, мелкая �
   assert.equal(under.scaled, false);
   // Отметка снята — ни одного значка, и размер тот же, что был до этого таска.
   const plain = elevationMarkBox({ shape: "circle-thermo", sizeMm: { width: 900, height: 300 } }, scale, unit, false);
-  assert.equal(plain.icon, null);
+  assert.equal(plain.view, null);
   assert.equal(plain.width, 18 * unit, "без отметки знак прежнего размера");
 });
 
@@ -182,7 +188,12 @@ test("умолчания размеров наследуются, а не под
 test("G68: пустые умолчания убирают поле у типа, а не обнуляют его", () => {
   const project = createProject();
   const socket = project.markTypes.find((type) => type.code === "Р");
-  const cleared = setTypeSizes(project, socket.id, { length: "", width: "", heightAboveFloor: "" }).project;
+  const cleared = setTypeSizes(project, socket.id, {
+    length: "",
+    width: "",
+    depth: "",
+    heightAboveFloor: "",
+  }).project;
   const type = findType(cleared, socket.id);
   assert.ok(!Object.prototype.hasOwnProperty.call(type, "sizes"), "тип стал ровно таким, каким был до таска");
   // Ноль — это значение, а не пустота: метка в полу стоит на нуле.
@@ -191,9 +202,9 @@ test("G68: пустые умолчания убирают поле у типа, 
 });
 
 test("контур рисуется только обводкой — в чёрно-белом он останется контуром", () => {
-  for (const name of iconNames()) {
+  for (const name of objectViewNames()) {
     const { ctx, log } = scribe();
-    drawIcon(ctx, iconByName(name), { x: 0, y: 0, width: 40, height: 40 }, "#d1242f");
+    drawObjectView(ctx, objectViewByName(name), { x: 0, y: 0, width: 40, height: 40 }, "#d1242f");
     const painted = log.join(" ");
     assert.ok(painted.includes("stroke()"), name + ": контур не обведён");
     assert.ok(!/\bfill\(\)/.test(painted), name + ": значок залит — в туши станет чёрным пятном");
@@ -206,9 +217,9 @@ test("значок каждого типа отличим от соседей п
   // разных прибора, нарисованных одинаково, на бумаге неразличимы, а поймать
   // это глазами на тридцати значках дорого.
   const prints = new Map();
-  for (const name of iconNames()) {
+  for (const name of objectViewNames()) {
     const { ctx, log } = scribe();
-    drawIcon(ctx, iconByName(name), { x: 0, y: 0, width: 40, height: 40 }, "#000000");
+    drawObjectView(ctx, objectViewByName(name), { x: 0, y: 0, width: 40, height: 40 }, "#000000");
     const print = log.filter((entry) => !entry.includes("=")).join("|");
     assert.ok(!prints.has(print), name + " рисуется так же, как " + prints.get(print));
     prints.set(print, name);
@@ -309,4 +320,237 @@ test("в чёрно-белом развёртка идёт тушью, и кон
     ["#000000", "#ffffff"],
     "в чёрно-белом остаются только тушь и бумага: " + ink.join(" "),
   );
+});
+
+// ——— изображения описаны данными (таск 139, требование G198) ——————————
+//
+// Переделка «рисование → описание» касается всех тридцати двух изображений
+// сразу, и тихая потеря в одном из них не покраснеет ни от попарной
+// различимости (она про то, что изображения разные), ни от глаз (их тридцать
+// два). Поэтому вид каждого сверяется с тем, каким он был **до** переделки:
+// отпечаток снят на прежнем коде и лежит в `objectViews-before.json`.
+
+const PRINTS_BEFORE = JSON.parse(
+  readFileSync(new URL("./fixtures/objectViews-before.json", import.meta.url), "utf8"),
+);
+const PRINTS_AFTER = JSON.parse(
+  readFileSync(new URL("./fixtures/objectViews-after.json", import.meta.url), "utf8"),
+);
+
+// Два прямоугольника: квадратный и вытянутый три к одному. Второй ловит то,
+// что зависит от сторон, — скругления и пропорции.
+function printOf(name) {
+  const log = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get: (target, key) => (...args) =>
+        log.push(
+          String(key) +
+            "(" +
+            args.map((value) => (typeof value === "number" ? Math.round(value * 1000) / 1000 : String(value))).join(",") +
+            ")",
+        ),
+      set: () => true,
+    },
+  );
+  drawObjectView(ctx, objectViewByName(name), { x: 0, y: 0, width: 40, height: 40 }, "#000");
+  log.push("—");
+  drawObjectView(ctx, objectViewByName(name), { x: 10, y: 20, width: 90, height: 30 }, "#000");
+  return log;
+}
+
+// Три изображения, у которых капля: единственное место во всех тридцати двух,
+// где примитивов не хватало. Кривая Безье заменена шестью отрезками — это
+// заявленное упрощение (G198: «не хватает примитива — упрощается изображение,
+// а не растёт набор»), и список держит его честным: разойтись имеет право
+// только эта тройка.
+const SIMPLIFIED = ["dehumidifier", "leak", "waterOutlet"];
+
+test("переделка в данные не тронула вид: двадцать девять изображений из тридцати двух совпали до вызова", () => {
+  const names = objectViewNames();
+  assert.equal(names.length, 32, "изображений должно быть тридцать два: " + names.length);
+  const changed = [];
+  for (const name of names) {
+    const was = PRINTS_BEFORE[name];
+    assert.ok(was, name + ": отпечатка «до» нет — сверять не с чем");
+    if (JSON.stringify(was) !== JSON.stringify(printOf(name))) changed.push(name);
+  }
+  assert.deepEqual(
+    changed.sort(),
+    [...SIMPLIFIED].sort(),
+    "вид изменился не только у заявленного упрощения — это и есть тихая потеря",
+  );
+});
+
+test("упрощение капли названо и ограничено: кривых в описаниях не осталось ни одной", () => {
+  for (const name of SIMPLIFIED) {
+    const painted = printOf(name).join(" ");
+    assert.ok(!painted.includes("quadraticCurveTo"), name + ": кривая осталась");
+    assert.ok(!painted.includes("bezierCurveTo"), name + ": кривая осталась");
+  }
+  // И во всех остальных кривых не было и нет.
+  for (const name of objectViewNames()) {
+    const painted = printOf(name).join(" ");
+    assert.ok(!/CurveTo/.test(painted), name + ": в описании кривая");
+  }
+});
+
+test("описания — записи известных видов, и видов пять", () => {
+  const kinds = new Set();
+  for (const name of objectViewNames()) {
+    const view = objectViewByName(name);
+    assert.ok(Array.isArray(view.parts) && view.parts.length > 0, name + ": описания нет");
+    assert.ok(typeof view.draw !== "function", name + ": осталась функция рисования — описание не отдаётся данными");
+    for (const part of view.parts) {
+      assert.ok(part && typeof part === "object", name + ": примитив не запись");
+      kinds.add(part.kind);
+    }
+  }
+  assert.deepEqual([...kinds].sort(), ["arc", "circle", "line", "poly", "rect"], "набор примитивов вырос");
+});
+
+test("описание читается без холста: объём получит ту же геометрию", () => {
+  // Смысл переделки: по описанию можно посчитать габарит, не рисуя. Если
+  // контур кондиционера не уместился в свой прямоугольник, выдавить его на
+  // глубину тоже не выйдет.
+  for (const name of objectViewNames()) {
+    const view = objectViewByName(name);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const see = (x, y) => {
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    };
+    for (const part of view.parts) {
+      if (part.kind === "rect") {
+        see(part.x, part.y);
+        see(part.x + part.width, part.y + part.height);
+      } else if (part.kind === "circle") {
+        see(part.cx - part.r, part.cy - part.r);
+        see(part.cx + part.r, part.cy + part.r);
+      } else if (part.kind === "arc") {
+        // У дуги габарит считается по её углам, а не по всей окружности:
+        // купол светильника занимает половину круга, и мерить его целым
+        // кругом значило бы находить выход за рамку там, где его нет.
+        const from = Math.min(part.from, part.to);
+        const to = Math.max(part.from, part.to);
+        const angles = [from, to];
+        for (let turn = -4; turn <= 4; turn += 1) {
+          for (const quarter of [0, Math.PI / 2, Math.PI, (Math.PI * 3) / 2]) {
+            const angle = quarter + turn * Math.PI * 2;
+            if (angle >= from && angle <= to) angles.push(angle);
+          }
+        }
+        for (const angle of angles) see(part.cx + Math.cos(angle) * part.r, part.cy + Math.sin(angle) * part.r);
+        if (part.close) see(part.cx, part.cy);
+      } else if (part.kind === "line") {
+        see(part.x1, part.y1);
+        see(part.x2, part.y2);
+      } else if (part.kind === "poly") {
+        for (const [x, y] of part.points) see(x, y);
+      }
+    }
+    assert.ok(minX >= -0.55 && maxX <= 0.55, name + ": описание вылезло за свой прямоугольник по ширине");
+    assert.ok(minY >= -0.55 && maxY <= 0.55, name + ": описание вылезло за свой прямоугольник по высоте");
+  }
+});
+
+test("отпечатки держат вид и дальше: каждое изображение совпадает со своим снимком", () => {
+  for (const name of objectViewNames()) {
+    assert.deepEqual(printOf(name), PRINTS_AFTER[name], name + ": вид изменился");
+  }
+});
+
+// ——— выступ от стены (таск 139, требование G197) ——————————————————————
+
+test("выступ заполнен у всех типов стартового справочника", () => {
+  const template = defaultTemplate();
+  const without = template.markTypes.filter((type) => typeSizes(type).depth === null);
+  assert.deepEqual(without.map((type) => type.code), [], "тип без выступа от стены");
+  // Три правила, по которым брались числа, проверяются тремя образцами.
+  const depthOf = (code) => typeSizes(template.markTypes.find((type) => type.code === code)).depth;
+  assert.equal(depthOf("Р"), 10, "механизм в подрозетнике выходит рамкой");
+  assert.equal(depthOf("К"), 200, "внутренний блок сплита выступает корпусом");
+  assert.equal(depthOf("Т"), 0, "точечный светильник в потолке от стены не выступает");
+  assert.equal(depthOf("Щ"), -30, "встраиваемый щит утоплен — это минус, а не отдельное свойство");
+});
+
+test("минус принимает только выступ, и только он", () => {
+  assert.equal(MARK_DIMENSION_SIGNED.join(","), "depth");
+  assert.equal(markDimensionValue(-30, "depth"), -30);
+  assert.equal(markDimensionValue("-30", "depth"), -30);
+  // Остальные три по-прежнему не меньше нуля: отрицательной длины не бывает.
+  for (const field of ["length", "width", "heightAboveFloor"]) {
+    assert.throws(() => markDimensionValue(-1, field), /\S/, field + " принял минус");
+  }
+  // Потолок меряется по модулю: утопленное на сто метров — тоже опечатка.
+  assert.throws(() => markDimensionValue(-MARK_DIMENSION_MAX - 1, "depth"), /\S/);
+});
+
+test("выступ наследуется и правится как остальные размеры", () => {
+  const project = createProject();
+  const socket = project.markTypes.find((type) => type.code === "Р");
+  const scheme = addScheme(project, { name: "1", imageId: "p", width: 1000, height: 1000 });
+  const added = addMark(scheme.project, {
+    schemeId: scheme.scheme.id,
+    typeId: socket.id,
+    kind: "point",
+    points: [{ x: 0.5, y: 0.5 }],
+  });
+  assert.equal(markSizes(added.project, added.mark).depth, 10);
+  assert.equal(markSizes(added.project, added.mark).depthOwn, false);
+  // Утопили эту одну розетку — у типа ничего не изменилось.
+  const own = { ...added.mark, depth: -5 };
+  assert.equal(markSizes(added.project, own).depth, -5);
+  assert.equal(markSizes(added.project, own).depthOwn, true);
+  assert.equal(typeSizes(findType(added.project, socket.id)).depth, 10);
+});
+
+test("G68: имя изображения читается по обоим именам", () => {
+  // Поле звалось `icon`, пока изображения звались значками (таск 135).
+  // Объект, заведённый между тасками, своих уточнённых изображений не теряет.
+  assert.equal(typeObjectView({ view: "drain" }), "drain");
+  assert.equal(typeObjectView({ icon: "drain" }), "drain");
+  assert.equal(typeObjectView({ view: "drain", icon: "nightLight" }), "drain", "новое имя старше");
+  assert.equal(typeObjectView({}), null);
+  assert.equal(typeObjectView(null), null);
+});
+
+test("выступ на развёртку не попадает: он перпендикулярен листу", () => {
+  // Проверка, что ничего не сломалось: четвёртый размер в данных развёртки не
+  // появился, и рисуется она ровно тем же, чем рисовалась.
+  let project = createProject();
+  const scheme = addScheme(project, { name: "1 этаж", imageId: "p", width: 1200, height: 800 });
+  project = setPlanScale(scheme.project, scheme.scheme.id, {
+    a: { x: 0.1, y: 0.5 },
+    b: { x: 0.6, y: 0.5 },
+    meters: 6,
+  }).project;
+  project = setPlanOrigin(project, scheme.scheme.id, { at: { x: 0.1, y: 0.1 }, turn: 0 }).project;
+  const wall = addWall(project, {
+    schemeId: scheme.scheme.id,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 4000, y: 0 },
+    thicknessMm: 100,
+  });
+  project = wall.project;
+  const socket = project.markTypes.find((type) => type.code === "Р");
+  const mark = addMark(project, {
+    schemeId: scheme.scheme.id,
+    typeId: socket.id,
+    kind: "point",
+    points: [{ x: 0.2, y: 0.105 }],
+  });
+  project = setMarkWall(mark.project, mark.mark.id, { wallId: wall.wall.id, atMm: 1000 }).project;
+  const elevation = ["left", "right"]
+    .map((side) => wallElevation(project, wall.wall.id, side))
+    .find((item) => item.marks.length > 0);
+  const shown = elevation.marks[0];
+  assert.deepEqual(shown.sizeMm, { width: 80, height: 80 }, "на листе у вещи две стороны, а не три");
+  assert.equal(shown.depthMm, undefined, "выступ в данные развёртки не просочился");
 });

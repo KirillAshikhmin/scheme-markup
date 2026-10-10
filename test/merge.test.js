@@ -786,8 +786,8 @@ test("размеры метки переживают слияние копий",
   const mine = merged.project.marks.find((mark) => mark.id === oldId);
   const yours = merged.project.marks.find((mark) => mark.id === added.mark.id);
   // Ноль не потерялся по дороге: у метки в полу это ответ, а не пустота.
-  assert.deepEqual(markDimensions(mine), { length: 600, width: 400, heightAboveFloor: 0 });
-  assert.deepEqual(markDimensions(yours), { length: null, width: null, heightAboveFloor: 900 });
+  assert.deepEqual(markDimensions(mine), { length: 600, width: 400, depth: null, heightAboveFloor: 0 });
+  assert.deepEqual(markDimensions(yours), { length: null, width: null, depth: null, heightAboveFloor: 900 });
 
   // Обратный порядок сторон даёт то же: файлы в общей папке не должны ходить
   // по кругу, стирая размеры друг другу.

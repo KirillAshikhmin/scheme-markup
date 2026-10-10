@@ -2090,7 +2090,9 @@ test("объект без списка принятых открывается �
 test("размеры метки пишутся и читаются; порядок полей — порядок окна", () => {
   const { project: base, first } = projectWithSchemes();
   const step = putPoint(base, first.id, "Р");
-  assert.deepEqual(MARK_DIMENSION_FIELDS, ["length", "width", "heightAboveFloor"]);
+  // Выступ от стены встал третьим (таск 139, G197): порядок полей — порядок
+  // окна, и выступ стоит рядом с длиной и шириной, а не после высоты.
+  assert.deepEqual(MARK_DIMENSION_FIELDS, ["length", "width", "depth", "heightAboveFloor"]);
 
   const after = setMarkDimensions(step.project, step.mark.id, {
     length: 600,
@@ -2100,6 +2102,7 @@ test("размеры метки пишутся и читаются; порядо
   assert.deepEqual(markDimensions(findMark(after, step.mark.id)), {
     length: 600,
     width: 400,
+    depth: null,
     heightAboveFloor: 300,
   });
   assert.equal(markHasDimensions(findMark(after, step.mark.id)), true);
@@ -2170,6 +2173,7 @@ test("поля, которых в правке нет, остаются как �
   assert.deepEqual(markDimensions(findMark(after, step.mark.id)), {
     length: 600,
     width: 400,
+    depth: null,
     heightAboveFloor: 900,
   });
 });
@@ -2192,7 +2196,7 @@ test("метка без полей размеров открывается ка�
   };
 
   for (const mark of old.marks) {
-    assert.deepEqual(markDimensions(mark), { length: null, width: null, heightAboveFloor: null });
+    assert.deepEqual(markDimensions(mark), { length: null, width: null, depth: null, heightAboveFloor: null });
     assert.equal(markHasDimensions(mark), false);
   }
   // Ни одна метка, ни один номер, ни одна подпись не изменились.

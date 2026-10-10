@@ -640,11 +640,12 @@ test("размеры метки доезжают до файла и обратн
   const restored = (await unpackProject(await packProject(project, new Map([["img-1", fakePng(1)]])))).project;
   assert.deepEqual(restored, project);
   const back = restored.marks.find((mark) => mark.id === sized.mark.id);
-  assert.deepEqual(markDimensions(back), { length: 600, width: 1.5, heightAboveFloor: 0 });
-  // У метки, которой размеров не ставили, все три пусты — и пустыми и приехали.
+  assert.deepEqual(markDimensions(back), { length: 600, width: 1.5, depth: null, heightAboveFloor: 0 });
+  // У метки, которой размеров не ставили, все четыре пусты — и пустыми приехали.
   assert.deepEqual(markDimensions(restored.marks.find((mark) => mark.id === plain.mark.id)), {
     length: null,
     width: null,
+    depth: null,
     heightAboveFloor: null,
   });
 });
@@ -675,7 +676,7 @@ test("файл прежней версии без полей размеров ч
   assert.deepEqual(restored.marks, old.marks);
   assert.deepEqual(restored.marks.map((mark) => mark.number), project.marks.map((mark) => mark.number));
   for (const mark of restored.marks) {
-    assert.deepEqual(markDimensions(mark), { length: null, width: null, heightAboveFloor: null });
+    assert.deepEqual(markDimensions(mark), { length: null, width: null, depth: null, heightAboveFloor: null });
   }
 });
 

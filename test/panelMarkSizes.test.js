@@ -67,16 +67,16 @@ test("подпись кнопки показывает заданные разм
 
 test("окно разбирает поля по правилам модели: пусто — не задано, ноль — значение", () => {
   const empty = markSizesParse({ length: "", width: "   ", heightAboveFloor: "" });
-  assert.deepEqual(empty.values, { length: null, width: null, heightAboveFloor: null });
+  assert.deepEqual(empty.values, { length: null, width: null, depth: null, heightAboveFloor: null });
   assert.deepEqual(empty.invalid, []);
 
   const filled = markSizesParse({ length: "600", width: "1,5", heightAboveFloor: "0" });
-  assert.deepEqual(filled.values, { length: 600, width: 1.5, heightAboveFloor: 0 });
+  assert.deepEqual(filled.values, { length: 600, width: 1.5, depth: null, heightAboveFloor: 0 });
   assert.deepEqual(filled.invalid, []);
 
   // Поля, которого в форме нет, — то же «не задано», а не поломка.
-  assert.deepEqual(markSizesParse({}).values, { length: null, width: null, heightAboveFloor: null });
-  assert.deepEqual(markSizesParse(null).values, { length: null, width: null, heightAboveFloor: null });
+  assert.deepEqual(markSizesParse({}).values, { length: null, width: null, depth: null, heightAboveFloor: null });
+  assert.deepEqual(markSizesParse(null).values, { length: null, width: null, depth: null, heightAboveFloor: null });
 });
 
 test("негодное поле называет себя и не закрывает окно молча", () => {
