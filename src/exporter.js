@@ -8,6 +8,8 @@
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
 import { findGroup, findRoom, outlinesInOrder, planPixelsPerMeter, projectStamp, roomsInOrder, schemesInOrder } from "./model.js";
 import {
+  ELEVATION_UNIT_MM,
+  drawElevation,
   drawFont,
   drawFontReady,
   drawScheme,
@@ -36,6 +38,7 @@ import {
   gostSheetLayout,
   gostSheetSize,
   gostStampValues,
+  elevationSheetLayout,
 } from "./gostSheet.js";
 import { strings, text } from "./strings.js";
 
@@ -1256,6 +1259,156 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
   // Страница PDF берёт миллиметры у формата листа, а не у пикселей: формат —
   // это то, что написано на коробке бумаги.
   return exportOut(canvas, dpi, options, { width: plan.sheet.width, height: plan.sheet.height });
+}
+
+// ——— развёртки листами по помещениям ——————————————————————————————————
+//
+// Лист на помещение (требование G180). Рисует развёртки тот же
+// `render.drawElevation`, которым они показаны над планом (таск 129), —
+// второй отрисовки здесь нет и быть не должно: расходиться экрану и бумаге
+// нельзя, а развёртка это чертёж, который меряют линейкой.
+//
+// **Картинка и лист по ГОСТ считаются одной раскладкой.** Без рамки
+// выгружается ровно поле чертежа того же формата, тем же масштабом и с тем же
+// числом развёрток на листе; рамка и основная надпись — всё, что добавляет
+// отметка «лист по ГОСТ». Поэтому «сколько развёрток на листе» — одно правило
+// на оба вида файла (`gostSheet.elevationFit`), а не два похожих.
+
+/** Что мерить раскладкой: длина и показанная высота каждой развёртки. */
+export function elevationBlocks(elevations) {
+  return (Array.isArray(elevations) ? elevations : []).map((item) => ({
+    lengthMm: item.lengthMm,
+    heightMm: item.heightShownMm,
+  }));
+}
+
+/** Раскладка листов развёрток: формат, масштаб и разбивка. */
+export function elevationSheet(elevations, options = {}) {
+  return elevationSheetLayout(elevationBlocks(elevations), {
+    form: "form3",
+    format: options.format,
+  });
+}
+
+// Подпись размера для диалога: формат с ориентацией, пиксели, миллиметры
+// бумаги и настоящий масштаб. У картинки без рамки размер — поле чертежа, и
+// названо это полем, а не листом: лист — это то, что с рамкой.
+export function elevationSizeText(layout, options = {}) {
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  const paper = elevationPaperMm(layout, options.gost === true);
+  return text(options.gost === true ? "gost.size" : "elevationSheet.fieldSize", {
+    format: layout.sheet.format,
+    orientation:
+      layout.sheet.orientation === "landscape"
+        ? strings.gost.orientationLandscape
+        : strings.gost.orientationPortrait,
+    width: Math.round(paper.width * mm),
+    height: Math.round(paper.height * mm),
+    mmWidth: Math.round(paper.width),
+    mmHeight: Math.round(paper.height),
+    dpi,
+  });
+}
+
+function elevationPaperMm(layout, gost) {
+  if (gost) return { width: layout.sheet.width, height: layout.sheet.height };
+  return { width: layout.field.width, height: layout.field.height };
+}
+
+/**
+ * Один лист развёрток: PNG или страница документа.
+ *
+ * `page` — `{from, to}` из раскладки. Развёртка встаёт в свою полосу поля по
+ * середине: полосы равные, а чертёж в них одинаковой высоты, и ряд читается
+ * ровным, а не лестницей.
+ */
+export async function elevationSheetPng(project, elevations, page, layout, options = {}) {
+  await drawFontReady();
+  const gost = options.gost === true;
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  const paper = elevationPaperMm(layout, gost);
+  const canvas = exportCanvas(paper.width * mm, paper.height * mm);
+  // Чёрно-белый лист — та же подставка, что у схемы и таблицы (`mono.js`):
+  // развёртка идёт тушью, а не вторым путём рисования.
+  const ctx = monoOf(canvas.getContext("2d"), options.mono);
+  if (gost) {
+    drawGostFrame(ctx, layout.sheet, mm);
+  } else {
+    // Бумагу у листа красит сама рамка; у картинки поле заливается здесь.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  // Поле чертежа: на листе оно стоит внутри рамки, у картинки — это и есть вся
+  // картинка.
+  const field = gost ? layout.field : { x: 0, y: 0, width: layout.field.width, height: layout.field.height };
+  const unit = ELEVATION_UNIT_MM * mm;
+  for (let index = page.from; index < page.to; index += 1) {
+    const slotTop = field.y + layout.slotMm * (index - page.from);
+    drawElevation(
+      ctx,
+      elevations[index],
+      {
+        x: field.x * mm,
+        y: (slotTop + Math.max(0, (layout.slotMm - layout.boxMm.height) / 2)) * mm,
+        width: field.width * mm,
+        height: layout.boxMm.height * mm,
+      },
+      // Масштаб **задан раскладкой**, а не подобран по рамке: на листе
+      // развёрток несколько, а графа «Масштаб» у него одна (G169).
+      //
+      // Номер в подписи — сквозной по комнате, а не по листу: он и есть
+      // порядок обхода контура, и на втором листе счёт продолжается.
+      {
+        unit,
+        scale: layout.scale * mm,
+        label: text("elevationSheet.label", { index: index + 1, length: elevations[index].lengthMm }),
+      },
+    );
+  }
+  if (gost) {
+    drawGostStamp(
+      ctx,
+      layout.sheet,
+      layout.form,
+      gostStampValues(projectStamp(project), {
+        object: (project && project.name) || "",
+        building: options.building || "",
+        drawing: options.drawing || strings.elevationSheet.drawing,
+        scale: layout.scaleText,
+        sheet: options.sheet || 1,
+        sheets: options.sheets || 1,
+        date: gostDate(options.date),
+      }),
+      mm,
+    );
+  }
+  return exportOut(canvas, dpi, options, paper);
+}
+
+/**
+ * Все листы развёрток помещения, в порядке обхода его контура. Что в списке —
+ * PNG или страницы PDF — решает `options.pdf`, развилка одна и живёт в
+ * `exportOut`.
+ *
+ * Пусто — это ошибка, а не ноль листов: комната без стен в выбор не попадает,
+ * и если сюда пришёл пустой список, сказать об этом надо словами.
+ */
+export async function elevationSheets(project, elevations, options = {}) {
+  const layout = options.layout || elevationSheet(elevations, options);
+  if (layout.pages.length === 0) throw new Error(strings.elevationSheet.nothing);
+  const out = [];
+  for (let index = 0; index < layout.pages.length; index += 1) {
+    out.push(
+      await elevationSheetPng(project, elevations, layout.pages[index], layout, {
+        ...options,
+        sheet: index + 1,
+        sheets: layout.pages.length,
+      }),
+    );
+  }
+  return out;
 }
 
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
