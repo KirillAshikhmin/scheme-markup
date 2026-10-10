@@ -51,11 +51,14 @@ import {
   removeMarkPoint,
   removeOutlinePoint,
   drawingBoundsMm,
+  drawingCounts,
+  drawingScaleFactor,
   formatMeters,
   planFractionToMm,
   planMmToFraction,
   planScaleShort,
   planSizeMeters,
+  scaleDrawing,
   setPlanScale,
   PLAN_SCALE_METERS_MAX,
   PLAN_SCALE_SHORT_SHARE,
@@ -279,6 +282,66 @@ export const CANVAS_MODE_NOTES = {
  * Плашку о переходе даёт не она, а подписка на смену `mode`: так говорят о
  * себе **все** двери, включая клавиши и отмену.
  */
+/**
+ * Записать новый масштаб плана — и, если чертёж уже есть, спросить, идти ли
+ * ему следом (таск 134, требование G186).
+ *
+ * **Одна дверь на обе поверхности.** Калибруют и на холсте, и в мастерской, и
+ * вопрос с пересчётом обязан быть один: два похожих спрашивали бы по-разному и
+ * разошлись бы в первую же правку. Здесь же держится и правило «одним шагом» —
+ * масштаб и пересчёт уходят в `canvasCommit` вместе, поэтому Ctrl+Z возвращает
+ * и то и другое. Два шага были бы ловушкой: отменив половину, человек получил
+ * бы несовпадение, которого не делал.
+ *
+ * **Молча пересчитывать нельзя.** Чертёж мог быть нарисован не по подложке, а
+ * по сетке от размеров — такой верен сам по себе, и пересчёт его испортит.
+ * Поэтому вопрос, и в нём названа цена: во сколько раз и сколько чего тронет.
+ * Первая калибровка не спрашивает ничего — множителя из «масштаба не было» не
+ * выходит, и пересчитывать нечего.
+ *
+ * `before` — объект до записи масштаба, `after` — он же с новым масштабом.
+ * Возвращает `{ok, scaled, factor, counts}`; `ok: false` — человек закрыл
+ * вопрос, ничего не записано.
+ */
+export async function canvasCommitScale(before, after, schemeId, options = {}) {
+  const factor = drawingScaleFactor(before, after, schemeId);
+  const counts = factor ? drawingCounts(before, schemeId) : null;
+  const touches = counts ? counts.walls + counts.objects : 0;
+  let next = after;
+  let scaled = null;
+  if (factor && touches > 0) {
+    const answer = await uiConfirm({
+      title: strings.scale.followTitle,
+      message: text("scale.followAsk", {
+        change: factor > 1 ? text("scale.followBigger", { times: formatMeters(factor) }) : text("scale.followSmaller", { times: formatMeters(1 / factor) }),
+        parts: drawingCountsText(counts),
+      }),
+      confirmLabel: strings.scale.followYes,
+      cancelLabel: strings.scale.followNo,
+      // Не красная: ни один из двух ответов ничего не теряет, а отмена у обоих
+      // одна и та же — Ctrl+Z.
+      confirmClass: "ui-btn ui-btn--accent",
+    });
+    // Отказ от пересчёта — это «оставить как есть», а не отмена калибровки:
+    // масштаб человек уже задал, и терять его на этом вопросе нельзя.
+    if (answer) scaled = scaleDrawing(after, schemeId, factor);
+    if (scaled) next = scaled.project;
+  }
+  if (!findScheme(next, schemeId)) return { ok: false, scaled: null, factor, counts };
+  canvasCommit(before, next, strings.history.scaleSet, { schemeId, ...options });
+  return { ok: true, scaled, factor, counts };
+}
+
+/** Цена вопроса словами: только то, чего и правда сколько-то есть. */
+export function drawingCountsText(counts) {
+  const parts = [];
+  if (counts.walls > 0) parts.push(text("scale.followWalls", { count: counts.walls }));
+  if (counts.openings > 0) parts.push(text("scale.followOpenings", { count: counts.openings }));
+  if (counts.objects > 0) parts.push(text("scale.followObjects", { count: counts.objects }));
+  if (counts.marks > 0) parts.push(text("scale.followMarks", { count: counts.marks }));
+  return parts.join(", ");
+}
+
 export function canvasStartScale(schemeId) {
   canvasApi.setState({
     schemeId,
@@ -1935,7 +1998,7 @@ async function canvasScaleAsk() {
   }
 }
 
-function canvasScaleCommit(draft, meters) {
+async function canvasScaleCommit(draft, meters) {
   const state = canvasState();
   const [a, b] = draft.points;
   if (!findScheme(state.project, draft.schemeId)) {
@@ -1946,25 +2009,42 @@ function canvasScaleCommit(draft, meters) {
     const result = setPlanScale(state.project, draft.schemeId, { a, b, meters });
     canvasDraft = null;
     // Через ту же дверь, что и всё остальное: Ctrl+Z возвращает прежний
-    // масштаб (или прежнее «масштаба нет»). Режим сам уходит в «Выделение» —
-    // калибруют один раз, а не серией.
-    canvasCommit(state.project, result.project, strings.history.scaleSet, {
+    // масштаб (или прежнее «масштаба нет») — а с таска 134 и чертёж, если он
+    // пошёл следом. Режим сам уходит в «Выделение»: калибруют один раз, а не
+    // серией.
+    const done = await canvasCommitScale(state.project, result.project, draft.schemeId, {
       patch: { mode: "select" },
-      schemeId: draft.schemeId,
     });
+    if (!done.ok) return;
     const size = planSizeMeters(canvasState().project, draft.schemeId);
     canvasApi.notify(
       text("scale.applied", {
         meters: formatMeters(result.scale.meters),
         width: size ? formatMeters(size.width) : "",
         height: size ? formatMeters(size.height) : "",
-      }),
+      }) + canvasScaleFollowSaid(done),
       "success",
     );
   } catch (error) {
     canvasCancelDraft();
     canvasFail(error);
   }
+}
+
+/**
+ * Что дописать к известию о заданном масштабе: пошёл ли чертёж следом и не
+ * торчит ли теперь проём за своей стеной.
+ *
+ * Про торчащий проём говорится вслух, потому что сделать с ним нечего без
+ * вранья: ширину ему задали руками, и менять её пересчёт не вправе, а стена
+ * после исправленного масштаба и правда короче этой ширины. Это противоречие
+ * человека, а не сборки, и молчать о нём нельзя.
+ */
+export function canvasScaleFollowSaid(done) {
+  if (!done || !done.scaled) return "";
+  const said = " " + text("scale.followDone", { count: done.scaled.walls });
+  if (!done.scaled.stuck) return said;
+  return said + " " + text("scale.followStuck", { count: done.scaled.stuck });
 }
 
 // `typeId` передаётся только тогда, когда линию дочерчивают не тем типом, что

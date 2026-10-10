@@ -277,7 +277,15 @@ export function uiModal(options) {
   return { close: entry.close, card };
 }
 
-export function uiConfirm({ title, message, confirmLabel }) {
+/**
+ * Вопрос с двумя ответами.
+ *
+ * `cancelLabel` и `confirmClass` нужны там, где вопрос не про «делать или
+ * передумать», а про развилку с двумя равными ответами: «пересчитать чертёж»
+ * против «оставить как есть» (таск 134). Слово «Отмена» там соврало бы — ни
+ * один из ответов ничего не отменяет, — а красная кнопка обещала бы потерю.
+ */
+export function uiConfirm({ title, message, confirmLabel, cancelLabel, confirmClass }) {
   return new Promise((resolve) => {
     let modal;
     const answer = (value) => {
@@ -288,9 +296,9 @@ export function uiConfirm({ title, message, confirmLabel }) {
       title,
       body: uiEl("p", { class: "modal__text", text: message }),
       actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => answer(false) } }),
+        uiButton(cancelLabel || strings.dialog.cancel, { on: { click: () => answer(false) } }),
         uiButton(confirmLabel || strings.dialog.confirm, {
-          class: "ui-btn ui-btn--danger",
+          class: confirmClass || "ui-btn ui-btn--danger",
           on: { click: () => answer(true) },
         }),
       ],
