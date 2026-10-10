@@ -312,8 +312,11 @@ test("заголовок называет стену и комнату, а по�
   const scene = fullScene();
   const right = wallElevation(scene.project, scene.wallId, "right");
   assert.equal(elevationTitle(right), "Стена 4000 мм · Кухня");
-  // У розетки высота не задана — об этом сказано, а не выдумано.
-  assert.match(elevationNote(right), /Меток без высоты: 1/);
+  // У розетки своя высота не задана — она наследует умолчание типа (таск 135,
+  // G192), и об этом сказано вслух: догадка сборки не выдаётся за введённое
+  // число.
+  assert.match(elevationNote(right), /Высот по умолчанию типа: 1/);
+  assert.ok(!/Меток без высоты/.test(elevationNote(right)), "унаследованная высота — не «без высоты»");
   const bare = wallScene();
   assert.match(elevationNote(wallElevation(bare.project, bare.wallId, "left")), /ничего нет/);
 });
