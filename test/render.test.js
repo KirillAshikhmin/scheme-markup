@@ -12,6 +12,8 @@ import {
   labelLayout,
   labelLead,
   labelOffsetOf,
+  markStackPoints,
+  markStacks,
   planToScreen,
   renderInternals,
   screenToPlan,
@@ -136,12 +138,18 @@ test("попадание считается в экранных пикселях
   assert.equal(hitTest(added.project, scheme, { x: 500, y: 250 }, view), null);
 });
 
+// Правило «поздняя метка лежит выше ранней» живёт там, где знаки **наехали**
+// друг на друга, но не совпали: совпавшие по месту разводит стопка (таск 131),
+// и клик по ним попадает в тот знак, который на этом месте нарисован, —
+// проверяется это в `test/markStack.test.js`.
 test("поздняя метка лежит выше ранней", () => {
   const base = world();
   const first = addMark(base.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.5, y: 0.5 }] });
-  const second = addMark(first.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.5, y: 0.5 }] });
+  // Пятнадцать пикселей плана между центрами: дальше порога стопки (радиус
+  // знака, здесь 10), но ближе двух радиусов — знаки перекрываются.
+  const second = addMark(first.project, { schemeId: base.schemeId, typeId: base.typeId, points: [{ x: 0.515, y: 0.5 }] });
   const scheme = second.project.schemes[0];
-  assert.equal(hitTest(second.project, scheme, { x: 500, y: 250 }, viewOf()).markId, second.mark.id);
+  assert.equal(hitTest(second.project, scheme, { x: 508, y: 250 }, viewOf()).markId, second.mark.id);
 });
 
 test("подпись ловится отдельно от метки", () => {
@@ -518,25 +526,33 @@ test("раскладка повторяется: она от геометрии,
   assert.deepEqual(places(labelBoxes(reversed.project, reversed.scheme, viewOf())), places(first));
 });
 
+// Куча меток в одной точке с таска 131 расходится стопкой, и подпись каждой
+// едет **вместе со своим знаком**: мерить её теперь надо от знака, а не от
+// общей для всех точки. Иначе «ПОДСВЕТКА12» считалась бы ушедшей на триста
+// пикселей, хотя стоит она ровно у своей метки.
 test("отведённая подпись остаётся рядом со своей меткой", () => {
   const { project, scheme } = pileOf(12);
-  const boxes = labelBoxes(project, scheme, viewOf());
+  const view = viewOf();
+  const stacks = markStacks(project, scheme, null, view);
+  const boxes = labelBoxes(project, scheme, view);
   assert.equal(boxes.length, 12);
-  for (const box of boxes) {
-    // Метка одна на всех — пиксели (500, 250) на плане 1000×500.
-    const away = Math.max(0, Math.abs(box.y - 250) - box.height / 2);
+  for (const target of renderInternals.labelTargets(project, scheme, null)) {
+    const box = labelBox(project, scheme, target, view, null);
+    const glyph = planToScreen(markStackPoints(target, stacks)[0], scheme, view);
+    const away = Math.max(0, Math.abs(box.y - glyph.y) - box.height / 2);
     // Дальше пяти строк подпись перестаёт читаться как «эта, у этой метки»:
     // монтажник с листом в руках приписывает её соседнему устройству.
-    assert.ok(away <= box.height * 5, "подпись «" + box.text + "» ушла от метки на " + away);
-    const side = box.x < 500 ? 500 - (box.x + box.width) : box.x - 500;
+    assert.ok(away <= box.height * 5, "подпись «" + box.text + "» ушла от знака на " + away);
+    const side = box.x < glyph.x ? glyph.x - (box.x + box.width) : box.x - glyph.x;
     assert.ok(side >= 0 && side < 40, "подпись «" + box.text + "» отъехала вбок на " + side);
   }
 });
 
-// Двадцать меток в одной точке развести некуда: свободных мест вокруг метки
-// меньше, чем подписей. Здесь важно, что именно происходит — подписи не
-// пропадают и метки не разъезжаются, а последним достаётся место с наименьшим
-// наложением, и они честно помечены `crowded`.
+// Двадцать меток в одной точке — крайний случай приёмки: щит, где два десятка
+// линий сходятся на пятачке. С таска 131 их знаки расходятся стопкой, и
+// подписям места хватает всем: тесноты (`crowded`) тут больше нет, а важно
+// по-прежнему одно — ни одна подпись не пропала, ни одна не слилась с соседней
+// и **ни одна метка не переехала** (G68: стопка — отрисовка).
 test("когда разводить некуда — подписи остаются на месте меток, а не пропадают", () => {
   const { project, scheme } = pileOf(20);
   const boxes = labelBoxes(project, scheme, viewOf());
@@ -544,8 +560,9 @@ test("когда разводить некуда — подписи остают
   assert.equal(boxes.length, 20, "подпись пропала с плана");
   assert.ok(boxes.every((box) => box.text.length > 0), "подпись осталась без текста");
   assert.equal(new Set(boxes.map((box) => box.text)).size, 20, "две подписи слились в одну");
-  assert.ok(boxes.some((box) => box.crowded), "теснота не помечена: разбирать выгрузку будет нечем");
-  // Метка стоит там, где стоит железка: раскладка двигает только подпись.
+  assert.equal(new Set(boxes.map((box) => box.x + ":" + box.y)).size, 20, "две подписи встали в одно место");
+  // Метка стоит там, где стоит железка: раскладка двигает только подпись,
+  // стопка — только знак, и ни та, ни другая — не точку в объекте.
   for (const mark of project.marks) assert.deepEqual(mark.points, [{ x: 0.5, y: 0.5 }]);
 });
 

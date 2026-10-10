@@ -78,6 +78,7 @@ import {
   labelLeaderHolder,
   labelLeaderShown,
   markLinks,
+  markStacks,
   labelLead,
   hitOutline,
   hitTest,
@@ -761,7 +762,7 @@ function canvasPaint() {
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
     const mark = findMark(project, state.selectedMarkIds[0]);
     if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
-      drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark));
+      drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark), canvasStacks(state, scheme));
     }
   }
   // Линейка — последней: она поверх всего, и с неё тянут направляющие.
@@ -1122,6 +1123,23 @@ function canvasHandleColor(state, mark) {
 function canvasBlockStep(state) {
   const view = state.project ? state.project.view : null;
   return blockStepPx(view ? view.markSize : DEFAULT_MARK_SIZE);
+}
+
+// Стопки совпавших меток этой схемы — ровно те, что сейчас на экране: фильтр и
+// величина знака те же, что в кадре. Нужны они холсту затем, что ручки «+»
+// рисуются у **знака**, а знак в стопке отодвинут от своей точки.
+function canvasStacks(state, scheme) {
+  if (!state.project || !scheme) return null;
+  return markStacks(state.project, scheme, state.filter, canvasViewOf(state));
+}
+
+// Смещение знака выделенной метки в пикселях плана — его холст передаёт модели
+// вместе с шагом: новая метка обязана встать туда, где нарисована ручка «+»,
+// а не на настоящую точку, над которой стоит чужой знак.
+function canvasStackShift(state, scheme, markId) {
+  const stacks = canvasStacks(state, scheme);
+  const shift = stacks ? stacks.get(markId) : null;
+  return shift ? shift.px : null;
 }
 
 // Ручка «+» ставит метку выбранного типа: выбрана «Р» — рядом с выключателем
@@ -1650,6 +1668,7 @@ function canvasBlockPoint(markId, side) {
     const result = addToGroup(state.project, markId, side, {
       step: canvasBlockStep(state),
       typeId: canvasPlacedTypeId(state),
+      fromPx: canvasStackShift(state, canvasScheme(state), markId),
     });
     canvasCommit(state.project, result.project, strings.history.addBlock, { selection: [result.mark.id] });
   } catch (error) {
@@ -2236,7 +2255,7 @@ function canvasTouchPick(state, point) {
   if (single) {
     const selected = findMark(state.project, single);
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
-      const side = hitHandle(scheme, selected, point, view, slack);
+      const side = hitHandle(scheme, selected, point, view, slack, canvasStacks(state, scheme));
       const neighbour = hit && hit.part === "mark" && hit.markId !== selected.id;
       if (side && !neighbour) {
         pick.blockSide = side;
@@ -2756,7 +2775,7 @@ function canvasPointerDown(event) {
   if (editable && state.selectedMarkIds.length === 1) {
     const selected = findMark(state.project, state.selectedMarkIds[0]);
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
-      const side = hitHandle(scheme, selected, point, view);
+      const side = hitHandle(scheme, selected, point, view, 0, canvasStacks(state, scheme));
       const covered = side ? hitTest(state.project, scheme, point, view, state.filter) : null;
       const neighbour = covered && covered.part === "mark" && covered.markId !== selected.id;
       if (side && !neighbour) {

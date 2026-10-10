@@ -19,6 +19,10 @@ import {
   blockMembers,
   findMark,
   findRoom,
+  findWall,
+  markDimensions,
+  markWall,
+  markWallSide,
   repeatedNumbers,
   findType,
   findGroup,
@@ -2393,22 +2397,285 @@ export function visibleMarks(project, scheme, filter) {
   return project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter));
 }
 
+// ——— стопка совпавших меток ———————————————————————————————————————————
+//
+// Случай заказчика (G181): «бывает, например у зоны ТВ когда снизу блок
+// розеток расположен, и сверху под ТВ ещё один блок, в горизонтали они на
+// одной оси, а по вертикали на разной. На развёртке стен всё корректно будет,
+// а вот на основной схеме как это сделать?»
+//
+// На плане, который смотрит сверху, «на разной высоте» не видно вовсе: знаки
+// лежат один на другом, и **верхняя метка просто невидима**. Разводились до
+// сих пор только подписи (`labelPlaceAll`), а знаки рисовались там, где стоят.
+//
+// Из трёх предложенных решений заказчик выбрал: **стопкой, с высотой у каждой,
+// без схлопывания в счётчик** — «сразу на каких высотах, и стопкой без
+// счётчика». Счётчика поэтому здесь нет ни при каком числе меток.
+//
+// Три свойства, ради которых всё считается именно так:
+//
+// 1. **Координаты меток не меняются** (G68). Стопка — отрисовка: смещение
+//    живёт один кадр и в объект не попадает. Выгруженный файл до и после
+//    показа стопки побайтно один.
+// 2. **Считается в пикселях плана, а не экрана и не в миллиметрах чертежа.**
+//    Знак рисуется радиусом `markSize` в пикселях плана и растёт с
+//    приближением — значит и «наезжают ли знаки друг на друга» от приближения
+//    не зависит: стопка на распечатке повторяет ту, что видел инженер (то же
+//    правило, что у раскладки подписей). Миллиметры здесь не годятся вовсе:
+//    они есть только у откалиброванного и привязанного чертежа (ADR 008), а
+//    знаки наезжают и на плане, которого никто не чертил. У привязки метки к
+//    стене мера обратная (миллиметры) и по той же причине: там это **данные**,
+//    которые не должны зависеть от взгляда, а здесь — рисование.
+// 3. **Попадание по клику считается тем же смещением.** `hitTest` и
+//    `drawMarkBody` берут точку знака из одной функции `markStackPoints`:
+//    разойдись они — клик попадал бы в пустое место.
+
+// Порог совпадения — в радиусах знака. Полрадиуса от центра до центра значит,
+// что верхний знак накрывает центр нижнего: на плане это один знак, а не два.
+// Больше брать нельзя: шаг блока — 2,22 радиуса (знаки вплотную, G182), и
+// порог от него обязан остаться в стороне, иначе каждый блок розеток в одной
+// рамке превращался бы в стопку.
+const MARK_STACK_REACH_RATIO = 1;
+// Шаг стопки — в радиусах знака. Втрое больше радиуса: знаки расходятся с
+// просветом примерно в треть знака. Вплотную (2,22) стопка читалась бы как
+// блок в одной рамке, а блок — это другое: там метки стоят рядом на самом
+// плане. Просвет и тонкая линия к настоящей точке говорят «это одно место».
+const MARK_STACK_STEP_RATIO = 3;
+// Подпись высоты стоит от центра знака на столько радиусов (её ближний край).
+// Край знака с обводкой — 1,11 радиуса, остаток — воздух.
+const MARK_STACK_HEIGHT_GAP = 1.35;
+
+// В стопку идут только **одиночные точки**. Линия видна сама по себе: её трек
+// уходит от вершины в сторону, и под чужим знаком она не пропадает. Плашка
+// комментария — не знак, её разводит раскладка подписей. Метка с несколькими
+// точками — это блок «одна метка на блок» (ADR 004): отодвинь её целиком, и
+// соврут остальные её точки, а отодвинуть одну из них стопка не умеет — она
+// двигает метку, а не точку.
+function markStackable(mark) {
+  return Boolean(mark) && mark.kind === "point" && !markIsComment(mark) && (mark.points || []).length === 1;
+}
+
+function markStackHeight(mark) {
+  return markDimensions(mark).heightAboveFloor;
+}
+
+/**
+ * Направление стопки — единичный вектор в пикселях плана.
+ *
+ * У метки, привязанной к стене (таск 128), — **перпендикуляр стене, в сторону
+ * самой метки**. Так отступ вдоль стены (`wallAtMm`) остаётся честным: знак
+ * едет поперёк стены и его проекция на стену не меняется, то есть развёртка и
+ * план говорят об одном и том же месте. Вдоль стены ехать нельзя — знак
+ * оказался бы на другом метре стены; внутрь стены тоже: там тело стены на
+ * чертеже и соседняя комната.
+ *
+ * У непривязанной метки стены нет, и ехать поперёк нечему — тогда **вверх**.
+ * Выбрано так: подпись у метки уходит в первую очередь вбок (`labelSlots`),
+ * значит вертикаль свободнее; а порядок в стопке — по возрастанию высоты над
+ * полом, и вверх по листу оказывается то, что выше над полом. Направление не
+ * зависит ни от соседей, ни от приближения — одна и та же схема раскладывается
+ * одинаково при каждой отрисовке.
+ *
+ * Поворот чертежа относительно подложки (G178) учитывается: нормаль стены
+ * живёт в миллиметрах чертежа, и в пиксели плана она переводится тем же
+ * поворотом, что весь чертёж (`drawingTurn`).
+ */
+function markStackDirection(project, scheme, marks) {
+  for (const mark of marks) {
+    const binding = markWall(mark);
+    if (!binding) continue;
+    const side = markWallSide(project, mark);
+    if (!side) continue;
+    const vectors = wallVectors(findWall(project, binding.wallId));
+    const origin = planOriginOf(project, scheme.id);
+    if (!vectors || !origin) continue;
+    // `n` — левая нормаль стены в осях чертежа, та же, которой `markWallSide`
+    // считает сторону. Метке справа достаётся обратная.
+    const n = side === "left" ? vectors.n : { x: -vectors.n.x, y: -vectors.n.y };
+    const turned = drawingTurn(n, origin.turn);
+    // `|| 0` — от **минус нуля**: поворот и смена знака дают `-0`, и дальше он
+    // поехал бы в смещение знака и в сравнения направления. Та же оговорка, что
+    // у `wallVectors` в модели.
+    return { x: turned.x || 0, y: turned.y || 0 };
+  }
+  return { x: 0, y: -1 };
+}
+
+/**
+ * Куда встают знаки стопки: `markId → {index, count, px, at, dir, stepPx,
+ * heightMm}`. `px` — смещение знака в пикселях плана, `at` — то же в долях
+ * плана (ими живут точки метки), `index` 0 — знак остался на настоящей точке.
+ *
+ * Метки в стопке **не перемешиваются случайно**:
+ *
+ * — совпавшие собираются от затравки, а не цепочкой. Затравка — первая по
+ *   порядку объекта метка, не попавшая в чужую стопку; к ней притягиваются те,
+ *   что ближе порога **к ней самой**. Цепочкой плотный ряд розеток съехался бы
+ *   в одну стопку через весь план, хотя соседи в нём различимы;
+ * — порядок в стопке — **метки без высоты, затем по возрастанию высоты над
+ *   полом**, при равенстве — порядок объекта (порядок постановки). Читается
+ *   стопка от настоящей точки наружу, и читается она так же, как развёртка
+ *   снизу вверх: у пола — ближе к точке, выше над полом — дальше. Метки без
+ *   высоты стоят там, где на развёртке стоит их полоса, — перед полом
+ *   (таск 129): высоты у них нет, и места в порядке высот им не придумано;
+ * — на настоящей точке остаётся первый знак стопки, а не середина: у двух
+ *   меток уезжает ровно одна, и на плане заказчика разъедется минимум из
+ *   возможного.
+ */
+function markStackPlaceAll(project, scheme, filter, sizes) {
+  const result = new Map();
+  const list = visibleMarks(project, scheme, filter).filter(markStackable);
+  if (list.length < 2) return result;
+  const width = schemeWidth(scheme);
+  const height = schemeHeight(scheme);
+  const reach = sizes.radius * MARK_STACK_REACH_RATIO;
+  const stepPx = sizes.radius * MARK_STACK_STEP_RATIO;
+  const order = new Map(list.map((mark, index) => [mark.id, index]));
+  const taken = new Set();
+  for (const seed of list) {
+    if (taken.has(seed.id)) continue;
+    taken.add(seed.id);
+    const at = seed.points[0];
+    const members = [seed];
+    for (const other of list) {
+      if (taken.has(other.id)) continue;
+      const dx = (other.points[0].x - at.x) * width;
+      const dy = (other.points[0].y - at.y) * height;
+      if (Math.hypot(dx, dy) > reach) continue;
+      taken.add(other.id);
+      members.push(other);
+    }
+    if (members.length < 2) continue;
+    members.sort((first, second) => {
+      const a = markStackHeight(first);
+      const b = markStackHeight(second);
+      if (a === null && b !== null) return -1;
+      if (b === null && a !== null) return 1;
+      if (a !== null && b !== null && a !== b) return a - b;
+      return order.get(first.id) - order.get(second.id);
+    });
+    const dir = markStackDirection(project, scheme, members);
+    const span = stepPx * (members.length - 1);
+    // Непривязанная стопка уходит вверх, а у метки под верхним краем плана
+    // вверху места нет: уехавший за край знак на выгрузке «весь план» просто
+    // отрезан. Тогда она уходит вниз — а если не влезает ни туда, ни туда (две
+    // дюжины меток в одной точке длиннее плана), то в ту сторону, где места
+    // больше: потерять меньше лучше, чем потерять больше.
+    //
+    // Разворачивается только **непривязанная** стопка: у привязанной сторону
+    // решает стена, и разворот поставил бы знаки внутрь стены и в соседнюю
+    // комнату — соврал бы о месте, а не о красоте.
+    const free = dir.x === 0 && dir.y === -1;
+    const above = at.y * height;
+    const below = height - above;
+    const flip = free && above - span < 0 && (below >= span || below > above);
+    const step = flip ? { x: 0, y: 1 } : dir;
+    members.forEach((mark, index) => {
+      const px = { x: step.x * stepPx * index, y: step.y * stepPx * index };
+      result.set(mark.id, {
+        index,
+        count: members.length,
+        px,
+        at: { x: px.x / width, y: px.y / height },
+        dir: step,
+        stepPx,
+        heightMm: markStackHeight(mark),
+      });
+    });
+  }
+  return result;
+}
+
+// Кэш стопок — тот же приём, что у раскладки подписей: объект после любой
+// правки новый, поэтому `WeakMap` сам забывает устаревшее. Внутри — по схеме,
+// величине знака и фильтру: спрашивают стопку и кадр холста, и попадание по
+// клику на каждое движение мыши.
+const markStackCache = new WeakMap();
+
+/** Стопки схемы. Фильтр учитывается: спрятанная метка никого не накрывает. */
+export function markStacks(project, scheme, filter, view) {
+  if (!project || !scheme) return new Map();
+  const state = renderView(view);
+  const sizes = labelPlanSizes(state);
+  const key = [scheme.id, sizes.radius, labelFilterKey(filter)].join("|");
+  let byKey = markStackCache.get(project);
+  if (!byKey) {
+    byKey = new Map();
+    markStackCache.set(project, byKey);
+  }
+  let value = byKey.get(key);
+  if (!value) {
+    value = markStackPlaceAll(project, scheme, filter, sizes);
+    byKey.set(key, value);
+  }
+  return value;
+}
+
+/**
+ * Точки знака метки в долях плана — **единственная дверь** к тому, где знак
+ * нарисован. Её спрашивают и рисование, и попадание по клику, и подпись: пока
+ * дверь одна, клик не может разойтись с рисунком.
+ */
+export function markStackPoints(mark, stacks) {
+  const points = (mark && mark.points) || [];
+  const shift = stacks && mark ? stacks.get(mark.id) : null;
+  if (!shift) return points;
+  return points.map((point) => ({ x: point.x + shift.at.x, y: point.y + shift.at.y }));
+}
+
+/**
+ * Подпись высоты у знака в стопке — в пикселях плана.
+ *
+ * Заказчик просил именно её: «сразу на каких высотах», чтобы не гадать, какая
+ * из совпавших меток верхняя. Высота **не выдумывается**: у метки без заданной
+ * высоты в подписи стоит вопрос, как на развёртке такая метка стоит отдельной
+ * полосой, а не на придуманном уровне (таск 129).
+ *
+ * Стоит подпись **поперёк стопки**: вдоль неё места нет — там следующий знак.
+ */
+function markStackHeightPlanBox(mark, shift, sizes, scheme) {
+  if (!shift) return null;
+  const width = schemeWidth(scheme);
+  const height = schemeHeight(scheme);
+  const value =
+    shift.heightMm === null
+      ? strings.marks.stackHeightUnknown
+      : text("marks.stackHeight", { mm: Math.round(shift.heightMm) });
+  const cx = mark.points[0].x * width + shift.px.x;
+  const cy = mark.points[0].y * height + shift.px.y;
+  const gap = sizes.radius * MARK_STACK_HEIGHT_GAP;
+  const span = Math.max(sizes.font * 0.8, value.length * sizes.font * LABEL_CHAR_RATIO);
+  const tall = sizes.font * 1.2;
+  // Стопка идёт по горизонтали — подпись над знаком, иначе сбоку. У наклонной
+  // стены перпендикуляр наклонный, и выбирается та ось, вдоль которой стопка
+  // уезжает меньше.
+  const across = Math.abs(shift.dir.x) > Math.abs(shift.dir.y);
+  if (across) {
+    return { text: value, align: "center", x: cx - span / 2, y: cy - gap - tall, at: { x: cx, y: cy - gap - tall / 2 }, width: span, height: tall };
+  }
+  return { text: value, align: "left", x: cx + gap, y: cy - tall / 2, at: { x: cx + gap, y: cy }, width: span, height: tall };
+}
+
 // ——— подписи —————————————————————————————————————————————————————————
 
 // Точка привязки подписи: для одиночной метки — её точка, для группы — середина
 // между входящими метками. Смещение подписи хранится в пикселях плана, поэтому
 // поворот плана уносит её вместе с меткой.
-function labelOrigin(project, target) {
+//
+// Точка берётся **там, где нарисован знак** (`markStackPoints`): метку, уехавшую
+// в стопку совпавших, подпись обязана догнать, иначе «Р1» осталось бы у чужого
+// знака. Стопки нет — точка та же, что была всегда.
+function labelOrigin(project, target, stacks) {
   if (target.markIds) {
     const points = labelMemberIds(target)
       .map((id) => project.marks.find((mark) => mark.id === id))
       .filter(Boolean)
-      .map((mark) => mark.points[0]);
+      .map((mark) => markStackPoints(mark, stacks)[0]);
     if (points.length === 0) return { x: 0, y: 0 };
     const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
     return { x: sum.x / points.length, y: sum.y / points.length };
   }
-  return target.points[0];
+  return markStackPoints(target, stacks)[0];
 }
 
 // Метки блока, по которым собирается подпись: под фильтром — только видимые
@@ -2619,14 +2886,21 @@ export function labelBox(project, scheme, target, view, filter) {
     throw error;
   }
   const state = renderView(view);
-  return labelBoxIn(project, scheme, target, state, labelLayout(project, scheme, filter, state));
+  return labelBoxIn(
+    project,
+    scheme,
+    target,
+    state,
+    labelLayout(project, scheme, filter, state),
+    markStacks(project, scheme, filter, state),
+  );
 }
 
 // То же самое с уже посчитанной раскладкой: кадр холста и попадание по клику
 // считают её один раз на все подписи схемы, а не заново на каждую.
-function labelBoxIn(project, scheme, target, state, layout) {
+function labelBoxIn(project, scheme, target, state, layout, stacks) {
   const font = labelFontSize(state);
-  const anchor = planToScreen(labelOrigin(project, target), scheme, state);
+  const anchor = planToScreen(labelOrigin(project, target, stacks), scheme, state);
   const value = labelTextOf(project, target);
   const plate = markIsComment(target) ? commentPlateSize(value, font) : null;
   const width = plate ? plate.width : Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
@@ -2822,8 +3096,8 @@ function labelSlots(gap, span, angle, reach = { left: 0, right: 0 }, lead = null
 // обязана встать за крайней меткой блока, а не поверх неё. Вершины ломаной в
 // счёт не идут: её подпись стоит у первой вершины, и тянуть её за весь трек
 // через полплана незачем.
-function labelReach(project, target) {
-  const origin = labelOrigin(project, target);
+function labelReach(project, target, stacks) {
+  const origin = labelOrigin(project, target, stacks);
   const ids = target.markIds ? labelMemberIds(target) : null;
   const marks = ids
     ? ids.map((id) => project.marks.find((mark) => mark.id === id)).filter(Boolean)
@@ -2832,7 +3106,7 @@ function labelReach(project, target) {
   let right = 0;
   for (const mark of marks) {
     if (!mark || mark.kind === "line") continue;
-    for (const point of mark.points || []) {
+    for (const point of markStackPoints(mark, stacks)) {
       right = Math.max(right, point.x - origin.x);
       left = Math.max(left, origin.x - point.x);
     }
@@ -2842,10 +3116,10 @@ function labelReach(project, target) {
 
 // Подпись в пикселях плана: `x`, `y` — точка привязки (сама метка), размеры —
 // оценка по числу знаков, та же, что у экранного `labelBox`.
-function labelPlanBox(project, scheme, target, sizes) {
-  const origin = labelOrigin(project, target);
+function labelPlanBox(project, scheme, target, sizes, stacks) {
+  const origin = labelOrigin(project, target, stacks);
   const text = labelTextOf(project, target);
-  const reach = labelReach(project, target);
+  const reach = labelReach(project, target, stacks);
   const lead = labelLeadSide(project, scheme, target);
   const width = schemeWidth(scheme);
   // Плашка комментария шире и выше строки: её габарит считает `commentPlateSize`
@@ -2905,14 +3179,14 @@ function labelFilterKey(filter) {
   ].join("|");
 }
 
-function labelPlaceAll(project, scheme, filter, sizes) {
+function labelPlaceAll(project, scheme, filter, sizes, stacks) {
   const planWidth = schemeWidth(scheme);
   const planHeight = schemeHeight(scheme);
   const layout = new Map();
   const entries = labelTargets(project, scheme, filter)
     .map((target) => ({
       key: labelKeyOf(target),
-      box: labelPlanBox(project, scheme, target, sizes),
+      box: labelPlanBox(project, scheme, target, sizes, stacks),
       offset: labelFixedPlace(project, target, sizes),
       gap: markPointer(target) ? sizes.gap * COMMENT_POINTER_GAP : sizes.gap,
     }))
@@ -2926,8 +3200,12 @@ function labelPlaceAll(project, scheme, filter, sizes) {
   // Сами метки — тоже занятые места. Подпись встала на уровень своей метки, и
   // у плотно поставленных точек соседний знак оказывается ровно там, куда
   // просится строка: без этого «Р6» легла бы на соседнюю розетку.
+  //
+  // Места занимают знаки **там, где они нарисованы**: уехавший в стопку знак
+  // освобождает своё прежнее место и занимает новое. Вместе с ним занята и
+  // подпись его высоты — иначе обозначение соседней метки легло бы на «h=900».
   for (const mark of visibleMarks(project, scheme, filter)) {
-    for (const point of mark.points || []) {
+    for (const point of markStackPoints(mark, stacks)) {
       placed.push({
         x: point.x * planWidth - sizes.radius,
         y: point.y * planHeight - sizes.radius,
@@ -2935,6 +3213,8 @@ function labelPlaceAll(project, scheme, filter, sizes) {
         height: sizes.radius * 2,
       });
     }
+    const height = markStackHeightPlanBox(mark, stacks ? stacks.get(mark.id) : null, sizes, scheme);
+    if (height) placed.push({ x: height.x, y: height.y, width: height.width, height: height.height });
   }
 
   for (const entry of entries) {
@@ -2989,7 +3269,7 @@ export function labelLayout(project, scheme, filter, view) {
   }
   let value = byKey.get(key);
   if (!value) {
-    value = labelPlaceAll(project, scheme, filter, sizes);
+    value = labelPlaceAll(project, scheme, filter, sizes, markStacks(project, scheme, filter, state));
     byKey.set(key, value);
   }
   return value;
@@ -3655,9 +3935,10 @@ export function hitTest(project, scheme, point, view, filter, extra = 0) {
 
   const targets = labelTargets(project, scheme, filter);
   const layout = labelLayout(project, scheme, filter, state);
+  const stacks = markStacks(project, scheme, filter, state);
   for (let index = targets.length - 1; index >= 0; index -= 1) {
     const target = targets[index];
-    const box = labelBoxIn(project, scheme, target, state, layout);
+    const box = labelBoxIn(project, scheme, target, state, layout, stacks);
     if (box.text && insideBox(point, box)) {
       // Подпись блока выбирает первую из тех меток, что в ней перечислены:
       // под фильтром скрытая метка в подписи не стоит и выбираться не должна.
@@ -3678,7 +3959,9 @@ export function hitTest(project, scheme, point, view, filter, extra = 0) {
   for (let index = marks.length - 1; index >= 0; index -= 1) {
     const mark = marks[index];
     const style = styleOf(project, mark.typeId);
-    const screen = mark.points.map((item) => planToScreen(item, scheme, state));
+    // Точка знака — из той же двери, что у рисования (`markStackPoints`):
+    // стопка совпавших меток обязана отдавать клик там, где знак виден.
+    const screen = markStackPoints(mark, stacks).map((item) => planToScreen(item, scheme, state));
     for (let vertex = 0; vertex < screen.length; vertex += 1) {
       const geometry = shapeGeometry(style.shape, screen[vertex].x, screen[vertex].y, radius);
       const near =
@@ -3706,12 +3989,18 @@ export function hitTest(project, scheme, point, view, filter, extra = 0) {
 
 // Четыре «+» вокруг выделенной точки: клик ставит соседнюю точку блока.
 // Ради них таск и существует: два десятка розеток ставятся без диалогов.
-function handlePositions(scheme, mark, view) {
+//
+// `stacks` — стопки схемы: у метки, которую стопка отодвинула, ручки стоят
+// вокруг **знака**, а не вокруг настоящей точки, над которой сейчас стоит
+// чужой знак. То же смещение холст передаёт модели (`addToGroup options.fromPx`),
+// поэтому метка по-прежнему встаёт ровно туда, где нарисована ручка.
+function handlePositions(scheme, mark, view, stacks) {
   if (!mark || mark.kind !== "point") return [];
   const state = renderView(view);
   const radius = markRadius(state);
   const gap = radius * HANDLE_GAP;
-  const base = planToScreen(mark.points[mark.points.length - 1], scheme, state);
+  const points = markStackPoints(mark, stacks);
+  const base = planToScreen(points[points.length - 1], scheme, state);
   const handleRadius = Math.max(7, Math.min(HANDLE_RADIUS, radius));
   return [
     { side: "left", x: base.x - gap, y: base.y, r: handleRadius },
@@ -3721,8 +4010,8 @@ function handlePositions(scheme, mark, view) {
   ];
 }
 
-export function hitHandle(scheme, mark, point, view, extra = 0) {
-  for (const handle of handlePositions(scheme, mark, view)) {
+export function hitHandle(scheme, mark, point, view, extra = 0, stacks = null) {
+  for (const handle of handlePositions(scheme, mark, view, stacks)) {
     if (Math.hypot(point.x - handle.x, point.y - handle.y) <= handle.r + 2 + extra) return handle.side;
   }
   return null;
@@ -3946,10 +4235,12 @@ function drawLabel(ctx, box, color, runs, selected) {
   ctx.restore();
 }
 
-function drawMarkBody(ctx, project, scheme, mark, view, selected) {
+function drawMarkBody(ctx, project, scheme, mark, view, selected, stacks) {
   const style = styleOf(project, mark.typeId);
   const radius = markRadius(view);
-  const screen = mark.points.map((point) => planToScreen(point, scheme, view));
+  // Знак рисуется там, куда его поставила стопка совпавших, — и ровно там же
+  // считается попадание по клику: точка берётся одной функцией на оба случая.
+  const screen = markStackPoints(mark, stacks).map((point) => planToScreen(point, scheme, view));
   // Комментарий рисуется плашкой, а не знаком (G163), и плашку рисует проход
   // подписей. Здесь остаётся только точка, в которую смотрит указатель: без
   // указателя плашка стоит на ней сама, и рисовать под ней нечего.
@@ -3987,12 +4278,85 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected) {
   ctx.restore();
 }
 
+// ——— стопка совпавших меток: отрисовка ————————————————————————————————
+//
+// Два прохода и ни одного нового способа рисовать знак: сами знаки рисует тот
+// же `drawMarkBody`, уже по смещённой точке. Здесь только то, чего без стопки
+// не бывает: тонкая линия от настоящей точки к уехавшим знакам и подпись
+// высоты у каждого.
+
+// Пиксель плана в экранный — для того, кто считал в пикселях плана, а не в
+// долях. Та же формула, что у `planToScreen`, только доля уже умножена на
+// размер плана.
+function planPxToScreen(at, view) {
+  return { x: view.offsetX + at.x * view.zoom, y: view.offsetY + at.y * view.zoom };
+}
+
+/**
+ * Спина стопки: волосяная линия от настоящей точки метки к дальнему знаку.
+ *
+ * Без неё стопка читалась бы рядом меток, стоящих на плане по-настоящему, —
+ * а они стоят в одном месте. Рецепт тот же, что у поводка отведённой подписи
+ * (`drawLabelLeader`): цвет метки вполсилы, толщина от размера знака. Красится
+ * цветом той метки, что осталась на настоящей точке: спина принадлежит месту,
+ * а не всем типам в стопке.
+ */
+function drawMarkStackSpines(ctx, project, scheme, view, marks, stacks) {
+  if (!stacks || stacks.size === 0) return;
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = Math.max(1, markRadius(view) * 0.12);
+  for (const mark of marks) {
+    const shift = stacks.get(mark.id);
+    if (!shift || shift.index !== 0 || shift.count < 2) continue;
+    const from = planToScreen(mark.points[0], scheme, view);
+    const far = shift.stepPx * (shift.count - 1);
+    ctx.strokeStyle = styleOf(project, mark.typeId).color;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(from.x + shift.dir.x * far * view.zoom, from.y + shift.dir.y * far * view.zoom);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * Высота над полом у каждого знака в стопке — то, ради чего заказчик стопку и
+ * выбрал: «сразу на каких высотах». Рисуется поверх знаков и под подписями:
+ * раскладка подписей считает эти прямоугольники занятыми, поэтому обозначение
+ * соседней метки на число не налезает.
+ */
+function drawMarkStackHeights(ctx, project, scheme, view, marks, stacks) {
+  if (!stacks || stacks.size === 0) return;
+  const sizes = labelPlanSizes(view);
+  const font = labelFontSize(view);
+  ctx.save();
+  ctx.font = drawFont(font, 600, view.fontFamily);
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(2, font * 0.3);
+  for (const mark of marks) {
+    const box = markStackHeightPlanBox(mark, stacks.get(mark.id), sizes, scheme);
+    if (!box) continue;
+    const at = planPxToScreen(box.at, view);
+    ctx.textAlign = box.align;
+    // Обводка-подложка — та же, что у подписи: число читается и поверх тёмных
+    // линий плана, и поверх самого знака.
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+    ctx.strokeText(box.text, at.x, at.y);
+    ctx.fillStyle = DRAWING_CAPTION;
+    ctx.fillText(box.text, at.x, at.y);
+  }
+  ctx.textAlign = "left";
+  ctx.restore();
+}
+
 // Ручки «+» рисуются только у выделенной точки. `color` — цвет типа, который
 // эта ручка поставит: в смешанном блоке она красится в цвет ставящейся метки,
 // а без него остаётся цветом выделения.
-export function drawHandles(ctx, scheme, mark, view, color) {
+export function drawHandles(ctx, scheme, mark, view, color, stacks = null) {
   const tint = color || "#0969da";
-  for (const handle of handlePositions(scheme, mark, view)) {
+  for (const handle of handlePositions(scheme, mark, view, stacks)) {
     ctx.save();
     ctx.beginPath();
     ctx.arc(handle.x, handle.y, handle.r, 0, Math.PI * 2);
@@ -4885,9 +5249,17 @@ export function drawScheme(ctx, {
     drawOutlines(ctx, { project, scheme, filter, view: state, mode: outlines, selectedOutlineId });
   }
   const selected = new Set(selectedIds || []);
-  for (const mark of visibleMarks(project, scheme, filter)) {
-    drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id));
+  // Стопка совпавших меток (G181): знаки, стоящие на плане в одном месте,
+  // расходятся **при отрисовке** — в объекте их точки те же. Спина стопки
+  // ложится под знаки: она подсказка о том, что место одно, а не часть знака.
+  const shown = visibleMarks(project, scheme, filter);
+  const stacks = markStacks(project, scheme, filter, state);
+  drawMarkStackSpines(ctx, project, scheme, state, shown, stacks);
+  for (const mark of shown) {
+    drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id), stacks);
   }
+  // Высоты — поверх знаков: число у знака, а не под ним.
+  drawMarkStackHeights(ctx, project, scheme, state, shown, stacks);
   // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
   // дугу разбора. `links` — либо готовый кадр (его считает холст из того же
   // промежуточного объекта, что и метки), либо `true`: посчитать самому. Так
@@ -4900,13 +5272,13 @@ export function drawScheme(ctx, {
   // подписи и перечеркнёт её.
   const layout = labelLayout(project, scheme, filter, state);
   const labels = labelTargets(project, scheme, filter).map((target) => {
-    const box = labelBoxIn(project, scheme, target, state, layout);
+    const box = labelBoxIn(project, scheme, target, state, layout, stacks);
     // Цвет подписи — цвет ведущей метки; у смешанного блока это только цвет
     // первого куска и поводка, а буквы каждого куска красятся своим типом.
     const color = styleOf(project, (labelLead(project, target) || {}).typeId).color;
     return {
       box,
-      anchor: planToScreen(labelOrigin(project, target), scheme, state),
+      anchor: planToScreen(labelOrigin(project, target, stacks), scheme, state),
       color,
       runs: labelRuns(project, target, color),
       // Поводок: правило раскладки, если метка не сказала иначе. Перебивка
@@ -4935,6 +5307,9 @@ export function drawScheme(ctx, {
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 export const renderInternals = {
   shapeGeometry,
+  markStackHeightPlanBox,
+  MARK_STACK_REACH_RATIO,
+  MARK_STACK_STEP_RATIO,
   outlineCenter,
   outlineTint,
   outlineLabelBox,
