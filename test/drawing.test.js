@@ -29,6 +29,9 @@ import {
   SCHEME_OBJECT_SHAPES,
   WALL_THICKNESS_MM_MAX,
   addMark,
+  clearPlanScale,
+  findMark,
+  findScheme,
   addOpening,
   addRoom,
   addScheme,
@@ -42,7 +45,9 @@ import {
   deleteSchemeObjectKind,
   deleteWall,
   drawingBoundsMm,
+  drawingCounts,
   drawingMmValue,
+  drawingScaleFactor,
   ensureSchemeObjectKinds,
   findSchemeObjectKind,
   findWall,
@@ -57,6 +62,7 @@ import {
   schemeObjectKindsInOrder,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
+  scaleDrawing,
   setMarkWall,
   setPlanOrigin,
   setPlanScale,
@@ -1007,4 +1013,213 @@ test("схему удалили — её чертёж уходит с ней, а
   assert.equal(markWall(mark), null);
   assert.equal(Object.prototype.hasOwnProperty.call(mark, "wallId"), false, "слияние обнулило поле вместо того, чтобы убрать");
   assert.equal(Object.prototype.hasOwnProperty.call(mark, "wallAtMm"), false);
+});
+
+// ——— чертёж идёт за исправленным масштабом (таск 134, G186) ——————————————
+//
+// Ошибся с масштабом — стены остались прежней длины в миллиметрах, а подложка
+// стала другого размера в метрах, и чертёж съехал. Здесь проверяется ровно
+// то, в чём ошибка дороже всего: **что пересчиталось, а что нет**, и что
+// объект, которого это не касается, не тронут ни на миллиметр.
+
+// Тот же план, откалиброванный заново: отрезок в те же полширины объявлен
+// другим числом метров.
+function recalibrated(project, schemeId, meters) {
+  return setPlanScale(project, schemeId, { a: { x: 0.1, y: 0.5 }, b: { x: 0.6, y: 0.5 }, meters }).project;
+}
+
+test("множитель считается из пикселей на метр и смотрит в нужную сторону", () => {
+  const base = drawnRoom();
+  const bigger = recalibrated(base.project, base.schemeId, 12);
+  // Было 100 px/м, стало 50 — план вдвое крупнее в метрах, значит и чертёж
+  // обязан стать вдвое крупнее в миллиметрах.
+  assert.equal(drawingScaleFactor(base.project, bigger, base.schemeId), 2);
+  const smaller = recalibrated(base.project, base.schemeId, 3);
+  assert.equal(drawingScaleFactor(base.project, smaller, base.schemeId), 0.5);
+  // Первая калибровка множителя не даёт: пересчитывать нечего, и спрашивать
+  // не о чем.
+  const fresh = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
+  const first = recalibrated(fresh.project, fresh.scheme.id, 6);
+  assert.equal(drawingScaleFactor(fresh.project, first, fresh.scheme.id), null);
+  // Снятие масштаба — тоже null: пересчитывать не во что.
+  assert.equal(drawingScaleFactor(bigger, clearPlanScale(bigger, base.schemeId).project, base.schemeId), null);
+  // Тот же масштаб второй раз ничего не двигает.
+  assert.equal(drawingScaleFactor(base.project, recalibrated(base.project, base.schemeId, 6), base.schemeId), null);
+});
+
+test("пересчёт двигает координаты и не трогает введённые руками размеры", () => {
+  const base = drawnRoom();
+  const wall = findWall(base.project, base.wallIds[0]);
+  const opened = addOpening(base.project, {
+    wallId: wall.id,
+    kind: "window",
+    atMm: 1000,
+    widthMm: 1500,
+    heightMm: 1400,
+    heightAboveFloorMm: 800,
+  });
+  const kinds = ensureSchemeObjectKinds(opened.project).project;
+  const kind = schemeObjectKindsInOrder(kinds)[0];
+  // Радиатор под окном: место — координата, габарит — число, введённое руками.
+  const withObject = addSchemeObject(kinds, {
+    schemeId: base.schemeId,
+    kindId: kind.id,
+    shape: "rect",
+    atMm: { x: 1750, y: 300 },
+    widthMm: 1200,
+    depthMm: 100,
+    turnDeg: 0,
+    heightMm: 500,
+    heightAboveFloorMm: 150,
+  });
+  const result = scaleDrawing(withObject.project, base.schemeId, 2);
+  assert.deepEqual(
+    { walls: result.walls, openings: result.openings, objects: result.objects, stuck: result.stuck },
+    { walls: 4, openings: 1, objects: 1, stuck: 0 },
+  );
+  // Стена: концы вдвое дальше, толщина та же.
+  const movedWall = findWall(result.project, wall.id);
+  assert.deepEqual(movedWall.aMm, { x: 0, y: 0 });
+  assert.deepEqual(movedWall.bMm, { x: 8000, y: 0 });
+  assert.equal(movedWall.thicknessMm, 100, "толщину вводили руками — она верна при любом масштабе");
+  assert.equal(wallLengthMm(movedWall), 8000);
+  // Проём: отступ вдоль стены вдвое, размеры прежние.
+  const movedOpening = openingsInWall(result.project, wall.id)[0];
+  assert.equal(movedOpening.atMm, 2000);
+  assert.equal(movedOpening.widthMm, 1500);
+  assert.equal(movedOpening.heightMm, 1400);
+  assert.equal(movedOpening.heightAboveFloorMm, 800);
+  // Объект: место вдвое, габариты прежние — радиатор уехал вместе со своим
+  // местом и остался той же ширины. Перестал помещаться под окном — это
+  // честный ответ, а не ошибка пересчёта.
+  const movedObject = schemeObjectsOnScheme(result.project, base.schemeId)[0];
+  assert.deepEqual(movedObject.atMm, { x: 3500, y: 600 });
+  assert.equal(movedObject.widthMm, 1200);
+  assert.equal(movedObject.depthMm, 100);
+  assert.equal(movedObject.heightMm, 500);
+  assert.equal(movedObject.heightAboveFloorMm, 150);
+  // Высоты — тоже введённое руками.
+  assert.equal(findScheme(result.project, base.schemeId).wallHeightMm, 2700);
+});
+
+test("пересчитанный чертёж ложится на план ровно туда же, где лежал", () => {
+  // Это и есть вся задача: доли плана, в которые попадают углы чертежа, после
+  // перекалибровки с пересчётом обязаны остаться теми же.
+  const base = drawnRoom();
+  const corner = { x: 4000, y: 3000 };
+  const was = planMmToFraction(base.project, base.schemeId, corner);
+  const bigger = recalibrated(base.project, base.schemeId, 12);
+  // Без пересчёта угол уехал: тот же миллиметр — другая доля.
+  const drifted = planMmToFraction(bigger, base.schemeId, corner);
+  assert.ok(Math.abs(drifted.x - was.x) > 0.05, "без пересчёта чертёж съезжает: " + JSON.stringify(drifted));
+  const scaled = scaleDrawing(bigger, base.schemeId, drawingScaleFactor(base.project, bigger, base.schemeId));
+  const movedCorner = findWall(scaled.project, base.wallIds[1]).bMm;
+  const now = planMmToFraction(scaled.project, base.schemeId, movedCorner);
+  assert.ok(Math.abs(now.x - was.x) < 1e-6 && Math.abs(now.y - was.y) < 1e-6, "угол остался на своём месте плана");
+});
+
+test("привязка метки к стене переезжает вместе с координатами", () => {
+  const base = drawnRoom();
+  const type = base.project.markTypes.find((item) => item.code === "Р");
+  const added = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: type.id,
+    kind: "point",
+    points: [{ x: 0.2, y: 0.105 }],
+  });
+  const wallId = base.wallIds[0];
+  const bound = setMarkWall(added.project, added.mark.id, { wallId, atMm: 1200 }).project;
+  const before = markWall(findMark(bound, added.mark.id));
+  assert.ok(before && before.atMm > 0, "метка привязалась: " + JSON.stringify(before));
+  const scaled = scaleDrawing(bound, base.schemeId, 2);
+  const after = markWall(findMark(scaled.project, added.mark.id));
+  assert.equal(after.wallId, wallId);
+  assert.equal(after.atMm, before.atMm * 2);
+  assert.equal(scaled.marks, 1);
+});
+
+test("проём шире укоротившейся стены прижимается к началу и считается вслух", () => {
+  const base = drawnRoom();
+  const wall = findWall(base.project, base.wallIds[0]);
+  // Дверь 900 в стене 4000. Чертёж мельче в десять раз — стена станет 400, и
+  // дверь в неё не влезет: ширину ей задавали руками, и менять её нельзя.
+  const opened = addOpening(base.project, {
+    wallId: wall.id,
+    kind: "door",
+    atMm: 2000,
+    widthMm: 900,
+    heightMm: 2100,
+    heightAboveFloorMm: 0,
+    hinge: OPENING_HINGES[0],
+    swing: OPENING_SWINGS[0],
+  });
+  const tight = scaleDrawing(opened.project, base.schemeId, 0.1);
+  const moved = openingsInWall(tight.project, wall.id)[0];
+  assert.equal(moved.atMm, 0, "прижат к началу: дальше некуда");
+  assert.equal(moved.widthMm, 900, "ширину вводили руками — пересчёт её не трогает");
+  assert.equal(tight.stuck, 1, "про торчащий проём говорится вслух");
+  // А вдвое — ещё влезает, и прижимать не приходится.
+  const half = scaleDrawing(opened.project, base.schemeId, 0.5);
+  assert.equal(openingsInWall(half.project, wall.id)[0].atMm, 1000);
+  assert.equal(half.stuck, 0);
+});
+
+test("цена вопроса считает только своё", () => {
+  const base = drawnRoom();
+  const counts = drawingCounts(base.project, base.schemeId);
+  assert.deepEqual(counts, { walls: 4, openings: 0, objects: 0, marks: 0 });
+  // Вторая схема со своим чертежом в счёт первой не попадает.
+  const second = addScheme(base.project, { name: "2 этаж", imageId: "plan-2", width: 1200, height: 800 });
+  const alien = addWall(second.project, {
+    schemeId: second.scheme.id,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 1000, y: 0 },
+    thicknessMm: 100,
+  }).project;
+  assert.equal(drawingCounts(alien, base.schemeId).walls, 4);
+  assert.equal(drawingCounts(alien, second.scheme.id).walls, 1);
+  // И пересчёт первой схемы чужую стену не трогает.
+  const scaled = scaleDrawing(alien, base.schemeId, 2);
+  const untouched = wallsOnScheme(scaled.project, second.scheme.id)[0];
+  assert.deepEqual(untouched.bMm, { x: 1000, y: 0 });
+});
+
+test("G68: пересчитывать нечего — тот же объект по ссылке", () => {
+  const base = drawnRoom();
+  // Множитель единица, ноль, мусор — объект не трогается вовсе.
+  for (const factor of [1, 0, -2, Number.NaN, "дважды", null]) {
+    const result = scaleDrawing(base.project, base.schemeId, factor);
+    assert.equal(result.project, base.project, "множитель " + String(factor) + " тронул объект");
+    assert.equal(result.walls, 0);
+  }
+  // Схема без чертежа: пересчитывать нечего, и пустых списков не заводится.
+  const plain = planProject();
+  const nothing = scaleDrawing(plain.project, plain.schemeId, 2);
+  assert.equal(nothing.project, plain.project);
+  assert.ok(!Object.prototype.hasOwnProperty.call(nothing.project, "walls"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(nothing.project, "openings"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(nothing.project, "schemeObjects"));
+  // А у объекта с чертежом, но без проёмов и объектов, пересчёт их не заводит.
+  const scaled = scaleDrawing(base.project, base.schemeId, 2);
+  assert.ok(!Object.prototype.hasOwnProperty.call(scaled.project, "openings"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(scaled.project, "schemeObjects"));
+});
+
+test("полоса объекта пересчитывается по вершинам, а ширина полосы — нет", () => {
+  const base = drawnRoom();
+  const kinds = ensureSchemeObjectKinds(base.project).project;
+  const kind = schemeObjectKindsInOrder(kinds)[0];
+  const band = addSchemeObject(kinds, {
+    schemeId: base.schemeId,
+    kindId: kind.id,
+    shape: "polyline",
+    pointsMm: [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 2000, y: 600 }],
+    depthMm: 600,
+    heightMm: 900,
+  });
+  const scaled = scaleDrawing(band.project, base.schemeId, 2);
+  const moved = schemeObjectsOnScheme(scaled.project, base.schemeId)[0];
+  assert.deepEqual(moved.pointsMm, [{ x: 0, y: 0 }, { x: 4000, y: 0 }, { x: 4000, y: 1200 }]);
+  assert.equal(moved.depthMm, 600, "глубина полосы — размер, а не координата");
+  assert.equal(moved.heightMm, 900);
 });
