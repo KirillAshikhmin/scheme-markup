@@ -847,18 +847,23 @@ test("подсказка под полем своя у каждого занят
 // меряется кадр**: габарит в точках подложки, доли из тех же точек и согласие
 // этих долей с моделью.
 
-test("подложка без калибровки открывается режимом «Масштаб», а не рисованием", () => {
+test("окно открывается тем, что в нём есть что делать", () => {
+  // Подложка без калибровки — масштабом: без него не нарисовать ни стены, и
+  // человек, пришедший обводить план, первым делом обязан увидеть сам план.
   const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
   assert.equal(workshopInitialTool(noScale.project, noScale.scheme.id), WORKSHOP_TOOL_SCALE);
-  // Везде ещё — **выделением** (таск 133): холст открывается в нём по той же
-  // причине — сперва смотрят, потом правят, и первый клик по ошибке ничего не
-  // создаёт. Прежде окно открывалось прямо в рисовании стен, и ровно на это
-  // заказчик и пожаловался: «рисую стены, а как мне выбрать текущую».
+  // Чертёж уже есть — **выделением** (таск 133): холст открывается в нём по
+  // той же причине. Прежде окно открывалось прямо в рисовании стен, и ровно на
+  // это заказчик и пожаловался: «рисую стены, а как мне выбрать текущую».
+  const drawn = drawnRoom();
+  assert.equal(workshopInitialTool(drawn.project, drawn.schemeId), "edit");
+  assert.equal(workshopModeOf(workshopInitialTool(drawn.project, drawn.schemeId)), "select");
+  // Чертежа ещё нет — добавлением: выделять нечего, и окно со словами «клик
+  // выделяет» над пустым полем читалось бы сломанным.
   const ready = planProject();
-  assert.equal(workshopInitialTool(ready.project, ready.schemeId), "edit");
-  assert.equal(workshopModeOf(workshopInitialTool(ready.project, ready.schemeId)), "select");
+  assert.equal(workshopModeOf(workshopInitialTool(ready.project, ready.schemeId)), "add");
   const blank = blankProject();
-  assert.equal(workshopInitialTool(blank.project, blank.schemeId), "edit");
+  assert.equal(workshopModeOf(workshopInitialTool(blank.project, blank.schemeId)), "add");
 });
 
 test("кадр занятия «Масштаб» меряется точками подложки, а не миллиметрами", () => {
