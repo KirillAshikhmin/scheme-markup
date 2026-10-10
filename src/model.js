@@ -279,17 +279,22 @@ export const DEFAULT_MARK_SIZE = 16;
  * абсолютным числом нельзя: у метки есть настройка величины, и при мелком
  * знаке прежние 28 пикселей разносили блок на семь радиусов.
  *
- * Откуда 2,4:
+ * Откуда 2,22 (G182: «добавляй эту метку вплотную к текущей, её иконку именно,
+ * а не на отступе, как сейчас»):
  *   — знак рисуется радиусом `markSize`, обводка добавляет ещё 0,11 радиуса,
- *     то есть два соседних знака касаются на 2,22 радиуса — ближе нельзя,
- *     иначе блок сливается в кляксу;
- *   — ручка «+» стоит ровно на 2,4 радиуса от центра метки (`HANDLE_GAP`
- *     в `render.js`), и новая метка встаёт **ровно туда, куда нажали**;
- *   — просвет между знаками получается 0,18 радиуса: знаки не сливаются,
- *     но читаются как одна рамка.
+ *     то есть внешний край знака лежит на 1,11 радиуса от центра, а два
+ *     соседних знака **касаются краями** ровно на 2,22 радиуса. Это и есть
+ *     «вплотную»: ближе — знаки наезжают друг на друга, дальше — остаётся
+ *     зазор, от которого заказчик и отказался (прежние 2,4 давали просвет
+ *     в 0,18 радиуса);
+ *   — мера, а не число: «вплотную» посчитано от нынешней величины знака,
+ *     поэтому ползунок величины меток двигает шаг вместе с собой;
+ *   — ручка «+» стоит на том же расстоянии от центра метки (`HANDLE_GAP`
+ *     в `render.js` берёт эту самую константу), и новая метка встаёт **ровно
+ *     туда, куда нажали**.
  * Согласие с ручкой проверено `test/blockStep.test.js` через `hitHandle`.
  */
-export const BLOCK_STEP_RATIO = 2.4;
+export const BLOCK_STEP_RATIO = 2.22;
 
 // Шаг блока в пикселях плана для заданной величины метки.
 export function blockStepPx(markSize) {
@@ -1733,12 +1738,25 @@ export function addToGroup(project, markId, side, options = {}) {
   const scheme = requireScheme(project, mark.schemeId);
   const type = requireType(project, options.typeId || mark.typeId);
   const stepPx = options.step || BLOCK_STEP_PX;
-  const dx = stepPx / (scheme.width > 0 ? scheme.width : BLOCK_FALLBACK_SIZE_PX);
-  const dy = stepPx / (scheme.height > 0 ? scheme.height : BLOCK_FALLBACK_SIZE_PX);
+  const width = scheme.width > 0 ? scheme.width : BLOCK_FALLBACK_SIZE_PX;
+  const height = scheme.height > 0 ? scheme.height : BLOCK_FALLBACK_SIZE_PX;
+  const dx = stepPx / width;
+  const dy = stepPx / height;
   const from = mark.points[mark.points.length - 1];
+  // `fromPx` — откуда отсчитывать шаг, в пикселях плана. Нужен он ровно одному
+  // случаю: отрисовка отодвинула знак метки стопкой совпавших (G181), ручка
+  // «+» нарисована у **знака**, и новая метка обязана встать под ручку, а не
+  // под настоящую точку, над которой сейчас стоит другой знак. Своего мнения о
+  // стопке у модели нет и быть не может — ей передают готовое смещение, как
+  // передают `step`; без него всё считается как считалось.
+  const shift = options.fromPx || null;
+  const base = {
+    x: from.x + (shift ? Number(shift.x) / width : 0),
+    y: from.y + (shift ? Number(shift.y) / height : 0),
+  };
   const point = {
-    x: clampFraction(from.x + (side === "left" ? -dx : side === "right" ? dx : 0)),
-    y: clampFraction(from.y + (side === "up" ? -dy : side === "down" ? dy : 0)),
+    x: clampFraction(base.x + (side === "left" ? -dx : side === "right" ? dx : 0)),
+    y: clampFraction(base.y + (side === "up" ? -dy : side === "down" ? dy : 0)),
   };
 
   const mode = options.blockMode || blockModeOf(mark, type);
