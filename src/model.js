@@ -727,61 +727,61 @@ const TEMPLATE_CATEGORIES = [
 const TEMPLATE_TYPES = [
   // Свет. Семь точечных типов идут без своей формы и берут круг с крестом у
   // категории — тот самый повтор, на который заказчик согласился сознательно.
-  { category: "light", code: "Т", name: strings.types.spot },
-  { category: "light", code: "С", name: strings.types.lamp },
-  { category: "light", code: "ПК", name: strings.types.bedLight },
+  { category: "light", code: "Т", name: strings.types.spot, sizes: { length: 90, width: 90 } },
+  { category: "light", code: "С", name: strings.types.lamp, sizes: { length: 200, width: 120 } },
+  { category: "light", code: "ПК", name: strings.types.bedLight, sizes: { length: 40, width: 40 } },
   // Линейные типы света разведены начертанием: цвет в категории общий, и на
   // чёрно-белой распечатке линию от линии отличает только рисунок.
-  { category: "light", code: "ТР", name: strings.types.track, kind: "line", lineStyle: "double" },
-  { category: "light", code: "ПС", name: strings.types.backlight },
+  { category: "light", code: "ТР", name: strings.types.track, kind: "line", lineStyle: "double", sizes: { length: 60, width: 60 } },
+  { category: "light", code: "ПС", name: strings.types.backlight, sizes: { length: 40, width: 40 } },
   // Лента своего начертания не имеет: берёт категорийное, то есть сплошную.
-  { category: "light", code: "Л", name: strings.types.strip, kind: "line" },
-  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, kind: "line", lineStyle: "dashed" },
+  { category: "light", code: "Л", name: strings.types.strip, kind: "line", sizes: { length: 10, width: 10 } },
+  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, kind: "line", lineStyle: "dashed", sizes: { length: 10, width: 10 } },
   // Выключатели: число каналов — число клавиш, связь с нагрузкой получает номер
   // клавиши. Каналы приехали из объекта заказчика вместе со справочником.
-  { category: "switches", code: "В", name: strings.types.switch, shape: "square", channels: 1 },
-  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2 },
-  { category: "sockets", code: "Р", name: strings.types.socket, shape: "circle-socket" },
-  { category: "climate", code: "Б", name: strings.types.breezer, shape: "dome-dot" },
-  { category: "climate", code: "К", name: strings.types.conditioner, shape: "circle-thermo" },
-  { category: "network", code: "W", name: strings.types.wifi, shape: "circle-wave" },
-  { category: "intercom", code: "Д", name: strings.types.intercom },
-  { category: "curtains", code: "КШ", name: strings.types.curtainRail },
-  { category: "light", code: "ППл", name: strings.types.floorLight },
-  { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave" },
-  { category: "light", code: "ЛЮ", name: strings.types.chandelier },
-  { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1 },
-  { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2 },
-  { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain" },
+  { category: "switches", code: "В", name: strings.types.switch, shape: "square", channels: 1, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "sockets", code: "Р", name: strings.types.socket, shape: "circle-socket", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
+  { category: "climate", code: "Б", name: strings.types.breezer, shape: "dome-dot", sizes: { length: 600, width: 350, heightAboveFloor: 2100 } },
+  { category: "climate", code: "К", name: strings.types.conditioner, shape: "circle-thermo", sizes: { length: 900, width: 300, heightAboveFloor: 2300 } },
+  { category: "network", code: "W", name: strings.types.wifi, shape: "circle-wave", sizes: { length: 120, width: 120, heightAboveFloor: 2400 } },
+  { category: "intercom", code: "Д", name: strings.types.intercom, sizes: { length: 150, width: 200, heightAboveFloor: 1500 } },
+  { category: "curtains", code: "КШ", name: strings.types.curtainRail, sizes: { length: 400, width: 120, heightAboveFloor: 2400 } },
+  { category: "light", code: "ППл", name: strings.types.floorLight, sizes: { length: 40, width: 40, heightAboveFloor: 100 } },
+  { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave", sizes: { length: 40, width: 40, heightAboveFloor: 2400 } },
+  { category: "light", code: "ЛЮ", name: strings.types.chandelier, sizes: { length: 500, width: 400 } },
+  { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2, icon: "switchToggle", sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain", icon: "nightLight", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
   // Розетка 380: три отверстия по кругу против двух у обычной — на плане их
   // не спутать.
-  { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple" },
-  { category: "sensors", code: "ДП", name: strings.types.presence, shape: "circle-fan" },
-  { category: "appliances", code: "СУШ", name: strings.types.dryer },
-  { category: "panel", code: "Щ", name: strings.types.panel, shape: "square-hatch" },
-  { category: "climate", code: "ВЫТ", name: strings.types.hood, shape: "circle-fill" },
-  { category: "light", code: "Бр", name: strings.types.sconce },
-  { category: "appliances", code: "ДЭП", name: strings.types.cabinetDoor },
-  { category: "network", code: "ПУ", name: strings.types.controlPanel, shape: "square-jack" },
-  { category: "climate", code: "ОВ", name: strings.types.dehumidifier, shape: "drop-dot" },
-  { category: "network", code: "ВП", name: strings.types.ethernet, shape: "square-cross" },
-  { category: "cinema", code: "РЕС", name: strings.types.receiver },
-  { category: "cinema", code: "ПРО", name: strings.types.projector, shape: "diamond-dot" },
-  { category: "network", code: "УК", name: strings.types.smartSpeaker, shape: "circle-antenna" },
+  { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
+  { category: "sensors", code: "ДП", name: strings.types.presence, shape: "circle-fan", sizes: { length: 70, width: 70, heightAboveFloor: 2400 } },
+  { category: "appliances", code: "СУШ", name: strings.types.dryer, sizes: { length: 500, width: 800, heightAboveFloor: 900 } },
+  { category: "panel", code: "Щ", name: strings.types.panel, shape: "square-hatch", sizes: { length: 450, width: 600, heightAboveFloor: 1400 } },
+  { category: "climate", code: "ВЫТ", name: strings.types.hood, shape: "circle-fill", sizes: { length: 600, width: 350, heightAboveFloor: 1700 } },
+  { category: "light", code: "Бр", name: strings.types.sconce, sizes: { length: 150, width: 250, heightAboveFloor: 1800 } },
+  { category: "appliances", code: "ДЭП", name: strings.types.cabinetDoor, sizes: { length: 400, width: 500, heightAboveFloor: 600 } },
+  { category: "network", code: "ПУ", name: strings.types.controlPanel, shape: "square-jack", sizes: { length: 120, width: 120, heightAboveFloor: 1400 } },
+  { category: "climate", code: "ОВ", name: strings.types.dehumidifier, shape: "drop-dot", sizes: { length: 400, width: 600, heightAboveFloor: 0 } },
+  { category: "network", code: "ВП", name: strings.types.ethernet, shape: "square-cross", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
+  { category: "cinema", code: "РЕС", name: strings.types.receiver, sizes: { length: 430, width: 80, heightAboveFloor: 400 } },
+  { category: "cinema", code: "ПРО", name: strings.types.projector, shape: "diamond-dot", sizes: { length: 300, width: 120, heightAboveFloor: 2400 } },
+  { category: "network", code: "УК", name: strings.types.smartSpeaker, shape: "circle-antenna", sizes: { length: 150, width: 180, heightAboveFloor: 900 } },
   // Вертикальный кусок ленты ставится одной точкой, а не тянется по плану.
-  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical" },
-  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3 },
-  { category: "sensors", code: "ДД", name: strings.types.motion, shape: "triangle-dot" },
-  { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split" },
-  { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop" },
-  { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross" },
-  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar" },
-  { category: "plumbing", code: "ВР", name: strings.types.waterOutlet },
-  { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain" },
-  { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve" },
-  { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander" },
-  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring" },
-  { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring" },
+  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical", sizes: { length: 40, width: 600, heightAboveFloor: 900 } },
+  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "sensors", code: "ДД", name: strings.types.motion, shape: "triangle-dot", sizes: { length: 70, width: 70, heightAboveFloor: 2200 } },
+  { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split", sizes: { length: 70, width: 40, heightAboveFloor: 2000 } },
+  { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop", sizes: { length: 60, width: 60, heightAboveFloor: 0 } },
+  { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross", icon: "panelBox", sizes: { length: 300, width: 400, heightAboveFloor: 1400 } },
+  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 100, heightAboveFloor: 0 } },
+  { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, icon: "waterOutlet", sizes: { length: 60, width: 60, heightAboveFloor: 600 } },
+  { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", icon: "drain", sizes: { length: 110, width: 110, heightAboveFloor: 100 } },
+  { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, heightAboveFloor: 400 } },
+  { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander", sizes: { length: 40, width: 40, heightAboveFloor: 100 } },
+  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring", sizes: { length: 300, width: 60, heightAboveFloor: 1600 } },
+  { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring", sizes: { length: 120, width: 80, heightAboveFloor: 2300 } },
 ];
 
 function newId() {
@@ -834,6 +834,16 @@ export function defaultTemplate() {
     blockMode: "each",
     // Каналы: у выключателей столько, сколько клавиш, у остальных один.
     channels: type.channels || TYPE_CHANNELS_DEFAULT,
+    // Имя значка развёртки — только там, где форма знака двусмысленна и по
+    // ней не угадать (таск 135): ночник и выход канализации делят
+    // `circle-drain`, осушитель и водорозетка — `drop-dot`. Остальные типы
+    // поля не получают и берут значок по форме: так же, как его возьмёт
+    // объект, размеченный до этого таска.
+    ...(type.icon ? { icon: type.icon } : {}),
+    // Умолчания размеров (G192): «для меток надо бы прописать дефолтные
+    // размеры, которые уже можно будет править». Метка их наследует, пока не
+    // задала своё, и развёртка рисует вещь этим размером.
+    ...(type.sizes ? { sizes: type.sizes } : {}),
     order: index,
   }));
   return { categories, markTypes, equipmentTypes: equipmentTypeTemplate() };
@@ -1851,6 +1861,77 @@ export function markDimensions(mark) {
     values[field] = typeof value === "number" && Number.isFinite(value) ? value : null;
   }
   return values;
+}
+
+/**
+ * Размеры **с умолчаниями типа** (таск 135, требование G192). Слова заказчика:
+ * «для меток надо бы прописать дефолтные размеры, которые уже можно будет
+ * править, и на развёртке отображать уже указанные».
+ *
+ * Лестница та же, что у цвета и формы (ADR 005): у метки — её значение, нет —
+ * умолчание типа, нет и там — `null`.
+ *
+ * **Наследование, а не подстановка в метку**, и это решение, а не мелочь.
+ * Подставить умолчания при создании значило бы оставить уже размеченные
+ * объекты без них: в присланном объекте заказчика размеры заполнены у **нуля**
+ * меток из 592, и ни одна не ожила бы, пока он не переставит их заново.
+ * Наследование оживляет его объект в тот же день и ничего в нём не меняет —
+ * поправил умолчание у типа, и все его метки поехали за ним.
+ *
+ * `own` говорит, что значение **своё**, а не унаследованное: по нему окно
+ * показывает умолчание заглушкой, а не числом, и развёртка знает, о скольких
+ * высотах она догадалась.
+ */
+export function markSizes(project, mark) {
+  const type = mark ? findType(project, mark.typeId) : null;
+  const defaults = typeSizes(type);
+  const values = markDimensions(mark);
+  const result = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    const own = values[field] !== null;
+    result[field] = own ? values[field] : defaults[field];
+    result[field + "Own"] = own;
+  }
+  return result;
+}
+
+/** Умолчания размеров у типа. У типа без них — три `null`. */
+export function typeSizes(type) {
+  const sizes = type && type.sizes ? type.sizes : null;
+  const values = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    const value = sizes ? sizes[field] : null;
+    values[field] = typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  return values;
+}
+
+/**
+ * Записать умолчания размеров у типа. Пустое поле **убирает** умолчание, а не
+ * обнуляет его: ноль у высоты над полом — это «в полу», и путать его с «не
+ * задано» нельзя. Когда не осталось ни одного, поле `sizes` у типа исчезает —
+ * тип становится ровно таким, каким был до этого таска (G68).
+ */
+export function setTypeSizes(project, typeId, patch) {
+  const type = findType(project, typeId);
+  if (!type) throw modelError("typeNotFound");
+  const next = { ...typeSizes(type) };
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (!patch || !Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    next[field] = markDimensionValue(patch[field]);
+  }
+  const kept = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (next[field] !== null) kept[field] = next[field];
+  }
+  const markTypes = project.markTypes.map((item) => {
+    if (item.id !== typeId) return item;
+    const copy = { ...item };
+    if (Object.keys(kept).length === 0) delete copy.sizes;
+    else copy.sizes = kept;
+    return copy;
+  });
+  return { project: withProject(project, { markTypes }), type: markTypes.find((item) => item.id === typeId) };
 }
 
 // Задан ли у метки хоть один размер: по этому строка списка показывает, что
@@ -4764,6 +4845,8 @@ export function wallElevation(project, wallId, side = "left") {
     if (!binding || binding.wallId !== wallId) continue;
     if (markWallSide(project, mark) !== view) continue;
     const style = styleOf(project, mark.typeId);
+    const sizes = markSizes(project, mark);
+    const type = findType(project, mark.typeId);
     const span =
       binding.toMm === null
         ? { fromMm: sideAlong(length, binding.atMm, view), toMm: null }
@@ -4777,7 +4860,19 @@ export function wallElevation(project, wallId, side = "left") {
       kind: mark.kind === "line" ? "line" : "point",
       fromMm: Math.round(span.fromMm),
       toMm: span.toMm === null ? null : Math.round(span.toMm),
-      heightMm: markDimensions(mark).heightAboveFloor,
+      // Размеры и высота — **с умолчаниями типа** (G192): у заказчика в 592
+      // метках не заполнено ни одной, и без наследования развёртка осталась бы
+      // такой же мёртвой, какой была.
+      heightMm: sizes.heightAboveFloor,
+      sizeMm: { width: sizes.length, height: sizes.width },
+      heightOwn: sizes.heightAboveFloorOwn,
+      icon: type && type.icon ? type.icon : null,
+      // Группа едет с меткой на развёртку (таск 135, G190 и G191): там метки
+      // одной группы встают вплотную, как подрозетники в стене, и получают
+      // одну отметку высоты на всех. Решает это отрисовка — здесь только
+      // ключ и общая подпись, которую иначе пришлось бы собирать второй раз.
+      groupId: mark.groupId || null,
+      groupLabel: mark.groupId ? labelOf(project, mark.groupId) : "",
     });
   }
   marks.sort((first, second) => first.fromMm - second.fromMm);

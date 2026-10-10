@@ -8,7 +8,7 @@
 //
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
-import { layoutAllows, PANEL_IDS, registerPanel } from "./app.js";
+import { ELEVATION_ICONS_SETTING, layoutAllows, PANEL_IDS, registerPanel } from "./app.js";
 import { strings, text } from "./strings.js";
 import {
   DEFAULT_MARK_SIZE,
@@ -4031,6 +4031,13 @@ function mountCanvasElevation(host, api) {
   const strip = createElevationStrip({
     onSide: (side) => api.setState({ wallSide: side }),
     onClose: () => api.setState({ selectedWallId: null }),
+    // Отметка живёт в настройках браузера, как слои и шрифт схемы: на одном
+    // компьютере смотрят картинками, на другом знаками, а объект один.
+    onIcons: (value) => {
+      api.setState({ elevationIcons: value });
+      setSetting(ELEVATION_ICONS_SETTING, value);
+    },
+    icons: api.getState().elevationIcons !== false,
   });
   host.append(strip.node);
 
@@ -4049,6 +4056,7 @@ function mountCanvasElevation(host, api) {
       side: state.wallSide,
       place: elevationPlace(canvasWallMiddleY(state), height),
       fieldHeight: height,
+      icons: state.elevationIcons !== false,
     });
   }
 
@@ -4057,6 +4065,7 @@ function mountCanvasElevation(host, api) {
       "selectedWallId" in changed ||
       "wallSide" in changed ||
       "elevationShown" in changed ||
+      "elevationIcons" in changed ||
       "project" in changed ||
       "schemeId" in changed ||
       "view" in changed ||

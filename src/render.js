@@ -50,6 +50,7 @@ import {
   wallsOnScheme,
 } from "./model.js";
 import { strings, text } from "./strings.js";
+import { drawIcon, iconByName, iconForShape } from "./icons/registry.js";
 
 export const SHAPES = SHAPE_NAMES;
 
@@ -4956,6 +4957,102 @@ function elevationText(ctx, value, x, y, align, unit) {
  * стоит заголовок строкой), а на листе из нескольких развёрток она и есть
  * порядок обхода: без номера ряд чертежей читается как россыпь.
  */
+/**
+ * Постоянный размер мелкого значка — в тех же единицах, что остальная
+ * развёртка (`unit`: 1 на экране, точек в миллиметре на бумаге).
+ *
+ * Двадцать две точки против восемнадцати у нынешнего знака: контуру нужно чуть
+ * больше места, чем кругу с крестом, иначе две дырки розетки сливаются.
+ */
+export const ELEVATION_ICON_PX = 22;
+
+/**
+ * Граница между «значком» и «вещью в масштабе», в миллиметрах настоящего
+ * объекта (таск 135). Заказчик: «располагать их на схеме цветом метки и рядом
+ * или прям поверх объекта, если большой» — то есть ответ разный, и граница
+ * обязана быть названа числом.
+ *
+ * Триста выбраны по тому, что по эту и ту сторону оказывается. Мельче: розетка
+ * и выключатель 80, датчики 50–70, точка WiFi 120, панель управления 120 — всё
+ * это на стене в 2700 мм занимает от трёх до пяти процентов высоты, то есть
+ * обращается в точку, и рисовать их в масштабе значит не рисовать вовсе.
+ * Крупнее: кондиционер 900 × 300, бризер и вытяжка 600, щит 450 × 600,
+ * ресивер 430 — у этих вещей контур и есть ответ на вопрос «влезет ли», ради
+ * которого на развёртку и смотрят.
+ */
+export const ELEVATION_SCALE_MM = 300;
+
+/**
+ * Прямоугольник метки на развёртке и значок, которым её рисовать.
+ *
+ * Крупная вещь рисуется **своим размером** в масштабе стены, мелкая — значком
+ * постоянного размера. Чистая и вынесена наружу: эта развилка — то самое
+ * место, где легче всего соврать о размере, и проверяется она без холста.
+ */
+export function elevationMarkBox(mark, scale, unit, icons) {
+  const icon = icons ? elevationIconOf(mark) : null;
+  const size = mark.sizeMm || {};
+  const width = Number(size.width) || (icon ? icon.mm.width : 0);
+  const height = Number(size.height) || (icon ? icon.mm.height : 0);
+  const big = icon && (width >= ELEVATION_SCALE_MM || height >= ELEVATION_SCALE_MM);
+  if (big) return { icon, width: Math.max(1, width * scale), height: Math.max(1, height * scale), scaled: true };
+  const side = (icon ? ELEVATION_ICON_PX : 18) * unit;
+  const aspect = icon && width > 0 && height > 0 ? height / width : 1;
+  return { icon, width: side, height: side * Math.min(2, Math.max(0.5, aspect)), scaled: false };
+}
+
+/** Значок метки: имя у типа старше формы знака (см. `icons/registry.js`). */
+export function elevationIconOf(mark) {
+  return iconByName(mark.icon) || iconForShape(mark.shape);
+}
+
+/**
+ * Точечные метки развёртки — **рядами**: группа идёт одним рядом вплотную,
+ * одиночка сама себе ряд (таск 135, требования G190 и G191).
+ *
+ * G190 («на развёртке сразу указывать рядом, как и в жизни подрозетники»):
+ * метки одной группы стоят на стене вплотную друг к другу, как подрозетники в
+ * рамке, а не каждая на своём расчётном отступе. Расчётные отступы у них
+ * разъехались бы на пару сантиметров — ровно настолько, насколько человек
+ * промахнулся мышью на плане, — и рамка из трёх розеток перестала бы быть
+ * рамкой.
+ *
+ * G191 («одну высоту указывать у группы по нижнему объекту»): подпись у ряда
+ * одна. Заказчик снял вопрос о разной высоте внутри группы: «2 блока розеток
+ * мы в одну группу не собираем, это всегда 2 группы разных», — поэтому берём
+ * нижнюю и не городим разбора.
+ *
+ * Порядок в ряду — по расстоянию вдоль стены, как они стоят на плане. Ряд
+ * встаёт серединой туда, где середина у группы: иначе рамка уехала бы вправо
+ * от того места, где её нарисовали.
+ *
+ * Чистая и вынесена наружу: без холста проверяется и порядок, и высота ряда.
+ */
+export function elevationRows(marks) {
+  const rows = [];
+  const byGroup = new Map();
+  for (const mark of marks) {
+    const key = mark.groupId || null;
+    if (!key) {
+      rows.push({ members: [mark] });
+      continue;
+    }
+    if (!byGroup.has(key)) {
+      const row = { members: [] };
+      byGroup.set(key, row);
+      rows.push(row);
+    }
+    byGroup.get(key).members.push(mark);
+  }
+  return rows.map((row) => {
+    const members = [...row.members].sort((first, second) => first.fromMm - second.fromMm);
+    const heights = members.map((mark) => mark.heightMm).filter((value) => value !== null);
+    const centreMm = members.reduce((sum, mark) => sum + mark.fromMm, 0) / members.length;
+    const label = members.length > 1 && members[0].groupLabel ? members[0].groupLabel : members[0].label;
+    return { members, centreMm, label, heightMm: heights.length > 0 ? Math.min(...heights) : null };
+  });
+}
+
 export function drawElevation(ctx, elevation, box, options = {}) {
   if (!elevation) return null;
   const unit = options.unit > 0 ? options.unit : 1;
@@ -5049,17 +5146,19 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
 
-  // Метки: знак на своём месте и высоте, подпись рядом. Линия — отрезком.
+  // Метки: знак или изображение на своём месте и высоте, подпись рядом.
+  // Линия — отрезком.
   const unknown = [];
+  const points = [];
   for (const mark of elevation.marks) {
     if (mark.heightMm === null) {
       unknown.push(mark);
       continue;
     }
-    const y = atY(mark.heightMm);
-    ctx.strokeStyle = mark.color;
-    ctx.fillStyle = mark.color;
     if (mark.kind === "line" && mark.toMm !== null) {
+      const y = atY(mark.heightMm);
+      ctx.strokeStyle = mark.color;
+      ctx.fillStyle = mark.color;
       ctx.lineWidth = 2.5 * unit;
       ctx.beginPath();
       ctx.moveTo(atX(mark.fromMm), y);
@@ -5075,9 +5174,32 @@ export function drawElevation(ctx, elevation, box, options = {}) {
       );
       continue;
     }
-    const x = atX(mark.fromMm);
-    drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
-    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13 * unit, "center", unit);
+    points.push(mark);
+  }
+
+  // Точечные метки идут **рядами**: группа — один ряд (таск 135, G190 и
+  // G191). См. `elevationRows`.
+  for (const row of elevationRows(points)) {
+    const boxes = row.members.map((mark) => elevationMarkBox(mark, scale, unit, options.icons === true));
+    const width = boxes.reduce((sum, box) => sum + box.width, 0);
+    let x = atX(row.centreMm) - width / 2;
+    let top = Infinity;
+    row.members.forEach((mark, index) => {
+      const box = boxes[index];
+      const y = atY(mark.heightMm);
+      const icon = box.icon;
+      if (icon) {
+        drawIcon(ctx, icon, { x, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
+      } else {
+        drawShape(ctx, mark.shape, x + box.width / 2, y, 9 * unit, mark.color);
+      }
+      top = Math.min(top, y - box.height / 2);
+      x += box.width;
+    });
+    // Одна отметка высоты на ряд, по нижнему объекту (G191): «2 блока розеток
+    // мы в одну группу не собираем, это всегда 2 группы разных», — значит у
+    // ряда высота и правда одна, и повторять её у каждого подрозетника незачем.
+    elevationText(ctx, row.label + " · " + row.heightMm, atX(row.centreMm), top - 7 * unit, "center", unit);
   }
 
   // Метки без высоты — полосой под полом: на стене им места нет, но и

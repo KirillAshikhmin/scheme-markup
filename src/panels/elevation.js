@@ -69,6 +69,11 @@ export function elevationNote(elevation) {
   if (empty) notes.push(strings.elevation.empty);
   const blind = elevation.marks.filter((mark) => mark.heightMm === null).length;
   if (blind > 0) notes.push(text("elevation.blind", { count: blind }));
+  // Высота, взятая у типа, — это **догадка сборки**, пусть и хорошая: правило
+  // объекта велит показывать её пользователю, а не выдавать за введённую
+  // (таск 135, G192). Поправил у метки — число перестало быть умолчанием.
+  const guessed = elevation.marks.filter((mark) => mark.heightMm !== null && mark.heightOwn === false).length;
+  if (guessed > 0) notes.push(text("elevation.guessed", { count: guessed }));
   return notes.join(" ");
 }
 
@@ -76,7 +81,7 @@ export function elevationNote(elevation) {
  * Создать полосу. Возвращает `{node, update, destroy}`; вызывающий сам кладёт
  * `node` туда, где у него план, и зовёт `update` на каждой правке.
  */
-export function createElevationStrip({ onSide, onClose }) {
+export function createElevationStrip({ onSide, onClose, onIcons, icons }) {
   const canvas = uiEl("canvas", { class: "elev__canvas" });
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   const title = uiEl("span", { class: "elev__title" });
@@ -88,18 +93,38 @@ export function createElevationStrip({ onSide, onClose }) {
       on: { click: () => onSide && onSide(side) },
     }),
   );
+  // Отметка «изображения» — на самом окне развёртки, как предложил заказчик
+  // (таск 135, G187: «можно прямо на окне с развёрткой»). Личная настройка
+  // браузера, как слои и шрифт схемы; в объект не попадает.
+  const iconsBox = uiEl("input", { type: "checkbox" });
+  iconsBox.checked = icons !== false;
+  iconsBox.addEventListener("change", () => onIcons && onIcons(iconsBox.checked));
+  const iconsRow = uiEl("label", { class: "elev__icons", title: strings.elevation.iconsHint }, [
+    iconsBox,
+    uiEl("span", { text: strings.elevation.icons }),
+  ]);
   const closeButton = uiIconButton("close", {
     title: strings.elevation.close,
     on: { click: () => onClose && onClose() },
   });
   const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
   const node = uiEl("div", { class: "elev" }, [
-    uiEl("div", { class: "elev__head" }, [title, ...sideButtons, closeButton]),
+    uiEl("div", { class: "elev__head" }, [title, iconsRow, ...sideButtons, closeButton]),
     stage,
     note,
   ]);
+  // **Полоса не отдаёт своё нажатие дальше** (дефект D24). На холсте она лежит
+  // в прозрачном для указателя слое, в мастерской — внутри поля чертежа, и во
+  // втором случае нажатие на кнопку всплывало бы в обработчик поля: клик по
+  // «Закрыть» ставил бы вершину стены. Правило одно и живёт у самой полосы —
+  // чинить это на каждой поверхности по-своему значило бы завести две разные
+  // починки одной беды.
+  for (const kind of ["pointerdown", "pointerup", "dblclick", "wheel"]) {
+    node.addEventListener(kind, (event) => event.stopPropagation());
+  }
   node.hidden = true;
   let shown = null;
+  let withIcons = icons !== false;
 
   function paint() {
     if (!ctx || !shown || node.hidden) return;
@@ -113,14 +138,18 @@ export function createElevationStrip({ onSide, onClose }) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    drawElevation(ctx, shown, { x: 0, y: 0, width, height });
+    drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { icons: withIcons });
   }
 
   /**
    * Показать развёртку выделенной стены. `wallId` пустой — полоса прячется:
    * пустой развёртки на экране не бывает (G68).
    */
-  function update({ project, wallId, side, place, fieldHeight }) {
+  function update({ project, wallId, side, place, fieldHeight, icons: shownIcons }) {
+    if (shownIcons !== undefined) {
+      withIcons = shownIcons !== false;
+      iconsBox.checked = withIcons;
+    }
     const wall = wallId ? findWall(project, wallId) : null;
     if (!wall) {
       node.hidden = true;

@@ -14,9 +14,11 @@ import {
   MARK_DIMENSION_FIELDS,
   MARK_DIMENSION_MAX,
   findMark,
+  findType,
   labelOf,
   markDimensionValue,
   markDimensions,
+  typeSizes,
 } from "../model.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
 
@@ -76,10 +78,34 @@ export function markSizesParse(raw) {
  * идёт через `canvasCommit`, и место у неё одно — там же, где остальные
  * правки строки.
  */
+/**
+ * То же окно, но для **умолчаний типа** (таск 135, требование G192): «для
+ * меток надо бы прописать дефолтные размеры, которые уже можно будет править».
+ *
+ * Второго окна не заводится нарочно: поля те же три, проверка та же, подпись
+ * та же. Разница только в заголовке и подсказке — и в том, что заполненное
+ * здесь метка наследует, пока не задала своё.
+ */
+export function openTypeSizesPicker(project, typeId) {
+  const type = findType(project, typeId);
+  return openSizesPicker({
+    title: text("markSizes.typeTitle", { label: type ? type.code + " — " + type.name : "" }),
+    hint: strings.markSizes.typeHint,
+    current: typeSizes(type),
+  });
+}
+
 export function openMarkSizesPicker(project, markId) {
+  const mark = findMark(project, markId);
+  return openSizesPicker({
+    title: text("markSizes.title", { label: labelOf(project, markId) }),
+    hint: strings.markSizes.hint,
+    current: markDimensions(mark),
+  });
+}
+
+function openSizesPicker({ title, hint, current }) {
   return new Promise((resolve) => {
-    const mark = findMark(project, markId);
-    const current = markDimensions(mark);
     const inputs = new Map();
     const error = uiEl("p", { class: "sizes__error" });
     error.hidden = true;
@@ -122,9 +148,9 @@ export function openMarkSizesPicker(project, markId) {
     };
 
     modal = uiModal({
-      title: text("markSizes.title", { label: labelOf(project, markId) }),
+      title,
       body: uiEl("div", { class: "sizes" }, [
-        uiEl("p", { class: "modal__hint", text: strings.markSizes.hint }),
+        uiEl("p", { class: "modal__hint", text: hint }),
         ...rows,
         error,
       ]),

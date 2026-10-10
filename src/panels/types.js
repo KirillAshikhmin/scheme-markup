@@ -7,6 +7,7 @@
 // созданные остаются как были.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
+import { markSizesSummary, openTypeSizesPicker } from "./markSizes.js";
 import {
   CODE_MAX_LENGTH,
   BLOCK_MODES,
@@ -36,6 +37,8 @@ import {
   typesInOrder,
   updateCategory,
   updateType,
+  setTypeSizes,
+  typeSizes,
 } from "../model.js";
 import { lineStyleIcon, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
@@ -804,6 +807,27 @@ export function openTypesDictionary(api) {
     commit((current) => deleteCategory(current, category.id).project, strings.history.removeCategory);
   }
 
+  /**
+   * Кнопка умолчаний размеров у типа. Подпись показывает заданное — так видно
+   * без открытия окна, у каких типов умолчания есть, а у каких нет.
+   */
+  function sizesButton(type) {
+    const sizes = typeSizes(type);
+    const summary = markSizesSummary(sizes);
+    const button = uiButton(summary || strings.markSizes.typeButton, {
+      class: "ui-btn dict__sizes" + (summary ? " is-set" : ""),
+      title: strings.markSizes.typeHint,
+      on: {
+        click: async () => {
+          const picked = await openTypeSizesPicker(project(), type.id);
+          if (!picked) return;
+          commit((current) => setTypeSizes(current, type.id, picked).project, strings.history.typeSizes);
+        },
+      },
+    });
+    return button;
+  }
+
   function typeRow(type, count) {
     const category = findCategory(project(), type.categoryId);
     const style = styleOf(project(), type.id);
@@ -895,6 +919,10 @@ export function openTypesDictionary(api) {
         onChange: (value) =>
           commit((current) => updateType(current, type.id, { channels: value }).project, strings.history.editType),
       }),
+      // Умолчания размеров (таск 135, G192) — кнопкой, а не тремя полями в
+      // строке: строка типа и так собирает восемь полей, а числа заполняют
+      // один раз на тип и потом не трогают. Окно то же, что у размеров метки.
+      sizesButton(type),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,

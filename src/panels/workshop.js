@@ -75,6 +75,8 @@
 // у объекта без чертежа — ноль правок, ноль шагов истории, ноль новых полей в
 // `project.json`. Пустые списки в объект не попадают: их не кладёт ни одна
 // функция модели чертежа.
+import { ELEVATION_ICONS_SETTING } from "../app.js";
+import { setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
   DRAWING_MM_MAX,
@@ -1030,6 +1032,11 @@ export function openWorkshop({ schemeId, api }) {
   const strip = createElevationStrip({
     onSide: (side) => setState({ wallSide: side }),
     onClose: () => select(null),
+    onIcons: (value) => {
+      setState({ elevationIcons: value });
+      setSetting(ELEVATION_ICONS_SETTING, value);
+    },
+    icons: getState().elevationIcons !== false,
   });
   const node = uiEl("canvas", { class: "workshop__canvas" });
   // Поле забирает фокус по нажатию: иначе после правки толщины фокус остаётся
@@ -3063,6 +3070,7 @@ export function openWorkshop({ schemeId, api }) {
       side: getState().wallSide,
       place: elevationPlace((a.y + b.y) / 2, box.height),
       fieldHeight: box.height,
+      icons: getState().elevationIcons !== false,
     });
   }
 
@@ -3116,7 +3124,7 @@ export function openWorkshop({ schemeId, api }) {
       finish();
       return;
     }
-    if ("wallSide" in changed) sync();
+    if ("wallSide" in changed || "elevationIcons" in changed) sync();
     if ("project" in changed || "schemeImage" in changed) {
       // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
       if (selected && !aliveSelection()) selected = null;
