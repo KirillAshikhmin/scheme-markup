@@ -10,6 +10,10 @@
 // **без схлопывания в счётчик**. Поэтому здесь проверяется и то, что счётчика
 // нет ни при каком числе меток.
 //
+// Подписи высот он потом снял сам (G188, таск 136): «на схеме при расстановке
+// в колонку не указывай их высоту». Стопка осталась, числа ушли — и теперь
+// здесь проверяется обратное: на плане нет ни одного `h=`.
+//
 // Главное правило сборки, которое стопка обязана не сломать: попадание по
 // клику считается тем же смещением, что отрисовка. Поэтому в каждом тесте,
 // где знак уехал, рядом стоит `hitTest`.
@@ -26,6 +30,7 @@ import {
   blockStepPx,
   createProject,
   findMark,
+  markDimensions,
   markWall,
   markWallSide,
   planMmToFraction,
@@ -279,31 +284,50 @@ test("порядок стопки: без высоты — у точки, дал
 
 // ——— высота у каждой, без счётчика ————————————————————————————————————
 
-test("у каждого знака в стопке видна высота, а у метки без высоты — вопрос, а не выдумка", () => {
+test("G188: высота в стопке не подписана — ни числом, ни вопросом", () => {
+  // Высоты нарочно разные, и одна метка без высоты: до G188 здесь стояли
+  // «h=1100», «h=300» и «h=?».
   const built = pile([1100, 300, null]);
   const view = viewOf();
   const { ctx, log } = recorder();
   drawScheme(ctx, { project: built.project, scheme: built.scheme, filter: null, view, selectedIds: [] });
   const shown = texts(log);
-  assert.ok(shown.includes("h=1100"), "высота 1100 не подписана: " + shown.join(" "));
-  assert.ok(shown.includes("h=300"), "высота 300 не подписана: " + shown.join(" "));
-  assert.ok(shown.includes("h=?"), "метка без высоты показана не честно: " + shown.join(" "));
-  // Высота — у знака, а не у настоящей точки: подпись каждой стоит рядом со
-  // своим знаком.
-  const stacks = markStacks(built.project, built.scheme, null, view);
-  const sizes = { font: 12, gap: 15, radius: MARK_SIZE };
-  for (const id of built.ids) {
-    const mark = findMark(built.project, id);
-    const box = renderInternals.markStackHeightPlanBox(mark, stacks.get(id), sizes, built.scheme);
-    const glyph = markStackPoints(mark, stacks)[0];
-    assert.ok(Math.abs(box.at.y - glyph.y * HEIGHT) < 1e-6, "подпись высоты оторвалась от своего знака");
-    // Слева от знака: справа стоит обозначение метки, и сторону у него не
-    // отнимают — там же ручка «+», и соседняя метка встаёт не поверх числа.
-    assert.ok(box.x + box.width < glyph.x * WIDTH, "подпись высоты легла на знак или заняла сторону подписи");
+  assert.deepEqual(shown.filter((value) => value.startsWith("h=")), [], "на плане осталась подпись высоты: " + shown.join(" "));
+  // Обозначения меток при этом на месте: убраны числа, а не подписи.
+  for (const label of ["Р1", "Р2", "Р3"]) {
+    assert.ok(shown.includes(label), "обозначение " + label + " пропало вместе с высотой");
   }
+  // И сама стопка цела: три знака в трёх разных местах.
+  const stacks = markStacks(built.project, built.scheme, null, view);
+  const places = built.ids.map((id) => {
+    const point = markStackPoints(findMark(built.project, id), stacks)[0];
+    return point.x.toFixed(6) + ":" + point.y.toFixed(6);
+  });
+  assert.equal(new Set(places).size, 3, "вместе с высотами разъехалась и стопка");
 });
 
-test("одна метка в стопке не бывает: без стопки высота у знака не подписывается", () => {
+test("G188: высота метки не потерялась — она лежит в самой метке", () => {
+  // Где смотреть высоту после G188: поле метки — источник, из него её берут
+  // карточка метки, строка списка («В 900 мм») и развёртка стен.
+  const built = pile([1100, 300, null]);
+  const stacks = markStacks(built.project, built.scheme, null, viewOf());
+  assert.deepEqual(
+    built.ids.map((id) => markDimensions(findMark(built.project, id)).heightAboveFloor),
+    [1100, 300, null],
+    "высота пропала из метки, а не только с плана",
+  );
+  // Порядок стопки её по-прежнему решает: метка без высоты — у точки, дальше
+  // по возрастанию.
+  assert.deepEqual(
+    built.ids
+      .map((id) => stacks.get(id))
+      .sort((a, b) => a.index - b.index)
+      .map((shift) => shift.heightMm),
+    [null, 300, 1100],
+  );
+});
+
+test("ни у одинокой метки, ни у далёких соседей на плане нет ни одного числа высоты", () => {
   const built = pile([300]);
   const { ctx, log } = recorder();
   drawScheme(ctx, { project: built.project, scheme: built.scheme, filter: null, view: viewOf(), selectedIds: [] });
@@ -321,15 +345,15 @@ test("счётчика нет ни при каком числе меток: де
     return point.x.toFixed(6) + ":" + point.y.toFixed(6);
   });
   assert.equal(new Set(places).size, 10, "знаки стопки встали друг на друга");
-  // Подписи — десять обозначений и десять высот, и ни одного «×10».
+  // Подписи — десять обозначений и ни одного «×10». Высот на плане нет (G188).
   const { ctx, log } = recorder();
   drawScheme(ctx, { project: built.project, scheme: built.scheme, filter: null, view, selectedIds: [] });
   const shown = texts(log);
   for (let index = 1; index <= 10; index += 1) {
     assert.ok(shown.includes("Р" + index), "обозначение Р" + index + " пропало с плана");
-    assert.ok(shown.includes("h=" + 100 * index), "высота " + 100 * index + " пропала с плана");
   }
   assert.ok(!shown.some((value) => value.includes("×")), "на плане появился счётчик: " + shown.join(" "));
+  assert.deepEqual(shown.filter((value) => value.startsWith("h=")), [], "в гребне щитка осталась подпись высоты");
 });
 
 // ——— клик там, где нарисовано ——————————————————————————————————————————
@@ -366,21 +390,21 @@ test("стопка считается по тому же фильтру, что 
 
 // ——— подписи по-прежнему разводятся ———————————————————————————————————
 
-test("подписи стопки не налезают ни на знаки, ни на высоты", () => {
+test("подписи стопки не налезают на знаки", () => {
   const built = pile([1100, 300, null]);
   const view = viewOf();
   const stacks = markStacks(built.project, built.scheme, null, view);
-  const sizes = { font: 12, gap: MARK_SIZE * 1.5, radius: MARK_SIZE };
   const boxes = renderInternals
     .labelTargets(built.project, built.scheme, null)
     .map((target) => labelBounds(labelBox(built.project, built.scheme, target, view, null)));
   assert.equal(boxes.length, 3);
   assert.equal(new Set(boxes.map((box) => box.x + ":" + box.y)).size, 3, "две подписи встали в одно место");
 
+  // Прямоугольников высот в занятых местах больше нет (G188) — проверяется
+  // только то, что осталось: подпись обходит знаки.
   for (const id of built.ids) {
     const mark = findMark(built.project, id);
     const glyph = planToScreen(markStackPoints(mark, stacks)[0], built.scheme, view);
-    const height = renderInternals.markStackHeightPlanBox(mark, stacks.get(id), sizes, built.scheme);
     for (const box of boxes) {
       const onGlyph =
         box.x < glyph.x + MARK_SIZE &&
@@ -388,9 +412,6 @@ test("подписи стопки не налезают ни на знаки, н
         box.y < glyph.y + MARK_SIZE &&
         glyph.y - MARK_SIZE < box.y + box.height;
       assert.ok(!onGlyph, "подпись легла на знак стопки");
-      const onHeight =
-        box.x < height.x + height.width && height.x < box.x + box.width && box.y < height.y + height.height && height.y < box.y + box.height;
-      assert.ok(!onHeight, "подпись легла на подписанную высоту");
     }
   }
 });
@@ -456,8 +477,8 @@ test("G68: у объекта прежнего формата стопка не �
     old.marks.map((mark) => ({ ...mark })),
     "метка старого объекта изменилась",
   );
-  // Высоты у них нет, и выдумывать её нельзя: подписан вопрос.
+  // И на плане у них нет ни числа, ни вопроса: подписи высот сняты (G188).
   const { ctx, log } = recorder();
   drawScheme(ctx, { project: opened, scheme, filter: null, view, selectedIds: [] });
-  assert.deepEqual(texts(log).filter((value) => value.startsWith("h=")), ["h=?", "h=?"]);
+  assert.deepEqual(texts(log).filter((value) => value.startsWith("h=")), []);
 });

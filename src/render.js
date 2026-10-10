@@ -2441,9 +2441,6 @@ const MARK_STACK_REACH_RATIO = 1;
 // блок в одной рамке, а блок — это другое: там метки стоят рядом на самом
 // плане. Просвет и тонкая линия к настоящей точке говорят «это одно место».
 const MARK_STACK_STEP_RATIO = 3;
-// Подпись высоты стоит от центра знака на столько радиусов (её ближний край).
-// Край знака с обводкой — 1,11 радиуса, остаток — воздух.
-const MARK_STACK_HEIGHT_GAP = 1.35;
 
 // В стопку идут только **одиночные точки**. Линия видна сама по себе: её трек
 // уходит от вершины в сторону, и под чужим знаком она не пропадает. Плашка
@@ -2579,6 +2576,8 @@ function markStackPlaceAll(project, scheme, filter, sizes) {
         at: { x: px.x / width, y: px.y / height },
         dir: step,
         stepPx,
+        // Высота знака на плане не подписана (G188), но порядок в стопке
+        // решает она — поле остаётся ключом этого порядка.
         heightMm: markStackHeight(mark),
       });
     });
@@ -2623,42 +2622,17 @@ export function markStackPoints(mark, stacks) {
   return points.map((point) => ({ x: point.x + shift.at.x, y: point.y + shift.at.y }));
 }
 
-/**
- * Подпись высоты у знака в стопке — в пикселях плана.
- *
- * Заказчик просил именно её: «сразу на каких высотах», чтобы не гадать, какая
- * из совпавших меток верхняя. Высота **не выдумывается**: у метки без заданной
- * высоты в подписи стоит вопрос, как на развёртке такая метка стоит отдельной
- * полосой, а не на придуманном уровне (таск 129).
- *
- * Стоит подпись **поперёк стопки**: вдоль неё места нет — там следующий знак.
- */
-function markStackHeightPlanBox(mark, shift, sizes, scheme) {
-  if (!shift) return null;
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
-  const value =
-    shift.heightMm === null
-      ? strings.marks.stackHeightUnknown
-      : text("marks.stackHeight", { mm: Math.round(shift.heightMm) });
-  const cx = mark.points[0].x * width + shift.px.x;
-  const cy = mark.points[0].y * height + shift.px.y;
-  const gap = sizes.radius * MARK_STACK_HEIGHT_GAP;
-  const span = Math.max(sizes.font * 0.8, value.length * sizes.font * LABEL_CHAR_RATIO);
-  const tall = sizes.font * 1.2;
-  // Стопка идёт по горизонтали — подпись над знаком, иначе сбоку. У наклонной
-  // стены перпендикуляр наклонный, и выбирается та ось, вдоль которой стопка
-  // уезжает меньше.
-  const across = Math.abs(shift.dir.x) > Math.abs(shift.dir.y);
-  if (across) {
-    return { text: value, align: "center", x: cx - span / 2, y: cy - gap - tall, at: { x: cx, y: cy - gap - tall / 2 }, width: span, height: tall };
-  }
-  // **Слева, а не справа.** Справа от метки стоит её обозначение — заказчик
-  // просил именно так («не сверху справа, а просто справа»), и отнимать у
-  // подписи её сторону ради числа нельзя: подпись главная. Заодно справа
-  // живёт ручка «+», и соседняя метка по ней встаёт не поверх числа.
-  return { text: value, align: "right", x: cx - gap - span, y: cy - tall / 2, at: { x: cx - gap, y: cy }, width: span, height: tall };
-}
+// ——— высота в стопке больше не подписывается (G188) ———————————————————
+//
+// Таск 131 рисовал у каждого знака стопки бледное «h=900» — так заказчик
+// просил тогда: «сразу на каких высотах». Посмотрев на готовый план, он эту
+// часть своего же требования снял: «на схеме при расстановке в колонку не
+// указывай их высоту». Числа загромождали план, а стопка он оставил.
+//
+// Высота не потерялась: она лежит в метке (`heightAboveFloor`), видна в
+// карточке метки и в строке списка («В 900 мм»), а на развёртке стен у каждой
+// метки подписана рядом со знаком. Порядок стопки её по-прежнему решает —
+// `heightMm` в записи стопки остался ключом порядка, просто не рисуется.
 
 // ——— подписи —————————————————————————————————————————————————————————
 
@@ -3206,8 +3180,9 @@ function labelPlaceAll(project, scheme, filter, sizes, stacks) {
   // просится строка: без этого «Р6» легла бы на соседнюю розетку.
   //
   // Места занимают знаки **там, где они нарисованы**: уехавший в стопку знак
-  // освобождает своё прежнее место и занимает новое. Вместе с ним занята и
-  // подпись его высоты — иначе обозначение соседней метки легло бы на «h=900».
+  // освобождает своё прежнее место и занимает новое. Подписи высот в этом
+  // списке были до G188 — теперь их на плане нет, и место рядом со знаком
+  // снова свободно для обозначений.
   for (const mark of visibleMarks(project, scheme, filter)) {
     for (const point of markStackPoints(mark, stacks)) {
       placed.push({
@@ -3217,8 +3192,6 @@ function labelPlaceAll(project, scheme, filter, sizes, stacks) {
         height: sizes.radius * 2,
       });
     }
-    const height = markStackHeightPlanBox(mark, stacks ? stacks.get(mark.id) : null, sizes, scheme);
-    if (height) placed.push({ x: height.x, y: height.y, width: height.width, height: height.height });
   }
 
   for (const entry of entries) {
@@ -4284,17 +4257,10 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected, stacks) {
 
 // ——— стопка совпавших меток: отрисовка ————————————————————————————————
 //
-// Два прохода и ни одного нового способа рисовать знак: сами знаки рисует тот
-// же `drawMarkBody`, уже по смещённой точке. Здесь только то, чего без стопки
-// не бывает: тонкая линия от настоящей точки к уехавшим знакам и подпись
-// высоты у каждого.
-
-// Пиксель плана в экранный — для того, кто считал в пикселях плана, а не в
-// долях. Та же формула, что у `planToScreen`, только доля уже умножена на
-// размер плана.
-function planPxToScreen(at, view) {
-  return { x: view.offsetX + at.x * view.zoom, y: view.offsetY + at.y * view.zoom };
-}
+// Ни одного нового способа рисовать знак: сами знаки рисует тот же
+// `drawMarkBody`, уже по смещённой точке. Здесь только то, чего без стопки не
+// бывает, — тонкая линия от настоящей точки к уехавшим знакам. Подписей высот
+// у знаков больше нет (G188), и второй проход по стопке отпал вместе с ними.
 
 /**
  * Спина стопки: волосяная линия от настоящей точки метки к дальнему знаку.
@@ -4324,36 +4290,6 @@ function drawMarkStackSpines(ctx, project, scheme, view, marks, stacks) {
   ctx.restore();
 }
 
-/**
- * Высота над полом у каждого знака в стопке — то, ради чего заказчик стопку и
- * выбрал: «сразу на каких высотах». Рисуется поверх знаков и под подписями:
- * раскладка подписей считает эти прямоугольники занятыми, поэтому обозначение
- * соседней метки на число не налезает.
- */
-function drawMarkStackHeights(ctx, project, scheme, view, marks, stacks) {
-  if (!stacks || stacks.size === 0) return;
-  const sizes = labelPlanSizes(view);
-  const font = labelFontSize(view);
-  ctx.save();
-  ctx.font = drawFont(font, 600, view.fontFamily);
-  ctx.textBaseline = "middle";
-  ctx.lineJoin = "round";
-  ctx.lineWidth = Math.max(2, font * 0.3);
-  for (const mark of marks) {
-    const box = markStackHeightPlanBox(mark, stacks.get(mark.id), sizes, scheme);
-    if (!box) continue;
-    const at = planPxToScreen(box.at, view);
-    ctx.textAlign = box.align;
-    // Обводка-подложка — та же, что у подписи: число читается и поверх тёмных
-    // линий плана, и поверх самого знака.
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-    ctx.strokeText(box.text, at.x, at.y);
-    ctx.fillStyle = DRAWING_CAPTION;
-    ctx.fillText(box.text, at.x, at.y);
-  }
-  ctx.textAlign = "left";
-  ctx.restore();
-}
 
 // Ручки «+» рисуются только у выделенной точки. `color` — цвет типа, который
 // эта ручка поставит: в смешанном блоке она красится в цвет ставящейся метки,
@@ -5262,8 +5198,6 @@ export function drawScheme(ctx, {
   for (const mark of shown) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id), stacks);
   }
-  // Высоты — поверх знаков: число у знака, а не под ним.
-  drawMarkStackHeights(ctx, project, scheme, state, shown, stacks);
   // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
   // дугу разбора. `links` — либо готовый кадр (его считает холст из того же
   // промежуточного объекта, что и метки), либо `true`: посчитать самому. Так
@@ -5311,7 +5245,6 @@ export function drawScheme(ctx, {
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 export const renderInternals = {
   shapeGeometry,
-  markStackHeightPlanBox,
   MARK_STACK_REACH_RATIO,
   MARK_STACK_STEP_RATIO,
   outlineCenter,
