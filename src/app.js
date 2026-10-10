@@ -71,7 +71,7 @@ const appState = {
   //
   // Умолчание — показаны: ради этого таск и затеян («что бы схема была уже
   // живая»), а отметка нужна тому, кто хочет прежний лист со знаками.
-  elevationIcons: true,
+  elevationViews: true,
   // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
   // встречать пользователя дугами поверх плана никто не просил.
   linksShown: false,
@@ -111,7 +111,7 @@ export const DRAWING_SETTING = "schemeDrawingShown";
 // Полоса развёртки выделенной стены — третий выключатель того же ряда.
 export const ELEVATION_SETTING = "schemeElevationShown";
 // Изображения объектов на развёртке — такая же личная настройка браузера.
-export const ELEVATION_ICONS_SETTING = "elevationIcons";
+export const ELEVATION_VIEWS_SETTING = "elevationViews";
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -590,9 +590,9 @@ function wireSections() {
       if (saved === false) setState({ elevationShown: false });
     })
     .catch(() => {});
-  Promise.resolve(getSetting(ELEVATION_ICONS_SETTING))
+  Promise.resolve(getSetting(ELEVATION_VIEWS_SETTING))
     .then((saved) => {
-      if (saved === false) setState({ elevationIcons: false });
+      if (saved === false) setState({ elevationViews: false });
     })
     .catch(() => {});
   // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище

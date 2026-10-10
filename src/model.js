@@ -727,61 +727,61 @@ const TEMPLATE_CATEGORIES = [
 const TEMPLATE_TYPES = [
   // Свет. Семь точечных типов идут без своей формы и берут круг с крестом у
   // категории — тот самый повтор, на который заказчик согласился сознательно.
-  { category: "light", code: "Т", name: strings.types.spot, sizes: { length: 90, width: 90 } },
-  { category: "light", code: "С", name: strings.types.lamp, sizes: { length: 200, width: 120 } },
-  { category: "light", code: "ПК", name: strings.types.bedLight, sizes: { length: 40, width: 40 } },
+  { category: "light", code: "Т", name: strings.types.spot, sizes: { length: 90, width: 90, depth: 0 } },
+  { category: "light", code: "С", name: strings.types.lamp, sizes: { length: 200, width: 120, depth: 90 } },
+  { category: "light", code: "ПК", name: strings.types.bedLight, sizes: { length: 40, width: 40, depth: 15 } },
   // Линейные типы света разведены начертанием: цвет в категории общий, и на
   // чёрно-белой распечатке линию от линии отличает только рисунок.
-  { category: "light", code: "ТР", name: strings.types.track, kind: "line", lineStyle: "double", sizes: { length: 60, width: 60 } },
-  { category: "light", code: "ПС", name: strings.types.backlight, sizes: { length: 40, width: 40 } },
+  { category: "light", code: "ТР", name: strings.types.track, kind: "line", lineStyle: "double", sizes: { length: 60, width: 60, depth: 60 } },
+  { category: "light", code: "ПС", name: strings.types.backlight, sizes: { length: 40, width: 40, depth: 15 } },
   // Лента своего начертания не имеет: берёт категорийное, то есть сплошную.
-  { category: "light", code: "Л", name: strings.types.strip, kind: "line", sizes: { length: 10, width: 10 } },
-  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, kind: "line", lineStyle: "dashed", sizes: { length: 10, width: 10 } },
+  { category: "light", code: "Л", name: strings.types.strip, kind: "line", sizes: { length: 10, width: 10, depth: 10 } },
+  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, kind: "line", lineStyle: "dashed", sizes: { length: 10, width: 10, depth: 10 } },
   // Выключатели: число каналов — число клавиш, связь с нагрузкой получает номер
   // клавиши. Каналы приехали из объекта заказчика вместе со справочником.
-  { category: "switches", code: "В", name: strings.types.switch, shape: "square", channels: 1, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
-  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
-  { category: "sockets", code: "Р", name: strings.types.socket, shape: "circle-socket", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
-  { category: "climate", code: "Б", name: strings.types.breezer, shape: "dome-dot", sizes: { length: 600, width: 350, heightAboveFloor: 2100 } },
-  { category: "climate", code: "К", name: strings.types.conditioner, shape: "circle-thermo", sizes: { length: 900, width: 300, heightAboveFloor: 2300 } },
-  { category: "network", code: "W", name: strings.types.wifi, shape: "circle-wave", sizes: { length: 120, width: 120, heightAboveFloor: 2400 } },
-  { category: "intercom", code: "Д", name: strings.types.intercom, sizes: { length: 150, width: 200, heightAboveFloor: 1500 } },
-  { category: "curtains", code: "КШ", name: strings.types.curtainRail, sizes: { length: 400, width: 120, heightAboveFloor: 2400 } },
-  { category: "light", code: "ППл", name: strings.types.floorLight, sizes: { length: 40, width: 40, heightAboveFloor: 100 } },
-  { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave", sizes: { length: 40, width: 40, heightAboveFloor: 2400 } },
-  { category: "light", code: "ЛЮ", name: strings.types.chandelier, sizes: { length: 500, width: 400 } },
-  { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
-  { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2, icon: "switchToggle", sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
-  { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain", icon: "nightLight", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
+  { category: "switches", code: "В", name: strings.types.switch, shape: "square", channels: 1, sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
+  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2, sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
+  { category: "sockets", code: "Р", name: strings.types.socket, shape: "circle-socket", sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 300 } },
+  { category: "climate", code: "Б", name: strings.types.breezer, shape: "dome-dot", sizes: { length: 600, width: 350, depth: 200, heightAboveFloor: 2100 } },
+  { category: "climate", code: "К", name: strings.types.conditioner, shape: "circle-thermo", sizes: { length: 900, width: 300, depth: 200, heightAboveFloor: 2300 } },
+  { category: "network", code: "W", name: strings.types.wifi, shape: "circle-wave", sizes: { length: 120, width: 120, depth: 35, heightAboveFloor: 2400 } },
+  { category: "intercom", code: "Д", name: strings.types.intercom, sizes: { length: 150, width: 200, depth: 25, heightAboveFloor: 1500 } },
+  { category: "curtains", code: "КШ", name: strings.types.curtainRail, sizes: { length: 400, width: 120, depth: 120, heightAboveFloor: 2400 } },
+  { category: "light", code: "ППл", name: strings.types.floorLight, sizes: { length: 40, width: 40, depth: 15, heightAboveFloor: 100 } },
+  { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave", sizes: { length: 40, width: 40, depth: 15, heightAboveFloor: 2400 } },
+  { category: "light", code: "ЛЮ", name: strings.types.chandelier, sizes: { length: 500, width: 400, depth: 300 } },
+  { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1, sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
+  { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2, view: "switchToggle", sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
+  { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain", view: "nightLight", sizes: { length: 80, width: 80, depth: 25, heightAboveFloor: 300 } },
   // Розетка 380: три отверстия по кругу против двух у обычной — на плане их
   // не спутать.
-  { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
-  { category: "sensors", code: "ДП", name: strings.types.presence, shape: "circle-fan", sizes: { length: 70, width: 70, heightAboveFloor: 2400 } },
-  { category: "appliances", code: "СУШ", name: strings.types.dryer, sizes: { length: 500, width: 800, heightAboveFloor: 900 } },
-  { category: "panel", code: "Щ", name: strings.types.panel, shape: "square-hatch", sizes: { length: 450, width: 600, heightAboveFloor: 1400 } },
-  { category: "climate", code: "ВЫТ", name: strings.types.hood, shape: "circle-fill", sizes: { length: 600, width: 350, heightAboveFloor: 1700 } },
-  { category: "light", code: "Бр", name: strings.types.sconce, sizes: { length: 150, width: 250, heightAboveFloor: 1800 } },
-  { category: "appliances", code: "ДЭП", name: strings.types.cabinetDoor, sizes: { length: 400, width: 500, heightAboveFloor: 600 } },
-  { category: "network", code: "ПУ", name: strings.types.controlPanel, shape: "square-jack", sizes: { length: 120, width: 120, heightAboveFloor: 1400 } },
-  { category: "climate", code: "ОВ", name: strings.types.dehumidifier, shape: "drop-dot", sizes: { length: 400, width: 600, heightAboveFloor: 0 } },
-  { category: "network", code: "ВП", name: strings.types.ethernet, shape: "square-cross", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
-  { category: "cinema", code: "РЕС", name: strings.types.receiver, sizes: { length: 430, width: 80, heightAboveFloor: 400 } },
-  { category: "cinema", code: "ПРО", name: strings.types.projector, shape: "diamond-dot", sizes: { length: 300, width: 120, heightAboveFloor: 2400 } },
-  { category: "network", code: "УК", name: strings.types.smartSpeaker, shape: "circle-antenna", sizes: { length: 150, width: 180, heightAboveFloor: 900 } },
+  { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple", sizes: { length: 80, width: 80, depth: 12, heightAboveFloor: 300 } },
+  { category: "sensors", code: "ДП", name: strings.types.presence, shape: "circle-fan", sizes: { length: 70, width: 70, depth: 25, heightAboveFloor: 2400 } },
+  { category: "appliances", code: "СУШ", name: strings.types.dryer, sizes: { length: 500, width: 800, depth: 110, heightAboveFloor: 900 } },
+  { category: "panel", code: "Щ", name: strings.types.panel, shape: "square-hatch", sizes: { length: 450, width: 600, depth: -30, heightAboveFloor: 1400 } },
+  { category: "climate", code: "ВЫТ", name: strings.types.hood, shape: "circle-fill", sizes: { length: 600, width: 350, depth: 500, heightAboveFloor: 1700 } },
+  { category: "light", code: "Бр", name: strings.types.sconce, sizes: { length: 150, width: 250, depth: 120, heightAboveFloor: 1800 } },
+  { category: "appliances", code: "ДЭП", name: strings.types.cabinetDoor, sizes: { length: 400, width: 500, depth: 20, heightAboveFloor: 600 } },
+  { category: "network", code: "ПУ", name: strings.types.controlPanel, shape: "square-jack", sizes: { length: 120, width: 120, depth: 12, heightAboveFloor: 1400 } },
+  { category: "climate", code: "ОВ", name: strings.types.dehumidifier, shape: "drop-dot", sizes: { length: 400, width: 600, depth: 250, heightAboveFloor: 0 } },
+  { category: "network", code: "ВП", name: strings.types.ethernet, shape: "square-cross", sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 300 } },
+  { category: "cinema", code: "РЕС", name: strings.types.receiver, sizes: { length: 430, width: 80, depth: 300, heightAboveFloor: 400 } },
+  { category: "cinema", code: "ПРО", name: strings.types.projector, shape: "diamond-dot", sizes: { length: 300, width: 120, depth: 250, heightAboveFloor: 2400 } },
+  { category: "network", code: "УК", name: strings.types.smartSpeaker, shape: "circle-antenna", sizes: { length: 150, width: 180, depth: 90, heightAboveFloor: 900 } },
   // Вертикальный кусок ленты ставится одной точкой, а не тянется по плану.
-  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical", sizes: { length: 40, width: 600, heightAboveFloor: 900 } },
-  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
-  { category: "sensors", code: "ДД", name: strings.types.motion, shape: "triangle-dot", sizes: { length: 70, width: 70, heightAboveFloor: 2200 } },
-  { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split", sizes: { length: 70, width: 40, heightAboveFloor: 2000 } },
-  { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop", sizes: { length: 60, width: 60, heightAboveFloor: 0 } },
-  { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross", icon: "panelBox", sizes: { length: 300, width: 400, heightAboveFloor: 1400 } },
-  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 100, heightAboveFloor: 0 } },
-  { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, icon: "waterOutlet", sizes: { length: 60, width: 60, heightAboveFloor: 600 } },
-  { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", icon: "drain", sizes: { length: 110, width: 110, heightAboveFloor: 100 } },
-  { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, heightAboveFloor: 400 } },
-  { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander", sizes: { length: 40, width: 40, heightAboveFloor: 100 } },
-  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring", sizes: { length: 300, width: 60, heightAboveFloor: 1600 } },
-  { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring", sizes: { length: 120, width: 80, heightAboveFloor: 2300 } },
+  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical", sizes: { length: 40, width: 600, depth: 15, heightAboveFloor: 900 } },
+  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3, sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
+  { category: "sensors", code: "ДД", name: strings.types.motion, shape: "triangle-dot", sizes: { length: 70, width: 70, depth: 30, heightAboveFloor: 2200 } },
+  { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split", sizes: { length: 70, width: 40, depth: 15, heightAboveFloor: 2000 } },
+  { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop", sizes: { length: 60, width: 60, depth: 15, heightAboveFloor: 0 } },
+  { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross", view: "panelBox", sizes: { length: 300, width: 400, depth: 90, heightAboveFloor: 1400 } },
+  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 100, depth: 100, heightAboveFloor: 0 } },
+  { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, view: "waterOutlet", sizes: { length: 60, width: 60, depth: 20, heightAboveFloor: 600 } },
+  { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", view: "drain", sizes: { length: 110, width: 110, depth: 40, heightAboveFloor: 100 } },
+  { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, depth: 60, heightAboveFloor: 400 } },
+  { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander", sizes: { length: 40, width: 40, depth: 10, heightAboveFloor: 100 } },
+  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring", sizes: { length: 300, width: 60, depth: 25, heightAboveFloor: 1600 } },
+  { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring", sizes: { length: 120, width: 80, depth: 70, heightAboveFloor: 2300 } },
 ];
 
 function newId() {
@@ -834,15 +834,25 @@ export function defaultTemplate() {
     blockMode: "each",
     // Каналы: у выключателей столько, сколько клавиш, у остальных один.
     channels: type.channels || TYPE_CHANNELS_DEFAULT,
-    // Имя значка развёртки — только там, где форма знака двусмысленна и по
+    // Имя изображения объекта — только там, где форма знака двусмысленна и по
     // ней не угадать (таск 135): ночник и выход канализации делят
     // `circle-drain`, осушитель и водорозетка — `drop-dot`. Остальные типы
-    // поля не получают и берут значок по форме: так же, как его возьмёт
+    // поля не получают и берут изображение по форме: так же, как его возьмёт
     // объект, размеченный до этого таска.
-    ...(type.icon ? { icon: type.icon } : {}),
+    ...(type.view ? { view: type.view } : {}),
     // Умолчания размеров (G192): «для меток надо бы прописать дефолтные
     // размеры, которые уже можно будет править». Метка их наследует, пока не
     // задала своё, и развёртка рисует вещь этим размером.
+    //
+    // **Выступ от стены** (таск 139, G197) заполнен у всех сорока семи типов.
+    // Числа взяты у того, что ставят в квартире, и держатся трёх правил:
+    // механизм в подрозетнике выходит наружу рамкой — десять миллиметров
+    // (розетки, выключатели, панели); настенный прибор выступает своим
+    // корпусом — внутренний блок сплита и бризер по двести, бра сто двадцать,
+    // колонка девяносто; потолочное и встроенное выступа от стены не имеет —
+    // точечный светильник ноль, встраиваемый щит **минус тридцать**: он
+    // утоплен в нишу, и это то же измерение в другую сторону, а не отдельное
+    // свойство.
     ...(type.sizes ? { sizes: type.sizes } : {}),
     order: index,
   }));
@@ -1824,8 +1834,30 @@ export const MARK_DIMENSION_UNIT = "mm";
 // не бывает, и молча уехать в файл.
 export const MARK_DIMENSION_MAX = 100000;
 
-// Порядок здесь — порядок полей в окне и в подписи кнопки.
-export const MARK_DIMENSION_FIELDS = ["length", "width", "heightAboveFloor"];
+/**
+ * Порядок здесь — порядок полей в окне и в подписи кнопки.
+ *
+ * **Выступ от стены** (`depth`) добавлен в таске 139, требование G197:
+ * «глубину добавляй». Три прежних размера все про плоскость стены — длина
+ * поперёк, ширина вдоль, высота над полом; четвёртого, перпендикулярного
+ * листу, не было ни у чего.
+ *
+ * Назван он выступом, а не глубиной, нарочно: «глубина» в этой сборке уже
+ * занята объектом чертежа, где она означает размер **по полу** (столешница
+ * глубиной 600). Два разных числа под одним словом в одном окне читались бы
+ * как одно, и ошибку заметили бы на монтаже.
+ *
+ * **Утопленное — отрицательный выступ**, а не отдельное свойство. Щит в нише
+ * выступает на минус тридцать: это то же измерение, та же ось и тот же ноль
+ * (плоскость стены), просто в другую сторону. Отдельный признак «утоплено»
+ * потребовал бы двух полей вместо одного, двух проверок и ответа на вопрос,
+ * что значит «утоплено на −10». Поэтому `depth` — единственное поле, которое
+ * принимает отрицательное; остальные три по-прежнему не меньше нуля.
+ */
+export const MARK_DIMENSION_FIELDS = ["length", "width", "depth", "heightAboveFloor"];
+
+// Выступ — единственный размер, у которого бывает минус: утопленное.
+export const MARK_DIMENSION_SIGNED = ["depth"];
 
 /**
  * Одно значение размера.
@@ -1837,13 +1869,14 @@ export const MARK_DIMENSION_FIELDS = ["length", "width", "heightAboveFloor"];
  *
  * Запятая принимается наравне с точкой: «1,5» набирают чаще, чем «1.5».
  */
-export function markDimensionValue(value) {
+export function markDimensionValue(value, field) {
   if (value === null || value === undefined) return null;
   const raw = typeof value === "string" ? value.trim().replace(",", ".") : value;
   if (raw === "") return null;
   const number = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(number) || number < 0) throw modelError("badDimension");
-  if (number > MARK_DIMENSION_MAX) {
+  const signed = MARK_DIMENSION_SIGNED.includes(field);
+  if (!Number.isFinite(number) || (!signed && number < 0)) throw modelError("badDimension");
+  if (Math.abs(number) > MARK_DIMENSION_MAX) {
     throw modelError("dimensionTooBig", { max: MARK_DIMENSION_MAX, unit: strings.markSizes.unit });
   }
   return number;
@@ -1895,7 +1928,17 @@ export function markSizes(project, mark) {
   return result;
 }
 
-/** Умолчания размеров у типа. У типа без них — три `null`. */
+/**
+ * Имя изображения объекта у типа. Читается **по обоим именам**: поле
+ * называлось `icon`, пока изображения звались значками (таск 135), и объект,
+ * заведённый до переименования, обязан открыться как закрывался.
+ */
+export function typeObjectView(type) {
+  if (!type) return null;
+  return type.view || type.icon || null;
+}
+
+/** Умолчания размеров у типа. У типа без них — четыре `null`. */
 export function typeSizes(type) {
   const sizes = type && type.sizes ? type.sizes : null;
   const values = {};
@@ -1918,7 +1961,7 @@ export function setTypeSizes(project, typeId, patch) {
   const next = { ...typeSizes(type) };
   for (const field of MARK_DIMENSION_FIELDS) {
     if (!patch || !Object.prototype.hasOwnProperty.call(patch, field)) continue;
-    next[field] = markDimensionValue(patch[field]);
+    next[field] = markDimensionValue(patch[field], field);
   }
   const kept = {};
   for (const field of MARK_DIMENSION_FIELDS) {
@@ -2005,7 +2048,7 @@ export function updateMark(project, markId, patch) {
   // попадают в метку, нет: `setMarkDimensions` идёт через эту же функцию.
   for (const field of MARK_DIMENSION_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(changes, field)) {
-      changes[field] = markDimensionValue(changes[field]);
+      changes[field] = markDimensionValue(changes[field], field);
     }
   }
   const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, ...changes } : mark));
@@ -4866,7 +4909,11 @@ export function wallElevation(project, wallId, side = "left") {
       heightMm: sizes.heightAboveFloor,
       sizeMm: { width: sizes.length, height: sizes.width },
       heightOwn: sizes.heightAboveFloorOwn,
-      icon: type && type.icon ? type.icon : null,
+      // Имя изображения объекта. Поле переименовано в таске 139 (`icon` →
+      // `view`: это не значок, а упрощённое изображение самой вещи) и
+      // читается по обоим именам — объект, заведённый между тасками 135 и
+      // 139, не теряет своих пяти уточнённых изображений.
+      view: typeObjectView(type),
       // Группа едет с меткой на развёртку (таск 135, G190 и G191): там метки
       // одной группы встают вплотную, как подрозетники в стене, и получают
       // одну отметку высоты на всех. Решает это отрисовка — здесь только

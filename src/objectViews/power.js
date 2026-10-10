@@ -1,0 +1,77 @@
+// Изображения объектов на развёртке: розетки, выключатели, розетки данных,
+// щиты.
+//
+// Добавить изображение — дописать запись сюда (G187, уточнение заказчика: «не
+// зашивай все в один файл, что бы можно было легко менять и расширять
+// список»). Больше ничего править не надо: `shapes` — это и есть привязка,
+// реестр читает её сам.
+//
+// `parts` — **описание данными** (G198): список примитивов в долях своего
+// прямоугольника. Рисует их один интерпретатор в реестре, объёмный вид потом
+// прочитает те же записи.
+//
+// `mm` — размер вещи на случай, когда у типа не задан свой: умолчания живут у
+// типа (G192), здесь последний рубеж для типа, заведённого руками.
+import { viewCircle, viewKeys, viewLine, viewParts, viewPlate, viewRect } from "./kit.js";
+
+export const VIEWS_POWER = {
+  // Розетка: плашка, контактные отверстия и заземляющие скобы.
+  socket: {
+    shapes: ["circle-socket"],
+    mm: { width: 80, height: 80 },
+    parts: viewParts(
+      viewPlate(),
+      viewCircle(0, 0, 0.3),
+      viewCircle(-0.12, 0, 0.055),
+      viewCircle(0.12, 0, 0.055),
+      viewLine(-0.3, -0.19, -0.3, 0.19),
+      viewLine(0.3, -0.19, 0.3, 0.19),
+    ),
+  },
+  // Трёхфазная: три отверстия по кругу — на развёртке так же, как на плане.
+  socket380: {
+    shapes: ["circle-triple"],
+    mm: { width: 80, height: 80 },
+    parts: viewParts(
+      viewPlate(),
+      viewCircle(0, 0, 0.3),
+      [-Math.PI / 2, Math.PI / 6, (Math.PI * 5) / 6].map((angle) =>
+        viewCircle(Math.cos(angle) * 0.14, Math.sin(angle) * 0.14, 0.055),
+      ),
+    ),
+  },
+  // Выключатели: клавиш столько, сколько каналов. Это и есть разница между
+  // «В», «ВВ» и «ВВВ», когда смотришь на стену.
+  switch1: { shapes: ["square"], mm: { width: 80, height: 80 }, parts: viewParts(viewKeys(1)) },
+  switch2: { shapes: ["square-bar"], mm: { width: 80, height: 80 }, parts: viewParts(viewKeys(2)) },
+  switch3: { shapes: ["square-bar-two"], mm: { width: 80, height: 80 }, parts: viewParts(viewKeys(3)) },
+  // Переключатель: та же плашка, но с указателем направления на клавише.
+  switchToggle: {
+    shapes: ["square-chevron"],
+    mm: { width: 80, height: 80 },
+    parts: viewParts(viewKeys(1), viewLine(-0.1, -0.1, 0.1, 0), viewLine(-0.1, 0.1, 0.1, 0)),
+  },
+  // Розетка данных: плашка с портом и защёлкой.
+  data: {
+    shapes: ["square-cross"],
+    mm: { width: 80, height: 80 },
+    parts: viewParts(
+      viewPlate(),
+      viewRect(-0.18, -0.2, 0.36, 0.34, 0.04),
+      viewLine(-0.06, -0.2, -0.06, -0.3),
+      viewLine(0.06, -0.2, 0.06, -0.3),
+      viewLine(-0.06, -0.3, 0.06, -0.3),
+    ),
+  },
+  // Щит: ящик с дверцей и рядами автоматов.
+  panelBox: {
+    shapes: ["square-hatch", "square-grid"],
+    mm: { width: 450, height: 600 },
+    parts: viewParts(
+      viewPlate(0.02, 0.06),
+      viewLine(-0.24, -0.46, -0.24, 0.46),
+      [0, 1, 2].map((index) => viewLine(-0.16, -0.26 + index * 0.26, 0.4, -0.26 + index * 0.26)),
+      viewCircle(-0.36, 0, 0.05),
+    ),
+  },
+};
