@@ -478,6 +478,40 @@
   flex: 1 1 auto;
 }
 
+/* Имя текущего режима рядом с кнопками (таск 133): холст бывает ещё в обводке
+   помещения и в калибровке, и показывать в эту минуту обе кнопки погашенными —
+   значит показывать состояние, которого не бывает.
+
+   Это **не кнопка**, и выглядеть она кнопкой не должна: нажимать её некуда,
+   она отвечает на «где я». Отсюда и рисунок — заливка без рамки и курсор
+   стрелкой, как у подписи, а не как у кнопки. Урок таска 132 ровно об этом:
+   что говорит о состоянии, то и выглядит состоянием. */
+.tools__modeNow {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  /* Таблетка, а не кнопка. У всех кнопок сборки радиус 6 и рамка; здесь радиус
+     круглый и рамки нет — рисунок сам говорит, что нажимать нечего. */
+  border-radius: 999px;
+  background: rgba(31, 111, 235, 0.22);
+  color: var(--panel-text);
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: default;
+}
+
+/* Перед именем — точка: тот же знак «горит», что у уровней в панели проблем.
+   Он виден и тем, кому синяя заливка на тёмном фоне читается слабо. */
+.tools__modeNow::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
 .ui-btn.is-active {
   background: var(--accent);
   border-color: var(--accent);
@@ -3317,12 +3351,39 @@
   flex-direction: column;
 }
 
+/* Два ряда над полем (таск 133): «Режим» и, только в добавлении, «Добавить».
+   Второй прижат к первому вплотную — это второй уровень одного выбора, а не
+   отдельная часть окна. */
 .workshop__tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 8px;
+}
+
+.workshop__tools--adding {
+  margin-top: -4px;
+}
+
+/* Подпись уровня: она не кнопка и нажиматься не должна — отсюда и приглушённый
+   цвет, и мелкий кегль. Тот же приём, что у подписей «РЕЖИМ» и «ТИП МЕТКИ» в
+   левой колонке: там человек к нему уже привык. */
+.workshop__toolsLabel {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+  margin-right: 2px;
+}
+
+/* Масштаб окна и «Вписать» — не режимы, и стоять в их ряду как равные они не
+   должны: отжимаются вправо. */
+.workshop__view {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Поле чертежа — бумага, а не тёмная панель: чертёж чертят на бумаге, и те же
@@ -4906,6 +4967,18 @@ const strings = {
     mode: "Режим",
     addMode: "Добавление",
     selectModeHint: "Клик выбирает метку: её двигают, правят и удаляют",
+    // Режимы, которые включают не отсюда: обводку помещения — панель
+    // «Помещения», калибровку — строка схемы и панель выгрузки. Своей кнопки
+    // у них в этом ряду нет, но **имя есть** (таск 133): пока ряд показывал
+    // обе кнопки погашенными, панель молчала о том, где человек находится, —
+    // заказчик так и сказал, «не очевидно, что холст переходит в режим
+    // калибровки». Имя стоит рядом с кнопками и само не нажимается: оно
+    // отвечает на «где я», а дверь наружу — соседнее «Выделение» и Esc.
+    mode_room: "Обводка",
+    mode_scale: "Калибровка",
+    modeNow_room: "Сейчас обводится контур помещения: клик — вершина, двойной клик — конец. «Выделение» или Esc — выйти.",
+    modeNow_scale: "Сейчас калибровка масштаба: два клика по концам известного отрезка. «Выделение» или Esc — выйти.",
+    selectModeLeave: "Выйти из текущего режима в выделение (то же делает Esc)",
     kindPointHint: "Тип точечный: клик по плану ставит точку",
     kindLineHint: "Тип линейный: клики рисуют ломаную, двойной клик заканчивает",
     kindCommentHint: "Тип-комментарий: клик по плану ставит плашку с текстом",
@@ -4927,6 +5000,12 @@ const strings = {
     drawingLayer: "Чертёж",
     layersHint:
       "Снимите подложку — разметка идёт по своему чертежу; снимите чертёж — по фотографии. Оба выключателя уходят и в выгрузку: лист показывает то же, что экран.",
+    // Полоса развёртки (таск 133, G185). В выгрузку, в отличие от двух
+    // соседей, не уходит: развёртка на лист идёт своей кнопкой в шапке, а
+    // полоса поверх холста на бумагу не попадала никогда.
+    elevationStrip: "Развёртка выделенной стены",
+    elevationStripHint:
+      "Полоса с развёрткой выезжает поверх плана, когда выделена стена чертежа. Снимите отметку, если размечаете по своему чертежу и задеваете стены мимо меток: стена будет выделяться, а полоса не появится.",
     zoom: "Масштаб",
     zoomIn: "Приблизить",
     zoomOut: "Отдалить",
@@ -5003,6 +5082,12 @@ const strings = {
     draftDropped: "Незаконченный черновик убран: в нём была одна вершина",
     hintRoom:
       "Обводим помещение «{name}»: клик — вершина по стене, двойной клик по первой замыкает контур. Backspace — убрать вершину, Esc — отменить. Направление липнет к ровным углам через 15°, а курсор — к прежним вершинам ломаной по пунктирным направляющим; у курсора виден градус, Alt — рисовать свободно.",
+    // Плашка о входе в обводку (таск 133). Режим включала панель помещений, и
+    // след был один — подсказка над холстом, которую можно свернуть. Та же
+    // история, что была у калибровки, и лечится тем же: `CANVAS_MODE_NOTES`.
+    // Слова нейтральны к имени комнаты: плашку даёт холст, а имя стоит в
+    // подсказке над планом, где рука и работает.
+    modeRoomSaid: "Обводка помещения: клик — вершина по стене, двойной клик по первой замыкает контур. Esc — выйти.",
     outlineTooShort: "Контур помещения — не меньше трёх вершин",
     needRoom: "Сначала выберите помещение, которое обводим",
     deleteOutlineTitle: "Удалить контур помещения?",
@@ -5664,25 +5749,40 @@ const strings = {
     openHint: "Мастерская чертежа: слои, сетка и стены в миллиметрах",
     title: "Чертёж схемы «{name}»",
     close: "Закрыть",
-    // Нулевое занятие: масштаб. Стоит первым и появляется только у подложки
-    // без калибровки — там без него нечего делать, а с ним окно открывается
-    // прямо на нём (дефект D22, требование G183). Заказчик: «чертёж же можно
-    // на основе подложки рисовать» — вот с этого и начинается.
-    toolScale: "Масштаб",
-    toolScaleHint:
+    // ——— первый уровень: чем занят (таск 133, G184) ———
+    //
+    // Слова заказчика: «рисую стены, а как мне выбрать текущую, поправить её
+    // или удалить. Нужен выбор режима — выбор или добавление как для меток».
+    // Ряд из пяти кнопок отвечал сразу на два вопроса, и первый в нём терялся:
+    // «Правку» заказчик не нашёл среди «Стен», «Проёмов» и «Объектов».
+    mode: "Режим",
+    modeSelect: "Выделение",
+    modeSelectHint: "Выделять и двигать: вершина цепочки тянется за ручку, стена — за середину, проём — вдоль своей стены",
+    modeAdd: "Добавление",
+    modeAddHint: "Рисовать новое. Что именно — стены, проёмы или объекты — выбирается строкой ниже",
+    // Масштаб — **режим**, а не шестая кнопка «что рисуем»: он отвечает не на
+    // «что», а на «чем занят» (дефект D22, требование G183). Появляется только
+    // у подложки без калибровки: везде ещё калибровать нечего.
+    modeScale: "Масштаб",
+    modeScaleHint:
       "Задать масштаб плана по известному размеру — здесь же, по той картинке, которую собираетесь обводить",
-    // Два инструмента, и больше в этом окне нет: стены рисуют (G177 —
-    // полилинией) и правят. Проёмы и объекты — таск 126, меток здесь нет вовсе.
+    // Развёртка — свой режим (G185). Слова заказчика: «в режиме правка при
+    // выделении стены сразу появляется развёртка. Пожалуй просмотр развёртки
+    // надо сделать отдельным режимом».
+    modeElevation: "Развёртка",
+    modeElevationHint: "Смотреть развёртку стены: клик по стене — её развёртка полосой поверх плана",
+    elevationNone: "Стена не выделена — щёлкните по стене чертежа",
+    // ——— второй уровень: что добавляем ———
+    //
+    // Порядок — порядок работы, заданный заказчиком (G176): сперва стены,
+    // потом проёмы, потом объекты.
+    adding: "Добавить",
     toolWalls: "Стены",
     toolWallsHint: "Рисовать стены цепочкой: клик — вершина, двойной клик — конец цепочки",
-    // Порядок занятий — порядок работы, заданный заказчиком (G176): сперва
-    // стены, потом проёмы, потом объекты.
     toolOpenings: "Проёмы",
     toolOpeningsHint: "Поставить окно, дверь, проём или арку: покажите на стену — проём сядет в неё серединой под курсор",
     toolObjects: "Объекты",
     toolObjectsHint: "Поставить на пол радиатор, столешницу, колонну: клик — прямоугольник по умолчанию, полоса рисуется цепочкой",
-    toolEdit: "Правка",
-    toolEditHint: "Выделять и двигать: вершина цепочки тянется за ручку, стена — за середину, проём — вдоль своей стены",
     fit: "Вписать",
     layers: "Слои",
     layerPlan: "Подложка",
@@ -5797,6 +5897,10 @@ const strings = {
       "Клик ставит объект серединой под курсор, размеры — по виду. Полоса рисуется цепочкой: клик — вершина, двойной клик — конец. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
     hintEdit:
       "Клик выделяет. Вершина тянется за ручку, стена — за середину, проём — вдоль своей стены, объект — целиком. Delete убирает выделенное, Esc снимает выделение. Ctrl+Z — отмена.",
+    // Развёртка (G185): здесь только смотрят. Про правку в этой подсказке нет
+    // ни слова нарочно — за ней возвращаются в «Выделение».
+    hintElevation:
+      "Клик по стене показывает её развёртку полосой поверх плана. Сторона переключается на самой полосе, крестик её закрывает. Править стены здесь нельзя — для этого «Выделение».",
     chainAdded: "Цепочка из {count} стен",
     originSet: "Начало координат чертежа — середина подложки",
     // Дописывается к известию о замене подложки рядом с `scale.replaceDropped`:
@@ -6473,6 +6577,12 @@ const strings = {
     // Калибровки нет — масштаба на листе нет тоже, и это говорится вслух:
     // молча написать «1:100» значило бы соврать линейке.
     noScaleHint: "Масштаб схемы не задан — в штампе будет «Без масштаба». Откалибруйте план по отрезку.",
+    // Дверь к этой самой калибровке (таск 133). Слова над ней говорили, что
+    // сделать, и не давали, чем: сообщение без кнопки — зеркало кнопки,
+    // похожей на сообщение.
+    noScaleFix: "Задать масштаб плана",
+    noScaleFixHint:
+      "Закроет это окно и переведёт холст в калибровку: два клика по концам известного отрезка и расстояние в метрах. Выбранные формат и множитель не потеряются.",
     tooSmall: "На бумаге подписи мельче 2,5 мм — на листе их не прочитать. Возьмите формат крупнее или уменьшите план.",
     pages: "Листов: {count}",
     stampButton: "Данные для штампа",
@@ -21067,6 +21177,15 @@ const appState = {
   // чертёж, а человек без чертежа не увидит никакой разницы (G68).
   planShown: true,
   drawingShown: true,
+  // Полоса развёртки выделенной стены (таск 133, G185). Выключатель той же
+  // природы, что два выше: выбор глаз, а не свойство объекта.
+  //
+  // Умолчание — показана, и это не забывчивость. На холсте стену нельзя ни
+  // подвинуть, ни поправить — её выделяют ровно затем, чтобы посмотреть
+  // развёртку, другого смысла у клика по стене там нет. Выключатель нужен
+  // тому, кто размечает поверх своего чертежа и не хочет, чтобы полоса
+  // выезжала от промаха мимо метки.
+  elevationShown: true,
   // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
   // встречать пользователя дугами поверх плана никто не просил.
   linksShown: false,
@@ -21103,6 +21222,8 @@ const GUIDES_SETTING = "schemeGuidesShown";
 // Подложка и чертёж: что видно на холсте и что уходит в выгрузку.
 const PLAN_SETTING = "schemePlanShown";
 const DRAWING_SETTING = "schemeDrawingShown";
+// Полоса развёртки выделенной стены — третий выключатель того же ряда.
+const ELEVATION_SETTING = "schemeElevationShown";
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -21557,6 +21678,11 @@ function wireSections() {
       if (saved === false) setState({ drawingShown: false });
     })
     .catch(() => {});
+  Promise.resolve(getSetting(ELEVATION_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ elevationShown: false });
+    })
+    .catch(() => {});
   // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище
   // ответит «показаны».
   Promise.resolve(getSetting(LINKS_SETTING))
@@ -21974,6 +22100,47 @@ function canvasViewOnly() {
 // «Выделение». Включает его панель схем — масштаб принадлежит схеме, и ручка
 // для него стоит там же, где сама схема.
 const CANVAS_MODE_SCALE = "scale";
+
+/**
+ * Режимы, у которых **нет своей кнопки** в ряду «Режим», — и потому о входе в
+ * них говорит плашка (таск 133).
+ *
+ * Корень беды, который таск 133 лечит, а не обходит: ряд «Режим» знал только
+ * выделение и добавление, и в обводке помещения с калибровкой не горела ни
+ * одна кнопка — панель показывала состояние, которого не бывает. Теперь ряд
+ * называет любой режим, а плашка остаётся вторым следом: ряд живёт в левой
+ * колонке, которую на планшете сворачивают, а рука в это время над холстом.
+ *
+ * Объявление висит **на состоянии, а не на дверях**: режим меняют панель схем,
+ * панель помещений, панель выгрузки и клавиши, и каждая новая дверь молчала бы
+ * по-своему. Здесь забыть нельзя.
+ */
+const CANVAS_MODE_NOTES = {
+  room: strings.canvas.modeRoomSaid,
+  scale: strings.scale.started,
+};
+
+/**
+ * Включить калибровку масштаба у схемы — **единственная дверь в режим**.
+ *
+ * Держит её холст, потому что режим его. Зовут её двое: строка схемы (там
+ * кнопка масштаба) и панель выгрузки (там подсказка «масштаб не задан», у
+ * которой до таска 133 двери не было вовсе). Второй такой дороги заводить
+ * нельзя: разойдись они — одна забудет снять выделение, и ручки метки встанут
+ * под рукой, которая целится в точку отрезка.
+ *
+ * Плашку о переходе даёт не она, а подписка на смену `mode`: так говорят о
+ * себе **все** двери, включая клавиши и отмену.
+ */
+function canvasStartScale(schemeId) {
+  canvasApi.setState({
+    schemeId,
+    selectedMarkIds: [],
+    selectedOutlineId: null,
+    editPathId: null,
+    mode: CANVAS_MODE_SCALE,
+  });
+}
 
 // Цвет отрезка калибровки. Он не часть чертежа и ничьим типом не окрашен —
 // поэтому свой, тот же синий, которым холст рисует всё «служебное».
@@ -25286,7 +25453,13 @@ function mountCanvas(host, api) {
     // рисует рука. Черновик подтягивается к новому положению дел здесь, в
     // одном месте, а не на каждой кнопке, которая что-то из этого правит.
     if ("mode" in changed || "activeTypeId" in changed || "project" in changed) canvasSyncDraft(state);
-    if ("mode" in changed) canvasSyncCursor();
+    if ("mode" in changed) {
+      canvasSyncCursor();
+      // Режим, у которого нет своей кнопки, говорит о себе сам — кто бы его ни
+      // включил. См. `CANVAS_MODE_NOTES`.
+      const said = CANVAS_MODE_NOTES[state.mode];
+      if (said) canvasApi.notify(said);
+    }
     // Подгонка пробуется и на правке объекта: у схемы без подложки вписывать
     // до первой стены нечего, и единственный случай, когда «вписать» впервые
     // становится возможным, — появление чертежа. Повторов это не даёт:
@@ -25507,6 +25680,14 @@ function mountCanvasFullscreen(host, api) {
  * регулярно накрывала бы ровно то, ради чего её открыли. Сторона стены живёт
  * в состоянии сеанса рядом с выделением — в объект она не попадает, это
  * взгляд, а не свойство чертежа.
+ *
+ * **Правило показа одно на обе поверхности** (таск 133, G185): полоса не
+ * выезжает сама собой, её показывают, когда попросили. В мастерской просьба —
+ * режим «Развёртка». Здесь просьба — сам клик по стене: на холсте стену
+ * нельзя ни подвинуть, ни поправить, выделяют её ровно затем, чтобы увидеть
+ * развёртку, и второго смысла у этого клика нет. Для того, кто размечает
+ * поверх своего чертежа и ловит полосу промахом мимо метки, есть выключатель
+ * `elevationShown` — рядом с подложкой и чертежом, в разделе «Размеры».
  */
 function mountCanvasElevation(host, api) {
   const strip = createElevationStrip({
@@ -25519,7 +25700,7 @@ function mountCanvasElevation(host, api) {
     const state = api.getState();
     const scheme = canvasScheme(state);
     const project = state.project;
-    if (!project || !scheme || !state.selectedWallId || !canvasNode) {
+    if (!project || !scheme || !state.selectedWallId || !canvasNode || state.elevationShown === false) {
       strip.update({ project, wallId: null });
       return;
     }
@@ -25537,6 +25718,7 @@ function mountCanvasElevation(host, api) {
     if (
       "selectedWallId" in changed ||
       "wallSide" in changed ||
+      "elevationShown" in changed ||
       "project" in changed ||
       "schemeId" in changed ||
       "view" in changed ||
@@ -32277,6 +32459,7 @@ function stampDialog(api, onSaved) {
 
 
 
+
 // Выбор пользователя живёт между открытиями диалога: разбивку и множитель
 // выставляют один раз на объект, а выгружают много раз.
 const exportChoice = {
@@ -32850,6 +33033,29 @@ function exportSchemeDialog(api) {
   const state = getState();
   const scheme = findScheme(state.project, state.schemeId);
   const hint = uiEl("p", { class: "export__hint" });
+  /**
+   * Дверь к калибровке (таск 133).
+   *
+   * Подсказка «масштаб схемы не задан — в штампе будет „Без масштаба“,
+   * откалибруйте план по отрезку» жила здесь с таска 112 и была **сообщением
+   * без кнопки**: человеку говорили, что сделать, и не давали, чем. Зеркало
+   * того же дефекта D22, где кнопка выглядела сообщением.
+   *
+   * Окно при этом закрывается: калибруют на холсте, и держать поверх него
+   * окно выгрузки незачем. Выгрузку открывают заново — это один клик, а
+   * выбранные формат и множитель переживают закрытие (`exportChoice`).
+   */
+  const scaleDoor = uiButton(strings.gost.noScaleFix, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.gost.noScaleFixHint,
+    on: {
+      click: () => {
+        modal.close();
+        canvasStartScale(scheme.id);
+      },
+    },
+  });
+  scaleDoor.hidden = true;
   // Комната, выбранная раньше, могла остаться без контура на этой схеме —
   // тогда лист берётся целиком, а не молча по пустой рамке.
   if (exportAreaRoomId() && !exportRoomArea(state.project, scheme, exportAreaRoomId())) exportChoice.area = "all";
@@ -32902,13 +33108,18 @@ function exportSchemeDialog(api) {
       const plan = gostPlanOf();
       const parts = [gostSheetSizeText(plan.sheet, exportChoice.schemeScale), plan.scaleText];
       // Калибровки нет — в штампе будет «Без масштаба», и сказать об этом надо
-      // до выгрузки: чертёж без масштаба меряют линейкой впустую.
+      // до выгрузки: чертёж без масштаба меряют линейкой впустую. Рядом с этими
+      // словами стоит и дверь к калибровке — сообщение без кнопки оставляло
+      // человека ровно там же, где кнопка, похожая на сообщение (таск 133).
       if (!plan.denominator) parts.push(strings.gost.noScaleHint);
+      scaleDoor.hidden = Boolean(plan.denominator) || !scheme || !scheme.imageId;
       if (plan.tooSmall) parts.push(strings.gost.tooSmall);
       if (exportByRooms()) parts.push(text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }));
       hint.textContent = parts.join(" · ");
       return;
     }
+    // Без листа по ГОСТ масштаб в штампе некуда писать — и дверь ни к чему.
+    scaleDoor.hidden = true;
     const size = exportAreaSize(state, scheme);
     const line = exportSizeText(size.width, size.height, exportChoice.schemeScale);
     if (!exportByRooms()) {
@@ -33175,7 +33386,7 @@ function exportSchemeDialog(api) {
 
   const modal = uiModal({
     title: strings.exportPanel.schemeDialog,
-    body: uiEl("div", { class: "export__body" }, [controls, monoNote, hint]),
+    body: uiEl("div", { class: "export__body" }, [controls, monoNote, hint, scaleDoor]),
     actions: [uiButton(strings.dialog.close, { on: { click: () => modal.close() } }), ...actions],
     primary: actions[actions.length - 1],
   });
@@ -37850,6 +38061,47 @@ const WORKSHOP_ZOOM_KEY_STEP = 1.25;
 const WORKSHOP_TOOL_SCALE = "scale";
 const WORKSHOP_PLAN_ZOOM_MAX = 8;
 
+// Режим «Развёртка» (таск 133, G185): в нём клик по стене показывает её
+// развёртку, и больше ни в одном полоса не выезжает.
+const WORKSHOP_TOOL_ELEVATION = "elevation";
+
+/**
+ * **Два уровня вместо ряда занятий** (таск 133, G184). Слова заказчика:
+ * «рисую стены, а как мне выбрать текущую, поправить её или удалить. Нужен
+ * выбор режима — выбор или добавление как для меток».
+ *
+ * Ряд из пяти кнопок отвечал сразу на два вопроса — «чем я занят» и «что
+ * рисую», — и первый в нём терялся: «Правку» заказчик просто не нашёл среди
+ * «Стен», «Проёмов» и «Объектов». Теперь вопроса два и уровня два:
+ *
+ *   режим — выделение, добавление, масштаб, развёртка;
+ *   что добавляем — стены, проёмы, объекты (только в добавлении).
+ *
+ * Внутри окна всё по-прежнему решает **одно** поле `tool`: мода и «что
+ * добавляем» — это его два взгляда, а не второе состояние рядом. Заведи их
+ * врозь — и нашлась бы пара «режим добавления, а добавляем ничего».
+ */
+const WORKSHOP_MODES = ["select", "add", WORKSHOP_TOOL_SCALE, WORKSHOP_TOOL_ELEVATION];
+const WORKSHOP_ADDING = ["walls", "openings", "objects"];
+
+/** Каким режимом читается занятие. Обратное — `workshopToolOf`. */
+function workshopModeOf(tool) {
+  if (tool === "edit") return "select";
+  if (tool === WORKSHOP_TOOL_SCALE || tool === WORKSHOP_TOOL_ELEVATION) return tool;
+  return "add";
+}
+
+/**
+ * Каким занятием оборачивается выбор режима. `adding` — что добавляли в
+ * прошлый раз: вернулись в добавление — вернулись к тому же, чем рисовали,
+ * а не к стенам через раз.
+ */
+function workshopToolOf(mode, adding) {
+  if (mode === "add") return WORKSHOP_ADDING.includes(adding) ? adding : "walls";
+  if (mode === WORKSHOP_TOOL_SCALE || mode === WORKSHOP_TOOL_ELEVATION) return mode;
+  return "edit";
+}
+
 // Пороги попадания в пикселях экрана, как у холста: иначе на разном масштабе
 // всё ведёт себя по-разному. Вершина ловится шире тела стены — ею правят.
 const WORKSHOP_VERTEX_PX = 9;
@@ -38062,13 +38314,30 @@ function workshopPlanFraction(project, schemeId, pointPx) {
 }
 
 /**
- * Чем окно занято при открытии. Подложка без калибровки — **масштабом**: там
- * без него не нарисовать ни стены, и человек, пришедший обводить план, первым
- * делом обязан увидеть сам план (дефект D22). Во всех остальных случаях —
- * стенами, как было.
+ * Чем окно занято при открытии.
+ *
+ * Подложка без калибровки — **масштабом**: там без него не нарисовать ни
+ * стены, и человек, пришедший обводить план, первым делом обязан увидеть сам
+ * план (дефект D22). Это правило старше остальных и остаётся.
+ *
+ * Дальше правило одно: **окно открывается тем, что в нём есть что делать.**
+ *
+ * Чертёж уже есть — **выделением**, а не стенами. Прежде окно открывалось
+ * прямо в рисовании, и ровно на это заказчик и пожаловался: «рисую стены, а
+ * как мне выбрать текущую» — обратной дороги он не видел среди четырёх
+ * одинаковых кнопок. Холст открывается в выделении по той же причине: сперва
+ * смотрят, потом правят, и первый клик по ошибке ничего не создаёт.
+ *
+ * Чертежа ещё нет — **добавлением**: выделять нечего, и окно, встречающее
+ * пустое поле словами «клик выделяет», читалось бы сломанным. Это не
+ * исключение из правила, а оно само: нет чертежа — нет и выделения.
+ *
+ * Дорога в обе стороны при этом не спрятана: оба режима стоят соседними
+ * кнопками одного ряда, и в добавлении помнится, чем рисовали в прошлый раз.
  */
 function workshopInitialTool(project, schemeId) {
-  return workshopPlacement(project, schemeId).kind === "noScale" ? WORKSHOP_TOOL_SCALE : "walls";
+  if (workshopPlacement(project, schemeId).kind === "noScale") return WORKSHOP_TOOL_SCALE;
+  return drawingBoundsMm(project, schemeId) ? "edit" : "walls";
 }
 
 // ——— лист схемы без подложки ——————————————————————————————————————————
@@ -38478,6 +38747,7 @@ function workshopHint(tool) {
   // Слова калибровки — те самые, что над холстом: жест один и тот же, и
   // второго описания одного жеста в сборке быть не должно.
   if (tool === WORKSHOP_TOOL_SCALE) return strings.scale.hint;
+  if (tool === WORKSHOP_TOOL_ELEVATION) return strings.workshop.hintElevation;
   if (tool === "openings") return strings.workshop.hintOpenings;
   if (tool === "objects") return strings.workshop.hintObjects;
   if (tool === "edit") return strings.workshop.hintEdit;
@@ -38541,6 +38811,10 @@ let workshopDoorHinge = OPENING_HINGES[0];
 let workshopDoorSwing = OPENING_SWINGS[0];
 // Объекты: вид выбирается в колонке, размеры подставляются по виду, форма —
 // от вида же (столешница полосой, остальное прямоугольником).
+// Что добавляли в прошлый раз (таск 133): вернулись в «Добавление» — вернулись
+// к тому же, чем рисовали. Та же природа, что у толщины стен и шага сетки —
+// рабочее место, а не объект.
+let workshopAdding = "walls";
 let workshopObjectKindName = strings.schemeObjectKinds.radiator;
 let workshopObjectShape = SCHEME_OBJECT_SHAPES[0];
 let workshopObjectSizes = {};
@@ -38622,32 +38896,43 @@ function openWorkshop({ schemeId, api }) {
   const stage = uiEl("div", { class: "workshop__stage", attrs: { tabindex: "-1" } }, [node, strip.node]);
   const ctx = node.getContext ? node.getContext("2d") : null;
 
-  // ——— левая часть: инструменты над полем ———
+  // ——— левая часть: два уровня над полем ———
   //
-  // «Масштаб» стоит первым и показывается только у подложки без калибровки:
-  // там он — нулевой шаг работы, а везде ещё он не нужен и занимал бы место в
-  // ряду, который и так дорос до семи кнопок.
-  const scaleButton = uiButton(strings.workshop.toolScale, {
-    title: strings.workshop.toolScaleHint,
-    on: { click: () => setTool(WORKSHOP_TOOL_SCALE) },
+  // Первый ряд отвечает на «чем я занят», второй — на «что добавляю», и второй
+  // виден только в добавлении (таск 133, G184). Прежде оба вопроса отвечались
+  // одним рядом кнопок, и первый в нём терялся: «Правку» заказчик не нашёл.
+  const selectButton = uiButton(strings.workshop.modeSelect, {
+    title: strings.workshop.modeSelectHint,
+    on: { click: () => setMode("select") },
   });
+  const addButton = uiButton(strings.workshop.modeAdd, {
+    title: strings.workshop.modeAddHint,
+    on: { click: () => setMode("add") },
+  });
+  // «Масштаб» — режим, а не пятая кнопка «что рисуем»: он отвечает не на «что»,
+  // а на «чем занят». Показывается он только у подложки без калибровки — везде
+  // ещё калибровать нечего, и режим, который ничего не даст, в ряду лишний.
+  const scaleButton = uiButton(strings.workshop.modeScale, {
+    title: strings.workshop.modeScaleHint,
+    on: { click: () => setMode(WORKSHOP_TOOL_SCALE) },
+  });
+  const elevationButton = uiButton(strings.workshop.modeElevation, {
+    title: strings.workshop.modeElevationHint,
+    on: { click: () => setMode(WORKSHOP_TOOL_ELEVATION) },
+  });
+  // Порядок второго ряда — порядок работы, заданный заказчиком (G176): сперва
+  // стены, потом проёмы, потом объекты.
   const wallsButton = uiButton(strings.workshop.toolWalls, {
     title: strings.workshop.toolWallsHint,
-    on: { click: () => setTool("walls") },
+    on: { click: () => setAdding("walls") },
   });
-  // Порядок кнопок — порядок работы, заданный заказчиком (G176): сперва
-  // стены, потом проёмы, потом объекты. Правка последняя: ею пользуются после.
   const openingsButton = uiButton(strings.workshop.toolOpenings, {
     title: strings.workshop.toolOpeningsHint,
-    on: { click: () => setTool("openings") },
+    on: { click: () => setAdding("openings") },
   });
   const objectsButton = uiButton(strings.workshop.toolObjects, {
     title: strings.workshop.toolObjectsHint,
-    on: { click: () => setTool("objects") },
-  });
-  const editButton = uiButton(strings.workshop.toolEdit, {
-    title: strings.workshop.toolEditHint,
-    on: { click: () => setTool("edit") },
+    on: { click: () => setAdding("objects") },
   });
   const zoomOut = uiIconButton("minus", {
     title: strings.tools.zoomOut,
@@ -38848,18 +39133,28 @@ function openWorkshop({ schemeId, api }) {
     ]),
   ]);
 
+  const addingRow = uiEl("div", { class: "workshop__tools workshop__tools--adding" }, [
+    uiEl("span", { class: "workshop__toolsLabel", text: strings.workshop.adding }),
+    wallsButton,
+    openingsButton,
+    objectsButton,
+  ]);
+
   const body = uiEl("div", { class: "workshop" }, [
     uiEl("div", { class: "workshop__main" }, [
+      // Ряд режимов: что делаю. Вид (масштаб окна и «Вписать») прижат вправо —
+      // он не режим и стоять в одном ряду с ними как равный не должен.
       uiEl("div", { class: "workshop__tools" }, [
+        uiEl("span", { class: "workshop__toolsLabel", text: strings.workshop.mode }),
+        selectButton,
+        addButton,
         scaleButton,
-        wallsButton,
-        openingsButton,
-        objectsButton,
-        editButton,
-        zoomOut,
-        zoomIn,
-        fitButton,
+        elevationButton,
+        uiEl("span", { class: "workshop__view" }, [zoomOut, zoomIn, fitButton]),
       ]),
+      // Ряд «что добавляем»: виден только в добавлении — в остальных режимах
+      // он отвечал бы на вопрос, которого человек не задавал.
+      addingRow,
       stage,
       meta,
       hint,
@@ -38982,7 +39277,28 @@ function openWorkshop({ schemeId, api }) {
     });
   }
 
-  // ——— инструменты ———
+  // ——— режимы и занятия ———
+  //
+  // Снаружи окна их два уровня, внутри — одно поле `tool`: `setMode` и
+  // `setAdding` переводят выбор человека в него, `workshopModeOf` читает
+  // обратно. Второго состояния рядом нет нарочно — иначе нашлась бы пара
+  // «режим добавления, а добавлять нечего».
+
+  function mode() {
+    return workshopModeOf(tool);
+  }
+
+  function setMode(next) {
+    setTool(workshopToolOf(next, workshopAdding));
+  }
+
+  // Что добавляем — помнится на сеанс, как толщина стен и шаг сетки: вернулся
+  // в добавление — вернулся к тому же, чем рисовал, а не к стенам через раз.
+  function setAdding(kind) {
+    if (!WORKSHOP_ADDING.includes(kind)) return;
+    workshopAdding = kind;
+    setTool(kind);
+  }
 
   function setTool(next) {
     if (tool === next) return;
@@ -38998,6 +39314,10 @@ function openWorkshop({ schemeId, api }) {
     // Кадр у занятия «Масштаб» свой — точки подложки вместо миллиметров, — и
     // при переходе в любую сторону смысл `view` меняется целиком: без нового
     // «вписать» план уехал бы за край поля в тысячу крат.
+    // Выделенная стена живёт и в состоянии сеанса: ушли из развёртки — полоса
+    // над основным холстом тоже закрывается, иначе она осталась бы висеть от
+    // режима, из которого уже вышли.
+    if (getState().selectedWallId) setState({ selectedWallId: null });
     if (was === WORKSHOP_TOOL_SCALE || next === WORKSHOP_TOOL_SCALE) {
       fit();
       if (next === WORKSHOP_TOOL_SCALE) notify(strings.scale.started);
@@ -39013,10 +39333,12 @@ function openWorkshop({ schemeId, api }) {
     const same = Boolean(selected) === Boolean(next) && (!next || (selected.kind === next.kind && selected.id === next.id));
     if (same) return;
     selected = next;
-    // Выделенная стена попадает и в состояние сеанса: закрыли окно — её
-    // развёртка осталась открытой над основным холстом, и искать стену заново
-    // не надо.
-    const wallId = next && next.kind === "wall" ? next.id : null;
+    // Выделенная стена попадает и в состояние сеанса: закрыли окно в режиме
+    // развёртки — полоса осталась открытой над основным холстом, и искать
+    // стену заново не надо. Из других режимов она туда не уходит: там стену
+    // выделяют, чтобы подвинуть, и полоса на холсте была бы следствием, о
+    // котором никто не просил (таск 133, G185).
+    const wallId = next && next.kind === "wall" && tool === WORKSHOP_TOOL_ELEVATION ? next.id : null;
     if (getState().selectedWallId !== wallId) setState({ selectedWallId: wallId });
     sync();
   }
@@ -39037,6 +39359,10 @@ function openWorkshop({ schemeId, api }) {
   // который поставит следующий клик. Отсюда и заголовок группы.
   function subject() {
     if (tool === WORKSHOP_TOOL_SCALE) return WORKSHOP_TOOL_SCALE;
+    // В развёртке колонка говорит про стену — но полей у неё здесь нет:
+    // толщину правят в выделении, а тут смотрят. Иначе поле толщины стояло бы
+    // под полосой развёртки и звало править то, за чем сюда не приходили.
+    if (tool === WORKSHOP_TOOL_ELEVATION) return WORKSHOP_TOOL_ELEVATION;
     if (selected) return selected.kind;
     if (tool === "openings") return "opening";
     if (tool === "objects") return "object";
@@ -39551,8 +39877,10 @@ function openWorkshop({ schemeId, api }) {
         "success",
       );
       // Масштаб есть — подложку теперь есть на что положить, и окно само
-      // берётся за стены: за ними человек и пришёл.
-      setTool("walls");
+      // берётся за рисование: за ним человек и пришёл. Это единственное место,
+      // где окно меняет режим за человека, и оно же единственное, где
+      // следующий шаг известен без вопросов.
+      setMode("add");
     } catch (error) {
       scaleDraft = null;
       fail(error);
@@ -39621,13 +39949,6 @@ function openWorkshop({ schemeId, api }) {
       flipDoor(pick.kind);
       return;
     }
-    // Ручки створки ничего не таскают — они переключают дверь по нажатию:
-    // перетаскиванием дверь не «приоткроешь», у неё четыре положения, а не
-    // непрерывный угол.
-    if (pick.kind === "hinge" || pick.kind === "swing") {
-      flipDoor(pick.kind);
-      return;
-    }
     select(pick.kind === "vertex" ? { kind: "wall", id: pick.wallId } : { kind: pick.kind, id: pick.id });
     drag = {
       kind: pick.kind,
@@ -39651,6 +39972,15 @@ function openWorkshop({ schemeId, api }) {
   function tap(event) {
     if (scaleMode()) {
       scaleClick(event);
+      return;
+    }
+    // Развёртка: клик берёт **стену и только стену**. Проём и объект здесь не
+    // выделяются вовсе — развёртка бывает у стены, а выделить то, чего этот
+    // режим не покажет, значило бы обещать несделанное.
+    if (tool === WORKSHOP_TOOL_ELEVATION) {
+      const pick = workshopPick(project(), schemeId, mmOf(event), view, selected);
+      const wallId = pick && (pick.kind === "wall" ? pick.id : pick.kind === "vertex" ? pick.wallId : null);
+      select(wallId ? { kind: "wall", id: wallId } : null);
       return;
     }
     if (tool === "walls") {
@@ -40373,8 +40703,13 @@ function openWorkshop({ schemeId, api }) {
     const spot = placement();
     const wall = selectedWall();
     const scaling = scaleMode();
+    const now = mode();
+    // Первый уровень: чем занят. Второй виден только в добавлении.
+    selectButton.className = "ui-btn" + (now === "select" ? " ui-btn--accent" : "");
+    addButton.className = "ui-btn" + (now === "add" ? " ui-btn--accent" : "");
+    elevationButton.className = "ui-btn" + (now === WORKSHOP_TOOL_ELEVATION ? " ui-btn--accent" : "");
+    addingRow.hidden = now !== "add";
     wallsButton.className = "ui-btn" + (tool === "walls" ? " ui-btn--accent" : "");
-    editButton.className = "ui-btn" + (tool === "edit" ? " ui-btn--accent" : "");
     // Кнопка масштаба стоит, пока масштаба нет, и пока им занимаются: иначе
     // она пропала бы из-под руки в тот же миг, когда занятие ещё идёт.
     scaleButton.hidden = spot.kind !== "noScale" && !scaling;
@@ -40414,7 +40749,8 @@ function openWorkshop({ schemeId, api }) {
     syncRooms(current);
     syncElevation(current, wall);
     meta.textContent = workshopStatus(current, schemeId, spot);
-    node.style.cursor = tool === "edit" ? "default" : "crosshair";
+    // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
+    node.style.cursor = tool === "edit" || tool === WORKSHOP_TOOL_ELEVATION ? "default" : "crosshair";
     redraw();
   }
 
@@ -40433,8 +40769,11 @@ function openWorkshop({ schemeId, api }) {
     wallFields.hidden = kind !== "wall";
     openingFields.hidden = kind !== "opening";
     objectFields.hidden = kind !== "object";
-    removeButton.disabled = !selected;
-    removeButton.hidden = !selected;
+    // Удалять можно в выделении: в развёртке смотрят, а не правят, и кнопка
+    // «Удалить» под полосой развёртки обещала бы не то занятие.
+    const editing = Boolean(selected) && tool !== WORKSHOP_TOOL_ELEVATION;
+    removeButton.disabled = !editing;
+    removeButton.hidden = !editing;
     subjectNote.classList.remove("is-bad");
     // Масштаб: полей у него нет — он задаётся в поле, отрезком. Колонка
     // держит заголовок и то самое объяснение, которого прежде не получал
@@ -40442,6 +40781,14 @@ function openWorkshop({ schemeId, api }) {
     if (kind === WORKSHOP_TOOL_SCALE) {
       subjectHead.textContent = strings.workshop.scaleHead;
       subjectNote.textContent = strings.scale.dialogHint;
+      return;
+    }
+    // Развёртка: колонка называет выделенную стену и больше ничего не обещает.
+    if (kind === WORKSHOP_TOOL_ELEVATION) {
+      subjectHead.textContent = strings.workshop.modeElevation;
+      subjectNote.textContent = wall
+        ? text("workshop.wallInfo", { length: wallLengthMm(wall) })
+        : strings.workshop.elevationNone;
       return;
     }
     if (kind === "wall") {
@@ -40529,10 +40876,18 @@ function openWorkshop({ schemeId, api }) {
         : strings.workshop.objectHint;
   }
 
-  // Полоса развёртки в окне: у той же стены, что выделена, и у того края
-  // поля, который дальше от неё.
+  /**
+   * Полоса развёртки в окне: у той же стены, что выделена, и у того края поля,
+   * который дальше от неё.
+   *
+   * **Только в своём режиме** (таск 133, G185). Слова заказчика: «в режиме
+   * правка при выделении стены сразу появляется развёртка. Пожалуй просмотр
+   * развёртки надо сделать отдельным режимом». Полоса занимает до сорока
+   * процентов окна, и выезжать она должна, когда её позвали, а не когда стену
+   * выделили, чтобы подвинуть.
+   */
   function syncElevation(current, wall) {
-    if (!wall) {
+    if (!wall || tool !== WORKSHOP_TOOL_ELEVATION) {
       strip.update({ project: current, wallId: null });
       return;
     }
@@ -41791,21 +42146,16 @@ function mountSchemesPanel(host, api) {
   // схему и отдаёт холсту режим; выделение при этом снимается, чтобы ручки
   // метки не стояли под рукой, которая целится в точку отрезка.
   //
-  // **Переход в режим говорит о себе плашкой.** Подсказка над холстом про
-  // калибровку есть (`scale.hint`), но её можно свернуть — свёрнутость живёт в
-  // настройках браузера, — и тогда от смены режима не остаётся ни одного
-  // видимого следа: ряд «Выделение/Добавление» в инструментах показывает при
-  // калибровке обе кнопки неактивными, то есть ровно ничего. Заказчик это и
-  // увидел: «холст переходит в режим калибровки» — незаметно.
+  // **Переход в режим говорит о себе сам** — но не отсюда (таск 133). Плашку
+  // даёт холст на смену `mode` (`CANVAS_MODE_NOTES`), какой бы дверью в режим
+  // ни вошли: этой, панелью выгрузки или клавишей. Пока плашку давала каждая
+  // дверь, новая дверь молчала бы по-своему — ровно так молчала обводка
+  // помещения, пока калибровка уже говорила.
+  //
+  // Сама дверь живёт в холсте (`canvasStartScale`): режим его, и зовут эту
+  // дверь двое — отсюда и из панели выгрузки.
   function startScale(schemeId) {
-    setState({
-      schemeId,
-      selectedMarkIds: [],
-      selectedOutlineId: null,
-      editPathId: null,
-      mode: CANVAS_MODE_SCALE,
-    });
-    notify(strings.scale.started);
+    canvasStartScale(schemeId);
   }
 
   function dropScale(schemeId) {
@@ -42834,31 +43184,54 @@ function mountToolsPanel(host, api) {
           ],
     );
 
-    // Режимов два: выделение и добавление. Что именно добавится — точка или
-    // ломаная, — решает вид выбранного типа, и строка под кнопками говорит
-    // ровно это. Третьей кнопки нет: выбор вида руками пользователя только
-    // путал, когда он уже выбрал тип. Строка нужна именно словами: по одному
-    // значку типа не видно, ставится метка кликом или тянется линией.
-    const modeNote = !kind
+    // Кнопок по-прежнему две: включить руками можно выделение и добавление.
+    // Что именно добавится — точка или ломаная, — решает вид выбранного типа,
+    // и строка под кнопками говорит ровно это. Третьей кнопки «что добавляем»
+    // нет: выбор вида руками пользователя только путал, когда он уже выбрал
+    // тип. Строка нужна именно словами: по одному значку типа не видно,
+    // ставится метка кликом или тянется линией.
+    //
+    // **Но режимов у холста четыре** (таск 133). Обводку помещения включает
+    // панель помещений, калибровку — панель схем и панель выгрузки; своей
+    // кнопки у них здесь нет и не нужно — их включают оттуда, где они по делу.
+    // А вот показывать в эту минуту обе кнопки погашенными — значит показывать
+    // состояние, которого не бывает: ровно на это заказчик и сказал «вообще не
+    // очевидно, что холст переходит в режим калибровки». Поэтому рядом встаёт
+    // **имя текущего режима** — не кнопка: нажимать его некуда, он отвечает на
+    // «где я», а дверь наружу — соседнее «Выделение» и Esc.
+    const named = state.mode !== "select" && state.mode !== "add" ? state.mode : null;
+    const kindNote = !kind
       ? strings.canvas.needType
       : kind === "line"
         ? strings.tools.kindLineHint
         : kind === MARK_KIND_COMMENT
           ? strings.tools.kindCommentHint
           : strings.tools.kindPointHint;
-    const modeRow = uiEl("div", { class: "tools__row tools__row--modes" }, [
-      uiButton(strings.tools.selectMode, {
-        class: "ui-btn" + (state.mode === "select" ? " is-active" : ""),
-        title: strings.tools.selectModeHint,
-        on: { click: () => setMode("select") },
-      }),
-      uiButton(strings.tools.addMode, {
-        class: "ui-btn" + (state.mode === "add" ? " is-active" : ""),
-        // Типа нет — кнопка откроет окно выбора, про точку ей обещать нечего.
-        title: modeNote,
-        on: { click: () => setMode("add") },
-      }),
-    ]);
+    const modeNote = named ? strings.tools["modeNow_" + named] || kindNote : kindNote;
+    const modeRow = uiEl(
+      "div",
+      { class: "tools__row tools__row--modes" },
+      [
+        uiButton(strings.tools.selectMode, {
+          class: "ui-btn" + (state.mode === "select" ? " is-active" : ""),
+          title: named ? strings.tools.selectModeLeave : strings.tools.selectModeHint,
+          on: { click: () => setMode("select") },
+        }),
+        uiButton(strings.tools.addMode, {
+          class: "ui-btn" + (state.mode === "add" ? " is-active" : ""),
+          // Типа нет — кнопка откроет окно выбора, про точку ей обещать нечего.
+          title: kindNote,
+          on: { click: () => setMode("add") },
+        }),
+        named
+          ? uiEl("span", {
+              class: "tools__modeNow",
+              text: strings.tools["mode_" + named] || named,
+              title: modeNote,
+            })
+          : null,
+      ].filter(Boolean),
+    );
 
     // Блок собирается только из точек — ручки «+» у линии нет и быть не может.
     // При линейном типе выбор гаснет и говорит почему: живой на вид список,
@@ -42990,6 +43363,15 @@ function mountSizesPanel(host, api) {
         uiEl("span", { text: strings.tools.drawingLayer }),
       ]),
       uiEl("p", { class: "tools__note", text: strings.tools.layersHint }),
+      // Третий выключатель того же ряда и той же природы (таск 133, G185):
+      // полоса развёртки выделенной стены. В выгрузку он, в отличие от двух
+      // соседей, не уходит — развёртка на лист идёт своей кнопкой в шапке
+      // (таск 130), а полоса поверх холста на бумагу не попадала никогда.
+      uiEl("label", { class: "tools__field tools__field--check" }, [
+        toolsLayerCheck(state, setState, "elevationShown", ELEVATION_SETTING),
+        uiEl("span", { text: strings.tools.elevationStrip }),
+      ]),
+      uiEl("p", { class: "tools__note", text: strings.tools.elevationStripHint }),
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       uiEl("div", { class: "tools__row" }, [
         uiIconButton("minus", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
@@ -43007,6 +43389,7 @@ function mountSizesPanel(host, api) {
       "guidesShown" in changed ||
       "planShown" in changed ||
       "drawingShown" in changed ||
+      "elevationShown" in changed ||
       "schemeFont" in changed
     ) {
       render();
