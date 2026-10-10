@@ -1128,6 +1128,25 @@ export function workshopPick(project, schemeId, pointMm, view, selected) {
 }
 
 /**
+ * Что выделяет жест: **вещь, а не ручку**. Взялись за вершину стены — выделена
+ * стена, за угол объекта — объект. Ручка это жест, а не то, что правят, и
+ * выделенная «ручка» оставила бы колонку свойств без предмета: ни полей, ни
+ * вида, ни размеров (найдено живым прогоном таска 137 — первая же правка угла
+ * опустошила колонку).
+ *
+ * `WORKSHOP_SUBJECTS` — всё, чем выделение бывает: на этот список смотрят и
+ * `subject()`, и `aliveSelection()`.
+ */
+export const WORKSHOP_SUBJECTS = ["wall", "opening", "object"];
+
+export function workshopSelectionOf(pick) {
+  if (!pick) return null;
+  if (pick.kind === "vertex") return { kind: "wall", id: pick.wallId };
+  if (pick.kind === "objectHandle") return { kind: "object", id: pick.id };
+  return WORKSHOP_SUBJECTS.includes(pick.kind) ? { kind: pick.kind, id: pick.id } : null;
+}
+
+/**
  * Что должно влезть в окно: нарисованное и — когда она ложится — подложка.
  * Ни того, ни другой нет — лист `WORKSHOP_EMPTY_MM` вокруг нуля.
  */
@@ -2469,7 +2488,7 @@ export function openWorkshop({ schemeId, api }) {
       flipDoor(pick.kind);
       return;
     }
-    select(pick.kind === "vertex" ? { kind: "wall", id: pick.wallId } : { kind: pick.kind, id: pick.id });
+    select(workshopSelectionOf(pick));
     drag = {
       kind: pick.kind,
       id: pick.id,

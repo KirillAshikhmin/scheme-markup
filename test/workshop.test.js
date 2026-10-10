@@ -73,6 +73,7 @@ import {
   WORKSHOP_ORIGIN_AT,
   WORKSHOP_PLAN_ZOOM_MAX,
   WORKSHOP_SHEET,
+  WORKSHOP_SUBJECTS,
   WORKSHOP_TOOL_ELEVATION,
   WORKSHOP_TOOL_SCALE,
   WORKSHOP_UNIT,
@@ -106,6 +107,7 @@ import {
   workshopPointsRemove,
   workshopRectCornerPatch,
   workshopRectFromContour,
+  workshopSelectionOf,
   workshopShapeOfWay,
   workshopTryOpening,
   workshopPlacement,
@@ -1393,4 +1395,29 @@ test("опора угла у прямоугольника — соседний �
     anchorIndex: 2,
     skipIndex: -1,
   });
+});
+
+test("жест выделяет вещь, а не ручку: иначе колонка свойств остаётся без предмета", () => {
+  // Найдено живым прогоном: первая же правка угла выделяла «ручку», и в
+  // колонке пропадали и вид, и размеры — править стало нечем.
+  assert.deepEqual(workshopSelectionOf({ kind: "objectHandle", id: "o1", handle: { kind: "vertex", index: 0 } }), {
+    kind: "object",
+    id: "o1",
+  });
+  assert.deepEqual(workshopSelectionOf({ kind: "vertex", id: "w1", wallId: "w1" }), { kind: "wall", id: "w1" });
+  assert.deepEqual(workshopSelectionOf({ kind: "object", id: "o2" }), { kind: "object", id: "o2" });
+  assert.deepEqual(workshopSelectionOf({ kind: "opening", id: "p1" }), { kind: "opening", id: "p1" });
+  assert.equal(workshopSelectionOf(null), null);
+  // Чем выделение бывает — список один на всех, и всё, что из жеста выходит,
+  // в нём есть: колонка свойств и проверка «живо ли выделенное» смотрят туда же.
+  for (const pick of [
+    { kind: "objectHandle", id: "o1" },
+    { kind: "vertex", id: "w1", wallId: "w1" },
+    { kind: "wall", id: "w1" },
+    { kind: "opening", id: "p1" },
+    { kind: "object", id: "o2" },
+  ]) {
+    const selection = workshopSelectionOf(pick);
+    assert.ok(WORKSHOP_SUBJECTS.includes(selection.kind), pick.kind + " выделяет не предмет: " + selection.kind);
+  }
 });
