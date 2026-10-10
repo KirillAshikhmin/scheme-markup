@@ -5045,8 +5045,12 @@ const strings = {
       "Выберите тип метки, чтобы ставить метки по плану. Клик по стенке контура выделяет помещение. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб.",
     hintPoint:
       "Добавление: клик ставит {label}. Ручки «+» у выделенной метки ставят рядом {label} — так в одной рамке собираются выключатель и розетка. Esc снимает выделение и прячет ручки, второй Esc возвращает в «Выделение».",
+    // Про Ctrl в перетаскивании сказано здесь, потому что больше негде: блок
+    // едет целиком по умолчанию (G189), и узнать, как увезти из него одну
+    // метку, человек может только из этой подсказки. «Ctrl» — по-виндовому,
+    // как и везде в подсказках: на Mac на его месте Cmd.
     hintSelectMode:
-      "Клик выбирает метку, перетаскивание двигает её или подпись, двойной клик по подписи возвращает её на место, Delete удаляет, Esc снимает выделение. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб.",
+      "Клик выбирает метку, перетаскивание двигает её или подпись, двойной клик по подписи возвращает её на место, Delete удаляет, Esc снимает выделение. Метка из блока везёт весь блок; с зажатым Ctrl едет одна она. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб.",
     hintLine:
       "Добавление линией: клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить, ещё раз — вернуться в «Выделение». Направление липнет к ровным углам через 15°, а курсор — к прежним вершинам ломаной по пунктирным направляющим; у курсора виден градус, Alt — рисовать свободно.",
     // Комментарий ставится как точка — одним кликом, — но дальше у него своя
@@ -5130,6 +5134,9 @@ const strings = {
     addBlock: "точка блока",
     addLine: "линия",
     move: "перемещение метки",
+    // Группа меток, собранная ручкой «+», едет как одна метка (G189) — и
+    // отменяется тоже как одна: один жест, один шаг истории.
+    moveBlock: "перенос блока",
     guideAdd: "направляющая",
     guideMove: "перенос направляющей",
     guideRemove: "снятие направляющей",
@@ -5968,16 +5975,10 @@ const strings = {
     // для человека это угол комнаты, а не «конец a».
     onWall: "На стене, {at} м от угла",
     wallLabel: "Стена",
-    // Подпись высоты у знака в стопке совпавших меток (G181). «Сразу на каких
-    // высотах» — слова заказчика: без числа непонятно, какая из совпавших
-    // верхняя. Пишется как высоту пишут на чертеже — `h=900`, в миллиметрах,
-    // как она и хранится; «В 900» взять нельзя, на плане рядом со знаком это
-    // читалось бы кодом метки («В9»).
-    stackHeight: "h={mm}",
-    // Высота не задана — вопрос, а не придуманное число: та же честность, что
-    // у развёртки, где метка без высоты стоит отдельной полосой под полом, а
-    // не на выдуманном уровне (таск 129).
-    stackHeightUnknown: "h=?",
+    // Подписей высот у знаков стопки больше нет (G188): заказчик снял эту часть
+    // своего же G181 — «на схеме при расстановке в колонку не указывай их
+    // высоту». Высота читается в карточке метки и в строке списка («В 900 мм»)
+    // и подписана у знака на развёртке стен.
     room: "Помещение",
     roomAuto: "Помещение подставлено по контуру на схеме",
     roomManual: "Помещение вписано вручную — по контуру оно больше не меняется",
@@ -17998,6 +17999,10 @@ function visibleMarks(project, scheme, filter) {
 // без схлопывания в счётчик** — «сразу на каких высотах, и стопкой без
 // счётчика». Счётчика поэтому здесь нет ни при каком числе меток.
 //
+// Высоты у каждой он потом снял сам (G188): «на схеме при расстановке в
+// колонку не указывай их высоту». Осталась стопка и порядок по высоте —
+// число у знака не рисуется, а читается в карточке метки и на развёртке.
+//
 // Три свойства, ради которых всё считается именно так:
 //
 // 1. **Координаты меток не меняются** (G68). Стопка — отрисовка: смещение
@@ -18027,9 +18032,6 @@ const MARK_STACK_REACH_RATIO = 1;
 // блок в одной рамке, а блок — это другое: там метки стоят рядом на самом
 // плане. Просвет и тонкая линия к настоящей точке говорят «это одно место».
 const MARK_STACK_STEP_RATIO = 3;
-// Подпись высоты стоит от центра знака на столько радиусов (её ближний край).
-// Край знака с обводкой — 1,11 радиуса, остаток — воздух.
-const MARK_STACK_HEIGHT_GAP = 1.35;
 
 // В стопку идут только **одиночные точки**. Линия видна сама по себе: её трек
 // уходит от вершины в сторону, и под чужим знаком она не пропадает. Плашка
@@ -18165,6 +18167,8 @@ function markStackPlaceAll(project, scheme, filter, sizes) {
         at: { x: px.x / width, y: px.y / height },
         dir: step,
         stepPx,
+        // Высота знака на плане не подписана (G188), но порядок в стопке
+        // решает она — поле остаётся ключом этого порядка.
         heightMm: markStackHeight(mark),
       });
     });
@@ -18209,42 +18213,17 @@ function markStackPoints(mark, stacks) {
   return points.map((point) => ({ x: point.x + shift.at.x, y: point.y + shift.at.y }));
 }
 
-/**
- * Подпись высоты у знака в стопке — в пикселях плана.
- *
- * Заказчик просил именно её: «сразу на каких высотах», чтобы не гадать, какая
- * из совпавших меток верхняя. Высота **не выдумывается**: у метки без заданной
- * высоты в подписи стоит вопрос, как на развёртке такая метка стоит отдельной
- * полосой, а не на придуманном уровне (таск 129).
- *
- * Стоит подпись **поперёк стопки**: вдоль неё места нет — там следующий знак.
- */
-function markStackHeightPlanBox(mark, shift, sizes, scheme) {
-  if (!shift) return null;
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
-  const value =
-    shift.heightMm === null
-      ? strings.marks.stackHeightUnknown
-      : text("marks.stackHeight", { mm: Math.round(shift.heightMm) });
-  const cx = mark.points[0].x * width + shift.px.x;
-  const cy = mark.points[0].y * height + shift.px.y;
-  const gap = sizes.radius * MARK_STACK_HEIGHT_GAP;
-  const span = Math.max(sizes.font * 0.8, value.length * sizes.font * LABEL_CHAR_RATIO);
-  const tall = sizes.font * 1.2;
-  // Стопка идёт по горизонтали — подпись над знаком, иначе сбоку. У наклонной
-  // стены перпендикуляр наклонный, и выбирается та ось, вдоль которой стопка
-  // уезжает меньше.
-  const across = Math.abs(shift.dir.x) > Math.abs(shift.dir.y);
-  if (across) {
-    return { text: value, align: "center", x: cx - span / 2, y: cy - gap - tall, at: { x: cx, y: cy - gap - tall / 2 }, width: span, height: tall };
-  }
-  // **Слева, а не справа.** Справа от метки стоит её обозначение — заказчик
-  // просил именно так («не сверху справа, а просто справа»), и отнимать у
-  // подписи её сторону ради числа нельзя: подпись главная. Заодно справа
-  // живёт ручка «+», и соседняя метка по ней встаёт не поверх числа.
-  return { text: value, align: "right", x: cx - gap - span, y: cy - tall / 2, at: { x: cx - gap, y: cy }, width: span, height: tall };
-}
+// ——— высота в стопке больше не подписывается (G188) ———————————————————
+//
+// Таск 131 рисовал у каждого знака стопки бледное «h=900» — так заказчик
+// просил тогда: «сразу на каких высотах». Посмотрев на готовый план, он эту
+// часть своего же требования снял: «на схеме при расстановке в колонку не
+// указывай их высоту». Числа загромождали план, а стопка он оставил.
+//
+// Высота не потерялась: она лежит в метке (`heightAboveFloor`), видна в
+// карточке метки и в строке списка («В 900 мм»), а на развёртке стен у каждой
+// метки подписана рядом со знаком. Порядок стопки её по-прежнему решает —
+// `heightMm` в записи стопки остался ключом порядка, просто не рисуется.
 
 // ——— подписи —————————————————————————————————————————————————————————
 
@@ -18791,8 +18770,9 @@ function labelPlaceAll(project, scheme, filter, sizes, stacks) {
   // просится строка: без этого «Р6» легла бы на соседнюю розетку.
   //
   // Места занимают знаки **там, где они нарисованы**: уехавший в стопку знак
-  // освобождает своё прежнее место и занимает новое. Вместе с ним занята и
-  // подпись его высоты — иначе обозначение соседней метки легло бы на «h=900».
+  // освобождает своё прежнее место и занимает новое. Подписи высот в этом
+  // списке были до G188 — теперь их на плане нет, и место рядом со знаком
+  // снова свободно для обозначений.
   for (const mark of visibleMarks(project, scheme, filter)) {
     for (const point of markStackPoints(mark, stacks)) {
       placed.push({
@@ -18802,8 +18782,6 @@ function labelPlaceAll(project, scheme, filter, sizes, stacks) {
         height: sizes.radius * 2,
       });
     }
-    const height = markStackHeightPlanBox(mark, stacks ? stacks.get(mark.id) : null, sizes, scheme);
-    if (height) placed.push({ x: height.x, y: height.y, width: height.width, height: height.height });
   }
 
   for (const entry of entries) {
@@ -19864,17 +19842,10 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected, stacks) {
 
 // ——— стопка совпавших меток: отрисовка ————————————————————————————————
 //
-// Два прохода и ни одного нового способа рисовать знак: сами знаки рисует тот
-// же `drawMarkBody`, уже по смещённой точке. Здесь только то, чего без стопки
-// не бывает: тонкая линия от настоящей точки к уехавшим знакам и подпись
-// высоты у каждого.
-
-// Пиксель плана в экранный — для того, кто считал в пикселях плана, а не в
-// долях. Та же формула, что у `planToScreen`, только доля уже умножена на
-// размер плана.
-function planPxToScreen(at, view) {
-  return { x: view.offsetX + at.x * view.zoom, y: view.offsetY + at.y * view.zoom };
-}
+// Ни одного нового способа рисовать знак: сами знаки рисует тот же
+// `drawMarkBody`, уже по смещённой точке. Здесь только то, чего без стопки не
+// бывает, — тонкая линия от настоящей точки к уехавшим знакам. Подписей высот
+// у знаков больше нет (G188), и второй проход по стопке отпал вместе с ними.
 
 /**
  * Спина стопки: волосяная линия от настоящей точки метки к дальнему знаку.
@@ -19904,36 +19875,6 @@ function drawMarkStackSpines(ctx, project, scheme, view, marks, stacks) {
   ctx.restore();
 }
 
-/**
- * Высота над полом у каждого знака в стопке — то, ради чего заказчик стопку и
- * выбрал: «сразу на каких высотах». Рисуется поверх знаков и под подписями:
- * раскладка подписей считает эти прямоугольники занятыми, поэтому обозначение
- * соседней метки на число не налезает.
- */
-function drawMarkStackHeights(ctx, project, scheme, view, marks, stacks) {
-  if (!stacks || stacks.size === 0) return;
-  const sizes = labelPlanSizes(view);
-  const font = labelFontSize(view);
-  ctx.save();
-  ctx.font = drawFont(font, 600, view.fontFamily);
-  ctx.textBaseline = "middle";
-  ctx.lineJoin = "round";
-  ctx.lineWidth = Math.max(2, font * 0.3);
-  for (const mark of marks) {
-    const box = markStackHeightPlanBox(mark, stacks.get(mark.id), sizes, scheme);
-    if (!box) continue;
-    const at = planPxToScreen(box.at, view);
-    ctx.textAlign = box.align;
-    // Обводка-подложка — та же, что у подписи: число читается и поверх тёмных
-    // линий плана, и поверх самого знака.
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-    ctx.strokeText(box.text, at.x, at.y);
-    ctx.fillStyle = DRAWING_CAPTION;
-    ctx.fillText(box.text, at.x, at.y);
-  }
-  ctx.textAlign = "left";
-  ctx.restore();
-}
 
 // Ручки «+» рисуются только у выделенной точки. `color` — цвет типа, который
 // эта ручка поставит: в смешанном блоке она красится в цвет ставящейся метки,
@@ -20841,8 +20782,6 @@ function drawScheme(ctx, {
   for (const mark of shown) {
     drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id), stacks);
   }
-  // Высоты — поверх знаков: число у знака, а не под ним.
-  drawMarkStackHeights(ctx, project, scheme, state, shown, stacks);
   // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
   // дугу разбора. `links` — либо готовый кадр (его считает холст из того же
   // промежуточного объекта, что и метки), либо `true`: посчитать самому. Так
@@ -20890,7 +20829,6 @@ function drawScheme(ctx, {
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 const renderInternals = {
   shapeGeometry,
-  markStackHeightPlanBox,
   MARK_STACK_REACH_RATIO,
   MARK_STACK_STEP_RATIO,
   outlineCenter,
@@ -22805,6 +22743,22 @@ function canvasResize() {
   canvasPaint();
 }
 
+/**
+ * Что обведено выделением в этом кадре.
+ *
+ * Обычно — выделенные метки сеанса. Пока ведут группу (G189), обведена вся
+ * она: по пунктиру видно, что взяли блок, а не одну розетку, и видно это до
+ * того, как кнопка отпущена. Выделение сеанса при этом не трогается — в нём
+ * остаётся взятая метка, у неё и после переноса открыта карточка и стоят
+ * ручки «+». Кадр говорит «везу блок», состояние — «работаю с этой меткой»,
+ * и путать эти два ответа нельзя: правка полей в панели адресуется одной.
+ */
+function canvasFrameSelected(state) {
+  const moving = canvasDrag && canvasDrag.kind === "mark" && canvasDrag.moved ? canvasDrag.moving : null;
+  if (!moving || moving.length < 2) return state.selectedMarkIds;
+  return moving;
+}
+
 function canvasPaint() {
   if (!canvasCtx || !canvasNode) return;
   const ratio = window.devicePixelRatio || 1;
@@ -22825,7 +22779,7 @@ function canvasPaint() {
     selectedWallId: state.selectedWallId || null,
     filter: state.filter,
     view,
-    selectedIds: state.selectedMarkIds,
+    selectedIds: canvasFrameSelected(state),
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     guides: canvasDrag && (canvasDrag.kind === "pathVertex" || canvasDrag.kind === "pathAdd") ? canvasDrag.guides : null,
@@ -24673,6 +24627,11 @@ function canvasGrabDrag(state, scheme, view, point, pick) {
       kind,
       markId: pick.markId,
       groupId: pick.groupId || null,
+      // У пальца Ctrl нет, и взятая долгим нажатием группа едет целиком — то
+      // самое умолчание, о котором просил заказчик (G189). Разнять блок можно
+      // мышью с Ctrl/Cmd; на планшете метку из блока правят, уводя её ручкой
+      // «+» заново, — отдельного жеста для этого не выдумано.
+      moving: canvasMoveIds(state.project, pick.markId, pick.groupId || null, false),
       anchor: canvasNearestVertex(mark, point, scheme, view),
       before: state.project,
       selectId: pick.markId,
@@ -25007,10 +24966,16 @@ function canvasPointerDown(event) {
       };
       return;
     }
+    const kind = hit.part === "label" ? "label" : "mark";
     canvasDrag = {
-      kind: hit.part === "label" ? "label" : "mark",
+      kind,
       markId: hit.markId,
       groupId: hit.groupId,
+      // Кого везёт жест (G189). Решается **на нажатии**, один раз: жест, у
+      // которого смысл меняется посреди ведения, нельзя ни показать, ни
+      // отменить одним шагом. Ctrl/Cmd, нажатый после того как метку уже
+      // повезли, эту группу не разнимает — отпустите и возьмите снова.
+      moving: kind === "mark" ? canvasMoveIds(state.project, hit.markId, hit.groupId, canvasDragSolo(event)) : null,
       anchor: canvasNearestVertex(findMark(state.project, hit.markId), point, scheme, view),
       start: point,
       before: state.project,
@@ -25077,6 +25042,70 @@ function canvasWallAt(state, plan) {
   return best ? best.id : null;
 }
 
+// ——— группа едет как одна метка ———————————————————————————————————————
+//
+// Заказчик (G189): «группы выключателей\розеток давай двигать вместе, как одну
+// метку по умолчанию, а с зажатым ctrl\command уже отдельно каждую точку».
+// До этого рамка, собранная ручкой «+», разъезжалась по одной метке: взял
+// среднюю розетку из трёх — уехала одна, а блок перестал быть блоком.
+//
+// **Группа** здесь — ровно та, что в ADR 004 у режима «каждая своя»: несколько
+// самостоятельных меток, связанных `group {markIds}` с общей подписью-
+// перечислением. Второй механизм того же ADR — «одна метка на блок» — уже
+// едет целиком и без всякой правки: там точки лежат в одной метке, и
+// перетаскивание всегда возило их вместе. Третьей сущности не заводится.
+//
+// Выделение фильтром не сужается: скрытая метка блока едет вместе со
+// остальными. Блок — одно место на плане; оставь её позади, и человек увидит
+// разъехавшийся блок, только сняв фильтр, — а это и есть испорченная
+// разметка (G68). Решение видно в объекте целиком, а не в текущем кадре.
+
+/**
+ * Разнимает ли этот жест группу: Ctrl на Windows, Cmd на Mac. Разбор тот же,
+ * что у Ctrl+C/Ctrl+V и Ctrl+Z в `canvasKeyDown`, — обе клавиши названы
+ * заказчиком, и второй правды о них в сборке нет.
+ */
+function canvasDragSolo(event) {
+  return Boolean(event && (event.ctrlKey || event.metaKey));
+}
+
+/**
+ * Какие метки везёт жест: одну взятую или всю её группу.
+ *
+ * `solo` — Ctrl/Cmd на нажатии. Порядок — модельный `blockMembers`: своей
+ * сортировки холст не заводит. Взятая метка в списке есть всегда, даже если
+ * группа рассыпалась (висячий `groupId` после удаления соседей).
+ */
+function canvasMoveIds(project, markId, groupId, solo) {
+  if (!markId) return [];
+  if (solo || !groupId) return [markId];
+  const group = findGroup(project, groupId);
+  if (!group) return [markId];
+  const ids = blockMembers(project, group.markIds).map((mark) => mark.id);
+  if (!ids.includes(markId)) ids.push(markId);
+  return ids.length > 1 ? ids : [markId];
+}
+
+/**
+ * Сдвинуть метки на один и тот же вектор в долях плана.
+ *
+ * Объект правит модель — `updateMark` на каждую метку, по снимку «до»: сдвиг
+ * один, и форма блока от перетаскивания не меняется никогда. Результат — один
+ * объект «после», поэтому в историю он уходит одним шагом `canvasCommit`.
+ * Исчезнувшая метка молча пропускается: список собран на нажатии, а между
+ * нажатием и ведением объект мог успеть измениться (отмена из другой панели).
+ */
+function canvasMoveMarks(project, ids, shift) {
+  let next = project;
+  for (const id of ids || []) {
+    const mark = findMark(next, id);
+    if (!mark) continue;
+    const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
+    next = updateMark(next, id, { points }).project;
+  }
+  return next;
+}
+
 // Перетаскивание метки: новые точки считаются от снимка «до», а не от
 // предыдущего кадра, — иначе метка уползает от курсора накопленной ошибкой.
 function canvasDragTo(point, free) {
@@ -25134,8 +25163,13 @@ function canvasDragTo(point, free) {
       const anchor = shifted[canvasDrag.anchor] || shifted[0];
       const snapped = canvasGuideSnap(anchor, free);
       const fix = { x: snapped.x - anchor.x, y: snapped.y - anchor.y };
-      const points = shifted.map((item) => ({ x: item.x + fix.x, y: item.y + fix.y }));
-      canvasPreview = updateMark(before, canvasDrag.markId, { points }).project;
+      // Сдвиг один на всех, и считается он по взятой метке: группа едет как
+      // одна метка (G189) и форму не меняет — соседи получают ровно тот же
+      // сдвиг, включая поправку от направляющей.
+      canvasPreview = canvasMoveMarks(before, canvasDrag.moving || [canvasDrag.markId], {
+        x: dx + fix.x,
+        y: dy + fix.y,
+      });
     }
   } catch (error) {
     // Модель отказала на полпути — картинка замерла бы под рукой, а по
@@ -25287,9 +25321,16 @@ function canvasPointerUp(event) {
   }
   if (drag.moved) {
     if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
-      const label = drag.kind === "label" ? strings.history.moveLabel : strings.history.move;
+      // Перенос группы — **один** шаг истории, а не по шагу на метку: один
+      // жест человека, один Ctrl+Z. Ярлык называет, что вернётся: «перенос
+      // блока» в списке отмены против «перемещения метки».
+      const whole = drag.kind === "mark" && (drag.moving || []).length > 1;
+      const label = drag.kind === "label" ? strings.history.moveLabel : whole ? strings.history.moveBlock : strings.history.move;
       const after = canvasPreview;
       canvasPreview = null;
+      // Выделение остаётся на взятой метке: панель свойств и карточка говорят
+      // об одной метке, и после переноса блока человек правит ту, за которую
+      // взялся, а не получает пустую панель «выделено три».
       canvasCommit(drag.before, after, label, { selection: [drag.markId] });
     }
     if (drag.kind === "pathVertex" && canvasPreview) {
