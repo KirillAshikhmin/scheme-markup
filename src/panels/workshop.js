@@ -85,7 +85,6 @@ import {
   OPENING_KIND_DOOR,
   OPENING_SWINGS,
   PLAN_SCALE_SHORT_SHARE,
-  SCHEME_OBJECT_SHAPES,
   WALL_THICKNESS_MM_MAX,
   addOpening,
   addSchemeObject,
@@ -129,6 +128,7 @@ import {
   wallsOnScheme,
 } from "../model.js";
 import {
+  CANVAS_FRESH_VERTEX_MS,
   canvasCommitScale,
   canvasPanSpeed,
   canvasPanVector,
@@ -154,6 +154,10 @@ import {
   drawingUnitBridge,
   draftSnap,
   drawFont,
+  drawPathHandles,
+  hitPathHandle,
+  pathEditHandles,
+  pathVertexHandles,
   planToScreen,
   screenToPlan,
 } from "../render.js";
@@ -249,6 +253,10 @@ export const WORKSHOP_WALL_PX = 6;
 
 // Пока палец не сдвинулся на столько, это клик, а не перетаскивание.
 const WORKSHOP_DRAG_SLOP = 3;
+
+// Насколько подпись длины отступает от линии: ближе — садится на саму линию,
+// дальше — отрывается от неё и читается как чужая.
+const WORKSHOP_LENGTH_GAP_PX = 13;
 
 // Сдвиг вида стрелками (дефект D23, «навигация должна быть как и у схемы»).
 // Направление и кривую разгона даёт сам холст — `canvasPanVector` и
@@ -383,6 +391,21 @@ export function workshopSnapMm(pointsMm, cursorMm, view, options = {}) {
 }
 
 /**
+ * Росчерк без холостых кликов: подряд идущие совпадающие вершины выбрасываются
+ * — два клика в одну точку это один клик, а не стена нулевой длины. Одна дверь
+ * у цепочки стен, полосы объекта и контура: примета у них общая.
+ */
+function workshopDistinct(pointsMm) {
+  const points = [];
+  for (const point of Array.isArray(pointsMm) ? pointsMm : []) {
+    const last = points[points.length - 1];
+    if (last && last.x === point.x && last.y === point.y) continue;
+    points.push({ x: point.x, y: point.y });
+  }
+  return points;
+}
+
+/**
  * Росчерк — в отрезки. **Концы соседних стен — один и тот же объект точки**, и
  * равенство в данных поэтому не «почти», а буква в букву: модель переписывает
  * обе копии одним `drawingPointMm`, целые миллиметры совпадают равенством, и
@@ -392,12 +415,7 @@ export function workshopSnapMm(pointsMm, cursorMm, view, options = {}) {
  * это один клик, а не стена нулевой длины.
  */
 export function workshopChain(pointsMm) {
-  const points = [];
-  for (const point of Array.isArray(pointsMm) ? pointsMm : []) {
-    const last = points[points.length - 1];
-    if (last && last.x === point.x && last.y === point.y) continue;
-    points.push({ x: point.x, y: point.y });
-  }
+  const points = workshopDistinct(pointsMm);
   const walls = [];
   for (let index = 1; index < points.length; index += 1) {
     walls.push({ aMm: points[index - 1], bMm: points[index] });
@@ -740,15 +758,303 @@ export function workshopObjectDefaults(project, kindId) {
   return workshopObjectDefaultsByName(kind ? kind.name : null);
 }
 
+// ——— объект рисуется, а не набирается числами (таск 137, G193) ————————————
+//
+// Слова заказчика: «при добавлении объектов типа „Прямоугольник“ позволь не
+// просто выставлять размеры, а просто рисовать его, как сейчас метки — линии,
+// только что бы обязательно надо было завершить контур».
+//
+// **Способов поставить объект три, а форм в модели по-прежнему две.** Это и
+// есть ответ на развилку тикета: прямоугольник остаётся прямоугольником
+// (`shape: "rect"` — середина, ширина, глубина, поворот), а контур — это
+// **способ его задать**, а не третья форма.
+//
+// Почему не полилиния: форма хранения — это то, что увидит развёртка и 3D.
+// Полоса (`polyline`) выражает вещь, которая идёт **по стене** и у которой одна
+// глубина: кухонный фронт, короб, марш. Обведённый контур кухонного фронта —
+// это не полоса: у неё нет направления, вдоль которого отмеряют. Положи его
+// полилинией — и в развёртке он встал бы лентой по своему же периметру, то есть
+// дважды. А главное, у заказчика на руках объекты, набранные числами
+// (`WORKSHOP_OBJECT_DEFAULTS`), и форма у них `rect`: заведи контуру свою форму
+// — и два прямоугольника на одном чертеже стали бы разными вещами, которые
+// по-разному рисуются, по-разному проецируются на стену и по-разному правятся.
+//
+// **Приведение названо вслух: габарит в осях первой нарисованной стороны.** Не
+// «по двум первым сторонам» (вторая сторона может быть нарисована под любым
+// углом — тогда правило спорило бы с собой) и не по осям чертежа (повёрнутый
+// кухонный фронт лёг бы прямо). Для настоящего прямоугольника это точно: контур
+// прямоугольника возвращает тот же прямоугольник, до миллиметра (тест). Для
+// кривого контура это **габарит**, и человек видит его призраком **до** того,
+// как замкнёт: контур обводят на глазах, и обещать нечего — показано.
+export const WORKSHOP_OBJECT_WAYS = ["rect", "contour", "polyline"];
 
+// Меньше трёх вершин — не контур: двумя точками площадь не огородить. Ровно
+// столько же требует и холст, чтобы замкнуть ломаную метки.
+export const WORKSHOP_CONTOUR_MIN = 3;
 
+/** Какой формой модели оборачивается выбранный способ. */
+export function workshopShapeOfWay(way) {
+  return way === "polyline" ? "polyline" : "rect";
+}
+
+/**
+ * Каким способом читается форма поставленного объекта. Объект **не помнит**,
+ * нарисовали его контуром или набрали числами, — и помнить не должен: в
+ * чертеже это одна и та же вещь. Поэтому прямоугольник читается
+ * прямоугольником, а не контуром.
+ */
+export function workshopWayOfShape(shape) {
+  return shape === "polyline" ? "polyline" : "rect";
+}
+
+// Контур замкнут самим жестом: вершину, которой его закончили, в список не
+// дописывают. Но прийти она может — от клика ровно в первую вершину, — и тогда
+// это по-прежнему тот же контур.
+function workshopContourPoints(pointsMm) {
+  const points = workshopDistinct(pointsMm);
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (points.length > 1 && first.x === last.x && first.y === last.y) points.pop();
+  return points;
+}
+
+function workshopAxes(turnDeg) {
+  const angle = ((Number(turnDeg) || 0) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return { u: { x: cos, y: sin }, n: { x: -sin, y: cos } };
+}
+
+const workshopDot = (point, axis) => point.x * axis.x + point.y * axis.y;
+
+/**
+ * Замкнутый контур — в прямоугольник: габарит в осях **первой нарисованной
+ * стороны**. `null` — прямоугольника из этого не выйдет: вершин меньше трёх
+ * или контур без площади (все вершины на одной линии).
+ *
+ * Поворот приводится к полуобороту: прямоугольник, повёрнутый на 180°, — тот
+ * же прямоугольник, и показывать в колонке «Поворот 183°» вместо «3°» значило
+ * бы пугать числом на пустом месте.
+ */
+export function workshopRectFromContour(pointsMm) {
+  const points = workshopContourPoints(pointsMm);
+  if (points.length < WORKSHOP_CONTOUR_MIN) return null;
+  const degrees = (Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x) * 180) / Math.PI;
+  const turnDeg = ((Math.round(degrees) % 180) + 180) % 180;
+  const { u, n } = workshopAxes(turnDeg);
+  const along = points.map((point) => workshopDot(point, u));
+  const across = points.map((point) => workshopDot(point, n));
+  const minA = Math.min(...along);
+  const maxA = Math.max(...along);
+  const minB = Math.min(...across);
+  const maxB = Math.max(...across);
+  const widthMm = Math.round(maxA - minA);
+  const depthMm = Math.round(maxB - minB);
+  if (!(widthMm > 0) || !(depthMm > 0)) return null;
+  const centerA = (minA + maxA) / 2;
+  const centerB = (minB + maxB) / 2;
+  return {
+    atMm: workshopRoundMm({
+      x: centerA * u.x + centerB * n.x,
+      y: centerA * u.y + centerB * n.y,
+    }),
+    widthMm,
+    depthMm,
+    turnDeg,
+  };
+}
+
+/**
+ * Правка прямоугольника **за угол** (G194): угол напротив стоит на месте,
+ * поворот не трогается — вещь растянули, а не повернули.
+ *
+ * Считается в осях самого объекта, а не экрана: у повёрнутой столешницы «шире»
+ * значит шире вдоль неё самой. Размер меньше миллиметра не бывает — модель
+ * нулевой прямоугольник не примет, и предлагать его окно не должно; угол,
+ * сведённый в точку, оставляет миллиметр, а отказ не показывается вовсе.
+ */
+export function workshopRectCornerPatch(object, index, pointMm) {
+  if (!object || object.shape === "polyline" || !pointMm) return null;
+  const corners = schemeObjectCorners(object);
+  const fixed = corners[(Number(index) + 2) % 4];
+  if (!fixed || !corners[Number(index)]) return null;
+  const { u, n } = workshopAxes(object.turnDeg);
+  const span = (axis) => {
+    const from = workshopDot(fixed, axis);
+    const to = workshopDot(pointMm, axis);
+    const size = Math.max(1, Math.round(Math.abs(to - from)));
+    return { size, center: from + (to < from ? -size : size) / 2 };
+  };
+  const a = span(u);
+  const b = span(n);
+  return {
+    atMm: workshopRoundMm({
+      x: a.center * u.x + b.center * n.x,
+      y: a.center * u.y + b.center * n.y,
+    }),
+    widthMm: a.size,
+    depthMm: b.size,
+  };
+}
+
+// ——— полоса правится как ломаная метки (таск 137, G194) ———————————————————
+//
+// Четыре движения, и все четыре взяты у холста: вершину двигают, ручка на
+// середине отрезка разбивает его, ручка за концом продолжает полосу, двойной
+// клик по вершине её убирает. Геометрия ручек, порядок спора за клик и их
+// рисунок — те самые, что у ломаной метки и контура помещения
+// (`render.pathEditHandles`, `hitPathHandle`, `drawPathHandles`): второй руки у
+// человека нет, и второго правила здесь не заводится.
+//
+// Повторён только **список точек**: у метки его правит `model.moveMarkPoint` и
+// соседи, а у объекта схемы точки лежат в `pointsMm`, и своего мутатора окно не
+// пишет — считает новый список и отдаёт его `updateSchemeObject`. Ровно так же
+// устроен перенос вершины цепочки стен (`workshopMoveVertex`, таск 125).
+
+function workshopPointsOf(pointsMm) {
+  return (Array.isArray(pointsMm) ? pointsMm : []).map((point) => ({ x: point.x, y: point.y }));
+}
+
+function workshopInside(points, index) {
+  return Number.isInteger(index) && index >= 0 && index < points.length;
+}
+
+export function workshopPointsMove(pointsMm, index, pointMm) {
+  const points = workshopPointsOf(pointsMm);
+  if (!workshopInside(points, index) || !pointMm) return null;
+  points[index] = { x: pointMm.x, y: pointMm.y };
+  return points;
+}
+
+/** Новая вершина встаёт **за** `index` — на отрезке от неё к следующей. */
+export function workshopPointsInsert(pointsMm, index, pointMm) {
+  const points = workshopPointsOf(pointsMm);
+  if (!workshopInside(points, index) || !pointMm) return null;
+  points.splice(index + 1, 0, { x: pointMm.x, y: pointMm.y });
+  return points;
+}
+
+/**
+ * Продолжение полосы — за любой её конец. Отдельно от вставки по той же
+ * причине, по которой у метки отдельная `extendMarkLine`: продолжить с головы
+ * вставкой «после индекса» можно было бы только перевернув список, а порядок
+ * вершин значащий — по нему идёт подпись и считается развёртка.
+ */
+export function workshopPointsExtend(pointsMm, end, pointMm) {
+  const points = workshopPointsOf(pointsMm);
+  if (points.length === 0 || !pointMm) return null;
+  const added = { x: pointMm.x, y: pointMm.y };
+  if (end === "start") return [added, ...points];
+  if (end === "end") return [...points, added];
+  return null;
+}
+
+/**
+ * Убрать вершину. Список считается даже тогда, когда он станет короче двух
+ * вершин: **отказывает модель** (`schemeObjectShortLine`) и её же словами —
+ * второго свода правил в окне нет, как и у проёмов (таск 126).
+ */
+export function workshopPointsRemove(pointsMm, index) {
+  const points = workshopPointsOf(pointsMm);
+  if (!workshopInside(points, index)) return null;
+  points.splice(index, 1);
+  return points;
+}
+
+/**
+ * Источники притяжки при правке вершины — правило холста (`canvasPathSnap`)
+ * буква в букву: опора идёт **последней** (от неё `draftSnap` отмеряет угол
+ * кратно 15°), правимая вершина в источники не попадает — сама с собой она не
+ * выравнивается.
+ *
+ * Сам холст этого не отдаёт: его `canvasPathSnap` прибит к синглтон-состоянию
+ * и к его схеме. Повторено поэтому не поведение, а три строки выборки.
+ */
+export function workshopPathSources(pointsMm, anchorIndex, skipIndex) {
+  const points = workshopPointsOf(pointsMm);
+  const anchor = points[anchorIndex] || points[0];
+  if (!anchor) return [];
+  const sources = points.filter((point, at) => at !== skipIndex && at !== anchorIndex);
+  return [...sources, anchor];
+}
+
+/** Какая вершина служит опорой угла, когда двигают ручку `handle`. */
+export function workshopPathAnchor(points, handle) {
+  if (!handle) return { anchorIndex: 0, skipIndex: -1 };
+  if (handle.kind !== "vertex") return { anchorIndex: handle.index, skipIndex: -1 };
+  const last = points.length - 1;
+  // У прямоугольника углы — кольцо: опора первого угла последний, а не второй.
+  const ring = points.length === 4 && handle.ring;
+  const index = Number(handle.index);
+  if (index > 0) return { anchorIndex: index - 1, skipIndex: index };
+  return { anchorIndex: ring ? last : Math.min(1, last), skipIndex: index };
+}
+
+/**
+ * Ручки выделенного объекта. Прямоугольнику полагаются **только углы**:
+ * вставить в него пятый угол и продолжить его некуда — он не путь. Полосе
+ * достаётся весь набор пути, какой правит ломаную метки.
+ */
+export function workshopObjectHandles(object, view) {
+  if (!object) return [];
+  if (object.shape === "polyline") {
+    return pathEditHandles(WORKSHOP_UNIT, { points: object.pointsMm || [], closed: false }, view);
+  }
+  return pathVertexHandles(WORKSHOP_UNIT, schemeObjectCorners(object), view).map((handle) => ({
+    ...handle,
+    ring: true,
+  }));
+}
+
+/**
+ * **Одна дверь для предпросмотра и для записи.** Пока тащат — кадр рисуется из
+ * этого патча, по отпусканию он же уходит в `updateSchemeObject`. Разойдись эти
+ * два пути — призрак обещал бы одно, а в объект уходило бы другое.
+ */
+export function workshopObjectPatch(object, handle, toMm) {
+  if (!object || !handle || !toMm) return null;
+  if (object.shape !== "polyline") {
+    return handle.kind === "vertex" ? workshopRectCornerPatch(object, handle.index, toMm) : null;
+  }
+  const points = object.pointsMm || [];
+  const next =
+    handle.kind === "vertex"
+      ? workshopPointsMove(points, handle.index, toMm)
+      : handle.kind === "insert"
+        ? workshopPointsInsert(points, handle.index, toMm)
+        : handle.kind === "extend"
+          ? workshopPointsExtend(points, handle.end, toMm)
+          : null;
+  return next ? { pointsMm: next } : null;
+}
+
+/**
+ * Где стоит длина набираемого отрезка (G195). Слова заказчика: «в процессе
+ * рисования **над текущей линией** указывай ей длину при рисовании».
+ *
+ * Середина отрезка, сдвиг по нормали — и всегда в сторону меньшего `y`, то
+ * есть вверх по экрану: подпись над линией, а не под ней, с какого конца её ни
+ * рисуй. `null` — отрезка ещё нет, и мерить нечего.
+ */
+export function workshopLengthAt(a, b, gap) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0)) return null;
+  const normal = { x: -dy / length, y: dx / length };
+  const side = normal.y <= 0 ? 1 : -1;
+  return {
+    x: (a.x + b.x) / 2 + normal.x * side * gap,
+    y: (a.y + b.y) / 2 + normal.y * side * gap,
+  };
+}
 
 /**
  * Что под курсором на чертеже. Старшинство названо здесь целиком, потому что
- * спорят теперь четверо:
+ * спорят теперь пятеро:
  *
- *   1. **ручки створки выделенной двери** — ими её и переключают, и стоят они
- *      поверх самой двери;
+ *   1. **ручки выделенного** — створки у двери, углы и вершины у объекта. Ими
+ *      его и правят, и стоят они поверх самой вещи;
  *   2. **вершина стены** — ею правят угол, промах по ней обиднее всего;
  *   3. **проём** — он лежит в стене, и клик по нему должен брать его, а не
  *      стену под ним;
@@ -760,6 +1066,15 @@ export function workshopPick(project, schemeId, pointMm, view, selected) {
   const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
   const vertexMm = WORKSHOP_VERTEX_PX / zoom;
   const slackMm = WORKSHOP_WALL_PX / zoom;
+  // Ручки правки живут **в экранных пикселях** — порог у них свой и тот же, что
+  // на холсте: `hitPathHandle` считает по радиусу самой ручки.
+  if (selected && selected.kind === "object") {
+    const object = findSchemeObject(project, selected.id);
+    const handle = object
+      ? hitPathHandle(workshopObjectHandles(object, view), planToScreen(pointMm, WORKSHOP_UNIT, view))
+      : null;
+    if (handle) return { kind: "objectHandle", id: object.id, handle };
+  }
   if (selected && selected.kind === "opening") {
     const opening = findOpening(project, selected.id);
     const wall = opening ? findWall(project, opening.wallId) : null;
@@ -888,13 +1203,20 @@ export function workshopGridDrawStepMm(gridMm, zoom) {
  * в это время ставил окно в стену. Чистая и вынесена наружу ради теста:
  * пропущенное занятие молча показало бы чужие слова.
  */
-export function workshopHint(tool) {
+export function workshopHint(tool, way) {
   // Слова калибровки — те самые, что над холстом: жест один и тот же, и
   // второго описания одного жеста в сборке быть не должно.
   if (tool === WORKSHOP_TOOL_SCALE) return strings.scale.hint;
   if (tool === WORKSHOP_TOOL_ELEVATION) return strings.workshop.hintElevation;
   if (tool === "openings") return strings.workshop.hintOpenings;
-  if (tool === "objects") return strings.workshop.hintObjects;
+  if (tool === "objects") {
+    // Способов поставить объект три, и жесты у них разные (таск 137): про
+    // «замкните контур» читал бы человек, который в эту минуту ставит радиатор
+    // кликом.
+    if (way === "contour") return strings.workshop.hintContour;
+    if (way === "polyline") return strings.workshop.hintBand;
+    return strings.workshop.hintObjects;
+  }
   if (tool === "edit") return strings.workshop.hintEdit;
   return strings.workshop.hint;
 }
@@ -954,14 +1276,16 @@ let workshopOpeningKind = OPENING_KINDS[0];
 let workshopOpeningSizes = JSON.parse(JSON.stringify(WORKSHOP_OPENING_DEFAULTS));
 let workshopDoorHinge = OPENING_HINGES[0];
 let workshopDoorSwing = OPENING_SWINGS[0];
-// Объекты: вид выбирается в колонке, размеры подставляются по виду, форма —
-// от вида же (столешница полосой, остальное прямоугольником).
+// Объекты: вид выбирается в колонке, размеры подставляются по виду, способ —
+// от вида же (столешницу тянут полосой, остальное ставят прямоугольником).
 // Что добавляли в прошлый раз (таск 133): вернулись в «Добавление» — вернулись
 // к тому же, чем рисовали. Та же природа, что у толщины стен и шага сетки —
 // рабочее место, а не объект.
 let workshopAdding = "walls";
 let workshopObjectKindName = strings.schemeObjectKinds.radiator;
-let workshopObjectShape = SCHEME_OBJECT_SHAPES[0];
+// Способ, а не форма (таск 137): прямоугольник ставится кликом по умолчаниям
+// **или** обводится контуром, и это один и тот же `shape: "rect"`.
+let workshopObjectWay = WORKSHOP_OBJECT_WAYS[0];
 let workshopObjectSizes = {};
 let workshopOpened = false;
 
@@ -1013,6 +1337,13 @@ export function openWorkshop({ schemeId, api }) {
   // холсте (дефект D23, «навигация должна быть как и у схемы»).
   let press = null;
   let hover = null;
+  // Ручка правки под курсором: бледная ручка разбивки становится под рукой тем
+  // самым квадратом, который встанет на её место (`render.drawPathHandles`).
+  let hoverHandle = null;
+  // Вершина, которую ручка поставила сию минуту: `{id, index, at}`. Нужна ровно
+  // для того же, для чего холсту (`canvasFreshVertex`) — чтобы двойной клик по
+  // ручке разбивки не убирал ту вершину, которую сам только что и поставил.
+  let freshVertex = null;
   let streak = null;
   let frame = 0;
   // Зажатые стрелки и часы непрерывного хода.
@@ -1201,10 +1532,13 @@ export function openWorkshop({ schemeId, api }) {
     title: strings.workshop.objectKindAddHint,
     on: { click: () => addObjectKind() },
   });
-  const shapeButtons = SCHEME_OBJECT_SHAPES.map((shape) =>
-    uiButton(strings.workshop["shape_" + shape], {
+  // Три способа поставить объект, а не две формы (таск 137): прямоугольник
+  // кликом по умолчаниям, он же контуром по месту, полоса цепочкой.
+  const wayButtons = WORKSHOP_OBJECT_WAYS.map((way) =>
+    uiButton(strings.workshop["way_" + way], {
       class: "ui-btn workshop__chip",
-      on: { click: () => setObjectShape(shape) },
+      title: strings.workshop["wayHint_" + way],
+      on: { click: () => setObjectWay(way) },
     }),
   );
   const objectWidth = workshopNumber(1, DRAWING_MM_MAX);
@@ -1220,7 +1554,7 @@ export function openWorkshop({ schemeId, api }) {
   const turnField = workshopField(strings.workshop.objectTurn, objectTurn);
   const objectFields = uiEl("div", { class: "workshop__fields" }, [
     uiEl("div", { class: "workshop__chips" }, [objectKindSelect, objectKindAdd]),
-    uiEl("div", { class: "workshop__chips" }, shapeButtons),
+    uiEl("div", { class: "workshop__chips" }, wayButtons),
     widthField,
     depthField,
     turnField,
@@ -1771,9 +2105,11 @@ export function openWorkshop({ schemeId, api }) {
     workshopObjectSizes = {};
     const object = selectedObject();
     if (!object) {
-      // Форма идёт за видом: столешницу тянут полосой, радиатор набирают
-      // прямоугольником — и спрашивать об этом отдельно незачем.
-      workshopObjectShape = workshopObjectDefaultsByName(name).shape;
+      // Способ идёт за видом: столешницу тянут полосой, радиатор набирают
+      // прямоугольником — и спрашивать об этом отдельно незачем. Контур у вида
+      // умолчанием не бывает: обводить или набрать числами — это решение
+      // человека, а не свойство радиатора.
+      workshopObjectWay = workshopWayOfShape(workshopObjectDefaultsByName(name).shape);
       sync();
       return;
     }
@@ -1787,12 +2123,26 @@ export function openWorkshop({ schemeId, api }) {
     }
   }
 
-  function setObjectShape(shape) {
-    if (selectedObject()) return;
-    workshopObjectShape = shape;
+  // Способ ставить объект: кликом по умолчаниям, обводкой контура или полосой.
+  // Размеры сбрасываются к умолчаниям вида: контур их посчитает сам, а клик
+  // возьмёт те, что у вида, — донашивать за контуром чужую ширину незачем.
+  function setObjectWay(way) {
+    if (selectedObject() || !WORKSHOP_OBJECT_WAYS.includes(way)) return;
+    workshopObjectWay = way;
     workshopObjectSizes = {};
     draft = null;
     sync();
+  }
+
+  function objectWay() {
+    const object = selectedObject();
+    return object ? workshopWayOfShape(object.shape) : workshopObjectWay;
+  }
+
+  // Рисуется ли объект росчерком — полосой или контуром. Клик по умолчаниям
+  // росчерка не ведёт: он ставит вещь целиком с первого нажатия.
+  function objectDrawn() {
+    return tool === "objects" && workshopObjectWay !== "rect";
   }
 
   async function addObjectKind() {
@@ -1818,16 +2168,22 @@ export function openWorkshop({ schemeId, api }) {
   function objectSizes(source, kindId) {
     const kind = kindId ? findSchemeObjectKind(source, kindId) : null;
     const defaults = workshopObjectDefaultsByName(kind ? kind.name : workshopObjectKindName);
-    return { ...defaults, ...workshopObjectSizes, shape: workshopObjectShape };
+    return { ...defaults, ...workshopObjectSizes, shape: workshopShapeOfWay(workshopObjectWay) };
   }
 
-  function placeObject(pointMm, pointsMm) {
+  /**
+   * Поставить объект. `rect` — габарит, посчитанный контуром; без него
+   * прямоугольник берёт размеры у вида (умолчания G192 остаются: контур — это
+   * второй способ, а не замена первому).
+   */
+  function placeObject(pointMm, pointsMm, rect) {
     const ready = withKinds();
     const kindId = currentKindId(ready.project);
     if (!kindId) return;
     const sizes = objectSizes(ready.project, kindId);
-    const fields =
-      sizes.shape === "polyline"
+    const fields = rect
+      ? { shape: "rect", ...rect }
+      : sizes.shape === "polyline"
         ? { shape: "polyline", pointsMm, depthMm: sizes.depthMm }
         : {
             shape: "rect",
@@ -1847,8 +2203,10 @@ export function openWorkshop({ schemeId, api }) {
       // Как и проём, поставленный объект себя не выделяет: иначе выбор вида в
       // колонке стал бы правкой только что поставленного.
       commit(added.project, strings.history.objectAdd);
+      return added.schemeObject;
     } catch (error) {
       fail(error);
+      return null;
     }
   }
 
@@ -2122,6 +2480,13 @@ export function openWorkshop({ schemeId, api }) {
       start: { x: event.clientX, y: event.clientY },
       moved: false,
     };
+    // Ручка пути: место, где она стоит, уже и есть ответ — клик по ней без
+    // движения ставит вершину туда, где её нарисовали. Ровно так ведёт себя
+    // холст (`canvasPathAddCommit` берёт точку нажатия, если рука не поехала).
+    if (pick.kind === "objectHandle") {
+      drag.handle = pick.handle;
+      drag.toMm = workshopRoundMm(screenToPlan({ x: pick.handle.x, y: pick.handle.y }, WORKSHOP_UNIT, view));
+    }
   }
 
   /**
@@ -2158,7 +2523,9 @@ export function openWorkshop({ schemeId, api }) {
       return;
     }
     if (tool === "objects") {
-      if (workshopObjectShape === "polyline") addVertex(event);
+      // Три способа, и первый клик у каждого свой: полоса и контур начинают
+      // росчерк, прямоугольник ставится целиком по умолчаниям вида (G192).
+      if (objectDrawn()) addVertex(event);
       else placeObject(snapOf(mmOf(event), event.altKey).point, null);
       return;
     }
@@ -2182,6 +2549,13 @@ export function openWorkshop({ schemeId, api }) {
       paint();
       return;
     }
+    // Клик в первую вершину **замыкает контур** — тем же жестом, которым на
+    // холсте замыкают ломаную метки, и порог тот же, в экранных пикселях:
+    // попасть в неё миллиметр в миллиметр нельзя.
+    if (workshopObjectWay === "contour" && onFirstVertex(event)) {
+      finishContour();
+      return;
+    }
     // Клик по последней вершине ничего не добавляет: это первая половина
     // двойного клика, которым цепочку заканчивают. Та же примета, что на холсте.
     const last = draft.points[draft.points.length - 1];
@@ -2192,10 +2566,34 @@ export function openWorkshop({ schemeId, api }) {
     paint();
   }
 
+  function onFirstVertex(event) {
+    if (!draft || draft.points.length < WORKSHOP_CONTOUR_MIN) return false;
+    const first = screenOf(draft.points[0]);
+    const at = pointOf(event);
+    return Math.hypot(at.x - first.x, at.y - first.y) <= WORKSHOP_VERTEX_PX;
+  }
+
   stage.addEventListener("dblclick", (event) => {
     event.preventDefault();
-    if (tool === "walls") finishChain();
-    else if (tool === "objects" && workshopObjectShape === "polyline") finishBand();
+    if (tool === "walls") {
+      finishChain();
+      return;
+    }
+    // Правка: двойной клик по вершине полосы её убирает — как двойной клик по
+    // вершине ломаной метки на холсте.
+    if (tool === "edit") {
+      dropObjectVertex(event);
+      return;
+    }
+    if (tool !== "objects" || !draft) return;
+    if (workshopObjectWay === "polyline") {
+      finishBand();
+      return;
+    }
+    // Контур двойным кликом **не заканчивается**: незамкнутый контур объектом
+    // не становится (G193), а терять за это четыре клика человеку незачем —
+    // черновик остаётся на поле, сказано только, чего не хватает.
+    notify(strings.workshop.contourOpen, "error");
   });
 
   // Полоса объекта — тот же росчерк, что цепочка стен, только кончается одним
@@ -2210,6 +2608,39 @@ export function openWorkshop({ schemeId, api }) {
       return;
     }
     placeObject(null, points);
+    sync();
+  }
+
+  /**
+   * Замкнуть контур — и получить прямоугольник (G193).
+   *
+   * Габарит считает `workshopRectFromContour` — **та же функция**, что рисует
+   * призрак под рукой: что показано, то и записано. Контур, из которого
+   * прямоугольника не выходит (меньше трёх вершин, все вершины на одной линии),
+   * черновик не теряет: сказано, чего не хватает.
+   *
+   * Посчитанные размеры уходят в умолчания сеанса — тогда они **видны в
+   * колонке** сразу, тем же порядком, каким в окне помнится толщина стен и
+   * размер окна: поправил окно на 1300 — следующее окно встанет 1300.
+   */
+  function finishContour() {
+    if (!draft) return;
+    const rect = workshopRectFromContour(draft.points);
+    if (!rect) {
+      notify(strings.workshop.contourFlat, "error");
+      return;
+    }
+    draft = null;
+    const added = placeObject(null, null, rect);
+    if (added) {
+      workshopObjectSizes = {
+        ...workshopObjectSizes,
+        widthMm: rect.widthMm,
+        depthMm: rect.depthMm,
+        turnDeg: rect.turnDeg,
+      };
+      notify(text("workshop.contourAdded", { width: rect.widthMm, depth: rect.depthMm }), "success");
+    }
     sync();
   }
 
@@ -2257,7 +2688,7 @@ export function openWorkshop({ schemeId, api }) {
       redraw();
       return;
     }
-    if (tool === "walls" || (tool === "objects" && workshopObjectShape === "polyline")) {
+    if (tool === "walls" || objectDrawn()) {
       // Предпросмотра до первого клика нет — как и на холсте: тянуть резинку
       // не от чего.
       if (!draft) return;
@@ -2286,16 +2717,21 @@ export function openWorkshop({ schemeId, api }) {
       return;
     }
     const pick = workshopPick(project(), schemeId, mmOf(event), view, selected);
-    const next = pick ? pick.kind + ":" + pick.id : null;
+    const handle = pick && pick.kind === "objectHandle" ? pick.handle : null;
+    const next = pick ? pick.kind + ":" + pick.id + ":" + (handle ? handle.kind + handle.index : "") : null;
     if (next !== hover) {
       hover = next;
+      hoverHandle = handle;
       node.style.cursor = !pick
         ? "default"
-        : pick.kind === "vertex"
+        : pick.kind === "vertex" || (handle && handle.kind === "vertex")
           ? "grab"
-          : pick.kind === "hinge" || pick.kind === "swing"
+          : pick.kind === "hinge" || pick.kind === "swing" || handle
             ? "pointer"
             : "move";
+      // Ручка под рукой меняет рисунок — бледный «плюс» становится квадратом
+      // будущей вершины. Кадр поэтому перерисовывается, а не только курсор.
+      redraw();
     }
   }
 
@@ -2309,6 +2745,25 @@ export function openWorkshop({ schemeId, api }) {
       const opening = findOpening(project(), drag.id);
       const wall = opening ? findWall(project(), opening.wallId) : null;
       if (wall) drag.atMm = workshopOpeningAt(wall, mmOf(event), opening.widthMm);
+      redraw();
+      return;
+    }
+    // Ручка объекта: притяжка та же, что у правки ломаной на холсте — опора
+    // соседняя вершина, сама с собой правимая не выравнивается
+    // (`workshopPathSources`).
+    if (drag.kind === "objectHandle") {
+      const object = findSchemeObject(project(), drag.id);
+      if (object) {
+        const points =
+          object.shape === "polyline" ? object.pointsMm || [] : schemeObjectCorners(object);
+        const anchor = workshopPathAnchor(points, drag.handle);
+        drag.toMm = workshopSnapMm(
+          workshopPathSources(points, anchor.anchorIndex, anchor.skipIndex),
+          mmOf(event),
+          view,
+          { free: event.altKey, gridMm: workshopGridMm, gridSnap: workshopGridSnap },
+        ).point;
+      }
       redraw();
       return;
     }
@@ -2332,6 +2787,71 @@ export function openWorkshop({ schemeId, api }) {
         ? { pointsMm: (object.pointsMm || []).map((point) => ({ x: point.x + deltaMm.x, y: point.y + deltaMm.y })) }
         : { atMm: { x: object.atMm.x + deltaMm.x, y: object.atMm.y + deltaMm.y } };
     return updateSchemeObject(project(), object.id, patch).project;
+  }
+
+  /**
+   * Записать правку объекта за ручку — **тем же патчем**, которым рисовался
+   * предпросмотр (`workshopObjectPatch`). Одной правкой на весь жест: стек
+   * отмены не набивается кадрами, и Ctrl+Z возвращает место, где была вещь до
+   * того, как за неё взялись.
+   */
+  function applyObjectHandle(current) {
+    const object = findSchemeObject(project(), current.id);
+    const patch = object ? workshopObjectPatch(object, current.handle, current.toMm) : null;
+    if (!patch) {
+      sync();
+      return;
+    }
+    const label =
+      object.shape === "polyline" ? strings.history.objectPoint : strings.history.objectResize;
+    try {
+      commit(updateSchemeObject(project(), object.id, patch).project, label);
+      // Вершина, поставленная только что этой же рукой: двойной клик по ней
+      // ничего не убирает (та же оговорка, что у холста).
+      if (current.handle.kind !== "vertex") {
+        freshVertex = { id: object.id, index: addedIndex(object, current.handle), at: panNow() };
+      }
+    } catch (error) {
+      fail(error);
+      sync();
+    }
+  }
+
+  // Куда встала новая вершина: разбивка садится сразу за своим отрезком,
+  // продолжение — в голову или в хвост списка (`canvasAddedIndex` у холста).
+  function addedIndex(object, handle) {
+    if (handle.kind === "extend") return handle.end === "start" ? 0 : (object.pointsMm || []).length;
+    return handle.index + 1;
+  }
+
+  /**
+   * Двойной клик по вершине полосы её убирает — тот же жест, что у ломаной
+   * метки на холсте. Полосу короче двух вершин не оставляем не потому, что
+   * здесь проверка, а потому что её не примет модель: слова отказа её же.
+   */
+  function dropObjectVertex(event) {
+    const object = selectedObject();
+    if (!object || object.shape !== "polyline") return;
+    const handle = hitPathHandle(workshopObjectHandles(object, view), pointOf(event));
+    if (!handle || handle.kind !== "vertex") return;
+    if (
+      freshVertex &&
+      freshVertex.id === object.id &&
+      freshVertex.index === handle.index &&
+      panNow() - freshVertex.at < CANVAS_FRESH_VERTEX_MS
+    ) {
+      return;
+    }
+    const pointsMm = workshopPointsRemove(object.pointsMm, handle.index);
+    if (!pointsMm) return;
+    try {
+      commit(
+        updateSchemeObject(project(), object.id, { pointsMm }).project,
+        strings.history.objectPoint,
+      );
+    } catch (error) {
+      fail(error);
+    }
   }
 
   // Якорь для магнита угла при переносе вершины — противоположный конец той
@@ -2363,11 +2883,17 @@ export function openWorkshop({ schemeId, api }) {
     const current = drag;
     drag = null;
     if (!current.moved) {
-      paint();
+      // Ручка разбивки и ручка продолжения срабатывают и без движения: клик по
+      // ним ставит вершину туда, где они нарисованы. Вершину, наоборот,
+      // нажатием на месте не правят — её тащат.
+      if (current.kind === "objectHandle" && current.handle.kind !== "vertex") applyObjectHandle(current);
+      else paint();
       return;
     }
     try {
-      if (current.kind === "vertex" && current.toMm) {
+      if (current.kind === "objectHandle") {
+        applyObjectHandle(current);
+      } else if (current.kind === "vertex" && current.toMm) {
         const result = workshopMoveVertex(project(), schemeId, current.fromMm, current.toMm);
         if (result.moved > 0) commit(result.project, strings.history.wallVertex);
       } else if (current.kind === "wall" && current.deltaMm) {
@@ -2467,7 +2993,11 @@ export function openWorkshop({ schemeId, api }) {
     if (event.key === "Enter" && draft) {
       event.preventDefault();
       event.stopPropagation();
-      if (tool === "objects") finishBand();
+      // У контура «закончить» может значить только «замкнуть»: незамкнутый
+      // контур объектом не становится (G193), и Enter его замыкает, а не
+      // оставляет полосой.
+      if (workshopObjectWay === "contour" && tool === "objects") finishContour();
+      else if (tool === "objects") finishBand();
       else finishChain();
       return;
     }
@@ -2616,6 +3146,7 @@ export function openWorkshop({ schemeId, api }) {
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
     paintDrawing();
+    paintObjectHandles();
     paintDraft();
   }
 
@@ -2763,6 +3294,12 @@ export function openWorkshop({ schemeId, api }) {
   }
 
   function shiftObject(object) {
+    // Правка за ручку: кадр рисуется тем самым патчем, который уйдёт в объект
+    // по отпусканию, — одна дверь на предпросмотр и на запись.
+    if (drag && drag.moved && drag.kind === "objectHandle" && drag.id === object.id) {
+      const patch = workshopObjectPatch(object, drag.handle, drag.toMm);
+      return patch ? { ...object, ...patch } : object;
+    }
     if (!(drag && drag.moved && drag.kind === "object" && drag.id === object.id && drag.deltaMm)) return object;
     const deltaMm = drag.deltaMm;
     if (object.shape === "polyline") {
@@ -2809,14 +3346,18 @@ export function openWorkshop({ schemeId, api }) {
       drawDrawingOpening(ctx, bridge(), ghost.wall, ghost.opening, { ghost: true, bad: !ghost.ok });
       return;
     }
-    const band = tool === "objects" && workshopObjectShape === "polyline";
-    if ((tool !== "walls" && !band) || !draft) return;
+    const band = objectDrawn() && workshopObjectWay === "polyline";
+    const contour = objectDrawn() && workshopObjectWay === "contour";
+    if ((tool !== "walls" && !band && !contour) || !draft) return;
     const points = [...draft.points, draft.cursor];
     ctx.lineCap = "butt";
     ctx.lineJoin = "round";
-    ctx.lineWidth = Math.max(1, (band ? bandWidthMm() : workshopThicknessMm) * view.zoom);
-    ctx.strokeStyle = band ? DRAWING_OBJECT : WORKSHOP_ACCENT;
-    ctx.globalAlpha = 0.5;
+    // Контур обводят по месту, и толщины у него нет: он не стена и не полоса, а
+    // габарит, который из него выйдет. Поэтому линия тонкая, а габарит показан
+    // призраком — см. ниже.
+    ctx.lineWidth = contour ? 1.5 : Math.max(1, (band ? bandWidthMm() : workshopThicknessMm) * view.zoom);
+    ctx.strokeStyle = band || contour ? DRAWING_OBJECT : WORKSHOP_ACCENT;
+    ctx.globalAlpha = contour ? 1 : 0.5;
     ctx.beginPath();
     points.forEach((point, index) => {
       const at = screenOf(point);
@@ -2825,29 +3366,98 @@ export function openWorkshop({ schemeId, api }) {
     });
     ctx.stroke();
     ctx.globalAlpha = 1;
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = DRAWING_EDGE;
-    ctx.beginPath();
-    points.forEach((point, index) => {
-      const at = screenOf(point);
-      if (index === 0) ctx.moveTo(at.x, at.y);
-      else ctx.lineTo(at.x, at.y);
-    });
-    ctx.stroke();
+    if (!contour) {
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = DRAWING_EDGE;
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        const at = screenOf(point);
+        if (index === 0) ctx.moveTo(at.x, at.y);
+        else ctx.lineTo(at.x, at.y);
+      });
+      ctx.stroke();
+    }
+    if (contour) paintContourGhost();
     for (const point of draft.points) handle(ctx, screenOf(point));
-    // Длина набираемого отрезка — у курсора: стену рисуют по размеру, и
-    // смотреть на панель в этот момент некогда.
+    // Длина набираемого отрезка — **над ним самим** (G195). Слова заказчика: «в
+    // процессе рисования над текущей линией указывай ей длину при рисовании».
+    // Одна подпись на все три росчерка: стену, полосу и контур рисуют одной
+    // рукой, и мерить её надо одинаково.
     const last = draft.points[draft.points.length - 1];
-    const length = Math.round(Math.hypot(draft.cursor.x - last.x, draft.cursor.y - last.y));
-    if (length <= 0) return;
-    const at = screenOf(draft.cursor);
+    paintLength(last, draft.cursor);
+  }
+
+  /**
+   * Что выйдет из контура, пока его обводят: габарит прямоугольника и его
+   * размеры. Считает его **та же** `workshopRectFromContour`, которая запишет
+   * объект по замыканию, — приведение контура к прямоугольнику поэтому не
+   * обещание, а показанное.
+   *
+   * Замыкающая сторона нарисована пунктиром от курсора к первой вершине: по
+   * ней видно, что контур **надо** замкнуть и где это сделать.
+   */
+  function paintContourGhost() {
+    const first = screenOf(draft.points[0]);
+    const cursor = screenOf(draft.cursor);
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = DRAWING_OBJECT;
+    ctx.beginPath();
+    ctx.moveTo(cursor.x, cursor.y);
+    ctx.lineTo(first.x, first.y);
+    ctx.stroke();
+    const rect = workshopRectFromContour([...draft.points, draft.cursor]);
+    if (rect) {
+      const corners = schemeObjectCorners({ shape: "rect", ...rect }).map(screenOf);
+      ctx.strokeStyle = WORKSHOP_ACCENT;
+      ctx.beginPath();
+      corners.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const middle = screenOf(rect.atMm);
+      ctx.font = drawFont(12, 600);
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      const line = text("workshop.contourSize", { width: rect.widthMm, depth: rect.depthMm });
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = WORKSHOP_PAPER;
+      ctx.strokeText(line, middle.x, middle.y);
+      ctx.fillStyle = DRAWING_EDGE;
+      ctx.fillText(line, middle.x, middle.y);
+      ctx.textAlign = "start";
+    }
+    ctx.restore();
+  }
+
+  // Длина отрезка над ним самим: место считает `workshopLengthAt`, здесь только
+  // рисуется. Нулевой отрезок подписи не получает — её некуда повернуть.
+  function paintLength(fromMm, toMm) {
+    const length = Math.round(Math.hypot(toMm.x - fromMm.x, toMm.y - fromMm.y));
+    const at = length > 0 ? workshopLengthAt(screenOf(fromMm), screenOf(toMm), WORKSHOP_LENGTH_GAP_PX) : null;
+    if (!at) return;
+    ctx.save();
     ctx.font = drawFont(13, 600);
-    ctx.textBaseline = "bottom";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
     ctx.lineWidth = 3;
     ctx.strokeStyle = WORKSHOP_PAPER;
-    ctx.strokeText(String(length), at.x + 10, at.y - 8);
+    ctx.strokeText(String(length), at.x, at.y);
     ctx.fillStyle = DRAWING_EDGE;
-    ctx.fillText(String(length), at.x + 10, at.y - 8);
+    ctx.fillText(String(length), at.x, at.y);
+    ctx.restore();
+  }
+
+  // Ручки пути выделенной полосы: середины отрезков и концы. Вершины рисует
+  // общий слой чертежа своим кружком — тем же, каким в этом окне показаны
+  // вершины стен и ручки двери.
+  function paintObjectHandles() {
+    if (tool !== "edit") return;
+    const object = selectedObject();
+    if (!object || object.shape !== "polyline") return;
+    const extra = workshopObjectHandles(shiftObject(object), view).filter((item) => item.kind !== "vertex");
+    drawPathHandles(ctx, extra, WORKSHOP_ACCENT, hoverHandle);
   }
 
   // Ширина полосы нового объекта: из умолчаний вида, пока его не поправили.
@@ -2911,7 +3521,7 @@ export function openWorkshop({ schemeId, api }) {
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
     objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");
     syncSubject(current, wall);
-    hint.textContent = workshopHint(tool);
+    hint.textContent = workshopHint(tool, workshopObjectWay);
     if (document.activeElement !== heightInput) {
       const own = findScheme(current, schemeId);
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
@@ -3019,9 +3629,13 @@ export function openWorkshop({ schemeId, api }) {
       ? (findSchemeObjectKind(current, object.kindId) || { name: "" }).name
       : workshopObjectKindName;
     if (names.includes(kindName)) objectKindSelect.value = kindName;
-    const shape = object ? object.shape : workshopObjectShape;
-    shapeButtons.forEach((button, index) => {
-      button.className = "ui-btn workshop__chip" + (SCHEME_OBJECT_SHAPES[index] === shape ? " is-on" : "");
+    // Выделенный объект **не помнит**, нарисовали его контуром или набрали
+    // числами, — и врать об этом нельзя: у прямоугольника горит
+    // «Прямоугольник», а способ выбирают для следующего.
+    const way = objectWay();
+    const shape = object ? object.shape : workshopShapeOfWay(way);
+    wayButtons.forEach((button, index) => {
+      button.className = "ui-btn workshop__chip" + (WORKSHOP_OBJECT_WAYS[index] === way ? " is-on" : "");
       button.disabled = Boolean(object);
     });
     const sizes = object || objectSizes(current, currentKindId(current));
@@ -3037,13 +3651,14 @@ export function openWorkshop({ schemeId, api }) {
     fieldValue(objectHeight, sizes.heightMm === null || sizes.heightMm === undefined ? "" : sizes.heightMm);
     fieldValue(objectFloor, sizes.heightAboveFloorMm || 0);
     const top = object ? schemeObjectTopMm(object) : null;
+    // У выделенного объекта в строке стоит его верх над полом, а без выделения
+    // — слова того способа, которым встанет следующий: они разные, и общая
+    // подсказка врала бы одному из трёх.
     subjectNote.textContent = object
       ? top === null
         ? strings.workshop.objectFullHeight
         : text("workshop.objectTop", { top })
-      : shape === "polyline"
-        ? strings.workshop.objectBandHint
-        : strings.workshop.objectHint;
+      : strings.workshop["wayNote_" + way];
   }
 
   /**

@@ -32,8 +32,11 @@ import {
   addOpening,
   addRoom,
   addScheme,
+  addSchemeObject,
   createProject,
   drawingBoundsMm,
+  ensureSchemeObjectKinds,
+  findSchemeObject,
   findScheme,
   openingsInWall,
   planFractionToMm,
@@ -41,11 +44,13 @@ import {
   planOriginOf,
   planPixelsPerMeter,
   planSizeMeters,
+  schemeObjectKindsInOrder,
   setPlanOrigin,
   setPlanScale,
   setSchemeWallHeight,
   schemeObjectCorners,
   segmentDistanceMm,
+  updateSchemeObject,
   wallVectors,
   wallsOnScheme,
 } from "../src/model.js";
@@ -57,9 +62,11 @@ import {
 import { identityTransform, rotateTransform } from "../src/imagePrep.js";
 import { applyPlanEdit } from "../src/panels/schemes.js";
 import {
+  WORKSHOP_CONTOUR_MIN,
   WORKSHOP_EMPTY_MM,
   WORKSHOP_GRID_STEPS_MM,
   WORKSHOP_OBJECT_FALLBACK,
+  WORKSHOP_OBJECT_WAYS,
   WORKSHOP_OPENING_DEFAULTS,
   WORKSHOP_ADDING,
   WORKSHOP_MODES,
@@ -82,12 +89,24 @@ import {
   workshopGridDrawStepMm,
   workshopHint,
   workshopInitialTool,
+  workshopLengthAt,
   workshopModeOf,
   workshopMoveVertex,
   workshopMoveWall,
   workshopObjectDefaultsByName,
+  workshopObjectHandles,
+  workshopObjectPatch,
   workshopOpeningAt,
+  workshopPathAnchor,
+  workshopPathSources,
   workshopPick,
+  workshopPointsExtend,
+  workshopPointsInsert,
+  workshopPointsMove,
+  workshopPointsRemove,
+  workshopRectCornerPatch,
+  workshopRectFromContour,
+  workshopShapeOfWay,
   workshopTryOpening,
   workshopPlacement,
   workshopPlanExtent,
@@ -98,6 +117,7 @@ import {
   workshopStatus,
   workshopToolOf,
   workshopVertexEnds,
+  workshopWayOfShape,
 } from "../src/panels/workshop.js";
 import { strings } from "../src/strings.js";
 
@@ -968,4 +988,409 @@ test("у каждого режима своя подсказка, и развё�
   const elevation = workshopHint(WORKSHOP_TOOL_ELEVATION);
   assert.ok(!/Delete|тянется/.test(elevation), "развёртка зовёт править: " + elevation);
   assert.match(elevation, /Выделение/);
+});
+
+// ——— объекты рисуются контуром и правятся вершинами (таск 137) ——————————
+//
+// Требования G193–G195. Слова заказчика: «при добавлении объектов типа
+// „Прямоугольник“ позволь не просто выставлять размеры, а просто рисовать его,
+// как сейчас метки — линии, только что бы обязательно надо было завершить
+// контур. А так же позволь редактировать их таская за края… в процессе
+// рисования над текущей линией указывай ей длину».
+//
+// Проверяется здесь то, чего живой прогон не поймает:
+//
+//   1. **Приведение контура к прямоугольнику.** Контур даёт многоугольник, а
+//      форма модели — `rect` (середина, ширина, глубина, поворот). Правило
+//      одно и названо: габарит в осях **первой нарисованной стороны**. Для
+//      настоящего прямоугольника оно точное — туда и обратно без потерь.
+//   2. **Правка за угол держит противоположный угол на месте.** Иначе вещь
+//      уезжала бы из-под руки, и заметить это можно было бы только глазами.
+//   3. **Одна дверь для предпросмотра и для записи** (`workshopObjectPatch`):
+//      разойдись они — призрак обещал бы одно, а в объект уходило бы другое.
+//   4. **G68:** объект, поставленный кликом, остаётся прежним — правка угла не
+//      трогает ни вид, ни высоты, ни форму.
+
+function withObject(base, fields) {
+  const ready = ensureSchemeObjectKinds(base.project);
+  const kindId = schemeObjectKindsInOrder(ready.project)[0].id;
+  const added = addSchemeObject(ready.project, {
+    schemeId: base.schemeId,
+    kindId,
+    heightMm: 500,
+    heightAboveFloorMm: 150,
+    ...fields,
+  });
+  return { project: added.project, schemeId: base.schemeId, object: added.schemeObject, kindId };
+}
+
+const boxOf = (points) => ({
+  minX: Math.min(...points.map((point) => point.x)),
+  minY: Math.min(...points.map((point) => point.y)),
+  maxX: Math.max(...points.map((point) => point.x)),
+  maxY: Math.max(...points.map((point) => point.y)),
+});
+
+test("замкнутый контур становится прямоугольником: габарит в осях первой стороны", () => {
+  const rect = workshopRectFromContour([
+    { x: 1000, y: 1000 },
+    { x: 3400, y: 1000 },
+    { x: 3400, y: 1600 },
+    { x: 1000, y: 1600 },
+  ]);
+  assert.deepEqual(rect, { atMm: { x: 2200, y: 1300 }, widthMm: 2400, depthMm: 600, turnDeg: 0 });
+});
+
+test("контур прямоугольника возвращает тот же прямоугольник — и под углом тоже", () => {
+  const source = { shape: "rect", atMm: { x: 5000, y: 4000 }, widthMm: 2400, depthMm: 600, turnDeg: 15 };
+  const rect = workshopRectFromContour(schemeObjectCorners(source));
+  assert.equal(rect.turnDeg, 15, "поворот взят у первой нарисованной стороны");
+  // Углы модель округляет до целых миллиметров, поэтому обратный ход сходится
+  // с точностью до миллиметра, а не до нуля.
+  assert.ok(Math.abs(rect.widthMm - 2400) <= 1, "ширина: " + rect.widthMm);
+  assert.ok(Math.abs(rect.depthMm - 600) <= 1, "глубина: " + rect.depthMm);
+  assert.ok(Math.abs(rect.atMm.x - 5000) <= 1 && Math.abs(rect.atMm.y - 4000) <= 1);
+});
+
+test("первая сторона решает, что ширина: обвёл с короткой — она и ширина", () => {
+  const along = workshopRectFromContour([
+    { x: 1000, y: 1000 },
+    { x: 1000, y: 1600 },
+    { x: 3400, y: 1600 },
+    { x: 3400, y: 1000 },
+  ]);
+  assert.equal(along.turnDeg, 90);
+  assert.equal(along.widthMm, 600, "первой нарисована короткая сторона");
+  assert.equal(along.depthMm, 2400);
+  // На плане это тот же прямоугольник: середина и габарит совпадают с тем,
+  // что вышло из обхода с длинной стороны.
+  assert.deepEqual(along.atMm, { x: 2200, y: 1300 });
+  assert.deepEqual(boxOf(schemeObjectCorners({ shape: "rect", ...along })), {
+    minX: 1000,
+    minY: 1000,
+    maxX: 3400,
+    maxY: 1600,
+  });
+});
+
+test("замыкающая вершина ничего не меняет: контур замкнут и так", () => {
+  const points = [
+    { x: 0, y: 0 },
+    { x: 2000, y: 0 },
+    { x: 2000, y: 1000 },
+    { x: 0, y: 1000 },
+  ];
+  assert.deepEqual(workshopRectFromContour([...points, { x: 0, y: 0 }]), workshopRectFromContour(points));
+});
+
+test("незамкнутым контуром объект не становится: двух вершин и прямой линии мало", () => {
+  assert.equal(WORKSHOP_CONTOUR_MIN, 3);
+  assert.equal(workshopRectFromContour([{ x: 0, y: 0 }, { x: 1000, y: 0 }]), null);
+  assert.equal(workshopRectFromContour([]), null);
+  // Три вершины на одной линии площади не дают — и прямоугольника тоже.
+  assert.equal(
+    workshopRectFromContour([{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 2000, y: 0 }]),
+    null,
+    "контур без площади",
+  );
+  // Два клика в одну точку — один клик, как у цепочки стен.
+  assert.equal(
+    workshopRectFromContour([{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 0 }]),
+    null,
+  );
+});
+
+test("кривой контур приводится габаритом — и накрывает всё, что обвели", () => {
+  // Буква «Г»: человек обвёл кухонный фронт с заворотом. Прямоугольником это
+  // не является, и приведение названо вслух — габарит в осях первой стороны.
+  const points = [
+    { x: 0, y: 0 },
+    { x: 3000, y: 0 },
+    { x: 3000, y: 600 },
+    { x: 600, y: 600 },
+    { x: 600, y: 2000 },
+    { x: 0, y: 2000 },
+  ];
+  const rect = workshopRectFromContour(points);
+  assert.equal(rect.turnDeg, 0);
+  assert.equal(rect.widthMm, 3000);
+  assert.equal(rect.depthMm, 2000);
+  const box = boxOf(schemeObjectCorners({ shape: "rect", ...rect }));
+  for (const point of points) {
+    assert.ok(
+      point.x >= box.minX && point.x <= box.maxX && point.y >= box.minY && point.y <= box.maxY,
+      "вершина контура осталась снаружи габарита",
+    );
+  }
+});
+
+test("правка за угол держит противоположный угол на месте", () => {
+  const object = { shape: "rect", atMm: { x: 2000, y: 1000 }, widthMm: 1000, depthMm: 400, turnDeg: 0 };
+  const corners = schemeObjectCorners(object);
+  assert.deepEqual(corners[0], { x: 1500, y: 800 });
+  const patch = workshopRectCornerPatch(object, 0, { x: 1000, y: 500 });
+  assert.deepEqual(patch, { atMm: { x: 1750, y: 850 }, widthMm: 1500, depthMm: 700 });
+  const after = schemeObjectCorners({ ...object, ...patch });
+  assert.deepEqual(after[2], corners[2], "угол напротив не сдвинулся ни на миллиметр");
+  assert.deepEqual(after[0], { x: 1000, y: 500 }, "взятый угол встал под руку");
+});
+
+test("повёрнутый прямоугольник правится за угол по своим осям", () => {
+  const object = { shape: "rect", atMm: { x: 4000, y: 3000 }, widthMm: 2000, depthMm: 800, turnDeg: 90 };
+  const corners = schemeObjectCorners(object);
+  const patch = workshopRectCornerPatch(object, 1, { x: corners[1].x + 300, y: corners[1].y + 500 });
+  const after = schemeObjectCorners({ ...object, ...patch });
+  assert.deepEqual(after[3], corners[3], "угол напротив держится");
+  // Поворот правка угла не трогает: вещь растянули, а не повернули.
+  assert.equal(patch.turnDeg, undefined);
+});
+
+test("угол, сведённый в точку, оставляет миллиметр, а не нуль", () => {
+  const object = { shape: "rect", atMm: { x: 1000, y: 1000 }, widthMm: 600, depthMm: 600, turnDeg: 0 };
+  const corners = schemeObjectCorners(object);
+  const patch = workshopRectCornerPatch(object, 0, corners[2]);
+  assert.equal(patch.widthMm, 1);
+  assert.equal(patch.depthMm, 1);
+  // Модель прямоугольник нулевого размера не принимает — значит и окно не
+  // должно его предлагать.
+  assert.doesNotThrow(() => schemeObjectCorners({ ...object, ...patch }));
+});
+
+test("ломаная объекта правится теми же четырьмя движениями, что ломаная метки", () => {
+  const points = [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 800 }];
+  assert.deepEqual(workshopPointsMove(points, 1, { x: 1200, y: 100 }), [
+    { x: 0, y: 0 },
+    { x: 1200, y: 100 },
+    { x: 1000, y: 800 },
+  ]);
+  // Вершина от ручки на середине встаёт **за** своим отрезком, как на холсте.
+  assert.deepEqual(workshopPointsInsert(points, 0, { x: 500, y: -200 }), [
+    { x: 0, y: 0 },
+    { x: 500, y: -200 },
+    { x: 1000, y: 0 },
+    { x: 1000, y: 800 },
+  ]);
+  assert.deepEqual(workshopPointsExtend(points, "start", { x: -500, y: 0 })[0], { x: -500, y: 0 });
+  assert.deepEqual(workshopPointsExtend(points, "end", { x: 1000, y: 1500 })[3], { x: 1000, y: 1500 });
+  assert.deepEqual(workshopPointsRemove(points, 1), [{ x: 0, y: 0 }, { x: 1000, y: 800 }]);
+  // Исходный список не меняется ни одним из движений: правит объект только
+  // модель, а здесь считают новый список.
+  assert.deepEqual(points, [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 800 }]);
+  // Мимо списка — ничего: промах по индексу не роняет и не выдумывает вершину.
+  assert.equal(workshopPointsMove(points, 7, { x: 0, y: 0 }), null);
+  assert.equal(workshopPointsInsert(points, -1, { x: 0, y: 0 }), null);
+  assert.equal(workshopPointsExtend(points, "середина", { x: 0, y: 0 }), null);
+});
+
+test("из полосы в две вершины вершину не убрать — и отказывает это модель", () => {
+  const base = planProject();
+  const made = withObject(base, {
+    shape: "polyline",
+    pointsMm: [{ x: 0, y: 0 }, { x: 2000, y: 0 }],
+    depthMm: 600,
+  });
+  const short = workshopPointsRemove(made.object.pointsMm, 0);
+  assert.deepEqual(short, [{ x: 2000, y: 0 }], "список считается, а запрет живёт в модели");
+  assert.throws(
+    () => updateSchemeObject(made.project, made.object.id, { pointsMm: short }),
+    (error) => error.message === strings.errors.schemeObjectShortLine,
+  );
+});
+
+test("ручки объекта взяты у холста: вершины, середины отрезков и концы полосы", () => {
+  const view = viewOf({ zoom: 1 });
+  const band = {
+    shape: "polyline",
+    pointsMm: [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 800 }],
+    depthMm: 600,
+  };
+  const handles = workshopObjectHandles(band, view);
+  const kinds = handles.map((handle) => handle.kind);
+  assert.equal(kinds.filter((kind) => kind === "vertex").length, 3);
+  assert.equal(kinds.filter((kind) => kind === "insert").length, 2, "по ручке на каждый отрезок");
+  assert.equal(kinds.filter((kind) => kind === "extend").length, 2, "полоса не замкнута — у неё два конца");
+  // Вершина в списке раньше середины и конца: спор за клик решается порядком,
+  // ровно как у холста (`render.pathEditHandles`).
+  assert.equal(handles[0].kind, "vertex");
+  // У прямоугольника ручек ровно четыре — это углы, а не путь: вставлять в
+  // прямоугольник пятый угол и продолжать его некуда.
+  const rect = workshopObjectHandles(
+    { shape: "rect", atMm: { x: 2000, y: 1000 }, widthMm: 1000, depthMm: 400, turnDeg: 0 },
+    view,
+  );
+  assert.equal(rect.length, 4);
+  assert.deepEqual([...new Set(rect.map((handle) => handle.kind))], ["vertex"]);
+});
+
+test("ручка выделенного объекта старше его тела — ею и правят", () => {
+  const base = drawnRoom();
+  const made = withObject(
+    { project: base.project, schemeId: base.schemeId },
+    { shape: "rect", atMm: { x: 2000, y: 1500 }, widthMm: 1000, depthMm: 600, turnDeg: 0 },
+  );
+  const view = viewOf({ zoom: 1 });
+  const chosen = { kind: "object", id: made.object.id };
+  const corner = schemeObjectCorners(made.object)[0];
+  const onHandle = workshopPick(made.project, made.schemeId, corner, view, chosen);
+  assert.equal(onHandle.kind, "objectHandle");
+  assert.equal(onHandle.id, made.object.id);
+  assert.equal(onHandle.handle.kind, "vertex");
+  assert.equal(onHandle.handle.index, 0);
+  // Тело объекта берётся как прежде — целиком (G68: прежняя рука цела).
+  const onBody = workshopPick(made.project, made.schemeId, { x: 2000, y: 1500 }, view, chosen);
+  assert.equal(onBody.kind, "object");
+  // Без выделения ручек нет: угол объекта — такое же пустое место, как и был.
+  assert.equal(workshopPick(made.project, made.schemeId, corner, view, null).kind, "object");
+});
+
+test("предпросмотр и запись — одна дверь: патч считается один раз", () => {
+  const base = planProject();
+  const made = withObject(base, {
+    shape: "polyline",
+    pointsMm: [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 800 }],
+    depthMm: 600,
+  });
+  const view = viewOf({ zoom: 1 });
+  const handles = workshopObjectHandles(made.object, view);
+  const vertex = handles.find((handle) => handle.kind === "vertex" && handle.index === 1);
+  const insert = handles.find((handle) => handle.kind === "insert" && handle.index === 0);
+  const extend = handles.find((handle) => handle.kind === "extend" && handle.end === "start");
+  const moved = workshopObjectPatch(made.object, vertex, { x: 1200, y: 100 });
+  assert.deepEqual(moved.pointsMm[1], { x: 1200, y: 100 });
+  assert.equal(workshopObjectPatch(made.object, insert, { x: 500, y: -300 }).pointsMm.length, 4);
+  assert.deepEqual(workshopObjectPatch(made.object, extend, { x: -400, y: 0 }).pointsMm[0], { x: -400, y: 0 });
+  // Патч ложится в модель как есть — иначе предпросмотр обещал бы одно, а в
+  // объект уходило бы другое.
+  const after = updateSchemeObject(made.project, made.object.id, moved).schemeObject;
+  assert.deepEqual(after.pointsMm, moved.pointsMm);
+  assert.equal(after.shape, "polyline");
+  // Прямоугольник той же дверью правится за угол, а середины и концы ему не
+  // полагаются — у него их нет.
+  const rect = { shape: "rect", atMm: { x: 0, y: 0 }, widthMm: 1000, depthMm: 400, turnDeg: 0 };
+  assert.deepEqual(
+    workshopObjectPatch(rect, { kind: "vertex", index: 2 }, { x: 800, y: 300 }),
+    workshopRectCornerPatch(rect, 2, { x: 800, y: 300 }),
+  );
+  assert.equal(workshopObjectPatch(rect, { kind: "insert", index: 0 }, { x: 0, y: 0 }), null);
+});
+
+test("опора магнита у правимой вершины — соседняя, и сама с собой она не равняется", () => {
+  const points = [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 800 }];
+  // Правило взято у холста (`canvasPathSnap`): опора идёт последней, правимая
+  // вершина в источники не попадает.
+  assert.deepEqual(workshopPathSources(points, 0, 1), [{ x: 1000, y: 800 }, { x: 0, y: 0 }]);
+  assert.deepEqual(workshopPathSources(points, 1, 2), [{ x: 0, y: 0 }, { x: 1000, y: 0 }]);
+  // У новой вершины опора — та, от которой она растёт, и пропускать нечего.
+  assert.deepEqual(workshopPathSources(points, 2, -1), [
+    { x: 0, y: 0 },
+    { x: 1000, y: 0 },
+    { x: 1000, y: 800 },
+  ]);
+});
+
+test("длина стоит над отрезком, а не под ним и не в стороне", () => {
+  const gap = 12;
+  const flat = workshopLengthAt({ x: 100, y: 200 }, { x: 300, y: 200 }, gap);
+  assert.equal(flat.x, 200, "середина отрезка");
+  assert.equal(flat.y, 200 - gap, "над отрезком");
+  // Отрезок, нарисованный в обратную сторону, подпись не переворачивает.
+  assert.deepEqual(workshopLengthAt({ x: 300, y: 200 }, { x: 100, y: 200 }, gap), flat);
+  const steep = workshopLengthAt({ x: 100, y: 100 }, { x: 100, y: 500 }, gap);
+  assert.equal(steep.y, 300);
+  assert.equal(Math.abs(steep.x - 100), gap, "у вертикали подпись уходит в сторону");
+  // Нулевой отрезок подписи не получает — её некуда повернуть.
+  assert.equal(workshopLengthAt({ x: 10, y: 10 }, { x: 10, y: 10 }, gap), null);
+});
+
+test("три способа поставить объект, и у каждого своя форма в модели", () => {
+  assert.deepEqual(WORKSHOP_OBJECT_WAYS, ["rect", "contour", "polyline"]);
+  assert.equal(workshopShapeOfWay("rect"), "rect");
+  assert.equal(workshopShapeOfWay("contour"), "rect", "контур даёт прямоугольник");
+  assert.equal(workshopShapeOfWay("polyline"), "polyline");
+  // Форм в модели по-прежнему две, и каждая достижима.
+  for (const shape of SCHEME_OBJECT_SHAPES) {
+    assert.ok(
+      WORKSHOP_OBJECT_WAYS.some((way) => workshopShapeOfWay(way) === shape),
+      shape + ": формы не поставить ни одним способом",
+    );
+    assert.equal(workshopShapeOfWay(workshopWayOfShape(shape)), shape);
+  }
+  // Поставленный объект не помнит, каким способом его нарисовали, — и врать об
+  // этом нельзя: у прямоугольника способ читается прямоугольником.
+  assert.equal(workshopWayOfShape("rect"), "rect");
+  assert.equal(workshopWayOfShape("polyline"), "polyline");
+});
+
+test("G68: объект, поставленный кликом, правка угла не меняет ни в чём остальном", () => {
+  const base = planProject();
+  const made = withObject(base, {
+    shape: "rect",
+    atMm: { x: 1000, y: 500 },
+    widthMm: 1200,
+    depthMm: 100,
+    turnDeg: 30,
+  });
+  const patch = workshopRectCornerPatch(made.object, 0, { x: 300, y: 300 });
+  const after = updateSchemeObject(made.project, made.object.id, patch).schemeObject;
+  assert.equal(after.shape, "rect");
+  assert.equal(after.kindId, made.kindId);
+  assert.equal(after.turnDeg, 30, "поворот прежний");
+  assert.equal(after.heightMm, 500);
+  assert.equal(after.heightAboveFloorMm, 150);
+  // И числами он правится как прежде: правка угла прежней правки не отменяет.
+  const typed = updateSchemeObject(made.project, made.object.id, {
+    widthMm: 1300,
+    depthMm: 120,
+    turnDeg: 45,
+  }).schemeObject;
+  assert.equal(typed.widthMm, 1300);
+  assert.equal(typed.depthMm, 120);
+  assert.equal(typed.turnDeg, 45);
+  assert.deepEqual(findSchemeObject(made.project, made.object.id).atMm, { x: 1000, y: 500 });
+});
+
+test("у каждого способа своя подсказка: про замыкание контура читает тот, кто его обводит", () => {
+  const click = workshopHint("objects", "rect");
+  const contour = workshopHint("objects", "contour");
+  const band = workshopHint("objects", "polyline");
+  assert.equal(new Set([click, contour, band]).size, 3, "подсказки способов повторяются");
+  assert.match(contour, /амкн/, "про обязательное замыкание не сказано");
+  assert.ok(!/амкн/.test(click), "клик зовёт замыкать контур: " + click);
+  // Длина при рисовании названа там, где рисуют (G195).
+  assert.match(contour, /[Дд]лина/);
+  assert.match(band, /[Дд]лина/);
+  // Способ не назван — подсказка та же, что у клика: умолчание способа — он.
+  assert.equal(workshopHint("objects"), click);
+  // Правка называет и ручки полосы, и углы объекта (G194).
+  const edit = workshopHint("edit");
+  assert.match(edit, /угл/);
+  assert.match(edit, /середине отрезка/);
+});
+
+test("опора угла у прямоугольника — соседний угол по кольцу, а у полосы — предыдущая вершина", () => {
+  const corners = schemeObjectCorners({
+    shape: "rect",
+    atMm: { x: 0, y: 0 },
+    widthMm: 1000,
+    depthMm: 400,
+    turnDeg: 0,
+  });
+  // У прямоугольника углы — кольцо: у первого опора последний, а не второй.
+  assert.deepEqual(workshopPathAnchor(corners, { kind: "vertex", index: 0, ring: true }), {
+    anchorIndex: 3,
+    skipIndex: 0,
+  });
+  assert.deepEqual(workshopPathAnchor(corners, { kind: "vertex", index: 2, ring: true }), {
+    anchorIndex: 1,
+    skipIndex: 2,
+  });
+  // У полосы концов два, и у первой вершины опорой служит вторая.
+  const points = [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 800 }];
+  assert.deepEqual(workshopPathAnchor(points, { kind: "vertex", index: 0 }), { anchorIndex: 1, skipIndex: 0 });
+  // Новая вершина растёт от своей ручки, и пропускать нечего.
+  assert.deepEqual(workshopPathAnchor(points, { kind: "insert", index: 1 }), { anchorIndex: 1, skipIndex: -1 });
+  assert.deepEqual(workshopPathAnchor(points, { kind: "extend", index: 2, end: "end" }), {
+    anchorIndex: 2,
+    skipIndex: -1,
+  });
 });

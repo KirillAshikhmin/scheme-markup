@@ -609,8 +609,10 @@ let canvasHoverHandle = null;
 // которую сам только что и поставил (первый клик ставит, второй попадает уже
 // по ней). Смотри `canvasDoubleClick`.
 let canvasFreshVertex = null;
-// Столько времени вершина считается «только что поставленной».
-const CANVAS_FRESH_VERTEX_MS = 600;
+// Столько времени вершина считается «только что поставленной». Наружу отдана
+// мастерской (таск 137): полосу объекта там правят той же рукой, и окно, которое
+// считало бы вершину свежей другое время, вело бы себя иначе на том же жесте.
+export const CANVAS_FRESH_VERTEX_MS = 600;
 
 function canvasNow() {
   const clock = typeof performance === "object" && performance !== null ? performance : null;
