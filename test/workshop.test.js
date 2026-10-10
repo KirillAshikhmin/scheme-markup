@@ -40,6 +40,7 @@ import {
   planMmToFraction,
   planOriginOf,
   planPixelsPerMeter,
+  planSizeMeters,
   setPlanOrigin,
   setPlanScale,
   setSchemeWallHeight,
@@ -61,7 +62,9 @@ import {
   WORKSHOP_OBJECT_FALLBACK,
   WORKSHOP_OPENING_DEFAULTS,
   WORKSHOP_ORIGIN_AT,
+  WORKSHOP_PLAN_ZOOM_MAX,
   WORKSHOP_SHEET,
+  WORKSHOP_TOOL_SCALE,
   WORKSHOP_UNIT,
   WORKSHOP_ZOOM_MAX,
   WORKSHOP_ZOOM_MIN,
@@ -75,6 +78,7 @@ import {
   workshopFitView,
   workshopGridDrawStepMm,
   workshopHint,
+  workshopInitialTool,
   workshopMoveVertex,
   workshopMoveWall,
   workshopObjectDefaultsByName,
@@ -82,6 +86,8 @@ import {
   workshopPick,
   workshopTryOpening,
   workshopPlacement,
+  workshopPlanExtent,
+  workshopPlanFraction,
   workshopPlanPointScreen,
   workshopRoundMm,
   workshopSnapMm,
@@ -827,4 +833,84 @@ test("подсказка под полем своя у каждого занят
   assert.match(workshopHint("walls"), /вершина стены/);
   // Незнакомое занятие не оставляет человека без слов.
   assert.equal(workshopHint("какое-то"), workshopHint("walls"));
+});
+
+// ——— масштаб задаётся в мастерской (таск 132, дефект D22) ——————————————
+//
+// Чем здесь легко соврать: показать картинку, подразумевая миллиметры, которых
+// нет. Поэтому проверяется не «видно ли» — это дело живого прогона, — а **чем
+// меряется кадр**: габарит в точках подложки, доли из тех же точек и согласие
+// этих долей с моделью.
+
+test("подложка без калибровки открывается занятием «Масштаб», а не стенами", () => {
+  const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
+  assert.equal(workshopInitialTool(noScale.project, noScale.scheme.id), WORKSHOP_TOOL_SCALE);
+  // Везде ещё — стенами, как было: калибровка там не нужна и дорогу не
+  // загораживает (G68 — объект, который чертили раньше, открывается как прежде).
+  const ready = planProject();
+  assert.equal(workshopInitialTool(ready.project, ready.schemeId), "walls");
+  const blank = blankProject();
+  assert.equal(workshopInitialTool(blank.project, blank.schemeId), "walls");
+});
+
+test("кадр занятия «Масштаб» меряется точками подложки, а не миллиметрами", () => {
+  const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
+  const extent = workshopPlanExtent(noScale.project, noScale.scheme.id);
+  // Габарит — ровно картинка: левый верхний угол в нуле, правый нижний в её
+  // размере. Миллиметров в этом габарите нет ни одного.
+  assert.deepEqual(extent, { minX: 0, minY: 0, maxX: 1200, maxY: 800 });
+  // Вписывается целиком и попадает серединой в середину поля.
+  const view = workshopFitView(extent, { width: 600, height: 400 }, WORKSHOP_PLAN_ZOOM_MAX);
+  const middle = planToScreen({ x: 600, y: 400 }, WORKSHOP_UNIT, view);
+  assert.ok(Math.abs(middle.x - 300) < 0.001 && Math.abs(middle.y - 200) < 0.001, "середина картинки — середина поля");
+  const corner = planToScreen({ x: 1200, y: 800 }, WORKSHOP_UNIT, view);
+  assert.ok(corner.x <= 600 && corner.y <= 400, "картинка влезла целиком: " + JSON.stringify(corner));
+  // У схемы без подложки кадра нет вовсе — калибровать нечего.
+  const blank = blankProject();
+  assert.equal(workshopPlanExtent(blank.project, blank.schemeId), null);
+});
+
+test("точка подложки превращается в долю плана и зажимается её краем", () => {
+  const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
+  const id = noScale.scheme.id;
+  assert.deepEqual(workshopPlanFraction(noScale.project, id, { x: 600, y: 400 }), { x: 0.5, y: 0.5 });
+  assert.deepEqual(workshopPlanFraction(noScale.project, id, { x: 300, y: 200 }), { x: 0.25, y: 0.25 });
+  // Конец отрезка, выведенный за край картинки, принадлежит краю: доли живут
+  // в 0…1 (ADR 002), и выпускать их за эти границы нельзя.
+  assert.deepEqual(workshopPlanFraction(noScale.project, id, { x: -50, y: 2000 }), { x: 0, y: 1 });
+});
+
+test("отрезок, проведённый в окне, даёт тот же масштаб, что калибровка на холсте", () => {
+  const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
+  const id = noScale.scheme.id;
+  // Полширины картинки объявлены шестью метрами: 600 точек на 6 м — сто точек
+  // на метр, как в остальных тестах этого файла.
+  const a = workshopPlanFraction(noScale.project, id, { x: 300, y: 400 });
+  const b = workshopPlanFraction(noScale.project, id, { x: 900, y: 400 });
+  const scaled = setPlanScale(noScale.project, id, { a, b, meters: 6 }).project;
+  assert.ok(Math.abs(planPixelsPerMeter(scaled, id) - 100) < 1e-6, planPixelsPerMeter(scaled, id));
+  const size = planSizeMeters(scaled, id);
+  assert.ok(Math.abs(size.width - 12) < 1e-6 && Math.abs(size.height - 8) < 1e-6, JSON.stringify(size));
+  // Масштаб задан — подложку теперь есть на что положить, и слой доступен.
+  const spot = workshopPlacement(scaled, id);
+  assert.equal(spot.kind, "ready");
+  assert.equal(spot.pending, true, "привязку всё так же ставит первая стена, а не калибровка");
+  // До калибровки — отказ, и он не изменился: это и есть честное ограничение.
+  assert.equal(workshopPlacement(noScale.project, id).kind, "noScale");
+});
+
+test("подсказка занятия «Масштаб» — та же, что над холстом: второго описания жеста нет", () => {
+  assert.equal(workshopHint(WORKSHOP_TOOL_SCALE), strings.scale.hint);
+  assert.notEqual(workshopHint(WORKSHOP_TOOL_SCALE), workshopHint("walls"));
+});
+
+test("потолок увеличения свой у каждого кадра: точка плана крупнее миллиметра", () => {
+  // Один предел на оба кадра не годится: в миллиметровом полтора пикселя на
+  // миллиметр — это уже некуда, а в кадре подложки это полтора пикселя на
+  // точку фотографии, и конец стены на ней не поймать.
+  assert.equal(workshopClampZoom(1e6), WORKSHOP_ZOOM_MAX);
+  assert.equal(workshopClampZoom(1e6, WORKSHOP_PLAN_ZOOM_MAX), WORKSHOP_PLAN_ZOOM_MAX);
+  assert.ok(WORKSHOP_PLAN_ZOOM_MAX > WORKSHOP_ZOOM_MAX);
+  // Снизу предел общий: километровый план в окошко глубже не вписывается.
+  assert.equal(workshopClampZoom(0, WORKSHOP_PLAN_ZOOM_MAX), WORKSHOP_ZOOM_MIN);
 });

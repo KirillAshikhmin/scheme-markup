@@ -173,12 +173,17 @@ export function applyPlanEdit(project, schemeId, { imageId, width, height, trans
  * это то, что инженер сверяет с чертежом глазом: дом по фасаду двенадцать
  * метров, значит «план 12,4 × 8,6 м» подтверждает калибровку, а «124 × 86»
  * выдаёт запятую не на том месте раньше, чем по этому масштабу закажут ленту.
+ *
+ * **Без масштаба кнопка зовёт, а не сообщает** (дефект D22). Прежде на ней
+ * стояло «Масштаб не задан»: на кнопку это похоже не было, и заказчик спросил
+ * «а как его задать?», хотя нажатие и было ответом. Состояние осталось в
+ * подсказке — его читают, когда хотят знать, а не когда ищут, за что нажать.
  */
 export function schemesScaleView(project, schemeId, name) {
   const scale = planScaleOf(project, schemeId);
   const size = planSizeMeters(project, schemeId);
   if (!scale || !size) {
-    return { set: false, label: strings.scale.notSet, title: text("scale.notSetTitle", { name }) };
+    return { set: false, label: strings.scale.ask, title: text("scale.notSetTitle", { name }) };
   }
   return {
     set: true,
@@ -914,15 +919,12 @@ function mountSchemesPanel(host, api) {
     openDrawing(added.scheme.id);
   }
 
-  // Мастерская чертежа — своё окно (`panels/workshop.js`). Калибровка живёт на
-  // холсте, поэтому окно её не знает, а просит сделать: иначе мастерская
-  // потянула бы за собой половину этой панели.
+  // Мастерская чертежа — своё окно (`panels/workshop.js`). Калибровку она
+  // делает сама, своим занятием «Масштаб»: прежде окно просило эту панель
+  // перевести холст в режим — и закрывалось, выставляя человека ровно тогда,
+  // когда он пришёл обводить план (дефект D22, таск 132).
   function openDrawing(schemeId) {
-    openWorkshop({
-      schemeId,
-      api: { getState, setState, notify, subscribe },
-      onCalibrate: (target) => startScale(target),
-    });
+    openWorkshop({ schemeId, api: { getState, setState, notify, subscribe } });
   }
 
   /**
@@ -1066,8 +1068,21 @@ function mountSchemesPanel(host, api) {
   // Ручка стоит в строке схемы, а не в инструментах: масштаб принадлежит
   // схеме. У этажей разные планы и разные калибровки, и кнопка у каждой свои.
 
-  // Клик по кнопке: масштаба нет — сразу калибруем (лишнее окно там ни о чём);
-  // есть — показываем, что задано, и спрашиваем, калибровать заново или снять.
+  /**
+   * Клик по кнопке масштаба: окно с объяснением, а потом уже режим.
+   *
+   * **Первый заход объясняет не меньше повторного** — и это исправление
+   * дефекта D22, а не украшение. Прежде развилка стояла наоборот: масштаб
+   * задан — окно с `dialogHint` («показываете на плане две точки и говорите,
+   * сколько между ними метров»), масштаба нет — молча режим. То есть
+   * объяснение получал тот, кто уже калибровал, а новичка, которому оно
+   * нужнее всего, бросали в режим без слова. Заказчик так и сказал: «Вообще не
+   * очевидно что это кнопка и холст переходит в режим калибровки».
+   *
+   * Лишний клик здесь дешевле непонятного состояния: человек читает, что
+   * сейчас случится, и сам нажимает «Откалибровать по отрезку» — дальше режим
+   * для него не новость, а то, о чём он попросил.
+   */
   async function editScale(schemeId) {
     const state = getState();
     const scheme = findScheme(state.project, schemeId);
@@ -1077,37 +1092,39 @@ function mountSchemesPanel(host, api) {
       return;
     }
     const scale = planScaleOf(state.project, schemeId);
-    if (!scale) {
-      startScale(schemeId);
-      return;
-    }
-    const size = planSizeMeters(state.project, schemeId);
+    const size = scale ? planSizeMeters(state.project, schemeId) : null;
     let modal = null;
     const body = uiEl("div", {}, [
       uiEl("p", {
-        text: text("scale.dialogSet", {
-          meters: formatMeters(scale.meters),
-          width: size ? formatMeters(size.width) : "",
-          height: size ? formatMeters(size.height) : "",
-        }),
+        text: scale
+          ? text("scale.dialogSet", {
+              meters: formatMeters(scale.meters),
+              width: size ? formatMeters(size.width) : "",
+              height: size ? formatMeters(size.height) : "",
+            })
+          : strings.scale.dialogNone,
       }),
       uiEl("p", { class: "modal__hint", text: strings.scale.dialogHint }),
     ]);
     modal = uiModal({
       title: text("scale.dialogTitle", { name: scheme.name }),
       body,
+      // «Убрать масштаб» есть только там, где есть что убирать: кнопка,
+      // которая никогда не оживает, хуже отсутствующей.
       actions: [
         uiButton(strings.dialog.cancel, { on: { click: () => modal.close() } }),
-        uiButton(strings.scale.clear, {
-          class: "ui-btn ui-btn--danger",
-          on: {
-            click: () => {
-              modal.close();
-              dropScale(schemeId);
-            },
-          },
-        }),
-        uiButton(strings.scale.again, {
+        scale
+          ? uiButton(strings.scale.clear, {
+              class: "ui-btn ui-btn--danger",
+              on: {
+                click: () => {
+                  modal.close();
+                  dropScale(schemeId);
+                },
+              },
+            })
+          : null,
+        uiButton(scale ? strings.scale.again : strings.scale.start, {
           class: "ui-btn ui-btn--accent",
           on: {
             click: () => {
@@ -1116,13 +1133,20 @@ function mountSchemesPanel(host, api) {
             },
           },
         }),
-      ],
+      ].filter(Boolean),
     });
   }
 
   // Калибруют на холсте — там план и видно. Панель только открывает нужную
   // схему и отдаёт холсту режим; выделение при этом снимается, чтобы ручки
   // метки не стояли под рукой, которая целится в точку отрезка.
+  //
+  // **Переход в режим говорит о себе плашкой.** Подсказка над холстом про
+  // калибровку есть (`scale.hint`), но её можно свернуть — свёрнутость живёт в
+  // настройках браузера, — и тогда от смены режима не остаётся ни одного
+  // видимого следа: ряд «Выделение/Добавление» в инструментах показывает при
+  // калибровке обе кнопки неактивными, то есть ровно ничего. Заказчик это и
+  // увидел: «холст переходит в режим калибровки» — незаметно.
   function startScale(schemeId) {
     setState({
       schemeId,
@@ -1131,6 +1155,7 @@ function mountSchemesPanel(host, api) {
       editPathId: null,
       mode: CANVAS_MODE_SCALE,
     });
+    notify(strings.scale.started);
   }
 
   function dropScale(schemeId) {
