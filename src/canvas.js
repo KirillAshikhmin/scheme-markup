@@ -19,6 +19,7 @@ import {
   addToGroup,
   applyMarkWalls,
   applyRoomOutlines,
+  blockMembers,
   blockStepPx,
   deleteMark,
   deleteOutline,
@@ -767,6 +768,22 @@ function canvasResize() {
   canvasPaint();
 }
 
+/**
+ * Что обведено выделением в этом кадре.
+ *
+ * Обычно — выделенные метки сеанса. Пока ведут группу (G189), обведена вся
+ * она: по пунктиру видно, что взяли блок, а не одну розетку, и видно это до
+ * того, как кнопка отпущена. Выделение сеанса при этом не трогается — в нём
+ * остаётся взятая метка, у неё и после переноса открыта карточка и стоят
+ * ручки «+». Кадр говорит «везу блок», состояние — «работаю с этой меткой»,
+ * и путать эти два ответа нельзя: правка полей в панели адресуется одной.
+ */
+function canvasFrameSelected(state) {
+  const moving = canvasDrag && canvasDrag.kind === "mark" && canvasDrag.moved ? canvasDrag.moving : null;
+  if (!moving || moving.length < 2) return state.selectedMarkIds;
+  return moving;
+}
+
 function canvasPaint() {
   if (!canvasCtx || !canvasNode) return;
   const ratio = window.devicePixelRatio || 1;
@@ -787,7 +804,7 @@ function canvasPaint() {
     selectedWallId: state.selectedWallId || null,
     filter: state.filter,
     view,
-    selectedIds: state.selectedMarkIds,
+    selectedIds: canvasFrameSelected(state),
     selectedOutlineId: state.selectedOutlineId || null,
     draft: canvasDraft,
     guides: canvasDrag && (canvasDrag.kind === "pathVertex" || canvasDrag.kind === "pathAdd") ? canvasDrag.guides : null,
@@ -2642,6 +2659,11 @@ function canvasGrabDrag(state, scheme, view, point, pick) {
       kind,
       markId: pick.markId,
       groupId: pick.groupId || null,
+      // У пальца Ctrl нет, и взятая долгим нажатием группа едет целиком — то
+      // самое умолчание, о котором просил заказчик (G189). Разнять блок можно
+      // мышью с Ctrl/Cmd; на планшете метку из блока правят, уводя её ручкой
+      // «+» заново, — отдельного жеста для этого не выдумано.
+      moving: canvasMoveIds(state.project, pick.markId, pick.groupId || null, false),
       anchor: canvasNearestVertex(mark, point, scheme, view),
       before: state.project,
       selectId: pick.markId,
@@ -2976,10 +2998,16 @@ function canvasPointerDown(event) {
       };
       return;
     }
+    const kind = hit.part === "label" ? "label" : "mark";
     canvasDrag = {
-      kind: hit.part === "label" ? "label" : "mark",
+      kind,
       markId: hit.markId,
       groupId: hit.groupId,
+      // Кого везёт жест (G189). Решается **на нажатии**, один раз: жест, у
+      // которого смысл меняется посреди ведения, нельзя ни показать, ни
+      // отменить одним шагом. Ctrl/Cmd, нажатый после того как метку уже
+      // повезли, эту группу не разнимает — отпустите и возьмите снова.
+      moving: kind === "mark" ? canvasMoveIds(state.project, hit.markId, hit.groupId, canvasDragSolo(event)) : null,
       anchor: canvasNearestVertex(findMark(state.project, hit.markId), point, scheme, view),
       start: point,
       before: state.project,
@@ -3046,6 +3074,70 @@ function canvasWallAt(state, plan) {
   return best ? best.id : null;
 }
 
+// ——— группа едет как одна метка ———————————————————————————————————————
+//
+// Заказчик (G189): «группы выключателей\розеток давай двигать вместе, как одну
+// метку по умолчанию, а с зажатым ctrl\command уже отдельно каждую точку».
+// До этого рамка, собранная ручкой «+», разъезжалась по одной метке: взял
+// среднюю розетку из трёх — уехала одна, а блок перестал быть блоком.
+//
+// **Группа** здесь — ровно та, что в ADR 004 у режима «каждая своя»: несколько
+// самостоятельных меток, связанных `group {markIds}` с общей подписью-
+// перечислением. Второй механизм того же ADR — «одна метка на блок» — уже
+// едет целиком и без всякой правки: там точки лежат в одной метке, и
+// перетаскивание всегда возило их вместе. Третьей сущности не заводится.
+//
+// Выделение фильтром не сужается: скрытая метка блока едет вместе со
+// остальными. Блок — одно место на плане; оставь её позади, и человек увидит
+// разъехавшийся блок, только сняв фильтр, — а это и есть испорченная
+// разметка (G68). Решение видно в объекте целиком, а не в текущем кадре.
+
+/**
+ * Разнимает ли этот жест группу: Ctrl на Windows, Cmd на Mac. Разбор тот же,
+ * что у Ctrl+C/Ctrl+V и Ctrl+Z в `canvasKeyDown`, — обе клавиши названы
+ * заказчиком, и второй правды о них в сборке нет.
+ */
+export function canvasDragSolo(event) {
+  return Boolean(event && (event.ctrlKey || event.metaKey));
+}
+
+/**
+ * Какие метки везёт жест: одну взятую или всю её группу.
+ *
+ * `solo` — Ctrl/Cmd на нажатии. Порядок — модельный `blockMembers`: своей
+ * сортировки холст не заводит. Взятая метка в списке есть всегда, даже если
+ * группа рассыпалась (висячий `groupId` после удаления соседей).
+ */
+export function canvasMoveIds(project, markId, groupId, solo) {
+  if (!markId) return [];
+  if (solo || !groupId) return [markId];
+  const group = findGroup(project, groupId);
+  if (!group) return [markId];
+  const ids = blockMembers(project, group.markIds).map((mark) => mark.id);
+  if (!ids.includes(markId)) ids.push(markId);
+  return ids.length > 1 ? ids : [markId];
+}
+
+/**
+ * Сдвинуть метки на один и тот же вектор в долях плана.
+ *
+ * Объект правит модель — `updateMark` на каждую метку, по снимку «до»: сдвиг
+ * один, и форма блока от перетаскивания не меняется никогда. Результат — один
+ * объект «после», поэтому в историю он уходит одним шагом `canvasCommit`.
+ * Исчезнувшая метка молча пропускается: список собран на нажатии, а между
+ * нажатием и ведением объект мог успеть измениться (отмена из другой панели).
+ */
+export function canvasMoveMarks(project, ids, shift) {
+  let next = project;
+  for (const id of ids || []) {
+    const mark = findMark(next, id);
+    if (!mark) continue;
+    const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
+    next = updateMark(next, id, { points }).project;
+  }
+  return next;
+}
+
 // Перетаскивание метки: новые точки считаются от снимка «до», а не от
 // предыдущего кадра, — иначе метка уползает от курсора накопленной ошибкой.
 function canvasDragTo(point, free) {
@@ -3103,8 +3195,13 @@ function canvasDragTo(point, free) {
       const anchor = shifted[canvasDrag.anchor] || shifted[0];
       const snapped = canvasGuideSnap(anchor, free);
       const fix = { x: snapped.x - anchor.x, y: snapped.y - anchor.y };
-      const points = shifted.map((item) => ({ x: item.x + fix.x, y: item.y + fix.y }));
-      canvasPreview = updateMark(before, canvasDrag.markId, { points }).project;
+      // Сдвиг один на всех, и считается он по взятой метке: группа едет как
+      // одна метка (G189) и форму не меняет — соседи получают ровно тот же
+      // сдвиг, включая поправку от направляющей.
+      canvasPreview = canvasMoveMarks(before, canvasDrag.moving || [canvasDrag.markId], {
+        x: dx + fix.x,
+        y: dy + fix.y,
+      });
     }
   } catch (error) {
     // Модель отказала на полпути — картинка замерла бы под рукой, а по
@@ -3256,9 +3353,16 @@ function canvasPointerUp(event) {
   }
   if (drag.moved) {
     if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
-      const label = drag.kind === "label" ? strings.history.moveLabel : strings.history.move;
+      // Перенос группы — **один** шаг истории, а не по шагу на метку: один
+      // жест человека, один Ctrl+Z. Ярлык называет, что вернётся: «перенос
+      // блока» в списке отмены против «перемещения метки».
+      const whole = drag.kind === "mark" && (drag.moving || []).length > 1;
+      const label = drag.kind === "label" ? strings.history.moveLabel : whole ? strings.history.moveBlock : strings.history.move;
       const after = canvasPreview;
       canvasPreview = null;
+      // Выделение остаётся на взятой метке: панель свойств и карточка говорят
+      // об одной метке, и после переноса блока человек правит ту, за которую
+      // взялся, а не получает пустую панель «выделено три».
       canvasCommit(drag.before, after, label, { selection: [drag.markId] });
     }
     if (drag.kind === "pathVertex" && canvasPreview) {
