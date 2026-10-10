@@ -61,9 +61,12 @@ import {
   WORKSHOP_GRID_STEPS_MM,
   WORKSHOP_OBJECT_FALLBACK,
   WORKSHOP_OPENING_DEFAULTS,
+  WORKSHOP_ADDING,
+  WORKSHOP_MODES,
   WORKSHOP_ORIGIN_AT,
   WORKSHOP_PLAN_ZOOM_MAX,
   WORKSHOP_SHEET,
+  WORKSHOP_TOOL_ELEVATION,
   WORKSHOP_TOOL_SCALE,
   WORKSHOP_UNIT,
   WORKSHOP_ZOOM_MAX,
@@ -79,6 +82,7 @@ import {
   workshopGridDrawStepMm,
   workshopHint,
   workshopInitialTool,
+  workshopModeOf,
   workshopMoveVertex,
   workshopMoveWall,
   workshopObjectDefaultsByName,
@@ -92,6 +96,7 @@ import {
   workshopRoundMm,
   workshopSnapMm,
   workshopStatus,
+  workshopToolOf,
   workshopVertexEnds,
 } from "../src/panels/workshop.js";
 import { strings } from "../src/strings.js";
@@ -842,15 +847,18 @@ test("подсказка под полем своя у каждого занят
 // меряется кадр**: габарит в точках подложки, доли из тех же точек и согласие
 // этих долей с моделью.
 
-test("подложка без калибровки открывается занятием «Масштаб», а не стенами", () => {
+test("подложка без калибровки открывается режимом «Масштаб», а не рисованием", () => {
   const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
   assert.equal(workshopInitialTool(noScale.project, noScale.scheme.id), WORKSHOP_TOOL_SCALE);
-  // Везде ещё — стенами, как было: калибровка там не нужна и дорогу не
-  // загораживает (G68 — объект, который чертили раньше, открывается как прежде).
+  // Везде ещё — **выделением** (таск 133): холст открывается в нём по той же
+  // причине — сперва смотрят, потом правят, и первый клик по ошибке ничего не
+  // создаёт. Прежде окно открывалось прямо в рисовании стен, и ровно на это
+  // заказчик и пожаловался: «рисую стены, а как мне выбрать текущую».
   const ready = planProject();
-  assert.equal(workshopInitialTool(ready.project, ready.schemeId), "walls");
+  assert.equal(workshopInitialTool(ready.project, ready.schemeId), "edit");
+  assert.equal(workshopModeOf(workshopInitialTool(ready.project, ready.schemeId)), "select");
   const blank = blankProject();
-  assert.equal(workshopInitialTool(blank.project, blank.schemeId), "walls");
+  assert.equal(workshopInitialTool(blank.project, blank.schemeId), "edit");
 });
 
 test("кадр занятия «Масштаб» меряется точками подложки, а не миллиметрами", () => {
@@ -913,4 +921,46 @@ test("потолок увеличения свой у каждого кадра:
   assert.ok(WORKSHOP_PLAN_ZOOM_MAX > WORKSHOP_ZOOM_MAX);
   // Снизу предел общий: километровый план в окошко глубже не вписывается.
   assert.equal(workshopClampZoom(0, WORKSHOP_PLAN_ZOOM_MAX), WORKSHOP_ZOOM_MIN);
+});
+
+// ——— два уровня: режим и что добавляем (таск 133, G184 и G185) —————————
+//
+// Проверяется сам шов: снаружи окна уровня два, внутри поле одно, и перевод
+// между ними обязан сходиться в обе стороны. Разойдись он — нашлась бы пара
+// «режим добавления, а добавлять нечего», и кнопка горела бы не та.
+
+test("режим и занятие — два взгляда на одно поле, и перевод сходится в обе стороны", () => {
+  for (const adding of WORKSHOP_ADDING) {
+    assert.equal(workshopModeOf(adding), "add", adding + " читается добавлением");
+    assert.equal(workshopToolOf("add", adding), adding);
+  }
+  assert.equal(workshopModeOf("edit"), "select");
+  assert.equal(workshopToolOf("select", "walls"), "edit");
+  assert.equal(workshopModeOf(WORKSHOP_TOOL_SCALE), WORKSHOP_TOOL_SCALE);
+  assert.equal(workshopToolOf(WORKSHOP_TOOL_SCALE, "walls"), WORKSHOP_TOOL_SCALE);
+  assert.equal(workshopModeOf(WORKSHOP_TOOL_ELEVATION), WORKSHOP_TOOL_ELEVATION);
+  assert.equal(workshopToolOf(WORKSHOP_TOOL_ELEVATION, "objects"), WORKSHOP_TOOL_ELEVATION);
+  // Каждый режим из списка отзывается занятием, и занятие читается тем же
+  // режимом: пустых клеток в этой таблице нет.
+  for (const mode of WORKSHOP_MODES) {
+    assert.equal(workshopModeOf(workshopToolOf(mode, "walls")), mode, mode + " не вернулся собой");
+  }
+  // Мусор вместо «что добавляем» не оставляет окно без занятия.
+  assert.equal(workshopToolOf("add", "чепуха"), "walls");
+  assert.equal(workshopToolOf("add", undefined), "walls");
+});
+
+test("у каждого режима своя подсказка, и развёртка не зовёт править", () => {
+  const seen = new Set();
+  for (const tool of ["edit", "walls", "openings", "objects", WORKSHOP_TOOL_SCALE, WORKSHOP_TOOL_ELEVATION]) {
+    const line = workshopHint(tool);
+    assert.ok(line && line.length > 20, tool + ": подсказки нет");
+    seen.add(line);
+  }
+  assert.equal(seen.size, 6, "подсказки режимов не повторяются");
+  // В развёртке смотрят: про перетаскивание и удаление в ней нет ни слова, а
+  // дорога к правке названа.
+  const elevation = workshopHint(WORKSHOP_TOOL_ELEVATION);
+  assert.ok(!/Delete|тянется/.test(elevation), "развёртка зовёт править: " + elevation);
+  assert.match(elevation, /Выделение/);
 });
