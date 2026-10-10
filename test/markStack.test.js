@@ -167,13 +167,18 @@ test("совпавшие метки расходятся стопкой, а то
 
 test("G68: объект до и после показа стопки побайтно один", async () => {
   const built = pile([1100, 300, null]);
-  const before = await packProject(built.project, new Map());
+  // Дата упаковки задана нарочно. Без неё zip штампует файлы текущим
+  // временем, а в формате zip время хранится с шагом в две секунды: две
+  // упаковки подряд изредка попадают по разные стороны границы, и тест
+  // краснеет раз в несколько прогонов, не говоря при этом ничего о продукте.
+  const packedAt = new Date(2026, 0, 1, 12, 0, 0);
+  const before = await packProject(built.project, new Map(), { date: packedAt });
   const view = viewOf();
   // Всё, что умеет стопка, — на одном и том же объекте.
   markStacks(built.project, built.scheme, null, view);
   hitTest(built.project, built.scheme, { x: 600, y: 400 }, view, null);
   drawScheme(recorder().ctx, { project: built.project, scheme: built.scheme, filter: null, view, selectedIds: [] });
-  const after = await packProject(built.project, new Map());
+  const after = await packProject(built.project, new Map(), { date: packedAt });
   assert.deepEqual(new Uint8Array(await after.arrayBuffer()), new Uint8Array(await before.arrayBuffer()), "выгрузка изменилась");
   // И то же самое после круга «упаковать — распаковать»: открытый объект
   // совпадает с закрытым меткой к метке.

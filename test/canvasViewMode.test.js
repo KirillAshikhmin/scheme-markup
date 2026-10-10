@@ -6,7 +6,8 @@
 // а Delete удалял. Поэтому запрет живёт в самом холсте, а не в стилях.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canvasAddKind, canvasEditAllowed, canvasHintText } from "../src/canvas.js";
+import { canvasAddKind, canvasEditAllowed, canvasHintText, canvasInternals } from "../src/canvas.js";
+import { markRadius } from "../src/render.js";
 import { LAYOUT_ABILITIES } from "../src/app.js";
 import { strings } from "../src/strings.js";
 import { addScheme, createProject } from "../src/model.js";
@@ -93,4 +94,22 @@ test("режим добавления берёт вид у выбранного 
   // Тип не выбран — добавлять нечего, и холст не должен считать это точкой.
   assert.equal(canvasAddKind(stateOf({ mode: "add" })), null);
   assert.equal(canvasAddKind(null), null);
+});
+
+// Вид холста собирается из объектных размеров и сеансового масштаба. Поле
+// кладётся, **только когда оно у объекта есть**: `undefined` перебил бы
+// умолчание `render`, и у объекта, собранного мимо `createProject` (чужой
+// файл, сборка руками), радиус метки считался бы `NaN`. Тогда порог «клик по
+// первой вершине замыкает контур» переставал срабатывать, и обводка не
+// замыкалась двойным кликом вовсе. Найдено исполнителем таска 138 на
+// собранном руками файле.
+test("вид холста не перебивает умолчания отсутствующими размерами", () => {
+  const bare = canvasInternals.viewOf({ view: { zoom: 1 }, project: { view: {} }, schemeFont: null });
+  assert.equal("markSize" in bare, false, "пустой размер метки не должен попасть в вид");
+  assert.equal("labelSize" in bare, false, "пустой размер подписи не должен попасть в вид");
+  assert.ok(Number.isFinite(markRadius(bare)), "радиус метки обязан остаться числом");
+
+  const full = canvasInternals.viewOf({ view: { zoom: 1 }, project: { view: { markSize: 14, labelSize: 11 } }, schemeFont: null });
+  assert.equal(full.markSize, 14, "заданный размер метки доезжает как есть");
+  assert.equal(full.labelSize, 11);
 });

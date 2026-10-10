@@ -792,8 +792,21 @@ function canvasViewOf(state) {
   // объектными размерами: это выбор глаз из личных настроек браузера, в объект
   // он не попадает. Выгрузка собирает свой `view` сама и этого поля не кладёт,
   // поэтому на бумагу уходит чертёжный шрифт независимо от настройки (G172).
-  return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize, fontKind: state.schemeFont };
+  // Поля кладутся, только когда они у объекта есть. Иначе `undefined`
+  // перебивает умолчание `render` — у объекта, собранного мимо
+  // `createProject` (чужой файл, сборка руками), `markRadius` отвечал `NaN`,
+  // и обводка контура переставала замыкаться двойным кликом: порог «клик по
+  // первой вершине» считается от радиуса. Найдено исполнителем таска 138.
+  const view = { ...state.view, fontKind: state.schemeFont };
+  if (sizes.markSize !== undefined) view.markSize = sizes.markSize;
+  if (sizes.labelSize !== undefined) view.labelSize = sizes.labelSize;
+  return view;
 }
+
+// Внутренности холста, открытые тестам. Приём тот же, что у `renderInternals`:
+// функции остаются частными, но проверяемыми — иначе правило «поле кладётся,
+// только когда оно есть» держалось бы на комментарии.
+export const canvasInternals = { viewOf: canvasViewOf };
 
 function canvasScheme(state) {
   return state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
