@@ -1133,6 +1133,9 @@ function exportElevationDialog(api) {
       format: exportChoice.gostFormat,
       scale: exportChoice.schemeScale,
       mono: exportChoice.mono,
+      // Изображения объектов — то же правило, что у слоёв чертежа (таск 127):
+      // отметка с экрана уходит и в выгрузку, лист показывает проверенное.
+      icons: getState().elevationIcons !== false,
       building: roomName(),
       drawing: [scheme ? scheme.name : "", strings.elevationSheet.drawing].filter(Boolean).join(" · "),
       pdf: pdf === true,

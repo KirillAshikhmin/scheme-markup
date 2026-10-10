@@ -65,6 +65,13 @@ const appState = {
   // тому, кто размечает поверх своего чертежа и не хочет, чтобы полоса
   // выезжала от промаха мимо метки.
   elevationShown: true,
+  // Изображения объектов на развёртке вместо условных знаков (таск 135,
+  // G187). Заказчик предложил и место для отметки — «можно прямо на окне с
+  // развёрткой», — и она там и стоит.
+  //
+  // Умолчание — показаны: ради этого таск и затеян («что бы схема была уже
+  // живая»), а отметка нужна тому, кто хочет прежний лист со знаками.
+  elevationIcons: true,
   // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
   // встречать пользователя дугами поверх плана никто не просил.
   linksShown: false,
@@ -103,6 +110,8 @@ export const PLAN_SETTING = "schemePlanShown";
 export const DRAWING_SETTING = "schemeDrawingShown";
 // Полоса развёртки выделенной стены — третий выключатель того же ряда.
 export const ELEVATION_SETTING = "schemeElevationShown";
+// Изображения объектов на развёртке — такая же личная настройка браузера.
+export const ELEVATION_ICONS_SETTING = "elevationIcons";
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -307,6 +316,9 @@ export function notify(message, kind = "info") {
 }
 
 function reportAppError(error) {
+  // Стек уходит в консоль, а человеку достаётся плашка: без стека такую
+  // ошибку ловят вслепую, а показывать его в плашке незачем.
+  if (typeof console !== "undefined" && console.error) console.error(error);
   notify(error && error.message ? error.message : String(error), "error");
 }
 
@@ -576,6 +588,11 @@ function wireSections() {
   Promise.resolve(getSetting(ELEVATION_SETTING))
     .then((saved) => {
       if (saved === false) setState({ elevationShown: false });
+    })
+    .catch(() => {});
+  Promise.resolve(getSetting(ELEVATION_ICONS_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ elevationIcons: false });
     })
     .catch(() => {});
   // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище

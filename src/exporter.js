@@ -1362,6 +1362,10 @@ export async function elevationSheetPng(project, elevations, page, layout, optio
       // порядок обхода контура, и на втором листе счёт продолжается.
       {
         unit,
+        // Отметка «изображения» уходит и в выгрузку — то же правило, что у
+        // слоёв чертежа (таск 127): лист обязан показывать то, что человек
+        // проверил на экране.
+        icons: options.icons !== false,
         scale: layout.scale * mm,
         label: text("elevationSheet.label", { index: index + 1, length: elevations[index].lengthMm }),
       },
