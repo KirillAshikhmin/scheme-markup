@@ -5728,7 +5728,35 @@ const strings = {
     // Дописывается к известию о замене подложки: пиксели те же, метры другие.
     replaceDropped: "Масштаб снят: план другой — откалибруйте заново.",
     applied: "Масштаб задан: {meters} м между точками, весь план — {width} × {height} м",
+    // ——— чертёж идёт за исправленным масштабом (таск 134, G186) ———
+    //
+    // Слова заказчика: «если ошибся с масштабом то при его изменении чертёж
+    // может не совпасть, как бы масштабировать его» и «только наверно
+    // спрашивай — масштабировать чертёж в след за масштабом или нет, вдруг оно
+    // не надо». Вопрос называет **цену**: во сколько раз и сколько чего
+    // тронет. «Чертёж станет в 1,2 раза крупнее: 14 стен, 3 проёма» понятнее,
+    // чем «пересчитать?».
+    followTitle: "Пересчитать чертёж под новый масштаб?",
+    followAsk:
+      "Чертёж нарисован в прежнем масштабе и с новым на план не ляжет. {change} Тронет: {parts}. Толщина стен, размеры проёмов и объектов и высоты останутся прежними — их вводили числом, и они верны при любом масштабе. Если чертёж рисовали по сетке от размеров, а не по подложке, — оставьте как есть.",
+    followBigger: "Пересчёт сделает его в {times} раза крупнее.",
+    followSmaller: "Пересчёт сделает его в {times} раза мельче.",
+    followWalls: "стен {count}",
+    followOpenings: "проёмов {count}",
+    followObjects: "объектов {count}",
+    followMarks: "меток на стенах {count}",
+    followYes: "Пересчитать чертёж",
+    followNo: "Оставить как есть",
+    followDone: "Чертёж пересчитан: стен {count}. Ctrl+Z вернёт и масштаб, и чертёж.",
+    // Проём шире стены, которая после исправленного масштаба стала короче:
+    // ширину ему задали руками, и менять её пересчёт не вправе. Противоречие
+    // человека, а не сборки, — и молчать о нём нельзя.
+    followStuck: "Проёмов шире своей стены: {count} — они прижаты к началу и торчат за конец.",
     cleared: "Масштаб снят — длины больше не показываются",
+    // Снятие масштаба чертежа не касается (таск 134): пересчитывать не во что —
+    // без калибровки у плана нет метров, а чертёж в миллиметрах сам по себе
+    // верен и ждёт следующей калибровки там же, где был.
+    clearedDrawing: "Чертёж остался как есть: в миллиметрах он верен и без масштаба — просто пока не ляжет на план.",
     cancelled: "Калибровка отменена",
     // Длина в метрах: единица приписывается здесь, число считает модель.
     meters: "{value} м",
@@ -5877,7 +5905,7 @@ const strings = {
     // здесь же, по той же картинке.
     calibrate: "Задать масштаб плана",
     calibrateHint:
-      "Отрезок проводится здесь же, по той подложке, которую собираетесь обводить: окно не закрывается. Рисовать по плану до масштаба нельзя — миллиметры уже нарисованных стен калибровка не пересчитает.",
+      "Отрезок проводится здесь же, по той подложке, которую собираетесь обводить: окно не закрывается. Ошиблись с масштабом — откалибруйте заново, и окно спросит, пересчитать ли чертёж следом.",
     // Заголовок колонки свойств, когда занятие — масштаб.
     scaleHead: "Масштаб плана",
     // Ушли от масштаба к стенам, а масштаба так и нет: подложка в поле гаснет,
@@ -10300,6 +10328,158 @@ function drawingBoundsMm(project, schemeId) {
   const maxX = Math.max(...xs);
   const maxY = Math.max(...ys);
   return { minX, minY, maxX, maxY, widthMm: maxX - minX, heightMm: maxY - minY };
+}
+
+// ——— чертёж идёт за исправленным масштабом ——————————————————————————————
+//
+// Требование G186, таск 134. Слова заказчика: «если ошибся с масштабом то при
+// его изменении чертёж может не совпасть, как бы масштабировать его. Точнее
+// только стены, проёмы и т.д. не меняем в размере».
+//
+// Откуда беда: чертёж живёт в миллиметрах, подложка — в долях плана, связывает
+// их калибровка. Обвели стены при одном масштабе, нашли ошибку, откалибровали
+// заново — и стены остались прежней длины в миллиметрах, а подложка стала
+// другого размера в метрах. Чертёж съехал, и руками это не поправить.
+//
+// **Что пересчитывается, а что нет**, заказчик назвал сам, и разделение
+// верное: пересчитываются **координаты** (вершины стен, отступ проёма вдоль
+// стены, место объекта, привязка метки к стене), не пересчитываются
+// **введённые руками размеры** (толщина стены, ширина и высота проёма,
+// габариты объекта, высоты помещений). Координаты сняты с подложки и ошиблись
+// вместе с ней; размеры человек вводил числом, и они верны независимо от того,
+// какой масштаб стоял у плана.
+//
+// Проверка на радиаторе под окном: окно уедет вместе со стеной, радиатор —
+// вместе со своим местом, но оба останутся прежнего размера. Перестал
+// помещаться — это честный ответ, а не ошибка пересчёта.
+
+/**
+ * Во сколько раз чертёж должен вырасти, чтобы остаться на том же месте
+ * картинки после перекалибровки. `null` — считать не из чего (масштаба не было
+ * или не стало) или пересчитывать нечего (множитель единица).
+ *
+ * **Откуда дробь.** Точка чертежа ложится на план через «пикселей плана в
+ * миллиметре»: смещение в пикселях равно `мм · px_на_метр / 1000`. Чтобы
+ * смещение в пикселях осталось прежним при новой калибровке, миллиметры обязаны
+ * измениться обратно пропорционально: `мм' = мм · px_было / px_стало`.
+ *
+ * Проверка в уме: план считали по 100 px/м (12 м по ширине), оказалось 50 px/м
+ * (24 м) — всё вдвое крупнее, множитель 2. Так и выходит: 100 / 50.
+ */
+function drawingScaleFactor(before, after, schemeId) {
+  const was = planPixelsPerMeter(before, schemeId);
+  const now = planPixelsPerMeter(after, schemeId);
+  if (!(was > 0) || !(now > 0)) return null;
+  const factor = was / now;
+  if (!Number.isFinite(factor) || !(factor > 0) || factor === 1) return null;
+  return factor;
+}
+
+/**
+ * Сколько чего в чертеже схемы — цена вопроса, который задают перед
+ * пересчётом. «Чертёж станет в 1,2 раза крупнее: 14 стен, 3 проёма, 2 объекта»
+ * понятнее, чем «пересчитать?».
+ *
+ * Метки считаются только привязанные к стенам: остальных пересчёт не касается
+ * вовсе — они живут долями плана и за калибровкой идут сами (ADR 002).
+ */
+function drawingCounts(project, schemeId) {
+  const walls = wallsOnScheme(project, schemeId);
+  const wallIds = new Set(walls.map((wall) => wall.id));
+  const openings = openingsOf(project).filter((opening) => wallIds.has(opening.wallId)).length;
+  const marks = (project.marks || []).filter((mark) => mark.wallId && wallIds.has(mark.wallId)).length;
+  return { walls: walls.length, openings, objects: schemeObjectsOnScheme(project, schemeId).length, marks };
+}
+
+const scaledMm = (value, factor) => Math.round(Number(value) * factor) || 0;
+const scaledPoint = (point, factor) => ({ x: scaledMm(point.x, factor), y: scaledMm(point.y, factor) });
+
+/**
+ * Пересчитать чертёж схемы в `factor` раз: координаты умножаются, введённые
+ * руками размеры не трогаются.
+ *
+ * Пишет напрямую, а не через `addWall`/`updateOpening`, нарочно: это одно
+ * преобразование всего чертежа, и проводить его по одной правке значило бы
+ * тридцать раз пересобрать объект и тридцать раз проверить инварианты, из
+ * которых здесь важен ровно один — проём не выходит за свою стену.
+ *
+ * **Проём прижимается к стене**, если после пересчёта за её концом не хватает
+ * места: то же правило, по которому его ставят мышью (`workshopOpeningAt`).
+ * Когда стена стала короче самого проёма, прижимать некуда — такой проём
+ * остаётся в начале стены и **торчит за её конец**: ширину ему менять нельзя
+ * (её вводили руками), а молча выбросить дверь нельзя тем более. Сколько их
+ * таких, возвращается числом — об этом говорят вслух.
+ *
+ * Привязки меток к стенам пересчитываются здесь же, чтобы объект, который
+ * вернула эта функция, был согласован сам с собой. Последнее слово всё равно за
+ * `applyMarkWalls` из `canvasCommit`: привязка — следствие места метки на
+ * плане, и после пересчёта она подтверждается, а где метка и правда отошла от
+ * стены дальше порога — снимается. Это не второе правило, а его проверка.
+ *
+ * Множитель единица или пересчитывать нечего — возвращается **тот же объект по
+ * ссылке**: ни шага истории, ни `updatedAt` на пустом месте (G68).
+ */
+function scaleDrawing(project, schemeId, factor) {
+  const empty = { project, walls: 0, openings: 0, objects: 0, marks: 0, stuck: 0 };
+  const k = Number(factor);
+  if (!Number.isFinite(k) || !(k > 0) || k === 1) return empty;
+  const mine = wallsOnScheme(project, schemeId);
+  const objectsMine = schemeObjectsOnScheme(project, schemeId);
+  if (mine.length === 0 && objectsMine.length === 0) return empty;
+  const wallIds = new Set(mine.map((wall) => wall.id));
+  const lengths = new Map();
+
+  const walls = wallsOf(project).map((wall) => {
+    if (!wallIds.has(wall.id)) return wall;
+    const next = { ...wall, aMm: scaledPoint(wall.aMm, k), bMm: scaledPoint(wall.bMm, k) };
+    lengths.set(wall.id, wallLengthMm(next));
+    return next;
+  });
+
+  let stuck = 0;
+  let openingCount = 0;
+  const openings = openingsOf(project).map((opening) => {
+    if (!wallIds.has(opening.wallId)) return opening;
+    openingCount += 1;
+    const length = lengths.get(opening.wallId) || 0;
+    const room = length - Number(opening.widthMm);
+    if (room < 0) stuck += 1;
+    const at = Math.min(Math.max(0, scaledMm(opening.atMm, k)), Math.max(0, room));
+    return at === opening.atMm ? opening : { ...opening, atMm: at };
+  });
+
+  const objects = schemeObjectsOf(project).map((object) => {
+    if (object.schemeId !== schemeId) return object;
+    if (object.shape === "polyline") {
+      return { ...object, pointsMm: (object.pointsMm || []).map((point) => scaledPoint(point, k)) };
+    }
+    return { ...object, atMm: scaledPoint(object.atMm, k) };
+  });
+
+  let markCount = 0;
+  const marks = (project.marks || []).map((mark) => {
+    if (!mark.wallId || !wallIds.has(mark.wallId)) return mark;
+    markCount += 1;
+    const next = { ...mark, wallAtMm: scaledMm(mark.wallAtMm, k) };
+    if (typeof mark.wallToMm === "number") next.wallToMm = scaledMm(mark.wallToMm, k);
+    return next;
+  });
+
+  // В объект кладётся только то, что в нём и было: пустых списков модель
+  // чертежа не заводит (G68), и пересчёт не повод завести их первым.
+  const patch = {};
+  if (Array.isArray(project.walls)) patch.walls = walls;
+  if (Array.isArray(project.openings)) patch.openings = openings;
+  if (Array.isArray(project.schemeObjects)) patch.schemeObjects = objects;
+  if (markCount > 0) patch.marks = marks;
+  return {
+    project: withProject(project, patch),
+    walls: mine.length,
+    openings: openingCount,
+    objects: objectsMine.length,
+    marks: markCount,
+    stuck,
+  };
 }
 
 // ——— чертёж: проёмы ———————————————————————————————————————————————————
@@ -21049,7 +21229,16 @@ function uiModal(options) {
   uiFocusEntry(entry);
   return { close: entry.close, card };
 }
-function uiConfirm({ title, message, confirmLabel }) {
+
+/**
+ * Вопрос с двумя ответами.
+ *
+ * `cancelLabel` и `confirmClass` нужны там, где вопрос не про «делать или
+ * передумать», а про развилку с двумя равными ответами: «пересчитать чертёж»
+ * против «оставить как есть» (таск 134). Слово «Отмена» там соврало бы — ни
+ * один из ответов ничего не отменяет, — а красная кнопка обещала бы потерю.
+ */
+function uiConfirm({ title, message, confirmLabel, cancelLabel, confirmClass }) {
   return new Promise((resolve) => {
     let modal;
     const answer = (value) => {
@@ -21060,9 +21249,9 @@ function uiConfirm({ title, message, confirmLabel }) {
       title,
       body: uiEl("p", { class: "modal__text", text: message }),
       actions: [
-        uiButton(strings.dialog.cancel, { on: { click: () => answer(false) } }),
+        uiButton(cancelLabel || strings.dialog.cancel, { on: { click: () => answer(false) } }),
         uiButton(confirmLabel || strings.dialog.confirm, {
-          class: "ui-btn ui-btn--danger",
+          class: confirmClass || "ui-btn ui-btn--danger",
           on: { click: () => answer(true) },
         }),
       ],
@@ -22132,6 +22321,65 @@ const CANVAS_MODE_NOTES = {
  * Плашку о переходе даёт не она, а подписка на смену `mode`: так говорят о
  * себе **все** двери, включая клавиши и отмену.
  */
+/**
+ * Записать новый масштаб плана — и, если чертёж уже есть, спросить, идти ли
+ * ему следом (таск 134, требование G186).
+ *
+ * **Одна дверь на обе поверхности.** Калибруют и на холсте, и в мастерской, и
+ * вопрос с пересчётом обязан быть один: два похожих спрашивали бы по-разному и
+ * разошлись бы в первую же правку. Здесь же держится и правило «одним шагом» —
+ * масштаб и пересчёт уходят в `canvasCommit` вместе, поэтому Ctrl+Z возвращает
+ * и то и другое. Два шага были бы ловушкой: отменив половину, человек получил
+ * бы несовпадение, которого не делал.
+ *
+ * **Молча пересчитывать нельзя.** Чертёж мог быть нарисован не по подложке, а
+ * по сетке от размеров — такой верен сам по себе, и пересчёт его испортит.
+ * Поэтому вопрос, и в нём названа цена: во сколько раз и сколько чего тронет.
+ * Первая калибровка не спрашивает ничего — множителя из «масштаба не было» не
+ * выходит, и пересчитывать нечего.
+ *
+ * `before` — объект до записи масштаба, `after` — он же с новым масштабом.
+ * Возвращает `{ok, scaled, factor, counts}`; `ok: false` — человек закрыл
+ * вопрос, ничего не записано.
+ */
+async function canvasCommitScale(before, after, schemeId, options = {}) {
+  const factor = drawingScaleFactor(before, after, schemeId);
+  const counts = factor ? drawingCounts(before, schemeId) : null;
+  const touches = counts ? counts.walls + counts.objects : 0;
+  let next = after;
+  let scaled = null;
+  if (factor && touches > 0) {
+    const answer = await uiConfirm({
+      title: strings.scale.followTitle,
+      message: text("scale.followAsk", {
+        change: factor > 1 ? text("scale.followBigger", { times: formatMeters(factor) }) : text("scale.followSmaller", { times: formatMeters(1 / factor) }),
+        parts: drawingCountsText(counts),
+      }),
+      confirmLabel: strings.scale.followYes,
+      cancelLabel: strings.scale.followNo,
+      // Не красная: ни один из двух ответов ничего не теряет, а отмена у обоих
+      // одна и та же — Ctrl+Z.
+      confirmClass: "ui-btn ui-btn--accent",
+    });
+    // Отказ от пересчёта — это «оставить как есть», а не отмена калибровки:
+    // масштаб человек уже задал, и терять его на этом вопросе нельзя.
+    if (answer) scaled = scaleDrawing(after, schemeId, factor);
+    if (scaled) next = scaled.project;
+  }
+  if (!findScheme(next, schemeId)) return { ok: false, scaled: null, factor, counts };
+  canvasCommit(before, next, strings.history.scaleSet, { schemeId, ...options });
+  return { ok: true, scaled, factor, counts };
+}
+
+/** Цена вопроса словами: только то, чего и правда сколько-то есть. */
+function drawingCountsText(counts) {
+  const parts = [];
+  if (counts.walls > 0) parts.push(text("scale.followWalls", { count: counts.walls }));
+  if (counts.openings > 0) parts.push(text("scale.followOpenings", { count: counts.openings }));
+  if (counts.objects > 0) parts.push(text("scale.followObjects", { count: counts.objects }));
+  if (counts.marks > 0) parts.push(text("scale.followMarks", { count: counts.marks }));
+  return parts.join(", ");
+}
 function canvasStartScale(schemeId) {
   canvasApi.setState({
     schemeId,
@@ -23786,7 +24034,7 @@ async function canvasScaleAsk() {
   }
 }
 
-function canvasScaleCommit(draft, meters) {
+async function canvasScaleCommit(draft, meters) {
   const state = canvasState();
   const [a, b] = draft.points;
   if (!findScheme(state.project, draft.schemeId)) {
@@ -23797,25 +24045,42 @@ function canvasScaleCommit(draft, meters) {
     const result = setPlanScale(state.project, draft.schemeId, { a, b, meters });
     canvasDraft = null;
     // Через ту же дверь, что и всё остальное: Ctrl+Z возвращает прежний
-    // масштаб (или прежнее «масштаба нет»). Режим сам уходит в «Выделение» —
-    // калибруют один раз, а не серией.
-    canvasCommit(state.project, result.project, strings.history.scaleSet, {
+    // масштаб (или прежнее «масштаба нет») — а с таска 134 и чертёж, если он
+    // пошёл следом. Режим сам уходит в «Выделение»: калибруют один раз, а не
+    // серией.
+    const done = await canvasCommitScale(state.project, result.project, draft.schemeId, {
       patch: { mode: "select" },
-      schemeId: draft.schemeId,
     });
+    if (!done.ok) return;
     const size = planSizeMeters(canvasState().project, draft.schemeId);
     canvasApi.notify(
       text("scale.applied", {
         meters: formatMeters(result.scale.meters),
         width: size ? formatMeters(size.width) : "",
         height: size ? formatMeters(size.height) : "",
-      }),
+      }) + canvasScaleFollowSaid(done),
       "success",
     );
   } catch (error) {
     canvasCancelDraft();
     canvasFail(error);
   }
+}
+
+/**
+ * Что дописать к известию о заданном масштабе: пошёл ли чертёж следом и не
+ * торчит ли теперь проём за своей стеной.
+ *
+ * Про торчащий проём говорится вслух, потому что сделать с ним нечего без
+ * вранья: ширину ему задали руками, и менять её пересчёт не вправе, а стена
+ * после исправленного масштаба и правда короче этой ширины. Это противоречие
+ * человека, а не сборки, и молчать о нём нельзя.
+ */
+function canvasScaleFollowSaid(done) {
+  if (!done || !done.scaled) return "";
+  const said = " " + text("scale.followDone", { count: done.scaled.walls });
+  if (!done.scaled.stuck) return said;
+  return said + " " + text("scale.followStuck", { count: done.scaled.stuck });
 }
 
 // `typeId` передаётся только тогда, когда линию дочерчивают не тем типом, что
@@ -37986,11 +38251,17 @@ registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 //      координаты допускает нарочно.
 //   2. **Подложка есть, калибровки нет.** Подложку под **чертёж** не положить —
 //      и это не решение, а арифметика: без пикселей на метр `planMmToFraction`
-//      отвечает `null`, миллиметру не от чего считаться. Рисовать «на глаз, а
-//      потом откалибровать» нельзя: калибровка миллиметры уже нарисованных
-//      стен не пересчитывает (в отличие от долей разметки), и такой чертёж
-//      остался бы неверным навсегда. Рисовать по сетке, от размеров, при этом
-//      никто не мешает.
+//      отвечает `null`, миллиметру не от чего считаться. Обводить картинку, под
+//      которой нет метров, поэтому нечем: не на что опереть ни одну стену.
+//      Рисовать по сетке, от размеров, при этом никто не мешает.
+//
+//      Раньше здесь стояло и второе, более сильное: «на глаз нарисовать и
+//      потом откалибровать нельзя, потому что миллиметры нарисованных стен за
+//      калибровкой не идут». **С таска 134 идут** — по выбору человека
+//      (`canvasCommitScale` спрашивает, `model.scaleDrawing` пересчитывает).
+//      Ошибся с масштабом — откалибровал заново, ответил «пересчитать», и
+//      чертёж снова лёг на план. Отказ от пересчёта оставляет чертёж как был:
+//      нарисованный по сетке от размеров верен сам по себе.
 //
 //      Но **показать картинку и положить на неё чертёж — разные задачи** (таск
 //      132, дефект D22). Прежде окно гасило слой подложки и предлагало кнопку,
@@ -38285,9 +38556,12 @@ function workshopAttachOrigin(project, schemeId) {
 //
 // Чего в этом кадре нет: сетки, нуля и чертежа. Все трое живут в миллиметрах,
 // а миллиметр здесь ещё ничему не равен — нарисовать их значило бы соврать о
-// размерах. Нарисовать стену в этом кадре тоже нельзя, и это то самое честное
-// ограничение: калибровка пересчитывает доли разметки, но миллиметры уже
-// нарисованных стен не трогает.
+// размерах. Нарисовать стену в этом кадре тоже нечем: координате не на что
+// опереться, пока у плана нет метров.
+//
+// Это **не** то прежнее «обводить на глаз нельзя навсегда»: с таска 134
+// исправленный масштаб уводит чертёж за собой, если человек на это согласился.
+// Здесь ограничение другое и живёт ровно до первой калибровки.
 
 /**
  * Габарит подложки в её собственных точках — кадр занятия «Масштаб».
@@ -39860,27 +40134,39 @@ function openWorkshop({ schemeId, api }) {
     }
   }
 
-  function applyScale(a, b, meters) {
+  async function applyScale(a, b, meters) {
     try {
-      const result = setPlanScale(project(), schemeId, { a, b, meters });
+      const before = project();
+      const result = setPlanScale(before, schemeId, { a, b, meters });
       scaleDraft = null;
       // Через ту же дверь, что и всё остальное: Ctrl+Z возвращает прежнее
-      // «масштаба нет» — и подложка снова гаснет, как и была.
-      commit(result.project, strings.history.scaleSet);
+      // «масштаба нет» — и подложка снова гаснет, как и была. С таска 134 той
+      // же дверью идёт и пересчёт чертежа: вопрос «идти ли чертежу следом»
+      // задаёт `canvasCommitScale`, одинаково здесь и на холсте, и обе правки
+      // уходят одним шагом истории.
+      const done = await canvasCommitScale(before, result.project, schemeId);
+      if (closed || !done.ok) return;
       const size = planSizeMeters(project(), schemeId);
       notify(
         text("scale.applied", {
           meters: formatMeters(result.scale.meters),
           width: size ? formatMeters(size.width) : "",
           height: size ? formatMeters(size.height) : "",
-        }),
+        }) + canvasScaleFollowSaid(done),
         "success",
       );
       // Масштаб есть — подложку теперь есть на что положить, и окно само
       // берётся за рисование: за ним человек и пришёл. Это единственное место,
       // где окно меняет режим за человека, и оно же единственное, где
       // следующий шаг известен без вопросов.
-      setMode("add");
+      //
+      // Чертёж уже был и пошёл следом — рисовать человек не собирался, он
+      // чинил масштаб: окно остаётся в выделении, где видно, что получилось.
+      if (!done.scaled) setMode("add");
+      else {
+        setMode("select");
+        fit();
+      }
     } catch (error) {
       scaleDraft = null;
       fail(error);
@@ -40710,9 +40996,14 @@ function openWorkshop({ schemeId, api }) {
     elevationButton.className = "ui-btn" + (now === WORKSHOP_TOOL_ELEVATION ? " ui-btn--accent" : "");
     addingRow.hidden = now !== "add";
     wallsButton.className = "ui-btn" + (tool === "walls" ? " ui-btn--accent" : "");
-    // Кнопка масштаба стоит, пока масштаба нет, и пока им занимаются: иначе
-    // она пропала бы из-под руки в тот же миг, когда занятие ещё идёт.
-    scaleButton.hidden = spot.kind !== "noScale" && !scaling;
+    // Кнопка масштаба стоит у любой подложки — и когда масштаба нет, и когда
+    // его надо **исправить** (таск 134). В таске 132 её прятали после первой
+    // калибровки нарочно: перекалибровка меняла пиксели на метр, а нарисованные
+    // стены оставались в прежних миллиметрах, и чертёж молча съезжал. Теперь
+    // чертёж идёт следом по выбору человека, опасности нет, и ходить за
+    // исправлением в строку схемы больше незачем — ошиблись здесь, чините
+    // здесь же.
+    scaleButton.hidden = spot.kind === "noImage" && !scaling;
     scaleButton.className = "ui-btn" + (scaling ? " ui-btn--accent" : "");
     // Пока задают масштаб, в поле только план — отметка это и показывает, а
     // снять её нечем: другого кадра у занятия нет.
@@ -40725,6 +41016,9 @@ function openWorkshop({ schemeId, api }) {
         : spot.kind === "noScale"
           ? strings.workshop.layerPlanNoScale
           : "";
+    // Кнопка в колонке слоёв остаётся только там, где масштаба нет: она стоит
+    // рядом с погашенной отметкой подложки и объясняет её. Исправляют масштаб
+    // режимом в ряду.
     calibrateButton.hidden = spot.kind !== "noScale" || scaling;
     attachButton.hidden = !spot.pending || scaling;
     gridCheck.checked = workshopLayers.grid && !scaling;
@@ -42158,13 +42452,22 @@ function mountSchemesPanel(host, api) {
     canvasStartScale(schemeId);
   }
 
+  /**
+   * Снятие масштаба. Чертежа оно **не касается** (таск 134): пересчитывать не
+   * во что — без калибровки у плана нет метров, а чертёж в миллиметрах сам по
+   * себе верен и ждёт следующей калибровки там же, где лежал. Сказать об этом
+   * надо вслух: человек только что видел вопрос про пересчёт при смене
+   * масштаба и вправе ждать его и здесь.
+   */
   function dropScale(schemeId) {
     const before = getState().project;
     try {
       const result = clearPlanScale(before, schemeId);
       if (!result.cleared) return;
+      const drawn = drawingCounts(before, schemeId);
       canvasCommit(before, result.project, strings.history.scaleClear, { schemeId });
-      notify(strings.scale.cleared, "success");
+      const said = drawn.walls + drawn.objects > 0 ? " " + strings.scale.clearedDrawing : "";
+      notify(strings.scale.cleared + said, "success");
     } catch (error) {
       notify(error.message, "error");
     }
