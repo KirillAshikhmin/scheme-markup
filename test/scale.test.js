@@ -340,7 +340,12 @@ test("кнопка масштаба в панели схем говорит ра
   const base = scene();
   const empty = schemesScaleView(base.project, base.schemeId, "1 этаж");
   assert.equal(empty.set, false);
-  assert.equal(empty.label, strings.scale.notSet);
+  // Без масштаба на кнопке **призыв**, а не состояние (дефект D22): «Масштаб
+  // не задан» читалось как сообщение, и заказчик спросил «а как его задать?».
+  assert.equal(empty.label, strings.scale.ask);
+  // Состояние никуда не делось — оно в подсказке, вместе с приглашением нажать.
+  assert.ok(empty.title.includes("не задан"), "состояние ушло из подсказки: " + empty.title);
+  assert.ok(empty.title.includes("Нажмите"), "подсказка не зовёт нажать: " + empty.title);
   const view = schemesScaleView(calibrated(base), base.schemeId, "1 этаж");
   assert.equal(view.set, true);
   // Размер всего плана — то, что инженер сверяет с чертежом глазом.
