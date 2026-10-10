@@ -4570,50 +4570,93 @@ function drawDrawingCaption(ctx, object, corners, name, bridge) {
 
 // Поля рамки: слева — размер высоты, снизу — размер длины, под полом — полоса
 // для меток, у которых высота не задана.
+// Поля рамки: слева — размер высоты, снизу — размер длины, под полом — полоса
+// для меток, у которых высота не задана.
+//
+// Числа здесь — **единицы**, не пиксели: на экране единица равна точке (тогда
+// развёртка выглядит так же, как её нарисовал таск 129), на бумаге —
+// `ELEVATION_UNIT_MM` миллиметра. Множитель приходит доводом `unit`, и второй
+// отрисовки для листа по ГОСТ не заводится (таск 130).
 const ELEVATION_PAD = { left: 56, right: 18, top: 20, bottom: 42 };
 const ELEVATION_UNKNOWN_BAND = 22;
 const ELEVATION_FONT = 11;
 // Мельче этого подпись на развёртке не читается — тогда её просто нет.
 const ELEVATION_LABEL_MIN_PX = 26;
 
-function elevationTick(ctx, x, y, vertical) {
+// Шрифт развёртки на бумаге — 3,5 мм: размер по ГОСТ 2.304, тот же, которым
+// подписана таблица. Из него и выводится, сколько миллиметров стоит единица, —
+// одно число на все поля, и пропорции экранной развёртки переносятся на лист
+// целиком.
+export const ELEVATION_FONT_MM = 3.5;
+export const ELEVATION_UNIT_MM = ELEVATION_FONT_MM / ELEVATION_FONT;
+
+// Сколько единиц рамки съедают поля: по ширине и по высоте. Этим считает
+// раскладку листа `gostSheet.elevationFit` — размеры полей живут здесь, рядом
+// с тем, кто их рисует, и второго их описания в сборке нет.
+export const ELEVATION_FRAME_UNITS = {
+  side: ELEVATION_PAD.left + ELEVATION_PAD.right,
+  stack: ELEVATION_PAD.top + ELEVATION_PAD.bottom + ELEVATION_UNKNOWN_BAND,
+};
+
+function elevationTick(ctx, x, y, vertical, unit) {
+  const arm = 4 * unit;
   ctx.beginPath();
   if (vertical) {
-    ctx.moveTo(x - 4, y);
-    ctx.lineTo(x + 4, y);
+    ctx.moveTo(x - arm, y);
+    ctx.lineTo(x + arm, y);
   } else {
-    ctx.moveTo(x, y - 4);
-    ctx.lineTo(x, y + 4);
+    ctx.moveTo(x, y - arm);
+    ctx.lineTo(x, y + arm);
   }
   ctx.stroke();
 }
 
-function elevationText(ctx, value, x, y, align) {
+// Подпись с подложкой под буквами. Кисть берётся и **возвращается**: без
+// `restore` цвет бумаги оставался на холсте, и следующая линия рисовалась им
+// же. Так пропадала размерная цепочка под стеной: на цветном листе она была
+// бледно-серой, на чёрно-белом исчезала совсем (найдено живым прогоном T130).
+function elevationText(ctx, value, x, y, align, unit) {
+  ctx.save();
   ctx.textAlign = align || "center";
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 3 * unit;
   ctx.strokeStyle = DRAWING_PAPER;
   ctx.strokeText(value, x, y);
   ctx.fillStyle = DRAWING_CAPTION;
   ctx.fillText(value, x, y);
-  ctx.textAlign = "start";
+  ctx.restore();
 }
 
 /**
  * Нарисовать развёртку в заданный прямоугольник.
  *
  * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
- * вызывающий попадает мышью в то, что нарисовано, и по ней же будущая
- * выгрузка посчитает размер листа.
+ * вызывающий попадает мышью в то, что нарисовано, и по ней же выгрузка
+ * проверяет, что обещанный масштаб настоящий.
+ *
+ * `options.unit` — величина единицы полей и шрифта в точках холста: `1` на
+ * экране, «точек в миллиметре × `ELEVATION_UNIT_MM`» на бумаге.
+ * `options.scale` — **заданный** масштаб (точек холста на миллиметр объекта).
+ * Без него развёртка вписывается в рамку сама; с ним она рисуется ровно тем
+ * масштабом, который лист обещал в штампе: на одном листе их несколько, а
+ * графа «Масштаб» у листа одна (G169).
+ * `options.label` — подпись над чертежом. На экране её не надо (над полосой
+ * стоит заголовок строкой), а на листе из нескольких развёрток она и есть
+ * порядок обхода: без номера ряд чертежей читается как россыпь.
  */
-export function drawElevation(ctx, elevation, box) {
+export function drawElevation(ctx, elevation, box, options = {}) {
   if (!elevation) return null;
+  const unit = options.unit > 0 ? options.unit : 1;
+  const band = ELEVATION_UNKNOWN_BAND * unit;
   const inner = {
-    x: box.x + ELEVATION_PAD.left,
-    y: box.y + ELEVATION_PAD.top,
-    width: Math.max(1, box.width - ELEVATION_PAD.left - ELEVATION_PAD.right),
-    height: Math.max(1, box.height - ELEVATION_PAD.top - ELEVATION_PAD.bottom - ELEVATION_UNKNOWN_BAND),
+    x: box.x + ELEVATION_PAD.left * unit,
+    y: box.y + ELEVATION_PAD.top * unit,
+    width: Math.max(1, box.width - (ELEVATION_PAD.left + ELEVATION_PAD.right) * unit),
+    height: Math.max(1, box.height - (ELEVATION_PAD.top + ELEVATION_PAD.bottom) * unit - band),
   };
-  const scale = Math.min(inner.width / Math.max(1, elevation.lengthMm), inner.height / Math.max(1, elevation.heightShownMm));
+  const scale =
+    options.scale > 0
+      ? options.scale
+      : Math.min(inner.width / Math.max(1, elevation.lengthMm), inner.height / Math.max(1, elevation.heightShownMm));
   const wallWidth = elevation.lengthMm * scale;
   const wallHeight = elevation.heightShownMm * scale;
   // Стена прижата к низу поля: пол — это пол, и смотреть на него снизу вверх
@@ -4623,15 +4666,24 @@ export function drawElevation(ctx, elevation, box) {
   const floor = inner.y + inner.height;
   const atX = (mm) => left + mm * scale;
   const atY = (mm) => floor - mm * scale;
+  // Чем тонкой полоске не стать: узкий проём или плинтус обязан остаться
+  // видимым, и на бумаге эта мера тоже измеряется единицами, а не точками.
+  const thin = 2 * unit;
 
   ctx.save();
-  ctx.font = drawFont(ELEVATION_FONT, 600);
+  ctx.font = drawFont(ELEVATION_FONT * unit, 600);
   ctx.textBaseline = "middle";
+
+  // Подпись — в верхнем поле рамки и по левому краю поля, а не над самой
+  // стеной: короткая стена стоит по середине, и подписи ряда разъехались бы.
+  if (options.label) {
+    elevationText(ctx, options.label, inner.x, box.y + (ELEVATION_PAD.top / 2) * unit, "left", unit);
+  }
 
   // Поле стены.
   ctx.fillStyle = DRAWING_PAPER;
   ctx.fillRect(left, floor - wallHeight, wallWidth, wallHeight);
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.5 * unit;
   ctx.strokeStyle = DRAWING_WALL;
   ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
 
@@ -4640,33 +4692,35 @@ export function drawElevation(ctx, elevation, box) {
   for (const object of elevation.objects) {
     const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
     const y = atY(top);
-    const height = Math.max(2, (top - object.floorMm) * scale);
+    const height = Math.max(thin, (top - object.floorMm) * scale);
     ctx.fillStyle = DRAWING_OBJECT_FILL;
-    ctx.fillRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
-    ctx.lineWidth = 1.2;
+    ctx.fillRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    ctx.lineWidth = 1.2 * unit;
     ctx.strokeStyle = DRAWING_OBJECT;
-    ctx.strokeRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
-    if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX) continue;
-    elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8);
-    if (object.topMm !== null) elevationText(ctx, String(object.topMm), atX(object.toMm) + 2, y + 9, "left");
+    ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) continue;
+    elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+    if (object.topMm !== null) {
+      elevationText(ctx, String(object.topMm), atX(object.toMm) + 2 * unit, y + 9 * unit, "left", unit);
+    }
   }
 
   // Проёмы: дырка в стене с косяками. У двери — засечка со стороны петель,
   // как её рисуют на развёртке: наклонная от верхнего косяка к нижнему.
   for (const opening of elevation.openings) {
     const x = atX(opening.fromMm);
-    const width = Math.max(2, (opening.toMm - opening.fromMm) * scale);
+    const width = Math.max(thin, (opening.toMm - opening.fromMm) * scale);
     const top = atY(opening.topMm);
-    const height = Math.max(2, (opening.topMm - opening.floorMm) * scale);
+    const height = Math.max(thin, (opening.topMm - opening.floorMm) * scale);
     ctx.fillStyle = DRAWING_PAPER;
     ctx.fillRect(x, top, width, height);
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * unit;
     ctx.strokeStyle = DRAWING_EDGE;
     ctx.strokeRect(x, top, width, height);
     if (opening.hinge) {
       const hingeX = opening.hinge === "start" ? x : x + width;
-      ctx.setLineDash([4, 3]);
-      ctx.lineWidth = 1;
+      ctx.setLineDash([4 * unit, 3 * unit]);
+      ctx.lineWidth = 1 * unit;
       ctx.beginPath();
       ctx.moveTo(hingeX, top);
       ctx.lineTo(opening.hinge === "start" ? x + width : x, top + height / 2);
@@ -4674,10 +4728,12 @@ export function drawElevation(ctx, elevation, box) {
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    if (width < ELEVATION_LABEL_MIN_PX) continue;
+    if (width < ELEVATION_LABEL_MIN_PX * unit) continue;
     // Низ и верх проёма — числами у его косяка: именно от них отмеряют.
-    elevationText(ctx, String(opening.topMm), x + width / 2, top - 8);
-    if (opening.floorMm > 0) elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9);
+    elevationText(ctx, String(opening.topMm), x + width / 2, top - 8 * unit, "center", unit);
+    if (opening.floorMm > 0) {
+      elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9 * unit, "center", unit);
+    }
   }
 
   // Метки: знак на своём месте и высоте, подпись рядом. Линия — отрезком.
@@ -4691,39 +4747,46 @@ export function drawElevation(ctx, elevation, box) {
     ctx.strokeStyle = mark.color;
     ctx.fillStyle = mark.color;
     if (mark.kind === "line" && mark.toMm !== null) {
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.5 * unit;
       ctx.beginPath();
       ctx.moveTo(atX(mark.fromMm), y);
       ctx.lineTo(atX(mark.toMm), y);
       ctx.stroke();
-      elevationText(ctx, mark.label + " · " + mark.heightMm, (atX(mark.fromMm) + atX(mark.toMm)) / 2, y - 9);
+      elevationText(
+        ctx,
+        mark.label + " · " + mark.heightMm,
+        (atX(mark.fromMm) + atX(mark.toMm)) / 2,
+        y - 9 * unit,
+        "center",
+        unit,
+      );
       continue;
     }
     const x = atX(mark.fromMm);
-    drawShape(ctx, mark.shape, x, y, 9, mark.color);
-    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13);
+    drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
+    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13 * unit, "center", unit);
   }
 
   // Метки без высоты — полосой под полом: на стене им места нет, но и
   // потерять их нельзя. Выдуманная высота соврала бы развёртке.
   if (unknown.length > 0) {
-    const y = floor + ELEVATION_UNKNOWN_BAND / 2 + 4;
-    ctx.setLineDash([3, 3]);
-    ctx.lineWidth = 1;
+    const y = floor + band / 2 + 4 * unit;
+    ctx.setLineDash([3 * unit, 3 * unit]);
+    ctx.lineWidth = 1 * unit;
     ctx.strokeStyle = DRAWING_CAPTION;
     ctx.beginPath();
-    ctx.moveTo(left, floor + 3);
-    ctx.lineTo(left + wallWidth, floor + 3);
+    ctx.moveTo(left, floor + 3 * unit);
+    ctx.lineTo(left + wallWidth, floor + 3 * unit);
     ctx.stroke();
     ctx.setLineDash([]);
     for (const mark of unknown) {
-      drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7, mark.color);
-      elevationText(ctx, mark.label, atX(mark.fromMm) + 11, y, "left");
+      drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7 * unit, mark.color);
+      elevationText(ctx, mark.label, atX(mark.fromMm) + 11 * unit, y, "left", unit);
     }
   }
 
   // Пол толще стен: он опора всему, что на развёртке стоит.
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2.5 * unit;
   ctx.strokeStyle = DRAWING_WALL;
   ctx.beginPath();
   ctx.moveTo(left, floor);
@@ -4731,31 +4794,31 @@ export function drawElevation(ctx, elevation, box) {
   ctx.stroke();
 
   // ——— размеры ———
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 * unit;
   ctx.strokeStyle = DRAWING_CAPTION;
   // Высота — слева, одной выносной.
-  const heightX = left - 26;
+  const heightX = left - 26 * unit;
   ctx.beginPath();
   ctx.moveTo(heightX, floor);
   ctx.lineTo(heightX, floor - wallHeight);
   ctx.stroke();
-  elevationTick(ctx, heightX, floor, true);
-  elevationTick(ctx, heightX, floor - wallHeight, true);
-  elevationText(ctx, String(elevation.heightShownMm), heightX - 4, floor - wallHeight / 2, "right");
+  elevationTick(ctx, heightX, floor, true, unit);
+  elevationTick(ctx, heightX, floor - wallHeight, true, unit);
+  elevationText(ctx, String(elevation.heightShownMm), heightX - 4 * unit, floor - wallHeight / 2, "right", unit);
   // Длина — снизу, и по ней же засечки проёмов: по этой цепочке проём и
   // размечают на стене.
-  const lengthY = floor + ELEVATION_UNKNOWN_BAND + 14;
+  const lengthY = floor + band + 14 * unit;
   ctx.beginPath();
   ctx.moveTo(left, lengthY);
   ctx.lineTo(left + wallWidth, lengthY);
   ctx.stroke();
-  elevationTick(ctx, left, lengthY);
-  elevationTick(ctx, left + wallWidth, lengthY);
-  elevationText(ctx, String(elevation.lengthMm), left + wallWidth / 2, lengthY + 12);
+  elevationTick(ctx, left, lengthY, false, unit);
+  elevationTick(ctx, left + wallWidth, lengthY, false, unit);
+  elevationText(ctx, String(elevation.lengthMm), left + wallWidth / 2, lengthY + 12 * unit, "center", unit);
   for (const opening of elevation.openings) {
     for (const mm of [opening.fromMm, opening.toMm]) {
-      elevationTick(ctx, atX(mm), lengthY);
-      elevationText(ctx, String(mm), atX(mm), lengthY - 10);
+      elevationTick(ctx, atX(mm), lengthY, false, unit);
+      elevationText(ctx, String(mm), atX(mm), lengthY - 10 * unit, "center", unit);
     }
   }
   ctx.restore();

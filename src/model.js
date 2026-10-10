@@ -4445,6 +4445,16 @@ const WALL_ROOM_PROBE_MM = 100;
  */
 export function wallRoomId(project, wallId, side) {
   const wall = findWall(project, wallId);
+  const point = wallSideProbe(project, wallId, side);
+  return wall && point ? roomAtPoint(project, wall.schemeId, point) : null;
+}
+
+// Пробная точка стороны: середина стены, отодвинутая за её грань на эту
+// сторону, в долях плана — такими контуры и спрашивают. Вынесена из
+// `wallRoomId` ради выгрузки: ей нужен не только `roomId`, но и **тот самый
+// контур**, по которому пойдёт обход (таск 130).
+function wallSideProbe(project, wallId, side) {
+  const wall = findWall(project, wallId);
   const vectors = wallVectors(wall);
   if (!wall || !vectors) return null;
   const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM);
@@ -4452,8 +4462,16 @@ export function wallRoomId(project, wallId, side) {
     x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
     y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
   };
-  const point = planMmToFraction(project, wall.schemeId, middle);
-  return point ? roomAtPoint(project, wall.schemeId, point) : null;
+  return planMmToFraction(project, wall.schemeId, middle);
+}
+
+// Контур под этой стороной. Не `roomId`: у комнаты контуров может быть
+// несколько (две части одной комнаты), и обход идёт по тому, который накрывает
+// именно эту грань.
+function wallSideOutline(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  const point = wallSideProbe(project, wallId, side);
+  return wall && point ? outlineAtPoint(project, wall.schemeId, point) : null;
 }
 
 /**
@@ -4626,6 +4644,173 @@ function flipHinge(value) {
 
 function flipSwing(value) {
   return value === "right" ? "left" : "right";
+}
+
+// ——— развёртки листом на помещение ————————————————————————————————————
+//
+// Требование G180, слова заказчика: «да, стены комнаты на листе». Правило
+// отбора здесь важнее самой выгрузки: у квартиры десятки стен, и «выгрузить
+// все развёртки» без правила даёт пачку листов, половина которых пустая.
+//
+// **Принадлежит комнате не стена, а сторона стены** — это находка таска 128, и
+// здесь она окупается дважды: на лист идут те стороны, что смотрят внутрь, и
+// высота берётся та, что задана этой комнате (`wallHeightOnSide`).
+//
+// **Порядок задаёт обход контура.** Грань стены проецируется на контур, и
+// развёртки сортируются по пройденному пути. Обход нормализуется по часовой
+// стрелке на плане и начинается с вершины, ближайшей к левому верхнему углу
+// контура: тогда порядок не зависит от того, с какого угла комнату обводили, и
+// две выгрузки одной комнаты совпадают. На **невыпуклой** комнате (ниша,
+// эркер) это единственный способ не запутаться: габаритная рамка там накрывает
+// вырез, а контур идёт вдоль стен и ведёт вдоль них же.
+
+// Что делать со стеной, которой нет в контуре, — молча потерять нельзя:
+//
+// 1. Сторона, которую накрывает контур → лист этой комнаты.
+// 2. Стена, у которой **ни одна** сторона не в контуре (перегородка в поле,
+//    стена без обводки) → лист «вне помещений»: там её видно, и видно, что
+//    комнату надо обвести.
+// 3. Наружная грань стены, которая другой стороной стоит в комнате, — это
+//    фасад: развёртки с улицы никто не просил, и на лист она идёт **только
+//    если на ней есть метки** (камера, фасадный светильник). Иначе её нет, но
+//    и потери нет: сама стена показана со стороны комнаты.
+//
+// Перегородка внутри одной комнаты попадает на её лист **дважды** — по разу на
+// сторону, и это верно: на двух гранях разные метки.
+
+function wallSideFaceMm(wall, side) {
+  const vectors = wallVectors(wall);
+  if (!wall || !vectors) return null;
+  const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2);
+  return {
+    x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
+    y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
+  };
+}
+
+// Знак обхода кольца. Ось `y` на плане смотрит вниз, поэтому положительная
+// сумма — обход по часовой стрелке так, как его видит человек на листе.
+function ringTurn(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return sum;
+}
+
+/**
+ * Контур в миллиметрах чертежа, нормализованный для обхода: по часовой и с
+ * началом у левого верхнего угла. Пустой список — привязки чертежа нет, и
+ * обходить нечего (тогда и комнат у сторон нет: они считаются через ту же
+ * привязку).
+ */
+function outlineRingMm(project, outline) {
+  const points = (outline && Array.isArray(outline.points) ? outline.points : [])
+    .map((point) => planFractionToMm(project, outline.schemeId, point))
+    .filter(Boolean);
+  if (points.length < OUTLINE_MIN_POINTS) return [];
+  const ring = ringTurn(points) < 0 ? points.slice().reverse() : points;
+  const minX = Math.min(...ring.map((point) => point.x));
+  const minY = Math.min(...ring.map((point) => point.y));
+  let start = 0;
+  let best = Infinity;
+  ring.forEach((point, index) => {
+    const gap = Math.hypot(point.x - minX, point.y - minY);
+    if (gap < best) {
+      best = gap;
+      start = index;
+    }
+  });
+  return [...ring.slice(start), ...ring.slice(0, start)];
+}
+
+// Пройденный путь до ближайшей к точке точки кольца. Проецируется **грань**
+// стены, а не её середина: грань лежит на самом контуре, и у неё нет спора за
+// угол, который был бы у точки внутри стены.
+function ringPositionMm(ring, point) {
+  let run = 0;
+  let best = null;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    const t = length > 0 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (length * length))) : 0;
+    const gap = Math.hypot(point.x - (a.x + dx * t), point.y - (a.y + dy * t));
+    if (best === null || gap < best.gap) best = { gap, at: run + length * t };
+    run += length;
+  }
+  return best ? best.at : 0;
+}
+
+function wallMarkedOn(project, wallId, side) {
+  return project.marks.some((mark) => {
+    const binding = markWall(mark);
+    return binding && binding.wallId === wallId && markWallSide(project, mark) === side;
+  });
+}
+
+/**
+ * Что выгружать листами развёрток: `{rooms, loose}`.
+ *
+ * `rooms` — комнаты, у которых **есть** стены на этой схеме, в порядке
+ * `roomsInOrder`; у каждой `sides: [{wallId, side}]` в порядке обхода контура.
+ * Комната без стен в список не попадает вовсе — пустых листов не бывает (G68).
+ * Комната со стенами, но без меток, попадает: пустая стена с проёмами это тоже
+ * чертёж для монтажника.
+ *
+ * `loose` — стороны вне контуров по правилу выше.
+ */
+export function elevationPlan(project, schemeId) {
+  const ordered = outlinesInOrder(project, schemeId);
+  const ringOf = new Map();
+  ordered.forEach((outline, index) => ringOf.set(outline.id, { index, ring: outlineRingMm(project, outline) }));
+  const byRoom = new Map();
+  const loose = [];
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const probed = WALL_SIDES.map((side) => ({ side, outline: wallSideOutline(project, wall.id, side) }));
+    const homeless = probed.every((item) => !item.outline);
+    for (const item of probed) {
+      if (!item.outline) {
+        if (homeless || wallMarkedOn(project, wall.id, item.side)) loose.push({ wallId: wall.id, side: item.side });
+        continue;
+      }
+      const roomId = item.outline.roomId;
+      if (!byRoom.has(roomId)) byRoom.set(roomId, []);
+      const place = ringOf.get(item.outline.id) || { index: 0, ring: [] };
+      const face = wallSideFaceMm(wall, item.side);
+      byRoom.get(roomId).push({
+        wallId: wall.id,
+        side: item.side,
+        ring: place.index,
+        at: place.ring.length > 1 && face ? ringPositionMm(place.ring, face) : 0,
+      });
+    }
+  }
+  const rooms = [];
+  for (const room of roomsInOrder(project)) {
+    const sides = byRoom.get(room.id);
+    if (!sides || sides.length === 0) continue;
+    sides.sort((first, second) => first.ring - second.ring || first.at - second.at || (first.side < second.side ? -1 : 1));
+    rooms.push({ roomId: room.id, name: room.name, sides: sides.map(({ wallId, side }) => ({ wallId, side })) });
+  }
+  return { rooms, loose };
+}
+
+/** Стороны стен одной комнаты в порядке обхода её контура. */
+export function roomWallSides(project, schemeId, roomId) {
+  const found = elevationPlan(project, schemeId).rooms.find((room) => room.roomId === roomId);
+  return found ? found.sides : [];
+}
+
+/** Развёртки по списку сторон — ровно то, что рисует `render.drawElevation`. */
+export function wallElevations(project, sides) {
+  return (Array.isArray(sides) ? sides : [])
+    .map((item) => wallElevation(project, item.wallId, item.side))
+    .filter(Boolean);
 }
 
 // ——— данные для штампа ————————————————————————————————————————————————

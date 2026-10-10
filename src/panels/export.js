@@ -6,7 +6,15 @@
 // поэтому скрытое фильтром не попадает ни в таблицу, ни в картинку, ни в легенду.
 import { PANEL_IDS, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
-import { findRoom, findScheme, projectStamp, roomsInOrder, schemesInOrder } from "../model.js";
+import {
+  elevationPlan,
+  findRoom,
+  findScheme,
+  projectStamp,
+  roomsInOrder,
+  schemesInOrder,
+  wallElevations,
+} from "../model.js";
 import { screenToPlan } from "../render.js";
 import { getImage } from "../store.js";
 import { decodePlanImage, releasePlanImage } from "../imagePrep.js";
@@ -16,6 +24,9 @@ import {
   allSchemesPdf,
   allSchemesPlan,
   allSchemesZip,
+  elevationSheet,
+  elevationSheets,
+  elevationSizeText,
   exportCopy,
   exportDownload,
   exportFileName,
@@ -83,6 +94,10 @@ const exportChoice = {
   // прежние выгрузки остаются тем, чем были, а название формата стоит на самой
   // кнопке, так что скрытым выбор не становится.
   format: "png",
+  // Помещение листа развёрток: `null` — ещё не выбирали, `"loose"` — стены вне
+  // контуров. Живёт между открытиями, как соседние: развёртки выгружают по
+  // комнате и возвращаются к той же.
+  elevationRoom: null,
 };
 
 // Выгружаем документом, а не картинкой.
@@ -945,6 +960,213 @@ function exportSchemeDialog(api) {
   refreshHint();
 }
 
+// ——— диалог развёрток —————————————————————————————————————————————————
+//
+// Лист на помещение (таск 130, требование G180). Что на лист попадает и в
+// каком порядке — решает `model.elevationPlan` обходом контура; здесь только
+// выбор комнаты, формата и вида файла.
+//
+// Окно **третье**, а не отметка в окне схемы: у схемы на листе план с метками,
+// у развёрток — ряд чертежей, и общего у них ровно столько, сколько между
+// таблицей и схемой. Новый вид выгрузки стоит рядом с прежними и ничего не
+// заменяет (G68).
+
+// Что предложить в списке: комнаты со стенами на этой схеме плюс, если есть,
+// стены вне контуров. Комната без стен в список не попадает вовсе — пустых
+// листов не бывает.
+function exportElevationGroups(project, schemeId) {
+  if (!project || !schemeId) return [];
+  const plan = elevationPlan(project, schemeId);
+  const groups = plan.rooms.map((room) => ({ value: room.roomId, label: room.name, sides: room.sides }));
+  if (plan.loose.length > 0) {
+    groups.push({ value: "loose", label: strings.elevationSheet.loose, sides: plan.loose });
+  }
+  return groups;
+}
+
+function exportElevationDialog(api) {
+  const { getState, notify } = api;
+  const state = getState();
+  const scheme = findScheme(state.project, state.schemeId);
+  const groups = exportElevationGroups(state.project, state.schemeId);
+  if (groups.length === 0) {
+    notify(strings.elevationSheet.noWalls, "info");
+    return;
+  }
+  // Комната, выбранная на прошлом объекте или на другой схеме, могла исчезнуть
+  // — тогда берётся первая, а не пустой выбор.
+  if (!groups.some((group) => group.value === exportChoice.elevationRoom)) {
+    exportChoice.elevationRoom = groups[0].value;
+  }
+  const chosen = () => groups.find((group) => group.value === exportChoice.elevationRoom) || groups[0];
+  const hint = uiEl("p", { class: "export__hint" });
+  // Правило «сколько развёрток на листе» стоит в самом окне: по нему человек и
+  // решает, поднимать ли формат, а искать это в отчёте он не станет.
+  const rule = uiEl("p", { class: "export__hint" });
+  const monoNote = uiEl("p", { class: "export__hint export__hint--warn" });
+
+  // Объект берётся свежим: окно «Данные для штампа» правит его из-под этого же
+  // диалога (та же причина, что у диалога схемы).
+  const elevationsOf = () => wallElevations(getState().project, chosen().sides);
+  const layoutOf = (elevations) => elevationSheet(elevations, { format: exportChoice.gostFormat });
+
+  let syncLabels = () => {};
+
+  const refreshHint = () => {
+    syncLabels();
+    const groups2 = exportChoice.mono ? monoSameShapes(state.project, scheme, state.filter) : [];
+    monoNote.textContent = monoSameText(groups2);
+    monoNote.hidden = groups2.length === 0;
+    const layout = layoutOf(elevationsOf());
+    const parts = [
+      elevationSizeText(layout, { scale: exportChoice.schemeScale, gost: exportChoice.gost }),
+      layout.scaleText,
+      layout.pages.length === 1
+        ? text("elevationSheet.sheetsOne", { per: layout.pages[0].to - layout.pages[0].from })
+        : text("elevationSheet.sheets", { count: layout.pages.length, per: layout.perSheet }),
+    ];
+    if (layout.tooSmall) parts.push(strings.elevationSheet.tooSmall);
+    hint.textContent = parts.join(" · ");
+    rule.textContent =
+      (chosen().value === "loose" ? strings.elevationSheet.looseHint : strings.elevationSheet.order) +
+      " " +
+      strings.elevationSheet.rule;
+  };
+
+  const fileField = exportField(strings.exportPanel.file, exportFileSelect(refreshHint));
+  fileField.title = strings.exportPanel.fileHint;
+  const formatField = exportField(strings.gost.format, exportFormatSelect(refreshHint));
+  const gostCheck = exportCheck(strings.gost.sheet, exportChoice.gost, (on) => {
+    exportChoice.gost = on;
+    refreshHint();
+  });
+  gostCheck.title = strings.gost.sheetHint;
+  const monoToggle = exportCheck(strings.mono.sheet, exportChoice.mono, (on) => {
+    exportChoice.mono = on;
+    refreshHint();
+  });
+  monoToggle.title = strings.mono.sheetHint;
+
+  const controls = uiEl("div", { class: "export__controls" }, [
+    exportField(
+      strings.elevationSheet.room,
+      exportSelect(
+        groups.map((group) => ({ value: String(group.value), label: group.label })),
+        String(chosen().value),
+        (value) => {
+          exportChoice.elevationRoom = value;
+          refreshHint();
+        },
+      ),
+    ),
+    exportField(
+      strings.exportPanel.scale,
+      exportScaleSelect(exportChoice.schemeScale, (value) => {
+        exportChoice.schemeScale = value;
+        refreshHint();
+      }),
+    ),
+    fileField,
+    // Формат листа нужен и картинке: без рамки выгружается то же поле того же
+    // формата, и число развёрток на листе у них одно.
+    formatField,
+    gostCheck,
+    monoToggle,
+  ]);
+
+  const guard = async (run) => {
+    try {
+      await run();
+    } catch (error) {
+      notify(error && error.message ? error.message : strings.exportPanel.failed, "error");
+    }
+  };
+
+  const roomName = () => (chosen().value === "loose" ? strings.elevationSheet.loose : chosen().label);
+  const titleOf = () =>
+    [state.project.name, scheme ? scheme.name : "", roomName(), strings.elevationSheet.drawing]
+      .filter(Boolean)
+      .join(" · ");
+  // В имени файла — короткое слово, а не полное название чертежа: имя режется
+  // по шестидесятому знаку, и «Развёртки стен» у комнаты с длинным именем до
+  // него не доживало.
+  const partOf = () => [scheme ? scheme.name : "", roomName(), strings.elevationSheet.button].filter(Boolean).join(" — ");
+
+  const render = async (pdf) => {
+    const elevations = elevationsOf();
+    const layout = layoutOf(elevations);
+    // О мелкоте говорим и здесь: подсказку в окне могли не прочесть, а лист с
+    // нечитаемым чертежом уже уйдёт в файл.
+    if (layout.tooSmall) notify(strings.elevationSheet.tooSmall, "error");
+    return elevationSheets(getState().project, elevations, {
+      layout,
+      gost: exportChoice.gost,
+      format: exportChoice.gostFormat,
+      scale: exportChoice.schemeScale,
+      mono: exportChoice.mono,
+      building: roomName(),
+      drawing: [scheme ? scheme.name : "", strings.elevationSheet.drawing].filter(Boolean).join(" · "),
+      pdf: pdf === true,
+    });
+  };
+
+  const downloadButton = uiButton(strings.exportPanel.download, {
+    class: "ui-btn ui-btn--accent",
+    on: {
+      click: () =>
+        guard(async () => {
+          if (exportToPdf()) {
+            const pages = await render(true);
+            const name = exportFileName(state.project, partOf(), "pdf");
+            exportDownload(exportPdf(pages, { title: titleOf() }), name);
+            notify(text("exportPanel.saved", { name }), "success");
+            return;
+          }
+          const sheets = await render(false);
+          // Несколько листов — это несколько файлов, и класть их в папку
+          // загрузок по одному нельзя: браузер второй и третий скачивает молча
+          // или не скачивает вовсе. Поэтому архив (как у таблицы по ГОСТ).
+          const name = exportFileName(state.project, partOf(), sheets.length > 1 ? "zip" : "png");
+          exportDownload(
+            sheets.length > 1 ? await gostSheetsZip(sheets, exportFileName(state.project, partOf(), "png")) : sheets[0],
+            name,
+          );
+          notify(text("exportPanel.saved", { name }), "success");
+        }),
+    },
+  });
+
+  syncLabels = () => {
+    const pdf = exportToPdf();
+    downloadButton.textContent = pdf ? strings.exportPanel.downloadPdf : strings.exportPanel.download;
+  };
+
+  const actions = [
+    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+    uiButton(strings.exportPanel.print, {
+      on: {
+        click: () =>
+          guard(async () => {
+            // Печать всегда картинкой и по листу на страницу: на развёртке всё
+            // нужное уже написано подписью и штампом, а заголовок над картинкой
+            // съел бы поле чертежа.
+            const sheets = await render(false);
+            await gostPrintSheets(sheets);
+          }),
+      },
+    }),
+    downloadButton,
+  ];
+
+  const modal = uiModal({
+    title: strings.elevationSheet.title,
+    body: uiEl("div", { class: "export__body" }, [controls, monoNote, hint, rule]),
+    actions: [uiButton(strings.dialog.close, { on: { click: () => modal.close() } }), ...actions],
+    primary: actions[actions.length - 1],
+  });
+  refreshHint();
+}
+
 // ——— панель ———————————————————————————————————————————————————————————
 
 function mountExportPanel(host, api) {
@@ -955,7 +1177,13 @@ function mountExportPanel(host, api) {
   const schemeButton = uiButton(strings.exportPanel.schemeTitle, {
     on: { click: () => exportSchemeDialog(api) },
   });
-  host.replaceChildren(uiEl("div", { class: "export" }, [tableButton, schemeButton]));
+  // Третья кнопка — развёртки. Гаснет, когда на схеме нет ни одной стены
+  // чертежа: без стен выгружать нечего, и сказать это надо кнопкой, а не
+  // пустым окном.
+  const elevationButton = uiButton(strings.elevationSheet.button, {
+    on: { click: () => exportElevationDialog(api) },
+  });
+  host.replaceChildren(uiEl("div", { class: "export" }, [tableButton, schemeButton, elevationButton]));
 
   // Пустая выгрузка никому не нужна: без меток кнопки гаснут и говорят почему.
   const sync = (state) => {
@@ -969,6 +1197,11 @@ function mountExportPanel(host, api) {
       : marks === 0
         ? strings.exportPanel.noMarks
         : strings.exportPanel.schemeDialog;
+    // Развёрткам метки не нужны: пустая стена с проёмами это тоже чертёж для
+    // монтажника. Нужны стены — и только они.
+    const walls = scheme ? exportElevationGroups(state.project, scheme.id).length : 0;
+    elevationButton.disabled = walls === 0;
+    elevationButton.title = walls === 0 ? strings.elevationSheet.noWalls : strings.elevationSheet.dialog;
   };
 
   subscribe(sync);

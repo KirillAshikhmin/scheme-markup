@@ -6382,6 +6382,37 @@ const strings = {
   // Постоянные надписи форм (`labels`) напечатаны в самом стандарте и меняться
   // не могут — они здесь, потому что это видимый текст, а не потому, что их
   // правят.
+  // Выгрузка развёрток листом на помещение (таск 130, требование G180).
+  elevationSheet: {
+    button: "Развёртки",
+    title: "Выгрузка развёрток",
+    dialog: "Развёртки стен помещения: лист на комнату, порядок — обход её контура",
+    room: "Помещение",
+    // Название чертежа в штампе: что на листе, а не как он сделан.
+    drawing: "Развёртки стен",
+    // Подпись над чертежом на листе: номер по обходу контура и длина стены.
+    // Номер сквозной по комнате — на втором листе счёт продолжается.
+    label: "{index}. Стена {length} мм",
+    // Стены, которых не накрыл ни один контур. Отдельный лист, а не тишина:
+    // молча потерять стену нельзя, а назвать её «ничьей» — значит показать
+    // человеку, что комнату осталось обвести.
+    loose: "Стены вне помещений",
+    looseHint: "Стены, которых не накрыл ни один контур. Обведите помещение — и они встанут на его лист.",
+    // Правило «сколько развёрток на листе» — вслух, в самом окне: по нему
+    // человек и решает, поднимать ли формат.
+    rule: "На лист идёт столько развёрток, сколько их остаётся читаемыми: высота стены на бумаге не ниже 40 мм. Остальные — на следующий лист той же комнаты.",
+    sheets: "Листов: {count}, по {per} развёртки на лист",
+    sheetsOne: "Один лист, развёрток на нём: {per}",
+    // У картинки без рамки размер — поле чертежа, а не лист: лист — это то,
+    // что с рамкой и штампом.
+    fieldSize: "{format}, {orientation} · {width} × {height} px · поле {mmWidth} × {mmHeight} мм при {dpi} dpi",
+    tooSmall: "Стена на бумаге ниже 40 мм — для чертежа мелко. Возьмите формат крупнее.",
+    noWalls: "На этой схеме нет стен чертежа — развёртки брать не из чего",
+    nothing: "В этом выборе нет ни одной стены — выгружать нечего.",
+    done: "Листов развёрток: {count}",
+    // Что на листе: порядок по обходу контура, и сторона у каждой стены своя.
+    order: "Порядок — обход контура комнаты, каждая стена показана стороной внутрь неё.",
+  },
   gost: {
     sheet: "Лист по ГОСТ",
     sheetHint: "Рамка и основная надпись по ГОСТ Р 21.1101-2013 (СПДС)",
@@ -10881,6 +10912,16 @@ const WALL_ROOM_PROBE_MM = 100;
  */
 function wallRoomId(project, wallId, side) {
   const wall = findWall(project, wallId);
+  const point = wallSideProbe(project, wallId, side);
+  return wall && point ? roomAtPoint(project, wall.schemeId, point) : null;
+}
+
+// Пробная точка стороны: середина стены, отодвинутая за её грань на эту
+// сторону, в долях плана — такими контуры и спрашивают. Вынесена из
+// `wallRoomId` ради выгрузки: ей нужен не только `roomId`, но и **тот самый
+// контур**, по которому пойдёт обход (таск 130).
+function wallSideProbe(project, wallId, side) {
+  const wall = findWall(project, wallId);
   const vectors = wallVectors(wall);
   if (!wall || !vectors) return null;
   const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM);
@@ -10888,8 +10929,16 @@ function wallRoomId(project, wallId, side) {
     x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
     y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
   };
-  const point = planMmToFraction(project, wall.schemeId, middle);
-  return point ? roomAtPoint(project, wall.schemeId, point) : null;
+  return planMmToFraction(project, wall.schemeId, middle);
+}
+
+// Контур под этой стороной. Не `roomId`: у комнаты контуров может быть
+// несколько (две части одной комнаты), и обход идёт по тому, который накрывает
+// именно эту грань.
+function wallSideOutline(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  const point = wallSideProbe(project, wallId, side);
+  return wall && point ? outlineAtPoint(project, wall.schemeId, point) : null;
 }
 
 /**
@@ -11062,6 +11111,173 @@ function flipHinge(value) {
 
 function flipSwing(value) {
   return value === "right" ? "left" : "right";
+}
+
+// ——— развёртки листом на помещение ————————————————————————————————————
+//
+// Требование G180, слова заказчика: «да, стены комнаты на листе». Правило
+// отбора здесь важнее самой выгрузки: у квартиры десятки стен, и «выгрузить
+// все развёртки» без правила даёт пачку листов, половина которых пустая.
+//
+// **Принадлежит комнате не стена, а сторона стены** — это находка таска 128, и
+// здесь она окупается дважды: на лист идут те стороны, что смотрят внутрь, и
+// высота берётся та, что задана этой комнате (`wallHeightOnSide`).
+//
+// **Порядок задаёт обход контура.** Грань стены проецируется на контур, и
+// развёртки сортируются по пройденному пути. Обход нормализуется по часовой
+// стрелке на плане и начинается с вершины, ближайшей к левому верхнему углу
+// контура: тогда порядок не зависит от того, с какого угла комнату обводили, и
+// две выгрузки одной комнаты совпадают. На **невыпуклой** комнате (ниша,
+// эркер) это единственный способ не запутаться: габаритная рамка там накрывает
+// вырез, а контур идёт вдоль стен и ведёт вдоль них же.
+
+// Что делать со стеной, которой нет в контуре, — молча потерять нельзя:
+//
+// 1. Сторона, которую накрывает контур → лист этой комнаты.
+// 2. Стена, у которой **ни одна** сторона не в контуре (перегородка в поле,
+//    стена без обводки) → лист «вне помещений»: там её видно, и видно, что
+//    комнату надо обвести.
+// 3. Наружная грань стены, которая другой стороной стоит в комнате, — это
+//    фасад: развёртки с улицы никто не просил, и на лист она идёт **только
+//    если на ней есть метки** (камера, фасадный светильник). Иначе её нет, но
+//    и потери нет: сама стена показана со стороны комнаты.
+//
+// Перегородка внутри одной комнаты попадает на её лист **дважды** — по разу на
+// сторону, и это верно: на двух гранях разные метки.
+
+function wallSideFaceMm(wall, side) {
+  const vectors = wallVectors(wall);
+  if (!wall || !vectors) return null;
+  const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2);
+  return {
+    x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
+    y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
+  };
+}
+
+// Знак обхода кольца. Ось `y` на плане смотрит вниз, поэтому положительная
+// сумма — обход по часовой стрелке так, как его видит человек на листе.
+function ringTurn(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return sum;
+}
+
+/**
+ * Контур в миллиметрах чертежа, нормализованный для обхода: по часовой и с
+ * началом у левого верхнего угла. Пустой список — привязки чертежа нет, и
+ * обходить нечего (тогда и комнат у сторон нет: они считаются через ту же
+ * привязку).
+ */
+function outlineRingMm(project, outline) {
+  const points = (outline && Array.isArray(outline.points) ? outline.points : [])
+    .map((point) => planFractionToMm(project, outline.schemeId, point))
+    .filter(Boolean);
+  if (points.length < OUTLINE_MIN_POINTS) return [];
+  const ring = ringTurn(points) < 0 ? points.slice().reverse() : points;
+  const minX = Math.min(...ring.map((point) => point.x));
+  const minY = Math.min(...ring.map((point) => point.y));
+  let start = 0;
+  let best = Infinity;
+  ring.forEach((point, index) => {
+    const gap = Math.hypot(point.x - minX, point.y - minY);
+    if (gap < best) {
+      best = gap;
+      start = index;
+    }
+  });
+  return [...ring.slice(start), ...ring.slice(0, start)];
+}
+
+// Пройденный путь до ближайшей к точке точки кольца. Проецируется **грань**
+// стены, а не её середина: грань лежит на самом контуре, и у неё нет спора за
+// угол, который был бы у точки внутри стены.
+function ringPositionMm(ring, point) {
+  let run = 0;
+  let best = null;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    const t = length > 0 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (length * length))) : 0;
+    const gap = Math.hypot(point.x - (a.x + dx * t), point.y - (a.y + dy * t));
+    if (best === null || gap < best.gap) best = { gap, at: run + length * t };
+    run += length;
+  }
+  return best ? best.at : 0;
+}
+
+function wallMarkedOn(project, wallId, side) {
+  return project.marks.some((mark) => {
+    const binding = markWall(mark);
+    return binding && binding.wallId === wallId && markWallSide(project, mark) === side;
+  });
+}
+
+/**
+ * Что выгружать листами развёрток: `{rooms, loose}`.
+ *
+ * `rooms` — комнаты, у которых **есть** стены на этой схеме, в порядке
+ * `roomsInOrder`; у каждой `sides: [{wallId, side}]` в порядке обхода контура.
+ * Комната без стен в список не попадает вовсе — пустых листов не бывает (G68).
+ * Комната со стенами, но без меток, попадает: пустая стена с проёмами это тоже
+ * чертёж для монтажника.
+ *
+ * `loose` — стороны вне контуров по правилу выше.
+ */
+function elevationPlan(project, schemeId) {
+  const ordered = outlinesInOrder(project, schemeId);
+  const ringOf = new Map();
+  ordered.forEach((outline, index) => ringOf.set(outline.id, { index, ring: outlineRingMm(project, outline) }));
+  const byRoom = new Map();
+  const loose = [];
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const probed = WALL_SIDES.map((side) => ({ side, outline: wallSideOutline(project, wall.id, side) }));
+    const homeless = probed.every((item) => !item.outline);
+    for (const item of probed) {
+      if (!item.outline) {
+        if (homeless || wallMarkedOn(project, wall.id, item.side)) loose.push({ wallId: wall.id, side: item.side });
+        continue;
+      }
+      const roomId = item.outline.roomId;
+      if (!byRoom.has(roomId)) byRoom.set(roomId, []);
+      const place = ringOf.get(item.outline.id) || { index: 0, ring: [] };
+      const face = wallSideFaceMm(wall, item.side);
+      byRoom.get(roomId).push({
+        wallId: wall.id,
+        side: item.side,
+        ring: place.index,
+        at: place.ring.length > 1 && face ? ringPositionMm(place.ring, face) : 0,
+      });
+    }
+  }
+  const rooms = [];
+  for (const room of roomsInOrder(project)) {
+    const sides = byRoom.get(room.id);
+    if (!sides || sides.length === 0) continue;
+    sides.sort((first, second) => first.ring - second.ring || first.at - second.at || (first.side < second.side ? -1 : 1));
+    rooms.push({ roomId: room.id, name: room.name, sides: sides.map(({ wallId, side }) => ({ wallId, side })) });
+  }
+  return { rooms, loose };
+}
+
+/** Стороны стен одной комнаты в порядке обхода её контура. */
+function roomWallSides(project, schemeId, roomId) {
+  const found = elevationPlan(project, schemeId).rooms.find((room) => room.roomId === roomId);
+  return found ? found.sides : [];
+}
+
+/** Развёртки по списку сторон — ровно то, что рисует `render.drawElevation`. */
+function wallElevations(project, sides) {
+  return (Array.isArray(sides) ? sides : [])
+    .map((item) => wallElevation(project, item.wallId, item.side))
+    .filter(Boolean);
 }
 
 // ——— данные для штампа ————————————————————————————————————————————————
@@ -13178,7 +13394,11 @@ function projectFileBase(project) {
     .replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 60);
+    // Обрезка — **после** чистки и ещё раз подчищенная: разрез по шестидесятому
+    // знаку может прийтись на пробел, и в папку загрузок уехало бы имя вида
+    // «… — Развёртки -2026-10-10.png» (видно на живом прогоне T130).
+    .slice(0, 60)
+    .trim();
   return safe || strings.project.untitled;
 }
 
@@ -19581,50 +19801,93 @@ function drawDrawingCaption(ctx, object, corners, name, bridge) {
 
 // Поля рамки: слева — размер высоты, снизу — размер длины, под полом — полоса
 // для меток, у которых высота не задана.
+// Поля рамки: слева — размер высоты, снизу — размер длины, под полом — полоса
+// для меток, у которых высота не задана.
+//
+// Числа здесь — **единицы**, не пиксели: на экране единица равна точке (тогда
+// развёртка выглядит так же, как её нарисовал таск 129), на бумаге —
+// `ELEVATION_UNIT_MM` миллиметра. Множитель приходит доводом `unit`, и второй
+// отрисовки для листа по ГОСТ не заводится (таск 130).
 const ELEVATION_PAD = { left: 56, right: 18, top: 20, bottom: 42 };
 const ELEVATION_UNKNOWN_BAND = 22;
 const ELEVATION_FONT = 11;
 // Мельче этого подпись на развёртке не читается — тогда её просто нет.
 const ELEVATION_LABEL_MIN_PX = 26;
 
-function elevationTick(ctx, x, y, vertical) {
+// Шрифт развёртки на бумаге — 3,5 мм: размер по ГОСТ 2.304, тот же, которым
+// подписана таблица. Из него и выводится, сколько миллиметров стоит единица, —
+// одно число на все поля, и пропорции экранной развёртки переносятся на лист
+// целиком.
+const ELEVATION_FONT_MM = 3.5;
+const ELEVATION_UNIT_MM = ELEVATION_FONT_MM / ELEVATION_FONT;
+
+// Сколько единиц рамки съедают поля: по ширине и по высоте. Этим считает
+// раскладку листа `gostSheet.elevationFit` — размеры полей живут здесь, рядом
+// с тем, кто их рисует, и второго их описания в сборке нет.
+const ELEVATION_FRAME_UNITS = {
+  side: ELEVATION_PAD.left + ELEVATION_PAD.right,
+  stack: ELEVATION_PAD.top + ELEVATION_PAD.bottom + ELEVATION_UNKNOWN_BAND,
+};
+
+function elevationTick(ctx, x, y, vertical, unit) {
+  const arm = 4 * unit;
   ctx.beginPath();
   if (vertical) {
-    ctx.moveTo(x - 4, y);
-    ctx.lineTo(x + 4, y);
+    ctx.moveTo(x - arm, y);
+    ctx.lineTo(x + arm, y);
   } else {
-    ctx.moveTo(x, y - 4);
-    ctx.lineTo(x, y + 4);
+    ctx.moveTo(x, y - arm);
+    ctx.lineTo(x, y + arm);
   }
   ctx.stroke();
 }
 
-function elevationText(ctx, value, x, y, align) {
+// Подпись с подложкой под буквами. Кисть берётся и **возвращается**: без
+// `restore` цвет бумаги оставался на холсте, и следующая линия рисовалась им
+// же. Так пропадала размерная цепочка под стеной: на цветном листе она была
+// бледно-серой, на чёрно-белом исчезала совсем (найдено живым прогоном T130).
+function elevationText(ctx, value, x, y, align, unit) {
+  ctx.save();
   ctx.textAlign = align || "center";
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 3 * unit;
   ctx.strokeStyle = DRAWING_PAPER;
   ctx.strokeText(value, x, y);
   ctx.fillStyle = DRAWING_CAPTION;
   ctx.fillText(value, x, y);
-  ctx.textAlign = "start";
+  ctx.restore();
 }
 
 /**
  * Нарисовать развёртку в заданный прямоугольник.
  *
  * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
- * вызывающий попадает мышью в то, что нарисовано, и по ней же будущая
- * выгрузка посчитает размер листа.
+ * вызывающий попадает мышью в то, что нарисовано, и по ней же выгрузка
+ * проверяет, что обещанный масштаб настоящий.
+ *
+ * `options.unit` — величина единицы полей и шрифта в точках холста: `1` на
+ * экране, «точек в миллиметре × `ELEVATION_UNIT_MM`» на бумаге.
+ * `options.scale` — **заданный** масштаб (точек холста на миллиметр объекта).
+ * Без него развёртка вписывается в рамку сама; с ним она рисуется ровно тем
+ * масштабом, который лист обещал в штампе: на одном листе их несколько, а
+ * графа «Масштаб» у листа одна (G169).
+ * `options.label` — подпись над чертежом. На экране её не надо (над полосой
+ * стоит заголовок строкой), а на листе из нескольких развёрток она и есть
+ * порядок обхода: без номера ряд чертежей читается как россыпь.
  */
-function drawElevation(ctx, elevation, box) {
+function drawElevation(ctx, elevation, box, options = {}) {
   if (!elevation) return null;
+  const unit = options.unit > 0 ? options.unit : 1;
+  const band = ELEVATION_UNKNOWN_BAND * unit;
   const inner = {
-    x: box.x + ELEVATION_PAD.left,
-    y: box.y + ELEVATION_PAD.top,
-    width: Math.max(1, box.width - ELEVATION_PAD.left - ELEVATION_PAD.right),
-    height: Math.max(1, box.height - ELEVATION_PAD.top - ELEVATION_PAD.bottom - ELEVATION_UNKNOWN_BAND),
+    x: box.x + ELEVATION_PAD.left * unit,
+    y: box.y + ELEVATION_PAD.top * unit,
+    width: Math.max(1, box.width - (ELEVATION_PAD.left + ELEVATION_PAD.right) * unit),
+    height: Math.max(1, box.height - (ELEVATION_PAD.top + ELEVATION_PAD.bottom) * unit - band),
   };
-  const scale = Math.min(inner.width / Math.max(1, elevation.lengthMm), inner.height / Math.max(1, elevation.heightShownMm));
+  const scale =
+    options.scale > 0
+      ? options.scale
+      : Math.min(inner.width / Math.max(1, elevation.lengthMm), inner.height / Math.max(1, elevation.heightShownMm));
   const wallWidth = elevation.lengthMm * scale;
   const wallHeight = elevation.heightShownMm * scale;
   // Стена прижата к низу поля: пол — это пол, и смотреть на него снизу вверх
@@ -19634,15 +19897,24 @@ function drawElevation(ctx, elevation, box) {
   const floor = inner.y + inner.height;
   const atX = (mm) => left + mm * scale;
   const atY = (mm) => floor - mm * scale;
+  // Чем тонкой полоске не стать: узкий проём или плинтус обязан остаться
+  // видимым, и на бумаге эта мера тоже измеряется единицами, а не точками.
+  const thin = 2 * unit;
 
   ctx.save();
-  ctx.font = drawFont(ELEVATION_FONT, 600);
+  ctx.font = drawFont(ELEVATION_FONT * unit, 600);
   ctx.textBaseline = "middle";
+
+  // Подпись — в верхнем поле рамки и по левому краю поля, а не над самой
+  // стеной: короткая стена стоит по середине, и подписи ряда разъехались бы.
+  if (options.label) {
+    elevationText(ctx, options.label, inner.x, box.y + (ELEVATION_PAD.top / 2) * unit, "left", unit);
+  }
 
   // Поле стены.
   ctx.fillStyle = DRAWING_PAPER;
   ctx.fillRect(left, floor - wallHeight, wallWidth, wallHeight);
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.5 * unit;
   ctx.strokeStyle = DRAWING_WALL;
   ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
 
@@ -19651,33 +19923,35 @@ function drawElevation(ctx, elevation, box) {
   for (const object of elevation.objects) {
     const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
     const y = atY(top);
-    const height = Math.max(2, (top - object.floorMm) * scale);
+    const height = Math.max(thin, (top - object.floorMm) * scale);
     ctx.fillStyle = DRAWING_OBJECT_FILL;
-    ctx.fillRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
-    ctx.lineWidth = 1.2;
+    ctx.fillRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    ctx.lineWidth = 1.2 * unit;
     ctx.strokeStyle = DRAWING_OBJECT;
-    ctx.strokeRect(atX(object.fromMm), y, Math.max(2, (object.toMm - object.fromMm) * scale), height);
-    if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX) continue;
-    elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8);
-    if (object.topMm !== null) elevationText(ctx, String(object.topMm), atX(object.toMm) + 2, y + 9, "left");
+    ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) continue;
+    elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+    if (object.topMm !== null) {
+      elevationText(ctx, String(object.topMm), atX(object.toMm) + 2 * unit, y + 9 * unit, "left", unit);
+    }
   }
 
   // Проёмы: дырка в стене с косяками. У двери — засечка со стороны петель,
   // как её рисуют на развёртке: наклонная от верхнего косяка к нижнему.
   for (const opening of elevation.openings) {
     const x = atX(opening.fromMm);
-    const width = Math.max(2, (opening.toMm - opening.fromMm) * scale);
+    const width = Math.max(thin, (opening.toMm - opening.fromMm) * scale);
     const top = atY(opening.topMm);
-    const height = Math.max(2, (opening.topMm - opening.floorMm) * scale);
+    const height = Math.max(thin, (opening.topMm - opening.floorMm) * scale);
     ctx.fillStyle = DRAWING_PAPER;
     ctx.fillRect(x, top, width, height);
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * unit;
     ctx.strokeStyle = DRAWING_EDGE;
     ctx.strokeRect(x, top, width, height);
     if (opening.hinge) {
       const hingeX = opening.hinge === "start" ? x : x + width;
-      ctx.setLineDash([4, 3]);
-      ctx.lineWidth = 1;
+      ctx.setLineDash([4 * unit, 3 * unit]);
+      ctx.lineWidth = 1 * unit;
       ctx.beginPath();
       ctx.moveTo(hingeX, top);
       ctx.lineTo(opening.hinge === "start" ? x + width : x, top + height / 2);
@@ -19685,10 +19959,12 @@ function drawElevation(ctx, elevation, box) {
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    if (width < ELEVATION_LABEL_MIN_PX) continue;
+    if (width < ELEVATION_LABEL_MIN_PX * unit) continue;
     // Низ и верх проёма — числами у его косяка: именно от них отмеряют.
-    elevationText(ctx, String(opening.topMm), x + width / 2, top - 8);
-    if (opening.floorMm > 0) elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9);
+    elevationText(ctx, String(opening.topMm), x + width / 2, top - 8 * unit, "center", unit);
+    if (opening.floorMm > 0) {
+      elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9 * unit, "center", unit);
+    }
   }
 
   // Метки: знак на своём месте и высоте, подпись рядом. Линия — отрезком.
@@ -19702,39 +19978,46 @@ function drawElevation(ctx, elevation, box) {
     ctx.strokeStyle = mark.color;
     ctx.fillStyle = mark.color;
     if (mark.kind === "line" && mark.toMm !== null) {
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.5 * unit;
       ctx.beginPath();
       ctx.moveTo(atX(mark.fromMm), y);
       ctx.lineTo(atX(mark.toMm), y);
       ctx.stroke();
-      elevationText(ctx, mark.label + " · " + mark.heightMm, (atX(mark.fromMm) + atX(mark.toMm)) / 2, y - 9);
+      elevationText(
+        ctx,
+        mark.label + " · " + mark.heightMm,
+        (atX(mark.fromMm) + atX(mark.toMm)) / 2,
+        y - 9 * unit,
+        "center",
+        unit,
+      );
       continue;
     }
     const x = atX(mark.fromMm);
-    drawShape(ctx, mark.shape, x, y, 9, mark.color);
-    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13);
+    drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
+    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13 * unit, "center", unit);
   }
 
   // Метки без высоты — полосой под полом: на стене им места нет, но и
   // потерять их нельзя. Выдуманная высота соврала бы развёртке.
   if (unknown.length > 0) {
-    const y = floor + ELEVATION_UNKNOWN_BAND / 2 + 4;
-    ctx.setLineDash([3, 3]);
-    ctx.lineWidth = 1;
+    const y = floor + band / 2 + 4 * unit;
+    ctx.setLineDash([3 * unit, 3 * unit]);
+    ctx.lineWidth = 1 * unit;
     ctx.strokeStyle = DRAWING_CAPTION;
     ctx.beginPath();
-    ctx.moveTo(left, floor + 3);
-    ctx.lineTo(left + wallWidth, floor + 3);
+    ctx.moveTo(left, floor + 3 * unit);
+    ctx.lineTo(left + wallWidth, floor + 3 * unit);
     ctx.stroke();
     ctx.setLineDash([]);
     for (const mark of unknown) {
-      drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7, mark.color);
-      elevationText(ctx, mark.label, atX(mark.fromMm) + 11, y, "left");
+      drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7 * unit, mark.color);
+      elevationText(ctx, mark.label, atX(mark.fromMm) + 11 * unit, y, "left", unit);
     }
   }
 
   // Пол толще стен: он опора всему, что на развёртке стоит.
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2.5 * unit;
   ctx.strokeStyle = DRAWING_WALL;
   ctx.beginPath();
   ctx.moveTo(left, floor);
@@ -19742,31 +20025,31 @@ function drawElevation(ctx, elevation, box) {
   ctx.stroke();
 
   // ——— размеры ———
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 * unit;
   ctx.strokeStyle = DRAWING_CAPTION;
   // Высота — слева, одной выносной.
-  const heightX = left - 26;
+  const heightX = left - 26 * unit;
   ctx.beginPath();
   ctx.moveTo(heightX, floor);
   ctx.lineTo(heightX, floor - wallHeight);
   ctx.stroke();
-  elevationTick(ctx, heightX, floor, true);
-  elevationTick(ctx, heightX, floor - wallHeight, true);
-  elevationText(ctx, String(elevation.heightShownMm), heightX - 4, floor - wallHeight / 2, "right");
+  elevationTick(ctx, heightX, floor, true, unit);
+  elevationTick(ctx, heightX, floor - wallHeight, true, unit);
+  elevationText(ctx, String(elevation.heightShownMm), heightX - 4 * unit, floor - wallHeight / 2, "right", unit);
   // Длина — снизу, и по ней же засечки проёмов: по этой цепочке проём и
   // размечают на стене.
-  const lengthY = floor + ELEVATION_UNKNOWN_BAND + 14;
+  const lengthY = floor + band + 14 * unit;
   ctx.beginPath();
   ctx.moveTo(left, lengthY);
   ctx.lineTo(left + wallWidth, lengthY);
   ctx.stroke();
-  elevationTick(ctx, left, lengthY);
-  elevationTick(ctx, left + wallWidth, lengthY);
-  elevationText(ctx, String(elevation.lengthMm), left + wallWidth / 2, lengthY + 12);
+  elevationTick(ctx, left, lengthY, false, unit);
+  elevationTick(ctx, left + wallWidth, lengthY, false, unit);
+  elevationText(ctx, String(elevation.lengthMm), left + wallWidth / 2, lengthY + 12 * unit, "center", unit);
   for (const opening of elevation.openings) {
     for (const mm of [opening.fromMm, opening.toMm]) {
-      elevationTick(ctx, atX(mm), lengthY);
-      elevationText(ctx, String(mm), atX(mm), lengthY - 10);
+      elevationTick(ctx, atX(mm), lengthY, false, unit);
+      elevationText(ctx, String(mm), atX(mm), lengthY - 10 * unit, "center", unit);
     }
   }
   ctx.restore();
@@ -27077,6 +27360,107 @@ function gostPaginate(total, sheet, options = {}) {
   return pages;
 }
 
+// ——— листы развёрток ———————————————————————————————————————————————————
+//
+// Лист на помещение (требование G180). Развёртки комнаты идут на лист
+// **одним масштабом** — тем, что написан в основной надписи: у графы
+// «Масштаб» значение одно, и две развёртки разной крупности рядом сделали бы
+// её ложью (G169).
+//
+// Масштаб здесь, в отличие от плана, настоящий без калибровки: чертёж задан в
+// миллиметрах объекта, и `scale` — прямо «миллиметров бумаги на миллиметр
+// стены». Знаменатель — просто `1 / scale`.
+
+// Ниже какой высоты стена на бумаге перестаёт быть чертежом. Сорок
+// миллиметров: при шрифте 3,5 мм (ГОСТ 2.304) от пола до потолка умещается
+// одиннадцать строк, и подписи розетки на 300, выключателя на 900 и вывода
+// под карниз ещё расходятся. Ниже они сливаются в полосу — и тогда честнее
+// второй лист, чем мелкий шрифт (слова заказчика).
+const ELEVATION_MIN_WALL_MM = 40;
+
+/**
+ * Сколько развёрток влезет на лист и каким масштабом — **правило вслух**:
+ *
+ * 1. Масштаб один на лист. Сверху его держит ширина поля: самая длинная стена
+ *    комнаты обязана влезть целиком, обрезать чертёж нельзя.
+ * 2. На лист кладётся столько развёрток, сколько их остаётся читаемыми:
+ *    пробуем 2, 3, … и останавливаемся, когда высота стены на бумаге падает
+ *    ниже `ELEVATION_MIN_WALL_MM`. Одна развёртка на лист идёт всегда — даже
+ *    если и она мелковата (тогда поднимается признак `tooSmall`).
+ * 3. Листов выходит `ceil(всего / влезает)`, и дальше развёртки делятся по
+ *    ним **поровну**: число листов от этого не меняется, а масштаб только
+ *    крупнеет. Четыре стены на двух листах идут 2 + 2, а не 3 + 1.
+ *
+ * `blocks` — `[{lengthMm, heightMm}]`, то есть `lengthMm` и `heightShownMm`
+ * развёрток. Пустой список даёт ноль листов: лист с одной рамкой — это не
+ * ответ «стен нет», это мусор в папке (G68).
+ */
+function elevationFit(blocks, field, options = {}) {
+  const list = Array.isArray(blocks) ? blocks : [];
+  const sideMm = ELEVATION_FRAME_UNITS.side * ELEVATION_UNIT_MM;
+  const stackMm = ELEVATION_FRAME_UNITS.stack * ELEVATION_UNIT_MM;
+  const longest = Math.max(1, ...list.map((item) => Number(item.lengthMm) || 0));
+  const tallest = Math.max(1, ...list.map((item) => Number(item.heightMm) || 0));
+  const widthFit = Math.max(0, field.width - sideMm) / longest;
+  const scaleAt = (count) => Math.min(widthFit, Math.max(0, field.height / count - stackMm) / tallest);
+  const minWall = options.minWallMm > 0 ? options.minWallMm : ELEVATION_MIN_WALL_MM;
+  let fits = 1;
+  for (let count = 2; count <= list.length; count += 1) {
+    if (tallest * scaleAt(count) < minWall) break;
+    fits = count;
+  }
+  const sheets = Math.max(1, Math.ceil(list.length / fits));
+  const perSheet = Math.max(1, Math.ceil(list.length / sheets));
+  const scale = scaleAt(perSheet);
+  const pages = [];
+  for (let at = 0; at < list.length; at += perSheet) {
+    pages.push({ from: at, to: Math.min(list.length, at + perSheet) });
+  }
+  return {
+    scale,
+    perSheet,
+    pages,
+    // Высота ячейки листа: поле делится на равные полосы, и развёртка стоит в
+    // своей по середине. Равные полосы, а не плотная укладка: у стен одной
+    // комнаты высота одна, и ряд с одинаковым шагом читается как ряд.
+    slotMm: field.height / perSheet,
+    boxMm: { width: field.width, height: tallest * scale + stackMm },
+    wallMm: tallest * scale,
+    tooSmall: list.length > 0 && tallest * scale < minWall,
+  };
+}
+
+/**
+ * Раскладка листа развёрток: формат, поле, масштаб и разбивка по листам.
+ *
+ * Формат подбирается тем же правилом, что у схемы, только мерка другая: не
+ * «подпись не мельче 2,5 мм», а «стена не ниже 40 мм». Берётся самый мелкий
+ * формат, на котором мерка держится; не держится нигде — самый крупный и
+ * `tooSmall`. Ориентация не спрашивается: из двух берётся та, что даёт меньше
+ * листов, а при равном числе — та, где масштаб крупнее.
+ */
+function elevationSheetLayout(blocks, options = {}) {
+  const form = options.form || "form3";
+  const variantOf = (format, orientation) => {
+    const sheet = gostSheetSize(format, orientation);
+    const field = gostField(sheet, form);
+    const fit = elevationFit(blocks, field, options);
+    const denominator = fit.scale > 0 ? 1 / fit.scale : null;
+    return { sheet, field, form, ...fit, denominator, scaleText: gostScaleText(denominator) };
+  };
+  const bestOf = (format) =>
+    ["portrait", "landscape"]
+      .map((orientation) => variantOf(format, orientation))
+      .sort((first, second) => first.pages.length - second.pages.length || second.scale - first.scale)[0];
+  if (options.format && options.format !== "auto") return bestOf(options.format);
+  let last = null;
+  for (const format of GOST_FORMATS) {
+    last = bestOf(format.id);
+    if (!last.tooSmall) return last;
+  }
+  return last;
+}
+
 // ——— основная надпись ——————————————————————————————————————————————————
 //
 // Ниже — сетка форм из приложения Ж. Координаты в миллиметрах от левого
@@ -28629,6 +29013,156 @@ async function gostSchemePng(project, scheme, image, options = {}) {
   // Страница PDF берёт миллиметры у формата листа, а не у пикселей: формат —
   // это то, что написано на коробке бумаги.
   return exportOut(canvas, dpi, options, { width: plan.sheet.width, height: plan.sheet.height });
+}
+
+// ——— развёртки листами по помещениям ——————————————————————————————————
+//
+// Лист на помещение (требование G180). Рисует развёртки тот же
+// `render.drawElevation`, которым они показаны над планом (таск 129), —
+// второй отрисовки здесь нет и быть не должно: расходиться экрану и бумаге
+// нельзя, а развёртка это чертёж, который меряют линейкой.
+//
+// **Картинка и лист по ГОСТ считаются одной раскладкой.** Без рамки
+// выгружается ровно поле чертежа того же формата, тем же масштабом и с тем же
+// числом развёрток на листе; рамка и основная надпись — всё, что добавляет
+// отметка «лист по ГОСТ». Поэтому «сколько развёрток на листе» — одно правило
+// на оба вида файла (`gostSheet.elevationFit`), а не два похожих.
+
+/** Что мерить раскладкой: длина и показанная высота каждой развёртки. */
+function elevationBlocks(elevations) {
+  return (Array.isArray(elevations) ? elevations : []).map((item) => ({
+    lengthMm: item.lengthMm,
+    heightMm: item.heightShownMm,
+  }));
+}
+
+/** Раскладка листов развёрток: формат, масштаб и разбивка. */
+function elevationSheet(elevations, options = {}) {
+  return elevationSheetLayout(elevationBlocks(elevations), {
+    form: "form3",
+    format: options.format,
+  });
+}
+
+// Подпись размера для диалога: формат с ориентацией, пиксели, миллиметры
+// бумаги и настоящий масштаб. У картинки без рамки размер — поле чертежа, и
+// названо это полем, а не листом: лист — это то, что с рамкой.
+function elevationSizeText(layout, options = {}) {
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  const paper = elevationPaperMm(layout, options.gost === true);
+  return text(options.gost === true ? "gost.size" : "elevationSheet.fieldSize", {
+    format: layout.sheet.format,
+    orientation:
+      layout.sheet.orientation === "landscape"
+        ? strings.gost.orientationLandscape
+        : strings.gost.orientationPortrait,
+    width: Math.round(paper.width * mm),
+    height: Math.round(paper.height * mm),
+    mmWidth: Math.round(paper.width),
+    mmHeight: Math.round(paper.height),
+    dpi,
+  });
+}
+
+function elevationPaperMm(layout, gost) {
+  if (gost) return { width: layout.sheet.width, height: layout.sheet.height };
+  return { width: layout.field.width, height: layout.field.height };
+}
+
+/**
+ * Один лист развёрток: PNG или страница документа.
+ *
+ * `page` — `{from, to}` из раскладки. Развёртка встаёт в свою полосу поля по
+ * середине: полосы равные, а чертёж в них одинаковой высоты, и ряд читается
+ * ровным, а не лестницей.
+ */
+async function elevationSheetPng(project, elevations, page, layout, options = {}) {
+  await drawFontReady();
+  const gost = options.gost === true;
+  const dpi = gostDpi(options.scale);
+  const mm = gostPixelsPerMm(dpi);
+  const paper = elevationPaperMm(layout, gost);
+  const canvas = exportCanvas(paper.width * mm, paper.height * mm);
+  // Чёрно-белый лист — та же подставка, что у схемы и таблицы (`mono.js`):
+  // развёртка идёт тушью, а не вторым путём рисования.
+  const ctx = monoOf(canvas.getContext("2d"), options.mono);
+  if (gost) {
+    drawGostFrame(ctx, layout.sheet, mm);
+  } else {
+    // Бумагу у листа красит сама рамка; у картинки поле заливается здесь.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  // Поле чертежа: на листе оно стоит внутри рамки, у картинки — это и есть вся
+  // картинка.
+  const field = gost ? layout.field : { x: 0, y: 0, width: layout.field.width, height: layout.field.height };
+  const unit = ELEVATION_UNIT_MM * mm;
+  for (let index = page.from; index < page.to; index += 1) {
+    const slotTop = field.y + layout.slotMm * (index - page.from);
+    drawElevation(
+      ctx,
+      elevations[index],
+      {
+        x: field.x * mm,
+        y: (slotTop + Math.max(0, (layout.slotMm - layout.boxMm.height) / 2)) * mm,
+        width: field.width * mm,
+        height: layout.boxMm.height * mm,
+      },
+      // Масштаб **задан раскладкой**, а не подобран по рамке: на листе
+      // развёрток несколько, а графа «Масштаб» у него одна (G169).
+      //
+      // Номер в подписи — сквозной по комнате, а не по листу: он и есть
+      // порядок обхода контура, и на втором листе счёт продолжается.
+      {
+        unit,
+        scale: layout.scale * mm,
+        label: text("elevationSheet.label", { index: index + 1, length: elevations[index].lengthMm }),
+      },
+    );
+  }
+  if (gost) {
+    drawGostStamp(
+      ctx,
+      layout.sheet,
+      layout.form,
+      gostStampValues(projectStamp(project), {
+        object: (project && project.name) || "",
+        building: options.building || "",
+        drawing: options.drawing || strings.elevationSheet.drawing,
+        scale: layout.scaleText,
+        sheet: options.sheet || 1,
+        sheets: options.sheets || 1,
+        date: gostDate(options.date),
+      }),
+      mm,
+    );
+  }
+  return exportOut(canvas, dpi, options, paper);
+}
+
+/**
+ * Все листы развёрток помещения, в порядке обхода его контура. Что в списке —
+ * PNG или страницы PDF — решает `options.pdf`, развилка одна и живёт в
+ * `exportOut`.
+ *
+ * Пусто — это ошибка, а не ноль листов: комната без стен в выбор не попадает,
+ * и если сюда пришёл пустой список, сказать об этом надо словами.
+ */
+async function elevationSheets(project, elevations, options = {}) {
+  const layout = options.layout || elevationSheet(elevations, options);
+  if (layout.pages.length === 0) throw new Error(strings.elevationSheet.nothing);
+  const out = [];
+  for (let index = 0; index < layout.pages.length; index += 1) {
+    out.push(
+      await elevationSheetPng(project, elevations, layout.pages[index], layout, {
+        ...options,
+        sheet: index + 1,
+        sheets: layout.pages.length,
+      }),
+    );
+  }
+  return out;
 }
 
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
@@ -31321,6 +31855,10 @@ const exportChoice = {
   // прежние выгрузки остаются тем, чем были, а название формата стоит на самой
   // кнопке, так что скрытым выбор не становится.
   format: "png",
+  // Помещение листа развёрток: `null` — ещё не выбирали, `"loose"` — стены вне
+  // контуров. Живёт между открытиями, как соседние: развёртки выгружают по
+  // комнате и возвращаются к той же.
+  elevationRoom: null,
 };
 
 // Выгружаем документом, а не картинкой.
@@ -32183,6 +32721,213 @@ function exportSchemeDialog(api) {
   refreshHint();
 }
 
+// ——— диалог развёрток —————————————————————————————————————————————————
+//
+// Лист на помещение (таск 130, требование G180). Что на лист попадает и в
+// каком порядке — решает `model.elevationPlan` обходом контура; здесь только
+// выбор комнаты, формата и вида файла.
+//
+// Окно **третье**, а не отметка в окне схемы: у схемы на листе план с метками,
+// у развёрток — ряд чертежей, и общего у них ровно столько, сколько между
+// таблицей и схемой. Новый вид выгрузки стоит рядом с прежними и ничего не
+// заменяет (G68).
+
+// Что предложить в списке: комнаты со стенами на этой схеме плюс, если есть,
+// стены вне контуров. Комната без стен в список не попадает вовсе — пустых
+// листов не бывает.
+function exportElevationGroups(project, schemeId) {
+  if (!project || !schemeId) return [];
+  const plan = elevationPlan(project, schemeId);
+  const groups = plan.rooms.map((room) => ({ value: room.roomId, label: room.name, sides: room.sides }));
+  if (plan.loose.length > 0) {
+    groups.push({ value: "loose", label: strings.elevationSheet.loose, sides: plan.loose });
+  }
+  return groups;
+}
+
+function exportElevationDialog(api) {
+  const { getState, notify } = api;
+  const state = getState();
+  const scheme = findScheme(state.project, state.schemeId);
+  const groups = exportElevationGroups(state.project, state.schemeId);
+  if (groups.length === 0) {
+    notify(strings.elevationSheet.noWalls, "info");
+    return;
+  }
+  // Комната, выбранная на прошлом объекте или на другой схеме, могла исчезнуть
+  // — тогда берётся первая, а не пустой выбор.
+  if (!groups.some((group) => group.value === exportChoice.elevationRoom)) {
+    exportChoice.elevationRoom = groups[0].value;
+  }
+  const chosen = () => groups.find((group) => group.value === exportChoice.elevationRoom) || groups[0];
+  const hint = uiEl("p", { class: "export__hint" });
+  // Правило «сколько развёрток на листе» стоит в самом окне: по нему человек и
+  // решает, поднимать ли формат, а искать это в отчёте он не станет.
+  const rule = uiEl("p", { class: "export__hint" });
+  const monoNote = uiEl("p", { class: "export__hint export__hint--warn" });
+
+  // Объект берётся свежим: окно «Данные для штампа» правит его из-под этого же
+  // диалога (та же причина, что у диалога схемы).
+  const elevationsOf = () => wallElevations(getState().project, chosen().sides);
+  const layoutOf = (elevations) => elevationSheet(elevations, { format: exportChoice.gostFormat });
+
+  let syncLabels = () => {};
+
+  const refreshHint = () => {
+    syncLabels();
+    const groups2 = exportChoice.mono ? monoSameShapes(state.project, scheme, state.filter) : [];
+    monoNote.textContent = monoSameText(groups2);
+    monoNote.hidden = groups2.length === 0;
+    const layout = layoutOf(elevationsOf());
+    const parts = [
+      elevationSizeText(layout, { scale: exportChoice.schemeScale, gost: exportChoice.gost }),
+      layout.scaleText,
+      layout.pages.length === 1
+        ? text("elevationSheet.sheetsOne", { per: layout.pages[0].to - layout.pages[0].from })
+        : text("elevationSheet.sheets", { count: layout.pages.length, per: layout.perSheet }),
+    ];
+    if (layout.tooSmall) parts.push(strings.elevationSheet.tooSmall);
+    hint.textContent = parts.join(" · ");
+    rule.textContent =
+      (chosen().value === "loose" ? strings.elevationSheet.looseHint : strings.elevationSheet.order) +
+      " " +
+      strings.elevationSheet.rule;
+  };
+
+  const fileField = exportField(strings.exportPanel.file, exportFileSelect(refreshHint));
+  fileField.title = strings.exportPanel.fileHint;
+  const formatField = exportField(strings.gost.format, exportFormatSelect(refreshHint));
+  const gostCheck = exportCheck(strings.gost.sheet, exportChoice.gost, (on) => {
+    exportChoice.gost = on;
+    refreshHint();
+  });
+  gostCheck.title = strings.gost.sheetHint;
+  const monoToggle = exportCheck(strings.mono.sheet, exportChoice.mono, (on) => {
+    exportChoice.mono = on;
+    refreshHint();
+  });
+  monoToggle.title = strings.mono.sheetHint;
+
+  const controls = uiEl("div", { class: "export__controls" }, [
+    exportField(
+      strings.elevationSheet.room,
+      exportSelect(
+        groups.map((group) => ({ value: String(group.value), label: group.label })),
+        String(chosen().value),
+        (value) => {
+          exportChoice.elevationRoom = value;
+          refreshHint();
+        },
+      ),
+    ),
+    exportField(
+      strings.exportPanel.scale,
+      exportScaleSelect(exportChoice.schemeScale, (value) => {
+        exportChoice.schemeScale = value;
+        refreshHint();
+      }),
+    ),
+    fileField,
+    // Формат листа нужен и картинке: без рамки выгружается то же поле того же
+    // формата, и число развёрток на листе у них одно.
+    formatField,
+    gostCheck,
+    monoToggle,
+  ]);
+
+  const guard = async (run) => {
+    try {
+      await run();
+    } catch (error) {
+      notify(error && error.message ? error.message : strings.exportPanel.failed, "error");
+    }
+  };
+
+  const roomName = () => (chosen().value === "loose" ? strings.elevationSheet.loose : chosen().label);
+  const titleOf = () =>
+    [state.project.name, scheme ? scheme.name : "", roomName(), strings.elevationSheet.drawing]
+      .filter(Boolean)
+      .join(" · ");
+  // В имени файла — короткое слово, а не полное название чертежа: имя режется
+  // по шестидесятому знаку, и «Развёртки стен» у комнаты с длинным именем до
+  // него не доживало.
+  const partOf = () => [scheme ? scheme.name : "", roomName(), strings.elevationSheet.button].filter(Boolean).join(" — ");
+
+  const render = async (pdf) => {
+    const elevations = elevationsOf();
+    const layout = layoutOf(elevations);
+    // О мелкоте говорим и здесь: подсказку в окне могли не прочесть, а лист с
+    // нечитаемым чертежом уже уйдёт в файл.
+    if (layout.tooSmall) notify(strings.elevationSheet.tooSmall, "error");
+    return elevationSheets(getState().project, elevations, {
+      layout,
+      gost: exportChoice.gost,
+      format: exportChoice.gostFormat,
+      scale: exportChoice.schemeScale,
+      mono: exportChoice.mono,
+      building: roomName(),
+      drawing: [scheme ? scheme.name : "", strings.elevationSheet.drawing].filter(Boolean).join(" · "),
+      pdf: pdf === true,
+    });
+  };
+
+  const downloadButton = uiButton(strings.exportPanel.download, {
+    class: "ui-btn ui-btn--accent",
+    on: {
+      click: () =>
+        guard(async () => {
+          if (exportToPdf()) {
+            const pages = await render(true);
+            const name = exportFileName(state.project, partOf(), "pdf");
+            exportDownload(exportPdf(pages, { title: titleOf() }), name);
+            notify(text("exportPanel.saved", { name }), "success");
+            return;
+          }
+          const sheets = await render(false);
+          // Несколько листов — это несколько файлов, и класть их в папку
+          // загрузок по одному нельзя: браузер второй и третий скачивает молча
+          // или не скачивает вовсе. Поэтому архив (как у таблицы по ГОСТ).
+          const name = exportFileName(state.project, partOf(), sheets.length > 1 ? "zip" : "png");
+          exportDownload(
+            sheets.length > 1 ? await gostSheetsZip(sheets, exportFileName(state.project, partOf(), "png")) : sheets[0],
+            name,
+          );
+          notify(text("exportPanel.saved", { name }), "success");
+        }),
+    },
+  });
+
+  syncLabels = () => {
+    const pdf = exportToPdf();
+    downloadButton.textContent = pdf ? strings.exportPanel.downloadPdf : strings.exportPanel.download;
+  };
+
+  const actions = [
+    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+    uiButton(strings.exportPanel.print, {
+      on: {
+        click: () =>
+          guard(async () => {
+            // Печать всегда картинкой и по листу на страницу: на развёртке всё
+            // нужное уже написано подписью и штампом, а заголовок над картинкой
+            // съел бы поле чертежа.
+            const sheets = await render(false);
+            await gostPrintSheets(sheets);
+          }),
+      },
+    }),
+    downloadButton,
+  ];
+
+  const modal = uiModal({
+    title: strings.elevationSheet.title,
+    body: uiEl("div", { class: "export__body" }, [controls, monoNote, hint, rule]),
+    actions: [uiButton(strings.dialog.close, { on: { click: () => modal.close() } }), ...actions],
+    primary: actions[actions.length - 1],
+  });
+  refreshHint();
+}
+
 // ——— панель ———————————————————————————————————————————————————————————
 
 function mountExportPanel(host, api) {
@@ -32193,7 +32938,13 @@ function mountExportPanel(host, api) {
   const schemeButton = uiButton(strings.exportPanel.schemeTitle, {
     on: { click: () => exportSchemeDialog(api) },
   });
-  host.replaceChildren(uiEl("div", { class: "export" }, [tableButton, schemeButton]));
+  // Третья кнопка — развёртки. Гаснет, когда на схеме нет ни одной стены
+  // чертежа: без стен выгружать нечего, и сказать это надо кнопкой, а не
+  // пустым окном.
+  const elevationButton = uiButton(strings.elevationSheet.button, {
+    on: { click: () => exportElevationDialog(api) },
+  });
+  host.replaceChildren(uiEl("div", { class: "export" }, [tableButton, schemeButton, elevationButton]));
 
   // Пустая выгрузка никому не нужна: без меток кнопки гаснут и говорят почему.
   const sync = (state) => {
@@ -32207,6 +32958,11 @@ function mountExportPanel(host, api) {
       : marks === 0
         ? strings.exportPanel.noMarks
         : strings.exportPanel.schemeDialog;
+    // Развёрткам метки не нужны: пустая стена с проёмами это тоже чертёж для
+    // монтажника. Нужны стены — и только они.
+    const walls = scheme ? exportElevationGroups(state.project, scheme.id).length : 0;
+    elevationButton.disabled = walls === 0;
+    elevationButton.title = walls === 0 ? strings.elevationSheet.noWalls : strings.elevationSheet.dialog;
   };
 
   subscribe(sync);

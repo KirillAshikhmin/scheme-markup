@@ -19,7 +19,7 @@
 // отношение для графы «Масштаб» (`gostScaleDenominator`). Второй формулы для
 // того же числа в сборке нет и быть не должно: два пути расчёта разойдутся в
 // последнем знаке, а заказчик проверяет чертёж линейкой (G169).
-import { drawFont } from "./render.js";
+import { ELEVATION_FRAME_UNITS, ELEVATION_UNIT_MM, drawFont } from "./render.js";
 import { strings, text } from "./strings.js";
 
 // ——— бумага ———————————————————————————————————————————————————————————
@@ -266,6 +266,107 @@ export function gostPaginate(total, sheet, options = {}) {
     at += room;
   } while (at < total);
   return pages;
+}
+
+// ——— листы развёрток ———————————————————————————————————————————————————
+//
+// Лист на помещение (требование G180). Развёртки комнаты идут на лист
+// **одним масштабом** — тем, что написан в основной надписи: у графы
+// «Масштаб» значение одно, и две развёртки разной крупности рядом сделали бы
+// её ложью (G169).
+//
+// Масштаб здесь, в отличие от плана, настоящий без калибровки: чертёж задан в
+// миллиметрах объекта, и `scale` — прямо «миллиметров бумаги на миллиметр
+// стены». Знаменатель — просто `1 / scale`.
+
+// Ниже какой высоты стена на бумаге перестаёт быть чертежом. Сорок
+// миллиметров: при шрифте 3,5 мм (ГОСТ 2.304) от пола до потолка умещается
+// одиннадцать строк, и подписи розетки на 300, выключателя на 900 и вывода
+// под карниз ещё расходятся. Ниже они сливаются в полосу — и тогда честнее
+// второй лист, чем мелкий шрифт (слова заказчика).
+export const ELEVATION_MIN_WALL_MM = 40;
+
+/**
+ * Сколько развёрток влезет на лист и каким масштабом — **правило вслух**:
+ *
+ * 1. Масштаб один на лист. Сверху его держит ширина поля: самая длинная стена
+ *    комнаты обязана влезть целиком, обрезать чертёж нельзя.
+ * 2. На лист кладётся столько развёрток, сколько их остаётся читаемыми:
+ *    пробуем 2, 3, … и останавливаемся, когда высота стены на бумаге падает
+ *    ниже `ELEVATION_MIN_WALL_MM`. Одна развёртка на лист идёт всегда — даже
+ *    если и она мелковата (тогда поднимается признак `tooSmall`).
+ * 3. Листов выходит `ceil(всего / влезает)`, и дальше развёртки делятся по
+ *    ним **поровну**: число листов от этого не меняется, а масштаб только
+ *    крупнеет. Четыре стены на двух листах идут 2 + 2, а не 3 + 1.
+ *
+ * `blocks` — `[{lengthMm, heightMm}]`, то есть `lengthMm` и `heightShownMm`
+ * развёрток. Пустой список даёт ноль листов: лист с одной рамкой — это не
+ * ответ «стен нет», это мусор в папке (G68).
+ */
+export function elevationFit(blocks, field, options = {}) {
+  const list = Array.isArray(blocks) ? blocks : [];
+  const sideMm = ELEVATION_FRAME_UNITS.side * ELEVATION_UNIT_MM;
+  const stackMm = ELEVATION_FRAME_UNITS.stack * ELEVATION_UNIT_MM;
+  const longest = Math.max(1, ...list.map((item) => Number(item.lengthMm) || 0));
+  const tallest = Math.max(1, ...list.map((item) => Number(item.heightMm) || 0));
+  const widthFit = Math.max(0, field.width - sideMm) / longest;
+  const scaleAt = (count) => Math.min(widthFit, Math.max(0, field.height / count - stackMm) / tallest);
+  const minWall = options.minWallMm > 0 ? options.minWallMm : ELEVATION_MIN_WALL_MM;
+  let fits = 1;
+  for (let count = 2; count <= list.length; count += 1) {
+    if (tallest * scaleAt(count) < minWall) break;
+    fits = count;
+  }
+  const sheets = Math.max(1, Math.ceil(list.length / fits));
+  const perSheet = Math.max(1, Math.ceil(list.length / sheets));
+  const scale = scaleAt(perSheet);
+  const pages = [];
+  for (let at = 0; at < list.length; at += perSheet) {
+    pages.push({ from: at, to: Math.min(list.length, at + perSheet) });
+  }
+  return {
+    scale,
+    perSheet,
+    pages,
+    // Высота ячейки листа: поле делится на равные полосы, и развёртка стоит в
+    // своей по середине. Равные полосы, а не плотная укладка: у стен одной
+    // комнаты высота одна, и ряд с одинаковым шагом читается как ряд.
+    slotMm: field.height / perSheet,
+    boxMm: { width: field.width, height: tallest * scale + stackMm },
+    wallMm: tallest * scale,
+    tooSmall: list.length > 0 && tallest * scale < minWall,
+  };
+}
+
+/**
+ * Раскладка листа развёрток: формат, поле, масштаб и разбивка по листам.
+ *
+ * Формат подбирается тем же правилом, что у схемы, только мерка другая: не
+ * «подпись не мельче 2,5 мм», а «стена не ниже 40 мм». Берётся самый мелкий
+ * формат, на котором мерка держится; не держится нигде — самый крупный и
+ * `tooSmall`. Ориентация не спрашивается: из двух берётся та, что даёт меньше
+ * листов, а при равном числе — та, где масштаб крупнее.
+ */
+export function elevationSheetLayout(blocks, options = {}) {
+  const form = options.form || "form3";
+  const variantOf = (format, orientation) => {
+    const sheet = gostSheetSize(format, orientation);
+    const field = gostField(sheet, form);
+    const fit = elevationFit(blocks, field, options);
+    const denominator = fit.scale > 0 ? 1 / fit.scale : null;
+    return { sheet, field, form, ...fit, denominator, scaleText: gostScaleText(denominator) };
+  };
+  const bestOf = (format) =>
+    ["portrait", "landscape"]
+      .map((orientation) => variantOf(format, orientation))
+      .sort((first, second) => first.pages.length - second.pages.length || second.scale - first.scale)[0];
+  if (options.format && options.format !== "auto") return bestOf(options.format);
+  let last = null;
+  for (const format of GOST_FORMATS) {
+    last = bestOf(format.id);
+    if (!last.tooSmall) return last;
+  }
+  return last;
 }
 
 // ——— основная надпись ——————————————————————————————————————————————————
