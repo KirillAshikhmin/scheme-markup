@@ -52,6 +52,7 @@ import {
 } from "../exporter.js";
 import { GOST_FORMATS } from "../gostSheet.js";
 import { monoSameShapes, monoSameText } from "../mono.js";
+import { canvasStartScale } from "../canvas.js";
 import { stampDialog } from "./stampForm.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
 
@@ -628,6 +629,29 @@ function exportSchemeDialog(api) {
   const state = getState();
   const scheme = findScheme(state.project, state.schemeId);
   const hint = uiEl("p", { class: "export__hint" });
+  /**
+   * Дверь к калибровке (таск 133).
+   *
+   * Подсказка «масштаб схемы не задан — в штампе будет „Без масштаба“,
+   * откалибруйте план по отрезку» жила здесь с таска 112 и была **сообщением
+   * без кнопки**: человеку говорили, что сделать, и не давали, чем. Зеркало
+   * того же дефекта D22, где кнопка выглядела сообщением.
+   *
+   * Окно при этом закрывается: калибруют на холсте, и держать поверх него
+   * окно выгрузки незачем. Выгрузку открывают заново — это один клик, а
+   * выбранные формат и множитель переживают закрытие (`exportChoice`).
+   */
+  const scaleDoor = uiButton(strings.gost.noScaleFix, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.gost.noScaleFixHint,
+    on: {
+      click: () => {
+        modal.close();
+        canvasStartScale(scheme.id);
+      },
+    },
+  });
+  scaleDoor.hidden = true;
   // Комната, выбранная раньше, могла остаться без контура на этой схеме —
   // тогда лист берётся целиком, а не молча по пустой рамке.
   if (exportAreaRoomId() && !exportRoomArea(state.project, scheme, exportAreaRoomId())) exportChoice.area = "all";
@@ -680,13 +704,18 @@ function exportSchemeDialog(api) {
       const plan = gostPlanOf();
       const parts = [gostSheetSizeText(plan.sheet, exportChoice.schemeScale), plan.scaleText];
       // Калибровки нет — в штампе будет «Без масштаба», и сказать об этом надо
-      // до выгрузки: чертёж без масштаба меряют линейкой впустую.
+      // до выгрузки: чертёж без масштаба меряют линейкой впустую. Рядом с этими
+      // словами стоит и дверь к калибровке — сообщение без кнопки оставляло
+      // человека ровно там же, где кнопка, похожая на сообщение (таск 133).
       if (!plan.denominator) parts.push(strings.gost.noScaleHint);
+      scaleDoor.hidden = Boolean(plan.denominator) || !scheme || !scheme.imageId;
       if (plan.tooSmall) parts.push(strings.gost.tooSmall);
       if (exportByRooms()) parts.push(text("exportPanel.roomsPlan", { total: roomsPlan.total, rooms: roomsPlan.rooms }));
       hint.textContent = parts.join(" · ");
       return;
     }
+    // Без листа по ГОСТ масштаб в штампе некуда писать — и дверь ни к чему.
+    scaleDoor.hidden = true;
     const size = exportAreaSize(state, scheme);
     const line = exportSizeText(size.width, size.height, exportChoice.schemeScale);
     if (!exportByRooms()) {
@@ -953,7 +982,7 @@ function exportSchemeDialog(api) {
 
   const modal = uiModal({
     title: strings.exportPanel.schemeDialog,
-    body: uiEl("div", { class: "export__body" }, [controls, monoNote, hint]),
+    body: uiEl("div", { class: "export__body" }, [controls, monoNote, hint, scaleDoor]),
     actions: [uiButton(strings.dialog.close, { on: { click: () => modal.close() } }), ...actions],
     primary: actions[actions.length - 1],
   });
