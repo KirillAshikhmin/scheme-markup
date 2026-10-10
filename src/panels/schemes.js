@@ -17,6 +17,7 @@ import { layoutAllows, PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } 
 import {
   addScheme,
   clearPlanScale,
+  drawingCounts,
   deleteScheme,
   findScheme,
   formatMeters,
@@ -1153,13 +1154,22 @@ function mountSchemesPanel(host, api) {
     canvasStartScale(schemeId);
   }
 
+  /**
+   * Снятие масштаба. Чертежа оно **не касается** (таск 134): пересчитывать не
+   * во что — без калибровки у плана нет метров, а чертёж в миллиметрах сам по
+   * себе верен и ждёт следующей калибровки там же, где лежал. Сказать об этом
+   * надо вслух: человек только что видел вопрос про пересчёт при смене
+   * масштаба и вправе ждать его и здесь.
+   */
   function dropScale(schemeId) {
     const before = getState().project;
     try {
       const result = clearPlanScale(before, schemeId);
       if (!result.cleared) return;
+      const drawn = drawingCounts(before, schemeId);
       canvasCommit(before, result.project, strings.history.scaleClear, { schemeId });
-      notify(strings.scale.cleared, "success");
+      const said = drawn.walls + drawn.objects > 0 ? " " + strings.scale.clearedDrawing : "";
+      notify(strings.scale.cleared + said, "success");
     } catch (error) {
       notify(error.message, "error");
     }

@@ -3660,6 +3660,158 @@ export function drawingBoundsMm(project, schemeId) {
   return { minX, minY, maxX, maxY, widthMm: maxX - minX, heightMm: maxY - minY };
 }
 
+// ——— чертёж идёт за исправленным масштабом ——————————————————————————————
+//
+// Требование G186, таск 134. Слова заказчика: «если ошибся с масштабом то при
+// его изменении чертёж может не совпасть, как бы масштабировать его. Точнее
+// только стены, проёмы и т.д. не меняем в размере».
+//
+// Откуда беда: чертёж живёт в миллиметрах, подложка — в долях плана, связывает
+// их калибровка. Обвели стены при одном масштабе, нашли ошибку, откалибровали
+// заново — и стены остались прежней длины в миллиметрах, а подложка стала
+// другого размера в метрах. Чертёж съехал, и руками это не поправить.
+//
+// **Что пересчитывается, а что нет**, заказчик назвал сам, и разделение
+// верное: пересчитываются **координаты** (вершины стен, отступ проёма вдоль
+// стены, место объекта, привязка метки к стене), не пересчитываются
+// **введённые руками размеры** (толщина стены, ширина и высота проёма,
+// габариты объекта, высоты помещений). Координаты сняты с подложки и ошиблись
+// вместе с ней; размеры человек вводил числом, и они верны независимо от того,
+// какой масштаб стоял у плана.
+//
+// Проверка на радиаторе под окном: окно уедет вместе со стеной, радиатор —
+// вместе со своим местом, но оба останутся прежнего размера. Перестал
+// помещаться — это честный ответ, а не ошибка пересчёта.
+
+/**
+ * Во сколько раз чертёж должен вырасти, чтобы остаться на том же месте
+ * картинки после перекалибровки. `null` — считать не из чего (масштаба не было
+ * или не стало) или пересчитывать нечего (множитель единица).
+ *
+ * **Откуда дробь.** Точка чертежа ложится на план через «пикселей плана в
+ * миллиметре»: смещение в пикселях равно `мм · px_на_метр / 1000`. Чтобы
+ * смещение в пикселях осталось прежним при новой калибровке, миллиметры обязаны
+ * измениться обратно пропорционально: `мм' = мм · px_было / px_стало`.
+ *
+ * Проверка в уме: план считали по 100 px/м (12 м по ширине), оказалось 50 px/м
+ * (24 м) — всё вдвое крупнее, множитель 2. Так и выходит: 100 / 50.
+ */
+export function drawingScaleFactor(before, after, schemeId) {
+  const was = planPixelsPerMeter(before, schemeId);
+  const now = planPixelsPerMeter(after, schemeId);
+  if (!(was > 0) || !(now > 0)) return null;
+  const factor = was / now;
+  if (!Number.isFinite(factor) || !(factor > 0) || factor === 1) return null;
+  return factor;
+}
+
+/**
+ * Сколько чего в чертеже схемы — цена вопроса, который задают перед
+ * пересчётом. «Чертёж станет в 1,2 раза крупнее: 14 стен, 3 проёма, 2 объекта»
+ * понятнее, чем «пересчитать?».
+ *
+ * Метки считаются только привязанные к стенам: остальных пересчёт не касается
+ * вовсе — они живут долями плана и за калибровкой идут сами (ADR 002).
+ */
+export function drawingCounts(project, schemeId) {
+  const walls = wallsOnScheme(project, schemeId);
+  const wallIds = new Set(walls.map((wall) => wall.id));
+  const openings = openingsOf(project).filter((opening) => wallIds.has(opening.wallId)).length;
+  const marks = (project.marks || []).filter((mark) => mark.wallId && wallIds.has(mark.wallId)).length;
+  return { walls: walls.length, openings, objects: schemeObjectsOnScheme(project, schemeId).length, marks };
+}
+
+const scaledMm = (value, factor) => Math.round(Number(value) * factor) || 0;
+const scaledPoint = (point, factor) => ({ x: scaledMm(point.x, factor), y: scaledMm(point.y, factor) });
+
+/**
+ * Пересчитать чертёж схемы в `factor` раз: координаты умножаются, введённые
+ * руками размеры не трогаются.
+ *
+ * Пишет напрямую, а не через `addWall`/`updateOpening`, нарочно: это одно
+ * преобразование всего чертежа, и проводить его по одной правке значило бы
+ * тридцать раз пересобрать объект и тридцать раз проверить инварианты, из
+ * которых здесь важен ровно один — проём не выходит за свою стену.
+ *
+ * **Проём прижимается к стене**, если после пересчёта за её концом не хватает
+ * места: то же правило, по которому его ставят мышью (`workshopOpeningAt`).
+ * Когда стена стала короче самого проёма, прижимать некуда — такой проём
+ * остаётся в начале стены и **торчит за её конец**: ширину ему менять нельзя
+ * (её вводили руками), а молча выбросить дверь нельзя тем более. Сколько их
+ * таких, возвращается числом — об этом говорят вслух.
+ *
+ * Привязки меток к стенам пересчитываются здесь же, чтобы объект, который
+ * вернула эта функция, был согласован сам с собой. Последнее слово всё равно за
+ * `applyMarkWalls` из `canvasCommit`: привязка — следствие места метки на
+ * плане, и после пересчёта она подтверждается, а где метка и правда отошла от
+ * стены дальше порога — снимается. Это не второе правило, а его проверка.
+ *
+ * Множитель единица или пересчитывать нечего — возвращается **тот же объект по
+ * ссылке**: ни шага истории, ни `updatedAt` на пустом месте (G68).
+ */
+export function scaleDrawing(project, schemeId, factor) {
+  const empty = { project, walls: 0, openings: 0, objects: 0, marks: 0, stuck: 0 };
+  const k = Number(factor);
+  if (!Number.isFinite(k) || !(k > 0) || k === 1) return empty;
+  const mine = wallsOnScheme(project, schemeId);
+  const objectsMine = schemeObjectsOnScheme(project, schemeId);
+  if (mine.length === 0 && objectsMine.length === 0) return empty;
+  const wallIds = new Set(mine.map((wall) => wall.id));
+  const lengths = new Map();
+
+  const walls = wallsOf(project).map((wall) => {
+    if (!wallIds.has(wall.id)) return wall;
+    const next = { ...wall, aMm: scaledPoint(wall.aMm, k), bMm: scaledPoint(wall.bMm, k) };
+    lengths.set(wall.id, wallLengthMm(next));
+    return next;
+  });
+
+  let stuck = 0;
+  let openingCount = 0;
+  const openings = openingsOf(project).map((opening) => {
+    if (!wallIds.has(opening.wallId)) return opening;
+    openingCount += 1;
+    const length = lengths.get(opening.wallId) || 0;
+    const room = length - Number(opening.widthMm);
+    if (room < 0) stuck += 1;
+    const at = Math.min(Math.max(0, scaledMm(opening.atMm, k)), Math.max(0, room));
+    return at === opening.atMm ? opening : { ...opening, atMm: at };
+  });
+
+  const objects = schemeObjectsOf(project).map((object) => {
+    if (object.schemeId !== schemeId) return object;
+    if (object.shape === "polyline") {
+      return { ...object, pointsMm: (object.pointsMm || []).map((point) => scaledPoint(point, k)) };
+    }
+    return { ...object, atMm: scaledPoint(object.atMm, k) };
+  });
+
+  let markCount = 0;
+  const marks = (project.marks || []).map((mark) => {
+    if (!mark.wallId || !wallIds.has(mark.wallId)) return mark;
+    markCount += 1;
+    const next = { ...mark, wallAtMm: scaledMm(mark.wallAtMm, k) };
+    if (typeof mark.wallToMm === "number") next.wallToMm = scaledMm(mark.wallToMm, k);
+    return next;
+  });
+
+  // В объект кладётся только то, что в нём и было: пустых списков модель
+  // чертежа не заводит (G68), и пересчёт не повод завести их первым.
+  const patch = {};
+  if (Array.isArray(project.walls)) patch.walls = walls;
+  if (Array.isArray(project.openings)) patch.openings = openings;
+  if (Array.isArray(project.schemeObjects)) patch.schemeObjects = objects;
+  if (markCount > 0) patch.marks = marks;
+  return {
+    project: withProject(project, patch),
+    walls: mine.length,
+    openings: openingCount,
+    objects: objectsMine.length,
+    marks: markCount,
+    stuck,
+  };
+}
+
 // ——— чертёж: проёмы ———————————————————————————————————————————————————
 //
 // Проём — объект **на стене**, а не на плане: стена, отступ от её начала,
