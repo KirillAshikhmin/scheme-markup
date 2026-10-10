@@ -58,12 +58,39 @@
   flex-direction: column;
 }
 
+/* Два ряда над полем (таск 133): «Режим» и, только в добавлении, «Добавить».
+   Второй прижат к первому вплотную — это второй уровень одного выбора, а не
+   отдельная часть окна. */
 .workshop__tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 8px;
+}
+
+.workshop__tools--adding {
+  margin-top: -4px;
+}
+
+/* Подпись уровня: она не кнопка и нажиматься не должна — отсюда и приглушённый
+   цвет, и мелкий кегль. Тот же приём, что у подписей «РЕЖИМ» и «ТИП МЕТКИ» в
+   левой колонке: там человек к нему уже привык. */
+.workshop__toolsLabel {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+  margin-right: 2px;
+}
+
+/* Масштаб окна и «Вписать» — не режимы, и стоять в их ряду как равные они не
+   должны: отжимаются вправо. */
+.workshop__view {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Поле чертежа — бумага, а не тёмная панель: чертёж чертят на бумаге, и те же

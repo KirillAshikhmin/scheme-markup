@@ -8,6 +8,7 @@
 // контуров. В этом разделе остаются только режимы про метки.
 import {
   DRAWING_SETTING,
+  ELEVATION_SETTING,
   GUIDES_SETTING,
   PLAN_SETTING,
   SCHEME_FONT_SETTING,
@@ -266,31 +267,54 @@ function mountToolsPanel(host, api) {
           ],
     );
 
-    // Режимов два: выделение и добавление. Что именно добавится — точка или
-    // ломаная, — решает вид выбранного типа, и строка под кнопками говорит
-    // ровно это. Третьей кнопки нет: выбор вида руками пользователя только
-    // путал, когда он уже выбрал тип. Строка нужна именно словами: по одному
-    // значку типа не видно, ставится метка кликом или тянется линией.
-    const modeNote = !kind
+    // Кнопок по-прежнему две: включить руками можно выделение и добавление.
+    // Что именно добавится — точка или ломаная, — решает вид выбранного типа,
+    // и строка под кнопками говорит ровно это. Третьей кнопки «что добавляем»
+    // нет: выбор вида руками пользователя только путал, когда он уже выбрал
+    // тип. Строка нужна именно словами: по одному значку типа не видно,
+    // ставится метка кликом или тянется линией.
+    //
+    // **Но режимов у холста четыре** (таск 133). Обводку помещения включает
+    // панель помещений, калибровку — панель схем и панель выгрузки; своей
+    // кнопки у них здесь нет и не нужно — их включают оттуда, где они по делу.
+    // А вот показывать в эту минуту обе кнопки погашенными — значит показывать
+    // состояние, которого не бывает: ровно на это заказчик и сказал «вообще не
+    // очевидно, что холст переходит в режим калибровки». Поэтому рядом встаёт
+    // **имя текущего режима** — не кнопка: нажимать его некуда, он отвечает на
+    // «где я», а дверь наружу — соседнее «Выделение» и Esc.
+    const named = state.mode !== "select" && state.mode !== "add" ? state.mode : null;
+    const kindNote = !kind
       ? strings.canvas.needType
       : kind === "line"
         ? strings.tools.kindLineHint
         : kind === MARK_KIND_COMMENT
           ? strings.tools.kindCommentHint
           : strings.tools.kindPointHint;
-    const modeRow = uiEl("div", { class: "tools__row tools__row--modes" }, [
-      uiButton(strings.tools.selectMode, {
-        class: "ui-btn" + (state.mode === "select" ? " is-active" : ""),
-        title: strings.tools.selectModeHint,
-        on: { click: () => setMode("select") },
-      }),
-      uiButton(strings.tools.addMode, {
-        class: "ui-btn" + (state.mode === "add" ? " is-active" : ""),
-        // Типа нет — кнопка откроет окно выбора, про точку ей обещать нечего.
-        title: modeNote,
-        on: { click: () => setMode("add") },
-      }),
-    ]);
+    const modeNote = named ? strings.tools["modeNow_" + named] || kindNote : kindNote;
+    const modeRow = uiEl(
+      "div",
+      { class: "tools__row tools__row--modes" },
+      [
+        uiButton(strings.tools.selectMode, {
+          class: "ui-btn" + (state.mode === "select" ? " is-active" : ""),
+          title: named ? strings.tools.selectModeLeave : strings.tools.selectModeHint,
+          on: { click: () => setMode("select") },
+        }),
+        uiButton(strings.tools.addMode, {
+          class: "ui-btn" + (state.mode === "add" ? " is-active" : ""),
+          // Типа нет — кнопка откроет окно выбора, про точку ей обещать нечего.
+          title: kindNote,
+          on: { click: () => setMode("add") },
+        }),
+        named
+          ? uiEl("span", {
+              class: "tools__modeNow",
+              text: strings.tools["mode_" + named] || named,
+              title: modeNote,
+            })
+          : null,
+      ].filter(Boolean),
+    );
 
     // Блок собирается только из точек — ручки «+» у линии нет и быть не может.
     // При линейном типе выбор гаснет и говорит почему: живой на вид список,
@@ -422,6 +446,15 @@ function mountSizesPanel(host, api) {
         uiEl("span", { text: strings.tools.drawingLayer }),
       ]),
       uiEl("p", { class: "tools__note", text: strings.tools.layersHint }),
+      // Третий выключатель того же ряда и той же природы (таск 133, G185):
+      // полоса развёртки выделенной стены. В выгрузку он, в отличие от двух
+      // соседей, не уходит — развёртка на лист идёт своей кнопкой в шапке
+      // (таск 130), а полоса поверх холста на бумагу не попадала никогда.
+      uiEl("label", { class: "tools__field tools__field--check" }, [
+        toolsLayerCheck(state, setState, "elevationShown", ELEVATION_SETTING),
+        uiEl("span", { text: strings.tools.elevationStrip }),
+      ]),
+      uiEl("p", { class: "tools__note", text: strings.tools.elevationStripHint }),
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       uiEl("div", { class: "tools__row" }, [
         uiIconButton("minus", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
@@ -439,6 +472,7 @@ function mountSizesPanel(host, api) {
       "guidesShown" in changed ||
       "planShown" in changed ||
       "drawingShown" in changed ||
+      "elevationShown" in changed ||
       "schemeFont" in changed
     ) {
       render();
