@@ -873,6 +873,17 @@
    коротком — доля поля, и на планшете полоса не съедает план целиком. */
 
 .elev {
+  /* **Полоса ловит указатель сама** (дефект D24). Слова заказчика: «в режиме
+     схемы на просмотре развёртки не кликабельны кнопки слева\справа и
+     закрыть, клики проходят через них на схему и выделяют другие объекты».
+
+     Причина была ровно в одной строке: полоса лежит в `#canvas-overlay`, а у
+     него `pointer-events: none` — под ним план, и метка обязана вставать
+     сквозь него. Подсказка и полный экран своё `auto` объявили, а полоса,
+     пришедшая позже (таск 129), — нет. Поэтому её кнопки клика не получали
+     вовсе, а холст принимал нажатие за клик по плану и выделял то, что лежит
+     под полосой. */
+  pointer-events: auto;
   position: absolute;
   left: 8px;
   right: 8px;
@@ -916,6 +927,24 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--canvas-text);
+}
+
+/* Отметка «изображения» — на самом окне развёртки, как просил заказчик
+   (таск 135). Стоит слева от сторон: она про то, **чем** рисовать, а стороны —
+   про то, с какой стороны смотреть, и смешивать их в один ряд кнопок нельзя. */
+.elev__icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: 12px;
+  color: var(--canvas-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.elev__icons input {
+  margin: 0;
 }
 
 /* Кнопки на бумаге, а не на панели: полоса светлая, и тёмные кнопки панели в
@@ -5187,6 +5216,7 @@ const strings = {
     objectKindAdd: "новый вид объекта",
     stamp: "данные для штампа",
     scaleSet: "масштаб плана",
+    typeSizes: "размеры по умолчанию",
     scaleClear: "снятие масштаба плана",
     compact: "уплотнение нумерации",
     compactAll: "смыкание номеров по всем типам",
@@ -5956,9 +5986,18 @@ const strings = {
     side_right: "Справа",
     sideHint: "С какой стороны смотрим на стену: на разных сторонах разные метки, и отсчёт зеркалится",
     close: "Закрыть развёртку",
+    // Изображения объектов вместо условных знаков (таск 135, G187). Слова
+    // заказчика: «что бы схема была уже живая».
+    icons: "Изображения",
+    iconsHint:
+      "Рисовать на развёртке схематические контуры объектов вместо условных знаков: розетка похожа на розетку, кондиционер на кондиционер. Крупные вещи — в своём размере, мелкие — значком. На план это не влияет: там знаки остаются. Отметка уходит и в выгрузку.",
     noHeight: "Высота стен не задана — показано {height} мм по тому, что на стене стоит.",
     empty: "На этой стене пока ничего нет.",
     blind: "Меток без высоты: {count} — они под полом полосой, выдумывать им высоту нельзя.",
+    // Высота, взятая у типа (таск 135, G192). Показывается вслух: это догадка
+    // сборки, пусть и хорошая, и правило объекта велит не выдавать её за
+    // введённое человеком число.
+    guessed: "Высот по умолчанию типа: {count} — поправьте у метки, если на объекте иначе.",
     // Подсказка холста про выделение стены.
     pick: "Клик по стене чертежа открывает её развёртку; метка под курсором всегда главнее стены.",
   },
@@ -6064,6 +6103,12 @@ const strings = {
   // подпись кнопки складывают её подстановкой. В модели ей отвечает константа
   // `MARK_DIMENSION_UNIT`; сменить меру — правка этих двух мест.
   markSizes: {
+    // То же окно для умолчаний типа (таск 135, G192): поля те же три, и
+    // заводить второе окно ради другого заголовка незачем.
+    typeTitle: "Размеры по умолчанию: {label}",
+    typeHint:
+      "Эти размеры метка берёт, пока не задала свои: по ним развёртка рисует вещь в масштабе стены. Пустое поле — умолчания нет. Поправили здесь — поехали все метки этого типа, у которых своего размера нет.",
+    typeButton: "Размеры",
     unit: "мм",
     // Кнопка в строке метки. Не просто «Размеры»: так уже называется панель
     // величины меток и подписей на экране, и две разные вещи под одним словом
@@ -7440,61 +7485,61 @@ const TEMPLATE_CATEGORIES = [
 const TEMPLATE_TYPES = [
   // Свет. Семь точечных типов идут без своей формы и берут круг с крестом у
   // категории — тот самый повтор, на который заказчик согласился сознательно.
-  { category: "light", code: "Т", name: strings.types.spot },
-  { category: "light", code: "С", name: strings.types.lamp },
-  { category: "light", code: "ПК", name: strings.types.bedLight },
+  { category: "light", code: "Т", name: strings.types.spot, sizes: { length: 90, width: 90 } },
+  { category: "light", code: "С", name: strings.types.lamp, sizes: { length: 200, width: 120 } },
+  { category: "light", code: "ПК", name: strings.types.bedLight, sizes: { length: 40, width: 40 } },
   // Линейные типы света разведены начертанием: цвет в категории общий, и на
   // чёрно-белой распечатке линию от линии отличает только рисунок.
-  { category: "light", code: "ТР", name: strings.types.track, kind: "line", lineStyle: "double" },
-  { category: "light", code: "ПС", name: strings.types.backlight },
+  { category: "light", code: "ТР", name: strings.types.track, kind: "line", lineStyle: "double", sizes: { length: 60, width: 60 } },
+  { category: "light", code: "ПС", name: strings.types.backlight, sizes: { length: 40, width: 40 } },
   // Лента своего начертания не имеет: берёт категорийное, то есть сплошную.
-  { category: "light", code: "Л", name: strings.types.strip, kind: "line" },
-  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, kind: "line", lineStyle: "dashed" },
+  { category: "light", code: "Л", name: strings.types.strip, kind: "line", sizes: { length: 10, width: 10 } },
+  { category: "light", code: "ПШ", name: strings.types.wardrobeLight, kind: "line", lineStyle: "dashed", sizes: { length: 10, width: 10 } },
   // Выключатели: число каналов — число клавиш, связь с нагрузкой получает номер
   // клавиши. Каналы приехали из объекта заказчика вместе со справочником.
-  { category: "switches", code: "В", name: strings.types.switch, shape: "square", channels: 1 },
-  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2 },
-  { category: "sockets", code: "Р", name: strings.types.socket, shape: "circle-socket" },
-  { category: "climate", code: "Б", name: strings.types.breezer, shape: "dome-dot" },
-  { category: "climate", code: "К", name: strings.types.conditioner, shape: "circle-thermo" },
-  { category: "network", code: "W", name: strings.types.wifi, shape: "circle-wave" },
-  { category: "intercom", code: "Д", name: strings.types.intercom },
-  { category: "curtains", code: "КШ", name: strings.types.curtainRail },
-  { category: "light", code: "ППл", name: strings.types.floorLight },
-  { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave" },
-  { category: "light", code: "ЛЮ", name: strings.types.chandelier },
-  { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1 },
-  { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2 },
-  { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain" },
+  { category: "switches", code: "В", name: strings.types.switch, shape: "square", channels: 1, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "switches", code: "ВВ", name: strings.types.switchDouble, shape: "square-bar", channels: 2, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "sockets", code: "Р", name: strings.types.socket, shape: "circle-socket", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
+  { category: "climate", code: "Б", name: strings.types.breezer, shape: "dome-dot", sizes: { length: 600, width: 350, heightAboveFloor: 2100 } },
+  { category: "climate", code: "К", name: strings.types.conditioner, shape: "circle-thermo", sizes: { length: 900, width: 300, heightAboveFloor: 2300 } },
+  { category: "network", code: "W", name: strings.types.wifi, shape: "circle-wave", sizes: { length: 120, width: 120, heightAboveFloor: 2400 } },
+  { category: "intercom", code: "Д", name: strings.types.intercom, sizes: { length: 150, width: 200, heightAboveFloor: 1500 } },
+  { category: "curtains", code: "КШ", name: strings.types.curtainRail, sizes: { length: 400, width: 120, heightAboveFloor: 2400 } },
+  { category: "light", code: "ППл", name: strings.types.floorLight, sizes: { length: 40, width: 40, heightAboveFloor: 100 } },
+  { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave", sizes: { length: 40, width: 40, heightAboveFloor: 2400 } },
+  { category: "light", code: "ЛЮ", name: strings.types.chandelier, sizes: { length: 500, width: 400 } },
+  { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2, icon: "switchToggle", sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain", icon: "nightLight", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
   // Розетка 380: три отверстия по кругу против двух у обычной — на плане их
   // не спутать.
-  { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple" },
-  { category: "sensors", code: "ДП", name: strings.types.presence, shape: "circle-fan" },
-  { category: "appliances", code: "СУШ", name: strings.types.dryer },
-  { category: "panel", code: "Щ", name: strings.types.panel, shape: "square-hatch" },
-  { category: "climate", code: "ВЫТ", name: strings.types.hood, shape: "circle-fill" },
-  { category: "light", code: "Бр", name: strings.types.sconce },
-  { category: "appliances", code: "ДЭП", name: strings.types.cabinetDoor },
-  { category: "network", code: "ПУ", name: strings.types.controlPanel, shape: "square-jack" },
-  { category: "climate", code: "ОВ", name: strings.types.dehumidifier, shape: "drop-dot" },
-  { category: "network", code: "ВП", name: strings.types.ethernet, shape: "square-cross" },
-  { category: "cinema", code: "РЕС", name: strings.types.receiver },
-  { category: "cinema", code: "ПРО", name: strings.types.projector, shape: "diamond-dot" },
-  { category: "network", code: "УК", name: strings.types.smartSpeaker, shape: "circle-antenna" },
+  { category: "sockets", code: "РC", name: strings.types.socket380, shape: "circle-triple", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
+  { category: "sensors", code: "ДП", name: strings.types.presence, shape: "circle-fan", sizes: { length: 70, width: 70, heightAboveFloor: 2400 } },
+  { category: "appliances", code: "СУШ", name: strings.types.dryer, sizes: { length: 500, width: 800, heightAboveFloor: 900 } },
+  { category: "panel", code: "Щ", name: strings.types.panel, shape: "square-hatch", sizes: { length: 450, width: 600, heightAboveFloor: 1400 } },
+  { category: "climate", code: "ВЫТ", name: strings.types.hood, shape: "circle-fill", sizes: { length: 600, width: 350, heightAboveFloor: 1700 } },
+  { category: "light", code: "Бр", name: strings.types.sconce, sizes: { length: 150, width: 250, heightAboveFloor: 1800 } },
+  { category: "appliances", code: "ДЭП", name: strings.types.cabinetDoor, sizes: { length: 400, width: 500, heightAboveFloor: 600 } },
+  { category: "network", code: "ПУ", name: strings.types.controlPanel, shape: "square-jack", sizes: { length: 120, width: 120, heightAboveFloor: 1400 } },
+  { category: "climate", code: "ОВ", name: strings.types.dehumidifier, shape: "drop-dot", sizes: { length: 400, width: 600, heightAboveFloor: 0 } },
+  { category: "network", code: "ВП", name: strings.types.ethernet, shape: "square-cross", sizes: { length: 80, width: 80, heightAboveFloor: 300 } },
+  { category: "cinema", code: "РЕС", name: strings.types.receiver, sizes: { length: 430, width: 80, heightAboveFloor: 400 } },
+  { category: "cinema", code: "ПРО", name: strings.types.projector, shape: "diamond-dot", sizes: { length: 300, width: 120, heightAboveFloor: 2400 } },
+  { category: "network", code: "УК", name: strings.types.smartSpeaker, shape: "circle-antenna", sizes: { length: 150, width: 180, heightAboveFloor: 900 } },
   // Вертикальный кусок ленты ставится одной точкой, а не тянется по плану.
-  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical" },
-  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3 },
-  { category: "sensors", code: "ДД", name: strings.types.motion, shape: "triangle-dot" },
-  { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split" },
-  { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop" },
-  { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross" },
-  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar" },
-  { category: "plumbing", code: "ВР", name: strings.types.waterOutlet },
-  { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain" },
-  { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve" },
-  { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander" },
-  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring" },
-  { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring" },
+  { category: "light", code: "ЛВ", name: strings.types.stripVertical, shape: "rect-vertical", sizes: { length: 40, width: 600, heightAboveFloor: 900 } },
+  { category: "switches", code: "ВВВ", name: strings.types.switchTriple, shape: "square-bar-two", channels: 3, sizes: { length: 80, width: 80, heightAboveFloor: 900 } },
+  { category: "sensors", code: "ДД", name: strings.types.motion, shape: "triangle-dot", sizes: { length: 70, width: 70, heightAboveFloor: 2200 } },
+  { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split", sizes: { length: 70, width: 40, heightAboveFloor: 2000 } },
+  { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop", sizes: { length: 60, width: 60, heightAboveFloor: 0 } },
+  { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross", icon: "panelBox", sizes: { length: 300, width: 400, heightAboveFloor: 1400 } },
+  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 100, heightAboveFloor: 0 } },
+  { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, icon: "waterOutlet", sizes: { length: 60, width: 60, heightAboveFloor: 600 } },
+  { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", icon: "drain", sizes: { length: 110, width: 110, heightAboveFloor: 100 } },
+  { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, heightAboveFloor: 400 } },
+  { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander", sizes: { length: 40, width: 40, heightAboveFloor: 100 } },
+  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring", sizes: { length: 300, width: 60, heightAboveFloor: 1600 } },
+  { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring", sizes: { length: 120, width: 80, heightAboveFloor: 2300 } },
 ];
 
 function newId() {
@@ -7546,6 +7591,16 @@ function defaultTemplate() {
     blockMode: "each",
     // Каналы: у выключателей столько, сколько клавиш, у остальных один.
     channels: type.channels || TYPE_CHANNELS_DEFAULT,
+    // Имя значка развёртки — только там, где форма знака двусмысленна и по
+    // ней не угадать (таск 135): ночник и выход канализации делят
+    // `circle-drain`, осушитель и водорозетка — `drop-dot`. Остальные типы
+    // поля не получают и берут значок по форме: так же, как его возьмёт
+    // объект, размеченный до этого таска.
+    ...(type.icon ? { icon: type.icon } : {}),
+    // Умолчания размеров (G192): «для меток надо бы прописать дефолтные
+    // размеры, которые уже можно будет править». Метка их наследует, пока не
+    // задала своё, и развёртка рисует вещь этим размером.
+    ...(type.sizes ? { sizes: type.sizes } : {}),
     order: index,
   }));
   return { categories, markTypes, equipmentTypes: equipmentTypeTemplate() };
@@ -8548,6 +8603,77 @@ function markDimensions(mark) {
     values[field] = typeof value === "number" && Number.isFinite(value) ? value : null;
   }
   return values;
+}
+
+/**
+ * Размеры **с умолчаниями типа** (таск 135, требование G192). Слова заказчика:
+ * «для меток надо бы прописать дефолтные размеры, которые уже можно будет
+ * править, и на развёртке отображать уже указанные».
+ *
+ * Лестница та же, что у цвета и формы (ADR 005): у метки — её значение, нет —
+ * умолчание типа, нет и там — `null`.
+ *
+ * **Наследование, а не подстановка в метку**, и это решение, а не мелочь.
+ * Подставить умолчания при создании значило бы оставить уже размеченные
+ * объекты без них: в присланном объекте заказчика размеры заполнены у **нуля**
+ * меток из 592, и ни одна не ожила бы, пока он не переставит их заново.
+ * Наследование оживляет его объект в тот же день и ничего в нём не меняет —
+ * поправил умолчание у типа, и все его метки поехали за ним.
+ *
+ * `own` говорит, что значение **своё**, а не унаследованное: по нему окно
+ * показывает умолчание заглушкой, а не числом, и развёртка знает, о скольких
+ * высотах она догадалась.
+ */
+function markSizes(project, mark) {
+  const type = mark ? findType(project, mark.typeId) : null;
+  const defaults = typeSizes(type);
+  const values = markDimensions(mark);
+  const result = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    const own = values[field] !== null;
+    result[field] = own ? values[field] : defaults[field];
+    result[field + "Own"] = own;
+  }
+  return result;
+}
+
+/** Умолчания размеров у типа. У типа без них — три `null`. */
+function typeSizes(type) {
+  const sizes = type && type.sizes ? type.sizes : null;
+  const values = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    const value = sizes ? sizes[field] : null;
+    values[field] = typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  return values;
+}
+
+/**
+ * Записать умолчания размеров у типа. Пустое поле **убирает** умолчание, а не
+ * обнуляет его: ноль у высоты над полом — это «в полу», и путать его с «не
+ * задано» нельзя. Когда не осталось ни одного, поле `sizes` у типа исчезает —
+ * тип становится ровно таким, каким был до этого таска (G68).
+ */
+function setTypeSizes(project, typeId, patch) {
+  const type = findType(project, typeId);
+  if (!type) throw modelError("typeNotFound");
+  const next = { ...typeSizes(type) };
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (!patch || !Object.prototype.hasOwnProperty.call(patch, field)) continue;
+    next[field] = markDimensionValue(patch[field]);
+  }
+  const kept = {};
+  for (const field of MARK_DIMENSION_FIELDS) {
+    if (next[field] !== null) kept[field] = next[field];
+  }
+  const markTypes = project.markTypes.map((item) => {
+    if (item.id !== typeId) return item;
+    const copy = { ...item };
+    if (Object.keys(kept).length === 0) delete copy.sizes;
+    else copy.sizes = kept;
+    return copy;
+  });
+  return { project: withProject(project, { markTypes }), type: markTypes.find((item) => item.id === typeId) };
 }
 
 // Задан ли у метки хоть один размер: по этому строка списка показывает, что
@@ -11416,6 +11542,8 @@ function wallElevation(project, wallId, side = "left") {
     if (!binding || binding.wallId !== wallId) continue;
     if (markWallSide(project, mark) !== view) continue;
     const style = styleOf(project, mark.typeId);
+    const sizes = markSizes(project, mark);
+    const type = findType(project, mark.typeId);
     const span =
       binding.toMm === null
         ? { fromMm: sideAlong(length, binding.atMm, view), toMm: null }
@@ -11429,7 +11557,19 @@ function wallElevation(project, wallId, side = "left") {
       kind: mark.kind === "line" ? "line" : "point",
       fromMm: Math.round(span.fromMm),
       toMm: span.toMm === null ? null : Math.round(span.toMm),
-      heightMm: markDimensions(mark).heightAboveFloor,
+      // Размеры и высота — **с умолчаниями типа** (G192): у заказчика в 592
+      // метках не заполнено ни одной, и без наследования развёртка осталась бы
+      // такой же мёртвой, какой была.
+      heightMm: sizes.heightAboveFloor,
+      sizeMm: { width: sizes.length, height: sizes.width },
+      heightOwn: sizes.heightAboveFloorOwn,
+      icon: type && type.icon ? type.icon : null,
+      // Группа едет с меткой на развёртку (таск 135, G190 и G191): там метки
+      // одной группы встают вплотную, как подрозетники в стене, и получают
+      // одну отметку высоты на всех. Решает это отрисовка — здесь только
+      // ключ и общая подпись, которую иначе пришлось бы собирать второй раз.
+      groupId: mark.groupId || null,
+      groupLabel: mark.groupId ? labelOf(project, mark.groupId) : "",
     });
   }
   marks.sort((first, second) => first.fromMm - second.fromMm);
@@ -15627,6 +15767,615 @@ function autosaveAgoText(at, now) {
   if (hours < 24) return text("autosave.ago.pattern", { count: hours, word: autosavePlural(hours, words.hours) });
   const days = Math.floor(hours / 24);
   return text("autosave.ago.pattern", { count: days, word: autosavePlural(days, words.days) });
+}
+
+// src/icons/kit.js
+// Кирпичи, из которых сложены значки развёртки (таск 135, G187).
+//
+// Каждый значок рисуется **долями своего прямоугольника**: −0.5…0.5 по обеим
+// осям, где −0.5 — левый (верхний) край, 0.5 — правый (нижний). Кирпичи
+// переводят доли в точки холста сами, поэтому значок один и тот же и в двадцати
+// точках экрана, и в сантиметре бумаги, и в масштабе стены.
+//
+// **Почему доли переводятся здесь, а не `ctx.scale`.** Прямоугольник значка
+// бывает непропорциональным: внутренний блок кондиционера — три к одному. От
+// `ctx.scale(width, height)` вместе с геометрией растянулась бы и толщина
+// линии: вертикальные штрихи стали бы втрое толще горизонтальных, а круги —
+// овалами. Здесь масштаб применяется к координатам, а `lineWidth` остаётся в
+// точках холста и одинаков во всех направлениях.
+//
+// Имена с приставкой `icon`: бандл — одна область видимости, и `line` с
+// `circle` в ней уже заняты.
+
+// Доля → точка холста. Радиусы меряются по короткой стороне: круг обязан
+// остаться кругом на любом прямоугольнике.
+const atX = (box, value) => box.x + (0.5 + value) * box.width;
+const atY = (box, value) => box.y + (0.5 + value) * box.height;
+const atR = (box, value) => value * Math.min(box.width, box.height);
+function iconRoundRect(ctx, box, x, y, width, height, radius) {
+  const left = atX(box, x);
+  const top = atY(box, y);
+  const right = atX(box, x + width);
+  const bottom = atY(box, y + height);
+  const r = Math.max(0, Math.min(atR(box, radius), Math.min(Math.abs(right - left), Math.abs(bottom - top)) / 2));
+  ctx.beginPath();
+  ctx.moveTo(left + r, top);
+  ctx.lineTo(right - r, top);
+  ctx.arcTo(right, top, right, top + r, r);
+  ctx.lineTo(right, bottom - r);
+  ctx.arcTo(right, bottom, right - r, bottom, r);
+  ctx.lineTo(left + r, bottom);
+  ctx.arcTo(left, bottom, left, bottom - r, r);
+  ctx.lineTo(left, top + r);
+  ctx.arcTo(left, top, left + r, top, r);
+  ctx.closePath();
+  ctx.stroke();
+}
+
+/** Плашка прибора во весь прямоугольник значка. */
+function iconPlate(ctx, box, inset = 0.04, radius = 0.1) {
+  iconRoundRect(ctx, box, -0.5 + inset, -0.5 + inset, 1 - inset * 2, 1 - inset * 2, radius);
+}
+function iconCircle(ctx, box, cx, cy, r) {
+  ctx.beginPath();
+  ctx.arc(atX(box, cx), atY(box, cy), atR(box, r), 0, Math.PI * 2);
+  ctx.stroke();
+}
+function iconLine(ctx, box, x1, y1, x2, y2) {
+  ctx.beginPath();
+  ctx.moveTo(atX(box, x1), atY(box, y1));
+  ctx.lineTo(atX(box, x2), atY(box, y2));
+  ctx.stroke();
+}
+
+/** Дуга долями: купол светильника, обзор датчика, складка шторы. */
+function iconArc(ctx, box, cx, cy, r, from, to, close) {
+  ctx.beginPath();
+  ctx.arc(atX(box, cx), atY(box, cy), atR(box, r), from, to);
+  if (close) ctx.closePath();
+  ctx.stroke();
+}
+
+/** Ломаная долями: зонт вытяжки, объектив камеры. */
+function iconPoly(ctx, box, points, close) {
+  ctx.beginPath();
+  points.forEach(([x, y], index) => {
+    if (index === 0) ctx.moveTo(atX(box, x), atY(box, y));
+    else ctx.lineTo(atX(box, x), atY(box, y));
+  });
+  if (close) ctx.closePath();
+  ctx.stroke();
+}
+
+/** Решётка: ею читаются кондиционер, бризер и вытяжка — у всех троих она лицо. */
+function iconLouvers(ctx, box, count, from, to, left, right) {
+  for (let index = 0; index < count; index += 1) {
+    const y = from + ((to - from) * (index + 0.5)) / count;
+    iconLine(ctx, box, left, y, right, y);
+  }
+}
+
+/** Дуги сигнала: присутствие, движение, WiFi. */
+function iconWaves(ctx, box, cx, cy, radii, from, to) {
+  for (const r of radii) iconArc(ctx, box, cx, cy, r, from, to, false);
+}
+
+/** Капля: протечка, осушитель, водорозетка. */
+function iconDrop(ctx, box, cx, cy, size) {
+  const x = atX(box, cx);
+  const y = atY(box, cy);
+  const r = atR(box, size);
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.quadraticCurveTo(x + r * 0.9, y + r * 0.35, x, y + r * 0.8);
+  ctx.quadraticCurveTo(x - r * 0.9, y + r * 0.35, x, y - r);
+  ctx.closePath();
+  ctx.stroke();
+}
+
+/** Плашка с клавишами: столько, сколько каналов у выключателя. */
+function iconKeys(ctx, box, count) {
+  iconPlate(ctx, box);
+  const width = 0.62 / count;
+  for (let index = 0; index < count; index += 1) {
+    iconRoundRect(ctx, box, -0.31 + index * width, -0.26, width * 0.84, 0.52, 0.04);
+  }
+}
+
+// src/icons/climate.js
+// Значки развёртки: климат.
+//
+// Здесь живёт тот самый кондиционер, ради которого таск и затеян: его
+// внутренний блок под метр по стене, и влезет он над дверью или нет — вопрос,
+// на который отвечает только контур в настоящем размере.
+const ICONS_CLIMATE = {
+  // Внутренний блок кондиционера: корпус с решёткой и индикатором.
+  conditioner: {
+    shapes: ["circle-thermo"],
+    mm: { width: 900, height: 300 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.5, -0.5, 1, 0.75, 0.16);
+      iconLouvers(ctx, box, 3, 0, 0.22, -0.4, 0.4);
+      iconLine(ctx, box, -0.5, 0.25, 0.5, 0.25);
+      iconCircle(ctx, box, 0.36, -0.28, 0.05);
+    },
+  },
+  // Бризер: приточная коробка с круглой решёткой.
+  breezer: {
+    shapes: ["dome-dot", "dome"],
+    mm: { width: 600, height: 350 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.5, -0.5, 1, 1, 0.14);
+      iconCircle(ctx, box, 0, 0, 0.26);
+      iconCircle(ctx, box, 0, 0, 0.1);
+      iconLine(ctx, box, -0.26, 0, 0.26, 0);
+      iconLine(ctx, box, 0, -0.26, 0, 0.26);
+    },
+  },
+  // Вытяжка: зонт над плитой.
+  hood: {
+    shapes: ["circle-fill"],
+    mm: { width: 600, height: 350 },
+    draw(ctx, box) {
+      iconPoly(ctx, box, [[-0.5, 0.5], [-0.28, -0.2], [0.28, -0.2], [0.5, 0.5]], true);
+      iconRoundRect(ctx, box, -0.12, -0.5, 0.24, 0.3, 0.03);
+      iconLouvers(ctx, box, 2, 0.1, 0.4, -0.3, 0.3);
+    },
+  },
+  // Осушитель: напольная коробка с решёткой и каплей.
+  dehumidifier: {
+    shapes: ["drop-dot"],
+    mm: { width: 400, height: 600 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.5, -0.5, 1, 1, 0.12);
+      iconLouvers(ctx, box, 3, -0.3, 0.05, -0.3, 0.3);
+      iconDrop(ctx, box, 0, 0.26, 0.16);
+    },
+  },
+};
+
+// src/icons/light.js
+// Значки развёртки: свет.
+//
+// Двенадцать типов света стартового справочника делят одну форму
+// `circle-cross` и получают один значок светильника. Бра от точечного на
+// развёртке не отличить — ровно настолько, насколько их не отличить и на
+// плане: форма у них общая, категорийная, и заказчик согласился на этот повтор
+// сознательно. День, когда это станет мешать, лечится своей формой у бра (она
+// же поможет плану), а не вторым ключом у значка.
+const ICONS_LIGHT = {
+  // Светильник: купол с лучами.
+  lamp: {
+    shapes: ["circle-cross", "circle", "circle-dot", "circle-rays", "circle-ring"],
+    mm: { width: 90, height: 90 },
+    draw(ctx, box) {
+      iconArc(ctx, box, 0, 0.06, 0.3, Math.PI, 0, true);
+      iconLine(ctx, box, -0.34, 0.06, 0.34, 0.06);
+      for (const [x, y] of [[-0.42, 0.3], [0, 0.42], [0.42, 0.3]]) {
+        iconLine(ctx, box, x * 0.6, y * 0.55, x, y);
+      }
+    },
+  },
+  // Ночник: тот же купол, но присевший к полу, и свет вниз.
+  nightLight: {
+    shapes: [],
+    mm: { width: 80, height: 80 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.34, -0.3, 0.68, 0.4, 0.1);
+      for (const x of [-0.18, 0, 0.18]) iconLine(ctx, box, x, 0.14, x, 0.36);
+    },
+  },
+  // Лента вертикальная: полоса во всю высоту ниши — её и ставят по высоте.
+  stripVertical: {
+    shapes: ["rect-vertical", "rect-vertical-ticks"],
+    mm: { width: 40, height: 600 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.5, -0.5, 1, 1, 0.3);
+      for (let index = 0; index < 4; index += 1) {
+        const y = -0.32 + index * 0.21;
+        iconLine(ctx, box, -0.18, y, 0.18, y);
+      }
+    },
+  },
+};
+
+// src/icons/net.js
+// Значки развёртки: сеть, домофон, кинотеатр, панели управления.
+const ICONS_NET = {
+  // Точка WiFi: плоский корпус с дугами.
+  wifi: {
+    shapes: ["circle-wave"],
+    mm: { width: 120, height: 120 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.4, 0.06, 0.8, 0.28, 0.12);
+      iconWaves(ctx, box, 0, 0.06, [0.2, 0.32, 0.44], Math.PI + 0.5, -0.5);
+    },
+  },
+  // Умная колонка: цилиндр с сеткой.
+  speaker: {
+    shapes: ["circle-antenna"],
+    mm: { width: 150, height: 180 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.32, -0.42, 0.64, 0.84, 0.2);
+      iconLouvers(ctx, box, 3, -0.2, 0.2, -0.22, 0.22);
+    },
+  },
+  // Панель управления: плашка с экраном.
+  panelControl: {
+    shapes: ["square-jack"],
+    mm: { width: 120, height: 120 },
+    draw(ctx, box) {
+      iconPlate(ctx, box);
+      iconRoundRect(ctx, box, -0.26, -0.26, 0.52, 0.38, 0.04);
+      iconLine(ctx, box, -0.14, 0.26, 0.14, 0.26);
+    },
+  },
+  // Домофон: панель с экраном и кнопкой.
+  intercom: {
+    shapes: ["triangle-down", "triangle-down-fill"],
+    mm: { width: 150, height: 200 },
+    draw(ctx, box) {
+      iconPlate(ctx, box);
+      iconRoundRect(ctx, box, -0.28, -0.36, 0.56, 0.4, 0.05);
+      iconCircle(ctx, box, 0, 0.24, 0.1);
+    },
+  },
+  // Проектор: корпус с объективом и креплением.
+  projector: {
+    shapes: ["diamond-dot"],
+    mm: { width: 300, height: 120 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.5, -0.34, 0.86, 0.68, 0.1);
+      iconCircle(ctx, box, 0.36, 0, 0.16);
+      iconLine(ctx, box, -0.3, 0.34, -0.3, 0.46);
+      iconLine(ctx, box, 0.12, 0.34, 0.12, 0.46);
+    },
+  },
+  // Ресивер: плоский корпус с окошком.
+  receiver: {
+    shapes: ["square-wave"],
+    mm: { width: 430, height: 80 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.5, -0.4, 1, 0.8, 0.08);
+      iconRoundRect(ctx, box, -0.3, -0.16, 0.34, 0.32, 0.04);
+      iconCircle(ctx, box, 0.3, 0, 0.12);
+    },
+  },
+};
+
+// src/icons/power.js
+// Значки развёртки: розетки, выключатели, розетки данных.
+//
+// Добавить значок — дописать запись сюда (требование G187, уточнение
+// заказчика: «не зашивай все в один файл, что бы можно было легко менять и
+// расширять список»). Больше ничего править не надо: `shapes` — это и есть
+// привязка, реестр читает её сам.
+//
+// `mm` — размер вещи **на случай, когда у типа не задан свой**: умолчания
+// живут у типа (G192), а здесь лежит последний рубеж для типа, заведённого
+// руками.
+const ICONS_POWER = {
+  // Розетка: плашка, контактные отверстия и заземляющие скобы.
+  socket: {
+    shapes: ["circle-socket"],
+    mm: { width: 80, height: 80 },
+    draw(ctx, box) {
+      iconPlate(ctx, box);
+      iconCircle(ctx, box, 0, 0, 0.3);
+      iconCircle(ctx, box, -0.12, 0, 0.055);
+      iconCircle(ctx, box, 0.12, 0, 0.055);
+      iconLine(ctx, box, -0.3, -0.19, -0.3, 0.19);
+      iconLine(ctx, box, 0.3, -0.19, 0.3, 0.19);
+    },
+  },
+  // Трёхфазная: три отверстия по кругу — на развёртке так же, как на плане.
+  socket380: {
+    shapes: ["circle-triple"],
+    mm: { width: 80, height: 80 },
+    draw(ctx, box) {
+      iconPlate(ctx, box);
+      iconCircle(ctx, box, 0, 0, 0.3);
+      for (const angle of [-Math.PI / 2, Math.PI / 6, (Math.PI * 5) / 6]) {
+        iconCircle(ctx, box, Math.cos(angle) * 0.14, Math.sin(angle) * 0.14, 0.055);
+      }
+    },
+  },
+  // Выключатели: клавиш столько, сколько каналов. Это и есть разница между
+  // «В», «ВВ» и «ВВВ», когда смотришь на стену.
+  switch1: { shapes: ["square"], mm: { width: 80, height: 80 }, draw: (ctx, box) => iconKeys(ctx, box, 1) },
+  switch2: { shapes: ["square-bar"], mm: { width: 80, height: 80 }, draw: (ctx, box) => iconKeys(ctx, box, 2) },
+  switch3: { shapes: ["square-bar-two"], mm: { width: 80, height: 80 }, draw: (ctx, box) => iconKeys(ctx, box, 3) },
+  // Переключатель: та же плашка, но с указателем направления на клавише.
+  switchToggle: {
+    shapes: ["square-chevron"],
+    mm: { width: 80, height: 80 },
+    draw(ctx, box) {
+      iconKeys(ctx, box, 1);
+      iconLine(ctx, box, -0.1, -0.1, 0.1, 0);
+      iconLine(ctx, box, -0.1, 0.1, 0.1, 0);
+    },
+  },
+  // Розетка данных: плашка с портом и защёлкой.
+  data: {
+    shapes: ["square-cross"],
+    mm: { width: 80, height: 80 },
+    draw(ctx, box) {
+      iconPlate(ctx, box);
+      iconRoundRect(ctx, box, -0.18, -0.2, 0.36, 0.34, 0.04);
+      iconLine(ctx, box, -0.06, -0.2, -0.06, -0.3);
+      iconLine(ctx, box, 0.06, -0.2, 0.06, -0.3);
+      iconLine(ctx, box, -0.06, -0.3, 0.06, -0.3);
+    },
+  },
+  // Щит: ящик с дверцей и рядами автоматов.
+  panelBox: {
+    shapes: ["square-hatch", "square-grid"],
+    mm: { width: 450, height: 600 },
+    draw(ctx, box) {
+      iconPlate(ctx, box, 0.02, 0.06);
+      iconLine(ctx, box, -0.24, -0.46, -0.24, 0.46);
+      for (let index = 0; index < 3; index += 1) {
+        const y = -0.26 + index * 0.26;
+        iconLine(ctx, box, -0.16, y, 0.4, y);
+      }
+      iconCircle(ctx, box, -0.36, 0, 0.05);
+    },
+  },
+};
+
+// src/icons/sense.js
+// Значки развёртки: датчики.
+const ICONS_SENSE = {
+  // Присутствие: купол с дугами обзора.
+  presence: {
+    shapes: ["circle-fan"],
+    mm: { width: 70, height: 70 },
+    draw(ctx, box) {
+      iconArc(ctx, box, 0, -0.16, 0.26, Math.PI, 0, true);
+      iconWaves(ctx, box, 0, -0.16, [0.36, 0.46], 0.35, Math.PI - 0.35);
+    },
+  },
+  // Движение: коробочка с линзой.
+  motion: {
+    shapes: ["triangle-dot"],
+    mm: { width: 70, height: 70 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.34, -0.4, 0.68, 0.56, 0.14);
+      iconCircle(ctx, box, 0, -0.12, 0.14);
+      iconWaves(ctx, box, 0, -0.12, [0.34, 0.44], 0.4, Math.PI - 0.4);
+    },
+  },
+  // Открытие: две части — на створке и на раме.
+  opening: {
+    shapes: ["square-split"],
+    mm: { width: 70, height: 40 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.46, -0.3, 0.5, 0.6, 0.08);
+      iconRoundRect(ctx, box, 0.12, -0.2, 0.34, 0.4, 0.08);
+      iconLine(ctx, box, 0.04, 0, 0.12, 0);
+    },
+  },
+  // Протечка: шайба с каплей и усами-электродами.
+  leak: {
+    shapes: ["drop"],
+    mm: { width: 60, height: 60 },
+    draw(ctx, box) {
+      iconCircle(ctx, box, 0, -0.04, 0.3);
+      iconDrop(ctx, box, 0, -0.08, 0.16);
+      iconLine(ctx, box, -0.16, 0.3, -0.16, 0.44);
+      iconLine(ctx, box, 0.16, 0.3, 0.16, 0.44);
+    },
+  },
+  // Камера: корпус с объективом на кронштейне.
+  camera: {
+    shapes: ["diamond-ring"],
+    mm: { width: 120, height: 80 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.46, -0.24, 0.6, 0.44, 0.08);
+      iconPoly(ctx, box, [[0.14, -0.14], [0.4, -0.3], [0.4, 0.26], [0.14, 0.1]], true);
+      iconLine(ctx, box, -0.2, 0.2, -0.2, 0.42);
+    },
+  },
+};
+
+// src/icons/things.js
+// Значки развёртки: сантехника, электроприборы, карнизы.
+const ICONS_THINGS = {
+  // Выход канализации: раструб с крестовиной.
+  drain: {
+    shapes: [],
+    mm: { width: 110, height: 110 },
+    draw(ctx, box) {
+      iconCircle(ctx, box, 0, 0, 0.32);
+      iconCircle(ctx, box, 0, 0, 0.18);
+      iconLine(ctx, box, -0.32, 0, 0.32, 0);
+      iconLine(ctx, box, 0, -0.32, 0, 0.32);
+    },
+  },
+
+  // Кран с электроприводом: корпус крана с рукояткой привода.
+  valve: {
+    shapes: ["circle-valve"],
+    mm: { width: 100, height: 100 },
+    draw(ctx, box) {
+      iconCircle(ctx, box, 0, 0.08, 0.26);
+      iconLine(ctx, box, -0.44, 0.08, -0.26, 0.08);
+      iconLine(ctx, box, 0.26, 0.08, 0.44, 0.08);
+      iconLine(ctx, box, 0, -0.18, 0, -0.42);
+      iconLine(ctx, box, -0.18, -0.42, 0.18, -0.42);
+    },
+  },
+  // Водорозетка: вывод трубы с капелькой.
+  waterOutlet: {
+    shapes: [],
+    mm: { width: 60, height: 60 },
+    draw(ctx, box) {
+      iconCircle(ctx, box, 0, 0, 0.3);
+      iconCircle(ctx, box, 0, 0, 0.12);
+      iconDrop(ctx, box, 0, 0.34, 0.14);
+    },
+  },
+  // Робот-пылесос: шайба сбоку, с бампером и колёсами.
+  vacuum: {
+    shapes: ["trapezoid-bar"],
+    mm: { width: 350, height: 100 },
+    draw(ctx, box) {
+      iconRoundRect(ctx, box, -0.5, -0.3, 1, 0.6, 0.26);
+      iconLine(ctx, box, -0.5, 0.1, 0.5, 0.1);
+      iconCircle(ctx, box, -0.26, 0.2, 0.08);
+      iconCircle(ctx, box, 0.26, 0.2, 0.08);
+    },
+  },
+  // Сушилка, дверца с приводом и прочая техника: коробка с приводом.
+  appliance: {
+    shapes: ["square-bolt", "square-ring"],
+    mm: { width: 400, height: 500 },
+    draw(ctx, box) {
+      iconPlate(ctx, box, 0.04, 0.08);
+      iconLine(ctx, box, -0.42, -0.18, 0.42, -0.18);
+      iconCircle(ctx, box, 0, 0.16, 0.16);
+      iconLine(ctx, box, 0, 0.16, 0.1, 0.06);
+    },
+  },
+  // Карниз штор: труба на кронштейнах и складки ткани.
+  curtainRail: {
+    shapes: ["diamond"],
+    mm: { width: 400, height: 120 },
+    draw(ctx, box) {
+      iconLine(ctx, box, -0.5, -0.28, 0.5, -0.28);
+      iconLine(ctx, box, -0.5, -0.16, 0.5, -0.16);
+      iconLine(ctx, box, -0.3, -0.16, -0.3, -0.34);
+      iconLine(ctx, box, 0.3, -0.16, 0.3, -0.34);
+      for (const x of [-0.3, 0, 0.3]) {
+        iconArc(ctx, box, x, 0.12, 0.16, Math.PI, 0, false);
+      }
+    },
+  },
+};
+
+// src/icons/registry.js
+// Реестр значков развёртки (таск 135, требование G187).
+//
+// Слова заказчика: «указывать на развёртке стен объекты на месте меток… найти
+// для всех типов меток изображения минималистично схематические — контурные и
+// располагать их на схеме цветом метки и рядом или прям поверх объекта, если
+// большой (например кондиционер). То есть что бы схема была уже живая».
+//
+// На **плане** остаются условные знаки: там знак читают как обозначение, и его
+// различимость выверена отпечатками (`shapes.test.js`). На **развёртке**
+// человек смотрит на стену так, как она будет выглядеть, и кружок вместо
+// кондиционера эту картину не достраивает.
+//
+// ——— почему контуры в коде, а не файлы рядом ———
+//
+// Заказчик разрешил файлы («svg файлы»), а потом уточнил: «не обязательно SVG —
+// делай оптимально, но не зашивай все в один файл, что бы можно было легко
+// менять и расширять список». Считаю по трём статьям:
+//
+//   **Цвет.** Контур обязан краситься цветом метки. У внешнего `<img>` цвет не
+//   меняется ничем: пришлось бы либо тянуть файл текстом и разбирать его (то
+//   есть всё равно рисовать кодом, только через загрузку), либо держать по
+//   файлу на каждый цвет — а цвет у категории произвольный. Здесь это
+//   `ctx.strokeStyle = color`, одна строка на все значки.
+//
+//   **Выгрузка синхронная.** Лист развёрток рисуется одним проходом по холсту.
+//   Внешняя картинка требует ожидания — ровно та беда, которую решали со
+//   шрифтом (`drawFontReady`), и решать её пришлось бы в четырёх местах: PNG,
+//   PDF, печать, архив. Нарисованный код ждать нечего.
+//
+//   **Сборка.** Каждый файл рядом — строка в офлайн-кэше `sw.js`, имя в
+//   `assertLocalLinks` и повод для опечатки, которая молча оставит стену без
+//   значка. Тридцать значков — тридцать таких поводов.
+//
+// А «легко менять и расширять» решается не форматом, а **раскладкой**: значки
+// лежат семьями по отдельным файлам (`power`, `light`, `climate`, `sense`,
+// `net`, `things`), и добавить значок — дописать запись в один небольшой файл.
+// Привязка к форме знака лежит в самой записи (`shapes`), поэтому второго
+// места, куда надо не забыть вписаться, нет.
+//
+// ——— откуда у типа значок ———
+//
+// Лестница та же, что у цвета и формы (ADR 005), и третьего механизма не
+// заводится:
+//
+//   1. `type.icon` — имя значка, записанное у типа. Стоит там же, где
+//      умолчания размеров (G192), и заполнено в шаблоне ровно там, где форма
+//      знака двусмысленна: ночник и выход канализации делят `circle-drain`,
+//      осушитель и водорозетка — `drop-dot`.
+//   2. форма знака (`style.shape`) — ключ, который уже есть **у чужого
+//      объекта**. У заказчика в его 592 метках нет ни одного `type.icon`, но
+//      форма проставлена: розетка `circle-socket`, кондиционер `circle-thermo`,
+//      щит `square-hatch`. Поэтому его объект оживает без миграции.
+//   3. ничего — развёртка рисует нынешний знак. Тип, заведённый руками, — это
+//      не исключение, а обычная жизнь: справочник у каждого объекта свой.
+//
+// **Цена решения названа**: двенадцать типов света стартового справочника
+// делят одну форму `circle-cross` и получают один значок светильника. Бра от
+// точечного на развёртке не отличить — ровно настолько, насколько их не
+// отличить и на плане.
+
+
+
+
+
+
+const ICON_FAMILIES = [ICONS_POWER, ICONS_LIGHT, ICONS_CLIMATE, ICONS_SENSE, ICONS_NET, ICONS_THINGS];
+
+const ICONS = {};
+const BY_SHAPE = {};
+for (const family of ICON_FAMILIES) {
+  for (const [name, icon] of Object.entries(family)) {
+    ICONS[name] = { name, ...icon };
+    for (const shape of icon.shapes || []) BY_SHAPE[shape] = name;
+  }
+}
+
+/** Значок по имени. `null` — такого имени нет. */
+function iconByName(name) {
+  return name && ICONS[name] ? ICONS[name] : null;
+}
+
+/** Значок по форме знака. `null` — у этой формы значка нет. */
+function iconForShape(shape) {
+  return iconByName(BY_SHAPE[shape]);
+}
+
+/** Все имена значков — для справочника типов и для сверки отпечатками. */
+function iconNames() {
+  return Object.keys(ICONS).sort();
+}
+
+/** Какие формы знаков уже разобраны по значкам. */
+function iconShapes() {
+  return Object.keys(BY_SHAPE).sort();
+}
+
+// Толщина контура — доля размера значка, как у знаков на плане: тонкая линия
+// на крупном кондиционере выглядела бы случайной царапиной.
+const ICON_LINE_SHARE = 0.055;
+const ICON_LINE_MIN = 0.9;
+
+/**
+ * Нарисовать значок в прямоугольник цветом метки.
+ *
+ * Контур и только контур: заливки нет нарочно. В чёрно-белом листе краска
+ * становится тушью (`mono.js`), и залитый значок превратился бы в чёрное
+ * пятно, из которого не читается ничего, — а контур остаётся контуром.
+ */
+function drawIcon(ctx, icon, box, color) {
+  if (!icon || !box || !(box.width > 0) || !(box.height > 0)) return;
+  const size = Math.min(box.width, box.height);
+  ctx.save();
+  // Координаты значок считает сам (`icons/kit.js`), поэтому холст не
+  // масштабируется: толщина линии остаётся в точках и одинакова во всех
+  // направлениях даже у кондиционера три к одному.
+  ctx.lineWidth = Math.max(ICON_LINE_MIN, size * ICON_LINE_SHARE);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  icon.draw(ctx, box);
+  ctx.restore();
 }
 
 // src/render.js
@@ -20537,6 +21286,101 @@ function elevationText(ctx, value, x, y, align, unit) {
  * стоит заголовок строкой), а на листе из нескольких развёрток она и есть
  * порядок обхода: без номера ряд чертежей читается как россыпь.
  */
+/**
+ * Постоянный размер мелкого значка — в тех же единицах, что остальная
+ * развёртка (`unit`: 1 на экране, точек в миллиметре на бумаге).
+ *
+ * Двадцать две точки против восемнадцати у нынешнего знака: контуру нужно чуть
+ * больше места, чем кругу с крестом, иначе две дырки розетки сливаются.
+ */
+const ELEVATION_ICON_PX = 22;
+
+/**
+ * Граница между «значком» и «вещью в масштабе», в миллиметрах настоящего
+ * объекта (таск 135). Заказчик: «располагать их на схеме цветом метки и рядом
+ * или прям поверх объекта, если большой» — то есть ответ разный, и граница
+ * обязана быть названа числом.
+ *
+ * Триста выбраны по тому, что по эту и ту сторону оказывается. Мельче: розетка
+ * и выключатель 80, датчики 50–70, точка WiFi 120, панель управления 120 — всё
+ * это на стене в 2700 мм занимает от трёх до пяти процентов высоты, то есть
+ * обращается в точку, и рисовать их в масштабе значит не рисовать вовсе.
+ * Крупнее: кондиционер 900 × 300, бризер и вытяжка 600, щит 450 × 600,
+ * ресивер 430 — у этих вещей контур и есть ответ на вопрос «влезет ли», ради
+ * которого на развёртку и смотрят.
+ */
+const ELEVATION_SCALE_MM = 300;
+
+/**
+ * Прямоугольник метки на развёртке и значок, которым её рисовать.
+ *
+ * Крупная вещь рисуется **своим размером** в масштабе стены, мелкая — значком
+ * постоянного размера. Чистая и вынесена наружу: эта развилка — то самое
+ * место, где легче всего соврать о размере, и проверяется она без холста.
+ */
+function elevationMarkBox(mark, scale, unit, icons) {
+  const icon = icons ? elevationIconOf(mark) : null;
+  const size = mark.sizeMm || {};
+  const width = Number(size.width) || (icon ? icon.mm.width : 0);
+  const height = Number(size.height) || (icon ? icon.mm.height : 0);
+  const big = icon && (width >= ELEVATION_SCALE_MM || height >= ELEVATION_SCALE_MM);
+  if (big) return { icon, width: Math.max(1, width * scale), height: Math.max(1, height * scale), scaled: true };
+  const side = (icon ? ELEVATION_ICON_PX : 18) * unit;
+  const aspect = icon && width > 0 && height > 0 ? height / width : 1;
+  return { icon, width: side, height: side * Math.min(2, Math.max(0.5, aspect)), scaled: false };
+}
+
+/** Значок метки: имя у типа старше формы знака (см. `icons/registry.js`). */
+function elevationIconOf(mark) {
+  return iconByName(mark.icon) || iconForShape(mark.shape);
+}
+
+/**
+ * Точечные метки развёртки — **рядами**: группа идёт одним рядом вплотную,
+ * одиночка сама себе ряд (таск 135, требования G190 и G191).
+ *
+ * G190 («на развёртке сразу указывать рядом, как и в жизни подрозетники»):
+ * метки одной группы стоят на стене вплотную друг к другу, как подрозетники в
+ * рамке, а не каждая на своём расчётном отступе. Расчётные отступы у них
+ * разъехались бы на пару сантиметров — ровно настолько, насколько человек
+ * промахнулся мышью на плане, — и рамка из трёх розеток перестала бы быть
+ * рамкой.
+ *
+ * G191 («одну высоту указывать у группы по нижнему объекту»): подпись у ряда
+ * одна. Заказчик снял вопрос о разной высоте внутри группы: «2 блока розеток
+ * мы в одну группу не собираем, это всегда 2 группы разных», — поэтому берём
+ * нижнюю и не городим разбора.
+ *
+ * Порядок в ряду — по расстоянию вдоль стены, как они стоят на плане. Ряд
+ * встаёт серединой туда, где середина у группы: иначе рамка уехала бы вправо
+ * от того места, где её нарисовали.
+ *
+ * Чистая и вынесена наружу: без холста проверяется и порядок, и высота ряда.
+ */
+function elevationRows(marks) {
+  const rows = [];
+  const byGroup = new Map();
+  for (const mark of marks) {
+    const key = mark.groupId || null;
+    if (!key) {
+      rows.push({ members: [mark] });
+      continue;
+    }
+    if (!byGroup.has(key)) {
+      const row = { members: [] };
+      byGroup.set(key, row);
+      rows.push(row);
+    }
+    byGroup.get(key).members.push(mark);
+  }
+  return rows.map((row) => {
+    const members = [...row.members].sort((first, second) => first.fromMm - second.fromMm);
+    const heights = members.map((mark) => mark.heightMm).filter((value) => value !== null);
+    const centreMm = members.reduce((sum, mark) => sum + mark.fromMm, 0) / members.length;
+    const label = members.length > 1 && members[0].groupLabel ? members[0].groupLabel : members[0].label;
+    return { members, centreMm, label, heightMm: heights.length > 0 ? Math.min(...heights) : null };
+  });
+}
 function drawElevation(ctx, elevation, box, options = {}) {
   if (!elevation) return null;
   const unit = options.unit > 0 ? options.unit : 1;
@@ -20630,17 +21474,19 @@ function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
 
-  // Метки: знак на своём месте и высоте, подпись рядом. Линия — отрезком.
+  // Метки: знак или изображение на своём месте и высоте, подпись рядом.
+  // Линия — отрезком.
   const unknown = [];
+  const points = [];
   for (const mark of elevation.marks) {
     if (mark.heightMm === null) {
       unknown.push(mark);
       continue;
     }
-    const y = atY(mark.heightMm);
-    ctx.strokeStyle = mark.color;
-    ctx.fillStyle = mark.color;
     if (mark.kind === "line" && mark.toMm !== null) {
+      const y = atY(mark.heightMm);
+      ctx.strokeStyle = mark.color;
+      ctx.fillStyle = mark.color;
       ctx.lineWidth = 2.5 * unit;
       ctx.beginPath();
       ctx.moveTo(atX(mark.fromMm), y);
@@ -20656,9 +21502,32 @@ function drawElevation(ctx, elevation, box, options = {}) {
       );
       continue;
     }
-    const x = atX(mark.fromMm);
-    drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
-    elevationText(ctx, mark.label + " · " + mark.heightMm, x, y - 13 * unit, "center", unit);
+    points.push(mark);
+  }
+
+  // Точечные метки идут **рядами**: группа — один ряд (таск 135, G190 и
+  // G191). См. `elevationRows`.
+  for (const row of elevationRows(points)) {
+    const boxes = row.members.map((mark) => elevationMarkBox(mark, scale, unit, options.icons === true));
+    const width = boxes.reduce((sum, box) => sum + box.width, 0);
+    let x = atX(row.centreMm) - width / 2;
+    let top = Infinity;
+    row.members.forEach((mark, index) => {
+      const box = boxes[index];
+      const y = atY(mark.heightMm);
+      const icon = box.icon;
+      if (icon) {
+        drawIcon(ctx, icon, { x, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
+      } else {
+        drawShape(ctx, mark.shape, x + box.width / 2, y, 9 * unit, mark.color);
+      }
+      top = Math.min(top, y - box.height / 2);
+      x += box.width;
+    });
+    // Одна отметка высоты на ряд, по нижнему объекту (G191): «2 блока розеток
+    // мы в одну группу не собираем, это всегда 2 группы разных», — значит у
+    // ряда высота и правда одна, и повторять её у каждого подрозетника незачем.
+    elevationText(ctx, row.label + " · " + row.heightMm, atX(row.centreMm), top - 7 * unit, "center", unit);
   }
 
   // Метки без высоты — полосой под полом: на стене им места нет, но и
@@ -21313,6 +22182,13 @@ const appState = {
   // тому, кто размечает поверх своего чертежа и не хочет, чтобы полоса
   // выезжала от промаха мимо метки.
   elevationShown: true,
+  // Изображения объектов на развёртке вместо условных знаков (таск 135,
+  // G187). Заказчик предложил и место для отметки — «можно прямо на окне с
+  // развёрткой», — и она там и стоит.
+  //
+  // Умолчание — показаны: ради этого таск и затеян («что бы схема была уже
+  // живая»), а отметка нужна тому, кто хочет прежний лист со знаками.
+  elevationIcons: true,
   // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
   // встречать пользователя дугами поверх плана никто не просил.
   linksShown: false,
@@ -21351,6 +22227,8 @@ const PLAN_SETTING = "schemePlanShown";
 const DRAWING_SETTING = "schemeDrawingShown";
 // Полоса развёртки выделенной стены — третий выключатель того же ряда.
 const ELEVATION_SETTING = "schemeElevationShown";
+// Изображения объектов на развёртке — такая же личная настройка браузера.
+const ELEVATION_ICONS_SETTING = "elevationIcons";
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -21548,6 +22426,9 @@ function notify(message, kind = "info") {
 }
 
 function reportAppError(error) {
+  // Стек уходит в консоль, а человеку достаётся плашка: без стека такую
+  // ошибку ловят вслепую, а показывать его в плашке незачем.
+  if (typeof console !== "undefined" && console.error) console.error(error);
   notify(error && error.message ? error.message : String(error), "error");
 }
 
@@ -21810,6 +22691,11 @@ function wireSections() {
       if (saved === false) setState({ elevationShown: false });
     })
     .catch(() => {});
+  Promise.resolve(getSetting(ELEVATION_ICONS_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ elevationIcons: false });
+    })
+    .catch(() => {});
   // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище
   // ответит «показаны».
   Promise.resolve(getSetting(LINKS_SETTING))
@@ -21993,6 +22879,11 @@ function elevationNote(elevation) {
   if (empty) notes.push(strings.elevation.empty);
   const blind = elevation.marks.filter((mark) => mark.heightMm === null).length;
   if (blind > 0) notes.push(text("elevation.blind", { count: blind }));
+  // Высота, взятая у типа, — это **догадка сборки**, пусть и хорошая: правило
+  // объекта велит показывать её пользователю, а не выдавать за введённую
+  // (таск 135, G192). Поправил у метки — число перестало быть умолчанием.
+  const guessed = elevation.marks.filter((mark) => mark.heightMm !== null && mark.heightOwn === false).length;
+  if (guessed > 0) notes.push(text("elevation.guessed", { count: guessed }));
   return notes.join(" ");
 }
 
@@ -22000,7 +22891,7 @@ function elevationNote(elevation) {
  * Создать полосу. Возвращает `{node, update, destroy}`; вызывающий сам кладёт
  * `node` туда, где у него план, и зовёт `update` на каждой правке.
  */
-function createElevationStrip({ onSide, onClose }) {
+function createElevationStrip({ onSide, onClose, onIcons, icons }) {
   const canvas = uiEl("canvas", { class: "elev__canvas" });
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   const title = uiEl("span", { class: "elev__title" });
@@ -22012,18 +22903,38 @@ function createElevationStrip({ onSide, onClose }) {
       on: { click: () => onSide && onSide(side) },
     }),
   );
+  // Отметка «изображения» — на самом окне развёртки, как предложил заказчик
+  // (таск 135, G187: «можно прямо на окне с развёрткой»). Личная настройка
+  // браузера, как слои и шрифт схемы; в объект не попадает.
+  const iconsBox = uiEl("input", { type: "checkbox" });
+  iconsBox.checked = icons !== false;
+  iconsBox.addEventListener("change", () => onIcons && onIcons(iconsBox.checked));
+  const iconsRow = uiEl("label", { class: "elev__icons", title: strings.elevation.iconsHint }, [
+    iconsBox,
+    uiEl("span", { text: strings.elevation.icons }),
+  ]);
   const closeButton = uiIconButton("close", {
     title: strings.elevation.close,
     on: { click: () => onClose && onClose() },
   });
   const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
   const node = uiEl("div", { class: "elev" }, [
-    uiEl("div", { class: "elev__head" }, [title, ...sideButtons, closeButton]),
+    uiEl("div", { class: "elev__head" }, [title, iconsRow, ...sideButtons, closeButton]),
     stage,
     note,
   ]);
+  // **Полоса не отдаёт своё нажатие дальше** (дефект D24). На холсте она лежит
+  // в прозрачном для указателя слое, в мастерской — внутри поля чертежа, и во
+  // втором случае нажатие на кнопку всплывало бы в обработчик поля: клик по
+  // «Закрыть» ставил бы вершину стены. Правило одно и живёт у самой полосы —
+  // чинить это на каждой поверхности по-своему значило бы завести две разные
+  // починки одной беды.
+  for (const kind of ["pointerdown", "pointerup", "dblclick", "wheel"]) {
+    node.addEventListener(kind, (event) => event.stopPropagation());
+  }
   node.hidden = true;
   let shown = null;
+  let withIcons = icons !== false;
 
   function paint() {
     if (!ctx || !shown || node.hidden) return;
@@ -22037,14 +22948,18 @@ function createElevationStrip({ onSide, onClose }) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    drawElevation(ctx, shown, { x: 0, y: 0, width, height });
+    drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { icons: withIcons });
   }
 
   /**
    * Показать развёртку выделенной стены. `wallId` пустой — полоса прячется:
    * пустой развёртки на экране не бывает (G68).
    */
-  function update({ project, wallId, side, place, fieldHeight }) {
+  function update({ project, wallId, side, place, fieldHeight, icons: shownIcons }) {
+    if (shownIcons !== undefined) {
+      withIcons = shownIcons !== false;
+      iconsBox.checked = withIcons;
+    }
     const wall = wallId ? findWall(project, wallId) : null;
     if (!wall) {
       node.hidden = true;
@@ -25999,6 +26914,13 @@ function mountCanvasElevation(host, api) {
   const strip = createElevationStrip({
     onSide: (side) => api.setState({ wallSide: side }),
     onClose: () => api.setState({ selectedWallId: null }),
+    // Отметка живёт в настройках браузера, как слои и шрифт схемы: на одном
+    // компьютере смотрят картинками, на другом знаками, а объект один.
+    onIcons: (value) => {
+      api.setState({ elevationIcons: value });
+      setSetting(ELEVATION_ICONS_SETTING, value);
+    },
+    icons: api.getState().elevationIcons !== false,
   });
   host.append(strip.node);
 
@@ -26017,6 +26939,7 @@ function mountCanvasElevation(host, api) {
       side: state.wallSide,
       place: elevationPlace(canvasWallMiddleY(state), height),
       fieldHeight: height,
+      icons: state.elevationIcons !== false,
     });
   }
 
@@ -26025,6 +26948,7 @@ function mountCanvasElevation(host, api) {
       "selectedWallId" in changed ||
       "wallSide" in changed ||
       "elevationShown" in changed ||
+      "elevationIcons" in changed ||
       "project" in changed ||
       "schemeId" in changed ||
       "view" in changed ||
@@ -30065,6 +30989,10 @@ async function elevationSheetPng(project, elevations, page, layout, options = {}
       // порядок обхода контура, и на втором листе счёт продолжается.
       {
         unit,
+        // Отметка «изображения» уходит и в выгрузку — то же правило, что у
+        // слоёв чертежа (таск 127): лист обязан показывать то, что человек
+        // проверил на экране.
+        icons: options.icons !== false,
         scale: layout.scale * mm,
         label: text("elevationSheet.label", { index: index + 1, length: elevations[index].lengthMm }),
       },
@@ -33843,6 +34771,9 @@ function exportElevationDialog(api) {
       format: exportChoice.gostFormat,
       scale: exportChoice.schemeScale,
       mono: exportChoice.mono,
+      // Изображения объектов — то же правило, что у слоёв чертежа (таск 127):
+      // отметка с экрана уходит и в выгрузку, лист показывает проверенное.
+      icons: getState().elevationIcons !== false,
       building: roomName(),
       drawing: [scheme ? scheme.name : "", strings.elevationSheet.drawing].filter(Boolean).join(" · "),
       pdf: pdf === true,
@@ -34857,10 +35788,33 @@ function markSizesParse(raw) {
  * идёт через `canvasCommit`, и место у неё одно — там же, где остальные
  * правки строки.
  */
+/**
+ * То же окно, но для **умолчаний типа** (таск 135, требование G192): «для
+ * меток надо бы прописать дефолтные размеры, которые уже можно будет править».
+ *
+ * Второго окна не заводится нарочно: поля те же три, проверка та же, подпись
+ * та же. Разница только в заголовке и подсказке — и в том, что заполненное
+ * здесь метка наследует, пока не задала своё.
+ */
+function openTypeSizesPicker(project, typeId) {
+  const type = findType(project, typeId);
+  return openSizesPicker({
+    title: text("markSizes.typeTitle", { label: type ? type.code + " — " + type.name : "" }),
+    hint: strings.markSizes.typeHint,
+    current: typeSizes(type),
+  });
+}
 function openMarkSizesPicker(project, markId) {
+  const mark = findMark(project, markId);
+  return openSizesPicker({
+    title: text("markSizes.title", { label: labelOf(project, markId) }),
+    hint: strings.markSizes.hint,
+    current: markDimensions(mark),
+  });
+}
+
+function openSizesPicker({ title, hint, current }) {
   return new Promise((resolve) => {
-    const mark = findMark(project, markId);
-    const current = markDimensions(mark);
     const inputs = new Map();
     const error = uiEl("p", { class: "sizes__error" });
     error.hidden = true;
@@ -34903,9 +35857,9 @@ function openMarkSizesPicker(project, markId) {
     };
 
     modal = uiModal({
-      title: text("markSizes.title", { label: labelOf(project, markId) }),
+      title,
       body: uiEl("div", { class: "sizes" }, [
-        uiEl("p", { class: "modal__hint", text: strings.markSizes.hint }),
+        uiEl("p", { class: "modal__hint", text: hint }),
         ...rows,
         error,
       ]),
@@ -35971,6 +36925,27 @@ function openTypesDictionary(api) {
     commit((current) => deleteCategory(current, category.id).project, strings.history.removeCategory);
   }
 
+  /**
+   * Кнопка умолчаний размеров у типа. Подпись показывает заданное — так видно
+   * без открытия окна, у каких типов умолчания есть, а у каких нет.
+   */
+  function sizesButton(type) {
+    const sizes = typeSizes(type);
+    const summary = markSizesSummary(sizes);
+    const button = uiButton(summary || strings.markSizes.typeButton, {
+      class: "ui-btn dict__sizes" + (summary ? " is-set" : ""),
+      title: strings.markSizes.typeHint,
+      on: {
+        click: async () => {
+          const picked = await openTypeSizesPicker(project(), type.id);
+          if (!picked) return;
+          commit((current) => setTypeSizes(current, type.id, picked).project, strings.history.typeSizes);
+        },
+      },
+    });
+    return button;
+  }
+
   function typeRow(type, count) {
     const category = findCategory(project(), type.categoryId);
     const style = styleOf(project(), type.id);
@@ -36062,6 +37037,10 @@ function openTypesDictionary(api) {
         onChange: (value) =>
           commit((current) => updateType(current, type.id, { channels: value }).project, strings.history.editType),
       }),
+      // Умолчания размеров (таск 135, G192) — кнопкой, а не тремя полями в
+      // строке: строка типа и так собирает восемь полей, а числа заполняют
+      // один раз на тип и потом не трогают. Окно то же, что у размеров метки.
+      sizesButton(type),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -38332,6 +39311,8 @@ registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
 
 
+
+
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
 // экрана на миллиметр», и пороги притяжки, заданные в пикселях экрана, остаются
@@ -39202,6 +40183,11 @@ function openWorkshop({ schemeId, api }) {
   const strip = createElevationStrip({
     onSide: (side) => setState({ wallSide: side }),
     onClose: () => select(null),
+    onIcons: (value) => {
+      setState({ elevationIcons: value });
+      setSetting(ELEVATION_ICONS_SETTING, value);
+    },
+    icons: getState().elevationIcons !== false,
   });
   const node = uiEl("canvas", { class: "workshop__canvas" });
   // Поле забирает фокус по нажатию: иначе после правки толщины фокус остаётся
@@ -41235,6 +42221,7 @@ function openWorkshop({ schemeId, api }) {
       side: getState().wallSide,
       place: elevationPlace((a.y + b.y) / 2, box.height),
       fieldHeight: box.height,
+      icons: getState().elevationIcons !== false,
     });
   }
 
@@ -41288,7 +42275,7 @@ function openWorkshop({ schemeId, api }) {
       finish();
       return;
     }
-    if ("wallSide" in changed) sync();
+    if ("wallSide" in changed || "elevationIcons" in changed) sync();
     if ("project" in changed || "schemeImage" in changed) {
       // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
       if (selected && !aliveSelection()) selected = null;
