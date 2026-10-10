@@ -1365,7 +1365,7 @@ export async function elevationSheetPng(project, elevations, page, layout, optio
         // Отметка «изображения» уходит и в выгрузку — то же правило, что у
         // слоёв чертежа (таск 127): лист обязан показывать то, что человек
         // проверил на экране.
-        icons: options.icons !== false,
+        views: options.views !== false,
         scale: layout.scale * mm,
         label: text("elevationSheet.label", { index: index + 1, length: elevations[index].lengthMm }),
       },

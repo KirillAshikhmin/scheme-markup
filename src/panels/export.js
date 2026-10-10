@@ -1135,7 +1135,7 @@ function exportElevationDialog(api) {
       mono: exportChoice.mono,
       // Изображения объектов — то же правило, что у слоёв чертежа (таск 127):
       // отметка с экрана уходит и в выгрузку, лист показывает проверенное.
-      icons: getState().elevationIcons !== false,
+      views: getState().elevationViews !== false,
       building: roomName(),
       drawing: [scheme ? scheme.name : "", strings.elevationSheet.drawing].filter(Boolean).join(" · "),
       pdf: pdf === true,

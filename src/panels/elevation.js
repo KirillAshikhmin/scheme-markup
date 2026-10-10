@@ -81,7 +81,7 @@ export function elevationNote(elevation) {
  * Создать полосу. Возвращает `{node, update, destroy}`; вызывающий сам кладёт
  * `node` туда, где у него план, и зовёт `update` на каждой правке.
  */
-export function createElevationStrip({ onSide, onClose, onIcons, icons }) {
+export function createElevationStrip({ onSide, onClose, onViews, views }) {
   const canvas = uiEl("canvas", { class: "elev__canvas" });
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   const title = uiEl("span", { class: "elev__title" });
@@ -96,12 +96,12 @@ export function createElevationStrip({ onSide, onClose, onIcons, icons }) {
   // Отметка «изображения» — на самом окне развёртки, как предложил заказчик
   // (таск 135, G187: «можно прямо на окне с развёрткой»). Личная настройка
   // браузера, как слои и шрифт схемы; в объект не попадает.
-  const iconsBox = uiEl("input", { type: "checkbox" });
-  iconsBox.checked = icons !== false;
-  iconsBox.addEventListener("change", () => onIcons && onIcons(iconsBox.checked));
-  const iconsRow = uiEl("label", { class: "elev__icons", title: strings.elevation.iconsHint }, [
-    iconsBox,
-    uiEl("span", { text: strings.elevation.icons }),
+  const viewsBox = uiEl("input", { type: "checkbox" });
+  viewsBox.checked = views !== false;
+  viewsBox.addEventListener("change", () => onViews && onViews(viewsBox.checked));
+  const viewsRow = uiEl("label", { class: "elev__views", title: strings.elevation.viewsHint }, [
+    viewsBox,
+    uiEl("span", { text: strings.elevation.views }),
   ]);
   const closeButton = uiIconButton("close", {
     title: strings.elevation.close,
@@ -109,7 +109,7 @@ export function createElevationStrip({ onSide, onClose, onIcons, icons }) {
   });
   const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
   const node = uiEl("div", { class: "elev" }, [
-    uiEl("div", { class: "elev__head" }, [title, iconsRow, ...sideButtons, closeButton]),
+    uiEl("div", { class: "elev__head" }, [title, viewsRow, ...sideButtons, closeButton]),
     stage,
     note,
   ]);
@@ -124,7 +124,7 @@ export function createElevationStrip({ onSide, onClose, onIcons, icons }) {
   }
   node.hidden = true;
   let shown = null;
-  let withIcons = icons !== false;
+  let withViews = views !== false;
 
   function paint() {
     if (!ctx || !shown || node.hidden) return;
@@ -138,17 +138,17 @@ export function createElevationStrip({ onSide, onClose, onIcons, icons }) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { icons: withIcons });
+    drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { views: withViews });
   }
 
   /**
    * Показать развёртку выделенной стены. `wallId` пустой — полоса прячется:
    * пустой развёртки на экране не бывает (G68).
    */
-  function update({ project, wallId, side, place, fieldHeight, icons: shownIcons }) {
-    if (shownIcons !== undefined) {
-      withIcons = shownIcons !== false;
-      iconsBox.checked = withIcons;
+  function update({ project, wallId, side, place, fieldHeight, views: shownViews }) {
+    if (shownViews !== undefined) {
+      withViews = shownViews !== false;
+      viewsBox.checked = withViews;
     }
     const wall = wallId ? findWall(project, wallId) : null;
     if (!wall) {

@@ -50,7 +50,7 @@ import {
   wallsOnScheme,
 } from "./model.js";
 import { strings, text } from "./strings.js";
-import { drawIcon, iconByName, iconForShape } from "./icons/registry.js";
+import { drawObjectView, objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 
 export const SHAPES = SHAPE_NAMES;
 
@@ -4958,16 +4958,16 @@ function elevationText(ctx, value, x, y, align, unit) {
  * порядок обхода: без номера ряд чертежей читается как россыпь.
  */
 /**
- * Постоянный размер мелкого значка — в тех же единицах, что остальная
+ * Постоянный размер мелкого изображения — в тех же единицах, что остальная
  * развёртка (`unit`: 1 на экране, точек в миллиметре на бумаге).
  *
  * Двадцать две точки против восемнадцати у нынешнего знака: контуру нужно чуть
  * больше места, чем кругу с крестом, иначе две дырки розетки сливаются.
  */
-export const ELEVATION_ICON_PX = 22;
+export const ELEVATION_VIEW_PX = 22;
 
 /**
- * Граница между «значком» и «вещью в масштабе», в миллиметрах настоящего
+ * Граница между «уменьшённым изображением» и «вещью в масштабе», в миллиметрах настоящего
  * объекта (таск 135). Заказчик: «располагать их на схеме цветом метки и рядом
  * или прям поверх объекта, если большой» — то есть ответ разный, и граница
  * обязана быть названа числом.
@@ -4985,25 +4985,26 @@ export const ELEVATION_SCALE_MM = 300;
 /**
  * Прямоугольник метки на развёртке и значок, которым её рисовать.
  *
- * Крупная вещь рисуется **своим размером** в масштабе стены, мелкая — значком
+ * Крупная вещь рисуется **своим размером** в масштабе стены, мелкая —
+ * уменьшённым изображением
  * постоянного размера. Чистая и вынесена наружу: эта развилка — то самое
  * место, где легче всего соврать о размере, и проверяется она без холста.
  */
-export function elevationMarkBox(mark, scale, unit, icons) {
-  const icon = icons ? elevationIconOf(mark) : null;
+export function elevationMarkBox(mark, scale, unit, views) {
+  const view = views ? elevationViewOf(mark) : null;
   const size = mark.sizeMm || {};
-  const width = Number(size.width) || (icon ? icon.mm.width : 0);
-  const height = Number(size.height) || (icon ? icon.mm.height : 0);
-  const big = icon && (width >= ELEVATION_SCALE_MM || height >= ELEVATION_SCALE_MM);
-  if (big) return { icon, width: Math.max(1, width * scale), height: Math.max(1, height * scale), scaled: true };
-  const side = (icon ? ELEVATION_ICON_PX : 18) * unit;
-  const aspect = icon && width > 0 && height > 0 ? height / width : 1;
-  return { icon, width: side, height: side * Math.min(2, Math.max(0.5, aspect)), scaled: false };
+  const width = Number(size.width) || (view ? view.mm.width : 0);
+  const height = Number(size.height) || (view ? view.mm.height : 0);
+  const big = view && (width >= ELEVATION_SCALE_MM || height >= ELEVATION_SCALE_MM);
+  if (big) return { view, width: Math.max(1, width * scale), height: Math.max(1, height * scale), scaled: true };
+  const side = (view ? ELEVATION_VIEW_PX : 18) * unit;
+  const aspect = view && width > 0 && height > 0 ? height / width : 1;
+  return { view, width: side, height: side * Math.min(2, Math.max(0.5, aspect)), scaled: false };
 }
 
 /** Значок метки: имя у типа старше формы знака (см. `icons/registry.js`). */
-export function elevationIconOf(mark) {
-  return iconByName(mark.icon) || iconForShape(mark.shape);
+export function elevationViewOf(mark) {
+  return objectViewByName(mark.view) || objectViewForShape(mark.shape);
 }
 
 /**
@@ -5180,16 +5181,16 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   // Точечные метки идут **рядами**: группа — один ряд (таск 135, G190 и
   // G191). См. `elevationRows`.
   for (const row of elevationRows(points)) {
-    const boxes = row.members.map((mark) => elevationMarkBox(mark, scale, unit, options.icons === true));
+    const boxes = row.members.map((mark) => elevationMarkBox(mark, scale, unit, options.views === true));
     const width = boxes.reduce((sum, box) => sum + box.width, 0);
     let x = atX(row.centreMm) - width / 2;
     let top = Infinity;
     row.members.forEach((mark, index) => {
       const box = boxes[index];
       const y = atY(mark.heightMm);
-      const icon = box.icon;
-      if (icon) {
-        drawIcon(ctx, icon, { x, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
+      const view = box.view;
+      if (view) {
+        drawObjectView(ctx, view, { x, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
       } else {
         drawShape(ctx, mark.shape, x + box.width / 2, y, 9 * unit, mark.color);
       }

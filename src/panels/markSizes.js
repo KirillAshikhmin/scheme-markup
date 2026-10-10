@@ -13,6 +13,7 @@ import { strings, text } from "../strings.js";
 import {
   MARK_DIMENSION_FIELDS,
   MARK_DIMENSION_MAX,
+  MARK_DIMENSION_SIGNED,
   findMark,
   findType,
   labelOf,
@@ -63,7 +64,7 @@ export function markSizesParse(raw) {
   const invalid = [];
   for (const field of MARK_DIMENSION_FIELDS) {
     try {
-      values[field] = markDimensionValue(raw ? raw[field] : null);
+      values[field] = markDimensionValue(raw ? raw[field] : null, field);
     } catch (error) {
       values[field] = null;
       invalid.push({ field, message: error && error.message ? error.message : String(error) });
@@ -117,7 +118,14 @@ function openSizesPicker({ title, hint, current }) {
         type: "number",
         value: current[field] === null ? "" : String(current[field]),
         title: label,
-        attrs: { min: "0", max: String(MARK_DIMENSION_MAX), step: "1", inputmode: "decimal" },
+        // Выступ — единственное поле, которое принимает минус: утопленное
+        // (щит в нише) это та же ось и тот же ноль, просто в другую сторону.
+        attrs: {
+          min: String(MARK_DIMENSION_SIGNED.includes(field) ? -MARK_DIMENSION_MAX : 0),
+          max: String(MARK_DIMENSION_MAX),
+          step: "1",
+          inputmode: "decimal",
+        },
       });
       inputs.set(field, input);
       return uiEl("label", { class: "sizes__row" }, [
