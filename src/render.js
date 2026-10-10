@@ -2653,7 +2653,11 @@ function markStackHeightPlanBox(mark, shift, sizes, scheme) {
   if (across) {
     return { text: value, align: "center", x: cx - span / 2, y: cy - gap - tall, at: { x: cx, y: cy - gap - tall / 2 }, width: span, height: tall };
   }
-  return { text: value, align: "left", x: cx + gap, y: cy - tall / 2, at: { x: cx + gap, y: cy }, width: span, height: tall };
+  // **Слева, а не справа.** Справа от метки стоит её обозначение — заказчик
+  // просил именно так («не сверху справа, а просто справа»), и отнимать у
+  // подписи её сторону ради числа нельзя: подпись главная. Заодно справа
+  // живёт ручка «+», и соседняя метка по ней встаёт не поверх числа.
+  return { text: value, align: "right", x: cx - gap - span, y: cy - tall / 2, at: { x: cx - gap, y: cy }, width: span, height: tall };
 }
 
 // ——— подписи —————————————————————————————————————————————————————————

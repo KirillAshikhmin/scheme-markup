@@ -297,7 +297,9 @@ test("у каждого знака в стопке видна высота, а �
     const box = renderInternals.markStackHeightPlanBox(mark, stacks.get(id), sizes, built.scheme);
     const glyph = markStackPoints(mark, stacks)[0];
     assert.ok(Math.abs(box.at.y - glyph.y * HEIGHT) < 1e-6, "подпись высоты оторвалась от своего знака");
-    assert.ok(box.at.x > glyph.x * WIDTH, "подпись высоты легла на знак");
+    // Слева от знака: справа стоит обозначение метки, и сторону у него не
+    // отнимают — там же ручка «+», и соседняя метка встаёт не поверх числа.
+    assert.ok(box.x + box.width < glyph.x * WIDTH, "подпись высоты легла на знак или заняла сторону подписи");
   }
 });
 

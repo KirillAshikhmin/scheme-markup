@@ -582,8 +582,11 @@ test("подпись считается по тому же фильтру, чт�
     points: [{ x: 0.2, y: 0.4 }],
   }).project;
   // Вторая метка — прямо под первой: подпись соседа занимает то самое место
-  // справа, куда просится «ЛЕНТА1».
-  const added = addMark(project, { schemeId: base.schemeId, typeId: tape.type.id, points: [{ x: 0.2, y: 0.42 }] });
+  // справа, куда просится «ЛЕНТА1». Четырнадцать пикселей плана между центрами —
+  // нарочно дальше порога стопки (радиус знака, здесь 10): речь о том, как
+  // делят места **подписи**, а совпавшие по месту знаки разводит стопка, и
+  // тогда подписям делить было бы нечего (таск 131).
+  const added = addMark(project, { schemeId: base.schemeId, typeId: tape.type.id, points: [{ x: 0.2, y: 0.428 }] });
   project = added.project;
   const scheme = project.schemes[0];
   const view = viewOf();
@@ -592,10 +595,10 @@ test("подпись считается по тому же фильтру, чт�
   // Сосед виден — подписи делят места, и «ЛЕНТА1» отведена от своего места.
   const crowded = labelBox(project, scheme, added.mark, view, null);
   // Сосед скрыт — делить не с кем, подпись стоит где положено: справа от метки
-  // (200, 210) и на её уровне.
+  // (200, 214) и на её уровне.
   const free = labelBox(project, scheme, added.mark, view, shown);
   assert.equal(free.x, 200 + 10 * renderInternals.LABEL_GAP);
-  assert.equal(free.y, 210);
+  assert.equal(free.y, 214);
   // Отводится она влево от метки — место справа занял сосед.
   assert.notEqual(crowded.x, free.x, "пример не тот: без фильтра подпись никуда не отводится");
 
