@@ -4941,65 +4941,91 @@ function elevationText(ctx, value, x, y, align, unit) {
 }
 
 /**
- * Нарисовать развёртку в заданный прямоугольник.
+ * **Нижняя граница масштаба** изображения объекта — в тех же единицах, что
+ * остальная развёртка (`unit`: 1 на экране, точек в миллиметре на бумаге).
  *
- * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
- * вызывающий попадает мышью в то, что нарисовано, и по ней же выгрузка
- * проверяет, что обещанный масштаб настоящий.
+ * Дефект D25: «что-то масштаб меток слишком крупный на развёртке». Мелкая вещь
+ * рисовалась **постоянным размером** 22 точки независимо от длины стены. На
+ * стене восьми метров это выглядело нормально, а на стене 2100 масштаб
+ * развёртки крупный, и те же 22 точки оборачивались третью метра: розетка 80 мм
+ * выходила размером 250.
  *
- * `options.unit` — величина единицы полей и шрифта в точках холста: `1` на
- * экране, «точек в миллиметре × `ELEVATION_UNIT_MM`» на бумаге.
- * `options.scale` — **заданный** масштаб (точек холста на миллиметр объекта).
- * Без него развёртка вписывается в рамку сама; с ним она рисуется ровно тем
- * масштабом, который лист обещал в штампе: на одном листе их несколько, а
- * графа «Масштаб» у листа одна (G169).
- * `options.label` — подпись над чертежом. На экране её не надо (над полосой
- * стоит заголовок строкой), а на листе из нескольких развёрток она и есть
- * порядок обхода: без номера ряд чертежей читается как россыпь.
+ * Ошибка была в самой постановке: «мельче трёхсот миллиметров — рисуем
+ * постоянным размером». Правильная — **граница снизу**: рисуем в масштабе, но
+ * не мельче того, на чём вещь ещё узнаётся. Тогда развилки «крупное или
+ * мелкое» не нужно вовсе, и прежней `ELEVATION_SCALE_MM` больше нет: одно
+ * правило вместо двух.
+ *
+ * Тринадцать точек выбраны глазами, не арифметикой. Двадцать два — явно много
+ * (на короткой стене розетка в полтора подрозетника шириной), десять —
+ * контур розетки сливается в кружок с чёрточками. На тринадцати два отверстия
+ * розетки ещё различимы, а на стене 2100 розетка выходит почти в масштабе:
+ * восемьдесят миллиметров дают там около девяти точек, то есть подтягивать
+ * приходится в полтора раза, а не в три.
  */
-/**
- * Постоянный размер мелкого изображения — в тех же единицах, что остальная
- * развёртка (`unit`: 1 на экране, точек в миллиметре на бумаге).
- *
- * Двадцать две точки против восемнадцати у нынешнего знака: контуру нужно чуть
- * больше места, чем кругу с крестом, иначе две дырки розетки сливаются.
- */
-export const ELEVATION_VIEW_PX = 22;
+export const ELEVATION_VIEW_MIN_PX = 13;
 
 /**
- * Граница между «уменьшённым изображением» и «вещью в масштабе», в миллиметрах настоящего
- * объекта (таск 135). Заказчик: «располагать их на схеме цветом метки и рядом
- * или прям поверх объекта, если большой» — то есть ответ разный, и граница
- * обязана быть названа числом.
+ * Насколько подтянутой вещь может быть **молча**.
  *
- * Триста выбраны по тому, что по эту и ту сторону оказывается. Мельче: розетка
- * и выключатель 80, датчики 50–70, точка WiFi 120, панель управления 120 — всё
- * это на стене в 2700 мм занимает от трёх до пяти процентов высоты, то есть
- * обращается в точку, и рисовать их в масштабе значит не рисовать вовсе.
- * Крупнее: кондиционер 900 × 300, бризер и вытяжка 600, щит 450 × 600,
- * ресивер 430 — у этих вещей контур и есть ответ на вопрос «влезет ли», ради
- * которого на развёртку и смотрят.
+ * Подпись говорит, что мелочь нарисована крупнее своего масштаба, — иначе по
+ * картинке начнут мерить. Но подтяжка на сотую долю не меняет ни картинки, ни
+ * выводов по ней, а подпись, которая горит всегда, учит себя не читать:
+ * на полосе во весь экран розетка выходит в 12.5 точек при минимуме 13, и
+ * кричать об этих четырёх процентах значит обесценить то же слово там, где
+ * вещь нарисована втрое крупнее.
+ *
+ * Десятая доля — та граница, за которой разница видна глазом на самой
+ * картинке. Это мера **разговора**, а не рисования: на размер нарисованного
+ * она не влияет никак.
  */
-export const ELEVATION_SCALE_MM = 300;
+export const ELEVATION_GROWN_QUIET = 1.1;
 
 /**
- * Прямоугольник метки на развёртке и значок, которым её рисовать.
+ * Прямоугольник метки на развёртке и изображение, которым её рисовать.
  *
- * Крупная вещь рисуется **своим размером** в масштабе стены, мелкая —
- * уменьшённым изображением
- * постоянного размера. Чистая и вынесена наружу: эта развилка — то самое
- * место, где легче всего соврать о размере, и проверяется она без холста.
+ * Правило одно: **каждая сторона — своя в масштабе, но не меньше минимума**.
+ * Крупная вещь целиком своя (кондиционер 900 × 300 на любой стене), мелкая
+ * подтягивается до читаемой, а вещь между ними едет по масштабу без всякой
+ * развилки.
+ *
+ * Стороны подтягиваются **врозь**, и это не небрежность: вертикальная лента
+ * 40 × 600 с сохранением пропорции выросла бы до двух метров высотой, лишь бы
+ * её толщина стала различимой. Врозь каждая сторона либо честна, либо стоит на
+ * минимуме, и нарисованной крупнее, чем `max(свой размер, минимум)`, вещь не
+ * бывает никогда. Поэтому и прежний зажим пропорции (от половины до двух)
+ * больше не нужен: границу держит сам минимум.
+ *
+ * `scaled` — обе стороны в масштабе, то есть вещь нарисована честно. По нему
+ * развёртка считает, о чём предупредить подписью: подтянутая вещь крупнее
+ * своего масштаба, и молчать об этом на листе, по которому размечают стену,
+ * нельзя.
+ *
+ * Чистая и вынесена наружу: эта развилка — то самое место, где легче всего
+ * соврать о размере, и проверяется она без холста.
  */
 export function elevationMarkBox(mark, scale, unit, views) {
   const view = views ? elevationViewOf(mark) : null;
+  // Без изображения рисуется условный знак, и размер у него свой, постоянный:
+  // знак не изображает вещь и масштаба не обещает.
+  if (!view) {
+    const side = 18 * unit;
+    return { view: null, width: side, height: side, scaled: false, grown: 1 };
+  }
   const size = mark.sizeMm || {};
-  const width = Number(size.width) || (view ? view.mm.width : 0);
-  const height = Number(size.height) || (view ? view.mm.height : 0);
-  const big = view && (width >= ELEVATION_SCALE_MM || height >= ELEVATION_SCALE_MM);
-  if (big) return { view, width: Math.max(1, width * scale), height: Math.max(1, height * scale), scaled: true };
-  const side = (view ? ELEVATION_VIEW_PX : 18) * unit;
-  const aspect = view && width > 0 && height > 0 ? height / width : 1;
-  return { view, width: side, height: side * Math.min(2, Math.max(0.5, aspect)), scaled: false };
+  const width = Number(size.width) || view.mm.width;
+  const height = Number(size.height) || view.mm.height;
+  const min = ELEVATION_VIEW_MIN_PX * unit;
+  const atScale = { width: width * scale, height: height * scale };
+  return {
+    view,
+    width: Math.max(min, atScale.width),
+    height: Math.max(min, atScale.height),
+    scaled: atScale.width >= min && atScale.height >= min,
+    // Во сколько раз нарисованное крупнее настоящего масштаба. Единица —
+    // честно; по этому числу подпись и решает, есть ли о чём говорить.
+    grown: Math.max(1, min / Math.max(1e-9, Math.min(atScale.width, atScale.height))),
+  };
 }
 
 /** Значок метки: имя у типа старше формы знака (см. `icons/registry.js`). */
@@ -5054,6 +5080,26 @@ export function elevationRows(marks) {
   });
 }
 
+/**
+ * Нарисовать развёртку в заданный прямоугольник.
+ *
+ * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
+ * вызывающий попадает мышью в то, что нарисовано, и по ней же выгрузка
+ * проверяет, что обещанный масштаб настоящий, — и `grown`: сколько вещей
+ * пришлось подтянуть до читаемого размера (дефект D25). Знает это только
+ * отрисовка: подтянута вещь или нет, зависит от масштаба, а масштаб
+ * известен здесь.
+ *
+ * `options.unit` — величина единицы полей и шрифта в точках холста: `1` на
+ * экране, «точек в миллиметре × `ELEVATION_UNIT_MM`» на бумаге.
+ * `options.scale` — **заданный** масштаб (точек холста на миллиметр объекта).
+ * Без него развёртка вписывается в рамку сама; с ним она рисуется ровно тем
+ * масштабом, который лист обещал в штампе: на одном листе их несколько, а
+ * графа «Масштаб» у листа одна (G169).
+ * `options.label` — подпись над чертежом. На экране её не надо (над полосой
+ * стоит заголовок строкой), а на листе из нескольких развёрток она и есть
+ * порядок обхода: без номера ряд чертежей читается как россыпь.
+ */
 export function drawElevation(ctx, elevation, box, options = {}) {
   if (!elevation) return null;
   const unit = options.unit > 0 ? options.unit : 1;
@@ -5081,6 +5127,30 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   // видимым, и на бумаге эта мера тоже измеряется единицами, а не точками.
   const thin = 2 * unit;
 
+  // Метки разбираются **до рисования**, а не по дороге: подпись над чертежом
+  // говорит, сколько вещей пришлось подтянуть до читаемого размера (дефект
+  // D25), а стоит она в самом верху — считать это после было бы поздно.
+  const unknown = [];
+  const points = [];
+  const lines = [];
+  for (const mark of elevation.marks) {
+    if (mark.heightMm === null) unknown.push(mark);
+    else if (mark.kind === "line" && mark.toMm !== null) lines.push(mark);
+    else points.push(mark);
+  }
+  // Точечные метки идут **рядами**: группа — один ряд (таск 135, G190 и
+  // G191). См. `elevationRows`.
+  const rows = elevationRows(points).map((row) => ({
+    ...row,
+    boxes: row.members.map((mark) => elevationMarkBox(mark, scale, unit, options.views === true)),
+  }));
+  // Знак без изображения не считается подтянутым: он и не обещал масштаба.
+  // Подтяжка меньше десятой доли — молча (см. `ELEVATION_GROWN_QUIET`).
+  const grown = rows.reduce(
+    (sum, row) => sum + row.boxes.filter((box) => box.view && box.grown > ELEVATION_GROWN_QUIET).length,
+    0,
+  );
+
   ctx.save();
   ctx.font = drawFont(ELEVATION_FONT * unit, 600);
   ctx.textBaseline = "middle";
@@ -5088,7 +5158,11 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   // Подпись — в верхнем поле рамки и по левому краю поля, а не над самой
   // стеной: короткая стена стоит по середине, и подписи ряда разъехались бы.
   if (options.label) {
-    elevationText(ctx, options.label, inner.x, box.y + (ELEVATION_PAD.top / 2) * unit, "left", unit);
+    // Приписка о подтянутых вещах едет **с подписью**, а не только в полосу на
+    // экране: размечают стену по листу, и на листе графа «Масштаб» одна, а
+    // мелочь на нём крупнее своего масштаба (дефект D25).
+    const said = grown > 0 ? options.label + " · " + text("elevationSheet.grown", { count: grown }) : options.label;
+    elevationText(ctx, said, inner.x, box.y + (ELEVATION_PAD.top / 2) * unit, "left", unit);
   }
 
   // Поле стены.
@@ -5149,39 +5223,27 @@ export function drawElevation(ctx, elevation, box, options = {}) {
 
   // Метки: знак или изображение на своём месте и высоте, подпись рядом.
   // Линия — отрезком.
-  const unknown = [];
-  const points = [];
-  for (const mark of elevation.marks) {
-    if (mark.heightMm === null) {
-      unknown.push(mark);
-      continue;
-    }
-    if (mark.kind === "line" && mark.toMm !== null) {
-      const y = atY(mark.heightMm);
-      ctx.strokeStyle = mark.color;
-      ctx.fillStyle = mark.color;
-      ctx.lineWidth = 2.5 * unit;
-      ctx.beginPath();
-      ctx.moveTo(atX(mark.fromMm), y);
-      ctx.lineTo(atX(mark.toMm), y);
-      ctx.stroke();
-      elevationText(
-        ctx,
-        mark.label + " · " + mark.heightMm,
-        (atX(mark.fromMm) + atX(mark.toMm)) / 2,
-        y - 9 * unit,
-        "center",
-        unit,
-      );
-      continue;
-    }
-    points.push(mark);
+  for (const mark of lines) {
+    const y = atY(mark.heightMm);
+    ctx.strokeStyle = mark.color;
+    ctx.fillStyle = mark.color;
+    ctx.lineWidth = 2.5 * unit;
+    ctx.beginPath();
+    ctx.moveTo(atX(mark.fromMm), y);
+    ctx.lineTo(atX(mark.toMm), y);
+    ctx.stroke();
+    elevationText(
+      ctx,
+      mark.label + " · " + mark.heightMm,
+      (atX(mark.fromMm) + atX(mark.toMm)) / 2,
+      y - 9 * unit,
+      "center",
+      unit,
+    );
   }
 
-  // Точечные метки идут **рядами**: группа — один ряд (таск 135, G190 и
-  // G191). См. `elevationRows`.
-  for (const row of elevationRows(points)) {
-    const boxes = row.members.map((mark) => elevationMarkBox(mark, scale, unit, options.views === true));
+  for (const row of rows) {
+    const boxes = row.boxes;
     const width = boxes.reduce((sum, box) => sum + box.width, 0);
     let x = atX(row.centreMm) - width / 2;
     let top = Infinity;
@@ -5258,7 +5320,7 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
   ctx.restore();
-  return { x: left, y: floor - wallHeight, width: wallWidth, height: wallHeight, scale };
+  return { x: left, y: floor - wallHeight, width: wallWidth, height: wallHeight, scale, grown };
 }
 
 export function drawScheme(ctx, {

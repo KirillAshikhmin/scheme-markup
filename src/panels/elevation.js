@@ -59,8 +59,17 @@ export function elevationTitle(elevation) {
   return parts.join(" · ");
 }
 
-/** Что сказать под развёрткой: про высоту и про пустую стену. */
-export function elevationNote(elevation) {
+/**
+ * Что сказать под развёрткой: про высоту, про пустую стену и про вещи,
+ * подтянутые до читаемого размера.
+ *
+ * `drawn` — то, что вернула отрисовка (`render.drawElevation`). Подтянута вещь
+ * или нет, зависит от масштаба развёртки, а масштаб знает только отрисовка:
+ * одна и та же розетка на короткой стене нарисована почти в масштабе, а на
+ * длинной — крупнее. Поэтому эта часть подписи приходит оттуда, а не считается
+ * заново по данным (дефект D25).
+ */
+export function elevationNote(elevation, drawn) {
   if (!elevation) return "";
   const notes = [];
   if (!elevation.heightKnown) notes.push(text("elevation.noHeight", { height: elevation.heightShownMm }));
@@ -74,6 +83,8 @@ export function elevationNote(elevation) {
   // (таск 135, G192). Поправил у метки — число перестало быть умолчанием.
   const guessed = elevation.marks.filter((mark) => mark.heightMm !== null && mark.heightOwn === false).length;
   if (guessed > 0) notes.push(text("elevation.guessed", { count: guessed }));
+  const grown = drawn && drawn.grown > 0 ? drawn.grown : 0;
+  if (grown > 0) notes.push(text("elevation.grown", { count: grown }));
   return notes.join(" ");
 }
 
@@ -138,7 +149,17 @@ export function createElevationStrip({ onSide, onClose, onViews, views }) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { views: withViews });
+    const drawn = drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { views: withViews });
+    // Подпись дописывается **после** рисования: сколько вещей подтянуто до
+    // читаемого размера, известно только от масштаба, а масштаб развёртка
+    // подбирает сама по своему полю (дефект D25). Поле меняется — меняется и
+    // приписка, потому что `paint` зовётся и на каждой смене размера.
+    setNote(drawn);
+  }
+
+  function setNote(drawn) {
+    note.textContent = shown ? elevationNote(shown, drawn) : "";
+    note.hidden = note.textContent === "";
   }
 
   /**
@@ -164,8 +185,9 @@ export function createElevationStrip({ onSide, onClose, onViews, views }) {
     node.classList.toggle("elev--bottom", place !== "top");
     node.style.setProperty("--elev-height", Math.round(elevationHeight(fieldHeight)) + "px");
     title.textContent = elevationTitle(shown);
-    note.textContent = elevationNote(shown);
-    note.hidden = note.textContent === "";
+    // Без приписки о подтянутых вещах: её допишет `paint` ниже, когда масштаб
+    // станет известен. Здесь — чтобы полоса не мелькала пустой подписью.
+    setNote(null);
     sideButtons.forEach((button, index) => {
       button.className = "ui-btn elev__side" + (WALL_SIDES[index] === view ? " is-on" : "");
     });
