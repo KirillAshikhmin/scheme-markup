@@ -69,6 +69,11 @@ import {
   updateOutline,
 } from "./model.js";
 import {
+  ROOM_TRACE_AREA_MAX_MM2,
+  ROOM_TRACE_AREA_MIN_MM2,
+  roomTraceAt,
+} from "./roomTrace.js";
+import {
   drawHandles,
   drawScheme,
   drawingBridge,
@@ -252,6 +257,15 @@ function canvasViewOnly() {
 // для него стоит там же, где сама схема.
 export const CANVAS_MODE_SCALE = "scale";
 
+// ——— помещение по чертежу: имя режима ————————————————————————————————
+//
+// Пятый режим холста, и тоже короткоживущий: рука показывает **одну** точку
+// внутри комнаты, контур находится по стенам, и режим сам возвращается в
+// «Выделение» — с выделенным контуром, чтобы вершины сразу были под рукой.
+// Включает его панель помещений: помещение принадлежит ей, и вторая дверь в
+// этот режим не нужна.
+export const CANVAS_MODE_ROOM_TRACE = "roomTrace";
+
 /**
  * Режимы, у которых **нет своей кнопки** в ряду «Режим», — и потому о входе в
  * них говорит плашка (таск 133).
@@ -268,6 +282,7 @@ export const CANVAS_MODE_SCALE = "scale";
  */
 export const CANVAS_MODE_NOTES = {
   room: strings.canvas.modeRoomSaid,
+  roomTrace: strings.canvas.modeRoomTraceSaid,
   scale: strings.scale.started,
 };
 
@@ -353,6 +368,57 @@ export function canvasStartScale(schemeId) {
   });
 }
 
+/**
+ * Включить определение помещения по чертежу — **единственная дверь в режим**
+ * (таск 138), как `canvasStartScale` у калибровки.
+ *
+ * Выделение снимается здесь же: ручки выделенной метки висят над планом и
+ * отобрали бы клик у точки, которую человек показывает внутри комнаты.
+ */
+export function canvasStartRoomTrace(roomId) {
+  canvasApi.setState({
+    activeRoomId: roomId,
+    selectedMarkIds: [],
+    selectedOutlineId: null,
+    editPathId: null,
+    mode: CANVAS_MODE_ROOM_TRACE,
+  });
+}
+
+/**
+ * Отказ автоопределения словами. Чистая функция от объекта и ответа
+ * `roomTraceAt`: шесть причин, и каждая называет, что делать дальше.
+ *
+ * Карта явная, а не `strings.roomTrace[reason]`: склеенный на лету ключ
+ * выходит пользователю строкой «roomTrace.foo», и проверка словаря таких
+ * разделов не сканирует.
+ */
+const CANVAS_ROOM_TRACE_SAID = {
+  noWalls: strings.roomTrace.noWalls,
+  noBridge: strings.roomTrace.noBridge,
+  inWall: strings.roomTrace.inWall,
+  open: strings.roomTrace.open,
+};
+
+export function canvasRoomTraceSaid(project, result) {
+  const reason = result ? result.reason : null;
+  if (reason === "taken") {
+    const room = result.roomId ? findRoom(project, result.roomId) : null;
+    return room ? text("roomTrace.taken", { name: room.name }) : strings.roomTrace.takenUnnamed;
+  }
+  if (reason === "tooSmall") {
+    return text("roomTrace.tooSmall", { min: formatMeters(ROOM_TRACE_AREA_MIN_MM2 / 1e6) });
+  }
+  if (reason === "tooBig") {
+    return text("roomTrace.tooBig", {
+      area: formatMeters((result.areaMm2 || 0) / 1e6),
+      max: formatMeters(ROOM_TRACE_AREA_MAX_MM2 / 1e6),
+    });
+  }
+  if (reason === "tooComplex") return text("roomTrace.tooComplex", { count: result.points || 0 });
+  return CANVAS_ROOM_TRACE_SAID[reason] || strings.roomTrace.noWalls;
+}
+
 // Цвет отрезка калибровки. Он не часть чертежа и ничьим типом не окрашен —
 // поэтому свой, тот же синий, которым холст рисует всё «служебное».
 const CANVAS_SCALE_COLOR = "#0969da";
@@ -362,7 +428,8 @@ const CANVAS_SCALE_COLOR = "#0969da";
 // ручка под курсором отобрала бы у него клик. Одно правило на рисование и на
 // попадание — разойдись они, пользователь нажимал бы на то, чего не видит.
 function canvasHandlesShown(state) {
-  return canvasEditAllowed(state) && state.mode !== CANVAS_MODE_SCALE;
+  if (!canvasEditAllowed(state)) return false;
+  return state.mode !== CANVAS_MODE_SCALE && state.mode !== CANVAS_MODE_ROOM_TRACE;
 }
 
 // ——— что ставит режим добавления ——————————————————————————————————————
@@ -409,6 +476,9 @@ export function canvasHintText(state) {
   // Калибровка — поверх всего остального: рука в этот момент занята отрезком,
   // и про метки с помещениями рассказывать нечего.
   if (state.mode === CANVAS_MODE_SCALE) return strings.scale.hint;
+  if (state.mode === CANVAS_MODE_ROOM_TRACE) {
+    return text("canvas.hintRoomTrace", { name: room ? room.name : "" });
+  }
   if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
   const adding = canvasAddKind(state);
   if (adding === "point" && type) {
@@ -609,8 +679,10 @@ let canvasHoverHandle = null;
 // которую сам только что и поставил (первый клик ставит, второй попадает уже
 // по ней). Смотри `canvasDoubleClick`.
 let canvasFreshVertex = null;
-// Столько времени вершина считается «только что поставленной».
-const CANVAS_FRESH_VERTEX_MS = 600;
+// Столько времени вершина считается «только что поставленной». Наружу отдана
+// мастерской (таск 137): полосу объекта там правят той же рукой, и окно, которое
+// считало бы вершину свежей другое время, вело бы себя иначе на том же жесте.
+export const CANVAS_FRESH_VERTEX_MS = 600;
 
 function canvasNow() {
   const clock = typeof performance === "object" && performance !== null ? performance : null;
@@ -720,8 +792,21 @@ function canvasViewOf(state) {
   // объектными размерами: это выбор глаз из личных настроек браузера, в объект
   // он не попадает. Выгрузка собирает свой `view` сама и этого поля не кладёт,
   // поэтому на бумагу уходит чертёжный шрифт независимо от настройки (G172).
-  return { ...state.view, markSize: sizes.markSize, labelSize: sizes.labelSize, fontKind: state.schemeFont };
+  // Поля кладутся, только когда они у объекта есть. Иначе `undefined`
+  // перебивает умолчание `render` — у объекта, собранного мимо
+  // `createProject` (чужой файл, сборка руками), `markRadius` отвечал `NaN`,
+  // и обводка контура переставала замыкаться двойным кликом: порог «клик по
+  // первой вершине» считается от радиуса. Найдено исполнителем таска 138.
+  const view = { ...state.view, fontKind: state.schemeFont };
+  if (sizes.markSize !== undefined) view.markSize = sizes.markSize;
+  if (sizes.labelSize !== undefined) view.labelSize = sizes.labelSize;
+  return view;
 }
+
+// Внутренности холста, открытые тестам. Приём тот же, что у `renderInternals`:
+// функции остаются частными, но проверяемыми — иначе правило «поле кладётся,
+// только когда оно есть» держалось бы на комментарии.
+export const canvasInternals = { viewOf: canvasViewOf };
 
 function canvasScheme(state) {
   return state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
@@ -1862,6 +1947,49 @@ function canvasOutlineClick(plan, screen, free) {
   canvasDraftClick(plan, screen, free);
 }
 
+/**
+ * Клик в режиме «по чертежу»: контур ищется по стенам и сразу кладётся
+ * помещению. Один клик — один контур, черновика здесь нет вовсе.
+ *
+ * Дальше всё как у обведённого рукой: режим возвращается в «Выделение», контур
+ * выделен, вершины под рукой. Отмена — тот же Ctrl+Z, потому что запись идёт
+ * через `canvasCommit`, второй дороги к объекту нет.
+ */
+function canvasRoomTraceClick(plan) {
+  const state = canvasState();
+  if (!state.activeRoomId || !findRoom(state.project, state.activeRoomId)) {
+    canvasApi.notify(strings.canvas.needRoom);
+    return;
+  }
+  const found = roomTraceAt(state.project, state.schemeId, plan);
+  if (!found.ok) {
+    canvasApi.notify(canvasRoomTraceSaid(state.project, found), "error");
+    return;
+  }
+  try {
+    const made = addOutline(state.project, {
+      schemeId: state.schemeId,
+      roomId: state.activeRoomId,
+      points: found.points,
+    });
+    canvasCommit(state.project, made.project, strings.history.addOutlineTraced, {
+      selection: [],
+      patch: { mode: "select", selectedOutlineId: made.outline.id },
+    });
+    // Площадь вслух: по ней сразу видно, попала ли заливка в комнату или
+    // ушла через дверь в коридор. Числа у этой кнопки — единственная проверка,
+    // которую человек может сделать не глядя на план.
+    canvasApi.notify(
+      text("roomTrace.found", {
+        area: formatMeters(found.areaMm2 / 1e6),
+        count: found.points.length,
+      }),
+    );
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
 function canvasDraftClick(plan, screen, free) {
   const state = canvasState();
   if (!canvasDraft) {
@@ -2453,6 +2581,9 @@ export function canvasTapKind(state, pick = {}) {
   // точку отрезка, и ручка выделенной метки под пальцем не должна отбирать
   // жест у масштаба.
   if (state && state.mode === CANVAS_MODE_SCALE) return "scalePoint";
+  // Определение по чертежу забирает тап так же и ровно затем же: рука
+  // показывает точку внутри комнаты, и ручка метки под пальцем отобрала бы её.
+  if (state && state.mode === CANVAS_MODE_ROOM_TRACE) return "roomTrace";
   if (pick.labelTurn) return "labelTurn";
   if (pick.labelLeader) return "labelLeader";
   // Ручка вершины — для переноса, а не для тапа: тапом по ней мышь тоже ничего
@@ -2478,7 +2609,7 @@ export function canvasTapKind(state, pick = {}) {
  */
 export function canvasGrabKind(state, pick = {}) {
   if (!canvasEditAllowed(state)) return null;
-  if (state.mode === CANVAS_MODE_SCALE) return null;
+  if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return null;
   if (state.mode === "room" || canvasAddKind(state) === "line") return null;
   if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "pathVertex" : "pathAdd";
   if (pick.markId) return pick.part === "label" ? "label" : "mark";
@@ -2719,6 +2850,7 @@ function canvasTouchUp(state, drag, point, cancelled) {
     );
   } else if (kind === "block") canvasBlockPoint(state.selectedMarkIds[0], pick.blockSide);
   else if (kind === "scalePoint") canvasScaleClick(plan, point, false);
+  else if (kind === "roomTrace") canvasRoomTraceClick(plan);
   else if (kind === "vertex") {
     if (state.mode === "room") canvasOutlineClick(plan, point, false);
     else canvasLineClick(plan, point, false);
@@ -2870,6 +3002,13 @@ function canvasPointerDown(event) {
   // затем, чтобы по ней откалибровать.
   if (editable && state.mode === CANVAS_MODE_SCALE) {
     canvasDrag = { kind: "scale", start: point, view: { ...state.view }, moved: false };
+    return;
+  }
+
+  // Показ точки внутри комнаты — тоже клик раньше всех ручек, и по той же
+  // причине. Жест начинается панорамой: план обязан листаться и здесь.
+  if (editable && state.mode === CANVAS_MODE_ROOM_TRACE) {
+    canvasDrag = { kind: "roomTrace", start: point, view: { ...state.view }, moved: false };
     return;
   }
 
@@ -3306,7 +3445,7 @@ function canvasPointerMove(event) {
   }
   // «scale» в этом списке не для красоты: отрезок калибровки берут во всю
   // стену, и между первой и второй точкой план приходится возить.
-  if (["pan", "empty", "place", "line", "room", "outline", "scale"].includes(canvasDrag.kind)) {
+  if (["pan", "empty", "place", "line", "room", "outline", "scale", "roomTrace"].includes(canvasDrag.kind)) {
     canvasApi.setState({
       view: {
         ...state.view,
@@ -3422,6 +3561,10 @@ function canvasPointerUp(event) {
     canvasScaleClick(plan, point, event.altKey);
     return;
   }
+  if (drag.kind === "roomTrace") {
+    canvasRoomTraceClick(plan);
+    return;
+  }
   if (drag.kind === "line") {
     canvasLineClick(plan, point, event.altKey);
     return;
@@ -3468,7 +3611,9 @@ function canvasDoubleAt(at, slack = 0) {
   if (!canvasEditAllowed(state)) return false;
   // В калибровке двойного жеста нет вовсе: два клика там — это две точки
   // отрезка, и ни замыкать, ни возвращать подпись на место сейчас нечего.
-  if (state.mode === CANVAS_MODE_SCALE) return false;
+  // В определении по чертежу его нет по той же причине: там всё решает один
+  // клик, и второй не должен приниматься за правку только что найденного.
+  if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return false;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   // Двойной клик по линейке ставит направляющую в точке клика — это второй
@@ -3915,7 +4060,7 @@ function mountCanvasHint(host, api) {
     // цвета нет вовсе: размечать там нечем.
     let color = "";
     if (canvasEditAllowed(state)) {
-      if (state.mode === "room" && room) color = room.color;
+      if ((state.mode === "room" || state.mode === CANVAS_MODE_ROOM_TRACE) && room) color = room.color;
       else if (type) color = styleOf(state.project, type.id).color;
     }
     hint.style.borderColor = color;

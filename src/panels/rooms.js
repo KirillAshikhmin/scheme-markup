@@ -20,7 +20,8 @@ import {
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton } from "./ui.js";
 import { colorPickerButton } from "./colorPicker.js";
-import { canvasCommit } from "../canvas.js";
+import { CANVAS_MODE_ROOM_TRACE, canvasCommit, canvasRoomTraceSaid, canvasStartRoomTrace } from "../canvas.js";
+import { roomTraceReady } from "../roomTrace.js";
 
 // Кнопка цвета помещения: открывает своё окно выбора. Занятыми в него уходят
 // и цвета соседних комнат, и цвета категорий: контуров на плане бывает
@@ -90,6 +91,25 @@ export function roomsAddAction(project, name) {
     : { kind: "create", roomId: null, name: trimmed };
 }
 
+/**
+ * Что делает кнопка «по чертежу»: `trace` — считать контур по стенам, `tell` —
+ * сказать, чего не хватает, `name` — попросить название, `scheme` — попросить
+ * план. Чистая функция, потому что проверок четыре и порядок у них важен:
+ * сперва то, что мешает **вообще**, потом то, что мешает **этому** помещению.
+ *
+ * Кнопка при этом не гасится и не прячется: «чертежа нет» — это не поломка, а
+ * состояние, у которого есть ответ, откуда чертёж берётся. Погашенная кнопка
+ * этот ответ сказать не может — нажатия у неё не бывает.
+ */
+export function roomsTraceAction(project, schemeId, name, ready) {
+  if (!project) return { kind: "none", roomId: null, name: "" };
+  if (!schemeId) return { kind: "scheme", roomId: null, name: "" };
+  if (ready && !ready.ok) return { kind: "tell", roomId: null, name: "", reason: ready.reason };
+  const action = roomsAddAction(project, name);
+  if (action.kind === "none") return { kind: "name", roomId: null, name: "" };
+  return { kind: action.kind === "draw" ? "trace" : "create", roomId: action.roomId, name: action.name };
+}
+
 // Что делает кнопка контура: нарисовать новый или править вершины прежнего.
 // Правка — это режим выбора с выделенным контуром: дальше вершины таскаются
 // на холсте, «+» на стенке добавляет, двойной клик убирает.
@@ -117,7 +137,14 @@ function mountRoomsPanel(host, api) {
     title: strings.rooms.addAndDrawHint,
     on: { click: () => addAndDraw() },
   });
-  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton]));
+  // Второй способ — рядом, а не вместо: без чертежа обводят руками, и этот
+  // порядок кнопок («обвести» первой) так и говорит.
+  const traceButton = uiButton(strings.rooms.addAndTrace, {
+    class: "ui-btn",
+    title: strings.rooms.addAndTraceHint,
+    on: { click: () => addAndTrace() },
+  });
+  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton, traceButton]));
 
   function project() {
     return getState().project;
@@ -137,7 +164,11 @@ function mountRoomsPanel(host, api) {
     const state = getState();
     if (!state.project) return;
     const action = roomsAddAction(state.project, input.value);
-    if (action.kind === "none") return;
+    // Пустое поле: прежде кнопка молчала, и нажатие выглядело поломкой.
+    if (action.kind === "none") {
+      notify(strings.rooms.needName);
+      return;
+    }
     if (action.kind === "draw") {
       input.value = "";
       startDrawing(action.roomId);
@@ -150,6 +181,42 @@ function mountRoomsPanel(host, api) {
         patch: drawPatch(created.room.id),
       });
       if (!state.schemeId) notify(strings.canvas.needScheme);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // Та же дорога, что у обводки, но заканчивается она одним кликом по комнате:
+  // режим холста ставит `canvasStartRoomTrace`, контур считает он же.
+  function addAndTrace() {
+    const state = getState();
+    const ready = state.project && state.schemeId ? roomTraceReady(state.project, state.schemeId) : null;
+    const action = roomsTraceAction(state.project, state.schemeId, input.value, ready);
+    if (action.kind === "none") return;
+    if (action.kind === "scheme") {
+      notify(strings.canvas.needScheme);
+      return;
+    }
+    // Чертежа нет — не молчим: сказано и чего не хватает, и откуда это берётся.
+    if (action.kind === "tell") {
+      notify(canvasRoomTraceSaid(state.project, action), "error");
+      return;
+    }
+    if (action.kind === "name") {
+      notify(strings.rooms.needName);
+      return;
+    }
+    if (action.kind === "trace") {
+      input.value = "";
+      canvasStartRoomTrace(action.roomId);
+      return;
+    }
+    try {
+      const created = addRoom(state.project, action.name);
+      input.value = "";
+      canvasCommit(state.project, created.project, strings.history.addRoom, {
+        patch: { activeRoomId: created.room.id, mode: CANVAS_MODE_ROOM_TRACE, selectedOutlineId: null },
+      });
     } catch (error) {
       fail(error);
     }
@@ -234,10 +301,19 @@ function mountRoomsPanel(host, api) {
       setSectionBadge(SECTION_IDS.rooms, "");
       input.disabled = true;
       addButton.disabled = true;
+      traceButton.disabled = true;
       return;
     }
     input.disabled = false;
     addButton.disabled = false;
+    traceButton.disabled = false;
+    // Чего не хватает чертежу — в подсказке кнопки, а не в её погашенном виде:
+    // так ответ виден до нажатия, а не только после.
+    const ready = state.schemeId ? roomTraceReady(state.project, state.schemeId) : null;
+    traceButton.title = ready && !ready.ok
+      ? canvasRoomTraceSaid(state.project, ready)
+      : strings.rooms.addAndTraceHint;
+    traceButton.classList.toggle("is-active", state.mode === CANVAS_MODE_ROOM_TRACE);
     const rows = roomsRows(state.project, state.schemeId);
     setSectionBadge(SECTION_IDS.rooms, rows.length || "");
     if (rows.length === 0) {
@@ -246,7 +322,8 @@ function mountRoomsPanel(host, api) {
     }
     list.replaceChildren(
       ...rows.map((row) => {
-        const drawing = state.mode === "room" && state.activeRoomId === row.room.id;
+        const drawing =
+          (state.mode === "room" || state.mode === CANVAS_MODE_ROOM_TRACE) && state.activeRoomId === row.room.id;
         const editing = Boolean(row.outlineId) && state.selectedOutlineId === row.outlineId;
         const action = roomsOutlineAction(row);
         return uiEl("div", { class: "rooms__row" + (drawing || editing ? " is-active" : "") }, [
