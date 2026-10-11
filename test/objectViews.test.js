@@ -41,7 +41,14 @@ import {
 } from "../src/model.js";
 import { drawObjectView, objectViewByName, objectViewForShape, objectViewNames } from "../src/objectViews/registry.js";
 import { monoContext } from "../src/mono.js";
-import { ELEVATION_SCALE_MM, drawElevation, elevationViewOf, elevationMarkBox, elevationRows } from "../src/render.js";
+import {
+  ELEVATION_GROWN_QUIET,
+  ELEVATION_VIEW_MIN_PX,
+  drawElevation,
+  elevationViewOf,
+  elevationMarkBox,
+  elevationRows,
+} from "../src/render.js";
 
 // Холст-писец: записывает каждый вызов и каждое присваивание. Тем же приёмом
 // в таске 127 сверяли кадр чертежа — отпечаток контура снимается так же.
@@ -89,7 +96,14 @@ test("изображение берётся сперва у типа, потом
   assert.equal(elevationViewOf({ view: "чепуха", shape: "звезда" }), null);
 });
 
-test("крупная вещь — в масштабе стены, мелкая — уменьшённым изображением", () => {
+// ——— размер на развёртке (таск 140, дефект D25) ——————————————————————————
+//
+// Правило одно: **каждая сторона — своя в масштабе, но не меньше минимума**.
+// Прежних двух («мельче трёхсот миллиметров — постоянный размер, крупнее — свой»)
+// больше нет, и ровно из них вырос дефект: постоянные двадцать две точки на
+// короткой стене оборачивались третью метра.
+
+test("правило одно: вещь в масштабе, но не мельче минимума", () => {
   const scale = 0.05; // точек холста на миллиметр стены
   const unit = 1;
   // Кондиционер 900 × 300: в масштабе это 45 × 15 точек, и влезет он или нет
@@ -97,29 +111,100 @@ test("крупная вещь — в масштабе стены, мелкая �
   const big = elevationMarkBox({ shape: "circle-thermo", sizeMm: { width: 900, height: 300 } }, scale, unit, true);
   assert.equal(big.scaled, true);
   assert.ok(Math.abs(big.width - 45) < 1e-6 && Math.abs(big.height - 15) < 1e-6, JSON.stringify(big));
-  // Розетка 80 × 80: в масштабе это четыре точки — значок, а не вещь.
+  // Розетка 80 × 80: в масштабе это четыре точки — не видно ничего, и она
+  // подтягивается до минимума. Ровно до минимума, а не до чего-то своего.
   const small = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 80, height: 80 } }, scale, unit, true);
   assert.equal(small.scaled, false);
-  assert.ok(small.width > 80 * scale * 4, "мелкое рисуется читаемым, а не честной точкой");
-  // Граница названа числом и проверяется ею же.
+  assert.equal(small.width, ELEVATION_VIEW_MIN_PX * unit);
+  assert.equal(small.height, ELEVATION_VIEW_MIN_PX * unit);
+  // Развилки между ними нет: вещь, у которой в масштабе ровно минимум, честна,
+  // и ни одного числа в миллиметрах правило больше не знает.
   const edge = elevationMarkBox(
-    { shape: "circle-thermo", sizeMm: { width: ELEVATION_SCALE_MM, height: 100 } },
+    { shape: "circle-thermo", sizeMm: { width: ELEVATION_VIEW_MIN_PX / scale, height: ELEVATION_VIEW_MIN_PX / scale } },
     scale,
     unit,
     true,
   );
-  assert.equal(edge.scaled, true, "ровно на границе вещь уже рисуется своим размером");
-  const under = elevationMarkBox(
-    { shape: "circle-thermo", sizeMm: { width: ELEVATION_SCALE_MM - 1, height: 100 } },
-    scale,
-    unit,
-    true,
-  );
-  assert.equal(under.scaled, false);
-  // Отметка снята — ни одного значка, и размер тот же, что был до этого таска.
+  assert.equal(edge.scaled, true, "на самом минимуме вещь уже в масштабе");
+  assert.equal(edge.width, ELEVATION_VIEW_MIN_PX);
+  // Единица бумаги умножает минимум вместе со всем остальным: на листе
+  // различимость меряется тем же, чем поля и шрифт.
+  const paper = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 80, height: 80 } }, scale, 4, true);
+  assert.equal(paper.width, ELEVATION_VIEW_MIN_PX * 4);
+  // Отметка снята — ни одного изображения, и знак прежнего размера.
   const plain = elevationMarkBox({ shape: "circle-thermo", sizeMm: { width: 900, height: 300 } }, scale, unit, false);
   assert.equal(plain.view, null);
   assert.equal(plain.width, 18 * unit, "без отметки знак прежнего размера");
+});
+
+test("D25: на крупном масштабе розетка становится честной, а не остаётся значком", () => {
+  // Суть дефекта: прежде нарисованный размер **не зависел от масштаба стены**,
+  // и на короткой стене розетка выходила в треть метра. Теперь у неё есть
+  // масштаб, на котором она честна, — у постоянного размера такого не бывает.
+  const unit = 1;
+  const socket = { shape: "circle-socket", sizeMm: { width: 80, height: 80 } };
+  const drawnMm = (scale) => elevationMarkBox(socket, scale, unit, true).width / scale;
+  // Стена подлиннее — масштаб мельче: подтягивать приходится сильнее.
+  assert.ok(drawnMm(0.05) > drawnMm(0.1), "на крупном масштабе врать приходится меньше");
+  // И есть масштаб, на котором врать не приходится вовсе.
+  const honest = elevationMarkBox(socket, 0.2, unit, true);
+  assert.equal(honest.scaled, true);
+  assert.equal(honest.width, 16, "80 мм при 0.2 — шестнадцать точек, и подтягивать нечего");
+  // Прежнее правило дало бы здесь свои двадцать две точки, то есть 110 мм
+  // вместо восьмидесяти, и это ровно то, на что смотрел заказчик.
+  assert.ok(honest.width < 22, "постоянного размера больше нет");
+});
+
+test("во сколько раз подтянуто — число, и о сотых долях подпись молчит", () => {
+  const unit = 1;
+  const socket = { shape: "circle-socket", sizeMm: { width: 80, height: 80 } };
+  // В масштабе — ровно единица: врать не о чем.
+  assert.equal(elevationMarkBox(socket, 0.2, unit, true).grown, 1);
+  // Вчетверо мельче минимума — вчетверо и подтянуто.
+  const tiny = elevationMarkBox(socket, ELEVATION_VIEW_MIN_PX / 80 / 4, unit, true);
+  assert.ok(Math.abs(tiny.grown - 4) < 1e-9, "подтяжка считается числом: " + tiny.grown);
+  // Полоса во весь экран: розетка выходит в 12.5 точек при минимуме 13 —
+  // подтяжка в четыре сотых, и подпись о ней молчит, иначе будет гореть
+  // всегда и перестанет читаться там, где вещь крупнее втрое.
+  const near = elevationMarkBox(socket, 0.1557, unit, true);
+  assert.ok(near.grown > 1, "подтяжка всё-таки есть");
+  assert.ok(near.grown < ELEVATION_GROWN_QUIET, "о четырёх процентах подпись молчит: " + near.grown);
+  // Мера разговора на рисование не влияет: нарисовано всё равно по минимуму.
+  assert.equal(near.width, ELEVATION_VIEW_MIN_PX);
+});
+
+test("стороны подтягиваются врозь: тонкая вещь не вырастает в полстены", () => {
+  // Вертикальная лента 40 × 600. С сохранением пропорции подтягивание по
+  // тонкой стороне утроило бы и длинную: вместо шестидесяти четырёх точек
+  // почти двести — лента в два метра высотой на стене 2800.
+  const scale = 0.107;
+  const unit = 1;
+  const tape = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 40, height: 600 } }, scale, unit, true);
+  assert.equal(tape.width, ELEVATION_VIEW_MIN_PX, "тонкая сторона встала на минимум");
+  assert.ok(Math.abs(tape.height - 600 * scale) < 1e-6, "длинная сторона осталась своей: " + tape.height);
+  assert.equal(tape.scaled, false, "вещь подтянута — значит не в масштабе");
+});
+
+test("крупнее, чем свой размер или минимум, не бывает ни одна вещь справочника", () => {
+  // Единственное обещание, которое правило даёт: нарисованное не больше, чем
+  // `max(свой размер, минимум)`. Соврать о размере можно только в одну
+  // сторону — в сторону различимости, и ровно на столько, сколько ей нужно.
+  const template = defaultTemplate();
+  for (const unit of [1, 3.5]) {
+    for (const scale of [0.01, 0.05, 0.107, 0.3, 2]) {
+      for (const type of template.markTypes) {
+        const sizes = typeSizes(type);
+        const mark = { shape: styleOf({ markTypes: template.markTypes, categories: template.categories }, type.id).shape, view: type.view || type.icon, sizeMm: { width: sizes.length, height: sizes.width } };
+        const box = elevationMarkBox(mark, scale, unit, true);
+        if (!box.view) continue;
+        const min = ELEVATION_VIEW_MIN_PX * unit;
+        const where = type.code + " при масштабе " + scale + " и единице " + unit;
+        assert.ok(box.width <= Math.max(min, sizes.length * scale) + 1e-9, where + ": шире обещанного");
+        assert.ok(box.height <= Math.max(min, sizes.width * scale) + 1e-9, where + ": выше обещанного");
+        assert.ok(box.width >= min - 1e-9 && box.height >= min - 1e-9, where + ": мельче различимого");
+      }
+    }
+  }
 });
 
 test("подрозетники идут вплотную и одной высотой на ряд", () => {
@@ -308,7 +393,7 @@ test("в чёрно-белом развёртка идёт тушью, и кон
         },
       },
     );
-    drawElevation(wrap ? monoContext(base) : base, elevation, { x: 0, y: 0, width: 800, height: 300 }, { icons: true });
+    drawElevation(wrap ? monoContext(base) : base, elevation, { x: 0, y: 0, width: 800, height: 300 }, { views: true });
     return [...new Set(seen)];
   };
 

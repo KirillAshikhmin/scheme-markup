@@ -386,6 +386,36 @@ test("подпись над чертежом — номер по обходу, �
   assert.ok(!without.some((line) => line.indexOf("Стена 8000 мм") >= 0), "на экране подпись стоит строкой над полосой");
 });
 
+test("D25: подпись на листе говорит, что мелочь увеличена", () => {
+  // На листе графа «Масштаб» одна, а по чертежу размечают стену. Если розетку
+  // пришлось подтянуть до различимого размера, молчать об этом нельзя: линейка
+  // приложится к картинке и соврёт.
+  const made = scene();
+  const view = wallElevation(made.project, made.kitchenWalls[4], "right");
+  const box = { x: 0, y: 0, width: 900, height: 300 };
+  const log = [];
+  const drawn = drawElevation(scribe(log), view, box, { views: true, label: "7. Стена 8000 мм" });
+  assert.ok(drawn.grown > 0, "розетка 80 мм на стене восьми метров честной быть не может");
+  assert.ok(
+    log.some((line) => line.indexOf("мелкие вещи увеличены: " + drawn.grown) >= 0),
+    "приписки нет в подписи: " + log.filter((line) => line.indexOf("Стена 8000") >= 0).join(" | "),
+  );
+  // Масштаб крупный — приписки нет: говорить не о чем.
+  const honestLog = [];
+  const honest = drawElevation(scribe(honestLog), view, box, {
+    views: true,
+    scale: 0.4,
+    label: "7. Стена 8000 мм",
+  });
+  assert.equal(honest.grown, 0);
+  assert.ok(!honestLog.some((line) => line.indexOf("увеличены") >= 0), "сказано о том, чего нет");
+  // Знаки вместо изображений — тоже без приписки: знак масштаба не обещал.
+  const signsLog = [];
+  const signs = drawElevation(scribe(signsLog), view, box, { label: "7. Стена 8000 мм" });
+  assert.equal(signs.grown, 0);
+  assert.ok(!signsLog.some((line) => line.indexOf("увеличены") >= 0));
+});
+
 // Кисть со стопкой: `save`/`restore` работают по-настоящему, и видно, каким
 // цветом на самом деле проведена каждая линия.
 function strokeColors(elevation, box, options) {
