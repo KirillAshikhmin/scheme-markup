@@ -952,7 +952,10 @@ function mountSchemesPanel(host, api) {
    * не уходя с той, которую размечают.
    */
   function openVolumeView(schemeId) {
-    openVolume({ schemeId, api: { getState, notify, subscribe } });
+    // `setState` окну объёма нужен ровно на одно — выделение (таск 148): оно
+    // общее с планом и со списком меток. В объект объём по-прежнему не пишет
+    // ничего (G68), и шагов истории у него нет.
+    openVolume({ schemeId, api: { getState, setState, notify, subscribe } });
   }
 
   /**

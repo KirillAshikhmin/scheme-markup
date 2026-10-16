@@ -178,6 +178,38 @@ export function markCardShift(markY, cardTop, gap = MARK_CARD_GAP) {
   return markY > limit ? Math.round(markY - limit) : 0;
 }
 
+/**
+ * Карточка метки узлами: голова и поля. Вынесена из монтажа нарочно — ту же
+ * карточку показывает окно объёмного режима (таск 148, слова заказчика: «Да, и
+ * карточку»), и собирать её там второй раз значило бы завести вторую карточку,
+ * которая однажды разойдётся с этой полями или видом.
+ *
+ * Кнопку головы и хвост полей задаёт хозяин: на плане это сворачивание или
+ * крестик и строка правки комментария, в объёме — крестик, снимающий выделение.
+ */
+export function markCardParts(model, { headButton = null, extra = null } = {}) {
+  const head = uiEl("div", { class: "mark-card__head" }, [
+    uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 20)),
+    uiEl("span", { class: "mark-card__label", text: model.label }),
+    uiEl("span", { class: "mark-card__type", text: model.code + " — " + model.typeName }),
+    ...(headButton ? [headButton] : []),
+  ]);
+  const body = uiEl("div", { class: "mark-card__body" });
+  if (model.rows.length === 0 && !model.comment) {
+    body.append(uiEl("p", { class: "mark-card__empty", text: strings.markCard.empty }));
+  }
+  for (const row of model.rows) {
+    body.append(
+      uiEl("div", { class: "mark-card__row", title: row.title }, [
+        uiEl("span", { class: "mark-card__name", text: row.label }),
+        uiEl("span", { class: "mark-card__value", text: row.value }),
+      ]),
+    );
+  }
+  if (extra) body.append(extra);
+  return [head, body];
+}
+
 function mountMarkCard(host, api) {
   const { getState, setState, subscribe } = api;
   const card = uiEl("div", { class: "mark-card" });
@@ -244,50 +276,31 @@ function mountMarkCard(host, api) {
           attrs: { "aria-expanded": "true" },
           on: { click: () => flip(true) },
         });
-    const head = uiEl("div", { class: "mark-card__head" }, [
-      uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 20)),
-      uiEl("span", { class: "mark-card__label", text: model.label }),
-      uiEl("span", { class: "mark-card__type", text: model.code + " — " + model.typeName }),
-      headButton,
-    ]);
-    const body = uiEl("div", { class: "mark-card__body" });
-    if (model.rows.length === 0 && !model.comment) {
-      body.append(uiEl("p", { class: "mark-card__empty", text: strings.markCard.empty }));
-    }
-    for (const row of model.rows) {
-      body.append(
-        uiEl("div", { class: "mark-card__row", title: row.title }, [
-          uiEl("span", { class: "mark-card__name", text: row.label }),
-          uiEl("span", { class: "mark-card__value", text: row.value }),
-        ]),
-      );
-    }
     // Кнопка правки текста — только у комментария и только в правке: в
     // просмотре карточка ничего не меняет. На компьютере карточка сквозная для
     // мыши (`pointer-events: none`), но кнопки в ней клик ловят — ради них
     // исключение и сделано.
-    if (model.comment && layoutAllows("editMarks", state.layout)) {
-      body.append(
-        uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
-          uiButton(strings.markCard.editComment, {
-            class: "ui-btn mark-card__edit",
-            title: strings.markCard.editCommentHint,
-            on: { click: () => canvasEditCommentText(model.id) },
-          }),
-          uiEl("span", {
-            class: "mark-card__value mark-card__pointer",
-            text: model.pointer ? strings.markCard.pointerOn : strings.markCard.pointerOff,
-            // С указателем подсказка говорит о двух ручках: плашку и точку
-            // возят врозь (G199), и без слов об этом не узнать — точка мелкая
-            // и стоит на другом конце указателя. Без указателя разводить
-            // нечего, и подсказка остаётся прежней: вот кнопка, вот что она
-            // включает.
-            title: model.pointer ? strings.markCard.pointerHintOn : strings.markCard.pointerHint,
-          }),
-        ]),
-      );
-    }
-    card.replaceChildren(head, body);
+    const commentRow =
+      model.comment && layoutAllows("editMarks", state.layout)
+        ? uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
+            uiButton(strings.markCard.editComment, {
+              class: "ui-btn mark-card__edit",
+              title: strings.markCard.editCommentHint,
+              on: { click: () => canvasEditCommentText(model.id) },
+            }),
+            uiEl("span", {
+              class: "mark-card__value mark-card__pointer",
+              text: model.pointer ? strings.markCard.pointerOn : strings.markCard.pointerOff,
+              // С указателем подсказка говорит о двух ручках: плашку и точку
+              // возят врозь (G199), и без слов об этом не узнать — точка мелкая
+              // и стоит на другом конце указателя. Без указателя разводить
+              // нечего, и подсказка остаётся прежней: вот кнопка, вот что она
+              // включает.
+              title: model.pointer ? strings.markCard.pointerHintOn : strings.markCard.pointerHint,
+            }),
+          ])
+        : null;
+    card.replaceChildren(...markCardParts(model, { headButton, extra: commentRow }));
     // План подвигается только в просмотре: там карточка высокая и метка
     // действительно уходит под неё. На компьютере выделение случается на
     // каждый клик по метке, и сдвиг плана из-под руки — прямая дорога к

@@ -9,13 +9,18 @@
 //
 // ——— что это окно не делает ————————————————————————————————————————————
 //
-// **Ничего не пишет** (G68). Объёмный режим читает чертёж и только: ни правок,
-// ни шагов истории, ни новых полей. Открыть и закрыть его у любого объекта —
-// ноль изменений.
+// **В объект не пишет ничего** (G68). Объёмный режим читает чертёж и метки и
+// только: ни правок, ни шагов истории, ни новых полей. Открыть и закрыть его у
+// любого объекта — ноль изменений.
 //
-// Меток в нём пока нет (таск 148), этажей, лестницы, сенсорного управления и
-// снимка вида — тоже (таск 149). Разбито так нарочно: первый шаг можно
-// посмотреть глазами, не дожидаясь остального.
+// Единственное, что окно меняет наружу, — **выделение** (таск 148), и это не
+// оговорка к правилу, а другое место: выделенные метки живут в состоянии
+// сеанса рядом с масштабом и фильтром, в объект и в файл проекта они не
+// попадают никогда. Заказчик попросил прямо: «выделил в объёме — выделено и в
+// списке, и наоборот», — а два выделения, живущие врозь, и есть та потеря, от
+// которой он предостерегал.
+//
+// Этажей, лестницы, сенсорного управления и снимка вида здесь нет (таск 149).
 //
 // ——— окно открывается обзором ———————————————————————————————————————————
 //
@@ -24,8 +29,16 @@
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
 import { layoutAllows } from "../app.js";
-import { FULLSCREEN_EVENTS, canvasFullscreenLabel, canvasFullscreenOn, canvasFullscreenSupported, canvasFullscreenToggle } from "../canvas.js";
+import {
+  FULLSCREEN_EVENTS,
+  canvasFrameLinks,
+  canvasFullscreenLabel,
+  canvasFullscreenOn,
+  canvasFullscreenSupported,
+  canvasFullscreenToggle,
+} from "../canvas.js";
 import { findRoom, findScheme } from "../model.js";
+import { visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -33,6 +46,9 @@ import {
   VOLUME_EYE_MM,
   VOLUME_HEIGHT_FALLBACK_MM,
   VOLUME_LOOK_DEG_PX,
+  VOLUME_MARK_NO_PLACE,
+  VOLUME_MARK_NO_POINT,
+  VOLUME_MARK_NO_SIZE,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_RUN_MM_S,
   VOLUME_START_PITCH_DEG,
@@ -48,12 +64,18 @@ import {
   volumeDrawBackdrop,
   volumeFrame,
   volumeHorizon,
+  volumeLinkLines,
+  volumeMarkAnchor,
+  volumeMarkPlace,
   volumeMarkerFaces,
+  volumePickAt,
   volumeRoomAt,
   volumeScene,
+  volumeSelectLines,
   volumeStart,
   volumeStep,
 } from "../volume.js";
+import { markCardModel, markCardParts } from "./markCard.js";
 import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton, uiModal } from "./ui.js";
 
 // Окно одно: второе показывало бы ту же сцену второй камерой и сжирало бы
@@ -95,6 +117,49 @@ export function volumeWhere(project, scene, at) {
   return place;
 }
 
+/** Сколько неразмещённых меток окно называет по имени, прежде чем сказать «и ещё». */
+export const VOLUME_UNPLACED_SHOWN = 8;
+
+/** Почему вещь не встала в объём — словом. */
+export function volumeUnplacedReason(reason) {
+  if (reason === VOLUME_MARK_NO_SIZE) return strings.volume.unplacedNoSize;
+  if (reason === VOLUME_MARK_NO_POINT) return strings.volume.unplacedNoPoint;
+  return strings.volume.unplacedNoPlace;
+}
+
+/**
+ * Строка «не размещены» (таск 148).
+ *
+ * Заказчик решил прямо: метке, у которой нет ни привязки, ни высоты, места не
+ * выдумывать — но и терять её молча нельзя. Поэтому список стоит под полем,
+ * зовёт метки по обозначению и у каждой называет причину: по ней видно, чего
+ * не хватает объекту, а не сборке. Длинный список обрывается — все обозначения
+ * остаются в подсказке строки, а не выталкивают поле за край окна.
+ *
+ * Чистая и вынесена наружу: строку, собранную в обработчике кадра, не проверяет
+ * ничто.
+ */
+export function volumeUnplacedLine(unplaced) {
+  const list = unplaced || [];
+  if (list.length === 0) return "";
+  const named = list
+    .slice(0, VOLUME_UNPLACED_SHOWN)
+    .map((item) => text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) }));
+  if (list.length > VOLUME_UNPLACED_SHOWN) {
+    named.push(text("volume.unplacedMore", { count: list.length - VOLUME_UNPLACED_SHOWN }));
+  }
+  return text("volume.unplaced", { count: list.length, list: named.join(", ") });
+}
+
+/** Все неразмещённые по обозначениям — в подсказку строки, когда их много. */
+export function volumeUnplacedTitle(unplaced) {
+  const list = unplaced || [];
+  if (list.length <= VOLUME_UNPLACED_SHOWN) return "";
+  return list
+    .map((item) => text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) }))
+    .join(", ");
+}
+
 /** Строки про то, чего в сцене не хватает. Порядок — порядок важности. */
 export function volumeNotes(scene) {
   const lines = [];
@@ -108,12 +173,21 @@ export function volumeNotes(scene) {
 
 export function openVolume({ schemeId, api }) {
   if (volumeOpened) return null;
-  const { getState, notify, subscribe } = api;
+  const { getState, setState, notify, subscribe } = api;
   const project = getState().project;
   if (!findScheme(project, schemeId)) return null;
   volumeOpened = true;
 
-  let scene = volumeScene(project, schemeId);
+  // Метки берутся **видимые на плане**: фильтр спрятал метку на плане — её нет
+  // и в объёме. Иначе у одного объекта было бы два ответа на вопрос «что
+  // сейчас показано».
+  const sceneMarks = (state) => {
+    const scheme = findScheme(state.project, schemeId);
+    return scheme ? visibleMarks(state.project, scheme, state.filter) : [];
+  };
+  const sceneOf = (state) => volumeScene(state.project, schemeId, { marks: sceneMarks(state) });
+
+  let scene = sceneOf(getState());
   let view = "around";
   let closed = false;
   let frame = 0;
@@ -123,6 +197,12 @@ export function openVolume({ schemeId, api }) {
   let look = null; // перетаскивание мышью: {x, y}
   let locked = false;
   let denied = false;
+  // Последний кадр — он же ответ на «во что ткнули»: клик ищет метку в том, что
+  // человек видит, а не в сцене. Второго способа считать попадание не заводим.
+  let shown = [];
+  // Рамка выделения и стрелки связей. Пересобираются на правку объекта и на
+  // смену выделения, а не на кадр: на бегу их считать незачем, они не двигаются.
+  let overlay = [];
 
   const start = scene.empty ? { x: 0, y: 0, yaw: 0 } : volumeStart(scene);
   // Человек: место на плане, рысканье и наклон. Высота глаз постоянная —
@@ -132,7 +212,17 @@ export function openVolume({ schemeId, api }) {
   let around = { target: { x: start.x, y: start.y, z: 1200 }, yaw: start.yaw, pitch: (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180, distance: VOLUME_AROUND_NEAR_MM };
 
   const node = uiEl("canvas", { class: "volume__canvas" });
-  const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [node]);
+  // Карточка выделенной метки — внизу поверх поля, ровно так же, как она стоит
+  // внизу поверх плана (заказчик: «Да, и карточку»). Собирается тем же
+  // `markCardParts` и из той же `markCardModel`: второй правды о метке в сборке
+  // быть не должно.
+  const cardClose = uiIconButton("close", {
+    class: "ui-btn mark-card__close",
+    label: strings.volume.cardClose,
+    on: { click: () => select(null) },
+  });
+  const card = uiEl("div", { class: "mark-card mark-card--volume", attrs: { hidden: "hidden" } });
+  const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [node, card]);
   const ctx = node.getContext ? node.getContext("2d") : null;
 
   const personButton = uiButton(strings.volume.viewPerson, {
@@ -150,6 +240,7 @@ export function openVolume({ schemeId, api }) {
   });
   const where = uiEl("span", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
+  const missing = uiEl("p", { class: "volume__missing" });
   const hint = uiEl("p", { class: "modal__hint" });
 
   const bar = uiEl("div", { class: "volume__tools" }, [
@@ -159,7 +250,7 @@ export function openVolume({ schemeId, api }) {
     where,
     uiEl("span", { class: "volume__spacer" }, [fitButton, fullButton]),
   ]);
-  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, hint]);
+  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, hint]);
 
   const scheme = findScheme(project, schemeId);
   const closeButton = uiButton(strings.volume.close, {
@@ -239,11 +330,74 @@ export function openVolume({ schemeId, api }) {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const spot = camera();
     volumeDrawBackdrop(ctx, box, volumeHorizon(spot, box));
-    if (scene.empty) return;
+    if (scene.empty) {
+      shown = [];
+      return;
+    }
     // Кружок «вы здесь» рисуется только в обзоре: от первого лица человек и
     // так знает, где стоит, а под ногами кружок закрыл бы пол.
-    const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : null;
-    volumeDraw(ctx, volumeFrame(scene, spot, box, marker));
+    const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
+    shown = volumeFrame(scene, spot, box, [...overlay, ...marker]);
+    volumeDraw(ctx, shown);
+  }
+
+  // ——— выделение ———
+  //
+  // Выделение **общее с планом**, и живёт оно там же, где жило, — в состоянии
+  // сеанса. Окно его только читает и ставит; ни объект, ни история от этого не
+  // меняются (G68).
+
+  function selectedIds() {
+    return getState().selectedMarkIds || [];
+  }
+
+  function select(markId) {
+    const current = selectedIds();
+    const next = markId ? [markId] : [];
+    if (current.length === next.length && current.every((id, index) => id === next[index])) return;
+    setState({ selectedMarkIds: next });
+  }
+
+  // Рамка выделенного и стрелки связей. Правила, какие связи показывать, —
+  // плановые целиком (`canvasFrameLinks`): переключатель в шапке включён —
+  // видны все связи схемы, выключен — связная группа выделенной метки.
+  function rebuildOverlay() {
+    overlay = [];
+    if (scene.empty) return;
+    const state = getState();
+    for (const id of selectedIds()) {
+      const place = volumeMarkPlace(scene, id);
+      if (place) volumeSelectLines(place, overlay);
+    }
+    const scheme = findScheme(state.project, schemeId);
+    if (!scheme) return;
+    volumeLinkLines(canvasFrameLinks(state, null, scheme), (id) => volumeMarkAnchor(scene, id), overlay);
+  }
+
+  function syncCard() {
+    const state = getState();
+    const selected = selectedIds();
+    // Карточка про одну метку — то же правило, что у карточки на плане:
+    // у выделенных пачкой общих полей нет.
+    const model = selected.length === 1 ? markCardModel(state.project, selected[0]) : null;
+    card.hidden = !model;
+    if (!model) return;
+    card.replaceChildren(...markCardParts(model, { headButton: cardClose }));
+  }
+
+  function syncSelection() {
+    rebuildOverlay();
+    syncCard();
+    paint();
+  }
+
+  // Во что ткнули. Под захватом мыши курсора нет вовсе, и целятся серединой
+  // поля — тем самым прицелом, которым в играх и целятся.
+  function pickAt(event) {
+    const box = viewport();
+    if (locked) return volumePickAt(shown, box.width / 2, box.height / 2);
+    const rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0 };
+    return volumePickAt(shown, event.clientX - rect.left, event.clientY - rect.top);
   }
 
   function redraw() {
@@ -376,17 +530,28 @@ export function openVolume({ schemeId, api }) {
     lookBy(dx, dy);
   }
 
-  function onPointerUp() {
-    // Щёлкнули, не поведя мышью — просим захват: это и есть «как в игре».
-    // Отказ браузера не беда, перетаскивание никуда не делось.
-    if (look && !look.moved && !locked && typeof stage.requestPointerLock === "function") {
-      try {
-        stage.requestPointerLock();
-      } catch (error) {
-        // захват не дали — молчим: способ водить взглядом остаётся
-      }
-    }
+  function onPointerUp(event) {
+    const started = look;
     look = null;
+    if (closed || !started || started.moved) return;
+    // Щелчок по вещи — выделение (таск 148), и захват мыши тогда не просится:
+    // человек целился в розетку, а не в поле. Щелчок мимо — снимает выделение
+    // (так же, как тап по пустому месту плана) и просит захват: это и есть «как
+    // в игре». Отказ браузера не беда, перетаскивание никуда не делось.
+    if (!scene.empty) {
+      const hit = pickAt(event);
+      if (hit) {
+        select(hit);
+        return;
+      }
+      select(null);
+    }
+    if (locked || typeof stage.requestPointerLock !== "function") return;
+    try {
+      stage.requestPointerLock();
+    } catch (error) {
+      // захват не дали — молчим: способ водить взглядом остаётся
+    }
   }
 
   function onLockChange() {
@@ -493,7 +658,8 @@ export function openVolume({ schemeId, api }) {
       return;
     }
     const base = view === "person" ? strings.volume.hintPerson : strings.volume.hintAround;
-    hint.textContent = locked ? base + " " + strings.volume.hintLocked : base + " " + strings.volume.hintGrab;
+    const grab = locked ? strings.volume.hintLocked : strings.volume.hintGrab;
+    hint.textContent = base + " " + grab + " " + strings.volume.pickHint;
   }
 
   function sync() {
@@ -502,20 +668,26 @@ export function openVolume({ schemeId, api }) {
     stage.classList.toggle("volume__stage--person", view === "person");
     if (scene.empty) {
       meta.textContent = strings.volume.empty;
+      missing.textContent = "";
+      missing.hidden = true;
     } else {
       const lines = [
         text("volume.counts", {
           walls: scene.wallCount,
           openings: scene.openingCount,
           rooms: scene.rooms.length,
+          marks: scene.marks.length,
         }),
         ...volumeNotes(scene),
       ];
       meta.textContent = lines.join(" ");
+      missing.textContent = volumeUnplacedLine(scene.unplaced);
+      missing.title = volumeUnplacedTitle(scene.unplaced);
+      missing.hidden = scene.unplaced.length === 0;
     }
     syncWhere();
     syncHint();
-    paint();
+    syncSelection();
   }
 
   // ——— жизнь окна ———
@@ -560,8 +732,11 @@ export function openVolume({ schemeId, api }) {
           finish();
           return;
         }
-        if (!("project" in changed)) return;
-        scene = volumeScene(state.project, schemeId) || scene;
+        // Выделили метку в списке или на плане — рамка и карточка поднимаются
+        // здесь: выделение одно на оба вида. То же и с показом связей.
+        if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
+        if (!("project" in changed) && !("filter" in changed)) return;
+        scene = sceneOf(state) || scene;
         sync();
       })
     : null;
