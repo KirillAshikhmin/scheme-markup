@@ -34,6 +34,7 @@ import {
   markWall,
   markWallBindable,
   markWallNear,
+  markWallNearest,
   markWallSide,
   openingsInWall,
   planFractionToMm,
@@ -130,6 +131,28 @@ test("порог меряется от грани стены, а не от её 
   assert.ok(markWallNear(inside.project, inside.project.marks[0]), "в пределах порога — на стене");
   const outside = putMark(box.project, box.schemeId, "Р", { x: 0, y: 1400 - MARK_WALL_REACH_MM - 10 });
   assert.equal(markWallNear(outside.project, outside.project.marks[0]), null, "за порогом — не на стене");
+});
+
+// Заказчик: «расстояние привязки увеличь автоматической» (D26). Число названо
+// не «вдвое», а делом: шестьсот — глубина кухонной столешницы и обычного
+// шкафа, за которыми розетка на плане оказывается внутри комнаты, а стоит
+// всё равно на стене. Граница сверху — узкая комната: порог обязан остаться
+// меньше, чем от её середины до стены.
+test("порог берёт розетку за столешницей и не берёт светильник посреди комнаты", () => {
+  assert.equal(MARK_WALL_REACH_MM, 600, "порог привязки изменили, не сказав об этом здесь");
+  const box = room();
+  // Розетка за кухонной столешницей: 600 мм от грани нижней стены (грань 1400).
+  const counter = putMark(box.project, box.schemeId, "Р", { x: 0, y: 1400 - 600 });
+  assert.ok(markWallNear(counter.project, counter.project.marks[0]), "розетка за столешницей осталась без стены");
+  // Светильник посреди комнаты 4000 × 3000 — чуть ниже середины, чтобы ближняя
+  // стена была одна: до грани нижней 1300, до верхней 1500.
+  const middle = putMark(box.project, box.schemeId, "Т", { x: 0, y: 100 });
+  assert.equal(markWallNear(middle.project, middle.project.marks[0]), null, "середина комнаты стала стеной");
+  // И ближайшая стена у него всё-таки есть — просто далеко. На этом держится
+  // направление стопки (D26): оно считается по месту, а не по порогу.
+  const near = markWallNearest(middle.project, middle.project.marks[0]);
+  assert.equal(near.wallId, box.wallIds[2], "ближняя стена посреди комнаты — нижняя");
+  assert.equal(near.gapMm, 1300);
 });
 
 test("спорят стены расстоянием: ближняя забирает метку", () => {

@@ -35,6 +35,7 @@ import {
   markWallSide,
   planMmToFraction,
   setMarkDimensions,
+  setMarkWall,
   setPlanOrigin,
   setPlanScale,
   setSchemeWallHeight,
@@ -244,6 +245,40 @@ test("у привязанной метки стопка уходит перпе�
   // с планом говорят об одном месте.
   const points = scene.ids.map((id) => markStackPoints(findMark(scene.project, id), stacks)[0]);
   for (const point of points) assert.equal(point.y, scene.at.y, "знак уехал вдоль стены");
+});
+
+// ——— D26: знак не улетает из-под курсора ——————————————————————————————
+//
+// Слова заказчика: «подносишь к стене, она привязывается, но метка из под
+// курсора улетает, а не должна». Улетал именно **знак**: точки метки привязка
+// никогда не трогала, а вот направление стопки читалось из записанных полей —
+// и переворачивалось в тот миг, когда автопривязка их дописывала. Теперь
+// направление считается по месту метки, и запись привязки на рисунок не влияет
+// вовсе.
+test("D26: запись привязки знак не двигает — ни постановка, ни снятие", () => {
+  const scene = tvWall();
+  const view = viewOf();
+  const bound = scene.ids.map((id) => markStackPoints(findMark(scene.project, id), markStacks(scene.project, scene.scheme, null, view))[0]);
+
+  // Снимаем привязку у обеих меток, ничего не двигая: метка стоит там же, где
+  // стояла, и знак обязан остаться на том же месте.
+  let bare = scene.project;
+  for (const id of scene.ids) bare = setMarkWall(bare, id, null).project;
+  for (const id of scene.ids) assert.equal(markWall(findMark(bare, id)), null, "привязка не снялась");
+  const stacks = markStacks(bare, bare.schemes[0], null, view);
+  const loose = scene.ids.map((id) => markStackPoints(findMark(bare, id), stacks)[0]);
+  assert.deepEqual(loose, bound, "знак уехал от того, что привязку сняли");
+  // И направление то же: поперёк стены, потому что стена рядом — а не вверх,
+  // потому что поля опустели.
+  for (const id of scene.ids) assert.deepEqual(stacks.get(id).dir, { x: 1, y: 0 }, "направление стопки пошло за полями, а не за местом");
+
+  // Обратно: автопривязка дописывает поля — и снова ни один знак не трогается.
+  const again = applyMarkWalls(bare).project;
+  assert.deepEqual(
+    scene.ids.map((id) => markStackPoints(findMark(again, id), markStacks(again, again.schemes[0], null, view))[0]),
+    bound,
+    "знак улетел в тот миг, когда привязка появилась",
+  );
 });
 
 test("поворот чертежа поворачивает и стопку", () => {

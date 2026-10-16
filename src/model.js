@@ -4763,12 +4763,25 @@ export function setMarkWall(project, markId, binding) {
 // в зависимости от того, насколько человек приблизил план. Данные зависели бы
 // от взгляда — ровно то, чего в этой сборке нет нигде.
 //
-// Триста миллиметров **от грани стены** (то есть сверх половины её толщины):
-// розетка рисуется точкой у стены и часто чуть внутри комнаты — подрозетник
-// выступает, а за радиатором в сотне миллиметров от стены розетка всё ещё на
-// стене. Полметра было бы много: в комнате три метра до середины, и метка
-// посреди неё не должна считаться настенной.
-export const MARK_WALL_REACH_MM = 300;
+// Порог считается **от грани стены**, то есть сверх половины её толщины.
+//
+// Было триста (таск 128) — и заказчик сказал, что мало: «расстояние привязки
+// увеличь автоматической». Шестьсот — не вдвое ради круглого числа, а
+// **глубина кухонной столешницы и обычного шкафа**: розетка за ними рисуется
+// на плане внутри комнаты, а стоит всё равно на стене, и это самый частый
+// случай «метка далеко от линии стены, но настенная». Второй такой случай —
+// подложка: стены обведены по растровому плану, и линия чертежа отходит от
+// нарисованной стены на те же сантиметры, на которые человек промахнулся
+// обводкой.
+//
+// Больше брать нельзя: порог обязан остаться меньше половины **узкой**
+// комнаты, иначе светильник посреди неё станет настенным. В комнате три метра
+// до середины полтора — шестьсот от неё далеко.
+//
+// Прежний довод «полметра было бы много» снят не числом, а тем, что появилось
+// рядом: с таска 143 привязку ставят и снимают руками (G202), и лишняя
+// привязка стоит один щелчок, а недостающая стоила развёртки.
+export const MARK_WALL_REACH_MM = 600;
 
 /**
  * Привязывается ли метка к стене вообще.
@@ -4833,7 +4846,17 @@ function markMiddleMm(project, mark) {
 export function markWallSide(project, mark) {
   const binding = markWall(mark);
   if (!binding) return null;
-  const wall = findWall(project, binding.wallId);
+  return markWallSideOn(project, mark, binding.wallId);
+}
+
+/**
+ * То же самое, но у **заданной** стены, а не у записанной в привязке. Нужно
+ * там, где стена выбрана местом метки, а не её полями: ручной привязке (G202)
+ * и направлению стопки на плане (дефект D26). Записанная привязка и сторона
+ * считаются одним кодом — второй системы названий сторон не заводится.
+ */
+export function markWallSideOn(project, mark, wallId) {
+  const wall = findWall(project, wallId);
   // У линии сторону решает её середина: концы ленты лежат у самой стены, и
   // первый из них может оказаться по другую сторону от оси на миллиметр.
   const at = wall ? markMiddleMm(project, mark) : null;
@@ -4849,12 +4872,35 @@ export function markWallSide(project, mark) {
   return side > 0 ? "left" : "right";
 }
 
-/**
- * Ближайшая стена под меткой — или `null`, если ни одна не ближе порога.
- * Спорят стены расстоянием до **грани**: короб из двух перегородок в
- * полуметре друг от друга иначе забирал бы метку то одной, то другой.
- */
-export function markWallNear(project, mark, walls) {
+// Отступ метки вдоль одной стены и зазор до её **грани**. Зазор у линии — по
+// худшей вершине: лента, которая идёт вдоль стены и уходит в комнату, на этой
+// стене не лежит, и отрезок «от и до» по ней соврал бы.
+function wallAlongOf(wall, points) {
+  const vectors = wallVectors(wall);
+  if (!vectors) return null;
+  const half = Number(wall.thicknessMm) / 2;
+  let worst = 0;
+  const along = [];
+  for (const at of points) {
+    const distance = Math.min(
+      vectors.len,
+      Math.max(0, (at.x - wall.aMm.x) * vectors.u.x + (at.y - wall.aMm.y) * vectors.u.y),
+    );
+    along.push(distance);
+    const foot = {
+      x: wall.aMm.x + vectors.u.x * distance,
+      y: wall.aMm.y + vectors.u.y * distance,
+    };
+    worst = Math.max(worst, Math.hypot(at.x - foot.x, at.y - foot.y) - half);
+  }
+  return {
+    gap: worst,
+    atMm: Math.round(along[0]),
+    toMm: points.length > 1 ? Math.round(along[along.length - 1]) : null,
+  };
+}
+
+function markWallNearestRaw(project, mark, walls) {
   if (!markWallBindable(mark)) return null;
   const list = walls || wallsOnScheme(project, mark.schemeId);
   if (list.length === 0) return null;
@@ -4862,42 +4908,57 @@ export function markWallNear(project, mark, walls) {
   if (points.length === 0) return null;
   let best = null;
   for (const wall of list) {
-    const vectors = wallVectors(wall);
-    if (!vectors) continue;
-    const half = Number(wall.thicknessMm) / 2;
-    let worst = 0;
-    const along = [];
-    for (const at of points) {
-      const distance = Math.min(
-        vectors.len,
-        Math.max(0, (at.x - wall.aMm.x) * vectors.u.x + (at.y - wall.aMm.y) * vectors.u.y),
-      );
-      along.push(distance);
-      const foot = {
-        x: wall.aMm.x + vectors.u.x * distance,
-        y: wall.aMm.y + vectors.u.y * distance,
-      };
-      worst = Math.max(worst, Math.hypot(at.x - foot.x, at.y - foot.y) - half);
-    }
-    // **У линии к стене обязаны быть близко все вершины.** Лента, которая
-    // идёт вдоль стены и уходит в комнату, на этой стене не лежит, и отрезок
-    // «от и до» по ней соврал бы.
-    if (worst > MARK_WALL_REACH_MM) continue;
-    if (best && worst >= best.gap) continue;
-    best = {
-      gap: worst,
-      wallId: wall.id,
-      atMm: Math.round(along[0]),
-      toMm: points.length > 1 ? Math.round(along[along.length - 1]) : null,
-    };
+    const along = wallAlongOf(wall, points);
+    if (!along) continue;
+    if (best && along.gap >= best.gap) continue;
+    best = { wallId: wall.id, ...along };
   }
-  if (!best) return null;
-  return {
-    wallId: best.wallId,
-    atMm: best.atMm,
-    toMm: best.toMm,
-    gapMm: Math.round(Math.max(0, best.gap)),
-  };
+  return best;
+}
+
+const alongOut = (best) =>
+  best === null
+    ? null
+    : { wallId: best.wallId, atMm: best.atMm, toMm: best.toMm, gapMm: Math.round(Math.max(0, best.gap)) };
+
+/**
+ * Отступ метки вдоль **названной** стены — `{wallId, atMm, toMm, gapMm}` или
+ * `null`. Порога здесь нет: стену назвала рука (G202), и далеко она или
+ * близко — не нам решать. Отступ при этом по-прежнему считается, а не
+ * задаётся: руками выбирают стену, а не метр на ней.
+ */
+export function markWallAlong(project, mark, wallId) {
+  const wall = findWall(project, wallId);
+  if (!wall || !mark || wall.schemeId !== mark.schemeId) return null;
+  if (!markWallBindable(mark)) return null;
+  const points = markPointsMm(project, mark);
+  if (points.length === 0) return null;
+  const along = wallAlongOf(wall, points);
+  return alongOut(along ? { wallId, ...along } : null);
+}
+
+/**
+ * Ближайшая к метке стена — **без порога**. Спорят стены расстоянием до
+ * грани: короб из двух перегородок в полуметре друг от друга иначе забирал бы
+ * метку то одной, то другой.
+ *
+ * Отдельно от `markWallNear` она нужна рисованию: направление стопки знаков
+ * обязано зависеть от места метки, а не от того, записана ли уже привязка
+ * (дефект D26) — иначе знак улетал из-под курсора в тот самый миг, когда
+ * привязка появлялась.
+ */
+export function markWallNearest(project, mark, walls) {
+  return alongOut(markWallNearestRaw(project, mark, walls));
+}
+
+/**
+ * Ближайшая стена под меткой — или `null`, если ни одна не ближе порога.
+ * Это и есть автопривязка: порог решает, считать ли метку настенной.
+ */
+export function markWallNear(project, mark, walls) {
+  const best = markWallNearestRaw(project, mark, walls);
+  if (!best || best.gap > MARK_WALL_REACH_MM) return null;
+  return alongOut(best);
 }
 
 /**
