@@ -84,7 +84,12 @@ export function elevationNote(elevation, drawn) {
   // Высота, взятая у типа, — это **догадка сборки**, пусть и хорошая: правило
   // объекта велит показывать её пользователю, а не выдавать за введённую
   // (таск 135, G192). Поправил у метки — число перестало быть умолчанием.
-  const guessed = elevation.marks.filter((mark) => mark.heightMm !== null && mark.heightOwn === false).length;
+  //
+  // Высота, пришедшая от группы (G203), догадкой **не** считается: её записал
+  // человек у соседней метки той же группы и сам попросил распространить на
+  // всех. Назови её умолчанием типа — и подпись соврала бы о том, чьё это
+  // число. Поэтому считается не «не своя», а именно «от типа».
+  const guessed = elevation.marks.filter((mark) => mark.heightMm !== null && mark.heightFrom === "type").length;
   if (guessed > 0) notes.push(text("elevation.guessed", { count: guessed }));
   const grown = drawn && drawn.grown > 0 ? drawn.grown : 0;
   if (grown > 0) notes.push(text("elevation.grown", { count: grown }));

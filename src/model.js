@@ -1944,18 +1944,68 @@ export function markDimensions(mark) {
  * `own` говорит, что значение **своё**, а не унаследованное: по нему окно
  * показывает умолчание заглушкой, а не числом, и развёртка знает, о скольких
  * высотах она догадалась.
+ *
+ * **Третья ступень лестницы — высота группы** (таск 143, требование G203):
+ * «если в группе у хотя бы одной метки есть высота, то она распространяется
+ * на все метки». Порядок такой: своё → группы → типа.
+ *
+ * Почему ступень наследования, а не правка данных и не хитрость развёртки.
+ * Правка данных (проставить высоту всем меткам группы) выдавала бы догадку
+ * сборки за введённое человеком число и тронула бы объект там, где он ничего
+ * не просил менять; хитрость развёртки знала бы правду в одном месте, а
+ * карточка метки и таблица — нет. Ступень лестницы отвечает всем одинаково,
+ * ничего не пишет в объект и честно говорит `own: false`.
+ *
+ * `from` — **откуда** взято значение: `"own"`, `"group"`, `"type"` или `null`.
+ * Без него подпись развёртки о догадках стала бы врать: высота, записанная
+ * рукой у соседней метки той же группы, — не умолчание типа, а то же самое
+ * число человека, и считать её догадкой нельзя.
  */
 export function markSizes(project, mark) {
   const type = mark ? findType(project, mark.typeId) : null;
   const defaults = typeSizes(type);
   const values = markDimensions(mark);
+  const shared = groupHeightMm(project, mark);
   const result = {};
   for (const field of MARK_DIMENSION_FIELDS) {
     const own = values[field] !== null;
-    result[field] = own ? values[field] : defaults[field];
+    // Группа делится только высотой: длину и ширину у неё делить нечему —
+    // в одной рамке стоят и розетка, и выключатель, и размеры у них свои.
+    const fromGroup = !own && field === "heightAboveFloor" ? shared : null;
+    const value = own ? values[field] : fromGroup !== null ? fromGroup : defaults[field];
+    result[field] = value;
     result[field + "Own"] = own;
+    result[field + "From"] = own ? "own" : fromGroup !== null ? "group" : value === null ? null : "type";
   }
   return result;
+}
+
+/**
+ * Высота группы для метки, у которой своей высоты нет (G203): самая низкая из
+ * **своих** высот её соседей по группе.
+ *
+ * Своих — чтобы не было круга: метка спрашивает соседей, соседи её. Нижняя —
+ * потому что так уже решено у ряда на развёртке (G191, «одну высоту указывать
+ * у группы по нижнему объекту»), и двух правил «какая высота у группы» в
+ * сборке быть не должно.
+ *
+ * Метка со своей высотой этого не спрашивает вовсе — её число старше: столбик
+ * подрозетников тем и держится, что у каждого своя высота, и распространять по
+ * группе нужно **недостающее**, а не переписывать записанное.
+ */
+function groupHeightMm(project, mark) {
+  if (!mark || !mark.groupId) return null;
+  const group = findGroup(project, mark.groupId);
+  if (!group) return null;
+  let best = null;
+  for (const id of group.markIds || []) {
+    if (id === mark.id) continue;
+    const member = findMark(project, id);
+    const height = member ? markDimensions(member).heightAboveFloor : null;
+    if (height === null) continue;
+    if (best === null || height < best) best = height;
+  }
+  return best;
 }
 
 /**
@@ -5415,6 +5465,10 @@ export function wallElevation(project, wallId, side = "left") {
       heightMm: sizes.heightAboveFloor,
       sizeMm: { width: sizes.length, height: sizes.width },
       heightOwn: sizes.heightAboveFloorOwn,
+      // Откуда высота: своя, от группы (G203) или умолчание типа (G192).
+      // Подпись листа считает догадками только последние — высота, записанная
+      // рукой у соседки по группе, такое же число человека, как своё.
+      heightFrom: sizes.heightAboveFloorFrom,
       // Имя изображения объекта. Поле переименовано в таске 139 (`icon` →
       // `view`: это не значок, а упрощённое изображение самой вещи) и
       // читается по обоим именам — объект, заведённый между тасками 135 и

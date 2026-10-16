@@ -21,6 +21,8 @@ import {
   blockStepPx,
   createProject,
   findMark,
+  markDimensions,
+  markSizes,
   markWall,
   planMmToFraction,
   setMarkDimensions,
@@ -31,6 +33,7 @@ import {
   wallElevation,
 } from "../src/model.js";
 import { drawElevation, elevationPack, elevationRows } from "../src/render.js";
+import { elevationNote } from "../src/panels/elevation.js";
 
 // ——— чистая раскладка по оси ——————————————————————————————————————————
 
@@ -124,7 +127,11 @@ function frame(offsets, heights) {
     project = updateMark(project, ids[index], {
       points: [planMmToFraction(project, schemeId, { x: -2000 + offset, y: 1300 })],
     }).project;
-    project = setMarkDimensions(project, ids[index], { heightAboveFloor: heights[index] }).project;
+    // `null` — высоту этой метке не задавали вовсе: так проверяется ступень
+    // наследования, а не подстановка.
+    if (heights[index] !== null) {
+      project = setMarkDimensions(project, ids[index], { heightAboveFloor: heights[index] }).project;
+    }
   });
   project = applyMarkWalls(project).project;
   return { project, schemeId, wallId: wall.wall.id, ids };
@@ -201,4 +208,65 @@ test("D27: подрозетники вплотную — но серединой
   // И расходятся они ровно на ширину знака — вплотную, без просвета.
   assert.ok(Math.abs(places[1] - places[0] - 18) < 1e-6, "подрозетники встали не вплотную");
   assert.ok(Math.abs(places[2] - places[1] - 18) < 1e-6);
+});
+
+// ——— G203: высота группы ———————————————————————————————————————————————
+//
+// Слова заказчика: «если в группе у хотя бы одной метки есть высота, то она
+// распространяется на все метки». Распространяется именно **недостающая**:
+// метка со своей высотой её не теряет, иначе столбик подрозетников, который
+// заказчик просил тем же письмом, собрать было бы нельзя.
+
+// Высоты здесь нарочно не 300: у розетки в стартовом справочнике умолчание
+// типа — ровно 300 (G192), и на нём не видно, чья высота победила.
+const heightsOf = (project, ids) => ids.map((id) => markSizes(project, findMark(project, id)).heightAboveFloor);
+
+test("G203: высота одной метки группы становится высотой тех, у кого своей нет", () => {
+  const built = frame([2000, 2222, 2444], [null, 1100, null]);
+  assert.deepEqual(heightsOf(built.project, built.ids), [1100, 1100, 1100], "высота по группе не разошлась");
+
+  // Но в объекте она **не записана**: это ступень наследования, а не правка
+  // данных (G68 — метка осталась такой, какой её оставил человек).
+  const bare = built.ids.filter((id) => markDimensions(findMark(built.project, id)).heightAboveFloor === null);
+  assert.equal(bare.length, 2, "высота проставлена в метки, а не унаследована");
+  for (const id of bare) {
+    const sizes = markSizes(built.project, findMark(built.project, id));
+    assert.equal(sizes.heightAboveFloorOwn, false, "унаследованная высота выдана за свою");
+    assert.equal(sizes.heightAboveFloorFrom, "group", "высота пришла не от группы");
+  }
+
+  // И на стене стоят все три — до этого две из них уходили полосой «высота не
+  // задана» под пол.
+  const elevation = wallElevation(built.project, built.wallId, "left");
+  assert.deepEqual(elevation.marks.map((mark) => mark.heightMm), [1100, 1100, 1100]);
+  // Подпись листа не называет их догадкой: число записал человек, просто у
+  // соседней метки той же группы.
+  assert.equal(elevationNote(elevation, null), "", "развёртка назвала высоту группы умолчанием типа");
+});
+
+test("G203: своя высота старше группы — на этом держится столбик", () => {
+  // Две розетки в одном месте стены и на разных высотах: на плане это стопка
+  // (G181), на развёртке — столбик.
+  const built = frame([2000, 2000], [300, 1100]);
+  assert.deepEqual(heightsOf(built.project, built.ids), [300, 1100], "своя высота метки потерялась");
+
+  const elevation = wallElevation(built.project, built.wallId, "left");
+  const rows = elevationRows(elevation.marks);
+  assert.equal(rows.length, 1, "группа разъехалась на два ряда");
+  assert.equal(rows[0].axis, "column");
+
+  const { ctx, log } = recorder();
+  const drawn = drawElevation(ctx, elevation, { x: 0, y: 0, width: 1000, height: 600 }, { unit: 1 });
+  const floor = drawn.y + drawn.height;
+  // Знаки стоят друг над другом: каждый на своей высоте, оба на одном месте
+  // стены. Это и есть «вертикальные группы поддерживаются».
+  const signs = log
+    .filter((line) => line.startsWith("arc:"))
+    .map((line) => line.slice(4).split(","))
+    .filter((parts) => Math.abs(Number(parts[2]) - SIGN_RADIUS) < 1e-9)
+    .map((parts) => ({ x: Number(parts[0]), mm: (floor - Number(parts[1])) / drawn.scale }));
+  assert.equal(signs.length, 2);
+  assert.ok(Math.abs(signs[0].x - signs[1].x) < 1e-6, "столбик разъехался по горизонтали");
+  assert.ok(Math.abs(signs[0].mm - 300) < 0.5, "нижний знак не на своей высоте: " + signs[0].mm);
+  assert.ok(Math.abs(signs[1].mm - 1100) < 0.5, "верхний знак не на своей высоте: " + signs[1].mm);
 });
