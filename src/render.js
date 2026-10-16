@@ -5298,26 +5298,40 @@ export function elevationViewOf(mark) {
 }
 
 /**
- * Точечные метки развёртки — **рядами**: группа идёт одним рядом вплотную,
- * одиночка сама себе ряд (таск 135, требования G190 и G191).
+ * Точечные метки развёртки — **рядами**: группа идёт одним рядом, одиночка
+ * сама себе ряд (таск 135, требования G190 и G191).
  *
  * G190 («на развёртке сразу указывать рядом, как и в жизни подрозетники»):
  * метки одной группы стоят на стене вплотную друг к другу, как подрозетники в
- * рамке, а не каждая на своём расчётном отступе. Расчётные отступы у них
- * разъехались бы на пару сантиметров — ровно настолько, насколько человек
- * промахнулся мышью на плане, — и рамка из трёх розеток перестала бы быть
- * рамкой.
+ * рамке. **Вплотную — это про просветы внутри группы, а не про место самой
+ * группы** (дефект D27: «метки по горизонтали должны быть ровно в том месте,
+ * как и на схеме, сейчас могут разъезжаться»). До этого таска ряд целиком
+ * вставал серединой в середину группы и раскладывался вплотную от края — и
+ * метка, нарисованная на плане в двадцати сантиметрах от соседки, на развёртке
+ * оказывалась в восьми. Теперь каждая метка стоит на **своём** отступе, а
+ * вплотную расходятся только те, что налезли бы друг на друга
+ * (`elevationPack`): на плане промахнулись мышью на сантиметр — рамка всё
+ * равно рамка, нарисовали розетки врозь — они и на стене врозь.
  *
- * G191 («одну высоту указывать у группы по нижнему объекту»): подпись у ряда
- * одна. Заказчик снял вопрос о разной высоте внутри группы: «2 блока розеток
- * мы в одну группу не собираем, это всегда 2 группы разных», — поэтому берём
- * нижнюю и не городим разбора.
+ * `axis` — чем группа различается на плане, тем и строится на стене:
  *
- * Порядок в ряду — по расстоянию вдоль стены, как они стоят на плане. Ряд
- * встаёт серединой туда, где середина у группы: иначе рамка уехала бы вправо
- * от того места, где её нарисовали.
+ * - `"row"` — метки разошлись **вдоль стены** (обычный блок подрозетников):
+ *   ряд по горизонтали, одна отметка высоты на всех (G191);
+ * - `"column"` — метки стоят на одном месте стены, а различаются **высотой**
+ *   (G203: «вертикальные и горизонтальные группы должны поддерживаться»).
+ *   Столбик по вертикали, и подписана высота у каждой метки: разные высоты —
+ *   это и есть то, ради чего столбик собрали.
  *
- * Чистая и вынесена наружу: без холста проверяется и порядок, и высота ряда.
+ * Отличаются они не полем и не настройкой, а самим расположением меток: что
+ * разошлось сильнее — отступ вдоль стены или высота над полом. Выбор по
+ * расположению тем и хорош, что человек ничего не объявляет: поставил
+ * подрозетники в рамку — ряд, поставил столбиком — столбик.
+ *
+ * G191 («одну высоту указывать у группы по нижнему объекту»): у ряда высота
+ * одна, по нижнему. Заказчик снял вопрос о разной высоте внутри ряда: «2 блока
+ * розеток мы в одну группу не собираем, это всегда 2 группы разных».
+ *
+ * Чистая и вынесена наружу: без холста проверяется и порядок, и высота, и ось.
  */
 export function elevationRows(marks) {
   const rows = [];
@@ -5336,12 +5350,59 @@ export function elevationRows(marks) {
     byGroup.get(key).members.push(mark);
   }
   return rows.map((row) => {
-    const members = [...row.members].sort((first, second) => first.fromMm - second.fromMm);
-    const heights = members.map((mark) => mark.heightMm).filter((value) => value !== null);
+    const heights = row.members.map((mark) => mark.heightMm).filter((value) => value !== null);
+    const spread = (values) => (values.length > 1 ? Math.max(...values) - Math.min(...values) : 0);
+    // Столбик — когда высоты разошлись сильнее, чем отступы. Равенство (в том
+    // числе у одиночки, где оба нуля) — ряд: ряд умолчание, столбик случай.
+    const column = spread(heights) > spread(row.members.map((mark) => mark.fromMm));
+    // Порядок в ряду — по его собственной оси: ряд читается вдоль стены,
+    // столбик — снизу вверх, как его и размечают. Метки без высоты в столбик
+    // не попадают (они стоят полосой под полом), но порядок у них всё равно
+    // устойчивый: сортировка стабильна.
+    const members = [...row.members].sort((first, second) =>
+      column ? (first.heightMm || 0) - (second.heightMm || 0) : first.fromMm - second.fromMm,
+    );
     const centreMm = members.reduce((sum, mark) => sum + mark.fromMm, 0) / members.length;
     const label = members.length > 1 && members[0].groupLabel ? members[0].groupLabel : members[0].label;
-    return { members, centreMm, label, heightMm: heights.length > 0 ? Math.min(...heights) : null };
+    return {
+      members,
+      centreMm,
+      label,
+      axis: column ? "column" : "row",
+      heightMm: heights.length > 0 ? Math.min(...heights) : null,
+    };
   });
+}
+
+/**
+ * Разложить ряд по одной оси: каждая метка на **своём** месте, а те, что
+ * налезли бы друг на друга, — вплотную (дефект D27).
+ *
+ * `places` — места в порядке возрастания, `sizes` — размеры вдоль той же оси,
+ * обе величины в одних единицах. Отвечает новыми местами.
+ *
+ * Два правила, и второе важнее первого:
+ *
+ *   1. соседи расходятся **ровно настолько, чтобы коснуться краями** — не
+ *      больше; просветы, которые и так были, остаются как есть;
+ *   2. **середина ряда не двигается**: что раздвинули, то поровну и сдвинули
+ *      обратно. Иначе рамка из трёх розеток, раздвинутая вправо, уехала бы
+ *      с того места, где её нарисовали на плане.
+ *
+ * Из первого правила следует главное: ряд, нарисованный врозь, функция не
+ * трогает вовсе — отступ на развёртке совпадает с планом **числом**, а не
+ * примерно. Вплотную встаёт только то, что иначе налезло бы.
+ */
+export function elevationPack(places, sizes) {
+  const next = places.slice();
+  for (let index = 1; index < next.length; index += 1) {
+    const touch = next[index - 1] + (sizes[index - 1] + sizes[index]) / 2;
+    if (next[index] < touch) next[index] = touch;
+  }
+  if (next.length < 2) return next;
+  const middle = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const shift = middle(places) - middle(next);
+  return shift === 0 ? next : next.map((value) => value + shift);
 }
 
 /**
@@ -5529,26 +5590,53 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     );
   }
 
+  // Знак метки или её изображение в прямоугольнике с серединой в `(x, y)`.
+  const drawRowMark = (mark, box, x, y) => {
+    if (box.view) {
+      drawObjectView(ctx, box.view, { x: x - box.width / 2, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
+    } else {
+      drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
+    }
+  };
+
   for (const row of rows) {
     const boxes = row.boxes;
-    const width = boxes.reduce((sum, box) => sum + box.width, 0);
-    let x = atX(row.centreMm) - width / 2;
+    // **Столбик** (G203): метки стоят на одном месте стены и различаются
+    // высотой. Расходятся они по вертикали — и подписана высота у каждой: ради
+    // разных высот столбик и собирают.
+    if (row.axis === "column") {
+      const places = elevationPack(
+        row.members.map((mark) => mark.heightMm * scale),
+        boxes.map((box) => box.height),
+      );
+      row.members.forEach((mark, index) => {
+        const box = boxes[index];
+        const x = atX(mark.fromMm);
+        const y = floor - places[index];
+        drawRowMark(mark, box, x, y);
+        elevationText(ctx, mark.label + " · " + mark.heightMm, x + box.width / 2 + 4 * unit, y, "left", unit);
+      });
+      continue;
+    }
+    // **Ряд**: каждая метка на своём отступе вдоль стены, вплотную расходятся
+    // только налезающие (дефект D27). Считается в точках холста относительно
+    // левого края стены — там же, где живут размеры знаков.
+    const places = elevationPack(
+      row.members.map((mark) => mark.fromMm * scale),
+      boxes.map((box) => box.width),
+    );
     let top = Infinity;
     row.members.forEach((mark, index) => {
       const box = boxes[index];
       const y = atY(mark.heightMm);
-      const view = box.view;
-      if (view) {
-        drawObjectView(ctx, view, { x, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
-      } else {
-        drawShape(ctx, mark.shape, x + box.width / 2, y, 9 * unit, mark.color);
-      }
+      drawRowMark(mark, box, left + places[index], y);
       top = Math.min(top, y - box.height / 2);
-      x += box.width;
     });
     // Одна отметка высоты на ряд, по нижнему объекту (G191): «2 блока розеток
     // мы в одну группу не собираем, это всегда 2 группы разных», — значит у
     // ряда высота и правда одна, и повторять её у каждого подрозетника незачем.
+    // Стоит она над серединой группы — той, что на плане: `elevationPack`
+    // середину ряда не двигает.
     elevationText(ctx, row.label + " · " + row.heightMm, atX(row.centreMm), top - 7 * unit, "center", unit);
   }
 
