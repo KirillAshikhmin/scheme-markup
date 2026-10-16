@@ -60,6 +60,7 @@ import {
 import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+import { openVolume, volumeAllowed } from "./volume.js";
 import { openWorkshop } from "./workshop.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
@@ -822,39 +823,55 @@ function mountSchemesPanel(host, api) {
       // принадлежит схеме, как и масштаб. Поворота и масштаба у схемы **без**
       // подложки не бывает, а чертёж бывает — он сам себе план, и строка для
       // такой схемы остаётся с одной кнопкой.
+      // Объём (таск 146) стоит в этой же строке, но живёт по своему умению:
+      // он ничего не правит, и его доступность решает не `editSchemes`, а
+      // `viewVolume`. Сегодня оба умения десктопные, и строка от этого не
+      // меняется; появится сенсорное управление (таск 149) — кнопка окажется
+      // в строке просмотра, где правок нет вовсе, без правки раскладки.
+      const planRow = [];
       if (editable) {
         const view = scheme.imageId ? schemesScaleView(project, scheme.id, scheme.name) : null;
-        row.append(
-          uiEl("div", { class: "scheme-row__plan" }, [
-            scheme.imageId
-              ? uiIconButton("rotateLeft", {
-                  title: strings.schemes.turnLeft,
-                  attrs: turning ? { disabled: "disabled" } : {},
-                  on: { click: () => turnPlan(scheme.id, -90) },
-                })
-              : null,
-            scheme.imageId
-              ? uiIconButton("rotateRight", {
-                  title: strings.schemes.turnRight,
-                  attrs: turning ? { disabled: "disabled" } : {},
-                  on: { click: () => turnPlan(scheme.id, 90) },
-                })
-              : null,
-            view
-              ? uiButton(view.label, {
-                  class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
-                  title: view.title,
-                  on: { click: () => editScale(scheme.id) },
-                })
-              : null,
-            uiButton(strings.workshop.open, {
-              class: "ui-btn scheme-row__drawing" + (scheme.imageId ? "" : " ui-btn--wide"),
-              title: strings.workshop.openHint,
-              on: { click: () => openDrawing(scheme.id) },
+        if (scheme.imageId) {
+          planRow.push(
+            uiIconButton("rotateLeft", {
+              title: strings.schemes.turnLeft,
+              attrs: turning ? { disabled: "disabled" } : {},
+              on: { click: () => turnPlan(scheme.id, -90) },
             }),
-          ]),
+            uiIconButton("rotateRight", {
+              title: strings.schemes.turnRight,
+              attrs: turning ? { disabled: "disabled" } : {},
+              on: { click: () => turnPlan(scheme.id, 90) },
+            }),
+          );
+        }
+        if (view) {
+          planRow.push(
+            uiButton(view.label, {
+              class: "ui-btn ui-btn--wide scheme-row__scale" + (view.set ? " is-set" : ""),
+              title: view.title,
+              on: { click: () => editScale(scheme.id) },
+            }),
+          );
+        }
+        planRow.push(
+          uiButton(strings.workshop.open, {
+            class: "ui-btn scheme-row__drawing" + (scheme.imageId ? "" : " ui-btn--wide"),
+            title: strings.workshop.openHint,
+            on: { click: () => openDrawing(scheme.id) },
+          }),
         );
       }
+      if (volumeAllowed(state)) {
+        planRow.push(
+          uiButton(strings.volume.open, {
+            class: "ui-btn scheme-row__volume" + (editable ? "" : " ui-btn--wide"),
+            title: strings.volume.openHint,
+            on: { click: () => openVolumeView(scheme.id) },
+          }),
+        );
+      }
+      if (planRow.length > 0) row.append(uiEl("div", { class: "scheme-row__plan" }, planRow));
       list.append(row);
     });
   }
@@ -926,6 +943,16 @@ function mountSchemesPanel(host, api) {
   // когда он пришёл обводить план (дефект D22, таск 132).
   function openDrawing(schemeId) {
     openWorkshop({ schemeId, api: { getState, setState, notify, subscribe } });
+  }
+
+  /**
+   * Объёмный режим — своё окно (`panels/volume.js`), и оно **только читает**:
+   * ни `setState`, ни шага истории ему не нужно, поэтому в его api их и нет.
+   * Схема при этом текущей не становится — смотреть объём чужой схемы можно,
+   * не уходя с той, которую размечают.
+   */
+  function openVolumeView(schemeId) {
+    openVolume({ schemeId, api: { getState, notify, subscribe } });
   }
 
   /**
