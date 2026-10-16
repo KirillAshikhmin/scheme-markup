@@ -143,6 +143,50 @@
   height: 30px;
 }
 
+/* Кнопка «3D» (G209, таск 150) — слева от полноэкранной и ровно такая же:
+   тот же размер, та же рамка, та же мера отступа от линейки. Разница одна —
+   вместо рисованного значка две буквы: «3D» заказчик назвал словом, а значка
+   объёма, который читался бы без подписи, не бывает. */
+.canvas-volume {
+  position: absolute;
+  right: 44px;
+  top: calc(12px + var(--canvas-hint-inset, 0px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--canvas-line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #57606a;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.canvas-volume:hover,
+.canvas-volume:focus-visible {
+  color: var(--accent);
+}
+
+/* Нет чертежа — кнопка остаётся на месте и гаснет с причиной в подсказке:
+   исчезни она, и человек решил бы, что объём отвалился. */
+.canvas-volume[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#app.is-mobile .canvas-volume {
+  width: 30px;
+  height: 30px;
+  right: 50px;
+}
+
 /* ——— карточка выделенной метки (просмотр) ————————————————————————————
    Снизу и поверх плана: верхние углы заняты подсказкой и полным экраном.
    Ширина ограничена — на планшете лёжа карточка во весь экран читается хуже,

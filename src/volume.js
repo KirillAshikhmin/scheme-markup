@@ -164,6 +164,42 @@ export const VOLUME_LAYER_BASE = 0;
 export const VOLUME_LAYER_GROUND = 1;
 export const VOLUME_LAYER_BODY = 2;
 export const VOLUME_LAYER_MARK = 3;
+/**
+ * Толщина ломтя глубины, на которые режется грань перед сортировкой (дефект
+ * D32: «иногда бывает что стены просвечивают, при определённом повороте»).
+ *
+ * Порядок рисования решает **средняя** дальность грани, а перекрытие в кадре
+ * решает дальность **в пикселе**. У грани, уходящей от камеры вдаль, это разные
+ * числа: стена, видимая почти с торца, тянется от метра до пяти, серединой
+ * сидит на трёх — и всё, что лежит между тремя метрами и её ближним концом,
+ * рисуется после неё, то есть поверх. Это и видно на снимке заказчика.
+ *
+ * Лекарство — не другая мера дальности, а **ломти**: в осях камеры грань
+ * режется плоскостями `z = k · шаг`, и каждый кусок едет в очереди со своей
+ * средней дальностью. Границы ломтей общие для всей сцены, и из этого следует
+ * ровно то свойство, которого не хватало: если грань A в каком-то пикселе
+ * ближе грани B, их куски в этом пикселе лежат в ломтях `i ≤ j`, и при `i < j`
+ * порядок верен **всегда**, а при `i = j` они ближе шага друг к другу. То есть
+ * **ошибка порядка больше шага не бывает** — не «почти не бывает», а не бывает.
+ *
+ * Четверть метра — выбор по замеру на объекте заказчика (6912 кадров из восьми
+ * помещений, выборка каждые шесть точек поля 1432 × 580):
+ *
+ * | шаг | граней в кадре | точек с провалом >200 мм | >500 мм | худший провал |
+ * |---|---|---|---|---|
+ * | без ломтей | 54 | 0,65 % | 0,13 % | **1544 мм** |
+ * | 1000 мм | 94 | 0,39 % | 0,055 % | 990 мм |
+ * | 500 мм | 134 | 0,48 % | 0 % | 500 мм |
+ * | **250 мм** | **213** | **0,059 %** | **0 %** | **250 мм** |
+ *
+ * Худший провал в каждой строке равен шагу — то самое следствие, посчитанное
+ * заранее и подтверждённое замером. Четверть метра выбрана потому, что это
+ * первый шаг, на котором «сквозь стену видно соседнюю комнату» становится
+ * невозможным по построению: меньше четверти метра стены друг от друга не
+ * стоят. Цена — вчетверо больше заливок у граней, уходящих вдаль, и ничего у
+ * всех остальных: грань, целиком лежащая в одном ломте, не режется вовсе.
+ */
+export const VOLUME_DEPTH_SLAB_MM = 250;
 /** Сколько раз выталкиваем тело из стен за шаг: угол держат два прохода. */
 const VOLUME_PUSH_PASSES = 4;
 /** Светлота самой тёмной и самой светлой грани. */
@@ -186,8 +222,17 @@ export const VOLUME_FLOOR_RGB = [170, 142, 110];
 export const VOLUME_CEILING_RGB = [238, 238, 236];
 export const VOLUME_OBJECT_RGB = [150, 126, 190];
 export const VOLUME_DOOR_RGB = [176, 132, 92];
+/** Ручка двери — металл: светлее полотна и холоднее его (G207). */
+export const VOLUME_HANDLE_RGB = [186, 190, 198];
 export const VOLUME_FRAME_RGB = [240, 242, 244];
 export const VOLUME_MARKER_RGB = [31, 111, 235];
+
+/**
+ * Радиус кружка «вы здесь» на обзоре (G212). Полтора дециметра — это полшага
+ * человека: указатель виден, а пол под ним — тоже, и клик по месту за ним
+ * (перенос) не упирается в собственный указатель.
+ */
+export const VOLUME_MARKER_MM = 150;
 
 // ——— мелкая векторная арифметика ————————————————————————————————————————
 //
@@ -247,6 +292,9 @@ function volumeFace(points, rgb, options = {}) {
     // Чья это грань: по ней кадр отвечает, во что попал клик (таск 148).
     // У стен, пола и вещей чертежа хозяина нет — и попадать в них незачем.
     markId: options.markId || null,
+    // Чьё это полотно: по нему кадр отвечает, какую дверь открывает E (G207).
+    // Есть только у полотна и его ручки — больше ни у чего в сцене.
+    doorId: options.doorId || null,
     // Поверхность, на которой стоят вещи (сторона стены), и обратная ссылка у
     // самой вещи. Зачем — см. `volumeHostDepths`.
     host: options.host || null,
@@ -297,6 +345,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   if (corners.length < 3 || !(topMm > bottomMm)) return out;
   const markId = options.markId || null;
   const onHost = options.onHost || null;
+  const doorId = options.doorId || null;
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[(index + 1) % corners.length];
@@ -309,6 +358,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
         normal: { x: dy / length, y: -dx / length, z: 0 },
         markId,
         onHost,
+        doorId,
       }),
     );
   }
@@ -316,17 +366,17 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
     volumeFace(
       corners.map((point) => volumeAt(point, topMm)),
       rgb,
-      { normal: { x: 0, y: 0, z: 1 }, markId, onHost },
+      { normal: { x: 0, y: 0, z: 1 }, markId, onHost, doorId },
     ),
   );
   // Низ лежащей на полу вещи не нужен никому, а низ висящей — нужен: на
   // потолочный светильник смотрят снизу, и без этой грани он был бы дырой.
-  if (bottomMm > 0 || markId) {
+  if (bottomMm > 0 || markId || doorId) {
     out.push(
       volumeFace(
         corners.map((point) => volumeAt(point, bottomMm)),
         rgb,
-        { normal: { x: 0, y: 0, z: -1 }, markId, onHost },
+        { normal: { x: 0, y: 0, z: -1 }, markId, onHost, doorId },
       ),
     );
   }
@@ -396,11 +446,12 @@ export function volumeWallTiles(lengthMm, heightMm, openings) {
  * Грани стены: две стороны, разбитые проёмами, два торца, верх; на каждый
  * проём — четыре грани его откосов, рама окну и полотно двери.
  *
- * Низ стены не рисуется: он под полом. Полотно двери стоит **раскрытым**, как
- * его рисуют на плане (`render.drawingDoorLeaf`): закрытое перекрыло бы вид в
- * соседнюю комнату, которого заказчик просил прямо («Давай всю схему»).
+ * Низ стены не рисуется: он под полом. Полотно двери стоит **закрытым** (G207,
+ * решение заказчика, которое отменило решение таска 146): «По умолчанию пусть
+ * все двери будут закрыты». Раскрывается оно поимённо — `openDoorIds` — и живёт
+ * это только в сеансе окна: в объект состояние двери не пишется (G68).
  */
-export function volumeWallFaces(wall, openings, heightMm, out = []) {
+export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null) {
   const vectors = wallVectors(wall);
   if (!vectors || !(heightMm > 0)) return out;
   const half = Number(wall.thicknessMm) / 2;
@@ -459,13 +510,13 @@ export function volumeWallFaces(wall, openings, heightMm, out = []) {
     ),
   );
   for (const opening of openings || []) {
-    volumeOpeningFaces(wall, opening, heightMm, out);
+    volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds);
   }
   return out;
 }
 
-/** Откосы проёма, рама окна и раскрытое полотно двери. */
-function volumeOpeningFaces(wall, opening, heightMm, out) {
+/** Откосы проёма, рама окна и полотно двери — закрытое или раскрытое. */
+function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
   const vectors = wallVectors(wall);
   if (!vectors) return out;
   const half = Number(wall.thicknessMm) / 2;
@@ -516,12 +567,31 @@ function volumeOpeningFaces(wall, opening, heightMm, out) {
     volumeWindowFrame(at, from, to, bottom, top, out);
     return out;
   }
-  if (opening.kind === OPENING_KIND_DOOR) volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out);
+  if (opening.kind === OPENING_KIND_DOOR) {
+    const open = volumeDoorOpen(openDoorIds, opening.id);
+    volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open);
+  }
   return out;
+}
+
+/** Открыта ли эта дверь. Список пустой или не дан — закрыты все (G207). */
+export function volumeDoorOpen(openDoorIds, doorId) {
+  if (!openDoorIds || !doorId) return false;
+  if (typeof openDoorIds.has === "function") return openDoorIds.has(doorId);
+  return Array.isArray(openDoorIds) && openDoorIds.includes(doorId);
 }
 
 /** Толщина брусков рамы окна. */
 const VOLUME_FRAME_MM = 60;
+
+// Ручка двери (G207). Числа — обычная дверная фурнитура: ручка на 1050 мм от
+// пола, длиной 130 мм, выступает на 35 мм в каждую сторону полотна, высотой
+// 90 мм. Отступ от свободного края — 70 мм, как у настоящего замка.
+const VOLUME_HANDLE_MM = 1050;
+const VOLUME_HANDLE_LONG_MM = 130;
+const VOLUME_HANDLE_OUT_MM = 35;
+const VOLUME_HANDLE_TALL_MM = 90;
+const VOLUME_HANDLE_EDGE_MM = 70;
 
 // Рама — четыре бруска по краю проёма, в середине толщины стены. Стекла нет:
 // сквозь окно видно фон, и это ровно то, чего просил заказчик.
@@ -546,11 +616,24 @@ function volumeWindowFrame(at, from, to, bottom, top, out) {
   }
 }
 
-// Полотно — одна двусторонняя грань от петли наружу, на четверть оборота: так
-// дверь рисуют на плане, так видно, какой кусок пола она занимает. Держать
-// человека она не должна (слова заказчика: «Проходим сквозь нарисованные
-// двери»), и в список препятствий не попадает — см. `volumeWallSolids`.
-function volumeDoorLeaf(wall, opening, span, out) {
+/**
+ * Полотно двери — одна двусторонняя грань от петли и ручка на ней.
+ *
+ * **Закрытое** стоит в самом проёме, в середине толщины стены: там же, где
+ * бруски рамы у окна, и ровно поэтому не спорит с гранями стены за порядок —
+ * совпавшие плоскости в сортировке по дальности решаются случаем, а полотно в
+ * середине стены от её сторон отодвинуто на полтолщины.
+ *
+ * **Раскрытое** уходит от петли на четверть оборота — так дверь рисуют на плане
+ * (`render.drawingDoorLeaf`), и так видно, какой кусок пола она занимает.
+ *
+ * Держать человека полотно не должно ни в том, ни в другом виде (слова
+ * заказчика: «Проходим сквозь нарисованные двери») и в список препятствий не
+ * попадает — см. `volumeWallSolids`. Закрытая дверь, сквозь которую проходят,
+ * выглядит странно, и об этом сказано вслух в отчёте: поведение заказчик не
+ * отменял, а менять его без его слова нельзя.
+ */
+function volumeDoorLeaf(wall, opening, span, out, open) {
   const vectors = wallVectors(wall);
   const width = span.to - span.from;
   if (!vectors || !(width > 0)) return out;
@@ -562,14 +645,36 @@ function volumeDoorLeaf(wall, opening, span, out) {
     y: Number(wall.aMm.y) + u.y * alongHinge,
   };
   const side = opening.swing === "right" ? -1 : 1;
-  const tip = { x: hinge.x + n.x * side * width, y: hinge.y + n.y * side * width };
+  const doorId = opening.id || null;
+  // Куда смотрит полотно: раскрытое — прочь от стены, закрытое — вдоль неё.
+  const leaf = open ? { x: n.x * side, y: n.y * side } : { x: u.x * (atStart ? 1 : -1), y: u.y * (atStart ? 1 : -1) };
+  const tip = { x: hinge.x + leaf.x * width, y: hinge.y + leaf.y * width };
   out.push(
     volumeFace(
       [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
       VOLUME_DOOR_RGB,
-      { both: true },
+      { both: true, doorId },
     ),
   );
+  // Ручка у свободного края полотна, на высоте, на которой её берут рукой
+  // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
+  // открывают с той стороны, с которой подошли.
+  const handleAt = {
+    x: tip.x - leaf.x * VOLUME_HANDLE_EDGE_MM,
+    y: tip.y - leaf.y * VOLUME_HANDLE_EDGE_MM,
+  };
+  const bottom = Math.max(span.bottom, VOLUME_HANDLE_MM - VOLUME_HANDLE_TALL_MM / 2);
+  const top = Math.min(span.top, bottom + VOLUME_HANDLE_TALL_MM);
+  if (top > bottom) {
+    volumePrismFaces(
+      volumeBoxCorners(handleAt, leaf, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
+      bottom,
+      top,
+      VOLUME_HANDLE_RGB,
+      out,
+      { doorId },
+    );
+  }
   return out;
 }
 
@@ -606,16 +711,30 @@ export function volumeArea(corners) {
   return Math.abs(sum) / 2;
 }
 
-// Обход приводится к часовому на экране: у пола нормаль обязана смотреть
-// вверх, и зависеть это от того, в какую сторону человек обводил комнату, не
-// должно. Ось `y` смотрит вниз, поэтому «по часовой на экране» — это
-// отрицательная знаковая площадь.
+/**
+ * Обход приводится к часовому на экране — тому единственному, при котором
+ * «левая» нормаль ребра смотрит **наружу** (соглашение `volumeFaceNormal` и
+ * `wallVectors`, второго в сборке нет). Зависеть это от того, в какую сторону
+ * человек обводил комнату или ставил вещь, не должно.
+ *
+ * **Знак здесь был обратный, и это дефект, найденный замером D32** (таск 150):
+ * функция возвращала обход против часовой, то есть у каждой призмы — у вещи
+ * чертежа, у тела метки — боковые нормали смотрели **внутрь**. Следствие
+ * видно глазами: ближняя сторона шкафа отсекалась как отвёрнутая, и вместо неё
+ * рисовалась дальняя — сквозь переднюю стенку шкафа был виден его задник. У
+ * плит пола и потолка нормаль задана прямо, поэтому их это не касалось, и
+ * тестами не ловилось: они считали грани, а не их направление.
+ *
+ * Ось `y` смотрит вниз, и при этой формуле у часового на экране обхода сумма
+ * **положительная**: проверено на квадрате, у которого наружу смотрят все
+ * четыре нормали.
+ */
 function volumeClockwise(corners) {
   let sum = 0;
   for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
     sum += corners[j].x * corners[i].y - corners[i].x * corners[j].y;
   }
-  return sum <= 0 ? corners : [...corners].reverse();
+  return sum >= 0 ? corners : [...corners].reverse();
 }
 
 /**
@@ -1402,6 +1521,10 @@ export function volumeLinkLines(links, anchorOf, out = []) {
  * плане: фильтр спрятал метку на плане — она не появляется и в объёме, иначе в
  * двух видах одного объекта пришлось бы держать два ответа на вопрос «что
  * показано». Без него берутся все метки схемы.
+ *
+ * `options.openDoorIds` — какие двери раскрыты (G207). Без него закрыты все, и
+ * это умолчание: состояние двери живёт в сеансе окна и в объект не попадает
+ * никогда (G68). Поэтому оно и приходит аргументом сборки, а не полем проёма.
  */
 export function volumeScene(project, schemeId, options = {}) {
   const scheme = findScheme(project, schemeId);
@@ -1412,7 +1535,7 @@ export function volumeScene(project, schemeId, options = {}) {
   if (walls.length === 0 && objects.length === 0) {
     // Без чертежа метку ставить не на что: ни стен, ни пола, ни потолка. Это
     // не потеря — объём и так говорит, что показывать нечего.
-    return { empty: true, notes: [], faces: [], solids: [], rooms: [], boundsMm: null, marks: [], unplaced: [] };
+    return { empty: true, notes: [], faces: [], solids: [], rooms: [], boundsMm: null, doors: [], marks: [], unplaced: [] };
   }
   const rooms = volumeRooms(project, schemeId);
   const schemeHeight = volumeHeightMm(project, schemeId, null);
@@ -1457,12 +1580,18 @@ export function volumeScene(project, schemeId, options = {}) {
     notes.push(outlinesInOrder(project, schemeId).length > 0 ? "noBridge" : "noRooms");
   }
   const solids = [];
+  // Все двери схемы: по этому списку хоткей «все двери» (G210) знает, что
+  // открывать, не спрашивая объект второй раз.
+  const doors = [];
   for (const wall of walls) {
     const openings = openingsInWall(project, wall.id);
+    for (const opening of openings) {
+      if (opening.kind === OPENING_KIND_DOOR && opening.id) doors.push(opening.id);
+    }
     const left = wallHeightOnSide(project, wall.id, "left");
     const right = wallHeightOnSide(project, wall.id, "right");
     const height = Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm;
-    volumeWallFaces(wall, openings, height, faces);
+    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
     for (const span of volumeWallSolids(wall, openings)) {
@@ -1509,9 +1638,33 @@ export function volumeScene(project, schemeId, options = {}) {
     heightMm: schemeHeight.mm,
     wallCount: walls.length,
     openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
+    doors,
     marks: marks.placed,
     unplaced: marks.unplaced,
   };
+}
+
+/**
+ * Какую дверь показывают (G207): ищется по полотну и ручке, сверху вниз — тем
+ * же порядком, которым рисовался кадр, только с конца. Запас промаха тот же,
+ * что у вещей: полотно в три метра занимает полкадра, а ручка — пару точек, и
+ * требовать попадания в саму дверь на другом конце коридора незачем.
+ */
+export function volumeDoorAt(polygons, x, y, slack = VOLUME_PICK_SLACK_PX) {
+  let near = null;
+  let gap = slack;
+  for (let index = polygons.length - 1; index >= 0; index -= 1) {
+    const polygon = polygons[index];
+    if (!polygon.door || polygon.stroke) continue;
+    if (volumePolygonHit(polygon.xy, x, y)) return polygon.door;
+    const centre = volumePolygonCentre(polygon.xy);
+    const distance = Math.hypot(centre.x - x, centre.y - y);
+    if (distance < gap) {
+      gap = distance;
+      near = polygon.door;
+    }
+  }
+  return near;
 }
 
 /** Где в объёме стоит метка — по её месту в сцене. `null` — не размещена. */
@@ -1658,6 +1811,61 @@ export function volumeStep(scene, at, dx, dy) {
 }
 
 /**
+ * Куда показали на полу: луч сквозь точку кадра до плоскости пола (G212,
+ * «при клике курсором позволяй перемещать»).
+ *
+ * `null` — луч идёт вверх или вдоль пола и ни во что не упирается: с обзора,
+ * который смотрит сверху всегда (`volumeAroundPitch`), такого не бывает, но
+ * отвечать на это выдуманной точкой нельзя.
+ *
+ * Считается **плоскостью пола, а не гранями сцены**: указывают на место, а не
+ * на поверхность, и нажатый кусок стены должен значить «туда, к этой стене», а
+ * не «на её гребень». Куда человек встанет на самом деле, решает `volumeMoveTo`.
+ */
+export function volumeFloorAt(camera, box, x, y) {
+  const basis = volumeBasis(camera);
+  const focal = volumeFocal(box);
+  const right = (x - box.width / 2) / focal;
+  const up = (box.height / 2 - y) / focal;
+  const direction = {
+    x: basis.fwd.x + basis.right.x * right + basis.up.x * up,
+    y: basis.fwd.y + basis.right.y * right + basis.up.y * up,
+    z: basis.fwd.z + basis.right.z * right + basis.up.z * up,
+  };
+  if (!(direction.z < -1e-6) || !(camera.at.z > 0)) return null;
+  const away = -camera.at.z / direction.z;
+  return { x: camera.at.x + direction.x * away, y: camera.at.y + direction.y * away };
+}
+
+/**
+ * Куда человек встанет, если показали сюда (G212).
+ *
+ * Правило одно на оба случая, и оно прямо от заказчика: **вплотную**. Показали
+ * в стену — тело выталкивается из неё и встаёт у её грани (`volumePush`, тот же
+ * счёт, что у ходьбы, — второго правила «где можно стоять» в сборке нет).
+ *
+ * Показали за пределы плана — точка сперва зажимается габаритом чертежа, и
+ * зажимается **внутрь на радиус тела**. Это не запас на всякий случай: габарит
+ * идёт по осевым линиям наружных стен, и зажатая ровно по нему точка попадает в
+ * середину стены, где выталкивать её равно выгодно в обе стороны — человек
+ * оказывался снаружи дома. Шаг внутрь даёт выталкиванию сторону, и выходит
+ * обещанное: человек у внутренней грани наружной стены.
+ */
+export function volumeMoveTo(scene, at) {
+  const bounds = scene && scene.boundsMm;
+  const inside = (value, min, max) => {
+    const from = min + VOLUME_BODY_MM;
+    const to = max - VOLUME_BODY_MM;
+    if (!(to > from)) return (min + max) / 2;
+    return Math.max(from, Math.min(to, value));
+  };
+  const point = bounds
+    ? { x: inside(at.x, bounds.minX, bounds.maxX), y: inside(at.y, bounds.minY, bounds.maxY) }
+    : { x: at.x, y: at.y };
+  return volumePush((scene && scene.solids) || [], point, VOLUME_BODY_MM);
+}
+
+/**
  * В каком помещении стоит человек — по контурам сцены, а не по `roomAtPoint`:
  * контуры здесь уже переведены в миллиметры, и спрашивается это на каждом
  * шаге. Окно называет комнату вслух — заказчик про обзор сказал «без него не
@@ -1723,19 +1931,72 @@ function volumeToCamera(point, eye, basis) {
  * мелкая погрешность, а клякса на весь кадр.
  */
 export function volumeClipNear(points, near = VOLUME_NEAR_MM) {
-  const out = [];
-  for (let index = 0; index < points.length; index += 1) {
-    const a = points[index];
-    const b = points[(index + 1) % points.length];
-    const aIn = a.z >= near;
-    const bIn = b.z >= near;
-    if (aIn) out.push(a);
-    if (aIn !== bIn) {
-      const t = (near - a.z) / (b.z - a.z);
-      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: near });
+  return volumeClipDepth(points, near, Infinity);
+}
+
+/**
+ * Отсечение многоугольника слоем глубины `[near, far]` — тем же обходом рёбер,
+ * что ближней плоскостью, только с двумя сторонами.
+ *
+ * Этим режутся ломти (`VOLUME_DEPTH_SLAB_MM`): кусок грани, лежащий между двумя
+ * плоскостями равной дальности, остаётся плоским многоугольником и считается
+ * дальше как обычная грань.
+ */
+export function volumeClipDepth(points, near = VOLUME_NEAR_MM, far = Infinity) {
+  const side = (list, keep, cut) => {
+    const out = [];
+    for (let index = 0; index < list.length; index += 1) {
+      const a = list[index];
+      const b = list[(index + 1) % list.length];
+      const aIn = keep(a);
+      const bIn = keep(b);
+      if (aIn) out.push(a);
+      if (aIn !== bIn) out.push(cut(a, b));
     }
+    return out;
+  };
+  let poly = side(
+    points,
+    (point) => point.z >= near,
+    (a, b) => {
+      const t = (near - a.z) / (b.z - a.z);
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: near };
+    },
+  );
+  if (!(far < Infinity) || poly.length < 3) return poly;
+  poly = side(
+    poly,
+    (point) => point.z <= far,
+    (a, b) => {
+      const t = (far - a.z) / (b.z - a.z);
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: far };
+    },
+  );
+  return poly.length < 3 ? [] : poly;
+}
+
+/**
+ * Куски грани по ломтям глубины. Грань, целиком лежащая в одном ломте (а это
+ * почти всякая стена, на которую смотрят в лицо), возвращается как есть — одним
+ * куском и без единого лишнего многоугольника.
+ */
+export function volumeDepthSlabs(points, step = VOLUME_DEPTH_SLAB_MM) {
+  if (!(step > 0) || points.length < 3) return [points];
+  let min = Infinity;
+  let max = -Infinity;
+  for (const point of points) {
+    if (point.z < min) min = point.z;
+    if (point.z > max) max = point.z;
   }
-  return out;
+  const first = Math.floor(min / step);
+  const last = Math.floor(max / step);
+  if (first === last) return [points];
+  const out = [];
+  for (let index = first; index <= last; index += 1) {
+    const piece = volumeClipDepth(points, index * step, (index + 1) * step);
+    if (piece.length >= 3) out.push(piece);
+  }
+  return out.length > 0 ? out : [points];
 }
 
 /**
@@ -1758,14 +2019,11 @@ export function volumeFrame(scene, camera, box, extra = null) {
   const halfWidth = box.width / 2;
   const halfHeight = box.height / 2;
   const polygons = [];
-  const take = (face) => {
-    const screen = volumeFacePolygon(face, camera, basis, focal, halfWidth, halfHeight, box);
-    if (screen) polygons.push(screen);
-  };
+  const take = (face) => volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, polygons);
   for (const face of scene.faces) take(face);
   for (const face of extra || []) take(face);
   polygons.sort((a, b) => (a.layer === b.layer ? b.depth - a.depth : a.layer - b.layer));
-  return volumeHostOrder(polygons);
+  return volumeOutlineOrder(volumeHostOrder(polygons));
 }
 
 /**
@@ -1816,6 +2074,18 @@ function volumeHostOrder(polygons) {
     deferred = true;
   }
   if (!deferred) return polygons;
+  return volumeReorder(polygons, waiting);
+}
+
+/**
+ * Перестановка очереди: `waiting` — карта «за каким многоугольником встать» →
+ * список тех, кто встаёт за ним. Всё остальное сохраняет свой порядок.
+ *
+ * Одна на две надобности — вещь за своим куском стены (`volumeHostOrder`) и
+ * контур за своим телом (`volumeOutlineOrder`): это одно и то же действие, и
+ * двух его списаний в сборке быть не должно.
+ */
+function volumeReorder(polygons, waiting) {
   const moved = new Set();
   for (const list of waiting.values()) for (const index of list) moved.add(index);
   const out = [];
@@ -1827,10 +2097,59 @@ function volumeHostOrder(polygons) {
   return out;
 }
 
-// Одна грань в экранный многоугольник — или `null`, если её не видно:
-// отвёрнута, целиком за ближней плоскостью или целиком за краем окна.
-function volumeFacePolygon(face, camera, basis, focal, halfWidth, halfHeight, box) {
-  if (face.line) return volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box);
+/**
+ * Контур вещи рисуется **сразу после её тела**, и это правило, а не дальность.
+ *
+ * Контур поднят над лицом вещи на миллиметр (`VOLUME_VIEW_LIFT_MM`) — то есть
+ * лежит в плоскости, параллельной лицу. Сортировка по средней дальности на
+ * таком зазоре ничего не решает: у решётки бризера свои точки стоят не там, где
+ * середина его плашки, и при взгляде вкось средняя дальность контура бывает
+ * больше средней дальности тела. Тогда тело закрашивает собственный контур — тот
+ * самый дефект живого прогона таска 148, у которого от решётки оставался один
+ * индикатор. Миллиметровым зазором он лечится только случайно, поэтому порядок
+ * здесь назван прямо.
+ */
+function volumeOutlineOrder(polygons) {
+  let bodies = null;
+  for (let index = 0; index < polygons.length; index += 1) {
+    const polygon = polygons[index];
+    if (polygon.stroke || !polygon.pick) continue;
+    if (!bodies) bodies = new Map();
+    bodies.set(polygon.pick, index);
+  }
+  if (!bodies) return polygons;
+  const waiting = new Map();
+  let deferred = false;
+  for (let index = 0; index < polygons.length; index += 1) {
+    const polygon = polygons[index];
+    if (!polygon.stroke || !polygon.pick) continue;
+    const at = bodies.get(polygon.pick);
+    if (at === undefined || at <= index) continue;
+    let list = waiting.get(at);
+    if (!list) waiting.set(at, (list = []));
+    list.push(index);
+    deferred = true;
+  }
+  return deferred ? volumeReorder(polygons, waiting) : polygons;
+}
+
+/**
+ * Одна грань в экранные многоугольники. Пусто — её не видно: отвёрнута, целиком
+ * за ближней плоскостью или целиком за краем окна.
+ *
+ * Многоугольников бывает несколько: грань, уходящая от камеры вдаль, режется
+ * ломтями глубины (`VOLUME_DEPTH_SLAB_MM`), и каждый кусок едет в очереди со
+ * своей дальностью. Ломтями режется только **ярус тел** — стены, вещи, полотна:
+ * у плиты и у полов с потолками порядок решает ярус, а не дальность, и спорить
+ * им не о чем (пол всегда ниже глаз, потолок всегда выше, в кадре они не
+ * перекрываются никогда).
+ */
+function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out) {
+  if (face.line) {
+    const line = volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box);
+    if (line) out.push(line);
+    return out;
+  }
   const first = face.p[0];
   const vx = camera.at.x - first.x;
   const vy = camera.at.y - first.y;
@@ -1841,36 +2160,42 @@ function volumeFacePolygon(face, camera, basis, focal, halfWidth, halfHeight, bo
     normal = { x: -normal.x, y: -normal.y, z: -normal.z };
     facing = -facing;
   }
-  if (facing <= 0) return null;
+  if (facing <= 0) return out;
   const clipped = volumeClipNear(face.p.map((point) => volumeToCamera(point, camera.at, basis)));
-  if (clipped.length < 3) return null;
-  const xy = [];
-  let depth = 0;
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const point of clipped) {
-    const scale = focal / point.z;
-    const x = halfWidth + point.x * scale;
-    const y = halfHeight - point.y * scale;
-    xy.push(x, y);
-    depth += point.z;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
+  if (clipped.length < 3) return out;
+  const fill = volumeFill(face.rgb, volumeShade(normal));
+  const pieces = face.layer === VOLUME_LAYER_BODY ? volumeDepthSlabs(clipped) : [clipped];
+  for (const piece of pieces) {
+    const xy = [];
+    let depth = 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const point of piece) {
+      const scale = focal / point.z;
+      const x = halfWidth + point.x * scale;
+      const y = halfHeight - point.y * scale;
+      xy.push(x, y);
+      depth += point.z;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    if (maxX < 0 || minX > box.width || maxY < 0 || minY > box.height) continue;
+    out.push({
+      xy,
+      depth: depth / piece.length,
+      layer: face.layer,
+      fill,
+      pick: face.markId || null,
+      door: face.doorId || null,
+      host: face.host || null,
+      onHost: face.onHost || null,
+    });
   }
-  if (maxX < 0 || minX > box.width || maxY < 0 || minY > box.height) return null;
-  return {
-    xy,
-    depth: depth / clipped.length,
-    layer: face.layer,
-    fill: volumeFill(face.rgb, volumeShade(normal)),
-    pick: face.markId || null,
-    host: face.host || null,
-    onHost: face.onHost || null,
-  };
+  return out;
 }
 
 /**
@@ -2043,44 +2368,167 @@ function volumePolygonCentre(xy) {
   return { x: sumX / count, y: sumY / count };
 }
 
-// ——— задник ——————————————————————————————————————————————————————————————
+// ——— фон: панорама вокруг дома ———————————————————————————————————————————
 //
-// Слова заказчика: «статичный фон с зелёным полем с небольшим количеством
-// деревьев, небом, солнцем и облаками». Он рисуется **один раз за кадром и в
-// перспективе не участвует** — это задник, а не сцена, и ни одна его точка не
-// проходит через камеру.
+// Слова заказчика (G208): «при повороте от 1 лица дом крутится, а фон нет, как
+// будто сам дом вращается на местности — не хорошо. А так же в зависимости от
+// вертикального наклона двигаются облака и солнце, они должны быть статичны.
+// Ну и вращаться в след за поворотом, то есть как реальный фон. И нарисуй
+// несколько деревьев и кустарников ближе».
 //
-// Единственное, за чем он следит, — строка горизонта (`volumeHorizon`): она
-// считается одним числом из наклона и не знает рысканья. Без неё поле и небо
-// стояли бы посреди окна, когда взгляд опущен в пол, и за краем пола виднелась
-// бы трава выше настоящего горизонта. Это не перспектива, а одно смещение.
+// Таск 146 рисовал задник **в экранных точках**: одно и то же дерево на одном и
+// том же месте кадра, что бы человек ни делал головой. Исполнитель назвал это
+// ценой решения, заказчик цену не принял — и правильно: от такого фона дом и
+// правда выглядит вертушкой на местности.
+//
+// ——— что здесь считается и почему это не вторая сцена —————————————————
+//
+// Фон — **бесконечно далёкая панорама**: у каждой вещи есть сторона света
+// (`az`, та же мера, что рысканье камеры) и высота над горизонтом (`rise`), а
+// места в метрах у неё нет вовсе. Точка панорамы попадает на экран **той же
+// камерой, что и сцена** (`volumeBasis`, `volumeFocal`), только без переноса:
+// направление не зависит от того, где стоит человек, — значит фон не
+// приближается шагами и не съезжает от хождения, но поворачивается вслед за
+// головой и наклоняется вслед за взглядом, как настоящий.
+//
+// Второй системы координат из этого не вышло: направление считается тремя
+// скалярными произведениями на тот же базис, а числа фона — два угла на вещь.
+// Ставить деревья **в саму сцену** далёкими плоскостями было бы дороже и
+// неправдивее: плоскость за окном участвовала бы в сортировке граней, лезла бы
+// в столкновения и в обзор сверху (где дом видно с крыши, а «задник» оказался
+// бы лежащим на земле листом), а деревьев за каждым окном нужно было бы ровно
+// столько, сколько окон. Панорама же одна на весь дом и не знает о нём ничего.
+//
+// ——— горизонт: формула та же, доказательство другое ————————————————————
+//
+// `volumeHorizon` считает строку горизонта одним числом из наклона и рысканья
+// не знает. В таске 146 это было **упрощением**, теперь это **следствие**:
+// направление с нулевой высотой над горизонтом даёт на экране
+// `y = height / 2 + focal · tg(pitch)` при любой стороне света — то есть ровно
+// ту же строку. Поэтому и небо спокойно при наклоне: оно не привязано к
+// горизонту долями своей высоты (от этого солнце и ездило), а стоит на своих
+// углах и едет вместе со всем кадром.
 
 const VOLUME_SKY_TOP = "#8dbfe6";
 const VOLUME_SKY_LOW = "#dceaf4";
 const VOLUME_FIELD_FAR = "#9cba78";
 const VOLUME_FIELD_NEAR = "#6b9450";
 const VOLUME_SUN = "#fff3c4";
+const VOLUME_SUN_HALO = "rgba(255, 243, 196, 0.35)";
 const VOLUME_CLOUD = "#ffffff";
 const VOLUME_TRUNK = "#6b5134";
+const VOLUME_CROWN_FAR = "#6f8f5a";
 const VOLUME_CROWN = "#4f7a3c";
+const VOLUME_CROWN_DARK = "#3f6632";
+const VOLUME_BUSH = "#5c8a41";
 
-// Доли ширины окна и высоты неба. Числа постоянные: задник один и тот же в
-// любом кадре, и двигаться ему незачем.
+/** Ближе этого направление считается ушедшим за край: делить на нуль нельзя. */
+const VOLUME_SKY_NEAR = 0.08;
+
+/**
+ * Солнце: сторона света и высота над горизонтом в градусах, угловой радиус —
+ * тоже в градусах. Высота небольшая (14°): при взгляде прямо и поле зрения 90°
+ * по длинной стороне окна на вертикаль остаётся около ±22°, и солнце, повешенное
+ * высоко, не попадало бы в кадр вовсе.
+ */
+const VOLUME_SUN_AT = { az: 205, rise: 14, size: 2.1 };
+
+/** Облака: сторона света, высота, угловой размер. */
 const VOLUME_CLOUDS = [
-  { x: 0.14, lift: 0.62, size: 0.075 },
-  { x: 0.37, lift: 0.78, size: 0.055 },
-  { x: 0.62, lift: 0.58, size: 0.095 },
-  { x: 0.86, lift: 0.8, size: 0.06 },
-];
-const VOLUME_TREES = [
-  { x: 0.08, size: 0.055 },
-  { x: 0.22, size: 0.035 },
-  { x: 0.46, size: 0.045 },
-  { x: 0.68, size: 0.03 },
-  { x: 0.91, size: 0.05 },
+  { az: 25, rise: 16, size: 7 },
+  { az: 70, rise: 9, size: 5 },
+  { az: 120, rise: 18, size: 8 },
+  { az: 165, rise: 11, size: 5.5 },
+  { az: 240, rise: 15, size: 6.5 },
+  { az: 285, rise: 8, size: 4.5 },
+  { az: 320, rise: 19, size: 7.5 },
 ];
 
-export function volumeDrawBackdrop(ctx, box, horizonY) {
+/**
+ * Деревья и кустарники. `rise` — высота **основания**: ноль значит «стоит на
+ * горизонте», то есть далеко, отрицательное — ближе к дому, потому что земля у
+ * ног уходит вниз. `size` — угловая высота вещи. Три вида (круглая крона, ель,
+ * куст) и три дальности: ближние заказчик просил прямо, дальние держат горизонт
+ * обжитым, когда смотришь между ближними.
+ */
+const VOLUME_TREES = [
+  // дальний ряд по всему кругу
+  { az: 10, rise: 0, size: 3.4, kind: "tree" },
+  { az: 48, rise: 0, size: 2.6, kind: "spruce" },
+  { az: 95, rise: 0, size: 3.8, kind: "tree" },
+  { az: 140, rise: 0, size: 2.8, kind: "spruce" },
+  { az: 185, rise: 0, size: 3.2, kind: "tree" },
+  { az: 228, rise: 0, size: 2.4, kind: "tree" },
+  { az: 262, rise: 0, size: 3.6, kind: "spruce" },
+  { az: 305, rise: 0, size: 2.9, kind: "tree" },
+  { az: 345, rise: 0, size: 3.1, kind: "spruce" },
+  // средний ряд
+  { az: 30, rise: -2.2, size: 9, kind: "spruce" },
+  { az: 112, rise: -2.6, size: 10.5, kind: "tree" },
+  { az: 200, rise: -2, size: 8.5, kind: "tree" },
+  { az: 275, rise: -2.8, size: 11, kind: "spruce" },
+  { az: 330, rise: -2.4, size: 9.5, kind: "tree" },
+  // ближний ряд — то, о чём просил заказчик
+  { az: 62, rise: -6.5, size: 19, kind: "tree" },
+  { az: 155, rise: -7.5, size: 21, kind: "spruce" },
+  { az: 248, rise: -6, size: 17.5, kind: "tree" },
+  { az: 352, rise: -7, size: 20, kind: "tree" },
+  // кустарники — ниже деревьев и ближе к земле
+  { az: 44, rise: -9, size: 6.5, kind: "bush" },
+  { az: 88, rise: -10.5, size: 7.5, kind: "bush" },
+  { az: 133, rise: -8.5, size: 6, kind: "bush" },
+  { az: 176, rise: -11, size: 8, kind: "bush" },
+  { az: 219, rise: -9.5, size: 7, kind: "bush" },
+  { az: 295, rise: -10, size: 7.5, kind: "bush" },
+  { az: 315, rise: -8.8, size: 6.2, kind: "bush" },
+];
+
+const DEG = Math.PI / 180;
+
+/**
+ * Прицел панорамы: базис камеры, фокус и середина окна. Считается один раз на
+ * кадр — все вещи фона смотрят через него.
+ */
+export function volumeSkyAim(camera, box) {
+  return {
+    basis: volumeBasis(camera),
+    focal: volumeFocal(box),
+    halfWidth: box.width / 2,
+    halfHeight: box.height / 2,
+  };
+}
+
+/**
+ * Направление панорамы в точку экрана. `null` — направление за спиной.
+ *
+ * `scale` — сколько экранных точек даёт один радиан углового размера рядом с
+ * этой точкой: им считаются размеры облака и дерева, и из него само собой
+ * выходит, что у края широкого окна вещи крупнее, чем в середине, — так же, как
+ * у граней сцены, и ровно потому, что камера одна и та же.
+ */
+export function volumeSkyPoint(aim, azimuthDeg, riseDeg) {
+  const rise = riseDeg * DEG;
+  const azimuth = azimuthDeg * DEG;
+  const flat = Math.cos(rise);
+  const direction = { x: flat * Math.cos(azimuth), y: flat * Math.sin(azimuth), z: Math.sin(rise) };
+  const { basis, focal } = aim;
+  const depth = direction.x * basis.fwd.x + direction.y * basis.fwd.y + direction.z * basis.fwd.z;
+  if (!(depth > VOLUME_SKY_NEAR)) return null;
+  const right = direction.x * basis.right.x + direction.y * basis.right.y + direction.z * basis.right.z;
+  const up = direction.x * basis.up.x + direction.y * basis.up.y + direction.z * basis.up.z;
+  const scale = focal / depth;
+  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale };
+}
+
+/**
+ * Фон кадра: небо с солнцем и облаками, поле и зелень по кругу.
+ *
+ * Рисуется до сцены и в её сортировке не участвует — ни одна точка фона не
+ * знает, где стоит человек. Возвращается строка горизонта: по ней окно рисует
+ * миникарту и подписи, и второго её счёта в сборке нет.
+ */
+export function volumeDrawBackdrop(ctx, box, camera) {
+  const horizonY = volumeHorizon(camera, box);
   const line = Math.max(-box.height, Math.min(box.height * 2, horizonY));
   const sky = ctx.createLinearGradient(0, Math.min(0, line - box.height), 0, line);
   sky.addColorStop(0, VOLUME_SKY_TOP);
@@ -2094,33 +2542,86 @@ export function volumeDrawBackdrop(ctx, box, horizonY) {
     ctx.fillStyle = field;
     ctx.fillRect(0, Math.max(0, line), box.width, box.height - Math.max(0, line));
   }
-  const skyHeight = Math.max(1, Math.min(line, box.height));
-  // Солнце и облака живут в небе, деревья стоят на горизонте.
+  const aim = volumeSkyAim(camera, box);
+  volumeDrawSun(ctx, aim);
+  for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, aim, cloud);
+  // Дальние раньше ближних: в этом порядке они и стоят в списке, и переставлять
+  // их нечем — у фона нет дальности, есть только порядок рисования.
+  for (const tree of VOLUME_TREES) volumeDrawTree(ctx, aim, tree);
+  return line;
+}
+
+function volumeDrawSun(ctx, aim) {
+  const at = volumeSkyPoint(aim, VOLUME_SUN_AT.az, VOLUME_SUN_AT.rise);
+  if (!at) return;
+  const radius = Math.max(4, VOLUME_SUN_AT.size * DEG * at.scale);
+  ctx.fillStyle = VOLUME_SUN_HALO;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius * 2.1, 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = VOLUME_SUN;
   ctx.beginPath();
-  ctx.arc(box.width * 0.79, line - skyHeight * 0.68, Math.max(8, box.width * 0.028), 0, Math.PI * 2);
+  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function volumeDrawCloud(ctx, aim, cloud) {
+  const at = volumeSkyPoint(aim, cloud.az, cloud.rise);
+  if (!at) return;
+  const radius = Math.max(4, cloud.size * DEG * at.scale * 0.4);
   ctx.fillStyle = VOLUME_CLOUD;
-  for (const cloud of VOLUME_CLOUDS) {
-    const radius = Math.max(6, box.width * cloud.size * 0.4);
-    const top = line - skyHeight * cloud.lift;
+  ctx.beginPath();
+  ctx.arc(at.x - radius, at.y, radius * 0.72, 0, Math.PI * 2);
+  ctx.arc(at.x, at.y - radius * 0.3, radius, 0, Math.PI * 2);
+  ctx.arc(at.x + radius, at.y, radius * 0.66, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Дерево, ель и куст — тремя кистями по одному и тому же правилу: основание на
+// своей высоте над горизонтом, высота угловая. Своей картинки у фона нет
+// нарочно: это рисунок за окном, а не часть чертежа.
+function volumeDrawTree(ctx, aim, tree) {
+  const base = volumeSkyPoint(aim, tree.az, tree.rise);
+  if (!base) return;
+  const height = Math.max(6, tree.size * DEG * base.scale);
+  const far = tree.rise === 0;
+  if (tree.kind === "bush") {
+    const radius = height * 0.5;
+    ctx.fillStyle = VOLUME_BUSH;
     ctx.beginPath();
-    ctx.arc(box.width * cloud.x - radius, top, radius * 0.72, 0, Math.PI * 2);
-    ctx.arc(box.width * cloud.x, top - radius * 0.3, radius, 0, Math.PI * 2);
-    ctx.arc(box.width * cloud.x + radius, top, radius * 0.66, 0, Math.PI * 2);
+    ctx.arc(base.x - radius * 0.8, base.y - radius * 0.6, radius * 0.62, 0, Math.PI * 2);
+    ctx.arc(base.x + radius * 0.75, base.y - radius * 0.5, radius * 0.56, 0, Math.PI * 2);
+    ctx.arc(base.x, base.y - radius * 0.95, radius * 0.78, 0, Math.PI * 2);
     ctx.fill();
+    return;
   }
-  for (const tree of VOLUME_TREES) {
-    const height = Math.max(10, box.height * tree.size);
-    const x = box.width * tree.x;
-    ctx.fillStyle = VOLUME_TRUNK;
-    ctx.fillRect(x - height * 0.07, line - height * 0.45, height * 0.14, height * 0.45);
-    ctx.fillStyle = VOLUME_CROWN;
-    ctx.beginPath();
-    ctx.arc(x, line - height * 0.62, height * 0.38, 0, Math.PI * 2);
-    ctx.fill();
+  ctx.fillStyle = VOLUME_TRUNK;
+  const trunk = Math.max(1, height * (tree.kind === "spruce" ? 0.05 : 0.08));
+  const trunkTop = base.y - height * (tree.kind === "spruce" ? 0.2 : 0.45);
+  ctx.fillRect(base.x - trunk / 2, trunkTop, trunk, base.y - trunkTop);
+  if (tree.kind === "spruce") {
+    ctx.fillStyle = far ? VOLUME_CROWN_FAR : VOLUME_CROWN_DARK;
+    const half = height * 0.27;
+    for (const level of [0, 1, 2]) {
+      const bottom = base.y - height * (0.18 + level * 0.26);
+      const top = bottom - height * 0.42;
+      const spread = half * (1 - level * 0.22);
+      ctx.beginPath();
+      ctx.moveTo(base.x - spread, bottom);
+      ctx.lineTo(base.x + spread, bottom);
+      ctx.lineTo(base.x, top);
+      ctx.closePath();
+      ctx.fill();
+    }
+    return;
   }
-  return line;
+  ctx.fillStyle = far ? VOLUME_CROWN_FAR : VOLUME_CROWN;
+  const radius = height * 0.34;
+  ctx.beginPath();
+  ctx.arc(base.x, base.y - height * 0.66, radius, 0, Math.PI * 2);
+  ctx.arc(base.x - radius * 0.72, base.y - height * 0.47, radius * 0.66, 0, Math.PI * 2);
+  ctx.arc(base.x + radius * 0.7, base.y - height * 0.5, radius * 0.6, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // ——— обзор со стороны ————————————————————————————————————————————————————
@@ -2199,9 +2700,14 @@ export function volumeAroundPitch(pitch, distance, liftMm) {
  * половину вопроса. Кружок лежит чуть выше пола и идёт **последним ярусом**,
  * поверх всего: ближняя стена под углом прячет за собой полосу пола метра в
  * три, и указатель, который она закрывает, бесполезен.
+ *
+ * Радиус — `VOLUME_MARKER_MM`, и он вдвое меньше прежнего (G212: «Позицию на
+ * схеме на обзорном виде сделай меньше»). Кружок в 320 мм на обзоре квартиры
+ * закрывал собой полметра пола — то есть ровно то место, куда человек
+ * собирался перейти кликом.
  */
-export function volumeMarkerFaces(at, yaw, out = []) {
-  const radius = 320;
+export function volumeMarkerFaces(at, yaw, out = [], radiusMm = VOLUME_MARKER_MM) {
+  const radius = radiusMm;
   const lift = 15;
   const circle = [];
   const steps = 14;
@@ -2213,15 +2719,15 @@ export function volumeMarkerFaces(at, yaw, out = []) {
     normal: { x: 0, y: 0, z: 1 },
     layer: VOLUME_LAYER_MARK,
   }));
-  const tip = { x: at.x + Math.cos(yaw) * radius * 2.1, y: at.y + Math.sin(yaw) * radius * 2.1, z: lift };
+  const tip = { x: at.x + Math.cos(yaw) * radius * 2.4, y: at.y + Math.sin(yaw) * radius * 2.4, z: lift };
   const left = {
-    x: at.x + Math.cos(yaw + Math.PI / 2) * radius * 0.55,
-    y: at.y + Math.sin(yaw + Math.PI / 2) * radius * 0.55,
+    x: at.x + Math.cos(yaw + Math.PI / 2) * radius * 0.62,
+    y: at.y + Math.sin(yaw + Math.PI / 2) * radius * 0.62,
     z: lift,
   };
   const right = {
-    x: at.x + Math.cos(yaw - Math.PI / 2) * radius * 0.55,
-    y: at.y + Math.sin(yaw - Math.PI / 2) * radius * 0.55,
+    x: at.x + Math.cos(yaw - Math.PI / 2) * radius * 0.62,
+    y: at.y + Math.sin(yaw - Math.PI / 2) * radius * 0.62,
     z: lift,
   };
   out.push(volumeFace(volumeClockwise([tip, left, right]).map((point) => ({ ...point, z: lift })), VOLUME_MARKER_RGB, {

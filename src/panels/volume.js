@@ -28,7 +28,7 @@
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
-import { layoutAllows } from "../app.js";
+import { PANEL_IDS, layoutAllows, registerPanel } from "../app.js";
 import {
   FULLSCREEN_EVENTS,
   canvasFrameLinks,
@@ -36,9 +36,10 @@ import {
   canvasFullscreenOn,
   canvasFullscreenSupported,
   canvasFullscreenToggle,
+  canvasHintInset,
 } from "../canvas.js";
-import { findRoom, findScheme } from "../model.js";
-import { visibleMarks } from "../render.js";
+import { findRoom, findScheme, schemeObjectsOnScheme, wallsOnScheme } from "../model.js";
+import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -49,6 +50,7 @@ import {
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_POINT,
   VOLUME_MARK_NO_SIZE,
+  VOLUME_MARKER_RGB,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_RUN_MM_S,
   VOLUME_START_PITCH_DEG,
@@ -60,14 +62,16 @@ import {
   volumeAroundPitch,
   volumeFreeMm,
   volumeBasis,
+  volumeDoorAt,
   volumeDraw,
   volumeDrawBackdrop,
+  volumeFloorAt,
   volumeFrame,
-  volumeHorizon,
   volumeLinkLines,
   volumeMarkAnchor,
   volumeMarkPlace,
   volumeMarkerFaces,
+  volumeMoveTo,
   volumePickAt,
   volumeRoomAt,
   volumeScene,
@@ -90,9 +94,53 @@ export function volumeKeyMove(code) {
   if (code === "KeyD") return { forward: 0, side: 1, turn: 0 };
   // Стрелки влево-вправо вертят, а не ходят: без мыши повернуться иначе нечем,
   // а боком ходят по A и D, как привыкли.
-  if (code === "ArrowLeft" || code === "KeyQ") return { forward: 0, side: 0, turn: -1 };
-  if (code === "ArrowRight" || code === "KeyE") return { forward: 0, side: 0, turn: 1 };
+  //
+  // **Q и E поворот больше не делают** (G207): E заказчик отдал двери, а Q
+  // оставлять в одиночестве нельзя — пара «Q влево, E вправо» тем и была
+  // хороша, что симметрична, а один Q читался бы как опечатка. Поворот остался
+  // у стрелок, которыми его и делают без мыши.
+  if (code === "ArrowLeft") return { forward: 0, side: 0, turn: -1 };
+  if (code === "ArrowRight") return { forward: 0, side: 0, turn: 1 };
   return null;
+}
+
+/**
+ * Клавиши дверей (G207, G210). Вынесены сюда, чтобы о них можно было спросить
+ * тестом, а не читать обработчик.
+ *
+ * **E — дверь под рукой**, прямое слово заказчика. **R — все двери разом**, и
+ * выбор объясним: R не занят ничем, лежит на той же строке клавиатуры, под тем
+ * же пальцем, что E, а спутать их не страшно — обе правки живут в сеансе, обе
+ * обратимы тем же нажатием, и ни одна не касается объекта (G68). Соседние
+ * буквы, которые пришлось отвергнуть: W A S D и Shift ходят, V меняет вид, F
+ * вписывает схему, Q отдан вместе с E (см. `volumeKeyMove`).
+ */
+export const VOLUME_DOOR_KEY = "KeyE";
+export const VOLUME_DOORS_KEY = "KeyR";
+
+/**
+ * Alt он же Option (G211). Проверяется и по `key`, и по `code`: на Mac Option —
+ * модификатор ввода, и браузер, отдающий `key` вида «Dead» для следующей
+ * клавиши, сам Alt всё равно называет Alt'ом.
+ */
+export function volumeAltKey(event) {
+  return event.key === "Alt" || event.code === "AltLeft" || event.code === "AltRight";
+}
+
+/**
+ * Какие двери открыты после нажатия «все двери».
+ *
+ * Правило: **есть хоть одна закрытая — открываются все, иначе закрываются
+ * все.** В тикете сказано «открывает все закрытые и закрывает все открытые», и
+ * буквальное прочтение (вывернуть каждую наизнанку) здесь неверно: из
+ * вперемешку открытых дверей оно даёт другую смесь и никогда — «все закрыты»,
+ * то есть одной клавишей нельзя вернуться ни к одному из двух состояний,
+ * которые заказчик называл словами «открыть и закрыть все двери».
+ */
+export function volumeDoorsAfterAll(doors, open) {
+  const list = doors || [];
+  const closed = list.filter((id) => !open.has(id));
+  return closed.length > 0 ? list : [];
 }
 
 /** Наклон взгляда не заводится за отвес: вверх ногами смотреть незачем. */
@@ -115,6 +163,26 @@ export function volumeWhere(project, scene, at) {
   // стены, и подсказать тут можно только выход — обзор.
   if (volumeFreeMm(scene.solids, at.x, at.y) < VOLUME_TIGHT_MM) return place + " · " + strings.volume.tight;
   return place;
+}
+
+/**
+ * Место миникарты в поле (G212) или `null`, если показывать её негде.
+ *
+ * Левый нижний угол — слово заказчика. Пятая часть ширины поля, но не меньше
+ * 110 и не больше 220 точек: мельче плана не разобрать, крупнее — накладка
+ * начинает спорить с кадром. Высота идёт по пропорции чертежа и зажата третью
+ * высоты поля — вытянутая вверх квартира иначе дала бы полосу во весь бок.
+ *
+ * **На узком или низком поле миникарты нет вовсе.** Это и есть ответ на «проверь,
+ * что не загораживает вид»: накладка в треть кадра загораживает его по
+ * определению, и честнее не показывать её, чем показывать поверх комнаты.
+ */
+export function volumeMinimapBox(box, bounds) {
+  if (!bounds || !(bounds.widthMm > 0) || !(bounds.heightMm > 0)) return null;
+  if (box.width < 520 || box.height < 320) return null;
+  const width = Math.max(110, Math.min(220, box.width * 0.2));
+  const height = Math.max(70, Math.min(box.height * 0.3, (width * bounds.heightMm) / bounds.widthMm));
+  return { x: 14, y: box.height - height - 14, width, height };
 }
 
 /** Сколько неразмещённых меток окно называет по имени, прежде чем сказать «и ещё». */
@@ -160,6 +228,21 @@ export function volumeUnplacedTitle(unplaced) {
     .join(", ");
 }
 
+/**
+ * Строка про двери (G207, G210): сколько открыто и что с ними делают клавиши.
+ *
+ * Чистая и вынесена наружу по той же причине, что `volumeUnplacedLine`: строку,
+ * собранную в обработчике кадра, не проверяет ничто. Дверей в схеме нет вовсе —
+ * и строки нет: клавиша, которой нечего открывать, в подсказке лишняя.
+ */
+export function volumeDoorLine(doors, open, aimed) {
+  const list = doors || [];
+  if (list.length === 0) return "";
+  const count = list.filter((id) => open.has(id)).length;
+  const state = text("volume.doors", { open: count, count: list.length });
+  return aimed ? state + " " + strings.volume.doorAimed : state + " " + strings.volume.doorKeys;
+}
+
 /** Строки про то, чего в сцене не хватает. Порядок — порядок важности. */
 export function volumeNotes(scene) {
   const lines = [];
@@ -185,7 +268,12 @@ export function openVolume({ schemeId, api }) {
     const scheme = findScheme(state.project, schemeId);
     return scheme ? visibleMarks(state.project, scheme, state.filter) : [];
   };
-  const sceneOf = (state) => volumeScene(state.project, schemeId, { marks: sceneMarks(state) });
+  // Раскрытые двери (G207). Живут **в сеансе окна**: закрыл дверь в объёме — в
+  // файл не попадает ничего (G68), и объект после прогулки байт в байт тот же.
+  // Поэтому это и не поле проёма, а аргумент сборки сцены.
+  const openDoors = new Set();
+  const sceneOf = (state) =>
+    volumeScene(state.project, schemeId, { marks: sceneMarks(state), openDoorIds: openDoors });
 
   let scene = sceneOf(getState());
   let view = "around";
@@ -197,6 +285,14 @@ export function openVolume({ schemeId, api }) {
   let look = null; // перетаскивание мышью: {x, y}
   let locked = false;
   let denied = false;
+  // Где рука: точка поля под курсором (без захвата) — ею целятся в дверь.
+  let pointer = null;
+  // Дверь под рукой и дверь, по которой щёлкнули. Заказчик назвал оба способа:
+  // «по клику на них или когда наведён курсор».
+  let aimedDoor = null;
+  let heldDoor = null;
+  // Alt отпустил мышь, и по отпусканию Alt её надо забрать обратно (G211).
+  let altFree = false;
   // Последний кадр — он же ответ на «во что ткнули»: клик ищет метку в том, что
   // человек видит, а не в сцене. Второго способа считать попадание не заводим.
   let shown = [];
@@ -329,7 +425,9 @@ export function openVolume({ schemeId, api }) {
     ctx.clearRect(0, 0, node.width, node.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const spot = camera();
-    volumeDrawBackdrop(ctx, box, volumeHorizon(spot, box));
+    // Фон — настоящая панорама вокруг дома (G208): он знает о камере её
+    // направление и больше ничего, и поворачивается вслед за головой.
+    volumeDrawBackdrop(ctx, box, spot);
     if (scene.empty) {
       shown = [];
       return;
@@ -339,6 +437,74 @@ export function openVolume({ schemeId, api }) {
     const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
     shown = volumeFrame(scene, spot, box, [...overlay, ...marker]);
     volumeDraw(ctx, shown);
+    // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
+    if (view === "person") paintMinimap(box);
+    syncAim();
+  }
+
+  // ——— миникарта (G212) ———
+  //
+  // «а на виде от 1 лица сделай в левом нижнем углу миникарту — вид сверху».
+  // На ней **только план и местоположение** (прямой ответ заказчика: «Только
+  // схема и местоположение») — ни меток, ни подписей помещений: миникарта
+  // отвечает на «где я и куда смотрю», а что где висит, видно в самом кадре.
+  //
+  // Рисует её **тот же `drawDrawing`, что и план** (стены с толщиной, проёмы,
+  // объекты пола), через мост «пиксель равен миллиметру» — второй отрисовки
+  // чертежа в сборке нет. Буквы углов и подписи объектов отпадают сами: у них
+  // свои пороги в экранных точках, и на миникарте стена короче порога.
+
+  function paintMinimap(box) {
+    const place = volumeMinimapBox(box, scene.boundsMm);
+    if (!place) return;
+    const bounds = scene.boundsMm;
+    const state = getState();
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(place.x, place.y, place.width, place.height);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(31, 35, 40, 0.35)";
+    ctx.stroke();
+    ctx.clip();
+    const pad = 8;
+    const zoom = Math.min(
+      (place.width - pad * 2) / bounds.widthMm,
+      (place.height - pad * 2) / bounds.heightMm,
+    );
+    const view = {
+      zoom,
+      offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
+      offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
+    };
+    drawDrawing(ctx, { project: state.project, schemeId, bridge: drawingUnitBridge(view) });
+    // Местоположение и направление взгляда. Направление показать надо: без него
+    // точка отвечает на половину вопроса, и миникарта становится бесполезной.
+    const at = { x: view.offsetX + person.x * zoom, y: view.offsetY + person.y * zoom };
+    const colour = "rgb(" + VOLUME_MARKER_RGB.join(",") + ")";
+    const reach = 13;
+    ctx.beginPath();
+    ctx.moveTo(at.x + Math.cos(person.yaw) * reach, at.y + Math.sin(person.yaw) * reach);
+    ctx.lineTo(
+      at.x + Math.cos(person.yaw + 2.5) * reach * 0.8,
+      at.y + Math.sin(person.yaw + 2.5) * reach * 0.8,
+    );
+    ctx.lineTo(
+      at.x + Math.cos(person.yaw - 2.5) * reach * 0.8,
+      at.y + Math.sin(person.yaw - 2.5) * reach * 0.8,
+    );
+    ctx.closePath();
+    ctx.fillStyle = colour;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = colour;
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ——— выделение ———
@@ -393,11 +559,73 @@ export function openVolume({ schemeId, api }) {
 
   // Во что ткнули. Под захватом мыши курсора нет вовсе, и целятся серединой
   // поля — тем самым прицелом, которым в играх и целятся.
-  function pickAt(event) {
+  function atEvent(event) {
     const box = viewport();
-    if (locked) return volumePickAt(shown, box.width / 2, box.height / 2);
+    if (locked) return { x: box.width / 2, y: box.height / 2 };
     const rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0 };
-    return volumePickAt(shown, event.clientX - rect.left, event.clientY - rect.top);
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  function pickAt(event) {
+    const at = atEvent(event);
+    return volumePickAt(shown, at.x, at.y);
+  }
+
+  // ——— двери (G207, G210) ———
+  //
+  // «По умолчанию пусть все двери будут закрыты, по клику на них или когда
+  // наведён курсор, то по нажатию клавиши E надо открывать и закрывать дверь».
+  //
+  // Прицел у двери тот же, что у вещи: под захватом мыши — середина поля, без
+  // захвата — точка под курсором. Щелчок по двери её запоминает, и E работает,
+  // даже если рука уже съехала с полотна.
+
+  /** Куда смотрит рука: прицел под захватом, курсор без него. */
+  function aimPoint() {
+    const box = viewport();
+    if (locked) return { x: box.width / 2, y: box.height / 2 };
+    return pointer;
+  }
+
+  /** Дверь под рукой — по последнему нарисованному кадру. */
+  function syncAim() {
+    const at = aimPoint();
+    const found = at && !scene.empty ? volumeDoorAt(shown, at.x, at.y) : null;
+    if (found === aimedDoor) return;
+    aimedDoor = found;
+    syncHint();
+  }
+
+  // Сцена пересобирается целиком: дверь меняет грани стены, в которой стоит, и
+  // считать её заново дешевле, чем держать второй путь «подмени одно полотно».
+  // На объекте заказчика это 8 мс и происходит по нажатию клавиши, а не в кадре.
+  function rebuildScene() {
+    scene = sceneOf(getState()) || scene;
+    rebuildOverlay();
+    syncHint();
+    paint();
+  }
+
+  function toggleDoor(doorId) {
+    if (!doorId) return false;
+    if (openDoors.has(doorId)) openDoors.delete(doorId);
+    else openDoors.add(doorId);
+    heldDoor = doorId;
+    rebuildScene();
+    return true;
+  }
+
+  function toggleAllDoors() {
+    const doors = scene.doors || [];
+    if (doors.length === 0) {
+      notify(strings.volume.doorsNone, "info");
+      return;
+    }
+    const next = volumeDoorsAfterAll(doors, openDoors);
+    openDoors.clear();
+    for (const id of next) openDoors.add(id);
+    rebuildScene();
+    notify(next.length > 0 ? strings.volume.doorsOpened : strings.volume.doorsClosed, "info");
   }
 
   function redraw() {
@@ -523,7 +751,13 @@ export function openVolume({ schemeId, api }) {
       lookBy(event.movementX || 0, event.movementY || 0);
       return;
     }
-    if (!look) return;
+    const rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0 };
+    pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (!look) {
+      // Курсор просто ведут по полю — смотрим, не навели ли на дверь (G207).
+      syncAim();
+      return;
+    }
     const dx = event.clientX - look.x;
     const dy = event.clientY - look.y;
     look = { x: event.clientX, y: event.clientY, moved: look.moved || Math.hypot(dx, dy) > 2 };
@@ -539,18 +773,51 @@ export function openVolume({ schemeId, api }) {
     // (так же, как тап по пустому месту плана) и просит захват: это и есть «как
     // в игре». Отказ браузера не беда, перетаскивание никуда не делось.
     if (!scene.empty) {
-      const hit = pickAt(event);
+      const at = atEvent(event);
+      const hit = volumePickAt(shown, at.x, at.y);
       if (hit) {
         select(hit);
         return;
       }
+      // Щелчок по двери её запоминает — дальше ею распоряжается E. Сама дверь
+      // от клика не открывается: заказчик назвал клавишу, а клик — только
+      // способ показать, о какой двери речь.
+      const door = volumeDoorAt(shown, at.x, at.y);
+      if (door) {
+        heldDoor = door;
+        aimedDoor = door;
+        syncHint();
+        return;
+      }
       select(null);
+      // Клик по обзору переносит туда, куда показали (G212). Захват мыши в
+      // обзоре при этом не просится: у клика здесь появился свой смысл, а
+      // голову в обзоре водят перетаскиванием, как и раньше.
+      if (view === "around") {
+        const place = volumeFloorAt(camera(), viewport(), at.x, at.y);
+        if (place) {
+          const moved = volumeMoveTo(scene, place);
+          person.x = moved.x;
+          person.y = moved.y;
+          syncWhere();
+          paint();
+        }
+        return;
+      }
     }
-    if (locked || typeof stage.requestPointerLock !== "function") return;
+    if (locked) return;
+    grabPointer();
+  }
+
+  // Захват мыши. Браузер вправе отказать — и это не беда: перетаскивание
+  // никуда не делось, и вторым способом водить взглядом остаётся оно.
+  function grabPointer() {
+    if (typeof stage.requestPointerLock !== "function") return;
     try {
-      stage.requestPointerLock();
+      const got = stage.requestPointerLock();
+      if (got && typeof got.catch === "function") got.catch(() => {});
     } catch (error) {
-      // захват не дали — молчим: способ водить взглядом остаётся
+      // захват не дали — молчим
     }
   }
 
@@ -581,6 +848,20 @@ export function openVolume({ schemeId, api }) {
       if (typeof document.exitPointerLock === "function") document.exitPointerLock();
       return;
     }
+    // Alt (на Mac — Option) отпускает мышь, пока его держат (G211): «Показывай
+    // курсор не только по Esc но и по Alt\Option кнопкам». Отпустили — захват
+    // просится обратно, и щёлкать по полю для этого не надо.
+    //
+    // `preventDefault` здесь не ставится нарочно: Alt — системный модификатор
+    // ввода, и перехватывать его целиком значило бы ломать набор в других
+    // полях страницы. Нам нужно его нажатие, а не его смысл.
+    if (volumeAltKey(event)) {
+      if (locked) {
+        altFree = true;
+        if (typeof document.exitPointerLock === "function") document.exitPointerLock();
+      }
+      return;
+    }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.code === "KeyV") {
       event.preventDefault();
@@ -592,6 +873,17 @@ export function openVolume({ schemeId, api }) {
       fit();
       return;
     }
+    // Дверь под рукой или та, по которой щёлкнули (G207).
+    if (event.code === VOLUME_DOOR_KEY) {
+      event.preventDefault();
+      if (!toggleDoor(aimedDoor || heldDoor)) notify(strings.volume.doorAimless, "info");
+      return;
+    }
+    if (event.code === VOLUME_DOORS_KEY) {
+      event.preventDefault();
+      toggleAllDoors();
+      return;
+    }
     const known = volumeKeyMove(event.code) || event.code === "ShiftLeft" || event.code === "ShiftRight";
     if (!known) return;
     event.preventDefault();
@@ -600,11 +892,22 @@ export function openVolume({ schemeId, api }) {
   }
 
   function onKeyUp(event) {
+    // Отпустили Alt — мышь возвращается виду (G211). Если захвата и не было,
+    // просить его по отпусканию Alt нельзя: человек не звал его вовсе.
+    if (volumeAltKey(event)) {
+      if (!altFree) return;
+      altFree = false;
+      grabPointer();
+      return;
+    }
     keyStop(event.code);
   }
 
   function onBlur() {
     keyStop(null);
+    // Ушли с окна с зажатым Alt — его отпускание до нас не дойдёт, и ждать
+    // его нечего: иначе следующий Alt оказался бы «уже нажатым».
+    altFree = false;
   }
 
   function onResize() {
@@ -659,7 +962,7 @@ export function openVolume({ schemeId, api }) {
     }
     const base = view === "person" ? strings.volume.hintPerson : strings.volume.hintAround;
     const grab = locked ? strings.volume.hintLocked : strings.volume.hintGrab;
-    hint.textContent = base + " " + grab + " " + strings.volume.pickHint;
+    hint.textContent = base + " " + grab + " " + strings.volume.pickHint + " " + volumeDoorLine(scene.doors, openDoors, aimedDoor || heldDoor);
   }
 
   function sync() {
@@ -765,3 +1068,65 @@ export function openVolume({ schemeId, api }) {
 export function volumeAllowed(state) {
   return layoutAllows("viewVolume", state && state.layout);
 }
+
+/** Есть ли в схеме чертёж: без стен и объектов объёму показывать нечего. */
+export function volumeHasDrawing(project, schemeId) {
+  if (!project || !schemeId) return false;
+  return wallsOnScheme(project, schemeId).length > 0 || schemeObjectsOnScheme(project, schemeId).length > 0;
+}
+
+/**
+ * Кнопка «3D» над планом (G209): «Сверху справа на схеме есть кнопка
+ * полноэкранного режима — рядом добавь кнопку 3D которая тоже будет отображать
+ * это окно».
+ *
+ * Открывает **то же окно**, что кнопка «Объём» в строке схемы: `openVolume`
+ * один, и второго пути к объёму в сборке нет.
+ *
+ * Живёт она в своей точке монтирования, а не в общем наложении холста, и это не
+ * прихоть: наложение собирает `canvas.js`, а объём лежит в панелях, которые
+ * `canvas.js` импортируют, — положи кнопку туда, и сборка откажется склеивать
+ * модули по кругу (`build.js`, «Циклический импорт»). Точка та же по счёту, что
+ * у карточки метки в просмотре, и обходится она одной строкой в `index.html`.
+ *
+ * **Гаснет с причиной** (слова тикета): без чертежа кнопка не исчезает, а
+ * становится недоступной и говорит в подсказке, чего не хватает. Исчезни она —
+ * человек решил бы, что объём отвалился.
+ */
+function mountVolumeButton(host, api) {
+  const { getState, setState, notify, subscribe } = api;
+  const button = uiEl("button", {
+    class: "canvas-volume",
+    type: "button",
+    text: strings.volume.button,
+    on: {
+      click: () => {
+        const state = getState();
+        if (!state.schemeId) return;
+        openVolume({ schemeId: state.schemeId, api: { getState, setState, notify, subscribe } });
+      },
+    },
+  });
+  host.append(button);
+  const render = () => {
+    const state = getState();
+    const shown = Boolean(state.schemeId) && volumeAllowed(state);
+    button.hidden = !shown;
+    if (!shown) return;
+    const ready = volumeHasDrawing(state.project, state.schemeId);
+    if (ready) button.removeAttribute("disabled");
+    else button.setAttribute("disabled", "disabled");
+    const label = ready ? strings.volume.openHint : strings.volume.noDrawing;
+    button.title = label;
+    button.setAttribute("aria-label", strings.volume.open + " · " + label);
+    // Линейка занимает полосу сверху — мера отступа общая с кнопкой полного
+    // экрана, иначе кнопки встали бы на разной высоте.
+    button.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
+  };
+  subscribe((state, changed) => {
+    if ("schemeId" in changed || "guidesShown" in changed || "layout" in changed || "project" in changed) render();
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.canvasVolume, mountVolumeButton);

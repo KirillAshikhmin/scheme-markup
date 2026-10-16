@@ -52,12 +52,18 @@ import {
   VOLUME_LAYER_BODY,
   VOLUME_LAYER_GROUND,
   VOLUME_LAYER_MARK,
+  VOLUME_DOOR_RGB,
+  VOLUME_DEPTH_SLAB_MM,
+  VOLUME_HANDLE_RGB,
+  VOLUME_MARKER_MM,
   VOLUME_MARK_CEILING,
   VOLUME_MARK_LIFT_MM,
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_SIZE,
   VOLUME_MARK_ROOM,
   VOLUME_MARK_WALL,
+  VOLUME_OBJECT_RGB,
+  VOLUME_WALL_RGB,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_SELECT_COLOR,
@@ -66,6 +72,13 @@ import {
   volumeAroundFit,
   volumeAroundPitch,
   volumeClipNear,
+  volumeClipDepth,
+  volumeDepthSlabs,
+  volumeDoorAt,
+  volumeFloorAt,
+  volumeMoveTo,
+  volumeSkyAim,
+  volumeSkyPoint,
   volumeFill,
   volumeFocal,
   volumeFrame,
@@ -91,8 +104,13 @@ import {
 } from "../src/volume.js";
 import {
   VOLUME_UNPLACED_SHOWN,
+  volumeAltKey,
   volumeClampPitch,
+  volumeDoorLine,
+  volumeDoorsAfterAll,
+  volumeHasDrawing,
   volumeKeyMove,
+  volumeMinimapBox,
   volumeNotes,
   volumeUnplacedLine,
   volumeUnplacedTitle,
@@ -339,7 +357,17 @@ test("дверь оставляет дыру в препятствиях, окн
   assert.deepEqual(window.map((span) => [span.fromMm, span.toMm]), [[0, 4000]], "под окном стена");
 });
 
-test("у двери есть полотно, и оно двустороннее; у окна — рама", () => {
+// ——— двери (G207, G210, таск 150) —————————————————————————————————————
+//
+// Решение таска 146 отменено заказчиком: «По умолчанию пусть все двери будут
+// закрыты, по клику на них или когда наведён курсор, то по нажатию клавиши E
+// надо открывать и закрывать дверь, ну и на дверях ручки нарисуй».
+//
+// Главное, за чем здесь следят: состояние двери **в объект не попадает** — оно
+// живёт в сеансе окна и приходит аргументом сборки сцены (G68).
+
+/** Комната с дверью в первой стене и окном во второй. */
+function doorScene() {
   const scene = roomScene();
   let project = addOpening(scene.project, {
     wallId: scene.walls[0],
@@ -351,6 +379,7 @@ test("у двери есть полотно, и оно двустороннее;
     hinge: "start",
     swing: "left",
   }).project;
+  const doorId = project.openings[project.openings.length - 1].id;
   project = addOpening(project, {
     wallId: scene.walls[1],
     kind: "window",
@@ -359,14 +388,97 @@ test("у двери есть полотно, и оно двустороннее;
     heightMm: 1400,
     heightAboveFloorMm: 800,
   }).project;
-  const built = volumeScene(project, scene.schemeId);
+  return { ...scene, project, doorId };
+}
+
+const doorLeafOf = (built) => built.faces.find((face) => face.both && face.rgb[0] === VOLUME_DOOR_RGB[0]);
+
+test("дверь закрыта по умолчанию: полотно стоит в проёме, а не поперёк комнаты", () => {
+  const scene = doorScene();
+  const built = volumeScene(scene.project, scene.schemeId);
   const twoSided = built.faces.filter((face) => face.both);
   assert.equal(twoSided.length, 5, "одно полотно двери и четыре бруска рамы окна");
-  // Полотно раскрыто: оно уходит от стены, а не лежит в её плоскости. Стена
-  // идёт по y = −1500, значит полотно обязано отойти по y.
-  const leaf = twoSided.find((face) => face.rgb[0] === 176);
-  const spread = Math.max(...leaf.p.map((point) => Math.abs(point.y + 1500)));
-  assert.ok(spread > 800, "полотно раскрыто на четверть оборота, а не закрывает проём: " + spread);
+  const leaf = doorLeafOf(built);
+  // Стена идёт по y = −1500. Закрытое полотно лежит вдоль неё: от стены оно не
+  // отходит, а проём перекрывает по всей ширине.
+  const away = Math.max(...leaf.p.map((point) => Math.abs(point.y + 1500)));
+  assert.ok(away < 1, "закрытое полотно стоит в проёме: " + away);
+  const along = Math.max(...leaf.p.map((point) => point.x)) - Math.min(...leaf.p.map((point) => point.x));
+  assert.ok(Math.abs(along - 900) < 1, "перекрывает проём во всю ширину: " + along);
+  assert.equal(leaf.doorId, scene.doorId, "полотно знает свою дверь — ею распоряжается E");
+});
+
+test("у закрытой двери есть ручка, и она на высоте руки по обе стороны полотна", () => {
+  const scene = doorScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const handle = built.faces.filter((face) => face.rgb === VOLUME_HANDLE_RGB);
+  assert.ok(handle.length >= 5, "ручка — призма: бока, верх и низ, а не одна грань");
+  const zs = handle.flatMap((face) => face.p.map((point) => point.z));
+  assert.ok(Math.min(...zs) > 900 && Math.max(...zs) < 1200, "ручка на высоте руки: " + Math.min(...zs) + "…" + Math.max(...zs));
+  // Выступает на обе стороны полотна: дверь открывают с той стороны, с которой
+  // подошли. Полотно стоит по y = −1500, значит ручка обязана его перекрыть.
+  const ys = handle.flatMap((face) => face.p.map((point) => point.y));
+  assert.ok(Math.min(...ys) < -1500 && Math.max(...ys) > -1500, "ручка по обе стороны полотна");
+  for (const face of handle) assert.equal(face.doorId, scene.doorId, "ручка принадлежит своей двери");
+});
+
+test("названная дверь раскрывается, остальные остаются закрытыми", () => {
+  const scene = doorScene();
+  const closed = doorLeafOf(volumeScene(scene.project, scene.schemeId));
+  const open = doorLeafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set([scene.doorId]) }));
+  const spread = Math.max(...open.p.map((point) => Math.abs(point.y + 1500)));
+  assert.ok(spread > 800, "раскрытое полотно уходит от стены на четверть оборота: " + spread);
+  assert.ok(Math.max(...closed.p.map((point) => Math.abs(point.y + 1500))) < 1, "закрытое — нет");
+  // Чужое имя двери ничего не раскрывает: список — именной, а не «открыть всё».
+  const other = doorLeafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(["нет такой"]) }));
+  assert.ok(Math.max(...other.p.map((point) => Math.abs(point.y + 1500))) < 1);
+  assert.deepEqual(volumeScene(scene.project, scene.schemeId).doors, [scene.doorId], "сцена знает все двери схемы");
+});
+
+test("G68: состояние двери в объект не попадает ни при открытии, ни при закрытии", () => {
+  const scene = doorScene();
+  const before = JSON.stringify(scene.project);
+  volumeScene(scene.project, scene.schemeId);
+  volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set([scene.doorId]) });
+  assert.equal(JSON.stringify(scene.project), before, "объём только читает");
+});
+
+test("«все двери» одной клавишей: есть закрытая — открываются все, иначе закрываются все", () => {
+  const doors = ["a", "b", "c"];
+  assert.deepEqual(volumeDoorsAfterAll(doors, new Set()), doors, "все закрыты — открываем все");
+  assert.deepEqual(volumeDoorsAfterAll(doors, new Set(["b"])), doors, "одна открыта — открываем остальные");
+  assert.deepEqual(volumeDoorsAfterAll(doors, new Set(doors)), [], "все открыты — закрываем все");
+  assert.deepEqual(volumeDoorsAfterAll([], new Set()), [], "дверей нет — и делать нечего");
+});
+
+test("строка про двери считает открытые и называет клавиши, а без дверей молчит", () => {
+  assert.equal(volumeDoorLine([], new Set(), null), "");
+  const line = volumeDoorLine(["a", "b"], new Set(["a"]), null);
+  assert.match(line, /открыто 1 из 2/);
+  assert.match(line, /E/);
+  assert.match(line, /R/);
+  assert.match(volumeDoorLine(["a"], new Set(), "a"), /эту дверь/);
+});
+
+test("дверь ловится кликом по полотну и по ручке, а стена под ними — нет", () => {
+  const scene = doorScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const box = { width: 1200, height: 700 };
+  // Стоим в комнате и смотрим на стену с дверью: она по y = −1500, дверь на
+  // отступе 1500…2400 от начала стены (x = −2000), то есть около x = −50.
+  const camera = { at: { x: -50, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
+  const frame = volumeFrame(built, camera, box);
+  const found = volumeDoorAt(frame, box.width / 2, box.height / 2);
+  assert.equal(found, scene.doorId, "прицел в середине поля смотрит в дверь");
+  // Угол поля — стена, и дверью он быть не может: иначе E открывал бы двери,
+  // на которые никто не показывал.
+  assert.equal(volumeDoorAt(frame, 2, 2), null);
+});
+
+test("Alt он же Option: узнаётся и по имени клавиши, и по её коду", () => {
+  assert.equal(volumeAltKey({ key: "Alt", code: "AltLeft" }), true);
+  assert.equal(volumeAltKey({ key: "Dead", code: "AltRight" }), true, "на Mac Option правит ввод, но код у него свой");
+  assert.equal(volumeAltKey({ key: "a", code: "KeyA" }), false);
 });
 
 // ——— ходьба ———————————————————————————————————————————————————————————
@@ -530,6 +642,151 @@ test("в кадре пол и потолок лежат раньше стен, �
   }
 });
 
+// ——— D32: стены просвечивают (таск 150) ———————————————————————————————
+//
+// «иногда бывает что стены просвечивают, при определённом повороте, но обычно
+// всё норм». Порядок рисования решает средняя дальность грани, а перекрытие в
+// кадре — дальность в пикселе: у стены, уходящей от камеры вдаль, это разные
+// числа. Лекарство — ломти глубины (`VOLUME_DEPTH_SLAB_MM`).
+
+test("ломти глубины режут грань по общей сетке и ничего не теряют", () => {
+  const area = (points) => {
+    let sum = 0;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+      sum += points[j].x * points[i].z - points[i].x * points[j].z;
+    }
+    return Math.abs(sum) / 2;
+  };
+  // Грань, уходящая от камеры: по оси z она тянется от 500 до 1700 мм.
+  const quad = [
+    { x: -100, y: 0, z: 500 },
+    { x: 100, y: 0, z: 1700 },
+    { x: 100, y: 200, z: 1700 },
+    { x: -100, y: 200, z: 500 },
+  ];
+  const pieces = volumeDepthSlabs(quad, 250);
+  assert.equal(pieces.length, 5, "границы на 500, 750, 1000, 1250, 1500 и 1750 — пять кусков");
+  for (const piece of pieces) {
+    const zs = piece.map((point) => point.z);
+    assert.ok(Math.max(...zs) - Math.min(...zs) <= 250 + 1e-9, "кусок не толще ломтя — это и есть предел ошибки");
+  }
+  const whole = area(quad.map((point) => ({ x: point.x, z: point.z })));
+  const cut = pieces.reduce((sum, piece) => sum + area(piece.map((point) => ({ x: point.x, z: point.z }))), 0);
+  assert.ok(Math.abs(whole - cut) < 1e-6, "куски складываются в целую грань: " + whole + " против " + cut);
+  // Грань, целиком лежащая в одном ломте, не режется вовсе — ни одного лишнего
+  // многоугольника на всякую стену, на которую смотрят в лицо.
+  const flat = [
+    { x: 0, y: 0, z: 1000 },
+    { x: 500, y: 0, z: 1050 },
+    { x: 500, y: 0, z: 1100 },
+  ];
+  assert.equal(volumeDepthSlabs(flat, 250).length, 1);
+  // Отсечение слоем — то же, что ближней плоскостью, только с двух сторон.
+  assert.deepEqual(volumeClipDepth(quad, 0, Infinity), quad);
+  assert.equal(volumeClipDepth(quad, 2000, 3000).length, 0, "за слоем грани нет");
+});
+
+test("дальняя стена больше не рисуется поверх ближней вещи (D32)", () => {
+  // Стенд — тот самый случай, на котором «художник» врёт. Ближняя вещь уходит
+  // от камеры вдаль: её бок тянется с метра на пять, а серединой сидит на
+  // трёх — дальше стены, стоящей поперёк взгляда в двух метрах. По средним
+  // дальностям стена рисуется второй и закрашивает собой ту часть вещи, что
+  // лежит к камере ближе неё. Это и видно на снимке заказчика.
+  const base = planProject();
+  let project = ensureSchemeObjectKinds(base.project).project;
+  const kind = schemeObjectKindsInOrder(project)[0];
+  project = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    kindId: kind.id,
+    shape: "rect",
+    atMm: { x: 3000, y: -500 },
+    widthMm: 4000,
+    depthMm: 500,
+    heightMm: 2200,
+    heightAboveFloorMm: 0,
+  }).project;
+  project = addWall(project, {
+    schemeId: base.schemeId,
+    aMm: { x: 2050, y: -3000 },
+    bMm: { x: 2050, y: 3000 },
+    thicknessMm: 100,
+  }).project;
+  const built = volumeScene(project, base.schemeId);
+  const box = { width: 1432, height: 580 };
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: 0, pitch: 0 };
+  const frame = volumeFrame(built, camera, box);
+  const focal = volumeFocal(box);
+  // Точка кадра, в которой бок вещи стоит в полутора метрах от камеры: его
+  // плоскость y = −250 видна под долей −250/1500 от фокуса. Стена в этой точке
+  // лежит на двух метрах, то есть за вещью.
+  const px = box.width / 2 - (focal * 250) / 1500;
+  const py = box.height / 2 + 60;
+  const inside = (xy) => {
+    let hit = false;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i];
+      const ay = xy[i + 1];
+      const bx = xy[j];
+      const by = xy[j + 1];
+      if (ay > py !== by > py && px < ((bx - ax) * (py - ay)) / (by - ay) + ax) hit = !hit;
+    }
+    return hit;
+  };
+  const here = frame.filter((polygon) => !polygon.stroke && inside(polygon.xy));
+  const wallFill = volumeFill(VOLUME_WALL_RGB, volumeShade({ x: -1, y: 0, z: 0 }));
+  const sideFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: 1, z: 0 }));
+  assert.ok(
+    here.some((polygon) => polygon.fill === wallFill) && here.some((polygon) => polygon.fill === sideFill),
+    "в этой точке спорят бок вещи и дальняя стена — иначе стенд ничего не проверяет",
+  );
+  const last = here[here.length - 1];
+  assert.equal(last.fill, sideFill, "последним нарисован бок ближней вещи, а не стена за ней");
+  assert.ok(
+    Math.abs(last.depth - 1500) <= VOLUME_DEPTH_SLAB_MM,
+    "и это тот самый его кусок, который в этой точке и виден: " + Math.round(last.depth),
+  );
+});
+
+test("у призмы нормали смотрят наружу: видна ближняя сторона шкафа, а не его задник", () => {
+  // Дефект, найденный замером D32 (таск 150): обход приводился к обратному, и
+  // у всякой призмы — вещи чертежа, тела метки — боковые нормали смотрели
+  // внутрь. Ближняя сторона отсекалась как отвёрнутая, и вместо неё рисовалась
+  // дальняя. Плит пола и потолка это не касалось: у них нормаль задана прямо, —
+  // поэтому и тестами не ловилось.
+  const scene = roomScene();
+  const kinds = ensureSchemeObjectKinds(scene.project);
+  let project = kinds.project;
+  project = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: schemeObjectKindsInOrder(project)[0].id,
+    shape: "rect",
+    atMm: { x: 0, y: -800 },
+    widthMm: 1200,
+    depthMm: 400,
+    heightMm: 2000,
+    heightAboveFloorMm: 0,
+  }).project;
+  const built = volumeScene(project, scene.schemeId);
+  const sides = built.faces.filter((face) => face.rgb === VOLUME_OBJECT_RGB && face.n.z === 0);
+  for (const face of sides) {
+    const middle = {
+      x: face.p.reduce((sum, point) => sum + point.x, 0) / face.p.length,
+      y: face.p.reduce((sum, point) => sum + point.y, 0) / face.p.length,
+    };
+    // Наружу — значит от середины вещи (она стоит в x = 0, y = −800).
+    const away = (middle.x - 0) * face.n.x + (middle.y + 800) * face.n.y;
+    assert.ok(away > 0, "нормаль смотрит от вещи, а не в неё: " + JSON.stringify(face.n));
+  }
+  // И то же самое в кадре: стоя перед вещью, видим её ближнюю сторону.
+  const box = { width: 900, height: 600 };
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
+  const frame = volumeFrame(built, camera, box);
+  const faceFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: 1, z: 0 }));
+  const backFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: -1, z: 0 }));
+  assert.ok(frame.some((polygon) => polygon.fill === faceFill), "ближняя сторона в кадре есть");
+  assert.ok(!frame.some((polygon) => polygon.fill === backFill), "а дальней в нём нет");
+});
+
 test("отвёрнутые грани в кадр не попадают: изнутри комнаты видно её, а не коробку снаружи", () => {
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
@@ -588,17 +845,62 @@ test("через дверь видна соседняя комната, а не 
   assert.ok(far.length > 0, "за дверью должна быть видна настоящая соседняя комната");
 });
 
-test("задник держится горизонта и ничего не берёт у перспективы", () => {
+// ——— фон: настоящая панорама (G208, таск 150) ——————————————————————————
+//
+// «при повороте от 1 лица дом крутится, а фон нет, как будто сам дом вращается
+// на местности — не хорошо… Ну и вращаться в след за поворотом, то есть как
+// реальный фон».
+
+test("горизонт не зависит от рысканья — и это теперь следствие, а не упрощение", () => {
   const box = { width: 1200, height: 700 };
   const level = volumeHorizon({ yaw: 0, pitch: 0 }, box);
   assert.equal(level, box.height / 2, "на ровном взгляде горизонт посередине");
-  // Рысканье горизонта не трогает — это и значит «в перспективе не участвует».
   for (const yaw of [0, 1, 2, 3]) {
     assert.equal(volumeHorizon({ yaw, pitch: 0.3 }, box), volumeHorizon({ yaw: 0, pitch: 0.3 }, box));
   }
   // Опустили взгляд — горизонт поднялся, и поле ушло вниз.
   assert.ok(volumeHorizon({ yaw: 0, pitch: -0.5 }, box) < level);
   assert.ok(volumeHorizon({ yaw: 0, pitch: 0.5 }, box) > level);
+  // Главное: точка панорамы с нулевой высотой над горизонтом ложится **ровно**
+  // на эту строку при любой стороне света. Разойдись эти два счёта — деревья
+  // стояли бы не на горизонте, а над ним или под ним.
+  for (const pitch of [-0.4, -0.17, 0, 0.3]) {
+    const camera = { at: { x: 0, y: 0, z: 1600 }, yaw: 0.7, pitch };
+    const aim = volumeSkyAim(camera, box);
+    const line = volumeHorizon(camera, box);
+    for (const away of [-30, -10, 0, 12, 35]) {
+      const at = volumeSkyPoint(aim, 0.7 * 180 / Math.PI + away, 0);
+      assert.ok(at, "направление в поле зрения");
+      assert.ok(Math.abs(at.y - line) < 1e-6, "горизонт панорамы и volumeHorizon — одно число");
+    }
+  }
+});
+
+test("фон вращается вслед за поворотом, а небо при наклоне едет вместе со всем кадром", () => {
+  const box = { width: 1200, height: 700 };
+  const aim = (yaw, pitch) => volumeSkyAim({ at: { x: 0, y: 0, z: 1600 }, yaw, pitch }, box);
+  // Вещь, стоящая прямо по курсу, стоит в середине поля — при любом курсе.
+  for (const yaw of [0, 1.2, 3.4, 5.9]) {
+    const at = volumeSkyPoint(aim(yaw, 0), (yaw * 180) / Math.PI, 0);
+    assert.ok(Math.abs(at.x - box.width / 2) < 1e-6, "по курсу — середина поля");
+  }
+  // Повернули голову на 20° — вещь уехала в ту же сторону и ровно настолько же.
+  const straight = volumeSkyPoint(aim(0, 0), 0, 0);
+  const turned = volumeSkyPoint(aim((20 * Math.PI) / 180, 0), 0, 0);
+  assert.ok(turned.x < straight.x - 100, "фон едет за поворотом, а не стоит на месте кадра");
+  assert.ok(Math.abs(turned.y - straight.y) < 1e-6, "по вертикали при чистом повороте он не дёргается");
+  // Наклонили взгляд вниз — солнце ушло вверх ровно так же, как ушёл горизонт:
+  // никакого собственного хода у неба нет (это и значит «статичны»).
+  const flatSun = volumeSkyPoint(aim(0, 0), 0, 14);
+  const downSun = volumeSkyPoint(aim(0, -0.2), 0, 14);
+  const flatLine = volumeHorizon({ yaw: 0, pitch: 0 }, box);
+  const downLine = volumeHorizon({ yaw: 0, pitch: -0.2 }, box);
+  assert.ok(
+    Math.abs((downSun.y - downLine) / (flatSun.y - flatLine) - 1) < 0.2,
+    "солнце держится горизонта, а не долей высоты неба: " + (downSun.y - downLine) + " против " + (flatSun.y - flatLine),
+  );
+  // За спиной вещи нет вовсе: делить на нуль и рисовать её наизнанку нельзя.
+  assert.equal(volumeSkyPoint(aim(0, 0), 180, 0), null);
 });
 
 test("обзор вписывает всю схему и смотрит на неё сверху", () => {
@@ -786,6 +1088,71 @@ test("клавиши разложены по осям камеры, а стре�
   assert.deepEqual(volumeKeyMove("KeyA"), { forward: 0, side: -1, turn: 0 });
   assert.deepEqual(volumeKeyMove("ArrowLeft"), { forward: 0, side: 0, turn: -1 });
   assert.equal(volumeKeyMove("KeyZ"), null);
+  // E отдан двери (G207), Q ушёл вместе с ним: поворот остался у стрелок.
+  assert.equal(volumeKeyMove("KeyE"), null, "E больше не вертит — он открывает дверь");
+  assert.equal(volumeKeyMove("KeyQ"), null, "и Q не вертит: пара была симметричной, одиночка читалась бы опечаткой");
+  assert.equal(volumeKeyMove("KeyR"), null, "R занят всеми дверьми разом (G210)");
+});
+
+// ——— указатель, перенос кликом и миникарта (G212, таск 150) —————————————
+
+test("указатель «вы здесь» стал мельче, но остался указателем", () => {
+  const marker = volumeMarkerFaces({ x: 0, y: 0 }, 0);
+  const reach = Math.max(...marker.flatMap((face) => face.p.map((point) => Math.hypot(point.x, point.y))));
+  assert.ok(VOLUME_MARKER_MM < 320, "радиус меньше прежнего: " + VOLUME_MARKER_MM);
+  assert.ok(reach <= VOLUME_MARKER_MM * 2.5, "и вместе с ним укоротился треугольник взгляда: " + Math.round(reach));
+  assert.equal(marker.length, 2, "кружок и треугольник остались на месте");
+});
+
+test("клик по обзору переносит туда, куда показали, а в стену — вплотную к ней", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const box = { width: 1200, height: 700 };
+  // Обзор смотрит на середину комнаты сверху и сбоку (камера стоит по −x и
+  // выше пола): луч сквозь середину поля упирается в цель, а сквозь точку ниже
+  // — в пол ближе к камере.
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0, -Math.PI / 4, 9000);
+  const middle = volumeFloorAt(camera, box, box.width / 2, box.height / 2);
+  assert.ok(middle, "луч в пол упирается");
+  assert.ok(Math.hypot(middle.x, middle.y) < 50, "середина поля — середина комнаты: " + JSON.stringify(middle));
+  const lower = volumeFloorAt(camera, box, box.width / 2, box.height / 2 + 100);
+  assert.ok(lower.x < middle.x - 100, "точка ниже в кадре лежит ближе к камере: " + Math.round(lower.x));
+  // Взгляд вверх ни во что не упирается, и выдумывать точку нельзя.
+  assert.equal(volumeFloorAt({ at: { x: 0, y: 0, z: 1600 }, yaw: 0, pitch: 0.5 }, box, box.width / 2, 10), null);
+  // Показали в стену — встаём вплотную: комната 4 × 3 м со стенами в 200 мм,
+  // то есть внутренняя грань по y = −1400, и тело радиусом 220 мм встанет перед ней.
+  const inside = volumeMoveTo(built, { x: 0, y: -1450 });
+  assert.ok(inside.y > -1400 + VOLUME_BODY_MM - 1, "тело вытолкнуто из стены: " + Math.round(inside.y));
+  assert.ok(inside.y < -1400 + VOLUME_BODY_MM + 1, "и встало вплотную к ней, а не в середину комнаты");
+  // Показали далеко за пределы плана — то же правило: зажали габаритом и
+  // вытолкнули, человек оказался у внутренней грани наружной стены, а не
+  // снаружи дома (габарит идёт по осевым линиям стен — см. `volumeMoveTo`).
+  const far = volumeMoveTo(built, { x: 0, y: -40000 });
+  assert.ok(far.y >= -1400 + VOLUME_BODY_MM - 1, "за пределами плана — внутри дома: " + Math.round(far.y));
+  assert.ok(far.y < -1400 + VOLUME_BODY_MM + 220, "и вплотную к стене: " + Math.round(far.y));
+});
+
+test("миникарта живёт в левом нижнем углу и уходит с узкого поля", () => {
+  const bounds = { minX: -2000, minY: -1500, maxX: 2000, maxY: 1500, widthMm: 4000, heightMm: 3000 };
+  const box = { width: 1432, height: 580 };
+  const place = volumeMinimapBox(box, bounds);
+  assert.ok(place.x < 20, "прижата к левому краю");
+  assert.ok(place.y + place.height > box.height - 20, "и к нижнему");
+  assert.ok(place.width <= 220 && place.width >= 110, "шириной в пятую часть поля, но в своих пределах");
+  assert.ok(place.height <= box.height * 0.3 + 1, "и не выше трети поля");
+  // Узкое или низкое поле: честнее не показывать, чем загораживать комнату.
+  assert.equal(volumeMinimapBox({ width: 420, height: 580 }, bounds), null);
+  assert.equal(volumeMinimapBox({ width: 1432, height: 300 }, bounds), null);
+  // Нет габарита чертежа — нечего и рисовать.
+  assert.equal(volumeMinimapBox(box, null), null);
+});
+
+test("кнопка 3D знает, есть ли в схеме чертёж", () => {
+  const empty = planProject();
+  assert.equal(volumeHasDrawing(empty.project, empty.schemeId), false, "без стен и объектов показывать нечего");
+  const scene = roomScene();
+  assert.equal(volumeHasDrawing(scene.project, scene.schemeId), true);
+  assert.equal(volumeHasDrawing(null, null), false);
 });
 
 test("взгляд не заводится за отвес", () => {

@@ -423,12 +423,14 @@ body {
 }
 
 #canvas-host,
-#canvas-overlay {
+#canvas-overlay,
+#canvas-volume {
   position: absolute;
   inset: 0;
 }
 
-#canvas-overlay {
+#canvas-overlay,
+#canvas-volume {
   pointer-events: none;
 }
 
