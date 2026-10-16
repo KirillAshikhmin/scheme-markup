@@ -4899,6 +4899,12 @@ const DRAWING_LETTER_MIN_PX = 44;
  * она у угла одна на всех, и имя любой стены читается по её двум концам; напиши
  * имя вдоль стены, и смежность, ради которой буквы и заводились, пропала бы.
  *
+ * **Кружком, а не просто буквой.** Так на строительных чертежах обозначают
+ * координационные оси (ГОСТ 21.101), откуда взят и сам алфавит, — и так буква
+ * читается на тёмной стене: живым прогоном видно, что тёмная буква с тонкой
+ * обводкой на стене цвета `DRAWING_WALL` не читается вовсе. Кружок — это
+ * бумага под буквой, и на чёрно-белом листе он остаётся белым с контуром тушью.
+ *
  * Рисуется по **нарисованным** концам (`wallAt`), а не по записанным в объекте:
  * в мастерской стену тащат за ручку, и буква обязана ехать с углом, а не
  * оставаться там, где он был. Один угол — одна буква: совпавшие концы дают одно
@@ -4909,10 +4915,9 @@ function drawDrawingLetters(ctx, bridge, names, walls, wallAt) {
   const byWall = new Map(names.map((named) => [named.wallId, named]));
   const done = new Set();
   ctx.save();
-  ctx.font = drawFont(12, 700);
+  ctx.font = drawFont(11, 700);
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
-  ctx.lineWidth = 3;
   for (const wall of walls) {
     const named = byWall.get(wall.id);
     if (!named) continue;
@@ -4928,8 +4933,16 @@ function drawDrawingLetters(ctx, bridge, names, walls, wallAt) {
       const key = letter + "@" + Math.round(at.x) + ":" + Math.round(at.y);
       if (done.has(key)) continue;
       done.add(key);
-      ctx.strokeStyle = DRAWING_PAPER;
-      ctx.strokeText(letter, at.x, at.y);
+      // Кружок по букве, а не постоянный: двухбуквенный угол в него тоже
+      // обязан влезть, а не вылезти за края.
+      const radius = Math.max(9, ctx.measureText(letter).width / 2 + 3);
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = DRAWING_PAPER;
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = DRAWING_CAPTION;
+      ctx.stroke();
       ctx.fillStyle = DRAWING_EDGE;
       ctx.fillText(letter, at.x, at.y);
     }
@@ -5429,11 +5442,13 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     ctx.lineWidth = 1.2 * unit;
     ctx.strokeStyle = DRAWING_WALL;
     ctx.strokeRect(x, floor - wallHeight, width, wallHeight);
-    // Имя — у потолка: там, где у стены пусто. Подпись шире торца, и это
-    // нарочно — перегородка в сто миллиметров на листе уже трёх букв, а
-    // безымянный торец не отвечает на «какая именно это стена».
+    // Имя — под потолком: там, где у стены пусто, и на целую строку ниже
+    // верхней грани, чтобы подложка подписи не выедала её линию (видно только
+    // на снимке живого прогона). Подпись шире торца, и это нарочно:
+    // перегородка в сто миллиметров на листе уже трёх букв, а безымянный торец
+    // не отвечает на «какая именно это стена».
     if (cross.name) {
-      elevationText(ctx, cross.name, x + width / 2, floor - wallHeight + 9 * unit, "center", unit);
+      elevationText(ctx, cross.name, x + width / 2, floor - wallHeight + 13 * unit, "center", unit);
     }
   }
 
