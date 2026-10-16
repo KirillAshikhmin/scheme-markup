@@ -840,7 +840,10 @@ export function openTypesDictionary(api) {
     const summary = markSizesSummary(sizes);
     const button = uiButton(summary || strings.markSizes.typeButton, {
       class: "ui-btn dict__sizes" + (summary ? " is-set" : ""),
-      title: strings.markSizes.typeHint,
+      // Колонка у кнопки постоянной ширины (D30), и длинная подпись в ней
+      // ужимается многоточием — поэтому она же стоит в подсказке целиком:
+      // числа размеров не должны пропадать из-за меры колонки.
+      title: summary ? summary + " · " + strings.markSizes.typeHint : strings.markSizes.typeHint,
       on: {
         click: async () => {
           const picked = await openTypeSizesPicker(project(), type.id);
