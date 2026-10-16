@@ -3814,6 +3814,254 @@ export function drawingBoundsMm(project, schemeId) {
   return { minX, minY, maxX, maxY, widthMm: maxX - minX, heightMm: maxY - minY };
 }
 
+// ——— имена углов и стен ————————————————————————————————————————————————
+//
+// Требование G200, слова заказчика: «Стенам сделай наименования для каждой —
+// один край А, второй Б, то есть стена АБ, вторая стена, смежная с этой БВ. То
+// есть буквы присваиваются углам. Если стен много, то добавляй вторую букву —
+// АА-АБ и т.д.»
+//
+// **Буква принадлежит углу, а не стене** — в этом всё требование. Смежные
+// стены делят букву общего угла, и по именам видно, что они сходятся: АБ и БВ
+// встречаются в углу Б. Назови буквами сами стены — и соседство пропадёт.
+//
+// **Имена — производная, а не данные.** Здесь они считаются от чертежа и в
+// объект не пишутся ни одним полем (G68). Записанное имя разошлось бы с
+// геометрией при первой правке: передвинул конец стены — угол стал другим, а
+// буква осталась бы прежней и соврала.
+//
+// **Угол — это точка, в которой сошлись концы.** Концы стен совпадают точно,
+// миллиметр в миллиметр (ADR 008), поэтому угол находится равенством, без
+// допуска, и буква у него одна на всех сошедшихся. Стена, ни с кем не
+// сошедшаяся, получает свои две буквы: конец без соседа — тоже угол.
+
+/**
+ * Буквы обозначений — русский алфавит **без** Ё, З, Й, О, Х, Ц, Ч, Щ, Ъ, Ы, Ь.
+ *
+ * Список не придуман: ровно эти одиннадцать букв запрещает ГОСТ 21.101 для
+ * обозначения координационных осей на строительных чертежах — то есть для
+ * того же самого дела. У каждой свой изъян на бумаге: у Ё и Й точки и галочка
+ * пропадают при печати и копировании, З и О читаются как 3 и 0 среди размеров,
+ * Х похожа на знак умножения и на перечёркивание, Ц, Ч и Щ путаются друг с
+ * другом и с 4, а Ъ, Ы и Ь прописными не бывают вовсе и читаются как опечатка.
+ * Своего списка мы не заводим: чертёж попадает к монтажнику, который привык к
+ * осям по ГОСТу.
+ */
+export const WALL_LETTERS = "АБВГДЕЖИКЛМНПРСТУФШЭЮЯ";
+
+/**
+ * Буква угла по его номеру в обходе: `0` → «А», `21` → «Я», `22` → «АА».
+ *
+ * После алфавита идут двухбуквенные — так заказчик и сказал («добавляй вторую
+ * букву — АА-АБ»). Счёт бижективный, как у столбцов таблицы: после «АЯ» идёт
+ * «БА», после «ЯЯ» — «ААА». Двадцать две буквы дают 22 угла однобуквенными и
+ * 506 всего двумя — на квартиру и на дом с запасом.
+ */
+export function wallCornerLetter(index) {
+  const base = WALL_LETTERS.length;
+  let left = Math.floor(Number(index));
+  if (!(left >= 0)) return "";
+  let name = "";
+  do {
+    name = WALL_LETTERS[left % base] + name;
+    left = Math.floor(left / base) - 1;
+  } while (left >= 0);
+  return name;
+}
+
+/**
+ * Имя стены из букв её углов.
+ *
+ * Однобуквенные углы пишутся слитно — «стена АБ», как сказал заказчик;
+ * двухбуквенные через дефис — «АА-АБ», как он же их и записал. Дефис здесь не
+ * украшение: слитное «ААБ» читалось бы и как «АА + Б», и как «А + АБ», а по
+ * имени стены ещё предстоит привязывать метки руками (G202).
+ */
+export function wallNameOf(aLetter, bLetter) {
+  if (!aLetter || !bLetter) return "";
+  const long = aLetter.length > 1 || bLetter.length > 1;
+  return long ? aLetter + "-" + bLetter : aLetter + bLetter;
+}
+
+// Угол по координатам: ключ из целых миллиметров. Равенство, а не допуск —
+// ADR 008 платил за целые миллиметры ровно этим.
+function wallCornerKey(point) {
+  return Math.round(Number(point.x)) + ":" + Math.round(Number(point.y));
+}
+
+// Направление ребра — углом **по часовой от севера**: ось `y` на плане растёт
+// вниз, поэтому восток это +90°, юг +180°, запад +270°.
+function wallEdgeTurn(from, to) {
+  const turn = Math.atan2(to.x - from.x, -(to.y - from.y));
+  return turn < 0 ? turn + Math.PI * 2 : turn;
+}
+
+/**
+ * Углы чертежа с буквами — и то, из каких углов составлено имя каждой стены.
+ *
+ * **Устойчивость порядка здесь важнее всего остального.** Тот же чертёж обязан
+ * давать те же имена при каждом открытии: иначе ручная привязка метки к «стене
+ * БВ» однажды покажет на другую стену. Поэтому порядок считается **только от
+ * геометрии** — ни порядок стен в списке, ни направление, в котором их рисовали,
+ * на буквы не влияют.
+ *
+ * Правило взято у таска 130, где так же нормализован обход контура комнаты:
+ *
+ * 1. Стены разбираются на **граф**: узлы — углы, рёбра — сами стены. Несвязных
+ *    кусков может быть сколько угодно (отдельная перегородка, второй корпус).
+ * 2. Каждый кусок начинается с угла, **ближайшего к левому верхнему углу его
+ *    габарита**; при равенстве — тот, что выше, затем левее. Куски идут в том
+ *    же порядке по своим началам.
+ * 3. Из угла обход уходит по ребру, **первому по часовой от севера**, и так в
+ *    глубину, пока не кончатся непройденные стены; потом возвращается к
+ *    последнему углу, где они остались. Буква выдаётся углу при первой встрече.
+ *
+ * На простой комнате из четырёх стен это ровно обход по часовой: А в левом
+ * верхнем углу, дальше Б, В, Г — и стены читаются АБ, БВ, ВГ, АГ. На чертеже
+ * посложнее это уже не кольцо, а обход в глубину с ветками по часовой — но
+ * устойчивость от этого не зависит, а она и есть цена вопроса.
+ */
+function wallNaming(project, schemeId) {
+  const nodes = new Map();
+  const nodeAt = (point) => {
+    const key = wallCornerKey(point);
+    if (!nodes.has(key))
+      nodes.set(key, { key, x: Math.round(Number(point.x)), y: Math.round(Number(point.y)), links: [] });
+    return nodes.get(key);
+  };
+  const byWall = new Map();
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const a = nodeAt(wall.aMm);
+    const b = nodeAt(wall.bMm);
+    // Концов в одной точке у стены не бывает (`wallPointsSame`), но округление
+    // ключа теоретически может их сложить — такая стена ребром не становится.
+    if (a === b) continue;
+    const edge = { wallId: wall.id, a, b };
+    byWall.set(wall.id, edge);
+    a.links.push({ edge, to: b });
+    b.links.push({ edge, to: a });
+  }
+  for (const node of nodes.values()) {
+    node.links.sort(
+      (first, second) =>
+        wallEdgeTurn(node, first.to) - wallEdgeTurn(node, second.to) ||
+        first.to.y - second.to.y ||
+        first.to.x - second.to.x,
+    );
+  }
+  // Связные куски и начало каждого.
+  const taken = new Set();
+  const parts = [];
+  for (const node of nodes.values()) {
+    if (taken.has(node.key)) continue;
+    taken.add(node.key);
+    const stack = [node];
+    const group = [];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      group.push(current);
+      for (const link of current.links) {
+        if (taken.has(link.to.key)) continue;
+        taken.add(link.to.key);
+        stack.push(link.to);
+      }
+    }
+    parts.push({ group, start: wallPartStart(group) });
+  }
+  parts.sort((first, second) => first.start.y - second.start.y || first.start.x - second.start.x);
+  // Обход в глубину: буква выдаётся углу при первой встрече.
+  const corners = [];
+  const letters = new Map();
+  const order = new Map();
+  const give = (node) => {
+    if (letters.has(node.key)) return;
+    const letter = wallCornerLetter(corners.length);
+    order.set(letter, corners.length);
+    letters.set(node.key, letter);
+    corners.push({ letter, atMm: { x: node.x, y: node.y }, wallIds: node.links.map((link) => link.edge.wallId) });
+  };
+  for (const part of parts) {
+    give(part.start);
+    const used = new Set();
+    const stack = [part.start];
+    while (stack.length > 0) {
+      const node = stack[stack.length - 1];
+      const next = node.links.find((link) => !used.has(link.edge));
+      if (!next) {
+        stack.pop();
+        continue;
+      }
+      used.add(next.edge);
+      give(next.to);
+      stack.push(next.to);
+    }
+  }
+  const walls = new Map();
+  for (const [wallId, edge] of byWall) {
+    const aLetter = letters.get(edge.a.key) || "";
+    const bLetter = letters.get(edge.b.key) || "";
+    // Имя составлено **в порядке букв**, а не концов стены: иначе стена,
+    // нарисованная справа налево, звалась бы «БА», и одна комната читалась бы
+    // то так, то так. Концы при этом названы каждый своей буквой — развёртке
+    // нужно знать, какой угол у неё слева на листе.
+    const ahead = order.get(aLetter) <= order.get(bLetter);
+    walls.set(wallId, {
+      wallId,
+      aLetter,
+      bLetter,
+      name: ahead ? wallNameOf(aLetter, bLetter) : wallNameOf(bLetter, aLetter),
+    });
+  }
+  return { corners, walls };
+}
+
+// Начало обхода куска: угол, ближайший к левому верхнему углу его габарита.
+// Равенство разводится по «выше, затем левее» — на симметричной комнате до
+// угла габарита одинаково далеко сразу двум вершинам, и без этого правила
+// буквы зависели бы от порядка стен в списке.
+function wallPartStart(group) {
+  const minX = Math.min(...group.map((node) => node.x));
+  const minY = Math.min(...group.map((node) => node.y));
+  let best = null;
+  for (const node of group) {
+    const gap = Math.hypot(node.x - minX, node.y - minY);
+    const better =
+      best === null ||
+      gap < best.gap - 1e-9 ||
+      (gap <= best.gap + 1e-9 && (node.y < best.node.y || (node.y === best.node.y && node.x < best.node.x)));
+    if (better) best = { gap, node };
+  }
+  return best.node;
+}
+
+/**
+ * Углы чертежа схемы: `[{letter, atMm, wallIds}]` в порядке обхода (он же
+ * порядок букв). Пустой список — стен на схеме нет.
+ */
+export function wallCorners(project, schemeId) {
+  return wallNaming(project, schemeId).corners;
+}
+
+/**
+ * Имена стен схемы: `[{wallId, name, aLetter, bLetter}]` в порядке
+ * `wallsOnScheme`. Своей сортировки не заводить — порядок сущностей только из
+ * модели.
+ */
+export function wallNames(project, schemeId) {
+  const named = wallNaming(project, schemeId).walls;
+  return wallsOnScheme(project, schemeId)
+    .map((wall) => named.get(wall.id))
+    .filter(Boolean);
+}
+
+/** Имя одной стены — «АБ». Пустая строка, если стены такой нет. */
+export function wallName(project, wallId) {
+  const wall = findWall(project, wallId);
+  if (!wall) return "";
+  const named = wallNaming(project, wall.schemeId).walls.get(wallId);
+  return named ? named.name : "";
+}
+
 // ——— чертёж идёт за исправленным масштабом ——————————————————————————————
 //
 // Требование G186, таск 134. Слова заказчика: «если ошибся с масштабом то при
@@ -4877,6 +5125,115 @@ export function wallObjectsOn(project, wallId, side) {
   return found.sort((first, second) => first.fromMm - second.fromMm);
 }
 
+// ——— перпендикулярные стены на развёртке ——————————————————————————————
+//
+// Требование G201, слова заказчика: «На развёртке если в стене есть
+// перпендикулярная стена, то её надо рисовать». Монтажник обязан видеть, что
+// здесь угол, а не чистое поле: розетку в двадцати миллиметрах от угла не
+// поставить, а по пустой развёртке этого не узнать.
+//
+// **Строго 90° не требуется, и это решение, а не поблажка.** Квартиры бывают с
+// косыми стенами, и упирающаяся под 80° стена — такой же угол, как под 90°:
+// места у неё отнимается столько же. Исключается только то, что **почти вдоль**:
+// у такой стены торец размазывается по нашей стене в `толщина / sin угла`, и на
+// пятнадцати градусах это уже вчетверо — полоса читается не торцом, а участком
+// стены. Пятнадцать градусов — тот же шаг, которым встают направляющие при
+// рисовании (таск 49): стену, нарисованную «не вдоль этой», человек повернул
+// хотя бы на одну засечку.
+export const WALL_CROSS_MIN_DEG = 15;
+
+// Насколько стена должна выйти за нашу грань, чтобы её было видно с этой
+// стороны. Полмиллиметра — не допуск на совпадение концов (он не нужен, ADR
+// 008), а защита от шума поворота: координаты целые, а синусы с косинусами нет.
+const WALL_CROSS_OUT_MM = 0.5;
+
+// Насколько стена дотягивается до нашей грани. Концы стен цепочки совпадают
+// точно, но упирающуюся перегородку рисуют и «на глаз»: конец, не доехавший до
+// грани на сантиметр, — это неточность чертежа, а не проём, и молча терять
+// из-за неё целый угол нельзя. Сто миллиметров — самая тонкая перегородка,
+// какую строят (профиль 50, 75, 100): в щель у́же этого не встанет ничего, а
+// щель крупнее человек оставил нарочно.
+//
+// Число отвечает только на «дотянулась ли». **Место** торца считается по
+// настоящим размерам, без всякого запаса: раздутая полоса соврала бы о том,
+// сколько стены занято.
+export const WALL_CROSS_REACH_MM = 100;
+
+/**
+ * Стены, упирающиеся в эту стену и **видные с этой стороны** — торцом, на своём
+ * месте вдоль стены, с зеркальными по стороне отступами и со своим именем.
+ *
+ * Считается на месте, как и объекты на стене (`wallObjectsOn`): ссылок между
+ * стенами нет, соседство выражено геометрией (ADR 008), и поле «мои соседи»
+ * врало бы после первого же переноса стены.
+ *
+ * **Сторона решает и здесь.** Перегородка, упирающаяся справа, с левой стороны
+ * не видна — она за стеной. Поэтому в список идёт только та, что **выходит за
+ * нашу грань** на эту сторону; стена, прошедшая сквозь нашу, видна с обеих.
+ *
+ * **Место и ширина торца** считаются по пересечению оси соседки с плоскостью
+ * нашей грани: там она нашу стену и перекрывает. Ширина — `толщина / sin угла`:
+ * у перпендикулярной это ровно её толщина, у косой — больше, ровно настолько,
+ * насколько она косая. Столько места она и отнимает в жизни.
+ */
+export function wallCrossings(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  const vectors = wallVectors(wall);
+  if (!wall || !vectors) return [];
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const half = Number(wall.thicknessMm) / 2;
+  const length = wallLengthMm(wall);
+  const limit = Math.sin((WALL_CROSS_MIN_DEG * Math.PI) / 180);
+  // Поперечная координата нашей грани с этой стороны: `n` смотрит влево, и
+  // грань правой стороны лежит в минусе.
+  const face = view === "left" ? half : -half;
+  const named = wallNaming(project, wall.schemeId).walls;
+  const found = [];
+  for (const other of wallsOnScheme(project, wall.schemeId)) {
+    if (other.id === wallId) continue;
+    const cross = wallVectors(other);
+    if (!cross) continue;
+    // Синус угла между стенами — он же крутизна, с которой ось соседки
+    // переходит нашу толщину. Почти вдоль (меньше `WALL_CROSS_MIN_DEG`) — это
+    // не угол, а второй слой стены, и торца у неё не видно.
+    const slope = cross.u.x * vectors.n.x + cross.u.y * vectors.n.y;
+    if (Math.abs(slope) < limit) continue;
+    const thick = Number(other.thicknessMm);
+    const alongOf = (point) =>
+      (Number(point.x) - wall.aMm.x) * vectors.u.x + (Number(point.y) - wall.aMm.y) * vectors.u.y;
+    const acrossOf = (point) =>
+      (Number(point.x) - wall.aMm.x) * vectors.n.x + (Number(point.y) - wall.aMm.y) * vectors.n.y;
+    const fromA = acrossOf(other.aMm);
+    // Докуда по своей оси соседке идти до нашей грани. Отрицательное или
+    // больше длины — грань за её концом; на сто миллиметров это ещё угол.
+    const reach = (face - fromA) / slope;
+    if (reach < -WALL_CROSS_REACH_MM || reach > cross.len + WALL_CROSS_REACH_MM) continue;
+    // Видно ли её с этой стороны: торчит ли её тело за нашу грань наружу.
+    // Считается по настоящим концам — продлённая ось вылезла бы за дальнюю
+    // грань и показала бы слева то, что уткнулось справа.
+    const ends = [acrossOf(other.aMm), acrossOf(other.bMm)];
+    // Поперёк тело соседки шире оси на половину толщины, повёрнутую углом между
+    // стенами: у перпендикулярной торец параллелен нашей стене, и шире оси она
+    // не становится вовсе.
+    const spread = (thick / 2) * Math.abs(cross.n.x * vectors.n.x + cross.n.y * vectors.n.y);
+    const out = view === "left" ? Math.max(...ends) + spread : -(Math.min(...ends) - spread);
+    if (out <= half + WALL_CROSS_OUT_MM) continue;
+    const at = alongOf(other.aMm) + reach * (cross.u.x * vectors.u.x + cross.u.y * vectors.u.y);
+    const width = Math.abs(thick / slope);
+    const fromMm = Math.max(0, at - width / 2);
+    const toMm = Math.min(length, at + width / 2);
+    if (!(toMm - fromMm > 0)) continue;
+    const span = sideSpan(length, fromMm, toMm, view);
+    found.push({
+      wallId: other.id,
+      name: (named.get(other.id) || {}).name || "",
+      fromMm: Math.round(span.fromMm),
+      toMm: Math.round(span.toMm),
+    });
+  }
+  return found.sort((first, second) => first.fromMm - second.fromMm || (first.name < second.name ? -1 : 1));
+}
+
 /**
  * Развёртка стены с одной стороны — всё, что на ней есть, на своих местах.
  *
@@ -4962,9 +5319,17 @@ export function wallElevation(project, wallId, side = "left") {
   ];
   const roomId = wallRoomId(project, wallId, view);
   const room = roomId ? findRoom(project, roomId) : null;
+  const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
   return {
     wallId,
     side: view,
+    // Имя стены (G200) и буквы её углов — каждая на своём краю листа. Отсчёт с
+    // левой стороны зеркалится, и вместе с ним меняются местами углы: конец
+    // `a` уходит направо. Без этого подпись «А» стояла бы на листе у того
+    // угла, который на плане зовётся Б.
+    name: named.name,
+    fromLetter: view === "left" ? named.bLetter : named.aLetter,
+    toLetter: view === "left" ? named.aLetter : named.bLetter,
     lengthMm: length,
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
@@ -4977,6 +5342,8 @@ export function wallElevation(project, wallId, side = "left") {
     openings,
     marks,
     objects,
+    // Упирающиеся стены, видные с этой стороны (G201).
+    crossings: wallCrossings(project, wallId, view),
   };
 }
 
