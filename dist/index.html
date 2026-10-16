@@ -604,11 +604,24 @@
   border-color: var(--panel-line);
 }
 
-/* Значок фигуры (`render.shapeIcon`) в строке списка и на кнопке типа
-   не сжимается вместе с текстом. */
+/* Значок типа (`render.typeIcon`) в строке списка и на кнопке типа
+   не сжимается вместе с текстом — ни фигура точечного, ни образец линии. */
 .picker__row .shape-icon,
-.tools__type .shape-icon {
+.picker__row .line-icon,
+.tools__type .shape-icon,
+.tools__type .line-icon {
   flex: 0 0 auto;
+}
+
+/* Клетка знака постоянной ширины — та же мера на оба вида (`PICKER_ICON` в
+   typePicker.js). Образец линии втрое шире фигуры, и без клетки код с
+   названием уезжали бы на каждой линейной строке: это то же правило колонок,
+   каким выровнен справочник. */
+.picker__icon {
+  flex: 0 0 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .picker__code {
@@ -1434,7 +1447,15 @@
      набранного в кнопках текста. */
   --dict-gap: 6px;
   --dict-act: 36px;
-  --dict-count: 28px;
+  --dict-count: 36px;
+  /* Поле кода и кнопка размеров — такие же меры, как у хвоста (дефект D30).
+     Мерились в живом прогоне: поле кода «плавало» 203…306 px от строки к
+     строке, кнопка размеров 178…271 px по длине своей подписи, и из этой
+     разницы ехали все поля сразу — название начиналось то на 443-й точке, то
+     на 582-й. Колонок в строке одиннадцать, и свободной ширины у строки
+     ровно одна: тянуться имеет право **только название типа**. */
+  --dict-code: 120px;
+  --dict-sizes: 272px;
   /* Клетка знака: кнопка формы и кнопка начертания стоят в одной колонке и
      потому одной ширины. Мерой, а не числом в трёх местах, — по ней считает
      ширину и кнопка строки добавления категории. */
@@ -1522,13 +1543,17 @@
   padding: 4px 0;
 }
 
-/* Кнопка строки добавления занимает ровно хвост строки типа — счётчик, две
-   кнопки и промежутки между ними. Тогда остаток ширины, который забирают код,
-   название и категория, у обеих строк один, и всё до кнопки — значок, поля,
-   переключатель вида и знак — стоит колонка в колонку. */
+/* Кнопка строки добавления занимает ровно хвост строки типа — размеры,
+   счётчик, две кнопки и промежутки между ними. Тогда остаток ширины, который
+   забирает название, у обеих строк один, и всё до кнопки — значок, поля,
+   переключатель вида и знак — стоит колонка в колонку.
+
+   Колонка размеров в этом счёте и была потеряна (D30): строка добавления
+   кнопки размеров не имеет, и без неё её поля выходили на 95 px шире, чем у
+   строк типов, — видно на снимке живого прогона. */
 .dict__add {
   flex: none;
-  width: calc(var(--dict-count) + var(--dict-act) * 2 + var(--dict-gap) * 2);
+  width: calc(var(--dict-sizes) + var(--dict-count) + var(--dict-act) * 2 + var(--dict-gap) * 3);
 }
 
 /* То же самое для строки добавления категории, только хвост у строки категории
@@ -1556,17 +1581,50 @@
 }
 
 /* Код типа — до шестнадцати букв (`CODE_MAX_LENGTH`), поэтому поле шире
-   прежних двух знаков; длинное название типа ужимается рядом само. */
-.dict__code {
+   прежних двух знаков; длинное название типа ужимается рядом само.
+
+   Правило записано через строку (`.dict__row .dict__code`) нарочно, как и у
+   каналов: `.dict__code` само по себе слабее общего `.dict__row .ui-input
+   { flex: 1 }` — и проигрывало ему. Поле кода вело себя как второе поле
+   названия: делило с ним свободную ширину и в каждой строке получалось своей
+   (203, 211, 214 px — живой прогон таска 147, дефект D30). Это и значит
+   «таблица едет»: в строке, где подпись кнопки размеров длиннее, уезжают и
+   код, и название, и категория. */
+.dict__row .dict__code {
   flex: none;
-  width: 120px;
+  width: var(--dict-code);
+  min-width: var(--dict-code);
   text-align: center;
   font-weight: 700;
 }
 
+/* Выбор категории ширину не отдаёт и не берёт: мера у него своя — самое
+   длинное имя категории, одинаковое во всех строках, — а сжиматься заодно с
+   соседями он не должен. `flex: none` здесь ровно против этого: без него
+   строка с длинным хвостом ужимала селект, и названия категорий в соседних
+   строках стояли разной ширины. */
+.dict__row .ui-select {
+  flex: none;
+}
+
+/* Кнопка умолчаний размеров — своя колонка, а не ширина своей подписи. Подпись
+   у неё длиннее всех в строке («Д 450 · Ш 600 · Г −30 · В 1400 мм») и у каждого
+   типа своя: пока ширину диктовала она, из разницы в сотню точек ехала вся
+   таблица. Что не влезло — многоточием, а целиком подпись осталась в подсказке
+   кнопки: число размеров не теряется. */
+.dict__sizes {
+  flex: none;
+  width: var(--dict-sizes);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Счётчик меток — тоже мерой: четыре цифры (`MARK_NUMBER_MAX`) шире двух, и
+   без меры хвост строки с тысячей меток стоял бы не там, где у соседки. */
 .dict__count {
   flex: none;
-  min-width: var(--dict-count);
+  width: var(--dict-count);
   text-align: right;
   color: var(--panel-muted);
   font-size: 12px;
@@ -1612,6 +1670,16 @@
 
 .catalog__row:hover {
   background: var(--panel-bg-deep);
+}
+
+/* Клетка знака в строке общей базы: одна мера на фигуру точечного типа и на
+   образец линии линейного (`TYPES_CATALOG_ICON`). Без неё коды и названия
+   стоят лестницей — линейная строка шире точечной на весь образец. */
+.catalog__icon {
+  flex: 0 0 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Заголовок категории: её цвет задаёт панель, здесь только вес и воздух. */
@@ -4897,6 +4965,7 @@ const strings = {
     stairLight: "Подсветка лестницы",
     mirrorLight: "Подсветка зеркала",
     camera: "Камера",
+    vent: "Вентиляция",
     // Тип комментария один на всю категорию: код «Коммент» заказчик назвал сам.
     comment: "Комментарий",
   },
@@ -7686,6 +7755,23 @@ const TEMPLATE_TYPES = [
   { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander", sizes: { length: 40, width: 40, depth: 10, heightAboveFloor: 100 } },
   { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring", sizes: { length: 300, width: 60, depth: 25, heightAboveFloor: 1600 } },
   { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring", sizes: { length: 120, width: 80, depth: 70, heightAboveFloor: 2300 } },
+  // Вентиляция (G206). Слова заказчика: «это просто вентиляционный вентилятор,
+  // как обычно в санузлах ставят».
+  //
+  // **Знак** — горизонтальный прямоугольник с засечками: в палитре он и значит
+  // решётку («засечки поперёк корпуса делают его решёткой»), и не занят никем
+  // — ни в «Климате», где уже стоят полукруг с точкой, круг с термометром,
+  // залитый круг и капля, ни в чужой категории. Круг с тремя лучами —
+  // настоящий вентилятор — занят датчиком присутствия, и брать его значило бы
+  // завести объекту новое предупреждение на пустом месте (G145).
+  //
+  // **Числа** — у решётки канального вентилятора санузла: лицевая панель около
+  // 150 × 150 при канале Ø100. Выступ 25 мм — корпус сидит в канале, наружу
+  // выходит только панель; это не «механизм в подрозетнике» (10) и не
+  // «настенный прибор корпусом» (120…200), а встроенное с панелью. Высота
+  // 2300 — середина решётки: при потолке санузла 2500 её верх оказывается в
+  // 2375, то есть вплотную под потолком, как её и ставят.
+  { category: "climate", code: "ВЕНТ", name: strings.types.vent, shape: "rect-horizontal-ticks", sizes: { length: 150, width: 150, depth: 25, heightAboveFloor: 2300 } },
 ];
 
 function newId() {
@@ -7747,7 +7833,7 @@ function defaultTemplate() {
     // размеры, которые уже можно будет править». Метка их наследует, пока не
     // задала своё, и развёртка рисует вещь этим размером.
     //
-    // **Выступ от стены** (таск 139, G197) заполнен у всех сорока семи типов.
+    // **Выступ от стены** (таск 139, G197) заполнен у всех типов справочника.
     // Числа взяты у того, что ставят в квартире, и держатся трёх правил:
     // механизм в подрозетнике выходит наружу рамкой — десять миллиметров
     // (розетки, выключатели, панели); настенный прибор выступает своим
@@ -16698,6 +16784,18 @@ const VIEWS_CLIMATE = {
       viewLouvers(2, 0.1, 0.4, -0.3, 0.3),
     ),
   },
+  // Вентиляция: решётка канального вентилятора — рамка панели, круг рабочего
+  // колеса за ней и три жалюзи поперёк. Жалюзи не выходят за круг: на листе
+  // это одна вещь, а не решётка поверх кольца.
+  vent: {
+    shapes: ["rect-horizontal-ticks"],
+    mm: { width: 150, height: 150 },
+    parts: viewParts(
+      viewRect(-0.5, -0.5, 1, 1, 0.1),
+      viewCircle(0, 0, 0.3),
+      viewLouvers(3, -0.24, 0.24, -0.2, 0.2),
+    ),
+  },
   // Осушитель: напольная коробка с решёткой и каплей.
   dehumidifier: {
     shapes: ["drop-dot"],
@@ -18500,6 +18598,61 @@ function shapeIcon(shape, color, size = 22) {
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   if (ctx) drawShape(ctx, shape, size / 2, size / 2, size * 0.34, color);
   return canvas;
+}
+
+// Знак без цвета бывает у одной строки на всю сборку — у черновика нового
+// типа, которому ещё не выбрали категорию. Тот же приглушённый серый, которым
+// рисует его справочник: цвет знак всегда берёт у категории.
+const SIGN_COLOR_FALLBACK = "#57606A";
+
+/**
+ * **Знак типа в интерфейсе — одна лестница на все окна** (дефект D31).
+ *
+ * У точечного типа обозначение — фигура, у линейного — начертание, и это
+ * решает не окно, а вид типа. Пока каждое окно звало `shapeIcon` само,
+ * линейные типы в окне выбора рисовались точками: заказчик увидел это как «тип
+ * Линия не поддерживается» — у ПКШ в справочнике волна, а в окне выбора круг.
+ *
+ * Поэтому план знака считается здесь и только здесь: справочник, окно выбора
+ * типа, плашка выбранного типа и окно общей базы берут его отсюда. Второго
+ * места, где вид превращается в рисунок, быть не должно — именно на нём они и
+ * разошлись.
+ *
+ * Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
+ * формата поля нет вовсе, и вид выводится по его меткам.
+ */
+function typeIconPlan(project, typeId) {
+  const style = styleOf(project, typeId);
+  return typeSignPlan({ kind: typeKindOf(project, typeId), ...style });
+}
+
+/**
+ * То же, но по записи типа, которой в объекте ещё нет: строка окна «Добавить
+ * из общей базы» и черновик строки справочника. Спросить `typeKindOf` о них
+ * нельзя — их типа в объекте нет, — а рисоваться они обязаны так же.
+ *
+ * Третий вид (комментарий) здесь становится точкой: плашку комментария в
+ * списках рисует её знак, а начертания у неё нет.
+ */
+function typeSignPlan({ kind, shape, lineStyle, color }) {
+  return {
+    kind: kind === "line" ? "line" : "point",
+    shape: shape || "circle",
+    lineStyle: lineStyle || LINE_STYLES[0],
+    color: color || SIGN_COLOR_FALLBACK,
+  };
+}
+
+/** Нарисовать знак по плану: фигура точечного или образец линии линейного. */
+function typeSignIcon(plan, size = 22, length = size * 2) {
+  return plan.kind === "line"
+    ? lineStyleIcon(plan.lineStyle, plan.color, size, length)
+    : shapeIcon(plan.shape, plan.color, size);
+}
+
+/** Знак типа объекта: план и рисунок одним вызовом — так его и зовут окна. */
+function typeIcon(project, typeId, size = 22, length = size * 2) {
+  return typeSignIcon(typeIconPlan(project, typeId), size, length);
 }
 
 // ——— координаты —————————————————————————————————————————————————————
@@ -38795,6 +38948,10 @@ const TYPES_LINE_BUTTON = { size: 26, length: 56 };
 // от штрихпунктирной в 26px не отличить. Поэтому образец рисуется во всю
 // клетку, а фигура садится в клетку той же ширины по центру.
 const TYPES_BADGE = { size: 20, length: 48 };
+// Значок строки окна «Добавить из общей базы»: та же пара мер и та же клетка
+// постоянной ширины (`.catalog__icon`), что в справочнике, — линейный тип базы
+// рисуется линией, а не точкой (D31).
+const TYPES_CATALOG_ICON = { size: 20, length: 44 };
 
 function typesLineCell({ lineStyle, color, active, inherit, onPick }) {
   // Та же подпись, что у сетки фигур: у категории со сплошной линией первая и
@@ -39174,7 +39331,12 @@ function openTypesCatalog(project, template) {
       list.append(
         uiEl("label", { class: "catalog__row catalog__row--group" }, [
           head,
-          shapeIcon(group.category.shape, group.category.color, 18),
+          // Знак категории — фигура: вида у категории нет, она задаёт
+          // умолчание и точечным типам, и линейным. Клетка та же, что у строк
+          // типов, — иначе названия категорий и кодов стоят не в колонку.
+          uiEl("span", { class: "catalog__icon" }, [
+            shapeIcon(group.category.shape, group.category.color, TYPES_CATALOG_ICON.size - 2),
+          ]),
           name,
         ]),
       );
@@ -39193,9 +39355,25 @@ function openTypesCatalog(project, template) {
         list.append(
           uiEl("label", { class: "catalog__row catalog__row--type", title: type.code + " — " + type.name }, [
             box,
-            // Форма типа, а если своей нет — форма категории: ровно то, что
+            // Обозначение типа, а если своего нет — категорийное: ровно то, что
             // нарисует план. Цвет всегда категорийный, цвета у типа нет.
-            shapeIcon(type.shape || group.category.shape, group.category.color, 20),
+            //
+            // Вид здесь спрашивается у самой записи, а не у `typeKindOf`: типа
+            // этой строки в объекте ещё нет — её и предлагают добавить. То же
+            // расхождение, что и в окне выбора (D31): линейные типы базы
+            // рисовались точками, хотя их вид в записи указан.
+            uiEl("span", { class: "catalog__icon" }, [
+              typeSignIcon(
+                typeSignPlan({
+                  kind: type.kind,
+                  shape: type.shape || group.category.shape,
+                  lineStyle: type.lineStyle || group.category.lineStyle,
+                  color: group.category.color,
+                }),
+                TYPES_CATALOG_ICON.size,
+                TYPES_CATALOG_ICON.length,
+              ),
+            ]),
             uiEl("span", { class: "catalog__code", text: type.code }),
             uiEl("span", { class: "catalog__name", text: type.name }),
           ]),
@@ -39339,7 +39517,10 @@ function openTypesDictionary(api) {
     const summary = markSizesSummary(sizes);
     const button = uiButton(summary || strings.markSizes.typeButton, {
       class: "ui-btn dict__sizes" + (summary ? " is-set" : ""),
-      title: strings.markSizes.typeHint,
+      // Колонка у кнопки постоянной ширины (D30), и длинная подпись в ней
+      // ужимается многоточием — поэтому она же стоит в подсказке целиком:
+      // числа размеров не должны пропадать из-за меры колонки.
+      title: summary ? summary + " · " + strings.markSizes.typeHint : strings.markSizes.typeHint,
       on: {
         click: async () => {
           const picked = await openTypeSizesPicker(project(), type.id);
@@ -39353,7 +39534,6 @@ function openTypesDictionary(api) {
 
   function typeRow(type, count) {
     const category = findCategory(project(), type.categoryId);
-    const style = styleOf(project(), type.id);
     // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
     // он одной функцией модели, чтобы справочник и холст не разошлись.
     const kind = typeKindOf(project(), type.id);
@@ -39380,11 +39560,12 @@ function openTypesDictionary(api) {
     });
     compactButton.disabled = count === 0;
     // Значок строки — то, чем тип рисуется на плане: у точечного фигура,
-    // у линейного отрезок его начертанием.
+    // у линейного отрезок его начертанием. Рисует его общий `render.typeIcon`,
+    // тот же, что в окне выбора типа и на плашке выбранного (D31): здесь было
+    // верно, а там нет, и расхождение жило ровно потому, что рисовальщиков
+    // было три.
     const badge = uiEl("span", { class: "dict__badge" }, [
-      kind === "line"
-        ? lineStyleIcon(style.lineStyle, style.color, TYPES_BADGE.size, TYPES_BADGE.length)
-        : shapeIcon(style.shape, style.color, TYPES_BADGE.size),
+      typeIcon(project(), type.id, TYPES_BADGE.size, TYPES_BADGE.length),
     ]);
     return uiEl("div", { class: "dict__row" }, [
       badge,
@@ -39566,11 +39747,11 @@ function openTypesDictionary(api) {
     // показывает, во что обернулось умолчание «как у категории», до того как
     // пользователь откроет сетку знаков.
     function badgeNode() {
-      const style = typesDraftStyle(draft, category());
+      // Типа в объекте ещё нет — спрашивать `typeKindOf` не о чем, вид берётся
+      // у черновика. Рисует знак тот же общий проход, что и строки заведённых
+      // типов.
       return uiEl("span", { class: "dict__badge" }, [
-        style.kind === "line"
-          ? lineStyleIcon(style.lineStyle, style.color, TYPES_BADGE.size, TYPES_BADGE.length)
-          : shapeIcon(style.shape, style.color, TYPES_BADGE.size),
+        typeSignIcon(typeSignPlan(typesDraftStyle(draft, category())), TYPES_BADGE.size, TYPES_BADGE.length),
       ]);
     }
 
@@ -47063,11 +47244,21 @@ registerPanel(PANEL_IDS.headerSearch, mountSearchPanel);
 
 
 
-// Значок типа — цвет категории и форма из справочника, нарисованные общим
-// `render.shapeIcon`: в списке видно ровно то, что попадёт на план.
-function pickerIcon(project, typeId, size = 22) {
-  const style = styleOf(project, typeId);
-  return shapeIcon(style.shape, style.color, size);
+// Клетка знака в строке: одна мера на оба вида. Образец линии шире фигуры —
+// сплющить его до её ширины нельзя (точечную линию от штрихпунктирной в 22px
+// не отличить), поэтому фигура садится в клетку той же ширины, что образец.
+// Так строки точечных и линейных типов стоят колонка в колонку — то же
+// правило, по которому выровнены строки справочника.
+const PICKER_ICON = { size: 22, length: 44 };
+
+// Значок типа — цвет категории и обозначение из справочника, нарисованные
+// общим `render.typeIcon`: у точечного типа фигура, у линейного образец его
+// начертания (дефект D31 — здесь рисовались точки у всех). Вид спрашивает сам
+// `typeIcon` у `typeKindOf`: у объекта прежнего формата поля `kind` нет.
+function pickerIcon(project, typeId, size = PICKER_ICON.size) {
+  return uiEl("span", { class: "picker__icon" }, [
+    typeIcon(project, typeId, size, PICKER_ICON.length),
+  ]);
 }
 
 // Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.
@@ -47457,11 +47648,20 @@ function openTypePicker(project, options = {}) {
 
 const TOOLS_MARK_SIZE = { min: 4, max: 36 };
 const TOOLS_LABEL_SIZE = { min: 8, max: 40 };
-// Крупный значок выбранного типа: цвет категории и форма из справочника,
-// нарисованные тем же `render.shapeIcon`, что в списках и на плане.
+// Клетка знака на плашке: образец линии длиннее фигуры, и мера у них одна —
+// иначе код и название съезжают, стоит сменить точечный тип на линейный.
+const TOOLS_TYPE_ICON_LENGTH = 52;
+
+// Крупный значок выбранного типа: цвет категории и обозначение из справочника,
+// нарисованные тем же `render.typeIcon`, что в окне выбора и в справочнике.
+//
+// Это было **третье место** того же дефекта D31: плашка звала `shapeIcon`
+// напрямую, и у линейного типа на ней стояла точка — ровно то, из-за чего
+// заказчик решил, что «тип Линия не поддерживается». Вид плашка и так знает
+// (строка-подсказка под кнопками спрашивает его у `typeKindOf`), но знак
+// рисовался мимо него.
 function toolsTypeIcon(project, typeId, size = 26) {
-  const style = styleOf(project, typeId);
-  return shapeIcon(style.shape, style.color, size);
+  return typeIcon(project, typeId, size, TOOLS_TYPE_ICON_LENGTH);
 }
 
 // Ползунок двигается живьём, а в историю попадает одним действием на всё
