@@ -247,6 +247,10 @@ function volumeFace(points, rgb, options = {}) {
     // Чья это грань: по ней кадр отвечает, во что попал клик (таск 148).
     // У стен, пола и вещей чертежа хозяина нет — и попадать в них незачем.
     markId: options.markId || null,
+    // Поверхность, на которой стоят вещи (сторона стены), и обратная ссылка у
+    // самой вещи. Зачем — см. `volumeHostDepths`.
+    host: options.host || null,
+    onHost: options.onHost || null,
   };
 }
 
@@ -274,6 +278,9 @@ export function volumeLine(points, color, options = {}) {
     n: options.normal || null,
     layer: options.layer === undefined ? VOLUME_LAYER_BODY : options.layer,
     markId: options.markId || null,
+    // Контур едет в очереди вместе со своим телом (см. `volumeHostOrder`):
+    // отстань он от него — и тело закрасит собственный контур.
+    onHost: options.onHost || null,
   };
 }
 
@@ -289,6 +296,7 @@ function volumeAt(point, z) {
 function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   if (corners.length < 3 || !(topMm > bottomMm)) return out;
   const markId = options.markId || null;
+  const onHost = options.onHost || null;
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[(index + 1) % corners.length];
@@ -300,6 +308,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
       volumeFace([volumeAt(a, bottomMm), volumeAt(b, bottomMm), volumeAt(b, topMm), volumeAt(a, topMm)], rgb, {
         normal: { x: dy / length, y: -dx / length, z: 0 },
         markId,
+        onHost,
       }),
     );
   }
@@ -307,7 +316,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
     volumeFace(
       corners.map((point) => volumeAt(point, topMm)),
       rgb,
-      { normal: { x: 0, y: 0, z: 1 }, markId },
+      { normal: { x: 0, y: 0, z: 1 }, markId, onHost },
     ),
   );
   // Низ лежащей на полу вещи не нужен никому, а низ висящей — нужен: на
@@ -317,7 +326,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
       volumeFace(
         corners.map((point) => volumeAt(point, bottomMm)),
         rgb,
-        { normal: { x: 0, y: 0, z: -1 }, markId },
+        { normal: { x: 0, y: 0, z: -1 }, markId, onHost },
       ),
     );
   }
@@ -402,25 +411,31 @@ export function volumeWallFaces(wall, openings, heightMm, out = []) {
   });
   for (const side of [1, -1]) {
     const normal = { x: n.x * side, y: n.y * side, z: 0 };
+    const sideName = side > 0 ? "left" : "right";
     for (const tile of volumeWallTiles(len, heightMm, openings)) {
-      const from = at(tile.fromMm, half * side);
-      const to = at(tile.toMm, half * side);
-      // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
-      // стороне концы меняются местами.
-      const first = side > 0 ? to : from;
-      const second = side > 0 ? from : to;
-      out.push(
-        volumeFace(
-          [
-            volumeAt(first, tile.bottomMm),
-            volumeAt(second, tile.bottomMm),
-            volumeAt(second, tile.topMm),
-            volumeAt(first, tile.topMm),
-          ],
-          VOLUME_WALL_RGB,
-          { normal },
-        ),
-      );
+      // Кусок стены режется ещё и **по метровой сетке вдоль неё** (находка
+      // живого прогона, см. `volumeHostKey`): так у каждой вещи есть свой
+      // кусок стены, за которым она встаёт в очередь, а не вся стена целиком.
+      for (const piece of volumeWallPieces(tile.fromMm, tile.toMm)) {
+        const from = at(piece.fromMm, half * side);
+        const to = at(piece.toMm, half * side);
+        // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
+        // стороне концы меняются местами.
+        const first = side > 0 ? to : from;
+        const second = side > 0 ? from : to;
+        out.push(
+          volumeFace(
+            [
+              volumeAt(first, tile.bottomMm),
+              volumeAt(second, tile.bottomMm),
+              volumeAt(second, tile.topMm),
+              volumeAt(first, tile.topMm),
+            ],
+            VOLUME_WALL_RGB,
+            { normal, host: volumeHostKey(wall.id, sideName, piece.index) },
+          ),
+        );
+      }
     }
   }
   for (const end of [0, 1]) {
@@ -811,6 +826,62 @@ export const VOLUME_MARK_NO_POINT = "noPoint";
 export const VOLUME_MARK_NO_SIZE = "noSize";
 export const VOLUME_MARK_NO_PLACE = "noPlace";
 
+/**
+ * Шаг сетки, которой сторона стены режется на куски для порядка рисования.
+ *
+ * Метр — не круглое число ради круглого: это размер, при котором кусок стены и
+ * вещь на нём сравнимы по дальности своих середин. Мельче — лишние грани на
+ * ровном месте, крупнее — возвращается та самая ошибка, ради которой сетка и
+ * заведена (см. `volumeHostKey`).
+ */
+const VOLUME_WALL_STEP_MM = 1000;
+
+/**
+ * Ключ поверхности, на которой висит вещь: кусок стороны стены.
+ *
+ * Нужен **порядку рисования**, и это главная находка живого прогона:
+ * выключатель на стене пропадал целиком. Причина не в размере и не в цвете —
+ * порядок граней решает дальность их середин, а стена длиной четыре метра
+ * серединой оказалась **ближе** выключателя, стоящего у её края. Значит стена
+ * рисовалась после него и закрашивала его собой.
+ *
+ * Ярусом это не чинится: подними вещи над стенами — и розетки станут видны
+ * сквозь все перегородки разом. Поэтому вещь не получает своего яруса, а
+ * **встаёт в очереди сразу за своим куском стены** (`volumeHostOrder`): со
+ * своей стороны стена её не закроет никогда, а чужие стены закроют.
+ *
+ * Кусок, а не вся сторона, — второй дефект того же прогона: стена квартиры
+ * тянется через три комнаты, и «после всей стены» означало «после её ближнего
+ * конца», то есть поверх перегородки, за которой стоит соседняя комната. Метки
+ * гостиной просвечивали сквозь стену спальни.
+ */
+function volumeHostKey(wallId, side, index) {
+  return wallId + "|" + side + "|" + index;
+}
+
+/** Куски стороны стены по сетке: метровые, с обрезкой по краям проёмов. */
+function volumeWallPieces(fromMm, toMm) {
+  const pieces = [];
+  let cursor = fromMm;
+  let index = Math.floor(fromMm / VOLUME_WALL_STEP_MM);
+  while (cursor < toMm) {
+    const edge = Math.min(toMm, (index + 1) * VOLUME_WALL_STEP_MM);
+    if (edge > cursor) pieces.push({ fromMm: cursor, toMm: edge, index });
+    cursor = edge;
+    index += 1;
+  }
+  return pieces;
+}
+
+/** Куски стены, которые вещь накрывает собой: по ним она и встаёт в очередь. */
+function volumeHostKeys(wallId, side, fromMm, toMm) {
+  const keys = [];
+  const first = Math.floor(Math.min(fromMm, toMm) / VOLUME_WALL_STEP_MM);
+  const last = Math.floor(Math.max(fromMm, toMm) / VOLUME_WALL_STEP_MM);
+  for (let index = first; index <= last; index += 1) keys.push(volumeHostKey(wallId, side, index));
+  return keys;
+}
+
 /** Толщина контура изображения — в экранных точках (см. `volumeLine`). */
 const VOLUME_VIEW_LINE_PX = 1.4;
 /** На сколько контур отодвинут от лица вещи, чтобы не спорить с ним за порядок. */
@@ -818,12 +889,17 @@ const VOLUME_VIEW_LIFT_MM = 1;
 /** Во сколько отрезков разбирается полная окружность изображения. */
 const VOLUME_VIEW_STEPS = 16;
 
-// Светлота тела вещи: цвет категории, разбавленный белым. Чистый цвет на всей
-// поверхности в объёме читается хуже плоского контура (замечание таска 139), а
-// совсем серая вещь теряет категорию, по которой её узнают издали. Поэтому тело
-// — бледная плашка цвета метки, а контур поверх неё цветом в полную силу: так
-// же, как на развёртке, где контур рисуется цветом по белой бумаге.
-const VOLUME_MARK_TINT = 0.32;
+// Светлота тела вещи: цвет категории, разбавленный белым, и контур поверх него
+// — тем же цветом в полную силу. Так вещь читается и издали (пятно цвета
+// категории видно, когда контур уже слился), и вблизи (контур насыщеннее
+// своего тела, как тушь по бумаге на развёртке).
+//
+// Доля подобрана живым прогоном, и оба края пробовались на нём же: при 0,7 тело
+// почти догоняет контур по насыщенности, и решётка бризера на нём пропадает; при
+// 0,3 бледное пятно теряется на светлой стене. Замечание таска 139 («цвет на
+// всей поверхности читается хуже контура») верно и здесь — поэтому цвет и
+// разбавлен, а не взят в полную силу.
+const VOLUME_MARK_TINT = 0.45;
 const VOLUME_MARK_BASE = [226, 224, 220];
 
 function volumeTint(rgb) {
@@ -961,6 +1037,9 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
       mode: VOLUME_MARK_WALL,
       wallId: wall.id,
       side,
+      // Куски стены, которые вещь накрывает: карниз в три метра стоит на трёх,
+      // розетка — на одном. Очередь считается по последнему из них.
+      host: volumeHostKeys(wall.id, side, middle - alongMm / 2, middle + alongMm / 2),
       heightMm,
       prisms: [
         {
@@ -1041,7 +1120,10 @@ export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
 /** Грани тела вещи. Хозяин у каждой — сама метка: по ним и ловится клик. */
 export function volumeMarkFaces(place, out = []) {
   for (const prism of place.prisms || []) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, {
+      markId: place.markId,
+      onHost: place.host || null,
+    });
   }
   return out;
 }
@@ -1127,10 +1209,17 @@ function volumeRectPoints(part) {
   ];
 }
 
-/** Доля лица вещи → точка в миллиметрах чертежа и высоте над полом. */
+/**
+ * Доля лица вещи → точка в миллиметрах чертежа и высоте над полом.
+ *
+ * Доля по высоте берётся **с обратным знаком**: у плоского интерпретатора ось
+ * `y` растёт вниз (так устроен холст), а здесь вверх. Без этого решётка
+ * кондиционера оказалась бы над индикатором, а клавиша выключателя — под
+ * рамкой: изображение рисовалось бы вверх ногами и молча.
+ */
 export function volumeFacePoint(face, fx, fy) {
   const alongMm = fx * face.widthMm;
-  const upMm = fy * face.heightMm;
+  const upMm = -fy * face.heightMm;
   return {
     x: face.origin.x + face.u.x * alongMm + face.v.x * upMm + face.normal.x * VOLUME_VIEW_LIFT_MM,
     y: face.origin.y + face.u.y * alongMm + face.v.y * upMm + face.normal.y * VOLUME_VIEW_LIFT_MM,
@@ -1153,7 +1242,13 @@ export function volumeMarkViewLines(place, out = []) {
       volumeLine(
         line.points.map((point) => volumeFacePoint(place.face, point.x, point.y)),
         place.color,
-        { closed: line.closed, normal: place.face.normal, width: VOLUME_VIEW_LINE_PX, markId: place.markId },
+        {
+          closed: line.closed,
+          normal: place.face.normal,
+          width: VOLUME_VIEW_LINE_PX,
+          markId: place.markId,
+          onHost: place.host || null,
+        },
       ),
     );
   }
@@ -1670,7 +1765,66 @@ export function volumeFrame(scene, camera, box, extra = null) {
   for (const face of scene.faces) take(face);
   for (const face of extra || []) take(face);
   polygons.sort((a, b) => (a.layer === b.layer ? b.depth - a.depth : a.layer - b.layer));
-  return polygons;
+  return volumeHostOrder(polygons);
+}
+
+/**
+ * Вещь рисуется **сразу после своей стены** (находка живого прогона, см.
+ * `volumeHostKey`).
+ *
+ * Сортировка по дальности сравнивает середины граней, а середина стены в четыре
+ * метра и середина розетки в восемь сантиметров — числа несопоставимые: стена,
+ * уходящая вбок, оказывалась «ближе» розетки у своего края и закрашивала её.
+ *
+ * Чинится это порядком, а не арифметикой: вещь не меняет своей дальности, а
+ * **переставляется в очереди** за последний кусок той стороны стены, на которой
+ * висит. Со своей стороны стена вещь не закрывает никогда (вещь стоит перед её
+ * плоскостью), а всё, что нарисовано позже, — чужие стены, перегородки, вещи
+ * чертежа — закрывает её по-прежнему. Это и было вторым дефектом прогона:
+ * перенеси вещь просто ближе числом, и розетки соседней комнаты начинают
+ * просвечивать сквозь перегородку.
+ *
+ * Стена отвёрнута (вещь на изнанке) — переставлять не за чем: вещь остаётся на
+ * своём месте по дальности.
+ */
+function volumeHostOrder(polygons) {
+  let last = null;
+  for (let index = 0; index < polygons.length; index += 1) {
+    const host = polygons[index].host;
+    if (!host) continue;
+    if (!last) last = new Map();
+    last.set(host, index);
+  }
+  if (!last) return polygons;
+  const waiting = new Map();
+  let deferred = false;
+  for (let index = 0; index < polygons.length; index += 1) {
+    const polygon = polygons[index];
+    const hosts = polygon.onHost;
+    if (!hosts) continue;
+    // Вещь стоит за **последним** из своих кусков стены: карниз накрывает три,
+    // и спрятаться за ближним из них ему нельзя.
+    let at;
+    for (const host of hosts) {
+      const found = last.get(host);
+      if (found !== undefined && (at === undefined || found > at)) at = found;
+    }
+    if (at === undefined || at <= index) continue;
+    let list = waiting.get(at);
+    if (!list) waiting.set(at, (list = []));
+    list.push(index);
+    deferred = true;
+  }
+  if (!deferred) return polygons;
+  const moved = new Set();
+  for (const list of waiting.values()) for (const index of list) moved.add(index);
+  const out = [];
+  for (let index = 0; index < polygons.length; index += 1) {
+    if (!moved.has(index)) out.push(polygons[index]);
+    const list = waiting.get(index);
+    if (list) for (const at of list) out.push(polygons[at]);
+  }
+  return out;
 }
 
 // Одна грань в экранный многоугольник — или `null`, если её не видно:
@@ -1714,6 +1868,8 @@ function volumeFacePolygon(face, camera, basis, focal, halfWidth, halfHeight, bo
     layer: face.layer,
     fill: volumeFill(face.rgb, volumeShade(normal)),
     pick: face.markId || null,
+    host: face.host || null,
+    onHost: face.onHost || null,
   };
 }
 
@@ -1766,6 +1922,7 @@ function volumeLinePolygon(line, camera, basis, focal, halfWidth, halfHeight, bo
     dash: line.dash,
     arrow: line.arrow,
     pick: line.markId || null,
+    onHost: line.onHost || null,
   };
 }
 

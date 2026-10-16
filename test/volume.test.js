@@ -75,6 +75,7 @@ import {
   volumeLinkLines,
   volumeMarkerFaces,
   volumePickAt,
+  volumeFacePoint,
   volumeSelectLines,
   volumeViewPolylines,
   volumeObjectFaces,
@@ -208,9 +209,14 @@ test("у комнаты есть пол, потолок и стены с тол�
   // Под ними — плита по габариту чертежа: она закрывает пороги дверей, где
   // пола нет ни у одной комнаты.
   assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BASE).length, 1);
-  // Толщина стены видна по торцам: у стены без проёмов пять граней — две
-  // стороны, два торца и верх. Низ не рисуется: он под полом.
-  assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY).length, 4 * 5);
+  // Толщина стены видна по торцам: у стены без проёмов два торца и верх, а
+  // каждая её сторона нарезана **метровой сеткой** (таск 148): по куску стены
+  // вещь и встаёт в очередь отрисовки. Низ не рисуется: он под полом.
+  // Стены комнаты 4 × 3 м: у четырёхметровой по четыре куска на сторону, у
+  // трёхметровой по три, плюс три грани торцов и верха у каждой.
+  const body = built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY);
+  assert.equal(body.length, 2 * (4 * 2 + 3) + 2 * (3 * 2 + 3));
+  assert.equal(body.filter((face) => face.host).length, 2 * 4 * 2 + 2 * 3 * 2, "куски сторон знают свой ключ");
 });
 
 test("окно считает стены и проёмы чертежа, а не препятствия", () => {
@@ -530,7 +536,8 @@ test("отвёрнутые грани в кадр не попадают: изн�
   const box = { width: 1200, height: 700 };
   // Стоим в середине и смотрим в нижнюю стену (она по y = −1500, то есть
   // рысканье −90°).
-  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
+  // Взгляд опущен: выключатель висит на 900 мм, а глаза на 1600.
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: -0.5 };
   const frame = volumeFrame(built, camera, box);
   const all = volumeFrame({ faces: built.faces.map((face) => ({ ...face, both: true })) }, camera, box);
   assert.ok(frame.length < all.length, "без отсева граней было бы больше — значит отсев работает");
@@ -1111,4 +1118,60 @@ test("метки в сцене не меняют объект (G68)", () => {
   const built = volumeScene(put.project, scene.schemeId, {});
   assert.equal(built.marks.length, 1);
   assert.equal(JSON.stringify(put.project), before, "объём только читает (G68)");
+});
+
+test("вещь рисуется после своего куска стены — иначе стена закрашивает её собой", () => {
+  // Дефект живого прогона: выключатель на стене пропадал целиком. Порядок
+  // граней решала дальность их середин, и стена в четыре метра серединой
+  // оказывалась ближе метки у своего края.
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "В", [{ x: 200, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.ok(Array.isArray(place.host) && place.host.length > 0, "вещь знает свой кусок стены");
+  // Смотрим на эту стену из середины комнаты.
+  // Взгляд опущен: выключатель висит на 900 мм, а глаза на 1600.
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: -0.5 };
+  const frame = volumeFrame(built, camera, { width: 900, height: 600 });
+  let wallAt = -1;
+  let markAtIndex = -1;
+  frame.forEach((polygon, index) => {
+    if (polygon.host && place.host.includes(polygon.host)) wallAt = Math.max(wallAt, index);
+    if (polygon.pick === put.markId) markAtIndex = Math.max(markAtIndex, index);
+  });
+  assert.ok(wallAt >= 0, "кусок стены в кадре есть");
+  assert.ok(markAtIndex > wallAt, "вещь ложится поверх своего куска стены: " + markAtIndex + " против " + wallAt);
+});
+
+test("контур едет в очереди вместе со своим телом, а не под ним", () => {
+  // Дефект живого прогона: контур рисовался, но тело метки ложилось поверх
+  // него — у кондиционера от решётки оставался один индикатор. Тело и контур
+  // обязаны идти в кадре подряд, и порядок этот проверяется, а не смотрится.
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "К", [{ x: 200, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.ok(place.view, "у кондиционера есть изображение объекта");
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0.2 };
+  const frame = volumeFrame(built, camera, { width: 900, height: 600 });
+  let lastBody = -1;
+  let firstLine = Infinity;
+  frame.forEach((polygon, index) => {
+    if (polygon.pick !== put.markId) return;
+    if (polygon.stroke) firstLine = Math.min(firstLine, index);
+    else lastBody = Math.max(lastBody, index);
+  });
+  assert.ok(firstLine < Infinity, "контур в кадре есть");
+  assert.ok(firstLine > lastBody, "контур ложится поверх тела: " + firstLine + " против " + lastBody);
+});
+
+test("изображение не встаёт вверх ногами: низ картинки — низ вещи", () => {
+  // У плоского интерпретатора ось y растёт вниз (холст), у объёма — вверх.
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "К", [{ x: 200, y: -1100 }]);
+  const place = placeOf(volumeScene(put.project, scene.schemeId, {}), put.markId);
+  const top = volumeFacePoint(place.face, 0, -0.5);
+  const bottom = volumeFacePoint(place.face, 0, 0.5);
+  assert.ok(top.z > bottom.z, "верх изображения выше его низа: " + top.z + " против " + bottom.z);
+  assert.equal(Math.round(top.z - bottom.z), place.face.heightMm);
 });
