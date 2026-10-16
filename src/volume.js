@@ -45,6 +45,14 @@ import {
   OPENING_KIND_DOOR,
   drawingBoundsMm,
   findScheme,
+  findType,
+  findWall,
+  hexToRgb,
+  labelOf,
+  markIsComment,
+  markSizes,
+  markWall,
+  markWallSideOn,
   openingsInWall,
   outlinesInOrder,
   planFractionToMm,
@@ -52,11 +60,14 @@ import {
   planMmToFraction,
   schemeObjectCorners,
   schemeObjectsOnScheme,
+  styleOf,
+  typeObjectView,
   wallHeightOf,
   wallHeightOnSide,
   wallVectors,
   wallsOnScheme,
 } from "./model.js";
+import { objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 
 // ——— числа ——————————————————————————————————————————————————————————————
 
@@ -233,6 +244,36 @@ function volumeFace(points, rgb, options = {}) {
     rgb,
     layer: options.layer === undefined ? VOLUME_LAYER_BODY : options.layer,
     both: Boolean(options.both),
+    // Чья это грань: по ней кадр отвечает, во что попал клик (таск 148).
+    // У стен, пола и вещей чертежа хозяина нет — и попадать в них незачем.
+    markId: options.markId || null,
+  };
+}
+
+/**
+ * **Линия в сцене**: ломаная, которая не заливается, а обводится (таск 148).
+ *
+ * Заведена ради двух вещей, которые гранями не рисуются: контур изображения
+ * объекта на лицевой стороне вещи и стрелка связи. И то и другое — **рисунок**,
+ * а не поверхность: толщина у него в экранных точках, иначе контур розетки в
+ * трёх метрах пропадает вовсе, а в полуметре превращается в кляксу.
+ *
+ * `normal` необязательна: с ней линия отсекается по направлению, как грань
+ * (контур на лицевой стороне не виден с изнанки), без неё видна всегда —
+ * стрелке связи так и надо.
+ */
+export function volumeLine(points, color, options = {}) {
+  return {
+    p: points,
+    line: true,
+    color,
+    width: options.width === undefined ? 1.4 : options.width,
+    closed: Boolean(options.closed),
+    dash: options.dash || null,
+    arrow: Boolean(options.arrow),
+    n: options.normal || null,
+    layer: options.layer === undefined ? VOLUME_LAYER_BODY : options.layer,
+    markId: options.markId || null,
   };
 }
 
@@ -245,8 +286,9 @@ function volumeAt(point, z) {
  * висит над полом — низ. Низ лежащей на полу вещи не рисуется вовсе: его
  * никогда не видно, а грань стоит кадра.
  */
-function volumePrismFaces(corners, bottomMm, topMm, rgb, out) {
+function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   if (corners.length < 3 || !(topMm > bottomMm)) return out;
+  const markId = options.markId || null;
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[(index + 1) % corners.length];
@@ -257,6 +299,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out) {
     out.push(
       volumeFace([volumeAt(a, bottomMm), volumeAt(b, bottomMm), volumeAt(b, topMm), volumeAt(a, topMm)], rgb, {
         normal: { x: dy / length, y: -dx / length, z: 0 },
+        markId,
       }),
     );
   }
@@ -264,15 +307,17 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out) {
     volumeFace(
       corners.map((point) => volumeAt(point, topMm)),
       rgb,
-      { normal: { x: 0, y: 0, z: 1 } },
+      { normal: { x: 0, y: 0, z: 1 }, markId },
     ),
   );
-  if (bottomMm > 0) {
+  // Низ лежащей на полу вещи не нужен никому, а низ висящей — нужен: на
+  // потолочный светильник смотрят снизу, и без этой грани он был бы дырой.
+  if (bottomMm > 0 || markId) {
     out.push(
       volumeFace(
         corners.map((point) => volumeAt(point, bottomMm)),
         rgb,
-        { normal: { x: 0, y: 0, z: -1 } },
+        { normal: { x: 0, y: 0, z: -1 }, markId },
       ),
     );
   }
@@ -698,6 +743,557 @@ export function volumePrismSolid(prism) {
   };
 }
 
+// ——— метки ———————————————————————————————————————————————————————————————
+//
+// Таск 148, второй шаг G205. Где стоит вещь — правила заказчика, записанные
+// словами и сведённые в одно решение:
+//
+//   **Высота решает вертикаль, стена — сторону и место.**
+//
+//   1. Высота задана и метка привязана к стене → вещь стоит **на своей стене**:
+//      отступ вдоль из привязки, высота над полом — середина вещи, сторона — та,
+//      на которой метка лежит по плану. Выступ от стены (G197) гонит её наружу.
+//   2. Высота задана, стены нет → вещь висит **в своём месте по плану** на
+//      заданной высоте.
+//   3. Высоты нет → вещь **потолочная**: встаёт под потолок того помещения, в
+//      котором стоит, в своём месте по плану. Это не догадка сборки, а то, как
+//      заполнен справочник: высота пуста ровно у потолочного света — точечный
+//      светильник, светильник, подсветка, лента, трек, люстра, подсветка
+//      кровати и шкафа, — и заполнена у всего, что висит на стене.
+//   4. Высоты нет и потолка над меткой нет (помещение не обведено или метка
+//      лежит вне контуров) → вешать не на что, и вещь **не размещается**:
+//      уходит списком «не размещённые». Слова заказчика прямые: выдумывать им
+//      место нельзя, но и молча терять нельзя.
+//   5. Размеров нет вовсе → рисовать нечем, и это тот же список. Такое бывает
+//      у типа, заведённого руками: в стартовом справочнике размеры есть у всех
+//      (G192), а «Мастер-выключатель» из объекта заказчика — его собственный
+//      тип, и размеров у него нет ни одного.
+//
+// **Плашка комментария в объёме не участвует вовсе** — ни вещью, ни строкой
+// списка: это надпись на чертеже, а не изделие (то же правило, что у развёртки,
+// `markWallBindable`).
+//
+// Три измерения вещи читаются по той поверхности, на которой она висит, и это
+// одно правило на все случаи: **длина — вдоль поверхности, ширина — вторая
+// сторона лица, выступ — прочь от поверхности**. На стене лицо стоит
+// вертикально (длина вдоль стены, ширина вверх, выступ наружу), на потолке —
+// горизонтально (длина и ширина по полу, выступ вниз). Поэтому точечная лента
+// ЛВ (40 × 600) на стене сама собой встаёт **вертикальной лентой**, а люстра
+// (500 × 400, выступ 300) свисает с потолка своим габаритом: ни одной отдельной
+// ветки на эти два случая нет.
+//
+// **Метки не держат человека.** Сквозь шкаф ходить нельзя — это вещь чертежа, —
+// а сквозь розетку можно: препятствием её никто не называл.
+
+/**
+ * На сколько лицо вещи выступает перед гранью стены, прежде чем начнётся её
+ * выступ. Два миллиметра — не зазор «на всякий случай», а лекарство от
+ * совпавших плоскостей: встроенный щит (выступ −30) и плоская панель лежат
+ * ровно в грани стены, и без этого сдвига порядок граней между ними решался бы
+ * случайно.
+ */
+export const VOLUME_MARK_LIFT_MM = 2;
+/**
+ * Самая мелкая сторона вещи. Лента 10 × 10 мм в объёме вырождается в волос, в
+ * который не попасть кликом, — и дело не в красоте, а в том, что вещь обязана
+ * остаться выделяемой. Двадцать миллиметров на расстоянии вытянутой руки — те
+ * же пара точек экрана, что и десять, но грань у них настоящая.
+ */
+export const VOLUME_MARK_MIN_MM = 20;
+
+/** Как вещь поставлена: на стене, в воздухе на своей высоте, под потолком. */
+export const VOLUME_MARK_WALL = "wall";
+export const VOLUME_MARK_ROOM = "room";
+export const VOLUME_MARK_CEILING = "ceiling";
+
+/** Почему вещь не размещена. Строки к этим кодам — в окне, не здесь. */
+export const VOLUME_MARK_NO_POINT = "noPoint";
+export const VOLUME_MARK_NO_SIZE = "noSize";
+export const VOLUME_MARK_NO_PLACE = "noPlace";
+
+/** Толщина контура изображения — в экранных точках (см. `volumeLine`). */
+const VOLUME_VIEW_LINE_PX = 1.4;
+/** На сколько контур отодвинут от лица вещи, чтобы не спорить с ним за порядок. */
+const VOLUME_VIEW_LIFT_MM = 1;
+/** Во сколько отрезков разбирается полная окружность изображения. */
+const VOLUME_VIEW_STEPS = 16;
+
+// Светлота тела вещи: цвет категории, разбавленный белым. Чистый цвет на всей
+// поверхности в объёме читается хуже плоского контура (замечание таска 139), а
+// совсем серая вещь теряет категорию, по которой её узнают издали. Поэтому тело
+// — бледная плашка цвета метки, а контур поверх неё цветом в полную силу: так
+// же, как на развёртке, где контур рисуется цветом по белой бумаге.
+const VOLUME_MARK_TINT = 0.32;
+const VOLUME_MARK_BASE = [226, 224, 220];
+
+function volumeTint(rgb) {
+  return [0, 1, 2].map((index) =>
+    Math.round(rgb[index] * VOLUME_MARK_TINT + VOLUME_MARK_BASE[index] * (1 - VOLUME_MARK_TINT)),
+  );
+}
+
+/** Цвет метки тройкой каналов; незнакомый — серый, как и в `styleOf`. */
+function volumeRgbOf(color) {
+  const rgb = hexToRgb(color);
+  return rgb ? [rgb.r, rgb.g, rgb.b] : [120, 120, 120];
+}
+
+// Точки метки в миллиметрах чертежа. Пусто — моста к подложке нет (ADR 008) или
+// точек у метки не осталось: место неизвестно, и выдумывать его нельзя.
+function volumeMarkPathMm(project, mark) {
+  const out = [];
+  for (const point of mark.points || []) {
+    const at = planFractionToMm(project, mark.schemeId, point);
+    if (!at) return [];
+    out.push(at);
+  }
+  return out;
+}
+
+function volumePathMiddle(path) {
+  const xs = path.map((point) => point.x);
+  const ys = path.map((point) => point.y);
+  return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+}
+
+/** Изображение объекта у метки: имя у типа старше формы знака (ADR 005). */
+export function volumeMarkView(project, mark) {
+  const type = findType(project, mark.typeId);
+  const style = styleOf(project, mark.typeId);
+  return objectViewByName(typeObjectView(type)) || objectViewForShape(style.shape);
+}
+
+// Прямоугольник в плане вокруг точки: `along` вдоль направления `u`, `across`
+// поперёк него. Из него выходит и тело точечной вещи, и звено ленты.
+function volumeBoxCorners(at, u, alongMm, acrossMm) {
+  const n = { x: u.y, y: -u.x };
+  const ha = alongMm / 2;
+  const hc = acrossMm / 2;
+  return volumeClockwise([
+    { x: at.x - u.x * ha - n.x * hc, y: at.y - u.y * ha - n.y * hc },
+    { x: at.x + u.x * ha - n.x * hc, y: at.y + u.y * ha - n.y * hc },
+    { x: at.x + u.x * ha + n.x * hc, y: at.y + u.y * ha + n.y * hc },
+    { x: at.x - u.x * ha + n.x * hc, y: at.y - u.y * ha + n.y * hc },
+  ]);
+}
+
+// Звенья ленты: по призме на отрезок пути, поперечник у всех один. То же, что у
+// ломаного объекта чертежа (`volumeObjectPrisms`), и по той же причине —
+// соседние звенья заходят друг в друга на изломе, как две стены в углу.
+function volumePathPrisms(path, acrossMm, bottomMm, topMm) {
+  const prisms = [];
+  for (let index = 0; index + 1 < path.length; index += 1) {
+    const a = path[index];
+    const b = path[index + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (!(length > 0)) continue;
+    const u = { x: dx / length, y: dy / length };
+    const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    prisms.push({ corners: volumeBoxCorners(middle, u, length, acrossMm), bottomMm, topMm });
+  }
+  return prisms;
+}
+
+/**
+ * Где стоит одна метка — или почему не стоит нигде.
+ *
+ * `null` — того, чего в объёме нет вовсе (плашка комментария); `{markId, skip}`
+ * — неразмещённая; полное описание места — размещённая. Чистая: ни холста, ни
+ * строк, — правило места обязано проверяться без браузера.
+ */
+export function volumeMarkPlacement(project, mark, rooms = []) {
+  if (!mark || markIsComment(mark)) return null;
+  const path = volumeMarkPathMm(project, mark);
+  if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
+  const sizes = markSizes(project, mark);
+  if (!(sizes.length > 0) && !(sizes.width > 0)) return { markId: mark.id, skip: VOLUME_MARK_NO_SIZE };
+  const lengthMm = Math.max(VOLUME_MARK_MIN_MM, sizes.length || 0);
+  const widthMm = Math.max(VOLUME_MARK_MIN_MM, sizes.width || 0);
+  // Выступ **не подтягивается до самой мелкой стороны**: это измерение, по
+  // которому ничего не выделяют, и округли его до двадцати — плоская панель
+  // стала бы вдвое толще себя. Хватает двух миллиметров: тело перестаёт быть
+  // вырожденным, а у встроенного светильника выступ и правда нулевой.
+  const depthMm = Math.max(VOLUME_MARK_LIFT_MM, Math.abs(sizes.depth || 0));
+  const recessed = Number(sizes.depth) < 0;
+  const line = mark.kind === "line" && path.length >= 2;
+  const style = styleOf(project, mark.typeId);
+  const rgb = volumeRgbOf(style.color);
+  const common = {
+    markId: mark.id,
+    label: labelOf(project, mark.id),
+    color: style.color,
+    rgb,
+    bodyRgb: volumeTint(rgb),
+    kind: line ? "line" : "point",
+    view: line ? null : volumeMarkView(project, mark),
+  };
+  const heightMm = sizes.heightAboveFloor;
+  const binding = markWall(mark);
+  const wall = binding ? findWall(project, binding.wallId) : null;
+  const vectors = wall ? wallVectors(wall) : null;
+  const side = wall && vectors ? markWallSideOn(project, mark, wall.id) : null;
+
+  // ——— на своей стене ———
+  if (heightMm !== null && wall && vectors && side) {
+    const sign = side === "left" ? 1 : -1;
+    const normal = { x: vectors.n.x * sign, y: vectors.n.y * sign, z: 0 };
+    const faceMm = Number(wall.thicknessMm) / 2 + VOLUME_MARK_LIFT_MM;
+    // Отступ берётся из привязки **как есть**: зеркалит отступы только лист
+    // развёртки (таск 129), а объёму нужны обе стороны стены разом.
+    const to = binding.toMm === null ? binding.atMm : binding.toMm;
+    const fromMm = Math.min(binding.atMm, to);
+    const toMm = Math.max(binding.atMm, to);
+    const alongMm = line ? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm) : lengthMm;
+    const middle = (fromMm + toMm) / 2;
+    // Выступ идёт наружу от грани стены; утопленное (щит, выступ −30) уходит
+    // внутрь, но лицом остаётся в плоскости стены — иначе его не было бы видно.
+    const outer = recessed ? faceMm : faceMm + depthMm;
+    const inner = recessed ? faceMm - depthMm : faceMm;
+    const at = (across) => ({
+      x: Number(wall.aMm.x) + vectors.u.x * middle + normal.x * across,
+      y: Number(wall.aMm.y) + vectors.u.y * middle + normal.y * across,
+    });
+    const faceAt = at(outer);
+    return {
+      ...common,
+      mode: VOLUME_MARK_WALL,
+      wallId: wall.id,
+      side,
+      heightMm,
+      prisms: [
+        {
+          corners: volumeBoxCorners(at((outer + inner) / 2), vectors.u, alongMm, Math.max(outer - inner, 1)),
+          bottomMm: heightMm - widthMm / 2,
+          topMm: heightMm + widthMm / 2,
+        },
+      ],
+      anchor: { x: faceAt.x, y: faceAt.y, z: heightMm },
+      // Лицо вещи — её наружная грань: по нему рисуется изображение объекта.
+      face: {
+        origin: { x: faceAt.x, y: faceAt.y, z: heightMm },
+        u: { x: vectors.u.x, y: vectors.u.y, z: 0 },
+        v: { x: 0, y: 0, z: 1 },
+        normal,
+        widthMm: alongMm,
+        heightMm: widthMm,
+      },
+    };
+  }
+
+  // ——— в воздухе на своей высоте и под потолком ———
+  const middle = volumePathMiddle(path);
+  const room = heightMm === null ? volumeRoomAt({ rooms }, middle) : null;
+  if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
+  const topMm = heightMm === null ? room.heightMm : heightMm + depthMm / 2;
+  const bottomMm = topMm - depthMm;
+  const centreMm = (topMm + bottomMm) / 2;
+  const prisms = line
+    ? volumePathPrisms(path, lengthMm, bottomMm, topMm)
+    : [{ corners: volumeBoxCorners(middle, { x: 1, y: 0 }, lengthMm, widthMm), bottomMm, topMm }];
+  if (prisms.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
+  return {
+    ...common,
+    mode: heightMm === null ? VOLUME_MARK_CEILING : VOLUME_MARK_ROOM,
+    roomId: room ? room.roomId : null,
+    heightMm: centreMm,
+    prisms,
+    anchor: { x: middle.x, y: middle.y, z: centreMm },
+    // Лицо потолочной вещи смотрит вниз: на светильник смотрят снизу, и
+    // изображение объекта рисуется на нижней грани.
+    face: line
+      ? null
+      : {
+          origin: { x: middle.x, y: middle.y, z: bottomMm },
+          u: { x: 1, y: 0, z: 0 },
+          v: { x: 0, y: 1, z: 0 },
+          normal: { x: 0, y: 0, z: -1 },
+          widthMm: lengthMm,
+          heightMm: widthMm,
+        },
+  };
+}
+
+/**
+ * Все метки схемы: размещённые и список тех, кому места не нашлось.
+ *
+ * `marks` — что считать: окно отдаёт сюда видимые на плане, чтобы фильтр значил
+ * в двух видах одно и то же. Порядок сохраняется — список неразмещённых
+ * читается в том же порядке, что таблица меток.
+ */
+export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
+  const list = marks || (project ? project.marks.filter((mark) => mark.schemeId === schemeId) : []);
+  const placed = [];
+  const unplaced = [];
+  for (const mark of list) {
+    const place = volumeMarkPlacement(project, mark, rooms || []);
+    if (!place) continue;
+    if (place.skip) {
+      unplaced.push({ markId: mark.id, label: labelOf(project, mark.id), reason: place.skip });
+      continue;
+    }
+    placed.push(place);
+  }
+  return { placed, unplaced };
+}
+
+/** Грани тела вещи. Хозяин у каждой — сама метка: по ним и ловится клик. */
+export function volumeMarkFaces(place, out = []) {
+  for (const prism of place.prisms || []) {
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId });
+  }
+  return out;
+}
+
+/**
+ * **Второй интерпретатор изображений объектов** (таск 139, G198).
+ *
+ * Обещание того таска проверяется здесь: объёму хватило тех же пяти примитивов,
+ * и ни одной записи переписывать не пришлось. Разница с плоским интерпретатором
+ * (`objectViews/registry.js`, `drawPart`) одна, и она в природе вывода: тот
+ * рисует по холсту и умеет дуги со скруглениями сам, а этому нужны **точки** —
+ * окружность, дуга и скруглённый угол разбираются на отрезки здесь.
+ *
+ * Доли те же: −0.5…0.5 по сторонам своего прямоугольника.
+ */
+export function volumeViewPolylines(view) {
+  const lines = [];
+  for (const part of (view && view.parts) || []) {
+    if (part.kind === "line") {
+      lines.push({ points: [{ x: part.x1, y: part.y1 }, { x: part.x2, y: part.y2 }], closed: false });
+      continue;
+    }
+    if (part.kind === "poly") {
+      lines.push({ points: (part.points || []).map(([x, y]) => ({ x, y })), closed: Boolean(part.close) });
+      continue;
+    }
+    if (part.kind === "rect") {
+      lines.push({ points: volumeRectPoints(part), closed: true });
+      continue;
+    }
+    if (part.kind === "circle") {
+      lines.push({ points: volumeArcPoints(part.cx, part.cy, part.r, 0, Math.PI * 2), closed: true });
+      continue;
+    }
+    if (part.kind === "arc") {
+      lines.push({
+        points: volumeArcPoints(part.cx, part.cy, part.r, part.from, part.to),
+        closed: Boolean(part.close),
+      });
+    }
+  }
+  return lines.filter((item) => item.points.length >= 2);
+}
+
+// Дуга отрезками. Шаг — доля полного круга, но не меньше двух отрезков: у
+// четверти окружности их выходит четыре, и излома на лице вещи не видно.
+function volumeArcPoints(cx, cy, r, from, to) {
+  const span = Math.abs(to - from);
+  const steps = Math.max(2, Math.round((VOLUME_VIEW_STEPS * span) / (Math.PI * 2)));
+  const points = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const angle = from + ((to - from) * index) / steps;
+    points.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
+  }
+  // Полная окружность: последняя точка совпала бы с первой, а замкнутость
+  // говорится признаком `closed`, а не дублем вершины.
+  if (span >= Math.PI * 2 - 1e-6) points.pop();
+  return points;
+}
+
+// Прямоугольник со скруглением: углы — те же дуги. Радиус в долях, как у
+// плоского интерпретатора, и так же зажат половиной короткой стороны.
+function volumeRectPoints(part) {
+  const left = part.x;
+  const top = part.y;
+  const right = part.x + part.width;
+  const bottom = part.y + part.height;
+  const r = Math.max(0, Math.min(Number(part.radius) || 0, Math.min(Math.abs(part.width), Math.abs(part.height)) / 2));
+  if (!(r > 0)) {
+    return [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: right, y: bottom },
+      { x: left, y: bottom },
+    ];
+  }
+  const corner = (cx, cy, from, to) => volumeArcPoints(cx, cy, r, from, to);
+  return [
+    ...corner(left + r, top + r, Math.PI, Math.PI * 1.5),
+    ...corner(right - r, top + r, Math.PI * 1.5, Math.PI * 2),
+    ...corner(right - r, bottom - r, 0, Math.PI * 0.5),
+    ...corner(left + r, bottom - r, Math.PI * 0.5, Math.PI),
+  ];
+}
+
+/** Доля лица вещи → точка в миллиметрах чертежа и высоте над полом. */
+export function volumeFacePoint(face, fx, fy) {
+  const alongMm = fx * face.widthMm;
+  const upMm = fy * face.heightMm;
+  return {
+    x: face.origin.x + face.u.x * alongMm + face.v.x * upMm + face.normal.x * VOLUME_VIEW_LIFT_MM,
+    y: face.origin.y + face.u.y * alongMm + face.v.y * upMm + face.normal.y * VOLUME_VIEW_LIFT_MM,
+    z: face.origin.z + face.u.z * alongMm + face.v.z * upMm + face.normal.z * VOLUME_VIEW_LIFT_MM,
+  };
+}
+
+/**
+ * Контур вещи — её изображением объекта, цветом метки.
+ *
+ * Изображения нет (тип без имени и с формой, которой изображения не завели) —
+ * нет и контура: вещь остаётся своей плашкой цвета категории. Условный знак
+ * плана сюда не переносится нарочно: знак читают как обозначение рядом с
+ * подписью, а в объёме подписи нет, и знак стал бы украшением.
+ */
+export function volumeMarkViewLines(place, out = []) {
+  if (!place || !place.face || !place.view) return out;
+  for (const line of volumeViewPolylines(place.view)) {
+    out.push(
+      volumeLine(
+        line.points.map((point) => volumeFacePoint(place.face, point.x, point.y)),
+        place.color,
+        { closed: line.closed, normal: place.face.normal, width: VOLUME_VIEW_LINE_PX, markId: place.markId },
+      ),
+    );
+  }
+  return out;
+}
+
+// ——— выделение и связи ———————————————————————————————————————————————————
+//
+// Выделение в объёме **общее с планом** (слова заказчика): окно и список меток
+// смотрят в одно и то же поле состояния, и кто выделил первым — неважно.
+// Поэтому здесь только рамка, а живёт выделение там же, где жило.
+//
+// И рамка, и стрелки лежат **поверх всего** (`VOLUME_LAYER_MARK`) — это прямое
+// решение заказчика: «стрелка идёт сквозь стену». Цель в соседней комнате иначе
+// пропадала бы за перегородкой вместе с ответом на вопрос, куда связь ведёт.
+// Чтобы сквозная линия не врала о том, что видно глазами, связь рисуется
+// **дважды**: сплошной в общем потоке (её закрывают стены, как и положено) и
+// тонкой пунктирной поверх всего. Там, где связь видна, пунктир ложится на свою
+// же сплошную линию и не заметен; там, где она за стеной, остаётся один
+// пунктир — он и значит «цель за стеной».
+
+/** Цвет рамки выделения — тот же, что на плане (`drawMarkBody`). */
+export const VOLUME_SELECT_COLOR = "#0969DA";
+/** Цвета связей — те же, что на плане (`LINK_COLOR` и `LINK_TIE_COLOR`). */
+export const VOLUME_LINK_COLOR = "#BF3989";
+export const VOLUME_TIE_COLOR = "#0F2E7A";
+/** Во сколько глушится поднятое цепочкой, но выделенной метки не касающееся. */
+const VOLUME_LINK_FAR = 0.4;
+/** Насколько видна сквозь стену та часть связи, которую закрывает геометрия. */
+const VOLUME_LINK_THROUGH = 0.55;
+const VOLUME_LINK_WIDTH = 2.2;
+const VOLUME_LINK_THROUGH_WIDTH = 1.1;
+const VOLUME_LINK_DASH = [6, 5];
+const VOLUME_SELECT_DASH = [7, 5];
+const VOLUME_SELECT_GROW = 1.3;
+
+/** Тот же тон вполсилы: прозрачность пишется в сам цвет. */
+export function volumeFade(color, alpha) {
+  const rgb = hexToRgb(color) || { r: 120, g: 120, b: 120 };
+  return "rgba(" + rgb.r + "," + rgb.g + "," + rgb.b + "," + Math.round(alpha * 100) / 100 + ")";
+}
+
+/**
+ * Рамка выделенной вещи: по её лицу у точки, по оси у ленты. Пунктир и цвет те
+ * же, что у кольца выделения на плане: одна и та же метка не должна выделяться
+ * в двух видах по-разному.
+ */
+export function volumeSelectLines(place, out = []) {
+  if (!place) return out;
+  if (place.face) {
+    const half = VOLUME_SELECT_GROW / 2;
+    out.push(
+      volumeLine(
+        [
+          volumeFacePoint(place.face, -half, -half),
+          volumeFacePoint(place.face, half, -half),
+          volumeFacePoint(place.face, half, half),
+          volumeFacePoint(place.face, -half, half),
+        ],
+        VOLUME_SELECT_COLOR,
+        { closed: true, dash: VOLUME_SELECT_DASH, width: 2, layer: VOLUME_LAYER_MARK },
+      ),
+    );
+    return out;
+  }
+  // Лента: рамки у неё нет, обводится сама — так же, как на плане выделяется
+  // линия, а не кольцо вокруг каждой её вершины.
+  for (const prism of place.prisms || []) {
+    const middleZ = (prism.bottomMm + prism.topMm) / 2;
+    out.push(
+      volumeLine(
+        prism.corners.map((point) => ({ x: point.x, y: point.y, z: middleZ })),
+        VOLUME_SELECT_COLOR,
+        { closed: true, dash: VOLUME_SELECT_DASH, width: 2, layer: VOLUME_LAYER_MARK },
+      ),
+    );
+  }
+  return out;
+}
+
+/**
+ * Стрелки связей по правилам плана.
+ *
+ * Правила, **какие** связи показывать, берутся с плана целиком
+ * (`canvas.canvasFrameLinks` → `render.markLinks`): управление — дугой со
+ * стрелкой, общее управление — без стрелки (это отношение равных), общий номер
+ * — кольцом по своим меткам. Вторых правил здесь не заводится: разойдись они, у
+ * одной метки на плане и в объёме оказались бы разные связи.
+ *
+ * `anchorOf` отвечает, где в объёме стоит метка. Неразмещённой вещи в объёме
+ * нет — нет и стрелки к ней: это было бы указание в пустоту. Почему её нет,
+ * отвечает список неразмещённых.
+ */
+export function volumeLinkLines(links, anchorOf, out = []) {
+  const pair = (item, color, arrow) => {
+    const from = anchorOf(item.fromId);
+    const to = anchorOf(item.toId);
+    if (!from || !to) return;
+    const alpha = item.near === false ? VOLUME_LINK_FAR : 1;
+    out.push(
+      volumeLine([from, to], alpha === 1 ? color : volumeFade(color, alpha), { width: VOLUME_LINK_WIDTH, arrow }),
+    );
+    out.push(
+      volumeLine([from, to], volumeFade(color, VOLUME_LINK_THROUGH * alpha), {
+        width: VOLUME_LINK_THROUGH_WIDTH,
+        dash: VOLUME_LINK_DASH,
+        arrow,
+        layer: VOLUME_LAYER_MARK,
+      }),
+    );
+  };
+  for (const line of (links && links.lines) || []) pair(line, VOLUME_LINK_COLOR, true);
+  for (const tie of (links && links.ties) || []) pair(tie, VOLUME_TIE_COLOR, false);
+  for (const group of (links && links.groups) || []) {
+    const points = (group.markIds || []).map((id) => anchorOf(id)).filter(Boolean);
+    if (points.length < 2) continue;
+    const alpha = group.near === false ? VOLUME_LINK_FAR : 1;
+    // Кольцом по углу вокруг середины: тождество — не цепь, у него нет ни
+    // начала, ни направления, и замкнутая линия говорит об этом сама.
+    const centre = {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+    const ring = [...points].sort(
+      (first, second) =>
+        Math.atan2(first.y - centre.y, first.x - centre.x) - Math.atan2(second.y - centre.y, second.x - centre.x),
+    );
+    out.push(volumeLine(ring, volumeFade(VOLUME_LINK_COLOR, alpha), { closed: true, dash: VOLUME_LINK_DASH, width: 1.4 }));
+    out.push(
+      volumeLine(ring, volumeFade(VOLUME_LINK_COLOR, VOLUME_LINK_THROUGH * alpha), {
+        closed: true,
+        dash: VOLUME_LINK_DASH,
+        width: 1,
+        layer: VOLUME_LAYER_MARK,
+      }),
+    );
+  }
+  return out;
+}
+
 // ——— сцена ———————————————————————————————————————————————————————————————
 
 /**
@@ -706,15 +1302,22 @@ export function volumePrismSolid(prism) {
  * `empty` — объект без чертежа: окно открывается и говорит, что показывать
  * нечего. `notes` — коды того, о чём окно обязано сказать вслух: нет моста к
  * подложке, помещения не обведены, высота не задана.
+ *
+ * `options.marks` — какие метки ставить (таск 148). Окно отдаёт сюда видимые на
+ * плане: фильтр спрятал метку на плане — она не появляется и в объёме, иначе в
+ * двух видах одного объекта пришлось бы держать два ответа на вопрос «что
+ * показано». Без него берутся все метки схемы.
  */
-export function volumeScene(project, schemeId) {
+export function volumeScene(project, schemeId, options = {}) {
   const scheme = findScheme(project, schemeId);
   if (!scheme) return null;
   const walls = wallsOnScheme(project, schemeId);
   const objects = schemeObjectsOnScheme(project, schemeId);
   const notes = [];
   if (walls.length === 0 && objects.length === 0) {
-    return { empty: true, notes: [], faces: [], solids: [], rooms: [], boundsMm: null };
+    // Без чертежа метку ставить не на что: ни стен, ни пола, ни потолка. Это
+    // не потеря — объём и так говорит, что показывать нечего.
+    return { empty: true, notes: [], faces: [], solids: [], rooms: [], boundsMm: null, marks: [], unplaced: [] };
   }
   const rooms = volumeRooms(project, schemeId);
   const schemeHeight = volumeHeightMm(project, schemeId, null);
@@ -789,6 +1392,15 @@ export function volumeScene(project, schemeId) {
       if (solid) solids.push(solid);
     }
   }
+  // Метки — последними: их тела и контуры ложатся в тот же поток граней, что
+  // стены и вещи чертежа, и спорят с ними порядком, а не ярусом. Вещь на стене
+  // стоит перед стеной — это и значит «перед»; препятствием она при этом не
+  // становится (сквозь розетку ходят).
+  const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms });
+  for (const place of marks.placed) {
+    volumeMarkFaces(place, faces);
+    volumeMarkViewLines(place, faces);
+  }
   // `wallCount` — настоящее число стен чертежа, а не длина `solids`: препятствий
   // больше, потому что проём режет стену на куски, а вещи на полу тоже держат.
   // Окно говорит о чертеже, и путать эти два числа нельзя.
@@ -802,7 +1414,25 @@ export function volumeScene(project, schemeId) {
     heightMm: schemeHeight.mm,
     wallCount: walls.length,
     openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
+    marks: marks.placed,
+    unplaced: marks.unplaced,
   };
+}
+
+/** Где в объёме стоит метка — по её месту в сцене. `null` — не размещена. */
+export function volumeMarkAnchor(scene, markId) {
+  for (const place of (scene && scene.marks) || []) {
+    if (place.markId === markId) return place.anchor;
+  }
+  return null;
+}
+
+/** Размещение метки в сцене по её идентификатору. */
+export function volumeMarkPlace(scene, markId) {
+  for (const place of (scene && scene.marks) || []) {
+    if (place.markId === markId) return place;
+  }
+  return null;
 }
 
 // ——— где встать ——————————————————————————————————————————————————————————
@@ -1046,6 +1676,7 @@ export function volumeFrame(scene, camera, box, extra = null) {
 // Одна грань в экранный многоугольник — или `null`, если её не видно:
 // отвёрнута, целиком за ближней плоскостью или целиком за краем окна.
 function volumeFacePolygon(face, camera, basis, focal, halfWidth, halfHeight, box) {
+  if (face.line) return volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box);
   const first = face.p[0];
   const vx = camera.at.x - first.x;
   const vy = camera.at.y - first.y;
@@ -1082,13 +1713,73 @@ function volumeFacePolygon(face, camera, basis, focal, halfWidth, halfHeight, bo
     depth: depth / clipped.length,
     layer: face.layer,
     fill: volumeFill(face.rgb, volumeShade(normal)),
+    pick: face.markId || null,
   };
 }
+
+/**
+ * Линия сцены в экранную ломаную (таск 148).
+ *
+ * Отличий от грани два. Первое: светлоты у линии нет — контур изображения и
+ * стрелка связи рисуются своим цветом, а не поверхностью, повёрнутой к свету.
+ * Второе: **за ближнюю плоскость линия не режется, а выбрасывается целиком.**
+ * Резать её пришлось бы иначе, чем кольцо грани (у ломаной есть концы, и
+ * замкнуть её по кругу значило бы дорисовать отрезок, которого нет), а цена
+ * отказа нулевая: контур вещи длиной в полметра оказывается наполовину за
+ * спиной только тогда, когда человек уткнулся в него носом.
+ */
+function volumeLinePolygon(line, camera, basis, focal, halfWidth, halfHeight, box) {
+  if (line.n) {
+    const first = line.p[0];
+    const facing =
+      line.n.x * (camera.at.x - first.x) + line.n.y * (camera.at.y - first.y) + line.n.z * (camera.at.z - first.z);
+    if (facing <= 0) return null;
+  }
+  const xy = [];
+  let depth = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const point of line.p) {
+    const at = volumeToCamera(point, camera.at, basis);
+    if (at.z < VOLUME_NEAR_MM) return null;
+    const scale = focal / at.z;
+    const x = halfWidth + at.x * scale;
+    const y = halfHeight - at.y * scale;
+    xy.push(x, y);
+    depth += at.z;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (xy.length < 4) return null;
+  if (maxX < 0 || minX > box.width || maxY < 0 || minY > box.height) return null;
+  return {
+    xy,
+    depth: depth / line.p.length,
+    layer: line.layer,
+    stroke: line.color,
+    width: line.width,
+    closed: line.closed,
+    dash: line.dash,
+    arrow: line.arrow,
+    pick: line.markId || null,
+  };
+}
+
+/** Стрелка связи в экранных точках: размер у неё постоянный, как у плана. */
+const VOLUME_ARROW_PX = 9;
+const VOLUME_ARROW_SPREAD = 0.42;
 
 /**
  * Отрисовка кадра. Заливка и обводка тем же цветом: без обводки между
  * соседними гранями остаётся волосяная щель от сглаживания, и стена
  * расчерчивается белыми нитями.
+ *
+ * Линии (контур вещи, стрелка связи) обводятся своим цветом и своей толщиной и
+ * не заливаются вовсе: это рисунок поверх сцены, а не её поверхность.
  */
 export function volumeDraw(ctx, polygons) {
   ctx.lineJoin = "round";
@@ -1098,13 +1789,101 @@ export function volumeDraw(ctx, polygons) {
     ctx.beginPath();
     ctx.moveTo(xy[0], xy[1]);
     for (let index = 2; index < xy.length; index += 2) ctx.lineTo(xy[index], xy[index + 1]);
-    ctx.closePath();
-    ctx.fillStyle = polygon.fill;
-    ctx.strokeStyle = polygon.fill;
-    ctx.fill();
+    if (!polygon.stroke) {
+      ctx.closePath();
+      ctx.fillStyle = polygon.fill;
+      ctx.strokeStyle = polygon.fill;
+      ctx.fill();
+      ctx.stroke();
+      continue;
+    }
+    if (polygon.closed) ctx.closePath();
+    ctx.save();
+    ctx.lineWidth = polygon.width;
+    ctx.strokeStyle = polygon.stroke;
+    if (polygon.dash) ctx.setLineDash(polygon.dash);
     ctx.stroke();
+    if (polygon.arrow) volumeDrawArrow(ctx, xy);
+    ctx.restore();
   }
   return polygons.length;
+}
+
+// Наконечник стрелки — в экранных точках, по направлению последнего отрезка:
+// в объёме он иначе то съёживался бы в точку, то вырастал в парус.
+function volumeDrawArrow(ctx, xy) {
+  const size = xy.length;
+  if (size < 4) return;
+  const tipX = xy[size - 2];
+  const tipY = xy[size - 1];
+  const dx = tipX - xy[size - 4];
+  const dy = tipY - xy[size - 3];
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0)) return;
+  const ux = dx / length;
+  const uy = dy / length;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(tipX - ux * VOLUME_ARROW_PX - uy * VOLUME_ARROW_PX * VOLUME_ARROW_SPREAD, tipY - uy * VOLUME_ARROW_PX + ux * VOLUME_ARROW_PX * VOLUME_ARROW_SPREAD);
+  ctx.lineTo(tipX, tipY);
+  ctx.lineTo(tipX - ux * VOLUME_ARROW_PX + uy * VOLUME_ARROW_PX * VOLUME_ARROW_SPREAD, tipY - uy * VOLUME_ARROW_PX - ux * VOLUME_ARROW_PX * VOLUME_ARROW_SPREAD);
+  ctx.stroke();
+}
+
+/** Насколько промахивается рука: розетка в трёх метрах — десяток точек экрана. */
+export const VOLUME_PICK_SLACK_PX = 14;
+
+/**
+ * Во что попал клик (таск 148): обозначение метки или `null`.
+ *
+ * Ищется **по телам вещей и сверху вниз** — тем же порядком, которым кадр
+ * рисовался, только с конца: что человек видит последним нарисованным, то и
+ * под курсором. Контуры и связи в поиске не участвуют: по ним целиться нельзя,
+ * а попадание в линию толщиной в точку было бы случайностью.
+ *
+ * Не попал точно — берётся ближайшая вещь в пределах промаха: розетка с трёх
+ * метров занимает десяток точек, и требовать попадания в неё пикселем значило
+ * бы сделать выделение недоступным ровно там, где оно нужнее всего.
+ */
+export function volumePickAt(polygons, x, y, slack = VOLUME_PICK_SLACK_PX) {
+  let near = null;
+  let gap = slack;
+  for (let index = polygons.length - 1; index >= 0; index -= 1) {
+    const polygon = polygons[index];
+    if (!polygon.pick || polygon.stroke) continue;
+    if (volumePolygonHit(polygon.xy, x, y)) return polygon.pick;
+    const centre = volumePolygonCentre(polygon.xy);
+    const distance = Math.hypot(centre.x - x, centre.y - y);
+    if (distance < gap) {
+      gap = distance;
+      near = polygon.pick;
+    }
+  }
+  return near;
+}
+
+function volumePolygonHit(xy, x, y) {
+  let inside = false;
+  for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+    const ax = xy[i];
+    const ay = xy[i + 1];
+    const bx = xy[j];
+    const by = xy[j + 1];
+    const crosses = ay > y !== by > y;
+    if (crosses && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) inside = !inside;
+  }
+  return inside;
+}
+
+function volumePolygonCentre(xy) {
+  let sumX = 0;
+  let sumY = 0;
+  for (let index = 0; index < xy.length; index += 2) {
+    sumX += xy[index];
+    sumY += xy[index + 1];
+  }
+  const count = xy.length / 2;
+  return { x: sumX / count, y: sumY / count };
 }
 
 // ——— задник ——————————————————————————————————————————————————————————————

@@ -18,21 +18,32 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  COMMENT_TYPE_ID,
+  addMark,
   addOpening,
   addOutline,
   addRoom,
   addScheme,
   addSchemeObject,
+  addType,
   addWall,
+  applyMarkWalls,
   createProject,
   ensureSchemeObjectKinds,
+  findMark,
+  labelOf,
+  markWall,
+  markWallSide,
   planMmToFraction,
   schemeObjectKindsInOrder,
+  setMarkDimensions,
   setPlanOrigin,
   setPlanScale,
   setRoomWallHeight,
   setSchemeWallHeight,
+  styleOf,
 } from "../src/model.js";
+import { objectViewByName, objectViewNames } from "../src/objectViews/registry.js";
 import {
   VOLUME_BODY_MM,
   VOLUME_EYE_MM,
@@ -41,8 +52,15 @@ import {
   VOLUME_LAYER_BODY,
   VOLUME_LAYER_GROUND,
   VOLUME_LAYER_MARK,
+  VOLUME_MARK_CEILING,
+  VOLUME_MARK_LIFT_MM,
+  VOLUME_MARK_NO_PLACE,
+  VOLUME_MARK_NO_SIZE,
+  VOLUME_MARK_ROOM,
+  VOLUME_MARK_WALL,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
+  VOLUME_SELECT_COLOR,
   volumeArea,
   volumeAroundCamera,
   volumeAroundFit,
@@ -54,7 +72,11 @@ import {
   volumeFreeMm,
   volumeHeightMm,
   volumeHorizon,
+  volumeLinkLines,
   volumeMarkerFaces,
+  volumePickAt,
+  volumeSelectLines,
+  volumeViewPolylines,
   volumeObjectFaces,
   volumeOpeningWalkable,
   volumePointInside,
@@ -66,7 +88,15 @@ import {
   volumeWallSolids,
   volumeWallTiles,
 } from "../src/volume.js";
-import { volumeClampPitch, volumeKeyMove, volumeNotes, volumeWhere } from "../src/panels/volume.js";
+import {
+  VOLUME_UNPLACED_SHOWN,
+  volumeClampPitch,
+  volumeKeyMove,
+  volumeNotes,
+  volumeUnplacedLine,
+  volumeUnplacedTitle,
+  volumeWhere,
+} from "../src/panels/volume.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -755,4 +785,330 @@ test("взгляд не заводится за отвес", () => {
   assert.ok(volumeClampPitch(10) < Math.PI / 2);
   assert.ok(volumeClampPitch(-10) > -Math.PI / 2);
   assert.equal(volumeClampPitch(0), 0);
+});
+
+// ——— метки в объёме (таск 148) ————————————————————————————————————————
+//
+// Три вещи, которые тихо врут, если за ними не следить:
+//
+//   1. **Где стоит вещь.** Правила места — слова заказчика, и проверяются они
+//      числами: отступ, высота и сторона у стенной, потолок у потолочной.
+//   2. **Что не размещено.** Выдумывать место нельзя, молча терять — тоже.
+//      Список обязан называть метку и причину.
+//   3. **Что изображение разбирается тем же списком** (обещание таска 139):
+//      второй интерпретатор читает те же пять примитивов и не вылезает из
+//      прямоугольника вещи.
+
+const typeByCode = (project, code) => project.markTypes.find((type) => type.code === code);
+
+// Метка на схеме с автопривязкой к стене — тем же путём, каким её ставит холст
+// (`canvasCommit` → `applyMarkWalls`): привязка обязана быть следствием места.
+function markAt(project, schemeId, code, pointsMm, kind = "point") {
+  const added = addMark(project, {
+    schemeId,
+    typeId: typeByCode(project, code).id,
+    kind,
+    points: pointsMm.map((point) => planMmToFraction(project, schemeId, point)),
+  });
+  const bound = applyMarkWalls(added.project, schemeId);
+  return { project: bound.project, markId: added.marks[0].id };
+}
+
+const placeOf = (built, markId) => built.marks.find((place) => place.markId === markId) || null;
+const faceSpanZ = (place) => ({
+  bottomMm: Math.min(...place.prisms.map((prism) => prism.bottomMm)),
+  topMm: Math.max(...place.prisms.map((prism) => prism.topMm)),
+});
+
+test("метка на стене стоит по отступу, высоте и стороне", () => {
+  const scene = roomScene();
+  // Розетка у верхней стены, внутри комнаты: 300 мм от грани — автопривязка
+  // берёт её (порог 600).
+  const put = markAt(scene.project, scene.schemeId, "Р", [{ x: -500, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.ok(place, "розетка размещена");
+  assert.equal(place.mode, VOLUME_MARK_WALL);
+  assert.equal(place.side, markWallSide(put.project, findMark(put.project, put.markId)));
+  // Высота — умолчание типа (G192): 300 мм до середины розетки.
+  assert.equal(place.heightMm, 300);
+  const span = faceSpanZ(place);
+  assert.equal(span.bottomMm, 260, "низ розетки — середина минус половина ширины");
+  assert.equal(span.topMm, 340);
+  // Сторона: вещь стоит внутри комнаты, то есть с той же стороны оси стены,
+  // что и сама метка, и не глубже грани.
+  const binding = markWall(findMark(put.project, put.markId));
+  assert.equal(binding.wallId, scene.walls[0]);
+  for (const corner of place.prisms[0].corners) {
+    assert.ok(corner.y > -1400 - 1e-9, "вещь не утоплена в стену: " + corner.y);
+    assert.ok(corner.y < -1400 + VOLUME_MARK_LIFT_MM + 10 + 1e-9, "и не улетела в комнату: " + corner.y);
+    // Выступ рамки — десять миллиметров, и вещь выходит ровно на них.
+    // Отступ вдоль стены — из привязки, своей длиной в обе стороны.
+    assert.ok(Math.abs(corner.x - (-2000 + binding.atMm)) <= 40 + 1e-9);
+  }
+  // Лицо вещи смотрит в комнату, и изображение объекта рисуется по нему.
+  assert.ok(place.face.normal.y > 0, "лицо розетки смотрит внутрь комнаты");
+  assert.equal(place.face.widthMm, 80);
+  assert.equal(place.face.heightMm, 80);
+});
+
+test("утопленное лицом остаётся в плоскости стены, а телом уходит внутрь", () => {
+  const scene = roomScene();
+  // Щит: выступ −30 (встроен в нишу), высота 1400.
+  const put = markAt(scene.project, scene.schemeId, "Щ", [{ x: 0, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.equal(place.mode, VOLUME_MARK_WALL);
+  const ys = place.prisms[0].corners.map((corner) => corner.y);
+  // Лицо — у самой грани стены (−1400 плюс подъём), тело на 30 мм в стену.
+  assert.ok(Math.max(...ys) <= -1400 + VOLUME_MARK_LIFT_MM + 1e-9);
+  assert.ok(Math.min(...ys) < -1400, "утопленное уходит в стену, а не наружу");
+  assert.ok(Math.max(...ys) - Math.min(...ys) >= 29, "глубина ниши — его выступ");
+});
+
+test("потолочная без высоты встаёт под потолок, с высотой — на свою", () => {
+  const scene = roomScene();
+  // Точечный светильник: в справочнике у него нет высоты вовсе — и это не
+  // пропуск, а то, как заказчик отмечает потолочное.
+  const put = markAt(scene.project, scene.schemeId, "Т", [{ x: 0, y: 0 }]);
+  const ceiling = placeOf(volumeScene(put.project, scene.schemeId, {}), put.markId);
+  assert.equal(ceiling.mode, VOLUME_MARK_CEILING);
+  assert.equal(faceSpanZ(ceiling).topMm, 2700, "верх вещи — потолок комнаты");
+  assert.ok(ceiling.face.normal.z < 0, "лицо потолочной вещи смотрит вниз");
+  // Высоту поставили руками — вещь уходит на неё, оставаясь на своём месте.
+  const lowered = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 2400 }).project;
+  const own = placeOf(volumeScene(lowered, scene.schemeId, {}), put.markId);
+  assert.equal(own.mode, VOLUME_MARK_ROOM);
+  assert.equal(own.heightMm, 2400);
+  assert.deepEqual(own.anchor.x, ceiling.anchor.x, "место по плану не изменилось");
+  assert.deepEqual(own.anchor.y, ceiling.anchor.y);
+});
+
+test("точечная лента встаёт вертикальной лентой", () => {
+  const scene = roomScene();
+  // ЛВ — лента вертикальная: 40 вдоль стены, 600 вверх, высота 900.
+  const put = markAt(scene.project, scene.schemeId, "ЛВ", [{ x: 800, y: -1100 }]);
+  const place = placeOf(volumeScene(put.project, scene.schemeId, {}), put.markId);
+  assert.equal(place.mode, VOLUME_MARK_WALL);
+  const span = faceSpanZ(place);
+  assert.equal(span.bottomMm, 600);
+  assert.equal(span.topMm, 1200);
+  assert.equal(place.face.widthMm, 40);
+  assert.equal(place.face.heightMm, 600);
+  assert.ok(place.face.heightMm > place.face.widthMm * 10, "лента стоит стоймя, а не лежит");
+});
+
+test("линейная метка идёт по своей линии, а высота у неё по общему правилу", () => {
+  const scene = roomScene();
+  // Подсветка карниза штор: линейная, высота 2400 — вдоль верхней стены.
+  const strip = markAt(
+    scene.project,
+    scene.schemeId,
+    "ПКШ",
+    [{ x: -1500, y: -1100 }, { x: 1500, y: -1100 }],
+    "line",
+  );
+  const onWall = placeOf(volumeScene(strip.project, scene.schemeId, {}), strip.markId);
+  assert.equal(onWall.mode, VOLUME_MARK_WALL);
+  assert.equal(onWall.heightMm, 2400);
+  assert.equal(onWall.kind, "line");
+  const binding = markWall(findMark(strip.project, strip.markId));
+  const alongMm = Math.abs(binding.toMm - binding.atMm);
+  const xs = onWall.prisms[0].corners.map((corner) => corner.x);
+  assert.ok(Math.abs(Math.max(...xs) - Math.min(...xs) - alongMm) < 1, "лента идёт от своего начала до конца");
+  // Трек без высоты — по своей линии под потолком, а не на стене.
+  const track = markAt(
+    scene.project,
+    scene.schemeId,
+    "ТР",
+    [{ x: -800, y: -200 }, { x: 800, y: -200 }, { x: 800, y: 800 }],
+    "line",
+  );
+  const above = placeOf(volumeScene(track.project, scene.schemeId, {}), track.markId);
+  assert.equal(above.mode, VOLUME_MARK_CEILING);
+  assert.equal(above.prisms.length, 2, "по призме на звено ломаной");
+  assert.equal(faceSpanZ(above).topMm, 2700);
+  assert.equal(above.face, null, "у ленты лица нет: изображение объекта принадлежит вещи, а не линии");
+});
+
+test("метка без высоты и без потолка над ней не размещается, а называется", () => {
+  const scene = roomScene();
+  // Светильник за пределами обведённого помещения: высоты у типа нет, потолка
+  // над меткой тоже — вешать не на что.
+  const put = markAt(scene.project, scene.schemeId, "Т", [{ x: 3500, y: 3000 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  assert.equal(placeOf(built, put.markId), null);
+  assert.equal(built.unplaced.length, 1);
+  assert.equal(built.unplaced[0].markId, put.markId);
+  assert.equal(built.unplaced[0].reason, VOLUME_MARK_NO_PLACE);
+  assert.equal(built.unplaced[0].label, labelOf(put.project, put.markId));
+});
+
+test("вещь без размеров не размещается: рисовать её нечем", () => {
+  const scene = roomScene();
+  const category = scene.project.categories[0];
+  const added = addType(scene.project, { code: "МВ", name: "Мастер-выключатель", categoryId: category.id });
+  const put = markAt(added.project, scene.schemeId, "МВ", [{ x: 0, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  assert.equal(built.marks.length, 0);
+  assert.equal(built.unplaced[0].reason, VOLUME_MARK_NO_SIZE);
+});
+
+test("плашка комментария в объём не идёт вовсе — ни вещью, ни строкой списка", () => {
+  const scene = roomScene();
+  const comment = addMark(scene.project, {
+    schemeId: scene.schemeId,
+    typeId: COMMENT_TYPE_ID,
+    kind: "comment",
+    points: [planMmToFraction(scene.project, scene.schemeId, { x: 0, y: 0 })],
+  });
+  const built = volumeScene(comment.project, scene.schemeId, {});
+  assert.equal(built.marks.length, 0);
+  assert.equal(built.unplaced.length, 0, "надпись на чертеже — не потерянная вещь");
+});
+
+test("фильтр плана и объём показывают одно и то же", () => {
+  const scene = roomScene();
+  const first = markAt(scene.project, scene.schemeId, "Р", [{ x: -500, y: -1100 }]);
+  const second = markAt(first.project, scene.schemeId, "В", [{ x: 500, y: -1100 }]);
+  const all = volumeScene(second.project, scene.schemeId, {});
+  assert.equal(all.marks.length, 2);
+  const only = volumeScene(second.project, scene.schemeId, {
+    marks: second.project.marks.filter((mark) => mark.id === first.markId),
+  });
+  assert.equal(only.marks.length, 1);
+  assert.equal(only.marks[0].markId, first.markId);
+});
+
+// ——— изображение объекта: второй интерпретатор ————————————————————————
+
+test("второй интерпретатор разбирает те же пять примитивов", () => {
+  const lines = volumeViewPolylines({
+    parts: [
+      { kind: "rect", x: -0.4, y: -0.3, width: 0.8, height: 0.6, radius: 0 },
+      { kind: "circle", cx: 0, cy: 0, r: 0.2 },
+      { kind: "line", x1: -0.5, y1: 0, x2: 0.5, y2: 0 },
+      { kind: "arc", cx: 0, cy: 0, r: 0.3, from: 0, to: Math.PI, close: true },
+      { kind: "poly", points: [[-0.2, -0.2], [0.2, -0.2], [0, 0.2]], close: true },
+    ],
+  });
+  assert.equal(lines.length, 5, "ни один вид записи не потерян");
+  assert.deepEqual(lines[0].points.length, 4, "прямоугольник без скругления — четыре вершины");
+  assert.ok(lines[1].points.length >= 12 && lines[1].closed, "окружность разобрана на отрезки и замкнута");
+  assert.equal(lines[2].closed, false, "отрезок не замыкается");
+  assert.ok(lines[3].points.length >= 3 && lines[3].closed, "дуга с замыканием");
+  assert.deepEqual(lines[4].points.length, 3);
+});
+
+test("все изображения справочника умещаются в свой прямоугольник и в объёме", () => {
+  for (const name of objectViewNames()) {
+    const lines = volumeViewPolylines(objectViewByName(name));
+    assert.ok(lines.length > 0, "у изображения «" + name + "» нет ни одной линии");
+    for (const line of lines) {
+      for (const point of line.points) {
+        // Та же мера, что у плоского обмера в `objectViews.test.js`: десятая
+        // доля запаса (объектив проектора выходит на 0,52). Двух разных
+        // ответов на «умещается ли контур» в сборке быть не должно.
+        assert.ok(Math.abs(point.x) <= 0.55, name + ": контур вылез по ширине — " + point.x);
+        assert.ok(Math.abs(point.y) <= 0.55, name + ": контур вылез по высоте — " + point.y);
+      }
+    }
+  }
+});
+
+test("контур вещи рисуется её цветом и лежит на её лице", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "Р", [{ x: -500, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.ok(place.view, "у розетки есть изображение объекта (по форме знака)");
+  const lines = built.faces.filter((face) => face.line && face.markId === put.markId);
+  assert.ok(lines.length >= 3, "контур розетки — несколько линий");
+  const style = styleOf(put.project, findMark(put.project, put.markId).typeId);
+  for (const line of lines) {
+    assert.equal(line.color, style.color, "контур рисуется цветом метки");
+    for (const point of line.p) {
+      // Точка контура обязана лежать в пределах лица вещи: вдоль — половина
+      // длины, по высоте — половина ширины. Это тот же обмер, которым таск 139
+      // проверял плоские изображения, только в объёме.
+      const along =
+        (point.x - place.face.origin.x) * place.face.u.x + (point.y - place.face.origin.y) * place.face.u.y;
+      assert.ok(Math.abs(along) <= place.face.widthMm * 0.55, "контур вылез вдоль стены: " + along);
+      assert.ok(Math.abs(point.z - place.face.origin.z) <= place.face.heightMm * 0.55, "контур вылез по высоте");
+    }
+  }
+});
+
+// ——— выделение, клик и связи —————————————————————————————————————————
+
+test("клик попадает в вещь, а не в стену за ней", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "К", [{ x: 0, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  const box = { width: 800, height: 600 };
+  // Смотрим на кондиционер из середины комнаты.
+  const camera = { at: { x: 0, y: 500, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
+  const frame = volumeFrame(built, camera, box);
+  const mine = frame.filter((polygon) => polygon.pick === put.markId && !polygon.stroke);
+  assert.ok(mine.length > 0, "грани вещи знают, чьи они");
+  const xy = mine[mine.length - 1].xy;
+  const centre = { x: (xy[0] + xy[4]) / 2, y: (xy[1] + xy[5]) / 2 };
+  assert.equal(volumePickAt(frame, centre.x, centre.y), put.markId);
+  // Мимо всего — пусто: клик по стене выделение снимает, а не оставляет.
+  assert.equal(volumePickAt(frame, 5, 5), null);
+  assert.ok(place.anchor.z > 0);
+});
+
+test("рамка выделения лежит поверх всего: вещь за стеной не теряется", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "Р", [{ x: -500, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const lines = volumeSelectLines(placeOf(built, put.markId));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].layer, VOLUME_LAYER_MARK);
+  assert.ok(lines[0].closed && lines[0].dash, "рамка замкнута и пунктирна — как кольцо выделения на плане");
+  assert.equal(lines[0].color, VOLUME_SELECT_COLOR);
+});
+
+test("связь рисуется дважды: сплошной в сцене и пунктиром сквозь стену", () => {
+  const anchors = { a: { x: 0, y: 0, z: 900 }, b: { x: 3000, y: 0, z: 2700 } };
+  const lines = volumeLinkLines({ lines: [{ fromId: "a", toId: "b" }] }, (id) => anchors[id] || null);
+  assert.equal(lines.length, 2);
+  const solid = lines.find((line) => line.layer !== VOLUME_LAYER_MARK);
+  const through = lines.find((line) => line.layer === VOLUME_LAYER_MARK);
+  assert.ok(solid && through, "одна линия в общем потоке, вторая поверх всего");
+  assert.equal(solid.dash, null, "видимая часть связи — сплошная");
+  assert.ok(through.dash, "сквозная — пунктиром: по нему и видно, что цель за стеной");
+  assert.ok(solid.arrow && through.arrow, "управление — отношение направленное");
+  assert.ok(through.width < solid.width);
+  // Общее управление — отношение равных, и стрелки у него нет.
+  const ties = volumeLinkLines({ ties: [{ fromId: "a", toId: "b" }] }, (id) => anchors[id] || null);
+  assert.ok(ties.every((line) => !line.arrow));
+  // Неразмещённой вещи в объёме нет — нет и стрелки в пустоту.
+  assert.deepEqual(volumeLinkLines({ lines: [{ fromId: "a", toId: "нет" }] }, (id) => anchors[id] || null), []);
+});
+
+test("строка «не размещены» называет метки и причину, а длинный список обрывает", () => {
+  assert.equal(volumeUnplacedLine([]), "");
+  const one = volumeUnplacedLine([{ markId: "1", label: "ДД1", reason: VOLUME_MARK_NO_PLACE }]);
+  assert.ok(one.includes("ДД1"), one);
+  assert.ok(one.includes("1"), one);
+  const many = [];
+  for (let index = 0; index < VOLUME_UNPLACED_SHOWN + 3; index += 1) {
+    many.push({ markId: String(index), label: "Т" + index, reason: VOLUME_MARK_NO_SIZE });
+  }
+  const line = volumeUnplacedLine(many);
+  assert.ok(line.includes("Т0") && !line.includes("Т10"), line);
+  assert.ok(volumeUnplacedTitle(many).includes("Т10"), "все обозначения остаются в подсказке");
+  assert.equal(volumeUnplacedTitle([{ markId: "1", label: "Т1", reason: VOLUME_MARK_NO_SIZE }]), "");
+});
+
+test("метки в сцене не меняют объект (G68)", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "Р", [{ x: -500, y: -1100 }]);
+  const before = JSON.stringify(put.project);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  assert.equal(built.marks.length, 1);
+  assert.equal(JSON.stringify(put.project), before, "объём только читает (G68)");
 });
