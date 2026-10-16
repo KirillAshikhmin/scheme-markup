@@ -37,10 +37,16 @@ import {
   VOLUME_BODY_MM,
   VOLUME_EYE_MM,
   VOLUME_HEIGHT_FALLBACK_MM,
+  VOLUME_LAYER_BASE,
+  VOLUME_LAYER_BODY,
+  VOLUME_LAYER_GROUND,
+  VOLUME_LAYER_MARK,
   VOLUME_NEAR_MM,
+  VOLUME_PITCH_MAX_DEG,
   volumeArea,
   volumeAroundCamera,
   volumeAroundFit,
+  volumeAroundPitch,
   volumeClipNear,
   volumeFill,
   volumeFocal,
@@ -162,26 +168,50 @@ test("схема без чертежа отвечает empty, а не пуст�
 test("у комнаты есть пол, потолок и стены с толщиной", () => {
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
-  const ground = built.faces.filter((face) => face.ground);
+  const ground = built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND);
   assert.equal(ground.length, 2, "пол и потолок — по одному на обведённое помещение");
   const floor = ground.find((face) => face.n.z > 0);
   const ceiling = ground.find((face) => face.n.z < 0);
   assert.ok(floor && ceiling, "у пола нормаль вверх, у потолка вниз");
   assert.ok(floor.p.every((point) => point.z === 0), "пол лежит на нуле");
   assert.ok(ceiling.p.every((point) => point.z === 2700), "потолок — на высоте схемы");
+  // Под ними — плита по габариту чертежа: она закрывает пороги дверей, где
+  // пола нет ни у одной комнаты.
+  assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BASE).length, 1);
   // Толщина стены видна по торцам: у стены без проёмов пять граней — две
   // стороны, два торца и верх. Низ не рисуется: он под полом.
-  assert.equal(built.faces.filter((face) => !face.ground).length, 4 * 5);
+  assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY).length, 4 * 5);
+});
+
+test("окно считает стены и проёмы чертежа, а не препятствия", () => {
+  const scene = roomScene();
+  const project = addOpening(scene.project, {
+    wallId: scene.walls[0],
+    kind: "door",
+    atMm: 1500,
+    widthMm: 900,
+    heightMm: 2100,
+    heightAboveFloorMm: 0,
+    hinge: "start",
+    swing: "left",
+  }).project;
+  const built = volumeScene(project, scene.schemeId);
+  assert.equal(built.wallCount, 4, "стен ровно столько, сколько нарисовано");
+  assert.equal(built.openingCount, 1);
+  // Препятствий больше: проём разрезал стену надвое.
+  assert.equal(built.solids.length, 5);
 });
 
 test("переопределение высоты комнаты доходит до объёма", () => {
   const scene = roomScene({ roomHeightMm: 3100 });
   const built = volumeScene(scene.project, scene.schemeId);
-  const ceiling = built.faces.find((face) => face.ground && face.n.z < 0);
+  const ceiling = built.faces.find((face) => face.layer === VOLUME_LAYER_GROUND && face.n.z < 0);
   assert.equal(ceiling.p[0].z, 3100, "потолок встал по высоте комнаты");
   // Стена рисуется до верхнего из двух своих потолков: снаружи 2700, внутри
   // 3100 — иначе у более высокой комнаты осталась бы щель над стеной.
-  const wallTop = Math.max(...built.faces.filter((face) => !face.ground).flatMap((face) => face.p.map((point) => point.z)));
+  const wallTop = Math.max(
+    ...built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY).flatMap((face) => face.p.map((point) => point.z)),
+  );
   assert.equal(wallTop, 3100);
 });
 
@@ -191,7 +221,7 @@ test("высоты нет вовсе — рисуется умолчание, и
   const project = setSchemeWallHeight(scene.project, scene.schemeId, "").project;
   const built = volumeScene(project, scene.schemeId);
   assert.deepEqual(built.notes, ["noHeight"]);
-  const ceiling = built.faces.find((face) => face.ground && face.n.z < 0);
+  const ceiling = built.faces.find((face) => face.layer === VOLUME_LAYER_GROUND && face.n.z < 0);
   assert.equal(ceiling.p[0].z, VOLUME_HEIGHT_FALLBACK_MM);
   assert.ok(volumeNotes(built)[0].includes(String(VOLUME_HEIGHT_FALLBACK_MM)), "число названо в строке");
 });
@@ -200,10 +230,13 @@ test("помещения не обведены — пол плитой под ч
   const scene = roomScene({ room: false });
   const built = volumeScene(scene.project, scene.schemeId);
   assert.deepEqual(built.notes, ["noRooms"]);
-  const ground = built.faces.filter((face) => face.ground);
-  assert.equal(ground.length, 1, "одна плита пола");
-  assert.ok(ground[0].n.z > 0, "и она смотрит вверх");
-  assert.ok(volumeArea(ground[0].p) > volumeArea([{ x: -2000, y: -1500 }, { x: 2000, y: -1500 }, { x: 2000, y: 1500 }, { x: -2000, y: 1500 }]));
+  assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND).length, 0, "ни полов, ни потолков комнат");
+  const plate = built.faces.filter((face) => face.layer === VOLUME_LAYER_BASE);
+  assert.equal(plate.length, 1, "одна плита пола");
+  assert.ok(plate[0].n.z > 0, "и она смотрит вверх");
+  // Плита идёт по габариту чертежа, то есть по осевым линиям наружных стен:
+  // дальше неё лезть нельзя — за осевой начинается улица.
+  assert.equal(volumeArea(plate[0].p), 4000 * 3000);
 });
 
 test("контуры есть, а моста к плану нет — помещения не считаются, и это названо", () => {
@@ -216,7 +249,7 @@ test("контуры есть, а моста к плану нет — помещ
   const built = volumeScene(project, scene.schemeId);
   assert.deepEqual(built.notes, ["noBridge"]);
   assert.equal(built.rooms.length, 0);
-  assert.equal(built.faces.filter((face) => face.ground).length, 1, "плита на месте — пола не лишаемся");
+  assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BASE).length, 1, "плита на месте — пола не лишаемся");
 });
 
 // ——— проёмы: что видно и что держит ———————————————————————————————————
@@ -301,6 +334,21 @@ test("у двери есть полотно, и оно двустороннее;
 });
 
 // ——— ходьба ———————————————————————————————————————————————————————————
+
+test("длинный шаг не проскакивает сквозь тонкую перегородку", () => {
+  // Перегородка в 50 мм поперёк пути и прыжок на пять метров: выталкивание
+  // разбирает перекрытие, а не путь, поэтому шаг обязан дробиться.
+  const base = planProject();
+  const project = addWall(base.project, {
+    schemeId: base.schemeId,
+    aMm: { x: -3000, y: 0 },
+    bMm: { x: 3000, y: 0 },
+    thicknessMm: 50,
+  }).project;
+  const built = volumeScene(project, base.schemeId);
+  const after = volumeStep(built, { x: 0, y: -2000 }, 0, 5000);
+  assert.ok(after.y < 0, "остались по свою сторону перегородки: " + after.y);
+});
 
 test("сквозь стену не пройти: тело выталкивается и остаётся в комнате", () => {
   const scene = roomScene();
@@ -432,10 +480,11 @@ test("в кадре пол и потолок лежат раньше стен, �
     box,
   );
   assert.ok(frame.length > 3, "внутри комнаты видно не меньше пола, потолка и двух стен: " + frame.length);
-  assert.ok(frame.some((polygon) => polygon.ground), "пол и потолок в кадре");
-  const firstBody = frame.findIndex((polygon) => !polygon.ground);
+  assert.ok(frame.some((polygon) => polygon.layer === VOLUME_LAYER_GROUND), "пол и потолок в кадре");
+  assert.equal(frame[0].layer, VOLUME_LAYER_BASE, "плита ложится первой");
+  const firstBody = frame.findIndex((polygon) => polygon.layer === VOLUME_LAYER_BODY);
   assert.ok(
-    frame.slice(0, firstBody).every((polygon) => polygon.ground),
+    frame.slice(0, firstBody).every((polygon) => polygon.layer < VOLUME_LAYER_BODY),
     "пол и потолок стоят в начале списка",
   );
   for (const part of [frame.slice(0, firstBody), frame.slice(firstBody)]) {
@@ -536,14 +585,19 @@ test("кружок «вы здесь» идёт в общем потоке гр�
   const marker = volumeMarkerFaces({ x: 100, y: 200 }, 0);
   assert.equal(marker.length, 2, "кружок и треугольник взгляда");
   for (const face of marker) {
-    assert.equal(face.ground, false, "лежи он в полу — пол ближней комнаты закрасил бы его");
+    assert.equal(face.layer, VOLUME_LAYER_MARK, "указатель рисуется поверх всего — иначе ближняя стена спрячет его");
     assert.ok(face.n.z > 0, "смотрит вверх");
   }
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
   const box = { width: 1200, height: 700 };
   const camera = volumeAroundCamera({ x: 0, y: 0, z: 1200 }, 0.5, -0.8, 9000);
-  assert.equal(volumeFrame(built, camera, box, marker).length, volumeFrame(built, camera, box).length + 2);
+  const frame = volumeFrame(built, camera, box, marker);
+  assert.equal(frame.length, volumeFrame(built, camera, box).length + 2);
+  // И ложится он последним: ближняя стена прячет за собой полосу пола, а
+  // указатель обязан быть виден всегда.
+  assert.equal(frame[frame.length - 1].layer, VOLUME_LAYER_MARK);
+  assert.equal(frame[frame.length - 2].layer, VOLUME_LAYER_MARK);
 });
 
 // ——— объекты пола —————————————————————————————————————————————————————
@@ -579,6 +633,32 @@ test("объект пола становится призмой, а колонн
   assert.equal(object.length, 10);
   const top = Math.max(...object.flatMap((face) => face.p.map((point) => point.z)));
   assert.equal(top, 3100, "колонна встала во всю высоту комнаты, а не в выдуманную");
+});
+
+test("вещь на полу держит человека, а короб под потолком — нет", () => {
+  const scene = roomScene();
+  const kinds = ensureSchemeObjectKinds(scene.project);
+  let project = kinds.project;
+  const kind = schemeObjectKindsInOrder(project)[0];
+  const place = (heightMm, heightAboveFloorMm) =>
+    addSchemeObject(project, {
+      schemeId: scene.schemeId,
+      kindId: kind.id,
+      shape: "rect",
+      atMm: { x: 0, y: 0 },
+      widthMm: 1200,
+      depthMm: 600,
+      turnDeg: 0,
+      heightMm,
+      heightAboveFloorMm,
+    }).project;
+  const bare = volumeScene(project, scene.schemeId).solids.length;
+  // Шкаф на полу — препятствие.
+  assert.equal(volumeScene(place(2200, 0), scene.schemeId).solids.length, bare + 1);
+  // Короб под потолком — над головой, проходим.
+  assert.equal(volumeScene(place(400, 2200), scene.schemeId).solids.length, bare);
+  // Порожек в сто миллиметров — переступили.
+  assert.equal(volumeScene(place(100, 0), scene.schemeId).solids.length, bare);
 });
 
 test("висящий над полом объект получает и низ", () => {
@@ -635,6 +715,32 @@ test("имя помещения называется вслух, а вне по�
   assert.ok(volumeWhere(scene.project, built, { x: 0, y: 0 }).includes("Спальня"));
   assert.equal(volumeWhere(scene.project, built, { x: 9000, y: 9000 }), "Вне помещений");
   assert.equal(volumeRoomAt(built, { x: 9000, y: 9000 }), null);
+});
+
+test("в тесном месте окно говорит об этом словом, а не чинит само", () => {
+  const scene = roomScene({ roomName: "Санузел" });
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Посередине комнаты 4 × 3 м просторно.
+  assert.equal(volumeWhere(scene.project, built, { x: 0, y: 0 }), "Вы в помещении «Санузел»");
+  // Вплотную к стене — тесно, и названо это вслух.
+  const wall = volumeStep(built, { x: 0, y: 0 }, 0, 5000);
+  assert.ok(volumeWhere(scene.project, built, wall).includes("тесно"), "про тесноту сказано: " + volumeWhere(scene.project, built, wall));
+  // Но геометрия цела: стена не ближе ближней плоскости.
+  assert.ok(volumeFreeMm(built.solids, wall.x, wall.y) > VOLUME_NEAR_MM);
+});
+
+test("обзор не ныряет под крышу: наклон ограничен расстоянием", () => {
+  const lift = 1900;
+  // Отошли далеко — можно смотреть почти вдоль земли, но всё же сверху.
+  const far = volumeAroundPitch(0, 20000, lift);
+  assert.ok(far < 0, "обзор всегда смотрит сверху: " + far);
+  assert.ok(Math.abs(Math.sin(-far) * 20000 - lift) < 1, "подъём над целью ровно по крыше");
+  // Подошли вплотную — вид становится отвесным.
+  assert.ok(volumeAroundPitch(0, 2000, lift) < volumeAroundPitch(0, 20000, lift));
+  // Ближе, чем крыша высока, — почти отвес, и за него не заходим.
+  assert.ok(volumeAroundPitch(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
+  // Круче ограничения смотреть не запрещено — запрещено положе.
+  assert.ok(volumeAroundPitch(-1.2, 20000, lift) < far);
 });
 
 test("клавиши разложены по осям камеры, а стрелки влево-вправо вертят", () => {

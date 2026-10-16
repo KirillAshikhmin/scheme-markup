@@ -75,6 +75,20 @@ export const VOLUME_NEAR_MM = 80;
  * пропускает человека; окно на высоте 800 мм — нет, под ним глухая стена.
  */
 export const VOLUME_STEP_MM = 300;
+/** Макушка: под тем, что выше неё, проходят не нагибаясь. */
+export const VOLUME_HEAD_MM = 1900;
+/**
+ * Свободное место вокруг, ниже которого окно говорит «тесно».
+ *
+ * Это ответ на узкий санузел, где камера упирается носом в стену. Ломаться там
+ * нечему — радиус тела больше ближней плоскости, и грань сквозь камеру не
+ * пройдёт никогда, — но кадр становится ровным полем в сорок сантиметров
+ * стены, и человек решит, что сборка сломалась. Поэтому окно не подменяет
+ * решение за него (ни выталкивания в середину комнаты, ни поля зрения
+ * нараспашку), а называет происходящее словом и показывает выход: обзор.
+ * Полметра — половина прохода между стеной и ванной.
+ */
+export const VOLUME_TIGHT_MM = 500;
 /**
  * Поле зрения по длинной стороне окна.
  *
@@ -112,8 +126,35 @@ export const VOLUME_AROUND_PITCH_DEG = -42;
 export const VOLUME_AROUND_NEAR_MM = 7000;
 export const VOLUME_AROUND_MIN_MM = 1500;
 export const VOLUME_AROUND_MAX_MM = 400000;
-/** Запас пола вокруг чертежа, когда помещения не обведены. */
-export const VOLUME_PLATE_MARGIN_MM = 1500;
+/**
+ * Три яруса, в которых грани ложатся на холст (дефект живого прогона).
+ *
+ *   0 — **плита под чертежом**. Одна грань на всю схему, по габариту чертежа,
+ *       то есть по осевым линиям наружных стен. Нужна не для красоты: в пороге
+ *       двери пола нет вовсе (комнаты кончаются у внутренних граней, а между
+ *       ними лежит толщина стены), и сквозь эту щель был виден задник —
+ *       зелёная полоса поперёк каждого проёма. Той же щелью отзывается контур,
+ *       обведённый рукой чуть мимо стены. Плита закрывает оба случая разом и
+ *       наружу не вылезает: за осевой линией её прячет сама стена.
+ *   1 — **полы и потолки** помещений.
+ *   2 — **всё остальное**: стены, объекты, полотна, рамы.
+ *   3 — **кружок «вы здесь»**. Он рисуется поверх всего, и это не оплошность:
+ *       он не часть комнаты, а указатель. Обзор смотрит под углом, и ближняя
+ *       стена высотой 2,7 м прячет за собой полосу пола метра в три — то есть
+ *       ровно того человека, ради которого обзор и открыли («без него не
+ *       понять, где стоишь»). Указатель, видный сквозь стену, отвечает на этот
+ *       вопрос всегда; сама стена при этом остаётся на месте и читается как
+ *       стена.
+ *
+ * Ярус сильнее дальности, и это правило, а не ускорение: под плитой нет
+ * ничего, под полом нет ничего, а потолок, видимый снизу, не закрывает ничего,
+ * кроме себя. Будь они в общем потоке, пол комнаты, в которой стоишь, оказался
+ * бы ближе дальней стены и закрасил бы её низ.
+ */
+export const VOLUME_LAYER_BASE = 0;
+export const VOLUME_LAYER_GROUND = 1;
+export const VOLUME_LAYER_BODY = 2;
+export const VOLUME_LAYER_MARK = 3;
 /** Сколько раз выталкиваем тело из стен за шаг: угол держат два прохода. */
 const VOLUME_PUSH_PASSES = 4;
 /** Светлота самой тёмной и самой светлой грани. */
@@ -183,8 +224,8 @@ export function volumeFill(rgb, shade) {
 // ——— грани ———————————————————————————————————————————————————————————————
 //
 // Грань — плоский многоугольник в миллиметрах чертежа плюс третья ось: `z`
-// отсчитывается от пола вверх. `ground` отделяет пол и потолок от всего
-// остального, `both` помечает двустороннюю грань (дверное полотно).
+// отсчитывается от пола вверх. `layer` — ярус отрисовки (см. выше), `both`
+// помечает двустороннюю грань (дверное полотно, брусок рамы).
 
 function volumeFace(points, rgb, options = {}) {
   const normal = options.normal || volumeFaceNormal(points);
@@ -192,7 +233,7 @@ function volumeFace(points, rgb, options = {}) {
     p: points,
     n: normal,
     rgb,
-    ground: Boolean(options.ground),
+    layer: options.layer === undefined ? VOLUME_LAYER_BODY : options.layer,
     both: Boolean(options.both),
   };
 }
@@ -563,49 +604,100 @@ function volumeHeightAt(project, schemeId, pointMm, fallbackMm) {
 }
 
 /**
- * Грани объекта схемы. Прямоугольник — призма по четырём углам, ломаная —
- * цепочка призм по звеньям: соседние звенья слегка заходят друг в друга на
- * изломе, и это тот же стык, что у двух стен в углу.
+ * Объект схемы, разложенный на прямые призмы.
+ *
+ * Прямоугольник — одна призма по четырём углам, ломаная — цепочка призм по
+ * звеньям: соседние звенья слегка заходят друг в друга на изломе, и это тот же
+ * стык, что у двух стен в углу.
  *
  * Высота `null` значит «во всю высоту помещения» (колонна, ниша, короб) — она
  * берётся по тому помещению, в котором вещь стоит.
+ *
+ * Одно место на обе надобности: по этим призмам вещь и рисуется, и держит
+ * человека. Посчитай их врозь — и однажды нарисованный шкаф окажется не там,
+ * где он не пускает.
  */
-export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = []) {
+export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) {
   const corners = schemeObjectCorners(object);
-  if (corners.length === 0) return out;
+  if (corners.length === 0) return [];
   const bottom = Math.max(0, Number(object.heightAboveFloorMm || 0));
   const own = typeof object.heightMm === "number" ? Number(object.heightMm) : null;
-  if (object.shape === "polyline") {
-    const halfWidth = Number(object.depthMm) / 2;
-    for (let index = 0; index + 1 < corners.length; index += 1) {
-      const a = corners[index];
-      const b = corners[index + 1];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const length = Math.hypot(dx, dy);
-      if (!(length > 0)) continue;
-      const nx = (dy / length) * halfWidth;
-      const ny = (-dx / length) * halfWidth;
-      const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const top = own === null ? volumeHeightAt(project, schemeId, middle, fallbackHeightMm) : bottom + own;
-      volumePrismFaces(
-        volumeClockwise([
-          { x: a.x + nx, y: a.y + ny },
-          { x: b.x + nx, y: b.y + ny },
-          { x: b.x - nx, y: b.y - ny },
-          { x: a.x - nx, y: a.y - ny },
-        ]),
-        bottom,
-        top,
-        VOLUME_OBJECT_RGB,
-        out,
-      );
-    }
-    return out;
+  const topAt = (middle) => (own === null ? volumeHeightAt(project, schemeId, middle, fallbackHeightMm) : bottom + own);
+  if (object.shape !== "polyline") {
+    return [{ corners: volumeClockwise(corners), bottomMm: bottom, topMm: topAt(object.atMm || corners[0]) }];
   }
-  const middle = object.atMm || corners[0];
-  const top = own === null ? volumeHeightAt(project, schemeId, middle, fallbackHeightMm) : bottom + own;
-  return volumePrismFaces(volumeClockwise(corners), bottom, top, VOLUME_OBJECT_RGB, out);
+  const halfWidth = Number(object.depthMm) / 2;
+  const prisms = [];
+  for (let index = 0; index + 1 < corners.length; index += 1) {
+    const a = corners[index];
+    const b = corners[index + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (!(length > 0)) continue;
+    const nx = (dy / length) * halfWidth;
+    const ny = (-dx / length) * halfWidth;
+    prisms.push({
+      corners: volumeClockwise([
+        { x: a.x + nx, y: a.y + ny },
+        { x: b.x + nx, y: b.y + ny },
+        { x: b.x - nx, y: b.y - ny },
+        { x: a.x - nx, y: a.y - ny },
+      ]),
+      bottomMm: bottom,
+      topMm: topAt({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }),
+    });
+  }
+  return prisms;
+}
+
+/** Грани объекта схемы. */
+export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = []) {
+  for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out);
+  }
+  return out;
+}
+
+/**
+ * Держит ли вещь человека. Решает, как и у проёма, геометрия: через низкое
+ * переступают, под высоким проходят.
+ *
+ * Колонна, шкаф и столешница не пускают — пройти сквозь шкаф так же неверно,
+ * как сквозь стену, и заказчик разрешил проходить ровно сквозь **дверные
+ * полотна**, а не сквозь вещи. Короб под потолком, наоборот, над головой, и
+ * останавливать им человека было бы странно.
+ */
+export function volumePrismBlocks(prism) {
+  return prism.bottomMm < VOLUME_HEAD_MM && prism.topMm > VOLUME_STEP_MM;
+}
+
+/** Препятствие из призмы: повёрнутый прямоугольник по её габариту. */
+export function volumePrismSolid(prism) {
+  const corners = prism.corners;
+  if (corners.length < 4) return null;
+  const a = corners[0];
+  const b = corners[1];
+  const c = corners[2];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0)) return null;
+  const ux = dx / length;
+  const uy = dy / length;
+  const nx = uy;
+  const ny = -ux;
+  const depth = Math.abs((c.x - b.x) * nx + (c.y - b.y) * ny);
+  return {
+    cx: (a.x + c.x) / 2,
+    cy: (a.y + c.y) / 2,
+    ux,
+    uy,
+    nx,
+    ny,
+    half: length / 2,
+    halfT: depth / 2,
+  };
 }
 
 // ——— сцена ———————————————————————————————————————————————————————————————
@@ -630,44 +722,43 @@ export function volumeScene(project, schemeId) {
   const schemeHeight = volumeHeightMm(project, schemeId, null);
   if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
   const faces = [];
+  const bounds = drawingBoundsMm(project, schemeId);
+  // Плита под чертежом — нулевой ярус. Она есть всегда: с обведёнными
+  // помещениями закрывает пороги и щели у стен, без них остаётся единственным
+  // полом. Потолка в этом случае нет вовсе — накрыть всё одной крышкой значило
+  // бы соврать о том, где кончается комната, и отнять обзор со стороны.
+  if (bounds) {
+    faces.push(
+      volumeFace(
+        volumeClockwise([
+          { x: bounds.minX, y: bounds.minY },
+          { x: bounds.maxX, y: bounds.minY },
+          { x: bounds.maxX, y: bounds.maxY },
+          { x: bounds.minX, y: bounds.maxY },
+        ]).map((point) => volumeAt(point, 0)),
+        VOLUME_FLOOR_RGB,
+        { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_BASE },
+      ),
+    );
+  }
   for (const room of rooms) {
     faces.push(
       volumeFace(
         room.pointsMm.map((point) => volumeAt(point, 0)),
         VOLUME_FLOOR_RGB,
-        { normal: { x: 0, y: 0, z: 1 }, ground: true },
+        { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
       ),
     );
     faces.push(
       volumeFace(
         [...room.pointsMm].reverse().map((point) => volumeAt(point, room.heightMm)),
         VOLUME_CEILING_RGB,
-        { normal: { x: 0, y: 0, z: -1 }, ground: true },
+        { normal: { x: 0, y: 0, z: -1 }, layer: VOLUME_LAYER_GROUND },
       ),
     );
   }
-  const bounds = drawingBoundsMm(project, schemeId);
   if (rooms.length === 0) {
-    // Помещения не обведены — пол кладётся плитой под всем чертежом, а потолка
-    // нет вовсе. Накрыть всё одной крышкой значило бы соврать о том, где
-    // кончается комната, и отнять обзор со стороны.
     notes.push(outlinesInOrder(project, schemeId).length > 0 ? "noBridge" : "noRooms");
-    if (bounds) {
-      const margin = VOLUME_PLATE_MARGIN_MM;
-      const plate = volumeClockwise([
-        { x: bounds.minX - margin, y: bounds.minY - margin },
-        { x: bounds.maxX + margin, y: bounds.minY - margin },
-        { x: bounds.maxX + margin, y: bounds.maxY + margin },
-        { x: bounds.minX - margin, y: bounds.maxY + margin },
-      ]);
-      faces.push(
-        volumeFace(
-          plate.map((point) => volumeAt(point, 0)),
-          VOLUME_FLOOR_RGB,
-          { normal: { x: 0, y: 0, z: 1 }, ground: true },
-        ),
-      );
-    }
   }
   const solids = [];
   for (const wall of walls) {
@@ -693,9 +784,27 @@ export function volumeScene(project, schemeId) {
     }
   }
   for (const object of objects) {
-    volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces);
+    for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
+      volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, faces);
+      if (!volumePrismBlocks(prism)) continue;
+      const solid = volumePrismSolid(prism);
+      if (solid) solids.push(solid);
+    }
   }
-  return { empty: false, notes, faces, solids, rooms, boundsMm: bounds, heightMm: schemeHeight.mm };
+  // `wallCount` — настоящее число стен чертежа, а не длина `solids`: препятствий
+  // больше, потому что проём режет стену на куски, а вещи на полу тоже держат.
+  // Окно говорит о чертеже, и путать эти два числа нельзя.
+  return {
+    empty: false,
+    notes,
+    faces,
+    solids,
+    rooms,
+    boundsMm: bounds,
+    heightMm: schemeHeight.mm,
+    wallCount: walls.length,
+    openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
+  };
 }
 
 // ——— где встать ——————————————————————————————————————————————————————————
@@ -804,9 +913,25 @@ export function volumePush(solids, at, radius) {
   return { x, y };
 }
 
-/** Шаг с проверкой стен: сдвинулись, потом вытолкнулись. */
+/**
+ * Шаг с проверкой стен: сдвинулись, потом вытолкнулись.
+ *
+ * Шаг дробится на куски не длиннее радиуса тела — и это не предосторожность, а
+ * необходимость. Выталкивание разбирает **перекрытие**, а не путь: прыгни
+ * человек разом дальше, чем толщина перегородки плюс два радиуса, и он
+ * окажется по ту сторону, ничего не задев. На бегу (4,8 м/с) кадр длиной в
+ * десятую долю секунды — это 480 мм, а перегородка бывает в 50 мм: без дробления
+ * сквозь неё проходили бы при любом подвисании вкладки.
+ */
 export function volumeStep(scene, at, dx, dy) {
-  return volumePush(scene.solids || [], { x: at.x + dx, y: at.y + dy }, VOLUME_BODY_MM);
+  const solids = scene.solids || [];
+  const length = Math.hypot(dx, dy);
+  const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
+  let point = { x: at.x, y: at.y };
+  for (let index = 0; index < parts; index += 1) {
+    point = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM);
+  }
+  return point;
 }
 
 /**
@@ -916,10 +1041,7 @@ export function volumeFrame(scene, camera, box, extra = null) {
   };
   for (const face of scene.faces) take(face);
   for (const face of extra || []) take(face);
-  polygons.sort((a, b) => {
-    if (a.ground !== b.ground) return a.ground ? -1 : 1;
-    return b.depth - a.depth;
-  });
+  polygons.sort((a, b) => (a.layer === b.layer ? b.depth - a.depth : a.layer - b.layer));
   return polygons;
 }
 
@@ -960,7 +1082,7 @@ function volumeFacePolygon(face, camera, basis, focal, halfWidth, halfHeight, bo
   return {
     xy,
     depth: depth / clipped.length,
-    ground: face.ground,
+    layer: face.layer,
     fill: volumeFill(face.rgb, volumeShade(normal)),
   };
 }
@@ -1113,13 +1235,36 @@ export function volumeAroundDistance(value) {
 }
 
 /**
+ * Наклон обзора, при котором камера заведомо выше крыши (дефект живого
+ * прогона).
+ *
+ * Обзор ходит вокруг цели, а цель стоит на полу среди стен. Подними взгляд к
+ * горизонту — и камера, отойдя на семь метров, окажется **внутри** стены
+ * соседней комнаты: кадр станет ровным серым полем, и человек решит, что
+ * сборка сломалась. Сквозь стены при этом смотреть нельзя по той же причине,
+ * по какой сквозь них нельзя ходить, — пропадёт смысл.
+ *
+ * Поэтому обзор смотрит сверху всегда: наклон ограничен так, чтобы подъём
+ * камеры над целью был не меньше `liftMm` — высоты, на которой кончается
+ * чертёж. Отошли дальше — можно смотреть положе; приблизились — вид сам
+ * становится круче, вплоть до отвесного.
+ */
+export function volumeAroundPitch(pitch, distance, liftMm) {
+  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
+  if (!(distance > 0) || !(liftMm > 0)) return Math.max(-limit, Math.min(limit, pitch));
+  const ratio = Math.min(1, liftMm / distance);
+  const steepest = -Math.min(limit, Math.asin(ratio));
+  return Math.max(-limit, Math.min(steepest, pitch));
+}
+
+/**
  * Где стоит человек — кружок на полу и треугольник взгляда.
  *
  * Заказчик про обзор: «без него не понять, где стоишь». Значит обзор обязан
  * показать не только комнату, но и самого смотрящего — иначе он отвечает на
- * половину вопроса. Кружок лежит чуть выше пола и попадает в общий поток
- * граней, а не в пол с потолком: лежи он там, пол ближней комнаты закрасил бы
- * его.
+ * половину вопроса. Кружок лежит чуть выше пола и идёт **последним ярусом**,
+ * поверх всего: ближняя стена под углом прячет за собой полосу пола метра в
+ * три, и указатель, который она закрывает, бесполезен.
  */
 export function volumeMarkerFaces(at, yaw, out = []) {
   const radius = 320;
@@ -1132,6 +1277,7 @@ export function volumeMarkerFaces(at, yaw, out = []) {
   }
   out.push(volumeFace(volumeClockwise(circle).map((point) => ({ ...point, z: lift })), VOLUME_MARKER_RGB, {
     normal: { x: 0, y: 0, z: 1 },
+    layer: VOLUME_LAYER_MARK,
   }));
   const tip = { x: at.x + Math.cos(yaw) * radius * 2.1, y: at.y + Math.sin(yaw) * radius * 2.1, z: lift };
   const left = {
@@ -1146,6 +1292,7 @@ export function volumeMarkerFaces(at, yaw, out = []) {
   };
   out.push(volumeFace(volumeClockwise([tip, left, right]).map((point) => ({ ...point, z: lift })), VOLUME_MARKER_RGB, {
     normal: { x: 0, y: 0, z: 1 },
+    layer: VOLUME_LAYER_MARK,
   }));
   return out;
 }

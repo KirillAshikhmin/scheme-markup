@@ -37,9 +37,12 @@ import {
   VOLUME_RUN_MM_S,
   VOLUME_START_PITCH_DEG,
   VOLUME_WALK_MM_S,
+  VOLUME_TIGHT_MM,
   volumeAroundCamera,
   volumeAroundDistance,
   volumeAroundFit,
+  volumeAroundPitch,
+  volumeFreeMm,
   volumeBasis,
   volumeDraw,
   volumeDrawBackdrop,
@@ -84,8 +87,12 @@ export function volumeClampPitch(radians) {
 export function volumeWhere(project, scene, at) {
   const room = volumeRoomAt(scene, at);
   const found = room && room.roomId ? findRoom(project, room.roomId) : null;
-  if (found) return text("volume.inRoom", { name: found.name });
-  return strings.volume.outside;
+  const place = found ? text("volume.inRoom", { name: found.name }) : strings.volume.outside;
+  // Упёрлись носом в стену — об этом говорится словом, а не исправляется за
+  // человека: в санузле 1,4 × 1,6 м кадр честно показывает сорок сантиметров
+  // стены, и подсказать тут можно только выход — обзор.
+  if (volumeFreeMm(scene.solids, at.x, at.y) < VOLUME_TIGHT_MM) return place + " · " + strings.volume.tight;
+  return place;
 }
 
 /** Строки про то, чего в сцене не хватает. Порядок — порядок важности. */
@@ -180,6 +187,7 @@ export function openVolume({ schemeId, api }) {
     // понять, где стоишь, а не чтобы потерять себя из виду.
     if (next === "around") {
       around = { ...around, target: { x: person.x, y: person.y, z: 1200 }, yaw: person.yaw, distance: VOLUME_AROUND_NEAR_MM };
+      around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
     }
     view = next;
     sync();
@@ -189,6 +197,7 @@ export function openVolume({ schemeId, api }) {
     if (scene.empty) return;
     const fitted = volumeAroundFit(scene, viewport());
     around = { ...around, target: fitted.target, distance: fitted.distance };
+    around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
     if (view !== "around") {
       view = "around";
       sync();
@@ -327,13 +336,24 @@ export function openVolume({ schemeId, api }) {
   // каждый браузер и не во всякой вкладке, поэтому перетаскивание работает
   // всегда и само по себе.
 
+  // Насколько обзор обязан подняться над целью, чтобы остаться снаружи: это
+  // высота, на которой кончается чертёж, минус высота самой цели.
+  function aroundLift() {
+    const roof = (scene.heightMm || VOLUME_HEIGHT_FALLBACK_MM) + 400;
+    return Math.max(0, roof - around.target.z);
+  }
+
   function lookBy(dx, dy) {
     const perPixel = (VOLUME_LOOK_DEG_PX * Math.PI) / 180;
     if (view === "person") {
       person.yaw += dx * perPixel;
       person.pitch = volumeClampPitch(person.pitch - dy * perPixel);
     } else {
-      around = { ...around, yaw: around.yaw + dx * perPixel, pitch: volumeClampPitch(around.pitch - dy * perPixel) };
+      around = {
+        ...around,
+        yaw: around.yaw + dx * perPixel,
+        pitch: volumeAroundPitch(around.pitch - dy * perPixel, around.distance, aroundLift()),
+      };
     }
     paint();
   }
@@ -377,7 +397,10 @@ export function openVolume({ schemeId, api }) {
   function onWheel(event) {
     if (view !== "around") return;
     event.preventDefault();
-    around = { ...around, distance: volumeAroundDistance(around.distance * Math.exp(event.deltaY / 400)) };
+    const distance = volumeAroundDistance(around.distance * Math.exp(event.deltaY / 400));
+    // Приблизились — вид сам становится круче: иначе камера нырнула бы под
+    // крышу и уткнулась в стену изнутри.
+    around = { ...around, distance, pitch: volumeAroundPitch(around.pitch, distance, aroundLift()) };
     paint();
   }
 
@@ -482,8 +505,8 @@ export function openVolume({ schemeId, api }) {
     } else {
       const lines = [
         text("volume.counts", {
-          walls: scene.solids.length,
-          faces: scene.faces.length,
+          walls: scene.wallCount,
+          openings: scene.openingCount,
           rooms: scene.rooms.length,
         }),
         ...volumeNotes(scene),
