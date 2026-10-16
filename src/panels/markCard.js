@@ -277,7 +277,12 @@ function mountMarkCard(host, api) {
           uiEl("span", {
             class: "mark-card__value mark-card__pointer",
             text: model.pointer ? strings.markCard.pointerOn : strings.markCard.pointerOff,
-            title: strings.markCard.pointerHint,
+            // С указателем подсказка говорит о двух ручках: плашку и точку
+            // возят врозь (G199), и без слов об этом не узнать — точка мелкая
+            // и стоит на другом конце указателя. Без указателя разводить
+            // нечего, и подсказка остаётся прежней: вот кнопка, вот что она
+            // включает.
+            title: model.pointer ? strings.markCard.pointerHintOn : strings.markCard.pointerHint,
           }),
         ]),
       );
