@@ -244,10 +244,12 @@ test("общая база приносит типы тихо, а открыты�
   assert.ok(asked[0].message.includes("НТ") && asked[0].message.includes("ЛЮ"));
 });
 
-test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок семь типов", () => {
+test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок восемь типов", () => {
   const template = defaultTemplate();
   assert.equal(template.categories.length, 12);
-  assert.equal(template.markTypes.length, 47);
+  // Сорок восьмой — «ВЕНТ — Вентиляция» в «Климате»: заказчик добавил его
+  // в таске 147 (G206).
+  assert.equal(template.markTypes.length, 48);
 
   // prettier-ignore
   assert.deepEqual(
@@ -275,7 +277,7 @@ test("стартовый справочник — справочник зака�
     ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
      "ПКШ", "ЛЮ", "П", "ПП", "Н", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
      "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
-     "КВ", "ПЛ", "ПЗ", "КАМ"],
+     "КВ", "ПЛ", "ПЗ", "КАМ", "ВЕНТ"],
   );
   // Названия — данные заказчика, поэтому пришпилены целиком, вместе с его
   // заглавными буквами посреди названия и сокращением «эл приводом».
@@ -327,6 +329,7 @@ test("стартовый справочник — справочник зака�
     ПЛ: "Подсветка лестницы",
     ПЗ: "Подсветка зеркала",
     КАМ: "Камера",
+    ВЕНТ: "Вентиляция",
   });
   assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
 
@@ -358,13 +361,47 @@ test("стартовый справочник — справочник зака�
   assert.equal(template.markTypes.find((t) => t.code === "К").shape, "circle-thermo");
 });
 
+// Вентиляция (G206). Слова заказчика: «добавил вентиляцию (добавил новую метку
+// — ВЕНТ — Вентиляция в категории климат). Это просто вентиляционный
+// вентилятор, как обычно в санузлах ставят».
+test("вентиляция: ВЕНТ стоит в «Климате» со своим знаком и числами санузла", () => {
+  const template = defaultTemplate();
+  const vent = template.markTypes.find((type) => type.code === "ВЕНТ");
+  assert.ok(vent, "типа ВЕНТ в шаблоне нет");
+  assert.equal(vent.name, "Вентиляция");
+  assert.equal(vent.kind, "point", "вентиляция ставится точкой, а не линией");
+  const climate = template.categories.find((category) => category.name === "Климат");
+  assert.equal(vent.categoryId, climate.id, "ВЕНТ заведён не в «Климате»");
+
+  // Решётка канального вентилятора санузла: лицевая панель 150 × 150 при
+  // канале Ø100, наружу выходит только она — выступ 25. Высота 2300 — середина
+  // решётки: при потолке 2500 её верх в 2375, вплотную под потолком.
+  assert.deepEqual(vent.sizes, { length: 150, width: 150, depth: 25, heightAboveFloor: 2300 });
+
+  // Знак свободен — и в своей категории, и во всех чужих. Иначе чистый объект
+  // получил бы новое предупреждение о повторе знака (G145), а круг с тремя
+  // лучами — самый «вентиляторный» в палитре — занят датчиком присутствия.
+  assert.equal(vent.shape, "rect-horizontal-ticks");
+  assert.deepEqual(
+    template.markTypes.filter((type) => type.shape === vent.shape).map((type) => type.code),
+    ["ВЕНТ"],
+    "знак вентиляции делят с ней другие типы",
+  );
+  assert.equal(
+    template.categories.some((category) => category.shape === vent.shape),
+    false,
+    "знак вентиляции совпал со знаком категории",
+  );
+  assert.equal(template.markTypes.find((type) => type.code === "ДП").shape, "circle-fan");
+});
+
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
   const project = createProject();
   // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
   // вид типа — точка или линия.
   assert.equal(project.formatVersion, 4);
   assert.equal(project.categories.length, 12);
-  assert.equal(project.markTypes.length, 47);
+  assert.equal(project.markTypes.length, 48);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -1428,7 +1465,7 @@ test("общая база: пустому справочнику предлаг�
       "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
     ],
   );
-  assert.equal(offeredCodes(offer).length, 47);
+  assert.equal(offeredCodes(offer).length, 48);
   assert.equal(offer[0].types[0].code, "Т");
   assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
 

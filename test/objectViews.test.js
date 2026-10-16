@@ -83,6 +83,28 @@ test("у каждого типа стартового справочника е�
   assert.deepEqual(missing, [], "тип без контура: развёртка нарисует ему кружок");
 });
 
+// Вентиляция (G206): изображение найдено по знаку, и его размер — тот же, что
+// умолчание типа. Разойдись они — на развёртке вещь рисовалась бы одной
+// решёткой, а мерилась другой.
+test("вентиляция: изображение найдено по знаку и меряется как сам тип", () => {
+  const view = objectViewForShape("rect-horizontal-ticks");
+  assert.ok(view, "у знака вентиляции нет изображения — развёртка нарисует кружок");
+  assert.equal(view.name, "vent");
+  const vent = defaultTemplate().markTypes.find((type) => type.code === "ВЕНТ");
+  assert.deepEqual(view.mm, { width: vent.sizes.length, height: vent.sizes.width });
+  // Решётка: рамка панели, круг рабочего колеса и жалюзи — и ни одна жалюзи
+  // за круг не выходит, иначе это решётка поверх кольца, а не одна вещь.
+  const circle = view.parts.find((part) => part.kind === "circle");
+  assert.ok(circle, "круга рабочего колеса нет");
+  for (const part of view.parts.filter((item) => item.kind === "line")) {
+    const far = Math.max(
+      Math.hypot(part.x1 - circle.cx, part.y1 - circle.cy),
+      Math.hypot(part.x2 - circle.cx, part.y2 - circle.cy),
+    );
+    assert.ok(far <= circle.r, "жалюзи вылезла за круг: " + JSON.stringify(part));
+  }
+});
+
 test("изображение берётся сперва у типа, потом по форме, и ничем не ломается", () => {
   // Имя у типа старше формы: ночник и выход канализации делят `circle-drain`,
   // и без имени один из них нарисовался бы чужой вещью.
@@ -452,12 +474,23 @@ function printOf(name) {
 // только эта тройка.
 const SIMPLIFIED = ["dehumidifier", "leak", "waterOutlet"];
 
+// Изображения, заведённые **после** переделки в данные: отпечатка «до» у них
+// нет и быть не может — сверять их не с чем. Список именной нарочно: новое имя
+// без строки здесь красит прогон, и тихо проскочить мимо сверки «до» нельзя.
+//
+// `vent` — вентиляция санузла, таск 147 (G206).
+const ADDED_AFTER = ["vent"];
+
 test("переделка в данные не тронула вид: двадцать девять изображений из тридцати двух совпали до вызова", () => {
   const names = objectViewNames();
-  assert.equal(names.length, 32, "изображений должно быть тридцать два: " + names.length);
+  assert.equal(names.length, 32 + ADDED_AFTER.length, "изображений стало другое число: " + names.length);
   const changed = [];
   for (const name of names) {
     const was = PRINTS_BEFORE[name];
+    if (ADDED_AFTER.includes(name)) {
+      assert.ok(!was, name + ": изображение названо новым, а отпечаток «до» у него есть");
+      continue;
+    }
     assert.ok(was, name + ": отпечатка «до» нет — сверять не с чем");
     if (JSON.stringify(was) !== JSON.stringify(printOf(name))) changed.push(name);
   }
