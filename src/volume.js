@@ -118,8 +118,6 @@ export const VOLUME_RUN_MM_S = 4800;
 export const VOLUME_PITCH_MAX_DEG = 85;
 /** Сколько экранных точек поворачивают голову на градус. */
 export const VOLUME_LOOK_DEG_PX = 0.22;
-/** Два вида: от первого лица и обзор со стороны. */
-export const VOLUME_VIEWS = ["person", "around"];
 /** Наклон обзора по умолчанию: смотрим сверху вниз. */
 export const VOLUME_AROUND_PITCH_DEG = -42;
 /** Насколько обзор отходит, когда его зовут к человеку. */
