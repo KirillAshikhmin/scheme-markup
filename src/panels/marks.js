@@ -28,6 +28,9 @@ import {
   markLengthMeters,
   markRoomManual,
   markWall,
+  markWallAlong,
+  markWallManual,
+  MARK_WALL_REACH_MM,
   placementsAt,
   findScheme,
   repeatedNumbers,
@@ -37,9 +40,13 @@ import {
   setMarkDimensions,
   setMarkFreeNumber,
   setMarkNumber,
+  setMarkWall,
   styleOf,
   typesInOrder,
   updateMark,
+  wallName,
+  wallNames,
+  wallsOnScheme,
 } from "../model.js";
 import { planToScreen, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
@@ -59,6 +66,10 @@ const MARKS_NEW_ROOM = "--new-room--";
 // на схеме. Любой другой выбор в этом поле — ручная правка, и она главнее:
 // такую метку автоматика больше не трогает.
 const MARKS_AUTO_ROOM = "--auto-room--";
+// «По месту метки» — стена отдана автоматике (таск 128). Любой другой выбор в
+// этом поле, включая «Не на стене», — ручная привязка (G202), и она главнее:
+// такую метку автоматика больше не перебивает.
+const MARKS_AUTO_WALL = "--auto-wall--";
 
 // Холст подводится к метке переводом координат из render.js: доли плана в
 // пиксели экрана здесь руками не пересчитываются.
@@ -458,7 +469,50 @@ export function marksWallText(project, mark) {
   if (!binding) return "";
   const wall = findWall(project, binding.wallId);
   if (!wall) return "";
-  return text("marks.onWall", { at: formatMeters(binding.atMm / 1000) });
+  const at = formatMeters(binding.atMm / 1000);
+  // Имя стены (таск 142) — там, где чертёж его дал: оно и есть ответ на «какая
+  // это стена», ради которого заводились буквы углов. У одинокой стены без
+  // соседей имени нет, и строка остаётся прежней.
+  const name = wallName(project, wall.id);
+  return name ? text("marks.onWallNamed", { name, at }) : text("marks.onWall", { at });
+}
+
+/**
+ * Стены, к которым метку можно привязать рукой (требование G202): стены её
+ * схемы, по именам из таска 142, с расстоянием вдоль стены и зазором до неё.
+ *
+ * Порядок — `wallsOnScheme`, своего не заводим: порядок сущностей приходит из
+ * модели. Отступ считается здесь же, а не задаётся человеком: он называет
+ * стену, а не метр на ней.
+ *
+ * Пусто — на схеме нет стен, и выбирать не из чего: у объекта без чертежа
+ * строка метки остаётся ровно такой, какой была (G68).
+ */
+export function marksWallChoices(project, mark) {
+  if (!mark) return [];
+  const named = new Map(wallNames(project, mark.schemeId).map((item) => [item.wallId, item.name]));
+  const out = [];
+  for (const wall of wallsOnScheme(project, mark.schemeId)) {
+    const along = markWallAlong(project, mark, wall.id);
+    if (!along) continue;
+    const name = named.get(wall.id) || "";
+    const at = formatMeters(along.atMm / 1000);
+    const gap = formatMeters(along.gapMm / 1000);
+    out.push({
+      wallId: wall.id,
+      name,
+      atMm: along.atMm,
+      gapMm: along.gapMm,
+      // Далёкая стена названа вслух: выбрать её никто не запрещает (это
+      // решение человека), но и молчать о том, что до неё два метра, нельзя.
+      text: !name
+        ? text("marks.wallOptionPlain", { at })
+        : along.gapMm > MARK_WALL_REACH_MM
+          ? text("marks.wallOptionFar", { name, at, gap })
+          : text("marks.wallOption", { name, at }),
+    });
+  }
+  return out;
 }
 
 export function marksRowModel(project, row, options = {}) {
@@ -491,8 +545,13 @@ export function marksRowModel(project, row, options = {}) {
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
     // в миллиметрах (`sizes`) — другое поле, и путать их нельзя.
     lengthText: marksLengthText(project, mark),
-    // Стена, к которой метка привязалась сама. Пусто — привязки нет.
+    // Стена метки: строкой — где она стоит, списком — чем её переназначить
+    // рукой (G202). Пустая строка значит «привязки нет», пустой список — «на
+    // схеме нет стен», и тогда в разметке не будет ни строки, ни списка.
     wallText: marksWallText(project, mark),
+    wallId: markWall(mark) ? mark.wallId : null,
+    wallManual: markWallManual(mark),
+    wallChoices: marksWallChoices(project, mark),
     // Обе стороны связи — свёрнутым перечнем: повторы номера есть и у
     // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
     // одной группы носят один номер.
@@ -798,6 +857,40 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // Стена, названная рукой (G202). Отступ вдоль неё считает модель: человек
+  // говорит «эта метка на стене БВ», а не «на 1200 мм от угла».
+  function setWall(markId, wallId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    try {
+      const along = wallId ? markWallAlong(state.project, mark, wallId) : null;
+      // «Не на стене» — такое же решение человека, как выбор стены, и
+      // признак ручной правки у него тот же: иначе автопривязка вернула бы
+      // снятую привязку на следующей же правке объекта.
+      const next = setMarkWall(state.project, markId, along, { manual: true });
+      if (!next.changed) return;
+      canvasCommit(state.project, next.project, strings.history.markWall);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  // Возврат метки автоматике — тот же приём, что у помещения: снимаем признак
+  // ручной правки, а стену подставит по месту метки сам `canvasCommit`.
+  function setAutoWall(markId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark || !markWallManual(mark)) return;
+    try {
+      canvasCommit(state.project, setMarkWall(state.project, markId, null).project, strings.history.markWallAuto);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
   // Пока окно открыто, объект мог уехать (отмена, чужая правка): список
   // отмеченного сверяется со свежим снимком, прежде чем стать шагом истории.
   async function editControls(markId) {
@@ -880,6 +973,41 @@ function mountMarksPanel(host, api) {
       }
       const room = select.value ? roomsInOrder(state.project).find((item) => item.id === select.value) : null;
       setRoom(mark.id, room ? room.name : "");
+    });
+    return select;
+  }
+
+  /**
+   * Поле «Стена» — список стен схемы по именам (G202). Устроено как поле
+   * помещения, и это нарочно: третьего способа «поставил руками — автоматика
+   * не перебивает» в сборке нет.
+   *
+   * Стен на схеме нет — поля нет вовсе: у объекта без чертежа строка метки
+   * остаётся ровно такой, какой была (G68).
+   */
+  function wallField(view, mark) {
+    const choices = view.fields.wallChoices;
+    if (choices.length === 0) return null;
+    const manual = view.fields.wallManual;
+    const select = uiEl("select", {
+      class: "ui-select marks__wall" + (manual ? " is-manual" : ""),
+      title: manual ? strings.marks.wallManualTitle : strings.marks.wallAutoTitle,
+    });
+    const auto = manual ? null : choices.find((item) => item.wallId === view.fields.wallId);
+    select.append(
+      uiEl("option", {
+        value: MARKS_AUTO_WALL,
+        text: auto && auto.name ? text("marks.wallAutoOf", { name: auto.name }) : strings.marks.wallAuto,
+      }),
+    );
+    select.append(uiEl("option", { value: "", text: strings.marks.wallNone }));
+    for (const choice of choices) {
+      select.append(uiEl("option", { value: choice.wallId, text: choice.text }));
+    }
+    select.value = manual ? view.fields.wallId || "" : MARKS_AUTO_WALL;
+    select.addEventListener("change", () => {
+      if (select.value === MARKS_AUTO_WALL) setAutoWall(mark.id);
+      else setWall(mark.id, select.value || null);
     });
     return select;
   }
@@ -1041,11 +1169,14 @@ function mountMarksPanel(host, api) {
               text: text("scale.markLength", { value: view.fields.lengthText }),
             })
           : null,
-        // Стена под меткой — строкой и только для чтения: её ставит
-        // автоматика по месту метки, и править её надо планом, а не списком.
+        // Стена под меткой — строкой: где метка стоит и в каком месте стены.
+        // Строка только читается; переназначается стена списком под ней.
         view.fields && view.fields.wallText
           ? uiEl("p", { class: "mark-row__by mark-row__wall", text: view.fields.wallText })
           : null,
+        // Выбор стены рукой (G202) — под строкой: сперва человек читает, что
+        // получилось само, потом правит, если автоматика ошиблась.
+        view.fields ? wallField(view, mark) : null,
         controlsButton,
         equipmentButton,
         sizesButton,

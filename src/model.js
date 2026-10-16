@@ -1130,7 +1130,7 @@ export function deleteScheme(project, schemeId) {
   const marks = dropControls(
     project.marks
       .filter((mark) => mark.schemeId !== schemeId)
-      .map((mark) => (goneWalls.has(mark.wallId) ? withoutWallBinding(mark) : mark)),
+      .map((mark) => (goneWalls.has(mark.wallId) ? markWithoutWall(mark) : mark)),
     removed,
   );
   const groups = project.groups.filter((group) => group.schemeId !== schemeId);
@@ -3790,7 +3790,7 @@ export function deleteWall(project, wallId) {
   const wall = requireWall(project, wallId);
   const walls = wallsOf(project).filter((item) => item.id !== wallId);
   const openings = openingsOf(project).filter((opening) => opening.wallId !== wallId);
-  const marks = project.marks.map((mark) => (mark.wallId === wallId ? withoutWallBinding(mark) : mark));
+  const marks = project.marks.map((mark) => (mark.wallId === wallId ? markWithoutWall(mark) : mark));
   return { project: withProject(project, { walls, openings, marks }), deleted: wall };
 }
 
@@ -4690,8 +4690,18 @@ export function setRoomWallHeight(project, roomId, value) {
 // автоматикой, — то есть в таске 127, где привязка и записывается. Сторону
 // открывания двери, наоборот, не вывести никогда, поэтому она заведена сразу.
 
-function withoutWallBinding(mark) {
-  const { wallId, wallAtMm, wallToMm, ...rest } = mark;
+/**
+ * Метка без привязки к стене — **все** её поля убраны, включая признак ручной
+ * привязки. Поля именно убираются, а не обнуляются: метка без привязки и метка
+ * со снятой привязкой обязаны читаться одинаково, иначе упаковка дописала бы
+ * старой метке то, чего в ней не было (G68).
+ *
+ * Одна дверь на всё приложение: из какого набора полей состоит привязка, знает
+ * только это место — и слияние (`merge`), которое выбрасывает привязку к
+ * исчезнувшей стене, спрашивает здесь же.
+ */
+export function markWithoutWall(mark) {
+  const { wallId, wallAtMm, wallToMm, wallManual, ...rest } = mark;
   return rest;
 }
 
@@ -4714,17 +4724,41 @@ export function markWall(mark) {
 }
 
 /**
+ * Выбрана ли стена метки **рукой** (требование G202). Правило то же, что у
+ * помещения (`markRoomManual`): выбрал человек — автоматика больше не
+ * перебивает.
+ *
+ * Разница с помещением одна, и она про прежние объекты: помещение до контуров
+ * могло взяться только из рук, поэтому метка без признака считается вписанной
+ * руками. Привязку к стене, наоборот, с самого её появления (таск 128) ставила
+ * только автоматика — значит метка без признака привязана автоматикой, и
+ * прежние объекты открываются как были (G68).
+ */
+export function markWallManual(mark) {
+  return Boolean(mark && mark.wallManual);
+}
+
+/**
  * Привязать метку к стене или снять привязку (`null`). Снятие **убирает**
  * поля, а не обнуляет их: метка без привязки и метка со снятой привязкой
  * обязаны читаться одинаково, иначе упаковка дописала бы старой метке поля,
  * которых в ней не было (G68).
+ *
+ * `options.manual` — выбор сделан рукой (G202). Признак ставится и на снятие:
+ * «эта метка не на стене» — такое же решение человека, как «эта метка на стене
+ * БВ», и автоматике его перебивать нельзя. Вернуть метку автоматике —
+ * `setMarkWall(project, id, null)` без признака: поля уходят вместе с ним, и
+ * ближайший `applyMarkWalls` проставит привязку по месту.
  */
-export function setMarkWall(project, markId, binding) {
+export function setMarkWall(project, markId, binding, options = {}) {
   const mark = requireMark(project, markId);
+  const manual = Boolean(options && options.manual);
   if (binding === null || binding === undefined) {
-    if (!markWall(mark)) return { project, mark, changed: false };
-    const marks = project.marks.map((item) => (item.id === markId ? withoutWallBinding(item) : item));
-    return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
+    if (!markWall(mark) && markWallManual(mark) === manual) return { project, mark, changed: false };
+    const bare = markWithoutWall(mark);
+    const next = manual ? { ...bare, wallManual: true } : bare;
+    const marks = project.marks.map((item) => (item.id === markId ? next : item));
+    return { project: withProject(project, { marks }), mark: next, changed: true };
   }
   const wall = requireWall(project, binding.wallId);
   if (wall.schemeId !== mark.schemeId) throw modelError("wallOtherScheme");
@@ -4738,8 +4772,10 @@ export function setMarkWall(project, markId, binding) {
     if (to > length) throw modelError("markWallAtOutside", { at: to, length });
     next.wallToMm = to;
   }
+  if (manual) next.wallManual = true;
+  else delete next.wallManual;
   const marks = project.marks.map((item) => (item.id === markId ? next : item));
-  return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
+  return { project: withProject(project, { marks }), mark: next, changed: true };
 }
 
 // ——— автопривязка метки к стене ———————————————————————————————————————
@@ -4750,12 +4786,21 @@ export function setMarkWall(project, markId, binding) {
 // угадыванию «какая розетка к какой стене ближе», и угадывать пришлось бы
 // каждый раз заново.
 //
-// **Ставится она сама, по месту метки, и только так.** Кнопки «привязать» нет
-// и не будет: человек ставит розетки, а не ведёт учёт стен. Ручного
-// переопределения (как `roomManual` у помещения) здесь тоже нет — его и не
-// было в договоре таска 123: «привязку проставляет автоматика по месту метки,
-// а не рука человека». Поэтому привязка всегда равна тому, что видно на
-// плане, и расходиться с ним не может.
+// **Ставится она сама, по месту метки.** Кнопки «привязать» в холсте нет:
+// человек ставит розетки, а не ведёт учёт стен, и привязка равна тому, что
+// видно на плане.
+//
+// **Рука при этом старше автоматики** (требование G202, таск 143): заказчик
+// попросил называть стену по имени сам — «эта метка на стене БВ» — и снимать
+// привязку, которую поставила автоматика. Устроено это ровно как у помещения
+// (`roomManual`), третьего способа не заведено: признак `wallManual` у метки,
+// автоматика такую метку не перебивает, «вернуть автоматике» снимает признак.
+//
+// Руками выбирают **стену, а не метр на ней**: отступ `wallAtMm` и у ручной
+// привязки считается по месту метки (`markWallAlong`) на каждой правке. Иначе
+// метка, которую подвинули вдоль стены, осталась бы на развёртке стоять там,
+// где её привязали, — ровно тот разъезд плана и развёртки, из-за которого
+// заводился дефект D27.
 //
 // **Порог — в миллиметрах чертежа, а не в пикселях экрана.** Пиксели привычнее
 // руке, но привязка пересчитывается на каждой правке объекта, а масштаб
@@ -4974,6 +5019,14 @@ export function markWallNear(project, mark, walls) {
  * может молча оказаться «на стене» в полуметре от неё: правило одно, и
  * проверяется оно после каждой правки.
  *
+ * **Метку с ручной привязкой (G202) автоматика не перебивает** — как не
+ * перебивает помещение, вписанное руками. Стену за неё никто не выбирает
+ * заново; пересчитывается только отступ вдоль выбранной стены, потому что
+ * отступ — следствие места метки, а не выбор человека. Метка, у которой руками
+ * снята привязка, остаётся без стены. А вот стену, которой больше нет, не
+ * удержит и рука: выбора больше не существует, поля уходят вместе с признаком
+ * (`markWithoutWall`), и метка возвращается автоматике.
+ *
  * У объекта без чертежа не делается **ничего**: схем со стенами нет, и тот же
  * объект возвращается по ссылке (G68).
  */
@@ -4989,12 +5042,17 @@ export function applyMarkWalls(project, schemeId) {
     if (!markWallBindable(mark)) return mark;
     const walls = wallsOf(mark.schemeId);
     if (walls.length === 0) return mark;
-    const next = markWallNear(project, mark, walls);
     const now = markWall(mark);
+    const next = markWallManual(mark)
+      ? // Рука назвала стену — считаем по ней, а не по ближайшей. Если такой
+        // стены на схеме нет (удалили), привязку уносит `markWithoutWall`
+        // ниже, вместе с признаком.
+        (now ? markWallAlong(project, mark, now.wallId) : null)
+      : markWallNear(project, mark, walls);
     if (!next) {
       if (!now) return mark;
       changed.push(mark.id);
-      return withoutWallBinding(mark);
+      return markWithoutWall(mark);
     }
     if (now && now.wallId === next.wallId && now.atMm === next.atMm && now.toMm === next.toMm) return mark;
     changed.push(mark.id);
