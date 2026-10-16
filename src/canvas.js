@@ -2790,6 +2790,9 @@ function canvasGrabDrag(state, scheme, view, point, pick) {
       kind,
       markId: pick.markId,
       groupId: pick.groupId || null,
+      // Точка комментария и пальцу достаётся отдельно от плашки (G199): ручки
+      // у них разные, и спор за долгое нажатие разбирает тот же `part`.
+      commentPoint: canvasDragsCommentPoint(state.project, pick.markId, pick.part),
       // У пальца Ctrl нет, и взятая долгим нажатием группа едет целиком — то
       // самое умолчание, о котором просил заказчик (G189). Разнять блок можно
       // мышью с Ctrl/Cmd; на планшете метку из блока правят, уводя её ручкой
@@ -3142,6 +3145,10 @@ function canvasPointerDown(event) {
       kind,
       markId: hit.markId,
       groupId: hit.groupId,
+      // Точка комментария едет без плашки (G199). Решается здесь же, где и
+      // состав группы, и по той же причине: жест, у которого смысл меняется
+      // посреди ведения, нельзя ни показать, ни отменить одним шагом.
+      commentPoint: canvasDragsCommentPoint(state.project, hit.markId, hit.part),
       // Кого везёт жест (G189). Решается **на нажатии**, один раз: жест, у
       // которого смысл меняется посреди ведения, нельзя ни показать, ни
       // отменить одним шагом. Ctrl/Cmd, нажатый после того как метку уже
@@ -3277,6 +3284,83 @@ export function canvasMoveMarks(project, ids, shift) {
   return next;
 }
 
+// ——— комментарий: плашка и точка едут врозь ———————————————————————————
+//
+// Требование G199. Слова заказчика: «У комментария должна быть возможность
+// сдвигать метку, куда указывает независимо от текст». У комментария с
+// указателем две сущности на плане — плашка с текстом и точка, в которую
+// смотрит остриё, — и держатся они в одной метке: точка это `points[0]`,
+// плашка отведена пиксельным `labelOffset` (таск 116).
+//
+// Отсюда и вся работа таска: **перенос плашки уже был независимым** (смещение
+// правится, точка стоит), а перенос точки тащил плашку за собой, потому что
+// смещение считается от точки. Нового поля для этого не завелось: точку везёт
+// обычная правка `points`, а плашка остаётся на месте поправкой того же
+// `labelOffset` на тот же сдвиг со знаком минус. Формат объекта не тронут —
+// значит и миграции нет, и прежние комментарии открываются как были (G68).
+
+/**
+ * Везёт ли этот жест **точку** комментария отдельно от плашки.
+ *
+ * Спрашивается на нажатии, как и состав группы (G189): смысл жеста не должен
+ * меняться посреди ведения. Разбор идёт по тому же `part`, что у всех прочих
+ * жестов холста, — встаём в спор за клик, а не рядом с ним:
+ *
+ * - `label` — плашка; её возят смещением, и это прежнее поведение;
+ * - `mark` у комментария **с указателем** — та самая точка: плашка в этот
+ *   момент отдаёт `label`, и спутать их нельзя;
+ * - `mark` у комментария **без указателя** — плашка, стоящая на своей точке:
+ *   разводить нечего, едет вся метка, как ездила.
+ */
+export function canvasDragsCommentPoint(project, markId, part) {
+  if (!markId || part === "label") return false;
+  const mark = findMark(project, markId);
+  return Boolean(mark && markIsComment(mark) && markPointer(mark));
+}
+
+/**
+ * Перенос точки комментария: точка едет, плашка остаётся там, где стояла.
+ *
+ * `base` — смещение плашки, какое видно **сейчас**, в пикселях плана (его
+ * отдаёт `labelBox().dx/dy`). Берётся видимое, а не записанное, по той же
+ * причине, что у переноса подписи: плашку с указателем могла поставить
+ * раскладка, и дёргать её в стандартное место в тот миг, когда повезли точку,
+ * нельзя. Побочное следствие — потащили точку, и плашка становится
+ * поставленной рукой: раскладка её больше не двигает. Так и надо, место ей
+ * выбрал человек.
+ *
+ * Единицы разные нарочно: точки метки — доли плана (ADR 002), смещение
+ * подписи — пиксели плана. Поэтому поправка умножается на размер плана.
+ */
+export function canvasMoveCommentPoint(project, scheme, markId, shift, base) {
+  const mark = findMark(project, markId);
+  if (!mark) return project;
+  const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
+  const width = scheme && scheme.width > 0 ? scheme.width : 0;
+  const height = scheme && scheme.height > 0 ? scheme.height : 0;
+  const labelOffset = {
+    dx: (base ? base.dx : 0) - shift.x * width,
+    dy: (base ? base.dy : 0) - shift.y * height,
+  };
+  return updateMark(project, markId, { points, labelOffset }).project;
+}
+
+/**
+ * Ярлык шага истории для переноса: по нему человек в списке отмены видит, что
+ * вернётся.
+ *
+ * Плашка и точка комментария едут врозь — и называются врозь: иначе два
+ * соседних шага «смещение подписи» и «перемещение метки» не сказали бы, какой
+ * из них вернёт текст, а какой остриё.
+ */
+export function canvasMoveStepLabel(project, drag) {
+  if (!drag) return strings.history.move;
+  const comment = drag.markId ? markIsComment(findMark(project, drag.markId)) : false;
+  if (drag.kind === "label") return comment ? strings.history.moveCommentPlate : strings.history.moveLabel;
+  if (drag.commentPoint) return strings.history.moveCommentPoint;
+  return (drag.moving || []).length > 1 ? strings.history.moveBlock : strings.history.move;
+}
+
 // Перетаскивание метки: новые точки считаются от снимка «до», а не от
 // предыдущего кадра, — иначе метка уползает от курсора накопленной ошибкой.
 function canvasDragTo(point, free) {
@@ -3334,13 +3418,22 @@ function canvasDragTo(point, free) {
       const anchor = shifted[canvasDrag.anchor] || shifted[0];
       const snapped = canvasGuideSnap(anchor, free);
       const fix = { x: snapped.x - anchor.x, y: snapped.y - anchor.y };
-      // Сдвиг один на всех, и считается он по взятой метке: группа едет как
-      // одна метка (G189) и форму не меняет — соседи получают ровно тот же
-      // сдвиг, включая поправку от направляющей.
-      canvasPreview = canvasMoveMarks(before, canvasDrag.moving || [canvasDrag.markId], {
-        x: dx + fix.x,
-        y: dy + fix.y,
-      });
+      const shift = { x: dx + fix.x, y: dy + fix.y };
+      // Точка комментария везётся без плашки (G199): плашка стоит там, где её
+      // видно сейчас, и это место берётся из той же `labelBox`, из которой его
+      // берёт перенос самой плашки.
+      if (canvasDrag.commentPoint) {
+        const seen = labelBox(before, scheme, mark, view, state.filter);
+        canvasPreview = canvasMoveCommentPoint(before, scheme, canvasDrag.markId, shift, {
+          dx: seen.dx,
+          dy: seen.dy,
+        });
+      } else {
+        // Сдвиг один на всех, и считается он по взятой метке: группа едет как
+        // одна метка (G189) и форму не меняет — соседи получают ровно тот же
+        // сдвиг, включая поправку от направляющей.
+        canvasPreview = canvasMoveMarks(before, canvasDrag.moving || [canvasDrag.markId], shift);
+      }
     }
   } catch (error) {
     // Модель отказала на полпути — картинка замерла бы под рукой, а по
@@ -3494,9 +3587,9 @@ function canvasPointerUp(event) {
     if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
       // Перенос группы — **один** шаг истории, а не по шагу на метку: один
       // жест человека, один Ctrl+Z. Ярлык называет, что вернётся: «перенос
-      // блока» в списке отмены против «перемещения метки».
-      const whole = drag.kind === "mark" && (drag.moving || []).length > 1;
-      const label = drag.kind === "label" ? strings.history.moveLabel : whole ? strings.history.moveBlock : strings.history.move;
+      // блока» против «перемещения метки», плашка комментария против его
+      // точки. Считает его `canvasMoveStepLabel` — одно правило на все переносы.
+      const label = canvasMoveStepLabel(drag.before, drag);
       const after = canvasPreview;
       canvasPreview = null;
       // Выделение остаётся на взятой метке: панель свойств и карточка говорят
