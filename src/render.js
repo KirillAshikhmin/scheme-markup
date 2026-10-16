@@ -47,6 +47,7 @@ import {
   styleOf,
   labelOf,
   typesInOrder,
+  wallNames,
   wallVectors,
   wallsOnScheme,
 } from "./model.js";
@@ -4683,6 +4684,11 @@ export function drawLegend(ctx, { project, scheme, filter, view, box }) {
 // их нельзя. В чёрно-белом листе всё это проходит через `mono.js` и становится
 // тушью, своей развилки здесь нет (G170).
 export const DRAWING_WALL = "#30363d";
+// Подкраска стены, видимой торцом на развёртке (G201). Слабая нарочно: `mono`
+// снимает заливку слабее половины как подкраску и оставляет контур тушью, то
+// есть на чёрно-белом листе торец выходит рамкой, а не чёрным пятном поверх
+// меток.
+export const DRAWING_WALL_FILL = "rgba(48, 54, 61, 0.12)";
 export const DRAWING_EDGE = "#0f1419";
 export const DRAWING_PAPER = "#f6f8fa";
 export const DRAWING_OBJECT = "#6639ba";
@@ -4867,12 +4873,68 @@ export function drawDrawing(ctx, options = {}) {
       });
     }
   }
+  // Буквы углов — поверх стен и проёмов, но под разметкой: метка главнее
+  // обозначения стены, как и везде (G200). Вместе со слоем стен они и гаснут:
+  // буква без стены не значит ничего.
+  drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
   if (!active || active.kind !== "wall" || !options.handle) return;
   const wall = walls.find((item) => item.id === active.id);
   if (!wall) return;
   const ends = options.wallAt ? options.wallAt(wall) : wall;
   options.handle(ctx, bridge.toScreen(ends.aMm));
   options.handle(ctx, bridge.toScreen(ends.bMm));
+}
+
+// Мельче этого буква угла на плане не ставится. Порог — экранная длина самой
+// стены: на общем виде квартиры буквы всех углов слиплись бы в кашу поверх
+// чертежа, а у стены короче сорока точек их всё равно негде развести. Правило
+// то же, что у подписи объекта (`DRAWING_CAPTION_MIN_PX`): порог в экранных
+// пикселях, а не отметка «тут показывать, а тут нет».
+const DRAWING_LETTER_MIN_PX = 44;
+
+/**
+ * Буквы углов на чертеже.
+ *
+ * Буква ставится **в самом углу** — там, где сошлись концы стен. Так видно, что
+ * она у угла одна на всех, и имя любой стены читается по её двум концам; напиши
+ * имя вдоль стены, и смежность, ради которой буквы и заводились, пропала бы.
+ *
+ * Рисуется по **нарисованным** концам (`wallAt`), а не по записанным в объекте:
+ * в мастерской стену тащат за ручку, и буква обязана ехать с углом, а не
+ * оставаться там, где он был. Один угол — одна буква: совпавшие концы дают одно
+ * и то же место, и повторную отрисовку снимает ключ по букве и месту.
+ */
+function drawDrawingLetters(ctx, bridge, names, walls, wallAt) {
+  if (names.length === 0) return;
+  const byWall = new Map(names.map((named) => [named.wallId, named]));
+  const done = new Set();
+  ctx.save();
+  ctx.font = drawFont(12, 700);
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.lineWidth = 3;
+  for (const wall of walls) {
+    const named = byWall.get(wall.id);
+    if (!named) continue;
+    const ends = wallAt ? wallAt(wall) : wall;
+    const from = bridge.toScreen(ends.aMm);
+    const to = bridge.toScreen(ends.bMm);
+    if (Math.hypot(to.x - from.x, to.y - from.y) < DRAWING_LETTER_MIN_PX) continue;
+    for (const [letter, at] of [
+      [named.aLetter, from],
+      [named.bLetter, to],
+    ]) {
+      if (!letter) continue;
+      const key = letter + "@" + Math.round(at.x) + ":" + Math.round(at.y);
+      if (done.has(key)) continue;
+      done.add(key);
+      ctx.strokeStyle = DRAWING_PAPER;
+      ctx.strokeText(letter, at.x, at.y);
+      ctx.fillStyle = DRAWING_EDGE;
+      ctx.fillText(letter, at.x, at.y);
+    }
+  }
+  ctx.restore();
 }
 
 function drawDrawingWall(ctx, bridge, wall, active) {
@@ -5354,6 +5416,27 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   ctx.strokeStyle = DRAWING_WALL;
   ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
 
+  // Упирающиеся стены — торцом от пола до потолка (G201). Идут **первыми**, под
+  // всем остальным: торец говорит «здесь угол», а не заменяет собой метки, и
+  // загородить розетку возле угла он не имеет права. Заливка слабая нарочно —
+  // в чёрно-белом листе `mono` снимает её как подкраску и оставляет контур
+  // тушью, то есть на бумаге торец читается рамкой, а не чёрным пятном.
+  for (const cross of elevation.crossings || []) {
+    const x = atX(cross.fromMm);
+    const width = Math.max(thin, (cross.toMm - cross.fromMm) * scale);
+    ctx.fillStyle = DRAWING_WALL_FILL;
+    ctx.fillRect(x, floor - wallHeight, width, wallHeight);
+    ctx.lineWidth = 1.2 * unit;
+    ctx.strokeStyle = DRAWING_WALL;
+    ctx.strokeRect(x, floor - wallHeight, width, wallHeight);
+    // Имя — у потолка: там, где у стены пусто. Подпись шире торца, и это
+    // нарочно — перегородка в сто миллиметров на листе уже трёх букв, а
+    // безымянный торец не отвечает на «какая именно это стена».
+    if (cross.name) {
+      elevationText(ctx, cross.name, x + width / 2, floor - wallHeight + 9 * unit, "center", unit);
+    }
+  }
+
   // Объекты на полу — под всем остальным: розетка над столешницей обязана
   // остаться видной поверх неё.
   for (const object of elevation.objects) {
@@ -5495,6 +5578,16 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   elevationTick(ctx, left, lengthY, false, unit);
   elevationTick(ctx, left + wallWidth, lengthY, false, unit);
   elevationText(ctx, String(elevation.lengthMm), left + wallWidth / 2, lengthY + 12 * unit, "center", unit);
+  // Буквы углов — на концах этой самой размерной цепочки (G200): длина 4000 и
+  // есть расстояние от угла А до угла Б, и подписанные концы отвечают на
+  // «какой край листа какой край стены». В поле за цепочкой пусто, а внутри
+  // чертежа буква легла бы поверх меток.
+  if (elevation.fromLetter) {
+    elevationText(ctx, elevation.fromLetter, left - 7 * unit, lengthY, "right", unit);
+  }
+  if (elevation.toLetter) {
+    elevationText(ctx, elevation.toLetter, left + wallWidth + 7 * unit, lengthY, "left", unit);
+  }
   for (const opening of elevation.openings) {
     for (const mm of [opening.fromMm, opening.toMm]) {
       elevationTick(ctx, atX(mm), lengthY, false, unit);

@@ -27,6 +27,14 @@ import {
   wallNameOf,
   wallNames,
 } from "../src/model.js";
+import {
+  DRAWING_PAPER,
+  DRAWING_WALL_FILL,
+  drawDrawing,
+  drawElevation,
+  drawingUnitBridge,
+} from "../src/render.js";
+import { monoContext } from "../src/mono.js";
 
 // Схема без подложки: чертёж живёт в своих миллиметрах и ничего от картинки не
 // ждёт (ADR 008), а имена считаются по чертежу — калибровка им не нужна.
@@ -405,6 +413,142 @@ test("развёртка несёт имя стены, буквы её краё�
   );
   assert.equal(inside.crossings.length, 3, "перегородка и два угла комнаты");
   assert.deepEqual(outside.crossings, []);
+});
+
+// ——— отрисовка ————————————————————————————————————————————————————————
+
+// Кисть-писарь: записывает вызовы и присваивания, как в соседних тестах
+// развёртки.
+function scribe(log) {
+  const impl = { measureText: (value) => ({ width: String(value).length * 6 }) };
+  return new Proxy(impl, {
+    get: (target, key) =>
+      key in target ? target[key] : (...args) => log.push(String(key) + "(" + args.join(",") + ")"),
+    set: (target, key, value) => ((target[key] = value), log.push(String(key) + "=" + String(value)), true),
+  });
+}
+
+test("торец упирающейся стены нарисован под метками и подписан именем", () => {
+  const scene = crossScene([[{ x: 2000, y: 2900 }, { x: 2000, y: 1500 }]]);
+  const view = wallElevation(scene.project, scene.bottomId, "right");
+  const log = [];
+  drawElevation(scribe(log), view, { x: 0, y: 0, width: 900, height: 320 });
+  const fill = log.findIndex((line) => line === "fillStyle=" + DRAWING_WALL_FILL);
+  assert.ok(fill >= 0, "торец не нарисован вовсе");
+  const partition = wallName(scene.project, scene.extraIds[0]);
+  assert.ok(
+    log.some((line) => line.indexOf("fillText(" + partition + ",") === 0),
+    "торец без имени не отвечает на «какая это стена»: " + partition,
+  );
+  // Торцы идут **до** размеров и меток: подпись «ВГ» внизу листа — это уже
+  // размерная цепочка, и всё, что рисуется после торца, ложится поверх него.
+  const length = log.findIndex((line) => line.indexOf("fillText(" + view.lengthMm + ",") === 0);
+  assert.ok(length > fill, "торец нарисован поверх размеров");
+});
+
+test("буквы углов стоят на концах размерной цепочки", () => {
+  const scene = crossScene([[{ x: 2000, y: 2900 }, { x: 2000, y: 1500 }]]);
+  const view = wallElevation(scene.project, scene.bottomId, "right");
+  const log = [];
+  const drawn = drawElevation(scribe(log), view, { x: 0, y: 0, width: 900, height: 320 });
+  const at = (letter) => {
+    const line = log.find((item) => item.indexOf("fillText(" + letter + ",") === 0);
+    assert.ok(line, "буквы " + letter + " на листе нет");
+    return Number(line.split(",")[1]);
+  };
+  // Слева на листе В, справа Г — и ровно за концами нарисованной стены.
+  assert.ok(at("В") < drawn.x, "левая буква залезла на чертёж");
+  assert.ok(at("Г") > drawn.x + drawn.width, "правая буква залезла на чертёж");
+});
+
+test("в чёрно-белом торец идёт тушью, а подкраска снимается", () => {
+  const scene = crossScene([[{ x: 2000, y: 2900 }, { x: 2000, y: 1500 }]]);
+  const view = wallElevation(scene.project, scene.bottomId, "right");
+  const paints = { fill: [], stroke: [] };
+  const impl = {
+    measureText: (value) => ({ width: String(value).length * 6 }),
+    save: () => {},
+    restore: () => {},
+  };
+  const ctx = new Proxy(impl, {
+    get: (target, key) => (key in target ? target[key] : () => {}),
+    set: (target, key, value) => {
+      if (key === "fillStyle") paints.fill.push(String(value));
+      if (key === "strokeStyle") paints.stroke.push(String(value));
+      return true;
+    },
+  });
+  drawElevation(monoContext(ctx), view, { x: 0, y: 0, width: 900, height: 320 });
+  assert.ok(!paints.fill.includes(DRAWING_WALL_FILL), "подкраска торца уехала на чёрно-белый лист как есть");
+  assert.ok(paints.fill.includes("rgba(0, 0, 0, 0)"), "подкраска обязана сниматься, а не чернеть пятном");
+  assert.ok(paints.stroke.includes("#000000"), "контур торца обязан идти тушью");
+});
+
+test("буква угла на чертеже рисуется у угла и один раз на угол", () => {
+  const scene = withWalls(bareScheme(), ROOM);
+  const log = [];
+  drawDrawing(scribe(log), {
+    project: scene.project,
+    schemeId: scene.schemeId,
+    bridge: drawingUnitBridge({ zoom: 0.1, offsetX: 0, offsetY: 0 }),
+  });
+  const letters = log.filter((line) => /^fillText\([А-Я],/.test(line));
+  assert.deepEqual(
+    letters.map((line) => line.slice("fillText(".length).split(",")[0]).sort(),
+    ["А", "Б", "В", "Г"],
+    "у угла буква одна на все сошедшиеся стены: " + letters.join(" | "),
+  );
+  // Буква стоит ровно в углу: А — в нуле чертежа, то есть в нуле поля.
+  assert.ok(letters.some((line) => line === "fillText(А,0,0)"), letters.join(" | "));
+  // И с подложкой цветом бумаги под ней: иначе буква на тёмной стене не
+  // читается.
+  assert.ok(log.includes("strokeStyle=" + DRAWING_PAPER));
+  assert.ok(log.some((line) => /^strokeText\(А,/.test(line)));
+});
+
+test("на мелком масштабе буквы не ставятся — иначе на плане каша", () => {
+  const scene = withWalls(bareScheme(), ROOM);
+  const log = [];
+  drawDrawing(scribe(log), {
+    project: scene.project,
+    schemeId: scene.schemeId,
+    // Комната 4 × 3 метра в сорок точек: буквы четырёх углов слиплись бы.
+    bridge: drawingUnitBridge({ zoom: 0.01, offsetX: 0, offsetY: 0 }),
+  });
+  assert.ok(log.length > 10, "чертёж не нарисовался вовсе — пример не тот");
+  assert.deepEqual(log.filter((line) => /^fillText\([А-Я],/.test(line)), []);
+});
+
+test("буква едет за концом стены, который тащат за ручку", () => {
+  const scene = withWalls(bareScheme(), ROOM);
+  const log = [];
+  const moved = { x: 400, y: 0 };
+  drawDrawing(scribe(log), {
+    project: scene.project,
+    schemeId: scene.schemeId,
+    bridge: drawingUnitBridge({ zoom: 0.1, offsetX: 0, offsetY: 0 }),
+    // Верхнюю стену тащат за конец `a`: буква обязана уехать с углом, а не
+    // остаться там, где он был.
+    wallAt: (wall) => (wall.id === scene.wallIds[0] ? { ...wall, aMm: moved } : wall),
+  });
+  const letters = log.filter((line) => /^fillText\([А-Я],/.test(line));
+  assert.ok(letters.some((line) => line === "fillText(А,40,0)"), letters.join(" | "));
+  // Прежний угол остался у левой стены — та же буква, но уже в другом месте:
+  // цепочку порвали, и по двум «А» это видно (ADR 008: порвать можно, и ни
+  // одна проверка об этом не скажет).
+  assert.equal(letters.filter((line) => /^fillText\(А,/.test(line)).length, 2);
+});
+
+test("слой стен выключен — букв нет", () => {
+  const scene = withWalls(bareScheme(), ROOM);
+  const log = [];
+  drawDrawing(scribe(log), {
+    project: scene.project,
+    schemeId: scene.schemeId,
+    bridge: drawingUnitBridge({ zoom: 0.1, offsetX: 0, offsetY: 0 }),
+    walls: false,
+  });
+  assert.deepEqual(log.filter((line) => /^fillText\([А-Я],/.test(line)), []);
 });
 
 test("метка привязана к стене — имя стены при этом не меняется", () => {

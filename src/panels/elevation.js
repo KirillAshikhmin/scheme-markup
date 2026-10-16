@@ -51,10 +51,13 @@ export function elevationHeight(fieldHeight) {
 /**
  * Строка заголовка: что за стена, из какой она комнаты и какой стороной
  * повёрнута. Чистая — слова проверяются без браузера.
+ *
+ * Имя стены (G200) стоит первым: им стену и называют. Длина осталась рядом —
+ * имя отвечает «какая стена», длина «сколько в ней».
  */
 export function elevationTitle(elevation) {
   if (!elevation) return "";
-  const parts = [text("elevation.wall", { length: elevation.lengthMm })];
+  const parts = [text("elevation.wall", { name: elevation.name, length: elevation.lengthMm })];
   if (elevation.roomName) parts.push(elevation.roomName);
   return parts.join(" · ");
 }

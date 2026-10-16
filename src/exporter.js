@@ -1381,7 +1381,13 @@ export async function elevationSheetPng(project, elevations, page, layout, optio
         // проверил на экране.
         views: options.views !== false,
         scale: layout.scale * mm,
-        label: text("elevationSheet.label", { index: index + 1, length: elevations[index].lengthMm }),
+        label: text("elevationSheet.label", {
+          index: index + 1,
+          // Имя стены (G200): лист и план связываются буквами углов, и без
+          // имени монтажник не найдёт на плане ту стену, что у него в руках.
+          name: elevations[index].name,
+          length: elevations[index].lengthMm,
+        }),
       },
     );
   }
