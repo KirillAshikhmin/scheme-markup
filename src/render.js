@@ -2746,6 +2746,24 @@ const COMMENT_PLATE_RADIUS = 0.5;
 // обозначение, — линия вышла бы в десяток пикселей, и указателя было бы не
 // разглядеть. Отодвинутую рукой плашку это не трогает: у неё своё смещение.
 const COMMENT_POINTER_GAP = 3.5;
+// Радиус точки комментария — в долях радиуса знака. Точка не знак: это место на
+// плане, в которое смотрит указатель, и рисуется она мелкой кляксой, чтобы не
+// спорить с обозначениями вокруг.
+const COMMENT_POINT_RATIO = 0.4;
+
+/**
+ * Радиус точки комментария на экране — одна дверь на рисование и на попадание.
+ *
+ * Нужна она с таска 141: точку комментария возят отдельно от плашки (G199),
+ * значит по ней кликают, — а мерить это попадание знаком типа (`style.shape`)
+ * нельзя. Знак у встроенного типа — `rect-horizontal`, то есть сама плашка:
+ * клик ловился бы прямоугольником размером со знак вокруг точки, которая
+ * нарисована вчетверо меньше. Правило «попадание считается тем же кодом, что
+ * отрисовка» для точки комментария — это и есть.
+ */
+export function commentPointRadius(view) {
+  return Math.max(2, markRadius(view) * COMMENT_POINT_RATIO);
+}
 
 /**
  * Текст плашки, разложенный по строкам. Перенос по словам; слово длиннее
@@ -3909,6 +3927,11 @@ function insideBox(point, box) {
 // `part` — `label` (подпись, её таскают отдельно), `mark` (точка или вершина
 // линии), `line` (сегмент ломаной). Сверху вниз: подписи, потом метки в обратном
 // порядке постановки — поздняя метка лежит выше ранней.
+//
+// У комментария с указателем это **две разные ручки одной метки**: плашка
+// отвечает `label` (едет смещение), точка — `mark` (едут координаты). Третьего
+// значения `part` ради этого не заведено: точка комментария и есть тело метки,
+// а что плашка при её переносе остаётся на месте — дело холста (G199).
 export function hitTest(project, scheme, point, view, filter, extra = 0) {
   if (!project || !scheme) return null;
   const state = renderView(view);
@@ -3944,6 +3967,24 @@ export function hitTest(project, scheme, point, view, filter, extra = 0) {
     // Точка знака — из той же двери, что у рисования (`markStackPoints`):
     // стопка совпавших меток обязана отдавать клик там, где знак виден.
     const screen = markStackPoints(mark, stacks).map((item) => planToScreen(item, scheme, state));
+    // Комментарий: плашку поймал проход подписей выше, а здесь ловится его
+    // **точка** — та, в которую смотрит указатель, и её возят отдельно от
+    // плашки (G199). Запас вокруг точки — тот же, что у ручек подписи
+    // (`HIT_SLACK_PX`), и мерится он от нарисованной кляксы, а не от знака
+    // типа: знак у комментария — прямоугольник плашки.
+    //
+    // **Без указателя точки нет вовсе.** Плашка стоит на ней сама, рисовать
+    // там нечего — значит и ловить нечего: клик по этому месту уже забрала
+    // плашка и отдала его как `mark` (двигается весь комментарий).
+    if (markIsComment(mark)) {
+      if (!markPointer(mark)) continue;
+      const at = screen[0];
+      const reach = commentPointRadius(state) + HIT_SLACK_PX + extra;
+      if (Math.hypot(point.x - at.x, point.y - at.y) <= reach) {
+        return { markId: mark.id, part: "mark", groupId: null, index: 0 };
+      }
+      continue;
+    }
     for (let vertex = 0; vertex < screen.length; vertex += 1) {
       const geometry = shapeGeometry(style.shape, screen[vertex].x, screen[vertex].y, radius);
       const near =
@@ -4229,7 +4270,7 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected, stacks) {
   if (markIsComment(mark)) {
     if (!markPointer(mark)) return;
     const at = screen[0];
-    drawShape(ctx, "circle-fill", at.x, at.y, Math.max(2, radius * 0.4), style.color);
+    drawShape(ctx, "circle-fill", at.x, at.y, commentPointRadius(view), style.color);
     if (!selected) return;
     ctx.save();
     ctx.strokeStyle = "#0969da";
