@@ -12176,6 +12176,43 @@ function migrateTypeKinds(project) {
  * у того, где меток больше; у меток остальных сменится приставка подписи.
  * Из двух путей, какими тип попадал в объект, так получиться не могло.
  */
+/**
+ * Умолчания размеров доходят до справочника, заведённого раньше них.
+ *
+ * Размеры у типов появились в таске 139 — но **в шаблоне**, то есть достались
+ * только новому объекту. У заказчика справочник собран давно: сорок девять
+ * своих типов, и ни у одного нет `sizes`. Наследование при этом исправно —
+ * наследовать нечего, и в карточке метки размеров не видно (дефект D28).
+ *
+ * Поэтому типу без размеров они проставляются по шаблону: сперва **по коду**
+ * («Т», «Р», «В» — коды заказчика совпадают со стартовыми), потом **по форме
+ * знака**, как это сделано у изображений объектов. Не нашлось ни там, ни там —
+ * поле остаётся пустым: выдумывать размер вещи, которую мы не узнали, нельзя.
+ *
+ * Трогается **только справочник**: метки не получают ни одного нового поля,
+ * и записанное у типа число продолжает следовать за правкой умолчания.
+ */
+function fillTypeSizes(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, filled: 0 };
+  const byCode = new Map();
+  const byShape = new Map();
+  for (const item of TEMPLATE_TYPES) {
+    if (!item.sizes) continue;
+    if (item.code && !byCode.has(item.code)) byCode.set(item.code, item.sizes);
+    if (item.shape && !byShape.has(item.shape)) byShape.set(item.shape, item.sizes);
+  }
+  let filled = 0;
+  const markTypes = project.markTypes.map((type) => {
+    const known = typeSizes(type);
+    if (MARK_DIMENSION_FIELDS.some((field) => known[field] !== null)) return type;
+    const source = byCode.get(type.code) || (type.shape ? byShape.get(type.shape) : null);
+    if (!source) return type;
+    filled += 1;
+    return { ...type, sizes: { ...source } };
+  });
+  if (filled === 0) return { project, changed: false, filled: 0 };
+  return { project: { ...project, markTypes }, changed: true, filled };
+}
 function migrateCommentType(project) {
   if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, moved: 0 };
   const own = project.markTypes.filter((type) => type.kind === MARK_KIND_COMMENT);
@@ -13950,7 +13987,10 @@ function migrateProject(loaded) {
   // объект — иначе упаковка правила бы то, что сама же и сверяет.
   // Комментарий перестал быть строкой справочника (G173): объект сборки, где
   // он ею был, переводится на встроенный тип — молча и без правки подписей.
-  return migrateCommentType(migrateTypeKinds(filled).project).project;
+  // Размеры по умолчанию (D28) доходят до справочника, заведённого раньше них:
+  // у типа без размеров они проставляются по шаблону. Трогается только
+  // справочник — метки новых полей не получают.
+  return fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project;
 }
 
 // Календарный день пользователя, а не UTC: разметку правят вечером, и
@@ -40247,7 +40287,7 @@ function mountProjectsPanel(host, api) {
     // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
     // открывался бы по-разному из базы и из архива. Тем же правилом и там же
     // переезжает комментарий со строки справочника на встроенный тип (G173).
-    const migrated = migrateCommentType(migrateTypeKinds(stored).project).project;
+    const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
     // Постоянный ключ у объектов, заведённых до его появления, дописывается
     // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
     // трогается, в истории отмены ничего не появляется, а в базу объект

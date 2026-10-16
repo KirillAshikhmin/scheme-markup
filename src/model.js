@@ -5403,6 +5403,44 @@ export function migrateTypeKinds(project) {
  * у того, где меток больше; у меток остальных сменится приставка подписи.
  * Из двух путей, какими тип попадал в объект, так получиться не могло.
  */
+/**
+ * Умолчания размеров доходят до справочника, заведённого раньше них.
+ *
+ * Размеры у типов появились в таске 139 — но **в шаблоне**, то есть достались
+ * только новому объекту. У заказчика справочник собран давно: сорок девять
+ * своих типов, и ни у одного нет `sizes`. Наследование при этом исправно —
+ * наследовать нечего, и в карточке метки размеров не видно (дефект D28).
+ *
+ * Поэтому типу без размеров они проставляются по шаблону: сперва **по коду**
+ * («Т», «Р», «В» — коды заказчика совпадают со стартовыми), потом **по форме
+ * знака**, как это сделано у изображений объектов. Не нашлось ни там, ни там —
+ * поле остаётся пустым: выдумывать размер вещи, которую мы не узнали, нельзя.
+ *
+ * Трогается **только справочник**: метки не получают ни одного нового поля,
+ * и записанное у типа число продолжает следовать за правкой умолчания.
+ */
+export function fillTypeSizes(project) {
+  if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, filled: 0 };
+  const byCode = new Map();
+  const byShape = new Map();
+  for (const item of TEMPLATE_TYPES) {
+    if (!item.sizes) continue;
+    if (item.code && !byCode.has(item.code)) byCode.set(item.code, item.sizes);
+    if (item.shape && !byShape.has(item.shape)) byShape.set(item.shape, item.sizes);
+  }
+  let filled = 0;
+  const markTypes = project.markTypes.map((type) => {
+    const known = typeSizes(type);
+    if (MARK_DIMENSION_FIELDS.some((field) => known[field] !== null)) return type;
+    const source = byCode.get(type.code) || (type.shape ? byShape.get(type.shape) : null);
+    if (!source) return type;
+    filled += 1;
+    return { ...type, sizes: { ...source } };
+  });
+  if (filled === 0) return { project, changed: false, filled: 0 };
+  return { project: { ...project, markTypes }, changed: true, filled };
+}
+
 export function migrateCommentType(project) {
   if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, moved: 0 };
   const own = project.markTypes.filter((type) => type.kind === MARK_KIND_COMMENT);

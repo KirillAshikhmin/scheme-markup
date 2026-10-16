@@ -777,11 +777,24 @@ function legacyProject() {
   return JSON.parse(LEGACY_TEXT);
 }
 
-test("G68: объект прежней сборки доезжает через файл байт в байт", async () => {
+test("G68: объект прежней сборки доезжает через файл без правки разметки", async () => {
   const project = legacyProject();
   const file = await packProject(project, new Map());
   const { project: loaded } = await unpackProject(file);
-  assert.equal(JSON.stringify(loaded, null, 2), LEGACY_TEXT, "в объекте без чертежа завелись новые поля");
+  // Побайтного совпадения больше нет, и это решение заказчика, а не оплошность:
+  // по дефекту D28 типу без размеров они проставляются по шаблону при открытии.
+  // Трогается **только справочник** — поэтому сверяется всё остальное, а типы
+  // отдельно: ни одного нового ключа, кроме `sizes`.
+  const strip = (value) => JSON.stringify({ ...value, markTypes: null }, null, 2);
+  assert.equal(strip(loaded), strip(JSON.parse(LEGACY_TEXT)), "в объекте без чертежа завелись новые поля");
+  loaded.markTypes.forEach((type, index) => {
+    const was = JSON.parse(LEGACY_TEXT).markTypes[index];
+    const added = Object.keys(type).filter((key) => !Object.prototype.hasOwnProperty.call(was, key));
+    assert.deepEqual(added, added.length ? ["sizes"] : [], "у типа появилось что-то кроме размеров");
+    for (const key of Object.keys(was)) {
+      assert.deepEqual(type[key], was[key], "правка задела прежнее поле типа: " + key);
+    }
+  });
   for (const key of ["walls", "openings", "schemeObjects", "schemeObjectKinds"]) {
     assert.equal(Object.prototype.hasOwnProperty.call(loaded, key), false, "пустой список уехал в файл: " + key);
   }

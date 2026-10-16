@@ -4,6 +4,7 @@ import { LAST_PROJECT_KEY, layoutAllows, PANEL_IDS, registerPanel } from "../app
 import {
   createProject,
   ensureProjectKey,
+  fillTypeSizes,
   migrateCommentType,
   migrateTypeKinds,
   updateProject,
@@ -116,7 +117,7 @@ function mountProjectsPanel(host, api) {
     // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
     // открывался бы по-разному из базы и из архива. Тем же правилом и там же
     // переезжает комментарий со строки справочника на встроенный тип (G173).
-    const migrated = migrateCommentType(migrateTypeKinds(stored).project).project;
+    const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
     // Постоянный ключ у объектов, заведённых до его появления, дописывается
     // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
     // трогается, в истории отмены ничего не появляется, а в базу объект

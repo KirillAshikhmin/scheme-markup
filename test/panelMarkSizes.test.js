@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  fillTypeSizes,
   MARK_DIMENSION_FIELDS,
   MARK_DIMENSION_MAX,
   MARK_DIMENSION_UNIT,
@@ -90,4 +91,37 @@ test("негодное поле называет себя и не закрыва
   const mixed = markSizesParse({ length: "600", width: "-2", heightAboveFloor: "" });
   assert.equal(mixed.values.length, 600);
   assert.deepEqual(mixed.invalid.map((item) => item.field), ["width"]);
+});
+
+// ——— умолчания доходят до справочника, заведённого раньше них ———————————
+//
+// Дефект D28: у заказчика сорок девять своих типов и ни у одного нет размеров,
+// потому что умолчания (таск 139) прописаны в шаблоне и достаются только
+// новому объекту. Наследование при этом исправно — наследовать нечего.
+test("тип без размеров получает их по коду, а незнакомый остаётся пустым", () => {
+  const project = {
+    markTypes: [
+      { id: "a", code: "Р", name: "Розетка" },
+      { id: "b", code: "ЧЕГОНЕТ", name: "Своё" },
+      { id: "c", code: "В", name: "Выключатель", sizes: { length: 55 } },
+    ],
+    marks: [{ id: "m", typeId: "a", points: [{ x: 0.1, y: 0.1 }] }],
+  };
+  const { project: filled, changed, filled: count } = fillTypeSizes(project);
+  assert.equal(changed, true);
+  assert.equal(count, 1, "проставить надо ровно тому, у кого пусто");
+
+  const socket = filled.markTypes[0];
+  assert.ok(socket.sizes && socket.sizes.length > 0, "розетка обязана получить размеры по коду");
+
+  assert.equal(filled.markTypes[1].sizes, undefined, "незнакомому коду размер не выдумывается");
+  assert.deepEqual(filled.markTypes[2].sizes, { length: 55 }, "свой размер не перебивается шаблонным");
+  assert.deepEqual(filled.marks, project.marks, "метки не трогаются вовсе");
+});
+
+test("повторный проход ничего не меняет — миграция идемпотентна", () => {
+  const once = fillTypeSizes({ markTypes: [{ id: "a", code: "Р", name: "Розетка" }], marks: [] });
+  const twice = fillTypeSizes(once.project);
+  assert.equal(twice.changed, false);
+  assert.equal(twice.project, once.project, "второй проход обязан вернуть тот же объект");
 });
