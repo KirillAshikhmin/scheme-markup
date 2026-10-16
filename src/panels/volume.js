@@ -478,7 +478,9 @@ export function openVolume({ schemeId, api }) {
       offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
       offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
     };
-    drawDrawing(ctx, { project: state.project, schemeId, bridge: drawingUnitBridge(view) });
+    // Без подписей: буквы углов и имена объектов на накладке в двести точек
+    // слипаются в кашу, а заказчик просил «только схема и местоположение».
+    drawDrawing(ctx, { project: state.project, schemeId, bridge: drawingUnitBridge(view), labels: false });
     // Местоположение и направление взгляда. Направление показать надо: без него
     // точка отвечает на половину вопроса, и миникарта становится бесполезной.
     const at = { x: view.offsetX + person.x * zoom, y: view.offsetY + person.y * zoom };

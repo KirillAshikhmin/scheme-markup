@@ -4906,6 +4906,8 @@ function drawingOpeningsByWall(project, schemeId) {
  * `options.wallAt` — подмена концов стены на время перетаскивания.
  * `options.openingAt` — подмена отступа проёма на то же время.
  * `options.handle` — чем рисовать ручку; без неё ручек нет.
+ * `options.labels` — `false` рисует чертёж без слов (буквы углов, имена
+ *   объектов): так его просит миникарта объёма.
  */
 export function drawDrawing(ctx, options = {}) {
   const { project, schemeId, bridge } = options;
@@ -4914,11 +4916,16 @@ export function drawDrawing(ctx, options = {}) {
   const objects = options.objects === false ? [] : schemeObjectsOnScheme(project, schemeId);
   if (walls.length === 0 && objects.length === 0) return;
   const active = options.active || null;
+  // `labels: false` — чертёж без слов: ни букв углов, ни подписей объектов.
+  // Заведено для миникарты объёма (G212, таск 150), где заказчик попросил
+  // «только схема и местоположение»: на накладке в двести точек подписи
+  // превращаются в кашу, а читают по ней не имена, а своё место.
+  const labels = options.labels !== false;
   const kinds = new Map(schemeObjectKindsInOrder(project).map((kind) => [kind.id, kind]));
   for (const object of objects) {
     drawDrawingObject(ctx, bridge, options.objectAt ? options.objectAt(object) : object, {
       active: active && active.kind === "object" && active.id === object.id,
-      name: (kinds.get(object.kindId) || {}).name || "",
+      name: labels ? (kinds.get(object.kindId) || {}).name || "" : "",
       handle: options.handle,
     });
   }
@@ -4940,7 +4947,7 @@ export function drawDrawing(ctx, options = {}) {
   // Буквы углов — поверх стен и проёмов, но под разметкой: метка главнее
   // обозначения стены, как и везде (G200). Вместе со слоем стен они и гаснут:
   // буква без стены не значит ничего.
-  drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
+  if (labels) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
   if (!active || active.kind !== "wall" || !options.handle) return;
   const wall = walls.find((item) => item.id === active.id);
   if (!wall) return;
