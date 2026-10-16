@@ -572,7 +572,11 @@ export function canvasFullscreenLabel(on) {
 
 // Переключение. Возвращает обещание: браузер вправе отказать, и отказ надо
 // показать, а не проглотить.
-function canvasFullscreenToggle(doc, element) {
+//
+// Вынесено наружу ради объёмного режима (таск 146): он разворачивает не
+// страницу, а своё окно, но дверь к полному экрану у браузеров двоится ровно
+// так же. Второй разбор тех же имён разошёлся бы с этим при первой правке.
+export function canvasFullscreenToggle(doc, element) {
   if (canvasFullscreenOn(doc)) {
     const exit = FULLSCREEN_EXIT.find((name) => typeof doc[name] === "function");
     return exit ? Promise.resolve(doc[exit]()) : Promise.reject(new Error("no exit"));

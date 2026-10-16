@@ -1,0 +1,116 @@
+/* ——— объёмный режим ———————————————————————————————————————————————————
+
+   Заказчик: «просто открывается окно, где можно перемещаться по комнатам…
+   суть как в игре», «Отдельное окно с разворотом на полный экран».
+
+   Окно почти во весь экран, как мастерская, и по той же причине: ходят по
+   квартире, а не по одной комнате, и дальний угол не должен уходить за край.
+   Правой колонки у него нет вовсе — в объёме нечего настраивать, а каждая
+   сотня точек ширины здесь это угол обзора. */
+
+.modal--volume {
+  width: min(98vw, 1500px);
+  height: 94vh;
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal--volume .modal__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* «Закрыть» слева — по той же причине, что в мастерской: уведомления живут в
+   правом нижнем углу экрана, и окно почти во весь экран подводит свой ряд
+   кнопок ровно под них. */
+.modal--volume .modal__actions {
+  justify-content: flex-start;
+}
+
+/* Полный экран разворачивает саму карточку окна (а не страницу): в объёме за
+   затемнением нет ничего нужного, и «как в игре» значит именно это. Карточка
+   при этом теряет скругление и отступы — иначе по краю экрана осталась бы
+   рамка диалога. */
+.modal--volume:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  background: #0d1117;
+}
+
+.volume {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+}
+
+.volume__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.volume__toolsLabel {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+  margin-right: 2px;
+}
+
+/* Где стоит человек — рядом с переключателем вида, а не в строке состояния под
+   полем: это ответ на тот же вопрос, что задаёт кнопка «Обзор». */
+.volume__where {
+  font-size: 13px;
+  color: var(--panel-text);
+  margin-left: 10px;
+}
+
+.volume__spacer {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Поле — не бумага. Чертёж чертят на бумаге, а по комнате ходят: фон поля
+   закрывает задник (небо и поле), и видеть его цвет человек не должен вовсе.
+   Чёрный на случай первого кадра до отрисовки — он лучше белой вспышки. */
+.volume__stage {
+  position: relative;
+  flex: 1;
+  min-height: 200px;
+  overflow: hidden;
+  background: #0d1117;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  user-select: none;
+  touch-action: none;
+  cursor: grab;
+}
+
+/* От первого лица курсор — крест: он показывает, куда смотришь, и не обещает,
+   что поле можно потащить. */
+.volume__stage--person {
+  cursor: crosshair;
+}
+
+.volume__canvas {
+  display: block;
+}
+
+.volume__meta {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+  font-variant-numeric: tabular-nums;
+}

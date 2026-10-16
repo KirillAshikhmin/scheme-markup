@@ -437,6 +437,16 @@
   font-size: 11px;
 }
 
+/* Объём (таск 146) встаёт рядом с «Чертежом» — тем же словом и той же мерой.
+   Порядок между ними не случайный: сперва рисуют, потом смотрят. */
+#panel-schemes .scheme-row__volume {
+  flex: none;
+  order: 2;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
 #panel-schemes .scheme-row__tools .ui-btn {
   padding: 1px 4px;
 }
