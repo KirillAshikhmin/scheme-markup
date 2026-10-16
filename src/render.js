@@ -11,6 +11,7 @@
 // метки задан в пикселях плана, поэтому метка живёт на плане как наклейка:
 // приближение увеличивает и её, а экспорт в двойном разрешении даёт тот же вид.
 import {
+  BLOCK_LABEL_SEPARATOR,
   BLOCK_STEP_RATIO,
   OPENING_KIND_DOOR,
   SHAPE_NAMES,
@@ -2721,6 +2722,109 @@ function labelTextOf(project, target) {
   return (target.markIds ? blockLabel(project, labelMemberIds(target)) : labelOf(project, target.id)) || "";
 }
 
+// ——— потолок длины подписи ————————————————————————————————————————————
+//
+// Свёртки в диапазон мало. На снимке заказчика блок из трёх розеток и витой
+// пары подписан «Р8Р9Р10, RJ2»; свёртка делает из этого «Р8–10, RJ2» — на три
+// знака короче, но всё ещё вдвое шире самого блока. Поэтому у подписи есть
+// потолок, и при переполнении она **переносится**, а не обрезается: каждый
+// номер в ней — адрес розетки, и спрятанный многоточием номер делает план
+// врущим. Прятать нечего — можно только сложить.
+
+/**
+ * Потолок строки подписи в знаках.
+ *
+ * Восемь — это самый частый смешанный блок целиком: «В1, Р1Р2» (выключатель и
+ * две розетки в одной рамке) остаётся одной строкой, какой и был, вместе со
+ * всеми подписями короче. Переносится то, что длиннее: «Р8–10, RJ2» ложится в
+ * два этажа по пять знаков вместо одной строки в десять.
+ *
+ * В пикселях плана при обычном кегле 12 это около семидесяти — ширина блока из
+ * четырёх розеток. Подпись перестаёт быть заметно длиннее того, что подписывает,
+ * и это весь смысл числа: мерить подпись шириной блока точнее (блок бывает и в
+ * шесть точек), но тогда одна и та же подпись переползала бы с этажа на этаж от
+ * ползунка величины метки.
+ *
+ * Мера — знаки, а не пиксели, по той же причине, что у плашки комментария:
+ * настоящей ширины текста здесь не измерить, `labelBox` зовут и попадание по
+ * клику, и тесты без холста.
+ */
+const LABEL_WRAP_CHARS = 8;
+// Высота строки подписи в долях кегля. Та же, что у габарита одной строки:
+// одной строкой подпись обязана занимать ровно то, что занимала всегда.
+const LABEL_LINE = 1.2;
+
+/**
+ * Куски подписи, разложенные по строкам: `[{text, from, to}]`.
+ *
+ * Перенос идёт **только по запятым** — тем самым разделителям, которые склеила
+ * `blockLabelParts`. Внутри куска строка не рубится никогда: «Р8–Р10» — одно
+ * обозначение, и разорванное посередине оно читается как два других.
+ *
+ * Запятая остаётся на строке слева, как пунктуация в наборе, а пробел после
+ * неё на переносе съедается. В потолок она не считается — висит за ним, как
+ * знак в наборе свисает на поле: иначе «В1, Р1–3, RJ1» пришлось бы рвать перед
+ * «Р1–3», где строка ещё не кончилась. `from`/`to` — границы кусков: по ним
+ * рисование раздаёт строкам цвета, не пересчитывая разбивку во второй раз.
+ *
+ * Кусок длиннее потолка (код типа бывает в шестнадцать букв) строку
+ * переполняет — и остаётся целым: перенос обещает сложить подпись, а не
+ * уложиться во что бы ни стало.
+ */
+function labelWrap(parts, limit = LABEL_WRAP_CHARS) {
+  const lines = [];
+  let from = 0;
+  let line = "";
+  const flush = (to) => {
+    if (to <= from) return;
+    lines.push({ text: line.trimEnd(), from, to });
+    from = to;
+    line = "";
+  };
+  for (let index = 0; index < parts.length; index += 1) {
+    const piece = parts[index].text;
+    const separator = piece === BLOCK_LABEL_SEPARATOR;
+    if (!separator && line !== "" && line.length + piece.length > limit) flush(index);
+    line += piece;
+  }
+  flush(parts.length);
+  return lines;
+}
+
+/**
+ * Строки подписи цели. Одна строка — у всех, кроме переполнившего потолок
+ * блока: у одиночной метки кусков нет вовсе, а плашка комментария переносится
+ * своим правилом (`commentPlateLines`) и сюда не заходит.
+ *
+ * Склейка строк обязана совпасть с самой подписью — разойдись они, обводка
+ * легла бы по одной строке, а буквы по другой. Разошлись — подпись остаётся
+ * одной строкой, какой была: лучше длинная, чем рваная.
+ */
+function labelLinesOf(project, target, value) {
+  const whole = [{ text: value, from: 0, to: 0 }];
+  if (!target || !target.markIds || markIsComment(target)) return whole;
+  const parts = blockLabelParts(project, labelMemberIds(target));
+  if (parts.length === 0) return whole;
+  const lines = labelWrap(parts);
+  // Сравнение без пробелов: перенос съедает ровно пробел после запятой, и
+  // только его.
+  const joined = lines.map((line) => line.text).join("");
+  if (joined.replace(/\s+/g, "") !== value.replace(/\s+/g, "")) return whole;
+  return lines;
+}
+
+// Куски одной строки подписи. Последний теряет пробел после запятой — ровно
+// тот, который съел перенос: иначе буквы разошлись бы с обводкой на ширину
+// пробела.
+function labelLineRuns(runs, line) {
+  if (!runs || line.to <= line.from) return null;
+  const pieces = runs.slice(line.from, line.to).map((run) => ({ ...run }));
+  const last = pieces[pieces.length - 1];
+  if (last) last.text = last.text.trimEnd();
+  if (pieces.map((piece) => piece.text).join("") !== line.text) return null;
+  return pieces;
+}
+
 // ——— плашка комментария ———————————————————————————————————————————————
 //
 // Плашка — прямоугольник со скруглёнными углами и текстом внутри (G163).
@@ -2904,14 +3008,19 @@ function labelBoxIn(project, scheme, target, state, layout, stacks) {
   const anchor = planToScreen(labelOrigin(project, target, stacks), scheme, state);
   const value = labelTextOf(project, target);
   const plate = markIsComment(target) ? commentPlateSize(value, font) : null;
-  const width = plate ? plate.width : Math.max(font * 0.8, value.length * font * LABEL_CHAR_RATIO);
+  // Строки подписи — те же, что мерила раскладка: переполнившая потолок
+  // подпись блока переносится по запятым (D29). Одна строка — `lines` из
+  // одного куска, и всё считается как раньше.
+  const lines = plate ? null : labelLinesOf(project, target, value);
+  const size = plate || labelLinesSize(lines, font);
   const place = labelPlaceOf(project, scheme, target, state, layout);
   return {
     text: value,
+    lines,
     x: anchor.x + place.dx * state.zoom,
     y: anchor.y + place.dy * state.zoom,
-    width,
-    height: plate ? plate.height : font * 1.2,
+    width: size.width,
+    height: size.height,
     font,
     // Семейства едут вместе с кеглем: рисует подпись тот, у кого на руках
     // только `box`. Габарит от них не зависит — он считается по числу знаков
@@ -3115,6 +3224,16 @@ function labelReach(project, target, stacks) {
   return { left, right };
 }
 
+// Габарит подписи по её строкам: ширина — самая длинная строка, высота — их
+// число. Одной строкой выходит ровно то, что выходило всегда.
+function labelLinesSize(lines, font) {
+  const longest = lines.reduce((max, line) => Math.max(max, line.text.length), 0);
+  return {
+    width: Math.max(font * 0.8, longest * font * LABEL_CHAR_RATIO),
+    height: lines.length * font * LABEL_LINE,
+  };
+}
+
 // Подпись в пикселях плана: `x`, `y` — точка привязки (сама метка), размеры —
 // оценка по числу знаков, та же, что у экранного `labelBox`.
 function labelPlanBox(project, scheme, target, sizes, stacks) {
@@ -3127,12 +3246,17 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
   // по тем же знакам и тому же кеглю. Раскладке она от этого не чужая — место
   // ей ищется тем же перебором, и соседние подписи её обходят.
   const plate = markIsComment(target) ? commentPlateSize(text, sizes.font) : null;
+  // Перенесённая подпись блока занимает две строки и половину прежней ширины —
+  // раскладка обязана мерить то же, что рисуется, иначе подписи наедут.
+  const lines = plate ? null : labelLinesOf(project, target, text);
+  const size = plate || labelLinesSize(lines, sizes.font);
   return {
     text,
+    lines,
     x: origin.x * width,
     y: origin.y * schemeHeight(scheme),
-    width: plate ? plate.width : Math.max(sizes.font * 0.8, text.length * sizes.font * LABEL_CHAR_RATIO),
-    height: plate ? plate.height : sizes.font * 1.2,
+    width: size.width,
+    height: size.height,
     angle: labelAngleOf(project, target),
     reach: { left: reach.left * width, right: reach.right * width },
     lead,
@@ -4206,15 +4330,15 @@ export function labelRuns(project, target, fallback) {
   return runs;
 }
 
-// Обводка одна на всю подпись, буквы — кусками. Порядок именно такой: обведи
+// Обводка одна на всю строку, буквы — кусками. Порядок именно такой: обведи
 // каждый кусок по отдельности, и белая подложка легла бы поверх соседней буквы,
 // разорвав подпись на плане.
-function paintLabel(ctx, box, runs, x, y) {
-  ctx.strokeText(box.text, x, y);
+function paintLine(ctx, value, runs, x, y) {
+  ctx.strokeText(value, x, y);
   // Одноцветная подпись рисуется одним вызовом — ровно тем же, что и до правки.
   if (!runs || runs.every((run) => run.color === runs[0].color)) {
     if (runs && runs.length > 0) ctx.fillStyle = runs[0].color;
-    ctx.fillText(box.text, x, y);
+    ctx.fillText(value, x, y);
     return;
   }
   // Сдвиг куска меряется по **накопленной строке**, а не суммой кусков: так
@@ -4224,6 +4348,23 @@ function paintLabel(ctx, box, runs, x, y) {
     ctx.fillStyle = run.color;
     ctx.fillText(run.text, x + (done ? ctx.measureText(done).width : 0), y);
     done += run.text;
+  }
+}
+
+// Подпись целиком. Одна строка — один проход, тот же, что был всегда;
+// перенесённая (D29) идёт строка за строкой от середины габарита, и обводка у
+// каждой своя: это разные строки, и склеивать их нечем.
+function paintLabel(ctx, box, runs, x, y) {
+  const lines = box.lines && box.lines.length > 1 ? box.lines : null;
+  if (!lines) {
+    paintLine(ctx, box.text, runs, x, y);
+    return;
+  }
+  const step = box.font * LABEL_LINE;
+  const first = y - (step * (lines.length - 1)) / 2;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    paintLine(ctx, line.text, labelLineRuns(runs, line), x, first + step * index);
   }
 }
 

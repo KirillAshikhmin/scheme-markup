@@ -483,7 +483,7 @@ test("поля метки правятся, номер и тип через patc
   assert.equal(labelOf(after, mark.id), "В1");
 });
 
-test("блок «каждая своя»: три точки дают три метки, группу и слитную подпись", () => {
+test("блок «каждая своя»: три точки дают три метки, группу и общую подпись", () => {
   const { project: base, first } = projectWithSchemes();
   const step = addMark(base, {
     schemeId: first.id,
@@ -503,7 +503,9 @@ test("блок «каждая своя»: три точки дают три ме
     ["В1", "В2", "В3"],
   );
   assert.ok(step.marks.every((m) => m.groupId === step.group.id));
-  assert.equal(labelOf(step.project, step.group.id), "В1В2В3");
+  // Три подряд сворачиваются в диапазон (D29): у каждой метки обозначение
+  // своё, а подпись блока — короткая.
+  assert.equal(labelOf(step.project, step.group.id), "В1–3");
 });
 
 test("блок «одна метка на блок»: один номер и несколько точек", () => {
@@ -541,7 +543,8 @@ test("соседняя точка блока встаёт рядом по выб
   const up = addToGroup(right.project, right.mark.id, "up");
   assert.deepEqual(up.mark.points[0], { x: 0.5 + BLOCK_STEP_PX / 1000, y: 0.5 - BLOCK_STEP_PX / 2000 });
   assert.equal(findGroup(up.project, right.group.id).markIds.length, 3);
-  assert.equal(labelOf(up.project, right.group.id), "В1В2В3");
+  // Пара склеена слитно, третья метка сворачивает подпись в диапазон (D29).
+  assert.equal(labelOf(up.project, right.group.id), "В1–3");
 });
 
 test("разрыв в номерах внутри группы рвёт подпись запятой", () => {
@@ -1242,7 +1245,7 @@ test("подпись блока называет обозначение один
       { x: 0.3, y: 0.3 },
     ],
   });
-  assert.equal(labelOf(step.project, step.group.id), "Т1Т2Т3");
+  assert.equal(labelOf(step.project, step.group.id), "Т1–3");
 
   let project = setMarkNumber(step.project, step.marks[1].id, 1).project; // Т1 Т1 Т3
   assert.equal(labelOf(project, step.group.id), "Т1, Т3");
@@ -1305,7 +1308,7 @@ test("длинный код даёт обозначение целиком, а �
   assert.equal(labelOf(gapped, block.group.id), "ПОДСВЕТКА2, ПОДСВЕТКА4");
 });
 
-test("короткий код по-прежнему склеивается слитно рядом с длинным", () => {
+test("короткий код сворачивается тем же диапазоном, что и длинный", () => {
   const { project: base, first } = projectWithSchemes();
   const light = base.categories.find((c) => c.name === "Свет").id;
   const withLong = addType(base, { code: "ЛЕНТА", name: "Лента в нише", categoryId: light });
@@ -1320,7 +1323,8 @@ test("короткий код по-прежнему склеивается сл�
       { x: 0.3, y: 0.2 },
     ],
   });
-  assert.equal(labelOf(block.project, block.group.id), "В1В2В3");
+  // Запись диапазона одна на любой код: слева код, справа только номер (D29).
+  assert.equal(labelOf(block.project, block.group.id), "В1–3");
 
   // порядок в подписи блока — по справочнику: «Свет» идёт раньше «Выключателей»
   const mixed = changeMarkType(block.project, block.marks[2].id, withLong.type.id).project;

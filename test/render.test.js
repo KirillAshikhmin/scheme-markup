@@ -265,7 +265,7 @@ test("у блока одна подпись на всех, у одиночных
   const targets = renderInternals.labelTargets(alone.project, scheme, null);
   assert.equal(targets.length, 2, "три метки блока дают одну подпись плюс одиночная");
   assert.equal(targets.filter((item) => item.markIds).length, 1, "одна цель — группа");
-  assert.equal(labelOf(alone.project, targets.find((item) => item.markIds).id), "Р1Р2Р3");
+  assert.equal(labelOf(alone.project, targets.find((item) => item.markIds).id), "Р1–3");
 });
 
 test("смещение подписи блока берётся у первой метки, своё у группы важнее", () => {
