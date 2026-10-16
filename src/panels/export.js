@@ -72,6 +72,22 @@ const exportChoice = {
   area: "all",
   legend: true,
   outlines: true,
+  /**
+   * Два слоя плана на листе: подложка-фотография и чертёж (G204).
+   *
+   * **Умолчание берётся с экрана** и переставляется на каждом открытии окна
+   * (`exportSyncLayers`), а не живёт между ними, как соседние отметки. Причина
+   * в том, что это не свойство листа, а слой: выключатели подложки и чертежа
+   * стоят в «Размерах» (таск 127) и обещают, что «лист показывает то же, что
+   * экран». Отметка здесь — возможность отступить от этого обещания один раз,
+   * не трогая холст; закроешь окно — и лист снова повторяет экран.
+   *
+   * Умолчание «как на экране» ещё и единственное, при котором лист одного
+   * листа не меняется (G68): `exportSchemeImage` слушал `state.planShown` с
+   * таска 127.
+   */
+  plan: true,
+  drawing: true,
   // Связи меток на бумаге. Умолчание — «нет»: лист по умолчанию остаётся
   // чертежом, а связи это разбор. Отметка живёт между открытиями диалога, как
   // и соседние, — поставил один раз и печатаешь с ней дальше.
@@ -233,13 +249,23 @@ function exportAreaSize(state, scheme) {
   return { width: area.width, height: area.height };
 }
 
+// Подложка и чертёж этой выгрузки: умолчание — то, что на экране (таск 127),
+// дальше окном владеет человек. Снимается на каждом открытии окна схемы, а не
+// один раз: выключатель слоя человек трогает между выгрузками.
+function exportSyncLayers(state) {
+  exportChoice.plan = state.planShown !== false;
+  exportChoice.drawing = state.drawingShown !== false;
+}
+
 // План схемы для рисования: уже разобранный на холсте — как есть, чужой —
 // из хранилища. Разобранный здесь план здесь же и освобождается.
 async function exportSchemeImage(state, scheme) {
-  // Выключенная подложка не уходит и на бумагу (таск 127): человек скрыл
+  // Снятая подложка не уходит и на бумагу (таск 127, G204): человек скрыл
   // фотографию, потому что размечает по своему чертежу, и печатать под
-  // метками то, чего он не видел, нельзя.
-  if (state.planShown === false) return { image: null, release: null };
+  // метками то, чего он не видел, нельзя. Отметка окна умолчанием повторяет
+  // экран, поэтому спрашивается только она — двух ответов на один вопрос быть
+  // не должно.
+  if (exportChoice.plan === false) return { image: null, release: null };
   const loaded = state.schemeImage;
   if (loaded && loaded.schemeId === scheme.id && loaded.image) return { image: loaded.image, release: null };
   if (!scheme.imageId) return { image: null, release: null };
@@ -652,6 +678,9 @@ function exportSchemeDialog(api) {
     },
   });
   scaleDoor.hidden = true;
+  // Подложка и чертёж — то, что на экране: окно открылось, чтобы выгрузить
+  // увиденное.
+  exportSyncLayers(state);
   // Комната, выбранная раньше, могла остаться без контура на этой схеме —
   // тогда лист берётся целиком, а не молча по пустой рамке.
   if (exportAreaRoomId() && !exportRoomArea(state.project, scheme, exportAreaRoomId())) exportChoice.area = "all";
@@ -678,6 +707,20 @@ function exportSchemeDialog(api) {
     monoSync();
   });
   monoToggle.title = strings.mono.sheetHint;
+
+  // Два слоя плана на листе (G204). Слова заказчика: «при экспорте схемы должна
+  // быть опция рисовать ли подложку». Отметок две, а не одна, по той же причине,
+  // по которой их два на холсте: подложку снимают, чтобы разметка легла на свой
+  // чертёж, а чертёж — чтобы она легла на фотографию. Дай одну — и вторая
+  // половина ответа осталась бы в чужой панели, а в архиве её не было бы вовсе.
+  const planCheck = exportCheck(strings.exportPanel.withPlan, exportChoice.plan, (on) => {
+    exportChoice.plan = on;
+  });
+  planCheck.title = strings.exportPanel.withPlanHint;
+  const drawingCheck = exportCheck(strings.exportPanel.withDrawing, exportChoice.drawing, (on) => {
+    exportChoice.drawing = on;
+  });
+  drawingCheck.title = strings.exportPanel.withDrawingHint;
 
   // Раскладка листа по ГОСТ считается тем же вызовом, что и выгрузка: формат,
   // поле чертежа и настоящий масштаб в подсказке обязаны совпасть с тем, что
@@ -784,6 +827,12 @@ function exportSchemeDialog(api) {
     // Вид файла стоит рядом с множителем, а не среди отметок: это список, и
     // два списка подряд читаются как один вопрос «чем и в чём выгружаем».
     fileField,
+    // Подложка и чертёж — первыми среди отметок (G204): это то, **на чём**
+    // лист нарисован, а легенда, контуры и связи — то, что поверх. Названы они
+    // теми же словами, что выключатели слоёв в «Размерах»: слой один, и второго
+    // имени у него быть не должно.
+    planCheck,
+    drawingCheck,
     exportCheck(strings.exportPanel.withLegend, exportChoice.legend, (on) => {
       exportChoice.legend = on;
     }),
@@ -828,8 +877,9 @@ function exportSchemeDialog(api) {
   const renderScheme = async (pdf) => {
     const { image, release } = await exportSchemeImage(state, scheme);
     // План может быть не загружен — метки тогда лягут на белый лист, и лучше
-    // сказать об этом, чем отдать «пустую» на вид картинку молча.
-    if (!image && state.planShown !== false && scheme.imageId) {
+    // сказать об этом, чем отдать «пустую» на вид картинку молча. Снятая
+    // отметка подложки об этом молчит: белый лист там и заказан.
+    if (!image && exportChoice.plan !== false && scheme.imageId) {
       notify(strings.exportPanel.noImage, "info");
     }
     // Подпись, оттащенную далеко от метки, поля не догоняют: о таких говорим
@@ -846,7 +896,7 @@ function exportSchemeDialog(api) {
       links: exportChoice.links,
       mono: exportChoice.mono,
       filter: exportFilterOfSheet(state),
-      drawing: state.drawingShown !== false,
+      drawing: exportChoice.drawing !== false,
       pdf: pdf === true,
     };
     try {
@@ -887,8 +937,10 @@ function exportSchemeDialog(api) {
             dismissable: false,
           });
           try {
+            // Снятая подложка — это ещё и не читать из базы десяток
+            // фотографий плана: рисовать их всё равно некуда.
             const images = new Map();
-            for (const item of schemesInOrder(state.project)) {
+            for (const item of exportChoice.plan === false ? [] : schemesInOrder(state.project)) {
               if (!item.imageId || images.has(item.imageId)) continue;
               const blob = await getImage(item.imageId);
               if (blob) images.set(item.imageId, blob);
@@ -904,6 +956,12 @@ function exportSchemeDialog(api) {
               outlines: exportChoice.outlines,
               links: exportChoice.links,
               mono: exportChoice.mono,
+              // Архив слушает те же две отметки, что и один лист (G204).
+              // Прежде он не слушал ни одной: лист, скачанный кнопкой
+              // «Скачать», уходил без подложки, а такой же лист внутри zip —
+              // с подложкой, и расходились они молча.
+              plan: exportChoice.plan !== false,
+              drawing: exportChoice.drawing !== false,
               filter: state.filter,
               onProgress: ({ done, total }) => {
                 line.textContent = text("exportPanel.sheetsProgress", { done, total });

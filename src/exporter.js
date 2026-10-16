@@ -743,6 +743,20 @@ export async function tablePng(table, options = {}) {
 
 // Картинка для рисования: Blob декодируется, готовый ImageBitmap или <img>
 // берётся как есть.
+/**
+ * Подложка листа: что из переданных картинок достаётся этой схеме.
+ *
+ * Снятая отметка «С подложкой» (G204) отрезает её **здесь** — в одном месте на
+ * весь архив и на документ. Прежде архив рисовал подложку всегда: лист,
+ * скачанный кнопкой «Скачать», уходил без фотографии, а такой же лист внутри
+ * zip — с фотографией, и расходились они молча.
+ */
+export function exportSheetPlan(images, scheme, options = {}) {
+  if (options.plan === false) return null;
+  if (!images || !scheme) return null;
+  return images.get(scheme.imageId) || null;
+}
+
 async function exportImageOf(source) {
   if (!source) return null;
   if (typeof Blob !== "undefined" && source instanceof Blob) {
@@ -891,7 +905,7 @@ async function allSchemesSheets(project, images, options = {}) {
       : schemePng(project, scheme, extra.image, { ...options, ...extra });
   for (let index = 0; index < schemes.length; index += 1) {
     const scheme = schemes[index];
-    const image = await exportImageOf(map.get(scheme.imageId));
+    const image = await exportImageOf(exportSheetPlan(map, scheme, options));
     const whole = await draw(scheme, { image, area: "all" });
     put(exportSheetName(scheme, index), whole);
     if (options.rooms !== true) continue;
