@@ -1713,8 +1713,11 @@
   min-width: 0;
 }
 
-/* Вписанное руками помещение подчёркнуто: по контуру оно больше не меняется. */
-.marks__room.is-manual {
+/* Вписанное руками помещение подчёркнуто: по контуру оно больше не меняется.
+   Выбранная рукой стена — тем же, и это не два правила, а одно: «поставил
+   руками — автоматика не перебивает» выглядит одинаково (G202). */
+.marks__room.is-manual,
+.marks__wall.is-manual {
   border-color: var(--accent);
 }
 
@@ -5251,6 +5254,8 @@ const strings = {
     editPlacement: "правка размещения",
     removePlacement: "снятие оборудования",
     markRoomAuto: "помещение по контуру",
+    markWall: "стена метки",
+    markWallAuto: "стена по месту метки",
     withRooms: "{label} + помещения по контуру",
     addOutline: "контур помещения",
     addOutlineTraced: "контур по чертежу",
@@ -6066,11 +6071,28 @@ const strings = {
   marks: {
     count: "Показано {shown} из {total}",
     // Привязка метки к стене (таск 128). Её ставит автоматика по месту метки,
-    // поэтому строка только читается: править её надо планом, а не списком.
+    // а с таска 143 стену можно назвать и рукой (G202) — по имени из таска 142.
     // «От угла» — потому что расстояние меряется от первого конца стены, и
     // для человека это угол комнаты, а не «конец a».
+    //
+    // Имя стены в строке есть, когда чертёж его дал: у стены-одиночки без
+    // соседей букв углов нет, и строка остаётся прежней — «На стене, 4,95 м от
+    // угла». Второй строки на этот случай не заводится.
     onWall: "На стене, {at} м от угла",
+    onWallNamed: "На стене {name}, {at} м от угла",
     wallLabel: "Стена",
+    // Выбор стены рукой. Порядок слов тот же, что у помещения: сперва «как
+    // решит автоматика», потом «никак», потом сами стены.
+    wallAuto: "По месту метки",
+    wallAutoOf: "По месту метки: {name}",
+    wallNone: "Не на стене",
+    // Стена в списке — именем и расстоянием: имя отвечает «какая это стена»,
+    // расстояние — «туда ли я целюсь». У стены без букв остаётся расстояние.
+    wallOption: "{name} · {at} м",
+    wallOptionFar: "{name} · {at} м, {gap} м от стены",
+    wallOptionPlain: "Стена · {at} м",
+    wallAutoTitle: "Стену подставляет автоматика по месту метки",
+    wallManualTitle: "Стена выбрана вручную — по месту метки она больше не меняется",
     // Подписей высот у знаков стопки больше нет (G188): заказчик снял эту часть
     // своего же G181 — «на схеме при расстановке в колонку не указывай их
     // высоту». Высота читается в карточке метки и в строке списка («В 900 мм»)
@@ -7983,7 +8005,7 @@ function deleteScheme(project, schemeId) {
   const marks = dropControls(
     project.marks
       .filter((mark) => mark.schemeId !== schemeId)
-      .map((mark) => (goneWalls.has(mark.wallId) ? withoutWallBinding(mark) : mark)),
+      .map((mark) => (goneWalls.has(mark.wallId) ? markWithoutWall(mark) : mark)),
     removed,
   );
   const groups = project.groups.filter((group) => group.schemeId !== schemeId);
@@ -8793,18 +8815,68 @@ function markDimensions(mark) {
  * `own` говорит, что значение **своё**, а не унаследованное: по нему окно
  * показывает умолчание заглушкой, а не числом, и развёртка знает, о скольких
  * высотах она догадалась.
+ *
+ * **Третья ступень лестницы — высота группы** (таск 143, требование G203):
+ * «если в группе у хотя бы одной метки есть высота, то она распространяется
+ * на все метки». Порядок такой: своё → группы → типа.
+ *
+ * Почему ступень наследования, а не правка данных и не хитрость развёртки.
+ * Правка данных (проставить высоту всем меткам группы) выдавала бы догадку
+ * сборки за введённое человеком число и тронула бы объект там, где он ничего
+ * не просил менять; хитрость развёртки знала бы правду в одном месте, а
+ * карточка метки и таблица — нет. Ступень лестницы отвечает всем одинаково,
+ * ничего не пишет в объект и честно говорит `own: false`.
+ *
+ * `from` — **откуда** взято значение: `"own"`, `"group"`, `"type"` или `null`.
+ * Без него подпись развёртки о догадках стала бы врать: высота, записанная
+ * рукой у соседней метки той же группы, — не умолчание типа, а то же самое
+ * число человека, и считать её догадкой нельзя.
  */
 function markSizes(project, mark) {
   const type = mark ? findType(project, mark.typeId) : null;
   const defaults = typeSizes(type);
   const values = markDimensions(mark);
+  const shared = groupHeightMm(project, mark);
   const result = {};
   for (const field of MARK_DIMENSION_FIELDS) {
     const own = values[field] !== null;
-    result[field] = own ? values[field] : defaults[field];
+    // Группа делится только высотой: длину и ширину у неё делить нечему —
+    // в одной рамке стоят и розетка, и выключатель, и размеры у них свои.
+    const fromGroup = !own && field === "heightAboveFloor" ? shared : null;
+    const value = own ? values[field] : fromGroup !== null ? fromGroup : defaults[field];
+    result[field] = value;
     result[field + "Own"] = own;
+    result[field + "From"] = own ? "own" : fromGroup !== null ? "group" : value === null ? null : "type";
   }
   return result;
+}
+
+/**
+ * Высота группы для метки, у которой своей высоты нет (G203): самая низкая из
+ * **своих** высот её соседей по группе.
+ *
+ * Своих — чтобы не было круга: метка спрашивает соседей, соседи её. Нижняя —
+ * потому что так уже решено у ряда на развёртке (G191, «одну высоту указывать
+ * у группы по нижнему объекту»), и двух правил «какая высота у группы» в
+ * сборке быть не должно.
+ *
+ * Метка со своей высотой этого не спрашивает вовсе — её число старше: столбик
+ * подрозетников тем и держится, что у каждого своя высота, и распространять по
+ * группе нужно **недостающее**, а не переписывать записанное.
+ */
+function groupHeightMm(project, mark) {
+  if (!mark || !mark.groupId) return null;
+  const group = findGroup(project, mark.groupId);
+  if (!group) return null;
+  let best = null;
+  for (const id of group.markIds || []) {
+    if (id === mark.id) continue;
+    const member = findMark(project, id);
+    const height = member ? markDimensions(member).heightAboveFloor : null;
+    if (height === null) continue;
+    if (best === null || height < best) best = height;
+  }
+  return best;
 }
 
 /**
@@ -10613,7 +10685,7 @@ function deleteWall(project, wallId) {
   const wall = requireWall(project, wallId);
   const walls = wallsOf(project).filter((item) => item.id !== wallId);
   const openings = openingsOf(project).filter((opening) => opening.wallId !== wallId);
-  const marks = project.marks.map((mark) => (mark.wallId === wallId ? withoutWallBinding(mark) : mark));
+  const marks = project.marks.map((mark) => (mark.wallId === wallId ? markWithoutWall(mark) : mark));
   return { project: withProject(project, { walls, openings, marks }), deleted: wall };
 }
 
@@ -11495,8 +11567,18 @@ function setRoomWallHeight(project, roomId, value) {
 // автоматикой, — то есть в таске 127, где привязка и записывается. Сторону
 // открывания двери, наоборот, не вывести никогда, поэтому она заведена сразу.
 
-function withoutWallBinding(mark) {
-  const { wallId, wallAtMm, wallToMm, ...rest } = mark;
+/**
+ * Метка без привязки к стене — **все** её поля убраны, включая признак ручной
+ * привязки. Поля именно убираются, а не обнуляются: метка без привязки и метка
+ * со снятой привязкой обязаны читаться одинаково, иначе упаковка дописала бы
+ * старой метке то, чего в ней не было (G68).
+ *
+ * Одна дверь на всё приложение: из какого набора полей состоит привязка, знает
+ * только это место — и слияние (`merge`), которое выбрасывает привязку к
+ * исчезнувшей стене, спрашивает здесь же.
+ */
+function markWithoutWall(mark) {
+  const { wallId, wallAtMm, wallToMm, wallManual, ...rest } = mark;
   return rest;
 }
 
@@ -11519,17 +11601,41 @@ function markWall(mark) {
 }
 
 /**
+ * Выбрана ли стена метки **рукой** (требование G202). Правило то же, что у
+ * помещения (`markRoomManual`): выбрал человек — автоматика больше не
+ * перебивает.
+ *
+ * Разница с помещением одна, и она про прежние объекты: помещение до контуров
+ * могло взяться только из рук, поэтому метка без признака считается вписанной
+ * руками. Привязку к стене, наоборот, с самого её появления (таск 128) ставила
+ * только автоматика — значит метка без признака привязана автоматикой, и
+ * прежние объекты открываются как были (G68).
+ */
+function markWallManual(mark) {
+  return Boolean(mark && mark.wallManual);
+}
+
+/**
  * Привязать метку к стене или снять привязку (`null`). Снятие **убирает**
  * поля, а не обнуляет их: метка без привязки и метка со снятой привязкой
  * обязаны читаться одинаково, иначе упаковка дописала бы старой метке поля,
  * которых в ней не было (G68).
+ *
+ * `options.manual` — выбор сделан рукой (G202). Признак ставится и на снятие:
+ * «эта метка не на стене» — такое же решение человека, как «эта метка на стене
+ * БВ», и автоматике его перебивать нельзя. Вернуть метку автоматике —
+ * `setMarkWall(project, id, null)` без признака: поля уходят вместе с ним, и
+ * ближайший `applyMarkWalls` проставит привязку по месту.
  */
-function setMarkWall(project, markId, binding) {
+function setMarkWall(project, markId, binding, options = {}) {
   const mark = requireMark(project, markId);
+  const manual = Boolean(options && options.manual);
   if (binding === null || binding === undefined) {
-    if (!markWall(mark)) return { project, mark, changed: false };
-    const marks = project.marks.map((item) => (item.id === markId ? withoutWallBinding(item) : item));
-    return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
+    if (!markWall(mark) && markWallManual(mark) === manual) return { project, mark, changed: false };
+    const bare = markWithoutWall(mark);
+    const next = manual ? { ...bare, wallManual: true } : bare;
+    const marks = project.marks.map((item) => (item.id === markId ? next : item));
+    return { project: withProject(project, { marks }), mark: next, changed: true };
   }
   const wall = requireWall(project, binding.wallId);
   if (wall.schemeId !== mark.schemeId) throw modelError("wallOtherScheme");
@@ -11543,8 +11649,10 @@ function setMarkWall(project, markId, binding) {
     if (to > length) throw modelError("markWallAtOutside", { at: to, length });
     next.wallToMm = to;
   }
+  if (manual) next.wallManual = true;
+  else delete next.wallManual;
   const marks = project.marks.map((item) => (item.id === markId ? next : item));
-  return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId), changed: true };
+  return { project: withProject(project, { marks }), mark: next, changed: true };
 }
 
 // ——— автопривязка метки к стене ———————————————————————————————————————
@@ -11555,12 +11663,21 @@ function setMarkWall(project, markId, binding) {
 // угадыванию «какая розетка к какой стене ближе», и угадывать пришлось бы
 // каждый раз заново.
 //
-// **Ставится она сама, по месту метки, и только так.** Кнопки «привязать» нет
-// и не будет: человек ставит розетки, а не ведёт учёт стен. Ручного
-// переопределения (как `roomManual` у помещения) здесь тоже нет — его и не
-// было в договоре таска 123: «привязку проставляет автоматика по месту метки,
-// а не рука человека». Поэтому привязка всегда равна тому, что видно на
-// плане, и расходиться с ним не может.
+// **Ставится она сама, по месту метки.** Кнопки «привязать» в холсте нет:
+// человек ставит розетки, а не ведёт учёт стен, и привязка равна тому, что
+// видно на плане.
+//
+// **Рука при этом старше автоматики** (требование G202, таск 143): заказчик
+// попросил называть стену по имени сам — «эта метка на стене БВ» — и снимать
+// привязку, которую поставила автоматика. Устроено это ровно как у помещения
+// (`roomManual`), третьего способа не заведено: признак `wallManual` у метки,
+// автоматика такую метку не перебивает, «вернуть автоматике» снимает признак.
+//
+// Руками выбирают **стену, а не метр на ней**: отступ `wallAtMm` и у ручной
+// привязки считается по месту метки (`markWallAlong`) на каждой правке. Иначе
+// метка, которую подвинули вдоль стены, осталась бы на развёртке стоять там,
+// где её привязали, — ровно тот разъезд плана и развёртки, из-за которого
+// заводился дефект D27.
 //
 // **Порог — в миллиметрах чертежа, а не в пикселях экрана.** Пиксели привычнее
 // руке, но привязка пересчитывается на каждой правке объекта, а масштаб
@@ -11568,12 +11685,25 @@ function setMarkWall(project, markId, binding) {
 // в зависимости от того, насколько человек приблизил план. Данные зависели бы
 // от взгляда — ровно то, чего в этой сборке нет нигде.
 //
-// Триста миллиметров **от грани стены** (то есть сверх половины её толщины):
-// розетка рисуется точкой у стены и часто чуть внутри комнаты — подрозетник
-// выступает, а за радиатором в сотне миллиметров от стены розетка всё ещё на
-// стене. Полметра было бы много: в комнате три метра до середины, и метка
-// посреди неё не должна считаться настенной.
-const MARK_WALL_REACH_MM = 300;
+// Порог считается **от грани стены**, то есть сверх половины её толщины.
+//
+// Было триста (таск 128) — и заказчик сказал, что мало: «расстояние привязки
+// увеличь автоматической». Шестьсот — не вдвое ради круглого числа, а
+// **глубина кухонной столешницы и обычного шкафа**: розетка за ними рисуется
+// на плане внутри комнаты, а стоит всё равно на стене, и это самый частый
+// случай «метка далеко от линии стены, но настенная». Второй такой случай —
+// подложка: стены обведены по растровому плану, и линия чертежа отходит от
+// нарисованной стены на те же сантиметры, на которые человек промахнулся
+// обводкой.
+//
+// Больше брать нельзя: порог обязан остаться меньше половины **узкой**
+// комнаты, иначе светильник посреди неё станет настенным. В комнате три метра
+// до середины полтора — шестьсот от неё далеко.
+//
+// Прежний довод «полметра было бы много» снят не числом, а тем, что появилось
+// рядом: с таска 143 привязку ставят и снимают руками (G202), и лишняя
+// привязка стоит один щелчок, а недостающая стоила развёртки.
+const MARK_WALL_REACH_MM = 600;
 
 /**
  * Привязывается ли метка к стене вообще.
@@ -11638,7 +11768,17 @@ function markMiddleMm(project, mark) {
 function markWallSide(project, mark) {
   const binding = markWall(mark);
   if (!binding) return null;
-  const wall = findWall(project, binding.wallId);
+  return markWallSideOn(project, mark, binding.wallId);
+}
+
+/**
+ * То же самое, но у **заданной** стены, а не у записанной в привязке. Нужно
+ * там, где стена выбрана местом метки, а не её полями: ручной привязке (G202)
+ * и направлению стопки на плане (дефект D26). Записанная привязка и сторона
+ * считаются одним кодом — второй системы названий сторон не заводится.
+ */
+function markWallSideOn(project, mark, wallId) {
+  const wall = findWall(project, wallId);
   // У линии сторону решает её середина: концы ленты лежат у самой стены, и
   // первый из них может оказаться по другую сторону от оси на миллиметр.
   const at = wall ? markMiddleMm(project, mark) : null;
@@ -11654,12 +11794,35 @@ function markWallSide(project, mark) {
   return side > 0 ? "left" : "right";
 }
 
-/**
- * Ближайшая стена под меткой — или `null`, если ни одна не ближе порога.
- * Спорят стены расстоянием до **грани**: короб из двух перегородок в
- * полуметре друг от друга иначе забирал бы метку то одной, то другой.
- */
-function markWallNear(project, mark, walls) {
+// Отступ метки вдоль одной стены и зазор до её **грани**. Зазор у линии — по
+// худшей вершине: лента, которая идёт вдоль стены и уходит в комнату, на этой
+// стене не лежит, и отрезок «от и до» по ней соврал бы.
+function wallAlongOf(wall, points) {
+  const vectors = wallVectors(wall);
+  if (!vectors) return null;
+  const half = Number(wall.thicknessMm) / 2;
+  let worst = 0;
+  const along = [];
+  for (const at of points) {
+    const distance = Math.min(
+      vectors.len,
+      Math.max(0, (at.x - wall.aMm.x) * vectors.u.x + (at.y - wall.aMm.y) * vectors.u.y),
+    );
+    along.push(distance);
+    const foot = {
+      x: wall.aMm.x + vectors.u.x * distance,
+      y: wall.aMm.y + vectors.u.y * distance,
+    };
+    worst = Math.max(worst, Math.hypot(at.x - foot.x, at.y - foot.y) - half);
+  }
+  return {
+    gap: worst,
+    atMm: Math.round(along[0]),
+    toMm: points.length > 1 ? Math.round(along[along.length - 1]) : null,
+  };
+}
+
+function markWallNearestRaw(project, mark, walls) {
   if (!markWallBindable(mark)) return null;
   const list = walls || wallsOnScheme(project, mark.schemeId);
   if (list.length === 0) return null;
@@ -11667,42 +11830,57 @@ function markWallNear(project, mark, walls) {
   if (points.length === 0) return null;
   let best = null;
   for (const wall of list) {
-    const vectors = wallVectors(wall);
-    if (!vectors) continue;
-    const half = Number(wall.thicknessMm) / 2;
-    let worst = 0;
-    const along = [];
-    for (const at of points) {
-      const distance = Math.min(
-        vectors.len,
-        Math.max(0, (at.x - wall.aMm.x) * vectors.u.x + (at.y - wall.aMm.y) * vectors.u.y),
-      );
-      along.push(distance);
-      const foot = {
-        x: wall.aMm.x + vectors.u.x * distance,
-        y: wall.aMm.y + vectors.u.y * distance,
-      };
-      worst = Math.max(worst, Math.hypot(at.x - foot.x, at.y - foot.y) - half);
-    }
-    // **У линии к стене обязаны быть близко все вершины.** Лента, которая
-    // идёт вдоль стены и уходит в комнату, на этой стене не лежит, и отрезок
-    // «от и до» по ней соврал бы.
-    if (worst > MARK_WALL_REACH_MM) continue;
-    if (best && worst >= best.gap) continue;
-    best = {
-      gap: worst,
-      wallId: wall.id,
-      atMm: Math.round(along[0]),
-      toMm: points.length > 1 ? Math.round(along[along.length - 1]) : null,
-    };
+    const along = wallAlongOf(wall, points);
+    if (!along) continue;
+    if (best && along.gap >= best.gap) continue;
+    best = { wallId: wall.id, ...along };
   }
-  if (!best) return null;
-  return {
-    wallId: best.wallId,
-    atMm: best.atMm,
-    toMm: best.toMm,
-    gapMm: Math.round(Math.max(0, best.gap)),
-  };
+  return best;
+}
+
+const alongOut = (best) =>
+  best === null
+    ? null
+    : { wallId: best.wallId, atMm: best.atMm, toMm: best.toMm, gapMm: Math.round(Math.max(0, best.gap)) };
+
+/**
+ * Отступ метки вдоль **названной** стены — `{wallId, atMm, toMm, gapMm}` или
+ * `null`. Порога здесь нет: стену назвала рука (G202), и далеко она или
+ * близко — не нам решать. Отступ при этом по-прежнему считается, а не
+ * задаётся: руками выбирают стену, а не метр на ней.
+ */
+function markWallAlong(project, mark, wallId) {
+  const wall = findWall(project, wallId);
+  if (!wall || !mark || wall.schemeId !== mark.schemeId) return null;
+  if (!markWallBindable(mark)) return null;
+  const points = markPointsMm(project, mark);
+  if (points.length === 0) return null;
+  const along = wallAlongOf(wall, points);
+  return alongOut(along ? { wallId, ...along } : null);
+}
+
+/**
+ * Ближайшая к метке стена — **без порога**. Спорят стены расстоянием до
+ * грани: короб из двух перегородок в полуметре друг от друга иначе забирал бы
+ * метку то одной, то другой.
+ *
+ * Отдельно от `markWallNear` она нужна рисованию: направление стопки знаков
+ * обязано зависеть от места метки, а не от того, записана ли уже привязка
+ * (дефект D26) — иначе знак улетал из-под курсора в тот самый миг, когда
+ * привязка появлялась.
+ */
+function markWallNearest(project, mark, walls) {
+  return alongOut(markWallNearestRaw(project, mark, walls));
+}
+
+/**
+ * Ближайшая стена под меткой — или `null`, если ни одна не ближе порога.
+ * Это и есть автопривязка: порог решает, считать ли метку настенной.
+ */
+function markWallNear(project, mark, walls) {
+  const best = markWallNearestRaw(project, mark, walls);
+  if (!best || best.gap > MARK_WALL_REACH_MM) return null;
+  return alongOut(best);
 }
 
 /**
@@ -11717,6 +11895,14 @@ function markWallNear(project, mark, walls) {
  * что метка осталась за её концом дальше порога, — снялась тоже. Метка не
  * может молча оказаться «на стене» в полуметре от неё: правило одно, и
  * проверяется оно после каждой правки.
+ *
+ * **Метку с ручной привязкой (G202) автоматика не перебивает** — как не
+ * перебивает помещение, вписанное руками. Стену за неё никто не выбирает
+ * заново; пересчитывается только отступ вдоль выбранной стены, потому что
+ * отступ — следствие места метки, а не выбор человека. Метка, у которой руками
+ * снята привязка, остаётся без стены. А вот стену, которой больше нет, не
+ * удержит и рука: выбора больше не существует, поля уходят вместе с признаком
+ * (`markWithoutWall`), и метка возвращается автоматике.
  *
  * У объекта без чертежа не делается **ничего**: схем со стенами нет, и тот же
  * объект возвращается по ссылке (G68).
@@ -11733,12 +11919,17 @@ function applyMarkWalls(project, schemeId) {
     if (!markWallBindable(mark)) return mark;
     const walls = wallsOf(mark.schemeId);
     if (walls.length === 0) return mark;
-    const next = markWallNear(project, mark, walls);
     const now = markWall(mark);
+    const next = markWallManual(mark)
+      ? // Рука назвала стену — считаем по ней, а не по ближайшей. Если такой
+        // стены на схеме нет (удалили), привязку уносит `markWithoutWall`
+        // ниже, вместе с признаком.
+        (now ? markWallAlong(project, mark, now.wallId) : null)
+      : markWallNear(project, mark, walls);
     if (!next) {
       if (!now) return mark;
       changed.push(mark.id);
-      return withoutWallBinding(mark);
+      return markWithoutWall(mark);
     }
     if (now && now.wallId === next.wallId && now.atMm === next.atMm && now.toMm === next.toMm) return mark;
     changed.push(mark.id);
@@ -12100,6 +12291,10 @@ function wallElevation(project, wallId, side = "left") {
       heightMm: sizes.heightAboveFloor,
       sizeMm: { width: sizes.length, height: sizes.width },
       heightOwn: sizes.heightAboveFloorOwn,
+      // Откуда высота: своя, от группы (G203) или умолчание типа (G192).
+      // Подпись листа считает догадками только последние — высота, записанная
+      // рукой у соседки по группе, такое же число человека, как своё.
+      heightFrom: sizes.heightAboveFloorFrom,
       // Имя изображения объекта. Поле переименовано в таске 139 (`icon` →
       // `view`: это не значок, а упрощённое изображение самой вещи) и
       // читается по обоим именам — объект, заведённый между тасками 135 и
@@ -15415,13 +15610,14 @@ function mergeReferences(merged, report, sources, winner) {
     // Привязка к стене, которой больше нет. Поля **убираются**, а не
     // обнуляются: метка без привязки и метка со снятой привязкой обязаны
     // читаться одинаково, иначе слияние дописало бы старой метке то, чего в
-    // ней не было (G68). Строки в отчёт не идёт — привязку проставляет
-    // автоматика по месту метки (таск 127), а не рука человека, и терять тут
-    // нечего, кроме догадки.
-    if (mark.wallId && !walls.has(mark.wallId)) {
-      const { wallId, wallAtMm, ...rest } = next;
-      return rest;
-    }
+    // ней не было (G68). Строки в отчёт не идёт: привязку ставит автоматика по
+    // месту метки (таск 127), а выбранную рукой стену (G202) здесь уже некому
+    // держать — самой стены в слитом объекте нет, и терять, кроме ссылки в
+    // пустоту, нечего.
+    // Какие поля составляют привязку, знает модель, а не слияние: с таском
+    // 143 их четыре (появился признак ручного выбора), и список в двух местах
+    // разошёлся бы на первой же правке.
+    if (mark.wallId && !walls.has(mark.wallId)) return markWithoutWall(next);
     return next;
   });
   return merged;
@@ -19425,19 +19621,26 @@ function markStackHeight(mark) {
 /**
  * Направление стопки — единичный вектор в пикселях плана.
  *
- * У метки, привязанной к стене (таск 128), — **перпендикуляр стене, в сторону
- * самой метки**. Так отступ вдоль стены (`wallAtMm`) остаётся честным: знак
- * едет поперёк стены и его проекция на стену не меняется, то есть развёртка и
- * план говорят об одном и том же месте. Вдоль стены ехать нельзя — знак
- * оказался бы на другом метре стены; внутрь стены тоже: там тело стены на
- * чертеже и соседняя комната.
+ * Там, где у метки есть стена, — **перпендикуляр стене, в сторону самой
+ * метки**. Так отступ вдоль стены (`wallAtMm`) остаётся честным: знак едет
+ * поперёк стены и его проекция на стену не меняется, то есть развёртка и план
+ * говорят об одном и том же месте. Вдоль стены ехать нельзя — знак оказался бы
+ * на другом метре стены; внутрь стены тоже: там тело стены на чертеже и
+ * соседняя комната.
  *
- * У непривязанной метки стены нет, и ехать поперёк нечему — тогда **вверх**.
- * Выбрано так: подпись у метки уходит в первую очередь вбок (`labelSlots`),
- * значит вертикаль свободнее; а порядок в стопке — по возрастанию высоты над
- * полом, и вверх по листу оказывается то, что выше над полом. Направление не
- * зависит ни от соседей, ни от приближения — одна и та же схема раскладывается
- * одинаково при каждой отрисовке.
+ * **Стена берётся по месту метки (`markWallNearest`), а не из её привязки, и
+ * это починка дефекта D26.** Пока направление читалось из записанных полей,
+ * оно переворачивалось в тот самый миг, когда автопривязка их дописывала:
+ * человек подводил стопку к стене, порог срабатывал — и знак, который он вёл,
+ * прыгал на два шага (с «вверх» на «поперёк»), то есть улетал из-под курсора.
+ * Привязка — следствие места (G68), и рисованию незачем знать, записана она
+ * уже или нет: место то же, направление то же, знак стоит.
+ *
+ * Где стен нет вовсе — **вверх**. Выбрано так: подпись у метки уходит в первую
+ * очередь вбок (`labelSlots`), значит вертикаль свободнее; а порядок в стопке —
+ * по возрастанию высоты над полом, и вверх по листу оказывается то, что выше
+ * над полом. Направление не зависит ни от соседей, ни от приближения — одна и
+ * та же схема раскладывается одинаково при каждой отрисовке.
  *
  * Поворот чертежа относительно подложки (G178) учитывается: нормаль стены
  * живёт в миллиметрах чертежа, и в пиксели плана она переводится тем же
@@ -19445,11 +19648,11 @@ function markStackHeight(mark) {
  */
 function markStackDirection(project, scheme, marks) {
   for (const mark of marks) {
-    const binding = markWall(mark);
-    if (!binding) continue;
-    const side = markWallSide(project, mark);
+    const near = markWallNearest(project, mark);
+    if (!near) continue;
+    const side = markWallSideOn(project, mark, near.wallId);
     if (!side) continue;
-    const vectors = wallVectors(findWall(project, binding.wallId));
+    const vectors = wallVectors(findWall(project, near.wallId));
     const origin = planOriginOf(project, scheme.id);
     if (!vectors || !origin) continue;
     // `n` — левая нормаль стены в осях чертежа, та же, которой `markWallSide`
@@ -22244,26 +22447,40 @@ function elevationViewOf(mark) {
 }
 
 /**
- * Точечные метки развёртки — **рядами**: группа идёт одним рядом вплотную,
- * одиночка сама себе ряд (таск 135, требования G190 и G191).
+ * Точечные метки развёртки — **рядами**: группа идёт одним рядом, одиночка
+ * сама себе ряд (таск 135, требования G190 и G191).
  *
  * G190 («на развёртке сразу указывать рядом, как и в жизни подрозетники»):
  * метки одной группы стоят на стене вплотную друг к другу, как подрозетники в
- * рамке, а не каждая на своём расчётном отступе. Расчётные отступы у них
- * разъехались бы на пару сантиметров — ровно настолько, насколько человек
- * промахнулся мышью на плане, — и рамка из трёх розеток перестала бы быть
- * рамкой.
+ * рамке. **Вплотную — это про просветы внутри группы, а не про место самой
+ * группы** (дефект D27: «метки по горизонтали должны быть ровно в том месте,
+ * как и на схеме, сейчас могут разъезжаться»). До этого таска ряд целиком
+ * вставал серединой в середину группы и раскладывался вплотную от края — и
+ * метка, нарисованная на плане в двадцати сантиметрах от соседки, на развёртке
+ * оказывалась в восьми. Теперь каждая метка стоит на **своём** отступе, а
+ * вплотную расходятся только те, что налезли бы друг на друга
+ * (`elevationPack`): на плане промахнулись мышью на сантиметр — рамка всё
+ * равно рамка, нарисовали розетки врозь — они и на стене врозь.
  *
- * G191 («одну высоту указывать у группы по нижнему объекту»): подпись у ряда
- * одна. Заказчик снял вопрос о разной высоте внутри группы: «2 блока розеток
- * мы в одну группу не собираем, это всегда 2 группы разных», — поэтому берём
- * нижнюю и не городим разбора.
+ * `axis` — чем группа различается на плане, тем и строится на стене:
  *
- * Порядок в ряду — по расстоянию вдоль стены, как они стоят на плане. Ряд
- * встаёт серединой туда, где середина у группы: иначе рамка уехала бы вправо
- * от того места, где её нарисовали.
+ * - `"row"` — метки разошлись **вдоль стены** (обычный блок подрозетников):
+ *   ряд по горизонтали, одна отметка высоты на всех (G191);
+ * - `"column"` — метки стоят на одном месте стены, а различаются **высотой**
+ *   (G203: «вертикальные и горизонтальные группы должны поддерживаться»).
+ *   Столбик по вертикали, и подписана высота у каждой метки: разные высоты —
+ *   это и есть то, ради чего столбик собрали.
  *
- * Чистая и вынесена наружу: без холста проверяется и порядок, и высота ряда.
+ * Отличаются они не полем и не настройкой, а самим расположением меток: что
+ * разошлось сильнее — отступ вдоль стены или высота над полом. Выбор по
+ * расположению тем и хорош, что человек ничего не объявляет: поставил
+ * подрозетники в рамку — ряд, поставил столбиком — столбик.
+ *
+ * G191 («одну высоту указывать у группы по нижнему объекту»): у ряда высота
+ * одна, по нижнему. Заказчик снял вопрос о разной высоте внутри ряда: «2 блока
+ * розеток мы в одну группу не собираем, это всегда 2 группы разных».
+ *
+ * Чистая и вынесена наружу: без холста проверяется и порядок, и высота, и ось.
  */
 function elevationRows(marks) {
   const rows = [];
@@ -22282,12 +22499,59 @@ function elevationRows(marks) {
     byGroup.get(key).members.push(mark);
   }
   return rows.map((row) => {
-    const members = [...row.members].sort((first, second) => first.fromMm - second.fromMm);
-    const heights = members.map((mark) => mark.heightMm).filter((value) => value !== null);
+    const heights = row.members.map((mark) => mark.heightMm).filter((value) => value !== null);
+    const spread = (values) => (values.length > 1 ? Math.max(...values) - Math.min(...values) : 0);
+    // Столбик — когда высоты разошлись сильнее, чем отступы. Равенство (в том
+    // числе у одиночки, где оба нуля) — ряд: ряд умолчание, столбик случай.
+    const column = spread(heights) > spread(row.members.map((mark) => mark.fromMm));
+    // Порядок в ряду — по его собственной оси: ряд читается вдоль стены,
+    // столбик — снизу вверх, как его и размечают. Метки без высоты в столбик
+    // не попадают (они стоят полосой под полом), но порядок у них всё равно
+    // устойчивый: сортировка стабильна.
+    const members = [...row.members].sort((first, second) =>
+      column ? (first.heightMm || 0) - (second.heightMm || 0) : first.fromMm - second.fromMm,
+    );
     const centreMm = members.reduce((sum, mark) => sum + mark.fromMm, 0) / members.length;
     const label = members.length > 1 && members[0].groupLabel ? members[0].groupLabel : members[0].label;
-    return { members, centreMm, label, heightMm: heights.length > 0 ? Math.min(...heights) : null };
+    return {
+      members,
+      centreMm,
+      label,
+      axis: column ? "column" : "row",
+      heightMm: heights.length > 0 ? Math.min(...heights) : null,
+    };
   });
+}
+
+/**
+ * Разложить ряд по одной оси: каждая метка на **своём** месте, а те, что
+ * налезли бы друг на друга, — вплотную (дефект D27).
+ *
+ * `places` — места в порядке возрастания, `sizes` — размеры вдоль той же оси,
+ * обе величины в одних единицах. Отвечает новыми местами.
+ *
+ * Два правила, и второе важнее первого:
+ *
+ *   1. соседи расходятся **ровно настолько, чтобы коснуться краями** — не
+ *      больше; просветы, которые и так были, остаются как есть;
+ *   2. **середина ряда не двигается**: что раздвинули, то поровну и сдвинули
+ *      обратно. Иначе рамка из трёх розеток, раздвинутая вправо, уехала бы
+ *      с того места, где её нарисовали на плане.
+ *
+ * Из первого правила следует главное: ряд, нарисованный врозь, функция не
+ * трогает вовсе — отступ на развёртке совпадает с планом **числом**, а не
+ * примерно. Вплотную встаёт только то, что иначе налезло бы.
+ */
+function elevationPack(places, sizes) {
+  const next = places.slice();
+  for (let index = 1; index < next.length; index += 1) {
+    const touch = next[index - 1] + (sizes[index - 1] + sizes[index]) / 2;
+    if (next[index] < touch) next[index] = touch;
+  }
+  if (next.length < 2) return next;
+  const middle = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const shift = middle(places) - middle(next);
+  return shift === 0 ? next : next.map((value) => value + shift);
 }
 
 /**
@@ -22475,26 +22739,53 @@ function drawElevation(ctx, elevation, box, options = {}) {
     );
   }
 
+  // Знак метки или её изображение в прямоугольнике с серединой в `(x, y)`.
+  const drawRowMark = (mark, box, x, y) => {
+    if (box.view) {
+      drawObjectView(ctx, box.view, { x: x - box.width / 2, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
+    } else {
+      drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
+    }
+  };
+
   for (const row of rows) {
     const boxes = row.boxes;
-    const width = boxes.reduce((sum, box) => sum + box.width, 0);
-    let x = atX(row.centreMm) - width / 2;
+    // **Столбик** (G203): метки стоят на одном месте стены и различаются
+    // высотой. Расходятся они по вертикали — и подписана высота у каждой: ради
+    // разных высот столбик и собирают.
+    if (row.axis === "column") {
+      const places = elevationPack(
+        row.members.map((mark) => mark.heightMm * scale),
+        boxes.map((box) => box.height),
+      );
+      row.members.forEach((mark, index) => {
+        const box = boxes[index];
+        const x = atX(mark.fromMm);
+        const y = floor - places[index];
+        drawRowMark(mark, box, x, y);
+        elevationText(ctx, mark.label + " · " + mark.heightMm, x + box.width / 2 + 4 * unit, y, "left", unit);
+      });
+      continue;
+    }
+    // **Ряд**: каждая метка на своём отступе вдоль стены, вплотную расходятся
+    // только налезающие (дефект D27). Считается в точках холста относительно
+    // левого края стены — там же, где живут размеры знаков.
+    const places = elevationPack(
+      row.members.map((mark) => mark.fromMm * scale),
+      boxes.map((box) => box.width),
+    );
     let top = Infinity;
     row.members.forEach((mark, index) => {
       const box = boxes[index];
       const y = atY(mark.heightMm);
-      const view = box.view;
-      if (view) {
-        drawObjectView(ctx, view, { x, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
-      } else {
-        drawShape(ctx, mark.shape, x + box.width / 2, y, 9 * unit, mark.color);
-      }
+      drawRowMark(mark, box, left + places[index], y);
       top = Math.min(top, y - box.height / 2);
-      x += box.width;
     });
     // Одна отметка высоты на ряд, по нижнему объекту (G191): «2 блока розеток
     // мы в одну группу не собираем, это всегда 2 группы разных», — значит у
     // ряда высота и правда одна, и повторять её у каждого подрозетника незачем.
+    // Стоит она над серединой группы — той, что на плане: `elevationPack`
+    // середину ряда не двигает.
     elevationText(ctx, row.label + " · " + row.heightMm, atX(row.centreMm), top - 7 * unit, "center", unit);
   }
 
@@ -24583,7 +24874,12 @@ function elevationNote(elevation, drawn) {
   // Высота, взятая у типа, — это **догадка сборки**, пусть и хорошая: правило
   // объекта велит показывать её пользователю, а не выдавать за введённую
   // (таск 135, G192). Поправил у метки — число перестало быть умолчанием.
-  const guessed = elevation.marks.filter((mark) => mark.heightMm !== null && mark.heightOwn === false).length;
+  //
+  // Высота, пришедшая от группы (G203), догадкой **не** считается: её записал
+  // человек у соседней метки той же группы и сам попросил распространить на
+  // всех. Назови её умолчанием типа — и подпись соврала бы о том, чьё это
+  // число. Поэтому считается не «не своя», а именно «от типа».
+  const guessed = elevation.marks.filter((mark) => mark.heightMm !== null && mark.heightFrom === "type").length;
   if (guessed > 0) notes.push(text("elevation.guessed", { count: guessed }));
   const grown = drawn && drawn.grown > 0 ? drawn.grown : 0;
   if (grown > 0) notes.push(text("elevation.grown", { count: grown }));
@@ -39582,6 +39878,10 @@ const MARKS_NEW_ROOM = "--new-room--";
 // на схеме. Любой другой выбор в этом поле — ручная правка, и она главнее:
 // такую метку автоматика больше не трогает.
 const MARKS_AUTO_ROOM = "--auto-room--";
+// «По месту метки» — стена отдана автоматике (таск 128). Любой другой выбор в
+// этом поле, включая «Не на стене», — ручная привязка (G202), и она главнее:
+// такую метку автоматика больше не перебивает.
+const MARKS_AUTO_WALL = "--auto-wall--";
 
 // Холст подводится к метке переводом координат из render.js: доли плана в
 // пиксели экрана здесь руками не пересчитываются.
@@ -39980,7 +40280,50 @@ function marksWallText(project, mark) {
   if (!binding) return "";
   const wall = findWall(project, binding.wallId);
   if (!wall) return "";
-  return text("marks.onWall", { at: formatMeters(binding.atMm / 1000) });
+  const at = formatMeters(binding.atMm / 1000);
+  // Имя стены (таск 142) — там, где чертёж его дал: оно и есть ответ на «какая
+  // это стена», ради которого заводились буквы углов. У одинокой стены без
+  // соседей имени нет, и строка остаётся прежней.
+  const name = wallName(project, wall.id);
+  return name ? text("marks.onWallNamed", { name, at }) : text("marks.onWall", { at });
+}
+
+/**
+ * Стены, к которым метку можно привязать рукой (требование G202): стены её
+ * схемы, по именам из таска 142, с расстоянием вдоль стены и зазором до неё.
+ *
+ * Порядок — `wallsOnScheme`, своего не заводим: порядок сущностей приходит из
+ * модели. Отступ считается здесь же, а не задаётся человеком: он называет
+ * стену, а не метр на ней.
+ *
+ * Пусто — на схеме нет стен, и выбирать не из чего: у объекта без чертежа
+ * строка метки остаётся ровно такой, какой была (G68).
+ */
+function marksWallChoices(project, mark) {
+  if (!mark) return [];
+  const named = new Map(wallNames(project, mark.schemeId).map((item) => [item.wallId, item.name]));
+  const out = [];
+  for (const wall of wallsOnScheme(project, mark.schemeId)) {
+    const along = markWallAlong(project, mark, wall.id);
+    if (!along) continue;
+    const name = named.get(wall.id) || "";
+    const at = formatMeters(along.atMm / 1000);
+    const gap = formatMeters(along.gapMm / 1000);
+    out.push({
+      wallId: wall.id,
+      name,
+      atMm: along.atMm,
+      gapMm: along.gapMm,
+      // Далёкая стена названа вслух: выбрать её никто не запрещает (это
+      // решение человека), но и молчать о том, что до неё два метра, нельзя.
+      text: !name
+        ? text("marks.wallOptionPlain", { at })
+        : along.gapMm > MARK_WALL_REACH_MM
+          ? text("marks.wallOptionFar", { name, at, gap })
+          : text("marks.wallOption", { name, at }),
+    });
+  }
+  return out;
 }
 function marksRowModel(project, row, options = {}) {
   const mark = row.mark;
@@ -40012,8 +40355,13 @@ function marksRowModel(project, row, options = {}) {
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
     // в миллиметрах (`sizes`) — другое поле, и путать их нельзя.
     lengthText: marksLengthText(project, mark),
-    // Стена, к которой метка привязалась сама. Пусто — привязки нет.
+    // Стена метки: строкой — где она стоит, списком — чем её переназначить
+    // рукой (G202). Пустая строка значит «привязки нет», пустой список — «на
+    // схеме нет стен», и тогда в разметке не будет ни строки, ни списка.
     wallText: marksWallText(project, mark),
+    wallId: markWall(mark) ? mark.wallId : null,
+    wallManual: markWallManual(mark),
+    wallChoices: marksWallChoices(project, mark),
     // Обе стороны связи — свёрнутым перечнем: повторы номера есть и у
     // подопечных («Т3, Т3, Т3»), и у управляющих — два проходных выключателя
     // одной группы носят один номер.
@@ -40318,6 +40666,40 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // Стена, названная рукой (G202). Отступ вдоль неё считает модель: человек
+  // говорит «эта метка на стене БВ», а не «на 1200 мм от угла».
+  function setWall(markId, wallId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    try {
+      const along = wallId ? markWallAlong(state.project, mark, wallId) : null;
+      // «Не на стене» — такое же решение человека, как выбор стены, и
+      // признак ручной правки у него тот же: иначе автопривязка вернула бы
+      // снятую привязку на следующей же правке объекта.
+      const next = setMarkWall(state.project, markId, along, { manual: true });
+      if (!next.changed) return;
+      canvasCommit(state.project, next.project, strings.history.markWall);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
+  // Возврат метки автоматике — тот же приём, что у помещения: снимаем признак
+  // ручной правки, а стену подставит по месту метки сам `canvasCommit`.
+  function setAutoWall(markId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark || !markWallManual(mark)) return;
+    try {
+      canvasCommit(state.project, setMarkWall(state.project, markId, null).project, strings.history.markWallAuto);
+    } catch (error) {
+      fail(error);
+      render();
+    }
+  }
+
   // Пока окно открыто, объект мог уехать (отмена, чужая правка): список
   // отмеченного сверяется со свежим снимком, прежде чем стать шагом истории.
   async function editControls(markId) {
@@ -40400,6 +40782,41 @@ function mountMarksPanel(host, api) {
       }
       const room = select.value ? roomsInOrder(state.project).find((item) => item.id === select.value) : null;
       setRoom(mark.id, room ? room.name : "");
+    });
+    return select;
+  }
+
+  /**
+   * Поле «Стена» — список стен схемы по именам (G202). Устроено как поле
+   * помещения, и это нарочно: третьего способа «поставил руками — автоматика
+   * не перебивает» в сборке нет.
+   *
+   * Стен на схеме нет — поля нет вовсе: у объекта без чертежа строка метки
+   * остаётся ровно такой, какой была (G68).
+   */
+  function wallField(view, mark) {
+    const choices = view.fields.wallChoices;
+    if (choices.length === 0) return null;
+    const manual = view.fields.wallManual;
+    const select = uiEl("select", {
+      class: "ui-select marks__wall" + (manual ? " is-manual" : ""),
+      title: manual ? strings.marks.wallManualTitle : strings.marks.wallAutoTitle,
+    });
+    const auto = manual ? null : choices.find((item) => item.wallId === view.fields.wallId);
+    select.append(
+      uiEl("option", {
+        value: MARKS_AUTO_WALL,
+        text: auto && auto.name ? text("marks.wallAutoOf", { name: auto.name }) : strings.marks.wallAuto,
+      }),
+    );
+    select.append(uiEl("option", { value: "", text: strings.marks.wallNone }));
+    for (const choice of choices) {
+      select.append(uiEl("option", { value: choice.wallId, text: choice.text }));
+    }
+    select.value = manual ? view.fields.wallId || "" : MARKS_AUTO_WALL;
+    select.addEventListener("change", () => {
+      if (select.value === MARKS_AUTO_WALL) setAutoWall(mark.id);
+      else setWall(mark.id, select.value || null);
     });
     return select;
   }
@@ -40561,11 +40978,14 @@ function mountMarksPanel(host, api) {
               text: text("scale.markLength", { value: view.fields.lengthText }),
             })
           : null,
-        // Стена под меткой — строкой и только для чтения: её ставит
-        // автоматика по месту метки, и править её надо планом, а не списком.
+        // Стена под меткой — строкой: где метка стоит и в каком месте стены.
+        // Строка только читается; переназначается стена списком под ней.
         view.fields && view.fields.wallText
           ? uiEl("p", { class: "mark-row__by mark-row__wall", text: view.fields.wallText })
           : null,
+        // Выбор стены рукой (G202) — под строкой: сперва человек читает, что
+        // получилось само, потом правит, если автоматика ошиблась.
+        view.fields ? wallField(view, mark) : null,
         controlsButton,
         equipmentButton,
         sizesButton,
