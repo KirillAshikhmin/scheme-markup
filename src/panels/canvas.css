@@ -581,11 +581,24 @@
   border-color: var(--panel-line);
 }
 
-/* Значок фигуры (`render.shapeIcon`) в строке списка и на кнопке типа
-   не сжимается вместе с текстом. */
+/* Значок типа (`render.typeIcon`) в строке списка и на кнопке типа
+   не сжимается вместе с текстом — ни фигура точечного, ни образец линии. */
 .picker__row .shape-icon,
-.tools__type .shape-icon {
+.picker__row .line-icon,
+.tools__type .shape-icon,
+.tools__type .line-icon {
   flex: 0 0 auto;
+}
+
+/* Клетка знака постоянной ширины — та же мера на оба вида (`PICKER_ICON` в
+   typePicker.js). Образец линии втрое шире фигуры, и без клетки код с
+   названием уезжали бы на каждой линейной строке: это то же правило колонок,
+   каким выровнен справочник. */
+.picker__icon {
+  flex: 0 0 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .picker__code {

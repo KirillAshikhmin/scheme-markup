@@ -26,7 +26,6 @@ import {
   findMark,
   findType,
   labelOf,
-  styleOf,
   typeKindOf,
   updateProject,
   updateType,
@@ -34,7 +33,7 @@ import {
 import { uiEl, uiButton, uiIconButton } from "./ui.js";
 import { setSetting } from "../store.js";
 import { openTypePicker } from "./typePicker.js";
-import { FONT_DRAFT, FONT_SYSTEM, shapeIcon } from "../render.js";
+import { FONT_DRAFT, FONT_SYSTEM, typeIcon } from "../render.js";
 import { canUndo, canRedo, onHistoryChange, undoLabel, redoLabel } from "../history.js";
 import {
   canvasCommit,
@@ -47,11 +46,20 @@ import {
 
 const TOOLS_MARK_SIZE = { min: 4, max: 36 };
 const TOOLS_LABEL_SIZE = { min: 8, max: 40 };
-// Крупный значок выбранного типа: цвет категории и форма из справочника,
-// нарисованные тем же `render.shapeIcon`, что в списках и на плане.
+// Клетка знака на плашке: образец линии длиннее фигуры, и мера у них одна —
+// иначе код и название съезжают, стоит сменить точечный тип на линейный.
+const TOOLS_TYPE_ICON_LENGTH = 52;
+
+// Крупный значок выбранного типа: цвет категории и обозначение из справочника,
+// нарисованные тем же `render.typeIcon`, что в окне выбора и в справочнике.
+//
+// Это было **третье место** того же дефекта D31: плашка звала `shapeIcon`
+// напрямую, и у линейного типа на ней стояла точка — ровно то, из-за чего
+// заказчик решил, что «тип Линия не поддерживается». Вид плашка и так знает
+// (строка-подсказка под кнопками спрашивает его у `typeKindOf`), но знак
+// рисовался мимо него.
 function toolsTypeIcon(project, typeId, size = 26) {
-  const style = styleOf(project, typeId);
-  return shapeIcon(style.shape, style.color, size);
+  return typeIcon(project, typeId, size, TOOLS_TYPE_ICON_LENGTH);
 }
 
 // Ползунок двигается живьём, а в историю попадает одним действием на всё

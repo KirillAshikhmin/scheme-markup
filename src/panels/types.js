@@ -31,7 +31,6 @@ import {
   colorsInUse,
   findType,
   freeColor,
-  styleOf,
   typeChannels,
   typeKindOf,
   typesInOrder,
@@ -40,7 +39,7 @@ import {
   setTypeSizes,
   typeSizes,
 } from "../model.js";
-import { lineStyleIcon, shapeIcon } from "../render.js";
+import { lineStyleIcon, shapeIcon, typeIcon, typeSignIcon, typeSignPlan } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { getSetting, setSetting } from "../store.js";
@@ -270,6 +269,10 @@ const TYPES_LINE_BUTTON = { size: 26, length: 56 };
 // от штрихпунктирной в 26px не отличить. Поэтому образец рисуется во всю
 // клетку, а фигура садится в клетку той же ширины по центру.
 const TYPES_BADGE = { size: 20, length: 48 };
+// Значок строки окна «Добавить из общей базы»: та же пара мер и та же клетка
+// постоянной ширины (`.catalog__icon`), что в справочнике, — линейный тип базы
+// рисуется линией, а не точкой (D31).
+const TYPES_CATALOG_ICON = { size: 20, length: 44 };
 
 function typesLineCell({ lineStyle, color, active, inherit, onPick }) {
   // Та же подпись, что у сетки фигур: у категории со сплошной линией первая и
@@ -650,7 +653,12 @@ export function openTypesCatalog(project, template) {
       list.append(
         uiEl("label", { class: "catalog__row catalog__row--group" }, [
           head,
-          shapeIcon(group.category.shape, group.category.color, 18),
+          // Знак категории — фигура: вида у категории нет, она задаёт
+          // умолчание и точечным типам, и линейным. Клетка та же, что у строк
+          // типов, — иначе названия категорий и кодов стоят не в колонку.
+          uiEl("span", { class: "catalog__icon" }, [
+            shapeIcon(group.category.shape, group.category.color, TYPES_CATALOG_ICON.size - 2),
+          ]),
           name,
         ]),
       );
@@ -669,9 +677,25 @@ export function openTypesCatalog(project, template) {
         list.append(
           uiEl("label", { class: "catalog__row catalog__row--type", title: type.code + " — " + type.name }, [
             box,
-            // Форма типа, а если своей нет — форма категории: ровно то, что
+            // Обозначение типа, а если своего нет — категорийное: ровно то, что
             // нарисует план. Цвет всегда категорийный, цвета у типа нет.
-            shapeIcon(type.shape || group.category.shape, group.category.color, 20),
+            //
+            // Вид здесь спрашивается у самой записи, а не у `typeKindOf`: типа
+            // этой строки в объекте ещё нет — её и предлагают добавить. То же
+            // расхождение, что и в окне выбора (D31): линейные типы базы
+            // рисовались точками, хотя их вид в записи указан.
+            uiEl("span", { class: "catalog__icon" }, [
+              typeSignIcon(
+                typeSignPlan({
+                  kind: type.kind,
+                  shape: type.shape || group.category.shape,
+                  lineStyle: type.lineStyle || group.category.lineStyle,
+                  color: group.category.color,
+                }),
+                TYPES_CATALOG_ICON.size,
+                TYPES_CATALOG_ICON.length,
+              ),
+            ]),
             uiEl("span", { class: "catalog__code", text: type.code }),
             uiEl("span", { class: "catalog__name", text: type.name }),
           ]),
@@ -830,7 +854,6 @@ export function openTypesDictionary(api) {
 
   function typeRow(type, count) {
     const category = findCategory(project(), type.categoryId);
-    const style = styleOf(project(), type.id);
     // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
     // он одной функцией модели, чтобы справочник и холст не разошлись.
     const kind = typeKindOf(project(), type.id);
@@ -857,11 +880,12 @@ export function openTypesDictionary(api) {
     });
     compactButton.disabled = count === 0;
     // Значок строки — то, чем тип рисуется на плане: у точечного фигура,
-    // у линейного отрезок его начертанием.
+    // у линейного отрезок его начертанием. Рисует его общий `render.typeIcon`,
+    // тот же, что в окне выбора типа и на плашке выбранного (D31): здесь было
+    // верно, а там нет, и расхождение жило ровно потому, что рисовальщиков
+    // было три.
     const badge = uiEl("span", { class: "dict__badge" }, [
-      kind === "line"
-        ? lineStyleIcon(style.lineStyle, style.color, TYPES_BADGE.size, TYPES_BADGE.length)
-        : shapeIcon(style.shape, style.color, TYPES_BADGE.size),
+      typeIcon(project(), type.id, TYPES_BADGE.size, TYPES_BADGE.length),
     ]);
     return uiEl("div", { class: "dict__row" }, [
       badge,
@@ -1043,11 +1067,11 @@ export function openTypesDictionary(api) {
     // показывает, во что обернулось умолчание «как у категории», до того как
     // пользователь откроет сетку знаков.
     function badgeNode() {
-      const style = typesDraftStyle(draft, category());
+      // Типа в объекте ещё нет — спрашивать `typeKindOf` не о чем, вид берётся
+      // у черновика. Рисует знак тот же общий проход, что и строки заведённых
+      // типов.
       return uiEl("span", { class: "dict__badge" }, [
-        style.kind === "line"
-          ? lineStyleIcon(style.lineStyle, style.color, TYPES_BADGE.size, TYPES_BADGE.length)
-          : shapeIcon(style.shape, style.color, TYPES_BADGE.size),
+        typeSignIcon(typeSignPlan(typesDraftStyle(draft, category())), TYPES_BADGE.size, TYPES_BADGE.length),
       ]);
     }
 

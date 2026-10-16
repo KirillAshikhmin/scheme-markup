@@ -22,17 +22,26 @@ import {
   codeProblem,
   matchTypeExactly,
   searchTypes,
-  styleOf,
   typeKindOf,
   CODE_MAX_LENGTH,
 } from "../model.js";
-import { shapeIcon } from "../render.js";
+import { typeIcon } from "../render.js";
 
-// Значок типа — цвет категории и форма из справочника, нарисованные общим
-// `render.shapeIcon`: в списке видно ровно то, что попадёт на план.
-function pickerIcon(project, typeId, size = 22) {
-  const style = styleOf(project, typeId);
-  return shapeIcon(style.shape, style.color, size);
+// Клетка знака в строке: одна мера на оба вида. Образец линии шире фигуры —
+// сплющить его до её ширины нельзя (точечную линию от штрихпунктирной в 22px
+// не отличить), поэтому фигура садится в клетку той же ширины, что образец.
+// Так строки точечных и линейных типов стоят колонка в колонку — то же
+// правило, по которому выровнены строки справочника.
+const PICKER_ICON = { size: 22, length: 44 };
+
+// Значок типа — цвет категории и обозначение из справочника, нарисованные
+// общим `render.typeIcon`: у точечного типа фигура, у линейного образец его
+// начертания (дефект D31 — здесь рисовались точки у всех). Вид спрашивает сам
+// `typeIcon` у `typeKindOf`: у объекта прежнего формата поля `kind` нет.
+function pickerIcon(project, typeId, size = PICKER_ICON.size) {
+  return uiEl("span", { class: "picker__icon" }, [
+    typeIcon(project, typeId, size, PICKER_ICON.length),
+  ]);
 }
 
 // Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.

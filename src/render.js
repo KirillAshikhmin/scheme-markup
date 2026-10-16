@@ -13,6 +13,7 @@
 import {
   BLOCK_LABEL_SEPARATOR,
   BLOCK_STEP_RATIO,
+  LINE_STYLES,
   OPENING_KIND_DOOR,
   SHAPE_NAMES,
   blockLabel,
@@ -46,6 +47,7 @@ import {
   segmentDistanceMm,
   styleOf,
   labelOf,
+  typeKindOf,
   typesInOrder,
   wallNames,
   wallVectors,
@@ -1342,6 +1344,61 @@ export function shapeIcon(shape, color, size = 22) {
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   if (ctx) drawShape(ctx, shape, size / 2, size / 2, size * 0.34, color);
   return canvas;
+}
+
+// Знак без цвета бывает у одной строки на всю сборку — у черновика нового
+// типа, которому ещё не выбрали категорию. Тот же приглушённый серый, которым
+// рисует его справочник: цвет знак всегда берёт у категории.
+const SIGN_COLOR_FALLBACK = "#57606A";
+
+/**
+ * **Знак типа в интерфейсе — одна лестница на все окна** (дефект D31).
+ *
+ * У точечного типа обозначение — фигура, у линейного — начертание, и это
+ * решает не окно, а вид типа. Пока каждое окно звало `shapeIcon` само,
+ * линейные типы в окне выбора рисовались точками: заказчик увидел это как «тип
+ * Линия не поддерживается» — у ПКШ в справочнике волна, а в окне выбора круг.
+ *
+ * Поэтому план знака считается здесь и только здесь: справочник, окно выбора
+ * типа, плашка выбранного типа и окно общей базы берут его отсюда. Второго
+ * места, где вид превращается в рисунок, быть не должно — именно на нём они и
+ * разошлись.
+ *
+ * Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
+ * формата поля нет вовсе, и вид выводится по его меткам.
+ */
+export function typeIconPlan(project, typeId) {
+  const style = styleOf(project, typeId);
+  return typeSignPlan({ kind: typeKindOf(project, typeId), ...style });
+}
+
+/**
+ * То же, но по записи типа, которой в объекте ещё нет: строка окна «Добавить
+ * из общей базы» и черновик строки справочника. Спросить `typeKindOf` о них
+ * нельзя — их типа в объекте нет, — а рисоваться они обязаны так же.
+ *
+ * Третий вид (комментарий) здесь становится точкой: плашку комментария в
+ * списках рисует её знак, а начертания у неё нет.
+ */
+export function typeSignPlan({ kind, shape, lineStyle, color }) {
+  return {
+    kind: kind === "line" ? "line" : "point",
+    shape: shape || "circle",
+    lineStyle: lineStyle || LINE_STYLES[0],
+    color: color || SIGN_COLOR_FALLBACK,
+  };
+}
+
+/** Нарисовать знак по плану: фигура точечного или образец линии линейного. */
+export function typeSignIcon(plan, size = 22, length = size * 2) {
+  return plan.kind === "line"
+    ? lineStyleIcon(plan.lineStyle, plan.color, size, length)
+    : shapeIcon(plan.shape, plan.color, size);
+}
+
+/** Знак типа объекта: план и рисунок одним вызовом — так его и зовут окна. */
+export function typeIcon(project, typeId, size = 22, length = size * 2) {
+  return typeSignIcon(typeIconPlan(project, typeId), size, length);
 }
 
 // ——— координаты —————————————————————————————————————————————————————

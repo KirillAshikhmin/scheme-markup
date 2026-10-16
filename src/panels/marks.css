@@ -554,6 +554,16 @@
   background: var(--panel-bg-deep);
 }
 
+/* Клетка знака в строке общей базы: одна мера на фигуру точечного типа и на
+   образец линии линейного (`TYPES_CATALOG_ICON`). Без неё коды и названия
+   стоят лестницей — линейная строка шире точечной на весь образец. */
+.catalog__icon {
+  flex: 0 0 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Заголовок категории: её цвет задаёт панель, здесь только вес и воздух. */
 .catalog__row--group {
   margin-top: 6px;

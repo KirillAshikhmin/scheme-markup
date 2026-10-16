@@ -8,7 +8,9 @@
 // показывается пользователю списком на правку.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
+  COMMENT_TYPE_ID,
   MARK_KINDS,
   addMark,
   changeMarkType,
@@ -28,6 +30,7 @@ import {
   updateType,
   validate,
 } from "../src/model.js";
+import { typeIconPlan, typeSignPlan } from "../src/render.js";
 import { pickerGroupsOfKind } from "../src/panels/typePicker.js";
 import { FORMAT_VERSION, unpackProject, writeZip } from "../src/projectFile.js";
 
@@ -403,4 +406,98 @@ test("окно смены типа показывает только типы с
   // Без вида окно показывает справочник целиком — постановка новой метки
   // ничего не сужает.
   assert.deepEqual(pickerGroupsOfKind(project, searchTypes(project, ""), null), searchTypes(project, ""));
+});
+
+// ——— знак типа в окнах (дефект D31) ——————————————————————————————————
+//
+// Слова заказчика: «при выборе метки не поддерживается тип Линия, точнее
+// визуально у всех иконки как будто это точки». Тип поддерживался — рисовался
+// он мимо своего вида: справочник звал `lineStyleIcon`, а окно выбора и плашка
+// выбранного типа — `shapeIcon`, и у ПКШ вместо волны стоял круг.
+//
+// Лечится это не третьим условием в третьем окне, а одной лестницей:
+// `render.typeIconPlan` считает, чем тип рисуется, и все окна берут знак
+// оттуда. Поэтому проверяется здесь сам план — он чистый, холста ему не надо.
+
+test("план знака идёт за видом типа: линейному — начертание, точечному — фигура", () => {
+  const { project } = markedProject();
+  const planOf = (code) => typeIconPlan(project, typeIdOf(project, code));
+
+  // Линейные типы шаблона: у каждого своё начертание, и в плане стоит оно.
+  assert.deepEqual(planOf("ПКШ"), {
+    kind: "line",
+    shape: "circle-cross",
+    lineStyle: "wave",
+    color: "#1F6FEB",
+  });
+  assert.equal(planOf("ТР").lineStyle, "double");
+  assert.equal(planOf("ПЛ").lineStyle, "meander");
+  // Лента своего начертания не имеет — берёт категорийное, сплошную.
+  assert.equal(planOf("Л").kind, "line");
+  assert.equal(planOf("Л").lineStyle, "solid");
+
+  // Точечный остаётся фигурой, и цвет у обоих видов категорийный.
+  assert.deepEqual(planOf("Р"), {
+    kind: "point",
+    shape: "circle-socket",
+    lineStyle: "solid",
+    color: "#D1242F",
+  });
+
+  // Встроенный комментарий — третий вид, и знак у него фигура: начертания у
+  // плашки нет, спрашивать её не о чем.
+  assert.equal(typeIconPlan(project, COMMENT_TYPE_ID).kind, "point");
+});
+
+test("знак объекта прежнего формата идёт за выведенным видом, а не за полем", () => {
+  // У объекта прежней сборки поля `kind` у типов нет вовсе: вид выводится по
+  // меткам. Спроси окно `type.kind` — и у трека, нарисованного линиями, знак
+  // остался бы точкой. Поэтому план спрашивает `typeKindOf`.
+  const { project } = markedProject();
+  const old = asOldFormat(project);
+  assert.equal(old.markTypes.every((type) => type.kind === undefined), true, "в старом объекте остался вид");
+
+  assert.equal(typeIconPlan(old, typeIdOf(old, "ТР")).kind, "line", "трек старого объекта нарисован точкой");
+  assert.equal(typeIconPlan(old, typeIdOf(old, "ТР")).lineStyle, "double");
+  assert.equal(typeIconPlan(old, typeIdOf(old, "Т")).kind, "point");
+  // Смешанный тип модель считает точечным — и знак идёт за этим же ответом,
+  // а не за своим вторым правилом.
+  assert.equal(typeIconPlan(old, typeIdOf(old, "Л")).kind, typeKindOf(old, typeIdOf(old, "Л")));
+});
+
+test("план знака по записи типа, которого в объекте ещё нет", () => {
+  // Строка окна «Добавить из общей базы» и черновик новой строки справочника:
+  // типа в объекте нет, спросить `typeKindOf` не о чем — вид берётся из самой
+  // записи. Правило при этом то же самое, и считает его та же функция.
+  assert.deepEqual(typeSignPlan({ kind: "line", lineStyle: "wave", color: "#1F6FEB" }), {
+    kind: "line",
+    shape: "circle",
+    lineStyle: "wave",
+    color: "#1F6FEB",
+  });
+  // Вид не указан — точка: так же решает и модель.
+  assert.equal(typeSignPlan({ shape: "square" }).kind, "point");
+  // Начертание не указано — сплошная, фигура не указана — круг: знак рисуется
+  // всегда, пустого места в строке не бывает.
+  assert.equal(typeSignPlan({ kind: "line" }).lineStyle, "solid");
+  assert.equal(typeSignPlan({}).shape, "circle");
+});
+
+// Третьего рисовальщика быть не должно: окно выбора типа и плашка выбранного
+// типа зовут общий `typeIcon`, а не `shapeIcon` напрямую. Сверка по исходникам
+// — тем же приёмом, каким `panelIcons.test.js` сверяет значки интерфейса:
+// промах здесь ничего не ломает и не падает, он просто рисует точку там, где
+// должна быть линия, и замечает это только человек на снимке.
+test("знак типа в окнах рисует одна функция, а не каждое окно по-своему", () => {
+  const read = (file) => readFileSync(new URL("../src/panels/" + file, import.meta.url), "utf8");
+  for (const file of ["typePicker.js", "tools.js"]) {
+    const source = read(file);
+    assert.ok(source.includes("typeIcon("), file + ": знак типа рисуется не общей функцией");
+    assert.doesNotMatch(source, /\bshapeIcon\(/, file + ": остался свой вызов shapeIcon — он не знает вида типа");
+  }
+  // В справочнике `shapeIcon` остаётся законно: им нарисованы сетка фигур и
+  // знак категории, у которой вида нет вовсе. Но строки типов — через общий.
+  const dictionary = read("types.js");
+  assert.ok(dictionary.includes("typeIcon(project(), type.id"), "строка справочника рисует знак сама");
+  assert.ok(dictionary.includes("typeSignIcon(typeSignPlan("), "строка общей базы рисует знак сама");
 });
