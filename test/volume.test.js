@@ -53,7 +53,7 @@ import {
   VOLUME_LAYER_GROUND,
   VOLUME_LAYER_MARK,
   VOLUME_DOOR_RGB,
-  VOLUME_DEPTH_SLAB_MM,
+  VOLUME_PLANE_EPS_MM,
   VOLUME_HANDLE_RGB,
   VOLUME_MARKER_MM,
   VOLUME_MARK_CEILING,
@@ -73,12 +73,17 @@ import {
   volumeAroundPitch,
   volumeClipNear,
   volumeClipDepth,
-  volumeDepthSlabs,
+  volumeFaceSide,
+  volumeOrderRank,
+  volumeOrderTree,
+  volumeOrderWalk,
+  volumeSplitFace,
   volumeDoorAt,
   volumeFloorAt,
   volumeMoveTo,
   volumeSkyAim,
   volumeSkyPoint,
+  volumeBasis,
   volumeFill,
   volumeFocal,
   volumeFrame,
@@ -227,14 +232,12 @@ test("у комнаты есть пол, потолок и стены с тол�
   // Под ними — плита по габариту чертежа: она закрывает пороги дверей, где
   // пола нет ни у одной комнаты.
   assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BASE).length, 1);
-  // Толщина стены видна по торцам: у стены без проёмов два торца и верх, а
-  // каждая её сторона нарезана **метровой сеткой** (таск 148): по куску стены
-  // вещь и встаёт в очередь отрисовки. Низ не рисуется: он под полом.
-  // Стены комнаты 4 × 3 м: у четырёхметровой по четыре куска на сторону, у
-  // трёхметровой по три, плюс три грани торцов и верха у каждой.
+  // Толщина стены видна по торцам: у стены без проёмов две стороны, два торца
+  // и верх, низ не рисуется — он под полом. Метровой сетки, которой стороны
+  // резались в тасках 148–150 ради порядка, больше нет (таск 151): сторона без
+  // проёмов — один многоугольник.
   const body = built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY);
-  assert.equal(body.length, 2 * (4 * 2 + 3) + 2 * (3 * 2 + 3));
-  assert.equal(body.filter((face) => face.host).length, 2 * 4 * 2 + 2 * 3 * 2, "куски сторон знают свой ключ");
+  assert.equal(body.length, 4 * (2 + 3), "по пять граней на стену: две стороны, два торца, верх");
 });
 
 test("окно считает стены и проёмы чертежа, а не препятствия", () => {
@@ -635,55 +638,233 @@ test("в кадре пол и потолок лежат раньше стен, �
     frame.slice(0, firstBody).every((polygon) => polygon.layer < VOLUME_LAYER_BODY),
     "пол и потолок стоят в начале списка",
   );
-  for (const part of [frame.slice(0, firstBody), frame.slice(firstBody)]) {
+  // По дальности выкладываются **только** ярусы вне дерева порядка: плита,
+  // полы и потолки. Ярус тел с таска 151 выкладывает дерево, и дальность
+  // середины там ничего не решает — это и есть лекарство от D32 и D33.
+  for (const part of [frame.slice(0, firstBody)]) {
     for (let index = 1; index < part.length; index += 1) {
       assert.ok(part[index - 1].depth >= part[index].depth - 1e-9, "порядок по дальности сбился");
     }
   }
 });
 
-// ——— D32: стены просвечивают (таск 150) ———————————————————————————————
+// ——— порядок граней: D32 (таск 150) и D33 (таск 151) ————————————————————
 //
-// «иногда бывает что стены просвечивают, при определённом повороте, но обычно
-// всё норм». Порядок рисования решает средняя дальность грани, а перекрытие в
-// кадре — дальность в пикселе: у стены, уходящей от камеры вдаль, это разные
-// числа. Лекарство — ломти глубины (`VOLUME_DEPTH_SLAB_MM`).
+// D32 — «иногда бывает что стены просвечивают, при определённом повороте»:
+// порядок решала средняя дальность грани, а перекрытие в кадре решает
+// дальность в пикселе. Таск 150 лечил это ломтями глубины; заказчик увидел
+// цену — D33, «на границах и углах появились треугольные артефакты»: ошибка
+// измельчала до шага ломтя, но стала видна на каждом кадре, а у разрезанной
+// грани появились швы.
+//
+// Таск 151 убрал обе разом: порядок выкладывает дерево разбиения
+// (`volumeOrderTree`), и он верен в каждом пикселе, а не «с точностью до шага».
 
-test("ломти глубины режут грань по общей сетке и ничего не теряют", () => {
+test("грань делится плоскостью начисто: площадь сходится, поля сохраняются", () => {
   const area = (points) => {
     let sum = 0;
     for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
-      sum += points[j].x * points[i].z - points[i].x * points[j].z;
+      sum += points[j].x * points[i].y - points[i].x * points[j].y;
     }
     return Math.abs(sum) / 2;
   };
-  // Грань, уходящая от камеры: по оси z она тянется от 500 до 1700 мм.
-  const quad = [
-    { x: -100, y: 0, z: 500 },
-    { x: 100, y: 0, z: 1700 },
-    { x: 100, y: 200, z: 1700 },
-    { x: -100, y: 200, z: 500 },
-  ];
-  const pieces = volumeDepthSlabs(quad, 250);
-  assert.equal(pieces.length, 5, "границы на 500, 750, 1000, 1250, 1500 и 1750 — пять кусков");
-  for (const piece of pieces) {
-    const zs = piece.map((point) => point.z);
-    assert.ok(Math.max(...zs) - Math.min(...zs) <= 250 + 1e-9, "кусок не толще ломтя — это и есть предел ошибки");
+  const quad = {
+    p: [
+      { x: -100, y: -100, z: 0 },
+      { x: 300, y: -100, z: 0 },
+      { x: 300, y: 100, z: 0 },
+      { x: -100, y: 100, z: 0 },
+    ],
+    n: { x: 0, y: 0, z: 1 },
+    rgb: VOLUME_WALL_RGB,
+    layer: VOLUME_LAYER_BODY,
+    markId: "вещь",
+    doorId: "дверь",
+  };
+  const plane = { x: 1, y: 0, z: 0, d: 0 };
+  assert.equal(volumeFaceSide(plane, quad), 2, "плоскость грань пересекает");
+  const cut = volumeSplitFace(quad, plane);
+  assert.ok(cut.front && cut.back, "вышли обе половины");
+  assert.ok(Math.abs(area(quad.p) - area(cut.front.p) - area(cut.back.p)) < 1e-6, "площадь не потерялась");
+  assert.ok(cut.front.p.every((point) => point.x >= -1e-9), "перед плоскостью — только перед");
+  assert.ok(cut.back.p.every((point) => point.x <= 1e-9), "за плоскостью — только за");
+  for (const half of [cut.front, cut.back]) {
+    assert.equal(half.markId, "вещь", "хозяин половины — та же метка: иначе клик перестанет в неё попадать");
+    assert.equal(half.doorId, "дверь");
+    assert.equal(half.rgb, VOLUME_WALL_RGB);
+    assert.deepEqual(half.n, quad.n, "нормаль у половины та же — светлота не меняется");
   }
-  const whole = area(quad.map((point) => ({ x: point.x, z: point.z })));
-  const cut = pieces.reduce((sum, piece) => sum + area(piece.map((point) => ({ x: point.x, z: point.z }))), 0);
-  assert.ok(Math.abs(whole - cut) < 1e-6, "куски складываются в целую грань: " + whole + " против " + cut);
-  // Грань, целиком лежащая в одном ломте, не режется вовсе — ни одного лишнего
-  // многоугольника на всякую стену, на которую смотрят в лицо.
-  const flat = [
-    { x: 0, y: 0, z: 1000 },
-    { x: 500, y: 0, z: 1050 },
-    { x: 500, y: 0, z: 1100 },
-  ];
-  assert.equal(volumeDepthSlabs(flat, 250).length, 1);
-  // Отсечение слоем — то же, что ближней плоскостью, только с двух сторон.
-  assert.deepEqual(volumeClipDepth(quad, 0, Infinity), quad);
-  assert.equal(volumeClipDepth(quad, 2000, 3000).length, 0, "за слоем грани нет");
+  // Грань, плоскости не касающаяся, не режется вовсе: лишних граней в сцене
+  // дерево не заводит.
+  const far = { ...quad, p: quad.p.map((point) => ({ ...point, x: point.x + 1000 })) };
+  assert.equal(volumeFaceSide(plane, far), 1);
+  assert.equal(volumeSplitFace(far, plane).front, far, "грань вернулась собой, а не копией");
+  assert.equal(volumeSplitFace(far, plane).back, null);
+  // Грань в самой плоскости — ни перед, ни за: такие лежат в узле.
+  assert.equal(volumeFaceSide({ x: 0, y: 0, z: 1, d: 0 }, quad), 0);
+  // Отступ, внутри которого точка считается лежащей на плоскости, заведомо
+  // меньше того, на что в сцене отодвигают нарочно (вещь от стены — 2 мм).
+  assert.ok(VOLUME_PLANE_EPS_MM < VOLUME_MARK_LIFT_MM / 10);
+});
+
+test("дерево порядка выкладывает грани от дальней к ближней с любой стороны", () => {
+  // Две стенки поперёк взгляда: одна в метре, другая в трёх.
+  const wall = (atX, id) => ({
+    p: [
+      { x: atX, y: -500, z: 0 },
+      { x: atX, y: 500, z: 0 },
+      { x: atX, y: 500, z: 1000 },
+      { x: atX, y: -500, z: 1000 },
+    ],
+    n: { x: -1, y: 0, z: 0 },
+    rgb: VOLUME_WALL_RGB,
+    layer: VOLUME_LAYER_BODY,
+    markId: id,
+  });
+  const near = wall(1000, "ближняя");
+  const far = wall(3000, "дальняя");
+  const tree = volumeOrderTree([near, far]);
+  const fromLeft = volumeOrderWalk(tree, { x: 0, y: 0, z: 500 }).map((face) => face.markId);
+  assert.deepEqual(fromLeft, ["дальняя", "ближняя"], "смотрим слева — дальняя рисуется первой");
+  const fromRight = volumeOrderWalk(tree, { x: 5000, y: 0, z: 500 }).map((face) => face.markId);
+  assert.deepEqual(fromRight, ["ближняя", "дальняя"], "обошли кругом — порядок перевернулся сам");
+  // Линии в дереве не лежат: им считают место по середине. Точка между
+  // стенками встаёт после дальней и до ближней — с одной стороны и с другой.
+  assert.equal(volumeOrderRank(tree, { x: 0, y: 0, z: 500 }, { x: 2000, y: 0, z: 500 }), 1);
+  assert.equal(volumeOrderRank(tree, { x: 5000, y: 0, z: 500 }, { x: 2000, y: 0, z: 500 }), 1);
+  // Грань, которую плоскость соседа пересекает, дерево режет — и считает
+  // половины врозь. Это единственный рез, который в сборке остался.
+  const across = {
+    p: [
+      { x: 0, y: 0, z: 0 },
+      { x: 5000, y: 0, z: 0 },
+      { x: 5000, y: 0, z: 1000 },
+      { x: 0, y: 0, z: 1000 },
+    ],
+    n: { x: 0, y: -1, z: 0 },
+    rgb: VOLUME_WALL_RGB,
+    layer: VOLUME_LAYER_BODY,
+    markId: "поперёк",
+  };
+  const mixed = volumeOrderWalk(volumeOrderTree([near, far, across]), { x: 0, y: -2000, z: 500 });
+  assert.equal(mixed.filter((face) => face.markId === "поперёк").length, 3, "поперечная грань разрезана обеими стенками");
+  // Пол и потолок в дерево не попадают: у них свой ярус.
+  const floor = { ...across, layer: VOLUME_LAYER_GROUND };
+  assert.equal(volumeOrderWalk(volumeOrderTree([floor]), { x: 0, y: 0, z: 0 }).length, 0);
+});
+
+test("порядок кадра совпадает с истиной в каждом пикселе", () => {
+  // Самая честная проверка, какую можно написать: кадр против луча. Для сетки
+  // точек поля считается, какая поверхность в этой точке **на самом деле**
+  // ближе всех, и сверяется с тем, чем точка закрашена. Разойдись они — это и
+  // есть «стена просвечивает» (D32) или клин на стыке (D33).
+  const base = planProject();
+  let project = ensureSchemeObjectKinds(base.project).project;
+  const kind = schemeObjectKindsInOrder(project)[0];
+  // Вещь, уходящая от камеры вдаль, — тот самый случай, на котором «художник»
+  // врал: её бок тянется с метра на пять.
+  project = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    kindId: kind.id,
+    shape: "rect",
+    atMm: { x: 3000, y: -500 },
+    widthMm: 4000,
+    depthMm: 500,
+    heightMm: 2200,
+    heightAboveFloorMm: 0,
+  }).project;
+  project = addWall(project, {
+    schemeId: base.schemeId,
+    aMm: { x: 2050, y: -3000 },
+    bMm: { x: 2050, y: 3000 },
+    thicknessMm: 100,
+  }).project;
+  project = addWall(project, {
+    schemeId: base.schemeId,
+    aMm: { x: -2000, y: 1200 },
+    bMm: { x: 6000, y: 1600 },
+    thicknessMm: 150,
+  }).project;
+  const built = volumeScene(project, base.schemeId);
+  const box = { width: 320, height: 200 };
+  const inside = (points, point, axis) => {
+    const u = axis === 0 ? "y" : "x";
+    const v = axis === 2 ? "y" : "z";
+    let hit = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+      const ax = points[i][u], ay = points[i][v], bx = points[j][u], by = points[j][v];
+      if (ay > point[v] !== by > point[v] && point[u] < ((bx - ax) * (point[v] - ay)) / (by - ay) + ax) hit = !hit;
+    }
+    return hit;
+  };
+  const hit2 = (xy, x, y) => {
+    let got = false;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i], ay = xy[i + 1], bx = xy[j], by = xy[j + 1];
+      if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) got = !got;
+    }
+    return got;
+  };
+  let samples = 0;
+  const wrong = [];
+  for (const yaw of [0, 0.5, -0.9, 2.2]) {
+    const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw, pitch: -0.15 };
+    const frame = volumeFrame(built, camera, box);
+    const basis = volumeBasis(camera);
+    const focal = volumeFocal(box);
+    for (let py = 2; py < box.height; py += 7) {
+      for (let px = 2; px < box.width; px += 7) {
+        const cx = (px - box.width / 2) / focal;
+        const cy = -(py - box.height / 2) / focal;
+        const dir = {
+          x: basis.right.x * cx + basis.up.x * cy + basis.fwd.x,
+          y: basis.right.y * cx + basis.up.y * cy + basis.fwd.y,
+          z: basis.right.z * cx + basis.up.z * cy + basis.fwd.z,
+        };
+        // Истина: ближайшая лицевая грань на луче.
+        let truth = null;
+        for (const face of built.faces) {
+          if (face.line) continue;
+          let normal = face.n;
+          let facing =
+            normal.x * (camera.at.x - face.p[0].x) +
+            normal.y * (camera.at.y - face.p[0].y) +
+            normal.z * (camera.at.z - face.p[0].z);
+          if (face.both && facing < 0) {
+            normal = { x: -normal.x, y: -normal.y, z: -normal.z };
+            facing = -facing;
+          }
+          if (facing <= 0) continue;
+          const denom = face.n.x * dir.x + face.n.y * dir.y + face.n.z * dir.z;
+          if (!(Math.abs(denom) > 1e-12)) continue;
+          const d = face.n.x * face.p[0].x + face.n.y * face.p[0].y + face.n.z * face.p[0].z;
+          const t = (d - (face.n.x * camera.at.x + face.n.y * camera.at.y + face.n.z * camera.at.z)) / denom;
+          if (!(t >= VOLUME_NEAR_MM)) continue;
+          if (truth && t >= truth.t - 1e-6) continue;
+          const at = { x: camera.at.x + dir.x * t, y: camera.at.y + dir.y * t, z: camera.at.z + dir.z * t };
+          const axis =
+            Math.abs(face.n.x) >= Math.abs(face.n.y) && Math.abs(face.n.x) >= Math.abs(face.n.z)
+              ? 0
+              : Math.abs(face.n.y) >= Math.abs(face.n.z)
+                ? 1
+                : 2;
+          if (!inside(face.p, at, axis)) continue;
+          truth = { t, fill: volumeFill(face.rgb, volumeShade(normal)) };
+        }
+        // Что нарисовано: последний накрывший точку многоугольник.
+        let painted = null;
+        for (const polygon of frame) {
+          if (polygon.stroke) continue;
+          if (hit2(polygon.xy, px, py)) painted = polygon;
+        }
+        if (!truth || !painted) continue;
+        samples += 1;
+        if (painted.fill !== truth.fill) wrong.push({ yaw, px, py, want: truth.fill, got: painted.fill });
+      }
+    }
+  }
+  assert.ok(samples > 2000, "стенд обязан быть плотным: точек " + samples);
+  assert.deepEqual(wrong.slice(0, 4), [], "в этих точках нарисована не та поверхность, которая ближе");
 });
 
 test("дальняя стена больше не рисуется поверх ближней вещи (D32)", () => {
@@ -741,10 +922,16 @@ test("дальняя стена больше не рисуется поверх 
   );
   const last = here[here.length - 1];
   assert.equal(last.fill, sideFill, "последним нарисован бок ближней вещи, а не стена за ней");
+  // Чинит это дерево порядка (таск 151): бок вещи разрезан **плоскостью той
+  // самой стены**, из-за которой шёл спор, и кусок, видимый в этой точке,
+  // честно лежит ближе неё. Рез при этом один — по настоящей геометрии, а не
+  // пять по сетке дальностей, как давали ломти таска 150.
+  const wallHere = here.find((polygon) => polygon.fill === wallFill);
   assert.ok(
-    Math.abs(last.depth - 1500) <= VOLUME_DEPTH_SLAB_MM,
-    "и это тот самый его кусок, который в этой точке и виден: " + Math.round(last.depth),
+    last.depth < wallHere.depth,
+    "видимый кусок бока ближе стены: " + Math.round(last.depth) + " против " + Math.round(wallHere.depth),
   );
+  assert.equal(frame.filter((polygon) => polygon.fill === sideFill).length, 2, "бок разрезан надвое, а не на ломти");
 });
 
 test("у призмы нормали смотрят наружу: видна ближняя сторона шкафа, а не его задник", () => {
@@ -1487,27 +1674,28 @@ test("метки в сцене не меняют объект (G68)", () => {
   assert.equal(JSON.stringify(put.project), before, "объём только читает (G68)");
 });
 
-test("вещь рисуется после своего куска стены — иначе стена закрашивает её собой", () => {
-  // Дефект живого прогона: выключатель на стене пропадал целиком. Порядок
-  // граней решала дальность их середин, и стена в четыре метра серединой
-  // оказывалась ближе метки у своего края.
+test("вещь рисуется после своей стены — иначе стена закрашивает её собой", () => {
+  // Дефект живого прогона таска 148: выключатель на стене пропадал целиком.
+  // Порядок граней решала дальность их середин, и стена в четыре метра
+  // серединой оказывалась ближе метки у своего края. Таски 148–150 лечили это
+  // перестановкой очереди по ключу куска стены; с деревом порядка (таск 151)
+  // лечить нечего — вещь стоит перед плоскостью стены, и дерево это видит.
   const scene = roomScene();
   const put = markAt(scene.project, scene.schemeId, "В", [{ x: 200, y: -1100 }]);
   const built = volumeScene(put.project, scene.schemeId, {});
-  const place = placeOf(built, put.markId);
-  assert.ok(Array.isArray(place.host) && place.host.length > 0, "вещь знает свой кусок стены");
   // Смотрим на эту стену из середины комнаты.
   // Взгляд опущен: выключатель висит на 900 мм, а глаза на 1600.
   const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: -0.5 };
   const frame = volumeFrame(built, camera, { width: 900, height: 600 });
+  const wallFill = volumeFill(VOLUME_WALL_RGB, volumeShade({ x: 0, y: 1, z: 0 }));
   let wallAt = -1;
   let markAtIndex = -1;
   frame.forEach((polygon, index) => {
-    if (polygon.host && place.host.includes(polygon.host)) wallAt = Math.max(wallAt, index);
+    if (polygon.fill === wallFill) wallAt = Math.max(wallAt, index);
     if (polygon.pick === put.markId) markAtIndex = Math.max(markAtIndex, index);
   });
-  assert.ok(wallAt >= 0, "кусок стены в кадре есть");
-  assert.ok(markAtIndex > wallAt, "вещь ложится поверх своего куска стены: " + markAtIndex + " против " + wallAt);
+  assert.ok(wallAt >= 0, "стена, на которой висит вещь, в кадре есть");
+  assert.ok(markAtIndex > wallAt, "вещь ложится поверх своей стены: " + markAtIndex + " против " + wallAt);
 });
 
 test("контур едет в очереди вместе со своим телом, а не под ним", () => {

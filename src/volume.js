@@ -165,41 +165,19 @@ export const VOLUME_LAYER_GROUND = 1;
 export const VOLUME_LAYER_BODY = 2;
 export const VOLUME_LAYER_MARK = 3;
 /**
- * Толщина ломтя глубины, на которые режется грань перед сортировкой (дефект
- * D32: «иногда бывает что стены просвечивают, при определённом повороте»).
+ * Зазор, внутри которого точка считается лежащей **на** плоскости грани
+ * (дерево порядка, см. `volumeOrderTree`).
  *
- * Порядок рисования решает **средняя** дальность грани, а перекрытие в кадре
- * решает дальность **в пикселе**. У грани, уходящей от камеры вдаль, это разные
- * числа: стена, видимая почти с торца, тянется от метра до пяти, серединой
- * сидит на трёх — и всё, что лежит между тремя метрами и её ближним концом,
- * рисуется после неё, то есть поверх. Это и видно на снимке заказчика.
- *
- * Лекарство — не другая мера дальности, а **ломти**: в осях камеры грань
- * режется плоскостями `z = k · шаг`, и каждый кусок едет в очереди со своей
- * средней дальностью. Границы ломтей общие для всей сцены, и из этого следует
- * ровно то свойство, которого не хватало: если грань A в каком-то пикселе
- * ближе грани B, их куски в этом пикселе лежат в ломтях `i ≤ j`, и при `i < j`
- * порядок верен **всегда**, а при `i = j` они ближе шага друг к другу. То есть
- * **ошибка порядка больше шага не бывает** — не «почти не бывает», а не бывает.
- *
- * Четверть метра — выбор по замеру на объекте заказчика (6912 кадров из восьми
- * помещений, выборка каждые шесть точек поля 1432 × 580):
- *
- * | шаг | граней в кадре | точек с провалом >200 мм | >500 мм | худший провал |
- * |---|---|---|---|---|
- * | без ломтей | 54 | 0,65 % | 0,13 % | **1544 мм** |
- * | 1000 мм | 94 | 0,39 % | 0,055 % | 990 мм |
- * | 500 мм | 134 | 0,48 % | 0 % | 500 мм |
- * | **250 мм** | **213** | **0,059 %** | **0 %** | **250 мм** |
- *
- * Худший провал в каждой строке равен шагу — то самое следствие, посчитанное
- * заранее и подтверждённое замером. Четверть метра выбрана потому, что это
- * первый шаг, на котором «сквозь стену видно соседнюю комнату» становится
- * невозможным по построению: меньше четверти метра стены друг от друга не
- * стоят. Цена — вчетверо больше заливок у граней, уходящих вдаль, и ничего у
- * всех остальных: грань, целиком лежащая в одном ломте, не режется вовсе.
+ * Двадцатая доля миллиметра — заведомо меньше всего, что в сцене отодвинуто
+ * нарочно: вещь стоит перед стеной на 2 мм (`VOLUME_MARK_LIFT_MM`), контур
+ * поднят над лицом вещи на 1 мм (`VOLUME_VIEW_LIFT_MM`). И заведомо больше
+ * погрешности, с которой миллиметровые координаты складываются в double.
  */
-export const VOLUME_DEPTH_SLAB_MM = 250;
+export const VOLUME_PLANE_EPS_MM = 0.05;
+/** Сколько плоскостей примеряется в узле дерева, прежде чем выбрать лучшую. */
+const VOLUME_ORDER_TRIES = 12;
+/** Во сколько раз разрез дороже перекоса: цена лишней грани против цены глубины. */
+const VOLUME_ORDER_SPLIT_COST = 8;
 /** Сколько раз выталкиваем тело из стен за шаг: угол держат два прохода. */
 const VOLUME_PUSH_PASSES = 4;
 /** Светлота самой тёмной и самой светлой грани. */
@@ -295,10 +273,6 @@ function volumeFace(points, rgb, options = {}) {
     // Чьё это полотно: по нему кадр отвечает, какую дверь открывает E (G207).
     // Есть только у полотна и его ручки — больше ни у чего в сцене.
     doorId: options.doorId || null,
-    // Поверхность, на которой стоят вещи (сторона стены), и обратная ссылка у
-    // самой вещи. Зачем — см. `volumeHostDepths`.
-    host: options.host || null,
-    onHost: options.onHost || null,
   };
 }
 
@@ -326,9 +300,6 @@ export function volumeLine(points, color, options = {}) {
     n: options.normal || null,
     layer: options.layer === undefined ? VOLUME_LAYER_BODY : options.layer,
     markId: options.markId || null,
-    // Контур едет в очереди вместе со своим телом (см. `volumeHostOrder`):
-    // отстань он от него — и тело закрасит собственный контур.
-    onHost: options.onHost || null,
   };
 }
 
@@ -344,7 +315,6 @@ function volumeAt(point, z) {
 function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   if (corners.length < 3 || !(topMm > bottomMm)) return out;
   const markId = options.markId || null;
-  const onHost = options.onHost || null;
   const doorId = options.doorId || null;
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
@@ -357,7 +327,6 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
       volumeFace([volumeAt(a, bottomMm), volumeAt(b, bottomMm), volumeAt(b, topMm), volumeAt(a, topMm)], rgb, {
         normal: { x: dy / length, y: -dx / length, z: 0 },
         markId,
-        onHost,
         doorId,
       }),
     );
@@ -366,7 +335,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
     volumeFace(
       corners.map((point) => volumeAt(point, topMm)),
       rgb,
-      { normal: { x: 0, y: 0, z: 1 }, markId, onHost, doorId },
+      { normal: { x: 0, y: 0, z: 1 }, markId, doorId },
     ),
   );
   // Низ лежащей на полу вещи не нужен никому, а низ висящей — нужен: на
@@ -376,7 +345,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
       volumeFace(
         corners.map((point) => volumeAt(point, bottomMm)),
         rgb,
-        { normal: { x: 0, y: 0, z: -1 }, markId, onHost, doorId },
+        { normal: { x: 0, y: 0, z: -1 }, markId, doorId },
       ),
     );
   }
@@ -463,30 +432,29 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
   for (const side of [1, -1]) {
     const normal = { x: n.x * side, y: n.y * side, z: 0 };
     const sideName = side > 0 ? "left" : "right";
+    // Сторона стены — **один** многоугольник на кусок между проёмами. Метровой
+    // сетки, которой она резалась в тасках 148–150 ради порядка рисования,
+    // больше нет: порядок выкладывает дерево (`volumeOrderTree`), а вещь стоит
+    // перед плоскостью стены на два миллиметра — этого дереву довольно.
     for (const tile of volumeWallTiles(len, heightMm, openings)) {
-      // Кусок стены режется ещё и **по метровой сетке вдоль неё** (находка
-      // живого прогона, см. `volumeHostKey`): так у каждой вещи есть свой
-      // кусок стены, за которым она встаёт в очередь, а не вся стена целиком.
-      for (const piece of volumeWallPieces(tile.fromMm, tile.toMm)) {
-        const from = at(piece.fromMm, half * side);
-        const to = at(piece.toMm, half * side);
-        // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
-        // стороне концы меняются местами.
-        const first = side > 0 ? to : from;
-        const second = side > 0 ? from : to;
-        out.push(
-          volumeFace(
-            [
-              volumeAt(first, tile.bottomMm),
-              volumeAt(second, tile.bottomMm),
-              volumeAt(second, tile.topMm),
-              volumeAt(first, tile.topMm),
-            ],
-            VOLUME_WALL_RGB,
-            { normal, host: volumeHostKey(wall.id, sideName, piece.index) },
-          ),
-        );
-      }
+      const from = at(tile.fromMm, half * side);
+      const to = at(tile.toMm, half * side);
+      // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
+      // стороне концы меняются местами.
+      const first = side > 0 ? to : from;
+      const second = side > 0 ? from : to;
+      out.push(
+        volumeFace(
+          [
+            volumeAt(first, tile.bottomMm),
+            volumeAt(second, tile.bottomMm),
+            volumeAt(second, tile.topMm),
+            volumeAt(first, tile.topMm),
+          ],
+          VOLUME_WALL_RGB,
+          { normal },
+        ),
+      );
     }
   }
   for (const end of [0, 1]) {
@@ -945,62 +913,6 @@ export const VOLUME_MARK_NO_POINT = "noPoint";
 export const VOLUME_MARK_NO_SIZE = "noSize";
 export const VOLUME_MARK_NO_PLACE = "noPlace";
 
-/**
- * Шаг сетки, которой сторона стены режется на куски для порядка рисования.
- *
- * Метр — не круглое число ради круглого: это размер, при котором кусок стены и
- * вещь на нём сравнимы по дальности своих середин. Мельче — лишние грани на
- * ровном месте, крупнее — возвращается та самая ошибка, ради которой сетка и
- * заведена (см. `volumeHostKey`).
- */
-const VOLUME_WALL_STEP_MM = 1000;
-
-/**
- * Ключ поверхности, на которой висит вещь: кусок стороны стены.
- *
- * Нужен **порядку рисования**, и это главная находка живого прогона:
- * выключатель на стене пропадал целиком. Причина не в размере и не в цвете —
- * порядок граней решает дальность их середин, а стена длиной четыре метра
- * серединой оказалась **ближе** выключателя, стоящего у её края. Значит стена
- * рисовалась после него и закрашивала его собой.
- *
- * Ярусом это не чинится: подними вещи над стенами — и розетки станут видны
- * сквозь все перегородки разом. Поэтому вещь не получает своего яруса, а
- * **встаёт в очереди сразу за своим куском стены** (`volumeHostOrder`): со
- * своей стороны стена её не закроет никогда, а чужие стены закроют.
- *
- * Кусок, а не вся сторона, — второй дефект того же прогона: стена квартиры
- * тянется через три комнаты, и «после всей стены» означало «после её ближнего
- * конца», то есть поверх перегородки, за которой стоит соседняя комната. Метки
- * гостиной просвечивали сквозь стену спальни.
- */
-function volumeHostKey(wallId, side, index) {
-  return wallId + "|" + side + "|" + index;
-}
-
-/** Куски стороны стены по сетке: метровые, с обрезкой по краям проёмов. */
-function volumeWallPieces(fromMm, toMm) {
-  const pieces = [];
-  let cursor = fromMm;
-  let index = Math.floor(fromMm / VOLUME_WALL_STEP_MM);
-  while (cursor < toMm) {
-    const edge = Math.min(toMm, (index + 1) * VOLUME_WALL_STEP_MM);
-    if (edge > cursor) pieces.push({ fromMm: cursor, toMm: edge, index });
-    cursor = edge;
-    index += 1;
-  }
-  return pieces;
-}
-
-/** Куски стены, которые вещь накрывает собой: по ним она и встаёт в очередь. */
-function volumeHostKeys(wallId, side, fromMm, toMm) {
-  const keys = [];
-  const first = Math.floor(Math.min(fromMm, toMm) / VOLUME_WALL_STEP_MM);
-  const last = Math.floor(Math.max(fromMm, toMm) / VOLUME_WALL_STEP_MM);
-  for (let index = first; index <= last; index += 1) keys.push(volumeHostKey(wallId, side, index));
-  return keys;
-}
-
 /** Толщина контура изображения — в экранных точках (см. `volumeLine`). */
 const VOLUME_VIEW_LINE_PX = 1.4;
 /** На сколько контур отодвинут от лица вещи, чтобы не спорить с ним за порядок. */
@@ -1156,9 +1068,6 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
       mode: VOLUME_MARK_WALL,
       wallId: wall.id,
       side,
-      // Куски стены, которые вещь накрывает: карниз в три метра стоит на трёх,
-      // розетка — на одном. Очередь считается по последнему из них.
-      host: volumeHostKeys(wall.id, side, middle - alongMm / 2, middle + alongMm / 2),
       heightMm,
       prisms: [
         {
@@ -1239,10 +1148,7 @@ export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
 /** Грани тела вещи. Хозяин у каждой — сама метка: по ним и ловится клик. */
 export function volumeMarkFaces(place, out = []) {
   for (const prism of place.prisms || []) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, {
-      markId: place.markId,
-      onHost: place.host || null,
-    });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId });
   }
   return out;
 }
@@ -1366,7 +1272,6 @@ export function volumeMarkViewLines(place, out = []) {
           normal: place.face.normal,
           width: VOLUME_VIEW_LINE_PX,
           markId: place.markId,
-          onHost: place.host || null,
         },
       ),
     );
@@ -1535,7 +1440,7 @@ export function volumeScene(project, schemeId, options = {}) {
   if (walls.length === 0 && objects.length === 0) {
     // Без чертежа метку ставить не на что: ни стен, ни пола, ни потолка. Это
     // не потеря — объём и так говорит, что показывать нечего.
-    return { empty: true, notes: [], faces: [], solids: [], rooms: [], boundsMm: null, doors: [], marks: [], unplaced: [] };
+    return { empty: true, notes: [], faces: [], order: null, solids: [], rooms: [], boundsMm: null, doors: [], marks: [], unplaced: [] };
   }
   const rooms = volumeRooms(project, schemeId);
   const schemeHeight = volumeHeightMm(project, schemeId, null);
@@ -1632,6 +1537,8 @@ export function volumeScene(project, schemeId, options = {}) {
     empty: false,
     notes,
     faces,
+    // Дерево порядка строится здесь, один раз на сцену: кадру остаётся обход.
+    order: volumeOrderTree(faces),
     solids,
     rooms,
     boundsMm: bounds,
@@ -1936,11 +1843,8 @@ export function volumeClipNear(points, near = VOLUME_NEAR_MM) {
 
 /**
  * Отсечение многоугольника слоем глубины `[near, far]` — тем же обходом рёбер,
- * что ближней плоскостью, только с двумя сторонами.
- *
- * Этим режутся ломти (`VOLUME_DEPTH_SLAB_MM`): кусок грани, лежащий между двумя
- * плоскостями равной дальности, остаётся плоским многоугольником и считается
- * дальше как обычная грань.
+ * что ближней плоскостью, только с двумя сторонами. Общий случай; кадру нужен
+ * его частный — `volumeClipNear`.
  */
 export function volumeClipDepth(points, near = VOLUME_NEAR_MM, far = Infinity) {
   const side = (list, keep, cut) => {
@@ -1975,40 +1879,264 @@ export function volumeClipDepth(points, near = VOLUME_NEAR_MM, far = Infinity) {
   return poly.length < 3 ? [] : poly;
 }
 
+// ——— порядок граней: дерево разбиения (D32, D33) ——————————————————————————
+//
+// Порядок рисования — не сортировка, а **дерево**, построенное один раз на
+// сцену (`volumeOrderTree`) и обойдённое на каждый кадр (`volumeOrderWalk`).
+//
+// ——— почему не сортировка ————————————————————————————————————————————————
+//
+// «Художник» сравнивает грани одним числом — дальностью середины, — а
+// перекрытие в кадре решает дальность **в пикселе**. У грани, уходящей от
+// камеры вдаль, это разные числа, и спор она проигрывает целиком: стена в
+// четыре метра серединой оказывается ближе вещи, стоящей у её края (D32,
+// «иногда бывает что стены просвечивают»).
+//
+// Таск 150 лечил это **ломтями**: грань резалась плоскостями равной дальности
+// `z = k · 250 мм`, и каждый кусок ехал со своей серединой. Провалы глубже
+// полуметра это убрало, но завело свою семью дефектов (D33, слова заказчика:
+// «на границах и углах появились треугольные артефакты»):
+//
+//   — ошибка порядка не исчезла, а измельчала: внутри одного ломтя соседние
+//     куски по-прежнему спорят, и спор этот теперь виден **на каждом кадре** —
+//     ровной чередой клиньев с шагом ломтя вдоль кромки;
+//   — у разрезанной грани появились швы: канва сглаживает края, и два куска
+//     общего ребра не складываются в непрозрачный пиксель.
+//
+// Ни то ни другое мельче шага не чинится: это та же шкала, а не выход.
+//
+// ——— что вместо ————————————————————————————————————————————————————————
+//
+// Дерево двоичного разбиения пространства. В узле — плоскость одной из граней;
+// всё, что перед ней, в одном поддереве, всё, что за ней, в другом, грани в
+// самой плоскости — в узле. Грань, которую плоскость пересекает, режется по ней
+// надвое — **по настоящей геометрии, а не по сетке**.
+//
+// Свойство, ради которого всё затевалось: луч из глаза пересекает плоскость
+// узла не больше одного раза, значит **всё, что лежит на стороне глаза, стоит
+// на луче раньше** всего, что лежит за плоскостью. Обход «дальнее поддерево,
+// потом плоскость, потом ближнее» даёт порядок, верный в каждом пикселе и на
+// любом ракурсе — не «ошибка не больше шага», а ошибки нет вовсе.
+//
+// Цена названа и замерена в отчёте таска: дерево строится при сборке сцены
+// (там же, где считаются грани, — на объекте заказчика это единицы
+// миллисекунд), резов выходит на порядок меньше, чем давали ломти, а кадр
+// вместо сортировки `n log n` получает обход `n` без единого сравнения.
+//
+// Ярусы (`VOLUME_LAYER_*`) дерево не отменяет: в нём лежит только ярус тел.
+// Плита, полы с потолками и указатель «вы здесь» ложатся до и после него по
+// прежнему правилу — там спорить не о чем (см. `VOLUME_LAYER_BASE`).
+
+/** Плоскость грани: нормаль и расстояние до начала координат. */
+function volumePlaneOf(face) {
+  return {
+    x: face.n.x,
+    y: face.n.y,
+    z: face.n.z,
+    d: face.n.x * face.p[0].x + face.n.y * face.p[0].y + face.n.z * face.p[0].z,
+  };
+}
+
+/** С какой стороны плоскости точка: 1 перед, −1 за, 0 — на ней. */
+function volumePointSide(plane, point, eps = VOLUME_PLANE_EPS_MM) {
+  const gap = plane.x * point.x + plane.y * point.y + plane.z * point.z - plane.d;
+  return gap > eps ? 1 : gap < -eps ? -1 : 0;
+}
+
 /**
- * Куски грани по ломтям глубины. Грань, целиком лежащая в одном ломте (а это
- * почти всякая стена, на которую смотрят в лицо), возвращается как есть — одним
- * куском и без единого лишнего многоугольника.
+ * С какой стороны плоскости грань: `1` перед, `−1` за, `0` в самой плоскости,
+ * `2` — пересекает, то есть её придётся резать.
  */
-export function volumeDepthSlabs(points, step = VOLUME_DEPTH_SLAB_MM) {
-  if (!(step > 0) || points.length < 3) return [points];
-  let min = Infinity;
-  let max = -Infinity;
+export function volumeFaceSide(plane, face) {
+  let front = 0;
+  let back = 0;
+  for (const point of face.p) {
+    const side = volumePointSide(plane, point);
+    if (side > 0) front += 1;
+    else if (side < 0) back += 1;
+  }
+  if (front > 0 && back > 0) return 2;
+  if (front > 0) return 1;
+  if (back > 0) return -1;
+  return 0;
+}
+
+/**
+ * Разрез грани плоскостью. Возвращает `{front, back}` — две грани со всеми
+ * полями исходной (цвет, ярус, хозяин, полотно) и своими точками.
+ *
+ * Грань выпуклая или нет — обход один и тот же: вершины раскладываются по
+ * сторонам, точка пересечения ребра попадает в обе половины.
+ */
+export function volumeSplitFace(face, plane) {
+  const side = volumeFaceSide(plane, face);
+  if (side === 1 || side === 0) return { front: face, back: null };
+  if (side === -1) return { front: null, back: face };
+  const front = [];
+  const back = [];
+  const points = face.p;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    const sa = volumePointSide(plane, a);
+    const sb = volumePointSide(plane, b);
+    if (sa >= 0) front.push(a);
+    if (sa <= 0) back.push(a);
+    if (sa * sb < 0) {
+      const da = plane.x * a.x + plane.y * a.y + plane.z * a.z - plane.d;
+      const db = plane.x * b.x + plane.y * b.y + plane.z * b.z - plane.d;
+      const t = da / (da - db);
+      const cut = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t };
+      front.push(cut);
+      back.push(cut);
+    }
+  }
+  return {
+    front: front.length >= 3 ? { ...face, p: front } : null,
+    back: back.length >= 3 ? { ...face, p: back } : null,
+  };
+}
+
+/**
+ * Дерево порядка по граням яруса тел. `null` — делить нечего.
+ *
+ * Строится один раз на сцену и живёт в ней (`scene.order`): сцена пересобирается
+ * при правке объекта и при открытии двери, и дерево вместе с ней.
+ */
+export function volumeOrderTree(faces) {
+  const items = [];
+  for (const face of faces || []) {
+    if (!face || face.line) continue;
+    if (face.layer !== undefined && face.layer !== VOLUME_LAYER_BODY) continue;
+    items.push(face);
+  }
+  return volumeOrderNode(items);
+}
+
+/**
+ * Узел дерева. Плоскость выбирается примеркой: меньше резов, ровнее половины.
+ * Грань-кандидат всегда лежит в своей же плоскости, поэтому узел забирает хотя
+ * бы одну грань — построение не зацикливается.
+ */
+function volumeOrderNode(items) {
+  if (items.length === 0) return null;
+  let best = null;
+  const tries = Math.min(items.length, VOLUME_ORDER_TRIES);
+  for (let at = 0; at < tries; at += 1) {
+    const plane = volumePlaneOf(items[Math.floor((at * items.length) / tries)]);
+    let front = 0;
+    let back = 0;
+    let splits = 0;
+    for (const item of items) {
+      const side = volumeFaceSide(plane, item);
+      if (side === 2) splits += 1;
+      else if (side === 1) front += 1;
+      else if (side === -1) back += 1;
+    }
+    if (front === 0 && back === 0 && splits === 0) continue;
+    const score = splits * VOLUME_ORDER_SPLIT_COST + Math.abs(front - back);
+    if (!best || score < best.score) best = { plane, score };
+  }
+  // Все грани в одной плоскости: делить нечем, и незачем — коплоскостные грани
+  // друг друга не закрывают.
+  if (!best) return { plane: volumePlaneOf(items[0]), same: items, front: null, back: null, count: items.length };
+  const plane = best.plane;
+  const same = [];
+  const front = [];
+  const back = [];
+  for (const item of items) {
+    const side = volumeFaceSide(plane, item);
+    if (side === 0) {
+      same.push(item);
+      continue;
+    }
+    if (side === 1) {
+      front.push(item);
+      continue;
+    }
+    if (side === -1) {
+      back.push(item);
+      continue;
+    }
+    const cut = volumeSplitFace(item, plane);
+    if (cut.front) front.push(cut.front);
+    if (cut.back) back.push(cut.back);
+  }
+  const node = { plane, same, front: volumeOrderNode(front), back: volumeOrderNode(back), count: 0 };
+  node.count = same.length + (node.front ? node.front.count : 0) + (node.back ? node.back.count : 0);
+  return node;
+}
+
+/**
+ * Обход дерева от дальнего к ближнему: дальнее поддерево, своя плоскость,
+ * ближнее поддерево. Возвращает грани в порядке рисования.
+ */
+export function volumeOrderWalk(tree, eye, out = []) {
+  if (!tree) return out;
+  const near = volumePointSide(tree.plane, eye) >= 0;
+  volumeOrderWalk(near ? tree.back : tree.front, eye, out);
+  for (const face of tree.same) out.push(face);
+  volumeOrderWalk(near ? tree.front : tree.back, eye, out);
+  return out;
+}
+
+/**
+ * Сколько граней обход нарисует **раньше** этой точки. Ею встают в очередь те,
+ * кого в дереве нет: линии (контур вещи, стрелка связи) — рисунок поверх сцены,
+ * резать их по плоскостям нельзя (у ломаной есть концы, а у пунктира — шаг), и
+ * место в очереди им считается по середине.
+ */
+export function volumeOrderRank(tree, eye, point) {
+  let node = tree;
+  let rank = 0;
+  while (node) {
+    const near = volumePointSide(node.plane, eye) >= 0;
+    const first = near ? node.back : node.front;
+    const second = near ? node.front : node.back;
+    const side = volumePointSide(node.plane, point);
+    const inFirst = near ? side < 0 : side > 0;
+    if (inFirst) {
+      node = first;
+      continue;
+    }
+    rank += (first ? first.count : 0) + node.same.length;
+    node = second;
+  }
+  return rank;
+}
+
+/** Грань яруса тел — та, что лежит в дереве порядка. */
+function volumeInTree(face) {
+  return !face.line && (face.layer === undefined || face.layer === VOLUME_LAYER_BODY);
+}
+
+/** Середина грани или линии: ею считается место в очереди у тех, кого нет в дереве. */
+function volumeMiddleOf(points) {
+  let x = 0;
+  let y = 0;
+  let z = 0;
   for (const point of points) {
-    if (point.z < min) min = point.z;
-    if (point.z > max) max = point.z;
+    x += point.x;
+    y += point.y;
+    z += point.z;
   }
-  const first = Math.floor(min / step);
-  const last = Math.floor(max / step);
-  if (first === last) return [points];
-  const out = [];
-  for (let index = first; index <= last; index += 1) {
-    const piece = volumeClipDepth(points, index * step, (index + 1) * step);
-    if (piece.length >= 3) out.push(piece);
-  }
-  return out.length > 0 ? out : [points];
+  return { x: x / points.length, y: y / points.length, z: z / points.length };
 }
 
 /**
  * Кадр: грани сцены, переведённые в экранные многоугольники и выложенные в
  * порядке рисования.
  *
- * Порядок — сортировка по дальности, дальние первыми, и пол с потолком идут
- * **до** всего остального. Это не ускорение, а правило: под полом ничего нет,
- * а потолок, видимый снизу, не закрывает ничего, кроме себя, — значит они
- * ложатся первыми и спор «пол поверх далёкой стены» не возникает вовсе. Будь
- * они в общем потоке, пол комнаты, в которой стоишь, оказался бы ближе дальней
- * стены и закрасил бы её низ.
+ * Ярус тел выкладывает **дерево порядка** (`volumeOrderTree`) — точно, в каждом
+ * пикселе и на любом ракурсе. Плита, полы с потолками и указатель «вы здесь»
+ * лежат вне дерева, своими ярусами и по дальности: под полом ничего нет, а
+ * потолок, видимый снизу, не закрывает ничего, кроме себя, — спорить им не о
+ * чем. Будь они в общем потоке, пол комнаты, в которой стоишь, оказался бы
+ * ближе дальней стены и закрасил бы её низ.
+ *
+ * Линии (контур вещи, стрелка связи) в дереве не лежат — их встраивают в
+ * очередь по середине (`volumeOrderRank`), а контур вещи ставит на место своим
+ * правилом `volumeOutlineOrder`.
  *
  * Невидимые грани отбрасываются по направлению нормали; двусторонние (полотно
  * двери, рама окна) нормаль поворачивают навстречу.
@@ -2019,71 +2147,44 @@ export function volumeFrame(scene, camera, box, extra = null) {
   const halfWidth = box.width / 2;
   const halfHeight = box.height / 2;
   const polygons = [];
-  const take = (face) => volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, polygons);
-  for (const face of scene.faces) take(face);
-  for (const face of extra || []) take(face);
-  polygons.sort((a, b) => (a.layer === b.layer ? b.depth - a.depth : a.layer - b.layer));
-  return volumeOutlineOrder(volumeHostOrder(polygons));
+  // У собранной сцены дерево уже есть; у наскоро составленной (стенд, тест) его
+  // строят на месте — кадр обязан быть верным и там.
+  const tree = scene.order === undefined ? volumeOrderTree(scene.faces) : scene.order;
+  const take = (face, order) =>
+    volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, polygons, order);
+  // Половина — чтобы линия встала **между** гранями, а не спорила с одной из них.
+  const rankOf = (face) => volumeOrderRank(tree, camera.at, volumeMiddleOf(face.p)) - 0.5;
+  let rank = 0;
+  for (const face of volumeOrderWalk(tree, camera.at)) {
+    take(face, rank);
+    rank += 1;
+  }
+  for (const face of scene.faces) {
+    if (volumeInTree(face)) continue;
+    take(face, face.layer === VOLUME_LAYER_BODY ? rankOf(face) : null);
+  }
+  for (const face of extra || []) {
+    take(face, face.layer === VOLUME_LAYER_BODY || face.layer === undefined ? rankOf(face) : null);
+  }
+  polygons.sort((a, b) => (a.layer === b.layer ? a.order - b.order : a.layer - b.layer));
+  return volumeOutlineOrder(polygons);
 }
 
-/**
- * Вещь рисуется **сразу после своей стены** (находка живого прогона, см.
- * `volumeHostKey`).
- *
- * Сортировка по дальности сравнивает середины граней, а середина стены в четыре
- * метра и середина розетки в восемь сантиметров — числа несопоставимые: стена,
- * уходящая вбок, оказывалась «ближе» розетки у своего края и закрашивала её.
- *
- * Чинится это порядком, а не арифметикой: вещь не меняет своей дальности, а
- * **переставляется в очереди** за последний кусок той стороны стены, на которой
- * висит. Со своей стороны стена вещь не закрывает никогда (вещь стоит перед её
- * плоскостью), а всё, что нарисовано позже, — чужие стены, перегородки, вещи
- * чертежа — закрывает её по-прежнему. Это и было вторым дефектом прогона:
- * перенеси вещь просто ближе числом, и розетки соседней комнаты начинают
- * просвечивать сквозь перегородку.
- *
- * Стена отвёрнута (вещь на изнанке) — переставлять не за чем: вещь остаётся на
- * своём месте по дальности.
- */
-function volumeHostOrder(polygons) {
-  let last = null;
-  for (let index = 0; index < polygons.length; index += 1) {
-    const host = polygons[index].host;
-    if (!host) continue;
-    if (!last) last = new Map();
-    last.set(host, index);
-  }
-  if (!last) return polygons;
-  const waiting = new Map();
-  let deferred = false;
-  for (let index = 0; index < polygons.length; index += 1) {
-    const polygon = polygons[index];
-    const hosts = polygon.onHost;
-    if (!hosts) continue;
-    // Вещь стоит за **последним** из своих кусков стены: карниз накрывает три,
-    // и спрятаться за ближним из них ему нельзя.
-    let at;
-    for (const host of hosts) {
-      const found = last.get(host);
-      if (found !== undefined && (at === undefined || found > at)) at = found;
-    }
-    if (at === undefined || at <= index) continue;
-    let list = waiting.get(at);
-    if (!list) waiting.set(at, (list = []));
-    list.push(index);
-    deferred = true;
-  }
-  if (!deferred) return polygons;
-  return volumeReorder(polygons, waiting);
-}
+// Вещь на стене рисуется после неё сама: она **и правда** стоит перед
+// плоскостью стены — на два миллиметра (`VOLUME_MARK_LIFT_MM`), — а дерево
+// порядка смотрит на плоскости, а не на дальность середин. Поэтому
+// перестановки «вещь за своим куском стены», которой жили таски 148–150
+// (`volumeHostOrder`, метровая сетка стороны стены), здесь больше нет: с точным
+// порядком она не помогала, а мешала — вещь вставала перед **чужими** стенами,
+// и розетки соседней комнаты просвечивали сквозь перегородку. Замер: 0,028 %
+// точек кадра с провалом до шести метров против нуля без неё.
 
 /**
  * Перестановка очереди: `waiting` — карта «за каким многоугольником встать» →
  * список тех, кто встаёт за ним. Всё остальное сохраняет свой порядок.
  *
- * Одна на две надобности — вещь за своим куском стены (`volumeHostOrder`) и
- * контур за своим телом (`volumeOutlineOrder`): это одно и то же действие, и
- * двух его списаний в сборке быть не должно.
+ * Нужна она контуру вещи (`volumeOutlineOrder`): контур обязан ехать сразу за
+ * своим телом, и это правило, а не дальность.
  */
 function volumeReorder(polygons, waiting) {
   const moved = new Set();
@@ -2134,20 +2235,24 @@ function volumeOutlineOrder(polygons) {
 }
 
 /**
- * Одна грань в экранные многоугольники. Пусто — её не видно: отвёрнута, целиком
+ * Одна грань в экранный многоугольник. Пусто — её не видно: отвёрнута, целиком
  * за ближней плоскостью или целиком за краем окна.
  *
- * Многоугольников бывает несколько: грань, уходящая от камеры вдаль, режется
- * ломтями глубины (`VOLUME_DEPTH_SLAB_MM`), и каждый кусок едет в очереди со
- * своей дальностью. Ломтями режется только **ярус тел** — стены, вещи, полотна:
- * у плиты и у полов с потолками порядок решает ярус, а не дальность, и спорить
- * им не о чем (пол всегда ниже глаз, потолок всегда выше, в кадре они не
- * перекрываются никогда).
+ * Многоугольник ровно один: грань в кадре больше не режется ничем. Резы, если
+ * они нужны, сделаны один раз при сборке дерева порядка — по настоящим
+ * плоскостям сцены, а не по сетке дальностей (см. `volumeOrderTree`). Шва от
+ * них тем меньше, чем меньше резов, и это то же самое число.
+ *
+ * `order` — место в очереди: ранг из дерева у яруса тел, `null` у всех
+ * остальных, и тогда порядок внутри яруса решает дальность, как прежде.
  */
-function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out) {
+function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out, order = null) {
   if (face.line) {
     const line = volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box);
-    if (line) out.push(line);
+    if (line) {
+      line.order = order === null ? -line.depth : order;
+      out.push(line);
+    }
     return out;
   }
   const first = face.p[0];
@@ -2163,38 +2268,34 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
   if (facing <= 0) return out;
   const clipped = volumeClipNear(face.p.map((point) => volumeToCamera(point, camera.at, basis)));
   if (clipped.length < 3) return out;
-  const fill = volumeFill(face.rgb, volumeShade(normal));
-  const pieces = face.layer === VOLUME_LAYER_BODY ? volumeDepthSlabs(clipped) : [clipped];
-  for (const piece of pieces) {
-    const xy = [];
-    let depth = 0;
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const point of piece) {
-      const scale = focal / point.z;
-      const x = halfWidth + point.x * scale;
-      const y = halfHeight - point.y * scale;
-      xy.push(x, y);
-      depth += point.z;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-    if (maxX < 0 || minX > box.width || maxY < 0 || minY > box.height) continue;
-    out.push({
-      xy,
-      depth: depth / piece.length,
-      layer: face.layer,
-      fill,
-      pick: face.markId || null,
-      door: face.doorId || null,
-      host: face.host || null,
-      onHost: face.onHost || null,
-    });
+  const xy = [];
+  let depth = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const point of clipped) {
+    const scale = focal / point.z;
+    const x = halfWidth + point.x * scale;
+    const y = halfHeight - point.y * scale;
+    xy.push(x, y);
+    depth += point.z;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
   }
+  if (maxX < 0 || minX > box.width || maxY < 0 || minY > box.height) return out;
+  const middle = depth / clipped.length;
+  out.push({
+    xy,
+    depth: middle,
+    order: order === null ? -middle : order,
+    layer: face.layer,
+    fill: volumeFill(face.rgb, volumeShade(normal)),
+    pick: face.markId || null,
+    door: face.doorId || null,
+  });
   return out;
 }
 
@@ -2247,7 +2348,6 @@ function volumeLinePolygon(line, camera, basis, focal, halfWidth, halfHeight, bo
     dash: line.dash,
     arrow: line.arrow,
     pick: line.markId || null,
-    onHost: line.onHost || null,
   };
 }
 
