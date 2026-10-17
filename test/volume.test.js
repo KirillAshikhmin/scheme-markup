@@ -101,6 +101,7 @@ import {
   volumePickAt,
   volumeSightAt,
   volumeFacePoint,
+  volumeModelRgb,
   volumeSelectLines,
   volumeViewPolylines,
   volumeObjectFaces,
@@ -1192,11 +1193,18 @@ test("объект пола становится призмой, а колонн
     heightAboveFloorMm: 0,
   }).project;
   const built = volumeScene(project, scene.schemeId);
-  const object = built.faces.filter((face) => face.rgb[0] === 150);
-  // Две призмы по пять граней: четыре боковины и верх, низ лежит на полу.
+  // Своим цветом рисуются колонна (одно тело во весь габарит) и фасад
+  // столешницы: по пять граней — четыре боковины и верх, низ лежит на полу.
+  // Светлая плита столешницы — второе тело её модели (таск 155), и цвет у неё
+  // материальный, от того же цвета вещи.
+  const object = built.faces.filter((face) => face.rgb[0] === VOLUME_OBJECT_RGB[0]);
   assert.equal(object.length, 10);
+  const slab = built.faces.filter((face) => face.rgb[0] === volumeModelRgb("light", VOLUME_OBJECT_RGB)[0]);
+  assert.equal(slab.length, 6, "плита столешницы — отдельное тело, с низом: она лежит на фасаде");
   const top = Math.max(...object.flatMap((face) => face.p.map((point) => point.z)));
   assert.equal(top, 3100, "колонна встала во всю высоту комнаты, а не в выдуманную");
+  const counterTop = Math.max(...slab.flatMap((face) => face.p.map((point) => point.z)));
+  assert.equal(counterTop, 900, "верх столешницы — та высота, от которой отмеряют розетки над ней");
 });
 
 test("вещь на полу держит человека, а короб под потолком — нет", () => {
