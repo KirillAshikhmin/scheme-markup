@@ -67,7 +67,7 @@ import {
 import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
-import { openVolume, volumeAllowed } from "./volume.js";
+import { volumeAllowed } from "./volume.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
@@ -960,16 +960,17 @@ function mountSchemesPanel(host, api) {
   }
 
   /**
-   * Объёмный режим — своё окно (`panels/volume.js`), и оно **только читает**:
-   * ни `setState`, ни шага истории ему не нужно, поэтому в его api их и нет.
-   * Схема при этом текущей не становится — смотреть объём чужой схемы можно,
-   * не уходя с той, которую размечают.
+   * Кнопка «Объём» в строке схемы: делает эту схему текущей и переключает
+   * основной экран в режим «Объём» (таск 153).
+   *
+   * Прежде окно показывало объём **чужой** схемы, не уходя с размечаемой.
+   * Режим так не умеет и не должен: на экране одна схема, и правая колонка в
+   * объёме показывает её же метки. Поэтому кнопка выбирает схему — ровно то же
+   * делает кнопка «Чертёж» рядом.
    */
   function openVolumeView(schemeId) {
-    // `setState` окну объёма нужен ровно на одно — выделение (таск 148): оно
-    // общее с планом и со списком меток. В объект объём по-прежнему не пишет
-    // ничего (G68), и шагов истории у него нет.
-    openVolume({ schemeId, api: { getState, setState, notify, subscribe } });
+    if (getState().schemeId !== schemeId) setState({ schemeId, selectedMarkIds: [] });
+    setScreen("volume");
   }
 
   /**

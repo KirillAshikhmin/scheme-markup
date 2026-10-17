@@ -31,17 +31,8 @@
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
-import { PANEL_IDS, layoutAllows, registerPanel } from "../app.js";
-import {
-  FULLSCREEN_EVENTS,
-  canvasFrameLinks,
-  canvasFullscreenLabel,
-  canvasFullscreenOn,
-  canvasFullscreenSupported,
-  canvasFullscreenToggle,
-  canvasHintInset,
-  canvasHintUnseen,
-} from "../canvas.js";
+import { PANEL_IDS, layoutAllows, registerPanel, screenMode } from "../app.js";
+import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasHintUnseen } from "../canvas.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { findRoom, findScheme, schemeFloorOf } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
@@ -92,11 +83,7 @@ import {
   volumeStep,
 } from "../volume.js";
 import { markCardModel, markCardParts } from "./markCard.js";
-import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton, uiModal } from "./ui.js";
-
-// Окно одно: второе показывало бы ту же сцену второй камерой и сжирало бы
-// кадры у первого. То же правило, что у мастерской.
-let volumeOpened = false;
+import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
 
 // ——— подсказка плашкой (G218) ————————————————————————————————————————————
 //
@@ -531,18 +518,33 @@ export function volumeNotes(scene) {
   return lines;
 }
 
-export function openVolume({ schemeId: openOn, api }) {
-  if (volumeOpened) return null;
+/**
+ * Собрать объём на основном экране (таск 153).
+ *
+ * Окна у объёма больше нет: поле занимает основной экран, вид, этаж, «Вся
+ * схема», снимок и двери стоят в верхнем блоке левой колонки, а правая колонка
+ * показывает **тот же список меток, что и схема** — выделение у них общее и
+ * всегда было общим. Полноэкранный показ даёт кнопка «Во весь экран» над полем,
+ * общая на все три режима.
+ *
+ * Поверхность **живёт дальше, когда режим сменили**: она только гаснет
+ * (`visibility` в стилях). Поэтому человек, вернувшийся в «Объём», стоит там,
+ * где стоял, с теми же открытыми дверями и на том же этаже — в объект при этом
+ * по-прежнему не попадает ничего (G68).
+ */
+function createVolume({ api, hosts }) {
   const { getState, setState, notify, subscribe } = api;
   const project = getState().project;
-  if (!findScheme(project, openOn)) return null;
-  volumeOpened = true;
+  if (!findScheme(project, getState().schemeId)) return null;
 
   // Какую схему показываем. **Переменная, а не аргумент**: лестница меняет этаж,
-  // то есть меняет схему под той же камерой (таск 149). Второго окна на второй
-  // этаж не заводится — человек поднимается по лестнице, а не открывает ещё
-  // одно окно, и пройденный путь, открытые двери и вид остаются при нём.
-  let schemeId = openOn;
+  // то есть меняет схему под той же камерой (таск 149), и схему же меняют в
+  // списке схем — объём идёт за выбором человека, не выходя из режима.
+  //
+  // Этаж, на который человек поднялся, становится текущей схемой всего
+  // приложения (таск 153): иначе список меток справа показывал бы метки того
+  // этажа, с которого человек уже ушёл, а шапка — его имя.
+  let schemeId = getState().schemeId;
 
   // Метки берутся **видимые на плане**: фильтр спрятал метку на плане — её нет
   // и в объёме. Иначе у одного объекта было бы два ответа на вопрос «что
@@ -567,7 +569,6 @@ export function openVolume({ schemeId: openOn, api }) {
   const keys = new Map();
   let look = null; // перетаскивание мышью: {x, y}
   let locked = false;
-  let denied = false;
   // Где рука: точка поля под курсором (без захвата) — ею целятся в дверь.
   let pointer = null;
   // Дверь под рукой и дверь, по которой щёлкнули. Заказчик назвал оба способа:
@@ -731,10 +732,6 @@ export function openVolume({ schemeId: openOn, api }) {
     attrs: { hidden: "hidden" },
     on: { click: () => toggleAllDoors() },
   });
-  const fullButton = uiIconButton("fullscreen", {
-    label: canvasFullscreenLabel(false),
-    on: { click: () => toggleFullscreen() },
-  });
   const where = uiEl("span", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
   const missing = uiEl("p", { class: "volume__missing" });
@@ -744,38 +741,44 @@ export function openVolume({ schemeId: openOn, api }) {
   // человек уже читает про недостающее.
   const spareLine = uiEl("p", { class: "volume__missing" });
 
-  const bar = uiEl("div", { class: "volume__tools" }, [
-    uiEl("span", { class: "volume__toolsLabel", text: strings.volume.view }),
-    personButton,
-    aroundButton,
-    where,
-    uiEl("span", { class: "volume__spacer" }, [doorsButton, shotButton, fitButton, fullButton]),
-  ]);
-  // Подсказки под полем больше нет: она переехала плашкой в само поле (G218).
-  // Под полем остаётся то, что говорит про объект, а не про управление, — счёт
-  // чертежа, недостающее и запасные габариты.
-  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, spareLine]);
-
-  const closeButton = uiButton(strings.volume.close, {
-    class: "ui-btn ui-btn--accent",
-    on: { click: () => finish() },
-  });
-  const modal = uiModal({
-    title: volumeTitle(findScheme(project, schemeId).name, schemeFloorOf(project, schemeId)),
-    body,
-    actions: [closeButton],
-    onCancel: () => cleanup(),
-  });
-  modal.card.classList.add("modal--volume");
-  // Заголовок переписывается при переходе по лестнице: имя схемы и номер этажа
-  // в нём — единственное место, где написано, где человек оказался.
-  const titleNode = modal.card.querySelector(".modal__title");
-  const depth = uiDialogDepth();
+  // ——— где что стоит на основном экране (таск 153) ———
+  //
+  // Подсказка про управление — плашка в поле (G218, таск 152), она переехала
+  // вместе с полем и не переделывалась. Строки про объект (где стоит человек,
+  // счёт чертежа, недостающее, запасные габариты) собраны во вторую плашку —
+  // под полем места больше нет, поле занимает экран целиком.
+  //
+  // Заголовок с этажом тоже уехал в эту плашку: прежде он стоял в шапке окна и
+  // был единственным местом, где написано, где человек оказался после
+  // лестницы. Окна нет — осталась первая строка плашки.
+  const titleNode = uiEl("p", { class: "volume__title" });
+  const notePlate = uiEl("div", { class: "screen-note" }, [titleNode, where, meta, missing, spareLine]);
+  // Нечего показывать — плашка посреди поля, а не строчка в углу: это главное,
+  // что человек должен прочесть, войдя в режим без чертежа.
+  const emptyNote = uiEl("p", { class: "screen-empty", attrs: { hidden: "hidden" } });
+  stage.append(notePlate, emptyNote);
+  hosts.stage.replaceChildren(stage);
+  hosts.side.replaceChildren(
+    uiEl("div", { class: "volume__panel" }, [
+      uiEl("div", { class: "volume__tools" }, [
+        uiEl("span", { class: "volume__toolsLabel", text: strings.volume.view }),
+        personButton,
+        aroundButton,
+      ]),
+      // «Вся схема», снимок и все двери разом: не вид, а действия над ним —
+      // своей строкой под переключателем вида.
+      uiEl("div", { class: "volume__tools" }, [fitButton, shotButton, doorsButton]),
+    ]),
+  );
 
   // ——— вид ———
 
+  // Поверхность жива и в чужом режиме — она только погасла, — поэтому клавиши
+  // обязаны спрашивать, её ли сейчас экран. Правило то же, что у холста
+  // (`canvasOnScreen`) и у чертежа: кто показан, того и клавиатура. Диалог
+  // забирает её у всех троих: пока стопка не пуста, клавиши принадлежат ему.
   function ours() {
-    return !closed && uiDialogDepth() === depth;
+    return !closed && screenMode() === "volume" && uiDialogDepth() === 0;
   }
 
   function setView(next) {
@@ -1613,6 +1616,11 @@ export function openVolume({ schemeId: openOn, api }) {
     // читает**: его правило прежнее, то же место плана (таск 149).
     leaveScheme();
     schemeId = option.schemeId;
+    // Этаж, на который поднялись, становится текущей схемой всего приложения
+    // (таск 153): список меток справа, имя в шапке и подсветка в списке схем
+    // обязаны говорить про тот этаж, на котором человек стоит. Своя подписка
+    // этого изменения не увидит как смены схемы — `schemeId` уже равен ему.
+    setState({ schemeId });
     scene = sceneOf(state) || scene;
     const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
     person.x = moved.x;
@@ -1672,6 +1680,7 @@ export function openVolume({ schemeId: openOn, api }) {
     leaveScheme();
     const place = visited.get(back.schemeId) || null;
     schemeId = back.schemeId;
+    setState({ schemeId });
     scene = sceneOf(state) || scene;
     if (!scene.empty) {
       const at = place || { x: person.x, y: person.y, yaw: person.yaw };
@@ -1829,36 +1838,17 @@ export function openVolume({ schemeId: openOn, api }) {
 
   // ——— полный экран ———
   //
-  // Разворачивается **само окно**, а не страница: заказчик просил «окно с
-  // разворотом на полный экран», и панели за затемнением в нём не нужны.
-
-  function toggleFullscreen() {
-    Promise.resolve()
-      .then(() => canvasFullscreenToggle(document, modal.card))
-      .then(() => syncFullscreen())
-      // Браузер отказал — кнопка уходит до перезагрузки, как на холсте:
-      // спрашивать его ещё раз тем же жестом нечем.
-      .catch(() => {
-        denied = true;
-        notify(strings.canvas.fullscreenDenied, "error");
-        syncFullscreen();
-      });
-  }
+  // Своей кнопки у режима больше нет (таск 153): во весь экран разворачивает та
+  // же кнопка над полем, что и в двух других режимах, и разворачивает она
+  // страницу целиком. Прежде окно разворачивало само себя — панелей за
+  // затемнением у него не было, а здесь они и есть то, чем в объёме управляют:
+  // вид, этаж, снимок и список меток.
+  //
+  // Полю от этого нужно одно: перемериться, когда экран стал другого размера.
 
   function onFullscreenChange() {
     if (closed) return;
-    syncFullscreen();
     resize();
-  }
-
-  function syncFullscreen() {
-    const on = canvasFullscreenOn(document);
-    fullButton.hidden = denied || !canvasFullscreenSupported(document, modal.card);
-    const label = canvasFullscreenLabel(on);
-    fullButton.replaceChildren(uiIcon(on ? "fullscreenExit" : "fullscreen"));
-    fullButton.title = label;
-    fullButton.setAttribute("aria-label", label);
-    fullButton.setAttribute("aria-pressed", on ? "true" : "false");
   }
 
   // ——— подписи ———
@@ -1914,9 +1904,17 @@ export function openVolume({ schemeId: openOn, api }) {
     if (padNode.hidden) padEnd(null);
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
     shotButton.hidden = scene.empty;
-    if (titleNode) titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
+    titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
+    // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
+    // задник и плашку посреди экрана. Кнопка режима при этом не гаснет: режим
+    // доступен всегда, и сказать, чего не хватает, обязано само поле.
+    emptyNote.hidden = !scene.empty;
+    emptyNote.textContent = scene.empty ? strings.volume.empty : "";
+    // Плашка про объект в пустом поле молчит: всё, что она сказала бы, уже
+    // написано посреди экрана, а второй раз то же самое — шум.
+    notePlate.hidden = scene.empty;
     if (scene.empty) {
-      meta.textContent = strings.volume.empty;
+      meta.textContent = "";
       missing.textContent = "";
       missing.hidden = true;
       spareLine.textContent = "";
@@ -1945,12 +1943,14 @@ export function openVolume({ schemeId: openOn, api }) {
     syncSelection();
   }
 
-  // ——— жизнь окна ———
+  // ——— жизнь поверхности ———
 
-  function cleanup() {
+  function destroy() {
     if (closed) return;
     closed = true;
-    volumeOpened = false;
+    volumeSurface = null;
+    hosts.stage.replaceChildren();
+    hosts.side.replaceChildren();
     keyStop(null);
     if (frame) {
       const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
@@ -1958,7 +1958,6 @@ export function openVolume({ schemeId: openOn, api }) {
       frame = 0;
     }
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
-    if (canvasFullscreenOn(document)) canvasFullscreenToggle(document, modal.card).catch(() => {});
     if (unsubscribe) unsubscribe();
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
@@ -1971,9 +1970,31 @@ export function openVolume({ schemeId: openOn, api }) {
     for (const name of FULLSCREEN_EVENTS) document.removeEventListener(name, onFullscreenChange);
   }
 
-  function finish() {
-    cleanup();
-    modal.close();
+  /**
+   * Схему сменили **не лестницей**, а в списке схем (таск 153).
+   *
+   * Правило то же, что у перехода по лестнице: человек встаёт в том же месте
+   * плана, а `volumeMoveTo` выталкивает его из стен. Память дороги при этом
+   * ведётся так же, как при лестнице, — иначе возврат (G216) потерял бы этаж,
+   * с которого ушли, и человек снова оказался бы в тупике, который этим
+   * возвратом и чинят.
+   */
+  function followScheme(state) {
+    leaveScheme();
+    schemeId = state.schemeId;
+    scene = sceneOf(state) || scene;
+    if (!scene.empty) {
+      const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
+      person.x = moved.x;
+      person.y = moved.y;
+      around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
+    }
+    // Выделение осталось на прежней схеме, и карточка про него говорила бы о
+    // том, чего в кадре нет.
+    select(null);
+    stairAsked = (stairHere() || {}).objectId || null;
+    resize();
+    sync();
   }
 
   // Чертёж могли поправить в другой вкладке того же объекта или отменой на
@@ -1982,10 +2003,26 @@ export function openVolume({ schemeId: openOn, api }) {
   const unsubscribe = subscribe
     ? subscribe((state, changed) => {
         if (closed) return;
-        // Схему удалили под окном — закрываемся: смотреть нечего.
-        if (!findScheme(state.project, schemeId)) {
-          finish();
+        // Схему удалили под поверхностью или закрыли объект — поверхность
+        // разбирается: следующий вход в режим соберёт её на той схеме, которая
+        // открыта.
+        if (!findScheme(state.project, state.schemeId)) {
+          destroy();
           return;
+        }
+        // Схему сменили в списке схем — идём туда же. Переход по лестнице
+        // досюда не доходит: он меняет `schemeId` сам и ставит его в состояние
+        // заодно, так что к этому мигу обе схемы уже совпадают.
+        if (state.schemeId !== schemeId) {
+          followScheme(state);
+          return;
+        }
+        // Режим включили — поле снова на экране: перемерить его и забрать
+        // клавиатуру себе.
+        if ("screen" in changed && state.screen === "volume") {
+          resize();
+          sync();
+          if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
@@ -2009,7 +2046,6 @@ export function openVolume({ schemeId: openOn, api }) {
   document.addEventListener("pointerlockchange", onLockChange);
   for (const name of FULLSCREEN_EVENTS) document.addEventListener(name, onFullscreenChange);
 
-  syncFullscreen();
   sync();
   resize();
   if (!scene.empty) fit();
@@ -2026,7 +2062,7 @@ export function openVolume({ schemeId: openOn, api }) {
       syncHint();
     })
     .catch(() => {});
-  return { close: finish };
+  return { destroy };
 }
 
 /** Доступен ли объёмный режим в этой раскладке. */
@@ -2045,58 +2081,43 @@ export function volumeHasDrawing(project, schemeId) {
   return volumeDrawn(project, schemeId);
 }
 
-/**
- * Кнопка «3D» над планом (G209): «Сверху справа на схеме есть кнопка
- * полноэкранного режима — рядом добавь кнопку 3D которая тоже будет отображать
- * это окно».
- *
- * Открывает **то же окно**, что кнопка «Объём» в строке схемы: `openVolume`
- * один, и второго пути к объёму в сборке нет.
- *
- * Живёт она в своей точке монтирования, а не в общем наложении холста, и это не
- * прихоть: наложение собирает `canvas.js`, а объём лежит в панелях, которые
- * `canvas.js` импортируют, — положи кнопку туда, и сборка откажется склеивать
- * модули по кругу (`build.js`, «Циклический импорт»). Точка та же по счёту, что
- * у карточки метки в просмотре, и обходится она одной строкой в `index.html`.
- *
- * **Гаснет с причиной** (слова тикета): без чертежа кнопка не исчезает, а
- * становится недоступной и говорит в подсказке, чего не хватает. Исчезни она —
- * человек решил бы, что объём отвалился.
- */
-function mountVolumeButton(host, api) {
-  const { getState, setState, notify, subscribe } = api;
-  const button = uiEl("button", {
-    class: "canvas-volume",
-    type: "button",
-    text: strings.volume.button,
-    on: {
-      click: () => {
-        const state = getState();
-        if (!state.schemeId) return;
-        openVolume({ schemeId: state.schemeId, api: { getState, setState, notify, subscribe } });
-      },
-    },
-  });
-  host.append(button);
-  const render = () => {
-    const state = getState();
-    const shown = Boolean(state.schemeId) && volumeAllowed(state);
-    button.hidden = !shown;
-    if (!shown) return;
-    const ready = volumeHasDrawing(state.project, state.schemeId);
-    if (ready) button.removeAttribute("disabled");
-    else button.setAttribute("disabled", "disabled");
-    const label = ready ? strings.volume.openHint : strings.volume.noDrawing;
-    button.title = label;
-    button.setAttribute("aria-label", strings.volume.open + " · " + label);
-    // Линейка занимает полосу сверху — мера отступа общая с кнопкой полного
-    // экрана, иначе кнопки встали бы на разной высоте.
-    button.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
+// ——— режим «Объём» основного экрана (таск 153) ————————————————————————
+//
+// Кнопки «3D» над планом больше нет: её дело делает переключатель режимов, и
+// второго пути к объёму в сборке не осталось. Исчезло с ней и гашение «без
+// чертежа»: режим доступен всегда — он показывает задник и плашку с причиной, —
+// а гасла кнопка потому, что открывала окно.
+//
+// Поверхность одна на страницу и собирается **по первому входу в режим**: сцена
+// на объекте заказчика считается восемь миллисекунд, и платить их тем, кто в
+// объём не заходил, незачем. Собранная, она живёт дальше и в чужих режимах —
+// гаснет, но помнит, где стоит человек, какие двери открыты и какой этаж.
+let volumeSurface = null;
+
+function mountVolumeScreen(host, api) {
+  const { getState, subscribe } = api;
+  // Две точки монтирования на одну поверхность: поле в основном экране и
+  // верхний блок левой колонки. Правой колонке режим ничего не даёт — там стоит
+  // **тот же список меток, что и на схеме**, и выделение у них общее.
+  const hosts = { stage: host, side: document.getElementById(PANEL_IDS.volumeTools) };
+
+  const placeholder = () => {
+    if (volumeSurface || !hosts.side) return;
+    hosts.side.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.screens.needScheme }));
   };
+
+  const build = () => {
+    const state = getState();
+    if (!volumeSurface && state.screen === "volume" && state.schemeId && hosts.side) {
+      volumeSurface = createVolume({ api, hosts });
+    }
+    placeholder();
+  };
+
   subscribe((state, changed) => {
-    if ("schemeId" in changed || "guidesShown" in changed || "layout" in changed || "project" in changed) render();
+    if ("screen" in changed || "schemeId" in changed || "project" in changed) build();
   });
-  render();
+  build();
 }
 
-registerPanel(PANEL_IDS.canvasVolume, mountVolumeButton);
+registerPanel(PANEL_IDS.screenVolume, mountVolumeScreen);
