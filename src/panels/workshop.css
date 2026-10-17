@@ -225,10 +225,10 @@
   background: rgba(31, 111, 235, 0.18);
 }
 
-/* Выбор вида объекта забирает строку, «плюс» рядом — ровно свою ширину.
-   Основа нулевая, а не по содержимому: имя «Столешница (кухонный фронт)» шире
-   колонки, и при `auto` строка переносилась, оставляя «плюс» один на второй —
-   это видно на снимке живого прогона. */
+/* Выпадающий список в ряду кнопок забирает строку целиком. Основа нулевая, а
+   не по содержимому: длинное имя шире колонки, и при `auto` строка
+   переносилась бы, оставляя соседнюю кнопку одну на второй — это видно на
+   снимке живого прогона. */
 .workshop__chips select.ui-input {
   flex: 1 1 0;
   min-width: 0;
@@ -236,6 +236,65 @@
 
 .workshop__chips .workshop__chip:last-child:not(:first-child) {
   flex: 0 0 auto;
+}
+
+/* ——— каталог вещей чертежа (таск 154, G224) ——————————————————————————————
+
+   «Надо в выборе таблицей их отображать с изображением и названием»: строка
+   категории и сетка плиток под ней. Три колонки — мера колонки на 264 точки:
+   на плитку остаётся 76, и в них помещаются картинка в 40 точек и имя в две
+   строки. Четыре колонки резали бы «Полотенцесушитель» на полуслове, две
+   растили бы сетку вдвое вниз. */
+.objectTiles {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.objectTiles__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* Плитка: картинка над подписью. Имя переносится и не обрезается многоточием —
+   «Посудомоечная машина» и «Полотенцесушитель» отличаются от соседей началом,
+   а не концом, но прочитать их человек должен целиком. */
+.objectTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 3px 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--panel-text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.objectTile:hover,
+.objectTile:focus-visible {
+  border-color: var(--accent);
+}
+
+.objectTile.is-on {
+  border-color: var(--accent);
+  background: rgba(31, 111, 235, 0.18);
+}
+
+.objectTile__icon {
+  display: block;
+}
+
+.objectTile__name {
+  display: block;
+  overflow-wrap: anywhere;
 }
 
 .workshop__rooms {

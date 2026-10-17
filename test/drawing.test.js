@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   DRAWING_MM_MAX,
+  FORMAT_VERSION,
   OPENING_HINGES,
   OPENING_KINDS,
   OPENING_SWINGS,
@@ -785,8 +786,12 @@ test("G68: объект прежней сборки доезжает через 
   // по дефекту D28 типу без размеров они проставляются по шаблону при открытии.
   // Трогается **только справочник** — поэтому сверяется всё остальное, а типы
   // отдельно: ни одного нового ключа, кроме `sizes`.
-  const strip = (value) => JSON.stringify({ ...value, markTypes: null }, null, 2);
+  //
+  // Номер версии формата в сверку не входит: файл всегда сохраняется нынешней
+  // версией, и её рост — не правка разметки. Проверяется он отдельной строкой.
+  const strip = (value) => JSON.stringify({ ...value, formatVersion: null, markTypes: null }, null, 2);
   assert.equal(strip(loaded), strip(JSON.parse(LEGACY_TEXT)), "в объекте без чертежа завелись новые поля");
+  assert.equal(loaded.formatVersion, FORMAT_VERSION, "файл сохраняется нынешней версией формата");
   loaded.markTypes.forEach((type, index) => {
     const was = JSON.parse(LEGACY_TEXT).markTypes[index];
     const added = Object.keys(type).filter((key) => !Object.prototype.hasOwnProperty.call(was, key));

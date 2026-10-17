@@ -50,6 +50,7 @@ import {
 } from "../src/model.js";
 import { MARK_BOX_FRAME_DEPTH_MM, MARK_BOX_FRAME_MM } from "../src/markBox.js";
 import { objectViewByName, objectViewNames, objectViewShapes } from "../src/objectViews/registry.js";
+import { objectCatalogKeyByName } from "../src/objectCatalog.js";
 import {
   VOLUME_BODY_MM,
   VOLUME_EYE_MM,
@@ -113,7 +114,6 @@ import {
   volumeScene,
   volumeShade,
   volumeFloors,
-  volumeStairKind,
   volumeStairNear,
   volumeStairs,
   volumeStart,
@@ -2066,12 +2066,18 @@ test("объект прежней сборки не знает этажей — 
   assert.equal(JSON.stringify(legacy), before, "объект изменился — это запрещено прямо (G68)");
 });
 
-test("лестница узнаётся по имени вида — терпимо к регистру, пробелам и приписке", () => {
+test("лестница узнаётся по ключу каталога, а прежняя — по имени вида", () => {
+  // С таска 154 у лестницы есть ключ, и он не зависит от слов. Имя осталось
+  // запасным путём для уже размеченных объектов — терпимым к регистру,
+  // пробелам и приписке.
   for (const name of ["Лестница", "лестница", "  ЛЕСТНИЦА  ", "Лестничный марш", "Лестница на 2 этаж", "stairs"]) {
-    assert.equal(volumeStairKind(name), true, name);
+    assert.equal(objectCatalogKeyByName(name), "stairs", name);
   }
-  for (const name of ["", null, "Марш", "Шкаф", "Колонна", "Щит"]) {
-    assert.equal(volumeStairKind(name), false, String(name));
+  for (const name of ["", null, "Марш"]) {
+    assert.equal(objectCatalogKeyByName(name), null, String(name));
+  }
+  for (const name of ["Шкаф", "Колонна", "Щит"]) {
+    assert.notEqual(objectCatalogKeyByName(name), "stairs", name);
   }
 });
 

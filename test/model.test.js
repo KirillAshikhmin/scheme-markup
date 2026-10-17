@@ -397,9 +397,9 @@ test("вентиляция: ВЕНТ стоит в «Климате» со св�
 
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
   const project = createProject();
-  // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
-  // вид типа — точка или линия.
-  assert.equal(project.formatVersion, 4);
+  // Версия 5: к контурам помещений, виду типа и каналу связи добавился ключ
+  // встроенного каталога у вещи чертежа (таск 154).
+  assert.equal(project.formatVersion, 5);
   assert.equal(project.categories.length, 12);
   assert.equal(project.markTypes.length, 48);
   assert.deepEqual(project.marks, []);

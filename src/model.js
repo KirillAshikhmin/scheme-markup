@@ -2,6 +2,10 @@
 // Чистый модуль: ни DOM, ни хранилища. Все функции возвращают новый объект,
 // исходный не меняется.
 import { strings, text } from "./strings.js";
+// Встроенный каталог вещей чертежа (таск 154): ключи, имена, габариты и место
+// установки. Данные сборки, а не справочник объекта, — поэтому модель их
+// читает, но никогда не правит.
+import { objectCatalogEntry, objectCatalogKeyByName } from "./objectCatalog.js";
 
 // Версия формата объекта. Поднимается, когда в project.json появляются поля,
 // без которых работа теряется. История:
@@ -12,6 +16,8 @@ import { strings, text } from "./strings.js";
 //       (`type.kindGuessed`), по которой показывается список на правку.
 //   4 — канал связи: запись в `mark.controls` бывает и объектом
 //       `{id, channel}`, и число каналов у типа (`type.channels`).
+//   5 — ключ встроенного каталога у вещи чертежа (`schemeObject.catalogKey`)
+//       вместо вида из справочника объекта (таск 154).
 // Совместимости вперёд нет сознательно: страница версии 1 не знает о контурах
 // и, открыв такой файл, молча потеряла бы их вместе с ручной правкой —
 // поэтому она честно откажется («файл сделан более новой версией»). Со
@@ -25,7 +31,11 @@ import { strings, text } from "./strings.js";
 // меткам (`migrateTypeKinds`), а тип без `channels` — одноканальным
 // (`typeChannels`). Связь строкой и связь объектом с каналом законны обе —
 // старая запись не переписывается (`markControlLinks`).
-export const FORMAT_VERSION = 4;
+// Вещь чертежа, названная ключом каталога, страницей версии 4 была бы прочтена
+// как вещь без вида: на её чертеже она осталась бы безымянным прямоугольником,
+// а слияние с чужой правкой выбросило бы её как ссылку в никуда. Поэтому
+// версия поднята — такой файл честно не откроется, а не потеряет вещи молча.
+export const FORMAT_VERSION = 5;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -4567,6 +4577,59 @@ export function findSchemeObjectKind(project, kindId) {
   return schemeObjectKindsOf(project).find((item) => item.id === kindId) || null;
 }
 
+// ——— чем вещь чертежа названа и узнана (таск 154) ————————————————————————
+//
+// Вещей на чертеже две породы, и читаются они одним местом — этим:
+//
+//   **новая** носит `catalogKey` — ключ встроенного каталога. Имя, габариты,
+//     место установки, модель и изображение берутся по нему, и одинаковы они у
+//     всех объектов и на всех машинах;
+//   **прежняя** носит `kindId` — ссылку в справочник внутри объекта. Имя у неё
+//     своё, и человек мог его переписать; ключ ей **выводится из имени** и
+//     нигде не записывается (G68: объект, который не трогали, остаётся байт в
+//     байт таким, каким закрывался).
+//
+// Выводить молча здесь можно потому, что ответ однозначен: вывод ничего не
+// меняет ни в объекте, ни на чертеже — он только включает вещи модель в объёме
+// и узнавание лестницы. Не вывелось — вещь остаётся на месте со своим именем и
+// своим габаритом, как было до каталога.
+
+/** Ключ каталога у вещи чертежа. `null` — вещь вне каталога. */
+export function schemeObjectKeyOf(project, object) {
+  if (!object) return null;
+  if (object.catalogKey && objectCatalogEntry(object.catalogKey)) return object.catalogKey;
+  const kind = findSchemeObjectKind(project, object.kindId);
+  return kind ? objectCatalogKeyByName(kind.name) : null;
+}
+
+/**
+ * Имя вещи на чертеже, в списке и на развёртке.
+ *
+ * У вещи каталога — имя каталога, у прежней — **её собственное имя из
+ * справочника объекта**, и подменять его именем каталога нельзя: человек мог
+ * назвать вид «Шкаф в прихожей», и на его чертеже так и написано.
+ */
+export function schemeObjectNameOf(project, object) {
+  if (!object) return "";
+  const entry = object.catalogKey ? objectCatalogEntry(object.catalogKey) : null;
+  if (entry) return entry.name;
+  const kind = findSchemeObjectKind(project, object.kindId);
+  return kind ? kind.name : "";
+}
+
+/** Где вещь стоит: на полу, на стене, в полу. `null` — вещь вне каталога. */
+export function schemeObjectMountOf(project, object) {
+  const entry = objectCatalogEntry(schemeObjectKeyOf(project, object));
+  return entry ? entry.mount : null;
+}
+
+// Вещь каталога ссылается на сборку, а не на справочник объекта: проверять её
+// надо против каталога, и отказ называет ключ, а не «вид не найден».
+function requireSchemeObjectKey(key) {
+  if (!objectCatalogEntry(key)) throw modelError("schemeObjectCatalogUnknown", { key });
+  return key;
+}
+
 /**
  * Завести справочник видов, если его ещё нет. Отдельная команда, а не
  * дописывание при открытии: объект, которого не трогали, обязан остаться
@@ -4686,20 +4749,43 @@ function schemeObjectShapeFields(shape, source, current) {
   };
 }
 
-export function addSchemeObject(project, { schemeId, kindId, shape = "rect", heightMm, heightAboveFloorMm = 0, ...rest } = {}) {
+/**
+ * Поставить вещь на чертёж.
+ *
+ * Чем она названа — `catalogKey` (вещь встроенного каталога, так ставят с
+ * таска 154) или `kindId` (вид из справочника объекта, так стояли прежние).
+ * Оба сразу не принимаются: два ответа на «что это» разошлись бы при первой же
+ * правке, и вещь на чертеже стала бы называться одним, а в объёме выглядеть
+ * другим.
+ */
+export function addSchemeObject(
+  project,
+  { schemeId, catalogKey, kindId, shape = "rect", heightMm, heightAboveFloorMm = 0, ...rest } = {},
+) {
   requireScheme(project, schemeId);
-  if (!findSchemeObjectKind(project, kindId)) throw modelError("schemeObjectKindNotFound");
+  if (catalogKey) requireSchemeObjectKey(catalogKey);
+  else if (!findSchemeObjectKind(project, kindId)) throw modelError("schemeObjectKindNotFound");
   if (!SCHEME_OBJECT_SHAPES.includes(shape)) throw modelError("schemeObjectShapeUnknown");
   const object = {
     id: newId(),
     schemeId,
-    kindId,
+    ...(catalogKey ? { catalogKey } : { kindId }),
     shape,
     ...schemeObjectShapeFields(shape, rest, null),
     heightMm: drawingHeightMm(heightMm),
     heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
   };
   return { project: withProject(project, { schemeObjects: [...schemeObjectsOf(project), object] }), schemeObject: object };
+}
+
+// Чем вещь названа после правки. Ключ каталога и вид справочника — два
+// взаимоисключающих ответа: пришёл новый — прежний уходит вместе со своим
+// полем, а не остаётся лежать вторым мнением.
+function schemeObjectNaming(current, patch) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
+  if (has("catalogKey")) return { catalogKey: requireSchemeObjectKey(patch.catalogKey) };
+  if (has("kindId")) return { kindId: patch.kindId };
+  return current.catalogKey ? { catalogKey: current.catalogKey } : { kindId: current.kindId };
 }
 
 export function updateSchemeObject(project, objectId, patch = {}) {
@@ -4713,7 +4799,7 @@ export function updateSchemeObject(project, objectId, patch = {}) {
   const next = {
     id: current.id,
     schemeId: current.schemeId,
-    kindId: Object.prototype.hasOwnProperty.call(patch, "kindId") ? patch.kindId : current.kindId,
+    ...schemeObjectNaming(current, patch),
     shape,
     ...schemeObjectShapeFields(shape, patch, current.shape === shape ? current : null),
     heightMm: Object.prototype.hasOwnProperty.call(patch, "heightMm")
@@ -5362,7 +5448,7 @@ export function wallObjectsOn(project, wallId, side) {
     const span = sideSpan(vectors.len, Math.min(...along), Math.max(...along), side);
     found.push({
       id: object.id,
-      name: (findSchemeObjectKind(project, object.kindId) || {}).name || "",
+      name: schemeObjectNameOf(project, object),
       fromMm: Math.round(span.fromMm),
       toMm: Math.round(span.toMm),
       floorMm: Number(object.heightAboveFloorMm) || 0,

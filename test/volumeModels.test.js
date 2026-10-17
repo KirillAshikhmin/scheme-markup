@@ -47,7 +47,7 @@ import {
 import { markBoxMm } from "../src/markBox.js";
 import { objectViewByName, objectViewForShape } from "../src/objectViews/registry.js";
 import { MODEL_CYL_SIDES, MODEL_MATERIALS } from "../src/objectModels/kit.js";
-import { MODEL_OBJECT_WORDS } from "../src/objectModels/objects.js";
+import { objectCatalogKeys } from "../src/objectCatalog.js";
 import {
   OBJECT_MODEL_BODY_MAX,
   OBJECT_MODEL_FACE_MAX,
@@ -203,12 +203,12 @@ test("у каждого точечного типа стартового спр�
 });
 
 test("у каждой вещи каталога есть модель, и девять прежних видов узнаются по имени", () => {
-  for (const key of Object.keys(MODEL_OBJECT_WORDS)) {
+  for (const key of objectCatalogKeys()) {
     assert.ok(objectModelByKey(key), key + ": вещь каталога без модели");
   }
   // Двадцать два ключа: тринадцать вещей из брифа и девять нынешних видов,
   // шкаф у них общий.
-  assert.equal(Object.keys(MODEL_OBJECT_WORDS).length, 22);
+  assert.equal(objectCatalogKeys().length, 22);
   // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам.
   for (const [key, name] of Object.entries(strings.schemeObjectKinds)) {
     const found = objectModelForName(name);
@@ -564,19 +564,19 @@ test("у ленты модели нет: это цепочка звеньев, �
 test("вещь чертежа находит модель по ключу каталога, а имя — запасной путь", () => {
   const stand = objectScene("Шкаф");
   assert.equal(volumeObjectModel(stand.project, stand.object).key, "cabinet", "по имени вида");
-  // Появится у вида ключ — он старше имени. Переименуем вид во что угодно:
-  // модель найдётся всё равно.
-  const keyed = updateSchemeObjectKind(stand.project, stand.kind.id, { name: "Пенал" }).project;
-  assert.equal(volumeObjectModel(keyed, stand.object), null, "без ключа и без знакомого имени — габарит");
-  const withKey = {
-    ...keyed,
-    schemeObjectKinds: keyed.schemeObjectKinds.map((kind) =>
-      kind.id === stand.kind.id ? { ...kind, key: "cabinet" } : kind,
-    ),
-  };
-  assert.equal(volumeObjectModel(withKey, stand.object).key, "cabinet", "по ключу у вида");
-  // И так же — если ключ окажется у самой вещи, а не у её вида.
-  assert.equal(volumeObjectModel(keyed, { ...stand.object, catalogKey: "fridge" }).key, "fridge");
+  // Переименованный вид модели не находит: имя — единственное, что у прежней
+  // вещи есть, и выдумывать за человека нечего.
+  const renamed = updateSchemeObjectKind(stand.project, stand.kind.id, { name: "Пенал" }).project;
+  assert.equal(volumeObjectModel(renamed, stand.object), null, "без ключа и без знакомого имени — габарит");
+  // Ключ каталога живёт **у самой вещи** (таск 154) и старше любого имени:
+  // переименованный вид ему не указ.
+  assert.equal(volumeObjectModel(renamed, { ...stand.object, catalogKey: "fridge" }).key, "fridge");
+  // А у вещи, поставленной каталогом, справочника видов нет вовсе — и модель
+  // всё равно находится: она пришла из сборки, а не из объекта.
+  assert.equal(
+    volumeObjectModel({ ...renamed, schemeObjectKinds: [] }, { id: "x", shape: "rect", catalogKey: "bed" }).key,
+    "bed",
+  );
 });
 
 test("перёд вещи берётся из поворота на чертеже", () => {

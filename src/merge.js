@@ -670,8 +670,13 @@ function mergeReferences(merged, report, sources, winner) {
   // Вид у объекта обязателен: безымянный прямоугольник на чертеже не значит
   // ничего. Вернуть его не вышло — значит записи нет ни у кого и ни в общем
   // снимке, и объект уходит вслед за ней, как тип без категории.
+  //
+  // **Вещь встроенного каталога (таск 154) этой проверки не знает**: её имя
+  // лежит не в объекте, а в сборке, и справочнику она не ссылка. Спроси с неё
+  // `kindId` — и каждая вещь, поставленная после каталога, вылетала бы при
+  // первом же слиянии, то есть работа терялась бы молча.
   merged.schemeObjects = merged.schemeObjects.filter((object) =>
-    objectKinds.has(object.kindId) ? true : dropObject(object),
+    object.catalogKey || objectKinds.has(object.kindId) ? true : dropObject(object),
   );
 
   // Тип модели и сама модель — такой же справочник: `equipmentTypeInUse` и

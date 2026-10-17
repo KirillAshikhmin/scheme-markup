@@ -61,16 +61,25 @@
 import { VIEWS_CLIMATE } from "./climate.js";
 import { VIEWS_LIGHT } from "./light.js";
 import { VIEWS_NET } from "./net.js";
+import { VIEWS_OBJECTS } from "./objects.js";
 import { VIEWS_POWER } from "./power.js";
 import { VIEWS_SENSE } from "./sense.js";
 import { VIEWS_THINGS } from "./things.js";
 
-const VIEW_FAMILIES = [VIEWS_POWER, VIEWS_LIGHT, VIEWS_CLIMATE, VIEWS_SENSE, VIEWS_NET, VIEWS_THINGS];
+// Семейство `objects` — вещи чертежа (таск 154): они живут в том же реестре,
+// что изображения меток, и по той же причине, по какой в одном реестре живут
+// их модели (`objectModels/registry.js`). Имя записи там и тут одно — ключ
+// встроенного каталога, — и ни одного ключа два семейства не делят.
+const VIEW_FAMILIES = [VIEWS_POWER, VIEWS_LIGHT, VIEWS_CLIMATE, VIEWS_SENSE, VIEWS_NET, VIEWS_THINGS, VIEWS_OBJECTS];
 
 const ICONS = {};
+const VIEW_CLASHES = [];
 const BY_SHAPE = {};
 for (const family of VIEW_FAMILIES) {
   for (const [name, icon] of Object.entries(family)) {
+    // Два семейства, занявшие одно имя, молча затёрли бы друг друга — и у
+    // метки оказалось бы изображение дивана. Список пустой держит тест.
+    if (ICONS[name]) VIEW_CLASHES.push(name);
     ICONS[name] = { name, ...icon };
     for (const shape of icon.shapes || []) BY_SHAPE[shape] = name;
   }
@@ -89,6 +98,11 @@ export function objectViewForShape(shape) {
 /** Все имена изображений — для справочника типов и для сверки отпечатками. */
 export function objectViewNames() {
   return Object.keys(ICONS).sort();
+}
+
+/** Имена, занятые дважды. Пусто — иначе тест красный. */
+export function objectViewClashes() {
+  return [...VIEW_CLASHES];
 }
 
 /** Какие формы знаков уже разобраны по изображениям. */

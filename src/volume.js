@@ -45,7 +45,7 @@ import {
   OPENING_KIND_DOOR,
   drawingBoundsMm,
   findScheme,
-  findSchemeObjectKind,
+  schemeObjectKeyOf,
   findType,
   findWall,
   hexToRgb,
@@ -74,7 +74,7 @@ import {
 import { MARK_BOX_FRAME_DEPTH_MM, markBoxMm } from "./markBox.js";
 import { objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 import { MODEL_CYL_SIDES } from "./objectModels/kit.js";
-import { objectModelByKey, objectModelForName } from "./objectModels/registry.js";
+import { objectModelByKey } from "./objectModels/registry.js";
 
 // ——— числа ——————————————————————————————————————————————————————————————
 
@@ -816,9 +816,9 @@ export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) 
 
 /**
  * Модель вещи чертежа (таск 155). Ключ каталога старше имени вида, и оба пути
- * нужны: ключ — то, к чему ведёт таск 154, имя — то, чем живут уже
- * размеченные объекты (G68). Где бы каталог ни решил держать ключ — у вещи или
- * у её вида, — он будет найден здесь, а не в третьем месте.
+ * нужны: ключ — то, чем вещь названа с таска 154, имя — то, чем живут уже
+ * размеченные объекты (G68). Оба пути сведены в `schemeObjectKeyOf`, и
+ * второго места, где ключ вещи вычисляют, в сборке нет.
  *
  * У ломаной модели нет: ломаной задают кухонный фронт, короб и марш, то есть
  * **полосу**, а не вещь, — повторять по модели на каждом звене значило бы
@@ -826,12 +826,7 @@ export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) 
  */
 export function volumeObjectModel(project, object) {
   if (!object || object.shape === "polyline") return null;
-  const kind = findSchemeObjectKind(project, object.kindId);
-  for (const key of [object.catalogKey, object.kindKey, kind ? kind.key : null]) {
-    const model = objectModelByKey(key);
-    if (model) return model;
-  }
-  return objectModelForName(kind ? kind.name : null);
+  return objectModelByKey(schemeObjectKeyOf(project, object));
 }
 
 /**
@@ -930,27 +925,17 @@ export function volumePrismSolid(prism) {
 // или ломаной марша, и в объёме она стоит призмой во всю высоту помещения.
 // Объём только узнаёт её среди прочих вещей.
 //
-// **Узнаёт по имени вида, и другого способа нет.** У вида объекта есть `id`
-// (свежий uuid на каждый объект) и `name` — ни кода, ни ключа, в отличие от
-// типов меток. Привязываться к `id` нельзя (`defaultTemplate` выдаёт новые на
-// каждый объект), значит остаётся имя. Поэтому имя сверяется терпимо: регистр,
-// пробелы по краям и «ё» не считаются, а внутри строки ищется корень «лестни» —
-// «Лестница», «лестничный марш», «Лестница на 2 этаж» и латинское `stairs`
-// узнаются все.
-// Переименовал человек вид в «Марш» — объём лестницы не найдёт и честно
-// промолчит; выдумывать за него второй справочник ради этого незачем.
-
-const VOLUME_STAIR_WORDS = ["лестни", "stair"];
-
-/** Это вид «лестница»? Сверяется имя вида объекта чертежа. */
-export function volumeStairKind(name) {
-  const plain = String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, "е");
-  if (plain === "") return false;
-  return VOLUME_STAIR_WORDS.some((word) => plain.includes(word));
-}
+// **Узнаёт по ключу каталога — `stairs`** (таск 154). Прежде узнавала по
+// имени вида, и это было единственным, что у вида есть: ни кода, ни ключа, а
+// `id` у каждого объекта свой. Имя человек правит руками — переименовал «Марш»,
+// и перехода по этажам нет. Со встроенным каталогом у лестницы появился ключ,
+// один на все объекты и на все машины, и узнавание перестало зависеть от слов.
+//
+// Имя осталось **запасным путём** и нигде здесь не упоминается: вещь прежней
+// разметки получает ключ выводом из имени в `schemeObjectKeyOf`, тем же
+// терпимым сравнением («Лестница», «лестничный марш», «Лестница на 2 этаж»,
+// `stairs`). Два места, где лестницу узнают, развелись бы при первой правке —
+// поэтому место одно.
 
 /** Расстояние от точки до многоугольника: ноль — точка внутри. */
 function volumePolygonGap(point, corners) {
@@ -974,8 +959,7 @@ function volumePolygonGap(point, corners) {
 export function volumeStairs(project, schemeId) {
   const stairs = [];
   for (const object of schemeObjectsOnScheme(project, schemeId)) {
-    const kind = findSchemeObjectKind(project, object.kindId);
-    if (!kind || !volumeStairKind(kind.name)) continue;
+    if (schemeObjectKeyOf(project, object) !== "stairs") continue;
     const polygons = volumeObjectPrisms(project, schemeId, object, VOLUME_HEIGHT_FALLBACK_MM).map(
       (prism) => prism.corners,
     );

@@ -39,7 +39,14 @@ import {
   typeObjectView,
   wallElevation,
 } from "../src/model.js";
-import { drawObjectView, objectViewByName, objectViewForShape, objectViewNames } from "../src/objectViews/registry.js";
+import {
+  drawObjectView,
+  objectViewByName,
+  objectViewClashes,
+  objectViewForShape,
+  objectViewNames,
+} from "../src/objectViews/registry.js";
+import { objectCatalogKeys } from "../src/objectCatalog.js";
 import { monoContext } from "../src/mono.js";
 import {
   ELEVATION_GROWN_QUIET,
@@ -481,13 +488,23 @@ const SIMPLIFIED = ["dehumidifier", "leak", "waterOutlet"];
 // `vent` — вентиляция санузла, таск 147 (G206).
 const ADDED_AFTER = ["vent"];
 
+// Вещи встроенного каталога (таск 154). Они живут в том же реестре, что
+// изображения меток, и отпечатка «до» у них тоже нет и быть не может —
+// поэтому список отдельный: по нему видно, что реестр вырос каталогом, а не
+// тем, что кто-то тихо дорисовал метке второй значок.
+const ADDED_OBJECTS = objectCatalogKeys();
+
 test("переделка в данные не тронула вид: двадцать девять изображений из тридцати двух совпали до вызова", () => {
   const names = objectViewNames();
-  assert.equal(names.length, 32 + ADDED_AFTER.length, "изображений стало другое число: " + names.length);
+  assert.equal(
+    names.length,
+    32 + ADDED_AFTER.length + ADDED_OBJECTS.length,
+    "изображений стало другое число: " + names.length,
+  );
   const changed = [];
   for (const name of names) {
     const was = PRINTS_BEFORE[name];
-    if (ADDED_AFTER.includes(name)) {
+    if (ADDED_AFTER.includes(name) || ADDED_OBJECTS.includes(name)) {
       assert.ok(!was, name + ": изображение названо новым, а отпечаток «до» у него есть");
       continue;
     }
@@ -499,6 +516,14 @@ test("переделка в данные не тронула вид: двадц�
     [...SIMPLIFIED].sort(),
     "вид изменился не только у заявленного упрощения — это и есть тихая потеря",
   );
+});
+
+test("у каждой вещи каталога есть изображение, и с метками они именами не спорят", () => {
+  // Плитка выбора без картинки — пустая клетка: вещь в каталоге есть, а
+  // показать её нечем. Поймать это глазами на двадцати двух плитках дорого.
+  const without = objectCatalogKeys().filter((key) => !objectViewByName(key));
+  assert.deepEqual(without, [], "вещь каталога без изображения");
+  assert.deepEqual(objectViewClashes(), [], "два семейства заняли одно имя — изображение досталось чужому");
 });
 
 test("упрощение капли названо и ограничено: кривых в описаниях не осталось ни одной", () => {

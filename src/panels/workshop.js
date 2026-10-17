@@ -91,19 +91,16 @@ import {
   WALL_THICKNESS_MM_MAX,
   addOpening,
   addSchemeObject,
-  addSchemeObjectKind,
   addWall,
   deleteOpening,
   deleteSchemeObject,
   deleteWall,
   drawingBoundsMm,
   drawingMmValue,
-  ensureSchemeObjectKinds,
   findOpening,
   findRoom,
   findScheme,
   findSchemeObject,
-  findSchemeObjectKind,
   findWall,
   formatMeters,
   openingsInWall,
@@ -116,7 +113,9 @@ import {
   SCHEME_FLOOR_MIN,
   schemeFloorOf,
   schemeObjectCorners,
-  schemeObjectKindsInOrder,
+  schemeObjectKeyOf,
+  schemeObjectMountOf,
+  schemeObjectNameOf,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
   segmentDistanceMm,
@@ -166,7 +165,9 @@ import {
   planToScreen,
   screenToPlan,
 } from "../render.js";
-import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton, uiPrompt } from "./ui.js";
+import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton } from "./ui.js";
+import { objectCatalogDefaults, objectCatalogEntry, objectCatalogKeyByName } from "../objectCatalog.js";
+import { createObjectTiles } from "./objectTiles.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
 import { createFieldPlate } from "./plate.js";
 
@@ -665,29 +666,13 @@ export function workshopTryOpening(project, draft, openingId) {
   }
 }
 
-// ——— объекты на полу: умолчания по виду ————————————————————————————————
+// ——— объекты на полу: умолчания из каталога ———————————————————————————
 //
-// Виды пополняются человеком, а умолчания привязаны к стартовым девяти —
-// сопоставление идёт **по имени** (к id справочника привязываться нельзя,
-// `schemeObjectKindTemplate` выдаёт свежие на каждый вызов). Незнакомому виду
-// достаётся `WORKSHOP_OBJECT_FALLBACK`: квадрат, который человек поправит.
-//
-// Числа — то, что стоит в квартире. Два вида выверены отдельно, потому что
-// ради них объекты и заведены (таск 122): **радиатор** 1200 × 100, высота 500,
-// от пола 150 — он висит под окном ровно там, где хочется розетка; и
-// **столешница** полосой 600 мм, верх на 900 (860 + 40) — от этого числа
-// отмеряют розетки над кухонным фронтом.
-export const WORKSHOP_OBJECT_DEFAULTS = {
-  column: { shape: "rect", widthMm: 400, depthMm: 400, heightMm: null, heightAboveFloorMm: 0 },
-  niche: { shape: "rect", widthMm: 1000, depthMm: 300, heightMm: null, heightAboveFloorMm: 0 },
-  duct: { shape: "rect", widthMm: 300, depthMm: 300, heightMm: null, heightAboveFloorMm: 0 },
-  stairs: { shape: "rect", widthMm: 1100, depthMm: 2700, heightMm: null, heightAboveFloorMm: 0 },
-  panel: { shape: "rect", widthMm: 600, depthMm: 150, heightMm: 800, heightAboveFloorMm: 1000 },
-  radiator: { shape: "rect", widthMm: 1200, depthMm: 100, heightMm: 500, heightAboveFloorMm: 150 },
-  counter: { shape: "polyline", depthMm: 600, heightMm: 40, heightAboveFloorMm: 860 },
-  plumbing: { shape: "rect", widthMm: 700, depthMm: 400, heightMm: 400, heightAboveFloorMm: 0 },
-  cabinet: { shape: "rect", widthMm: 1000, depthMm: 600, heightMm: 2200, heightAboveFloorMm: 0 },
-};
+// С таска 154 габариты вещи живут во **встроенном каталоге**
+// (`objectCatalog.js`), а не списком здесь: там же её имя, категория, место
+// установки, изображение и ключ модели, и второго места, куда надо вписать
+// новую вещь, нет. Здесь остались две двери к этим числам — по ключу и по
+// имени прежнего вида — и запасной квадрат для вещи, которой в каталоге нет.
 
 export const WORKSHOP_OBJECT_FALLBACK = {
   shape: "rect",
@@ -697,29 +682,21 @@ export const WORKSHOP_OBJECT_FALLBACK = {
   heightAboveFloorMm: 0,
 };
 
-function workshopKindKeyByName(name) {
-  const wanted = String(name == null ? "" : name).trim().toLowerCase();
-  for (const key of Object.keys(WORKSHOP_OBJECT_DEFAULTS)) {
-    if (String(strings.schemeObjectKinds[key] || "").toLowerCase() === wanted) return key;
-  }
-  return null;
+/** Умолчания вещи каталога. Чужой ключ — запасной квадрат, а не пустота. */
+export function workshopObjectDefaultsByKey(key) {
+  return objectCatalogDefaults(key) || { ...WORKSHOP_OBJECT_FALLBACK };
 }
 
 /**
- * Умолчания вида — **по имени**, а не по id: `schemeObjectKindTemplate` выдаёт
- * свежие идентификаторы на каждый вызов, привязываться к ним нельзя (то же
- * правило, что у `defaultTemplate`). Имени хватает: справочник пополняет
- * человек, и своему виду он даст своё имя, а не чужое.
+ * Умолчания по **имени** вида — для вещей прежней разметки (G68): ключа у них
+ * нет, а имя есть, и каталог переводит одно в другое терпимым сравнением.
+ * Вид, которого в каталоге нет («Аквариум»), получает запасной квадрат — ровно
+ * как получал до каталога.
  */
 export function workshopObjectDefaultsByName(name) {
-  const key = workshopKindKeyByName(name);
-  return { ...(key ? WORKSHOP_OBJECT_DEFAULTS[key] : WORKSHOP_OBJECT_FALLBACK) };
+  return workshopObjectDefaultsByKey(objectCatalogKeyByName(name));
 }
 
-export function workshopObjectDefaults(project, kindId) {
-  const kind = findSchemeObjectKind(project, kindId);
-  return workshopObjectDefaultsByName(kind ? kind.name : null);
-}
 
 // ——— объект рисуется, а не набирается числами (таск 137, G193) ————————————
 //
@@ -738,7 +715,7 @@ export function workshopObjectDefaults(project, kindId) {
 // это не полоса: у неё нет направления, вдоль которого отмеряют. Положи его
 // полилинией — и в развёртке он встал бы лентой по своему же периметру, то есть
 // дважды. А главное, у заказчика на руках объекты, набранные числами
-// (`WORKSHOP_OBJECT_DEFAULTS`), и форма у них `rect`: заведи контуру свою форму
+// (умолчания каталога), и форма у них `rect`: заведи контуру свою форму
 // — и два прямоугольника на одном чертеже стали бы разными вещами, которые
 // по-разному рисуются, по-разному проецируются на стену и по-разному правятся.
 //
@@ -1245,11 +1222,11 @@ export function workshopListGroups(project, schemeId) {
     }
   }
   const objectRows = schemeObjectsOnScheme(project, schemeId).map((object) => {
-    const kind = findSchemeObjectKind(project, object.kindId);
+    const name = schemeObjectNameOf(project, object);
     return {
       kind: "object",
       id: object.id,
-      label: kind ? kind.name : strings.workshop.object,
+      label: name || strings.workshop.object,
       note:
         object.shape === "polyline"
           ? text("workshop.listBandNote", { depth: object.depthMm })
@@ -1330,7 +1307,11 @@ let workshopDoorSwing = OPENING_SWINGS[0];
 // к тому же, чем рисовали. Та же природа, что у толщины стен и шага сетки —
 // рабочее место, а не объект.
 let workshopAdding = "walls";
-let workshopObjectKindName = strings.schemeObjectKinds.radiator;
+// Что поставит следующий клик — **ключ встроенного каталога** (таск 154).
+// Прежде здесь стояло имя вида из справочника объекта, и у двух объектов с
+// по-разному названными видами это имя значило разное. Радиатор остаётся
+// умолчанием: ради него и столешницы объекты на чертеже и заведены.
+let workshopObjectKey = "radiator";
 // Способ, а не форма (таск 137): прямоугольник ставится кликом по умолчаниям
 // **или** обводится контуром, и это один и тот же `shape: "rect"`.
 let workshopObjectWay = WORKSHOP_OBJECT_WAYS[0];
@@ -1568,13 +1549,10 @@ function createWorkshop({ api, hosts }) {
     doorFields,
   ]);
 
-  const objectKindSelect = uiEl("select", { class: "ui-input" });
-  objectKindSelect.addEventListener("change", () => setObjectKind(objectKindSelect.value));
-  const objectKindAdd = uiButton(strings.workshop.objectKindAdd, {
-    class: "ui-btn workshop__chip",
-    title: strings.workshop.objectKindAddHint,
-    on: { click: () => addObjectKind() },
-  });
+  // Встроенный каталог: категория и плитки с картинкой и названием (таск 154).
+  // Своих видов человек больше не заводит — заказчик решил это прямо: «без
+  // кастомных для объектов, не усложняем».
+  const objectTiles = createObjectTiles({ onPick: (key) => setObjectKey(key) });
   // Три способа поставить объект, а не две формы (таск 137): прямоугольник
   // кликом по умолчаниям, он же контуром по месту, полоса цепочкой.
   const wayButtons = WORKSHOP_OBJECT_WAYS.map((way) =>
@@ -1595,14 +1573,18 @@ function createWorkshop({ api, hosts }) {
   const widthField = workshopField(strings.workshop.objectWidth, objectWidth);
   const depthField = workshopField(strings.workshop.objectDepth, objectDepth);
   const turnField = workshopField(strings.workshop.objectTurn, objectTurn);
+  // Где вещь стоит — на полу, на стене, в полу. Строка стоит над высотами и
+  // отвечает ровно на вопрос «почему у картины от пола 1300, а у стола ноль».
+  const objectMountNote = uiEl("p", { class: "workshop__note" });
   const objectFields = uiEl("div", { class: "workshop__fields" }, [
-    uiEl("div", { class: "workshop__chips" }, [objectKindSelect, objectKindAdd]),
+    objectTiles.node,
     uiEl("div", { class: "workshop__chips" }, wayButtons),
     widthField,
     depthField,
     turnField,
     workshopField(strings.workshop.objectHeight, objectHeight),
     workshopField(strings.workshop.objectFloor, objectFloor),
+    objectMountNote,
     uiEl("p", { class: "workshop__note", text: strings.workshop.objectHeightHint }),
   ]);
 
@@ -2140,39 +2122,31 @@ function createWorkshop({ api, hosts }) {
 
   // ——— объекты на полу ——————————————————————————————————————————————————
 
-  // Справочник видов заводится **по первой надобности и через canvasCommit**
-  // (договор таска 123): объект без чертежа не должен носить девять видов с
-  // собой. Поэтому `ensureSchemeObjectKinds` зовётся здесь, в минуту первого
-  // объекта, а не при открытии окна.
-  function withKinds() {
-    const ready = ensureSchemeObjectKinds(workshopEnsureSheet(project(), schemeId).project);
-    return { project: ready.project, added: ready.added };
+  // Справочника видов вещь каталога больше не заводит (таск 154): её имя и
+  // габариты лежат в сборке, а в объект пишется один ключ. Прежние виды в
+  // чужом объекте при этом остаются на месте — ни одной записи их справочника
+  // сборка не трогает (G68).
+  function withSheet() {
+    return workshopEnsureSheet(project(), schemeId).project;
   }
 
-  function currentKindId(source) {
-    const list = schemeObjectKindsInOrder(source);
-    if (list.length === 0) return null;
-    const found = list.find((kind) => kind.name === workshopObjectKindName);
-    return (found || list[0]).id;
-  }
-
-  function setObjectKind(name) {
-    workshopObjectKindName = name;
+  function setObjectKey(key) {
+    workshopObjectKey = key;
     workshopObjectSizes = {};
     const object = selectedObject();
     if (!object) {
-      // Способ идёт за видом: столешницу тянут полосой, радиатор набирают
-      // прямоугольником — и спрашивать об этом отдельно незачем. Контур у вида
+      // Способ идёт за вещью: столешницу тянут полосой, радиатор набирают
+      // прямоугольником — и спрашивать об этом отдельно незачем. Контур
       // умолчанием не бывает: обводить или набрать числами — это решение
       // человека, а не свойство радиатора.
-      workshopObjectWay = workshopWayOfShape(workshopObjectDefaultsByName(name).shape);
+      workshopObjectWay = workshopWayOfShape(workshopObjectDefaultsByKey(key).shape);
       sync();
       return;
     }
-    const kindId = currentKindId(project());
-    if (!kindId) return;
+    // Выделенной вещи плитка меняет саму вещь: прежний вид из справочника
+    // уходит вместе со своим полем, а имя на чертеже становится каталожным.
     try {
-      commit(updateSchemeObject(project(), object.id, { kindId }).project, strings.history.objectEdit);
+      commit(updateSchemeObject(project(), object.id, { catalogKey: key }).project, strings.history.objectEdit);
     } catch (error) {
       fail(error);
       sync();
@@ -2201,29 +2175,16 @@ function createWorkshop({ api, hosts }) {
     return tool === "objects" && workshopObjectWay !== "rect";
   }
 
-  async function addObjectKind() {
-    const name = await uiPrompt({ title: strings.workshop.objectKindAddTitle });
-    if (!name) return;
-    const ready = withKinds();
-    let next = ready.project;
-    try {
-      const added = addSchemeObjectKind(next, { name });
-      next = added.project;
-      workshopObjectKindName = added.schemeObjectKind.name;
-      workshopObjectSizes = {};
-      canvasCommit(project(), next, strings.history.objectKindAdd, { schemeId });
-    } catch (error) {
-      fail(error);
-    }
-    sync();
+  // Ключ той вещи, о которой сейчас речь: у выделенной — её собственный (у
+  // прежней выведенный из имени), без выделения — выбранный плиткой.
+  function objectKey(object) {
+    return object ? schemeObjectKeyOf(project(), object) : workshopObjectKey;
   }
 
-  // Умолчания берутся по **имени** вида, а не по его id: до первого объекта
-  // справочника в объекте ещё нет (он заводится вместе с объектом), и id
-  // взяться неоткуда — а показать размеры радиатора надо уже сейчас.
-  function objectSizes(source, kindId) {
-    const kind = kindId ? findSchemeObjectKind(source, kindId) : null;
-    const defaults = workshopObjectDefaultsByName(kind ? kind.name : workshopObjectKindName);
+  // Умолчания берутся у каталога по ключу. Поправленное руками старше
+  // умолчаний — `workshopObjectSizes` ложится сверху и живёт до смены вещи.
+  function objectSizes(object) {
+    const defaults = workshopObjectDefaultsByKey(objectKey(object));
     return { ...defaults, ...workshopObjectSizes, shape: workshopShapeOfWay(workshopObjectWay) };
   }
 
@@ -2233,10 +2194,8 @@ function createWorkshop({ api, hosts }) {
    * второй способ, а не замена первому).
    */
   function placeObject(pointMm, pointsMm, rect) {
-    const ready = withKinds();
-    const kindId = currentKindId(ready.project);
-    if (!kindId) return;
-    const sizes = objectSizes(ready.project, kindId);
+    const ready = withSheet();
+    const sizes = objectSizes(null);
     const fields = rect
       ? { shape: "rect", ...rect }
       : sizes.shape === "polyline"
@@ -2249,15 +2208,15 @@ function createWorkshop({ api, hosts }) {
             turnDeg: sizes.turnDeg || 0,
           };
     try {
-      const added = addSchemeObject(ready.project, {
+      const added = addSchemeObject(ready, {
         schemeId,
-        kindId,
+        catalogKey: workshopObjectKey,
         heightMm: sizes.heightMm,
         heightAboveFloorMm: sizes.heightAboveFloorMm,
         ...fields,
       });
-      // Как и проём, поставленный объект себя не выделяет: иначе выбор вида в
-      // колонке стал бы правкой только что поставленного.
+      // Как и проём, поставленный объект себя не выделяет: иначе выбор вещи в
+      // колонке стал бы правкой только что поставленной.
       commit(added.project, strings.history.objectAdd);
       return added.schemeObject;
     } catch (error) {
@@ -3319,10 +3278,7 @@ function createWorkshop({ api, hosts }) {
 
   // Ширина полосы нового объекта: из умолчаний вида, пока его не поправили.
   function bandWidthMm() {
-    const ready = project();
-    const kindId = currentKindId(ready);
-    const sizes = objectSizes(ready, kindId);
-    return Number(sizes.depthMm) || 600;
+    return Number(objectSizes(null).depthMm) || 600;
   }
 
   // ——— панель: значения и доступность ———
@@ -3498,22 +3454,16 @@ function createWorkshop({ api, hosts }) {
 
   function syncObject(current, object) {
     subjectHead.textContent = strings.workshop.object;
-    const kinds = schemeObjectKindsInOrder(current);
-    // Справочник видов заводится только когда объект появляется, поэтому до
-    // первого объекта выбирать не из чего — в списке стоят стартовые девять
-    // имён, а записаны они будут вместе с первым объектом.
-    const names = kinds.length > 0 ? kinds.map((item) => item.name) : Object.values(strings.schemeObjectKinds);
-    const listKey = names.join("|");
-    if (objectKindSelect.dataset.key !== listKey) {
-      objectKindSelect.dataset.key = listKey;
-      objectKindSelect.replaceChildren(
-        ...names.map((name) => uiEl("option", { value: name, text: name })),
-      );
-    }
-    const kindName = object
-      ? (findSchemeObjectKind(current, object.kindId) || { name: "" }).name
-      : workshopObjectKindName;
-    if (names.includes(kindName)) objectKindSelect.value = kindName;
+    // Что горит в каталоге: у выделенной вещи — её ключ, без выделения — тот,
+    // которым поставят следующую. У вещи прежней разметки ключ выведен из
+    // имени вида, и плитка горит у той вещи, которой она и была.
+    const key = objectKey(object);
+    objectTiles.update({ key });
+    // Где вещь стоит. У вещи вне каталога этого ответа нет — и строка молчит,
+    // а не выдумывает «на полу».
+    const mount = object ? schemeObjectMountOf(current, object) : (objectCatalogEntry(key) || {}).mount;
+    objectMountNote.textContent = mount ? strings.schemeObjectMounts[mount] || "" : "";
+    objectMountNote.hidden = !mount;
     // Выделенный объект **не помнит**, нарисовали его контуром или набрали
     // числами, — и врать об этом нельзя: у прямоугольника горит
     // «Прямоугольник», а способ выбирают для следующего.
@@ -3523,7 +3473,7 @@ function createWorkshop({ api, hosts }) {
       button.className = "ui-btn workshop__chip" + (WORKSHOP_OBJECT_WAYS[index] === way ? " is-on" : "");
       button.disabled = Boolean(object);
     });
-    const sizes = object || objectSizes(current, currentKindId(current));
+    const sizes = object || objectSizes(null);
     widthField.hidden = shape === "polyline";
     turnField.hidden = shape === "polyline";
     const depthLabel = depthField.querySelector(".workshop__label");
@@ -3539,11 +3489,19 @@ function createWorkshop({ api, hosts }) {
     // У выделенного объекта в строке стоит его верх над полом, а без выделения
     // — слова того способа, которым встанет следующий: они разные, и общая
     // подсказка врала бы одному из трёх.
-    subjectNote.textContent = object
-      ? top === null
-        ? strings.workshop.objectFullHeight
-        : text("workshop.objectTop", { top })
-      : strings.workshop["wayNote_" + way];
+    //
+    // Отдельный случай — вещь прежней разметки, которой в каталоге нет вовсе
+    // («Аквариум»): ни одна плитка не горит, и молчать об этом нельзя — иначе
+    // человек решит, что каталог сломался. Строка называет её вид и говорит,
+    // что выбор плитки её заменит.
+    const legacy = object && !key ? schemeObjectNameOf(current, object) : "";
+    subjectNote.textContent = legacy
+      ? text("workshop.objectLegacy", { name: legacy })
+      : object
+        ? top === null
+          ? strings.workshop.objectFullHeight
+          : text("workshop.objectTop", { top })
+        : strings.workshop["wayNote_" + way];
   }
 
   /**

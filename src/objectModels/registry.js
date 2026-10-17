@@ -20,12 +20,14 @@
 //
 // ——— откуда у вещи чертежа модель ———
 //
-// По ключу встроенного каталога (таск 154), а пока его нет — по имени вида,
-// терпимым сравнением. Подробности и слова — в `objects.js`.
+// По ключу встроенного каталога (таск 154), а у вещи прежней разметки ключа
+// нет — там он выводится из имени вида, и переводит имя в ключ сам каталог
+// (`objectCatalogKeyByName`), а не второй список слов здесь.
+import { objectCatalogKeyByName } from "../objectCatalog.js";
 import { MODELS_CLIMATE } from "./climate.js";
 import { MODELS_LIGHT } from "./light.js";
 import { MODELS_NET } from "./net.js";
-import { MODEL_OBJECT_WORDS, MODELS_OBJECTS } from "./objects.js";
+import { MODELS_OBJECTS } from "./objects.js";
 import { MODELS_POWER } from "./power.js";
 import { MODELS_SENSE } from "./sense.js";
 import { MODELS_THINGS } from "./things.js";
@@ -65,11 +67,6 @@ for (const family of MODEL_FAMILIES) {
   }
 }
 
-// Слова ищутся от самого длинного корня: «Столешница» содержит и «стол».
-const MODEL_WORDS = Object.entries(MODEL_OBJECT_WORDS)
-  .flatMap(([key, words]) => words.map((word) => ({ key, word })))
-  .sort((left, right) => right.word.length - left.word.length);
-
 /** Модель по ключу. `null` — такого ключа нет, и вещь рисуется габаритом. */
 export function objectModelByKey(key) {
   return key && MODELS[key] ? MODELS[key] : null;
@@ -93,22 +90,14 @@ export function objectModelFaceCount(model) {
 }
 
 /**
- * Модель вещи чертежа по **имени вида** — мост до встроенного каталога.
+ * Модель вещи чертежа по **имени прежнего вида** — мост для уже размеченных
+ * объектов (G68).
  *
- * Сравнение терпимое, как у лестницы в объёме (`volumeStairKind`): регистр,
- * «ё» и пробелы по краям не считаются, внутри строки ищется корень. Поэтому
- * «Шкаф», «шкафы» и «Шкаф в прихожей» узнаются все, а переименованный в
- * «Пенал» — никто, и тогда вещь честно рисуется габаритом, как рисовалась до
- * моделей.
+ * Имя в ключ переводит каталог, терпимо (регистр, «ё», пробелы по краям,
+ * корень внутри строки): «Шкаф», «шкафы» и «Шкаф в прихожей» узнаются все, а
+ * переименованный в «Пенал» — никто, и тогда вещь честно рисуется габаритом,
+ * как рисовалась до моделей.
  */
 export function objectModelForName(name) {
-  const plain = String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, "е");
-  if (plain === "") return null;
-  for (const entry of MODEL_WORDS) {
-    if (plain.includes(entry.word)) return objectModelByKey(entry.key);
-  }
-  return null;
+  return objectModelByKey(objectCatalogKeyByName(name));
 }
