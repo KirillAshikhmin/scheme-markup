@@ -12,6 +12,7 @@ import {
   CODE_MAX_LENGTH,
   BLOCK_MODES,
   LINE_STYLES,
+  MARK_AXIS_FLAT,
   MARK_KINDS,
   MARK_KIND_COMMENT,
   SHAPE_NAMES,
@@ -31,6 +32,7 @@ import {
   colorsInUse,
   findType,
   freeColor,
+  typeAxisSeat,
   typeChannels,
   typeKindOf,
   typesInOrder,
@@ -837,13 +839,20 @@ export function openTypesDictionary(api) {
    */
   function sizesButton(type) {
     const sizes = typeSizes(type);
-    const summary = markSizesSummary(sizes);
+    // Посадка типа — по его же умолчанию высоты над полом (таск 161,
+    // `typeAxisSeat`): тип без неё даёт метки под потолком, и подписывать его
+    // размеры стенными именами значило бы соврать в справочнике ровно так,
+    // как врала карточка люстры. Подсказка берётся оттуда же: в ней написано,
+    // чем посадка решается.
+    const seat = typeAxisSeat(type);
+    const summary = markSizesSummary(sizes, seat);
+    const hint = seat === MARK_AXIS_FLAT ? strings.markSizes.flat.typeHint : strings.markSizes.typeHint;
     const button = uiButton(summary || strings.markSizes.typeButton, {
       class: "ui-btn dict__sizes" + (summary ? " is-set" : ""),
       // Колонка у кнопки постоянной ширины (D30), и длинная подпись в ней
       // ужимается многоточием — поэтому она же стоит в подсказке целиком:
       // числа размеров не должны пропадать из-за меры колонки.
-      title: summary ? summary + " · " + strings.markSizes.typeHint : strings.markSizes.typeHint,
+      title: summary ? summary + " · " + hint : hint,
       on: {
         click: async () => {
           const picked = await openTypeSizesPicker(project(), type.id);

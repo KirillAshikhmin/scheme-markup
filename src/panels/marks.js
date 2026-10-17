@@ -21,6 +21,7 @@ import {
   labelOf,
   linkedMarkIds,
   markControlIds,
+  markAxisSeat,
   markControls,
   markControlledBy,
   markControlsByChannel,
@@ -539,7 +540,9 @@ export function marksRowModel(project, row, options = {}) {
     original: mark.original || "",
     // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
     // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
-    sizes: markSizesSummary(mark),
+    // Посадка решает, какое из двух полей зовётся высотой (таск 161): у
+    // потолочной люстры «В» стоит у того числа, которое свисает вниз.
+    sizes: markSizesSummary(mark, markAxisSeat(project, mark)),
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
     // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
