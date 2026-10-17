@@ -239,6 +239,28 @@ test("трёхфазная розетка не спутается с обычн�
   assert.ok(share > MIN_DIFFERENCE * 2, "розетки расходятся всего на " + Math.round(share * 100) + "% знака");
 });
 
+// Отдельная проверка, названная в тикете таска 160: мастер-выключатель гасит
+// весь объект, и спутать его с обычным выключателем нельзя. Круг против
+// квадрата — разные силуэты, и расходятся они не на пороге, а в разы выше его.
+test("мастер-выключатель не спутается ни с одним выключателем на плане", () => {
+  const { categories, markTypes } = defaultTemplate();
+  const byId = new Map(categories.map((category) => [category.id, category]));
+  const master = markTypes.find((type) => type.code === "МВ");
+  const shapeOf = (type) => type.shape || byId.get(type.categoryId).shape;
+  const neighbours = markTypes.filter(
+    (type) => type.categoryId === master.categoryId && type.code !== "МВ" && (type.kind || "point") === "point",
+  );
+  assert.equal(neighbours.length, 5, "состав выключателей разошёлся со справочником");
+  const mine = inkOf(shapeOf(master));
+  for (const type of neighbours) {
+    const share = difference(mine, inkOf(shapeOf(type))) / GLYPH_AREA;
+    assert.ok(
+      share > MIN_DIFFERENCE * 2,
+      "МВ и " + type.code + " расходятся всего на " + Math.round(share * 100) + "% знака",
+    );
+  }
+});
+
 test("старые обозначения рисуются как раньше: заливки и засечки у них не появилось", () => {
   assert.equal(shapeGeometry("circle-cross", 0, 0, 10).cross, true);
   assert.equal(shapeGeometry("circle", 0, 0, 10).cross, false);
@@ -412,6 +434,9 @@ test("выключатели, розетка, климат и щит нарис�
     ["В", "ВВ", "ВВВ", "П", "ПП"].map(shapeOf),
     ["square", "square-bar", "square-bar-two", "square-chevron", "square-cross"],
   );
+  // Шестой — мастер-выключатель, и он из квадратной семьи выпадает нарочно:
+  // он гасит всё, и расходиться с клавишами обязан силуэтом, а не засечкой.
+  assert.equal(shapeOf("МВ"), "circle-slash");
   // Розетки: евророзетка — круг с двумя отверстиями, трёхфазная — с тремя.
   assert.deepEqual(["Р", "РC"].map(shapeOf), ["circle-socket", "circle-triple"]);
   // Климат: бризер — полукруг с точкой, кондиционер — круг с термометром,

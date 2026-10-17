@@ -70,7 +70,7 @@ import {
 
 // Стартовый справочник — справочник рабочего объекта заказчика. Его слова:
 // «справочник типов в общий возьми из этого проекта». Тринадцать категорий и
-// сорок восемь типов пришпилены целиком: это данные пользователя, и правка
+// сорок девять типов пришпилены целиком: это данные пользователя, и правка
 // сборки не должна задеть их ни на букву, ни на знак.
 //
 // Коды у него разошлись с прежним шаблоном, и это не ошибка разбора: `П` —
@@ -190,7 +190,9 @@ test("повтор, заведённый руками, предупрежден�
   const open = (source) => validate(source).filter((problem) => !problemAccepted(source, problem.key));
 
   // Развёл шесть светов по своим знакам — под кругом с крестом остался один «Т».
-  const free = ["circle-slash", "circle-slash-two", "circle-chevron", "square-ring", "square-grid", "trapezoid"];
+  // Формы свободные: ни один тип шаблона их не носит. «Круг с клавишей» из
+  // этого списка ушёл в таске 160 — его взял мастер-выключатель.
+  const free = ["circle-bar", "circle-slash-two", "circle-chevron", "square-ring", "square-grid", "trapezoid"];
   ["С", "ПК", "ПС", "ППл", "ЛЮ", "Бр"].forEach((code, index) => {
     const type = project.markTypes.find((item) => item.code === code);
     project = updateType(project, type.id, { shape: free[index] }).project;
@@ -244,12 +246,13 @@ test("общая база приносит типы тихо, а открыты�
   assert.ok(asked[0].message.includes("НТ") && asked[0].message.includes("ЛЮ"));
 });
 
-test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок восемь типов", () => {
+test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок девять типов", () => {
   const template = defaultTemplate();
   assert.equal(template.categories.length, 12);
   // Сорок восьмой — «ВЕНТ — Вентиляция» в «Климате»: заказчик добавил его
-  // в таске 147 (G206).
-  assert.equal(template.markTypes.length, 48);
+  // в таске 147 (G206). Сорок девятый — «МВ — Мастер-выключатель» в
+  // «Выключателях»: таск 160 (G239).
+  assert.equal(template.markTypes.length, 49);
 
   // prettier-ignore
   assert.deepEqual(
@@ -277,7 +280,7 @@ test("стартовый справочник — справочник зака�
     ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
      "ПКШ", "ЛЮ", "П", "ПП", "Н", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
      "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
-     "КВ", "ПЛ", "ПЗ", "КАМ", "ВЕНТ"],
+     "КВ", "ПЛ", "ПЗ", "КАМ", "ВЕНТ", "МВ"],
   );
   // Названия — данные заказчика, поэтому пришпилены целиком, вместе с его
   // заглавными буквами посреди названия и сокращением «эл приводом».
@@ -330,6 +333,7 @@ test("стартовый справочник — справочник зака�
     ПЗ: "Подсветка зеркала",
     КАМ: "Камера",
     ВЕНТ: "Вентиляция",
+    МВ: "Мастер-выключатель",
   });
   assert.ok(template.markTypes.every((t) => t.blockMode === "each"));
 
@@ -343,14 +347,17 @@ test("стартовый справочник — справочник зака�
   );
   // Выключатели — каждый своим квадратом: клавиши на знаке считают глазами.
   // Порядок здесь — порядок справочника заказчика, а не порядок числа клавиш.
+  // Мастер-выключатель из квадратной семьи выпадает нарочно: он гасит всё, и
+  // круг с клавишей расходится с «В» силуэтом, а не засечкой (таск 160).
   assert.deepEqual(
-    template.markTypes.filter((t) => ["В", "ВВ", "ВВВ", "П", "ПП"].includes(t.code)).map((t) => [t.code, t.shape]),
+    template.markTypes.filter((t) => ["В", "ВВ", "ВВВ", "П", "ПП", "МВ"].includes(t.code)).map((t) => [t.code, t.shape]),
     [
       ["В", "square"],
       ["ВВ", "square-bar"],
       ["П", "square-chevron"],
       ["ПП", "square-cross"],
       ["ВВВ", "square-bar-two"],
+      ["МВ", "circle-slash"],
     ],
   );
   // Каналы приехали из объекта заказчика: у остальных типов один.
@@ -395,13 +402,53 @@ test("вентиляция: ВЕНТ стоит в «Климате» со св�
   assert.equal(template.markTypes.find((type) => type.code === "ДП").shape, "circle-fan");
 });
 
+// Мастер-выключатель (таск 160, G239). Слова заказчика: «Мастер выключатель -
+// это тоже выключатель, а изображён как светильник, надо поменять». Его
+// собственный тип стоял в «Свете» со знаком «Круг с подвесом», и по лестнице
+// ADR 005 это давало ему плафон. В стартовом справочнике типа не было вовсе —
+// теперь есть, и стоит он там, где и должен.
+test("мастер-выключатель стоит в «Выключателях» со своим знаком и числами выключателя", () => {
+  const template = defaultTemplate();
+  const master = template.markTypes.find((type) => type.code === "МВ");
+  assert.ok(master, "типа МВ в шаблоне нет");
+  assert.equal(master.name, "Мастер-выключатель");
+  assert.equal(master.kind, "point", "мастер-выключатель ставится точкой, а не линией");
+  const switches = template.categories.find((category) => category.name === "Выключатели");
+  assert.equal(master.categoryId, switches.id, "МВ заведён не в «Выключателях»");
+
+  // Числа — как у остальных выключателей: механизм в подрозетнике, рамка
+  // наружу на 10, посадка 900. Клавиша одна — канал один.
+  assert.deepEqual(master.sizes, { length: 80, width: 80, depth: 10, heightAboveFloor: 900 });
+  assert.equal(master.channels, 1);
+
+  // Знак свободен и в своей категории, и во всех чужих: иначе чистый объект
+  // получил бы новое предупреждение о повторе знака (G145).
+  assert.equal(master.shape, "circle-slash");
+  assert.deepEqual(
+    template.markTypes.filter((type) => type.shape === master.shape).map((type) => type.code),
+    ["МВ"],
+    "знак мастер-выключателя делят с ним другие типы",
+  );
+  assert.equal(
+    template.categories.some((category) => category.shape === master.shape),
+    false,
+    "знак мастер-выключателя совпал со знаком категории",
+  );
+  // И знак обычного выключателя остался своим — он никуда не поехал.
+  assert.equal(template.markTypes.find((type) => type.code === "В").shape, "square");
+
+  // Поля `view` у типа нет: изображение и модель приходят формой знака — тем же
+  // путём, которым их получит тип, заведённый руками.
+  assert.equal(Object.prototype.hasOwnProperty.call(master, "view"), false);
+});
+
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
   const project = createProject();
   // Версия 3: контуры помещений, ручная правка помещения, цвет помещения и
   // вид типа — точка или линия.
   assert.equal(project.formatVersion, 4);
   assert.equal(project.categories.length, 12);
-  assert.equal(project.markTypes.length, 48);
+  assert.equal(project.markTypes.length, 49);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
   assert.deepEqual(project.counters, {});
@@ -1465,7 +1512,7 @@ test("общая база: пустому справочнику предлаг�
       "Электроприборы", "Кинотеатр", "Датчики", "Щит", "Сантехника",
     ],
   );
-  assert.equal(offeredCodes(offer).length, 48);
+  assert.equal(offeredCodes(offer).length, 49);
   assert.equal(offer[0].types[0].code, "Т");
   assert.equal(offer[0].category.existingId, null, "чужой категории в объекте ещё нет");
 

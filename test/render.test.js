@@ -355,7 +355,7 @@ test("справочник упорядочен один раз: категор�
   assert.deepEqual(groups[0].types.map((type) => type.code), [
     "Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "ППл", "ПКШ", "ЛЮ", "Н", "Бр", "ЛВ", "ПЛ", "ПЗ",
   ]);
-  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "П", "ПП", "ВВВ"]);
+  assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "П", "ПП", "ВВВ", "МВ"]);
   assert.deepEqual(groups[9].types.map((type) => type.code), ["ДП", "ДД", "ДО", "ДПр"]);
   assert.deepEqual(groups[10].types.map((type) => type.code), ["Щ", "ЩС"]);
 });

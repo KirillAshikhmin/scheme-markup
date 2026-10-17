@@ -1854,14 +1854,16 @@ test("вещь без размеров рисуется запасным габ�
   const scene = roomScene();
   const category = scene.project.categories[0];
   // Тип заказчика как он есть: своя форма, размеров нет ни одного, высота
-  // записана у самой метки — то есть вещь висит на своей стене.
+  // записана у самой метки — то есть вещь висит на своей стене. Код здесь
+  // «МВЗ»: сам «МВ» с таска 160 живёт в стартовом справочнике и со своими
+  // размерами, а запас проверяется как раз на типе без них.
   const added = addType(scene.project, {
-    code: "МВ",
-    name: "Мастер-выключатель",
+    code: "МВЗ",
+    name: "Мастер-выключатель заказчика",
     categoryId: category.id,
     shape: "circle-rays",
   });
-  const put = markAt(added.project, scene.schemeId, "МВ", [{ x: 0, y: -1100 }]);
+  const put = markAt(added.project, scene.schemeId, "МВЗ", [{ x: 0, y: -1100 }]);
   const withHeight = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 1400 }).project;
   const before = JSON.stringify(withHeight);
   const built = volumeScene(withHeight, scene.schemeId, {});
@@ -1885,7 +1887,8 @@ test("незнакомая форма без изображения рисует
   const scene = roomScene();
   const category = scene.project.categories[0];
   // Звезду ни одно изображение объекта не разбирает (таких форм в сетке
-  // четырнадцать из пятидесяти с лишним) — остаётся рамка.
+  // тринадцать из пятидесяти с лишним: круг с клавишей ушёл к выключателю в
+  // таске 160) — остаётся рамка.
   assert.ok(!objectViewShapes().includes("star"));
   const added = addType(scene.project, {
     code: "ЩЩ",

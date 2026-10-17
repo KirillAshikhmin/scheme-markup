@@ -199,7 +199,43 @@ test("у каждого точечного типа стартового спр�
     else covered += 1;
   }
   assert.deepEqual(missing, [], "тип без модели");
-  assert.equal(covered, 43, "сорок три точечных типа из сорока восьми");
+  assert.equal(covered, 44, "сорок четыре точечных типа из сорока девяти");
+});
+
+// Мастер-выключатель (таск 160, G239). Слова заказчика: «Мастер выключатель -
+// это тоже выключатель, а изображён как светильник, надо поменять». Светильник
+// он получал по лестнице: знак «Круг с подвесом» разбирает изображение `lamp`,
+// а на имя изображения садится модель — отсюда плафон в объёме.
+//
+// Лечится это знаком, и только им: поля `view` в интерфейсе нет, справочник
+// правят обозначением. Поэтому «Круг с клавишей» обязан приводить за собой
+// выключателя — и типу из стартового справочника, и типу, заведённому руками,
+// одинаково.
+test("мастер-выключатель — выключатель и на развёртке, и в объёме", () => {
+  const view = objectViewForShape("circle-slash");
+  assert.ok(view, "у круга с клавишей нет изображения — развёртка нарисует знак");
+  assert.equal(view.name, "switch1", "круг с клавишей разобран не выключателем: " + view.name);
+  const model = objectModelByKey(view.name);
+  assert.ok(model, "у изображения выключателя нет модели");
+  assert.equal(model.key, "switch1");
+  // Клавиша в модели есть, плафона нет: имена тел говорят, что собрано.
+  const bodies = model.parts.map((part) => part.name);
+  assert.ok(bodies.includes("frame"), "у выключателя нет рамки: " + bodies.join(", "));
+  assert.deepEqual(bodies, objectModelByKey("switch1").parts.map((part) => part.name));
+  assert.notEqual(model, objectModelByKey("lamp"), "модель мастер-выключателя — светильник");
+
+  // Тип стартового справочника проходит ту же лестницу целиком: имени
+  // изображения у него нет, и ответ даёт форма знака.
+  const template = defaultTemplate();
+  const categories = new Map(template.categories.map((item) => [item.id, item]));
+  const master = template.markTypes.find((type) => type.code === "МВ");
+  assert.equal(typeObjectView(master), null, "у МВ появилось имя изображения — лестница короче, чем у его типа");
+  const shape = master.shape || categories.get(master.categoryId).shape;
+  assert.equal(objectViewForShape(shape).name, "switch1");
+
+  // А круг с подвесом остался светильником: знак заказчика никуда не поехал,
+  // и его объект до смены знака выглядит ровно как выглядел (G68).
+  assert.equal(objectViewForShape("circle-rays").name, "lamp");
 });
 
 test("у каждой вещи каталога есть модель, и девять прежних видов узнаются по имени", () => {
