@@ -10,6 +10,7 @@ import {
   fillTypeSizes,
   MARK_DIMENSION_FIELDS,
   MARK_DIMENSION_MAX,
+  MARK_DIMENSION_SIGNED,
   MARK_DIMENSION_UNIT,
   addMark,
   addScheme,
@@ -56,14 +57,46 @@ test("единица видна в каждой подписи и написан
 
 test("подпись кнопки показывает заданные размеры и молчит о незаданных", () => {
   assert.equal(markSizesSummary(markWith(null)), "");
-  assert.equal(markSizesSummary(markWith({ length: 600, width: 400, heightAboveFloor: 900 })), "Д 600 · Ш 400 · В 900 мм");
+  // Габарит пишется как на чертеже — Д · Ш · В, — и посадка идёт за ним. У
+  // высоты над полом буквы нет: «В» с таска 158 занято высотой вещи, и два
+  // разных числа под одной буквой в одной строке читались бы как одно.
+  assert.equal(
+    markSizesSummary(markWith({ length: 900, depth: 200, width: 300, heightAboveFloor: 2300 })),
+    "Д 900 · Ш 200 · В 300 · от пола 2300 мм",
+  );
   // Заданные показываются, пустые пропускаются — а не встают прочерком.
-  assert.equal(markSizesSummary(markWith({ heightAboveFloor: 300 })), "В 300 мм");
-  assert.equal(markSizesSummary(markWith({ length: 1500, heightAboveFloor: 0 })), "Д 1500 · В 0 мм");
+  assert.equal(markSizesSummary(markWith({ heightAboveFloor: 300 })), "от пола 300 мм");
+  assert.equal(markSizesSummary(markWith({ length: 1500, heightAboveFloor: 0 })), "Д 1500 · от пола 0 мм");
+  // Вертикальная лента заказчика: «надо указать высоту от пола до потолка».
+  assert.equal(markSizesSummary(markWith({ length: 40, width: 2700 })), "Д 40 · В 2700 мм");
+  // Утопленное — минус у ширины: щит в нише уходит за плоскость стены.
+  assert.equal(markSizesSummary(markWith({ depth: -30 })), "Ш -30 мм");
   // Дробное в подписи — через запятую, как его и набирают.
-  assert.equal(markSizesSummary(markWith({ width: 1.5 })), "Ш 1,5 мм");
+  assert.equal(markSizesSummary(markWith({ width: 1.5 })), "В 1,5 мм");
   // Метки нет вовсе (окно открыли, а метку успели удалить) — пустая строка.
   assert.equal(markSizesSummary(null), "");
+});
+
+// ——— имена осей (таск 158, требование G233) ——————————————————————————————
+//
+// Слова заказчика: «у меток ещё должна быть характеристика Высота. И в
+// интерфейсе сделай 3 поля рядом : Длина, Ширина, Высота». Высота в объекте
+// лежала с самого начала — звалась «Шириной», а ширина звалась «Выступом от
+// стены». Тест держит подписи: разойдись они с осями снова, и чертёж прочтут
+// неверно, а заметят это на монтаже.
+test("подписи полей названы по осям, а тройка габаритов стоит перед посадкой", () => {
+  assert.deepEqual(MARK_DIMENSION_FIELDS, ["length", "depth", "width", "heightAboveFloor"]);
+  assert.equal(markSizesLabel("length"), "Длина, мм");
+  assert.equal(markSizesLabel("depth"), "Ширина, мм");
+  assert.equal(markSizesLabel("width"), "Высота, мм");
+  assert.equal(markSizesLabel("heightAboveFloor"), "Высота над полом, мм");
+  // Высота над полом — не габарит, и в тройку не входит: окно ставит её своей
+  // строкой под ней.
+  assert.deepEqual(MARK_DIMENSION_FIELDS.slice(0, 3), ["length", "depth", "width"]);
+  // Минус бывает только у ширины: утопленное — та же ось в другую сторону.
+  assert.deepEqual(MARK_DIMENSION_SIGNED, ["depth"]);
+  assert.equal(markSizesParse({ depth: "-30" }).values.depth, -30);
+  assert.deepEqual(markSizesParse({ width: "-30" }).invalid.map((item) => item.field), ["width"]);
 });
 
 test("окно разбирает поля по правилам модели: пусто — не задано, ноль — значение", () => {
