@@ -1848,12 +1848,21 @@ export function volumeLinkLines(links, anchorOf, out = []) {
  * `options.openDoorIds` — какие двери раскрыты (G207). Без него закрыты все, и
  * это умолчание: состояние двери живёт в сеансе окна и в объект не попадает
  * никогда (G68). Поэтому оно и приходит аргументом сборки, а не полем проёма.
+ *
+ * `options.hiddenObjectIds` — вещи, спрятанные с экрана (таск 154, G223). Той
+ * же природы, что раскрытые двери: выбор глаз, живущий в сеансе и в настройках
+ * браузера. Спрятанной вещи в сцене нет **совсем** — ни граней, ни
+ * препятствия, ни лестницы: сквозь невидимый шкаф человек идёт, не понимая,
+ * обо что споткнулся, а лестница, которой не видно, не должна спрашивать про
+ * этаж.
  */
 export function volumeScene(project, schemeId, options = {}) {
   const scheme = findScheme(project, schemeId);
   if (!scheme) return null;
   const walls = wallsOnScheme(project, schemeId);
-  const objects = schemeObjectsOnScheme(project, schemeId);
+  const hidden =
+    options.hiddenObjectIds instanceof Set ? options.hiddenObjectIds : new Set(options.hiddenObjectIds || []);
+  const objects = schemeObjectsOnScheme(project, schemeId).filter((object) => !hidden.has(object.id));
   const notes = [];
   if (walls.length === 0 && objects.length === 0) {
     // Без чертежа метку ставить не на что: ни стен, ни пола, ни потолка. Это
@@ -1985,7 +1994,7 @@ export function volumeScene(project, schemeId, options = {}) {
     // Лестницы схемы (таск 149): по ним окно спрашивает про этаж. Лежат в
     // сцене, а не ищутся на каждом шаге, — спрашивается это на каждом шаге, а
     // меняется только вместе с чертежом, то есть вместе со всей сценой.
-    stairs: volumeStairs(project, schemeId),
+    stairs: volumeStairs(project, schemeId).filter((stair) => !hidden.has(stair.objectId)),
     marks: marks.placed,
     unplaced: marks.unplaced,
     // Нарисованные запасным габаритом (G215): вещь в сцене есть, а размер её

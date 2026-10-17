@@ -41,7 +41,7 @@ import {
   planPixelsPerMeter,
   pointInOutline,
   schemeObjectCorners,
-  schemeObjectKindsInOrder,
+  schemeObjectNameOf,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
   segmentDistanceMm,
@@ -4909,12 +4909,20 @@ function drawingOpeningsByWall(project, schemeId) {
  * `options.handle` — чем рисовать ручку; без неё ручек нет.
  * `options.labels` — `false` рисует чертёж без слов (буквы углов, имена
  *   объектов): так его просит миникарта объёма.
+ * `options.hiddenObjectIds` — вещи, спрятанные с экрана поштучно (таск 154,
+ *   G223). Список приходит **доводом, а не из объекта**: прятать их — выбор
+ *   глаз, и в выгрузках его нет вовсе. Кто не передал — у того на листе все
+ *   вещи, как и было.
  */
 export function drawDrawing(ctx, options = {}) {
   const { project, schemeId, bridge } = options;
   if (!project || !schemeId || !bridge) return;
   const walls = wallsOnScheme(project, schemeId);
-  const objects = options.objects === false ? [] : schemeObjectsOnScheme(project, schemeId);
+  const hidden = options.hiddenObjectIds instanceof Set ? options.hiddenObjectIds : new Set(options.hiddenObjectIds || []);
+  const objects =
+    options.objects === false
+      ? []
+      : schemeObjectsOnScheme(project, schemeId).filter((object) => !hidden.has(object.id));
   if (walls.length === 0 && objects.length === 0) return;
   const active = options.active || null;
   // `labels: false` — чертёж без слов: ни букв углов, ни подписей объектов.
@@ -4922,11 +4930,12 @@ export function drawDrawing(ctx, options = {}) {
   // «только схема и местоположение»: на накладке в двести точек подписи
   // превращаются в кашу, а читают по ней не имена, а своё место.
   const labels = options.labels !== false;
-  const kinds = new Map(schemeObjectKindsInOrder(project).map((kind) => [kind.id, kind]));
   for (const object of objects) {
     drawDrawingObject(ctx, bridge, options.objectAt ? options.objectAt(object) : object, {
       active: active && active.kind === "object" && active.id === object.id,
-      name: labels ? (kinds.get(object.kindId) || {}).name || "" : "",
+      // Имя вещи спрашивается у модели: у вещи каталога оно каталожное, у
+      // прежней — её собственное из справочника объекта (таск 154).
+      name: labels ? schemeObjectNameOf(project, object) : "",
       handle: options.handle,
     });
   }
@@ -5792,6 +5801,10 @@ export function drawScheme(ctx, {
   outlines,
   selectedOutlineId,
   drawing,
+  // Что из чертежа спрятано с экрана (таск 154, G223). Холст передаёт, выгрузки
+  // — нет: у них свои галки видимости, и они не менялись.
+  objects,
+  hiddenObjectIds,
   selectedWallId,
 }) {
   const state = renderView(view);
@@ -5821,6 +5834,8 @@ export function drawScheme(ctx, {
       project,
       schemeId: scheme.id,
       bridge: drawingBridge(project, scheme, state),
+      objects,
+      hiddenObjectIds,
       // Выделенная стена подсвечена и на холсте: её развёртка открыта полосой
       // рядом, и видеть, о какой именно стене речь, обязательно.
       active: selectedWallId ? { kind: "wall", id: selectedWallId } : null,

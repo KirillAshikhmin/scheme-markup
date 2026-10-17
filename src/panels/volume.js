@@ -36,7 +36,7 @@ import { FULLSCREEN_EVENTS, canvasFrameLinks } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_BOX_FRAME_DEPTH_MM, MARK_BOX_FRAME_MM } from "../markBox.js";
-import { findRoom, findScheme, schemeFloorOf } from "../model.js";
+import { findRoom, findScheme, schemeFloorOf, schemeObjectsOnScheme } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
 import {
@@ -552,8 +552,19 @@ function createVolume({ api, hosts }) {
   // файл не попадает ничего (G68), и объект после прогулки байт в байт тот же.
   // Поэтому это и не поле проёма, а аргумент сборки сцены.
   const openDoors = new Set();
+  // «Скрыть все объекты» — та же отметка, только разом: сцена собирается без
+  // единой вещи чертежа. Отдельного выключателя у сцены нет нарочно — иначе
+  // ответов на «что показано» стало бы два.
+  const sceneObjectIds = (state) =>
+    schemeObjectsOnScheme(state.project, schemeId).map((object) => object.id);
   const sceneOf = (state) =>
-    volumeScene(state.project, schemeId, { marks: sceneMarks(state), openDoorIds: openDoors });
+    volumeScene(state.project, schemeId, {
+      marks: sceneMarks(state),
+      openDoorIds: openDoors,
+      // Спрятанные вещи чертежа (таск 154, G223): «Скрытое не видно на чертеже
+      // и в объёме». Отметка приходит из сеанса, в объект не пишется.
+      hiddenObjectIds: state.objectsShown === false ? sceneObjectIds(state) : state.hiddenObjectIds,
+    });
 
   let scene = sceneOf(getState());
   let view = "around";
@@ -882,7 +893,16 @@ function createVolume({ api, hosts }) {
     };
     // Без подписей: буквы углов и имена объектов на накладке в двести точек
     // слипаются в кашу, а заказчик просил «только схема и местоположение».
-    drawDrawing(ctx, { project: state.project, schemeId, bridge: drawingUnitBridge(view), labels: false });
+    drawDrawing(ctx, {
+      project: state.project,
+      schemeId,
+      bridge: drawingUnitBridge(view),
+      labels: false,
+      // Спрятанное не всплывает и на миникарте: она показывает то же поле,
+      // только сверху (таск 154, G223).
+      objects: state.objectsShown !== false,
+      hiddenObjectIds: state.hiddenObjectIds,
+    });
     // Местоположение и направление взгляда. Направление показать надо: без него
     // точка отвечает на половину вопроса, и миникарта становится бесполезной.
     const at = { x: view.offsetX + person.x * zoom, y: view.offsetY + person.y * zoom };
@@ -2022,7 +2042,10 @@ function createVolume({ api, hosts }) {
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
         if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
-        if (!("project" in changed) && !("filter" in changed)) return;
+        // Вещи погасили или вернули (таск 154, G223) — сцену надо собрать
+        // заново: спрятанной вещи в ней нет ни гранью, ни препятствием.
+        const objectsChanged = "objectsShown" in changed || "hiddenObjectIds" in changed;
+        if (!("project" in changed) && !("filter" in changed) && !objectsChanged) return;
         scene = sceneOf(state) || scene;
         sync();
       })

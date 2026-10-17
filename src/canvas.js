@@ -951,6 +951,11 @@ function canvasPaint() {
     image: canvasImage(state),
     // Чертёж — слой под метками; выключатель его прячет, а не удаляет.
     drawing: state.drawingShown !== false,
+    // Вещи чертежа: отметка «скрыть все» и спрятанные поштучно глазком
+    // (таск 154, G223). Это экран: в PNG, в лист ГОСТ и в развёртки ничего из
+    // этого не уходит — там свои галки видимости.
+    objects: state.objectsShown !== false,
+    hiddenObjectIds: state.hiddenObjectIds,
     selectedWallId: state.selectedWallId || null,
     filter: state.filter,
     view,

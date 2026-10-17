@@ -10,6 +10,7 @@ import {
   DRAWING_SETTING,
   ELEVATION_SETTING,
   GUIDES_SETTING,
+  OBJECTS_SETTING,
   PLAN_SETTING,
   SCHEME_FONT_SETTING,
   layoutAllows,
@@ -489,6 +490,20 @@ function mountSizesPanel(host, api) {
         uiEl("span", { text: strings.tools.drawingLayer }),
       ]),
       uiEl("p", { class: "tools__note", text: strings.tools.layersHint }),
+      // Вещи чертежа — третий слой того же ряда (таск 154, G223): «дать
+      // возможность скрывать объекты с чертежа». Отметка **положительная**,
+      // как два соседа сверху: ряд, в котором одна галка значит «показать», а
+      // другая «скрыть», читается наоборот через раз. Снятая прячет все вещи
+      // разом; поштучно их прячет глазок в списке элементов чертежа.
+      //
+      // В выгрузку, в отличие от подложки и чертежа, она не уходит: слова
+      // заказчика — «на экране, а для выгрузок у нас же свои параметры
+      // видимости».
+      uiEl("label", { class: "tools__field tools__field--check" }, [
+        toolsLayerCheck(state, setState, "objectsShown", OBJECTS_SETTING),
+        uiEl("span", { text: strings.tools.objectsLayer }),
+      ]),
+      uiEl("p", { class: "tools__note", text: strings.tools.objectsLayerHint }),
       // Третий выключатель того же ряда и той же природы (таск 133, G185):
       // полоса развёртки выделенной стены. В выгрузку он, в отличие от двух
       // соседей, не уходит — развёртка на лист идёт своей кнопкой в шапке
@@ -520,6 +535,7 @@ function mountSizesPanel(host, api) {
       "guidesShown" in changed ||
       "planShown" in changed ||
       "drawingShown" in changed ||
+      "objectsShown" in changed ||
       "elevationShown" in changed ||
       "schemeFont" in changed ||
       // Ряд масштаба смотрит на то поле, которое показано (G227).

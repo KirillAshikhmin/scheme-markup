@@ -73,10 +73,12 @@
 // функция модели чертежа.
 import {
   ELEVATION_VIEWS_SETTING,
+  OBJECTS_SETTING,
   PANEL_IDS,
   registerPanel,
   SCREEN_DEFAULT,
   screenMode,
+  setObjectHidden,
   setScreen,
 } from "../app.js";
 import { setSetting } from "../store.js";
@@ -165,7 +167,7 @@ import {
   planToScreen,
   screenToPlan,
 } from "../render.js";
-import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton } from "./ui.js";
+import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
 import { objectCatalogDefaults, objectCatalogEntry, objectCatalogKeyByName } from "../objectCatalog.js";
 import { createObjectTiles } from "./objectTiles.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
@@ -1000,8 +1002,12 @@ export function workshopLengthAt(a, b, gap) {
  *      стену под ним;
  *   4. **объект на полу** — он внутри комнаты, стен там обычно нет;
  *   5. **тело стены** — последнее, и порог растёт с толщиной.
+ *
+ * `hiddenObjectIds` — вещи, спрятанные с экрана (таск 154, G223): их не видно,
+ * значит и взять их нельзя. Иначе человек тащил бы за угол то, чего на поле
+ * нет, и объяснить это было бы нечем.
  */
-export function workshopPick(project, schemeId, pointMm, view, selected) {
+export function workshopPick(project, schemeId, pointMm, view, selected, hiddenObjectIds) {
   const walls = wallsOnScheme(project, schemeId);
   const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
   const vertexMm = WORKSHOP_VERTEX_PX / zoom;
@@ -1051,7 +1057,9 @@ export function workshopPick(project, schemeId, pointMm, view, selected) {
       }
     }
   }
-  const objects = schemeObjectsOnScheme(project, schemeId);
+  const hiddenObjects =
+    hiddenObjectIds instanceof Set ? hiddenObjectIds : new Set(hiddenObjectIds || []);
+  const objects = schemeObjectsOnScheme(project, schemeId).filter((object) => !hiddenObjects.has(object.id));
   for (let index = objects.length - 1; index >= 0; index -= 1) {
     if (drawingHitObject(objects[index], pointMm, slackMm)) {
       return { kind: "object", id: objects[index].id };
@@ -1291,7 +1299,11 @@ export function workshopSummaryLines(project, schemeId, placement) {
 // Что человек выбрал в окне — его рабочее место, а не свойство объекта: слои,
 // шаг сетки, притяжка и толщина новых стен живут в памяти страницы и переживают
 // закрытие окна, но в `project.json` не попадают.
-let workshopLayers = { plan: true, grid: true, walls: true, objects: true };
+// Отметки слоёв поля. «Объектов» среди них больше нет: вещи гасит общий
+// выключатель «Объекты чертежа» (таск 154, G223) — он же стоит в «Интерфейсе
+// проекта» и гасит их заодно на плане и в объёме. Две отметки с одним словом в
+// двух местах отвечали бы на один вопрос по-разному.
+let workshopLayers = { plan: true, grid: true, walls: true };
 let workshopGridMm = WORKSHOP_GRID_DEFAULT_MM;
 let workshopGridSnap = true;
 let workshopThicknessMm = WORKSHOP_THICKNESS_DEFAULT_MM;
@@ -1453,8 +1465,8 @@ function createWorkshop({ api, hosts }) {
   const wallsCheck = uiEl("input", { type: "checkbox" });
   const objectsCheck = uiEl("input", { type: "checkbox" });
   objectsCheck.addEventListener("change", () => {
-    workshopLayers = { ...workshopLayers, objects: objectsCheck.checked };
-    sync();
+    setState({ objectsShown: objectsCheck.checked });
+    setSetting(OBJECTS_SETTING, objectsCheck.checked);
   });
   planCheck.addEventListener("change", () => {
     workshopLayers = { ...workshopLayers, plan: planCheck.checked };
@@ -1709,6 +1721,13 @@ function createWorkshop({ api, hosts }) {
 
   function project() {
     return getState().project;
+  }
+
+  // Вещи, спрятанные с экрана (таск 154, G223): их не рисуют, их нельзя взять
+  // в поле и их не видно в объёме. Отметка живёт в сеансе и в настройках
+  // браузера, а не в объекте.
+  function hiddenObjects() {
+    return new Set(getState().hiddenObjectIds);
   }
 
   function placement() {
@@ -2343,7 +2362,7 @@ function createWorkshop({ api, hosts }) {
     // Правка: если под рукой что-то есть — берём его, и дальше это
     // перетаскивание, а не панорама. Пусто — жест решится по отпусканию.
     if (tool === "edit") {
-      const pick = workshopPick(project(), schemeId, mmOf(event), view, selected);
+      const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
       if (pick) {
         grab(pick, event);
         return;
@@ -2588,7 +2607,7 @@ function createWorkshop({ api, hosts }) {
       ghost = null;
       return;
     }
-    const pick = workshopPick(project(), schemeId, mmOf(event), view, selected);
+    const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
     const handle = pick && pick.kind === "objectHandle" ? pick.handle : null;
     const next = pick ? pick.kind + ":" + pick.id + ":" + (handle ? handle.kind + handle.index : "") : null;
     if (next !== hover) {
@@ -3134,7 +3153,8 @@ function createWorkshop({ api, hosts }) {
       bridge: bridge(),
       active: selected,
       walls: workshopLayers.walls,
-      objects: workshopLayers.objects,
+      objects: getState().objectsShown !== false,
+      hiddenObjectIds: getState().hiddenObjectIds,
       wallAt: wallEnds,
       openingAt: movedOpening,
       objectAt: shiftObject,
@@ -3307,7 +3327,7 @@ function createWorkshop({ api, hosts }) {
     attachButton.hidden = !spot.pending;
     gridCheck.checked = workshopLayers.grid;
     wallsCheck.checked = workshopLayers.walls;
-    objectsCheck.checked = workshopLayers.objects;
+    objectsCheck.checked = getState().objectsShown !== false;
     gridSelect.value = String(workshopGridMm);
     snapCheck.checked = workshopGridSnap;
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
@@ -3346,9 +3366,50 @@ function createWorkshop({ api, hosts }) {
    * колонка пересобиралась бы кадрами. Подсветка выделенного живёт отдельно и
    * меняется без пересборки.
    */
+  /**
+   * Строка списка: имя с размером — кнопка выделения, а у вещи рядом с ней
+   * глазок (таск 154, G223).
+   *
+   * Две кнопки, а не одна с двумя действиями: кнопка внутри кнопки — не
+   * разметка, а по строке кликают, чтобы выделить, и промах по глазку не
+   * должен прятать вещь.
+   */
+  function listRow(row, hidden) {
+    const pick = uiEl(
+      "button",
+      {
+        class: "workshop__listPick",
+        type: "button",
+        title: row.note,
+        attrs: { "data-kind": row.kind, "data-id": row.id },
+        // Клик по строке — то же выделение, что клик по вещи в поле: второй
+        // правды о выделенном в режиме нет.
+        on: { click: () => select({ kind: row.kind, id: row.id }) },
+      },
+      [
+        uiEl("span", { class: "workshop__listName", text: row.label }),
+        uiEl("span", { class: "workshop__listNote", text: row.note }),
+      ],
+    );
+    if (row.kind !== "object") return uiEl("div", { class: "workshop__listRow" }, [pick]);
+    const off = hidden.has(row.id);
+    const eye = uiEl("button", {
+      class: "ui-btn ui-btn--icon workshop__eye" + (off ? " is-off" : ""),
+      type: "button",
+      title: off ? strings.workshop.objectShow : strings.workshop.objectHide,
+      attrs: { "aria-label": off ? strings.workshop.objectShow : strings.workshop.objectHide, "aria-pressed": off ? "true" : "false" },
+      on: { click: () => setObjectHidden(row.id, !off) },
+    });
+    eye.append(off ? uiIcon("viewOff") : uiIcon("view"));
+    return uiEl("div", { class: "workshop__listRow" }, [pick, eye]);
+  }
+
   function syncList(current) {
     const groups = workshopListGroups(current, schemeId);
-    const key = JSON.stringify(groups);
+    const hidden = hiddenObjects();
+    // В ключ входит и спрятанное: глазок — часть строки, и сменившись, он
+    // обязан перерисоваться.
+    const key = JSON.stringify(groups) + "|" + [...hidden].sort().join(",");
     if (key !== listKey) {
       listKey = key;
       const parts = [];
@@ -3359,24 +3420,7 @@ function createWorkshop({ api, hosts }) {
               uiEl("span", { text: group.title }),
               uiEl("span", { class: "workshop__listCount", text: String(group.rows.length) }),
             ]),
-            ...group.rows.map((row) =>
-              uiEl(
-                "button",
-                {
-                  class: "workshop__listRow",
-                  type: "button",
-                  title: row.note,
-                  attrs: { "data-kind": row.kind, "data-id": row.id },
-                  // Клик по строке — то же выделение, что клик по вещи в поле:
-                  // второй правды о выделенном в режиме нет.
-                  on: { click: () => select({ kind: row.kind, id: row.id }) },
-                },
-                [
-                  uiEl("span", { class: "workshop__listName", text: row.label }),
-                  uiEl("span", { class: "workshop__listNote", text: row.note }),
-                ],
-              ),
-            ),
+            ...group.rows.map((row) => listRow(row, hidden)),
           ]),
         );
       }
@@ -3386,7 +3430,7 @@ function createWorkshop({ api, hosts }) {
       }
       list.replaceChildren(...parts);
     }
-    for (const row of list.querySelectorAll(".workshop__listRow")) {
+    for (const row of list.querySelectorAll(".workshop__listPick")) {
       const on = Boolean(selected) && selected.kind === row.dataset.kind && selected.id === row.dataset.id;
       row.classList.toggle("is-on", on);
       row.setAttribute("aria-pressed", on ? "true" : "false");
@@ -3615,6 +3659,12 @@ function createWorkshop({ api, hosts }) {
     // сняли её в «Интерфейсе проекта» — полоса уходит и отсюда. Без этой
     // строки поверхность о ней не узнавала: проверено живым прогоном.
     if ("wallSide" in changed || "elevationViews" in changed || "elevationShown" in changed) sync();
+    // Вещи погасили или вернули — хоть глазком в списке, хоть галкой в
+    // «Интерфейсе проекта»: поле и список обязаны это увидеть (таск 154).
+    if ("objectsShown" in changed || "hiddenObjectIds" in changed) {
+      listKey = null;
+      sync();
+    }
     if ("project" in changed || "schemeImage" in changed) {
       // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
       if (selected && !aliveSelection()) selected = null;

@@ -342,11 +342,22 @@
   padding: 1px 6px;
 }
 
+/* Строка списка: кнопка выделения и — у вещи — глазок рядом (таск 154, G223).
+   Кнопка внутри кнопки разметкой не бывает, поэтому строка стала рядом из
+   двух: по широкой выделяют, по узкой прячут. */
 .workshop__listRow {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workshop__listPick {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 4px 6px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -358,15 +369,43 @@
   cursor: pointer;
 }
 
-.workshop__listRow:hover,
-.workshop__listRow:focus-visible {
+.workshop__listPick:hover,
+.workshop__listPick:focus-visible {
   border-color: var(--panel-line);
   background: #1c2129;
 }
 
-.workshop__listRow.is-on {
+.workshop__listPick.is-on {
   border-color: var(--accent);
   background: rgba(31, 111, 235, 0.18);
+}
+
+/* Глазок. Приглушён, пока вещь видна, — он не действие, а переключатель
+   состояния, и пестреть двумя десятками значков в списке ему незачем.
+   Спрятанная вещь, наоборот, названа ясно: перечёркнутый глаз и цвет текста. */
+.workshop__eye {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 3px;
+  border-color: transparent;
+  background: none;
+  color: var(--panel-muted);
+}
+
+.workshop__eye:hover,
+.workshop__eye:focus-visible {
+  border-color: var(--panel-line);
+  color: var(--panel-text);
+}
+
+.workshop__eye.is-off {
+  color: var(--panel-text);
+}
+
+/* Спрятанная вещь приглушена и в самой строке: по списку видно, чего сейчас
+   нет на поле, не наводя мышь на каждый глазок. */
+.workshop__listRow:has(.workshop__eye.is-off) .workshop__listName {
+  color: var(--panel-muted);
 }
 
 .workshop__listName {

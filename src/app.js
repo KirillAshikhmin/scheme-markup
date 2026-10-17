@@ -117,6 +117,17 @@ const appState = {
   // Умолчание — показаны: ради этого таск и затеян («что бы схема была уже
   // живая»), а отметка нужна тому, кто хочет прежний лист со знаками.
   elevationViews: true,
+  // Вещи чертежа на экране (таск 154, G223). Два выключателя одной природы:
+  // `objectsShown` — «скрыть все объекты» разом, `hiddenObjectIds` — те, что
+  // спрятаны поштучно глазком в списке элементов чертежа.
+  //
+  // **Это экран, а не объект** — слова заказчика прямые: «на экране, а для
+  // выгрузок у нас же свои параметры видимости». Поэтому отметка живёт в
+  // настройках браузера, а не в `project.json`: уехав в файл, она пришла бы к
+  // напарнику вместе с проектом и спрятала бы ему чужую работу. PNG, лист
+  // ГОСТ и развёртки её не спрашивают вовсе — у них свои галки.
+  objectsShown: true,
+  hiddenObjectIds: [],
   // Связи меток на плане: умолчание — «нет». Это разбор, а не чертёж, и
   // встречать пользователя дугами поверх плана никто не просил.
   linksShown: false,
@@ -166,6 +177,11 @@ export const DRAWING_SETTING = "schemeDrawingShown";
 export const ELEVATION_SETTING = "schemeElevationShown";
 // Изображения объектов на развёртке — такая же личная настройка браузера.
 export const ELEVATION_VIEWS_SETTING = "elevationViews";
+// Вещи чертежа: «скрыть все» и список спрятанных поштучно (таск 154, G223).
+// Второй ключ хранит карту «объект → список вещей»: объектов у человека
+// несколько, и прятать в одном вещь из другого было бы дико.
+export const OBJECTS_SETTING = "schemeObjectsShown";
+export const HIDDEN_OBJECTS_SETTING = "hiddenSchemeObjects";
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -335,9 +351,53 @@ export function getState() {
   return {
     ...appState,
     selectedMarkIds: [...appState.selectedMarkIds],
+    hiddenObjectIds: [...appState.hiddenObjectIds],
     filter: { ...appState.filter },
     view: { ...appState.view },
   };
+}
+
+// Спрятанные вещи чертежа по объектам: `{идентификатор объекта: [id вещей]}`.
+// Карта целиком лежит в памяти страницы и в настройках браузера, а в состоянии
+// сеанса — только список текущего объекта: панели спрашивают «спрятана ли эта
+// вещь», а не «в каком объекте что спрятано».
+let appHiddenObjects = {};
+let appHiddenProjectId = null;
+
+// Сменился объект — меняется и список спрятанного. Делается это **внутри**
+// `setState`, до оповещения: иначе подписчик успел бы нарисовать новый объект
+// со списком от прежнего, и у него погасла бы вещь, которую никто не прятал.
+function syncHiddenObjects(changed) {
+  const projectId = appState.project ? appState.project.id : null;
+  if (projectId === appHiddenProjectId) return;
+  appHiddenProjectId = projectId;
+  const saved = projectId && Array.isArray(appHiddenObjects[projectId]) ? appHiddenObjects[projectId] : [];
+  if (saved.length === 0 && appState.hiddenObjectIds.length === 0) return;
+  appState.hiddenObjectIds = [...saved];
+  changed.hiddenObjectIds = appState.hiddenObjectIds;
+}
+
+/**
+ * Спрятать вещь чертежа с экрана или вернуть её. Глазок в списке элементов
+ * зовёт только это.
+ *
+ * Список чистится о живые вещи объекта: вещь удалили — её id в настройках не
+ * остаётся, иначе однажды он достался бы другой вещи. В объект при этом не
+ * пишется ничего (G68).
+ */
+export function setObjectHidden(objectId, hidden) {
+  if (!objectId) return;
+  const next = new Set(appState.hiddenObjectIds);
+  if (hidden) next.add(objectId);
+  else next.delete(objectId);
+  const alive = new Set(((appState.project && appState.project.schemeObjects) || []).map((object) => object.id));
+  const kept = [...next].filter((id) => alive.has(id));
+  setState({ hiddenObjectIds: kept });
+  const projectId = appState.project ? appState.project.id : null;
+  if (!projectId) return;
+  appHiddenObjects = { ...appHiddenObjects, [projectId]: kept };
+  if (kept.length === 0) delete appHiddenObjects[projectId];
+  Promise.resolve(setSetting(HIDDEN_OBJECTS_SETTING, appHiddenObjects)).catch(() => {});
 }
 
 export function setState(patch) {
@@ -349,6 +409,7 @@ export function setState(patch) {
       changed[key] = value;
     }
   }
+  syncHiddenObjects(changed);
   if (Object.keys(changed).length === 0) return getState();
   const snapshot = getState();
   for (const subscriber of [...appSubscribers]) {
@@ -708,6 +769,23 @@ function wireSections() {
   Promise.resolve(getSetting(ELEVATION_VIEWS_SETTING))
     .then((saved) => {
       if (saved === false) setState({ elevationViews: false });
+    })
+    .catch(() => {});
+  // Вещи чертежа: «скрыть все» и карта спрятанных поштучно. Карта читается
+  // целиком, а в состояние ложится список того объекта, который к этой минуте
+  // открыт, — объект поднимается из базы тоже не сразу.
+  Promise.resolve(getSetting(OBJECTS_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ objectsShown: false });
+    })
+    .catch(() => {});
+  Promise.resolve(getSetting(HIDDEN_OBJECTS_SETTING))
+    .then((saved) => {
+      if (!saved || typeof saved !== "object") return;
+      appHiddenObjects = saved;
+      const projectId = appState.project ? appState.project.id : null;
+      const list = projectId && Array.isArray(appHiddenObjects[projectId]) ? appHiddenObjects[projectId] : [];
+      if (list.length > 0) setState({ hiddenObjectIds: [...list] });
     })
     .catch(() => {});
   // Связи, наоборот, стартуют спрятанными и зажигаются, когда хранилище

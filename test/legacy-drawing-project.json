@@ -1,0 +1,111 @@
+{
+  "formatVersion": 4,
+  "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0001",
+  "name": "Объект прежней сборки с чертежом",
+  "createdAt": "2026-03-04T09:12:00.000+03:00",
+  "updatedAt": "2026-03-04T10:40:00.000+03:00",
+  "categories": [],
+  "markTypes": [],
+  "rooms": [],
+  "schemes": [
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "name": "1 этаж",
+      "imageId": null,
+      "width": 1200,
+      "height": 900,
+      "order": 0
+    }
+  ],
+  "marks": [],
+  "groups": [],
+  "counters": {},
+  "view": { "zoom": 1, "offsetX": 0, "offsetY": 0, "markSize": 10, "labelSize": 12 },
+  "walls": [
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0010",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "aMm": { "x": 0, "y": 0 },
+      "bMm": { "x": 4000, "y": 0 },
+      "thicknessMm": 100
+    },
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0011",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "aMm": { "x": 4000, "y": 0 },
+      "bMm": { "x": 4000, "y": 3000 },
+      "thicknessMm": 100
+    },
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0012",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "aMm": { "x": 4000, "y": 3000 },
+      "bMm": { "x": 0, "y": 3000 },
+      "thicknessMm": 100
+    },
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0013",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "aMm": { "x": 0, "y": 3000 },
+      "bMm": { "x": 0, "y": 0 },
+      "thicknessMm": 100
+    }
+  ],
+  "schemeObjectKinds": [
+    { "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0020", "name": "Радиатор", "order": 0 },
+    { "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0021", "name": "Лестница на 2 этаж", "order": 1 },
+    { "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0022", "name": "Аквариум", "order": 2 },
+    { "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0023", "name": "Столешница (кухонный фронт)", "order": 3 }
+  ],
+  "schemeObjects": [
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0030",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "kindId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0020",
+      "shape": "rect",
+      "atMm": { "x": 2000, "y": 120 },
+      "widthMm": 1200,
+      "depthMm": 100,
+      "turnDeg": 0,
+      "heightMm": 500,
+      "heightAboveFloorMm": 150
+    },
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0031",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "kindId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0021",
+      "shape": "rect",
+      "atMm": { "x": 3200, "y": 1600 },
+      "widthMm": 1100,
+      "depthMm": 2700,
+      "turnDeg": 90,
+      "heightMm": null,
+      "heightAboveFloorMm": 0
+    },
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0032",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "kindId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0022",
+      "shape": "rect",
+      "atMm": { "x": 700, "y": 2400 },
+      "widthMm": 1500,
+      "depthMm": 600,
+      "turnDeg": 0,
+      "heightMm": 700,
+      "heightAboveFloorMm": 400
+    },
+    {
+      "id": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0033",
+      "schemeId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0002",
+      "kindId": "2b0b5a2e-0a5e-4f3c-9a1f-1d6f4a7c0023",
+      "shape": "polyline",
+      "pointsMm": [
+        { "x": 200, "y": 2700 },
+        { "x": 2600, "y": 2700 }
+      ],
+      "depthMm": 600,
+      "heightMm": 40,
+      "heightAboveFloorMm": 860
+    }
+  ]
+}
