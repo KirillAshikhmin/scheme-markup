@@ -48,6 +48,7 @@ import {
   setSchemeWallHeight,
   styleOf,
 } from "../src/model.js";
+import { MARK_BOX_FRAME_DEPTH_MM, MARK_BOX_FRAME_MM } from "../src/markBox.js";
 import { objectViewByName, objectViewNames, objectViewShapes } from "../src/objectViews/registry.js";
 import {
   VOLUME_BODY_MM,
@@ -67,8 +68,6 @@ import {
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_SIZE,
   VOLUME_MARK_ROOM,
-  VOLUME_MARK_SPARE_DEPTH_MM,
-  VOLUME_MARK_SPARE_MM,
   VOLUME_MARK_WALL,
   VOLUME_OBJECT_RGB,
   VOLUME_WALL_RGB,
@@ -91,7 +90,6 @@ import {
   volumeFloorAt,
   volumeMoveTo,
   volumeSkyAim,
-  volumeSpareBox,
   volumeSkyPoint,
   volumeBasis,
   volumeFill,
@@ -1553,35 +1551,16 @@ test("метка без высоты и без потолка над ней не
   assert.equal(built.unplaced[0].label, labelOf(put.project, put.markId));
 });
 
-// ——— запасной габарит (G215) —————————————————————————————————————————————
+// ——— запасной габарит (G215, G226) ———————————————————————————————————————
 //
 // Тип, заведённый рукой с незнакомой формой, из объёма выпадал: умолчания
 // (G192) ищут донора по коду и по форме, а такой формы в шаблоне нет вовсе. Это
 // дыра в правиле, а не в данных — и закрывается она на время рисования, в
 // сцене, без единой записи в справочник (G68).
-
-test("запасной габарит берётся у изображения объекта, а без него — рамкой справочника", () => {
-  // «Мастер-выключатель» заказчика: форма `circle-rays` входит в светильник, и
-  // его габарит — тот самый честный запас из того же реестра.
-  const lamp = objectViewByName("lamp");
-  assert.deepEqual(volumeSpareBox(lamp), {
-    lengthMm: lamp.mm.width,
-    widthMm: lamp.mm.height,
-    depthMm: VOLUME_MARK_SPARE_DEPTH_MM,
-    from: "lamp",
-  });
-  // Изображения нет совсем — общая рамка, та же, что у выключателя и розетки
-  // стартового справочника.
-  assert.deepEqual(volumeSpareBox(null), {
-    lengthMm: VOLUME_MARK_SPARE_MM,
-    widthMm: VOLUME_MARK_SPARE_MM,
-    depthMm: VOLUME_MARK_SPARE_DEPTH_MM,
-    from: null,
-  });
-  // Запись без размеров изображения (такой в реестре нет, но запас обязан
-  // отвечать и на неё) уходит в ту же рамку.
-  assert.equal(volumeSpareBox({ name: "x", mm: { width: 0, height: 0 } }).lengthMm, VOLUME_MARK_SPARE_MM);
-});
+//
+// Само правило габарита здесь не проверяется: оно общее с развёрткой и живёт в
+// `markBox.js` (`test/markBox.test.js`). Здесь — что объём зовёт его и что
+// сцена от этого получается та, которую человек увидит.
 
 test("вещь без размеров рисуется запасным габаритом и называется вслух", () => {
   const scene = roomScene();
@@ -1629,8 +1608,8 @@ test("незнакомая форма без изображения рисует
   const put = markAt(added.project, scene.schemeId, "ЩЩ", [{ x: 0, y: -1100 }]);
   const withHeight = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 900 }).project;
   const place = placeOf(volumeScene(withHeight, scene.schemeId, {}), put.markId);
-  assert.equal(place.face.widthMm, VOLUME_MARK_SPARE_MM);
-  assert.equal(place.face.heightMm, VOLUME_MARK_SPARE_MM);
+  assert.equal(place.face.widthMm, MARK_BOX_FRAME_MM);
+  assert.equal(place.face.heightMm, MARK_BOX_FRAME_MM);
   // Выступ у плоского изображения взять негде, и он тоже из рамки: тело вещи
   // на стене толщиной в этот выступ, а не в плёнку.
   const corners = place.prisms[0].corners;
@@ -1639,26 +1618,73 @@ test("незнакомая форма без изображения рисует
     return Math.hypot(next.x - corner.x, next.y - corner.y);
   });
   assert.ok(
-    Math.abs(Math.min(...sides) - VOLUME_MARK_SPARE_DEPTH_MM) < 0.01,
+    Math.abs(Math.min(...sides) - MARK_BOX_FRAME_DEPTH_MM) < 0.01,
     "запасной выступ — рамка справочника, а не плёнка",
   );
 });
 
-test("вещь, у которой размер задан хоть один, рисуется ровно как прежде", () => {
+test("названа одна сторона — вторая подтягивается габаритом, а не нижним пределом (G226)", () => {
   const scene = roomScene();
   const category = scene.project.categories[0];
   const added = addType(scene.project, { code: "ЩЩ", name: "Своя вещь", categoryId: category.id, shape: "star" });
   const put = markAt(added.project, scene.schemeId, "ЩЩ", [{ x: 0, y: -1100 }]);
-  // Своя длина у метки, ширины нет нигде: правило прежнее — вторая сторона
-  // подтянута до самой мелкой (20 мм), а не до запаса. Запас включается только
-  // там, где не задано **ни одной** стороны, и готовый объект не меняется.
+  // Своя длина у метки, ширины нет нигде. До таска 156 вторая сторона уходила
+  // в нижний предел видимости (20 мм) и вещь выходила 600 × 20 здесь против
+  // 600 × 80 на листе развёртки. Правило теперь одно, развёрточное: сторона
+  // подтягивается габаритом — у звезды изображения нет, значит рамкой.
   const own = setMarkDimensions(put.project, put.markId, { length: 600, heightAboveFloor: 900 }).project;
+  const before = JSON.stringify(own);
   const built = volumeScene(own, scene.schemeId, {});
   const place = placeOf(built, put.markId);
+  assert.equal(place.face.widthMm, 600, "названная сторона — своя, её никто не трогает");
+  assert.equal(place.face.heightMm, MARK_BOX_FRAME_MM);
+  // Догадка названа вслух: сторона взята сборкой, и человек об этом читает.
+  assert.equal(place.spare, true);
+  assert.deepEqual(built.spare, [{ markId: put.markId, label: labelOf(own, put.markId) }]);
+  // Выступ при этом остаётся своим: о третьем измерении по одной названной
+  // стороне догадываться нечем, и вещь от правки не толстеет.
+  const span = faceSpanZ(place);
+  assert.equal(span.topMm - span.bottomMm, MARK_BOX_FRAME_MM, "по высоте вещь встала подтянутой стороной");
+  const corners = place.prisms[0].corners;
+  const sides = corners.map((corner, index) => {
+    const next = corners[(index + 1) % corners.length];
+    return Math.hypot(next.x - corner.x, next.y - corner.y);
+  });
+  assert.ok(Math.abs(Math.min(...sides) - VOLUME_MARK_LIFT_MM) < 0.01, "выступ прежний: 2 мм, а не рамка");
+  assert.equal(JSON.stringify(own), before, "догадка живёт в сцене: в объект не записано ничего (G68)");
+});
+
+test("обе стороны названы — вещь не двигается ни на миллиметр (G226)", () => {
+  const scene = roomScene();
+  const category = scene.project.categories[0];
+  const added = addType(scene.project, { code: "ЩЩ", name: "Своя вещь", categoryId: category.id, shape: "star" });
+  const put = markAt(added.project, scene.schemeId, "ЩЩ", [{ x: 0, y: -1100 }]);
+  const own = setMarkDimensions(put.project, put.markId, {
+    length: 600,
+    width: 300,
+    depth: 40,
+    heightAboveFloor: 900,
+  }).project;
+  const place = placeOf(volumeScene(own, scene.schemeId, {}), put.markId);
   assert.equal(place.face.widthMm, 600);
-  assert.equal(place.face.heightMm, VOLUME_MARK_MIN_MM);
-  assert.equal(place.spare, false);
-  assert.deepEqual(built.spare, []);
+  assert.equal(place.face.heightMm, 300);
+  assert.equal(place.spare, false, "догадываться не о чем — и слова об этом нет");
+  const span = faceSpanZ(place);
+  assert.equal(span.topMm - span.bottomMm, 300);
+});
+
+test("ноль на стороне лица — пустота, а не ноль: вещи нулевой длины не бывает", () => {
+  const scene = roomScene();
+  const category = scene.project.categories[0];
+  const added = addType(scene.project, { code: "ЩЩ", name: "Своя вещь", categoryId: category.id, shape: "star" });
+  const put = markAt(added.project, scene.schemeId, "ЩЩ", [{ x: 0, y: -1100 }]);
+  // Ноль у выступа — это «встроенный» (и он остаётся нулём), а ноль у длины
+  // читается как «не сказано»: так развёртка считала с самого начала.
+  const own = setMarkDimensions(put.project, put.markId, { length: 0, width: 300, heightAboveFloor: 900 }).project;
+  const place = placeOf(volumeScene(own, scene.schemeId, {}), put.markId);
+  assert.equal(place.face.widthMm, MARK_BOX_FRAME_MM);
+  assert.equal(place.face.heightMm, 300);
+  assert.equal(place.spare, true);
 });
 
 test("встроенная вещь не толстеет от запасного выступа", () => {
@@ -1854,8 +1880,8 @@ test("строка «нарисованы запасным габаритом» 
   const one = volumeSpareLine([{ markId: "1", label: "МВ1" }]);
   assert.ok(one.includes("МВ1"), one);
   // Числа общей рамки приходят из сцены, а не переписаны в словарь второй раз.
-  assert.ok(one.includes(String(VOLUME_MARK_SPARE_MM)), one);
-  assert.ok(one.includes(String(VOLUME_MARK_SPARE_DEPTH_MM)), one);
+  assert.ok(one.includes(String(MARK_BOX_FRAME_MM)), one);
+  assert.ok(one.includes(String(MARK_BOX_FRAME_DEPTH_MM)), one);
   // Это не «не размещены»: вещь в кадре есть, и путать две новости нельзя.
   assert.ok(!one.includes(strings.volume.unplacedNoSize), one);
   const many = [];
