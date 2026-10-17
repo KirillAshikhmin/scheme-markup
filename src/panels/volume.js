@@ -54,6 +54,8 @@ import {
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_POINT,
   VOLUME_MARK_NO_SIZE,
+  VOLUME_MARK_SPARE_DEPTH_MM,
+  VOLUME_MARK_SPARE_MM,
   VOLUME_MARKER_RGB,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_RUN_MM_S,
@@ -307,22 +309,64 @@ export function volumeUnplacedReason(reason) {
 export function volumeUnplacedLine(unplaced) {
   const list = unplaced || [];
   if (list.length === 0) return "";
-  const named = list
-    .slice(0, VOLUME_UNPLACED_SHOWN)
-    .map((item) => text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) }));
-  if (list.length > VOLUME_UNPLACED_SHOWN) {
-    named.push(text("volume.unplacedMore", { count: list.length - VOLUME_UNPLACED_SHOWN }));
-  }
-  return text("volume.unplaced", { count: list.length, list: named.join(", ") });
+  return text("volume.unplaced", { count: list.length, list: volumeNamedList(list, unplacedName, "volume.unplacedMore") });
 }
 
 /** Все неразмещённые по обозначениям — в подсказку строки, когда их много. */
 export function volumeUnplacedTitle(unplaced) {
   const list = unplaced || [];
   if (list.length <= VOLUME_UNPLACED_SHOWN) return "";
-  return list
-    .map((item) => text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) }))
-    .join(", ");
+  return list.map(unplacedName).join(", ");
+}
+
+/** Одна неразмещённая вещь: обозначение и причина. */
+function unplacedName(item) {
+  return text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) });
+}
+
+/**
+ * Перечень, который не выталкивает поле за край окна: названо
+ * `VOLUME_UNPLACED_SHOWN`, дальше «и ещё N», а полный список уходит в подсказку
+ * строки. Одна мера на оба списка — и неразмещённых, и нарисованных запасным
+ * габаритом: это одна и та же строка под полем, и обрываться она обязана
+ * одинаково.
+ */
+function volumeNamedList(list, name, moreKey) {
+  const named = list.slice(0, VOLUME_UNPLACED_SHOWN).map(name);
+  if (list.length > VOLUME_UNPLACED_SHOWN) {
+    named.push(text(moreKey, { count: list.length - VOLUME_UNPLACED_SHOWN }));
+  }
+  return named.join(", ");
+}
+
+/**
+ * Строка «нарисованы запасным габаритом» (G215).
+ *
+ * Вещь, у типа которой нет ни одного размера, в объём теперь попадает — но её
+ * габарит сборка **выдумала** (`volumeSpareBox`: габарит изображения объекта, а
+ * без изображения — обычная рамка). Молчать об этом нельзя: человек решит, что
+ * числа заданы, и будет размечать щит по догадке. Писать догадку в справочник
+ * тоже нельзя (G68) — остаётся сказать словом, той же строкой под полем, где
+ * живут неразмещённые.
+ *
+ * Чистая и вынесена наружу по той же причине, что `volumeUnplacedLine`.
+ */
+export function volumeSpareLine(spare) {
+  const list = spare || [];
+  if (list.length === 0) return "";
+  return text("volume.spare", {
+    count: list.length,
+    list: volumeNamedList(list, (item) => item.label, "volume.spareMore"),
+    side: VOLUME_MARK_SPARE_MM,
+    depth: VOLUME_MARK_SPARE_DEPTH_MM,
+  });
+}
+
+/** Все нарисованные запасным габаритом — в подсказку строки, когда их много. */
+export function volumeSpareTitle(spare) {
+  const list = spare || [];
+  if (list.length <= VOLUME_UNPLACED_SHOWN) return "";
+  return list.map((item) => item.label).join(", ");
 }
 
 /**
@@ -534,6 +578,11 @@ export function openVolume({ schemeId: openOn, api }) {
   const where = uiEl("span", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
   const missing = uiEl("p", { class: "volume__missing" });
+  // Нарисованные запасным габаритом (G215) — своей строкой рядом с
+  // неразмещёнными: новость другая («вещь есть, но размер выдуман»), а место и
+  // цвет те же — в объекте не хватает числа, и сказать об этом надо там, где
+  // человек уже читает про недостающее.
+  const spareLine = uiEl("p", { class: "volume__missing" });
   const hint = uiEl("p", { class: "modal__hint" });
 
   const bar = uiEl("div", { class: "volume__tools" }, [
@@ -543,7 +592,7 @@ export function openVolume({ schemeId: openOn, api }) {
     where,
     uiEl("span", { class: "volume__spacer" }, [doorsButton, shotButton, fitButton, fullButton]),
   ]);
-  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, hint]);
+  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, spareLine, hint]);
 
   const closeButton = uiButton(strings.volume.close, {
     class: "ui-btn ui-btn--accent",
@@ -1584,6 +1633,8 @@ export function openVolume({ schemeId: openOn, api }) {
       meta.textContent = strings.volume.empty;
       missing.textContent = "";
       missing.hidden = true;
+      spareLine.textContent = "";
+      spareLine.hidden = true;
     } else {
       const lines = [
         text("volume.counts", {
@@ -1598,6 +1649,10 @@ export function openVolume({ schemeId: openOn, api }) {
       missing.textContent = volumeUnplacedLine(scene.unplaced);
       missing.title = volumeUnplacedTitle(scene.unplaced);
       missing.hidden = scene.unplaced.length === 0;
+      const spare = scene.spare || [];
+      spareLine.textContent = volumeSpareLine(spare);
+      spareLine.title = volumeSpareTitle(spare);
+      spareLine.hidden = spare.length === 0;
     }
     syncWhere();
     syncStair();

@@ -1009,10 +1009,17 @@ export function volumeFloors(project, schemeId) {
 //      лежит вне контуров) → вешать не на что, и вещь **не размещается**:
 //      уходит списком «не размещённые». Слова заказчика прямые: выдумывать им
 //      место нельзя, но и молча терять нельзя.
-//   5. Размеров нет вовсе → рисовать нечем, и это тот же список. Такое бывает
+//   5. Размеров нет вовсе → вещь рисуется **запасным габаритом** (G215,
+//      `VOLUME_MARK_SPARE_MM`) и попадает в сцену, а не в список. Такое бывает
 //      у типа, заведённого руками: в стартовом справочнике размеры есть у всех
 //      (G192), а «Мастер-выключатель» из объекта заказчика — его собственный
-//      тип, и размеров у него нет ни одного.
+//      тип, и размеров у него нет ни одного. Габарит при этом догадка, и окно
+//      говорит об этом списком `spare`: потерять вещь нельзя, но и выдать
+//      догадку за чертёж тоже.
+//
+//      Запас включается только там, где **нет ни длины, ни ширины**: вещь, у
+//      которой хоть одно число записано рукой, рисуется ровно как сегодня, и
+//      ни один готовый объект от этого не меняется.
 //
 // **Плашка комментария в объёме не участвует вовсе** — ни вещью, ни строкой
 // списка: это надпись на чертеже, а не изделие (то же правило, что у развёртки,
@@ -1045,6 +1052,62 @@ export const VOLUME_MARK_LIFT_MM = 2;
  * же пара точек экрана, что и десять, но грань у них настоящая.
  */
 export const VOLUME_MARK_MIN_MM = 20;
+
+/**
+ * **Запасной габарит** вещи, у которой размеров нет ни одного (G215).
+ *
+ * Дыра была такая: `fillTypeSizes` (G192) подтягивает умолчания по коду и по
+ * форме знака, но у типа, заведённого рукой с незнакомой формой, донора нет
+ * вовсе — и вещь уходила списком «не размещены». То есть выпадала из объёма не
+ * из-за данных, а из-за правила, и человек об этом узнавал только строчкой под
+ * полем, которую мог и не прочесть.
+ *
+ * **Откуда числа.** Первый ответ уже написан в развёртке: `elevationMarkBox`
+ * при пустом размере берёт габарит **изображения объекта** (`view.mm`), и дыры
+ * у неё поэтому нет. Изображения разобраны по формам знаков, и «Мастер-
+ * выключатель» заказчика с формой `circle-rays` попадает в светильник
+ * (`objectViews/light.js`, 90 × 90) — запас честный и из того же реестра,
+ * которым объём уже рисует лица вещей. Так что здесь не заводится второго
+ * правила: берётся то же.
+ *
+ * Изображения нет совсем — остаётся общий запас, и он тоже не выдуман:
+ * **80 × 80 × 10 мм** стоит в самом стартовом справочнике у выключателя «В» и
+ * розетки «Р» (`TEMPLATE_TYPES`), то есть это обычная рамка, которой в квартире
+ * больше всего.
+ *
+ * **Выступ** у плоского изображения взять негде — его нет ни у одной записи
+ * реестра, они двумерные. Поэтому выступ и общему запасу, и запасу по
+ * изображению даётся один: те же 10 мм рамки из справочника. Двух миллиметров
+ * (`VOLUME_MARK_LIFT_MM`, с которыми вещь без выступа рисуется сегодня) здесь
+ * мало: вещь, у которой и размеры запасные, под потолком стала бы плёнкой.
+ *
+ * **В справочник не пишется ничего** (G68): запас живёт в сцене, на время
+ * рисования. Иначе человек увидел бы у своего типа чужие числа и решил, что
+ * сам их задал, — а они догадка сборки, и сказать о ней надо словом
+ * (`spare` в `volumeMarks`), а не записью в объект.
+ */
+export const VOLUME_MARK_SPARE_MM = 80;
+export const VOLUME_MARK_SPARE_DEPTH_MM = 10;
+
+/**
+ * Запасной габарит по изображению объекта или общий. `view` — изображение вещи
+ * (`volumeMarkView`), `null` — такого нет.
+ *
+ * Чистая и вынесена наружу: откуда у вещи взялся габарит — это правило, и
+ * проверяться оно обязано тестом, а не глазами на кадре.
+ */
+export function volumeSpareBox(view) {
+  const mm = view && view.mm ? view.mm : null;
+  if (mm && Number(mm.width) > 0 && Number(mm.height) > 0) {
+    return { lengthMm: Number(mm.width), widthMm: Number(mm.height), depthMm: VOLUME_MARK_SPARE_DEPTH_MM, from: view.name || "view" };
+  }
+  return {
+    lengthMm: VOLUME_MARK_SPARE_MM,
+    widthMm: VOLUME_MARK_SPARE_MM,
+    depthMm: VOLUME_MARK_SPARE_DEPTH_MM,
+    from: null,
+  };
+}
 
 /** Как вещь поставлена: на стене, в воздухе на своей высоте, под потолком. */
 export const VOLUME_MARK_WALL = "wall";
@@ -1158,14 +1221,23 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
   const path = volumeMarkPathMm(project, mark);
   if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
   const sizes = markSizes(project, mark);
-  if (!(sizes.length > 0) && !(sizes.width > 0)) return { markId: mark.id, skip: VOLUME_MARK_NO_SIZE };
-  const lengthMm = Math.max(VOLUME_MARK_MIN_MM, sizes.length || 0);
-  const widthMm = Math.max(VOLUME_MARK_MIN_MM, sizes.width || 0);
+  const markView = volumeMarkView(project, mark);
+  // Размеров нет ни одного — вещь рисуется запасным габаритом (G215). Строки
+  // `VOLUME_MARK_NO_SIZE` в списке неразмещённых после этого не бывает вовсе,
+  // но код остаётся: окно знает его, и объект прежнего формата в середине
+  // пересборки не должен спорить с новым правилом.
+  const spare = !(sizes.length > 0) && !(sizes.width > 0) ? volumeSpareBox(markView) : null;
+  const lengthMm = Math.max(VOLUME_MARK_MIN_MM, (spare ? spare.lengthMm : sizes.length) || 0);
+  const widthMm = Math.max(VOLUME_MARK_MIN_MM, (spare ? spare.widthMm : sizes.width) || 0);
   // Выступ **не подтягивается до самой мелкой стороны**: это измерение, по
   // которому ничего не выделяют, и округли его до двадцати — плоская панель
   // стала бы вдвое толще себя. Хватает двух миллиметров: тело перестаёт быть
   // вырожденным, а у встроенного светильника выступ и правда нулевой.
-  const depthMm = Math.max(VOLUME_MARK_LIFT_MM, Math.abs(sizes.depth || 0));
+  //
+  // Запасной выступ берётся только вместе с запасным габаритом и только там,
+  // где своего нет: записанный ноль — это ноль («встроенный»), а не пустота.
+  const depthOwn = spare && sizes.depth === null ? spare.depthMm : sizes.depth;
+  const depthMm = Math.max(VOLUME_MARK_LIFT_MM, Math.abs(depthOwn || 0));
   const recessed = Number(sizes.depth) < 0;
   const line = mark.kind === "line" && path.length >= 2;
   const style = styleOf(project, mark.typeId);
@@ -1177,7 +1249,11 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
     rgb,
     bodyRgb: volumeTint(rgb),
     kind: line ? "line" : "point",
-    view: line ? null : volumeMarkView(project, mark),
+    view: line ? null : markView,
+    // Габарит — догадка сборки, а не чертёж: окно обязано сказать об этом
+    // словом (`volumeMarks().spare`). Откуда именно взят запас, здесь не
+    // хранится: это правило `volumeSpareBox`, и спрашивают его у неё.
+    spare: Boolean(spare),
   };
   const heightMm = sizes.heightAboveFloor;
   const binding = markWall(mark);
@@ -1266,16 +1342,22 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
 }
 
 /**
- * Все метки схемы: размещённые и список тех, кому места не нашлось.
+ * Все метки схемы: размещённые, список тех, кому места не нашлось, и список
+ * нарисованных запасным габаритом (G215).
  *
  * `marks` — что считать: окно отдаёт сюда видимые на плане, чтобы фильтр значил
- * в двух видах одно и то же. Порядок сохраняется — список неразмещённых
- * читается в том же порядке, что таблица меток.
+ * в двух видах одно и то же. Порядок сохраняется — списки читаются в том же
+ * порядке, что таблица меток.
+ *
+ * Запасной габарит — не потеря, а догадка: вещь в сцене есть, но её размер
+ * сборка выдумала. Поэтому `spare` отдельным списком, а не причиной в
+ * `unplaced`: это разные новости, и смешивать их нельзя.
  */
 export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
   const list = marks || (project ? project.marks.filter((mark) => mark.schemeId === schemeId) : []);
   const placed = [];
   const unplaced = [];
+  const spare = [];
   for (const mark of list) {
     const place = volumeMarkPlacement(project, mark, rooms || []);
     if (!place) continue;
@@ -1284,8 +1366,9 @@ export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
       continue;
     }
     placed.push(place);
+    if (place.spare) spare.push({ markId: place.markId, label: place.label });
   }
-  return { placed, unplaced };
+  return { placed, unplaced, spare };
 }
 
 /** Грани тела вещи. Хозяин у каждой — сама метка: по ним и ловится клик. */
@@ -1595,6 +1678,7 @@ export function volumeScene(project, schemeId, options = {}) {
       stairs: [],
       marks: [],
       unplaced: [],
+      spare: [],
     };
   }
   const rooms = volumeRooms(project, schemeId);
@@ -1707,6 +1791,9 @@ export function volumeScene(project, schemeId, options = {}) {
     stairs: volumeStairs(project, schemeId),
     marks: marks.placed,
     unplaced: marks.unplaced,
+    // Нарисованные запасным габаритом (G215): вещь в сцене есть, а размер её
+    // сборка выдумала — окно называет такие вещи вслух.
+    spare: marks.spare,
   };
 }
 
