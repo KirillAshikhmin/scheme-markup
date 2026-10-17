@@ -45414,6 +45414,13 @@ const VOLUME_MARK_LIFT_MM = 2;
 const VOLUME_MARK_MIN_MM = 20;
 
 /**
+ * Напуск пола под стеной (дефект D37): на сколько полоса пола выходит за грань
+ * стены по обе стороны. Пять сантиметров прячутся под самой стеной и в углах, а
+ * больше — и пол полез бы кантом наружу, из-под стены на землю.
+ */
+const VOLUME_FLOOR_LAP = 50;
+
+/**
  * Вещь **стоит на полу**, а не висит на своей высоте (дефект D34).
  *
  * Высота над полом — это **середина** вещи: розетка на 300 занимает от 260 до
@@ -46315,6 +46322,45 @@ function volumeScene(project, schemeId, options = {}) {
     volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
+    // **Пол под стеной** (дефект D37). Слова заказчика: «под дверными проёмами
+    // нет пола».
+    //
+    // Пол лежит по контурам помещений, то есть кончается у внутренней грани
+    // стены. Под самой стеной пола нет никогда, а **проём — это дыра в стене на
+    // всю её толщину**, и порога в нём не было тоже. Раньше дыры затыкала плита
+    // чертежа, крашенная полом; с тех пор как плита стала землёй (G237), каждая
+    // щель читается травой в доме.
+    //
+    // Поэтому пол кладётся полосой **под всю стену: во всю длину и во всю
+    // толщину, поверх проёмов**. Это и есть ответ на порог: он получается сам,
+    // одной гранью на стену, и не требует ни разбора проёмов, ни объединения
+    // контуров. Снаружи полоса не видна — её ровно накрывает сама стена.
+    //
+    // `VOLUME_FLOOR_LAP` — напуск по обе стороны: контур помещения обводят по
+    // подложке рукой, и промахнуться на сантиметр-другой мимо грани стены
+    // обычное дело. Напуск маленький нарочно: пять сантиметров прячутся под
+    // стеной и в углах, а сделай его больше — пол полез бы кантом наружу.
+    //
+    // Нужна полоса только там, где плита стала землёй: без обведённых помещений
+    // плита сама пол, и подкладывать под стену нечего.
+    if (rooms.length > 0) {
+      const middleMm = vectors.len / 2;
+      faces.push(
+        volumeFace(
+          volumeBoxCorners(
+            {
+              x: Number(wall.aMm.x) + vectors.u.x * middleMm,
+              y: Number(wall.aMm.y) + vectors.u.y * middleMm,
+            },
+            vectors.u,
+            vectors.len + VOLUME_FLOOR_LAP * 2,
+            Number(wall.thicknessMm) + VOLUME_FLOOR_LAP * 2,
+          ).map((point) => volumeAt(point, 0)),
+          VOLUME_FLOOR_RGB,
+          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
+        ),
+      );
+    }
     for (const span of volumeWallSolids(wall, openings)) {
       const middle = (span.fromMm + span.toMm) / 2;
       solids.push({
@@ -46363,6 +46409,14 @@ function volumeScene(project, schemeId, options = {}) {
     solids,
     rooms,
     boundsMm: bounds,
+    // На сколько нарисованное выходит за габарит чертежа: стена стоит на всю
+    // толщину от своей оси, а пол под ней — ещё и с напуском (D37). Обзор
+    // «вся схема» вмещает то, что **рисуется**, и без этого числа он резал бы
+    // угол у толстых стен — впритык он стоял и до напуска.
+    outsetMm: walls.reduce(
+      (most, wall) => Math.max(most, Number(wall.thicknessMm) / 2 + (rooms.length > 0 ? VOLUME_FLOOR_LAP : 0)),
+      0,
+    ),
     heightMm: schemeHeight.mm,
     wallCount: walls.length,
     openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
@@ -48026,7 +48080,10 @@ function volumeAroundFit(scene, box) {
     y: (bounds.minY + bounds.maxY) / 2,
     z: height / 2,
   };
-  const radius = Math.hypot(bounds.widthMm, bounds.heightMm, height) / 2;
+  // Габарит берётся с выносом: стены стоят толщиной за своими осями, пол под
+  // ними — с напуском (D37), и всё это обязано попасть в кадр.
+  const outset = (scene.outsetMm || 0) * 2;
+  const radius = Math.hypot(bounds.widthMm + outset, bounds.heightMm + outset, height) / 2;
   const focal = volumeFocal(box);
   const fit = (radius * focal) / (0.42 * Math.min(box.width, box.height));
   return { target, distance: volumeAroundDistance(fit) };
