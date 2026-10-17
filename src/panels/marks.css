@@ -1266,12 +1266,35 @@
   max-width: 420px;
 }
 
-/* Подпись слева, поле справа: три строки читаются столбиком, а не лесенкой. */
+/* Подпись слева, поле справа: строки читаются столбиком, а не лесенкой. */
 .sizes__row {
   display: grid;
   grid-template-columns: 1fr 120px;
   align-items: center;
   gap: 10px;
+}
+
+/* Три габарита в строку (таск 158): равные столбцы, подпись над полем. Так
+   габарит и набирают — 900 × 200 × 300, — а слева подписи на три столбца не
+   хватило бы ширины окна. */
+.sizes__trio {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sizes__cell {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Поле в тройке не держит ширину содержимого: три по 120 точек в окно не
+   влезут, и столбец обязан сжиматься вместе с ним. */
+.sizes__cell .sizes__input {
+  width: 100%;
+  min-width: 0;
 }
 
 .sizes__label {
