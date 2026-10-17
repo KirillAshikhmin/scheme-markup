@@ -79,8 +79,10 @@ test("переключатели заказчика стоят в своей к�
   assert.equal(project.markTypes.find((type) => type.code === "ПС").name, strings.types.backlight);
 
   const switches = typesInOrder(project).find((group) => group.category.name === "Выключатели");
-  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "П", "ПП", "ВВВ"]);
-  // Знаки все свои: иначе на плане пять выключателей одного зелёного цвета
+  // Шестой в категории — мастер-выключатель, заведённый в стартовый справочник
+  // в таске 160: порядок тот же, что в справочнике, и он встал последним.
+  assert.deepEqual(switches.types.map((type) => type.code), ["В", "ВВ", "П", "ПП", "ВВВ", "МВ"]);
+  // Знаки все свои: иначе на плане шесть выключателей одного зелёного цвета
   // различал бы только код.
   const shapes = switches.types.map((type) => styleOf(project, type.id).shape);
   assert.equal(new Set(shapes).size, shapes.length, "два выключателя рисуются одним знаком: " + shapes.join(", "));
@@ -89,21 +91,21 @@ test("переключатели заказчика стоят в своей к�
   // Каналы приехали из объекта заказчика вместе со справочником.
   assert.deepEqual(
     switches.types.map((type) => [type.code, type.channels]),
-    [["В", 1], ["ВВ", 2], ["П", 1], ["ПП", 2], ["ВВВ", 3]],
+    [["В", 1], ["ВВ", 2], ["П", 1], ["ПП", 2], ["ВВВ", 3], ["МВ", 1]],
   );
 });
 
-test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок восемь типов", () => {
+test("стартовый справочник — справочник заказчика: двенадцать категорий и сорок девять типов", () => {
   const { categories, markTypes } = defaultTemplate();
   assert.equal(categories.length, 12, "категории справочника заказчика потерялись");
-  assert.equal(markTypes.length, 48, "типы справочника заказчика потерялись");
+  assert.equal(markTypes.length, 49, "типы справочника заказчика потерялись");
   // Порядок — его порядок, а не наша перекладка по категориям.
   // prettier-ignore
   assert.deepEqual(markTypes.map((type) => type.code), [
     "Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "В", "ВВ", "Р", "Б", "К", "W", "Д", "КШ", "ППл",
     "ПКШ", "ЛЮ", "П", "ПП", "Н", "РC", "ДП", "СУШ", "Щ", "ВЫТ", "Бр", "ДЭП", "ПУ",
     "ОВ", "ВП", "РЕС", "ПРО", "УК", "ЛВ", "ВВВ", "ДД", "ДО", "ДПр", "ЩС", "РП", "ВР", "КН",
-    "КВ", "ПЛ", "ПЗ", "КАМ", "ВЕНТ",
+    "КВ", "ПЛ", "ПЗ", "КАМ", "ВЕНТ", "МВ",
   ]);
   // prettier-ignore
   assert.deepEqual(categories.map((category) => category.name), [

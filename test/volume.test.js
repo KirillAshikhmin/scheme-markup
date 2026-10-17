@@ -75,6 +75,7 @@ import {
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_HILLS,
+  VOLUME_FLOOR_LAP,
   VOLUME_FLOOR_RGB,
   VOLUME_LAND_RGB,
   VOLUME_MOUNTAINS,
@@ -259,14 +260,16 @@ test("у комнаты есть пол, потолок и стены с тол�
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
   const ground = built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND);
-  assert.equal(ground.length, 2, "пол и потолок — по одному на обведённое помещение");
-  const floor = ground.find((face) => face.n.z > 0);
+  // Пол и потолок помещения — и полоса пола под каждой из четырёх стен: она
+  // закрывает порог в проёме и щель между контуром и гранью стены (D37).
+  assert.equal(ground.length, 2 + 4, "пол, потолок и пол под каждой стеной");
   const ceiling = ground.find((face) => face.n.z < 0);
-  assert.ok(floor && ceiling, "у пола нормаль вверх, у потолка вниз");
-  assert.ok(floor.p.every((point) => point.z === 0), "пол лежит на нуле");
+  const floors = ground.filter((face) => face.n.z > 0);
+  assert.equal(floors.length, 5, "у пола нормаль вверх, у потолка вниз");
+  assert.ok(floors.every((face) => face.p.every((point) => point.z === 0)), "весь пол лежит на нуле");
   assert.ok(ceiling.p.every((point) => point.z === 2700), "потолок — на высоте схемы");
-  // Под ними — плита по габариту чертежа: она закрывает пороги дверей, где
-  // пола нет ни у одной комнаты.
+  // Под ними — плита по габариту чертежа. Полом она больше не работает: пол у
+  // помещений свой, а плита стала землёй вокруг дома (G237).
   assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BASE).length, 1);
   // Толщина стены видна по торцам: у стены без проёмов две стороны, два торца
   // и верх, низ не рисуется — он под полом. Метровой сетки, которой стороны
@@ -274,6 +277,73 @@ test("у комнаты есть пол, потолок и стены с тол�
   // проёмов — один многоугольник.
   const body = built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY);
   assert.equal(body.length, 4 * (2 + 3), "по пять граней на стену: две стороны, два торца, верх");
+});
+
+// ——— D37: под проёмом и под стеной есть пол ———————————————————————————————
+//
+// Слова заказчика: «под дверными проёмами нет пола». Пол лежит по контурам
+// помещений, под стенами его нет никогда, а проём — дыра в стене на всю её
+// толщину. Раньше щели затыкала плита чертежа, крашенная полом; с тех пор как
+// плита стала землёй (G237), сквозь них видно траву.
+
+// Накрыта ли точка плана полом на нулевой отметке.
+function floorUnder(built, point) {
+  return built.faces.some(
+    (face) =>
+      face.n.z > 0 &&
+      face.p.every((corner) => corner.z === 0) &&
+      face.rgb === VOLUME_FLOOR_RGB &&
+      volumePointInside(point, face.p),
+  );
+}
+
+test("под дверным проёмом есть пол, а не земля (D37)", () => {
+  const scene = roomScene();
+  // Дверь в нижней стене комнаты: ось стены идёт по y = −1500, толщина 200.
+  const project = addOpening(scene.project, {
+    wallId: scene.walls[0],
+    kind: "door",
+    atMm: 1500,
+    widthMm: 900,
+    heightMm: 2100,
+    heightAboveFloorMm: 0,
+    hinge: "start",
+    swing: "left",
+  }).project;
+  const built = volumeScene(project, scene.schemeId);
+  // Середина проёма — ровно та точка, где человек переступает порог: пол там
+  // обязан быть, и он не кончается ни у одной грани стены.
+  const middle = { x: -2000 + 1500 + 450, y: -1500 };
+  assert.ok(floorUnder(built, middle), "в проёме пола нет — видно землю");
+  for (const across of [-90, -40, 0, 40, 90]) {
+    assert.ok(floorUnder(built, { x: middle.x, y: -1500 + across }), "порог дырявый на " + across + " мм");
+  }
+  // И щель под самой стеной — между контуром помещения и гранью стены — тоже
+  // закрыта: контур обведён на 100 мм внутрь от оси, стена уходит на 100 мм
+  // наружу.
+  assert.ok(floorUnder(built, { x: 0, y: -1500 }), "под стеной пола нет");
+  assert.ok(floorUnder(built, { x: 0, y: -1450 }), "щель между полом комнаты и стеной открыта");
+});
+
+test("полоса пола прячется под стеной и не лезет кантом наружу", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Наружная грань нижней стены — y = −1600. Дальше полоса уходит ровно на
+  // напуск и не больше: иначе пол был бы виден из-под дома.
+  assert.ok(floorUnder(built, { x: 0, y: -1600 - VOLUME_FLOOR_LAP + 5 }), "полоса не доходит до наружной грани");
+  assert.ok(!floorUnder(built, { x: 0, y: -1600 - VOLUME_FLOOR_LAP - 5 }), "пол вылез из-под стены на землю");
+  // Обзор «вся схема» обязан вмещать то, что рисуется, — с выносом стен и
+  // напуском пола.
+  assert.ok(built.outsetMm >= 100 + VOLUME_FLOOR_LAP - 1e-9, "вынос посчитан не по толщине стены: " + built.outsetMm);
+});
+
+test("помещения не обведены — плита остаётся полом, и подкладывать под стену нечего (D37)", () => {
+  const bare = roomScene({ room: false });
+  const built = volumeScene(bare.project, bare.schemeId);
+  assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND).length, 0, "полос под стенами нет");
+  const plate = built.faces.find((face) => face.layer === VOLUME_LAYER_BASE);
+  assert.deepEqual(plate.rgb, VOLUME_FLOOR_RGB, "плита сама пол — красить её землёй нельзя");
+  assert.ok(floorUnder(built, { x: 0, y: -1500 }), "пол под стеной есть — это сама плита");
 });
 
 test("окно считает стены и проёмы чертежа, а не препятствия", () => {
@@ -699,7 +769,12 @@ test("в кадре пол и потолок лежат раньше стен, �
   // По дальности выкладываются **только** ярусы вне дерева порядка: плита,
   // полы и потолки. Ярус тел с таска 151 выкладывает дерево, и дальность
   // середины там ничего не решает — это и есть лекарство от D32 и D33.
-  for (const part of [frame.slice(0, firstBody)]) {
+  //
+  // Дальность сравнивается **внутри яруса**, а не поперёк них: ярусы идут
+  // своим порядком (земля под полом всегда, как бы далеко ни лежал её
+  // середина), и мерить их одной линейкой нельзя.
+  for (const layer of [VOLUME_LAYER_BASE, VOLUME_LAYER_GROUND]) {
+    const part = frame.slice(0, firstBody).filter((polygon) => polygon.layer === layer);
     for (let index = 1; index < part.length; index += 1) {
       assert.ok(part[index - 1].depth >= part[index].depth - 1e-9, "порядок по дальности сбился");
     }
@@ -1854,14 +1929,16 @@ test("вещь без размеров рисуется запасным габ�
   const scene = roomScene();
   const category = scene.project.categories[0];
   // Тип заказчика как он есть: своя форма, размеров нет ни одного, высота
-  // записана у самой метки — то есть вещь висит на своей стене.
+  // записана у самой метки — то есть вещь висит на своей стене. Код здесь
+  // «МВЗ»: сам «МВ» с таска 160 живёт в стартовом справочнике и со своими
+  // размерами, а запас проверяется как раз на типе без них.
   const added = addType(scene.project, {
-    code: "МВ",
-    name: "Мастер-выключатель",
+    code: "МВЗ",
+    name: "Мастер-выключатель заказчика",
     categoryId: category.id,
     shape: "circle-rays",
   });
-  const put = markAt(added.project, scene.schemeId, "МВ", [{ x: 0, y: -1100 }]);
+  const put = markAt(added.project, scene.schemeId, "МВЗ", [{ x: 0, y: -1100 }]);
   const withHeight = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 1400 }).project;
   const before = JSON.stringify(withHeight);
   const built = volumeScene(withHeight, scene.schemeId, {});
@@ -1885,7 +1962,8 @@ test("незнакомая форма без изображения рисует
   const scene = roomScene();
   const category = scene.project.categories[0];
   // Звезду ни одно изображение объекта не разбирает (таких форм в сетке
-  // четырнадцать из пятидесяти с лишним) — остаётся рамка.
+  // тринадцать из пятидесяти с лишним: круг с клавишей ушёл к выключателю в
+  // таске 160) — остаётся рамка.
   assert.ok(!objectViewShapes().includes("star"));
   const added = addType(scene.project, {
     code: "ЩЩ",
