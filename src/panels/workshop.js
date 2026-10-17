@@ -75,7 +75,7 @@
 // у объекта без чертежа — ноль правок, ноль шагов истории, ноль новых полей в
 // `project.json`. Пустые списки в объект не попадают: их не кладёт ни одна
 // функция модели чертежа.
-import { ELEVATION_VIEWS_SETTING } from "../app.js";
+import { ELEVATION_VIEWS_SETTING, PANEL_IDS, registerPanel, screenMode } from "../app.js";
 import { setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
@@ -128,6 +128,7 @@ import {
   updateSchemeObject,
   updateWall,
   wallLengthMm,
+  wallName,
   wallVectors,
   wallsOnScheme,
 } from "../model.js";
@@ -165,7 +166,7 @@ import {
   planToScreen,
   screenToPlan,
 } from "../render.js";
-import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton, uiPrompt } from "./ui.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
@@ -1249,6 +1250,66 @@ export function workshopHint(tool, way) {
  * стен. Чистая — слова про случай «молча рисовать в никуда нельзя» решаются
  * здесь и проверяются без браузера.
  */
+/**
+ * Список элементов чертежа для правой колонки режима «Чертёж» (таск 153).
+ *
+ * Заказчик: правая панель своя в каждом режиме, и в чертеже это «список
+ * элементов чертежа с глазками видимости». Глазки — соседний таск (154), здесь
+ * сам список и место под них.
+ *
+ * Порядок — **модельный** (`wallsOnScheme`, `openingsInWall`,
+ * `schemeObjectsOnScheme`), своей сортировки не заводится: разойдись она с
+ * чертежом — список перестал бы отвечать на «что я выделил». Стены названы так
+ * же, как на чертеже и в развёртке (`wallName`), проёмы стоят под своей стеной
+ * (их место на чертеже — в ней), объекты зовутся по виду.
+ *
+ * Чистая: панель из неё только рисует строки, и проверяется она тестом — иначе
+ * расхождение имён со чертежом заметил бы только глаз.
+ */
+export function workshopListGroups(project, schemeId) {
+  if (!project || !schemeId) return [];
+  const walls = wallsOnScheme(project, schemeId);
+  const wallRows = [];
+  const openingRows = [];
+  for (const wall of walls) {
+    wallRows.push({
+      kind: "wall",
+      id: wall.id,
+      label: text("workshop.listWall", { name: wallName(project, wall.id) }),
+      note: text("workshop.listWallNote", { length: wallLengthMm(wall), thickness: wall.thicknessMm }),
+    });
+    for (const opening of openingsInWall(project, wall.id)) {
+      openingRows.push({
+        kind: "opening",
+        id: opening.id,
+        label: strings.openingKinds[opening.kind] || strings.workshop.opening,
+        note: text("workshop.listOpeningNote", {
+          wall: wallName(project, wall.id),
+          width: opening.widthMm,
+          height: opening.heightMm,
+        }),
+      });
+    }
+  }
+  const objectRows = schemeObjectsOnScheme(project, schemeId).map((object) => {
+    const kind = findSchemeObjectKind(project, object.kindId);
+    return {
+      kind: "object",
+      id: object.id,
+      label: kind ? kind.name : strings.workshop.object,
+      note:
+        object.shape === "polyline"
+          ? text("workshop.listBandNote", { depth: object.depthMm })
+          : text("workshop.listRectNote", { width: object.widthMm, depth: object.depthMm }),
+    };
+  });
+  return [
+    { kind: "wall", title: strings.workshop.layerWalls, rows: wallRows },
+    { kind: "opening", title: strings.workshop.toolOpenings, rows: openingRows },
+    { kind: "object", title: strings.workshop.layerObjects, rows: objectRows },
+  ];
+}
+
 export function workshopStatus(project, schemeId, placement) {
   const parts = [];
   if (placement.kind === "ready") {
@@ -1310,7 +1371,6 @@ let workshopObjectKindName = strings.schemeObjectKinds.radiator;
 // **или** обводится контуром, и это один и тот же `shape: "rect"`.
 let workshopObjectWay = WORKSHOP_OBJECT_WAYS[0];
 let workshopObjectSizes = {};
-let workshopOpened = false;
 
 // Краска самого окна. Цвета чертежа сюда не входят: их держит общий слой
 // (`render.DRAWING_*`), и повтори их здесь — стена в окне и стена на холсте
@@ -1323,20 +1383,32 @@ const WORKSHOP_GRID_MAJOR = "#aeb7c0";
 const WORKSHOP_ORIGIN = "#d1242f";
 
 /**
- * Открыть мастерскую для схемы.
+ * Собрать мастерскую чертежа на основном экране (таск 153).
  *
- * Про калибровку окно больше ничего не спрашивает у вызывающего: она делается
- * здесь же, занятием `WORKSHOP_TOOL_SCALE`. Прежний довод `onCalibrate` уводил
- * на холст, закрывая окно, — и это и был дефект D22.
+ * Окна у мастерской больше нет: поле занимает основной экран, инструменты и
+ * свойства стоят в верхнем блоке левой колонки, список элементов — в правой.
+ * Полноэкранный показ даёт кнопка «Во весь экран» над полем, общая на все три
+ * режима, — своей кнопки «Закрыть» у режима нет и быть не может.
+ *
+ * Про калибровку мастерская по-прежнему ничего не спрашивает у вызывающего:
+ * она делается здесь же, занятием `WORKSHOP_TOOL_SCALE`. Прежний довод
+ * `onCalibrate` уводил на холст, закрывая окно, — и это и был дефект D22.
+ *
+ * Поверхность **живёт дальше, когда режим сменили**: она только гаснет
+ * (`visibility` в стилях). Поэтому человек, вернувшийся в «Чертёж», находит
+ * тот же масштаб, тот же инструмент и тот же черновик — в объект при этом не
+ * попадает ничего (G68).
  */
-export function openWorkshop({ schemeId, api }) {
-  if (workshopOpened) return null;
+function createWorkshop({ api, hosts }) {
   const { getState, setState, notify, subscribe } = api;
+  // Схема — та, что открыта в приложении, и она **меняется под поверхностью**:
+  // выбрали другую в списке схем — чертят её же, не выходя из режима. Прежде
+  // окно открывалось на одну схему и закрывалось, чтобы сменить её.
+  let schemeId = getState().schemeId;
   if (!findScheme(getState().project, schemeId)) return null;
-  workshopOpened = true;
 
-  // Чем окно занято при открытии: подложка без калибровки — масштабом, иначе
-  // стенами. Пришёл обводить план — первым делом видит план.
+  // Чем мастерская занята при открытии: подложка без калибровки — масштабом,
+  // иначе стенами. Пришёл обводить план — первым делом видит план.
   let tool = workshopInitialTool(getState().project, schemeId);
   let view = { zoom: 1, offsetX: 0, offsetY: 0 };
   let fitted = false;
@@ -1447,8 +1519,14 @@ export function openWorkshop({ schemeId, api }) {
     on: { click: () => zoomBy(WORKSHOP_ZOOM_KEY_STEP) },
   });
   const fitButton = uiButton(strings.workshop.fit, { on: { click: () => fit() } });
+  // Строка состояния и подсказка — плашки **поверх поля**: под полем места
+  // больше нет, поле занимает основной экран целиком (таск 153). Состояние о
+  // чертеже — слева под верхним рядом, подсказка про руки — справа, ровно так
+  // же, как это устроено в объёме. Кликов плашки не берут: под ними чертят.
   const meta = uiEl("p", { class: "workshop__meta" });
-  const hint = uiEl("p", { class: "modal__hint", text: workshopHint("walls") });
+  const hint = uiEl("p", { class: "canvas-hint__text", text: workshopHint("walls") });
+  const metaPlate = uiEl("div", { class: "screen-note" }, [meta]);
+  const hintPlate = uiEl("div", { class: "canvas-hint canvas-hint--screen" }, [hint]);
 
   // ——— правая часть: слои, сетка, стена, высоты ———
   const planCheck = uiEl("input", { type: "checkbox" });
@@ -1665,10 +1743,19 @@ export function openWorkshop({ schemeId, api }) {
     objectsButton,
   ]);
 
-  const body = uiEl("div", { class: "workshop" }, [
-    uiEl("div", { class: "workshop__main" }, [
-      // Ряд режимов: что делаю. Вид (масштаб окна и «Вписать») прижат вправо —
-      // он не режим и стоять в одном ряду с ними как равный не должен.
+  // ——— где что стоит (таск 153) ———
+  //
+  // Ряды занятий уехали в колонку вместе со свойствами: заказчик решил, что
+  // правая панель своя в каждом режиме, а верхний блок левой меняется, — и
+  // инструменты чертежа это и есть верхний блок. Над полем остаётся только то,
+  // что над полем и было: подсказка слева, полный экран справа, а между ними
+  // переключатель режимов.
+  stage.append(metaPlate, hintPlate);
+  hosts.stage.replaceChildren(stage);
+  hosts.side.replaceChildren(
+    uiEl("div", { class: "workshop__panel" }, [
+      // Ряд режимов: что делаю. Вид (масштаб и «Вписать») прижат вправо — он не
+      // режим и стоять в одном ряду с ними как равный не должен.
       uiEl("div", { class: "workshop__tools" }, [
         uiEl("span", { class: "workshop__toolsLabel", text: strings.workshop.mode }),
         selectButton,
@@ -1680,29 +1767,22 @@ export function openWorkshop({ schemeId, api }) {
       // Ряд «что добавляем»: виден только в добавлении — в остальных режимах
       // он отвечал бы на вопрос, которого человек не задавал.
       addingRow,
-      stage,
-      meta,
-      hint,
+      side,
     ]),
-    side,
-  ]);
+  );
+  const list = uiEl("div", { class: "workshop__list" });
+  hosts.list.replaceChildren(list);
+  let listKey = null;
 
-  const scheme = findScheme(getState().project, schemeId);
-  const closeButton = uiButton(strings.workshop.close, {
-    class: "ui-btn ui-btn--accent",
-    on: { click: () => finish() },
-  });
-  const modal = uiModal({
-    title: text("workshop.title", { name: scheme.name }),
-    body,
-    actions: [closeButton],
-    onCancel: () => cleanup(),
-  });
-  modal.card.classList.add("modal--workshop");
-  // Глубина стопки диалогов на момент открытия: пока она такая же, клавиатура
-  // наша. Поверх мастерской встают подтверждения — им она уступает, как и
-  // холст уступает ей самой.
-  const depth = uiDialogDepth();
+  // ——— режим на экране ———
+  //
+  // Поверхность жива и в чужом режиме — она только погасла, — поэтому клавиши
+  // и часы обязаны спрашивать, её ли сейчас экран. Правило то же, что у холста
+  // (`canvasOnScreen`) и у объёма: кто показан, того и клавиатура. Диалог
+  // забирает её у всех троих: пока стопка не пуста, клавиши принадлежат ему.
+  function active() {
+    return !closed && screenMode() === "drawing" && uiDialogDepth() === 0;
+  }
 
   // ——— состояние объекта ———
 
@@ -2986,11 +3066,12 @@ export function openWorkshop({ schemeId, api }) {
 
   // ——— клавиатура ———
   //
-  // Пока мастерская — верхний диалог, клавиатура её: холст уступает её сам
-  // (`uiDialogDepth() > 0`), а подтверждению поверх неё уступает она. Ctrl+Z
-  // поэтому приходится вести самим — иначе отмены в окне не было бы вовсе.
+  // Клавиши мастерской работают, пока на экране она (`active`): стрелки в
+  // объёме ходят, на плане листают план, и один и тот же код не должен
+  // доставаться трём поверхностям сразу. Ctrl+Z она ведёт сама — слушатель
+  // стоит в фазе перехвата и до холста событие не доходит.
   function onKeyDown(event) {
-    if (closed || uiDialogDepth() !== depth) return;
+    if (!active()) return;
     const target = event.target;
     const tag = target && target.tagName;
     // Отметку слоя отмена не касается: в ней нечего отменять, а стоять фокус в
@@ -3584,10 +3665,67 @@ export function openWorkshop({ schemeId, api }) {
     }
     syncRooms(current);
     syncElevation(current, wall);
+    syncList(current);
     meta.textContent = workshopStatus(current, schemeId, spot);
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
     node.style.cursor = tool === "edit" || tool === WORKSHOP_TOOL_ELEVATION ? "default" : "crosshair";
     redraw();
+  }
+
+  /**
+   * Список элементов чертежа в правой колонке (таск 153).
+   *
+   * Пересобирается, только когда чертёж действительно изменился: ключ —
+   * перечисление того, что в списке стоит. На объекте заказчика это сотня
+   * строк, а `sync()` зовётся на каждое движение мышью в поле — без ключа
+   * колонка пересобиралась бы кадрами. Подсветка выделенного живёт отдельно и
+   * меняется без пересборки.
+   */
+  function syncList(current) {
+    const groups = workshopListGroups(current, schemeId);
+    const key = JSON.stringify(groups);
+    if (key !== listKey) {
+      listKey = key;
+      const parts = [];
+      for (const group of groups) {
+        parts.push(
+          uiEl("div", { class: "workshop__listGroup" }, [
+            uiEl("h4", { class: "workshop__head" }, [
+              uiEl("span", { text: group.title }),
+              uiEl("span", { class: "workshop__listCount", text: String(group.rows.length) }),
+            ]),
+            ...group.rows.map((row) =>
+              uiEl(
+                "button",
+                {
+                  class: "workshop__listRow",
+                  type: "button",
+                  title: row.note,
+                  attrs: { "data-kind": row.kind, "data-id": row.id },
+                  // Клик по строке — то же выделение, что клик по вещи в поле:
+                  // второй правды о выделенном в режиме нет.
+                  on: { click: () => select({ kind: row.kind, id: row.id }) },
+                },
+                [
+                  uiEl("span", { class: "workshop__listName", text: row.label }),
+                  uiEl("span", { class: "workshop__listNote", text: row.note }),
+                ],
+              ),
+            ),
+          ]),
+        );
+      }
+      // Чертежа нет вовсе — колонка говорит об этом словом, а не пустотой.
+      if (groups.every((group) => group.rows.length === 0)) {
+        parts.push(uiEl("p", { class: "panel__empty", text: strings.workshop.listEmpty }));
+      }
+      list.replaceChildren(...parts);
+    }
+    for (const row of list.querySelectorAll(".workshop__listRow")) {
+      const on = Boolean(selected) && selected.kind === row.dataset.kind && selected.id === row.dataset.id;
+      row.classList.toggle("is-on", on);
+      row.setAttribute("aria-pressed", on ? "true" : "false");
+    }
   }
 
   function fieldValue(input, value) {
@@ -3790,10 +3928,40 @@ export function openWorkshop({ schemeId, api }) {
 
   const unsubscribe = subscribe((state, changed) => {
     if (closed) return;
-    // Схему удалили под окном — закрываемся: править нечего.
-    if (!findScheme(state.project, schemeId)) {
-      finish();
+    // Схему удалили под поверхностью или закрыли объект — поверхность
+    // разбирается. Собрать её заново дешевле, чем держать мастерскую, у
+    // которой нет схемы: следующий вход в режим соберёт её на той схеме,
+    // которая открыта.
+    if (!findScheme(state.project, state.schemeId)) {
+      destroy();
       return;
+    }
+    // Схему сменили в списке — чертят её же, не выходя из режима (таск 153).
+    // Всё, что относилось к прежней схеме, снимается: черновик, выделение и
+    // вписанный кадр — у новой схемы свой масштаб и свой габарит.
+    if (state.schemeId !== schemeId) {
+      schemeId = state.schemeId;
+      draft = null;
+      ghost = null;
+      scaleDraft = null;
+      press = null;
+      selected = null;
+      hover = null;
+      hoverHandle = null;
+      listKey = null;
+      tool = workshopInitialTool(state.project, schemeId);
+      fitted = false;
+      resize();
+      sync();
+      return;
+    }
+    // Режим включили — поле снова на экране: его надо перемерить (пока
+    // поверхность гасла, колонки могли спрятать или вернуть) и забрать
+    // клавиатуру себе.
+    if ("screen" in changed && state.screen === "drawing") {
+      resize();
+      sync();
+      if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
     }
     if ("wallSide" in changed || "elevationViews" in changed) sync();
     if ("project" in changed || "schemeImage" in changed) {
@@ -3810,11 +3978,14 @@ export function openWorkshop({ schemeId, api }) {
     return Boolean(findSchemeObject(project(), selected.id));
   }
 
-  function cleanup() {
+  function destroy() {
     if (closed) return;
     strip.destroy();
     closed = true;
-    workshopOpened = false;
+    workshopSurface = null;
+    hosts.stage.replaceChildren();
+    hosts.side.replaceChildren();
+    hosts.list.replaceChildren();
     panKeyUp(null);
     if (unsubscribe) unsubscribe();
     window.removeEventListener("pointermove", onPointerMove);
@@ -3826,11 +3997,6 @@ export function openWorkshop({ schemeId, api }) {
     document.removeEventListener("keyup", onKeyUp, true);
   }
 
-  function finish() {
-    cleanup();
-    modal.close();
-  }
-
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerEnd);
   window.addEventListener("pointercancel", onPointerEnd);
@@ -3839,17 +4005,57 @@ export function openWorkshop({ schemeId, api }) {
   document.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("keyup", onKeyUp, true);
 
-  // Схема, открытая в мастерской, становится текущей: её картинку панель схем
-  // держит в состоянии сеанса, и второй раз декодировать тот же план окно не
-  // должно. Заодно шаг истории, записанный отсюда, возвращает Ctrl+Z на ту же
-  // схему, на которой он случился.
-  if (getState().schemeId !== schemeId) setState({ schemeId, selectedMarkIds: [] });
   resize();
-  // Окно открылось — клавиатура у поля чертежа, а не у первой отметки слоя,
-  // которой диалог отдаёт фокус по умолчанию.
+  // Режим включился — клавиатура у поля чертежа, а не у первой отметки слоя в
+  // колонке: работают с чертежом — клавиши его.
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
-  return { close: finish };
+  return { destroy };
 }
+
+// ——— режим «Чертёж» основного экрана (таск 153) ———————————————————————
+//
+// Поверхность одна на страницу и собирается **по первому входу в режим**: до
+// него чертёж никому не нужен, а сцена и холст не бесплатны. Собранная, она
+// живёт дальше и в чужих режимах — гаснет, но помнит масштаб, инструмент и
+// черновик. Разбирается она только тогда, когда чертить стало нечего: схему
+// удалили или объект закрыли.
+let workshopSurface = null;
+
+function mountWorkshopScreen(host, api) {
+  const { getState, subscribe } = api;
+  // Три точки монтирования на одну поверхность: поле в основном экране,
+  // инструменты в левой колонке, список элементов в правой. Берутся по
+  // идентификатору из разметки, а не тремя регистрациями: у трёх регистраций
+  // три закрытия, а выделение, инструмент и черновик у них общие.
+  const hosts = {
+    stage: host,
+    side: document.getElementById(PANEL_IDS.drawTools),
+    list: document.getElementById(PANEL_IDS.drawList),
+  };
+
+  const placeholder = () => {
+    if (workshopSurface) return;
+    for (const node of [hosts.side, hosts.list]) {
+      if (!node) continue;
+      node.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.screens.needScheme }));
+    }
+  };
+
+  const build = () => {
+    const state = getState();
+    if (!workshopSurface && state.screen === "drawing" && state.schemeId && hosts.side && hosts.list) {
+      workshopSurface = createWorkshop({ api, hosts });
+    }
+    placeholder();
+  };
+
+  subscribe((state, changed) => {
+    if ("screen" in changed || "schemeId" in changed || "project" in changed) build();
+  });
+  build();
+}
+
+registerPanel(PANEL_IDS.screenDrawing, mountWorkshopScreen);
 
 function workshopCheckRow(input, label, title) {
   return uiEl("label", { class: "workshop__check", title: title || "" }, [input, uiEl("span", { text: label })]);

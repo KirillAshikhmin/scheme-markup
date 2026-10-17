@@ -13,7 +13,14 @@
 // переносится с прибавкой угла. Поэтому поворот стоит прямо в строке схемы
 // двумя кнопками и обходится без окна: нажал — повернулось, Ctrl+Z вернул.
 // Окно осталось за тем, ради чего и заведено, — за новой картинкой.
-import { layoutAllows, PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
+import {
+  layoutAllows,
+  PANEL_IDS,
+  registerPanel,
+  SECTION_IDS,
+  setScreen,
+  setSectionBadge,
+} from "../app.js";
 import {
   addScheme,
   clearPlanScale,
@@ -61,7 +68,6 @@ import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js"
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
 import { openVolume, volumeAllowed } from "./volume.js";
-import { openWorkshop } from "./workshop.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
@@ -937,12 +943,20 @@ function mountSchemesPanel(host, api) {
     openDrawing(added.scheme.id);
   }
 
-  // Мастерская чертежа — своё окно (`panels/workshop.js`). Калибровку она
-  // делает сама, своим занятием «Масштаб»: прежде окно просило эту панель
-  // перевести холст в режим — и закрывалось, выставляя человека ровно тогда,
-  // когда он пришёл обводить план (дефект D22, таск 132).
+  /**
+   * Кнопка «Чертёж» в строке схемы: делает эту схему текущей и переключает
+   * основной экран в режим «Чертёж» (таск 153). Окна у мастерской больше нет —
+   * чертёж стал содержимым экрана, — и кнопка осталась ровно одним: коротким
+   * путём «эту схему, и сразу чертить».
+   *
+   * Схема становится текущей заодно и потому, что её картинку панель схем
+   * держит в состоянии сеанса: второй раз декодировать тот же план незачем. А
+   * шаг истории, записанный в чертеже, возвращает Ctrl+Z на ту же схему, на
+   * которой он случился.
+   */
   function openDrawing(schemeId) {
-    openWorkshop({ schemeId, api: { getState, setState, notify, subscribe } });
+    if (getState().schemeId !== schemeId) setState({ schemeId, selectedMarkIds: [] });
+    setScreen("drawing");
   }
 
   /**
