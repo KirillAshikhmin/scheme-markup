@@ -45,6 +45,7 @@ import {
   OPENING_KIND_DOOR,
   drawingBoundsMm,
   findScheme,
+  findSchemeObjectKind,
   findType,
   findWall,
   hexToRgb,
@@ -58,8 +59,11 @@ import {
   planFractionToMm,
   roomAtPoint,
   planMmToFraction,
+  schemeFloorOf,
   schemeObjectCorners,
   schemeObjectsOnScheme,
+  schemesInOrder,
+  segmentDistanceMm,
   styleOf,
   typeObjectView,
   wallHeightOf,
@@ -122,6 +126,17 @@ export const VOLUME_START_PITCH_DEG = -10;
  * нельзя — окно говорит об этом строкой, как говорит развёртка (таск 129).
  */
 export const VOLUME_HEIGHT_FALLBACK_MM = 2700;
+/**
+ * С какого расстояния до лестницы спрашивают про этаж (таск 149).
+ *
+ * Метр с небольшим от её габарита — расстояние, с которого человек на неё
+ * **подошёл**, а не прошёл мимо: лестница стоит у стены, проход рядом с ней
+ * шириной в метр, и шаг в сторону из прохода уже упирается в саму лестницу
+ * (тело выталкивается в 220 мм от неё). Больше — вопрос задавался бы из
+ * соседней комнаты, меньше — не задавался бы вовсе: ближе 220 мм подойти
+ * нельзя, лестница не пускает.
+ */
+export const VOLUME_STAIR_REACH_MM = 1100;
 /** Ход и бег, миллиметры в секунду. */
 export const VOLUME_WALK_MM_S = 2400;
 export const VOLUME_RUN_MM_S = 4800;
@@ -845,6 +860,134 @@ export function volumePrismSolid(prism) {
   };
 }
 
+// ——— лестница и этажи ————————————————————————————————————————————————————
+//
+// Таск 149. Слова заказчика: «У схем можно задавать этаж, а при подходе к любой
+// лестнице спрашивать нужный этаж. Если 2 этажа, то просто с подтверждением
+// переходить».
+//
+// Лестница — не новая сущность: она **уже** есть в справочнике видов объектов
+// чертежа («Лестница» в стартовом наборе, таск 122), её рисуют прямоугольником
+// или ломаной марша, и в объёме она стоит призмой во всю высоту помещения.
+// Объём только узнаёт её среди прочих вещей.
+//
+// **Узнаёт по имени вида, и другого способа нет.** У вида объекта есть `id`
+// (свежий uuid на каждый объект) и `name` — ни кода, ни ключа, в отличие от
+// типов меток. Привязываться к `id` нельзя (`defaultTemplate` выдаёт новые на
+// каждый объект), значит остаётся имя. Поэтому имя сверяется терпимо: регистр,
+// пробелы по краям и «ё» не считаются, а внутри строки ищется корень «лестни» —
+// «Лестница», «лестничный марш», «Лестница на 2 этаж» и латинское `stairs`
+// узнаются все.
+// Переименовал человек вид в «Марш» — объём лестницы не найдёт и честно
+// промолчит; выдумывать за него второй справочник ради этого незачем.
+
+const VOLUME_STAIR_WORDS = ["лестни", "stair"];
+
+/** Это вид «лестница»? Сверяется имя вида объекта чертежа. */
+export function volumeStairKind(name) {
+  const plain = String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, "е");
+  if (plain === "") return false;
+  return VOLUME_STAIR_WORDS.some((word) => plain.includes(word));
+}
+
+/** Расстояние от точки до многоугольника: ноль — точка внутри. */
+function volumePolygonGap(point, corners) {
+  if (corners.length < 3) return Infinity;
+  if (volumePointInside(point, corners)) return 0;
+  let gap = Infinity;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+    gap = Math.min(gap, segmentDistanceMm(point, corners[i], corners[j]));
+  }
+  return gap;
+}
+
+/**
+ * Лестницы схемы: `{objectId, polygons, atMm}` в миллиметрах чертежа.
+ *
+ * `polygons` — те же габариты, которыми лестница рисуется и которыми не
+ * пускает (`volumeObjectPrisms`): у ломаной марша их столько, сколько звеньев.
+ * Второй геометрии у лестницы нет — иначе спрашивать про этаж начали бы не там,
+ * где она нарисована.
+ */
+export function volumeStairs(project, schemeId) {
+  const stairs = [];
+  for (const object of schemeObjectsOnScheme(project, schemeId)) {
+    const kind = findSchemeObjectKind(project, object.kindId);
+    if (!kind || !volumeStairKind(kind.name)) continue;
+    const polygons = volumeObjectPrisms(project, schemeId, object, VOLUME_HEIGHT_FALLBACK_MM).map(
+      (prism) => prism.corners,
+    );
+    if (polygons.length === 0) continue;
+    let sx = 0;
+    let sy = 0;
+    let count = 0;
+    for (const polygon of polygons) {
+      for (const point of polygon) {
+        sx += point.x;
+        sy += point.y;
+        count += 1;
+      }
+    }
+    stairs.push({ objectId: object.id, polygons, atMm: { x: sx / count, y: sy / count } });
+  }
+  return stairs;
+}
+
+/**
+ * Лестница, к которой подошли, или `null`. Ближайшая, если их рядом несколько:
+ * спрашивают про ту, у которой стоят.
+ */
+export function volumeStairNear(stairs, at, reach = VOLUME_STAIR_REACH_MM) {
+  let near = null;
+  let gap = reach;
+  for (const stair of stairs || []) {
+    let own = Infinity;
+    for (const polygon of stair.polygons) own = Math.min(own, volumePolygonGap(at, polygon));
+    if (own > gap) continue;
+    gap = own;
+    near = stair;
+  }
+  return near ? { stair: near, distanceMm: gap } : null;
+}
+
+/**
+ * Куда ведёт лестница: `{floor, options}` — этаж этой схемы и этажи, на которые
+ * можно перейти.
+ *
+ * В список идёт не всякая схема, а та, у которой **задан этаж и есть чертёж**.
+ * Этаж — потому что схема без номера не этаж, а просто второй план (развёртка,
+ * фрагмент, чужая квартира), и предлагать «перейти» на него значило бы гадать.
+ * Чертёж — потому что переход на схему, где показывать нечего, это тупик: окно
+ * открылось бы пустым полем и человеку пришлось бы возвращаться.
+ *
+ * Порядок — по номеру этажа, снизу вверх: так его читают на табличке лифта.
+ * Два плана с одним номером (бывает: план этажа и его зеркальная копия)
+ * остаются оба и различаются именем схемы — выбрасывать чужую работу по
+ * догадке нельзя.
+ */
+export function volumeFloors(project, schemeId) {
+  const options = [];
+  for (const scheme of schemesInOrder(project)) {
+    if (scheme.id === schemeId) continue;
+    const floor = schemeFloorOf(project, scheme.id);
+    if (floor === null) continue;
+    const drawn =
+      wallsOnScheme(project, scheme.id).length > 0 || schemeObjectsOnScheme(project, scheme.id).length > 0;
+    if (!drawn) continue;
+    options.push({
+      schemeId: scheme.id,
+      name: scheme.name,
+      floor,
+      stairs: volumeStairs(project, scheme.id).length > 0,
+    });
+  }
+  options.sort((a, b) => a.floor - b.floor);
+  return { floor: schemeFloorOf(project, schemeId), options };
+}
+
 // ——— метки ———————————————————————————————————————————————————————————————
 //
 // Таск 148, второй шаг G205. Где стоит вещь — правила заказчика, записанные
@@ -1440,7 +1583,19 @@ export function volumeScene(project, schemeId, options = {}) {
   if (walls.length === 0 && objects.length === 0) {
     // Без чертежа метку ставить не на что: ни стен, ни пола, ни потолка. Это
     // не потеря — объём и так говорит, что показывать нечего.
-    return { empty: true, notes: [], faces: [], order: null, solids: [], rooms: [], boundsMm: null, doors: [], marks: [], unplaced: [] };
+    return {
+      empty: true,
+      notes: [],
+      faces: [],
+      order: null,
+      solids: [],
+      rooms: [],
+      boundsMm: null,
+      doors: [],
+      stairs: [],
+      marks: [],
+      unplaced: [],
+    };
   }
   const rooms = volumeRooms(project, schemeId);
   const schemeHeight = volumeHeightMm(project, schemeId, null);
@@ -1546,6 +1701,10 @@ export function volumeScene(project, schemeId, options = {}) {
     wallCount: walls.length,
     openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
     doors,
+    // Лестницы схемы (таск 149): по ним окно спрашивает про этаж. Лежат в
+    // сцене, а не ищутся на каждом шаге, — спрашивается это на каждом шаге, а
+    // меняется только вместе с чертежом, то есть вместе со всей сценой.
+    stairs: volumeStairs(project, schemeId),
     marks: marks.placed,
     unplaced: marks.unplaced,
   };

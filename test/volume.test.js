@@ -29,17 +29,22 @@ import {
   addWall,
   applyMarkWalls,
   createProject,
+  SCHEME_FLOOR_MAX,
+  SCHEME_FLOOR_MIN,
   ensureSchemeObjectKinds,
   findMark,
+  findScheme,
   labelOf,
   markWall,
   markWallSide,
   planMmToFraction,
+  schemeFloorOf,
   schemeObjectKindsInOrder,
   setMarkDimensions,
   setPlanOrigin,
   setPlanScale,
   setRoomWallHeight,
+  setSchemeFloor,
   setSchemeWallHeight,
   styleOf,
 } from "../src/model.js";
@@ -67,6 +72,7 @@ import {
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_SELECT_COLOR,
+  VOLUME_STAIR_REACH_MM,
   volumeArea,
   volumeAroundCamera,
   volumeAroundFit,
@@ -102,6 +108,10 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeShade,
+  volumeFloors,
+  volumeStairKind,
+  volumeStairNear,
+  volumeStairs,
   volumeStart,
   volumeStep,
   volumeWallSolids,
@@ -117,10 +127,14 @@ import {
   volumeKeyMove,
   volumeMinimapBox,
   volumeNotes,
+  volumePadVector,
+  volumeStairLine,
+  volumeTitle,
   volumeUnplacedLine,
   volumeUnplacedTitle,
   volumeWhere,
 } from "../src/panels/volume.js";
+import { strings, text } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -1729,4 +1743,269 @@ test("изображение не встаёт вверх ногами: низ �
   const bottom = volumeFacePoint(place.face, 0, 0.5);
   assert.ok(top.z > bottom.z, "верх изображения выше его низа: " + top.z + " против " + bottom.z);
   assert.equal(Math.round(top.z - bottom.z), place.face.heightMm);
+});
+
+// ——— этажи, лестница, планшет и снимок (таск 149) ——————————————————————
+//
+// Три вещи, которые тихо врут, если за ними не следить:
+//
+//   1. **G68.** Этаж — единственное новое поле за весь объёмный режим, и оно
+//      необязательное. Объект, которому этажей не задавали, обязан остаться
+//      байт в байт тем же: пустое значение ключ **удаляет**, а не кладёт `null`.
+//   2. **Кого считать лестницей.** Вид объекта узнаётся по имени, другого
+//      способа у справочника видов нет вовсе — ни кода, ни ключа. Разойдись это
+//      с терпимым сравнением, и лестница в объекте заказчика перестанет быть
+//      лестницей молча.
+//   3. **Куда ведёт переход.** В список этажей идёт не всякая схема: без
+//      номера она не этаж, без чертежа — тупик.
+
+function stairsKindId(project) {
+  return schemeObjectKindsInOrder(project).find((kind) => kind.name === "Лестница").id;
+}
+
+// Комната с лестницей у левой стены: марш 1100 × 2700, как в стартовых
+// размерах мастерской.
+function stairScene(options = {}) {
+  const scene = roomScene(options);
+  let project = ensureSchemeObjectKinds(scene.project).project;
+  const added = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: stairsKindId(project),
+    shape: "rect",
+    atMm: options.atMm || { x: -1200, y: 0 },
+    widthMm: 1100,
+    depthMm: 2700,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  return { ...scene, project: added.project, objectId: added.schemeObject.id };
+}
+
+test("этаж схемы задаётся, читается и снимается, не оставляя ключа", () => {
+  const base = planProject();
+  assert.equal(schemeFloorOf(base.project, base.schemeId), null, "без правки этажа нет");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(findScheme(base.project, base.schemeId), "floor"),
+    false,
+    "и ключа в схеме нет вовсе — иначе прежний объект изменился бы от чтения",
+  );
+  const set = setSchemeFloor(base.project, base.schemeId, 2);
+  assert.equal(set.changed, true);
+  assert.equal(schemeFloorOf(set.project, base.schemeId), 2);
+  // Подвал и цоколь — это минус первый и нулевой, а не «не задано».
+  assert.equal(schemeFloorOf(setSchemeFloor(set.project, base.schemeId, -1).project, base.schemeId), -1);
+  assert.equal(schemeFloorOf(setSchemeFloor(set.project, base.schemeId, 0).project, base.schemeId), 0);
+  const cleared = setSchemeFloor(set.project, base.schemeId, "");
+  assert.equal(cleared.changed, true);
+  assert.equal(schemeFloorOf(cleared.project, base.schemeId), null);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(findScheme(cleared.project, base.schemeId), "floor"),
+    false,
+    "снятый этаж уносит ключ с собой: пустые поля в файл не пишутся (G68)",
+  );
+  // Снимать нечего — объект тот же по ссылке, и шага истории на это не нужно.
+  const again = setSchemeFloor(cleared.project, base.schemeId, null);
+  assert.equal(again.changed, false);
+  assert.equal(again.project, cleared.project);
+});
+
+test("этаж — целое число в разумных пределах, и остальное отвергается вслух", () => {
+  const base = planProject();
+  const code = (value) => {
+    try {
+      setSchemeFloor(base.project, base.schemeId, value);
+      return "";
+    } catch (error) {
+      return error.code;
+    }
+  };
+  assert.equal(code("1,5"), "schemeFloorInvalid", "половины этажа не бывает");
+  assert.equal(code("2.5"), "schemeFloorInvalid");
+  assert.equal(code("мансарда"), "schemeFloorInvalid");
+  assert.equal(code(1000), "schemeFloorRange");
+  assert.equal(code(-1000), "schemeFloorRange");
+  assert.equal(code(SCHEME_FLOOR_MAX), "");
+  assert.equal(code(SCHEME_FLOOR_MIN), "");
+  // «2,0» — то же целое, что «2»: запятая здесь только разделитель.
+  assert.equal(schemeFloorOf(setSchemeFloor(base.project, base.schemeId, "2,0").project, base.schemeId), 2);
+});
+
+test("объект прежней сборки не знает этажей — и не узнаёт о них от чтения (G68)", () => {
+  const legacy = JSON.parse(readFileSync(join(HERE, "legacy-project.json"), "utf8"));
+  const before = JSON.stringify(legacy);
+  for (const scheme of legacy.schemes) {
+    assert.equal(schemeFloorOf(legacy, scheme.id), null);
+    const floors = volumeFloors(legacy, scheme.id);
+    assert.equal(floors.floor, null);
+    assert.deepEqual(floors.options, [], "перейти некуда: ни у одной схемы этажа нет");
+    assert.deepEqual(volumeStairs(legacy, scheme.id), []);
+  }
+  assert.equal(JSON.stringify(legacy), before, "объект изменился — это запрещено прямо (G68)");
+});
+
+test("лестница узнаётся по имени вида — терпимо к регистру, пробелам и приписке", () => {
+  for (const name of ["Лестница", "лестница", "  ЛЕСТНИЦА  ", "Лестничный марш", "Лестница на 2 этаж", "stairs"]) {
+    assert.equal(volumeStairKind(name), true, name);
+  }
+  for (const name of ["", null, "Марш", "Шкаф", "Колонна", "Щит"]) {
+    assert.equal(volumeStairKind(name), false, String(name));
+  }
+});
+
+test("лестница чертежа попадает в сцену своей геометрией, а шкаф — нет", () => {
+  const scene = stairScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  assert.equal(built.stairs.length, 1);
+  assert.equal(built.stairs[0].objectId, scene.objectId);
+  assert.equal(built.stairs[0].polygons.length, 1, "у прямоугольного марша один габарит");
+  assert.deepEqual(
+    built.stairs[0].atMm,
+    { x: -1200, y: 0 },
+    "середина лестницы — там, где её поставили: спрашивают у того места, где она нарисована",
+  );
+  // Та же вещь под другим видом лестницей не считается: справочник тот же,
+  // габарит тот же, имя вида другое.
+  const plain = roomScene();
+  const withKinds = ensureSchemeObjectKinds(plain.project).project;
+  const cabinet = schemeObjectKindsInOrder(withKinds).find((kind) => kind.name === "Шкаф");
+  const other = addSchemeObject(withKinds, {
+    schemeId: plain.schemeId,
+    kindId: cabinet.id,
+    shape: "rect",
+    atMm: { x: -1200, y: 0 },
+    widthMm: 1100,
+    depthMm: 2700,
+    turnDeg: 0,
+  }).project;
+  assert.deepEqual(volumeScene(other, plain.schemeId).stairs, [], "шкаф лестницей не стал");
+  // И объект от сборки сцены не меняется.
+  const before = JSON.stringify(scene.project);
+  volumeScene(scene.project, scene.schemeId);
+  assert.equal(JSON.stringify(scene.project), before);
+});
+
+test("подход к лестнице виден с метра, а из другого конца комнаты — нет", () => {
+  const scene = stairScene();
+  const stairs = volumeScene(scene.project, scene.schemeId).stairs;
+  // Лестница занимает x от −1750 до −650. Встали в полуметре от её края.
+  assert.ok(volumeStairNear(stairs, { x: -150, y: 0 }), "в полуметре от края — подошли");
+  assert.equal(volumeStairNear(stairs, { x: 1500, y: 0 }), null, "через комнату — не подошли");
+  // Ровно на границе досягаемости и чуть дальше.
+  assert.ok(volumeStairNear(stairs, { x: -650 + VOLUME_STAIR_REACH_MM - 1, y: 0 }));
+  assert.equal(volumeStairNear(stairs, { x: -650 + VOLUME_STAIR_REACH_MM + 1, y: 0 }), null);
+  // Внутри габарита расстояние ноль: так бывает у лестницы, через которую
+  // можно пройти (низкий марш, порожек).
+  const inside = volumeStairNear(stairs, { x: -1200, y: 0 });
+  assert.equal(inside.distanceMm, 0);
+  assert.equal(volumeStairNear([], { x: 0, y: 0 }), null);
+});
+
+test("в список этажей идёт только схема с номером и чертежом, и по порядку снизу вверх", () => {
+  const first = stairScene();
+  let project = setSchemeFloor(first.project, first.schemeId, 1).project;
+  // Второй этаж: своя схема со своим чертежом.
+  const second = addScheme(project, { name: "2 этаж", imageId: "plan-2", width: 1200, height: 800 });
+  project = second.project;
+  project = addWall(project, {
+    schemeId: second.scheme.id,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 4000, y: 0 },
+    thicknessMm: 200,
+  }).project;
+  project = setSchemeFloor(project, second.scheme.id, 2).project;
+  // Подвал — тоже со чертежом.
+  const basement = addScheme(project, { name: "Подвал", imageId: "plan-0", width: 1200, height: 800 });
+  project = basement.project;
+  project = addWall(project, {
+    schemeId: basement.scheme.id,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 4000, y: 0 },
+    thicknessMm: 200,
+  }).project;
+  project = setSchemeFloor(project, basement.scheme.id, -1).project;
+  // Схема с номером, но без чертежа — тупик, в список не идёт.
+  const bare = addScheme(project, { name: "3 этаж", imageId: "plan-3", width: 1200, height: 800 });
+  project = setSchemeFloor(bare.project, bare.scheme.id, 3).project;
+  // Схема с чертежом, но без номера — не этаж вовсе.
+  const noFloor = addScheme(project, { name: "Развёртка", imageId: "plan-4", width: 1200, height: 800 });
+  project = addWall(noFloor.project, {
+    schemeId: noFloor.scheme.id,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 1000, y: 0 },
+    thicknessMm: 100,
+  }).project;
+
+  const floors = volumeFloors(project, first.schemeId);
+  assert.equal(floors.floor, 1, "свой этаж известен");
+  assert.deepEqual(
+    floors.options.map((option) => option.floor),
+    [-1, 2],
+    "только этажи с чертежом, снизу вверх",
+  );
+  assert.deepEqual(
+    floors.options.map((option) => option.name),
+    ["Подвал", "2 этаж"],
+  );
+  assert.deepEqual(
+    floors.options.map((option) => option.stairs),
+    [false, false],
+    "лестницы на тех этажах не нарисовано — об этом окно говорит вслух",
+  );
+  // Со второго этажа виден первый — и у него лестница есть.
+  const fromSecond = volumeFloors(project, second.scheme.id);
+  assert.deepEqual(
+    fromSecond.options.map((option) => [option.floor, option.stairs]),
+    [[-1, false], [1, true]],
+  );
+  // Своя схема в список не попадает никогда.
+  assert.ok(floors.options.every((option) => option.schemeId !== first.schemeId));
+});
+
+test("строка про лестницу молчит без лестницы и говорит, когда перейти некуда", () => {
+  assert.equal(volumeStairLine(null, []), "");
+  assert.equal(volumeStairLine(null, [{ floor: 2 }]), "");
+  assert.equal(volumeStairLine({ objectId: "s" }, []), strings.volume.stairNoFloors);
+  assert.equal(volumeStairLine({ objectId: "s" }, [{ floor: 2 }]), strings.volume.stairNear);
+});
+
+test("заголовок окна называет этаж, когда он задан", () => {
+  assert.equal(volumeTitle("1 этаж", null), text("volume.title", { name: "1 этаж" }));
+  assert.equal(volumeTitle("Мансарда", 3), text("volume.titleFloor", { name: "Мансарда", floor: 3 }));
+  assert.ok(volumeTitle("Подвал", -1).includes("-1"), "подвал называется своим номером, а не пропадает");
+});
+
+// ——— сенсорное управление ———————————————————————————————————————————————
+
+test("площадка ходьбы: вверх — вперёд, в сторону — поворот, середина — покой", () => {
+  const radius = 64;
+  assert.deepEqual(volumePadVector(0, 0, radius), { forward: 0, turn: 0 }, "палец в середине не идёт");
+  // Мёртвая зона: дрожание пальца ходьбой не считается.
+  assert.deepEqual(volumePadVector(5, 5, radius), { forward: 0, turn: 0 });
+  const up = volumePadVector(0, -radius, radius);
+  assert.equal(up.forward, 1, "палец вверх — полный шаг вперёд");
+  assert.equal(Math.abs(up.turn), 0);
+  const down = volumePadVector(0, radius, radius);
+  assert.equal(down.forward, -1);
+  const right = volumePadVector(radius, 0, radius);
+  assert.equal(right.turn, 1, "палец вправо — поворот вправо");
+  assert.equal(Math.abs(right.forward), 0);
+  assert.equal(volumePadVector(-radius, 0, radius).turn, -1);
+  // Полпути — полшага: иначе пальцем нельзя было бы идти медленно.
+  const half = volumePadVector(0, -radius * 0.6, radius);
+  assert.ok(half.forward > 0.4 && half.forward < 0.65, "полшага остаётся полушагом: " + half.forward);
+  // За краем площадки — то же, что на краю: больше единицы не бывает.
+  const far = volumePadVector(0, -radius * 4, radius);
+  assert.equal(far.forward, 1);
+  assert.ok(Math.hypot(far.forward, far.turn) <= 1.0000001);
+});
+
+test("подсказка пальцем не обещает клавиш, которых на планшете нет", () => {
+  const open = new Set();
+  const mouse = volumeDoorLine(["d1", "d2"], open, null, false);
+  const touch = volumeDoorLine(["d1", "d2"], open, null, true);
+  assert.ok(mouse.includes("E"), "мышью клавиша названа: " + mouse);
+  assert.equal(touch.includes(strings.volume.doorTouch), true);
+  assert.equal(touch.includes("E открывает"), false, "пальцем клавиши E нет вовсе: " + touch);
+  // Дверей нет — строки нет ни там, ни там.
+  assert.equal(volumeDoorLine([], open, null, true), "");
 });

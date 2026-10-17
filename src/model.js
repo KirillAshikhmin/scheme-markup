@@ -1127,6 +1127,67 @@ function roundOffset(value) {
   return Math.round(Number(value) * 100) / 100;
 }
 
+// ——— этаж схемы ———————————————————————————————————————————————————————
+//
+// Таск 149 (G205). Решение заказчика: «У схем можно задавать этаж, а при
+// подходе к любой лестнице спрашивать нужный этаж».
+//
+// Схема и так была этажом по смыслу — высота стен живёт у неё именно потому,
+// что «у подвала, первого этажа и мансарды высота разная». Номер делает это
+// числом: по нему объёмный режим знает, куда ведёт лестница, и ничего больше.
+// Ни нумерация меток, ни таблицы, ни выгрузки этажа не знают и знать не
+// должны — иначе одно необязательное поле расползлось бы по всей сборке.
+//
+// **Поле необязательное, и это главное** (G68). У объекта, которому этажей не
+// задавали, в схеме нет и ключа `floor`: пустое значение ключ **удаляет**, а не
+// кладёт в него `null`. Поэтому прежний объект открывается и выгружается байт в
+// байт тем же файлом — ровно как с `wallHeightMm`, по образцу которого это и
+// сделано.
+//
+// Целое со знаком: подвал — минус первый, цоколь — нулевой. Дробных этажей не
+// бывает; «полтора» на середине марша — это площадка, а не этаж.
+export const SCHEME_FLOOR_MIN = -50;
+export const SCHEME_FLOOR_MAX = 300;
+
+/** Этаж схемы или `null`, если его не задавали. */
+export function schemeFloorOf(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  return scheme && typeof scheme.floor === "number" ? scheme.floor : null;
+}
+
+// Пусто — «не задано». Запятую принимаем как десятичную точку, чтобы «1,0»
+// отвергалось по той же причине, что «1.5», а не разбиралось в единицу молча.
+function schemeFloorValue(value) {
+  if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return null;
+  const number = Number(String(value).trim().replace(",", "."));
+  if (!Number.isFinite(number) || !Number.isInteger(number)) throw modelError("schemeFloorInvalid");
+  if (number < SCHEME_FLOOR_MIN || number > SCHEME_FLOOR_MAX) {
+    throw modelError("schemeFloorRange", { min: SCHEME_FLOOR_MIN, max: SCHEME_FLOOR_MAX });
+  }
+  return number;
+}
+
+/**
+ * Задать или снять этаж схемы. `changed: false` — ничего не поменялось, и шага
+ * истории на это не нужно (тот же договор, что у `setSchemeWallHeight`).
+ */
+export function setSchemeFloor(project, schemeId, value) {
+  const scheme = requireScheme(project, schemeId);
+  const floor = schemeFloorValue(value);
+  if (floor === null && !Object.prototype.hasOwnProperty.call(scheme, "floor")) {
+    return { project, scheme, changed: false };
+  }
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    if (floor === null) {
+      const { floor: dropped, ...rest } = item;
+      return rest;
+    }
+    return { ...item, floor };
+  });
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), changed: true };
+}
+
 // Какие картинки объекту нужны: по этому списку хранилище понимает, что в нём
 // осталось от прежних подложек и больше никому не принадлежит.
 export function usedImageIds(project) {
