@@ -40,6 +40,7 @@ import {
   planMmToFraction,
   schemeFloorOf,
   schemeObjectKindsInOrder,
+  schemesInOrder,
   setMarkDimensions,
   setPlanOrigin,
   setPlanScale,
@@ -90,6 +91,7 @@ import {
   volumeDoorAt,
   volumeFloorAt,
   volumeMoveTo,
+  volumeSchemeChoices,
   volumeSkyAim,
   volumeSpareBox,
   volumeSkyPoint,
@@ -136,8 +138,10 @@ import {
   volumePadVector,
   volumeSpareLine,
   volumeSpareTitle,
+  volumeSchemeLabel,
   volumeStairLine,
   volumeTitle,
+  volumeTypingTarget,
   volumeUnplacedLine,
   volumeUnplacedTitle,
   volumeWhere,
@@ -2151,6 +2155,57 @@ test("строка про лестницу молчит без лестницы 
   assert.equal(volumeStairLine(null, [{ floor: 2 }]), "");
   assert.equal(volumeStairLine({ objectId: "s" }, []), strings.volume.stairNoFloors);
   assert.equal(volumeStairLine({ objectId: "s" }, [{ floor: 2 }]), strings.volume.stairNear);
+});
+
+// ——— выбор схемы в окне (G217) ———————————————————————————————————————————
+
+test("в выбор схемы идут все схемы объекта, а не только с чертежом", () => {
+  const first = stairScene();
+  let project = setSchemeFloor(first.project, first.schemeId, 1).project;
+  const second = addScheme(project, { name: "2 этаж", imageId: "plan-2", width: 1200, height: 800 });
+  project = addWall(second.project, {
+    schemeId: second.scheme.id,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 4000, y: 0 },
+    thicknessMm: 200,
+  }).project;
+  project = setSchemeFloor(project, second.scheme.id, 2).project;
+  // Схема без чертежа: в список этажей она не идёт (переход в пустое окно —
+  // тупик), а в выбор идёт — иначе человек ищет, куда она делась.
+  const bare = addScheme(project, { name: "Развёртка", imageId: "plan-3", width: 1200, height: 800 });
+  project = bare.project;
+
+  const choices = volumeSchemeChoices(project);
+  assert.deepEqual(
+    choices.map((item) => [item.name, item.floor, item.drawn]),
+    [["1 этаж", 1, true], ["2 этаж", 2, true], ["Развёртка", null, false]],
+  );
+  // Порядок — из модели: его человек задаёт в панели схем, и второй сортировки
+  // в сборке нет (в отличие от лестницы, которая ведёт снизу вверх).
+  assert.deepEqual(
+    choices.map((item) => item.schemeId),
+    schemesInOrder(project).map((scheme) => scheme.id),
+  );
+  // Своя схема из выбора не выпадает: по ней видно, где ты сейчас.
+  assert.ok(choices.some((item) => item.schemeId === first.schemeId));
+  // Этаж виден в строке, пустая схема — с припиской.
+  assert.equal(volumeSchemeLabel(choices[1]), text("volume.schemeFloor", { floor: 2, name: "2 этаж" }));
+  assert.equal(volumeSchemeLabel(choices[2]), text("volume.schemeBlank", { name: "Развёртка" }));
+  assert.equal(volumeSchemeLabel({ name: "План", floor: null, drawn: true }), "План");
+  // Объект от разбора списка не меняется (G68).
+  const before = JSON.stringify(project);
+  volumeSchemeChoices(project);
+  assert.equal(JSON.stringify(project), before);
+});
+
+test("клавиши окна не отбирают стрелки у поля выбора", () => {
+  assert.equal(volumeTypingTarget({ tagName: "SELECT" }), true);
+  assert.equal(volumeTypingTarget({ tagName: "INPUT" }), true);
+  assert.equal(volumeTypingTarget({ tagName: "TEXTAREA" }), true);
+  assert.equal(volumeTypingTarget({ tagName: "DIV", isContentEditable: true }), true);
+  assert.equal(volumeTypingTarget({ tagName: "CANVAS" }), false);
+  assert.equal(volumeTypingTarget({ tagName: "DIV" }), false);
+  assert.equal(volumeTypingTarget(null), false);
 });
 
 test("заголовок окна называет этаж, когда он задан", () => {

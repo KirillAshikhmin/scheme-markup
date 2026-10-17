@@ -974,9 +974,7 @@ export function volumeFloors(project, schemeId) {
     if (scheme.id === schemeId) continue;
     const floor = schemeFloorOf(project, scheme.id);
     if (floor === null) continue;
-    const drawn =
-      wallsOnScheme(project, scheme.id).length > 0 || schemeObjectsOnScheme(project, scheme.id).length > 0;
-    if (!drawn) continue;
+    if (!volumeDrawn(project, scheme.id)) continue;
     options.push({
       schemeId: scheme.id,
       name: scheme.name,
@@ -986,6 +984,39 @@ export function volumeFloors(project, schemeId) {
   }
   options.sort((a, b) => a.floor - b.floor);
   return { floor: schemeFloorOf(project, schemeId), options };
+}
+
+/** Есть ли в схеме чертёж: без стен и объектов объёму показывать нечего. */
+export function volumeDrawn(project, schemeId) {
+  if (!project || !schemeId) return false;
+  return wallsOnScheme(project, schemeId).length > 0 || schemeObjectsOnScheme(project, schemeId).length > 0;
+}
+
+/**
+ * Какие схемы можно показать в окне (G217). Слова заказчика: «в окне добавь
+ * выбор схемы ещё».
+ *
+ * **В списке все схемы объекта, а не только с чертежом.** Схема без чертежа
+ * даёт пустое окно — но окно про это говорит словом (`volume.empty`), а
+ * спрятанная схема не говорит ничего, и человек ищет, куда она делась. Поэтому
+ * строка списка несёт признак `drawn`, а прятать нечего.
+ *
+ * Этаж едет с каждой строкой: у двухэтажного объекта список читается как дом, а
+ * не как набор имён файлов.
+ *
+ * **Порядок — из модели** (`schemesInOrder`), а не по номеру этажа. Правило
+ * общее для всей сборки: порядок схем человек задаёт сам в панели схем, и
+ * вторая сортировка тут развела бы список окна с тем списком, по которому он
+ * щёлкает каждый день. Этажи сортирует только лестница — там это выбор «куда
+ * вести», а не перечень того, что есть.
+ */
+export function volumeSchemeChoices(project) {
+  return schemesInOrder(project).map((scheme) => ({
+    schemeId: scheme.id,
+    name: scheme.name,
+    floor: schemeFloorOf(project, scheme.id),
+    drawn: volumeDrawn(project, scheme.id),
+  }));
 }
 
 // ——— метки ———————————————————————————————————————————————————————————————
