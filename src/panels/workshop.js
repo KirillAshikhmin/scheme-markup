@@ -3653,7 +3653,10 @@ function createWorkshop({ api, hosts }) {
       sync();
       if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
     }
-    if ("wallSide" in changed || "elevationViews" in changed) sync();
+    // Галка «Развёртка выделенной стены» — одна на план и на чертёж (G227):
+    // сняли её в «Интерфейсе проекта» — полоса уходит и отсюда. Без этой
+    // строки поверхность о ней не узнавала: проверено живым прогоном.
+    if ("wallSide" in changed || "elevationViews" in changed || "elevationShown" in changed) sync();
     if ("project" in changed || "schemeImage" in changed) {
       // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
       if (selected && !aliveSelection()) selected = null;

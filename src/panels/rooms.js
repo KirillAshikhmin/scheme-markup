@@ -6,7 +6,14 @@
 // Дом у помещений один — этот раздел. Ни окна, ни кнопки в правой колонке
 // больше нет: заводить, переименовывать, красить, считать метки и удалять
 // можно только здесь.
-import { PANEL_IDS, registerPanel, SECTION_IDS, setSectionBadge } from "../app.js";
+import {
+  PANEL_IDS,
+  registerPanel,
+  SCREEN_DEFAULT,
+  SECTION_IDS,
+  setScreen,
+  setSectionBadge,
+} from "../app.js";
 import {
   addRoom,
   colorsInUse,
@@ -214,6 +221,8 @@ function mountRoomsPanel(host, api) {
     try {
       const created = addRoom(state.project, action.name);
       input.value = "";
+      // Показывают пальцем внутрь комнаты на плане — его и показываем (таск 153).
+      setScreen(SCREEN_DEFAULT);
       canvasCommit(state.project, created.project, strings.history.addRoom, {
         patch: { activeRoomId: created.room.id, mode: CANVAS_MODE_ROOM_TRACE, selectedOutlineId: null },
       });
@@ -231,6 +240,10 @@ function mountRoomsPanel(host, api) {
 
   // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
   // вершины на плане.
+  //
+  // И то и другое делается **на плане**, а раздел «Помещения» стоит в колонке
+  // во всех трёх режимах (таск 153): если на экране чертёж или объём, план
+  // надо вернуть — иначе обводка началась бы за кадром.
   function startOutline(roomId) {
     const state = getState();
     if (!state.schemeId) {
@@ -242,6 +255,7 @@ function mountRoomsPanel(host, api) {
       startDrawing(roomId);
       return;
     }
+    setScreen(SCREEN_DEFAULT);
     setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
     notify(strings.rooms.outlineEditing);
   }
@@ -253,6 +267,7 @@ function mountRoomsPanel(host, api) {
       notify(strings.canvas.needScheme);
       return;
     }
+    setScreen(SCREEN_DEFAULT);
     setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
   }
 

@@ -26489,6 +26489,11 @@ function drawingCountsText(counts) {
   return parts.join(", ");
 }
 function canvasStartScale(schemeId) {
+  // Отрезок меряют **по плану**, значит план и надо показать (таск 153): позвать
+  // калибровку можно из строки схемы и из слоёв чертежа, а поле в этот миг может
+  // быть занято чертежом или объёмом. Режим — часть самой двери, иначе каждый
+  // зовущий чинил бы это сам и однажды забыл бы.
+  setScreen(SCREEN_DEFAULT);
   canvasApi.setState({
     schemeId,
     selectedMarkIds: [],
@@ -26506,6 +26511,9 @@ function canvasStartScale(schemeId) {
  * отобрали бы клик у точки, которую человек показывает внутри комнаты.
  */
 function canvasStartRoomTrace(roomId) {
+  // Показывают пальцем внутрь комнаты **на плане** — значит план и показываем
+  // (таск 153): «Помещения» стоят в колонке во всех трёх режимах.
+  setScreen(SCREEN_DEFAULT);
   canvasApi.setState({
     activeRoomId: roomId,
     selectedMarkIds: [],
@@ -39768,6 +39776,8 @@ function mountRoomsPanel(host, api) {
     try {
       const created = addRoom(state.project, action.name);
       input.value = "";
+      // Показывают пальцем внутрь комнаты на плане — его и показываем (таск 153).
+      setScreen(SCREEN_DEFAULT);
       canvasCommit(state.project, created.project, strings.history.addRoom, {
         patch: { activeRoomId: created.room.id, mode: CANVAS_MODE_ROOM_TRACE, selectedOutlineId: null },
       });
@@ -39785,6 +39795,10 @@ function mountRoomsPanel(host, api) {
 
   // Кнопка у комнаты: нет контура — обводим, есть — выделяем его и правим
   // вершины на плане.
+  //
+  // И то и другое делается **на плане**, а раздел «Помещения» стоит в колонке
+  // во всех трёх режимах (таск 153): если на экране чертёж или объём, план
+  // надо вернуть — иначе обводка началась бы за кадром.
   function startOutline(roomId) {
     const state = getState();
     if (!state.schemeId) {
@@ -39796,6 +39810,7 @@ function mountRoomsPanel(host, api) {
       startDrawing(roomId);
       return;
     }
+    setScreen(SCREEN_DEFAULT);
     setState({ mode: "select", selectedOutlineId: row.outlineId, selectedMarkIds: [], activeRoomId: roomId });
     notify(strings.rooms.outlineEditing);
   }
@@ -39807,6 +39822,7 @@ function mountRoomsPanel(host, api) {
       notify(strings.canvas.needScheme);
       return;
     }
+    setScreen(SCREEN_DEFAULT);
     setState({ activeRoomId: roomId, mode: "room", selectedOutlineId: null });
   }
 
@@ -53922,7 +53938,10 @@ function createWorkshop({ api, hosts }) {
       sync();
       if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
     }
-    if ("wallSide" in changed || "elevationViews" in changed) sync();
+    // Галка «Развёртка выделенной стены» — одна на план и на чертёж (G227):
+    // сняли её в «Интерфейсе проекта» — полоса уходит и отсюда. Без этой
+    // строки поверхность о ней не узнавала: проверено живым прогоном.
+    if ("wallSide" in changed || "elevationViews" in changed || "elevationShown" in changed) sync();
     if ("project" in changed || "schemeImage" in changed) {
       // Отмена могла унести то, что было выделено, — и проём вместе со стеной.
       if (selected && !aliveSelection()) selected = null;

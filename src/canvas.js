@@ -14,6 +14,7 @@ import {
   PANEL_IDS,
   registerPanel,
   SCREEN_DEFAULT,
+  setScreen,
 } from "./app.js";
 import { strings, text } from "./strings.js";
 import {
@@ -366,6 +367,11 @@ export function drawingCountsText(counts) {
 }
 
 export function canvasStartScale(schemeId) {
+  // Отрезок меряют **по плану**, значит план и надо показать (таск 153): позвать
+  // калибровку можно из строки схемы и из слоёв чертежа, а поле в этот миг может
+  // быть занято чертежом или объёмом. Режим — часть самой двери, иначе каждый
+  // зовущий чинил бы это сам и однажды забыл бы.
+  setScreen(SCREEN_DEFAULT);
   canvasApi.setState({
     schemeId,
     selectedMarkIds: [],
@@ -383,6 +389,9 @@ export function canvasStartScale(schemeId) {
  * отобрали бы клик у точки, которую человек показывает внутри комнаты.
  */
 export function canvasStartRoomTrace(roomId) {
+  // Показывают пальцем внутрь комнаты **на плане** — значит план и показываем
+  // (таск 153): «Помещения» стоят в колонке во всех трёх режимах.
+  setScreen(SCREEN_DEFAULT);
   canvasApi.setState({
     activeRoomId: roomId,
     selectedMarkIds: [],
