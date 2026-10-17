@@ -1063,6 +1063,10 @@ export function volumeDrawn(project, schemeId) {
 //      на которой метка лежит по плану. Выступ от стены (G197) гонит её наружу.
 //   2. Высота задана, стены нет → вещь висит **в своём месте по плану** на
 //      заданной высоте.
+//   2a. Высота задана **нулём** → вещь не висит, а **стоит на полу**: на нуле
+//      её низ, а не середина (дефект D34, `volumeMarkOnFloor`). Правило
+//      действует в обеих ветках: осушитель у стены стоит на полу так же, как
+//      робот-пылесос посреди комнаты.
 //   3. Высоты нет → вещь **потолочная**: встаёт под потолок того помещения, в
 //      котором стоит, в своём месте по плану. Это не догадка сборки, а то, как
 //      заполнен справочник: высота пуста ровно у потолочного света — точечный
@@ -1116,6 +1120,34 @@ export const VOLUME_MARK_LIFT_MM = 2;
  * же пара точек экрана, что и десять, но грань у них настоящая.
  */
 export const VOLUME_MARK_MIN_MM = 20;
+
+/**
+ * Вещь **стоит на полу**, а не висит на своей высоте (дефект D34).
+ *
+ * Высота над полом — это **середина** вещи: розетка на 300 занимает от 260 до
+ * 340, и иначе её не поставить — ни верх, ни низ у висящей вещи не главнее
+ * другого. Но ровно на этом правиле вещь с высотой **нуль** — осушитель, робот‑
+ * пылесос, датчик протечки — вставала серединой на нуле, то есть нижней
+ * половиной под полом.
+ *
+ * Признак — **сама нулевая высота, и больше ничего**. Проверять «есть ли под
+ * ней пол» незачем: пол в объёме есть всегда (обведённое помещение или плита
+ * под всем чертежом, `volumeScene`), так что проверка была бы истинной везде и
+ * не различала бы ничего. Поля «где стоит» у метки нет (у вещей чертежа оно
+ * появилось в таске 154), и заводить его ради этого не нужно: вещи, у которой
+ * середина **на уровне пола**, не бывает. Записанный ноль у висящей вещи
+ * означал бы, что её половина замурована в стяжку, — такого не размечают, и
+ * читать ноль как «низ на полу» значит понять человека, а не догадаться за
+ * него.
+ *
+ * Поэтому правило узкое: **двигается только нулевая высота**. Вещь на 50 мм
+ * останется серединой на пятидесяти, даже если её низ при этом уйдёт ниже нуля:
+ * пятьдесят человек написал сам, и перетолковывать его число нельзя (G68 —
+ * готовый объект не должен меняться сверх того, что прямо исправляют).
+ */
+export function volumeMarkOnFloor(heightMm) {
+  return heightMm === 0;
+}
 
 /**
  * **Запасной габарит** спрашивается у общего правила — `markBoxMm`
@@ -1332,6 +1364,15 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
     // внутрь, но лицом остаётся в плоскости стены — иначе его не было бы видно.
     const outer = recessed ? faceMm : faceMm + depthMm;
     const inner = recessed ? faceMm - depthMm : faceMm;
+    // Высота над полом — середина вещи, кроме вещи, стоящей на полу
+    // (`volumeMarkOnFloor`, D34): у неё на полу стоит низ. Вверх на стене идёт
+    // **ширина** — вторая сторона лица, и другого имени у этой оси нет.
+    const bottomMm = volumeMarkOnFloor(heightMm) ? 0 : heightMm - widthMm / 2;
+    const topMm = bottomMm + widthMm;
+    // Середина тела, а не записанное число: по ней стоит лицо, целится рамка
+    // выделения и приходит стрелка связи. У всего, что висит, она и есть
+    // записанная высота, — разойтись они могут только у стоящего на полу.
+    const centreMm = (bottomMm + topMm) / 2;
     const at = (across) => ({
       x: Number(wall.aMm.x) + vectors.u.x * middle + normal.x * across,
       y: Number(wall.aMm.y) + vectors.u.y * middle + normal.y * across,
@@ -1342,15 +1383,15 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
       mode: VOLUME_MARK_WALL,
       wallId: wall.id,
       side,
-      heightMm,
+      heightMm: centreMm,
       prisms: [
         {
           corners: volumeBoxCorners(at((outer + inner) / 2), vectors.u, alongMm, Math.max(outer - inner, 1)),
-          bottomMm: heightMm - widthMm / 2,
-          topMm: heightMm + widthMm / 2,
+          bottomMm,
+          topMm,
         },
       ],
-      anchor: { x: faceAt.x, y: faceAt.y, z: heightMm },
+      anchor: { x: faceAt.x, y: faceAt.y, z: centreMm },
       // Габарит для модели (таск 155). Перёд берётся **оттуда же, откуда
       // лицо**: `u` — вдоль стены, как у изображения, `f` — от лица в стену,
       // то есть доля −0.5 по глубине всегда лежит на наружной грани, и у
@@ -1358,7 +1399,7 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
       // длину, вверх — ширину, и третьего имени у этой оси нет.
       frame: {
         at: at((outer + inner) / 2),
-        bottomMm: heightMm - widthMm / 2,
+        bottomMm,
         u: { x: vectors.u.x, y: vectors.u.y },
         f: { x: -normal.x, y: -normal.y },
         widthMm: alongMm,
@@ -1367,7 +1408,7 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
       },
       // Лицо вещи — её наружная грань: по нему рисуется изображение объекта.
       face: {
-        origin: { x: faceAt.x, y: faceAt.y, z: heightMm },
+        origin: { x: faceAt.x, y: faceAt.y, z: centreMm },
         u: { x: vectors.u.x, y: vectors.u.y, z: 0 },
         v: { x: 0, y: 0, z: 1 },
         normal,
@@ -1381,8 +1422,14 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
   const middle = volumePathMiddle(path);
   const room = heightMm === null ? volumeRoomAt({ rooms }, middle) : null;
   if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
-  const topMm = heightMm === null ? room.heightMm : heightMm + depthMm / 2;
-  const bottomMm = topMm - depthMm;
+  // Вверх у вещи без стены идёт **выступ**: она лежит лицом к полу или к
+  // потолку, а не стоит боком. Потолочная свисает выступом от потолка, висящая
+  // в воздухе берёт свою высоту серединой, а стоящая на полу
+  // (`volumeMarkOnFloor`, D34) — низом: робот-пылесос с выступом 90 занимает от
+  // нуля до девяноста, а не от минус сорока пяти до сорока пяти.
+  const onFloor = volumeMarkOnFloor(heightMm);
+  const bottomMm = heightMm === null ? room.heightMm - depthMm : onFloor ? 0 : heightMm - depthMm / 2;
+  const topMm = bottomMm + depthMm;
   const centreMm = (topMm + bottomMm) / 2;
   const prisms = line
     ? volumePathPrisms(path, lengthMm, bottomMm, topMm)
@@ -1411,14 +1458,24 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
           heightMm: topMm - bottomMm,
         },
     // Лицо потолочной вещи смотрит вниз: на светильник смотрят снизу, и
-    // изображение объекта рисуется на нижней грани.
+    // изображение объекта рисуется на нижней грани. У стоящей на полу — ровно
+    // наоборот (D34): на робота-пылесоса смотрят сверху, а лицо, оставленное
+    // внизу, легло бы в самую плоскость пола и ушло бы под неё вместе с
+    // контуром (`VOLUME_VIEW_LIFT_MM` поднимает контур **по нормали**), да ещё
+    // и отсеклось бы отбором по нормали — то есть вещь осталась бы без
+    // изображения вовсе.
+    //
+    // Переворачивается только нормаль и сторона, на которой лежит лицо: `u` и
+    // `v` остаются своими. У горизонтального лица верхнего края нет вовсе —
+    // человек ходит вокруг и смотрит на него с любой стороны, — и назначать его
+    // значило бы выдумать то, чего в данных нет.
     face: line
       ? null
       : {
-          origin: { x: middle.x, y: middle.y, z: bottomMm },
+          origin: { x: middle.x, y: middle.y, z: onFloor ? topMm : bottomMm },
           u: { x: 1, y: 0, z: 0 },
           v: { x: 0, y: 1, z: 0 },
-          normal: { x: 0, y: 0, z: -1 },
+          normal: { x: 0, y: 0, z: onFloor ? 1 : -1 },
           widthMm: lengthMm,
           heightMm: widthMm,
         },

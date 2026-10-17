@@ -99,6 +99,8 @@ import {
   volumeHeightMm,
   volumeHorizon,
   volumeLinkLines,
+  volumeMarkOnFloor,
+  volumeMarkViewLines,
   volumeMarkerFaces,
   volumePickAt,
   volumeSightAt,
@@ -1465,6 +1467,80 @@ test("метка на стене стоит по отступу, высоте и
   assert.ok(place.face.normal.y > 0, "лицо розетки смотрит внутрь комнаты");
   assert.equal(place.face.widthMm, 80);
   assert.equal(place.face.heightMm, 80);
+});
+
+// ——— D34: нулевая высота — это «на полу» ——————————————————————————————————
+//
+// Высота над полом — середина вещи, и на этом правиле вещь с высотой нуль
+// (осушитель, робот-пылесос, датчик протечки) стояла серединой на нуле, то есть
+// нижней половиной под полом. Признак — сама нулевая высота: вещи, у которой
+// середина на уровне пола, не бывает.
+
+test("правило различает «стоит на полу» и «висит»: двигается только нулевая высота", () => {
+  assert.equal(volumeMarkOnFloor(0), true);
+  assert.equal(volumeMarkOnFloor(300), false);
+  // Высоты нет вовсе — это потолочная вещь, и к полу она не имеет отношения.
+  assert.equal(volumeMarkOnFloor(null), false);
+  // Сто миллиметров человек написал сам — и перетолковывать его число нельзя,
+  // даже если низ вещи при этом уйдёт ниже нуля.
+  assert.equal(volumeMarkOnFloor(100), false);
+});
+
+test("осушитель у стены стоит на полу, а не половиной под ним", () => {
+  const scene = roomScene();
+  // Осушитель «ОВ» из стартового справочника: 400 × 600 × 250, высота 0.
+  const put = markAt(scene.project, scene.schemeId, "ОВ", [{ x: -500, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.equal(place.mode, VOLUME_MARK_WALL, "привязался к стене — случай тот самый");
+  const span = faceSpanZ(place);
+  assert.equal(span.bottomMm, 0, "низ на полу");
+  assert.equal(span.topMm, 600, "вверх ушла вся ширина вещи");
+  // Середина тела — по ней лицо, рамка выделения и стрелка связи.
+  assert.equal(place.heightMm, 300);
+  assert.equal(place.face.origin.z, 300);
+  assert.equal(place.anchor.z, 300);
+  assert.equal(place.frame.bottomMm, 0, "модель садится на тот же пол");
+});
+
+test("робот-пылесос посреди комнаты лежит на полу и лицом вверх", () => {
+  const scene = roomScene();
+  // Середина комнаты: до стен больше порога автопривязки — вещь стоит в своём
+  // месте по плану, а не на стене. Вверх у неё идёт выступ (100 мм).
+  const put = markAt(scene.project, scene.schemeId, "РП", [{ x: 0, y: 0 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.equal(place.mode, VOLUME_MARK_ROOM);
+  const span = faceSpanZ(place);
+  assert.equal(span.bottomMm, 0, "низ на полу");
+  assert.equal(span.topMm, 100, "вверх — выступ вещи");
+  assert.equal(place.heightMm, 50);
+  // Лицо смотрит вверх: оставь его внизу — изображение легло бы в плоскость
+  // пола, ушло бы под неё вместе с контуром и отсеклось бы по нормали.
+  assert.equal(place.face.normal.z, 1);
+  assert.equal(place.face.origin.z, 100);
+  assert.ok(volumeMarkViewLines(place).length > 0, "контур вещи есть");
+  for (const line of volumeMarkViewLines(place)) {
+    for (const point of line.p) assert.ok(point.z > 0, "контур не ушёл под пол: " + point.z);
+  }
+});
+
+test("висящая на стене вещь от правки не сдвинулась", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "Р", [{ x: -500, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const span = faceSpanZ(placeOf(built, put.markId));
+  // Розетка на 300 — ровно середина минус половина ширины, как и была.
+  assert.deepEqual(span, { bottomMm: 260, topMm: 340 });
+});
+
+test("вещь на полу: сцена собралась, а объект не изменился (G68)", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "ДПр", [{ x: 0, y: 0 }]);
+  const before = JSON.stringify(put.project);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  assert.equal(faceSpanZ(placeOf(built, put.markId)).bottomMm, 0);
+  assert.equal(JSON.stringify(put.project), before, "посадка живёт в сцене, а не в объекте");
 });
 
 test("утопленное лицом остаётся в плоскости стены, а телом уходит внутрь", () => {
