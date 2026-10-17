@@ -165,7 +165,8 @@ test("в раскрытой строке видно, заданы ли у мет
 
   box.project = setMarkDimensions(box.project, box.lampOne, { length: 600, heightAboveFloor: 0 }).project;
   const view = marksRowModel(box.project, rowOf(box, box.lampOne), { open: true });
-  assert.equal(view.fields.sizes, "Д 600 · В 0 мм");
+  // «от пола» вместо буквы «В» — с таска 158 буква занята высотой самой вещи.
+  assert.equal(view.fields.sizes, "Д 600 · от пола 0 мм");
   // Соседней метке чужие размеры не приписываются.
   assert.equal(marksRowModel(box.project, rowOf(box, box.lampTwo), { open: true }).fields.sizes, "");
   // В свёрнутой строке полей нет вовсе — размеры их не заводят.

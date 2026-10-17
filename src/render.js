@@ -55,6 +55,7 @@ import {
 } from "./model.js";
 import { strings, text } from "./strings.js";
 import { markBoxMm } from "./markBox.js";
+import { markSpareLine } from "./markSpare.js";
 import { drawObjectView, objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 
 export const SHAPES = SHAPE_NAMES;
@@ -5339,7 +5340,11 @@ export function elevationMarkBox(mark, scale, unit, views) {
   // знак не изображает вещь и масштаба не обещает.
   if (!view) {
     const side = 18 * unit;
-    return { view: null, width: side, height: side, scaled: false, grown: 1 };
+    // Догадкой знак не считается, и это та же мысль, что у `scaled`: знак не
+    // изображает вещь и размера не обещает, значит и предупреждать о выдуманной
+    // стороне не о чем. Снял человек отметку «изображения» — на листе остались
+    // одни знаки, и о габаритах лист не говорит вовсе.
+    return { view: null, width: side, height: side, scaled: false, grown: 1, guessed: false };
   }
   const size = mark.sizeMm || {};
   // Габарит вещи — один ответ на обе поверхности (G226, `markBox.js`): каждая
@@ -5357,6 +5362,10 @@ export function elevationMarkBox(mark, scale, unit, views) {
     // Во сколько раз нарисованное крупнее настоящего масштаба. Единица —
     // честно; по этому числу подпись и решает, есть ли о чём говорить.
     grown: Math.max(1, min / Math.max(1e-9, Math.min(atScale.width, atScale.height))),
+    // Хоть одна сторона габарита — догадка общего правила (G226). Развёртка об
+    // этом говорит так же, как объём (G230), и считает то же самое: второго
+    // счёта нет, здесь просто проброшен ответ `markBoxMm`.
+    guessed: box.guessed,
   };
 }
 
@@ -5492,6 +5501,13 @@ export function elevationPack(places, sizes) {
  * `options.label` — подпись над чертежом. На экране её не надо (над полосой
  * стоит заголовок строкой), а на листе из нескольких развёрток она и есть
  * порядок обхода: без номера ряд чертежей читается как россыпь.
+ *
+ * Возвращает поле стены, выбранный масштаб и две новости о том, чем вещи
+ * нарисованы: `grown` — сколько подтянуто до читаемого размера (дефект D25),
+ * `spare` — какие нарисованы запасным габаритом (G230). Обе знает только
+ * отрисовка: первая зависит от масштаба, который она подбирает сама, вторая —
+ * от отметки «изображения», и считать их по данным заново значило бы завести
+ * второй счёт.
  */
 export function drawElevation(ctx, elevation, box, options = {}) {
   if (!elevation) return null;
@@ -5543,6 +5559,17 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     (sum, row) => sum + row.boxes.filter((box) => box.view && box.grown > ELEVATION_GROWN_QUIET).length,
     0,
   );
+  // Вещи с додуманной стороной (G230): список тот же, что у объёма, и считает
+  // его то же правило (`markBoxMm` через `elevationMarkBox`). Собирается здесь
+  // по той же причине, что `grown`: кто чем нарисован, знает только отрисовка —
+  // отметка «изображения» снята, и говорить не о чем вовсе.
+  const spare = [];
+  for (const row of rows) {
+    row.members.forEach((mark, index) => {
+      const box = row.boxes[index];
+      if (box.view && box.guessed) spare.push({ markId: mark.id, label: mark.label });
+    });
+  }
 
   ctx.save();
   ctx.font = drawFont(ELEVATION_FONT * unit, 600);
@@ -5555,7 +5582,24 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     // экране: размечают стену по листу, и на листе графа «Масштаб» одна, а
     // мелочь на нём крупнее своего масштаба (дефект D25).
     const said = grown > 0 ? options.label + " · " + text("elevationSheet.grown", { count: grown }) : options.label;
-    elevationText(ctx, said, inner.x, box.y + (ELEVATION_PAD.top / 2) * unit, "left", unit);
+    const captionY = box.y + (ELEVATION_PAD.top / 2) * unit;
+    elevationText(ctx, said, inner.x, captionY, "left", unit);
+    // Додуманная сторона — **на том же листе** и теми же словами, что в объёме
+    // (`markSpare.js`, G230). Молчать на листе нельзя ровно по той причине, по
+    // которой на нём стоит приписка о подтянутых вещах (дефект D25): по листу
+    // размечают стену, графа «Масштаб» у него одна, а у этих вещей сторона не
+    // измерена, а взята у картинки. Догадка хуже подтяжки: подтянутую вещь
+    // можно померить по справочнику, а у этой мерить нечего.
+    //
+    // Хвост с объяснением остаётся экрану: подпись над чертежом — строка, а не
+    // абзац, и целый абзац по ширине листа не ляжет. Поэтому здесь голова, и
+    // стоит она **у правого края** поля, навстречу подписи, а не за ней: имя
+    // стены слева, догадка справа — так они не упираются друг в друга даже на
+    // узком формате.
+    const spareSaid = markSpareLine(spare);
+    if (spareSaid) {
+      elevationText(ctx, spareSaid, inner.x + inner.width, captionY, "right", unit);
+    }
   }
 
   // Поле стены.
@@ -5773,7 +5817,7 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
   ctx.restore();
-  return { x: left, y: floor - wallHeight, width: wallWidth, height: wallHeight, scale, grown };
+  return { x: left, y: floor - wallHeight, width: wallWidth, height: wallHeight, scale, grown, spare };
 }
 
 export function drawScheme(ctx, {

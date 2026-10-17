@@ -2131,9 +2131,11 @@ test("объект без списка принятых открывается �
 test("размеры метки пишутся и читаются; порядок полей — порядок окна", () => {
   const { project: base, first } = projectWithSchemes();
   const step = putPoint(base, first.id, "Р");
-  // Выступ от стены встал третьим (таск 139, G197): порядок полей — порядок
-  // окна, и выступ стоит рядом с длиной и шириной, а не после высоты.
-  assert.deepEqual(MARK_DIMENSION_FIELDS, ["length", "width", "depth", "heightAboveFloor"]);
+  // Порядок полей — порядок окна, а окно с таска 158 (G233) ставит три
+  // габарита в строку: Длина · Ширина · Высота. Ширина — это прежний «Выступ
+  // от стены» (поперёк стены), высота — прежняя «Ширина» (вверх); посадка
+  // идёт за тройкой, потому что габаритом не является.
+  assert.deepEqual(MARK_DIMENSION_FIELDS, ["length", "depth", "width", "heightAboveFloor"]);
 
   const after = setMarkDimensions(step.project, step.mark.id, {
     length: 600,
