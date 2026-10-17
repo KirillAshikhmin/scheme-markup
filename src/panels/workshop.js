@@ -53,17 +53,13 @@
 //      чертёж снова лёг на план. Отказ от пересчёта оставляет чертёж как был:
 //      нарисованный по сетке от размеров верен сам по себе.
 //
-//      Но **показать картинку и положить на неё чертёж — разные задачи** (таск
-//      132, дефект D22). Прежде окно гасило слой подложки и предлагало кнопку,
-//      которая закрывала его и уводила на холст: человек, пришедший обводить
-//      план, выставлялся из мастерской прежде, чем что-то увидел. Теперь у
-//      окна есть нулевое занятие — `WORKSHOP_TOOL_SCALE`, — и в нём кадр
-//      меряется **точками подложки, а не миллиметрами**: картинка видна
-//      целиком, отрезок калибровки проводится по ней же, метры спрашиваются
-//      тут же, и в объект уходит `setPlanScale` через `canvasCommit`. Ни
-//      сетки, ни чертежа в этом кадре нет — миллиметр в нём ещё ничему не
-//      равен, и рисовать в нём нечем. Масштаб задан — окно само берётся за
-//      стены и вписывает план заново.
+//      **Задать масштаб — дело плана, а не чертежа** (G227, таск 153). Своего
+//      занятия «Масштаб» у чертежа больше нет: заказчик убрал его как дубль —
+//      «Масштаб убери, он в Схемах есть». Слой подложки в чертеже при этом
+//      по-прежнему гаснет, но рядом с ним стоит кнопка, которая показывает
+//      план и начинает на нём калибровку (`canvasStartScale`) — ту же самую,
+//      что и строка схемы. Задали масштаб — вернулись в чертёж, и подложка в
+//      поле зажглась.
 //   3. **Подложки нет вовсе.** Привязки не бывает — привязывать не к чему, поле
 //      не появляется. Чертёж сам себе план: размер берётся из `drawingBoundsMm`,
 //      а у пустой схемы окно показывает лист `WORKSHOP_EMPTY_MM` вокруг нуля —
@@ -75,7 +71,14 @@
 // у объекта без чертежа — ноль правок, ноль шагов истории, ноль новых полей в
 // `project.json`. Пустые списки в объект не попадают: их не кладёт ни одна
 // функция модели чертежа.
-import { ELEVATION_VIEWS_SETTING, PANEL_IDS, registerPanel, screenMode } from "../app.js";
+import {
+  ELEVATION_VIEWS_SETTING,
+  PANEL_IDS,
+  registerPanel,
+  SCREEN_DEFAULT,
+  screenMode,
+  setScreen,
+} from "../app.js";
 import { setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
@@ -107,7 +110,6 @@ import {
   planFractionToMm,
   planOriginOf,
   planPixelsPerMeter,
-  planScaleShort,
   planSizeMeters,
   roomsInOrder,
   SCHEME_FLOOR_MAX,
@@ -134,13 +136,11 @@ import {
 } from "../model.js";
 import {
   CANVAS_FRESH_VERTEX_MS,
-  canvasCommitScale,
   canvasPanSpeed,
   canvasPanVector,
   canvasPinchWheel,
   canvasRedoStep,
-  canvasScaleFollowSaid,
-  canvasScaleMeters,
+  canvasStartScale,
   canvasUndoStep,
   canvasWheelKind,
   canvasZoomFactor,
@@ -204,15 +204,23 @@ export const WORKSHOP_ZOOM_MIN = 0.0007;
 export const WORKSHOP_ZOOM_MAX = 1.5;
 const WORKSHOP_ZOOM_KEY_STEP = 1.25;
 
-// Занятие «Масштаб» (таск 132) меряет кадр **точками подложки**, а не
-// миллиметрами, и предел у него поэтому свой: восемь пикселей экрана на точку
-// плана — чтобы конец стены на фотографии было чем поймать точно.
-export const WORKSHOP_TOOL_SCALE = "scale";
-export const WORKSHOP_PLAN_ZOOM_MAX = 8;
-
-// Режим «Развёртка» (таск 133, G185): в нём клик по стене показывает её
-// развёртку, и больше ни в одном полоса не выезжает.
-export const WORKSHOP_TOOL_ELEVATION = "elevation";
+// ——— чего в чертеже больше нет (G227, таск 153) ————————————————————————
+//
+// Заказчик, посмотрев режим живьём: «Кнопки + − и вписать дублируются, есть в
+// нижнем блоке с интерфейсом… Так же кнопка Развёртка… дублируется в блоке
+// интерфейса. И Масштаб убери, он в Схемах есть».
+//
+// Поэтому из чертежа ушли три вещи, и ни одна из них не пропала:
+//
+//   **масштаб окна** («−», «+», «Вписать») — он в «Интерфейсе проекта», в той
+//     же левой колонке ниже, и теперь работает на то поле, которое на экране;
+//   **развёртка** — полоса выезжает по выделенной стене, как на плане, а
+//     показывать её или нет, решает галка «Развёртка выделенной стены» там же,
+//     в «Интерфейсе проекта»;
+//   **калибровка масштаба плана** — она в строке схемы, в разделе «Схемы»
+//     («Масштаб: план …»), и кнопка в слоях чертежа ведёт ровно туда же.
+//
+// Занятия внутри остались два: выделение и добавление.
 
 /**
  * **Два уровня вместо ряда занятий** (таск 133, G184). Слова заказчика:
@@ -230,13 +238,12 @@ export const WORKSHOP_TOOL_ELEVATION = "elevation";
  * добавляем» — это его два взгляда, а не второе состояние рядом. Заведи их
  * врозь — и нашлась бы пара «режим добавления, а добавляем ничего».
  */
-export const WORKSHOP_MODES = ["select", "add", WORKSHOP_TOOL_SCALE, WORKSHOP_TOOL_ELEVATION];
+export const WORKSHOP_MODES = ["select", "add"];
 export const WORKSHOP_ADDING = ["walls", "openings", "objects"];
 
 /** Каким режимом читается занятие. Обратное — `workshopToolOf`. */
 export function workshopModeOf(tool) {
   if (tool === "edit") return "select";
-  if (tool === WORKSHOP_TOOL_SCALE || tool === WORKSHOP_TOOL_ELEVATION) return tool;
   return "add";
 }
 
@@ -247,7 +254,6 @@ export function workshopModeOf(tool) {
  */
 export function workshopToolOf(mode, adding) {
   if (mode === "add") return WORKSHOP_ADDING.includes(adding) ? adding : "walls";
-  if (mode === WORKSHOP_TOOL_SCALE || mode === WORKSHOP_TOOL_ELEVATION) return mode;
   return "edit";
 }
 
@@ -433,60 +439,12 @@ export function workshopAttachOrigin(project, schemeId) {
   return setPlanOrigin(project, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 });
 }
 
-// ——— занятие «Масштаб»: кадр в точках подложки ————————————————————————
-//
-// **Картинку можно показать без калибровки, чертёж — нельзя.** Разница в том,
-// чем меряется кадр. Миллиметр без пикселей на метр не считается ни во что —
-// значит кадр, размеченный в миллиметрах, подложку принять не может. Но кадр,
-// размеченный **точками самой подложки**, принимает её без единого допущения:
-// точка плана — это точка плана, а не «примерно столько-то миллиметров».
-//
-// Поэтому у занятия «Масштаб» единица — точка подложки. `WORKSHOP_UNIT` и
-// `view` при этом те же: `zoom` читается как «пикселей экрана на точку плана»,
-// и `render.planToScreen`/`screenToPlan`/`draftSnap` работают без правок — как
-// и в миллиметровом кадре. Своей арифметики не появляется ни строки.
-//
-// Чего в этом кадре нет: сетки, нуля и чертежа. Все трое живут в миллиметрах,
-// а миллиметр здесь ещё ничему не равен — нарисовать их значило бы соврать о
-// размерах. Нарисовать стену в этом кадре тоже нечем: координате не на что
-// опереться, пока у плана нет метров.
-//
-// Это **не** то прежнее «обводить на глаз нельзя навсегда»: с таска 134
-// исправленный масштаб уводит чертёж за собой, если человек на это согласился.
-// Здесь ограничение другое и живёт ровно до первой калибровки.
-
 /**
- * Габарит подложки в её собственных точках — кадр занятия «Масштаб».
- * `null` — показывать нечего: размера у схемы нет (её и калибровать нечем).
- */
-export function workshopPlanExtent(project, schemeId) {
-  const scheme = findScheme(project, schemeId);
-  const width = Number(scheme && scheme.width) || 0;
-  const height = Number(scheme && scheme.height) || 0;
-  if (!(width > 0) || !(height > 0)) return null;
-  return { minX: 0, minY: 0, maxX: width, maxY: height };
-}
-
-/**
- * Точка подложки (её точки) — в долю плана 0…1, как точки меток (ADR 002).
- * Доля зажимается: конец отрезка, выведенный за край картинки, принадлежит
- * краю, а не пустоте за ним.
- */
-export function workshopPlanFraction(project, schemeId, pointPx) {
-  const extent = workshopPlanExtent(project, schemeId);
-  if (!extent || !pointPx) return null;
-  const share = (value, size) => Math.min(1, Math.max(0, Number(value) / size));
-  return { x: share(pointPx.x, extent.maxX), y: share(pointPx.y, extent.maxY) };
-}
-
-/**
- * Чем окно занято при открытии.
+ * Чем чертёж занят при открытии.
  *
- * Подложка без калибровки — **масштабом**: там без него не нарисовать ни
- * стены, и человек, пришедший обводить план, первым делом обязан увидеть сам
- * план (дефект D22). Это правило старше остальных и остаётся.
- *
- * Дальше правило одно: **окно открывается тем, что в нём есть что делать.**
+ * Правило одно: **режим открывается тем, что в нём есть что делать.** Про
+ * масштаб плана он больше не думает — тот задаётся в «Схемах» (G227), а
+ * чертить по сетке можно и без подложки.
  *
  * Чертёж уже есть — **выделением**, а не стенами. Прежде окно открывалось
  * прямо в рисовании, и ровно на это заказчик и пожаловался: «рисую стены, а
@@ -502,7 +460,6 @@ export function workshopPlanFraction(project, schemeId, pointPx) {
  * кнопками одного ряда, и в добавлении помнится, чем рисовали в прошлый раз.
  */
 export function workshopInitialTool(project, schemeId) {
-  if (workshopPlacement(project, schemeId).kind === "noScale") return WORKSHOP_TOOL_SCALE;
   return drawingBoundsMm(project, schemeId) ? "edit" : "walls";
 }
 
@@ -1179,10 +1136,9 @@ export function workshopExtentMm(project, schemeId, placement) {
 }
 
 /**
- * Зажать масштаб окна. Потолок — довод: у миллиметрового кадра он свой
- * (`WORKSHOP_ZOOM_MAX`), у кадра занятия «Масштаб» — свой
- * (`WORKSHOP_PLAN_ZOOM_MAX`): единица там в сотни раз крупнее, и один предел
- * на оба не годится.
+ * Зажать масштаб окна. Потолок остался доводом, хотя кадр теперь один:
+ * `workshopFitView` зовут и с чужой мерой — из теста и из «Интерфейса
+ * проекта», — и прибивать предел внутри значило бы прятать его от вызывающего.
  */
 export function workshopClampZoom(zoom, max = WORKSHOP_ZOOM_MAX) {
   const value = Number(zoom);
@@ -1228,10 +1184,6 @@ export function workshopGridDrawStepMm(gridMm, zoom) {
  * пропущенное занятие молча показало бы чужие слова.
  */
 export function workshopHint(tool, way) {
-  // Слова калибровки — те самые, что над холстом: жест один и тот же, и
-  // второго описания одного жеста в сборке быть не должно.
-  if (tool === WORKSHOP_TOOL_SCALE) return strings.scale.hint;
-  if (tool === WORKSHOP_TOOL_ELEVATION) return strings.workshop.hintElevation;
   if (tool === "openings") return strings.workshop.hintOpenings;
   if (tool === "objects") {
     // Способов поставить объект три, и жесты у них разные (таск 137): про
@@ -1390,9 +1342,8 @@ const WORKSHOP_ORIGIN = "#d1242f";
  * Полноэкранный показ даёт кнопка «Во весь экран» над полем, общая на все три
  * режима, — своей кнопки «Закрыть» у режима нет и быть не может.
  *
- * Про калибровку мастерская по-прежнему ничего не спрашивает у вызывающего:
- * она делается здесь же, занятием `WORKSHOP_TOOL_SCALE`. Прежний довод
- * `onCalibrate` уводил на холст, закрывая окно, — и это и был дефект D22.
+ * Масштаб плана задаётся в «Схемах» (G227): кнопка рядом с погашенной
+ * отметкой подложки показывает план и начинает калибровку там.
  *
  * Поверхность **живёт дальше, когда режим сменили**: она только гаснет
  * (`visibility` в стилях). Поэтому человек, вернувшийся в «Чертёж», находит
@@ -1421,10 +1372,6 @@ function createWorkshop({ api, hosts }) {
   // той же попыткой записи, что и сам клик, поэтому красным он становится
   // ровно тогда, когда клик не прошёл бы.
   let ghost = null;
-  // Отрезок калибровки — `{pointsPx: [точки подложки], cursorPx}`. Живёт
-  // отдельно от `draft`: тот в миллиметрах, а этот в точках плана, и путать их
-  // нельзя даже на один кадр.
-  let scaleDraft = null;
   let drag = null;
   let pan = null;
   // Нажатие, которое ещё не решило, чем станет: клик занятия или панорама.
@@ -1485,17 +1432,6 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.modeAddHint,
     on: { click: () => setMode("add") },
   });
-  // «Масштаб» — режим, а не пятая кнопка «что рисуем»: он отвечает не на «что»,
-  // а на «чем занят». Показывается он только у подложки без калибровки — везде
-  // ещё калибровать нечего, и режим, который ничего не даст, в ряду лишний.
-  const scaleButton = uiButton(strings.workshop.modeScale, {
-    title: strings.workshop.modeScaleHint,
-    on: { click: () => setMode(WORKSHOP_TOOL_SCALE) },
-  });
-  const elevationButton = uiButton(strings.workshop.modeElevation, {
-    title: strings.workshop.modeElevationHint,
-    on: { click: () => setMode(WORKSHOP_TOOL_ELEVATION) },
-  });
   // Порядок второго ряда — порядок работы, заданный заказчиком (G176): сперва
   // стены, потом проёмы, потом объекты.
   const wallsButton = uiButton(strings.workshop.toolWalls, {
@@ -1510,15 +1446,6 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.toolObjectsHint,
     on: { click: () => setAdding("objects") },
   });
-  const zoomOut = uiIconButton("minus", {
-    title: strings.tools.zoomOut,
-    on: { click: () => zoomBy(1 / WORKSHOP_ZOOM_KEY_STEP) },
-  });
-  const zoomIn = uiIconButton("plus", {
-    title: strings.tools.zoomIn,
-    on: { click: () => zoomBy(WORKSHOP_ZOOM_KEY_STEP) },
-  });
-  const fitButton = uiButton(strings.workshop.fit, { on: { click: () => fit() } });
   // Строка состояния и подсказка — плашки **поверх поля**: под полем места
   // больше нет, поле занимает основной экран целиком (таск 153). Состояние о
   // чертеже — слева под верхним рядом, подсказка про руки — справа, ровно так
@@ -1550,11 +1477,15 @@ function createWorkshop({ api, hosts }) {
     sync();
   });
   const planRow = workshopCheckRow(planCheck, strings.workshop.layerPlan);
-  // Кнопка больше не закрывает окно: она берётся за занятие «Масштаб» здесь же.
+  // Масштаб плана задаётся **в «Схемах»** (G227, слова заказчика: «Масштаб
+  // убери, он в Схемах есть»). Кнопка рядом с погашенной отметкой подложки
+  // осталась — она объясняет, почему подложки не видно, — но ведёт туда же,
+  // куда «Масштаб: план …» в строке схемы: на план, где отрезок и меряют.
+  // Второй двери к калибровке в сборке нет.
   const calibrateButton = uiButton(strings.workshop.calibrate, {
     class: "ui-btn ui-btn--wide",
     title: strings.workshop.calibrateHint,
-    on: { click: () => setTool(WORKSHOP_TOOL_SCALE) },
+    on: { click: () => calibrateOnPlan() },
   });
   const attachButton = uiButton(strings.workshop.attach, {
     class: "ui-btn ui-btn--wide",
@@ -1760,9 +1691,6 @@ function createWorkshop({ api, hosts }) {
         uiEl("span", { class: "workshop__toolsLabel", text: strings.workshop.mode }),
         selectButton,
         addButton,
-        scaleButton,
-        elevationButton,
-        uiEl("span", { class: "workshop__view" }, [zoomOut, zoomIn, fitButton]),
       ]),
       // Ряд «что добавляем»: виден только в добавлении — в остальных режимах
       // он отвечал бы на вопрос, которого человек не задавал.
@@ -1821,23 +1749,39 @@ function createWorkshop({ api, hosts }) {
     return { width: Math.max(1, stage.clientWidth), height: Math.max(1, stage.clientHeight) };
   }
 
-  // Занятие «Масштаб» меряет кадр точками подложки — у него свой габарит и
-  // свой потолок увеличения. Одна дверь на оба кадра: разойдись «что вписать»
-  // и «что нарисовать», картинка уехала бы за край поля.
-  function scaleMode() {
-    return tool === WORKSHOP_TOOL_SCALE;
-  }
-
   function zoomCeiling() {
-    return scaleMode() ? WORKSHOP_PLAN_ZOOM_MAX : WORKSHOP_ZOOM_MAX;
+    return WORKSHOP_ZOOM_MAX;
   }
 
   function fit() {
-    const planExtent = scaleMode() ? workshopPlanExtent(project(), schemeId) : null;
-    view = planExtent
-      ? workshopFitView(planExtent, viewport(), WORKSHOP_PLAN_ZOOM_MAX)
-      : workshopFitView(workshopExtentMm(project(), schemeId, placement()), viewport());
+    view = workshopFitView(workshopExtentMm(project(), schemeId, placement()), viewport());
     sync();
+  }
+
+  /**
+   * «100 %» для чертежа (G227): миллиметр чертежа — точка экрана.
+   *
+   * Тот же смысл, что у «100 %» на плане, где точка картинки равна точке
+   * экрана: натуральная величина, видно не всё. Кадр при этом остаётся на
+   * месте — середина поля показывает то же место чертежа, что и до нажатия.
+   */
+  function zoomReset() {
+    const box = viewport();
+    const middle = screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view);
+    view = { zoom: 1, offsetX: box.width / 2 - middle.x, offsetY: box.height / 2 - middle.y };
+    sync();
+  }
+
+  /**
+   * Уйти на план задавать масштаб (G227).
+   *
+   * Калибровка живёт в «Схемах» и делается по плану — значит, и показать надо
+   * план: иначе человек жал бы кнопку, а отрезок меряли бы на поле, которого
+   * в этот миг не видно.
+   */
+  function calibrateOnPlan() {
+    setScreen(SCREEN_DEFAULT);
+    canvasStartScale(schemeId);
   }
 
   function zoomAt(point, factor) {
@@ -1907,30 +1851,16 @@ function createWorkshop({ api, hosts }) {
 
   function setTool(next) {
     if (tool === next) return;
-    const was = tool;
     draft = null;
     ghost = null;
-    scaleDraft = null;
     press = null;
     // Выделение снимается вместе со сменой занятия: иначе поля выделенной
     // стены перебивали бы умолчания проёма, за которым человек и переключился.
     selected = null;
     tool = next;
-    // Кадр у занятия «Масштаб» свой — точки подложки вместо миллиметров, — и
-    // при переходе в любую сторону смысл `view` меняется целиком: без нового
-    // «вписать» план уехал бы за край поля в тысячу крат.
-    // Выделенная стена живёт и в состоянии сеанса: ушли из развёртки — полоса
-    // над основным холстом тоже закрывается, иначе она осталась бы висеть от
-    // режима, из которого уже вышли.
+    // Выделенная стена живёт и в состоянии сеанса: сняли выделение — полоса
+    // развёртки над планом закрывается вместе с ним.
     if (getState().selectedWallId) setState({ selectedWallId: null });
-    if (was === WORKSHOP_TOOL_SCALE || next === WORKSHOP_TOOL_SCALE) {
-      fit();
-      if (next === WORKSHOP_TOOL_SCALE) notify(strings.scale.started);
-      // Ушли от масштаба, а масштаба так и нет — подложка в поле гаснет.
-      // Молчать об этом нельзя: именно это молчание заказчик и увидел.
-      else if (placement().kind === "noScale") notify(strings.workshop.scaleFirst);
-      return;
-    }
     sync();
   }
 
@@ -1938,12 +1868,11 @@ function createWorkshop({ api, hosts }) {
     const same = Boolean(selected) === Boolean(next) && (!next || (selected.kind === next.kind && selected.id === next.id));
     if (same) return;
     selected = next;
-    // Выделенная стена попадает и в состояние сеанса: закрыли окно в режиме
-    // развёртки — полоса осталась открытой над основным холстом, и искать
-    // стену заново не надо. Из других режимов она туда не уходит: там стену
-    // выделяют, чтобы подвинуть, и полоса на холсте была бы следствием, о
-    // котором никто не просил (таск 133, G185).
-    const wallId = next && next.kind === "wall" && tool === WORKSHOP_TOOL_ELEVATION ? next.id : null;
+    // Выделенная стена попадает и в состояние сеанса: выделение у чертежа и у
+    // плана общее, и полоса развёртки выезжает по одному правилу на оба поля
+    // (G227) — выделена стена, и галка «Развёртка выделенной стены» в
+    // «Интерфейсе проекта» включена. Режима «Развёртка» для этого больше нет.
+    const wallId = next && next.kind === "wall" ? next.id : null;
     if (getState().selectedWallId !== wallId) setState({ selectedWallId: wallId });
     sync();
   }
@@ -1963,11 +1892,6 @@ function createWorkshop({ api, hosts }) {
   // Какой предмет сейчас в колонке свойств: выделенный, а без выделения — тот,
   // который поставит следующий клик. Отсюда и заголовок группы.
   function subject() {
-    if (tool === WORKSHOP_TOOL_SCALE) return WORKSHOP_TOOL_SCALE;
-    // В развёртке колонка говорит про стену — но полей у неё здесь нет:
-    // толщину правят в выделении, а тут смотрят. Иначе поле толщины стояло бы
-    // под полосой развёртки и звало править то, за чем сюда не приходили.
-    if (tool === WORKSHOP_TOOL_ELEVATION) return WORKSHOP_TOOL_ELEVATION;
     if (selected) return selected.kind;
     if (tool === "openings") return "opening";
     if (tool === "objects") return "object";
@@ -2407,139 +2331,6 @@ function createWorkshop({ api, hosts }) {
     }
   }
 
-  // ——— масштаб: отрезок по той же картинке, которую собираются обводить ———
-  //
-  // Жест тот же, что на холсте (`CANVAS_MODE_SCALE`, таск 111): клик — первый
-  // конец, второй клик — второй, потом вопрос о расстоянии. Общие здесь не
-  // строки и не рука, а **проверки**: короткий отрезок (`planScaleShort`),
-  // разбор набранного (`canvasScaleMeters`) и запись (`setPlanScale`) взяты
-  // готовыми. Своё — только кадр в точках подложки.
-
-  function scalePointOf(event) {
-    return screenToPlan(pointOf(event), WORKSHOP_UNIT, view);
-  }
-
-  function scaleSnapOf(event) {
-    const points = scaleDraft ? scaleDraft.pointsPx : [];
-    return draftSnap(points, scalePointOf(event), WORKSHOP_UNIT, view, event.altKey ? { free: true } : {});
-  }
-
-  function scaleClick(event) {
-    if (!workshopPlanExtent(project(), schemeId)) return;
-    const snap = scaleSnapOf(event);
-    if (!scaleDraft) {
-      scaleDraft = { pointsPx: [snap.point], cursorPx: snap.point };
-      paint();
-      return;
-    }
-    // Второй клик в ту же точку — промах, а не отрезок: калибровать по нулю
-    // нельзя, и отвечать на это ошибкой было бы грубо. Та же примета, что на
-    // холсте, и тот же порог в пикселях экрана.
-    const first = screenOf(scaleDraft.pointsPx[0]);
-    const at = pointOf(event);
-    if (Math.hypot(at.x - first.x, at.y - first.y) <= WORKSHOP_VERTEX_PX) return;
-    scaleDraft = { pointsPx: [scaleDraft.pointsPx[0], snap.point], cursorPx: snap.point };
-    paint();
-    askMeters();
-  }
-
-  function cancelScale(said) {
-    scaleDraft = null;
-    if (said) notify(strings.scale.cancelled);
-    paint();
-  }
-
-  // Вопрос о расстоянии. Короткий отрезок не проходит молча: сперва
-  // предупреждение, и только потом цифра. Диалог живёт дольше черновика —
-  // за это время могли отменить, сменить занятие или закрыть окно, и тогда
-  // отрезок уже ничей.
-  async function askMeters() {
-    const own = scaleDraft;
-    if (!own || own.pointsPx.length < 2) return;
-    const a = workshopPlanFraction(project(), schemeId, own.pointsPx[0]);
-    const b = workshopPlanFraction(project(), schemeId, own.pointsPx[1]);
-    if (!a || !b) {
-      cancelScale(false);
-      return;
-    }
-    if (planScaleShort(project(), schemeId, { a, b })) {
-      const go = await uiConfirm({
-        title: strings.scale.shortTitle,
-        message: text("scale.shortAsk", { share: Math.round(PLAN_SCALE_SHORT_SHARE * 100) }),
-        confirmLabel: strings.scale.shortAnyway,
-      });
-      if (closed || scaleDraft !== own) return;
-      if (!go) {
-        cancelScale(true);
-        return;
-      }
-    }
-    let typed = "";
-    for (;;) {
-      const raw = await uiPrompt({
-        title: strings.scale.askTitle,
-        value: typed,
-        placeholder: strings.scale.askPlaceholder,
-        submitLabel: strings.scale.askSubmit,
-      });
-      if (closed || scaleDraft !== own) return;
-      if (raw === null) {
-        cancelScale(true);
-        return;
-      }
-      typed = raw;
-      const meters = canvasScaleMeters(raw);
-      // Опечатку не проглатываем и работу не теряем: отрезок на месте, вопрос
-      // задаётся снова с тем, что было набрано.
-      if (meters === null) {
-        notify(strings.scale.badMeters, "error");
-        continue;
-      }
-      applyScale(a, b, meters);
-      return;
-    }
-  }
-
-  async function applyScale(a, b, meters) {
-    try {
-      const before = project();
-      const result = setPlanScale(before, schemeId, { a, b, meters });
-      scaleDraft = null;
-      // Через ту же дверь, что и всё остальное: Ctrl+Z возвращает прежнее
-      // «масштаба нет» — и подложка снова гаснет, как и была. С таска 134 той
-      // же дверью идёт и пересчёт чертежа: вопрос «идти ли чертежу следом»
-      // задаёт `canvasCommitScale`, одинаково здесь и на холсте, и обе правки
-      // уходят одним шагом истории.
-      const done = await canvasCommitScale(before, result.project, schemeId);
-      if (closed || !done.ok) return;
-      const size = planSizeMeters(project(), schemeId);
-      notify(
-        text("scale.applied", {
-          meters: formatMeters(result.scale.meters),
-          width: size ? formatMeters(size.width) : "",
-          height: size ? formatMeters(size.height) : "",
-        }) + canvasScaleFollowSaid(done),
-        "success",
-      );
-      // Масштаб есть — подложку теперь есть на что положить, и окно само
-      // берётся за рисование: за ним человек и пришёл. Это единственное место,
-      // где окно меняет режим за человека, и оно же единственное, где
-      // следующий шаг известен без вопросов.
-      //
-      // Чертёж уже был и пошёл следом — рисовать человек не собирался, он
-      // чинил масштаб: окно остаётся в выделении, где видно, что получилось.
-      if (!done.scaled) setMode("add");
-      else {
-        setMode("select");
-        fit();
-      }
-    } catch (error) {
-      scaleDraft = null;
-      fail(error);
-      sync();
-    }
-  }
-
   // ——— указатель ———
   //
   // **Рука — холстовая** (дефект D23, слова заказчика: «навигация должна быть
@@ -2629,19 +2420,6 @@ function createWorkshop({ api, hosts }) {
    * и притяжка всё равно ставит вершину в узел или на ровный угол.
    */
   function tap(event) {
-    if (scaleMode()) {
-      scaleClick(event);
-      return;
-    }
-    // Развёртка: клик берёт **стену и только стену**. Проём и объект здесь не
-    // выделяются вовсе — развёртка бывает у стены, а выделить то, чего этот
-    // режим не покажет, значило бы обещать несделанное.
-    if (tool === WORKSHOP_TOOL_ELEVATION) {
-      const pick = workshopPick(project(), schemeId, mmOf(event), view, selected);
-      const wallId = pick && (pick.kind === "wall" ? pick.id : pick.kind === "vertex" ? pick.wallId : null);
-      select(wallId ? { kind: "wall", id: wallId } : null);
-      return;
-    }
     if (tool === "walls") {
       addVertex(event);
       return;
@@ -2810,14 +2588,6 @@ function createWorkshop({ api, hosts }) {
       }
       drag.moved = true;
       dragTo(event);
-      return;
-    }
-    // Отрезок калибровки тянется от первого конца, как резинка ломаной: до
-    // первого клика тянуть не от чего.
-    if (scaleMode()) {
-      if (!scaleDraft) return;
-      scaleDraft.cursorPx = scaleSnapOf(event).point;
-      redraw();
       return;
     }
     if (tool === "walls" || objectDrawn()) {
@@ -3101,12 +2871,6 @@ function createWorkshop({ api, hosts }) {
       event.stopPropagation();
       return;
     }
-    if (event.key === "Escape" && scaleDraft) {
-      event.preventDefault();
-      event.stopPropagation();
-      cancelScale(true);
-      return;
-    }
     if (event.key === "Escape" && draft) {
       // Esc сперва отменяет цепочку, и только потом закрывает окно — та же
       // лесенка, что у холста. Слушатель висит в фазе перехвата: иначе окно
@@ -3264,14 +3028,6 @@ function createWorkshop({ api, hosts }) {
     ctx.fillStyle = WORKSHOP_PAPER;
     ctx.fillRect(0, 0, node.width, node.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    // Кадр занятия «Масштаб» меряется точками подложки: в нём только картинка
-    // и отрезок. Сетка, нуль и чертёж живут в миллиметрах, а миллиметр здесь
-    // ещё ничему не равен — нарисовать их значило бы соврать о размерах.
-    if (scaleMode()) {
-      paintScalePlan(box);
-      paintScaleDraft();
-      return;
-    }
     const spot = placement();
     if (workshopLayers.plan && spot.kind === "ready") paintPlan(spot, box);
     if (workshopLayers.grid) paintGrid(box);
@@ -3303,49 +3059,6 @@ function createWorkshop({ api, hosts }) {
       // Картинку могли закрыть (схему переключили) — кадр не повод падать.
     }
     ctx.restore();
-  }
-
-  /**
-   * Подложка в своём кадре: точка плана — единица, левый верхний угол в нуле.
-   * Поворота здесь нет вовсе и быть не может: поворот — это угол **осей
-   * чертежа** к осям плана, а чертежа в этом кадре нет.
-   */
-  function paintScalePlan(box) {
-    const bitmap = image();
-    const extent = workshopPlanExtent(project(), schemeId);
-    if (!bitmap || !extent) return;
-    const zero = screenOf({ x: 0, y: 0 });
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, box.width, box.height);
-    ctx.clip();
-    ctx.translate(zero.x, zero.y);
-    ctx.scale(view.zoom, view.zoom);
-    try {
-      ctx.drawImage(bitmap, 0, 0, extent.maxX, extent.maxY);
-    } catch (error) {
-      // Картинку могли закрыть (схему переключили) — кадр не повод падать.
-    }
-    ctx.restore();
-  }
-
-  // Отрезок калибровки: концы ручками, как у вершин цепочки, — ими и целятся.
-  function paintScaleDraft() {
-    if (!scaleDraft) return;
-    const points = [...scaleDraft.pointsPx];
-    if (points.length < 2) points.push(scaleDraft.cursorPx);
-    ctx.lineCap = "round";
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = WORKSHOP_ACCENT;
-    ctx.beginPath();
-    points.forEach((point, index) => {
-      const at = screenOf(point);
-      if (index === 0) ctx.moveTo(at.x, at.y);
-      else ctx.lineTo(at.x, at.y);
-    });
-    ctx.stroke();
-    ctx.lineCap = "butt";
-    for (const point of points) handle(ctx, screenOf(point));
   }
 
   function paintGrid(box) {
@@ -3607,48 +3320,27 @@ function createWorkshop({ api, hosts }) {
     const current = project();
     const spot = placement();
     const wall = selectedWall();
-    const scaling = scaleMode();
     const now = mode();
     // Первый уровень: чем занят. Второй виден только в добавлении.
     selectButton.className = "ui-btn" + (now === "select" ? " ui-btn--accent" : "");
     addButton.className = "ui-btn" + (now === "add" ? " ui-btn--accent" : "");
-    elevationButton.className = "ui-btn" + (now === WORKSHOP_TOOL_ELEVATION ? " ui-btn--accent" : "");
     addingRow.hidden = now !== "add";
     wallsButton.className = "ui-btn" + (tool === "walls" ? " ui-btn--accent" : "");
-    // Кнопка масштаба стоит у любой подложки — и когда масштаба нет, и когда
-    // его надо **исправить** (таск 134). В таске 132 её прятали после первой
-    // калибровки нарочно: перекалибровка меняла пиксели на метр, а нарисованные
-    // стены оставались в прежних миллиметрах, и чертёж молча съезжал. Теперь
-    // чертёж идёт следом по выбору человека, опасности нет, и ходить за
-    // исправлением в строку схемы больше незачем — ошиблись здесь, чините
-    // здесь же.
-    scaleButton.hidden = spot.kind === "noImage" && !scaling;
-    scaleButton.className = "ui-btn" + (scaling ? " ui-btn--accent" : "");
-    // Пока задают масштаб, в поле только план — отметка это и показывает, а
-    // снять её нечем: другого кадра у занятия нет.
-    planCheck.checked = scaling || (workshopLayers.plan && spot.kind === "ready");
-    planCheck.disabled = scaling || spot.kind !== "ready";
-    planRow.title = scaling
-      ? strings.workshop.layerPlanScaling
-      : spot.kind === "noImage"
+    planCheck.checked = workshopLayers.plan && spot.kind === "ready";
+    planCheck.disabled = spot.kind !== "ready";
+    planRow.title =
+      spot.kind === "noImage"
         ? strings.workshop.layerPlanNone
         : spot.kind === "noScale"
           ? strings.workshop.layerPlanNoScale
           : "";
-    // Кнопка в колонке слоёв остаётся только там, где масштаба нет: она стоит
-    // рядом с погашенной отметкой подложки и объясняет её. Исправляют масштаб
-    // режимом в ряду.
-    calibrateButton.hidden = spot.kind !== "noScale" || scaling;
-    attachButton.hidden = !spot.pending || scaling;
-    gridCheck.checked = workshopLayers.grid && !scaling;
-    wallsCheck.checked = workshopLayers.walls && !scaling;
-    objectsCheck.checked = workshopLayers.objects && !scaling;
-    // Слои миллиметрового кадра в кадре масштаба ничего не значат: живая на
-    // вид отметка, которая ни на что не влияет, — обещание, которого окно не
-    // держит.
-    for (const check of [gridCheck, wallsCheck, objectsCheck]) check.disabled = scaling;
-    gridSelect.disabled = scaling;
-    snapCheck.disabled = scaling;
+    // Кнопка остаётся там, где масштаба нет: она стоит рядом с погашенной
+    // отметкой подложки и объясняет её, а ведёт на план, в «Схемы» (G227).
+    calibrateButton.hidden = spot.kind !== "noScale";
+    attachButton.hidden = !spot.pending;
+    gridCheck.checked = workshopLayers.grid;
+    wallsCheck.checked = workshopLayers.walls;
+    objectsCheck.checked = workshopLayers.objects;
     gridSelect.value = String(workshopGridMm);
     snapCheck.checked = workshopGridSnap;
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
@@ -3668,7 +3360,7 @@ function createWorkshop({ api, hosts }) {
     syncList(current);
     meta.textContent = workshopStatus(current, schemeId, spot);
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
-    node.style.cursor = tool === "edit" || tool === WORKSHOP_TOOL_ELEVATION ? "default" : "crosshair";
+    node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
   }
 
@@ -3743,28 +3435,10 @@ function createWorkshop({ api, hosts }) {
     wallFields.hidden = kind !== "wall";
     openingFields.hidden = kind !== "opening";
     objectFields.hidden = kind !== "object";
-    // Удалять можно в выделении: в развёртке смотрят, а не правят, и кнопка
-    // «Удалить» под полосой развёртки обещала бы не то занятие.
-    const editing = Boolean(selected) && tool !== WORKSHOP_TOOL_ELEVATION;
+    const editing = Boolean(selected);
     removeButton.disabled = !editing;
     removeButton.hidden = !editing;
     subjectNote.classList.remove("is-bad");
-    // Масштаб: полей у него нет — он задаётся в поле, отрезком. Колонка
-    // держит заголовок и то самое объяснение, которого прежде не получал
-    // никто, кто калибрует впервые.
-    if (kind === WORKSHOP_TOOL_SCALE) {
-      subjectHead.textContent = strings.workshop.scaleHead;
-      subjectNote.textContent = strings.scale.dialogHint;
-      return;
-    }
-    // Развёртка: колонка называет выделенную стену и больше ничего не обещает.
-    if (kind === WORKSHOP_TOOL_ELEVATION) {
-      subjectHead.textContent = strings.workshop.modeElevation;
-      subjectNote.textContent = wall
-        ? text("workshop.wallInfo", { length: wallLengthMm(wall) })
-        : strings.workshop.elevationNone;
-      return;
-    }
     if (kind === "wall") {
       subjectHead.textContent = strings.workshop.wall;
       thicknessLabel.textContent = wall ? strings.workshop.thickness : strings.workshop.thicknessNew;
@@ -3859,14 +3533,14 @@ function createWorkshop({ api, hosts }) {
    * Полоса развёртки в окне: у той же стены, что выделена, и у того края поля,
    * который дальше от неё.
    *
-   * **Только в своём режиме** (таск 133, G185). Слова заказчика: «в режиме
-   * правка при выделении стены сразу появляется развёртка. Пожалуй просмотр
-   * развёртки надо сделать отдельным режимом». Полоса занимает до сорока
-   * процентов окна, и выезжать она должна, когда её позвали, а не когда стену
-   * выделили, чтобы подвинуть.
+   * **Правило одно с планом** (G227). Своего режима у развёртки больше нет —
+   * заказчик убрал его как дубль: «кнопка Развёртка… дублируется в блоке
+   * интерфейса». Полоса выезжает там же, где над планом: выделили стену, и
+   * галка «Развёртка выделенной стены» в «Интерфейсе проекта» включена. Мешает
+   * — её снимают той же галкой, одной на оба поля.
    */
   function syncElevation(current, wall) {
-    if (!wall || tool !== WORKSHOP_TOOL_ELEVATION) {
+    if (!wall || getState().elevationShown === false) {
       strip.update({ project: current, wallId: null });
       return;
     }
@@ -3943,7 +3617,6 @@ function createWorkshop({ api, hosts }) {
       schemeId = state.schemeId;
       draft = null;
       ghost = null;
-      scaleDraft = null;
       press = null;
       selected = null;
       hover = null;
@@ -4009,7 +3682,15 @@ function createWorkshop({ api, hosts }) {
   // Режим включился — клавиатура у поля чертежа, а не у первой отметки слоя в
   // колонке: работают с чертежом — клавиши его.
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
-  return { destroy };
+  // Масштаб поля наружу: им правит раздел «Интерфейс проекта» (G227) — тот
+  // самый, который заказчик назвал единственным местом кнопок «−», «+» и
+  // «Вписать». Второго ряда этих кнопок в чертеже больше нет.
+  return {
+    destroy,
+    zoomBy: (factor) => zoomBy(factor),
+    fit: () => fit(),
+    reset: () => zoomReset(),
+  };
 }
 
 // ——— режим «Чертёж» основного экрана (таск 153) ———————————————————————
@@ -4056,6 +3737,32 @@ function mountWorkshopScreen(host, api) {
 }
 
 registerPanel(PANEL_IDS.screenDrawing, mountWorkshopScreen);
+
+// ——— масштаб чертежа снаружи (G227) ——————————————————————————————————
+//
+// «Кнопки + − и вписать дублируются, есть в нижнем блоке с интерфейсом, но в
+// режиме чертёж они не работают сейчас. Убери сверху, а снизу почини для
+// чертежа».
+//
+// Раздел «Интерфейс проекта» зовёт эти три двери, не зная о мастерской ничего
+// другого. Поверхности может не быть вовсе (в чертеж ещё не заходили) — тогда
+// звать нечего, и кнопки в разделе погашены (`workshopViewReady`).
+
+export function workshopViewReady() {
+  return Boolean(workshopSurface);
+}
+
+export function workshopViewZoomBy(factor) {
+  if (workshopSurface) workshopSurface.zoomBy(factor);
+}
+
+export function workshopViewFit() {
+  if (workshopSurface) workshopSurface.fit();
+}
+
+export function workshopViewReset() {
+  if (workshopSurface) workshopSurface.reset();
+}
 
 function workshopCheckRow(input, label, title) {
   return uiEl("label", { class: "workshop__check", title: title || "" }, [input, uiEl("span", { text: label })]);

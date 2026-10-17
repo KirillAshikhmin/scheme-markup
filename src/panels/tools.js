@@ -43,6 +43,41 @@ import {
   canvasZoomBy,
   canvasZoomReset,
 } from "../canvas.js";
+import {
+  workshopViewFit,
+  workshopViewReady,
+  workshopViewReset,
+  workshopViewZoomBy,
+} from "./workshop.js";
+
+/**
+ * Ряд масштаба: «−», «+», «Вписать план», «100 %» (G227).
+ *
+ * Куда он смотрит, решает режим экрана, а не панель: панель только зовёт.
+ * «Чертёж» отвечает через `panels/workshop.js` — поверхность там одна на
+ * страницу, и, пока в чертёж не заходили, звать некого: кнопки гаснут.
+ */
+function toolsZoomRow(state) {
+  const screen = state.screen;
+  const drawing = screen === "drawing";
+  const off = screen === "volume" || (drawing && !workshopViewReady());
+  const title = screen === "volume" ? strings.tools.zoomVolume : "";
+  const make = (button) => {
+    if (!off) return button;
+    button.disabled = true;
+    if (title) button.title = title;
+    return button;
+  };
+  const zoomBy = (factor) => (drawing ? workshopViewZoomBy(factor) : canvasZoomBy(factor));
+  const fit = () => (drawing ? workshopViewFit() : canvasFitPlan());
+  const reset = () => (drawing ? workshopViewReset() : canvasZoomReset());
+  return uiEl("div", { class: "tools__row" }, [
+    make(uiIconButton("minus", { title: strings.tools.zoomOut, on: { click: () => zoomBy(1 / 1.25) } })),
+    make(uiIconButton("plus", { title: strings.tools.zoomIn, on: { click: () => zoomBy(1.25) } })),
+    make(uiButton(strings.tools.zoomFit, { on: { click: () => fit() } })),
+    make(uiButton(strings.tools.zoomReset, { on: { click: () => reset() } })),
+  ]);
+}
 
 const TOOLS_MARK_SIZE = { min: 4, max: 36 };
 const TOOLS_LABEL_SIZE = { min: 8, max: 40 };
@@ -463,13 +498,18 @@ function mountSizesPanel(host, api) {
         uiEl("span", { text: strings.tools.elevationStrip }),
       ]),
       uiEl("p", { class: "tools__note", text: strings.tools.elevationStripHint }),
+      // ——— масштаб того поля, которое на экране (G227) ————————————————
+      //
+      // Заказчик: «Кнопки + − и вписать дублируются, есть в нижнем блоке с
+      // интерфейсом, но в режиме чертёж они не работают сейчас. Убери сверху, а
+      // снизу почини для чертежа».
+      //
+      // Поэтому ряд один, а поле у него то, которое показано: в «Схеме» — план,
+      // в «Чертеже» — чертёж. В «Объёме» масштаба нет вовсе: там отходят и
+      // приближаются колесом, а «всю схему» показывает своя кнопка, — и ряд
+      // гаснет с причиной в подсказке, а не делает вид, что работает.
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
-      uiEl("div", { class: "tools__row" }, [
-        uiIconButton("minus", { title: strings.tools.zoomOut, on: { click: () => canvasZoomBy(1 / 1.25) } }),
-        uiIconButton("plus", { title: strings.tools.zoomIn, on: { click: () => canvasZoomBy(1.25) } }),
-        uiButton(strings.tools.zoomFit, { on: { click: () => canvasFitPlan() } }),
-        uiButton(strings.tools.zoomReset, { on: { click: () => canvasZoomReset() } }),
-      ]),
+      toolsZoomRow(state),
     );
   }
 
@@ -481,7 +521,9 @@ function mountSizesPanel(host, api) {
       "planShown" in changed ||
       "drawingShown" in changed ||
       "elevationShown" in changed ||
-      "schemeFont" in changed
+      "schemeFont" in changed ||
+      // Ряд масштаба смотрит на то поле, которое показано (G227).
+      "screen" in changed
     ) {
       render();
     }

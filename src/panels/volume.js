@@ -758,6 +758,15 @@ function createVolume({ api, hosts }) {
   const emptyNote = uiEl("p", { class: "screen-empty", attrs: { hidden: "hidden" } });
   stage.append(notePlate, emptyNote);
   hosts.stage.replaceChildren(stage);
+  // Этаж — в колонке, рядом с видом (таск 153): на каком этаже человек стоит,
+  // видно и не подходя к лестнице, а переход остаётся **один на обе кнопки** —
+  // то же правило `volumeFloorAction`, что у кнопки в поле. Второго способа
+  // менять этаж не заводится.
+  const floorLine = uiEl("span", { class: "volume__floorLine" });
+  const floorButton = uiButton("", {
+    class: "ui-btn ui-btn--wide",
+    on: { click: () => floorByHand() },
+  });
   hosts.side.replaceChildren(
     uiEl("div", { class: "volume__panel" }, [
       uiEl("div", { class: "volume__tools" }, [
@@ -768,6 +777,11 @@ function createVolume({ api, hosts }) {
       // «Вся схема», снимок и все двери разом: не вид, а действия над ним —
       // своей строкой под переключателем вида.
       uiEl("div", { class: "volume__tools" }, [fitButton, shotButton, doorsButton]),
+      uiEl("div", { class: "volume__tools" }, [
+        uiEl("span", { class: "volume__toolsLabel", text: strings.volume.floorLabel }),
+        floorLine,
+      ]),
+      floorButton,
     ]),
   );
 
@@ -1496,6 +1510,17 @@ function createVolume({ api, hosts }) {
       stairButton.textContent = action.label;
       stairButton.title = action.title;
     }
+    // Та же кнопка в колонке: один ответ `volumeFloorAction` на оба места,
+    // разойтись им нечем. В поле кнопка нужна тому, кто идёт пальцем и смотрит
+    // в комнату; в колонке — тому, кто смотрит на панель.
+    floorButton.hidden = stairButton.hidden;
+    if (!floorButton.hidden) {
+      floorButton.textContent = action.label;
+      floorButton.title = action.title;
+    }
+    const floor = schemeFloorOf(getState().project, schemeId);
+    floorLine.textContent =
+      floor === null || floor === undefined ? strings.volume.floorNone : String(floor);
     syncHint();
   }
 

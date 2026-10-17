@@ -71,11 +71,8 @@ import {
   WORKSHOP_ADDING,
   WORKSHOP_MODES,
   WORKSHOP_ORIGIN_AT,
-  WORKSHOP_PLAN_ZOOM_MAX,
   WORKSHOP_SHEET,
   WORKSHOP_SUBJECTS,
-  WORKSHOP_TOOL_ELEVATION,
-  WORKSHOP_TOOL_SCALE,
   WORKSHOP_UNIT,
   WORKSHOP_ZOOM_MAX,
   WORKSHOP_ZOOM_MIN,
@@ -111,8 +108,6 @@ import {
   workshopShapeOfWay,
   workshopTryOpening,
   workshopPlacement,
-  workshopPlanExtent,
-  workshopPlanFraction,
   workshopPlanPointScreen,
   workshopRoundMm,
   workshopSnapMm,
@@ -862,18 +857,19 @@ test("подсказка под полем своя у каждого занят
   assert.equal(workshopHint("какое-то"), workshopHint("walls"));
 });
 
-// ——— масштаб задаётся в мастерской (таск 132, дефект D22) ——————————————
+// ——— чертёж открывается тем, что в нём есть что делать ————————————————
 //
-// Чем здесь легко соврать: показать картинку, подразумевая миллиметры, которых
-// нет. Поэтому проверяется не «видно ли» — это дело живого прогона, — а **чем
-// меряется кадр**: габарит в точках подложки, доли из тех же точек и согласие
-// этих долей с моделью.
+// Занятия «Масштаб» в чертеже больше нет (G227): калибровка живёт в «Схемах».
+// Поэтому и подложка без масштаба открывается обычным занятием — рисовать по
+// сетке можно и без неё.
 
-test("окно открывается тем, что в нём есть что делать", () => {
-  // Подложка без калибровки — масштабом: без него не нарисовать ни стены, и
-  // человек, пришедший обводить план, первым делом обязан увидеть сам план.
+test("чертёж открывается тем, что в нём есть что делать", () => {
   const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
-  assert.equal(workshopInitialTool(noScale.project, noScale.scheme.id), WORKSHOP_TOOL_SCALE);
+  assert.equal(
+    workshopModeOf(workshopInitialTool(noScale.project, noScale.scheme.id)),
+    "add",
+    "чертежа нет — добавление, а не исчезнувший «Масштаб»",
+  );
   // Чертёж уже есть — **выделением** (таск 133): холст открывается в нём по
   // той же причине. Прежде окно открывалось прямо в рисовании стен, и ровно на
   // это заказчик и пожаловался: «рисую стены, а как мне выбрать текущую».
@@ -888,66 +884,12 @@ test("окно открывается тем, что в нём есть что �
   assert.equal(workshopModeOf(workshopInitialTool(blank.project, blank.schemeId)), "add");
 });
 
-test("кадр занятия «Масштаб» меряется точками подложки, а не миллиметрами", () => {
-  const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
-  const extent = workshopPlanExtent(noScale.project, noScale.scheme.id);
-  // Габарит — ровно картинка: левый верхний угол в нуле, правый нижний в её
-  // размере. Миллиметров в этом габарите нет ни одного.
-  assert.deepEqual(extent, { minX: 0, minY: 0, maxX: 1200, maxY: 800 });
-  // Вписывается целиком и попадает серединой в середину поля.
-  const view = workshopFitView(extent, { width: 600, height: 400 }, WORKSHOP_PLAN_ZOOM_MAX);
-  const middle = planToScreen({ x: 600, y: 400 }, WORKSHOP_UNIT, view);
-  assert.ok(Math.abs(middle.x - 300) < 0.001 && Math.abs(middle.y - 200) < 0.001, "середина картинки — середина поля");
-  const corner = planToScreen({ x: 1200, y: 800 }, WORKSHOP_UNIT, view);
-  assert.ok(corner.x <= 600 && corner.y <= 400, "картинка влезла целиком: " + JSON.stringify(corner));
-  // У схемы без подложки кадра нет вовсе — калибровать нечего.
-  const blank = blankProject();
-  assert.equal(workshopPlanExtent(blank.project, blank.schemeId), null);
-});
-
-test("точка подложки превращается в долю плана и зажимается её краем", () => {
-  const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
-  const id = noScale.scheme.id;
-  assert.deepEqual(workshopPlanFraction(noScale.project, id, { x: 600, y: 400 }), { x: 0.5, y: 0.5 });
-  assert.deepEqual(workshopPlanFraction(noScale.project, id, { x: 300, y: 200 }), { x: 0.25, y: 0.25 });
-  // Конец отрезка, выведенный за край картинки, принадлежит краю: доли живут
-  // в 0…1 (ADR 002), и выпускать их за эти границы нельзя.
-  assert.deepEqual(workshopPlanFraction(noScale.project, id, { x: -50, y: 2000 }), { x: 0, y: 1 });
-});
-
-test("отрезок, проведённый в окне, даёт тот же масштаб, что калибровка на холсте", () => {
-  const noScale = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
-  const id = noScale.scheme.id;
-  // Полширины картинки объявлены шестью метрами: 600 точек на 6 м — сто точек
-  // на метр, как в остальных тестах этого файла.
-  const a = workshopPlanFraction(noScale.project, id, { x: 300, y: 400 });
-  const b = workshopPlanFraction(noScale.project, id, { x: 900, y: 400 });
-  const scaled = setPlanScale(noScale.project, id, { a, b, meters: 6 }).project;
-  assert.ok(Math.abs(planPixelsPerMeter(scaled, id) - 100) < 1e-6, planPixelsPerMeter(scaled, id));
-  const size = planSizeMeters(scaled, id);
-  assert.ok(Math.abs(size.width - 12) < 1e-6 && Math.abs(size.height - 8) < 1e-6, JSON.stringify(size));
-  // Масштаб задан — подложку теперь есть на что положить, и слой доступен.
-  const spot = workshopPlacement(scaled, id);
-  assert.equal(spot.kind, "ready");
-  assert.equal(spot.pending, true, "привязку всё так же ставит первая стена, а не калибровка");
-  // До калибровки — отказ, и он не изменился: это и есть честное ограничение.
-  assert.equal(workshopPlacement(noScale.project, id).kind, "noScale");
-});
-
-test("подсказка занятия «Масштаб» — та же, что над холстом: второго описания жеста нет", () => {
-  assert.equal(workshopHint(WORKSHOP_TOOL_SCALE), strings.scale.hint);
-  assert.notEqual(workshopHint(WORKSHOP_TOOL_SCALE), workshopHint("walls"));
-});
-
-test("потолок увеличения свой у каждого кадра: точка плана крупнее миллиметра", () => {
-  // Один предел на оба кадра не годится: в миллиметровом полтора пикселя на
-  // миллиметр — это уже некуда, а в кадре подложки это полтора пикселя на
-  // точку фотографии, и конец стены на ней не поймать.
+test("масштаб поля зажат с обеих сторон, и чужая мера зажимается тоже", () => {
   assert.equal(workshopClampZoom(1e6), WORKSHOP_ZOOM_MAX);
-  assert.equal(workshopClampZoom(1e6, WORKSHOP_PLAN_ZOOM_MAX), WORKSHOP_PLAN_ZOOM_MAX);
-  assert.ok(WORKSHOP_PLAN_ZOOM_MAX > WORKSHOP_ZOOM_MAX);
-  // Снизу предел общий: километровый план в окошко глубже не вписывается.
-  assert.equal(workshopClampZoom(0, WORKSHOP_PLAN_ZOOM_MAX), WORKSHOP_ZOOM_MIN);
+  // Потолок остаётся доводом: «Вписать» зовут и с чужой мерой.
+  assert.equal(workshopClampZoom(1e6, 4), 4);
+  // Снизу предел общий: километровый план в поле глубже не вписывается.
+  assert.equal(workshopClampZoom(0, 4), WORKSHOP_ZOOM_MIN);
 });
 
 // ——— два уровня: режим и что добавляем (таск 133, G184 и G185) —————————
@@ -963,10 +905,9 @@ test("режим и занятие — два взгляда на одно по�
   }
   assert.equal(workshopModeOf("edit"), "select");
   assert.equal(workshopToolOf("select", "walls"), "edit");
-  assert.equal(workshopModeOf(WORKSHOP_TOOL_SCALE), WORKSHOP_TOOL_SCALE);
-  assert.equal(workshopToolOf(WORKSHOP_TOOL_SCALE, "walls"), WORKSHOP_TOOL_SCALE);
-  assert.equal(workshopModeOf(WORKSHOP_TOOL_ELEVATION), WORKSHOP_TOOL_ELEVATION);
-  assert.equal(workshopToolOf(WORKSHOP_TOOL_ELEVATION, "objects"), WORKSHOP_TOOL_ELEVATION);
+  // Режимов осталось два (G227): «Масштаб» и «Развёртка» ушли как дубли того,
+  // что уже есть в «Схемах» и в «Интерфейсе проекта».
+  assert.deepEqual(WORKSHOP_MODES, ["select", "add"]);
   // Каждый режим из списка отзывается занятием, и занятие читается тем же
   // режимом: пустых клеток в этой таблице нет.
   for (const mode of WORKSHOP_MODES) {
@@ -977,19 +918,14 @@ test("режим и занятие — два взгляда на одно по�
   assert.equal(workshopToolOf("add", undefined), "walls");
 });
 
-test("у каждого режима своя подсказка, и развёртка не зовёт править", () => {
+test("у каждого занятия своя подсказка, и чужих слов в ней нет", () => {
   const seen = new Set();
-  for (const tool of ["edit", "walls", "openings", "objects", WORKSHOP_TOOL_SCALE, WORKSHOP_TOOL_ELEVATION]) {
+  for (const tool of ["edit", "walls", "openings", "objects"]) {
     const line = workshopHint(tool);
     assert.ok(line && line.length > 20, tool + ": подсказки нет");
     seen.add(line);
   }
-  assert.equal(seen.size, 6, "подсказки режимов не повторяются");
-  // В развёртке смотрят: про перетаскивание и удаление в ней нет ни слова, а
-  // дорога к правке названа.
-  const elevation = workshopHint(WORKSHOP_TOOL_ELEVATION);
-  assert.ok(!/Delete|тянется/.test(elevation), "развёртка зовёт править: " + elevation);
-  assert.match(elevation, /Выделение/);
+  assert.equal(seen.size, 4, "подсказки занятий не повторяются");
 });
 
 // ——— объекты рисуются контуром и правятся вершинами (таск 137) ——————————
