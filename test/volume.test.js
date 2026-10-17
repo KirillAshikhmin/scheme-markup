@@ -99,6 +99,7 @@ import {
   volumeLinkLines,
   volumeMarkerFaces,
   volumePickAt,
+  volumeSightAt,
   volumeFacePoint,
   volumeSelectLines,
   volumeViewPolylines,
@@ -1656,6 +1657,33 @@ test("клик попадает в вещь, а не в стену за ней",
   // Мимо всего — пусто: клик по стене выделение снимает, а не оставляет.
   assert.equal(volumePickAt(frame, 5, 5), null);
   assert.ok(place.anchor.z > 0);
+});
+
+test("прицел видит только то, что видно: вещь за стеной в него не попадает (G214)", () => {
+  // Рука целится с запасом и сквозь стену — ей прощается промах (`volumePickAt`).
+  // Взгляд не прощает ничего: `volumeSightAt` отвечает тем, что в этой точке
+  // нарисовано последним, то есть ровно тем, что человек видит.
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "К", [{ x: 0, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const box = { width: 800, height: 600 };
+  const camera = { at: { x: 0, y: 500, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
+  const frame = volumeFrame(built, camera, box);
+  const mine = frame.filter((polygon) => polygon.pick === put.markId && !polygon.stroke);
+  const xy = mine[mine.length - 1].xy;
+  const centre = { x: (xy[0] + xy[4]) / 2, y: (xy[1] + xy[5]) / 2 };
+  assert.equal(volumeSightAt(frame, centre.x, centre.y), put.markId, "вещь перед глазами — видно её");
+  // Та же вещь с изнанки стены: рука её достаёт, взгляд — нет.
+  const behind = { at: { x: 0, y: -2500, z: VOLUME_EYE_MM }, yaw: Math.PI / 2, pitch: 0 };
+  const back = volumeFrame(built, behind, box);
+  const blocked = back.filter((polygon) => polygon.pick === put.markId && !polygon.stroke);
+  assert.ok(blocked.length > 0, "грани вещи в кадре есть — она просто закрыта стеной");
+  const hidden = blocked[blocked.length - 1].xy;
+  const at = { x: (hidden[0] + hidden[4]) / 2, y: (hidden[1] + hidden[5]) / 2 };
+  assert.equal(volumePickAt(back, at.x, at.y), put.markId, "рука достаёт её и сквозь стену — так было и в таске 148");
+  assert.equal(volumeSightAt(back, at.x, at.y), null, "а взгляд упирается в стену");
+  // Пустое место — пусто и для взгляда.
+  assert.equal(volumeSightAt(frame, 5, 5), null);
 });
 
 test("рамка выделения лежит поверх всего: вещь за стеной не теряется", () => {

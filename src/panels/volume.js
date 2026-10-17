@@ -78,6 +78,7 @@ import {
   volumeMarkerFaces,
   volumeMoveTo,
   volumePickAt,
+  volumeSightAt,
   volumeRoomAt,
   volumeScene,
   volumeSelectLines,
@@ -796,8 +797,22 @@ export function openVolume({ schemeId: openOn, api }) {
     return view === "person" ? { x: box.width / 2, y: box.height / 2 } : null;
   }
 
+  /**
+   * Прицел виден ровно тогда, когда он **и есть рука** (G213).
+   *
+   * От первого лица и мышью — да; в обзоре центр поля ничего не значит, а
+   * пальцем целятся касанием, и клавиши E там нет вовсе (таск 149). И пока
+   * курсор над полем, целится курсор — он и нарисован крестом (`volume.css`),
+   * а второй крест посреди поля обещал бы то, чего не делает. Увели курсор с
+   * поля или отдали мышь виду — снова прицел.
+   */
+  function syncAimNode() {
+    aimNode.hidden = scene.empty || view !== "person" || touching || (!locked && pointer !== null);
+  }
+
   /** Дверь под рукой — по последнему нарисованному кадру. */
   function syncAim() {
+    syncAimNode();
     const at = aimPoint();
     const found = at && !scene.empty ? volumeDoorAt(shown, at.x, at.y) : null;
     if (found === aimedDoor) return;
@@ -824,8 +839,12 @@ export function openVolume({ schemeId: openOn, api }) {
     const at = aimPoint();
     const aimed = at && !scene.empty;
     const choice = volumeAimChoice({
-      markExact: aimed ? volumePickAt(shown, at.x, at.y, 0) : null,
+      // Точно — это **видно** (`volumeSightAt`), а не «накрыто телом»: вещь за
+      // стеной человек не видит, и выделять её по взгляду нельзя.
+      markExact: aimed ? volumeSightAt(shown, at.x, at.y) : null,
       door: aimedDoor || heldDoor,
+      // А рядом — это рука с её промахом, тем же, что у клика: розетка в трёх
+      // метрах занимает десяток точек.
       markNear: aimed ? volumePickAt(shown, at.x, at.y) : null,
     });
     if (choice.kind === "mark") {
@@ -1045,7 +1064,12 @@ export function openVolume({ schemeId: openOn, api }) {
       }
     }
     const rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0 };
-    pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const at = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    // Рука — только над полем. Увели курсор на панель или за окно — руки нет, и
+    // целится прицел (G213): клавиша, переставшая работать от того, что мышь
+    // лежит на кнопке, была бы загадкой.
+    const box = viewport();
+    pointer = at.x >= 0 && at.y >= 0 && at.x <= box.width && at.y <= box.height ? at : null;
     if (!look) {
       // Курсор просто ведут по полю — смотрим, не навели ли на дверь (G207).
       syncAim();
@@ -1138,6 +1162,8 @@ export function openVolume({ schemeId: openOn, api }) {
 
   function onLockChange() {
     locked = document.pointerLockElement === stage;
+    // Мышь отдали виду — курсора нет, и целится прицел; вернули — снова рука.
+    syncAimNode();
     syncHint();
   }
 
@@ -1546,9 +1572,7 @@ export function openVolume({ schemeId: openOn, api }) {
     personButton.className = "ui-btn" + (view === "person" ? " is-on" : "");
     aroundButton.className = "ui-btn" + (view === "around" ? " is-on" : "");
     stage.classList.toggle("volume__stage--person", view === "person");
-    // Прицел — от первого лица и только мышью: в обзоре центр поля ничего не
-    // значит, а пальцем целятся касанием, и клавиши E там нет вовсе (таск 149).
-    aimNode.hidden = scene.empty || view !== "person" || touching;
+    syncAimNode();
     // Площадка ходьбы — только пальцем и только там, где ходят: в обзоре она
     // возила бы цель камеры, а не человека, и была бы просто непонятной.
     padNode.hidden = !touching || view !== "person" || scene.empty;

@@ -2603,6 +2603,29 @@ export function volumePickAt(polygons, x, y, slack = VOLUME_PICK_SLACK_PX) {
   return near;
 }
 
+/**
+ * **Что видно в точке кадра** (G214): обозначение метки, если в этой точке
+ * последней нарисована она, иначе `null` — стена, пол, полотно двери.
+ *
+ * Отличие от `volumePickAt` одно, и оно по существу. Клик — это рука, и ей
+ * прощается промах: вещь, до которой десяток точек, считается задетой, а стена
+ * перед ней руке не мешает. Прицел — это **взгляд**, и прощать ему нечего: он
+ * показывает ровно одну точку кадра, и ответ на вопрос «на что ты смотришь»
+ * может быть только один — то, что в этой точке видно. Спрятанную за стеной
+ * вещь человек не видит, и выделять её по взгляду было бы обманом.
+ *
+ * Отвечать на это стало можно только с таском 151: порядок кадра точен в
+ * каждом пикселе, и «нарисовано последним» наконец значит «видно».
+ */
+export function volumeSightAt(polygons, x, y) {
+  for (let index = polygons.length - 1; index >= 0; index -= 1) {
+    const polygon = polygons[index];
+    if (polygon.stroke) continue;
+    if (volumePolygonHit(polygon.xy, x, y)) return polygon.pick || null;
+  }
+  return null;
+}
+
 function volumePolygonHit(xy, x, y) {
   let inside = false;
   for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
