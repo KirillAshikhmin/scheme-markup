@@ -48,7 +48,7 @@ import {
   setSchemeWallHeight,
   styleOf,
 } from "../src/model.js";
-import { objectViewByName, objectViewNames } from "../src/objectViews/registry.js";
+import { objectViewByName, objectViewNames, objectViewShapes } from "../src/objectViews/registry.js";
 import {
   VOLUME_BODY_MM,
   VOLUME_EYE_MM,
@@ -63,9 +63,12 @@ import {
   VOLUME_MARKER_MM,
   VOLUME_MARK_CEILING,
   VOLUME_MARK_LIFT_MM,
+  VOLUME_MARK_MIN_MM,
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_SIZE,
   VOLUME_MARK_ROOM,
+  VOLUME_MARK_SPARE_DEPTH_MM,
+  VOLUME_MARK_SPARE_MM,
   VOLUME_MARK_WALL,
   VOLUME_OBJECT_RGB,
   VOLUME_WALL_RGB,
@@ -88,6 +91,7 @@ import {
   volumeFloorAt,
   volumeMoveTo,
   volumeSkyAim,
+  volumeSpareBox,
   volumeSkyPoint,
   volumeBasis,
   volumeFill,
@@ -127,16 +131,22 @@ import {
   volumeDoorLine,
   volumeDoorsAfterAll,
   volumeHasDrawing,
+  volumeHintText,
   volumeKeyMove,
   volumeMinimapBox,
   volumeNotes,
   volumePadVector,
-  volumeStairLine,
+  volumeSpareLine,
+  volumeSpareTitle,
+  volumeFloorAction,
+  volumeFloorName,
   volumeTitle,
+  volumeTypingTarget,
   volumeUnplacedLine,
   volumeUnplacedTitle,
   volumeWhere,
 } from "../src/panels/volume.js";
+import { canvasHintUnseen } from "../src/canvas.js";
 import { strings, text } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1551,14 +1561,123 @@ test("метка без высоты и без потолка над ней не
   assert.equal(built.unplaced[0].label, labelOf(put.project, put.markId));
 });
 
-test("вещь без размеров не размещается: рисовать её нечем", () => {
+// ——— запасной габарит (G215) —————————————————————————————————————————————
+//
+// Тип, заведённый рукой с незнакомой формой, из объёма выпадал: умолчания
+// (G192) ищут донора по коду и по форме, а такой формы в шаблоне нет вовсе. Это
+// дыра в правиле, а не в данных — и закрывается она на время рисования, в
+// сцене, без единой записи в справочник (G68).
+
+test("запасной габарит берётся у изображения объекта, а без него — рамкой справочника", () => {
+  // «Мастер-выключатель» заказчика: форма `circle-rays` входит в светильник, и
+  // его габарит — тот самый честный запас из того же реестра.
+  const lamp = objectViewByName("lamp");
+  assert.deepEqual(volumeSpareBox(lamp), {
+    lengthMm: lamp.mm.width,
+    widthMm: lamp.mm.height,
+    depthMm: VOLUME_MARK_SPARE_DEPTH_MM,
+    from: "lamp",
+  });
+  // Изображения нет совсем — общая рамка, та же, что у выключателя и розетки
+  // стартового справочника.
+  assert.deepEqual(volumeSpareBox(null), {
+    lengthMm: VOLUME_MARK_SPARE_MM,
+    widthMm: VOLUME_MARK_SPARE_MM,
+    depthMm: VOLUME_MARK_SPARE_DEPTH_MM,
+    from: null,
+  });
+  // Запись без размеров изображения (такой в реестре нет, но запас обязан
+  // отвечать и на неё) уходит в ту же рамку.
+  assert.equal(volumeSpareBox({ name: "x", mm: { width: 0, height: 0 } }).lengthMm, VOLUME_MARK_SPARE_MM);
+});
+
+test("вещь без размеров рисуется запасным габаритом и называется вслух", () => {
   const scene = roomScene();
   const category = scene.project.categories[0];
-  const added = addType(scene.project, { code: "МВ", name: "Мастер-выключатель", categoryId: category.id });
+  // Тип заказчика как он есть: своя форма, размеров нет ни одного, высота
+  // записана у самой метки — то есть вещь висит на своей стене.
+  const added = addType(scene.project, {
+    code: "МВ",
+    name: "Мастер-выключатель",
+    categoryId: category.id,
+    shape: "circle-rays",
+  });
   const put = markAt(added.project, scene.schemeId, "МВ", [{ x: 0, y: -1100 }]);
-  const built = volumeScene(put.project, scene.schemeId, {});
-  assert.equal(built.marks.length, 0);
-  assert.equal(built.unplaced[0].reason, VOLUME_MARK_NO_SIZE);
+  const withHeight = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 1400 }).project;
+  const before = JSON.stringify(withHeight);
+  const built = volumeScene(withHeight, scene.schemeId, {});
+  assert.equal(built.unplaced.length, 0, "места ей больше не выдумывают — её рисуют");
+  const place = placeOf(built, put.markId);
+  assert.equal(place.mode, VOLUME_MARK_WALL);
+  assert.equal(place.heightMm, 1400);
+  // Габарит — светильника: 90 вдоль стены, 90 по высоте.
+  const lamp = objectViewByName("lamp");
+  assert.equal(place.face.widthMm, lamp.mm.width);
+  assert.equal(place.face.heightMm, lamp.mm.height);
+  const span = faceSpanZ(place);
+  assert.equal(span.topMm - span.bottomMm, lamp.mm.height);
+  // И об этом сказано: вещь в списке запасных, а не потерянных.
+  assert.deepEqual(built.spare, [{ markId: put.markId, label: labelOf(withHeight, put.markId) }]);
+  assert.equal(place.spare, true);
+  assert.equal(JSON.stringify(withHeight), before, "запас живёт в сцене: в справочник не записано ничего (G68)");
+});
+
+test("незнакомая форма без изображения рисуется общей рамкой", () => {
+  const scene = roomScene();
+  const category = scene.project.categories[0];
+  // Звезду ни одно изображение объекта не разбирает (таких форм в сетке
+  // четырнадцать из пятидесяти с лишним) — остаётся рамка.
+  assert.ok(!objectViewShapes().includes("star"));
+  const added = addType(scene.project, {
+    code: "ЩЩ",
+    name: "Своя вещь",
+    categoryId: category.id,
+    shape: "star",
+  });
+  const put = markAt(added.project, scene.schemeId, "ЩЩ", [{ x: 0, y: -1100 }]);
+  const withHeight = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 900 }).project;
+  const place = placeOf(volumeScene(withHeight, scene.schemeId, {}), put.markId);
+  assert.equal(place.face.widthMm, VOLUME_MARK_SPARE_MM);
+  assert.equal(place.face.heightMm, VOLUME_MARK_SPARE_MM);
+  // Выступ у плоского изображения взять негде, и он тоже из рамки: тело вещи
+  // на стене толщиной в этот выступ, а не в плёнку.
+  const corners = place.prisms[0].corners;
+  const sides = corners.map((corner, index) => {
+    const next = corners[(index + 1) % corners.length];
+    return Math.hypot(next.x - corner.x, next.y - corner.y);
+  });
+  assert.ok(
+    Math.abs(Math.min(...sides) - VOLUME_MARK_SPARE_DEPTH_MM) < 0.01,
+    "запасной выступ — рамка справочника, а не плёнка",
+  );
+});
+
+test("вещь, у которой размер задан хоть один, рисуется ровно как прежде", () => {
+  const scene = roomScene();
+  const category = scene.project.categories[0];
+  const added = addType(scene.project, { code: "ЩЩ", name: "Своя вещь", categoryId: category.id, shape: "star" });
+  const put = markAt(added.project, scene.schemeId, "ЩЩ", [{ x: 0, y: -1100 }]);
+  // Своя длина у метки, ширины нет нигде: правило прежнее — вторая сторона
+  // подтянута до самой мелкой (20 мм), а не до запаса. Запас включается только
+  // там, где не задано **ни одной** стороны, и готовый объект не меняется.
+  const own = setMarkDimensions(put.project, put.markId, { length: 600, heightAboveFloor: 900 }).project;
+  const built = volumeScene(own, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.equal(place.face.widthMm, 600);
+  assert.equal(place.face.heightMm, VOLUME_MARK_MIN_MM);
+  assert.equal(place.spare, false);
+  assert.deepEqual(built.spare, []);
+});
+
+test("встроенная вещь не толстеет от запасного выступа", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "Т", [{ x: 0, y: 0 }]);
+  // У точечного светильника шаблона выступ записан нулём — это «встроенный», а
+  // не пустота, и запас его не касается.
+  const place = placeOf(volumeScene(put.project, scene.schemeId, {}), put.markId);
+  const span = faceSpanZ(place);
+  assert.equal(span.topMm - span.bottomMm, VOLUME_MARK_LIFT_MM);
+  assert.equal(place.spare, false);
 });
 
 test("плашка комментария в объём не идёт вовсе — ни вещью, ни строкой списка", () => {
@@ -1736,6 +1855,25 @@ test("строка «не размещены» называет метки и п
   assert.ok(line.includes("Т0") && !line.includes("Т10"), line);
   assert.ok(volumeUnplacedTitle(many).includes("Т10"), "все обозначения остаются в подсказке");
   assert.equal(volumeUnplacedTitle([{ markId: "1", label: "Т1", reason: VOLUME_MARK_NO_SIZE }]), "");
+});
+
+test("строка «нарисованы запасным габаритом» называет вещи и говорит, откуда габарит", () => {
+  assert.equal(volumeSpareLine([]), "");
+  const one = volumeSpareLine([{ markId: "1", label: "МВ1" }]);
+  assert.ok(one.includes("МВ1"), one);
+  // Числа общей рамки приходят из сцены, а не переписаны в словарь второй раз.
+  assert.ok(one.includes(String(VOLUME_MARK_SPARE_MM)), one);
+  assert.ok(one.includes(String(VOLUME_MARK_SPARE_DEPTH_MM)), one);
+  // Это не «не размещены»: вещь в кадре есть, и путать две новости нельзя.
+  assert.ok(!one.includes(strings.volume.unplacedNoSize), one);
+  const many = [];
+  for (let index = 0; index < VOLUME_UNPLACED_SHOWN + 3; index += 1) {
+    many.push({ markId: String(index), label: "Т" + index });
+  }
+  const line = volumeSpareLine(many);
+  assert.ok(line.includes("Т0") && !line.includes("Т10"), line);
+  assert.ok(volumeSpareTitle(many).includes("Т10"), "все обозначения остаются в подсказке");
+  assert.equal(volumeSpareTitle([{ markId: "1", label: "Т1" }]), "");
 });
 
 test("метки в сцене не меняют объект (G68)", () => {
@@ -2020,11 +2158,43 @@ test("в список этажей идёт только схема с номе�
   assert.ok(floors.options.every((option) => option.schemeId !== first.schemeId));
 });
 
-test("строка про лестницу молчит без лестницы и говорит, когда перейти некуда", () => {
-  assert.equal(volumeStairLine(null, []), "");
-  assert.equal(volumeStairLine(null, [{ floor: 2 }]), "");
-  assert.equal(volumeStairLine({ objectId: "s" }, []), strings.volume.stairNoFloors);
-  assert.equal(volumeStairLine({ objectId: "s" }, [{ floor: 2 }]), strings.volume.stairNear);
+test("у лестницы окно предлагает этаж, а без неё молчит или зовёт обратно", () => {
+  const stair = { objectId: "s" };
+  const floors = [{ floor: 2 }];
+  // Ни лестницы, ни дороги назад — предлагать нечего, и строки нет.
+  assert.deepEqual(volumeFloorAction(null, [], null), { kind: "none", label: "", title: "", hint: "" });
+  assert.equal(volumeFloorAction(null, floors, null).kind, "none", "лестницы нет — этажи сами по себе не зовут");
+  // Лестница есть, этажей не задано: кнопки нет, но молчать нельзя — человек
+  // видит нарисованную лестницу.
+  const dead = volumeFloorAction(stair, [], null);
+  assert.equal(dead.kind, "none");
+  assert.equal(dead.hint, strings.volume.stairNoFloors);
+  // Лестница и этажи — обычный переход таска 149.
+  const up = volumeFloorAction(stair, floors, null);
+  assert.equal(up.kind, "stair");
+  assert.equal(up.label, strings.volume.stairButton);
+  assert.equal(up.hint, strings.volume.stairNear);
+  // Лестницы нет, а пришли мы сюда переходом — возврат (G216).
+  const back = volumeFloorAction(null, [], { schemeId: "s1", name: "1 этаж", floor: 1 });
+  assert.equal(back.kind, "back");
+  assert.equal(back.label, text("volume.backButton", { where: text("volume.floorNumber", { floor: 1 }) }));
+  assert.equal(back.hint, strings.volume.backLine);
+  // Лестница старше возврата: есть она — ею и пользуются, правило T149 цело.
+  assert.equal(volumeFloorAction(stair, floors, { schemeId: "s1", name: "1", floor: 1 }).kind, "stair");
+  // Схема без этажа зовётся именем, и падеж у обоих случаев один.
+  const named = volumeFloorAction(null, [], { schemeId: "s2", name: "План", floor: null });
+  assert.equal(named.label, text("volume.backButton", { where: text("volume.floorNamed", { name: "План" }) }));
+  assert.equal(volumeFloorName(null), "");
+});
+
+test("клавиши окна не отбирают клавиши у поля ввода", () => {
+  assert.equal(volumeTypingTarget({ tagName: "SELECT" }), true);
+  assert.equal(volumeTypingTarget({ tagName: "INPUT" }), true);
+  assert.equal(volumeTypingTarget({ tagName: "TEXTAREA" }), true);
+  assert.equal(volumeTypingTarget({ tagName: "DIV", isContentEditable: true }), true);
+  assert.equal(volumeTypingTarget({ tagName: "CANVAS" }), false);
+  assert.equal(volumeTypingTarget({ tagName: "DIV" }), false);
+  assert.equal(volumeTypingTarget(null), false);
 });
 
 test("заголовок окна называет этаж, когда он задан", () => {
@@ -2056,6 +2226,69 @@ test("площадка ходьбы: вверх — вперёд, в сторо�
   const far = volumePadVector(0, -radius * 4, radius);
   assert.equal(far.forward, 1);
   assert.ok(Math.hypot(far.forward, far.turn) <= 1.0000001);
+});
+
+// ——— подсказка плашкой (G218) ————————————————————————————————————————————
+//
+// Вид плашки проверяется снимком — зелёный прогон про стили не говорит ничего.
+// А вот текст её чистый, и собирается он из шести кусков: разойдись сборка —
+// человек останется без клавиш, о которых больше написать негде.
+
+test("текст подсказки говорит про тот вид и то управление, которые сейчас", () => {
+  const base = {
+    empty: false,
+    view: "person",
+    touching: false,
+    locked: false,
+    aim: true,
+    doors: [],
+    open: new Set(),
+    aimedDoor: null,
+    stair: null,
+    floors: [],
+  };
+  const person = volumeHintText(base);
+  assert.ok(person.includes(strings.volume.hintPerson), person);
+  assert.ok(person.includes(strings.volume.hintGrab), "мышь не захвачена — про это и сказано");
+  assert.ok(person.includes(strings.volume.aimHint), "прицел показан — про него есть строка");
+  // Обзор говорит своё, и про прицел там молчит: его в обзоре нет.
+  const around = volumeHintText({ ...base, view: "around", aim: false });
+  assert.ok(around.includes(strings.volume.hintAround), around);
+  assert.ok(!around.includes(strings.volume.aimHint), around);
+  // Мышь у вида — другая строка про мышь, и обе разом не говорятся.
+  const locked = volumeHintText({ ...base, locked: true });
+  assert.ok(locked.includes(strings.volume.hintLocked) && !locked.includes(strings.volume.hintGrab), locked);
+  // Пальцем про мышь не говорится вовсе (таск 149).
+  const touch = volumeHintText({ ...base, touching: true });
+  assert.ok(touch.includes(strings.volume.hintTouch), touch);
+  assert.ok(!touch.includes(strings.volume.hintGrab) && !touch.includes(strings.volume.hintLocked), touch);
+  // Двери и лестница дописываются теми же строками, что и прежде.
+  const full = volumeHintText({ ...base, doors: ["d1"], stair: { objectId: "s" }, floors: [{ floor: 2 }] });
+  assert.ok(full.includes(strings.volume.stairNear), full);
+  // Возврат с этажа без лестницы (G216) говорится в той же строке.
+  const back = volumeHintText({ ...base, back: { schemeId: "s", name: "1 этаж", floor: 1 } });
+  assert.ok(back.includes(strings.volume.backLine), back);
+  assert.ok(full.includes(volumeDoorLine(["d1"], new Set(), null, false)), full);
+  // Схема без чертежа: подсказка говорит, чем рисуют чертёж, и ничего больше.
+  assert.equal(volumeHintText({ ...base, empty: true }), strings.volume.emptyHint);
+});
+
+test("свёрнутая подсказка окна помечается, когда текст сменился", () => {
+  // Правило то же, что на холсте, и считает его та же функция — второго
+  // «текст сменился» в сборке нет.
+  const open = new Set();
+  const first = volumeHintText({
+    empty: false, view: "person", touching: false, locked: false, aim: false,
+    doors: ["d1"], open, aimedDoor: null, stair: null, floors: [],
+  });
+  const second = volumeHintText({
+    empty: false, view: "person", touching: false, locked: false, aim: false,
+    doors: ["d1"], open: new Set(["d1"]), aimedDoor: null, stair: null, floors: [],
+  });
+  assert.notEqual(first, second, "открытая дверь меняет текст — иначе проверять нечего");
+  assert.equal(canvasHintUnseen(first, second), true);
+  assert.equal(canvasHintUnseen(first, first), false);
+  assert.equal(canvasHintUnseen(null, second), false, "не видел ничего — и знака нет");
 });
 
 test("подсказка пальцем не обещает клавиш, которых на планшете нет", () => {

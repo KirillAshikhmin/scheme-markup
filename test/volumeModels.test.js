@@ -68,6 +68,7 @@ import {
   volumeObjectModel,
   volumeObjectPrisms,
   volumeScene,
+  volumeSpareBox,
 } from "../src/volume.js";
 import { strings } from "../src/strings.js";
 
@@ -506,6 +507,34 @@ test("нет модели — прежняя коробка по габарит�
   for (const face of faces) {
     assert.deepEqual(face.rgb, plain.bodyRgb, "коробка рисуется прежним цветом");
   }
+});
+
+test("запасной габарит и модель берутся у одного изображения", () => {
+  // Стык с таском 152 (G215): у вещи без размеров габарит берётся у её
+  // плоского изображения. Модель приходит оттуда же, и поэтому они сходятся —
+  // в запасном габарите кондиционера не оказывается чужого кубика.
+  const scene = roomScene();
+  const added = addType(scene.project, {
+    categoryId: scene.project.categories[3].id,
+    code: "КК",
+    name: "Свой кондиционер",
+    shape: "circle-thermo",
+  });
+  const mark = addMark(added.project, {
+    schemeId: scene.schemeId,
+    typeId: added.type.id,
+    kind: "point",
+    points: [planMmToFraction(added.project, scene.schemeId, { x: 0, y: -1000 })],
+  });
+  const place = volumeMarkPlacement(mark.project, mark.mark, roomList(scene));
+  assert.equal(place.spare, true, "размеров нет — габарит запасной");
+  assert.equal(place.model.key, "conditioner", "и модель та же, что у изображения");
+  const spare = volumeSpareBox(place.view);
+  assert.equal(spare.from, "conditioner");
+  const prisms = volumeModelPrisms(place.frame, place.model.parts);
+  assert.equal(prisms.length, 3, "корпус, панель и жалюзи");
+  const xs = prisms.flatMap((prism) => prism.corners.map((point) => point.x));
+  assert.equal(Math.round(Math.max(...xs) - Math.min(...xs)), spare.lengthMm, "модель заняла весь запасной габарит");
 });
 
 test("у ленты модели нет: это цепочка звеньев, а не вещь", () => {
