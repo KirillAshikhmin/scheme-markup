@@ -132,6 +132,7 @@ import {
   volumeDoorLine,
   volumeDoorsAfterAll,
   volumeHasDrawing,
+  volumeHintText,
   volumeKeyMove,
   volumeMinimapBox,
   volumeNotes,
@@ -146,6 +147,7 @@ import {
   volumeUnplacedTitle,
   volumeWhere,
 } from "../src/panels/volume.js";
+import { canvasHintUnseen } from "../src/canvas.js";
 import { strings, text } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -2237,6 +2239,66 @@ test("площадка ходьбы: вверх — вперёд, в сторо�
   const far = volumePadVector(0, -radius * 4, radius);
   assert.equal(far.forward, 1);
   assert.ok(Math.hypot(far.forward, far.turn) <= 1.0000001);
+});
+
+// ——— подсказка плашкой (G218) ————————————————————————————————————————————
+//
+// Вид плашки проверяется снимком — зелёный прогон про стили не говорит ничего.
+// А вот текст её чистый, и собирается он из шести кусков: разойдись сборка —
+// человек останется без клавиш, о которых больше написать негде.
+
+test("текст подсказки говорит про тот вид и то управление, которые сейчас", () => {
+  const base = {
+    empty: false,
+    view: "person",
+    touching: false,
+    locked: false,
+    aim: true,
+    doors: [],
+    open: new Set(),
+    aimedDoor: null,
+    stair: null,
+    floors: [],
+  };
+  const person = volumeHintText(base);
+  assert.ok(person.includes(strings.volume.hintPerson), person);
+  assert.ok(person.includes(strings.volume.hintGrab), "мышь не захвачена — про это и сказано");
+  assert.ok(person.includes(strings.volume.aimHint), "прицел показан — про него есть строка");
+  // Обзор говорит своё, и про прицел там молчит: его в обзоре нет.
+  const around = volumeHintText({ ...base, view: "around", aim: false });
+  assert.ok(around.includes(strings.volume.hintAround), around);
+  assert.ok(!around.includes(strings.volume.aimHint), around);
+  // Мышь у вида — другая строка про мышь, и обе разом не говорятся.
+  const locked = volumeHintText({ ...base, locked: true });
+  assert.ok(locked.includes(strings.volume.hintLocked) && !locked.includes(strings.volume.hintGrab), locked);
+  // Пальцем про мышь не говорится вовсе (таск 149).
+  const touch = volumeHintText({ ...base, touching: true });
+  assert.ok(touch.includes(strings.volume.hintTouch), touch);
+  assert.ok(!touch.includes(strings.volume.hintGrab) && !touch.includes(strings.volume.hintLocked), touch);
+  // Двери и лестница дописываются теми же строками, что и прежде.
+  const full = volumeHintText({ ...base, doors: ["d1"], stair: { objectId: "s" }, floors: [{ floor: 2 }] });
+  assert.ok(full.includes(strings.volume.stairNear), full);
+  assert.ok(full.includes(volumeDoorLine(["d1"], new Set(), null, false)), full);
+  // Схема без чертежа: подсказка говорит, чем рисуют чертёж, и ничего больше.
+  assert.equal(volumeHintText({ ...base, empty: true }), strings.volume.emptyHint);
+});
+
+test("свёрнутая подсказка окна помечается, когда текст сменился", () => {
+  // Правило то же, что на холсте, и считает его та же функция — второго
+  // «текст сменился» в сборке нет.
+  const open = new Set();
+  const first = volumeHintText({
+    empty: false, view: "person", touching: false, locked: false, aim: false,
+    doors: ["d1"], open, aimedDoor: null, stair: null, floors: [],
+  });
+  const second = volumeHintText({
+    empty: false, view: "person", touching: false, locked: false, aim: false,
+    doors: ["d1"], open: new Set(["d1"]), aimedDoor: null, stair: null, floors: [],
+  });
+  assert.notEqual(first, second, "открытая дверь меняет текст — иначе проверять нечего");
+  assert.equal(canvasHintUnseen(first, second), true);
+  assert.equal(canvasHintUnseen(first, first), false);
+  assert.equal(canvasHintUnseen(null, second), false, "не видел ничего — и знака нет");
 });
 
 test("подсказка пальцем не обещает клавиш, которых на планшете нет", () => {

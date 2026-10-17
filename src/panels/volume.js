@@ -40,10 +40,12 @@ import {
   canvasFullscreenSupported,
   canvasFullscreenToggle,
   canvasHintInset,
+  canvasHintUnseen,
 } from "../canvas.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { findRoom, findScheme, schemeFloorOf } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
+import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -96,6 +98,25 @@ import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton, uiModal } from "./
 // Окно одно: второе показывало бы ту же сцену второй камерой и сжирало бы
 // кадры у первого. То же правило, что у мастерской.
 let volumeOpened = false;
+
+// ——— подсказка плашкой (G218) ————————————————————————————————————————————
+//
+// Слова заказчика: «подсказку по управлению сделай в виде как на схеме —
+// кнопочка справа сверху, которую закрывать можно».
+//
+// Механизм взят у холста целиком: те же классы (`canvas-hint`,
+// `canvas-hint__text`, `canvas-hint__toggle`, `is-collapsed`), та же точка на
+// кнопке при сменившемся тексте (`canvasHintUnseen`, `is-new`) и те же подписи.
+// Второго поведения не заводится — у человека одна рука на обе поверхности.
+//
+// **Настройка своя**, отдельная от холста: подсказки разные, и свернув одну, он
+// не просил сворачивать другую. Свёрнутость живёт там же, где у холста, — в
+// настройках браузера, то есть переживает закрытие окна и перезагрузку.
+const VOLUME_HINT_SETTING = "volumeHintCollapsed";
+let volumeHintCollapsed = false;
+// Текст, который человек видел последним развёрнутым. Модульная, а не оконная:
+// закрыл и открыл окно — подсказка та же, и мигать точкой ей незачем.
+let volumeHintSeen = null;
 
 /** Клавиша → куда шагаем: вперёд/назад и в сторону, в осях камеры. */
 export function volumeKeyMove(code) {
@@ -390,6 +411,34 @@ export function volumeDoorLine(doors, open, aimed, touching) {
 }
 
 /**
+ * Текст подсказки окна (G218) — весь, одной строкой.
+ *
+ * Собирается из того же, из чего собирался в строке под полем: вид говорит про
+ * свои клавиши, мышь — про захват, палец — про площадку и щипок, дальше про
+ * выделение, прицел, двери и лестницу под рукой. Переезд в плашку ничего из
+ * этого не отменил.
+ *
+ * Чистая и вынесена наружу: текст, собранный внутри обработчика, не проверяет
+ * ничто, а подсказка — единственное место, где в окне написано, что делают
+ * клавиши.
+ */
+export function volumeHintText(state) {
+  if (state.empty) return strings.volume.emptyHint;
+  const parts = [state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
+  // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
+  if (state.touching) parts.push(strings.volume.hintTouch);
+  else parts.push(state.locked ? strings.volume.hintLocked : strings.volume.hintGrab);
+  parts.push(strings.volume.pickHint);
+  // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
+  if (state.aim) parts.push(strings.volume.aimHint);
+  parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
+  // Про лестницу — последней: она есть под рукой далеко не всегда, а когда
+  // есть, это самое новое в строке.
+  parts.push(volumeStairLine(state.stair, state.floors));
+  return parts.filter((part) => part !== "").join(" ");
+}
+
+/**
  * Строка про лестницу под рукой (таск 149).
  *
  * Пусто — лестницы рядом нет. Есть, но этажей не задано — об этом говорится
@@ -587,12 +636,37 @@ export function openVolume({ schemeId: openOn, api }) {
   // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
   // (`volume.css`), и читать его нечем — `aria-hidden`.
   const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
+  // Подсказка по управлению — плашка справа сверху поля со сворачивающей
+  // кнопкой (G218). Кнопка **справа от текста**, а не слева, как на холсте:
+  // плашка прижата к правому краю, и свёрнутая она обязана остаться в том же
+  // углу, где была её кнопка.
+  const hintText = uiEl("p", { class: "canvas-hint__text" });
+  const hintToggle = uiEl(
+    "button",
+    {
+      class: "canvas-hint__toggle",
+      type: "button",
+      on: {
+        click: () => {
+          volumeHintCollapsed = !volumeHintCollapsed;
+          setSetting(VOLUME_HINT_SETTING, volumeHintCollapsed);
+          syncHint();
+          // Клавиши возвращаются полю: свернул подсказку — идёшь дальше, а не
+          // жмёшь пробелом ту же кнопку.
+          if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
+        },
+      },
+    },
+    uiIcon("hint"),
+  );
+  const hint = uiEl("div", { class: "canvas-hint canvas-hint--volume" }, [hintText, hintToggle]);
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
     stairButton,
     padNode,
     aimNode,
+    hint,
     askBox,
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
@@ -656,7 +730,6 @@ export function openVolume({ schemeId: openOn, api }) {
   // цвет те же — в объекте не хватает числа, и сказать об этом надо там, где
   // человек уже читает про недостающее.
   const spareLine = uiEl("p", { class: "volume__missing" });
-  const hint = uiEl("p", { class: "modal__hint" });
 
   const bar = uiEl("div", { class: "volume__tools" }, [
     schemeBox,
@@ -666,7 +739,10 @@ export function openVolume({ schemeId: openOn, api }) {
     where,
     uiEl("span", { class: "volume__spacer" }, [doorsButton, shotButton, fitButton, fullButton]),
   ]);
-  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, spareLine, hint]);
+  // Подсказки под полем больше нет: она переехала плашкой в само поле (G218).
+  // Под полем остаётся то, что говорит про объект, а не про управление, — счёт
+  // чертежа, недостающее и запасные габариты.
+  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, spareLine]);
 
   const closeButton = uiButton(strings.volume.close, {
     class: "ui-btn ui-btn--accent",
@@ -1764,23 +1840,39 @@ export function openVolume({ schemeId: openOn, api }) {
     where.textContent = scene.empty || view !== "person" ? "" : volumeWhere(getState().project, scene, person);
   }
 
+  /**
+   * Подсказка плашкой (G218): текст, свёрнутость и точка на кнопке.
+   *
+   * Разворачивать её за человека нельзя — он свернул её осознанно, и она
+   * выпрыгивала бы под рукой на каждую открытую дверь. Но и молча съесть
+   * сменившийся текст нельзя: кнопка получает точку и другую подпись. Правило
+   * то же, что на холсте, и считает его та же `canvasHintUnseen`.
+   */
   function syncHint() {
-    if (scene.empty) {
-      hint.textContent = strings.volume.emptyHint;
-      return;
-    }
-    const parts = [view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
-    // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
-    if (touching) parts.push(strings.volume.hintTouch);
-    else parts.push(locked ? strings.volume.hintLocked : strings.volume.hintGrab);
-    parts.push(strings.volume.pickHint);
-    // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
-    if (!aimNode.hidden) parts.push(strings.volume.aimHint);
-    parts.push(volumeDoorLine(scene.doors, openDoors, aimedDoor || heldDoor, touching));
-    // Про лестницу — последней: она есть под рукой далеко не всегда, а когда
-    // есть, это самое новое в строке.
-    parts.push(volumeStairLine(stairHere(), floorOptions()));
-    hint.textContent = parts.filter((part) => part !== "").join(" ");
+    const value = volumeHintText({
+      empty: scene.empty,
+      view,
+      touching,
+      locked,
+      aim: !aimNode.hidden,
+      doors: scene.doors,
+      open: openDoors,
+      aimedDoor: aimedDoor || heldDoor,
+      stair: stairHere(),
+      floors: floorOptions(),
+    });
+    hintText.textContent = value;
+    hint.classList.toggle("is-collapsed", volumeHintCollapsed);
+    hintText.hidden = volumeHintCollapsed;
+    // Развёрнутую подсказку человек видит — значит, этот текст прочитан.
+    if (!volumeHintCollapsed) volumeHintSeen = value;
+    const unseen = volumeHintCollapsed && canvasHintUnseen(volumeHintSeen, value);
+    hintToggle.classList.toggle("is-new", unseen);
+    let label = strings.canvas.hintCollapse;
+    if (volumeHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
+    hintToggle.title = label;
+    hintToggle.setAttribute("aria-label", label);
+    hintToggle.setAttribute("aria-expanded", volumeHintCollapsed ? "false" : "true");
   }
 
   function sync() {
@@ -1895,6 +1987,18 @@ export function openVolume({ schemeId: openOn, api }) {
   resize();
   if (!scene.empty) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
+  // Свёрнутость подсказки читается из настроек асинхронно — как на холсте:
+  // плашка стартует развёрнутой и схлопывается, когда хранилище ответит.
+  // То, что человек успел увидеть до ответа, прочитанным не считается: он на
+  // подсказку не смотрел, она мигнула сама.
+  Promise.resolve(getSetting(VOLUME_HINT_SETTING))
+    .then((saved) => {
+      if (closed || saved !== true) return;
+      volumeHintCollapsed = true;
+      volumeHintSeen = null;
+      syncHint();
+    })
+    .catch(() => {});
   return { close: finish };
 }
 
