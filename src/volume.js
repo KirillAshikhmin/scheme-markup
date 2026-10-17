@@ -78,7 +78,7 @@ import { objectModelByKey, objectModelForName } from "./objectModels/registry.js
 
 // ——— числа ——————————————————————————————————————————————————————————————
 
-/** Высота глаз. Постоянная: «от первого лица», приседать и прыгать незачем. */
+/** Высота глаз стоя. С таска 159 она не единственная — см. `VOLUME_CROUCH_MM`. */
 export const VOLUME_EYE_MM = 1600;
 /**
  * Радиус тела. Он же — страховка от того, чем кончается «камера упёрлась носом
@@ -95,6 +95,71 @@ export const VOLUME_NEAR_MM = 80;
 export const VOLUME_STEP_MM = 300;
 /** Макушка: под тем, что выше неё, проходят не нагибаясь. */
 export const VOLUME_HEAD_MM = 1900;
+
+// ——— стойка: присед и прыжок (G234, таск 159) ——————————————————————————
+//
+// Слова заказчика: «Сделай на клавишу Control функцию Присесть, а на пробел -
+// прыжок». Это **квартира, а не игра**: числа взяты у человека, а не у
+// платформера, и названы здесь все до одного.
+//
+// Высота глаз больше не постоянная, и прежняя оговорка «приседать и прыгать
+// незачем» снята его словом. Что при этом не изменилось: в объект по-прежнему
+// не пишется ничего (G68) — стойка живёт в сеансе, как двери и выделение.
+
+/**
+ * От глаз до макушки — 300 мм, и это не новое число, а то же самое: стоя глаза
+ * на 1600, макушка на 1900. Поэтому присед считается **один раз** — опускаются
+ * и глаза, и макушка, — и столкновения с глазами не расходятся никогда.
+ */
+export const VOLUME_CROWN_MM = VOLUME_HEAD_MM - VOLUME_EYE_MM;
+/**
+ * Насколько опускается присед: 550 мм. Глаза уходят с 1600 на **1050**,
+ * макушка — с 1900 на **1350**.
+ *
+ * Числа человеческие: у сидящего на корточках взрослого глаза как раз около
+ * метра, а 1350 — та высота, под которой он проходит. Проверяется это не
+ * рулеткой, а квартирой: низ навесного шкафа кухни — 1400–1500 мм, низ марша
+ * лестницы над проходом — от 1300, и присед обязан пускать именно туда.
+ * Возьми меньше (скажем, 1000 мм приседа) — и под шкаф человек не пролезет,
+ * то есть клавиша не будет делать ничего; возьми больше — он поползёт по полу,
+ * чего заказчик не просил.
+ */
+export const VOLUME_CROUCH_MM = 550;
+/**
+ * Скорость приседа и подъёма — 3000 мм/с, то есть **0,18 с** на все 550 мм.
+ *
+ * Не мгновенно, и причина не в красоте: Control на главном экране соседствует с
+ * Ctrl+Z, Ctrl+C и Ctrl+V, и между нажатием Control и буквой проходит
+ * десятая доля секунды. Мгновенный присед дёргал бы кадр на каждой отмене;
+ * плавный за это время едва начинается и возвращается назад сам (см.
+ * `volumeStanceKey`).
+ */
+export const VOLUME_CROUCH_MM_S = 3000;
+/**
+ * Высота прыжка — 300 мм. Это ступенька, а не прыжок на месте в игре: взрослый
+ * с места подпрыгивает на 30–40 см, и двух метров в квартире не нужно.
+ */
+export const VOLUME_JUMP_MM = 300;
+/** Падение — настоящее земное ускорение, 9,81 м/с². Второго числа тут незачем. */
+export const VOLUME_FALL_MM_S2 = 9810;
+/**
+ * Начальная скорость прыжка — та, что даёт ровно `VOLUME_JUMP_MM` и ни
+ * миллиметром больше: v = √(2gh) = 2426 мм/с. Отсюда **взлёт 0,25 с, падение
+ * 0,25 с**, вся дуга — полсекунды.
+ */
+export const VOLUME_JUMP_MM_S = Math.sqrt(2 * VOLUME_FALL_MM_S2 * VOLUME_JUMP_MM);
+/**
+ * Перемычка, ниже которой проём держит стоя, — 1700 мм.
+ *
+ * Заказчик назвал проём среди низких мест, где «встать нельзя». Но высота
+ * проёма в чертеже — это высота полотна, а не просвет над головой: дверь 1800
+ * в чьём-то уже размеченном объекте не должна перестать пускать человека,
+ * который вчера через неё ходил. Поэтому держит только то, что низко
+ * **несомненно**: 1700 мм — высота, под которой головой не наклонишься, а
+ * присядешь. Проём 1500 мм пропускает присед (макушка 1350) и не пускает стоя;
+ * дверь 2100 мм остаётся дырой в любой стойке, как и была.
+ */
+export const VOLUME_LINTEL_MM = 1700;
 /**
  * Свободное место вокруг, ниже которого окно говорит «тесно».
  *
@@ -400,6 +465,32 @@ export function volumeWallSolids(wall, openings) {
   }
   if (cursor < length) spans.push({ fromMm: cursor, toMm: length });
   return spans.filter((span) => span.toMm - span.fromMm > 0);
+}
+
+/**
+ * Низкие перемычки над проёмами (G234): препятствие **над** дырой, которое
+ * держит стоящего и пропускает присевшего.
+ *
+ * Зачем оно вообще: проём, через который проходят, вырезан из препятствий
+ * целиком (`volumeWallSolids`) — то есть лаз высотой в метр до таска 159
+ * пропускал человека в полный рост. Заказчик назвал проём среди низких мест,
+ * где «встать нельзя», и перемычка — это он же, только посчитанный.
+ *
+ * Порог отбора — `VOLUME_LINTEL_MM`, и он нарочно много ниже макушки: см. там.
+ */
+export function volumeWallLintels(openings, wallHeightMm) {
+  const out = [];
+  for (const opening of openings || []) {
+    if (!volumeOpeningWalkable(opening)) continue;
+    const bottom = Math.max(0, Number(opening.heightAboveFloorMm) || 0);
+    const top = bottom + (Number(opening.heightMm) || 0);
+    if (!(top > 0) || top >= VOLUME_LINTEL_MM) continue;
+    const fromMm = Number(opening.atMm) || 0;
+    const toMm = fromMm + (Number(opening.widthMm) || 0);
+    if (!(toMm > fromMm)) continue;
+    out.push({ fromMm, toMm, bottomMm: top, topMm: Math.max(top, Number(wallHeightMm) || top) });
+  }
+  return out;
 }
 
 /**
@@ -886,6 +977,11 @@ export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, o
  * как сквозь стену, и заказчик разрешил проходить ровно сквозь **дверные
  * полотна**, а не сквозь вещи. Короб под потолком, наоборот, над головой, и
  * останавливать им человека было бы странно.
+ *
+ * Спрашивается это **в полный рост** и один раз, при сборке сцены: присед
+ * макушку только опускает, то есть отсеять он может лишь то, что уже отсеяно
+ * здесь. Что держит присевшего, решается на шаге — `volumeSolidBlocks`, и
+ * высоты вещи для этого едут в препятствие (`volumePrismSolid`).
  */
 export function volumePrismBlocks(prism) {
   return prism.bottomMm < VOLUME_HEAD_MM && prism.topMm > VOLUME_STEP_MM;
@@ -916,6 +1012,10 @@ export function volumePrismSolid(prism) {
     ny,
     half: length / 2,
     halfT: depth / 2,
+    // Высоты вещи едут в препятствие вместе с её габаритом (G234): под
+    // навесным шкафом присевший проходит, сквозь колонну до потолка — нет.
+    bottomMm: Number(prism.bottomMm) || 0,
+    topMm: Number(prism.topMm) || 0,
   };
 }
 
@@ -1946,7 +2046,14 @@ export function volumeScene(project, schemeId, options = {}) {
     volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
-    for (const span of volumeWallSolids(wall, openings)) {
+    // Сплошные участки стены — во всю её высоту; низкая перемычка над проёмом
+    // (G234) — своим куском от верха проёма до верха стены. У препятствия
+    // появились высоты: по ним присевший проходит там, где стоящий не проходит.
+    const spans = [
+      ...volumeWallSolids(wall, openings).map((span) => ({ ...span, bottomMm: 0, topMm: height })),
+      ...volumeWallLintels(openings, height),
+    ];
+    for (const span of spans) {
       const middle = (span.fromMm + span.toMm) / 2;
       solids.push({
         cx: Number(wall.aMm.x) + vectors.u.x * middle,
@@ -1957,6 +2064,8 @@ export function volumeScene(project, schemeId, options = {}) {
         ny: vectors.n.y,
         half: (span.toMm - span.fromMm) / 2,
         halfT: Number(wall.thicknessMm) / 2,
+        bottomMm: span.bottomMm,
+        topMm: span.topMm,
       });
     }
   }
@@ -2061,11 +2170,56 @@ function volumeGap(solid, x, y) {
   return Math.hypot(Math.max(along, 0), Math.max(across, 0));
 }
 
-/** Сколько свободного места вокруг точки. */
-export function volumeFreeMm(solids, x, y) {
+/**
+ * Держит ли препятствие человека, у которого макушка на `headMm` (G234).
+ *
+ * Правило то же, что у вещи чертежа (`volumePrismBlocks`), только спрашивается
+ * оно не при сборке сцены, а на каждом шаге: присев, человек проходит под тем,
+ * что выше его макушки, — и это единственный способ сделать так, чтобы
+ * «проходить там, где низко» и «сквозь стены нельзя» были одним счётом, а не
+ * двумя.
+ *
+ * Препятствие без высот (такие строит рука в тестах) держит всегда: `topMm`
+ * без значения — это «до потолка», и молча пропускать сквозь него нельзя.
+ */
+export function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM) {
+  const bottom = Number(solid.bottomMm) || 0;
+  const top = solid.topMm === undefined || solid.topMm === null ? Infinity : Number(solid.topMm);
+  return bottom < headMm && top > VOLUME_STEP_MM;
+}
+
+/** Сколько свободного места вокруг точки для человека с макушкой на `headMm`. */
+export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM) {
   let free = Infinity;
-  for (const solid of solids) free = Math.min(free, volumeGap(solid, x, y));
+  for (const solid of solids) {
+    if (!volumeSolidBlocks(solid, headMm)) continue;
+    free = Math.min(free, volumeGap(solid, x, y));
+  }
   return free;
+}
+
+/**
+ * Можно ли здесь встать (G234).
+ *
+ * Заказчик назвал случай прямо: человек отпустил Control под потолком в
+ * 1200 мм. Ответ — **он не встаёт и остаётся присевшим**: протолкнуть макушку
+ * сквозь низ шкафа значило бы пустить человека сквозь вещь, а вытолкнуть его в
+ * сторону — переставить его туда, куда он не шёл. Он встанет сам, как только
+ * выйдет из-под низкого места; окно говорит об этом словом.
+ *
+ * Считается **только по тем препятствиям, которые мешают именно вставанию**:
+ * которые держат стоя и не держат сейчас. Стену, которая держит в любой стойке,
+ * спрашивать нельзя не ради скорости: прижатый к ней человек стоит ровно в
+ * `VOLUME_BODY_MM` от её грани, и сравнение «на волос ближе или на волос
+ * дальше» в double запрещало бы ему вставать у стенки через раз.
+ */
+export function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM) {
+  for (const solid of (scene && scene.solids) || []) {
+    if (volumeSolidBlocks(solid, headMm)) continue;
+    if (!volumeSolidBlocks(solid, VOLUME_HEAD_MM)) continue;
+    if (volumeGap(solid, at.x, at.y) < VOLUME_BODY_MM) return false;
+  }
+  return true;
 }
 
 /**
@@ -2126,12 +2280,15 @@ export function volumeStart(scene) {
  * не останавливается, уткнувшись. Четыре прохода держат угол, где давят сразу
  * две стены.
  */
-export function volumePush(solids, at, radius) {
+export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
   let x = at.x;
   let y = at.y;
   for (let pass = 0; pass < VOLUME_PUSH_PASSES; pass += 1) {
     let moved = false;
     for (const solid of solids) {
+      // Присевший проходит под высоким (G234): препятствие, которое кончается
+      // ниже его макушки, тела не касается вовсе.
+      if (!volumeSolidBlocks(solid, headMm)) continue;
       const dx = x - solid.cx;
       const dy = y - solid.cy;
       const along = dx * solid.ux + dy * solid.uy;
@@ -2165,15 +2322,110 @@ export function volumePush(solids, at, radius) {
  * десятую долю секунды — это 480 мм, а перегородка бывает в 50 мм: без дробления
  * сквозь неё проходили бы при любом подвисании вкладки.
  */
-export function volumeStep(scene, at, dx, dy) {
+export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
   const solids = scene.solids || [];
   const length = Math.hypot(dx, dy);
   const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
   let point = { x: at.x, y: at.y };
   for (let index = 0; index < parts; index += 1) {
-    point = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM);
+    point = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
   }
   return point;
+}
+
+// ——— стойка (G234, таск 159) ————————————————————————————————————————————
+//
+// Присед и прыжок — **чистый счёт**, вынесенный сюда целиком: это одна третья
+// координата человека, и в обработчике клавиши её не проверить ничем. Поле
+// зовёт отсюда четыре функции и не считает сам ни миллиметра.
+//
+// Стойка — `{crouchMm, liftMm, speedMm}`: насколько присел, насколько оторвался
+// от пола и с какой скоростью идёт вверх. В объект из этого не попадает ничего
+// (G68) — она живёт в сеансе поверхности, как открытые двери.
+
+/** Стойка, с которой встают на пол: в полный рост и на земле. */
+export function volumeStanceStart() {
+  return { crouchMm: 0, liftMm: 0, speedMm: 0 };
+}
+
+/** Высота глаз в этой стойке: присед опускает, прыжок поднимает. */
+export function volumeStanceEye(stance) {
+  return VOLUME_EYE_MM - stance.crouchMm + stance.liftMm;
+}
+
+/**
+ * Макушка в этой стойке — она и решает, где человек пройдёт.
+ *
+ * **Прыжок макушку не поднимает**, и это решение, а не недосмотр: стоять на
+ * вещах в объёме нельзя (пола над полом в сцене нет), и пусти прыжок сквозь
+ * низкое препятствие — человек приземлился бы внутри шкафа. Прыжок поднимает
+ * глаза, то есть позволяет заглянуть за перегородку; проходимость он не
+ * меняет — «сквозь стены нельзя, прыгнув тоже».
+ */
+export function volumeStanceHead(stance) {
+  return VOLUME_HEAD_MM - stance.crouchMm;
+}
+
+/** В воздухе ли человек: прыжок идёт, пока он не вернулся на пол. */
+export function volumeStanceAir(stance) {
+  return stance.liftMm > 0 || stance.speedMm > 0;
+}
+
+/**
+ * Нужен ли стойке ещё один тик. Часы в объёме идут, только пока их держат
+ * (клавиша, палец на площадке), и прыжок с приседом — третий повод: иначе
+ * прыжок замер бы в воздухе у того, кто прыгнул, не идя.
+ *
+ * Присед, которому **не дали встать**, поводом не считается: он уже стоит на
+ * своих 550 мм, и ждать от него нечего — встанет он на том же тике, которым
+ * выйдет из-под низкого места.
+ */
+export function volumeStanceBusy(stance, crouch) {
+  if (volumeStanceAir(stance)) return true;
+  return stance.crouchMm !== (crouch ? VOLUME_CROUCH_MM : 0);
+}
+
+/**
+ * Прыжок (G234). Разовый: пока человек в воздухе, второго не бывает.
+ *
+ * **Присев, не прыгают.** Это не придирка к игровым привычкам: присед —
+ * единственный способ оказаться там, где над головой низко, и прыжок оттуда
+ * ударил бы макушкой в то, под что человек только что пролез.
+ */
+export function volumeStanceJump(stance) {
+  if (stance.crouchMm > 0 || volumeStanceAir(stance)) return stance;
+  return { ...stance, speedMm: VOLUME_JUMP_MM_S };
+}
+
+/**
+ * Шаг стойки за `seconds` секунд: присед едет к цели, прыжок летит по дуге.
+ *
+ * `crouch` — держат ли Control (или человек застрял под низким и ещё не
+ * встал), `canStand` — есть ли над ним место, чтобы выпрямиться. Отказ в
+ * подъёме честный: присед **остаётся**, стойка не меняется ни на миллиметр, и
+ * сквозь низ шкафа никто не проходит.
+ */
+export function volumeStanceStep(stance, seconds, options = {}) {
+  const span = Math.max(0, Number(seconds) || 0);
+  const crouch = Boolean(options.crouch);
+  const canStand = options.canStand !== false;
+  const target = crouch ? VOLUME_CROUCH_MM : 0;
+  let crouchMm = stance.crouchMm;
+  if (target > crouchMm) crouchMm = Math.min(target, crouchMm + VOLUME_CROUCH_MM_S * span);
+  else if (target < crouchMm && canStand) crouchMm = Math.max(target, crouchMm - VOLUME_CROUCH_MM_S * span);
+  let liftMm = stance.liftMm;
+  let speedMm = stance.speedMm;
+  if (volumeStanceAir(stance)) {
+    speedMm -= VOLUME_FALL_MM_S2 * span;
+    liftMm += speedMm * span;
+    // Приземлились: ниже пола не бывает, и скорость гасится здесь же — иначе
+    // следующий тик утащил бы человека под пол.
+    if (liftMm <= 0) {
+      liftMm = 0;
+      speedMm = 0;
+    }
+  }
+  return { crouchMm, liftMm, speedMm };
 }
 
 /**
@@ -2217,7 +2469,7 @@ export function volumeFloorAt(camera, box, x, y) {
  * оказывался снаружи дома. Шаг внутрь даёт выталкиванию сторону, и выходит
  * обещанное: человек у внутренней грани наружной стены.
  */
-export function volumeMoveTo(scene, at) {
+export function volumeMoveTo(scene, at, headMm = VOLUME_HEAD_MM) {
   const bounds = scene && scene.boundsMm;
   const inside = (value, min, max) => {
     const from = min + VOLUME_BODY_MM;
@@ -2228,7 +2480,7 @@ export function volumeMoveTo(scene, at) {
   const point = bounds
     ? { x: inside(at.x, bounds.minX, bounds.maxX), y: inside(at.y, bounds.minY, bounds.maxY) }
     : { x: at.x, y: at.y };
-  return volumePush((scene && scene.solids) || [], point, VOLUME_BODY_MM);
+  return volumePush((scene && scene.solids) || [], point, VOLUME_BODY_MM, headMm);
 }
 
 /**
