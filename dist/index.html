@@ -3741,6 +3741,41 @@
   background: linear-gradient(to bottom, #fff 0 4px, transparent 4px 7px, #fff 7px 11px);
 }
 
+/* ——— подсказка плашкой (G218, таск 152) ————————————————————————————————
+
+   «подсказку по управлению сделай в виде как на схеме — кнопочка справа
+   сверху, которую закрывать можно».
+
+   Плашка — та же, что над планом: класс `.canvas-hint` со всеми своими мерами,
+   рамкой, подложкой, кнопкой и точкой на ней (`panels/canvas.css`). Здесь
+   только то, чем окно отличается от холста, и ничего больше — второй плашки в
+   сборке нет.
+
+   **Справа сверху** — слово заказчика. «Снимок», «Вся схема» и полный экран
+   стоят в том же углу, но **строкой выше, в шапке окна**, а не в поле: плашка
+   живёт внутри кадра и с ними не спорит ни в обычном окне, ни в полном экране,
+   где шапка разворачивается вместе со всей карточкой.
+
+   **Толстая кромка справа**, а не слева: у холста она отмечает край, от
+   которого подсказка растёт, и здесь этот край другой.
+
+   **Кликов плашка не берёт**, кроме самой кнопки (у неё `pointer-events: auto`
+   в общих стилях): под ней комната, и вещь в правом верхнем углу кадра обязана
+   выделяться сквозь неё — так же, как метка ставится сквозь подсказку плана.
+
+   Двойной класс в селекторе — не украшение: он поднимает вес правила над
+   `.canvas-hint`, и порядок склейки стилей сборщиком на него не влияет. */
+.canvas-hint.canvas-hint--volume {
+  left: auto;
+  right: 12px;
+  top: 12px;
+  max-width: min(440px, calc(100% - 24px));
+  border-left-width: 1px;
+  border-right-width: 4px;
+  pointer-events: none;
+  z-index: 3;
+}
+
 /* ——— мастерская чертежа ————————————————————————————————————————————————
 
    Заказчик: «Само окно делаем побольше, что бы удобнее было». Насколько —
@@ -6559,6 +6594,12 @@ const strings = {
     unplacedNoSize: "у типа не заданы размеры",
     unplacedNoPlace: "нет ни высоты, ни потолка над меткой",
     unplacedNoPoint: "нет места на плане",
+    // Нарисованные запасным габаритом (G215). Это не потеря, а догадка: вещь в
+    // сцене есть, но её размер сборка взяла сама — у изображения объекта или у
+    // обычной рамки. Молчать нельзя (человек решит, что числа заданы), и писать
+    // их в справочник тоже (решит, что задал сам), — поэтому строка.
+    spare: "Нарисованы запасным габаритом: {count} — {list}. Размеры у типа не заданы: взят габарит изображения объекта, а без изображения — рамка {side} × {side} × {depth} мм. Задайте размеры у типа — вещь встанет своей.",
+    spareMore: "и ещё {count}",
     // Объект без чертежа. Открывать окно всё равно надо: человек нажал кнопку,
     // и молчаливо не открывшееся окно он сочтёт поломкой.
     empty: "На этой схеме нет чертежа — показывать нечего. Нарисуйте стены в мастерской чертежа, и комната появится здесь.",
@@ -6584,9 +6625,24 @@ const strings = {
     // вправе знать, чего не хватает объекту, а не сборке.
     stairNoFloors: "Рядом лестница, но перейти некуда: ни у одной другой схемы с чертежом не задан этаж. Поле «Этаж этой схемы» — в мастерской чертежа.",
     stairArrived: "Этаж {floor}: вы вышли у лестницы",
+    // Возврат с этажа, где лестницы нет вовсе (G216). Тупик, названный в таске
+    // 149: подняться туда можно, а кнопка «Этаж» живёт рядом с лестницей — и её
+    // там нет. Лестницы ему не выдумывают: возврат идёт по той, по которой
+    // поднялись, и ставит человека туда, откуда он ушёл.
+    //
+    // Название в винительном падеже — одно на кнопку и на уведомление:
+    // «вернуться на этаж 1», «вернуться на схему „План“».
+    floorNumber: "этаж {floor}",
+    floorNamed: "схему «{name}»",
+    backButton: "Вернуться на {where}",
+    backButtonHint: "Вернуться туда, откуда вы сюда поднялись (Enter)",
+    backLine: "Лестницы на этой схеме не нарисовано: кнопка внизу поля вернёт туда, откуда вы пришли.",
+    backArrived: "Вы вернулись на {where} — туда, откуда ушли",
     // Лестницы на новом этаже нет — об этом говорится прямо: человек встал в
     // том же месте плана, и это единственное честное место из возможных.
-    stairArrivedPlain: "Этаж {floor}: лестницы на нём не нарисовано — вы встали в том же месте плана",
+    // Лестницы на новом этаже нет — здесь и был тупик (G216). Про выход из
+    // него говорится ровно там, где человек об него спотыкается.
+    stairArrivedPlain: "Этаж {floor}: лестницы на нём не нарисовано — вы встали в том же месте плана. Вернуться — кнопкой внизу поля",
     // Снимок вида (таск 149). Слова заказчика: «просто возможность сделать
     // „скрин“» — текущий кадр, без подписи и рамки.
     shot: "Снимок",
@@ -43472,9 +43528,7 @@ function volumeFloors(project, schemeId) {
     if (scheme.id === schemeId) continue;
     const floor = schemeFloorOf(project, scheme.id);
     if (floor === null) continue;
-    const drawn =
-      wallsOnScheme(project, scheme.id).length > 0 || schemeObjectsOnScheme(project, scheme.id).length > 0;
-    if (!drawn) continue;
+    if (!volumeDrawn(project, scheme.id)) continue;
     options.push({
       schemeId: scheme.id,
       name: scheme.name,
@@ -43484,6 +43538,12 @@ function volumeFloors(project, schemeId) {
   }
   options.sort((a, b) => a.floor - b.floor);
   return { floor: schemeFloorOf(project, schemeId), options };
+}
+
+/** Есть ли в схеме чертёж: без стен и объектов объёму показывать нечего. */
+function volumeDrawn(project, schemeId) {
+  if (!project || !schemeId) return false;
+  return wallsOnScheme(project, schemeId).length > 0 || schemeObjectsOnScheme(project, schemeId).length > 0;
 }
 
 // ——— метки ———————————————————————————————————————————————————————————————
@@ -43507,10 +43567,17 @@ function volumeFloors(project, schemeId) {
 //      лежит вне контуров) → вешать не на что, и вещь **не размещается**:
 //      уходит списком «не размещённые». Слова заказчика прямые: выдумывать им
 //      место нельзя, но и молча терять нельзя.
-//   5. Размеров нет вовсе → рисовать нечем, и это тот же список. Такое бывает
+//   5. Размеров нет вовсе → вещь рисуется **запасным габаритом** (G215,
+//      `VOLUME_MARK_SPARE_MM`) и попадает в сцену, а не в список. Такое бывает
 //      у типа, заведённого руками: в стартовом справочнике размеры есть у всех
 //      (G192), а «Мастер-выключатель» из объекта заказчика — его собственный
-//      тип, и размеров у него нет ни одного.
+//      тип, и размеров у него нет ни одного. Габарит при этом догадка, и окно
+//      говорит об этом списком `spare`: потерять вещь нельзя, но и выдать
+//      догадку за чертёж тоже.
+//
+//      Запас включается только там, где **нет ни длины, ни ширины**: вещь, у
+//      которой хоть одно число записано рукой, рисуется ровно как сегодня, и
+//      ни один готовый объект от этого не меняется.
 //
 // **Плашка комментария в объёме не участвует вовсе** — ни вещью, ни строкой
 // списка: это надпись на чертеже, а не изделие (то же правило, что у развёртки,
@@ -43543,6 +43610,62 @@ const VOLUME_MARK_LIFT_MM = 2;
  * же пара точек экрана, что и десять, но грань у них настоящая.
  */
 const VOLUME_MARK_MIN_MM = 20;
+
+/**
+ * **Запасной габарит** вещи, у которой размеров нет ни одного (G215).
+ *
+ * Дыра была такая: `fillTypeSizes` (G192) подтягивает умолчания по коду и по
+ * форме знака, но у типа, заведённого рукой с незнакомой формой, донора нет
+ * вовсе — и вещь уходила списком «не размещены». То есть выпадала из объёма не
+ * из-за данных, а из-за правила, и человек об этом узнавал только строчкой под
+ * полем, которую мог и не прочесть.
+ *
+ * **Откуда числа.** Первый ответ уже написан в развёртке: `elevationMarkBox`
+ * при пустом размере берёт габарит **изображения объекта** (`view.mm`), и дыры
+ * у неё поэтому нет. Изображения разобраны по формам знаков, и «Мастер-
+ * выключатель» заказчика с формой `circle-rays` попадает в светильник
+ * (`objectViews/light.js`, 90 × 90) — запас честный и из того же реестра,
+ * которым объём уже рисует лица вещей. Так что здесь не заводится второго
+ * правила: берётся то же.
+ *
+ * Изображения нет совсем — остаётся общий запас, и он тоже не выдуман:
+ * **80 × 80 × 10 мм** стоит в самом стартовом справочнике у выключателя «В» и
+ * розетки «Р» (`TEMPLATE_TYPES`), то есть это обычная рамка, которой в квартире
+ * больше всего.
+ *
+ * **Выступ** у плоского изображения взять негде — его нет ни у одной записи
+ * реестра, они двумерные. Поэтому выступ и общему запасу, и запасу по
+ * изображению даётся один: те же 10 мм рамки из справочника. Двух миллиметров
+ * (`VOLUME_MARK_LIFT_MM`, с которыми вещь без выступа рисуется сегодня) здесь
+ * мало: вещь, у которой и размеры запасные, под потолком стала бы плёнкой.
+ *
+ * **В справочник не пишется ничего** (G68): запас живёт в сцене, на время
+ * рисования. Иначе человек увидел бы у своего типа чужие числа и решил, что
+ * сам их задал, — а они догадка сборки, и сказать о ней надо словом
+ * (`spare` в `volumeMarks`), а не записью в объект.
+ */
+const VOLUME_MARK_SPARE_MM = 80;
+const VOLUME_MARK_SPARE_DEPTH_MM = 10;
+
+/**
+ * Запасной габарит по изображению объекта или общий. `view` — изображение вещи
+ * (`volumeMarkView`), `null` — такого нет.
+ *
+ * Чистая и вынесена наружу: откуда у вещи взялся габарит — это правило, и
+ * проверяться оно обязано тестом, а не глазами на кадре.
+ */
+function volumeSpareBox(view) {
+  const mm = view && view.mm ? view.mm : null;
+  if (mm && Number(mm.width) > 0 && Number(mm.height) > 0) {
+    return { lengthMm: Number(mm.width), widthMm: Number(mm.height), depthMm: VOLUME_MARK_SPARE_DEPTH_MM, from: view.name || "view" };
+  }
+  return {
+    lengthMm: VOLUME_MARK_SPARE_MM,
+    widthMm: VOLUME_MARK_SPARE_MM,
+    depthMm: VOLUME_MARK_SPARE_DEPTH_MM,
+    from: null,
+  };
+}
 
 /** Как вещь поставлена: на стене, в воздухе на своей высоте, под потолком. */
 const VOLUME_MARK_WALL = "wall";
@@ -43656,14 +43779,23 @@ function volumeMarkPlacement(project, mark, rooms = []) {
   const path = volumeMarkPathMm(project, mark);
   if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
   const sizes = markSizes(project, mark);
-  if (!(sizes.length > 0) && !(sizes.width > 0)) return { markId: mark.id, skip: VOLUME_MARK_NO_SIZE };
-  const lengthMm = Math.max(VOLUME_MARK_MIN_MM, sizes.length || 0);
-  const widthMm = Math.max(VOLUME_MARK_MIN_MM, sizes.width || 0);
+  const markView = volumeMarkView(project, mark);
+  // Размеров нет ни одного — вещь рисуется запасным габаритом (G215). Строки
+  // `VOLUME_MARK_NO_SIZE` в списке неразмещённых после этого не бывает вовсе,
+  // но код остаётся: окно знает его, и объект прежнего формата в середине
+  // пересборки не должен спорить с новым правилом.
+  const spare = !(sizes.length > 0) && !(sizes.width > 0) ? volumeSpareBox(markView) : null;
+  const lengthMm = Math.max(VOLUME_MARK_MIN_MM, (spare ? spare.lengthMm : sizes.length) || 0);
+  const widthMm = Math.max(VOLUME_MARK_MIN_MM, (spare ? spare.widthMm : sizes.width) || 0);
   // Выступ **не подтягивается до самой мелкой стороны**: это измерение, по
   // которому ничего не выделяют, и округли его до двадцати — плоская панель
   // стала бы вдвое толще себя. Хватает двух миллиметров: тело перестаёт быть
   // вырожденным, а у встроенного светильника выступ и правда нулевой.
-  const depthMm = Math.max(VOLUME_MARK_LIFT_MM, Math.abs(sizes.depth || 0));
+  //
+  // Запасной выступ берётся только вместе с запасным габаритом и только там,
+  // где своего нет: записанный ноль — это ноль («встроенный»), а не пустота.
+  const depthOwn = spare && sizes.depth === null ? spare.depthMm : sizes.depth;
+  const depthMm = Math.max(VOLUME_MARK_LIFT_MM, Math.abs(depthOwn || 0));
   const recessed = Number(sizes.depth) < 0;
   const line = mark.kind === "line" && path.length >= 2;
   const style = styleOf(project, mark.typeId);
@@ -43675,7 +43807,11 @@ function volumeMarkPlacement(project, mark, rooms = []) {
     rgb,
     bodyRgb: volumeTint(rgb),
     kind: line ? "line" : "point",
-    view: line ? null : volumeMarkView(project, mark),
+    view: line ? null : markView,
+    // Габарит — догадка сборки, а не чертёж: окно обязано сказать об этом
+    // словом (`volumeMarks().spare`). Откуда именно взят запас, здесь не
+    // хранится: это правило `volumeSpareBox`, и спрашивают его у неё.
+    spare: Boolean(spare),
   };
   const heightMm = sizes.heightAboveFloor;
   const binding = markWall(mark);
@@ -43764,16 +43900,22 @@ function volumeMarkPlacement(project, mark, rooms = []) {
 }
 
 /**
- * Все метки схемы: размещённые и список тех, кому места не нашлось.
+ * Все метки схемы: размещённые, список тех, кому места не нашлось, и список
+ * нарисованных запасным габаритом (G215).
  *
  * `marks` — что считать: окно отдаёт сюда видимые на плане, чтобы фильтр значил
- * в двух видах одно и то же. Порядок сохраняется — список неразмещённых
- * читается в том же порядке, что таблица меток.
+ * в двух видах одно и то же. Порядок сохраняется — списки читаются в том же
+ * порядке, что таблица меток.
+ *
+ * Запасной габарит — не потеря, а догадка: вещь в сцене есть, но её размер
+ * сборка выдумала. Поэтому `spare` отдельным списком, а не причиной в
+ * `unplaced`: это разные новости, и смешивать их нельзя.
  */
 function volumeMarks(project, schemeId, { marks, rooms } = {}) {
   const list = marks || (project ? project.marks.filter((mark) => mark.schemeId === schemeId) : []);
   const placed = [];
   const unplaced = [];
+  const spare = [];
   for (const mark of list) {
     const place = volumeMarkPlacement(project, mark, rooms || []);
     if (!place) continue;
@@ -43782,8 +43924,9 @@ function volumeMarks(project, schemeId, { marks, rooms } = {}) {
       continue;
     }
     placed.push(place);
+    if (place.spare) spare.push({ markId: place.markId, label: place.label });
   }
-  return { placed, unplaced };
+  return { placed, unplaced, spare };
 }
 
 /** Грани тела вещи. Хозяин у каждой — сама метка: по ним и ловится клик. */
@@ -44093,6 +44236,7 @@ function volumeScene(project, schemeId, options = {}) {
       stairs: [],
       marks: [],
       unplaced: [],
+      spare: [],
     };
   }
   const rooms = volumeRooms(project, schemeId);
@@ -44205,6 +44349,9 @@ function volumeScene(project, schemeId, options = {}) {
     stairs: volumeStairs(project, schemeId),
     marks: marks.placed,
     unplaced: marks.unplaced,
+    // Нарисованные запасным габаритом (G215): вещь в сцене есть, а размер её
+    // сборка выдумала — окно называет такие вещи вслух.
+    spare: marks.spare,
   };
 }
 
@@ -45559,9 +45706,29 @@ function volumeMarkerFaces(at, yaw, out = [], radiusMm = VOLUME_MARKER_MM) {
 
 
 
+
 // Окно одно: второе показывало бы ту же сцену второй камерой и сжирало бы
 // кадры у первого. То же правило, что у мастерской.
 let volumeOpened = false;
+
+// ——— подсказка плашкой (G218) ————————————————————————————————————————————
+//
+// Слова заказчика: «подсказку по управлению сделай в виде как на схеме —
+// кнопочка справа сверху, которую закрывать можно».
+//
+// Механизм взят у холста целиком: те же классы (`canvas-hint`,
+// `canvas-hint__text`, `canvas-hint__toggle`, `is-collapsed`), та же точка на
+// кнопке при сменившемся тексте (`canvasHintUnseen`, `is-new`) и те же подписи.
+// Второго поведения не заводится — у человека одна рука на обе поверхности.
+//
+// **Настройка своя**, отдельная от холста: подсказки разные, и свернув одну, он
+// не просил сворачивать другую. Свёрнутость живёт там же, где у холста, — в
+// настройках браузера, то есть переживает закрытие окна и перезагрузку.
+const VOLUME_HINT_SETTING = "volumeHintCollapsed";
+let volumeHintCollapsed = false;
+// Текст, который человек видел последним развёрнутым. Модульная, а не оконная:
+// закрыл и открыл окно — подсказка та же, и мигать точкой ей незачем.
+let volumeHintSeen = null;
 
 /** Клавиша → куда шагаем: вперёд/назад и в сторону, в осях камеры. */
 function volumeKeyMove(code) {
@@ -45777,22 +45944,64 @@ function volumeUnplacedReason(reason) {
 function volumeUnplacedLine(unplaced) {
   const list = unplaced || [];
   if (list.length === 0) return "";
-  const named = list
-    .slice(0, VOLUME_UNPLACED_SHOWN)
-    .map((item) => text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) }));
-  if (list.length > VOLUME_UNPLACED_SHOWN) {
-    named.push(text("volume.unplacedMore", { count: list.length - VOLUME_UNPLACED_SHOWN }));
-  }
-  return text("volume.unplaced", { count: list.length, list: named.join(", ") });
+  return text("volume.unplaced", { count: list.length, list: volumeNamedList(list, unplacedName, "volume.unplacedMore") });
 }
 
 /** Все неразмещённые по обозначениям — в подсказку строки, когда их много. */
 function volumeUnplacedTitle(unplaced) {
   const list = unplaced || [];
   if (list.length <= VOLUME_UNPLACED_SHOWN) return "";
-  return list
-    .map((item) => text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) }))
-    .join(", ");
+  return list.map(unplacedName).join(", ");
+}
+
+/** Одна неразмещённая вещь: обозначение и причина. */
+function unplacedName(item) {
+  return text("volume.unplacedItem", { label: item.label, reason: volumeUnplacedReason(item.reason) });
+}
+
+/**
+ * Перечень, который не выталкивает поле за край окна: названо
+ * `VOLUME_UNPLACED_SHOWN`, дальше «и ещё N», а полный список уходит в подсказку
+ * строки. Одна мера на оба списка — и неразмещённых, и нарисованных запасным
+ * габаритом: это одна и та же строка под полем, и обрываться она обязана
+ * одинаково.
+ */
+function volumeNamedList(list, name, moreKey) {
+  const named = list.slice(0, VOLUME_UNPLACED_SHOWN).map(name);
+  if (list.length > VOLUME_UNPLACED_SHOWN) {
+    named.push(text(moreKey, { count: list.length - VOLUME_UNPLACED_SHOWN }));
+  }
+  return named.join(", ");
+}
+
+/**
+ * Строка «нарисованы запасным габаритом» (G215).
+ *
+ * Вещь, у типа которой нет ни одного размера, в объём теперь попадает — но её
+ * габарит сборка **выдумала** (`volumeSpareBox`: габарит изображения объекта, а
+ * без изображения — обычная рамка). Молчать об этом нельзя: человек решит, что
+ * числа заданы, и будет размечать щит по догадке. Писать догадку в справочник
+ * тоже нельзя (G68) — остаётся сказать словом, той же строкой под полем, где
+ * живут неразмещённые.
+ *
+ * Чистая и вынесена наружу по той же причине, что `volumeUnplacedLine`.
+ */
+function volumeSpareLine(spare) {
+  const list = spare || [];
+  if (list.length === 0) return "";
+  return text("volume.spare", {
+    count: list.length,
+    list: volumeNamedList(list, (item) => item.label, "volume.spareMore"),
+    side: VOLUME_MARK_SPARE_MM,
+    depth: VOLUME_MARK_SPARE_DEPTH_MM,
+  });
+}
+
+/** Все нарисованные запасным габаритом — в подсказку строки, когда их много. */
+function volumeSpareTitle(spare) {
+  const list = spare || [];
+  if (list.length <= VOLUME_UNPLACED_SHOWN) return "";
+  return list.map((item) => item.label).join(", ");
 }
 
 /**
@@ -45814,16 +46023,108 @@ function volumeDoorLine(doors, open, aimed, touching) {
 }
 
 /**
- * Строка про лестницу под рукой (таск 149).
+ * Текст подсказки окна (G218) — весь, одной строкой.
  *
- * Пусто — лестницы рядом нет. Есть, но этажей не задано — об этом говорится
- * прямо: человек видит нарисованную лестницу, и молчание он прочтёт как
- * поломку, а не как «поле не заполнено».
+ * Собирается из того же, из чего собирался в строке под полем: вид говорит про
+ * свои клавиши, мышь — про захват, палец — про площадку и щипок, дальше про
+ * выделение, прицел, двери и лестницу под рукой. Переезд в плашку ничего из
+ * этого не отменил.
+ *
+ * Чистая и вынесена наружу: текст, собранный внутри обработчика, не проверяет
+ * ничто, а подсказка — единственное место, где в окне написано, что делают
+ * клавиши.
  */
-function volumeStairLine(near, options) {
-  if (!near) return "";
-  if (!options || options.length === 0) return strings.volume.stairNoFloors;
-  return strings.volume.stairNear;
+function volumeHintText(state) {
+  if (state.empty) return strings.volume.emptyHint;
+  const parts = [state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
+  // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
+  if (state.touching) parts.push(strings.volume.hintTouch);
+  else parts.push(state.locked ? strings.volume.hintLocked : strings.volume.hintGrab);
+  parts.push(strings.volume.pickHint);
+  // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
+  if (state.aim) parts.push(strings.volume.aimHint);
+  parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
+  // Про этажи — последней: лестница под рукой есть далеко не всегда, а когда
+  // есть, это самое новое в строке. Там же и возврат (G216).
+  parts.push(volumeFloorAction(state.stair, state.floors, state.back).hint);
+  return parts.filter((part) => part !== "").join(" ");
+}
+
+/**
+ * Как назвать схему, на которую зовёт возврат: этажом, если он задан, иначе
+ * именем. Винительный падеж один на кнопку и на уведомление — «вернуться на
+ * этаж 1», «вернуться на схему „План“».
+ */
+function volumeFloorName(where) {
+  if (!where) return "";
+  return where.floor === null || where.floor === undefined
+    ? text("volume.floorNamed", { name: where.name })
+    : text("volume.floorNumber", { floor: where.floor });
+}
+
+/**
+ * Что окно предлагает сделать с этажами: подняться по лестнице под рукой или
+ * вернуться туда, откуда пришёл (G216).
+ *
+ * **Один ответ на кнопку и на подсказку.** Раньше кнопка и строка считались
+ * врозь, и разойтись они могли молча; теперь это одно правило, и проверяется
+ * оно тестом.
+ *
+ * Разбор:
+ *
+ *   - **лестница под рукой** — её вопрос, как в таске 149; этажей не задано ни
+ *     у одной схемы — кнопки нет, но строка об этом говорит прямо: человек
+ *     видит нарисованную лестницу, и молчание он прочтёт как поломку;
+ *   - **лестницы нет, а пришли мы сюда переходом** — возврат. Это и есть
+ *     тупик, который назвал исполнитель таска 149: подняться на этаж, где
+ *     лестница не нарисована, можно, а вернуться было нечем — кнопка живёт
+ *     рядом с лестницей, а её там нет. Лестницы ему не выдумывают: возврат идёт
+ *     по той же, по которой поднялись;
+ *   - **ни того, ни другого** — молчание: предлагать нечего.
+ *
+ * Возврат не привязан ни к месту, ни к виду, и это нарочно. Кнопка «Этаж»
+ * живёт рядом с лестницей, потому что лестница — вещь на чертеже, к ней
+ * подходят. У возврата вещи нет: он про дорогу, по которой пришли. Привяжи его
+ * к точке прихода — и человек, отошедший на три шага, снова в тупике, ровно в
+ * том, который чинят.
+ */
+function volumeFloorAction(stair, options, back) {
+  if (stair) {
+    if (!options || options.length === 0) {
+      return { kind: "none", label: "", title: "", hint: strings.volume.stairNoFloors };
+    }
+    return {
+      kind: "stair",
+      label: strings.volume.stairButton,
+      title: strings.volume.stairButtonHint,
+      hint: strings.volume.stairNear,
+    };
+  }
+  if (back) {
+    return {
+      kind: "back",
+      label: text("volume.backButton", { where: volumeFloorName(back) }),
+      title: strings.volume.backButtonHint,
+      hint: strings.volume.backLine,
+    };
+  }
+  return { kind: "none", label: "", title: "", hint: "" };
+}
+
+/**
+ * Клавиатура принадлежит полю ввода, а не окну.
+ *
+ * Правило то же, что у диалогов (`uiDialogDepth`): у кого фокус, того и
+ * клавиши. Своих полей у окна сейчас нет — его клавиши ловятся на `document` и
+ * держатся глубиной диалога. Но объём переезжает на главный экран рядом с
+ * панелями, где полей вдоволь: без этой проверки «W» в имени помещения увёл бы
+ * человека на шаг вперёд.
+ */
+function volumeTypingTarget(node) {
+  if (!node || !node.tagName) return false;
+  if (node.isContentEditable === true) return true;
+  const tag = String(node.tagName).toLowerCase();
+  return tag === "select" || tag === "input" || tag === "textarea";
 }
 
 /** Заголовок окна: с номером этажа, если он у схемы задан. */
@@ -45902,6 +46203,9 @@ function openVolume({ schemeId: openOn, api }) {
   // отошёл и подошёл снова — спросится опять.
   let ask = null;
   let stairAsked = null;
+  // Откуда пришли на нынешнюю схему (G216). Живёт в сеансе окна, в объект не
+  // пишется ничего (G68); закрыли окно — дорога забыта, и это честно.
+  let cameFrom = null;
   // Вопрос отпускает мышь: по курсору в нём и щёлкают. Был захват — вернём.
   let askWasLocked = false;
   // Последний кадр — он же ответ на «во что ткнули»: клик ищет метку в том, что
@@ -45915,6 +46219,21 @@ function openVolume({ schemeId: openOn, api }) {
   // Человек: место на плане, рысканье и наклон. Высота глаз постоянная —
   // приседать и прыгать в этом режиме незачем.
   const person = { x: start.x, y: start.y, yaw: start.yaw, pitch: (VOLUME_START_PITCH_DEG * Math.PI) / 180 };
+  /**
+   * Где человек стоял на схемах, которые уже покидал (G216, G217).
+   *
+   * Дыра, названная исполнителем таска 149: поднялся на этаж, где лестница не
+   * нарисована, — и вернуться нечем, кнопка «Этаж» живёт только рядом с
+   * лестницей. Выбор схемы в шапке (G217) этот тупик закрывает сам, а память
+   * делает выбор **возвратом**, а не переброской: человек встаёт там, откуда
+   * ушёл, то есть у той же лестницы, по которой поднялся. Без неё выбор ставил
+   * бы его в самое просторное место схемы — то есть в другом конце квартиры от
+   * двери, из которой он вышел.
+   *
+   * Живёт **в сеансе окна**: в объект не пишется ничего (G68). Закрыли окно —
+   * память ушла, и это честно: заново открытый объём не помнит дороги.
+   */
+  const visited = new Map();
   // Обзор: цель, вокруг которой ходит камера, и расстояние до неё.
   let around = { target: { x: start.x, y: start.y, z: 1200 }, yaw: start.yaw, pitch: (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180, distance: VOLUME_AROUND_NEAR_MM };
 
@@ -45949,26 +46268,54 @@ function openVolume({ schemeId: openOn, api }) {
   const askText = uiEl("p", { class: "volume__askText" });
   const askRow = uiEl("div", { class: "volume__askRow" });
   const askBox = uiEl("div", { class: "volume__ask", attrs: { hidden: "hidden" } }, [askText, askRow]);
-  // Кнопка «Этаж» на поле: тот же вопрос, заданный по своей воле. Нужна и
-  // пальцем (клавиш там нет), и мышью (отказался один раз — спроси снова, не
-  // отходя от лестницы).
+  // Кнопка этажей на поле. У лестницы — тот же вопрос, заданный по своей воле:
+  // нужен и пальцем (клавиш там нет), и мышью (отказался один раз — спроси
+  // снова, не отходя от лестницы). На этаже, где лестницы нет, та же кнопка
+  // зовёт обратно (G216) — одна кнопка и одна клавиша на оба перехода между
+  // этажами, второго места для них не заводится. Подпись ставит `syncStair`:
+  // она у кнопки меняется вместе со смыслом.
   const stairButton = uiButton(strings.volume.stairButton, {
     class: "ui-btn ui-btn--accent volume__stair",
     title: strings.volume.stairButtonHint,
     attrs: { hidden: "hidden" },
-    on: { click: () => askStairs(true) },
+    on: { click: () => floorByHand() },
   });
   // Прицел (G213): «при виде от 1 лица поставь миниатюрный прицел по центру
   // экрана». Он **узел над холстом, а не рисунок по холсту** — иначе уехал бы
   // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
   // (`volume.css`), и читать его нечем — `aria-hidden`.
   const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
+  // Подсказка по управлению — плашка справа сверху поля со сворачивающей
+  // кнопкой (G218). Кнопка **справа от текста**, а не слева, как на холсте:
+  // плашка прижата к правому краю, и свёрнутая она обязана остаться в том же
+  // углу, где была её кнопка.
+  const hintText = uiEl("p", { class: "canvas-hint__text" });
+  const hintToggle = uiEl(
+    "button",
+    {
+      class: "canvas-hint__toggle",
+      type: "button",
+      on: {
+        click: () => {
+          volumeHintCollapsed = !volumeHintCollapsed;
+          setSetting(VOLUME_HINT_SETTING, volumeHintCollapsed);
+          syncHint();
+          // Клавиши возвращаются полю: свернул подсказку — идёшь дальше, а не
+          // жмёшь пробелом ту же кнопку.
+          if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
+        },
+      },
+    },
+    uiIcon("hint"),
+  );
+  const hint = uiEl("div", { class: "canvas-hint canvas-hint--volume" }, [hintText, hintToggle]);
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
     stairButton,
     padNode,
     aimNode,
+    hint,
     askBox,
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
@@ -46003,7 +46350,11 @@ function openVolume({ schemeId: openOn, api }) {
   const where = uiEl("span", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
   const missing = uiEl("p", { class: "volume__missing" });
-  const hint = uiEl("p", { class: "modal__hint" });
+  // Нарисованные запасным габаритом (G215) — своей строкой рядом с
+  // неразмещёнными: новость другая («вещь есть, но размер выдуман»), а место и
+  // цвет те же — в объекте не хватает числа, и сказать об этом надо там, где
+  // человек уже читает про недостающее.
+  const spareLine = uiEl("p", { class: "volume__missing" });
 
   const bar = uiEl("div", { class: "volume__tools" }, [
     uiEl("span", { class: "volume__toolsLabel", text: strings.volume.view }),
@@ -46012,7 +46363,10 @@ function openVolume({ schemeId: openOn, api }) {
     where,
     uiEl("span", { class: "volume__spacer" }, [doorsButton, shotButton, fitButton, fullButton]),
   ]);
-  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, hint]);
+  // Подсказки под полем больше нет: она переехала плашкой в само поле (G218).
+  // Под полем остаётся то, что говорит про объект, а не про управление, — счёт
+  // чертежа, недостающее и запасные габариты.
+  const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, spareLine]);
 
   const closeButton = uiButton(strings.volume.close, {
     class: "ui-btn ui-btn--accent",
@@ -46745,9 +47099,47 @@ function openVolume({ schemeId: openOn, api }) {
 
   /** Кнопка «Этаж» и строка подсказки — по тому, стоим ли мы у лестницы. */
   function syncStair() {
-    const stair = stairHere();
-    stairButton.hidden = !stair || Boolean(ask) || floorOptions().length === 0;
+    const action = floorAction();
+    stairButton.hidden = action.kind === "none" || Boolean(ask);
+    if (!stairButton.hidden) {
+      stairButton.textContent = action.label;
+      stairButton.title = action.title;
+    }
     syncHint();
+  }
+
+  /** Что сейчас делает кнопка этажей и о чём говорит подсказка. */
+  function floorAction() {
+    return volumeFloorAction(stairHere(), floorOptions(), backFloor());
+  }
+
+  /**
+   * Куда зовёт возврат (G216) — или `null`, если звать некуда.
+   *
+   * Условий два, и оба обязательны: мы **пришли сюда переходом** (окно помнит
+   * дорогу, пока открыто) и **лестницы на этой схеме нет ни одной**. Есть
+   * лестница — ею и пользуются, правило таска 149 не трогается вовсе.
+   *
+   * Схему, с которой пришли, могли удалить под окном — тогда возврата нет: имя
+   * и этаж спрашиваются у объекта каждый раз, а не запоминаются вместе с
+   * дорогой.
+   */
+  function backFloor() {
+    if (!cameFrom) return null;
+    if ((scene.stairs || []).length > 0) return null;
+    const project = getState().project;
+    const found = findScheme(project, cameFrom.schemeId);
+    if (!found) return null;
+    return { schemeId: found.id, name: found.name, floor: schemeFloorOf(project, found.id) };
+  }
+
+  /** Кнопка этажей и Enter: у лестницы — вопрос, без неё — возврат. */
+  function floorByHand() {
+    if (stairHere()) {
+      askStairs(true);
+      return;
+    }
+    goBackFloor();
   }
 
   /**
@@ -46762,7 +47154,7 @@ function openVolume({ schemeId: openOn, api }) {
     }
     const options = floorOptions();
     if (options.length === 0) {
-      // Строка под полем про это уже говорит (`volumeStairLine`) — вопроса без
+      // Подсказка про это уже говорит (`volumeFloorAction`) — вопроса без
       // ответов не задаём.
       if (byHand) notify(strings.volume.stairNoFloors, "info");
       return;
@@ -46827,6 +47219,11 @@ function openVolume({ schemeId: openOn, api }) {
     closeAsk();
     const state = getState();
     if (!findScheme(state.project, option.schemeId)) return;
+    // Где мы стояли на покидаемой схеме и откуда пришли — в память окна
+    // (G216): с этажа, где лестницы не нарисовано, человек вернётся сюда
+    // кнопкой и встанет у той же лестницы. Сам переход по лестнице память **не
+    // читает**: его правило прежнее, то же место плана (таск 149).
+    leaveScheme();
     schemeId = option.schemeId;
     scene = sceneOf(state) || scene;
     const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
@@ -46844,6 +47241,65 @@ function openVolume({ schemeId: openOn, api }) {
         : text("volume.stairArrivedPlain", { floor: option.floor }),
       "info",
     );
+  }
+
+  // ——— выбор схемы (G217) и возврат (G216) ————————————————————————————————
+  //
+  // «В окне добавь выбор схемы ещё».
+  //
+  // Это и есть выход из тупика, который назвал исполнитель таска 149: на этаж
+  // без нарисованной лестницы попасть было можно, а вернуться нечем. Выдумывать
+  // там лестницу нельзя (её нет на чертеже), заводить вторую кнопку «обратно» —
+  // значит заводить второй способ сменить схему. Выбор в шапке закрывает и то и
+  // другое: он доступен всегда и на любой схеме.
+
+  /** Запомнить, где человек стоит на нынешней схеме. */
+  function rememberPlace() {
+    visited.set(schemeId, { x: person.x, y: person.y, yaw: person.yaw, pitch: person.pitch });
+  }
+
+  /** Уходим со схемы: где стояли — в память, а сама схема — «откуда пришли». */
+  function leaveScheme() {
+    rememberPlace();
+    cameFrom = { schemeId };
+  }
+
+  /**
+   * Вернуться туда, откуда пришли (G216).
+   *
+   * **Куда встаёт человек** — туда, где стоял, когда уходил, и глядя в ту же
+   * сторону. Это и есть «возврат в точке прихода»: уходил он от лестницы, по
+   * ней и возвращается. Место проходит через `volumeMoveTo` — чертёж могли
+   * поправить, пока окно открыто, и память не должна поставить человека в новую
+   * стену.
+   *
+   * Что остаётся при человеке: открытые двери и вид. Что сбрасывается:
+   * выделение — выделенная метка осталась на прежней схеме.
+   */
+  function goBackFloor() {
+    const back = backFloor();
+    if (!back) return;
+    closeAsk();
+    const state = getState();
+    leaveScheme();
+    const place = visited.get(back.schemeId) || null;
+    schemeId = back.schemeId;
+    scene = sceneOf(state) || scene;
+    if (!scene.empty) {
+      const at = place || { x: person.x, y: person.y, yaw: person.yaw };
+      const moved = volumeMoveTo(scene, at);
+      person.x = moved.x;
+      person.y = moved.y;
+      person.yaw = at.yaw;
+      if (place) person.pitch = volumeClampPitch(place.pitch);
+      around = { ...around, target: { ...around.target, x: person.x, y: person.y }, yaw: person.yaw };
+    }
+    select(null);
+    // Вернулись мы к самой лестнице — и вопрос про этаж сам не всплывает:
+    // иначе он предложил бы тут же подняться обратно.
+    stairAsked = (stairHere() || {}).objectId || null;
+    sync();
+    notify(text("volume.backArrived", { where: volumeFloorName(back) }), "info");
   }
 
   // ——— снимок вида (таск 149) ———
@@ -46873,6 +47329,9 @@ function openVolume({ schemeId: openOn, api }) {
 
   function onKeyDown(event) {
     if (!ours()) return;
+    // Клавиши принадлежат полю ввода, пока в нём фокус: «W» в имени помещения
+    // не должно уводить человека на шаг вперёд.
+    if (volumeTypingTarget(event.target)) return;
     // Вопрос про этаж (таск 149) забирает клавиатуру себе: Enter переходит на
     // первый этаж из списка, Esc отказывается — и ни то, ни другое не доходит
     // до окна и до стопки диалогов. Иначе Esc закрыл бы весь объём, а Enter
@@ -46894,13 +47353,15 @@ function openVolume({ schemeId: openOn, api }) {
       // отвечает на вопрос, а не идёт.
       return;
     }
-    // Стоим у лестницы — Enter спрашивает про этаж (таск 149). Это та же
+    // Enter — переход между этажами (таск 149, G216): у лестницы спрашивает про
+    // этаж, на этаже без лестницы возвращает туда, откуда пришли. Это та же
     // клавиша «согласиться», которой отвечают на сам вопрос, и единственная
-    // новая в окне: E, R, V, F, W A S D, стрелки, Shift и Alt заняты.
-    if (event.key === "Enter" && stairHere()) {
+    // новая в окне: E, R, V, F, W A S D, стрелки, Shift и Alt заняты. Делает
+    // она ровно то же, что кнопка на поле, — и решает это одно правило.
+    if (event.key === "Enter" && floorAction().kind !== "none") {
       event.preventDefault();
       event.stopPropagation();
-      askStairs(true);
+      floorByHand();
       return;
     }
     // Esc при захвате отпускает мышь и окна не закрывает: человек жмёт его,
@@ -47018,23 +47479,40 @@ function openVolume({ schemeId: openOn, api }) {
     where.textContent = scene.empty || view !== "person" ? "" : volumeWhere(getState().project, scene, person);
   }
 
+  /**
+   * Подсказка плашкой (G218): текст, свёрнутость и точка на кнопке.
+   *
+   * Разворачивать её за человека нельзя — он свернул её осознанно, и она
+   * выпрыгивала бы под рукой на каждую открытую дверь. Но и молча съесть
+   * сменившийся текст нельзя: кнопка получает точку и другую подпись. Правило
+   * то же, что на холсте, и считает его та же `canvasHintUnseen`.
+   */
   function syncHint() {
-    if (scene.empty) {
-      hint.textContent = strings.volume.emptyHint;
-      return;
-    }
-    const parts = [view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
-    // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
-    if (touching) parts.push(strings.volume.hintTouch);
-    else parts.push(locked ? strings.volume.hintLocked : strings.volume.hintGrab);
-    parts.push(strings.volume.pickHint);
-    // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
-    if (!aimNode.hidden) parts.push(strings.volume.aimHint);
-    parts.push(volumeDoorLine(scene.doors, openDoors, aimedDoor || heldDoor, touching));
-    // Про лестницу — последней: она есть под рукой далеко не всегда, а когда
-    // есть, это самое новое в строке.
-    parts.push(volumeStairLine(stairHere(), floorOptions()));
-    hint.textContent = parts.filter((part) => part !== "").join(" ");
+    const value = volumeHintText({
+      empty: scene.empty,
+      view,
+      touching,
+      locked,
+      aim: !aimNode.hidden,
+      doors: scene.doors,
+      open: openDoors,
+      aimedDoor: aimedDoor || heldDoor,
+      stair: stairHere(),
+      floors: floorOptions(),
+      back: backFloor(),
+    });
+    hintText.textContent = value;
+    hint.classList.toggle("is-collapsed", volumeHintCollapsed);
+    hintText.hidden = volumeHintCollapsed;
+    // Развёрнутую подсказку человек видит — значит, этот текст прочитан.
+    if (!volumeHintCollapsed) volumeHintSeen = value;
+    const unseen = volumeHintCollapsed && canvasHintUnseen(volumeHintSeen, value);
+    hintToggle.classList.toggle("is-new", unseen);
+    let label = strings.canvas.hintCollapse;
+    if (volumeHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
+    hintToggle.title = label;
+    hintToggle.setAttribute("aria-label", label);
+    hintToggle.setAttribute("aria-expanded", volumeHintCollapsed ? "false" : "true");
   }
 
   function sync() {
@@ -47053,6 +47531,8 @@ function openVolume({ schemeId: openOn, api }) {
       meta.textContent = strings.volume.empty;
       missing.textContent = "";
       missing.hidden = true;
+      spareLine.textContent = "";
+      spareLine.hidden = true;
     } else {
       const lines = [
         text("volume.counts", {
@@ -47067,6 +47547,10 @@ function openVolume({ schemeId: openOn, api }) {
       missing.textContent = volumeUnplacedLine(scene.unplaced);
       missing.title = volumeUnplacedTitle(scene.unplaced);
       missing.hidden = scene.unplaced.length === 0;
+      const spare = scene.spare || [];
+      spareLine.textContent = volumeSpareLine(spare);
+      spareLine.title = volumeSpareTitle(spare);
+      spareLine.hidden = spare.length === 0;
     }
     syncWhere();
     syncStair();
@@ -47142,6 +47626,18 @@ function openVolume({ schemeId: openOn, api }) {
   resize();
   if (!scene.empty) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
+  // Свёрнутость подсказки читается из настроек асинхронно — как на холсте:
+  // плашка стартует развёрнутой и схлопывается, когда хранилище ответит.
+  // То, что человек успел увидеть до ответа, прочитанным не считается: он на
+  // подсказку не смотрел, она мигнула сама.
+  Promise.resolve(getSetting(VOLUME_HINT_SETTING))
+    .then((saved) => {
+      if (closed || saved !== true) return;
+      volumeHintCollapsed = true;
+      volumeHintSeen = null;
+      syncHint();
+    })
+    .catch(() => {});
   return { close: finish };
 }
 
@@ -47150,10 +47646,15 @@ function volumeAllowed(state) {
   return layoutAllows("viewVolume", state && state.layout);
 }
 
-/** Есть ли в схеме чертёж: без стен и объектов объёму показывать нечего. */
+/**
+ * Есть ли в схеме чертёж: без стен и объектов объёму показывать нечего.
+ *
+ * Ответ один на всю сборку и живёт в сцене (`volumeDrawn`): кнопка над планом,
+ * список этажей лестницы и выбор схемы в окне обязаны считать «чертёж есть»
+ * одинаково, иначе кнопка гаснет там, где список предлагает перейти.
+ */
 function volumeHasDrawing(project, schemeId) {
-  if (!project || !schemeId) return false;
-  return wallsOnScheme(project, schemeId).length > 0 || schemeObjectsOnScheme(project, schemeId).length > 0;
+  return volumeDrawn(project, schemeId);
 }
 
 /**
