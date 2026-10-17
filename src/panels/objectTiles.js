@@ -86,7 +86,12 @@ export function createObjectTiles({ onPick }) {
               attrs: { "data-key": entry.key },
               on: { click: () => onPick(entry.key) },
             },
-            [objectTileIcon(entry.key), uiEl("span", { class: "objectTile__name", text: entry.name })],
+            [
+              objectTileIcon(entry.key),
+              // Язык подписи назван в самой подписи: перенос по слогам
+              // (`hyphens: auto`) работает только когда браузер знает язык.
+              uiEl("span", { class: "objectTile__name", text: entry.name, attrs: { lang: "ru" } }),
+            ],
           ),
         ),
       );
