@@ -121,6 +121,7 @@ import {
   VOLUME_UNPLACED_SHOWN,
   volumeAltKey,
   volumeClampPitch,
+  volumeAimChoice,
   volumeDoorLine,
   volumeDoorsAfterAll,
   volumeHasDrawing,
@@ -475,6 +476,28 @@ test("строка про двери считает открытые и назы
   assert.match(line, /E/);
   assert.match(line, /R/);
   assert.match(volumeDoorLine(["a"], new Set(), "a"), /эту дверь/);
+});
+
+test("E действует на то, на что смотришь: спор двери и вещи решает точность (G214)", () => {
+  // «нажатием на E на выключатель он должен выделяться». Одна клавиша — одно
+  // правило, и разбор «дверь или вещь» проверяется, а не читается в коде.
+  assert.deepEqual(volumeAimChoice({ markExact: "в1", door: null, markNear: "в1" }), { kind: "mark", id: "в1" });
+  assert.deepEqual(
+    volumeAimChoice({ markExact: "в1", door: "д1", markNear: "в1" }),
+    { kind: "mark", id: "в1" },
+    "точное попадание в вещь старше двери: в розетку целятся нарочно, под полотно попадают заодно",
+  );
+  assert.deepEqual(
+    volumeAimChoice({ markExact: null, door: "д1", markNear: "в1" }),
+    { kind: "door", id: "д1" },
+    "а вещь, в которую попали только с запасом, двери уступает",
+  );
+  assert.deepEqual(
+    volumeAimChoice({ markExact: null, door: null, markNear: "в1" }),
+    { kind: "mark", id: "в1" },
+    "двери нет вовсе — хватит и запаса",
+  );
+  assert.deepEqual(volumeAimChoice({ markExact: null, door: null, markNear: null }), { kind: "none", id: null });
 });
 
 test("дверь ловится кликом по полотну и по ручке, а стена под ними — нет", () => {

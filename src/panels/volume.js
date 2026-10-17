@@ -125,6 +125,36 @@ export const VOLUME_DOOR_KEY = "KeyE";
 export const VOLUME_DOORS_KEY = "KeyR";
 
 /**
+ * На что подействует **E** (G214): «нажатием на E на выключатель он должен
+ * выделяться».
+ *
+ * Одна клавиша — одно правило: **E действует на то, на что смотришь**. Дверь
+ * открывает или закрывает, вещь — выделяет. Спор, если под прицелом и то и
+ * другое, решает **точность попадания**, а не вид:
+ *
+ *   1. вещь, в которую попали **точно**, старше двери. Вещь мелкая, и попасть
+ *      в неё можно только нарочно; дверное полотно занимает полкадра, и под
+ *      прицелом оно оказывается заодно, а не по желанию;
+ *   2. дверь старше вещи, в которую попали **с запасом** (`VOLUME_PICK_SLACK_PX`,
+ *      розетка в трёх метрах — десяток точек экрана): целились в дверь, а
+ *      розетка рядом просто попала в запас;
+ *   3. и только если двери нет вовсе — вещь с запасом.
+ *
+ * Дверь приходит уже выбранной (`door`): это дверь под прицелом или та, по
+ * которой щёлкнули раньше (G207) — у неё своё правило запаса, и второго здесь
+ * не заводится.
+ *
+ * Чистая и вынесена наружу: правило, записанное внутри обработчика клавиши, не
+ * проверяется ничем.
+ */
+export function volumeAimChoice({ markExact, door, markNear }) {
+  if (markExact) return { kind: "mark", id: markExact };
+  if (door) return { kind: "door", id: door };
+  if (markNear) return { kind: "mark", id: markNear };
+  return { kind: "none", id: null };
+}
+
+/**
  * Alt он же Option (G211). Проверяется и по `key`, и по `code`: на Mac Option —
  * модификатор ввода, и браузер, отдающий `key` вида «Dead» для следующей
  * клавиши, сам Alt всё равно называет Alt'ом.
@@ -458,11 +488,17 @@ export function openVolume({ schemeId: openOn, api }) {
     attrs: { hidden: "hidden" },
     on: { click: () => askStairs(true) },
   });
+  // Прицел (G213): «при виде от 1 лица поставь миниатюрный прицел по центру
+  // экрана». Он **узел над холстом, а не рисунок по холсту** — иначе уехал бы
+  // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
+  // (`volume.css`), и читать его нечем — `aria-hidden`.
+  const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
     stairButton,
     padNode,
+    aimNode,
     askBox,
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
@@ -744,11 +780,20 @@ export function openVolume({ schemeId: openOn, api }) {
   // захвата — точка под курсором. Щелчок по двери её запоминает, и E работает,
   // даже если рука уже съехала с полотна.
 
-  /** Куда смотрит рука: прицел под захватом, курсор без него. */
+  /**
+   * Куда смотрит рука.
+   *
+   * Под захватом мыши курсора нет вовсе — целятся серединой поля, то есть
+   * прицелом (G213). Есть курсор — целятся им: он на поле виден, и обещать
+   * вместо него середину значило бы врать. Курсор увели с поля, а захвата нет —
+   * снова прицел: от первого лица середина поля всегда что-то значит, и
+   * клавиша, переставшая работать от того, что мышь лежит на панели, — хуже.
+   */
   function aimPoint() {
     const box = viewport();
     if (locked) return { x: box.width / 2, y: box.height / 2 };
-    return pointer;
+    if (pointer) return pointer;
+    return view === "person" ? { x: box.width / 2, y: box.height / 2 } : null;
   }
 
   /** Дверь под рукой — по последнему нарисованному кадру. */
@@ -768,6 +813,30 @@ export function openVolume({ schemeId: openOn, api }) {
     rebuildOverlay();
     syncHint();
     paint();
+  }
+
+  /**
+   * Что сделает E (G214). Вещь под прицелом — выделить **тем же выделением**,
+   * что клик по ней и список меток (таск 148); дверь — открыть или закрыть
+   * (G207). Правило разбора — в `volumeAimChoice`, здесь только руки.
+   */
+  function actOnAim() {
+    const at = aimPoint();
+    const aimed = at && !scene.empty;
+    const choice = volumeAimChoice({
+      markExact: aimed ? volumePickAt(shown, at.x, at.y, 0) : null,
+      door: aimedDoor || heldDoor,
+      markNear: aimed ? volumePickAt(shown, at.x, at.y) : null,
+    });
+    if (choice.kind === "mark") {
+      select(choice.id);
+      return;
+    }
+    if (choice.kind === "door") {
+      toggleDoor(choice.id);
+      return;
+    }
+    notify(strings.volume.aimless, "info");
   }
 
   function toggleDoor(doorId) {
@@ -1372,10 +1441,10 @@ export function openVolume({ schemeId: openOn, api }) {
       fit();
       return;
     }
-    // Дверь под рукой или та, по которой щёлкнули (G207).
+    // E действует на то, на что смотришь (G207, G214).
     if (event.code === VOLUME_DOOR_KEY) {
       event.preventDefault();
-      if (!toggleDoor(aimedDoor || heldDoor)) notify(strings.volume.doorAimless, "info");
+      actOnAim();
       return;
     }
     if (event.code === VOLUME_DOORS_KEY) {
@@ -1464,6 +1533,8 @@ export function openVolume({ schemeId: openOn, api }) {
     if (touching) parts.push(strings.volume.hintTouch);
     else parts.push(locked ? strings.volume.hintLocked : strings.volume.hintGrab);
     parts.push(strings.volume.pickHint);
+    // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
+    if (!aimNode.hidden) parts.push(strings.volume.aimHint);
     parts.push(volumeDoorLine(scene.doors, openDoors, aimedDoor || heldDoor, touching));
     // Про лестницу — последней: она есть под рукой далеко не всегда, а когда
     // есть, это самое новое в строке.
@@ -1475,6 +1546,9 @@ export function openVolume({ schemeId: openOn, api }) {
     personButton.className = "ui-btn" + (view === "person" ? " is-on" : "");
     aroundButton.className = "ui-btn" + (view === "around" ? " is-on" : "");
     stage.classList.toggle("volume__stage--person", view === "person");
+    // Прицел — от первого лица и только мышью: в обзоре центр поля ничего не
+    // значит, а пальцем целятся касанием, и клавиши E там нет вовсе (таск 149).
+    aimNode.hidden = scene.empty || view !== "person" || touching;
     // Площадка ходьбы — только пальцем и только там, где ходят: в обзоре она
     // возила бы цель камеры, а не человека, и была бы просто непонятной.
     padNode.hidden = !touching || view !== "person" || scene.empty;

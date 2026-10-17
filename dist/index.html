@@ -3683,6 +3683,64 @@
   gap: 6px;
 }
 
+/* ——— прицел (G213, таск 151) ————————————————————————————————————————————
+
+   «при виде от 1 лица поставь миниатюрный прицел по центру экрана».
+
+   Он **накладка над кадром, а не часть кадра**, и это не стилистика: снимок
+   вида (таск 149) снимается с самого холста, и прицел, нарисованный по канве,
+   уехал бы в картинку указателем. Отдельным узлом поверх канвы он не попадёт
+   в снимок никак — ни флагом, ни перерисовкой, ни по недосмотру.
+
+   Видно его и на светлой стене, и на тёмном полу: белые штрихи с тёмной
+   обводкой в точку толщиной. Одним цветом этого не добиться — белый теряется
+   на потолке, чёрный на полу, — а обводка работает на любом фоне, как у
+   всякого курсора.
+
+   Одиннадцать точек в поперечнике, разрыв в три посередине: «миниатюрный» —
+   слово заказчика, а разрыв оставляет видимой саму вещь, в которую целятся. */
+.volume__aim {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  margin: -6px 0 0 -6px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.volume__aim[hidden] {
+  display: none;
+}
+
+/* Четыре штриха двумя узлами: полоса с разрывом посередине рисуется градиентом
+   с резкими границами — так в разметке не заводится четырёх пустых узлов ради
+   четырёх чёрточек. Тень вместо обводки: у полосы с прозрачной серединой
+   `box-shadow` обвёл бы и разрыв. */
+.volume__aim::before,
+.volume__aim::after {
+  content: "";
+  position: absolute;
+  filter: drop-shadow(0 0 1px rgba(13, 17, 23, 0.95));
+}
+
+.volume__aim::before {
+  left: 0;
+  top: 5px;
+  width: 11px;
+  height: 1px;
+  background: linear-gradient(to right, #fff 0 4px, transparent 4px 7px, #fff 7px 11px);
+}
+
+.volume__aim::after {
+  left: 5px;
+  top: 0;
+  width: 1px;
+  height: 11px;
+  background: linear-gradient(to bottom, #fff 0 4px, transparent 4px 7px, #fff 7px 11px);
+}
+
 /* ——— мастерская чертежа ————————————————————————————————————————————————
 
    Заказчик: «Само окно делаем побольше, что бы удобнее было». Насколько —
@@ -6471,9 +6529,8 @@ const strings = {
     // объект не попало ничего (G68), и говорить об этом строкой не надо —
     // надо, чтобы это было видно по самим дверям.
     doors: "Двери: открыто {open} из {count}.",
-    doorKeys: "E открывает дверь под курсором, R — все двери разом.",
+    doorKeys: "E открывает дверь, на которую смотрите, R — все двери разом.",
     doorAimed: "E откроет или закроет эту дверь, R — все двери разом.",
-    doorAimless: "Наведите курсор на дверь или щёлкните по ней — E откроет ту, на которую показали. R открывает и закрывает все двери разом.",
     doorsOpened: "Все двери открыты",
     doorsClosed: "Все двери закрыты",
     doorsNone: "На этой схеме нет ни одной двери",
@@ -6488,6 +6545,10 @@ const strings = {
     // Метки в объёме (таск 148). Выделение общее с планом, и сказать об этом
     // надо один раз словом: иначе человек решит, что окно живёт отдельно.
     pickHint: "Клик по вещи выделяет её — то же выделение, что в списке меток и на плане.",
+    // Прицел и E (G213, G214). Одно правило на клавишу: действует на то, на
+    // что смотришь, — и сказать его надо там же, где показан прицел.
+    aimHint: "Прицел посреди поля — то, на что смотрите: E выделит вещь в нём.",
+    aimless: "В прицеле ничего нет: наведите его на вещь или на дверь — E подействует на то, на что смотрите.",
     cardClose: "Снять выделение",
     // Не размещённые: заказчик решил прямо — место им не выдумывать, но и
     // молча терять нельзя. Поэтому список стоит под полем и зовёт метки по
@@ -45512,6 +45573,36 @@ const VOLUME_DOOR_KEY = "KeyE";
 const VOLUME_DOORS_KEY = "KeyR";
 
 /**
+ * На что подействует **E** (G214): «нажатием на E на выключатель он должен
+ * выделяться».
+ *
+ * Одна клавиша — одно правило: **E действует на то, на что смотришь**. Дверь
+ * открывает или закрывает, вещь — выделяет. Спор, если под прицелом и то и
+ * другое, решает **точность попадания**, а не вид:
+ *
+ *   1. вещь, в которую попали **точно**, старше двери. Вещь мелкая, и попасть
+ *      в неё можно только нарочно; дверное полотно занимает полкадра, и под
+ *      прицелом оно оказывается заодно, а не по желанию;
+ *   2. дверь старше вещи, в которую попали **с запасом** (`VOLUME_PICK_SLACK_PX`,
+ *      розетка в трёх метрах — десяток точек экрана): целились в дверь, а
+ *      розетка рядом просто попала в запас;
+ *   3. и только если двери нет вовсе — вещь с запасом.
+ *
+ * Дверь приходит уже выбранной (`door`): это дверь под прицелом или та, по
+ * которой щёлкнули раньше (G207) — у неё своё правило запаса, и второго здесь
+ * не заводится.
+ *
+ * Чистая и вынесена наружу: правило, записанное внутри обработчика клавиши, не
+ * проверяется ничем.
+ */
+function volumeAimChoice({ markExact, door, markNear }) {
+  if (markExact) return { kind: "mark", id: markExact };
+  if (door) return { kind: "door", id: door };
+  if (markNear) return { kind: "mark", id: markNear };
+  return { kind: "none", id: null };
+}
+
+/**
  * Alt он же Option (G211). Проверяется и по `key`, и по `code`: на Mac Option —
  * модификатор ввода, и браузер, отдающий `key` вида «Dead» для следующей
  * клавиши, сам Alt всё равно называет Alt'ом.
@@ -45844,11 +45935,17 @@ function openVolume({ schemeId: openOn, api }) {
     attrs: { hidden: "hidden" },
     on: { click: () => askStairs(true) },
   });
+  // Прицел (G213): «при виде от 1 лица поставь миниатюрный прицел по центру
+  // экрана». Он **узел над холстом, а не рисунок по холсту** — иначе уехал бы
+  // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
+  // (`volume.css`), и читать его нечем — `aria-hidden`.
+  const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
     stairButton,
     padNode,
+    aimNode,
     askBox,
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
@@ -46130,11 +46227,20 @@ function openVolume({ schemeId: openOn, api }) {
   // захвата — точка под курсором. Щелчок по двери её запоминает, и E работает,
   // даже если рука уже съехала с полотна.
 
-  /** Куда смотрит рука: прицел под захватом, курсор без него. */
+  /**
+   * Куда смотрит рука.
+   *
+   * Под захватом мыши курсора нет вовсе — целятся серединой поля, то есть
+   * прицелом (G213). Есть курсор — целятся им: он на поле виден, и обещать
+   * вместо него середину значило бы врать. Курсор увели с поля, а захвата нет —
+   * снова прицел: от первого лица середина поля всегда что-то значит, и
+   * клавиша, переставшая работать от того, что мышь лежит на панели, — хуже.
+   */
   function aimPoint() {
     const box = viewport();
     if (locked) return { x: box.width / 2, y: box.height / 2 };
-    return pointer;
+    if (pointer) return pointer;
+    return view === "person" ? { x: box.width / 2, y: box.height / 2 } : null;
   }
 
   /** Дверь под рукой — по последнему нарисованному кадру. */
@@ -46154,6 +46260,30 @@ function openVolume({ schemeId: openOn, api }) {
     rebuildOverlay();
     syncHint();
     paint();
+  }
+
+  /**
+   * Что сделает E (G214). Вещь под прицелом — выделить **тем же выделением**,
+   * что клик по ней и список меток (таск 148); дверь — открыть или закрыть
+   * (G207). Правило разбора — в `volumeAimChoice`, здесь только руки.
+   */
+  function actOnAim() {
+    const at = aimPoint();
+    const aimed = at && !scene.empty;
+    const choice = volumeAimChoice({
+      markExact: aimed ? volumePickAt(shown, at.x, at.y, 0) : null,
+      door: aimedDoor || heldDoor,
+      markNear: aimed ? volumePickAt(shown, at.x, at.y) : null,
+    });
+    if (choice.kind === "mark") {
+      select(choice.id);
+      return;
+    }
+    if (choice.kind === "door") {
+      toggleDoor(choice.id);
+      return;
+    }
+    notify(strings.volume.aimless, "info");
   }
 
   function toggleDoor(doorId) {
@@ -46758,10 +46888,10 @@ function openVolume({ schemeId: openOn, api }) {
       fit();
       return;
     }
-    // Дверь под рукой или та, по которой щёлкнули (G207).
+    // E действует на то, на что смотришь (G207, G214).
     if (event.code === VOLUME_DOOR_KEY) {
       event.preventDefault();
-      if (!toggleDoor(aimedDoor || heldDoor)) notify(strings.volume.doorAimless, "info");
+      actOnAim();
       return;
     }
     if (event.code === VOLUME_DOORS_KEY) {
@@ -46850,6 +46980,8 @@ function openVolume({ schemeId: openOn, api }) {
     if (touching) parts.push(strings.volume.hintTouch);
     else parts.push(locked ? strings.volume.hintLocked : strings.volume.hintGrab);
     parts.push(strings.volume.pickHint);
+    // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
+    if (!aimNode.hidden) parts.push(strings.volume.aimHint);
     parts.push(volumeDoorLine(scene.doors, openDoors, aimedDoor || heldDoor, touching));
     // Про лестницу — последней: она есть под рукой далеко не всегда, а когда
     // есть, это самое новое в строке.
@@ -46861,6 +46993,9 @@ function openVolume({ schemeId: openOn, api }) {
     personButton.className = "ui-btn" + (view === "person" ? " is-on" : "");
     aroundButton.className = "ui-btn" + (view === "around" ? " is-on" : "");
     stage.classList.toggle("volume__stage--person", view === "person");
+    // Прицел — от первого лица и только мышью: в обзоре центр поля ничего не
+    // значит, а пальцем целятся касанием, и клавиши E там нет вовсе (таск 149).
+    aimNode.hidden = scene.empty || view !== "person" || touching;
     // Площадка ходьбы — только пальцем и только там, где ходят: в обзоре она
     // возила бы цель камеры, а не человека, и была бы просто непонятной.
     padNode.hidden = !touching || view !== "person" || scene.empty;
