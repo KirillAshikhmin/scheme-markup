@@ -142,3 +142,96 @@
 .mark-card--volume[hidden] {
   display: none;
 }
+
+/* ——— сенсорное управление, лестница и снимок (таск 149) ————————————————
+
+   «Нужно планшетное управление, если зашли с планшета или смартфона».
+   Заказчик смотрит с восьмидюймового. */
+
+/* Площадка ходьбы. Правый нижний угол — не прихоть: левый отдан миникарте
+   прямым словом заказчика (G212), а большой палец достаёт до любого из них.
+   Шестьдесят точек радиусом: мельче площадку не нащупать не глядя, а глядеть
+   человек будет в комнату, а не себе под палец. */
+.volume__pad {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  touch-action: none;
+  z-index: 3;
+}
+
+.volume__pad[hidden] {
+  display: none;
+}
+
+.volume__pad.is-on {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+/* Кружок под пальцем: без него непонятно, держит ли площадка касание вообще. */
+.volume__padKnob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* Кнопка «Этаж» — внизу по середине поля: она появляется только у лестницы, и
+   место под ней свободно в обоих видах (карточка метки прижата влево,
+   площадка ходьбы — вправо). */
+.volume__stair {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 3;
+}
+
+.volume__stair[hidden] {
+  display: none;
+}
+
+/* Вопрос про этаж живёт в самом поле, а не диалогом поверх страницы: в полном
+   экране развёрнута карточка окна, и всё, что лежит в `#dialog-host`, в этот
+   миг не видно вовсе. Поэтому — накладка посреди поля. */
+.volume__ask {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(420px, calc(100% - 32px));
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-line);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+}
+
+.volume__ask[hidden] {
+  display: none;
+}
+
+.volume__askText {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--panel-text);
+}
+
+.volume__askRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

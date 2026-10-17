@@ -8,6 +8,8 @@ process.env.TZ = "Europe/Moscow";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { projectFileName } from "../src/projectFile.js";
+import { exportFileName } from "../src/exporter.js";
+import { text } from "../src/strings.js";
 
 test("вечерняя выгрузка помечена сегодняшним днём пользователя, а не вчерашним по UTC", () => {
   // 16 сентября, 01:19 по Москве — в UTC это ещё 15-е, 22:19.
@@ -39,4 +41,24 @@ test("длинное имя обрезается без пробела на ср
   );
   assert.equal(name.indexOf(" -2026"), -1, name);
   assert.ok(name.length <= 60 + "-2026-10-10.zip".length);
+});
+
+// Снимок объёмного вида (таск 149): «просто возможность сделать „скрин“».
+// Имя собирает то же правило, что у прочих выгрузок, — иначе снимок уехал бы в
+// папку загрузок под именем от браузера и потерялся бы среди чужих картинок.
+test("снимок объёма назван объектом, схемой и днём, а не браузером", () => {
+  const name = exportFileName(
+    { name: "Городские сады" },
+    text("volume.shotPart", { name: "1 этаж" }),
+    "png",
+  );
+  assert.match(name, /^Городские сады — Объём 1 этаж-\d{4}-\d{2}-\d{2}\.png$/, name);
+  // Длинное имя схемы не ломает имя файла и не вылезает за шестьдесят знаков.
+  const long = exportFileName(
+    { name: "Городские сады" },
+    text("volume.shotPart", { name: "Plan Image 3.0 #7376071 2026-08-13 16.49" }),
+    "png",
+  );
+  assert.ok(long.endsWith(".png"), long);
+  assert.ok(!long.includes("/") && !long.includes(":"), "запрещённых в имени знаков нет: " + long);
 });

@@ -19,6 +19,9 @@ import {
   acceptedProblems,
   createProject,
   addScheme,
+  findScheme,
+  schemeFloorOf,
+  setSchemeFloor,
   addMark,
   addRoom,
   MARK_DIMENSION_FIELDS,
@@ -745,4 +748,28 @@ test("сверка ловит пропавшую и чужую отметку у
     (error) => error.code === "fileCheckFailed",
     "лишняя метка прошла сверку",
   );
+});
+
+// Этаж схемы (таск 149) — единственное новое поле объёмного режима, и оно
+// необязательное. G68: объект, которому этажей не задавали, обязан
+// упаковываться и распаковываться ровно тем же, чем был, — без ключа `floor`.
+test("этаж схемы проходит файл насквозь, а схема без него ключа не получает", async () => {
+  const added = addScheme(createProject({ name: "Дом" }), { name: "1 этаж", width: 1000, height: 800 });
+  const second = addScheme(added.project, { name: "2 этаж", width: 1000, height: 800 });
+  const project = setSchemeFloor(second.project, added.scheme.id, 1).project;
+
+  const restored = (await unpackProject(await packProject(project, new Map()))).project;
+  assert.deepEqual(restored, project, "объект после круга тот же");
+  assert.equal(schemeFloorOf(restored, added.scheme.id), 1, "этаж вернулся числом");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(findScheme(restored, second.scheme.id), "floor"),
+    false,
+    "у схемы без этажа ключа нет и после круга: пустые поля в файл не пишутся (G68)",
+  );
+
+  // Объект, в котором этажей не задавали вовсе, после круга не отличается от
+  // объекта прежней сборки ни одним ключом.
+  const plain = (await unpackProject(await packProject(second.project, new Map()))).project;
+  assert.deepEqual(plain, second.project);
+  assert.ok(plain.schemes.every((scheme) => !Object.prototype.hasOwnProperty.call(scheme, "floor")));
 });

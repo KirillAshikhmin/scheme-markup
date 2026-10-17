@@ -20,7 +20,10 @@
 // списке, и наоборот», — а два выделения, живущие врозь, и есть та потеря, от
 // которой он предостерегал.
 //
-// Этажей, лестницы, сенсорного управления и снимка вида здесь нет (таск 149).
+// Этажи, лестница, сенсорное управление и снимок вида — таск 149, и к правилу
+// выше они ничего не добавляют: этаж схемы правится **не здесь** (поле стоит в
+// мастерской чертежа, где у схемы правят её величины), переход по лестнице
+// меняет показываемую схему, а не объект, а снимок — картинку в папке загрузок.
 //
 // ——— окно открывается обзором ———————————————————————————————————————————
 //
@@ -38,7 +41,8 @@ import {
   canvasFullscreenToggle,
   canvasHintInset,
 } from "../canvas.js";
-import { findRoom, findScheme, schemeObjectsOnScheme, wallsOnScheme } from "../model.js";
+import { exportDownload, exportFileName, viewPng } from "../exporter.js";
+import { findRoom, findScheme, schemeFloorOf, schemeObjectsOnScheme, wallsOnScheme } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
 import {
@@ -66,6 +70,7 @@ import {
   volumeDraw,
   volumeDrawBackdrop,
   volumeFloorAt,
+  volumeFloors,
   volumeFrame,
   volumeLinkLines,
   volumeMarkAnchor,
@@ -76,6 +81,7 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeSelectLines,
+  volumeStairNear,
   volumeStart,
   volumeStep,
 } from "../volume.js";
@@ -185,6 +191,66 @@ export function volumeMinimapBox(box, bounds) {
   return { x: 14, y: box.height - height - 14, width, height };
 }
 
+// ——— сенсорное управление (таск 149) ——————————————————————————————————
+//
+// «Нужно планшетное управление, если зашли с планшета или смартфона».
+// Заказчик смотрит с восьмидюймового.
+//
+// Разложено так: **палец по полю вертит головой** (это уже умеет перетаскивание
+// мыши — события указателя одни и те же, и трогать его не пришлось), а ходит
+// **площадка в углу поля**: вверх-вниз — шаг вперёд и назад, влево-вправо —
+// поворот.
+//
+// Почему поворот, а не шаг боком, как у A и D: одного пальца должно хватать на
+// всё. Ходьба без поворота — это ходьба в стену; боковой шаг, наоборот,
+// удобство, и на планшете его просто нет. Поворот есть в критериях приёмки
+// («ходьба и поворот пальцем»), шаг боком — нет.
+//
+// Площадка стоит **справа внизу**, хотя в играх ход обычно под левым большим
+// пальцем. Причина простая: левый нижний угол отдан миникарте прямым словом
+// заказчика (G212), и двигать её ради привычки нельзя. Поворот при этом
+// остаётся у любого пальца на любом месте поля, так что левая рука без дела не
+// остаётся.
+//
+// **С жестами холста не дерётся** нигде: окно — своя точка монтирования со
+// своим `touch-action: none`, панорама и щипок плана живут на `#canvas-host`
+// под затемнением диалога и событий не видят вовсе. А внутри окна два жеста
+// разведены по месту: начавшееся на площадке касание поворотом не становится
+// никогда — площадка забирает указатель себе.
+
+/** Мёртвая зона площадки: доля радиуса, в которой палец ещё стоит на месте. */
+export const VOLUME_PAD_DEAD = 0.18;
+
+/**
+ * Куда ведёт палец на площадке: `{forward, turn}` от −1 до 1.
+ *
+ * Величина растёт от края мёртвой зоны к краю площадки: тронул слегка — идёшь
+ * шагом, увёл до края — бежишь. Дальше края не считается — палец, уехавший за
+ * площадку, значит то же, что палец на её краю.
+ */
+export function volumePadVector(dx, dy, radius) {
+  const reach = radius > 0 ? radius : 1;
+  const dead = reach * VOLUME_PAD_DEAD;
+  const length = Math.hypot(dx, dy);
+  if (!(length > dead)) return { forward: 0, turn: 0 };
+  const power = Math.min(1, (length - dead) / (reach - dead)) / length;
+  return { forward: -dy * power, turn: dx * power };
+}
+
+/**
+ * Похоже ли, что сюда зашли пальцем. Это только **первая** догадка, по которой
+ * площадка видна сразу: настоящий ответ даёт первое касание (`pointerType`), и
+ * мышь площадки не увидит никогда.
+ */
+export function volumeTouchLikely() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  try {
+    return window.matchMedia("(pointer: coarse)").matches;
+  } catch (error) {
+    return false;
+  }
+}
+
 /** Сколько неразмещённых меток окно называет по имени, прежде чем сказать «и ещё». */
 export const VOLUME_UNPLACED_SHOWN = 8;
 
@@ -235,12 +301,34 @@ export function volumeUnplacedTitle(unplaced) {
  * собранную в обработчике кадра, не проверяет ничто. Дверей в схеме нет вовсе —
  * и строки нет: клавиша, которой нечего открывать, в подсказке лишняя.
  */
-export function volumeDoorLine(doors, open, aimed) {
+export function volumeDoorLine(doors, open, aimed, touching) {
   const list = doors || [];
   if (list.length === 0) return "";
   const count = list.filter((id) => open.has(id)).length;
   const state = text("volume.doors", { open: count, count: list.length });
+  // Пальцем клавиши E нет вовсе (таск 149), и обещать её значило бы оставить
+  // планшет с закрытыми дверями: там дверь открывается касанием по ней.
+  if (touching) return state + " " + strings.volume.doorTouch;
   return aimed ? state + " " + strings.volume.doorAimed : state + " " + strings.volume.doorKeys;
+}
+
+/**
+ * Строка про лестницу под рукой (таск 149).
+ *
+ * Пусто — лестницы рядом нет. Есть, но этажей не задано — об этом говорится
+ * прямо: человек видит нарисованную лестницу, и молчание он прочтёт как
+ * поломку, а не как «поле не заполнено».
+ */
+export function volumeStairLine(near, options) {
+  if (!near) return "";
+  if (!options || options.length === 0) return strings.volume.stairNoFloors;
+  return strings.volume.stairNear;
+}
+
+/** Заголовок окна: с номером этажа, если он у схемы задан. */
+export function volumeTitle(name, floor) {
+  if (floor === null || floor === undefined) return text("volume.title", { name });
+  return text("volume.titleFloor", { name, floor });
 }
 
 /** Строки про то, чего в сцене не хватает. Порядок — порядок важности. */
@@ -254,12 +342,18 @@ export function volumeNotes(scene) {
   return lines;
 }
 
-export function openVolume({ schemeId, api }) {
+export function openVolume({ schemeId: openOn, api }) {
   if (volumeOpened) return null;
   const { getState, setState, notify, subscribe } = api;
   const project = getState().project;
-  if (!findScheme(project, schemeId)) return null;
+  if (!findScheme(project, openOn)) return null;
   volumeOpened = true;
+
+  // Какую схему показываем. **Переменная, а не аргумент**: лестница меняет этаж,
+  // то есть меняет схему под той же камерой (таск 149). Второго окна на второй
+  // этаж не заводится — человек поднимается по лестнице, а не открывает ещё
+  // одно окно, и пройденный путь, открытые двери и вид остаются при нём.
+  let schemeId = openOn;
 
   // Метки берутся **видимые на плане**: фильтр спрятал метку на плане — её нет
   // и в объёме. Иначе у одного объекта было бы два ответа на вопрос «что
@@ -293,6 +387,23 @@ export function openVolume({ schemeId, api }) {
   let heldDoor = null;
   // Alt отпустил мышь, и по отпусканию Alt её надо забрать обратно (G211).
   let altFree = false;
+  // Зашли пальцем (таск 149). Догадка по виду указателя — сразу, точный ответ —
+  // по первому касанию: мышь площадку ходьбы не увидит никогда.
+  let touching = volumeTouchLikely();
+  // Палец на площадке ходьбы: `{id, forward, turn}`.
+  let pad = null;
+  // Щипок двумя пальцами в обзоре: расстояние между ними и расстояние камеры в
+  // тот миг, когда щипок начался.
+  let pinch = null;
+  // Касания на поле, по которым узнаётся щипок.
+  const touches = new Map();
+  // Открытый вопрос про этаж и лестница, про которую уже спросили. Вторая нужна
+  // затем, чтобы вопрос не задавался заново на каждом шаге у той же лестницы:
+  // отошёл и подошёл снова — спросится опять.
+  let ask = null;
+  let stairAsked = null;
+  // Вопрос отпускает мышь: по курсору в нём и щёлкают. Был захват — вернём.
+  let askWasLocked = false;
   // Последний кадр — он же ответ на «во что ткнули»: клик ищет метку в том, что
   // человек видит, а не в сцене. Второго способа считать попадание не заводим.
   let shown = [];
@@ -318,7 +429,42 @@ export function openVolume({ schemeId, api }) {
     on: { click: () => select(null) },
   });
   const card = uiEl("div", { class: "mark-card mark-card--volume", attrs: { hidden: "hidden" } });
-  const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [node, card]);
+  // Площадка ходьбы (таск 149): видна только там, где ходят пальцем. Кружок
+  // внутри показывает, куда палец уведён, — без него непонятно, держит ли
+  // площадка касание вообще.
+  const padKnob = uiEl("span", { class: "volume__padKnob" });
+  const padNode = uiEl(
+    "div",
+    {
+      class: "volume__pad",
+      attrs: { hidden: "hidden", "aria-hidden": "true", title: strings.volume.padLabel },
+    },
+    [padKnob],
+  );
+  // Вопрос про этаж живёт **в самом окне**, а не диалогом поверх страницы, и это
+  // не вкусовщина: стопка диалогов прячет карточки под верхней (`uiRefreshDialogs`),
+  // а в полном экране развёрнута карточка окна — всё, что лежит в
+  // `#dialog-host`, в этот момент не видно вовсе. Окно в полном экране — главный
+  // способ смотреть объём, и вопрос, которого там нет, был бы вопросом в пустоту.
+  const askText = uiEl("p", { class: "volume__askText" });
+  const askRow = uiEl("div", { class: "volume__askRow" });
+  const askBox = uiEl("div", { class: "volume__ask", attrs: { hidden: "hidden" } }, [askText, askRow]);
+  // Кнопка «Этаж» на поле: тот же вопрос, заданный по своей воле. Нужна и
+  // пальцем (клавиш там нет), и мышью (отказался один раз — спроси снова, не
+  // отходя от лестницы).
+  const stairButton = uiButton(strings.volume.stairButton, {
+    class: "ui-btn ui-btn--accent volume__stair",
+    title: strings.volume.stairButtonHint,
+    attrs: { hidden: "hidden" },
+    on: { click: () => askStairs(true) },
+  });
+  const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
+    node,
+    card,
+    stairButton,
+    padNode,
+    askBox,
+  ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
 
   const personButton = uiButton(strings.volume.viewPerson, {
@@ -330,6 +476,20 @@ export function openVolume({ schemeId, api }) {
     on: { click: () => setView("around") },
   });
   const fitButton = uiButton(strings.volume.fit, { title: strings.volume.fitHint, on: { click: () => fit() } });
+  // Снимок вида (таск 149): «просто возможность сделать „скрин“». Одна кнопка,
+  // и она же единственный способ — клавиши у неё нет нарочно: занятых в окне
+  // букв хватает, а снимок делают не на бегу.
+  const shotButton = uiButton(strings.volume.shot, {
+    title: strings.volume.shotHint,
+    on: { click: () => shot() },
+  });
+  // Все двери разом — пальцем (таск 149): клавиши R на планшете нет. Мышью её
+  // не показываем, чтобы не заводить второй способ там, где клавиша уже есть.
+  const doorsButton = uiButton(strings.volume.doorsAll, {
+    title: strings.volume.doorsAllHint,
+    attrs: { hidden: "hidden" },
+    on: { click: () => toggleAllDoors() },
+  });
   const fullButton = uiIconButton("fullscreen", {
     label: canvasFullscreenLabel(false),
     on: { click: () => toggleFullscreen() },
@@ -344,22 +504,24 @@ export function openVolume({ schemeId, api }) {
     personButton,
     aroundButton,
     where,
-    uiEl("span", { class: "volume__spacer" }, [fitButton, fullButton]),
+    uiEl("span", { class: "volume__spacer" }, [doorsButton, shotButton, fitButton, fullButton]),
   ]);
   const body = uiEl("div", { class: "volume" }, [bar, stage, meta, missing, hint]);
 
-  const scheme = findScheme(project, schemeId);
   const closeButton = uiButton(strings.volume.close, {
     class: "ui-btn ui-btn--accent",
     on: { click: () => finish() },
   });
   const modal = uiModal({
-    title: text("volume.title", { name: scheme.name }),
+    title: volumeTitle(findScheme(project, schemeId).name, schemeFloorOf(project, schemeId)),
     body,
     actions: [closeButton],
     onCancel: () => cleanup(),
   });
   modal.card.classList.add("modal--volume");
+  // Заголовок переписывается при переходе по лестнице: имя схемы и номер этажа
+  // в нём — единственное место, где написано, где человек оказался.
+  const titleNode = modal.card.querySelector(".modal__title");
   const depth = uiDialogDepth();
 
   // ——— вид ———
@@ -649,8 +811,13 @@ export function openVolume({ schemeId, api }) {
     return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   }
 
+  // Кто-то держит ход: клавиша или палец на площадке. Пока держат — идут часы.
+  function moving() {
+    return keys.size > 0 || Boolean(pad);
+  }
+
   function walkSchedule() {
-    if (walking || keys.size === 0 || closed) return;
+    if (walking || !moving() || closed) return;
     const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
     clock = now();
     walking = schedule(walkTick);
@@ -658,7 +825,7 @@ export function openVolume({ schemeId, api }) {
 
   function walkTick() {
     walking = 0;
-    if (keys.size === 0 || closed) return;
+    if (!moving() || closed) return;
     const time = now();
     const step = Math.min(0.1, Math.max(0, (time - clock) / 1000));
     clock = time;
@@ -677,9 +844,15 @@ export function openVolume({ schemeId, api }) {
       side += move.side;
       turn += move.turn;
     }
+    // Площадка ходьбы (таск 149) складывается с клавишами, а не спорит с ними:
+    // в одном окне бывают и мышь с клавиатурой, и палец.
+    if (pad) {
+      forward += pad.forward;
+      turn += pad.turn;
+    }
     const speed = (run ? VOLUME_RUN_MM_S : VOLUME_WALK_MM_S) * step;
     if (turn !== 0) {
-      const spin = turn * step * 2.2;
+      const spin = Math.max(-1, Math.min(1, turn)) * step * 2.2;
       if (view === "person") person.yaw += spin;
       else around = { ...around, yaw: around.yaw + spin };
     }
@@ -689,13 +862,18 @@ export function openVolume({ schemeId, api }) {
       // Ход по плану, а не по направлению взгляда: с опущенным взглядом иначе
       // уходишь в пол, и это чувствуется как провал, а не как шаг.
       const flat = Math.hypot(basis.fwd.x, basis.fwd.y) || 1;
-      const dx = ((basis.fwd.x / flat) * forward + basis.right.x * side) / length * speed;
-      const dy = ((basis.fwd.y / flat) * forward + basis.right.y * side) / length * speed;
+      // Длина делится на себя же, но не больше единицы: клавиши дают ровно
+      // единицу (или корень из двух на двух сразу, как и было), а палец на
+      // площадке — сколько увёл, и полшага должны остаться полушагом.
+      const scale = (Math.min(1, length) / length) * speed;
+      const dx = ((basis.fwd.x / flat) * forward + basis.right.x * side) * scale;
+      const dy = ((basis.fwd.y / flat) * forward + basis.right.y * side) * scale;
       if (view === "person") {
         const moved = volumeStep(scene, person, dx, dy);
         person.x = moved.x;
         person.y = moved.y;
         syncWhere();
+        stairCheck();
       } else {
         around = { ...around, target: { ...around.target, x: around.target.x + dx, y: around.target.y + dy } };
       }
@@ -707,7 +885,13 @@ export function openVolume({ schemeId, api }) {
   function keyStop(code) {
     if (code) keys.delete(code);
     else keys.clear();
-    if (keys.size > 0 || !walking) return;
+    walkStop();
+  }
+
+  // Ход держать больше некому — часы останавливаются. Отдельно от `keyStop`:
+  // палец с площадки сняли, а зажатую клавишу при этом отпускать нельзя.
+  function walkStop() {
+    if (moving() || !walking) return;
     const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
     cancel(walking);
     walking = 0;
@@ -744,14 +928,52 @@ export function openVolume({ schemeId, api }) {
 
   function onPointerDown(event) {
     if (event.button !== 0) return;
+    // Кнопки и вопрос лежат **в самом поле** (карточка метки, площадка ходьбы,
+    // «Этаж», вопрос про этаж), и нажатие на них полем не считается: иначе
+    // щелчок по кнопке начинал бы поворот головы, а отпускание снимало бы
+    // выделение.
+    if (event.target !== node) return;
+    if (event.pointerType === "touch") setTouch(true);
     stage.focus({ preventScroll: true });
+    if (event.pointerType === "touch") {
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      // Второй палец — щипок, а не второй поворот: взгляд перестаёт ехать за
+      // первым пальцем, иначе щипок водил бы головой заодно.
+      if (touches.size === 2) {
+        look = null;
+        pinch = { gap: touchGap(), distance: around.distance };
+        return;
+      }
+      if (touches.size > 2) return;
+    }
     look = { x: event.clientX, y: event.clientY, moved: false };
   }
 
   function onPointerMove(event) {
+    // Палец на площадке ходьбы — это ход, а не поворот: пока он там, поле
+    // взгляда его движений не видит вовсе (таск 149).
+    if (pad && event.pointerId === pad.id) {
+      padMove(event);
+      return;
+    }
     if (locked) {
       lookBy(event.movementX || 0, event.movementY || 0);
       return;
+    }
+    if (event.pointerType === "touch" && touches.has(event.pointerId)) {
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      // Щипок двумя пальцами — то же, что колесо: в обзоре приближает, от
+      // первого лица не делает ничего (приближать там нечего, а поле зрения
+      // человек не просил).
+      if (pinch && touches.size === 2) {
+        const gap = touchGap();
+        if (gap > 0 && pinch.gap > 0 && view === "around") {
+          const distance = volumeAroundDistance((pinch.distance * pinch.gap) / gap);
+          around = { ...around, distance, pitch: volumeAroundPitch(around.pitch, distance, aroundLift()) };
+          paint();
+        }
+        return;
+      }
     }
     const rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0 };
     pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -766,9 +988,21 @@ export function openVolume({ schemeId, api }) {
     lookBy(dx, dy);
   }
 
+  /** Расстояние между двумя касаниями — мера щипка. */
+  function touchGap() {
+    const points = [...touches.values()];
+    if (points.length < 2) return 0;
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+  }
+
   function onPointerUp(event) {
     const started = look;
     look = null;
+    if (event.pointerType === "touch") {
+      touches.delete(event.pointerId);
+      if (touches.size < 2) pinch = null;
+    }
+    padEnd(event);
     if (closed || !started || started.moved) return;
     // Щелчок по вещи — выделение (таск 148), и захват мыши тогда не просится:
     // человек целился в розетку, а не в поле. Щелчок мимо — снимает выделение
@@ -786,6 +1020,14 @@ export function openVolume({ schemeId, api }) {
       // способ показать, о какой двери речь.
       const door = volumeDoorAt(shown, at.x, at.y);
       if (door) {
+        // Пальцем касание **открывает** дверь: клавиши E на планшете нет, и
+        // «запомнить дверь для клавиши» там значило бы не делать ничего
+        // (таск 149). Мышью остаётся прежнее — клик показывает, о какой двери
+        // речь, а открывает её E (решение таска 150, заказчик назвал клавишу).
+        if (touching) {
+          toggleDoor(door);
+          return;
+        }
         heldDoor = door;
         aimedDoor = door;
         syncHint();
@@ -808,7 +1050,9 @@ export function openVolume({ schemeId, api }) {
       }
     }
     if (locked) return;
-    grabPointer();
+    // Пальцем захват указателя не просится: курсора нет, захватывать нечего, а
+    // отказ браузера на каждое касание — лишняя работа и мигание.
+    if (!touching) grabPointer();
   }
 
   // Захват мыши. Браузер вправе отказать — и это не беда: перетаскивание
@@ -838,10 +1082,263 @@ export function openVolume({ schemeId, api }) {
     paint();
   }
 
+  // ——— палец: площадка ходьбы, щипок, кнопки на поле (таск 149) ———
+  //
+  // Площадка показывается по первому касанию и больше не прячется: один раз
+  // зашли пальцем — дальше им и ходят. Обратно к мыши окно не переключается
+  // само, и это нарочно — кнопка, исчезающая под рукой, хуже лишней.
+
+  function setTouch(value) {
+    if (touching === value) return;
+    touching = value;
+    sync();
+  }
+
+  function padAt(event) {
+    const rect = padNode.getBoundingClientRect
+      ? padNode.getBoundingClientRect()
+      : { left: 0, top: 0, width: 0, height: 0 };
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
+    const dx = event.clientX - cx;
+    const dy = event.clientY - cy;
+    const move = volumePadVector(dx, dy, radius);
+    // Кружок показывает палец, но из площадки не выезжает.
+    const length = Math.hypot(dx, dy) || 1;
+    const reach = Math.min(1, length / radius) * radius * 0.62;
+    padKnob.style.transform = "translate(" + (dx / length) * reach + "px, " + (dy / length) * reach + "px)";
+    return move;
+  }
+
+  function padStart(event) {
+    if (pad || closed) return;
+    setTouch(true);
+    event.preventDefault();
+    if (padNode.setPointerCapture) {
+      try {
+        padNode.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // захват указателя площадкой не дали — обойдёмся событиями окна
+      }
+    }
+    const move = padAt(event);
+    pad = { id: event.pointerId, forward: move.forward, turn: move.turn };
+    padNode.classList.add("is-on");
+    walkSchedule();
+  }
+
+  function padMove(event) {
+    if (!pad || event.pointerId !== pad.id) return;
+    event.preventDefault();
+    const move = padAt(event);
+    pad = { id: pad.id, forward: move.forward, turn: move.turn };
+    walkSchedule();
+  }
+
+  function padEnd(event) {
+    if (!pad || (event && event.pointerId !== undefined && event.pointerId !== pad.id)) return;
+    pad = null;
+    padNode.classList.remove("is-on");
+    padKnob.style.transform = "";
+    walkStop();
+  }
+
+  // ——— лестница и этажи (таск 149) ———
+  //
+  // «У схем можно задавать этаж, а при подходе к любой лестнице спрашивать
+  // нужный этаж. Если 2 этажа, то просто с подтверждением переходить».
+  //
+  // Спрашивается **на подходе**: вопрос всплывает сам, когда человек подошёл к
+  // лестнице (`VOLUME_STAIR_REACH_MM`), и не всплывает второй раз у той же
+  // лестницы, пока от неё не отойдут. Один этаж на выбор — подтверждение одной
+  // кнопкой, как и просил заказчик; больше — список этажей.
+
+  /** Лестница, у которой стоит человек, или `null`. */
+  function stairHere() {
+    if (scene.empty || view !== "person") return null;
+    const near = volumeStairNear(scene.stairs, person);
+    return near ? near.stair : null;
+  }
+
+  /** Куда ведёт лестница: этажи других схем, годные для перехода. */
+  function floorOptions() {
+    return volumeFloors(getState().project, schemeId).options;
+  }
+
+  // Шаг сделан — не подошли ли к лестнице. Вопрос задаётся один раз на подход:
+  // `stairAsked` помнит ту лестницу, про которую уже спросили, а выход из её
+  // окрестности снова разрешает вопрос.
+  function stairCheck() {
+    const stair = stairHere();
+    const id = stair ? stair.objectId : null;
+    if (id === stairAsked) return;
+    stairAsked = id;
+    syncStair();
+    if (!stair || ask) return;
+    askStairs(false);
+  }
+
+  /** Кнопка «Этаж» и строка подсказки — по тому, стоим ли мы у лестницы. */
+  function syncStair() {
+    const stair = stairHere();
+    stairButton.hidden = !stair || Boolean(ask) || floorOptions().length === 0;
+    syncHint();
+  }
+
+  /**
+   * Спросить про этаж. `byHand` — спросили кнопкой или Enter: тогда молчать
+   * нельзя даже там, где переходить некуда, иначе кнопка выглядит сломанной.
+   */
+  function askStairs(byHand) {
+    const stair = stairHere();
+    if (!stair) {
+      if (byHand) notify(strings.volume.stairNoFloors, "info");
+      return;
+    }
+    const options = floorOptions();
+    if (options.length === 0) {
+      // Строка под полем про это уже говорит (`volumeStairLine`) — вопроса без
+      // ответов не задаём.
+      if (byHand) notify(strings.volume.stairNoFloors, "info");
+      return;
+    }
+    // Вопрос забирает клавиатуру и отпускает мышь: по курсору в нём и щёлкают.
+    keyStop(null);
+    padEnd(null);
+    askWasLocked = locked;
+    if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
+    ask = { stair, options };
+    askText.textContent =
+      options.length === 1
+        ? text("volume.stairOne", { floor: options[0].floor })
+        : strings.volume.stairPick;
+    const buttons = options.map((option, index) =>
+      uiButton(
+        options.length === 1 ? strings.volume.stairGo : text("volume.stairOption", option),
+        {
+          class: "ui-btn" + (index === 0 ? " ui-btn--accent" : ""),
+          on: { click: () => goToFloor(option) },
+        },
+      ),
+    );
+    buttons.push(uiButton(strings.volume.stairStay, { on: { click: () => closeAsk() } }));
+    askRow.replaceChildren(...buttons);
+    askBox.hidden = false;
+    syncStair();
+  }
+
+  function closeAsk() {
+    if (!ask) return;
+    ask = null;
+    askBox.hidden = true;
+    askRow.replaceChildren();
+    if (askWasLocked && !touching) grabPointer();
+    askWasLocked = false;
+    syncStair();
+  }
+
+  /**
+   * Перейти на другой этаж.
+   *
+   * **Человек остаётся там, где стоял**, — в том же месте плана и глядя в ту же
+   * сторону, — и это и есть ответ на «камера встаёт у соответствующей лестницы
+   * нового этажа». Лестничная клетка у этажей одного дома в одном месте плана:
+   * встав по тем же координатам, человек оказывается ровно у лестницы нового
+   * этажа, а `volumeMoveTo` выталкивает его из самой лестницы и из стен тем же
+   * счётом, которым это делает ходьба.
+   *
+   * **Лестницы на новом этаже нет** — правило то же, и другого честного места
+   * всё равно нет: человек встаёт в том же месте плана (у `volumeMoveTo` оно
+   * зажато габаритом чертежа и вытолкнуто из стен), а окно говорит об этом
+   * вслух. Выдумывать ему середину комнаты значило бы соврать о том, где он
+   * поднялся.
+   *
+   * Что остаётся при человеке: открытые двери (у этажей свои проёмы, и
+   * вернувшись назад он найдёт свои двери как оставил) и вид. Что сбрасывается:
+   * выделение — выделенная метка осталась на прежнем этаже, и карточка про неё
+   * говорила бы о том, чего в кадре нет.
+   */
+  function goToFloor(option) {
+    closeAsk();
+    const state = getState();
+    if (!findScheme(state.project, option.schemeId)) return;
+    schemeId = option.schemeId;
+    scene = sceneOf(state) || scene;
+    const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
+    person.x = moved.x;
+    person.y = moved.y;
+    around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
+    select(null);
+    // У лестницы, с которой сошли, вопрос второй раз не задаётся: иначе он
+    // всплыл бы сразу же и предложил вернуться обратно.
+    stairAsked = (stairHere() || {}).objectId || null;
+    sync();
+    notify(
+      option.stairs
+        ? text("volume.stairArrived", { floor: option.floor })
+        : text("volume.stairArrivedPlain", { floor: option.floor }),
+      "info",
+    );
+  }
+
+  // ——— снимок вида (таск 149) ———
+  //
+  // «Да, но просто возможность сделать „скрин“». Снимок — **ровно тот кадр,
+  // который на поле**: тем же холстом, той же величины, без рамки, подписи и
+  // полей. Имя собирает `exportFileName`, то есть то же правило, по которому
+  // названы все выгрузки объекта, — снимок ложится в папку загрузок рядом с
+  // ними, а не под случайным именем от браузера.
+
+  async function shot() {
+    const name = exportFileName(getState().project, text("volume.shotPart", { name: schemeName() }), "png");
+    try {
+      exportDownload(await viewPng(node), name);
+      notify(text("volume.shotDone", { name }), "success");
+    } catch (error) {
+      notify(error && error.message ? error.message : strings.exportPanel.failed, "error");
+    }
+  }
+
+  function schemeName() {
+    const found = findScheme(getState().project, schemeId);
+    return found ? found.name : "";
+  }
+
   // ——— клавиатура ———
 
   function onKeyDown(event) {
     if (!ours()) return;
+    // Вопрос про этаж (таск 149) забирает клавиатуру себе: Enter переходит на
+    // первый этаж из списка, Esc отказывается — и ни то, ни другое не доходит
+    // до окна и до стопки диалогов. Иначе Esc закрыл бы весь объём, а Enter
+    // нажал бы «Закрыть объём»: в стопке диалогов главное действие окна — она.
+    if (ask) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAsk();
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        goToFloor(ask.options[0]);
+        return;
+      }
+      // Остальные клавиши при открытом вопросе не ходят и не вертят: человек
+      // отвечает на вопрос, а не идёт.
+      return;
+    }
+    // Стоим у лестницы — Enter спрашивает про этаж (таск 149). Это та же
+    // клавиша «согласиться», которой отвечают на сам вопрос, и единственная
+    // новая в окне: E, R, V, F, W A S D, стрелки, Shift и Alt заняты.
+    if (event.key === "Enter" && stairHere()) {
+      event.preventDefault();
+      event.stopPropagation();
+      askStairs(true);
+      return;
+    }
     // Esc при захвате отпускает мышь и окна не закрывает: человек жмёт его,
     // чтобы вернуть курсор, а не чтобы уйти. Перехват в фазе погружения —
     // слушатель диалогов стоит на всплытии.
@@ -962,15 +1459,29 @@ export function openVolume({ schemeId, api }) {
       hint.textContent = strings.volume.emptyHint;
       return;
     }
-    const base = view === "person" ? strings.volume.hintPerson : strings.volume.hintAround;
-    const grab = locked ? strings.volume.hintLocked : strings.volume.hintGrab;
-    hint.textContent = base + " " + grab + " " + strings.volume.pickHint + " " + volumeDoorLine(scene.doors, openDoors, aimedDoor || heldDoor);
+    const parts = [view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
+    // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
+    if (touching) parts.push(strings.volume.hintTouch);
+    else parts.push(locked ? strings.volume.hintLocked : strings.volume.hintGrab);
+    parts.push(strings.volume.pickHint);
+    parts.push(volumeDoorLine(scene.doors, openDoors, aimedDoor || heldDoor, touching));
+    // Про лестницу — последней: она есть под рукой далеко не всегда, а когда
+    // есть, это самое новое в строке.
+    parts.push(volumeStairLine(stairHere(), floorOptions()));
+    hint.textContent = parts.filter((part) => part !== "").join(" ");
   }
 
   function sync() {
     personButton.className = "ui-btn" + (view === "person" ? " is-on" : "");
     aroundButton.className = "ui-btn" + (view === "around" ? " is-on" : "");
     stage.classList.toggle("volume__stage--person", view === "person");
+    // Площадка ходьбы — только пальцем и только там, где ходят: в обзоре она
+    // возила бы цель камеры, а не человека, и была бы просто непонятной.
+    padNode.hidden = !touching || view !== "person" || scene.empty;
+    if (padNode.hidden) padEnd(null);
+    doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
+    shotButton.hidden = scene.empty;
+    if (titleNode) titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
     if (scene.empty) {
       meta.textContent = strings.volume.empty;
       missing.textContent = "";
@@ -991,7 +1502,7 @@ export function openVolume({ schemeId, api }) {
       missing.hidden = scene.unplaced.length === 0;
     }
     syncWhere();
-    syncHint();
+    syncStair();
     syncSelection();
   }
 
@@ -1048,6 +1559,7 @@ export function openVolume({ schemeId, api }) {
 
   stage.addEventListener("pointerdown", onPointerDown);
   stage.addEventListener("wheel", onWheel, { passive: false });
+  padNode.addEventListener("pointerdown", padStart);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
