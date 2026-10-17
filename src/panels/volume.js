@@ -1535,7 +1535,9 @@ function createVolume({ api, hosts }) {
       if (view === "around") {
         const place = volumeFloorAt(camera(), viewport(), at.x, at.y);
         if (place) {
-          const moved = volumeMoveTo(scene, place);
+          // Перенос — та же ходьба, только сразу: куда присевший пройдёт, туда
+          // он и переносится (G234). Стоя под низкое его не поставит ничто.
+          const moved = volumeMoveTo(scene, place, volumeStanceHead(stance));
           person.x = moved.x;
           person.y = moved.y;
           // Перенесли присевшего — под низким он остался или вышел, решает
@@ -1829,7 +1831,7 @@ function createVolume({ api, hosts }) {
     // этого изменения не увидит как смены схемы — `schemeId` уже равен ему.
     setState({ schemeId });
     scene = sceneOf(state) || scene;
-    const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
+    const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
     around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
@@ -1891,7 +1893,7 @@ function createVolume({ api, hosts }) {
     scene = sceneOf(state) || scene;
     if (!scene.empty) {
       const at = place || { x: person.x, y: person.y, yaw: person.yaw };
-      const moved = volumeMoveTo(scene, at);
+      const moved = volumeMoveTo(scene, at, volumeStanceHead(stance));
       person.x = moved.x;
       person.y = moved.y;
       person.yaw = at.yaw;
@@ -2228,7 +2230,7 @@ function createVolume({ api, hosts }) {
     schemeId = state.schemeId;
     scene = sceneOf(state) || scene;
     if (!scene.empty) {
-      const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
+      const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
       person.x = moved.x;
       person.y = moved.y;
       around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
