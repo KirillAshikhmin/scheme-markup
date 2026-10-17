@@ -3835,6 +3835,19 @@
   display: none;
 }
 
+/* Прицел виден и при неперехваченном курсоре (G235, слова заказчика), и чтобы
+   крестов не стало двух, своего указателя у холста в этот миг нет вовсе: прицел
+   **и есть** курсор, он идёт за мышью и показывает ровно ту точку, на которую
+   подействуют E и клик.
+
+   Класс ставится вместе с самим прицелом (`syncAimNode`), а не по виду: погас
+   прицел — вернулся курсор, и поле без чертежа не остаётся без указателя.
+   Кнопки, плашки и площадка ходьбы лежат своими узлами поверх холста и свой
+   курсор сохраняют. */
+.volume__stage--aim .volume__canvas {
+  cursor: none;
+}
+
 /* Четыре штриха двумя узлами: полоса с разрывом посередине рисуется градиентом
    с резкими границами — так в разметке не заводится четырёх пустых узлов ради
    четырёх чёрточек. Тень вместо обводки: у полосы с прозрачной серединой
@@ -6836,13 +6849,21 @@ const strings = {
     floorLabel: "ЭТАЖ",
     floorNone: "не задан",
     viewPerson: "От первого лица",
-    viewPersonHint: "Ходить по комнатам: мышь вертит головой, W A S D ходят, Shift ускоряет",
+    viewPersonHint: "Ходить по комнатам: мышь вертит головой, W A S D ходят, Shift ускоряет, Control приседает, пробел подпрыгивает",
     viewAround: "Обзор",
     viewAroundHint: "Отойти и посмотреть со стороны: видно, где стоишь и как устроена вся схема",
     fit: "Вся схема",
     fitHint: "Отойти так, чтобы схема уместилась целиком (F)",
     // Подсказки разные у двух видов: мышь в них делает разное.
-    hintPerson: "W A S D — ход, Shift — быстрее, ← → — поворот, V — сменить вид. Сквозь стены нельзя, сквозь дверные полотна можно. Слева внизу — миникарта.",
+    // Клавиши стойки (G234) стоят в подсказке рядом с ходьбой: это ходьба и
+    // есть, только вверх и вниз. Числа в строке не называются — человеку нужно
+    // знать клавишу, а 550 и 300 мм живут в коде и в отчёте.
+    hintPerson: "W A S D — ход, Shift — быстрее, ← → — поворот, Control — присесть, пробел — прыжок, V — сменить вид. Сквозь стены нельзя, сквозь дверные полотна можно. Слева внизу — миникарта.",
+    // Встать негде (G234). Заказчик назвал этот случай сам: человек отпустил
+    // Control под низким потолком. Протолкнуть макушку сквозь вещь нельзя,
+    // отодвинуть человека в сторону — тоже; остаётся сказать и подождать, пока
+    // он выйдет.
+    standBlocked: "Встать негде: над вами низко. Отойдите — и вы выпрямитесь сами.",
     hintAround: "Мышь вращает вид, колесо приближает, W A S D — переносят, V — сменить вид, F — вся схема. Клик по полу переносит человека туда.",
     hintGrab: "Щелчок по полю отдаёт мышь виду.",
     hintLocked: "Мышь у вида: Esc её вернёт, Alt (Option) покажет курсор, пока держите.",
@@ -6850,8 +6871,11 @@ const strings = {
     // объект не попало ничего (G68), и говорить об этом строкой не надо —
     // надо, чтобы это было видно по самим дверям.
     doors: "Двери: открыто {open} из {count}.",
-    doorKeys: "E открывает дверь, на которую смотрите, R — все двери разом.",
-    doorAimed: "E откроет или закроет эту дверь, R — все двери разом.",
+    // Щелчок по двери её открывает (G235) — и сказано это там же, где про
+    // клавишу: одно правило, два повода, и человеку всё равно, какой из них он
+    // вспомнит первым.
+    doorKeys: "Клик или E открывают дверь, на которую показываете, R — все двери разом.",
+    doorAimed: "Клик или E откроют и закроют эту дверь, R — все двери разом.",
     doorsOpened: "Все двери открыты",
     doorsClosed: "Все двери закрыты",
     doorsNone: "На этой схеме нет ни одной двери",
@@ -6865,11 +6889,13 @@ const strings = {
     counts: "Стен {walls} · проёмов {openings} · помещений {rooms} · меток {marks}",
     // Метки в объёме (таск 148). Выделение общее с планом, и сказать об этом
     // надо один раз словом: иначе человек решит, что окно живёт отдельно.
-    pickHint: "Клик по вещи выделяет её — то же выделение, что в списке меток и на плане.",
-    // Прицел и E (G213, G214). Одно правило на клавишу: действует на то, на
-    // что смотришь, — и сказать его надо там же, где показан прицел.
-    aimHint: "Прицел посреди поля — то, на что смотрите: E выделит вещь в нём.",
-    aimless: "В прицеле ничего нет: наведите его на вещь или на дверь — E подействует на то, на что смотрите.",
+    pickHint: "Клик равноценен E: по вещи — выделит её (то же выделение, что в списке меток и на плане), по двери — откроет или закроет.",
+    // Прицел, E и клик (G213, G214, G235). Одно правило: действуют на то, на
+    // что смотришь, — и сказать его надо там же, где показан прицел. Про то,
+    // что прицел идёт за курсором, сказано прямо: иначе человек с мышью решит,
+    // что целится середина поля.
+    aimHint: "Прицел — то, на что смотрите: он идёт за курсором, а под захваченной мышью стоит посреди поля.",
+    aimless: "В прицеле ничего нет: наведите его на вещь или на дверь — E и клик подействуют на то, на что смотрите.",
     cardClose: "Снять выделение",
     // Не размещённые: заказчик решил прямо — место им не выдумывать, но и
     // молча терять нельзя. Поэтому список стоит под полем и зовёт метки по
@@ -44404,7 +44430,7 @@ registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
 // ——— числа ——————————————————————————————————————————————————————————————
 
-/** Высота глаз. Постоянная: «от первого лица», приседать и прыгать незачем. */
+/** Высота глаз стоя. С таска 159 она не единственная — см. `VOLUME_CROUCH_MM`. */
 const VOLUME_EYE_MM = 1600;
 /**
  * Радиус тела. Он же — страховка от того, чем кончается «камера упёрлась носом
@@ -44421,6 +44447,71 @@ const VOLUME_NEAR_MM = 80;
 const VOLUME_STEP_MM = 300;
 /** Макушка: под тем, что выше неё, проходят не нагибаясь. */
 const VOLUME_HEAD_MM = 1900;
+
+// ——— стойка: присед и прыжок (G234, таск 159) ——————————————————————————
+//
+// Слова заказчика: «Сделай на клавишу Control функцию Присесть, а на пробел -
+// прыжок». Это **квартира, а не игра**: числа взяты у человека, а не у
+// платформера, и названы здесь все до одного.
+//
+// Высота глаз больше не постоянная, и прежняя оговорка «приседать и прыгать
+// незачем» снята его словом. Что при этом не изменилось: в объект по-прежнему
+// не пишется ничего (G68) — стойка живёт в сеансе, как двери и выделение.
+
+/**
+ * От глаз до макушки — 300 мм, и это не новое число, а то же самое: стоя глаза
+ * на 1600, макушка на 1900. Поэтому присед считается **один раз** — опускаются
+ * и глаза, и макушка, — и столкновения с глазами не расходятся никогда.
+ */
+const VOLUME_CROWN_MM = VOLUME_HEAD_MM - VOLUME_EYE_MM;
+/**
+ * Насколько опускается присед: 550 мм. Глаза уходят с 1600 на **1050**,
+ * макушка — с 1900 на **1350**.
+ *
+ * Числа человеческие: у сидящего на корточках взрослого глаза как раз около
+ * метра, а 1350 — та высота, под которой он проходит. Проверяется это не
+ * рулеткой, а квартирой: низ навесного шкафа кухни — 1400–1500 мм, низ марша
+ * лестницы над проходом — от 1300, и присед обязан пускать именно туда.
+ * Возьми меньше (скажем, 1000 мм приседа) — и под шкаф человек не пролезет,
+ * то есть клавиша не будет делать ничего; возьми больше — он поползёт по полу,
+ * чего заказчик не просил.
+ */
+const VOLUME_CROUCH_MM = 550;
+/**
+ * Скорость приседа и подъёма — 3000 мм/с, то есть **0,18 с** на все 550 мм.
+ *
+ * Не мгновенно, и причина не в красоте: Control на главном экране соседствует с
+ * Ctrl+Z, Ctrl+C и Ctrl+V, и между нажатием Control и буквой проходит
+ * десятая доля секунды. Мгновенный присед дёргал бы кадр на каждой отмене;
+ * плавный за это время едва начинается и возвращается назад сам (см.
+ * `volumeStanceKey`).
+ */
+const VOLUME_CROUCH_MM_S = 3000;
+/**
+ * Высота прыжка — 300 мм. Это ступенька, а не прыжок на месте в игре: взрослый
+ * с места подпрыгивает на 30–40 см, и двух метров в квартире не нужно.
+ */
+const VOLUME_JUMP_MM = 300;
+/** Падение — настоящее земное ускорение, 9,81 м/с². Второго числа тут незачем. */
+const VOLUME_FALL_MM_S2 = 9810;
+/**
+ * Начальная скорость прыжка — та, что даёт ровно `VOLUME_JUMP_MM` и ни
+ * миллиметром больше: v = √(2gh) = 2426 мм/с. Отсюда **взлёт 0,25 с, падение
+ * 0,25 с**, вся дуга — полсекунды.
+ */
+const VOLUME_JUMP_MM_S = Math.sqrt(2 * VOLUME_FALL_MM_S2 * VOLUME_JUMP_MM);
+/**
+ * Перемычка, ниже которой проём держит стоя, — 1700 мм.
+ *
+ * Заказчик назвал проём среди низких мест, где «встать нельзя». Но высота
+ * проёма в чертеже — это высота полотна, а не просвет над головой: дверь 1800
+ * в чьём-то уже размеченном объекте не должна перестать пускать человека,
+ * который вчера через неё ходил. Поэтому держит только то, что низко
+ * **несомненно**: 1700 мм — высота, под которой головой не наклонишься, а
+ * присядешь. Проём 1500 мм пропускает присед (макушка 1350) и не пускает стоя;
+ * дверь 2100 мм остаётся дырой в любой стойке, как и была.
+ */
+const VOLUME_LINTEL_MM = 1700;
 /**
  * Свободное место вокруг, ниже которого окно говорит «тесно».
  *
@@ -44730,6 +44821,32 @@ function volumeWallSolids(wall, openings) {
   }
   if (cursor < length) spans.push({ fromMm: cursor, toMm: length });
   return spans.filter((span) => span.toMm - span.fromMm > 0);
+}
+
+/**
+ * Низкие перемычки над проёмами (G234): препятствие **над** дырой, которое
+ * держит стоящего и пропускает присевшего.
+ *
+ * Зачем оно вообще: проём, через который проходят, вырезан из препятствий
+ * целиком (`volumeWallSolids`) — то есть лаз высотой в метр до таска 159
+ * пропускал человека в полный рост. Заказчик назвал проём среди низких мест,
+ * где «встать нельзя», и перемычка — это он же, только посчитанный.
+ *
+ * Порог отбора — `VOLUME_LINTEL_MM`, и он нарочно много ниже макушки: см. там.
+ */
+function volumeWallLintels(openings, wallHeightMm) {
+  const out = [];
+  for (const opening of openings || []) {
+    if (!volumeOpeningWalkable(opening)) continue;
+    const bottom = Math.max(0, Number(opening.heightAboveFloorMm) || 0);
+    const top = bottom + (Number(opening.heightMm) || 0);
+    if (!(top > 0) || top >= VOLUME_LINTEL_MM) continue;
+    const fromMm = Number(opening.atMm) || 0;
+    const toMm = fromMm + (Number(opening.widthMm) || 0);
+    if (!(toMm > fromMm)) continue;
+    out.push({ fromMm, toMm, bottomMm: top, topMm: Math.max(top, Number(wallHeightMm) || top) });
+  }
+  return out;
 }
 
 /**
@@ -45216,6 +45333,11 @@ function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = []
  * как сквозь стену, и заказчик разрешил проходить ровно сквозь **дверные
  * полотна**, а не сквозь вещи. Короб под потолком, наоборот, над головой, и
  * останавливать им человека было бы странно.
+ *
+ * Спрашивается это **в полный рост** и один раз, при сборке сцены: присед
+ * макушку только опускает, то есть отсеять он может лишь то, что уже отсеяно
+ * здесь. Что держит присевшего, решается на шаге — `volumeSolidBlocks`, и
+ * высоты вещи для этого едут в препятствие (`volumePrismSolid`).
  */
 function volumePrismBlocks(prism) {
   return prism.bottomMm < VOLUME_HEAD_MM && prism.topMm > VOLUME_STEP_MM;
@@ -45246,6 +45368,10 @@ function volumePrismSolid(prism) {
     ny,
     half: length / 2,
     halfT: depth / 2,
+    // Высоты вещи едут в препятствие вместе с её габаритом (G234): под
+    // навесным шкафом присевший проходит, сквозь колонну до потолка — нет.
+    bottomMm: Number(prism.bottomMm) || 0,
+    topMm: Number(prism.topMm) || 0,
   };
 }
 
@@ -45450,6 +45576,13 @@ const VOLUME_MARK_LIFT_MM = 2;
  * же пара точек экрана, что и десять, но грань у них настоящая.
  */
 const VOLUME_MARK_MIN_MM = 20;
+
+/**
+ * Напуск пола под стеной (дефект D37): на сколько полоса пола выходит за грань
+ * стены по обе стороны. Пять сантиметров прячутся под самой стеной и в углах, а
+ * больше — и пол полез бы кантом наружу, из-под стены на землю.
+ */
+const VOLUME_FLOOR_LAP = 50;
 
 /**
  * Вещь **стоит на полу**, а не висит на своей высоте (дефект D34).
@@ -46353,7 +46486,53 @@ function volumeScene(project, schemeId, options = {}) {
     volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
-    for (const span of volumeWallSolids(wall, openings)) {
+    // **Пол под стеной** (дефект D37). Слова заказчика: «под дверными проёмами
+    // нет пола».
+    //
+    // Пол лежит по контурам помещений, то есть кончается у внутренней грани
+    // стены. Под самой стеной пола нет никогда, а **проём — это дыра в стене на
+    // всю её толщину**, и порога в нём не было тоже. Раньше дыры затыкала плита
+    // чертежа, крашенная полом; с тех пор как плита стала землёй (G237), каждая
+    // щель читается травой в доме.
+    //
+    // Поэтому пол кладётся полосой **под всю стену: во всю длину и во всю
+    // толщину, поверх проёмов**. Это и есть ответ на порог: он получается сам,
+    // одной гранью на стену, и не требует ни разбора проёмов, ни объединения
+    // контуров. Снаружи полоса не видна — её ровно накрывает сама стена.
+    //
+    // `VOLUME_FLOOR_LAP` — напуск по обе стороны: контур помещения обводят по
+    // подложке рукой, и промахнуться на сантиметр-другой мимо грани стены
+    // обычное дело. Напуск маленький нарочно: пять сантиметров прячутся под
+    // стеной и в углах, а сделай его больше — пол полез бы кантом наружу.
+    //
+    // Нужна полоса только там, где плита стала землёй: без обведённых помещений
+    // плита сама пол, и подкладывать под стену нечего.
+    if (rooms.length > 0) {
+      const middleMm = vectors.len / 2;
+      faces.push(
+        volumeFace(
+          volumeBoxCorners(
+            {
+              x: Number(wall.aMm.x) + vectors.u.x * middleMm,
+              y: Number(wall.aMm.y) + vectors.u.y * middleMm,
+            },
+            vectors.u,
+            vectors.len + VOLUME_FLOOR_LAP * 2,
+            Number(wall.thicknessMm) + VOLUME_FLOOR_LAP * 2,
+          ).map((point) => volumeAt(point, 0)),
+          VOLUME_FLOOR_RGB,
+          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
+        ),
+      );
+    }
+    // Сплошные участки стены — во всю её высоту; низкая перемычка над проёмом
+    // (G234) — своим куском от верха проёма до верха стены. У препятствия
+    // появились высоты: по ним присевший проходит там, где стоящий не проходит.
+    const spans = [
+      ...volumeWallSolids(wall, openings).map((span) => ({ ...span, bottomMm: 0, topMm: height })),
+      ...volumeWallLintels(openings, height),
+    ];
+    for (const span of spans) {
       const middle = (span.fromMm + span.toMm) / 2;
       solids.push({
         cx: Number(wall.aMm.x) + vectors.u.x * middle,
@@ -46364,6 +46543,8 @@ function volumeScene(project, schemeId, options = {}) {
         ny: vectors.n.y,
         half: (span.toMm - span.fromMm) / 2,
         halfT: Number(wall.thicknessMm) / 2,
+        bottomMm: span.bottomMm,
+        topMm: span.topMm,
       });
     }
   }
@@ -46401,6 +46582,14 @@ function volumeScene(project, schemeId, options = {}) {
     solids,
     rooms,
     boundsMm: bounds,
+    // На сколько нарисованное выходит за габарит чертежа: стена стоит на всю
+    // толщину от своей оси, а пол под ней — ещё и с напуском (D37). Обзор
+    // «вся схема» вмещает то, что **рисуется**, и без этого числа он резал бы
+    // угол у толстых стен — впритык он стоял и до напуска.
+    outsetMm: walls.reduce(
+      (most, wall) => Math.max(most, Number(wall.thicknessMm) / 2 + (rooms.length > 0 ? VOLUME_FLOOR_LAP : 0)),
+      0,
+    ),
     heightMm: schemeHeight.mm,
     wallCount: walls.length,
     openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
@@ -46468,11 +46657,56 @@ function volumeGap(solid, x, y) {
   return Math.hypot(Math.max(along, 0), Math.max(across, 0));
 }
 
-/** Сколько свободного места вокруг точки. */
-function volumeFreeMm(solids, x, y) {
+/**
+ * Держит ли препятствие человека, у которого макушка на `headMm` (G234).
+ *
+ * Правило то же, что у вещи чертежа (`volumePrismBlocks`), только спрашивается
+ * оно не при сборке сцены, а на каждом шаге: присев, человек проходит под тем,
+ * что выше его макушки, — и это единственный способ сделать так, чтобы
+ * «проходить там, где низко» и «сквозь стены нельзя» были одним счётом, а не
+ * двумя.
+ *
+ * Препятствие без высот (такие строит рука в тестах) держит всегда: `topMm`
+ * без значения — это «до потолка», и молча пропускать сквозь него нельзя.
+ */
+function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM) {
+  const bottom = Number(solid.bottomMm) || 0;
+  const top = solid.topMm === undefined || solid.topMm === null ? Infinity : Number(solid.topMm);
+  return bottom < headMm && top > VOLUME_STEP_MM;
+}
+
+/** Сколько свободного места вокруг точки для человека с макушкой на `headMm`. */
+function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM) {
   let free = Infinity;
-  for (const solid of solids) free = Math.min(free, volumeGap(solid, x, y));
+  for (const solid of solids) {
+    if (!volumeSolidBlocks(solid, headMm)) continue;
+    free = Math.min(free, volumeGap(solid, x, y));
+  }
   return free;
+}
+
+/**
+ * Можно ли здесь встать (G234).
+ *
+ * Заказчик назвал случай прямо: человек отпустил Control под потолком в
+ * 1200 мм. Ответ — **он не встаёт и остаётся присевшим**: протолкнуть макушку
+ * сквозь низ шкафа значило бы пустить человека сквозь вещь, а вытолкнуть его в
+ * сторону — переставить его туда, куда он не шёл. Он встанет сам, как только
+ * выйдет из-под низкого места; окно говорит об этом словом.
+ *
+ * Считается **только по тем препятствиям, которые мешают именно вставанию**:
+ * которые держат стоя и не держат сейчас. Стену, которая держит в любой стойке,
+ * спрашивать нельзя не ради скорости: прижатый к ней человек стоит ровно в
+ * `VOLUME_BODY_MM` от её грани, и сравнение «на волос ближе или на волос
+ * дальше» в double запрещало бы ему вставать у стенки через раз.
+ */
+function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM) {
+  for (const solid of (scene && scene.solids) || []) {
+    if (volumeSolidBlocks(solid, headMm)) continue;
+    if (!volumeSolidBlocks(solid, VOLUME_HEAD_MM)) continue;
+    if (volumeGap(solid, at.x, at.y) < VOLUME_BODY_MM) return false;
+  }
+  return true;
 }
 
 /**
@@ -46533,12 +46767,15 @@ function volumeStart(scene) {
  * не останавливается, уткнувшись. Четыре прохода держат угол, где давят сразу
  * две стены.
  */
-function volumePush(solids, at, radius) {
+function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
   let x = at.x;
   let y = at.y;
   for (let pass = 0; pass < VOLUME_PUSH_PASSES; pass += 1) {
     let moved = false;
     for (const solid of solids) {
+      // Присевший проходит под высоким (G234): препятствие, которое кончается
+      // ниже его макушки, тела не касается вовсе.
+      if (!volumeSolidBlocks(solid, headMm)) continue;
       const dx = x - solid.cx;
       const dy = y - solid.cy;
       const along = dx * solid.ux + dy * solid.uy;
@@ -46572,15 +46809,110 @@ function volumePush(solids, at, radius) {
  * десятую долю секунды — это 480 мм, а перегородка бывает в 50 мм: без дробления
  * сквозь неё проходили бы при любом подвисании вкладки.
  */
-function volumeStep(scene, at, dx, dy) {
+function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
   const solids = scene.solids || [];
   const length = Math.hypot(dx, dy);
   const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
   let point = { x: at.x, y: at.y };
   for (let index = 0; index < parts; index += 1) {
-    point = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM);
+    point = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
   }
   return point;
+}
+
+// ——— стойка (G234, таск 159) ————————————————————————————————————————————
+//
+// Присед и прыжок — **чистый счёт**, вынесенный сюда целиком: это одна третья
+// координата человека, и в обработчике клавиши её не проверить ничем. Поле
+// зовёт отсюда четыре функции и не считает сам ни миллиметра.
+//
+// Стойка — `{crouchMm, liftMm, speedMm}`: насколько присел, насколько оторвался
+// от пола и с какой скоростью идёт вверх. В объект из этого не попадает ничего
+// (G68) — она живёт в сеансе поверхности, как открытые двери.
+
+/** Стойка, с которой встают на пол: в полный рост и на земле. */
+function volumeStanceStart() {
+  return { crouchMm: 0, liftMm: 0, speedMm: 0 };
+}
+
+/** Высота глаз в этой стойке: присед опускает, прыжок поднимает. */
+function volumeStanceEye(stance) {
+  return VOLUME_EYE_MM - stance.crouchMm + stance.liftMm;
+}
+
+/**
+ * Макушка в этой стойке — она и решает, где человек пройдёт.
+ *
+ * **Прыжок макушку не поднимает**, и это решение, а не недосмотр: стоять на
+ * вещах в объёме нельзя (пола над полом в сцене нет), и пусти прыжок сквозь
+ * низкое препятствие — человек приземлился бы внутри шкафа. Прыжок поднимает
+ * глаза, то есть позволяет заглянуть за перегородку; проходимость он не
+ * меняет — «сквозь стены нельзя, прыгнув тоже».
+ */
+function volumeStanceHead(stance) {
+  return VOLUME_HEAD_MM - stance.crouchMm;
+}
+
+/** В воздухе ли человек: прыжок идёт, пока он не вернулся на пол. */
+function volumeStanceAir(stance) {
+  return stance.liftMm > 0 || stance.speedMm > 0;
+}
+
+/**
+ * Нужен ли стойке ещё один тик. Часы в объёме идут, только пока их держат
+ * (клавиша, палец на площадке), и прыжок с приседом — третий повод: иначе
+ * прыжок замер бы в воздухе у того, кто прыгнул, не идя.
+ *
+ * Присед, которому **не дали встать**, поводом не считается: он уже стоит на
+ * своих 550 мм, и ждать от него нечего — встанет он на том же тике, которым
+ * выйдет из-под низкого места.
+ */
+function volumeStanceBusy(stance, crouch) {
+  if (volumeStanceAir(stance)) return true;
+  return stance.crouchMm !== (crouch ? VOLUME_CROUCH_MM : 0);
+}
+
+/**
+ * Прыжок (G234). Разовый: пока человек в воздухе, второго не бывает.
+ *
+ * **Присев, не прыгают.** Это не придирка к игровым привычкам: присед —
+ * единственный способ оказаться там, где над головой низко, и прыжок оттуда
+ * ударил бы макушкой в то, под что человек только что пролез.
+ */
+function volumeStanceJump(stance) {
+  if (stance.crouchMm > 0 || volumeStanceAir(stance)) return stance;
+  return { ...stance, speedMm: VOLUME_JUMP_MM_S };
+}
+
+/**
+ * Шаг стойки за `seconds` секунд: присед едет к цели, прыжок летит по дуге.
+ *
+ * `crouch` — держат ли Control (или человек застрял под низким и ещё не
+ * встал), `canStand` — есть ли над ним место, чтобы выпрямиться. Отказ в
+ * подъёме честный: присед **остаётся**, стойка не меняется ни на миллиметр, и
+ * сквозь низ шкафа никто не проходит.
+ */
+function volumeStanceStep(stance, seconds, options = {}) {
+  const span = Math.max(0, Number(seconds) || 0);
+  const crouch = Boolean(options.crouch);
+  const canStand = options.canStand !== false;
+  const target = crouch ? VOLUME_CROUCH_MM : 0;
+  let crouchMm = stance.crouchMm;
+  if (target > crouchMm) crouchMm = Math.min(target, crouchMm + VOLUME_CROUCH_MM_S * span);
+  else if (target < crouchMm && canStand) crouchMm = Math.max(target, crouchMm - VOLUME_CROUCH_MM_S * span);
+  let liftMm = stance.liftMm;
+  let speedMm = stance.speedMm;
+  if (volumeStanceAir(stance)) {
+    speedMm -= VOLUME_FALL_MM_S2 * span;
+    liftMm += speedMm * span;
+    // Приземлились: ниже пола не бывает, и скорость гасится здесь же — иначе
+    // следующий тик утащил бы человека под пол.
+    if (liftMm <= 0) {
+      liftMm = 0;
+      speedMm = 0;
+    }
+  }
+  return { crouchMm, liftMm, speedMm };
 }
 
 /**
@@ -46624,7 +46956,7 @@ function volumeFloorAt(camera, box, x, y) {
  * оказывался снаружи дома. Шаг внутрь даёт выталкиванию сторону, и выходит
  * обещанное: человек у внутренней грани наружной стены.
  */
-function volumeMoveTo(scene, at) {
+function volumeMoveTo(scene, at, headMm = VOLUME_HEAD_MM) {
   const bounds = scene && scene.boundsMm;
   const inside = (value, min, max) => {
     const from = min + VOLUME_BODY_MM;
@@ -46635,7 +46967,7 @@ function volumeMoveTo(scene, at) {
   const point = bounds
     ? { x: inside(at.x, bounds.minX, bounds.maxX), y: inside(at.y, bounds.minY, bounds.maxY) }
     : { x: at.x, y: at.y };
-  return volumePush((scene && scene.solids) || [], point, VOLUME_BODY_MM);
+  return volumePush((scene && scene.solids) || [], point, VOLUME_BODY_MM, headMm);
 }
 
 /**
@@ -48064,7 +48396,10 @@ function volumeAroundFit(scene, box) {
     y: (bounds.minY + bounds.maxY) / 2,
     z: height / 2,
   };
-  const radius = Math.hypot(bounds.widthMm, bounds.heightMm, height) / 2;
+  // Габарит берётся с выносом: стены стоят толщиной за своими осями, пол под
+  // ними — с напуском (D37), и всё это обязано попасть в кадр.
+  const outset = (scene.outsetMm || 0) * 2;
+  const radius = Math.hypot(bounds.widthMm + outset, bounds.heightMm + outset, height) / 2;
   const focal = volumeFocal(box);
   const fit = (radius * focal) / (0.42 * Math.min(box.width, box.height));
   return { target, distance: volumeAroundDistance(fit) };
@@ -48232,6 +48567,83 @@ function volumeKeyMove(code) {
  */
 const VOLUME_DOOR_KEY = "KeyE";
 const VOLUME_DOORS_KEY = "KeyR";
+
+// ——— клавиши стойки (G234) ——————————————————————————————————————————————
+//
+// **Control приседает, пробел прыгает** — прямые слова заказчика. Обе клавиши
+// лежат под большими пальцами, и обе на главном экране живут среди панелей,
+// кнопок и привычных сочетаний. Развести их пришлось нарочно.
+//
+// **Control против Ctrl+Z, Ctrl+C, Ctrl+V.** Отличить «присесть» от
+// «модификатора» в миг нажатия невозможно: первым приходит сам Control, а буква
+// — через десятую долю секунды. Поэтому присед начинается сразу, а приход буквы
+// с зажатым Control его **отменяет** (`"combo"`) и больше не начинает до
+// отпускания. Платой был бы дёрнутый кадр на каждой отмене — её снимает
+// плавность приседа (`VOLUME_CROUCH_MM_S`): за сотню миллисекунд он уходит на
+// 300 мм из 550 и возвращается сам. Сочетание при этом доходит до отмены и до
+// буфера нетронутым: `"combo"` не зовёт `preventDefault` и событие не
+// останавливает.
+//
+// **Пробел против прокрутки страницы и кнопки под фокусом.** Прокрутку снимает
+// `preventDefault` на нажатии; кнопку — он же вместе с `preventDefault` на
+// **отпускании**: нажатие кнопки пробелом браузер делает именно по `keyup`, и
+// одного нажатия тут не хватает. Сочетания с пробелом остаются системе:
+// Ctrl+Space (смена раскладки), Cmd+Space (поиск), Alt+Space (меню окна) —
+// стойке они не принадлежат.
+
+/** Пробел — прыжок. */
+const VOLUME_JUMP_KEY = "Space";
+
+/** Control он же Ctrl: приседает любой из двух. */
+function volumeCrouchKey(code) {
+  return code === "ControlLeft" || code === "ControlRight";
+}
+
+/**
+ * Что делает клавиша со стойкой: `"crouch"`, `"combo"`, `"jump"` или `null`.
+ *
+ * Чистая и вынесена наружу: правило, записанное внутри обработчика клавиши, не
+ * проверяется ничем. Разбор — в разделе выше.
+ */
+function volumeStanceKey(event) {
+  if (volumeCrouchKey(event.code)) return "crouch";
+  if (event.ctrlKey || event.metaKey) return "combo";
+  if (event.code === VOLUME_JUMP_KEY && !event.altKey) return "jump";
+  return null;
+}
+
+/**
+ * Куда целятся — и, с таска 159, **где нарисован прицел** (G235).
+ *
+ * Слова заказчика: «Когда курсор не перехвачен — тоже прицел надо отображать, а
+ * клик на дверь должен тоже её открывать. Клик равноценен нажатию E на объект
+ * под курсором».
+ *
+ * **Решение таска 151 отменено его словом.** Там прицел гас, пока курсор над
+ * полем, с доводом «второй крест посреди поля обещал бы то, чего не делает».
+ * Довод остался верным — и именно поэтому прицел теперь не второй крест, а
+ * тот же самый: он **идёт за курсором**, пока тот над полем, и возвращается
+ * посреди поля, когда мышь отдана виду. Двух прицелов не бывает ни на миг, и
+ * обещает он ровно то, что делает: «клик равноценен нажатию E на объект **под
+ * курсором**» — значит E и клик обязаны смотреть в одну точку, а точка эта
+ * одна на оба способа и живёт здесь.
+ *
+ * Разбор:
+ *
+ *   - **мышь у вида** (захват) — курсора нет вовсе, целятся серединой поля;
+ *   - **курсор над полем** — целится он;
+ *   - **курсор увели** на панель или за окно — от первого лица снова середина:
+ *     клавиша, переставшая работать от того, что мышь лежит на кнопке, была бы
+ *     загадкой;
+ *   - **в обзоре** середина поля не значит ничего (это и есть та часть решения
+ *     таска 151, которую заказчик не отменял), и без курсора ответа нет.
+ */
+function volumeAimAt(box, state) {
+  const middle = { x: box.width / 2, y: box.height / 2 };
+  if (state.locked) return middle;
+  if (state.pointer) return state.pointer;
+  return state.view === "person" ? middle : null;
+}
 
 /**
  * На что подействует **E** (G214): «нажатием на E на выключатель он должен
@@ -48672,9 +49084,23 @@ function createVolume({ api, hosts }) {
   let overlay = [];
 
   const start = scene.empty ? { x: 0, y: 0, yaw: 0 } : volumeStart(scene);
-  // Человек: место на плане, рысканье и наклон. Высота глаз постоянная —
-  // приседать и прыгать в этом режиме незачем.
+  // Человек: место на плане, рысканье и наклон. Высоту глаз он больше не носит
+  // с собой — её даёт стойка (G234), и постоянной она быть перестала по слову
+  // заказчика: «на клавишу Control функцию Присесть, а на пробел - прыжок».
   const person = { x: start.x, y: start.y, yaw: start.yaw, pitch: (VOLUME_START_PITCH_DEG * Math.PI) / 180 };
+  // ——— стойка (G234) ———
+  //
+  // Присед и прыжок живут **в сеансе поверхности**, как открытые двери: в
+  // объект не пишется ничего (G68). Счёт весь в `volume.js` — здесь только
+  // руки: кто держит Control, кому не дали встать и о чём сказать вслух.
+  let stance = volumeStanceStart();
+  // Держат ли Control. Отдельно от `crouchStuck`: отпустивший Control под
+  // низким потолком человек остаётся присевшим, но **хотеть** приседа он
+  // перестал, и встанет он сам, как только выйдет.
+  let crouchHeld = false;
+  let crouchStuck = false;
+  // Про «встать негде» говорится один раз на попытку, а не каждый кадр.
+  let stuckSaid = false;
   /**
    * Где человек стоял на схемах, которые уже покидал (G216, G217).
    *
@@ -48869,7 +49295,8 @@ function createVolume({ api, hosts }) {
 
   function camera() {
     if (view === "person") {
-      return { at: { x: person.x, y: person.y, z: VOLUME_EYE_MM }, yaw: person.yaw, pitch: person.pitch };
+      // Высота глаз — у стойки (G234): присел — ниже, прыгнул — выше.
+      return { at: { x: person.x, y: person.y, z: volumeStanceEye(stance) }, yaw: person.yaw, pitch: person.pitch };
     }
     return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance);
   }
@@ -49055,34 +49482,36 @@ function createVolume({ api, hosts }) {
   // Прицел у двери тот же, что у вещи: под захватом мыши — середина поля, без
   // захвата — точка под курсором. Щелчок по двери её запоминает, и E работает,
   // даже если рука уже съехала с полотна.
+  //
+  // С таска 159 щелчок по двери её **открывает** (G235, слова заказчика «клик
+  // на дверь должен тоже её открывать»), а не только показывает, о какой двери
+  // речь. Разбор — в `onPointerUp`.
 
-  /**
-   * Куда смотрит рука.
-   *
-   * Под захватом мыши курсора нет вовсе — целятся серединой поля, то есть
-   * прицелом (G213). Есть курсор — целятся им: он на поле виден, и обещать
-   * вместо него середину значило бы врать. Курсор увели с поля, а захвата нет —
-   * снова прицел: от первого лица середина поля всегда что-то значит, и
-   * клавиша, переставшая работать от того, что мышь лежит на панели, — хуже.
-   */
+  /** Куда смотрит рука — одно правило на E, на клик и на сам прицел (`volumeAimAt`). */
   function aimPoint() {
-    const box = viewport();
-    if (locked) return { x: box.width / 2, y: box.height / 2 };
-    if (pointer) return pointer;
-    return view === "person" ? { x: box.width / 2, y: box.height / 2 } : null;
+    return volumeAimAt(viewport(), { locked, pointer, view });
   }
 
   /**
-   * Прицел виден ровно тогда, когда он **и есть рука** (G213).
+   * Прицел виден ровно там, где он **и есть рука** (G213, G235).
    *
-   * От первого лица и мышью — да; в обзоре центр поля ничего не значит, а
-   * пальцем целятся касанием, и клавиши E там нет вовсе (таск 149). И пока
-   * курсор над полем, целится курсор — он и нарисован крестом (`volume.css`),
-   * а второй крест посреди поля обещал бы то, чего не делает. Увели курсор с
-   * поля или отдали мышь виду — снова прицел.
+   * Заказчик: «Когда курсор не перехвачен — тоже прицел надо отображать». Было
+   * иначе — прицел гас, пока курсор над полем (таск 151), — и правило сменилось
+   * по его слову. Прицел не стал вторым крестом: он идёт за курсором
+   * (`volumeAimAt`), и вместо курсора — у холста в этом виде своего указателя
+   * нет вовсе (`volume__stage--aim` в `volume.css`). Один крест, одна точка
+   * попадания, и обещает он ровно то, что делают E и клик.
+   *
+   * Чего нет по-прежнему: прицела в обзоре (центр поля там ничего не значит) и
+   * прицела под пальцем — там целятся касанием, и клавиши E нет вовсе (таск 149).
    */
   function syncAimNode() {
-    aimNode.hidden = scene.empty || view !== "person" || touching || (!locked && pointer !== null);
+    const at = scene.empty || view !== "person" || touching ? null : aimPoint();
+    aimNode.hidden = at === null;
+    stage.classList.toggle("volume__stage--aim", at !== null);
+    if (!at) return;
+    aimNode.style.left = at.x + "px";
+    aimNode.style.top = at.y + "px";
   }
 
   /** Дверь под рукой — по последнему нарисованному кадру. */
@@ -49101,36 +49530,57 @@ function createVolume({ api, hosts }) {
   function rebuildScene() {
     scene = sceneOf(getState()) || scene;
     rebuildOverlay();
+    // Низкое место могли убрать с чертежа, пока человек сидел под ним (G234).
+    stanceRecheck();
     syncHint();
     paint();
   }
 
   /**
-   * Что сделает E (G214). Вещь под прицелом — выделить **тем же выделением**,
-   * что клик по ней и список меток (таск 148); дверь — открыть или закрыть
-   * (G207). Правило разбора — в `volumeAimChoice`, здесь только руки.
+   * На что подействуют E и клик в этой точке поля.
+   *
+   * `door` приходит снаружи, потому что у E и у клика он берётся по-разному:
+   * E слушается двери **под прицелом или запомненной щелчком** (G207), клик —
+   * той, по которой щёлкнули. Остальное одно на оба: вещь, которую **видно**
+   * (`volumeSightAt`) — точное попадание, вещь в запасе промаха
+   * (`volumePickAt`) — нет, а разбор между ними и дверью делает
+   * `volumeAimChoice`.
    */
-  function actOnAim() {
-    const at = aimPoint();
-    const aimed = at && !scene.empty;
-    const choice = volumeAimChoice({
-      // Точно — это **видно** (`volumeSightAt`), а не «накрыто телом»: вещь за
-      // стеной человек не видит, и выделять её по взгляду нельзя.
-      markExact: aimed ? volumeSightAt(shown, at.x, at.y) : null,
-      door: aimedDoor || heldDoor,
-      // А рядом — это рука с её промахом, тем же, что у клика: розетка в трёх
-      // метрах занимает десяток точек.
-      markNear: aimed ? volumePickAt(shown, at.x, at.y) : null,
+  function aimChoiceAt(at, door) {
+    if (!at || scene.empty) return { kind: "none", id: null };
+    return volumeAimChoice({
+      markExact: volumeSightAt(shown, at.x, at.y),
+      door,
+      markNear: volumePickAt(shown, at.x, at.y),
     });
+  }
+
+  /**
+   * Что делает нажатие E и **что делает щелчок** (G214, G235): одно правило,
+   * два повода. Слова заказчика: «Клик равноценен нажатию E на объект под
+   * курсором».
+   *
+   * Вещь — выделить **тем же выделением**, что список меток и план (таск 148);
+   * дверь — открыть или закрыть (G207). `false` — под прицелом нет ни того, ни
+   * другого, и дальше решает тот, кто спрашивал: E говорит об этом словом, а
+   * щелчок по полю значит своё (см. `onPointerUp`).
+   */
+  function actOnChoice(choice) {
     if (choice.kind === "mark") {
       select(choice.id);
-      return;
+      return true;
     }
     if (choice.kind === "door") {
       toggleDoor(choice.id);
-      return;
+      return true;
     }
-    notify(strings.volume.aimless, "info");
+    return false;
+  }
+
+  /** E действует на то, на что смотришь (G207, G214). */
+  function actOnAim() {
+    const choice = aimChoiceAt(aimPoint(), aimedDoor || heldDoor);
+    if (!actOnChoice(choice)) notify(strings.volume.aimless, "info");
   }
 
   function toggleDoor(doorId) {
@@ -49174,9 +49624,79 @@ function createVolume({ api, hosts }) {
     return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   }
 
-  // Кто-то держит ход: клавиша или палец на площадке. Пока держат — идут часы.
+  // Кто-то держит ход: клавиша, палец на площадке — или стойка, которой ещё
+  // есть куда ехать (G234). Прыжок без ходьбы иначе замер бы в воздухе: часы в
+  // объёме идут только пока их держат, и присед с прыжком — третий повод.
   function moving() {
-    return keys.size > 0 || Boolean(pad);
+    return keys.size > 0 || Boolean(pad) || volumeStanceBusy(stance, crouchHeld || crouchStuck);
+  }
+
+  // ——— присед и прыжок (G234) ———
+  //
+  // Счёт — в `volume.js`, здесь три руки: шаг стойки на каждом тике, разовый
+  // прыжок и слово про «встать негде».
+
+  /**
+   * Шаг стойки. Он же — то место, где человек **встаёт сам**, выйдя из-под
+   * низкого: вставать можно или нет, спрашивается каждый тик по тому месту, где
+   * он стоит сейчас.
+   *
+   * «Застрял» бывает только у того, кто уже присел: стоящего в низкое место не
+   * пускает сама ходьба, и подниматься ему незачем.
+   */
+  function stanceTick(step) {
+    const room = volumeCanStand(scene, person, volumeStanceHead(stance));
+    if (!crouchHeld) {
+      crouchStuck = stance.crouchMm > 0 && !room;
+      // Отпустил Control под низким потолком — об этом говорится словом, один
+      // раз на попытку: протолкнуть макушку сквозь вещь нельзя, переставить
+      // человека в сторону — тоже, а молчание он прочтёт как залипшую клавишу.
+      if (crouchStuck && !stuckSaid) {
+        notify(strings.volume.standBlocked, "info");
+        stuckSaid = true;
+      }
+      if (!crouchStuck) stuckSaid = false;
+    }
+    stance = volumeStanceStep(stance, step, { crouch: crouchHeld || crouchStuck, canStand: room });
+  }
+
+  /** Control нажали: приседаем, пока держат. */
+  function crouchStart() {
+    if (crouchHeld) return;
+    crouchHeld = true;
+    walkSchedule();
+  }
+
+  /**
+   * Control отпустили — или его нажали как модификатор (Ctrl+Z, Ctrl+C,
+   * Ctrl+V): встаём. Встать негде — `stanceTick` оставит присед и скажет об
+   * этом.
+   */
+  function crouchStop() {
+    if (!crouchHeld) return;
+    crouchHeld = false;
+    walkSchedule();
+  }
+
+  /** Пробел: разовый прыжок. Присев и в воздухе не прыгают (`volumeStanceJump`). */
+  function jump() {
+    if (view !== "person") return;
+    stance = volumeStanceJump(stance);
+    walkSchedule();
+  }
+
+  /**
+   * Место под человеком изменилось не шагом (перенос кликом, переход по
+   * лестнице, правка чертежа) — присевший, которому не давали встать, мог
+   * оказаться там, где можно. Часы в этот миг стоят, и спросить об этом надо
+   * руками.
+   */
+  function stanceRecheck() {
+    if (crouchHeld || !crouchStuck) return;
+    if (!volumeCanStand(scene, person, volumeStanceHead(stance))) return;
+    crouchStuck = false;
+    stuckSaid = false;
+    walkSchedule();
   }
 
   function walkSchedule() {
@@ -49192,6 +49712,7 @@ function createVolume({ api, hosts }) {
     const time = now();
     const step = Math.min(0.1, Math.max(0, (time - clock) / 1000));
     clock = time;
+    stanceTick(step);
     let forward = 0;
     let side = 0;
     let turn = 0;
@@ -49232,7 +49753,9 @@ function createVolume({ api, hosts }) {
       const dx = ((basis.fwd.x / flat) * forward + basis.right.x * side) * scale;
       const dy = ((basis.fwd.y / flat) * forward + basis.right.y * side) * scale;
       if (view === "person") {
-        const moved = volumeStep(scene, person, dx, dy);
+        // Макушку даёт стойка (G234): присевший проходит там, где низко, — и
+        // ровно там, где это правда проходимо.
+        const moved = volumeStep(scene, person, dx, dy, volumeStanceHead(stance));
         person.x = moved.x;
         person.y = moved.y;
         syncWhere();
@@ -49290,6 +49813,9 @@ function createVolume({ api, hosts }) {
   }
 
   function onPointerDown(event) {
+    // Ctrl+щелчок на Mac — вызов контекстного меню, а не присед (G234): правило
+    // то же, что у Ctrl с буквой, только модификатором тут работает мышь.
+    if (event.ctrlKey) crouchStop();
     if (event.button !== 0) return;
     // Кнопки и вопрос лежат **в самом поле** (карточка метки, площадка ходьбы,
     // «Этаж», вопрос про этаж), и нажатие на них полем не считается: иначе
@@ -49372,45 +49898,52 @@ function createVolume({ api, hosts }) {
     }
     padEnd(event);
     if (closed || !started || started.moved) return;
-    // Щелчок по вещи — выделение (таск 148), и захват мыши тогда не просится:
-    // человек целился в розетку, а не в поле. Щелчок мимо — снимает выделение
-    // (так же, как тап по пустому месту плана) и просит захват: это и есть «как
-    // в игре». Отказ браузера не беда, перетаскивание никуда не делось.
+    // ——— щелчок равноценен E (G235) ———
+    //
+    // Слова заказчика: «клик на дверь должен тоже её открывать. Клик
+    // равноценен нажатию E на объект под курсором». **Это меняет решение таска
+    // 150**, где щелчок по двери только запоминал, о какой двери речь, а
+    // открывала её клавиша. Мышь при этом догнала палец: касанием дверь
+    // открывалась уже в таске 149 — теперь у пальца и у мыши одно правило, а не
+    // два.
+    //
+    // Разводится всё **по тому, на что показали**, а не по виду и не по
+    // устройству: дверь — открыть, вещь — выделить, а щелчок **мимо того и
+    // другого** значит своё, потому что у E там нет дела вовсе. Отсюда и
+    // перенос кликом по полу в обзоре (G212) никуда не девается: он живёт
+    // ровно в ветке «ни двери, ни вещи», то есть там же, где жил, — и ни одной
+    // точки поля у него новое правило не отняло. Дверь и до таска 159
+    // забирала щелчок себе (запоминала его), только проку от этого мышью не
+    // было никакого.
     if (!scene.empty) {
       const at = atEvent(event);
-      const hit = volumePickAt(shown, at.x, at.y);
-      if (hit) {
-        select(hit);
-        return;
-      }
-      // Щелчок по двери её запоминает — дальше ею распоряжается E. Сама дверь
-      // от клика не открывается: заказчик назвал клавишу, а клик — только
-      // способ показать, о какой двери речь.
       const door = volumeDoorAt(shown, at.x, at.y);
-      if (door) {
-        // Пальцем касание **открывает** дверь: клавиши E на планшете нет, и
-        // «запомнить дверь для клавиши» там значило бы не делать ничего
-        // (таск 149). Мышью остаётся прежнее — клик показывает, о какой двери
-        // речь, а открывает её E (решение таска 150, заказчик назвал клавишу).
-        if (touching) {
-          toggleDoor(door);
-          return;
-        }
-        heldDoor = door;
-        aimedDoor = door;
-        syncHint();
-        return;
+      const choice = aimChoiceAt(at, door);
+      // Дверь, по которой щёлкнули, остаётся под рукой: E распоряжается ею и
+      // после того, как мышь съехала с полотна (G207).
+      if (choice.kind === "door") {
+        heldDoor = choice.id;
+        aimedDoor = choice.id;
       }
+      // Захват мыши после попадания не просится: человек целился в розетку или
+      // в дверь, а не в поле.
+      if (actOnChoice(choice)) return;
+      // Мимо — снимает выделение, как тап по пустому месту плана.
       select(null);
       // Клик по обзору переносит туда, куда показали (G212). Захват мыши в
-      // обзоре при этом не просится: у клика здесь появился свой смысл, а
-      // голову в обзоре водят перетаскиванием, как и раньше.
+      // обзоре при этом не просится: у клика здесь свой смысл, а голову в
+      // обзоре водят перетаскиванием, как и раньше.
       if (view === "around") {
         const place = volumeFloorAt(camera(), viewport(), at.x, at.y);
         if (place) {
-          const moved = volumeMoveTo(scene, place);
+          // Перенос — та же ходьба, только сразу: куда присевший пройдёт, туда
+          // он и переносится (G234). Стоя под низкое его не поставит ничто.
+          const moved = volumeMoveTo(scene, place, volumeStanceHead(stance));
           person.x = moved.x;
           person.y = moved.y;
+          // Перенесли присевшего — под низким он остался или вышел, решает
+          // новое место (G234).
+          stanceRecheck();
           syncWhere();
           paint();
         }
@@ -49437,7 +49970,12 @@ function createVolume({ api, hosts }) {
 
   function onLockChange() {
     locked = document.pointerLockElement === stage;
-    // Мышь отдали виду — курсора нет, и целится прицел; вернули — снова рука.
+    // Где лежал курсор до захвата — забывается: вернув его, браузер ставит
+    // указатель сам, и прицел, оставшийся на старом месте, показывал бы на
+    // то, во что человек уже не целится. До первого движения мыши он стоит
+    // посреди поля — то есть там, где целился миг назад (G235).
+    pointer = null;
+    // Мышь отдали виду — курсора нет, и целится середина поля; вернули — рука.
     syncAimNode();
     syncHint();
   }
@@ -49694,7 +50232,7 @@ function createVolume({ api, hosts }) {
     // этого изменения не увидит как смены схемы — `schemeId` уже равен ему.
     setState({ schemeId });
     scene = sceneOf(state) || scene;
-    const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
+    const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
     around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
@@ -49756,7 +50294,7 @@ function createVolume({ api, hosts }) {
     scene = sceneOf(state) || scene;
     if (!scene.empty) {
       const at = place || { x: person.x, y: person.y, yaw: person.yaw };
-      const moved = volumeMoveTo(scene, at);
+      const moved = volumeMoveTo(scene, at, volumeStanceHead(stance));
       person.x = moved.x;
       person.y = moved.y;
       person.yaw = at.yaw;
@@ -49855,6 +50393,27 @@ function createVolume({ api, hosts }) {
       }
       return;
     }
+    // Присед и прыжок (G234). Разбор — `volumeStanceKey`: Control приседает сам
+    // по себе и отменяет присед в сочетании, пробел прыгает и не прокручивает
+    // страницу, системные сочетания с пробелом остаются системе.
+    const stanceKey = volumeStanceKey(event);
+    if (stanceKey === "crouch") {
+      // `preventDefault` здесь не ставится по той же причине, что у Alt: Control
+      // — модификатор ввода, и перехватывать его целиком значило бы ломать
+      // сочетания на всей странице. Нам нужно его нажатие, а не его смысл.
+      if (!event.repeat) crouchStart();
+      return;
+    }
+    if (stanceKey === "combo") {
+      crouchStop();
+      return;
+    }
+    if (stanceKey === "jump") {
+      // Прокрутка страницы и кнопка под фокусом снимаются здесь и в `onKeyUp`.
+      event.preventDefault();
+      if (!event.repeat) jump();
+      return;
+    }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.code === "KeyV") {
       event.preventDefault();
@@ -49893,11 +50452,29 @@ function createVolume({ api, hosts }) {
       grabPointer();
       return;
     }
+    // Отпустили Control — встаём (G234). Спрашивать `ours()` здесь не нужно и
+    // нельзя: человек мог уйти в другой режим, не отпустив клавишу, и присед
+    // остался бы висеть.
+    if (volumeCrouchKey(event.code)) {
+      crouchStop();
+      return;
+    }
+    // Нажатие кнопки пробелом браузер делает по **отпусканию**, и снять его
+    // можно только здесь: пробел в объёме прыгает, а не нажимает кнопку, на
+    // которой остался фокус после щелчка по панели.
+    if (event.code === VOLUME_JUMP_KEY && ours() && !volumeTypingTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     keyStop(event.code);
   }
 
   function onBlur() {
     keyStop(null);
+    // Ушли с окна с зажатым Control — его отпускание до нас не дойдёт, и
+    // стоять в приседе до следующего нажатия человек не просил.
+    crouchStop();
     // Ушли с окна с зажатым Alt — его отпускание до нас не дойдёт, и ждать
     // его нечего: иначе следующий Alt оказался бы «уже нажатым».
     altFree = false;
@@ -50006,6 +50583,9 @@ function createVolume({ api, hosts }) {
     // доступен всегда, и сказать, чего не хватает, обязано само поле.
     emptyNote.hidden = !scene.empty;
     emptyNote.textContent = scene.empty ? strings.volume.empty : "";
+    // Человека могли перенести на другой этаж или на другую схему, пока он
+    // сидел под низким: встать ему, может быть, уже есть где (G234).
+    stanceRecheck();
     syncSummary();
     syncWhere();
     syncStair();
@@ -50053,7 +50633,7 @@ function createVolume({ api, hosts }) {
     schemeId = state.schemeId;
     scene = sceneOf(state) || scene;
     if (!scene.empty) {
-      const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
+      const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
       person.x = moved.x;
       person.y = moved.y;
       around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
