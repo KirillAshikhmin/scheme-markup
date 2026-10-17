@@ -11,7 +11,8 @@
 //    текст нельзя; разворачиваться сама она при этом не должна.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canvasHintInset, canvasHintText, canvasHintUnseen } from "../src/canvas.js";
+import { canvasHintInset, canvasHintText } from "../src/canvas.js";
+import { plateUnseen } from "../src/panels/plate.js";
 import { RULER_SIZE } from "../src/render.js";
 import { strings } from "../src/strings.js";
 import { addScheme, createProject } from "../src/model.js";
@@ -52,16 +53,16 @@ test("свёрнутая подсказка помечается, когда т�
   const before = canvasHintText(stateOf({}));
   const after = canvasHintText(stateOf({ mode: "room", activeRoomId: null }));
   assert.notEqual(before, after, "подсказки режимов совпали — проверять нечего");
-  assert.equal(canvasHintUnseen(before, after), true);
+  assert.equal(plateUnseen(before, after), true);
 });
 
 test("тот же текст знака не даёт, и первый показ тоже", () => {
   const value = canvasHintText(stateOf({}));
-  assert.equal(canvasHintUnseen(value, value), false);
+  assert.equal(plateUnseen(value, value), false);
   // Ничего ещё не видели (страница открылась свёрнутой) — точка была бы шумом.
-  assert.equal(canvasHintUnseen(null, value), false);
+  assert.equal(plateUnseen(null, value), false);
   // Подсказки нет вовсе (схема не выбрана) — помечать нечего.
-  assert.equal(canvasHintUnseen(value, null), false);
+  assert.equal(plateUnseen(value, null), false);
 });
 
 test("текст вернулся к прежнему — знак снимается", () => {
@@ -69,8 +70,8 @@ test("текст вернулся к прежнему — знак снимае�
   // и точка на кнопке врала бы.
   const select = canvasHintText(stateOf({}));
   const room = canvasHintText(stateOf({ mode: "room" }));
-  assert.equal(canvasHintUnseen(select, room), true);
-  assert.equal(canvasHintUnseen(select, select), false);
+  assert.equal(plateUnseen(select, room), true);
+  assert.equal(plateUnseen(select, select), false);
 });
 
 test("подписи кнопки сворачивания есть в словаре", () => {

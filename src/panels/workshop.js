@@ -168,6 +168,7 @@ import {
 } from "../render.js";
 import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIconButton, uiPrompt } from "./ui.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
+import { createFieldPlate } from "./plate.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
@@ -1263,6 +1264,17 @@ export function workshopListGroups(project, schemeId) {
 }
 
 export function workshopStatus(project, schemeId, placement) {
+  return workshopSummaryLines(project, schemeId, placement).join(" · ");
+}
+
+/**
+ * То же самое строками — для сводки над полем (G228).
+ *
+ * Одна строка — один ответ: чем меряется план, сколько в чертеже стен, проёмов
+ * и объектов. Разбирать обратно строку со всеми ними («сплитом по точке»)
+ * нельзя: внутри частей точка тоже встречается.
+ */
+export function workshopSummaryLines(project, schemeId, placement) {
   const parts = [];
   if (placement.kind === "ready") {
     const size = planSizeMeters(project, schemeId);
@@ -1294,7 +1306,7 @@ export function workshopStatus(project, schemeId, placement) {
   if (openings > 0) parts.push(text("workshop.openingCount", { count: openings }));
   const objects = schemeObjectsOnScheme(project, schemeId).length;
   if (objects > 0) parts.push(text("workshop.objectCount", { count: objects }));
-  return parts.join(" · ");
+  return parts;
 }
 
 // ——— окно ——————————————————————————————————————————————————————————————
@@ -1446,14 +1458,13 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.toolObjectsHint,
     on: { click: () => setAdding("objects") },
   });
-  // Строка состояния и подсказка — плашки **поверх поля**: под полем места
-  // больше нет, поле занимает основной экран целиком (таск 153). Состояние о
-  // чертеже — слева под верхним рядом, подсказка про руки — справа, ровно так
-  // же, как это устроено в объёме. Кликов плашки не берут: под ними чертят.
-  const meta = uiEl("p", { class: "workshop__meta" });
-  const hint = uiEl("p", { class: "canvas-hint__text", text: workshopHint("walls") });
-  const metaPlate = uiEl("div", { class: "screen-note" }, [meta]);
-  const hintPlate = uiEl("div", { class: "canvas-hint canvas-hint--screen" }, [hint]);
+  // Две плашки поверх поля, по общему правилу всех трёх режимов (G228):
+  // **подсказка слева** со знаком «?» — про руки, **сводка справа** со знаком
+  // «i» — про чертёж (размеры плана, счёт стен, проёмов и объектов). Обе
+  // сворачиваются и помнят себя порознь; кирпич один на сборку
+  // (`panels/plate.js`).
+  const hintPlate = createFieldPlate({ side: "left", setting: WORKSHOP_HINT_SETTING });
+  const summaryPlate = createFieldPlate({ side: "right", setting: WORKSHOP_SUMMARY_SETTING });
 
   // ——— правая часть: слои, сетка, стена, высоты ———
   const planCheck = uiEl("input", { type: "checkbox" });
@@ -1681,7 +1692,7 @@ function createWorkshop({ api, hosts }) {
   // инструменты чертежа это и есть верхний блок. Над полем остаётся только то,
   // что над полем и было: подсказка слева, полный экран справа, а между ними
   // переключатель режимов.
-  stage.append(metaPlate, hintPlate);
+  stage.append(hintPlate.node, summaryPlate.node);
   hosts.stage.replaceChildren(stage);
   hosts.side.replaceChildren(
     uiEl("div", { class: "workshop__panel" }, [
@@ -3346,7 +3357,6 @@ function createWorkshop({ api, hosts }) {
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
     objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");
     syncSubject(current, wall);
-    hint.textContent = workshopHint(tool, workshopObjectWay);
     if (document.activeElement !== heightInput) {
       const own = findScheme(current, schemeId);
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
@@ -3358,7 +3368,14 @@ function createWorkshop({ api, hosts }) {
     syncRooms(current);
     syncElevation(current, wall);
     syncList(current);
-    meta.textContent = workshopStatus(current, schemeId, spot);
+    hintPlate.update(workshopHint(tool, workshopObjectWay));
+    // Сводка — строками, как в объёме: каждая отвечает на свой вопрос, и
+    // читать её сверху вниз легче, чем одну длинную строку.
+    summaryPlate.update(workshopSummaryLines(current, schemeId, spot), {
+      // Масштаба у плана нет — это и есть то, о чём сводка обязана сказать, даже
+      // будучи свёрнутой: без него подложку под чертёж не положить.
+      alert: spot.kind === "noScale",
+    });
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
     node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
@@ -3700,6 +3717,10 @@ function createWorkshop({ api, hosts }) {
 // живёт дальше и в чужих режимах — гаснет, но помнит масштаб, инструмент и
 // черновик. Разбирается она только тогда, когда чертить стало нечего: схему
 // удалили или объект закрыли.
+// Свёрнутость плашек — у каждой своя (G228) и переживает перезагрузку.
+const WORKSHOP_HINT_SETTING = "workshopHintCollapsed";
+const WORKSHOP_SUMMARY_SETTING = "workshopSummaryCollapsed";
+
 let workshopSurface = null;
 
 function mountWorkshopScreen(host, api) {

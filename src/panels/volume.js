@@ -32,11 +32,11 @@
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
 import { PANEL_IDS, layoutAllows, registerPanel, screenMode } from "../app.js";
-import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasHintUnseen } from "../canvas.js";
+import { FULLSCREEN_EVENTS, canvasFrameLinks } from "../canvas.js";
+import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { findRoom, findScheme, schemeFloorOf } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
-import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -90,19 +90,15 @@ import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
 // Слова заказчика: «подсказку по управлению сделай в виде как на схеме —
 // кнопочка справа сверху, которую закрывать можно».
 //
-// Механизм взят у холста целиком: те же классы (`canvas-hint`,
-// `canvas-hint__text`, `canvas-hint__toggle`, `is-collapsed`), та же точка на
-// кнопке при сменившемся тексте (`canvasHintUnseen`, `is-new`) и те же подписи.
-// Второго поведения не заводится — у человека одна рука на обе поверхности.
+// Механизм общий на все три режима (G228) и живёт в `panels/plate.js`: те же
+// классы, та же точка на кнопке при сменившемся тексте, те же подписи. Второго
+// поведения не заводится — у человека одна рука на все поверхности.
 //
-// **Настройка своя**, отдельная от холста: подсказки разные, и свернув одну, он
-// не просил сворачивать другую. Свёрнутость живёт там же, где у холста, — в
-// настройках браузера, то есть переживает закрытие окна и перезагрузку.
+// **Настройки свои**, отдельные от холста и друг от друга: подсказка и сводка
+// разные, и свернув одну, он не просил сворачивать другую. Живут они в
+// настройках браузера, то есть переживают перезагрузку.
 const VOLUME_HINT_SETTING = "volumeHintCollapsed";
-let volumeHintCollapsed = false;
-// Текст, который человек видел последним развёрнутым. Модульная, а не оконная:
-// закрыл и открыл окно — подсказка та же, и мигать точкой ей незачем.
-let volumeHintSeen = null;
+const VOLUME_SUMMARY_SETTING = "volumeSummaryCollapsed";
 
 /** Клавиша → куда шагаем: вперёд/назад и в сторону, в осях камеры. */
 export function volumeKeyMove(code) {
@@ -674,37 +670,17 @@ function createVolume({ api, hosts }) {
   // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
   // (`volume.css`), и читать его нечем — `aria-hidden`.
   const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
-  // Подсказка по управлению — плашка справа сверху поля со сворачивающей
-  // кнопкой (G218). Кнопка **справа от текста**, а не слева, как на холсте:
-  // плашка прижата к правому краю, и свёрнутая она обязана остаться в том же
-  // углу, где была её кнопка.
-  const hintText = uiEl("p", { class: "canvas-hint__text" });
-  const hintToggle = uiEl(
-    "button",
-    {
-      class: "canvas-hint__toggle",
-      type: "button",
-      on: {
-        click: () => {
-          volumeHintCollapsed = !volumeHintCollapsed;
-          setSetting(VOLUME_HINT_SETTING, volumeHintCollapsed);
-          syncHint();
-          // Клавиши возвращаются полю: свернул подсказку — идёшь дальше, а не
-          // жмёшь пробелом ту же кнопку.
-          if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
-        },
-      },
-    },
-    uiIcon("hint"),
-  );
-  const hint = uiEl("div", { class: "canvas-hint canvas-hint--volume" }, [hintText, hintToggle]);
+  // Подсказка по управлению — плашка **слева** со знаком «?» (G228): правило
+  // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
+  // стоит сводка, а ещё правее — кнопка полноэкранного показа.
+  const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
     stairButton,
     padNode,
     aimNode,
-    hint,
+    hintPlate.node,
     askBox,
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
@@ -732,7 +708,7 @@ function createVolume({ api, hosts }) {
     attrs: { hidden: "hidden" },
     on: { click: () => toggleAllDoors() },
   });
-  const where = uiEl("span", { class: "volume__where" });
+  const where = uiEl("p", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
   const missing = uiEl("p", { class: "volume__missing" });
   // Нарисованные запасным габаритом (G215) — своей строкой рядом с
@@ -752,11 +728,11 @@ function createVolume({ api, hosts }) {
   // был единственным местом, где написано, где человек оказался после
   // лестницы. Окна нет — осталась первая строка плашки.
   const titleNode = uiEl("p", { class: "volume__title" });
-  const notePlate = uiEl("div", { class: "screen-note" }, [titleNode, where, meta, missing, spareLine]);
+  const summaryPlate = createFieldPlate({ side: "right", setting: VOLUME_SUMMARY_SETTING });
   // Нечего показывать — плашка посреди поля, а не строчка в углу: это главное,
   // что человек должен прочесть, войдя в режим без чертежа.
   const emptyNote = uiEl("p", { class: "screen-empty", attrs: { hidden: "hidden" } });
-  stage.append(notePlate, emptyNote);
+  stage.append(summaryPlate.node, emptyNote);
   hosts.stage.replaceChildren(stage);
   // Этаж — в колонке, рядом с видом (таск 153): на каком этаже человек стоит,
   // видно и не подходя к лестнице, а переход остаётся **один на обе кнопки** —
@@ -1883,12 +1859,46 @@ function createVolume({ api, hosts }) {
   }
 
   /**
-   * Подсказка плашкой (G218): текст, свёрнутость и точка на кнопке.
+   * Сводка — правая плашка со знаком «i» (G228): где человек стоит, сколько в
+   * сцене чего и чего в ней **не** видно.
    *
-   * Разворачивать её за человека нельзя — он свернул её осознанно, и она
-   * выпрыгивала бы под рукой на каждую открытую дверь. Но и молча съесть
-   * сменившийся текст нельзя: кнопка получает точку и другую подпись. Правило
-   * то же, что на холсте, и считает его та же `canvasHintUnseen`.
+   * Предупреждения (неразмещённые метки, запасной габарит) — её часть, и
+   * пропасть вместе со свёрнутой плашкой они не должны: кнопка получает точку
+   * (`alert`), ту же самую, которой подсказка говорит «текст сменился».
+   *
+   * В пустом поле плашка молчит: всё, что она сказала бы, уже написано
+   * посреди экрана, а второй раз то же самое — шум.
+   */
+  function syncSummary() {
+    titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
+    if (scene.empty) {
+      summaryPlate.update([], { hidden: true });
+      return;
+    }
+    meta.textContent = [
+      text("volume.counts", {
+        walls: scene.wallCount,
+        openings: scene.openingCount,
+        rooms: scene.rooms.length,
+        marks: scene.marks.length,
+      }),
+      ...volumeNotes(scene),
+    ].join(" ");
+    missing.textContent = volumeUnplacedLine(scene.unplaced);
+    missing.title = volumeUnplacedTitle(scene.unplaced);
+    missing.hidden = scene.unplaced.length === 0;
+    const spare = scene.spare || [];
+    spareLine.textContent = volumeSpareLine(spare);
+    spareLine.title = volumeSpareTitle(spare);
+    spareLine.hidden = spare.length === 0;
+    summaryPlate.update([titleNode, where, meta, missing, spareLine], {
+      alert: scene.unplaced.length > 0 || spare.length > 0,
+    });
+  }
+
+  /**
+   * Подсказка плашкой (G218, G228): текст у неё свой, а свёрнутость, точка на
+   * кнопке и память — общие с остальными плашками (`panels/plate.js`).
    */
   function syncHint() {
     const value = volumeHintText({
@@ -1904,18 +1914,7 @@ function createVolume({ api, hosts }) {
       floors: floorOptions(),
       back: backFloor(),
     });
-    hintText.textContent = value;
-    hint.classList.toggle("is-collapsed", volumeHintCollapsed);
-    hintText.hidden = volumeHintCollapsed;
-    // Развёрнутую подсказку человек видит — значит, этот текст прочитан.
-    if (!volumeHintCollapsed) volumeHintSeen = value;
-    const unseen = volumeHintCollapsed && canvasHintUnseen(volumeHintSeen, value);
-    hintToggle.classList.toggle("is-new", unseen);
-    let label = strings.canvas.hintCollapse;
-    if (volumeHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
-    hintToggle.title = label;
-    hintToggle.setAttribute("aria-label", label);
-    hintToggle.setAttribute("aria-expanded", volumeHintCollapsed ? "false" : "true");
+    hintPlate.update(value);
   }
 
   function sync() {
@@ -1929,40 +1928,12 @@ function createVolume({ api, hosts }) {
     if (padNode.hidden) padEnd(null);
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
     shotButton.hidden = scene.empty;
-    titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
     // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
     // задник и плашку посреди экрана. Кнопка режима при этом не гаснет: режим
     // доступен всегда, и сказать, чего не хватает, обязано само поле.
     emptyNote.hidden = !scene.empty;
     emptyNote.textContent = scene.empty ? strings.volume.empty : "";
-    // Плашка про объект в пустом поле молчит: всё, что она сказала бы, уже
-    // написано посреди экрана, а второй раз то же самое — шум.
-    notePlate.hidden = scene.empty;
-    if (scene.empty) {
-      meta.textContent = "";
-      missing.textContent = "";
-      missing.hidden = true;
-      spareLine.textContent = "";
-      spareLine.hidden = true;
-    } else {
-      const lines = [
-        text("volume.counts", {
-          walls: scene.wallCount,
-          openings: scene.openingCount,
-          rooms: scene.rooms.length,
-          marks: scene.marks.length,
-        }),
-        ...volumeNotes(scene),
-      ];
-      meta.textContent = lines.join(" ");
-      missing.textContent = volumeUnplacedLine(scene.unplaced);
-      missing.title = volumeUnplacedTitle(scene.unplaced);
-      missing.hidden = scene.unplaced.length === 0;
-      const spare = scene.spare || [];
-      spareLine.textContent = volumeSpareLine(spare);
-      spareLine.title = volumeSpareTitle(spare);
-      spareLine.hidden = spare.length === 0;
-    }
+    syncSummary();
     syncWhere();
     syncStair();
     syncSelection();
@@ -2075,18 +2046,6 @@ function createVolume({ api, hosts }) {
   resize();
   if (!scene.empty) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
-  // Свёрнутость подсказки читается из настроек асинхронно — как на холсте:
-  // плашка стартует развёрнутой и схлопывается, когда хранилище ответит.
-  // То, что человек успел увидеть до ответа, прочитанным не считается: он на
-  // подсказку не смотрел, она мигнула сама.
-  Promise.resolve(getSetting(VOLUME_HINT_SETTING))
-    .then((saved) => {
-      if (closed || saved !== true) return;
-      volumeHintCollapsed = true;
-      volumeHintSeen = null;
-      syncHint();
-    })
-    .catch(() => {});
   return { destroy };
 }
 

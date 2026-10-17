@@ -128,6 +128,7 @@ import {
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { getSetting, setSetting } from "./store.js";
 import { uiConfirm, uiDialogDepth, uiEl, uiIcon, uiPrompt } from "./panels/ui.js";
+import { createFieldPlate, plateUnseen } from "./panels/plate.js";
 import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
@@ -518,6 +519,48 @@ function canvasHintCopy(hint) {
   return hint + " " + strings.canvas.hintCopy;
 }
 
+/**
+ * Сводка плана — правая плашка режима «Схема» (G228).
+ *
+ * Заказчик: «в схеме тоже давай сводку», состав — «размеры, количество и т.д.».
+ * Поэтому здесь ровно то же, что в сводках чертежа и объёма: **чем схема
+ * меряется и сколько в ней чего**. Размер плана в метрах — если масштаб задан;
+ * в точках — всегда, это то, во что упираются доли меток. Счёт меток считается
+ * **видимых** (`visibleMarks`): фильтр спрятал половину — сводка говорит о том,
+ * что на экране, иначе она спорила бы с собственным планом.
+ *
+ * Чистая и вынесена наружу ради теста: сводка, разошедшаяся с планом, —
+ * ровно та ошибка, которую глазами ловят последней.
+ */
+export function canvasSummaryLines(state) {
+  if (!state || !state.project || !state.schemeId) return [];
+  const scheme = findScheme(state.project, state.schemeId);
+  if (!scheme) return [];
+  const lines = [];
+  const size = planSizeMeters(state.project, state.schemeId);
+  if (size) {
+    lines.push(
+      text("canvas.sumSize", { width: formatMeters(size.width), height: formatMeters(size.height) }),
+    );
+  } else if (scheme.imageId) {
+    lines.push(strings.canvas.sumNoScale);
+  }
+  if (Number(scheme.width) > 0 && Number(scheme.height) > 0) {
+    lines.push(text("canvas.sumPixels", { width: Math.round(scheme.width), height: Math.round(scheme.height) }));
+  }
+  const marks = visibleMarks(state.project, scheme, state.filter);
+  const all = state.project.marks.filter((mark) => mark.schemeId === scheme.id).length;
+  lines.push(
+    marks.length === all
+      ? text("canvas.sumMarks", { count: all })
+      : text("canvas.sumMarksFiltered", { count: marks.length, all }),
+  );
+  const rooms = (state.project.rooms || []).length;
+  const walls = wallsOnScheme(state.project, state.schemeId).length;
+  lines.push(text("canvas.sumRooms", { rooms, walls }));
+  return lines;
+}
+
 // ——— подсказка: отступ от края и знак «текст сменился» ————————————————
 //
 // Линейка (таск 59) занимает полосу в `RULER_SIZE` пикселей сверху и слева
@@ -529,20 +572,6 @@ export function canvasHintInset(state) {
   // переключатель с полным экраном висеть на пустом поле (таск 153).
   if (!canvasOnScreen(state)) return 0;
   return canvasGuidesShown(state) ? RULER_SIZE : 0;
-}
-
-// Текст подсказки меняется по ходу работы и иногда говорит важное («второй Esc
-// возвращает в „Выделение“»). Когда подсказка свёрнута, разворачивать её за
-// пользователя нельзя: он свернул её осознанно, и она выпрыгивала бы под рукой
-// на каждую смену типа — ровно то, от чего он избавился. Но и молча съесть
-// новый текст нельзя, поэтому кнопка получает точку и другую подпись.
-//
-// `seen` — текст, который пользователь видел последним (подсказка была
-// развёрнута). Ничего не видел — знака нет: точка на первой же подсказке после
-// перезагрузки была бы шумом.
-export function canvasHintUnseen(seen, current) {
-  if (seen === null || current === null) return false;
-  return seen !== current;
 }
 
 // ——— полный экран ————————————————————————————————————————————————————
@@ -609,6 +638,8 @@ export function canvasFullscreenToggle(doc, element) {
 // Свёрнутость — оснастка рабочего места, как и отметка линейки: живёт в
 // настройках браузера, в объект и в файл проекта не попадает.
 const CANVAS_HINT_SETTING = "canvasHintCollapsed";
+// Свёрнутость сводки — своя (G228): свернул сводку, а подсказка осталась.
+const CANVAS_SUMMARY_SETTING = "canvasSummaryCollapsed";
 let canvasHintCollapsed = false;
 let canvasHintSeen = null;
 
@@ -4171,7 +4202,7 @@ function mountCanvasHint(host, api) {
     body.hidden = canvasHintCollapsed;
     // Развёрнутую подсказку пользователь видит — значит, этот текст прочитан.
     if (!canvasHintCollapsed) canvasHintSeen = value;
-    const unseen = canvasHintCollapsed && canvasHintUnseen(canvasHintSeen, value);
+    const unseen = canvasHintCollapsed && plateUnseen(canvasHintSeen, value);
     toggle.classList.toggle("is-new", unseen);
     let label = strings.canvas.hintCollapse;
     if (canvasHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
@@ -4382,12 +4413,43 @@ function canvasWallMiddleY(state) {
   return (a.y + b.y) / 2;
 }
 
-// Поверх холста живут трое: подсказка слева, полный экран справа и полоса
-// развёртки у дальнего от стены края. Точка монтирования одна, поэтому и
+/**
+ * Сводка плана — правая плашка (G228).
+ *
+ * Правило одно на три режима: слева подсказка со знаком «?», справа сводка со
+ * знаком «i», и стоит она левее кнопки полноэкранности. Содержимое считает
+ * `canvasSummaryLines`, а здесь только руки и перерисовка.
+ */
+function mountCanvasSummary(host, api) {
+  const plate = createFieldPlate({ side: "right", setting: CANVAS_SUMMARY_SETTING });
+  host.append(plate.node);
+  const render = () => {
+    const state = api.getState();
+    plate.update(canvasSummaryLines(state), { hidden: !canvasOnScreen(state) });
+    plate.node.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
+  };
+  api.subscribe((state, changed) => {
+    if (
+      "project" in changed ||
+      "schemeId" in changed ||
+      "filter" in changed ||
+      "layout" in changed ||
+      "guidesShown" in changed ||
+      "screen" in changed
+    ) {
+      render();
+    }
+  });
+  render();
+}
+
+// Поверх холста живут четверо: подсказка слева, сводка и полный экран справа и
+// полоса развёртки у дальнего от стены края. Точка монтирования одна, поэтому и
 // монтируются они вместе — панель чистит поле один раз, а не каждый за себя.
 function mountCanvasOverlay(host, api) {
   host.replaceChildren();
   mountCanvasHint(host, api);
+  mountCanvasSummary(host, api);
   mountCanvasFullscreen(host, api);
   mountCanvasElevation(host, api);
 }

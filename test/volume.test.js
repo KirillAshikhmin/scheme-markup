@@ -145,7 +145,7 @@ import {
   volumeUnplacedTitle,
   volumeWhere,
 } from "../src/panels/volume.js";
-import { canvasHintUnseen } from "../src/canvas.js";
+import { plateUnseen } from "../src/panels/plate.js";
 import { strings, text } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -2278,9 +2278,9 @@ test("свёрнутая подсказка окна помечается, ко�
     doors: ["d1"], open: new Set(["d1"]), aimedDoor: null, stair: null, floors: [],
   });
   assert.notEqual(first, second, "открытая дверь меняет текст — иначе проверять нечего");
-  assert.equal(canvasHintUnseen(first, second), true);
-  assert.equal(canvasHintUnseen(first, first), false);
-  assert.equal(canvasHintUnseen(null, second), false, "не видел ничего — и знака нет");
+  assert.equal(plateUnseen(first, second), true);
+  assert.equal(plateUnseen(first, first), false);
+  assert.equal(plateUnseen(null, second), false, "не видел ничего — и знака нет");
 });
 
 test("подсказка пальцем не обещает клавиш, которых на планшете нет", () => {

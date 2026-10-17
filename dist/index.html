@@ -244,51 +244,41 @@
   font-size: 12px;
 }
 
-/* ——— плашки поверх поля режима (таск 153) ————————————————————————————
-   У чертежа и у объёма своё поле во весь основной экран, и всё, что прежде
-   стояло под полем в окне, стоит теперь плашкой над ним. Мест два, и смысл у
-   них разный: слева внизу верхнего ряда — **про объект** (сколько стен, чего не
-   хватает, где человек стоит), справа — **про руки** (что делают клавиши и
-   мышь). Оба места ниже верхнего ряда: там уже стоят подсказка плана,
-   переключатель и полный экран, и лезть под них плашке нельзя.
+/* ——— сводка справа (G228) ————————————————————————————————————————————
+   «Информацию, так же чтобы скрывалась, справа, левее кнопки полноэкранности,
+   с иконкой i (info). И там как раз размеры, количество и т.д.»
 
-   Кликов плашки не берут: под ними чертят и ходят. */
-.screen-note {
-  position: absolute;
-  left: 12px;
-  top: 50px;
-  max-width: min(420px, calc(100% - 24px));
-  padding: 5px 9px;
-  border: 1px solid var(--canvas-line);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #57606a;
-  font-size: 12px;
-  line-height: 1.35;
-  pointer-events: none;
-  z-index: 3;
+   Та же плашка, что подсказка, и те же классы — разница в стороне: прижата к
+   правому краю, отступив полосу под кнопку полноэкранного показа, кнопка в ней
+   стоит справа от текста (`row-reverse`), а подчёркнута правая кромка. Так
+   свёрнутая сводка остаётся ровно там, где была её кнопка.
+
+   Ширина не доходит до середины: там переключатель режимов. */
+.canvas-hint.canvas-hint--info {
+  left: auto;
+  right: 46px;
+  max-width: min(360px, calc(50% - 158px), calc(100% - 96px));
+  flex-direction: row-reverse;
+  border-left-width: 1px;
+  border-right-width: 4px;
 }
 
-.screen-note[hidden] {
-  display: none;
-}
-
-.screen-note > p {
+/* Строки сводки идут столбиком: каждая отвечает на свой вопрос. */
+.canvas-hint__text > p {
   margin: 0;
 }
 
-/* Подсказка режима — та же плашка, что над планом, только справа и ниже
-   верхнего ряда: в правом верхнем углу стоит полный экран. Рамка подчёркнута
-   справа — у подсказки плана слева, и так видно, к какому краю она прижата. */
-.canvas-hint.canvas-hint--screen {
-  left: auto;
-  right: 12px;
-  top: 50px;
-  max-width: min(380px, calc(100% - 24px));
-  border-left-width: 1px;
-  border-right-width: 4px;
-  pointer-events: none;
-  z-index: 3;
+.canvas-hint__text > p + p {
+  margin-top: 2px;
+}
+
+.canvas-hint__text > p[hidden] {
+  display: none;
+}
+
+/* Свёрнутая сводка — одна кнопка, как и свёрнутая подсказка. */
+.canvas-hint.canvas-hint--info.is-collapsed {
+  right: 46px;
 }
 
 /* ——— карточка выделенной метки (просмотр) ————————————————————————————
@@ -3565,18 +3555,17 @@
 }
 
 /* Заголовок с этажом и строка «где стоит человек» — в плашке над полем
-   (`.screen-note`): прежде первое стояло в шапке окна, второе рядом с
+   (сводка справа, G228): прежде первое стояло в шапке окна, второе рядом с
    переключателем вида. Окна нет, а ответ на «где я» нужен ровно там, куда
    человек смотрит, — в поле. */
 .volume__title {
-  margin: 0 0 2px;
-  font-size: 12px;
+  margin: 0;
   font-weight: 600;
   color: var(--canvas-text);
 }
 
 .volume__where {
-  display: block;
+  margin: 0;
   color: var(--canvas-text);
 }
 
@@ -3616,8 +3605,8 @@
   display: block;
 }
 
-/* Счёт чертежа — в плашке над полем (`.screen-note`): цвет и фон достаются
-   оттуда, под полем места больше нет. */
+/* Счёт чертежа — в сводке над полем: цвет и фон достаются ей, под полем места
+   больше нет. */
 .volume__meta {
   margin: 0;
   font-variant-numeric: tabular-nums;
@@ -3829,43 +3818,10 @@
   background: linear-gradient(to bottom, #fff 0 4px, transparent 4px 7px, #fff 7px 11px);
 }
 
-/* ——— подсказка плашкой (G218, таск 152) ————————————————————————————————
-
-   «подсказку по управлению сделай в виде как на схеме — кнопочка справа
-   сверху, которую закрывать можно».
-
-   Плашка — та же, что над планом: класс `.canvas-hint` со всеми своими мерами,
-   рамкой, подложкой, кнопкой и точкой на ней (`panels/canvas.css`). Здесь
-   только то, чем окно отличается от холста, и ничего больше — второй плашки в
-   сборке нет.
-
-   **Справа сверху** — слово заказчика. «Снимок», «Вся схема» и полный экран
-   стоят в том же углу, но **строкой выше, в шапке окна**, а не в поле: плашка
-   живёт внутри кадра и с ними не спорит ни в обычном окне, ни в полном экране,
-   где шапка разворачивается вместе со всей карточкой.
-
-   **Толстая кромка справа**, а не слева: у холста она отмечает край, от
-   которого подсказка растёт, и здесь этот край другой.
-
-   **Кликов плашка не берёт**, кроме самой кнопки (у неё `pointer-events: auto`
-   в общих стилях): под ней комната, и вещь в правом верхнем углу кадра обязана
-   выделяться сквозь неё — так же, как метка ставится сквозь подсказку плана.
-
-   Двойной класс в селекторе — не украшение: он поднимает вес правила над
-   `.canvas-hint`, и порядок склейки стилей сборщиком на него не влияет. */
-.canvas-hint.canvas-hint--volume {
-  left: auto;
-  right: 12px;
-  /* Ниже верхнего ряда: в правом верхнем углу стоит кнопка полного экрана, а по
-     центру — переключатель режимов (таск 153). Прежде плашка жила в своём окне,
-     и ряда над ней не было. */
-  top: 50px;
-  max-width: min(440px, calc(100% - 24px));
-  border-left-width: 1px;
-  border-right-width: 4px;
-  pointer-events: none;
-  z-index: 3;
-}
+/* Своего правила у плашек объёма больше нет (G228): подсказка слева, сводка
+   справа — и обе берут вид у общей `.canvas-hint` в `canvas.css`. Поле объёма
+   тёмное, а плашки светлые — те же, что над планом: инструмент один, и читаться
+   они должны одинаково. */
 
 /* ——— мастерская чертежа на основном экране (таск 153) ————————————————————
 
@@ -3943,12 +3899,8 @@
   display: block;
 }
 
-/* Строка состояния чертежа: в плашке над полем (`.screen-note`), и цвет ей
-   достаётся оттуда — своего фона у неё нет. */
-.workshop__meta {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
+/* Строка состояния чертежа ушла в сводку над полем (G228) — своего правила у
+   неё больше нет: вид ей задаёт плашка. */
 
 /* Колонка свойств: прежде она была правой колонкой окна на 290 точек, теперь
    это верхний блок левой колонки страницы. Своей ширины у неё больше нет —
@@ -5823,6 +5775,30 @@ const strings = {
     commentTextTitle: "Текст комментария",
     // Подсказку можно свернуть в одну кнопку со значком: текст её читают
     // один раз, а место она занимает всё время работы.
+    // Слова плашек (G228): подсказка слева со знаком «?», сводка справа со
+    // знаком «i». Собраны парами — плашек две, и механизм у них один
+    // (`panels/plate.js`), поэтому и слова лежат рядом.
+    hintWords: {
+      collapse: "Свернуть подсказку",
+      expand: "Показать подсказку",
+      expandNew: "Подсказка изменилась — нажмите, чтобы прочитать",
+    },
+    info: {
+      collapse: "Свернуть сводку",
+      expand: "Показать сводку: размеры, счёт и что не показано",
+      expandNew: "В сводке есть о чём сказать — нажмите, чтобы прочитать",
+    },
+    // ——— сводка плана (G228) ———
+    //
+    // Та же мысль, что в сводках чертежа и объёма: чем меряется и сколько чего.
+    // Метки считаются видимые: фильтр спрятал половину — сводка говорит про то,
+    // что на экране.
+    sumSize: "План {width} × {height} м",
+    sumNoScale: "Масштаб плана не задан — размеров в метрах нет",
+    sumPixels: "Подложка {width} × {height} точек",
+    sumMarks: "Меток {count}",
+    sumMarksFiltered: "Меток видно {count} из {all}",
+    sumRooms: "Помещений {rooms} · стен чертежа {walls}",
     hintCollapse: "Свернуть подсказку",
     hintExpand: "Показать подсказку",
     // Текст сменился, пока подсказка свёрнута. Разворачивать её за
@@ -24116,6 +24092,10 @@ const UI_ICONS = {
   // кольцо с вопросом читается как «здесь написано, что делать», и в клетке
   // 16 px у него узнаётся сам знак, а не пятно.
   hint: ["M12 4.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15", "M9.8 9.6a2.3 2.3 0 0 1 4.4.9c0 1.6-2.2 1.9-2.2 3.3", "M12 16.8v.2"],
+  // «i» для сводки (G228): тот же круг, что у «?», — плашки стоят по краям
+  // одного ряда и обязаны читаться парой. Внутри точка и штрих: буква «i»
+  // линиями, а не шрифтом, — своего шрифта у значков нет.
+  info: ["M12 4.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15", "M12 10.8v6", "M12 7.4v.2"],
   // Уплотнение нумерации: две стрелки, сходящиеся к середине, — «сомкнуть».
   // Прежнее «№» говорило про номера, но не про то, что с ними сделают.
   compact: ["M4 12h6", "M7 9l3 3-3 3", "M20 12h-6", "M17 9l-3 3 3 3"],
@@ -25896,6 +25876,151 @@ function onHistoryChange(listener) {
   return () => historyListeners.delete(listener);
 }
 
+// src/panels/plate.js
+// Плашка поверх поля: подсказка слева и сводка справа (G228, таск 153).
+//
+// Слова заказчика, посмотревшего три режима подряд: «На чертеже панели не
+// скрываются, на схеме вопросик скрывающийся слева (как и должно быть), а в
+// Объёме — справа. Сделай подсказки все слева, чтобы скрывались, а информацию,
+// так же чтобы скрывалась, справа, левее кнопки полноэкранности, с иконкой i
+// (info). И там как раз размеры, количество и т.д.»
+//
+// Отсюда правило, одно на все три режима:
+//
+//   **слева — подсказка**, знак «?», она про руки: что делают клик, клавиши и
+//     мышь прямо сейчас;
+//   **справа — сводка**, знак «i», она про объект: размеры, счёт, недостающее.
+//     Стоит левее кнопки полноэкранности, потому что кнопка там была раньше и
+//     двигать её незачем.
+//
+// Обе сворачиваются в свой знак и **помнят себя порознь**: свернул сводку —
+// свёрнута сводка, а не подсказка, и после перезагрузки обе на своих местах.
+// Механизм взят у подсказки холста целиком (те же классы, та же точка на
+// кнопке, та же настройка в браузере) — второго в сборке нет.
+//
+// Что показывает знак на свёрнутой плашке:
+//
+//   **подсказка** — текст сменился, пока она была свёрнута (`plateUnseen`):
+//     «второй Esc возвращает в „Выделение“» нельзя съесть молча;
+//   **сводка** — в ней есть о чём предупредить (неразмещённые метки, запасной
+//     габарит). Свёрнутая сводка не должна прятать плохие новости — заказчик
+//     назвал это прямо.
+
+
+
+/**
+ * Текст плашки сменился, пока она была свёрнута.
+ *
+ * Разворачивать её за человека нельзя: он свернул её осознанно, и она
+ * выпрыгивала бы под рукой на каждую смену типа — ровно то, от чего он
+ * избавился. Но и молча съесть «второй Esc возвращает в „Выделение“» нельзя,
+ * поэтому кнопка получает точку и другую подпись.
+ *
+ * `seen` — текст, который человек видел последним (плашка была развёрнута).
+ * Ничего не видел — знака нет: точка на первой же подсказке после перезагрузки
+ * была бы шумом.
+ *
+ * Живёт здесь, а не в холсте, с тех пор как плашек стало две на три режима
+ * (G228): холст зовёт её отсюда, как и все остальные.
+ */
+function plateUnseen(seen, current) {
+  if (seen === null || current === null) return false;
+  return seen !== current;
+}
+
+// Свёрнутость живёт здесь, а не в самой плашке: поверхности пересобираются
+// (сменили схему, вышли и вернулись в режим), а выбор человека — нет.
+const plateCollapsed = new Map();
+// Что человек уже прочёл: текст, который стоял в развёрнутой плашке.
+const plateSeen = new Map();
+
+/**
+ * Собрать плашку.
+ *
+ * `side` — «left» для подсказки, «right» для сводки; `setting` — ключ, по
+ * которому помнится свёрнутость. Знак выбирает сторона, и доводом он не
+ * передаётся нарочно: правило «слева „?“, справа „i“» одно на сборку, и
+ * позволить его перебить значило бы завести второй вид плашки.
+ */
+function createFieldPlate({ side, setting }) {
+  const info = side === "right";
+  const body = uiEl("div", { class: "canvas-hint__text" });
+  const toggle = uiEl(
+    "button",
+    {
+      class: "canvas-hint__toggle",
+      type: "button",
+      on: { click: () => flip() },
+    },
+    info ? uiIcon("info") : uiIcon("hint"),
+  );
+  // Кнопка стоит первой у обеих: у подсказки она слева от текста (как на
+  // холсте), у сводки её ставит к правому краю сама раскладка (`row-reverse` в
+  // стилях) — свёрнутая плашка обязана остаться в том углу, где была её кнопка.
+  const node = uiEl("div", { class: "canvas-hint" + (info ? " canvas-hint--info" : "") }, [toggle, body]);
+  let alert = false;
+  let text = "";
+
+  function collapsed() {
+    return plateCollapsed.get(setting) === true;
+  }
+
+  function flip() {
+    plateCollapsed.set(setting, !collapsed());
+    setSetting(setting, collapsed());
+    render();
+  }
+
+  function render() {
+    const shut = collapsed();
+    node.classList.toggle("is-collapsed", shut);
+    body.hidden = shut;
+    // Развёрнутую плашку человек видит — значит, этот текст прочитан.
+    if (!shut) plateSeen.set(setting, text);
+    const seen = plateSeen.has(setting) ? plateSeen.get(setting) : null;
+    const unseen = shut && (alert || plateUnseen(seen, text));
+    toggle.classList.toggle("is-new", Boolean(unseen));
+    const words = info ? strings.canvas.info : strings.canvas.hintWords;
+    let label = words.collapse;
+    if (shut) label = unseen ? words.expandNew : words.expand;
+    toggle.title = label;
+    toggle.setAttribute("aria-label", label);
+    toggle.setAttribute("aria-expanded", shut ? "false" : "true");
+  }
+
+  /**
+   * Что в плашке. `parts` — строка или готовые узлы (у сводки это строки
+   * подряд), `options.alert` — есть о чём предупредить, `options.hidden` —
+   * показывать нечего вовсе.
+   */
+  function update(parts, options = {}) {
+    const list = parts == null ? [] : Array.isArray(parts) ? parts : [parts];
+    const nodes = list.map((part) => (typeof part === "string" ? uiEl("p", { text: part }) : part));
+    body.replaceChildren(...nodes);
+    text = nodes.map((part) => part.textContent || "").join(" ");
+    alert = Boolean(options.alert);
+    node.hidden = Boolean(options.hidden) || text.trim() === "";
+    render();
+  }
+
+  render();
+  // Настройка читается асинхронно, как у подсказки холста: плашка стартует
+  // развёрнутой и схлопывается, когда хранилище ответит. То, что человек успел
+  // увидеть до ответа, прочитанным не считается — он на неё не смотрел.
+  if (!plateCollapsed.has(setting)) {
+    Promise.resolve(getSetting(setting))
+      .then((saved) => {
+        if (saved !== true || plateCollapsed.get(setting) === true) return;
+        plateCollapsed.set(setting, true);
+        plateSeen.delete(setting);
+        render();
+      })
+      .catch(() => {});
+  }
+
+  return { node, update };
+}
+
 // src/panels/elevation.js
 // Полоса развёртки выделенной стены (таск 129, требование G179).
 //
@@ -26120,6 +26245,7 @@ function createElevationStrip({ onSide, onClose, onViews, views }) {
 //
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
+
 
 
 
@@ -26515,6 +26641,48 @@ function canvasHintCopy(hint) {
   return hint + " " + strings.canvas.hintCopy;
 }
 
+/**
+ * Сводка плана — правая плашка режима «Схема» (G228).
+ *
+ * Заказчик: «в схеме тоже давай сводку», состав — «размеры, количество и т.д.».
+ * Поэтому здесь ровно то же, что в сводках чертежа и объёма: **чем схема
+ * меряется и сколько в ней чего**. Размер плана в метрах — если масштаб задан;
+ * в точках — всегда, это то, во что упираются доли меток. Счёт меток считается
+ * **видимых** (`visibleMarks`): фильтр спрятал половину — сводка говорит о том,
+ * что на экране, иначе она спорила бы с собственным планом.
+ *
+ * Чистая и вынесена наружу ради теста: сводка, разошедшаяся с планом, —
+ * ровно та ошибка, которую глазами ловят последней.
+ */
+function canvasSummaryLines(state) {
+  if (!state || !state.project || !state.schemeId) return [];
+  const scheme = findScheme(state.project, state.schemeId);
+  if (!scheme) return [];
+  const lines = [];
+  const size = planSizeMeters(state.project, state.schemeId);
+  if (size) {
+    lines.push(
+      text("canvas.sumSize", { width: formatMeters(size.width), height: formatMeters(size.height) }),
+    );
+  } else if (scheme.imageId) {
+    lines.push(strings.canvas.sumNoScale);
+  }
+  if (Number(scheme.width) > 0 && Number(scheme.height) > 0) {
+    lines.push(text("canvas.sumPixels", { width: Math.round(scheme.width), height: Math.round(scheme.height) }));
+  }
+  const marks = visibleMarks(state.project, scheme, state.filter);
+  const all = state.project.marks.filter((mark) => mark.schemeId === scheme.id).length;
+  lines.push(
+    marks.length === all
+      ? text("canvas.sumMarks", { count: all })
+      : text("canvas.sumMarksFiltered", { count: marks.length, all }),
+  );
+  const rooms = (state.project.rooms || []).length;
+  const walls = wallsOnScheme(state.project, state.schemeId).length;
+  lines.push(text("canvas.sumRooms", { rooms, walls }));
+  return lines;
+}
+
 // ——— подсказка: отступ от края и знак «текст сменился» ————————————————
 //
 // Линейка (таск 59) занимает полосу в `RULER_SIZE` пикселей сверху и слева
@@ -26526,20 +26694,6 @@ function canvasHintInset(state) {
   // переключатель с полным экраном висеть на пустом поле (таск 153).
   if (!canvasOnScreen(state)) return 0;
   return canvasGuidesShown(state) ? RULER_SIZE : 0;
-}
-
-// Текст подсказки меняется по ходу работы и иногда говорит важное («второй Esc
-// возвращает в „Выделение“»). Когда подсказка свёрнута, разворачивать её за
-// пользователя нельзя: он свернул её осознанно, и она выпрыгивала бы под рукой
-// на каждую смену типа — ровно то, от чего он избавился. Но и молча съесть
-// новый текст нельзя, поэтому кнопка получает точку и другую подпись.
-//
-// `seen` — текст, который пользователь видел последним (подсказка была
-// развёрнута). Ничего не видел — знака нет: точка на первой же подсказке после
-// перезагрузки была бы шумом.
-function canvasHintUnseen(seen, current) {
-  if (seen === null || current === null) return false;
-  return seen !== current;
 }
 
 // ——— полный экран ————————————————————————————————————————————————————
@@ -26606,6 +26760,8 @@ function canvasFullscreenToggle(doc, element) {
 // Свёрнутость — оснастка рабочего места, как и отметка линейки: живёт в
 // настройках браузера, в объект и в файл проекта не попадает.
 const CANVAS_HINT_SETTING = "canvasHintCollapsed";
+// Свёрнутость сводки — своя (G228): свернул сводку, а подсказка осталась.
+const CANVAS_SUMMARY_SETTING = "canvasSummaryCollapsed";
 let canvasHintCollapsed = false;
 let canvasHintSeen = null;
 
@@ -30161,7 +30317,7 @@ function mountCanvasHint(host, api) {
     body.hidden = canvasHintCollapsed;
     // Развёрнутую подсказку пользователь видит — значит, этот текст прочитан.
     if (!canvasHintCollapsed) canvasHintSeen = value;
-    const unseen = canvasHintCollapsed && canvasHintUnseen(canvasHintSeen, value);
+    const unseen = canvasHintCollapsed && plateUnseen(canvasHintSeen, value);
     toggle.classList.toggle("is-new", unseen);
     let label = strings.canvas.hintCollapse;
     if (canvasHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
@@ -30372,12 +30528,43 @@ function canvasWallMiddleY(state) {
   return (a.y + b.y) / 2;
 }
 
-// Поверх холста живут трое: подсказка слева, полный экран справа и полоса
-// развёртки у дальнего от стены края. Точка монтирования одна, поэтому и
+/**
+ * Сводка плана — правая плашка (G228).
+ *
+ * Правило одно на три режима: слева подсказка со знаком «?», справа сводка со
+ * знаком «i», и стоит она левее кнопки полноэкранности. Содержимое считает
+ * `canvasSummaryLines`, а здесь только руки и перерисовка.
+ */
+function mountCanvasSummary(host, api) {
+  const plate = createFieldPlate({ side: "right", setting: CANVAS_SUMMARY_SETTING });
+  host.append(plate.node);
+  const render = () => {
+    const state = api.getState();
+    plate.update(canvasSummaryLines(state), { hidden: !canvasOnScreen(state) });
+    plate.node.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
+  };
+  api.subscribe((state, changed) => {
+    if (
+      "project" in changed ||
+      "schemeId" in changed ||
+      "filter" in changed ||
+      "layout" in changed ||
+      "guidesShown" in changed ||
+      "screen" in changed
+    ) {
+      render();
+    }
+  });
+  render();
+}
+
+// Поверх холста живут четверо: подсказка слева, сводка и полный экран справа и
+// полоса развёртки у дальнего от стены края. Точка монтирования одна, поэтому и
 // монтируются они вместе — панель чистит поле один раз, а не каждый за себя.
 function mountCanvasOverlay(host, api) {
   host.replaceChildren();
   mountCanvasHint(host, api);
+  mountCanvasSummary(host, api);
   mountCanvasFullscreen(host, api);
   mountCanvasElevation(host, api);
 }
@@ -46115,19 +46302,15 @@ function volumeMarkerFaces(at, yaw, out = [], radiusMm = VOLUME_MARKER_MM) {
 // Слова заказчика: «подсказку по управлению сделай в виде как на схеме —
 // кнопочка справа сверху, которую закрывать можно».
 //
-// Механизм взят у холста целиком: те же классы (`canvas-hint`,
-// `canvas-hint__text`, `canvas-hint__toggle`, `is-collapsed`), та же точка на
-// кнопке при сменившемся тексте (`canvasHintUnseen`, `is-new`) и те же подписи.
-// Второго поведения не заводится — у человека одна рука на обе поверхности.
+// Механизм общий на все три режима (G228) и живёт в `panels/plate.js`: те же
+// классы, та же точка на кнопке при сменившемся тексте, те же подписи. Второго
+// поведения не заводится — у человека одна рука на все поверхности.
 //
-// **Настройка своя**, отдельная от холста: подсказки разные, и свернув одну, он
-// не просил сворачивать другую. Свёрнутость живёт там же, где у холста, — в
-// настройках браузера, то есть переживает закрытие окна и перезагрузку.
+// **Настройки свои**, отдельные от холста и друг от друга: подсказка и сводка
+// разные, и свернув одну, он не просил сворачивать другую. Живут они в
+// настройках браузера, то есть переживают перезагрузку.
 const VOLUME_HINT_SETTING = "volumeHintCollapsed";
-let volumeHintCollapsed = false;
-// Текст, который человек видел последним развёрнутым. Модульная, а не оконная:
-// закрыл и открыл окно — подсказка та же, и мигать точкой ей незачем.
-let volumeHintSeen = null;
+const VOLUME_SUMMARY_SETTING = "volumeSummaryCollapsed";
 
 /** Клавиша → куда шагаем: вперёд/назад и в сторону, в осях камеры. */
 function volumeKeyMove(code) {
@@ -46699,37 +46882,17 @@ function createVolume({ api, hosts }) {
   // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
   // (`volume.css`), и читать его нечем — `aria-hidden`.
   const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
-  // Подсказка по управлению — плашка справа сверху поля со сворачивающей
-  // кнопкой (G218). Кнопка **справа от текста**, а не слева, как на холсте:
-  // плашка прижата к правому краю, и свёрнутая она обязана остаться в том же
-  // углу, где была её кнопка.
-  const hintText = uiEl("p", { class: "canvas-hint__text" });
-  const hintToggle = uiEl(
-    "button",
-    {
-      class: "canvas-hint__toggle",
-      type: "button",
-      on: {
-        click: () => {
-          volumeHintCollapsed = !volumeHintCollapsed;
-          setSetting(VOLUME_HINT_SETTING, volumeHintCollapsed);
-          syncHint();
-          // Клавиши возвращаются полю: свернул подсказку — идёшь дальше, а не
-          // жмёшь пробелом ту же кнопку.
-          if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
-        },
-      },
-    },
-    uiIcon("hint"),
-  );
-  const hint = uiEl("div", { class: "canvas-hint canvas-hint--volume" }, [hintText, hintToggle]);
+  // Подсказка по управлению — плашка **слева** со знаком «?» (G228): правило
+  // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
+  // стоит сводка, а ещё правее — кнопка полноэкранного показа.
+  const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
     stairButton,
     padNode,
     aimNode,
-    hint,
+    hintPlate.node,
     askBox,
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
@@ -46757,7 +46920,7 @@ function createVolume({ api, hosts }) {
     attrs: { hidden: "hidden" },
     on: { click: () => toggleAllDoors() },
   });
-  const where = uiEl("span", { class: "volume__where" });
+  const where = uiEl("p", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
   const missing = uiEl("p", { class: "volume__missing" });
   // Нарисованные запасным габаритом (G215) — своей строкой рядом с
@@ -46777,11 +46940,11 @@ function createVolume({ api, hosts }) {
   // был единственным местом, где написано, где человек оказался после
   // лестницы. Окна нет — осталась первая строка плашки.
   const titleNode = uiEl("p", { class: "volume__title" });
-  const notePlate = uiEl("div", { class: "screen-note" }, [titleNode, where, meta, missing, spareLine]);
+  const summaryPlate = createFieldPlate({ side: "right", setting: VOLUME_SUMMARY_SETTING });
   // Нечего показывать — плашка посреди поля, а не строчка в углу: это главное,
   // что человек должен прочесть, войдя в режим без чертежа.
   const emptyNote = uiEl("p", { class: "screen-empty", attrs: { hidden: "hidden" } });
-  stage.append(notePlate, emptyNote);
+  stage.append(summaryPlate.node, emptyNote);
   hosts.stage.replaceChildren(stage);
   // Этаж — в колонке, рядом с видом (таск 153): на каком этаже человек стоит,
   // видно и не подходя к лестнице, а переход остаётся **один на обе кнопки** —
@@ -47908,12 +48071,46 @@ function createVolume({ api, hosts }) {
   }
 
   /**
-   * Подсказка плашкой (G218): текст, свёрнутость и точка на кнопке.
+   * Сводка — правая плашка со знаком «i» (G228): где человек стоит, сколько в
+   * сцене чего и чего в ней **не** видно.
    *
-   * Разворачивать её за человека нельзя — он свернул её осознанно, и она
-   * выпрыгивала бы под рукой на каждую открытую дверь. Но и молча съесть
-   * сменившийся текст нельзя: кнопка получает точку и другую подпись. Правило
-   * то же, что на холсте, и считает его та же `canvasHintUnseen`.
+   * Предупреждения (неразмещённые метки, запасной габарит) — её часть, и
+   * пропасть вместе со свёрнутой плашкой они не должны: кнопка получает точку
+   * (`alert`), ту же самую, которой подсказка говорит «текст сменился».
+   *
+   * В пустом поле плашка молчит: всё, что она сказала бы, уже написано
+   * посреди экрана, а второй раз то же самое — шум.
+   */
+  function syncSummary() {
+    titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
+    if (scene.empty) {
+      summaryPlate.update([], { hidden: true });
+      return;
+    }
+    meta.textContent = [
+      text("volume.counts", {
+        walls: scene.wallCount,
+        openings: scene.openingCount,
+        rooms: scene.rooms.length,
+        marks: scene.marks.length,
+      }),
+      ...volumeNotes(scene),
+    ].join(" ");
+    missing.textContent = volumeUnplacedLine(scene.unplaced);
+    missing.title = volumeUnplacedTitle(scene.unplaced);
+    missing.hidden = scene.unplaced.length === 0;
+    const spare = scene.spare || [];
+    spareLine.textContent = volumeSpareLine(spare);
+    spareLine.title = volumeSpareTitle(spare);
+    spareLine.hidden = spare.length === 0;
+    summaryPlate.update([titleNode, where, meta, missing, spareLine], {
+      alert: scene.unplaced.length > 0 || spare.length > 0,
+    });
+  }
+
+  /**
+   * Подсказка плашкой (G218, G228): текст у неё свой, а свёрнутость, точка на
+   * кнопке и память — общие с остальными плашками (`panels/plate.js`).
    */
   function syncHint() {
     const value = volumeHintText({
@@ -47929,18 +48126,7 @@ function createVolume({ api, hosts }) {
       floors: floorOptions(),
       back: backFloor(),
     });
-    hintText.textContent = value;
-    hint.classList.toggle("is-collapsed", volumeHintCollapsed);
-    hintText.hidden = volumeHintCollapsed;
-    // Развёрнутую подсказку человек видит — значит, этот текст прочитан.
-    if (!volumeHintCollapsed) volumeHintSeen = value;
-    const unseen = volumeHintCollapsed && canvasHintUnseen(volumeHintSeen, value);
-    hintToggle.classList.toggle("is-new", unseen);
-    let label = strings.canvas.hintCollapse;
-    if (volumeHintCollapsed) label = unseen ? strings.canvas.hintExpandNew : strings.canvas.hintExpand;
-    hintToggle.title = label;
-    hintToggle.setAttribute("aria-label", label);
-    hintToggle.setAttribute("aria-expanded", volumeHintCollapsed ? "false" : "true");
+    hintPlate.update(value);
   }
 
   function sync() {
@@ -47954,40 +48140,12 @@ function createVolume({ api, hosts }) {
     if (padNode.hidden) padEnd(null);
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
     shotButton.hidden = scene.empty;
-    titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
     // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
     // задник и плашку посреди экрана. Кнопка режима при этом не гаснет: режим
     // доступен всегда, и сказать, чего не хватает, обязано само поле.
     emptyNote.hidden = !scene.empty;
     emptyNote.textContent = scene.empty ? strings.volume.empty : "";
-    // Плашка про объект в пустом поле молчит: всё, что она сказала бы, уже
-    // написано посреди экрана, а второй раз то же самое — шум.
-    notePlate.hidden = scene.empty;
-    if (scene.empty) {
-      meta.textContent = "";
-      missing.textContent = "";
-      missing.hidden = true;
-      spareLine.textContent = "";
-      spareLine.hidden = true;
-    } else {
-      const lines = [
-        text("volume.counts", {
-          walls: scene.wallCount,
-          openings: scene.openingCount,
-          rooms: scene.rooms.length,
-          marks: scene.marks.length,
-        }),
-        ...volumeNotes(scene),
-      ];
-      meta.textContent = lines.join(" ");
-      missing.textContent = volumeUnplacedLine(scene.unplaced);
-      missing.title = volumeUnplacedTitle(scene.unplaced);
-      missing.hidden = scene.unplaced.length === 0;
-      const spare = scene.spare || [];
-      spareLine.textContent = volumeSpareLine(spare);
-      spareLine.title = volumeSpareTitle(spare);
-      spareLine.hidden = spare.length === 0;
-    }
+    syncSummary();
     syncWhere();
     syncStair();
     syncSelection();
@@ -48100,18 +48258,6 @@ function createVolume({ api, hosts }) {
   resize();
   if (!scene.empty) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
-  // Свёрнутость подсказки читается из настроек асинхронно — как на холсте:
-  // плашка стартует развёрнутой и схлопывается, когда хранилище ответит.
-  // То, что человек успел увидеть до ответа, прочитанным не считается: он на
-  // подсказку не смотрел, она мигнула сама.
-  Promise.resolve(getSetting(VOLUME_HINT_SETTING))
-    .then((saved) => {
-      if (closed || saved !== true) return;
-      volumeHintCollapsed = true;
-      volumeHintSeen = null;
-      syncHint();
-    })
-    .catch(() => {});
   return { destroy };
 }
 
@@ -50297,6 +50443,7 @@ function openTypePicker(project, options = {}) {
 
 
 
+
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
 // экрана на миллиметр», и пороги притяжки, заданные в пикселях экрана, остаются
@@ -51386,6 +51533,17 @@ function workshopListGroups(project, schemeId) {
   ];
 }
 function workshopStatus(project, schemeId, placement) {
+  return workshopSummaryLines(project, schemeId, placement).join(" · ");
+}
+
+/**
+ * То же самое строками — для сводки над полем (G228).
+ *
+ * Одна строка — один ответ: чем меряется план, сколько в чертеже стен, проёмов
+ * и объектов. Разбирать обратно строку со всеми ними («сплитом по точке»)
+ * нельзя: внутри частей точка тоже встречается.
+ */
+function workshopSummaryLines(project, schemeId, placement) {
   const parts = [];
   if (placement.kind === "ready") {
     const size = planSizeMeters(project, schemeId);
@@ -51417,7 +51575,7 @@ function workshopStatus(project, schemeId, placement) {
   if (openings > 0) parts.push(text("workshop.openingCount", { count: openings }));
   const objects = schemeObjectsOnScheme(project, schemeId).length;
   if (objects > 0) parts.push(text("workshop.objectCount", { count: objects }));
-  return parts.join(" · ");
+  return parts;
 }
 
 // ——— окно ——————————————————————————————————————————————————————————————
@@ -51569,14 +51727,13 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.toolObjectsHint,
     on: { click: () => setAdding("objects") },
   });
-  // Строка состояния и подсказка — плашки **поверх поля**: под полем места
-  // больше нет, поле занимает основной экран целиком (таск 153). Состояние о
-  // чертеже — слева под верхним рядом, подсказка про руки — справа, ровно так
-  // же, как это устроено в объёме. Кликов плашки не берут: под ними чертят.
-  const meta = uiEl("p", { class: "workshop__meta" });
-  const hint = uiEl("p", { class: "canvas-hint__text", text: workshopHint("walls") });
-  const metaPlate = uiEl("div", { class: "screen-note" }, [meta]);
-  const hintPlate = uiEl("div", { class: "canvas-hint canvas-hint--screen" }, [hint]);
+  // Две плашки поверх поля, по общему правилу всех трёх режимов (G228):
+  // **подсказка слева** со знаком «?» — про руки, **сводка справа** со знаком
+  // «i» — про чертёж (размеры плана, счёт стен, проёмов и объектов). Обе
+  // сворачиваются и помнят себя порознь; кирпич один на сборку
+  // (`panels/plate.js`).
+  const hintPlate = createFieldPlate({ side: "left", setting: WORKSHOP_HINT_SETTING });
+  const summaryPlate = createFieldPlate({ side: "right", setting: WORKSHOP_SUMMARY_SETTING });
 
   // ——— правая часть: слои, сетка, стена, высоты ———
   const planCheck = uiEl("input", { type: "checkbox" });
@@ -51804,7 +51961,7 @@ function createWorkshop({ api, hosts }) {
   // инструменты чертежа это и есть верхний блок. Над полем остаётся только то,
   // что над полем и было: подсказка слева, полный экран справа, а между ними
   // переключатель режимов.
-  stage.append(metaPlate, hintPlate);
+  stage.append(hintPlate.node, summaryPlate.node);
   hosts.stage.replaceChildren(stage);
   hosts.side.replaceChildren(
     uiEl("div", { class: "workshop__panel" }, [
@@ -53469,7 +53626,6 @@ function createWorkshop({ api, hosts }) {
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
     objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");
     syncSubject(current, wall);
-    hint.textContent = workshopHint(tool, workshopObjectWay);
     if (document.activeElement !== heightInput) {
       const own = findScheme(current, schemeId);
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
@@ -53481,7 +53637,14 @@ function createWorkshop({ api, hosts }) {
     syncRooms(current);
     syncElevation(current, wall);
     syncList(current);
-    meta.textContent = workshopStatus(current, schemeId, spot);
+    hintPlate.update(workshopHint(tool, workshopObjectWay));
+    // Сводка — строками, как в объёме: каждая отвечает на свой вопрос, и
+    // читать её сверху вниз легче, чем одну длинную строку.
+    summaryPlate.update(workshopSummaryLines(current, schemeId, spot), {
+      // Масштаба у плана нет — это и есть то, о чём сводка обязана сказать, даже
+      // будучи свёрнутой: без него подложку под чертёж не положить.
+      alert: spot.kind === "noScale",
+    });
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
     node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
@@ -53823,6 +53986,10 @@ function createWorkshop({ api, hosts }) {
 // живёт дальше и в чужих режимах — гаснет, но помнит масштаб, инструмент и
 // черновик. Разбирается она только тогда, когда чертить стало нечего: схему
 // удалили или объект закрыли.
+// Свёрнутость плашек — у каждой своя (G228) и переживает перезагрузку.
+const WORKSHOP_HINT_SETTING = "workshopHintCollapsed";
+const WORKSHOP_SUMMARY_SETTING = "workshopSummaryCollapsed";
+
 let workshopSurface = null;
 
 function mountWorkshopScreen(host, api) {

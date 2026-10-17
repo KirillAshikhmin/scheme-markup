@@ -18,7 +18,9 @@ import {
   SECTION_IDS,
   sectionListFrom,
 } from "../src/app.js";
-import { canvasHintInset, canvasHintText, canvasOnScreen } from "../src/canvas.js";
+import { canvasHintInset, canvasHintText, canvasOnScreen, canvasSummaryLines } from "../src/canvas.js";
+import { plateUnseen } from "../src/panels/plate.js";
+import { workshopPlacement, workshopStatus, workshopSummaryLines } from "../src/panels/workshop.js";
 import { RULER_SIZE } from "../src/render.js";
 import { addScheme, createProject } from "../src/model.js";
 import { strings } from "../src/strings.js";
@@ -108,4 +110,44 @@ test("план уступает экран: подсказка и линейка
   assert.equal(canvasHintInset(stateOf({})), RULER_SIZE);
   assert.equal(canvasHintInset(stateOf({ screen: "volume" })), 0);
   assert.equal(canvasHintInset(stateOf({ screen: "drawing" })), 0);
+});
+
+// ——— две плашки над полем: подсказка слева, сводка справа (G228) ————————
+//
+// Заказчик: «Сделай подсказки все слева, чтобы скрывались, а информацию, так же
+// чтобы скрывалась, справа, левее кнопки полноэкранности, с иконкой i (info). И
+// там как раз размеры, количество и т.д.»
+//
+// Проверяется чистая половина: что в сводке лежит и что она не расходится со
+// строкой состояния, из которой собрана.
+
+test("сводка плана отвечает на «сколько чего» и считает видимые метки", () => {
+  const scheme = made.scheme;
+  const lines = canvasSummaryLines(stateOf({}));
+  assert.ok(lines.length >= 3, "сводка из одной строки ничего не говорит");
+  assert.ok(
+    lines.some((line) => line.includes(String(scheme.width))),
+    "размер подложки в сводке не назван: " + lines.join(" | "),
+  );
+  assert.ok(lines.some((line) => /Меток/.test(line)));
+  assert.ok(lines.some((line) => /Помещений/.test(line)));
+  // Без схемы сводке говорить нечего — и она молчит, а не показывает нули.
+  assert.deepEqual(canvasSummaryLines(stateOf({ schemeId: null })), []);
+  assert.deepEqual(canvasSummaryLines(null), []);
+});
+
+test("сводка чертежа — те же слова, что строка состояния, только порознь", () => {
+  const spot = workshopPlacement(made.project, made.scheme.id);
+  const lines = workshopSummaryLines(made.project, made.scheme.id, spot);
+  assert.ok(lines.length >= 2);
+  // Разошлись бы они — человек читал бы в сводке одно, а в отчёте другое.
+  assert.equal(workshopStatus(made.project, made.scheme.id, spot), lines.join(" · "));
+  for (const line of lines) assert.ok(line.trim().length > 0, "пустая строка сводки");
+});
+
+test("свёрнутая плашка помечается, когда текст сменился, и молчит, когда не видел ничего", () => {
+  assert.equal(plateUnseen("было", "стало"), true);
+  assert.equal(plateUnseen("было", "было"), false);
+  assert.equal(plateUnseen(null, "стало"), false, "не видел ничего — и знака нет");
+  assert.equal(plateUnseen("было", null), false);
 });
