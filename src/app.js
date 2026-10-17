@@ -24,10 +24,20 @@ export const PANEL_IDS = {
   // Карточка выделенной метки в просмотре: своя точка поверх холста, под
   // подсказкой и кнопкой полного экрана — те в верхних углах, эта внизу.
   canvasCard: "canvas-card",
-  // Кнопка «3D» над планом (G209, таск 150). Своя точка, а не общее наложение
-  // холста: наложение собирает `canvas.js`, а объёмное окно живёт в панелях,
+  // Переключатель режимов экрана (таск 153, G219): по центру того же ряда, где
+  // слева подсказка, а справа полный экран. Своя точка, а не общее наложение
+  // холста: наложение собирает `canvas.js`, а переключатель живёт в панелях,
   // которые его же и импортируют, — кнопка оттуда замкнула бы сборку в круг.
-  canvasVolume: "canvas-volume",
+  canvasModes: "canvas-modes",
+  // Поверхности основного экрана: чертёж и объём лежат там же, где план, и
+  // показывается ровно одна (таск 153). Окон у них больше нет.
+  screenDrawing: "screen-drawing",
+  screenVolume: "screen-volume",
+  // Верхний блок левой колонки в режиме «Чертёж» и в режиме «Объём» — на месте
+  // «Меток». Правая колонка в «Чертеже» — список элементов чертежа.
+  drawTools: "panel-draw-tools",
+  drawList: "panel-draw-list",
+  volumeTools: "panel-volume-tools",
   headerActions: "header-actions",
   headerSearch: "header-search",
   headerHistory: "header-history",
@@ -37,8 +47,39 @@ export const PANEL_IDS = {
   dialogs: "dialog-host",
 };
 
+// ——— три режима основного экрана (таск 153, G219) ————————————————————————
+//
+// Заказчик: «надо на их уровне по центру добавить переключатель — Чертёж,
+// Схема, Объём. Чтобы переключать контент, а не в окне показывать чертёж и
+// объём».
+//
+// Порядок — порядок самого переключателя и порядок работы: сперва чертят
+// (Чертёж), потом размечают (Схема), потом смотрят, что вышло (Объём). Схема
+// стоит посередине не ради красоты: она главная, и из неё одинаково близко в
+// обе стороны.
+export const SCREEN_MODES = ["drawing", "scheme", "volume"];
+// Объект открывается схемой: размечают чаще, чем чертят и смотрят, и это
+// единственный режим, который есть всегда и у всякого объекта.
+export const SCREEN_DEFAULT = "scheme";
+// Чем режим разрешён. Умение, а не отдельный список: «Чертёж» — правка объекта
+// и на узком экране его нет ровно потому, что там нет никакой правки, а
+// «Объём» только смотрит и на планшете остаётся. Разойдись эти два списка — на
+// телефоне появился бы режим, в котором нечем работать.
+export const SCREEN_ABILITIES = {
+  drawing: "editDrawing",
+  scheme: "viewPlan",
+  volume: "viewVolume",
+};
+
 const appState = {
   layout: "desktop",
+  // Что показано на основном экране: план, чертёж или объём (таск 153, G219).
+  // **Состояние сеанса вкладки и только оно** (G68): в объект режим не
+  // пишется — иначе напарник, открывший файл, попадал бы в чужой объём, — и в
+  // настройки браузера тоже не пишется: объект открывается схемой, она главная.
+  // Внутри сеанса помнится всё: поверхности живут дальше за кадром, и человек
+  // возвращается туда, где стоял в объёме, и к тому инструменту, которым чертил.
+  screen: SCREEN_DEFAULT,
   project: null,
   schemeId: null,
   selectedMarkIds: [],
@@ -95,9 +136,18 @@ export const SECTION_IDS = {
   marks: "marks",
   rooms: "rooms",
   schemes: "schemes",
+  // Имя раздела осталось `sizes`, а подпись стала «Интерфейс проекта» (таск
+  // 153): по ключу помнится свёрнутость, и переименуй его — у всех, кто уже
+  // работает, раздел развернулся бы обратно.
   sizes: "sizes",
   markList: "markList",
   properties: "properties",
+  // Верхние блоки левой колонки режимов «Чертёж» и «Объём» и список элементов
+  // чертежа в правой (таск 153). Сворачиваются и помнятся так же, как
+  // остальные: логика панелей не меняется ни на йоту.
+  drawTools: "drawTools",
+  drawList: "drawList",
+  volumeTools: "volumeTools",
 };
 export const SECTIONS_SETTING = "collapsedSections";
 // Колонки целиком: на планшете две по 264 точки съедают весь экран, и холсту
@@ -175,6 +225,12 @@ export const LAYOUT_ABILITIES = {
   // всему полю и щиплют двумя пальцами в обзоре, так что кнопка в режиме
   // просмотра больше не обещает того, чем нельзя воспользоваться.
   viewVolume: ["desktop", "mobile"],
+  // Мастерская чертежа (таск 153): стены рисуют цепочкой в миллиметрах, и это
+  // правка объекта — в просмотре её нет, как нет постановки меток. Своё умение,
+  // а не `editSchemes`: тот про список схем (имя, порядок, удаление), и
+  // разреши чертёж вместе с ним — на телефоне появился бы режим с инструментами
+  // и без возможности ими воспользоваться.
+  editDrawing: ["desktop"],
   undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],
@@ -201,6 +257,29 @@ export function layoutModeFor(view, override) {
 export function layoutAllows(ability, mode) {
   const modes = LAYOUT_ABILITIES[ability];
   return Array.isArray(modes) && modes.includes(mode);
+}
+
+// ——— режимы и раскладка: чистые правила ————————————————————————————————
+
+// Неизвестный режим недоступен, как и неизвестное умение: опечатка уводит
+// человека на схему, а не оставляет его на пустом экране.
+export function screenAllowed(screen, layout) {
+  const ability = SCREEN_ABILITIES[screen];
+  return Boolean(ability) && layoutAllows(ability, layout);
+}
+
+// Что показывает переключатель в этой раскладке. На узком экране кнопок две:
+// «Чертёж» там не умеет ничего, и кнопка, которая ничего не делает, хуже
+// отсутствующей — то же правило, по которому на телефоне нет кнопки отмены.
+export function screensFor(layout) {
+  return SCREEN_MODES.filter((screen) => screenAllowed(screen, layout));
+}
+
+// Экран сузили, а человек стоял в чертеже — его возвращают на схему. То же
+// правило, по которому вход в просмотр снимает режим постановки меток: режим,
+// в котором на этом экране нечем работать, оставлять нельзя.
+export function screenAfterLayout(screen, layout) {
+  return screenAllowed(screen, layout) ? screen : SCREEN_DEFAULT;
 }
 
 const appCollapsed = new Set();
@@ -280,6 +359,7 @@ export function setState(patch) {
     }
   }
   syncCanvasClass();
+  syncScreenClass();
   syncSchemeName();
   return snapshot;
 }
@@ -356,6 +436,27 @@ function syncCanvasClass() {
   const app = document.getElementById("app");
   if (!app) return;
   app.classList.toggle("has-scheme", Boolean(appState.schemeId));
+}
+
+// Режим экрана — отметкой на корне страницы: по ней стили решают, какая
+// поверхность видна и какие разделы стоят в колонках. Класса здесь нет
+// нарочно — режим один из трёх, и три класса рассинхронизировались бы.
+function syncScreenClass() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.dataset.screen = appState.screen;
+}
+
+export function screenMode() {
+  return appState.screen;
+}
+
+// Режим меняется одной дверью: отметка на корне, панели и поверхности узнают
+// о нём из `subscribe`. Недоступный в этой раскладке режим не включается —
+// иначе переключатель обещал бы то, чего на этом экране нет.
+export function setScreen(screen) {
+  if (!screenAllowed(screen, appState.layout)) return;
+  setState({ screen });
 }
 
 function layoutViewport() {
@@ -436,6 +537,10 @@ function syncLayout() {
     // делась, и оставленный «Точка» ставил бы метки там, где их не ждут.
     setState(mode === "mobile" ? { layout: mode, mode: "select" } : { layout: mode });
   }
+  // И по той же причине — режим экрана: окно сузили, а человек стоял в
+  // чертеже, которого в просмотре нет вовсе (таск 153).
+  const screen = screenAfterLayout(appState.screen, mode);
+  if (screen !== appState.screen) setState({ screen });
   syncSheet();
   syncSchemeName();
 }
@@ -629,6 +734,7 @@ export function startApp() {
   wireSections();
   wirePanels();
   syncCanvasClass();
+  syncScreenClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
   // Веб-версия заодно просит служебный скрипт: установленное приложение

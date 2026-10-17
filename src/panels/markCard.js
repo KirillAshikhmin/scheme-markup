@@ -30,7 +30,7 @@ import {
   markPointer,
   styleOf,
 } from "../model.js";
-import { canvasEditCommentText } from "../canvas.js";
+import { canvasEditCommentText, canvasOnScreen } from "../canvas.js";
 import { planToScreen, shapeIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings } from "../strings.js";
@@ -226,7 +226,13 @@ function mountMarkCard(host, api) {
   const render = () => {
     const state = getState();
     const mode = markCardState(state, collapsed);
-    const model = mode === MARK_CARD_NONE ? null : markCardModel(state.project, state.selectedMarkIds[0]);
+    // Карточка стоит поверх плана — в чужом режиме плана под ней нет (таск
+    // 153). У объёма своя такая же карточка в своём поле, собранная тем же
+    // `markCardParts`: две сразу были бы две правды об одной метке.
+    const model =
+      mode === MARK_CARD_NONE || !canvasOnScreen(state)
+        ? null
+        : markCardModel(state.project, state.selectedMarkIds[0]);
     card.hidden = !model;
     // В просмотре карточка показывает метку целиком и стоит колонкой; на
     // компьютере она ужата в ряды и пропускает клик на план под собой.
@@ -333,7 +339,8 @@ function mountMarkCard(host, api) {
       "selectedMarkIds" in changed ||
       "project" in changed ||
       "layout" in changed ||
-      "schemeId" in changed
+      "schemeId" in changed ||
+      "screen" in changed
     ) {
       render();
     }

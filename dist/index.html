@@ -38,9 +38,12 @@
   position: absolute;
   left: calc(12px + var(--canvas-hint-inset, 0px));
   top: calc(12px + var(--canvas-hint-inset, 0px));
-  /* Справа в том же ряду стоит кнопка полного экрана — её полоса вычтена из
-     ширины подсказки, иначе развёрнутый текст лёг бы под неё. */
-  max-width: min(460px, calc(100% - 62px - var(--canvas-hint-inset, 0px)));
+  /* Справа в том же ряду стоит кнопка полного экрана, а по центру —
+     переключатель режимов (таск 153). Обе полосы вычтены из ширины подсказки,
+     иначе развёрнутый текст лёг бы под них. До середины подсказка не доходит с
+     запасом в половину переключателя: на узком окне она ужимается и переносит
+     строку, а под кнопки не лезет. */
+  max-width: min(460px, calc(50% - 124px - var(--canvas-hint-inset, 0px)), calc(100% - 62px - var(--canvas-hint-inset, 0px)));
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -166,48 +169,79 @@
   height: 30px;
 }
 
-/* Кнопка «3D» (G209, таск 150) — слева от полноэкранной и ровно такая же:
-   тот же размер, та же рамка, та же мера отступа от линейки. Разница одна —
-   вместо рисованного значка две буквы: «3D» заказчик назвал словом, а значка
-   объёма, который читался бы без подписи, не бывает. */
-.canvas-volume {
+/* ——— переключатель режимов (таск 153, G219) ——————————————————————————————
+   «надо на их уровне по центру добавить переключатель — Чертёж, Схема, Объём».
+
+   Ряд из трёх кнопок по центру верхней полосы поля: слева от него подсказка,
+   справа полный экран. Отступ от линейки — та же мера, что у них обоих
+   (`--canvas-hint-inset`): встань кнопки на другой высоте, и одним рядом они
+   читаться перестанут.
+
+   Кнопки — одна плашка с общей рамкой, а не три отдельные: это один выбор из
+   трёх, и выглядеть он должен переключателем, а не тремя кнопками, у которых
+   случайно общая высота. Прежняя кнопка «3D» стояла здесь же справа — её дело
+   делает этот ряд, и её больше нет. */
+.canvas-modes {
   position: absolute;
-  right: 44px;
+  left: 50%;
+  transform: translateX(-50%);
   top: calc(12px + var(--canvas-hint-inset, 0px));
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 2px;
   border: 1px solid var(--canvas-line);
-  border-radius: 5px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.92);
-  color: #57606a;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.02em;
-  cursor: pointer;
   pointer-events: auto;
+  /* Поверх полосы развёртки и карточки метки: по переключателю щёлкают в любом
+     режиме, и закрывать его чему-либо нельзя. */
+  z-index: 4;
 }
 
-.canvas-volume:hover,
-.canvas-volume:focus-visible {
+.canvas-modes[hidden] {
+  display: none;
+}
+
+/* Селектор нарочно двойной — `.canvas-modes .canvas-modes__btn`. Стили
+   собираются в один файл по алфавиту имён, и `panels.css` ложится после
+   `canvas.css`: с одним классом общая кнопка `.ui-btn` перебивала бы здесь всё
+   до последнего свойства — и заливку, и поля, и рамку. */
+.canvas-modes .canvas-modes__btn {
+  margin: 0;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #57606a;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.canvas-modes .canvas-modes__btn:hover,
+.canvas-modes .canvas-modes__btn:focus-visible {
   color: var(--accent);
+  background: rgba(31, 111, 235, 0.08);
+  border-color: transparent;
 }
 
-/* Нет чертежа — кнопка остаётся на месте и гаснет с причиной в подсказке:
-   исчезни она, и человек решил бы, что объём отвалился. */
-.canvas-volume[disabled] {
-  opacity: 0.45;
-  cursor: default;
+/* Включённый режим залит, а не обведён: обводка внутри общей рамки читается
+   как вторая рамка, а не как «я здесь». */
+.canvas-modes .canvas-modes__btn.is-on,
+.canvas-modes .canvas-modes__btn.is-on:hover,
+.canvas-modes .canvas-modes__btn.is-on:focus-visible {
+  background: var(--accent);
+  color: #fff;
 }
 
-#app.is-mobile .canvas-volume {
-  width: 30px;
-  height: 30px;
-  right: 50px;
+/* Палец крупнее курсора — как у подсказки и полного экрана, но ряд стоит между
+   двумя кнопками по краям, и поля у него остаются узкими: на телефоне лишние
+   восемь точек с каждой стороны — это перенос ряда под подсказку. */
+#app.is-mobile .canvas-modes .canvas-modes__btn {
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 12px;
 }
 
 /* ——— карточка выделенной метки (просмотр) ————————————————————————————
@@ -4803,14 +4837,56 @@ body {
 
 #canvas-host,
 #canvas-overlay,
-#canvas-volume {
+#canvas-modes,
+.screen {
   position: absolute;
   inset: 0;
 }
 
 #canvas-overlay,
-#canvas-volume {
+#canvas-modes {
   pointer-events: none;
+}
+
+/* ——— три режима основного экрана (таск 153, G219) ————————————————————
+   Чертёж и объём — содержимое экрана, а не окна: обе поверхности лежат там же,
+   где план, и видна ровно одна.
+
+   Невидимая поверхность **гаснет, а не выпадает из раскладки**: `display: none`
+   отдаёт ей нулевой размер, и, вернувшись, человек получил бы пересчитанный с
+   нуля кадр — другой масштаб в чертеже, другое поле зрения в объёме. При
+   `visibility` размер остаётся настоящим, холст не пересобирается, а клики и
+   фокус сквозь погасшую поверхность всё равно не проходят. */
+.screen {
+  visibility: hidden;
+}
+
+#app.has-scheme[data-screen="drawing"] #screen-drawing,
+#app.has-scheme[data-screen="volume"] #screen-volume {
+  visibility: visible;
+}
+
+/* План в чужом режиме не виден и кликов не берёт — но из раскладки не уходит
+   по той же причине, что и поверхности: размер холста должен остаться своим. */
+#app:not([data-screen="scheme"]) #canvas-host {
+  visibility: hidden;
+}
+
+/* Разделы колонок: виден тот, чей режим включён. Общие разделы («Помещения»,
+   «Схемы», «Интерфейс проекта») этого правила не знают и стоят во всех трёх —
+   место, ширина, скрытие и сворачивание у них прежние. */
+.panel__section--screen {
+  display: none;
+}
+
+#app[data-screen="scheme"] [data-section-id="marks"],
+#app[data-screen="scheme"] [data-section-id="markList"],
+#app[data-screen="scheme"] [data-section-id="properties"],
+#app[data-screen="drawing"] [data-section-id="drawTools"],
+#app[data-screen="drawing"] [data-section-id="drawList"],
+#app[data-screen="volume"] [data-section-id="volumeTools"],
+#app[data-screen="volume"] [data-section-id="markList"] {
+  display: flex;
 }
 
 #canvas-empty {
@@ -5015,11 +5091,19 @@ body {
 }
 
 /* В листе только то, на что можно смотреть: постановка меток, помещения,
-   размеры и справочник в режиме просмотра не живут. */
+   размеры, справочник и чертёж в режиме просмотра не живут.
+
+   Блок «Объём» в этом списке нарочно отсутствует: вид, этаж, «Вся схема»,
+   снимок и двери — чтение, а не правка, и на планшете это единственное место,
+   где до них можно дотянуться. Он приходит в тот же лист, что список схем,
+   когда включён режим «Объём» (правило режимов выше), — своей кнопки в нижнем
+   ряду ему не нужно. */
 #app.is-mobile [data-section-id="marks"],
 #app.is-mobile [data-section-id="rooms"],
 #app.is-mobile [data-section-id="sizes"],
-#app.is-mobile [data-section-id="properties"] {
+#app.is-mobile [data-section-id="properties"],
+#app.is-mobile [data-section-id="drawTools"],
+#app.is-mobile [data-section-id="drawList"] {
   display: none;
 }
 
@@ -5115,7 +5199,31 @@ body {
            под ним. Растущий раздел в колонке один — список, которому нужно
            место: слева схемы, справа метки. -->
       <aside id="panel-left" class="panel">
-        <section class="panel__section" data-section-id="marks">
+        <!-- Верхний блок левой колонки свой в каждом режиме (таск 153): в Схеме
+             «Метки», в Чертеже инструменты, в Объёме вид и этаж. Три раздела
+             стоят рядом, а виден ровно один — тот, чей режим включён. Ниже
+             «Помещения», «Схемы» и «Интерфейс проекта» общие на все три. -->
+        <section class="panel__section panel__section--screen" data-section-id="drawTools">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="drawTools" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.drawTools"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-draw-tools" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--screen" data-section-id="volumeTools">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="volumeTools" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.volumeTools"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-volume-tools" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--screen" data-section-id="marks">
           <h2 class="panel__head">
             <button class="panel__title" type="button" data-section="marks" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
@@ -5159,11 +5267,19 @@ body {
 
       <main id="canvas-area">
         <div id="canvas-host" class="mount"></div>
+        <!-- Чертёж и объём — содержимое основного экрана, а не окна (таск 153).
+             Лежат там же, где план, и видна ровно одна поверхность: невидимые
+             не прячутся из раскладки, а только гаснут (`visibility`), и поэтому
+             держат свой размер — вернувшись, человек находит тот же кадр, а не
+             пересчитанный с нуля. -->
+        <div id="screen-drawing" class="screen mount"></div>
+        <div id="screen-volume" class="screen mount"></div>
         <div id="canvas-overlay" class="mount"></div>
-        <!-- Кнопка «3D» над планом: рядом с полноэкранной, в правом верхнем
-             углу. Своя точка монтирования — наложение собирает canvas.js, а
-             объёмное окно лежит в панелях, которые его импортируют. -->
-        <div id="canvas-volume" class="mount"></div>
+        <!-- Переключатель «Чертёж · Схема · Объём»: по центру того же ряда, где
+             слева подсказка, а справа полный экран. Своя точка монтирования —
+             наложение собирает canvas.js, а переключатель лежит в панелях,
+             которые его импортируют. -->
+        <div id="canvas-modes" class="mount"></div>
         <!-- Карточка выделенной метки в просмотре: снизу, поверх плана.
              Верхние углы заняты подсказкой и полным экраном, и драться с ними
              ей незачем. -->
@@ -5172,7 +5288,20 @@ body {
       </main>
 
       <aside id="panel-right" class="panel">
-        <section class="panel__section panel__section--grow" data-section-id="markList">
+        <!-- Правая колонка своя в каждом режиме (таск 153): в Чертеже — список
+             элементов чертежа, в Схеме и в Объёме — тот же список меток
+             (выделение у них общее). -->
+        <section class="panel__section panel__section--grow panel__section--screen" data-section-id="drawList">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="drawList" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.drawList"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-draw-list" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--grow panel__section--screen" data-section-id="markList">
           <h2 class="panel__head">
             <button class="panel__title" type="button" data-section="markList" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
@@ -5182,7 +5311,9 @@ body {
           </h2>
           <div id="panel-marks" class="panel__body mount"></div>
         </section>
-        <section class="panel__section" data-section-id="properties">
+        <!-- Справочник типов — про метки: в Чертеже и в Объёме править типы
+             незачем, и место в колонке дороже. -->
+        <section class="panel__section panel__section--screen" data-section-id="properties">
           <h2 class="panel__head">
             <button class="panel__title" type="button" data-section="properties" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
@@ -5230,9 +5361,19 @@ const strings = {
     schemes: "Схемы",
     marks: "Метки",
     rooms: "Помещения",
-    sizes: "Размеры",
+    // Заказчик: «В левом столбце раздел Размеры в пору переименовать в
+    // интерфейс проекта» (таск 153). Ключ раздела остался `sizes`: по нему
+    // помнится свёрнутость, и переименуй его — раздел развернулся бы у всех,
+    // кто его однажды свернул.
+    sizes: "Интерфейс проекта",
     markList: "Список меток",
     properties: "Справочник типов",
+    // Верхние блоки колонок в режимах «Чертёж» и «Объём» (таск 153). Названы
+    // тем же словом, что кнопка режима: человек нажал «Чертёж» — и видит
+    // «Чертёж» в колонке, а не «Мастерскую».
+    drawTools: "Чертёж",
+    drawList: "Элементы чертежа",
+    volumeTools: "Объём",
     canvasEmpty: "Загрузите план схемы, чтобы начать разметку",
     // Ручки колонок. Слово у ручки-значка остаётся в подсказке и в aria-label:
     // сама ручка — полоска со стрелкой, и без слова её назначение читается
@@ -5538,6 +5679,22 @@ const strings = {
     // иначе это выглядело бы как категория, потерявшая своё место.
     builtinComment: "Комментарий",
     builtinCommentHint: "Есть всегда: в справочнике его нет, переименовать и удалить нельзя",
+  },
+  // ——— переключатель режимов экрана (таск 153, G219) ————————————————————
+  //
+  // Три слова заказчика («Чертёж, Схема, Объём») и ни одного своего: он назвал
+  // их сам, и те же слова стоят в заголовках блоков левой колонки.
+  screens: {
+    label: "Режим экрана",
+    drawing: "Чертёж",
+    drawingHint: "Чертить план в миллиметрах: стены, проёмы и объекты, слои, сетка и высоты",
+    scheme: "Схема",
+    schemeHint: "Размечать электроточки по плану — то, ради чего всё остальное",
+    volume: "Объём",
+    volumeHint: "Пройти по схеме в объёме: вид от первого лица и обзор, этажи и двери",
+    // Объём без чертежа. Режим доступен всегда — кнопка режима не гаснет, в
+    // отличие от прежней «3D», — и сказать, чего не хватает, обязано само поле.
+    volumeEmptyHint: "В этой схеме нет чертежа — перейдите в «Чертёж» и нарисуйте стены",
   },
   canvas: {
     hintSelect:
@@ -24156,10 +24313,20 @@ const PANEL_IDS = {
   // Карточка выделенной метки в просмотре: своя точка поверх холста, под
   // подсказкой и кнопкой полного экрана — те в верхних углах, эта внизу.
   canvasCard: "canvas-card",
-  // Кнопка «3D» над планом (G209, таск 150). Своя точка, а не общее наложение
-  // холста: наложение собирает `canvas.js`, а объёмное окно живёт в панелях,
+  // Переключатель режимов экрана (таск 153, G219): по центру того же ряда, где
+  // слева подсказка, а справа полный экран. Своя точка, а не общее наложение
+  // холста: наложение собирает `canvas.js`, а переключатель живёт в панелях,
   // которые его же и импортируют, — кнопка оттуда замкнула бы сборку в круг.
-  canvasVolume: "canvas-volume",
+  canvasModes: "canvas-modes",
+  // Поверхности основного экрана: чертёж и объём лежат там же, где план, и
+  // показывается ровно одна (таск 153). Окон у них больше нет.
+  screenDrawing: "screen-drawing",
+  screenVolume: "screen-volume",
+  // Верхний блок левой колонки в режиме «Чертёж» и в режиме «Объём» — на месте
+  // «Меток». Правая колонка в «Чертеже» — список элементов чертежа.
+  drawTools: "panel-draw-tools",
+  drawList: "panel-draw-list",
+  volumeTools: "panel-volume-tools",
   headerActions: "header-actions",
   headerSearch: "header-search",
   headerHistory: "header-history",
@@ -24169,8 +24336,39 @@ const PANEL_IDS = {
   dialogs: "dialog-host",
 };
 
+// ——— три режима основного экрана (таск 153, G219) ————————————————————————
+//
+// Заказчик: «надо на их уровне по центру добавить переключатель — Чертёж,
+// Схема, Объём. Чтобы переключать контент, а не в окне показывать чертёж и
+// объём».
+//
+// Порядок — порядок самого переключателя и порядок работы: сперва чертят
+// (Чертёж), потом размечают (Схема), потом смотрят, что вышло (Объём). Схема
+// стоит посередине не ради красоты: она главная, и из неё одинаково близко в
+// обе стороны.
+const SCREEN_MODES = ["drawing", "scheme", "volume"];
+// Объект открывается схемой: размечают чаще, чем чертят и смотрят, и это
+// единственный режим, который есть всегда и у всякого объекта.
+const SCREEN_DEFAULT = "scheme";
+// Чем режим разрешён. Умение, а не отдельный список: «Чертёж» — правка объекта
+// и на узком экране его нет ровно потому, что там нет никакой правки, а
+// «Объём» только смотрит и на планшете остаётся. Разойдись эти два списка — на
+// телефоне появился бы режим, в котором нечем работать.
+const SCREEN_ABILITIES = {
+  drawing: "editDrawing",
+  scheme: "viewPlan",
+  volume: "viewVolume",
+};
+
 const appState = {
   layout: "desktop",
+  // Что показано на основном экране: план, чертёж или объём (таск 153, G219).
+  // **Состояние сеанса вкладки и только оно** (G68): в объект режим не
+  // пишется — иначе напарник, открывший файл, попадал бы в чужой объём, — и в
+  // настройки браузера тоже не пишется: объект открывается схемой, она главная.
+  // Внутри сеанса помнится всё: поверхности живут дальше за кадром, и человек
+  // возвращается туда, где стоял в объёме, и к тому инструменту, которым чертил.
+  screen: SCREEN_DEFAULT,
   project: null,
   schemeId: null,
   selectedMarkIds: [],
@@ -24227,9 +24425,18 @@ const SECTION_IDS = {
   marks: "marks",
   rooms: "rooms",
   schemes: "schemes",
+  // Имя раздела осталось `sizes`, а подпись стала «Интерфейс проекта» (таск
+  // 153): по ключу помнится свёрнутость, и переименуй его — у всех, кто уже
+  // работает, раздел развернулся бы обратно.
   sizes: "sizes",
   markList: "markList",
   properties: "properties",
+  // Верхние блоки левой колонки режимов «Чертёж» и «Объём» и список элементов
+  // чертежа в правой (таск 153). Сворачиваются и помнятся так же, как
+  // остальные: логика панелей не меняется ни на йоту.
+  drawTools: "drawTools",
+  drawList: "drawList",
+  volumeTools: "volumeTools",
 };
 const SECTIONS_SETTING = "collapsedSections";
 // Колонки целиком: на планшете две по 264 точки съедают весь экран, и холсту
@@ -24307,6 +24514,12 @@ const LAYOUT_ABILITIES = {
   // всему полю и щиплют двумя пальцами в обзоре, так что кнопка в режиме
   // просмотра больше не обещает того, чем нельзя воспользоваться.
   viewVolume: ["desktop", "mobile"],
+  // Мастерская чертежа (таск 153): стены рисуют цепочкой в миллиметрах, и это
+  // правка объекта — в просмотре её нет, как нет постановки меток. Своё умение,
+  // а не `editSchemes`: тот про список схем (имя, порядок, удаление), и
+  // разреши чертёж вместе с ним — на телефоне появился бы режим с инструментами
+  // и без возможности ими воспользоваться.
+  editDrawing: ["desktop"],
   undo: ["desktop"],
   saveFile: ["desktop"],
   editMarks: ["desktop"],
@@ -24332,6 +24545,29 @@ function layoutModeFor(view, override) {
 function layoutAllows(ability, mode) {
   const modes = LAYOUT_ABILITIES[ability];
   return Array.isArray(modes) && modes.includes(mode);
+}
+
+// ——— режимы и раскладка: чистые правила ————————————————————————————————
+
+// Неизвестный режим недоступен, как и неизвестное умение: опечатка уводит
+// человека на схему, а не оставляет его на пустом экране.
+function screenAllowed(screen, layout) {
+  const ability = SCREEN_ABILITIES[screen];
+  return Boolean(ability) && layoutAllows(ability, layout);
+}
+
+// Что показывает переключатель в этой раскладке. На узком экране кнопок две:
+// «Чертёж» там не умеет ничего, и кнопка, которая ничего не делает, хуже
+// отсутствующей — то же правило, по которому на телефоне нет кнопки отмены.
+function screensFor(layout) {
+  return SCREEN_MODES.filter((screen) => screenAllowed(screen, layout));
+}
+
+// Экран сузили, а человек стоял в чертеже — его возвращают на схему. То же
+// правило, по которому вход в просмотр снимает режим постановки меток: режим,
+// в котором на этом экране нечем работать, оставлять нельзя.
+function screenAfterLayout(screen, layout) {
+  return screenAllowed(screen, layout) ? screen : SCREEN_DEFAULT;
 }
 
 const appCollapsed = new Set();
@@ -24408,6 +24644,7 @@ function setState(patch) {
     }
   }
   syncCanvasClass();
+  syncScreenClass();
   syncSchemeName();
   return snapshot;
 }
@@ -24481,6 +24718,26 @@ function syncCanvasClass() {
   const app = document.getElementById("app");
   if (!app) return;
   app.classList.toggle("has-scheme", Boolean(appState.schemeId));
+}
+
+// Режим экрана — отметкой на корне страницы: по ней стили решают, какая
+// поверхность видна и какие разделы стоят в колонках. Класса здесь нет
+// нарочно — режим один из трёх, и три класса рассинхронизировались бы.
+function syncScreenClass() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.dataset.screen = appState.screen;
+}
+function screenMode() {
+  return appState.screen;
+}
+
+// Режим меняется одной дверью: отметка на корне, панели и поверхности узнают
+// о нём из `subscribe`. Недоступный в этой раскладке режим не включается —
+// иначе переключатель обещал бы то, чего на этом экране нет.
+function setScreen(screen) {
+  if (!screenAllowed(screen, appState.layout)) return;
+  setState({ screen });
 }
 
 function layoutViewport() {
@@ -24557,6 +24814,10 @@ function syncLayout() {
     // делась, и оставленный «Точка» ставил бы метки там, где их не ждут.
     setState(mode === "mobile" ? { layout: mode, mode: "select" } : { layout: mode });
   }
+  // И по той же причине — режим экрана: окно сузили, а человек стоял в
+  // чертеже, которого в просмотре нет вовсе (таск 153).
+  const screen = screenAfterLayout(appState.screen, mode);
+  if (screen !== appState.screen) setState({ screen });
   syncSheet();
   syncSchemeName();
 }
@@ -24744,6 +25005,7 @@ function startApp() {
   wireSections();
   wirePanels();
   syncCanvasClass();
+  syncScreenClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
   // Веб-версия заодно просит служебный скрипт: установленное приложение
@@ -26110,11 +26372,23 @@ function canvasPlacesByClick(state) {
   return kind === "point" || kind === MARK_KIND_COMMENT;
 }
 
+// ——— план показан или уступил место чертежу с объёмом (таск 153) ————————
+//
+// Режим экрана один на три поверхности, и холст — одна из них. Отсутствие поля
+// в состоянии считается схемой: настройки у режима нет, в объект он не пишется
+// (G68), и до первой отрисовки состояние может прийти без него.
+function canvasOnScreen(state) {
+  const screen = state && state.screen ? state.screen : SCREEN_DEFAULT;
+  return screen === SCREEN_DEFAULT;
+}
+
 // Текст подсказки над планом — чистая функция от состояния. `null` значит, что
 // подсказки нет вовсе. В просмотре она не рассказывает, как ставить метки и
-// рисовать контуры: этого здесь нет, и обещать нечего.
+// рисовать контуры: этого здесь нет, и обещать нечего. В чужом режиме её нет
+// совсем: там своя подсказка про своё поле.
 function canvasHintText(state) {
   if (!state || !state.schemeId) return null;
+  if (!canvasOnScreen(state)) return null;
   if (!canvasEditAllowed(state)) return strings.mobile.viewOnly;
   // Правка ломаной — это режим руки, и подсказка обязана сказать, что сейчас
   // делает двойной клик: он здесь занят вершинами, а не выделением.
@@ -26158,6 +26432,9 @@ function canvasHintCopy(hint) {
 // здесь, а не в стилях: линейку прячут отметкой в «Размерах», и вместе с ней
 // обязан уходить отступ — иначе подсказка висит с пустым полем сверху.
 function canvasHintInset(state) {
+  // Чертёж и объём линейки не рисуют вовсе, и отступ под неё оставил бы
+  // переключатель с полным экраном висеть на пустом поле (таск 153).
+  if (!canvasOnScreen(state)) return 0;
   return canvasGuidesShown(state) ? RULER_SIZE : 0;
 }
 
@@ -29500,6 +29777,13 @@ function canvasKeyDown(event) {
     canvasRedoStep();
     return;
   }
+  // Дальше всё — про план под рукой: метки, типы, ход и масштаб. На экране
+  // может стоять чертёж или объём, и там те же клавиши заняты своим (таск
+  // 153): стрелки в объёме ходят, «+» в чертеже не значит ничего.
+  //
+  // Отмена и возврат выше этой границы нарочно: они про объект, а не про
+  // режим, живут в шапке и обязаны работать во всех трёх.
+  if (!canvasOnScreen(state)) return;
   // Ctrl+C и Ctrl+V — по физической клавише, как и всё здесь: в русской
   // раскладке на них «с» и «м». Поля ввода и диалоги отсечены выше — там
   // копирование и вставка текста остаются браузерными и никуда не деваются.
@@ -29814,6 +30098,8 @@ function mountCanvasHint(host, api) {
       "activeRoomId" in changed ||
       "schemeId" in changed ||
       "layout" in changed ||
+      // Режим экрана: подсказка про план уходит вместе с планом (таск 153).
+      "screen" in changed ||
       // Линейка пришла или ушла — отступ подсказки меняется вместе с ней.
       "guidesShown" in changed ||
       // Правка ломаной — такой же режим руки, как «Добавление»: началась или
@@ -29886,7 +30172,17 @@ function mountCanvasFullscreen(host, api) {
     button.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
   };
   api.subscribe((state, changed) => {
-    if ("schemeId" in changed || "guidesShown" in changed || "layout" in changed) render();
+    if (
+      "schemeId" in changed ||
+      "guidesShown" in changed ||
+      "layout" in changed ||
+      // Кнопка одна на все три режима — она и есть обещанный тикетом
+      // полноэкранный показ чертежа и объёма (таск 153), — но мера отступа у
+      // режимов разная: линейка есть только у плана.
+      "screen" in changed
+    ) {
+      render();
+    }
   });
   // Из полного экрана выходят и мимо кнопки: Esc, жест, системная кнопка. Своё
   // состояние кнопка не помнит, но перерисоваться обязана — иначе на обратно
@@ -29931,7 +30227,16 @@ function mountCanvasElevation(host, api) {
     const state = api.getState();
     const scheme = canvasScheme(state);
     const project = state.project;
-    if (!project || !scheme || !state.selectedWallId || !canvasNode || state.elevationShown === false) {
+    // В чужом режиме полосы над планом нет: план не виден, а у чертежа своя
+    // такая же полоса в своём поле (таск 153).
+    if (
+      !project ||
+      !scheme ||
+      !state.selectedWallId ||
+      !canvasNode ||
+      !canvasOnScreen(state) ||
+      state.elevationShown === false
+    ) {
       strip.update({ project, wallId: null });
       return;
     }
@@ -29955,7 +30260,8 @@ function mountCanvasElevation(host, api) {
       "project" in changed ||
       "schemeId" in changed ||
       "view" in changed ||
-      "layout" in changed
+      "layout" in changed ||
+      "screen" in changed
     ) {
       render();
     }
@@ -42190,7 +42496,13 @@ function mountMarkCard(host, api) {
   const render = () => {
     const state = getState();
     const mode = markCardState(state, collapsed);
-    const model = mode === MARK_CARD_NONE ? null : markCardModel(state.project, state.selectedMarkIds[0]);
+    // Карточка стоит поверх плана — в чужом режиме плана под ней нет (таск
+    // 153). У объёма своя такая же карточка в своём поле, собранная тем же
+    // `markCardParts`: две сразу были бы две правды об одной метке.
+    const model =
+      mode === MARK_CARD_NONE || !canvasOnScreen(state)
+        ? null
+        : markCardModel(state.project, state.selectedMarkIds[0]);
     card.hidden = !model;
     // В просмотре карточка показывает метку целиком и стоит колонкой; на
     // компьютере она ужата в ряды и пропускает клик на план под собой.
@@ -42297,7 +42609,8 @@ function mountMarkCard(host, api) {
       "selectedMarkIds" in changed ||
       "project" in changed ||
       "layout" in changed ||
-      "schemeId" in changed
+      "schemeId" in changed ||
+      "screen" in changed
     ) {
       render();
     }
@@ -52805,6 +53118,87 @@ function mountSchemesPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
+
+// src/panels/screens.js
+// Переключатель режимов основного экрана: Чертёж · Схема · Объём (таск 153,
+// G219).
+//
+// Слова заказчика: «На основном экране на схеме уже есть кнопки сверху по
+// углам, надо на их уровне по центру добавить переключатель — Чертёж, Схема,
+// Объём. Чтобы переключать контент, а не в окне показывать чертёж и объём. Ну
+// и кнопка 3D тоже уйдёт соответственно».
+//
+// **Переключатель — единственная дверь к режиму.** Его же зовут кнопки в
+// строке схемы («Чертёж» и «Объём» в панели схем): они выбирают схему и
+// переключают режим, а не открывают окно. Второго пути к чертежу и к объёму в
+// сборке нет — прежние окна убраны целиком.
+//
+// Кнопки режимов **не гаснут**: режим доступен всегда, даже когда показывать в
+// нём нечего. Нет чертежа — об этом говорит само поле («Объём» рисует задник и
+// плашку с причиной), а не погашенная кнопка: прежняя «3D» гасла потому, что
+// она открывала окно, а окна больше нет. Исключение одно и оно про экран, а не
+// про объект: на узком экране «Чертежа» нет вовсе — там нет никакой правки
+// (`screensFor`).
+
+
+
+function mountScreens(host, api) {
+  const { getState, setState, subscribe } = api;
+  // Идентификатор объекта, на котором собран ряд: сменился объект — режим
+  // возвращается к схеме (она главная, и у нового объекта чертежа может не
+  // быть вовсе). Сам `project` в состоянии меняется на каждую правку, поэтому
+  // сравнивается именно id.
+  let projectId = null;
+  const row = uiEl("div", {
+    class: "canvas-modes",
+    attrs: { role: "group", "aria-label": strings.screens.label },
+  });
+  const buttons = new Map();
+  for (const screen of ["drawing", "scheme", "volume"]) {
+    buttons.set(
+      screen,
+      uiButton(strings.screens[screen], {
+        class: "ui-btn canvas-modes__btn",
+        title: strings.screens[screen + "Hint"],
+        on: { click: () => setScreen(screen) },
+      }),
+    );
+  }
+  row.append(...buttons.values());
+  host.append(row);
+
+  const render = () => {
+    const state = getState();
+    // Без открытой схемы показывать нечего ни одному режиму: ряд уходит
+    // целиком, как уходят подсказка и кнопка полного экрана.
+    row.hidden = !state.schemeId;
+    const shown = screensFor(state.layout);
+    for (const [screen, button] of buttons) {
+      button.hidden = !shown.includes(screen);
+      const on = state.screen === screen;
+      button.className = "ui-btn canvas-modes__btn" + (on ? " is-on" : "");
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  };
+
+  subscribe((state, changed) => {
+    if ("project" in changed) {
+      const id = state.project ? state.project.id : null;
+      if (id !== projectId) {
+        projectId = id;
+        // Новый объект открывается схемой (таск 153): в объект режим не
+        // пишется (G68), и помнить чужой чертёж на новом объекте незачем.
+        if (state.screen !== SCREEN_DEFAULT && screenAllowed(SCREEN_DEFAULT, state.layout)) {
+          setState({ screen: SCREEN_DEFAULT });
+        }
+      }
+    }
+    if ("screen" in changed || "schemeId" in changed || "layout" in changed || "project" in changed) render();
+  });
+  render();
+}
+
+registerPanel(PANEL_IDS.canvasModes, mountScreens);
 
 // src/panels/search.js
 // Поиск по объекту: строка в шапке и выпадающий список вариантов.

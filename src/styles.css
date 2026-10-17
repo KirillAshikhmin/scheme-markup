@@ -424,14 +424,56 @@ body {
 
 #canvas-host,
 #canvas-overlay,
-#canvas-volume {
+#canvas-modes,
+.screen {
   position: absolute;
   inset: 0;
 }
 
 #canvas-overlay,
-#canvas-volume {
+#canvas-modes {
   pointer-events: none;
+}
+
+/* ——— три режима основного экрана (таск 153, G219) ————————————————————
+   Чертёж и объём — содержимое экрана, а не окна: обе поверхности лежат там же,
+   где план, и видна ровно одна.
+
+   Невидимая поверхность **гаснет, а не выпадает из раскладки**: `display: none`
+   отдаёт ей нулевой размер, и, вернувшись, человек получил бы пересчитанный с
+   нуля кадр — другой масштаб в чертеже, другое поле зрения в объёме. При
+   `visibility` размер остаётся настоящим, холст не пересобирается, а клики и
+   фокус сквозь погасшую поверхность всё равно не проходят. */
+.screen {
+  visibility: hidden;
+}
+
+#app.has-scheme[data-screen="drawing"] #screen-drawing,
+#app.has-scheme[data-screen="volume"] #screen-volume {
+  visibility: visible;
+}
+
+/* План в чужом режиме не виден и кликов не берёт — но из раскладки не уходит
+   по той же причине, что и поверхности: размер холста должен остаться своим. */
+#app:not([data-screen="scheme"]) #canvas-host {
+  visibility: hidden;
+}
+
+/* Разделы колонок: виден тот, чей режим включён. Общие разделы («Помещения»,
+   «Схемы», «Интерфейс проекта») этого правила не знают и стоят во всех трёх —
+   место, ширина, скрытие и сворачивание у них прежние. */
+.panel__section--screen {
+  display: none;
+}
+
+#app[data-screen="scheme"] [data-section-id="marks"],
+#app[data-screen="scheme"] [data-section-id="markList"],
+#app[data-screen="scheme"] [data-section-id="properties"],
+#app[data-screen="drawing"] [data-section-id="drawTools"],
+#app[data-screen="drawing"] [data-section-id="drawList"],
+#app[data-screen="volume"] [data-section-id="volumeTools"],
+#app[data-screen="volume"] [data-section-id="markList"] {
+  display: flex;
 }
 
 #canvas-empty {
@@ -636,11 +678,19 @@ body {
 }
 
 /* В листе только то, на что можно смотреть: постановка меток, помещения,
-   размеры и справочник в режиме просмотра не живут. */
+   размеры, справочник и чертёж в режиме просмотра не живут.
+
+   Блок «Объём» в этом списке нарочно отсутствует: вид, этаж, «Вся схема»,
+   снимок и двери — чтение, а не правка, и на планшете это единственное место,
+   где до них можно дотянуться. Он приходит в тот же лист, что список схем,
+   когда включён режим «Объём» (правило режимов выше), — своей кнопки в нижнем
+   ряду ему не нужно. */
 #app.is-mobile [data-section-id="marks"],
 #app.is-mobile [data-section-id="rooms"],
 #app.is-mobile [data-section-id="sizes"],
-#app.is-mobile [data-section-id="properties"] {
+#app.is-mobile [data-section-id="properties"],
+#app.is-mobile [data-section-id="drawTools"],
+#app.is-mobile [data-section-id="drawList"] {
   display: none;
 }
 

@@ -8,7 +8,13 @@
 //
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
-import { ELEVATION_VIEWS_SETTING, layoutAllows, PANEL_IDS, registerPanel } from "./app.js";
+import {
+  ELEVATION_VIEWS_SETTING,
+  layoutAllows,
+  PANEL_IDS,
+  registerPanel,
+  SCREEN_DEFAULT,
+} from "./app.js";
 import { strings, text } from "./strings.js";
 import {
   DEFAULT_MARK_SIZE,
@@ -459,11 +465,23 @@ export function canvasPlacesByClick(state) {
   return kind === "point" || kind === MARK_KIND_COMMENT;
 }
 
+// ——— план показан или уступил место чертежу с объёмом (таск 153) ————————
+//
+// Режим экрана один на три поверхности, и холст — одна из них. Отсутствие поля
+// в состоянии считается схемой: настройки у режима нет, в объект он не пишется
+// (G68), и до первой отрисовки состояние может прийти без него.
+export function canvasOnScreen(state) {
+  const screen = state && state.screen ? state.screen : SCREEN_DEFAULT;
+  return screen === SCREEN_DEFAULT;
+}
+
 // Текст подсказки над планом — чистая функция от состояния. `null` значит, что
 // подсказки нет вовсе. В просмотре она не рассказывает, как ставить метки и
-// рисовать контуры: этого здесь нет, и обещать нечего.
+// рисовать контуры: этого здесь нет, и обещать нечего. В чужом режиме её нет
+// совсем: там своя подсказка про своё поле.
 export function canvasHintText(state) {
   if (!state || !state.schemeId) return null;
+  if (!canvasOnScreen(state)) return null;
   if (!canvasEditAllowed(state)) return strings.mobile.viewOnly;
   // Правка ломаной — это режим руки, и подсказка обязана сказать, что сейчас
   // делает двойной клик: он здесь занят вершинами, а не выделением.
@@ -507,6 +525,9 @@ function canvasHintCopy(hint) {
 // здесь, а не в стилях: линейку прячут отметкой в «Размерах», и вместе с ней
 // обязан уходить отступ — иначе подсказка висит с пустым полем сверху.
 export function canvasHintInset(state) {
+  // Чертёж и объём линейки не рисуют вовсе, и отступ под неё оставил бы
+  // переключатель с полным экраном висеть на пустом поле (таск 153).
+  if (!canvasOnScreen(state)) return 0;
   return canvasGuidesShown(state) ? RULER_SIZE : 0;
 }
 
@@ -3856,6 +3877,13 @@ function canvasKeyDown(event) {
     canvasRedoStep();
     return;
   }
+  // Дальше всё — про план под рукой: метки, типы, ход и масштаб. На экране
+  // может стоять чертёж или объём, и там те же клавиши заняты своим (таск
+  // 153): стрелки в объёме ходят, «+» в чертеже не значит ничего.
+  //
+  // Отмена и возврат выше этой границы нарочно: они про объект, а не про
+  // режим, живут в шапке и обязаны работать во всех трёх.
+  if (!canvasOnScreen(state)) return;
   // Ctrl+C и Ctrl+V — по физической клавише, как и всё здесь: в русской
   // раскладке на них «с» и «м». Поля ввода и диалоги отсечены выше — там
   // копирование и вставка текста остаются браузерными и никуда не деваются.
@@ -4170,6 +4198,8 @@ function mountCanvasHint(host, api) {
       "activeRoomId" in changed ||
       "schemeId" in changed ||
       "layout" in changed ||
+      // Режим экрана: подсказка про план уходит вместе с планом (таск 153).
+      "screen" in changed ||
       // Линейка пришла или ушла — отступ подсказки меняется вместе с ней.
       "guidesShown" in changed ||
       // Правка ломаной — такой же режим руки, как «Добавление»: началась или
@@ -4242,7 +4272,17 @@ function mountCanvasFullscreen(host, api) {
     button.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
   };
   api.subscribe((state, changed) => {
-    if ("schemeId" in changed || "guidesShown" in changed || "layout" in changed) render();
+    if (
+      "schemeId" in changed ||
+      "guidesShown" in changed ||
+      "layout" in changed ||
+      // Кнопка одна на все три режима — она и есть обещанный тикетом
+      // полноэкранный показ чертежа и объёма (таск 153), — но мера отступа у
+      // режимов разная: линейка есть только у плана.
+      "screen" in changed
+    ) {
+      render();
+    }
   });
   // Из полного экрана выходят и мимо кнопки: Esc, жест, системная кнопка. Своё
   // состояние кнопка не помнит, но перерисоваться обязана — иначе на обратно
@@ -4287,7 +4327,16 @@ function mountCanvasElevation(host, api) {
     const state = api.getState();
     const scheme = canvasScheme(state);
     const project = state.project;
-    if (!project || !scheme || !state.selectedWallId || !canvasNode || state.elevationShown === false) {
+    // В чужом режиме полосы над планом нет: план не виден, а у чертежа своя
+    // такая же полоса в своём поле (таск 153).
+    if (
+      !project ||
+      !scheme ||
+      !state.selectedWallId ||
+      !canvasNode ||
+      !canvasOnScreen(state) ||
+      state.elevationShown === false
+    ) {
       strip.update({ project, wallId: null });
       return;
     }
@@ -4311,7 +4360,8 @@ function mountCanvasElevation(host, api) {
       "project" in changed ||
       "schemeId" in changed ||
       "view" in changed ||
-      "layout" in changed
+      "layout" in changed ||
+      "screen" in changed
     ) {
       render();
     }
