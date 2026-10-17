@@ -136,8 +136,6 @@ import {
   volumeMinimapBox,
   volumeNotes,
   volumePadVector,
-  volumeSpareLine,
-  volumeSpareTitle,
   volumeFloorAction,
   volumeFloorName,
   volumeTitle,
@@ -1957,25 +1955,6 @@ test("строка «не размещены» называет метки и п
   assert.ok(line.includes("Т0") && !line.includes("Т10"), line);
   assert.ok(volumeUnplacedTitle(many).includes("Т10"), "все обозначения остаются в подсказке");
   assert.equal(volumeUnplacedTitle([{ markId: "1", label: "Т1", reason: VOLUME_MARK_NO_SIZE }]), "");
-});
-
-test("строка «нарисованы запасным габаритом» называет вещи и говорит, откуда габарит", () => {
-  assert.equal(volumeSpareLine([]), "");
-  const one = volumeSpareLine([{ markId: "1", label: "МВ1" }]);
-  assert.ok(one.includes("МВ1"), one);
-  // Числа общей рамки приходят из сцены, а не переписаны в словарь второй раз.
-  assert.ok(one.includes(String(MARK_BOX_FRAME_MM)), one);
-  assert.ok(one.includes(String(MARK_BOX_FRAME_DEPTH_MM)), one);
-  // Это не «не размещены»: вещь в кадре есть, и путать две новости нельзя.
-  assert.ok(!one.includes(strings.volume.unplacedNoSize), one);
-  const many = [];
-  for (let index = 0; index < VOLUME_UNPLACED_SHOWN + 3; index += 1) {
-    many.push({ markId: String(index), label: "Т" + index });
-  }
-  const line = volumeSpareLine(many);
-  assert.ok(line.includes("Т0") && !line.includes("Т10"), line);
-  assert.ok(volumeSpareTitle(many).includes("Т10"), "все обозначения остаются в подсказке");
-  assert.equal(volumeSpareTitle([{ markId: "1", label: "Т1" }]), "");
 });
 
 test("метки в сцене не меняют объект (G68)", () => {

@@ -35,7 +35,7 @@ import { PANEL_IDS, layoutAllows, registerPanel, screenMode } from "../app.js";
 import { FULLSCREEN_EVENTS, canvasFrameLinks } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
-import { MARK_BOX_FRAME_DEPTH_MM, MARK_BOX_FRAME_MM } from "../markBox.js";
+import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
 import { findRoom, findScheme, schemeFloorOf } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
@@ -288,8 +288,14 @@ export function volumeTouchLikely() {
   }
 }
 
-/** Сколько неразмещённых меток окно называет по имени, прежде чем сказать «и ещё». */
-export const VOLUME_UNPLACED_SHOWN = 8;
+/**
+ * Сколько неразмещённых меток окно называет по имени, прежде чем сказать «и
+ * ещё». Мера не своя: это та же строка под тем же полем, что и перечень
+ * нарисованных запасным габаритом, и живёт она в одном месте
+ * (`markSpare.MARK_LIST_SHOWN`) — иначе два списка под одним полем однажды
+ * оборвались бы по-разному.
+ */
+export const VOLUME_UNPLACED_SHOWN = MARK_LIST_SHOWN;
 
 /** Почему вещь не встала в объём — словом. */
 export function volumeUnplacedReason(reason) {
@@ -329,48 +335,12 @@ function unplacedName(item) {
 }
 
 /**
- * Перечень, который не выталкивает поле за край окна: названо
- * `VOLUME_UNPLACED_SHOWN`, дальше «и ещё N», а полный список уходит в подсказку
- * строки. Одна мера на оба списка — и неразмещённых, и нарисованных запасным
- * габаритом: это одна и та же строка под полем, и обрываться она обязана
- * одинаково.
+ * Перечень, который не выталкивает поле за край окна. Правило и мера — общие
+ * (`markSpare.markNamedList`): под полем объёма стоят два списка — неразмещённые
+ * и нарисованные запасным габаритом, — и обрываться они обязаны одинаково.
  */
 function volumeNamedList(list, name, moreKey) {
-  const named = list.slice(0, VOLUME_UNPLACED_SHOWN).map(name);
-  if (list.length > VOLUME_UNPLACED_SHOWN) {
-    named.push(text(moreKey, { count: list.length - VOLUME_UNPLACED_SHOWN }));
-  }
-  return named.join(", ");
-}
-
-/**
- * Строка «нарисованы запасным габаритом» (G215, G226).
- *
- * Вещь, у типа которой размеры заданы не все, в объём попадает — но
- * недостающую сторону сборка **выдумала** (`markBoxMm`: габарит изображения
- * объекта, а без изображения — обычная рамка). Молчать об этом нельзя: человек
- * решит, что числа заданы, и будет размечать щит по догадке. Писать догадку в
- * справочник тоже нельзя (G68) — остаётся сказать словом, той же строкой под
- * полем, где живут неразмещённые.
- *
- * Чистая и вынесена наружу по той же причине, что `volumeUnplacedLine`.
- */
-export function volumeSpareLine(spare) {
-  const list = spare || [];
-  if (list.length === 0) return "";
-  return text("volume.spare", {
-    count: list.length,
-    list: volumeNamedList(list, (item) => item.label, "volume.spareMore"),
-    side: MARK_BOX_FRAME_MM,
-    depth: MARK_BOX_FRAME_DEPTH_MM,
-  });
-}
-
-/** Все нарисованные запасным габаритом — в подсказку строки, когда их много. */
-export function volumeSpareTitle(spare) {
-  const list = spare || [];
-  if (list.length <= VOLUME_UNPLACED_SHOWN) return "";
-  return list.map((item) => item.label).join(", ");
+  return markNamedList(list, name, moreKey);
 }
 
 /**
@@ -1887,8 +1857,10 @@ function createVolume({ api, hosts }) {
     missing.title = volumeUnplacedTitle(scene.unplaced);
     missing.hidden = scene.unplaced.length === 0;
     const spare = scene.spare || [];
-    spareLine.textContent = volumeSpareLine(spare);
-    spareLine.title = volumeSpareTitle(spare);
+    // Та же строка, что под развёрткой (`markSpare.js`, G230): в сводке место
+    // под абзац есть, поэтому с хвостом — откуда числа и что сделать.
+    spareLine.textContent = markSpareLine(spare, { why: true });
+    spareLine.title = markSpareTitle(spare);
     spareLine.hidden = spare.length === 0;
     summaryPlate.update([titleNode, where, meta, missing, spareLine], {
       alert: scene.unplaced.length > 0 || spare.length > 0,
