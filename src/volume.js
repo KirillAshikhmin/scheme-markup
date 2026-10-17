@@ -73,6 +73,8 @@ import {
 } from "./model.js";
 import { MARK_BOX_FRAME_DEPTH_MM, markBoxMm } from "./markBox.js";
 import { objectViewByName, objectViewForShape } from "./objectViews/registry.js";
+import { MODEL_CYL_SIDES } from "./objectModels/kit.js";
+import { objectModelByKey, objectModelForName } from "./objectModels/registry.js";
 
 // ——— числа ——————————————————————————————————————————————————————————————
 
@@ -812,8 +814,64 @@ export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) 
   return prisms;
 }
 
-/** Грани объекта схемы. */
+/**
+ * Модель вещи чертежа (таск 155). Ключ каталога старше имени вида, и оба пути
+ * нужны: ключ — то, к чему ведёт таск 154, имя — то, чем живут уже
+ * размеченные объекты (G68). Где бы каталог ни решил держать ключ — у вещи или
+ * у её вида, — он будет найден здесь, а не в третьем месте.
+ *
+ * У ломаной модели нет: ломаной задают кухонный фронт, короб и марш, то есть
+ * **полосу**, а не вещь, — повторять по модели на каждом звене значило бы
+ * поставить в ряд пять холодильников там, где человек провёл линию.
+ */
+export function volumeObjectModel(project, object) {
+  if (!object || object.shape === "polyline") return null;
+  const kind = findSchemeObjectKind(project, object.kindId);
+  for (const key of [object.catalogKey, object.kindKey, kind ? kind.key : null]) {
+    const model = objectModelByKey(key);
+    if (model) return model;
+  }
+  return objectModelForName(kind ? kind.name : null);
+}
+
+/**
+ * Габарит вещи чертежа для модели.
+ *
+ * **Перёд берётся из поворота на чертеже**, и больше ниоткуда: человек
+ * поворачивает вещь мышью или числом, и это единственное место, где он
+ * говорит, куда она смотрит. Угадывать по ближней стене было бы умнее на
+ * словах и непредсказуемо на деле: шкаф, поставленный в середине комнаты,
+ * разворачивался бы сам, стоило подвинуть его на сантиметр.
+ *
+ * При нулевом повороте вещь смотрит вниз по листу — туда, куда смотрит вещь,
+ * приставленная к верхней стене комнаты. Так ставят шкаф, кровать и машинку:
+ * габарит задают «ширина по стене × глубина от стены», и глубина уходит от
+ * стены в комнату.
+ */
+export function volumeObjectFrame(project, schemeId, object, fallbackHeightMm) {
+  if (!object || object.shape === "polyline" || !object.atMm) return null;
+  const prisms = volumeObjectPrisms(project, schemeId, object, fallbackHeightMm);
+  if (prisms.length !== 1) return null;
+  const prism = prisms[0];
+  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    at: { x: Number(object.atMm.x), y: Number(object.atMm.y) },
+    bottomMm: prism.bottomMm,
+    u: { x: cos, y: sin },
+    f: { x: sin, y: -cos },
+    widthMm: Number(object.widthMm),
+    depthMm: Number(object.depthMm),
+    heightMm: prism.topMm - prism.bottomMm,
+  };
+}
+
+/** Грани объекта схемы: модель, а без неё — прежняя призма по габариту. */
 export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = []) {
+  const model = volumeObjectModel(project, object);
+  const frame = model ? volumeObjectFrame(project, schemeId, object, fallbackHeightMm) : null;
+  if (frame) return volumeModelFaces(frame, model, VOLUME_OBJECT_RGB, out);
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out);
   }
@@ -1227,6 +1285,7 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
   const line = mark.kind === "line" && path.length >= 2;
   const style = styleOf(project, mark.typeId);
   const rgb = volumeRgbOf(style.color);
+  const view = line ? null : markView;
   const common = {
     markId: mark.id,
     label: labelOf(project, mark.id),
@@ -1234,12 +1293,22 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
     rgb,
     bodyRgb: volumeTint(rgb),
     kind: line ? "line" : "point",
-    view: line ? null : markView,
+    view,
     // Хоть одна сторона габарита — догадка сборки, а не чертёж: окно обязано
     // сказать об этом словом (`volumeMarks().spare`). Откуда именно взята
     // каждая сторона, здесь не хранится: это правило `markBoxMm`, и
     // спрашивают его у неё.
     spare: box.guessed,
+    // Модель садится на последнюю ступень лестницы изображения (таск 155,
+    // `objectModels/registry.js`): нашлось изображение — его имя и есть ключ
+    // модели. У ленты модели нет и быть не может: она не вещь, а цепочка
+    // звеньев, и у звена нет ни лица, ни верха.
+    //
+    // С запасным габаритом (G215, G226) модель живёт мирно и по той же
+    // причине: недостающая сторона взята у того же изображения, и получается,
+    // что у вещи сходятся и габарит, и тело — а не кубик в габарите от
+    // кондиционера.
+    model: view ? objectModelByKey(view.name) : null,
   };
   const heightMm = sizes.heightAboveFloor;
   const binding = markWall(mark);
@@ -1282,6 +1351,20 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
         },
       ],
       anchor: { x: faceAt.x, y: faceAt.y, z: heightMm },
+      // Габарит для модели (таск 155). Перёд берётся **оттуда же, откуда
+      // лицо**: `u` — вдоль стены, как у изображения, `f` — от лица в стену,
+      // то есть доля −0.5 по глубине всегда лежит на наружной грани, и у
+      // утопленного щита тоже. Высота габарита — ширина вещи: по стене мерят
+      // длину, вверх — ширину, и третьего имени у этой оси нет.
+      frame: {
+        at: at((outer + inner) / 2),
+        bottomMm: heightMm - widthMm / 2,
+        u: { x: vectors.u.x, y: vectors.u.y },
+        f: { x: -normal.x, y: -normal.y },
+        widthMm: alongMm,
+        depthMm: Math.max(outer - inner, 1),
+        heightMm: widthMm,
+      },
       // Лицо вещи — её наружная грань: по нему рисуется изображение объекта.
       face: {
         origin: { x: faceAt.x, y: faceAt.y, z: heightMm },
@@ -1312,6 +1395,21 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
     heightMm: centreMm,
     prisms,
     anchor: { x: middle.x, y: middle.y, z: centreMm },
+    // Габарит для модели. Вещь в воздухе не повёрнута ничем — её коробка
+    // лежит по осям плана, — значит и модель берёт их: `u` вдоль `x`, перёд
+    // смотрит против `y`. Вверх здесь идёт **выступ**: у потолочного
+    // светильника вниз от потолка свисает именно он.
+    frame: line
+      ? null
+      : {
+          at: middle,
+          bottomMm,
+          u: { x: 1, y: 0 },
+          f: { x: 0, y: 1 },
+          widthMm: lengthMm,
+          depthMm: widthMm,
+          heightMm: topMm - bottomMm,
+        },
     // Лицо потолочной вещи смотрит вниз: на светильник смотрят снизу, и
     // изображение объекта рисуется на нижней грани.
     face: line
@@ -1357,10 +1455,134 @@ export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
   return { placed, unplaced, spare };
 }
 
-/** Грани тела вещи. Хозяин у каждой — сама метка: по ним и ловится клик. */
+/**
+ * Грани тела вещи. Хозяин у каждой — сама метка: по ним и ловится клик.
+ *
+ * Есть модель — рисуется она, нет — прежняя коробка по габариту (таск 155).
+ * Порядок именно такой, а не наоборот: пока модели писались, объём ни одной
+ * минуты не был сломан, и тип, заведённый человеком руками, останется с
+ * коробкой навсегда — у него нет изображения, а значит нет и модели.
+ *
+ * Выделение, прицел и `E` по взгляду от модели не зависят: `markId` стоит у
+ * **каждой** грани модели, поэтому выделяется вещь целиком, а не одно тело.
+ */
 export function volumeMarkFaces(place, out = []) {
+  if (place.model && place.frame) return volumeModelFaces(place.frame, place.model, place.bodyRgb, out, place.markId);
   for (const prism of place.prisms || []) {
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId });
+  }
+  return out;
+}
+
+// ——— модели (таск 155, требование G221) ——————————————————————————————————
+//
+// Второй интерпретатор описаний — после плоского (`objectViews/registry.js`) и
+// объёмного для изображений (`volumeViewPolylines`). Читает список тел
+// (`objectModels/kit.js`) и выдаёт призмы: ни мешей, ни вершин руками.
+//
+// Тело — это **призма по многоугольнику в плане**, то есть ровно то, чем уже
+// рисуются стены, вещи чертежа и коробки меток. Поэтому цилиндр здесь
+// вертикальный, и другого быть не может: `volumePrismFaces` выдавливает
+// многоугольник вверх. Лежачая труба — полотенцесушитель, ствол объектива,
+// карниз — описывается коробкой, и в её тридцати миллиметрах разницы не видит
+// никто. Это то же решение, что отказ от кривой Безье у изображений: не
+// хватает примитива — упрощается вещь, а не растёт набор.
+
+/** Нейтральные концы двух материалов. Чистых их не бывает — см. `volumeModelRgb`. */
+const VOLUME_MODEL_METAL = [172, 176, 182];
+const VOLUME_MODEL_GLASS = [205, 219, 230];
+/** Насколько `light` светлее тела и насколько `dark` темнее его. */
+const VOLUME_MODEL_LIGHT = 0.8;
+const VOLUME_MODEL_DARK = 0.72;
+/** Сколько своего цвета остаётся у металла и стекла. */
+const VOLUME_MODEL_NEUTRAL = 0.86;
+
+function volumeMix(rgb, to, share) {
+  return [0, 1, 2].map((index) => Math.round(rgb[index] * (1 - share) + to[index] * share));
+}
+
+/**
+ * Цвет тела: материал, посчитанный **от цвета самой вещи**.
+ *
+ * Так решается спор модели с ADR 005. Цвет принадлежит категории, и модель
+ * своей краски не приносит ни одной: `body` — ровно тот цвет, которым вещь
+ * рисовалась до моделей (у метки — разбавленный цвет её категории, у вещи
+ * чертежа — её собственный), `light` и `dark` — он же светлее и темнее,
+ * `metal` и `glass` — почти нейтральные, но оттенок вещи в них остаётся.
+ * Перекрасил человек категорию — поехали все пять.
+ *
+ * Из этого следует проверяемое обещание: **у вещи, чья модель — одно тело во
+ * весь габарит, в кадре не изменилось ничего** — ни цвета, ни числа граней.
+ * Колонна тому свидетель.
+ *
+ * Выигрыш тоже проверяется глазами: на одной стене стоят розетка и
+ * выключатель одного цвета, и до моделей они были двумя одинаковыми плашками.
+ * Теперь у одной светлая сердцевина, у другого светлые клавиши — а красный
+ * остался красным.
+ */
+export function volumeModelRgb(material, bodyRgb) {
+  if (material === "light") return volumeMix(bodyRgb, VOLUME_MARK_BASE, VOLUME_MODEL_LIGHT);
+  if (material === "dark") return bodyRgb.map((value) => Math.round(value * VOLUME_MODEL_DARK));
+  if (material === "metal") return volumeMix(bodyRgb, VOLUME_MODEL_METAL, VOLUME_MODEL_NEUTRAL);
+  if (material === "glass") return volumeMix(bodyRgb, VOLUME_MODEL_GLASS, VOLUME_MODEL_NEUTRAL);
+  return bodyRgb;
+}
+
+/**
+ * Тела модели, переведённые в призмы габарита.
+ *
+ * Габарит — `frame`: середина в плане, низ по высоте, направление лица и три
+ * размера. Доли переводятся им, и только им: ни одно описание не знает ни
+ * миллиметров, ни того, на стене вещь или на полу.
+ */
+export function volumeModelPrisms(frame, parts) {
+  const out = [];
+  if (!frame || !(frame.heightMm > 0)) return out;
+  const at = (fx, fy) => ({
+    x: frame.at.x + frame.u.x * fx * frame.widthMm + frame.f.x * fy * frame.depthMm,
+    y: frame.at.y + frame.u.y * fx * frame.widthMm + frame.f.y * fy * frame.depthMm,
+  });
+  for (const part of parts || []) {
+    const bottomMm = frame.bottomMm + part.z * frame.heightMm;
+    const topMm = frame.bottomMm + (part.z + part.height) * frame.heightMm;
+    const corners = [];
+    if (part.kind === "cyl") {
+      // Эллипс вписан в прямоугольник тела, углы сдвинуты на полшага: при
+      // восьми сторонах так получаются плоские грани вперёд, назад и по
+      // бокам, а не рёбра — цилиндр у стены стоит к ней стороной.
+      const cx = part.x + part.width / 2;
+      const cy = part.y + part.depth / 2;
+      for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
+        const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+        corners.push(at(cx + (Math.cos(angle) * part.width) / 2, cy + (Math.sin(angle) * part.depth) / 2));
+      }
+    } else {
+      corners.push(at(part.x, part.y));
+      corners.push(at(part.x + part.width, part.y));
+      corners.push(at(part.x + part.width, part.y + part.depth));
+      corners.push(at(part.x, part.y + part.depth));
+    }
+    out.push({
+      corners: volumeClockwise(corners),
+      bottomMm,
+      topMm,
+      material: part.material,
+      name: part.name,
+      // Признак свечения доезжает до призмы и останавливается здесь: сегодня
+      // он у всех выключен, а день, когда свет начнёт включаться, правит одну
+      // строку ниже — и ни одной из пятидесяти моделей.
+      lit: part.lit,
+    });
+  }
+  return out;
+}
+
+/** Грани модели. `markId` — хозяин: у вещей чертежа его нет, у меток есть. */
+export function volumeModelFaces(frame, model, rgb, out = [], markId = null) {
+  for (const prism of volumeModelPrisms(frame, model && model.parts)) {
+    // Та самая одна строка: `prism.lit` пока всегда `false`.
+    const fill = volumeModelRgb(prism.material, rgb);
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, { markId });
   }
   return out;
 }
@@ -1739,8 +1961,13 @@ export function volumeScene(project, schemeId, options = {}) {
     }
   }
   for (const object of objects) {
+    // Рисуется модель или габарит — решает одно место (`volumeObjectFaces`), а
+    // **держит человека по-прежнему габарит**: пройти между ножек стола так же
+    // неверно, как пройти сквозь шкаф, и столкновения модель не касаются.
+    // Посчитай их врозь — и однажды нарисованный шкаф окажется не там, где он
+    // не пускает.
+    volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces);
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
-      volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, faces);
       if (!volumePrismBlocks(prism)) continue;
       const solid = volumePrismSolid(prism);
       if (solid) solids.push(solid);
