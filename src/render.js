@@ -54,6 +54,7 @@ import {
   wallsOnScheme,
 } from "./model.js";
 import { strings, text } from "./strings.js";
+import { markBoxMm } from "./markBox.js";
 import { drawObjectView, objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 
 export const SHAPES = SHAPE_NAMES;
@@ -5341,10 +5342,13 @@ export function elevationMarkBox(mark, scale, unit, views) {
     return { view: null, width: side, height: side, scaled: false, grown: 1 };
   }
   const size = mark.sizeMm || {};
-  const width = Number(size.width) || view.mm.width;
-  const height = Number(size.height) || view.mm.height;
+  // Габарит вещи — один ответ на обе поверхности (G226, `markBox.js`): каждая
+  // сторона своя, недостающая берётся у изображения объекта. Правило то же,
+  // что было здесь, но теперь его же спрашивает и объём — и расходиться им
+  // больше негде.
+  const box = markBoxMm({ lengthMm: size.width, widthMm: size.height }, view);
   const min = ELEVATION_VIEW_MIN_PX * unit;
-  const atScale = { width: width * scale, height: height * scale };
+  const atScale = { width: box.lengthMm * scale, height: box.widthMm * scale };
   return {
     view,
     width: Math.max(min, atScale.width),

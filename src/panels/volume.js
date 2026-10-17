@@ -35,6 +35,7 @@ import { PANEL_IDS, layoutAllows, registerPanel, screenMode } from "../app.js";
 import { FULLSCREEN_EVENTS, canvasFrameLinks } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
+import { MARK_BOX_FRAME_DEPTH_MM, MARK_BOX_FRAME_MM } from "../markBox.js";
 import { findRoom, findScheme, schemeFloorOf } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
@@ -47,8 +48,6 @@ import {
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_POINT,
   VOLUME_MARK_NO_SIZE,
-  VOLUME_MARK_SPARE_DEPTH_MM,
-  VOLUME_MARK_SPARE_MM,
   VOLUME_MARKER_RGB,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_RUN_MM_S,
@@ -345,14 +344,14 @@ function volumeNamedList(list, name, moreKey) {
 }
 
 /**
- * Строка «нарисованы запасным габаритом» (G215).
+ * Строка «нарисованы запасным габаритом» (G215, G226).
  *
- * Вещь, у типа которой нет ни одного размера, в объём теперь попадает — но её
- * габарит сборка **выдумала** (`volumeSpareBox`: габарит изображения объекта, а
- * без изображения — обычная рамка). Молчать об этом нельзя: человек решит, что
- * числа заданы, и будет размечать щит по догадке. Писать догадку в справочник
- * тоже нельзя (G68) — остаётся сказать словом, той же строкой под полем, где
- * живут неразмещённые.
+ * Вещь, у типа которой размеры заданы не все, в объём попадает — но
+ * недостающую сторону сборка **выдумала** (`markBoxMm`: габарит изображения
+ * объекта, а без изображения — обычная рамка). Молчать об этом нельзя: человек
+ * решит, что числа заданы, и будет размечать щит по догадке. Писать догадку в
+ * справочник тоже нельзя (G68) — остаётся сказать словом, той же строкой под
+ * полем, где живут неразмещённые.
  *
  * Чистая и вынесена наружу по той же причине, что `volumeUnplacedLine`.
  */
@@ -362,8 +361,8 @@ export function volumeSpareLine(spare) {
   return text("volume.spare", {
     count: list.length,
     list: volumeNamedList(list, (item) => item.label, "volume.spareMore"),
-    side: VOLUME_MARK_SPARE_MM,
-    depth: VOLUME_MARK_SPARE_DEPTH_MM,
+    side: MARK_BOX_FRAME_MM,
+    depth: MARK_BOX_FRAME_DEPTH_MM,
   });
 }
 
