@@ -85,7 +85,6 @@ import {
   volumeSightAt,
   volumeRoomAt,
   volumeScene,
-  volumeSchemeChoices,
   volumeDrawn,
   volumeSelectLines,
   volumeStairNear,
@@ -432,46 +431,81 @@ export function volumeHintText(state) {
   // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
   if (state.aim) parts.push(strings.volume.aimHint);
   parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
-  // Про лестницу — последней: она есть под рукой далеко не всегда, а когда
-  // есть, это самое новое в строке.
-  parts.push(volumeStairLine(state.stair, state.floors));
+  // Про этажи — последней: лестница под рукой есть далеко не всегда, а когда
+  // есть, это самое новое в строке. Там же и возврат (G216).
+  parts.push(volumeFloorAction(state.stair, state.floors, state.back).hint);
   return parts.filter((part) => part !== "").join(" ");
 }
 
 /**
- * Строка про лестницу под рукой (таск 149).
- *
- * Пусто — лестницы рядом нет. Есть, но этажей не задано — об этом говорится
- * прямо: человек видит нарисованную лестницу, и молчание он прочтёт как
- * поломку, а не как «поле не заполнено».
+ * Как назвать схему, на которую зовёт возврат: этажом, если он задан, иначе
+ * именем. Винительный падеж один на кнопку и на уведомление — «вернуться на
+ * этаж 1», «вернуться на схему „План“».
  */
-export function volumeStairLine(near, options) {
-  if (!near) return "";
-  if (!options || options.length === 0) return strings.volume.stairNoFloors;
-  return strings.volume.stairNear;
+export function volumeFloorName(where) {
+  if (!where) return "";
+  return where.floor === null || where.floor === undefined
+    ? text("volume.floorNamed", { name: where.name })
+    : text("volume.floorNumber", { floor: where.floor });
 }
 
 /**
- * Строка схемы в выборе окна (G217).
+ * Что окно предлагает сделать с этажами: подняться по лестнице под рукой или
+ * вернуться туда, откуда пришёл (G216).
  *
- * Этаж — впереди имени, как на табличке лифта: у двухэтажного объекта список
- * тогда читается как дом. Схема без чертежа остаётся в списке с честной
- * припиской: объём на ней пуст, но спрятанная схема не говорит об этом ничего,
- * и человек ищет, куда она делась.
+ * **Один ответ на кнопку и на подсказку.** Раньше кнопка и строка считались
+ * врозь, и разойтись они могли молча; теперь это одно правило, и проверяется
+ * оно тестом.
+ *
+ * Разбор:
+ *
+ *   - **лестница под рукой** — её вопрос, как в таске 149; этажей не задано ни
+ *     у одной схемы — кнопки нет, но строка об этом говорит прямо: человек
+ *     видит нарисованную лестницу, и молчание он прочтёт как поломку;
+ *   - **лестницы нет, а пришли мы сюда переходом** — возврат. Это и есть
+ *     тупик, который назвал исполнитель таска 149: подняться на этаж, где
+ *     лестница не нарисована, можно, а вернуться было нечем — кнопка живёт
+ *     рядом с лестницей, а её там нет. Лестницы ему не выдумывают: возврат идёт
+ *     по той же, по которой поднялись;
+ *   - **ни того, ни другого** — молчание: предлагать нечего.
+ *
+ * Возврат не привязан ни к месту, ни к виду, и это нарочно. Кнопка «Этаж»
+ * живёт рядом с лестницей, потому что лестница — вещь на чертеже, к ней
+ * подходят. У возврата вещи нет: он про дорогу, по которой пришли. Привяжи его
+ * к точке прихода — и человек, отошедший на три шага, снова в тупике, ровно в
+ * том, который чинят.
  */
-export function volumeSchemeLabel(item) {
-  const floor = item.floor === null || item.floor === undefined;
-  const named = floor ? item.name : text("volume.schemeFloor", { floor: item.floor, name: item.name });
-  return item.drawn ? named : text("volume.schemeBlank", { name: named });
+export function volumeFloorAction(stair, options, back) {
+  if (stair) {
+    if (!options || options.length === 0) {
+      return { kind: "none", label: "", title: "", hint: strings.volume.stairNoFloors };
+    }
+    return {
+      kind: "stair",
+      label: strings.volume.stairButton,
+      title: strings.volume.stairButtonHint,
+      hint: strings.volume.stairNear,
+    };
+  }
+  if (back) {
+    return {
+      kind: "back",
+      label: text("volume.backButton", { where: volumeFloorName(back) }),
+      title: strings.volume.backButtonHint,
+      hint: strings.volume.backLine,
+    };
+  }
+  return { kind: "none", label: "", title: "", hint: "" };
 }
 
 /**
  * Клавиатура принадлежит полю ввода, а не окну.
  *
- * Выбор схемы (G217) — первое поле в этом окне, и без этой проверки стрелки,
- * которыми перебирают схемы, уходили бы в поворот головы, а V и F — в смену
- * вида. Правило то же, что у диалогов (`uiDialogDepth`): у кого фокус, того и
- * клавиши.
+ * Правило то же, что у диалогов (`uiDialogDepth`): у кого фокус, того и
+ * клавиши. Своих полей у окна сейчас нет — его клавиши ловятся на `document` и
+ * держатся глубиной диалога. Но объём переезжает на главный экран рядом с
+ * панелями, где полей вдоволь: без этой проверки «W» в имени помещения увёл бы
+ * человека на шаг вперёд.
  */
 export function volumeTypingTarget(node) {
   if (!node || !node.tagName) return false;
@@ -557,6 +591,9 @@ export function openVolume({ schemeId: openOn, api }) {
   // отошёл и подошёл снова — спросится опять.
   let ask = null;
   let stairAsked = null;
+  // Откуда пришли на нынешнюю схему (G216). Живёт в сеансе окна, в объект не
+  // пишется ничего (G68); закрыли окно — дорога забыта, и это честно.
+  let cameFrom = null;
   // Вопрос отпускает мышь: по курсору в нём и щёлкают. Был захват — вернём.
   let askWasLocked = false;
   // Последний кадр — он же ответ на «во что ткнули»: клик ищет метку в том, что
@@ -565,9 +602,6 @@ export function openVolume({ schemeId: openOn, api }) {
   // Рамка выделения и стрелки связей. Пересобираются на правку объекта и на
   // смену выделения, а не на кадр: на бегу их считать незачем, они не двигаются.
   let overlay = [];
-  // Отпечаток списка схем в шапке: по нему видно, надо ли пересобирать узлы
-  // выбора (G217) или достаточно переставить выбранную строку.
-  let schemeKey = "";
 
   const start = scene.empty ? { x: 0, y: 0, yaw: 0 } : volumeStart(scene);
   // Человек: место на плане, рысканье и наклон. Высота глаз постоянная —
@@ -622,14 +656,17 @@ export function openVolume({ schemeId: openOn, api }) {
   const askText = uiEl("p", { class: "volume__askText" });
   const askRow = uiEl("div", { class: "volume__askRow" });
   const askBox = uiEl("div", { class: "volume__ask", attrs: { hidden: "hidden" } }, [askText, askRow]);
-  // Кнопка «Этаж» на поле: тот же вопрос, заданный по своей воле. Нужна и
-  // пальцем (клавиш там нет), и мышью (отказался один раз — спроси снова, не
-  // отходя от лестницы).
+  // Кнопка этажей на поле. У лестницы — тот же вопрос, заданный по своей воле:
+  // нужен и пальцем (клавиш там нет), и мышью (отказался один раз — спроси
+  // снова, не отходя от лестницы). На этаже, где лестницы нет, та же кнопка
+  // зовёт обратно (G216) — одна кнопка и одна клавиша на оба перехода между
+  // этажами, второго места для них не заводится. Подпись ставит `syncStair`:
+  // она у кнопки меняется вместе со смыслом.
   const stairButton = uiButton(strings.volume.stairButton, {
     class: "ui-btn ui-btn--accent volume__stair",
     title: strings.volume.stairButtonHint,
     attrs: { hidden: "hidden" },
-    on: { click: () => askStairs(true) },
+    on: { click: () => floorByHand() },
   });
   // Прицел (G213): «при виде от 1 лица поставь миниатюрный прицел по центру
   // экрана». Он **узел над холстом, а не рисунок по холсту** — иначе уехал бы
@@ -698,30 +735,6 @@ export function openVolume({ schemeId: openOn, api }) {
     label: canvasFullscreenLabel(false),
     on: { click: () => toggleFullscreen() },
   });
-  // Выбор схемы (G217): «в окне добавь выбор схемы ещё». Стоит в шапке рядом с
-  // видом — это выбор того же разбора, «что показываем», только крупнее.
-  //
-  // Схему, открытую в приложении, он **не меняет**: решение таска 149 —
-  // объём смотрит, а не ведёт за собой. Поэтому `setState({schemeId})` здесь
-  // нет, и закрытое окно не оставляет человека на чужой схеме.
-  const schemeSelect = uiEl("select", {
-    class: "ui-select volume__scheme",
-    title: strings.volume.schemeHint,
-    attrs: { "aria-label": strings.volume.scheme },
-    on: {
-      change: () => {
-        const picked = schemeSelect.value;
-        // Клавиши возвращаются полю: выбрал схему — идёшь по ней, а не
-        // перебираешь список стрелками дальше.
-        if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
-        goToScheme(picked);
-      },
-    },
-  });
-  const schemeBox = uiEl("span", { class: "volume__schemeBox" }, [
-    uiEl("span", { class: "volume__toolsLabel", text: strings.volume.scheme }),
-    schemeSelect,
-  ]);
   const where = uiEl("span", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
   const missing = uiEl("p", { class: "volume__missing" });
@@ -732,7 +745,6 @@ export function openVolume({ schemeId: openOn, api }) {
   const spareLine = uiEl("p", { class: "volume__missing" });
 
   const bar = uiEl("div", { class: "volume__tools" }, [
-    schemeBox,
     uiEl("span", { class: "volume__toolsLabel", text: strings.volume.view }),
     personButton,
     aroundButton,
@@ -1475,9 +1487,47 @@ export function openVolume({ schemeId: openOn, api }) {
 
   /** Кнопка «Этаж» и строка подсказки — по тому, стоим ли мы у лестницы. */
   function syncStair() {
-    const stair = stairHere();
-    stairButton.hidden = !stair || Boolean(ask) || floorOptions().length === 0;
+    const action = floorAction();
+    stairButton.hidden = action.kind === "none" || Boolean(ask);
+    if (!stairButton.hidden) {
+      stairButton.textContent = action.label;
+      stairButton.title = action.title;
+    }
     syncHint();
+  }
+
+  /** Что сейчас делает кнопка этажей и о чём говорит подсказка. */
+  function floorAction() {
+    return volumeFloorAction(stairHere(), floorOptions(), backFloor());
+  }
+
+  /**
+   * Куда зовёт возврат (G216) — или `null`, если звать некуда.
+   *
+   * Условий два, и оба обязательны: мы **пришли сюда переходом** (окно помнит
+   * дорогу, пока открыто) и **лестницы на этой схеме нет ни одной**. Есть
+   * лестница — ею и пользуются, правило таска 149 не трогается вовсе.
+   *
+   * Схему, с которой пришли, могли удалить под окном — тогда возврата нет: имя
+   * и этаж спрашиваются у объекта каждый раз, а не запоминаются вместе с
+   * дорогой.
+   */
+  function backFloor() {
+    if (!cameFrom) return null;
+    if ((scene.stairs || []).length > 0) return null;
+    const project = getState().project;
+    const found = findScheme(project, cameFrom.schemeId);
+    if (!found) return null;
+    return { schemeId: found.id, name: found.name, floor: schemeFloorOf(project, found.id) };
+  }
+
+  /** Кнопка этажей и Enter: у лестницы — вопрос, без неё — возврат. */
+  function floorByHand() {
+    if (stairHere()) {
+      askStairs(true);
+      return;
+    }
+    goBackFloor();
   }
 
   /**
@@ -1492,7 +1542,7 @@ export function openVolume({ schemeId: openOn, api }) {
     }
     const options = floorOptions();
     if (options.length === 0) {
-      // Строка под полем про это уже говорит (`volumeStairLine`) — вопроса без
+      // Подсказка про это уже говорит (`volumeFloorAction`) — вопроса без
       // ответов не задаём.
       if (byHand) notify(strings.volume.stairNoFloors, "info");
       return;
@@ -1557,10 +1607,11 @@ export function openVolume({ schemeId: openOn, api }) {
     closeAsk();
     const state = getState();
     if (!findScheme(state.project, option.schemeId)) return;
-    // Где мы стояли на покидаемой схеме — в память окна (G216): вернувшись сюда
-    // выбором схемы, человек встанет у той же лестницы. Сам переход по лестнице
-    // память **не читает**: его правило прежнее, то же место плана (таск 149).
-    rememberPlace();
+    // Где мы стояли на покидаемой схеме и откуда пришли — в память окна
+    // (G216): с этажа, где лестницы не нарисовано, человек вернётся сюда
+    // кнопкой и встанет у той же лестницы. Сам переход по лестнице память **не
+    // читает**: его правило прежнее, то же место плана (таск 149).
+    leaveScheme();
     schemeId = option.schemeId;
     scene = sceneOf(state) || scene;
     const moved = volumeMoveTo(scene, { x: person.x, y: person.y });
@@ -1595,74 +1646,48 @@ export function openVolume({ schemeId: openOn, api }) {
     visited.set(schemeId, { x: person.x, y: person.y, yaw: person.yaw, pitch: person.pitch });
   }
 
-  /**
-   * Показать другую схему.
-   *
-   * **Куда встаёт человек.** Был на этой схеме в этом сеансе — туда, откуда
-   * ушёл, и глядя в ту же сторону (G216): выбор обязан быть возвратом, иначе
-   * поднявшийся по лестнице и вернувшийся выбором оказывался бы не у неё.
-   * Не был — туда, где объём открывается сам (`volumeStart`, самое просторное
-   * место самой большой комнаты): другого честного ответа у прямого выбора нет,
-   * а место по старым координатам на чужой схеме — это середина стены или угол
-   * чулана.
-   *
-   * Место в обоих случаях проходит через `volumeMoveTo`: чертёж могли поправить,
-   * пока окно открыто, и память не должна ставить человека в новую стену.
-   *
-   * Что остаётся при человеке: открытые двери (у схем свои проёмы) и вид. Что
-   * сбрасывается: выделение — выделенная метка осталась на прежней схеме.
-   */
-  function goToScheme(nextId) {
-    if (!nextId || nextId === schemeId) return;
-    const state = getState();
-    if (!findScheme(state.project, nextId)) return;
-    closeAsk();
+  /** Уходим со схемы: где стояли — в память, а сама схема — «откуда пришли». */
+  function leaveScheme() {
     rememberPlace();
-    const back = visited.get(nextId) || null;
-    schemeId = nextId;
+    cameFrom = { schemeId };
+  }
+
+  /**
+   * Вернуться туда, откуда пришли (G216).
+   *
+   * **Куда встаёт человек** — туда, где стоял, когда уходил, и глядя в ту же
+   * сторону. Это и есть «возврат в точке прихода»: уходил он от лестницы, по
+   * ней и возвращается. Место проходит через `volumeMoveTo` — чертёж могли
+   * поправить, пока окно открыто, и память не должна поставить человека в новую
+   * стену.
+   *
+   * Что остаётся при человеке: открытые двери и вид. Что сбрасывается:
+   * выделение — выделенная метка осталась на прежней схеме.
+   */
+  function goBackFloor() {
+    const back = backFloor();
+    if (!back) return;
+    closeAsk();
+    const state = getState();
+    leaveScheme();
+    const place = visited.get(back.schemeId) || null;
+    schemeId = back.schemeId;
     scene = sceneOf(state) || scene;
     if (!scene.empty) {
-      const at = back || volumeStart(scene);
+      const at = place || { x: person.x, y: person.y, yaw: person.yaw };
       const moved = volumeMoveTo(scene, at);
       person.x = moved.x;
       person.y = moved.y;
       person.yaw = at.yaw;
-      if (back) person.pitch = volumeClampPitch(back.pitch);
+      if (place) person.pitch = volumeClampPitch(place.pitch);
       around = { ...around, target: { ...around.target, x: person.x, y: person.y }, yaw: person.yaw };
     }
     select(null);
-    // У лестницы, на которой стоим после перехода, вопрос сам не всплывает:
-    // человек пришёл сюда выбором, а не подошёл к ней шагом.
+    // Вернулись мы к самой лестнице — и вопрос про этаж сам не всплывает:
+    // иначе он предложил бы тут же подняться обратно.
     stairAsked = (stairHere() || {}).objectId || null;
     sync();
-    notify(text(back ? "volume.schemeBack" : "volume.schemeFresh", { name: schemeName() }), "info");
-  }
-
-  /**
-   * Список схем в шапке. Пересобирается только когда он правда изменился
-   * (схему переименовали, добавили, стёрли чертёж): `sync` зовут и на смену
-   * вида, а перебирать узлы под открытым списком незачем.
-   */
-  function syncSchemes() {
-    const choices = volumeSchemeChoices(getState().project);
-    // Отпечаток — JSON, а не склейка через разделитель: разделителем в имени
-    // схемы быть может что угодно, а управляющий символ в собранной странице
-    // роняет сборку (`assertPlainText`) — и правильно роняет.
-    const key = JSON.stringify(
-      choices.map((item) => [item.schemeId, item.floor, item.drawn, item.name]),
-    );
-    if (key !== schemeKey) {
-      schemeKey = key;
-      schemeSelect.replaceChildren(
-        ...choices.map((item) =>
-          uiEl("option", { text: volumeSchemeLabel(item), attrs: { value: item.schemeId } }),
-        ),
-      );
-    }
-    schemeSelect.value = schemeId;
-    // Схема у объекта одна — выбирать нечего, и строка в шапке только повторяла
-    // бы заголовок окна.
-    schemeBox.hidden = choices.length < 2;
+    notify(text("volume.backArrived", { where: volumeFloorName(back) }), "info");
   }
 
   // ——— снимок вида (таск 149) ———
@@ -1692,8 +1717,8 @@ export function openVolume({ schemeId: openOn, api }) {
 
   function onKeyDown(event) {
     if (!ours()) return;
-    // Клавиши принадлежат полю ввода, пока в нём фокус: выбор схемы (G217)
-    // перебирают стрелками, и уходить в поворот головы они не должны.
+    // Клавиши принадлежат полю ввода, пока в нём фокус: «W» в имени помещения
+    // не должно уводить человека на шаг вперёд.
     if (volumeTypingTarget(event.target)) return;
     // Вопрос про этаж (таск 149) забирает клавиатуру себе: Enter переходит на
     // первый этаж из списка, Esc отказывается — и ни то, ни другое не доходит
@@ -1716,13 +1741,15 @@ export function openVolume({ schemeId: openOn, api }) {
       // отвечает на вопрос, а не идёт.
       return;
     }
-    // Стоим у лестницы — Enter спрашивает про этаж (таск 149). Это та же
+    // Enter — переход между этажами (таск 149, G216): у лестницы спрашивает про
+    // этаж, на этаже без лестницы возвращает туда, откуда пришли. Это та же
     // клавиша «согласиться», которой отвечают на сам вопрос, и единственная
-    // новая в окне: E, R, V, F, W A S D, стрелки, Shift и Alt заняты.
-    if (event.key === "Enter" && stairHere()) {
+    // новая в окне: E, R, V, F, W A S D, стрелки, Shift и Alt заняты. Делает
+    // она ровно то же, что кнопка на поле, — и решает это одно правило.
+    if (event.key === "Enter" && floorAction().kind !== "none") {
       event.preventDefault();
       event.stopPropagation();
-      askStairs(true);
+      floorByHand();
       return;
     }
     // Esc при захвате отпускает мышь и окна не закрывает: человек жмёт его,
@@ -1860,6 +1887,7 @@ export function openVolume({ schemeId: openOn, api }) {
       aimedDoor: aimedDoor || heldDoor,
       stair: stairHere(),
       floors: floorOptions(),
+      back: backFloor(),
     });
     hintText.textContent = value;
     hint.classList.toggle("is-collapsed", volumeHintCollapsed);
@@ -1876,7 +1904,6 @@ export function openVolume({ schemeId: openOn, api }) {
   }
 
   function sync() {
-    syncSchemes();
     personButton.className = "ui-btn" + (view === "person" ? " is-on" : "");
     aroundButton.className = "ui-btn" + (view === "around" ? " is-on" : "");
     stage.classList.toggle("volume__stage--person", view === "person");

@@ -40,7 +40,6 @@ import {
   planMmToFraction,
   schemeFloorOf,
   schemeObjectKindsInOrder,
-  schemesInOrder,
   setMarkDimensions,
   setPlanOrigin,
   setPlanScale,
@@ -91,7 +90,6 @@ import {
   volumeDoorAt,
   volumeFloorAt,
   volumeMoveTo,
-  volumeSchemeChoices,
   volumeSkyAim,
   volumeSpareBox,
   volumeSkyPoint,
@@ -139,8 +137,8 @@ import {
   volumePadVector,
   volumeSpareLine,
   volumeSpareTitle,
-  volumeSchemeLabel,
-  volumeStairLine,
+  volumeFloorAction,
+  volumeFloorName,
   volumeTitle,
   volumeTypingTarget,
   volumeUnplacedLine,
@@ -2152,55 +2150,36 @@ test("в список этажей идёт только схема с номе�
   assert.ok(floors.options.every((option) => option.schemeId !== first.schemeId));
 });
 
-test("строка про лестницу молчит без лестницы и говорит, когда перейти некуда", () => {
-  assert.equal(volumeStairLine(null, []), "");
-  assert.equal(volumeStairLine(null, [{ floor: 2 }]), "");
-  assert.equal(volumeStairLine({ objectId: "s" }, []), strings.volume.stairNoFloors);
-  assert.equal(volumeStairLine({ objectId: "s" }, [{ floor: 2 }]), strings.volume.stairNear);
+test("у лестницы окно предлагает этаж, а без неё молчит или зовёт обратно", () => {
+  const stair = { objectId: "s" };
+  const floors = [{ floor: 2 }];
+  // Ни лестницы, ни дороги назад — предлагать нечего, и строки нет.
+  assert.deepEqual(volumeFloorAction(null, [], null), { kind: "none", label: "", title: "", hint: "" });
+  assert.equal(volumeFloorAction(null, floors, null).kind, "none", "лестницы нет — этажи сами по себе не зовут");
+  // Лестница есть, этажей не задано: кнопки нет, но молчать нельзя — человек
+  // видит нарисованную лестницу.
+  const dead = volumeFloorAction(stair, [], null);
+  assert.equal(dead.kind, "none");
+  assert.equal(dead.hint, strings.volume.stairNoFloors);
+  // Лестница и этажи — обычный переход таска 149.
+  const up = volumeFloorAction(stair, floors, null);
+  assert.equal(up.kind, "stair");
+  assert.equal(up.label, strings.volume.stairButton);
+  assert.equal(up.hint, strings.volume.stairNear);
+  // Лестницы нет, а пришли мы сюда переходом — возврат (G216).
+  const back = volumeFloorAction(null, [], { schemeId: "s1", name: "1 этаж", floor: 1 });
+  assert.equal(back.kind, "back");
+  assert.equal(back.label, text("volume.backButton", { where: text("volume.floorNumber", { floor: 1 }) }));
+  assert.equal(back.hint, strings.volume.backLine);
+  // Лестница старше возврата: есть она — ею и пользуются, правило T149 цело.
+  assert.equal(volumeFloorAction(stair, floors, { schemeId: "s1", name: "1", floor: 1 }).kind, "stair");
+  // Схема без этажа зовётся именем, и падеж у обоих случаев один.
+  const named = volumeFloorAction(null, [], { schemeId: "s2", name: "План", floor: null });
+  assert.equal(named.label, text("volume.backButton", { where: text("volume.floorNamed", { name: "План" }) }));
+  assert.equal(volumeFloorName(null), "");
 });
 
-// ——— выбор схемы в окне (G217) ———————————————————————————————————————————
-
-test("в выбор схемы идут все схемы объекта, а не только с чертежом", () => {
-  const first = stairScene();
-  let project = setSchemeFloor(first.project, first.schemeId, 1).project;
-  const second = addScheme(project, { name: "2 этаж", imageId: "plan-2", width: 1200, height: 800 });
-  project = addWall(second.project, {
-    schemeId: second.scheme.id,
-    aMm: { x: 0, y: 0 },
-    bMm: { x: 4000, y: 0 },
-    thicknessMm: 200,
-  }).project;
-  project = setSchemeFloor(project, second.scheme.id, 2).project;
-  // Схема без чертежа: в список этажей она не идёт (переход в пустое окно —
-  // тупик), а в выбор идёт — иначе человек ищет, куда она делась.
-  const bare = addScheme(project, { name: "Развёртка", imageId: "plan-3", width: 1200, height: 800 });
-  project = bare.project;
-
-  const choices = volumeSchemeChoices(project);
-  assert.deepEqual(
-    choices.map((item) => [item.name, item.floor, item.drawn]),
-    [["1 этаж", 1, true], ["2 этаж", 2, true], ["Развёртка", null, false]],
-  );
-  // Порядок — из модели: его человек задаёт в панели схем, и второй сортировки
-  // в сборке нет (в отличие от лестницы, которая ведёт снизу вверх).
-  assert.deepEqual(
-    choices.map((item) => item.schemeId),
-    schemesInOrder(project).map((scheme) => scheme.id),
-  );
-  // Своя схема из выбора не выпадает: по ней видно, где ты сейчас.
-  assert.ok(choices.some((item) => item.schemeId === first.schemeId));
-  // Этаж виден в строке, пустая схема — с припиской.
-  assert.equal(volumeSchemeLabel(choices[1]), text("volume.schemeFloor", { floor: 2, name: "2 этаж" }));
-  assert.equal(volumeSchemeLabel(choices[2]), text("volume.schemeBlank", { name: "Развёртка" }));
-  assert.equal(volumeSchemeLabel({ name: "План", floor: null, drawn: true }), "План");
-  // Объект от разбора списка не меняется (G68).
-  const before = JSON.stringify(project);
-  volumeSchemeChoices(project);
-  assert.equal(JSON.stringify(project), before);
-});
-
-test("клавиши окна не отбирают стрелки у поля выбора", () => {
+test("клавиши окна не отбирают клавиши у поля ввода", () => {
   assert.equal(volumeTypingTarget({ tagName: "SELECT" }), true);
   assert.equal(volumeTypingTarget({ tagName: "INPUT" }), true);
   assert.equal(volumeTypingTarget({ tagName: "TEXTAREA" }), true);
@@ -2278,6 +2257,9 @@ test("текст подсказки говорит про тот вид и то 
   // Двери и лестница дописываются теми же строками, что и прежде.
   const full = volumeHintText({ ...base, doors: ["d1"], stair: { objectId: "s" }, floors: [{ floor: 2 }] });
   assert.ok(full.includes(strings.volume.stairNear), full);
+  // Возврат с этажа без лестницы (G216) говорится в той же строке.
+  const back = volumeHintText({ ...base, back: { schemeId: "s", name: "1 этаж", floor: 1 } });
+  assert.ok(back.includes(strings.volume.backLine), back);
   assert.ok(full.includes(volumeDoorLine(["d1"], new Set(), null, false)), full);
   // Схема без чертежа: подсказка говорит, чем рисуют чертёж, и ничего больше.
   assert.equal(volumeHintText({ ...base, empty: true }), strings.volume.emptyHint);
