@@ -311,6 +311,40 @@ export function volumeMinimapBox(box, bounds) {
   return { x: 14, y: box.height - height - 14, width, height };
 }
 
+// ——— присед и прыжок пальцем (таск 163, G242) ——————————————————————————
+//
+// «на интерфейсе для планшетов и смартфонов добавь кнопки прыжкак и присяда».
+//
+// Кнопки стоят **слева внизу**, а не рядом с площадкой ходьбы, и это не выбор
+// места, а условие работы. Присед держат (таск 159, G234), а приседают затем,
+// чтобы пройти под низким, — то есть присед и ход обязаны идти **вместе**.
+// Один палец этого не умеет: уйдя с площадки на кнопку, он останавливает ход.
+// Площадка отдана правому большому пальцу (G212 отдал левый угол миникарте),
+// значит стойка достаётся левому, и держать присед, шагая, можно двумя руками,
+// как на планшете её и держат.
+//
+// С миникартой кнопки не спорят: в углу лежит она, и столбик встаёт **над**
+// ней — отступ считается от её же прямоугольника, а не на глаз. Миникарты в
+// поле нет (телефон, узкое или низкое поле) — столбик опускается в сам угол.
+
+/** Поля поверх кадра: отступ кнопок и площадки от края поля, в точках. */
+export const VOLUME_FIELD_EDGE = 18;
+
+/**
+ * Насколько столбик кнопок стойки поднят над низом поля.
+ *
+ * Чистая и вынесена наружу: «не спорит с миникартой» — вся суть расположения,
+ * а проверить её на глаз можно только подобрав поле нужного размера. Миникарта
+ * появляется и исчезает от размера поля и от самой схемы, и считать её границу
+ * второй раз на глаз в стилях нельзя — отступ берётся у того же
+ * `volumeMinimapBox`, что её и рисует.
+ */
+export function volumeStanceBottom(box, bounds) {
+  const place = volumeMinimapBox(box, bounds);
+  if (!place) return VOLUME_FIELD_EDGE;
+  return Math.round(box.height - place.y + 12);
+}
+
 // ——— сенсорное управление (таск 149) ——————————————————————————————————
 //
 // «Нужно планшетное управление, если зашли с планшета или смартфона».
@@ -679,6 +713,10 @@ function createVolume({ api, hosts }) {
   // перестал, и встанет он сам, как только выйдет.
   let crouchHeld = false;
   let crouchStuck = false;
+  // Палец на кнопке приседа (таск 163, G242): `null` — кнопку не держат.
+  // Отпускание ищут по нему, иначе присед, начатый кнопкой, снимался бы любым
+  // касанием поля.
+  let crouchFinger = null;
   // Про «встать негде» говорится один раз на попытку, а не каждый кадр.
   let stuckSaid = false;
   /**
@@ -722,6 +760,25 @@ function createVolume({ api, hosts }) {
     },
     [padKnob],
   );
+  // Присед и прыжок пальцем (таск 163, G242). Своих правил у кнопок нет: они
+  // зовут ровно то, что зовут Control и пробел, — `crouchStart`/`crouchStop` и
+  // `jump`. Числа стойки (550 мм приседа, 300 мм прыжка, полсекунды дуги)
+  // живут в `volume.js` и про то, какой рукой их позвали, не знают.
+  const jumpButton = uiIconButton("jump", {
+    class: "ui-btn volume__stanceBtn",
+    label: strings.volume.jump,
+    title: strings.volume.jumpHint,
+    on: { click: () => jump() },
+  });
+  const crouchButton = uiIconButton("crouch", {
+    class: "ui-btn volume__stanceBtn",
+    label: strings.volume.crouch,
+    title: strings.volume.crouchHint,
+  });
+  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [
+    jumpButton,
+    crouchButton,
+  ]);
   // Вопрос про этаж живёт **в самом окне**, а не диалогом поверх страницы, и это
   // не вкусовщина: стопка диалогов прячет карточки под верхней (`uiRefreshDialogs`),
   // а в полном экране развёрнута карточка окна — всё, что лежит в
@@ -756,6 +813,7 @@ function createVolume({ api, hosts }) {
     card,
     stairButton,
     padNode,
+    stanceBox,
     aimNode,
     hintPlate.node,
     askBox,
@@ -1262,6 +1320,9 @@ function createVolume({ api, hosts }) {
    * этом.
    */
   function crouchStop() {
+    // Кнопку больше не держат — чем бы присед ни был начат: вставать всегда
+    // значит «палец с кнопки снят» (таск 163, G242).
+    crouchFinger = null;
     if (!crouchHeld) return;
     crouchHeld = false;
     walkSchedule();
@@ -1272,6 +1333,34 @@ function createVolume({ api, hosts }) {
     if (view !== "person") return;
     stance = volumeStanceJump(stance);
     walkSchedule();
+  }
+
+  // ——— та же стойка пальцем (таск 163, G242) ———
+  //
+  // Кнопка приседа держится, как клавиша: нажали — присели, отпустили —
+  // встали, встать негде — остались внизу и услышали ту же строку. Своих чисел
+  // у кнопок нет вовсе — они зовут то же, что Control и пробел.
+
+  function crouchPress(event) {
+    if (crouchFinger !== null) return;
+    event.preventDefault();
+    crouchFinger = event.pointerId;
+    if (crouchButton.setPointerCapture) {
+      try {
+        crouchButton.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // захват указателя кнопке не дали — отпускание поймаем окном
+      }
+    }
+    crouchStart();
+  }
+
+  // Отпустили палец, увели его за край, потеряли захват, ушли из вида от
+  // первого лица — всё это одно и то же: кнопку больше не держат.
+  function crouchRelease(event) {
+    if (crouchFinger === null) return;
+    if (event && event.pointerId !== undefined && event.pointerId !== crouchFinger) return;
+    crouchStop();
   }
 
   /**
@@ -1486,6 +1575,9 @@ function createVolume({ api, hosts }) {
       if (touches.size < 2) pinch = null;
     }
     padEnd(event);
+    // Захвата указателя кнопка могла и не получить — тогда отпускание придёт
+    // сюда, и присед обязан сняться здесь же: палец свой она узнает сама.
+    crouchRelease(event);
     if (closed || !started || started.moved) return;
     // ——— щелчок равноценен E (G235) ———
     //
@@ -2163,8 +2255,15 @@ function createVolume({ api, hosts }) {
     syncAimNode();
     // Площадка ходьбы — только пальцем и только там, где ходят: в обзоре она
     // возила бы цель камеры, а не человека, и была бы просто непонятной.
-    padNode.hidden = !touching || view !== "person" || scene.empty;
+    // Кнопки стойки живут по тому же правилу и в то же время: присед и прыжок
+    // — это ходьба, только вверх и вниз, и в обзоре их нет так же, как там нет
+    // площадки.
+    const noWalk = !touching || view !== "person" || scene.empty;
+    padNode.hidden = noWalk;
     if (padNode.hidden) padEnd(null);
+    stanceBox.hidden = noWalk;
+    if (stanceBox.hidden) crouchRelease(null);
+    else stanceBox.style.bottom = volumeStanceBottom(viewport(), scene.boundsMm) + "px";
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
     shotButton.hidden = scene.empty;
     // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
@@ -2277,6 +2376,12 @@ function createVolume({ api, hosts }) {
   stage.addEventListener("pointerdown", onPointerDown);
   stage.addEventListener("wheel", onWheel, { passive: false });
   padNode.addEventListener("pointerdown", padStart);
+  crouchButton.addEventListener("pointerdown", crouchPress);
+  crouchButton.addEventListener("pointerup", crouchRelease);
+  crouchButton.addEventListener("pointercancel", crouchRelease);
+  // Захват потеряли (палец уехал за край, браузер отдал указатель другому) —
+  // это то же отпускание: иначе человек остался бы сидеть без кнопки.
+  crouchButton.addEventListener("lostpointercapture", crouchRelease);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);

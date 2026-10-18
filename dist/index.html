@@ -3756,6 +3756,61 @@
   pointer-events: none;
 }
 
+/* ——— присед и прыжок пальцем (таск 163, G242) ————————————————————————
+
+   «на интерфейсе для планшетов и смартфонов добавь кнопки прыжкак и присяда».
+
+   Столбик слева внизу, площадка ходьбы — справа: присед держат, и держат его
+   **на ходу** (под низкое идут пригнувшись). Одним пальцем так не выйдет — уйдя
+   с площадки, он останавливает ход, — поэтому стойка достаётся второй руке.
+   Прыжок стоит сверху, присед снизу: стрелки на значках смотрят туда же, куда
+   кнопки, и путать их нечем.
+
+   Отступ снизу ставит не этот файл: в левом нижнем углу лежит миникарта (G212),
+   и столбик встаёт над ней ровно по её высоте — её считает `volumeStanceBottom`
+   тем же `volumeMinimapBox`, которым миникарта рисуется. Здесь только запасное
+   значение на случай, пока поле ещё не мерили. */
+.volume__stance {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 3;
+}
+
+.volume__stance[hidden] {
+  display: none;
+}
+
+/* Цель под палец: 52 точки — столько же, сколько у кнопок нижнего ряда в
+   просмотре. Кружок, а не прямоугольник: рядом площадка ходьбы, и они читаются
+   одной оснасткой поля, а не кнопками панели, уехавшими на холст. */
+.volume__stanceBtn {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  touch-action: none;
+}
+
+/* Нажата — та же подсветка, что у площадки под пальцем: одно поле, один язык. */
+.volume__stanceBtn:active {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.volume__stanceBtn .ui-icon {
+  --ui-icon: 24px;
+}
+
 /* Кнопка «Этаж» — внизу по середине поля: она появляется только у лестницы, и
    место под ней свободно в обоих видах (карточка метки прижата влево,
    площадка ходьбы — вправо). */
@@ -4489,10 +4544,69 @@
   padding: 12px 14px;
 }
 
-/* Кнопки выгрузки в шапке и поля диалогов. */
+/* Кнопка выгрузок в шапке и поля диалогов. */
 .export {
+  position: relative;
   display: flex;
   gap: 8px;
+}
+
+/* ——— меню выгрузок под значком принтера (таск 163, G242) ————————————————
+
+   Три слова в шапке стали одним значком, а сами выгрузки — списком под ним.
+   Устроен он как список предупреждений по соседству: раскрывается кнопкой,
+   закрывается ею же, нажатием мимо и Escape, и диалогом не становится.
+
+   Прижат к правому краю кнопки, а не к левому, как у предупреждений: значок
+   стоит в правой половине шапки, и список, выросший вправо, уехал бы за край
+   экрана на телефоне. */
+.export__drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: min(320px, 92vw);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 18px 44px rgba(1, 4, 9, 0.6);
+}
+
+/* Пункт — строка во всю ширину списка: в неё помещается имя выгрузки и причина
+   гашения под ним. Рамки у пунктов нет — рамка в списке читалась бы сеткой
+   кнопок, а это перечень. */
+.export__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border-color: transparent;
+  background: none;
+  text-align: left;
+}
+
+.export__item:hover:not(:disabled) {
+  background: #21262d;
+  border-color: var(--panel-line);
+}
+
+/* Погасший пункт не исчезает и не молчит: причина стоит строкой под именем —
+   в меню для неё есть место, которого у кнопки в шапке не было. Она же
+   остаётся в подсказке: наводят на пункт и читают там же. */
+.export__itemName {
+  font-weight: 600;
+}
+
+.export__itemWhy {
+  font-size: 12px;
+  color: var(--panel-muted);
+  white-space: normal;
 }
 
 .export__body {
@@ -5207,13 +5321,28 @@ body {
   }
 }
 
+/* Промежутки и поля кнопок на узком экране — настольные, а не пальцевые
+   (таск 163, G242). Высота под палец остаётся прежней (40 точек), а лишние
+   точки по краям каждой кнопки не дают ничего, кроме второй строки: на 360 их
+   набиралось 32 — ровно имя схемы. */
 #app.is-mobile #app-header {
   height: auto;
   min-height: 0;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   row-gap: 2px;
   padding: 6px 10px;
+}
+
+#app.is-mobile #app-header .ui-btn {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+/* Отступ перед файловыми кнопками съел бы те же восемь точек: в ряду, который
+   меряют строкой, промежуток один на всех. */
+#app.is-mobile #file-actions {
+  margin-left: 0;
 }
 
 /* Название сервиса на объекте не нужно: место дороже. */
@@ -5221,10 +5350,20 @@ body {
   display: none;
 }
 
+/* Имя открытой схемы стоит **в том же ряду**, что и всё остальное (таск 163,
+   G242): заказчик мерил шапку строкой — «на смартфоне вся верхняя панель
+   должна уместиться в 1 строку», — и своя строка у имени была ровно второй.
+   Ему достаётся то, что осталось после кнопок и списка объектов, и обрезается
+   оно многоточием; целиком имя лежит в подсказке и в списке схем, который на
+   телефоне открывается кнопкой снизу. */
 #app.is-mobile #scheme-name {
   display: block;
-  width: 100%;
-  order: 9;
+  /* Начальная ширина — ноль, а не длина самого имени: в ряду с переносом
+     длинное имя иначе не ужимается, а переносится — ровно той второй строкой,
+     от которой уходили. Ноль делает имя последним в очереди за местом:
+     сперва кнопки и список объектов, остаток — ему. */
+  flex: 1 1 0;
+  min-width: 0;
   font-size: 12px;
   color: var(--panel-muted);
   overflow: hidden;
@@ -5234,31 +5373,16 @@ body {
 
 /* Планшет стоймя выбирает просмотр — так решил заказчик («десктоп, а с планшета
    смотреть»), — но и в просмотре шапка обязана быть одной строкой: именно там
-   её видели расходящейся надвое. Имя схемы встаёт в ряд с остальным и ужимается
-   многоточием. На телефоне ему в ряду места нет, и своя строка у него остаётся:
-   имя открытой схемы больше показать негде.
+   её видели расходящейся надвое.
 
-   Вместе с ним ужимаются поля кнопок — до настольных. Высота под палец остаётся
-   прежней (40 точек), а лишние восемь точек по краям каждой кнопки на планшете
-   не дают ничего, кроме второй строки: на 768 их набиралось почти полсотни.
-
-   Порог — 640, а не «чуть ниже iPad»: восьмидюймовый планшет заказчика отдаёт
-   600–800 логических точек, и полоса 640–740 была самой больной — там шапка
-   расходилась на две строки при полностью пустом правом крае. Со значком вместо
-   слова у кнопки раскладки ряду хватает 543 + 14vw точек, то есть одной строкой
-   он держится с 631; 640 взято ближайшим круглым числом сверху. */
+   На планшете ряд не тесен, и имя схемы там не должно разъезжаться во всю
+   ширину: потолок в 14vw оставляет место списку объектов и кнопкам. На
+   телефоне потолка нет — имя забирает остаток ряда, и остаток этот невелик
+   (таск 163, G242). */
 @media (min-width: 640px) {
   #app.is-mobile #scheme-name {
-    width: auto;
-    order: 0;
     flex: 0 1 auto;
-    min-width: 0;
     max-width: 14vw;
-  }
-
-  #app.is-mobile #app-header .ui-btn {
-    padding-left: 8px;
-    padding-right: 8px;
   }
 }
 
@@ -5374,11 +5498,14 @@ body {
   max-width: 82vw;
 }
 
-/* На телефоне список объектов занимает почти половину строки — иначе от имени
-   останется огрызок. На планшете половина строки ему не нужна: там рядом стоит
-   имя схемы, кнопки просмотра и файл, и потолок оставляет место всем. */
+/* Список объектов на телефоне ужат до трети строки (таск 163, G242): в одном
+   ряду с ним стоят имя схемы и четыре кнопки, и половина строки у списка —
+   это вторая строка у всей шапки. Обрезанное имя объекта видно целиком, как
+   только список раскрыли, и это единственное место, где объект назван, —
+   поэтому ужат он, а не убран. На планшете потолок тот же в точках и
+   просторнее в долях: там строка шире. */
 #app.is-mobile #project-actions .ui-select {
-  max-width: min(46vw, 180px);
+  max-width: min(32vw, 180px);
 }
 
 /* Уведомления не должны ложиться на нижнюю панель. */
@@ -7102,7 +7229,16 @@ const strings = {
     // Сенсорное управление (таск 149): «Нужно планшетное управление, если
     // зашли с планшета или смартфона».
     padLabel: "Ходьба и поворот",
-    hintTouch: "Палец по полю вертит головой, площадка справа внизу ходит и поворачивает, щипок двумя пальцами в обзоре приближает.",
+    hintTouch:
+      "Палец по полю вертит головой, площадка справа внизу ходит и поворачивает, " +
+      "кнопки слева внизу приседают и подпрыгивают, щипок двумя пальцами в обзоре приближает.",
+    // Присед и прыжок пальцем (таск 163, G242): «добавь кнопки прыжкак и
+    // присяда». Числа в подсказках не называются — они те же, что у клавиш, и
+    // человеку нужно знать, что кнопку приседа держат, а кнопку прыжка нажимают.
+    crouch: "Присесть",
+    crouchHint: "Держите, пока нужно идти пригнувшись (то же, что Control). Отпустите — выпрямитесь; встать негде — останетесь внизу",
+    jump: "Прыжок",
+    jumpHint: "Подпрыгнуть (то же, что пробел). Прыжок поднимает взгляд, но не макушку: перепрыгнуть низкое нельзя",
     doorTouch: "Касание по двери открывает и закрывает её.",
     doorsAll: "Все двери",
     doorsAllHint: "Открыть или закрыть все двери разом (R)",
@@ -7834,6 +7970,13 @@ const strings = {
     busy: "Готовим файл…",
     tooBig: "Слишком большая картинка — уменьшите множитель",
     failed: "Не удалось собрать файл",
+    // Меню выгрузок под значком принтера (таск 163, G242). Слова заказчика:
+    // «кнопки Таблица, схема, развёртки спрячь в меню по иконке-кнопке с
+    // принтером». Имя у меню своё — «Выгрузки»: три пункта под ним про разное,
+    // и «Печать» соврала бы (из таблицы и схемы уходят ещё PNG, PDF и архив).
+    menu: "Выгрузки",
+    menuHint: "Таблица меток, схема листом и развёртки стен: что выгрузить или напечатать",
+    menuClose: "Закрыть меню выгрузок",
   },
   // Чёрно-белая выгрузка схем: лист, нарисованный тушью по бумаге.
   mono: {
@@ -25806,6 +25949,18 @@ const UI_ICONS = {
   // видно без слова: уголки наружу — «развернуть», внутрь — «свернуть».
   fullscreen: ["M4 9.5V4h5.5", "M20 9.5V4h-5.5", "M4 14.5V20h5.5", "M20 14.5V20h-5.5"],
   fullscreenExit: ["M9.5 4v5.5H4", "M14.5 4v5.5H20", "M9.5 20v-5.5H4", "M14.5 20v-5.5H20"],
+  // Выгрузки под одним значком (таск 163, G242): принтер — корпус, лист,
+  // въехавший в него сверху, и лист, вышедший снизу. Знак заказчик назвал сам
+  // («меню по иконке-кнопке с принтером»), и он честен: за ним и печать, и
+  // файл листа — то, что уходит со страницы наружу.
+  printer: ["M7.5 9.5V4.5h9v5", "M4.5 9.5h15v7h-3", "M7.5 16.5h-3", "M7.5 13.5h9v6h-9z"],
+  // Присесть и подпрыгнуть пальцем (таск 163, G242). Пара: у обеих земля
+  // чертой внизу, и отличает их только стрелка — вниз к земле у приседа, вверх
+  // от земли у прыжка. Без черты обе читались бы как «листать список»: земля и
+  // говорит, что речь про стойку, а не про порядок. Человечка здесь нет
+  // нарочно — в клетке 18 px он превращается в пятно, а стрелка читается.
+  crouch: ["M12 4.5v9", "M8.5 10 12 13.5l3.5-3.5", "M5 19.5h14"],
+  jump: ["M12 13.5v-9", "M8.5 8 12 4.5l3.5 3.5", "M5 19.5h14"],
 };
 function uiIcon(name) {
   const svg = document.createElementNS(UI_SVG_NS, "svg");
@@ -26273,9 +26428,20 @@ const LAYOUT_ABILITIES = {
   // Предупреждения — про правку объекта: в них отвечают на вопрос о виде типа
   // и идут чинить найденное. В просмотре чинить нечем, а место в шапке дорого.
   warnings: ["desktop"],
-  // Связи — чтение, а не правка: «что включает этот выключатель» спрашивают и
-  // с телефона, стоя перед щитом. Ничего не меняют, поэтому идут в оба вида.
-  markLinks: ["desktop", "mobile"],
+  // Связи ушли с узких раскладок (таск 163, G242) прямым словом заказчика:
+  // «спрячь кнопку отображения связей, тогда на смартфоне вся верхняя панель
+  // должна уместиться в 1 строку». Прежний довод («спрашивают и с телефона,
+  // стоя перед щитом») он этим и отменил, а взамен на телефоне остаётся то,
+  // ради чего туда смотрят: **выделенная метка показывает свои связи и с
+  // выключенным переключателем** — это правило старше кнопки и её не касается.
+  //
+  // В меню выгрузок кнопке места нет: связи — слой показа, а не выгрузка, и
+  // значок принтера над ней соврал бы. В «Интерфейсе проекта», где стоят
+  // остальные выключатели показа, ей место по смыслу — но этот раздел на узком
+  // экране не показывается вовсе (`styles.css`), так что переезд туда был бы
+  // тем же исчезновением, только ещё и с переездом на большом экране, где
+  // заказчик ничего менять не просил.
+  markLinks: ["desktop"],
   // Объёмный режим (таск 146) тоже только читает, и по смыслу ему место в обоих
   // видах. Сенсорное управление появилось (таск 149) — и слово в списке
   // изменилось: пальцем в окне ходят площадкой в углу поля, вертят головой по
@@ -26525,6 +26691,10 @@ function syncSchemeName() {
   if (!node) return;
   const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
   node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
+  // Имя стоит в одной строке со всем остальным (таск 163, G242) и обрезается
+  // многоточием: на телефоне ему достаётся то, что осталось. Целиком оно есть
+  // в подсказке — и в списке схем, где его видно без обрезки.
+  node.title = node.textContent;
 }
 
 function syncCanvasClass() {
@@ -29646,8 +29816,15 @@ function canvasSchemeGuides(state, scheme) {
 // Общий показ связей: отметка в шапке. Умолчание — «нет». Это не значит, что
 // связей не видно вовсе: выключенный переключатель оставляет связи выделенной
 // метки (см. `canvasFrameLinks`).
+//
+// Раскладку спрашиваем вместе с отметкой (таск 163, G242): кнопки связей на
+// узком экране больше нет, а отметка живёт в настройках браузера и переживает
+// поворот планшета. Без этого вопроса человек, включивший связи в альбомной
+// ориентации, получал бы в книжной паутину поверх плана и ни одной кнопки,
+// которой её снять. Сама отметка при этом цела — повернул обратно, и связи на
+// месте.
 function canvasLinksShown(state) {
-  return Boolean(state && state.linksShown === true);
+  return Boolean(state && state.linksShown === true && layoutAllows("markLinks", state.layout));
 }
 
 /**
@@ -39876,7 +40053,8 @@ function stampDialog(api, onSaved) {
 }
 
 // src/panels/export.js
-// Панель выгрузки: две кнопки в шапке и два диалога — таблица и схема.
+// Панель выгрузки: кнопка-значок в шапке, меню под ней и три диалога — таблица,
+// схема и развёртки.
 //
 // Панель ничего не считает сама: таблицу строит `tables.js`, картинку и печать
 // делает `exporter.js`. Здесь — выбор разбивки, области и множителя, да связь
@@ -41097,44 +41275,165 @@ function exportElevationDialog(api) {
 }
 
 // ——— панель ———————————————————————————————————————————————————————————
+//
+// Три выгрузки стоят **под одним значком принтера** (таск 163, G242). Слова
+// заказчика: «в верхней шапке кнопки Таблица, схема, развёртки спрячь в меню
+// по иконке-кнопке с принтером».
+//
+// **Меню одно на все раскладки**, не только на узкие, и это решение:
+//
+//   — заказчик говорил про шапку, а телефон назвал мерой («тогда на смартфоне
+//     вся верхняя панель должна уместиться в 1 строку»), а не границей правки:
+//     двое разных шапок — это две разных привычки у одного человека, который
+//     за столом работает на большом экране, а на объекте смотрит с телефона;
+//   — ни один из трёх пунктов не делает ничего сам: все три открывают окно с
+//     выбором разбивки, области, множителя и листа. Лишнее нажатие перед
+//     окном, в котором всё равно будет пять, стоит дешевле двух расположений;
+//   — три слова в шапке занимали 263 точки из 360 на телефоне — ровно то
+//     место, из-за которого шапка расходилась на четыре строки.
+//
+// Погасший пункт остаётся погасшим **с причиной** — и в подсказке, и строкой
+// под именем: в меню для неё есть место, которого у кнопки в шапке не было.
+
+/**
+ * Пункты меню выгрузок: что открывается и почему пункт погас.
+ *
+ * Чистая и вынесена наружу нарочно. Причина гашения — единственное, что
+ * человек узнаёт о пустой выгрузке, и разойдись она с самой выгрузкой (кнопка
+ * жива, а окно пустое, или наоборот), — поймать это глазами труднее всего.
+ *
+ * `reason` пустой означает «пункт жив»; `hint` — подсказка живого пункта.
+ */
+function exportMenuItems(state) {
+  const project = state && state.project ? state.project : null;
+  const marks = project ? project.marks.length : 0;
+  const scheme = project && state.schemeId ? findScheme(project, state.schemeId) : null;
+  // Развёрткам метки не нужны: пустая стена с проёмами это тоже чертёж для
+  // монтажника. Нужны стены — и только они.
+  const walls = project && scheme ? exportElevationGroups(project, scheme.id).length : 0;
+  return [
+    {
+      id: "table",
+      label: strings.exportPanel.tableTitle,
+      hint: strings.exportPanel.tableDialog,
+      reason: marks === 0 ? strings.exportPanel.noMarks : null,
+    },
+    {
+      id: "scheme",
+      label: strings.exportPanel.schemeTitle,
+      hint: strings.exportPanel.schemeDialog,
+      reason: !scheme ? strings.exportPanel.noScheme : marks === 0 ? strings.exportPanel.noMarks : null,
+    },
+    {
+      id: "elevation",
+      label: strings.elevationSheet.button,
+      hint: strings.elevationSheet.dialog,
+      reason: walls === 0 ? strings.elevationSheet.noWalls : null,
+    },
+  ];
+}
 
 function mountExportPanel(host, api) {
   const { getState, subscribe } = api;
-  const tableButton = uiButton(strings.exportPanel.tableTitle, {
-    on: { click: () => exportTableDialog(api) },
-  });
-  const schemeButton = uiButton(strings.exportPanel.schemeTitle, {
-    on: { click: () => exportSchemeDialog(api) },
-  });
-  // Третья кнопка — развёртки. Гаснет, когда на схеме нет ни одной стены
-  // чертежа: без стен выгружать нечего, и сказать это надо кнопкой, а не
-  // пустым окном.
-  const elevationButton = uiButton(strings.elevationSheet.button, {
-    on: { click: () => exportElevationDialog(api) },
-  });
-  host.replaceChildren(uiEl("div", { class: "export" }, [tableButton, schemeButton, elevationButton]));
+  let open = false;
 
-  // Пустая выгрузка никому не нужна: без меток кнопки гаснут и говорят почему.
-  const sync = (state) => {
-    const marks = state.project ? state.project.marks.length : 0;
-    const scheme = state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    tableButton.disabled = marks === 0;
-    tableButton.title = marks === 0 ? strings.exportPanel.noMarks : strings.exportPanel.tableDialog;
-    schemeButton.disabled = marks === 0 || !scheme;
-    schemeButton.title = !scheme
-      ? strings.exportPanel.noScheme
-      : marks === 0
-        ? strings.exportPanel.noMarks
-        : strings.exportPanel.schemeDialog;
-    // Развёрткам метки не нужны: пустая стена с проёмами это тоже чертёж для
-    // монтажника. Нужны стены — и только они.
-    const walls = scheme ? exportElevationGroups(state.project, scheme.id).length : 0;
-    elevationButton.disabled = walls === 0;
-    elevationButton.title = walls === 0 ? strings.elevationSheet.noWalls : strings.elevationSheet.dialog;
+  const openers = {
+    table: () => exportTableDialog(api),
+    scheme: () => exportSchemeDialog(api),
+    elevation: () => exportElevationDialog(api),
   };
 
-  subscribe(sync);
-  sync(getState());
+  const toggle = uiIconButton("printer", {
+    class: "ui-btn export__menu",
+    label: strings.exportPanel.menu,
+    title: strings.exportPanel.menuHint,
+    on: { click: () => setOpen(!open) },
+  });
+  toggle.setAttribute("aria-expanded", "false");
+  const drop = uiEl("div", { class: "export__drop", attrs: { role: "menu" } });
+  drop.hidden = true;
+  host.replaceChildren(uiEl("div", { class: "export" }, [toggle, drop]));
+
+  function setOpen(value) {
+    open = Boolean(value);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.setAttribute("aria-label", open ? strings.exportPanel.menuClose : strings.exportPanel.menu);
+    drop.hidden = !open;
+    if (!open) {
+      drop.replaceChildren();
+      drop.style.right = "";
+      return;
+    }
+    renderDrop();
+    place();
+  }
+
+  /**
+   * Меню растёт влево от своей кнопки, а кнопка стоит в правой половине шапки —
+   * на телефоне список левым краем уезжал за экран. Край считается по живому:
+   * ширина списка задана стилями, а место под него зависит от того, сколько в
+   * шапке кнопок и как широк список объектов, — в стилях этого не знает никто.
+   */
+  function place() {
+    drop.style.right = "";
+    if (!drop.getBoundingClientRect) return;
+    const box = drop.getBoundingClientRect();
+    if (box.left >= 8) return;
+    // Отрицательный отступ справа сдвигает список вправо ровно настолько,
+    // чтобы его левый край встал у края экрана.
+    drop.style.right = Math.round(box.left - 8) + "px";
+  }
+
+  function pick(item) {
+    if (item.reason) return;
+    // Меню закрывается до окна, а не после: иначе оно осталось бы раскрытым
+    // под диалогом и ждало второго закрытия.
+    setOpen(false);
+    openers[item.id]();
+  }
+
+  function renderDrop() {
+    drop.replaceChildren(
+      ...exportMenuItems(getState()).map((item) => {
+        const row = uiButton(item.label, {
+          class: "ui-btn export__item",
+          title: item.reason || item.hint,
+          attrs: { role: "menuitem" },
+          on: { click: () => pick(item) },
+        });
+        row.disabled = Boolean(item.reason);
+        if (item.reason) {
+          row.textContent = "";
+          row.append(
+            uiEl("span", { class: "export__itemName", text: item.label }),
+            uiEl("span", { class: "export__itemWhy", text: item.reason }),
+          );
+        }
+        return row;
+      }),
+    );
+  }
+
+  // Состояние меню живёт в сеансе (G68) и в объект не попадает ничем: раскрыто
+  // оно или нет, знает только эта панель, и при перерисовке меню закрывается.
+  subscribe(() => {
+    if (open) renderDrop();
+  });
+
+  // Закрывается тем же, чем открывается: повторным нажатием, нажатием мимо и
+  // Escape — ровно как список предупреждений рядом. Диалогом панель не
+  // становится: пока меню закрыто, клавиатура остаётся у холста.
+  document.addEventListener("pointerdown", (event) => {
+    if (!open || host.contains(event.target)) return;
+    setOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!open || event.key !== "Escape") return;
+    if (uiDialogDepth() > 0) return;
+    event.preventDefault();
+    setOpen(false);
+    toggle.focus();
+  });
 }
 
 registerPanel(PANEL_IDS.headerActions, mountExportPanel);
@@ -50366,6 +50665,40 @@ function volumeMinimapBox(box, bounds) {
   return { x: 14, y: box.height - height - 14, width, height };
 }
 
+// ——— присед и прыжок пальцем (таск 163, G242) ——————————————————————————
+//
+// «на интерфейсе для планшетов и смартфонов добавь кнопки прыжкак и присяда».
+//
+// Кнопки стоят **слева внизу**, а не рядом с площадкой ходьбы, и это не выбор
+// места, а условие работы. Присед держат (таск 159, G234), а приседают затем,
+// чтобы пройти под низким, — то есть присед и ход обязаны идти **вместе**.
+// Один палец этого не умеет: уйдя с площадки на кнопку, он останавливает ход.
+// Площадка отдана правому большому пальцу (G212 отдал левый угол миникарте),
+// значит стойка достаётся левому, и держать присед, шагая, можно двумя руками,
+// как на планшете её и держат.
+//
+// С миникартой кнопки не спорят: в углу лежит она, и столбик встаёт **над**
+// ней — отступ считается от её же прямоугольника, а не на глаз. Миникарты в
+// поле нет (телефон, узкое или низкое поле) — столбик опускается в сам угол.
+
+/** Поля поверх кадра: отступ кнопок и площадки от края поля, в точках. */
+const VOLUME_FIELD_EDGE = 18;
+
+/**
+ * Насколько столбик кнопок стойки поднят над низом поля.
+ *
+ * Чистая и вынесена наружу: «не спорит с миникартой» — вся суть расположения,
+ * а проверить её на глаз можно только подобрав поле нужного размера. Миникарта
+ * появляется и исчезает от размера поля и от самой схемы, и считать её границу
+ * второй раз на глаз в стилях нельзя — отступ берётся у того же
+ * `volumeMinimapBox`, что её и рисует.
+ */
+function volumeStanceBottom(box, bounds) {
+  const place = volumeMinimapBox(box, bounds);
+  if (!place) return VOLUME_FIELD_EDGE;
+  return Math.round(box.height - place.y + 12);
+}
+
 // ——— сенсорное управление (таск 149) ——————————————————————————————————
 //
 // «Нужно планшетное управление, если зашли с планшета или смартфона».
@@ -50734,6 +51067,10 @@ function createVolume({ api, hosts }) {
   // перестал, и встанет он сам, как только выйдет.
   let crouchHeld = false;
   let crouchStuck = false;
+  // Палец на кнопке приседа (таск 163, G242): `null` — кнопку не держат.
+  // Отпускание ищут по нему, иначе присед, начатый кнопкой, снимался бы любым
+  // касанием поля.
+  let crouchFinger = null;
   // Про «встать негде» говорится один раз на попытку, а не каждый кадр.
   let stuckSaid = false;
   /**
@@ -50777,6 +51114,25 @@ function createVolume({ api, hosts }) {
     },
     [padKnob],
   );
+  // Присед и прыжок пальцем (таск 163, G242). Своих правил у кнопок нет: они
+  // зовут ровно то, что зовут Control и пробел, — `crouchStart`/`crouchStop` и
+  // `jump`. Числа стойки (550 мм приседа, 300 мм прыжка, полсекунды дуги)
+  // живут в `volume.js` и про то, какой рукой их позвали, не знают.
+  const jumpButton = uiIconButton("jump", {
+    class: "ui-btn volume__stanceBtn",
+    label: strings.volume.jump,
+    title: strings.volume.jumpHint,
+    on: { click: () => jump() },
+  });
+  const crouchButton = uiIconButton("crouch", {
+    class: "ui-btn volume__stanceBtn",
+    label: strings.volume.crouch,
+    title: strings.volume.crouchHint,
+  });
+  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [
+    jumpButton,
+    crouchButton,
+  ]);
   // Вопрос про этаж живёт **в самом окне**, а не диалогом поверх страницы, и это
   // не вкусовщина: стопка диалогов прячет карточки под верхней (`uiRefreshDialogs`),
   // а в полном экране развёрнута карточка окна — всё, что лежит в
@@ -50811,6 +51167,7 @@ function createVolume({ api, hosts }) {
     card,
     stairButton,
     padNode,
+    stanceBox,
     aimNode,
     hintPlate.node,
     askBox,
@@ -51317,6 +51674,9 @@ function createVolume({ api, hosts }) {
    * этом.
    */
   function crouchStop() {
+    // Кнопку больше не держат — чем бы присед ни был начат: вставать всегда
+    // значит «палец с кнопки снят» (таск 163, G242).
+    crouchFinger = null;
     if (!crouchHeld) return;
     crouchHeld = false;
     walkSchedule();
@@ -51327,6 +51687,34 @@ function createVolume({ api, hosts }) {
     if (view !== "person") return;
     stance = volumeStanceJump(stance);
     walkSchedule();
+  }
+
+  // ——— та же стойка пальцем (таск 163, G242) ———
+  //
+  // Кнопка приседа держится, как клавиша: нажали — присели, отпустили —
+  // встали, встать негде — остались внизу и услышали ту же строку. Своих чисел
+  // у кнопок нет вовсе — они зовут то же, что Control и пробел.
+
+  function crouchPress(event) {
+    if (crouchFinger !== null) return;
+    event.preventDefault();
+    crouchFinger = event.pointerId;
+    if (crouchButton.setPointerCapture) {
+      try {
+        crouchButton.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // захват указателя кнопке не дали — отпускание поймаем окном
+      }
+    }
+    crouchStart();
+  }
+
+  // Отпустили палец, увели его за край, потеряли захват, ушли из вида от
+  // первого лица — всё это одно и то же: кнопку больше не держат.
+  function crouchRelease(event) {
+    if (crouchFinger === null) return;
+    if (event && event.pointerId !== undefined && event.pointerId !== crouchFinger) return;
+    crouchStop();
   }
 
   /**
@@ -51541,6 +51929,9 @@ function createVolume({ api, hosts }) {
       if (touches.size < 2) pinch = null;
     }
     padEnd(event);
+    // Захвата указателя кнопка могла и не получить — тогда отпускание придёт
+    // сюда, и присед обязан сняться здесь же: палец свой она узнает сама.
+    crouchRelease(event);
     if (closed || !started || started.moved) return;
     // ——— щелчок равноценен E (G235) ———
     //
@@ -52218,8 +52609,15 @@ function createVolume({ api, hosts }) {
     syncAimNode();
     // Площадка ходьбы — только пальцем и только там, где ходят: в обзоре она
     // возила бы цель камеры, а не человека, и была бы просто непонятной.
-    padNode.hidden = !touching || view !== "person" || scene.empty;
+    // Кнопки стойки живут по тому же правилу и в то же время: присед и прыжок
+    // — это ходьба, только вверх и вниз, и в обзоре их нет так же, как там нет
+    // площадки.
+    const noWalk = !touching || view !== "person" || scene.empty;
+    padNode.hidden = noWalk;
     if (padNode.hidden) padEnd(null);
+    stanceBox.hidden = noWalk;
+    if (stanceBox.hidden) crouchRelease(null);
+    else stanceBox.style.bottom = volumeStanceBottom(viewport(), scene.boundsMm) + "px";
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
     shotButton.hidden = scene.empty;
     // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
@@ -52332,6 +52730,12 @@ function createVolume({ api, hosts }) {
   stage.addEventListener("pointerdown", onPointerDown);
   stage.addEventListener("wheel", onWheel, { passive: false });
   padNode.addEventListener("pointerdown", padStart);
+  crouchButton.addEventListener("pointerdown", crouchPress);
+  crouchButton.addEventListener("pointerup", crouchRelease);
+  crouchButton.addEventListener("pointercancel", crouchRelease);
+  // Захват потеряли (палец уехал за край, браузер отдал указатель другому) —
+  // это то же отпускание: иначе человек остался бы сидеть без кнопки.
+  crouchButton.addEventListener("lostpointercapture", crouchRelease);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);

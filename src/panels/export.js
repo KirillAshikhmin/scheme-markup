@@ -1,4 +1,5 @@
-// Панель выгрузки: две кнопки в шапке и два диалога — таблица и схема.
+// Панель выгрузки: кнопка-значок в шапке, меню под ней и три диалога — таблица,
+// схема и развёртки.
 //
 // Панель ничего не считает сама: таблицу строит `tables.js`, картинку и печать
 // делает `exporter.js`. Здесь — выбор разбивки, области и множителя, да связь
@@ -54,7 +55,7 @@ import { GOST_FORMATS } from "../gostSheet.js";
 import { monoSameShapes, monoSameText } from "../mono.js";
 import { canvasStartScale } from "../canvas.js";
 import { stampDialog } from "./stampForm.js";
-import { uiButton, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiDialogDepth, uiEl, uiIconButton, uiModal } from "./ui.js";
 
 // Выбор пользователя живёт между открытиями диалога: разбивку и множитель
 // выставляют один раз на объект, а выгружают много раз.
@@ -1258,44 +1259,165 @@ function exportElevationDialog(api) {
 }
 
 // ——— панель ———————————————————————————————————————————————————————————
+//
+// Три выгрузки стоят **под одним значком принтера** (таск 163, G242). Слова
+// заказчика: «в верхней шапке кнопки Таблица, схема, развёртки спрячь в меню
+// по иконке-кнопке с принтером».
+//
+// **Меню одно на все раскладки**, не только на узкие, и это решение:
+//
+//   — заказчик говорил про шапку, а телефон назвал мерой («тогда на смартфоне
+//     вся верхняя панель должна уместиться в 1 строку»), а не границей правки:
+//     двое разных шапок — это две разных привычки у одного человека, который
+//     за столом работает на большом экране, а на объекте смотрит с телефона;
+//   — ни один из трёх пунктов не делает ничего сам: все три открывают окно с
+//     выбором разбивки, области, множителя и листа. Лишнее нажатие перед
+//     окном, в котором всё равно будет пять, стоит дешевле двух расположений;
+//   — три слова в шапке занимали 263 точки из 360 на телефоне — ровно то
+//     место, из-за которого шапка расходилась на четыре строки.
+//
+// Погасший пункт остаётся погасшим **с причиной** — и в подсказке, и строкой
+// под именем: в меню для неё есть место, которого у кнопки в шапке не было.
+
+/**
+ * Пункты меню выгрузок: что открывается и почему пункт погас.
+ *
+ * Чистая и вынесена наружу нарочно. Причина гашения — единственное, что
+ * человек узнаёт о пустой выгрузке, и разойдись она с самой выгрузкой (кнопка
+ * жива, а окно пустое, или наоборот), — поймать это глазами труднее всего.
+ *
+ * `reason` пустой означает «пункт жив»; `hint` — подсказка живого пункта.
+ */
+export function exportMenuItems(state) {
+  const project = state && state.project ? state.project : null;
+  const marks = project ? project.marks.length : 0;
+  const scheme = project && state.schemeId ? findScheme(project, state.schemeId) : null;
+  // Развёрткам метки не нужны: пустая стена с проёмами это тоже чертёж для
+  // монтажника. Нужны стены — и только они.
+  const walls = project && scheme ? exportElevationGroups(project, scheme.id).length : 0;
+  return [
+    {
+      id: "table",
+      label: strings.exportPanel.tableTitle,
+      hint: strings.exportPanel.tableDialog,
+      reason: marks === 0 ? strings.exportPanel.noMarks : null,
+    },
+    {
+      id: "scheme",
+      label: strings.exportPanel.schemeTitle,
+      hint: strings.exportPanel.schemeDialog,
+      reason: !scheme ? strings.exportPanel.noScheme : marks === 0 ? strings.exportPanel.noMarks : null,
+    },
+    {
+      id: "elevation",
+      label: strings.elevationSheet.button,
+      hint: strings.elevationSheet.dialog,
+      reason: walls === 0 ? strings.elevationSheet.noWalls : null,
+    },
+  ];
+}
 
 function mountExportPanel(host, api) {
   const { getState, subscribe } = api;
-  const tableButton = uiButton(strings.exportPanel.tableTitle, {
-    on: { click: () => exportTableDialog(api) },
-  });
-  const schemeButton = uiButton(strings.exportPanel.schemeTitle, {
-    on: { click: () => exportSchemeDialog(api) },
-  });
-  // Третья кнопка — развёртки. Гаснет, когда на схеме нет ни одной стены
-  // чертежа: без стен выгружать нечего, и сказать это надо кнопкой, а не
-  // пустым окном.
-  const elevationButton = uiButton(strings.elevationSheet.button, {
-    on: { click: () => exportElevationDialog(api) },
-  });
-  host.replaceChildren(uiEl("div", { class: "export" }, [tableButton, schemeButton, elevationButton]));
+  let open = false;
 
-  // Пустая выгрузка никому не нужна: без меток кнопки гаснут и говорят почему.
-  const sync = (state) => {
-    const marks = state.project ? state.project.marks.length : 0;
-    const scheme = state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    tableButton.disabled = marks === 0;
-    tableButton.title = marks === 0 ? strings.exportPanel.noMarks : strings.exportPanel.tableDialog;
-    schemeButton.disabled = marks === 0 || !scheme;
-    schemeButton.title = !scheme
-      ? strings.exportPanel.noScheme
-      : marks === 0
-        ? strings.exportPanel.noMarks
-        : strings.exportPanel.schemeDialog;
-    // Развёрткам метки не нужны: пустая стена с проёмами это тоже чертёж для
-    // монтажника. Нужны стены — и только они.
-    const walls = scheme ? exportElevationGroups(state.project, scheme.id).length : 0;
-    elevationButton.disabled = walls === 0;
-    elevationButton.title = walls === 0 ? strings.elevationSheet.noWalls : strings.elevationSheet.dialog;
+  const openers = {
+    table: () => exportTableDialog(api),
+    scheme: () => exportSchemeDialog(api),
+    elevation: () => exportElevationDialog(api),
   };
 
-  subscribe(sync);
-  sync(getState());
+  const toggle = uiIconButton("printer", {
+    class: "ui-btn export__menu",
+    label: strings.exportPanel.menu,
+    title: strings.exportPanel.menuHint,
+    on: { click: () => setOpen(!open) },
+  });
+  toggle.setAttribute("aria-expanded", "false");
+  const drop = uiEl("div", { class: "export__drop", attrs: { role: "menu" } });
+  drop.hidden = true;
+  host.replaceChildren(uiEl("div", { class: "export" }, [toggle, drop]));
+
+  function setOpen(value) {
+    open = Boolean(value);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.setAttribute("aria-label", open ? strings.exportPanel.menuClose : strings.exportPanel.menu);
+    drop.hidden = !open;
+    if (!open) {
+      drop.replaceChildren();
+      drop.style.right = "";
+      return;
+    }
+    renderDrop();
+    place();
+  }
+
+  /**
+   * Меню растёт влево от своей кнопки, а кнопка стоит в правой половине шапки —
+   * на телефоне список левым краем уезжал за экран. Край считается по живому:
+   * ширина списка задана стилями, а место под него зависит от того, сколько в
+   * шапке кнопок и как широк список объектов, — в стилях этого не знает никто.
+   */
+  function place() {
+    drop.style.right = "";
+    if (!drop.getBoundingClientRect) return;
+    const box = drop.getBoundingClientRect();
+    if (box.left >= 8) return;
+    // Отрицательный отступ справа сдвигает список вправо ровно настолько,
+    // чтобы его левый край встал у края экрана.
+    drop.style.right = Math.round(box.left - 8) + "px";
+  }
+
+  function pick(item) {
+    if (item.reason) return;
+    // Меню закрывается до окна, а не после: иначе оно осталось бы раскрытым
+    // под диалогом и ждало второго закрытия.
+    setOpen(false);
+    openers[item.id]();
+  }
+
+  function renderDrop() {
+    drop.replaceChildren(
+      ...exportMenuItems(getState()).map((item) => {
+        const row = uiButton(item.label, {
+          class: "ui-btn export__item",
+          title: item.reason || item.hint,
+          attrs: { role: "menuitem" },
+          on: { click: () => pick(item) },
+        });
+        row.disabled = Boolean(item.reason);
+        if (item.reason) {
+          row.textContent = "";
+          row.append(
+            uiEl("span", { class: "export__itemName", text: item.label }),
+            uiEl("span", { class: "export__itemWhy", text: item.reason }),
+          );
+        }
+        return row;
+      }),
+    );
+  }
+
+  // Состояние меню живёт в сеансе (G68) и в объект не попадает ничем: раскрыто
+  // оно или нет, знает только эта панель, и при перерисовке меню закрывается.
+  subscribe(() => {
+    if (open) renderDrop();
+  });
+
+  // Закрывается тем же, чем открывается: повторным нажатием, нажатием мимо и
+  // Escape — ровно как список предупреждений рядом. Диалогом панель не
+  // становится: пока меню закрыто, клавиатура остаётся у холста.
+  document.addEventListener("pointerdown", (event) => {
+    if (!open || host.contains(event.target)) return;
+    setOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!open || event.key !== "Escape") return;
+    if (uiDialogDepth() > 0) return;
+    event.preventDefault();
+    setOpen(false);
+    toggle.focus();
+  });
 }
 
 registerPanel(PANEL_IDS.headerActions, mountExportPanel);

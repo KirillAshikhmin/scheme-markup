@@ -58,7 +58,11 @@ test("в режиме просмотра доступно смотреть и о
     assert.equal(layoutAllows(ability, "mobile"), true, ability + " должно быть доступно на телефоне");
     assert.equal(layoutAllows(ability, "desktop"), true, ability + " должно быть доступно на десктопе");
   }
-  for (const ability of ["editMarks", "editSchemes", "editRooms", "editProject", "dictionary", "viewSizes", "saveFile"]) {
+  // Связи ушли с узкого экрана по слову заказчика (таск 163, G242) — не
+  // потому, что это правка: «спрячь кнопку отображения связей, тогда на
+  // смартфоне вся верхняя панель должна уместиться в 1 строку». Стоит в том же
+  // списке, потому что проверяется то же самое: кнопки на телефоне нет.
+  for (const ability of ["editMarks", "editSchemes", "editRooms", "editProject", "dictionary", "viewSizes", "saveFile", "markLinks"]) {
     assert.equal(layoutAllows(ability, "mobile"), false, ability + " не должно быть доступно на телефоне");
     assert.equal(layoutAllows(ability, "desktop"), true, ability + " должно быть доступно на десктопе");
   }

@@ -147,6 +147,7 @@ import {
   volumeKeyMove,
   volumeMinimapBox,
   volumeNotes,
+  volumeStanceBottom,
   volumePadVector,
   volumeFloorAction,
   volumeFloorName,
@@ -1667,6 +1668,27 @@ test("миникарта живёт в левом нижнем углу и ух�
   assert.equal(volumeMinimapBox({ width: 1432, height: 300 }, bounds), null);
   // Нет габарита чертежа — нечего и рисовать.
   assert.equal(volumeMinimapBox(box, null), null);
+});
+
+// Присед и прыжок пальцем (таск 163, G242). Заказчик назвал условие сам:
+// кнопки не должны спорить с площадкой ходьбы и миникартой. С площадкой они
+// разведены по сторонам поля (она справа, они слева), а с миникартой — по
+// высоте, и вот это считается, а не ставится на глаз: миникарта то есть, то
+// нет, и высота у неё своя на каждом поле.
+test("кнопки стойки встают над миникартой, а без неё — в самый угол", () => {
+  const bounds = { minX: -2000, minY: -1500, maxX: 2000, maxY: 1500, widthMm: 4000, heightMm: 3000 };
+  const box = { width: 1432, height: 580 };
+  const place = volumeMinimapBox(box, bounds);
+  const bottom = volumeStanceBottom(box, bounds);
+  // Низ столбика выше верхней кромки миникарты: перекрытия нет ни точкой.
+  assert.ok(bottom > box.height - place.y, "столбик налез на миникарту");
+  assert.ok(bottom < box.height - place.y + 40, "и не улетел от неё к потолку");
+  // Телефон: миникарты на узком поле нет вовсе, и столбик опускается в угол.
+  const phone = { width: 360, height: 620 };
+  assert.equal(volumeMinimapBox(phone, bounds), null);
+  assert.equal(volumeStanceBottom(phone, bounds), 18);
+  // Чертежа нет — миникарты нет, и считать нечего.
+  assert.equal(volumeStanceBottom(box, null), 18);
 });
 
 test("кнопка 3D знает, есть ли в схеме чертёж", () => {
