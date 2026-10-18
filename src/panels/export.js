@@ -1343,8 +1343,29 @@ function mountExportPanel(host, api) {
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
     toggle.setAttribute("aria-label", open ? strings.exportPanel.menuClose : strings.exportPanel.menu);
     drop.hidden = !open;
-    if (open) renderDrop();
-    else drop.replaceChildren();
+    if (!open) {
+      drop.replaceChildren();
+      drop.style.right = "";
+      return;
+    }
+    renderDrop();
+    place();
+  }
+
+  /**
+   * Меню растёт влево от своей кнопки, а кнопка стоит в правой половине шапки —
+   * на телефоне список левым краем уезжал за экран. Край считается по живому:
+   * ширина списка задана стилями, а место под него зависит от того, сколько в
+   * шапке кнопок и как широк список объектов, — в стилях этого не знает никто.
+   */
+  function place() {
+    drop.style.right = "";
+    if (!drop.getBoundingClientRect) return;
+    const box = drop.getBoundingClientRect();
+    if (box.left >= 8) return;
+    // Отрицательный отступ справа сдвигает список вправо ровно настолько,
+    // чтобы его левый край встал у края экрана.
+    drop.style.right = Math.round(box.left - 8) + "px";
   }
 
   function pick(item) {

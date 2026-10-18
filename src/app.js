@@ -502,6 +502,10 @@ function syncSchemeName() {
   if (!node) return;
   const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
   node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
+  // Имя стоит в одной строке со всем остальным (таск 163, G242) и обрезается
+  // многоточием: на телефоне ему достаётся то, что осталось. Целиком оно есть
+  // в подсказке — и в списке схем, где его видно без обрезки.
+  node.title = node.textContent;
 }
 
 function syncCanvasClass() {
