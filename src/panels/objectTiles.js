@@ -11,9 +11,16 @@
 // рисует тот же реестр, которым рисуются изображения меток
 // (`objectViews/registry.js`): своего рисунка у плитки нет.
 //
-// Поиска здесь нет нарочно: вещей двадцать две, категорий шесть, и в самой
-// крупной — пять плиток. Поле поиска отняло бы строку у того, ради чего оно
+// Поиска здесь нет нарочно: вещей двадцать четыре, категорий шесть, и в самой
+// крупной — шесть плиток. Поле поиска отняло бы строку у того, ради чего оно
 // заведено, и ответ всё равно был бы виден целиком.
+//
+// **Вещь прежнего справочника из сетки спрятана** (`entry.legacy`, таск 162):
+// общий вид «Сантехника» остался в каталоге — им размечены чужие чертежи, — но
+// в плитках он стоял бы вторым унитазом с именем похуже. Прячет его экран, а
+// не каталог: что показать в выборе — дело колонки. И пока такой вещью стоит
+// **выделенное**, её плитка видна и горит: человек обязан видеть, чем стоит
+// вещь на его чертеже, а подсветить вместо неё похожую значило бы соврать.
 import { objectCatalogCategory, objectCatalogEntry, OBJECT_CATEGORIES } from "../objectCatalog.js";
 import { drawObjectView, objectViewByName } from "../objectViews/registry.js";
 import { strings } from "../strings.js";
@@ -57,7 +64,7 @@ export function createObjectTiles({ onPick }) {
   // Категория — память панели, а не объекта: выбрал «Технику», поставил
   // холодильник и плиту — список не прыгает обратно.
   let category = OBJECT_CATEGORIES[0];
-  let shownCategory = null;
+  let shownMark = null;
   let currentKey = null;
 
   const select = uiEl("select", { class: "ui-input objectTiles__category" });
@@ -72,11 +79,21 @@ export function createObjectTiles({ onPick }) {
   const grid = uiEl("div", { class: "objectTiles__grid" });
   const node = uiEl("div", { class: "objectTiles" }, [select, grid]);
 
+  // Что показать в сетке: вещи категории без прежних — и прежняя, если ею
+  // стоит выделенное.
+  function tiles() {
+    return objectCatalogCategory(category).filter((entry) => !entry.legacy || entry.key === currentKey);
+  }
+
   function draw() {
-    if (shownCategory !== category) {
-      shownCategory = category;
+    const shown = tiles();
+    // Отметка пересборки — категория и состав: от прежней вещи сетка меняется
+    // при том же разделе, и одной категории в отметке не хватило бы.
+    const mark = category + "\n" + shown.map((entry) => entry.key).join(",");
+    if (shownMark !== mark) {
+      shownMark = mark;
       grid.replaceChildren(
-        ...objectCatalogCategory(category).map((entry) =>
+        ...shown.map((entry) =>
           uiEl(
             "button",
             {
