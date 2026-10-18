@@ -242,6 +242,7 @@ test("кадр берёт связи из промежуточного объе�
   const state = {
     project: base.project,
     linksShown: true,
+    layout: "desktop",
     filter: null,
     selectedMarkIds: [],
   };
@@ -305,7 +306,7 @@ test("переключатель выключен — видны связи вы
   let project = setMarkControls(far.project, base.switchId, [base.stripId]).project;
   project = setMarkControls(project, other.mark.id, [far.mark.id]).project;
   const scheme = project.schemes[0];
-  const state = { project, filter: null, linksShown: false };
+  const state = { project, filter: null, linksShown: false, layout: "desktop" };
 
   // Выделен управляющий — видна его связь, чужая не видна.
   const mine = canvasFrameLinks({ ...state, selectedMarkIds: [base.switchId] }, null, scheme);
@@ -320,8 +321,29 @@ test("переключатель выключен — видны связи вы
   assert.equal(theirs.lines[0].fromId, base.switchId);
 
   // Включённый переключатель показывает всё.
-  const all = canvasFrameLinks({ ...state, linksShown: true, selectedMarkIds: [base.switchId] }, null, scheme);
+  const all = canvasFrameLinks({ ...state, linksShown: true, layout: "desktop", selectedMarkIds: [base.switchId] }, null, scheme);
   assert.equal(all.lines.length, 2);
+});
+
+// Узкий экран (таск 163, G242): кнопки связей там больше нет, а отметка живёт
+// в настройках браузера и переживает поворот планшета. Включил связи лёжа,
+// повернул стоймя — и паутина осталась бы на плане без единой кнопки, которой
+// её снять. Поэтому раскладку спрашивают вместе с отметкой; выделенная метка
+// свои связи показывает и там — это правило кнопки не касается.
+test("на узкой раскладке общий показ выключен, а связи выделенной метки целы", () => {
+  const base = linked(scene());
+  const state = {
+    project: base.project,
+    filter: null,
+    linksShown: true,
+    selectedMarkIds: [],
+  };
+  assert.ok(canvasFrameLinks({ ...state, layout: "desktop" }, null, base.scheme).lines.length > 0);
+  assert.deepEqual(canvasFrameLinks({ ...state, layout: "mobile" }, null, base.scheme).lines, []);
+  // Выделили метку — её связь видна и на телефоне, с отметкой и без неё.
+  const picked = { ...state, layout: "mobile", selectedMarkIds: [base.switchId] };
+  assert.ok(canvasFrameLinks(picked, null, base.scheme).lines.length > 0);
+  assert.ok(canvasFrameLinks({ ...picked, linksShown: false }, null, base.scheme).lines.length > 0);
 });
 
 // Вид не должен прыгать на переключении: одна и та же дуга у одной и той же
@@ -339,8 +361,8 @@ test("дуга выделенной метки не прыгает при пер
   const scheme = project.schemes[0];
   const state = { project, filter: null, selectedMarkIds: [second.mark.id] };
 
-  const narrow = canvasFrameLinks({ ...state, linksShown: false }, null, scheme).lines;
-  const wide = canvasFrameLinks({ ...state, linksShown: true }, null, scheme).lines;
+  const narrow = canvasFrameLinks({ ...state, linksShown: false, layout: "desktop" }, null, scheme).lines;
+  const wide = canvasFrameLinks({ ...state, linksShown: true, layout: "desktop" }, null, scheme).lines;
   const geometry = ({ near, ...rest }) => rest;
   const mine = wide.find((line) => line.fromId === second.mark.id);
   const same = narrow.find((line) => line.fromId === second.mark.id);
@@ -365,7 +387,7 @@ test("в общем режиме связи выделенной метки ло
   project = setMarkControls(project, second.mark.id, [base.stripId]).project;
   const scheme = project.schemes[0];
   const frame = canvasFrameLinks(
-    { project, filter: null, linksShown: true, selectedMarkIds: [second.mark.id] },
+    { project, filter: null, linksShown: true, layout: "desktop", selectedMarkIds: [second.mark.id] },
     null,
     scheme,
   );
@@ -541,7 +563,7 @@ test("в выгрузке связей нет без отметки и есть 
 test("drawScheme рисует и готовый кадр связей, и посчитанный сам", () => {
   const base = linked(scene());
   const ready = canvasFrameLinks(
-    { project: base.project, filter: null, linksShown: true, selectedMarkIds: [] },
+    { project: base.project, filter: null, linksShown: true, layout: "desktop", selectedMarkIds: [] },
     null,
     base.scheme,
   );
@@ -851,7 +873,7 @@ test("выделенная метка показывает свою цепь и 
   const links = markLinks(base.project, base.scheme, null);
   assert.equal(links.groups[0].markIds.length, 4, "пример не тот");
   const frame = canvasFrameLinks(
-    { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.ids[2]] },
+    { project: base.project, filter: null, linksShown: false, layout: "desktop", selectedMarkIds: [base.ids[2]] },
     null,
     base.scheme,
   );
@@ -861,7 +883,7 @@ test("выделенная метка показывает свою цепь и 
 
 test("кадр берёт цепь и оболочку из промежуточного объекта, пока идёт перенос", () => {
   const base = ceiling(3);
-  const state = { project: base.project, filter: null, linksShown: true, selectedMarkIds: [] };
+  const state = { project: base.project, filter: null, linksShown: true, layout: "desktop", selectedMarkIds: [] };
   const moved = {
     ...base.project,
     marks: base.project.marks.map((mark) => (mark.id === base.ids[0] ? { ...mark, points: [{ x: 0.9, y: 0.1 }] } : mark)),
@@ -872,7 +894,7 @@ test("кадр берёт цепь и оболочку из промежуточ
   assert.deepEqual(group.points[index], { x: 0.9, y: 0.1 }, "оболочка читает объект из состояния и отстанет от метки");
 
   const chain = circuit();
-  const chainState = { project: chain.project, filter: null, linksShown: true, selectedMarkIds: [] };
+  const chainState = { project: chain.project, filter: null, linksShown: true, layout: "desktop", selectedMarkIds: [] };
   const chainMoved = {
     ...chain.project,
     marks: chain.project.marks.map((mark) => (mark.id === chain.ids[0] ? { ...mark, points: [{ x: 0.05, y: 0.05 }] } : mark)),
@@ -1051,7 +1073,7 @@ test("выделенный выключатель поднимает второ�
   for (const id of base.ids) assert.ok(linked.includes(id), "светильник группы не поднялся");
 
   const frame = canvasFrameLinks(
-    { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] },
+    { project: base.project, filter: null, linksShown: false, layout: "desktop", selectedMarkIds: [base.switchId] },
     null,
     base.scheme,
   );
@@ -1090,7 +1112,7 @@ test("связная группа считается по объекту, а х�
   assert.equal(linkedMarkIds(project, base.switchId).length, 2, "чужая схема из замыкания выпала");
   const scheme = project.schemes.find((item) => item.id === base.schemeId);
   const frame = canvasFrameLinks(
-    { project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] },
+    { project, filter: null, linksShown: false, layout: "desktop", selectedMarkIds: [base.switchId] },
     null,
     scheme,
   );
@@ -1103,7 +1125,7 @@ test("связная группа считается по объекту, а х�
 test("связи самой выделенной метки идут в полную силу, остальная цепочка — вполсилы", () => {
   const base = flat();
   const frame = canvasFrameLinks(
-    { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] },
+    { project: base.project, filter: null, linksShown: false, layout: "desktop", selectedMarkIds: [base.switchId] },
     null,
     base.scheme,
   );
@@ -1127,7 +1149,7 @@ test("связи самой выделенной метки идут в полн
 test("во включённом режиме ничего не глушится", () => {
   const base = flat();
   const frame = canvasFrameLinks(
-    { project: base.project, filter: null, linksShown: true, selectedMarkIds: [base.switchId] },
+    { project: base.project, filter: null, linksShown: true, layout: "desktop", selectedMarkIds: [base.switchId] },
     null,
     base.scheme,
   );
@@ -1136,7 +1158,7 @@ test("во включённом режиме ничего не глушится"
 
 test("кадр связной группы берётся из промежуточного объекта", () => {
   const base = flat();
-  const state = { project: base.project, filter: null, linksShown: false, selectedMarkIds: [base.switchId] };
+  const state = { project: base.project, filter: null, linksShown: false, layout: "desktop", selectedMarkIds: [base.switchId] };
   const moved = {
     ...base.project,
     marks: base.project.marks.map((mark) => (mark.id === base.passId ? { ...mark, points: [{ x: 0.95, y: 0.05 }] } : mark)),
