@@ -1576,10 +1576,12 @@ function createWorkshop({ api, hosts }) {
   // той же попыткой записи, что и сам клик, поэтому красным он становится
   // ровно тогда, когда клик не прошёл бы.
   let ghost = null;
-  // Призрак вещи под курсором (таск 164): что встанет по клику — с размерами и
-  // углом из колонки. Его считает `workshopObjectRectAt` — та же функция, что
-  // ставит вещь, поэтому обещать призраку нечего: он показывает.
-  let objectGhost = null;
+  // Где стоит призрак вещи (таск 164) — **точка, а не вещь**: сама вещь
+  // считается на кадре, `workshopObjectRectAt` по полям колонки. Храни тут
+  // готовый прямоугольник — и он остался бы со старым углом, когда угол
+  // поправили, не двигая руки: поле уже 90°, а под рукой по-прежнему 0°.
+  // Найдено живым прогоном таска 164.
+  let objectGhostMm = null;
   let drag = null;
   let pan = null;
   // Нажатие, которое ещё не решило, чем станет: клик занятия или панорама.
@@ -2100,7 +2102,7 @@ function createWorkshop({ api, hosts }) {
     if (tool === next) return;
     draft = null;
     ghost = null;
-    objectGhost = null;
+    objectGhostMm = null;
     press = null;
     // Выделение снимается вместе со сменой занятия: иначе поля выделенной
     // стены перебивали бы умолчания проёма, за которым человек и переключился.
@@ -2915,10 +2917,10 @@ function createWorkshop({ api, hosts }) {
     if (tool === "objects") {
       // Рука ушла с поля (курсор в колонке) — призрака нет: рисовать вещь там,
       // куда клик её не поставит, значило бы обещать невозможное.
-      const next = onField(event) ? objectGhostAt(snapOf(mmOf(event), event.altKey).point) : null;
-      const before = objectGhost;
-      objectGhost = next;
-      if (before || next) redraw();
+      const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
+      const moved = Boolean(next) !== Boolean(objectGhostMm) || (next && objectGhostMm && (next.x !== objectGhostMm.x || next.y !== objectGhostMm.y));
+      objectGhostMm = next;
+      if (moved) redraw();
       return;
     }
     const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
@@ -3525,9 +3527,12 @@ function createWorkshop({ api, hosts }) {
       drawDrawingOpening(ctx, bridge(), ghost.wall, ghost.opening, { ghost: true, bad: !ghost.ok });
       return;
     }
-    // Призрак вещи: габарит, перёд и числа — до клика (таск 164).
-    if (tool === "objects" && objectGhost) {
-      paintObjectGhost(objectGhost);
+    // Призрак вещи: габарит, перёд и числа — до клика (таск 164). Считается на
+    // кадре из полей колонки: поправили угол, не двигая руки, — призрак
+    // повернулся вместе с полем.
+    if (tool === "objects" && objectGhostMm) {
+      const ghostObject = objectGhostAt(objectGhostMm);
+      if (ghostObject) paintObjectGhost(ghostObject);
       return;
     }
     const band = objectDrawn() && workshopObjectWay === "polyline";
@@ -4090,7 +4095,7 @@ function createWorkshop({ api, hosts }) {
       schemeId = state.schemeId;
       draft = null;
       ghost = null;
-      objectGhost = null;
+      objectGhostMm = null;
       press = null;
       selected = null;
       hover = null;
