@@ -176,10 +176,69 @@
   padding: 12px 14px;
 }
 
-/* Кнопки выгрузки в шапке и поля диалогов. */
+/* Кнопка выгрузок в шапке и поля диалогов. */
 .export {
+  position: relative;
   display: flex;
   gap: 8px;
+}
+
+/* ——— меню выгрузок под значком принтера (таск 163, G242) ————————————————
+
+   Три слова в шапке стали одним значком, а сами выгрузки — списком под ним.
+   Устроен он как список предупреждений по соседству: раскрывается кнопкой,
+   закрывается ею же, нажатием мимо и Escape, и диалогом не становится.
+
+   Прижат к правому краю кнопки, а не к левому, как у предупреждений: значок
+   стоит в правой половине шапки, и список, выросший вправо, уехал бы за край
+   экрана на телефоне. */
+.export__drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: min(320px, 92vw);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 18px 44px rgba(1, 4, 9, 0.6);
+}
+
+/* Пункт — строка во всю ширину списка: в неё помещается имя выгрузки и причина
+   гашения под ним. Рамки у пунктов нет — рамка в списке читалась бы сеткой
+   кнопок, а это перечень. */
+.export__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border-color: transparent;
+  background: none;
+  text-align: left;
+}
+
+.export__item:hover:not(:disabled) {
+  background: #21262d;
+  border-color: var(--panel-line);
+}
+
+/* Погасший пункт не исчезает и не молчит: причина стоит строкой под именем —
+   в меню для неё есть место, которого у кнопки в шапке не было. Она же
+   остаётся в подсказке: наводят на пункт и читают там же. */
+.export__itemName {
+  font-weight: 600;
+}
+
+.export__itemWhy {
+  font-size: 12px;
+  color: var(--panel-muted);
+  white-space: normal;
 }
 
 .export__body {
