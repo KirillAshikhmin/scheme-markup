@@ -953,7 +953,22 @@ function createVolume({ api, hosts }) {
     node.style.height = box.height + "px";
     node.width = Math.round(box.width * ratio);
     node.height = Math.round(box.height * ratio);
+    placeField();
     paint();
+  }
+
+  /**
+   * Куда встал столбик кнопок поля — считается здесь, а не однажды при показе.
+   *
+   * Отступ берётся у миникарты (`volumeStanceBottom`), а миникарта живёт от
+   * размера поля: планшет повернули, страницу развернули во весь экран, окно
+   * потянули — кромка миникарты уехала, и отступ, поставленный один раз в
+   * `sync()`, указывал бы на прежнюю. Поэтому место пересчитывается там же, где
+   * меряется поле, — в `resize()`, и ещё раз в `sync()`, когда столбик только
+   * показывают.
+   */
+  function placeField() {
+    stanceBox.style.bottom = volumeStanceBottom(viewport(), scene.boundsMm) + "px";
   }
 
   function paint() {
@@ -2263,7 +2278,7 @@ function createVolume({ api, hosts }) {
     if (padNode.hidden) padEnd(null);
     stanceBox.hidden = noWalk;
     if (stanceBox.hidden) crouchRelease(null);
-    else stanceBox.style.bottom = volumeStanceBottom(viewport(), scene.boundsMm) + "px";
+    else placeField();
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
     shotButton.hidden = scene.empty;
     // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
