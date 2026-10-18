@@ -25,6 +25,9 @@
 //      объект по ссылке, ни одного шага истории на пустом месте.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   OPENING_KINDS,
@@ -60,6 +63,7 @@ import {
   planToScreen,
 } from "../src/render.js";
 import { identityTransform, rotateTransform } from "../src/imagePrep.js";
+import { volumeObjectFrame } from "../src/volume.js";
 import { applyPlanEdit } from "../src/panels/schemes.js";
 import {
   WORKSHOP_CONTOUR_MIN,
@@ -94,6 +98,7 @@ import {
   workshopObjectDefaultsByName,
   workshopObjectHandles,
   workshopObjectPatch,
+  workshopObjectRectAt,
   workshopOpeningAt,
   workshopPathAnchor,
   workshopPathSources,
@@ -113,6 +118,15 @@ import {
   workshopSnapMm,
   workshopStatus,
   workshopToolOf,
+  workshopTurnBy,
+  workshopTurnDeg,
+  workshopTurnHandle,
+  workshopTurnToward,
+  workshopFrontAxis,
+  workshopWallTurnDeg,
+  WORKSHOP_TURN_SNAP_DEG,
+  WORKSHOP_TURN_STEP_DEG,
+  WORKSHOP_TURN_WALL_MM,
   workshopVertexEnds,
   workshopWayOfShape,
 } from "../src/panels/workshop.js";
@@ -136,6 +150,13 @@ function blankProject() {
 }
 
 const viewOf = (patch) => ({ zoom: 0.1, offsetX: 400, offsetY: 300, ...patch });
+
+// Чертёж прежней сборки: по нему держится G68 — чужой объект не меняется ни от
+// одной новой строки окна.
+const LEGACY_DRAWING_TEXT = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "legacy-drawing-project.json"),
+  "utf8",
+);
 
 // Цепочка «как рисуют комнату»: четыре клика по углам и пятый в первый угол.
 const ROOM = [
@@ -1150,14 +1171,18 @@ test("ручки объекта взяты у холста: вершины, се
   // Вершина в списке раньше середины и конца: спор за клик решается порядком,
   // ровно как у холста (`render.pathEditHandles`).
   assert.equal(handles[0].kind, "vertex");
-  // У прямоугольника ручек ровно четыре — это углы, а не путь: вставлять в
-  // прямоугольник пятый угол и продолжать его некуда.
+  // У прямоугольника ручек пять: четыре угла и поворот (таск 164). Середин и
+  // концов ему не полагается — он не путь: вставлять в прямоугольник пятый
+  // угол и продолжать его некуда.
   const rect = workshopObjectHandles(
     { shape: "rect", atMm: { x: 2000, y: 1000 }, widthMm: 1000, depthMm: 400, turnDeg: 0 },
     view,
   );
-  assert.equal(rect.length, 4);
-  assert.deepEqual([...new Set(rect.map((handle) => handle.kind))], ["vertex"]);
+  assert.equal(rect.length, 5);
+  assert.deepEqual([...new Set(rect.map((handle) => handle.kind))], ["vertex", "turn"]);
+  // Ручка поворота идёт последней: спор за клик решается порядком, и угол
+  // габарита старше поворота — он стоит на самой вещи.
+  assert.equal(rect[4].kind, "turn");
 });
 
 test("ручка выделенного объекта старше его тела — ею и правят", () => {
@@ -1355,5 +1380,226 @@ test("жест выделяет вещь, а не ручку: иначе кол�
   ]) {
     const selection = workshopSelectionOf(pick);
     assert.ok(WORKSHOP_SUBJECTS.includes(selection.kind), pick.kind + " выделяет не предмет: " + selection.kind);
+  }
+});
+
+// ——— вещь поворачивается (таск 164, G243) ————————————————————————————————
+//
+// Слова заказчика: «унитаз и другие объекты надо вращать и сразу задавать им их
+// размеры при выборе». Поворот в модели был с таска 126, а в окне к нему вели
+// только цифры в поле. Проверяется здесь то, чего живой прогон не поймает:
+//
+//   1. **Перёд на чертеже и фасад в объёме — одна ось.** Объём берёт перёд из
+//      `turnDeg` (таск 155), ручка поворота стоит перед вещью, и клюв призрака
+//      смотрит туда же. Разойдись эти описания — ручка показывала бы одну
+//      сторону, а фасад шкафа в объёме смотрел бы в другую, и увидеть это
+//      можно было бы только глазами, да и то не сразу.
+//   2. **Шаг и свободный ввод не спорят.** Рука притягивает кратно 15° — тем
+//      же шагом, которым магнит держит углы стен, — Alt оставляет градус, а
+//      поле и кнопки считают один оборот без накопления («350 + 90 = 80»).
+//   3. **Призрак и постановка — одна дверь** (`workshopObjectRectAt`): что
+//      показано под рукой, то и записано в объект, вместе с углом.
+//   4. **Размеры не путаются местами.** Ширина остаётся шириной самой вещи, а
+//      не её тенью на плане: у повёрнутой на 90° вещи габарит в данных тот же,
+//      а на листе он транспонирован.
+//   5. **G68.** Новый код ничего не трогает в чужом чертеже: ручки, доворот и
+//      призрак — чистые вычисления, объект после них байт в байт тот же.
+
+const turned = (patch) => ({
+  shape: "rect",
+  atMm: { x: 2000, y: 1500 },
+  widthMm: 1200,
+  depthMm: 400,
+  turnDeg: 0,
+  ...patch,
+});
+
+// Середина переда вещи: там начинается поводок ручки поворота.
+function frontMidMm(object) {
+  const corners = schemeObjectCorners(object);
+  return { x: (corners[2].x + corners[3].x) / 2, y: (corners[2].y + corners[3].y) / 2 };
+}
+
+test("перёд вещи на чертеже — та же ось, которой объём разворачивает фасад", () => {
+  // Нулевой поворот: перёд вниз по листу — туда, куда смотрит вещь, стоящая у
+  // верхней стены комнаты.
+  const zero = workshopFrontAxis(0);
+  assert.ok(Math.abs(zero.x) < 1e-9 && Math.abs(zero.y - 1) < 1e-9, "перёд при нуле не вниз по листу");
+  for (const turnDeg of [0, 15, 90, 180, 270, 345]) {
+    const front = workshopFrontAxis(turnDeg);
+    const frame = volumeObjectFrame(createProject(), null, turned({ turnDeg, heightMm: 500 }), 2700);
+    // `frame.f` — ось глубины модели, и перёд лежит на доле −0,5: он равен
+    // минус `f`. Это и есть шов между окном и объёмом.
+    assert.ok(Math.abs(front.x + frame.f.x) < 1e-9, "перёд по x разошёлся на " + turnDeg + "°");
+    assert.ok(Math.abs(front.y + frame.f.y) < 1e-9, "перёд по y разошёлся на " + turnDeg + "°");
+  }
+});
+
+test("ручка поворота стоит перед вещью и едет за ней", () => {
+  const view = viewOf({ zoom: 1 });
+  const handle = workshopTurnHandle(turned({}), view);
+  assert.equal(handle.kind, "turn");
+  // Поводок начинается на середине переда: у вещи 1200 × 400 с нулевым
+  // поворотом это точка (2000, 1700).
+  assert.equal(Math.round(handle.from.x), 400 + 2000);
+  assert.equal(Math.round(handle.from.y), 300 + 1700);
+  // Сама ручка — дальше по переду, то есть ниже по листу.
+  assert.ok(handle.y > handle.from.y, "ручка не перед вещью");
+  assert.equal(Math.round(handle.x), Math.round(handle.from.x), "ручка ушла в сторону");
+  // Повернули на 90° — ручка ушла влево: перёд при 90° смотрит в минус x.
+  const left = workshopTurnHandle(turned({ turnDeg: 90 }), view);
+  assert.ok(left.x < left.from.x, "ручка не поехала за поворотом");
+  // У полосы поворота нет — и ручки нет.
+  const band = { shape: "polyline", pointsMm: [{ x: 0, y: 0 }, { x: 1000, y: 0 }], depthMm: 600 };
+  assert.equal(workshopTurnHandle(band, view), null);
+});
+
+test("рука поворачивает кратно 15°, Alt — на градус", () => {
+  const object = turned({});
+  // Рука ровно под вещью: перёд вниз, угол нулевой.
+  assert.equal(workshopTurnToward(object, { x: 2000, y: 4000 }), 0);
+  // Рука слева — перёд влево, это 90°.
+  assert.equal(workshopTurnToward(object, { x: -1000, y: 1500 }), 90);
+  assert.equal(workshopTurnToward(object, { x: 2000, y: -1000 }), 180);
+  assert.equal(workshopTurnToward(object, { x: 5000, y: 1500 }), 270);
+  // Между шагами угол сворачивается к ближайшим 15° — тем же шагом, которым
+  // магнит холста держит углы стен.
+  const near = workshopTurnToward(object, { x: 1900, y: 2500 });
+  assert.equal(near % WORKSHOP_TURN_SNAP_DEG, 0, "шаг руки не кратен 15°: " + near);
+  // Alt снимает шаг: остаётся целый градус.
+  const free = workshopTurnToward(object, { x: 1900, y: 2500 }, { free: true });
+  assert.equal(free, 6, "свободный угол посчитан не по направлению: " + free);
+  // Рука в самой середине направления не задаёт — и выдумывать его нельзя.
+  assert.equal(workshopTurnToward(object, { x: 2000, y: 1500 }), null);
+  // Полоса не поворачивается вовсе.
+  assert.equal(workshopTurnToward({ shape: "polyline", pointsMm: [] }, { x: 0, y: 0 }), null);
+});
+
+test("ручка поворота — та же дверь, что запись: патч один и в объект ложится как есть", () => {
+  const base = drawnRoom();
+  const made = withObject(base, turned({}));
+  const view = viewOf({ zoom: 1 });
+  const handle = workshopObjectHandles(made.object, view).find((item) => item.kind === "turn");
+  // Сам габарит ручкой не становится: середина переда — это тело вещи.
+  const picked = workshopPick(made.project, made.schemeId, frontMidMm(made.object), view, {
+    kind: "object",
+    id: made.object.id,
+  });
+  assert.equal(picked.kind, "object");
+  const patch = workshopObjectPatch(made.object, handle, { x: -1000, y: 1500 });
+  assert.deepEqual(patch, { turnDeg: 90 });
+  const after = updateSchemeObject(made.project, made.object.id, patch).schemeObject;
+  assert.equal(after.turnDeg, 90);
+  // Габарит правкой угла не тронут: повернули, а не растянули.
+  assert.equal(after.widthMm, made.object.widthMm);
+  assert.equal(after.depthMm, made.object.depthMm);
+  assert.equal(after.heightMm, made.object.heightMm, "высота не тронута");
+  // Alt доходит до патча тем же доводом, которым рисуется призрак.
+  assert.deepEqual(workshopObjectPatch(made.object, handle, { x: 1900, y: 2500 }, { free: true }), { turnDeg: 6 });
+  // Ручки разбивки у прямоугольника нет, и поворот её не подменяет.
+  assert.equal(workshopObjectPatch(made.object, { kind: "insert", index: 0 }, { x: 0, y: 0 }), null);
+});
+
+test("кнопка и клавиша считают один оборот, а не накапливают витки", () => {
+  assert.equal(WORKSHOP_TURN_STEP_DEG, 90);
+  assert.equal(workshopTurnBy(350, WORKSHOP_TURN_STEP_DEG), 80);
+  assert.equal(workshopTurnBy(0, -WORKSHOP_TURN_STEP_DEG), 270);
+  assert.equal(workshopTurnBy(270, WORKSHOP_TURN_STEP_DEG), 0);
+  // Правило приведения — модельное: целый градус одного оборота.
+  assert.equal(workshopTurnDeg(-10), 350);
+  assert.equal(workshopTurnDeg(390), 30);
+  assert.equal(workshopTurnDeg("42"), 42);
+  assert.equal(workshopTurnDeg(""), 0);
+  assert.equal(workshopTurnDeg(undefined), 0);
+  assert.equal(workshopTurnDeg(44.6), 45);
+});
+
+test("призрак под рукой и поставленная вещь — один и тот же прямоугольник", () => {
+  const sizes = { shape: "rect", widthMm: 650, depthMm: 400, turnDeg: 90, heightMm: 800 };
+  const ghost = workshopObjectRectAt(sizes, { x: 1200, y: 800 });
+  assert.deepEqual(ghost, { shape: "rect", atMm: { x: 1200, y: 800 }, widthMm: 650, depthMm: 400, turnDeg: 90 });
+  // В объект уходит он же — модель ничего не переписывает по дороге.
+  const base = drawnRoom();
+  const ready = ensureSchemeObjectKinds(base.project);
+  const kindId = schemeObjectKindsInOrder(ready.project)[0].id;
+  const added = addSchemeObject(ready.project, { schemeId: base.schemeId, kindId, ...ghost, heightMm: 800 });
+  for (const key of ["widthMm", "depthMm", "turnDeg"]) {
+    assert.equal(added.schemeObject[key], ghost[key], "призрак обещал одно, а встало другое: " + key);
+  }
+  assert.deepEqual(added.schemeObject.atMm, ghost.atMm);
+  // Угол без числа — ноль, а не `undefined`: поле пустым не бывает.
+  assert.equal(workshopObjectRectAt({ widthMm: 100, depthMm: 100 }, { x: 0, y: 0 }).turnDeg, 0);
+  assert.equal(workshopObjectRectAt(null, { x: 0, y: 0 }), null);
+});
+
+test("поворот не путает размеры местами: ширина остаётся шириной вещи", () => {
+  const base = drawnRoom();
+  const made = withObject(base, turned({}));
+  const flat = boxOf(schemeObjectCorners(made.object));
+  const after = updateSchemeObject(made.project, made.object.id, { turnDeg: 90 }).schemeObject;
+  // В данных габарит тот же — вещь повернули, а не переобмерили.
+  assert.equal(after.widthMm, 1200);
+  assert.equal(after.depthMm, 400);
+  // На листе он транспонирован: ширина легла по `y`, глубина по `x`.
+  const box = boxOf(schemeObjectCorners(after));
+  assert.equal(box.maxX - box.minX, flat.maxY - flat.minY);
+  assert.equal(box.maxY - box.minY, flat.maxX - flat.minX);
+  // Правка за угол повёрнутой вещи по-прежнему считается в её собственных осях
+  // (таск 137): поворот этого не изменил.
+  const patch = workshopRectCornerPatch(after, 0, schemeObjectCorners(after)[0]);
+  assert.equal(patch.widthMm, 1200);
+  assert.equal(patch.depthMm, 400);
+});
+
+test("спинкой к стене: ширина вдоль стены, перёд в комнату", () => {
+  const base = drawnRoom();
+  const walls = wallsOnScheme(base.project, base.schemeId);
+  // Комната ROOM: верхняя стена по `y = 0`, левая по `x = 0`.
+  assert.equal(workshopWallTurnDeg(walls, turned({ atMm: { x: 2000, y: 300 } })), 0, "у верхней стены перёд вниз");
+  assert.equal(workshopWallTurnDeg(walls, turned({ atMm: { x: 2000, y: 2700 } })), 180, "у нижней стены перёд вверх");
+  assert.equal(workshopWallTurnDeg(walls, turned({ atMm: { x: 300, y: 1500 } })), 270, "у левой стены перёд вправо");
+  assert.equal(workshopWallTurnDeg(walls, turned({ atMm: { x: 3700, y: 1500 } })), 90, "у правой стены перёд влево");
+  // Наклонная стена даёт свой угол, а не ближайшие 90°.
+  const slanted = workshopAddChain(base.project, base.schemeId, [{ x: 0, y: 6000 }, { x: 4000, y: 7000 }], 100).project;
+  const turnDeg = workshopWallTurnDeg(
+    wallsOnScheme(slanted, base.schemeId).filter((wall) => wall.aMm.y >= 6000),
+    turned({ atMm: { x: 2000, y: 6200 } }),
+  );
+  // Стена идёт под 14° к горизонту, вещь стоит над ней — значит перёд уходит
+  // вверх по листу, но не ровно вверх (180°), а повёрнутым на те же 14°.
+  assert.equal(turnDeg, 194, "перёд не перпендикулярен наклонной стене: " + turnDeg);
+  // Стены рядом нет — доворачивать не к чему, и выдумывать нельзя.
+  assert.equal(workshopWallTurnDeg(walls, turned({ atMm: { x: 2000, y: 20000 } })), null);
+  assert.equal(workshopWallTurnDeg([], turned({})), null);
+  assert.equal(workshopWallTurnDeg(walls, { shape: "polyline", pointsMm: [] }), null);
+  assert.ok(WORKSHOP_TURN_WALL_MM >= 1000, "порог меньше метра оставил бы кнопку без работы");
+  // Вещь ровно на линии стены (колонна в стене) стороны не называет: из двух
+  // перпендикуляров берётся тот, что ближе к нынешнему углу, — доворот не
+  // разворачивает вещь на пол-оборота без повода.
+  assert.equal(workshopWallTurnDeg(walls, turned({ atMm: { x: 2000, y: 0 }, turnDeg: 170 })), 180);
+  assert.equal(workshopWallTurnDeg(walls, turned({ atMm: { x: 2000, y: 0 }, turnDeg: 10 })), 0);
+});
+
+test("G68: поворот ничего не трогает в чужом чертеже", () => {
+  const source = JSON.parse(LEGACY_DRAWING_TEXT);
+  const project = JSON.parse(LEGACY_DRAWING_TEXT);
+  const view = viewOf({ zoom: 1 });
+  const walls = project.walls || [];
+  assert.ok((project.schemeObjects || []).length > 0, "в объекте прежней сборки нет вещей — проверять нечего");
+  for (const object of project.schemeObjects) {
+    workshopObjectHandles(object, view);
+    workshopTurnHandle(object, view);
+    workshopTurnToward(object, { x: 0, y: 0 });
+    workshopWallTurnDeg(walls, object);
+    workshopObjectRectAt(object, object.atMm || { x: 0, y: 0 });
+  }
+  assert.deepEqual(project, source, "чистые вычисления правят объект");
+  // Поворота у прежней вещи не прибавилось и не убавилось: у кого он есть —
+  // тот же, у кого нет — его и нет.
+  for (let index = 0; index < project.schemeObjects.length; index += 1) {
+    assert.deepEqual(
+      Object.keys(project.schemeObjects[index]).sort(),
+      Object.keys(source.schemeObjects[index]).sort(),
+    );
   }
 });

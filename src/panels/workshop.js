@@ -837,6 +837,194 @@ export function workshopRectCornerPatch(object, index, pointMm) {
   };
 }
 
+// ——— вещь поворачивается (таск 164, G243) —————————————————————————————————
+//
+// Слова заказчика: «унитаз и другие объекты надо вращать и сразу задавать им их
+// размеры при выборе». Поворот в модели был с таска 126 (`turnDeg`), и поле
+// «Поворот, °» в колонке стояло там же — но набрать в нём 90 и попасть
+// унитазом к стене значило посчитать угол в голове. Здесь добавлены три
+// двери к одному и тому же числу, и все три сводятся к `turnDeg`:
+//
+//   **шаг в четверть оборота** (`WORKSHOP_TURN_STEP_DEG`) — кнопки «−90°» и
+//     «+90°» и клавиша `R`. Это главный случай: вещь ставят к одной из четырёх
+//     стен, и трёх нажатий на весь чертёж хватает;
+//   **рука за ручку** — ручка перед вещью, и угол притягивается кратно 15°
+//     (`WORKSHOP_TURN_SNAP_DEG`) — **тем же шагом**, которым магнит холста
+//     держит углы стен (`render.draftSnap`). Стены квартиры стоят под этими
+//     углами, и вещь у стены — под ними же. Alt снимает притяжку, как и на
+//     вершине: остаётся целый градус;
+//   **поле числа** — любой целый градус без всяких шагов. Свободный ввод
+//     остаётся старшим: шаг — это удобство, а не правило, и у наклонной стены
+//     мансарды он не должен мешать.
+//
+// Полоса (`shape: "polyline"`) поворота не имеет вовсе: её форма задана
+// точками, и «угол» у неё был бы третьим мнением рядом с ними. Поэтому ни
+// поля, ни ручки, ни прочерка — строки просто нет (см. `syncObject`).
+
+/** Шаг кнопки и клавиши: четверть оборота. */
+export const WORKSHOP_TURN_STEP_DEG = 90;
+
+/** Шаг руки — те же 15°, которыми магнит холста держит углы стен. */
+export const WORKSHOP_TURN_SNAP_DEG = 15;
+
+/** Дальше этого «спинкой к стене» стену не ищет: рядом её нет. */
+export const WORKSHOP_TURN_WALL_MM = 3000;
+
+// Ручка поворота стоит **перед вещью**, в точках экрана от середины её переда:
+// ближе — садится на сам габарит, дальше — отрывается от вещи и читается как
+// чужая. Радиус тот же, что у ручки пути (`render.OUTLINE_HANDLE_PX`): рука у
+// человека одна.
+const WORKSHOP_TURN_GAP_PX = 26;
+const WORKSHOP_TURN_HANDLE_PX = 7;
+
+/** Угол в целых градусах одного оборота — правило модели (`schemeObjectTurnDeg`). */
+export function workshopTurnDeg(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return ((Math.round(number) % 360) + 360) % 360;
+}
+
+/** Повернуть на столько-то: кнопка, клавиша и «к стене» считают одним местом. */
+export function workshopTurnBy(turnDeg, deltaDeg) {
+  return workshopTurnDeg((Number(turnDeg) || 0) + (Number(deltaDeg) || 0));
+}
+
+/**
+ * Куда вещь **смотрит** на чертеже.
+ *
+ * При нулевом повороте перёд уходит вниз по листу — туда, куда смотрит вещь,
+ * приставленная к верхней стене комнаты. Это не выбор окна: ровно так читает
+ * поворот модель в объёме (`volume.volumeObjectFrame`, таск 155), где доля
+ * −0,5 по глубине лежит на той стороне, где `y` больше. Ось здесь одна и та
+ * же — поперечная ось вещи, `workshopAxes(turnDeg).n`, — и второго описания
+ * переда в сборке быть не должно: разойдись они, ручка поворота смотрела бы в
+ * одну сторону, а фасад шкафа в объёме — в другую.
+ */
+export function workshopFrontAxis(turnDeg) {
+  return workshopAxes(turnDeg).n;
+}
+
+/** Середина переда вещи в миллиметрах — там, где стоит ручка поворота. */
+export function workshopFrontMidMm(object) {
+  if (!object || object.shape === "polyline") return null;
+  const corners = schemeObjectCorners(object);
+  if (corners.length < 4) return null;
+  return { x: (corners[2].x + corners[3].x) / 2, y: (corners[2].y + corners[3].y) / 2 };
+}
+
+/**
+ * Ручка поворота выделенного прямоугольника: перед вещью, на поводке от
+ * середины её переда. Ею она и показывает, куда вещь смотрит, — поэтому
+ * отдельной приметы переда у выделенного нет, их было бы две.
+ *
+ * `null` — у полосы и у вещи без габарита: поворачивать нечего.
+ */
+export function workshopTurnHandle(object, view) {
+  const frontMm = workshopFrontMidMm(object);
+  if (!frontMm) return null;
+  const from = planToScreen(frontMm, WORKSHOP_UNIT, view);
+  const axis = workshopFrontAxis(object.turnDeg);
+  return {
+    kind: "turn",
+    index: 0,
+    x: from.x + axis.x * WORKSHOP_TURN_GAP_PX,
+    y: from.y + axis.y * WORKSHOP_TURN_GAP_PX,
+    r: WORKSHOP_TURN_HANDLE_PX,
+    from,
+  };
+}
+
+/**
+ * Угол, при котором вещь смотрит **в точку под рукой**. Считается от середины
+ * вещи: ручка ходит по кругу, и радиус в ответ не входит — важно только
+ * направление.
+ *
+ * `free` (зажатый Alt) — целый градус, как и на вершине; без него угол
+ * притягивается кратно 15°. `null` — рука ровно в середине вещи, направления
+ * нет, и выдумывать его нельзя.
+ */
+export function workshopTurnToward(object, pointMm, options = {}) {
+  if (!object || object.shape === "polyline" || !object.atMm || !pointMm) return null;
+  const dx = Number(pointMm.x) - Number(object.atMm.x);
+  const dy = Number(pointMm.y) - Number(object.atMm.y);
+  if (!(Math.hypot(dx, dy) > 0)) return null;
+  // Обратный ход к `workshopFrontAxis`: перёд равен {−sin, cos}, значит угол
+  // читается из направления как `atan2(−x, y)`.
+  const degrees = (Math.atan2(-dx, dy) * 180) / Math.PI;
+  const step = options.free ? 1 : WORKSHOP_TURN_SNAP_DEG;
+  return workshopTurnDeg(Math.round(degrees / step) * step);
+}
+
+/**
+ * Угол, при котором вещь стоит **спинкой к ближайшей стене**.
+ *
+ * Притяжка названа вслух и остаётся **ручной** (таск 164): при постановке вещь
+ * сама не доворачивается. Унитаз у стены действительно всегда к ней спиной, но
+ * человек ставит и нарочно — косой умывальник в углу, диван посреди комнаты, —
+ * и правило «рядом стена, значит повернуть» спорило бы с набранным им числом.
+ * Поэтому это кнопка: нажал — довернулось, не нажал — стоит как поставил.
+ *
+ * Стена даёт **ось**, а не направление: ширина вещи ложится вдоль стены, а
+ * перёд уходит на ту сторону, где вещь стоит. Вещь ровно на линии стены
+ * (колонна в стене) стороны не называет — тогда из двух перпендикуляров
+ * берётся тот, что ближе к нынешнему углу: доворот не должен разворачивать
+ * вещь на пол-оборота без повода.
+ *
+ * `null` — поворачивать нечего (полоса) или стены ближе `limitMm` нет.
+ */
+export function workshopWallTurnDeg(walls, object, limitMm = WORKSHOP_TURN_WALL_MM) {
+  if (!object || object.shape === "polyline" || !object.atMm) return null;
+  const at = { x: Number(object.atMm.x), y: Number(object.atMm.y) };
+  let best = null;
+  for (const wall of walls || []) {
+    if (!wall || !wall.aMm || !wall.bMm) continue;
+    const axis = wallVectors(wall);
+    if (!axis) continue;
+    const gap = segmentDistanceMm(at, wall.aMm, wall.bMm);
+    if (gap > limitMm) continue;
+    if (!best || gap < best.gap) best = { gap, axis, wall };
+  }
+  if (!best) return null;
+  // Сторона, на которой стоит вещь: от ближней точки стены к её середине.
+  const span = { x: Number(best.wall.bMm.x) - Number(best.wall.aMm.x), y: Number(best.wall.bMm.y) - Number(best.wall.aMm.y) };
+  const length = Math.hypot(span.x, span.y);
+  const along = Math.max(
+    0,
+    Math.min(1, ((at.x - Number(best.wall.aMm.x)) * span.x + (at.y - Number(best.wall.aMm.y)) * span.y) / (length * length)),
+  );
+  const near = { x: Number(best.wall.aMm.x) + span.x * along, y: Number(best.wall.aMm.y) + span.y * along };
+  const side = { x: at.x - near.x, y: at.y - near.y };
+  const sides = [best.axis.n, { x: -best.axis.n.x, y: -best.axis.n.y }];
+  const turns = sides.map((axis) => workshopTurnDeg((Math.atan2(-axis.x, axis.y) * 180) / Math.PI));
+  if (Math.hypot(side.x, side.y) >= 1) {
+    const pick = sides[0].x * side.x + sides[0].y * side.y >= 0 ? 0 : 1;
+    return turns[pick];
+  }
+  const now = workshopTurnDeg(object.turnDeg);
+  const away = (turn) => Math.min(((turn - now) % 360 + 360) % 360, ((now - turn) % 360 + 360) % 360);
+  return away(turns[0]) <= away(turns[1]) ? turns[0] : turns[1];
+}
+
+/**
+ * Что встанет по клику: прямоугольник серединой под курсор, с теми размерами и
+ * тем углом, которые стоят в колонке.
+ *
+ * **Одна дверь для призрака и для постановки** (таск 164): призрак под рукой
+ * рисуется из этого же ответа, которым `placeObject` зовёт модель. Разойдись
+ * они — человек видел бы один угол, а ставил другой, и это была бы та самая
+ * ложь, которой окно не должно говорить.
+ */
+export function workshopObjectRectAt(sizes, pointMm) {
+  if (!sizes || !pointMm) return null;
+  return {
+    shape: "rect",
+    atMm: { x: Number(pointMm.x), y: Number(pointMm.y) },
+    widthMm: Number(sizes.widthMm),
+    depthMm: Number(sizes.depthMm),
+    turnDeg: workshopTurnDeg(sizes.turnDeg),
+  };
+}
+
 // ——— полоса правится как ломаная метки (таск 137, G194) ———————————————————
 //
 // Четыре движения, и все четыре взяты у холста: вершину двигают, ручка на
@@ -931,29 +1119,42 @@ export function workshopPathAnchor(points, handle) {
 }
 
 /**
- * Ручки выделенного объекта. Прямоугольнику полагаются **только углы**:
+ * Ручки выделенного объекта. Прямоугольнику полагаются **углы и поворот**:
  * вставить в него пятый угол и продолжить его некуда — он не путь. Полосе
- * достаётся весь набор пути, какой правит ломаную метки.
+ * достаётся весь набор пути, какой правит ломаную метки, а поворота у неё нет
+ * вовсе (таск 164).
+ *
+ * Ручка поворота идёт **последней**: спор за клик решается порядком, и угол
+ * вещи старше её поворота — он стоит на самом габарите, а поворот снаружи.
  */
 export function workshopObjectHandles(object, view) {
   if (!object) return [];
   if (object.shape === "polyline") {
     return pathEditHandles(WORKSHOP_UNIT, { points: object.pointsMm || [], closed: false }, view);
   }
-  return pathVertexHandles(WORKSHOP_UNIT, schemeObjectCorners(object), view).map((handle) => ({
+  const corners = pathVertexHandles(WORKSHOP_UNIT, schemeObjectCorners(object), view).map((handle) => ({
     ...handle,
     ring: true,
   }));
+  const turn = workshopTurnHandle(object, view);
+  return turn ? [...corners, turn] : corners;
 }
 
 /**
  * **Одна дверь для предпросмотра и для записи.** Пока тащат — кадр рисуется из
  * этого патча, по отпусканию он же уходит в `updateSchemeObject`. Разойдись эти
  * два пути — призрак обещал бы одно, а в объект уходило бы другое.
+ *
+ * `options.free` — зажатый Alt: он нужен ручке поворота (целый градус вместо
+ * шага 15°) и приходит обоими путями из одного места, `drag.free`.
  */
-export function workshopObjectPatch(object, handle, toMm) {
+export function workshopObjectPatch(object, handle, toMm, options = {}) {
   if (!object || !handle || !toMm) return null;
   if (object.shape !== "polyline") {
+    if (handle.kind === "turn") {
+      const turnDeg = workshopTurnToward(object, toMm, options);
+      return turnDeg === null ? null : { turnDeg };
+    }
     return handle.kind === "vertex" ? workshopRectCornerPatch(object, handle.index, toMm) : null;
   }
   const points = object.pointsMm || [];
@@ -1375,6 +1576,10 @@ function createWorkshop({ api, hosts }) {
   // той же попыткой записи, что и сам клик, поэтому красным он становится
   // ровно тогда, когда клик не прошёл бы.
   let ghost = null;
+  // Призрак вещи под курсором (таск 164): что встанет по клику — с размерами и
+  // углом из колонки. Его считает `workshopObjectRectAt` — та же функция, что
+  // ставит вещь, поэтому обещать призраку нечего: он показывает.
+  let objectGhost = null;
   let drag = null;
   let pan = null;
   // Нажатие, которое ещё не решило, чем станет: клик занятия или панорама.
@@ -1583,6 +1788,28 @@ function createWorkshop({ api, hosts }) {
   const widthField = workshopField(strings.workshop.objectWidth, objectWidth);
   const depthField = workshopField(strings.workshop.objectDepth, objectDepth);
   const turnField = workshopField(strings.workshop.objectTurn, objectTurn);
+  // Четверть оборота кнопкой — главный случай: вещь ставят к одной из четырёх
+  // стен. Клавиша `R` названа в подсказке, а не отдельной строкой: горячий
+  // ключ, о котором негде прочитать, всё равно что его нет.
+  const turnLeftButton = uiButton(strings.workshop.objectTurnLeft, {
+    class: "ui-btn workshop__chip",
+    title: strings.workshop.objectTurnLeftHint,
+    on: { click: () => turnBy(-WORKSHOP_TURN_STEP_DEG) },
+  });
+  const turnRightButton = uiButton(strings.workshop.objectTurnRight, {
+    class: "ui-btn workshop__chip",
+    title: strings.workshop.objectTurnRightHint,
+    on: { click: () => turnBy(WORKSHOP_TURN_STEP_DEG) },
+  });
+  // Доворот к стене — **кнопка, а не притяжка** (таск 164): при постановке
+  // вещь сама не поворачивается, см. `workshopWallTurnDeg`.
+  const turnWallButton = uiButton(strings.workshop.objectToWall, {
+    class: "ui-btn workshop__chip",
+    title: strings.workshop.objectToWallHint,
+    on: { click: () => turnToWall() },
+  });
+  const turnChips = uiEl("div", { class: "workshop__chips" }, [turnLeftButton, turnRightButton, turnWallButton]);
+  const turnNote = uiEl("p", { class: "workshop__note", text: strings.workshop.objectTurnHint });
   // Где вещь стоит — на полу, на стене, в полу. Строка стоит над высотами и
   // отвечает ровно на вопрос «почему у картины от пола 1300, а у стола ноль».
   const objectMountNote = uiEl("p", { class: "workshop__note" });
@@ -1592,6 +1819,8 @@ function createWorkshop({ api, hosts }) {
     widthField,
     depthField,
     turnField,
+    turnChips,
+    turnNote,
     workshopField(strings.workshop.objectHeight, objectHeight),
     workshopField(strings.workshop.objectFloor, objectFloor),
     objectMountNote,
@@ -1824,6 +2053,14 @@ function createWorkshop({ api, hosts }) {
     return screenToPlan(pointOf(event), WORKSHOP_UNIT, view);
   }
 
+  // Рука над полем, а не над колонкой: слушатель висит на окне, и события
+  // приходят из любого его угла.
+  function onField(event) {
+    const at = pointOf(event);
+    const box = viewport();
+    return at.x >= 0 && at.y >= 0 && at.x <= box.width && at.y <= box.height;
+  }
+
   function screenOf(pointMm) {
     return planToScreen(pointMm, WORKSHOP_UNIT, view);
   }
@@ -1863,6 +2100,7 @@ function createWorkshop({ api, hosts }) {
     if (tool === next) return;
     draft = null;
     ghost = null;
+    objectGhost = null;
     press = null;
     // Выделение снимается вместе со сменой занятия: иначе поля выделенной
     // стены перебивали бы умолчания проёма, за которым человек и переключился.
@@ -2149,7 +2387,7 @@ function createWorkshop({ api, hosts }) {
 
   function setObjectKey(key) {
     workshopObjectKey = key;
-    workshopObjectSizes = {};
+    workshopObjectSizes = keptTurn();
     const object = selectedObject();
     if (!object) {
       // Способ идёт за вещью: столешницу тянут полосой, радиатор набирают
@@ -2170,13 +2408,28 @@ function createWorkshop({ api, hosts }) {
     }
   }
 
+  /**
+   * Угол переживает смену вещи и способа, размеры — нет (таск 164).
+   *
+   * Угол принадлежит **стене, которую обставляют**, а не вещи: вдоль одной
+   * стены подряд ставят шесть предметов — унитаз, раковину, стиральную машину,
+   * — и спрашивать «а под каким углом» шесть раз значило бы спрашивать одно и
+   * то же. Размеры, наоборот, у каждой вещи свои и возвращаются к каталожным.
+   * Спрятанным состоянием это не становится: угол стоит числом в колонке и
+   * нарисован призраком под рукой.
+   */
+  function keptTurn() {
+    const turnDeg = workshopTurnDeg(workshopObjectSizes.turnDeg);
+    return turnDeg ? { turnDeg } : {};
+  }
+
   // Способ ставить объект: кликом по умолчаниям, обводкой контура или полосой.
   // Размеры сбрасываются к умолчаниям вида: контур их посчитает сам, а клик
   // возьмёт те, что у вида, — донашивать за контуром чужую ширину незачем.
   function setObjectWay(way) {
     if (selectedObject() || !WORKSHOP_OBJECT_WAYS.includes(way)) return;
     workshopObjectWay = way;
-    workshopObjectSizes = {};
+    workshopObjectSizes = keptTurn();
     draft = null;
     sync();
   }
@@ -2206,6 +2459,16 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
+   * Призрак вещи под рукой: что встанет по клику. `null` — ставят росчерком
+   * (полоса, контур), и призрак там свой — сама линия под рукой.
+   */
+  function objectGhostAt(pointMm) {
+    const sizes = objectSizes(null);
+    if (sizes.shape !== "rect") return null;
+    return workshopObjectRectAt(sizes, pointMm);
+  }
+
+  /**
    * Поставить объект. `rect` — габарит, посчитанный контуром; без него
    * прямоугольник берёт размеры у вида (умолчания G192 остаются: контур — это
    * второй способ, а не замена первому).
@@ -2217,13 +2480,9 @@ function createWorkshop({ api, hosts }) {
       ? { shape: "rect", ...rect }
       : sizes.shape === "polyline"
         ? { shape: "polyline", pointsMm, depthMm: sizes.depthMm }
-        : {
-            shape: "rect",
-            atMm: pointMm,
-            widthMm: sizes.widthMm,
-            depthMm: sizes.depthMm,
-            turnDeg: sizes.turnDeg || 0,
-          };
+        : // Та же дверь, из которой нарисован призрак под рукой: что показано,
+          // то и встало — вместе с углом (таск 164).
+          workshopObjectRectAt(sizes, pointMm);
     try {
       const added = addSchemeObject(ready, {
         schemeId,
@@ -2239,6 +2498,63 @@ function createWorkshop({ api, hosts }) {
     } catch (error) {
       fail(error);
       return null;
+    }
+  }
+
+  /**
+   * Повернуть на четверть оборота (таск 164): выделенную вещь — правкой через
+   * историю, а без выделения — ту, которая встанет следующей. Одна дверь на
+   * кнопки и на клавишу `R`.
+   *
+   * Полоса поворота не имеет — у неё форма задана точками, и кнопки ей
+   * недоступны (`syncObject` их гасит).
+   */
+  function turnBy(deltaDeg) {
+    const object = selectedObject();
+    if (object) {
+      if (object.shape === "polyline") return;
+      try {
+        commit(
+          updateSchemeObject(project(), object.id, { turnDeg: workshopTurnBy(object.turnDeg, deltaDeg) }).project,
+          strings.history.objectTurn,
+        );
+      } catch (error) {
+        fail(error);
+        sync();
+      }
+      return;
+    }
+    if (objectSizes(null).shape === "polyline") return;
+    workshopObjectSizes = {
+      ...workshopObjectSizes,
+      turnDeg: workshopTurnBy(objectSizes(null).turnDeg, deltaDeg),
+    };
+    sync();
+  }
+
+  /**
+   * Довернуть выделенную вещь спинкой к ближайшей стене. Притяжки при
+   * постановке нет нарочно (`workshopWallTurnDeg`): человек ставит и под углом,
+   * и правило «рядом стена — значит повернуть» спорило бы с его числом.
+   *
+   * Стены рядом нет — сказано словами: молчащая кнопка выглядит сломанной.
+   */
+  function turnToWall() {
+    const object = selectedObject();
+    if (!object || object.shape === "polyline") return;
+    const turnDeg = workshopWallTurnDeg(walls(), object);
+    if (turnDeg === null) {
+      notify(strings.workshop.objectNoWall, "error");
+      return;
+    }
+    // Уже стоит спинкой — шага истории не будет: пустая правка в стеке отмены
+    // стоила бы человеку одного Ctrl+Z впустую.
+    if (turnDeg === workshopTurnDeg(object.turnDeg)) return;
+    try {
+      commit(updateSchemeObject(project(), object.id, { turnDeg }).project, strings.history.objectTurn);
+    } catch (error) {
+      fail(error);
+      sync();
     }
   }
 
@@ -2593,8 +2909,16 @@ function createWorkshop({ api, hosts }) {
       }
       return;
     }
+    // Что встанет по клику — видно до клика (таск 164): призрак идёт за рукой с
+    // теми размерами и тем углом, которые стоят в колонке. Росчерк сюда не
+    // доходит — полосу и контур рисуют на глазах, и обещать там нечего.
     if (tool === "objects") {
-      ghost = null;
+      // Рука ушла с поля (курсор в колонке) — призрака нет: рисовать вещь там,
+      // куда клик её не поставит, значило бы обещать невозможное.
+      const next = onField(event) ? objectGhostAt(snapOf(mmOf(event), event.altKey).point) : null;
+      const before = objectGhost;
+      objectGhost = next;
+      if (before || next) redraw();
       return;
     }
     const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
@@ -2605,7 +2929,7 @@ function createWorkshop({ api, hosts }) {
       hoverHandle = handle;
       node.style.cursor = !pick
         ? "default"
-        : pick.kind === "vertex" || (handle && handle.kind === "vertex")
+        : pick.kind === "vertex" || (handle && (handle.kind === "vertex" || handle.kind === "turn"))
           ? "grab"
           : pick.kind === "hinge" || pick.kind === "swing" || handle
             ? "pointer"
@@ -2634,6 +2958,15 @@ function createWorkshop({ api, hosts }) {
     // (`workshopPathSources`).
     if (drag.kind === "objectHandle") {
       const object = findSchemeObject(project(), drag.id);
+      // Ручка поворота ходит по кругу, и притягивать её к узлам сетки не к
+      // чему: у поворота свой шаг — 15°, и считает его `workshopTurnToward`
+      // по той же примете `free`, что и вершина (зажатый Alt).
+      if (object && drag.handle.kind === "turn") {
+        drag.toMm = mmOf(event);
+        drag.free = event.altKey;
+        redraw();
+        return;
+      }
       if (object) {
         const points =
           object.shape === "polyline" ? object.pointsMm || [] : schemeObjectCorners(object);
@@ -2678,18 +3011,23 @@ function createWorkshop({ api, hosts }) {
    */
   function applyObjectHandle(current) {
     const object = findSchemeObject(project(), current.id);
-    const patch = object ? workshopObjectPatch(object, current.handle, current.toMm) : null;
+    const patch = object ? workshopObjectPatch(object, current.handle, current.toMm, { free: current.free }) : null;
     if (!patch) {
       sync();
       return;
     }
     const label =
-      object.shape === "polyline" ? strings.history.objectPoint : strings.history.objectResize;
+      current.handle.kind === "turn"
+        ? strings.history.objectTurn
+        : object.shape === "polyline"
+          ? strings.history.objectPoint
+          : strings.history.objectResize;
     try {
       commit(updateSchemeObject(project(), object.id, patch).project, label);
       // Вершина, поставленная только что этой же рукой: двойной клик по ней
-      // ничего не убирает (та же оговорка, что у холста).
-      if (current.handle.kind !== "vertex") {
+      // ничего не убирает (та же оговорка, что у холста). Ручка поворота
+      // вершин не ставит — ей здесь нечего помнить.
+      if (current.handle.kind === "insert" || current.handle.kind === "extend") {
         freshVertex = { id: object.id, index: addedIndex(object, current.handle), at: panNow() };
       }
     } catch (error) {
@@ -2766,8 +3104,10 @@ function createWorkshop({ api, hosts }) {
     if (!current.moved) {
       // Ручка разбивки и ручка продолжения срабатывают и без движения: клик по
       // ним ставит вершину туда, где они нарисованы. Вершину, наоборот,
-      // нажатием на месте не правят — её тащат.
-      if (current.kind === "objectHandle" && current.handle.kind !== "vertex") applyObjectHandle(current);
+      // нажатием на месте не правят — её тащат. Ручку поворота тоже: клик по
+      // ней свернул бы угол к ближайшим 15° без всякого движения руки.
+      const adds = current.kind === "objectHandle" && (current.handle.kind === "insert" || current.handle.kind === "extend");
+      if (adds) applyObjectHandle(current);
       else paint();
       return;
     }
@@ -2887,6 +3227,15 @@ function createWorkshop({ api, hosts }) {
       draft.points.pop();
       if (draft.points.length === 0) draft = null;
       paint();
+      return;
+    }
+    // Четверть оборота с клавиатуры (таск 164): рука остаётся на мыши, а вещь
+    // поворачивается — тем же шагом и той же дверью, что кнопки в колонке.
+    const turnable = tool === "objects" || (selected && selected.kind === "object");
+    if (event.code === "KeyR" && !event.altKey && turnable) {
+      event.preventDefault();
+      event.stopPropagation();
+      turnBy(event.shiftKey ? -WORKSHOP_TURN_STEP_DEG : WORKSHOP_TURN_STEP_DEG);
       return;
     }
     if ((event.key === "Delete" || event.key === "Backspace") && selected) {
@@ -3126,7 +3475,7 @@ function createWorkshop({ api, hosts }) {
     // Правка за ручку: кадр рисуется тем самым патчем, который уйдёт в объект
     // по отпусканию, — одна дверь на предпросмотр и на запись.
     if (drag && drag.moved && drag.kind === "objectHandle" && drag.id === object.id) {
-      const patch = workshopObjectPatch(object, drag.handle, drag.toMm);
+      const patch = workshopObjectPatch(object, drag.handle, drag.toMm, { free: drag.free });
       return patch ? { ...object, ...patch } : object;
     }
     if (!(drag && drag.moved && drag.kind === "object" && drag.id === object.id && drag.deltaMm)) return object;
@@ -3174,6 +3523,11 @@ function createWorkshop({ api, hosts }) {
     // стоит строкой под полем.
     if (tool === "openings" && ghost) {
       drawDrawingOpening(ctx, bridge(), ghost.wall, ghost.opening, { ghost: true, bad: !ghost.ok });
+      return;
+    }
+    // Призрак вещи: габарит, перёд и числа — до клика (таск 164).
+    if (tool === "objects" && objectGhost) {
+      paintObjectGhost(objectGhost);
       return;
     }
     const band = objectDrawn() && workshopObjectWay === "polyline";
@@ -3279,15 +3633,113 @@ function createWorkshop({ api, hosts }) {
     ctx.restore();
   }
 
+  /**
+   * Призрак вещи под рукой (таск 164): повёрнутый габарит, клюв переда и
+   * строка «ширина × глубина · угол».
+   *
+   * Зачем клюв: на плане повёрнутый на 180° унитаз выглядит точно так же, как
+   * неповёрнутый, — четыре угла те же. Число угла об этом говорит, а клюв
+   * показывает, и смотреть на него не надо: он там же, где рука.
+   */
+  function paintObjectGhost(object) {
+    const corners = schemeObjectCorners(object).map(screenOf);
+    if (corners.length < 4) return;
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = DRAWING_OBJECT;
+    ctx.beginPath();
+    corners.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    paintObjectFront(object, corners);
+    const middle = screenOf(object.atMm);
+    ctx.font = drawFont(12, 600);
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    const line = text("workshop.ghostSize", {
+      width: object.widthMm,
+      depth: object.depthMm,
+      turn: object.turnDeg,
+    });
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = WORKSHOP_PAPER;
+    ctx.strokeText(line, middle.x, middle.y);
+    ctx.fillStyle = DRAWING_EDGE;
+    ctx.fillText(line, middle.x, middle.y);
+    ctx.textAlign = "start";
+    ctx.restore();
+  }
+
+  // Клюв переда: уголок на середине той стороны, которой вещь смотрит.
+  // Направление — `workshopFrontAxis`, то же самое, из которого объём берёт
+  // фасад: второго описания переда в сборке нет.
+  function paintObjectFront(object, corners) {
+    const front = { x: (corners[2].x + corners[3].x) / 2, y: (corners[2].y + corners[3].y) / 2 };
+    const axis = workshopFrontAxis(object.turnDeg);
+    const side = { x: -axis.y, y: axis.x };
+    const tip = { x: front.x + axis.x * 9, y: front.y + axis.y * 9 };
+    ctx.beginPath();
+    ctx.moveTo(front.x + side.x * 7, front.y + side.y * 7);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.lineTo(front.x - side.x * 7, front.y - side.y * 7);
+    ctx.closePath();
+    ctx.fillStyle = DRAWING_OBJECT;
+    ctx.fill();
+  }
+
   // Ручки пути выделенной полосы: середины отрезков и концы. Вершины рисует
   // общий слой чертежа своим кружком — тем же, каким в этом окне показаны
-  // вершины стен и ручки двери.
+  // вершины стен и ручки двери. У прямоугольника ручка одна — поворот
+  // (таск 164): углы его габарита рисует тот же общий слой.
   function paintObjectHandles() {
     if (tool !== "edit") return;
     const object = selectedObject();
-    if (!object || object.shape !== "polyline") return;
-    const extra = workshopObjectHandles(shiftObject(object), view).filter((item) => item.kind !== "vertex");
+    if (!object) return;
+    const shown = shiftObject(object);
+    if (object.shape !== "polyline") {
+      paintTurnHandle(workshopTurnHandle(shown, view));
+      return;
+    }
+    const extra = workshopObjectHandles(shown, view).filter((item) => item.kind !== "vertex");
     drawPathHandles(ctx, extra, WORKSHOP_ACCENT, hoverHandle);
+  }
+
+  /**
+   * Ручка поворота: поводок от переда вещи и кольцо на его конце. Поводок — то
+   * же, чем холст показывает продолжение линии: по нему видно, чья это ручка и
+   * куда вещь смотрит. Под рукой кольцо наливается цветом — как квадрат
+   * будущей вершины у ручки разбивки.
+   */
+  function paintTurnHandle(turn) {
+    if (!turn) return;
+    const under = hoverHandle && hoverHandle.kind === "turn";
+    ctx.save();
+    ctx.globalAlpha = under ? 1 : 0.75;
+    ctx.beginPath();
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = WORKSHOP_ACCENT;
+    ctx.moveTo(turn.from.x, turn.from.y);
+    ctx.lineTo(turn.x, turn.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(turn.x, turn.y, turn.r - 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = under ? WORKSHOP_ACCENT : WORKSHOP_HANDLE;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = WORKSHOP_ACCENT;
+    ctx.stroke();
+    // Дуга внутри кольца — «поворачивается»: без неё кольцо не отличить от
+    // ручки вершины, а значат они разное.
+    ctx.beginPath();
+    ctx.arc(turn.x, turn.y, turn.r - 4, Math.PI * 0.35, Math.PI * 1.75);
+    ctx.strokeStyle = under ? WORKSHOP_HANDLE : WORKSHOP_ACCENT;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
   }
 
   // Ширина полосы нового объекта: из умолчаний вида, пока его не поправили.
@@ -3513,7 +3965,15 @@ function createWorkshop({ api, hosts }) {
     });
     const sizes = object || objectSizes(null);
     widthField.hidden = shape === "polyline";
+    // У полосы угла нет вовсе — её форма задана точками, — и строка не
+    // показывает ни пустого поля, ни прочерка: прочерк обещал бы, что угол
+    // есть, просто неизвестен (таск 164).
     turnField.hidden = shape === "polyline";
+    turnChips.hidden = shape === "polyline";
+    turnNote.hidden = shape === "polyline";
+    // «К стене» работает по выделенной вещи: без неё стену не от чего искать.
+    turnWallButton.disabled = !object;
+    turnWallButton.title = object ? strings.workshop.objectToWallHint : strings.workshop.objectToWallNone;
     const depthLabel = depthField.querySelector(".workshop__label");
     if (depthLabel) {
       depthLabel.textContent = shape === "polyline" ? strings.workshop.objectBand : strings.workshop.objectDepth;
@@ -3630,6 +4090,7 @@ function createWorkshop({ api, hosts }) {
       schemeId = state.schemeId;
       draft = null;
       ghost = null;
+      objectGhost = null;
       press = null;
       selected = null;
       hover = null;
