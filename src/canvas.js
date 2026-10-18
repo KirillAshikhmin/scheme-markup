@@ -17,6 +17,7 @@ import {
   setScreen,
 } from "./app.js";
 import { strings, text } from "./strings.js";
+import { gesturePinchOf, gesturePinchStep, gestureWheel } from "./gestures.js";
 import {
   DEFAULT_MARK_SIZE,
   MARK_KIND_COMMENT,
@@ -187,57 +188,12 @@ export function canvasPanSpeed(heldMs) {
   return CANVAS_PAN_SPEED_MIN + (CANVAS_PAN_SPEED_MAX - CANVAS_PAN_SPEED_MIN) * ramp * ramp;
 }
 
-// ——— колесо и трекпад ————————————————————————————————————————————————
+// ——— колесо, трекпад и щипок ——————————————————————————————————————————
 //
-// Браузер шлёт двухпальцевый скролл трекпада теми же событиями, что и колесо
-// мыши, а различить их надо: колесом заказчик зумит каждый день, двумя пальцами
-// привык листать. Цена ошибки несимметрична — сломанный зум мыши хуже, чем
-// неузнанный трекпад, — поэтому «листать» включается только по прямой примете
-// трекпада, а всё сомнительное остаётся зумом.
-//
-// Приметы, по порядку надёжности:
-// 1. `ctrlKey` — щипок на трекпаде приходит колесом с поднятым ctrlKey (и это
-//    же Ctrl+колесо у мыши). Зум всегда, даже посреди прокрутки.
-// 2. Строчный и постраничный режимы (`deltaMode` не ноль) шлёт только колесо.
-// 3. Горизонтальная составляющая, дробный шаг или шаг мельче щелчка колеса —
-//    трекпад. Щелчок колеса — это ровно 100 (Chrome) или 120 пикселей целым
-//    числом и без горизонтали.
-// 4. Серия: внутри одного жеста решение не меняется. Палец разгоняется, и к
-//    середине маха шаги становятся крупными и целыми — по приметам уже колесо;
-//    без серии мах переключался бы на зум на полпути.
-
-// Мера масштаба у колеса и у щипка разная, и мерить их одинаково нельзя:
-// щелчок колеса — это сразу сто пикселей, а щипок сыплет дробными единицами по
-// несколько за кадр. Пока мера была общей, щипок выходил вялым: чтобы
-// приблизить, пальцы приходилось сводить долго.
-//
-// Колесу оставлена прежняя мера — заказчика она устраивает: щелчок меняет
-// масштаб примерно на четырнадцать процентов. Щипку дана мера почти в семь раз
-// крупнее: жест на треть экрана — это около сотни единиц, и на такой мере он
-// приближает вдвое с лишним, как в привычных редакторах на Mac.
-const CANVAS_WHEEL_RATE = 0.0015;
-const CANVAS_PINCH_RATE = 0.01;
-// Потолок одного события: полтора раза. Резкий щипок (а иные драйверы шлют его
-// одним крупным событием) иначе перескакивал бы половину диапазона рывком —
-// а весь диапазон холста это шестьсот крат, и пройти его должно не меньше чем
-// за полтора десятка событий.
-const CANVAS_ZOOM_STEP_MAX = 1.5;
-
-// Щипок на трекпаде: колесо с ctrlKey и мелким или дробным шагом. Ctrl с
-// колесом мыши шлёт те же ровные сто пикселей — у него своя мера, и разгонять
-// его нельзя.
-export function canvasPinchWheel(event) {
-  if (!event.ctrlKey || event.deltaMode !== 0) return false;
-  return !Number.isInteger(event.deltaY) || Math.abs(event.deltaY) < CANVAS_WHEEL_NOTCH_PX;
-}
-
-// Во сколько раз событие меняет масштаб. Шаг пропорционален величине жеста:
-// пальцы двигают масштаб ровно настолько, насколько их свели.
-export function canvasZoomFactor(event, pinch) {
-  const step = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
-  const factor = Math.exp(-step * (pinch ? CANVAS_PINCH_RATE : CANVAS_WHEEL_RATE));
-  return Math.min(CANVAS_ZOOM_STEP_MAX, Math.max(1 / CANVAS_ZOOM_STEP_MAX, factor));
-}
+// Разбора здесь больше нет: приметы трекпада, меры масштаба и щипок двумя
+// пальцами живут одним модулем (`gestures.js`), и его же зовут чертёж и окно
+// загрузки плана (таск 162, требование G241). Холст остался хозяином того, что
+// с ответом делать: `canvasPanBy` и `canvasZoomAt` ниже.
 
 // ——— режим просмотра ——————————————————————————————————————————————————
 //
@@ -651,23 +607,6 @@ const CANVAS_HINT_SETTING = "canvasHintCollapsed";
 const CANVAS_SUMMARY_SETTING = "canvasSummaryCollapsed";
 let canvasHintCollapsed = false;
 let canvasHintSeen = null;
-
-// Пауза, после которой события колеса считаются новым жестом.
-const CANVAS_WHEEL_STREAK_MS = 220;
-// Мельче этого шага щелчка у колеса мыши не бывает.
-const CANVAS_WHEEL_NOTCH_PX = 40;
-
-// Что делать с событием колеса: `zoom` или `pan`. `streak` — `{kind, time}`
-// предыдущего события или `null`.
-export function canvasWheelKind(event, streak) {
-  if (event.ctrlKey || event.metaKey) return "zoom";
-  if (event.deltaMode !== 0) return "zoom";
-  if (streak && streak.kind && event.timeStamp - streak.time <= CANVAS_WHEEL_STREAK_MS) return streak.kind;
-  const sideways = event.deltaX !== 0;
-  const fractional = !Number.isInteger(event.deltaY) || !Number.isInteger(event.deltaX);
-  const small = Math.abs(event.deltaY) < CANVAS_WHEEL_NOTCH_PX;
-  return sideways || fractional || small ? "pan" : "zoom";
-}
 
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
@@ -2968,11 +2907,7 @@ function canvasPointerDown(event) {
   // (этот таск).
   if (event.pointerType === "touch") {
     if (canvasPointers.size === 2) {
-      const [a, b] = [...canvasPointers.values()];
-      canvasPinch = {
-        distance: Math.hypot(a.x - b.x, a.y - b.y),
-        center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-      };
+      canvasPinch = gesturePinchOf(canvasPointers.values());
       canvasPressCancel();
       canvasDrag = null;
       return;
@@ -3549,19 +3484,20 @@ function canvasPointerMove(event) {
   if (canvasPointers.has(event.pointerId)) canvasPointers.set(event.pointerId, point);
 
   if (canvasPinch && canvasPointers.size === 2) {
-    const [a, b] = [...canvasPointers.values()];
-    const distance = Math.hypot(a.x - b.x, a.y - b.y);
-    const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    if (canvasPinch.distance > 0) canvasZoomAt(center, distance / canvasPinch.distance);
+    // Щипок разбирает `gestures.js` — то же правило, что в чертеже и в окне
+    // загрузки плана. Порядок применения оттуда же: сперва масштаб вокруг
+    // новой середины, потом сдвиг на её ход.
+    const step = gesturePinchStep(canvasPinch, canvasPointers.values());
+    canvasZoomAt(step.pinch.center, step.factor);
     const state = canvasState();
     canvasApi.setState({
       view: {
         ...state.view,
-        offsetX: state.view.offsetX + (center.x - canvasPinch.center.x),
-        offsetY: state.view.offsetY + (center.y - canvasPinch.center.y),
+        offsetX: state.view.offsetX + step.panX,
+        offsetY: state.view.offsetY + step.panY,
       },
     });
-    canvasPinch = { distance, center };
+    canvasPinch = step.pinch;
     return;
   }
 
@@ -3876,15 +3812,13 @@ function canvasDoubleAt(at, slack = 0) {
 function canvasWheel(event) {
   if (uiDialogDepth() > 0) return;
   event.preventDefault();
-  const kind = canvasWheelKind(event, canvasWheelStreak);
-  canvasWheelStreak = { kind, time: event.timeStamp };
-  if (kind === "pan") {
-    // Листаем как прокрутка — в ту же сторону, что и стрелки: жест вниз
-    // показывает то, что ниже, поэтому содержимое уезжает вверх.
-    canvasPanBy(-event.deltaX, -event.deltaY);
+  const move = gestureWheel(event, canvasWheelStreak);
+  canvasWheelStreak = move.streak;
+  if (move.kind === "pan") {
+    canvasPanBy(move.panX, move.panY);
     return;
   }
-  canvasZoomAt(canvasPointOf(event), canvasZoomFactor(event, canvasPinchWheel(event)));
+  canvasZoomAt(canvasPointOf(event), move.factor);
 }
 
 // ——— клавиатура ——————————————————————————————————————————————————————
