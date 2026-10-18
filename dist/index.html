@@ -7462,6 +7462,10 @@ const strings = {
     washer: "Стиральная машина",
     dryerMachine: "Сушильная машина",
     picture: "Картина",
+    // Унитаз и ванна — таск 162: в «Сантехнике» их не хватало двух самых
+    // обычных. Общий вид «Сантехника» остался на месте ради прежних чертежей.
+    toilet: "Унитаз",
+    bathtub: "Ванна",
   },
   // Разделы каталога: сперва выбирают категорию, потом вещь (G224).
   schemeObjectCategories: {
@@ -8021,6 +8025,10 @@ function text(key, vars) {
 //   габариты     — длина × глубина × высота и высота от пола. Это **умолчания
 //                  поставленной вещи**: человек правит их у себя на чертеже,
 //                  как правил и раньше (G192).
+//   `legacy`     — вещь прежнего справочника, которой больше не размечают:
+//                  в каталоге она есть (по ней открываются уже размеченные
+//                  чертежи), а в плитках выбора её не показывают. Решает это
+//                  колонка плиток — что показать, дело экрана, а не каталога.
 //   `words`      — корни, по которым **имя прежнего вида** узнаётся как эта
 //                  вещь. Мост для уже размеченных объектов: ключа у них нет, а
 //                  имя есть. Сравнение терпимое (регистр, «ё», пробелы по
@@ -8057,7 +8065,8 @@ const OBJECT_MOUNTS = ["floor", "wall", "inFloor"];
 //
 //   **мебель и сантехника** — ходовой размер: обеденный стол 1400 × 800
 //   высотой 750, кровать 1600 × 2000 высотой 500 (числа заказчика), раковина
-//   верхом на 850, душевой уголок 900 × 900.
+//   верхом на 850, душевой уголок 900 × 900, унитаз-компакт 360 × 650 и ванна
+//   1700 × 700 (откуда взяты — у самих записей).
 //
 // Высота `null` — «во всю высоту помещения»: у колонны, ниши, короба и
 // лестницы своего числа нет, и выдумывать его значило бы врать.
@@ -8168,9 +8177,50 @@ const CATALOG = [
     heightAboveFloorMm: 0,
     words: ["бассейн"],
   },
-  // Общий вид «Сантехника» из прежнего справочника: унитаз, биде, ванна — всё,
-  // что заводили одним видом до каталога. Остаётся, потому что им уже
-  // размечены чужие чертежи.
+  // Унитаз напольный, он же «компакт» — чаша с бачком одним изделием.
+  // 360 × 650 и 780 в высоту: ширина чаши у ходовых компактов 340–380,
+  // вылет от стены с бачком 600–700, верх бачка 780–800 (седло при этом на
+  // 400). Взяты середины этих рядов — так стоит то, что покупают.
+  {
+    key: "toilet",
+    category: "sanitary",
+    mount: "floor",
+    shape: "rect",
+    widthMm: 360,
+    depthMm: 650,
+    heightMm: 780,
+    heightAboveFloorMm: 0,
+    words: ["унитаз"],
+  },
+  // Ванна прямоугольная 1700 × 700, борт на 600. Это самый ходовой размер и
+  // стального, и акрилового ряда (ГОСТ 1154-80 на стальные эмалированные даёт
+  // 1500/1700 в длину и 700/750 в ширину), и ровно он встаёт в санузел
+  // серийного дома — поперёк стены в 1700. Высота борта над полом у ванны на
+  // каркасе 590–620.
+  {
+    key: "bathtub",
+    category: "sanitary",
+    mount: "floor",
+    shape: "rect",
+    widthMm: 1700,
+    depthMm: 700,
+    heightMm: 600,
+    heightAboveFloorMm: 0,
+    words: ["ванн"],
+  },
+  // Общий вид «Сантехника» из прежнего справочника: биде и всё остальное, что
+  // заводили одним видом до каталога. Остаётся, потому что им уже размечены
+  // чужие чертежи, и **из плиток выбора спрятан** (`legacy`): в категории
+  // «Сантехника» плитка «Сантехника» не отвечает на вопрос «та ли это вещь», а
+  // нарисована она унитазом — то есть после сегодняшнего дня была бы вторым
+  // унитазом с именем похуже. Прячет её сама колонка плиток
+  // (`panels/objectTiles.js`), и выбранную показывает: человек должен видеть,
+  // чем стоит вещь на его чертеже.
+  //
+  // Слово «унитаз» ушло к унитазу — это честный хозяин корня, — и прежний
+  // чертёж с видом по имени «Унитаз» от переезда не меняется: тело в объёме у
+  // унитаза и у общего вида **одно и то же описание** (`objectModels`), а на
+  // чертеже вещь рисуется габаритом и своим именем, а не картинкой каталога.
   {
     key: "plumbing",
     category: "sanitary",
@@ -8180,7 +8230,8 @@ const CATALOG = [
     depthMm: 400,
     heightMm: 400,
     heightAboveFloorMm: 0,
-    words: ["сантехник", "унитаз"],
+    legacy: true,
+    words: ["сантехник"],
   },
 
   // ——— техника ———
@@ -19061,6 +19112,28 @@ const VIEWS_OBJECTS = {
       viewArc(0.14, 0.02, 0.14, 0, Math.PI, false),
     ),
   },
+  // Унитаз: бачок у стены, чаша и кольцо сиденья. Сиденьем и отличается от
+  // общего вида «Сантехника», который нарисован тем же унитазом без него:
+  // плитки обязаны различаться, а тело в объёме у них одно (`objectModels`).
+  toilet: {
+    shapes: [],
+    parts: viewParts(
+      viewRect(-0.3, -0.46, 0.6, 0.22, 0.03),
+      viewCircle(0, 0.12, 0.32),
+      viewCircle(0, 0.12, 0.21),
+    ),
+  },
+  // Ванна: борт, чаша, слив у изголовья и смеситель над ним — так ванну и
+  // показывают на плане санузла.
+  bathtub: {
+    shapes: [],
+    parts: viewParts(
+      viewRect(-0.48, -0.46, 0.96, 0.92, 0.08),
+      viewRect(-0.4, -0.38, 0.8, 0.76, 0.14),
+      viewCircle(-0.26, 0, 0.06),
+      viewRect(-0.465, -0.09, 0.05, 0.18, 0.02),
+    ),
+  },
   // Сантехника общим видом: бачок и чаша со сливом — унитаз сверху.
   plumbing: {
     shapes: [],
@@ -26762,6 +26835,177 @@ if (typeof document !== "undefined") {
   }
 }
 
+// src/gestures.js
+// Разбор жеста над полотном: **что пришло и во что это превращается** (таск
+// 162, требование G241).
+//
+// Слова заказчика: «На виде Схема можно двигать полоно 2 пальцами, а на
+// Чертеже нет — приведи управление в один вид, без дублирования кода». Разбор
+// колеса с приметами трекпада жил в `canvas.js`, а у мастерской чертежа был
+// свой щипок по касаниям — два правила вместо одного, и двухпальцевый скролл
+// трекпада листал план, но не чертёж.
+//
+// Теперь правило одно и лежит здесь. Модуль **чистый**: ни DOM, ни состояния,
+// ни рисования — на вход событие колеса или две точки касания, на выход
+// «сдвинуть на столько» и «умножить масштаб на столько». Применяют это сами
+// поверхности: у плана свой `canvasZoomAt`, у чертежа свой `zoomAt`, у окна
+// загрузки плана — прокрутка; сводить их в одну функцию значило бы тащить
+// сюда три вида состояния.
+//
+// Зовут модуль три поверхности: план (`canvas.js`), чертёж
+// (`panels/workshop.js`) и окно загрузки плана (`panels/schemes.js`). Своих
+// примет ни у одной не остаётся.
+//
+// **Объём (`panels/volume.js`) сюда не ходит, и это не недоделка.** Там другой
+// разбор: колесо отодвигает камеру в обзоре, а палец ходит и вертит головой —
+// жест тот же, смысл другой, и сводить их в одно правило значило бы соврать.
+
+// ——— колесо и трекпад ————————————————————————————————————————————————
+//
+// Приметы ниже выверены с заказчиком и перенесены сюда **как есть** — вместе с
+// ценой ошибки, названной в них же.
+//
+// Браузер шлёт двухпальцевый скролл трекпада теми же событиями, что и колесо
+// мыши, а различить их надо: колесом заказчик зумит каждый день, двумя пальцами
+// привык листать. Цена ошибки несимметрична — сломанный зум мыши хуже, чем
+// неузнанный трекпад, — поэтому «листать» включается только по прямой примете
+// трекпада, а всё сомнительное остаётся зумом.
+//
+// Приметы, по порядку надёжности:
+// 1. `ctrlKey` — щипок на трекпаде приходит колесом с поднятым ctrlKey (и это
+//    же Ctrl+колесо у мыши). Зум всегда, даже посреди прокрутки.
+// 2. Строчный и постраничный режимы (`deltaMode` не ноль) шлёт только колесо.
+// 3. Горизонтальная составляющая, дробный шаг или шаг мельче щелчка колеса —
+//    трекпад. Щелчок колеса — это ровно 100 (Chrome) или 120 пикселей целым
+//    числом и без горизонтали.
+// 4. Серия: внутри одного жеста решение не меняется. Палец разгоняется, и к
+//    середине маха шаги становятся крупными и целыми — по приметам уже колесо;
+//    без серии мах переключался бы на зум на полпути.
+
+// Пауза, после которой события колеса считаются новым жестом.
+const GESTURE_STREAK_MS = 220;
+// Мельче этого шага щелчка у колеса мыши не бывает.
+const GESTURE_NOTCH_PX = 40;
+
+// Мера масштаба у колеса и у щипка разная, и мерить их одинаково нельзя:
+// щелчок колеса — это сразу сто пикселей, а щипок сыплет дробными единицами по
+// несколько за кадр. Пока мера была общей, щипок выходил вялым: чтобы
+// приблизить, пальцы приходилось сводить долго.
+//
+// Колесу оставлена прежняя мера — заказчика она устраивает: щелчок меняет
+// масштаб примерно на четырнадцать процентов. Щипку дана мера почти в семь раз
+// крупнее: жест на треть экрана — это около сотни единиц, и на такой мере он
+// приближает вдвое с лишним, как в привычных редакторах на Mac.
+const GESTURE_WHEEL_RATE = 0.0015;
+const GESTURE_PINCH_RATE = 0.01;
+// Потолок одного события: полтора раза. Резкий щипок (а иные драйверы шлют его
+// одним крупным событием) иначе перескакивал бы половину диапазона рывком —
+// а весь диапазон холста это шестьсот крат, и пройти его должно не меньше чем
+// за полтора десятка событий.
+const GESTURE_ZOOM_STEP_MAX = 1.5;
+
+/**
+ * Что делать с событием колеса: `zoom` или `pan`. `streak` — `{kind, time}`
+ * предыдущего события или `null`.
+ */
+function gestureWheelKind(event, streak) {
+  if (event.ctrlKey || event.metaKey) return "zoom";
+  if (event.deltaMode !== 0) return "zoom";
+  if (streak && streak.kind && event.timeStamp - streak.time <= GESTURE_STREAK_MS) return streak.kind;
+  const sideways = event.deltaX !== 0;
+  const fractional = !Number.isInteger(event.deltaY) || !Number.isInteger(event.deltaX);
+  const small = Math.abs(event.deltaY) < GESTURE_NOTCH_PX;
+  return sideways || fractional || small ? "pan" : "zoom";
+}
+
+/**
+ * Щипок на трекпаде: колесо с ctrlKey и мелким или дробным шагом. Ctrl с
+ * колесом мыши шлёт те же ровные сто пикселей — у него своя мера, и разгонять
+ * его нельзя.
+ */
+function gestureWheelPinch(event) {
+  if (!event.ctrlKey || event.deltaMode !== 0) return false;
+  return !Number.isInteger(event.deltaY) || Math.abs(event.deltaY) < GESTURE_NOTCH_PX;
+}
+
+/**
+ * Во сколько раз событие меняет масштаб. Шаг пропорционален величине жеста:
+ * пальцы двигают масштаб ровно настолько, насколько их свели.
+ */
+function gestureZoomFactor(event, pinch) {
+  const step = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+  const factor = Math.exp(-step * (pinch ? GESTURE_PINCH_RATE : GESTURE_WHEEL_RATE));
+  return Math.min(GESTURE_ZOOM_STEP_MAX, Math.max(1 / GESTURE_ZOOM_STEP_MAX, factor));
+}
+
+/**
+ * **Единственная дверь для колеса.** Поверхность отдаёт событие и свою память
+ * о серии, получает готовый ответ:
+ *
+ *   `kind`      — `pan` или `zoom`;
+ *   `streak`    — что запомнить до следующего события (серия, примета 4);
+ *   `panX/panY` — на сколько сдвинуть полотно при `pan`;
+ *   `factor`    — во сколько раз изменить масштаб при `zoom`.
+ *
+ * Оба числа считаются всегда — так ответ читается целиком, а не по ветке.
+ *
+ * Листаем **как прокрутка**, в ту же сторону, что и стрелки: жест вниз
+ * показывает то, что ниже, поэтому содержимое уезжает вверх. Отсюда минусы.
+ */
+function gestureWheel(event, streak) {
+  const kind = gestureWheelKind(event, streak);
+  return {
+    kind,
+    streak: { kind, time: event.timeStamp },
+    panX: -event.deltaX,
+    panY: -event.deltaY,
+    factor: gestureZoomFactor(event, gestureWheelPinch(event)),
+  };
+}
+
+// ——— касания ——————————————————————————————————————————————————————————
+//
+// Щипок двумя пальцами на планшете. Примет здесь не нужно: два пальца — это
+// всегда щипок, и мера у него прямая (во сколько раз развели — во столько и
+// приблизили), без `GESTURE_PINCH_RATE`: разгонять то, что человек ведёт
+// руками, незачем.
+//
+// **Порядок применения** у всех поверхностей один, и взят он с плана, потому
+// что к нему заказчик привык: сперва масштаб вокруг новой середины между
+// пальцами, потом сдвиг на то, насколько эта середина уехала. Пальцы
+// одновременно сводят и везут — и то и другое должно случиться за один шаг.
+
+/** Щипок по двум точкам: расстояние и середина. Точек не две — `null`. */
+function gesturePinchOf(points) {
+  const [first, second] = [...points];
+  if (!first || !second) return null;
+  return {
+    distance: Math.hypot(first.x - second.x, first.y - second.y),
+    center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
+  };
+}
+
+/**
+ * Шаг щипка: от прошлого состояния к новым точкам.
+ *
+ * Возвращает `{factor, panX, panY, pinch}` — множитель масштаба, ход середины
+ * и что запомнить до следующего события. `factor` ровно 1, пока мерить не от
+ * чего: нулевое расстояние (пальцы пришли в одну точку) не должно уносить
+ * масштаб в бесконечность.
+ */
+function gesturePinchStep(previous, points) {
+  const now = gesturePinchOf(points);
+  if (!now) return null;
+  const was = previous || now;
+  const factor = was.distance > 0 && now.distance > 0 ? now.distance / was.distance : 1;
+  return {
+    factor,
+    panX: now.center.x - was.center.x,
+    panY: now.center.y - was.center.y,
+    pinch: now,
+  };
+}
+
 // src/roomTrace.js
 // Помещение по чертежу: показал точку внутри комнаты — контур нашёлся сам.
 //
@@ -27941,6 +28185,7 @@ function createElevationStrip({ onSide, onClose, onViews, views }) {
 
 
 
+
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
 //
 // Стрелки листают план, как прокрутка: камера едет в сторону стрелки, а не
@@ -27996,57 +28241,12 @@ function canvasPanSpeed(heldMs) {
   return CANVAS_PAN_SPEED_MIN + (CANVAS_PAN_SPEED_MAX - CANVAS_PAN_SPEED_MIN) * ramp * ramp;
 }
 
-// ——— колесо и трекпад ————————————————————————————————————————————————
+// ——— колесо, трекпад и щипок ——————————————————————————————————————————
 //
-// Браузер шлёт двухпальцевый скролл трекпада теми же событиями, что и колесо
-// мыши, а различить их надо: колесом заказчик зумит каждый день, двумя пальцами
-// привык листать. Цена ошибки несимметрична — сломанный зум мыши хуже, чем
-// неузнанный трекпад, — поэтому «листать» включается только по прямой примете
-// трекпада, а всё сомнительное остаётся зумом.
-//
-// Приметы, по порядку надёжности:
-// 1. `ctrlKey` — щипок на трекпаде приходит колесом с поднятым ctrlKey (и это
-//    же Ctrl+колесо у мыши). Зум всегда, даже посреди прокрутки.
-// 2. Строчный и постраничный режимы (`deltaMode` не ноль) шлёт только колесо.
-// 3. Горизонтальная составляющая, дробный шаг или шаг мельче щелчка колеса —
-//    трекпад. Щелчок колеса — это ровно 100 (Chrome) или 120 пикселей целым
-//    числом и без горизонтали.
-// 4. Серия: внутри одного жеста решение не меняется. Палец разгоняется, и к
-//    середине маха шаги становятся крупными и целыми — по приметам уже колесо;
-//    без серии мах переключался бы на зум на полпути.
-
-// Мера масштаба у колеса и у щипка разная, и мерить их одинаково нельзя:
-// щелчок колеса — это сразу сто пикселей, а щипок сыплет дробными единицами по
-// несколько за кадр. Пока мера была общей, щипок выходил вялым: чтобы
-// приблизить, пальцы приходилось сводить долго.
-//
-// Колесу оставлена прежняя мера — заказчика она устраивает: щелчок меняет
-// масштаб примерно на четырнадцать процентов. Щипку дана мера почти в семь раз
-// крупнее: жест на треть экрана — это около сотни единиц, и на такой мере он
-// приближает вдвое с лишним, как в привычных редакторах на Mac.
-const CANVAS_WHEEL_RATE = 0.0015;
-const CANVAS_PINCH_RATE = 0.01;
-// Потолок одного события: полтора раза. Резкий щипок (а иные драйверы шлют его
-// одним крупным событием) иначе перескакивал бы половину диапазона рывком —
-// а весь диапазон холста это шестьсот крат, и пройти его должно не меньше чем
-// за полтора десятка событий.
-const CANVAS_ZOOM_STEP_MAX = 1.5;
-
-// Щипок на трекпаде: колесо с ctrlKey и мелким или дробным шагом. Ctrl с
-// колесом мыши шлёт те же ровные сто пикселей — у него своя мера, и разгонять
-// его нельзя.
-function canvasPinchWheel(event) {
-  if (!event.ctrlKey || event.deltaMode !== 0) return false;
-  return !Number.isInteger(event.deltaY) || Math.abs(event.deltaY) < CANVAS_WHEEL_NOTCH_PX;
-}
-
-// Во сколько раз событие меняет масштаб. Шаг пропорционален величине жеста:
-// пальцы двигают масштаб ровно настолько, насколько их свели.
-function canvasZoomFactor(event, pinch) {
-  const step = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
-  const factor = Math.exp(-step * (pinch ? CANVAS_PINCH_RATE : CANVAS_WHEEL_RATE));
-  return Math.min(CANVAS_ZOOM_STEP_MAX, Math.max(1 / CANVAS_ZOOM_STEP_MAX, factor));
-}
+// Разбора здесь больше нет: приметы трекпада, меры масштаба и щипок двумя
+// пальцами живут одним модулем (`gestures.js`), и его же зовут чертёж и окно
+// загрузки плана (таск 162, требование G241). Холст остался хозяином того, что
+// с ответом делать: `canvasPanBy` и `canvasZoomAt` ниже.
 
 // ——— режим просмотра ——————————————————————————————————————————————————
 //
@@ -28458,23 +28658,6 @@ const CANVAS_HINT_SETTING = "canvasHintCollapsed";
 const CANVAS_SUMMARY_SETTING = "canvasSummaryCollapsed";
 let canvasHintCollapsed = false;
 let canvasHintSeen = null;
-
-// Пауза, после которой события колеса считаются новым жестом.
-const CANVAS_WHEEL_STREAK_MS = 220;
-// Мельче этого шага щелчка у колеса мыши не бывает.
-const CANVAS_WHEEL_NOTCH_PX = 40;
-
-// Что делать с событием колеса: `zoom` или `pan`. `streak` — `{kind, time}`
-// предыдущего события или `null`.
-function canvasWheelKind(event, streak) {
-  if (event.ctrlKey || event.metaKey) return "zoom";
-  if (event.deltaMode !== 0) return "zoom";
-  if (streak && streak.kind && event.timeStamp - streak.time <= CANVAS_WHEEL_STREAK_MS) return streak.kind;
-  const sideways = event.deltaX !== 0;
-  const fractional = !Number.isInteger(event.deltaY) || !Number.isInteger(event.deltaX);
-  const small = Math.abs(event.deltaY) < CANVAS_WHEEL_NOTCH_PX;
-  return sideways || fractional || small ? "pan" : "zoom";
-}
 
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
@@ -30768,11 +30951,7 @@ function canvasPointerDown(event) {
   // (этот таск).
   if (event.pointerType === "touch") {
     if (canvasPointers.size === 2) {
-      const [a, b] = [...canvasPointers.values()];
-      canvasPinch = {
-        distance: Math.hypot(a.x - b.x, a.y - b.y),
-        center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-      };
+      canvasPinch = gesturePinchOf(canvasPointers.values());
       canvasPressCancel();
       canvasDrag = null;
       return;
@@ -31349,19 +31528,20 @@ function canvasPointerMove(event) {
   if (canvasPointers.has(event.pointerId)) canvasPointers.set(event.pointerId, point);
 
   if (canvasPinch && canvasPointers.size === 2) {
-    const [a, b] = [...canvasPointers.values()];
-    const distance = Math.hypot(a.x - b.x, a.y - b.y);
-    const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    if (canvasPinch.distance > 0) canvasZoomAt(center, distance / canvasPinch.distance);
+    // Щипок разбирает `gestures.js` — то же правило, что в чертеже и в окне
+    // загрузки плана. Порядок применения оттуда же: сперва масштаб вокруг
+    // новой середины, потом сдвиг на её ход.
+    const step = gesturePinchStep(canvasPinch, canvasPointers.values());
+    canvasZoomAt(step.pinch.center, step.factor);
     const state = canvasState();
     canvasApi.setState({
       view: {
         ...state.view,
-        offsetX: state.view.offsetX + (center.x - canvasPinch.center.x),
-        offsetY: state.view.offsetY + (center.y - canvasPinch.center.y),
+        offsetX: state.view.offsetX + step.panX,
+        offsetY: state.view.offsetY + step.panY,
       },
     });
-    canvasPinch = { distance, center };
+    canvasPinch = step.pinch;
     return;
   }
 
@@ -31676,15 +31856,13 @@ function canvasDoubleAt(at, slack = 0) {
 function canvasWheel(event) {
   if (uiDialogDepth() > 0) return;
   event.preventDefault();
-  const kind = canvasWheelKind(event, canvasWheelStreak);
-  canvasWheelStreak = { kind, time: event.timeStamp };
-  if (kind === "pan") {
-    // Листаем как прокрутка — в ту же сторону, что и стрелки: жест вниз
-    // показывает то, что ниже, поэтому содержимое уезжает вверх.
-    canvasPanBy(-event.deltaX, -event.deltaY);
+  const move = gestureWheel(event, canvasWheelStreak);
+  canvasWheelStreak = move.streak;
+  if (move.kind === "pan") {
+    canvasPanBy(move.panX, move.panY);
     return;
   }
-  canvasZoomAt(canvasPointOf(event), canvasZoomFactor(event, canvasPinchWheel(event)));
+  canvasZoomAt(canvasPointOf(event), move.factor);
 }
 
 // ——— клавиатура ——————————————————————————————————————————————————————
@@ -37219,10 +37397,10 @@ const MODELS_POWER = {
 //
 // Ключи — ключи встроенного каталога (таск 154): тринадцать вещей из брифа
 // заказчика (стол, кровать, бассейн, стиральная и сушильная машины, раковина,
-// полотенцесушитель, душ, тумба, картина, плита, посудомойка, холодильник) и
+// полотенцесушитель, душ, тумба, картина, плита, посудомойка, холодильник),
 // девять нынешних видов (колонна, ниша, короб-стояк, лестница, щит, радиатор,
-// столешница, сантехника, шкаф) — шкаф у них общий, поэтому ключей двадцать
-// два.
+// столешница, сантехника, шкаф) — шкаф у них общий — и унитаз с ванной
+// (таск 162). Всего ключей двадцать четыре.
 //
 // ——— мост до прежних видов ———
 //
@@ -37240,6 +37418,18 @@ const MODELS_POWER = {
 // во весь габарит, и силуэт у них один. Делить их двумя одинаковыми записями
 // значило бы развести то, что завтра правится вместе.
 const MODEL_SHAFT = modelParts(modelBox("shaft"));
+
+// Унитаз — **одно описание на две вещи**: общий вид «Сантехника» из прежнего
+// справочника с самого начала был нарисован унитазом («унитаз — чаша плюс
+// бачок» — пример заказчика дословно), и когда в каталог пришёл настоящий
+// унитаз (таск 162), заводить ему второе такое же тело было бы нечестно: у
+// прежних чертежей, где вещь узнаётся по имени «Унитаз», кадр обязан остаться
+// прежним (G68). Доли считаются от габарита, поэтому одно описание одинаково
+// хорошо сидит и в 700 × 400 общего вида, и в 360 × 650 компакта.
+const MODEL_TOILET = modelParts(
+  modelCyl("bowl", { x: -0.3, width: 0.6, y: -0.5, depth: 0.75, z: 0, height: 0.62, material: "light" }),
+  modelBox("cistern", { x: -0.32, width: 0.64, y: 0.2, depth: 0.3, z: 0.3, height: 0.7 }),
+);
 
 const MODEL_LAUNDRY = modelParts(
   modelCyl("hatch", { x: -0.26, width: 0.52, y: -0.5, depth: 0.38, z: 0.26, height: 0.52, material: "glass" }),
@@ -37290,12 +37480,18 @@ const MODELS_OBJECTS = {
     modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
     modelBox("front", { y: -0.5, depth: 0.9, z: 0, height: 0.88 }),
   ),
-  // Сантехника: чаша и бачок — пример заказчика дословно («унитаз — чаша плюс
-  // бачок»). Вид в справочнике общий на всю сантехнику, поэтому и модель
-  // общая: раковина с душем в каталоге заведены своими ключами.
-  plumbing: modelParts(
-    modelCyl("bowl", { x: -0.3, width: 0.6, y: -0.5, depth: 0.75, z: 0, height: 0.62, material: "light" }),
-    modelBox("cistern", { x: -0.32, width: 0.64, y: 0.2, depth: 0.3, z: 0.3, height: 0.7 }),
+  // Сантехника общим видом и унитаз каталога — одно тело на двоих, см.
+  // `MODEL_TOILET` выше. Раковина, душ и ванна в каталоге заведены своими
+  // ключами, и у них свои тела.
+  plumbing: MODEL_TOILET,
+  toilet: MODEL_TOILET,
+  // Ванна: корпус, вода у борта и смеситель у изголовья. Чашу внутрь корпуса
+  // не выгрызаем — тел всего два вида (ADR: коробка и цилиндр), и ванна
+  // читается бортом с водой, а не толщиной стенки.
+  bathtub: modelParts(
+    modelBox("case", { z: 0, height: 0.9 }),
+    modelBox("water", { x: -0.36, width: 0.72, y: -0.4, depth: 0.8, z: 0.9, height: 0.08, material: "glass" }),
+    modelBox("tap", { x: -0.47, width: 0.08, y: -0.06, depth: 0.12, z: 0.9, height: 0.1, material: "metal" }),
   ),
   // Шкаф: корпус и фасад. Он же «шкаф» из брифа — вид и вещь каталога здесь
   // одно и то же.
@@ -45409,9 +45605,16 @@ registerPanel(PANEL_IDS.canvasCard, mountMarkCard);
 // рисует тот же реестр, которым рисуются изображения меток
 // (`objectViews/registry.js`): своего рисунка у плитки нет.
 //
-// Поиска здесь нет нарочно: вещей двадцать две, категорий шесть, и в самой
-// крупной — пять плиток. Поле поиска отняло бы строку у того, ради чего оно
+// Поиска здесь нет нарочно: вещей двадцать четыре, категорий шесть, и в самой
+// крупной — шесть плиток. Поле поиска отняло бы строку у того, ради чего оно
 // заведено, и ответ всё равно был бы виден целиком.
+//
+// **Вещь прежнего справочника из сетки спрятана** (`entry.legacy`, таск 162):
+// общий вид «Сантехника» остался в каталоге — им размечены чужие чертежи, — но
+// в плитках он стоял бы вторым унитазом с именем похуже. Прячет его экран, а
+// не каталог: что показать в выборе — дело колонки. И пока такой вещью стоит
+// **выделенное**, её плитка видна и горит: человек обязан видеть, чем стоит
+// вещь на его чертеже, а подсветить вместо неё похожую значило бы соврать.
 
 
 
@@ -45454,7 +45657,7 @@ function createObjectTiles({ onPick }) {
   // Категория — память панели, а не объекта: выбрал «Технику», поставил
   // холодильник и плиту — список не прыгает обратно.
   let category = OBJECT_CATEGORIES[0];
-  let shownCategory = null;
+  let shownMark = null;
   let currentKey = null;
 
   const select = uiEl("select", { class: "ui-input objectTiles__category" });
@@ -45469,11 +45672,21 @@ function createObjectTiles({ onPick }) {
   const grid = uiEl("div", { class: "objectTiles__grid" });
   const node = uiEl("div", { class: "objectTiles" }, [select, grid]);
 
+  // Что показать в сетке: вещи категории без прежних — и прежняя, если ею
+  // стоит выделенное.
+  function tiles() {
+    return objectCatalogCategory(category).filter((entry) => !entry.legacy || entry.key === currentKey);
+  }
+
   function draw() {
-    if (shownCategory !== category) {
-      shownCategory = category;
+    const shown = tiles();
+    // Отметка пересборки — категория и состав: от прежней вещи сетка меняется
+    // при том же разделе, и одной категории в отметке не хватило бы.
+    const mark = category + "\n" + shown.map((entry) => entry.key).join(",");
+    if (shownMark !== mark) {
+      shownMark = mark;
       grid.replaceChildren(
-        ...objectCatalogCategory(category).map((entry) =>
+        ...shown.map((entry) =>
           uiEl(
             "button",
             {
@@ -52200,6 +52413,7 @@ registerPanel(PANEL_IDS.screenVolume, mountVolumeScreen);
 
 
 
+
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
 
@@ -52691,14 +52905,6 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
       stage.scrollTop -= dy;
     }
 
-    function pinchNow() {
-      const [first, second] = [...fingers.values()];
-      return {
-        distance: Math.hypot(first.x - second.x, first.y - second.y),
-        center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
-      };
-    }
-
     function stopDrag(keepFrame) {
       if (!drag) return;
       // Рамку, которую начали тянуть и бросили (пришёл второй палец), не
@@ -52717,7 +52923,7 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
         fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (fingers.size === 2) {
           stopDrag(false);
-          pinch = { ...pinchNow(), zoom };
+          pinch = gesturePinchOf(fingers.values());
           event.preventDefault();
           return;
         }
@@ -52734,10 +52940,12 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
       if (fingers.has(event.pointerId)) {
         fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (pinch && fingers.size >= 2) {
-          const now = pinchNow();
-          panBy(now.center.x - pinch.center.x, now.center.y - pinch.center.y);
-          pinch.center = now.center;
-          if (pinch.distance > 0 && now.distance > 0) zoomTo(pinch.zoom * (now.distance / pinch.distance), now.center);
+          // Тот же `gestures.js` и тот же порядок, что на плане: масштаб вокруг
+          // новой середины, затем сдвиг на её ход.
+          const step = gesturePinchStep(pinch, fingers.values());
+          zoomTo(zoom * step.factor, step.pinch.center);
+          panBy(step.panX, step.panY);
+          pinch = step.pinch;
           return;
         }
       }
@@ -52764,19 +52972,25 @@ function openPlanEditor({ blob, width, height, title, beforeApply }) {
       if (wasFrame && frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
     }
 
-    // Колесо и щипок разбираются теми же приметами, что на холсте: мышью
-    // заказчик зумит, двумя пальцами по трекпаду — листает. Своего разбора
-    // здесь быть не должно, иначе одно и то же колесо в двух местах
-    // приложения делало бы разное.
+    // Колесо, трекпад и щипок разбирает `gestures.js` — то же правило, что на
+    // плане и в чертеже: мышью заказчик зумит, двумя пальцами по трекпаду —
+    // листает. Своего разбора здесь быть не должно, иначе одно и то же колесо
+    // в трёх местах приложения делало бы разное.
     stage.addEventListener(
       "wheel",
       (event) => {
         if (busy) return;
-        const kind = canvasWheelKind(event, streak);
-        streak = { kind, time: event.timeStamp };
-        if (kind === "pan") return;
+        const move = gestureWheel(event, streak);
+        streak = move.streak;
         event.preventDefault();
-        zoomTo(zoom * canvasZoomFactor(event, canvasPinchWheel(event)), { x: event.clientX, y: event.clientY });
+        // Увеличенный план здесь возят прокруткой окна — ею же листает и
+        // трекпад. Прежде `pan` отбрасывался, и двум пальцам тут не отвечало
+        // ничто.
+        if (move.kind === "pan") {
+          panBy(move.panX, move.panY);
+          return;
+        }
+        zoomTo(zoom * move.factor, { x: event.clientX, y: event.clientY });
       },
       { passive: false },
     );
@@ -54292,6 +54506,7 @@ function openTypePicker(project, options = {}) {
 // у объекта без чертежа — ноль правок, ноль шагов истории, ноль новых полей в
 // `project.json`. Пустые списки в объект не попадают: их не кладёт ни одна
 // функция модели чертежа.
+
 
 
 
@@ -56470,7 +56685,7 @@ function createWorkshop({ api, hosts }) {
         // пальца пришли возить и приближать. Без этого щипок оставлял за
         // собой вершину, поставленную первым касанием.
         press = null;
-        pinch = { ...pinchNow(), zoom: view.zoom };
+        pinch = gesturePinchOf(fingers.values());
         event.preventDefault();
         return;
       }
@@ -56557,14 +56772,6 @@ function createWorkshop({ api, hosts }) {
     // «Правка» по пустому месту снимает выделение — как клик по пустому месту
     // на холсте. Взятое под руку сюда не доходит: оно ушло в `drag`.
     select(null);
-  }
-
-  function pinchNow() {
-    const [first, second] = [...fingers.values()];
-    return {
-      distance: Math.hypot(first.x - second.x, first.y - second.y),
-      center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
-    };
   }
 
   function addVertex(event) {
@@ -56674,13 +56881,13 @@ function createWorkshop({ api, hosts }) {
     if (fingers.has(event.pointerId)) {
       fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (pinch && fingers.size >= 2) {
-        const now = pinchNow();
+        // Тот же `gestures.js`, что у колеса, и тот же порядок, что на плане:
+        // масштаб вокруг новой середины, затем сдвиг на её ход.
+        const step = gesturePinchStep(pinch, fingers.values());
         const rect = node.getBoundingClientRect();
-        panBy(now.center.x - pinch.center.x, now.center.y - pinch.center.y);
-        if (pinch.distance > 0 && now.distance > 0) {
-          zoomAt({ x: now.center.x - rect.left, y: now.center.y - rect.top }, now.distance / pinch.distance);
-        }
-        pinch = now;
+        zoomAt({ x: step.pinch.center.x - rect.left, y: step.pinch.center.y - rect.top }, step.factor);
+        panBy(step.panX, step.panY);
+        pinch = step.pinch;
         return;
       }
     }
@@ -56933,18 +57140,22 @@ function createWorkshop({ api, hosts }) {
   stage.addEventListener(
     "wheel",
     (event) => {
-      // Колесо и щипок разбираются теми же приметами, что на холсте и в окне
-      // загрузки плана: одно и то же колесо в трёх местах приложения не должно
-      // делать разного.
-      const kind = canvasWheelKind(event, streak);
-      streak = { kind, time: event.timeStamp };
-      if (kind === "pan") return;
+      // Колесо, трекпад и щипок разбирает `gestures.js` — то же правило, что на
+      // плане и в окне загрузки плана: одно и то же колесо в трёх местах
+      // приложения не должно делать разного.
+      //
+      // Прежде здесь `pan` молча отбрасывался, и двухпальцевый скролл трекпада
+      // чертёж не листал: «На виде Схема можно двигать полоно 2 пальцами, а на
+      // Чертеже нет» (G241). Теперь листает — тем же ходом и в ту же сторону.
+      const move = gestureWheel(event, streak);
+      streak = move.streak;
       event.preventDefault();
+      if (move.kind === "pan") {
+        panBy(move.panX, move.panY);
+        return;
+      }
       const rect = node.getBoundingClientRect();
-      zoomAt(
-        { x: event.clientX - rect.left, y: event.clientY - rect.top },
-        canvasZoomFactor(event, canvasPinchWheel(event)),
-      );
+      zoomAt({ x: event.clientX - rect.left, y: event.clientY - rect.top }, move.factor);
     },
     { passive: false },
   );

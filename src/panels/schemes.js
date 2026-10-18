@@ -39,13 +39,8 @@ import {
   updateOutline,
   updateScheme,
 } from "../model.js";
-import {
-  canvasCommit,
-  canvasPinchWheel,
-  canvasStartScale,
-  canvasWheelKind,
-  canvasZoomFactor,
-} from "../canvas.js";
+import { canvasCommit, canvasStartScale } from "../canvas.js";
+import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
 import { canUndo } from "../history.js";
 import {
   countPointsOutside,
@@ -561,14 +556,6 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
       stage.scrollTop -= dy;
     }
 
-    function pinchNow() {
-      const [first, second] = [...fingers.values()];
-      return {
-        distance: Math.hypot(first.x - second.x, first.y - second.y),
-        center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
-      };
-    }
-
     function stopDrag(keepFrame) {
       if (!drag) return;
       // Рамку, которую начали тянуть и бросили (пришёл второй палец), не
@@ -587,7 +574,7 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
         fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (fingers.size === 2) {
           stopDrag(false);
-          pinch = { ...pinchNow(), zoom };
+          pinch = gesturePinchOf(fingers.values());
           event.preventDefault();
           return;
         }
@@ -604,10 +591,12 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
       if (fingers.has(event.pointerId)) {
         fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (pinch && fingers.size >= 2) {
-          const now = pinchNow();
-          panBy(now.center.x - pinch.center.x, now.center.y - pinch.center.y);
-          pinch.center = now.center;
-          if (pinch.distance > 0 && now.distance > 0) zoomTo(pinch.zoom * (now.distance / pinch.distance), now.center);
+          // Тот же `gestures.js` и тот же порядок, что на плане: масштаб вокруг
+          // новой середины, затем сдвиг на её ход.
+          const step = gesturePinchStep(pinch, fingers.values());
+          zoomTo(zoom * step.factor, step.pinch.center);
+          panBy(step.panX, step.panY);
+          pinch = step.pinch;
           return;
         }
       }
@@ -634,19 +623,25 @@ export function openPlanEditor({ blob, width, height, title, beforeApply }) {
       if (wasFrame && frame && (frame.width < PLAN_FRAME_MIN || frame.height < PLAN_FRAME_MIN)) setFrame(null);
     }
 
-    // Колесо и щипок разбираются теми же приметами, что на холсте: мышью
-    // заказчик зумит, двумя пальцами по трекпаду — листает. Своего разбора
-    // здесь быть не должно, иначе одно и то же колесо в двух местах
-    // приложения делало бы разное.
+    // Колесо, трекпад и щипок разбирает `gestures.js` — то же правило, что на
+    // плане и в чертеже: мышью заказчик зумит, двумя пальцами по трекпаду —
+    // листает. Своего разбора здесь быть не должно, иначе одно и то же колесо
+    // в трёх местах приложения делало бы разное.
     stage.addEventListener(
       "wheel",
       (event) => {
         if (busy) return;
-        const kind = canvasWheelKind(event, streak);
-        streak = { kind, time: event.timeStamp };
-        if (kind === "pan") return;
+        const move = gestureWheel(event, streak);
+        streak = move.streak;
         event.preventDefault();
-        zoomTo(zoom * canvasZoomFactor(event, canvasPinchWheel(event)), { x: event.clientX, y: event.clientY });
+        // Увеличенный план здесь возят прокруткой окна — ею же листает и
+        // трекпад. Прежде `pan` отбрасывался, и двум пальцам тут не отвечало
+        // ничто.
+        if (move.kind === "pan") {
+          panBy(move.panX, move.panY);
+          return;
+        }
+        zoomTo(zoom * move.factor, { x: event.clientX, y: event.clientY });
       },
       { passive: false },
     );

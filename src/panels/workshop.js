@@ -139,14 +139,12 @@ import {
   CANVAS_FRESH_VERTEX_MS,
   canvasPanSpeed,
   canvasPanVector,
-  canvasPinchWheel,
   canvasRedoStep,
   canvasStartScale,
   canvasUndoStep,
-  canvasWheelKind,
-  canvasZoomFactor,
   canvasCommit,
 } from "../canvas.js";
+import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
 import {
   DRAWING_ACTIVE,
   DRAWING_EDGE,
@@ -2344,7 +2342,7 @@ function createWorkshop({ api, hosts }) {
         // пальца пришли возить и приближать. Без этого щипок оставлял за
         // собой вершину, поставленную первым касанием.
         press = null;
-        pinch = { ...pinchNow(), zoom: view.zoom };
+        pinch = gesturePinchOf(fingers.values());
         event.preventDefault();
         return;
       }
@@ -2431,14 +2429,6 @@ function createWorkshop({ api, hosts }) {
     // «Правка» по пустому месту снимает выделение — как клик по пустому месту
     // на холсте. Взятое под руку сюда не доходит: оно ушло в `drag`.
     select(null);
-  }
-
-  function pinchNow() {
-    const [first, second] = [...fingers.values()];
-    return {
-      distance: Math.hypot(first.x - second.x, first.y - second.y),
-      center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
-    };
   }
 
   function addVertex(event) {
@@ -2548,13 +2538,13 @@ function createWorkshop({ api, hosts }) {
     if (fingers.has(event.pointerId)) {
       fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (pinch && fingers.size >= 2) {
-        const now = pinchNow();
+        // Тот же `gestures.js`, что у колеса, и тот же порядок, что на плане:
+        // масштаб вокруг новой середины, затем сдвиг на её ход.
+        const step = gesturePinchStep(pinch, fingers.values());
         const rect = node.getBoundingClientRect();
-        panBy(now.center.x - pinch.center.x, now.center.y - pinch.center.y);
-        if (pinch.distance > 0 && now.distance > 0) {
-          zoomAt({ x: now.center.x - rect.left, y: now.center.y - rect.top }, now.distance / pinch.distance);
-        }
-        pinch = now;
+        zoomAt({ x: step.pinch.center.x - rect.left, y: step.pinch.center.y - rect.top }, step.factor);
+        panBy(step.panX, step.panY);
+        pinch = step.pinch;
         return;
       }
     }
@@ -2807,18 +2797,22 @@ function createWorkshop({ api, hosts }) {
   stage.addEventListener(
     "wheel",
     (event) => {
-      // Колесо и щипок разбираются теми же приметами, что на холсте и в окне
-      // загрузки плана: одно и то же колесо в трёх местах приложения не должно
-      // делать разного.
-      const kind = canvasWheelKind(event, streak);
-      streak = { kind, time: event.timeStamp };
-      if (kind === "pan") return;
+      // Колесо, трекпад и щипок разбирает `gestures.js` — то же правило, что на
+      // плане и в окне загрузки плана: одно и то же колесо в трёх местах
+      // приложения не должно делать разного.
+      //
+      // Прежде здесь `pan` молча отбрасывался, и двухпальцевый скролл трекпада
+      // чертёж не листал: «На виде Схема можно двигать полоно 2 пальцами, а на
+      // Чертеже нет» (G241). Теперь листает — тем же ходом и в ту же сторону.
+      const move = gestureWheel(event, streak);
+      streak = move.streak;
       event.preventDefault();
+      if (move.kind === "pan") {
+        panBy(move.panX, move.panY);
+        return;
+      }
       const rect = node.getBoundingClientRect();
-      zoomAt(
-        { x: event.clientX - rect.left, y: event.clientY - rect.top },
-        canvasZoomFactor(event, canvasPinchWheel(event)),
-      );
+      zoomAt({ x: event.clientX - rect.left, y: event.clientY - rect.top }, move.factor);
     },
     { passive: false },
   );

@@ -50,6 +50,7 @@ import {
 import { drawDrawing, drawingUnitBridge } from "../src/render.js";
 import { workshopObjectDefaultsByKey, workshopObjectDefaultsByName, workshopPick } from "../src/panels/workshop.js";
 import { volumeObjectModel, volumeScene, volumeStairs } from "../src/volume.js";
+import { objectModelByKey } from "../src/objectModels/registry.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { strings } from "../src/strings.js";
 
@@ -117,9 +118,9 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге двадцать две вещи, и каждая стоит ровно в одной категории", () => {
+test("в каталоге двадцать четыре вещи, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  assert.equal(keys.length, 22, "вещей в каталоге стало другое число: " + keys.length);
+  assert.equal(keys.length, 24, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -145,9 +146,13 @@ test("в каталоге двадцать две вещи, и каждая ст
   for (const key of ["column", "niche", "duct", "stairs", "panel", "radiator", "counter", "plumbing", "cabinet"]) {
     assert.ok(objectCatalogEntry(key), "прежний вид не попал в каталог: " + key);
   }
-  // Шкаф общий у брифа и у справочника — поэтому ключей двадцать два, а не
-  // двадцать три.
+  // Шкаф общий у брифа и у справочника — поэтому ключей было двадцать два, а
+  // не двадцать три.
   assert.equal(objectCatalogEntry("cabinet").name, strings.schemeObjectKinds.cabinet);
+  // И две вещи таска 162: «А где в перечне сантехники унитаз и ванна?»
+  for (const key of ["toilet", "bathtub"]) {
+    assert.equal(objectCatalogEntry(key).category, "sanitary", key + ": вещь ушла из сантехники");
+  }
   const counted = OBJECT_CATEGORIES.reduce((sum, category) => sum + objectCatalogCategory(category).length, 0);
   assert.equal(counted, keys.length, "вещь стоит вне категорий или в двух сразу");
   assert.deepEqual(objectCatalogInOrder().map((entry) => entry.key).sort(), [...keys].sort());
@@ -210,6 +215,41 @@ test("числа прежних девяти видов не поехали — 
   assert.equal(objectCatalogDefaults("какая-то вещь"), null);
 });
 
+test("унитаз и ванна встали ходовым размером, а общий вид «Сантехника» остался на месте", () => {
+  // Компакт: ширина чаши 340–380, вылет от стены с бачком 600–700, верх бачка
+  // 780–800 — взяты середины рядов. Ванна: 1700 × 700 — ходовой размер и
+  // стального (ГОСТ 1154-80), и акрилового ряда, борт на 600.
+  assert.deepEqual(objectCatalogDefaults("toilet"), {
+    shape: "rect",
+    widthMm: 360,
+    depthMm: 650,
+    heightMm: 780,
+    heightAboveFloorMm: 0,
+  });
+  assert.deepEqual(objectCatalogDefaults("bathtub"), {
+    shape: "rect",
+    widthMm: 1700,
+    depthMm: 700,
+    heightMm: 600,
+    heightAboveFloorMm: 0,
+  });
+  // Общий вид никуда не делся и числа его целы: по нему открываются чужие
+  // чертежи (G68).
+  assert.deepEqual(objectCatalogDefaults("plumbing"), {
+    shape: "rect",
+    widthMm: 700,
+    depthMm: 400,
+    heightMm: 400,
+    heightAboveFloorMm: 0,
+  });
+  // Он один во всём каталоге помечен прежним — и значит, прячется из плиток
+  // ровно он, а не «всё, что старше».
+  assert.deepEqual(
+    objectCatalogInOrder().filter((entry) => entry.legacy).map((entry) => entry.key),
+    ["plumbing"],
+  );
+});
+
 test("имя прежнего вида переводится в ключ терпимо, и столешница не становится столом", () => {
   assert.equal(objectCatalogKeyByName("Шкаф"), "cabinet");
   assert.equal(objectCatalogKeyByName("  ШКАФ в прихожей "), "cabinet");
@@ -224,6 +264,16 @@ test("имя прежнего вида переводится в ключ тер
   for (const [key, name] of Object.entries(strings.schemeObjectKinds)) {
     assert.equal(objectCatalogKeyByName(name), key, name + ": узнан как " + objectCatalogKeyByName(name));
   }
+  // Корень «унитаз» переехал от общего вида к унитазу: хозяин у слова теперь
+  // честный, а прежний чертёж с видом по имени «Унитаз» от этого не меняется —
+  // тело в объёме у них одно и то же, а на чертеже вещь рисуется габаритом и
+  // своим именем. Имя «Сантехника» по-прежнему ведёт к общему виду.
+  assert.equal(objectCatalogKeyByName("Унитаз"), "toilet");
+  assert.equal(objectCatalogKeyByName("Сантехника"), "plumbing");
+  assert.equal(objectCatalogKeyByName("Ванна"), "bathtub");
+  assert.equal(objectCatalogKeyByName("ванная"), "bathtub");
+  // А диван ванной не становится: корень «ванн», а не «ван».
+  assert.equal(objectCatalogKeyByName("Диван"), null);
   assert.equal(objectCatalogKeyByName("Аквариум"), null);
   assert.equal(objectCatalogKeyByName(""), null);
   assert.equal(objectCatalogKeyByName(null), null);
@@ -320,6 +370,59 @@ test("G68: объект прежней сборки открывается ка�
   // как рисовалась до моделей.
   assert.equal(volumeObjectModel(project, aquarium), null);
   assert.equal(volumeObjectModel(project, objects[0]).key, "radiator");
+});
+
+test("G68: прежний чертёж с видом «Унитаз» в объёме не изменился — тело у него то же", () => {
+  // Чертёж прежней сборки, на котором сантехнику заводили видами справочника:
+  // кто-то назвал вид «Унитаз», кто-то — «Ванна». Таск 162 отдал корень
+  // «унитаз» новой вещи каталога, и этот тест держит цену переезда на нуле.
+  const project = legacyProject();
+  const schemeId = project.schemes[0].id;
+  const kinds = [
+    { id: "kind-toilet", name: "Унитаз", order: 4 },
+    { id: "kind-bath", name: "Ванна", order: 5 },
+  ];
+  project.schemeObjectKinds = [...project.schemeObjectKinds, ...kinds];
+  const made = (id, kindId, widthMm, depthMm, heightMm) => ({
+    id,
+    schemeId,
+    kindId,
+    shape: "rect",
+    atMm: { x: 500, y: 2800 },
+    widthMm,
+    depthMm,
+    turnDeg: 0,
+    heightMm,
+    heightAboveFloorMm: 0,
+  });
+  const toilet = made("object-toilet", "kind-toilet", 700, 400, 400);
+  const bath = made("object-bath", "kind-bath", 1700, 700, 600);
+  project.schemeObjects = [...project.schemeObjects, toilet, bath];
+
+  // Имя — своё, из справочника объекта: каталог его не подменяет.
+  assert.equal(schemeObjectNameOf(project, toilet), "Унитаз");
+  assert.equal(schemeObjectNameOf(project, bath), "Ванна");
+  // Ключ сменился на точный — а **тело осталось тем же**: унитаз и общий вид
+  // «Сантехника» описаны одним списком тел (`objectModels/objects.js`).
+  assert.equal(schemeObjectKeyOf(project, toilet), "toilet");
+  assert.deepEqual(volumeObjectModel(project, toilet).parts, objectModelByKey("plumbing").parts);
+  // Габарит у вещи свой и записан в объекте: умолчания каталога его не трогают
+  // ни при чтении, ни в объёме.
+  assert.equal(toilet.widthMm, 700);
+  assert.equal(toilet.depthMm, 400);
+  // Ванна прежде модели не находила вовсе и рисовалась габаритом. Теперь мост
+  // по имени её узнаёт — это **названная** правка: в объекте и на чертеже
+  // ничего не меняется (вещь там рисуется габаритом и своим именем), меняется
+  // только кадр объёма, где у неё появилось тело.
+  assert.equal(schemeObjectKeyOf(project, bath), "bathtub");
+  assert.equal(volumeObjectModel(project, bath).key, "bathtub");
+  // Прежние вещи того же чертежа не поехали ни одной.
+  assert.deepEqual(
+    schemeObjectsOnScheme(project, schemeId)
+      .filter((object) => object.id !== toilet.id && object.id !== bath.id)
+      .map((object) => schemeObjectKeyOf(project, object)),
+    ["radiator", "stairs", null, "counter"],
+  );
 });
 
 test("G68: лестница прежнего объекта узнаётся по имени — объём по-прежнему переводит по этажам", () => {
