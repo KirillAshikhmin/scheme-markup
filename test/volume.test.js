@@ -147,12 +147,13 @@ import {
   volumeKeyMove,
   volumeMinimapBox,
   volumeNotes,
-  volumeStanceBottom,
+  volumeFieldBottom,
   volumePadVector,
   volumeFloorAction,
   volumeFloorName,
   volumeTitle,
   volumeTypingTarget,
+  volumeViewSwitch,
   volumeUnplacedLine,
   volumeUnplacedTitle,
   volumeWhere,
@@ -1670,25 +1671,47 @@ test("миникарта живёт в левом нижнем углу и ух�
   assert.equal(volumeMinimapBox(box, null), null);
 });
 
-// Присед и прыжок пальцем (таск 163, G242). Заказчик назвал условие сам:
-// кнопки не должны спорить с площадкой ходьбы и миникартой. С площадкой они
-// разведены по сторонам поля (она справа, они слева), а с миникартой — по
-// высоте, и вот это считается, а не ставится на глаз: миникарта то есть, то
-// нет, и высота у неё своя на каждом поле.
-test("кнопки стойки встают над миникартой, а без неё — в самый угол", () => {
+// Кнопки поля — стойка (таск 163, G242) и смена вида (таск 165, G244).
+// Заказчик назвал условие сам: кнопки не должны спорить с площадкой ходьбы и
+// миникартой. С площадкой они разведены по сторонам поля (она справа, они
+// слева), а с миникартой — по высоте, и вот это считается, а не ставится на
+// глаз: миникарта то есть, то нет, и высота у неё своя на каждом поле.
+test("столбик кнопок встаёт над миникартой, а без неё — в самый угол", () => {
   const bounds = { minX: -2000, minY: -1500, maxX: 2000, maxY: 1500, widthMm: 4000, heightMm: 3000 };
   const box = { width: 1432, height: 580 };
   const place = volumeMinimapBox(box, bounds);
-  const bottom = volumeStanceBottom(box, bounds);
+  const bottom = volumeFieldBottom(box, bounds);
   // Низ столбика выше верхней кромки миникарты: перекрытия нет ни точкой.
   assert.ok(bottom > box.height - place.y, "столбик налез на миникарту");
   assert.ok(bottom < box.height - place.y + 40, "и не улетел от неё к потолку");
   // Телефон: миникарты на узком поле нет вовсе, и столбик опускается в угол.
   const phone = { width: 360, height: 620 };
   assert.equal(volumeMinimapBox(phone, bounds), null);
-  assert.equal(volumeStanceBottom(phone, bounds), 18);
+  assert.equal(volumeFieldBottom(phone, bounds), 18);
   // Чертежа нет — миникарты нет, и считать нечего.
-  assert.equal(volumeStanceBottom(box, null), 18);
+  assert.equal(volumeFieldBottom(box, null), 18);
+});
+
+// Смена вида кнопкой на поле (таск 165, G244): «а как перейти в режим от 1 лица
+// на мобильном интерфейсе? сделай кнопку». Кнопка одна, и всё, что ей нужно
+// знать, — куда она ведёт; это же знание у клавиши V, и оно обязано быть одним.
+test("кнопка смены вида называет тот вид, в который переведёт", () => {
+  const fromPerson = volumeViewSwitch("person");
+  assert.equal(fromPerson.next, "around", "из первого лица кнопка ведёт в обзор");
+  assert.equal(fromPerson.label, strings.volume.viewAround, "и названа его же словом, что и в колонке");
+  const fromAround = volumeViewSwitch("around");
+  assert.equal(fromAround.next, "person");
+  assert.equal(fromAround.label, strings.volume.viewPerson);
+  // Подсказка добавляет к имени действие: «Обзор» само по себе читалось бы как
+  // «вы в обзоре», а кнопка в него ведёт.
+  assert.equal(fromAround.title, text("volume.viewSwitch", { name: strings.volume.viewPerson }));
+  assert.ok(fromAround.title.includes(strings.volume.viewPerson), "в подсказке назван тот же вид");
+  // Два нажатия возвращают туда, откуда ушли: переключатель, а не дорога в один
+  // конец.
+  assert.equal(volumeViewSwitch(volumeViewSwitch("person").next).next, "person");
+  // Неизвестный вид — первое лицо: оно главное, и кнопка, не знающая, где
+  // стоит, обязана вести в комнату, а не в никуда.
+  assert.equal(volumeViewSwitch(undefined).next, "person");
 });
 
 test("кнопка 3D знает, есть ли в схеме чертёж", () => {

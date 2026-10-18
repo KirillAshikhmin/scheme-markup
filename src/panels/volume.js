@@ -88,7 +88,7 @@ import {
   volumeStep,
 } from "../volume.js";
 import { markCardModel, markCardParts } from "./markCard.js";
-import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
+import { uiButton, uiButtonLabel, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
 
 // ——— подсказка плашкой (G218) ————————————————————————————————————————————
 //
@@ -331,18 +331,50 @@ export function volumeMinimapBox(box, bounds) {
 export const VOLUME_FIELD_EDGE = 18;
 
 /**
- * Насколько столбик кнопок стойки поднят над низом поля.
+ * Насколько столбик кнопок поля поднят над низом поля.
  *
  * Чистая и вынесена наружу: «не спорит с миникартой» — вся суть расположения,
  * а проверить её на глаз можно только подобрав поле нужного размера. Миникарта
  * появляется и исчезает от размера поля и от самой схемы, и считать её границу
  * второй раз на глаз в стилях нельзя — отступ берётся у того же
  * `volumeMinimapBox`, что её и рисует.
+ *
+ * Столбиком с таска 165 владеет не одна стойка: самой нижней в нём стоит кнопка
+ * смены вида, выше — присед и прыжок. Отступ от этого не меняется — он у низа
+ * столбика, а не у отдельной кнопки, — но имя у него уже не про стойку.
  */
-export function volumeStanceBottom(box, bounds) {
+export function volumeFieldBottom(box, bounds) {
   const place = volumeMinimapBox(box, bounds);
   if (!place) return VOLUME_FIELD_EDGE;
   return Math.round(box.height - place.y + 12);
+}
+
+// ——— смена вида кнопкой на поле (таск 165, G244) ————————————————————————
+//
+// «а как перейти в режим от 1 лица на мобильном интерфейсе? сделай кнопку».
+//
+// Переключатель вида стоял только в колонке, а колонка на телефоне и планшете
+// уезжает листом снизу: чтобы сменить вид, надо было открыть лист, найти блок
+// «Объём», нажать и закрыть лист. Клавиши V на телефоне нет вовсе — с поля до
+// вида не дотянуться.
+//
+// **Кнопка одна, а не две.** Два вида — это не два состояния, которые надо
+// подсвечивать: от первого лица человек стоит в комнате, в обзоре смотрит на
+// неё со стороны, и в каком он виде, видно по самому кадру вернее любой
+// подсветки (миникарта и та появляется только в первом лице). Значит, кнопке
+// остаётся сказать не «где ты», а **куда она ведёт** — и она называет тот вид,
+// в который переведёт, тем же словом, каким вид назван в колонке. Правило не
+// новое: так же устроена кнопка полного экрана — подпись говорит, что
+// случится по нажатию, а не то, что есть сейчас.
+//
+// Своего правила «какой вид следующий» у кнопки нет: `volumeViewSwitch` — одно
+// место и для неё, и для клавиши V.
+
+/** Куда ведёт кнопка смены вида: следующий вид, его имя и подсказка. */
+export function volumeViewSwitch(view) {
+  const next = view === "person" ? "around" : "person";
+  const label = next === "person" ? strings.volume.viewPerson : strings.volume.viewAround;
+  return { next, label, title: text("volume.viewSwitch", { name: label }) };
 }
 
 // ——— сенсорное управление (таск 149) ——————————————————————————————————
@@ -779,6 +811,33 @@ function createVolume({ api, hosts }) {
     jumpButton,
     crouchButton,
   ]);
+  // Смена вида кнопкой прямо на поле (таск 165, G244).
+  //
+  // Стоит в том же столбике, что присед и прыжок, и **самой нижней в нём** —
+  // по двум причинам, и обе про счёт, а не про вкус.
+  //
+  // *Место.* Левый низ уже посчитан: столбик берёт отступ у миникарты
+  // (`volumeFieldBottom` ← `volumeMinimapBox`), и новой кнопке в нём не нужно
+  // ни одного своего числа — она просто ещё одна строка столбика. Площадку
+  // ходьбы справа трогать нельзя, а второй счёт границы миникарты в сборке
+  // заводить запрещено.
+  //
+  // *Нижняя.* Присед и прыжок в обзоре уходят (там нечем ходить), а кнопка вида
+  // остаётся в обоих видах. Стой она сверху — на смене вида столбик под ней
+  // схлопывался бы, и кнопка уезжала бы вниз из-под пальца, который её только
+  // что нажал. Снизу она стоит на месте всегда: столбик растёт и убывает над
+  // ней. Цена — присед с прыжком поднялись на одну ячейку; порядок между ними
+  // (прыжок выше, присед ниже) таск 163 задал стрелками значков, и он цел.
+  const viewButton = uiButton("", {
+    class: "ui-btn volume__viewBtn",
+    on: { click: () => setView(volumeViewSwitch(view).next) },
+  });
+  // Столбик поля: стойка и кнопка вида. Положение — у него, а не у кнопок:
+  // отступ от низа поля один на весь столбик (`placeField`).
+  const fieldBox = uiEl("div", { class: "volume__field", attrs: { hidden: "hidden" } }, [
+    stanceBox,
+    viewButton,
+  ]);
   // Вопрос про этаж живёт **в самом окне**, а не диалогом поверх страницы, и это
   // не вкусовщина: стопка диалогов прячет карточки под верхней (`uiRefreshDialogs`),
   // а в полном экране развёрнута карточка окна — всё, что лежит в
@@ -813,7 +872,7 @@ function createVolume({ api, hosts }) {
     card,
     stairButton,
     padNode,
-    stanceBox,
+    fieldBox,
     aimNode,
     hintPlate.node,
     askBox,
@@ -968,7 +1027,7 @@ function createVolume({ api, hosts }) {
    * показывают.
    */
   function placeField() {
-    stanceBox.style.bottom = volumeStanceBottom(viewport(), scene.boundsMm) + "px";
+    fieldBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm) + "px";
   }
 
   function paint() {
@@ -2113,7 +2172,9 @@ function createVolume({ api, hosts }) {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.code === "KeyV") {
       event.preventDefault();
-      setView(view === "person" ? "around" : "person");
+      // Тот же ответ, что у кнопки на поле (таск 165): какой вид следующий,
+      // считается в одном месте.
+      setView(volumeViewSwitch(view).next);
       return;
     }
     if (event.code === "KeyF") {
@@ -2278,7 +2339,14 @@ function createVolume({ api, hosts }) {
     if (padNode.hidden) padEnd(null);
     stanceBox.hidden = noWalk;
     if (stanceBox.hidden) crouchRelease(null);
-    else placeField();
+    // Столбик поля виден там же, где площадка: пальцем и на непустой сцене.
+    // А вот от вида он не зависит — кнопка смены вида нужна в обоих видах, и
+    // именно её недоставало на телефоне (таск 165, G244). Мышью столбика нет:
+    // у неё есть и колонка, и клавиша V.
+    fieldBox.hidden = !touching || scene.empty;
+    if (!fieldBox.hidden) placeField();
+    const switcher = volumeViewSwitch(view);
+    uiButtonLabel(viewButton, switcher.label, switcher.title);
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
     shotButton.hidden = scene.empty;
     // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
