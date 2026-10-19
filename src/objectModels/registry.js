@@ -29,7 +29,7 @@ import { MODELS_LINES } from "./lines.js";
 import { MODELS_LIGHT } from "./light.js";
 import { MODELS_NET } from "./net.js";
 import { MODELS_OBJECTS } from "./objects.js";
-import { MODELS_POWER } from "./power.js";
+import { MODELS_KEYED, MODELS_POWER } from "./power.js";
 import { MODELS_SENSE } from "./sense.js";
 import { MODELS_THINGS } from "./things.js";
 import { MODEL_CYL_SIDES } from "./kit.js";
@@ -94,6 +94,30 @@ export function objectModelFaceCount(model) {
     faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : 6;
   }
   return faces;
+}
+
+/**
+ * Модель с клавишами **по числу каналов типа** (таск 177, G274).
+ *
+ * Клавишных моделей три с половиной — выключатель на одну, две, три клавиши и
+ * переключатель, — а каналов у типа бывает и четыре: «ПП» из стартового
+ * справочника двухканальный, а изображение у него переключателя с одной
+ * клавишей, и до этого таска он так и стоял на стене одноклавишным. Поэтому
+ * число клавиш берётся не из записи реестра, а у типа.
+ *
+ * Модель, у которой клавиш и так столько, сколько надо, отдаётся **той же
+ * ссылкой**: общее описание остаётся общим, и тесты, сверяющие его по ссылке,
+ * видят ровно то, что видели.
+ *
+ * Неклавишная модель проходит насквозь: каналы бывают и у реле, и у панели, а
+ * клавиши — только там, где они нарисованы.
+ */
+export function objectModelChannels(model, channels) {
+  const keyed = model && MODELS_KEYED[model.key];
+  if (!keyed) return model;
+  const want = Math.max(1, Math.min(Math.round(Number(channels) || 1), keyed.max));
+  if (want === keyed.keys) return model;
+  return { key: model.key, parts: keyed.build(want), keys: want };
 }
 
 /**

@@ -44,6 +44,7 @@ import {
   setMarkDimensions,
   setPlanOrigin,
   setPlanScale,
+  setMarkControls,
   setRoomWallHeight,
   setSchemeFloor,
   setSchemeWallHeight,
@@ -114,7 +115,11 @@ import {
   volumeFreeMm,
   volumeHeightMm,
   volumeHorizon,
+  volumeChannelAt,
+  volumeChannelLines,
+  volumeChannelLinks,
   volumeLinkLines,
+  volumeMarkFaces,
   volumeMarkOnFloor,
   volumeMarkViewLines,
   volumeMarkerFaces,
@@ -2678,6 +2683,146 @@ test("связь рисуется дважды: сплошной в сцене �
   assert.ok(ties.every((line) => !line.arrow));
   // Неразмещённой вещи в объёме нет — нет и стрелки в пустоту.
   assert.deepEqual(volumeLinkLines({ lines: [{ fromId: "a", toId: "нет" }] }, (id) => anchors[id] || null), []);
+});
+
+// ——— каналы многоклавишного выключателя (таск 177, G274) ——————————————————
+//
+// Слова заказчика: «В объёме Многоканальные выключатели (многоклавишные) рисуй
+// так же с несколькими вертикальными клавишами, и обрабатывай клик на каждый
+// канал отдельно рисуя стрелки только на соответствующий канал».
+
+test("у клавиш выключателя стоит номер канала, и доезжает он до грани", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "ВВ", [{ x: -500, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  assert.ok(place.model, "у двухклавишного нет модели");
+  const keys = place.model.parts.filter((part) => part.channel);
+  assert.deepEqual(
+    keys.map((part) => part.channel),
+    [1, 2],
+    "клавиш не две или номера не по порядку",
+  );
+  // Номер доезжает до грани: по ней кадр и отвечает, в какой канал попал клик.
+  const faces = volumeMarkFaces(place);
+  const channels = new Set(faces.map((face) => face.channel));
+  assert.ok(channels.has(1) && channels.has(2), "у граней клавиш нет номеров");
+  assert.ok(channels.has(null), "у рамки появился номер канала");
+  assert.ok(
+    faces.every((face) => face.markId === place.markId),
+    "хозяин грани клавиши — не метка",
+  );
+  // Трёхклавишный получает три клавиши, одноклавишный — одну: число берётся у
+  // типа, а не у записи реестра.
+  const triple = markAt(scene.project, scene.schemeId, "ВВВ", [{ x: 0, y: -1100 }]);
+  const tripled = placeOf(volumeScene(triple.project, scene.schemeId, {}), triple.markId);
+  assert.equal(tripled.model.parts.filter((part) => part.channel).length, 3);
+  const single = markAt(scene.project, scene.schemeId, "В", [{ x: 500, y: -1100 }]);
+  const one = placeOf(volumeScene(single.project, scene.schemeId, {}), single.markId);
+  assert.equal(one.model.parts.filter((part) => part.channel).length, 1);
+});
+
+test("двухканальный переключатель получает две клавиши, а не одну", () => {
+  // «ПП» — переключатель на два канала, а изображение у него с одной клавишей:
+  // до таска 177 он стоял на стене одноклавишным, то есть врал о себе.
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "ПП", [{ x: -500, y: -1100 }]);
+  const place = placeOf(volumeScene(put.project, scene.schemeId, {}), put.markId);
+  assert.equal(place.model.parts.filter((part) => part.channel).length, 2);
+  // Качалка никуда не делась — ею переключатель и отличается от выключателя.
+  assert.ok(place.model.parts.some((part) => part.name === "lever"), "качалка пропала");
+  assert.ok(place.model.parts.length <= 5, "тел стало больше предела");
+});
+
+test("щелчок по клавише попадает в её канал, а промах — ни в какой", () => {
+  // Правило взгляда: клавиша должна быть **видна** в этой точке кадра. Промах
+  // здесь не прощается — соседние клавиши стоят в десятке миллиметров, и
+  // «ближайшая в пределах промаха» выбрала бы канал, по которому не целились.
+  const key = (channel, x) => ({
+    xy: [x, 0, x + 10, 0, x + 10, 10, x, 10],
+    pick: "мет",
+    channel,
+    fill: "rgb(0,0,0)",
+  });
+  const polygons = [{ xy: [0, 0, 100, 0, 100, 100, 0, 100], pick: null, channel: null }, key(1, 10), key(2, 30)];
+  assert.deepEqual(volumeChannelAt(polygons, 15, 5), { markId: "мет", channel: 1 });
+  assert.deepEqual(volumeChannelAt(polygons, 35, 5), { markId: "мет", channel: 2 });
+  // Мимо клавиш — ни в какой канал: под точкой рамка, стена или пол.
+  assert.equal(volumeChannelAt(polygons, 60, 50), null);
+  assert.equal(volumeChannelAt(polygons, 500, 500), null);
+  // Клавишу закрыли непрозрачной гранью — щелчок попадает в неё, а не сквозь.
+  const covered = [...polygons, { xy: [0, 0, 100, 0, 100, 100, 0, 100], pick: null, channel: null }];
+  assert.equal(volumeChannelAt(covered, 15, 5), null);
+});
+
+test("выбранный канал оставляет стрелки только своей клавиши", () => {
+  const links = {
+    lines: [
+      { fromId: "вв", toId: "т1", channel: 1 },
+      { fromId: "вв", toId: "т2", channel: 2 },
+      { fromId: "вв", toId: "т3", channel: null },
+      { fromId: "другой", toId: "т1", channel: 1 },
+    ],
+    ties: [{ fromId: "вв", toId: "другой" }],
+    groups: [{ key: "т#1", markIds: ["т1", "т2"] }],
+    offScheme: [{ markId: "вв", count: 1 }],
+  };
+  // Канал не выбран — связи идут как шли: это обычная жизнь окна.
+  assert.equal(volumeChannelLinks(links, null), links);
+  assert.equal(volumeChannelLinks(links, { markId: "вв", channel: null }), links);
+  // Выбран — остаётся управление **с этой клавиши этой метки**, и больше ничего.
+  const only = volumeChannelLinks(links, { markId: "вв", channel: 2 });
+  assert.deepEqual(only.lines, [{ fromId: "вв", toId: "т2", channel: 2 }]);
+  assert.deepEqual(only.ties, [], "общее управление про клавишу не знает");
+  assert.deepEqual(only.groups, [], "общий номер — тождество меток, а не клавиша");
+  assert.deepEqual(only.offScheme, []);
+  // Связь без канала у той же метки не приписывается первой клавише: этого в
+  // данных нет.
+  const first = volumeChannelLinks(links, { markId: "вв", channel: 1 });
+  assert.deepEqual(
+    first.lines.map((line) => line.toId),
+    ["т1"],
+  );
+});
+
+test("рамка выбранной клавиши идёт по ней, а не по лицу вещи", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "ВВ", [{ x: -500, y: -1100 }]);
+  const built = volumeScene(put.project, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  const frame = volumeSelectLines(place);
+  const first = volumeChannelLines(place, 1);
+  const second = volumeChannelLines(place, 2);
+  assert.equal(first.length, 1);
+  assert.equal(second.length, 1);
+  assert.equal(first[0].color, VOLUME_SELECT_COLOR, "рамка клавиши другого цвета, чем выделение");
+  assert.equal(first[0].dash, null, "рамка клавиши пунктирна — её не отличить от рамки вещи");
+  assert.ok(frame[0].dash, "рамка вещи перестала быть пунктирной");
+  // Клавиши стоят рядом, а не друг на друге: рамки разведены по стене.
+  const along = (line) => line.p.reduce((sum, point) => sum + point.x, 0) / line.p.length;
+  assert.notEqual(Math.round(along(first[0])), Math.round(along(second[0])));
+  // Канала, которого у вещи нет, рамка не рисует вовсе.
+  assert.deepEqual(volumeChannelLines(place, 3), []);
+  assert.deepEqual(volumeChannelLines(place, null), []);
+});
+
+test("канал в объект не пишется: его знает только кадр (G68)", () => {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "ВВ", [{ x: -500, y: -1100 }]);
+  const load = markAt(put.project, scene.schemeId, "Т", [{ x: 0, y: 0 }]);
+  const wired = setMarkControls(load.project, put.markId, [{ id: load.markId, channel: 2 }]).project;
+  const before = JSON.stringify(wired);
+  const built = volumeScene(wired, scene.schemeId, {});
+  const place = placeOf(built, put.markId);
+  volumeMarkFaces(place);
+  volumeChannelLines(place, 2);
+  volumeChannelLinks({ lines: [{ fromId: put.markId, toId: load.markId, channel: 2 }] }, {
+    markId: put.markId,
+    channel: 2,
+  });
+  assert.equal(JSON.stringify(wired), before, "выбор канала доехал до объекта");
+  // И у самой метки ни поля, ни следа: связь знает канал, метка — нет.
+  assert.equal(findMark(wired, put.markId).channel, undefined);
 });
 
 test("строка «не размещены» называет метки и причину, а длинный список обрывает", () => {

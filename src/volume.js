@@ -65,6 +65,7 @@ import {
   schemesInOrder,
   segmentDistanceMm,
   styleOf,
+  typeChannels,
   typeObjectView,
   wallHeightOf,
   wallHeightOnSide,
@@ -74,7 +75,7 @@ import {
 import { MARK_BOX_FRAME_DEPTH_MM, markBoxMm } from "./markBox.js";
 import { objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 import { MODEL_CYL_SIDES } from "./objectModels/kit.js";
-import { objectLineModel, objectModelByKey } from "./objectModels/registry.js";
+import { objectLineModel, objectModelByKey, objectModelChannels } from "./objectModels/registry.js";
 
 // ——— числа ——————————————————————————————————————————————————————————————
 
@@ -412,6 +413,11 @@ function volumeFace(points, rgb, options = {}) {
     // Чья это грань: по ней кадр отвечает, во что попал клик (таск 148).
     // У стен, пола и вещей чертежа хозяина нет — и попадать в них незачем.
     markId: options.markId || null,
+    // Чья это клавиша (таск 177, G274): по ней кадр отвечает, в какой **канал**
+    // попал клик. Стоит только у клавиш выключателя — у рамки, у корпуса и у
+    // любой другой грани `null`, и щелчок по ним значит «вся метка», как
+    // значил.
+    channel: options.channel === undefined ? null : options.channel,
     // Чьё это полотно: по нему кадр отвечает, какую дверь открывает E (G207).
     // Есть только у полотна и его ручки — больше ни у чего в сцене.
     doorId: options.doorId || null,
@@ -459,6 +465,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   const markId = options.markId || null;
   const doorId = options.doorId || null;
   const clear = Boolean(options.clear);
+  const channel = options.channel === undefined ? null : options.channel;
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[(index + 1) % corners.length];
@@ -472,6 +479,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
         markId,
         doorId,
         clear,
+        channel,
       }),
     );
   }
@@ -479,7 +487,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
     volumeFace(
       corners.map((point) => volumeAt(point, topMm)),
       rgb,
-      { normal: { x: 0, y: 0, z: 1 }, markId, doorId, clear },
+      { normal: { x: 0, y: 0, z: 1 }, markId, doorId, clear, channel },
     ),
   );
   // Низ лежащей на полу вещи не нужен никому, а низ висящей — нужен: на
@@ -489,7 +497,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
       volumeFace(
         corners.map((point) => volumeAt(point, bottomMm)),
         rgb,
-        { normal: { x: 0, y: 0, z: -1 }, markId, doorId, clear },
+        { normal: { x: 0, y: 0, z: -1 }, markId, doorId, clear, channel },
       ),
     );
   }
@@ -1647,7 +1655,10 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
     // причине: недостающая сторона взята у того же изображения, и получается,
     // что у вещи сходятся и габарит, и тело — а не кубик в габарите от
     // кондиционера.
-    model: view ? objectModelByKey(view.name) : null,
+    // Клавиш у выключателя столько, сколько каналов у типа (таск 177, G274):
+    // описание приходит по имени изображения, а число клавиш — у справочника.
+    // Неклавишной модели это ничего не меняет, и отдаётся она той же ссылкой.
+    model: view ? objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)) : null,
   };
   const heightMm = sizes.heightAboveFloor;
   const binding = markWall(mark);
@@ -1975,6 +1986,8 @@ export function volumeModelPrisms(frame, parts) {
       // он у всех выключен, а день, когда свет начнёт включаться, правит одну
       // строку ниже — и ни одной из пятидесяти моделей.
       lit: part.lit,
+      // Номер канала клавиши (таск 177): у остальных тел его нет вовсе.
+      channel: part.channel === undefined ? null : part.channel,
     });
   }
   return out;
@@ -2055,15 +2068,21 @@ export function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
  */
 export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
   const parts = (model && model.parts) || [];
-  const own = { markId: options.markId || null, clear: Boolean(options.clear) };
+  const own = (part) => ({
+    markId: options.markId || null,
+    clear: Boolean(options.clear),
+    // Номер канала доезжает до грани и останавливается там: что значит «канал
+    // выделен», решает окно, а в объект не пишется ничего (G68, таск 177).
+    channel: part && part.channel !== undefined ? part.channel : null,
+  });
   for (const part of parts) {
     if (part.kind !== "tube") continue;
-    volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own);
+    volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
   }
   for (const prism of volumeModelPrisms(frame, parts)) {
     // Та самая одна строка: `prism.lit` пока всегда `false`.
     const fill = volumeModelRgb(prism.material, rgb);
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own);
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
   }
   return out;
 }
@@ -2269,6 +2288,42 @@ export function volumeSelectLines(place, out = []) {
 }
 
 /**
+ * **Рамка выбранной клавиши** (таск 177, G274): по самой клавише, а не по лицу
+ * вещи.
+ *
+ * Выбранный канал обязан быть виден глазами — иначе стрелки «только его» читались
+ * бы как пропавшие связи. Рамка идёт тем же цветом, что рамка выделения, но
+ * сплошной и вплотную по клавише: у вещи рамка снаружи и пунктиром, у клавиши
+ * внутри и линией, и спутать их нельзя.
+ *
+ * Доли клавиши переводятся в доли лица: у модели `z` считается снизу вверх, у
+ * лица `fy` — сверху вниз, отсюда `0.5 − z`. Это то же пересчитывание, что в
+ * `volumeFacePoint`, и другого места, где оно живёт, нет.
+ */
+export function volumeChannelLines(place, channel, out = []) {
+  if (!place || !place.face || !channel || !place.model) return out;
+  const key = (place.model.parts || []).find((part) => part.channel === channel);
+  if (!key) return out;
+  const left = key.x;
+  const right = key.x + key.width;
+  const top = 0.5 - (key.z + key.height);
+  const bottom = 0.5 - key.z;
+  out.push(
+    volumeLine(
+      [
+        volumeFacePoint(place.face, left, top),
+        volumeFacePoint(place.face, right, top),
+        volumeFacePoint(place.face, right, bottom),
+        volumeFacePoint(place.face, left, bottom),
+      ],
+      VOLUME_SELECT_COLOR,
+      { closed: true, width: 2, layer: VOLUME_LAYER_MARK },
+    ),
+  );
+  return out;
+}
+
+/**
  * Стрелки связей по правилам плана.
  *
  * Правила, **какие** связи показывать, берутся с плана целиком
@@ -2281,6 +2336,39 @@ export function volumeSelectLines(place, out = []) {
  * нет — нет и стрелки к ней: это было бы указание в пустоту. Почему её нет,
  * отвечает список неразмещённых.
  */
+/**
+ * **Связи одного канала** (таск 177, G274): слова заказчика — «обрабатывай клик
+ * на каждый канал отдельно рисуя стрелки только на соответствующий канал».
+ *
+ * Канал не выбран (`null`) — связи идут как шли, и это обычная жизнь: выделение
+ * метки показывает всю её цепь. Канал выбран — остаётся **только управление с
+ * этого канала этой метки**, и остаётся оно одно:
+ *
+ * - общее управление (`ties`) про канал не знает вовсе — это отношение равных
+ *   между двумя выключателями, и у него нет стороны «какой клавишей»;
+ * - общий номер (`groups`) — тождество меток, тоже не про клавишу;
+ * - связи **без канала** у той же метки — это разметка до каналов, и показывать
+ *   их при выбранной первой клавише значило бы сказать «они на первой», чего в
+ *   данных нет.
+ *
+ * Поэтому выбор канала — это **сужение до одной клавиши**, а не подсветка: на
+ * кадре остаётся ровно то, чем она управляет. Снять его можно щелчком мимо
+ * клавиши — выделение вещи целиком возвращает всю картину.
+ *
+ * Чистая и живёт здесь, а не в холсте: правила, **какие** связи бывают,
+ * по-прежнему плановые целиком (`canvasFrameLinks`), и второго их хозяина
+ * заводить нельзя. Здесь только отбор по каналу — то, чего на плане нет.
+ */
+export function volumeChannelLinks(links, pick) {
+  const empty = { lines: [], ties: [], groups: [], offScheme: [] };
+  if (!links) return empty;
+  if (!pick || !pick.markId || !pick.channel) return links;
+  return {
+    ...empty,
+    lines: (links.lines || []).filter((line) => line.fromId === pick.markId && line.channel === pick.channel),
+  };
+}
+
 export function volumeLinkLines(links, anchorOf, out = []) {
   const pair = (item, color, arrow) => {
     const from = anchorOf(item.fromId);
@@ -3489,6 +3577,9 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     clear: Boolean(face.clear),
     pick: face.markId || null,
     door: face.doorId || null,
+    // Клавиша выключателя (таск 177): по ней окно отвечает, в какой канал
+    // попал щелчок. У остальных многоугольников `null`.
+    channel: face.channel === undefined ? null : face.channel,
   });
   return out;
 }
@@ -3681,6 +3772,28 @@ export function volumeSightAt(polygons, x, y) {
     const polygon = polygons[index];
     if (polygon.stroke || polygon.clear) continue;
     if (volumePolygonHit(polygon.xy, x, y)) return polygon.pick || null;
+  }
+  return null;
+}
+
+/**
+ * **В какую клавишу попал щелчок** (таск 177, G274): `{markId, channel}` или
+ * `null`.
+ *
+ * Правило то же, что у взгляда (`volumeSightAt`): клавиша должна быть **видна**
+ * в этой точке кадра. Промах здесь не прощается, и это по существу: соседние
+ * клавиши стоят в десятке миллиметров друг от друга, и «ближайшая в пределах
+ * промаха» означала бы, что выбран канал, по которому человек не целился.
+ * Выделение самой метки при этом остаётся со своим запасом — промах по клавише
+ * просто выделяет вещь целиком, как выделял до каналов.
+ */
+export function volumeChannelAt(polygons, x, y) {
+  for (let index = polygons.length - 1; index >= 0; index -= 1) {
+    const polygon = polygons[index];
+    if (polygon.stroke || polygon.clear) continue;
+    if (!volumePolygonHit(polygon.xy, x, y)) continue;
+    if (!polygon.pick || !polygon.channel) return null;
+    return { markId: polygon.pick, channel: polygon.channel };
   }
   return null;
 }

@@ -60,6 +60,9 @@ import {
   volumeFreeMm,
   volumeBasis,
   volumeCanStand,
+  volumeChannelAt,
+  volumeChannelLines,
+  volumeChannelLinks,
   volumeDoorAt,
   volumeDraw,
   volumeDrawBackdrop,
@@ -535,6 +538,9 @@ export function volumeHintText(state) {
   if (state.touching) parts.push(strings.volume.hintTouch);
   else parts.push(state.locked ? strings.volume.hintLocked : strings.volume.hintGrab);
   parts.push(strings.volume.pickHint);
+  // Про клавиши каналов — только когда они под рукой: у одноклавишного
+  // выключателя и у розетки эта строка была бы шумом (таск 177, G274).
+  if (state.keys) parts.push(strings.volume.channelHint);
   // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
   if (state.aim) parts.push(strings.volume.aimHint);
   parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
@@ -1166,6 +1172,46 @@ function createVolume({ api, hosts }) {
     setState({ selectedMarkIds: next });
   }
 
+  // ——— выбранный канал (таск 177, G274) ———
+  //
+  // Слова заказчика: «обрабатывай клик на каждый канал отдельно рисуя стрелки
+  // только на соответствующий канал».
+  //
+  // **Что значит «канал выделен».** Это не второе выделение рядом с первым:
+  // выделена по-прежнему метка — та же, что в списке меток и на плане, — а
+  // канал говорит, **какой клавишей** на неё смотрят. Поэтому он и живёт
+  // здесь, в переменной окна, рядом с раскрытыми дверями и стойкой: в объект не
+  // попадает ничего (G68), в состояние сеанса — тоже ничего, потому что список
+  // меток и план про клавиши не знают и знать им незачем.
+  //
+  // Держится он за свою метку: выделили другую вещь (хоть здесь, хоть на плане,
+  // хоть в списке) — канал снимается сам, и картина связей возвращается целиком.
+  let channelPick = null;
+
+  /** Канал под точкой кадра — или `null`: клавиша должна быть видна. */
+  function channelAt(at) {
+    if (!at || scene.empty) return null;
+    return volumeChannelAt(shown, at.x, at.y);
+  }
+
+  function pickChannel(found) {
+    const was = channelPick;
+    const same = was && found && was.markId === found.markId && was.channel === found.channel;
+    channelPick = found || null;
+    // Кадр пересобирается здесь, а не состоянием: щелчок по второй клавише той
+    // же метки выделения не меняет, и подписка молчала бы.
+    if (!same) syncSelection();
+    if (!found || same) return;
+    // Сказать словом один раз: стрелок на кадре стало меньше, и без слова это
+    // читается как пропавшие связи. Пустой канал — тоже новость: клавиша есть,
+    // а нагрузки на ней нет.
+    const state = getState();
+    const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
+    const links = scheme ? volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick) : null;
+    const empty = !links || links.lines.length === 0;
+    notify(text(empty ? "volume.channelEmpty" : "volume.channelPicked", { channel: found.channel }), "info");
+  }
+
   // Рамка выделенного и стрелки связей. Правила, какие связи показывать, —
   // плановые целиком (`canvasFrameLinks`): переключатель в шапке включён —
   // видны все связи схемы, выключен — связная группа выделенной метки.
@@ -1173,13 +1219,21 @@ function createVolume({ api, hosts }) {
     overlay = [];
     if (scene.empty) return;
     const state = getState();
+    // Канал держится за свою метку: выделили другую — он снялся сам.
+    if (channelPick && !selectedIds().includes(channelPick.markId)) channelPick = null;
     for (const id of selectedIds()) {
       const place = volumeMarkPlace(scene, id);
-      if (place) volumeSelectLines(place, overlay);
+      if (!place) continue;
+      volumeSelectLines(place, overlay);
+      // Рамка по самой клавише: выбранный канал обязан быть виден глазами.
+      if (channelPick && channelPick.markId === id) volumeChannelLines(place, channelPick.channel, overlay);
     }
     const scheme = findScheme(state.project, schemeId);
     if (!scheme) return;
-    volumeLinkLines(canvasFrameLinks(state, null, scheme), (id) => volumeMarkAnchor(scene, id), overlay);
+    // Правила, какие связи бывают, — плановые целиком; канал только сужает их
+    // до одной клавиши (таск 177, G274).
+    const links = volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick);
+    volumeLinkLines(links, (id) => volumeMarkAnchor(scene, id), overlay);
   }
 
   function syncCard() {
@@ -1193,9 +1247,25 @@ function createVolume({ api, hosts }) {
     card.replaceChildren(...markCardParts(model, { headButton: cardClose }));
   }
 
+  /**
+   * Клавиши каналов под рукой: у выделенной вещи их больше одной или канал уже
+   * выбран. Только тогда про них и говорит подсказка.
+   */
+  function channelKeys() {
+    if (channelPick) return true;
+    if (scene.empty) return false;
+    for (const id of selectedIds()) {
+      const place = volumeMarkPlace(scene, id);
+      const parts = (place && place.model && place.model.parts) || [];
+      if (parts.some((part) => part.channel > 1)) return true;
+    }
+    return false;
+  }
+
   function syncSelection() {
     rebuildOverlay();
     syncCard();
+    syncHint();
     paint();
   }
 
@@ -1304,9 +1374,15 @@ function createVolume({ api, hosts }) {
    * другого, и дальше решает тот, кто спрашивал: E говорит об этом словом, а
    * щелчок по полю значит своё (см. `onPointerUp`).
    */
-  function actOnChoice(choice) {
+  function actOnChoice(choice, at) {
     if (choice.kind === "mark") {
       select(choice.id);
+      // Щелчок по клавише многоклавишного выключателя выбирает **её канал**
+      // (таск 177, G274), мимо клавиши — снимает выбор и возвращает все связи
+      // метки. Выделение при этом одно и то же: канал не выделяет вместо вещи,
+      // он говорит, какой клавишей на неё смотрят.
+      const found = channelAt(at);
+      pickChannel(found && found.markId === choice.id ? found : null);
       return true;
     }
     if (choice.kind === "door") {
@@ -1318,8 +1394,9 @@ function createVolume({ api, hosts }) {
 
   /** E действует на то, на что смотришь (G207, G214). */
   function actOnAim() {
-    const choice = aimChoiceAt(aimPoint(), aimedDoor || heldDoor);
-    if (!actOnChoice(choice)) notify(strings.volume.aimless, "info");
+    const at = aimPoint();
+    const choice = aimChoiceAt(at, aimedDoor || heldDoor);
+    if (!actOnChoice(choice, at)) notify(strings.volume.aimless, "info");
   }
 
   function toggleDoor(doorId) {
@@ -1700,9 +1777,10 @@ function createVolume({ api, hosts }) {
       }
       // Захват мыши после попадания не просится: человек целился в розетку или
       // в дверь, а не в поле.
-      if (actOnChoice(choice)) return;
+      if (actOnChoice(choice, at)) return;
       // Мимо — снимает выделение, как тап по пустому месту плана.
       select(null);
+      pickChannel(null);
       // Клик по обзору переносит туда, куда показали (G212). Захват мыши в
       // обзоре при этом не просится: у клика здесь свой смысл, а голову в
       // обзоре водят перетаскиванием, как и раньше.
@@ -2357,6 +2435,7 @@ function createVolume({ api, hosts }) {
       stair: stairHere(),
       floors: floorOptions(),
       back: backFloor(),
+      keys: channelKeys(),
     });
     // Подсказка в полном экране не уходит, а **складывается в свой знак**
     // (таск 166, G246). Она единственная из спрятанного говорит про руки:
