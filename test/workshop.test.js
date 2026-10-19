@@ -58,6 +58,7 @@ import {
   wallsOnScheme,
 } from "../src/model.js";
 import {
+  LABEL_TURN_RADIUS,
   drawingDoorLeaf,
   drawingHitObject,
   planToScreen,
@@ -100,6 +101,7 @@ import {
   workshopObjectPatch,
   workshopObjectRectAt,
   workshopOpeningAt,
+  workshopPlacePointMm,
   workshopPathAnchor,
   workshopPathSources,
   workshopPick,
@@ -124,6 +126,7 @@ import {
   workshopTurnToward,
   workshopFrontAxis,
   workshopWallTurnDeg,
+  WORKSHOP_TURN_HALF_DEG,
   WORKSHOP_TURN_SNAP_DEG,
   WORKSHOP_TURN_STEP_DEG,
   WORKSHOP_TURN_WALL_MM,
@@ -1602,4 +1605,56 @@ test("G68: поворот ничего не трогает в чужом чер�
       Object.keys(source.schemeObjects[index]).sort(),
     );
   }
+});
+
+// ——— призрак, Q/E и ручка поворота (таск 168, G248–G250) ——————————————————
+//
+// Жалоба заказчика: «просто тыкаешь и куда-то рядом встало». Она оказалась
+// буквальной, и вот её число: призрак считался из движения руки, клик — из
+// события отпускания кнопки, а между ними разрешено до `WORKSHOP_DRAG_SLOP`
+// точек. При притяжке к сетке в 500 мм граница клетки проходит через каждые
+// полметра, и две точки дрожи поперёк неё уносили вещь на полклетки от
+// обещанного. Живой прогон на объекте заказчика: рука на `y = 384` — призрак
+// на узле −500 мм, кнопка отпущена на `y = 382` — вещь встала на −1000 мм.
+//
+// Тестом держится правило, а не пиксели: точка постановки берётся у призрака.
+
+test("вещь встаёт туда, где стоял призрак, а не туда, где дрогнула рука", () => {
+  const shown = { pointMm: { x: 0, y: -500 }, free: false };
+  // Сырой курсор на отпускании ушёл за границу клетки — и притянулся к другому
+  // узлу. Берётся всё равно показанный.
+  assert.deepEqual(workshopPlacePointMm(shown, false, { x: 0, y: -1000 }), { x: 0, y: -500 });
+  // Призрака нет вовсе (палец коснулся, не наведя) — остаётся курсор.
+  assert.deepEqual(workshopPlacePointMm(null, false, { x: 120, y: 340 }), { x: 120, y: 340 });
+  // Alt нажали, не двинув рукой: призрак посчитан с притяжкой, а клик просят
+  // без неё — показанное больше не годится, точка считается заново.
+  assert.deepEqual(workshopPlacePointMm(shown, true, { x: 0, y: -524 }), { x: 0, y: -524 });
+  // И наоборот: призрак без притяжки, клик с ней.
+  const free = { pointMm: { x: 0, y: -524 }, free: true };
+  assert.deepEqual(workshopPlacePointMm(free, false, { x: 0, y: -500 }), { x: 0, y: -500 });
+  assert.deepEqual(workshopPlacePointMm(free, true, { x: 0, y: -500 }), { x: 0, y: -524 });
+});
+
+test("Q и E поворачивают на 45° тем же счётом, что R на 90°", () => {
+  assert.equal(WORKSHOP_TURN_HALF_DEG, 45);
+  // Шаги вкладываются друг в друга: две половины четверти — четверть.
+  assert.equal(WORKSHOP_TURN_STEP_DEG, WORKSHOP_TURN_HALF_DEG * 2);
+  assert.equal(WORKSHOP_TURN_HALF_DEG, WORKSHOP_TURN_SNAP_DEG * 3);
+  // Счёт — тот же, один оборот без накопления витков.
+  assert.equal(workshopTurnBy(0, WORKSHOP_TURN_HALF_DEG), 45);
+  assert.equal(workshopTurnBy(0, -WORKSHOP_TURN_HALF_DEG), 315);
+  assert.equal(workshopTurnBy(330, WORKSHOP_TURN_HALF_DEG), 15);
+  // Восемь нажатий `E` — полный оборот и ровно тот же угол, что был.
+  let turnDeg = 17;
+  for (let step = 0; step < 8; step += 1) turnDeg = workshopTurnBy(turnDeg, WORKSHOP_TURN_HALF_DEG);
+  assert.equal(turnDeg, 17);
+  // Угол, который четвертью оборота не набирается вовсе, — косая стена.
+  assert.equal(workshopTurnBy(0, WORKSHOP_TURN_HALF_DEG) % WORKSHOP_TURN_STEP_DEG, 45);
+});
+
+test("ручка поворота вещи меряется ручкой поворота подписи", () => {
+  const view = viewOf({ zoom: 1 });
+  const handle = workshopTurnHandle(turned({}), view);
+  // Одна мера на обе ручки: заказчик просил «как у подписи метки».
+  assert.equal(handle.r, LABEL_TURN_RADIUS);
 });
