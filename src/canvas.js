@@ -4347,6 +4347,10 @@ function mountCanvasFullscreen(host, api) {
 function mountCanvasElevation(host, api) {
   const strip = createElevationStrip({
     onSide: (side) => api.setState({ wallSide: side }),
+    // Переход к соседней стене из ряда полей (таск 179, G267): стена и сторона
+    // ложатся одной правкой состояния — иначе между ними мелькнула бы развёртка
+    // новой стены с прежней стороной.
+    onWall: ({ wallId, side }) => api.setState({ selectedWallId: wallId, wallSide: side }),
     onClose: () => api.setState({ selectedWallId: null }),
     // Отметка живёт в настройках браузера, как слои и шрифт схемы: на одном
     // компьютере смотрят картинками, на другом знаками, а объект один.

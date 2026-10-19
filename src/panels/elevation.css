@@ -83,6 +83,51 @@
   margin: 0;
 }
 
+/* Ряд перехода к соседней стене (таск 179, G267) — своей строкой под
+   заголовком. В заголовке уже стоят имя стены, две отметки, две кнопки сторон
+   и «Закрыть»; пара списков со стенами выдавила бы их за край на планшете.
+
+   Поля делят строку пополам и ужимаются вместе с полосой: имя стены короткое
+   («ЛМ · 1800 мм»), и места ему хватает даже на узком экране. */
+.elev__walkbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.elev__walkrow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--canvas-text);
+}
+
+.elev__walklabel {
+  flex: none;
+  color: #57606a;
+}
+
+.elev__walk {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--canvas-text);
+  background: #ffffff;
+  border: 1px solid var(--canvas-line);
+  border-radius: 6px;
+}
+
+.elev__walk:disabled {
+  color: #8b949e;
+  background: #f6f8fa;
+}
+
 /* Кнопки на бумаге, а не на панели: полоса светлая, и тёмные кнопки панели в
    ней читались бы дырами. */
 .elev .ui-btn {

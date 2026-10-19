@@ -1691,6 +1691,13 @@ function createWorkshop({ api, hosts }) {
   // окно закроют.
   const strip = createElevationStrip({
     onSide: (side) => setState({ wallSide: side }),
+    // Переход к соседней стене из ряда полей (таск 179, G267). Сторона встаёт
+    // первой, стена второй: выделение у чертежа своё (`select` ведёт и его), и
+    // кадра между двумя правками на экране не бывает — обе идут одной задачей.
+    onWall: ({ wallId, side }) => {
+      setState({ wallSide: side });
+      select({ kind: "wall", id: wallId });
+    },
     onClose: () => select(null),
     onViews: (value) => {
       setState({ elevationViews: value });

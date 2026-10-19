@@ -16,7 +16,7 @@
 // наоборот. Правило простое, но без него полоса регулярно накрывала бы ровно
 // то, ради чего её открыли.
 import { markSpareLine } from "../markSpare.js";
-import { WALL_SIDES, findWall, wallElevation } from "../model.js";
+import { WALL_SIDES, findWall, wallElevation, wallName, wallNeighbours } from "../model.js";
 import { drawElevation } from "../render.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiEl, uiIconButton } from "./ui.js";
@@ -114,10 +114,54 @@ export function elevationNote(elevation, drawn) {
 }
 
 /**
+ * Два поля перехода к соседней стене — по одному на сторону текущей (таск 179,
+ * требование G267).
+ *
+ * Возвращает `[{side, label, hint, here, options}]` в порядке `WALL_SIDES`;
+ * `options` — `[{wallId, side, text}]` слева направо по листу. Соседство
+ * считает модель (`wallNeighbours`) по чертежу, здесь только слова.
+ *
+ * **Почему поля по сторонам, а не по углам.** Заказчик сказал «в каждом поле
+ * одна и другая сторона текущей стены», и сторона здесь — не фигура речи:
+ * список у них разный. Перегородка, упирающаяся справа, слева не видна — она за
+ * стеной, — поэтому «с кем граничит стена» без стороны вопрос неполный. Углы на
+ * этом не годятся ещё и по делу: на объекте заказчика две стены из двадцати
+ * пяти ни с кем не делят угла вовсе, обоими концами уткнуты в середины чужих
+ * стен, и список по углам до них не доводит ниоткуда.
+ *
+ * **Что в списке и есть «часть стены».** Соседи — это ровно те торцы, которые
+ * на развёртке уже нарисованы с именами (G201): ткни в тот, что видишь. Они же
+ * делят стену на участки — часть стены это промежуток между двумя соседями, и
+ * `atMm` у записи говорит, где он кончается. Самих участков отдельными листами
+ * окно не режет: лист развёртки — целая стена с одной размерной цепочкой от
+ * угла до угла, и резать его значит заводить второй вид листа и второй отсчёт.
+ *
+ * Чистая и вынесена наружу: слова и порядок проверяются без браузера.
+ */
+export function elevationWalk(project, wallId) {
+  const name = wallName(project, wallId);
+  return WALL_SIDES.map((side) => {
+    const label = strings.elevation["side_" + side];
+    return {
+      side,
+      label,
+      hint: text("elevation.walkHint", { side: label.toLowerCase() }),
+      here: text("elevation.walkHere", { name }),
+      none: text("elevation.walkNone", { side: label }),
+      options: wallNeighbours(project, wallId, side).map((neighbour) => ({
+        wallId: neighbour.wallId,
+        side: neighbour.side,
+        text: text("elevation.walkAt", { name: neighbour.name, at: neighbour.atMm }),
+      })),
+    };
+  });
+}
+
+/**
  * Создать полосу. Возвращает `{node, update, destroy}`; вызывающий сам кладёт
  * `node` туда, где у него план, и зовёт `update` на каждой правке.
  */
-export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow }) {
+export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, onWall }) {
   const canvas = uiEl("canvas", { class: "elev__canvas" });
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   const title = uiEl("span", { class: "elev__title" });
@@ -151,6 +195,40 @@ export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, 
     growBox,
     uiEl("span", { text: strings.elevation.grow }),
   ]);
+  // Два поля перехода (таск 179, G267) — своим рядом под заголовком, а не в
+  // одной строке с кнопками: в шапке уже стоят заголовок, две отметки, две
+  // кнопки сторон и «Закрыть», и пара списков со стенами выдавила бы их за
+  // край на планшете. Ряд прячется вместе с полосой и перестраивается на каждой
+  // смене стены.
+  //
+  // Выбранной записью стоит сама стена: «ЛМ — эта стена». Поэтому поле отвечает
+  // и на «где я», а не только на «куда перейти», — и совпадает со словами
+  // заказчика «в каждом поле одна и другая сторона текущей стены».
+  const walkSelects = WALL_SIDES.map((side) =>
+    uiEl("select", {
+      class: "elev__walk",
+      on: {
+        change: (event) => {
+          const picked = walkOptions[side].get(event.target.value);
+          // «Эта стена» — не переход: поле возвращается к ней само после
+          // перестройки, и дёргать вызывающего незачем.
+          if (picked && onWall) onWall(picked);
+          else syncWalk();
+        },
+      },
+    }),
+  );
+  const walkLabels = WALL_SIDES.map((side, index) =>
+    uiEl("label", { class: "elev__walkrow" }, [
+      uiEl("span", { class: "elev__walklabel", text: strings.elevation["side_" + side] }),
+      walkSelects[index],
+    ]),
+  );
+  const walkRow = uiEl("div", { class: "elev__walkbar" }, walkLabels);
+  // Что стоит за каждой записью: ключ записи → `{wallId, side}`. Держать это в
+  // `value` целиком значило бы собирать и разбирать строку с двумя полями —
+  // карта честнее и переживает любые имена стен.
+  const walkOptions = { left: new Map(), right: new Map() };
   const closeButton = uiIconButton("close", {
     title: strings.elevation.close,
     on: { click: () => onClose && onClose() },
@@ -158,6 +236,7 @@ export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, 
   const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
   const node = uiEl("div", { class: "elev" }, [
     uiEl("div", { class: "elev__head" }, [title, viewsRow, growRow, ...sideButtons, closeButton]),
+    walkRow,
     stage,
     note,
   ]);
@@ -174,6 +253,37 @@ export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, 
   let shown = null;
   let withViews = views !== false;
   let withGrow = grow === true;
+  // От чего считается ряд перехода. Объект держится здесь, а не спрашивается у
+  // вызывающего: полоса уже берёт у него развёртку тем же способом.
+  let walkProject = null;
+  let walkWallId = null;
+
+  /**
+   * Перестроить ряд перехода. Зовётся на каждой смене стены: соседи считаются
+   * от чертежа, и после правки стены список обязан стать другим.
+   */
+  function syncWalk() {
+    const ready = Boolean(walkProject && walkWallId);
+    walkRow.hidden = !ready;
+    if (!ready) return;
+    elevationWalk(walkProject, walkWallId).forEach((field, index) => {
+      const select = walkSelects[index];
+      const known = walkOptions[field.side];
+      known.clear();
+      select.replaceChildren(uiEl("option", { value: "here", text: field.here }));
+      for (const option of field.options) {
+        const key = option.wallId + ":" + option.side;
+        known.set(key, { wallId: option.wallId, side: option.side });
+        select.append(uiEl("option", { value: key, text: option.text }));
+      }
+      // Выбранной всегда стоит сама стена: поле говорит, где человек, а переход
+      // уводит с него, и залипшая чужая запись врала бы о том, что открыто.
+      select.value = "here";
+      // Соседей нет — поле погашено с причиной, а не притворяется рабочим.
+      select.disabled = field.options.length === 0;
+      walkLabels[index].title = field.options.length === 0 ? field.none : field.hint;
+    });
+  }
 
   function paint() {
     if (!ctx || !shown || node.hidden) return;
@@ -217,6 +327,8 @@ export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, 
     if (!wall) {
       node.hidden = true;
       shown = null;
+      walkProject = null;
+      walkWallId = null;
       return null;
     }
     const view = WALL_SIDES.includes(side) ? side : WALL_SIDES[0];
@@ -227,6 +339,10 @@ export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, 
     node.classList.toggle("elev--bottom", place !== "top");
     node.style.setProperty("--elev-height", Math.round(elevationHeight(fieldHeight)) + "px");
     title.textContent = elevationTitle(shown);
+    // Ряд перехода — от этой стены: соседей считает модель по чертежу (G267).
+    walkProject = project;
+    walkWallId = wallId;
+    syncWalk();
     // Без приписки о подтянутых вещах: её допишет `paint` ниже, когда масштаб
     // станет известен. Здесь — чтобы полоса не мелькала пустой подписью.
     setNote(null);
