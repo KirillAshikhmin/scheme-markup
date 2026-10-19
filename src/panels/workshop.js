@@ -221,7 +221,6 @@ export const WORKSHOP_EMPTY_MM = { widthMm: 12000, heightMm: 9000 };
 // увеличивать нечего, координаты и так целые.
 export const WORKSHOP_ZOOM_MIN = 0.0007;
 export const WORKSHOP_ZOOM_MAX = 1.5;
-const WORKSHOP_ZOOM_KEY_STEP = 1.25;
 
 // ——— чего в чертеже больше нет (G227, таск 153) ————————————————————————
 //

@@ -590,6 +590,8 @@ export function randomColor(used, options = {}) {
 }
 
 // Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
+// Столько же вершин требует жест замыкания (`gestures.GESTURE_CLOSE_MIN`), но
+// это другая мерка с тем же значением — см. разбор у неё.
 export const OUTLINE_MIN_POINTS = 3;
 
 // Углы подписи. Девяносто градусов — подпись вдоль стены: в узком коридоре и у
@@ -5311,11 +5313,6 @@ function markPointsMm(project, mark) {
     out.push(at);
   }
   return out;
-}
-
-function markPointMm(project, mark) {
-  const points = markPointsMm(project, mark);
-  return points.length > 0 ? points[0] : null;
 }
 
 // Середина метки: у точки она же, у линии — середина её габарита.

@@ -382,8 +382,6 @@ export function elevationSheetLayout(blocks, options = {}) {
 const GOST_CHANGE_COLUMNS = [10, 10, 10, 10, 15, 10];
 // Колонки блока подписей: характер работы | фамилия | подпись | дата.
 const GOST_WORK_COLUMNS = [20, 20, 15, 10];
-// Левый блок у всех трёх форм одной ширины.
-const GOST_LEFT_WIDTH = 65;
 const GOST_ROW = 5;
 
 function gostRow(columns, x0, y, height, make) {
