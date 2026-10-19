@@ -20318,8 +20318,20 @@ const HIT_SLACK_PX = 4;
 // стоит дважды: подпись у края плана не уезжает влево, когда пора, и клик по
 // ней промахивается мимо прямоугольника.
 const LABEL_CHAR_RATIO = 0.75;
-// Насколько далеко от метки стоит подпись, если её не оттаскивали.
+// Насколько далеко от метки стоит подпись, если её не оттаскивали. Отдан
+// наружу: холст ставит подпись на то же место, когда её берут мышью.
 const LABEL_GAP = 1.5;
+
+/**
+ * Кегль чертёжного шрифта по ГОСТ 2.304 — 3,5 мм. Одно число на всё, что
+ * уходит на бумагу: подписи развёртки, графы штампа и таблица на листе.
+ *
+ * Живёт здесь, а не в `gostSheet.js`, где остальная бумажная метрика, потому
+ * что `gostSheet` тянет из `render.js`, а не наоборот: обратная ссылка была бы
+ * кольцом, а кольца сборка не терпит. До таска 173 это число стояло в трёх
+ * файлах порознь — и расхождение попало бы на бумагу заказчика.
+ */
+const GOST_TEXT_MM = 3.5;
 // Ручки «+» стоят от центра метки на столько её радиусов — ровно на шаг блока,
 // потому что новая метка встаёт **туда, где нарисована ручка**. Мера одна, и
 // живёт она в модели (`BLOCK_STEP_RATIO`): свои 2,4 здесь однажды уже
@@ -25400,12 +25412,10 @@ const ELEVATION_FONT = 11;
 // Мельче этого подпись на развёртке не читается — тогда её просто нет.
 const ELEVATION_LABEL_MIN_PX = 26;
 
-// Шрифт развёртки на бумаге — 3,5 мм: размер по ГОСТ 2.304, тот же, которым
-// подписана таблица. Из него и выводится, сколько миллиметров стоит единица, —
+// Из кегля ГОСТ и выводится, сколько миллиметров стоит единица развёртки, —
 // одно число на все поля, и пропорции экранной развёртки переносятся на лист
 // целиком.
-const ELEVATION_FONT_MM = 3.5;
-const ELEVATION_UNIT_MM = ELEVATION_FONT_MM / ELEVATION_FONT;
+const ELEVATION_UNIT_MM = GOST_TEXT_MM / ELEVATION_FONT;
 
 // Сколько единиц рамки съедают поля: по ширине и по высоте. Этим считает
 // раскладку листа `gostSheet.elevationFit` — размеры полей живут здесь, рядом
@@ -35196,6 +35206,9 @@ const GOST_STAMP_HEIGHT_MM = { form3: 55, form5: 40, form6: 15 };
 const GOST_LINE_MM = 0.7;
 const GOST_THIN_MM = 0.3;
 
+// Кегль граф штампа — общий по ГОСТ 2.304 (`render.GOST_TEXT_MM`, 3,5 мм):
+// графы ниже называют его по имени, а не повторяют числом.
+//
 // Наименьшая высота шрифта на чертеже по ГОСТ 2.304 — 2,5 мм. Ниже неё
 // подпись метки на бумаге не читается, и это мерка автоподбора формата.
 const GOST_MIN_TEXT_MM = 2.5;
@@ -35568,8 +35581,8 @@ function gostWorkBlock(top, rows) {
     cells.push(
       ...gostRow(GOST_WORK_COLUMNS, 0, y, GOST_ROW, (column) => {
         if (column === 0) return role ? { label: role, size: 2.5, align: "left" } : { field: "role" + index, size: 2.5, align: "left" };
-        if (column === 1) return { field: "name" + index, size: 3.5 };
-        if (column === 2) return { field: "sign" + index, size: 3.5 };
+        if (column === 1) return { field: "name" + index, size: GOST_TEXT_MM };
+        if (column === 2) return { field: "sign" + index, size: GOST_TEXT_MM };
         return { field: "date" + index, size: 2.5 };
       }),
     );
@@ -35584,15 +35597,15 @@ const GOST_FORM_BUILDERS = {
     const right = [
       { x: 65, y: 0, width: 120, height: 10, field: "code", size: 7 },
       { x: 65, y: 10, width: 120, height: 15, field: "object", size: 5, lines: 2 },
-      { x: 65, y: 25, width: 70, height: 15, field: "building", size: 3.5, lines: 2 },
+      { x: 65, y: 25, width: 70, height: 15, field: "building", size: GOST_TEXT_MM, lines: 2 },
       { x: 135, y: 25, width: 15, height: 5, label: "stage", size: 2.5 },
       { x: 150, y: 25, width: 15, height: 5, label: "sheet", size: 2.5 },
       { x: 165, y: 25, width: 20, height: 5, label: "sheets", size: 2.5 },
-      { x: 135, y: 30, width: 15, height: 10, field: "stage", size: 3.5 },
-      { x: 150, y: 30, width: 15, height: 10, field: "sheet", size: 3.5 },
-      { x: 165, y: 30, width: 20, height: 10, field: "sheets", size: 3.5 },
-      { x: 65, y: 40, width: 70, height: 15, field: "drawing", size: 3.5, lines: 3 },
-      { x: 135, y: 40, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+      { x: 135, y: 30, width: 15, height: 10, field: "stage", size: GOST_TEXT_MM },
+      { x: 150, y: 30, width: 15, height: 10, field: "sheet", size: GOST_TEXT_MM },
+      { x: 165, y: 30, width: 20, height: 10, field: "sheets", size: GOST_TEXT_MM },
+      { x: 65, y: 40, width: 70, height: 15, field: "drawing", size: GOST_TEXT_MM, lines: 3 },
+      { x: 135, y: 40, width: 50, height: 15, field: "org", size: GOST_TEXT_MM, lines: 2 },
     ];
     return {
       height: 55,
@@ -35615,10 +35628,10 @@ const GOST_FORM_BUILDERS = {
       { x: 135, y: 15, width: 15, height: 5, label: "stage", size: 2.5 },
       { x: 150, y: 15, width: 15, height: 5, label: "sheet", size: 2.5 },
       { x: 165, y: 15, width: 20, height: 5, label: "sheets", size: 2.5 },
-      { x: 135, y: 20, width: 15, height: 5, field: "stage", size: 3.5 },
-      { x: 150, y: 20, width: 15, height: 5, field: "sheet", size: 3.5 },
-      { x: 165, y: 20, width: 20, height: 5, field: "sheets", size: 3.5 },
-      { x: 135, y: 25, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+      { x: 135, y: 20, width: 15, height: 5, field: "stage", size: GOST_TEXT_MM },
+      { x: 150, y: 20, width: 15, height: 5, field: "sheet", size: GOST_TEXT_MM },
+      { x: 165, y: 20, width: 20, height: 5, field: "sheets", size: GOST_TEXT_MM },
+      { x: 135, y: 25, width: 50, height: 15, field: "org", size: GOST_TEXT_MM, lines: 2 },
     ];
     return {
       height: 40,
@@ -35638,7 +35651,7 @@ const GOST_FORM_BUILDERS = {
       ...gostChangeBlock(2),
       { x: 65, y: 0, width: 110, height: 15, field: "code", size: 5 },
       { x: 175, y: 0, width: 10, height: 7, label: "sheet", size: 2.5 },
-      { x: 175, y: 7, width: 10, height: 8, field: "sheet", size: 3.5 },
+      { x: 175, y: 7, width: 10, height: 8, field: "sheet", size: GOST_TEXT_MM },
     ];
     return {
       height: 15,
@@ -35781,7 +35794,7 @@ function gostWrap(ctx, value, cell, mm, sizeMm) {
 
 function gostCellText(ctx, value, cell, mm) {
   if (!value) return;
-  const sizeMm = cell.size || 3.5;
+  const sizeMm = cell.size || GOST_TEXT_MM;
   const lines = gostWrap(ctx, value, cell, mm, sizeMm);
   const step = sizeMm * 1.25 * mm;
   const top = (cell.y + cell.height / 2) * mm - ((lines.length - 1) * step) / 2;
@@ -37267,14 +37280,19 @@ async function elevationSheets(project, elevations, options = {}) {
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
 
 // Метрика таблицы на бумаге, в миллиметрах. Шаг строки живёт в `gostSheet.js`
-// (там же, где считается, сколько их влезет на лист); шрифт 3,5 мм — размер по
-// ГОСТ 2.304, ближайший к этому шагу.
+// (там же, где считается, сколько их влезет на лист); кегль — общий по ГОСТ
+// 2.304 (`render.GOST_TEXT_MM`), ближайший к этому шагу. Заголовок разбивки
+// крупнее на полмиллиметра — это своя мерка таблицы, у ГОСТ её нет.
 const GOST_TABLE = {
   row: GOST_TABLE_ROW_MM,
-  font: 3.5,
+  font: GOST_TEXT_MM,
   groupFont: 4,
   pad: 2,
 };
+
+// Черта под заголовком разбивки — между основной линией и тонкой: заголовок
+// весомее строки, но не равен рамке листа. Своё число, не ГОСТовское.
+const GOST_GROUP_LINE_MM = 0.5;
 
 // Строки будущих листов одним списком: заголовок разбивки, строка таблицы,
 // подвал «Итого». Разбивка по листам идёт по этому списку, поэтому «Лист N из
@@ -37394,17 +37412,17 @@ async function gostTablePng(table, page, plan, options = {}) {
     let x = field.x;
     for (const width of widths.slice(0, -1)) {
       x += width;
-      line(x, top, x, top + GOST_TABLE.row, 0.3);
+      line(x, top, x, top + GOST_TABLE.row, GOST_THIN_MM);
     }
-    line(field.x, top, field.x, top + GOST_TABLE.row, 0.3);
-    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, 0.3);
+    line(field.x, top, field.x, top + GOST_TABLE.row, GOST_THIN_MM);
+    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, GOST_THIN_MM);
   };
 
   // Шапка колонок: на каждом листе своя, и под ней основная линия.
   drawCells(table.columns, true);
   columnLines(y);
-  line(field.x, y, field.x + bodyWidth, y, 0.3);
-  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.7);
+  line(field.x, y, field.x + bodyWidth, y, GOST_THIN_MM);
+  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_LINE_MM);
   y += GOST_TABLE.row;
 
   for (const item of page.lines) {
@@ -37413,7 +37431,7 @@ async function gostTablePng(table, page, plan, options = {}) {
       ctx.font = drawFont((item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm, 600);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.strokeStyle = item.color || "#1f2328";
-      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
+      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? GOST_THIN_MM : GOST_GROUP_LINE_MM);
       ctx.strokeStyle = "#000000";
       ctx.fillStyle = "#1f2328";
       y += GOST_TABLE.row;
@@ -37438,7 +37456,7 @@ async function gostTablePng(table, page, plan, options = {}) {
     }
     drawCells(item.cells, false);
     columnLines(y);
-    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.3);
+    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_THIN_MM);
     y += GOST_TABLE.row;
   }
 

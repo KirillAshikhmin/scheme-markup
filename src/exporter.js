@@ -25,6 +25,7 @@ import {
   drawScheme,
   labelBox,
   labelFontSize,
+  GOST_TEXT_MM,
   markRadius,
   outlineLabelBox,
   visibleMarks,
@@ -36,7 +37,9 @@ import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
 import {
+  GOST_LINE_MM,
   GOST_TABLE_ROW_MM,
+  GOST_THIN_MM,
   drawGostFrame,
   drawGostStamp,
   gostDpi,
@@ -1467,14 +1470,19 @@ export async function elevationSheets(project, elevations, options = {}) {
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
 
 // Метрика таблицы на бумаге, в миллиметрах. Шаг строки живёт в `gostSheet.js`
-// (там же, где считается, сколько их влезет на лист); шрифт 3,5 мм — размер по
-// ГОСТ 2.304, ближайший к этому шагу.
+// (там же, где считается, сколько их влезет на лист); кегль — общий по ГОСТ
+// 2.304 (`render.GOST_TEXT_MM`), ближайший к этому шагу. Заголовок разбивки
+// крупнее на полмиллиметра — это своя мерка таблицы, у ГОСТ её нет.
 const GOST_TABLE = {
   row: GOST_TABLE_ROW_MM,
-  font: 3.5,
+  font: GOST_TEXT_MM,
   groupFont: 4,
   pad: 2,
 };
+
+// Черта под заголовком разбивки — между основной линией и тонкой: заголовок
+// весомее строки, но не равен рамке листа. Своё число, не ГОСТовское.
+const GOST_GROUP_LINE_MM = 0.5;
 
 // Строки будущих листов одним списком: заголовок разбивки, строка таблицы,
 // подвал «Итого». Разбивка по листам идёт по этому списку, поэтому «Лист N из
@@ -1594,17 +1602,17 @@ export async function gostTablePng(table, page, plan, options = {}) {
     let x = field.x;
     for (const width of widths.slice(0, -1)) {
       x += width;
-      line(x, top, x, top + GOST_TABLE.row, 0.3);
+      line(x, top, x, top + GOST_TABLE.row, GOST_THIN_MM);
     }
-    line(field.x, top, field.x, top + GOST_TABLE.row, 0.3);
-    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, 0.3);
+    line(field.x, top, field.x, top + GOST_TABLE.row, GOST_THIN_MM);
+    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, GOST_THIN_MM);
   };
 
   // Шапка колонок: на каждом листе своя, и под ней основная линия.
   drawCells(table.columns, true);
   columnLines(y);
-  line(field.x, y, field.x + bodyWidth, y, 0.3);
-  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.7);
+  line(field.x, y, field.x + bodyWidth, y, GOST_THIN_MM);
+  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_LINE_MM);
   y += GOST_TABLE.row;
 
   for (const item of page.lines) {
@@ -1613,7 +1621,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
       ctx.font = drawFont((item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm, 600);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.strokeStyle = item.color || "#1f2328";
-      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
+      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? GOST_THIN_MM : GOST_GROUP_LINE_MM);
       ctx.strokeStyle = "#000000";
       ctx.fillStyle = "#1f2328";
       y += GOST_TABLE.row;
@@ -1638,7 +1646,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
     }
     drawCells(item.cells, false);
     columnLines(y);
-    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.3);
+    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_THIN_MM);
     y += GOST_TABLE.row;
   }
 
