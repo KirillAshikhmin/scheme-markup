@@ -1195,6 +1195,9 @@ function exportElevationDialog(api) {
       // Изображения объектов — то же правило, что у слоёв чертежа (таск 127):
       // отметка с экрана уходит и в выгрузку, лист показывает проверенное.
       views: getState().elevationViews !== false,
+      // Нижняя граница масштаба мелких вещей (таск 179, D42) — та же отметка с
+      // того же экрана.
+      grow: getState().elevationGrow === true,
       building: roomName(),
       drawing: [scheme ? scheme.name : "", strings.elevationSheet.drawing].filter(Boolean).join(" · "),
       pdf: pdf === true,

@@ -9,6 +9,7 @@
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
 import {
+  ELEVATION_GROW_SETTING,
   ELEVATION_VIEWS_SETTING,
   layoutAllows,
   PANEL_IDS,
@@ -4354,6 +4355,13 @@ function mountCanvasElevation(host, api) {
       setSetting(ELEVATION_VIEWS_SETTING, value);
     },
     views: api.getState().elevationViews !== false,
+    // Нижняя граница масштаба мелких вещей (таск 179, D42) — той же природы и
+    // тем же путём, что «изображения».
+    onGrow: (value) => {
+      api.setState({ elevationGrow: value });
+      setSetting(ELEVATION_GROW_SETTING, value);
+    },
+    grow: api.getState().elevationGrow === true,
   });
   host.append(strip.node);
 
@@ -4382,6 +4390,7 @@ function mountCanvasElevation(host, api) {
       place: elevationPlace(canvasWallMiddleY(state), height),
       fieldHeight: height,
       views: state.elevationViews !== false,
+      grow: state.elevationGrow === true,
     });
   }
 
@@ -4391,6 +4400,7 @@ function mountCanvasElevation(host, api) {
       "wallSide" in changed ||
       "elevationShown" in changed ||
       "elevationViews" in changed ||
+      "elevationGrow" in changed ||
       "project" in changed ||
       "schemeId" in changed ||
       "view" in changed ||

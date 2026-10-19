@@ -72,6 +72,7 @@
 // `project.json`. Пустые списки в объект не попадают: их не кладёт ни одна
 // функция модели чертежа.
 import {
+  ELEVATION_GROW_SETTING,
   ELEVATION_VIEWS_SETTING,
   OBJECTS_SETTING,
   PANEL_IDS,
@@ -1696,6 +1697,13 @@ function createWorkshop({ api, hosts }) {
       setSetting(ELEVATION_VIEWS_SETTING, value);
     },
     views: getState().elevationViews !== false,
+    // Нижняя граница масштаба мелких вещей (таск 179, D42): та же отметка, что
+    // над холстом, и состояние у них общее.
+    onGrow: (value) => {
+      setState({ elevationGrow: value });
+      setSetting(ELEVATION_GROW_SETTING, value);
+    },
+    grow: getState().elevationGrow === true,
   });
   const node = uiEl("canvas", { class: "workshop__canvas" });
   // Поле забирает фокус по нажатию: иначе после правки толщины фокус остаётся
@@ -4188,6 +4196,7 @@ function createWorkshop({ api, hosts }) {
       place: elevationPlace((a.y + b.y) / 2, box.height),
       fieldHeight: box.height,
       views: getState().elevationViews !== false,
+      grow: getState().elevationGrow === true,
     });
   }
 
@@ -4274,7 +4283,8 @@ function createWorkshop({ api, hosts }) {
     // Галка «Развёртка выделенной стены» — одна на план и на чертёж (G227):
     // сняли её в «Интерфейсе проекта» — полоса уходит и отсюда. Без этой
     // строки поверхность о ней не узнавала: проверено живым прогоном.
-    if ("wallSide" in changed || "elevationViews" in changed || "elevationShown" in changed) sync();
+    if ("wallSide" in changed || "elevationViews" in changed || "elevationGrow" in changed || "elevationShown" in changed)
+      sync();
     // Вещи погасили или вернули — хоть глазком в списке, хоть галкой в
     // «Интерфейсе проекта»: поле и список обязаны это увидеть (таск 154).
     if ("objectsShown" in changed || "hiddenObjectIds" in changed) {

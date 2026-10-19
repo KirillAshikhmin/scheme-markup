@@ -1399,6 +1399,10 @@ export async function elevationSheetPng(project, elevations, page, layout, optio
         // слоёв чертежа (таск 127): лист обязан показывать то, что человек
         // проверил на экране.
         views: options.views !== false,
+        // И нижняя граница масштаба мелких вещей (таск 179, D42) — тем же
+        // путём: отметка снята, значит лист в реальном масштабе, и линейка по
+        // нему не врёт. Умолчание у неё, в отличие от «изображений», снятое.
+        grow: options.grow === true,
         scale: layout.scale * mm,
         label: text("elevationSheet.label", {
           index: index + 1,

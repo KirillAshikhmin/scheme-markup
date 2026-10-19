@@ -117,7 +117,7 @@ export function elevationNote(elevation, drawn) {
  * Создать полосу. Возвращает `{node, update, destroy}`; вызывающий сам кладёт
  * `node` туда, где у него план, и зовёт `update` на каждой правке.
  */
-export function createElevationStrip({ onSide, onClose, onViews, views }) {
+export function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow }) {
   const canvas = uiEl("canvas", { class: "elev__canvas" });
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   const title = uiEl("span", { class: "elev__title" });
@@ -139,13 +139,25 @@ export function createElevationStrip({ onSide, onClose, onViews, views }) {
     viewsBox,
     uiEl("span", { text: strings.elevation.views }),
   ]);
+  // Нижняя граница масштаба мелких вещей (таск 179, дефект D42) — отметка
+  // рядом с «изображениями», и это не случайное соседство: обе о том, **чем**
+  // нарисована вещь на листе, обе личные настройки браузера и обе уходят в
+  // выгрузку. Умолчание у неё снятое: заказчик сказал «рисуй всё в реальном
+  // масштабе», и честный лист — то, что видишь, не спросив ни о чём.
+  const growBox = uiEl("input", { type: "checkbox" });
+  growBox.checked = grow === true;
+  growBox.addEventListener("change", () => onGrow && onGrow(growBox.checked));
+  const growRow = uiEl("label", { class: "elev__views", title: strings.elevation.growHint }, [
+    growBox,
+    uiEl("span", { text: strings.elevation.grow }),
+  ]);
   const closeButton = uiIconButton("close", {
     title: strings.elevation.close,
     on: { click: () => onClose && onClose() },
   });
   const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
   const node = uiEl("div", { class: "elev" }, [
-    uiEl("div", { class: "elev__head" }, [title, viewsRow, ...sideButtons, closeButton]),
+    uiEl("div", { class: "elev__head" }, [title, viewsRow, growRow, ...sideButtons, closeButton]),
     stage,
     note,
   ]);
@@ -161,6 +173,7 @@ export function createElevationStrip({ onSide, onClose, onViews, views }) {
   node.hidden = true;
   let shown = null;
   let withViews = views !== false;
+  let withGrow = grow === true;
 
   function paint() {
     if (!ctx || !shown || node.hidden) return;
@@ -174,7 +187,7 @@ export function createElevationStrip({ onSide, onClose, onViews, views }) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const drawn = drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { views: withViews });
+    const drawn = drawElevation(ctx, shown, { x: 0, y: 0, width, height }, { views: withViews, grow: withGrow });
     // Подпись дописывается **после** рисования: сколько вещей подтянуто до
     // читаемого размера, известно только от масштаба, а масштаб развёртка
     // подбирает сама по своему полю (дефект D25). Поле меняется — меняется и
@@ -191,10 +204,14 @@ export function createElevationStrip({ onSide, onClose, onViews, views }) {
    * Показать развёртку выделенной стены. `wallId` пустой — полоса прячется:
    * пустой развёртки на экране не бывает (G68).
    */
-  function update({ project, wallId, side, place, fieldHeight, views: shownViews }) {
+  function update({ project, wallId, side, place, fieldHeight, views: shownViews, grow: shownGrow }) {
     if (shownViews !== undefined) {
       withViews = shownViews !== false;
       viewsBox.checked = withViews;
+    }
+    if (shownGrow !== undefined) {
+      withGrow = shownGrow === true;
+      growBox.checked = withGrow;
     }
     const wall = wallId ? findWall(project, wallId) : null;
     if (!wall) {
