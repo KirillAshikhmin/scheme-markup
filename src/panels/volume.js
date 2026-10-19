@@ -36,6 +36,7 @@ import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasFullscreenBare, canvasFullsc
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
+import { gesturePinchOf, gesturePinchStep } from "../gestures.js";
 import { WALL_HEIGHT_FALLBACK_MM, findRoom, findScheme, schemeFloorOf, schemeObjectsOnScheme } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
@@ -55,6 +56,7 @@ import {
   volumeAroundCamera,
   volumeAroundDistance,
   volumeAroundFit,
+  volumeAroundPan,
   volumeAroundPitch,
   volumeFreeMm,
   volumeBasis,
@@ -712,8 +714,8 @@ function createVolume({ api, hosts }) {
   let touching = volumeTouchLikely();
   // Палец на площадке ходьбы: `{id, forward, turn}`.
   let pad = null;
-  // Щипок двумя пальцами в обзоре: расстояние между ними и расстояние камеры в
-  // тот миг, когда щипок начался.
+  // Два пальца на поле: `{distance, center}` от общего `gesturePinchStep` —
+  // прошлый разведённый промежуток и прошлая середина между пальцами.
   let pinch = null;
   // Касания на поле, по которым узнаётся щипок.
   const touches = new Map();
@@ -1592,11 +1594,11 @@ function createVolume({ api, hosts }) {
     stage.focus({ preventScroll: true });
     if (event.pointerType === "touch") {
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      // Второй палец — щипок, а не второй поворот: взгляд перестаёт ехать за
-      // первым пальцем, иначе щипок водил бы головой заодно.
+      // Второй палец — жест двумя пальцами, а не второй поворот: взгляд
+      // перестаёт ехать за первым пальцем, иначе щипок водил бы головой заодно.
       if (touches.size === 2) {
         look = null;
-        pinch = { gap: touchGap(), distance: around.distance };
+        pinch = gesturePinchOf(touches.values());
         return;
       }
       if (touches.size > 2) return;
@@ -1617,14 +1619,29 @@ function createVolume({ api, hosts }) {
     }
     if (event.pointerType === "touch" && touches.has(event.pointerId)) {
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      // Щипок двумя пальцами — то же, что колесо: в обзоре приближает, от
-      // первого лица не делает ничего (приближать там нечего, а поле зрения
-      // человек не просил).
+      // Два пальца в обзоре возят карту и щипком приближают — ровно как на
+      // плане и в чертеже (таск 174, G256). Разбирает жест общий
+      // `gestures.js`, и порядок применения оттуда же: сперва масштаб, потом
+      // сдвиг на то, насколько уехала середина между пальцами.
+      //
+      // От первого лица два пальца не делают ничего, и это прежнее поведение:
+      // там ходят площадкой и вертят головой, приближать нечего, а поле зрения
+      // человек не просил.
       if (pinch && touches.size === 2) {
-        const gap = touchGap();
-        if (gap > 0 && pinch.gap > 0 && view === "around") {
-          const distance = volumeAroundDistance((pinch.distance * pinch.gap) / gap);
-          around = { ...around, distance, pitch: volumeAroundPitch(around.pitch, distance, aroundLift()) };
+        const step = gesturePinchStep(pinch, touches.values());
+        if (step) pinch = step.pinch;
+        if (step && view === "around") {
+          // Развели пальцы — приблизились, то есть камера подошла: расстояние
+          // делится на множитель, а не умножается.
+          const distance = volumeAroundDistance(around.distance / step.factor);
+          const pitch = volumeAroundPitch(around.pitch, distance, aroundLift());
+          const moved = volumeAroundPan({ yaw: around.yaw, pitch, distance }, viewport(), step.panX, step.panY);
+          around = {
+            ...around,
+            distance,
+            pitch,
+            target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy },
+          };
           paint();
         }
         return;
@@ -1646,13 +1663,6 @@ function createVolume({ api, hosts }) {
     const dy = event.clientY - look.y;
     look = { x: event.clientX, y: event.clientY, moved: look.moved || Math.hypot(dx, dy) > 2 };
     lookBy(dx, dy);
-  }
-
-  /** Расстояние между двумя касаниями — мера щипка. */
-  function touchGap() {
-    const points = [...touches.values()];
-    if (points.length < 2) return 0;
-    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
   }
 
   function onPointerUp(event) {
