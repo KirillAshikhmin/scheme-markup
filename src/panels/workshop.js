@@ -144,7 +144,14 @@ import {
   canvasUndoStep,
   canvasCommit,
 } from "../canvas.js";
-import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
+import {
+  GESTURE_CLOSE_MIN,
+  gestureDraftClick,
+  gestureDraftEnd,
+  gesturePinchOf,
+  gesturePinchStep,
+  gestureWheel,
+} from "../gestures.js";
 import {
   DRAWING_ACTIVE,
   DRAWING_EDGE,
@@ -728,9 +735,10 @@ export function workshopObjectDefaultsByName(name) {
 // как замкнёт: контур обводят на глазах, и обещать нечего — показано.
 export const WORKSHOP_OBJECT_WAYS = ["rect", "contour", "polyline"];
 
-// Меньше трёх вершин — не контур: двумя точками площадь не огородить. Ровно
-// столько же требует и холст, чтобы замкнуть ломаную метки.
-export const WORKSHOP_CONTOUR_MIN = 3;
+// Меньше трёх вершин — не контур: двумя точками площадь не огородить. Счёт
+// общий с планом (`GESTURE_CLOSE_MIN`, таск 167) — ровно столько же требует и
+// холст, чтобы замкнуть ломаную метки, и двух разных троек здесь не бывает.
+export const WORKSHOP_CONTOUR_MIN = GESTURE_CLOSE_MIN;
 
 /** Какой формой модели оборачивается выбранный способ. */
 export function workshopShapeOfWay(way) {
@@ -2756,28 +2764,21 @@ function createWorkshop({ api, hosts }) {
       paint();
       return;
     }
-    // Клик в первую вершину **замыкает контур** — тем же жестом, которым на
-    // холсте замыкают ломаную метки, и порог тот же, в экранных пикселях:
-    // попасть в неё миллиметр в миллиметр нельзя.
-    if (workshopObjectWay === "contour" && onFirstVertex(event)) {
-      finishContour();
-      return;
-    }
-    // Клик по последней вершине ничего не добавляет: это первая половина
-    // двойного клика, которым цепочку заканчивают. Та же примета, что на холсте.
-    const last = draft.points[draft.points.length - 1];
-    if (last.x === snap.point.x && last.y === snap.point.y) return;
+    // Клик по концевой вершине ничего не добавляет: это первая половина двойного
+    // клика, которым росчерк заканчивают. Разбор общий с планом
+    // (`gestureDraftClick`, таск 167) — и порог тот же, в экранных пикселях:
+    // попасть в вершину миллиметр в миллиметр нельзя.
+    const kind = gestureDraftClick(draft.points.map(screenOf), pointOf(event), WORKSHOP_VERTEX_PX);
+    if (kind === "last") return;
+    // Контуру отказывается и по первой вершине: замыкают его двойным кликом, как
+    // ломаную метки. Открытому росчерку — цепочке стен, полосе — клик в первую
+    // вершину, наоборот, нужен: кольцо он замыкает повтором точки, отметки
+    // «замкнуто» у него нет.
+    if (kind === "first" && workshopObjectWay === "contour" && tool === "objects") return;
     draft.points.push(snap.point);
     draft.cursor = snap.point;
     draft.snap = snap;
     paint();
-  }
-
-  function onFirstVertex(event) {
-    if (!draft || draft.points.length < WORKSHOP_CONTOUR_MIN) return false;
-    const first = screenOf(draft.points[0]);
-    const at = pointOf(event);
-    return Math.hypot(at.x - first.x, at.y - first.y) <= WORKSHOP_VERTEX_PX;
   }
 
   stage.addEventListener("dblclick", (event) => {
@@ -2797,9 +2798,19 @@ function createWorkshop({ api, hosts }) {
       finishBand();
       return;
     }
-    // Контур двойным кликом **не заканчивается**: незамкнутый контур объектом
-    // не становится (G193), а терять за это четыре клика человеку незачем —
-    // черновик остаётся на поле, сказано только, чего не хватает.
+    // Контур заканчивается тем же двойным кликом, что ломаная метки на плане
+    // (таск 167): по первой вершине — замкнут, и вещь встаёт; в стороне от
+    // концов — просто две вершины, рисование продолжается.
+    const end = gestureDraftEnd(draft.points.map(screenOf), pointOf(event), WORKSHOP_VERTEX_PX);
+    if (end === "none") return;
+    if (end === "close") {
+      finishContour();
+      return;
+    }
+    // Остаётся «закончить незамкнутым» — двойной клик по последней вершине. У
+    // контура такого ответа нет: незамкнутый контур вещью не становится (G193).
+    // Терять за это четыре клика человеку незачем — черновик остаётся на поле,
+    // сказано только, чего не хватает.
     notify(strings.workshop.contourOpen, "error");
   });
 

@@ -14,6 +14,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  GESTURE_CLOSE_MIN,
+  gestureDraftClick,
+  gestureDraftEnd,
   gesturePinchOf,
   gesturePinchStep,
   gestureWheel,
@@ -212,4 +215,76 @@ test("своего разбора жеста у поверхностей не о
   // ходит и вертит головой — другой разбор и другое дело.
   const volume = readFileSync(new URL("../src/panels/volume.js", import.meta.url), "utf8");
   assert.ok(!/gestureWheel\(/.test(volume), "объём поехал на общее правило — у него свой жест");
+});
+
+// ——— черновик ломаной: клик и двойной клик (таск 167, G247) ———————————————
+
+// Черновик из трёх вершин: буква «Г» с концами подальше друг от друга, чтобы
+// порог попадания не накрыл обе сразу.
+const draft3 = [
+  { x: 100, y: 100 },
+  { x: 300, y: 100 },
+  { x: 300, y: 260 },
+];
+
+test("клик в концевую вершину вершины не добавляет", () => {
+  // Это первая половина двойного клика, которым черновик заканчивают: добавь
+  // она вершину — у замкнутого контура появилась бы лишняя точка в углу.
+  assert.equal(gestureDraftClick(draft3, { x: 303, y: 263 }, 9), "last");
+  assert.equal(gestureDraftClick(draft3, { x: 104, y: 97 }, 9), "first");
+  // В стороне — обычная вершина.
+  assert.equal(gestureDraftClick(draft3, { x: 150, y: 220 }, 9), "add");
+  // Мимо порога — тоже вершина: порог экранный, и в него надо попасть.
+  assert.equal(gestureDraftClick(draft3, { x: 100, y: 115 }, 9), "add");
+  // Пустого черновика не бывает — но и спросить про него не грех.
+  assert.equal(gestureDraftClick([], { x: 0, y: 0 }, 9), "add");
+});
+
+test("у черновика из одной вершины концы — одна и та же точка", () => {
+  // И это ещё не замыкание: первая она же и последняя, а замыкать нечего.
+  assert.equal(gestureDraftClick([{ x: 100, y: 100 }], { x: 100, y: 100 }, 9), "last");
+  assert.equal(gestureDraftEnd([{ x: 100, y: 100 }], { x: 100, y: 100 }, 9), "finish");
+});
+
+test("двойной клик: по первой замыкает, по последней заканчивает, в стороне не значит ничего", () => {
+  assert.equal(gestureDraftEnd(draft3, { x: 100, y: 100 }, 9), "close");
+  assert.equal(gestureDraftEnd(draft3, { x: 300, y: 260 }, 9), "finish");
+  // Главное отличие от прежнего чертежа: двойной клик в стороне — просто две
+  // вершины подряд, рисование продолжается. Прежде чертёж на любой двойной клик
+  // отвечал «контур не замкнут».
+  assert.equal(gestureDraftEnd(draft3, { x: 200, y: 200 }, 9), "none");
+});
+
+test("замыкать меньше чем тремя вершинами нечего", () => {
+  assert.equal(GESTURE_CLOSE_MIN, 3);
+  const two = [
+    { x: 100, y: 100 },
+    { x: 300, y: 100 },
+  ];
+  // Клик по первой вершине пары — это «закончить», а не «замкнуть»: отрезок
+  // площади не огораживает. Ломаной метки этого хватает, контуру вещи — нет, и
+  // отказывает он уже сам.
+  assert.equal(gestureDraftEnd(two, { x: 100, y: 100 }, 9), "finish");
+  assert.equal(gestureDraftEnd(two, { x: 300, y: 100 }, 9), "finish");
+});
+
+test("порог попадания даёт поверхность, и он экранный", () => {
+  // На плане кружок вершины растёт с масштабом, в чертеже ручка постоянная —
+  // поэтому число приходит доводом, а не живёт здесь. Нулевой порог означает
+  // «ровно в точку».
+  assert.equal(gestureDraftEnd(draft3, { x: 118, y: 100 }, 20), "close");
+  assert.equal(gestureDraftEnd(draft3, { x: 118, y: 100 }, 9), "none");
+  assert.equal(gestureDraftClick(draft3, { x: 100, y: 100 }, 0), "first");
+  assert.equal(gestureDraftClick(draft3, { x: 101, y: 100 }, 0), "add");
+});
+
+test("жест черновика разбирают общей дверью и план, и чертёж", () => {
+  // Та же сверка исходников, что у колеса, и по той же причине: заказчик просил
+  // свести этот жест дважды (таски 137 и 167). Вернись разбор в поверхность — и
+  // контур снова разойдётся с ломаной, а глазами это ловится только жестом.
+  for (const name of ["src/canvas.js", "src/panels/workshop.js"]) {
+    const code = readFileSync(new URL("../" + name, import.meta.url), "utf8");
+    assert.ok(/gestureDraftClick\(/.test(code), name + ": вершину черновика ставит свой разбор");
+    assert.ok(/gestureDraftEnd\(/.test(code), name + ": черновик заканчивается своим разбором");
+  }
 });

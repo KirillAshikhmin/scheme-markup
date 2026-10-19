@@ -17,7 +17,13 @@ import {
   setScreen,
 } from "./app.js";
 import { strings, text } from "./strings.js";
-import { gesturePinchOf, gesturePinchStep, gestureWheel } from "./gestures.js";
+import {
+  gestureDraftClick,
+  gestureDraftEnd,
+  gesturePinchOf,
+  gesturePinchStep,
+  gestureWheel,
+} from "./gestures.js";
 import {
   DEFAULT_MARK_SIZE,
   MARK_KIND_COMMENT,
@@ -633,6 +639,9 @@ const CANVAS_ZOOM_MAX = 24;
 const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
+// Запас к радиусу метки, по которому клик считается попавшим в концевую вершину
+// черновика: по кружку в самый его край целиться незачем.
+const CANVAS_DRAFT_END_PAD_PX = 6;
 // То же для пальца, и мера у него своя. Палец не стоит на месте: тап по метке
 // на планшете уезжает на несколько точек, и по мышиной мерке в три точки он
 // почти всегда оказывался бы панорамой, а не выбором метки. Десять точек —
@@ -1944,6 +1953,18 @@ export function canvasDraftPoint(draft, cursor, scheme, view, options) {
   return draftSnap(points, cursor, scheme, view, options);
 }
 
+// Вершины черновика в экранных точках: общий разбор жеста (`gestureDraftClick`,
+// `gestureDraftEnd`) меряет попадание в вершину глазом, а не долями плана.
+function canvasDraftScreen(points, scheme, view) {
+  return (points || []).map((point) => planToScreen(point, scheme, view));
+}
+
+// Порог попадания в концевую вершину черновика: кружок вершины нарисован в
+// размер метки и растёт с масштабом, поэтому и порог считается от него.
+function canvasDraftEndPx(view, slack = 0) {
+  return markRadius(view) + CANVAS_DRAFT_END_PAD_PX + slack;
+}
+
 function canvasDraftSnap(plan, free) {
   const state = canvasState();
   const scheme = canvasScheme(state);
@@ -2053,14 +2074,12 @@ function canvasDraftClick(plan, screen, free) {
   const snap = canvasDraftSnap(plan, free);
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
-  const threshold = markRadius(view) + 6;
   const points = canvasDraft.points;
-  const last = planToScreen(points[points.length - 1], scheme, view);
-  const first = planToScreen(points[0], scheme, view);
   // Клик по последней или первой вершине ничего не добавляет: это первая
-  // половина двойного клика, который завершает или замыкает линию.
-  if (Math.hypot(screen.x - last.x, screen.y - last.y) <= threshold) return;
-  if (points.length >= 2 && Math.hypot(screen.x - first.x, screen.y - first.y) <= threshold) return;
+  // половина двойного клика, который завершает или замыкает линию. Разбор общий
+  // (`gestureDraftClick`, таск 167) — тем же живёт контур вещи в чертеже.
+  const kind = gestureDraftClick(canvasDraftScreen(points, scheme, view), screen, canvasDraftEndPx(view));
+  if (kind !== "add") return;
   points.push(snap.point);
   canvasDraft.cursor = snap.point;
   canvasDraft.snapped = false;
@@ -3815,15 +3834,14 @@ function canvasDoubleAt(at, slack = 0) {
   const drawing = state.mode === "room" || canvasAddKind(state) === "line";
   if (!drawing && canvasResetLabel(at)) return true;
   if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return false;
-  const threshold = markRadius(view) + 6 + slack;
   const points = canvasDraft.points;
-  const first = planToScreen(points[0], scheme, view);
-  const last = planToScreen(points[points.length - 1], scheme, view);
-  const onFirst = Math.hypot(at.x - first.x, at.y - first.y) <= threshold;
-  const onLast = Math.hypot(at.x - last.x, at.y - last.y) <= threshold;
+  // Что значит двойной клик — общий разбор (`gestureDraftEnd`, таск 167): по
+  // первой вершине замыкает, по последней заканчивает незамкнутым, в стороне не
+  // значит ничего. Тем же разбором заканчивается контур вещи в чертеже.
+  const end = gestureDraftEnd(canvasDraftScreen(points, scheme, view), at, canvasDraftEndPx(view, slack));
   // Двойной клик в стороне — это просто две вершины подряд: рисование
   // продолжается, ничего не теряется и не замыкается.
-  if (!onFirst && !onLast) return false;
+  if (end === "none") return false;
   // Контур помещения замкнут всегда: комната с открытой стенкой — не комната.
   if (state.mode === "room") {
     canvasOutlineFinish();
@@ -3831,7 +3849,7 @@ function canvasDoubleAt(at, slack = 0) {
   }
   // По первой точке — замкнутый контур (лента по периметру комнаты),
   // по последней — открытая линия, ровно как в брифе.
-  canvasLineFinish(onFirst && !onLast && points.length >= 3);
+  canvasLineFinish(end === "close");
   return true;
 }
 
