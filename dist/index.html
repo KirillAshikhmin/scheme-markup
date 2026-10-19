@@ -6475,6 +6475,14 @@ const strings = {
     wallHeight: "высота стен схемы",
     roomWallHeight: "высота стен помещения",
     schemeFloor: "этаж схемы",
+    // Правки схемы — такие же шаги истории, как правки помещения (таск 172):
+    // стек один на объект, и мимо него Ctrl+Z отменял предыдущую правку —
+    // перенос метки, поставленную линию. Удаление схемы шага не имеет нарочно:
+    // причина — в коде рядом с `deleteImage`.
+    addScheme: "новая схема",
+    renameScheme: "переименование схемы",
+    schemeProps: "свойства схемы",
+    schemeOrder: "порядок схем",
     planOrigin: "привязка чертежа к плану",
     openingAdd: "проём в стене",
     openingEdit: "размеры проёма",
@@ -7315,7 +7323,17 @@ const strings = {
     hintEdit:
       "Клик выделяет. Вершина тянется за ручку, стена — за середину, проём — вдоль своей стены, объект — целиком или за углы. У полосы ручка на середине отрезка разбивает его, ручка за концом продолжает, двойной клик по вершине убирает. Ручка перед вещью поворачивает её: клик — четверть оборота, рука — кратно 15°. Delete убирает выделенное, Esc снимает выделение. Ctrl+Z — отмена.",
     chainAdded: "Цепочка из {count} стен",
+    bandAdded: "Полоса объекта по {count} вершинам",
     originSet: "Начало координат чертежа — середина подложки",
+    // Начатое при смене занятия (таск 172). Дописывается к известию о том, что
+    // встало: одна плашка на одно событие, а «Ctrl+Z отменит» в ней потому,
+    // что дочерченного человек не просил — он просил другое занятие.
+    draftSettled: "— начатое дочерчено, Ctrl+Z отменит",
+    // Снять со словами, а не молча: это была его работа, и в стеке отмены её
+    // нет — черновик живёт вне истории.
+    draftShort: "Начатое убрано: в нём была одна вершина",
+    draftFlat: "Начатое убрано: из обведённого контура прямоугольника не вышло",
+    draftScheme: "Начатое убрано: сменилась схема, чертят уже другую",
     // Дописывается к известию о замене подложки рядом с `scale.replaceDropped`:
     // долг интерфейса из таска 123 — пока привязку некому было поставить, этого
     // известия было не видно, а теперь есть кому.
@@ -20286,7 +20304,10 @@ const HANDLE_RADIUS = 9;
 const DRAFT_ANGLE_FONT = 12;
 const DRAFT_ANGLE_GAP = 14;
 const DRAFT_ANGLE_FREE = "#57606a";
-// Короче этого отрезок ещё не направление, и градус у него случайный.
+// Короче этого отрезок ещё не направление, и градус у него случайный. Наружу
+// — ради чертежа: он рисует свой черновик сам (свои миллиметры, своя толщина
+// стены), а порог «отрезок ещё не направление» обязан быть один на две
+// поверхности.
 const DRAFT_ANGLE_MIN_PX = 8;
 
 // Направляющая: мелкий пунктир в волос толщиной и вполсилы. Узор мельче любого
@@ -24746,6 +24767,11 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
 // конец линии, и по углу холста не понять, к какому отрезку относится число.
 // Сработавший магнит виден по слову «ровно» и цвету — иначе непонятно, почему
 // линия не идёт за рукой.
+//
+// Зовут это и холст, и чертёж (таск 172): притяжку чертёж считал той же
+// `draftSnap` и **выбрасывал** посчитанное — в миллиметрах, где прямой угол
+// важнее всего, про прямой угол и молчали. Второго рисовальщика градуса для
+// этого заводить не стали.
 function drawDraftAngle(ctx, at, angle, snapped, color, family) {
   const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
   ctx.save();
@@ -55075,7 +55101,14 @@ function mountSchemesPanel(host, api) {
       width: edited.width,
       height: edited.height,
     });
-    setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
+    // Через историю, как и всё остальное (таск 172): Ctrl+Z убирает заведённую
+    // схему, а не предыдущую правку. Картинка при отмене остаётся в хранилище
+    // — ровно так же сделано у поворота подложки: уберёт её уборка при
+    // следующем запуске, когда отменять будет нечего.
+    canvasCommit(fresh, added.project, strings.history.addScheme, {
+      schemeId: added.scheme.id,
+      selection: [],
+    });
     notify(text("schemes.added", { name: added.scheme.name }), "success");
   }
 
@@ -55086,9 +55119,10 @@ function mountSchemesPanel(host, api) {
    * «можно создавать схему без подложки», — и размер ей даёт сам чертёж
    * (`drawingBoundsMm`), а не картинка.
    *
-   * Заводится тем же путём, что схема с планом, — через `setState`: добавление
-   * схемы в этой панели никогда не было шагом истории, и заводить второй
-   * порядок ради одной кнопки не стоит.
+   * Заводится тем же путём, что схема с планом, — теперь через `canvasCommit`
+   * (таск 172): прежде правки схемы в этой панели шли мимо отмены, и Ctrl+Z
+   * после них молча отменял предыдущую правку. Второго порядка ради одной
+   * кнопки здесь по-прежнему нет.
    */
   async function addBlankScheme() {
     const state = getState();
@@ -55096,7 +55130,10 @@ function mountSchemesPanel(host, api) {
     const added = addScheme(state.project, {
       name: text("schemes.defaultName", { number: state.project.schemes.length + 1 }),
     });
-    setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
+    canvasCommit(state.project, added.project, strings.history.addScheme, {
+      schemeId: added.scheme.id,
+      selection: [],
+    });
     notify(text("schemes.added", { name: added.scheme.name }), "success");
     openDrawing(added.scheme.id);
   }
@@ -55452,15 +55489,23 @@ function mountSchemesPanel(host, api) {
         return;
       }
       const name = nameInput.value.trim();
-      // Этаж идёт шагом истории — как и в мастерской, откуда поле переехало;
-      // имя шага истории не знало и до сегодня, и менять это правило таском
-      // про место поля не стоит.
-      if (floored.changed) {
-        canvasCommit(base, floored.project, strings.history.schemeFloor, { schemeId });
-      }
-      if (name !== "" && name !== own.name) {
-        setState({ project: updateScheme(getState().project, schemeId, { name }).project });
-      }
+      const renamed = name !== "" && name !== own.name;
+      // **Одно окно — один шаг отмены** (таск 172). Этаж шагом истории был и
+      // прежде, а имя шло мимо: переименовал схему, передумал, нажал Ctrl+Z —
+      // имя оставалось, а отменялась предыдущая правка, перенос метки или
+      // поставленная линия. Стек истории один на объект, и мимо него ходить
+      // нельзя.
+      //
+      // Ярлык шага зависит от того, что поправили: у этажа он прежний (человек
+      // читает его в подсказке отмены), у имени свой, а когда поправили оба —
+      // общий: «Готово» нажали один раз, и возвращать половину окна нельзя.
+      const next = renamed ? updateScheme(floored.project, schemeId, { name }).project : floored.project;
+      const label = floored.changed
+        ? renamed
+          ? strings.history.schemeProps
+          : strings.history.schemeFloor
+        : strings.history.renameScheme;
+      if (floored.changed || renamed) canvasCommit(base, next, label, { schemeId });
       modal.close();
     }
 
@@ -55487,9 +55532,30 @@ function mountSchemesPanel(host, api) {
     moved.forEach((scheme, position) => {
       if (scheme.order !== position) next = updateScheme(next, scheme.id, { order: position }).project;
     });
-    setState({ project: next });
+    // Порядок схем отменяется, как и всё прочее (таск 172). Текущая схема при
+    // этом не меняется: `schemeId` команде не передаётся — переставить строку
+    // в списке не значит открыть её.
+    if (next === project) return;
+    canvasCommit(project, next, strings.history.schemeOrder);
   }
 
+  /**
+   * Удаление схемы — **единственная правка схемы вне отмены, и это нарочно**
+   * (таск 172).
+   *
+   * Всё остальное в этой панели — завести, переименовать, переставить,
+   * повернуть и заменить подложку, снять масштаб — идёт через `canvasCommit`.
+   * Удаление не идёт: `deleteImage` уносит подложку из IndexedDB
+   * **безвозвратно**, и отмена вернула бы метки в их долях (ADR 002) на план,
+   * которого больше нет, — доли без картинки это не разметка, а числа.
+   * Оставить же картинку в базе нельзя: она копила бы подложки всех удалённых
+   * схем, а это десятки мегабайт на объект.
+   *
+   * Поэтому здесь `setState`, а не шаг истории, и защита у этой правки другая
+   * — вопрос с числом меток, которые уйдут вместе со схемой. «Починить» это
+   * место, обернув в `canvasCommit`, значит сломать отмену, а не исправить:
+   * прежде надо решить, что делать с картинкой, и это решение за заказчиком.
+   */
   async function removeScheme(schemeId, marks) {
     const project = getState().project;
     const scheme = findScheme(project, schemeId);
@@ -56107,8 +56173,26 @@ function workshopToolOf(mode, adding) {
 const WORKSHOP_VERTEX_PX = 9;
 const WORKSHOP_WALL_PX = 6;
 
-// Пока палец не сдвинулся на столько, это клик, а не перетаскивание.
-const WORKSHOP_DRAG_SLOP = 3;
+/**
+ * Поехала ли рука: мерка **холстовая**, и у пальца она своя (`canvasDragSlop`).
+ *
+ * Своего числа у чертежа больше нет. Стояло одно на мышь и палец разом — три
+ * точки, — а комментарий над ним говорил именно про палец. На планшете,
+ * рабочем месте заказчика, тап по стене уезжает на четыре точки: по мышиной
+ * мерке он оказывался перетаскиванием, стена ехала, и в историю падал шаг
+ * «перенос стены». При масштабе 0,1 пикселя на миллиметр это сорок
+ * миллиметров. У холста мерки разведены давно, и причина там названа: «тап по
+ * метке на планшете уезжает на несколько точек, и по мышиной мерке в три
+ * точки он почти всегда оказывался бы панорамой».
+ *
+ * `gesture` — начало жеста: `{x, y}` и `touch` у пальца; `at` — где рука
+ * сейчас. Сравнение то же, что на холсте: сдвиг **больше** мерки — поехал.
+ */
+function workshopHandMoved(gesture, at) {
+  if (!gesture || !at) return false;
+  const shift = Math.hypot(Number(at.x) - Number(gesture.x), Number(at.y) - Number(gesture.y));
+  return shift > canvasDragSlop(gesture);
+}
 
 // Насколько подпись длины отступает от линии: ближе — садится на саму линию,
 // дальше — отрывается от неё и читается как чужая.
@@ -56653,6 +56737,41 @@ function workshopRectFromContour(pointsMm) {
 }
 
 /**
+ * Что станет с начатым, когда занятие сменилось (таск 172, находка 1 разбора).
+ *
+ * Чистая половина решения: по занятию, способу и набранным вершинам сказать,
+ * чем кончится черновик, — `{finish: "chain"|"band"|"contour"}` или
+ * `{drop: "short"|"flat"|"none"}`. Говорить словами и писать в объект —
+ * половина окна, и она зовёт эту.
+ *
+ * Что значит «дочертить» — по черновику:
+ *
+ *   **цепочка стен** — записать стены по набранным вершинам, как двойной клик;
+ *     из одной вершины стены не выйдет, и она снимается со словами;
+ *   **полоса объекта** — то же: вещь встаёт по набранным вершинам;
+ *   **контур** — отдать габарит, который уже нарисован призраком под рукой
+ *     (`workshopRectFromContour` — та же дверь): что показано, то и записано.
+ *     Контур без площади прямоугольником не станет — снимается со словами;
+ *   **проём и вещь по умолчаниям** — черновика не ведут вовсе, и дочерчивать у
+ *     них нечего: призрак под рукой это не работа, он идёт за рукой и ничего не
+ *     набрал. Поэтому `none` — без слов: сказать было бы не о чем.
+ *
+ * Повторные клики в одну точку в счёт не идут (`workshopDistinct`): два клика
+ * в одно место — это один клик, а не стена нулевой длины.
+ */
+function workshopDraftFate(tool, way, pointsMm) {
+  const points = workshopDistinct(pointsMm);
+  if (tool === "walls") return points.length >= 2 ? { finish: "chain" } : { drop: "short" };
+  if (tool === "objects" && way === "polyline") {
+    return points.length >= 2 ? { finish: "band" } : { drop: "short" };
+  }
+  if (tool === "objects" && way === "contour") {
+    return workshopRectFromContour(points) ? { finish: "contour" } : { drop: "flat" };
+  }
+  return { drop: "none" };
+}
+
+/**
  * Правка прямоугольника **за угол** (G194): угол напротив стоит на месте,
  * поворот не трогается — вещь растянули, а не повернули.
  *
@@ -56904,9 +57023,10 @@ function workshopObjectRectAt(sizes, pointMm) {
  *
  * Жалоба заказчика «просто тыкаешь и куда-то рядом встало» оказалась буквальной
  * и считается числами. Призрак считался из события движения руки, а клик — из
- * события **отпускания** кнопки, и между ними разрешено до
- * `WORKSHOP_DRAG_SLOP` = 3 точек: меньший сдвиг кликом и остаётся, иначе жест
- * стал бы панорамой. Сами по себе эти три точки ничего не стоят — но притяжка
+ * события **отпускания** кнопки, и между ними разрешена вся мерка «рука
+ * поехала» (`workshopHandMoved`: три точки у мыши, десять у пальца): меньший
+ * сдвиг кликом и остаётся, иначе жест стал бы панорамой. Сами по себе эти
+ * точки ничего не стоят — но притяжка
  * к узлам сетки делит лист на клетки по 500 мм, и граница клетки шириной в
  * одну точку проходит через каждую. Дрогнула рука на две точки поперёк такой
  * границы — и вещь уехала на **полметра** от обещанного.
@@ -58003,8 +58123,37 @@ function createWorkshop({ api, hosts }) {
     setTool(kind);
   }
 
+  /**
+   * Начатое при смене занятия: дочертить или снять **со словами** (таск 172).
+   *
+   * Это было единственное место сборки, где терялась уже сделанная работа:
+   * начал цепочку стен из пяти вершин, нажал «Проёмы» — исчезло молча. На плане
+   * тот же жест линию дочерчивает и говорит об этом (`canvasSettleDraft`), а
+   * одинокую точку снимает со словами. Сведено к плану: решение — чистая
+   * `workshopDraftFate`, здесь только слова и запись.
+   *
+   * Дочерченное идёт в историю одним шагом и отменяется тем же Ctrl+Z — об этом
+   * и сказано в плашке: человек просил не стену, а другое занятие, и лишнее
+   * убирается одной клавишей. Черновик же вне истории, и вернуть его нечем.
+   */
+  function settleDraft() {
+    if (!draft) return false;
+    const fate = workshopDraftFate(tool, workshopObjectWay, draft.points);
+    if (fate.finish === "chain") finishChain({ settled: true });
+    else if (fate.finish === "band") finishBand({ settled: true });
+    else if (fate.finish === "contour") finishContour({ settled: true });
+    else {
+      draft = null;
+      if (fate.drop === "short") notify(strings.workshop.draftShort);
+      else if (fate.drop === "flat") notify(strings.workshop.draftFlat);
+      sync();
+    }
+    return true;
+  }
+
   function setTool(next) {
     if (tool === next) return;
+    settleDraft();
     draft = null;
     ghost = null;
     objectGhost = null;
@@ -58053,7 +58202,7 @@ function createWorkshop({ api, hosts }) {
     return "wall";
   }
 
-  function finishChain() {
+  function finishChain(options = {}) {
     if (!draft) return;
     const points = draft.points;
     draft = null;
@@ -58068,12 +58217,10 @@ function createWorkshop({ api, hosts }) {
         return;
       }
       commit(result.project, strings.history.wallChain);
-      notify(
-        result.origin
-          ? text("workshop.chainAdded", { count: result.added }) + " " + strings.workshop.originSet
-          : text("workshop.chainAdded", { count: result.added }),
-        "success",
-      );
+      const said =
+        (result.origin ? " " + strings.workshop.originSet : "") +
+        (options.settled ? " " + strings.workshop.draftSettled : "");
+      notify(text("workshop.chainAdded", { count: result.added }) + said, "success");
     } catch (error) {
       fail(error);
     }
@@ -58364,6 +58511,10 @@ function createWorkshop({ api, hosts }) {
   // возьмёт те, что у вида, — донашивать за контуром чужую ширину незачем.
   function setObjectWay(way) {
     if (selectedObject() || !WORKSHOP_OBJECT_WAYS.includes(way)) return;
+    // Способ — это «что рисуем», как тип на плане: начатое прежним способом
+    // дочерчивается прежним способом (`settleDraft` спрашивает ещё не
+    // сменившийся `workshopObjectWay`), а не пропадает от нажатия кнопки.
+    settleDraft();
     workshopObjectWay = way;
     workshopObjectSizes = keptTurn();
     draft = null;
@@ -58619,7 +58770,9 @@ function createWorkshop({ api, hosts }) {
     }
     // Всё остальное — нажатие без решения: поехала рука — панорама, не поехала
     // — клик занятия.
-    press = { x: event.clientX, y: event.clientY };
+    // Палец помечается здесь: мерка «поехал» у него своя, а спросить
+    // `pointerType` потом будет негде — движение приходит с окна.
+    press = { x: event.clientX, y: event.clientY, touch: event.pointerType === "touch" };
   });
 
   // Что берёт «Правка» под руку. Ручки створки ничего не таскают — они
@@ -58638,7 +58791,7 @@ function createWorkshop({ api, hosts }) {
       atMm: pick.atMm,
       fromMm: pick.atMm,
       startMm: mmOf(event),
-      start: { x: event.clientX, y: event.clientY },
+      start: { x: event.clientX, y: event.clientY, touch: event.pointerType === "touch" },
       moved: false,
     };
     // Ручка пути: место, где она стоит, уже и есть ответ — клик по ней без
@@ -58654,7 +58807,8 @@ function createWorkshop({ api, hosts }) {
    * Клик занятия: рука не поехала, и жест оказался не панорамой.
    *
    * Точка берётся из события отпускания, а не нажатия: разошлись они не больше
-   * чем на `WORKSHOP_DRAG_SLOP` пикселей — иначе этот путь бы и не вызвался, —
+   * чем на мерку «рука поехала» (`workshopHandMoved`) — иначе этот путь бы и не
+   * вызвался, —
    * и притяжка всё равно ставит вершину в узел или на ровный угол.
    */
   function tap(event) {
@@ -58745,7 +58899,7 @@ function createWorkshop({ api, hosts }) {
   // Полоса объекта — тот же росчерк, что цепочка стен, только кончается одним
   // объектом с шириной полосы, а не чередой отрезков: кухонный фронт идёт по
   // стене с поворотом, а глубина у него одна.
-  function finishBand() {
+  function finishBand(options = {}) {
     if (!draft) return;
     const points = draft.points;
     draft = null;
@@ -58753,7 +58907,13 @@ function createWorkshop({ api, hosts }) {
       sync();
       return;
     }
-    placeObject(null, points);
+    const added = placeObject(null, points);
+    // Двойным кликом полоса встаёт молча — она видна на поле, и плашка тут не
+    // нужна. Дочерченная словами — наоборот: человек в этот миг смотрит не на
+    // поле, а на кнопку занятия, которую нажал.
+    if (added && options.settled) {
+      notify(text("workshop.bandAdded", { count: points.length }) + " " + strings.workshop.draftSettled, "success");
+    }
     sync();
   }
 
@@ -58769,7 +58929,7 @@ function createWorkshop({ api, hosts }) {
    * колонке** сразу, тем же порядком, каким в окне помнится толщина стен и
    * размер окна: поправил окно на 1300 — следующее окно встанет 1300.
    */
-  function finishContour() {
+  function finishContour(options = {}) {
     if (!draft) return;
     const rect = workshopRectFromContour(draft.points);
     if (!rect) {
@@ -58785,7 +58945,11 @@ function createWorkshop({ api, hosts }) {
         depthMm: rect.depthMm,
         turnDeg: rect.turnDeg,
       };
-      notify(text("workshop.contourAdded", { width: rect.widthMm, depth: rect.depthMm }), "success");
+      notify(
+        text("workshop.contourAdded", { width: rect.widthMm, depth: rect.depthMm }) +
+          (options.settled ? " " + strings.workshop.draftSettled : ""),
+        "success",
+      );
     }
     sync();
   }
@@ -58809,7 +58973,7 @@ function createWorkshop({ api, hosts }) {
     // обычная ветка. Отсчёт идёт от точки нажатия, а не от этого события:
     // иначе первые три пикселя терялись бы и план отставал от руки.
     if (press) {
-      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < WORKSHOP_DRAG_SLOP) return;
+      if (!workshopHandMoved(press, { x: event.clientX, y: event.clientY })) return;
       pan = { x: press.x, y: press.y };
       press = null;
     }
@@ -58819,9 +58983,9 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (drag) {
-      if (!drag.moved && Math.hypot(event.clientX - drag.start.x, event.clientY - drag.start.y) < WORKSHOP_DRAG_SLOP) {
-        return;
-      }
+      // Тап пальцем по стене её не двигает: мерка пальцевая, и четыре точки
+      // дрожи остаются тапом, а не шагом «перенос стены» в истории.
+      if (!drag.moved && !workshopHandMoved(drag.start, { x: event.clientX, y: event.clientY })) return;
       drag.moved = true;
       dragTo(event);
       return;
@@ -59176,6 +59340,13 @@ function createWorkshop({ api, hosts }) {
       event.stopPropagation();
       draft.points.pop();
       if (draft.points.length === 0) draft = null;
+      // Убрали вершину — градус и направляющие относились к прежнему отрезку и
+      // врали бы про новый. Пересчитываются от новой последней вершины, ровно
+      // как чистит их холст.
+      else {
+        draft.snap = snapOf(draft.cursor, event.altKey);
+        draft.cursor = draft.snap.point;
+      }
       paint();
       return;
     }
@@ -59504,13 +59675,19 @@ function createWorkshop({ api, hosts }) {
     const contour = objectDrawn() && workshopObjectWay === "contour";
     if ((tool !== "walls" && !band && !contour) || !draft) return;
     const points = [...draft.points, draft.cursor];
+    const accent = band || contour ? DRAWING_OBJECT : WORKSHOP_ACCENT;
+    // Направляющие по прежним вершинам — **под** черновиком, как на плане:
+    // подсказка не должна перечёркивать линию. Считает их та же притяжка, что
+    // сажает вершину (`workshopSnapMm` → `render.draftSnap`), и до таска 172
+    // она считала их впустую: `draft.snap` не читал никто.
+    if (draft.snap) drawDraftGuides(ctx, WORKSHOP_UNIT, draft.snap.guides, view, accent);
     ctx.lineCap = "butt";
     ctx.lineJoin = "round";
     // Контур обводят по месту, и толщины у него нет: он не стена и не полоса, а
     // габарит, который из него выйдет. Поэтому линия тонкая, а габарит показан
     // призраком — см. ниже.
     ctx.lineWidth = contour ? 1.5 : Math.max(1, (band ? bandWidthMm() : workshopThicknessMm) * view.zoom);
-    ctx.strokeStyle = band || contour ? DRAWING_OBJECT : WORKSHOP_ACCENT;
+    ctx.strokeStyle = accent;
     ctx.globalAlpha = contour ? 1 : 0.5;
     ctx.beginPath();
     points.forEach((point, index) => {
@@ -59539,6 +59716,15 @@ function createWorkshop({ api, hosts }) {
     // рукой, и мерить её надо одинаково.
     const last = draft.points[draft.points.length - 1];
     paintLength(last, draft.cursor);
+    // Градус тянущегося отрезка — у курсора и тем же знаком, что на плане:
+    // «ровно 90°» и цвет, когда сработал магнит, серое число, когда нет. Порог
+    // «отрезок ещё не направление» холстовый (`DRAFT_ANGLE_MIN_PX`): у короткой
+    // резинки градус случайный и прыгал бы под рукой.
+    const from = screenOf(last);
+    const at = screenOf(draft.cursor);
+    if (draft.snap && Math.hypot(at.x - from.x, at.y - from.y) >= DRAFT_ANGLE_MIN_PX) {
+      drawDraftAngle(ctx, at, draft.snap.angle, Boolean(draft.snap.snapped), accent);
+    }
   }
 
   /**
@@ -60076,6 +60262,11 @@ function createWorkshop({ api, hosts }) {
     // Всё, что относилось к прежней схеме, снимается: черновик, выделение и
     // вписанный кадр — у новой схемы свой масштаб и свой габарит.
     if (state.schemeId !== schemeId) {
+      // Дочертить начатое здесь некуда: оно принадлежит покинутой схеме, а шаг
+      // истории вернул бы её в кадр (`commit` зовёт `canvasCommit` с её
+      // `schemeId`) и спорил бы с кликом человека по списку. Поэтому слово, а
+      // не молчание: работа была, и человек должен знать, что её не стало.
+      if (draft) notify(strings.workshop.draftScheme);
       schemeId = state.schemeId;
       draft = null;
       ghost = null;
