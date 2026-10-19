@@ -73,6 +73,7 @@ import {
   VOLUME_MARK_WALL,
   VOLUME_OBJECT_RGB,
   VOLUME_CLEAR_ALPHA,
+  VOLUME_MITER_MAX,
   VOLUME_WALL_RGB,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
@@ -124,6 +125,8 @@ import {
   volumeSelectLines,
   volumeViewPolylines,
   volumeObjectFaces,
+  volumeObjectPrisms,
+  volumePrismSolid,
   volumeObjectModel,
   volumeOpeningWalkable,
   volumePointInside,
@@ -2469,6 +2472,164 @@ test("стену взгляд по-прежнему не пробивает, а 
     "точка обязана лежать на прозрачной вещи",
   );
   assert.equal(volumeSightAt(frame, x, y), null, "за лицом шкафа метки нет — и взгляду отвечать нечем");
+});
+
+// ——— ус на изломе полосы (дефект D38) ———————————————————————————————————
+//
+// Слова заказчика по снимку объёма: «не должно быть такого, ни двойного на
+// углу, ни пустоты в другом углу». Нашлось это ровно потому, что вещи стали
+// прозрачными: непрозрачные звенья прятали и нахлёст, и клин.
+
+/** Полоса с изломом: буква «Г» из двух звеньев по 2 м, ширина 600. */
+function stripStand(points) {
+  const scene = roomScene();
+  let project = ensureSchemeObjectKinds(scene.project).project;
+  const kind = schemeObjectKindsInOrder(project)[0];
+  const added = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: kind.id,
+    shape: "polyline",
+    pointsMm: points,
+    depthMm: 600,
+    heightMm: 900,
+    heightAboveFloorMm: 0,
+  });
+  return { project: added.project, schemeId: scene.schemeId, object: added.schemeObject };
+}
+
+const polygonAreaMm = (corners) => {
+  let sum = 0;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+    sum += corners[j].x * corners[i].y - corners[i].x * corners[j].y;
+  }
+  return Math.abs(sum / 2);
+};
+const samePoint = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 0.01;
+
+test("звенья полосы сходятся усом: ни нахлёста, ни клина (D38)", () => {
+  // Излом в прямой угол: звено вдоль −x, затем вдоль −y, как кухонный фронт на
+  // объекте заказчика.
+  const stand = stripStand([
+    { x: 1000, y: 0 },
+    { x: -1000, y: 0 },
+    { x: -1000, y: -1200 },
+  ]);
+  const prisms = volumeObjectPrisms(stand.project, stand.schemeId, stand.object, VOLUME_HEIGHT_FALLBACK_MM);
+  assert.equal(prisms.length, 2, "два звена");
+  // Общих точек у соседних звеньев ровно две — это и есть общая кромка по
+  // биссектрисе. До правки их не было ни одной: звенья кончались поперёк оси.
+  const shared = [];
+  for (const point of prisms[0].corners) {
+    for (const other of prisms[1].corners) if (samePoint(point, other)) shared.push(point);
+  }
+  assert.equal(shared.length, 2, "звенья сходятся по общей кромке: " + JSON.stringify(shared));
+  // Кромка идёт по биссектрисе угла: внешний её конец отстоит от вершины на
+  // полуширину, умноженную на √2, внутренний — ровно столько же внутрь.
+  const vertex = { x: -1000, y: 0 };
+  for (const point of shared) {
+    assert.ok(
+      Math.abs(Math.hypot(point.x - vertex.x, point.y - vertex.y) - 300 * Math.SQRT2) < 0.01,
+      "конец кромки не на биссектрисе: " + JSON.stringify(point),
+    );
+  }
+  // Внешний клин закрыт: угол (−1300, 300) — тот самый, где до правки была
+  // пустота, — теперь лежит в звене.
+  const outer = shared.find((point) => point.x < vertex.x);
+  assert.ok(outer && Math.round(outer.x) === -1300 && Math.round(outer.y) === 300, JSON.stringify(outer));
+  // Нахлёста нет: площадь двух звеньев равна площади полосы с усом. Прежние
+  // прямоугольники давали ту же сумму, но 0,09 м² из неё приходились на
+  // дважды закрашенный квадрат у внутреннего угла.
+  const drawn = prisms.reduce((sum, prism) => sum + polygonAreaMm(prism.corners), 0);
+  const boxes = prisms.reduce((sum, prism) => sum + polygonAreaMm(prism.solidCorners), 0);
+  assert.ok(Math.abs(drawn - boxes) < 1, "площадь не изменилась: " + Math.round(drawn) + " против " + Math.round(boxes));
+  // Ни одна точка одного звена не лежит **внутри** другого: нахлёста нет.
+  const inside = (point, corners) => {
+    let hit = false;
+    for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+      const a = corners[i];
+      const b = corners[j];
+      if (a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) hit = !hit;
+    }
+    return hit;
+  };
+  // Середина квадрата, который до правки красился дважды.
+  const wasDouble = { x: -1150, y: -150 };
+  const covers = prisms.filter((prism) => inside(wasDouble, prism.corners)).length;
+  assert.equal(covers, 1, "внутренний угол закрашен ровно одним звеном, а было двумя");
+  // И столько же граней, сколько было: ус меняет координаты, а не число тел.
+  const faces = volumeObjectFaces(stand.project, stand.schemeId, stand.object, VOLUME_HEIGHT_FALLBACK_MM);
+  assert.equal(faces.length, 10, "два звена по пять граней — как до правки");
+});
+
+test("ус меняет рисунок, а не то, где полоса держит человека (D38)", () => {
+  const stand = stripStand([
+    { x: 1000, y: 0 },
+    { x: -1000, y: 0 },
+    { x: -1000, y: -1200 },
+  ]);
+  const prisms = volumeObjectPrisms(stand.project, stand.schemeId, stand.object, VOLUME_HEIGHT_FALLBACK_MM);
+  // Препятствие первого звена — прежний прямоугольник: середина на оси звена,
+  // половина длины 1000, половина толщины 300.
+  const solid = volumePrismSolid(prisms[0]);
+  assert.equal(Math.round(solid.cx), 0);
+  assert.equal(Math.round(solid.cy), 0);
+  assert.equal(Math.round(solid.half), 1000);
+  assert.equal(Math.round(solid.halfT), 300);
+  // И он не зависит от уса: ровно такой же выходит из звена без излома.
+  const plain = stripStand([
+    { x: 1000, y: 0 },
+    { x: -1000, y: 0 },
+  ]);
+  const alone = volumePrismSolid(volumeObjectPrisms(plain.project, plain.schemeId, plain.object, VOLUME_HEIGHT_FALLBACK_MM)[0]);
+  assert.deepEqual(
+    [Math.round(solid.cx), Math.round(solid.cy), Math.round(solid.half), Math.round(solid.halfT)],
+    [Math.round(alone.cx), Math.round(alone.cy), Math.round(alone.half), Math.round(alone.halfT)],
+  );
+  // У прямоугольной вещи второго набора углов нет вовсе: усу там негде быть.
+  const scene = roomScene();
+  let project = ensureSchemeObjectKinds(scene.project).project;
+  const box = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: schemeObjectKindsInOrder(project)[0].id,
+    shape: "rect",
+    atMm: { x: 0, y: 0 },
+    widthMm: 1200,
+    depthMm: 600,
+    heightMm: 900,
+    heightAboveFloorMm: 0,
+  });
+  const rect = volumeObjectPrisms(box.project, scene.schemeId, box.schemeObject, VOLUME_HEIGHT_FALLBACK_MM)[0];
+  assert.equal(rect.solidCorners, undefined);
+});
+
+test("прямая полоса усом не ведётся, а острый излом срезается по пределу (D38)", () => {
+  // Две точки на одной прямой: излома нет, и кромки остаются поперечными —
+  // полоса обязана выйти той же, какой была до правки.
+  const straight = stripStand([
+    { x: 1500, y: 0 },
+    { x: 0, y: 0 },
+    { x: -1500, y: 0 },
+  ]);
+  for (const prism of volumeObjectPrisms(straight.project, straight.schemeId, straight.object, VOLUME_HEIGHT_FALLBACK_MM)) {
+    for (const point of prism.corners) assert.ok(Math.abs(Math.abs(point.y) - 300) < 0.01, JSON.stringify(point));
+  }
+  // Полоса, сложенная почти вдвое: ус ушёл бы на метры, и он срезан пределом.
+  const sharp = stripStand([
+    { x: 2000, y: 0 },
+    { x: 0, y: 0 },
+    { x: 1980, y: 100 },
+  ]);
+  const prisms = volumeObjectPrisms(sharp.project, sharp.schemeId, sharp.object, VOLUME_HEIGHT_FALLBACK_MM);
+  const vertex = { x: 0, y: 0 };
+  let most = 0;
+  for (const prism of prisms) {
+    for (const point of prism.corners) {
+      const reach = Math.hypot(point.x - vertex.x, point.y - vertex.y);
+      if (reach < 2000) most = Math.max(most, reach);
+    }
+  }
+  assert.ok(most <= VOLUME_MITER_MAX * 300 + 0.01, "ус длиннее предела: " + Math.round(most));
+  assert.ok(most > 300, "но длиннее поперечной кромки — иначе предел ни при чём: " + Math.round(most));
 });
 
 test("прозрачность — вид, а не свойство вещи: объект цел, сквозь шкаф не пройти (G68)", () => {

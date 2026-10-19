@@ -248,6 +248,16 @@ export const VOLUME_LAYER_GROUND = 1;
 export const VOLUME_LAYER_BODY = 2;
 export const VOLUME_LAYER_MARK = 3;
 /**
+ * Предел уса на изломе полосы (D38): во сколько раз смещение угла может
+ * превысить половину ширины. Четыре — то же число, которым ограничивают ус
+ * обводки в SVG и в вебовской канве; приходится оно на излом примерно в 151°,
+ * и полос круче этого в чертеже не рисуют. За пределом ус срезается.
+ */
+export const VOLUME_MITER_MAX = 4;
+/** Ниже этого `1 + n₁·n₂` считается полным разворотом: стыковать нечего. */
+const VOLUME_MITER_EPS = 1e-6;
+
+/**
  * Зазор, внутри которого точка считается лежащей **на** плоскости грани
  * (дерево порядка, см. `volumeOrderTree`).
  *
@@ -909,11 +919,50 @@ function volumeHeightAt(project, schemeId, pointMm, fallbackMm) {
 }
 
 /**
+ * **Ус на изломе полосы** (дефект D38, таск 169).
+ *
+ * Слова заказчика по снимку объёма: «не должно быть такого, ни двойного на
+ * углу, ни пустоты в другом углу».
+ *
+ * Полоса (кухонный фронт, короб, марш) — цепочка призм по звеньям, и звенья,
+ * обрубленные **поперёк своей оси**, на изломе не стыкуются: с внутренней
+ * стороны угла они залезают друг на друга, с внешней между ними остаётся клин
+ * пустоты. Непрозрачные звенья это прятали — лишний слой неотличим от одного,
+ * — а прозрачные показали оба изъяна разом.
+ *
+ * Лечится тем же, чем в черчении: звено кончается не поперёк оси, а **по
+ * биссектрисе угла**. Две кромки сходятся ровно, нахлёст пропадает вместе с
+ * клином, и граней от этого не прибавляется ни одной — меняются координаты
+ * четырёх точек звена.
+ *
+ * Смещение считается по сумме единичных нормалей: `(n₁ + n₂) / (1 + n₁·n₂)`.
+ * На прямой она даёт ровно нормаль, на прямом угле — её же, удлинённую в
+ * `√2`, то есть точку встречи двух кромок.
+ */
+function volumeMiterOffset(prev, next, halfWidth) {
+  if (!prev) return { x: next.x * halfWidth, y: next.y * halfWidth };
+  if (!next) return { x: prev.x * halfWidth, y: prev.y * halfWidth };
+  const dot = prev.x * next.x + prev.y * next.y;
+  const denominator = 1 + dot;
+  // Полный разворот: ус уходит в бесконечность, а стыковать нечего — полоса
+  // легла сама на себя. Кромка остаётся поперечной, как была.
+  if (!(denominator > VOLUME_MITER_EPS)) return { x: next.x * halfWidth, y: next.y * halfWidth };
+  const x = ((prev.x + next.x) / denominator) * halfWidth;
+  const y = ((prev.y + next.y) / denominator) * halfWidth;
+  const reach = Math.hypot(x, y);
+  const limit = VOLUME_MITER_MAX * Math.abs(halfWidth);
+  // Острый излом: ус длиннее предела — срезаем его по пределу («заглушка»).
+  // Полоса в этом месте кончается тупым носом, и между звеньями остаётся
+  // щель — но лежит она **внутри** острого угла, который сам себя закрывает.
+  if (reach > limit && reach > 0) return { x: (x / reach) * limit, y: (y / reach) * limit };
+  return { x, y };
+}
+
+/**
  * Объект схемы, разложенный на прямые призмы.
  *
  * Прямоугольник — одна призма по четырём углам, ломаная — цепочка призм по
- * звеньям: соседние звенья слегка заходят друг в друга на изломе, и это тот же
- * стык, что у двух стен в углу.
+ * звеньям, сходящихся на изломе **усом** (`volumeMiterOffset`, дефект D38).
  *
  * Высота `null` значит «во всю высоту помещения» (колонна, ниша, короб) — она
  * берётся по тому помещению, в котором вещь стоит.
@@ -921,6 +970,15 @@ function volumeHeightAt(project, schemeId, pointMm, fallbackMm) {
  * Одно место на обе надобности: по этим призмам вещь и рисуется, и держит
  * человека. Посчитай их врозь — и однажды нарисованный шкаф окажется не там,
  * где он не пускает.
+ *
+ * Ус — единственное, в чём эти две надобности расходятся, и расходятся
+ * **названно**: `corners` — то, что рисуется (звено с косыми кромками),
+ * `solidCorners` — прежний прямоугольник звена, которым вещь держит человека.
+ * Препятствие осталось прямоугольником не из лени: `volumePrismSolid` выводит
+ * ось и толщину из трёх первых углов, и косая кромка превратила бы трапецию в
+ * препятствие, стоящее не там, где вещь. Цена решения названа: внешний клин
+ * излома теперь **нарисован, но не держит** — на прямом угле это треугольник
+ * с катетами в половину ширины полосы.
  */
 export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) {
   const corners = schemeObjectCorners(object);
@@ -932,7 +990,10 @@ export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) 
     return [{ corners: volumeClockwise(corners), bottomMm: bottom, topMm: topAt(object.atMm || corners[0]) }];
   }
   const halfWidth = Number(object.depthMm) / 2;
-  const prisms = [];
+  // Звенья собираются списком **до** призм: усу нужен сосед, а вырожденное
+  // звено (две точки в одном месте) соседом быть не может — оно выпадает, и
+  // ус считается через него.
+  const links = [];
   for (let index = 0; index + 1 < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[index + 1];
@@ -940,10 +1001,26 @@ export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) 
     const dy = b.y - a.y;
     const length = Math.hypot(dx, dy);
     if (!(length > 0)) continue;
-    const nx = (dy / length) * halfWidth;
-    const ny = (-dx / length) * halfWidth;
+    links.push({ a, b, n: { x: dy / length, y: -dx / length } });
+  }
+  const prisms = [];
+  for (let index = 0; index < links.length; index += 1) {
+    const link = links[index];
+    const head = volumeMiterOffset(links[index - 1] ? links[index - 1].n : null, link.n, halfWidth);
+    const tail = volumeMiterOffset(link.n, links[index + 1] ? links[index + 1].n : null, halfWidth);
+    const a = link.a;
+    const b = link.b;
+    const nx = link.n.x * halfWidth;
+    const ny = link.n.y * halfWidth;
     prisms.push({
       corners: volumeClockwise([
+        { x: a.x + head.x, y: a.y + head.y },
+        { x: b.x + tail.x, y: b.y + tail.y },
+        { x: b.x - tail.x, y: b.y - tail.y },
+        { x: a.x - head.x, y: a.y - head.y },
+      ]),
+      // Препятствие — прежний прямоугольник звена (см. выше про расхождение).
+      solidCorners: volumeClockwise([
         { x: a.x + nx, y: a.y + ny },
         { x: b.x + nx, y: b.y + ny },
         { x: b.x - nx, y: b.y - ny },
@@ -1047,7 +1124,10 @@ export function volumePrismBlocks(prism) {
 
 /** Препятствие из призмы: повёрнутый прямоугольник по её габариту. */
 export function volumePrismSolid(prism) {
-  const corners = prism.corners;
+  // Звено полосы держит человека прежним прямоугольником, а не косым усом
+  // (D38): ось и толщину препятствия выводят три первых угла, и трапеция
+  // поставила бы их криво. У всего остального `solidCorners` нет вовсе.
+  const corners = prism.solidCorners || prism.corners;
   if (corners.length < 4) return null;
   const a = corners[0];
   const b = corners[1];
