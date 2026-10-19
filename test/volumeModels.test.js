@@ -242,9 +242,9 @@ test("у каждой вещи каталога есть модель, и дев
   for (const key of objectCatalogKeys()) {
     assert.ok(objectModelByKey(key), key + ": вещь каталога без модели");
   }
-  // Двадцать четыре ключа: тринадцать вещей из брифа, девять нынешних видов
-  // (шкаф у них общий) и унитаз с ванной — таск 162.
-  assert.equal(objectCatalogKeys().length, 24);
+  // Тридцать ключей: тринадцать вещей из брифа, девять нынешних видов (шкаф у
+  // них общий), унитаз с ванной (таск 162) и шесть вещей таска 177.
+  assert.equal(objectCatalogKeys().length, 30);
   // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам.
   for (const [key, name] of Object.entries(strings.schemeObjectKinds)) {
     const found = objectModelForName(name);

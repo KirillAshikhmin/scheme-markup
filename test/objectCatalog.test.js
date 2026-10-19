@@ -118,9 +118,9 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге двадцать четыре вещи, и каждая стоит ровно в одной категории", () => {
+test("в каталоге тридцать вещей, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  assert.equal(keys.length, 24, "вещей в каталоге стало другое число: " + keys.length);
+  assert.equal(keys.length, 30, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -148,6 +148,16 @@ test("в каталоге двадцать четыре вещи, и кажда�
   }
   // Шкаф общий у брифа и у справочника — поэтому ключей было двадцать два, а
   // не двадцать три.
+  // И шесть вещей таска 177 (G262): «В технику добавь телевизор. А так же в
+  // мебель диван, кресло, журнальный стол, компьютерные стол и кресло (один
+  // объект), табуретки». Компьютерный стол с креслом — одна вещь, а не две.
+  for (const key of ["tv", "sofa", "armchair", "coffeeTable", "deskSet", "stool"]) {
+    assert.ok(objectCatalogEntry(key), "вещь таска 177 пропала: " + key);
+  }
+  assert.equal(objectCatalogEntry("tv").category, "appliances", "телевизор ушёл не в технику");
+  for (const key of ["sofa", "armchair", "coffeeTable", "deskSet", "stool"]) {
+    assert.equal(objectCatalogEntry(key).category, "furniture", key + ": вещь ушла не в мебель");
+  }
   assert.equal(objectCatalogEntry("cabinet").name, strings.schemeObjectKinds.cabinet);
   // И две вещи таска 162: «А где в перечне сантехники унитаз и ванна?»
   for (const key of ["toilet", "bathtub"]) {
@@ -272,8 +282,19 @@ test("имя прежнего вида переводится в ключ тер
   assert.equal(objectCatalogKeyByName("Сантехника"), "plumbing");
   assert.equal(objectCatalogKeyByName("Ванна"), "bathtub");
   assert.equal(objectCatalogKeyByName("ванная"), "bathtub");
-  // А диван ванной не становится: корень «ванн», а не «ван».
-  assert.equal(objectCatalogKeyByName("Диван"), null);
+  // Диван с таска 177 — своя вещь каталога, и ванной он не становится: корень
+  // «ванн», а не «ван». А «Диванная подушка» содержит оба корня — и побеждает
+  // длинный, как и задумано.
+  assert.equal(objectCatalogKeyByName("Диван"), "sofa");
+  assert.equal(objectCatalogKeyByName("Диванная подушка"), "sofa");
+  // Вещи таска 177 узнаются по своим корням, и длинный корень забирает имя у
+  // короткого: журнальный и компьютерный столы столом не становятся.
+  assert.equal(objectCatalogKeyByName("Журнальный стол"), "coffeeTable");
+  assert.equal(objectCatalogKeyByName("Компьютерный стол"), "deskSet");
+  assert.equal(objectCatalogKeyByName("Компьютерное кресло"), "deskSet");
+  assert.equal(objectCatalogKeyByName("Кресло"), "armchair");
+  assert.equal(objectCatalogKeyByName("Табуретки на кухне"), "stool");
+  assert.equal(objectCatalogKeyByName("Телевизор"), "tv");
   assert.equal(objectCatalogKeyByName("Аквариум"), null);
   assert.equal(objectCatalogKeyByName(""), null);
   assert.equal(objectCatalogKeyByName(null), null);
