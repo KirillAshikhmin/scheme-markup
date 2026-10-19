@@ -16,6 +16,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  WALL_HEIGHT_FALLBACK_MM,
   addMark,
   addOpening,
   addOutline,
@@ -285,8 +286,39 @@ test("высота не задана — развёртка не врёт чис
   const view = wallElevation(noHeight, bare.wallId, "left");
   assert.equal(view.heightMm, null);
   assert.equal(view.heightKnown, false);
-  assert.equal(view.heightShownMm, 2400, "верх самого высокого плюс триста воздуха");
+  assert.equal(view.heightShownMm, WALL_HEIGHT_FALLBACK_MM, "умолчание, а не выведенные 2400");
+  assert.equal(WALL_HEIGHT_FALLBACK_MM, 2800, "слово заказчика (G255)");
   assert.match(elevationNote(view), /Высота стен не задана/);
+  assert.match(elevationNote(view), /2800/, "в строке стоит то, во что нарисовано");
+});
+
+test("дверь выше умолчания поднимает лист, а не упирается в его потолок", () => {
+  const bare = wallScene();
+  // Проём ростом в умолчание: будь высота листа плоским числом, верхний косяк
+  // встал бы ровно на потолок. Запасной путь поднимает лист на воздух сверху.
+  const noHeight = setSchemeWallHeight(bare.project, bare.schemeId, "").project;
+  const tall = addOpening(noHeight, {
+    wallId: bare.wallId,
+    kind: "door",
+    atMm: 500,
+    widthMm: 900,
+    heightMm: WALL_HEIGHT_FALLBACK_MM,
+    heightAboveFloorMm: 0,
+  }).project;
+  const view = wallElevation(tall, bare.wallId, "left");
+  assert.equal(view.heightKnown, false);
+  assert.equal(view.heightShownMm, WALL_HEIGHT_FALLBACK_MM + 300, "верх проёма плюс триста воздуха");
+});
+
+test("заданная высота умолчанием не перебивается — ни схемы, ни комнаты (G68)", () => {
+  const bare = wallScene();
+  const own = setSchemeWallHeight(bare.project, bare.schemeId, 2400).project;
+  const view = wallElevation(own, bare.wallId, "left");
+  assert.equal(view.heightKnown, true);
+  assert.equal(view.heightShownMm, 2400, "у кого высота задана — у того ничего не меняется");
+  // Даже если задана ниже того, что на стене стоит: это число человека.
+  const low = setSchemeWallHeight(bare.project, bare.schemeId, 1800).project;
+  assert.equal(wallElevation(low, bare.wallId, "left").heightShownMm, 1800);
 });
 
 test("развёртки несуществующей стены не бывает", () => {

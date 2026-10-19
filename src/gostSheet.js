@@ -19,7 +19,7 @@
 // отношение для графы «Масштаб» (`gostScaleDenominator`). Второй формулы для
 // того же числа в сборке нет и быть не должно: два пути расчёта разойдутся в
 // последнем знаке, а заказчик проверяет чертёж линейкой (G169).
-import { ELEVATION_FRAME_UNITS, ELEVATION_UNIT_MM, drawFont } from "./render.js";
+import { ELEVATION_FRAME_UNITS, ELEVATION_UNIT_MM, GOST_TEXT_MM, drawFont } from "./render.js";
 import { strings, text } from "./strings.js";
 
 // ——— бумага ———————————————————————————————————————————————————————————
@@ -46,6 +46,9 @@ export const GOST_STAMP_HEIGHT_MM = { form3: 55, form5: 40, form6: 15 };
 export const GOST_LINE_MM = 0.7;
 export const GOST_THIN_MM = 0.3;
 
+// Кегль граф штампа — общий по ГОСТ 2.304 (`render.GOST_TEXT_MM`, 3,5 мм):
+// графы ниже называют его по имени, а не повторяют числом.
+//
 // Наименьшая высота шрифта на чертеже по ГОСТ 2.304 — 2,5 мм. Ниже неё
 // подпись метки на бумаге не читается, и это мерка автоподбора формата.
 export const GOST_MIN_TEXT_MM = 2.5;
@@ -379,8 +382,6 @@ export function elevationSheetLayout(blocks, options = {}) {
 const GOST_CHANGE_COLUMNS = [10, 10, 10, 10, 15, 10];
 // Колонки блока подписей: характер работы | фамилия | подпись | дата.
 const GOST_WORK_COLUMNS = [20, 20, 15, 10];
-// Левый блок у всех трёх форм одной ширины.
-const GOST_LEFT_WIDTH = 65;
 const GOST_ROW = 5;
 
 function gostRow(columns, x0, y, height, make) {
@@ -420,8 +421,8 @@ function gostWorkBlock(top, rows) {
     cells.push(
       ...gostRow(GOST_WORK_COLUMNS, 0, y, GOST_ROW, (column) => {
         if (column === 0) return role ? { label: role, size: 2.5, align: "left" } : { field: "role" + index, size: 2.5, align: "left" };
-        if (column === 1) return { field: "name" + index, size: 3.5 };
-        if (column === 2) return { field: "sign" + index, size: 3.5 };
+        if (column === 1) return { field: "name" + index, size: GOST_TEXT_MM };
+        if (column === 2) return { field: "sign" + index, size: GOST_TEXT_MM };
         return { field: "date" + index, size: 2.5 };
       }),
     );
@@ -436,15 +437,15 @@ const GOST_FORM_BUILDERS = {
     const right = [
       { x: 65, y: 0, width: 120, height: 10, field: "code", size: 7 },
       { x: 65, y: 10, width: 120, height: 15, field: "object", size: 5, lines: 2 },
-      { x: 65, y: 25, width: 70, height: 15, field: "building", size: 3.5, lines: 2 },
+      { x: 65, y: 25, width: 70, height: 15, field: "building", size: GOST_TEXT_MM, lines: 2 },
       { x: 135, y: 25, width: 15, height: 5, label: "stage", size: 2.5 },
       { x: 150, y: 25, width: 15, height: 5, label: "sheet", size: 2.5 },
       { x: 165, y: 25, width: 20, height: 5, label: "sheets", size: 2.5 },
-      { x: 135, y: 30, width: 15, height: 10, field: "stage", size: 3.5 },
-      { x: 150, y: 30, width: 15, height: 10, field: "sheet", size: 3.5 },
-      { x: 165, y: 30, width: 20, height: 10, field: "sheets", size: 3.5 },
-      { x: 65, y: 40, width: 70, height: 15, field: "drawing", size: 3.5, lines: 3 },
-      { x: 135, y: 40, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+      { x: 135, y: 30, width: 15, height: 10, field: "stage", size: GOST_TEXT_MM },
+      { x: 150, y: 30, width: 15, height: 10, field: "sheet", size: GOST_TEXT_MM },
+      { x: 165, y: 30, width: 20, height: 10, field: "sheets", size: GOST_TEXT_MM },
+      { x: 65, y: 40, width: 70, height: 15, field: "drawing", size: GOST_TEXT_MM, lines: 3 },
+      { x: 135, y: 40, width: 50, height: 15, field: "org", size: GOST_TEXT_MM, lines: 2 },
     ];
     return {
       height: 55,
@@ -467,10 +468,10 @@ const GOST_FORM_BUILDERS = {
       { x: 135, y: 15, width: 15, height: 5, label: "stage", size: 2.5 },
       { x: 150, y: 15, width: 15, height: 5, label: "sheet", size: 2.5 },
       { x: 165, y: 15, width: 20, height: 5, label: "sheets", size: 2.5 },
-      { x: 135, y: 20, width: 15, height: 5, field: "stage", size: 3.5 },
-      { x: 150, y: 20, width: 15, height: 5, field: "sheet", size: 3.5 },
-      { x: 165, y: 20, width: 20, height: 5, field: "sheets", size: 3.5 },
-      { x: 135, y: 25, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+      { x: 135, y: 20, width: 15, height: 5, field: "stage", size: GOST_TEXT_MM },
+      { x: 150, y: 20, width: 15, height: 5, field: "sheet", size: GOST_TEXT_MM },
+      { x: 165, y: 20, width: 20, height: 5, field: "sheets", size: GOST_TEXT_MM },
+      { x: 135, y: 25, width: 50, height: 15, field: "org", size: GOST_TEXT_MM, lines: 2 },
     ];
     return {
       height: 40,
@@ -490,7 +491,7 @@ const GOST_FORM_BUILDERS = {
       ...gostChangeBlock(2),
       { x: 65, y: 0, width: 110, height: 15, field: "code", size: 5 },
       { x: 175, y: 0, width: 10, height: 7, label: "sheet", size: 2.5 },
-      { x: 175, y: 7, width: 10, height: 8, field: "sheet", size: 3.5 },
+      { x: 175, y: 7, width: 10, height: 8, field: "sheet", size: GOST_TEXT_MM },
     ];
     return {
       height: 15,
@@ -633,7 +634,7 @@ function gostWrap(ctx, value, cell, mm, sizeMm) {
 
 function gostCellText(ctx, value, cell, mm) {
   if (!value) return;
-  const sizeMm = cell.size || 3.5;
+  const sizeMm = cell.size || GOST_TEXT_MM;
   const lines = gostWrap(ctx, value, cell, mm, sizeMm);
   const step = sizeMm * 1.25 * mm;
   const top = (cell.y + cell.height / 2) * mm - ((lines.length - 1) * step) / 2;

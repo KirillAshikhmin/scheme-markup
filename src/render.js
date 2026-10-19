@@ -40,10 +40,12 @@ import {
   planOriginOf,
   planPixelsPerMeter,
   pointInOutline,
+  schemeHeightPx,
   schemeObjectCorners,
   schemeObjectNameOf,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
+  schemeWidthPx,
   segmentDistanceMm,
   styleOf,
   labelOf,
@@ -163,8 +165,20 @@ const HIT_SLACK_PX = 4;
 // стоит дважды: подпись у края плана не уезжает влево, когда пора, и клик по
 // ней промахивается мимо прямоугольника.
 const LABEL_CHAR_RATIO = 0.75;
-// Насколько далеко от метки стоит подпись, если её не оттаскивали.
-const LABEL_GAP = 1.5;
+// Насколько далеко от метки стоит подпись, если её не оттаскивали. Отдан
+// наружу: холст ставит подпись на то же место, когда её берут мышью.
+export const LABEL_GAP = 1.5;
+
+/**
+ * Кегль чертёжного шрифта по ГОСТ 2.304 — 3,5 мм. Одно число на всё, что
+ * уходит на бумагу: подписи развёртки, графы штампа и таблица на листе.
+ *
+ * Живёт здесь, а не в `gostSheet.js`, где остальная бумажная метрика, потому
+ * что `gostSheet` тянет из `render.js`, а не наоборот: обратная ссылка была бы
+ * кольцом, а кольца сборка не терпит. До таска 173 это число стояло в трёх
+ * файлах порознь — и расхождение попало бы на бумагу заказчика.
+ */
+export const GOST_TEXT_MM = 3.5;
 // Ручки «+» стоят от центра метки на столько её радиусов — ровно на шаг блока,
 // потому что новая метка встаёт **туда, где нарисована ручка**. Мера одна, и
 // живёт она в модели (`BLOCK_STEP_RATIO`): свои 2,4 здесь однажды уже
@@ -178,8 +192,11 @@ const HANDLE_RADIUS = 9;
 const DRAFT_ANGLE_FONT = 12;
 const DRAFT_ANGLE_GAP = 14;
 const DRAFT_ANGLE_FREE = "#57606a";
-// Короче этого отрезок ещё не направление, и градус у него случайный.
-const DRAFT_ANGLE_MIN_PX = 8;
+// Короче этого отрезок ещё не направление, и градус у него случайный. Наружу
+// — ради чертежа: он рисует свой черновик сам (свои миллиметры, своя толщина
+// стены), а порог «отрезок ещё не направление» обязан быть один на две
+// поверхности.
+export const DRAFT_ANGLE_MIN_PX = 8;
 
 // Направляющая: мелкий пунктир в волос толщиной и вполсилы. Узор мельче любого
 // начертания метки — на пунктирной линии подсказку иначе не отличить от самого
@@ -1408,25 +1425,17 @@ export function typeIcon(project, typeId, size = 22, length = size * 2) {
 export function planToScreen(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: state.offsetX + point.x * schemeWidth(scheme) * state.zoom,
-    y: state.offsetY + point.y * schemeHeight(scheme) * state.zoom,
+    x: state.offsetX + point.x * schemeWidthPx(scheme) * state.zoom,
+    y: state.offsetY + point.y * schemeHeightPx(scheme) * state.zoom,
   };
 }
 
 export function screenToPlan(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: (point.x - state.offsetX) / (schemeWidth(scheme) * state.zoom),
-    y: (point.y - state.offsetY) / (schemeHeight(scheme) * state.zoom),
+    x: (point.x - state.offsetX) / (schemeWidthPx(scheme) * state.zoom),
+    y: (point.y - state.offsetY) / (schemeHeightPx(scheme) * state.zoom),
   };
-}
-
-function schemeWidth(scheme) {
-  return scheme && scheme.width > 0 ? scheme.width : 1000;
-}
-
-function schemeHeight(scheme) {
-  return scheme && scheme.height > 0 ? scheme.height : 1000;
 }
 
 // Радиус метки на экране: размер задан в пикселях плана и растёт с масштабом.
@@ -1445,8 +1454,8 @@ export function labelFontSize(view) {
 
 // Вписать план в прямоугольник холста.
 export function fitView(scheme, viewport) {
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const boxWidth = Math.max(1, viewport.width);
   const boxHeight = Math.max(1, viewport.height);
   const zoom = Math.min(boxWidth / width, boxHeight / height) * 0.96;
@@ -1509,8 +1518,8 @@ function rayProject(from, to, scheme, degrees) {
   // плавающей ошибки — продольная координата остаётся ровно под курсором.
   if (straight % 180 === 0) return { x: to.x, y: from.y };
   if (straight % 180 === 90) return { x: from.x, y: to.y };
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const radians = (straight * Math.PI) / 180;
   const ux = Math.cos(radians);
   const uy = -Math.sin(radians);
@@ -1523,8 +1532,8 @@ function rayProject(from, to, scheme, degrees) {
 // разных пикселей, и угол по долям — не тот угол, который видит инженер.
 // `options.free` — магнит снят; `options.limit` — свой порог.
 export function snapSegment(from, to, scheme, options = {}) {
-  const dx = (to.x - from.x) * schemeWidth(scheme);
-  const dy = (to.y - from.y) * schemeHeight(scheme);
+  const dx = (to.x - from.x) * schemeWidthPx(scheme);
+  const dy = (to.y - from.y) * schemeHeightPx(scheme);
   if (dx === 0 && dy === 0) return { point: to, angle: 0, snapped: false };
   const angle = segmentAngle(dx, dy);
   const limit = options.limit === undefined ? SNAP_ANGLE_DEG : options.limit;
@@ -1702,8 +1711,8 @@ export function rulerTicks(scheme, view, box) {
   };
   return {
     step,
-    top: ticks(box.width, state.offsetX, schemeWidth(scheme)),
-    left: ticks(box.height, state.offsetY, schemeHeight(scheme)),
+    top: ticks(box.width, state.offsetX, schemeWidthPx(scheme)),
+    left: ticks(box.height, state.offsetY, schemeHeightPx(scheme)),
   };
 }
 
@@ -1764,14 +1773,14 @@ export function rulerAxis(point) {
 export function guideScreen(guide, scheme, view) {
   const state = renderView(view);
   return guide.axis === "h"
-    ? state.offsetY + guide.at * schemeHeight(scheme) * state.zoom
-    : state.offsetX + guide.at * schemeWidth(scheme) * state.zoom;
+    ? state.offsetY + guide.at * schemeHeightPx(scheme) * state.zoom
+    : state.offsetX + guide.at * schemeWidthPx(scheme) * state.zoom;
 }
 
 // Доля плана из экранной координаты — обратный ход для перетаскивания.
 export function guideFraction(axis, screen, scheme, view) {
   const state = renderView(view);
-  const size = (axis === "h" ? schemeHeight(scheme) : schemeWidth(scheme)) * state.zoom;
+  const size = (axis === "h" ? schemeHeightPx(scheme) : schemeWidthPx(scheme)) * state.zoom;
   const offset = axis === "h" ? state.offsetY : state.offsetX;
   return size > 0 ? (screen - offset) / size : 0;
 }
@@ -2596,8 +2605,8 @@ function markStackPlaceAll(project, scheme, filter, sizes) {
   const result = new Map();
   const list = visibleMarks(project, scheme, filter).filter(markStackable);
   if (list.length < 2) return result;
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const reach = sizes.radius * MARK_STACK_REACH_RATIO;
   const stepPx = sizes.radius * MARK_STACK_STEP_RATIO;
   const order = new Map(list.map((mark, index) => [mark.id, index]));
@@ -3208,8 +3217,8 @@ function labelLeadSide(project, scheme, target) {
   const lead = labelLead(project, target);
   const points = (lead && lead.kind === "line" && lead.points) || [];
   if (points.length < 2) return null;
-  const dx = (points[1].x - points[0].x) * schemeWidth(scheme);
-  const dy = (points[1].y - points[0].y) * schemeHeight(scheme);
+  const dx = (points[1].x - points[0].x) * schemeWidthPx(scheme);
+  const dy = (points[1].y - points[0].y) * schemeHeightPx(scheme);
   if (Math.abs(dx) < Math.abs(dy)) return null;
   if (dx === 0 && dy === 0) return null;
   return { sign: dy >= 0 ? -1 : 1 };
@@ -3308,7 +3317,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
   const text = labelTextOf(project, target);
   const reach = labelReach(project, target, stacks);
   const lead = labelLeadSide(project, scheme, target);
-  const width = schemeWidth(scheme);
+  const width = schemeWidthPx(scheme);
   // Плашка комментария шире и выше строки: её габарит считает `commentPlateSize`
   // по тем же знакам и тому же кеглю. Раскладке она от этого не чужая — место
   // ей ищется тем же перебором, и соседние подписи её обходят.
@@ -3321,7 +3330,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
     text,
     lines,
     x: origin.x * width,
-    y: origin.y * schemeHeight(scheme),
+    y: origin.y * schemeHeightPx(scheme),
     width: size.width,
     height: size.height,
     angle: labelAngleOf(project, target),
@@ -3372,8 +3381,8 @@ function labelFilterKey(filter) {
 }
 
 function labelPlaceAll(project, scheme, filter, sizes, stacks) {
-  const planWidth = schemeWidth(scheme);
-  const planHeight = schemeHeight(scheme);
+  const planWidth = schemeWidthPx(scheme);
+  const planHeight = schemeHeightPx(scheme);
   const layout = new Map();
   const entries = labelTargets(project, scheme, filter)
     .map((target) => ({
@@ -4584,15 +4593,15 @@ function drawExtent(ctx, scheme, view) {
   const height = ctx.canvas && ctx.canvas.height > 0 && ratio > 0 ? ctx.canvas.height / ratio : 0;
   if (width > 0 && height > 0) return { width, height };
   return {
-    width: view.offsetX + schemeWidth(scheme) * view.zoom,
-    height: view.offsetY + schemeHeight(scheme) * view.zoom,
+    width: view.offsetX + schemeWidthPx(scheme) * view.zoom,
+    height: view.offsetY + schemeHeightPx(scheme) * view.zoom,
   };
 }
 
 // Направляющие: полупрозрачный мелкий пунктир через вершину, которая поймала
 // курсор. Узор нарочно мельче любого начертания метки — иначе на пунктирной
 // линии не понять, где черновик, а где подсказка.
-function drawDraftGuides(ctx, scheme, guides, view, color) {
+export function drawDraftGuides(ctx, scheme, guides, view, color) {
   if (!guides || guides.length === 0) return;
   const box = drawExtent(ctx, scheme, view);
   ctx.save();
@@ -4648,7 +4657,12 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
 // конец линии, и по углу холста не понять, к какому отрезку относится число.
 // Сработавший магнит виден по слову «ровно» и цвету — иначе непонятно, почему
 // линия не идёт за рукой.
-function drawDraftAngle(ctx, at, angle, snapped, color, family) {
+//
+// Зовут это и холст, и чертёж (таск 172): притяжку чертёж считал той же
+// `draftSnap` и **выбрасывал** посчитанное — в миллиметрах, где прямой угол
+// важнее всего, про прямой угол и молчали. Второго рисовальщика градуса для
+// этого заводить не стали.
+export function drawDraftAngle(ctx, at, angle, snapped, color, family) {
   const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
   ctx.save();
   ctx.font = drawFont(DRAFT_ANGLE_FONT, 600, family);
@@ -4873,8 +4887,8 @@ export function drawingBridge(project, scheme, view) {
   const origin = planOriginOf(project, scheme.id);
   if (!(perMeter > 0) || !origin) return null;
   const state = renderView(view);
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const pxPerMm = perMeter / 1000;
   const zeroX = state.offsetX + origin.at.x * width * state.zoom;
   const zeroY = state.offsetY + origin.at.y * height * state.zoom;
@@ -5263,12 +5277,10 @@ const ELEVATION_FONT = 11;
 // Мельче этого подпись на развёртке не читается — тогда её просто нет.
 const ELEVATION_LABEL_MIN_PX = 26;
 
-// Шрифт развёртки на бумаге — 3,5 мм: размер по ГОСТ 2.304, тот же, которым
-// подписана таблица. Из него и выводится, сколько миллиметров стоит единица, —
+// Из кегля ГОСТ и выводится, сколько миллиметров стоит единица развёртки, —
 // одно число на все поля, и пропорции экранной развёртки переносятся на лист
 // целиком.
-export const ELEVATION_FONT_MM = 3.5;
-export const ELEVATION_UNIT_MM = ELEVATION_FONT_MM / ELEVATION_FONT;
+export const ELEVATION_UNIT_MM = GOST_TEXT_MM / ELEVATION_FONT;
 
 // Сколько единиц рамки съедают поля: по ширине и по высоте. Этим считает
 // раскладку листа `gostSheet.elevationFit` — размеры полей живут здесь, рядом
@@ -5919,8 +5931,8 @@ export function drawScheme(ctx, {
       image,
       state.offsetX,
       state.offsetY,
-      schemeWidth(scheme) * state.zoom,
-      schemeHeight(scheme) * state.zoom,
+      schemeWidthPx(scheme) * state.zoom,
+      schemeHeightPx(scheme) * state.zoom,
     );
     ctx.restore();
   }
