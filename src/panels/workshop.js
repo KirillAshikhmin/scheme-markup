@@ -163,7 +163,10 @@ import {
   drawingHitObject,
   drawingOpeningSpan,
   drawingUnitBridge,
+  DRAFT_ANGLE_MIN_PX,
   draftSnap,
+  drawDraftAngle,
+  drawDraftGuides,
   drawFont,
   drawPathHandles,
   hitPathHandle,
@@ -3447,6 +3450,13 @@ function createWorkshop({ api, hosts }) {
       event.stopPropagation();
       draft.points.pop();
       if (draft.points.length === 0) draft = null;
+      // Убрали вершину — градус и направляющие относились к прежнему отрезку и
+      // врали бы про новый. Пересчитываются от новой последней вершины, ровно
+      // как чистит их холст.
+      else {
+        draft.snap = snapOf(draft.cursor, event.altKey);
+        draft.cursor = draft.snap.point;
+      }
       paint();
       return;
     }
@@ -3775,13 +3785,19 @@ function createWorkshop({ api, hosts }) {
     const contour = objectDrawn() && workshopObjectWay === "contour";
     if ((tool !== "walls" && !band && !contour) || !draft) return;
     const points = [...draft.points, draft.cursor];
+    const accent = band || contour ? DRAWING_OBJECT : WORKSHOP_ACCENT;
+    // Направляющие по прежним вершинам — **под** черновиком, как на плане:
+    // подсказка не должна перечёркивать линию. Считает их та же притяжка, что
+    // сажает вершину (`workshopSnapMm` → `render.draftSnap`), и до таска 172
+    // она считала их впустую: `draft.snap` не читал никто.
+    if (draft.snap) drawDraftGuides(ctx, WORKSHOP_UNIT, draft.snap.guides, view, accent);
     ctx.lineCap = "butt";
     ctx.lineJoin = "round";
     // Контур обводят по месту, и толщины у него нет: он не стена и не полоса, а
     // габарит, который из него выйдет. Поэтому линия тонкая, а габарит показан
     // призраком — см. ниже.
     ctx.lineWidth = contour ? 1.5 : Math.max(1, (band ? bandWidthMm() : workshopThicknessMm) * view.zoom);
-    ctx.strokeStyle = band || contour ? DRAWING_OBJECT : WORKSHOP_ACCENT;
+    ctx.strokeStyle = accent;
     ctx.globalAlpha = contour ? 1 : 0.5;
     ctx.beginPath();
     points.forEach((point, index) => {
@@ -3810,6 +3826,15 @@ function createWorkshop({ api, hosts }) {
     // рукой, и мерить её надо одинаково.
     const last = draft.points[draft.points.length - 1];
     paintLength(last, draft.cursor);
+    // Градус тянущегося отрезка — у курсора и тем же знаком, что на плане:
+    // «ровно 90°» и цвет, когда сработал магнит, серое число, когда нет. Порог
+    // «отрезок ещё не направление» холстовый (`DRAFT_ANGLE_MIN_PX`): у короткой
+    // резинки градус случайный и прыгал бы под рукой.
+    const from = screenOf(last);
+    const at = screenOf(draft.cursor);
+    if (draft.snap && Math.hypot(at.x - from.x, at.y - from.y) >= DRAFT_ANGLE_MIN_PX) {
+      drawDraftAngle(ctx, at, draft.snap.angle, Boolean(draft.snap.snapped), accent);
+    }
   }
 
   /**

@@ -178,8 +178,11 @@ const HANDLE_RADIUS = 9;
 const DRAFT_ANGLE_FONT = 12;
 const DRAFT_ANGLE_GAP = 14;
 const DRAFT_ANGLE_FREE = "#57606a";
-// Короче этого отрезок ещё не направление, и градус у него случайный.
-const DRAFT_ANGLE_MIN_PX = 8;
+// Короче этого отрезок ещё не направление, и градус у него случайный. Наружу
+// — ради чертежа: он рисует свой черновик сам (свои миллиметры, своя толщина
+// стены), а порог «отрезок ещё не направление» обязан быть один на две
+// поверхности.
+export const DRAFT_ANGLE_MIN_PX = 8;
 
 // Направляющая: мелкий пунктир в волос толщиной и вполсилы. Узор мельче любого
 // начертания метки — на пунктирной линии подсказку иначе не отличить от самого
@@ -4592,7 +4595,7 @@ function drawExtent(ctx, scheme, view) {
 // Направляющие: полупрозрачный мелкий пунктир через вершину, которая поймала
 // курсор. Узор нарочно мельче любого начертания метки — иначе на пунктирной
 // линии не понять, где черновик, а где подсказка.
-function drawDraftGuides(ctx, scheme, guides, view, color) {
+export function drawDraftGuides(ctx, scheme, guides, view, color) {
   if (!guides || guides.length === 0) return;
   const box = drawExtent(ctx, scheme, view);
   ctx.save();
@@ -4648,7 +4651,12 @@ function drawDraft(ctx, scheme, draft, view, color, lineStyle) {
 // конец линии, и по углу холста не понять, к какому отрезку относится число.
 // Сработавший магнит виден по слову «ровно» и цвету — иначе непонятно, почему
 // линия не идёт за рукой.
-function drawDraftAngle(ctx, at, angle, snapped, color, family) {
+//
+// Зовут это и холст, и чертёж (таск 172): притяжку чертёж считал той же
+// `draftSnap` и **выбрасывал** посчитанное — в миллиметрах, где прямой угол
+// важнее всего, про прямой угол и молчали. Второго рисовальщика градуса для
+// этого заводить не стали.
+export function drawDraftAngle(ctx, at, angle, snapped, color, family) {
   const value = text(snapped ? "canvas.angleSnapped" : "canvas.angleFree", { deg: Math.round(angle) % 360 });
   ctx.save();
   ctx.font = drawFont(DRAFT_ANGLE_FONT, 600, family);

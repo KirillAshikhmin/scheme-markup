@@ -16,7 +16,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { workshopDraftFate, workshopRectFromContour } from "../src/panels/workshop.js";
+import { drawDraftAngle, drawDraftGuides } from "../src/render.js";
+import { WORKSHOP_UNIT, workshopDraftFate, workshopRectFromContour } from "../src/panels/workshop.js";
 import { strings } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -87,4 +88,82 @@ test("смена занятия и смена способа спрашиваю�
     way.indexOf("settleDraft()") < way.indexOf("workshopObjectWay = way"),
     "способ меняется раньше, чем дочерчено начатое прежним",
   );
+});
+
+// ——— градус и направляющие: посчитаны и показаны (та же находка) ——————————
+//
+// Притяжка чертежа возвращала `angle`, `snapped` и `guides`, `draft.snap`
+// писался в двух местах — и **не читался нигде**: в чертеже, где всё в
+// миллиметрах и где прямой угол важнее всего, про прямой угол и молчали. Знак
+// взят холстовый целиком (`render.drawDraftAngle`, `render.drawDraftGuides`):
+// второго рисовальщика градуса в сборке быть не должно.
+
+// Холст-писец: записывает каждый вызов и каждое присваивание — картинки в Node
+// нет, а «чем рисовали» видно и так.
+function scribe() {
+  const log = [];
+  const impl = {
+    canvas: { width: 900, height: 600 },
+    measureText: (value) => ({ width: String(value).length * 7 }),
+    getTransform: () => ({ a: 1 }),
+  };
+  return {
+    log,
+    ctx: new Proxy(impl, {
+      get(target, key) {
+        if (key in target) return target[key];
+        return (...args) => log.push(String(key) + "(" + args.map((value) => JSON.stringify(value)).join(",") + ")");
+      },
+      set(target, key, value) {
+        log.push(String(key) + "=" + String(value));
+        target[key] = value;
+        return true;
+      },
+    }),
+  };
+}
+
+test("градус рисуется словами холста: «ровно» у сработавшего магнита", () => {
+  const snapped = scribe();
+  drawDraftAngle(snapped.ctx, { x: 300, y: 200 }, 90, true, "#0969da");
+  const said = snapped.log.filter((line) => line.startsWith("fillText(")).join(" ");
+  assert.ok(said.includes("ровно 90"), "градус не подписан словом «ровно»: " + said);
+  const free = scribe();
+  drawDraftAngle(free.ctx, { x: 300, y: 200 }, 87, false, "#0969da");
+  const freeSaid = free.log.filter((line) => line.startsWith("fillText(")).join(" ");
+  assert.ok(freeSaid.includes("87"), "свободный градус не подписан: " + freeSaid);
+  assert.ok(!freeSaid.includes("ровно"), "свободный отрезок назван ровным");
+});
+
+test("направляющая тянется через всё поле от той вершины, что поймала курсор", () => {
+  const probe = scribe();
+  drawDraftGuides(
+    probe.ctx,
+    WORKSHOP_UNIT,
+    [
+      { axis: "h", at: { x: 1000, y: 2500 } },
+      { axis: "v", at: { x: 1000, y: 2500 } },
+    ],
+    { zoom: 0.1, offsetX: 0, offsetY: 0 },
+    "#0969da",
+  );
+  // «Схема» чертежа — пиксель на миллиметр, поэтому при zoom 0,1 вершина
+  // 1000 × 2500 мм стоит на 100 × 250 точках экрана.
+  assert.ok(probe.log.includes("moveTo(0,250)"), "горизонтальной направляющей нет: " + probe.log.join(" "));
+  assert.ok(probe.log.includes("lineTo(900,250)"), "горизонтальная не дотянулась до края поля");
+  assert.ok(probe.log.includes("moveTo(100,0)"), "вертикальной направляющей нет");
+  assert.ok(probe.log.includes("lineTo(100,600)"), "вертикальная не дотянулась до края поля");
+  // Пустой список — ни одного вызова: подсказки нет, и кадр не меняется.
+  const empty = scribe();
+  drawDraftGuides(empty.ctx, WORKSHOP_UNIT, [], { zoom: 1, offsetX: 0, offsetY: 0 }, "#0969da");
+  assert.deepEqual(empty.log, []);
+});
+
+test("чертёж читает посчитанную притяжку, а не выбрасывает её", () => {
+  const source = readFileSync(WORKSHOP_SRC, "utf8");
+  assert.ok(source.includes("draft.snap.guides"), "направляющие чертежа снова считаются впустую");
+  assert.ok(source.includes("draft.snap.angle"), "градус чертежа снова считается впустую");
+  // Знак — холстовый, своего рисовальщика не завелось.
+  assert.ok(source.includes("drawDraftAngle("), "градус рисуется не холстовым знаком");
+  assert.ok(!/function\s+\w*[Dd]raftAngle/.test(source), "в чертеже завёлся свой рисовальщик градуса");
 });
