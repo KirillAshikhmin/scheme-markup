@@ -66,8 +66,10 @@ export function objectTileIcon(key, size = OBJECT_TILE_ICON) {
 // здесь считается высота категории для раскладки колонок и шаг стрелок
 // вверх-вниз. Разойдись эти числа — стрелка прыгала бы не на ряд.
 export const OBJECT_PICKER_TILES_PER_ROW = 3;
-// Колонка в три плитки по 84 точки с просветами — те же меры, что в CSS.
-const OBJECT_PICKER_COLUMN_MIN = 270;
+// Колонка в три плитки по 84 точки с просветами — та же мера, что в
+// `objectPicker.css` (`minmax(270px, 1fr)`); держит их вместе
+// `test/cssMeasures.test.js`.
+export const OBJECT_PICKER_COLUMN_MIN = 270;
 // Больше четырёх колонок не ставим: категорий всего шесть, и пятая колонка
 // растянула бы окно на весь экран ради двух плиток «Декора».
 const OBJECT_PICKER_MAX_COLUMNS = 4;

@@ -13,6 +13,8 @@ import {
   findScheme,
   projectStamp,
   roomsInOrder,
+  schemeHeightPx,
+  schemeWidthPx,
   schemesInOrder,
   wallElevations,
 } from "../model.js";
@@ -196,8 +198,8 @@ function exportViewArea(state, scheme) {
   if (!host) return "all";
   const box = host.getBoundingClientRect();
   if (box.width < 2 || box.height < 2) return "all";
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const from = screenToPlan({ x: 0, y: 0 }, scheme, state.view);
   const to = screenToPlan({ x: box.width, y: box.height }, scheme, state.view);
   return {
@@ -1195,6 +1197,9 @@ function exportElevationDialog(api) {
       // Изображения объектов — то же правило, что у слоёв чертежа (таск 127):
       // отметка с экрана уходит и в выгрузку, лист показывает проверенное.
       views: getState().elevationViews !== false,
+      // Нижняя граница масштаба мелких вещей (таск 179, D42) — та же отметка с
+      // того же экрана.
+      grow: getState().elevationGrow === true,
       building: roomName(),
       drawing: [scheme ? scheme.name : "", strings.elevationSheet.drawing].filter(Boolean).join(" · "),
       pdf: pdf === true,

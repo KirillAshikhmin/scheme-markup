@@ -9,10 +9,13 @@
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
 import {
+  cancelFrame,
+  ELEVATION_GROW_SETTING,
   ELEVATION_VIEWS_SETTING,
   layoutAllows,
   PANEL_IDS,
   registerPanel,
+  scheduleFrame,
   SCREEN_DEFAULT,
   setScreen,
 } from "./app.js";
@@ -51,6 +54,8 @@ import {
   insertOutlinePoint,
   moveSchemeGuide,
   schemeGuides,
+  schemeHeightPx,
+  schemeWidthPx,
   segmentDistanceMm,
   wallsOnScheme,
   labelOf,
@@ -109,6 +114,7 @@ import {
   labelTargetOf,
   labelTurnHandle,
   labelBox,
+  LABEL_GAP,
   markRadius,
   outlineLabelBox,
   outlineLabelTurn,
@@ -151,8 +157,11 @@ import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 // (чтобы не проскочить) и быстро дальше (чтобы одним нажатием дотащить план
 // через весь экран).
 
-// Шаг короткого нажатия, экранные пиксели.
-const CANVAS_PAN_STEP_PX = 24;
+// Шаг короткого нажатия, экранные пиксели. Отдан наружу: чертёж листает вид
+// теми же стрелками и тем же шагом (`workshop.js`), и второго числа тут быть
+// не должно — разойдись они, одна и та же клавиша ходила бы по-разному на
+// плане и в чертеже.
+export const CANVAS_PAN_STEP_PX = 24;
 // Сколько клавишу держат, прежде чем начнётся непрерывный ход.
 const CANVAS_PAN_HOLD_MS = 180;
 // Скорость непрерывного хода в начале и на потолке, пикселей в секунду.
@@ -161,7 +170,8 @@ const CANVAS_PAN_SPEED_MAX = 2400;
 // За столько разгон доходит до потолка.
 const CANVAS_PAN_RAMP_MS = 1300;
 // Потолок шага кадра: вкладку свернули на минуту — план не должен улететь.
-const CANVAS_PAN_FRAME_MS = 64;
+// Тоже отдан наружу — у чертежа свой цикл кадров, но мерка общая.
+export const CANVAS_PAN_FRAME_MS = 64;
 // Во сколько раз «+» и «−» меняют масштаб за нажатие.
 const CANVAS_ZOOM_KEY_STEP = 1.2;
 
@@ -635,8 +645,6 @@ let canvasHintSeen = null;
 
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
 // Запас к радиусу метки, по которому клик считается попавшим в концевую вершину
@@ -721,14 +729,6 @@ function canvasNow() {
   return clock && typeof clock.now === "function" ? clock.now() : Date.now();
 }
 
-function canvasFrameRequest(fn) {
-  return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, 16);
-}
-
-function canvasFrameCancel(id) {
-  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
-  else clearTimeout(id);
-}
 
 function canvasPanBy(dx, dy) {
   const state = canvasState();
@@ -769,7 +769,7 @@ function canvasPanKeyDown(code) {
 
 function canvasPanSchedule() {
   if (canvasPanFrame || canvasPanHeld.size === 0) return;
-  canvasPanFrame = canvasFrameRequest(canvasPanTick);
+  canvasPanFrame = scheduleFrame(canvasPanTick);
 }
 
 function canvasPanTick() {
@@ -796,7 +796,7 @@ function canvasPanRelease(code) {
   if (code) canvasPanHeld.delete(code);
   else canvasPanHeld.clear();
   if (canvasPanHeld.size > 0 || !canvasPanFrame) return;
-  canvasFrameCancel(canvasPanFrame);
+  cancelFrame(canvasPanFrame);
   canvasPanFrame = 0;
 }
 
@@ -866,8 +866,7 @@ function canvasPointOf(event) {
 
 function canvasRedraw() {
   if (canvasFrame || !canvasNode) return;
-  const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-  canvasFrame = schedule(() => {
+  canvasFrame = scheduleFrame(() => {
     canvasFrame = 0;
     canvasPaint();
   });
@@ -1224,8 +1223,8 @@ function canvasCursorPlan(state, scheme, view) {
 function canvasPasteStep(state, scheme) {
   const px = canvasBlockStep(state);
   return {
-    x: px / (scheme && scheme.width > 0 ? scheme.width : CANVAS_PLAN_FALLBACK_PX),
-    y: px / (scheme && scheme.height > 0 ? scheme.height : CANVAS_PLAN_FALLBACK_PX),
+    x: px / schemeWidthPx(scheme),
+    y: px / schemeHeightPx(scheme),
   };
 }
 
@@ -3244,7 +3243,7 @@ function canvasPointerDown(event) {
 // уместны**, в отличие от порога привязки метки (там миллиметры): это
 // попадание рукой, а не свойство данных, и оно обязано вести себя одинаково
 // на любом масштабе.
-const CANVAS_WALL_PICK_PX = 6;
+export const CANVAS_WALL_PICK_PX = 6;
 
 /**
  * Стена чертежа под точкой плана — или `null`. Выключенный слой чертежа стену
@@ -3454,7 +3453,9 @@ function canvasDragTo(point, free) {
       // в стандартное место в тот миг, когда за неё взялись мышью.
       const size = view.markSize || 10;
       const seen = target ? labelBox(before, scheme, target, view, state.filter) : null;
-      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: 0 };
+      // Запасное место подписи — то же, куда её ставит отрисовка, когда её не
+      // оттаскивали: мерка отступа берётся у неё (`LABEL_GAP`), а не повторяется.
+      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * LABEL_GAP, dy: 0 };
       const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
       // Подпись блока стоит по смещению его первой метки — своего поля у группы
       // модель не заводит, а собственной подписи у этой метки нет.
@@ -4139,8 +4140,8 @@ export function canvasFitDrawing(project, scheme, box) {
       ].filter(Boolean)
     : [];
   if (corners.length < 4) return fitView(scheme, box);
-  const width = Math.max(1, scheme.width || 1000);
-  const height = Math.max(1, scheme.height || 1000);
+  const width = Math.max(1, schemeWidthPx(scheme));
+  const height = Math.max(1, schemeHeightPx(scheme));
   const xs = corners.map((point) => point.x * width);
   const ys = corners.map((point) => point.y * height);
   const left = Math.min(...xs);
@@ -4346,6 +4347,10 @@ function mountCanvasFullscreen(host, api) {
 function mountCanvasElevation(host, api) {
   const strip = createElevationStrip({
     onSide: (side) => api.setState({ wallSide: side }),
+    // Переход к соседней стене из ряда полей (таск 179, G267): стена и сторона
+    // ложатся одной правкой состояния — иначе между ними мелькнула бы развёртка
+    // новой стены с прежней стороной.
+    onWall: ({ wallId, side }) => api.setState({ selectedWallId: wallId, wallSide: side }),
     onClose: () => api.setState({ selectedWallId: null }),
     // Отметка живёт в настройках браузера, как слои и шрифт схемы: на одном
     // компьютере смотрят картинками, на другом знаками, а объект один.
@@ -4354,6 +4359,13 @@ function mountCanvasElevation(host, api) {
       setSetting(ELEVATION_VIEWS_SETTING, value);
     },
     views: api.getState().elevationViews !== false,
+    // Нижняя граница масштаба мелких вещей (таск 179, D42) — той же природы и
+    // тем же путём, что «изображения».
+    onGrow: (value) => {
+      api.setState({ elevationGrow: value });
+      setSetting(ELEVATION_GROW_SETTING, value);
+    },
+    grow: api.getState().elevationGrow === true,
   });
   host.append(strip.node);
 
@@ -4382,6 +4394,7 @@ function mountCanvasElevation(host, api) {
       place: elevationPlace(canvasWallMiddleY(state), height),
       fieldHeight: height,
       views: state.elevationViews !== false,
+      grow: state.elevationGrow === true,
     });
   }
 
@@ -4391,6 +4404,7 @@ function mountCanvasElevation(host, api) {
       "wallSide" in changed ||
       "elevationShown" in changed ||
       "elevationViews" in changed ||
+      "elevationGrow" in changed ||
       "project" in changed ||
       "schemeId" in changed ||
       "view" in changed ||

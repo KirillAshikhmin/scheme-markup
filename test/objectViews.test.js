@@ -125,24 +125,53 @@ test("изображение берётся сперва у типа, потом
   assert.equal(elevationViewOf({ view: "чепуха", shape: "звезда" }), null);
 });
 
-// ——— размер на развёртке (таск 140, дефект D25) ——————————————————————————
+// ——— размер на развёртке (таск 140, дефект D25; таск 179, дефект D42) ——————
 //
 // Правило одно: **каждая сторона — своя в масштабе, но не меньше минимума**.
 // Прежних двух («мельче трёхсот миллиметров — постоянный размер, крупнее — свой»)
 // больше нет, и ровно из них вырос дефект: постоянные двадцать две точки на
 // короткой стене оборачивались третью метра.
+//
+// Сам минимум с таска 179 включается **отметкой** (D42: «рисуй всё в реальном
+// масштабе»), и тесты ниже ставят её доводом явно: они про границу, а не про
+// умолчание. Про умолчание — отдельный тест сразу за ними.
+
+test("D42: умолчание — реальный масштаб, границу снизу включает отметка", () => {
+  // Числа живого объекта: полоса во весь экран, стена 2800 по высоте, поле
+  // развёртки 216 точек — масштаб 0.0771 точки на миллиметр.
+  const scale = 216 / 2800;
+  const unit = 1;
+  const socket = { shape: "circle-socket", sizeMm: { width: 80, height: 80 } };
+  // Без отметки — свой размер: восемьдесят миллиметров дают 6.17 точки.
+  const real = elevationMarkBox(socket, scale, unit, true);
+  assert.ok(Math.abs(real.width - 80 * scale) < 1e-9, "нарисовано своим размером: " + real.width);
+  assert.equal(real.scaled, true, "в масштабе — значит честно");
+  assert.equal(real.grown, 1, "подтяжки нет вовсе, и подписи не о чем говорить");
+  // С отметкой — ровно прежнее поведение: тринадцать точек, то есть 169 мм
+  // вместо восьмидесяти. Это и есть то, на что смотрел заказчик.
+  const shown = elevationMarkBox(socket, scale, unit, true, true);
+  assert.equal(shown.width, ELEVATION_VIEW_MIN_PX * unit);
+  assert.equal(Math.round(shown.width / scale), 169, "тринадцать точек — это 169 мм объекта");
+  assert.ok(Math.abs(shown.grown - 169 / 80) < 0.01, "вдвое крупнее себя: " + shown.grown);
+  // Крупная вещь не меняется ни с отметкой, ни без неё: жалоба была ровно про
+  // это — мелкое растёт, крупное нет, и масштаб на листе перестаёт быть один.
+  const fridge = { shape: "circle-thermo", sizeMm: { width: 600, height: 350 } };
+  assert.equal(elevationMarkBox(fridge, scale, unit, true).width, elevationMarkBox(fridge, scale, unit, true, true).width);
+  // Отметка — это довод, а не настройка модуля: `false` и пропуск значат одно.
+  assert.equal(elevationMarkBox(socket, scale, unit, true, false).width, real.width);
+});
 
 test("правило одно: вещь в масштабе, но не мельче минимума", () => {
   const scale = 0.05; // точек холста на миллиметр стены
   const unit = 1;
   // Кондиционер 900 × 300: в масштабе это 45 × 15 точек, и влезет он или нет
   // над дверью, видно только так.
-  const big = elevationMarkBox({ shape: "circle-thermo", sizeMm: { width: 900, height: 300 } }, scale, unit, true);
+  const big = elevationMarkBox({ shape: "circle-thermo", sizeMm: { width: 900, height: 300 } }, scale, unit, true, true);
   assert.equal(big.scaled, true);
   assert.ok(Math.abs(big.width - 45) < 1e-6 && Math.abs(big.height - 15) < 1e-6, JSON.stringify(big));
   // Розетка 80 × 80: в масштабе это четыре точки — не видно ничего, и она
   // подтягивается до минимума. Ровно до минимума, а не до чего-то своего.
-  const small = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 80, height: 80 } }, scale, unit, true);
+  const small = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 80, height: 80 } }, scale, unit, true, true);
   assert.equal(small.scaled, false);
   assert.equal(small.width, ELEVATION_VIEW_MIN_PX * unit);
   assert.equal(small.height, ELEVATION_VIEW_MIN_PX * unit);
@@ -153,12 +182,13 @@ test("правило одно: вещь в масштабе, но не мель�
     scale,
     unit,
     true,
+    true,
   );
   assert.equal(edge.scaled, true, "на самом минимуме вещь уже в масштабе");
   assert.equal(edge.width, ELEVATION_VIEW_MIN_PX);
   // Единица бумаги умножает минимум вместе со всем остальным: на листе
   // различимость меряется тем же, чем поля и шрифт.
-  const paper = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 80, height: 80 } }, scale, 4, true);
+  const paper = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 80, height: 80 } }, scale, 4, true, true);
   assert.equal(paper.width, ELEVATION_VIEW_MIN_PX * 4);
   // Отметка снята — ни одного изображения, и знак прежнего размера.
   const plain = elevationMarkBox({ shape: "circle-thermo", sizeMm: { width: 900, height: 300 } }, scale, unit, false);
@@ -172,11 +202,11 @@ test("D25: на крупном масштабе розетка становит�
   // масштаб, на котором она честна, — у постоянного размера такого не бывает.
   const unit = 1;
   const socket = { shape: "circle-socket", sizeMm: { width: 80, height: 80 } };
-  const drawnMm = (scale) => elevationMarkBox(socket, scale, unit, true).width / scale;
+  const drawnMm = (scale) => elevationMarkBox(socket, scale, unit, true, true).width / scale;
   // Стена подлиннее — масштаб мельче: подтягивать приходится сильнее.
   assert.ok(drawnMm(0.05) > drawnMm(0.1), "на крупном масштабе врать приходится меньше");
   // И есть масштаб, на котором врать не приходится вовсе.
-  const honest = elevationMarkBox(socket, 0.2, unit, true);
+  const honest = elevationMarkBox(socket, 0.2, unit, true, true);
   assert.equal(honest.scaled, true);
   assert.equal(honest.width, 16, "80 мм при 0.2 — шестнадцать точек, и подтягивать нечего");
   // Прежнее правило дало бы здесь свои двадцать две точки, то есть 110 мм
@@ -188,14 +218,14 @@ test("во сколько раз подтянуто — число, и о сот
   const unit = 1;
   const socket = { shape: "circle-socket", sizeMm: { width: 80, height: 80 } };
   // В масштабе — ровно единица: врать не о чем.
-  assert.equal(elevationMarkBox(socket, 0.2, unit, true).grown, 1);
+  assert.equal(elevationMarkBox(socket, 0.2, unit, true, true).grown, 1);
   // Вчетверо мельче минимума — вчетверо и подтянуто.
-  const tiny = elevationMarkBox(socket, ELEVATION_VIEW_MIN_PX / 80 / 4, unit, true);
+  const tiny = elevationMarkBox(socket, ELEVATION_VIEW_MIN_PX / 80 / 4, unit, true, true);
   assert.ok(Math.abs(tiny.grown - 4) < 1e-9, "подтяжка считается числом: " + tiny.grown);
   // Полоса во весь экран: розетка выходит в 12.5 точек при минимуме 13 —
   // подтяжка в четыре сотых, и подпись о ней молчит, иначе будет гореть
   // всегда и перестанет читаться там, где вещь крупнее втрое.
-  const near = elevationMarkBox(socket, 0.1557, unit, true);
+  const near = elevationMarkBox(socket, 0.1557, unit, true, true);
   assert.ok(near.grown > 1, "подтяжка всё-таки есть");
   assert.ok(near.grown < ELEVATION_GROWN_QUIET, "о четырёх процентах подпись молчит: " + near.grown);
   // Мера разговора на рисование не влияет: нарисовано всё равно по минимуму.
@@ -208,7 +238,7 @@ test("стороны подтягиваются врозь: тонкая вещ�
   // почти двести — лента в два метра высотой на стене 2800.
   const scale = 0.107;
   const unit = 1;
-  const tape = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 40, height: 600 } }, scale, unit, true);
+  const tape = elevationMarkBox({ shape: "circle-socket", sizeMm: { width: 40, height: 600 } }, scale, unit, true, true);
   assert.equal(tape.width, ELEVATION_VIEW_MIN_PX, "тонкая сторона встала на минимум");
   assert.ok(Math.abs(tape.height - 600 * scale) < 1e-6, "длинная сторона осталась своей: " + tape.height);
   assert.equal(tape.scaled, false, "вещь подтянута — значит не в масштабе");
@@ -224,7 +254,7 @@ test("крупнее, чем свой размер или минимум, не �
       for (const type of template.markTypes) {
         const sizes = typeSizes(type);
         const mark = { shape: styleOf({ markTypes: template.markTypes, categories: template.categories }, type.id).shape, view: type.view || type.icon, sizeMm: { width: sizes.length, height: sizes.width } };
-        const box = elevationMarkBox(mark, scale, unit, true);
+        const box = elevationMarkBox(mark, scale, unit, true, true);
         if (!box.view) continue;
         const min = ELEVATION_VIEW_MIN_PX * unit;
         const where = type.code + " при масштабе " + scale + " и единице " + unit;

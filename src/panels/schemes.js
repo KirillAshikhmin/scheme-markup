@@ -940,7 +940,14 @@ function mountSchemesPanel(host, api) {
       width: edited.width,
       height: edited.height,
     });
-    setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
+    // Через историю, как и всё остальное (таск 172): Ctrl+Z убирает заведённую
+    // схему, а не предыдущую правку. Картинка при отмене остаётся в хранилище
+    // — ровно так же сделано у поворота подложки: уберёт её уборка при
+    // следующем запуске, когда отменять будет нечего.
+    canvasCommit(fresh, added.project, strings.history.addScheme, {
+      schemeId: added.scheme.id,
+      selection: [],
+    });
     notify(text("schemes.added", { name: added.scheme.name }), "success");
   }
 
@@ -951,9 +958,10 @@ function mountSchemesPanel(host, api) {
    * «можно создавать схему без подложки», — и размер ей даёт сам чертёж
    * (`drawingBoundsMm`), а не картинка.
    *
-   * Заводится тем же путём, что схема с планом, — через `setState`: добавление
-   * схемы в этой панели никогда не было шагом истории, и заводить второй
-   * порядок ради одной кнопки не стоит.
+   * Заводится тем же путём, что схема с планом, — теперь через `canvasCommit`
+   * (таск 172): прежде правки схемы в этой панели шли мимо отмены, и Ctrl+Z
+   * после них молча отменял предыдущую правку. Второго порядка ради одной
+   * кнопки здесь по-прежнему нет.
    */
   async function addBlankScheme() {
     const state = getState();
@@ -961,7 +969,10 @@ function mountSchemesPanel(host, api) {
     const added = addScheme(state.project, {
       name: text("schemes.defaultName", { number: state.project.schemes.length + 1 }),
     });
-    setState({ project: added.project, schemeId: added.scheme.id, selectedMarkIds: [] });
+    canvasCommit(state.project, added.project, strings.history.addScheme, {
+      schemeId: added.scheme.id,
+      selection: [],
+    });
     notify(text("schemes.added", { name: added.scheme.name }), "success");
     openDrawing(added.scheme.id);
   }
@@ -1317,15 +1328,23 @@ function mountSchemesPanel(host, api) {
         return;
       }
       const name = nameInput.value.trim();
-      // Этаж идёт шагом истории — как и в мастерской, откуда поле переехало;
-      // имя шага истории не знало и до сегодня, и менять это правило таском
-      // про место поля не стоит.
-      if (floored.changed) {
-        canvasCommit(base, floored.project, strings.history.schemeFloor, { schemeId });
-      }
-      if (name !== "" && name !== own.name) {
-        setState({ project: updateScheme(getState().project, schemeId, { name }).project });
-      }
+      const renamed = name !== "" && name !== own.name;
+      // **Одно окно — один шаг отмены** (таск 172). Этаж шагом истории был и
+      // прежде, а имя шло мимо: переименовал схему, передумал, нажал Ctrl+Z —
+      // имя оставалось, а отменялась предыдущая правка, перенос метки или
+      // поставленная линия. Стек истории один на объект, и мимо него ходить
+      // нельзя.
+      //
+      // Ярлык шага зависит от того, что поправили: у этажа он прежний (человек
+      // читает его в подсказке отмены), у имени свой, а когда поправили оба —
+      // общий: «Готово» нажали один раз, и возвращать половину окна нельзя.
+      const next = renamed ? updateScheme(floored.project, schemeId, { name }).project : floored.project;
+      const label = floored.changed
+        ? renamed
+          ? strings.history.schemeProps
+          : strings.history.schemeFloor
+        : strings.history.renameScheme;
+      if (floored.changed || renamed) canvasCommit(base, next, label, { schemeId });
       modal.close();
     }
 
@@ -1352,9 +1371,30 @@ function mountSchemesPanel(host, api) {
     moved.forEach((scheme, position) => {
       if (scheme.order !== position) next = updateScheme(next, scheme.id, { order: position }).project;
     });
-    setState({ project: next });
+    // Порядок схем отменяется, как и всё прочее (таск 172). Текущая схема при
+    // этом не меняется: `schemeId` команде не передаётся — переставить строку
+    // в списке не значит открыть её.
+    if (next === project) return;
+    canvasCommit(project, next, strings.history.schemeOrder);
   }
 
+  /**
+   * Удаление схемы — **единственная правка схемы вне отмены, и это нарочно**
+   * (таск 172).
+   *
+   * Всё остальное в этой панели — завести, переименовать, переставить,
+   * повернуть и заменить подложку, снять масштаб — идёт через `canvasCommit`.
+   * Удаление не идёт: `deleteImage` уносит подложку из IndexedDB
+   * **безвозвратно**, и отмена вернула бы метки в их долях (ADR 002) на план,
+   * которого больше нет, — доли без картинки это не разметка, а числа.
+   * Оставить же картинку в базе нельзя: она копила бы подложки всех удалённых
+   * схем, а это десятки мегабайт на объект.
+   *
+   * Поэтому здесь `setState`, а не шаг истории, и защита у этой правки другая
+   * — вопрос с числом меток, которые уйдут вместе со схемой. «Починить» это
+   * место, обернув в `canvasCommit`, значит сломать отмену, а не исправить:
+   * прежде надо решить, что делать с картинкой, и это решение за заказчиком.
+   */
   async function removeScheme(schemeId, marks) {
     const project = getState().project;
     const scheme = findScheme(project, schemeId);

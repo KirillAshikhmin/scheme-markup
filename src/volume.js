@@ -67,6 +67,7 @@ import {
   styleOf,
   typeChannels,
   typeObjectView,
+  WALL_HEIGHT_FALLBACK_MM,
   wallHeightOf,
   wallHeightOnSide,
   wallVectors,
@@ -191,11 +192,6 @@ export const VOLUME_FOV_DEG = 90;
  */
 export const VOLUME_START_PITCH_DEG = -10;
 /**
- * Высота, которой рисуется помещение без заданной высоты. Выдумывать её молча
- * нельзя — окно говорит об этом строкой, как говорит развёртка (таск 129).
- */
-export const VOLUME_HEIGHT_FALLBACK_MM = 2700;
-/**
  * С какого расстояния до лестницы спрашивают про этаж (таск 149).
  *
  * Метр с небольшим от её габарита — расстояние, с которого человек на неё
@@ -219,6 +215,11 @@ export const VOLUME_AROUND_PITCH_DEG = -42;
 export const VOLUME_AROUND_NEAR_MM = 7000;
 export const VOLUME_AROUND_MIN_MM = 1500;
 export const VOLUME_AROUND_MAX_MM = 400000;
+/**
+ * Самый положий наклон, на котором поправка на сжатие пола ещё растёт: синус
+ * двадцати градусов. Зачем предел — в `volumeAroundPan`.
+ */
+export const VOLUME_AROUND_PAN_TILT_MIN = Math.sin((20 * Math.PI) / 180);
 /**
  * Три яруса, в которых грани ложатся на холст (дефект живого прогона).
  *
@@ -828,12 +829,17 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
 
 /**
  * Высота помещения: переопределение комнаты, высота схемы, а если ни того ни
- * другого — `VOLUME_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ * другого — `WALL_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ *
+ * Умолчание живёт в модели (таск 173) и **одно** на объём и развёртку: своей
+ * константы здесь больше нет. Окно говорит о нём строкой `volume.noHeight`, и
+ * в строке стоит то же число, что на полосе развёртки, — прежде окно обещало
+ * это согласие комментарием, а числа были разные (2700 против «не ниже 2000»).
  */
 export function volumeHeightMm(project, schemeId, roomId) {
   const given = wallHeightOf(project, { schemeId, roomId });
   if (given > 0) return { mm: given, known: true };
-  return { mm: VOLUME_HEIGHT_FALLBACK_MM, known: false };
+  return { mm: WALL_HEIGHT_FALLBACK_MM, known: false };
 }
 
 /** Внутри ли точка в плановом многоугольнике. Тот же счёт, что `pointInOutline`. */
@@ -1211,7 +1217,7 @@ export function volumeStairs(project, schemeId) {
   const stairs = [];
   for (const object of schemeObjectsOnScheme(project, schemeId)) {
     if (schemeObjectKeyOf(project, object) !== "stairs") continue;
-    const polygons = volumeObjectPrisms(project, schemeId, object, VOLUME_HEIGHT_FALLBACK_MM).map(
+    const polygons = volumeObjectPrisms(project, schemeId, object, WALL_HEIGHT_FALLBACK_MM).map(
       (prism) => prism.corners,
     );
     if (polygons.length === 0) continue;
@@ -4554,7 +4560,7 @@ export function volumeAroundCamera(target, yaw, pitch, distance) {
  */
 export function volumeAroundFit(scene, box) {
   const bounds = scene.boundsMm;
-  const height = scene.heightMm || VOLUME_HEIGHT_FALLBACK_MM;
+  const height = scene.heightMm || WALL_HEIGHT_FALLBACK_MM;
   if (!bounds) {
     return { target: { x: 0, y: 0, z: height / 2 }, distance: VOLUME_AROUND_NEAR_MM };
   }
@@ -4574,6 +4580,61 @@ export function volumeAroundFit(scene, box) {
 
 export function volumeAroundDistance(value) {
   return Math.max(VOLUME_AROUND_MIN_MM, Math.min(VOLUME_AROUND_MAX_MM, value));
+}
+
+/**
+ * Перенос обзора двумя пальцами: ход середины между пальцами — в сдвиг цели по
+ * полу, миллиметры (таск 174, требование G256).
+ *
+ * Слова заказчика: «сделай в объеме на мобильном интерфейсе что бы карта в
+ * режиме сверху двигалась 2 пальцами». Сам жест разбирает общий `gestures.js`
+ * (`gesturePinchStep` отдаёт и множитель масштаба, и ход середины) — а перевести
+ * этот ход в миллиметры может только камера: это её счёт, и он здесь.
+ *
+ * Правило — **пол едет за пальцами**: куда ушла середина, туда уехала карта, а
+ * камера на столько же в обратную сторону. Цель ходит по полу, высота её не
+ * меняется: обзор смотрит сверху всегда (`volumeAroundPitch`), и поднятая цель
+ * увела бы его в стену.
+ *
+ * Мера одного пикселя — `distance / focal`: ширина пикселя на той глубине, где
+ * лежит цель. Отошли дальше — палец возит крупнее, и это ровно то, что видно
+ * глазом.
+ *
+ * Поперёк взгляда счёт точный: камера не кренится, и экранное «вправо» лежит
+ * на полу целиком. Вдоль — с поправкой на наклон, и берётся она из самой
+ * камеры: экранный «верх», положенный на пол, короче единицы ровно во столько,
+ * во сколько пол на экране сжат (это синус наклона). Без поправки карта
+ * отставала бы от пальца вверх-вниз, хотя поперёк шла бы вровень.
+ *
+ * Поправка **ограничена** `VOLUME_AROUND_PAN_TILT_MIN`: у почти
+ * горизонтального взгляда она уходит в бесконечность — пол под пальцем там
+ * лежит у горизонта, то есть в километрах, — и один мах уносил бы обзор
+ * неизвестно куда. Положе двадцати градусов карта просто отстаёт от пальца, и
+ * это по-прежнему управляемо.
+ */
+export function volumeAroundPan(view, box, panX, panY) {
+  const distance = Number(view && view.distance) || 0;
+  const focal = box ? volumeFocal(box) : 0;
+  if (!(distance > 0) || !(focal > 0)) return { dx: 0, dy: 0 };
+  const perPixel = distance / focal;
+  const basis = volumeBasis({ yaw: view.yaw, pitch: view.pitch });
+  // Экранный «верх», положенный на пол: и сторона, и мера сжатия сразу. У
+  // отвесного взгляда это направление рысканья, у положего — он же, но короче.
+  const lean = Math.hypot(basis.up.x, basis.up.y);
+  // Взгляд ровно вдоль земли — верх встал отвесно, и класть на пол нечего:
+  // сторону берём у самого взгляда. В обзоре такого не бывает
+  // (`volumeAroundPitch` держит камеру выше крыши), но отвечать на это нулём
+  // было бы неправдой.
+  const flat = Math.hypot(basis.fwd.x, basis.fwd.y) || 1;
+  const forward =
+    lean > 1e-9 ? { x: basis.up.x / lean, y: basis.up.y / lean } : { x: basis.fwd.x / flat, y: basis.fwd.y / flat };
+  const tilt = Math.max(VOLUME_AROUND_PAN_TILT_MIN, lean);
+  const across = -(Number(panX) || 0) * perPixel;
+  const along = ((Number(panY) || 0) * perPixel) / tilt;
+  return {
+    dx: basis.right.x * across + forward.x * along,
+    dy: basis.right.y * across + forward.y * along,
+  };
 }
 
 /**

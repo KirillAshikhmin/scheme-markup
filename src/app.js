@@ -117,6 +117,16 @@ const appState = {
   // Умолчание — показаны: ради этого таск и затеян («что бы схема была уже
   // живая»), а отметка нужна тому, кто хочет прежний лист со знаками.
   elevationViews: true,
+  // Нижняя граница масштаба мелких вещей на развёртке (таск 179, дефект D42).
+  // Слова заказчика: «на развёртке розетки и выключатели слишком большие,
+  // рисуй всё в реальном масштабе».
+  //
+  // Умолчание — **снято**: лист рисуется реальным масштабом, и линейка, к нему
+  // приложенная, не врёт. Отметка возвращает прежнюю границу тому, кому важнее
+  // узнать вещь в лицо, чем померить её: на стене девяти метров розетка
+  // выходит шестью точками. Той же природы, что «изображения», — личная
+  // настройка браузера, в объект не попадает и уходит в выгрузку.
+  elevationGrow: false,
   // Вещи чертежа на экране (таск 154, G223). Два выключателя одной природы:
   // `objectsShown` — «скрыть все объекты» разом, `hiddenObjectIds` — те, что
   // спрятаны поштучно глазком в списке элементов чертежа.
@@ -177,6 +187,9 @@ export const DRAWING_SETTING = "schemeDrawingShown";
 export const ELEVATION_SETTING = "schemeElevationShown";
 // Изображения объектов на развёртке — такая же личная настройка браузера.
 export const ELEVATION_VIEWS_SETTING = "elevationViews";
+// Нижняя граница масштаба мелких вещей на развёртке (таск 179, D42) — такая же
+// личная настройка браузера, и умолчание у неё снятое.
+export const ELEVATION_GROW_SETTING = "elevationGrow";
 // Вещи чертежа: «скрыть все» и список спрятанных поштучно (таск 154, G223).
 // Второй ключ хранит карту «объект → список вещей»: объектов у человека
 // несколько, и прятать в одном вещь из другого было бы дико.
@@ -284,6 +297,27 @@ export function layoutModeFor(view, override) {
 export function layoutAllows(ability, mode) {
   const modes = LAYOUT_ABILITIES[ability];
   return Array.isArray(modes) && modes.includes(mode);
+}
+
+// ——— кадр: один планировщик на три поверхности ————————————————————————
+//
+// `requestAnimationFrame` есть везде, где эта страница работает, но не в Node:
+// чистые куски поверхностей проверяются тестами, и падать там нельзя. Отсюда
+// запасной `setTimeout` в шестнадцать миллисекунд — кадр шестидесяти в
+// секунду. До таска 173 эта пара была переписана шесть раз (холст дважды,
+// чертёж дважды, объём дважды), а отмена — четыре.
+
+const FRAME_MS = 16;
+
+/** Нарисовать в следующем кадре. Возвращает ключ, которым кадр отменяют. */
+export function scheduleFrame(fn) {
+  return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, FRAME_MS);
+}
+
+/** Отменить заказанный кадр. */
+export function cancelFrame(id) {
+  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
+  else clearTimeout(id);
 }
 
 // ——— режимы и раскладка: чистые правила ————————————————————————————————
@@ -784,6 +818,13 @@ function wireSections() {
   Promise.resolve(getSetting(ELEVATION_VIEWS_SETTING))
     .then((saved) => {
       if (saved === false) setState({ elevationViews: false });
+    })
+    .catch(() => {});
+  // Умолчание у границы снятое (D42), поэтому поднимается **взведённая**
+  // отметка: сравнение с `true`, а не с `false`, как у соседей сверху.
+  Promise.resolve(getSetting(ELEVATION_GROW_SETTING))
+    .then((saved) => {
+      if (saved === true) setState({ elevationGrow: true });
     })
     .catch(() => {});
   // Вещи чертежа: «скрыть все» и карта спрятанных поштучно. Карта читается

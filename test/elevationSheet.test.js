@@ -390,20 +390,31 @@ test("D25: подпись на листе говорит, что мелочь у
   // На листе графа «Масштаб» одна, а по чертежу размечают стену. Если розетку
   // пришлось подтянуть до различимого размера, молчать об этом нельзя: линейка
   // приложится к картинке и соврёт.
+  //
+  // С таска 179 (D42) граница включается отметкой, и лист идёт за ней тем же
+  // путём, что за «изображениями»: `grow` сюда приходит с экрана. Поэтому
+  // здесь он поставлен явно — тест про приписку, а не про умолчание.
   const made = scene();
   const view = wallElevation(made.project, made.kitchenWalls[4], "right");
   const box = { x: 0, y: 0, width: 900, height: 300 };
   const log = [];
-  const drawn = drawElevation(scribe(log), view, box, { views: true, label: "7. Стена 8000 мм" });
+  const drawn = drawElevation(scribe(log), view, box, { views: true, grow: true, label: "7. Стена 8000 мм" });
   assert.ok(drawn.grown > 0, "розетка 80 мм на стене восьми метров честной быть не может");
   assert.ok(
     log.some((line) => line.indexOf("мелкие вещи увеличены: " + drawn.grown) >= 0),
     "приписки нет в подписи: " + log.filter((line) => line.indexOf("Стена 8000") >= 0).join(" | "),
   );
+  // D42: без отметки лист нарисован реальным масштабом — и приписки нет, потому
+  // что подтягивать никого не пришлось.
+  const realLog = [];
+  const real = drawElevation(scribe(realLog), view, box, { views: true, label: "7. Стена 8000 мм" });
+  assert.equal(real.grown, 0, "умолчание — реальный масштаб");
+  assert.ok(!realLog.some((line) => line.indexOf("увеличены") >= 0), "сказано о том, чего нет");
   // Масштаб крупный — приписки нет: говорить не о чем.
   const honestLog = [];
   const honest = drawElevation(scribe(honestLog), view, box, {
     views: true,
+    grow: true,
     scale: 0.4,
     label: "7. Стена 8000 мм",
   });
