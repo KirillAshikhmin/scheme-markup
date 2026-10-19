@@ -32,7 +32,7 @@
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
 import { PANEL_IDS, layoutAllows, registerPanel, screenMode } from "../app.js";
-import { FULLSCREEN_EVENTS, canvasFrameLinks } from "../canvas.js";
+import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasFullscreenBare, canvasFullscreenOn } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
@@ -2264,15 +2264,29 @@ function createVolume({ api, hosts }) {
   //
   // Своей кнопки у режима больше нет (таск 153): во весь экран разворачивает та
   // же кнопка над полем, что и в двух других режимах, и разворачивает она
-  // страницу целиком. Прежде окно разворачивало само себя — панелей за
-  // затемнением у него не было, а здесь они и есть то, чем в объёме управляют:
-  // вид, этаж, снимок и список меток.
+  // страницу целиком.
   //
-  // Полю от этого нужно одно: перемериться, когда экран стал другого размера.
+  // С таска 166 страница в полном экране «Объёма» убирает с себя всё, кроме
+  // поля (G246): шапку, обе колонки, нижний ряд и переключатель режимов. Что
+  // именно уходит — в `styles.css`, отметку ставит `canvas.js`, а полю
+  // остаётся своё: перемериться под новый размер и убрать с поля то, что лишнее
+  // уже на нём — сводку и развёрнутую подсказку.
+  //
+  // Ответ «мы в голом поле?» не хранится флагом, а спрашивается: выйти можно
+  // мимо кнопки — Esc, жест, переключение вкладки, — и запомненное разошлось бы
+  // с настоящим молча. Правило при этом общее с страницей (`canvasFullscreenBare`),
+  // своего второго у поля нет.
+
+  function bare() {
+    return canvasFullscreenBare(canvasFullscreenOn(document), screenMode());
+  }
 
   function onFullscreenChange() {
     if (closed) return;
     resize();
+    // Сводка и подсказка узнают о полном экране только отсюда: состояние
+    // сеанса не менялось, и подписка их не позовёт.
+    sync();
   }
 
   // ——— подписи ———
@@ -2294,7 +2308,12 @@ function createVolume({ api, hosts }) {
    */
   function syncSummary() {
     titleNode.textContent = volumeTitle(schemeName(), schemeFloorOf(getState().project, schemeId));
-    if (scene.empty) {
+    // Поле во весь экран (таск 166, G246): сводка уходит целиком — вместе со
+    // своим знаком. Она про объект, а не про руки: сколько стен и проёмов, чего
+    // не хватает, где человек стоит. Это читают, стоя у стола, и ради этого из
+    // полного экрана выходят — а выйдя, находят её на прежнем месте, с той же
+    // точкой предупреждения.
+    if (scene.empty || bare()) {
       summaryPlate.update([], { hidden: true });
       return;
     }
@@ -2339,6 +2358,13 @@ function createVolume({ api, hosts }) {
       floors: floorOptions(),
       back: backFloor(),
     });
+    // Подсказка в полном экране не уходит, а **складывается в свой знак**
+    // (таск 166, G246). Она единственная из спрятанного говорит про руки:
+    // какие клавиши, что делает палец, открыта ли дверь, — и как раз в полном
+    // экране ей учатся. Текстом она заняла бы верхнюю треть сцены, знаком — те
+    // же 26 точек, что соседние кнопки, и разворачивается одним нажатием.
+    // Памяти человека это не трогает: вышли — плашка такая, какой была.
+    hintPlate.fold(bare());
     hintPlate.update(value);
   }
 

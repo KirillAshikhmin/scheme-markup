@@ -10,14 +10,17 @@
 // 2. Мы сейчас внутри или снаружи. Выйти можно мимо кнопки — Esc, жест, —
 //    поэтому состояние спрашивается у документа, а не запоминается флагом.
 // 3. Подпись говорит, что случится по нажатию, а не то, что сейчас.
+// 4. Прячет ли полный экран всё, кроме поля, — и в каком режиме (таск 166).
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
   FULLSCREEN_EVENTS,
+  canvasFullscreenBare,
   canvasFullscreenLabel,
   canvasFullscreenOn,
   canvasFullscreenSupported,
 } from "../src/canvas.js";
+import { SCREEN_MODES } from "../src/app.js";
 import { strings } from "../src/strings.js";
 
 // Документ и элемент — простые объекты: DOM для этих ответов не нужен, и
@@ -61,6 +64,29 @@ test("подпись говорит, что случится по нажатию
   assert.equal(canvasFullscreenLabel(false), strings.canvas.fullscreenEnter);
   assert.equal(canvasFullscreenLabel(true), strings.canvas.fullscreenExit);
   assert.notEqual(strings.canvas.fullscreenEnter, strings.canvas.fullscreenExit);
+});
+
+// Поле во весь экран (таск 166, G246): «в режиме Объём в полноэкраном режиме
+// скрывай всё лишнее». Правило одно на двоих — страница по нему убирает с себя
+// шапку, колонки и переключатель, поле объёма по нему же убирает сводку и
+// складывает подсказку. Разойдись они — и человек остался бы в полном экране со
+// сводкой поверх сцены или, наоборот, без панелей в «Схеме».
+test("всё лишнее прячет только полный экран и только в «Объёме»", () => {
+  assert.equal(canvasFullscreenBare(true, "volume"), true);
+  // «Схема» и «Чертёж» в полном экране ведут себя как прежде: там панели — это
+  // руки, которыми работают, а не то, что загораживает.
+  assert.equal(canvasFullscreenBare(true, "scheme"), false);
+  assert.equal(canvasFullscreenBare(true, "drawing"), false);
+  // Обычный «Объём» ничего не прячет: панели на месте, пока экран не развёрнут.
+  assert.equal(canvasFullscreenBare(false, "volume"), false);
+  // Неизвестный режим — тоже нет: опечатка не должна раздевать страницу.
+  assert.equal(canvasFullscreenBare(true, "объёмчик"), false);
+  assert.equal(canvasFullscreenBare(true, undefined), false);
+  // Режим, который прячет, ровно один из трёх — и он существует.
+  assert.deepEqual(
+    SCREEN_MODES.filter((screen) => canvasFullscreenBare(true, screen)),
+    ["volume"],
+  );
 });
 
 test("выход мимо кнопки слышен в обоих браузерах", () => {

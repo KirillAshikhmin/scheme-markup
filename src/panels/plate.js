@@ -63,6 +63,9 @@ const plateSeen = new Map();
  * которому помнится свёрнутость. Знак выбирает сторона, и доводом он не
  * передаётся нарочно: правило «слева „?“, справа „i“» одно на сборку, и
  * позволить его перебить значило бы завести второй вид плашки.
+ *
+ * Наружу уходят три двери: `node` — сама плашка, `update` — что в ней написано,
+ * `fold` — просьба поля сложить её в знак, не трогая памяти человека.
  */
 export function createFieldPlate({ side, setting }) {
   const info = side === "right";
@@ -82,19 +85,49 @@ export function createFieldPlate({ side, setting }) {
   const node = uiEl("div", { class: "canvas-hint" + (info ? " canvas-hint--info" : "") }, [toggle, body]);
   let alert = false;
   let text = "";
+  // Плашку может сложить не человек, а само поле: в полном экране «Объёма» над
+  // сценой остаётся только знак (таск 166, G246). Это **не** выбор человека, и
+  // памяти свёрнутости оно не трогает — вышли из полного экрана, и плашка
+  // вернулась такой, какой была. `asked` помнит последнюю просьбу поля, чтобы
+  // складывать один раз за заход: развернул человек её в полном экране — она
+  // останется развёрнутой, а не схлопнется на следующем же кадре.
+  let folded = false;
+  let asked = false;
 
   function collapsed() {
     return plateCollapsed.get(setting) === true;
   }
 
   function flip() {
-    plateCollapsed.set(setting, !collapsed());
+    const was = shutNow();
+    // Человек трогает свою память, а не чужую просьбу: сложенную полем плашку
+    // он разворачивает тем же нажатием, и дальше она его.
+    folded = false;
+    plateCollapsed.set(setting, !was);
     setSetting(setting, collapsed());
     render();
   }
 
+  function shutNow() {
+    return folded || collapsed();
+  }
+
+  /**
+   * Сложить плашку в знак (или вернуть ей волю человека) — просьба поля.
+   *
+   * Повторная просьба того же ничего не делает: поле спрашивает это на каждом
+   * кадре, а человек имеет право развернуть плашку и в полном экране.
+   */
+  function fold(on) {
+    const want = Boolean(on);
+    if (want === asked) return;
+    asked = want;
+    folded = want;
+    render();
+  }
+
   function render() {
-    const shut = collapsed();
+    const shut = shutNow();
     node.classList.toggle("is-collapsed", shut);
     body.hidden = shut;
     // Развёрнутую плашку человек видит — значит, этот текст прочитан.
@@ -140,5 +173,5 @@ export function createFieldPlate({ side, setting }) {
       .catch(() => {});
   }
 
-  return { node, update };
+  return { node, update, fold };
 }

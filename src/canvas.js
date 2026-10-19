@@ -585,6 +585,25 @@ export function canvasFullscreenLabel(on) {
   return on ? strings.canvas.fullscreenExit : strings.canvas.fullscreenEnter;
 }
 
+/**
+ * Прячет ли полный экран всё, кроме поля (таск 166, G246).
+ *
+ * Слова заказчика: «в режиме Объём в полноэкраном режиме скрывай всё лишнее,
+ * оставь только саму сцену, управление, если с сенсорного девайса, кнопки что
+ * поверх сцены, плашку про метку и переключение вида».
+ *
+ * **Только «Объём».** В «Схеме» и в «Чертеже» полный экран убирает адресную
+ * строку, а панели там — рабочие руки: тип метки, инструмент, список. В
+ * «Объёме» руки другие — голова, ноги и глаза, — и всё, чем там пользуются на
+ * ходу, уже лежит на самом поле.
+ *
+ * Правило чистое и вынесено наружу: по нему решают двое — страница (что убрать
+ * с себя) и поле объёма (что убрать с себя), — и разойтись им нельзя.
+ */
+export function canvasFullscreenBare(on, screen) {
+  return Boolean(on) && screen === "volume";
+}
+
 // Переключение. Возвращает обещание: браузер вправе отказать, и отказ надо
 // показать, а не проглотить.
 //
@@ -4244,12 +4263,21 @@ function mountCanvasFullscreen(host, api) {
   host.append(button);
   const render = () => {
     const state = api.getState();
+    const on = canvasFullscreenOn(doc);
+    // Поле во весь экран (таск 166, G246): страница убирает с себя всё, кроме
+    // поля, и говорит об этом отметкой на своём корне — что именно уходит,
+    // решают стили (`styles.css`). Отметка ставится здесь потому, что это
+    // единственное место сборки, которое знает и про полный экран, и про
+    // режим; и считается она заново на каждый вопрос, как и само состояние
+    // кнопки, — запомненная, она разошлась бы с настоящей при выходе мимо
+    // кнопки.
+    const app = doc ? doc.getElementById("app") : null;
+    if (app) app.classList.toggle("is-field-bare", canvasFullscreenBare(on, state.screen));
     // Кнопка живёт над планом: без открытой схемы разворачивать нечего, и в
     // пустом холсте она была бы единственной вещью на экране.
     const shown = Boolean(state.schemeId) && !denied && canvasFullscreenSupported(doc, target);
     button.hidden = !shown;
     if (!shown) return;
-    const on = canvasFullscreenOn(doc);
     const label = canvasFullscreenLabel(on);
     button.replaceChildren(on ? uiIcon("fullscreenExit") : uiIcon("fullscreen"));
     button.title = label;
