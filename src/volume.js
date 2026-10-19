@@ -66,6 +66,7 @@ import {
   segmentDistanceMm,
   styleOf,
   typeObjectView,
+  WALL_HEIGHT_FALLBACK_MM,
   wallHeightOf,
   wallHeightOnSide,
   wallVectors,
@@ -189,11 +190,6 @@ export const VOLUME_FOV_DEG = 90;
  * комната узнаётся как раз по тому, где стена сходится с полом.
  */
 export const VOLUME_START_PITCH_DEG = -10;
-/**
- * Высота, которой рисуется помещение без заданной высоты. Выдумывать её молча
- * нельзя — окно говорит об этом строкой, как говорит развёртка (таск 129).
- */
-export const VOLUME_HEIGHT_FALLBACK_MM = 2700;
 /**
  * С какого расстояния до лестницы спрашивают про этаж (таск 149).
  *
@@ -820,12 +816,17 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
 
 /**
  * Высота помещения: переопределение комнаты, высота схемы, а если ни того ни
- * другого — `VOLUME_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ * другого — `WALL_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ *
+ * Умолчание живёт в модели (таск 173) и **одно** на объём и развёртку: своей
+ * константы здесь больше нет. Окно говорит о нём строкой `volume.noHeight`, и
+ * в строке стоит то же число, что на полосе развёртки, — прежде окно обещало
+ * это согласие комментарием, а числа были разные (2700 против «не ниже 2000»).
  */
 export function volumeHeightMm(project, schemeId, roomId) {
   const given = wallHeightOf(project, { schemeId, roomId });
   if (given > 0) return { mm: given, known: true };
-  return { mm: VOLUME_HEIGHT_FALLBACK_MM, known: false };
+  return { mm: WALL_HEIGHT_FALLBACK_MM, known: false };
 }
 
 /** Внутри ли точка в плановом многоугольнике. Тот же счёт, что `pointInOutline`. */
@@ -1203,7 +1204,7 @@ export function volumeStairs(project, schemeId) {
   const stairs = [];
   for (const object of schemeObjectsOnScheme(project, schemeId)) {
     if (schemeObjectKeyOf(project, object) !== "stairs") continue;
-    const polygons = volumeObjectPrisms(project, schemeId, object, VOLUME_HEIGHT_FALLBACK_MM).map(
+    const polygons = volumeObjectPrisms(project, schemeId, object, WALL_HEIGHT_FALLBACK_MM).map(
       (prism) => prism.corners,
     );
     if (polygons.length === 0) continue;
@@ -4240,7 +4241,7 @@ export function volumeAroundCamera(target, yaw, pitch, distance) {
  */
 export function volumeAroundFit(scene, box) {
   const bounds = scene.boundsMm;
-  const height = scene.heightMm || VOLUME_HEIGHT_FALLBACK_MM;
+  const height = scene.heightMm || WALL_HEIGHT_FALLBACK_MM;
   if (!bounds) {
     return { target: { x: 0, y: 0, z: height / 2 }, distance: VOLUME_AROUND_NEAR_MM };
   }

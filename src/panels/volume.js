@@ -36,13 +36,12 @@ import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasFullscreenBare, canvasFullsc
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
-import { findRoom, findScheme, schemeFloorOf, schemeObjectsOnScheme } from "../model.js";
+import { WALL_HEIGHT_FALLBACK_MM, findRoom, findScheme, schemeFloorOf, schemeObjectsOnScheme } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
   VOLUME_AROUND_PITCH_DEG,
-  VOLUME_HEIGHT_FALLBACK_MM,
   VOLUME_LOOK_DEG_PX,
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_POINT,
@@ -633,7 +632,7 @@ export function volumeNotes(scene) {
   for (const note of scene.notes || []) {
     if (note === "noRooms") lines.push(strings.volume.noRooms);
     if (note === "noBridge") lines.push(strings.volume.noBridge);
-    if (note === "noHeight") lines.push(text("volume.noHeight", { height: VOLUME_HEIGHT_FALLBACK_MM }));
+    if (note === "noHeight") lines.push(text("volume.noHeight", { height: WALL_HEIGHT_FALLBACK_MM }));
   }
   return lines;
 }
@@ -1563,7 +1562,7 @@ function createVolume({ api, hosts }) {
   // Насколько обзор обязан подняться над целью, чтобы остаться снаружи: это
   // высота, на которой кончается чертёж, минус высота самой цели.
   function aroundLift() {
-    const roof = (scene.heightMm || VOLUME_HEIGHT_FALLBACK_MM) + 400;
+    const roof = (scene.heightMm || WALL_HEIGHT_FALLBACK_MM) + 400;
     return Math.max(0, roof - around.target.z);
   }
 
