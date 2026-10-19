@@ -1,0 +1,81 @@
+/* ——— окно «Вещь чертежа»: категории колонками, вещи плитками ——————————
+   Таск 170 (G252): выбор вещи переехал из колонки чертежа в окно, как у меток.
+   Плитка «картинка — имя» (G224) та же, что стояла в колонке, а место ей тут
+   просторнее: в колонке на 264 точки показывалась одна категория, в окне стоят
+   все сразу — ради этого переезд и терпим, иначе шесть вещей подряд (кухня)
+   стоили бы шести листаний.
+
+   Раскладку колонок считает `pickerLayout` в typePicker.js — один механизм на
+   оба окна; здесь колонки только расставляются по ширине. */
+
+/* Ширину задаёт число колонок, но не шире внутренности карточки (96vw минус её
+   поля с рамкой). 290 точек на колонку — те же меры, что считает
+   `objectPickerColumnLimit`: 270 на колонку плюс просвет. */
+.picker--objects {
+  width: min(calc(96vw - 40px), calc(var(--picker-columns, 1) * 290px));
+  min-width: min(calc(96vw - 40px), 300px);
+}
+
+/* Селектор нарочно из двух классов: стили склеиваются в один лист по порядку
+   имён файлов, и `objectPicker.css` стоит **до** `typePicker.css` — одиночный
+   `.picker__columns--objects` проиграл бы соседнему `.picker__columns` с той же
+   весомостью, уехав и в чужую мерку колонки, и в чужой потолок высоты. */
+.picker--objects .picker__columns {
+  grid-template-columns: repeat(var(--picker-columns, 1), minmax(270px, 1fr));
+  /* Плитки выше строк: потолок у окна вещей свой, иначе четыре ряда плиток
+     прокручивались бы в окне, которому хватило бы места. */
+  max-height: 64vh;
+}
+
+/* Сетка плиток внутри категории. Три в ряд — та же тройка стоит в
+   `objectPicker.js` (`OBJECT_PICKER_TILES_PER_ROW`): по ней там считается
+   высота категории для раскладки колонок и шаг стрелок вверх-вниз. Разойдись
+   эти числа — стрелка прыгала бы не на ряд. */
+.objectTiles__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* Плитка: картинка над подписью. Имя переносится и не обрезается многоточием —
+   «Посудомоечная машина» и «Полотенцесушитель» отличаются от соседей началом,
+   а не концом, но прочитать их человек должен целиком. */
+.objectTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 3px 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--panel-text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.objectTile:hover,
+.objectTile:focus-visible {
+  border-color: var(--accent);
+}
+
+.objectTile.is-on {
+  border-color: var(--accent);
+  background: rgba(31, 111, 235, 0.18);
+}
+
+.objectTile__icon {
+  display: block;
+}
+
+/* Имя переносится по слогам, а где слог не помогает — по буквам: «Столешница
+   (кухонный фронт)» не влезает в клетку целиком ни при каком кегле, и перенос
+   с дефисом читается, а разрыв посреди слова — нет. */
+.objectTile__name {
+  display: block;
+  hyphens: auto;
+  overflow-wrap: anywhere;
+}

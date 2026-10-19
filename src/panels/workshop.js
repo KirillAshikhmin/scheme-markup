@@ -173,8 +173,13 @@ import {
   screenToPlan,
 } from "../render.js";
 import { uiButton, uiConfirm, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
-import { objectCatalogDefaults, objectCatalogEntry, objectCatalogKeyByName } from "../objectCatalog.js";
-import { createObjectTiles } from "./objectTiles.js";
+import {
+  objectCatalogDefaults,
+  objectCatalogEntry,
+  objectCatalogKeyByName,
+  objectCatalogName,
+} from "../objectCatalog.js";
+import { objectTileIcon, openObjectPicker } from "./objectPicker.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
 import { createFieldPlate } from "./plate.js";
 
@@ -734,6 +739,11 @@ export function workshopObjectDefaultsByName(name) {
 // кривого контура это **габарит**, и человек видит его призраком **до** того,
 // как замкнёт: контур обводят на глазах, и обещать нечего — показано.
 export const WORKSHOP_OBJECT_WAYS = ["rect", "contour", "polyline"];
+
+// Картинка вещи на плашке колонки (таск 170): мельче, чем плитка в окне, —
+// здесь она отвечает на «та ли вещь выбрана», а не на «какую выбрать», и
+// рядом с ней стоит имя словами.
+const WORKSHOP_THING_ICON = 26;
 
 // Меньше трёх вершин — не контур: двумя точками площадь не огородить. Счёт
 // общий с планом (`GESTURE_CLOSE_MIN`, таск 167) — ровно столько же требует и
@@ -1774,10 +1784,25 @@ function createWorkshop({ api, hosts }) {
     doorFields,
   ]);
 
-  // Встроенный каталог: категория и плитки с картинкой и названием (таск 154).
-  // Своих видов человек больше не заводит — заказчик решил это прямо: «без
-  // кастомных для объектов, не усложняем».
-  const objectTiles = createObjectTiles({ onPick: (key) => setObjectKey(key) });
+  // Встроенный каталог: своих видов человек не заводит — заказчик решил это
+  // прямо: «без кастомных для объектов, не усложняем».
+  //
+  // **Выбор вещи живёт в окне** (таск 170, G252): «механеику выбора для
+  // добавления и изменения объекта сделай как для меток — в отдельном окне».
+  // В колонке осталась плашка — картинка, имя и слово «Выбрать», — устроенная
+  // как плашка типа метки в панели инструментов. Дверь одна на оба случая:
+  // какую вещь поставить и какой стала выделенная. Что из двух сейчас, колонка
+  // знает сама — по тому же правилу, по которому меняются её заголовок и поля.
+  const thingIcon = uiEl("span", { class: "workshop__thingIcon" });
+  const thingName = uiEl("span", { class: "workshop__thingName" });
+  const thingButton = uiEl(
+    "button",
+    { class: "workshop__thing", type: "button", on: { click: () => chooseThing() } },
+    [thingIcon, thingName, uiEl("span", { class: "workshop__thingPick", text: strings.workshop.objectPick })],
+  );
+  // Что нарисовано на плашке: картинку зря не перерисовываем — `sync` зовут на
+  // каждое движение мыши по полю.
+  let thingShown = null;
   // Три способа поставить объект, а не две формы (таск 137): прямоугольник
   // кликом по умолчаниям, он же контуром по месту, полоса цепочкой.
   const wayButtons = WORKSHOP_OBJECT_WAYS.map((way) =>
@@ -1824,7 +1849,7 @@ function createWorkshop({ api, hosts }) {
   // отвечает ровно на вопрос «почему у картины от пола 1300, а у стола ноль».
   const objectMountNote = uiEl("p", { class: "workshop__note" });
   const objectFields = uiEl("div", { class: "workshop__fields" }, [
-    objectTiles.node,
+    thingButton,
     uiEl("div", { class: "workshop__chips" }, wayButtons),
     widthField,
     depthField,
@@ -2395,6 +2420,29 @@ function createWorkshop({ api, hosts }) {
     return workshopEnsureSheet(project(), schemeId).project;
   }
 
+  /**
+   * Открыть окно выбора вещи (таск 170, G252).
+   *
+   * Окно одно на оба случая — поставить новую и сменить у выделенной, — и
+   * горит в нём та вещь, о которой сейчас речь. Заголовок разный нарочно: при
+   * выделенной вещи человек правит стоящее на чертеже, и окно обязано сказать
+   * это словом, а не промолчать.
+   *
+   * Серия из шести вещей подряд (кухня) переезда в окно боялась не зря, и
+   * отвечено на это тремя вещами: в окне нет шага категории — все вещи стоят
+   * сразу; выбранная залипает в плашке, и шесть одинаковых ставятся кликами
+   * без диалога; поиск с Enter даёт путь без мыши (`objectPicker.js`).
+   */
+  async function chooseThing() {
+    const object = selectedObject();
+    const picked = await openObjectPicker({
+      key: objectKey(object),
+      title: object ? strings.workshop.objectChange : strings.objectPicker.title,
+    });
+    if (!picked) return;
+    setObjectKey(picked);
+  }
+
   function setObjectKey(key) {
     workshopObjectKey = key;
     workshopObjectSizes = keptTurn();
@@ -2408,8 +2456,14 @@ function createWorkshop({ api, hosts }) {
       sync();
       return;
     }
-    // Выделенной вещи плитка меняет саму вещь: прежний вид из справочника
+    // Выделенной вещи выбор меняет саму вещь: прежний вид из справочника
     // уходит вместе со своим полем, а имя на чертеже становится каталожным.
+    //
+    // Выбрали ту же самую — шага истории не будет: пустая правка в стеке
+    // отмены стоила бы человеку одного Ctrl+Z впустую (то же правило, что у
+    // «К стене»). У вещи прежней разметки `catalogKey` нет вовсе, и выбор её
+    // же ключа — настоящая правка: вид справочника уступает место каталогу.
+    if (object.catalogKey === key) return;
     try {
       commit(updateSchemeObject(project(), object.id, { catalogKey: key }).project, strings.history.objectEdit);
     } catch (error) {
@@ -3958,13 +4012,33 @@ function createWorkshop({ api, hosts }) {
     subjectNote.textContent = opening ? strings.workshop.doorHint : openingHelp();
   }
 
+  /**
+   * Плашка вещи в колонке: картинка, имя и подсказка про дверь.
+   *
+   * Перерисовывается только когда поменялось нарисованное: `sync` зовут на
+   * каждое движение мыши по полю, а картинка вещи — холст в точках устройства.
+   */
+  function syncThing(key, name, object) {
+    const mark = (key || "") + "\n" + (name || "");
+    if (thingShown !== mark) {
+      thingShown = mark;
+      thingIcon.replaceChildren(...(key ? [objectTileIcon(key, WORKSHOP_THING_ICON)] : []));
+      thingIcon.hidden = !key;
+      thingName.textContent = name || strings.workshop.objectUnknown;
+    }
+    thingButton.classList.toggle("is-set", Boolean(key));
+    thingButton.title = object ? strings.workshop.objectChangeHint : strings.workshop.objectChooseHint;
+  }
+
   function syncObject(current, object) {
     subjectHead.textContent = strings.workshop.object;
-    // Что горит в каталоге: у выделенной вещи — её ключ, без выделения — тот,
-    // которым поставят следующую. У вещи прежней разметки ключ выведен из
-    // имени вида, и плитка горит у той вещи, которой она и была.
+    // Что стоит на плашке: у выделенной вещи — её собственное имя (у прежней
+    // разметки — переименованное человеком, из справочника вида), без
+    // выделения — имя той вещи, которой поставят следующую. Картинку рисует
+    // ключ; у вещи вне каталога его нет вовсе, и плашка остаётся с одним
+    // именем, а не выдумывает чужую картинку.
     const key = objectKey(object);
-    objectTiles.update({ key });
+    syncThing(key, object ? schemeObjectNameOf(current, object) : objectCatalogName(key), object);
     // Где вещь стоит. У вещи вне каталога этого ответа нет — и строка молчит,
     // а не выдумывает «на полу».
     const mount = object ? schemeObjectMountOf(current, object) : (objectCatalogEntry(key) || {}).mount;

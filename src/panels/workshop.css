@@ -238,67 +238,67 @@
   flex: 0 0 auto;
 }
 
-/* ——— каталог вещей чертежа (таск 154, G224) ——————————————————————————————
+/* ——— плашка выбранной вещи (таск 170, G252) ——————————————————————————————
 
-   «Надо в выборе таблицей их отображать с изображением и названием»: строка
-   категории и сетка плиток под ней. Три колонки — мера колонки на 264 точки:
-   на плитку остаётся 76, и в них помещаются картинка в 40 точек и имя в две
-   строки. Четыре колонки резали бы «Полотенцесушитель» на полуслове, две
-   растили бы сетку вдвое вниз. */
-.objectTiles {
+   Выбор вещи уехал в окно (`objectPicker.css`), а в колонке осталась плашка:
+   картинка, имя и слово «Выбрать». Устроена она как плашка типа метки в панели
+   инструментов (`.tools__type`) — одна дверь к окну и одно место, где видно,
+   что встанет по клику или чем стоит выделенное. Высоты эта плашка колонке не
+   стоит почти ничего: вместо сетки в два-три ряда плиток — одна строка. */
+.workshop__thing {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
-.objectTiles__grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-}
-
-/* Плитка: картинка над подписью. Имя переносится и не обрезается многоточием —
-   «Посудомоечная машина» и «Полотенцесушитель» отличаются от соседей началом,
-   а не концом, но прочитать их человек должен целиком. */
-.objectTile {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 5px 3px 4px;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
   border: 1px solid var(--panel-line);
-  border-radius: 6px;
-  background: transparent;
+  border-radius: 8px;
+  background: #21262d;
   color: var(--panel-text);
   font: inherit;
-  font-size: 10px;
-  line-height: 1.2;
-  text-align: center;
+  text-align: left;
   cursor: pointer;
 }
 
-.objectTile:hover,
-.objectTile:focus-visible {
+.workshop__thing.is-set {
   border-color: var(--accent);
 }
 
-.objectTile.is-on {
+.workshop__thing:hover,
+.workshop__thing:focus-visible {
+  border-color: var(--panel-muted);
+}
+
+/* Картинка не сжимается вместе с текстом — иначе у «Полотенцесушителя» от неё
+   осталась бы полоска. */
+.workshop__thing .objectTile__icon {
+  flex: 0 0 auto;
+}
+
+.workshop__thingName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Слово «Выбрать» у плашки: по нему видно, что плашка нажимается. То же, что
+   у плашки типа метки, и теми же мерами. */
+.workshop__thingPick {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--panel-line);
+  background: #30363d;
+  color: var(--panel-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workshop__thing:hover .workshop__thingPick {
   border-color: var(--accent);
-  background: rgba(31, 111, 235, 0.18);
-}
-
-.objectTile__icon {
-  display: block;
-}
-
-/* Имя переносится по слогам, а где слог не помогает — по буквам: «Столешница»
-   в клетку 76 точек не влезает целиком ни при каком кегле, и перенос с
-   дефисом читается, а разрыв посреди слова — нет. */
-.objectTile__name {
-  display: block;
-  hyphens: auto;
-  overflow-wrap: anywhere;
 }
 
 .workshop__rooms {
