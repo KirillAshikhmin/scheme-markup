@@ -6,7 +6,17 @@
 // Своего рисования меток здесь нет и быть не должно.
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
-import { findGroup, findRoom, outlinesInOrder, planPixelsPerMeter, projectStamp, roomsInOrder, schemesInOrder } from "./model.js";
+import {
+  findGroup,
+  findRoom,
+  outlinesInOrder,
+  planPixelsPerMeter,
+  projectStamp,
+  roomsInOrder,
+  schemeHeightPx,
+  schemeWidthPx,
+  schemesInOrder,
+} from "./model.js";
 import {
   ELEVATION_UNIT_MM,
   drawElevation,
@@ -15,6 +25,7 @@ import {
   drawScheme,
   labelBox,
   labelFontSize,
+  GOST_TEXT_MM,
   markRadius,
   outlineLabelBox,
   visibleMarks,
@@ -26,7 +37,9 @@ import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
 import {
+  GOST_LINE_MM,
   GOST_TABLE_ROW_MM,
+  GOST_THIN_MM,
   drawGostFrame,
   drawGostStamp,
   gostDpi,
@@ -174,8 +187,8 @@ export function exportPdf(pages, meta = {}) {
 // панель сняла с экрана («как вижу»). Прямоугольник обрезается планом —
 // белые поля вокруг схемы на бумаге не нужны.
 function exportArea(scheme, area) {
-  const width = scheme && scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme && scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   if (!area || area === "all") return { x: 0, y: 0, width, height };
   const x = Math.max(0, Math.min(width, area.x || 0));
   const y = Math.max(0, Math.min(height, area.y || 0));
@@ -212,8 +225,8 @@ export function exportRoomArea(project, scheme, roomId) {
   if (!project || !scheme || !roomId) return null;
   const outlines = outlinesInOrder(project, scheme.id).filter((outline) => outline.roomId === roomId);
   if (outlines.length === 0) return null;
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -304,8 +317,8 @@ const EXPORT_FIT_PLAN = 0.05;
 
 function exportPlanSize(scheme) {
   return {
-    width: scheme && scheme.width > 0 ? scheme.width : 1000,
-    height: scheme && scheme.height > 0 ? scheme.height : 1000,
+    width: schemeWidthPx(scheme),
+    height: schemeHeightPx(scheme),
   };
 }
 
@@ -1457,14 +1470,19 @@ export async function elevationSheets(project, elevations, options = {}) {
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
 
 // Метрика таблицы на бумаге, в миллиметрах. Шаг строки живёт в `gostSheet.js`
-// (там же, где считается, сколько их влезет на лист); шрифт 3,5 мм — размер по
-// ГОСТ 2.304, ближайший к этому шагу.
+// (там же, где считается, сколько их влезет на лист); кегль — общий по ГОСТ
+// 2.304 (`render.GOST_TEXT_MM`), ближайший к этому шагу. Заголовок разбивки
+// крупнее на полмиллиметра — это своя мерка таблицы, у ГОСТ её нет.
 const GOST_TABLE = {
   row: GOST_TABLE_ROW_MM,
-  font: 3.5,
+  font: GOST_TEXT_MM,
   groupFont: 4,
   pad: 2,
 };
+
+// Черта под заголовком разбивки — между основной линией и тонкой: заголовок
+// весомее строки, но не равен рамке листа. Своё число, не ГОСТовское.
+const GOST_GROUP_LINE_MM = 0.5;
 
 // Строки будущих листов одним списком: заголовок разбивки, строка таблицы,
 // подвал «Итого». Разбивка по листам идёт по этому списку, поэтому «Лист N из
@@ -1584,17 +1602,17 @@ export async function gostTablePng(table, page, plan, options = {}) {
     let x = field.x;
     for (const width of widths.slice(0, -1)) {
       x += width;
-      line(x, top, x, top + GOST_TABLE.row, 0.3);
+      line(x, top, x, top + GOST_TABLE.row, GOST_THIN_MM);
     }
-    line(field.x, top, field.x, top + GOST_TABLE.row, 0.3);
-    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, 0.3);
+    line(field.x, top, field.x, top + GOST_TABLE.row, GOST_THIN_MM);
+    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, GOST_THIN_MM);
   };
 
   // Шапка колонок: на каждом листе своя, и под ней основная линия.
   drawCells(table.columns, true);
   columnLines(y);
-  line(field.x, y, field.x + bodyWidth, y, 0.3);
-  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.7);
+  line(field.x, y, field.x + bodyWidth, y, GOST_THIN_MM);
+  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_LINE_MM);
   y += GOST_TABLE.row;
 
   for (const item of page.lines) {
@@ -1603,7 +1621,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
       ctx.font = drawFont((item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm, 600);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.strokeStyle = item.color || "#1f2328";
-      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
+      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? GOST_THIN_MM : GOST_GROUP_LINE_MM);
       ctx.strokeStyle = "#000000";
       ctx.fillStyle = "#1f2328";
       y += GOST_TABLE.row;
@@ -1628,7 +1646,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
     }
     drawCells(item.cells, false);
     columnLines(y);
-    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.3);
+    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_THIN_MM);
     y += GOST_TABLE.row;
   }
 

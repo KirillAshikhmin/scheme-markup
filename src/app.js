@@ -286,6 +286,27 @@ export function layoutAllows(ability, mode) {
   return Array.isArray(modes) && modes.includes(mode);
 }
 
+// ——— кадр: один планировщик на три поверхности ————————————————————————
+//
+// `requestAnimationFrame` есть везде, где эта страница работает, но не в Node:
+// чистые куски поверхностей проверяются тестами, и падать там нельзя. Отсюда
+// запасной `setTimeout` в шестнадцать миллисекунд — кадр шестидесяти в
+// секунду. До таска 173 эта пара была переписана шесть раз (холст дважды,
+// чертёж дважды, объём дважды), а отмена — четыре.
+
+const FRAME_MS = 16;
+
+/** Нарисовать в следующем кадре. Возвращает ключ, которым кадр отменяют. */
+export function scheduleFrame(fn) {
+  return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, FRAME_MS);
+}
+
+/** Отменить заказанный кадр. */
+export function cancelFrame(id) {
+  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
+  else clearTimeout(id);
+}
+
 // ——— режимы и раскладка: чистые правила ————————————————————————————————
 
 // Неизвестный режим недоступен, как и неизвестное умение: опечатка уводит

@@ -331,8 +331,6 @@ export function blockStepPx(markSize) {
 
 // Шаг для величины метки по умолчанию: им пользуется тот, кто величины не знает.
 export const BLOCK_STEP_PX = blockStepPx(DEFAULT_MARK_SIZE);
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const BLOCK_FALLBACK_SIZE_PX = 1000;
 // Цвет метки, когда категория недоступна.
 const FALLBACK_COLOR = "#8B949E";
 export const BLOCK_SIDES = ["left", "right", "up", "down"];
@@ -592,6 +590,8 @@ export function randomColor(used, options = {}) {
 }
 
 // Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
+// Столько же вершин требует жест замыкания (`gestures.GESTURE_CLOSE_MIN`), но
+// это другая мерка с тем же значением — см. разбор у неё.
 export const OUTLINE_MIN_POINTS = 3;
 
 // Углы подписи. Девяносто градусов — подпись вдоль стены: в узком коридоре и у
@@ -1080,6 +1080,31 @@ function requireMark(project, markId) {
 }
 
 // ——— схемы ———————————————————————————————————————————————————————————
+
+/**
+ * Размер плана в пикселях, когда схема своих не знает.
+ *
+ * Знать их она обязана — точки лежат долями от размера плана (ADR 002), и
+ * `width`/`height` поэтому обязательная часть данных. Но схема без подложки
+ * заводится нулями, пока ей не нарисовали чертёж, и делить на ноль нельзя
+ * никому: ни попаданию клика, ни выгрузке, ни шагу блока. Отсюда квадрат в
+ * тысячу точек — условный план, на котором доли остаются долями.
+ *
+ * Число и обе функции живут **здесь**: до таска 173 та же тысяча стояла в
+ * восьми местах пяти файлов (холст, выгрузка, панель выгрузки, отрисовка, шаг
+ * блока), а каноническая пара функций была приватной в `render.js` — и поэтому
+ * её переписывали заново вместо того, чтобы позвать. Модель — нижний слой:
+ * позвать её может любой, а она не зовёт никого.
+ */
+export const SCHEME_FALLBACK_PX = 1000;
+
+export function schemeWidthPx(scheme) {
+  return scheme && scheme.width > 0 ? scheme.width : SCHEME_FALLBACK_PX;
+}
+
+export function schemeHeightPx(scheme) {
+  return scheme && scheme.height > 0 ? scheme.height : SCHEME_FALLBACK_PX;
+}
 
 export function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
   const scheme = {
@@ -1906,8 +1931,8 @@ export function addToGroup(project, markId, side, options = {}) {
   const scheme = requireScheme(project, mark.schemeId);
   const type = requireType(project, options.typeId || mark.typeId);
   const stepPx = options.step || BLOCK_STEP_PX;
-  const width = scheme.width > 0 ? scheme.width : BLOCK_FALLBACK_SIZE_PX;
-  const height = scheme.height > 0 ? scheme.height : BLOCK_FALLBACK_SIZE_PX;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const dx = stepPx / width;
   const dy = stepPx / height;
   const from = mark.points[mark.points.length - 1];
@@ -5041,6 +5066,24 @@ export function wallHeightOf(project, { schemeId, roomId } = {}) {
   return null;
 }
 
+/**
+ * Какой высоты показывать стену, которой высоту не задали, — **2800 мм**,
+ * слово заказчика (таск 173, G255: «Высота стен по умолчанию сделай 2800»).
+ *
+ * Число одно на все поверхности и живёт здесь: объём рисует им комнату
+ * (`volumeHeightMm`), развёртка берёт его полом показанной высоты
+ * (`wallElevation`), а панели вставляют его в свои строки. До этого таска их
+ * было два — плоские 2700 в объёме и выведенные «не ниже 2000» на развёртке, —
+ * и про одну и ту же стену человек читал два числа.
+ *
+ * **Данных это не касается.** Умолчание нигде не записывается в `project.json`:
+ * у схемы и комнаты по-прежнему либо есть своё число, либо нет его вовсе
+ * (`wallHeightOf` отдаёт честный `null`), и у кого высота задана — у того
+ * ничего не меняется. Правило «готовый проект не ломается» здесь выполняется
+ * тем, что показанное умолчание остаётся показанным.
+ */
+export const WALL_HEIGHT_FALLBACK_MM = 2800;
+
 // Снижать высоту под уже стоящим проёмом модель не даёт: промолчать значило бы
 // оставить окно выше потолка, а прижать его — угадать за человека.
 function checkHeightOverOpenings(project, schemeId, height) {
@@ -5270,11 +5313,6 @@ function markPointsMm(project, mark) {
     out.push(at);
   }
   return out;
-}
-
-function markPointMm(project, mark) {
-  const points = markPointsMm(project, mark);
-  return points.length > 0 ? points[0] : null;
 }
 
 // Середина метки: у точки она же, у линии — середина её габарита.
@@ -5773,8 +5811,9 @@ export function wallCrossings(project, wallId, side) {
  * Отступы здесь уже **зеркальные по стороне**: рисующему остаётся отложить их
  * слева направо и ничего не знать ни про стороны, ни про направление стены.
  * `heightMm` — высота этой стороны (`null`, если её не задавали);
- * `heightShownMm` — то, во что рисовать: заданная высота или выведенная из
- * того, что на стене стоит. Без числа развёртка была бы картинкой, а с
+ * `heightShownMm` — то, во что рисовать: заданная высота, умолчание
+ * `WALL_HEIGHT_FALLBACK_MM` или — если на стене стоит что-то выше его —
+ * выведенная из этого высота. Без числа развёртка была бы картинкой, а с
  * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
  */
 export function wallElevation(project, wallId, side = "left") {
@@ -5871,9 +5910,16 @@ export function wallElevation(project, wallId, side = "left") {
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
     heightKnown: known !== null,
-    // Выведенная высота: самое высокое, что на стене стоит, плюс триста
-    // миллиметров воздуха — чтобы верхний косяк не упирался в потолок листа.
-    heightShownMm: known !== null ? known : Math.max(2000, Math.max(0, ...tops) + 300),
+    // Незаданная высота — умолчание `WALL_HEIGHT_FALLBACK_MM`, то же, которым
+    // рисует комнату объём. Вывод «по тому, что на стене стоит» при этом
+    // остался, но стал **запасным путём**: он поднимает лист выше умолчания,
+    // когда на стене что-то стоит выше него, и не опускает его никогда.
+    //
+    // Убрать вывод совсем было нельзя: на объекте заказчика шесть сторон из
+    // пятидесяти несут вещь или метку ростом в самый потолок, и по плоскому
+    // умолчанию у них срезало бы верх — верхний косяк упёрся бы в потолок
+    // листа. Триста миллиметров воздуха над самым высоким — ровно про это.
+    heightShownMm: known !== null ? known : Math.max(WALL_HEIGHT_FALLBACK_MM, Math.max(0, ...tops) + 300),
     roomId,
     roomName: room ? room.name : "",
     openings,

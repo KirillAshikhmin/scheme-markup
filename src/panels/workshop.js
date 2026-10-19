@@ -72,10 +72,12 @@
 // `project.json`. Пустые списки в объект не попадают: их не кладёт ни одна
 // функция модели чертежа.
 import {
+  cancelFrame,
   ELEVATION_VIEWS_SETTING,
   OBJECTS_SETTING,
   PANEL_IDS,
   registerPanel,
+  scheduleFrame,
   SCREEN_DEFAULT,
   screenMode,
   setObjectHidden,
@@ -133,6 +135,9 @@ import {
 } from "../model.js";
 import {
   CANVAS_FRESH_VERTEX_MS,
+  CANVAS_PAN_FRAME_MS,
+  CANVAS_PAN_STEP_PX,
+  CANVAS_WALL_PICK_PX,
   canvasDragSlop,
   canvasPanSpeed,
   canvasPanVector,
@@ -152,6 +157,7 @@ import {
 import {
   DRAWING_ACTIVE,
   DRAWING_EDGE,
+  SNAP_STEP_DEG,
   DRAWING_OBJECT,
   DRAWING_PAPER,
   LABEL_TURN_RADIUS,
@@ -219,7 +225,6 @@ export const WORKSHOP_EMPTY_MM = { widthMm: 12000, heightMm: 9000 };
 // увеличивать нечего, координаты и так целые.
 export const WORKSHOP_ZOOM_MIN = 0.0007;
 export const WORKSHOP_ZOOM_MAX = 1.5;
-const WORKSHOP_ZOOM_KEY_STEP = 1.25;
 
 // ——— чего в чертеже больше нет (G227, таск 153) ————————————————————————
 //
@@ -275,9 +280,11 @@ export function workshopToolOf(mode, adding) {
 }
 
 // Пороги попадания в пикселях экрана, как у холста: иначе на разном масштабе
-// всё ведёт себя по-разному. Вершина ловится шире тела стены — ею правят.
+// всё ведёт себя по-разному. Вершина ловится шире тела стены — ею правят, и
+// это своя мерка чертежа. А промах по стене прощается тот же, что на плане:
+// число берётся у холста, а не повторяется здесь (таск 173).
 export const WORKSHOP_VERTEX_PX = 9;
-export const WORKSHOP_WALL_PX = 6;
+export const WORKSHOP_WALL_PX = CANVAS_WALL_PICK_PX;
 
 /**
  * Поехала ли рука: мерка **холстовая**, и у пальца она своя (`canvasDragSlop`).
@@ -309,10 +316,10 @@ const WORKSHOP_LENGTH_GAP_PX = 13;
 // `canvasPanSpeed` вывезены оттуда наружу, и второй такой арифметики здесь
 // нет. Повторить пришлось только ход кадров: холстовый прибит к его
 // синглтон-виду (`canvasPanBy` пишет в `getState().view`), а у окна вид свой.
-// Шаг короткого нажатия взят тот же, что у холста, — наружу он не отдан.
-const WORKSHOP_PAN_STEP_PX = 24;
-// Потолок шага кадра: вкладку свернули на минуту — план не должен улететь.
-const WORKSHOP_PAN_FRAME_MS = 64;
+// Шаг короткого нажатия и потолок шага кадра — те же, что у холста: теперь
+// они оттуда и берутся (таск 173).
+const WORKSHOP_PAN_STEP_PX = CANVAS_PAN_STEP_PX;
+const WORKSHOP_PAN_FRAME_MS = CANVAS_PAN_FRAME_MS;
 
 // ——— чистая половина: что показать и что записать ——————————————————————
 
@@ -950,8 +957,8 @@ export const WORKSHOP_TURN_STEP_DEG = 90;
  */
 export const WORKSHOP_TURN_HALF_DEG = 45;
 
-/** Шаг руки — те же 15°, которыми магнит холста держит углы стен. */
-export const WORKSHOP_TURN_SNAP_DEG = 15;
+/** Шаг руки — тот же, которым магнит холста держит углы стен (`SNAP_STEP_DEG`). */
+export const WORKSHOP_TURN_SNAP_DEG = SNAP_STEP_DEG;
 
 /** Дальше этого «спинкой к стене» стену не ищет: рядом её нет. */
 export const WORKSHOP_TURN_WALL_MM = 3000;
@@ -3514,8 +3521,7 @@ function createWorkshop({ api, hosts }) {
     if (code) panKeys.delete(code);
     else panKeys.clear();
     if (panKeys.size > 0 || !panFrame) return;
-    const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
-    cancel(panFrame);
+    cancelFrame(panFrame);
     panFrame = 0;
   }
 
@@ -3525,8 +3531,7 @@ function createWorkshop({ api, hosts }) {
 
   function panSchedule() {
     if (panFrame || panKeys.size === 0 || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    panFrame = schedule(panTick);
+    panFrame = scheduleFrame(panTick);
   }
 
   function panTick() {
@@ -3564,8 +3569,7 @@ function createWorkshop({ api, hosts }) {
 
   function redraw() {
     if (frame || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    frame = schedule(() => {
+    frame = scheduleFrame(() => {
       frame = 0;
       paint();
     });

@@ -7534,7 +7534,7 @@ const strings = {
     // написано словами: на ней самой только рисунок.
     hintTouch:
       "Палец по полю вертит головой, площадка справа внизу ходит и поворачивает, " +
-      "кнопки слева внизу приседают и подпрыгивают, щипок двумя пальцами в обзоре приближает. " +
+      "кнопки слева внизу приседают и подпрыгивают, два пальца в обзоре возят карту и щипком приближают. " +
       "Вид меняет кнопка справа сверху.",
     // Присед и прыжок пальцем (таск 163, G242): «добавь кнопки прыжкак и
     // присяда». Числа в подсказках не называются — они те же, что у клавиш, и
@@ -9258,8 +9258,6 @@ function blockStepPx(markSize) {
 
 // Шаг для величины метки по умолчанию: им пользуется тот, кто величины не знает.
 const BLOCK_STEP_PX = blockStepPx(DEFAULT_MARK_SIZE);
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const BLOCK_FALLBACK_SIZE_PX = 1000;
 // Цвет метки, когда категория недоступна.
 const FALLBACK_COLOR = "#8B949E";
 const BLOCK_SIDES = ["left", "right", "up", "down"];
@@ -9515,6 +9513,8 @@ function randomColor(used, options = {}) {
 }
 
 // Наименьшее число вершин замкнутого контура: двумя точками комнату не обвести.
+// Столько же вершин требует жест замыкания (`gestures.GESTURE_CLOSE_MIN`), но
+// это другая мерка с тем же значением — см. разбор у неё.
 const OUTLINE_MIN_POINTS = 3;
 
 // Углы подписи. Девяносто градусов — подпись вдоль стены: в узком коридоре и у
@@ -9994,6 +9994,29 @@ function requireMark(project, markId) {
 }
 
 // ——— схемы ———————————————————————————————————————————————————————————
+
+/**
+ * Размер плана в пикселях, когда схема своих не знает.
+ *
+ * Знать их она обязана — точки лежат долями от размера плана (ADR 002), и
+ * `width`/`height` поэтому обязательная часть данных. Но схема без подложки
+ * заводится нулями, пока ей не нарисовали чертёж, и делить на ноль нельзя
+ * никому: ни попаданию клика, ни выгрузке, ни шагу блока. Отсюда квадрат в
+ * тысячу точек — условный план, на котором доли остаются долями.
+ *
+ * Число и обе функции живут **здесь**: до таска 173 та же тысяча стояла в
+ * восьми местах пяти файлов (холст, выгрузка, панель выгрузки, отрисовка, шаг
+ * блока), а каноническая пара функций была приватной в `render.js` — и поэтому
+ * её переписывали заново вместо того, чтобы позвать. Модель — нижний слой:
+ * позвать её может любой, а она не зовёт никого.
+ */
+const SCHEME_FALLBACK_PX = 1000;
+function schemeWidthPx(scheme) {
+  return scheme && scheme.width > 0 ? scheme.width : SCHEME_FALLBACK_PX;
+}
+function schemeHeightPx(scheme) {
+  return scheme && scheme.height > 0 ? scheme.height : SCHEME_FALLBACK_PX;
+}
 function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
   const scheme = {
     id: newId(),
@@ -10813,8 +10836,8 @@ function addToGroup(project, markId, side, options = {}) {
   const scheme = requireScheme(project, mark.schemeId);
   const type = requireType(project, options.typeId || mark.typeId);
   const stepPx = options.step || BLOCK_STEP_PX;
-  const width = scheme.width > 0 ? scheme.width : BLOCK_FALLBACK_SIZE_PX;
-  const height = scheme.height > 0 ? scheme.height : BLOCK_FALLBACK_SIZE_PX;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const dx = stepPx / width;
   const dy = stepPx / height;
   const from = mark.points[mark.points.length - 1];
@@ -13907,6 +13930,24 @@ function wallHeightOf(project, { schemeId, roomId } = {}) {
   return null;
 }
 
+/**
+ * Какой высоты показывать стену, которой высоту не задали, — **2800 мм**,
+ * слово заказчика (таск 173, G255: «Высота стен по умолчанию сделай 2800»).
+ *
+ * Число одно на все поверхности и живёт здесь: объём рисует им комнату
+ * (`volumeHeightMm`), развёртка берёт его полом показанной высоты
+ * (`wallElevation`), а панели вставляют его в свои строки. До этого таска их
+ * было два — плоские 2700 в объёме и выведенные «не ниже 2000» на развёртке, —
+ * и про одну и ту же стену человек читал два числа.
+ *
+ * **Данных это не касается.** Умолчание нигде не записывается в `project.json`:
+ * у схемы и комнаты по-прежнему либо есть своё число, либо нет его вовсе
+ * (`wallHeightOf` отдаёт честный `null`), и у кого высота задана — у того
+ * ничего не меняется. Правило «готовый проект не ломается» здесь выполняется
+ * тем, что показанное умолчание остаётся показанным.
+ */
+const WALL_HEIGHT_FALLBACK_MM = 2800;
+
 // Снижать высоту под уже стоящим проёмом модель не даёт: промолчать значило бы
 // оставить окно выше потолка, а прижать его — угадать за человека.
 function checkHeightOverOpenings(project, schemeId, height) {
@@ -14134,11 +14175,6 @@ function markPointsMm(project, mark) {
     out.push(at);
   }
   return out;
-}
-
-function markPointMm(project, mark) {
-  const points = markPointsMm(project, mark);
-  return points.length > 0 ? points[0] : null;
 }
 
 // Середина метки: у точки она же, у линии — середина её габарита.
@@ -14636,8 +14672,9 @@ function wallCrossings(project, wallId, side) {
  * Отступы здесь уже **зеркальные по стороне**: рисующему остаётся отложить их
  * слева направо и ничего не знать ни про стороны, ни про направление стены.
  * `heightMm` — высота этой стороны (`null`, если её не задавали);
- * `heightShownMm` — то, во что рисовать: заданная высота или выведенная из
- * того, что на стене стоит. Без числа развёртка была бы картинкой, а с
+ * `heightShownMm` — то, во что рисовать: заданная высота, умолчание
+ * `WALL_HEIGHT_FALLBACK_MM` или — если на стене стоит что-то выше его —
+ * выведенная из этого высота. Без числа развёртка была бы картинкой, а с
  * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
  */
 function wallElevation(project, wallId, side = "left") {
@@ -14734,9 +14771,16 @@ function wallElevation(project, wallId, side = "left") {
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
     heightKnown: known !== null,
-    // Выведенная высота: самое высокое, что на стене стоит, плюс триста
-    // миллиметров воздуха — чтобы верхний косяк не упирался в потолок листа.
-    heightShownMm: known !== null ? known : Math.max(2000, Math.max(0, ...tops) + 300),
+    // Незаданная высота — умолчание `WALL_HEIGHT_FALLBACK_MM`, то же, которым
+    // рисует комнату объём. Вывод «по тому, что на стене стоит» при этом
+    // остался, но стал **запасным путём**: он поднимает лист выше умолчания,
+    // когда на стене что-то стоит выше него, и не опускает его никогда.
+    //
+    // Убрать вывод совсем было нельзя: на объекте заказчика шесть сторон из
+    // пятидесяти несут вещь или метку ростом в самый потолок, и по плоскому
+    // умолчанию у них срезало бы верх — верхний косяк упёрся бы в потолок
+    // листа. Триста миллиметров воздуха над самым высоким — ровно про это.
+    heightShownMm: known !== null ? known : Math.max(WALL_HEIGHT_FALLBACK_MM, Math.max(0, ...tops) + 300),
     roomId,
     roomName: room ? room.name : "",
     openings,
@@ -20289,8 +20333,20 @@ const HIT_SLACK_PX = 4;
 // стоит дважды: подпись у края плана не уезжает влево, когда пора, и клик по
 // ней промахивается мимо прямоугольника.
 const LABEL_CHAR_RATIO = 0.75;
-// Насколько далеко от метки стоит подпись, если её не оттаскивали.
+// Насколько далеко от метки стоит подпись, если её не оттаскивали. Отдан
+// наружу: холст ставит подпись на то же место, когда её берут мышью.
 const LABEL_GAP = 1.5;
+
+/**
+ * Кегль чертёжного шрифта по ГОСТ 2.304 — 3,5 мм. Одно число на всё, что
+ * уходит на бумагу: подписи развёртки, графы штампа и таблица на листе.
+ *
+ * Живёт здесь, а не в `gostSheet.js`, где остальная бумажная метрика, потому
+ * что `gostSheet` тянет из `render.js`, а не наоборот: обратная ссылка была бы
+ * кольцом, а кольца сборка не терпит. До таска 173 это число стояло в трёх
+ * файлах порознь — и расхождение попало бы на бумагу заказчика.
+ */
+const GOST_TEXT_MM = 3.5;
 // Ручки «+» стоят от центра метки на столько её радиусов — ровно на шаг блока,
 // потому что новая метка встаёт **туда, где нарисована ручка**. Мера одна, и
 // живёт она в модели (`BLOCK_STEP_RATIO`): свои 2,4 здесь однажды уже
@@ -21535,24 +21591,16 @@ function typeIcon(project, typeId, size = 22, length = size * 2) {
 function planToScreen(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: state.offsetX + point.x * schemeWidth(scheme) * state.zoom,
-    y: state.offsetY + point.y * schemeHeight(scheme) * state.zoom,
+    x: state.offsetX + point.x * schemeWidthPx(scheme) * state.zoom,
+    y: state.offsetY + point.y * schemeHeightPx(scheme) * state.zoom,
   };
 }
 function screenToPlan(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: (point.x - state.offsetX) / (schemeWidth(scheme) * state.zoom),
-    y: (point.y - state.offsetY) / (schemeHeight(scheme) * state.zoom),
+    x: (point.x - state.offsetX) / (schemeWidthPx(scheme) * state.zoom),
+    y: (point.y - state.offsetY) / (schemeHeightPx(scheme) * state.zoom),
   };
-}
-
-function schemeWidth(scheme) {
-  return scheme && scheme.width > 0 ? scheme.width : 1000;
-}
-
-function schemeHeight(scheme) {
-  return scheme && scheme.height > 0 ? scheme.height : 1000;
 }
 
 // Радиус метки на экране: размер задан в пикселях плана и растёт с масштабом.
@@ -21571,8 +21619,8 @@ function labelFontSize(view) {
 
 // Вписать план в прямоугольник холста.
 function fitView(scheme, viewport) {
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const boxWidth = Math.max(1, viewport.width);
   const boxHeight = Math.max(1, viewport.height);
   const zoom = Math.min(boxWidth / width, boxHeight / height) * 0.96;
@@ -21635,8 +21683,8 @@ function rayProject(from, to, scheme, degrees) {
   // плавающей ошибки — продольная координата остаётся ровно под курсором.
   if (straight % 180 === 0) return { x: to.x, y: from.y };
   if (straight % 180 === 90) return { x: from.x, y: to.y };
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const radians = (straight * Math.PI) / 180;
   const ux = Math.cos(radians);
   const uy = -Math.sin(radians);
@@ -21649,8 +21697,8 @@ function rayProject(from, to, scheme, degrees) {
 // разных пикселей, и угол по долям — не тот угол, который видит инженер.
 // `options.free` — магнит снят; `options.limit` — свой порог.
 function snapSegment(from, to, scheme, options = {}) {
-  const dx = (to.x - from.x) * schemeWidth(scheme);
-  const dy = (to.y - from.y) * schemeHeight(scheme);
+  const dx = (to.x - from.x) * schemeWidthPx(scheme);
+  const dy = (to.y - from.y) * schemeHeightPx(scheme);
   if (dx === 0 && dy === 0) return { point: to, angle: 0, snapped: false };
   const angle = segmentAngle(dx, dy);
   const limit = options.limit === undefined ? SNAP_ANGLE_DEG : options.limit;
@@ -21828,8 +21876,8 @@ function rulerTicks(scheme, view, box) {
   };
   return {
     step,
-    top: ticks(box.width, state.offsetX, schemeWidth(scheme)),
-    left: ticks(box.height, state.offsetY, schemeHeight(scheme)),
+    top: ticks(box.width, state.offsetX, schemeWidthPx(scheme)),
+    left: ticks(box.height, state.offsetY, schemeHeightPx(scheme)),
   };
 }
 
@@ -21890,14 +21938,14 @@ function rulerAxis(point) {
 function guideScreen(guide, scheme, view) {
   const state = renderView(view);
   return guide.axis === "h"
-    ? state.offsetY + guide.at * schemeHeight(scheme) * state.zoom
-    : state.offsetX + guide.at * schemeWidth(scheme) * state.zoom;
+    ? state.offsetY + guide.at * schemeHeightPx(scheme) * state.zoom
+    : state.offsetX + guide.at * schemeWidthPx(scheme) * state.zoom;
 }
 
 // Доля плана из экранной координаты — обратный ход для перетаскивания.
 function guideFraction(axis, screen, scheme, view) {
   const state = renderView(view);
-  const size = (axis === "h" ? schemeHeight(scheme) : schemeWidth(scheme)) * state.zoom;
+  const size = (axis === "h" ? schemeHeightPx(scheme) : schemeWidthPx(scheme)) * state.zoom;
   const offset = axis === "h" ? state.offsetY : state.offsetX;
   return size > 0 ? (screen - offset) / size : 0;
 }
@@ -22721,8 +22769,8 @@ function markStackPlaceAll(project, scheme, filter, sizes) {
   const result = new Map();
   const list = visibleMarks(project, scheme, filter).filter(markStackable);
   if (list.length < 2) return result;
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const reach = sizes.radius * MARK_STACK_REACH_RATIO;
   const stepPx = sizes.radius * MARK_STACK_STEP_RATIO;
   const order = new Map(list.map((mark, index) => [mark.id, index]));
@@ -23332,8 +23380,8 @@ function labelLeadSide(project, scheme, target) {
   const lead = labelLead(project, target);
   const points = (lead && lead.kind === "line" && lead.points) || [];
   if (points.length < 2) return null;
-  const dx = (points[1].x - points[0].x) * schemeWidth(scheme);
-  const dy = (points[1].y - points[0].y) * schemeHeight(scheme);
+  const dx = (points[1].x - points[0].x) * schemeWidthPx(scheme);
+  const dy = (points[1].y - points[0].y) * schemeHeightPx(scheme);
   if (Math.abs(dx) < Math.abs(dy)) return null;
   if (dx === 0 && dy === 0) return null;
   return { sign: dy >= 0 ? -1 : 1 };
@@ -23432,7 +23480,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
   const text = labelTextOf(project, target);
   const reach = labelReach(project, target, stacks);
   const lead = labelLeadSide(project, scheme, target);
-  const width = schemeWidth(scheme);
+  const width = schemeWidthPx(scheme);
   // Плашка комментария шире и выше строки: её габарит считает `commentPlateSize`
   // по тем же знакам и тому же кеглю. Раскладке она от этого не чужая — место
   // ей ищется тем же перебором, и соседние подписи её обходят.
@@ -23445,7 +23493,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
     text,
     lines,
     x: origin.x * width,
-    y: origin.y * schemeHeight(scheme),
+    y: origin.y * schemeHeightPx(scheme),
     width: size.width,
     height: size.height,
     angle: labelAngleOf(project, target),
@@ -23496,8 +23544,8 @@ function labelFilterKey(filter) {
 }
 
 function labelPlaceAll(project, scheme, filter, sizes, stacks) {
-  const planWidth = schemeWidth(scheme);
-  const planHeight = schemeHeight(scheme);
+  const planWidth = schemeWidthPx(scheme);
+  const planHeight = schemeHeightPx(scheme);
   const layout = new Map();
   const entries = labelTargets(project, scheme, filter)
     .map((target) => ({
@@ -24703,8 +24751,8 @@ function drawExtent(ctx, scheme, view) {
   const height = ctx.canvas && ctx.canvas.height > 0 && ratio > 0 ? ctx.canvas.height / ratio : 0;
   if (width > 0 && height > 0) return { width, height };
   return {
-    width: view.offsetX + schemeWidth(scheme) * view.zoom,
-    height: view.offsetY + schemeHeight(scheme) * view.zoom,
+    width: view.offsetX + schemeWidthPx(scheme) * view.zoom,
+    height: view.offsetY + schemeHeightPx(scheme) * view.zoom,
   };
 }
 
@@ -24997,8 +25045,8 @@ function drawingBridge(project, scheme, view) {
   const origin = planOriginOf(project, scheme.id);
   if (!(perMeter > 0) || !origin) return null;
   const state = renderView(view);
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const pxPerMm = perMeter / 1000;
   const zeroX = state.offsetX + origin.at.x * width * state.zoom;
   const zeroY = state.offsetY + origin.at.y * height * state.zoom;
@@ -25387,12 +25435,10 @@ const ELEVATION_FONT = 11;
 // Мельче этого подпись на развёртке не читается — тогда её просто нет.
 const ELEVATION_LABEL_MIN_PX = 26;
 
-// Шрифт развёртки на бумаге — 3,5 мм: размер по ГОСТ 2.304, тот же, которым
-// подписана таблица. Из него и выводится, сколько миллиметров стоит единица, —
+// Из кегля ГОСТ и выводится, сколько миллиметров стоит единица развёртки, —
 // одно число на все поля, и пропорции экранной развёртки переносятся на лист
 // целиком.
-const ELEVATION_FONT_MM = 3.5;
-const ELEVATION_UNIT_MM = ELEVATION_FONT_MM / ELEVATION_FONT;
+const ELEVATION_UNIT_MM = GOST_TEXT_MM / ELEVATION_FONT;
 
 // Сколько единиц рамки съедают поля: по ширине и по высоте. Этим считает
 // раскладку листа `gostSheet.elevationFit` — размеры полей живут здесь, рядом
@@ -26009,8 +26055,8 @@ function drawScheme(ctx, {
       image,
       state.offsetX,
       state.offsetY,
-      schemeWidth(scheme) * state.zoom,
-      schemeHeight(scheme) * state.zoom,
+      schemeWidthPx(scheme) * state.zoom,
+      schemeHeightPx(scheme) * state.zoom,
     );
     ctx.restore();
   }
@@ -26839,6 +26885,27 @@ function layoutAllows(ability, mode) {
   return Array.isArray(modes) && modes.includes(mode);
 }
 
+// ——— кадр: один планировщик на три поверхности ————————————————————————
+//
+// `requestAnimationFrame` есть везде, где эта страница работает, но не в Node:
+// чистые куски поверхностей проверяются тестами, и падать там нельзя. Отсюда
+// запасной `setTimeout` в шестнадцать миллисекунд — кадр шестидесяти в
+// секунду. До таска 173 эта пара была переписана шесть раз (холст дважды,
+// чертёж дважды, объём дважды), а отмена — четыре.
+
+const FRAME_MS = 16;
+
+/** Нарисовать в следующем кадре. Возвращает ключ, которым кадр отменяют. */
+function scheduleFrame(fn) {
+  return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, FRAME_MS);
+}
+
+/** Отменить заказанный кадр. */
+function cancelFrame(id) {
+  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
+  else clearTimeout(id);
+}
+
 // ——— режимы и раскладка: чистые правила ————————————————————————————————
 
 // Неизвестный режим недоступен, как и неизвестное умение: опечатка уводит
@@ -27402,9 +27469,13 @@ if (typeof document !== "undefined") {
 // (`panels/workshop.js`) и окно загрузки плана (`panels/schemes.js`). Своих
 // примет ни у одной не остаётся.
 //
-// **Объём (`panels/volume.js`) сюда не ходит, и это не недоделка.** Там другой
-// разбор: колесо отодвигает камеру в обзоре, а палец ходит и вертит головой —
-// жест тот же, смысл другой, и сводить их в одно правило значило бы соврать.
+// **Объём (`panels/volume.js`) ходит сюда за щипком, и только за ним** (таск
+// 174). Два пальца в обзоре возят карту и приближают — тот самый жест, что на
+// плане, и второй его разбор был бы третьим щипком в сборке; перевод хода
+// середины в миллиметры пола остаётся объёму, это счёт его камеры
+// (`volumeAroundPan`). А колесо у объёма своё: там оно отодвигает камеру, а не
+// меняет масштаб полотна, и палец по полю вертит головой — жест тот же, смысл
+// другой, и сводить их в одно правило значило бы соврать.
 
 // ——— колесо и трекпад ————————————————————————————————————————————————
 //
@@ -27577,6 +27648,13 @@ function gesturePinchStep(previous, points) {
 /**
  * Сколько вершин нужно, чтобы замыкать было что. Двумя точками площадь не
  * огородить — ни ломаной метки на плане, ни контуру вещи в чертеже.
+ *
+ * Столько же требует `model.OUTLINE_MIN_POINTS` у контура помещения, и это
+ * **не одна мерка, а две равные** (таск 173): здесь правило жеста — когда клик
+ * по первой вершине замыкает, там правило данных — какой контур модель примет.
+ * Свести их значило бы сказать, что четырёхугольные комнаты (поменяй кто-то
+ * число там) запрещают трёхточечную ломаную метку. Поэтому они названы друг
+ * против друга и оставлены врозь.
  */
 const GESTURE_CLOSE_MIN = 3;
 
@@ -28854,7 +28932,10 @@ function createElevationStrip({ onSide, onClose, onViews, views }) {
 // (чтобы не проскочить) и быстро дальше (чтобы одним нажатием дотащить план
 // через весь экран).
 
-// Шаг короткого нажатия, экранные пиксели.
+// Шаг короткого нажатия, экранные пиксели. Отдан наружу: чертёж листает вид
+// теми же стрелками и тем же шагом (`workshop.js`), и второго числа тут быть
+// не должно — разойдись они, одна и та же клавиша ходила бы по-разному на
+// плане и в чертеже.
 const CANVAS_PAN_STEP_PX = 24;
 // Сколько клавишу держат, прежде чем начнётся непрерывный ход.
 const CANVAS_PAN_HOLD_MS = 180;
@@ -28864,6 +28945,7 @@ const CANVAS_PAN_SPEED_MAX = 2400;
 // За столько разгон доходит до потолка.
 const CANVAS_PAN_RAMP_MS = 1300;
 // Потолок шага кадра: вкладку свернули на минуту — план не должен улететь.
+// Тоже отдан наружу — у чертежа свой цикл кадров, но мерка общая.
 const CANVAS_PAN_FRAME_MS = 64;
 // Во сколько раз «+» и «−» меняют масштаб за нажатие.
 const CANVAS_ZOOM_KEY_STEP = 1.2;
@@ -29336,8 +29418,6 @@ let canvasHintSeen = null;
 
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
 // Запас к радиусу метки, по которому клик считается попавшим в концевую вершину
@@ -29422,14 +29502,6 @@ function canvasNow() {
   return clock && typeof clock.now === "function" ? clock.now() : Date.now();
 }
 
-function canvasFrameRequest(fn) {
-  return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, 16);
-}
-
-function canvasFrameCancel(id) {
-  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
-  else clearTimeout(id);
-}
 
 function canvasPanBy(dx, dy) {
   const state = canvasState();
@@ -29470,7 +29542,7 @@ function canvasPanKeyDown(code) {
 
 function canvasPanSchedule() {
   if (canvasPanFrame || canvasPanHeld.size === 0) return;
-  canvasPanFrame = canvasFrameRequest(canvasPanTick);
+  canvasPanFrame = scheduleFrame(canvasPanTick);
 }
 
 function canvasPanTick() {
@@ -29497,7 +29569,7 @@ function canvasPanRelease(code) {
   if (code) canvasPanHeld.delete(code);
   else canvasPanHeld.clear();
   if (canvasPanHeld.size > 0 || !canvasPanFrame) return;
-  canvasFrameCancel(canvasPanFrame);
+  cancelFrame(canvasPanFrame);
   canvasPanFrame = 0;
 }
 
@@ -29567,8 +29639,7 @@ function canvasPointOf(event) {
 
 function canvasRedraw() {
   if (canvasFrame || !canvasNode) return;
-  const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-  canvasFrame = schedule(() => {
+  canvasFrame = scheduleFrame(() => {
     canvasFrame = 0;
     canvasPaint();
   });
@@ -29923,8 +29994,8 @@ function canvasCursorPlan(state, scheme, view) {
 function canvasPasteStep(state, scheme) {
   const px = canvasBlockStep(state);
   return {
-    x: px / (scheme && scheme.width > 0 ? scheme.width : CANVAS_PLAN_FALLBACK_PX),
-    y: px / (scheme && scheme.height > 0 ? scheme.height : CANVAS_PLAN_FALLBACK_PX),
+    x: px / schemeWidthPx(scheme),
+    y: px / schemeHeightPx(scheme),
   };
 }
 
@@ -32148,7 +32219,9 @@ function canvasDragTo(point, free) {
       // в стандартное место в тот миг, когда за неё взялись мышью.
       const size = view.markSize || 10;
       const seen = target ? labelBox(before, scheme, target, view, state.filter) : null;
-      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: 0 };
+      // Запасное место подписи — то же, куда её ставит отрисовка, когда её не
+      // оттаскивали: мерка отступа берётся у неё (`LABEL_GAP`), а не повторяется.
+      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * LABEL_GAP, dy: 0 };
       const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
       // Подпись блока стоит по смещению его первой метки — своего поля у группы
       // модель не заводит, а собственной подписи у этой метки нет.
@@ -32833,8 +32906,8 @@ function canvasFitDrawing(project, scheme, box) {
       ].filter(Boolean)
     : [];
   if (corners.length < 4) return fitView(scheme, box);
-  const width = Math.max(1, scheme.width || 1000);
-  const height = Math.max(1, scheme.height || 1000);
+  const width = Math.max(1, schemeWidthPx(scheme));
+  const height = Math.max(1, schemeHeightPx(scheme));
   const xs = corners.map((point) => point.x * width);
   const ys = corners.map((point) => point.y * height);
   const left = Math.min(...xs);
@@ -35181,6 +35254,9 @@ const GOST_STAMP_HEIGHT_MM = { form3: 55, form5: 40, form6: 15 };
 const GOST_LINE_MM = 0.7;
 const GOST_THIN_MM = 0.3;
 
+// Кегль граф штампа — общий по ГОСТ 2.304 (`render.GOST_TEXT_MM`, 3,5 мм):
+// графы ниже называют его по имени, а не повторяют числом.
+//
 // Наименьшая высота шрифта на чертеже по ГОСТ 2.304 — 2,5 мм. Ниже неё
 // подпись метки на бумаге не читается, и это мерка автоподбора формата.
 const GOST_MIN_TEXT_MM = 2.5;
@@ -35512,8 +35588,6 @@ function elevationSheetLayout(blocks, options = {}) {
 const GOST_CHANGE_COLUMNS = [10, 10, 10, 10, 15, 10];
 // Колонки блока подписей: характер работы | фамилия | подпись | дата.
 const GOST_WORK_COLUMNS = [20, 20, 15, 10];
-// Левый блок у всех трёх форм одной ширины.
-const GOST_LEFT_WIDTH = 65;
 const GOST_ROW = 5;
 
 function gostRow(columns, x0, y, height, make) {
@@ -35553,8 +35627,8 @@ function gostWorkBlock(top, rows) {
     cells.push(
       ...gostRow(GOST_WORK_COLUMNS, 0, y, GOST_ROW, (column) => {
         if (column === 0) return role ? { label: role, size: 2.5, align: "left" } : { field: "role" + index, size: 2.5, align: "left" };
-        if (column === 1) return { field: "name" + index, size: 3.5 };
-        if (column === 2) return { field: "sign" + index, size: 3.5 };
+        if (column === 1) return { field: "name" + index, size: GOST_TEXT_MM };
+        if (column === 2) return { field: "sign" + index, size: GOST_TEXT_MM };
         return { field: "date" + index, size: 2.5 };
       }),
     );
@@ -35569,15 +35643,15 @@ const GOST_FORM_BUILDERS = {
     const right = [
       { x: 65, y: 0, width: 120, height: 10, field: "code", size: 7 },
       { x: 65, y: 10, width: 120, height: 15, field: "object", size: 5, lines: 2 },
-      { x: 65, y: 25, width: 70, height: 15, field: "building", size: 3.5, lines: 2 },
+      { x: 65, y: 25, width: 70, height: 15, field: "building", size: GOST_TEXT_MM, lines: 2 },
       { x: 135, y: 25, width: 15, height: 5, label: "stage", size: 2.5 },
       { x: 150, y: 25, width: 15, height: 5, label: "sheet", size: 2.5 },
       { x: 165, y: 25, width: 20, height: 5, label: "sheets", size: 2.5 },
-      { x: 135, y: 30, width: 15, height: 10, field: "stage", size: 3.5 },
-      { x: 150, y: 30, width: 15, height: 10, field: "sheet", size: 3.5 },
-      { x: 165, y: 30, width: 20, height: 10, field: "sheets", size: 3.5 },
-      { x: 65, y: 40, width: 70, height: 15, field: "drawing", size: 3.5, lines: 3 },
-      { x: 135, y: 40, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+      { x: 135, y: 30, width: 15, height: 10, field: "stage", size: GOST_TEXT_MM },
+      { x: 150, y: 30, width: 15, height: 10, field: "sheet", size: GOST_TEXT_MM },
+      { x: 165, y: 30, width: 20, height: 10, field: "sheets", size: GOST_TEXT_MM },
+      { x: 65, y: 40, width: 70, height: 15, field: "drawing", size: GOST_TEXT_MM, lines: 3 },
+      { x: 135, y: 40, width: 50, height: 15, field: "org", size: GOST_TEXT_MM, lines: 2 },
     ];
     return {
       height: 55,
@@ -35600,10 +35674,10 @@ const GOST_FORM_BUILDERS = {
       { x: 135, y: 15, width: 15, height: 5, label: "stage", size: 2.5 },
       { x: 150, y: 15, width: 15, height: 5, label: "sheet", size: 2.5 },
       { x: 165, y: 15, width: 20, height: 5, label: "sheets", size: 2.5 },
-      { x: 135, y: 20, width: 15, height: 5, field: "stage", size: 3.5 },
-      { x: 150, y: 20, width: 15, height: 5, field: "sheet", size: 3.5 },
-      { x: 165, y: 20, width: 20, height: 5, field: "sheets", size: 3.5 },
-      { x: 135, y: 25, width: 50, height: 15, field: "org", size: 3.5, lines: 2 },
+      { x: 135, y: 20, width: 15, height: 5, field: "stage", size: GOST_TEXT_MM },
+      { x: 150, y: 20, width: 15, height: 5, field: "sheet", size: GOST_TEXT_MM },
+      { x: 165, y: 20, width: 20, height: 5, field: "sheets", size: GOST_TEXT_MM },
+      { x: 135, y: 25, width: 50, height: 15, field: "org", size: GOST_TEXT_MM, lines: 2 },
     ];
     return {
       height: 40,
@@ -35623,7 +35697,7 @@ const GOST_FORM_BUILDERS = {
       ...gostChangeBlock(2),
       { x: 65, y: 0, width: 110, height: 15, field: "code", size: 5 },
       { x: 175, y: 0, width: 10, height: 7, label: "sheet", size: 2.5 },
-      { x: 175, y: 7, width: 10, height: 8, field: "sheet", size: 3.5 },
+      { x: 175, y: 7, width: 10, height: 8, field: "sheet", size: GOST_TEXT_MM },
     ];
     return {
       height: 15,
@@ -35766,7 +35840,7 @@ function gostWrap(ctx, value, cell, mm, sizeMm) {
 
 function gostCellText(ctx, value, cell, mm) {
   if (!value) return;
-  const sizeMm = cell.size || 3.5;
+  const sizeMm = cell.size || GOST_TEXT_MM;
   const lines = gostWrap(ctx, value, cell, mm, sizeMm);
   const step = sizeMm * 1.25 * mm;
   const top = (cell.y + cell.height / 2) * mm - ((lines.length - 1) * step) / 2;
@@ -35971,8 +36045,8 @@ function exportPdf(pages, meta = {}) {
 // панель сняла с экрана («как вижу»). Прямоугольник обрезается планом —
 // белые поля вокруг схемы на бумаге не нужны.
 function exportArea(scheme, area) {
-  const width = scheme && scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme && scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   if (!area || area === "all") return { x: 0, y: 0, width, height };
   const x = Math.max(0, Math.min(width, area.x || 0));
   const y = Math.max(0, Math.min(height, area.y || 0));
@@ -36009,8 +36083,8 @@ function exportRoomArea(project, scheme, roomId) {
   if (!project || !scheme || !roomId) return null;
   const outlines = outlinesInOrder(project, scheme.id).filter((outline) => outline.roomId === roomId);
   if (outlines.length === 0) return null;
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -36101,8 +36175,8 @@ const EXPORT_FIT_PLAN = 0.05;
 
 function exportPlanSize(scheme) {
   return {
-    width: scheme && scheme.width > 0 ? scheme.width : 1000,
-    height: scheme && scheme.height > 0 ? scheme.height : 1000,
+    width: schemeWidthPx(scheme),
+    height: schemeHeightPx(scheme),
   };
 }
 
@@ -37252,14 +37326,19 @@ async function elevationSheets(project, elevations, options = {}) {
 // ——— таблица листами по ГОСТ ———————————————————————————————————————————
 
 // Метрика таблицы на бумаге, в миллиметрах. Шаг строки живёт в `gostSheet.js`
-// (там же, где считается, сколько их влезет на лист); шрифт 3,5 мм — размер по
-// ГОСТ 2.304, ближайший к этому шагу.
+// (там же, где считается, сколько их влезет на лист); кегль — общий по ГОСТ
+// 2.304 (`render.GOST_TEXT_MM`), ближайший к этому шагу. Заголовок разбивки
+// крупнее на полмиллиметра — это своя мерка таблицы, у ГОСТ её нет.
 const GOST_TABLE = {
   row: GOST_TABLE_ROW_MM,
-  font: 3.5,
+  font: GOST_TEXT_MM,
   groupFont: 4,
   pad: 2,
 };
+
+// Черта под заголовком разбивки — между основной линией и тонкой: заголовок
+// весомее строки, но не равен рамке листа. Своё число, не ГОСТовское.
+const GOST_GROUP_LINE_MM = 0.5;
 
 // Строки будущих листов одним списком: заголовок разбивки, строка таблицы,
 // подвал «Итого». Разбивка по листам идёт по этому списку, поэтому «Лист N из
@@ -37379,17 +37458,17 @@ async function gostTablePng(table, page, plan, options = {}) {
     let x = field.x;
     for (const width of widths.slice(0, -1)) {
       x += width;
-      line(x, top, x, top + GOST_TABLE.row, 0.3);
+      line(x, top, x, top + GOST_TABLE.row, GOST_THIN_MM);
     }
-    line(field.x, top, field.x, top + GOST_TABLE.row, 0.3);
-    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, 0.3);
+    line(field.x, top, field.x, top + GOST_TABLE.row, GOST_THIN_MM);
+    line(field.x + bodyWidth, top, field.x + bodyWidth, top + GOST_TABLE.row, GOST_THIN_MM);
   };
 
   // Шапка колонок: на каждом листе своя, и под ней основная линия.
   drawCells(table.columns, true);
   columnLines(y);
-  line(field.x, y, field.x + bodyWidth, y, 0.3);
-  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.7);
+  line(field.x, y, field.x + bodyWidth, y, GOST_THIN_MM);
+  line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_LINE_MM);
   y += GOST_TABLE.row;
 
   for (const item of page.lines) {
@@ -37398,7 +37477,7 @@ async function gostTablePng(table, page, plan, options = {}) {
       ctx.font = drawFont((item.level === 2 ? GOST_TABLE.font : GOST_TABLE.groupFont) * mm, 600);
       ctx.fillText(item.title, (field.x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       ctx.strokeStyle = item.color || "#1f2328";
-      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? 0.3 : 0.5);
+      line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, item.level === 2 ? GOST_THIN_MM : GOST_GROUP_LINE_MM);
       ctx.strokeStyle = "#000000";
       ctx.fillStyle = "#1f2328";
       y += GOST_TABLE.row;
@@ -37423,7 +37502,7 @@ async function gostTablePng(table, page, plan, options = {}) {
     }
     drawCells(item.cells, false);
     columnLines(y);
-    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, 0.3);
+    line(field.x, y + GOST_TABLE.row, field.x + bodyWidth, y + GOST_TABLE.row, GOST_THIN_MM);
     y += GOST_TABLE.row;
   }
 
@@ -40722,8 +40801,8 @@ function exportViewArea(state, scheme) {
   if (!host) return "all";
   const box = host.getBoundingClientRect();
   if (box.width < 2 || box.height < 2) return "all";
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const from = screenToPlan({ x: 0, y: 0 }, scheme, state.view);
   const to = screenToPlan({ x: box.width, y: box.height }, scheme, state.view);
   return {
@@ -46460,14 +46539,19 @@ function pickerIcon(project, typeId, size = PICKER_ICON.size) {
 // пустое поле.
 const PICKER_MAX_COLUMNS = 6;
 
-// Меры окна, по которым считается, сколько колонок в него влезет. Те же числа
-// стоят в `typePicker.css`: ширина колонки (`minmax(150px, 1fr)`), просвет
-// между колонками (`gap`), доля экрана под карточку (`max-width: 96vw`) и её
-// собственные поля с рамкой (`.modal`: по 18px с каждой стороны плюс рамка,
-// здесь с запасом до 40). Считать нужно
+// Меры окна, по которым считается, сколько колонок в него влезет. Считать нужно
 // всё это вместе: колонка, которая «почти влезла», даёт горизонтальную
 // прокрутку — а на узком экране колонок должно становиться меньше, только и
 // всего.
+//
+// **Хозяин этих чисел — здесь, а узнаёт о них CSS двумя путями** (таск 173).
+// Где стиль может спросить — он спрашивает: число колонок приходит к нему
+// переменной `--picker-columns`, которую ставит `renderList`. Где не может —
+// ширина колонки в `minmax()`, просвет `gap`, доля экрана `96vw` и поля
+// карточки `40px` — число повторено в `typePicker.css` и `objectPicker.css`,
+// а держит их вместе `test/cssMeasures.test.js`: он читает стиль текстом и
+// падает на расхождении. Переменная с запасным значением этого не заменила бы
+// — запасное значение и есть то же число во втором месте.
 const PICKER_COLUMN_MIN = 150;
 const PICKER_COLUMN_GAP = 14;
 const PICKER_MODAL_SHARE = 0.96;
@@ -46895,7 +46979,9 @@ function objectTileIcon(key, size = OBJECT_TILE_ICON) {
 // здесь считается высота категории для раскладки колонок и шаг стрелок
 // вверх-вниз. Разойдись эти числа — стрелка прыгала бы не на ряд.
 const OBJECT_PICKER_TILES_PER_ROW = 3;
-// Колонка в три плитки по 84 точки с просветами — те же меры, что в CSS.
+// Колонка в три плитки по 84 точки с просветами — та же мера, что в
+// `objectPicker.css` (`minmax(270px, 1fr)`); держит их вместе
+// `test/cssMeasures.test.js`.
 const OBJECT_PICKER_COLUMN_MIN = 270;
 // Больше четырёх колонок не ставим: категорий всего шесть, и пятая колонка
 // растянула бы окно на весь экран ради двух плиток «Декора».
@@ -47525,11 +47611,6 @@ const VOLUME_FOV_DEG = 90;
  */
 const VOLUME_START_PITCH_DEG = -10;
 /**
- * Высота, которой рисуется помещение без заданной высоты. Выдумывать её молча
- * нельзя — окно говорит об этом строкой, как говорит развёртка (таск 129).
- */
-const VOLUME_HEIGHT_FALLBACK_MM = 2700;
-/**
  * С какого расстояния до лестницы спрашивают про этаж (таск 149).
  *
  * Метр с небольшим от её габарита — расстояние, с которого человек на неё
@@ -47553,6 +47634,11 @@ const VOLUME_AROUND_PITCH_DEG = -42;
 const VOLUME_AROUND_NEAR_MM = 7000;
 const VOLUME_AROUND_MIN_MM = 1500;
 const VOLUME_AROUND_MAX_MM = 400000;
+/**
+ * Самый положий наклон, на котором поправка на сжатие пола ещё растёт: синус
+ * двадцати градусов. Зачем предел — в `volumeAroundPan`.
+ */
+const VOLUME_AROUND_PAN_TILT_MIN = Math.sin((20 * Math.PI) / 180);
 /**
  * Три яруса, в которых грани ложатся на холст (дефект живого прогона).
  *
@@ -48155,12 +48241,17 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
 
 /**
  * Высота помещения: переопределение комнаты, высота схемы, а если ни того ни
- * другого — `VOLUME_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ * другого — `WALL_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ *
+ * Умолчание живёт в модели (таск 173) и **одно** на объём и развёртку: своей
+ * константы здесь больше нет. Окно говорит о нём строкой `volume.noHeight`, и
+ * в строке стоит то же число, что на полосе развёртки, — прежде окно обещало
+ * это согласие комментарием, а числа были разные (2700 против «не ниже 2000»).
  */
 function volumeHeightMm(project, schemeId, roomId) {
   const given = wallHeightOf(project, { schemeId, roomId });
   if (given > 0) return { mm: given, known: true };
-  return { mm: VOLUME_HEIGHT_FALLBACK_MM, known: false };
+  return { mm: WALL_HEIGHT_FALLBACK_MM, known: false };
 }
 
 /** Внутри ли точка в плановом многоугольнике. Тот же счёт, что `pointInOutline`. */
@@ -48538,7 +48629,7 @@ function volumeStairs(project, schemeId) {
   const stairs = [];
   for (const object of schemeObjectsOnScheme(project, schemeId)) {
     if (schemeObjectKeyOf(project, object) !== "stairs") continue;
-    const polygons = volumeObjectPrisms(project, schemeId, object, VOLUME_HEIGHT_FALLBACK_MM).map(
+    const polygons = volumeObjectPrisms(project, schemeId, object, WALL_HEIGHT_FALLBACK_MM).map(
       (prism) => prism.corners,
     );
     if (polygons.length === 0) continue;
@@ -51572,7 +51663,7 @@ function volumeAroundCamera(target, yaw, pitch, distance) {
  */
 function volumeAroundFit(scene, box) {
   const bounds = scene.boundsMm;
-  const height = scene.heightMm || VOLUME_HEIGHT_FALLBACK_MM;
+  const height = scene.heightMm || WALL_HEIGHT_FALLBACK_MM;
   if (!bounds) {
     return { target: { x: 0, y: 0, z: height / 2 }, distance: VOLUME_AROUND_NEAR_MM };
   }
@@ -51591,6 +51682,61 @@ function volumeAroundFit(scene, box) {
 }
 function volumeAroundDistance(value) {
   return Math.max(VOLUME_AROUND_MIN_MM, Math.min(VOLUME_AROUND_MAX_MM, value));
+}
+
+/**
+ * Перенос обзора двумя пальцами: ход середины между пальцами — в сдвиг цели по
+ * полу, миллиметры (таск 174, требование G256).
+ *
+ * Слова заказчика: «сделай в объеме на мобильном интерфейсе что бы карта в
+ * режиме сверху двигалась 2 пальцами». Сам жест разбирает общий `gestures.js`
+ * (`gesturePinchStep` отдаёт и множитель масштаба, и ход середины) — а перевести
+ * этот ход в миллиметры может только камера: это её счёт, и он здесь.
+ *
+ * Правило — **пол едет за пальцами**: куда ушла середина, туда уехала карта, а
+ * камера на столько же в обратную сторону. Цель ходит по полу, высота её не
+ * меняется: обзор смотрит сверху всегда (`volumeAroundPitch`), и поднятая цель
+ * увела бы его в стену.
+ *
+ * Мера одного пикселя — `distance / focal`: ширина пикселя на той глубине, где
+ * лежит цель. Отошли дальше — палец возит крупнее, и это ровно то, что видно
+ * глазом.
+ *
+ * Поперёк взгляда счёт точный: камера не кренится, и экранное «вправо» лежит
+ * на полу целиком. Вдоль — с поправкой на наклон, и берётся она из самой
+ * камеры: экранный «верх», положенный на пол, короче единицы ровно во столько,
+ * во сколько пол на экране сжат (это синус наклона). Без поправки карта
+ * отставала бы от пальца вверх-вниз, хотя поперёк шла бы вровень.
+ *
+ * Поправка **ограничена** `VOLUME_AROUND_PAN_TILT_MIN`: у почти
+ * горизонтального взгляда она уходит в бесконечность — пол под пальцем там
+ * лежит у горизонта, то есть в километрах, — и один мах уносил бы обзор
+ * неизвестно куда. Положе двадцати градусов карта просто отстаёт от пальца, и
+ * это по-прежнему управляемо.
+ */
+function volumeAroundPan(view, box, panX, panY) {
+  const distance = Number(view && view.distance) || 0;
+  const focal = box ? volumeFocal(box) : 0;
+  if (!(distance > 0) || !(focal > 0)) return { dx: 0, dy: 0 };
+  const perPixel = distance / focal;
+  const basis = volumeBasis({ yaw: view.yaw, pitch: view.pitch });
+  // Экранный «верх», положенный на пол: и сторона, и мера сжатия сразу. У
+  // отвесного взгляда это направление рысканья, у положего — он же, но короче.
+  const lean = Math.hypot(basis.up.x, basis.up.y);
+  // Взгляд ровно вдоль земли — верх встал отвесно, и класть на пол нечего:
+  // сторону берём у самого взгляда. В обзоре такого не бывает
+  // (`volumeAroundPitch` держит камеру выше крыши), но отвечать на это нулём
+  // было бы неправдой.
+  const flat = Math.hypot(basis.fwd.x, basis.fwd.y) || 1;
+  const forward =
+    lean > 1e-9 ? { x: basis.up.x / lean, y: basis.up.y / lean } : { x: basis.fwd.x / flat, y: basis.fwd.y / flat };
+  const tilt = Math.max(VOLUME_AROUND_PAN_TILT_MIN, lean);
+  const across = -(Number(panX) || 0) * perPixel;
+  const along = ((Number(panY) || 0) * perPixel) / tilt;
+  return {
+    dx: basis.right.x * across + forward.x * along,
+    dy: basis.right.y * across + forward.y * along,
+  };
 }
 
 /**
@@ -51695,6 +51841,7 @@ function volumeMarkerFaces(at, yaw, out = [], radiusMm = VOLUME_MARKER_MM) {
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
+
 
 
 
@@ -52249,7 +52396,7 @@ function volumeNotes(scene) {
   for (const note of scene.notes || []) {
     if (note === "noRooms") lines.push(strings.volume.noRooms);
     if (note === "noBridge") lines.push(strings.volume.noBridge);
-    if (note === "noHeight") lines.push(text("volume.noHeight", { height: VOLUME_HEIGHT_FALLBACK_MM }));
+    if (note === "noHeight") lines.push(text("volume.noHeight", { height: WALL_HEIGHT_FALLBACK_MM }));
   }
   return lines;
 }
@@ -52329,8 +52476,8 @@ function createVolume({ api, hosts }) {
   let touching = volumeTouchLikely();
   // Палец на площадке ходьбы: `{id, forward, turn}`.
   let pad = null;
-  // Щипок двумя пальцами в обзоре: расстояние между ними и расстояние камеры в
-  // тот миг, когда щипок начался.
+  // Два пальца на поле: `{distance, center}` от общего `gesturePinchStep` —
+  // прошлый разведённый промежуток и прошлая середина между пальцами.
   let pinch = null;
   // Касания на поле, по которым узнаётся щипок.
   const touches = new Map();
@@ -52962,8 +53109,7 @@ function createVolume({ api, hosts }) {
 
   function redraw() {
     if (frame || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    frame = schedule(() => {
+    frame = scheduleFrame(() => {
       frame = 0;
       paint();
     });
@@ -53087,9 +53233,8 @@ function createVolume({ api, hosts }) {
 
   function walkSchedule() {
     if (walking || !moving() || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
     clock = now();
-    walking = schedule(walkTick);
+    walking = scheduleFrame(walkTick);
   }
 
   function walkTick() {
@@ -53164,8 +53309,7 @@ function createVolume({ api, hosts }) {
   // палец с площадки сняли, а зажатую клавишу при этом отпускать нельзя.
   function walkStop() {
     if (moving() || !walking) return;
-    const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
-    cancel(walking);
+    cancelFrame(walking);
     walking = 0;
   }
 
@@ -53179,7 +53323,7 @@ function createVolume({ api, hosts }) {
   // Насколько обзор обязан подняться над целью, чтобы остаться снаружи: это
   // высота, на которой кончается чертёж, минус высота самой цели.
   function aroundLift() {
-    const roof = (scene.heightMm || VOLUME_HEIGHT_FALLBACK_MM) + 400;
+    const roof = (scene.heightMm || WALL_HEIGHT_FALLBACK_MM) + 400;
     return Math.max(0, roof - around.target.z);
   }
 
@@ -53212,11 +53356,11 @@ function createVolume({ api, hosts }) {
     stage.focus({ preventScroll: true });
     if (event.pointerType === "touch") {
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      // Второй палец — щипок, а не второй поворот: взгляд перестаёт ехать за
-      // первым пальцем, иначе щипок водил бы головой заодно.
+      // Второй палец — жест двумя пальцами, а не второй поворот: взгляд
+      // перестаёт ехать за первым пальцем, иначе щипок водил бы головой заодно.
       if (touches.size === 2) {
         look = null;
-        pinch = { gap: touchGap(), distance: around.distance };
+        pinch = gesturePinchOf(touches.values());
         return;
       }
       if (touches.size > 2) return;
@@ -53237,14 +53381,29 @@ function createVolume({ api, hosts }) {
     }
     if (event.pointerType === "touch" && touches.has(event.pointerId)) {
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      // Щипок двумя пальцами — то же, что колесо: в обзоре приближает, от
-      // первого лица не делает ничего (приближать там нечего, а поле зрения
-      // человек не просил).
+      // Два пальца в обзоре возят карту и щипком приближают — ровно как на
+      // плане и в чертеже (таск 174, G256). Разбирает жест общий
+      // `gestures.js`, и порядок применения оттуда же: сперва масштаб, потом
+      // сдвиг на то, насколько уехала середина между пальцами.
+      //
+      // От первого лица два пальца не делают ничего, и это прежнее поведение:
+      // там ходят площадкой и вертят головой, приближать нечего, а поле зрения
+      // человек не просил.
       if (pinch && touches.size === 2) {
-        const gap = touchGap();
-        if (gap > 0 && pinch.gap > 0 && view === "around") {
-          const distance = volumeAroundDistance((pinch.distance * pinch.gap) / gap);
-          around = { ...around, distance, pitch: volumeAroundPitch(around.pitch, distance, aroundLift()) };
+        const step = gesturePinchStep(pinch, touches.values());
+        if (step) pinch = step.pinch;
+        if (step && view === "around") {
+          // Развели пальцы — приблизились, то есть камера подошла: расстояние
+          // делится на множитель, а не умножается.
+          const distance = volumeAroundDistance(around.distance / step.factor);
+          const pitch = volumeAroundPitch(around.pitch, distance, aroundLift());
+          const moved = volumeAroundPan({ yaw: around.yaw, pitch, distance }, viewport(), step.panX, step.panY);
+          around = {
+            ...around,
+            distance,
+            pitch,
+            target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy },
+          };
           paint();
         }
         return;
@@ -53266,13 +53425,6 @@ function createVolume({ api, hosts }) {
     const dy = event.clientY - look.y;
     look = { x: event.clientX, y: event.clientY, moved: look.moved || Math.hypot(dx, dy) > 2 };
     lookBy(dx, dy);
-  }
-
-  /** Расстояние между двумя касаниями — мера щипка. */
-  function touchGap() {
-    const points = [...touches.values()];
-    if (points.length < 2) return 0;
-    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
   }
 
   function onPointerUp(event) {
@@ -54039,8 +54191,7 @@ function createVolume({ api, hosts }) {
     hosts.side.replaceChildren();
     keyStop(null);
     if (frame) {
-      const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
-      cancel(frame);
+      cancelFrame(frame);
       frame = 0;
     }
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
@@ -56113,7 +56264,6 @@ const WORKSHOP_EMPTY_MM = { widthMm: 12000, heightMm: 9000 };
 // увеличивать нечего, координаты и так целые.
 const WORKSHOP_ZOOM_MIN = 0.0007;
 const WORKSHOP_ZOOM_MAX = 1.5;
-const WORKSHOP_ZOOM_KEY_STEP = 1.25;
 
 // ——— чего в чертеже больше нет (G227, таск 153) ————————————————————————
 //
@@ -56169,9 +56319,11 @@ function workshopToolOf(mode, adding) {
 }
 
 // Пороги попадания в пикселях экрана, как у холста: иначе на разном масштабе
-// всё ведёт себя по-разному. Вершина ловится шире тела стены — ею правят.
+// всё ведёт себя по-разному. Вершина ловится шире тела стены — ею правят, и
+// это своя мерка чертежа. А промах по стене прощается тот же, что на плане:
+// число берётся у холста, а не повторяется здесь (таск 173).
 const WORKSHOP_VERTEX_PX = 9;
-const WORKSHOP_WALL_PX = 6;
+const WORKSHOP_WALL_PX = CANVAS_WALL_PICK_PX;
 
 /**
  * Поехала ли рука: мерка **холстовая**, и у пальца она своя (`canvasDragSlop`).
@@ -56203,10 +56355,10 @@ const WORKSHOP_LENGTH_GAP_PX = 13;
 // `canvasPanSpeed` вывезены оттуда наружу, и второй такой арифметики здесь
 // нет. Повторить пришлось только ход кадров: холстовый прибит к его
 // синглтон-виду (`canvasPanBy` пишет в `getState().view`), а у окна вид свой.
-// Шаг короткого нажатия взят тот же, что у холста, — наружу он не отдан.
-const WORKSHOP_PAN_STEP_PX = 24;
-// Потолок шага кадра: вкладку свернули на минуту — план не должен улететь.
-const WORKSHOP_PAN_FRAME_MS = 64;
+// Шаг короткого нажатия и потолок шага кадра — те же, что у холста: теперь
+// они оттуда и берутся (таск 173).
+const WORKSHOP_PAN_STEP_PX = CANVAS_PAN_STEP_PX;
+const WORKSHOP_PAN_FRAME_MS = CANVAS_PAN_FRAME_MS;
 
 // ——— чистая половина: что показать и что записать ——————————————————————
 
@@ -56843,8 +56995,8 @@ const WORKSHOP_TURN_STEP_DEG = 90;
  */
 const WORKSHOP_TURN_HALF_DEG = 45;
 
-/** Шаг руки — те же 15°, которыми магнит холста держит углы стен. */
-const WORKSHOP_TURN_SNAP_DEG = 15;
+/** Шаг руки — тот же, которым магнит холста держит углы стен (`SNAP_STEP_DEG`). */
+const WORKSHOP_TURN_SNAP_DEG = SNAP_STEP_DEG;
 
 /** Дальше этого «спинкой к стене» стену не ищет: рядом её нет. */
 const WORKSHOP_TURN_WALL_MM = 3000;
@@ -59404,8 +59556,7 @@ function createWorkshop({ api, hosts }) {
     if (code) panKeys.delete(code);
     else panKeys.clear();
     if (panKeys.size > 0 || !panFrame) return;
-    const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
-    cancel(panFrame);
+    cancelFrame(panFrame);
     panFrame = 0;
   }
 
@@ -59415,8 +59566,7 @@ function createWorkshop({ api, hosts }) {
 
   function panSchedule() {
     if (panFrame || panKeys.size === 0 || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    panFrame = schedule(panTick);
+    panFrame = scheduleFrame(panTick);
   }
 
   function panTick() {
@@ -59454,8 +59604,7 @@ function createWorkshop({ api, hosts }) {
 
   function redraw() {
     if (frame || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    frame = schedule(() => {
+    frame = scheduleFrame(() => {
       frame = 0;
       paint();
     });
