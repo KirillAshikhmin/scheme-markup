@@ -31,7 +31,7 @@
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
-import { PANEL_IDS, layoutAllows, registerPanel, screenMode } from "../app.js";
+import { PANEL_IDS, cancelFrame, layoutAllows, registerPanel, scheduleFrame, screenMode } from "../app.js";
 import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasFullscreenBare, canvasFullscreenOn } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
@@ -1345,8 +1345,7 @@ function createVolume({ api, hosts }) {
 
   function redraw() {
     if (frame || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    frame = schedule(() => {
+    frame = scheduleFrame(() => {
       frame = 0;
       paint();
     });
@@ -1470,9 +1469,8 @@ function createVolume({ api, hosts }) {
 
   function walkSchedule() {
     if (walking || !moving() || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
     clock = now();
-    walking = schedule(walkTick);
+    walking = scheduleFrame(walkTick);
   }
 
   function walkTick() {
@@ -1547,8 +1545,7 @@ function createVolume({ api, hosts }) {
   // палец с площадки сняли, а зажатую клавишу при этом отпускать нельзя.
   function walkStop() {
     if (moving() || !walking) return;
-    const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
-    cancel(walking);
+    cancelFrame(walking);
     walking = 0;
   }
 
@@ -2422,8 +2419,7 @@ function createVolume({ api, hosts }) {
     hosts.side.replaceChildren();
     keyStop(null);
     if (frame) {
-      const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
-      cancel(frame);
+      cancelFrame(frame);
       frame = 0;
     }
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();

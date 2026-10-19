@@ -9,10 +9,12 @@
 // Координаты: в объекте — доли плана (0…1), на экране — пиксели холста.
 // Переводит их только render.js; здесь координаты не пересчитываются руками.
 import {
+  cancelFrame,
   ELEVATION_VIEWS_SETTING,
   layoutAllows,
   PANEL_IDS,
   registerPanel,
+  scheduleFrame,
   SCREEN_DEFAULT,
   setScreen,
 } from "./app.js";
@@ -111,6 +113,7 @@ import {
   labelTargetOf,
   labelTurnHandle,
   labelBox,
+  LABEL_GAP,
   markRadius,
   outlineLabelBox,
   outlineLabelTurn,
@@ -725,14 +728,6 @@ function canvasNow() {
   return clock && typeof clock.now === "function" ? clock.now() : Date.now();
 }
 
-function canvasFrameRequest(fn) {
-  return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : setTimeout(fn, 16);
-}
-
-function canvasFrameCancel(id) {
-  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
-  else clearTimeout(id);
-}
 
 function canvasPanBy(dx, dy) {
   const state = canvasState();
@@ -773,7 +768,7 @@ function canvasPanKeyDown(code) {
 
 function canvasPanSchedule() {
   if (canvasPanFrame || canvasPanHeld.size === 0) return;
-  canvasPanFrame = canvasFrameRequest(canvasPanTick);
+  canvasPanFrame = scheduleFrame(canvasPanTick);
 }
 
 function canvasPanTick() {
@@ -800,7 +795,7 @@ function canvasPanRelease(code) {
   if (code) canvasPanHeld.delete(code);
   else canvasPanHeld.clear();
   if (canvasPanHeld.size > 0 || !canvasPanFrame) return;
-  canvasFrameCancel(canvasPanFrame);
+  cancelFrame(canvasPanFrame);
   canvasPanFrame = 0;
 }
 
@@ -870,8 +865,7 @@ function canvasPointOf(event) {
 
 function canvasRedraw() {
   if (canvasFrame || !canvasNode) return;
-  const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-  canvasFrame = schedule(() => {
+  canvasFrame = scheduleFrame(() => {
     canvasFrame = 0;
     canvasPaint();
   });
@@ -3458,7 +3452,9 @@ function canvasDragTo(point, free) {
       // в стандартное место в тот миг, когда за неё взялись мышью.
       const size = view.markSize || 10;
       const seen = target ? labelBox(before, scheme, target, view, state.filter) : null;
-      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * 1.5, dy: 0 };
+      // Запасное место подписи — то же, куда её ставит отрисовка, когда её не
+      // оттаскивали: мерка отступа берётся у неё (`LABEL_GAP`), а не повторяется.
+      const base = seen ? { dx: seen.dx, dy: seen.dy } : { dx: size * LABEL_GAP, dy: 0 };
       const offset = { dx: base.dx + dx * scheme.width, dy: base.dy + dy * scheme.height };
       // Подпись блока стоит по смещению его первой метки — своего поля у группы
       // модель не заводит, а собственной подписи у этой метки нет.

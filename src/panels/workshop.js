@@ -72,10 +72,12 @@
 // `project.json`. Пустые списки в объект не попадают: их не кладёт ни одна
 // функция модели чертежа.
 import {
+  cancelFrame,
   ELEVATION_VIEWS_SETTING,
   OBJECTS_SETTING,
   PANEL_IDS,
   registerPanel,
+  scheduleFrame,
   SCREEN_DEFAULT,
   screenMode,
   setObjectHidden,
@@ -3411,8 +3413,7 @@ function createWorkshop({ api, hosts }) {
     if (code) panKeys.delete(code);
     else panKeys.clear();
     if (panKeys.size > 0 || !panFrame) return;
-    const cancel = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
-    cancel(panFrame);
+    cancelFrame(panFrame);
     panFrame = 0;
   }
 
@@ -3422,8 +3423,7 @@ function createWorkshop({ api, hosts }) {
 
   function panSchedule() {
     if (panFrame || panKeys.size === 0 || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    panFrame = schedule(panTick);
+    panFrame = scheduleFrame(panTick);
   }
 
   function panTick() {
@@ -3461,8 +3461,7 @@ function createWorkshop({ api, hosts }) {
 
   function redraw() {
     if (frame || closed) return;
-    const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
-    frame = schedule(() => {
+    frame = scheduleFrame(() => {
       frame = 0;
       paint();
     });
