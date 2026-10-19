@@ -841,6 +841,41 @@ export function workshopRectFromContour(pointsMm) {
 }
 
 /**
+ * Что станет с начатым, когда занятие сменилось (таск 172, находка 1 разбора).
+ *
+ * Чистая половина решения: по занятию, способу и набранным вершинам сказать,
+ * чем кончится черновик, — `{finish: "chain"|"band"|"contour"}` или
+ * `{drop: "short"|"flat"|"none"}`. Говорить словами и писать в объект —
+ * половина окна, и она зовёт эту.
+ *
+ * Что значит «дочертить» — по черновику:
+ *
+ *   **цепочка стен** — записать стены по набранным вершинам, как двойной клик;
+ *     из одной вершины стены не выйдет, и она снимается со словами;
+ *   **полоса объекта** — то же: вещь встаёт по набранным вершинам;
+ *   **контур** — отдать габарит, который уже нарисован призраком под рукой
+ *     (`workshopRectFromContour` — та же дверь): что показано, то и записано.
+ *     Контур без площади прямоугольником не станет — снимается со словами;
+ *   **проём и вещь по умолчаниям** — черновика не ведут вовсе, и дочерчивать у
+ *     них нечего: призрак под рукой это не работа, он идёт за рукой и ничего не
+ *     набрал. Поэтому `none` — без слов: сказать было бы не о чем.
+ *
+ * Повторные клики в одну точку в счёт не идут (`workshopDistinct`): два клика
+ * в одно место — это один клик, а не стена нулевой длины.
+ */
+export function workshopDraftFate(tool, way, pointsMm) {
+  const points = workshopDistinct(pointsMm);
+  if (tool === "walls") return points.length >= 2 ? { finish: "chain" } : { drop: "short" };
+  if (tool === "objects" && way === "polyline") {
+    return points.length >= 2 ? { finish: "band" } : { drop: "short" };
+  }
+  if (tool === "objects" && way === "contour") {
+    return workshopRectFromContour(points) ? { finish: "contour" } : { drop: "flat" };
+  }
+  return { drop: "none" };
+}
+
+/**
  * Правка прямоугольника **за угол** (G194): угол напротив стоит на месте,
  * поворот не трогается — вещь растянули, а не повернули.
  *
@@ -2195,8 +2230,37 @@ function createWorkshop({ api, hosts }) {
     setTool(kind);
   }
 
+  /**
+   * Начатое при смене занятия: дочертить или снять **со словами** (таск 172).
+   *
+   * Это было единственное место сборки, где терялась уже сделанная работа:
+   * начал цепочку стен из пяти вершин, нажал «Проёмы» — исчезло молча. На плане
+   * тот же жест линию дочерчивает и говорит об этом (`canvasSettleDraft`), а
+   * одинокую точку снимает со словами. Сведено к плану: решение — чистая
+   * `workshopDraftFate`, здесь только слова и запись.
+   *
+   * Дочерченное идёт в историю одним шагом и отменяется тем же Ctrl+Z — об этом
+   * и сказано в плашке: человек просил не стену, а другое занятие, и лишнее
+   * убирается одной клавишей. Черновик же вне истории, и вернуть его нечем.
+   */
+  function settleDraft() {
+    if (!draft) return false;
+    const fate = workshopDraftFate(tool, workshopObjectWay, draft.points);
+    if (fate.finish === "chain") finishChain({ settled: true });
+    else if (fate.finish === "band") finishBand({ settled: true });
+    else if (fate.finish === "contour") finishContour({ settled: true });
+    else {
+      draft = null;
+      if (fate.drop === "short") notify(strings.workshop.draftShort);
+      else if (fate.drop === "flat") notify(strings.workshop.draftFlat);
+      sync();
+    }
+    return true;
+  }
+
   function setTool(next) {
     if (tool === next) return;
+    settleDraft();
     draft = null;
     ghost = null;
     objectGhost = null;
@@ -2245,7 +2309,7 @@ function createWorkshop({ api, hosts }) {
     return "wall";
   }
 
-  function finishChain() {
+  function finishChain(options = {}) {
     if (!draft) return;
     const points = draft.points;
     draft = null;
@@ -2260,12 +2324,10 @@ function createWorkshop({ api, hosts }) {
         return;
       }
       commit(result.project, strings.history.wallChain);
-      notify(
-        result.origin
-          ? text("workshop.chainAdded", { count: result.added }) + " " + strings.workshop.originSet
-          : text("workshop.chainAdded", { count: result.added }),
-        "success",
-      );
+      const said =
+        (result.origin ? " " + strings.workshop.originSet : "") +
+        (options.settled ? " " + strings.workshop.draftSettled : "");
+      notify(text("workshop.chainAdded", { count: result.added }) + said, "success");
     } catch (error) {
       fail(error);
     }
@@ -2556,6 +2618,10 @@ function createWorkshop({ api, hosts }) {
   // возьмёт те, что у вида, — донашивать за контуром чужую ширину незачем.
   function setObjectWay(way) {
     if (selectedObject() || !WORKSHOP_OBJECT_WAYS.includes(way)) return;
+    // Способ — это «что рисуем», как тип на плане: начатое прежним способом
+    // дочерчивается прежним способом (`settleDraft` спрашивает ещё не
+    // сменившийся `workshopObjectWay`), а не пропадает от нажатия кнопки.
+    settleDraft();
     workshopObjectWay = way;
     workshopObjectSizes = keptTurn();
     draft = null;
@@ -2940,7 +3006,7 @@ function createWorkshop({ api, hosts }) {
   // Полоса объекта — тот же росчерк, что цепочка стен, только кончается одним
   // объектом с шириной полосы, а не чередой отрезков: кухонный фронт идёт по
   // стене с поворотом, а глубина у него одна.
-  function finishBand() {
+  function finishBand(options = {}) {
     if (!draft) return;
     const points = draft.points;
     draft = null;
@@ -2948,7 +3014,13 @@ function createWorkshop({ api, hosts }) {
       sync();
       return;
     }
-    placeObject(null, points);
+    const added = placeObject(null, points);
+    // Двойным кликом полоса встаёт молча — она видна на поле, и плашка тут не
+    // нужна. Дочерченная словами — наоборот: человек в этот миг смотрит не на
+    // поле, а на кнопку занятия, которую нажал.
+    if (added && options.settled) {
+      notify(text("workshop.bandAdded", { count: points.length }) + " " + strings.workshop.draftSettled, "success");
+    }
     sync();
   }
 
@@ -2964,7 +3036,7 @@ function createWorkshop({ api, hosts }) {
    * колонке** сразу, тем же порядком, каким в окне помнится толщина стен и
    * размер окна: поправил окно на 1300 — следующее окно встанет 1300.
    */
-  function finishContour() {
+  function finishContour(options = {}) {
     if (!draft) return;
     const rect = workshopRectFromContour(draft.points);
     if (!rect) {
@@ -2980,7 +3052,11 @@ function createWorkshop({ api, hosts }) {
         depthMm: rect.depthMm,
         turnDeg: rect.turnDeg,
       };
-      notify(text("workshop.contourAdded", { width: rect.widthMm, depth: rect.depthMm }), "success");
+      notify(
+        text("workshop.contourAdded", { width: rect.widthMm, depth: rect.depthMm }) +
+          (options.settled ? " " + strings.workshop.draftSettled : ""),
+        "success",
+      );
     }
     sync();
   }
@@ -4271,6 +4347,11 @@ function createWorkshop({ api, hosts }) {
     // Всё, что относилось к прежней схеме, снимается: черновик, выделение и
     // вписанный кадр — у новой схемы свой масштаб и свой габарит.
     if (state.schemeId !== schemeId) {
+      // Дочертить начатое здесь некуда: оно принадлежит покинутой схеме, а шаг
+      // истории вернул бы её в кадр (`commit` зовёт `canvasCommit` с её
+      // `schemeId`) и спорил бы с кликом человека по списку. Поэтому слово, а
+      // не молчание: работа была, и человек должен знать, что её не стало.
+      if (draft) notify(strings.workshop.draftScheme);
       schemeId = state.schemeId;
       draft = null;
       ghost = null;
