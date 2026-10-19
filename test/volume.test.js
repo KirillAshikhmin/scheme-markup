@@ -25,6 +25,7 @@ import {
   addRoom,
   addScheme,
   addSchemeObject,
+  addSchemeObjectKind,
   addType,
   addWall,
   applyMarkWalls,
@@ -71,6 +72,7 @@ import {
   VOLUME_MARK_ROOM,
   VOLUME_MARK_WALL,
   VOLUME_OBJECT_RGB,
+  VOLUME_CLEAR_ALPHA,
   VOLUME_WALL_RGB,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
@@ -122,6 +124,7 @@ import {
   volumeSelectLines,
   volumeViewPolylines,
   volumeObjectFaces,
+  volumeObjectModel,
   volumeOpeningWalkable,
   volumePointInside,
   volumeRoomAt,
@@ -984,7 +987,10 @@ test("порядок кадра совпадает с истиной в кажд
                 ? 1
                 : 2;
           if (!inside(face.p, at, axis)) continue;
-          truth = { t, fill: volumeFill(face.rgb, volumeShade(normal)) };
+          // Прозрачность — часть цвета (таск 169), и стенд сверяет её вместе с
+          // ним: грань вещи обязана быть нарисована прозрачной, а грань стены —
+          // непрозрачной, иначе точка закрашена не той поверхностью.
+          truth = { t, fill: volumeFill(face.rgb, volumeShade(normal), face.clear ? VOLUME_CLEAR_ALPHA : 1) };
         }
         // Что нарисовано: последний накрывший точку многоугольник.
         let painted = null;
@@ -1050,7 +1056,7 @@ test("дальняя стена больше не рисуется поверх 
   };
   const here = frame.filter((polygon) => !polygon.stroke && inside(polygon.xy));
   const wallFill = volumeFill(VOLUME_WALL_RGB, volumeShade({ x: -1, y: 0, z: 0 }));
-  const sideFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: 1, z: 0 }));
+  const sideFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: 1, z: 0 }), VOLUME_CLEAR_ALPHA);
   assert.ok(
     here.some((polygon) => polygon.fill === wallFill) && here.some((polygon) => polygon.fill === sideFill),
     "в этой точке спорят бок вещи и дальняя стена — иначе стенд ничего не проверяет",
@@ -1103,8 +1109,8 @@ test("у призмы нормали смотрят наружу: видна б�
   const box = { width: 900, height: 600 };
   const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
   const frame = volumeFrame(built, camera, box);
-  const faceFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: 1, z: 0 }));
-  const backFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: -1, z: 0 }));
+  const faceFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: 1, z: 0 }), VOLUME_CLEAR_ALPHA);
+  const backFill = volumeFill(VOLUME_OBJECT_RGB, volumeShade({ x: 0, y: -1, z: 0 }), VOLUME_CLEAR_ALPHA);
   assert.ok(frame.some((polygon) => polygon.fill === faceFill), "ближняя сторона в кадре есть");
   assert.ok(!frame.some((polygon) => polygon.fill === backFill), "а дальней в нём нет");
 });
@@ -2240,6 +2246,248 @@ test("прицел видит только то, что видно: вещь з�
   assert.equal(volumeSightAt(back, at.x, at.y), null, "а взгляд упирается в стену");
   // Пустое место — пусто и для взгляда.
   assert.equal(volumeSightAt(frame, 5, 5), null);
+});
+
+// ——— прозрачные вещи (таск 169, требование G251) ————————————————————————
+//
+// Слова заказчика: «сделай так же все объекты (мебель, сантехника и т.д.)
+// полупрозрачными, что бы можно было видеть метки, которые, например в шкафу, и
+// взаимодействовать с ними».
+//
+// Стенд — ровно его случай: шкаф 1200 × 600 × 2000 стоит у стены, а розетка
+// висит **внутри него** (шкаф задником стоит на той же грани стены, на которой
+// сидит метка). Дальше проверяется три вещи, и каждая из них — предмет тикета:
+// что просвечивает только вещь, что порядок остался точным (прозрачность его не
+// терпит приблизительным) и что взгляд теперь отвечает меткой за шкафом.
+
+function clearStand() {
+  const scene = roomScene();
+  const put = markAt(scene.project, scene.schemeId, "Р", [{ x: -500, y: -1100 }]);
+  let project = ensureSchemeObjectKinds(put.project).project;
+  const kind = schemeObjectKindsInOrder(project).find((item) => item.name === "Шкаф");
+  const added = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: kind.id,
+    shape: "rect",
+    atMm: { x: -500, y: -1100 },
+    widthMm: 1200,
+    depthMm: 600,
+    heightMm: 2000,
+    heightAboveFloorMm: 0,
+  });
+  return {
+    project: added.project,
+    schemeId: scene.schemeId,
+    markId: put.markId,
+    object: added.schemeObject,
+    // Смотрим на шкаф из комнаты и сверху вниз: розетка сидит на 300 мм, глаза
+    // на 1600, между ними полтора метра пола.
+    camera: { at: { x: -500, y: 600, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: -0.58 },
+    box: { width: 900, height: 600 },
+  };
+}
+
+/** Все непрозрачные и прозрачные многоугольники, накрывшие точку, по порядку рисования. */
+function coverAt(frame, x, y) {
+  const out = [];
+  for (let index = 0; index < frame.length; index += 1) {
+    const polygon = frame[index];
+    if (polygon.stroke) continue;
+    let inside = false;
+    const xy = polygon.xy;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i];
+      const ay = xy[i + 1];
+      const bx = xy[j];
+      const by = xy[j + 1];
+      if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) inside = !inside;
+    }
+    if (inside) out.push({ index, polygon });
+  }
+  return out;
+}
+
+/** Середина экранного многоугольника метки — та же точка, которой целятся прицелом. */
+function markPointAt(frame, markId) {
+  const mine = frame.filter((polygon) => polygon.pick === markId && !polygon.stroke);
+  assert.ok(mine.length > 0, "грани метки в кадре есть");
+  const xy = mine[mine.length - 1].xy;
+  return { x: (xy[0] + xy[4]) / 2, y: (xy[1] + xy[5]) / 2 };
+}
+
+test("просвечивает вещь чертежа — и только она (G251)", () => {
+  const stand = clearStand();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  const own = volumeObjectFaces(stand.project, stand.schemeId, stand.object, VOLUME_HEIGHT_FALLBACK_MM);
+  const clear = built.faces.filter((face) => face.clear);
+  assert.equal(clear.length, own.length, "прозрачны ровно грани вещи: " + clear.length + " против " + own.length);
+  assert.equal(clear.length, 11, "шкаф нарисован моделью из двух тел");
+  for (const face of clear) assert.equal(face.markId, null, "у вещи чертежа хозяина нет — и не появилось");
+  // Стены, пол, потолок, плита и метки — как были. Это правило таска 146:
+  // сквозь стену видно быть не должно.
+  for (const rgb of [VOLUME_WALL_RGB, VOLUME_FLOOR_RGB, VOLUME_LAND_RGB]) {
+    const same = built.faces.filter((face) => face.rgb === rgb);
+    assert.ok(same.length > 0, "стенд обязан содержать такие грани");
+    assert.ok(
+      same.every((face) => !face.clear),
+      "прозрачной стала поверхность комнаты, а не вещь",
+    );
+  }
+  const markFaces = built.faces.filter((face) => face.markId && !face.line);
+  assert.ok(markFaces.length > 0);
+  assert.ok(markFaces.every((face) => !face.clear), "метки прозрачными не делаем — их и смотрят");
+
+  // В кадре прозрачность живёт **в цвете**: заливка грани вещи — `rgba` с тем
+  // самым числом, заливка стены — прежний `rgb`.
+  const frame = volumeFrame(built, stand.camera, stand.box);
+  const painted = frame.filter((polygon) => polygon.clear);
+  assert.ok(painted.length > 0, "прозрачные грани в кадре есть");
+  for (const polygon of painted) {
+    assert.ok(polygon.fill.startsWith("rgba("), polygon.fill);
+    assert.ok(polygon.fill.endsWith("," + VOLUME_CLEAR_ALPHA + ")"), polygon.fill);
+  }
+  for (const polygon of frame) {
+    if (polygon.clear || polygon.stroke) continue;
+    assert.ok(polygon.fill.startsWith("rgb("), "непрозрачная грань не должна смешиваться: " + polygon.fill);
+  }
+});
+
+test("просвечивает любая порода вещи: модель, запасной габарит и звено полосы", () => {
+  // Прозрачность ставится в одном месте (`volumeObjectFaces`), и все три пути
+  // рисования идут через него. Разойдись они — одна вещь оказалась бы
+  // прозрачной в кадре, а другая нет, и человек не понял бы правила.
+  const scene = roomScene();
+  let project = ensureSchemeObjectKinds(scene.project).project;
+  const own = addSchemeObjectKind(project, { name: "Верстак" });
+  project = own.project;
+  const box = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: own.schemeObjectKind.id,
+    shape: "rect",
+    atMm: { x: 0, y: 0 },
+    widthMm: 1200,
+    depthMm: 600,
+    heightMm: 900,
+    heightAboveFloorMm: 0,
+  });
+  assert.equal(volumeObjectModel(box.project, box.schemeObject), null, "у вида, заведённого руками, модели нет");
+  const boxFaces = volumeObjectFaces(box.project, scene.schemeId, box.schemeObject, VOLUME_HEIGHT_FALLBACK_MM);
+  assert.equal(boxFaces.length, 5, "запасной габарит — призма");
+  assert.ok(boxFaces.every((face) => face.clear), "габарит просвечивает так же, как модель");
+  const strip = addSchemeObject(box.project, {
+    schemeId: scene.schemeId,
+    kindId: own.schemeObjectKind.id,
+    shape: "polyline",
+    pointsMm: [
+      { x: -1500, y: 800 },
+      { x: 0, y: 800 },
+      { x: 0, y: 1200 },
+    ],
+    depthMm: 600,
+    heightMm: 800,
+  });
+  const stripFaces = volumeObjectFaces(strip.project, scene.schemeId, strip.schemeObject, VOLUME_HEIGHT_FALLBACK_MM);
+  assert.equal(stripFaces.length, 10, "два звена по пять граней");
+  assert.ok(stripFaces.every((face) => face.clear), "звено полосы просвечивает так же");
+});
+
+test("метка в шкафу нарисована раньше его прозрачных граней — это и значит «от дальних к ближним»", () => {
+  // Прозрачность не терпит приблизительного порядка: смешивание
+  // некоммутативно, и грань, нарисованная не в свой черёд, даёт не тот цвет, а
+  // не только не тот верх. Проверяется поэтому не «вещь поверх», а вся очередь
+  // в одной точке кадра.
+  const stand = clearStand();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  const frame = volumeFrame(built, stand.camera, stand.box);
+  const at = markPointAt(frame, stand.markId);
+  const cover = coverAt(frame, at.x, at.y);
+  const mark = cover.filter((item) => item.polygon.pick === stand.markId);
+  const clear = cover.filter((item) => item.polygon.clear);
+  assert.ok(mark.length > 0 && clear.length > 0, "в этой точке спорят метка и шкаф — иначе стенд ничего не проверяет");
+  assert.ok(
+    Math.max(...mark.map((item) => item.index)) < Math.min(...clear.map((item) => item.index)),
+    "метка обязана быть нарисована раньше шкафа, иначе она не просветит сквозь него",
+  );
+  // Лицевых граней шкафа на луче **две** — фасад и лицо корпуса, — и ровно из
+  // этого числа посчитана прозрачность (`VOLUME_CLEAR_ALPHA`): за двумя гранями
+  // остаётся 0.6 × 0.6 = 0.36 того, что за ними.
+  assert.equal(clear.length, 2, "сквозь шкаф луч проходит две лицевые грани: " + clear.length);
+  assert.ok(
+    clear[0].polygon.depth > clear[1].polygon.depth,
+    "и они сами легли от дальней к ближней: " + clear.map((item) => Math.round(item.polygon.depth)).join(" → "),
+  );
+  assert.ok(
+    Math.round((1 - VOLUME_CLEAR_ALPHA) ** clear.length * 100) === 36,
+    "за шкафом остаётся треть того, что за ним",
+  );
+});
+
+test("взгляд смотрит сквозь прозрачную вещь и выделяет метку за ней (G251)", () => {
+  const stand = clearStand();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  const frame = volumeFrame(built, stand.camera, stand.box);
+  const at = markPointAt(frame, stand.markId);
+  assert.equal(volumeSightAt(frame, at.x, at.y), stand.markId, "розетка в шкафу — то, на что человек смотрит");
+  assert.equal(volumePickAt(frame, at.x, at.y), stand.markId, "рука достаёт её, как и прежде");
+  // Тот же кадр с непрозрачной вещью — это поведение до таска 169: взгляд
+  // упирался в шкаф, у которого хозяина нет, и отвечал «ничего». Прозрачная
+  // грань не отняла ни одного ответа — она перестала закрывать чужой.
+  const opaque = volumeFrame({ faces: built.faces.map((face) => ({ ...face, clear: false })) }, stand.camera, stand.box);
+  assert.equal(volumeSightAt(opaque, at.x, at.y), null, "непрозрачный шкаф закрывал метку от взгляда");
+});
+
+test("стену взгляд по-прежнему не пробивает, а за прозрачной вещью может не быть ничего", () => {
+  const stand = clearStand();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  // 1. Стена. Та же розетка снаружи комнаты: перед ней непрозрачная стена, и
+  // обход упирается в неё — правило таска 146 прозрачность не отменила.
+  const outside = { at: { x: -500, y: -2600, z: VOLUME_EYE_MM }, yaw: Math.PI / 2, pitch: -0.5 };
+  const back = volumeFrame(built, outside, stand.box);
+  const far = markPointAt(back, stand.markId);
+  assert.equal(volumeSightAt(back, far.x, far.y), null, "сквозь стену не видно ни метки, ни шкафа за ней");
+  assert.equal(volumePickAt(back, far.x, far.y), stand.markId, "а рука достаёт сквозь стену — так было с таска 148");
+  // 2. Пусто. Середина лица шкафа: за ней его собственный корпус и стена, и
+  // ответ — «ничего», ровно как до правки. Для `E` это слово «тут ничего нет»,
+  // для щелчка — снятие выделения.
+  const frame = volumeFrame(built, stand.camera, stand.box);
+  const area = (xy) => {
+    let sum = 0;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) sum += xy[j] * xy[i + 1] - xy[i] * xy[j + 1];
+    return Math.abs(sum / 2);
+  };
+  const face = frame.filter((polygon) => polygon.clear).sort((a, b) => area(b.xy) - area(a.xy))[0];
+  let x = 0;
+  let y = 0;
+  for (let index = 0; index < face.xy.length; index += 2) {
+    x += face.xy[index];
+    y += face.xy[index + 1];
+  }
+  x /= face.xy.length / 2;
+  y /= face.xy.length / 2;
+  assert.ok(
+    coverAt(frame, x, y).some((item) => item.polygon.clear),
+    "точка обязана лежать на прозрачной вещи",
+  );
+  assert.equal(volumeSightAt(frame, x, y), null, "за лицом шкафа метки нет — и взгляду отвечать нечем");
+});
+
+test("прозрачность — вид, а не свойство вещи: объект цел, сквозь шкаф не пройти (G68)", () => {
+  const stand = clearStand();
+  const before = JSON.stringify(stand.project);
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  assert.equal(JSON.stringify(stand.project), before, "в объект не пишется ничего (G68)");
+  assert.equal(
+    JSON.stringify(stand.project.schemeObjects),
+    JSON.stringify(JSON.parse(before).schemeObjects),
+    "и у вещи не завелось поля прозрачности",
+  );
+  // Препятствие — прежний габарит: шкаф 1200 × 600 держит так же, как держал.
+  const solid = built.solids.find((item) => Math.round(item.half * 2) === 1200 && Math.round(item.halfT * 2) === 600);
+  assert.ok(solid, "препятствие шкафа на месте");
+  let at = { x: -500, y: 0 };
+  for (let step = 0; step < 40; step += 1) at = volumeStep(built, at, 0, -200);
+  assert.ok(at.y > -800, "сквозь прозрачный шкаф не прошли: y = " + Math.round(at.y));
+  assert.equal(Math.round(volumeFreeMm(built.solids, at.x, at.y)), VOLUME_BODY_MM, "тело стоит вплотную к шкафу");
 });
 
 test("рамка выделения лежит поверх всего: вещь за стеной не теряется", () => {

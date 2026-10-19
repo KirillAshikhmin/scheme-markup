@@ -295,6 +295,36 @@ export const VOLUME_MARKER_RGB = [31, 111, 235];
  */
 export const VOLUME_MARKER_MM = 150;
 
+/**
+ * **Насколько вещь чертежа отдаёт своего цвета** (таск 169, требование G251).
+ *
+ * Слова заказчика: «сделай так же все объекты (мебель, сантехника и т.д.)
+ * полупрозрачными, что бы можно было видеть метки, которые, например в шкафу, и
+ * взаимодействовать с ними».
+ *
+ * Четыре десятых — и число это посчитано, а не выбрано на глаз. Считать его
+ * по одной грани нельзя: у модели вещи тел несколько, и луч сквозь шкаф
+ * проходит **две** лицевые грани — фасад (`door`) и лицо корпуса (`case`), —
+ * потому что отсеиваются только отвёрнутые грани, а не те, что стоят друг за
+ * другом. Прозрачность на пути перемножается, и за двумя гранями остаётся
+ * `0.6 × 0.6 = 0.36` того, что за ними: **треть** — ровно столько, сколько
+ * нужно, чтобы розетка в шкафу читалась цветом, а не угадывалась. Возьми
+ * половину — за фасадом осталась бы четверть, и на тёмном полу метка пропала
+ * бы; возьми треть — сама вещь перестала бы читаться формой.
+ *
+ * Форму держит не только заливка: кадр обводит каждую грань её же цветом
+ * (`volumeDraw`, иначе между соседними гранями видна волосяная щель от
+ * сглаживания), и у прозрачной грани эта обводка ложится на свою же заливку.
+ * Кромка выходит плотнее середины — `1 − 0.6²` по внутренней половине
+ * обводки, а на общем ребре двух граней и того больше. Это не изъян, а то, чем
+ * вещь и читается: середина лица просвечивает, рёбра остаются рёбрами.
+ *
+ * **Стены, пол, потолок, полотно двери и сами метки прозрачными не делаются**
+ * (правило таска 146 и прямое слово тикета): сквозь стену видно быть не
+ * должно, а метку смотрят, а не смотрят сквозь.
+ */
+export const VOLUME_CLEAR_ALPHA = 0.4;
+
 // ——— мелкая векторная арифметика ————————————————————————————————————————
 //
 // Своя, в три строки: выносить её в модель незачем — ни одна сущность объекта
@@ -330,10 +360,19 @@ export function volumeShade(normal) {
   return VOLUME_SHADE_MIN + ((VOLUME_SHADE_MAX - VOLUME_SHADE_MIN) * (dot + 1)) / 2;
 }
 
-/** Цвет грани: материал, умноженный на светлоту. */
-export function volumeFill(rgb, shade) {
+/**
+ * Цвет грани: материал, умноженный на светлоту.
+ *
+ * `alpha` меньше единицы — грань просвечивает (вещь чертежа, таск 169), и
+ * прозрачность пишется **в сам цвет**, а не в состояние холста: кадр от этого
+ * не меняется ни одной строкой — рисование так и остаётся одной заливкой на
+ * многоугольник (`volumeDraw`), и цена кадра та же самая.
+ */
+export function volumeFill(rgb, shade, alpha = 1) {
   const channel = (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
-  return "rgb(" + channel(rgb[0]) + "," + channel(rgb[1]) + "," + channel(rgb[2]) + ")";
+  const parts = channel(rgb[0]) + "," + channel(rgb[1]) + "," + channel(rgb[2]);
+  if (!(alpha < 1)) return "rgb(" + parts + ")";
+  return "rgba(" + parts + "," + Math.round(alpha * 100) / 100 + ")";
 }
 
 // ——— грани ———————————————————————————————————————————————————————————————
@@ -354,6 +393,12 @@ function volumeFace(points, rgb, options = {}) {
     // освещена тем же небом, что поле панорамы, и обязана совпасть с ним в
     // тон, а лампа сцены увела бы её вдвое в темноту.
     flat: Boolean(options.flat),
+    // Грань просвечивает (таск 169): вещь чертежа — и только она. Признак
+    // доезжает до двух мест и больше никуда: до цвета (`volumeFill` отдаёт
+    // `rgba`) и до взгляда (`volumeSightAt` сквозь такую грань смотрит
+    // дальше). Порядок прозрачная грань не меняет: он и так точен в каждом
+    // пикселе — см. `volumeOrderTree`.
+    clear: Boolean(options.clear),
     // Чья это грань: по ней кадр отвечает, во что попал клик (таск 148).
     // У стен, пола и вещей чертежа хозяина нет — и попадать в них незачем.
     markId: options.markId || null,
@@ -403,6 +448,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   if (corners.length < 3 || !(topMm > bottomMm)) return out;
   const markId = options.markId || null;
   const doorId = options.doorId || null;
+  const clear = Boolean(options.clear);
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[(index + 1) % corners.length];
@@ -415,6 +461,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
         normal: { x: dy / length, y: -dx / length, z: 0 },
         markId,
         doorId,
+        clear,
       }),
     );
   }
@@ -422,7 +469,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
     volumeFace(
       corners.map((point) => volumeAt(point, topMm)),
       rgb,
-      { normal: { x: 0, y: 0, z: 1 }, markId, doorId },
+      { normal: { x: 0, y: 0, z: 1 }, markId, doorId, clear },
     ),
   );
   // Низ лежащей на полу вещи не нужен никому, а низ висящей — нужен: на
@@ -432,7 +479,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
       volumeFace(
         corners.map((point) => volumeAt(point, bottomMm)),
         rgb,
-        { normal: { x: 0, y: 0, z: -1 }, markId, doorId },
+        { normal: { x: 0, y: 0, z: -1 }, markId, doorId, clear },
       ),
     );
   }
@@ -957,13 +1004,25 @@ export function volumeObjectFrame(project, schemeId, object, fallbackHeightMm) {
   };
 }
 
-/** Грани объекта схемы: модель, а без неё — прежняя призма по габариту. */
+/**
+ * Грани объекта схемы: модель, а без неё — прежняя призма по габариту.
+ *
+ * **Все они просвечивают** (таск 169, G251): и модель, и запасной габарит, и
+ * звено ломаной — вещь чертежа прозрачна целиком, какой бы породы она ни была.
+ * Это одно место на весь объём: других хозяев `clear` в сборке нет, и вещь не
+ * может оказаться прозрачной в кадре и непрозрачной для взгляда.
+ *
+ * Прозрачность — **вид, а не свойство вещи**: в объект не пишется ничего
+ * (G68), и ни столкновения (`volumeObjectPrisms` → `volumePrismSolid`), ни
+ * чертёж, ни выгрузки о ней не знают. Сквозь прозрачный шкаф по-прежнему не
+ * пройти.
+ */
 export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = []) {
   const model = volumeObjectModel(project, object);
   const frame = model ? volumeObjectFrame(project, schemeId, object, fallbackHeightMm) : null;
-  if (frame) return volumeModelFaces(frame, model, VOLUME_OBJECT_RGB, out);
+  if (frame) return volumeModelFaces(frame, model, VOLUME_OBJECT_RGB, out, { clear: true });
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out);
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: true });
   }
   return out;
 }
@@ -1628,7 +1687,9 @@ export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
  * **каждой** грани модели, поэтому выделяется вещь целиком, а не одно тело.
  */
 export function volumeMarkFaces(place, out = []) {
-  if (place.model && place.frame) return volumeModelFaces(place.frame, place.model, place.bodyRgb, out, place.markId);
+  if (place.model && place.frame) {
+    return volumeModelFaces(place.frame, place.model, place.bodyRgb, out, { markId: place.markId });
+  }
   for (const prism of place.prisms || []) {
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId });
   }
@@ -1738,12 +1799,21 @@ export function volumeModelPrisms(frame, parts) {
   return out;
 }
 
-/** Грани модели. `markId` — хозяин: у вещей чертежа его нет, у меток есть. */
-export function volumeModelFaces(frame, model, rgb, out = [], markId = null) {
+/**
+ * Грани модели.
+ *
+ * `options.markId` — хозяин: у вещей чертежа его нет, у меток есть.
+ * `options.clear` — модель просвечивает (таск 169): так рисуются вещи
+ * чертежа, и так не рисуются метки.
+ */
+export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
   for (const prism of volumeModelPrisms(frame, model && model.parts)) {
     // Та самая одна строка: `prism.lit` пока всегда `false`.
     const fill = volumeModelRgb(prism.material, rgb);
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, { markId });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, {
+      markId: options.markId || null,
+      clear: Boolean(options.clear),
+    });
   }
   return out;
 }
@@ -2765,6 +2835,38 @@ export function volumeClipDepth(points, near = VOLUME_NEAR_MM, far = Infinity) {
 // Ярусы (`VOLUME_LAYER_*`) дерево не отменяет: в нём лежит только ярус тел.
 // Плита, полы с потолками и указатель «вы здесь» ложатся до и после него по
 // прежнему правилу — там спорить не о чем (см. `VOLUME_LAYER_BASE`).
+//
+// ——— и почему прозрачным вещам не понадобился второй проход ——————————
+//
+// Таск 169 сделал вещи чертежа полупрозрачными, и прозрачность требует
+// рисования **строго от дальних к ближним без пропусков**: смешивание
+// некоммутативно, переставь двоих — получишь другой цвет. У «художника» (таск
+// 150) этого не было: он сортировал по средней дальности и врал в тех самых
+// точках, где грани пересекались, — прозрачность показала бы его ложь цветом,
+// а не только порядком.
+//
+// Дерево даёт ровно то, что нужно, и **ровно то же самое, что давало до
+// прозрачности**: обход «дальнее поддерево → своя плоскость → ближнее» — это и
+// есть порядок от дальних к ближним, точный в каждом пикселе, потому что
+// спорящие грани разрезаны по-настоящему. Поэтому ни отдельного прохода, ни
+// сортировки прозрачных, ни разделения потоков здесь нет: **признак
+// прозрачности не участвует в порядке вовсе** — он виден только цвету
+// (`volumeFill` отдаёт `rgba`) и взгляду (`volumeSightAt` смотрит сквозь).
+// Отдельный проход был бы здесь не улучшением, а поломкой: он бы выдернул
+// вещь из её настоящего места и поставил прозрачный шкаф **перед** стеной
+// соседней комнаты.
+//
+// Что дерево не обещает и обещать не может — порядок **коплоскостных** граней
+// (список `same` в узле): они друг друга не закрывают, и до прозрачности их
+// порядок не значил ничего. Прозрачным он тоже не значит ничего, пока
+// коплоскостные грани не накладываются друг на друга, — а наложенных
+// коплоскостных граней в сцене нет: тела модели стоят рядом, а не в одной
+// плоскости поверх друг друга.
+//
+// Что при этом честно складывается, а не пропадает, — **прозрачность по
+// пути**: сквозь шкаф с фасадом луч проходит две лицевые грани (отсеиваются
+// только отвёрнутые, а не стоящие друг за другом), и это посчитано в числе
+// `VOLUME_CLEAR_ALPHA`.
 
 /** Плоскость грани: нормаль и расстояние до начала координат. */
 function volumePlaneOf(face) {
@@ -3131,7 +3233,10 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     depth: middle,
     order: order === null ? -middle : order,
     layer: face.layer,
-    fill: volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal)),
+    fill: volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.clear ? VOLUME_CLEAR_ALPHA : 1),
+    // Многоугольник просвечивает (таск 169): взгляд смотрит сквозь него
+    // дальше. Рисование об этом не спрашивает — прозрачность уже в цвете.
+    clear: Boolean(face.clear),
     pick: face.markId || null,
     door: face.doorId || null,
   });
@@ -3296,11 +3401,35 @@ export function volumePickAt(polygons, x, y, slack = VOLUME_PICK_SLACK_PX) {
  *
  * Отвечать на это стало можно только с таском 151: порядок кадра точен в
  * каждом пикселе, и «нарисовано последним» наконец значит «видно».
+ *
+ * ——— сквозь прозрачную вещь (таск 169, G251) ———
+ *
+ * Прозрачная грань (вещь чертежа) для взгляда **не существует**: обход идёт
+ * дальше, пока не упрётся в непрозрачное. Это и есть просьба заказчика
+ * «взаимодействовать с ними»: шкаф просвечивает, за ним видно розетку — значит
+ * ответ «на что ты смотришь» — розетка, а не шкаф.
+ *
+ * Правило «видно — выделяется» при этом не меняется, а исполняется буквально:
+ * сквозь прозрачное видно, сквозь стену — нет, и **стена по-прежнему
+ * останавливает обход**. Метка за перегородкой невидима и невыделяема, даже
+ * если перед перегородкой стоит прозрачный шкаф.
+ *
+ * Пропустить, а не «спросить ближайшую непрозрачную и выбрать из двух», —
+ * потому что выбирать не из чего: **у вещи чертежа хозяина нет вовсе**
+ * (`markId` у её граней `null`), и до таска 169 взгляд в шкаф отвечал `null`.
+ * Прозрачная грань не отняла ни одного ответа — она только перестала закрывать
+ * чужой.
+ *
+ * Отсюда и ответ на «а если за прозрачной вещью ничего нет»: за ней
+ * непрозрачная стена, пол или плита — обход упирается в них и отвечает `null`,
+ * ровно как прежде. Для `E` это «тут ничего нет» словами (`volume.aimless`),
+ * для щелчка — снятие выделения, как по пустому месту плана. Ни одна точка
+ * поля смысла не поменяла, кроме той, где за вещью **и правда** метка.
  */
 export function volumeSightAt(polygons, x, y) {
   for (let index = polygons.length - 1; index >= 0; index -= 1) {
     const polygon = polygons[index];
-    if (polygon.stroke) continue;
+    if (polygon.stroke || polygon.clear) continue;
     if (volumePolygonHit(polygon.xy, x, y)) return polygon.pick || null;
   }
   return null;
