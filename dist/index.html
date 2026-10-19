@@ -9240,8 +9240,6 @@ function blockStepPx(markSize) {
 
 // Шаг для величины метки по умолчанию: им пользуется тот, кто величины не знает.
 const BLOCK_STEP_PX = blockStepPx(DEFAULT_MARK_SIZE);
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const BLOCK_FALLBACK_SIZE_PX = 1000;
 // Цвет метки, когда категория недоступна.
 const FALLBACK_COLOR = "#8B949E";
 const BLOCK_SIDES = ["left", "right", "up", "down"];
@@ -9976,6 +9974,29 @@ function requireMark(project, markId) {
 }
 
 // ——— схемы ———————————————————————————————————————————————————————————
+
+/**
+ * Размер плана в пикселях, когда схема своих не знает.
+ *
+ * Знать их она обязана — точки лежат долями от размера плана (ADR 002), и
+ * `width`/`height` поэтому обязательная часть данных. Но схема без подложки
+ * заводится нулями, пока ей не нарисовали чертёж, и делить на ноль нельзя
+ * никому: ни попаданию клика, ни выгрузке, ни шагу блока. Отсюда квадрат в
+ * тысячу точек — условный план, на котором доли остаются долями.
+ *
+ * Число и обе функции живут **здесь**: до таска 173 та же тысяча стояла в
+ * восьми местах пяти файлов (холст, выгрузка, панель выгрузки, отрисовка, шаг
+ * блока), а каноническая пара функций была приватной в `render.js` — и поэтому
+ * её переписывали заново вместо того, чтобы позвать. Модель — нижний слой:
+ * позвать её может любой, а она не зовёт никого.
+ */
+const SCHEME_FALLBACK_PX = 1000;
+function schemeWidthPx(scheme) {
+  return scheme && scheme.width > 0 ? scheme.width : SCHEME_FALLBACK_PX;
+}
+function schemeHeightPx(scheme) {
+  return scheme && scheme.height > 0 ? scheme.height : SCHEME_FALLBACK_PX;
+}
 function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
   const scheme = {
     id: newId(),
@@ -10795,8 +10816,8 @@ function addToGroup(project, markId, side, options = {}) {
   const scheme = requireScheme(project, mark.schemeId);
   const type = requireType(project, options.typeId || mark.typeId);
   const stepPx = options.step || BLOCK_STEP_PX;
-  const width = scheme.width > 0 ? scheme.width : BLOCK_FALLBACK_SIZE_PX;
-  const height = scheme.height > 0 ? scheme.height : BLOCK_FALLBACK_SIZE_PX;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const dx = stepPx / width;
   const dy = stepPx / height;
   const from = mark.points[mark.points.length - 1];
@@ -21540,24 +21561,16 @@ function typeIcon(project, typeId, size = 22, length = size * 2) {
 function planToScreen(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: state.offsetX + point.x * schemeWidth(scheme) * state.zoom,
-    y: state.offsetY + point.y * schemeHeight(scheme) * state.zoom,
+    x: state.offsetX + point.x * schemeWidthPx(scheme) * state.zoom,
+    y: state.offsetY + point.y * schemeHeightPx(scheme) * state.zoom,
   };
 }
 function screenToPlan(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: (point.x - state.offsetX) / (schemeWidth(scheme) * state.zoom),
-    y: (point.y - state.offsetY) / (schemeHeight(scheme) * state.zoom),
+    x: (point.x - state.offsetX) / (schemeWidthPx(scheme) * state.zoom),
+    y: (point.y - state.offsetY) / (schemeHeightPx(scheme) * state.zoom),
   };
-}
-
-function schemeWidth(scheme) {
-  return scheme && scheme.width > 0 ? scheme.width : 1000;
-}
-
-function schemeHeight(scheme) {
-  return scheme && scheme.height > 0 ? scheme.height : 1000;
 }
 
 // Радиус метки на экране: размер задан в пикселях плана и растёт с масштабом.
@@ -21576,8 +21589,8 @@ function labelFontSize(view) {
 
 // Вписать план в прямоугольник холста.
 function fitView(scheme, viewport) {
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const boxWidth = Math.max(1, viewport.width);
   const boxHeight = Math.max(1, viewport.height);
   const zoom = Math.min(boxWidth / width, boxHeight / height) * 0.96;
@@ -21640,8 +21653,8 @@ function rayProject(from, to, scheme, degrees) {
   // плавающей ошибки — продольная координата остаётся ровно под курсором.
   if (straight % 180 === 0) return { x: to.x, y: from.y };
   if (straight % 180 === 90) return { x: from.x, y: to.y };
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const radians = (straight * Math.PI) / 180;
   const ux = Math.cos(radians);
   const uy = -Math.sin(radians);
@@ -21654,8 +21667,8 @@ function rayProject(from, to, scheme, degrees) {
 // разных пикселей, и угол по долям — не тот угол, который видит инженер.
 // `options.free` — магнит снят; `options.limit` — свой порог.
 function snapSegment(from, to, scheme, options = {}) {
-  const dx = (to.x - from.x) * schemeWidth(scheme);
-  const dy = (to.y - from.y) * schemeHeight(scheme);
+  const dx = (to.x - from.x) * schemeWidthPx(scheme);
+  const dy = (to.y - from.y) * schemeHeightPx(scheme);
   if (dx === 0 && dy === 0) return { point: to, angle: 0, snapped: false };
   const angle = segmentAngle(dx, dy);
   const limit = options.limit === undefined ? SNAP_ANGLE_DEG : options.limit;
@@ -21833,8 +21846,8 @@ function rulerTicks(scheme, view, box) {
   };
   return {
     step,
-    top: ticks(box.width, state.offsetX, schemeWidth(scheme)),
-    left: ticks(box.height, state.offsetY, schemeHeight(scheme)),
+    top: ticks(box.width, state.offsetX, schemeWidthPx(scheme)),
+    left: ticks(box.height, state.offsetY, schemeHeightPx(scheme)),
   };
 }
 
@@ -21895,14 +21908,14 @@ function rulerAxis(point) {
 function guideScreen(guide, scheme, view) {
   const state = renderView(view);
   return guide.axis === "h"
-    ? state.offsetY + guide.at * schemeHeight(scheme) * state.zoom
-    : state.offsetX + guide.at * schemeWidth(scheme) * state.zoom;
+    ? state.offsetY + guide.at * schemeHeightPx(scheme) * state.zoom
+    : state.offsetX + guide.at * schemeWidthPx(scheme) * state.zoom;
 }
 
 // Доля плана из экранной координаты — обратный ход для перетаскивания.
 function guideFraction(axis, screen, scheme, view) {
   const state = renderView(view);
-  const size = (axis === "h" ? schemeHeight(scheme) : schemeWidth(scheme)) * state.zoom;
+  const size = (axis === "h" ? schemeHeightPx(scheme) : schemeWidthPx(scheme)) * state.zoom;
   const offset = axis === "h" ? state.offsetY : state.offsetX;
   return size > 0 ? (screen - offset) / size : 0;
 }
@@ -22726,8 +22739,8 @@ function markStackPlaceAll(project, scheme, filter, sizes) {
   const result = new Map();
   const list = visibleMarks(project, scheme, filter).filter(markStackable);
   if (list.length < 2) return result;
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const reach = sizes.radius * MARK_STACK_REACH_RATIO;
   const stepPx = sizes.radius * MARK_STACK_STEP_RATIO;
   const order = new Map(list.map((mark, index) => [mark.id, index]));
@@ -23337,8 +23350,8 @@ function labelLeadSide(project, scheme, target) {
   const lead = labelLead(project, target);
   const points = (lead && lead.kind === "line" && lead.points) || [];
   if (points.length < 2) return null;
-  const dx = (points[1].x - points[0].x) * schemeWidth(scheme);
-  const dy = (points[1].y - points[0].y) * schemeHeight(scheme);
+  const dx = (points[1].x - points[0].x) * schemeWidthPx(scheme);
+  const dy = (points[1].y - points[0].y) * schemeHeightPx(scheme);
   if (Math.abs(dx) < Math.abs(dy)) return null;
   if (dx === 0 && dy === 0) return null;
   return { sign: dy >= 0 ? -1 : 1 };
@@ -23437,7 +23450,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
   const text = labelTextOf(project, target);
   const reach = labelReach(project, target, stacks);
   const lead = labelLeadSide(project, scheme, target);
-  const width = schemeWidth(scheme);
+  const width = schemeWidthPx(scheme);
   // Плашка комментария шире и выше строки: её габарит считает `commentPlateSize`
   // по тем же знакам и тому же кеглю. Раскладке она от этого не чужая — место
   // ей ищется тем же перебором, и соседние подписи её обходят.
@@ -23450,7 +23463,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
     text,
     lines,
     x: origin.x * width,
-    y: origin.y * schemeHeight(scheme),
+    y: origin.y * schemeHeightPx(scheme),
     width: size.width,
     height: size.height,
     angle: labelAngleOf(project, target),
@@ -23501,8 +23514,8 @@ function labelFilterKey(filter) {
 }
 
 function labelPlaceAll(project, scheme, filter, sizes, stacks) {
-  const planWidth = schemeWidth(scheme);
-  const planHeight = schemeHeight(scheme);
+  const planWidth = schemeWidthPx(scheme);
+  const planHeight = schemeHeightPx(scheme);
   const layout = new Map();
   const entries = labelTargets(project, scheme, filter)
     .map((target) => ({
@@ -24708,8 +24721,8 @@ function drawExtent(ctx, scheme, view) {
   const height = ctx.canvas && ctx.canvas.height > 0 && ratio > 0 ? ctx.canvas.height / ratio : 0;
   if (width > 0 && height > 0) return { width, height };
   return {
-    width: view.offsetX + schemeWidth(scheme) * view.zoom,
-    height: view.offsetY + schemeHeight(scheme) * view.zoom,
+    width: view.offsetX + schemeWidthPx(scheme) * view.zoom,
+    height: view.offsetY + schemeHeightPx(scheme) * view.zoom,
   };
 }
 
@@ -24997,8 +25010,8 @@ function drawingBridge(project, scheme, view) {
   const origin = planOriginOf(project, scheme.id);
   if (!(perMeter > 0) || !origin) return null;
   const state = renderView(view);
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const pxPerMm = perMeter / 1000;
   const zeroX = state.offsetX + origin.at.x * width * state.zoom;
   const zeroY = state.offsetY + origin.at.y * height * state.zoom;
@@ -26009,8 +26022,8 @@ function drawScheme(ctx, {
       image,
       state.offsetX,
       state.offsetY,
-      schemeWidth(scheme) * state.zoom,
-      schemeHeight(scheme) * state.zoom,
+      schemeWidthPx(scheme) * state.zoom,
+      schemeHeightPx(scheme) * state.zoom,
     );
     ctx.restore();
   }
@@ -29336,8 +29349,6 @@ let canvasHintSeen = null;
 
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
 // Запас к радиусу метки, по которому клик считается попавшим в концевую вершину
@@ -29923,8 +29934,8 @@ function canvasCursorPlan(state, scheme, view) {
 function canvasPasteStep(state, scheme) {
   const px = canvasBlockStep(state);
   return {
-    x: px / (scheme && scheme.width > 0 ? scheme.width : CANVAS_PLAN_FALLBACK_PX),
-    y: px / (scheme && scheme.height > 0 ? scheme.height : CANVAS_PLAN_FALLBACK_PX),
+    x: px / schemeWidthPx(scheme),
+    y: px / schemeHeightPx(scheme),
   };
 }
 
@@ -32833,8 +32844,8 @@ function canvasFitDrawing(project, scheme, box) {
       ].filter(Boolean)
     : [];
   if (corners.length < 4) return fitView(scheme, box);
-  const width = Math.max(1, scheme.width || 1000);
-  const height = Math.max(1, scheme.height || 1000);
+  const width = Math.max(1, schemeWidthPx(scheme));
+  const height = Math.max(1, schemeHeightPx(scheme));
   const xs = corners.map((point) => point.x * width);
   const ys = corners.map((point) => point.y * height);
   const left = Math.min(...xs);
@@ -35971,8 +35982,8 @@ function exportPdf(pages, meta = {}) {
 // панель сняла с экрана («как вижу»). Прямоугольник обрезается планом —
 // белые поля вокруг схемы на бумаге не нужны.
 function exportArea(scheme, area) {
-  const width = scheme && scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme && scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   if (!area || area === "all") return { x: 0, y: 0, width, height };
   const x = Math.max(0, Math.min(width, area.x || 0));
   const y = Math.max(0, Math.min(height, area.y || 0));
@@ -36009,8 +36020,8 @@ function exportRoomArea(project, scheme, roomId) {
   if (!project || !scheme || !roomId) return null;
   const outlines = outlinesInOrder(project, scheme.id).filter((outline) => outline.roomId === roomId);
   if (outlines.length === 0) return null;
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -36101,8 +36112,8 @@ const EXPORT_FIT_PLAN = 0.05;
 
 function exportPlanSize(scheme) {
   return {
-    width: scheme && scheme.width > 0 ? scheme.width : 1000,
-    height: scheme && scheme.height > 0 ? scheme.height : 1000,
+    width: schemeWidthPx(scheme),
+    height: schemeHeightPx(scheme),
   };
 }
 
@@ -40722,8 +40733,8 @@ function exportViewArea(state, scheme) {
   if (!host) return "all";
   const box = host.getBoundingClientRect();
   if (box.width < 2 || box.height < 2) return "all";
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const from = screenToPlan({ x: 0, y: 0 }, scheme, state.view);
   const to = screenToPlan({ x: box.width, y: box.height }, scheme, state.view);
   return {

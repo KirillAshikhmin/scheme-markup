@@ -6,7 +6,17 @@
 // Своего рисования меток здесь нет и быть не должно.
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
-import { findGroup, findRoom, outlinesInOrder, planPixelsPerMeter, projectStamp, roomsInOrder, schemesInOrder } from "./model.js";
+import {
+  findGroup,
+  findRoom,
+  outlinesInOrder,
+  planPixelsPerMeter,
+  projectStamp,
+  roomsInOrder,
+  schemeHeightPx,
+  schemeWidthPx,
+  schemesInOrder,
+} from "./model.js";
 import {
   ELEVATION_UNIT_MM,
   drawElevation,
@@ -174,8 +184,8 @@ export function exportPdf(pages, meta = {}) {
 // панель сняла с экрана («как вижу»). Прямоугольник обрезается планом —
 // белые поля вокруг схемы на бумаге не нужны.
 function exportArea(scheme, area) {
-  const width = scheme && scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme && scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   if (!area || area === "all") return { x: 0, y: 0, width, height };
   const x = Math.max(0, Math.min(width, area.x || 0));
   const y = Math.max(0, Math.min(height, area.y || 0));
@@ -212,8 +222,8 @@ export function exportRoomArea(project, scheme, roomId) {
   if (!project || !scheme || !roomId) return null;
   const outlines = outlinesInOrder(project, scheme.id).filter((outline) => outline.roomId === roomId);
   if (outlines.length === 0) return null;
-  const width = scheme.width > 0 ? scheme.width : 1000;
-  const height = scheme.height > 0 ? scheme.height : 1000;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -304,8 +314,8 @@ const EXPORT_FIT_PLAN = 0.05;
 
 function exportPlanSize(scheme) {
   return {
-    width: scheme && scheme.width > 0 ? scheme.width : 1000,
-    height: scheme && scheme.height > 0 ? scheme.height : 1000,
+    width: schemeWidthPx(scheme),
+    height: schemeHeightPx(scheme),
   };
 }
 

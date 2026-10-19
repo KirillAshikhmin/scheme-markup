@@ -40,10 +40,12 @@ import {
   planOriginOf,
   planPixelsPerMeter,
   pointInOutline,
+  schemeHeightPx,
   schemeObjectCorners,
   schemeObjectNameOf,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
+  schemeWidthPx,
   segmentDistanceMm,
   styleOf,
   labelOf,
@@ -1408,25 +1410,17 @@ export function typeIcon(project, typeId, size = 22, length = size * 2) {
 export function planToScreen(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: state.offsetX + point.x * schemeWidth(scheme) * state.zoom,
-    y: state.offsetY + point.y * schemeHeight(scheme) * state.zoom,
+    x: state.offsetX + point.x * schemeWidthPx(scheme) * state.zoom,
+    y: state.offsetY + point.y * schemeHeightPx(scheme) * state.zoom,
   };
 }
 
 export function screenToPlan(point, scheme, view) {
   const state = renderView(view);
   return {
-    x: (point.x - state.offsetX) / (schemeWidth(scheme) * state.zoom),
-    y: (point.y - state.offsetY) / (schemeHeight(scheme) * state.zoom),
+    x: (point.x - state.offsetX) / (schemeWidthPx(scheme) * state.zoom),
+    y: (point.y - state.offsetY) / (schemeHeightPx(scheme) * state.zoom),
   };
-}
-
-function schemeWidth(scheme) {
-  return scheme && scheme.width > 0 ? scheme.width : 1000;
-}
-
-function schemeHeight(scheme) {
-  return scheme && scheme.height > 0 ? scheme.height : 1000;
 }
 
 // Радиус метки на экране: размер задан в пикселях плана и растёт с масштабом.
@@ -1445,8 +1439,8 @@ export function labelFontSize(view) {
 
 // Вписать план в прямоугольник холста.
 export function fitView(scheme, viewport) {
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const boxWidth = Math.max(1, viewport.width);
   const boxHeight = Math.max(1, viewport.height);
   const zoom = Math.min(boxWidth / width, boxHeight / height) * 0.96;
@@ -1509,8 +1503,8 @@ function rayProject(from, to, scheme, degrees) {
   // плавающей ошибки — продольная координата остаётся ровно под курсором.
   if (straight % 180 === 0) return { x: to.x, y: from.y };
   if (straight % 180 === 90) return { x: from.x, y: to.y };
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const radians = (straight * Math.PI) / 180;
   const ux = Math.cos(radians);
   const uy = -Math.sin(radians);
@@ -1523,8 +1517,8 @@ function rayProject(from, to, scheme, degrees) {
 // разных пикселей, и угол по долям — не тот угол, который видит инженер.
 // `options.free` — магнит снят; `options.limit` — свой порог.
 export function snapSegment(from, to, scheme, options = {}) {
-  const dx = (to.x - from.x) * schemeWidth(scheme);
-  const dy = (to.y - from.y) * schemeHeight(scheme);
+  const dx = (to.x - from.x) * schemeWidthPx(scheme);
+  const dy = (to.y - from.y) * schemeHeightPx(scheme);
   if (dx === 0 && dy === 0) return { point: to, angle: 0, snapped: false };
   const angle = segmentAngle(dx, dy);
   const limit = options.limit === undefined ? SNAP_ANGLE_DEG : options.limit;
@@ -1702,8 +1696,8 @@ export function rulerTicks(scheme, view, box) {
   };
   return {
     step,
-    top: ticks(box.width, state.offsetX, schemeWidth(scheme)),
-    left: ticks(box.height, state.offsetY, schemeHeight(scheme)),
+    top: ticks(box.width, state.offsetX, schemeWidthPx(scheme)),
+    left: ticks(box.height, state.offsetY, schemeHeightPx(scheme)),
   };
 }
 
@@ -1764,14 +1758,14 @@ export function rulerAxis(point) {
 export function guideScreen(guide, scheme, view) {
   const state = renderView(view);
   return guide.axis === "h"
-    ? state.offsetY + guide.at * schemeHeight(scheme) * state.zoom
-    : state.offsetX + guide.at * schemeWidth(scheme) * state.zoom;
+    ? state.offsetY + guide.at * schemeHeightPx(scheme) * state.zoom
+    : state.offsetX + guide.at * schemeWidthPx(scheme) * state.zoom;
 }
 
 // Доля плана из экранной координаты — обратный ход для перетаскивания.
 export function guideFraction(axis, screen, scheme, view) {
   const state = renderView(view);
-  const size = (axis === "h" ? schemeHeight(scheme) : schemeWidth(scheme)) * state.zoom;
+  const size = (axis === "h" ? schemeHeightPx(scheme) : schemeWidthPx(scheme)) * state.zoom;
   const offset = axis === "h" ? state.offsetY : state.offsetX;
   return size > 0 ? (screen - offset) / size : 0;
 }
@@ -2596,8 +2590,8 @@ function markStackPlaceAll(project, scheme, filter, sizes) {
   const result = new Map();
   const list = visibleMarks(project, scheme, filter).filter(markStackable);
   if (list.length < 2) return result;
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const reach = sizes.radius * MARK_STACK_REACH_RATIO;
   const stepPx = sizes.radius * MARK_STACK_STEP_RATIO;
   const order = new Map(list.map((mark, index) => [mark.id, index]));
@@ -3208,8 +3202,8 @@ function labelLeadSide(project, scheme, target) {
   const lead = labelLead(project, target);
   const points = (lead && lead.kind === "line" && lead.points) || [];
   if (points.length < 2) return null;
-  const dx = (points[1].x - points[0].x) * schemeWidth(scheme);
-  const dy = (points[1].y - points[0].y) * schemeHeight(scheme);
+  const dx = (points[1].x - points[0].x) * schemeWidthPx(scheme);
+  const dy = (points[1].y - points[0].y) * schemeHeightPx(scheme);
   if (Math.abs(dx) < Math.abs(dy)) return null;
   if (dx === 0 && dy === 0) return null;
   return { sign: dy >= 0 ? -1 : 1 };
@@ -3308,7 +3302,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
   const text = labelTextOf(project, target);
   const reach = labelReach(project, target, stacks);
   const lead = labelLeadSide(project, scheme, target);
-  const width = schemeWidth(scheme);
+  const width = schemeWidthPx(scheme);
   // Плашка комментария шире и выше строки: её габарит считает `commentPlateSize`
   // по тем же знакам и тому же кеглю. Раскладке она от этого не чужая — место
   // ей ищется тем же перебором, и соседние подписи её обходят.
@@ -3321,7 +3315,7 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
     text,
     lines,
     x: origin.x * width,
-    y: origin.y * schemeHeight(scheme),
+    y: origin.y * schemeHeightPx(scheme),
     width: size.width,
     height: size.height,
     angle: labelAngleOf(project, target),
@@ -3372,8 +3366,8 @@ function labelFilterKey(filter) {
 }
 
 function labelPlaceAll(project, scheme, filter, sizes, stacks) {
-  const planWidth = schemeWidth(scheme);
-  const planHeight = schemeHeight(scheme);
+  const planWidth = schemeWidthPx(scheme);
+  const planHeight = schemeHeightPx(scheme);
   const layout = new Map();
   const entries = labelTargets(project, scheme, filter)
     .map((target) => ({
@@ -4584,8 +4578,8 @@ function drawExtent(ctx, scheme, view) {
   const height = ctx.canvas && ctx.canvas.height > 0 && ratio > 0 ? ctx.canvas.height / ratio : 0;
   if (width > 0 && height > 0) return { width, height };
   return {
-    width: view.offsetX + schemeWidth(scheme) * view.zoom,
-    height: view.offsetY + schemeHeight(scheme) * view.zoom,
+    width: view.offsetX + schemeWidthPx(scheme) * view.zoom,
+    height: view.offsetY + schemeHeightPx(scheme) * view.zoom,
   };
 }
 
@@ -4873,8 +4867,8 @@ export function drawingBridge(project, scheme, view) {
   const origin = planOriginOf(project, scheme.id);
   if (!(perMeter > 0) || !origin) return null;
   const state = renderView(view);
-  const width = schemeWidth(scheme);
-  const height = schemeHeight(scheme);
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const pxPerMm = perMeter / 1000;
   const zeroX = state.offsetX + origin.at.x * width * state.zoom;
   const zeroY = state.offsetY + origin.at.y * height * state.zoom;
@@ -5886,8 +5880,8 @@ export function drawScheme(ctx, {
       image,
       state.offsetX,
       state.offsetY,
-      schemeWidth(scheme) * state.zoom,
-      schemeHeight(scheme) * state.zoom,
+      schemeWidthPx(scheme) * state.zoom,
+      schemeHeightPx(scheme) * state.zoom,
     );
     ctx.restore();
   }

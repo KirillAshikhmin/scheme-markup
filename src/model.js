@@ -331,8 +331,6 @@ export function blockStepPx(markSize) {
 
 // Шаг для величины метки по умолчанию: им пользуется тот, кто величины не знает.
 export const BLOCK_STEP_PX = blockStepPx(DEFAULT_MARK_SIZE);
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const BLOCK_FALLBACK_SIZE_PX = 1000;
 // Цвет метки, когда категория недоступна.
 const FALLBACK_COLOR = "#8B949E";
 export const BLOCK_SIDES = ["left", "right", "up", "down"];
@@ -1080,6 +1078,31 @@ function requireMark(project, markId) {
 }
 
 // ——— схемы ———————————————————————————————————————————————————————————
+
+/**
+ * Размер плана в пикселях, когда схема своих не знает.
+ *
+ * Знать их она обязана — точки лежат долями от размера плана (ADR 002), и
+ * `width`/`height` поэтому обязательная часть данных. Но схема без подложки
+ * заводится нулями, пока ей не нарисовали чертёж, и делить на ноль нельзя
+ * никому: ни попаданию клика, ни выгрузке, ни шагу блока. Отсюда квадрат в
+ * тысячу точек — условный план, на котором доли остаются долями.
+ *
+ * Число и обе функции живут **здесь**: до таска 173 та же тысяча стояла в
+ * восьми местах пяти файлов (холст, выгрузка, панель выгрузки, отрисовка, шаг
+ * блока), а каноническая пара функций была приватной в `render.js` — и поэтому
+ * её переписывали заново вместо того, чтобы позвать. Модель — нижний слой:
+ * позвать её может любой, а она не зовёт никого.
+ */
+export const SCHEME_FALLBACK_PX = 1000;
+
+export function schemeWidthPx(scheme) {
+  return scheme && scheme.width > 0 ? scheme.width : SCHEME_FALLBACK_PX;
+}
+
+export function schemeHeightPx(scheme) {
+  return scheme && scheme.height > 0 ? scheme.height : SCHEME_FALLBACK_PX;
+}
 
 export function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
   const scheme = {
@@ -1906,8 +1929,8 @@ export function addToGroup(project, markId, side, options = {}) {
   const scheme = requireScheme(project, mark.schemeId);
   const type = requireType(project, options.typeId || mark.typeId);
   const stepPx = options.step || BLOCK_STEP_PX;
-  const width = scheme.width > 0 ? scheme.width : BLOCK_FALLBACK_SIZE_PX;
-  const height = scheme.height > 0 ? scheme.height : BLOCK_FALLBACK_SIZE_PX;
+  const width = schemeWidthPx(scheme);
+  const height = schemeHeightPx(scheme);
   const dx = stepPx / width;
   const dy = stepPx / height;
   const from = mark.points[mark.points.length - 1];

@@ -51,6 +51,8 @@ import {
   insertOutlinePoint,
   moveSchemeGuide,
   schemeGuides,
+  schemeHeightPx,
+  schemeWidthPx,
   segmentDistanceMm,
   wallsOnScheme,
   labelOf,
@@ -635,8 +637,6 @@ let canvasHintSeen = null;
 
 const CANVAS_ZOOM_MIN = 0.04;
 const CANVAS_ZOOM_MAX = 24;
-// Размер плана, по которому считается шаг, пока схема не знает своих пикселей.
-const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
 // Запас к радиусу метки, по которому клик считается попавшим в концевую вершину
@@ -1224,8 +1224,8 @@ function canvasCursorPlan(state, scheme, view) {
 function canvasPasteStep(state, scheme) {
   const px = canvasBlockStep(state);
   return {
-    x: px / (scheme && scheme.width > 0 ? scheme.width : CANVAS_PLAN_FALLBACK_PX),
-    y: px / (scheme && scheme.height > 0 ? scheme.height : CANVAS_PLAN_FALLBACK_PX),
+    x: px / schemeWidthPx(scheme),
+    y: px / schemeHeightPx(scheme),
   };
 }
 
@@ -4139,8 +4139,8 @@ export function canvasFitDrawing(project, scheme, box) {
       ].filter(Boolean)
     : [];
   if (corners.length < 4) return fitView(scheme, box);
-  const width = Math.max(1, scheme.width || 1000);
-  const height = Math.max(1, scheme.height || 1000);
+  const width = Math.max(1, schemeWidthPx(scheme));
+  const height = Math.max(1, schemeHeightPx(scheme));
   const xs = corners.map((point) => point.x * width);
   const ys = corners.map((point) => point.y * height);
   const left = Math.min(...xs);
