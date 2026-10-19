@@ -2503,6 +2503,10 @@ function createWorkshop({ api, hosts }) {
     workshopObjectWay = way;
     workshopObjectSizes = keptTurn();
     draft = null;
+    // Призрак принадлежит клику, а не росчерку: сменили способ — он уходит.
+    // Иначе он остался бы под рукой с прежним габаритом и обещал бы клик там,
+    // где теперь обводят контур.
+    objectGhost = null;
     sync();
   }
 
@@ -3633,7 +3637,12 @@ function createWorkshop({ api, hosts }) {
     // Призрак вещи: габарит, перёд и числа — до клика (таск 164). Считается на
     // кадре из полей колонки: поправили угол, не двигая руки, — призрак
     // повернулся вместе с полем.
-    if (tool === "objects" && objectGhost) {
+    //
+    // `objectDrawn()` спрашивается здесь, а не только при смене способа: у
+    // росчерка свой призрак — сама линия под рукой (таск 167), и эта ветка
+    // обрывает кадр возвратом. Одного условия в `setObjectWay` мало — порядок
+    // веток важнее порядка вызовов.
+    if (tool === "objects" && !objectDrawn() && objectGhost) {
       const ghostObject = objectGhostAt(objectGhost.pointMm);
       if (ghostObject) paintObjectGhost(ghostObject);
       return;
