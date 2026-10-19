@@ -133,6 +133,7 @@ import {
 } from "../model.js";
 import {
   CANVAS_FRESH_VERTEX_MS,
+  canvasDragSlop,
   canvasPanSpeed,
   canvasPanVector,
   canvasRedoStep,
@@ -275,8 +276,26 @@ export function workshopToolOf(mode, adding) {
 export const WORKSHOP_VERTEX_PX = 9;
 export const WORKSHOP_WALL_PX = 6;
 
-// Пока палец не сдвинулся на столько, это клик, а не перетаскивание.
-const WORKSHOP_DRAG_SLOP = 3;
+/**
+ * Поехала ли рука: мерка **холстовая**, и у пальца она своя (`canvasDragSlop`).
+ *
+ * Своего числа у чертежа больше нет. Стояло одно на мышь и палец разом — три
+ * точки, — а комментарий над ним говорил именно про палец. На планшете,
+ * рабочем месте заказчика, тап по стене уезжает на четыре точки: по мышиной
+ * мерке он оказывался перетаскиванием, стена ехала, и в историю падал шаг
+ * «перенос стены». При масштабе 0,1 пикселя на миллиметр это сорок
+ * миллиметров. У холста мерки разведены давно, и причина там названа: «тап по
+ * метке на планшете уезжает на несколько точек, и по мышиной мерке в три
+ * точки он почти всегда оказывался бы панорамой».
+ *
+ * `gesture` — начало жеста: `{x, y}` и `touch` у пальца; `at` — где рука
+ * сейчас. Сравнение то же, что на холсте: сдвиг **больше** мерки — поехал.
+ */
+export function workshopHandMoved(gesture, at) {
+  if (!gesture || !at) return false;
+  const shift = Math.hypot(Number(at.x) - Number(gesture.x), Number(at.y) - Number(gesture.y));
+  return shift > canvasDragSlop(gesture);
+}
 
 // Насколько подпись длины отступает от линии: ближе — садится на саму линию,
 // дальше — отрывается от неё и читается как чужая.
@@ -1073,9 +1092,10 @@ export function workshopObjectRectAt(sizes, pointMm) {
  *
  * Жалоба заказчика «просто тыкаешь и куда-то рядом встало» оказалась буквальной
  * и считается числами. Призрак считался из события движения руки, а клик — из
- * события **отпускания** кнопки, и между ними разрешено до
- * `WORKSHOP_DRAG_SLOP` = 3 точек: меньший сдвиг кликом и остаётся, иначе жест
- * стал бы панорамой. Сами по себе эти три точки ничего не стоят — но притяжка
+ * события **отпускания** кнопки, и между ними разрешена вся мерка «рука
+ * поехала» (`workshopHandMoved`: три точки у мыши, десять у пальца): меньший
+ * сдвиг кликом и остаётся, иначе жест стал бы панорамой. Сами по себе эти
+ * точки ничего не стоят — но притяжка
  * к узлам сетки делит лист на клетки по 500 мм, и граница клетки шириной в
  * одну точку проходит через каждую. Дрогнула рука на две точки поперёк такой
  * границы — и вещь уехала на **полметра** от обещанного.
@@ -2791,7 +2811,9 @@ function createWorkshop({ api, hosts }) {
     }
     // Всё остальное — нажатие без решения: поехала рука — панорама, не поехала
     // — клик занятия.
-    press = { x: event.clientX, y: event.clientY };
+    // Палец помечается здесь: мерка «поехал» у него своя, а спросить
+    // `pointerType` потом будет негде — движение приходит с окна.
+    press = { x: event.clientX, y: event.clientY, touch: event.pointerType === "touch" };
   });
 
   // Что берёт «Правка» под руку. Ручки створки ничего не таскают — они
@@ -2810,7 +2832,7 @@ function createWorkshop({ api, hosts }) {
       atMm: pick.atMm,
       fromMm: pick.atMm,
       startMm: mmOf(event),
-      start: { x: event.clientX, y: event.clientY },
+      start: { x: event.clientX, y: event.clientY, touch: event.pointerType === "touch" },
       moved: false,
     };
     // Ручка пути: место, где она стоит, уже и есть ответ — клик по ней без
@@ -2826,7 +2848,8 @@ function createWorkshop({ api, hosts }) {
    * Клик занятия: рука не поехала, и жест оказался не панорамой.
    *
    * Точка берётся из события отпускания, а не нажатия: разошлись они не больше
-   * чем на `WORKSHOP_DRAG_SLOP` пикселей — иначе этот путь бы и не вызвался, —
+   * чем на мерку «рука поехала» (`workshopHandMoved`) — иначе этот путь бы и не
+   * вызвался, —
    * и притяжка всё равно ставит вершину в узел или на ровный угол.
    */
   function tap(event) {
@@ -2981,7 +3004,7 @@ function createWorkshop({ api, hosts }) {
     // обычная ветка. Отсчёт идёт от точки нажатия, а не от этого события:
     // иначе первые три пикселя терялись бы и план отставал от руки.
     if (press) {
-      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < WORKSHOP_DRAG_SLOP) return;
+      if (!workshopHandMoved(press, { x: event.clientX, y: event.clientY })) return;
       pan = { x: press.x, y: press.y };
       press = null;
     }
@@ -2991,9 +3014,9 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (drag) {
-      if (!drag.moved && Math.hypot(event.clientX - drag.start.x, event.clientY - drag.start.y) < WORKSHOP_DRAG_SLOP) {
-        return;
-      }
+      // Тап пальцем по стене её не двигает: мерка пальцевая, и четыре точки
+      // дрожи остаются тапом, а не шагом «перенос стены» в истории.
+      if (!drag.moved && !workshopHandMoved(drag.start, { x: event.clientX, y: event.clientY })) return;
       drag.moved = true;
       dragTo(event);
       return;
