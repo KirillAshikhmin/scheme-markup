@@ -1554,6 +1554,10 @@ export function volumeLineSpots(path, stepMm, max) {
     spots.push({
       at: { x: leg.a.x + leg.u.x * inside, y: leg.a.y + leg.u.y * inside },
       u: leg.u,
+      // **Настоящий** шаг, а не заказанный: на коротком пути он сжался, на
+      // длинном растянулся потолком. Им меряется элемент, который должен
+      // встать вплотную к соседнему — полотнище шторы.
+      stepMm: total / count,
     });
   }
   return spots;
@@ -1568,17 +1572,32 @@ export function volumeLineSpots(path, stepMm, max) {
  */
 function volumeLineFrames(repeat, path, acrossMm, bottomMm, topMm) {
   const thickMm = Math.max(VOLUME_MARK_LIFT_MM, topMm - bottomMm);
-  const sizeMm = Math.max(VOLUME_MARK_LIFT_MM, acrossMm * repeat.sizeShare);
-  const heightMm = thickMm * (repeat.dropShare + repeat.biteShare);
-  return volumeLineSpots(path, repeat.stepMm, repeat.max).map((spot) => ({
-    at: spot.at,
-    bottomMm: bottomMm - thickMm * repeat.dropShare,
-    u: spot.u,
-    f: { x: spot.u.y, y: -spot.u.x },
-    widthMm: sizeMm,
-    depthMm: sizeMm,
-    heightMm,
-  }));
+  const thinMm = Math.max(VOLUME_MARK_LIFT_MM, acrossMm * repeat.acrossShare);
+  return volumeLineSpots(path, repeat.stepMm, repeat.max).map((spot, index) => {
+    const f = { x: spot.u.y, y: -spot.u.x };
+    // Вдоль пути элемент мерится либо своим поперечником (светильник трека —
+    // кругляш), либо **шагом** (полотнище шторы — почти вплотную к соседнему,
+    // иначе вместо ткани выйдут жалюзи).
+    const alongMm = repeat.alongShare
+      ? Math.max(VOLUME_MARK_LIFT_MM, spot.stepMm * repeat.alongShare)
+      : thinMm;
+    // Волна: соседние элементы разведены по глубине. Складка тем и видна —
+    // грани полотнищ отвёрнуты друг от друга, и между ними встаёт тёмный стык.
+    const wave = repeat.waveShare ? (index % 2 === 0 ? -1 : 1) * repeat.waveShare * thinMm : 0;
+    return {
+      at: { x: spot.at.x + f.x * wave, y: spot.at.y + f.y * wave },
+      // Полотно висит **до пола**: низ — ноль, верх заходит в полосу карниза.
+      // Светильник трека, наоборот, свисает из полосы на долю её толщины.
+      bottomMm: repeat.toFloor ? 0 : bottomMm - thickMm * repeat.dropShare,
+      u: spot.u,
+      f,
+      widthMm: alongMm,
+      depthMm: thinMm,
+      heightMm: repeat.toFloor
+        ? Math.max(VOLUME_MARK_LIFT_MM, bottomMm + thickMm * repeat.biteShare)
+        : thickMm * (repeat.dropShare + repeat.biteShare),
+    };
+  });
 }
 
 /**
@@ -2034,12 +2053,24 @@ export function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
   const from = alongX ? part.x : part.y;
   const to = from + (alongX ? part.width : part.depth);
   const across = alongX ? part.y + part.depth / 2 : part.x + part.width / 2;
-  const radius = (alongX ? part.depth : part.width) / 2;
+  const acrossMm = alongX ? frame.depthMm : frame.widthMm;
   const middleZ = part.z + part.height / 2;
+  // Доли круга поперёк оси. Обычно он вписан в само тело и в неквадратном
+  // габарите выходит овальным — как овальна колонна 150 × 90. `round` берёт
+  // диаметр по **большей** стороне тела в миллиметрах и переводит его в доли
+  // каждой оси порознь: круг остаётся кругом, даже если для этого ему придётся
+  // выйти из габарита (круглое зеркало при полосе подсветки, таск 177).
+  let acrossShare = (alongX ? part.depth : part.width) / 2;
+  let upShare = part.height / 2;
+  if (part.round) {
+    const radiusMm = Math.max(acrossShare * 2 * acrossMm, part.height * frame.heightMm) / 2;
+    acrossShare = acrossMm > 0 ? radiusMm / acrossMm : acrossShare;
+    upShare = frame.heightMm > 0 ? radiusMm / frame.heightMm : upShare;
+  }
   const ring = [];
   for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
     const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
-    ring.push({ across: across + Math.cos(angle) * radius, z: middleZ + (Math.sin(angle) * part.height) / 2 });
+    ring.push({ across: across + Math.cos(angle) * acrossShare, z: middleZ + Math.sin(angle) * upShare });
   }
   const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
   const axisAt = (along) => (alongX ? at(along, across, middleZ) : at(across, along, middleZ));

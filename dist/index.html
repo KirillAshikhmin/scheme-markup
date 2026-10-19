@@ -38135,14 +38135,26 @@ function modelCyl(name, part = {}) {
  * лежит барабан машины и так висит круглое зеркало) кругом становится лицо,
  * вписанное в ширину и высоту; при `axis: "x"` (ось поперёк лица) — бок.
  *
- * Отсюда следствие, о котором надо знать, задавая габарит: **круг остаётся
- * кругом, только если круглы сами доли**. Зеркало в габарите 600 × 600 выйдет
- * круглым, в 300 × 60 — овалом; это то же правило, по которому колонна
- * 150 × 90 остаётся овальной (`modelCyl`), и подменять им числа человека
- * нельзя (G68).
+ * По умолчанию круг вписан в доли, и отсюда следствие: **кругом он остаётся,
+ * только если круглы сами доли**. Барабан в габарите 600 × 850 круглый по
+ * расчёту, а зеркало в габарите 300 × 60 вышло бы овалом — это то же правило,
+ * по которому колонна 150 × 90 остаётся овальной (`modelCyl`).
+ *
+ * `round: true` снимает эту оговорку: диаметр берётся по **большей** стороне
+ * тела в миллиметрах, и круг остаётся кругом в любом габарите — даже если для
+ * этого ему придётся выйти из габарита, как выходит полотно шторы (`toFloor`).
+ * Заведено это для круглого зеркала: габарит у метки «Подсветка зеркала» — сама
+ * подсветка (у заказчика в объекте 300 × 60), а зеркало при ней круглое, и
+ * вписать круг в полосу значило бы нарисовать не то, о чём он просил. Числа
+ * человека при этом целы (G68): габарит остаётся габаритом подсветки, вниз и
+ * вверх уходит только рисунок.
  */
 function modelTube(name, part = {}) {
-  return { ...modelPart("tube", name, part), axis: part.axis === "x" ? "x" : "y" };
+  return {
+    ...modelPart("tube", name, part),
+    axis: part.axis === "x" ? "x" : "y",
+    round: part.round === true,
+  };
 }
 
 /** Пластина во весь габарит в плане: `z` и `height` — её ярус. */
@@ -38281,15 +38293,19 @@ const MODELS_LIGHT = {
   // Стоячий цилиндр здесь не годится вовсе — выдавленный вверх, он даёт на
   // стене прямоугольник, то есть ровно ту плиту, которой зеркало и было.
   //
-  // **Круглым зеркало выходит при круглом габарите.** В стартовом справочнике
-  // у «ПЗ» стоит 600 × 600 × 30 — зеркало над раковиной с подсветкой по
-  // контуру; у метки, которой задали 300 × 60 (светодиодная полоса), оно
-  // честно выйдет овалом: доли считаются от сторон габарита, и перетолковывать
-  // числа человека нельзя (G68). Лечится это в колонке размеров — одним
-  // полем, а не вторым правилом в сборке.
+  // **Круглое оно в любом габарите** (`round`): диаметр берётся по большей
+  // стороне тела, и у метки с габаритом 300 × 60 — а именно такой он у
+  // заказчика в объекте — выходит зеркало Ø300, а не овал 300 × 60. Габарит
+  // при этом остаётся габаритом подсветки: выделение, рамка и размеры в
+  // колонке считаются по нему, из габарита выходит только рисунок (G68). В
+  // стартовом справочнике у «ПЗ» стоит 600 × 600 × 30 — зеркало над раковиной,
+  // и там круг совпадает с габаритом сам.
+  //
+  // Подсветка — второй круг чуть больше первого и светлее: по контуру зеркала
+  // она и идёт.
   mirror: modelParts(
-    modelTube("glass", { axis: "y", x: -0.42, width: 0.84, y: -0.5, depth: 0.3, z: 0.08, height: 0.84, material: "glass" }),
-    modelTube("glow", { axis: "y", y: -0.2, depth: 0.7, material: "light" }),
+    modelTube("glass", { axis: "y", round: true, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
+    modelTube("glow", { axis: "y", round: true, y: -0.2, depth: 0.7, material: "light" }),
   ),
   // Ночник: корпус у плинтуса и светящаяся щель внизу.
   nightLight: modelParts(
@@ -38324,6 +38340,11 @@ const MODELS_LIGHT = {
 // правило, с каким шагом он садится на путь. Полоса при этом остаётся полосой —
 // её по-прежнему рисуют звенья (`volumePathPrisms`), и лента от этого не
 // меняется ни одной гранью.
+//
+// Вторым этим же механизмом живут **шторы** (G261): в объекте заказчика «Карниз
+// штор» — линейный тип (карниз он провёл по окну линией), и модели у него нет
+// по той же причине. Полотнища ткани до пола — такой же повтор вдоль пути, как
+// светильники трека, только элемент мерится шагом, а не поперечником.
 //
 // ——— чем находится ———
 //
@@ -38364,7 +38385,7 @@ const LINE_SPOT_MAX = 10;
 const MODELS_LINES = {
   // Трек: точечный светильник торчит из полосы вниз.
   //
-  // `sizeShare` — габарит светильника в долях **поперечника полосы**: у трека
+  // `acrossShare` — габарит светильника в долях **поперечника полосы**: у трека
   // 60 × 60 это цилиндр Ø51, то есть почти во всю полосу, как оно и бывает.
   // `dropShare` — насколько он свисает ниже полосы, в долях её толщины;
   // `biteShare` — насколько он входит **в** полосу: торчать значит выходить из
@@ -38374,10 +38395,36 @@ const MODELS_LINES = {
   "ТР": {
     stepMm: LINE_SPOT_STEP_MM,
     max: LINE_SPOT_MAX,
-    sizeShare: 0.85,
+    acrossShare: 0.85,
     dropShare: 1.1,
     biteShare: 0.3,
     parts: modelParts(modelCyl("spot", { material: "light" })),
+  },
+  // Карниз штор: полотнища ткани до пола (G261, «Карниз штор, метку —
+  // отрисовывай как шторы на объеме»).
+  //
+  // **Почему и здесь, и моделью.** В стартовом справочнике «КШ» — точечный тип,
+  // и там шторы рисует модель (`objectModels/things.js`). А в объекте заказчика
+  // он **линейный**: карниз он провёл по окну линией, и вид типа у него выведен
+  // по меткам. У линейной метки модели нет и быть не может, поэтому шторы ей
+  // даёт повтор — то же полотно, только тремя полотнищами на точку и десятью
+  // вдоль пути.
+  //
+  // Числа: шаг 300 — ширина складки у шторы на люверсах; полотнище мерится
+  // **шагом** (0.92), чтобы встать почти вплотную к соседнему; поперёк оно
+  // тонкое (0.3 поперечника карниза) и разведено волной ±0.3 — так между
+  // полотнищами встаёт тёмный стык, и ткань читается тканью, а не щитом.
+  // `toFloor` — низ на полу, верх заходит в карниз на треть его толщины.
+  "КШ": {
+    stepMm: 300,
+    max: LINE_SPOT_MAX,
+    acrossShare: 0.3,
+    alongShare: 0.92,
+    waveShare: 0.3,
+    dropShare: 0,
+    biteShare: 0.3,
+    toFloor: true,
+    parts: modelParts(modelBox("fold", { material: "light" })),
   },
 };
 
@@ -49441,6 +49488,10 @@ function volumeLineSpots(path, stepMm, max) {
     spots.push({
       at: { x: leg.a.x + leg.u.x * inside, y: leg.a.y + leg.u.y * inside },
       u: leg.u,
+      // **Настоящий** шаг, а не заказанный: на коротком пути он сжался, на
+      // длинном растянулся потолком. Им меряется элемент, который должен
+      // встать вплотную к соседнему — полотнище шторы.
+      stepMm: total / count,
     });
   }
   return spots;
@@ -49455,17 +49506,32 @@ function volumeLineSpots(path, stepMm, max) {
  */
 function volumeLineFrames(repeat, path, acrossMm, bottomMm, topMm) {
   const thickMm = Math.max(VOLUME_MARK_LIFT_MM, topMm - bottomMm);
-  const sizeMm = Math.max(VOLUME_MARK_LIFT_MM, acrossMm * repeat.sizeShare);
-  const heightMm = thickMm * (repeat.dropShare + repeat.biteShare);
-  return volumeLineSpots(path, repeat.stepMm, repeat.max).map((spot) => ({
-    at: spot.at,
-    bottomMm: bottomMm - thickMm * repeat.dropShare,
-    u: spot.u,
-    f: { x: spot.u.y, y: -spot.u.x },
-    widthMm: sizeMm,
-    depthMm: sizeMm,
-    heightMm,
-  }));
+  const thinMm = Math.max(VOLUME_MARK_LIFT_MM, acrossMm * repeat.acrossShare);
+  return volumeLineSpots(path, repeat.stepMm, repeat.max).map((spot, index) => {
+    const f = { x: spot.u.y, y: -spot.u.x };
+    // Вдоль пути элемент мерится либо своим поперечником (светильник трека —
+    // кругляш), либо **шагом** (полотнище шторы — почти вплотную к соседнему,
+    // иначе вместо ткани выйдут жалюзи).
+    const alongMm = repeat.alongShare
+      ? Math.max(VOLUME_MARK_LIFT_MM, spot.stepMm * repeat.alongShare)
+      : thinMm;
+    // Волна: соседние элементы разведены по глубине. Складка тем и видна —
+    // грани полотнищ отвёрнуты друг от друга, и между ними встаёт тёмный стык.
+    const wave = repeat.waveShare ? (index % 2 === 0 ? -1 : 1) * repeat.waveShare * thinMm : 0;
+    return {
+      at: { x: spot.at.x + f.x * wave, y: spot.at.y + f.y * wave },
+      // Полотно висит **до пола**: низ — ноль, верх заходит в полосу карниза.
+      // Светильник трека, наоборот, свисает из полосы на долю её толщины.
+      bottomMm: repeat.toFloor ? 0 : bottomMm - thickMm * repeat.dropShare,
+      u: spot.u,
+      f,
+      widthMm: alongMm,
+      depthMm: thinMm,
+      heightMm: repeat.toFloor
+        ? Math.max(VOLUME_MARK_LIFT_MM, bottomMm + thickMm * repeat.biteShare)
+        : thickMm * (repeat.dropShare + repeat.biteShare),
+    };
+  });
 }
 
 /**
@@ -49921,12 +49987,24 @@ function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
   const from = alongX ? part.x : part.y;
   const to = from + (alongX ? part.width : part.depth);
   const across = alongX ? part.y + part.depth / 2 : part.x + part.width / 2;
-  const radius = (alongX ? part.depth : part.width) / 2;
+  const acrossMm = alongX ? frame.depthMm : frame.widthMm;
   const middleZ = part.z + part.height / 2;
+  // Доли круга поперёк оси. Обычно он вписан в само тело и в неквадратном
+  // габарите выходит овальным — как овальна колонна 150 × 90. `round` берёт
+  // диаметр по **большей** стороне тела в миллиметрах и переводит его в доли
+  // каждой оси порознь: круг остаётся кругом, даже если для этого ему придётся
+  // выйти из габарита (круглое зеркало при полосе подсветки, таск 177).
+  let acrossShare = (alongX ? part.depth : part.width) / 2;
+  let upShare = part.height / 2;
+  if (part.round) {
+    const radiusMm = Math.max(acrossShare * 2 * acrossMm, part.height * frame.heightMm) / 2;
+    acrossShare = acrossMm > 0 ? radiusMm / acrossMm : acrossShare;
+    upShare = frame.heightMm > 0 ? radiusMm / frame.heightMm : upShare;
+  }
   const ring = [];
   for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
     const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
-    ring.push({ across: across + Math.cos(angle) * radius, z: middleZ + (Math.sin(angle) * part.height) / 2 });
+    ring.push({ across: across + Math.cos(angle) * acrossShare, z: middleZ + Math.sin(angle) * upShare });
   }
   const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
   const axisAt = (along) => (alongX ? at(along, across, middleZ) : at(across, along, middleZ));

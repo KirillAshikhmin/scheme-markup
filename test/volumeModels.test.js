@@ -504,6 +504,68 @@ test("карниз штор висит шторами до пола", () => {
   assert.ok(depths.size > 1, "складки встали в одну плоскость");
 });
 
+test("круглое зеркало остаётся круглым и в габарите полосы", () => {
+  // У заказчика в объекте «ПЗ» размечена полосой 300 × 60 — это габарит самой
+  // подсветки. Зеркало при ней круглое, и вписать круг в полосу значило бы
+  // нарисовать не то, о чём он просил. Поэтому `round`: диаметр по большей
+  // стороне, в миллиметрах.
+  const frame = {
+    at: { x: 0, y: 0 },
+    bottomMm: 1570,
+    u: { x: 1, y: 0 },
+    f: { x: 0, y: 1 },
+    widthMm: 300,
+    depthMm: 25,
+    heightMm: 60,
+  };
+  const glass = objectModelByKey("mirror").parts.find((part) => part.name === "glass");
+  assert.equal(glass.round, true, "зеркало перестало быть круглым по большей стороне");
+  const faces = volumeTubeFaces(frame, glass, [120, 120, 120]);
+  const xs = faces.flatMap((face) => face.p.map((point) => point.x));
+  const zs = faces.flatMap((face) => face.p.map((point) => point.z));
+  const across = Math.max(...xs) - Math.min(...xs);
+  const tall = Math.max(...zs) - Math.min(...zs);
+  assert.ok(Math.abs(across - tall) < 1, "зеркало вышло овальным: " + across.toFixed(0) + " × " + tall.toFixed(0));
+  // И выходит оно из габарита вверх и вниз — как полотно шторы: габарит
+  // остаётся габаритом подсветки, из него уходит только рисунок.
+  assert.ok(Math.min(...zs) < frame.bottomMm, "зеркало уместилось в толщину подсветки");
+  // В квадратном габарите круг совпадает с габаритом сам, и ничего не выходит.
+  const square = { ...frame, widthMm: 600, depthMm: 30, heightMm: 600, bottomMm: 1300 };
+  const inside = volumeTubeFaces(square, glass, [120, 120, 120]);
+  const zsInside = inside.flatMap((face) => face.p.map((point) => point.z));
+  assert.ok(Math.min(...zsInside) >= square.bottomMm - 1, "в своём габарите зеркало полезло наружу");
+});
+
+test("линейный карниз штор одевается полотнищами до пола", () => {
+  // В объекте заказчика «Карниз штор» — **линейный** тип: карниз он провёл по
+  // окну линией, и вид типа выведен по меткам. Модели у линейной метки нет, и
+  // шторы ей даёт повтор вдоль пути — иначе правка не доехала бы до его
+  // чертежа вовсе.
+  const place = linePlace("КШ", [{ x: -1200, y: -1300 }, { x: 1200, y: -1300 }]);
+  assert.equal(place.kind, "line");
+  assert.equal(place.model, null, "у линейной метки завелась модель");
+  assert.ok(place.repeat, "у линейного карниза нет штор");
+  // Карниз в 2,4 м при шаге 300 — восемь полотнищ; потолок десяти тут не при
+  // чём, он для карниза во всю стену.
+  assert.equal(place.repeat.frames.length, 8, "полотнищ не восемь");
+  const band = place.prisms[0];
+  for (const frame of place.repeat.frames) {
+    assert.equal(frame.bottomMm, 0, "полотнище не доходит до пола");
+    assert.ok(frame.heightMm > 2000, "полотнище вышло коротким: " + frame.heightMm);
+    assert.ok(frame.bottomMm + frame.heightMm > band.bottomMm, "полотнище не заходит в карниз");
+    assert.ok(frame.bottomMm + frame.heightMm < band.topMm, "полотнище пробило карниз насквозь");
+    // Вдоль пути полотнище мерится шагом и встаёт почти вплотную к соседнему.
+    assert.ok(frame.widthMm > 260 && frame.widthMm < 300, "ширина полотнища: " + frame.widthMm);
+  }
+  // Складка видна тем, что соседние полотнища разведены по глубине.
+  const depths = place.repeat.frames.map((frame) => Math.round(frame.at.y));
+  assert.notEqual(depths[0], depths[1], "полотнища встали в одну плоскость");
+  assert.equal(depths[0], depths[2], "волна идёт не через одно полотнище");
+  // А подсветка карниза (ПКШ) рядом остаётся полосой: шторы у неё были бы
+  // второй шторой на том же окне.
+  assert.equal(linePlace("ПКШ", [{ x: -1200, y: -1300 }, { x: 1200, y: -1300 }]).repeat, null);
+});
+
 test("лежачий цилиндр — замкнутое тело, и все его грани смотрят наружу", () => {
   // Новый вид тела строит грани сам, минуя призмы, и ошибка в обходе дала бы
   // вещь, половина которой не видна с одной стороны и не видна насквозь с
