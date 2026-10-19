@@ -1845,6 +1845,11 @@ export function volumeModelPrisms(frame, parts) {
     y: frame.at.y + frame.u.y * fx * frame.widthMm + frame.f.y * fy * frame.depthMm,
   });
   for (const part of parts || []) {
+    // Лежачий цилиндр призмой не бывает вовсе (таск 177): призма выдавливается
+    // вверх, а у него ось горизонтальна. Грани ему строит `volumeTubeFaces`, и
+    // здесь он пропускается — иначе барабан стиральной машины молча стал бы
+    // коробкой, то есть ровно тем, на что заказчик и указал.
+    if (part.kind === "tube") continue;
     const bottomMm = frame.bottomMm + part.z * frame.heightMm;
     const topMm = frame.bottomMm + (part.z + part.height) * frame.heightMm;
     const corners = [];
@@ -1880,20 +1885,89 @@ export function volumeModelPrisms(frame, parts) {
 }
 
 /**
+ * Грань **наружу тела**: обход разворачивается, если нормаль смотрит внутрь.
+ *
+ * Заведена для лежачего цилиндра (таск 177) и нужна ровно ему: у призмы
+ * сторона наружу выходит сама — плановый многоугольник записан по часовой
+ * (`volumeClockwise`), и «левая» нормаль ребра смотрит из тела. У лежачего
+ * цилиндра плана нет вовсе: его бока стоят косо к обеим осям, и держать в
+ * голове, куда повёрнут габарит, пришлось бы в каждой записи. Вместо этого
+ * спрашивается сама геометрия: `inside` — точка на оси тела, и грань
+ * обязана смотреть от неё.
+ */
+function volumeFaceOut(points, inside, rgb, options) {
+  const normal = volumeFaceNormal(points);
+  const middle = volumeMiddleOf(points);
+  const away =
+    normal.x * (middle.x - inside.x) + normal.y * (middle.y - inside.y) + normal.z * (middle.z - inside.z);
+  return volumeFace(away >= 0 ? points : [...points].reverse(), rgb, options);
+}
+
+/**
+ * Грани **лежачего цилиндра**: восемь боковых полос и два днища (таск 177,
+ * G262 — «барабан, горизонтальный и внутри»).
+ *
+ * Круг вписан в те две стороны тела, что поперёк оси, а углы сдвинуты на
+ * полшага — как у стоячего цилиндра: при восьми сторонах восьмиугольник стоит
+ * к глазу стороной, а не ребром. Цена та же, что у стоячего, — десять граней,
+ * и предел вещи от нового вида тела не поехал.
+ */
+export function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
+  if (!frame || !(frame.heightMm > 0)) return out;
+  const at = (fx, fy, fz) => ({
+    x: frame.at.x + frame.u.x * fx * frame.widthMm + frame.f.x * fy * frame.depthMm,
+    y: frame.at.y + frame.u.y * fx * frame.widthMm + frame.f.y * fy * frame.depthMm,
+    z: frame.bottomMm + fz * frame.heightMm,
+  });
+  // Ось: `x` — поперёк лица, `y` — из лица в глубину. Вдоль неё тело тянется от
+  // `from` до `to`, а круг лежит в двух оставшихся долях.
+  const alongX = part.axis === "x";
+  const from = alongX ? part.x : part.y;
+  const to = from + (alongX ? part.width : part.depth);
+  const across = alongX ? part.y + part.depth / 2 : part.x + part.width / 2;
+  const radius = (alongX ? part.depth : part.width) / 2;
+  const middleZ = part.z + part.height / 2;
+  const ring = [];
+  for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
+    const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+    ring.push({ across: across + Math.cos(angle) * radius, z: middleZ + (Math.sin(angle) * part.height) / 2 });
+  }
+  const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
+  const axisAt = (along) => (alongX ? at(along, across, middleZ) : at(across, along, middleZ));
+  const middle = axisAt((from + to) / 2);
+  for (let index = 0; index < ring.length; index += 1) {
+    const a = ring[index];
+    const b = ring[(index + 1) % ring.length];
+    out.push(volumeFaceOut([node(a, from), node(b, from), node(b, to), node(a, to)], middle, rgb, options));
+  }
+  // Днища: наружу у каждого — прочь от другого конца оси.
+  out.push(volumeFaceOut(ring.map((item) => node(item, from)), axisAt(to), rgb, options));
+  out.push(volumeFaceOut(ring.map((item) => node(item, to)), axisAt(from), rgb, options));
+  return out;
+}
+
+/**
  * Грани модели.
  *
  * `options.markId` — хозяин: у вещей чертежа его нет, у меток есть.
  * `options.clear` — модель просвечивает (таск 169): так рисуются вещи
  * чертежа, и так не рисуются метки.
+ *
+ * Тела двух видов идут призмами, лежачий цилиндр — своими гранями (таск 177).
+ * Разбор по виду тела здесь и только здесь: ни одна модель не знает, чем её
+ * рисуют.
  */
 export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
-  for (const prism of volumeModelPrisms(frame, model && model.parts)) {
+  const parts = (model && model.parts) || [];
+  const own = { markId: options.markId || null, clear: Boolean(options.clear) };
+  for (const part of parts) {
+    if (part.kind !== "tube") continue;
+    volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own);
+  }
+  for (const prism of volumeModelPrisms(frame, parts)) {
     // Та самая одна строка: `prism.lit` пока всегда `false`.
     const fill = volumeModelRgb(prism.material, rgb);
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, {
-      markId: options.markId || null,
-      clear: Boolean(options.clear),
-    });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own);
   }
   return out;
 }

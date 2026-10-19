@@ -37971,9 +37971,16 @@ async function renderPlanImage(blob, transform) {
 // рисуют, а только говорят, из чего вещь состоит. Рисует их один проход в
 // `volume.js` — второго места, где разбирается описание, нет.
 //
-// Видов тела **два, и больше не будет**: коробка и цилиндр. Не хватает — ещё
-// упрощается вещь, а не растёт набор. У «низкополигонально» это не
-// ограничение, а само задание.
+// Видов тела **три**: коробка, стоячий цилиндр и лежачий. Два первых — с
+// таска 155, третий добавлен в таске 177 словами заказчика: «Почему у
+// стиральной машины перед ней цилиндр вертикальный, хотя логичнее его сделать
+// как барабан — горизонтальный и внутри» (G262). Горизонтальной оси у стоячего
+// цилиндра нет и быть не может — он выдавливается вверх, — а коробка вместо
+// барабана была бы ровно той подменой, на которую заказчик и указал. Поэтому
+// вид добавлен, а не вещь упрощена.
+//
+// Дальше набор не растёт: сфера, конус и кривая по-прежнему лечатся упрощением
+// вещи. У «низкополигонально» это не ограничение, а само задание.
 //
 // ——— система долей ———
 //
@@ -38055,6 +38062,25 @@ function modelBox(name, part = {}) {
  */
 function modelCyl(name, part = {}) {
   return modelPart("cyl", name, part);
+}
+
+/**
+ * **Лежачий цилиндр**: барабан, труба, круглое зеркало — то, у чего ось
+ * горизонтальна (таск 177, G262).
+ *
+ * Прямоугольник тела тот же, что у коробки, а круг вписывается в те две его
+ * стороны, что **поперёк оси**: при `axis: "y"` (ось из лица в глубину — так
+ * лежит барабан машины и так висит круглое зеркало) кругом становится лицо,
+ * вписанное в ширину и высоту; при `axis: "x"` (ось поперёк лица) — бок.
+ *
+ * Отсюда следствие, о котором надо знать, задавая габарит: **круг остаётся
+ * кругом, только если круглы сами доли**. Зеркало в габарите 600 × 600 выйдет
+ * круглым, в 300 × 60 — овалом; это то же правило, по которому колонна
+ * 150 × 90 остаётся овальной (`modelCyl`), и подменять им числа человека
+ * нельзя (G68).
+ */
+function modelTube(name, part = {}) {
+  return { ...modelPart("tube", name, part), axis: part.axis === "x" ? "x" : "y" };
 }
 
 /** Пластина во весь габарит в плане: `z` и `height` — её ярус. */
@@ -38155,11 +38181,24 @@ const MODELS_CLIMATE = {
 // своей формой знака у люстры (она же поможет плану) — тем же путём, которым
 // лечится их неразличимость на плане, а не вторым ключом у модели.
 const MODELS_LIGHT = {
-  // Светильник: плафон и подвес. Подвес узкий и сверху — на потолке он уходит
-  // в потолок и не виден вовсе, на стене читается кронштейном бра.
+  // Светильник: плафон двумя ярусами и тонкий подвес над ними.
+  //
+  // **Люстра «побольше и посимпатичнее»** (таск 177, G262) лечится здесь, а не
+  // своим ключом: модель у точечных типов света одна, и разводит их габарит
+  // (см. выше). Было так: плафон на три пятых габарита и толстый цилиндр
+  // подвеса на остальные две — у люстры 500 × 400 × 300 это читалось шайбой с
+  // трубой, то есть вещью **ниже** своего габарита. Стало: плафон во всю
+  // ширину и три четверти высоты двумя ярусами, подвес — волосок в десятую
+  // часть ширины. Люстра выросла и обрела ярус, точечный светильник (90 × 90
+  // при нулевом выступе) остался той же плоской шайбой — у него на все ярусы
+  // два миллиметра выступа, и делить их не на что.
+  //
+  // Цена — шесть граней: двадцать было, двадцать шесть стало. Это та же цена,
+  // что у любой вещи с третьим телом, и предел в тридцать она не трогает.
   lamp: modelParts(
-    modelCyl("shade", { z: 0, height: 0.6, material: "light" }),
-    modelCyl("holder", { x: -0.17, width: 0.34, y: -0.17, depth: 0.34, z: 0.6, height: 0.4, material: "metal" }),
+    modelCyl("shade", { z: 0, height: 0.52, material: "light" }),
+    modelCyl("tier", { x: -0.28, width: 0.56, y: -0.28, depth: 0.56, z: 0.52, height: 0.22, material: "light" }),
+    modelBox("rod", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.74, height: 0.26, material: "metal" }),
   ),
   // Ночник: корпус у плинтуса и светящаяся щель внизу.
   nightLight: modelParts(
@@ -38308,10 +38347,23 @@ const MODEL_TOILET = modelParts(
   modelBox("cistern", { x: -0.32, width: 0.64, y: 0.2, depth: 0.3, z: 0.3, height: 0.7 }),
 );
 
+// Стиральная и сушильная машины: барабан **внутри корпуса и лежачий** (таск
+// 177, G262). Слова заказчика: «Почему у стиральной машины перед ней цилиндр
+// вертикальный, хотя логичнее его сделать как барабан — горизонтальный и
+// внутри». Было ровно это — стоячий цилиндр, приклеенный к лицу снаружи.
+//
+// Ось барабана идёт **из лица в глубину**, как у машины с фронтальной
+// загрузкой: в лицо он смотрит кругом, и этот круг — люк. Виден барабан сквозь
+// корпус, потому что вещи чертежа просвечивают (таск 169) — то есть «внутри»
+// здесь значит «видно, что он внутри», а не «спрятан».
+//
+// Доли круга взяты так, чтобы в габарите 600 × 600 × 850 он вышел **круглым, а
+// не овальным**: 0.8 ширины — это 480 мм, 0.56 высоты — те же 476. Доли
+// считаются от разных сторон, и круг в них круглый только по расчёту.
 const MODEL_LAUNDRY = modelParts(
-  modelCyl("hatch", { x: -0.26, width: 0.52, y: -0.5, depth: 0.38, z: 0.26, height: 0.52, material: "glass" }),
-  modelBox("front", { y: -0.12, depth: 0.16, material: "light" }),
-  modelBox("case", { y: 0.04, depth: 0.46 }),
+  modelTube("drum", { axis: "y", x: -0.4, width: 0.8, y: -0.4, depth: 0.74, z: 0.2, height: 0.56, material: "metal" }),
+  modelTube("hatch", { axis: "y", x: -0.36, width: 0.72, y: -0.5, depth: 0.08, z: 0.235, height: 0.5, material: "glass" }),
+  modelBox("case", { y: -0.42, depth: 0.92 }),
 );
 const MODELS_OBJECTS = {
   // ——— девять нынешних видов ———
@@ -38417,10 +38469,12 @@ const MODELS_OBJECTS = {
     modelBox("rungLow", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.2, height: 0.1, material: "metal" }),
     modelBox("rungHigh", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.58, height: 0.1, material: "metal" }),
   ),
-  // Душ: поддон, стойка и лейка — допущение, разрешённое заказчиком прямо.
+  // Душ: стойка и лейка. **Поддона нет** — таск 177, слова заказчика «У Душа
+  // убери поддон»: плита во весь габарит читалась ступенью посреди санузла, а
+  // ставят сегодня трап в полу. Решение таска 154 «душ стоит на полу» при этом
+  // осталось: стойка начинается от нуля, то есть от пола, а не от борта.
   shower: modelParts(
-    modelBox("tray", { z: 0, height: 0.12, material: "light" }),
-    modelBox("riser", { x: -0.07, width: 0.14, y: 0.3, depth: 0.14, z: 0.12, height: 0.8, material: "metal" }),
+    modelBox("riser", { x: -0.07, width: 0.14, y: 0.3, depth: 0.14, z: 0, height: 0.92, material: "metal" }),
     modelBox("head", { x: -0.18, width: 0.36, y: 0.05, depth: 0.35, z: 0.92, height: 0.08, material: "light" }),
   ),
   // Тумба: корпус и два ящика. Двумя ящиками и отличается от шкафа с его одним
@@ -38666,10 +38720,16 @@ function objectModelClashes() {
   return [...CLASHES];
 }
 
-/** Сколько граней стоит модель: коробка — шесть, цилиндр — своих сторон плюс две. */
+/**
+ * Сколько граней стоит модель: коробка — шесть, цилиндр — своих сторон плюс
+ * две. Лежачий цилиндр (таск 177) стоит ровно столько же, сколько стоячий:
+ * бока и два днища, — поэтому новый вид тела предела не сдвинул.
+ */
 function objectModelFaceCount(model) {
   let faces = 0;
-  for (const part of (model && model.parts) || []) faces += part.kind === "cyl" ? MODEL_CYL_SIDES + 2 : 6;
+  for (const part of (model && model.parts) || []) {
+    faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : 6;
+  }
   return faces;
 }
 
@@ -49405,6 +49465,11 @@ function volumeModelPrisms(frame, parts) {
     y: frame.at.y + frame.u.y * fx * frame.widthMm + frame.f.y * fy * frame.depthMm,
   });
   for (const part of parts || []) {
+    // Лежачий цилиндр призмой не бывает вовсе (таск 177): призма выдавливается
+    // вверх, а у него ось горизонтальна. Грани ему строит `volumeTubeFaces`, и
+    // здесь он пропускается — иначе барабан стиральной машины молча стал бы
+    // коробкой, то есть ровно тем, на что заказчик и указал.
+    if (part.kind === "tube") continue;
     const bottomMm = frame.bottomMm + part.z * frame.heightMm;
     const topMm = frame.bottomMm + (part.z + part.height) * frame.heightMm;
     const corners = [];
@@ -49440,20 +49505,89 @@ function volumeModelPrisms(frame, parts) {
 }
 
 /**
+ * Грань **наружу тела**: обход разворачивается, если нормаль смотрит внутрь.
+ *
+ * Заведена для лежачего цилиндра (таск 177) и нужна ровно ему: у призмы
+ * сторона наружу выходит сама — плановый многоугольник записан по часовой
+ * (`volumeClockwise`), и «левая» нормаль ребра смотрит из тела. У лежачего
+ * цилиндра плана нет вовсе: его бока стоят косо к обеим осям, и держать в
+ * голове, куда повёрнут габарит, пришлось бы в каждой записи. Вместо этого
+ * спрашивается сама геометрия: `inside` — точка на оси тела, и грань
+ * обязана смотреть от неё.
+ */
+function volumeFaceOut(points, inside, rgb, options) {
+  const normal = volumeFaceNormal(points);
+  const middle = volumeMiddleOf(points);
+  const away =
+    normal.x * (middle.x - inside.x) + normal.y * (middle.y - inside.y) + normal.z * (middle.z - inside.z);
+  return volumeFace(away >= 0 ? points : [...points].reverse(), rgb, options);
+}
+
+/**
+ * Грани **лежачего цилиндра**: восемь боковых полос и два днища (таск 177,
+ * G262 — «барабан, горизонтальный и внутри»).
+ *
+ * Круг вписан в те две стороны тела, что поперёк оси, а углы сдвинуты на
+ * полшага — как у стоячего цилиндра: при восьми сторонах восьмиугольник стоит
+ * к глазу стороной, а не ребром. Цена та же, что у стоячего, — десять граней,
+ * и предел вещи от нового вида тела не поехал.
+ */
+function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
+  if (!frame || !(frame.heightMm > 0)) return out;
+  const at = (fx, fy, fz) => ({
+    x: frame.at.x + frame.u.x * fx * frame.widthMm + frame.f.x * fy * frame.depthMm,
+    y: frame.at.y + frame.u.y * fx * frame.widthMm + frame.f.y * fy * frame.depthMm,
+    z: frame.bottomMm + fz * frame.heightMm,
+  });
+  // Ось: `x` — поперёк лица, `y` — из лица в глубину. Вдоль неё тело тянется от
+  // `from` до `to`, а круг лежит в двух оставшихся долях.
+  const alongX = part.axis === "x";
+  const from = alongX ? part.x : part.y;
+  const to = from + (alongX ? part.width : part.depth);
+  const across = alongX ? part.y + part.depth / 2 : part.x + part.width / 2;
+  const radius = (alongX ? part.depth : part.width) / 2;
+  const middleZ = part.z + part.height / 2;
+  const ring = [];
+  for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
+    const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+    ring.push({ across: across + Math.cos(angle) * radius, z: middleZ + (Math.sin(angle) * part.height) / 2 });
+  }
+  const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
+  const axisAt = (along) => (alongX ? at(along, across, middleZ) : at(across, along, middleZ));
+  const middle = axisAt((from + to) / 2);
+  for (let index = 0; index < ring.length; index += 1) {
+    const a = ring[index];
+    const b = ring[(index + 1) % ring.length];
+    out.push(volumeFaceOut([node(a, from), node(b, from), node(b, to), node(a, to)], middle, rgb, options));
+  }
+  // Днища: наружу у каждого — прочь от другого конца оси.
+  out.push(volumeFaceOut(ring.map((item) => node(item, from)), axisAt(to), rgb, options));
+  out.push(volumeFaceOut(ring.map((item) => node(item, to)), axisAt(from), rgb, options));
+  return out;
+}
+
+/**
  * Грани модели.
  *
  * `options.markId` — хозяин: у вещей чертежа его нет, у меток есть.
  * `options.clear` — модель просвечивает (таск 169): так рисуются вещи
  * чертежа, и так не рисуются метки.
+ *
+ * Тела двух видов идут призмами, лежачий цилиндр — своими гранями (таск 177).
+ * Разбор по виду тела здесь и только здесь: ни одна модель не знает, чем её
+ * рисуют.
  */
 function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
-  for (const prism of volumeModelPrisms(frame, model && model.parts)) {
+  const parts = (model && model.parts) || [];
+  const own = { markId: options.markId || null, clear: Boolean(options.clear) };
+  for (const part of parts) {
+    if (part.kind !== "tube") continue;
+    volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own);
+  }
+  for (const prism of volumeModelPrisms(frame, parts)) {
     // Та самая одна строка: `prism.lit` пока всегда `false`.
     const fill = volumeModelRgb(prism.material, rgb);
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, {
-      markId: options.markId || null,
-      clear: Boolean(options.clear),
-    });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own);
   }
   return out;
 }

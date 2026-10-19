@@ -82,10 +82,16 @@ export function objectModelClashes() {
   return [...CLASHES];
 }
 
-/** Сколько граней стоит модель: коробка — шесть, цилиндр — своих сторон плюс две. */
+/**
+ * Сколько граней стоит модель: коробка — шесть, цилиндр — своих сторон плюс
+ * две. Лежачий цилиндр (таск 177) стоит ровно столько же, сколько стоячий:
+ * бока и два днища, — поэтому новый вид тела предела не сдвинул.
+ */
 export function objectModelFaceCount(model) {
   let faces = 0;
-  for (const part of (model && model.parts) || []) faces += part.kind === "cyl" ? MODEL_CYL_SIDES + 2 : 6;
+  for (const part of (model && model.parts) || []) {
+    faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : 6;
+  }
   return faces;
 }
 

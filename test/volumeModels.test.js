@@ -47,7 +47,7 @@ import {
 import { markBoxMm } from "../src/markBox.js";
 import { objectViewByName, objectViewForShape } from "../src/objectViews/registry.js";
 import { MODEL_CYL_SIDES, MODEL_MATERIALS } from "../src/objectModels/kit.js";
-import { objectCatalogKeys } from "../src/objectCatalog.js";
+import { objectCatalogDefaults, objectCatalogKeys } from "../src/objectCatalog.js";
 import {
   OBJECT_MODEL_BODY_MAX,
   OBJECT_MODEL_FACE_MAX,
@@ -69,6 +69,7 @@ import {
   volumeObjectModel,
   volumeObjectPrisms,
   volumeScene,
+  volumeTubeFaces,
 } from "../src/volume.js";
 import { strings } from "../src/strings.js";
 
@@ -304,7 +305,12 @@ test("у каждого тела есть имя, материал из набо
       // Слова заказчика: заложить, но не делать. Включённого свечения в сборке
       // нет ни одного, и этот тест — тот самый замок.
       assert.equal(part.lit, false, key + "." + part.name + ": свечение включено");
-      assert.ok(["box", "cyl"].includes(part.kind), key + "." + part.name + ": вид тела " + part.kind);
+      // Видов тела три: коробка, стоячий цилиндр и лежачий (таск 177). У
+      // лежачего обязательна ось — без неё непонятно, где у него круг.
+      assert.ok(["box", "cyl", "tube"].includes(part.kind), key + "." + part.name + ": вид тела " + part.kind);
+      if (part.kind === "tube") {
+        assert.ok(["x", "y"].includes(part.axis), key + "." + part.name + ": ось лежачего цилиндра " + part.axis);
+      }
     }
   }
 });
@@ -317,6 +323,111 @@ test("тела не вылезают за свой габарит", () => {
       assert.ok(part.x >= -0.5 && part.x + part.width <= 0.5, label + ": вылезло по ширине");
       assert.ok(part.y >= -0.5 && part.y + part.depth <= 0.5, label + ": вылезло по глубине");
       assert.ok(part.z >= 0 && part.z + part.height <= 1, label + ": вылезло по высоте");
+    }
+  }
+});
+
+// ——— правка моделей таска 177 (G262) —————————————————————————————————————
+
+test("барабан стиральной машины лежачий и внутри корпуса", () => {
+  // Слова заказчика: «Почему у стиральной машины перед ней цилиндр
+  // вертикальный, хотя логичнее его сделать как барабан — горизонтальный и
+  // внутри». Проверяется ровно это, числами: ось горизонтальна, тело глубже
+  // лица корпуса, стоячего цилиндра не осталось ни одного.
+  const parts = bodies("washer");
+  const drum = parts.find((part) => part.name === "drum");
+  const box = parts.find((part) => part.name === "case");
+  assert.ok(drum && box, "у машины нет барабана или корпуса");
+  assert.equal(drum.kind, "tube", "барабан не лежачий цилиндр");
+  assert.equal(drum.axis, "y", "ось барабана смотрит не из лица в глубину");
+  assert.ok(drum.y > box.y, "барабан вылез перед корпусом");
+  assert.ok(drum.y + drum.depth < box.y + box.depth, "барабан вылез за корпус");
+  assert.ok(
+    !parts.some((part) => part.kind === "cyl"),
+    "у машины остался стоячий цилиндр — это и была жалоба",
+  );
+  // Круг барабана круглый не на словах: в габарите 600 × 850 доли 0.8 и 0.56
+  // дают 480 и 476 мм. Расхождение больше сантиметра — уже овал.
+  const defaults = objectCatalogDefaults("washer");
+  const across = drum.width * defaults.widthMm;
+  const tall = drum.height * defaults.heightMm;
+  assert.ok(Math.abs(across - tall) <= 10, "барабан вышел овальным: " + across + " × " + tall);
+  // Люк — круг в лице, и он плоский: это окно, а не второй выступающий цилиндр.
+  const hatch = parts.find((part) => part.name === "hatch");
+  assert.equal(hatch.kind, "tube");
+  assert.ok(hatch.depth <= 0.1, "люк выпирает из лица машины: " + hatch.depth);
+  assert.equal(bodies("washer"), bodies("dryerMachine"), "машины разошлись телами");
+});
+
+test("у душа нет поддона, и он по-прежнему стоит на полу", () => {
+  // «У Душа убери поддон» (G262). Решение таска 154 «душ стоит на полу»
+  // остаётся: стойка начинается от нуля.
+  const parts = bodies("shower");
+  assert.ok(!parts.some((part) => part.name === "tray"), "поддон вернулся");
+  assert.ok(
+    parts.some((part) => part.z === 0),
+    "душ повис: ни одно тело не стоит на полу",
+  );
+});
+
+test("люстра заняла свой габарит и обрела ярус", () => {
+  // «а люстру сделай побольше и посимпатичнее» (G262). Модель у точечных типов
+  // света одна, и разводит их габарит, — поэтому «побольше» здесь значит
+  // «выше и шире в своих долях», а не второй ключ.
+  const parts = bodies("lamp");
+  const shade = parts.find((part) => part.name === "shade");
+  const tier = parts.find((part) => part.name === "tier");
+  const rod = parts.find((part) => part.name === "rod");
+  assert.ok(shade && tier && rod, "у светильника нет яруса или подвеса");
+  assert.equal(shade.width, 1, "плафон уже габарита");
+  assert.ok(shade.height + tier.height >= 0.7, "плафон занял меньше трёх четвертей высоты");
+  assert.ok(rod.width <= 0.12, "подвес остался толстым: " + rod.width);
+  assert.ok(
+    objectModelFaceCount(objectModelByKey("lamp")) <= OBJECT_MODEL_FACE_MAX,
+    "люстра вышла за предел граней",
+  );
+});
+
+test("лежачий цилиндр — замкнутое тело, и все его грани смотрят наружу", () => {
+  // Новый вид тела строит грани сам, минуя призмы, и ошибка в обходе дала бы
+  // вещь, половина которой не видна с одной стороны и не видна насквозь с
+  // другой. Поймать это глазами можно, но только зная, куда смотреть.
+  const frame = {
+    at: { x: 1000, y: 2000 },
+    bottomMm: 0,
+    u: { x: 1, y: 0 },
+    f: { x: 0, y: -1 },
+    widthMm: 600,
+    depthMm: 600,
+    heightMm: 850,
+  };
+  for (const axis of ["x", "y"]) {
+    const part = { kind: "tube", axis, name: "drum", material: "body", lit: false, x: -0.4, width: 0.8, y: -0.4, depth: 0.74, z: 0.2, height: 0.56 };
+    const faces = volumeTubeFaces(frame, part, [120, 120, 120]);
+    assert.equal(faces.length, MODEL_CYL_SIDES + 2, "ось " + axis + ": граней не восемь с днищами");
+    const middle = { x: 0, y: 0, z: 0 };
+    let count = 0;
+    for (const face of faces) {
+      for (const point of face.p) {
+        middle.x += point.x;
+        middle.y += point.y;
+        middle.z += point.z;
+        count += 1;
+      }
+    }
+    middle.x /= count;
+    middle.y /= count;
+    middle.z /= count;
+    for (const face of faces) {
+      const mid = { x: 0, y: 0, z: 0 };
+      for (const point of face.p) {
+        mid.x += point.x / face.p.length;
+        mid.y += point.y / face.p.length;
+        mid.z += point.z / face.p.length;
+      }
+      const away =
+        face.n.x * (mid.x - middle.x) + face.n.y * (mid.y - middle.y) + face.n.z * (mid.z - middle.z);
+      assert.ok(away > 0, "ось " + axis + ": грань смотрит внутрь тела");
     }
   }
 });
@@ -346,15 +457,46 @@ function printOf(model) {
           const inZ = 1 - b >= part.z && 1 - b <= part.z + part.height;
           const spanX = Math.abs(a - (part.x + part.width / 2)) <= part.width / 2;
           const spanY = Math.abs(a - (part.y + part.depth / 2)) <= part.depth / 2;
+          // Лежачий цилиндр (таск 177) в проекции **поперёк своей оси** —
+          // круг, и ровно этим круглое зеркало отличается от плиты на стене.
+          // Вдоль оси он прямоугольник, как и всё остальное.
+          const round = (ca, ra, cb, rb, pa, pb) => {
+            const da = ra > 0 ? (pa - ca) / ra : 0;
+            const db = rb > 0 ? (pb - cb) / rb : 0;
+            return da * da + db * db <= 1;
+          };
+          const tubeFace = (acrossIn) =>
+            round(
+              part.x + part.width / 2,
+              part.width / 2,
+              part.z + part.height / 2,
+              part.height / 2,
+              acrossIn ? a : 0,
+              1 - b,
+            );
           // Цилиндр в проекции на свою ось шире прямоугольника не бывает,
           // поэтому для двух боковых видов хватает той же полосы.
           let hit = false;
           let depth = 0;
           if (axes === "front") {
-            hit = (part.kind === "cyl" ? spanX : inX) && inZ;
+            if (part.kind === "tube") {
+              hit =
+                part.axis === "y"
+                  ? tubeFace(true)
+                  : inX && round(part.y + part.depth / 2, part.depth / 2, part.z + part.height / 2, part.height / 2, 0, 1 - b);
+            } else {
+              hit = (part.kind === "cyl" ? spanX : inX) && inZ;
+            }
             depth = part.y;
           } else if (axes === "side") {
-            hit = (part.kind === "cyl" ? spanY : inY) && inZ;
+            if (part.kind === "tube") {
+              hit =
+                part.axis === "x"
+                  ? round(part.y + part.depth / 2, part.depth / 2, part.z + part.height / 2, part.height / 2, a, 1 - b)
+                  : inY && round(part.x + part.width / 2, part.width / 2, part.z + part.height / 2, part.height / 2, 0, 1 - b);
+            } else {
+              hit = (part.kind === "cyl" ? spanY : inY) && inZ;
+            }
             depth = part.x;
           } else {
             const fx = a;
