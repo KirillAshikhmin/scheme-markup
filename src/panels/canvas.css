@@ -121,7 +121,13 @@
    ниже и забирает свою половину ширины, вторая половина остаётся соседке.
    Свёрнутые остаются в самом ряду: они там и есть кнопки. */
 #app.is-mobile .canvas-hint:not(.is-collapsed) {
-  top: calc(48px + var(--canvas-hint-inset, 0px));
+  /* «Строкой ниже» — это ниже угловой кнопки, и мера у них одна (таск 166):
+     отступ от края, сама кнопка и промежуток. Своим числом здесь плашка
+     разъехалась бы с кнопкой, стоит той подрасти. */
+  top: calc(
+    var(--canvas-corner-edge) + var(--canvas-corner-size) + var(--canvas-corner-gap) +
+      var(--canvas-hint-inset, 0px)
+  );
   /* Линейка занимает полосу слева, и на неё же сдвинута сама плашка: вычесть
      её надо и из ширины, иначе левая половина заезжает на правую. */
   max-width: calc(50% - 20px - var(--canvas-hint-inset, 0px));
@@ -132,18 +138,38 @@
   max-width: calc(50% - 20px);
 }
 
-/* Полный экран — зеркало свёрнутой подсказки: тот же размер, та же рамка, тот
-   же отступ от края. Линейка идёт сверху и слева, поэтому правому краю
-   поправка не нужна, а верхнему — та же, что у подсказки. */
-.canvas-full {
+/* ——— угловые кнопки поля ————————————————————————————————————————————————
+   Мера угла живёт здесь и только здесь. С таска 166 в правом верхнем углу их
+   две — полный экран и, ровно под ним, смена вида в «Объёме» (G245), — а стоят
+   они в разных файлах: кнопка полного экрана собирается наложением холста,
+   кнопка вида — самим полем объёма. Своё число у второй значило бы, что
+   поправь первую — и столбик разъедется.
+
+   Отступ от линейки в счёт не входит: линейку рисует только план, в «Объёме»
+   `canvasHintInset` даёт ноль, и поправка остаётся у тех, кто над планом. */
+#app {
+  --canvas-corner-size: 26px;
+  --canvas-corner-edge: 12px;
+  /* Промежуток между кнопками столбика: палец, тянущийся к виду, не должен
+     попадать в полный экран. */
+  --canvas-corner-gap: 6px;
+}
+
+/* Палец крупнее курсора — кнопки угла подрастают вместе с остальными. */
+#app.is-mobile {
+  --canvas-corner-size: 30px;
+}
+
+/* Рисунок угловой кнопки — зеркало свёрнутой подсказки: тот же размер, та же
+   рамка, та же заливка. Место у каждой своё, и только оно живёт в её
+   собственном правиле. */
+.canvas-corner {
   position: absolute;
-  right: 12px;
-  top: calc(12px + var(--canvas-hint-inset, 0px));
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: var(--canvas-corner-size);
+  height: var(--canvas-corner-size);
   padding: 0;
   border: 1px solid var(--canvas-line);
   border-radius: 5px;
@@ -153,18 +179,20 @@
   pointer-events: auto;
 }
 
-.canvas-full:hover,
-.canvas-full:focus-visible {
+.canvas-corner:hover,
+.canvas-corner:focus-visible {
   color: var(--accent);
 }
 
-.canvas-full .ui-icon {
+.canvas-corner .ui-icon {
   --ui-icon: 16px;
 }
 
-#app.is-mobile .canvas-full {
-  width: 30px;
-  height: 30px;
+/* Полный экран — первая ячейка угла. Линейка идёт сверху и слева, поэтому
+   правому краю поправка не нужна, а верхнему — та же, что у подсказки. */
+.canvas-full {
+  right: var(--canvas-corner-edge);
+  top: calc(var(--canvas-corner-edge) + var(--canvas-hint-inset, 0px));
 }
 
 /* ——— переключатель режимов (таск 153, G219) ——————————————————————————————
@@ -254,7 +282,9 @@
    Ширина не доходит до середины: там переключатель режимов. */
 .canvas-hint.canvas-hint--info {
   left: auto;
-  right: 46px;
+  /* Полоса под угловые кнопки — их же мера плюс промежуток (таск 166): своим
+     числом сводка наехала бы на полный экран, стоит кнопке подрасти. */
+  right: calc(var(--canvas-corner-edge) + var(--canvas-corner-size) + 8px);
   max-width: min(360px, calc(50% - 158px), calc(100% - 96px));
   flex-direction: row-reverse;
   border-left-width: 1px;
@@ -276,7 +306,7 @@
 
 /* Свёрнутая сводка — одна кнопка, как и свёрнутая подсказка. */
 .canvas-hint.canvas-hint--info.is-collapsed {
-  right: 46px;
+  right: calc(var(--canvas-corner-edge) + var(--canvas-corner-size) + 8px);
 }
 
 /* ——— карточка выделенной метки (просмотр) ————————————————————————————

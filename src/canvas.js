@@ -4224,7 +4224,9 @@ function mountCanvasFullscreen(host, api) {
   // раз тем же жестом нечем.
   let denied = false;
   const button = uiEl("button", {
-    class: "canvas-full",
+    // Рисунок и размер — общие для угловых кнопок поля (`.canvas-corner`), своё
+    // у этой только место: первая ячейка угла (таск 166).
+    class: "canvas-corner canvas-full",
     type: "button",
     on: {
       click: () => {
