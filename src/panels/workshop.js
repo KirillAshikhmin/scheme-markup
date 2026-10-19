@@ -111,9 +111,6 @@ import {
   planPixelsPerMeter,
   planSizeMeters,
   roomsInOrder,
-  SCHEME_FLOOR_MAX,
-  SCHEME_FLOOR_MIN,
-  schemeFloorOf,
   schemeObjectCorners,
   schemeObjectKeyOf,
   schemeObjectMountOf,
@@ -124,7 +121,6 @@ import {
   setPlanOrigin,
   setPlanScale,
   setRoomWallHeight,
-  setSchemeFloor,
   setSchemeWallHeight,
   updateOpening,
   updateScheme,
@@ -1874,16 +1870,10 @@ function createWorkshop({ api, hosts }) {
     event.preventDefault();
     applySchemeHeight();
   });
-  // Этаж схемы (таск 149). Живёт здесь, а не в панели схем: поле правит объект,
-  // а мастерская — единственное место, где у схемы правят её собственные
-  // величины (высота стен стоит строкой ниже и по той же причине).
-  const floorInput = workshopNumber(SCHEME_FLOOR_MIN, SCHEME_FLOOR_MAX);
-  floorInput.addEventListener("change", () => applySchemeFloor());
-  floorInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    applySchemeFloor();
-  });
+  // Этажа здесь больше нет (таск 170, G254). Слова заказчика: «Этаж этой схемы
+  // — вынеси из отдельного параметра вообще в параметры схемы». Поле стоит в
+  // свойствах схемы (`panels/schemes.js`), где у неё правят имя и масштаб;
+  // раздел «Схемы» виден во всех трёх режимах, и из чертежа до него один клик.
   const roomsList = uiEl("div", { class: "workshop__rooms" });
 
   const side = uiEl("div", { class: "workshop__side" }, [
@@ -1912,14 +1902,6 @@ function createWorkshop({ api, hosts }) {
       objectFields,
       subjectNote,
       removeButton,
-    ]),
-    uiEl("div", { class: "workshop__group" }, [
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.floor }),
-      uiEl("label", { class: "workshop__field" }, [
-        uiEl("span", { class: "workshop__label", text: strings.workshop.floorScheme }),
-        floorInput,
-      ]),
-      uiEl("p", { class: "workshop__note", text: strings.workshop.floorHint }),
     ]),
     uiEl("div", { class: "workshop__group" }, [
       uiEl("h4", { class: "workshop__head", text: strings.workshop.height }),
@@ -2658,17 +2640,6 @@ function createWorkshop({ api, hosts }) {
       const result = setSchemeWallHeight(project(), schemeId, heightInput.value);
       if (!result.changed) return;
       commit(result.project, strings.history.wallHeight);
-    } catch (error) {
-      fail(error);
-      sync();
-    }
-  }
-
-  function applySchemeFloor() {
-    try {
-      const result = setSchemeFloor(project(), schemeId, floorInput.value);
-      if (!result.changed) return;
-      commit(result.project, strings.history.schemeFloor);
     } catch (error) {
       fail(error);
       sync();
@@ -3852,10 +3823,6 @@ function createWorkshop({ api, hosts }) {
     if (document.activeElement !== heightInput) {
       const own = findScheme(current, schemeId);
       heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
-    }
-    if (document.activeElement !== floorInput) {
-      const floor = schemeFloorOf(current, schemeId);
-      floorInput.value = floor === null ? "" : String(floor);
     }
     syncRooms(current);
     syncElevation(current, wall);
