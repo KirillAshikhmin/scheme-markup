@@ -162,6 +162,47 @@
   color: var(--panel-muted);
 }
 
+/* ——— поля в окне (таск 170) ———————————————————————————————————————————
+   Свойства схемы — первое окно сборки, где полей больше одного: имя и этаж.
+   Подписи встают колонкой одной ширины, поля — остатком строки: иначе «Имя» и
+   «Этаж» разъехались бы по разным отступам, а короткое числовое поле этажа
+   растянулось бы на всю карточку. */
+.modal__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.modal__field > span {
+  flex: 0 0 auto;
+  min-width: 56px;
+}
+
+.modal__field > .ui-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Отказ модели (например «Этаж — целое число») остаётся в окне строкой: окно
+   не закрывается, и набранное не теряется. Пустая строка места не занимает. */
+.modal__error {
+  margin: 8px 0 0;
+  color: #ff9aa2;
+  font-size: 12px;
+}
+
+.modal__error:empty {
+  display: none;
+}
+
 .modal__actions {
   display: flex;
   justify-content: flex-end;

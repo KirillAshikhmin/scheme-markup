@@ -63,15 +63,21 @@ const PICKER_COLUMN_GAP = 14;
 const PICKER_MODAL_SHARE = 0.96;
 const PICKER_MODAL_CHROME = 40;
 
-// Сколько колонок помещается в экран шириной `width`.
-export function pickerColumnLimit(width) {
+// Сколько колонок помещается в экран шириной `width`. Мера колонки — довод:
+// у окна вещей чертежа (`objectPicker.js`) колонка шире, потому что в ней
+// стоят плитки, а не строки.
+export function pickerColumnLimit(width, columnMin = PICKER_COLUMN_MIN) {
   const usable = Math.max(0, Number(width) || 0) * PICKER_MODAL_SHARE - PICKER_MODAL_CHROME;
-  const fits = Math.floor((usable + PICKER_COLUMN_GAP) / (PICKER_COLUMN_MIN + PICKER_COLUMN_GAP));
+  const fits = Math.floor((usable + PICKER_COLUMN_GAP) / (columnMin + PICKER_COLUMN_GAP));
   return Math.max(1, Math.min(PICKER_MAX_COLUMNS, fits));
 }
 
 // Высота категории в строках: заголовок плюс её типы. Точные пиксели здесь не
 // нужны — раскладка решает, что с чем встанет в одну колонку, а не рисует.
+//
+// Мера высоты — довод раскладки, а не её устройство: окно вещей чертежа
+// считает ряды плиток (`objectPickerWeight`), и обоим окнам хватает одной
+// раскладки. Второго такого механизма в сборке быть не должно.
 function pickerWeight(group) {
   return 1 + (group && Array.isArray(group.types) ? group.types.length : 0);
 }
@@ -79,11 +85,11 @@ function pickerWeight(group) {
 // Категории кладутся в колонку подряд, пока та не станет выше `height`.
 // Порядок справочника сохраняется: колонка читается сверху вниз, колонки —
 // слева направо, «Свет» по-прежнему первый, «Щит» последний.
-function pickerFill(groups, height) {
+function pickerFill(groups, height, weightOf) {
   const columns = [];
   let filled = 0;
   for (const group of groups) {
-    const weight = pickerWeight(group);
+    const weight = weightOf(group);
     if (columns.length > 0 && filled + weight <= height) {
       columns[columns.length - 1].push(group);
       filled += weight;
@@ -101,18 +107,18 @@ function pickerFill(groups, height) {
 // зияла пустая половина окна. Здесь колонка набивается подряд до высоты самой
 // длинной категории: пустых мест между категориями не остаётся, а колонок
 // выходит ровно столько, сколько понадобилось, — не больше `limit`.
-export function pickerLayout(groups, limit = PICKER_MAX_COLUMNS) {
+export function pickerLayout(groups, limit = PICKER_MAX_COLUMNS, weightOf = pickerWeight) {
   const list = Array.isArray(groups) ? groups.filter(Boolean) : [];
   if (list.length === 0) return [];
   const cap = Math.max(1, Math.floor(Number(limit)) || 1);
-  const total = list.reduce((sum, group) => sum + pickerWeight(group), 0);
-  let height = Math.max(...list.map(pickerWeight));
-  let columns = pickerFill(list, height);
+  const total = list.reduce((sum, group) => sum + weightOf(group), 0);
+  let height = Math.max(...list.map(weightOf));
+  let columns = pickerFill(list, height, weightOf);
   // Категорий больше, чем колонок помещается в окно, — колонка становится
   // выше, и лишние уходят под соседние, а не за край экрана.
   while (columns.length > cap && height < total) {
     height += 1;
-    columns = pickerFill(list, height);
+    columns = pickerFill(list, height, weightOf);
   }
   return columns;
 }

@@ -22,6 +22,8 @@ import {
   setSectionBadge,
 } from "../app.js";
 import {
+  SCHEME_FLOOR_MAX,
+  SCHEME_FLOOR_MIN,
   addScheme,
   clearPlanScale,
   drawingCounts,
@@ -32,9 +34,11 @@ import {
   planScaleOf,
   planSizeMeters,
   replaceSchemeImage,
+  schemeFloorOf,
   schemesInOrder,
   setPlanOrigin,
   setPlanScale,
+  setSchemeFloor,
   updateMark,
   updateOutline,
   updateScheme,
@@ -61,7 +65,7 @@ import {
 } from "../imagePrep.js";
 import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { volumeAllowed } from "./volume.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
@@ -182,6 +186,24 @@ export function applyPlanEdit(project, schemeId, { imageId, width, height, trans
  * «а как его задать?», хотя нажатие и было ответом. Состояние осталось в
  * подсказке — его читают, когда хотят знать, а не когда ищут, за что нажать.
  */
+/**
+ * Строка под именем схемы: этаж и размер плана (таск 170, G254).
+ *
+ * Этаж стоит **первым** нарочно: в узкой колонке строка ужимается многоточием,
+ * и обрезать надо размер плана (он же в подсказке и в окне масштаба), а не
+ * номер этажа — ради него эта строка и выросла. Этажа нет — нет и слова о нём:
+ * объект, которому этажей не задавали, выглядит ровно как вчера (G68).
+ */
+export function schemesRowMeta(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  if (!scheme) return "";
+  const plan = scheme.imageId
+    ? text("schemes.size", { width: scheme.width, height: scheme.height })
+    : strings.schemes.noImage;
+  const floor = schemeFloorOf(project, schemeId);
+  return floor === null ? plan : text("schemes.metaFloor", { floor, plan });
+}
+
 export function schemesScaleView(project, schemeId, name) {
   const scale = planScaleOf(project, schemeId);
   const size = planSizeMeters(project, schemeId);
@@ -764,11 +786,10 @@ function mountSchemesPanel(host, api) {
       const row = uiEl("div", {
         class: "scheme-row" + (scheme.id === state.schemeId ? " scheme-row--current" : ""),
       });
-      // Размеры плана стоят в узкой колонке рядом с рядом кнопок и при длинном
-      // числе ужимаются многоточием — поэтому то же самое лежит в подсказке.
-      const meta = scheme.imageId
-        ? text("schemes.size", { width: scheme.width, height: scheme.height })
-        : strings.schemes.noImage;
+      // Этаж и размеры плана стоят в узкой колонке рядом с рядом кнопок и при
+      // длинном числе ужимаются многоточием — поэтому то же самое лежит в
+      // подсказке.
+      const meta = schemesRowMeta(project, scheme.id);
       row.append(
         uiEl("button", {
           class: "scheme-row__name",
@@ -792,7 +813,11 @@ function mountSchemesPanel(host, api) {
               },
             },
           }),
-          uiIconButton("edit", { title: strings.schemes.rename, on: { click: () => renameScheme(scheme.id) } }),
+          // Карандаш открывает **свойства схемы** (таск 170, G254): имя и этаж
+          // в одном окне. Прежде он открывал только имя, а этаж стоял полем в
+          // мастерской чертежа — заказчик попросил «вынести его вообще в
+          // параметры схемы», и параметры схемы живут здесь.
+          uiIconButton("edit", { title: strings.schemes.props, on: { click: () => editSchemeProps(scheme.id) } }),
           uiIconButton("up", {
             title: strings.schemes.up,
             attrs: index === 0 ? { disabled: "disabled" } : {},
@@ -1218,13 +1243,101 @@ function mountSchemesPanel(host, api) {
     }
   }
 
-  async function renameScheme(schemeId) {
-    const project = getState().project;
-    const scheme = findScheme(project, schemeId);
+  /**
+   * Свойства схемы: имя и этаж (таск 170, требование G254).
+   *
+   * Слова заказчика: «Этаж этой схемы — вынеси из отдельного параметра вообще в
+   * параметры схемы». Параметры схемы живут в этой панели, и правят их окнами —
+   * имя, масштаб, подложка, удаление: окно здесь не новый язык, а тот же.
+   * Поэтому карандаш, открывавший одно имя, открывает теперь свойства, а в
+   * колонке чертежа поля этажа больше нет вовсе.
+   *
+   * **Этаж остаётся необязательным** (G68, решение таска 149): пустое поле
+   * удаляет ключ `floor`, а не кладёт в него `null`, — объект, которому этажей
+   * не задавали, упаковывается байт в байт прежним. Проверку числа делает
+   * модель (`setSchemeFloor`), и её отказ остаётся в окне строкой: закрыть окно
+   * и потерять набранное из-за опечатки в этаже человек не должен.
+   */
+  function editSchemeProps(schemeId) {
+    const scheme = findScheme(getState().project, schemeId);
     if (!scheme) return;
-    const name = await uiPrompt({ title: strings.schemes.renameTitle, value: scheme.name });
-    if (!name || name === scheme.name) return;
-    setState({ project: updateScheme(getState().project, schemeId, { name }).project });
+    let modal = null;
+    const nameInput = uiEl("input", { class: "ui-input", type: "text", value: scheme.name });
+    const floorInput = uiEl("input", {
+      class: "ui-input",
+      type: "number",
+      placeholder: strings.schemes.floorNone,
+      attrs: {
+        min: String(SCHEME_FLOOR_MIN),
+        max: String(SCHEME_FLOOR_MAX),
+        step: "1",
+        inputmode: "numeric",
+      },
+    });
+    const floor = schemeFloorOf(getState().project, schemeId);
+    floorInput.value = floor === null ? "" : String(floor);
+    const error = uiEl("p", { class: "modal__error" });
+    const body = uiEl("div", {}, [
+      uiEl("div", { class: "modal__fields" }, [
+        uiEl("label", { class: "modal__field" }, [
+          uiEl("span", { text: strings.schemes.propsName }),
+          nameInput,
+        ]),
+        uiEl("label", { class: "modal__field" }, [
+          uiEl("span", { text: strings.schemes.floor }),
+          floorInput,
+        ]),
+      ]),
+      uiEl("p", { class: "modal__hint", text: strings.schemes.floorHint }),
+      error,
+    ]);
+    // Enter в поле имени — то же, что «Готово»: окно открывают ради имени чаще
+    // всего, и лишний щелчок мышью тут ни к чему.
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      apply();
+    });
+
+    function apply() {
+      const base = getState().project;
+      const own = findScheme(base, schemeId);
+      if (!own) {
+        modal.close();
+        return;
+      }
+      // Этаж проверяется **первым**: мусор в нём не должен оставить схему
+      // переименованной наполовину.
+      let floored;
+      try {
+        floored = setSchemeFloor(base, schemeId, floorInput.value);
+      } catch (failure) {
+        error.textContent = failure.message;
+        floorInput.focus();
+        return;
+      }
+      const name = nameInput.value.trim();
+      // Этаж идёт шагом истории — как и в мастерской, откуда поле переехало;
+      // имя шага истории не знало и до сегодня, и менять это правило таском
+      // про место поля не стоит.
+      if (floored.changed) {
+        canvasCommit(base, floored.project, strings.history.schemeFloor, { schemeId });
+      }
+      if (name !== "" && name !== own.name) {
+        setState({ project: updateScheme(getState().project, schemeId, { name }).project });
+      }
+      modal.close();
+    }
+
+    modal = uiModal({
+      title: strings.schemes.props,
+      body,
+      actions: [
+        uiButton(strings.dialog.cancel, { on: { click: () => modal.close() } }),
+        uiButton(strings.dialog.save, { class: "ui-btn ui-btn--accent", on: { click: () => apply() } }),
+      ],
+    });
+    nameInput.select();
   }
 
   function moveScheme(schemeId, delta) {

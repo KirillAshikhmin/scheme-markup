@@ -3473,8 +3473,10 @@ export function labelLayout(project, scheme, filter, view) {
 // и уводить руку в колонку ради этого незачем. Панель к тому же скрыта на
 // узком экране, а холст виден всегда.
 
-// Радиус ручки: как у ручек блока, чтобы попадать по ней не целясь.
-const LABEL_TURN_RADIUS = 9;
+// Радиус ручки: как у ручек блока, чтобы попадать по ней не целясь. Вынесен
+// наружу — им же меряется ручка поворота вещи чертежа (таск 168): ручка одна
+// и та же, и мера у неё одна.
+export const LABEL_TURN_RADIUS = 9;
 
 // Цель подписи, которой принадлежит метка: у блока — его группа (подпись одна
 // на всех), у одиночной метки — она сама. Скрытая фильтром метка цели не имеет.
@@ -4759,6 +4761,12 @@ export const DRAWING_EDGE = "#0f1419";
 export const DRAWING_PAPER = "#f6f8fa";
 export const DRAWING_OBJECT = "#6639ba";
 export const DRAWING_OBJECT_FILL = "rgba(102, 57, 186, 0.12)";
+
+// Чем призрак отличается от вещи, и только этим (таск 168): пунктирный контур
+// и полсилы цвета. Всё остальное — заливка, толщина, подпись — у него общее с
+// тем, что встанет по клику.
+export const DRAWING_GHOST_ALPHA = 0.7;
+export const DRAWING_GHOST_DASH = [5, 4];
 export const DRAWING_ACTIVE = "#1f6feb";
 export const DRAWING_BAD = "#d1242f";
 export const DRAWING_CAPTION = "#57606a";
@@ -5144,10 +5152,24 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
   options.handle(ctx, tip);
 }
 
-function drawDrawingObject(ctx, bridge, object, options = {}) {
+/**
+ * Вещь чертежа: габарит заливкой, контур и подпись с именем над ним.
+ *
+ * `options.ghost` — та же вещь **до** постановки (таск 168): заливка, контур и
+ * подпись те же самые, контур пунктирный, и всё это вполсилы. Вынесено
+ * наружу и зовётся из мастерской потому, что призрак обязан быть нарисован
+ * **этим же кодом**: до таска 168 он рисовался своим — голый пунктир без
+ * заливки и без имени, зато с числами поперёк самого габарита, — и вещь,
+ * вставшая по клику, выглядела иначе, чем обещанная. У радиатора 1200 × 100
+ * коробка габарита выходит 90 × 7 точек, а строка чисел поверх неё — 75 × 12:
+ * подпись крупнее того, что подписывает, и закрывает его целиком.
+ */
+export function drawDrawingObject(ctx, bridge, object, options = {}) {
   const colour = options.active ? DRAWING_ACTIVE : DRAWING_OBJECT;
   const corners = schemeObjectCorners(object).map((point) => bridge.toScreen(point));
   if (corners.length < 2) return;
+  ctx.save();
+  if (options.ghost) ctx.globalAlpha = DRAWING_GHOST_ALPHA;
   if (object.shape === "polyline") {
     ctx.lineCap = "butt";
     ctx.lineJoin = "round";
@@ -5156,6 +5178,7 @@ function drawDrawingObject(ctx, bridge, object, options = {}) {
     drawDrawingPath(ctx, corners);
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = colour;
+    if (options.ghost) ctx.setLineDash(DRAWING_GHOST_DASH);
     drawDrawingPath(ctx, corners);
   } else {
     ctx.beginPath();
@@ -5165,9 +5188,13 @@ function drawDrawingObject(ctx, bridge, object, options = {}) {
     ctx.fill();
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = colour;
+    if (options.ghost) ctx.setLineDash(DRAWING_GHOST_DASH);
     ctx.stroke();
   }
+  // Подпись пунктиром не пишется: штрихом держится только контур.
+  ctx.setLineDash([]);
   drawDrawingCaption(ctx, object, corners, options.name, bridge);
+  ctx.restore();
   if (!options.active || !options.handle) return;
   for (const point of corners) options.handle(ctx, point);
 }
