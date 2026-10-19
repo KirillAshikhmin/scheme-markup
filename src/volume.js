@@ -1850,7 +1850,10 @@ export function volumeModelPrisms(frame, parts) {
     // здесь он пропускается — иначе барабан стиральной машины молча стал бы
     // коробкой, то есть ровно тем, на что заказчик и указал.
     if (part.kind === "tube") continue;
-    const bottomMm = frame.bottomMm + part.z * frame.heightMm;
+    // Полотно шторы висит **до пола** (таск 177, G261): верх из долей, низ —
+    // ноль. Это единственное тело, которое выходит из габарита, и выходит оно
+    // по признаку в описании, а не по догадке интерпретатора.
+    const bottomMm = part.toFloor ? 0 : frame.bottomMm + part.z * frame.heightMm;
     const topMm = frame.bottomMm + (part.z + part.height) * frame.heightMm;
     const corners = [];
     if (part.kind === "cyl") {

@@ -807,7 +807,20 @@ const TEMPLATE_TYPES = [
   { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", view: "drain", sizes: { length: 110, width: 110, depth: 40, heightAboveFloor: 100 } },
   { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, depth: 60, heightAboveFloor: 400 } },
   { category: "light", code: "ПЛ", name: strings.types.stairLight, kind: "line", lineStyle: "meander", sizes: { length: 40, width: 40, depth: 10, heightAboveFloor: 100 } },
-  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring", sizes: { length: 300, width: 60, depth: 25, heightAboveFloor: 1600 } },
+  // Подсветка зеркала (таск 177, G262: «Метку Подсветка зеркала отрисовывай как
+  // зеркало, круглое»). Габарит стал габаритом **зеркала**: 600 × 600 при
+  // выступе 30 и середине на 1600 — круглое зеркало над раковиной с подсветкой
+  // по контуру, то самое, что заказчик и просит рисовать. Было 300 × 60 × 25 —
+  // габарит светодиодной полосы, из которого круглое зеркало выходит овалом.
+  //
+  // Это **умолчание**, а не правка размеченного: у метки с заполненными
+  // размерами ничего не меняется (G68), а у типа, у которого размеров нет
+  // вовсе, их подтянет `fillTypeSizes` по коду — как и у остальных типов.
+  //
+  // Имя изображения стоит рядом со знаком нарочно: знак «кольцо» ведёт на
+  // зеркало сам (`objectViews/light.js`), и поле `view` держит зеркало за
+  // типом даже у того, кто поменяет знак.
+  { category: "light", code: "ПЗ", name: strings.types.mirrorLight, shape: "circle-ring", view: "mirror", sizes: { length: 600, width: 600, depth: 30, heightAboveFloor: 1600 } },
   { category: "appliances", code: "КАМ", name: strings.types.camera, shape: "diamond-ring", sizes: { length: 120, width: 80, depth: 70, heightAboveFloor: 2300 } },
   // Вентиляция (G206). Слова заказчика: «это просто вентиляционный вентилятор,
   // как обычно в санузлах ставят».

@@ -388,6 +388,59 @@ test("люстра заняла свой габарит и обрела ярус
   );
 });
 
+test("подсветка зеркала — круглое зеркало, и знак ведёт на него", () => {
+  // «Метку Подсветка зеркала отрисовывай как зеркало, круглое» (G262). Знак
+  // «кольцо» обязан приводить зеркало сам: имён изображений у заказчика в
+  // объекте нет ни одного, а формы проставлены, — иначе правка не доехала бы
+  // до уже размеченного чертежа (G68).
+  const view = objectViewForShape("circle-ring");
+  assert.ok(view, "у кольца нет изображения");
+  assert.equal(view.name, "mirror", "кольцо разобрано не зеркалом: " + view.name);
+  const model = objectModelByKey(view.name);
+  assert.ok(model, "у зеркала нет модели");
+  // Оба тела — лежачие цилиндры осью в стену: ею круг и ложится на лицо.
+  for (const part of model.parts) {
+    assert.equal(part.kind, "tube", part.name + ": зеркало собрано не лежачим цилиндром");
+    assert.equal(part.axis, "y", part.name + ": ось зеркала смотрит не в стену");
+  }
+  // И круглым оно выходит на умолчаниях справочника: 600 × 600 габарита дают
+  // круг, а не овал.
+  const type = defaultTemplate().markTypes.find((item) => item.code === "ПЗ");
+  assert.equal(typeObjectView(type), "mirror", "имя изображения у ПЗ не стоит");
+  assert.equal(type.sizes.length, 600, "габарит зеркала не квадратный");
+  assert.equal(type.sizes.width, 600, "габарит зеркала не квадратный");
+  const glass = model.parts.find((part) => part.name === "glass");
+  assert.equal(glass.width * type.sizes.length, glass.height * type.sizes.width, "стекло вышло овальным");
+  // А светильник кольца лишился, но своих четырёх знаков не потерял.
+  assert.equal(objectViewForShape("circle-cross").name, "lamp");
+  assert.equal(objectViewForShape("circle-rays").name, "lamp");
+});
+
+test("карниз штор висит шторами до пола", () => {
+  // «Карниз штор, метку — отрисовывай как шторы на объеме» (G261). Полотно
+  // выходит из габарита вниз — это единственное такое тело в сборке, и
+  // проверяется оно числами: низ полотна на нуле, верх — под трубой карниза.
+  const scene = wallMark("КШ");
+  const place = volumeMarkPlacement(scene.project, scene.mark, []);
+  assert.ok(place && place.model, "у карниза нет модели");
+  const prisms = volumeModelPrisms(place.frame, place.model.parts);
+  const folds = prisms.filter((prism) => prism.name.startsWith("fold"));
+  const rod = prisms.find((prism) => prism.name === "rod");
+  assert.equal(folds.length, 3, "складок не три");
+  assert.ok(rod, "трубы карниза нет");
+  for (const fold of folds) {
+    assert.equal(fold.bottomMm, 0, "полотно не доходит до пола");
+    assert.ok(fold.topMm > 2300, "полотно начинается не у карниза: " + fold.topMm);
+    assert.ok(fold.topMm <= rod.bottomMm + 1, "полотно залезло на трубу");
+  }
+  // Сам карниз из габарита не вышел: выделение, рамка и размеры в колонке
+  // по-прежнему считаются по нему.
+  assert.ok(rod.bottomMm > 2300, "труба карниза уехала из габарита");
+  // Складки разведены по глубине — тем и читается ткань.
+  const depths = new Set(folds.map((fold) => Math.round(fold.corners[0].y)));
+  assert.ok(depths.size > 1, "складки встали в одну плоскость");
+});
+
 test("лежачий цилиндр — замкнутое тело, и все его грани смотрят наружу", () => {
   // Новый вид тела строит грани сам, минуя призмы, и ошибка в обходе дала бы
   // вещь, половина которой не видна с одной стороны и не видна насквозь с
