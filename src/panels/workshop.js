@@ -153,8 +153,11 @@ import {
   DRAWING_EDGE,
   DRAWING_OBJECT,
   DRAWING_PAPER,
+  LABEL_TURN_RADIUS,
   drawDrawing,
+  drawDrawingObject,
   drawDrawingOpening,
+  drawLabelTurn,
   drawingDoorLeaf,
   drawingHitObject,
   drawingOpeningSpan,
@@ -878,6 +881,18 @@ export function workshopRectCornerPatch(object, index, pointMm) {
 /** Шаг кнопки и клавиши: четверть оборота. */
 export const WORKSHOP_TURN_STEP_DEG = 90;
 
+/**
+ * Шаг клавиш `Q` и `E` — половина четверти (таск 168, G249). Слова заказчика:
+ * «плюс поворот на 45 градусов сделай и при размещении объекта по Q/E».
+ *
+ * Четыре двери к одному числу остаются каждая при своём шаге, и шаги не
+ * спорят, а вкладываются друг в друга: `R` — 90°, `Q`/`E` — 45°, ручка — 15°,
+ * поле — любой целый градус. Косой угол 45° нужен ровно там, где его просят, —
+ * срезанный угол кухни, диван к углу комнаты, — и четвертью оборота он не
+ * набирается вовсе, а ручкой набирается тремя шагами по 15°.
+ */
+export const WORKSHOP_TURN_HALF_DEG = 45;
+
 /** Шаг руки — те же 15°, которыми магнит холста держит углы стен. */
 export const WORKSHOP_TURN_SNAP_DEG = 15;
 
@@ -886,10 +901,23 @@ export const WORKSHOP_TURN_WALL_MM = 3000;
 
 // Ручка поворота стоит **перед вещью**, в точках экрана от середины её переда:
 // ближе — садится на сам габарит, дальше — отрывается от вещи и читается как
-// чужая. Радиус тот же, что у ручки пути (`render.OUTLINE_HANDLE_PX`): рука у
-// человека одна.
+// чужая.
+//
+// Радиус — радиус ручки поворота подписи (`render.LABEL_TURN_RADIUS`), и
+// рисуется она тем же `drawLabelTurn` (таск 168, G250). Слова заказчика: «а
+// так же у объекта при выделении кнопка поворота, **как и у подписи метки**».
+// До этого таска ручек поворота в сборке было две, и разного в них было три
+// вещи: мера (7 точек против 9), рисунок (своё кольцо с дугой против белого
+// кружка со стрелкой на дуге) и ответ на клик без движения (вещь молчала,
+// подпись поворачивалась). Осталось одно отличие, и оно от места: ручка
+// подписи сидит на самой подписи, а ручке вещи до вещи 26 точек — поэтому у
+// неё есть поводок, иначе кружок в стороне читался бы ничьим.
 const WORKSHOP_TURN_GAP_PX = 26;
-const WORKSHOP_TURN_HANDLE_PX = 7;
+const WORKSHOP_TURN_HANDLE_PX = LABEL_TURN_RADIUS;
+
+// Отступ строки размеров под габаритом призрака: имя вещи стоит над ним на
+// восьми точках (`render.drawDrawingCaption`), размеры — под ним на восьми же.
+const WORKSHOP_GHOST_LINE_GAP_PX = 8;
 
 /** Угол в целых градусах одного оборота — правило модели (`schemeObjectTurnDeg`). */
 export function workshopTurnDeg(value) {
@@ -1037,6 +1065,36 @@ export function workshopObjectRectAt(sizes, pointMm) {
     depthMm: Number(sizes.depthMm),
     turnDeg: workshopTurnDeg(sizes.turnDeg),
   };
+}
+
+/**
+ * Куда встанет вещь по клику: **в ту самую точку, из которой нарисован
+ * призрак** (таск 168, G248).
+ *
+ * Жалоба заказчика «просто тыкаешь и куда-то рядом встало» оказалась буквальной
+ * и считается числами. Призрак считался из события движения руки, а клик — из
+ * события **отпускания** кнопки, и между ними разрешено до
+ * `WORKSHOP_DRAG_SLOP` = 3 точек: меньший сдвиг кликом и остаётся, иначе жест
+ * стал бы панорамой. Сами по себе эти три точки ничего не стоят — но притяжка
+ * к узлам сетки делит лист на клетки по 500 мм, и граница клетки шириной в
+ * одну точку проходит через каждую. Дрогнула рука на две точки поперёк такой
+ * границы — и вещь уехала на **полметра** от обещанного.
+ *
+ * Снято живьём на объекте заказчика (сетка 500 мм, 13,5 мм в точке экрана):
+ * рука стоит на `y = 384`, призрак показывает узел −500 мм; кнопка отпущена на
+ * `y = 382` — вещь встала на −1000 мм. Тот же клик без дрожи даёт −500 мм.
+ *
+ * Поэтому точка берётся у призрака, а не у события. Сырой курсор остаётся
+ * запасным путём для случая, когда призрака нет вовсе: палец на сенсорном
+ * экране касается, не наведя, и показать ему было нечего.
+ *
+ * `free` (зажатый Alt) снимает притяжку, и это признак самой точки, а не
+ * события: нажали Alt, не двинув рукой, — призрак про это не знает, и точка
+ * считается заново, по курсору.
+ */
+export function workshopPlacePointMm(ghost, free, cursorMm) {
+  if (!ghost || !ghost.pointMm || Boolean(ghost.free) !== Boolean(free)) return cursorMm;
+  return ghost.pointMm;
 }
 
 // ——— полоса правится как ломаная метки (таск 137, G194) ———————————————————
@@ -1595,7 +1653,11 @@ function createWorkshop({ api, hosts }) {
   // готовый прямоугольник — и он остался бы со старым углом, когда угол
   // поправили, не двигая руки: поле уже 90°, а под рукой по-прежнему 0°.
   // Найдено живым прогоном таска 164.
-  let objectGhostMm = null;
+  //
+  // `{pointMm, free}` (таск 168): рядом с точкой лежит примета Alt, которой
+  // она посчитана, — по ней `workshopPlacePointMm` решает, годится ли показанная
+  // точка для клика. Из этой же точки вещь и встаёт: что показано, то и встало.
+  let objectGhost = null;
   let drag = null;
   let pan = null;
   // Нажатие, которое ещё не решило, чем станет: клик занятия или панорама.
@@ -2117,7 +2179,7 @@ function createWorkshop({ api, hosts }) {
     if (tool === next) return;
     draft = null;
     ghost = null;
-    objectGhostMm = null;
+    objectGhost = null;
     press = null;
     // Выделение снимается вместе со сменой занятия: иначе поля выделенной
     // стены перебивали бы умолчания проёма, за которым человек и переключился.
@@ -2477,6 +2539,10 @@ function createWorkshop({ api, hosts }) {
     workshopObjectWay = way;
     workshopObjectSizes = keptTurn();
     draft = null;
+    // Призрак принадлежит клику, а не росчерку: сменили способ — он уходит.
+    // Иначе он остался бы под рукой с прежним габаритом и обещал бы клик там,
+    // где теперь обводят контур.
+    objectGhost = null;
     sync();
   }
 
@@ -2511,7 +2577,13 @@ function createWorkshop({ api, hosts }) {
   function objectGhostAt(pointMm) {
     const sizes = objectSizes(null);
     if (sizes.shape !== "rect") return null;
-    return workshopObjectRectAt(sizes, pointMm);
+    const rect = workshopObjectRectAt(sizes, pointMm);
+    // Высоты — ради подписи (таск 168): имя вещи на чертеже идёт с её верхом
+    // над полом («Радиатор · верх 650 мм»), и верх считается из высоты и
+    // посадки. Без них призрак подписался бы короче, чем подпишется вещь, —
+    // то есть снова обещал бы не то. В саму постановку они идут своим путём,
+    // `placeObject`: `workshopObjectRectAt` остаётся дверью для габарита.
+    return rect && { ...rect, heightMm: sizes.heightMm, heightAboveFloorMm: sizes.heightAboveFloorMm };
   }
 
   /**
@@ -2774,7 +2846,10 @@ function createWorkshop({ api, hosts }) {
       // Три способа, и первый клик у каждого свой: полоса и контур начинают
       // росчерк, прямоугольник ставится целиком по умолчаниям вида (G192).
       if (objectDrawn()) addVertex(event);
-      else placeObject(snapOf(mmOf(event), event.altKey).point, null);
+      // Точка — у призрака (таск 168): он её показал, и до полуметра расхождения
+      // между показанным и вставшим набиралось на одной дрогнувшей руке
+      // (`workshopPlacePointMm`).
+      else placeObject(workshopPlacePointMm(objectGhost, event.altKey, snapOf(mmOf(event), event.altKey).point), null);
       return;
     }
     // «Правка» по пустому месту снимает выделение — как клик по пустому месту
@@ -2954,8 +3029,9 @@ function createWorkshop({ api, hosts }) {
       // Рука ушла с поля (курсор в колонке) — призрака нет: рисовать вещь там,
       // куда клик её не поставит, значило бы обещать невозможное.
       const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
-      const moved = Boolean(next) !== Boolean(objectGhostMm) || (next && objectGhostMm && (next.x !== objectGhostMm.x || next.y !== objectGhostMm.y));
-      objectGhostMm = next;
+      const was = objectGhost && objectGhost.pointMm;
+      const moved = Boolean(next) !== Boolean(was) || (next && was && (next.x !== was.x || next.y !== was.y));
+      objectGhost = next ? { pointMm: next, free: Boolean(event.altKey) } : null;
       if (moved) redraw();
       return;
     }
@@ -3142,11 +3218,19 @@ function createWorkshop({ api, hosts }) {
     if (!current.moved) {
       // Ручка разбивки и ручка продолжения срабатывают и без движения: клик по
       // ним ставит вершину туда, где они нарисованы. Вершину, наоборот,
-      // нажатием на месте не правят — её тащат. Ручку поворота тоже: клик по
-      // ней свернул бы угол к ближайшим 15° без всякого движения руки.
+      // нажатием на месте не правят — её тащат.
+      //
+      // Ручка поворота отвечает на клик четвертью оборота — тем же, чем на него
+      // отвечает ручка подписи метки (`canvasRotateLabel`), и тем же, что
+      // кнопка «+90°» и клавиша `R` (таск 168, G250). Прежде она молчала,
+      // потому что «клик свернул бы угол к ближайшим 15°», — но сворачивать
+      // ничего и не надо: четверть оборота это названный шаг от нынешнего
+      // угла, а не притяжка. Shift — против часовой, как у `R`.
       const adds = current.kind === "objectHandle" && (current.handle.kind === "insert" || current.handle.kind === "extend");
       if (adds) applyObjectHandle(current);
-      else paint();
+      else if (current.kind === "objectHandle" && current.handle.kind === "turn") {
+        turnBy(event.shiftKey ? -WORKSHOP_TURN_STEP_DEG : WORKSHOP_TURN_STEP_DEG);
+      } else paint();
       return;
     }
     try {
@@ -3274,6 +3358,18 @@ function createWorkshop({ api, hosts }) {
       event.preventDefault();
       event.stopPropagation();
       turnBy(event.shiftKey ? -WORKSHOP_TURN_STEP_DEG : WORKSHOP_TURN_STEP_DEG);
+      return;
+    }
+    // `Q` и `E` — половина четверти (таск 168, G249). Заказчик просил их «при
+    // размещении», но условие здесь то же, что у `R`: и при размещении, и у
+    // выделенной вещи. Рука у человека одна — она на мыши, — и правило
+    // «до клика поворачивает клавиша, после клика только колонка» пришлось бы
+    // держать в голове, а держать его незачем: угол один и тот же, дверей к
+    // нему четыре, и ни одна не знает, поставлена вещь или нет.
+    if ((event.code === "KeyQ" || event.code === "KeyE") && !event.altKey && !event.shiftKey && turnable) {
+      event.preventDefault();
+      event.stopPropagation();
+      turnBy(event.code === "KeyQ" ? -WORKSHOP_TURN_HALF_DEG : WORKSHOP_TURN_HALF_DEG);
       return;
     }
     if ((event.key === "Delete" || event.key === "Backspace") && selected) {
@@ -3566,8 +3662,13 @@ function createWorkshop({ api, hosts }) {
     // Призрак вещи: габарит, перёд и числа — до клика (таск 164). Считается на
     // кадре из полей колонки: поправили угол, не двигая руки, — призрак
     // повернулся вместе с полем.
-    if (tool === "objects" && objectGhostMm) {
-      const ghostObject = objectGhostAt(objectGhostMm);
+    //
+    // `objectDrawn()` спрашивается здесь, а не только при смене способа: у
+    // росчерка свой призрак — сама линия под рукой (таск 167), и эта ветка
+    // обрывает кадр возвратом. Одного условия в `setObjectWay` мало — порядок
+    // веток важнее порядка вызовов.
+    if (tool === "objects" && !objectDrawn() && objectGhost) {
+      const ghostObject = objectGhostAt(objectGhost.pointMm);
       if (ghostObject) paintObjectGhost(ghostObject);
       return;
     }
@@ -3675,8 +3776,23 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
-   * Призрак вещи под рукой (таск 164): повёрнутый габарит, клюв переда и
-   * строка «ширина × глубина · угол».
+   * Призрак вещи под рукой (таск 164, переписан в таске 168): **та самая
+   * вещь**, которая встанет по клику, нарисованная тем же кодом
+   * (`render.drawDrawingObject` с приметой `ghost`) — заливка, контур и подпись
+   * с именем над габаритом. Своё у призрака только три вещи: пунктир, полсилы
+   * цвета и строка «ширина × глубина · угол» **под** габаритом.
+   *
+   * Почему переписан. Заказчик призрака не видел: «просто тыкаешь и куда-то
+   * рядом встало». Прежний рисовал голый пунктирный прямоугольник без заливки
+   * и без имени, а числа клал поперёк его середины — у радиатора 1200 × 100 это
+   * коробка 90 × 7 точек под строкой 75 × 12. Подпись закрывала собой вещь,
+   * которую подписывала, а вставшая по клику вещь выглядела иначе: лиловая
+   * заливка, сплошной контур и имя сверху. Показанное и полученное не совпадали
+   * ни местом строки, ни видом.
+   *
+   * Числа ушли вниз по той же причине, по которой имя стоит сверху: у тонкой
+   * вещи на габарите нет места ни для одной строки, и обе ставятся снаружи, с
+   * разных сторон.
    *
    * Зачем клюв: на плане повёрнутый на 180° унитаз выглядит точно так же, как
    * неповёрнутый, — четыре угла те же. Число угла об этом говорит, а клюв
@@ -3685,30 +3801,24 @@ function createWorkshop({ api, hosts }) {
   function paintObjectGhost(object) {
     const corners = schemeObjectCorners(object).map(screenOf);
     if (corners.length < 4) return;
+    drawDrawingObject(ctx, bridge(), object, { ghost: true, name: objectCatalogName(workshopObjectKey) });
     ctx.save();
-    ctx.setLineDash([5, 4]);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = DRAWING_OBJECT;
-    ctx.beginPath();
-    corners.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
-    ctx.closePath();
-    ctx.stroke();
-    ctx.setLineDash([]);
     paintObjectFront(object, corners);
-    const middle = screenOf(object.atMm);
-    ctx.font = drawFont(12, 600);
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
     const line = text("workshop.ghostSize", {
       width: object.widthMm,
       depth: object.depthMm,
       turn: object.turnDeg,
     });
+    const middle = corners.reduce((sum, point) => sum + point.x, 0) / corners.length;
+    const bottom = Math.max(...corners.map((point) => point.y)) + WORKSHOP_GHOST_LINE_GAP_PX;
+    ctx.font = drawFont(12, 600);
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
     ctx.lineWidth = 3;
     ctx.strokeStyle = WORKSHOP_PAPER;
-    ctx.strokeText(line, middle.x, middle.y);
+    ctx.strokeText(line, middle, bottom);
     ctx.fillStyle = DRAWING_EDGE;
-    ctx.fillText(line, middle.x, middle.y);
+    ctx.fillText(line, middle, bottom);
     ctx.textAlign = "start";
     ctx.restore();
   }
@@ -3748,10 +3858,17 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
-   * Ручка поворота: поводок от переда вещи и кольцо на его конце. Поводок — то
-   * же, чем холст показывает продолжение линии: по нему видно, чья это ручка и
-   * куда вещь смотрит. Под рукой кольцо наливается цветом — как квадрат
-   * будущей вершины у ручки разбивки.
+   * Ручка поворота: поводок от переда вещи и **ручка поворота подписи** на его
+   * конце — `render.drawLabelTurn`, та самая и тем же кодом (таск 168, G250).
+   *
+   * Своего рисунка здесь больше нет. Он был — кольцо с дугой внутри, — и от
+   * ручки подписи отличался и мерой, и видом; заказчик попросил «как у подписи
+   * метки», и двух кнопок одного смысла в сборке не осталось. Под рукой ручка
+   * перестаёт быть полупрозрачной — это всё, что к общему рисунку добавлено.
+   *
+   * Поводок остаётся: ручка подписи сидит на подписи и в хозяине не
+   * сомневается, а эта стоит в 26 точках перед вещью, и без поводка кружок в
+   * стороне читался бы ничьим. Заодно он показывает, куда вещь смотрит.
    */
   function paintTurnHandle(turn) {
     if (!turn) return;
@@ -3766,20 +3883,7 @@ function createWorkshop({ api, hosts }) {
     ctx.lineTo(turn.x, turn.y);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.arc(turn.x, turn.y, turn.r - 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = under ? WORKSHOP_ACCENT : WORKSHOP_HANDLE;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = WORKSHOP_ACCENT;
-    ctx.stroke();
-    // Дуга внутри кольца — «поворачивается»: без неё кольцо не отличить от
-    // ручки вершины, а значат они разное.
-    ctx.beginPath();
-    ctx.arc(turn.x, turn.y, turn.r - 4, Math.PI * 0.35, Math.PI * 1.75);
-    ctx.strokeStyle = under ? WORKSHOP_HANDLE : WORKSHOP_ACCENT;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    drawLabelTurn(ctx, turn, WORKSHOP_ACCENT);
     ctx.restore();
   }
 
@@ -4147,7 +4251,7 @@ function createWorkshop({ api, hosts }) {
       schemeId = state.schemeId;
       draft = null;
       ghost = null;
-      objectGhostMm = null;
+      objectGhost = null;
       press = null;
       selected = null;
       hover = null;
