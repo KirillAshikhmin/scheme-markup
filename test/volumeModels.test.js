@@ -57,6 +57,7 @@ import {
   objectModelFaceCount,
   objectLineModel,
   objectLineModelCodes,
+  objectModelChannels,
   objectModelForName,
   objectModelKeys,
 } from "../src/objectModels/registry.js";
@@ -309,6 +310,51 @@ test("у модели не больше пяти тел и тридцати гр
   // объекта перестаёт быть «сотнями граней» и становится тысячами.
   const average = worst.reduce((sum, value) => sum + value, 0) / worst.length;
   assert.ok(average < 18, "средняя цена модели в гранях: " + average.toFixed(1));
+});
+
+test("клавишная модель держится предела на любом числе каналов", () => {
+  // Клавиши собираются функцией (таск 177), и реестр хранит лишь три её
+  // ответа. Предел пяти тел и тридцати граней обязан держаться на **всех**
+  // ответах, а не только на записанных: иначе четырёхканальный выключатель
+  // вышел бы за него молча.
+  for (const key of ["switch1", "switch2", "switch3", "switchToggle"]) {
+    const base = objectModelByKey(key);
+    assert.ok(base, key + ": клавишной модели нет в реестре");
+    // То же число каналов — та же ссылка: общее описание остаётся общим.
+    const keys = base.parts.filter((part) => part.channel).length;
+    assert.equal(objectModelChannels(base, keys), base, key + ": описание пересобралось на своём числе");
+    let last = null;
+    for (let channels = 1; channels <= 24; channels += 1) {
+      const model = objectModelChannels(base, channels);
+      assert.ok(model.parts.length <= OBJECT_MODEL_BODY_MAX, key + " на " + channels + ": тел больше предела");
+      assert.ok(
+        objectModelFaceCount(model) <= OBJECT_MODEL_FACE_MAX,
+        key + " на " + channels + ": граней больше предела",
+      );
+      const made = model.parts.filter((part) => part.channel);
+      assert.deepEqual(
+        made.map((part) => part.channel),
+        made.map((part, index) => index + 1),
+        key + " на " + channels + ": номера клавиш не по порядку",
+      );
+      // Клавиши стоят в ряд и не налезают друг на друга.
+      for (let index = 1; index < made.length; index += 1) {
+        assert.ok(
+          made[index].x >= made[index - 1].x + made[index - 1].width,
+          key + " на " + channels + ": клавиши налезли друг на друга",
+        );
+      }
+      // Выше потолка число клавиш не растёт: двадцать выходов реле клавишами
+      // не бывают, и рисовать их полосками было бы враньём.
+      if (last !== null) assert.ok(made.length >= last, key + ": клавиш стало меньше при большем числе каналов");
+      last = made.length;
+    }
+    assert.ok(last <= 4, key + ": клавиш больше четырёх");
+  }
+  // Неклавишная модель проходит насквозь: каналы бывают и у реле, и у панели.
+  const socket = objectModelByKey("socket");
+  assert.equal(objectModelChannels(socket, 3), socket);
+  assert.equal(objectModelChannels(null, 3), null);
 });
 
 test("у каждого тела есть имя, материал из набора и выключенное свечение", () => {
