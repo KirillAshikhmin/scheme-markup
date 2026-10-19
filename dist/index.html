@@ -38286,6 +38286,84 @@ const MODELS_LIGHT = {
   ),
 };
 
+// src/objectModels/lines.js
+// **Повтор вдоль пути** — то, чем линейная метка отличается от полосы
+// (таск 177, требование G275).
+//
+// Слова заказчика: «Трек (трековый светильник) изобрази не просто как полосу, а
+// как полосу из которой торчат цилиндры — отдельные точечные светильники. Иначе
+// это путается просто с лентой».
+//
+// ——— почему это не обычная модель ———
+//
+// Моделей у линейных меток нет и быть не может — так решено в таске 155: «у
+// звена нет ни лица, ни верха». И это по-прежнему верно: лента идёт по потолку
+// и по стене, гнётся на изломах, у неё нет ни переда, ни верха, ни единого
+// габарита, в долях которого описывалось бы тело. Поставить модель на звено
+// значило бы выстроить в ряд по люстре на каждый отрезок.
+//
+// Но у трека есть то, чего у ленты нет: **он состоит из отдельных вещей**.
+// Поэтому здесь описывается не модель метки, а **один повторяющийся элемент** и
+// правило, с каким шагом он садится на путь. Полоса при этом остаётся полосой —
+// её по-прежнему рисуют звенья (`volumePathPrisms`), и лента от этого не
+// меняется ни одной гранью.
+//
+// ——— чем находится ———
+//
+// **По коду типа**, и другого пути у линейной метки нет. У точечной лестница
+// изображения идёт «имя у типа → форма знака» (ADR 005), а у линейной знак —
+// это **начертание**: у трека он двойная линия, у ленты сплошная. Начертание
+// категорийное, у объекта заказчика его нет вовсе (эта возможность появилась
+// позже его разметки), и формы знака у линейных типов — общая категорийная,
+// одна на все пять. То есть ни один из двух привычных ключей трек от ленты не
+// отличает — ни в новом объекте, ни в старом.
+//
+// Код отличает: «ТР» — это трек и в стартовом справочнике, и в объекте
+// заказчика, откуда справочник и приехал. Мост по коду в сборке уже есть и
+// заведён ровно для этого — `fillTypeSizes` (G192) подтягивает умолчания
+// размеров «по коду и по форме знака». Здесь тот же мост и та же цена:
+// переименовал человек код — светильники пропадут, останется полоса. Это
+// честнее, чем гадать по толщине.
+//
+// ——— шаг повтора ———
+//
+// Шаг — **600 мм**, и это число из жизни: светильники на треке ставят через
+// полметра-метр, реже — плотнее у рабочей зоны. Но шаг не кладётся на путь
+// жёстко, иначе у трека в 1,7 м последний светильник повис бы в тридцати
+// сантиметрах от конца. Поэтому считается **число** светильников —
+// `round(длина / шаг)`, не меньше одного, — и они расставляются равномерно с
+// отступом полушага от концов (`volumeLineSpots`). Трек в 1,7 м получает три
+// светильника через 567 мм, трек в 40 см — один посередине: **на коротком
+// отрезке остаётся ровно одна вещь**, и это и есть ответ «чем он не лента».
+//
+// Потолок — десять светильников на метку. Не для красоты: каждый стоит десять
+// граней, и десятка — это сто граней на одну метку, больше, чем вся прежняя
+// сцена одной комнаты. Трек длиннее шести метров (а таких в квартире не
+// бывает) растянет шаг, а не утопит кадр.
+
+/** Шаг повтора по умолчанию и потолок числа элементов на метку. */
+const LINE_SPOT_STEP_MM = 600;
+const LINE_SPOT_MAX = 10;
+const MODELS_LINES = {
+  // Трек: точечный светильник торчит из полосы вниз.
+  //
+  // `sizeShare` — габарит светильника в долях **поперечника полосы**: у трека
+  // 60 × 60 это цилиндр Ø51, то есть почти во всю полосу, как оно и бывает.
+  // `dropShare` — насколько он свисает ниже полосы, в долях её толщины;
+  // `biteShare` — насколько он входит **в** полосу: торчать значит выходить из
+  // неё, а не висеть под ней, и заход на три десятых толщины заодно уводит
+  // донце цилиндра из плоскости низа полосы — две совпавшие плоскости порядок
+  // граней решал бы жребием.
+  "ТР": {
+    stepMm: LINE_SPOT_STEP_MM,
+    max: LINE_SPOT_MAX,
+    sizeShare: 0.85,
+    dropShare: 1.1,
+    biteShare: 0.3,
+    parts: modelParts(modelCyl("spot", { material: "light" })),
+  },
+};
+
 // src/objectModels/net.js
 // Модели меток: сеть, домофон, кинотеатр, панели управления.
 const MODELS_NET = {
@@ -38759,6 +38837,7 @@ const MODELS_THINGS = {
 
 
 
+
 /**
  * Предел тел на вещь. Пять — и это посчитанный предел, а не круглое число:
  * тело коробкой стоит шесть граней, цилиндром — десять, сцена живого объекта
@@ -38819,6 +38898,27 @@ function objectModelFaceCount(model) {
     faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : 6;
   }
   return faces;
+}
+
+/**
+ * **Повтор вдоль пути** по коду типа — то, чем линейная метка отличается от
+ * полосы (таск 177, G275). `null` — у этого кода повтора нет, и метка остаётся
+ * полосой: так рисуется лента, и так рисовались до этого все линейные типы.
+ *
+ * Отдельная дверь, а не ступень общей лестницы, потому что и ключ здесь
+ * другой: у точечной вещи ключ — имя изображения, у линейной — **код типа**
+ * (почему так, разобрано в `lines.js`). Складывать два разных ключа в один
+ * справочник значило бы разрешить коду типа занять имя изображения.
+ */
+function objectLineModel(code) {
+  const key = String(code || "").trim();
+  const found = key === "" ? null : MODELS_LINES[key];
+  return found ? { key, ...found } : null;
+}
+
+/** Все коды с повтором — для сверки пределов тел и граней. */
+function objectLineModelCodes() {
+  return Object.keys(MODELS_LINES);
 }
 
 /**
@@ -49221,6 +49321,67 @@ function volumePathPrisms(path, acrossMm, bottomMm, topMm) {
 }
 
 /**
+ * **Точки повтора вдоль пути** (таск 177, G275): куда сядут светильники трека.
+ *
+ * Правило одно на любую длину и любой излом: считается **число** элементов —
+ * `round(длина / шаг)`, не меньше одного и не больше потолка, — и они
+ * расставляются равномерно с отступом полушага от концов. Поэтому у трека в
+ * 1,7 м выходит три светильника через 567 мм, а не два через 600 и обрубок, а у
+ * трека в 40 см — ровно один посередине.
+ *
+ * Отдаёт точку и направление пути в ней: по направлению встаёт габарит
+ * элемента, и на изломе он честно повернётся вместе с полосой.
+ */
+function volumeLineSpots(path, stepMm, max) {
+  const legs = [];
+  let total = 0;
+  for (let index = 0; index + 1 < path.length; index += 1) {
+    const a = path[index];
+    const b = path[index + 1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!(length > 0)) continue;
+    legs.push({ a, u: { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, length, from: total });
+    total += length;
+  }
+  if (legs.length === 0 || !(stepMm > 0)) return [];
+  const count = Math.max(1, Math.min(Math.round(total / stepMm) || 1, Math.max(1, max)));
+  const spots = [];
+  for (let index = 0; index < count; index += 1) {
+    const along = (total * (index + 0.5)) / count;
+    // Нога, на которую попала мера. Последняя — для меры, упёршейся в конец.
+    const leg = legs.find((item) => along <= item.from + item.length) || legs[legs.length - 1];
+    const inside = along - leg.from;
+    spots.push({
+      at: { x: leg.a.x + leg.u.x * inside, y: leg.a.y + leg.u.y * inside },
+      u: leg.u,
+    });
+  }
+  return spots;
+}
+
+/**
+ * Габариты повторяющихся элементов по пути полосы (таск 177).
+ *
+ * Полоса остаётся полосой: её рисуют звенья. Элемент встаёт **в её
+ * поперечнике**, свисает ниже и заходит внутрь — почему именно так, разобрано
+ * у `MODELS_LINES` в `objectModels/lines.js`.
+ */
+function volumeLineFrames(repeat, path, acrossMm, bottomMm, topMm) {
+  const thickMm = Math.max(VOLUME_MARK_LIFT_MM, topMm - bottomMm);
+  const sizeMm = Math.max(VOLUME_MARK_LIFT_MM, acrossMm * repeat.sizeShare);
+  const heightMm = thickMm * (repeat.dropShare + repeat.biteShare);
+  return volumeLineSpots(path, repeat.stepMm, repeat.max).map((spot) => ({
+    at: spot.at,
+    bottomMm: bottomMm - thickMm * repeat.dropShare,
+    u: spot.u,
+    f: { x: spot.u.y, y: -spot.u.x },
+    widthMm: sizeMm,
+    depthMm: sizeMm,
+    heightMm,
+  }));
+}
+
+/**
  * Где стоит одна метка — или почему не стоит нигде.
  *
  * `null` — того, чего в объёме нет вовсе (плашка комментария); `{markId, skip}`
@@ -49260,6 +49421,16 @@ function volumeMarkPlacement(project, mark, rooms = []) {
   const style = styleOf(project, mark.typeId);
   const rgb = volumeRgbOf(style.color);
   const view = line ? null : markView;
+  // Повтор вдоль пути (таск 177, G275): у трека из полосы торчат светильники, у
+  // ленты не торчит ничего. Ищется по коду типа — почему именно по коду,
+  // разобрано в `objectModels/lines.js`.
+  const lineType = line ? findType(project, mark.typeId) : null;
+  const repeat = lineType ? objectLineModel(lineType.code) : null;
+  const repeating = (spotPath, acrossMm, bottomMm, topMm) => {
+    if (!repeat) return null;
+    const frames = volumeLineFrames(repeat, spotPath, acrossMm, bottomMm, topMm);
+    return frames.length === 0 ? null : { key: repeat.key, parts: repeat.parts, frames };
+  };
   const common = {
     markId: mark.id,
     label: labelOf(project, mark.id),
@@ -49275,8 +49446,10 @@ function volumeMarkPlacement(project, mark, rooms = []) {
     spare: box.guessed,
     // Модель садится на последнюю ступень лестницы изображения (таск 155,
     // `objectModels/registry.js`): нашлось изображение — его имя и есть ключ
-    // модели. У ленты модели нет и быть не может: она не вещь, а цепочка
-    // звеньев, и у звена нет ни лица, ни верха.
+    // модели. У линейной метки модели нет и быть не может: она не вещь, а
+    // цепочка звеньев, и у звена нет ни лица, ни верха. Зато у неё может быть
+    // **повтор вдоль пути** (таск 177, поле `repeat`) — у трека из полосы
+    // торчат светильники, у ленты не торчит ничего.
     //
     // С запасным габаритом (G215, G226) модель живёт мирно и по той же
     // причине: недостающая сторона взята у того же изображения, и получается,
@@ -49315,11 +49488,12 @@ function volumeMarkPlacement(project, mark, rooms = []) {
     // выделения и приходит стрелка связи. У всего, что висит, она и есть
     // записанная высота, — разойтись они могут только у стоящего на полу.
     const centreMm = (bottomMm + topMm) / 2;
-    const at = (across) => ({
-      x: Number(wall.aMm.x) + vectors.u.x * middle + normal.x * across,
-      y: Number(wall.aMm.y) + vectors.u.y * middle + normal.y * across,
+    const at = (across, alongMm = middle) => ({
+      x: Number(wall.aMm.x) + vectors.u.x * alongMm + normal.x * across,
+      y: Number(wall.aMm.y) + vectors.u.y * alongMm + normal.y * across,
     });
     const faceAt = at(outer);
+    const coreMm = (outer + inner) / 2;
     return {
       ...common,
       mode: VOLUME_MARK_WALL,
@@ -49328,11 +49502,20 @@ function volumeMarkPlacement(project, mark, rooms = []) {
       heightMm: centreMm,
       prisms: [
         {
-          corners: volumeBoxCorners(at((outer + inner) / 2), vectors.u, alongMm, Math.max(outer - inner, 1)),
+          corners: volumeBoxCorners(at(coreMm), vectors.u, alongMm, Math.max(outer - inner, 1)),
           bottomMm,
           topMm,
         },
       ],
+      // Повтор вдоль стены: путь — сама полоса от отступа до отступа. Поперечник
+      // тут — выступ от стены, а толщина полосы — её высота: на стене полоса
+      // лежит боком, и элемент всё равно свисает вниз.
+      repeat: repeating(
+        [at(coreMm, fromMm), at(coreMm, toMm)],
+        Math.max(outer - inner, 1),
+        bottomMm,
+        topMm,
+      ),
       anchor: { x: faceAt.x, y: faceAt.y, z: centreMm },
       // Габарит для модели (таск 155). Перёд берётся **оттуда же, откуда
       // лицо**: `u` — вдоль стены, как у изображения, `f` — от лица в стену,
@@ -49384,6 +49567,10 @@ function volumeMarkPlacement(project, mark, rooms = []) {
     roomId: room ? room.roomId : null,
     heightMm: centreMm,
     prisms,
+    // Повтор вдоль пути (таск 177): трек под потолком и есть тот случай, для
+    // которого он заведён. Поперечник полосы — её ширина в плане, толщина —
+    // выступ: полоса лежит лицом к полу, и светильники свисают вниз.
+    repeat: repeating(path, lengthMm, bottomMm, topMm),
     anchor: { x: middle.x, y: middle.y, z: centreMm },
     // Габарит для модели. Вещь в воздухе не повёрнута ничем — её коробка
     // лежит по осям плана, — значит и модель берёт их: `u` вдоль `x`, перёд
@@ -49480,6 +49667,12 @@ function volumeMarkFaces(place, out = []) {
   }
   for (const prism of place.prisms || []) {
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId });
+  }
+  // Повтор вдоль пути (таск 177, G275): полоса уже нарисована звеньями, а
+  // поверх неё садятся светильники трека. Хозяин у них тот же — сама метка,
+  // поэтому щелчок по светильнику выделяет трек, а не ничего.
+  for (const frame of (place.repeat && place.repeat.frames) || []) {
+    volumeModelFaces(frame, place.repeat, place.bodyRgb, out, { markId: place.markId });
   }
   return out;
 }

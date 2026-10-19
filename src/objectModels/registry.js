@@ -25,6 +25,7 @@
 // (`objectCatalogKeyByName`), а не второй список слов здесь.
 import { objectCatalogKeyByName } from "../objectCatalog.js";
 import { MODELS_CLIMATE } from "./climate.js";
+import { MODELS_LINES } from "./lines.js";
 import { MODELS_LIGHT } from "./light.js";
 import { MODELS_NET } from "./net.js";
 import { MODELS_OBJECTS } from "./objects.js";
@@ -93,6 +94,27 @@ export function objectModelFaceCount(model) {
     faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : 6;
   }
   return faces;
+}
+
+/**
+ * **Повтор вдоль пути** по коду типа — то, чем линейная метка отличается от
+ * полосы (таск 177, G275). `null` — у этого кода повтора нет, и метка остаётся
+ * полосой: так рисуется лента, и так рисовались до этого все линейные типы.
+ *
+ * Отдельная дверь, а не ступень общей лестницы, потому что и ключ здесь
+ * другой: у точечной вещи ключ — имя изображения, у линейной — **код типа**
+ * (почему так, разобрано в `lines.js`). Складывать два разных ключа в один
+ * справочник значило бы разрешить коду типа занять имя изображения.
+ */
+export function objectLineModel(code) {
+  const key = String(code || "").trim();
+  const found = key === "" ? null : MODELS_LINES[key];
+  return found ? { key, ...found } : null;
+}
+
+/** Все коды с повтором — для сверки пределов тел и граней. */
+export function objectLineModelCodes() {
+  return Object.keys(MODELS_LINES);
 }
 
 /**

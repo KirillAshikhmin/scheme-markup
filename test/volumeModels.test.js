@@ -48,12 +48,15 @@ import { markBoxMm } from "../src/markBox.js";
 import { objectViewByName, objectViewForShape } from "../src/objectViews/registry.js";
 import { MODEL_CYL_SIDES, MODEL_MATERIALS } from "../src/objectModels/kit.js";
 import { objectCatalogDefaults, objectCatalogKeys } from "../src/objectCatalog.js";
+import { LINE_SPOT_MAX } from "../src/objectModels/lines.js";
 import {
   OBJECT_MODEL_BODY_MAX,
   OBJECT_MODEL_FACE_MAX,
   objectModelByKey,
   objectModelClashes,
   objectModelFaceCount,
+  objectLineModel,
+  objectLineModelCodes,
   objectModelForName,
   objectModelKeys,
 } from "../src/objectModels/registry.js";
@@ -68,6 +71,7 @@ import {
   volumeObjectFrame,
   volumeObjectModel,
   volumeObjectPrisms,
+  volumeLineSpots,
   volumeScene,
   volumeTubeFaces,
 } from "../src/volume.js";
@@ -173,6 +177,19 @@ function objectScene(name, patch = {}) {
     ...patch,
   });
   return { project: added.project, schemeId: scene.schemeId, object: added.schemeObject, kind };
+}
+
+/** Линейная метка типа `code` по точкам в миллиметрах, под потолком комнаты. */
+function linePlace(code, pointsMm) {
+  const scene = roomScene();
+  const type = scene.project.markTypes.find((item) => item.code === code);
+  const added = addMark(scene.project, {
+    schemeId: scene.schemeId,
+    typeId: type.id,
+    kind: "line",
+    points: pointsMm.map((point) => planMmToFraction(scene.project, scene.schemeId, point)),
+  });
+  return volumeMarkPlacement(added.project, added.mark, roomList(scene));
 }
 
 const modelOf = (key) => objectModelByKey(key);
@@ -777,22 +794,101 @@ test("запасной габарит и модель берутся у одно
 });
 
 test("у ленты модели нет: это цепочка звеньев, а не вещь", () => {
-  const scene = roomScene();
-  const strip = scene.project.markTypes.find((type) => type.code === "Л");
-  const added = addMark(scene.project, {
-    schemeId: scene.schemeId,
-    typeId: strip.id,
-    kind: "line",
-    points: [
-      planMmToFraction(scene.project, scene.schemeId, { x: -1000, y: 0 }),
-      planMmToFraction(scene.project, scene.schemeId, { x: 1000, y: 0 }),
-    ],
-  });
-  const place = volumeMarkPlacement(added.project, added.mark, roomList(scene));
+  const place = linePlace("Л", [{ x: -1000, y: 0 }, { x: 1000, y: 0 }]);
   assert.equal(place.model, null);
   assert.equal(place.frame, null);
   assert.equal(place.kind, "line");
+  assert.equal(place.repeat, null, "у ленты завёлся повтор — она перестала быть полосой");
   assert.ok(volumeMarkFaces(place).length > 0, "звенья нарисованы по-прежнему");
+});
+
+// ——— трек: повтор вдоль пути (таск 177, G275) ————————————————————————————
+
+test("из трека торчат светильники, а лента остаётся полосой", () => {
+  // Слова заказчика: «Трек изобрази не просто как полосу, а как полосу из
+  // которой торчат цилиндры — отдельные точечные светильники. Иначе это
+  // путается просто с лентой». Проверяется ровно эта разница: у одного и того
+  // же пути у трека светильники есть, у ленты нет.
+  const track = linePlace("ТР", [{ x: -900, y: 0 }, { x: 900, y: 0 }]);
+  const strip = linePlace("Л", [{ x: -900, y: 0 }, { x: 900, y: 0 }]);
+  assert.ok(track.repeat, "у трека нет повтора");
+  assert.equal(strip.repeat, null, "у ленты появился повтор");
+  // Шаг 600 на 1800 мм — три светильника, и стоят они через 600 с отступом
+  // полушага от концов: −600, 0, 600.
+  assert.equal(track.repeat.frames.length, 3);
+  assert.deepEqual(
+    track.repeat.frames.map((frame) => Math.round(frame.at.x)),
+    [-600, 0, 600],
+  );
+  // Светильник **торчит из полосы вниз**: его низ ниже низа полосы, а верх
+  // заходит внутрь — иначе донце легло бы в плоскость низа полосы.
+  const prism = track.prisms[0];
+  for (const frame of track.repeat.frames) {
+    assert.ok(frame.bottomMm < prism.bottomMm, "светильник не свисает из полосы");
+    assert.ok(frame.bottomMm + frame.heightMm > prism.bottomMm, "светильник не входит в полосу");
+    assert.ok(frame.bottomMm + frame.heightMm < prism.topMm, "светильник пробил полосу насквозь");
+  }
+  // И грани у светильников есть, и хозяин у них — сам трек: щелчок по
+  // светильнику выделяет метку.
+  const faces = volumeMarkFaces(track);
+  const strips = volumeMarkFaces(strip);
+  assert.ok(faces.length > strips.length, "трек нарисован тем же числом граней, что лента");
+  assert.ok(
+    faces.every((face) => face.markId === track.markId),
+    "у грани светильника чужой хозяин",
+  );
+});
+
+test("на коротком отрезке остаётся один светильник, на длинном шаг растягивается", () => {
+  // Короткий трек — не полоса без ничего: один светильник посередине и есть
+  // ответ «чем он не лента».
+  const short = linePlace("ТР", [{ x: -200, y: 0 }, { x: 200, y: 0 }]);
+  assert.equal(short.repeat.frames.length, 1);
+  assert.equal(Math.round(short.repeat.frames[0].at.x), 0);
+  // Длинный не топит кадр: потолок — десять светильников, и шаг растягивается.
+  const long = linePlace("ТР", [{ x: -1900, y: -1300 }, { x: 1900, y: -1300 }, { x: 1900, y: 1300 }]);
+  assert.equal(long.repeat.frames.length, LINE_SPOT_MAX);
+  // Излом пути светильники переживают: направление берётся у своей ноги, и
+  // хотя бы один стоит на второй.
+  assert.ok(
+    long.repeat.frames.some((frame) => Math.abs(frame.u.x) < 0.001),
+    "ни один светильник не встал на второй ноге пути",
+  );
+});
+
+test("повтор вдоль пути считается по длине, а не по числу звеньев", () => {
+  // Чистая проверка самого правила: `round(длина / шаг)`, не меньше одного и не
+  // больше потолка, с отступом полушага от концов.
+  const path = [{ x: 0, y: 0 }, { x: 1000, y: 0 }];
+  assert.equal(volumeLineSpots(path, 600, 10).length, 2);
+  assert.equal(volumeLineSpots(path, 300, 10).length, 3);
+  assert.equal(volumeLineSpots(path, 5000, 10).length, 1);
+  assert.equal(volumeLineSpots(path, 10, 10).length, 10);
+  assert.deepEqual(
+    volumeLineSpots(path, 500, 10).map((spot) => Math.round(spot.at.x)),
+    [250, 750],
+  );
+  // Вырожденный путь светильников не даёт вовсе: ставить их некуда.
+  assert.deepEqual(volumeLineSpots([{ x: 0, y: 0 }], 600, 10), []);
+  assert.deepEqual(volumeLineSpots([{ x: 5, y: 5 }, { x: 5, y: 5 }], 600, 10), []);
+});
+
+test("элемент повтора держится того же предела, что модели", () => {
+  for (const code of objectLineModelCodes()) {
+    const repeat = objectLineModel(code);
+    assert.ok(repeat.stepMm > 0, code + ": шаг не положительный");
+    assert.ok(repeat.max >= 1 && repeat.max <= 16, code + ": потолок элементов " + repeat.max);
+    assert.ok(repeat.parts.length <= OBJECT_MODEL_BODY_MAX, code + ": тел больше предела");
+    assert.ok(
+      objectModelFaceCount(repeat) * repeat.max <= OBJECT_MODEL_FACE_MAX * 4,
+      code + ": повтор на метку стоит дороже четырёх вещей",
+    );
+    for (const part of repeat.parts) {
+      assert.ok(part.name && /^[a-zA-Z][a-zA-Z0-9]*$/.test(part.name), code + ": имя тела «" + part.name + "»");
+      assert.equal(part.lit, false, code + ": свечение включено");
+      assert.ok(MODEL_MATERIALS.includes(part.material), code + ": материал " + part.material);
+    }
+  }
 });
 
 // ——— интерпретатор: вещи чертежа ——————————————————————————————————————————
