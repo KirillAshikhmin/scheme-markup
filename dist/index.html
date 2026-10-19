@@ -7089,7 +7089,7 @@ const strings = {
     wayHint_polyline: "Полоса по ломаной: длина идёт по стене с поворотом, глубина одна",
     wayNote_rect: "Клик ставит объект серединой под курсор, размеры — по виду.",
     wayNote_contour:
-      "Обводите объект по месту: клик — вершина, последний клик — по первой вершине. Контур обязательно замкнуть; размеры посчитаются сами по габариту вдоль первой стороны и встанут в поля ниже — там их и правят.",
+      "Обводите объект по месту той же рукой, что ломаную метки на плане: клик — вершина, двойной клик по первой вершине замыкает. Контур обязательно замкнуть; размеры посчитаются сами по габариту вдоль первой стороны и встанут в поля ниже — там их и правят.",
     wayNote_polyline: "Полоса рисуется цепочкой, как стена: клик — вершина, двойной клик — конец.",
     // Контур обводят на глазах: размеры габарита стоят прямо в нём, а длина
     // набираемой стороны — над ней самой (G195).
@@ -7098,7 +7098,7 @@ const strings = {
     // Двойной клик контур не заканчивает: незамкнутый контур объектом не
     // становится. Черновик при этом не теряется — сказано только, чего не
     // хватает.
-    contourOpen: "Контур не замкнут: закончите его кликом по первой вершине или нажмите Enter",
+    contourOpen: "Контур не замкнут: замкните его двойным кликом по первой вершине или нажмите Enter",
     contourFlat: "Из этого контура прямоугольника не выйдет: нужно хотя бы три вершины и площадь между ними",
     height: "Высота",
     heightScheme: "Высота стен схемы, мм",
@@ -7153,7 +7153,7 @@ const strings = {
     hintObjects:
       "Клик ставит объект серединой под курсор, размеры — по виду. Способ рядом в колонке: прямоугольник кликом, контуром или полосой. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
     hintContour:
-      "Обводите объект контуром: клик — вершина, длина стороны видна над ней. Замкнуть обязательно — кликом по первой вершине или Enter; размеры посчитаются сами. Backspace — убрать последнюю, Esc — отменить контур. Ctrl+Z — отмена.",
+      "Обводите объект контуром — как ломаную метки на плане: клик — вершина, длина стороны видна над ней. Замкнуть обязательно: двойной клик по первой вершине или Enter; размеры посчитаются сами. Двойной клик по последней не закончит — незамкнутый контур объектом не становится. Backspace — убрать последнюю, Esc — отменить контур. Ctrl+Z — отмена.",
     hintBand:
       "Полоса рисуется цепочкой, как стена: клик — вершина, длина видна над отрезком, двойной клик — конец. Backspace — убрать последнюю, Esc — отменить. Ctrl+Z — отмена.",
     hintEdit:
@@ -27343,6 +27343,83 @@ function gesturePinchStep(previous, points) {
   };
 }
 
+// ——— черновик ломаной: клик и двойной клик ——————————————————————————————
+//
+// Таск 167, требование G247. Слова заказчика: «размещение контура объекта на
+// чертеже сделай той же логикой, что и линия меток рисуется, только требуй
+// замкнутого контура». Сказано это было второй раз (первый — таск 137), и
+// причина та же, что была у колеса: разбор жеста жил в двух местах и разошёлся.
+// На плане контур замыкали **двойным** кликом по первой вершине, в чертеже —
+// одиночным; на плане двойной клик в стороне просто ставил две вершины, в
+// чертеже ругался «контур не замкнут» на любой двойной клик.
+//
+// Теперь правило одно и лежит здесь. Разбор чистый: на вход уже поставленные
+// вершины **в экранных точках** и точка клика, на выход — что этот клик значит.
+// Экранные, а не свои: на плане вершины лежат долями, в чертеже миллиметрами, а
+// порог попадания в вершину у обоих всё равно экранный — в неё целятся глазом.
+// Перевод делает сама поверхность, у неё он и так есть.
+//
+// Порог каждая поверхность даёт свой, и это не недоделка: на плане вершина
+// черновика нарисована кружком в размер метки и растёт с масштабом
+// (`markRadius`), в чертеже метки нет вовсе, а ручки постоянные
+// (`WORKSHOP_VERTEX_PX`). Одно число на двоих врало бы про то, во что человек
+// целится.
+
+/**
+ * Сколько вершин нужно, чтобы замыкать было что. Двумя точками площадь не
+ * огородить — ни ломаной метки на плане, ни контуру вещи в чертеже.
+ */
+const GESTURE_CLOSE_MIN = 3;
+
+// В какую концевую вершину попала точка. `last` старше `first`: у черновика из
+// одной вершины они одна и та же, и это ещё не замыкание.
+function gestureEndVertex(screenPoints, at, radiusPx) {
+  const points = Array.isArray(screenPoints) ? screenPoints : [];
+  if (points.length === 0 || !at) return null;
+  const radius = Number(radiusPx) > 0 ? Number(radiusPx) : 0;
+  const near = (point) => Boolean(point) && Math.hypot(at.x - point.x, at.y - point.y) <= radius;
+  if (near(points[points.length - 1])) return "last";
+  if (near(points[0])) return "first";
+  return null;
+}
+
+/**
+ * Что значит одиночный клик, когда черновик уже начат:
+ *
+ *   `add`          — ставить вершину;
+ *   `first`/`last` — клик попал в концевую вершину, и вершины от него не
+ *                    прибавляется: это первая половина двойного клика, которым
+ *                    черновик заканчивают.
+ *
+ * Концевая вершина называется, а не прячется за общим «нет»: открытому росчерку
+ * — цепочке стен — клик в первую вершину нужен, кольцо он замыкает повтором
+ * точки, а не отметкой «замкнуто», и отказывать ему надо только по последней.
+ */
+function gestureDraftClick(screenPoints, at, radiusPx) {
+  return gestureEndVertex(screenPoints, at, radiusPx) || "add";
+}
+
+/**
+ * Что значит двойной клик по черновику:
+ *
+ *   `close`  — по первой вершине, и вершин хватает: замкнуть;
+ *   `finish` — по последней (или по первой, когда вершин меньше трёх):
+ *              закончить тем, что набрано, незамкнутым;
+ *   `none`   — в стороне от концов: это просто две вершины подряд, рисование
+ *              продолжается, ничего не теряется и не замыкается.
+ *
+ * `finish` — та самая развилка, на которой план и чертёж расходятся по делу, а
+ * не по жесту: ломаная метки незамкнутой бывает, контур вещи — нет, и чертёж на
+ * этот ответ отказывает словами.
+ */
+function gestureDraftEnd(screenPoints, at, radiusPx) {
+  const points = Array.isArray(screenPoints) ? screenPoints : [];
+  const hit = gestureEndVertex(points, at, radiusPx);
+  if (!hit) return "none";
+  if (hit === "first" && points.length >= GESTURE_CLOSE_MIN) return "close";
+  return "finish";
+}
+
 // src/roomTrace.js
 // Помещение по чертежу: показал точку внутри комнаты — контур нашёлся сам.
 //
@@ -29054,6 +29131,9 @@ const CANVAS_ZOOM_MAX = 24;
 const CANVAS_PLAN_FALLBACK_PX = 1000;
 // Смещение курсора, после которого клик считается перетаскиванием.
 const CANVAS_DRAG_SLOP = 3;
+// Запас к радиусу метки, по которому клик считается попавшим в концевую вершину
+// черновика: по кружку в самый его край целиться незачем.
+const CANVAS_DRAFT_END_PAD_PX = 6;
 // То же для пальца, и мера у него своя. Палец не стоит на месте: тап по метке
 // на планшете уезжает на несколько точек, и по мышиной мерке в три точки он
 // почти всегда оказывался бы панорамой, а не выбором метки. Десять точек —
@@ -30363,6 +30443,18 @@ function canvasDraftPoint(draft, cursor, scheme, view, options) {
   return draftSnap(points, cursor, scheme, view, options);
 }
 
+// Вершины черновика в экранных точках: общий разбор жеста (`gestureDraftClick`,
+// `gestureDraftEnd`) меряет попадание в вершину глазом, а не долями плана.
+function canvasDraftScreen(points, scheme, view) {
+  return (points || []).map((point) => planToScreen(point, scheme, view));
+}
+
+// Порог попадания в концевую вершину черновика: кружок вершины нарисован в
+// размер метки и растёт с масштабом, поэтому и порог считается от него.
+function canvasDraftEndPx(view, slack = 0) {
+  return markRadius(view) + CANVAS_DRAFT_END_PAD_PX + slack;
+}
+
 function canvasDraftSnap(plan, free) {
   const state = canvasState();
   const scheme = canvasScheme(state);
@@ -30472,14 +30564,12 @@ function canvasDraftClick(plan, screen, free) {
   const snap = canvasDraftSnap(plan, free);
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
-  const threshold = markRadius(view) + 6;
   const points = canvasDraft.points;
-  const last = planToScreen(points[points.length - 1], scheme, view);
-  const first = planToScreen(points[0], scheme, view);
   // Клик по последней или первой вершине ничего не добавляет: это первая
-  // половина двойного клика, который завершает или замыкает линию.
-  if (Math.hypot(screen.x - last.x, screen.y - last.y) <= threshold) return;
-  if (points.length >= 2 && Math.hypot(screen.x - first.x, screen.y - first.y) <= threshold) return;
+  // половина двойного клика, который завершает или замыкает линию. Разбор общий
+  // (`gestureDraftClick`, таск 167) — тем же живёт контур вещи в чертеже.
+  const kind = gestureDraftClick(canvasDraftScreen(points, scheme, view), screen, canvasDraftEndPx(view));
+  if (kind !== "add") return;
   points.push(snap.point);
   canvasDraft.cursor = snap.point;
   canvasDraft.snapped = false;
@@ -32229,15 +32319,14 @@ function canvasDoubleAt(at, slack = 0) {
   const drawing = state.mode === "room" || canvasAddKind(state) === "line";
   if (!drawing && canvasResetLabel(at)) return true;
   if ((canvasAddKind(state) !== "line" && state.mode !== "room") || !canvasDraft) return false;
-  const threshold = markRadius(view) + 6 + slack;
   const points = canvasDraft.points;
-  const first = planToScreen(points[0], scheme, view);
-  const last = planToScreen(points[points.length - 1], scheme, view);
-  const onFirst = Math.hypot(at.x - first.x, at.y - first.y) <= threshold;
-  const onLast = Math.hypot(at.x - last.x, at.y - last.y) <= threshold;
+  // Что значит двойной клик — общий разбор (`gestureDraftEnd`, таск 167): по
+  // первой вершине замыкает, по последней заканчивает незамкнутым, в стороне не
+  // значит ничего. Тем же разбором заканчивается контур вещи в чертеже.
+  const end = gestureDraftEnd(canvasDraftScreen(points, scheme, view), at, canvasDraftEndPx(view, slack));
   // Двойной клик в стороне — это просто две вершины подряд: рисование
   // продолжается, ничего не теряется и не замыкается.
-  if (!onFirst && !onLast) return false;
+  if (end === "none") return false;
   // Контур помещения замкнут всегда: комната с открытой стенкой — не комната.
   if (state.mode === "room") {
     canvasOutlineFinish();
@@ -32245,7 +32334,7 @@ function canvasDoubleAt(at, slack = 0) {
   }
   // По первой точке — замкнутый контур (лента по периметру комнаты),
   // по последней — открытая линия, ровно как в брифе.
-  canvasLineFinish(onFirst && !onLast && points.length >= 3);
+  canvasLineFinish(end === "close");
   return true;
 }
 
@@ -55841,9 +55930,10 @@ function workshopObjectDefaultsByName(name) {
 // как замкнёт: контур обводят на глазах, и обещать нечего — показано.
 const WORKSHOP_OBJECT_WAYS = ["rect", "contour", "polyline"];
 
-// Меньше трёх вершин — не контур: двумя точками площадь не огородить. Ровно
-// столько же требует и холст, чтобы замкнуть ломаную метки.
-const WORKSHOP_CONTOUR_MIN = 3;
+// Меньше трёх вершин — не контур: двумя точками площадь не огородить. Счёт
+// общий с планом (`GESTURE_CLOSE_MIN`, таск 167) — ровно столько же требует и
+// холст, чтобы замкнуть ломаную метки, и двух разных троек здесь не бывает.
+const WORKSHOP_CONTOUR_MIN = GESTURE_CLOSE_MIN;
 
 /** Какой формой модели оборачивается выбранный способ. */
 function workshopShapeOfWay(way) {
@@ -57866,28 +57956,21 @@ function createWorkshop({ api, hosts }) {
       paint();
       return;
     }
-    // Клик в первую вершину **замыкает контур** — тем же жестом, которым на
-    // холсте замыкают ломаную метки, и порог тот же, в экранных пикселях:
-    // попасть в неё миллиметр в миллиметр нельзя.
-    if (workshopObjectWay === "contour" && onFirstVertex(event)) {
-      finishContour();
-      return;
-    }
-    // Клик по последней вершине ничего не добавляет: это первая половина
-    // двойного клика, которым цепочку заканчивают. Та же примета, что на холсте.
-    const last = draft.points[draft.points.length - 1];
-    if (last.x === snap.point.x && last.y === snap.point.y) return;
+    // Клик по концевой вершине ничего не добавляет: это первая половина двойного
+    // клика, которым росчерк заканчивают. Разбор общий с планом
+    // (`gestureDraftClick`, таск 167) — и порог тот же, в экранных пикселях:
+    // попасть в вершину миллиметр в миллиметр нельзя.
+    const kind = gestureDraftClick(draft.points.map(screenOf), pointOf(event), WORKSHOP_VERTEX_PX);
+    if (kind === "last") return;
+    // Контуру отказывается и по первой вершине: замыкают его двойным кликом, как
+    // ломаную метки. Открытому росчерку — цепочке стен, полосе — клик в первую
+    // вершину, наоборот, нужен: кольцо он замыкает повтором точки, отметки
+    // «замкнуто» у него нет.
+    if (kind === "first" && workshopObjectWay === "contour" && tool === "objects") return;
     draft.points.push(snap.point);
     draft.cursor = snap.point;
     draft.snap = snap;
     paint();
-  }
-
-  function onFirstVertex(event) {
-    if (!draft || draft.points.length < WORKSHOP_CONTOUR_MIN) return false;
-    const first = screenOf(draft.points[0]);
-    const at = pointOf(event);
-    return Math.hypot(at.x - first.x, at.y - first.y) <= WORKSHOP_VERTEX_PX;
   }
 
   stage.addEventListener("dblclick", (event) => {
@@ -57907,9 +57990,19 @@ function createWorkshop({ api, hosts }) {
       finishBand();
       return;
     }
-    // Контур двойным кликом **не заканчивается**: незамкнутый контур объектом
-    // не становится (G193), а терять за это четыре клика человеку незачем —
-    // черновик остаётся на поле, сказано только, чего не хватает.
+    // Контур заканчивается тем же двойным кликом, что ломаная метки на плане
+    // (таск 167): по первой вершине — замкнут, и вещь встаёт; в стороне от
+    // концов — просто две вершины, рисование продолжается.
+    const end = gestureDraftEnd(draft.points.map(screenOf), pointOf(event), WORKSHOP_VERTEX_PX);
+    if (end === "none") return;
+    if (end === "close") {
+      finishContour();
+      return;
+    }
+    // Остаётся «закончить незамкнутым» — двойной клик по последней вершине. У
+    // контура такого ответа нет: незамкнутый контур вещью не становится (G193).
+    // Терять за это четыре клика человеку незачем — черновик остаётся на поле,
+    // сказано только, чего не хватает.
     notify(strings.workshop.contourOpen, "error");
   });
 
