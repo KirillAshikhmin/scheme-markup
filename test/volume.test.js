@@ -77,6 +77,7 @@ import {
   VOLUME_WALL_RGB,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
+  VOLUME_AROUND_PAN_TILT_MIN,
   VOLUME_HILLS,
   VOLUME_FLOOR_LAP,
   VOLUME_FLOOR_RGB,
@@ -91,6 +92,7 @@ import {
   volumeArea,
   volumeAroundCamera,
   volumeAroundFit,
+  volumeAroundPan,
   volumeAroundPitch,
   volumeClipNear,
   volumeClipDepth,
@@ -1613,6 +1615,89 @@ test("обзор не ныряет под крышу: наклон ограни�
   assert.ok(volumeAroundPitch(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
   // Круче ограничения смотреть не запрещено — запрещено положе.
   assert.ok(volumeAroundPitch(-1.2, 20000, lift) < far);
+});
+
+// ——— карта возится двумя пальцами (таск 174, G256) ————————————————————————
+//
+// Проверяется не «есть сдвиг», а **сходимость двух счётов**: перенос считает
+// `volumeAroundPan`, а куда смотрит пиксель — рисовальщик (`volumeFloorAt`,
+// тот же луч, которым переносят человека кликом). Разойдись они — карта поедет
+// не за пальцем, а мимо, и глазом это видно только на живой странице.
+
+// Поле и цель **на полу** (`z` ноль): луч `volumeFloorAt` упирается в ту же
+// плоскость, на которой стоит цель, и сходимость можно требовать числом.
+const panBox = { width: 1200, height: 700 };
+const panLen = (step) => Math.hypot(step.dx, step.dy);
+const panSlip = (view, panX, panY) => {
+  const centre = { x: panBox.width / 2, y: panBox.height / 2 };
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 0 }, view.yaw, view.pitch, view.distance);
+  const before = volumeFloorAt(camera, panBox, centre.x, centre.y);
+  const moved = volumeAroundPan(view, panBox, panX, panY);
+  const next = volumeAroundCamera({ x: moved.dx, y: moved.dy, z: 0 }, view.yaw, view.pitch, view.distance);
+  const after = volumeFloorAt(next, panBox, centre.x + panX, centre.y + panY);
+  assert.ok(before && after, "луч в пол упирается с обоих концов жеста");
+  const step = Math.hypot(moved.dx, moved.dy);
+  return { step, slip: Math.hypot(after.x - before.x, after.y - before.y), moved };
+};
+
+test("два пальца в обзоре: пол остаётся под серединой между пальцами", () => {
+  // Отвесный взгляд: середина уехала вправо и вверх — та точка пола, что была
+  // под пальцами, под ними и осталась.
+  const steep = panSlip({ yaw: 0.7, pitch: (-80 * Math.PI) / 180, distance: 12000 }, 60, -40);
+  assert.ok(steep.step > 1000, "жест на шесть десятков точек с двенадцати метров возит метрами: " + Math.round(steep.step));
+  assert.ok(steep.slip < steep.step * 0.03, "пол уехал из-под пальцев на " + Math.round(steep.slip) + " мм из " + Math.round(steep.step));
+  // Наклон по умолчанию (−42°) — то же самое, и обе оси сразу.
+  const tilted = panSlip({ yaw: -1.1, pitch: (-42 * Math.PI) / 180, distance: 20000 }, 6, 4);
+  assert.ok(tilted.slip < tilted.step * 0.03, "при наклоне пол уехал на " + Math.round(tilted.slip) + " мм из " + Math.round(tilted.step));
+  // Мелкий ход — сходимость точная: вся разница это перспектива на длинном
+  // махе, а не кривой счёт.
+  const small = panSlip({ yaw: 0.3, pitch: (-55 * Math.PI) / 180, distance: 9000 }, 3, -2);
+  assert.ok(small.slip < small.step * 0.01, "мелкий ход разошёлся: " + small.slip.toFixed(1) + " мм из " + small.step.toFixed(1));
+});
+
+test("палец везёт карту, а не камеру: сдвиг идёт в обратную сторону", () => {
+  // Рысканье ноль — экранное «вправо» это +y плана, «вверх» это +x.
+  const view = { yaw: 0, pitch: -Math.PI / 2, distance: 10000 };
+  const right = volumeAroundPan(view, panBox, 100, 0);
+  assert.ok(right.dy < 0, "палец вправо — карта вправо, камера влево: " + right.dy);
+  assert.ok(Math.abs(right.dx) < 1e-6, "поперёк взгляда чистое поперёк");
+  const up = volumeAroundPan(view, panBox, 0, -100);
+  assert.ok(up.dx < 0, "палец вверх — карта вверх, камера назад: " + up.dx);
+  // Отвесный взгляд — та самая «карта в режиме сверху»: мера пикселя одна на
+  // обе оси, и это `distance / focal`.
+  const perPixel = view.distance / volumeFocal(panBox);
+  assert.ok(Math.abs(Math.abs(right.dy) - 100 * perPixel) < 1e-6, "поперёк: " + right.dy);
+  assert.ok(Math.abs(Math.abs(up.dx) - 100 * perPixel) < 1e-6, "вдоль: " + up.dx);
+});
+
+test("отошёл дальше — палец возит крупнее, и ровно во столько же раз", () => {
+  const near = volumeAroundPan({ yaw: 0.4, pitch: -1, distance: 5000 }, panBox, 40, 25);
+  const far = volumeAroundPan({ yaw: 0.4, pitch: -1, distance: 20000 }, panBox, 40, 25);
+  const ratio = Math.hypot(far.dx, far.dy) / Math.hypot(near.dx, near.dy);
+  assert.ok(Math.abs(ratio - 4) < 1e-9, "вчетверо дальше — вчетверо крупнее шаг: " + ratio.toFixed(3));
+  // Мерить не от чего — ноль, а не бесконечность: щипок мог свести камеру в точку.
+  assert.deepEqual(volumeAroundPan({ yaw: 0, pitch: -1, distance: 0 }, panBox, 10, 10), { dx: 0, dy: 0 });
+  assert.deepEqual(volumeAroundPan({ yaw: 0, pitch: -1, distance: 9000 }, { width: 0, height: 0 }, 10, 10), { dx: 0, dy: 0 });
+});
+
+test("поправка на наклон есть, но у горизонта не уходит в бесконечность", () => {
+  const box = panBox;
+  const across = panLen(volumeAroundPan({ yaw: 0, pitch: (-42 * Math.PI) / 180, distance: 20000 }, box, 100, 0));
+  const along = panLen(volumeAroundPan({ yaw: 0, pitch: (-42 * Math.PI) / 180, distance: 20000 }, box, 0, 100));
+  // Пол на экране сжат синусом наклона — вдоль палец возит ровно во столько же
+  // раз крупнее, иначе карта отставала бы вверх-вниз.
+  assert.ok(Math.abs(along / across - 1 / Math.sin((42 * Math.PI) / 180)) < 1e-9, "отношение: " + (along / across).toFixed(3));
+  // Положе двадцати градусов поправка стоит: у почти горизонтального взгляда
+  // пол под пальцем лежит у горизонта, и без предела один мах уносил бы обзор
+  // за километры.
+  const shallow = panLen(volumeAroundPan({ yaw: 0, pitch: (-5 * Math.PI) / 180, distance: 20000 }, box, 0, 100));
+  const limit = panLen(volumeAroundPan({ yaw: 0, pitch: (-20 * Math.PI) / 180, distance: 20000 }, box, 0, 100));
+  assert.ok(Math.abs(shallow - limit) < 1e-6, "положе предела шаг не растёт: " + shallow.toFixed(1) + " против " + limit.toFixed(1));
+  assert.ok(Math.abs(limit - (100 * 20000) / volumeFocal(box) / VOLUME_AROUND_PAN_TILT_MIN) < 1e-6, "предел считается по тому же числу");
+  // Взгляд ровно вдоль земли (в обзоре такого не бывает) — сторона берётся у
+  // самого взгляда, и ответ не ноль и не NaN.
+  const flat = volumeAroundPan({ yaw: 0, pitch: 0, distance: 9000 }, box, 0, 100);
+  assert.ok(Number.isFinite(flat.dx) && Math.abs(flat.dx) > 0, "вдоль земли ответ есть: " + JSON.stringify(flat));
 });
 
 test("клавиши разложены по осям камеры, а стрелки влево-вправо вертят", () => {
