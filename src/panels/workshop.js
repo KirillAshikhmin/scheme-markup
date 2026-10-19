@@ -2529,7 +2529,13 @@ function createWorkshop({ api, hosts }) {
   function objectGhostAt(pointMm) {
     const sizes = objectSizes(null);
     if (sizes.shape !== "rect") return null;
-    return workshopObjectRectAt(sizes, pointMm);
+    const rect = workshopObjectRectAt(sizes, pointMm);
+    // Высоты — ради подписи (таск 168): имя вещи на чертеже идёт с её верхом
+    // над полом («Радиатор · верх 650 мм»), и верх считается из высоты и
+    // посадки. Без них призрак подписался бы короче, чем подпишется вещь, —
+    // то есть снова обещал бы не то. В саму постановку они идут своим путём,
+    // `placeObject`: `workshopObjectRectAt` остаётся дверью для габарита.
+    return rect && { ...rect, heightMm: sizes.heightMm, heightAboveFloorMm: sizes.heightAboveFloorMm };
   }
 
   /**
