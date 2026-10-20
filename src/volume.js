@@ -5370,8 +5370,8 @@ const VOLUME_TREE_FAR_MM = 300 * VOLUME_M;
  * высоты глаза, ни от часа. Именно этим он отличается от отменённого
  * `volumeGroundScale`, который дышал от высоты глаза.
  */
-export const VOLUME_BACKDROP_NEAR_MM = 38 * VOLUME_M;
-export const VOLUME_BACKDROP_CLEAR_MM = 10 * VOLUME_M;
+export const VOLUME_BACKDROP_NEAR_MM = 32 * VOLUME_M;
+export const VOLUME_BACKDROP_CLEAR_MM = 5 * VOLUME_M;
 
 /** Место на земле: сторона света и дальность в метрах. */
 function volumeAway(azDeg, metres) {
@@ -5393,49 +5393,48 @@ function volumeStanding(azDeg, metres, heightM, kind) {
  * не по высоте основания над горизонтом, как считалось в кольце.
  */
 export const VOLUME_TREES = [
-  // дальний ряд по всему кругу: 380…700 м
-  volumeStanding(10, 520, 14, "tree"),
-  volumeStanding(48, 610, 12, "spruce"),
-  volumeStanding(95, 430, 16, "poplar"),
-  volumeStanding(140, 660, 13, "spruce"),
-  volumeStanding(185, 480, 15, "tree"),
-  volumeStanding(228, 700, 11, "birch"),
-  volumeStanding(262, 390, 18, "spruce"),
-  volumeStanding(305, 560, 13, "tree"),
-  volumeStanding(345, 640, 15, "spruce"),
-  // средний ряд: 110…190 м
-  volumeStanding(30, 150, 12, "spruce"),
-  volumeStanding(78, 185, 14, "poplar"),
-  volumeStanding(112, 125, 10, "tree"),
-  volumeStanding(171, 165, 13, "birch"),
-  volumeStanding(200, 140, 11, "tree"),
-  volumeStanding(275, 115, 9, "spruce"),
-  volumeStanding(330, 175, 16, "tree"),
+  // дальний ряд по всему кругу: 230…430 м
+  volumeStanding(10, 320, 14, "tree"),
+  volumeStanding(48, 380, 12, "spruce"),
+  volumeStanding(95, 265, 16, "poplar"),
+  volumeStanding(140, 410, 13, "spruce"),
+  volumeStanding(185, 295, 15, "tree"),
+  volumeStanding(228, 430, 11, "birch"),
+  volumeStanding(262, 240, 18, "spruce"),
+  volumeStanding(305, 345, 13, "tree"),
+  volumeStanding(345, 395, 15, "spruce"),
+  // средний ряд: 70…120 м
+  volumeStanding(30, 95, 12, "spruce"),
+  volumeStanding(78, 118, 14, "poplar"),
+  volumeStanding(112, 78, 10, "tree"),
+  volumeStanding(171, 104, 13, "birch"),
+  volumeStanding(200, 88, 11, "tree"),
+  volumeStanding(275, 72, 9, "spruce"),
+  volumeStanding(330, 110, 16, "tree"),
   // Берёзовая роща (таск 181: «плюс ещё немного берёз»): три белых ствола
   // подряд в ближнем ряду и ещё три врозь — в среднем и дальнем.
-  volumeStanding(16, 52, 9, "birch"),
-  volumeStanding(22, 58, 11, "birch"),
-  volumeStanding(28, 49, 8, "birch"),
-  volumeStanding(145, 130, 12, "birch"),
-  volumeStanding(252, 155, 10, "birch"),
-  volumeStanding(68, 450, 12, "birch"),
-  // ближний ряд — то, о чём просил заказчик: 45…75 м
-  volumeStanding(62, 58, 11, "tree"),
-  volumeStanding(128, 64, 10, "birch"),
-  volumeStanding(155, 47, 9, "spruce"),
-  volumeStanding(212, 72, 12, "poplar"),
-  volumeStanding(248, 55, 10, "tree"),
-  volumeStanding(352, 68, 12, "tree"),
-  // кустарники — ниже деревьев и ближе к земле: 38…60 м
-  volumeStanding(44, 44, 2.1, "bush"),
-  volumeStanding(88, 39, 1.8, "bush"),
-  volumeStanding(133, 52, 2.4, "bush"),
-  volumeStanding(176, 41, 1.6, "bush"),
-  volumeStanding(219, 47, 2.2, "bush"),
-  volumeStanding(295, 38, 1.9, "bush"),
-  volumeStanding(315, 56, 2.3, "bush"),
+  volumeStanding(16, 36, 9, "birch"),
+  volumeStanding(22, 40, 11, "birch"),
+  volumeStanding(28, 34, 8, "birch"),
+  volumeStanding(145, 82, 12, "birch"),
+  volumeStanding(252, 98, 10, "birch"),
+  volumeStanding(68, 280, 12, "birch"),
+  // ближний ряд — то, о чём просил заказчик: 33…50 м
+  volumeStanding(62, 40, 11, "tree"),
+  volumeStanding(128, 44, 10, "birch"),
+  volumeStanding(155, 34, 9, "spruce"),
+  volumeStanding(212, 50, 12, "poplar"),
+  volumeStanding(248, 38, 10, "tree"),
+  volumeStanding(352, 47, 12, "tree"),
+  // кустарники — ниже деревьев и ближе к земле: 32…45 м
+  volumeStanding(44, 35, 2.1, "bush"),
+  volumeStanding(88, 32, 1.8, "bush"),
+  volumeStanding(133, 42, 2.4, "bush"),
+  volumeStanding(176, 33, 1.6, "bush"),
+  volumeStanding(219, 38, 2.2, "bush"),
+  volumeStanding(295, 32, 1.9, "bush"),
+  volumeStanding(315, 45, 2.3, "bush"),
 ];
-
 /**
  * Узлы полосы, лежащей на земле: середина и половина ширины.
  *
@@ -5471,31 +5470,31 @@ function volumeBandNodes(points, widthM) {
  */
 export const VOLUME_ROAD = volumeBandNodes(
   [
-    [286, 150],
-    [300, 210],
-    [315, 300],
-    [330, 420],
-    [345, 560],
-    [358, 700],
-    [12, 820],
-    [26, 900],
+    [286, 95],
+    [300, 135],
+    [315, 195],
+    [330, 275],
+    [345, 370],
+    [358, 470],
+    [12, 560],
+    [26, 640],
   ],
-  7,
+  9,
 );
 
 /** Река: с юго-востока к югу, шире дороги и извилистее — вода не спрямлена. */
 export const VOLUME_RIVER = volumeBandNodes(
   [
-    [118, 220],
-    [131, 300],
-    [142, 400],
-    [156, 520],
-    [168, 680],
-    [179, 850],
-    [191, 1020],
-    [204, 1200],
+    [118, 105],
+    [131, 150],
+    [142, 205],
+    [156, 275],
+    [168, 360],
+    [179, 455],
+    [191, 560],
+    [204, 670],
   ],
-  24,
+  60,
 );
 
 /**
@@ -5517,14 +5516,14 @@ export const VOLUME_HILLS = [
   {
     far: true,
     color: VOLUME_HILL_FAR,
-    awayM: 3200,
-    nodes: volumeRidge([1.5, 2.6, 2.1, 1.2, 1.9, 2.4, 1.4, 2.0, 2.6, 1.7, 1.1, 2.2, 1.8, 2.5], 3200, 42),
+    awayM: 2400,
+    nodes: volumeRidge([1.5, 2.6, 2.1, 1.2, 1.9, 2.4, 1.4, 2.0, 2.6, 1.7, 1.1, 2.2, 1.8, 2.5], 2400, 34),
   },
   {
     far: false,
     color: VOLUME_HILL_NEAR,
-    awayM: 1600,
-    nodes: volumeRidge([0.9, 0.5, 1.4, 1.6, 0.8, 1.1, 1.5, 0.6, 1.2, 1.55, 0.95, 0.7, 1.35, 1.05], 1600, 28),
+    awayM: 1200,
+    nodes: volumeRidge([0.9, 0.5, 1.4, 1.6, 0.8, 1.1, 1.5, 0.6, 1.2, 1.55, 0.95, 0.7, 1.35, 1.05], 1200, 22),
   },
 ];
 
@@ -5796,6 +5795,7 @@ export function volumeBackdropPlaces(land) {
           streets: VOLUME_CITY_STREETS,
           marks: VOLUME_CITY_MARKS,
           park: VOLUME_CITY_PARK,
+          banners: VOLUME_CITY_BANNER_PLACES,
           cityGreens: VOLUME_CITY_GREENS,
         }
       : {
@@ -5812,10 +5812,18 @@ export function volumeBackdropPlaces(land) {
             ...volumePushSpot(peak, push),
             halfMm: peak.halfMm * push,
           })),
-          city: VOLUME_CITY.map((block) => ({ ...volumePushSpot(block, push), halfMm: block.halfMm * push })),
+          city: VOLUME_CITY.map((block) => ({
+            ...volumePushSpot(block, push),
+            halfMm: block.halfMm * push,
+            deepMm: block.deepMm * push,
+          })),
           streets: VOLUME_CITY_STREETS.map((street) => volumePushBand(street, push)),
           marks: VOLUME_CITY_MARKS.map((street) => volumePushBand(street, push)),
           park: VOLUME_CITY_PARK.map((car) => volumePushSpot(car, push)),
+          banners: VOLUME_CITY_BANNER_PLACES.map((banner) => ({
+            ...volumePushSpot(banner, push),
+            halfMm: banner.halfMm * push,
+          })),
           cityGreens: VOLUME_CITY_GREENS.map((green) => volumePushSpot(green, push)),
         };
   VOLUME_BACKDROP_CACHE.set(push, made);
@@ -6076,6 +6084,7 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
     }
     take(places.city, (spot, index) => volumeDrawBlock(ctx, aim, spot, index, hour));
     take(places.park, (spot) => volumeDrawCar(ctx, aim, spot, palette));
+    take(places.banners, (spot) => volumeDrawBanner(ctx, aim, spot, hour));
     take(places.cityGreens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
   } else {
     if (!near) {
@@ -6107,29 +6116,229 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
 // ближними домами, зелень вдоль улиц. Дальний ряд домов рисуется раньше
 // ближнего — он за ним.
 /**
- * Многоэтажка: лицо, бок и сетка окон.
+ * Дом города — **коробка** (дефект D57): лицо, бок и крыша.
  *
- * Бок нужен, чтобы дом читался домом, а не вывеской: он уходит в ту сторону, в
- * которую от зрителя отвёрнут, то есть считается из самой панорамы, а не
- * выбирается на глаз. Окно светится или нет, решает `volumeCityWindowLit`, и
- * светящееся **не красится часом**: светит — значит не темнеет.
+ * Долг таска 199 назывался так: «бок у дома города пропал, дом читается щитом».
+ * Заказчик увидел это первым же взглядом — «плоские дома (о чем и говорил)».
+ * Теперь у дома есть глубина, и в кадр идут **две стены из четырёх** — те, что
+ * повёрнуты к камере; какие именно, решает сама камера, поэтому при облёте дом
+ * поворачивается, а не схлопывается.
+ *
+ * Окна рисуются **на каждой видимой стене** своей сеткой, посчитанной из метров
+ * (`VOLUME_CITY_FLOOR_MM`, `VOLUME_CITY_BAY_MM`), — у бока секций меньше, чем у
+ * лица, ровно во столько раз, во сколько он у́же.
+ *
+ * Светящееся окно **не красится часом** (светит — значит не темнеет), и то же
+ * правило у неоновой вывески (G310).
  */
 function volumeDrawBlock(ctx, aim, block, index, hour) {
   const palette = hour.palette;
-  // Лицо дома стоит поперёк взгляда на него: половина ширины откладывается по
-  // перпендикуляру к направлению «от середины чертежа к дому». Своей стороны
-  // света у дома больше нет — есть место, и перпендикуляр берётся из него.
+  // Лицо дома стоит поперёк взгляда на него, глубина уходит от середины
+  // чертежа: `u` — вдоль лица, `f` — в глубину.
   const len = Math.hypot(block.x, block.y) || 1;
-  const nx = -block.y / len;
-  const ny = block.x / len;
+  const fx = block.x / len;
+  const fy = block.y / len;
+  const ux = -fy;
+  const uy = fx;
+  const deep = block.deepMm / 2;
+  const corner = (alongSign, deepSign) => ({
+    x: block.x + ux * block.halfMm * alongSign + fx * deep * deepSign,
+    y: block.y + uy * block.halfMm * alongSign + fy * deep * deepSign,
+  });
+  // Четыре угла коробки в плане: лицо смотрит на дом (к середине чертежа).
+  const plan = {
+    faceLeft: corner(1, -1),
+    faceRight: corner(-1, -1),
+    backLeft: corner(1, 1),
+    backRight: corner(-1, 1),
+  };
+  const walls = [
+    { from: plan.faceLeft, to: plan.faceRight, wide: block.halfMm * 2, face: true },
+    { from: plan.faceRight, to: plan.backRight, wide: block.deepMm, face: false },
+    { from: plan.backRight, to: plan.backLeft, wide: block.halfMm * 2, face: false },
+    { from: plan.backLeft, to: plan.faceLeft, wide: block.deepMm, face: false },
+  ];
+  const at = aim.at;
+  const shown = [];
+  for (const wall of walls) {
+    // Стена видна, если её наружная нормаль смотрит на камеру. Обход коробки
+    // задан по кругу (лицо → правый бок → зад → левый бок), и при этом обходе
+    // наружу смотрит **правый** перпендикуляр ребра: у лица он уходит к
+    // середине чертежа, то есть к дому, как и положено лицу.
+    const ex = wall.to.x - wall.from.x;
+    const ey = wall.to.y - wall.from.y;
+    const nx = ey;
+    const ny = -ex;
+    const mx = (wall.from.x + wall.to.x) / 2;
+    const my = (wall.from.y + wall.to.y) / 2;
+    if (nx * (at.x - mx) + ny * (at.y - my) <= 0) continue;
+    const left = volumeGroundPoint(aim, wall.from.x, wall.from.y, block.heightMm);
+    const right = volumeGroundPoint(aim, wall.to.x, wall.to.y, block.heightMm);
+    const footLeft = volumeGroundPoint(aim, wall.from.x, wall.from.y, 0);
+    const footRight = volumeGroundPoint(aim, wall.to.x, wall.to.y, 0);
+    if (!left || !right || !footLeft || !footRight) continue;
+    shown.push({ ...wall, left, right, footLeft, footRight, depth: Math.hypot(mx - at.x, my - at.y) });
+  }
+  if (shown.length === 0) return;
+  // Дальняя стена ложится первой: у коробки их видно самое большее две, и
+  // спорить им не о чем, кроме порядка.
+  shown.sort((one, two) => two.depth - one.depth);
+  const lit = hour.cityLit;
+  for (let wallIndex = 0; wallIndex < shown.length; wallIndex += 1) {
+    const wall = shown[wallIndex];
+    const { left, right, footLeft, footRight } = wall;
+    // Бок темнее лица: та же мера, что у боковых стен города до таска 206.
+    const flat = wall.face || shown.length === 1;
+    ctx.fillStyle = flat
+      ? block.far
+        ? palette.wallFar
+        : palette.wall
+      : block.far
+        ? palette.wallSideFar
+        : palette.wallSide;
+    ctx.beginPath();
+    ctx.moveTo(left.x, left.y);
+    ctx.lineTo(right.x, right.y);
+    ctx.lineTo(footRight.x, footRight.y);
+    ctx.lineTo(footLeft.x, footLeft.y);
+    ctx.closePath();
+    ctx.fill();
+    // Окна: сетка по этажам и секциям, с полями по краям стены. Точки
+    // считаются по самой стене (`volumeCitySpot`), поэтому сетка едет вместе с
+    // перспективой.
+    const bays = Math.max(2, Math.round(wall.wide / VOLUME_CITY_BAY_MM));
+    const pad = 0.14;
+    const cellX = (1 - pad * 2) / bays;
+    const cellY = (1 - pad * 2) / block.floors;
+    const seed = index * 4 + wallIndex;
+    // Сколько точек занимает окно на этой стене. От этого зависит, рисовать ли
+    // каждое окно своим прямоугольником или целым этажом сразу (см. ниже).
+    const across = Math.hypot(right.x - left.x, right.y - left.y) / Math.max(1, bays);
+    // **Дальний дом рисуется этажами, а не окнами** (цена кадра, таск 206).
+    // Окно в полторы точки и так сливается с соседним в полосу, и полоса эта
+    // рисуется одной заливкой вместо `bays`; поимённо дорисовываются только
+    // **светящиеся** окна — ночью их доля не больше `VOLUME_CITY_LIT_MAX`, а
+    // днём нет вовсе. Вблизи (окно шире трёх точек) всё как было: каждое своим.
+    const rows = across < VOLUME_CITY_WINDOW_PX;
+    for (let floor = 0; floor < block.floors; floor += 1) {
+      const sy = pad + cellY * (floor + 0.14);
+      if (rows) {
+        const a = volumeCitySpot(left, right, footLeft, footRight, pad + cellX * 0.12, sy);
+        const b = volumeCitySpot(
+          left,
+          right,
+          footLeft,
+          footRight,
+          pad + cellX * (bays - 1 + 0.88),
+          sy + cellY * 0.72,
+        );
+        const width = b.x - a.x;
+        const height = b.y - a.y;
+        if (!(Math.abs(width) > 0.6) || !(Math.abs(height) > 0.6)) continue;
+        ctx.fillStyle = palette.glass;
+        ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(width), Math.abs(height));
+      }
+      for (let bay = 0; bay < bays; bay += 1) {
+        const alight = volumeCityWindowLit(seed, floor, bay, lit);
+        if (rows && !alight) continue;
+        const sx = pad + cellX * (bay + 0.12);
+        const a = volumeCitySpot(left, right, footLeft, footRight, sx, sy);
+        const b = volumeCitySpot(left, right, footLeft, footRight, sx + cellX * 0.76, sy + cellY * 0.72);
+        const width = b.x - a.x;
+        const height = b.y - a.y;
+        if (!(Math.abs(width) > 0.6) || !(Math.abs(height) > 0.6)) continue;
+        ctx.fillStyle = alight ? VOLUME_CITY_LIGHT : palette.glass;
+        ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(width), Math.abs(height));
+      }
+    }
+    // Неоновая вывеска — только на лице и только у того, кому она задана.
+    if (wall.face && block.sign) volumeDrawSign(ctx, block.sign, wall, hour);
+  }
+  // Крыша: четырёхугольник по верху коробки. Видна она сверху, а снизу
+  // вырождается в черту — и это та самая черта парапета, которой дом отличался
+  // от коробки до таска 206.
+  const top = [plan.faceLeft, plan.faceRight, plan.backRight, plan.backLeft].map((spot) =>
+    volumeGroundPoint(aim, spot.x, spot.y, block.heightMm),
+  );
+  if (top.every(Boolean)) {
+    ctx.fillStyle = block.far ? palette.roof : palette.roof;
+    ctx.beginPath();
+    ctx.moveTo(top[0].x, top[0].y);
+    for (let index2 = 1; index2 < top.length; index2 += 1) ctx.lineTo(top[index2].x, top[index2].y);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/**
+ * Неоновая вывеска на лице дома (G310): цветной прямоугольник в полоску.
+ *
+ * **Текста нет нарочно** — писать на вывеске значило бы придумывать чужую
+ * рекламу; узнаётся она цветом, полосами и тем, что ночью светится.
+ *
+ * Светится она **тем же часом, которым загораются окна** (`hour.cityLit`,
+ * G273): второго правила «ночь» в сборке нет. Днём доля ноль, и вывеска
+ * красится приглушённым тоном палитры, как всякая вещь фона; ночью берётся
+ * чистый неон и **час его не темнит** — светит, значит не темнеет.
+ */
+function volumeDrawSign(ctx, sign, wall, hour) {
+  const { left, right, footLeft, footRight } = wall;
+  const glow = Math.max(0, Math.min(1, hour.cityLit / VOLUME_CITY_LIT_MAX));
+  const neon = VOLUME_CITY_NEON[sign.neon % VOLUME_CITY_NEON.length];
+  const half = Math.max(0.05, Math.min(0.46, sign.wide / 2));
+  const high = 1 - sign.at;
+  const tall = Math.min(0.1, 0.055 + half * 0.08);
+  const a = volumeCitySpot(left, right, footLeft, footRight, 0.5 - half, high - tall / 2);
+  const b = volumeCitySpot(left, right, footLeft, footRight, 0.5 + half, high + tall / 2);
+  const width = b.x - a.x;
+  const height = b.y - a.y;
+  if (!(Math.abs(width) > 2) || !(Math.abs(height) > 1.5)) return;
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const wide = Math.abs(width);
+  const high2 = Math.abs(height);
+  ctx.fillStyle = glow > 0 ? neon.lit : volumeTintCss(volumeHexRgb(neon.day), hour.tint);
+  ctx.fillRect(x, y, wide, high2);
+  // Две тёмные полосы поперёк: по ним вывеска читается вывеской, а не окном.
+  ctx.fillStyle = glow > 0 ? neon.dark : volumeTintCss(volumeHexRgb(VOLUME_CITY_SIGN_DARK), hour.tint);
+  const bar = Math.max(1, high2 * 0.16);
+  ctx.fillRect(x + wide * 0.08, y + high2 * 0.3 - bar / 2, wide * 0.84, bar);
+  ctx.fillRect(x + wide * 0.08, y + high2 * 0.68 - bar / 2, wide * 0.52, bar);
+}
+
+/**
+ * Рекламный щит у дороги (G310): полотно на двух ногах, поперёк взгляда.
+ *
+ * Полотно — цветные полосы, и всё: текста на нём нет по той же причине, что на
+ * вывеске. Ночью щит **не светится** — подсветка билборда это уже вторая
+ * история, а неон висит на домах.
+ */
+function volumeDrawBanner(ctx, aim, banner, hour) {
+  const palette = hour.palette;
+  const len = Math.hypot(banner.x, banner.y) || 1;
+  const ux = -banner.y / len;
+  const uy = banner.x / len;
   const edge = (sign, zMm) =>
-    volumeGroundPoint(aim, block.x + nx * block.halfMm * sign, block.y + ny * block.halfMm * sign, zMm);
-  const left = edge(1, block.heightMm);
-  const right = edge(-1, block.heightMm);
-  const footLeft = edge(1, 0);
-  const footRight = edge(-1, 0);
-  if (!left || !right || !footLeft || !footRight) return;
-  ctx.fillStyle = block.far ? palette.wallFar : palette.wall;
+    volumeGroundPoint(aim, banner.x + ux * banner.halfMm * sign, banner.y + uy * banner.halfMm * sign, zMm);
+  const top = banner.bottomMm + banner.heightMm;
+  const left = edge(1, top);
+  const right = edge(-1, top);
+  const footLeft = edge(1, banner.bottomMm);
+  const footRight = edge(-1, banner.bottomMm);
+  const legLeft = edge(0.62, 0);
+  const legRight = edge(-0.62, 0);
+  if (!left || !right || !footLeft || !footRight || !legLeft || !legRight) return;
+  // Ноги — две черты до земли, толщиной в сотую ширины щита.
+  ctx.fillStyle = palette.wallSide;
+  const leg = Math.max(1, Math.abs(right.x - left.x) * 0.04);
+  for (const [atTop, atFoot] of [
+    [footLeft, legLeft],
+    [footRight, legRight],
+  ]) {
+    ctx.fillRect(Math.min(atTop.x, atFoot.x) - leg / 2, Math.min(atTop.y, atFoot.y), leg, Math.abs(atFoot.y - atTop.y));
+  }
+  const paint = VOLUME_CITY_BANNERS[banner.paint % VOLUME_CITY_BANNERS.length];
+  ctx.fillStyle = volumeTintCss(volumeHexRgb(paint.back), hour.tint);
   ctx.beginPath();
   ctx.moveTo(left.x, left.y);
   ctx.lineTo(right.x, right.y);
@@ -6137,37 +6346,19 @@ function volumeDrawBlock(ctx, aim, block, index, hour) {
   ctx.lineTo(footLeft.x, footLeft.y);
   ctx.closePath();
   ctx.fill();
-  // Окна: сетка по этажам и секциям, с полями по краям лица. Точки считаются
-  // по лицу дома (`volumeFaceSpot`), поэтому сетка едет вместе с перспективой:
-  // у края широкого окна дом крупнее, и окна у него крупнее тоже.
-  const lit = hour.cityLit;
-  const pad = 0.14;
-  const cellX = (1 - pad * 2) / block.bays;
-  const cellY = (1 - pad * 2) / block.floors;
-  for (let floor = 0; floor < block.floors; floor += 1) {
-    for (let bay = 0; bay < block.bays; bay += 1) {
-      const fx = pad + cellX * (bay + 0.12);
-      const fy = pad + cellY * (floor + 0.14);
-      const a = volumeCitySpot(left, right, footLeft, footRight, fx, fy);
-      const b = volumeCitySpot(left, right, footLeft, footRight, fx + cellX * 0.76, fy + cellY * 0.72);
-      const width = b.x - a.x;
-      const height = b.y - a.y;
-      if (!(Math.abs(width) > 0.6) || !(Math.abs(height) > 0.6)) continue;
-      ctx.fillStyle = volumeCityWindowLit(index, floor, bay, lit) ? VOLUME_CITY_LIGHT : palette.glass;
-      ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(width), Math.abs(height));
-    }
+  ctx.fillStyle = volumeTintCss(volumeHexRgb(paint.mark), hour.tint);
+  for (const [from, to, thick] of [
+    [0.1, 0.66, 0.2],
+    [0.1, 0.44, 0.52],
+    [0.1, 0.78, 0.74],
+  ]) {
+    const a = volumeCitySpot(left, right, footLeft, footRight, from, thick);
+    const b = volumeCitySpot(left, right, footLeft, footRight, to, thick + 0.14);
+    const wide = b.x - a.x;
+    const high = b.y - a.y;
+    if (!(Math.abs(wide) > 1) || !(Math.abs(high) > 0.8)) continue;
+    ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(wide), Math.abs(high));
   }
-  // Крыша плоской чертой: дом с ровным верхом читается коробкой, а с чертой —
-  // домом с парапетом.
-  ctx.fillStyle = block.far ? palette.wallSideFar : palette.wallSide;
-  const roofHeight = Math.max(1, Math.abs(footLeft.y - left.y) * 0.02);
-  ctx.beginPath();
-  ctx.moveTo(left.x, left.y);
-  ctx.lineTo(right.x, right.y);
-  ctx.lineTo(right.x, right.y + roofHeight);
-  ctx.lineTo(left.x, left.y + roofHeight);
-  ctx.closePath();
-  ctx.fill();
 }
 
 /** Точка на лице дома по долям: верх-низ и лево-право, с перспективой. */
@@ -7396,47 +7587,122 @@ const VOLUME_CITY_LIGHT = "#ffe6a3";
 const VOLUME_CITY_LIT_MAX = 0.55;
 
 /**
- * Многоэтажки по кругу: место на земле (`x`, `y`), половина ширины, высота,
- * сетка окон и признак дальнего ряда.
+ * Неон вывесок (G310). У каждого цвета три тона: `lit` — как он светится ночью
+ * (час его не темнит — светит, значит не темнеет), `day` — как та же вывеска
+ * читается днём, выключенной, `dark` — полосы на ней.
  *
- * Два ряда и разная высота — то же, чем держится лес «Природы»: ближние дома
- * заслоняют дальние, и горизонт не выглядит забором одинаковых столбов. Ближний
- * ряд стоит в 220…300 м (28…38 м высоты — это 5,3…9,8° с уровня глаз, то есть
- * квартал через дорогу), дальний — в 600…900 м (18…28 м, 1,2…2,7°).
+ * Цвета те, по которым неон и узнаётся: розовый, бирюзовый, жёлтый, зелёный.
+ * Их четыре, а не десять, по той же причине, по которой у машин пять: это
+ * задник, а не улица большого города.
  */
-function volumeBlock(az, away, halfM, heightM, floors, bays, far) {
+const VOLUME_CITY_NEON = [
+  { lit: "#ff5fa2", day: "#c2748f", dark: "#7a2348" },
+  { lit: "#53e5ff", day: "#6fa8b5", dark: "#15616e" },
+  { lit: "#ffd34d", day: "#bda868", dark: "#7a5c11" },
+  { lit: "#7bff8a", day: "#7fae85", dark: "#1f6a2a" },
+];
+
+/** Полосы на вывеске днём: тёмная краска по выключенному стеклу. */
+const VOLUME_CITY_SIGN_DARK = "#4a4f57";
+
+/**
+ * Рекламные щиты у дороги (G310): полотно и краска полос. Текста нет — писать
+ * на щите значило бы придумывать чужую рекламу.
+ */
+const VOLUME_CITY_BANNERS = [
+  { back: "#d94f3d", mark: "#ffe8c8" },
+  { back: "#2f6fb5", mark: "#eaf3ff" },
+  { back: "#f0b429", mark: "#5b3a00" },
+  { back: "#3b8f57", mark: "#eafbe8" },
+];
+
+/**
+ * Многоэтажки по кругу: место на земле, половина ширины лица, половина глубины,
+ * высота — и **сетка окон, посчитанная из метров**.
+ *
+ * ——— отчего дома выглядели сплюснутыми (дефект D57) ———————————————————————
+ *
+ * Слова заказчика: «по вертикали дома сплюснытые». Беда была **не в высоте и не
+ * в дальности**, а в сетке окон: `floors` и `bays` писались руками, порознь от
+ * настоящих метров. Замер прежних чисел: высота этажа выходила 3,2…3,8 м (это
+ * верно, так и строят), а ширина секции — **8,4…17,3 м**, то есть ячейка окна
+ * была вчетверо-впятеро шире себя (отношение 4,0…5,0 у дальнего ряда, 2,5…2,9 у
+ * ближнего). Глаз читает масштаб дома по окнам, и дом в ровную горизонтальную
+ * полоску читается приплюснутым — хоть ты сделай его вдвое выше.
+ *
+ * Поэтому сетка больше не пишется руками: **этаж 3,2 м, секция 3,5 м**, и число
+ * строк со столбцами выходит делением. Ячейка получается 3,5 × 3,2 — почти
+ * квадратной, как в настоящем доме, и пропорции сходятся сами на любой высоте и
+ * ширине.
+ */
+export const VOLUME_CITY_FLOOR_MM = 3200;
+export const VOLUME_CITY_BAY_MM = 3500;
+
+/**
+ * Ширина окна в экранных точках, ниже которой дом рисуется **этажами, а не
+ * окнами**: три точки. Окно у́же трёх точек сливается с соседним в полосу и
+ * нарисованное поимённо стоит ровно столько же, сколько нарисованное полосой, —
+ * а полоса это одна заливка вместо шести-девяти. Светящиеся окна дорисовываются
+ * поверх полосы и тогда: их доля ночью не больше `VOLUME_CITY_LIT_MAX`.
+ */
+const VOLUME_CITY_WINDOW_PX = 3;
+
+/**
+ * Дом — **коробка, а не щит** (дефект D57, долг таска 199). Кроме лица у него
+ * есть глубина, и в кадр попадают две стены и крыша: какая из боковых видна,
+ * решает сама камера. При облёте дом поворачивается, а не схлопывается.
+ *
+ * `sign` — неоновая вывеска на лице (G310): доля высоты, где она висит, доля
+ * ширины и цвет. Ночью светится тем же часом, что окна.
+ */
+function volumeBlock(az, away, halfM, deepM, heightM, far, sign = null) {
   const spot = volumeAway(az, away);
+  const halfMm = halfM * VOLUME_M;
+  const heightMm = heightM * VOLUME_M;
   return {
     x: spot.x,
     y: spot.y,
     awayMm: away * VOLUME_M,
-    halfMm: halfM * VOLUME_M,
-    heightMm: heightM * VOLUME_M,
-    floors,
-    bays,
+    halfMm,
+    deepMm: deepM * VOLUME_M,
+    heightMm,
+    floors: Math.max(2, Math.round(heightMm / VOLUME_CITY_FLOOR_MM)),
+    bays: Math.max(2, Math.round((halfMm * 2) / VOLUME_CITY_BAY_MM)),
     far: Boolean(far),
+    sign,
   };
 }
 
+/**
+ * Два ряда домов. Ближний стоит в **95…150 м** — это дом через дорогу: сорок
+ * метров высоты с уровня глаз дают 23°, и дом занимает треть неба, а не
+ * полоску у горизонта (до таска 206 он стоял в 220…300 м и давал 5…10°).
+ * Дальний ряд — 260…430 м, он заслоняется ближним и держит горизонт
+ * застроенным.
+ *
+ * Дома **у́же, чем были**: лицо 18…30 м вместо прежних 34…68. Широкая плита в
+ * полсотни метров сама по себе читается приземистой, сколько ни добавляй ей
+ * высоты.
+ */
 export const VOLUME_CITY = [
   // дальний ряд — за улицей, бледный
-  volumeBlock(8, 760, 28, 24, 7, 4, true),
-  volumeBlock(24, 900, 22, 18, 5, 3, true),
-  volumeBlock(58, 640, 32, 26, 8, 4, true),
-  volumeBlock(96, 820, 25, 20, 6, 3, true),
-  volumeBlock(131, 700, 30, 26, 7, 4, true),
-  volumeBlock(168, 880, 23, 19, 5, 3, true),
-  volumeBlock(205, 600, 34, 26, 8, 5, true),
-  volumeBlock(241, 840, 26, 22, 6, 3, true),
-  volumeBlock(278, 720, 31, 25, 7, 4, true),
-  volumeBlock(316, 900, 24, 19, 5, 3, true),
-  volumeBlock(344, 660, 29, 25, 7, 4, true),
+  volumeBlock(8, 330, 13, 11, 30, true),
+  volumeBlock(24, 410, 11, 9, 26, true),
+  volumeBlock(58, 285, 15, 12, 32, true, { at: 0.72, wide: 0.5, neon: 1 }),
+  volumeBlock(96, 370, 12, 10, 28, true),
+  volumeBlock(131, 310, 14, 11, 32, true),
+  volumeBlock(168, 395, 11, 9, 25, true),
+  volumeBlock(205, 265, 16, 12, 33, true, { at: 0.78, wide: 0.44, neon: 2 }),
+  volumeBlock(241, 380, 12, 10, 27, true),
+  volumeBlock(278, 320, 14, 11, 31, true),
+  volumeBlock(316, 425, 11, 9, 24, true),
+  volumeBlock(344, 295, 13, 11, 33, true),
   // ближний ряд — высокие, тёмнее и шире
-  volumeBlock(40, 260, 23, 31, 9, 5, false),
-  volumeBlock(112, 230, 19, 36, 11, 4, false),
-  volumeBlock(186, 300, 29, 28, 8, 6, false),
-  volumeBlock(258, 250, 21, 34, 10, 5, false),
-  volumeBlock(330, 220, 17, 38, 12, 4, false),
+  volumeBlock(40, 120, 11, 14, 40, false, { at: 0.8, wide: 0.52, neon: 0 }),
+  volumeBlock(112, 98, 9, 12, 44, false, { at: 0.66, wide: 0.46, neon: 3 }),
+  volumeBlock(186, 145, 15, 16, 36, false),
+  volumeBlock(258, 110, 10, 13, 46, false, { at: 0.74, wide: 0.5, neon: 1 }),
+  volumeBlock(330, 132, 12, 15, 38, false, { at: 0.58, wide: 0.42, neon: 2 }),
 ];
 
 /**
@@ -7456,8 +7722,8 @@ export function volumeCityWindowLit(block, floor, bay, share) {
 
 /**
  * Машины на парковке: место на земле, высота и цвет из палитры. Стоят рядком у
- * ближнего дома, в сотне метров — полтора метра высоты дают оттуда 0,9°, то
- * есть пятнышко, по которому видно, что это машина, и не больше.
+ * ближнего дома — после таска 206 в 45…70 м, а не в сотне: полтора метра
+ * высоты дают оттуда 1,2…1,9°, и видно, что это машины, а не точки.
  */
 function volumeCar(az, away, heightM, car) {
   const spot = volumeAway(az, away);
@@ -7465,41 +7731,75 @@ function volumeCar(az, away, heightM, car) {
 }
 
 export const VOLUME_CITY_PARK = [
-  volumeCar(150, 118, 1.5, 0),
-  volumeCar(154, 112, 1.5, 1),
-  volumeCar(158, 106, 1.6, 2),
-  volumeCar(162, 101, 1.6, 3),
-  volumeCar(166, 97, 1.7, 4),
-  volumeCar(170, 95, 1.7, 1),
-  volumeCar(290, 115, 1.5, 2),
-  volumeCar(294, 109, 1.6, 0),
-  volumeCar(298, 104, 1.6, 4),
-  volumeCar(302, 99, 1.7, 3),
+  volumeCar(150, 62, 1.5, 0),
+  volumeCar(154, 58, 1.5, 1),
+  volumeCar(158, 54, 1.6, 2),
+  volumeCar(162, 50, 1.6, 3),
+  volumeCar(166, 47, 1.7, 4),
+  volumeCar(170, 45, 1.7, 1),
+  volumeCar(290, 60, 1.5, 2),
+  volumeCar(294, 56, 1.6, 0),
+  volumeCar(298, 52, 1.6, 4),
+  volumeCar(302, 48, 1.7, 3),
 ];
 
-/** Улицы города: те же полосы, что дорога «Природы», только шире и с разметкой. */
+/**
+ * Рекламные щиты у дороги (G310): место, половина ширины полотна, высота
+ * полотна и высота его низа над землёй.
+ *
+ * Стоят они **вдоль улиц**, по которым и расставлены: шесть метров полотна в
+ * полусотне метров дают 7°, то есть щит читается щитом, а не пятном. Ноги
+ * поднимают полотно на три-четыре метра — так их и ставят, чтобы не мешали
+ * тротуару.
+ */
+function volumeBanner(az, away, halfM, heightM, bottomM, paint) {
+  const spot = volumeAway(az, away);
+  return {
+    x: spot.x,
+    y: spot.y,
+    awayMm: away * VOLUME_M,
+    halfMm: halfM * VOLUME_M,
+    heightMm: heightM * VOLUME_M,
+    bottomMm: bottomM * VOLUME_M,
+    paint,
+  };
+}
+
+export const VOLUME_CITY_BANNER_PLACES = [
+  volumeBanner(140, 52, 3.2, 3.6, 3.4, 0),
+  volumeBanner(196, 68, 3.6, 4, 3.8, 1),
+  volumeBanner(268, 58, 3, 3.4, 3.2, 2),
+  volumeBanner(322, 75, 3.8, 4.2, 4, 3),
+  volumeBanner(64, 88, 3.4, 3.8, 3.6, 1),
+];
+
+/**
+ * Улицы города: те же полосы, что дорога «Природы», только шире и с разметкой.
+ * После таска 206 ближнее колено в 55…60 м вместо 120: улица должна лежать
+ * перед домами, а не теряться за ними.
+ */
 export const VOLUME_CITY_STREETS = [
   volumeBandNodes(
     [
-      [134, 120],
-      [148, 180],
-      [163, 260],
-      [178, 380],
-      [193, 540],
-      [208, 720],
+      [134, 58],
+      [148, 95],
+      [163, 150],
+      [178, 230],
+      [193, 340],
+      [208, 480],
     ],
-    14,
+    16,
   ),
   volumeBandNodes(
     [
-      [274, 125],
-      [288, 185],
-      [303, 270],
-      [318, 390],
-      [333, 560],
-      [348, 800],
+      [274, 62],
+      [288, 100],
+      [303, 160],
+      [318, 250],
+      [333, 370],
+      [348, 520],
     ],
-    14,
+    16,
   ),
 ];
 
@@ -7524,12 +7824,12 @@ export const VOLUME_CITY_MARKS = VOLUME_CITY_STREETS.map((street) => volumeStree
 
 /** Деревья вдоль улиц: город не бетонная коробка, но и не лес. */
 export const VOLUME_CITY_GREENS = [
-  volumeStanding(143, 135, 9, "tree"),
-  volumeStanding(176, 210, 7, "tree"),
-  volumeStanding(199, 300, 2.4, "bush"),
-  volumeStanding(283, 140, 8.5, "tree"),
-  volumeStanding(311, 225, 7.5, "tree"),
-  volumeStanding(341, 290, 2.6, "bush"),
+  volumeStanding(143, 66, 9, "tree"),
+  volumeStanding(176, 105, 7, "tree"),
+  volumeStanding(199, 150, 2.4, "bush"),
+  volumeStanding(283, 70, 8.5, "tree"),
+  volumeStanding(311, 112, 7.5, "tree"),
+  volumeStanding(341, 145, 2.6, "bush"),
 ];
 
 /** Звёзды: раскиданы по небу раз и навсегда, своей яркости у каждой нет. */
