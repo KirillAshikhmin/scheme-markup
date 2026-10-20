@@ -88,6 +88,19 @@ import {
   VOLUME_LAND_RGB,
   VOLUME_MOUNTAINS,
   VOLUME_SUN_AT,
+  VOLUME_SUNRISE_MIN,
+  VOLUME_SUNSET_MIN,
+  VOLUME_DAY_MIN,
+  VOLUME_CLOCK_SPEEDS,
+  VOLUME_CLOCK_SPEED_DEFAULT,
+  VOLUME_NIGHT_RGB,
+  VOLUME_NIGHT_SHARE,
+  VOLUME_MOON_RISE_DEG,
+  VOLUME_BACKDROP_KINDS,
+  VOLUME_BACKDROP_DEFAULT,
+  VOLUME_MOOD_NOON,
+  VOLUME_CITY,
+  VOLUME_MARKER_RGB,
   VOLUME_RIVER,
   VOLUME_RIVER_GREENS,
   VOLUME_ROAD,
@@ -144,6 +157,28 @@ import {
   volumePointInside,
   volumeRoomAt,
   volumeScene,
+  volumeShadowFaces,
+  volumeClockNow,
+  volumeClockFixed,
+  volumeClockMinutes,
+  volumeClockAt,
+  volumeClockSpeedOf,
+  volumeClockDayMinutes,
+  volumeClockText,
+  volumeClockParse,
+  volumeSiteOf,
+  volumeDayTimes,
+  volumeDayPhase,
+  volumePanoramaAz,
+  volumeSunAt,
+  volumeMoonAt,
+  volumeNightShare,
+  volumeSkyColors,
+  volumeTintRgb,
+  volumeMood,
+  volumeCityWindowLit,
+  volumeBackdropKindOf,
+  volumeShadowShift,
   volumeShade,
   volumeFloors,
   volumeStairNear,
@@ -293,14 +328,29 @@ test("у комнаты есть пол, потолок и стены с тол�
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
   const ground = built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND);
-  // Пол и потолок помещения, полоса пола под каждой из четырёх стен (она
-  // закрывает порог в проёме и щель между контуром и гранью стены, D37) — и
-  // тень каждой стены на земле (D43).
-  assert.equal(ground.length, 2 + 4 + 4, "пол, потолок, пол под стенами и тени стен");
-  const ceiling = ground.find((face) => face.n.z < 0);
-  const shadows = ground.filter((face) => face.rgb === VOLUME_SHADOW_RGB);
+  // Пол и потолок помещения и полоса пола под каждой из четырёх стен (она
+  // закрывает порог в проёме и щель между контуром и гранью стены, D37).
+  // Тени стен (D43) в сцене больше не лежат гранями: с таска 181 солнце ходит
+  // по небу, и тень собирается вместе со снимком часа — в сцене остались
+  // габариты стен, от часа не зависящие.
+  assert.equal(ground.length, 2 + 4, "пол, потолок и пол под стенами");
+  assert.equal(built.shadowBoxes.length, 4, "габарит тени под каждой стеной");
+  const shadows = volumeShadowFaces(built.shadowBoxes, { az: 90, rise: 14, fade: 1 });
   assert.equal(shadows.length, 4, "тень под каждой стеной");
-  const floors = ground.filter((face) => face.n.z > 0 && face.rgb !== VOLUME_SHADOW_RGB);
+  assert.ok(
+    shadows.every((face) => face.layer === VOLUME_LAYER_GROUND && face.flat && face.n.z > 0),
+    "тень лежит на земле тем же ярусом, каким лежала в сцене",
+  );
+  assert.deepEqual(shadows[0].rgb, VOLUME_SHADOW_RGB, "в полную силу тень того же тона, что была");
+  // Солнце у горизонта — тени нет вовсе: она гаснет цветом, а не прозрачностью.
+  assert.deepEqual(volumeShadowFaces(built.shadowBoxes, { az: 90, rise: 1, fade: 0 }), []);
+  assert.deepEqual(volumeShadowFaces(built.shadowBoxes, { az: 90, rise: 7, fade: 0.5 })[0].rgb, [
+    Math.round((123 + 89) / 2),
+    Math.round((160 + 115) / 2),
+    Math.round((93 + 67) / 2),
+  ]);
+  const ceiling = ground.find((face) => face.n.z < 0);
+  const floors = ground.filter((face) => face.n.z > 0);
   assert.equal(floors.length, 5, "у пола нормаль вверх, у потолка вниз");
   assert.ok(floors.every((face) => face.p.every((point) => point.z === 0)), "весь пол лежит на нуле");
   assert.ok(ceiling.p.every((point) => point.z === 2700), "потолок — на высоте схемы");
@@ -1525,6 +1575,364 @@ test("фон рисует дорогу, реку, гряды и зелень —
   // два кадра, поэтому и мера вдвое.
   const total = ops.fill + ops.arc + ops.rect + ops.fade;
   assert.ok(total < 560, "фон разросся: операций холста на два кадра " + total);
+});
+
+// ——— час суток: одно непрерывное время (таск 181, G282) ———————————————————
+//
+// «сразу заложи по фону что бы можно было указывать время суток и фон менялся,
+// утро, день, вечер, ночь. при чем плавно менялся… ночь не сильно тёмная должна
+// быть, что бы было понятно что ночь, но различимо всё».
+
+const DAY_TIMES = { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, north: true };
+
+test("часы объёма: идущее время — формула, стоячее не идёт вовсе", () => {
+  const start = volumeClockNow(1000, new Date(2026, 9, 20, 12, 30), 60);
+  assert.equal(volumeClockMinutes(start, 1000), 12 * 60 + 30, "при открытии стоит реальное время");
+  // Минута настоящего времени при ускорении 60 — час в объёме.
+  assert.equal(volumeClockMinutes(start, 1000 + 60000), 13 * 60 + 30);
+  // Сутки проходят за 24 минуты — и это ровно то, что написано в подписи.
+  assert.equal(volumeClockDayMinutes(60), 24);
+  assert.deepEqual(VOLUME_CLOCK_SPEEDS.map(volumeClockDayMinutes), [24, 12, 6, 3, 1.5]);
+  // Через полночь время не ломается.
+  assert.equal(volumeClockMinutes(start, 1000 + 12 * 60000), 0 * 60 + 30);
+  // Стоячее время не зависит от того, сколько прошло снаружи: ни пересчёта, ни
+  // перерисовки — это и есть «при фиксированном времени фон не меняется вовсе».
+  const fixed = volumeClockFixed(23 * 60 + 15, 240);
+  assert.equal(volumeClockMinutes(fixed, 1000), 23 * 60 + 15);
+  assert.equal(volumeClockMinutes(fixed, 9e9), 23 * 60 + 15);
+  // Смена ускорения не сдвигает время: часы перецепляются за ту минуту, которую
+  // показывают. Иначе выбор «быстрее» прыгал бы временем.
+  const faster = volumeClockAt(start, 1000 + 60000, 960);
+  assert.equal(volumeClockMinutes(faster, 1000 + 60000), 13 * 60 + 30);
+  assert.equal(faster.speed, 960);
+  assert.equal(volumeClockAt(fixed, 7777, 120).fixed, true, "стоячие часы остаются стоячими");
+  // Чужое ускорение не берётся: в списке ровно пять пунктов.
+  assert.equal(volumeClockSpeedOf(7), VOLUME_CLOCK_SPEED_DEFAULT);
+  assert.equal(volumeClockSpeedOf("480"), 480, "строку из настроек читаем числом");
+  assert.equal(volumeClockSpeedOf(480), 480);
+});
+
+test("контрол с часами: строка и разбор", () => {
+  assert.equal(volumeClockText(0), "00:00");
+  assert.equal(volumeClockText(9 * 60 + 5), "09:05");
+  assert.equal(volumeClockText(23 * 60 + 59.7), "23:59", "секунды не округляют минуту вверх");
+  assert.equal(volumeClockText(1440 + 75), "01:15", "сутки заворачиваются");
+  assert.equal(volumeClockParse("09:30"), 570);
+  assert.equal(volumeClockParse("9:5"), 545);
+  assert.equal(volumeClockParse("24:00"), null);
+  assert.equal(volumeClockParse("12:60"), null);
+  assert.equal(volumeClockParse(""), null);
+  assert.equal(volumeClockParse("вечер"), null);
+});
+
+test("рассвет и закат: умолчание заказчика, а с координатами — по ним", () => {
+  // Нет координат — 9:00 и 21:00, прямые слова заказчика.
+  const plain = volumeDayTimes(volumeSiteOf(createProject()), new Date(2026, 5, 21, 12));
+  assert.equal(plain.riseMin, 9 * 60);
+  assert.equal(plain.setMin, 21 * 60);
+  assert.equal(plain.bySite, false);
+  // Мусор в координатах — тоже умолчание: объём не гадает.
+  assert.equal(volumeDayTimes({ latDeg: "север", lonDeg: 37 }).bySite, false);
+  assert.equal(volumeDayTimes({ latDeg: 555, lonDeg: 37 }).bySite, false);
+  assert.equal(volumeDayTimes(null).riseMin, 9 * 60);
+  // Есть координаты — считается по ним. Москва в июне: день длиннее 17 часов,
+  // в декабре — короче 7.5. Числа проверяются мерой, а не минутой: уравнения
+  // времени здесь нет нарочно (до четверти часа), и минуту обещать нельзя.
+  const site = { latDeg: 55.7558, lonDeg: 37.6173 };
+  const june = volumeDayTimes(site, new Date(2026, 5, 21, 12));
+  const december = volumeDayTimes(site, new Date(2026, 11, 21, 12));
+  assert.equal(june.bySite, true);
+  const hours = (times) => (times.setMin - times.riseMin) / 60;
+  assert.ok(hours(june) > 17 && hours(june) < 17.8, "июньский день в Москве: " + hours(june));
+  assert.ok(hours(december) > 6.9 && hours(december) < 7.6, "декабрьский день: " + hours(december));
+  assert.ok(june.riseMin < december.riseMin, "в июне светает раньше");
+  // Полярная ночь и полярный день не ломают счёт, а честно отвечают сутками.
+  const polar = { latDeg: 78.2, lonDeg: 15.6 };
+  const dark = volumeDayTimes(polar, new Date(2026, 11, 21, 12));
+  assert.equal(dark.setMin - dark.riseMin, 0, "полярная ночь: дня нет вовсе");
+  assert.equal(volumeSunAt(720, dark).up, false, "и солнце в полдень не встаёт");
+  const light = volumeDayTimes(polar, new Date(2026, 5, 21, 12));
+  assert.equal(light.setMin - light.riseMin, VOLUME_DAY_MIN, "полярный день: сутки целиком день");
+  assert.equal(volumeSunAt(60, light).up, true, "и в час ночи солнце над горизонтом");
+});
+
+test("место объекта читается терпимо: нет ключей — умолчания (дверь к таску 188)", () => {
+  // Сегодняшний объект свойств объекта не знает вовсе — и это не ошибка.
+  const bare = volumeSiteOf(createProject());
+  assert.equal(bare.latDeg, null);
+  assert.equal(bare.lonDeg, null);
+  assert.equal(bare.topDeg, 0, "верх чертежа смотрит на север");
+  assert.deepEqual(volumeSiteOf(null), { latDeg: null, lonDeg: null, topDeg: 0 });
+  // Таск 188 заводит их в свойствах объекта. Имена ключей перечислены списком,
+  // и любое из них читается.
+  assert.equal(volumeSiteOf({ site: { latDeg: 55.75, lonDeg: 37.61 } }).latDeg, 55.75);
+  assert.equal(volumeSiteOf({ properties: { latitude: 59.94, longitude: 30.31 } }).lonDeg, 30.31);
+  // «55.7558, 37.6173» — то, что человек скопирует из карт.
+  const pasted = volumeSiteOf({ site: { coords: "55.7558, 37.6173" } });
+  assert.equal(pasted.latDeg, 55.7558);
+  assert.equal(pasted.lonDeg, 37.6173);
+  // Направление верха чертежа — в градусах от севера по часовой стрелке.
+  assert.equal(volumeSiteOf({ site: { topDeg: 90 } }).topDeg, 90);
+  assert.equal(volumeSiteOf({ site: { northDeg: -90 } }).topDeg, 270, "отрицательный угол заворачивается");
+  // Мусор не притворяется местом.
+  assert.equal(volumeSiteOf({ site: { latDeg: "юг", lonDeg: null } }).latDeg, null);
+  assert.equal(volumeSiteOf({ site: { coords: "дом у реки" } }).latDeg, null);
+});
+
+test("утро, день, вечер и ночь — слова, а не состояния", () => {
+  const phase = (hour) => volumeDayPhase(hour * 60, DAY_TIMES);
+  assert.equal(phase(3), "night");
+  assert.equal(phase(8), "morning", "утро начинается за час до рассвета");
+  assert.equal(phase(11), "morning");
+  assert.equal(phase(12), "day");
+  assert.equal(phase(17), "day");
+  assert.equal(phase(18), "evening");
+  assert.equal(phase(21.5), "evening", "вечер держится час после заката");
+  assert.equal(phase(22), "night");
+  assert.equal(phase(0), "night");
+  // Слова сдвигаются вместе с рассветом: это отрезки от светила, а не от
+  // полуночи.
+  const early = { riseMin: 4 * 60, setMin: 22 * 60, north: true };
+  assert.equal(volumeDayPhase(4 * 60, early), "morning");
+  assert.equal(volumeDayPhase(8 * 60, early), "day");
+});
+
+test("солнце ходит по компасу: восход на востоке, полдень на юге, закат на западе", () => {
+  // Сторона света панорамы: ноль смотрит вправо по листу, 90° — вниз. При верхе
+  // чертежа на север вправо уходит восток, значит юг приходится на 90°.
+  assert.equal(volumePanoramaAz(180, 0), 90, "юг при верхе на север — вниз по листу");
+  assert.equal(volumePanoramaAz(90, 0), 0, "восток — вправо");
+  assert.equal(volumePanoramaAz(270, 0), 180, "запад — влево");
+  assert.equal(volumePanoramaAz(180, 90), 0, "верх смотрит на восток — юг уехал вправо");
+  const rise = volumeSunAt(VOLUME_SUNRISE_MIN, DAY_TIMES);
+  const noon = volumeSunAt((VOLUME_SUNRISE_MIN + VOLUME_SUNSET_MIN) / 2, DAY_TIMES);
+  const set = volumeSunAt(VOLUME_SUNSET_MIN, DAY_TIMES);
+  assert.equal(Math.round(rise.az), 0, "на восходе солнце на востоке");
+  assert.equal(Math.round(noon.az), VOLUME_SUN_AT.az, "в полдень — ровно там, где стояло до таска 181");
+  assert.equal(Math.round(set.az), 180, "на закате — на западе");
+  assert.ok(Math.abs(rise.height) < 1e-9 && Math.abs(set.height) < 1e-9, "на восходе и закате высота нулевая");
+  assert.equal(Math.round(noon.height), VOLUME_SUN_AT.rise, "в полдень солнце в своей верхней точке");
+  // Непрерывность: за сутки высота не прыгает ни на шаге минуты.
+  let was = volumeSunAt(0, DAY_TIMES).height;
+  for (let minute = 1; minute <= VOLUME_DAY_MIN; minute += 1) {
+    const now = volumeSunAt(minute % VOLUME_DAY_MIN, DAY_TIMES).height;
+    assert.ok(Math.abs(now - was) < 0.1, "скачок высоты на минуте " + minute);
+    was = now;
+  }
+  // Направление верха чертежа (таск 188) разворачивает светило вокруг дома и
+  // больше ничего: иначе окна южной стороны освещались бы как северные.
+  const turned = volumeSunAt((VOLUME_SUNRISE_MIN + VOLUME_SUNSET_MIN) / 2, DAY_TIMES, 90);
+  assert.equal(Math.round(turned.az), 0);
+  assert.equal(Math.round(turned.height), VOLUME_SUN_AT.rise, "высота от поворота листа не зависит");
+  // В южном полушарии полдень на севере — та же дуга, отражённая.
+  const south = volumeDayTimes({ latDeg: -33.9, lonDeg: 151.2 }, new Date(2026, 0, 15, 12));
+  assert.equal(south.north, false);
+  const southNoon = volumeSunAt((south.riseMin + south.setMin) / 2, south);
+  assert.equal(Math.round(southNoon.az), 270, "север при верхе на север — вверх по листу");
+});
+
+test("месяц ходит ночью и только ночью", () => {
+  assert.equal(volumeMoonAt(VOLUME_SUNRISE_MIN + 120, DAY_TIMES).up, false, "днём месяца нет");
+  const midnight = volumeMoonAt(3 * 60, DAY_TIMES);
+  assert.equal(midnight.up, true);
+  assert.equal(Math.round(midnight.height), VOLUME_MOON_RISE_DEG, "в середине ночи месяц выше всего");
+  assert.ok(VOLUME_MOON_RISE_DEG < VOLUME_SUN_AT.rise, "месяц ходит ниже солнца");
+  // Всходит на востоке после заката, садится на западе к рассвету.
+  assert.equal(Math.round(volumeMoonAt(VOLUME_SUNSET_MIN, DAY_TIMES).az), 0);
+  assert.equal(Math.round(volumeMoonAt(VOLUME_SUNRISE_MIN - 0.001, DAY_TIMES).az), 180);
+});
+
+test("ночь узнаётся тоном, но всё остаётся различимым", () => {
+  // Темнеет не на закате, а когда солнце уже низко: ступенька ровно на
+  // горизонте читалась бы выключателем.
+  assert.equal(volumeNightShare(14), 0, "в полдень цвет как написан");
+  assert.equal(volumeNightShare(6), 0);
+  assert.ok(volumeNightShare(0) > 0.1 && volumeNightShare(0) < 0.25, "на закате сумерки: " + volumeNightShare(0));
+  assert.equal(volumeNightShare(-8), VOLUME_NIGHT_SHARE, "глубже потолка ночь не темнеет");
+  assert.equal(volumeNightShare(-30), VOLUME_NIGHT_SHARE);
+  // И главное: ночная стена остаётся стеной, а не чернотой. Слова заказчика —
+  // «что бы было понятно что ночь, но различимо всё».
+  const night = { rgb: VOLUME_NIGHT_RGB, share: VOLUME_NIGHT_SHARE };
+  const wall = volumeTintRgb(VOLUME_WALL_RGB, night);
+  assert.ok(Math.min(...wall) > 110, "ночная стена ушла в черноту: " + wall.join(","));
+  const floor = volumeTintRgb(VOLUME_FLOOR_RGB, night);
+  assert.ok(Math.min(...floor) > 70, "ночной пол ушёл в черноту: " + floor.join(","));
+  // Метка остаётся заметно синее стены: цвет метки ночью не сереет.
+  const marker = volumeTintRgb(VOLUME_MARKER_RGB, night);
+  assert.ok(marker[2] - marker[0] > 40, "метка потеряла цвет: " + marker.join(","));
+  // Полдень не красится вовсе — ни одного числа мимо.
+  assert.equal(volumeTintRgb(VOLUME_WALL_RGB, { rgb: VOLUME_NIGHT_RGB, share: 0 }), VOLUME_WALL_RGB);
+  assert.equal(volumeTintRgb(VOLUME_WALL_RGB, null), VOLUME_WALL_RGB);
+  // Цвет грани считает час в том же месте, где считает светлоту лампы, —
+  // другого места для темноты в сборке нет.
+  const lit = volumeFill(VOLUME_WALL_RGB, 1, 1, null);
+  const dim = volumeFill(VOLUME_WALL_RGB, 1, 1, night);
+  assert.notEqual(lit, dim);
+  assert.equal(dim, "rgb(" + wall.join(",") + ")");
+  assert.equal(volumeFill(VOLUME_WALL_RGB, 1, 0.4, night), "rgba(" + wall.join(",") + ",0.4)");
+});
+
+test("земля у дома, земля за ним и её тень темнеют одной краской", () => {
+  // G237 держится и во времени: разойдись счёт — дом снова «залетал» бы над
+  // землёй, только теперь к ночи.
+  const mood = volumeMood({ minutes: 0, times: DAY_TIMES, kind: "nature" });
+  const plate = volumeFill(VOLUME_LAND_RGB, 1, 1, mood.tint);
+  assert.equal(mood.palette.land, plate, "поле панорамы и плита чертежа — один тон");
+  // Тень гаснет к горизонту и ночью её нет вовсе.
+  assert.equal(mood.shadow.fade, 0, "ночью тени от солнца нет");
+  const noon = volumeMood({ minutes: 900, times: DAY_TIMES, kind: "nature" });
+  assert.equal(noon.shadow.fade, 1, "в полдень тень в полную силу");
+  assert.equal(Math.round(noon.shadow.az), VOLUME_SUN_AT.az, "тень кладёт то солнце, которое видно");
+  const evening = volumeMood({ minutes: 1230, times: DAY_TIMES, kind: "nature" });
+  assert.ok(evening.shadow.fade > 0 && evening.shadow.fade < 1, "к вечеру тень слабеет: " + evening.shadow.fade);
+  // Длина тени не растёт за вынос плиты: ниже полуденной высоты солнце для
+  // тени не опускается (иначе тень уехала бы с земли на небо).
+  const low = volumeShadowShift(2800, { az: 90, rise: 2 });
+  const high = volumeShadowShift(2800, { az: 90, rise: VOLUME_SUN_AT.rise });
+  assert.ok(Math.abs(Math.hypot(low.x, low.y) - Math.hypot(high.x, high.y)) < 1);
+  assert.equal(Math.round(Math.hypot(high.x, high.y)), 11230, "та же тень, что считал таск 178");
+  // И направление у тени — ровно прочь от солнца.
+  const shift = volumeShadowShift(2800, { az: 0, rise: 14 });
+  assert.ok(shift.x < 0 && Math.abs(shift.y) < 1e-9, "солнце на востоке — тень на запад");
+});
+
+test("небо меняется плавно и в полдень остаётся прежним", () => {
+  // Полуденные цвета — ровно те, что были до таска 181.
+  const noon = volumeSkyColors(VOLUME_SUN_AT.rise);
+  assert.deepEqual(noon.top, [141, 191, 230], "#8dbfe6");
+  assert.deepEqual(noon.low, [220, 234, 244], "#dceaf4");
+  assert.deepEqual(volumeSkyColors(40).top, noon.top, "выше полудня небо не светлеет");
+  // Ночное небо темнее комнаты: ночь обязана узнаваться небом, а не потерей
+  // зрения в комнате.
+  const night = volumeSkyColors(-12);
+  const room = volumeTintRgb(VOLUME_WALL_RGB, { rgb: VOLUME_NIGHT_RGB, share: VOLUME_NIGHT_SHARE });
+  assert.ok(Math.max(...night.top) + 40 < Math.min(...room), "ночное небо не темнее стены");
+  // Заря: у горизонта небо теплее, чем в зените — это и есть закат.
+  const dusk = volumeSkyColors(1);
+  assert.ok(dusk.low[0] > dusk.low[2] + 60, "у горизонта не разгорелась заря: " + dusk.low.join(","));
+  assert.ok(dusk.top[2] > dusk.top[0], "зенит на закате всё ещё синий");
+  // Плавность: ни одного скачка цвета за сутки.
+  let was = volumeSkyColors(volumeSunAt(0, DAY_TIMES).height);
+  for (let minute = 1; minute <= VOLUME_DAY_MIN; minute += 1) {
+    const now = volumeSkyColors(volumeSunAt(minute % VOLUME_DAY_MIN, DAY_TIMES).height);
+    for (const key of ["top", "low"]) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        assert.ok(Math.abs(now[key][channel] - was[key][channel]) <= 2, "скачок неба на минуте " + minute);
+      }
+    }
+    was = now;
+  }
+});
+
+test("в городе к ночи загораются окна — и не мигают", () => {
+  const night = volumeMood({ minutes: 0, times: DAY_TIMES, kind: "city" });
+  const day = volumeMood({ minutes: 900, times: DAY_TIMES, kind: "city" });
+  assert.equal(day.cityLit, 0, "днём свет в окнах погашен");
+  assert.ok(night.cityLit > 0.5, "ночью город живой: " + night.cityLit);
+  const litCount = (share) => {
+    let count = 0;
+    for (let block = 0; block < VOLUME_CITY.length; block += 1) {
+      for (let floor = 0; floor < VOLUME_CITY[block].floors; floor += 1) {
+        for (let bay = 0; bay < VOLUME_CITY[block].bays; bay += 1) {
+          if (volumeCityWindowLit(block, floor, bay, share)) count += 1;
+        }
+      }
+    }
+    return count;
+  };
+  const all = litCount(1);
+  assert.ok(all > 300, "в городе меньше трёх сотен окон: " + all);
+  assert.equal(litCount(0), 0, "днём не светится ни одно");
+  // К вечеру окна загораются по одному: зажжённое не гаснет обратно, иначе
+  // город мигал бы на каждом снимке часа — то есть каждую секунду.
+  let was = 0;
+  for (const share of [0.1, 0.2, 0.3, 0.4, 0.55]) {
+    const now = litCount(share);
+    assert.ok(now > was, "свет не прибавился на доле " + share);
+    was = now;
+  }
+  for (let block = 0; block < 4; block += 1) {
+    for (let floor = 0; floor < 5; floor += 1) {
+      if (!volumeCityWindowLit(block, floor, 0, 0.3)) continue;
+      assert.ok(volumeCityWindowLit(block, floor, 0, 0.55), "окно потухло к ночи");
+    }
+  }
+  // Один и тот же ответ на один и тот же вопрос — свет не случаен.
+  assert.equal(volumeCityWindowLit(3, 2, 1, 0.4), volumeCityWindowLit(3, 2, 1, 0.4));
+});
+
+test("три фона рисуют разное, и цена кадра у каждого фоновая", () => {
+  const box = { x: 0, y: 0, width: 1280, height: 720 };
+  const at = { x: 0, y: 0, z: 1600 };
+  const count = (kind, minutes) => {
+    const ops = { fill: 0, arc: 0, rect: 0, fade: 0 };
+    const fade = { addColorStop: () => {} };
+    const ctx = {
+      createLinearGradient: () => (ops.fade += 1, fade),
+      beginPath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      closePath: () => {},
+      fill: () => (ops.fill += 1),
+      fillRect: () => (ops.rect += 1),
+      arc: () => (ops.arc += 1),
+      ellipse: () => (ops.arc += 1),
+      save: () => {},
+      restore: () => {},
+      fillStyle: "",
+    };
+    const mood = volumeMood({ minutes, times: DAY_TIMES, kind });
+    for (const yaw of [0, 60, 120, 180, 240, 300]) {
+      volumeDrawBackdrop(ctx, box, { at, yaw: (yaw * Math.PI) / 180, pitch: -0.08 }, mood);
+    }
+    return ops;
+  };
+  const plain = count("plain", 900);
+  const nature = count("nature", 900);
+  const city = count("city", 900);
+  // «Простой» — земля, небо и светило. Больше ничего: ни дороги, ни гор, ни
+  // деревьев, и это видно по счёту — у него одна растяжка на кадр (небо).
+  assert.equal(plain.fade, 6, "у простого фона лишние растяжки: " + plain.fade);
+  assert.ok(plain.fill + plain.arc < 20, "на простом фоне что-то нарисовалось: " + (plain.fill + plain.arc));
+  assert.ok(nature.fill > plain.fill * 8, "природа не богаче простого фона");
+  assert.ok(city.fill + city.rect > plain.fill * 8, "город не богаче простого фона");
+  // Город узнаётся прямоугольниками окон, природа — пятнами крон: счёт заливок
+  // у них разной природы, и это не придирка, а проверка, что фоны разные.
+  assert.ok(city.rect > 100, "окон в городе не нарисовано: " + city.rect);
+  assert.ok(nature.arc > city.arc, "у природы круглых крон больше, чем у города");
+  // Сторож цены: фон — это фон. Кадр сцены в таске 146 стоил 0,1 мс на 650
+  // гранях, и фону нельзя разрастаться до его доли незаметно. Счёт здесь за
+  // шесть кадров (полный оборот), поэтому и мера шестикратная.
+  for (const [name, ops] of [["простой", plain], ["природа", nature], ["город", city]]) {
+    const total = ops.fill + ops.arc + ops.rect + ops.fade;
+    assert.ok(total < 1700, "фон «" + name + "» разросся: операций на шесть кадров " + total);
+  }
+  // Ночью прибавляются звёзды и месяц, а не вторая картинка.
+  const nightPlain = count("plain", 0);
+  assert.ok(nightPlain.arc > plain.arc, "ночью не зажглось ни одной звезды");
+  // Звёзд сорок восемь на весь круг, и в кадр попадает около трети — вместе с
+  // месяцем это десятки точек на кадр, а не вторая картинка.
+  assert.ok(nightPlain.arc - plain.arc < 200, "звёзды разрослись: " + (nightPlain.arc - plain.arc));
+  // И фон остаётся фоном: строка горизонта по-прежнему возвращается.
+  const noMood = count("nature", 900);
+  assert.ok(noMood.fade > 0, "без снимка часа фон рисуется полуденным");
+});
+
+test("кадр берёт час готовым, а не считает его сам", () => {
+  // Снимок часа — единственное место, где время превращается в цвета. Кадр о
+  // времени не знает ничего: ему дают `mood`, и при стоячем времени это один и
+  // тот же объект на все кадры.
+  const mood = volumeMood({ minutes: 1200, times: DAY_TIMES, kind: "city" });
+  assert.deepEqual(volumeMood({ minutes: 1200, times: DAY_TIMES, kind: "city" }), mood, "снимок часа чист");
+  assert.equal(mood.kind, "city");
+  assert.equal(volumeMood({ minutes: 1200, kind: "ничего такого" }).kind, VOLUME_BACKDROP_DEFAULT);
+  assert.deepEqual(VOLUME_BACKDROP_KINDS, ["plain", "nature", "city"]);
+  assert.equal(volumeBackdropKindOf(undefined), "nature");
+  assert.equal(volumeBackdropKindOf("city"), "city");
+  // Полдень по умолчанию — тот фон, что был до таска 181.
+  assert.equal(VOLUME_MOOD_NOON.tint.share, 0);
+  assert.equal(VOLUME_MOOD_NOON.kind, "nature");
+  assert.equal(VOLUME_MOOD_NOON.sky.top, "rgb(141,191,230)");
 });
 
 test("обзор вписывает всю схему и смотрит на неё сверху", () => {
