@@ -62,7 +62,14 @@
       <!-- Разделы обеих колонок устроены одинаково: кликабельный заголовок
            сворачивает раздел, заголовок липнет к верху колонки, тело листается
            под ним. Растущий раздел в колонке один — список, которому нужно
-           место: слева схемы, справа метки. -->
+           место: слева схемы, справа метки.
+
+           Кнопок в заголовке две (таск 198). Галочка слева сворачивает раздел —
+           всегда, где бы заголовок ни был нарисован. Имя сворачивает, пока
+           заголовок стоит на своём месте, и **перелистывает к разделу**, когда
+           он нарисован у кромки колонки: там он указатель, а не кнопка
+           («нажал — прыгнуло туда»). Решает это `panels/rail.js` — разметка о
+           прокрутке не знает ничего. -->
       <aside id="panel-left" class="panel">
         <!-- Верхний блок левой колонки свой в каждом режиме (таск 153): в Схеме
              «Метки», в Чертеже инструменты, в Объёме вид и этаж. Три раздела
@@ -70,8 +77,10 @@
              «Помещения», «Схемы» и «Интерфейс проекта» общие на все три. -->
         <section class="panel__section panel__section--screen" data-section-id="drawTools">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawTools" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawTools" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawTools">
               <span class="panel__name" data-text="panels.drawTools"></span>
               <span class="panel__badge"></span>
             </button>
@@ -80,8 +89,10 @@
         </section>
         <section class="panel__section panel__section--screen" data-section-id="volumeTools">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="volumeTools" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="volumeTools" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="volumeTools">
               <span class="panel__name" data-text="panels.volumeTools"></span>
               <span class="panel__badge"></span>
             </button>
@@ -90,8 +101,10 @@
         </section>
         <section class="panel__section panel__section--screen" data-section-id="marks">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="marks" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="marks" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="marks">
               <span class="panel__name" data-text="panels.marks"></span>
               <span class="panel__badge"></span>
             </button>
@@ -100,8 +113,10 @@
         </section>
         <section class="panel__section" data-section-id="rooms">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="rooms" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="rooms" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="rooms">
               <span class="panel__name" data-text="panels.rooms"></span>
               <span class="panel__badge"></span>
             </button>
@@ -110,8 +125,10 @@
         </section>
         <section class="panel__section panel__section--grow" data-section-id="schemes">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="schemes" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="schemes" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="schemes">
               <span class="panel__name" data-text="panels.schemes"></span>
               <span class="panel__badge"></span>
             </button>
@@ -120,8 +137,10 @@
         </section>
         <section class="panel__section" data-section-id="sizes">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="sizes" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="sizes" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="sizes">
               <span class="panel__name" data-text="panels.sizes"></span>
               <span class="panel__badge"></span>
             </button>
@@ -165,8 +184,10 @@
              ровно как у метки в списке меток. -->
         <section class="panel__section panel__section--screen" data-section-id="drawWalls">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawWalls" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawWalls" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawWalls">
               <span class="panel__name" data-text="panels.drawWalls"></span>
               <span class="panel__badge"></span>
             </button>
@@ -175,8 +196,10 @@
         </section>
         <section class="panel__section panel__section--screen" data-section-id="drawOpenings">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawOpenings" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawOpenings" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawOpenings">
               <span class="panel__name" data-text="panels.drawOpenings"></span>
               <span class="panel__badge"></span>
             </button>
@@ -185,8 +208,10 @@
         </section>
         <section class="panel__section panel__section--screen" data-section-id="drawObjects">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawObjects" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawObjects" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawObjects">
               <span class="panel__name" data-text="panels.drawObjects"></span>
               <span class="panel__badge"></span>
             </button>
@@ -195,8 +220,10 @@
         </section>
         <section class="panel__section panel__section--grow panel__section--screen" data-section-id="markList">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="markList" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="markList" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="markList">
               <span class="panel__name" data-text="panels.markList"></span>
               <span class="panel__badge"></span>
             </button>
@@ -207,8 +234,10 @@
              незачем, и место в колонке дороже. -->
         <section class="panel__section panel__section--screen" data-section-id="properties">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="properties" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="properties" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="properties">
               <span class="panel__name" data-text="panels.properties"></span>
               <span class="panel__badge"></span>
             </button>

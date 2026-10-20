@@ -31,8 +31,22 @@
 // восьмидесяти строк списка. Сложить рейку в один DOM-узел и показывать в ней
 // клоны заголовков было бы дешевле на чтениях, но клон — это второй заголовок:
 // своя подстановка строк, свой счётчик, свой `aria-expanded` и своя подсветка
-// позванного раздела. Второго заголовка в сборке быть не должно: нажатая в
-// рейке галочка обязана сворачивать тот же раздел, а не его портрет.
+// позванного раздела. Второго заголовка в сборке быть не должно.
+//
+// **Нажатие на заголовок у кромки перелистывает к его разделу** (таск 198,
+// G303). Слова заказчика: «нажал — прыгнуло туда — да, так и надо, а то
+// приходится самому листать, это не очевидно». Таск 194 решил иначе — узел в
+// рейке тот же самый, значит и нажатие то же, — и довод был: придумывать
+// кнопке второй смысл в зависимости от того, где она нарисована, хуже.
+// Заказчик этот довод отклонил, и правило теперь такое: **заголовок, стоящий
+// не на своём месте, — указатель на раздел, а не кнопка сворачивания**.
+// Одинаково для обеих кромок: прижатый браузером к верхней (раздел начался
+// выше кадра) и поднятый рейкой к нижней ведут себя одним образом. Заголовок
+// на своём месте — прежняя кнопка. Сворачивание из рейки не пропало: галочка
+// слева от имени — своя кнопка (`.panel__fold`), и смысл у неё один и тот же,
+// где бы заголовок ни был нарисован.
+
+import { strings } from "../strings.js";
 
 // Какую долю кадра рейке отдавать нельзя. Разделов в колонке четыре-пять, и на
 // обычном экране рейка до этого не дотягивается вовсе; правило нужно низкому
@@ -41,16 +55,23 @@
 export const PANEL_RAIL_SHARE = 0.5;
 
 /**
- * Куда сдвинуть заголовки, чтобы те, чьи разделы ниже кадра, встали у кромки.
+ * Где стоит каждый заголовок при такой прокрутке.
  *
- * `items` — разделы колонки сверху вниз: `{ top, height }`, где `top` — место
- * раздела в содержимом колонки (не на экране: прокрутка на него не влияет), а
- * `height` — высота его заголовка. `frame` — что показано: `{ scrollTop,
- * clientHeight }`.
+ * `items` — разделы колонки сверху вниз: `{ top, box, head }`, где `top` —
+ * место раздела в содержимом колонки (не на экране: прокрутка на него не
+ * влияет), `box` — высота раздела, `head` — высота его заголовка. `frame` —
+ * что показано: `{ scrollTop, clientHeight }`.
  *
- * Отдаёт массив той же длины: `0` — заголовок стоит сам, отрицательное число —
- * на сколько его поднять. Вниз заголовок не двигается никогда: опустить его
- * ниже своего места значило бы закрыть им своё же содержимое.
+ * Отдаёт массив той же длины: `{ shift, side }`.
+ *
+ * `shift` — ноль или на сколько поднять заголовок. Вниз заголовок не
+ * двигается никогда: опустить его ниже своего места значило бы закрыть им своё
+ * же содержимое.
+ *
+ * `side` — где он при этом оказался: `""` — на своём месте, `"top"` — прижат к
+ * верхней кромке (это делает сам браузер, `position: sticky`), `"bottom"` —
+ * поднят рейкой к нижней. Наружу это нужно затем, что по стороне решается
+ * смысл нажатия (таск 198): заголовок не на своём месте — указатель.
  *
  * Разделы, которые целиком ниже кадра, — это всегда **хвост** списка, поэтому
  * счёт идёт с конца: последний раздел встаёт у самой кромки, предыдущий над
@@ -58,35 +79,74 @@ export const PANEL_RAIL_SHARE = 0.5;
  * местом дотянулся до своей строки в рейке — он и все, кто выше, стоят сами:
  * заголовок снимается с рейки ровно там, где сдвиг обнуляется, и перехода не
  * видно.
+ *
+ * Верх считается без прокрутки вовсе — одной арифметикой: браузер держит
+ * заголовок внутри его раздела, значит прижат тот и только тот, чей раздел
+ * **начался выше кадра и ещё не кончился**. Свёрнутый раздел (`box === head`)
+ * к верху не липнет никогда: двигать заголовок ему некуда.
  */
 export function panelRailPins(items, frame) {
   const count = items ? items.length : 0;
-  const shifts = new Array(count).fill(0);
+  const pins = [];
   const view = Math.max(0, (frame && frame.clientHeight) || 0);
-  if (!count || view <= 0) return shifts;
-  const edge = ((frame && frame.scrollTop) || 0) + view;
+  const from = (frame && frame.scrollTop) || 0;
+  for (let k = 0; k < count; k += 1) {
+    const item = items[k];
+    const held = item.box > item.head && item.top < from && from < item.top + item.box;
+    pins.push({ shift: 0, side: held ? "top" : "" });
+  }
+  if (!count || view <= 0) return pins;
+  const edge = from + view;
   let first = count;
   let stack = 0;
   for (let k = count - 1; k >= 0; k -= 1) {
-    const line = edge - stack - items[k].height;
+    const line = edge - stack - items[k].head;
     if (items[k].top <= line) break;
     first = k;
-    stack += items[k].height;
+    stack += items[k].head;
   }
-  if (first >= count) return shifts;
+  if (first >= count) return pins;
   // Лишние снимаются с дальнего конца: дальний раздел и так за двумя другими,
   // а ближний — следующий, к которому человек подойдёт прокруткой.
   let last = count;
   while (last > first + 1 && stack > view * PANEL_RAIL_SHARE) {
     last -= 1;
-    stack -= items[last].height;
+    stack -= items[last].head;
   }
   let line = edge;
   for (let k = last - 1; k >= first; k -= 1) {
-    line -= items[k].height;
-    shifts[k] = Math.min(0, Math.round(line - items[k].top));
+    line -= items[k].head;
+    const shift = Math.min(0, Math.round(line - items[k].top));
+    if (!shift) continue;
+    pins[k] = { shift, side: "bottom" };
   }
-  return shifts;
+  return pins;
+}
+
+/**
+ * Куда прокрутить колонку, чтобы раздел встал к верхней кромке.
+ *
+ * Считает это рейка, а не тот, кто её зовёт: заголовок обязан встать **под**
+ * накладкой — под теми заголовками, которые в целевом положении сами прижаты
+ * к верху, — иначе перелистывание прячет раздел за той же рейкой, из которой
+ * его позвали.
+ *
+ * Сегодня ответ всегда ноль, и это видно из счёта, а не взято на веру: к
+ * верхней кромке липнет только заголовок раздела, который её пересекает, а в
+ * целевом положении её пересекает сам позванный раздел — он и встаёт на своё
+ * место. Счёт оставлен счётом нарочно: заведётся сверху лестница заголовков,
+ * как завелась снизу, — перелистывание сядет правильно само, и вспоминать про
+ * это место не придётся.
+ */
+export function panelRailTopInset(items, index) {
+  const target = items[index] ? items[index].top : 0;
+  let inset = 0;
+  for (let k = 0; k < items.length; k += 1) {
+    if (k === index) continue;
+    const item = items[k];
+    if (item.box > item.head && item.top < target && target < item.top + item.box) inset += item.head;
+  }
+  return inset;
 }
 
 // Высота рейки по колонкам: её спрашивают прокрутки к выделенной строке —
@@ -132,10 +192,18 @@ export function panelRailInset(node) {
   return 0;
 }
 
-function railShift(head, shift) {
-  const css = shift ? "translateY(" + shift + "px)" : "";
-  if (head.style.transform !== css) head.style.transform = css;
-  head.classList.toggle("is-below", shift !== 0);
+// Заголовок, стоящий не на своём месте: поднят (`transform`), помечен классом
+// и подписан подсказкой — нажатие перелистнёт, а не свернёт. Пишем только на
+// смену значения: слепая запись стоила бы пересчёта стилей всему, что внутри.
+function railPin(node, pin) {
+  const css = pin.shift ? "translateY(" + pin.shift + "px)" : "";
+  if (node.style.transform !== css) node.style.transform = css;
+  node.classList.toggle("is-below", pin.side === "bottom");
+  node.classList.toggle("is-pinned", pin.side !== "");
+  const title = node.querySelector(".panel__title");
+  if (!title) return;
+  const hint = pin.side ? strings.panels.jump : "";
+  if (title.title !== hint) title.title = hint;
 }
 
 function railVar(node, name, value) {
@@ -155,37 +223,66 @@ function railItems(column) {
   const base = rect.top + column.clientTop - column.scrollTop;
   const items = [];
   for (const section of column.querySelectorAll(".panel__section")) {
-    const head = section.querySelector(".panel__head");
-    if (!head) continue;
-    items.push({
-      section,
-      head,
-      height: head.offsetHeight,
-      top: section.getBoundingClientRect().top - base,
-    });
+    const node = section.querySelector(".panel__head");
+    if (!node) continue;
+    const box = section.getBoundingClientRect();
+    items.push({ section, node, head: node.offsetHeight, top: box.top - base, box: box.height });
   }
   return items;
 }
 
+const RAIL_FREE = { shift: 0, side: "" };
+
 function syncColumn(column) {
   const all = railItems(column);
-  const shown = all.filter((item) => item.height > 0);
-  const shifts = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
+  const shown = all.filter((item) => item.head > 0);
+  const pins = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
   let rail = 0;
   for (let k = 0; k < shown.length; k += 1) {
-    railShift(shown[k].head, shifts[k]);
-    if (shifts[k]) rail += shown[k].height;
+    railPin(shown[k].node, pins[k]);
+    if (pins[k].shift) rail += shown[k].head;
   }
   for (const item of all) {
-    if (item.height <= 0) railShift(item.head, 0);
+    if (item.head <= 0) railPin(item.node, RAIL_FREE);
     // Прилипший блок внутри тела (фильтры списка меток) липнет **под**
     // заголовком своего раздела, а не на нём: высоту заголовка он узнаёт мерой,
     // а не числом в стилях — иначе фильтры разошлись бы с заголовком на первой
     // же правке шрифта или отступов.
-    railVar(item.section, "--panel-head", item.height);
+    railVar(item.section, "--panel-head", item.head);
   }
   railVar(column, "--panel-rail", rail);
   railHeight.set(column, rail);
+}
+
+/**
+ * Нажали заголовок — перелистнуть к его разделу, если заголовок нарисован у
+ * кромки (таск 198, G303).
+ *
+ * Отдаёт `true`, если нажатие было указателем и колонка перелистнута, и
+ * `false`, если заголовок стоит на своём месте: тогда это прежняя кнопка
+ * сворачивания, и решает не рейка. Знание «у кромки или нет» берётся из
+ * класса, который рейка поставила в последнем кадре прокрутки, — второго
+ * обмера ради одного клика не нужно.
+ *
+ * Прокрутка **мгновенная**, не плавная, и это выбор. Колонка на объекте
+ * заказчика — 3785 точек: плавный перелёт через неё занимает полсекунды, всё
+ * это время перестраивает рейку на каждом кадре и показывает по дороге строки,
+ * которых никто не звал. Слова заказчика («нажал — прыгнуло туда») — про
+ * прыжок. Мгновенная ещё и не спорит с рукой: начал человек листать сам —
+ * спорить не с чем, перелёт уже кончился.
+ */
+export function panelRailJump(node) {
+  const head = node && node.closest ? node.closest(".panel__head") : null;
+  if (!head || !head.classList.contains("is-pinned")) return false;
+  const section = head.closest(".panel__section");
+  const column = section ? section.closest(".panel") : null;
+  if (!column) return false;
+  const shown = railItems(column).filter((item) => item.head > 0);
+  const index = shown.findIndex((item) => item.node === head);
+  if (index < 0) return false;
+  column.scrollTop = shown[index].top - panelRailTopInset(shown, index);
+  syncPanelRail();
+  return true;
 }
 
 let railColumns = [];
