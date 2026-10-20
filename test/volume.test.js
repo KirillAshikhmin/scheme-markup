@@ -67,6 +67,9 @@ import {
   VOLUME_LAYER_GROUND,
   VOLUME_LAYER_SHADOW,
   VOLUME_LAYER_MARK,
+  VOLUME_LAYER_SUN,
+  VOLUME_SHEER_SHARE,
+  VOLUME_SUN_PROBE_MM,
   VOLUME_DOOR_RGB,
   VOLUME_PLANE_EPS_MM,
   VOLUME_HANDLE_RGB,
@@ -165,6 +168,12 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeShadowFaces,
+  volumeSunSpotFaces,
+  volumeSunSpotRgb,
+  volumeSunOpenings,
+  volumeSheerPlace,
+  volumeCurtainOpen,
+  volumeClipPolygon,
   volumeClockNow,
   volumeClockFixed,
   volumeClockMinutes,
@@ -464,6 +473,416 @@ test("тень дома не просвечивает сквозь пол ни �
     );
   }
   assert.ok(nearerSomewhere, "ни в один час тень не оказалась ближе пола — стенд перестал ловить D49");
+});
+
+// ——— таск 196: солнце входит в комнату через проёмы (D51, G301) ——————————
+//
+// Внутреннего света в сборке не было никогда: тень дома лежит на земле, а
+// внутри комнат её не видно ярусом (D49). Здесь проверяется то, чего не было, —
+// пятно, которое солнце кладёт на пол через проём, и четыре правила, которыми
+// оно живёт: ярус, сторона света, контур комнаты и штора перед проёмом.
+
+const SUN_DAY = { riseMin: 540, setMin: 1260 };
+const moodAt = (hour, project = null) =>
+  volumeMood({
+    minutes: hour * 60,
+    times: SUN_DAY,
+    kind: "nature",
+    topDeg: project ? projectTopAzimuth(project) : 0,
+  });
+
+/**
+ * Комната с окном в **южной** стене (`walls[2]`, ось y = +1500): комната от неё
+ * к северу, улица к югу — то есть ровно с той стороны, откуда в этих широтах
+ * светит солнце. Окно 600 × 1400 на высоте 800: обычное кухонное.
+ */
+function sunScene(options = {}) {
+  const scene = roomScene();
+  const put = addOpening(scene.project, {
+    wallId: scene.walls[options.wall === undefined ? 2 : options.wall],
+    kind: options.kind || "window",
+    atMm: options.atMm === undefined ? 1700 : options.atMm,
+    widthMm: options.widthMm === undefined ? 600 : options.widthMm,
+    heightMm: options.heightMm === undefined ? 1400 : options.heightMm,
+    heightAboveFloorMm: options.heightAboveFloorMm === undefined ? 800 : options.heightAboveFloorMm,
+    ...(options.kind === "door" ? { hinge: "start", swing: "left" } : {}),
+  });
+  return { ...scene, project: put.project, openingId: put.opening.id };
+}
+
+/** Две комнаты 8 × 3 м через общую стену с дверью и окно в южной стене левой. */
+function twoRoomScene() {
+  const base = planProject();
+  let project = base.project;
+  const corners = [
+    { x: -4000, y: -1500 },
+    { x: 4000, y: -1500 },
+    { x: 4000, y: 1500 },
+    { x: -4000, y: 1500 },
+  ];
+  const walls = [];
+  for (let index = 0; index < corners.length; index += 1) {
+    const added = addWall(project, {
+      schemeId: base.schemeId,
+      aMm: corners[index],
+      bMm: corners[(index + 1) % corners.length],
+      thicknessMm: 200,
+    });
+    project = added.project;
+    walls.push(added.wall.id);
+  }
+  const middle = addWall(project, {
+    schemeId: base.schemeId,
+    aMm: { x: 0, y: -1500 },
+    bMm: { x: 0, y: 1500 },
+    thicknessMm: 200,
+  });
+  project = middle.project;
+  const outline = (name, from, to) => {
+    const room = addRoom(project, name);
+    project = room.project;
+    project = addOutline(project, {
+      schemeId: base.schemeId,
+      roomId: room.room.id,
+      points: [
+        { x: from, y: -1400 },
+        { x: to, y: -1400 },
+        { x: to, y: 1400 },
+        { x: from, y: 1400 },
+      ].map((point) => fraction(project, base.schemeId, point)),
+    }).project;
+    return room.room.id;
+  };
+  const left = outline("Гостиная", -3900, -100);
+  const right = outline("Спальня", 100, 3900);
+  // Дверь в общей стене: обе её стороны — комнаты.
+  const door = addOpening(project, {
+    wallId: middle.wall.id,
+    kind: "door",
+    atMm: 1000,
+    widthMm: 900,
+    heightMm: 2100,
+    heightAboveFloorMm: 0,
+    hinge: "start",
+    swing: "left",
+  });
+  project = door.project;
+  // Окно в южной стене левой комнаты: `walls[2]` идёт от (4000, 1500) к
+  // (−4000, 1500), то есть отступ 5000 приходится на x = −1000.
+  const window = addOpening(project, {
+    wallId: walls[2],
+    kind: "window",
+    atMm: 5000,
+    widthMm: 1200,
+    heightMm: 2200,
+    heightAboveFloorMm: 0,
+  });
+  project = window.project;
+  return {
+    project,
+    schemeId: base.schemeId,
+    walls: [...walls, middle.wall.id],
+    doorId: door.opening.id,
+    windowId: window.opening.id,
+    rooms: { left, right },
+  };
+}
+
+test("через окно солнце кладёт на пол пятно, и ярус у пятна свой", () => {
+  const scene = sunScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  assert.equal(built.sunSpots.length, 1, "проём сцены собран один");
+  // Солнце ровно на юге и высоко: вынос считается в уме, и пятно целиком
+  // влезает в комнату — числа можно назвать точно. `rise` 45° даёт вынос
+  // «миллиметр на миллиметр высоты», `az` 90° — свет ровно вдоль −y.
+  const faces = volumeSunSpotFaces(built.sunSpots, { az: 90, rise: 45, fade: 1 });
+  assert.equal(faces.length, 1, "южное окно светит, когда солнце на юге");
+  const spot = faces[0];
+  assert.equal(spot.layer, VOLUME_LAYER_SUN, "ярус у пятна свой");
+  assert.ok(VOLUME_LAYER_GROUND < VOLUME_LAYER_SUN && VOLUME_LAYER_SUN < VOLUME_LAYER_BODY, "выше полов, ниже тел");
+  assert.ok(spot.flat, "пятно не затеняется лампой сцены: его светлота и есть свет");
+  assert.ok(spot.n.z > 0, "пятно смотрит вверх");
+  assert.ok(
+    spot.p.every((point) => point.z === 0),
+    "пятно лежит на нулевой отметке — там же, где пол",
+  );
+  // Пятно уехало от окна **прочь от солнца**: солнце на юге (+y), значит пятно
+  // к северу от окна, то есть в сторону меньших y.
+  const room = built.rooms[0].pointsMm;
+  assert.ok(
+    spot.p.every((point) => volumePointInside(point, room)),
+    "пятно лежит внутри комнаты",
+  );
+  // Низ окна 800 мм сносится на 800, верх 2200 — на 2200; внутренняя грань
+  // стены стоит на y = 1400. Значит пятно лежит от y = 600 до y = −800 и
+  // шириной ровно в окно: 600 мм, от x = −300 до x = 300.
+  const xs = spot.p.map((point) => Math.round(point.x)).sort((a, b) => a - b);
+  const ys = spot.p.map((point) => Math.round(point.y)).sort((a, b) => a - b);
+  assert.deepEqual(xs, [-300, -300, 300, 300], "пятно шириной в окно");
+  assert.deepEqual(ys, [-800, -800, 600, 600], "низ окна снесён на 800, верх на 2200");
+  assert.ok(Math.abs(volumeArea(spot.p) - 600 * 1400) < 1, "площадь пятна — окно, снесённое по высоте");
+  // И настоящий час кладёт пятно туда же, только со скосом: солнце в полдень
+  // стоит не ровно на юге, и параллелограмм перекошен.
+  const noon = volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow);
+  assert.equal(noon.length, 1, "в полдень южное окно светит");
+  assert.ok(
+    noon[0].p.every((point) => volumePointInside(point, room)),
+    "полуденное пятно вышло за комнату",
+  );
+});
+
+test("солнце зашло или стоит за стеной — пятна нет", () => {
+  const scene = sunScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Ночь: `fade` ноль, и луна пятен не даёт.
+  for (const hour of [0, 3, 6, 23]) {
+    const mood = moodAt(hour);
+    assert.equal(mood.shadow.fade, 0, hour + ":00 — солнце под горизонтом");
+    assert.deepEqual(volumeSunSpotFaces(built.sunSpots, mood.shadow), [], hour + ":00 даёт пятно");
+  }
+  // Сумерки гаснут тем же `fade`, что тень дома: пятно сводится к полу.
+  const dim = volumeSunSpotFaces(built.sunSpots, { az: 90, rise: 45, fade: 0.5 });
+  assert.equal(dim.length, 1);
+  assert.deepEqual(dim[0].rgb, volumeSunSpotRgb(0.5));
+  // Солнце с другой стороны стены: то же окно, тот же час, свет развёрнут на
+  // полоборота — пятну негде лежать.
+  assert.deepEqual(
+    volumeSunSpotFaces(built.sunSpots, { az: 270, rise: 45, fade: 1 }),
+    [],
+    "окно светит, когда солнце за его стеной",
+  );
+  // Окно в северной стене той же комнаты не светит с юга вовсе.
+  const north = sunScene({ wall: 0 });
+  const builtNorth = volumeScene(north.project, north.schemeId);
+  assert.equal(volumeSunSpotFaces(builtNorth.sunSpots, { az: 270, rise: 45, fade: 1 }).length, 1, "стенд пуст");
+  assert.deepEqual(
+    volumeSunSpotFaces(builtNorth.sunSpots, { az: 90, rise: 45, fade: 1 }),
+    [],
+    "северное окно светит с юга",
+  );
+});
+
+test("пятно светлое, и его цвет — пол при самой светлой грани сцены", () => {
+  // Пол — самая тёмная грань сцены (`volumeShade` вверх = 0,46), и пятно это
+  // он же при светлоте 1. Отношение 2,17 — обратное тому 0,72, которым тень
+  // темнит землю.
+  const dim = volumeShade({ x: 0, y: 0, z: 1 });
+  assert.ok(Math.abs(dim - 0.502) < 0.001, "светлота пола: " + dim.toFixed(3));
+  assert.deepEqual(volumeSunSpotRgb(1), [170, 142, 110], "полный свет — пол без затенения");
+  assert.deepEqual(volumeSunSpotRgb(1), VOLUME_FLOOR_RGB);
+  // Погасшее пятно совпадает с полом точка в точку: ни ступеньки, ни канта.
+  const floor = VOLUME_FLOOR_RGB.map((value) => Math.round(value * dim));
+  assert.deepEqual(volumeSunSpotRgb(0), floor, "гаснет пятно в самый пол");
+  assert.deepEqual(floor, [85, 71, 55]);
+  // Пятно светлее пола ровно вдвое (1 / 0,502 = 1,99) — и это та же мера, что
+  // у наружной тени, только в другую сторону: там земля × 0,72.
+  assert.ok(Math.abs(volumeSunSpotRgb(1)[0] / floor[0] - 2) < 0.01, "пятно светлее пола вдвое");
+  assert.ok(volumeSunSpotRgb(0.5)[0] > floor[0] && volumeSunSpotRgb(0.5)[0] < 170, "полусвет между полом и светом");
+});
+
+test("пятно обрезано контуром своей комнаты и в соседнюю не уходит", () => {
+  const scene = twoRoomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Низкое солнце: вынос больше комнаты, и без обрезки пятно ушло бы сквозь
+  // стены. Высота 10° даёт от верха окна 2,2 м вынос 12,5 м при комнате в 2,8 м.
+  const reach = 2200 / Math.tan((10 * Math.PI) / 180);
+  assert.ok(reach > 12000, "стенд пуст: пятно и так влезает в комнату");
+  const faces = volumeSunSpotFaces(built.sunSpots, { az: 90, rise: 10, fade: 1 });
+  assert.equal(faces.length, 1, "светит одно окно: дверь между комнатами не светит");
+  const left = built.rooms.find((room) => room.roomId === scene.rooms.left);
+  const right = built.rooms.find((room) => room.roomId === scene.rooms.right);
+  // Точка на самой кромке контура «внутри» не считается (луч задевает ребро),
+  // поэтому обрезка проверяется габаритом комнаты и площадью, а не строгим
+  // попаданием каждой вершины.
+  for (const point of faces[0].p) {
+    assert.ok(point.x >= -3900 - 1 && point.x <= -100 + 1, "пятно вышло за комнату по x: " + point.x);
+    assert.ok(point.y >= -1400 - 1 && point.y <= 1400 + 1, "пятно вышло за комнату по y: " + point.y);
+    assert.ok(!volumePointInside(point, right.pointsMm), "пятно уехало в соседнюю комнату");
+  }
+  assert.ok(volumePointInside({ x: -1600, y: 0 }, left.pointsMm), "стенд считает комнаты верно");
+  // Обрезка оставила ровно полосу через комнату: окно 1200 мм на глубину 2800.
+  assert.ok(Math.abs(volumeArea(faces[0].p) - 1200 * 2800) < 1, "обрезка съела не то: " + volumeArea(faces[0].p));
+  // Без обрезки пятно было бы вчетверо длиннее комнаты — проверяется тем же
+  // счётом, но по контуру, который заведомо шире дома.
+  const wide = volumeClipPolygon(
+    [{ x: -40000, y: -40000 }, { x: 40000, y: -40000 }, { x: 40000, y: 40000 }, { x: -40000, y: 40000 }],
+    faces[0].p,
+  );
+  assert.ok(volumeArea(wide) <= volumeArea(faces[0].p) + 1, "пятно уже обрезано: второй раз резать нечего");
+});
+
+test("дверь между двумя комнатами пятна не даёт: светить в неё нечему", () => {
+  const scene = twoRoomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const door = built.sunSpots.find((spot) => spot.openingId === scene.doorId);
+  assert.ok(door, "дверь в списке проёмов есть");
+  assert.ok(door.left && door.right, "у двери между комнатами обе стороны — комнаты");
+  const window = built.sunSpots.find((spot) => spot.openingId === scene.windowId);
+  assert.ok(
+    Boolean(window.left) !== Boolean(window.right),
+    "у окна наружной стены комната ровно с одной стороны, улица с другой",
+  );
+  // Ни в один час внутренняя дверь пятна не даёт — и это решение, а не промах:
+  // свет сквозь неё был бы вторым шагом, то есть трассировкой.
+  for (const hour of [8, 10, 12, 15, 18, 20]) {
+    const faces = volumeSunSpotFaces([door], moodAt(hour).shadow);
+    assert.deepEqual(faces, [], hour + ":00 — внутренняя дверь положила пятно");
+  }
+});
+
+test("направление верха чертежа доезжает до пятна (G288)", () => {
+  const scene = sunScene();
+  const turned = setProjectSite(scene.project, { topAzimuthDeg: 180 }).project;
+  const built = volumeScene(turned, scene.schemeId);
+  // Верх чертежа развёрнут на юг: то же окно смотрит теперь на север, и в
+  // полдень оно не светит. Час один и тот же — меняется только чертёж.
+  const plain = volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow);
+  assert.equal(plain.length, 1, "без поворота окно светит");
+  const spun = volumeSunSpotFaces(built.sunSpots, moodAt(12, turned).shadow);
+  assert.deepEqual(spun, [], "развёрнутый чертёж — и южное окно стало северным");
+  assert.equal(projectTopAzimuth(turned), 180);
+});
+
+test("закрытая штора гасит пятно своего окна, открытая — пропускает (G301)", () => {
+  const scene = sunScene();
+  // Карниз штор у окна: метка с тюлевой моделью, привязанная к той же стене.
+  // Окно стоит отступом 1700…2300 от конца стены (4000, 1500), то есть по
+  // x = −300…300; штора в 400 мм закрывает две трети его ширины.
+  const put = markAt(scene.project, scene.schemeId, "КШ", [{ x: 0, y: 1150 }]);
+  const built = volumeScene(put.project, scene.schemeId);
+  const place = built.marks.find((mark) => mark.markId === put.markId);
+  assert.ok(volumeSheerPlace(place), "штора узнана по тюлевому телу модели, а не по коду типа");
+  assert.equal(built.sunSpots.length, 1);
+  assert.equal(built.sunSpots[0].sheerMarkId, put.markId, "штора связана со своим проёмом");
+  assert.deepEqual(volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow), [], "закрытая штора пропустила солнце");
+  // Открывание шторы — отметка состояния, как у двери (G207), и счёт пятна от
+  // неё не меняется: та же сцена, тот же час, в объекте ни строки.
+  const open = volumeScene(put.project, scene.schemeId, { openCurtainIds: new Set([put.markId]) });
+  assert.equal(open.sunSpots[0].sheerMarkId, null, "открытая штора проём не держит");
+  assert.equal(volumeSunSpotFaces(open.sunSpots, moodAt(12).shadow).length, 1, "за открытой шторой пятно вернулось");
+  assert.equal(volumeCurtainOpen(new Set([put.markId]), put.markId), true);
+  assert.equal(volumeCurtainOpen(null, put.markId), false, "список пустой — закрыты все");
+  assert.equal(JSON.stringify(put.project), JSON.stringify(volumeScene(put.project, scene.schemeId) && put.project));
+});
+
+test("штора гасит только то, что закрывает: порог — половина ширины проёма", () => {
+  // Широкое окно 2200 мм и та же штора в 400: перекрытие 0,18 — пятно остаётся.
+  const wide = sunScene({ atMm: 900, widthMm: 2200 });
+  const put = markAt(wide.project, wide.schemeId, "КШ", [{ x: 0, y: 1150 }]);
+  const built = volumeScene(put.project, wide.schemeId);
+  assert.equal(built.sunSpots[0].sheerMarkId, null, "четверть окна не гасит пятно целиком");
+  assert.equal(volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow).length, 1);
+  assert.equal(VOLUME_SHEER_SHARE, 0.5);
+  // Штора на **другой** стене того же помещения проём не держит: правило
+  // спрашивает стену, а не расстояние.
+  const side = sunScene();
+  const aside = markAt(side.project, side.schemeId, "КШ", [{ x: 1850, y: 0 }]);
+  const near = volumeScene(aside.project, side.schemeId);
+  const place = near.marks.find((mark) => mark.markId === aside.markId);
+  assert.ok(volumeSheerPlace(place), "штора на боковой стене — тоже штора");
+  assert.notEqual(place.wallId, near.sunSpots[0].wallId, "и висит она на другой стене");
+  assert.equal(near.sunSpots[0].sheerMarkId, null, "чужая стена погасила пятно");
+});
+
+test("в кадре пятно ложится поверх пола и под телами, а земля сквозь пол не светит", () => {
+  // Окно от пола до верха: у такого пятно начинается у самой стены и попадает
+  // в комнату в любой час, когда солнце с его стороны.
+  const scene = sunScene({ heightAboveFloorMm: 0, heightMm: 2200, widthMm: 1200, atMm: 1400 });
+  const built = volumeScene(scene.project, scene.schemeId);
+  const named = {
+    ...built,
+    order: undefined,
+    faces: built.faces.map((face) =>
+      face.layer === VOLUME_LAYER_GROUND && face.n.z > 0 ? { ...face, markId: "пол" } : face,
+    ),
+  };
+  const box = { width: 972, height: 778 };
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0.6, -0.73, 14000);
+  const inside = (xy, x, y) => {
+    let hit = false;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i];
+      const ay = xy[i + 1];
+      const bx = xy[j];
+      const by = xy[j + 1];
+      if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) hit = !hit;
+    }
+    return hit;
+  };
+  let seen = 0;
+  for (const hour of [6, 10, 12, 15, 19]) {
+    const mood = moodAt(hour);
+    const shadow = volumeShadowFaces(built.shadowBoxes, mood.shadow).map((face) => ({ ...face, markId: "тень" }));
+    const spots = volumeSunSpotFaces(built.sunSpots, mood.shadow).map((face) => ({ ...face, markId: "пятно" }));
+    const frame = volumeFrame(named, camera, box, [...shadow, ...spots], mood.tint);
+    const ground = frame.filter((polygon) => !polygon.stroke && polygon.layer <= VOLUME_LAYER_SUN);
+    const floor = ground.find((polygon) => polygon.pick === "пол");
+    assert.ok(floor, "пол комнаты в кадре");
+    // Точка, в которой пятно лежит: его собственная середина.
+    const spot = ground.find((polygon) => polygon.pick === "пятно");
+    if (!spot) continue;
+    seen += 1;
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < spot.xy.length; i += 2) {
+      x += spot.xy[i];
+      y += spot.xy[i + 1];
+    }
+    x /= spot.xy.length / 2;
+    y /= spot.xy.length / 2;
+    const here = ground.filter((polygon) => inside(polygon.xy, x, y));
+    assert.equal(here[here.length - 1].pick, "пятно", hour + ":00 — поверх пятна легло что-то ещё");
+    assert.ok(
+      here.some((polygon) => polygon.pick === "пол"),
+      hour + ":00 — пятно лежит не на полу, а на земле",
+    );
+    assert.ok(
+      here.every((polygon) => polygon.pick !== "тень" || polygon.layer < floor.layer),
+      "наружная тень осталась ниже пола (D49)",
+    );
+    // Тела комнаты рисуются после пятна: стены и вещи его закрывают.
+    const body = frame.find((polygon) => polygon.layer === VOLUME_LAYER_BODY);
+    assert.ok(body, "тела в кадре");
+    assert.ok(frame.indexOf(spot) < frame.indexOf(body), "пятно легло после тел");
+  }
+  assert.ok(seen >= 3, "пятно попало в кадр меньше чем в трёх часах — стенд пуст");
+});
+
+test("обрезка выпуклым отсекателем режет и невыпуклый контур", () => {
+  // Г-образная комната: отсекатель выпуклый, отсекаемое — нет.
+  const room = [
+    { x: 0, y: 0 },
+    { x: 4000, y: 0 },
+    { x: 4000, y: 2000 },
+    { x: 2000, y: 2000 },
+    { x: 2000, y: 4000 },
+    { x: 0, y: 4000 },
+  ];
+  const whole = volumeClipPolygon(room, [
+    { x: -1000, y: -1000 },
+    { x: 5000, y: -1000 },
+    { x: 5000, y: 5000 },
+    { x: -1000, y: 5000 },
+  ]);
+  assert.ok(Math.abs(volumeArea(whole) - volumeArea(room)) < 1, "отсекатель шире комнаты — комната целиком");
+  // Полоса по правому крылу: вырезается только то, что в крыле и есть.
+  const band = volumeClipPolygon(room, [
+    { x: 2500, y: -500 },
+    { x: 3500, y: -500 },
+    { x: 3500, y: 4500 },
+    { x: 2500, y: 4500 },
+  ]);
+  assert.ok(Math.abs(volumeArea(band) - 1000 * 2000) < 1, "площадь полосы: " + volumeArea(band));
+  // Обход отсекателя не значит ничего: тот же ответ при обратном порядке.
+  const back = volumeClipPolygon(room, [
+    { x: 2500, y: 4500 },
+    { x: 3500, y: 4500 },
+    { x: 3500, y: -500 },
+    { x: 2500, y: -500 },
+  ]);
+  assert.ok(Math.abs(volumeArea(back) - volumeArea(band)) < 1, "обход отсекателя поменял ответ");
+  assert.deepEqual(volumeClipPolygon(room, [{ x: 9000, y: 9000 }, { x: 9500, y: 9000 }, { x: 9500, y: 9500 }]), []);
+  assert.equal(VOLUME_SUN_PROBE_MM, 150);
 });
 
 // ——— D37: под проёмом и под стеной есть пол ———————————————————————————————

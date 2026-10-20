@@ -101,6 +101,7 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeShadowFaces,
+  volumeSunSpotFaces,
   volumeSiteOf,
   volumeDrawn,
   volumeSelectLines,
@@ -844,6 +845,9 @@ function createVolume({ api, hosts }) {
   let hourTick = 0;
   // Грани тени дома в этот час: собираются вместе со снимком, а не в кадре.
   let shadow = [];
+  // Солнечные пятна от проёмов в этот час (таск 196) — там же, где тень, и по
+  // той же причине: час меняется раз в секунду, а кадров в секунде шестьдесят.
+  let spots = [];
   let view = "around";
   let closed = false;
   let frame = 0;
@@ -1274,14 +1278,16 @@ function createVolume({ api, hosts }) {
 
   // ——— час суток: один снимок на секунду ———
 
-  /** Сцена и тень под ней меняются вместе: тень держится за габариты стен. */
+  /** Сцена, тень и свет меняются вместе: все трое держатся за геометрию. */
   function setScene(state) {
     scene = sceneOf(state) || scene;
     refreshShadow();
   }
 
   function refreshShadow() {
-    shadow = volumeShadowFaces(scene.shadowBoxes, hour ? hour.shadow : null);
+    const at = hour ? hour.shadow : null;
+    shadow = volumeShadowFaces(scene.shadowBoxes, at);
+    spots = volumeSunSpotFaces(scene.sunSpots, at);
   }
 
   /**
@@ -1367,8 +1373,10 @@ function createVolume({ api, hosts }) {
     const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
     // Тень дома идёт в кадр `extra`, а не гранью сцены: её кладёт час (таск
     // 181). Ярус у неё свой (`VOLUME_LAYER_SHADOW`), и пол помещения ложится
-    // поверх неё правилом яруса, а не дальностью середин — дефект D49.
-    shown = volumeFrame(scene, spot, box, [...shadow, ...overlay, ...marker], at.tint);
+    // поверх неё правилом яруса, а не дальностью середин — дефект D49. Тем же
+    // путём и теми же `extra` идут солнечные пятна от проёмов (таск 196), ярус
+    // у них `VOLUME_LAYER_SUN` — выше полов, ниже тел.
+    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint);
     volumeDraw(ctx, shown);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);

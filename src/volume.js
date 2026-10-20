@@ -237,8 +237,15 @@ export const VOLUME_AROUND_PAN_TILT_MIN = Math.sin((20 * Math.PI) / 180);
  *   1 — **тень дома на земле** (D43). Своим ярусом, и это починка дефекта D49 —
  *       разбор числами ниже.
  *   2 — **полы и потолки** помещений.
- *   3 — **всё остальное**: стены, объекты, полотна, рамы.
- *   4 — **кружок «вы здесь»**. Он рисуется поверх всего, и это не оплошность:
+ *   3 — **солнечное пятно на полу комнаты** (таск 196, D51): проёмом пущенный
+ *       в комнату свет. Ярус ровно тот же урок, что у тени, только с другой
+ *       стороны пола: пятно обязано лежать **выше** пола своей комнаты и ниже
+ *       всего, что в комнате стоит. Дальностью это не решается по той же
+ *       причине, по которой не решилось у тени, — пятно и пол коплоскостны
+ *       (оба на нулевой отметке), и спор их середин переворачивается от часа.
+ *       Разбор числами — у `volumeSunSpotFaces`.
+ *   4 — **всё остальное**: стены, объекты, полотна, рамы.
+ *   5 — **кружок «вы здесь»**. Он рисуется поверх всего, и это не оплошность:
  *       он не часть комнаты, а указатель. Обзор смотрит под углом, и ближняя
  *       стена высотой 2,7 м прячет за собой полосу пола метра в три — то есть
  *       ровно того человека, ради которого обзор и открыли («без него не
@@ -278,8 +285,9 @@ export const VOLUME_AROUND_PAN_TILT_MIN = Math.sin((20 * Math.PI) / 180);
 export const VOLUME_LAYER_BASE = 0;
 export const VOLUME_LAYER_SHADOW = 1;
 export const VOLUME_LAYER_GROUND = 2;
-export const VOLUME_LAYER_BODY = 3;
-export const VOLUME_LAYER_MARK = 4;
+export const VOLUME_LAYER_SUN = 3;
+export const VOLUME_LAYER_BODY = 4;
+export const VOLUME_LAYER_MARK = 5;
 /**
  * Предел уса на изломе полосы (D38): во сколько раз смещение угла может
  * превысить половину ширины. Четыре — то же число, которым ограничивают ус
@@ -724,6 +732,380 @@ export function volumeShadowFaces(boxes, shadow, out = []) {
         volumeClockwise(volumeShadowOutline(box.corners, box.heightMm, at)).map((point) => volumeAt(point, 0)),
         rgb,
         { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_SHADOW, flat: true },
+      ),
+    );
+  }
+  return out;
+}
+
+// ——— солнце в комнате (таск 196, дефект D51, требование G301) —————————————
+//
+// Слова заказчика: «почему-то теперь в доме вообще нет тени ни через двери ни
+// через окна».
+//
+// **Сломанного нет, и это надо сказать прямо.** Внутреннего света в сборке не
+// было никогда: тень дома (таск 178) лежит только на земле, а внутри комнат её
+// не видно нарочно — ярусом (D49). Раньше сквозь щели в полу местами светила
+// зелёная земля, и это читалось тенью; таск 190 щели закрыл, и «тень» вместе с
+// ними исчезла. То есть заказчик просит не починки, а того, чего не было:
+// света, который солнце кладёт на пол через проём.
+//
+// **Это проекция проёма, а не трассировка лучей.** Проём — прямоугольник в
+// стене (низ, верх, ширина вдоль стены); солнце даёт направление; пятно — тот
+// же прямоугольник, снесённый по направлению света на пол. Низ проёма сносится
+// на `низ / tg(высота солнца)`, верх — на `верх / tg(...)`, и прямоугольник
+// становится **параллелограммом**: смещение растёт с высотой линейно, а стороны
+// проёма вдоль стены параллельны. Ни карт теней, ни отражений, ни света на
+// стенах, ни второго шага (из комнаты в комнату через внутреннюю дверь) здесь
+// нет — что из этого стоит сделать дальше, сказано в отчёте таска.
+//
+// ——— один шаг света: солнечная сторона проёма обязана быть улицей ————————
+//
+// У проёма две стороны, и обе спрашиваются у контуров помещений:
+//
+//   - **принимающая** (та, куда идёт свет) обязана быть комнатой — иначе пятну
+//     негде лежать: свет уходит из дома на улицу;
+//   - **солнечная** (та, откуда идёт свет) обязана быть улицей — иначе свет
+//     пришёл бы из соседней комнаты, то есть сам был бы пятном от другого
+//     проёма, а это уже второй шаг и трассировка.
+//
+// Отсюда сразу три ответа, которых иначе пришлось бы искать по отдельности:
+//
+//   1. **дверь между двумя комнатами пятна не даёт вовсе** — у неё обе стороны
+//      комнаты, значит светить в неё нечему. Цена названа прямо: сквозь
+//      внутреннюю дверь солнце в этой сборке не проходит, даже когда соседняя
+//      комната залита светом. Врать красивее было бы дороже: пятно за
+//      внутренней дверью появлялось бы и там, где его кормить нечем — у двери
+//      в середине квартиры;
+//   2. **солнце с другой стороны стены** — окно в северной стене в полдень не
+//      светит: принимающей стороной оказывается улица, и проём отбрасывается
+//      тем же условием, а не отдельной проверкой стороны света;
+//   3. **проём в стене, у которой комнат нет совсем** (сарай на чертеже),
+//      молчит.
+//
+// На объекте заказчика из 13 проёмов пятно могут дать 5 (четыре окна и входная
+// дверь), остальные 8 — внутренние.
+
+/**
+ * Светлота пола: та же, которой красит его лампа сцены.
+ *
+ * Пол — **самая тёмная грань сцены** по построению (у `VOLUME_LIGHT`
+ * отрицательная `z`: «пол темнее потолка», требование заказчика из таска 146).
+ * Числом это `volumeShade({0,0,1})` = **0,502**, то есть пол `170·142·110`
+ * показывается как `85·71·55` — то же число, которым считался дефект D49.
+ */
+const VOLUME_SUN_SPOT_DIM = volumeShade({ x: 0, y: 0, z: 1 });
+
+/**
+ * Цвет солнечного пятна: **тот же пол, которому досталась самая светлая грань
+ * сцены вместо самой тёмной.**
+ *
+ * Мера взята из уже существующих, а не придумана: снаружи тень — это земля,
+ * помноженная на 0,72 (`VOLUME_SHADOW_RGB`, доля взята от разброса светлот
+ * `VOLUME_SHADE_MIN`…`VOLUME_SHADE_MAX` = 0,46…1); внутри всё ровно наоборот —
+ * комната в полумраке, и солнце её местами освещает, то есть пятно это пол,
+ * которому досталась светлота 1 вместо своей 0,502, — светлее себя же ровно
+ * **вдвое** (1,99). Второй краски для пятна нет вовсе: `VOLUME_FLOOR_RGB`,
+ * нарисованный без затенения (`flat`), и есть пятно — `170·142·110` против
+ * пола `85·71·55`.
+ *
+ * **Гаснет пятно цветом, как и тень** — по тому же `fade`, которым гаснет она:
+ * `fade` = 1 даёт полный свет, `fade` = 0 сводит пятно к самому полу, и в
+ * сумерках оно исчезает, не мигнув. Прозрачностью этого делать нельзя по той же
+ * причине, что у тени: пятна двух окон одной комнаты перекрываются, и на
+ * пересечении вышло бы вдвое светлее.
+ *
+ * Ночь пятно не красит сама: `tint` кладёт на него тот же час, что на все грани
+ * сцены (`volumeFrame` → `volumeFill`), — но ночью `fade` и так ноль, и пятен
+ * нет: луна их не даёт, света у неё для этого нет.
+ */
+export function volumeSunSpotRgb(fade) {
+  const share = Math.max(0, Math.min(1, Number(fade) || 0));
+  const lift = VOLUME_SUN_SPOT_DIM + (1 - VOLUME_SUN_SPOT_DIM) * share;
+  return [
+    Math.round(VOLUME_FLOOR_RGB[0] * lift),
+    Math.round(VOLUME_FLOOR_RGB[1] * lift),
+    Math.round(VOLUME_FLOOR_RGB[2] * lift),
+  ];
+}
+
+/**
+ * Насколько глубоко в комнату заходит щуп, которым спрашивают сторону проёма.
+ *
+ * Полтора сантиметра от грани стены: контур помещения обводят по подложке
+ * рукой, и промахнуться на сантиметр-другой — обычное дело (то же наблюдение,
+ * из которого вышел напуск пола `VOLUME_FLOOR_LAP`). Больше брать нельзя:
+ * перегородка в сто миллиметров, и щуп, заведённый на полметра, ушёл бы в
+ * комнату за ней. Замер на объекте заказчика: все 13 проёмов отвечают одно и то
+ * же при щупе 50, 150 и 400 мм — то есть выбор внутри этого разброса ни на что
+ * не влияет, и взята середина.
+ */
+export const VOLUME_SUN_PROBE_MM = 150;
+
+/**
+ * Какую долю проёма штора должна закрыть, чтобы погасить пятно, — **половину**.
+ *
+ * Полупятен не бывает (см. `volumeSunOpenings`), значит порог обязан быть, и
+ * половина — единственный, который не выдуман: он симметричен и не требует
+ * второго числа. Промахи названы прямо: штора, закрывающая 0,6 широкого окна,
+ * гасит пятно целиком, а закрывающая 0,4 — не гасит вовсе.
+ */
+export const VOLUME_SHEER_SHARE = 0.5;
+
+/** Ткань ли это: у тела модели стоит именованная плотность (таск 189). */
+function volumeSheerParts(parts) {
+  return Array.isArray(parts) && parts.some((part) => part && part.clear);
+}
+
+/**
+ * Штора ли эта метка — спрашивается **у модели, а не у кода типа**.
+ *
+ * Ткань в этой сборке уже помечена: у полотнищ стоит `clear: "sheer"` (таск
+ * 189) — и у модели точечной шторы (`things.js` → `curtainRail`), и у повтора
+ * вдоль пути у линейной (`lines.js` → `КШ`). Поэтому вопрос «что висит перед
+ * проёмом» задаётся тому же признаку, которым ткань рисуется: завёл человек
+ * свой тип с тюлевой моделью — он гасит пятно даром, а список кодов пришлось бы
+ * править. Труба карниза плотная и в счёт не идёт — у неё `clear` нет.
+ */
+export function volumeSheerPlace(place) {
+  if (!place) return false;
+  if (place.repeat && volumeSheerParts(place.repeat.parts)) return true;
+  return Boolean(place.model && volumeSheerParts(place.model.parts));
+}
+
+/**
+ * Открыта ли эта штора. Список пустой или не дан — закрыты все (G301).
+ *
+ * **Отметка состояния, а не поле объекта** — ровно как у двери
+ * (`volumeDoorOpen`, G207): открытые шторы живут экраном, в `project.json` о
+ * них ни строки (G68). Открывание в этом таске не делается нарочно — слова
+ * заказчика «потом сделаем их открытие», — но счёт пятна уже спрашивает
+ * **состояние**, а не «штора есть»: включить открывание значит положить id
+ * метки в это множество (`volumeScene(..., { openCurtainIds })`) и дать ему
+ * клавишу в `panels/volume.js`, где уже лежит такое же множество дверей.
+ * Переписывать счёт пятна для этого не придётся.
+ */
+export function volumeCurtainOpen(openCurtainIds, markId) {
+  if (!openCurtainIds || !markId) return false;
+  if (typeof openCurtainIds.has === "function") return openCurtainIds.has(markId);
+  return Array.isArray(openCurtainIds) && openCurtainIds.includes(markId);
+}
+
+/**
+ * Проёмы, через которые солнце может положить пятно, — **без часа**.
+ *
+ * Собирается вместе со сценой и живёт в ней (`scene.sunSpots`), потому что от
+ * времени здесь не зависит ничего: ни геометрия проёма, ни сторона, где комната,
+ * ни штора перед ним. Час добавляет только направление света
+ * (`volumeSunSpotFaces`) — тот же раздел труда, что у тени дома (таск 181):
+ * сцена держит габариты, час кладёт грани.
+ *
+ * **Штора связывается с проёмом по стене и перекрытию вдоль неё.** Правило:
+ * штора гасит проём, если она висит на **той же стене** и закрывает **не меньше
+ * половины** его ширины. Стену и отступы называет сама метка (`markWall`,
+ * привязка к стене с `atMm`…`toMm`) — это данные, а не догадка о расстоянии, и
+ * второго хозяина у вопроса «на какой стене висит метка» в сборке нет.
+ * Сторона стены при этом **не спрашивается**: ткань, повешенная перед проёмом,
+ * заслоняет его с любой стороны, а спроси я сторону — штора, размеченная с
+ * улицы, пропускала бы солнце.
+ *
+ * Промахи правила названы прямо: штора на соседней стене того же окна (эркер,
+ * размеченный одной линией по двум стенам) гасит только проёмы своей стены;
+ * штора, задвинутая на треть окна, не гасит ничего; «половина» порога — число,
+ * а не измерение света.
+ */
+export function volumeSunOpenings(project, schemeId, rooms, places, heightOf, openCurtainIds = null) {
+  const spots = [];
+  if (!rooms || rooms.length === 0) return spots;
+  const roomAt = (point) => rooms.find((room) => volumePointInside(point, room.pointsMm)) || null;
+  // Тюль по стенам: отступы вдоль стены, посчитанные один раз на сцену.
+  const sheers = [];
+  for (const place of places || []) {
+    if (!place || place.mode !== VOLUME_MARK_WALL || !place.wallId || !place.frame) continue;
+    if (!volumeSheerPlace(place)) continue;
+    if (volumeCurtainOpen(openCurtainIds, place.markId)) continue;
+    sheers.push(place);
+  }
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    const openings = openingsInWall(project, wall.id);
+    if (openings.length === 0) continue;
+    const { u, n, len } = vectors;
+    const half = Number(wall.thicknessMm) / 2;
+    const heightMm = Number(heightOf ? heightOf(wall) : 0) || 0;
+    const along = (point) => (point.x - Number(wall.aMm.x)) * u.x + (point.y - Number(wall.aMm.y)) * u.y;
+    const curtains = sheers
+      .filter((place) => place.wallId === wall.id)
+      .map((place) => {
+        const middle = along(place.frame.at);
+        const reach = Math.max(0, Number(place.frame.widthMm) || 0) / 2;
+        return { markId: place.markId, fromMm: middle - reach, toMm: middle + reach };
+      });
+    const at = (alongMm, across) => ({
+      x: Number(wall.aMm.x) + u.x * alongMm + n.x * across,
+      y: Number(wall.aMm.y) + u.y * alongMm + n.y * across,
+    });
+    for (const opening of openings) {
+      const fromMm = Math.max(0, Math.min(len, Number(opening.atMm)));
+      const toMm = Math.max(fromMm, Math.min(len, fromMm + Number(opening.widthMm)));
+      const bottomMm = Math.max(0, Number(opening.heightAboveFloorMm || 0));
+      const topMm = heightMm > 0 ? Math.min(heightMm, bottomMm + Number(opening.heightMm)) : bottomMm + Number(opening.heightMm);
+      if (!(toMm > fromMm) || !(topMm > bottomMm)) continue;
+      const middleMm = (fromMm + toMm) / 2;
+      const widthMm = toMm - fromMm;
+      // Штора считается закрывающей, когда перекрытие вдоль стены больше
+      // половины ширины проёма.
+      const covered = curtains.find(
+        (curtain) =>
+          Math.min(curtain.toMm, toMm) - Math.max(curtain.fromMm, fromMm) >= widthMm * VOLUME_SHEER_SHARE,
+      );
+      spots.push({
+        openingId: opening.id || null,
+        wallId: wall.id,
+        aMm: { x: Number(wall.aMm.x), y: Number(wall.aMm.y) },
+        u: { x: u.x, y: u.y },
+        n: { x: n.x, y: n.y },
+        halfMm: half,
+        fromMm,
+        toMm,
+        bottomMm,
+        topMm,
+        // Контуры помещений по обе стороны проёма. `null` — улица.
+        left: (roomAt(at(middleMm, half + VOLUME_SUN_PROBE_MM)) || {}).pointsMm || null,
+        right: (roomAt(at(middleMm, -half - VOLUME_SUN_PROBE_MM)) || {}).pointsMm || null,
+        sheerMarkId: covered ? covered.markId : null,
+      });
+    }
+  }
+  return spots;
+}
+
+/**
+ * Пересечение многоугольника с **выпуклым** многоугольником (обход
+ * Сазерленда — Ходжмана, по одной полуплоскости на ребро отсечки).
+ *
+ * Режется контур помещения выпуклым параллелограммом пятна, а не наоборот, и
+ * порядок здесь не вкус: алгоритм требует выпуклости **отсекающего**, а контур
+ * помещения выпуклым не бывает — его обводят рукой, и Г-образная комната
+ * обычное дело. Сторона «внутри» берётся у середины отсечки: у выпуклого
+ * многоугольника она заведомо внутри, и обход контура — по часовой или
+ * против — перестаёт значить что-либо.
+ */
+export function volumeClipPolygon(subject, clip) {
+  if (!subject || subject.length < 3 || !clip || clip.length < 3) return [];
+  let out = subject.map((point) => ({ x: point.x, y: point.y }));
+  let cx = 0;
+  let cy = 0;
+  for (const point of clip) {
+    cx += point.x;
+    cy += point.y;
+  }
+  cx /= clip.length;
+  cy /= clip.length;
+  for (let index = 0; index < clip.length; index += 1) {
+    const a = clip[index];
+    const b = clip[(index + 1) % clip.length];
+    const side = (point) => (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+    const want = side({ x: cx, y: cy }) >= 0 ? 1 : -1;
+    const inside = (point) => side(point) * want >= 0;
+    const next = [];
+    for (let at = 0; at < out.length; at += 1) {
+      const here = out[at];
+      const there = out[(at + 1) % out.length];
+      const hereIn = inside(here);
+      const thereIn = inside(there);
+      if (hereIn) next.push(here);
+      if (hereIn !== thereIn) {
+        const from = side(here);
+        const to = side(there);
+        const share = from / (from - to);
+        next.push({ x: here.x + (there.x - here.x) * share, y: here.y + (there.y - here.y) * share });
+      }
+    }
+    out = next;
+    if (out.length < 3) return [];
+  }
+  return out;
+}
+
+/**
+ * Грани солнечных пятен в этот час (таск 196).
+ *
+ * `spots` — проёмы сцены (`scene.sunSpots`), `shadow` — где стоит солнце и
+ * насколько свет виден (`mood.shadow`, та же тройка, которой гаснет наружная
+ * тень). Хозяин у света и у тени один нарочно: разойдись они, пятно на полу
+ * легло бы не в ту сторону, в которую уходит тень дома за окном.
+ *
+ * **Солнце зашло — пятен нет**: `fade` ноль, и счёт не начинается. В сумерках
+ * пятно гаснет тем же `fade`, что тень. Ночью его не даёт и луна: света у неё
+ * для этого нет, и обещать его честнее не обещать.
+ *
+ * **Ярус у пятна свой** (`VOLUME_LAYER_SUN`): пятно лежит выше пола своей
+ * комнаты и ниже всего, что в комнате стоит. Числа — те же, что стоили дефекта
+ * D49: пятно и пол **коплоскостны** (оба на нулевой отметке, и у пятна нет даже
+ * миллиметра подъёма, которым вещь стоит перед стеной), то есть дальность их
+ * середин решала бы спор от часа к часу — пятно уходит от стены в комнату и
+ * оказывается то ближе пола, то дальше. Ярусом же порядок задан правилом:
+ *
+ *   пол (2) → пятно (3) → тела (4) → указатель (5),
+ *
+ * и из этого прямо следуют два ответа, которых пришлось бы искать отдельно:
+ * **метка на полу** (тело яруса 4, поднятое на `VOLUME_MARK_LIFT_MM`) рисуется
+ * поверх пятна и остаётся видна; **вещь чертежа** (диван, шкаф) тоже, то есть
+ * пятно под ней не просвечивает — свет кончается у того, что стоит на полу.
+ * Полупрозрачная вещь (таск 169) смешивается с пятном, как смешивалась с полом.
+ *
+ * **Пятно обрезано контуром своей комнаты** (`volumeClipPolygon`). Без обрезки
+ * закатное пятно уезжает сквозь стены на десятки метров: при высоте солнца 5°
+ * окно с верхом 2,2 м даёт вынос 25 м, то есть через всю квартиру и наружу.
+ */
+export function volumeSunSpotFaces(spots, shadow, out = []) {
+  const fade = shadow ? Math.max(0, Math.min(1, Number(shadow.fade))) : 0;
+  if (!spots || spots.length === 0 || !(fade > 0)) return out;
+  const rise = Number(shadow.rise);
+  if (!Number.isFinite(rise) || !(rise > 0)) return out;
+  // Вынос на миллиметр высоты: `1 / tg(высота солнца)`. Высота снизу не
+  // подпирается (в отличие от тени дома, которой нужна земляная плита под ней):
+  // пятно обрезано комнатой, и длина ему не страшна — у `fade` ноль наступает
+  // раньше, чем `tg` уходит в ноль.
+  const reach = 1 / Math.tan(rise * DEG);
+  const away = ((Number(shadow.az) || 0) + 180) * DEG;
+  // Куда идёт свет: ровно прочь от солнца, той же мерой, которой уходит тень
+  // (`volumeShadowShift`). Сторона света чертежа здесь уже учтена — `az`
+  // приходит повёрнутым на `topAzimuthDeg` (G288, `volumeSunAt`).
+  const dir = { x: Math.cos(away), y: Math.sin(away) };
+  const rgb = volumeSunSpotRgb(fade);
+  for (const spot of spots) {
+    // Закрытая штора гасит пятно своего проёма целиком (G301).
+    if (spot.sheerMarkId) continue;
+    const into = spot.n.x * dir.x + spot.n.y * dir.y;
+    // Свет идёт вдоль стены: пятну негде лежать, и считать нечего.
+    if (!(Math.abs(into) > 1e-6)) continue;
+    const sign = into > 0 ? 1 : -1;
+    const room = sign > 0 ? spot.left : spot.right;
+    const sunny = sign > 0 ? spot.right : spot.left;
+    // Принимающая сторона — комната, солнечная — улица. Разбор — выше.
+    if (!room || sunny) continue;
+    const at = (alongMm, z) => ({
+      x: spot.aMm.x + spot.u.x * alongMm + spot.n.x * spot.halfMm * sign + dir.x * z * reach,
+      y: spot.aMm.y + spot.u.y * alongMm + spot.n.y * spot.halfMm * sign + dir.y * z * reach,
+    });
+    // Проём берётся **внутренней гранью** стены (`halfMm` в сторону комнаты):
+    // пятно начинается там, где свет входит в комнату, а не в середине стены.
+    const quad = [
+      at(spot.fromMm, spot.bottomMm),
+      at(spot.toMm, spot.bottomMm),
+      at(spot.toMm, spot.topMm),
+      at(spot.fromMm, spot.topMm),
+    ];
+    const shape = volumeClipPolygon(room, quad);
+    if (shape.length < 3) continue;
+    out.push(
+      volumeFace(
+        shape.map((point) => volumeAt(point, 0)),
+        rgb,
+        { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_SUN, flat: true },
       ),
     );
   }
@@ -3005,6 +3387,8 @@ export function volumeScene(project, schemeId, options = {}) {
       order: null,
       solids: [],
       shadowBoxes: [],
+      sunSpots: [],
+      landMm: null,
       objectBoxes: [],
       rooms: [],
       boundsMm: null,
@@ -3046,17 +3430,27 @@ export function volumeScene(project, schemeId, options = {}) {
     wallHeights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm);
   }
   const tallest = walls.reduce((most, wall) => Math.max(most, wallHeights.get(wall.id) || 0), schemeHeight.mm || 0);
+  // Прямоугольник плиты, когда она работает землёй (D52): им фон узнаёт, где
+  // кончается земля сцены. `null` — плита сама пол, и земли у сцены нет вовсе.
+  let landMm = null;
   if (bounds) {
     const land = rooms.length > 0;
     const shadow = volumeShadowShift(tallest);
     const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
+    const plate = {
+      minX: bounds.minX - out,
+      minY: bounds.minY - out,
+      maxX: bounds.maxX + out,
+      maxY: bounds.maxY + out,
+    };
+    if (land) landMm = plate;
     faces.push(
       volumeFace(
         volumeClockwise([
-          { x: bounds.minX - out, y: bounds.minY - out },
-          { x: bounds.maxX + out, y: bounds.minY - out },
-          { x: bounds.maxX + out, y: bounds.maxY + out },
-          { x: bounds.minX - out, y: bounds.maxY + out },
+          { x: plate.minX, y: plate.minY },
+          { x: plate.maxX, y: plate.minY },
+          { x: plate.maxX, y: plate.maxY },
+          { x: plate.minX, y: plate.maxY },
         ]).map((point) => volumeAt(point, 0)),
         land ? VOLUME_LAND_RGB : VOLUME_FLOOR_RGB,
         { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_BASE, flat: land },
@@ -3279,6 +3673,22 @@ export function volumeScene(project, schemeId, options = {}) {
     solids,
     // Габариты стен для тени дома (таск 181): час кладёт её сам, см. выше.
     shadowBoxes,
+    // Проёмы, через которые солнце кладёт пятно на пол (таск 196). В сцене
+    // лежит то, что от часа не зависит — геометрия проёма, комнаты по обе его
+    // стороны и штора перед ним; грани кладёт час (`volumeSunSpotFaces`), тем
+    // же порядком, что тень дома.
+    sunSpots: volumeSunOpenings(
+      project,
+      schemeId,
+      rooms,
+      marks.placed,
+      (wall) => wallHeights.get(wall.id) || 0,
+      options.openCurtainIds || null,
+    ),
+    // Земляная плита: её прямоугольник в миллиметрах чертежа — `null`, когда
+    // плита работает полом, а не землёй. По нему фон знает, где кончается земля
+    // сцены (D52, `volumeGroundLimitDeg`), и второй мерки для этого нет.
+    landMm,
     // Занятые места: габариты вещей, которые человека **не держат** (G264), но
     // по которым видно, где в комнате пусто. Ими пользуется только выбор места
     // старта; ходьба, перенос и «тесно» спрашивают `solids`.
