@@ -39,6 +39,7 @@ import {
   openingHasLeaf,
   openingsInWall,
   outlinesInOrder,
+  planFractionToMm,
   planOriginOf,
   planPixelsPerMeter,
   pointInOutline,
@@ -1697,16 +1698,22 @@ export function rulerStep(zoom) {
  * собственных пикселях. Возвращает `{step, top, left}`; в списках — экранная
  * координата деления и признак длинного.
  */
-export function rulerTicks(scheme, view, box) {
+export function rulerTicks(scheme, view, box, options = {}) {
   const state = renderView(view);
   const step = rulerStep(state.zoom);
+  // У подложки деления стоят только там, где есть картинка: за её краем мерить
+  // нечего. У чертежа краёв нет вовсе — лист бесконечен в обе стороны, и
+  // миллиметры там бывают отрицательными (таск 193). Поэтому границы
+  // необязательны, а не выведены из «схемы»: подставь мастерская свою мерку в
+  // один миллиметр — линейка в чертеже показала бы одно деление.
+  const bounded = options.bounded !== false;
   const ticks = (size, offset, planSize) => {
     const list = [];
     const first = Math.floor(-offset / (step * state.zoom));
     const last = Math.ceil((size - offset) / (step * state.zoom));
     for (let index = first; index <= last; index += 1) {
       const at = index * step;
-      if (at < 0 || at > planSize) continue;
+      if (bounded && (at < 0 || at > planSize)) continue;
       list.push({ at, screen: offset + at * state.zoom, major: index % RULER_MAJOR_EVERY === 0 });
     }
     return list;
@@ -1720,9 +1727,9 @@ export function rulerTicks(scheme, view, box) {
 
 // Линейка: полоса с делениями сверху и слева. Без чисел — подписывать деления
 // нечем, план масштаба не знает.
-export function drawRuler(ctx, scheme, view, box) {
+export function drawRuler(ctx, scheme, view, box, options = {}) {
   const state = renderView(view);
-  const ticks = rulerTicks(scheme, state, box);
+  const ticks = rulerTicks(scheme, state, box, options);
   ctx.save();
   ctx.fillStyle = "rgba(246, 248, 250, 0.94)";
   ctx.fillRect(0, 0, box.width, RULER_SIZE);
@@ -4930,6 +4937,14 @@ export function drawingBridge(project, scheme, view) {
       const px = drawingTurn({ x: Number(pointMm.x) * scale, y: Number(pointMm.y) * scale }, turn);
       return { x: zeroX + px.x, y: zeroY + px.y };
     },
+    // Обратный ход: миллиметр под точкой экрана. Нужен сетке (таск 193) —
+    // она идёт от края поля до края, и чтобы узнать, с какого миллиметра
+    // начать, надо перевести угол кадра обратно. Поворот снимается тем же
+    // `drawingTurn` на дополнение до полного оборота.
+    toMm(point) {
+      const px = drawingTurn({ x: Number(point.x) - zeroX, y: Number(point.y) - zeroY }, (360 - turn) % 360);
+      return { x: px.x / scale, y: px.y / scale };
+    },
   };
 }
 
@@ -4941,7 +4956,139 @@ export function drawingUnitBridge(view) {
     toScreen(pointMm) {
       return { x: state.offsetX + Number(pointMm.x) * state.zoom, y: state.offsetY + Number(pointMm.y) * state.zoom };
     },
+    toMm(point) {
+      return { x: (Number(point.x) - state.offsetX) / state.zoom, y: (Number(point.y) - state.offsetY) / state.zoom };
+    },
   };
+}
+
+// ——— сетка чертежа: один рисунок на два поля (таск 193, G293) —————————————
+//
+// Слова заказчика: «Сделай что бы сетка была и на схеме… Короче меню Интерфейс
+// не должно отличаться от режима чертеж\схема». Сетка жила внутри мастерской
+// и рисовалась только там; теперь она рисуется **мостом**, а мост есть у обоих
+// полей — у плана `drawingBridge`, у мастерской `drawingUnitBridge`. Шаг у них
+// один и тот же: он лежит в объекте (`model.gridStepOf`, G258).
+//
+// Реже пяти пикселей на экране сетка читается заливкой — рисуется кратный шаг,
+// а притягивается по-прежнему выбранный: иначе отметка «шаг 100 мм» врала бы
+// на мелком масштабе.
+const GRID_MIN_PX = 5;
+const GRID_MULTIPLES = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+// Каждая пятая линия темнее: по ним глаз считает метры.
+const GRID_MAJOR_EVERY = 5;
+const GRID_LINE = "#d0d7de";
+const GRID_MAJOR = "#aeb7c0";
+
+/**
+ * Шаг сетки, которым её **рисуют**: выбранный человеком или кратный ему, если
+ * выбранный на этом масштабе слился бы в заливку. `0` — не рисуется вовсе
+ * (нет шага или «Без сетки»).
+ */
+export function gridDrawStepMm(gridMm, pxPerMm) {
+  const step = Number(gridMm) || 0;
+  const scale = Number(pxPerMm) > 0 ? Number(pxPerMm) : 1;
+  if (!(step > 0)) return 0;
+  for (const multiple of GRID_MULTIPLES) {
+    if (step * multiple * scale >= GRID_MIN_PX) return step * multiple;
+  }
+  return 0;
+}
+
+/**
+ * Сетка в миллиметрах чертежа поверх поля. `bridge` — мост того поля, которое
+ * рисует (у плана он знает и поворот подложки, поэтому четверть оборота сетку
+ * не кривит: линии остаются по осям листа).
+ *
+ * Шаг `0` и отсутствие моста — молчание: кадр не меняется ни на пиксель.
+ */
+export function drawDrawingGrid(ctx, bridge, box, gridMm) {
+  if (!ctx || !bridge || !box) return 0;
+  const step = gridDrawStepMm(gridMm, bridge.pxPerMm);
+  if (!(step > 0)) return 0;
+  // Край кадра в миллиметрах: все четыре угла, потому что при повороте
+  // подложки угол «слева сверху» на листе может оказаться любым.
+  const corners = [
+    bridge.toMm({ x: 0, y: 0 }),
+    bridge.toMm({ x: box.width, y: 0 }),
+    bridge.toMm({ x: 0, y: box.height }),
+    bridge.toMm({ x: box.width, y: box.height }),
+  ];
+  const xs = corners.map((point) => point.x);
+  const ys = corners.map((point) => point.y);
+  const from = { x: Math.min(...xs), y: Math.min(...ys) };
+  const to = { x: Math.max(...xs), y: Math.max(...ys) };
+  ctx.save();
+  ctx.lineWidth = 1;
+  const line = (ax, ay, bx, by, major) => {
+    const start = bridge.toScreen({ x: ax, y: ay });
+    const end = bridge.toScreen({ x: bx, y: by });
+    ctx.strokeStyle = major ? GRID_MAJOR : GRID_LINE;
+    ctx.beginPath();
+    // Полупиксельный сдвиг — чтобы линия в один пиксель не размазалась на два.
+    ctx.moveTo(Math.round(start.x) + 0.5, Math.round(start.y) + 0.5);
+    ctx.lineTo(Math.round(end.x) + 0.5, Math.round(end.y) + 0.5);
+    ctx.stroke();
+  };
+  let count = 0;
+  for (let mm = Math.ceil(from.x / step) * step; mm <= to.x; mm += step) {
+    line(mm, from.y, mm, to.y, Math.round(mm / step) % GRID_MAJOR_EVERY === 0);
+    count += 1;
+  }
+  for (let mm = Math.ceil(from.y / step) * step; mm <= to.y; mm += step) {
+    line(from.x, mm, to.x, mm, Math.round(mm / step) % GRID_MAJOR_EVERY === 0);
+    count += 1;
+  }
+  ctx.restore();
+  return count;
+}
+
+/**
+ * Направляющие плана поверх чертежа (таск 193). Место направляющей задано
+ * **долей подложки** (ADR 002), а поле чертежа мерит миллиметры, — значит доля
+ * переводится мостом модели, тем же, которым на подложку ложится чертёж.
+ *
+ * Поворот подложки четвертями оборота меняет ось: вертикальная направляющая
+ * плана на повёрнутом листе идёт горизонтально. Решается это не разбором
+ * поворота, а двумя точками: куда легли оба конца — та и ось.
+ */
+export function drawDrawingGuides(ctx, bridge, project, schemeId, guides, box, options = {}) {
+  if (!ctx || !bridge || !project || !schemeId || !guides || guides.length === 0 || !box) return 0;
+  const active = options.activeId || null;
+  ctx.save();
+  let drawn = 0;
+  for (const guide of guides) {
+    const ends =
+      guide.axis === "h"
+        ? [
+            { x: 0, y: guide.at },
+            { x: 1, y: guide.at },
+          ]
+        : [
+            { x: guide.at, y: 0 },
+            { x: guide.at, y: 1 },
+          ];
+    const mm = ends.map((point) => planFractionToMm(project, schemeId, point));
+    if (!mm[0] || !mm[1]) continue;
+    const at = mm.map((point) => bridge.toScreen(point));
+    const live = guide.id === active;
+    ctx.strokeStyle = live ? GUIDE_LINE_ACTIVE : GUIDE_LINE;
+    ctx.lineWidth = live ? 1.6 : 1;
+    ctx.beginPath();
+    if (Math.abs(at[0].x - at[1].x) < 0.5) {
+      const x = Math.round(at[0].x) + 0.5;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, box.height);
+    } else {
+      const y = Math.round(at[0].y) + 0.5;
+      ctx.moveTo(0, y);
+      ctx.lineTo(box.width, y);
+    }
+    ctx.stroke();
+    drawn += 1;
+  }
+  ctx.restore();
+  return drawn;
 }
 
 function drawingOpeningsByWall(project, schemeId) {
@@ -6053,6 +6200,12 @@ export function drawScheme(ctx, {
   outlines,
   selectedOutlineId,
   drawing,
+  // Сетка чертежа на плане (таск 193, G293): `{stepMm, box}`. Передаёт её
+  // только холст — у выгрузок своих галок видимости сетка не получала, и лист
+  // с ней не меняется ни на пиксель (G68). Шаг — из объекта (`gridStepOf`),
+  // `box` — размер поля в его собственных точках: сетка идёт от края до края,
+  // а не по краю подложки.
+  grid,
   // Что из чертежа спрятано с экрана (таск 154, G223). Холст передаёт, выгрузки
   // — нет: у них свои галки видимости, и они не менялись.
   objects,
@@ -6081,6 +6234,13 @@ export function drawScheme(ctx, {
   // Условие `project.walls || project.schemeObjects` — не оптимизация, а то же
   // правило: у объекта, которого не чертили, этих полей нет вовсе, и кадр не
   // спрашивает про калибровку ни разу.
+  // Сетка — **под чертежом и над подложкой**: по ней чертят, и перечёркивать
+  // ею нарисованные стены незачем. Мост у неё тот же, которым ложится чертёж:
+  // нет калибровки или привязки — нет и сетки, потому что миллиметра на этом
+  // плане не существует.
+  if (grid && grid.stepMm > 0 && grid.box) {
+    drawDrawingGrid(ctx, drawingBridge(project, scheme, state), grid.box, grid.stepMm);
+  }
   if (drawing !== false && (project.walls || project.schemeObjects)) {
     drawDrawing(ctx, {
       project,

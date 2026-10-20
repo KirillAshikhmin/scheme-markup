@@ -1,20 +1,27 @@
-// Общее место трёх режимов (требование G276, таск 178).
+// Одно место и один масштаб на три режима (требование G276, таск 178; дефект
+// D59, таск 193) и память вида между перезагрузками (G294).
 //
-// Слова заказчика: «При переключении Схема - Чертёж - объём мы должны
-// находиться в одном месте… центр схемы\чертежа это расположение камеры в
-// объёме. Ну и учитывай что может попасть на стены и т.д. тогда сдвигай».
+// Слова заказчика в таске 178: «При переключении Схема - Чертёж - объём мы
+// должны находиться в одном месте… центр схемы\чертежа это расположение камеры
+// в объёме. Ну и учитывай что может попасть на стены и т.д. тогда сдвигай».
+// Его же слова в таске 193: «сейчас при переключении я не остаюсь там же,
+// точнее не всегда работает и уровень зума меняется. Должно совпадать пиксель
+// в пиксель».
 //
-// ——— что это и чего это не ———————————————————————————————————————————————
+// ——— почему «не всегда работало» ———————————————————————————————————————
 //
-// До этого таска каждый режим помнил **своё** место: план — `view` в состоянии
-// приложения, чертёж — свой `view` внутри мастерской, объём — где стоит
-// человек. Переключение режима бросало человека туда, где он был в этом режиме
-// в прошлый раз: посмотрел кухню в объёме, вернулся на схему — а там спальня,
-// с которой уходил полчаса назад.
+// Потому что мест было **три**, а не одно: план держал свой `state.view`,
+// мастерская — свой `view` внутри себя, объём — где стоит человек. Этот модуль
+// до таска 193 переносил место только **через объём**: мастерская говорила,
+// где стоит, объём это читал на входе и оставлял просьбу на выходе. Переход
+// «Схема → Чертёж» напрямую не переносил ничего вовсе, а масштаб не
+// переносился ни на одном пути — ровно то, что заказчик и увидел.
 //
-// Здесь лежит **одно число на двоих** — место середины чертежа в миллиметрах, —
-// и лежит оно в сеансе: в объект не пишется ничего (G68), в настройки браузера
-// тоже. Закрыл вкладку — забылось.
+// Теперь здесь лежит **одно состояние на три режима**: середина поля в
+// миллиметрах чертежа и экранных точек на миллиметр. Кто на экране — тот и
+// пишет его (на каждый кадр), а остальные читают, когда их показывают. Второго
+// счёта нет: `volumePlanCentre` и `volumePlanViewAt` объёма зовут эти же
+// функции.
 //
 // ——— почему это отдельный модуль, а не поле состояния ——————————————————
 //
@@ -25,15 +32,29 @@
 // правку — положи сюда же место чертежа, и холст стал бы перерисовываться от
 // чужого переключения.
 //
-// Поле плана этому модулю не нужно вовсе: объём читает и пишет `state.view`
-// сам, через тот же мост «доли ↔ миллиметры», которым живёт весь чертёж.
-// Мастерская своего вида наружу не отдаёт — поэтому у неё две двери: сказать,
-// где она стоит, и забрать, куда её просят встать.
+// ——— где моста нет ————————————————————————————————————————————————————
+//
+// Перевод «доля плана ↔ миллиметр чертежа» держится на двух половинах:
+// калибровке (пикселей на метр) и привязке (где нуль чертежа на плане). Нет
+// хотя бы одной — обе функции модели отвечают `null`, и перенос молча не
+// делается: каждое поле остаётся там, где стояло. Соврать тут нечем — у плана
+// без калибровки миллиметра не существует.
+//
+// ——— «чьё это место» ——————————————————————————————————————————————————
+//
+// У записи есть отметка (`stamp`), которая растёт на каждую запись. Поверхность
+// помнит отметку своей последней записи и читает место только тогда, когда она
+// другая, — то есть когда место поставил **кто-то другой**. Без этого
+// спрятанная поверхность, которая всё ещё перерисовывается (мастерская рисует
+// кадр и на чужом режиме), перебивала бы своим старым местом то, куда уехало
+// поле на экране.
+import { findScheme, planFractionToMm, planMmToFraction, planPixelsPerMeter } from "./model.js";
+import { planToScreen, screenToPlan } from "./render.js";
 
-/** Где сейчас середина поля мастерской: `{schemeId, x, y}` или `null`. */
-let drawingAt = null;
-/** Куда мастерскую просят встать, когда её покажут: `{schemeId, x, y}` или `null`. */
-let drawingWanted = null;
+/** Общее место: `{schemeId, x, y, pxPerMm, stamp}` или `null`. */
+let place = null;
+let placeStamp = 0;
+const listeners = new Set();
 
 const placeOf = (schemeId, pointMm) => {
   if (!schemeId || !pointMm) return null;
@@ -43,36 +64,150 @@ const placeOf = (schemeId, pointMm) => {
   return { schemeId, x, y };
 };
 
-/** Мастерская говорит, где стоит середина её поля. Зовётся на каждую правку вида. */
-export function screenPlaceDrawing(schemeId, pointMm) {
-  drawingAt = placeOf(schemeId, pointMm);
-}
-
-/** Где стояла мастерская, когда её последний раз показывали. `null` — не знаем. */
-export function screenPlaceOfDrawing(schemeId) {
-  if (!drawingAt || drawingAt.schemeId !== schemeId) return null;
-  return { x: drawingAt.x, y: drawingAt.y };
-}
-
 /**
- * Просьба к мастерской: покажут — встань серединой сюда. Лежит до тех пор,
- * пока её не заберут: человек может уйти из объёма на схему, погулять по ней и
- * прийти в чертёж только через минуту.
+ * Поверхность на экране говорит, где стоит середина её поля и сколько в ней
+ * экранных точек на миллиметр. `pxPerMm` необязателен: объём масштабом не
+ * владеет вовсе и оставляет прежний — вернувшись, человек видит то
+ * приближение, которое выбрал сам.
+ *
+ * Возвращает отметку записи — её зовущий запоминает своей.
  */
-export function screenPlaceWant(schemeId, pointMm) {
-  drawingWanted = placeOf(schemeId, pointMm);
+export function screenPlaceSet(schemeId, pointMm, pxPerMm) {
+  const next = placeOf(schemeId, pointMm);
+  if (!next) return placeStamp;
+  const scale = Number(pxPerMm);
+  const kept = place && place.schemeId === schemeId ? place.pxPerMm : null;
+  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : kept;
+  // Запись, ничего не меняющая, не двигает отметку: мастерская и холст говорят
+  // это на каждый кадр, и память вида иначе писалась бы в хранилище впустую.
+  if (
+    place &&
+    place.schemeId === next.schemeId &&
+    place.x === next.x &&
+    place.y === next.y &&
+    place.pxPerMm === next.pxPerMm
+  ) {
+    return placeStamp;
+  }
+  placeStamp += 1;
+  place = { ...next, stamp: placeStamp };
+  for (const listener of [...listeners]) {
+    try {
+      listener(place);
+    } catch (error) {
+      // Слушатель — память вида; его беда не повод ронять кадр поля.
+    }
+  }
+  return placeStamp;
 }
 
-/** Мастерская забирает просьбу — ровно один раз. `null` — просьбы нет. */
-export function screenPlaceTake(schemeId) {
-  if (!drawingWanted || drawingWanted.schemeId !== schemeId) return null;
-  const place = { x: drawingWanted.x, y: drawingWanted.y };
-  drawingWanted = null;
-  return place;
+/** Общее место этой схемы: `{x, y, pxPerMm, stamp}` или `null`. */
+export function screenPlaceOf(schemeId) {
+  if (!place || !schemeId || place.schemeId !== schemeId) return null;
+  return { x: place.x, y: place.y, pxPerMm: place.pxPerMm, stamp: place.stamp };
 }
 
 /** Забыть всё: новый объект, закрытая схема. */
 export function screenPlaceForget() {
-  drawingAt = null;
-  drawingWanted = null;
+  place = null;
+  return placeStamp;
+}
+
+/** Кому сказать, что место сменилось (память вида). Возвращает отписку. */
+export function screenPlaceWatch(listener) {
+  if (typeof listener !== "function") return () => {};
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Поставить место из памяти — не от поверхности, а из настроек браузера.
+ * Отдельная дверь нарочно: у неё другое правило старшинства (выбор человека
+ * старше сохранённого, D54), и решает его тот, кто память поднимает.
+ */
+export function screenPlaceRestore(schemeId, saved) {
+  const next = screenPlaceFrom(saved);
+  if (!next) return 0;
+  return screenPlaceSet(schemeId, next, next.pxPerMm);
+}
+
+/**
+ * Что из настроек годится в место. Мусор (чужая версия, правка руками)
+ * отбрасывается молча: лучше прежнее поведение, чем поле, уехавшее в `NaN`.
+ */
+export function screenPlaceFrom(value) {
+  if (!value || typeof value !== "object") return null;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const scale = Number(value.pxPerMm);
+  return { x, y, pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null };
+}
+
+/** Что кладётся в настройки: только числа, и округлённые. */
+export function screenPlaceStored(value) {
+  const next = screenPlaceFrom(value);
+  if (!next) return null;
+  const stored = { x: Math.round(next.x), y: Math.round(next.y) };
+  // Масштаб округляется до шестого знака: в хранилище незачем двадцать цифр
+  // дробной части, а пиксель на миллиметр — это уже лупа.
+  if (next.pxPerMm) stored.pxPerMm = Math.round(next.pxPerMm * 1e6) / 1e6;
+  return stored;
+}
+
+// ——— план: доли подложки ↔ миллиметры чертежа ————————————————————————
+//
+// Обе половины живут здесь, потому что обе нужны и холсту, и объёму, и памяти
+// вида. Арифметика взята у моста кадра (`render.drawingBridge`): экранных
+// точек на миллиметр у плана — это `zoom · пикселей на метр / 1000`.
+
+/** Экранных точек на миллиметр у плана при этом масштабе. `0` — моста нет. */
+export function screenPlacePlanScale(project, schemeId, view) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  if (!(perMeter > 0)) return 0;
+  const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
+  return (zoom * perMeter) / 1000;
+}
+
+/** Масштаб плана, у которого в миллиметре столько экранных точек. `0` — моста нет. */
+export function screenPlacePlanZoom(project, schemeId, pxPerMm) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  const scale = Number(pxPerMm);
+  if (!(perMeter > 0) || !(scale > 0)) return 0;
+  return (scale * 1000) / perMeter;
+}
+
+/**
+ * Где стоит план: середина поля в миллиметрах чертежа плюс масштаб.
+ * `null` — моста нет (нет калибровки, нет привязки или нет схемы).
+ */
+export function screenPlacePlanRead(project, schemeId, box, view) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme) return null;
+  const point = screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
+  const at = planFractionToMm(project, schemeId, point);
+  if (!at) return null;
+  return { x: at.x, y: at.y, pxPerMm: screenPlacePlanScale(project, schemeId, view) };
+}
+
+/**
+ * Вид плана, у которого середина поля смотрит на это место тем же масштабом.
+ *
+ * `place.pxPerMm` задаёт приближение, и это половина «пиксель в пиксель» (D59):
+ * у плана и у чертежа после перехода одинаковы и середина, и число точек на
+ * миллиметр, значит всякая точка чертежа стоит под той же точкой экрана. Нет
+ * `pxPerMm` (так приходит место из объёма — камера масштабом не владеет) —
+ * остаётся прежний масштаб поля.
+ */
+export function screenPlacePlanView(project, schemeId, box, next, view) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme || !next) return null;
+  const point = planMmToFraction(project, schemeId, next);
+  if (!point) return null;
+  const asked = screenPlacePlanZoom(project, schemeId, next.pxPerMm);
+  const zoom = asked > 0 ? asked : Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
+  const at = planToScreen(point, scheme, { zoom, offsetX: 0, offsetY: 0 });
+  return { zoom, offsetX: box.width / 2 - at.x, offsetY: box.height / 2 - at.y };
 }

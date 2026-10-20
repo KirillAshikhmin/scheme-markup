@@ -119,6 +119,7 @@ import {
   planSizeMeters,
   roomsInOrder,
   schemeAnchorOf,
+  schemeGuides,
   schemeObjectCorners,
   schemeObjectKeyOf,
   schemeObjectMountOf,
@@ -167,9 +168,13 @@ import {
   DRAWING_OBJECT,
   DRAWING_PAPER,
   LABEL_TURN_RADIUS,
+  RULER_SIZE,
   drawDrawing,
+  drawDrawingGrid,
+  drawDrawingGuides,
   drawDrawingObject,
   drawDrawingOpening,
+  drawRuler,
   drawLabelTurn,
   drawingDoorLeaf,
   drawingHitObject,
@@ -210,7 +215,7 @@ import {
 import { objectTileIcon, openObjectPicker } from "./objectPicker.js";
 import { drawPickerHint, drawPickerName, drawPickerNote, openDrawPicker } from "./drawPicker.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
-import { screenPlaceDrawing, screenPlaceTake } from "../screenPlace.js";
+import { screenPlaceOf, screenPlaceSet } from "../screenPlace.js";
 import { createFieldPlate } from "./plate.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
@@ -242,10 +247,9 @@ export function workshopGridOptions(stepMm) {
   return [...WORKSHOP_GRID_STEPS_MM, step].sort((first, second) => first - second);
 }
 
-// Реже пяти пикселей на экране сетка читается заливкой — рисуется кратный шаг,
-// а притягивается по-прежнему выбранный.
-const WORKSHOP_GRID_MIN_PX = 5;
-const WORKSHOP_GRID_MULTIPLES = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+// Как часто рисуются линии сетки и каким кратным шагом — у общего слоя
+// (`render.gridDrawStepMm`): с таска 193 сетку рисуют оба поля, и своей меры у
+// мастерской больше нет.
 
 // Толщина новых стен. Сто миллиметров — перегородка, самая частая стена в
 // квартире; несущую человек задаёт сам.
@@ -1601,22 +1605,6 @@ export function workshopFitView(extent, viewport, max = WORKSHOP_ZOOM_MAX) {
 }
 
 /**
- * Шаг сетки, которым её **рисуют**: выбранный человеком или кратный ему, если
- * выбранный на этом масштабе слился бы в заливку. Притягивается при этом
- * по-прежнему выбранный — иначе отметка «шаг 100 мм» врала бы на мелком
- * масштабе.
- */
-export function workshopGridDrawStepMm(gridMm, zoom) {
-  const step = Number(gridMm) || 0;
-  const scale = Number(zoom) > 0 ? Number(zoom) : 1;
-  if (!(step > 0)) return 0;
-  for (const multiple of WORKSHOP_GRID_MULTIPLES) {
-    if (step * multiple * scale >= WORKSHOP_GRID_MIN_PX) return step * multiple;
-  }
-  return 0;
-}
-
-/**
  * Подсказка под полем — своя у каждого занятия. Одна на всех врала с той
  * минуты, как занятий стало три: про «вершину цепочки» читал человек, который
  * в это время ставил окно в стену. Чистая и вынесена наружу ради теста:
@@ -1829,8 +1817,6 @@ let workshopObjectSizes = {};
 const WORKSHOP_PAPER = DRAWING_PAPER;
 const WORKSHOP_ACCENT = DRAWING_ACTIVE;
 const WORKSHOP_HANDLE = "#ffffff";
-const WORKSHOP_GRID_LINE = "#d0d7de";
-const WORKSHOP_GRID_MAJOR = "#aeb7c0";
 const WORKSHOP_ORIGIN = "#d1242f";
 // Точка привязки (таск 205) — свой цвет, не красный нуля: два служебных знака
 // одной краской человек принял бы за один и тот же, а стоят они в разных
@@ -1866,6 +1852,9 @@ function createWorkshop({ api, hosts }) {
   let tool = workshopInitialTool(getState().project, schemeId);
   let view = { zoom: 1, offsetX: 0, offsetY: 0 };
   let fitted = false;
+  // Отметка последней записи общего места (G276, D59): по ней видно, своё оно
+  // или поставил кто-то другой — план, объём или память вида.
+  let placeStamp = 0;
   let draft = null; // {points: [мм], cursor: мм, snap: результат притяжки}
   // Выделено может быть одно из трёх: стена, проём или объект на полу.
   // Одна переменная на всех — иначе «выделено два разных» стало бы состоянием,
@@ -2238,7 +2227,11 @@ function createWorkshop({ api, hosts }) {
   // модели на каждом кадре: своей копии у поверхности нет — объект меняется
   // под ней, и копия разошлась бы с ним при первой же смене.
   function gridMm() {
-    return gridStepOf(project());
+    // «Без сетки» — пункт в списке шагов (таск 193, G293), а не отдельная
+    // галка: шаг у объекта остаётся прежним (G258, G68), а сетки нет. Ноль
+    // здесь гасит **и рисунок, и притяжку** одним ответом — узлов нет, и
+    // магниту держаться не за что.
+    return layerOn("gridShown") ? gridStepOf(project()) : 0;
   }
 
   // Шаг сетки правят в «Интерфейсе» (таск 187): поле спрашивает его у модели
@@ -3832,32 +3825,47 @@ function createWorkshop({ api, hosts }) {
     node.height = Math.round(box.height * ratio);
     if (!fitted) {
       fitted = true;
-      // Через ту же дверь, что кнопка «Вписать»: у занятия «Масштаб» габарит
-      // свой, и первый кадр обязан вписать картинку, а не миллиметры.
-      fit();
       // Первый вход в чертёж собирает поверхность **здесь**, уже после смены
-      // режима, — значит просьбу объёма (G276) надо забрать и на этом пути:
-      // в подписке её забирать некому, поверхности в тот миг ещё не было.
-      wantedPlace();
+      // режима, — значит общее место (G276, D59) надо забрать и на этом пути:
+      // в подписке его забирать некому, поверхности в тот миг ещё не было.
+      // Место старше вписывания: вписать лист после перехода значило бы сменить
+      // масштаб, за который заказчик и держится («пиксель в пиксель»).
+      //
+      // Нет места — через ту же дверь, что кнопка «Вписать»: у занятия
+      // «Масштаб» габарит свой, и первый кадр обязан вписать картинку, а не
+      // миллиметры.
+      if (pullPlace()) sync();
+      else fit();
       return;
     }
     sync();
   }
 
   /**
-   * Встать серединой туда, куда просил объём (G276, таск 178). Масштаб не
-   * трогается: переносится место, а не приближение.
+   * Встать туда, где стояло поле, с которого пришли, и **тем же масштабом**
+   * (G276, таск 178; дефект D59, таск 193).
    *
-   * Применённое место тут же объявляется своим (`screenPlaceDrawing`): объём
-   * спросит его **раньше**, чем мастерская успеет нарисовать первый кадр, —
-   * обратный переход бывает и через секунду.
+   * Масштаб переносится с таска 193: заказчик сказал «должно совпадать пиксель
+   * в пиксель», а у плана и у чертежа мера одна — экранных точек на миллиметр.
+   * Выше потолка мастерской (`WORKSHOP_ZOOM_MAX`) приближение не идёт: там
+   * миллиметр и так в полтора сантиметра экрана, и это единственный случай,
+   * когда «пиксель в пиксель» не держится — зато поле не уезжает в ничто.
+   *
+   * Читается место только когда оно **чужое**: отметка записи растёт на каждую
+   * правку, и своя собственная значит «я здесь и стою». Применённое тут же
+   * объявляется своим — объём и память вида спросят его раньше, чем
+   * мастерская нарисует первый кадр.
+   *
+   * `false` — места нет (не было ни одного перехода на этой схеме) или оно уже
+   * наше: вписывать кадр в таком случае решает зовущий.
    */
-  function wantedPlace() {
-    const want = screenPlaceTake(schemeId);
-    if (!want) return false;
+  function pullPlace() {
+    const place = screenPlaceOf(schemeId);
+    if (!place || place.stamp === placeStamp) return false;
     const box = viewport();
-    view = { ...view, offsetX: box.width / 2 - want.x * view.zoom, offsetY: box.height / 2 - want.y * view.zoom };
-    screenPlaceDrawing(schemeId, want);
+    const zoom = place.pxPerMm > 0 ? workshopClampZoom(place.pxPerMm, zoomCeiling()) : view.zoom;
+    view = { zoom, offsetX: box.width / 2 - place.x * zoom, offsetY: box.height / 2 - place.y * zoom };
+    placeStamp = screenPlaceSet(schemeId, { x: place.x, y: place.y }, zoom);
     return true;
   }
 
@@ -3865,11 +3873,21 @@ function createWorkshop({ api, hosts }) {
     if (!ctx) return;
     const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
     const box = viewport();
-    // Где стоит середина поля — в миллиметрах чертежа (G276, таск 178). Это
+    // Где стоит середина поля — в миллиметрах чертежа — и сколько в ней
+    // экранных точек на миллиметр (G276, таск 178; D59, таск 193). Это
     // говорится на каждый кадр, а не при уходе из режима: вид мастерской
-    // никуда наружу не отдаётся, и спросить её потом будет некому. Цена —
-    // присваивание одной ссылки на кадр.
-    screenPlaceDrawing(schemeId, screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view));
+    // никуда наружу не отдаётся, и спросить её потом будет некому.
+    //
+    // **И только на своём режиме.** Кадр рисуется и в чужом (поверхность
+    // гаснет `visibility`, а подписка зовёт `sync` на всякую правку объекта), и
+    // запись из спрятанного поля перебила бы место того, кто на виду.
+    if (screenMode() === "drawing") {
+      placeStamp = screenPlaceSet(
+        schemeId,
+        screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view),
+        view.zoom,
+      );
+    }
     // Бумага заливается по настоящим точкам холста, а не по его размеру в
     // стилевых пикселях: при дробном `devicePixelRatio` округление оставляло
     // по краю незакрашенную полосу в один пиксель — прозрачную, а не белую.
@@ -3879,7 +3897,10 @@ function createWorkshop({ api, hosts }) {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const spot = placement();
     if (layerOn("planShown") && spot.kind === "ready") paintPlan(spot, box);
-    if (layerOn("gridShown")) paintGrid(box);
+    // Сетку рисует общий слой (`render.drawDrawingGrid`): тем же рисунком и
+    // тем же шагом она ложится на план (таск 193, G293). Шаг ноль — «Без
+    // сетки», и слой молчит.
+    drawDrawingGrid(ctx, drawingUnitBridge(view), box, gridMm());
     if (spot.kind === "ready") paintOrigin();
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
@@ -3887,6 +3908,29 @@ function createWorkshop({ api, hosts }) {
     paintAnchor();
     paintObjectHandles();
     paintDraft();
+    paintGuides(box);
+  }
+
+  /**
+   * Линейка и направляющие — **и в чертеже** (таск 193, G293). Слова
+   * заказчика: «И линейку в чертеже и т.д. Короче меню Интерфейс не должно
+   * отличаться от режима чертеж\схема».
+   *
+   * Отметка одна на оба поля, та же, что у плана. Линейка в чертеже мерит
+   * миллиметры, и лист у неё без краёв: деления идут и в минус — у чертежа нет
+   * «начала картинки», от которого их считать.
+   *
+   * Направляющие ставят **на плане**: их место задано долей подложки (ADR 002),
+   * и в чертеже они видны ровно там, где есть мост в миллиметры. Тянуть новую с
+   * линейки чертежа нельзя — доле там взяться не от чего, если плана под
+   * чертежом нет вовсе.
+   */
+  function paintGuides(box) {
+    if (!layerOn("guidesShown")) return;
+    const bridge = drawingUnitBridge(view);
+    drawDrawingGuides(ctx, bridge, project(), schemeId, schemeGuides(project(), schemeId), box);
+    // Линейка последней: она поверх всего, как на плане.
+    drawRuler(ctx, WORKSHOP_UNIT, view, box, { bounded: false });
   }
 
   function paintPlan(spot, box) {
@@ -3909,32 +3953,6 @@ function createWorkshop({ api, hosts }) {
       // Картинку могли закрыть (схему переключили) — кадр не повод падать.
     }
     ctx.restore();
-  }
-
-  function paintGrid(box) {
-    const step = workshopGridDrawStepMm(gridMm(), view.zoom);
-    if (!(step > 0)) return;
-    const from = screenToPlan({ x: 0, y: 0 }, WORKSHOP_UNIT, view);
-    const to = screenToPlan({ x: box.width, y: box.height }, WORKSHOP_UNIT, view);
-    ctx.lineWidth = 1;
-    const firstX = Math.ceil(from.x / step) * step;
-    const firstY = Math.ceil(from.y / step) * step;
-    for (let mm = firstX; mm <= to.x; mm += step) {
-      const at = Math.round(screenOf({ x: mm, y: 0 }).x) + 0.5;
-      ctx.strokeStyle = Math.round(mm / step) % 5 === 0 ? WORKSHOP_GRID_MAJOR : WORKSHOP_GRID_LINE;
-      ctx.beginPath();
-      ctx.moveTo(at, 0);
-      ctx.lineTo(at, box.height);
-      ctx.stroke();
-    }
-    for (let mm = firstY; mm <= to.y; mm += step) {
-      const at = Math.round(screenOf({ x: 0, y: mm }).y) + 0.5;
-      ctx.strokeStyle = Math.round(mm / step) % 5 === 0 ? WORKSHOP_GRID_MAJOR : WORKSHOP_GRID_LINE;
-      ctx.beginPath();
-      ctx.moveTo(0, at);
-      ctx.lineTo(box.width, at);
-      ctx.stroke();
-    }
   }
 
   // Нуль чертежа виден всегда, когда он существует: после замены подложки
@@ -4751,13 +4769,26 @@ function createWorkshop({ api, hosts }) {
     // клавиатуру себе.
     if ("screen" in changed && state.screen === "drawing") {
       resize();
-      // Объём мог оставить просьбу встать серединой на человека (G276, таск
-      // 178): переключение режима переносит взгляд, а не бросает человека там,
-      // где он был в прошлый раз.
-      wantedPlace();
+      // Место общее на три режима (G276, таск 178; D59, таск 193):
+      // переключение переносит и середину, и масштаб, а не бросает человека
+      // там, где он стоял в прошлый раз.
+      pullPlace();
       sync();
       if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
     }
+    // Ушли из чертежа — занятие сбрасывается на «Выделение» (G296, таск 193).
+    // Слова заказчика: «при переключении между схема\чертёж\объем у первых
+    // двух сбрасывай режим на Выделение с Добавления».
+    //
+    // Сбрасывается **занятие**, а не выбор: чем чертить (стены, проёмы,
+    // объекты) и какая вещь выбрана — помнится, и вернувшийся человек готов
+    // ставить ту же вещь. Порядок внутри `setTool`: сперва дочертить начатое
+    // со словами (`settleDraft`), потом сменить занятие, — и он же держит
+    // правило «работа не теряется молча» (таск 172).
+    //
+    // Сбрасывается на **уходе**, а не на возвращении: уходя, человек ещё здесь,
+    // и слово о дочерченном он прочтёт на том поле, где эту работу начал.
+    if ("screen" in changed && state.screen !== "drawing") setMode("select");
     // Галка «Развёртка выделенной стены» — одна на план и на чертёж (G227):
     // сняли её в «Интерфейсе» — полоса уходит и отсюда. Без этой строки
     // поверхность о ней не узнавала: проверено живым прогоном.
@@ -4771,6 +4802,9 @@ function createWorkshop({ api, hosts }) {
       "drawingShown" in changed ||
       "gridShown" in changed ||
       "gridSnap" in changed ||
+      // Линейка и направляющие — тоже из «Интерфейса» и тоже про это поле
+      // (таск 193): без этой строки отметка меняла бы только себя.
+      "guidesShown" in changed ||
       // Шаг сетки принадлежит объекту, но правят его там же, и перерисовать
       // поле на его смену обязан тот же обработчик.
       "project" in changed

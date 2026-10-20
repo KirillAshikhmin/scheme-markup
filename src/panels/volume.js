@@ -49,13 +49,11 @@ import {
   WALL_HEIGHT_FALLBACK_MM,
   findRoom,
   findScheme,
-  planFractionToMm,
-  planMmToFraction,
   schemeFloorOf,
   schemeObjectsOnScheme,
 } from "../model.js";
-import { drawDrawing, drawingUnitBridge, planToScreen, screenToPlan, visibleMarks } from "../render.js";
-import { screenPlaceOfDrawing, screenPlaceWant } from "../screenPlace.js";
+import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
+import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "../screenPlace.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -412,40 +410,38 @@ export function volumeMinimapView(box, bounds, shown = true) {
 //      которого пришли (схема или чертёж);
 //   2. выходим из объёма — и схема, и чертёж встают серединой на человека.
 //
-// Схему объём правит сам: её вид лежит в состоянии приложения (`view`), и
-// перевод «середина поля ↔ миллиметры чертежа» считается теми же двумя
-// функциями модели, которыми живёт весь чертёж (`planFractionToMm`,
-// `planMmToFraction`). Мастерская держит свой вид при себе — с ней объём
-// говорит через `screenPlace.js`.
+// Схему объём правит сам: её вид лежит в состоянии приложения (`view`). Место
+// при этом **одно на три режима** и лежит в `screenPlace.js` (таск 193, D59):
+// объём его читает на входе и пишет на выходе, а переводом «середина поля ↔
+// миллиметры чертежа» владеет тот же модуль — своего счёта здесь больше нет.
+// Масштабом объём не владеет вовсе: камера приближения не знает, и у плана с
+// чертежом оно остаётся тем, которое человек выбрал до ухода.
 //
 // **Где это неприменимо:** у схемы без калибровки (план не привязан к
 // миллиметрам) моста между долями и миллиметрами нет вовсе — обе функции
 // отвечают `null`, и перенос молча не делается. Так же молчит он и у схемы без
 // подложки, где вид плана не значит ничего.
 
-/** Середина поля плана в миллиметрах чертежа. `null` — моста нет. */
+/**
+ * Середина поля плана в миллиметрах чертежа. `null` — моста нет.
+ *
+ * Счёт один на всю сборку и лежит он в `screenPlace.js` (таск 193, D59): туда
+ * же смотрят холст и память вида, и разойдись эти переводы — «пиксель в
+ * пиксель» разъехался бы ровно на разницу между ними.
+ */
 export function volumePlanCentre(project, schemeId, box, view) {
-  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
-  const scheme = findScheme(project, schemeId);
-  if (!scheme) return null;
-  const point = screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
-  return planFractionToMm(project, schemeId, point);
+  return screenPlacePlanRead(project, schemeId, box, view);
 }
 
 /**
  * Вид плана, у которого середина поля смотрит на точку чертежа. Масштаб не
  * трогается: человек его выбрал, и менять его при смене режима значило бы
- * отнять у него выбор — переносится **место**, а не приближение.
+ * отнять у него выбор — объём переносит **место**, а не приближение (поэтому
+ * `pxPerMm` общему счёту здесь не передаётся).
  */
 export function volumePlanViewAt(project, schemeId, box, view, pointMm) {
-  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
-  const scheme = findScheme(project, schemeId);
-  if (!scheme) return null;
-  const point = planMmToFraction(project, schemeId, pointMm);
-  if (!point) return null;
-  const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
-  const at = planToScreen(point, scheme, { zoom, offsetX: 0, offsetY: 0 });
-  return { zoom, offsetX: box.width / 2 - at.x, offsetY: box.height / 2 - at.y };
+  if (!pointMm) return null;
+  return screenPlacePlanView(project, schemeId, box, { x: pointMm.x, y: pointMm.y }, view);
 }
 
 /**
@@ -1366,11 +1362,13 @@ function createVolume({ api, hosts }) {
    */
   function placeArrive(state) {
     if (scene.empty) return;
-    // Пришли из чертежа — спрашиваем его; из схемы (или чертёж за весь сеанс
-    // не открывали и сказать ему нечего) — считаем середину плана.
-    const want =
-      (volumeCameFrom() === "drawing" ? screenPlaceOfDrawing(schemeId) : null) ||
-      volumePlanCentre(state.project, schemeId, viewport(), state.view);
+    // Место общее на три режима и лежит в одном месте (таск 193, D59): его и
+    // спрашиваем, кто бы его ни поставил — план, чертёж или память вида.
+    // Прежде здесь спрашивали **мастерскую**, и только когда пришли из неё, —
+    // отсюда и «не всегда работает»: прямой переход «Схема → Чертёж» не
+    // переносил ничего. Молчит общее место только там, где моста нет вовсе
+    // (схема без калибровки): тогда считается середина плана.
+    const want = screenPlaceOf(schemeId) || volumePlanCentre(state.project, schemeId, viewport(), state.view);
     if (!want) return;
     const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
     person.x = moved.x;
@@ -1394,8 +1392,10 @@ function createVolume({ api, hosts }) {
   function placeLeave(state) {
     if (scene.empty) return;
     const at = { x: person.x, y: person.y };
-    // Мастерская свой вид держит при себе — ей оставляют просьбу.
-    screenPlaceWant(schemeId, at);
+    // Общему месту говорится одно: где стоит человек. Масштаба объём не
+    // касается — камера им не владеет, и у плана с чертежом он остаётся тем,
+    // который человек выбрал до ухода (`screenPlaceSet` без `pxPerMm`).
+    screenPlaceSet(schemeId, at);
     const box = viewport();
     // Поле уже погасло, но не схлопнулось (гаснет оно `visibility`, а не
     // `display`) — и всё же вырожденный размер лучше проверить: вид плана,

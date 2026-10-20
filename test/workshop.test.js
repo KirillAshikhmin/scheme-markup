@@ -61,6 +61,7 @@ import {
   LABEL_TURN_RADIUS,
   drawingDoorLeaf,
   drawingHitObject,
+  gridDrawStepMm,
   planToScreen,
 } from "../src/render.js";
 import { identityTransform, rotateTransform } from "../src/imagePrep.js";
@@ -89,7 +90,6 @@ import {
   workshopEnsureSheet,
   workshopExtentMm,
   workshopFitView,
-  workshopGridDrawStepMm,
   workshopHint,
   workshopInitialTool,
   workshopLengthAt,
@@ -582,13 +582,15 @@ test("шаги сетки идут по возрастанию и начинаю
 });
 
 test("мелкую сетку рисуем кратным шагом, а притягиваем выбранным", () => {
+  // Мера переехала в общий слой (`render.gridDrawStepMm`, таск 193): сетку
+  // рисуют оба поля, и своей меры у мастерской больше нет.
   // Сто миллиметров при 0,01 пикселя на миллиметр — это один пиксель на линию:
   // такая гребёнка читается заливкой.
-  assert.equal(workshopGridDrawStepMm(100, 1), 100, "на крупном масштабе шаг свой");
-  const drawn = workshopGridDrawStepMm(100, 0.01);
+  assert.equal(gridDrawStepMm(100, 1), 100, "на крупном масштабе шаг свой");
+  const drawn = gridDrawStepMm(100, 0.01);
   assert.ok(drawn > 100 && drawn % 100 === 0, "шаг отрисовки кратен выбранному: " + drawn);
   assert.ok(drawn * 0.01 >= 5, "и даёт разборчивый просвет");
-  assert.equal(workshopGridDrawStepMm(0, 1), 0, "шага нет — сетки нет");
+  assert.equal(gridDrawStepMm(0, 1), 0, "шага нет — сетки нет");
 });
 
 // ——— вид окна ——————————————————————————————————————————————————————————
