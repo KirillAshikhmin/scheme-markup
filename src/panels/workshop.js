@@ -91,7 +91,6 @@ import {
   GRID_STEP_DEFAULT_MM,
   OPENING_HINGES,
   OPENING_KINDS,
-  OPENING_KIND_DOOR,
   OPENING_SWINGS,
   PLAN_SCALE_SHORT_SHARE,
   WALL_THICKNESS_MM_MAX,
@@ -110,6 +109,8 @@ import {
   findWall,
   formatMeters,
   gridStepOf,
+  openingDoorStep,
+  openingHasLeaf,
   openingsInWall,
   planFractionToMm,
   planOriginOf,
@@ -1461,7 +1462,7 @@ export function workshopPick(project, schemeId, pointMm, view, selected, hiddenO
   if (selected && selected.kind === "opening") {
     const opening = findOpening(project, selected.id);
     const wall = opening ? findWall(project, opening.wallId) : null;
-    const leaf = wall && opening.kind === OPENING_KIND_DOOR ? drawingDoorLeaf(wall, opening) : null;
+    const leaf = wall && openingHasLeaf(opening.kind) ? drawingDoorLeaf(wall, opening) : null;
     if (leaf) {
       if (Math.hypot(pointMm.x - leaf.hinge.x, pointMm.y - leaf.hinge.y) <= vertexMm) {
         return { kind: "hinge", id: opening.id };
@@ -2572,7 +2573,9 @@ function createWorkshop({ api, hosts }) {
   function openingDraft(kind) {
     const sizes = workshopOpeningSizes[kind] || WORKSHOP_OPENING_DEFAULTS[kind];
     const draftOpening = { kind, ...sizes };
-    if (kind === OPENING_KIND_DOOR) {
+    // Петли и сторона открывания — у всякого вида с полотном, не только у
+    // глухой двери (таск 180): у стеклянной они те же и те же четыре.
+    if (openingHasLeaf(kind)) {
       draftOpening.hinge = workshopDoorHinge;
       draftOpening.swing = workshopDoorSwing;
     }
@@ -2583,7 +2586,7 @@ function createWorkshop({ api, hosts }) {
     const opening = selectedOpening();
     if (opening) {
       try {
-        const patch = { kind, ...(kind === OPENING_KIND_DOOR ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
+        const patch = { kind, ...(openingHasLeaf(kind) ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
         commit(updateOpening(project(), opening.id, patch).project, strings.history.openingKind);
       } catch (error) {
         fail(error);
@@ -2676,31 +2679,89 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
-   * Переключить створку двери. Четыре сочетания — четыре разные двери, и
-   * различают их на плане по рисунку, а не по двум полям. Поэтому у выделенной
-   * двери на чертеже стоят две ручки: у петли и на кончике полотна. Кнопки в
-   * колонке делают то же самое словами — для тех, кто ищет глазами подпись.
+   * О какой двери сейчас речь: о выделенной, а без выделения — о той, которую
+   * поставит следующий клик. Правило то же, по которому колонка показывает
+   * толщину стены и габариты вещи, и второго его описания здесь нет.
    */
-  function flipDoor(what) {
+  function doorState(opening) {
+    return opening && openingHasLeaf(opening.kind)
+      ? { hinge: opening.hinge, swing: opening.swing }
+      : { hinge: workshopDoorHinge, swing: workshopDoorSwing };
+  }
+
+  /**
+   * Поставить двери состояние — одна дверь на все три двери к нему: кнопки
+   * «Петли» и «Открывание» в колонке, ручки у петли и на кончике полотна,
+   * клавиши `Q` и `E` (таск 180). Выделенной — правкой через историю, без
+   * выделения — той, которая встанет следующей.
+   *
+   * **Призрак под рукой переставляется здесь же.** До таска 180 кнопка в
+   * колонке меняла слова, а призрак оставался прежним до следующего движения
+   * мыши — то есть обещал дверь, которой уже не выберут. Пересчитывать его
+   * целиком незачем: створка не меняет ни места проёма, ни ответа модели
+   * «влезает ли он», — поэтому у него переставляются два поля, а `ok` и
+   * причина отказа остаются теми же.
+   */
+  function applyDoorState(state) {
     const opening = selectedOpening();
-    const flipHinge = (value) => (value === "end" ? "start" : "end");
-    const flipSwing = (value) => (value === "right" ? "left" : "right");
-    if (!opening || opening.kind !== OPENING_KIND_DOOR) {
-      if (what === "hinge") workshopDoorHinge = flipHinge(workshopDoorHinge);
-      else workshopDoorSwing = flipSwing(workshopDoorSwing);
+    if (!opening || !openingHasLeaf(opening.kind)) {
+      workshopDoorHinge = state.hinge;
+      workshopDoorSwing = state.swing;
+      if (ghost && openingHasLeaf(ghost.opening.kind)) {
+        ghost = { ...ghost, opening: { ...ghost.opening, hinge: state.hinge, swing: state.swing } };
+      }
       sync();
+      redraw();
       return;
     }
-    const patch =
-      what === "hinge" ? { hinge: flipHinge(opening.hinge) } : { swing: flipSwing(opening.swing) };
     try {
-      commit(updateOpening(project(), opening.id, patch).project, strings.history.openingSwing);
-      workshopDoorHinge = patch.hinge || opening.hinge;
-      workshopDoorSwing = patch.swing || opening.swing;
+      commit(updateOpening(project(), opening.id, state).project, strings.history.openingSwing);
+      workshopDoorHinge = state.hinge;
+      workshopDoorSwing = state.swing;
     } catch (error) {
       fail(error);
       sync();
     }
+  }
+
+  /**
+   * Переключить створку двери. Четыре сочетания — четыре разные двери, и
+   * различают их на плане по рисунку, а не по двум полям. Поэтому у выделенной
+   * двери на чертеже стоят две ручки: у петли и на кончике полотна. Кнопки в
+   * колонке делают то же самое словами — для тех, кто ищет глазами подпись.
+   *
+   * Кнопка переставляет **один** признак — тот, который на ней написан; по
+   * кольцу всех четырёх ведут `Q` и `E` (`stepDoor`).
+   */
+  function flipDoor(what) {
+    const now = doorState(selectedOpening());
+    const other = (list, value) => (value === list[0] ? list[1] : list[0]);
+    applyDoorState(
+      what === "hinge"
+        ? { hinge: other(OPENING_HINGES, now.hinge), swing: now.swing }
+        : { hinge: now.hinge, swing: other(OPENING_SWINGS, now.swing) },
+    );
+  }
+
+  /**
+   * `Q` и `E` — четыре двери по кругу (таск 180, G268). Слова заказчика: «при
+   * установке дверей так же вращай их по Q/E причём сразу по 4 значениям —
+   * сперва сторона петель, потом сторона открытия».
+   *
+   * Кольцо живёт в модели (`OPENING_DOOR_STATES`), здесь только шаг по нему:
+   * `E` вперёд, `Q` назад. Третьего механизма у проёма не заводится — это те
+   * же клавиши и то же условие «выделенное, а без выделения то, что встанет»,
+   * которыми таск 168 поворачивает вещь чертежа. Набор состояний другой: у
+   * вещи угол, у двери четыре сочетания петель и стороны.
+   */
+  function stepDoor(delta) {
+    applyDoorState(openingDoorStep(doorState(selectedOpening()), delta));
+  }
+
+  /** Есть ли сейчас дверь, которую листать: выделенная или та, что встанет. */
+  function doorTurnable() {
+    if (selected) return Boolean(selectedOpening()) && openingHasLeaf(selectedOpening().kind);
+    return tool === "openings" && openingHasLeaf(workshopOpeningKind);
   }
 
   // ——— объекты на полу ——————————————————————————————————————————————————
@@ -3652,6 +3713,20 @@ function createWorkshop({ api, hosts }) {
       turnBy(event.code === "KeyQ" ? -WORKSHOP_TURN_HALF_DEG : WORKSHOP_TURN_HALF_DEG);
       return;
     }
+    // Те же `Q` и `E` у двери (таск 180, G268) — и это **не третий механизм**:
+    // клавиши те же, условие то же («выделенное, а без выделения то, что
+    // встанет»), дверь к состоянию одна. Другой только набор: у вещи угол с
+    // шагом 45°, у двери четыре сочетания петель и стороны открывания.
+    //
+    // Спорить им не о чем: вещь поворачивают в занятии «объекты», дверь
+    // листают в «проёмах», и выделено в один миг что-то одно. У окна, проёма и
+    // арки полотна нет — там `Q` и `E` не перехватываются вовсе.
+    if ((event.code === "KeyQ" || event.code === "KeyE") && !event.altKey && !event.shiftKey && doorTurnable()) {
+      event.preventDefault();
+      event.stopPropagation();
+      stepDoor(event.code === "KeyQ" ? -1 : 1);
+      return;
+    }
     if ((event.key === "Delete" || event.key === "Backspace") && selected) {
       event.preventDefault();
       event.stopPropagation();
@@ -4378,7 +4453,10 @@ function createWorkshop({ api, hosts }) {
   }
 
   function openingHelp() {
-    return walls().length === 0 ? strings.workshop.openingNeedWall : strings.workshop.openingHint;
+    if (walls().length === 0) return strings.workshop.openingNeedWall;
+    // Про `Q` и `E` сказано только там, где они работают: у окна, проёма и
+    // арки листать нечего, и обещать им четыре двери было бы ложью.
+    return openingHasLeaf(workshopOpeningKind) ? strings.workshop.openingHintDoor : strings.workshop.openingHint;
   }
 
   function syncOpening(opening) {
@@ -4393,12 +4471,17 @@ function createWorkshop({ api, hosts }) {
     fieldValue(openingFloor, sizes.heightAboveFloorMm);
     atField.hidden = !opening;
     if (opening) fieldValue(openingAt, opening.atMm);
-    doorFields.hidden = kind !== OPENING_KIND_DOOR;
-    const hinge = opening && opening.kind === OPENING_KIND_DOOR ? opening.hinge : workshopDoorHinge;
-    const swing = opening && opening.kind === OPENING_KIND_DOOR ? opening.swing : workshopDoorSwing;
+    // Поля полотна — у всякого вида с полотном (таск 180): у стеклянной двери
+    // те же петли, та же сторона и те же четыре состояния.
+    const leaf = openingHasLeaf(kind);
+    doorFields.hidden = !leaf;
+    const { hinge, swing } = doorState(opening);
     hingeButton.textContent = text("workshop.doorHinge", { value: strings.openingHinges[hinge] });
     swingButton.textContent = text("workshop.doorSwing", { value: strings.openingSwings[swing] });
-    subjectNote.textContent = opening ? strings.workshop.doorHint : openingHelp();
+    // Подсказка про ручки и про `Q`/`E` стоит под дверью, а не под всяким
+    // выделенным проёмом: у выделенного окна створки нет, и слова про её ручки
+    // врали с того дня, как их написали.
+    subjectNote.textContent = opening ? (leaf ? strings.workshop.doorHint : "") : openingHelp();
   }
 
   /**

@@ -53,6 +53,18 @@ import {
   wallElevation,
 } from "../src/model.js";
 import { drawDrawingOpening, drawElevation, drawingBridge, drawingDoorLeaf } from "../src/render.js";
+import {
+  VOLUME_CLEAR_ALPHA,
+  VOLUME_EYE_MM,
+  VOLUME_FRAME_RGB,
+  VOLUME_GLASS_RGB,
+  VOLUME_HANDLE_RGB,
+  volumeDoorAt,
+  volumeFrame,
+  volumeOpeningWalkable,
+  volumeScene,
+  volumeSightAt,
+} from "../src/volume.js";
 import { strings } from "../src/strings.js";
 
 const PRINTS_BEFORE = JSON.parse(readFileSync(new URL("./fixtures/openings-before.json", import.meta.url), "utf8"));
@@ -331,4 +343,213 @@ test("G68: прежний проём не обзавёлся ни одним н�
   const asWindow = updateOpening(glass.project, glass.opening.id, { kind: "window", heightMm: 1400, heightAboveFloorMm: 800 });
   assert.equal(Object.prototype.hasOwnProperty.call(asWindow.opening, "hinge"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(asWindow.opening, "swing"), false);
+});
+
+// ——— объём: рама непрозрачна, стекло просвечивает (G269) ————————————————
+//
+// Прозрачность берётся **готовая** — та, которой просвечивает вещь чертежа
+// (таск 169): признак `clear` у грани и доля `VOLUME_CLEAR_ALPHA` в цвете.
+// Второй прозрачности в сборке быть не должно, иначе стекло двери и стекло
+// шкафа смешивались бы по-разному в одном кадре.
+
+/** Комната 4 × 3 из четырёх стен; проёмы ставятся в первую — она по y = −1500. */
+function room(specs) {
+  const added = addScheme(createProject(), { name: "1 этаж", imageId: "p", width: 1200, height: 800 });
+  let project = setPlanScale(added.project, added.scheme.id, {
+    a: { x: 0.1, y: 0.5 },
+    b: { x: 0.6, y: 0.5 },
+    meters: 6,
+  }).project;
+  const half = { x: 2000, y: 1500 };
+  const corners = [
+    { x: -half.x, y: -half.y },
+    { x: half.x, y: -half.y },
+    { x: half.x, y: half.y },
+    { x: -half.x, y: half.y },
+  ];
+  const walls = [];
+  for (let index = 0; index < corners.length; index += 1) {
+    const wall = addWall(project, {
+      schemeId: added.scheme.id,
+      aMm: corners[index],
+      bMm: corners[(index + 1) % corners.length],
+      thicknessMm: 200,
+    });
+    project = wall.project;
+    walls.push(wall.wall.id);
+  }
+  const ids = [];
+  for (const spec of specs) {
+    const put = addOpening(project, { wallId: walls[0], ...spec });
+    project = put.project;
+    ids.push(put.opening.id);
+  }
+  return { project, schemeId: added.scheme.id, walls, ids };
+}
+
+const GLASS_DOOR = {
+  kind: OPENING_KIND_GLASS_DOOR,
+  atMm: 1500,
+  widthMm: 900,
+  heightMm: 2100,
+  heightAboveFloorMm: 0,
+  hinge: "start",
+  swing: "left",
+};
+
+const leafOf = (built, doorId) => built.faces.filter((face) => face.doorId === doorId && face.both);
+
+test("полотно стеклянной двери — четыре бруска рамы и стекло в середине", () => {
+  const scene = room([GLASS_DOOR]);
+  const built = volumeScene(scene.project, scene.schemeId);
+  const leaf = leafOf(built, scene.ids[0]);
+  assert.equal(leaf.length, 5, "четыре бруска рамы и одно стекло: " + leaf.length);
+  const glass = leaf.filter((face) => face.clear);
+  assert.equal(glass.length, 1, "стекло одно");
+  assert.deepEqual(glass[0].rgb, VOLUME_GLASS_RGB);
+  for (const face of leaf.filter((item) => !item.clear)) {
+    assert.deepEqual(face.rgb, VOLUME_FRAME_RGB, "рама — тот же брусок, что у окна");
+    assert.equal(face.clear, false, "рама непрозрачна: сквозь раму видно быть не должно");
+  }
+  // Стекло отступает от края полотна на ширину рамы — по всем четырём краям.
+  const span = (faces, axis) => ({
+    min: Math.min(...faces.flatMap((face) => face.p.map((point) => point[axis]))),
+    max: Math.max(...faces.flatMap((face) => face.p.map((point) => point[axis]))),
+  });
+  const whole = span(leaf, "x");
+  const inner = span(glass, "x");
+  assert.ok(Math.abs(inner.min - (whole.min + OPENING_GLASS_FRAME_MM)) < 1, "рама слева: " + (inner.min - whole.min));
+  assert.ok(Math.abs(whole.max - inner.max - OPENING_GLASS_FRAME_MM) < 1, "рама справа");
+  const zWhole = span(leaf, "z");
+  const zInner = span(glass, "z");
+  assert.ok(Math.abs(zInner.min - (zWhole.min + OPENING_GLASS_FRAME_MM)) < 1, "рама снизу");
+  assert.ok(Math.abs(zWhole.max - zInner.max - OPENING_GLASS_FRAME_MM) < 1, "рама сверху");
+  // Ручка у стеклянной двери та же и тоже непрозрачная: её берут рукой.
+  const handle = built.faces.filter((face) => face.rgb === VOLUME_HANDLE_RGB && face.doorId === scene.ids[0]);
+  assert.ok(handle.length >= 5, "ручка — призма: " + handle.length);
+  for (const face of handle) assert.equal(face.clear, false);
+});
+
+test("рама и стекло лежат в одной плоскости и друг на друга не налезают", () => {
+  const scene = room([GLASS_DOOR]);
+  const leaf = leafOf(volumeScene(scene.project, scene.schemeId), scene.ids[0]);
+  // Коплоскостность — не прихоть: дерево порядка (таск 151) порядок внутри
+  // плоскости не обещает, и прозрачному стеклу он нужен только относительно
+  // того, что **за** полотном. Поэтому пять граней обязаны стоять в одной
+  // плоскости и не перекрывать друг друга — тогда их взаимный порядок не
+  // значит ничего.
+  const ys = leaf.flatMap((face) => face.p.map((point) => point.y));
+  assert.ok(Math.max(...ys) - Math.min(...ys) < 1, "полотно плоское: " + (Math.max(...ys) - Math.min(...ys)));
+  const boxes = leaf.map((face) => ({
+    x0: Math.min(...face.p.map((point) => point.x)),
+    x1: Math.max(...face.p.map((point) => point.x)),
+    z0: Math.min(...face.p.map((point) => point.z)),
+    z1: Math.max(...face.p.map((point) => point.z)),
+  }));
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const over = Math.min(boxes[i].x1, boxes[j].x1) - Math.max(boxes[i].x0, boxes[j].x0);
+      const up = Math.min(boxes[i].z1, boxes[j].z1) - Math.max(boxes[i].z0, boxes[j].z0);
+      assert.ok(over <= 0.01 || up <= 0.01, "грани " + i + " и " + j + " налезли друг на друга");
+    }
+  }
+});
+
+test("на узкое полотно рама не влезает — и стекла там не обещают", () => {
+  // Дверь шириной в три рамы: стекло выродилось бы в щель, и честнее
+  // нарисовать полотно глухим, чем обещать стекло.
+  const scene = room([{ ...GLASS_DOOR, widthMm: OPENING_GLASS_FRAME_MM * 3 }]);
+  const leaf = leafOf(volumeScene(scene.project, scene.schemeId), scene.ids[0]);
+  assert.equal(leaf.length, 1, "одно глухое полотно");
+  assert.equal(leaf[0].clear, false);
+});
+
+test("стеклянная дверь открывается, закрывается и попадает в «все двери»", () => {
+  const scene = room([
+    GLASS_DOOR,
+    { kind: OPENING_KIND_DOOR, atMm: 2600, widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
+  ]);
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Обе двери в списке сцены — по нему `R` открывает все разом (G210).
+  assert.deepEqual(built.doors, scene.ids, "сцена знает обе двери");
+  const away = (faces) => Math.max(...faces.flatMap((face) => face.p.map((point) => Math.abs(point.y + 1500))));
+  assert.ok(away(leafOf(built, scene.ids[0])) < 1, "закрытая стоит в проёме");
+  const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set([scene.ids[0]]) });
+  const spread = away(leafOf(open, scene.ids[0]));
+  assert.ok(spread > 800, "раскрытая уходит от стены на четверть оборота: " + spread);
+  // Стекло и рама уехали вместе с полотном: ни одна грань не осталась в проёме.
+  const glass = open.faces.filter((face) => face.doorId === scene.ids[0] && face.clear);
+  assert.equal(glass.length, 1);
+  assert.ok(Math.min(...glass[0].p.map((point) => Math.abs(point.y + 1500))) > 80, "стекло уехало со створкой");
+  // Соседняя глухая дверь при этом закрыта: список двери именной.
+  assert.ok(away(leafOf(open, scene.ids[1])) < 1, "глухая осталась закрытой");
+  // Сквозь проём стеклянной двери ходят, как сквозь дверной (решение таска 150).
+  assert.equal(volumeOpeningWalkable(scene.project.openings[0]), true);
+});
+
+test("щелчок по стеклу открывает дверь, а взгляд смотрит сквозь него", () => {
+  const scene = room([GLASS_DOOR]);
+  const built = volumeScene(scene.project, scene.schemeId);
+  const box = { width: 1200, height: 700 };
+  // Стоим в комнате перед дверью: стена по y = −1500, дверь на отступе
+  // 1500…2400 от начала стены (x = −2000), то есть около x = −50.
+  const camera = { at: { x: -50, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
+  const frame = volumeFrame(built, camera, box);
+  const middle = { x: box.width / 2, y: box.height / 2 };
+  // Прицел стоит на стекле — и дверь он всё равно показывает: щелчок и `E`
+  // спрашивают `volumeDoorAt`, а она прозрачную грань не пропускает.
+  assert.equal(volumeDoorAt(frame, middle.x, middle.y), scene.ids[0], "дверь под прицелом");
+  // Кусков стекла в кадре может быть несколько: дерево порядка (таск 151)
+  // режет грани плоскостями соседей, и это ровно то, чем оно и точно. Важно
+  // другое — **каждый** кусок смешивается с тем, что за ним.
+  const glass = frame.filter((polygon) => polygon.clear && polygon.door === scene.ids[0] && !polygon.stroke);
+  assert.ok(glass.length >= 1, "стекло в кадре есть");
+  for (const piece of glass) {
+    assert.ok(piece.fill.startsWith("rgba("), "стекло смешивается с тем, что за ним: " + piece.fill);
+    // Доля стекла — та же, что у вещи чертежа: своей прозрачности у двери нет.
+    assert.ok(piece.fill.endsWith("," + VOLUME_CLEAR_ALPHA + ")"), piece.fill);
+  }
+  const bars = frame.filter((polygon) => polygon.door === scene.ids[0] && !polygon.clear && !polygon.stroke);
+  assert.ok(bars.length >= 4, "брусков рамы в кадре: " + bars.length);
+  for (const bar of bars) assert.ok(bar.fill.startsWith("rgb("), "рама непрозрачна: " + bar.fill);
+  // Взгляд сквозь стекло идёт дальше (правило таска 169): за этой дверью ничего
+  // нет, и ответ — «ничего», а не «дверь». Спор между ними разводит
+  // `volumeAimChoice`: двери достаётся всё, на что взгляд не ответил.
+  assert.equal(volumeSightAt(frame, middle.x, middle.y), null, "сквозь стекло взгляд не упирается в полотно");
+});
+
+test("G68: стеклянная дверь в объект ничего не пишет и объём только читает", () => {
+  const scene = room([GLASS_DOOR]);
+  const before = JSON.stringify(scene.project);
+  volumeScene(scene.project, scene.schemeId);
+  volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) });
+  assert.equal(JSON.stringify(scene.project), before, "объём только читает");
+  // Открытая дверь живёт в сеансе окна: в проёме её состояния нет.
+  assert.equal(Object.prototype.hasOwnProperty.call(scene.project.openings[0], "open"), false);
+});
+
+// ——— один хозяин вопроса «есть ли полотно» ——————————————————————————————
+//
+// Стеклянная дверь — дверь в восьми местах сборки, и сломаться это может тихо:
+// забытое сравнение `kind === OPENING_KIND_DOOR` оставило бы её без петель в
+// колонке, без ручек на плане или без открывания в объёме. Поэтому вопрос
+// задаётся одним `openingHasLeaf`, и это проверяется по исходникам, а не
+// обещанием.
+
+test("вид двери не сравнивают напрямую: вопрос о полотне задаётся одним местом", () => {
+  const files = ["../src/render.js", "../src/volume.js", "../src/panels/workshop.js", "../src/panels/volume.js"];
+  for (const file of files) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.equal(
+      source.includes("OPENING_KIND_DOOR"),
+      false,
+      file + ": вид двери сравнивается напрямую — стеклянная дверь мимо этого места и проедет",
+    );
+  }
+  // Кольцо из четырёх состояний тоже одно: шаг по нему считает модель, а
+  // панель только зовёт её.
+  const panel = readFileSync(new URL("../src/panels/workshop.js", import.meta.url), "utf8");
+  assert.equal((panel.match(/openingDoorStep\(/g) || []).length, 1, "шаг по кольцу зовётся из одного места");
+  // И зовут его обе клавиши — `Q` и `E` — одной строкой, а не двумя путями.
+  assert.match(panel, /KeyQ[\s\S]{0,400}doorTurnable\(\)/, "у двери свои `Q` и `E` в том же обработчике");
 });

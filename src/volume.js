@@ -42,7 +42,8 @@
 // **G68: режим только читает.** Ни одной записи в объект, ни одного нового
 // поля. Объект без чертежа честно отвечает `empty`.
 import {
-  OPENING_KIND_DOOR,
+  OPENING_GLASS_FRAME_MM,
+  OPENING_KIND_GLASS_DOOR,
   drawingBoundsMm,
   findScheme,
   schemeObjectKeyOf,
@@ -54,6 +55,7 @@ import {
   markSizes,
   markWall,
   markWallSideOn,
+  openingHasLeaf,
   openingsInWall,
   outlinesInOrder,
   planFractionToMm,
@@ -325,6 +327,13 @@ export const VOLUME_DOOR_RGB = [176, 132, 92];
 /** Ручка двери — металл: светлее полотна и холоднее его (G207). */
 export const VOLUME_HANDLE_RGB = [186, 190, 198];
 export const VOLUME_FRAME_RGB = [240, 242, 244];
+/**
+ * **Стекло двери** (таск 180, G269) — холодный блик, а не цвет: сквозь него
+ * видно соседнюю комнату, и своего тона у него ровно столько, чтобы полотно
+ * читалось стеклом, а не дыркой. Отдаёт он `VOLUME_CLEAR_ALPHA` — ту же долю,
+ * что вещь чертежа (таск 169): второй прозрачности в сборке не заводится.
+ */
+export const VOLUME_GLASS_RGB = [196, 216, 224];
 export const VOLUME_MARKER_RGB = [31, 111, 235];
 
 /**
@@ -1024,7 +1033,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
     volumeWindowFrame(at, from, to, bottom, top, out);
     return out;
   }
-  if (opening.kind === OPENING_KIND_DOOR) {
+  if (openingHasLeaf(opening.kind)) {
     const open = volumeDoorOpen(openDoorIds, opening.id);
     volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open);
   }
@@ -1106,13 +1115,17 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
   // Куда смотрит полотно: раскрытое — прочь от стены, закрытое — вдоль неё.
   const leaf = open ? { x: n.x * side, y: n.y * side } : { x: u.x * (atStart ? 1 : -1), y: u.y * (atStart ? 1 : -1) };
   const tip = { x: hinge.x + leaf.x * width, y: hinge.y + leaf.y * width };
-  out.push(
-    volumeFace(
-      [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
-      VOLUME_DOOR_RGB,
-      { both: true, doorId },
-    ),
-  );
+  if (opening.kind === OPENING_KIND_GLASS_DOOR) {
+    volumeGlassLeaf(hinge, leaf, width, span, out, doorId);
+  } else {
+    out.push(
+      volumeFace(
+        [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
+        VOLUME_DOOR_RGB,
+        { both: true, doorId },
+      ),
+    );
+  }
   // Ручка у свободного края полотна, на высоте, на которой её берут рукой
   // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
   // открывают с той стороны, с которой подошли.
@@ -1132,6 +1145,62 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
       { doorId },
     );
   }
+  return out;
+}
+
+/**
+ * **Полотно стеклянной двери** (таск 180, G269): рама по контуру и стекло в
+ * середине. Слова заказчика — «как на французский балкон — с рамой, но не
+ * глухая, а по центру стекло, ну и тоже ручки».
+ *
+ * Четыре бруска рамы непрозрачны, пятая грань — стекло, и у неё `clear`: тот
+ * же признак и та же доля (`VOLUME_CLEAR_ALPHA`), которыми просвечивает вещь
+ * чертежа (таск 169). Второй прозрачности в сборке не заводится: разойдись
+ * они — стекло двери и стекло шкафа смешивались бы по-разному в одном кадре.
+ *
+ * ——— порядок граней ——————————————————————————————————————————————————————
+ *
+ * Рама и стекло **коплоскостны**: все пять граней лежат в одной плоскости
+ * полотна. Дерево порядка (таск 151) порядок внутри плоскости не обещает — и
+ * здесь он не нужен ни на что: бруски стоят вокруг стекла, а не поверх него, и
+ * коплоскостные грани, которые друг друга не закрывают, смешиваться между
+ * собой не могут. Ровно это условие и записано у `volumeOrderTree`.
+ *
+ * А вот то, что **за** полотном, дерево разводит как надо: плоскость полотна
+ * сама становится секущей, и всё, что за ней, рисуется раньше — то есть
+ * прозрачному стеклу достаётся уже готовый задник, как того и требует
+ * смешивание. Второго прохода «прозрачные после непрозрачных» не понадобилось
+ * и здесь.
+ *
+ * Полотно уже рамы вдвое — рама съедает ширину с двух сторон; на узкой или
+ * низкой двери (меньше трёх рам) стекла не остаётся, и полотно рисуется глухим
+ * одной гранью рамы: врать про стекло там, где его негде нарисовать, незачем.
+ */
+function volumeGlassLeaf(hinge, leaf, width, span, out, doorId) {
+  const at = (along, z) => volumeAt({ x: hinge.x + leaf.x * along, y: hinge.y + leaf.y * along }, z);
+  const quad = (fromAlong, toAlong, bottom, top, rgb, clear) => {
+    if (!(toAlong > fromAlong) || !(top > bottom)) return;
+    out.push(volumeFace([at(fromAlong, bottom), at(toAlong, bottom), at(toAlong, top), at(fromAlong, top)], rgb, {
+      both: true,
+      doorId,
+      clear,
+    }));
+  };
+  const frame = OPENING_GLASS_FRAME_MM;
+  const height = span.top - span.bottom;
+  if (!(width > frame * 3) || !(height > frame * 3)) {
+    quad(0, width, span.bottom, span.top, VOLUME_FRAME_RGB, false);
+    return out;
+  }
+  const inner = { from: frame, to: width - frame, bottom: span.bottom + frame, top: span.top - frame };
+  // Низ, верх и две стойки — рама; стойки встают между низом и верхом, чтобы
+  // бруски не легли друг на друга: наложенных коплоскостных граней в сцене
+  // быть не должно.
+  quad(0, width, span.bottom, inner.bottom, VOLUME_FRAME_RGB, false);
+  quad(0, width, inner.top, span.top, VOLUME_FRAME_RGB, false);
+  quad(0, inner.from, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
+  quad(inner.to, width, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
+  quad(inner.from, inner.to, inner.bottom, inner.top, VOLUME_GLASS_RGB, true);
   return out;
 }
 
@@ -2948,7 +3017,9 @@ export function volumeScene(project, schemeId, options = {}) {
   for (const wall of walls) {
     const openings = openingsInWall(project, wall.id);
     for (const opening of openings) {
-      if (opening.kind === OPENING_KIND_DOOR && opening.id) doors.push(opening.id);
+      // Стеклянная дверь — дверь и здесь (таск 180): её открывают `E`, щелчком
+      // и касанием, и `R` открывает её вместе со всеми.
+      if (openingHasLeaf(opening.kind) && opening.id) doors.push(opening.id);
     }
     const height = wallHeights.get(wall.id);
     volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null);
