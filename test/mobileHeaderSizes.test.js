@@ -93,8 +93,10 @@ test("G259 и G295: прокрутка одна на колонку — и пр�
   // «какие разделы ниже» отвечает рейка заголовков, а не треть колонки.
   assert.equal(APP_CSS.includes("max-height: 34%"), false, "потолок в треть колонки вернулся");
   assert.equal(APP_CSS.includes("max-height: 62%"), false, "потолок разделу с полями вернулся");
-  // Заголовки по-прежнему липкие — ими колонка и остаётся проходимой.
-  assert.match(ruleBody(APP_CSS, ".panel__head"), /position: sticky;/);
+  // Заголовки по-прежнему держатся у кромок — ими колонка и остаётся
+  // проходимой. С таска 201 их ставит рейка, а не `position: sticky`: верх и
+  // низ считает одно место (`panels/rail.js`), и проверяется это там же.
+  assert.match(ruleBody(APP_CSS, ".panel__head"), /position: relative;/);
   // В листе снизу прокрутка остаётся у тела: лист — один раздел на весь экран.
   assert.match(ruleBody(APP_CSS, "#app.is-mobile .panel__body"), /overflow: auto;/);
 });
