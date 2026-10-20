@@ -48664,6 +48664,12 @@ const VOLUME_ORDER_TRIES = 12;
 const VOLUME_ORDER_SPLIT_COST = 8;
 /** Сколько раз выталкиваем тело из стен за шаг: угол держат два прохода. */
 const VOLUME_PUSH_PASSES = 4;
+/**
+ * Сотая доля миллиметра: ниже неё сдвиг считается нулевым, а «стало глубже» —
+ * не считается вовсе (D39). Заведомо меньше всего, что человек увидит, и
+ * заведомо больше погрешности, с которой миллиметры складываются в double.
+ */
+const VOLUME_PUSH_EPS_MM = 0.01;
 /** Светлота самой тёмной и самой светлой грани. */
 const VOLUME_SHADE_MIN = 0.46;
 const VOLUME_SHADE_MAX = 1;
@@ -48679,6 +48685,25 @@ const VOLUME_LIGHT = volumeNormalize({ x: -0.42, y: -0.33, z: -0.84 });
 // там тушь по бумаге, а тут поверхность комнаты, и затенение гонит её светлоту
 // в обе стороны. Поэтому палитра своя и к `mono.js` отношения не имеет —
 // объёмный вид не печатают.
+/**
+ * Тень на земле (D43): земля, помноженная на 0,72.
+ *
+ * Не «серый с прозрачностью» и не вторая палитра: тень — это та же земля, до
+ * которой не дошёл свет, и взята она от неё же. Сплошная, потому что тени
+ * соседних стен перекрываются, а дом отбрасывает **одно** пятно: сложи их
+ * прозрачностью — и в углу дома вышло бы вдвое темнее, чем вдоль стены.
+ *
+ * 0,72 — примерно то же отношение, что между самой светлой и самой тёмной
+ * гранью сцены (`VOLUME_SHADE_MIN` = 0,46 … 1): тень читается, но не чернит
+ * траву.
+ */
+const VOLUME_SHADOW_RGB = [89, 115, 67];
+/**
+ * Запас земли за тенью дома (D43): плита кончается не там, где кончается тень,
+ * а на три метра дальше. Своего числа у выноса нет — он считается от самой
+ * тени (`volumeShadowShift`), то есть от высоты стен и высоты солнца.
+ */
+const VOLUME_LAND_OUT_MM = 3000;
 const VOLUME_WALL_RGB = [216, 212, 204];
 const VOLUME_FLOOR_RGB = [170, 142, 110];
 const VOLUME_CEILING_RGB = [238, 238, 236];
@@ -48846,6 +48871,64 @@ function volumeAt(point, z) {
 }
 
 /**
+ * Куда уходит тень точки, поднятой на `heightMm` (D43).
+ *
+ * Кладёт её **солнце, нарисованное на небе** (`VOLUME_SUN_AT`), и это
+ * единственный разумный хозяин: тень, лежащая не в ту сторону от видимого
+ * солнца, кричит о подделке громче, чем её отсутствие.
+ *
+ * Лампа сцены (`VOLUME_LIGHT`) для этого не годится вовсе, и это стоит сказать
+ * прямо: у неё отрицательная `z` и светлее всех грань, **смотрящая вниз** (так
+ * сделано нарочно — «пол темнее потолка», требование заказчика ещё из таска
+ * 146). Светит она, выходит, снизу — а свет снизу тени на земле не кладёт.
+ * Лампа красит грани, солнце кладёт тень; смешивать их нельзя.
+ *
+ * Длина — из высоты солнца над горизонтом: `h / tg(rise)`. При 14° стена
+ * 2800 мм даёт тень 11 231 мм — длинную, как и положено низкому солнцу.
+ * Направление — ровно прочь от солнца: `az + 180°`.
+ */
+function volumeShadowShift(heightMm) {
+  const rise = Math.max(1, Number(VOLUME_SUN_AT.rise) || 0) * DEG;
+  const reach = Number(heightMm) / Math.tan(rise);
+  const away = (Number(VOLUME_SUN_AT.az) + 180) * DEG;
+  if (!Number.isFinite(reach)) return { x: 0, y: 0 };
+  return { x: Math.cos(away) * reach, y: Math.sin(away) * reach };
+}
+
+/**
+ * Силуэт тени прямой призмы: выпуклая оболочка её габарита и того же габарита,
+ * сдвинутого на вынос тени. Одной только сдвинутой крышкой обойтись нельзя —
+ * между стеной и её тенью осталась бы светлая щель, то есть ровно то «дом не
+ * касается земли», от которого всё и затевалось.
+ */
+function volumeShadowOutline(corners, heightMm) {
+  const shift = volumeShadowShift(heightMm);
+  const points = [];
+  for (const point of corners) {
+    points.push({ x: point.x, y: point.y });
+    points.push({ x: point.x + shift.x, y: point.y + shift.y });
+  }
+  return volumeHull(points);
+}
+
+/** Выпуклая оболочка (обход Эндрю). Точек мало — восемь на стену. */
+function volumeHull(points) {
+  const list = [...points].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+  if (list.length < 3) return list;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (source) => {
+    const out = [];
+    for (const point of source) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], point) <= 0) out.pop();
+      out.push(point);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(list), ...half([...list].reverse())];
+}
+
+/**
  * Прямая призма по плановому многоугольнику: боковые грани, верх и — если вещь
  * висит над полом — низ. Низ лежащей на полу вещи не рисуется вовсе: его
  * никогда не видно, а грань стоит кадра.
@@ -48979,6 +49062,138 @@ function volumeWallTiles(lengthMm, heightMm, openings) {
   return tiles.filter((tile) => tile.toMm > tile.fromMm && tile.topMm > tile.bottomMm);
 }
 
+// ——— ус на углу стен (G265, таск 178) ————————————————————————————————————
+//
+// Слова заказчика: «Внешние углы под 90 градусов в стенах сделай так же как
+// пофиксил столешницу». Столешница — полоса вещи чертежа, починенная усом по
+// биссектрисе в таске 169 (дефект D38), и беда у стен ровно та же.
+//
+// **Что было видно.** Стена рисуется коробкой с поперечными торцами по своей
+// оси. Две стены, сошедшиеся в вершине под 90°, кладут эти коробки крест-накрест:
+// квадрат со стороной в полтолщины с **внутренней** стороны угла покрыт дважды,
+// а такой же квадрат с **внешней** — не покрыт вовсе. На стене 100 мм это
+// квадрат 50 × 50 мм: снаружи дома в углу зияет вырез, сквозь который видно
+// землю и нутро стены, а внутри комнаты по углу идёт шов.
+//
+// **Чем стены отличаются от полосы.** У полосы вершины идут цепочкой: у звена
+// всегда ровно один сосед с каждой стороны, и ширина у всей полосы одна. Стены
+// — отдельные сущности: в вершине может сойтись три стены и больше, у соседок
+// бывает разная толщина и разная высота, а конец стены может упираться в
+// середину чужой. Поэтому ус ставится только там, где стык **однозначен**:
+//
+//   1. в вершине ровно **два** конца стен — тройник и крест пропускаются: у
+//      них нет одной биссектрисы, и какую пару сводить, сказать нечем;
+//   2. **высоты соседок равны** — иначе ус срезал бы торец, а над соседкой
+//      осталась бы дыра во всю разницу высот;
+//   3. стены **не вдоль одной прямой** — у развёрнутых на 180° кромки
+//      параллельны и не пересекаются вовсе (стык и так чистый);
+//   4. ус не длиннее `VOLUME_MITER_MAX` полутолщин — то же число и та же
+//      причина, что у полосы (D38): на острых углах ус уходит в бесконечность;
+//   5. ус короче самой стены — у стены в ладонь длиной оба уса съели бы её
+//      целиком и вывернули бы грани наизнанку.
+//
+// Толщины при этом могут быть **разными**: кромка каждой стены кончается там,
+// где встречает соответствующую кромку соседки, и обе стены считают эту точку
+// одинаково — стык выходит общим и без уговора между ними.
+//
+// **Препятствие не меняется** — ровно как в D38: `volumeWallSolids` остаётся
+// прямоугольником по оси. Цена названа прямо: внешний клин угла теперь
+// нарисован, но не держит; на стене 100 мм это треугольник с катетами 50 мм,
+// вдвое меньше радиуса тела, и дотянуться до него человек всё равно не может —
+// его держит сама стена.
+
+/** Какая кромка соседки отвечает кромке `side` этой стены. Ноль — вдоль одной прямой. */
+function volumeMiterSide(side, hereN, hereAway, thereN, thereAway) {
+  const here = hereN.x * thereAway.x + hereN.y * thereAway.y;
+  const there = thereN.x * hereAway.x + thereN.y * hereAway.y;
+  if (Math.abs(here) < VOLUME_MITER_EPS || Math.abs(there) < VOLUME_MITER_EPS) return 0;
+  return side * Math.sign(here) * Math.sign(there);
+}
+
+/**
+ * Где кончается кромка `side` стены, сходящейся с соседкой: отступ вдоль оси от
+ * общей вершины, в её сторону. Отрицательный — кромка уходит **за** вершину,
+ * то есть наружу угла. `null` — ус неприменим.
+ */
+function volumeMiterReach(side, here, there) {
+  const sideThere = volumeMiterSide(side, here.n, here.away, there.n, there.away);
+  if (sideThere === 0) return null;
+  const turn = here.away.x * there.away.y - here.away.y * there.away.x;
+  if (Math.abs(turn) < VOLUME_MITER_EPS) return null;
+  const from = { x: here.n.x * side * here.half, y: here.n.y * side * here.half };
+  const to = { x: there.n.x * sideThere * there.half, y: there.n.y * sideThere * there.half };
+  const gap = { x: to.x - from.x, y: to.y - from.y };
+  const reach = (gap.x * there.away.y - gap.y * there.away.x) / turn;
+  const limit = VOLUME_MITER_MAX * here.half;
+  return Math.max(-limit, Math.min(limit, reach));
+}
+
+/**
+ * Усы на концах стен: `Map` по идентификатору стены →
+ * `{start: {left, right} | null, end: {left, right} | null}`, где числа —
+ * координаты вдоль оси стены, на которых кончаются её левая и правая кромки.
+ * Без уса это 0 и длина.
+ *
+ * `heightOf(wall)` — высота стены в сцене: ус ставится только между стенами
+ * одной высоты (см. разбор выше).
+ */
+function volumeWallMiters(walls, heightOf = () => 0) {
+  const list = [];
+  for (const wall of walls || []) {
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    list.push({ wall, vectors, half: Math.abs(Number(wall.thicknessMm) || 0) / 2 });
+  }
+  const atCorner = new Map();
+  const keyOf = (point) => Math.round(Number(point.x)) + "," + Math.round(Number(point.y));
+  list.forEach((item, index) => {
+    for (const end of ["a", "b"]) {
+      const key = keyOf(end === "a" ? item.wall.aMm : item.wall.bMm);
+      if (!atCorner.has(key)) atCorner.set(key, []);
+      atCorner.get(key).push({ index, end });
+    }
+  });
+  const miters = new Map();
+  const seatOf = (index) => {
+    const id = list[index].wall.id;
+    if (!miters.has(id)) miters.set(id, { start: null, end: null });
+    return miters.get(id);
+  };
+  const faceOf = (item, end) => ({
+    n: item.vectors.n,
+    half: item.half,
+    // Куда стена уходит от общей вершины.
+    away: end === "a" ? item.vectors.u : { x: -item.vectors.u.x, y: -item.vectors.u.y },
+  });
+  for (const ends of atCorner.values()) {
+    if (ends.length !== 2) continue;
+    const [one, two] = ends;
+    if (one.index === two.index) continue;
+    const here = list[one.index];
+    const there = list[two.index];
+    if (!(here.half > 0) || !(there.half > 0)) continue;
+    if (Math.abs(Number(heightOf(here.wall)) - Number(heightOf(there.wall))) > 1) continue;
+    const hereFace = faceOf(here, one.end);
+    const thereFace = faceOf(there, two.end);
+    const cut = (item, face, other, end) => {
+      const left = volumeMiterReach(1, face, other);
+      const right = volumeMiterReach(-1, face, other);
+      if (left === null || right === null) return null;
+      // Ус длиннее стены: вывернул бы её грани наизнанку — оставляем торец.
+      if (Math.max(Math.abs(left), Math.abs(right)) >= item.vectors.len) return null;
+      return end === "a"
+        ? { left, right }
+        : { left: item.vectors.len - left, right: item.vectors.len - right };
+    };
+    const first = cut(here, hereFace, thereFace, one.end);
+    const second = cut(there, thereFace, hereFace, two.end);
+    if (!first || !second) continue;
+    seatOf(one.index)[one.end === "a" ? "start" : "end"] = first;
+    seatOf(two.index)[two.end === "a" ? "start" : "end"] = second;
+  }
+  return miters;
+}
+
 /**
  * Грани стены: две стороны, разбитые проёмами, два торца, верх; на каждый
  * проём — четыре грани его откосов, рама окну и полотно двери.
@@ -48988,7 +49203,7 @@ function volumeWallTiles(lengthMm, heightMm, openings) {
  * все двери будут закрыты». Раскрывается оно поимённо — `openDoorIds` — и живёт
  * это только в сеансе окна: в объект состояние двери не пишется (G68).
  */
-function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null) {
+function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null) {
   const vectors = wallVectors(wall);
   if (!vectors || !(heightMm > 0)) return out;
   const half = Number(wall.thicknessMm) / 2;
@@ -48997,6 +49212,10 @@ function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null)
     x: Number(wall.aMm.x) + u.x * along + n.x * across,
     y: Number(wall.aMm.y) + u.y * along + n.y * across,
   });
+  // Ус на углу (G265): кромка кончается не поперёк оси, а там, где встречает
+  // кромку соседки. Без соседки числа те же, что были, — 0 и длина.
+  const startOf = (side) => (miter && miter.start ? (side > 0 ? miter.start.left : miter.start.right) : 0);
+  const endOf = (side) => (miter && miter.end ? (side > 0 ? miter.end.left : miter.end.right) : len);
   for (const side of [1, -1]) {
     const normal = { x: n.x * side, y: n.y * side, z: 0 };
     const sideName = side > 0 ? "left" : "right";
@@ -49005,8 +49224,11 @@ function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null)
     // больше нет: порядок выкладывает дерево (`volumeOrderTree`), а вещь стоит
     // перед плоскостью стены на два миллиметра — этого дереву довольно.
     for (const tile of volumeWallTiles(len, heightMm, openings)) {
-      const from = at(tile.fromMm, half * side);
-      const to = at(tile.toMm, half * side);
+      // Крайние куски стороны дотягиваются до уса: внутренняя кромка угла
+      // отступает, внешняя выходит за вершину — и обе кончаются там же, где
+      // кромки соседки.
+      const from = at(tile.fromMm === 0 ? startOf(side) : tile.fromMm, half * side);
+      const to = at(tile.toMm === len ? endOf(side) : tile.toMm, half * side);
       // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
       // стороне концы меняются местами.
       const first = side > 0 ? to : from;
@@ -49026,6 +49248,9 @@ function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null)
     }
   }
   for (const end of [0, 1]) {
+    // Сведённый ус торца не имеет вовсе: там стена переходит в соседку, и
+    // поперечная грань встала бы внутри угла, споря с её же кромками.
+    if (end === 0 ? miter && miter.start : miter && miter.end) continue;
     const along = end === 0 ? 0 : len;
     const normal = { x: u.x * (end === 0 ? -1 : 1), y: u.y * (end === 0 ? -1 : 1), z: 0 };
     const left = at(along, half);
@@ -49040,7 +49265,9 @@ function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null)
   }
   out.push(
     volumeFace(
-      [at(0, half), at(len, half), at(len, -half), at(0, -half)].map((point) => volumeAt(point, heightMm)),
+      [at(startOf(1), half), at(endOf(1), half), at(endOf(-1), -half), at(startOf(-1), -half)].map((point) =>
+        volumeAt(point, heightMm),
+      ),
       VOLUME_WALL_RGB,
       { normal: { x: 0, y: 0, z: 1 } },
     ),
@@ -50883,6 +51110,7 @@ function volumeScene(project, schemeId, options = {}) {
       faces: [],
       order: null,
       solids: [],
+      objectBoxes: [],
       rooms: [],
       boundsMm: null,
       doors: [],
@@ -50911,20 +51139,83 @@ function volumeScene(project, schemeId, options = {}) {
   //
   // Помещения не обведены — плита и есть единственный пол, и красится полом:
   // назвать её землёй значило бы сказать, что пола в доме нет.
+  //
+  // **Плита идёт с выносом** (D43): земля под домом не может кончаться ровно по
+  // осям наружных стен — иначе ей не на чем держать тень дома, которая уходит
+  // от стены на полторы высоты. Вынос считается от высоты, а не взят на глаз:
+  // `VOLUME_LAND_OUT` высот от габарита во все стороны.
+  const wallHeights = new Map();
+  for (const wall of walls) {
+    const left = wallHeightOnSide(project, wall.id, "left");
+    const right = wallHeightOnSide(project, wall.id, "right");
+    wallHeights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm);
+  }
+  const tallest = walls.reduce((most, wall) => Math.max(most, wallHeights.get(wall.id) || 0), schemeHeight.mm || 0);
   if (bounds) {
     const land = rooms.length > 0;
+    const shadow = volumeShadowShift(tallest);
+    const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
     faces.push(
       volumeFace(
         volumeClockwise([
-          { x: bounds.minX, y: bounds.minY },
-          { x: bounds.maxX, y: bounds.minY },
-          { x: bounds.maxX, y: bounds.maxY },
-          { x: bounds.minX, y: bounds.maxY },
+          { x: bounds.minX - out, y: bounds.minY - out },
+          { x: bounds.maxX + out, y: bounds.minY - out },
+          { x: bounds.maxX + out, y: bounds.maxY + out },
+          { x: bounds.minX - out, y: bounds.maxY + out },
         ]).map((point) => volumeAt(point, 0)),
         land ? VOLUME_LAND_RGB : VOLUME_FLOOR_RGB,
         { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_BASE, flat: land },
       ),
     );
+  }
+  // **Тень дома на земле** (дефект D43). Слова заказчика по снимку обзора: «дом
+  // всё ещё летает, а не стоит на земле».
+  //
+  // Разбор числами. Плита и земля сведены в один тон ещё в G237, и сведены
+  // верно: замер пикселей живого кадра — `123,160,93` и у самой стены, и в семи
+  // метрах от дома, тон в тон. Но ровно поэтому в кадре **не осталось ничего,
+  // что говорило бы о поверхности**: плита кончается по осям наружных стен
+  // (габарит 9200 × 8700 мм на объекте заказчика), за ней геометрии нет вовсе —
+  // поле панорамы рисуется заливкой ниже строки горизонта, а в обзоре (наклон
+  // −42°, поле 972 × 778) горизонт стоит на `y = −48` точки, то есть **выше
+  // кадра**: вся высота поля залита одним плоским цветом. Ни растяжки, ни
+  // затенения (плита `flat`), ни тени — глазу не за что зацепиться, и дом
+  // читается наклейкой на зелёном листе.
+  //
+  // Поэтому в сцену добавлена **тень**: единственная примета касания, которой
+  // не было. Кладёт её солнце с неба (`volumeShadowShift`): при его высоте 14°
+  // стена 2800 мм даёт тень 11 231 мм, и ложится она ровно прочь от солнца.
+  //
+  // Тень — это силуэт: выпуклая оболочка габарита стены и того же габарита,
+  // сдвинутого на вынос. Рисуется **сплошным** тоном без затенения, поэтому
+  // наложение теней соседних стен не темнеет вдвое и дом отбрасывает одно пятно.
+  //
+  // Кладётся она только на землю — то есть когда помещения обведены и плита
+  // работает землёй. Нет обводки — плита сама пол, и тень легла бы внутри дома.
+  // Внутри дома её не видно и так: полы помещений рисуются **после** неё.
+  if (rooms.length > 0) {
+    for (const wall of walls) {
+      const vectors = wallVectors(wall);
+      if (!vectors) continue;
+      const height = wallHeights.get(wall.id) || 0;
+      if (!(height > 0)) continue;
+      const corners = volumeBoxCorners(
+        {
+          x: Number(wall.aMm.x) + vectors.u.x * (vectors.len / 2),
+          y: Number(wall.aMm.y) + vectors.u.y * (vectors.len / 2),
+        },
+        vectors.u,
+        vectors.len,
+        Number(wall.thicknessMm),
+      );
+      faces.push(
+        volumeFace(
+          volumeClockwise(volumeShadowOutline(corners, height)).map((point) => volumeAt(point, 0)),
+          VOLUME_SHADOW_RGB,
+          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND, flat: true },
+        ),
+      );
+    }
   }
   for (const room of rooms) {
     faces.push(
@@ -50949,15 +51240,17 @@ function volumeScene(project, schemeId, options = {}) {
   // Все двери схемы: по этому списку хоткей «все двери» (G210) знает, что
   // открывать, не спрашивая объект второй раз.
   const doors = [];
+  // Высоты посчитаны выше, до плиты: по ним идёт вынос земли и тень дома (D43),
+  // по ним же сводятся углы (G265) — ус ставится только между стенами одной
+  // высоты.
+  const miters = volumeWallMiters(walls, (wall) => wallHeights.get(wall.id) || 0);
   for (const wall of walls) {
     const openings = openingsInWall(project, wall.id);
     for (const opening of openings) {
       if (opening.kind === OPENING_KIND_DOOR && opening.id) doors.push(opening.id);
     }
-    const left = wallHeightOnSide(project, wall.id, "left");
-    const right = wallHeightOnSide(project, wall.id, "right");
-    const height = Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm;
-    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null);
+    const height = wallHeights.get(wall.id);
+    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
     // **Пол под стеной** (дефект D37). Слова заказчика: «под дверными проёмами
@@ -51022,17 +51315,43 @@ function volumeScene(project, schemeId, options = {}) {
       });
     }
   }
+  // Габариты вещей: **не препятствия** (G264), а места, которые заняты.
+  // Разница — в следующем абзаце.
+  const objectBoxes = [];
   for (const object of objects) {
-    // Рисуется модель или габарит — решает одно место (`volumeObjectFaces`), а
-    // **держит человека по-прежнему габарит**: пройти между ножек стола так же
-    // неверно, как пройти сквозь шкаф, и столкновения модель не касаются.
-    // Посчитай их врозь — и однажды нарисованный шкаф окажется не там, где он
-    // не пускает.
+    // Рисуется модель или габарит — решает одно место (`volumeObjectFaces`).
+    //
+    // **Сквозь вещи проходят** (G264, таск 178). Слова заказчика: «Сделай что
+    // бы объекты можно было проходить на сквозь, убери коллизию». Было
+    // наоборот: габарит вещи держал человека, и это было задумано — «пройти
+    // между ножек стола так же неверно, как пройти сквозь шкаф».
+    //
+    // Отменено это не капризом, а тем, ради чего объём и открывают: в нём
+    // смотрят метки. Метка за диваном, розетка в тумбе, щит, к которому не
+    // подойти вплотную, — каждая вещь отнимала у человека подход к своим же
+    // точкам, а обойти её в квартире часто негде. С таска 169 вещи ещё и
+    // просвечивают: смотреть сквозь шкаф можно, а подойти нельзя — это разные
+    // правила об одном и том же, и заказчик свёл их в одно.
+    //
+    // **Стены остались**: сквозь них нельзя, это правило таска 146 и его никто
+    // не отменял. Вещь — мебель, её двигают; стена — дом.
+    //
+    // **Лестница и колонна проходятся тоже.** Они вещи каталога и исключением
+    // не стали: список исключений завёл бы второго хозяина правила (тот же
+    // довод, что у прозрачности в таске 169), а «конструкция» — это не признак
+    // данных, а догадка о замысле. Цена названа прямо: сквозь колонну и короб
+    // проходят насквозь, а в лестницу входят внутрь марша. Переход по этажам от
+    // этого не пострадал — он спрашивается по расстоянию до габарита
+    // (`volumeStairNear`), а не по упору в него, и теперь срабатывает ещё
+    // вернее: встать можно прямо на лестницу.
     volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces);
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
       if (!volumePrismBlocks(prism)) continue;
       const solid = volumePrismSolid(prism);
-      if (solid) solids.push(solid);
+      // Габарит остаётся в сцене, но не в `solids`: по нему выбирается место,
+      // с которого начинают ходить (`volumeStart`) — вставать внутрь дивана
+      // незачем и без столкновений.
+      if (solid) objectBoxes.push(solid);
     }
   }
   // Метки — последними: их тела и контуры ложатся в тот же поток граней, что
@@ -51054,6 +51373,10 @@ function volumeScene(project, schemeId, options = {}) {
     // Дерево порядка строится здесь, один раз на сцену: кадру остаётся обход.
     order: volumeOrderTree(faces),
     solids,
+    // Занятые места: габариты вещей, которые человека **не держат** (G264), но
+    // по которым видно, где в комнате пусто. Ими пользуется только выбор места
+    // старта; ходьба, перенос и «тесно» спрашивают `solids`.
+    objectBoxes,
     rooms,
     boundsMm: bounds,
     // На сколько нарисованное выходит за габарит чертежа: стена стоит на всю
@@ -51195,6 +51518,11 @@ function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM) {
 function volumeStart(scene) {
   const rooms = [...(scene.rooms || [])].sort((a, b) => volumeArea(b.pointsMm) - volumeArea(a.pointsMm));
   const solids = scene.solids || [];
+  // Место выбирается **и по вещам** (G264): сквозь них теперь проходят, но
+  // открывать окно с камерой внутри дивана незачем — просторным считается то,
+  // где нет ни стены, ни мебели. Выталкивает же человека по-прежнему только
+  // стена: вещь не препятствие, и толкаться ей нечем.
+  const roomy = [...solids, ...(scene.objectBoxes || [])];
   const candidates = [];
   for (const room of rooms.slice(0, 1)) {
     const xs = room.pointsMm.map((point) => point.x);
@@ -51208,7 +51536,7 @@ function volumeStart(scene) {
       for (let iy = 1; iy < steps; iy += 1) {
         const point = { x: minX + ((maxX - minX) * ix) / steps, y: minY + ((maxY - minY) * iy) / steps };
         if (!volumePointInside(point, room.pointsMm)) continue;
-        candidates.push({ point, room, free: volumeFreeMm(solids, point.x, point.y) });
+        candidates.push({ point, room, free: volumeFreeMm(roomy, point.x, point.y) });
       }
     }
   }
@@ -51236,16 +51564,72 @@ function volumeStart(scene) {
 }
 
 /**
- * Выталкивание тела из стен. Круг против повёрнутого прямоугольника: уходим по
- * той оси, по которой пересечение меньше, — так тело скользит вдоль стены, а
- * не останавливается, уткнувшись. Четыре прохода держат угол, где давят сразу
- * две стены.
+ * Насколько глубоко тело радиуса `radius` сидит в препятствиях: ноль — не сидит
+ * вовсе. Мерка та же, по которой выталкивает `volumePush`, и это не удобство, а
+ * условие: шаг сверяет «стало ли хуже» ровно с тем, что выталкивание умеет
+ * разобрать, — разойдись они, и человек то застревал бы на ровном месте, то
+ * проваливался бы в стену.
+ */
+function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM) {
+  let deep = 0;
+  for (const solid of solids || []) {
+    if (!volumeSolidBlocks(solid, headMm)) continue;
+    const dx = x - solid.cx;
+    const dy = y - solid.cy;
+    const overAlong = solid.half + radius - Math.abs(dx * solid.ux + dy * solid.uy);
+    const overAcross = solid.halfT + radius - Math.abs(dx * solid.nx + dy * solid.ny);
+    if (overAlong <= 0 || overAcross <= 0) continue;
+    deep = Math.max(deep, Math.min(overAlong, overAcross));
+  }
+  return deep;
+}
+
+/**
+ * Выталкивание тела из стен. Круг против повёрнутого прямоугольника: из каждого
+ * препятствия уходим по той оси, по которой пересечение меньше, — так тело
+ * скользит вдоль стены, а не останавливается, уткнувшись.
+ *
+ * ——— дефект D39: «застревает и начинает прыгать» ——————————————————————————
+ *
+ * Слова заказчика: «когда ходишь иногда где-то застревает и начинает прыгать,
+ * хотя жму движение на клавиатуре». Прыгала не стойка — прыгало **место**.
+ *
+ * Прежде проходы шли по препятствиям **по очереди**, и каждое двигало тело
+ * сразу: последнее слово оставалось за последним в списке. Там, где два
+ * препятствия требуют разного, это не сходится никогда, а **чередуется**, и
+ * чередуется с частотой кадров. Замер на объекте заказчика (25 стен, 8
+ * помещений, сетка проб 50 мм — 32 375 точек):
+ *
+ *   - **402 точки (1,2 %)**, где четыре прохода не разводят тело **одними
+ *     стенами**; с вещами их было 666 (2,1 %) — то есть уборка столкновений у
+ *     вещей (G264) убрала треть случаев и не вылечила ни одного;
+ *   - разбор одной такой точки: две параллельные стены по 100 мм, оси в 350 мм
+ *     друг от друга — просвет между гранями **250 мм** против диаметра тела
+ *     **440 мм**. Нижняя стена толкает на +190 мм, верхняя тут же на −190 мм,
+ *     и так каждый кадр: человек стоит на месте и дёргается на 190 мм шестьдесят
+ *     раз в секунду. Повтори выталкивание хоть двадцать пять раз — остаток тот
+ *     же 190: это не «мало проходов», это цикл длиной два;
+ *   - второй разбор — стена против габарита вещи: 218 мм, тот же цикл.
+ *
+ * Чинится это двумя правилами, и оба здесь:
+ *
+ *   1. **Проход считает все препятствия разом и складывает их требования**
+ *      (сумма векторов), а потом двигает тело один раз. Порядок препятствий
+ *      перестал решать что-либо: в углу две стены дают диагональ и расходятся
+ *      за проход, а в тесном месте их требования гасят друг друга в ноль — и
+ *      тело **стоит ровно**, вместо того чтобы прыгать между двумя положениями.
+ *   2. **Шаг не принимает положение хуже прежнего** (`volumeStep`): если после
+ *      выталкивания тело сидит глубже, чем стояло, шаг не делается вовсе.
+ *
+ * Угол при этом держится так же, как держался: четыре прохода остались.
  */
 function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
   let x = at.x;
   let y = at.y;
   for (let pass = 0; pass < VOLUME_PUSH_PASSES; pass += 1) {
-    let moved = false;
+    let sx = 0;
+    let sy = 0;
+    let pressed = false;
     for (const solid of solids) {
       // Присевший проходит под высоким (G234): препятствие, которое кончается
       // ниже его макушки, тела не касается вовсе.
@@ -51257,18 +51641,23 @@ function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
       const overAlong = solid.half + radius - Math.abs(along);
       const overAcross = solid.halfT + radius - Math.abs(across);
       if (overAlong <= 0 || overAcross <= 0) continue;
-      moved = true;
+      pressed = true;
       if (overAcross <= overAlong) {
         const sign = across >= 0 ? 1 : -1;
-        x += solid.nx * sign * overAcross;
-        y += solid.ny * sign * overAcross;
+        sx += solid.nx * sign * overAcross;
+        sy += solid.ny * sign * overAcross;
       } else {
         const sign = along >= 0 ? 1 : -1;
-        x += solid.ux * sign * overAlong;
-        y += solid.uy * sign * overAlong;
+        sx += solid.ux * sign * overAlong;
+        sy += solid.uy * sign * overAlong;
       }
     }
-    if (!moved) break;
+    if (!pressed) break;
+    // Требования погасили друг друга: место теснее тела, и уходить отсюда
+    // некуда. Стоим — это и есть лекарство от дрожи.
+    if (Math.abs(sx) < VOLUME_PUSH_EPS_MM && Math.abs(sy) < VOLUME_PUSH_EPS_MM) break;
+    x += sx;
+    y += sy;
   }
   return { x, y };
 }
@@ -51288,8 +51677,30 @@ function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
   const length = Math.hypot(dx, dy);
   const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
   let point = { x: at.x, y: at.y };
+  // Насколько глубоко человек сидит в препятствиях **сейчас**. Обычно ноль;
+  // не ноль бывает после переноса кликом, перехода по этажам и правки чертежа
+  // под ногами — и тогда выход из этого места тоже должен быть возможен.
+  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm);
   for (let index = 0; index < parts; index += 1) {
-    point = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
+    const want = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
+    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm);
+    // **Хуже не становится** (D39). Выталкивание разобрало не всё — значит
+    // место теснее тела, и шаг туда не делается вовсе: человек остаётся там,
+    // где стоял, вместо того чтобы дрожать между двумя положениями.
+    if (deep > depth + VOLUME_PUSH_EPS_MM) break;
+    // **Стало свободнее — идём не глядя.** Это выход из тесного места, куда
+    // человека могло занести переносом или правкой чертежа: единственное
+    // правило там — «лишь бы наружу».
+    if (deep > depth - VOLUME_PUSH_EPS_MM) {
+      // **Назад от нажатой клавиши не пятимся** (D39, второе правило). Клин из
+      // двух стен умеет вытолкнуть тело дальше, чем был шаг, — и тогда человек
+      // скачет между двумя местами, нажимая «вперёд». Скольжение вдоль стены
+      // это правило не трогает: там ход поперёк, а не назад.
+      const went = (want.x - point.x) * dx + (want.y - point.y) * dy;
+      if (went < -VOLUME_PUSH_EPS_MM * length) break;
+    }
+    point = want;
+    depth = deep;
   }
   return point;
 }
@@ -51441,7 +51852,33 @@ function volumeMoveTo(scene, at, headMm = VOLUME_HEAD_MM) {
   const point = bounds
     ? { x: inside(at.x, bounds.minX, bounds.maxX), y: inside(at.y, bounds.minY, bounds.maxY) }
     : { x: at.x, y: at.y };
-  return volumePush((scene && scene.solids) || [], point, VOLUME_BODY_MM, headMm);
+  const solids = (scene && scene.solids) || [];
+  const pushed = volumePush(solids, point, VOLUME_BODY_MM, headMm);
+  if (volumeDepthMm(solids, pushed.x, pushed.y, VOLUME_BODY_MM, headMm) <= 0) return pushed;
+  // **Вытолкнуть некуда — ищем рядом** (D39). Показали в место теснее тела: в
+  // щель между стеной и перегородкой, в толщу стены на дальнем конце луча, в
+  // угол ниши. Прежде человека там и оставляли — он оказывался зажат и дёргался
+  // на каждом нажатии; это и был главный вход в дефект, потому что ходьбой в
+  // такие места не попасть (в объекте заказчика все 390 щелей закрыты стенами).
+  //
+  // Поиск — кольцами по 100 мм до трёх метров, шестнадцать направлений в
+  // кольце: берётся первое свободное место, то есть **ближайшее**. Три метра —
+  // полкомнаты: дальше перенос перестал бы отвечать на «туда».
+  const found = volumeFreeSpotNear(solids, pushed, headMm);
+  return found || pushed;
+}
+
+/** Ближайшее к `at` место, где тело помещается целиком. `null` — не нашлось. */
+function volumeFreeSpotNear(solids, at, headMm = VOLUME_HEAD_MM, reachMm = 3000, stepMm = 100) {
+  for (let radius = stepMm; radius <= reachMm; radius += stepMm) {
+    for (let turn = 0; turn < 16; turn += 1) {
+      const angle = (turn * Math.PI) / 8;
+      const spot = { x: at.x + Math.cos(angle) * radius, y: at.y + Math.sin(angle) * radius };
+      const pushed = volumePush(solids, spot, VOLUME_BODY_MM, headMm);
+      if (volumeDepthMm(solids, pushed.x, pushed.y, VOLUME_BODY_MM, headMm) <= 0) return pushed;
+    }
+  }
+  return null;
 }
 
 /**
@@ -53356,6 +53793,53 @@ function volumeMinimapBox(box, bounds) {
   return { x: 14, y: box.height - height - 14, width, height };
 }
 
+/** Поля внутри миникарты: чертёж не прижимается к её кромке. */
+const VOLUME_MINIMAP_PAD = 8;
+
+/**
+ * Мост между миникартой и чертежом: прямоугольник накладки и перевод
+ * «миллиметр → точка поля».
+ *
+ * Одна мерка на двоих — на рисование карты и на попадание по ней (G270).
+ * Считай их врозь, и щелчок однажды поедет мимо того места, которое человек
+ * видел под курсором.
+ */
+function volumeMinimapView(box, bounds) {
+  const place = volumeMinimapBox(box, bounds);
+  if (!place) return null;
+  const zoom = Math.min(
+    (place.width - VOLUME_MINIMAP_PAD * 2) / bounds.widthMm,
+    (place.height - VOLUME_MINIMAP_PAD * 2) / bounds.heightMm,
+  );
+  return {
+    place,
+    zoom,
+    offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
+    offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
+  };
+}
+
+/**
+ * Куда на чертеже показали щелчком по миникарте (G270). `null` — мимо карты.
+ *
+ * Слова заказчика: «В режиме от первого лица при клике курсором на миникарте
+ * телепортируй туда». Карта показывает план сверху — значит и щелчок по ней
+ * значит место на плане, а не направление взгляда: за дверь, в дальнюю
+ * комнату, на другой конец коридора.
+ *
+ * Чистая и вынесена наружу ради теста: промах здесь — это «ткнул в кухню, а
+ * оказался в ванной», и ловить его глазами дорого.
+ */
+function volumeMinimapAt(box, bounds, at) {
+  const view = volumeMinimapView(box, bounds);
+  if (!view || !at) return null;
+  const { place, zoom } = view;
+  if (!(zoom > 0)) return null;
+  if (at.x < place.x || at.x > place.x + place.width) return null;
+  if (at.y < place.y || at.y > place.y + place.height) return null;
+  return { x: (at.x - view.offsetX) / zoom, y: (at.y - view.offsetY) / zoom };
+}
+
 // ——— присед и прыжок пальцем (таск 163, G242) ——————————————————————————
 //
 // «на интерфейсе для планшетов и смартфонов добавь кнопки прыжкак и присяда».
@@ -54134,9 +54618,10 @@ function createVolume({ api, hosts }) {
   // свои пороги в экранных точках, и на миникарте стена короче порога.
 
   function paintMinimap(box) {
-    const place = volumeMinimapBox(box, scene.boundsMm);
-    if (!place) return;
     const bounds = scene.boundsMm;
+    const spot = volumeMinimapView(box, bounds);
+    if (!spot) return;
+    const place = spot.place;
     const state = getState();
     ctx.save();
     ctx.beginPath();
@@ -54147,16 +54632,8 @@ function createVolume({ api, hosts }) {
     ctx.strokeStyle = "rgba(31, 35, 40, 0.35)";
     ctx.stroke();
     ctx.clip();
-    const pad = 8;
-    const zoom = Math.min(
-      (place.width - pad * 2) / bounds.widthMm,
-      (place.height - pad * 2) / bounds.heightMm,
-    );
-    const view = {
-      zoom,
-      offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
-      offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
-    };
+    const zoom = spot.zoom;
+    const view = { zoom, offsetX: spot.offsetX, offsetY: spot.offsetY };
     // Без подписей: буквы углов и имена объектов на накладке в двести точек
     // слипаются в кашу, а заказчик просил «только схема и местоположение».
     drawDrawing(ctx, {
@@ -54814,6 +55291,35 @@ function createVolume({ api, hosts }) {
     // было никакого.
     if (!scene.empty) {
       const at = atEvent(event);
+      // ——— щелчок по миникарте переносит (G270) ———
+      //
+      // «В режиме от первого лица при клике курсором на миникарте телепортируй
+      // туда». Карта — накладка поверх кадра, и щелчок по ней принадлежит ей,
+      // а не тому, что за ней: иначе человек, ткнувший в дальнюю комнату,
+      // открывал бы дверь, случайно оказавшуюся под картой.
+      //
+      // Под захваченной мышью карта щелчка не берёт: курсора там нет вовсе, и
+      // прицел стоит посреди поля (таск 159) — щёлкать по углу экрана нечем.
+      //
+      // Куда человек встанет, решает **то же правило, что у переноса кликом по
+      // полу** (G212): `volumeMoveTo` выталкивает тело из стены и ставит
+      // вплотную к ней, а место теснее тела меняет на ближайшее свободное
+      // (D39). Второго правила «куда можно встать» в сборке нет.
+      if (view === "person" && !locked) {
+        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at);
+        if (spot) {
+          const moved = volumeMoveTo(scene, spot, volumeStanceHead(stance));
+          person.x = moved.x;
+          person.y = moved.y;
+          // Перенесли присевшего — под низким он остался или вышел, решает
+          // новое место (G234); у лестницы спросит про этаж, как при ходьбе.
+          stanceRecheck();
+          syncWhere();
+          stairCheck();
+          paint();
+          return;
+        }
+      }
       const door = volumeDoorAt(shown, at.x, at.y);
       const choice = aimChoiceAt(at, door);
       // Дверь, по которой щёлкнули, остаётся под рукой: E распоряжается ею и
