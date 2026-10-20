@@ -14,7 +14,8 @@ import {
   BLOCK_LABEL_SEPARATOR,
   BLOCK_STEP_RATIO,
   LINE_STYLES,
-  OPENING_KIND_DOOR,
+  OPENING_GLASS_FRAME_MM,
+  OPENING_KIND_GLASS_DOOR,
   SHAPE_NAMES,
   blockLabel,
   blockLabelParts,
@@ -35,6 +36,7 @@ import {
   markLabelLeader,
   markPointer,
   listedTypes,
+  openingHasLeaf,
   openingsInWall,
   outlinesInOrder,
   planOriginOf,
@@ -5051,7 +5053,7 @@ function drawDrawingHandles(ctx, bridge, { walls, objects, active, activeOpening
     return;
   }
   if (active.kind === "opening") {
-    if (!activeOpening || activeOpening.opening.kind !== OPENING_KIND_DOOR) return;
+    if (!activeOpening || !openingHasLeaf(activeOpening.opening.kind)) return;
     const leaf = drawingDoorLeaf(activeOpening.wall, activeOpening.opening);
     if (!leaf) return;
     handle(ctx, bridge.toScreen(leaf.hinge));
@@ -5157,6 +5159,13 @@ function drawDrawingWall(ctx, bridge, wall, active) {
  * Проём в стене: разрыв до бумаги, два косяка поперёк стены и — по виду — то,
  * что его называет. Окно — ниткой стекла вдоль середины, арка — пунктиром,
  * проём без полотна — ничем, дверь — створкой с дугой.
+ *
+ * **Стеклянная дверь** (таск 180) рисуется той же створкой и той же дугой —
+ * четыре состояния у неё те же, и различать их человек должен тем же рисунком,
+ * — но полотно у неё не линия, а контур: рама по краю, бумага внутри. Это и
+ * есть «с рамой, но не глухая, а по центру стекло» в плановой проекции, и это
+ * тот же приём, которым на плане отличается окно: стекло — незакрашенное
+ * место, обведённое по контуру.
  */
 export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
   const span = drawingOpeningSpan(wall, opening);
@@ -5204,11 +5213,16 @@ export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
     ctx.lineTo(to.x, to.y);
     ctx.stroke();
     ctx.setLineDash([]);
-  } else if (opening.kind === OPENING_KIND_DOOR) {
+  } else if (openingHasLeaf(opening.kind)) {
     drawDrawingDoor(ctx, bridge, wall, opening, colour);
   }
   ctx.restore();
 }
+
+// Полотно стеклянной двери на плане тоньше рамы не бывает: при мелком масштабе
+// 90 мм рамы дают меньше точки, и контур слился бы в ту же линию, что у
+// глухого полотна. Три точки — наименьшее, на чём двойная линия ещё двойная.
+const DRAWING_GLASS_MIN_PX = 3;
 
 function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   const leaf = drawingDoorLeaf(wall, opening);
@@ -5217,12 +5231,16 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   const closed = bridge.toScreen(leaf.closed);
   const tip = bridge.toScreen(leaf.tip);
   const radius = Math.hypot(tip.x - hinge.x, tip.y - hinge.y);
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = colour;
-  ctx.beginPath();
-  ctx.moveTo(hinge.x, hinge.y);
-  ctx.lineTo(tip.x, tip.y);
-  ctx.stroke();
+  if (opening.kind === OPENING_KIND_GLASS_DOOR) {
+    drawDrawingGlassLeaf(ctx, hinge, tip, Math.max(DRAWING_GLASS_MIN_PX, OPENING_GLASS_FRAME_MM * bridge.pxPerMm), colour);
+  } else {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = colour;
+    ctx.beginPath();
+    ctx.moveTo(hinge.x, hinge.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+  }
   if (radius > 1) {
     const start = Math.atan2(closed.y - hinge.y, closed.x - hinge.x);
     const end = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
@@ -5240,6 +5258,34 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   }
   // Ручки петли и края створки — в последнем слое (`drawDrawingHandles`): здесь
   // они ложились под буквы углов, а кружок буквы ровно на конце стены и стоит.
+}
+
+/**
+ * Остеклённое полотно: контур рамы от петли до кончика, внутри бумага.
+ *
+ * Считается в экранных точках по двум концам полотна — тем же, которыми
+ * рисуется глухое, — и поэтому поворот подложки достаётся ему даром: своей
+ * нормали в миллиметрах здесь не выводится, как не выводит её и сам проём.
+ */
+function drawDrawingGlassLeaf(ctx, hinge, tip, thickness, colour) {
+  const dx = tip.x - hinge.x;
+  const dy = tip.y - hinge.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const half = thickness / 2;
+  const nx = (dy / len) * half;
+  const ny = (-dx / len) * half;
+  // Бумага внутри — это и есть стекло: закрашенное полотно читалось бы глухим.
+  ctx.beginPath();
+  ctx.moveTo(hinge.x + nx, hinge.y + ny);
+  ctx.lineTo(tip.x + nx, tip.y + ny);
+  ctx.lineTo(tip.x - nx, tip.y - ny);
+  ctx.lineTo(hinge.x - nx, hinge.y - ny);
+  ctx.closePath();
+  ctx.fillStyle = DRAWING_PAPER;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = colour;
+  ctx.stroke();
 }
 
 /**
@@ -5820,6 +5866,19 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     ctx.lineWidth = 1.5 * unit;
     ctx.strokeStyle = DRAWING_EDGE;
     ctx.strokeRect(x, top, width, height);
+    // Стеклянная дверь (таск 180): на развёртку она смотрит лицом, и здесь
+    // видно ровно то, что просил заказчик, — рама по контуру, стекло в
+    // середине. Рама отложена внутрь на свою ширину, а не нарисована двойной
+    // линией на глаз: число одно на план, развёртку и объём.
+    if (opening.kind === OPENING_KIND_GLASS_DOOR) {
+      const inset = OPENING_GLASS_FRAME_MM * scale;
+      // Рама съела бы всё полотно на мелком масштабе — тогда стекла нет вовсе,
+      // и рисовать его незачем: дверь остаётся обведённым проёмом.
+      if (width > inset * 2.5 && height > inset * 2.5) {
+        ctx.lineWidth = 1 * unit;
+        ctx.strokeRect(x + inset, top + inset, width - inset * 2, height - inset * 2);
+      }
+    }
     if (opening.hinge) {
       const hingeX = opening.hinge === "start" ? x : x + width;
       ctx.setLineDash([4 * unit, 3 * unit]);
