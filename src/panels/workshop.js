@@ -191,6 +191,7 @@ import {
 } from "../objectCatalog.js";
 import { objectTileIcon, openObjectPicker } from "./objectPicker.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
+import { screenPlaceDrawing, screenPlaceTake } from "../screenPlace.js";
 import { createFieldPlate } from "./plate.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
@@ -3615,6 +3616,11 @@ function createWorkshop({ api, hosts }) {
     if (!ctx) return;
     const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
     const box = viewport();
+    // Где стоит середина поля — в миллиметрах чертежа (G276, таск 178). Это
+    // говорится на каждый кадр, а не при уходе из режима: вид мастерской
+    // никуда наружу не отдаётся, и спросить её потом будет некому. Цена —
+    // присваивание одной ссылки на кадр.
+    screenPlaceDrawing(schemeId, screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view));
     // Бумага заливается по настоящим точкам холста, а не по его размеру в
     // стилевых пикселях: при дробном `devicePixelRatio` округление оставляло
     // по краю незакрашенную полосу в один пиксель — прозрачную, а не белую.
@@ -4417,6 +4423,15 @@ function createWorkshop({ api, hosts }) {
     // клавиатуру себе.
     if ("screen" in changed && state.screen === "drawing") {
       resize();
+      // Объём мог оставить просьбу встать серединой на человека (G276, таск
+      // 178): переключение режима переносит взгляд, а не бросает человека там,
+      // где он был в прошлый раз. Масштаб при этом не трогается — переносится
+      // место, а не приближение.
+      const want = screenPlaceTake(schemeId);
+      if (want) {
+        const box = viewport();
+        view = { ...view, offsetX: box.width / 2 - want.x * view.zoom, offsetY: box.height / 2 - want.y * view.zoom };
+      }
       sync();
       if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
     }

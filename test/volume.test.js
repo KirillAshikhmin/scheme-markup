@@ -166,6 +166,8 @@ import {
   volumeKeyMove,
   volumeMinimapBox,
   volumeMinimapAt,
+  volumePlanCentre,
+  volumePlanViewAt,
   volumeMinimapView,
   volumeNotes,
   volumeFieldBottom,
@@ -179,6 +181,13 @@ import {
   volumeUnplacedTitle,
   volumeWhere,
 } from "../src/panels/volume.js";
+import {
+  screenPlaceDrawing,
+  screenPlaceForget,
+  screenPlaceOfDrawing,
+  screenPlaceTake,
+  screenPlaceWant,
+} from "../src/screenPlace.js";
 import { elevationNote } from "../src/panels/elevation.js";
 import { plateUnseen } from "../src/panels/plate.js";
 import { strings, text } from "../src/strings.js";
@@ -1881,6 +1890,59 @@ test("щелчок по миникарте читается местом на п
   assert.equal(volumeMinimapAt(box, bounds, { x: middle.x, y: place.y - 5 }), null);
   // Карты нет вовсе — переносить нечем.
   assert.equal(volumeMinimapAt({ width: 420, height: 580 }, bounds, middle), null);
+});
+
+// ——— общее место трёх режимов (G276) ————————————————————————————————————
+//
+// «При переключении Схема - Чертёж - объём мы должны находиться в одном
+// месте… центр схемы\чертежа это расположение камеры в объёме».
+
+test("середина поля плана читается местом на чертеже и ставится обратно (G276)", () => {
+  const scene = planProject();
+  const box = { width: 900, height: 600 };
+  const view = { zoom: 0.5, offsetX: 120, offsetY: -40 };
+  const middle = volumePlanCentre(scene.project, scene.schemeId, box, view);
+  assert.ok(middle, "моста план → миллиметры нет");
+  // Поставить вид на то же место — и середина поля не сдвинется ни на
+  // миллиметр: два перевода обязаны сойтись.
+  const back = volumePlanViewAt(scene.project, scene.schemeId, box, view, middle);
+  assert.equal(back.zoom, view.zoom, "масштаб трогать нельзя — его выбрал человек");
+  const again = volumePlanCentre(scene.project, scene.schemeId, box, back);
+  assert.ok(Math.abs(again.x - middle.x) <= 1 && Math.abs(again.y - middle.y) <= 1, "место уехало: " + JSON.stringify([middle, again]));
+  // Показать на точку чертежа — середина поля встаёт ровно на неё.
+  const want = { x: 2500, y: -1200 };
+  const put = volumePlanViewAt(scene.project, scene.schemeId, box, view, want);
+  const got = volumePlanCentre(scene.project, scene.schemeId, box, put);
+  assert.ok(Math.abs(got.x - want.x) <= 1 && Math.abs(got.y - want.y) <= 1, "встали не туда: " + JSON.stringify(got));
+});
+
+test("без калибровки плана переносить нечем — и это молчание, а не ошибка (G276)", () => {
+  const bare = addScheme(createProject(), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
+  const box = { width: 900, height: 600 };
+  const view = { zoom: 1, offsetX: 0, offsetY: 0 };
+  assert.equal(volumePlanCentre(bare.project, bare.scheme.id, box, view), null);
+  assert.equal(volumePlanViewAt(bare.project, bare.scheme.id, box, view, { x: 0, y: 0 }), null);
+  // И чужой схемы тоже нет.
+  assert.equal(volumePlanCentre(bare.project, "нет такой", box, view), null);
+});
+
+test("мастерская говорит, где стоит, и забирает просьбу один раз (G276)", () => {
+  screenPlaceForget();
+  assert.equal(screenPlaceOfDrawing("схема-1"), null, "на пустом месте мастерская молчит");
+  screenPlaceDrawing("схема-1", { x: 1500, y: -800 });
+  assert.deepEqual(screenPlaceOfDrawing("схема-1"), { x: 1500, y: -800 });
+  // Чужая схема — чужое место: этаж сменили, и середина прежнего не годится.
+  assert.equal(screenPlaceOfDrawing("схема-2"), null);
+  // Просьба забирается ровно один раз: второй вход в чертёж не должен
+  // возвращать человека туда, откуда он уже ушёл руками.
+  screenPlaceWant("схема-1", { x: -200, y: 400 });
+  assert.deepEqual(screenPlaceTake("схема-1"), { x: -200, y: 400 });
+  assert.equal(screenPlaceTake("схема-1"), null);
+  // И просьба к чужой схеме не исполняется.
+  screenPlaceWant("схема-1", { x: 1, y: 2 });
+  assert.equal(screenPlaceTake("схема-2"), null);
+  screenPlaceForget();
+  assert.equal(screenPlaceTake("схема-1"), null);
 });
 
 test("перенос по миникарте не ставит в стену: работает то же правило, что у пола (G270, G212)", () => {

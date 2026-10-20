@@ -37,8 +37,17 @@ import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
 import { gesturePinchOf, gesturePinchStep } from "../gestures.js";
-import { WALL_HEIGHT_FALLBACK_MM, findRoom, findScheme, schemeFloorOf, schemeObjectsOnScheme } from "../model.js";
-import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
+import {
+  WALL_HEIGHT_FALLBACK_MM,
+  findRoom,
+  findScheme,
+  planFractionToMm,
+  planMmToFraction,
+  schemeFloorOf,
+  schemeObjectsOnScheme,
+} from "../model.js";
+import { drawDrawing, drawingUnitBridge, planToScreen, screenToPlan, visibleMarks } from "../render.js";
+import { screenPlaceOfDrawing, screenPlaceWant } from "../screenPlace.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -339,6 +348,56 @@ export function volumeMinimapView(box, bounds) {
     offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
     offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
   };
+}
+
+// ——— общее место трёх режимов (G276, таск 178) ———————————————————————————
+//
+// «При переключении Схема - Чертёж - объём мы должны находиться в одном
+// месте… центр схемы\чертежа это расположение камеры в объёме. Ну и учитывай
+// что может попасть на стены и т.д. тогда сдвигай».
+//
+// Объём здесь — **ось переноса**, и это не вольность, а прямое чтение слов: в
+// них место названо расположением камеры, а схема с чертежом — тем, что этому
+// месту следует. Поэтому правил ровно два:
+//
+//   1. входим в объём — камера встаёт туда, где была середина того поля, с
+//      которого пришли (схема или чертёж);
+//   2. выходим из объёма — и схема, и чертёж встают серединой на человека.
+//
+// Схему объём правит сам: её вид лежит в состоянии приложения (`view`), и
+// перевод «середина поля ↔ миллиметры чертежа» считается теми же двумя
+// функциями модели, которыми живёт весь чертёж (`planFractionToMm`,
+// `planMmToFraction`). Мастерская держит свой вид при себе — с ней объём
+// говорит через `screenPlace.js`.
+//
+// **Где это неприменимо:** у схемы без калибровки (план не привязан к
+// миллиметрам) моста между долями и миллиметрами нет вовсе — обе функции
+// отвечают `null`, и перенос молча не делается. Так же молчит он и у схемы без
+// подложки, где вид плана не значит ничего.
+
+/** Середина поля плана в миллиметрах чертежа. `null` — моста нет. */
+export function volumePlanCentre(project, schemeId, box, view) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme) return null;
+  const point = screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
+  return planFractionToMm(project, schemeId, point);
+}
+
+/**
+ * Вид плана, у которого середина поля смотрит на точку чертежа. Масштаб не
+ * трогается: человек его выбрал, и менять его при смене режима значило бы
+ * отнять у него выбор — переносится **место**, а не приближение.
+ */
+export function volumePlanViewAt(project, schemeId, box, view, pointMm) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme) return null;
+  const point = planMmToFraction(project, schemeId, pointMm);
+  if (!point) return null;
+  const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
+  const at = planToScreen(point, scheme, { zoom, offsetX: 0, offsetY: 0 });
+  return { zoom, offsetX: box.width / 2 - at.x, offsetY: box.height / 2 - at.y };
 }
 
 /**
@@ -1068,6 +1127,55 @@ function createVolume({ api, hosts }) {
       return { at: { x: person.x, y: person.y, z: volumeStanceEye(stance) }, yaw: person.yaw, pitch: person.pitch };
     }
     return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance);
+  }
+
+  // ——— общее место трёх режимов (G276) ———
+  //
+  // Разбор правила — у `volumePlanCentre` выше. Здесь две руки: встать туда,
+  // откуда пришли, и оставить своё место тем, к кому уходим.
+
+  /**
+   * Пришли в объём: камера встаёт на середину того поля, с которого пришли.
+   *
+   * **Попали в стену — сдвигаем** (слова заказчика). Сдвигает то же правило,
+   * что у переноса кликом по полу и по миникарте: `volumeMoveTo` выталкивает
+   * тело из стены и ставит вплотную к её грани, а место теснее тела меняет на
+   * ближайшее свободное (D39). Второго правила «куда можно встать» в сборке
+   * нет, и заводить его здесь было бы третьим ответом на тот же вопрос.
+   */
+  function placeArrive(state) {
+    if (scene.empty) return;
+    const want =
+      volumeCameFrom() === "drawing"
+        ? screenPlaceOfDrawing(schemeId)
+        : volumePlanCentre(state.project, schemeId, viewport(), state.view);
+    if (!want) return;
+    const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
+    person.x = moved.x;
+    person.y = moved.y;
+    // Обзор смотрит на то же место: вид переключают, не выходя из режима, и
+    // разойдись они — человек увидел бы со стороны не ту комнату, в которой
+    // только что стоял.
+    around = { ...around, target: { ...around.target, x: moved.x, y: moved.y } };
+    // Встал присевший под низкое или вышел из-под него — решает новое место.
+    stanceRecheck();
+    syncWhere();
+  }
+
+  /**
+   * Уходим из объёма: схема и чертёж встают серединой на человека.
+   *
+   * Масштаб обоих полей остаётся прежним — переносится место, а не
+   * приближение: масштаб человек выбрал сам, и менять его за него значило бы
+   * отнять выбор, о котором не просили.
+   */
+  function placeLeave(state) {
+    if (scene.empty) return;
+    const at = { x: person.x, y: person.y };
+    // Мастерская свой вид держит при себе — ей оставляют просьбу.
+    screenPlaceWant(schemeId, at);
+    const next = volumePlanViewAt(state.project, schemeId, viewport(), state.view, at);
+    if (next) setState({ view: next });
   }
 
   function viewport() {
@@ -2640,13 +2748,17 @@ function createVolume({ api, hosts }) {
           followScheme(state);
           return;
         }
-        // Режим включили — поле снова на экране: перемерить его и забрать
-        // клавиатуру себе.
+        // Режим включили — поле снова на экране: перемерить его, встать туда,
+        // где человек был на прежнем поле (G276), и забрать клавиатуру себе.
         if ("screen" in changed && state.screen === "volume") {
           resize();
+          placeArrive(state);
           sync();
           if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
+        // Режим сменили на другой — оставляем схеме и чертежу то место, где
+        // стоял человек (G276).
+        if ("screen" in changed && state.screen !== "volume") placeLeave(state);
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
         if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
@@ -2680,6 +2792,12 @@ function createVolume({ api, hosts }) {
 
   sync();
   resize();
+  // Первый вход в режим: человек встаёт туда, где была середина поля, с
+  // которого пришли (G276). Обзор при этом по-прежнему открывается **всей
+  // схемой** — это решение таска 146 («показать заказчику» начинается с общего
+  // вида), и оно с переносом не спорит: место достаётся человеку, а не рамке
+  // первого кадра. Переключил вид на первое лицо — стоит там, где показывал.
+  placeArrive(getState());
   if (!scene.empty) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
   return { destroy };
@@ -2713,6 +2831,15 @@ export function volumeHasDrawing(project, schemeId) {
 // объём не заходил, незачем. Собранная, она живёт дальше и в чужих режимах —
 // гаснет, но помнит, где стоит человек, какие двери открыты и какой этаж.
 let volumeSurface = null;
+// Какой режим показан сейчас и какой был до него (G276): по второму объём
+// решает, у кого спросить место — у схемы или у чертежа.
+let volumeScreenNow = null;
+let volumeScreenBefore = null;
+
+/** Режим, из которого пришли в объём. `null` — страницу открыли в нём. */
+export function volumeCameFrom() {
+  return volumeScreenBefore;
+}
 
 function mountVolumeScreen(host, api) {
   const { getState, subscribe } = api;
@@ -2735,8 +2862,17 @@ function mountVolumeScreen(host, api) {
   };
 
   subscribe((state, changed) => {
+    // Откуда пришли (G276). Считается **здесь**, а не в самой поверхности:
+    // поверхности может ещё не быть вовсе — в первый раз её собирает этот же
+    // обработчик, и первый вход в объём обязан знать прежний режим так же
+    // точно, как все следующие.
+    if ("screen" in changed && state.screen !== volumeScreenNow) {
+      volumeScreenBefore = volumeScreenNow;
+      volumeScreenNow = state.screen;
+    }
     if ("screen" in changed || "schemeId" in changed || "project" in changed) build();
   });
+  volumeScreenNow = getState().screen;
   build();
 }
 
