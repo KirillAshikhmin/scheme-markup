@@ -516,10 +516,31 @@ body {
 #app[data-screen="scheme"] [data-section-id="markList"],
 #app[data-screen="scheme"] [data-section-id="properties"],
 #app[data-screen="drawing"] [data-section-id="drawTools"],
-#app[data-screen="drawing"] [data-section-id="drawList"],
+#app[data-screen="drawing"] [data-section-id="drawWalls"],
+#app[data-screen="drawing"] [data-section-id="drawOpenings"],
+#app[data-screen="drawing"] [data-section-id="drawObjects"],
 #app[data-screen="volume"] [data-section-id="volumeTools"],
 #app[data-screen="volume"] [data-section-id="markList"] {
   display: flex;
+}
+
+/* ——— одна прокрутка на правую колонку чертежа (таск 187) ———————————————
+   В «Чертеже» растущих списков в колонке три — стены, проёмы, объекты, — и
+   общее правило дало бы каждому свой ползунок: три полосы прокрутки одна под
+   другой, да ещё рядом с ползунком самой колонки. Поэтому здесь правило левой
+   колонки (G259): каждый раздел стоит на высоте своего содержимого, листается
+   колонка целиком, а убирает с глаз лишнее то, чем заказчик и просил их
+   сделать — сворачивание заголовком.
+
+   Списка меток это не касается: в «Схеме» и в «Объёме» он по-прежнему растущий
+   со своей прокруткой к выделенной строке. */
+#app[data-screen="drawing"] #panel-right .panel__section {
+  flex: 0 0 auto;
+  max-height: none;
+}
+
+#app[data-screen="drawing"] #panel-right .panel__body {
+  overflow: visible;
 }
 
 #canvas-empty {
