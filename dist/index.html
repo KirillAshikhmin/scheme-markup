@@ -59531,6 +59531,9 @@ function createVolume({ api, hosts }) {
   // небом на первой же правке ускорения. Отсюда и частота: раз в секунду, а при
   // остановленном времени таймера нет вовсе (G282) — полоса стоит и не мигает.
   const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } });
+  // Что на полосе уже написано: с плавными светилами снимок часа считается
+  // тридцать раз в секунду, а минута на полосе столько раз не меняется.
+  let clockSaid = { value: null, line: null };
   // Подсказка по управлению — плашка **слева** со знаком «?» (G228): правило
   // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
   // стоит сводка, а ещё правее — кнопка полноэкранного показа.
@@ -59849,11 +59852,20 @@ function createVolume({ api, hosts }) {
   function syncClockLine(stamp, nowMs) {
     clockNode.hidden = scene.empty;
     if (scene.empty) return;
-    clockNode.textContent = text("volume.clockCorner", {
+    const value = text("volume.clockCorner", {
       date: volumeDateShort(stamp.day),
       time: volumeClockText(stamp.minutes),
     });
     const line = volumeParamsLine(volumeParamsClock(nowMs), stamp.minutes, hour ? hour.phase : null);
+    // **Пишем, только когда написанное изменилось** (таск 192). Полоса живёт в
+    // снимке часа, а снимок с отметкой «Плавные светила» считается тридцать раз
+    // в секунду — без этой проверки узел переписывался бы тридцать раз в
+    // секунду ради той же минуты: лишние перерисовки строки и повторное
+    // объявление `aria-label` читалкой. Минута на полосе меняется ровно так
+    // часто, как идёт время: раз в секунду при ×60 и шестнадцать раз при ×960.
+    if (clockSaid.value === value && clockSaid.line === line) return;
+    clockSaid = { value, line };
+    clockNode.textContent = value;
     clockNode.title = line;
     clockNode.setAttribute("aria-label", line);
   }
