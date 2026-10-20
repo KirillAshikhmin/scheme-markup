@@ -117,7 +117,7 @@ import {
   volumeAroundCamera,
   volumeAroundFit,
   volumeAroundPan,
-  volumeAroundPitch,
+  volumeAroundStand,
   volumeClipNear,
   volumeClipDepth,
   volumeFaceSide,
@@ -2494,18 +2494,66 @@ test("в тесном месте окно говорит об этом слов�
   assert.ok(volumeFreeMm(built.solids, wall.x, wall.y) > VOLUME_NEAR_MM);
 });
 
-test("обзор не ныряет под крышу: наклон ограничен расстоянием", () => {
+test("камера обзора не ныряет под крышу: место зажато расстоянием", () => {
   const lift = 1900;
-  // Отошли далеко — можно смотреть почти вдоль земли, но всё же сверху.
-  const far = volumeAroundPitch(0, 20000, lift);
-  assert.ok(far < 0, "обзор всегда смотрит сверху: " + far);
+  // Отошли далеко — стоять можно почти вдоль земли, но всё же сверху.
+  const far = volumeAroundStand(0, 20000, lift);
+  assert.ok(far < 0, "камера обзора всегда выше цели: " + far);
   assert.ok(Math.abs(Math.sin(-far) * 20000 - lift) < 1, "подъём над целью ровно по крыше");
-  // Подошли вплотную — вид становится отвесным.
-  assert.ok(volumeAroundPitch(0, 2000, lift) < volumeAroundPitch(0, 20000, lift));
+  // Подошли вплотную — место становится отвесным.
+  assert.ok(volumeAroundStand(0, 2000, lift) < volumeAroundStand(0, 20000, lift));
   // Ближе, чем крыша высока, — почти отвес, и за него не заходим.
-  assert.ok(volumeAroundPitch(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
-  // Круче ограничения смотреть не запрещено — запрещено положе.
-  assert.ok(volumeAroundPitch(-1.2, 20000, lift) < far);
+  assert.ok(volumeAroundStand(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
+  // Круче ограничения стоять не запрещено — запрещено положе.
+  assert.ok(volumeAroundStand(-1.2, 20000, lift) < far);
+  // Крыши нет (стенд, тест) — зажат один отвес.
+  assert.equal(volumeAroundStand(0.4, 20000, 0), 0.4);
+  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
+  assert.ok(Math.abs(volumeAroundStand(Math.PI / 2, 20000, 0) - limit) < 1e-9, "за отвес не заводится");
+});
+
+test("обзор задирает взгляд к небу, а камеру оставляет над крышей (G298)", () => {
+  // Та самая беда, из-за которой предел стоял: цель на полу, семь метров.
+  const lift = 1900;
+  const target = { x: 0, y: 0, z: 1200 };
+  const sky = (60 * Math.PI) / 180;
+  const camera = volumeAroundCamera(target, 0.4, sky, 7000, lift);
+  // Взгляд — тот, что задали: солнце в полдень лета стоит на 58°, и смотреть
+  // туда обзор теперь вправе.
+  assert.equal(camera.pitch, sky);
+  // А место камеры — прежнее, по крыше: подъём над целью ровно `lift`, и внутрь
+  // стены соседней комнаты она не попадает ни на миллиметр.
+  assert.ok(Math.abs(camera.at.z - (target.z + lift)) < 1, "камера съехала с крыши: " + camera.at.z);
+  // Больше крыши её поднимает только собственный наклон, и ниже неё она не
+  // опускается ни на каком взгляде — пройдём весь диапазон.
+  for (let deg = -85; deg <= 85; deg += 5) {
+    const at = volumeAroundCamera(target, 0.4, (deg * Math.PI) / 180, 7000, lift).at;
+    assert.ok(at.z >= target.z + lift - 1, "на " + deg + "° камера нырнула к полу: " + Math.round(at.z));
+  }
+  // Задранный взгляд камеру с места **не сдвигает**: от предела и выше она
+  // стоит там же, где стояла.
+  const edge = volumeAroundCamera(target, 0.4, volumeAroundStand(0, 7000, lift), 7000, lift);
+  assert.deepEqual(camera.at, edge.at);
+  // Приближение на задранном взгляде — шаг камеры к цели, а не поворот головы:
+  // взгляд тот же, место ближе и круче.
+  const near = volumeAroundCamera(target, 0.4, sky, 3500, lift);
+  assert.equal(near.pitch, sky);
+  assert.ok(Math.hypot(near.at.x, near.at.y) < Math.hypot(camera.at.x, camera.at.y), "камера не подошла");
+  assert.ok(near.at.z >= target.z + lift - 1, "подошедшая камера ушла под крышу");
+  // Опущенный взгляд — как было до таска 195: место и взгляд одно и то же.
+  const down = (-70 * Math.PI) / 180;
+  assert.deepEqual(
+    volumeAroundCamera(target, 0.4, down, 7000, lift),
+    volumeAroundCamera(target, 0.4, down, 7000, 0),
+    "опущенный взгляд перестал ставить камеру по себе",
+  );
+});
+
+test("щелчок по небу в обзоре никуда не переносит", () => {
+  // Луч из задранного кадра в пол не упирается — и выдуманной точки не бывает.
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 1200 }, 0.4, (60 * Math.PI) / 180, 7000, 1900);
+  const box = { width: 1200, height: 700 };
+  assert.equal(volumeFloorAt(camera, box, box.width / 2, 40), null);
 });
 
 // ——— карта возится двумя пальцами (таск 174, G256) ————————————————————————
@@ -2589,6 +2637,22 @@ test("поправка на наклон есть, но у горизонта н
   // самого взгляда, и ответ не ноль и не NaN.
   const flat = volumeAroundPan({ yaw: 0, pitch: 0, distance: 9000 }, box, 0, 100);
   assert.ok(Number.isFinite(flat.dx) && Math.abs(flat.dx) > 0, "вдоль земли ответ есть: " + JSON.stringify(flat));
+});
+
+test("на задранном взгляде карта едет туда же, а не наоборот (таск 195)", () => {
+  // Рысканье ноль — экранное «вверх» это +x плана. Опущенный взгляд: палец
+  // вверх — карта вверх, цель вперёд.
+  const box = panBox;
+  const down = volumeAroundPan({ yaw: 0, pitch: (-40 * Math.PI) / 180, distance: 9000 }, box, 0, -100);
+  const up = volumeAroundPan({ yaw: 0, pitch: (40 * Math.PI) / 180, distance: 9000 }, box, 0, -100);
+  // Задрали взгляд на столько же вверх — сторона та же. Считай сторону по
+  // экранному «верху», как до таска 195, и знак бы перевернулся: карта поехала
+  // бы от пальца в обратную сторону.
+  assert.ok(down.dx < 0 && up.dx < 0, "сторона перевернулась: " + down.dx.toFixed(1) + " против " + up.dx.toFixed(1));
+  assert.ok(Math.abs(Math.abs(up.dx) - Math.abs(down.dx)) < 1e-9, "мера сжатия пола зависит от знака наклона");
+  // Поперёк взгляда задранность не значит ничего: пол сжат вдоль, а не поперёк.
+  const across = volumeAroundPan({ yaw: 0, pitch: (40 * Math.PI) / 180, distance: 9000 }, box, 100, 0);
+  assert.ok(across.dy < 0 && Math.abs(across.dx) < 1e-6, "поперёк сбилось: " + JSON.stringify(across));
 });
 
 test("клавиши разложены по осям камеры, а стрелки влево-вправо вертят", () => {
