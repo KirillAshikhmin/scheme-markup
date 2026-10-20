@@ -2943,6 +2943,31 @@
   min-width: 0;
 }
 
+/* Столбец разделов окна свойств. Не `.export__body`, у которой своя нижняя
+   мера ширины в 520 точек: окно свойств открывают и из выгрузки на узком
+   экране, и там эта мера давала окну боковую прокрутку — поймано живым
+   прогоном на пятистах точках. */
+.modal__sections {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ——— разделы окна (таск 188) ————————————————————————————————————————
+   В свойствах объекта три раздела: сам объект, место и графы штампа. Набранный
+   тем же кеглем, что подписи полей, заголовок раздела читался бы четвёртой
+   подписью — живой прогон это и показал. Отделяет его волосяная линия, а не
+   кегль: окно и так плотное, а крупный заголовок спорил бы с именем окна. */
+.modal__section {
+  border-top: 1px solid var(--panel-line);
+  color: var(--panel-text);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+  padding-top: 10px;
+  text-transform: uppercase;
+}
+
 /* Отказ модели (например «Этаж — целое число») остаётся в окне строкой: окно
    не закрывается, и набранное не теряется. Пустая строка места не занимает. */
 .modal__error {
@@ -6645,7 +6670,7 @@ const strings = {
     objectResize: "габарит объекта чертежа",
     objectTurn: "поворот объекта чертежа",
     objectPoint: "вершина объекта чертежа",
-    stamp: "данные для штампа",
+    projectProps: "свойства объекта",
     scaleSet: "масштаб плана",
     typeSizes: "размеры по умолчанию",
     scaleClear: "снятие масштаба плана",
@@ -6743,6 +6768,14 @@ const strings = {
     // нулевой; половины этажа не бывает.
     schemeFloorInvalid: "Этаж — целое число: «1», «2», «0» или «-1» для подвала",
     schemeFloorRange: "Этаж — число от {min} до {max}",
+    // Координаты объекта (таск 188). Главный вид — пара из карты; отказ
+    // перечисляет то, что принимается, иначе человек не угадает, чем не
+    // угодила его строка.
+    coordsInvalid:
+      "Координаты — широта и долгота из карты: «55.7558, 37.6173». Принимаются и градусы с минутами: «55°45′21″N 37°37′02″E»",
+    coordsRange: "Широта — от -{lat} до {lat}, долгота — от -{lon} до {lon}",
+    azimuthInvalid: "Направление верха — градусы числом: «0», «90», «237,5»",
+    azimuthRange: "Направление верха — градусы от -360 до 360",
     scalePointsInvalid: "Калибровке нужны две точки на плане",
     scaleMetersInvalid: "Расстояние между точками — число больше нуля, в метрах",
     scaleMetersTooBig: "Расстояние между точками — не больше {max} м",
@@ -7069,8 +7102,10 @@ const strings = {
     switch: "Переключить объект",
     create: "Новый объект",
     createTitle: "Создать объект",
-    rename: "Переименовать объект",
-    renameTitle: "Имя объекта",
+    // Карандаш в шапке открывает свойства объекта (таск 188, G283): прежде он
+    // открывал одно имя, а адрес, координаты и графы штампа жили порознь —
+    // графы вообще за кнопкой в окне выгрузки.
+    props: "Свойства объекта",
     namePlaceholder: "Квартира на Ленина",
     remove: "Удалить объект",
     removeTitle: "Удалить объект?",
@@ -7085,6 +7120,43 @@ const strings = {
     // выглядит как «открыть план», а не «принести объект целиком».
     welcomeFile: "Объект с другой машины или от напарника приходит файлом проекта — откройте его.",
     empty: "Объектов пока нет",
+  },
+  projectProps: {
+    title: "Свойства объекта",
+    open: "Свойства объекта",
+    openHint: "Имя, адрес, координаты, направление верха чертежа и графы штампа",
+    name: "Имя объекта",
+    address: "Адрес объекта",
+    addressPlaceholder: "Москва, ул. Ленина, 14, кв. 56",
+    addressHint:
+      "Адрес встаёт в графу штампа «Наименование здания» — там, где лист не сужен помещением: лист по комнате называет комнату.",
+    place: "Место",
+    coords: "Координаты: широта, долгота",
+    coordsPlaceholder: "55.7558, 37.6173",
+    coordsHint:
+      "Как в карте: скопируйте пару чисел и вставьте. Принимаются и градусы с минутами. По координатам объём считает рассвет и закат; без них берутся 9:00 и 21:00.",
+    top: "Направление верха чертежа, °",
+    topPlaceholder: "0",
+    // Подпись обязана объяснить отсчёт: без неё половина людей отсчитает
+    // градусы в другую сторону, и окна южной стороны будут освещены как
+    // северные.
+    topHint:
+      "Градусы от севера по часовой стрелке: 0° — верх плана смотрит на север, 90° — на восток, 180° — на юг, 270° — на запад.",
+    topFacing: "Верх чертежа смотрит на {rhumb}",
+    topOnlyVolume:
+      "Направление читает только объём — по нему он ставит солнце и месяц. План, чертёж, развёртка и выгрузки от него не меняются.",
+    rhumbs: {
+      n: "север",
+      ne: "северо-восток",
+      e: "восток",
+      se: "юго-восток",
+      s: "юг",
+      sw: "юго-запад",
+      w: "запад",
+      nw: "северо-запад",
+    },
+    stamp: "Данные для штампа",
+    saved: "Свойства объекта сохранены",
   },
   schemes: {
     add: "Загрузить план",
@@ -8545,8 +8617,6 @@ const strings = {
       "Закроет это окно и переведёт холст в калибровку: два клика по концам известного отрезка и расстояние в метрах. Выбранные формат и множитель не потеряются.",
     tooSmall: "На бумаге подписи мельче 2,5 мм — на листе их не прочитать. Возьмите формат крупнее или уменьшите план.",
     pages: "Листов: {count}",
-    stampButton: "Данные для штампа",
-    stampTitle: "Данные для штампа",
     stampHint:
       "Графы основной надписи. Пустые остаются пустыми — лист выходит и без них. Наименование объекта и чертежа берутся из имени объекта и схемы, лист и дата считаются при выгрузке.",
     stampCode: "Обозначение (шифр) документа",
@@ -8557,7 +8627,6 @@ const strings = {
     stampChecker: "Проверил",
     stampApprover: "Утвердил",
     stampOrg: "Организация",
-    stampSaved: "Данные для штампа сохранены",
     roleChecker: "Пров.",
     roleApprover: "Утв.",
     labels: {
@@ -15501,6 +15570,312 @@ function setProjectStamp(project, patch = {}) {
   return { project: withProject(project, { stamp }), stamp: next, changed: true };
 }
 
+// ——— где стоит объект: адрес, координаты, направление верха чертежа ————
+//
+// Таск 188 (требования G283 и G284). Слова заказчика: «в свойствах проекта
+// (новый раздел, там данные что в данных для штампа, адрес, координаты и т.д.)
+// можно указать координаты и тогда по ним надо считать», и отдельно про верх:
+// «Сейчас же по умолчанию у схемы сверху север? А в жизни не всегда так, надо
+// указать направление, куда указывает верх чертежа. В градусах».
+//
+// Три вопроса, но один ответ на «чьё это свойство»: `project.site` — объекта, а
+// не схемы и не метки. Адрес и координаты одни на весь дом; направление — тоже
+// свойство дома, повернуть второй этаж относительно первого нельзя.
+//
+// **Направление ничего не рисует.** Решение заказчика: «направление живёт в
+// свойствах объекта и влияет по сути только на 3д сцену». Ни план, ни чертёж,
+// ни развёртка, ни выгрузки его не спрашивают — его читает объём, когда ставит
+// солнце и месяц (таск 181). Держит это `test/projectSite.test.js`: поворот
+// направления не меняет ни одной нарисованной линии и ни одной строки CSV, а
+// заодно сверяет по исходникам, что ключ никому, кроме объёма, не виден.
+//
+// **Поля необязательные все до единого** (G68; образец — `floor` схемы и
+// `view.gridStepMm`): пустое значение ключ **удаляет**, а когда опустели все —
+// удаляется и сам `site`. Объект, которому ничего этого не задавали, остаётся
+// байт в байт прежним файлом, и `FORMAT_VERSION` ради поля не поднят. Чтение
+// терпимое нарочно: мусор в ключе (чужая версия, правка файла руками) читается
+// как «не задано» и объект не роняет.
+
+// Адрес — одна строка: «Москва, ул. Ленина, 14, кв. 56». Двести знаков с
+// запасом хватает и на садовое товарищество с длинным именем.
+const PROJECT_ADDRESS_MAX = 200;
+const PROJECT_LAT_MAX = 90;
+const PROJECT_LON_MAX = 180;
+// Шесть знаков после точки — это одиннадцать сантиметров на земле. Больше в
+// координатах дома смысла нет: их берут из карты, где палец крупнее дома.
+const PROJECT_COORDS_DECIMALS = 6;
+// Верх чертежа смотрит на север, пока не сказано иное. Ноль — это и есть
+// «север», поэтому в файл он не пишется: объект без направления и объект, где
+// направление задали нулём, — это один и тот же объект.
+const PROJECT_TOP_AZIMUTH_DEFAULT = 0;
+
+// Румбы: восемь сторон по 45°, север начинается за 22,5° до нуля. Нужны, чтобы
+// окно сказало словом то, что человек набрал числом, — «90°» и «смотрит на
+// восток» вместе не дают отсчитать градусы в обратную сторону.
+const AZIMUTH_RHUMBS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+
+/** Румб направления: ключ стороны света для подписи. */
+function azimuthRhumb(deg) {
+  const value = (((Number(deg) || 0) % 360) + 360) % 360;
+  return AZIMUTH_RHUMBS[Math.round(value / 45) % 8];
+}
+
+function siteText(raw, limit) {
+  // Переводы строк из буфера схлопываются в пробел: адрес — одна строка, а
+  // перенос в ней разложит отрисовка по ширине поля.
+  return String(raw == null ? "" : raw).replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function siteRound(value, decimals) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+// Число из файла: вне диапазона и не число — «не задано».
+function siteDegrees(raw, limit) {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || Math.abs(raw) > limit) return null;
+  return siteRound(raw, PROJECT_COORDS_DECIMALS);
+}
+
+function siteAzimuth(raw) {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return PROJECT_TOP_AZIMUTH_DEFAULT;
+  const value = siteRound(((raw % 360) + 360) % 360, 1);
+  return value >= 360 ? 0 : value;
+}
+
+// ——— разбор координат ————————————————————————————————————————————————
+//
+// Человек берёт координаты из карты и вставляет как есть: «55.7558, 37.6173».
+// Это главный вид, и он обязан проходить без правки руками. Рядом с ним без
+// лишнего кода ложатся ещё три: пробел вместо запятой, запятая вместо точки
+// («55,7558 37,6173» — так копирует карта в русской локали) и градусы с
+// минутами из энциклопедии («55°45′21″N 37°37′02″E»).
+//
+// **Мусор не угадывается.** Одно число, три числа, буквы, «Москва» — отказ
+// строкой в окне: набранного человек не теряет, а молча подставленная точка
+// увела бы солнце в другую страну. Буквы сторон света требуются парой и разных
+// осей: по одной букве непонятно, к какому из двух чисел она относится, а
+// «55N 37N» — это не точка.
+
+const COORD_UNITS = new Map([
+  ["°", "deg"],
+  ["'", "min"],
+  ["′", "min"],
+  ["’", "min"],
+  ['"', "sec"],
+  ["″", "sec"],
+  ["”", "sec"],
+]);
+
+const COORD_HEMIS = new Map([
+  ["N", { axis: "lat", sign: 1 }],
+  ["S", { axis: "lat", sign: -1 }],
+  ["E", { axis: "lon", sign: 1 }],
+  ["W", { axis: "lon", sign: -1 }],
+  ["С", { axis: "lat", sign: 1 }],
+  ["Ю", { axis: "lat", sign: -1 }],
+  ["В", { axis: "lon", sign: 1 }],
+  ["З", { axis: "lon", sign: -1 }],
+]);
+
+const COORD_NUMBER = /(-?\d+(?:[.,]\d+)?)\s*(°|'|′|’|"|″|”)?/g;
+
+// Число с единицей и его знак. Минус живёт отдельно от величины: «-55°45′» —
+// это минус у всей группы, а не у градусов внутри неё.
+function coordTokens(source) {
+  const tokens = [];
+  for (const match of source.matchAll(COORD_NUMBER)) {
+    tokens.push({
+      value: Math.abs(Number(match[1].replace(",", "."))),
+      unit: COORD_UNITS.get(match[2]) || "",
+      minus: match[1].startsWith("-"),
+    });
+  }
+  // Всё, что не число, не единица и не разделитель, — мусор: «55.7, Москва»
+  // лучше отвергнуть, чем взять от него первую половину.
+  if (/[^\s,;]/.test(source.replace(COORD_NUMBER, " "))) throw modelError("coordsInvalid");
+  return tokens;
+}
+
+// Группа — это одно число координаты: градусы и, если их писали минутами,
+// минуты с секундами.
+function coordGroupValue(group) {
+  const order = ["deg", "min", "sec"];
+  if (group.length > 3) throw modelError("coordsInvalid");
+  group.forEach((token, index) => {
+    if (token.unit && token.unit !== order[index]) throw modelError("coordsInvalid");
+  });
+  for (const token of group.slice(1)) {
+    // Минус и шестьдесят минут внутри градуса — описка, а не координата.
+    if (token.minus || token.value >= 60) throw modelError("coordsInvalid");
+  }
+  const value = group[0].value + (group[1] ? group[1].value / 60 : 0) + (group[2] ? group[2].value / 3600 : 0);
+  return { value, minus: group[0].minus };
+}
+
+function coordsChecked(lat, lon) {
+  if (Math.abs(lat) > PROJECT_LAT_MAX || Math.abs(lon) > PROJECT_LON_MAX) {
+    throw modelError("coordsRange", { lat: PROJECT_LAT_MAX, lon: PROJECT_LON_MAX });
+  }
+  return { lat: siteRound(lat, PROJECT_COORDS_DECIMALS), lon: siteRound(lon, PROJECT_COORDS_DECIMALS) };
+}
+
+/**
+ * Координаты из строки: `null` — пусто («не задано»), мусор — отказ с текстом.
+ * Принимает и пару чисел, и градусы с минутами; буквы сторон света, если они
+ * есть, сами говорят, где из двух чисел широта («37.6173E 55.7558N» — та же
+ * точка, просто записанная наоборот).
+ */
+function parseCoords(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") {
+    const lat = siteDegrees(value.lat, PROJECT_LAT_MAX);
+    const lon = siteDegrees(value.lon, PROJECT_LON_MAX);
+    return lat === null || lon === null ? null : { lat, lon };
+  }
+  const raw = String(value).trim();
+  if (raw === "") return null;
+  // Неразрывный пробел из карты, типографский минус и сдвоенный штрих вместо
+  // секунд — невидимая глазом разница, из-за которой вставка не должна падать.
+  let source = raw
+    .replace(/[   ]/g, " ")
+    .replace(/[−–—]/g, "-")
+    .replace(/''/g, "″");
+  const hemis = [];
+  source = source.replace(/[A-Za-zА-Яа-яЁё]+/g, (word) => {
+    const key = word.toUpperCase();
+    if (word.length !== 1 || !COORD_HEMIS.has(key)) throw modelError("coordsInvalid");
+    hemis.push(COORD_HEMIS.get(key));
+    return " ";
+  });
+  const tokens = coordTokens(source);
+  // Знак градуса в строке и решает, как её читать: с ним числа собираются в
+  // две группы «градусы-минуты-секунды», без него каждое число само себе
+  // координата — «55.7558, 37.6173» это пара, а не градусы с минутами.
+  const sexagesimal = tokens.some((token) => token.unit !== "");
+  const groups = [];
+  for (const token of tokens) {
+    if (!sexagesimal || token.unit === "deg" || groups.length === 0) groups.push([token]);
+    else groups[groups.length - 1].push(token);
+  }
+  if (groups.length !== 2) throw modelError("coordsInvalid");
+  const parts = groups.map(coordGroupValue);
+  if (hemis.length === 0) {
+    return coordsChecked((parts[0].minus ? -1 : 1) * parts[0].value, (parts[1].minus ? -1 : 1) * parts[1].value);
+  }
+  if (hemis.length !== 2 || hemis[0].axis === hemis[1].axis) throw modelError("coordsInvalid");
+  // Буква уже сказала сторону — минус рядом с ней значил бы её же наоборот.
+  if (parts.some((part) => part.minus)) throw modelError("coordsInvalid");
+  const byAxis = {};
+  hemis.forEach((hemi, index) => {
+    byAxis[hemi.axis] = hemi.sign * parts[index].value;
+  });
+  return coordsChecked(byAxis.lat, byAxis.lon);
+}
+
+/** Координаты строкой в том же виде, в каком их дала карта. */
+function formatCoords(coords) {
+  if (!coords || typeof coords.lat !== "number" || typeof coords.lon !== "number") return "";
+  return coords.lat + ", " + coords.lon;
+}
+
+/** Направление верха чертежа из строки: `null` — пусто, мусор — отказ. */
+function parseTopAzimuth(value) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).replace(/°/g, "").trim();
+  if (raw === "") return null;
+  const number = Number(raw.replace(",", "."));
+  if (!Number.isFinite(number)) throw modelError("azimuthInvalid");
+  // Круг замкнут, и «-90» — это законные 270: человек вправе отсчитать против
+  // часовой. Дальше круга — описка («3600»), и её лучше вернуть вслух.
+  if (Math.abs(number) > 360) throw modelError("azimuthRange");
+  return siteAzimuth(number);
+}
+
+/**
+ * Свойства объекта: адрес, координаты и направление верха чертежа. Читать
+ * `project.site` самому нельзя — у объекта прежней разметки поля нет вовсе, а
+ * мусор здесь же становится «не задано».
+ *
+ * Широта и долгота — **пара**: одна без другой не точка, и половина пары
+ * читается как «координат нет».
+ */
+function projectSite(project) {
+  const raw =
+    project && project.site && typeof project.site === "object" && !Array.isArray(project.site) ? project.site : {};
+  const lat = siteDegrees(raw.lat, PROJECT_LAT_MAX);
+  const lon = siteDegrees(raw.lon, PROJECT_LON_MAX);
+  const paired = lat !== null && lon !== null;
+  return {
+    address: siteText(raw.address, PROJECT_ADDRESS_MAX),
+    lat: paired ? lat : null,
+    lon: paired ? lon : null,
+    topAzimuthDeg: siteAzimuth(raw.topAzimuthDeg),
+  };
+}
+
+/** Координаты объекта или `null`. По ним объём считает рассвет и закат. */
+function projectCoords(project) {
+  const site = projectSite(project);
+  return site.lat === null || site.lon === null ? null : { lat: site.lat, lon: site.lon };
+}
+
+/**
+ * Направление верха чертежа в градусах от севера по часовой стрелке. Не
+ * задано — ноль, то есть верх плана смотрит на север.
+ */
+function projectTopAzimuth(project) {
+  return projectSite(project).topAzimuthDeg;
+}
+
+/** Заполнено ли хоть что-нибудь. Пусто — это не ошибка, но сказать честнее. */
+function projectHasSite(project) {
+  const site = projectSite(project);
+  return site.address !== "" || site.lat !== null || site.topAzimuthDeg !== PROJECT_TOP_AZIMUTH_DEFAULT;
+}
+
+/**
+ * Правка свойств объекта. `coords` принимает строку из карты (разбор —
+ * `parseCoords`), `topAzimuthDeg` — строку или число. Пустые поля в объекте не
+ * хранятся, а когда пустыми стали все — поле `site` **убирается**: объект
+ * возвращается ровно в то состояние, в котором был до заполнения.
+ */
+function setProjectSite(project, patch = {}) {
+  const before = projectSite(project);
+  const next = { ...before };
+  const given = (field) => Object.prototype.hasOwnProperty.call(patch, field);
+  if (given("address")) next.address = siteText(patch.address, PROJECT_ADDRESS_MAX);
+  if (given("coords")) {
+    const coords = parseCoords(patch.coords);
+    next.lat = coords ? coords.lat : null;
+    next.lon = coords ? coords.lon : null;
+  }
+  if (given("topAzimuthDeg")) {
+    const azimuth = parseTopAzimuth(patch.topAzimuthDeg);
+    next.topAzimuthDeg = azimuth === null ? PROJECT_TOP_AZIMUTH_DEFAULT : azimuth;
+  }
+  // Правка, ничего не изменившая, объект не трогает: иначе «Сохранить» без
+  // единой правки переписывало бы время объекта и ломало сравнение файлов.
+  const same =
+    next.address === before.address &&
+    next.lat === before.lat &&
+    next.lon === before.lon &&
+    next.topAzimuthDeg === before.topAzimuthDeg;
+  if (same) return { project, site: next, changed: false };
+  const site = {};
+  if (next.address !== "") site.address = next.address;
+  if (next.lat !== null && next.lon !== null) {
+    site.lat = next.lat;
+    site.lon = next.lon;
+  }
+  if (next.topAzimuthDeg !== PROJECT_TOP_AZIMUTH_DEFAULT) site.topAzimuthDeg = next.topAzimuthDeg;
+  if (Object.keys(site).length === 0) {
+    const { site: dropped, ...rest } = project;
+    return { project: withProject(rest, {}), site: next, changed: true };
+  }
+  return { project: withProject(project, { site }), site: next, changed: true };
+}
+
 // ——— правка вершин ломаной ————————————————————————————————————————————
 //
 // Та же рука, что правит контур помещения: вершину двигают, добавляют между
@@ -18008,6 +18383,46 @@ function mergeStamp(merged, ours, theirs, winner) {
   else delete merged.stamp;
 }
 
+/**
+ * Свойства объекта: адрес, координаты и направление верха чертежа (таск 188).
+ *
+ * Сливаются **слотами**, по той же причине, что графы штампа: один вписал
+ * адрес, второй вставил координаты из карты — спора между ними нет, и работа
+ * обоих обязана сложиться. Спорит только один и тот же слот, заполненный
+ * по-разному, — там решает общий победитель.
+ *
+ * **Широта и долгота — один слот, а не два.** Половина пары не точка, и взять
+ * широту у одного, а долготу у другого значило бы поставить дом в чистое поле
+ * между ними. Направление в ноль градусов и пустой адрес «заполненными» не
+ * считаются: ноль — это умолчание «верх на север», и перебить им чужое число
+ * нельзя (`projectSite` читает их одинаково).
+ *
+ * Поля нет ни у кого — оно и не заводится: объект прежней разметки остаётся
+ * прежним, и два одинаковых файла сходятся в «ничего не изменилось» (G68).
+ */
+function mergeSite(merged, ours, theirs, winner) {
+  const has = (project) => Boolean(project && project.site && typeof project.site === "object");
+  if (!has(ours) && !has(theirs)) return;
+  const mine = projectSite(ours);
+  const other = projectSite(theirs);
+  const pick = (left, right) => (!left ? right : !right ? left : winner === "theirs" ? right : left);
+  const site = {};
+  const address = pick(mine.address, other.address);
+  if (address) site.address = address;
+  const coords = pick(
+    mine.lat === null ? null : { lat: mine.lat, lon: mine.lon },
+    other.lat === null ? null : { lat: other.lat, lon: other.lon },
+  );
+  if (coords) {
+    site.lat = coords.lat;
+    site.lon = coords.lon;
+  }
+  const top = pick(mine.topAzimuthDeg || null, other.topAzimuthDeg || null);
+  if (top) site.topAzimuthDeg = top;
+  if (Object.keys(site).length > 0) merged.site = site;
+  else delete merged.site;
+}
+
 // Кто выигрывает спор. Обе стороны считают это из одной пары и получают один
 // ответ — иначе слияние не сходится.
 function mergeWinner(ours, theirs) {
@@ -18643,6 +19058,7 @@ function mergeProjects(ours, theirs, base, options = {}) {
   }
   if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
   mergeStamp(merged, ours, theirs, winner);
+  mergeSite(merged, ours, theirs, winner);
   // Ключ проекта сходится. Есть у одного — берут оба: это факт, а не мнение, и
   // после первой же встречи родство перестаёт быть догадкой. Есть у обоих и
   // разные (копии разошлись до появления ключей) — берётся меньший по строке:
@@ -36786,9 +37202,10 @@ function gostStampForm(form) {
  * Что куда ложится (номера граф — по приложению Ж):
  * - (1) обозначение документа — шифр из данных штампа;
  * - (2) наименование предприятия — имя объекта;
- * - (3) наименование здания — помещение, когда лист режется по комнате, иначе
- *   пусто: отдельного «здания» в данных нет, а лист по кухне — это и есть
- *   часть объекта;
+ * - (3) наименование здания — помещение, когда лист режется по комнате; иначе
+ *   **адрес объекта** из его свойств (таск 188): дом для этой графы и
+ *   называется адресом, а лист по кухне — это и есть часть объекта. Нет ни
+ *   того, ни другого — графа пустая, как была до таска 188;
  * - (4) наименование изображений — имя схемы и **масштаб** второй строкой.
  *   Своей графы «Масштаб» у формы 3 нет (она есть у формы 4, для изделий), и
  *   по СПДС масштаб пишут под наименованием изображения — туда он и идёт;
@@ -36803,7 +37220,8 @@ function gostStampValues(stamp, sheetInfo = {}) {
   const values = {
     code: data.code || "",
     object: sheetInfo.object || "",
-    building: sheetInfo.building || "",
+    // Комната листа важнее адреса: лист по кухне называет кухню, а не дом.
+    building: sheetInfo.building || sheetInfo.address || "",
     drawing: [sheetInfo.drawing || "", sheetInfo.scale || ""].filter(Boolean).join("\n"),
     // Форма 5 держит объект и название документа в одной графе; совпали —
     // пишем один раз, строка-близнец в штампе выглядит опечаткой.
@@ -38203,6 +38621,7 @@ async function gostSchemePng(project, scheme, image, options = {}) {
     gostStampValues(projectStamp(project), {
       object: (project && project.name) || "",
       building: options.building || "",
+      address: projectSite(project).address,
       drawing: (scheme && scheme.name) || "",
       scale: plan.scaleText,
       sheet: options.sheet || 1,
@@ -38346,6 +38765,7 @@ async function elevationSheetPng(project, elevations, page, layout, options = {}
       gostStampValues(projectStamp(project), {
         object: (project && project.name) || "",
         building: options.building || "",
+        address: projectSite(project).address,
         drawing: options.drawing || strings.elevationSheet.drawing,
         scale: layout.scaleText,
         sheet: options.sheet || 1,
@@ -38571,6 +38991,7 @@ async function gostTablePng(table, page, plan, options = {}) {
     page.form,
     gostStampValues(options.stamp || {}, {
       object: options.object || "",
+      address: options.address || "",
       drawing: options.title || "",
       sheet: options.sheet || 1,
       sheets: options.sheets || 1,
@@ -42012,24 +42433,38 @@ function openEquipmentWindow(api, options = {}) {
   return { close };
 }
 
-// src/panels/stampForm.js
-// Окно «Данные для штампа»: графы основной надписи, которых в разметке нет.
+// src/panels/projectProps.js
+// Окно «Свойства объекта» (таск 188, требования G283 и G284).
 //
-// Отдельным файлом, а не внутри панели выгрузки: окно зовут из двух диалогов
-// (схема и таблица), и жить оно должно там, где его видно обоим. Своей панели
-// у него нет — это диалог, а не колонка.
+// **Где живёт раздел и почему.** Имя объекта правили карандашом в шапке — одним
+// полем в окне вопроса; этаж схемы таск 170 тем же карандашом превратил в
+// «Свойства схемы». Здесь то же решение на уровень выше: карандаш в шапке
+// открывает свойства объекта, а имя стало первым полем среди прочих. Своей
+// колонки у раздела нет нарочно — свойства объекта открывают раз в жизни
+// объекта, а место в колонках стоит дорого и принадлежит разметке.
 //
-// Правка объекта идёт через `canvasCommit`: Ctrl+Z возвращает прежние графы,
-// как и любую другую правку. Пустые графы не хранятся вовсе — объект, у
-// которого штамп не заполняли, остаётся побайтово прежним (G68).
+// **Данные штампа собрались сюда же.** Жили они и прежде у объекта
+// (`project.stamp`), а вот дверь к ним была в окне выгрузки — и дверей было
+// три: лист схемы, лист таблицы, лист развёрток. Теперь дверь одна, а те три
+// кнопки открывают это же окно с подсветкой раздела штампа: выгрузка данные
+// читает (`projectStamp`), но не спрашивает.
+//
+// Отдельным файлом, а не внутри панели объектов: зовут окно из четырёх мест, и
+// жить ему надо там, где его видно всем. Своей панели у него нет — это диалог,
+// а не колонка.
+//
+// Правка идёт через `canvasCommit` **одним шагом**: «Сохранить» нажали один
+// раз, и Ctrl+Z обязан вернуть окно целиком, а не половину. Тот же урок, что в
+// таске 172 с именем схемы.
 
 
 
 
 /**
- * Подписи и подсказки граф. Ключ — поле модели, поэтому список строк окна
- * не может разойтись с `PROJECT_STAMP_FIELDS`: порядок строк берётся оттуда,
- * а не повторяется здесь вторым списком. Новое поле без подписи ловит тест.
+ * Подписи и подсказки граф штампа. Ключ — поле модели, поэтому список строк
+ * окна не может разойтись с `PROJECT_STAMP_FIELDS`: порядок строк берётся
+ * оттуда, а не повторяется здесь вторым списком. Новое поле без подписи ловит
+ * тест.
  */
 const STAMP_LABELS = {
   code: { label: "stampCode", hint: "stampCodeHint" },
@@ -42040,55 +42475,175 @@ const STAMP_LABELS = {
   org: { label: "stampOrg" },
 };
 
-function stampField(field, value) {
-  const row = STAMP_LABELS[field] || { label: field };
-  const input = uiEl("input", {
-    class: "ui-input",
-    type: "text",
-    value,
-    placeholder: row.hint ? strings.gost[row.hint] : "",
-  });
-  return {
-    field,
+/**
+ * Живая подпись направления: словом то, что набрано числом. Пустое поле —
+ * пустая строка: «не задано» значит север, но говорить это человеку, который
+ * ещё ничего не ввёл, незачем.
+ *
+ * Чистая и отдельно от окна — её проверяет тест: число и румб обязаны сойтись,
+ * иначе подпись станет вторым мнением о том, как считать градусы.
+ */
+function projectTopFacing(value) {
+  const raw = String(value == null ? "" : value).trim();
+  if (raw === "") return "";
+  const number = Number(raw.replace(/°/g, "").replace(",", "."));
+  if (!Number.isFinite(number)) return "";
+  return text("projectProps.topFacing", { rhumb: strings.projectProps.rhumbs[azimuthRhumb(number)] });
+}
+
+// Подпись над полем, подсказка под ним — и подсказка **снаружи** `label`:
+// внутри она приклеивалась бы к имени поля, и читалка называла бы поле
+// «Координаты… как в карте… рассвет и закат…» целым абзацем.
+//
+// Отказ модели стоит **у своего поля**, а не общей строкой внизу окна. Живой
+// прогон показал почему: окно свойств длиннее экрана, нижняя строка оказалась
+// за краем, и «Сохранить» с мусором в координатах выглядело как «ничего не
+// произошло» — при том, что курсор уже стоял в испорченном поле наверху.
+function propsField(label, input, hint, error) {
+  const field = uiEl("label", { class: "export__field" }, [
+    uiEl("span", { class: "export__field-label", text: label }),
     input,
-    node: uiEl("label", { class: "export__field" }, [
-      uiEl("span", { class: "export__field-label", text: strings.gost[row.label] || field }),
-      input,
-    ]),
-  };
+  ]);
+  if (!hint && !error) return field;
+  return uiEl("div", { class: "export__field" }, [
+    field,
+    error || null,
+    hint ? uiEl("p", { class: "modal__hint", text: hint }) : null,
+  ]);
+}
+
+function propsHead(label) {
+  return uiEl("div", { class: "modal__section", text: label });
+}
+
+function propsInput(value, placeholder, extra = {}) {
+  return uiEl("input", { class: "ui-input", type: "text", value, placeholder, ...extra });
 }
 
 /**
- * Окно с графами. Закрывается двумя способами: «Сохранить» кладёт правку в
- * объект, «Отмена» не трогает ничего. `onSaved` зовут после сохранения —
- * диалогу выгрузки надо обновить подсказку.
+ * Окно свойств. `options.focus === "stamp"` — открыть с подсветкой граф штампа
+ * (так его зовут кнопки выгрузки), `options.onSaved` — сообщить тому, кто
+ * открыл: окну выгрузки надо обновить свою подсказку.
  */
-function stampDialog(api, onSaved) {
+function projectPropsDialog(api, options = {}) {
   const { getState, notify } = api;
-  const current = projectStamp(getState().project);
-  const rows = PROJECT_STAMP_FIELDS.map((field) => stampField(field, current[field]));
+  const project = getState().project;
+  if (!project) return null;
+  const site = projectSite(project);
+  const stamp = projectStamp(project);
 
-  const save = () => {
-    const patch = {};
-    for (const row of rows) patch[row.field] = row.input.value;
-    const before = getState().project;
-    const result = setProjectStamp(before, patch);
-    if (result.changed) canvasCommit(before, result.project, strings.history.stamp);
-    modal.close();
-    notify(strings.gost.stampSaved, "success");
-    if (typeof onSaved === "function") onSaved();
+  const nameInput = propsInput(project.name || "", strings.projects.namePlaceholder);
+  const addressInput = propsInput(site.address, strings.projectProps.addressPlaceholder);
+  const coordsInput = propsInput(formatCoords(projectCoords(project)), strings.projectProps.coordsPlaceholder);
+  const topInput = propsInput(
+    site.topAzimuthDeg === 0 ? "" : String(site.topAzimuthDeg),
+    strings.projectProps.topPlaceholder,
+    { attrs: { inputmode: "decimal" } },
+  );
+  // Живая подпись стоит только тогда, когда ей есть что сказать: пустая строка
+  // с отступами оставляла бы в окне дыру — поймано живым прогоном.
+  const facing = uiEl("p", { class: "modal__hint" });
+  const sayFacing = () => {
+    facing.textContent = projectTopFacing(topInput.value);
+    facing.hidden = facing.textContent === "";
   };
+  sayFacing();
+  topInput.addEventListener("input", sayFacing);
 
-  const confirm = uiButton(strings.dialog.save, { class: "ui-btn ui-btn--accent", on: { click: save } });
-  const modal = uiModal({
-    title: strings.gost.stampTitle,
-    body: uiEl("div", { class: "export__body" }, [
-      uiEl("p", { class: "export__hint", text: strings.gost.stampHint }),
-      uiEl("div", { class: "export__controls" }, rows.map((row) => row.node)),
+  const stampRows = PROJECT_STAMP_FIELDS.map((field) => {
+    const row = STAMP_LABELS[field] || { label: field };
+    const input = propsInput(stamp[field], row.hint ? strings.gost[row.hint] : "");
+    return { field, input, node: propsField(strings.gost[row.label] || field, input) };
+  });
+
+  const coordsError = uiEl("p", { class: "modal__error" });
+  const topError = uiEl("p", { class: "modal__error" });
+  const stampHead = propsHead(strings.projectProps.stamp);
+  const body = uiEl("div", { class: "modal__sections" }, [
+    uiEl("div", { class: "modal__fields" }, [
+      propsField(strings.projectProps.name, nameInput),
+      propsField(strings.projectProps.address, addressInput, strings.projectProps.addressHint),
     ]),
+    propsHead(strings.projectProps.place),
+    uiEl("div", { class: "modal__fields" }, [
+      propsField(strings.projectProps.coords, coordsInput, strings.projectProps.coordsHint, coordsError),
+      propsField(strings.projectProps.top, topInput, strings.projectProps.topHint, topError),
+    ]),
+    facing,
+    uiEl("p", { class: "modal__hint", text: strings.projectProps.topOnlyVolume }),
+    stampHead,
+    uiEl("p", { class: "modal__hint", text: strings.gost.stampHint }),
+    uiEl("div", { class: "modal__fields" }, stampRows.map((row) => row.node)),
+  ]);
+
+  let modal = null;
+
+  function apply() {
+    const base = getState().project;
+    if (!base) {
+      modal.close();
+      return;
+    }
+    // **Числа проверяются первыми.** Опечатка в координатах не должна оставить
+    // объект переименованным наполовину, а отказ модели остаётся в окне
+    // строкой: закрыть окно и потерять набранное человек не должен.
+    coordsError.textContent = "";
+    topError.textContent = "";
+    let located;
+    try {
+      located = setProjectSite(base, {
+        address: addressInput.value,
+        coords: coordsInput.value,
+        topAzimuthDeg: topInput.value,
+      });
+    } catch (failure) {
+      const azimuth = failure.code === "azimuthInvalid" || failure.code === "azimuthRange";
+      const input = azimuth ? topInput : coordsInput;
+      (azimuth ? topError : coordsError).textContent = failure.message;
+      input.focus();
+      if (typeof input.scrollIntoView === "function") input.scrollIntoView({ block: "center" });
+      return;
+    }
+    const patch = {};
+    for (const row of stampRows) patch[row.field] = row.input.value;
+    const stamped = setProjectStamp(located.project, patch);
+    // Пустое имя — не ответ: окно про имя спрашивают реже всего, а объект без
+    // имени не найти в списке.
+    const name = nameInput.value.trim();
+    const renamed = name !== "" && name !== base.name;
+    const next = renamed ? updateProject(stamped.project, { name }).project : stamped.project;
+    if (located.changed || stamped.changed || renamed) {
+      canvasCommit(base, next, strings.history.projectProps);
+    }
+    modal.close();
+    notify(strings.projectProps.saved, "success");
+    if (typeof options.onSaved === "function") options.onSaved();
+  }
+
+  for (const input of [nameInput, addressInput, coordsInput, topInput, ...stampRows.map((row) => row.input)]) {
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      apply();
+    });
+  }
+
+  const confirm = uiButton(strings.dialog.save, { class: "ui-btn ui-btn--accent", on: { click: () => apply() } });
+  modal = uiModal({
+    title: strings.projectProps.title,
+    body,
     actions: [uiButton(strings.dialog.cancel, { on: { click: () => modal.close() } }), confirm],
     primary: confirm,
   });
+  // Пришли за штампом — окно открывается на штампе: иначе кнопка «Свойства
+  // объекта» в выгрузке выглядела бы подменой той, что открывала графы.
+  if (options.focus === "stamp") {
+    if (typeof stampHead.scrollIntoView === "function") stampHead.scrollIntoView({ block: "nearest" });
+    stampRows[0].input.focus();
+    stampRows[0].input.select();
+  } else {
+    nameInput.select();
+  }
   return modal;
 }
 
@@ -42412,8 +42967,23 @@ function exportGostTableOptions(api, table) {
     mono: exportChoice.mono,
     stamp: projectStamp(project),
     object: project.name,
+    // Адрес объекта (таск 188): графу «наименование здания» заполняет он, когда
+    // лист не сужен помещением. Правило — в `gostStampValues`, здесь только
+    // доставка, как и у имени объекта.
+    address: projectSite(project).address,
     title,
   };
+}
+
+// Дверь к свойствам объекта из окна выгрузки (таск 188). Прежде здесь стояло
+// «Данные для штампа» и открывало своё окно с шестью графами; графы переехали в
+// свойства объекта, и кнопка ведёт туда же — с подсветкой нужного раздела.
+// Выгрузка данные читает (`projectStamp`, `projectSite`), но не спрашивает.
+function propsButton(api, onSaved) {
+  return uiButton(strings.projectProps.open, {
+    title: strings.projectProps.openHint,
+    on: { click: () => projectPropsDialog(api, { focus: "stamp", onSaved }) },
+  });
 }
 
 // ——— диалог таблицы ———————————————————————————————————————————————————
@@ -42582,7 +43152,7 @@ function exportTableDialog(api) {
   controls.append(
     gostCheck,
     formatField,
-    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refresh) } }),
+    propsButton(api, refresh),
   );
 
   const saved = (name) => notify(text("exportPanel.saved", { name }), "success");
@@ -42916,7 +43486,7 @@ function exportSchemeDialog(api) {
   controls.append(
     gostCheck,
     formatField,
-    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+    propsButton(api, refreshHint),
   );
 
   const guard = async (run) => {
@@ -43292,7 +43862,7 @@ function exportElevationDialog(api) {
   };
 
   const actions = [
-    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+    propsButton(api, refreshHint),
     uiButton(strings.exportPanel.print, {
       on: {
         click: () =>
@@ -48659,6 +49229,7 @@ function openObjectPicker(options = {}) {
 
 
 
+
 const SAVE_DELAY_MS = 400;
 
 function uniqueProjectName(list) {
@@ -48690,9 +49261,12 @@ function mountProjectsPanel(host, api) {
   // нарисованные линиями, и «＋» с корзиной-эмодзи выпадали из ряда — у них
   // своя толщина, свой размер и свой цвет. Слово у каждой кнопки осталось:
   // оно в подсказке и в `aria-label`.
-  const renameButton = uiIconButton("edit", {
-    label: strings.projects.rename,
-    on: { click: () => renameCurrent() },
+  // Карандаш открывает свойства объекта (таск 188): имя, адрес, координаты,
+  // направление верха чертежа и графы штампа. Прежде он открывал одно имя, а
+  // графы штампа жили за кнопкой в окне выгрузки.
+  const propsButton = uiIconButton("edit", {
+    label: strings.projects.props,
+    on: { click: () => projectPropsDialog(api) },
   });
   const createButton = uiIconButton("plus", {
     label: strings.projects.create,
@@ -48705,7 +49279,7 @@ function mountProjectsPanel(host, api) {
     label: strings.projects.remove,
     on: { click: () => removeCurrent() },
   });
-  host.replaceChildren(select, createButton, renameButton, removeButton);
+  host.replaceChildren(select, createButton, propsButton, removeButton);
 
   function currentId() {
     const state = getState();
@@ -48723,13 +49297,13 @@ function mountProjectsPanel(host, api) {
     }
     select.value = id;
     const has = Boolean(id);
-    renameButton.disabled = !has;
+    propsButton.disabled = !has;
     removeButton.disabled = !has;
     // Режим просмотра: объект выбирается, но не заводится, не переименовывается
     // и не удаляется — на объекте с телефоном это только риск.
     const editable = layoutAllows("editProject", getState().layout);
     createButton.hidden = !editable;
-    renameButton.hidden = !editable;
+    propsButton.hidden = !editable;
     removeButton.hidden = !editable;
   }
 
@@ -48780,20 +49354,6 @@ function mountProjectsPanel(host, api) {
     renderList();
     notify(text("projects.created", { name: project.name }), "success");
     return project;
-  }
-
-  async function renameCurrent() {
-    const state = getState();
-    if (!state.project) return;
-    const name = await uiPrompt({
-      title: strings.projects.renameTitle,
-      value: state.project.name,
-      placeholder: strings.projects.namePlaceholder,
-    });
-    if (!name || name === state.project.name) return;
-    const next = updateProject(state.project, { name });
-    setState({ project: next.project });
-    await refreshList();
   }
 
   async function removeCurrent() {
