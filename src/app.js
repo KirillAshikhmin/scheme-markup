@@ -11,7 +11,7 @@ import { registerServiceWorker } from "./pwa.js";
 import { uiIcon } from "./panels/ui.js";
 // Липкие заголовки колонок: верх умеет браузер, низ — рейка (таск 194).
 // Каркас её завязывает и трогает там, где сам меняет высоту разделов.
-import { panelRailInset, panelScrollBox, syncPanelRail, wirePanelRail } from "./panels/rail.js";
+import { panelRailInset, panelRailJump, panelScrollBox, syncPanelRail, wirePanelRail } from "./panels/rail.js";
 
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 export const PANEL_IDS = {
@@ -719,8 +719,16 @@ function applySectionState(id) {
   if (!node) return;
   const collapsed = appCollapsed.has(id);
   node.classList.toggle("is-collapsed", collapsed);
-  const button = node.querySelector("[data-section]");
-  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  // Состояние живёт на галочке: у неё одно дело — сворачивать, и держится оно
+  // за ней, где бы заголовок ни был нарисован. У имени раздела дело меняется
+  // от места (таск 198), и обещать голосу «свёрнуто/развёрнуто» ему нечем.
+  const fold = node.querySelector("[data-section-fold]");
+  if (fold) {
+    const label = collapsed ? strings.panels.unfold : strings.panels.fold;
+    fold.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    fold.setAttribute("aria-label", label);
+    fold.title = label;
+  }
   // Свернули раздел — разделы ниже переехали, и рейка заголовков устарела.
   // Наблюдатель за размерами поймал бы это и сам, но на кадр позже.
   syncPanelRail();
@@ -830,7 +838,25 @@ export function setSectionBadge(id, value) {
 
 function wireSections() {
   for (const button of document.querySelectorAll("[data-section]")) {
-    button.addEventListener("click", () => toggleSection(button.dataset.section));
+    button.addEventListener("click", () => {
+      // Имя раздела: на своём месте — прежняя кнопка сворачивания, у кромки
+      // колонки — указатель на раздел (таск 198, G303). Слова заказчика:
+      // «нажал — прыгнуло туда — да, так и надо, а то приходится самому
+      // листать, это не очевидно». Где нарисован заголовок и куда от него
+      // листать — знает рейка, и спрашивают её, а не меряют заново.
+      if (panelRailJump(button)) return;
+      toggleSection(button.dataset.section);
+    });
+  }
+  // Галочка слева от имени: сворачивает всегда — и когда раздел на виду, и
+  // когда от него виден один заголовок в рейке. Без неё свернуть невидимый
+  // раздел было бы нечем, а именно так прячут список меток, чтобы добраться до
+  // справочника типов.
+  for (const button of document.querySelectorAll("[data-section-fold]")) {
+    button.addEventListener("click", () => toggleSection(button.dataset.sectionFold));
+    // Подпись голосу ставится сразу, а не с первого нажатия: внутри кнопки один
+    // знак, и до первого сворачивания она читалась бы пустой.
+    applySectionState(button.dataset.sectionFold);
   }
   // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
   // когда хранилище ответит. Ждать его с пустым экраном хуже.

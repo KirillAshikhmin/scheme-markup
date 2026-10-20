@@ -360,6 +360,12 @@ body {
   top: 0;
   z-index: 2;
   background: var(--panel-bg);
+  /* Кнопок в заголовке две (таск 198): галочка и имя. Галочка сворачивает
+     всегда, имя — сворачивает на своём месте и перелистывает к разделу, когда
+     заголовок нарисован у кромки колонки. Ряд, а не кнопка в кнопке: вложенных
+     кнопок в разметке не бывает. */
+  display: flex;
+  align-items: stretch;
 }
 
 /* Раздел ещё ниже кадра — его заголовок стоит у нижней кромки колонки (таск
@@ -376,13 +382,42 @@ body {
   box-shadow: 0 -1px 0 var(--panel-line);
 }
 
+/* Галочка — своя кнопка, и дело у неё одно: свернуть раздел. Этим она и
+   ценна — заголовок в рейке перелистывает, а свернуть невидимый раздел
+   человеку всё равно нужно (так прячут список меток, чтобы добраться до
+   справочника). Поле слева прежнее заголовочное, справа — просвет до имени. */
+.panel__fold {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 9px 4px 7px 12px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  /* Тот же кегль, что у имени: заголовок — `h2`, и `font: inherit` принесло бы
+     сюда его полуторный размер, подняв высоту всей строки на пять точек. А по
+     высоте заголовка считается рейка. */
+  font-size: 11px;
+  line-height: 1;
+  color: var(--panel-muted);
+}
+
+.panel__fold:hover,
+.panel__fold:focus-visible {
+  color: var(--panel-text);
+}
+
 .panel__title {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  /* Остаток строки: по имени раздела попадают не целясь, и у рейки это
+     единственная цель перелистывания. */
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
-  padding: 9px 12px 7px;
+  padding: 9px 12px 7px 2px;
   border: 0;
   background: none;
   cursor: pointer;

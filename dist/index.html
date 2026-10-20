@@ -1335,20 +1335,20 @@
   margin: 0;
 }
 
-/* Ряд перехода к соседней стене (таск 179, G267) — своей строкой под
-   заголовком. В заголовке уже стоят имя стены, две отметки, две кнопки сторон
-   и «Закрыть»; пара списков со стенами выдавила бы их за край на планшете.
+/* Ряд углов участка (таск 197, G302) — своей строкой под заголовком. В
+   заголовке уже стоят имя стены, две отметки, две кнопки сторон и «Закрыть»;
+   пара списков выдавила бы их за край на планшете.
 
-   Поля делят строку пополам и ужимаются вместе с полосой: имя стены короткое
-   («ЛМ · 1800 мм»), и места ему хватает даже на узком экране. */
-.elev__walkbar {
+   Поля делят строку пополам и ужимаются вместе с полосой: запись короткая
+   («Ю · участок 2979 мм»), и места ей хватает даже на узком экране. */
+.elev__cutbar {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
 }
 
-.elev__walkrow {
+.elev__cutrow {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1358,12 +1358,12 @@
   color: var(--canvas-text);
 }
 
-.elev__walklabel {
+.elev__cutlabel {
   flex: none;
   color: #57606a;
 }
 
-.elev__walk {
+.elev__cut {
   flex: 1;
   min-width: 0;
   padding: 1px 4px;
@@ -1375,7 +1375,7 @@
   border-radius: 6px;
 }
 
-.elev__walk:disabled {
+.elev__cut:disabled {
   color: #8b949e;
   background: #f6f8fa;
 }
@@ -5723,6 +5723,12 @@ body {
   top: 0;
   z-index: 2;
   background: var(--panel-bg);
+  /* Кнопок в заголовке две (таск 198): галочка и имя. Галочка сворачивает
+     всегда, имя — сворачивает на своём месте и перелистывает к разделу, когда
+     заголовок нарисован у кромки колонки. Ряд, а не кнопка в кнопке: вложенных
+     кнопок в разметке не бывает. */
+  display: flex;
+  align-items: stretch;
 }
 
 /* Раздел ещё ниже кадра — его заголовок стоит у нижней кромки колонки (таск
@@ -5739,13 +5745,42 @@ body {
   box-shadow: 0 -1px 0 var(--panel-line);
 }
 
+/* Галочка — своя кнопка, и дело у неё одно: свернуть раздел. Этим она и
+   ценна — заголовок в рейке перелистывает, а свернуть невидимый раздел
+   человеку всё равно нужно (так прячут список меток, чтобы добраться до
+   справочника). Поле слева прежнее заголовочное, справа — просвет до имени. */
+.panel__fold {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 9px 4px 7px 12px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  /* Тот же кегль, что у имени: заголовок — `h2`, и `font: inherit` принесло бы
+     сюда его полуторный размер, подняв высоту всей строки на пять точек. А по
+     высоте заголовка считается рейка. */
+  font-size: 11px;
+  line-height: 1;
+  color: var(--panel-muted);
+}
+
+.panel__fold:hover,
+.panel__fold:focus-visible {
+  color: var(--panel-text);
+}
+
 .panel__title {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  /* Остаток строки: по имени раздела попадают не целясь, и у рейки это
+     единственная цель перелистывания. */
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
-  padding: 9px 12px 7px;
+  padding: 9px 12px 7px 2px;
   border: 0;
   background: none;
   cursor: pointer;
@@ -6249,7 +6284,14 @@ body {
       <!-- Разделы обеих колонок устроены одинаково: кликабельный заголовок
            сворачивает раздел, заголовок липнет к верху колонки, тело листается
            под ним. Растущий раздел в колонке один — список, которому нужно
-           место: слева схемы, справа метки. -->
+           место: слева схемы, справа метки.
+
+           Кнопок в заголовке две (таск 198). Галочка слева сворачивает раздел —
+           всегда, где бы заголовок ни был нарисован. Имя сворачивает, пока
+           заголовок стоит на своём месте, и **перелистывает к разделу**, когда
+           он нарисован у кромки колонки: там он указатель, а не кнопка
+           («нажал — прыгнуло туда»). Решает это `panels/rail.js` — разметка о
+           прокрутке не знает ничего. -->
       <aside id="panel-left" class="panel">
         <!-- Верхний блок левой колонки свой в каждом режиме (таск 153): в Схеме
              «Метки», в Чертеже инструменты, в Объёме вид и этаж. Три раздела
@@ -6257,8 +6299,10 @@ body {
              «Помещения», «Схемы» и «Интерфейс проекта» общие на все три. -->
         <section class="panel__section panel__section--screen" data-section-id="drawTools">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawTools" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawTools" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawTools">
               <span class="panel__name" data-text="panels.drawTools"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6267,8 +6311,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="volumeTools">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="volumeTools" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="volumeTools" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="volumeTools">
               <span class="panel__name" data-text="panels.volumeTools"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6277,8 +6323,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="marks">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="marks" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="marks" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="marks">
               <span class="panel__name" data-text="panels.marks"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6287,8 +6335,10 @@ body {
         </section>
         <section class="panel__section" data-section-id="rooms">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="rooms" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="rooms" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="rooms">
               <span class="panel__name" data-text="panels.rooms"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6297,8 +6347,10 @@ body {
         </section>
         <section class="panel__section panel__section--grow" data-section-id="schemes">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="schemes" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="schemes" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="schemes">
               <span class="panel__name" data-text="panels.schemes"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6307,8 +6359,10 @@ body {
         </section>
         <section class="panel__section" data-section-id="sizes">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="sizes" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="sizes" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="sizes">
               <span class="panel__name" data-text="panels.sizes"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6352,8 +6406,10 @@ body {
              ровно как у метки в списке меток. -->
         <section class="panel__section panel__section--screen" data-section-id="drawWalls">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawWalls" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawWalls" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawWalls">
               <span class="panel__name" data-text="panels.drawWalls"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6362,8 +6418,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="drawOpenings">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawOpenings" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawOpenings" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawOpenings">
               <span class="panel__name" data-text="panels.drawOpenings"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6372,8 +6430,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="drawObjects">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawObjects" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawObjects" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawObjects">
               <span class="panel__name" data-text="panels.drawObjects"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6382,8 +6442,10 @@ body {
         </section>
         <section class="panel__section panel__section--grow panel__section--screen" data-section-id="markList">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="markList" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="markList" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="markList">
               <span class="panel__name" data-text="panels.markList"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6394,8 +6456,10 @@ body {
              незачем, и место в колонке дороже. -->
         <section class="panel__section panel__section--screen" data-section-id="properties">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="properties" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="properties" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="properties">
               <span class="panel__name" data-text="panels.properties"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6467,6 +6531,15 @@ const strings = {
     showLeft: "Показать левую колонку",
     hideRight: "Скрыть правую колонку",
     showRight: "Показать правую колонку",
+    // Галочка в заголовке раздела — своя кнопка (таск 198), и подпись ей нужна:
+    // внутри один знак, а голос читает кнопку по подписи. Слово меняется по
+    // состоянию, как у ручек колонок.
+    fold: "Свернуть раздел",
+    unfold: "Развернуть раздел",
+    // Заголовок, нарисованный у кромки колонки, перелистывает к своему разделу
+    // (таск 198, G303). Подсказка на наведении — единственное место, где это
+    // сказано словом: сам заголовок выглядит как обычный.
+    jump: "Перейти к разделу",
     marksEmpty: "Меток пока нет — выберите тип и щёлкните по плану",
   },
   mobile: {
@@ -7982,6 +8055,11 @@ const strings = {
     // сразу говорит, между какими углами эта стена и с какими соседями она
     // делит углы. Длина рядом: имя отвечает «какая», длина — «сколько».
     wall: "Стена {name} · {length} мм",
+    // Участок между парой углов (таск 197, G302). Стена названа первой: метки
+    // привязывают к стене, и терять её имя нельзя. Участок — парой букв, как
+    // его называет сам заказчик («Л-М», «Л-Ю», «К-Ю»), а длина та, что стоит на
+    // размерной цепочке листа, то есть длина участка, а не всей стены.
+    section: "Стена {wall} · участок {name} · {length} мм",
     // Сторона названа «изнутри/снаружи»? Нет: что внутри, модель не знает —
     // помещения выводятся из контуров, а не из стен (ADR 008). Поэтому
     // стороны названы так же, как сторона открывания двери: слева и справа от
@@ -7990,18 +8068,22 @@ const strings = {
     side_left: "Слева",
     side_right: "Справа",
     sideHint: "С какой стороны смотрим на стену: на разных сторонах разные метки, и отсчёт зеркалится",
-    // Переход к соседней стене (таск 179, G267). Слова заказчика: «в каждом
-    // поле одна и другая сторона текущей стены, что бы можно было выбрать
-    // другую стену… только те стены, с которыми граничит».
+    // Два угла участка (таск 197, G302). Слова заказчика: «там должны быть не
+    // стены слева справа, а углы… И вот в выпадающих списках должны быть только
+    // связанные стеной углы».
     //
-    // Поля подписаны теми же словами, что кнопки сторон, — «Слева» и
-    // «Справа», — и это нарочно: список стороны и есть то, что на этой стороне
-    // граничит. Кнопка показывает сторону, поле уводит с неё к соседке.
-    walkHint:
-      "Перейти к стене, с которой эта граничит {side}. В списке только соседи этой стороны — те самые торцы, что видны на развёртке, и число у каждого это его отступ по листу. Соседка повернётся той стороной, что стоит в том же помещении.",
-    walkHere: "{name} — эта стена",
-    walkAt: "{name} · {at} мм",
-    walkNone: "{side}: соседних стен нет",
+    // Поля названы **углами**, а не сторонами, хотя слова «слева» и «справа» в
+    // шапке уже есть у кнопок: кнопка отвечает на «с какой стороны смотрим»,
+    // поле — на «какой угол у этого края листа». Одинаковая подпись у двух
+    // разных вопросов рядом — верный способ перепутать их оба.
+    cornerLeft: "Левый угол",
+    cornerRight: "Правый угол",
+    cornerHint:
+      "Угол у этого края листа. В списке только те углы, что связаны стеной с углом второго поля: лежат с ним на одной стене — её концом или местом, где в неё упёрлась другая стена. Выбрали — показан участок между новой парой. Кнопки «Слева/Справа» переворачивают лист, и углы меняются полями вместе с ним.",
+    cornerHere: "{letter} — этот угол",
+    cornerSame: "{letter} · участок {length} мм",
+    cornerOther: "{letter} · стена {wall}, {length} мм",
+    cornerNone: "Связанных стеной углов больше нет: у этой стены участок один",
     close: "Закрыть развёртку",
     // Изображения объектов вместо условных знаков (таск 135, G187). Слова
     // заказчика: «что бы схема была уже живая».
@@ -15469,27 +15551,33 @@ const WALL_ROOM_PROBE_MM = 100;
  *
  * Пробная точка отходит от середины стены на её сторону: сама середина лежит
  * внутри стены, то есть на границе контура, и ответ там был бы случайным.
+ *
+ * `alongMm` — где именно по стене спрашивать, отсчёт от конца `a`; умолчание
+ * середина. Нужен участку развёртки (таск 197): стена ЛМ на объекте заказчика
+ * длиной 9200 проходит мимо трёх комнат, и её середина отвечает за всю длину
+ * неверно — у участка Л-Ю своя комната и своя высота.
  */
-function wallRoomId(project, wallId, side) {
+function wallRoomId(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
-  const point = wallSideProbe(project, wallId, side);
+  const point = wallSideProbe(project, wallId, side, alongMm);
   return wall && point ? roomAtPoint(project, wall.schemeId, point) : null;
 }
 
-// Пробная точка стороны: середина стены, отодвинутая за её грань на эту
+// Пробная точка стороны: место на стене, отодвинутое за её грань на эту
 // сторону, в долях плана — такими контуры и спрашивают. Вынесена из
 // `wallRoomId` ради выгрузки: ей нужен не только `roomId`, но и **тот самый
 // контур**, по которому пойдёт обход (таск 130).
-function wallSideProbe(project, wallId, side) {
+function wallSideProbe(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
   const vectors = wallVectors(wall);
   if (!wall || !vectors) return null;
   const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM);
-  const middle = {
-    x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
-    y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
+  const along = Number.isFinite(Number(alongMm)) ? Math.max(0, Math.min(vectors.len, Number(alongMm))) : vectors.len / 2;
+  const at = {
+    x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * away,
+    y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * away,
   };
-  return planMmToFraction(project, wall.schemeId, middle);
+  return planMmToFraction(project, wall.schemeId, at);
 }
 
 // Контур под этой стороной. Не `roomId`: у комнаты контуров может быть
@@ -15510,10 +15598,10 @@ function wallSideOutline(project, wallId, side) {
  * высоту этажа. Теперь комната находится по стороне, а не по стене целиком —
  * у стены между кухней и прихожей две разные высоты, и обе верные.
  */
-function wallHeightOnSide(project, wallId, side) {
+function wallHeightOnSide(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
   if (!wall) return null;
-  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side) });
+  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side, alongMm) });
 }
 
 // Отступ вдоль стены с нужной стороны.
@@ -15689,79 +15777,259 @@ function wallCrossings(project, wallId, side) {
   return found.sort((first, second) => first.fromMm - second.fromMm || (first.name < second.name ? -1 : 1));
 }
 
-// ——— переход к соседней стене ———————————————————————————————————————————
+// ——— участок развёртки задаётся парой углов ——————————————————————————————
 //
-// Требование G267, таск 179. Слова заказчика: «Добавь 2 поля с выпадающим
-// списком, в каждом поле одна и другая сторона текущей стены, что бы можно
-// было выбрать другую стену или её часть. В каждом списке только те стены, с
-// которыми граничит значение второго списка».
+// Требование G302, таск 197 — правка решения таска 179 (G267). Слова
+// заказчика: «там должны быть не стены слева справа, а углы. Вот на примере
+// текущей схемы — выделил я Л-М стену, но хочу посмотреть участок стены, и вот
+// в правом выпадающем списке выбираю Ю, отображается уже Л-Ю, потом хочу
+// другую, и вместо Л выбираю К и смотрю другую стену кухни. И вот в выпадающих
+// списках должны быть только связанные стеной углы».
 //
-// **Соседи уже посчитаны.** Список «с какими стенами эта граничит на этой
-// стороне» — это ровно `wallCrossings`: он найден по геометрии (ADR 008, точное
-// совпадение в целых миллиметрах), он зависит от стороны (перегородка,
-// упирающаяся справа, слева не видна — она за стеной) и он **уже нарисован** на
-// листе торцами с именами (G201). Поэтому список выбора — это буквально «ткни в
-// один из торцов, которые видишь», а не второй механизм соседства рядом с
-// первым.
+// **Что значит «связаны стеной»: оба угла лежат на одной и той же стене** — её
+// концами или местом, где в неё уткнулась чужая стена. Это не третье прочтение
+// вместо двух очевидных, а единственное, которое сходится с примером
+// заказчика. На его объекте Ю — конец перегородки, уткнувшейся в стену ЛМ (24
+// мм не доехав до её оси), и в графе «углы — узлы, стены — рёбра» Ю с Л не
+// связан вовсе: они в разных связных кусках. Ни «соседние по чертежу углы»
+// (общего ребра нет), ни «сплошная линия стен» (пути нет) до Ю не доводят. А
+// «лежат на одной стене» доводит: Л — конец ЛМ, Ю — точка на ней, и Л-Ю это
+// первые 2979 мм её листа. Так же читается и К-Ю: К — место, где в перегородку
+// ФЮ уткнулась ИК, Ю — её конец, и К-Ю это участок листа ФЮ длиной 4126.
 //
-// Важно, что `wallCrossings` ловит **и углы, и упирающиеся в середину**: на
-// объекте заказчика из 25 стен две (АИ-АК и АЕ-АЖ) ни с кем не делят угла
-// вовсе — обоими концами они уткнуты в середины других стен, — и по углам до
-// них не дойти ни из какой стены. Список по углам был бы красивее на бумаге и
-// бесполезнее в квартире.
+// **Поэтому участок всегда плоский, и ломаным он не бывает.** Оба угла пары
+// лежат на одной стене, значит лист остаётся плоскостью одной стены с одной
+// размерной цепочкой — тем, чем развёртка и была (G179). Ломаную пару взять
+// неоткуда: её никто не положит в список. Разворачивать ломаную по сгибу — это
+// другой вид листа (два отсчёта, излом, и мерить по нему нельзя), и его никто
+// не просил.
+//
+// **Соседство таска 179 при этом не потеряно, а расширено.** Угол принадлежит
+// **каждой** стене, на которой лежит, и через него видны все такие стены:
+// перегородка, уткнувшаяся в середину чужой стены, делит с ней свой угол.
+// Поэтому две стены объекта заказчика, не делящие угла ни с кем (АИ-АК и
+// АЕ-АЖ, довод таска 179 против углов), из списков достижимы. Сверено на
+// объекте: ни одна из 25 стен не потеряла ни одного соседа, а четыре нашли
+// новых — продолжение той же стены за углом (ИЛ и ЛТ лежат в одну линию, и
+// `wallCrossings` их не видел: угол между ними меньше `WALL_CROSS_MIN_DEG`).
 
-/**
- * Соседи стены с этой стороны: `[{wallId, name, atMm, side}]` слева направо
- * **по листу** развёртки.
- *
- * `atMm` — середина торца соседки в отсчёте листа: по нему человек и находит
- * её на чертеже, который перед ним. `side` — какой стороной повернётся соседка,
- * когда на неё перейдут: см. ниже, почему это не всегда наша же сторона.
- *
- * Чистая и вынесена наружу: окно развёртки берёт списки отсюда, а не считает
- * соседство само.
- */
-function wallNeighbours(project, wallId, side) {
-  const wall = findWall(project, wallId);
-  if (!wall) return [];
-  const view = WALL_SIDES.includes(side) ? side : "left";
-  const here = wallRoomId(project, wallId, view);
-  return wallCrossings(project, wallId, view).map((cross) => ({
-    wallId: cross.wallId,
-    name: cross.name,
-    atMm: Math.round((cross.fromMm + cross.toMm) / 2),
-    side: wallFacingSide(project, cross.wallId, here, view),
-  }));
+// Короче этого участок не бывает: два угла, сошедшиеся в одной точке листа,
+// дали бы лист нулевой ширины. Миллиметр — цена деления чертежа (ADR 008).
+const WALL_SECTION_MIN_MM = 1;
+
+// Углы, лежащие на этой стене, в отсчёте от конца `a`: `[{letter, order,
+// alongMm, end}]` в порядке букв. `end` — наш собственный конец, `order` —
+// место угла в обходе чертежа (он же порядок букв).
+//
+// Свой конец проверки на близость не проходит, а получает её даром: он и есть
+// угол этой стены, где бы ни оказался после правки чертежа.
+function wallCornerList(project, wall) {
+  const vectors = wallVectors(wall);
+  if (!vectors) return [];
+  const length = wallLengthMm(wall);
+  // Дотянуться до стены угол может не точно: концы цепочки совпадают
+  // миллиметр в миллиметр (ADR 008), а упирающуюся перегородку рисуют и на
+  // глаз — у заказчика Ю не доехал до оси ЛМ на 24 мм, а Э остановился в 50.
+  // Запас тот же, которым `wallCrossings` отвечает на «дотянулась ли», и
+  // второго такого числа заводить нельзя: разойдись они — торец на листе
+  // нарисуется, а угла, которым его режут, в списке не будет.
+  const reach = Number(wall.thicknessMm) / 2 + WALL_CROSS_REACH_MM;
+  const found = [];
+  wallCorners(project, wall.schemeId).forEach((corner, order) => {
+    const end = corner.wallIds.includes(wall.id);
+    const along =
+      (corner.atMm.x - Number(wall.aMm.x)) * vectors.u.x + (corner.atMm.y - Number(wall.aMm.y)) * vectors.u.y;
+    if (!end) {
+      // За концом стены — не её угол: там она кончилась. Иначе угол далёкой
+      // стены, стоящей на одной линии с нашей, резал бы наш лист снаружи.
+      if (along < 0 || along > length) return;
+      if (segmentDistanceMm(corner.atMm, wall.aMm, wall.bMm) > reach) return;
+    }
+    found.push({ letter: corner.letter, order, alongMm: Math.round(Math.max(0, Math.min(length, along))), end });
+  });
+  return found;
 }
 
 /**
- * Какой стороной соседка повёрнута в то же помещение, откуда на неё смотрят.
+ * Углы, лежащие на этой стене, слева направо **по листу** этой стороны:
+ * `[{letter, order, atMm, alongMm, end}]`.
  *
- * Без этого переход работал бы через раз: стороны стены называются «слева» и
- * «справа» **от её собственного направления** (`WALL_SIDES`), а направления
- * соседних стен между собой никак не связаны — обвели одну слева направо,
- * другую снизу вверх. Перешёл по углу комнаты и попал на обратную грань, то
- * есть в соседнюю квартиру.
- *
- * Отвечает на это **помещение**: мы стоим в комнате, и нужна та грань соседки,
- * которая стоит в той же комнате. Комнаты выводятся из контуров, и спрашивает
- * их `wallRoomId` — то же место, что подписывает заголовок развёртки.
- *
- * Решает это не всегда, и тогда сторона остаётся наша:
- *
- *   - контуров нет или эта грань не накрыта ни одним (`roomId` пустой);
- *   - **ни одна** грань соседки не в нашей комнате — бывает у стены, уткнутой
- *     в нашу снаружи;
- *   - **обе** грани в нашей комнате — свободно стоящая перегородка внутри
- *     одной комнаты, и вопрос «какая из них к нам» ответа не имеет.
- *
- * Выдумывать на этих трёх нечего, и наша сторона — честное умолчание: кнопки
- * «Слева» и «Справа» на месте, одно нажатие.
+ * `atMm` — отступ угла по листу, уже зеркальный по стороне: по нему и видно,
+ * какой угол у листа слева. Список **от стороны не зависит** ничем, кроме
+ * порядка и отсчёта: угол принадлежит стене, а не её грани. Это нарочно —
+ * перегородка, уткнувшаяся с другой стороны, на нашем листе не нарисована, но
+ * место, где она к стене подходит, никуда не делось, и резать по нему стену
+ * человек вправе. Фильтруй список стороной — и пример заказчика сломался бы
+ * первым же шагом: он открыл ЛМ стороной по умолчанию и ждёт в списке Ю,
+ * который подходит к стене с обратной грани.
  */
-function wallFacingSide(project, otherId, roomId, fallback) {
-  if (!roomId) return fallback;
-  const facing = WALL_SIDES.filter((side) => wallRoomId(project, otherId, side) === roomId);
-  return facing.length === 1 ? facing[0] : fallback;
+function wallCornersOn(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  if (!wall) return [];
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const length = wallLengthMm(wall);
+  return wallCornerList(project, wall)
+    .map((corner) => ({ ...corner, atMm: Math.round(sideAlong(length, corner.alongMm, view)) }))
+    .sort((first, second) => first.atMm - second.atMm || first.order - second.order);
+}
+
+/**
+ * Участок стены между парой углов в отсчёте листа: `{fromMm, toMm, lengthMm,
+ * fromLetter, toLetter, name, whole}`.
+ *
+ * `cut` пустой — стена целиком, и тогда буквы и длина те же, что были до
+ * таска 197 (развёртки выгрузок считаются ровно этим путём). Пара, которой на
+ * этой стене нет, — `null`: вызывающий покажет стену целиком, а не пустоту.
+ *
+ * `fromLetter` — угол у **левого** края листа, `toLetter` — у правого. Порядок
+ * решает лист, а не порядок букв в паре: поля под развёрткой называют её края,
+ * и спорить с картинкой им нельзя. `name` же, наоборот, собрано в порядке
+ * букв — так названы стены (`wallNameOf`), так их читает заказчик («Л-М»,
+ * «К-Ю») и так имя участка не меняется от того, с какой стороны смотрят.
+ */
+function wallCornerSpan(project, wallId, side, cut = null) {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const length = wallLengthMm(wall);
+  const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
+  if (!cut || !cut.fromLetter || !cut.toLetter) {
+    return {
+      fromMm: 0,
+      toMm: length,
+      lengthMm: length,
+      // Отсчёт с левой стороны зеркалится, и вместе с ним меняются местами
+      // углы: конец `a` уходит направо (таск 142).
+      fromLetter: view === "left" ? named.bLetter : named.aLetter,
+      toLetter: view === "left" ? named.aLetter : named.bLetter,
+      name: named.name,
+      whole: true,
+    };
+  }
+  const corners = wallCornersOn(project, wallId, view);
+  const from = corners.find((corner) => corner.letter === cut.fromLetter);
+  const to = corners.find((corner) => corner.letter === cut.toLetter);
+  if (!from || !to) return null;
+  const [left, right] = from.atMm <= to.atMm ? [from, to] : [to, from];
+  if (!(right.atMm - left.atMm >= WALL_SECTION_MIN_MM)) return null;
+  const ahead = left.order <= right.order;
+  return {
+    fromMm: left.atMm,
+    toMm: right.atMm,
+    lengthMm: right.atMm - left.atMm,
+    fromLetter: left.letter,
+    toLetter: right.letter,
+    name: ahead ? wallNameOf(left.letter, right.letter) : wallNameOf(right.letter, left.letter),
+    whole: left.atMm === 0 && right.atMm === length,
+  };
+}
+
+/**
+ * Куда ведут углы, связанные стеной с опорным: `[{letter, wallId, side, cut,
+ * lengthMm, wallName, sameWall}]` — каждая запись готовый участок.
+ *
+ * Опорный угол — тот, что стоит в **противоположном** поле: заказчик просил
+ * ровно это («в каждом списке только связанные стеной углы» с углом второго
+ * списка). `edge` говорит, какое поле заполняют — `"from"` (левый угол листа)
+ * или `"to"` (правый).
+ *
+ * Порядок: сперва углы показанной стены, слева направо по её листу — ими
+ * режут тот самый лист, который перед человеком; потом углы остальных стен в
+ * порядке букв, то есть в порядке обхода чертежа.
+ */
+function wallCornerMoves(project, { wallId, side, fromLetter, toLetter, edge = "from" } = {}) {
+  const wall = findWall(project, wallId);
+  if (!wall) return [];
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const keepLetter = edge === "to" ? fromLetter : toLetter;
+  // Угол, который в этом поле уже стоит, повторять нечем: он и есть первая
+  // запись списка — «этот угол». Без этого у стены, у которой других углов нет
+  // вовсе, поле предлагало бы самого себя и выглядело бы рабочим.
+  const skipLetter = edge === "to" ? toLetter : fromLetter;
+  if (!keepLetter) return [];
+  const here = wallCornerSpan(project, wallId, view, { fromLetter, toLetter }) || wallCornerSpan(project, wallId, view, null);
+  // Комната, в которой человек стоит, — у середины **показанного участка**, а
+  // не стены: длинная стена проходит мимо нескольких комнат.
+  const length = wallLengthMm(wall);
+  const roomId = wallRoomId(project, wallId, view, sideAlong(length, (here.fromMm + here.toMm) / 2, view));
+  const walls = wallsOnScheme(project, wall.schemeId);
+  const byLetter = new Map();
+  walls.forEach((item, order) => {
+    const corners = wallCornerList(project, item);
+    const keep = corners.find((corner) => corner.letter === keepLetter);
+    if (!keep) return;
+    for (const corner of corners) {
+      if (corner.letter === keepLetter || corner.letter === skipLetter) continue;
+      // Участок нулевой ширины — не участок: два угла в одной точке листа
+      // бывают у перегородок, уткнувшихся в стену с двух сторон напротив.
+      if (Math.abs(corner.alongMm - keep.alongMm) < WALL_SECTION_MIN_MM) continue;
+      const both = corner.end && keep.end;
+      // Та же пара углов может лежать сразу на двух стенах (стена, обведённая
+      // дважды). Выбор между ними — правилом, а не случаем: показанная стена,
+      // потом та, чьи это **собственные** концы (ею пара и названа), потом по
+      // порядку стен в модели.
+      const rank = (item.id === wallId ? 0 : both ? 1 : 2) * 1000 + order;
+      const known = byLetter.get(corner.letter);
+      if (known && known.rank <= rank) continue;
+      byLetter.set(corner.letter, {
+        letter: corner.letter,
+        order: corner.order,
+        rank,
+        sameWall: item.id === wallId,
+        wallId: item.id,
+        wallName: wallName(project, item.id),
+        lengthMm: Math.abs(corner.alongMm - keep.alongMm),
+        atMm: item.id === wallId ? Math.round(sideAlong(length, corner.alongMm, view)) : 0,
+        side:
+          item.id === wallId
+            ? view
+            : wallCornerMoveSide(project, {
+                wallId: item.id,
+                roomId,
+                middleMm: (corner.alongMm + keep.alongMm) / 2,
+                ahead: corner.alongMm < keep.alongMm,
+                edge,
+              }),
+        cut: { fromLetter: corner.letter, toLetter: keepLetter },
+      });
+    }
+  });
+  return [...byLetter.values()].sort(
+    (first, second) =>
+      Number(second.sameWall) - Number(first.sameWall) ||
+      (first.sameWall ? first.atMm - second.atMm : first.order - second.order),
+  );
+}
+
+/**
+ * Какой грани показать стену, на которую переходят парой углов.
+ *
+ * **Первое слово за помещением** — довод таска 179 остаётся в силе: стороны
+ * называются «слева» и «справа» от собственного направления стены, а
+ * направления соседок между собой никак не связаны, и без этого правила
+ * переход по углу комнаты показывал бы наружную грань, то есть соседнюю
+ * квартиру. Нужна та грань соседки, что стоит в той же комнате, и спрашивается
+ * она у середины **нового участка**, а не всей стены.
+ *
+ * Помещение отвечает не всегда: контуров может не быть вовсе, обе грани могут
+ * стоять в нашей комнате (перегородка внутри неё) или ни одна — у стены,
+ * уткнутой в нашу снаружи. Тогда слово за **полем, в которое человек поставил
+ * угол**: поставил в левое — показываем ту грань, при которой этот угол у
+ * левого края листа. Прежнее умолчание «сторона остаётся наша» было честным,
+ * пока поля назывались сторонами; у пары углов оно хуже — лист поворачивался
+ * бы наугад, и выбранный угол оказывался не там, куда его положили. На объекте
+ * заказчика это ровно его третий шаг: К-Ю, помещение не отвечает, и грань
+ * выходит та, где К слева, — западная, кухонная.
+ */
+function wallCornerMoveSide(project, { wallId, roomId, middleMm, ahead, edge }) {
+  if (roomId) {
+    const facing = WALL_SIDES.filter((side) => wallRoomId(project, wallId, side, middleMm) === roomId);
+    if (facing.length === 1) return facing[0];
+  }
+  // Лист стороны «справа» читается от конца `a`, стороны «слева» — наоборот.
+  // Значит «выбранный угол слева на листе» — это `right` при меньшем отступе
+  // от `a` и `left` при большем.
+  return ahead === (edge !== "to") ? "right" : "left";
 }
 
 /**
@@ -15775,11 +16043,15 @@ function wallFacingSide(project, otherId, roomId, fallback) {
  * выведенная из этого высота. Без числа развёртка была бы картинкой, а с
  * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
  */
-function wallElevation(project, wallId, side = "left") {
+function wallElevation(project, wallId, side = "left", cut = null) {
   const wall = findWall(project, wallId);
   if (!wall) return null;
   const length = wallLengthMm(wall);
   const view = WALL_SIDES.includes(side) ? side : "left";
+  // Участок между парой углов (таск 197) или стена целиком. Негодная пара —
+  // стену поправили, буквы поехали — молча читается как целая стена: развёртка
+  // не обязана пропадать с экрана из-за того, что участок стал невозможен.
+  const span = wallCornerSpan(project, wallId, view, cut) || wallCornerSpan(project, wallId, view, null);
   const openings = openingsInWall(project, wallId).map((opening) => {
     const span = sideSpan(length, Number(opening.atMm), Number(opening.atMm) + Number(opening.widthMm), view);
     return {
@@ -15845,27 +16117,63 @@ function wallElevation(project, wallId, side = "left") {
     });
   }
   marks.sort((first, second) => first.fromMm - second.fromMm);
-  const objects = wallObjectsOn(project, wallId, view);
-  const known = wallHeightOnSide(project, wallId, view);
+  // Участок режет лист: что лежит за парой углов — уходит, что пара пересекла —
+  // обрезается по ней, и отступы считаются от **левого угла участка**. Иначе
+  // размерная цепочка соврала бы: она отсчитывает от левого края листа.
+  //
+  // У стены целиком обрезки нет вовсе, и это не оптимизация: `onSpan` выкинул
+  // бы метку, вылезшую за конец стены (бывает у привязки, сделанной рукой), а
+  // до таска 197 такая метка рисовалась — пусть и за краем листа. Целая стена
+  // обязана остаться той же, какой была (G68).
+  const onSpan = (list) => {
+    if (span.whole) return list;
+    const moved = [];
+    for (const item of list) {
+      if (item.toMm === null || item.toMm === undefined) {
+        if (item.fromMm < span.fromMm || item.fromMm > span.toMm) continue;
+        moved.push({ ...item, fromMm: Math.round(item.fromMm - span.fromMm) });
+        continue;
+      }
+      const from = Math.max(item.fromMm, span.fromMm);
+      const to = Math.min(item.toMm, span.toMm);
+      if (!(to - from > 0)) continue;
+      moved.push({ ...item, fromMm: Math.round(from - span.fromMm), toMm: Math.round(to - span.fromMm) });
+    }
+    return moved;
+  };
+  const shownOpenings = onSpan(openings);
+  const shownMarks = onSpan(marks);
+  const objects = onSpan(wallObjectsOn(project, wallId, view));
+  const crossings = onSpan(wallCrossings(project, wallId, view));
+  // Комната и высота — у середины **участка**, а не стены: стена ЛМ на объекте
+  // заказчика идёт мимо трёх комнат, и у её участков разные хозяева. У целой
+  // стены это по-прежнему её середина.
+  const middleAlongMm = sideAlong(length, (span.fromMm + span.toMm) / 2, view);
+  const known = wallHeightOnSide(project, wallId, view, middleAlongMm);
   const tops = [
-    ...openings.map((opening) => opening.topMm),
+    ...shownOpenings.map((opening) => opening.topMm),
     ...objects.map((object) => (object.topMm === null ? 0 : object.topMm)),
-    ...marks.map((mark) => mark.heightMm || 0),
+    ...shownMarks.map((mark) => mark.heightMm || 0),
   ];
-  const roomId = wallRoomId(project, wallId, view);
+  const roomId = wallRoomId(project, wallId, view, middleAlongMm);
   const room = roomId ? findRoom(project, roomId) : null;
   const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
   return {
     wallId,
     side: view,
-    // Имя стены (G200) и буквы её углов — каждая на своём краю листа. Отсчёт с
-    // левой стороны зеркалится, и вместе с ним меняются местами углы: конец
-    // `a` уходит направо. Без этого подпись «А» стояла бы на листе у того
-    // угла, который на плане зовётся Б.
+    // Имя стены (G200) и буквы углов участка — каждая на своём краю листа.
+    // Отсчёт с левой стороны зеркалится, и вместе с ним меняются местами углы:
+    // конец `a` уходит направо. Без этого подпись «А» стояла бы на листе у
+    // того угла, который на плане зовётся Б.
     name: named.name,
-    fromLetter: view === "left" ? named.bLetter : named.aLetter,
-    toLetter: view === "left" ? named.aLetter : named.bLetter,
-    lengthMm: length,
+    // Имя участка (таск 197) — в порядке букв, как имя стены; у целой стены это
+    // и есть её имя. Признак `partial` отвечает на «это вся стена или кусок»:
+    // заголовок полосы и подпись листа говорят об этом по-разному.
+    sectionName: span.name,
+    partial: !span.whole,
+    fromLetter: span.fromLetter,
+    toLetter: span.toLetter,
+    lengthMm: span.lengthMm,
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
     heightKnown: known !== null,
@@ -15881,11 +16189,11 @@ function wallElevation(project, wallId, side = "left") {
     heightShownMm: known !== null ? known : Math.max(WALL_HEIGHT_FALLBACK_MM, Math.max(0, ...tops) + 300),
     roomId,
     roomName: room ? room.name : "",
-    openings,
-    marks,
+    openings: shownOpenings,
+    marks: shownMarks,
     objects,
     // Упирающиеся стены, видные с этой стороны (G201).
-    crossings: wallCrossings(project, wallId, view),
+    crossings,
   };
 }
 
@@ -28498,8 +28806,20 @@ function formatMegabytes(bytes) {
 // восьмидесяти строк списка. Сложить рейку в один DOM-узел и показывать в ней
 // клоны заголовков было бы дешевле на чтениях, но клон — это второй заголовок:
 // своя подстановка строк, свой счётчик, свой `aria-expanded` и своя подсветка
-// позванного раздела. Второго заголовка в сборке быть не должно: нажатая в
-// рейке галочка обязана сворачивать тот же раздел, а не его портрет.
+// позванного раздела. Второго заголовка в сборке быть не должно.
+//
+// **Нажатие на заголовок у кромки перелистывает к его разделу** (таск 198,
+// G303). Слова заказчика: «нажал — прыгнуло туда — да, так и надо, а то
+// приходится самому листать, это не очевидно». Таск 194 решил иначе — узел в
+// рейке тот же самый, значит и нажатие то же, — и довод был: придумывать
+// кнопке второй смысл в зависимости от того, где она нарисована, хуже.
+// Заказчик этот довод отклонил, и правило теперь такое: **заголовок, стоящий
+// не на своём месте, — указатель на раздел, а не кнопка сворачивания**.
+// Одинаково для обеих кромок: прижатый браузером к верхней (раздел начался
+// выше кадра) и поднятый рейкой к нижней ведут себя одним образом. Заголовок
+// на своём месте — прежняя кнопка. Сворачивание из рейки не пропало: галочка
+// слева от имени — своя кнопка (`.panel__fold`), и смысл у неё один и тот же,
+// где бы заголовок ни был нарисован.
 
 // Какую долю кадра рейке отдавать нельзя. Разделов в колонке четыре-пять, и на
 // обычном экране рейка до этого не дотягивается вовсе; правило нужно низкому
@@ -28508,16 +28828,23 @@ function formatMegabytes(bytes) {
 const PANEL_RAIL_SHARE = 0.5;
 
 /**
- * Куда сдвинуть заголовки, чтобы те, чьи разделы ниже кадра, встали у кромки.
+ * Где стоит каждый заголовок при такой прокрутке.
  *
- * `items` — разделы колонки сверху вниз: `{ top, height }`, где `top` — место
- * раздела в содержимом колонки (не на экране: прокрутка на него не влияет), а
- * `height` — высота его заголовка. `frame` — что показано: `{ scrollTop,
- * clientHeight }`.
+ * `items` — разделы колонки сверху вниз: `{ top, box, head }`, где `top` —
+ * место раздела в содержимом колонки (не на экране: прокрутка на него не
+ * влияет), `box` — высота раздела, `head` — высота его заголовка. `frame` —
+ * что показано: `{ scrollTop, clientHeight }`.
  *
- * Отдаёт массив той же длины: `0` — заголовок стоит сам, отрицательное число —
- * на сколько его поднять. Вниз заголовок не двигается никогда: опустить его
- * ниже своего места значило бы закрыть им своё же содержимое.
+ * Отдаёт массив той же длины: `{ shift, side }`.
+ *
+ * `shift` — ноль или на сколько поднять заголовок. Вниз заголовок не
+ * двигается никогда: опустить его ниже своего места значило бы закрыть им своё
+ * же содержимое.
+ *
+ * `side` — где он при этом оказался: `""` — на своём месте, `"top"` — прижат к
+ * верхней кромке (это делает сам браузер, `position: sticky`), `"bottom"` —
+ * поднят рейкой к нижней. Наружу это нужно затем, что по стороне решается
+ * смысл нажатия (таск 198): заголовок не на своём месте — указатель.
  *
  * Разделы, которые целиком ниже кадра, — это всегда **хвост** списка, поэтому
  * счёт идёт с конца: последний раздел встаёт у самой кромки, предыдущий над
@@ -28525,35 +28852,74 @@ const PANEL_RAIL_SHARE = 0.5;
  * местом дотянулся до своей строки в рейке — он и все, кто выше, стоят сами:
  * заголовок снимается с рейки ровно там, где сдвиг обнуляется, и перехода не
  * видно.
+ *
+ * Верх считается без прокрутки вовсе — одной арифметикой: браузер держит
+ * заголовок внутри его раздела, значит прижат тот и только тот, чей раздел
+ * **начался выше кадра и ещё не кончился**. Свёрнутый раздел (`box === head`)
+ * к верху не липнет никогда: двигать заголовок ему некуда.
  */
 function panelRailPins(items, frame) {
   const count = items ? items.length : 0;
-  const shifts = new Array(count).fill(0);
+  const pins = [];
   const view = Math.max(0, (frame && frame.clientHeight) || 0);
-  if (!count || view <= 0) return shifts;
-  const edge = ((frame && frame.scrollTop) || 0) + view;
+  const from = (frame && frame.scrollTop) || 0;
+  for (let k = 0; k < count; k += 1) {
+    const item = items[k];
+    const held = item.box > item.head && item.top < from && from < item.top + item.box;
+    pins.push({ shift: 0, side: held ? "top" : "" });
+  }
+  if (!count || view <= 0) return pins;
+  const edge = from + view;
   let first = count;
   let stack = 0;
   for (let k = count - 1; k >= 0; k -= 1) {
-    const line = edge - stack - items[k].height;
+    const line = edge - stack - items[k].head;
     if (items[k].top <= line) break;
     first = k;
-    stack += items[k].height;
+    stack += items[k].head;
   }
-  if (first >= count) return shifts;
+  if (first >= count) return pins;
   // Лишние снимаются с дальнего конца: дальний раздел и так за двумя другими,
   // а ближний — следующий, к которому человек подойдёт прокруткой.
   let last = count;
   while (last > first + 1 && stack > view * PANEL_RAIL_SHARE) {
     last -= 1;
-    stack -= items[last].height;
+    stack -= items[last].head;
   }
   let line = edge;
   for (let k = last - 1; k >= first; k -= 1) {
-    line -= items[k].height;
-    shifts[k] = Math.min(0, Math.round(line - items[k].top));
+    line -= items[k].head;
+    const shift = Math.min(0, Math.round(line - items[k].top));
+    if (!shift) continue;
+    pins[k] = { shift, side: "bottom" };
   }
-  return shifts;
+  return pins;
+}
+
+/**
+ * Куда прокрутить колонку, чтобы раздел встал к верхней кромке.
+ *
+ * Считает это рейка, а не тот, кто её зовёт: заголовок обязан встать **под**
+ * накладкой — под теми заголовками, которые в целевом положении сами прижаты
+ * к верху, — иначе перелистывание прячет раздел за той же рейкой, из которой
+ * его позвали.
+ *
+ * Сегодня ответ всегда ноль, и это видно из счёта, а не взято на веру: к
+ * верхней кромке липнет только заголовок раздела, который её пересекает, а в
+ * целевом положении её пересекает сам позванный раздел — он и встаёт на своё
+ * место. Счёт оставлен счётом нарочно: заведётся сверху лестница заголовков,
+ * как завелась снизу, — перелистывание сядет правильно само, и вспоминать про
+ * это место не придётся.
+ */
+function panelRailTopInset(items, index) {
+  const target = items[index] ? items[index].top : 0;
+  let inset = 0;
+  for (let k = 0; k < items.length; k += 1) {
+    if (k === index) continue;
+    const item = items[k];
+    if (item.box > item.head && item.top < target && target < item.top + item.box) inset += item.head;
+  }
+  return inset;
 }
 
 // Высота рейки по колонкам: её спрашивают прокрутки к выделенной строке —
@@ -28599,10 +28965,18 @@ function panelRailInset(node) {
   return 0;
 }
 
-function railShift(head, shift) {
-  const css = shift ? "translateY(" + shift + "px)" : "";
-  if (head.style.transform !== css) head.style.transform = css;
-  head.classList.toggle("is-below", shift !== 0);
+// Заголовок, стоящий не на своём месте: поднят (`transform`), помечен классом
+// и подписан подсказкой — нажатие перелистнёт, а не свернёт. Пишем только на
+// смену значения: слепая запись стоила бы пересчёта стилей всему, что внутри.
+function railPin(node, pin) {
+  const css = pin.shift ? "translateY(" + pin.shift + "px)" : "";
+  if (node.style.transform !== css) node.style.transform = css;
+  node.classList.toggle("is-below", pin.side === "bottom");
+  node.classList.toggle("is-pinned", pin.side !== "");
+  const title = node.querySelector(".panel__title");
+  if (!title) return;
+  const hint = pin.side ? strings.panels.jump : "";
+  if (title.title !== hint) title.title = hint;
 }
 
 function railVar(node, name, value) {
@@ -28622,37 +28996,66 @@ function railItems(column) {
   const base = rect.top + column.clientTop - column.scrollTop;
   const items = [];
   for (const section of column.querySelectorAll(".panel__section")) {
-    const head = section.querySelector(".panel__head");
-    if (!head) continue;
-    items.push({
-      section,
-      head,
-      height: head.offsetHeight,
-      top: section.getBoundingClientRect().top - base,
-    });
+    const node = section.querySelector(".panel__head");
+    if (!node) continue;
+    const box = section.getBoundingClientRect();
+    items.push({ section, node, head: node.offsetHeight, top: box.top - base, box: box.height });
   }
   return items;
 }
 
+const RAIL_FREE = { shift: 0, side: "" };
+
 function syncColumn(column) {
   const all = railItems(column);
-  const shown = all.filter((item) => item.height > 0);
-  const shifts = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
+  const shown = all.filter((item) => item.head > 0);
+  const pins = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
   let rail = 0;
   for (let k = 0; k < shown.length; k += 1) {
-    railShift(shown[k].head, shifts[k]);
-    if (shifts[k]) rail += shown[k].height;
+    railPin(shown[k].node, pins[k]);
+    if (pins[k].shift) rail += shown[k].head;
   }
   for (const item of all) {
-    if (item.height <= 0) railShift(item.head, 0);
+    if (item.head <= 0) railPin(item.node, RAIL_FREE);
     // Прилипший блок внутри тела (фильтры списка меток) липнет **под**
     // заголовком своего раздела, а не на нём: высоту заголовка он узнаёт мерой,
     // а не числом в стилях — иначе фильтры разошлись бы с заголовком на первой
     // же правке шрифта или отступов.
-    railVar(item.section, "--panel-head", item.height);
+    railVar(item.section, "--panel-head", item.head);
   }
   railVar(column, "--panel-rail", rail);
   railHeight.set(column, rail);
+}
+
+/**
+ * Нажали заголовок — перелистнуть к его разделу, если заголовок нарисован у
+ * кромки (таск 198, G303).
+ *
+ * Отдаёт `true`, если нажатие было указателем и колонка перелистнута, и
+ * `false`, если заголовок стоит на своём месте: тогда это прежняя кнопка
+ * сворачивания, и решает не рейка. Знание «у кромки или нет» берётся из
+ * класса, который рейка поставила в последнем кадре прокрутки, — второго
+ * обмера ради одного клика не нужно.
+ *
+ * Прокрутка **мгновенная**, не плавная, и это выбор. Колонка на объекте
+ * заказчика — 3785 точек: плавный перелёт через неё занимает полсекунды, всё
+ * это время перестраивает рейку на каждом кадре и показывает по дороге строки,
+ * которых никто не звал. Слова заказчика («нажал — прыгнуло туда») — про
+ * прыжок. Мгновенная ещё и не спорит с рукой: начал человек листать сам —
+ * спорить не с чем, перелёт уже кончился.
+ */
+function panelRailJump(node) {
+  const head = node && node.closest ? node.closest(".panel__head") : null;
+  if (!head || !head.classList.contains("is-pinned")) return false;
+  const section = head.closest(".panel__section");
+  const column = section ? section.closest(".panel") : null;
+  if (!column) return false;
+  const shown = railItems(column).filter((item) => item.head > 0);
+  const index = shown.findIndex((item) => item.node === head);
+  if (index < 0) return false;
+  column.scrollTop = shown[index].top - panelRailTopInset(shown, index);
+  syncPanelRail();
+  return true;
 }
 
 let railColumns = [];
@@ -29400,8 +29803,16 @@ function applySectionState(id) {
   if (!node) return;
   const collapsed = appCollapsed.has(id);
   node.classList.toggle("is-collapsed", collapsed);
-  const button = node.querySelector("[data-section]");
-  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  // Состояние живёт на галочке: у неё одно дело — сворачивать, и держится оно
+  // за ней, где бы заголовок ни был нарисован. У имени раздела дело меняется
+  // от места (таск 198), и обещать голосу «свёрнуто/развёрнуто» ему нечем.
+  const fold = node.querySelector("[data-section-fold]");
+  if (fold) {
+    const label = collapsed ? strings.panels.unfold : strings.panels.fold;
+    fold.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    fold.setAttribute("aria-label", label);
+    fold.title = label;
+  }
   // Свернули раздел — разделы ниже переехали, и рейка заголовков устарела.
   // Наблюдатель за размерами поймал бы это и сам, но на кадр позже.
   syncPanelRail();
@@ -29506,7 +29917,25 @@ function setSectionBadge(id, value) {
 
 function wireSections() {
   for (const button of document.querySelectorAll("[data-section]")) {
-    button.addEventListener("click", () => toggleSection(button.dataset.section));
+    button.addEventListener("click", () => {
+      // Имя раздела: на своём месте — прежняя кнопка сворачивания, у кромки
+      // колонки — указатель на раздел (таск 198, G303). Слова заказчика:
+      // «нажал — прыгнуло туда — да, так и надо, а то приходится самому
+      // листать, это не очевидно». Где нарисован заголовок и куда от него
+      // листать — знает рейка, и спрашивают её, а не меряют заново.
+      if (panelRailJump(button)) return;
+      toggleSection(button.dataset.section);
+    });
+  }
+  // Галочка слева от имени: сворачивает всегда — и когда раздел на виду, и
+  // когда от него виден один заголовок в рейке. Без неё свернуть невидимый
+  // раздел было бы нечем, а именно так прячут список меток, чтобы добраться до
+  // справочника типов.
+  for (const button of document.querySelectorAll("[data-section-fold]")) {
+    button.addEventListener("click", () => toggleSection(button.dataset.sectionFold));
+    // Подпись голосу ставится сразу, а не с первого нажатия: внутри кнопки один
+    // знак, и до первого сворачивания она читалась бы пустой.
+    applySectionState(button.dataset.sectionFold);
   }
   // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
   // когда хранилище ответит. Ждать его с пустым экраном хуже.
@@ -30903,10 +31332,23 @@ function elevationHeight(fieldHeight) {
  *
  * Имя стены (G200) стоит первым: им стену и называют. Длина осталась рядом —
  * имя отвечает «какая стена», длина «сколько в ней».
+ *
+ * У участка (таск 197) в заголовке **две** меры: стена, по которой он идёт, и
+ * сам участок парой углов. Назови только участок — и человек потеряет стену, а
+ * метки он привязывает к стене (G202); назови только стену — и длина в
+ * заголовке разойдётся с размерной цепочкой на листе.
  */
 function elevationTitle(elevation) {
   if (!elevation) return "";
-  const parts = [text("elevation.wall", { name: elevation.name, length: elevation.lengthMm })];
+  const parts = [
+    elevation.partial
+      ? text("elevation.section", {
+          wall: elevation.name,
+          name: elevation.sectionName,
+          length: elevation.lengthMm,
+        })
+      : text("elevation.wall", { name: elevation.name, length: elevation.lengthMm }),
+  ];
   if (elevation.roomName) parts.push(elevation.roomName);
   return parts.join(" · ");
 }
@@ -30962,44 +31404,71 @@ function elevationNote(elevation, drawn) {
 }
 
 /**
- * Два поля перехода к соседней стене — по одному на сторону текущей (таск 179,
- * требование G267).
+ * Два края листа — два поля (таск 197, требование G302): `"from"` — левый угол
+ * участка, `"to"` — правый.
+ */
+const ELEVATION_EDGES = ["from", "to"];
+
+/**
+ * Два поля с углами участка — по одному на край листа (таск 197, G302; правка
+ * решения таска 179).
  *
- * Возвращает `[{side, label, hint, here, options}]` в порядке `WALL_SIDES`;
- * `options` — `[{wallId, side, text}]` слева направо по листу. Соседство
- * считает модель (`wallNeighbours`) по чертежу, здесь только слова.
+ * Возвращает `[{edge, letter, label, hint, none, here, options}]` в порядке
+ * `ELEVATION_EDGES`; `options` — `[{letter, wallId, side, cut, text}]`. Что с
+ * чем связано стеной, считает модель (`wallCornerMoves`) по чертежу — здесь
+ * только слова.
  *
- * **Почему поля по сторонам, а не по углам.** Заказчик сказал «в каждом поле
- * одна и другая сторона текущей стены», и сторона здесь — не фигура речи:
- * список у них разный. Перегородка, упирающаяся справа, слева не видна — она за
- * стеной, — поэтому «с кем граничит стена» без стороны вопрос неполный. Углы на
- * этом не годятся ещё и по делу: на объекте заказчика две стены из двадцати
- * пяти ни с кем не делят угла вовсе, обоими концами уткнуты в середины чужих
- * стен, и список по углам до них не доводит ниоткуда.
+ * **Где лево, а где право.** Поля называют **края листа**, а не концы стены:
+ * слева в поле стоит тот угол, который нарисован слева на развёртке. Правило
+ * устойчиво, потому что другого источника у него нет — буквы на краях размерной
+ * цепочки (`fromLetter`, `toLetter`, таск 142) и есть эти два поля. Отсюда и
+ * следствие, которое надо знать: кнопки «Слева/Справа» переворачивают лист, и
+ * углы меняются полями вместе с ним. Это не перескок списка — на листе они
+ * ровно там, где написаны.
  *
- * **Что в списке и есть «часть стены».** Соседи — это ровно те торцы, которые
- * на развёртке уже нарисованы с именами (G201): ткни в тот, что видишь. Они же
- * делят стену на участки — часть стены это промежуток между двумя соседями, и
- * `atMm` у записи говорит, где он кончается. Самих участков отдельными листами
- * окно не режет: лист развёртки — целая стена с одной размерной цепочкой от
- * угла до угла, и резать его значит заводить второй вид листа и второй отсчёт.
+ * **Список считается от противоположного поля**, как и просил заказчик: в левом
+ * поле те углы, что связаны стеной с правым, и наоборот. Поэтому смена угла —
+ * это всегда «оставь тот, второй, и покажи участок до нового».
+ *
+ * **Отдельное поле «часть стены» (таск 179) не нужно и не заводится**: часть
+ * стены это и есть пара углов, и теперь лист режется по ней. Второе поле о том
+ * же дало бы два способа задать одно.
  *
  * Чистая и вынесена наружу: слова и порядок проверяются без браузера.
  */
-function elevationWalk(project, wallId) {
-  const name = wallName(project, wallId);
-  return WALL_SIDES.map((side) => {
-    const label = strings.elevation["side_" + side];
+function elevationCorners(project, elevation) {
+  if (!project || !elevation) return [];
+  return ELEVATION_EDGES.map((edge) => {
+    const letter = edge === "to" ? elevation.toLetter : elevation.fromLetter;
+    const moves = wallCornerMoves(project, {
+      wallId: elevation.wallId,
+      side: elevation.side,
+      fromLetter: elevation.fromLetter,
+      toLetter: elevation.toLetter,
+      edge,
+    });
     return {
-      side,
-      label,
-      hint: text("elevation.walkHint", { side: label.toLowerCase() }),
-      here: text("elevation.walkHere", { name }),
-      none: text("elevation.walkNone", { side: label }),
-      options: wallNeighbours(project, wallId, side).map((neighbour) => ({
-        wallId: neighbour.wallId,
-        side: neighbour.side,
-        text: text("elevation.walkAt", { name: neighbour.name, at: neighbour.atMm }),
+      edge,
+      letter,
+      label: strings.elevation[edge === "to" ? "cornerRight" : "cornerLeft"],
+      hint: strings.elevation.cornerHint,
+      none: strings.elevation.cornerNone,
+      here: text("elevation.cornerHere", { letter }),
+      options: moves.map((move) => ({
+        letter: move.letter,
+        wallId: move.wallId,
+        side: move.side,
+        cut: move.cut,
+        // Буква главная, и она стоит первой: заказчик мыслит буквами, их же он
+        // видит кружками на чертеже. Остальное — чем этот угол отличается от
+        // двадцати других: у своей стены длиной участка, у чужой её именем.
+        text: move.sameWall
+          ? text("elevation.cornerSame", { letter: move.letter, length: move.lengthMm })
+          : text("elevation.cornerOther", {
+              letter: move.letter,
+              wall: move.wallName,
+              length: move.lengthMm,
+            }),
       })),
     };
   });
@@ -31043,40 +31512,42 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
     growBox,
     uiEl("span", { text: strings.elevation.grow }),
   ]);
-  // Два поля перехода (таск 179, G267) — своим рядом под заголовком, а не в
-  // одной строке с кнопками: в шапке уже стоят заголовок, две отметки, две
-  // кнопки сторон и «Закрыть», и пара списков со стенами выдавила бы их за
-  // край на планшете. Ряд прячется вместе с полосой и перестраивается на каждой
-  // смене стены.
+  // Два поля с углами участка (таск 197, G302) — своим рядом под заголовком, а
+  // не в одной строке с кнопками: в шапке уже стоят заголовок, две отметки, две
+  // кнопки сторон и «Закрыть», и пара списков выдавила бы их за край на
+  // планшете. Ряд прячется вместе с полосой и перестраивается на каждой смене
+  // участка.
   //
-  // Выбранной записью стоит сама стена: «ЛМ — эта стена». Поэтому поле отвечает
-  // и на «где я», а не только на «куда перейти», — и совпадает со словами
-  // заказчика «в каждом поле одна и другая сторона текущей стены».
-  const walkSelects = WALL_SIDES.map((side) =>
+  // Выбранной записью стоит сам угол: «Л — этот угол». Поэтому поле отвечает и
+  // на «где я», а не только на «куда перейти».
+  const cutSelects = ELEVATION_EDGES.map((edge) =>
     uiEl("select", {
-      class: "elev__walk",
+      class: "elev__cut",
       on: {
         change: (event) => {
-          const picked = walkOptions[side].get(event.target.value);
-          // «Эта стена» — не переход: поле возвращается к ней само после
+          const picked = cutOptions[edge].get(event.target.value);
+          // «Этот угол» — не переход: поле возвращается к нему само после
           // перестройки, и дёргать вызывающего незачем.
-          if (picked && onWall) onWall(picked);
-          else syncWalk();
+          if (picked) moveTo(picked);
+          else syncCut();
         },
       },
     }),
   );
-  const walkLabels = WALL_SIDES.map((side, index) =>
-    uiEl("label", { class: "elev__walkrow" }, [
-      uiEl("span", { class: "elev__walklabel", text: strings.elevation["side_" + side] }),
-      walkSelects[index],
+  const cutLabels = ELEVATION_EDGES.map((edge, index) =>
+    uiEl("label", { class: "elev__cutrow" }, [
+      uiEl("span", {
+        class: "elev__cutlabel",
+        text: strings.elevation[edge === "to" ? "cornerRight" : "cornerLeft"],
+      }),
+      cutSelects[index],
     ]),
   );
-  const walkRow = uiEl("div", { class: "elev__walkbar" }, walkLabels);
-  // Что стоит за каждой записью: ключ записи → `{wallId, side}`. Держать это в
-  // `value` целиком значило бы собирать и разбирать строку с двумя полями —
-  // карта честнее и переживает любые имена стен.
-  const walkOptions = { left: new Map(), right: new Map() };
+  const cutRow = uiEl("div", { class: "elev__cutbar" }, cutLabels);
+  // Что стоит за каждой записью: ключ записи → `{wallId, side, cut}`. Держать
+  // это в `value` целиком значило бы собирать и разбирать строку с четырьмя
+  // полями — карта честнее и переживает любые буквы углов.
+  const cutOptions = { from: new Map(), to: new Map() };
   const closeButton = uiIconButton("close", {
     title: strings.elevation.close,
     on: { click: () => onClose && onClose() },
@@ -31084,7 +31555,7 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
   const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
   const node = uiEl("div", { class: "elev" }, [
     uiEl("div", { class: "elev__head" }, [title, viewsRow, growRow, ...sideButtons, closeButton]),
-    walkRow,
+    cutRow,
     stage,
     note,
   ]);
@@ -31101,36 +31572,60 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
   let shown = null;
   let withViews = views !== false;
   let withGrow = grow === true;
-  // От чего считается ряд перехода. Объект держится здесь, а не спрашивается у
-  // вызывающего: полоса уже берёт у него развёртку тем же способом.
-  let walkProject = null;
-  let walkWallId = null;
+  // Последние доводы `update`: полоса перерисовывает себя сама, когда участок
+  // сменился внутри той же стены. Вызывающему там нечего менять — ни выделение,
+  // ни сторона не поехали, — и дёргать его состояние ради своего же листа
+  // значило бы заводить участок в состоянии сеанса на обе поверхности.
+  let last = null;
+  // Показанный участок: пара углов и стена, на которой она посчитана. Живёт у
+  // полосы, потому что это её лист: выделение стены и сторона общие с планом и
+  // мастерской, а на какой кусок стены человек смотрит — нет.
+  let cut = null;
+  let cutWallId = null;
 
   /**
-   * Перестроить ряд перехода. Зовётся на каждой смене стены: соседи считаются
-   * от чертежа, и после правки стены список обязан стать другим.
+   * Перестроить ряд углов. Зовётся на каждой смене участка: связи считаются от
+   * чертежа, и после правки стены список обязан стать другим.
    */
-  function syncWalk() {
-    const ready = Boolean(walkProject && walkWallId);
-    walkRow.hidden = !ready;
+  function syncCut() {
+    const ready = Boolean(last && last.project && shown);
+    cutRow.hidden = !ready;
     if (!ready) return;
-    elevationWalk(walkProject, walkWallId).forEach((field, index) => {
-      const select = walkSelects[index];
-      const known = walkOptions[field.side];
+    elevationCorners(last.project, shown).forEach((field, index) => {
+      const select = cutSelects[index];
+      const known = cutOptions[field.edge];
       known.clear();
       select.replaceChildren(uiEl("option", { value: "here", text: field.here }));
       for (const option of field.options) {
-        const key = option.wallId + ":" + option.side;
-        known.set(key, { wallId: option.wallId, side: option.side });
+        const key = option.letter + ":" + option.wallId + ":" + option.side;
+        known.set(key, { wallId: option.wallId, side: option.side, cut: option.cut });
         select.append(uiEl("option", { value: key, text: option.text }));
       }
-      // Выбранной всегда стоит сама стена: поле говорит, где человек, а переход
-      // уводит с него, и залипшая чужая запись врала бы о том, что открыто.
+      // Выбранным всегда стоит угол этого края листа: поле говорит, где человек,
+      // а выбор уводит с него, и залипшая чужая запись врала бы о том, что
+      // открыто.
       select.value = "here";
-      // Соседей нет — поле погашено с причиной, а не притворяется рабочим.
+      // Связанных углов нет — поле погашено с причиной, а не притворяется
+      // рабочим.
       select.disabled = field.options.length === 0;
-      walkLabels[index].title = field.options.length === 0 ? field.none : field.hint;
+      cutLabels[index].title = field.options.length === 0 ? field.none : field.hint;
     });
+  }
+
+  /**
+   * Показать участок, выбранный в поле.
+   *
+   * Участок внутри той же стены полоса показывает сама; участок на другой стене
+   * — через вызывающего: выделение стены общее с планом и чертежом, и
+   * расходиться им нельзя. Пара углов при этом уже отложена, и `update`
+   * подхватит её, как только выделение дойдёт обратно.
+   */
+  function moveTo(picked) {
+    cut = picked.cut;
+    cutWallId = picked.wallId;
+    const samePlace = shown && picked.wallId === shown.wallId && picked.side === shown.side;
+    if (!samePlace && onWall) onWall({ wallId: picked.wallId, side: picked.side });
+    else show();
   }
 
   function paint() {
@@ -31171,26 +31666,39 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
       withGrow = shownGrow === true;
       growBox.checked = withGrow;
     }
+    last = { project, wallId, side, place, fieldHeight };
+    return show();
+  }
+
+  // Нарисовать то, что отложено в `last` и `cut`. Отделено от `update` ради
+  // одного: смена участка внутри стены не меняет у вызывающего ничего, и
+  // перерисовать себя полоса обязана сама.
+  function show() {
+    const { project, wallId, side, place, fieldHeight } = last || {};
     const wall = wallId ? findWall(project, wallId) : null;
     if (!wall) {
       node.hidden = true;
       shown = null;
-      walkProject = null;
-      walkWallId = null;
+      cutRow.hidden = true;
       return null;
     }
+    // Выделили другую стену — участок прежней с ней не поедет: буквы у него
+    // чужие, и показывать «участок Л-Ю» на стене БВ было бы враньём.
+    if (cutWallId !== wallId) {
+      cut = null;
+      cutWallId = null;
+    }
     const view = WALL_SIDES.includes(side) ? side : WALL_SIDES[0];
-    shown = wallElevation(project, wallId, view);
+    shown = wallElevation(project, wallId, view, cut);
     node.hidden = !shown;
     if (!shown) return null;
     node.classList.toggle("elev--top", place === "top");
     node.classList.toggle("elev--bottom", place !== "top");
     node.style.setProperty("--elev-height", Math.round(elevationHeight(fieldHeight)) + "px");
     title.textContent = elevationTitle(shown);
-    // Ряд перехода — от этой стены: соседей считает модель по чертежу (G267).
-    walkProject = project;
-    walkWallId = wallId;
-    syncWalk();
+    // Ряд углов — от показанного участка: что с чем связано стеной, считает
+    // модель по чертежу (G302).
+    syncCut();
     // Без приписки о подтянутых вещах: её допишет `paint` ниже, когда масштаб
     // станет известен. Здесь — чтобы полоса не мелькала пустой подписью.
     setNote(null);
@@ -35537,9 +36045,10 @@ function mountCanvasFullscreen(host, api) {
 function mountCanvasElevation(host, api) {
   const strip = createElevationStrip({
     onSide: (side) => api.setState({ wallSide: side }),
-    // Переход к соседней стене из ряда полей (таск 179, G267): стена и сторона
+    // Переход на другую стену парой углов (таск 197, G302): стена и сторона
     // ложатся одной правкой состояния — иначе между ними мелькнула бы развёртка
-    // новой стены с прежней стороной.
+    // новой стены с прежней стороной. Сам участок полоса держит у себя: на
+    // какой кусок стены человек смотрит, выделению знать незачем.
     onWall: ({ wallId, side }) => api.setState({ selectedWallId: wallId, wallSide: side }),
     onClose: () => api.setState({ selectedWallId: null }),
     // Отметка живёт в настройках браузера, как слои и шрифт схемы: на одном
@@ -66188,7 +66697,7 @@ function createWorkshop({ api, hosts }) {
   // окно закроют.
   const strip = createElevationStrip({
     onSide: (side) => setState({ wallSide: side }),
-    // Переход к соседней стене из ряда полей (таск 179, G267). Сторона встаёт
+    // Переход на другую стену парой углов (таск 197, G302). Сторона встаёт
     // первой, стена второй: выделение у чертежа своё (`select` ведёт и его), и
     // кадра между двумя правками на экране не бывает — обе идут одной задачей.
     onWall: ({ wallId, side }) => {
