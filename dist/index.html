@@ -54668,9 +54668,10 @@ function volumeStanceStep(stance, seconds, options = {}) {
  * Куда показали на полу: луч сквозь точку кадра до плоскости пола (G212,
  * «при клике курсором позволяй перемещать»).
  *
- * `null` — луч идёт вверх или вдоль пола и ни во что не упирается: с обзора,
- * который смотрит сверху всегда (`volumeAroundPitch`), такого не бывает, но
- * отвечать на это выдуманной точкой нельзя.
+ * `null` — луч идёт вверх или вдоль пола и ни во что не упирается. С таска 195
+ * это в обзоре бывает: взгляд там задирается к небу (`volumeAroundStand`), и
+ * щелчок по небу никуда не переносит — отвечать на него выдуманной точкой
+ * пола было бы хуже, чем не отвечать вовсе.
  *
  * Считается **плоскостью пола, а не гранями сцены**: указывают на место, а не
  * на поверхность, и нажатый кусок стены должен значить «туда, к этой стене», а
@@ -57545,11 +57546,54 @@ const VOLUME_MOOD_NOON = volumeMood({
 // ——— обзор со стороны ————————————————————————————————————————————————————
 
 /**
- * Камера обзора: отходим от цели на расстояние по рысканью и наклону.
- * Наклон отрицательный — смотрим сверху вниз.
+ * Наклон, на котором обзор **стоит**: взгляд задирается свободно, а место
+ * камеры остаётся над крышей (таск 195, требование G298).
+ *
+ * До таска 195 этим числом зажимали сам взгляд, и довод был честный: обзор
+ * ходит вокруг цели, а цель стоит на полу среди стен — подними взгляд к
+ * горизонту, и камера, отойдя на семь метров, окажется **внутри** стены
+ * соседней комнаты, кадр станет ровным серым полем, и человек решит, что
+ * сборка сломалась.
+ *
+ * Заказчик предел со взгляда снял: «разреши обзору задирать камеру». Причина
+ * названа исполнителем таска 190: выше горизонта обзор не смотрел вовсе, а
+ * солнце летом в полдень стоит на 58° — настоящая астрономия оставалась за
+ * кадром.
+ *
+ * Предел поэтому не снят, а **переставлен со взгляда на место камеры**:
+ * подъём камеры над целью по-прежнему не меньше `liftMm` — высоты, на которой
+ * кончается чертёж, — и внутрь стены ей не попасть ни при каком взгляде.
+ * Задирается только взгляд, как у камеры на штативе: штатив стоит над крышей,
+ * голова поворачивается к небу. Серый кадр от этого не возвращается, и гасить
+ * ближние стены не пришлось — сквозь них никто не смотрит.
+ *
+ * Отошли дальше — стоять можно положе; приблизились — место само становится
+ * круче, вплоть до отвесного, а заданный взгляд от приближения не сбивается.
+ *
+ * Отвес и зенит сторожит `VOLUME_PITCH_MAX_DEG` — то же число, что у человека:
+ * вверх ногами не смотрит ни один из двух видов.
  */
-function volumeAroundCamera(target, yaw, pitch, distance) {
-  const basis = volumeBasis({ yaw, pitch });
+function volumeAroundStand(pitch, distance, liftMm) {
+  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
+  const aim = Math.max(-limit, Math.min(limit, pitch));
+  if (!(distance > 0) || !(liftMm > 0)) return aim;
+  const ratio = Math.min(1, liftMm / distance);
+  const steepest = -Math.min(limit, Math.asin(ratio));
+  return Math.min(steepest, aim);
+}
+
+/**
+ * Камера обзора: отходим от цели на расстояние по рысканью и **наклону
+ * стояния**, а смотрим туда, куда задали.
+ *
+ * Пока взгляд не задран, это одно и то же число, и камера ведёт себя как
+ * прежде. Задранный взгляд (`pitch` положе того, на чём камера стоит) её с
+ * места не сдвигает — разбор в `volumeAroundStand`, `liftMm` оттуда же. Без
+ * `liftMm` зажат один отвес: так зовут обзор стенд и тесты, которым крыша не
+ * мешает.
+ */
+function volumeAroundCamera(target, yaw, pitch, distance, liftMm = 0) {
+  const basis = volumeBasis({ yaw, pitch: volumeAroundStand(pitch, distance, liftMm) });
   return {
     at: {
       x: target.x - basis.fwd.x * distance,
@@ -57598,20 +57642,31 @@ function volumeAroundDistance(value) {
  * (`gesturePinchStep` отдаёт и множитель масштаба, и ход середины) — а перевести
  * этот ход в миллиметры может только камера: это её счёт, и он здесь.
  *
+ * Тем же ходом возит и двухпальцевый свайп трекпада (таск 195, требование
+ * G299): жест разбирает тот же `gestures.js` (`gestureWheel` отдаёт `pan` с
+ * готовым ходом в экранных точках), а перевод в миллиметры здесь один на оба
+ * устройства.
+ *
  * Правило — **пол едет за пальцами**: куда ушла середина, туда уехала карта, а
  * камера на столько же в обратную сторону. Цель ходит по полу, высота её не
- * меняется: обзор смотрит сверху всегда (`volumeAroundPitch`), и поднятая цель
- * увела бы его в стену.
+ * меняется: камера обзора стоит над крышей (`volumeAroundStand`), и поднятая
+ * цель увела бы её в стену.
  *
  * Мера одного пикселя — `distance / focal`: ширина пикселя на той глубине, где
  * лежит цель. Отошли дальше — палец возит крупнее, и это ровно то, что видно
  * глазом.
  *
  * Поперёк взгляда счёт точный: камера не кренится, и экранное «вправо» лежит
- * на полу целиком. Вдоль — с поправкой на наклон, и берётся она из самой
- * камеры: экранный «верх», положенный на пол, короче единицы ровно во столько,
- * во сколько пол на экране сжат (это синус наклона). Без поправки карта
- * отставала бы от пальца вверх-вниз, хотя поперёк шла бы вровень.
+ * на полу целиком. Вдоль — в сторону взгляда, положенного на пол, и с
+ * поправкой на наклон: пол на экране сжат ровно во столько, во сколько короче
+ * единицы экранный «верх», положенный на пол (это синус наклона). Без поправки
+ * карта отставала бы от пальца вверх-вниз, хотя поперёк шла бы вровень.
+ *
+ * Сторона берётся у **взгляда**, а не у «верха» (таск 195): у задранного
+ * взгляда горизонтальная часть «верха» разворачивается назад, и карта поехала
+ * бы от пальца в обратную сторону. На опущенном взгляде — а другого до таска
+ * 195 в обзоре не было — обе стороны это одно и то же направление, и числа от
+ * замены не изменились ни на бит.
  *
  * Поправка **ограничена** `VOLUME_AROUND_PAN_TILT_MIN`: у почти
  * горизонтального взгляда она уходит в бесконечность — пол под пальцем там
@@ -57625,16 +57680,17 @@ function volumeAroundPan(view, box, panX, panY) {
   if (!(distance > 0) || !(focal > 0)) return { dx: 0, dy: 0 };
   const perPixel = distance / focal;
   const basis = volumeBasis({ yaw: view.yaw, pitch: view.pitch });
-  // Экранный «верх», положенный на пол: и сторона, и мера сжатия сразу. У
-  // отвесного взгляда это направление рысканья, у положего — он же, но короче.
-  const lean = Math.hypot(basis.up.x, basis.up.y);
-  // Взгляд ровно вдоль земли — верх встал отвесно, и класть на пол нечего:
-  // сторону берём у самого взгляда. В обзоре такого не бывает
-  // (`volumeAroundPitch` держит камеру выше крыши), но отвечать на это нулём
-  // было бы неправдой.
-  const flat = Math.hypot(basis.fwd.x, basis.fwd.y) || 1;
+  // Взгляд, положенный на пол, — сторона сдвига вдоль. У отвесного взгляда
+  // класть нечего (он сам отвесный), и сторону даёт рысканье — то же самое
+  // направление в пределе.
+  const flat = Math.hypot(basis.fwd.x, basis.fwd.y);
   const forward =
-    lean > 1e-9 ? { x: basis.up.x / lean, y: basis.up.y / lean } : { x: basis.fwd.x / flat, y: basis.fwd.y / flat };
+    flat > 1e-9
+      ? { x: basis.fwd.x / flat, y: basis.fwd.y / flat }
+      : { x: Math.cos(view.yaw || 0), y: Math.sin(view.yaw || 0) };
+  // Экранный «верх», положенный на пол: его длина и есть мера сжатия пола
+  // (синус наклона). Знака у неё нет — сторону уже дал взгляд.
+  const lean = Math.hypot(basis.up.x, basis.up.y);
   const tilt = Math.max(VOLUME_AROUND_PAN_TILT_MIN, lean);
   const across = -(Number(panX) || 0) * perPixel;
   const along = ((Number(panY) || 0) * perPixel) / tilt;
@@ -57642,29 +57698,6 @@ function volumeAroundPan(view, box, panX, panY) {
     dx: basis.right.x * across + forward.x * along,
     dy: basis.right.y * across + forward.y * along,
   };
-}
-
-/**
- * Наклон обзора, при котором камера заведомо выше крыши (дефект живого
- * прогона).
- *
- * Обзор ходит вокруг цели, а цель стоит на полу среди стен. Подними взгляд к
- * горизонту — и камера, отойдя на семь метров, окажется **внутри** стены
- * соседней комнаты: кадр станет ровным серым полем, и человек решит, что
- * сборка сломалась. Сквозь стены при этом смотреть нельзя по той же причине,
- * по какой сквозь них нельзя ходить, — пропадёт смысл.
- *
- * Поэтому обзор смотрит сверху всегда: наклон ограничен так, чтобы подъём
- * камеры над целью был не меньше `liftMm` — высоты, на которой кончается
- * чертёж. Отошли дальше — можно смотреть положе; приблизились — вид сам
- * становится круче, вплоть до отвесного.
- */
-function volumeAroundPitch(pitch, distance, liftMm) {
-  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
-  if (!(distance > 0) || !(liftMm > 0)) return Math.max(-limit, Math.min(limit, pitch));
-  const ratio = Math.min(1, liftMm / distance);
-  const steepest = -Math.min(limit, Math.asin(ratio));
-  return Math.max(-limit, Math.min(steepest, pitch));
 }
 
 /**
@@ -59051,6 +59084,11 @@ function createVolume({ api, hosts }) {
   // Два пальца на поле: `{distance, center}` от общего `gesturePinchStep` —
   // прошлый разведённый промежуток и прошлая середина между пальцами.
   let pinch = null;
+  // Серия колеса: `{kind, time}` от общего `gestureWheel` (таск 195). Нужна
+  // затем же, зачем плану и чертежу: внутри одного маха трекпада решение
+  // «листать или приближать» не меняется, иначе разогнавшийся мах переключался
+  // бы на зум на полпути.
+  let wheelStreak = null;
   // Касания на поле, по которым узнаётся щипок.
   const touches = new Map();
   // Открытый вопрос про этаж и лестница, про которую уже спросили. Вторая нужна
@@ -59360,7 +59398,7 @@ function createVolume({ api, hosts }) {
     // понять, где стоишь, а не чтобы потерять себя из виду.
     if (next === "around") {
       around = { ...around, target: { x: person.x, y: person.y, z: 1200 }, yaw: person.yaw, distance: VOLUME_AROUND_NEAR_MM };
-      around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
+      around = { ...around, pitch: aroundAim() };
     }
     view = next;
     sync();
@@ -59370,7 +59408,7 @@ function createVolume({ api, hosts }) {
     if (scene.empty) return;
     const fitted = volumeAroundFit(scene, viewport());
     around = { ...around, target: fitted.target, distance: fitted.distance };
-    around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
+    around = { ...around, pitch: aroundAim() };
     if (view !== "around") {
       view = "around";
       sync();
@@ -59379,12 +59417,31 @@ function createVolume({ api, hosts }) {
     paint();
   }
 
+  /**
+   * Взгляд обзора, возвращённый на чертёж (таск 195).
+   *
+   * Руками взгляд задирается к небу свободно — но «Обзор» и «Вся схема» это
+   * **возврат**: они и так ставят цель и расстояние заново, и нажавший их ждёт
+   * увидеть схему, а не небо, в котором остался взгляд. Поэтому взгляд тут не
+   * положе умолчания обзора, и ровно так же его зажимает расстояние
+   * (`volumeAroundStand`): вплотную вид становится круче сам.
+   *
+   * Круче умолчания — не трогаем: смотреть на схему почти отвесно человек мог
+   * выбрать сам, и возврат такой выбор не отнимает.
+   */
+  function aroundAim() {
+    const home = (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180;
+    return volumeAroundStand(Math.min(around.pitch, home), around.distance, aroundLift());
+  }
+
   function camera() {
     if (view === "person") {
       // Высота глаз — у стойки (G234): присел — ниже, прыгнул — выше.
       return { at: { x: person.x, y: person.y, z: volumeStanceEye(stance) }, yaw: person.yaw, pitch: person.pitch };
     }
-    return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance);
+    // Место камеры считает `volumeAroundStand` по `aroundLift()`: задранный
+    // взгляд поворачивает голову, а штатив оставляет над крышей (G298).
+    return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance, aroundLift());
   }
 
   // ——— общее место трёх режимов (G276) ———
@@ -60185,10 +60242,13 @@ function createVolume({ api, hosts }) {
       person.yaw += dx * perPixel;
       person.pitch = volumeClampPitch(person.pitch - dy * perPixel);
     } else {
+      // Взгляд обзора зажат **тем же** правилом, что взгляд человека (G298):
+      // задирается до отвеса, за отвес не заводится. Где при этом стоит
+      // камера, решает `camera()`, а не рука.
       around = {
         ...around,
         yaw: around.yaw + dx * perPixel,
-        pitch: volumeAroundPitch(around.pitch - dy * perPixel, around.distance, aroundLift()),
+        pitch: volumeClampPitch(around.pitch - dy * perPixel),
       };
     }
     paint();
@@ -60246,14 +60306,18 @@ function createVolume({ api, hosts }) {
         if (step) pinch = step.pinch;
         if (step && view === "around") {
           // Развели пальцы — приблизились, то есть камера подошла: расстояние
-          // делится на множитель, а не умножается.
+          // делится на множитель, а не умножается. Взгляд щипок не трогает
+          // (таск 195): куда смотрят — выбор руки, а не приближения.
           const distance = volumeAroundDistance(around.distance / step.factor);
-          const pitch = volumeAroundPitch(around.pitch, distance, aroundLift());
-          const moved = volumeAroundPan({ yaw: around.yaw, pitch, distance }, viewport(), step.panX, step.panY);
+          const moved = volumeAroundPan(
+            { yaw: around.yaw, pitch: around.pitch, distance },
+            viewport(),
+            step.panX,
+            step.panY,
+          );
           around = {
             ...around,
             distance,
-            pitch,
             target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy },
           };
           paint();
@@ -60403,13 +60467,42 @@ function createVolume({ api, hosts }) {
     syncHint();
   }
 
+  /**
+   * Колесо и трекпад в обзоре (таск 195, требование G299).
+   *
+   * Слова заказчика: «я же просил в обзоре скролл 2 пальцами… сейчас 2
+   * пальцами всегда зум». Браузер шлёт двухпальцевый свайп трекпада тем же
+   * `wheel`, что и колесо мыши, и своего разбора у объёма нет: что пришло,
+   * решает общий `gestureWheel` — та же дверь, что у плана и чертежа (G241).
+   *
+   * Что из ответа получается:
+   *
+   *   `pan`  — свайп двумя пальцами **возит цель по полу**, тем же переводом
+   *            `volumeAroundPan`, которым её возят два пальца на стекле.
+   *            Слово заказчика — «скролл», то есть сдвиг: вращение вокруг цели
+   *            осталось за перетаскиванием, и отнимать у свайпа сдвиг в пользу
+   *            второго способа вертеть головой было бы подменой просьбы.
+   *   `zoom` — щипок трекпада (он приходит с `ctrlKey`) и колесо мыши
+   *            **отодвигают камеру**: мышь двумя пальцами не водят, а щипок и
+   *            на плане приближение. Расстояние делится на множитель — развели
+   *            пальцы, значит камера подошла.
+   *
+   * Взгляд колесо не трогает вовсе. До таска 195 оно само делало вид круче,
+   * чтобы камера не нырнула под крышу; теперь за место камеры отвечает
+   * `volumeAroundStand` в `camera()`, и приближение на задранном взгляде
+   * значит ровно «камера подошла», а не «взгляд опустился».
+   */
   function onWheel(event) {
     if (view !== "around") return;
     event.preventDefault();
-    const distance = volumeAroundDistance(around.distance * Math.exp(event.deltaY / 400));
-    // Приблизились — вид сам становится круче: иначе камера нырнула бы под
-    // крышу и уткнулась в стену изнутри.
-    around = { ...around, distance, pitch: volumeAroundPitch(around.pitch, distance, aroundLift()) };
+    const step = gestureWheel(event, wheelStreak);
+    wheelStreak = step.streak;
+    if (step.kind === "pan") {
+      const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
+      around = { ...around, target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy } };
+    } else {
+      around = { ...around, distance: volumeAroundDistance(around.distance / step.factor) };
+    }
     paint();
   }
 
