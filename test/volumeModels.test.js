@@ -47,7 +47,7 @@ import {
 import { markBoxMm } from "../src/markBox.js";
 import { objectViewByName, objectViewForShape } from "../src/objectViews/registry.js";
 import { MODEL_CYL_SIDES, MODEL_MATERIALS } from "../src/objectModels/kit.js";
-import { objectCatalogDefaults, objectCatalogKeys } from "../src/objectCatalog.js";
+import { objectCatalogDefaults, objectCatalogKeys, objectCatalogRetiredKeys } from "../src/objectCatalog.js";
 import { LINE_SPOT_MAX } from "../src/objectModels/lines.js";
 import {
   OBJECT_MODEL_BODY_MAX,
@@ -218,7 +218,12 @@ test("у каждого точечного типа стартового спр�
     else covered += 1;
   }
   assert.deepEqual(missing, [], "тип без модели");
-  assert.equal(covered, 44, "сорок четыре точечных типа из сорока девяти");
+  // Сорок шесть точечных из пятидесяти одного: пять линейных моделей не
+  // получают. Сорок пятый и сорок шестой — телевизор с полотенцесушителем
+  // (таск 186): модели у них те же, что были у вещей каталога, и находятся по
+  // имени изображения — «закрашенный квадрат» и «вертикальный прямоугольник с
+  // засечками» ведут каждый к своему.
+  assert.equal(covered, 46, "сорок шесть точечных типов из пятидесяти одного");
 });
 
 // Мастер-выключатель (таск 160, G239). Слова заказчика: «Мастер выключатель -
@@ -257,18 +262,60 @@ test("мастер-выключатель — выключатель и на р�
   assert.equal(objectViewForShape("circle-rays").name, "lamp");
 });
 
+// Телевизор и полотенцесушитель (таск 186, G279) переехали из каталога вещей в
+// метки, и переехали **с рисунком и телом**: заказчик просил сделать их
+// метками, а не нарисовать заново. Поэтому здесь сверяется не «есть модель», а
+// что это те же самые описания, и что знак каждого ведёт к своему — тип из
+// общей базы приезжает со знаком, но без имени изображения.
+test("телевизор и полотенцесушитель — метки с прежним изображением и прежним телом", () => {
+  const template = defaultTemplate();
+  const tv = template.markTypes.find((type) => type.code === "ТВ");
+  const dryer = template.markTypes.find((type) => type.code === "ПОС");
+
+  // Лестница целиком: имя изображения у типа, и тот же ответ по знаку.
+  for (const [type, name] of [[tv, "tv"], [dryer, "towelDryer"]]) {
+    assert.equal(typeObjectView(type), name, type.code + ": имя изображения у типа другое");
+    assert.equal(objectViewByName(name).name, name);
+    assert.equal(objectViewForShape(type.shape).name, name, type.code + ": знак ведёт к чужому изображению");
+  }
+  // Габарит изображения и умолчание типа — одно и то же число: разойдись они,
+  // на развёртке вещь рисовалась бы одним размером, а мерилась другим.
+  assert.deepEqual(objectViewByName("tv").mm, { width: tv.sizes.length, height: tv.sizes.width });
+  assert.deepEqual(objectViewByName("towelDryer").mm, { width: dryer.sizes.length, height: dryer.sizes.width });
+  // Вертикальная лента осталась при своём знаке: у неё забрали только засечки.
+  assert.equal(objectViewForShape("rect-vertical").name, "stripVertical");
+
+  // Тела — те же, что были у вещей каталога: тёмный экран с корпусом и
+  // кронштейном, две стойки с перекладинами.
+  assert.deepEqual(
+    objectModelByKey("tv").parts.map((part) => [part.name, part.material]),
+    [["screen", "dark"], ["case", "body"], ["bracket", "metal"]],
+  );
+  assert.deepEqual(
+    objectModelByKey("towelDryer").parts.map((part) => [part.name, part.material]),
+    [["postLeft", "body"], ["postRight", "body"], ["rungLow", "metal"], ["rungHigh", "metal"]],
+  );
+});
+
 test("у каждой вещи каталога есть модель, и девять прежних видов узнаются по имени", () => {
   for (const key of objectCatalogKeys()) {
     assert.ok(objectModelByKey(key), key + ": вещь каталога без модели");
   }
-  // Тридцать ключей: тринадцать вещей из брифа, девять нынешних видов (шкаф у
-  // них общий), унитаз с ванной (таск 162) и шесть вещей таска 177.
-  assert.equal(objectCatalogKeys().length, 30);
-  // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам.
+  // Двадцать восемь ключей: тринадцать вещей из брифа, девять нынешних видов
+  // (шкаф у них общий), унитаз с ванной (таск 162) и шесть вещей таска 177 —
+  // минус телевизор с полотенцесушителем, ушедшие в метки (таск 186).
+  assert.equal(objectCatalogKeys().length, 28);
+  // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам. И
+  // имена **ушедших** вещей — тоже: вид прежней разметки, названный
+  // «Телевизор» или «Полотенцесушитель», обязан узнаваться как узнавался, иначе
+  // у него пропало бы тело в объёме (G68).
   for (const [key, name] of Object.entries(strings.schemeObjectKinds)) {
     const found = objectModelForName(name);
     assert.ok(found, name + ": вид не узнан по имени");
     assert.equal(found.key, key, name + ": узнан как " + found.key);
+  }
+  for (const key of objectCatalogRetiredKeys()) {
+    assert.ok(objectModelByKey(key), key + ": у ушедшей в метки вещи пропало тело");
   }
   // Терпимость та же, что у лестницы: регистр, «ё» и пробелы не считаются, а
   // корень ищется внутри строки.

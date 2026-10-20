@@ -5,7 +5,7 @@ import { strings, text } from "./strings.js";
 // Встроенный каталог вещей чертежа (таск 154): ключи, имена, габариты и место
 // установки. Данные сборки, а не справочник объекта, — поэтому модель их
 // читает, но никогда не правит.
-import { objectCatalogEntry, objectCatalogKeyByName } from "./objectCatalog.js";
+import { objectCatalogEntry, objectCatalogKeyByName, objectCatalogRetired } from "./objectCatalog.js";
 
 // Версия формата объекта. Поднимается, когда в project.json появляются поля,
 // без которых работа теряется. История:
@@ -869,6 +869,44 @@ const TEMPLATE_TYPES = [
   // **Числа — как у остальных выключателей:** механизм в подрозетнике, 80 × 80
   // при выступе рамки 10, посадка 900. Канал один: клавиша у мастера одна.
   { category: "switches", code: "МВ", name: strings.types.switchMaster, shape: "circle-slash", channels: 1, sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
+  // ——— телевизор и полотенцесушитель (таск 186, G279) ————————————————————
+  //
+  // Слова заказчика: «Телевизор давай всё-таки уберём из объектов и сделаем
+  // меткой, потому что он будет интерактивным (включаться). И
+  // полотенцесушитель тоже, для него уже метка есть». Это его же граница из
+  // G225 — статичные вещи в каталоге, интерактивные метками, — применённая к
+  // двум вещам, которые в каталог попали зря.
+  //
+  // **Телевизор — в «Кинотеатр».** Из двух названных им категорий это та, где
+  // телевизор стоит рядом с родней: ресивер и проектор уже там, а проектор —
+  // прямо его замена (где на плане один, там нет другого). Общий цвет
+  // категории связывает их в одну цепочку, которую электрик и читает вместе:
+  // розетка плюс витая пара за экраном. «Электроприборы» — про бытовые
+  // приборы с приводом (сушилка, дверца, пылесос, камера), и телевизор там
+  // оказался бы в чужом ряду.
+  //
+  // **Числа — те же, что были у вещи каталога** (таск 177), и переехали они
+  // без правки: 1240 × 720 — панель 55 дюймов (диагональ 1397 при 16:9 даёт
+  // 1218 × 685, плюс рамка), выступ 80 — панель с кронштейном, низ на 850 —
+  // середина экрана приходится на 1210, то есть на уровень глаз сидящего.
+  // Ключи размеров врут именами нарочно (таск 158): `width` — это высота.
+  //
+  // **Знак — закрашенный квадрат**, тёмный экран: он ведёт на то же
+  // изображение и то же тело, что были у вещи (`objectViews/things.js`), и
+  // ведёт сам — тип, взятый из общей базы, несёт знак, но не имя изображения.
+  // Поле `view` стоит рядом с ним ради того, кто поменяет знак своему
+  // телевизору: изображение останется телевизором.
+  { category: "cinema", code: "ТВ", name: strings.types.tv, shape: "square-fill", view: "tv", sizes: { length: 1240, width: 720, depth: 80, heightAboveFloor: 850 } },
+  // **Полотенцесушитель — в «Сантехнику».** Туда же, куда его положил сам
+  // заказчик: в его рабочем объекте тип «Пос — Полотенцесушитель» стоит в
+  // «Сантехнике». В стартовом справочнике такого типа не было вовсе (ближайший
+  // «СУШ — Сушилка Электрическая» в «Электроприборах» — у него своя вещь), и
+  // здесь он заводится впервые.
+  //
+  // Числа — вещи каталога: 500 × 800 при выступе 100 и посадке 900. Это
+  // ходовой полотенцесушитель над раковиной, и ровно от этих 900 отмеряют ему
+  // вывод.
+  { category: "plumbing", code: "ПОС", name: strings.types.towelDryer, shape: "rect-vertical-ticks", view: "towelDryer", sizes: { length: 500, width: 800, depth: 100, heightAboveFloor: 900 } },
 ];
 
 function newId() {
@@ -4829,11 +4867,24 @@ export function findSchemeObjectKind(project, kindId) {
 // меняет ни в объекте, ни на чертеже — он только включает вещи модель в объёме
 // и узнавание лестницы. Не вывелось — вещь остаётся на месте со своим именем и
 // своим габаритом, как было до каталога.
+//
+// Ключ **ушедшей в метки** вещи (таск 186: телевизор, полотенцесушитель)
+// читается здесь наравне с каталожным, и это ровно то, ради чего надгробие
+// заведено: поставить такую вещь больше нельзя, а та, что уже стоит на
+// чертеже, обязана открыться со своим именем, своим местом установки и своим
+// телом в объёме (G68). Новую она не заводит ни одна дверь — `addSchemeObject`
+// такой ключ отвергает.
+
+// Что сборка знает о ключе вещи: запись каталога или надгробие ушедшей.
+// Порядок именно такой — каталог старше, и совпасть эти два списка не могут.
+function schemeObjectCatalogKnown(key) {
+  return objectCatalogEntry(key) || objectCatalogRetired(key);
+}
 
 /** Ключ каталога у вещи чертежа. `null` — вещь вне каталога. */
 export function schemeObjectKeyOf(project, object) {
   if (!object) return null;
-  if (object.catalogKey && objectCatalogEntry(object.catalogKey)) return object.catalogKey;
+  if (object.catalogKey && schemeObjectCatalogKnown(object.catalogKey)) return object.catalogKey;
   const kind = findSchemeObjectKind(project, object.kindId);
   return kind ? objectCatalogKeyByName(kind.name) : null;
 }
@@ -4847,7 +4898,7 @@ export function schemeObjectKeyOf(project, object) {
  */
 export function schemeObjectNameOf(project, object) {
   if (!object) return "";
-  const entry = object.catalogKey ? objectCatalogEntry(object.catalogKey) : null;
+  const entry = object.catalogKey ? schemeObjectCatalogKnown(object.catalogKey) : null;
   if (entry) return entry.name;
   const kind = findSchemeObjectKind(project, object.kindId);
   return kind ? kind.name : "";
@@ -4855,7 +4906,7 @@ export function schemeObjectNameOf(project, object) {
 
 /** Где вещь стоит: на полу, на стене, в полу. `null` — вещь вне каталога. */
 export function schemeObjectMountOf(project, object) {
-  const entry = objectCatalogEntry(schemeObjectKeyOf(project, object));
+  const entry = schemeObjectCatalogKnown(schemeObjectKeyOf(project, object));
   return entry ? entry.mount : null;
 }
 

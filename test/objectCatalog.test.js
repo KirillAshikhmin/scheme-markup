@@ -31,6 +31,8 @@ import {
   objectCatalogKeyByName,
   objectCatalogKeys,
   objectCatalogName,
+  objectCatalogRetired,
+  objectCatalogRetiredKeys,
 } from "../src/objectCatalog.js";
 import {
   SCHEME_OBJECT_SHAPES,
@@ -58,12 +60,19 @@ import {
   volumeStep,
 } from "../src/volume.js";
 import { objectModelByKey } from "../src/objectModels/registry.js";
+import { objectViewByName } from "../src/objectViews/registry.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { strings } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LEGACY_TEXT = readFileSync(join(HERE, "legacy-drawing-project.json"), "utf8");
 const legacyProject = () => JSON.parse(LEGACY_TEXT);
+// Чертёж **прошлой сборки**, где телевизор и полотенцесушитель ещё были вещами
+// каталога (таск 177): телевизор и полотенцесушитель поставлены ключом, а
+// третья вещь — видом справочника по имени «Полотенцесушитель», как ставили до
+// каталога. Рядом стоит радиатор: по нему видно, что сосед не поехал.
+const RETIRED_TEXT = readFileSync(join(HERE, "retired-objects-project.json"), "utf8");
+const retiredProject = () => JSON.parse(RETIRED_TEXT);
 
 function scribe(log) {
   return new Proxy(
@@ -125,9 +134,9 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге тридцать вещей, и каждая стоит ровно в одной категории", () => {
+test("в каталоге двадцать восемь вещей, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  assert.equal(keys.length, 30, "вещей в каталоге стало другое число: " + keys.length);
+  assert.equal(keys.length, 28, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -138,7 +147,6 @@ test("в каталоге тридцать вещей, и каждая стои�
     "washer",
     "dryerMachine",
     "sink",
-    "towelDryer",
     "shower",
     "dresser",
     "picture",
@@ -155,13 +163,26 @@ test("в каталоге тридцать вещей, и каждая стои�
   }
   // Шкаф общий у брифа и у справочника — поэтому ключей было двадцать два, а
   // не двадцать три.
-  // И шесть вещей таска 177 (G262): «В технику добавь телевизор. А так же в
-  // мебель диван, кресло, журнальный стол, компьютерные стол и кресло (один
-  // объект), табуретки». Компьютерный стол с креслом — одна вещь, а не две.
-  for (const key of ["tv", "sofa", "armchair", "coffeeTable", "deskSet", "stool"]) {
+  // И мебель таска 177 (G262): «в мебель диван, кресло, журнальный стол,
+  // компьютерные стол и кресло (один объект), табуретки». Компьютерный стол с
+  // креслом — одна вещь, а не две. Телевизор был шестым — и ушёл в метки
+  // (таск 186).
+  for (const key of ["sofa", "armchair", "coffeeTable", "deskSet", "stool"]) {
     assert.ok(objectCatalogEntry(key), "вещь таска 177 пропала: " + key);
   }
-  assert.equal(objectCatalogEntry("tv").category, "appliances", "телевизор ушёл не в технику");
+  // Телевизор и полотенцесушитель — метки (таск 186, G279), и в каталоге их
+  // нет ни одной дверью: ни ключом, ни плиткой, ни умолчанием.
+  for (const key of objectCatalogRetiredKeys()) {
+    assert.equal(objectCatalogEntry(key), null, key + ": ушедшая в метки вещь осталась в каталоге");
+    assert.equal(objectCatalogDefaults(key), null, key + ": у ушедшей вещи остались умолчания");
+    assert.equal(objectCatalogName(key), "", key + ": ушедшая вещь всё ещё называется каталогом");
+    assert.ok(!keys.includes(key), key + ": ушедшая вещь осталась в ключах каталога");
+    assert.ok(
+      !objectCatalogInOrder().some((entry) => entry.key === key),
+      key + ": ушедшая вещь всё ещё стоит в плитках",
+    );
+  }
+  assert.deepEqual(objectCatalogRetiredKeys(), ["tv", "towelDryer"]);
   for (const key of ["sofa", "armchair", "coffeeTable", "deskSet", "stool"]) {
     assert.equal(objectCatalogEntry(key).category, "furniture", key + ": вещь ушла не в мебель");
   }
@@ -274,7 +295,6 @@ test("имя прежнего вида переводится в ключ тер
   assert.equal(objectCatalogKeyByName("stairs"), "stairs");
   assert.equal(objectCatalogKeyByName("Столешница (кухонный фронт)"), "counter");
   assert.equal(objectCatalogKeyByName("Стол"), "table");
-  assert.equal(objectCatalogKeyByName("Полотенцесушитель"), "towelDryer");
   assert.equal(objectCatalogKeyByName("Сушильная машина"), "dryerMachine");
   // Имена словаря ведут каждое к своему ключу — иначе выбор плитки показывал
   // бы одну вещь, а чертёж называл другую.
@@ -301,7 +321,16 @@ test("имя прежнего вида переводится в ключ тер
   assert.equal(objectCatalogKeyByName("Компьютерное кресло"), "deskSet");
   assert.equal(objectCatalogKeyByName("Кресло"), "armchair");
   assert.equal(objectCatalogKeyByName("Табуретки на кухне"), "stool");
+  // Имена ушедших в метки вещей по-прежнему переводятся в ключ: вид прежней
+  // разметки, названный «Телевизор» или «Полотенцесушитель», обязан узнаваться
+  // так же, как узнавался вчера (G68). В самом каталоге этих вещей при этом
+  // нет — надгробие отвечает только на вопрос «чем названо то, что уже стоит».
   assert.equal(objectCatalogKeyByName("Телевизор"), "tv");
+  assert.equal(objectCatalogKeyByName("Полотенцесушитель"), "towelDryer");
+  assert.equal(objectCatalogRetired("tv").name, "Телевизор");
+  assert.equal(objectCatalogRetired("towelDryer").mount, "wall");
+  assert.equal(objectCatalogRetired("fridge"), null, "вещь каталога прочлась ушедшей");
+  assert.equal(objectCatalogRetired("нет такого"), null);
   assert.equal(objectCatalogKeyByName("Аквариум"), null);
   assert.equal(objectCatalogKeyByName(""), null);
   assert.equal(objectCatalogKeyByName(null), null);
@@ -451,6 +480,91 @@ test("G68: прежний чертёж с видом «Унитаз» в объ�
       .map((object) => schemeObjectKeyOf(project, object)),
     ["radiator", "stairs", null, "counter"],
   );
+});
+
+// ——— G68: вещи, ушедшие в метки (таск 186) ——————————————————————————————
+
+test("G68: чертёж с телевизором и полотенцесушителем-вещами открывается как был", () => {
+  const project = retiredProject();
+  const schemeId = project.schemes[0].id;
+  const objects = schemeObjectsOnScheme(project, schemeId);
+  assert.equal(objects.length, 4);
+  const [tv, dryer, dryerKind, radiator] = objects;
+
+  // Имя — на месте у обеих пород: у вещи с ключом его даёт надгробие, у вещи
+  // прежней разметки — её собственный вид. Пустое имя здесь значило бы, что
+  // человек открыл свой чертёж и не понял, что на нём стоит.
+  assert.deepEqual(
+    objects.map((object) => schemeObjectNameOf(project, object)),
+    ["Телевизор", "Полотенцесушитель", "Полотенцесушитель", "Радиатор"],
+  );
+  // Ключ, место установки и тело в объёме — те же, что были вчера.
+  assert.deepEqual(
+    objects.map((object) => schemeObjectKeyOf(project, object)),
+    ["tv", "towelDryer", "towelDryer", "radiator"],
+  );
+  assert.deepEqual(
+    objects.map((object) => schemeObjectMountOf(project, object)),
+    ["wall", "wall", "wall", "wall"],
+  );
+  assert.equal(volumeObjectModel(project, tv).key, "tv");
+  assert.deepEqual(volumeObjectModel(project, tv).parts, objectModelByKey("tv").parts);
+  assert.deepEqual(volumeObjectModel(project, dryer).parts, objectModelByKey("towelDryer").parts);
+  assert.deepEqual(volumeObjectModel(project, dryerKind).parts, objectModelByKey("towelDryer").parts);
+  assert.equal(volumeObjectModel(project, radiator).key, "radiator");
+  // И картинка у ключа цела: плитка выделенной вещи рисуется ею же.
+  assert.ok(objectViewByName("tv"), "у телевизора пропало изображение");
+  assert.ok(objectViewByName("towelDryer"), "у полотенцесушителя пропало изображение");
+
+  // Габарит и место не сдвинулись ни на миллиметр, и чтение не тронуло объект.
+  assert.deepEqual(
+    [tv.widthMm, tv.depthMm, tv.heightMm, tv.heightAboveFloorMm, tv.atMm],
+    [1240, 80, 720, 850, { x: 1800, y: 140 }],
+  );
+  assert.deepEqual([dryer.widthMm, dryer.heightAboveFloorMm, dryer.turnDeg], [600, 950, 90]);
+  assert.equal(JSON.stringify(project), JSON.stringify(retiredProject()), "чтение изменило объект");
+
+  // Вещь на чертеже нарисована и подписана своим именем — она не пропала с
+  // поля вместе с записью каталога.
+  const bridge = drawingUnitBridge({ zoom: 0.5, offsetX: 0, offsetY: 0 });
+  const log = [];
+  drawDrawing(scribe(log), { project, schemeId, bridge });
+  const painted = log.join("\n");
+  assert.ok(painted.includes("Телевизор"), "телевизор пропал с чертежа");
+  assert.ok(painted.includes("Полотенцесушитель"), "полотенцесушитель пропал с чертежа");
+});
+
+test("G68: файл с ушедшими вещами переживает круг «упаковали — распаковали» без новых полей", async () => {
+  const project = retiredProject();
+  const file = await packProject(project, new Map());
+  const { project: loaded } = await unpackProject(file);
+  assert.deepEqual(loaded.schemeObjects, project.schemeObjects, "у вещей чертежа появилось или пропало поле");
+  assert.deepEqual(loaded.schemeObjectKinds, project.schemeObjectKinds, "справочник видов поехал");
+});
+
+test("ушедшую в метки вещь больше не поставить, а поставленную по-прежнему можно двигать", () => {
+  // Поставить вещью то, что стало меткой, нельзя — и отказ называет ключ.
+  const scene = room();
+  assert.throws(
+    () =>
+      addSchemeObject(scene.project, {
+        schemeId: scene.schemeId,
+        catalogKey: "tv",
+        atMm: { x: 2000, y: 1500 },
+        widthMm: 1240,
+        depthMm: 80,
+      }),
+    /tv/,
+  );
+  // А та, что уже стоит, правится как любая другая: ни переезд, ни правка
+  // габарита не спотыкаются о пропавшую запись каталога.
+  const project = retiredProject();
+  const tvId = project.schemeObjects[0].id;
+  const moved = updateSchemeObject(project, tvId, { atMm: { x: 2200, y: 140 }, widthMm: 1600 });
+  assert.equal(moved.schemeObject.catalogKey, "tv", "вещь потеряла своё имя от переезда");
+  assert.deepEqual(moved.schemeObject.atMm, { x: 2200, y: 140 });
+  assert.equal(moved.schemeObject.widthMm, 1600);
+  assert.equal(schemeObjectNameOf(moved.project, moved.schemeObject), "Телевизор");
 });
 
 test("G68: лестница прежнего объекта узнаётся по имени — объём по-прежнему переводит по этажам", () => {

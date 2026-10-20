@@ -153,14 +153,8 @@ export const MODELS_OBJECTS = {
     modelBox("pedestal", { x: -0.18, width: 0.36, y: -0.2, depth: 0.4, z: 0, height: 0.55 }),
     modelBox("tap", { x: -0.06, width: 0.12, y: 0.3, depth: 0.12, z: 0.8, height: 0.2, material: "metal" }),
   ),
-  // Полотенцесушитель: две стойки и перекладины между ними. Лестница на стене
-  // — ровно то, чем он и выглядит.
-  towelDryer: modelParts(
-    modelBox("postLeft", { x: -0.44, width: 0.16, y: -0.3, depth: 0.6 }),
-    modelBox("postRight", { x: 0.28, width: 0.16, y: -0.3, depth: 0.6 }),
-    modelBox("rungLow", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.2, height: 0.1, material: "metal" }),
-    modelBox("rungHigh", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.58, height: 0.1, material: "metal" }),
-  ),
+  // Полотенцесушитель уехал к меткам (таск 186, G279): тело то же, лежит оно
+  // теперь в `objectModels/things.js`.
   // Душ: стойка и лейка. **Поддона нет** — таск 177, слова заказчика «У Душа
   // убери поддон»: плита во весь габарит читалась ступенью посреди санузла, а
   // ставят сегодня трап в полу. Решение таска 154 «душ стоит на полу» при этом
@@ -238,14 +232,8 @@ export const MODELS_OBJECTS = {
     modelCyl("seat", { z: 0.8, height: 0.2, material: "light" }),
     modelCyl("leg", { x: -0.16, width: 0.32, y: -0.16, depth: 0.32, z: 0, height: 0.8 }),
   ),
-  // Телевизор: тёмный экран почти во всю площадь лица, корпус за ним и
-  // кронштейн в стену. Экран **тёмный** — этим он и отличается от картины, у
-  // которой полотно светлое в широкой раме.
-  tv: modelParts(
-    modelBox("screen", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.04, height: 0.92, material: "dark" }),
-    modelBox("case", { x: -0.46, width: 0.92, y: -0.4, depth: 0.3, z: 0.06, height: 0.88 }),
-    modelBox("bracket", { x: -0.1, width: 0.2, y: -0.1, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
-  ),
+  // Телевизор уехал к меткам (таск 186, G279): тело то же, лежит оно теперь в
+  // `objectModels/things.js`.
 
   // Холодильник: две дверцы со швом между ними — по шву его и узнают.
   fridge: modelParts(
