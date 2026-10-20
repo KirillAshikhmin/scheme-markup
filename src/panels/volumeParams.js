@@ -59,18 +59,24 @@ import { uiButton, uiEl, uiIconButton, uiModal } from "./ui.js";
 export const VOLUME_BACKDROP_SETTING = "volumeBackdrop";
 export const VOLUME_MINIMAP_SETTING = "volumeMinimap";
 export const VOLUME_SPEED_SETTING = "volumeClockSpeed";
-// ——— три отметки таска 192 (G292) ———————————————————————————————————————
+// ——— две отметки таска 192 (G292) ———————————————————————————————————————
 //
 // Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
 // 1. Плавные светила… 2. Проходить сквозь стены 3. Летать».
 //
-// Все три — **вид и поведение рук**, то есть той же природы, что фон и
-// миникарта: в `project.json` им нельзя (G68), и живут они в настройках
-// браузера рядом с соседями. Умолчание у каждой — **снято**: сегодняшнее
-// поведение не меняется ни на миллиметр у того, кто галок не ставил.
+// Обе — **вид и поведение рук**, то есть той же природы, что фон и миникарта:
+// в `project.json` им нельзя (G68), и живут они в настройках браузера рядом с
+// соседями. Умолчание у каждой — **снято**: сегодняшнее поведение не меняется
+// ни на миллиметр у того, кто галок не ставил.
+//
+// Третьей была «Летать», и убрал её **заказчик** (таск 200, G304): «уберём
+// опцию Летать, но механику полёта перенесём в обзор». Отметки нет ни в окне,
+// ни в этом списке. Записанное когда-то `volumeFly: true` осталось лежать в
+// хранилище и не значит ничего: настройки читаются по именам, которые окно
+// спрашивает, и незнакомое имя никого не ждёт. Чистить его нечем и незачем —
+// в объект оно не попадало никогда (G68), миграции тут браться не от чего.
 export const VOLUME_SMOOTH_SETTING = "volumeSmoothSky";
 export const VOLUME_GHOST_SETTING = "volumeThroughWalls";
-export const VOLUME_FLY_SETTING = "volumeFly";
 
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
@@ -86,7 +92,6 @@ const params = {
   clock: null,
   smooth: false,
   ghost: false,
-  fly: false,
 };
 
 // Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
@@ -133,13 +138,12 @@ export function volumeParamsLoad() {
       tell();
     })
     .catch(() => {});
-  // Три отметки таска 192 — **отрицательные**: умолчание снято, и только
+  // Отметки таска 192 — **отрицательные**: умолчание снято, и только
   // записанное `true` их включает. Поэтому читаются они одним правилом, а не
-  // тремя: `saved !== true` — это «галки не ставили».
+  // двумя: `saved !== true` — это «галки не ставили».
   for (const [key, name] of [
     [VOLUME_SMOOTH_SETTING, "smooth"],
     [VOLUME_GHOST_SETTING, "ghost"],
-    [VOLUME_FLY_SETTING, "fly"],
   ]) {
     Promise.resolve(getSetting(key))
       .then((saved) => {
@@ -160,7 +164,6 @@ export function volumeParamsRead() {
     clock: params.clock,
     smooth: params.smooth,
     ghost: params.ghost,
-    fly: params.fly,
   };
 }
 
@@ -202,18 +205,17 @@ export function volumeParamsMinimap(shown) {
 }
 
 /**
- * Три отметки таска 192 — одной дверью (G292).
+ * Отметки таска 192 — одной дверью (G292).
  *
  * `smooth` — «Плавные светила» (фон в 30 кадров в секунду вместо раза в
- * секунду), `ghost` — «Проходить сквозь стены», `fly` — «Летать». Дверь одна
- * на три, потому что устроены они одинаково до буквы: прочесть, записать,
- * сказать полю. Три близнеца-функции разошлись бы на первой же правке.
+ * секунду), `ghost` — «Проходить сквозь стены». Дверь одна на обе, потому что
+ * устроены они одинаково до буквы: прочесть, записать, сказать полю. Два
+ * близнеца-функции разошлись бы на первой же правке.
  */
 export function volumeParamsFlag(name, on) {
   const keys = {
     smooth: VOLUME_SMOOTH_SETTING,
     ghost: VOLUME_GHOST_SETTING,
-    fly: VOLUME_FLY_SETTING,
   };
   const key = keys[name];
   if (!key) return;
@@ -412,13 +414,12 @@ export function createVolumeParams({ now, hour, times }) {
         checkRow(strings.volume.smooth, chosen.smooth, (on) => volumeParamsFlag("smooth", on)),
         uiEl("p", { class: "tools__note", text: strings.volume.smoothHint }),
         // Ходьба — свой раздел: это не вид за окном, а то, что делают руки.
-        // Обе отметки про одно — про запреты, которые человек снимает, когда
-        // показывает объект, а не ходит по нему.
+        // Отметка одна и про запрет, который человек снимает, когда показывает
+        // объект, а не ходит по нему. Вторая была «Летать» — её убрал
+        // заказчик (таск 200): полёт уехал в обзор, где он всегда.
         uiEl("p", { class: "tools__label", text: strings.volume.walking }),
         checkRow(strings.volume.ghost, chosen.ghost, (on) => volumeParamsFlag("ghost", on)),
         uiEl("p", { class: "tools__note", text: strings.volume.ghostHint }),
-        checkRow(strings.volume.fly, chosen.fly, (on) => volumeParamsFlag("fly", on)),
-        uiEl("p", { class: "tools__note", text: strings.volume.flyHint }),
       );
       line();
     };
@@ -472,9 +473,9 @@ export function createVolumeParams({ now, hour, times }) {
   }
 
   /**
-   * Строка с галкой. Одна на все четыре отметки окна (миникарта и три отметки
-   * таска 192): четыре списанных друг с друга строки разошлись бы на первой же
-   * правке разметки, а подпись и галка обязаны оставаться одной мишенью для
+   * Строка с галкой. Одна на все три отметки окна (миникарта и две отметки
+   * таска 192): списанные друг с друга строки разошлись бы на первой же правке
+   * разметки, а подпись и галка обязаны оставаться одной мишенью для
    * пальца — потому это `label`, а не `div`.
    */
   function checkRow(label, on, set) {

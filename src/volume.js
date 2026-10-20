@@ -3835,23 +3835,22 @@ function volumeGap(solid, x, y) {
  * Препятствие без высот (такие строит рука в тестах) держит всегда: `topMm`
  * без значения — это «до потолка», и молча пропускать сквозь него нельзя.
  *
- * `feetMm` — где ноги (таск 192, G292): у ходящего это ноль, у летящего — его
- * высота. Порог, через который переступают, отсчитывается **от ног**, поэтому
- * летящий выше стены над ней и проходит: стена кончилась ниже его подошв. У
- * нуля выходит прежнее правило до знака — второго счёта проходимости не
- * завелось.
+ * **Ноги у спрашивающего всегда на полу**, и других тел тут не бывает. Высота
+ * ног была доводом в таске 192, пока летал сам человек; с таска 200 (G304)
+ * полёт ушёл в обзор, а камера обзора проходит сквозь стены **всегда** и этого
+ * счёта не спрашивает вовсе. Поэтому порог отсчитывается от пола, как до 192.
  */
-export function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM, feetMm = 0) {
+export function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM) {
   const bottom = Number(solid.bottomMm) || 0;
   const top = solid.topMm === undefined || solid.topMm === null ? Infinity : Number(solid.topMm);
-  return bottom < headMm && top > feetMm + VOLUME_STEP_MM;
+  return bottom < headMm && top > VOLUME_STEP_MM;
 }
 
 /** Сколько свободного места вокруг точки для человека с макушкой на `headMm`. */
-export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM, feetMm = 0) {
+export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM) {
   let free = Infinity;
   for (const solid of solids) {
-    if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
+    if (!volumeSolidBlocks(solid, headMm)) continue;
     free = Math.min(free, volumeGap(solid, x, y));
   }
   return free;
@@ -3951,10 +3950,10 @@ export function volumeStart(scene) {
  * разобрать, — разойдись они, и человек то застревал бы на ровном месте, то
  * проваливался бы в стену.
  */
-export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM, feetMm = 0) {
+export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM) {
   let deep = 0;
   for (const solid of solids || []) {
-    if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
+    if (!volumeSolidBlocks(solid, headMm)) continue;
     const dx = x - solid.cx;
     const dy = y - solid.cy;
     const overAlong = solid.half + radius - Math.abs(dx * solid.ux + dy * solid.uy);
@@ -4004,7 +4003,7 @@ export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VO
  *
  * Угол при этом держится так же, как держался: четыре прохода остались.
  */
-export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM, feetMm = 0) {
+export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
   let x = at.x;
   let y = at.y;
   for (let pass = 0; pass < VOLUME_PUSH_PASSES; pass += 1) {
@@ -4013,9 +4012,8 @@ export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM, feetMm =
     let pressed = false;
     for (const solid of solids) {
       // Присевший проходит под высоким (G234): препятствие, которое кончается
-      // ниже его макушки, тела не касается вовсе. Летящий (таск 192) — над тем,
-      // что кончилось ниже его ног.
-      if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
+      // ниже его макушки, тела не касается вовсе.
+      if (!volumeSolidBlocks(solid, headMm)) continue;
       const dx = x - solid.cx;
       const dy = y - solid.cy;
       const along = dx * solid.ux + dy * solid.uy;
@@ -4054,19 +4052,18 @@ export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM, feetMm =
  * десятую долю секунды — это 480 мм, а перегородка бывает в 50 мм: без дробления
  * сквозь неё проходили бы при любом подвисании вкладки.
  *
- * ——— две отметки таска 192 (G292) ———————————————————————————————————————
+ * ——— отметка «Проходить сквозь стены» (таск 192, G292) ———————————————————
  *
- * `options.ghost` — «Проходить сквозь стены»: шаг идёт **ровно туда, куда
- * просили**, без дробления и выталкивания. Это и есть вся отмена столкновений,
- * и живёт она здесь, в единственном месте, которое знает, где человек пройдёт;
- * заведи её в поле — и в сборке стало бы два ответа на «куда шагнул».
+ * `options.ghost` — шаг идёт **ровно туда, куда просили**, без дробления и
+ * выталкивания. Это и есть вся отмена столкновений, и живёт она здесь, в
+ * единственном месте, которое знает, где человек пройдёт; заведи её в поле — и
+ * в сборке стало бы два ответа на «куда шагнул».
  *
- * `options.feetMm` — «Летать»: высота ног. Ноль у ходящего, своя высота у
- * летящего, и ею же решается, что он уже перелетел (`volumeSolidBlocks`).
+ * Высоты ног у шага больше нет (таск 200, G304): летал по этому счёту человек,
+ * а полёт уехал в обзор, где стены не спрашивают вовсе.
  */
 export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM, options = {}) {
   if (options.ghost) return { x: at.x + dx, y: at.y + dy };
-  const feetMm = Number(options.feetMm) || 0;
   const solids = scene.solids || [];
   const length = Math.hypot(dx, dy);
   const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
@@ -4074,16 +4071,15 @@ export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM, options =
   // Насколько глубоко человек сидит в препятствиях **сейчас**. Обычно ноль;
   // не ноль бывает после переноса кликом, перехода по этажам и правки чертежа
   // под ногами — и тогда выход из этого места тоже должен быть возможен.
-  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm, feetMm);
+  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm);
   for (let index = 0; index < parts; index += 1) {
     const want = volumePush(
       solids,
       { x: point.x + dx / parts, y: point.y + dy / parts },
       VOLUME_BODY_MM,
       headMm,
-      feetMm,
     );
-    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm, feetMm);
+    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm);
     // **Хуже не становится** (D39). Выталкивание разобрало не всё — значит
     // место теснее тела, и шаг туда не делается вовсе: человек остаётся там,
     // где стоял, вместо того чтобы дрожать между двумя положениями.
@@ -4115,10 +4111,14 @@ export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM, options =
 // от пола и с какой скоростью идёт вверх. В объект из этого не попадает ничего
 // (G68) — она живёт в сеансе поверхности, как открытые двери.
 //
-// **Полёт таска 192 (G292) живёт здесь же** и нарочно: «летать» и «прыгать» —
-// это одна третья координата человека в разных руках, и `liftMm` у них одна.
-// Второго счёта высоты в сборке нет; разойдись они — выключенная отметка
-// оставила бы летящего висеть, а прыжок считался бы от чужой высоты.
+// **Полёт отсюда ушёл** (таск 200, G304). Таск 192 клал его в ту же `liftMm`,
+// и правильно клал: у человека одна третья координата. Но заказчик увидел, что
+// летящий сквозь стены человек — это и есть обзор («вид от первого лица при
+// включённом полёте и проходить сквозь стены это по факту обзорный вид»), и
+// отметку «Летать» убрал. От первого лица осталось то, что было до 192: пробел
+// — прыжок, Control — присед. Высота камеры обзора — **её собственная** `z`
+// (`around.eye` в поле): она была у обзора всегда, и второго счёта высоты
+// таким переездом не завелось — счётов по-прежнему по одному на каждое тело.
 
 /** Стойка, с которой встают на пол: в полный рост и на земле. */
 export function volumeStanceStart() {
@@ -4144,19 +4144,16 @@ export function volumeStanceHead(stance) {
 }
 
 /**
- * Где у человека ноги и макушка — одной дверью (таск 192, G292).
+ * Пол держит — ниже нуля не опускается никто (G234, G292, G304).
  *
- * Вопрос один: столкновениям нужно знать, что держит тело. У идущего ноги на
- * полу, и ответ ровно тот, что был до таска 192 — `volumeStanceHead`, прыжок
- * макушку не поднимает. У **летящего** поднимается и то и другое: он проходит
- * над тем, что кончилось ниже его подошв, и упирается в то, что ещё не
- * кончилось. Второго счёта высоты при этом не завелось: высота у летящего — та
- * же `liftMm`, которой прыгает стойка таска 159.
+ * Правило **одно на человека и на камеру обзора**, и названо оно здесь затем,
+ * чтобы второго не завелось: под полом не нарисовано ничего — ни комнаты, ни
+ * земли, одна изнанка плиты, — и провалившийся туда видел бы серое поле вместо
+ * объекта. Прыжок таска 159 приземляется по нему, полёт обзора (таск 200) им же
+ * останавливается у земли.
  */
-export function volumeStanceBody(stance, flying) {
-  const headMm = volumeStanceHead(stance);
-  if (!flying) return { headMm, feetMm: 0 };
-  return { headMm: headMm + stance.liftMm, feetMm: stance.liftMm };
+export function volumeGroundMm(mm) {
+  return Math.max(0, Number(mm) || 0);
 }
 
 /** В воздухе ли человек: прыжок идёт, пока он не вернулся на пол. */
@@ -4173,12 +4170,7 @@ export function volumeStanceAir(stance) {
  * своих 550 мм, и ждать от него нечего — встанет он на том же тике, которым
  * выйдет из-под низкого места.
  */
-export function volumeStanceBusy(stance, crouch, options = {}) {
-  // **Летящий висит сам** (таск 192): отпустил клавиши — остался на своей
-  // высоте, и тика ему не нужно. Поводом остаётся зажатая клавиша (`rise`) и
-  // присед, который ещё доезжает до нуля: в полёте Control значит «ниже», а не
-  // «присесть», и присед, принесённый с земли, обязан разойтись сам.
-  if (options.fly) return Boolean(options.rise) || stance.crouchMm > 0;
+export function volumeStanceBusy(stance, crouch) {
   if (volumeStanceAir(stance)) return true;
   return stance.crouchMm !== (crouch ? VOLUME_CROUCH_MM : 0);
 }
@@ -4204,54 +4196,30 @@ export function volumeStanceJump(stance) {
  * подъёме честный: присед **остаётся**, стойка не меняется ни на миллиметр, и
  * сквозь низ шкафа никто не проходит.
  *
- * ——— полёт (таск 192, G292) ——————————————————————————————————————————————
- *
- * `flyMm` — на сколько миллиметров подняться **этим тиком**; число (хоть ноль)
- * значит «летим», `null` и отсутствие — «идём». Слова заказчика: «при движении
- * летим в сторону курсора, пробел (прыжок) - выше, ctrl (присяд) - ниже», — и
- * в эти миллиметры у поля уже сложены и клавиша, и наклон взгляда.
- *
- * **Высота у полёта та же, что у прыжка** — `liftMm`, и это главное условие
- * таска: второго счёта высоты в сборке нет, поэтому глаза считает прежний
- * `volumeStanceEye`, а выключенная отметка возвращает человека на пол той же
- * дугой падения, которой он приземляется после прыжка.
- *
- * Миллиметры, а не скорость, нарочно: «как быстро» живёт в одном месте
- * (`VOLUME_WALK_MM_S`, бег — `VOLUME_RUN_MM_S`), и второго числа для полёта не
- * заводится — летят с тем же Shift, с которым бегают.
- *
- * **Земля держит, потолка нет.** Ниже пола не опускаются: под полом ничего не
- * нарисовано, и провалившийся туда видел бы изнутри плиту вместо комнаты.
- * Вверх свободно, и это не недосмотр — потолка в счёте столкновений нет вовсе
- * (препятствия — стены и перемычки), а стены держат летящего, пока он не
- * поднялся выше них (`volumeStanceBody`). Тяготение в полёте не считается:
- * отпустил клавиши — висишь.
+ * Полёта здесь больше нет (таск 200, G304): отметку «Летать» заказчик убрал,
+ * и `liftMm` снова значит одно — прыжок. Пол, который её держит, назван
+ * отдельно (`volumeGroundMm`) и зовётся теперь с двух сторон: отсюда и из
+ * полёта камеры обзора.
  */
 export function volumeStanceStep(stance, seconds, options = {}) {
   const span = Math.max(0, Number(seconds) || 0);
-  const flying = options.flyMm !== undefined && options.flyMm !== null;
-  // В полёте Control значит «ниже», а не «присесть»: присед, принесённый с
-  // земли, расходится сам, и встать летящему не мешает ничто.
-  const crouch = flying ? false : Boolean(options.crouch);
-  const canStand = flying ? true : options.canStand !== false;
+  const crouch = Boolean(options.crouch);
+  const canStand = options.canStand !== false;
   const target = crouch ? VOLUME_CROUCH_MM : 0;
   let crouchMm = stance.crouchMm;
   if (target > crouchMm) crouchMm = Math.min(target, crouchMm + VOLUME_CROUCH_MM_S * span);
   else if (target < crouchMm && canStand) crouchMm = Math.max(target, crouchMm - VOLUME_CROUCH_MM_S * span);
   let liftMm = stance.liftMm;
   let speedMm = stance.speedMm;
-  if (flying) {
-    liftMm = Math.max(0, liftMm + (Number(options.flyMm) || 0));
-    speedMm = 0;
-  } else if (volumeStanceAir(stance)) {
+  if (volumeStanceAir(stance)) {
     speedMm -= VOLUME_FALL_MM_S2 * span;
     liftMm += speedMm * span;
-    // Приземлились: ниже пола не бывает, и скорость гасится здесь же — иначе
-    // следующий тик утащил бы человека под пол.
-    if (liftMm <= 0) {
-      liftMm = 0;
-      speedMm = 0;
-    }
+    // Приземлились: ниже пола не бывает (`volumeGroundMm` — то же правило, по
+    // которому у земли останавливается камера обзора), и скорость гасится
+    // здесь же — иначе следующий тик утащил бы человека под пол.
+    const landed = liftMm <= 0;
+    liftMm = volumeGroundMm(liftMm);
+    if (landed) speedMm = 0;
   }
   return { crouchMm, liftMm, speedMm };
 }
@@ -4261,7 +4229,7 @@ export function volumeStanceStep(stance, seconds, options = {}) {
  * «при клике курсором позволяй перемещать»).
  *
  * `null` — луч идёт вверх или вдоль пола и ни во что не упирается. С таска 195
- * это в обзоре бывает: взгляд там задирается к небу (`volumeAroundStand`), и
+ * это в обзоре бывает: взгляд там задирается к небу, и
  * щелчок по небу никуда не переносит — отвечать на него выдуманной точкой
  * пола было бы хуже, чем не отвечать вовсе.
  *
@@ -7271,64 +7239,58 @@ export const VOLUME_MOOD_NOON = volumeMood({
 
 // ——— обзор со стороны ————————————————————————————————————————————————————
 
+// ——— предел стояния снят (таск 200, G304) ———————————————————————————————
+//
+// Таск 195 завёл `volumeAroundStand`: взгляд задирался свободно, а место камеры
+// держалось над крышей — ровно затем, чтобы камера не оказалась **внутри**
+// стены, где кадр становится серым полем и читается как поломка.
+//
+// Заказчик этот предел снял сам: «по камере — ок, пусть в стенах оказываемся,
+// это ожидаемо». Поэтому **серый кадр внутри стены снова возможен, и это его
+// выбор, а не дефект сборки.** Замены пределу нет и заводить её нельзя: ни
+// выталкивания камеры из стены, ни гашения ближних граней — обзор получил
+// механику полёта (пробел выше, Control ниже, ход по взгляду) и летает сквозь
+// стены всегда, потому что камера — не человек.
+//
+// Что осталось от прежнего устройства: **цель обзора больше не хранится**. У
+// обзора хранится место камеры (`eye`), а цель — точка перед ней на
+// `distance`, то есть та, в которую она летит. Поэтому «брошенной цели на
+// другом конце квартиры» не бывает: вращение крутит точку перед собой, а
+// колесо подводит камеру к ней.
+
 /**
- * Наклон, на котором обзор **стоит**: взгляд задирается свободно, а место
- * камеры остаётся над крышей (таск 195, требование G298).
+ * Где стоит камера, смотрящая на `target` с расстояния `distance`.
  *
- * До таска 195 этим числом зажимали сам взгляд, и довод был честный: обзор
- * ходит вокруг цели, а цель стоит на полу среди стен — подними взгляд к
- * горизонту, и камера, отойдя на семь метров, окажется **внутри** стены
- * соседней комнаты, кадр станет ровным серым полем, и человек решит, что
- * сборка сломалась.
- *
- * Заказчик предел со взгляда снял: «разреши обзору задирать камеру». Причина
- * названа исполнителем таска 190: выше горизонта обзор не смотрел вовсе, а
- * солнце летом в полдень стоит на 58° — настоящая астрономия оставалась за
- * кадром.
- *
- * Предел поэтому не снят, а **переставлен со взгляда на место камеры**:
- * подъём камеры над целью по-прежнему не меньше `liftMm` — высоты, на которой
- * кончается чертёж, — и внутрь стены ей не попасть ни при каком взгляде.
- * Задирается только взгляд, как у камеры на штативе: штатив стоит над крышей,
- * голова поворачивается к небу. Серый кадр от этого не возвращается, и гасить
- * ближние стены не пришлось — сквозь них никто не смотрит.
- *
- * Отошли дальше — стоять можно положе; приблизились — место само становится
- * круче, вплоть до отвесного, а заданный взгляд от приближения не сбивается.
- *
- * Отвес и зенит сторожит `VOLUME_PITCH_MAX_DEG` — то же число, что у человека:
- * вверх ногами не смотрит ни один из двух видов.
+ * Этим считают **кадрирование**: «Обзор» ставит камеру на человека, «Вся
+ * схема» — на середину чертежа, колесо подводит её к той же цели ближе. Пол
+ * держит и здесь (`volumeGroundMm`): задранный взгляд с близкой целью иначе
+ * увёл бы камеру под плиту.
  */
-export function volumeAroundStand(pitch, distance, liftMm) {
-  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
-  const aim = Math.max(-limit, Math.min(limit, pitch));
-  if (!(distance > 0) || !(liftMm > 0)) return aim;
-  const ratio = Math.min(1, liftMm / distance);
-  const steepest = -Math.min(limit, Math.asin(ratio));
-  return Math.min(steepest, aim);
+export function volumeAroundEye(target, yaw, pitch, distance) {
+  const basis = volumeBasis({ yaw, pitch });
+  return {
+    x: target.x - basis.fwd.x * distance,
+    y: target.y - basis.fwd.y * distance,
+    z: volumeGroundMm(target.z - basis.fwd.z * distance),
+  };
 }
 
 /**
- * Камера обзора: отходим от цели на расстояние по рысканью и **наклону
- * стояния**, а смотрим туда, куда задали.
- *
- * Пока взгляд не задран, это одно и то же число, и камера ведёт себя как
- * прежде. Задранный взгляд (`pitch` положе того, на чём камера стоит) её с
- * места не сдвигает — разбор в `volumeAroundStand`, `liftMm` оттуда же. Без
- * `liftMm` зажат один отвес: так зовут обзор стенд и тесты, которым крыша не
- * мешает.
+ * Цель обзора: точка перед камерой на `distance`. Своей цели обзор не хранит —
+ * разбор выше, у `volumeAroundEye`.
  */
-export function volumeAroundCamera(target, yaw, pitch, distance, liftMm = 0) {
-  const basis = volumeBasis({ yaw, pitch: volumeAroundStand(pitch, distance, liftMm) });
+export function volumeAroundTarget(eye, yaw, pitch, distance) {
+  const basis = volumeBasis({ yaw, pitch });
   return {
-    at: {
-      x: target.x - basis.fwd.x * distance,
-      y: target.y - basis.fwd.y * distance,
-      z: target.z - basis.fwd.z * distance,
-    },
-    yaw,
-    pitch,
+    x: eye.x + basis.fwd.x * distance,
+    y: eye.y + basis.fwd.y * distance,
+    z: eye.z + basis.fwd.z * distance,
   };
+}
+
+/** Камера, смотрящая на `target` с расстояния `distance`: место и взгляд. */
+export function volumeAroundCamera(target, yaw, pitch, distance) {
+  return { at: volumeAroundEye(target, yaw, pitch, distance), yaw, pitch };
 }
 
 /**
@@ -7375,9 +7337,9 @@ export function volumeAroundDistance(value) {
  * устройства.
  *
  * Правило — **пол едет за пальцами**: куда ушла середина, туда уехала карта, а
- * камера на столько же в обратную сторону. Цель ходит по полу, высота её не
- * меняется: камера обзора стоит над крышей (`volumeAroundStand`), и поднятая
- * цель увела бы её в стену.
+ * камера на столько же в обратную сторону. Ответ — сдвиг **по полу**, и высота
+ * камеры им не меняется: вверх и вниз обзор ходит пробелом и Control (таск
+ * 200), а свайп — это «скролл», слово заказчика.
  *
  * Мера одного пикселя — `distance / focal`: ширина пикселя на той глубине, где
  * лежит цель. Отошли дальше — палец возит крупнее, и это ровно то, что видно
