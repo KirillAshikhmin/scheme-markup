@@ -82,7 +82,8 @@ import {
   volumeChannelLines,
   volumeChannelLinks,
   volumeDoorAt,
-  volumeClockMinutes,
+  volumeClockStamp,
+  volumeDayDateOf,
   volumeDayTimes,
   volumeDraw,
   volumeDrawBackdrop,
@@ -1286,10 +1287,17 @@ function createVolume({ api, hosts }) {
     shadow = volumeShadowFaces(scene.shadowBoxes, hour ? hour.shadow : null);
   }
 
-  /** Рассвет и закат этого объекта: по координатам (таск 188) или умолчанием. */
-  function dayTimes() {
+  /**
+   * Рассвет и закат этого объекта: по координатам (таск 188) или умолчанием —
+   * и **на ту дату, которая стоит на часах объёма** (G289), а не на сегодня.
+   * Сегодня бралось до таска 190, и тогда поле даты не двигало бы ничего:
+   * зимний рассвет считался бы по летнему дню.
+   */
+  function dayTimes(nowMs) {
+    const at = nowMs === undefined ? Date.now() : nowMs;
+    const stamp = volumeClockStamp(volumeParamsClock(at), at);
     const site = volumeSiteOf(getState().project);
-    return { site, times: volumeDayTimes(site, new Date()) };
+    return { site, stamp, times: volumeDayTimes(site, volumeDayDateOf(stamp.day)) };
   }
 
   /** Снимок часа. Нет его — считается; есть — берётся готовым. */
@@ -1299,9 +1307,9 @@ function createVolume({ api, hosts }) {
 
   function refreshHour() {
     const at = Date.now();
-    const { site, times } = dayTimes();
+    const { site, stamp, times } = dayTimes(at);
     hour = volumeMood({
-      minutes: volumeClockMinutes(volumeParamsClock(at), at),
+      minutes: stamp.minutes,
       times,
       topDeg: site.topDeg,
       kind: volumeParamsRead().kind,
@@ -1361,8 +1369,8 @@ function createVolume({ api, hosts }) {
     // так знает, где стоит, а под ногами кружок закрыл бы пол.
     const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
     // Тень дома идёт в кадр `extra`, а не гранью сцены: её кладёт час (таск
-    // 181), и ярус у неё тот же, что был, — пол помещения по-прежнему ложится
-    // поверх неё.
+    // 181). Ярус у неё свой (`VOLUME_LAYER_SHADOW`), и пол помещения ложится
+    // поверх неё правилом яруса, а не дальностью середин — дефект D49.
     shown = volumeFrame(scene, spot, box, [...shadow, ...overlay, ...marker], at.tint);
     volumeDraw(ctx, shown);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.

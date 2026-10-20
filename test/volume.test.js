@@ -65,6 +65,7 @@ import {
   VOLUME_LAYER_BASE,
   VOLUME_LAYER_BODY,
   VOLUME_LAYER_GROUND,
+  VOLUME_LAYER_SHADOW,
   VOLUME_LAYER_MARK,
   VOLUME_DOOR_RGB,
   VOLUME_PLANE_EPS_MM,
@@ -98,9 +99,10 @@ import {
   VOLUME_DAY_MIN,
   VOLUME_CLOCK_SPEEDS,
   VOLUME_CLOCK_SPEED_DEFAULT,
+  VOLUME_CLOCK_SPEED_REAL,
+  VOLUME_MOON_MONTH_DAYS,
   VOLUME_NIGHT_RGB,
   VOLUME_NIGHT_SHARE,
-  VOLUME_MOON_RISE_DEG,
   VOLUME_BACKDROP_KINDS,
   VOLUME_BACKDROP_DEFAULT,
   VOLUME_MOOD_NOON,
@@ -169,14 +171,25 @@ import {
   volumeClockAt,
   volumeClockSpeedOf,
   volumeClockDayMinutes,
+  volumeClockOnDay,
+  volumeClockStamp,
   volumeClockText,
+  volumeDateParse,
+  volumeDayMinutesOf,
+  volumeDateText,
+  volumeDayDateOf,
+  volumeDayNumberOf,
   volumeClockParse,
   volumeSiteOf,
   volumeDayTimes,
   volumeDayPhase,
   volumePanoramaAz,
+  volumeSkyPlace,
   volumeSunAt,
+  volumeMoonAgeDays,
   volumeMoonAt,
+  volumeMoonShape,
+  volumeMoonTiltDeg,
   volumeNightShare,
   volumeSkyColors,
   volumeTintRgb,
@@ -223,8 +236,14 @@ import {
   volumeWhere,
 } from "../src/panels/volume.js";
 import {
+  volumeParamsDay,
+  volumeParamsFix,
   volumeParamsLine,
+  volumeParamsNow,
+  volumeParamsRead,
+  volumeParamsSpeed,
   volumeParamsSunLine,
+  volumeDayLabel,
   volumePhaseWord,
   volumeSpeedLabel,
 } from "../src/panels/volumeParams.js";
@@ -350,9 +369,10 @@ test("у комнаты есть пол, потолок и стены с тол�
   const shadows = volumeShadowFaces(built.shadowBoxes, { az: 90, rise: 14, fade: 1 });
   assert.equal(shadows.length, 4, "тень под каждой стеной");
   assert.ok(
-    shadows.every((face) => face.layer === VOLUME_LAYER_GROUND && face.flat && face.n.z > 0),
-    "тень лежит на земле тем же ярусом, каким лежала в сцене",
+    shadows.every((face) => face.layer === VOLUME_LAYER_SHADOW && face.flat && face.n.z > 0),
+    "тень лежит на земле своим ярусом: выше плиты, ниже полов (D49)",
   );
+  assert.ok(VOLUME_LAYER_BASE < VOLUME_LAYER_SHADOW && VOLUME_LAYER_SHADOW < VOLUME_LAYER_GROUND);
   assert.deepEqual(shadows[0].rgb, VOLUME_SHADOW_RGB, "в полную силу тень того же тона, что была");
   // Солнце у горизонта — тени нет вовсе: она гаснет цветом, а не прозрачностью.
   assert.deepEqual(volumeShadowFaces(built.shadowBoxes, { az: 90, rise: 1, fade: 0 }), []);
@@ -376,6 +396,74 @@ test("у комнаты есть пол, потолок и стены с тол�
   // сведённом конце стена переходит в соседку.
   const body = built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY);
   assert.equal(body.length, 4 * (2 + 1), "по три грани на стену: две стороны и верх");
+});
+
+// ——— D49: внутри дома пол, а не зелень ————————————————————————————————
+//
+// «баг отрисовки тени внутри дома — просвечивает пол». Проверка числами: в
+// точке посреди комнаты перебираются **все** грани земли, накрывающие её, и
+// спрашивается, какая ложится последней. Раньше это решала дальность середин, и
+// ответ переворачивался от часа; теперь решает ярус.
+
+test("тень дома не просвечивает сквозь пол ни в один час (D49)", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Полы подписаны: `markId` — единственное поле, которое кадр переносит в
+  // многоугольник (`pick`), и спор читается по имени, а не по цвету.
+  const named = {
+    ...built,
+    order: undefined,
+    faces: built.faces.map((face) =>
+      face.layer === VOLUME_LAYER_GROUND && face.n.z > 0 ? { ...face, markId: "пол" } : face,
+    ),
+  };
+  const box = { width: 972, height: 778 };
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0.6, -0.73, 14000);
+  const inside = (xy, x, y) => {
+    let hit = false;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i];
+      const ay = xy[i + 1];
+      const bx = xy[j];
+      const by = xy[j + 1];
+      if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) hit = !hit;
+    }
+    return hit;
+  };
+  let nearerSomewhere = false;
+  for (const hour of [6, 10, 12, 15, 19]) {
+    const mood = volumeMood({ minutes: hour * 60, times: { riseMin: 540, setMin: 1260, north: true }, kind: "nature" });
+    // Тень подписана так же, как полы: сравнение не должно опираться на ярус —
+    // иначе стенд проверял бы сам себя.
+    const shadow = volumeShadowFaces(built.shadowBoxes, mood.shadow).map((face) => ({ ...face, markId: "тень" }));
+    const frame = volumeFrame(named, camera, box, shadow, mood.tint);
+    const ground = frame.filter((polygon) => !polygon.stroke && polygon.layer <= VOLUME_LAYER_GROUND);
+    const floor = ground.find((polygon) => polygon.pick === "пол");
+    assert.ok(floor, "пол комнаты в кадре — иначе стенд ничего не проверяет");
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < floor.xy.length; i += 2) {
+      x += floor.xy[i];
+      y += floor.xy[i + 1];
+    }
+    x /= floor.xy.length / 2;
+    y /= floor.xy.length / 2;
+    const here = ground.filter((polygon) => inside(polygon.xy, x, y));
+    const shadows = here.filter((polygon) => polygon.pick === "тень");
+    if (mood.shadow.fade > 0) {
+      assert.ok(shadows.length > 0, "в " + hour + ":00 тень не дотягивается до середины комнаты — стенд пуст");
+      // Та самая дальность, на которую полагался таск 178: хотя бы в одном часе
+      // тень **ближе** пола, то есть по дальности она бы его и закрасила.
+      if (shadows.some((polygon) => polygon.depth < floor.depth)) nearerSomewhere = true;
+    }
+    const last = here[here.length - 1];
+    assert.equal(last.pick, "пол", "в " + hour + ":00 поверх пола легло что-то ещё: ярус " + last.layer);
+    assert.ok(
+      shadows.every((polygon) => polygon.layer < floor.layer),
+      "тень обязана лежать ярусом ниже пола, а не рядом с ним",
+    );
+  }
+  assert.ok(nearerSomewhere, "ни в один час тень не оказалась ближе пола — стенд перестал ловить D49");
 });
 
 // ——— D37: под проёмом и под стеной есть пол ———————————————————————————————
@@ -1603,28 +1691,84 @@ const DAY_TIMES = { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, nort
 test("часы объёма: идущее время — формула, стоячее не идёт вовсе", () => {
   const start = volumeClockNow(1000, new Date(2026, 9, 20, 12, 30), 60);
   assert.equal(volumeClockMinutes(start, 1000), 12 * 60 + 30, "при открытии стоит реальное время");
+  assert.equal(start.fromDay, volumeDayNumberOf(new Date(2026, 9, 20)), "и реальная дата (G289)");
   // Минута настоящего времени при ускорении 60 — час в объёме.
   assert.equal(volumeClockMinutes(start, 1000 + 60000), 13 * 60 + 30);
   // Сутки проходят за 24 минуты — и это ровно то, что написано в подписи.
   assert.equal(volumeClockDayMinutes(60), 24);
-  assert.deepEqual(VOLUME_CLOCK_SPEEDS.map(volumeClockDayMinutes), [24, 12, 6, 3, 1.5]);
-  // Через полночь время не ломается.
+  assert.deepEqual(VOLUME_CLOCK_SPEEDS.map(volumeClockDayMinutes), [1440, 24, 12, 6, 3, 1.5]);
+  // «Без ускорения» — первым пунктом, и это идущее время: сутки идут сутки
+  // (G287).
+  assert.equal(VOLUME_CLOCK_SPEEDS[0], VOLUME_CLOCK_SPEED_REAL);
+  assert.equal(VOLUME_CLOCK_SPEED_REAL, 1);
+  assert.equal(volumeClockDayMinutes(VOLUME_CLOCK_SPEED_REAL), VOLUME_DAY_MIN);
+  const real = volumeClockNow(1000, new Date(2026, 9, 20, 12, 30), VOLUME_CLOCK_SPEED_REAL);
+  assert.equal(real.fixed, false, "единица — идущее время, а не стоячее");
+  assert.equal(volumeClockMinutes(real, 1000 + 60000), 12 * 60 + 31, "минута снаружи — минута внутри");
+  // Через полночь время не ломается, а **дата переводится** (G289).
   assert.equal(volumeClockMinutes(start, 1000 + 12 * 60000), 0 * 60 + 30);
+  assert.equal(volumeClockStamp(start, 1000 + 12 * 60000).day, start.fromDay + 1, "сутки кончились — число сменилось");
+  assert.equal(volumeClockStamp(start, 1000 + 11 * 60000).day, start.fromDay, "до полуночи — то же число");
+  // При ускорении 960 полночь приходит каждые полторы минуты настоящего
+  // времени: случай не книжный, он живой.
+  const fast = volumeClockNow(0, new Date(2026, 9, 20, 23, 0), 960);
+  assert.equal(volumeClockStamp(fast, 0).day, fast.fromDay);
+  assert.equal(volumeClockStamp(fast, 62_500).day, fast.fromDay + 1, "час до полуночи при 960 — это 62,5 с");
+  assert.equal(volumeClockStamp(fast, 62_500 + 90_000).day, fast.fromDay + 2, "и дальше по сутками за 90 с");
+  // Назад через полночь — тоже сутки назад, а не нулевой день.
+  const back = { ...start, atMs: 1000 + 13 * 60000 };
+  assert.equal(volumeClockStamp(back, 1000).day, start.fromDay - 1, "время, отведённое назад, уводит и число");
+  assert.equal(volumeClockStamp(back, 1000).minutes, 23 * 60 + 30);
   // Стоячее время не зависит от того, сколько прошло снаружи: ни пересчёта, ни
   // перерисовки — это и есть «при фиксированном времени фон не меняется вовсе».
-  const fixed = volumeClockFixed(23 * 60 + 15, 240);
+  const fixed = volumeClockFixed(23 * 60 + 15, 240, 20000);
   assert.equal(volumeClockMinutes(fixed, 1000), 23 * 60 + 15);
   assert.equal(volumeClockMinutes(fixed, 9e9), 23 * 60 + 15);
+  assert.equal(volumeClockStamp(fixed, 9e9).day, 20000, "и число стоит вместе с часом");
   // Смена ускорения не сдвигает время: часы перецепляются за ту минуту, которую
   // показывают. Иначе выбор «быстрее» прыгал бы временем.
   const faster = volumeClockAt(start, 1000 + 60000, 960);
   assert.equal(volumeClockMinutes(faster, 1000 + 60000), 13 * 60 + 30);
   assert.equal(faster.speed, 960);
+  assert.equal(faster.fromDay, start.fromDay, "и дату не трогает");
+  const overnight = volumeClockAt(start, 1000 + 12 * 60000, 1);
+  assert.equal(overnight.fromDay, start.fromDay + 1, "перецепка за полночью помнит новые сутки");
   assert.equal(volumeClockAt(fixed, 7777, 120).fixed, true, "стоячие часы остаются стоячими");
-  // Чужое ускорение не берётся: в списке ровно пять пунктов.
+  assert.equal(volumeClockAt(fixed, 7777, 120).fromDay, 20000);
+  // Другое число — без правки часа и хода (поле даты в окне).
+  const moved = volumeClockOnDay(start, 1000 + 60000, start.fromDay + 10);
+  assert.equal(moved.fromDay, start.fromDay + 10);
+  assert.equal(volumeClockMinutes(moved, 1000 + 60000), 13 * 60 + 30, "час остался тем же");
+  assert.equal(moved.fixed, false, "и время идёт дальше");
+  assert.equal(volumeClockOnDay(fixed, 9e9, 20005).fixed, true, "стоячим часам дата не даёт хода");
+  assert.equal(volumeClockOnDay(start, 1000, "мусор").fromDay, start.fromDay, "мусор числа не меняет");
+  // Чужое ускорение не берётся: в списке ровно шесть пунктов.
   assert.equal(volumeClockSpeedOf(7), VOLUME_CLOCK_SPEED_DEFAULT);
   assert.equal(volumeClockSpeedOf("480"), 480, "строку из настроек читаем числом");
   assert.equal(volumeClockSpeedOf(480), 480);
+  assert.equal(volumeClockSpeedOf(1), 1);
+});
+
+test("дата — номер суток: читается, пишется и не зависит от часового пояса (G289)", () => {
+  const day = volumeDayNumberOf(new Date(2026, 9, 20, 23, 59));
+  assert.equal(volumeDateText(day), "2026-10-20", "вечер не уезжает в соседние сутки");
+  assert.equal(volumeDayNumberOf(new Date(2026, 9, 20, 0, 1)), day, "и утро тоже");
+  assert.equal(volumeDateParse("2026-10-20"), day);
+  assert.equal(volumeDateText(volumeDateParse("2026-01-01")), "2026-01-01");
+  assert.equal(volumeDateText(volumeDateParse("2026-12-31")), "2026-12-31");
+  assert.equal(volumeDateParse("2026-02-30"), null, "тридцатого февраля не бывает — и мы не переносим в март");
+  assert.equal(volumeDateParse("20.10.2026"), null);
+  assert.equal(volumeDateParse(""), null);
+  assert.equal(volumeDateParse("вчера"), null);
+  // Сутки туда и обратно: год целиком, без сдвига на день.
+  for (let shift = 0; shift < 365; shift += 1) {
+    assert.equal(volumeDateParse(volumeDateText(day + shift)), day + shift, "сутки " + shift);
+  }
+  // Переход на летнее время (в Европе — последнее воскресенье марта) номер
+  // суток не сдвигает: он считается по дате, а не по миллисекундам.
+  const march = volumeDayNumberOf(new Date(2026, 2, 29, 3, 30));
+  assert.equal(volumeDateText(march), "2026-03-29");
+  assert.equal(volumeDayDateOf(march).getDate(), 29);
 });
 
 test("контрол с часами: строка и разбор", () => {
@@ -1714,49 +1858,265 @@ test("утро, день, вечер и ночь — слова, а не сос�
   assert.equal(volumeDayPhase(8 * 60, early), "day");
 });
 
-test("солнце ходит по компасу: восход на востоке, полдень на юге, закат на западе", () => {
+test("солнце стоит там, где стоит: высота и азимут по дате, времени и координатам (G288)", () => {
   // Сторона света панорамы: ноль смотрит вправо по листу, 90° — вниз. При верхе
   // чертежа на север вправо уходит восток, значит юг приходится на 90°.
   assert.equal(volumePanoramaAz(180, 0), 90, "юг при верхе на север — вниз по листу");
   assert.equal(volumePanoramaAz(90, 0), 0, "восток — вправо");
   assert.equal(volumePanoramaAz(270, 0), 180, "запад — влево");
   assert.equal(volumePanoramaAz(180, 90), 0, "верх смотрит на восток — юг уехал вправо");
-  const rise = volumeSunAt(VOLUME_SUNRISE_MIN, DAY_TIMES);
-  const noon = volumeSunAt((VOLUME_SUNRISE_MIN + VOLUME_SUNSET_MIN) / 2, DAY_TIMES);
-  const set = volumeSunAt(VOLUME_SUNSET_MIN, DAY_TIMES);
-  assert.equal(Math.round(rise.az), 0, "на восходе солнце на востоке");
-  assert.equal(Math.round(noon.az), VOLUME_SUN_AT.az, "в полдень — ровно там, где стояло до таска 181");
-  assert.equal(Math.round(set.az), 180, "на закате — на западе");
-  assert.ok(Math.abs(rise.height) < 1e-9 && Math.abs(set.height) < 1e-9, "на восходе и закате высота нулевая");
-  assert.equal(Math.round(noon.height), VOLUME_SUN_AT.rise, "в полдень солнце в своей верхней точке");
-  // Непрерывность: за сутки высота не прыгает ни на шаге минуты.
-  let was = volumeSunAt(0, DAY_TIMES).height;
-  for (let minute = 1; minute <= VOLUME_DAY_MIN; minute += 1) {
-    const now = volumeSunAt(minute % VOLUME_DAY_MIN, DAY_TIMES).height;
-    assert.ok(Math.abs(now - was) < 0.1, "скачок высоты на минуте " + minute);
-    was = now;
+  // ——— настоящая высота, а не число в коде ———
+  //
+  // Москва: в полдень 21 июня солнце стоит около 58°, 21 декабря — около 12°,
+  // в равноденствие — 90° минус широта. Справочные числа — 57,5°, 10,6° и
+  // 34,2°; сходимся в градус, и это сказано прямо: уравнения времени и
+  // настоящей эклиптики здесь нет.
+  const site = { latDeg: 55.7558, lonDeg: 37.6173 };
+  const noonOf = (times) => volumeSunAt((times.riseMin + times.setMin) / 2, times);
+  const june = volumeDayTimes(site, new Date(2026, 5, 21, 12));
+  const december = volumeDayTimes(site, new Date(2026, 11, 21, 12));
+  const march = volumeDayTimes(site, new Date(2026, 2, 20, 12));
+  assert.ok(Math.abs(noonOf(june).rise - 57.5) < 1.5, "полдень в июне: " + noonOf(june).rise.toFixed(1));
+  assert.ok(Math.abs(noonOf(december).rise - 10.6) < 1.5, "полдень в декабре: " + noonOf(december).rise.toFixed(1));
+  assert.ok(Math.abs(noonOf(march).rise - (90 - site.latDeg)) < 1.5, "равноденствие: " + noonOf(march).rise.toFixed(1));
+  assert.ok(noonOf(june).rise > 3 * noonOf(december).rise, "лето и зима обязаны различаться втрое, а не числом в коде");
+  assert.equal(Math.round(noonOf(june).az), 90, "в полдень солнце на юге — вниз по листу");
+  assert.equal(Math.round(noonOf(december).az), 90);
+  // ——— рассвет и закат сходятся с подписью окна ———
+  //
+  // Высота отсчитана от того же горизонта (−0,833°), по которому посчитаны
+  // рассвет и закат, поэтому её ноль приходится **ровно** на их минуту.
+  for (const times of [june, december, march, volumeDayTimes(null)]) {
+    assert.ok(Math.abs(volumeSunAt(times.riseMin, times).height) < 1e-6, "рассвет разошёлся с нулём высоты");
+    assert.ok(Math.abs(volumeSunAt(times.setMin, times).height) < 1e-6, "закат разошёлся с нулём высоты");
+    assert.equal(volumeSunAt(times.riseMin + 5, times).up, true, "через пять минут после рассвета солнце уже над горизонтом");
+    assert.equal(volumeSunAt(times.riseMin - 5, times).up, false, "а за пять минут до него — ещё под ним");
+  }
+  // Восход на востоке, закат на западе — и летом севернее, зимой южнее.
+  const compass = (az) => (az + 90 + 360) % 360;
+  assert.ok(compass(volumeSunAt(june.riseMin + 1, june).az) < 60, "в июне светает на северо-востоке");
+  assert.ok(compass(volumeSunAt(december.riseMin + 1, december).az) > 120, "в декабре — на юго-востоке");
+  assert.ok(Math.abs(compass(volumeSunAt(march.riseMin + 1, march).az) - 90) < 2, "в равноденствие — ровно на востоке");
+  assert.ok(compass(volumeSunAt(march.setMin - 1, march).az) > 268, "и садится ровно на западе");
+  // ——— одна формула на оба случая ———
+  //
+  // По координатам часовой угол идёт настоящей угловой скоростью — 15° в час,
+  // то есть 0,25° в минуту; без них та же дуга растягивается на окно заказчика.
+  // Двух формул здесь нет, и видно это числом.
+  assert.ok(Math.abs(volumeSkyPlace(june).hourScale - 0.25) < 1e-9, "по координатам растяжки нет вовсе");
+  assert.ok(Math.abs(volumeSkyPlace(december).hourScale - 0.25) < 1e-9);
+  assert.ok(volumeSkyPlace(volumeDayTimes(null)).hourScale > 0.25, "а окно 9:00…21:00 дугу растягивает");
+  // ——— без координат остаются слова заказчика ———
+  const plain = volumeDayTimes(volumeSiteOf(createProject()));
+  assert.equal(plain.riseMin, 9 * 60);
+  assert.equal(plain.setMin, 21 * 60);
+  const plainNoon = volumeSunAt(15 * 60, plain);
+  assert.ok(plainNoon.rise > 30 && plainNoon.rise < 40, "дуга всё равно настоящая: " + plainNoon.rise.toFixed(1));
+  assert.equal(Math.round(plainNoon.az), 90, "верх дуги — на юге");
+  assert.equal(volumeSunAt(12 * 60, plain).up, true);
+  assert.equal(volumeSunAt(3 * 60, plain).up, false);
+  // Непрерывность: за сутки высота не прыгает ни на шаге минуты. Настоящее
+  // солнце у горизонта идёт быстрее нарисованной синусоиды — 0,15° в минуту
+  // против 0,06°, — и это предел, а не оговорка.
+  for (const times of [plain, june, december]) {
+    let was = volumeSunAt(0, times).height;
+    for (let minute = 1; minute <= VOLUME_DAY_MIN; minute += 1) {
+      const now = volumeSunAt(minute % VOLUME_DAY_MIN, times).height;
+      assert.ok(Math.abs(now - was) < 0.2, "скачок высоты на минуте " + minute);
+      was = now;
+    }
   }
   // Направление верха чертежа (таск 188) разворачивает светило вокруг дома и
   // больше ничего: иначе окна южной стороны освещались бы как северные.
-  const turned = volumeSunAt((VOLUME_SUNRISE_MIN + VOLUME_SUNSET_MIN) / 2, DAY_TIMES, 90);
-  assert.equal(Math.round(turned.az), 0);
-  assert.equal(Math.round(turned.height), VOLUME_SUN_AT.rise, "высота от поворота листа не зависит");
-  // В южном полушарии полдень на севере — та же дуга, отражённая.
+  const turned = volumeSunAt((june.riseMin + june.setMin) / 2, june, 90);
+  assert.equal(Math.round(turned.az) % 360, 0);
+  assert.ok(Math.abs(turned.rise - noonOf(june).rise) < 1e-9, "высота от поворота листа не зависит");
+  // В южном полушарии полдень на севере — и это выходит из той же формулы, без
+  // отражённой дуги.
   const south = volumeDayTimes({ latDeg: -33.9, lonDeg: 151.2 }, new Date(2026, 0, 15, 12));
-  assert.equal(south.north, false);
-  const southNoon = volumeSunAt((south.riseMin + south.setMin) / 2, south);
+  const southNoon = noonOf(south);
   assert.equal(Math.round(southNoon.az), 270, "север при верхе на север — вверх по листу");
+  assert.ok(southNoon.rise > 70, "в середине января в Сиднее солнце почти в зените: " + southNoon.rise.toFixed(1));
 });
 
-test("месяц ходит ночью и только ночью", () => {
-  assert.equal(volumeMoonAt(VOLUME_SUNRISE_MIN + 120, DAY_TIMES).up, false, "днём месяца нет");
-  const midnight = volumeMoonAt(3 * 60, DAY_TIMES);
-  assert.equal(midnight.up, true);
-  assert.equal(Math.round(midnight.height), VOLUME_MOON_RISE_DEG, "в середине ночи месяц выше всего");
-  assert.ok(VOLUME_MOON_RISE_DEG < VOLUME_SUN_AT.rise, "месяц ходит ниже солнца");
-  // Всходит на востоке после заката, садится на западе к рассвету.
-  assert.equal(Math.round(volumeMoonAt(VOLUME_SUNSET_MIN, DAY_TIMES).az), 0);
-  assert.equal(Math.round(volumeMoonAt(VOLUME_SUNRISE_MIN - 0.001, DAY_TIMES).az), 180);
+test("полярный день и полярная ночь выходят из той же формулы", () => {
+  const polar = { latDeg: 78.2, lonDeg: 15.6 };
+  const dark = volumeDayTimes(polar, new Date(2026, 11, 21, 12));
+  assert.equal(dark.setMin - dark.riseMin, 0, "полярная ночь: дня нет вовсе");
+  assert.equal(volumeSunAt(720, dark).up, false, "и солнце в полдень не встаёт");
+  assert.ok(volumeSunAt(720, dark).rise < -5, "в полдень оно глубоко под горизонтом: " + volumeSunAt(720, dark).rise.toFixed(1));
+  for (let minute = 0; minute < VOLUME_DAY_MIN; minute += 10) {
+    assert.equal(volumeSunAt(minute, dark).up, false, "полярная ночь на минуте " + minute);
+  }
+  const light = volumeDayTimes(polar, new Date(2026, 5, 21, 12));
+  assert.equal(light.setMin - light.riseMin, VOLUME_DAY_MIN, "полярный день: сутки целиком день");
+  for (let minute = 0; minute < VOLUME_DAY_MIN; minute += 10) {
+    assert.equal(volumeSunAt(minute, light).up, true, "полярный день на минуте " + minute);
+  }
+  // Полночь ниже полудня, но обе над горизонтом — это и есть незакатное солнце.
+  assert.ok(volumeSunAt(0, light).rise > 5, "в полночь солнце над горизонтом");
+  assert.ok(volumeSunAt(720, light).rise > volumeSunAt(0, light).rise + 10, "а в полдень выше");
+});
+
+test("месяц ходит своим путём, и фаза у него по лунному месяцу (G288, G290)", () => {
+  const site = { latDeg: 55.7558, lonDeg: 37.6173 };
+  const dayOf = (year, month, day) => volumeDayTimes(site, new Date(year, month, day, 12));
+  // Возраст луны: от новолуния до новолуния — месяц, и ни суток больше.
+  const first = volumeMoonAgeDays(volumeDayNumberOf(new Date(2000, 0, 6)), 18 * 60 + 14, 0);
+  assert.ok(first < 0.01 || first > VOLUME_MOON_MONTH_DAYS - 0.01, "опорное новолуние: " + first.toFixed(3));
+  const age = (times) => volumeMoonAgeDays(times.dayNumber, 0, times.tzHours);
+  let was = age(dayOf(2026, 0, 1));
+  let turns = 0;
+  for (let day = 2; day <= 60; day += 1) {
+    const now = age(dayOf(2026, 0, day));
+    if (now < was) turns += 1;
+    else assert.ok(Math.abs(now - was - 1) < 0.01, "возраст растёт по суткам: " + now.toFixed(2));
+    was = now;
+  }
+  assert.equal(turns, 2, "за два месяца круг замкнулся дважды");
+  // ——— весь круг фаз из одного числа ———
+  //
+  // Освещённая доля идёт от новолуния к полнолунию и обратно, и подписанная
+  // полуось кромки (`edge`) проходит путь +1 → 0 → −1 → 0 → +1.
+  const atAge = (want) => {
+    // Подбираем дату и час, при которых возраст ближе всего к нужному.
+    let best = null;
+    for (let day = 0; day < 40; day += 1) {
+      for (let hour = 0; hour < 24; hour += 1) {
+        const times = dayOf(2026, 9, 1 + day);
+        const got = volumeMoonAgeDays(times.dayNumber, hour * 60, times.tzHours);
+        const miss = Math.abs(got - want);
+        if (!best || miss < best.miss) best = { miss, times, minutes: hour * 60, got };
+      }
+    }
+    return { ...best, moon: volumeMoonAt(best.minutes, best.times) };
+  };
+  const phases = [
+    ["новолуние", 0, 0, 1],
+    ["растущий серп", 3.7, 0.146, 0.707],
+    ["первая четверть", 7.38, 0.5, 0],
+    ["растущая горбатая", 11, 0.854, -0.707],
+    ["полнолуние", 14.77, 1, -1],
+    ["убывающая горбатая", 18.4, 0.854, -0.707],
+    ["последняя четверть", 22.1, 0.5, 0],
+    ["старый месяц", 25.8, 0.146, 0.707],
+  ];
+  for (const [name, want, lit, edge] of phases) {
+    const got = atAge(want);
+    assert.ok(Math.abs(got.moon.lit - lit) < 0.05, name + ": доля " + got.moon.lit.toFixed(3) + ", ждали " + lit);
+    assert.ok(Math.abs(got.moon.edge - edge) < 0.07, name + ": кромка " + got.moon.edge.toFixed(3) + ", ждали " + edge);
+  }
+  // ——— луна не ходит по солнечной дуге ———
+  //
+  // Полная луна стоит всю ночь и прячется днём, молодой серп садится вслед за
+  // солнцем — вот этим «свой путь» и отличается от прежней ночной дуги.
+  const full = atAge(14.77);
+  const midnight = volumeMoonAt(0, full.times);
+  const noon = volumeMoonAt(720, full.times);
+  assert.ok(midnight.rise > 30, "полная луна в полночь высоко: " + midnight.rise.toFixed(1));
+  assert.ok(noon.rise < 0, "и в полдень её нет над горизонтом: " + noon.rise.toFixed(1));
+  const young = atAge(3.5);
+  const evening = volumeMoonAt(young.times.setMin + 30, young.times);
+  assert.ok(evening.rise > 0, "молодой серп виден сразу после заката: " + evening.rise.toFixed(1));
+  assert.ok(volumeMoonAt(young.times.setMin + 240, young.times).rise < evening.rise, "и садится вслед за солнцем");
+  // Высота у луны своя: за месяц она обходит эклиптику целиком, то есть ходит
+  // то высоко, то низко — на одной борозде её держать нельзя.
+  let low = 90;
+  let high = -90;
+  for (let day = 0; day < 30; day += 1) {
+    const times = dayOf(2026, 9, 1 + day);
+    const best = Array.from({ length: 48 }, (unused, step) => volumeMoonAt(step * 30, times).rise).reduce(
+      (most, value) => Math.max(most, value),
+      -90,
+    );
+    low = Math.min(low, best);
+    high = Math.max(high, best);
+  }
+  assert.ok(high - low > 20, "верхняя точка луны за месяц гуляет: от " + low.toFixed(0) + "° до " + high.toFixed(0) + "°");
+  // Направление верха чертежа разворачивает и месяц.
+  assert.equal(
+    Math.round(volumeMoonAt(0, full.times, 90).az),
+    Math.round((volumeMoonAt(0, full.times).az - 90 + 360) % 360),
+  );
+});
+
+test("очерк месяца: серп на всех фазах и прямая кромка в четверть (D48, G290)", () => {
+  const radius = 20;
+  const area = (points) => {
+    let sum = 0;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+      sum += points[j].x * points[i].y - points[i].x * points[j].y;
+    }
+    return Math.abs(sum) / 2;
+  };
+  const disc = area(volumeMoonShape(radius, -1, 0));
+  // Полнолуние — полный диск; площадь ломаной на 48 точках отстаёт от круга на
+  // треть процента, и это единственная её неточность.
+  assert.ok(Math.abs(disc - Math.PI * radius * radius) / (Math.PI * radius * radius) < 0.005, "полный диск: " + disc.toFixed(1));
+  assert.ok(area(volumeMoonShape(radius, 1, 0)) < 1e-9, "новолуние — фигура без площади");
+  // Площадь равна освещённой доле — на каждой фазе, а не только в четверти.
+  for (let edge = -1; edge <= 1.0001; edge += 0.05) {
+    const lit = (1 - edge) / 2;
+    const got = area(volumeMoonShape(radius, edge, 0)) / disc;
+    assert.ok(Math.abs(got - lit) < 0.005, "кромка " + edge.toFixed(2) + ": доля " + got.toFixed(3) + " против " + lit.toFixed(3));
+  }
+  // ——— обе кромки выгнуты в одну сторону ———
+  //
+  // Именно этого и не было в дефекте D48: внутренняя кромка торчала за диск, и
+  // фигура читалась линзой. Проверяем прямо: ни одна точка очерка не выходит за
+  // круг, и у серпа **вся** фигура лежит в освещённой половине.
+  for (const edge of [0.95, 0.707, 0.3, 0.05]) {
+    const points = volumeMoonShape(radius, edge, 0);
+    assert.ok(
+      points.every((point) => Math.hypot(point.x, point.y) <= radius + 1e-9),
+      "кромка " + edge + ": точка вышла за диск",
+    );
+    // Освещённая сторона при нулевом наклоне — вверх по экрану, то есть `y < 0`.
+    assert.ok(points.every((point) => point.y <= 1e-9), "кромка " + edge + ": серп полез в тёмную половину");
+  }
+  // Четверть — ровно половина диска с прямой кромкой: все точки терминатора
+  // лежат на одной прямой.
+  const quarter = volumeMoonShape(radius, 0, 0);
+  const flat = quarter.filter((point) => Math.abs(point.y) < 1e-9);
+  assert.ok(flat.length > radius / 2, "прямая кромка собралась из " + flat.length + " точек");
+  assert.ok(Math.abs(area(quarter) / disc - 0.5) < 0.005, "четверть — половина диска");
+  // Через четверть фигура проходит **без скачка**: шаг кромки на 0,01 двигает
+  // очерк на доли точки.
+  const step = (edge) => {
+    const before = volumeMoonShape(radius, edge - 0.005, 0);
+    const after = volumeMoonShape(radius, edge + 0.005, 0);
+    return Math.max(...before.map((point, index) => Math.hypot(point.x - after[index].x, point.y - after[index].y)));
+  };
+  assert.ok(step(0) < 0.3, "на переходе через четверть очерк дёрнулся на " + step(0).toFixed(3) + " точки");
+  assert.ok(step(0.5) < 0.3 && step(-0.5) < 0.3, "и на серпе с горбатой тоже гладко");
+  // Наклон разворачивает фигуру целиком и площади не меняет: рожки смотрят
+  // туда, куда сказано, а серп остаётся серпом.
+  const tilted = volumeMoonShape(radius, 0.5, 90);
+  assert.ok(Math.abs(area(tilted) - area(volumeMoonShape(radius, 0.5, 0))) < 1e-9);
+  assert.ok(tilted.every((point) => point.x >= -1e-9), "при наклоне 90° освещённая сторона смотрит вправо");
+});
+
+test("рожки месяца смотрят прочь от солнца", () => {
+  // Угол считается от «вверх по экрану» по часовой стрелке. Солнце прямо над
+  // месяцем — освещён верх; под ним — освещён низ; слева — освещён левый край.
+  const up = volumeMoonTiltDeg({ az: 90, rise: 40 }, { az: 90, rise: 20 });
+  assert.ok(Math.abs(up) < 1e-6, "солнце выше месяца: " + up.toFixed(3));
+  const down = volumeMoonTiltDeg({ az: 90, rise: -10 }, { az: 90, rise: 20 });
+  assert.ok(Math.abs(Math.abs(down) - 180) < 1e-6, "солнце под горизонтом: " + down.toFixed(3));
+  const left = volumeMoonTiltDeg({ az: 0, rise: 0 }, { az: 90, rise: 0 });
+  assert.ok(Math.abs(left + 90) < 1e-6, "солнце левее месяца: " + left.toFixed(3));
+  const right = volumeMoonTiltDeg({ az: 180, rise: 0 }, { az: 90, rise: 0 });
+  assert.ok(Math.abs(right - 90) < 1e-6, "солнце правее месяца: " + right.toFixed(3));
+  // И на живом небе: у вечернего серпа освещённая сторона смотрит вниз, к
+  // закатившемуся солнцу, а у утреннего — вниз с другой стороны.
+  const site = { latDeg: 55.7558, lonDeg: 37.6173 };
+  const times = volumeDayTimes(site, new Date(2026, 9, 15, 12));
+  const evening = volumeMood({ minutes: times.setMin + 40, times, kind: "plain" });
+  assert.ok(Math.abs(evening.moon.tiltDeg) > 60, "вечерний серп светит книзу: " + evening.moon.tiltDeg.toFixed(0));
+  // Месяца днём не видно вовсе — яркость у него от высоты солнца, а не от своей.
+  const noon = volumeMood({ minutes: (times.riseMin + times.setMin) / 2, times, kind: "plain" });
+  assert.equal(noon.moon.glow, 0, "в полдень месяц не рисуется");
+  assert.equal(volumeMood({ minutes: 0, times, kind: "plain" }).moon.glow, 1, "а ночью рисуется в полную силу");
 });
 
 test("ночь узнаётся тоном, но всё остаётся различимым", () => {
@@ -1834,7 +2194,11 @@ test("небо меняется плавно и в полдень остаётс
     const now = volumeSkyColors(volumeSunAt(minute % VOLUME_DAY_MIN, DAY_TIMES).height);
     for (const key of ["top", "low"]) {
       for (let channel = 0; channel < 3; channel += 1) {
-        assert.ok(Math.abs(now[key][channel] - was[key][channel]) <= 2, "скачок неба на минуте " + minute);
+        // Пять единиц на минуту — предел настоящего солнца у горизонта: оно
+        // идёт 0,15° в минуту, а шаг цвета у неба — 60 единиц на четыре
+        // градуса. Это плавность, а не ступенька: глазу нужен скачок в
+        // полтора десятка.
+        assert.ok(Math.abs(now[key][channel] - was[key][channel]) <= 5, "скачок неба на минуте " + minute);
       }
     }
     was = now;
@@ -2310,6 +2674,9 @@ test("окно параметров: подписи ускорения и стр
   assert.equal(volumeSpeedLabel(60), "×60 — сутки за 24 мин");
   assert.equal(volumeSpeedLabel(960), "×960 — сутки за 1,5 мин");
   assert.equal(volumeSpeedLabel(7), volumeSpeedLabel(VOLUME_CLOCK_SPEED_DEFAULT), "чужое ускорение — умолчание");
+  // «Без ускорения» подписано словами, а не «×1 — сутки за 1440 мин» (G287).
+  assert.equal(volumeSpeedLabel(VOLUME_CLOCK_SPEED_REAL), strings.volume.speedNone);
+  assert.ok(!volumeSpeedLabel(VOLUME_CLOCK_SPEED_REAL).includes("1440"), "сутки за сутки в минутах не считают");
   // Слова часа — те же четыре, которыми названы отрезки суток.
   assert.equal(volumePhaseWord("night"), strings.volume.phaseNight);
   assert.equal(volumePhaseWord("morning"), strings.volume.phaseMorning);
@@ -2318,17 +2685,60 @@ test("окно параметров: подписи ускорения и стр
   assert.equal(volumePhaseWord("пятница"), strings.volume.phaseNight, "неизвестный час — ночь, а не пустота");
   // Строка состояния говорит и который час, и идёт ли он: «время стоит» — это
   // то же самое, что «фон не пересчитывается вовсе», словами человека.
+  const day = volumeDayNumberOf(new Date(2026, 9, 20));
   const running = volumeClockNow(0, new Date(2026, 9, 20, 2, 14), 240);
-  const line = volumeParamsLine(running, 134, "night");
+  const line = volumeParamsLine(running, 134, "night", day);
   assert.ok(line.includes("02:14") && line.includes("ночь") && line.includes("6"), line);
-  const fixed = volumeParamsLine(volumeClockFixed(134, 240), 134, "night");
-  assert.ok(fixed.includes("02:14") && fixed.includes("стоит"), fixed);
+  // И какое число (G289): дата двигает рассвет, значит человек обязан её видеть.
+  assert.ok(line.includes("20.10.2026"), line);
+  assert.equal(volumeDayLabel(day), "20.10.2026");
+  const fixed = volumeParamsLine(volumeClockFixed(134, 240, day), 134, "night", day);
+  assert.ok(fixed.includes("02:14") && fixed.includes("стоит") && fixed.includes("20.10.2026"), fixed);
   assert.ok(!fixed.includes("сутки"), "у стоячего времени суток не бывает: " + fixed);
+  // Без ускорения строка не врёт про минуты: сутки идут сутки.
+  const real = volumeParamsLine(volumeClockNow(0, new Date(2026, 9, 20, 2, 14), VOLUME_CLOCK_SPEED_REAL), 134, "night", day);
+  assert.ok(real.includes("идёт") && !real.includes("1440"), real);
   // Рассвет и закат: сказано, откуда они взялись.
   const own = volumeParamsSunLine({ riseMin: 300, setMin: 1300, bySite: true });
   assert.ok(own.includes("05:00") && own.includes("21:40") && own.includes("координат"), own);
   const plain = volumeParamsSunLine({ riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false });
   assert.ok(plain.includes("09:00") && plain.includes("21:00") && plain.includes("умолчание"), plain);
+});
+
+test("окно параметров: «Сейчас» ставит дату, время и «Без ускорения» (G287, G289)", () => {
+  // Двери окна правят один и тот же выбор, и спрашивается он одним
+  // `volumeParamsRead` — второго места для часов объёма нет.
+  const nowMs = 10_000;
+  volumeParamsSpeed(240, nowMs);
+  assert.equal(volumeParamsRead().speed, 240);
+  // Своё время — часы стоят, но дата у них остаётся та же.
+  volumeParamsFix(5 * 60, nowMs);
+  const stopped = volumeParamsRead().clock;
+  assert.equal(stopped.fixed, true);
+  assert.equal(volumeClockMinutes(stopped, nowMs + 9e6), 5 * 60, "стоячее время не идёт");
+  const today = volumeDayNumberOf(new Date());
+  assert.equal(volumeClockStamp(stopped, nowMs).day, today);
+  // Другая дата — число меняется, час стоит, ход не возвращается.
+  volumeParamsDay(today - 200, nowMs);
+  assert.equal(volumeClockStamp(volumeParamsRead().clock, nowMs).day, today - 200);
+  assert.equal(volumeClockStamp(volumeParamsRead().clock, nowMs).minutes, 5 * 60);
+  assert.equal(volumeParamsRead().clock.fixed, true, "дата не пускает стоячее время");
+  // «Сейчас» — сегодняшняя дата, настоящий час и «Без ускорения».
+  volumeParamsNow(nowMs);
+  const now = volumeParamsRead();
+  assert.equal(now.speed, VOLUME_CLOCK_SPEED_REAL, "кнопка выбирает первый пункт ряда сама");
+  assert.equal(now.clock.fixed, false, "и пускает время по-настоящему");
+  assert.equal(volumeClockStamp(now.clock, nowMs).day, today);
+  assert.ok(
+    Math.abs(volumeClockMinutes(now.clock, nowMs) - volumeDayMinutesOf(new Date())) < 1,
+    "час — настоящий",
+  );
+  // Минута снаружи — минута внутри: это и есть «реальное время».
+  assert.ok(
+    Math.abs(volumeClockMinutes(now.clock, nowMs + 60_000) - volumeClockMinutes(now.clock, nowMs) - 1) < 1e-6,
+    "без ускорения время идёт один к одному",
+  );
+  volumeParamsSpeed(VOLUME_CLOCK_SPEED_DEFAULT, nowMs);
 });
 
 test("щелчок по миникарте читается местом на плане (G270)", () => {
