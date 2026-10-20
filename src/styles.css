@@ -516,10 +516,41 @@ body {
 #app[data-screen="scheme"] [data-section-id="markList"],
 #app[data-screen="scheme"] [data-section-id="properties"],
 #app[data-screen="drawing"] [data-section-id="drawTools"],
-#app[data-screen="drawing"] [data-section-id="drawList"],
+#app[data-screen="drawing"] [data-section-id="drawWalls"],
+#app[data-screen="drawing"] [data-section-id="drawOpenings"],
+#app[data-screen="drawing"] [data-section-id="drawObjects"],
 #app[data-screen="volume"] [data-section-id="volumeTools"],
 #app[data-screen="volume"] [data-section-id="markList"] {
   display: flex;
+}
+
+/* ——— три списка делят правую колонку поровну (таск 187) ————————————————
+   Списков в «Чертеже» три, и видны должны быть все три заголовка сразу: иначе
+   на объекте заказчика (25 стен) «Проёмы» начинаются на четырёхстах точках
+   ниже нижнего края, и человек не знает, что они вообще есть, — проверено
+   живым прогоном.
+
+   Поэтому здесь работает общее правило правой колонки: раздел берёт не больше
+   трети её высоты, а дальше листается своим телом. Трети, а не половины, —
+   делят её трое, и при половине третий список всё равно уезжал бы за край.
+   Свёрнутый раздел из дележа выходит и отдаёт место соседям целиком. */
+#app[data-screen="drawing"] #panel-right .panel__section {
+  max-height: 34%;
+}
+
+#app[data-screen="drawing"] #panel-right .panel__section.is-collapsed {
+  max-height: none;
+}
+
+/* Раздел, в котором раскрыты параметры выделенного, берёт больше места: пачка
+   полей проёма выше трети колонки, и её низ — кнопку «Удалить» — иначе
+   приходилось бы доставать прокруткой. Соседи ужимаются, но не исчезают: их
+   заголовки и счётчики остаются на виду. */
+#app[data-screen="drawing"] #panel-right .panel__section:has(.workshop__listItem.is-open) {
+  /* Не ужимается — ужимаются соседи: одного потолка мало, высоту здесь делит
+     `flex-shrink`, и раздел с полями проигрывал его наравне с пустым. */
+  flex: 0 0 auto;
+  max-height: 62%;
 }
 
 #canvas-empty {

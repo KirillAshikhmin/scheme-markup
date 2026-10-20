@@ -537,7 +537,13 @@ test("G68: стеклянная дверь в объект ничего не п�
 // обещанием.
 
 test("вид двери не сравнивают напрямую: вопрос о полотне задаётся одним местом", () => {
-  const files = ["../src/render.js", "../src/volume.js", "../src/panels/workshop.js", "../src/panels/volume.js"];
+  const files = [
+    "../src/render.js",
+    "../src/volume.js",
+    "../src/panels/workshop.js",
+    "../src/panels/volume.js",
+    "../src/panels/drawPicker.js",
+  ];
   for (const file of files) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     assert.equal(

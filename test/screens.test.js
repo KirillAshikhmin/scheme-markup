@@ -81,11 +81,24 @@ test("у переключателя есть слово для каждого р
   assert.equal(strings.screens.volume, "Объём");
 });
 
-test("раздел «Интерфейс проекта» переименован, а ключ остался прежним", () => {
+test("раздел «Интерфейс» переименован дважды, а ключ остался прежним", () => {
   // Ключ держит свёрнутость: переименуй его — раздел развернулся бы у всех,
-  // кто его однажды свернул.
+  // кто его однажды свернул. Подпись же сменилась дважды по слову заказчика:
+  // «Размеры» → «Интерфейс проекта» (таск 153) → «Интерфейс» (таск 187, G281).
   assert.equal(SECTION_IDS.sizes, "sizes");
-  assert.equal(strings.panels.sizes, "Интерфейс проекта");
+  assert.equal(strings.panels.sizes, "Интерфейс");
+});
+
+test("в правой колонке чертежа три раздела, и прежний один из настроек отброшен", () => {
+  // Три списка вместо группы «Элементы чертежа» (таск 187, G280).
+  assert.deepEqual(
+    [SECTION_IDS.drawWalls, SECTION_IDS.drawOpenings, SECTION_IDS.drawObjects],
+    ["drawWalls", "drawOpenings", "drawObjects"],
+  );
+  assert.equal(Object.values(SECTION_IDS).includes("drawList"), false);
+  // Сохранённая свёрнутость прежнего раздела — мусор для нынешней сборки, и
+  // она отбрасывается сама: колонка от неё не схлопывается.
+  assert.deepEqual(sectionListFrom(["drawList", SECTION_IDS.drawWalls]), [SECTION_IDS.drawWalls]);
 });
 
 const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });

@@ -152,6 +152,127 @@ export function objectPickerStep(columns, key, dx, dy) {
 }
 
 /**
+ * Сетка вещей как кирпич: поиск сверху, категории колонками, плитки внутри.
+ *
+ * Вынесена наружу в таске 187: той же сеткой стоит шаг «Объекты» в окне «Что
+ * добавить», и второй её сборки быть не должно — разойдись они, человек видел
+ * бы в двух окнах два разных каталога. Окно выбора вещи (ниже) — первый её
+ * хозяин, и ведёт себя в точности как прежде.
+ *
+ * `onPick(key)` зовётся кликом по плитке и Enter в поиске; что считать
+ * выбранным, решает хозяин — он же присылает это `setKey`.
+ */
+export function createObjectTiles(options = {}) {
+  let key = options.key || null;
+  let columns = [];
+  const box = uiEl("div", { class: "picker__columns picker__columns--objects" });
+  const node = uiEl("div", { class: "picker picker--objects" });
+  const pick = (next) => {
+    if (next && typeof options.onPick === "function") options.onPick(next);
+  };
+  const firstKey = () => {
+    const first = box.querySelector(".objectTile");
+    return first ? first.dataset.key : null;
+  };
+
+  const search = uiEl("input", {
+    class: "ui-input",
+    type: "text",
+    placeholder: strings.objectPicker.search,
+    on: {
+      input: () => render(),
+      keydown: (event) => {
+        // Стрелка вниз из поиска — в первую плитку: дальше по сетке ходят
+        // стрелками, не хватаясь за мышь.
+        if (event.key === "ArrowDown") {
+          const first = box.querySelector(".objectTile");
+          if (!first) return;
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+        // Enter берёт первую найденную вещь. Своя обработка здесь
+        // обязательна: основное действие карточки — «Отмена», и оно
+        // сработало бы раньше (`uiModal` ловит Enter), то есть выбор
+        // терялся бы.
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        pick(firstKey());
+      },
+    },
+  });
+
+  function tile(entry) {
+    return uiEl(
+      "button",
+      {
+        class: "objectTile" + (entry.key === key ? " is-on" : ""),
+        type: "button",
+        title: entry.name,
+        attrs: { "data-key": entry.key, "aria-pressed": entry.key === key ? "true" : "false" },
+        on: { click: () => pick(entry.key) },
+      },
+      [
+        objectTileIcon(entry.key),
+        // Язык подписи назван в самой подписи: перенос по слогам
+        // (`hyphens: auto`) работает только когда браузер знает язык.
+        uiEl("span", { class: "objectTile__name", text: entry.name, attrs: { lang: "ru" } }),
+      ],
+    );
+  }
+
+  // Категория — заголовок и сетка её плиток. Блок целиком, потому что в
+  // колонке их бывает несколько: заголовок должен липнуть к своим плиткам, а
+  // не наезжать на соседнюю категорию.
+  function categoryBlock(group) {
+    return uiEl("div", { class: "picker__category" }, [
+      uiEl("div", { class: "picker__group", text: group.name }),
+      uiEl("div", { class: "objectTiles__grid" }, group.entries.map(tile)),
+    ]);
+  }
+
+  function render() {
+    const groups = objectPickerGroups(search.value, { key });
+    const width = typeof window === "undefined" ? 0 : window.innerWidth;
+    columns = pickerLayout(groups, objectPickerColumnLimit(width), objectPickerWeight);
+    box.replaceChildren(
+      ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
+    );
+    if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.objectPicker.empty }));
+    // Ширину окна задаёт число получившихся колонок: нашлась одна категория
+    // — окно узкое, и справа не остаётся пустого поля.
+    node.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
+  }
+
+  box.addEventListener("keydown", (event) => {
+    const current = event.target;
+    if (!current || !current.classList || !current.classList.contains("objectTile")) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      current.click();
+      return;
+    }
+    const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = objectPickerStep(columns, current.dataset.key, step[0], step[1]);
+    const target = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
+    if (target) target.focus();
+  });
+
+  render();
+  node.replaceChildren(search, box);
+  return {
+    node,
+    focus: () => search.focus(),
+    setKey(next) {
+      key = next || null;
+      render();
+    },
+  };
+}
+
+/**
  * Открыть окно выбора вещи. Отдаёт ключ каталога или `null`, если закрыли.
  *
  * `options.key` — вещь, которая горит (у выделенной её собственная, без
@@ -162,110 +283,21 @@ export function objectPickerStep(columns, key, dx, dy) {
 export function openObjectPicker(options = {}) {
   return new Promise((resolve) => {
     let modal;
-    let columns = [];
-    const done = (key) => {
-      modal.close();
-      resolve(key || null);
-    };
-
-    const box = uiEl("div", { class: "picker__columns picker__columns--objects" });
-    const body = uiEl("div", { class: "picker picker--objects" });
-    const search = uiEl("input", {
-      class: "ui-input",
-      type: "text",
-      placeholder: strings.objectPicker.search,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => {
-          // Стрелка вниз из поиска — в первую плитку: дальше по сетке ходят
-          // стрелками, не хватаясь за мышь.
-          if (event.key === "ArrowDown") {
-            const first = box.querySelector(".objectTile");
-            if (!first) return;
-            event.preventDefault();
-            first.focus();
-            return;
-          }
-          // Enter берёт первую найденную вещь. Своя обработка здесь
-          // обязательна: основное действие карточки — «Отмена», и оно
-          // сработало бы раньше (`uiModal` ловит Enter), то есть выбор
-          // терялся бы.
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          const first = box.querySelector(".objectTile");
-          if (first) first.click();
-        },
+    const tiles = createObjectTiles({
+      key: options.key,
+      onPick: (key) => {
+        modal.close();
+        resolve(key || null);
       },
     });
-
-    function tile(entry) {
-      return uiEl(
-        "button",
-        {
-          class: "objectTile" + (entry.key === options.key ? " is-on" : ""),
-          type: "button",
-          title: entry.name,
-          attrs: { "data-key": entry.key, "aria-pressed": entry.key === options.key ? "true" : "false" },
-          on: { click: () => done(entry.key) },
-        },
-        [
-          objectTileIcon(entry.key),
-          // Язык подписи назван в самой подписи: перенос по слогам
-          // (`hyphens: auto`) работает только когда браузер знает язык.
-          uiEl("span", { class: "objectTile__name", text: entry.name, attrs: { lang: "ru" } }),
-        ],
-      );
-    }
-
-    // Категория — заголовок и сетка её плиток. Блок целиком, потому что в
-    // колонке их бывает несколько: заголовок должен липнуть к своим плиткам, а
-    // не наезжать на соседнюю категорию.
-    function categoryBlock(group) {
-      return uiEl("div", { class: "picker__category" }, [
-        uiEl("div", { class: "picker__group", text: group.name }),
-        uiEl("div", { class: "objectTiles__grid" }, group.entries.map(tile)),
-      ]);
-    }
-
-    function renderList() {
-      const groups = objectPickerGroups(search.value, { key: options.key });
-      const width = typeof window === "undefined" ? 0 : window.innerWidth;
-      columns = pickerLayout(groups, objectPickerColumnLimit(width), objectPickerWeight);
-      box.replaceChildren(
-        ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
-      );
-      if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.objectPicker.empty }));
-      // Ширину окна задаёт число получившихся колонок: нашлась одна категория
-      // — окно узкое, и справа не остаётся пустого поля.
-      body.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
-    }
-
-    box.addEventListener("keydown", (event) => {
-      const current = event.target;
-      if (!current || !current.classList || !current.classList.contains("objectTile")) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        current.click();
-        return;
-      }
-      const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
-      if (!step) return;
-      event.preventDefault();
-      const next = objectPickerStep(columns, current.dataset.key, step[0], step[1]);
-      const node = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
-      if (node) node.focus();
-    });
-
-    renderList();
-    body.replaceChildren(search, box);
     modal = uiModal({
       title: options.title || strings.objectPicker.title,
-      body,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      body: tiles.node,
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => { modal.close(); resolve(null); } } })],
       onCancel: () => resolve(null),
     });
     // Широкая карточка — как у окна типов: ширину внутри задаёт сетка колонок.
     if (modal.card) modal.card.classList.add("modal--wide");
-    search.focus();
+    tiles.focus();
   });
 }
