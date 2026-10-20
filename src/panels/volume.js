@@ -37,8 +37,17 @@ import { createFieldPlate, plateUnseen } from "./plate.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
 import { gesturePinchOf, gesturePinchStep } from "../gestures.js";
-import { WALL_HEIGHT_FALLBACK_MM, findRoom, findScheme, schemeFloorOf, schemeObjectsOnScheme } from "../model.js";
-import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
+import {
+  WALL_HEIGHT_FALLBACK_MM,
+  findRoom,
+  findScheme,
+  planFractionToMm,
+  planMmToFraction,
+  schemeFloorOf,
+  schemeObjectsOnScheme,
+} from "../model.js";
+import { drawDrawing, drawingUnitBridge, planToScreen, screenToPlan, visibleMarks } from "../render.js";
+import { screenPlaceOfDrawing, screenPlaceWant } from "../screenPlace.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -313,6 +322,103 @@ export function volumeMinimapBox(box, bounds) {
   const width = Math.max(110, Math.min(220, box.width * 0.2));
   const height = Math.max(70, Math.min(box.height * 0.3, (width * bounds.heightMm) / bounds.widthMm));
   return { x: 14, y: box.height - height - 14, width, height };
+}
+
+/** Поля внутри миникарты: чертёж не прижимается к её кромке. */
+const VOLUME_MINIMAP_PAD = 8;
+
+/**
+ * Мост между миникартой и чертежом: прямоугольник накладки и перевод
+ * «миллиметр → точка поля».
+ *
+ * Одна мерка на двоих — на рисование карты и на попадание по ней (G270).
+ * Считай их врозь, и щелчок однажды поедет мимо того места, которое человек
+ * видел под курсором.
+ */
+export function volumeMinimapView(box, bounds) {
+  const place = volumeMinimapBox(box, bounds);
+  if (!place) return null;
+  const zoom = Math.min(
+    (place.width - VOLUME_MINIMAP_PAD * 2) / bounds.widthMm,
+    (place.height - VOLUME_MINIMAP_PAD * 2) / bounds.heightMm,
+  );
+  return {
+    place,
+    zoom,
+    offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
+    offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
+  };
+}
+
+// ——— общее место трёх режимов (G276, таск 178) ———————————————————————————
+//
+// «При переключении Схема - Чертёж - объём мы должны находиться в одном
+// месте… центр схемы\чертежа это расположение камеры в объёме. Ну и учитывай
+// что может попасть на стены и т.д. тогда сдвигай».
+//
+// Объём здесь — **ось переноса**, и это не вольность, а прямое чтение слов: в
+// них место названо расположением камеры, а схема с чертежом — тем, что этому
+// месту следует. Поэтому правил ровно два:
+//
+//   1. входим в объём — камера встаёт туда, где была середина того поля, с
+//      которого пришли (схема или чертёж);
+//   2. выходим из объёма — и схема, и чертёж встают серединой на человека.
+//
+// Схему объём правит сам: её вид лежит в состоянии приложения (`view`), и
+// перевод «середина поля ↔ миллиметры чертежа» считается теми же двумя
+// функциями модели, которыми живёт весь чертёж (`planFractionToMm`,
+// `planMmToFraction`). Мастерская держит свой вид при себе — с ней объём
+// говорит через `screenPlace.js`.
+//
+// **Где это неприменимо:** у схемы без калибровки (план не привязан к
+// миллиметрам) моста между долями и миллиметрами нет вовсе — обе функции
+// отвечают `null`, и перенос молча не делается. Так же молчит он и у схемы без
+// подложки, где вид плана не значит ничего.
+
+/** Середина поля плана в миллиметрах чертежа. `null` — моста нет. */
+export function volumePlanCentre(project, schemeId, box, view) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme) return null;
+  const point = screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
+  return planFractionToMm(project, schemeId, point);
+}
+
+/**
+ * Вид плана, у которого середина поля смотрит на точку чертежа. Масштаб не
+ * трогается: человек его выбрал, и менять его при смене режима значило бы
+ * отнять у него выбор — переносится **место**, а не приближение.
+ */
+export function volumePlanViewAt(project, schemeId, box, view, pointMm) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme) return null;
+  const point = planMmToFraction(project, schemeId, pointMm);
+  if (!point) return null;
+  const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
+  const at = planToScreen(point, scheme, { zoom, offsetX: 0, offsetY: 0 });
+  return { zoom, offsetX: box.width / 2 - at.x, offsetY: box.height / 2 - at.y };
+}
+
+/**
+ * Куда на чертеже показали щелчком по миникарте (G270). `null` — мимо карты.
+ *
+ * Слова заказчика: «В режиме от первого лица при клике курсором на миникарте
+ * телепортируй туда». Карта показывает план сверху — значит и щелчок по ней
+ * значит место на плане, а не направление взгляда: за дверь, в дальнюю
+ * комнату, на другой конец коридора.
+ *
+ * Чистая и вынесена наружу ради теста: промах здесь — это «ткнул в кухню, а
+ * оказался в ванной», и ловить его глазами дорого.
+ */
+export function volumeMinimapAt(box, bounds, at) {
+  const view = volumeMinimapView(box, bounds);
+  if (!view || !at) return null;
+  const { place, zoom } = view;
+  if (!(zoom > 0)) return null;
+  if (at.x < place.x || at.x > place.x + place.width) return null;
+  if (at.y < place.y || at.y > place.y + place.height) return null;
+  return { x: (at.x - view.offsetX) / zoom, y: (at.y - view.offsetY) / zoom };
 }
 
 // ——— присед и прыжок пальцем (таск 163, G242) ——————————————————————————
@@ -1023,6 +1129,61 @@ function createVolume({ api, hosts }) {
     return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance);
   }
 
+  // ——— общее место трёх режимов (G276) ———
+  //
+  // Разбор правила — у `volumePlanCentre` выше. Здесь две руки: встать туда,
+  // откуда пришли, и оставить своё место тем, к кому уходим.
+
+  /**
+   * Пришли в объём: камера встаёт на середину того поля, с которого пришли.
+   *
+   * **Попали в стену — сдвигаем** (слова заказчика). Сдвигает то же правило,
+   * что у переноса кликом по полу и по миникарте: `volumeMoveTo` выталкивает
+   * тело из стены и ставит вплотную к её грани, а место теснее тела меняет на
+   * ближайшее свободное (D39). Второго правила «куда можно встать» в сборке
+   * нет, и заводить его здесь было бы третьим ответом на тот же вопрос.
+   */
+  function placeArrive(state) {
+    if (scene.empty) return;
+    // Пришли из чертежа — спрашиваем его; из схемы (или чертёж за весь сеанс
+    // не открывали и сказать ему нечего) — считаем середину плана.
+    const want =
+      (volumeCameFrom() === "drawing" ? screenPlaceOfDrawing(schemeId) : null) ||
+      volumePlanCentre(state.project, schemeId, viewport(), state.view);
+    if (!want) return;
+    const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
+    person.x = moved.x;
+    person.y = moved.y;
+    // Обзор смотрит на то же место: вид переключают, не выходя из режима, и
+    // разойдись они — человек увидел бы со стороны не ту комнату, в которой
+    // только что стоял.
+    around = { ...around, target: { ...around.target, x: moved.x, y: moved.y } };
+    // Встал присевший под низкое или вышел из-под него — решает новое место.
+    stanceRecheck();
+    syncWhere();
+  }
+
+  /**
+   * Уходим из объёма: схема и чертёж встают серединой на человека.
+   *
+   * Масштаб обоих полей остаётся прежним — переносится место, а не
+   * приближение: масштаб человек выбрал сам, и менять его за него значило бы
+   * отнять выбор, о котором не просили.
+   */
+  function placeLeave(state) {
+    if (scene.empty) return;
+    const at = { x: person.x, y: person.y };
+    // Мастерская свой вид держит при себе — ей оставляют просьбу.
+    screenPlaceWant(schemeId, at);
+    const box = viewport();
+    // Поле уже погасло, но не схлопнулось (гаснет оно `visibility`, а не
+    // `display`) — и всё же вырожденный размер лучше проверить: вид плана,
+    // посчитанный по полю в один пиксель, увёл бы схему в угол.
+    if (!(box.width > 50) || !(box.height > 50)) return;
+    const next = volumePlanViewAt(state.project, schemeId, box, state.view, at);
+    if (next) setState({ view: next });
+  }
+
   function viewport() {
     return { width: Math.max(1, stage.clientWidth), height: Math.max(1, stage.clientHeight) };
   }
@@ -1093,9 +1254,10 @@ function createVolume({ api, hosts }) {
   // свои пороги в экранных точках, и на миникарте стена короче порога.
 
   function paintMinimap(box) {
-    const place = volumeMinimapBox(box, scene.boundsMm);
-    if (!place) return;
     const bounds = scene.boundsMm;
+    const spot = volumeMinimapView(box, bounds);
+    if (!spot) return;
+    const place = spot.place;
     const state = getState();
     ctx.save();
     ctx.beginPath();
@@ -1106,16 +1268,8 @@ function createVolume({ api, hosts }) {
     ctx.strokeStyle = "rgba(31, 35, 40, 0.35)";
     ctx.stroke();
     ctx.clip();
-    const pad = 8;
-    const zoom = Math.min(
-      (place.width - pad * 2) / bounds.widthMm,
-      (place.height - pad * 2) / bounds.heightMm,
-    );
-    const view = {
-      zoom,
-      offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
-      offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
-    };
+    const zoom = spot.zoom;
+    const view = { zoom, offsetX: spot.offsetX, offsetY: spot.offsetY };
     // Без подписей: буквы углов и имена объектов на накладке в двести точек
     // слипаются в кашу, а заказчик просил «только схема и местоположение».
     drawDrawing(ctx, {
@@ -1773,6 +1927,35 @@ function createVolume({ api, hosts }) {
     // было никакого.
     if (!scene.empty) {
       const at = atEvent(event);
+      // ——— щелчок по миникарте переносит (G270) ———
+      //
+      // «В режиме от первого лица при клике курсором на миникарте телепортируй
+      // туда». Карта — накладка поверх кадра, и щелчок по ней принадлежит ей,
+      // а не тому, что за ней: иначе человек, ткнувший в дальнюю комнату,
+      // открывал бы дверь, случайно оказавшуюся под картой.
+      //
+      // Под захваченной мышью карта щелчка не берёт: курсора там нет вовсе, и
+      // прицел стоит посреди поля (таск 159) — щёлкать по углу экрана нечем.
+      //
+      // Куда человек встанет, решает **то же правило, что у переноса кликом по
+      // полу** (G212): `volumeMoveTo` выталкивает тело из стены и ставит
+      // вплотную к ней, а место теснее тела меняет на ближайшее свободное
+      // (D39). Второго правила «куда можно встать» в сборке нет.
+      if (view === "person" && !locked) {
+        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at);
+        if (spot) {
+          const moved = volumeMoveTo(scene, spot, volumeStanceHead(stance));
+          person.x = moved.x;
+          person.y = moved.y;
+          // Перенесли присевшего — под низким он остался или вышел, решает
+          // новое место (G234); у лестницы спросит про этаж, как при ходьбе.
+          stanceRecheck();
+          syncWhere();
+          stairCheck();
+          paint();
+          return;
+        }
+      }
       const door = volumeDoorAt(shown, at.x, at.y);
       const choice = aimChoiceAt(at, door);
       // Дверь, по которой щёлкнули, остаётся под рукой: E распоряжается ею и
@@ -2571,13 +2754,17 @@ function createVolume({ api, hosts }) {
           followScheme(state);
           return;
         }
-        // Режим включили — поле снова на экране: перемерить его и забрать
-        // клавиатуру себе.
+        // Режим включили — поле снова на экране: перемерить его, встать туда,
+        // где человек был на прежнем поле (G276), и забрать клавиатуру себе.
         if ("screen" in changed && state.screen === "volume") {
           resize();
+          placeArrive(state);
           sync();
           if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
+        // Режим сменили на другой — оставляем схеме и чертежу то место, где
+        // стоял человек (G276).
+        if ("screen" in changed && state.screen !== "volume") placeLeave(state);
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
         if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
@@ -2611,6 +2798,12 @@ function createVolume({ api, hosts }) {
 
   sync();
   resize();
+  // Первый вход в режим: человек встаёт туда, где была середина поля, с
+  // которого пришли (G276). Обзор при этом по-прежнему открывается **всей
+  // схемой** — это решение таска 146 («показать заказчику» начинается с общего
+  // вида), и оно с переносом не спорит: место достаётся человеку, а не рамке
+  // первого кадра. Переключил вид на первое лицо — стоит там, где показывал.
+  placeArrive(getState());
   if (!scene.empty) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
   return { destroy };
@@ -2644,6 +2837,15 @@ export function volumeHasDrawing(project, schemeId) {
 // объём не заходил, незачем. Собранная, она живёт дальше и в чужих режимах —
 // гаснет, но помнит, где стоит человек, какие двери открыты и какой этаж.
 let volumeSurface = null;
+// Какой режим показан сейчас и какой был до него (G276): по второму объём
+// решает, у кого спросить место — у схемы или у чертежа.
+let volumeScreenNow = null;
+let volumeScreenBefore = null;
+
+/** Режим, из которого пришли в объём. `null` — страницу открыли в нём. */
+export function volumeCameFrom() {
+  return volumeScreenBefore;
+}
 
 function mountVolumeScreen(host, api) {
   const { getState, subscribe } = api;
@@ -2666,8 +2868,17 @@ function mountVolumeScreen(host, api) {
   };
 
   subscribe((state, changed) => {
+    // Откуда пришли (G276). Считается **здесь**, а не в самой поверхности:
+    // поверхности может ещё не быть вовсе — в первый раз её собирает этот же
+    // обработчик, и первый вход в объём обязан знать прежний режим так же
+    // точно, как все следующие.
+    if ("screen" in changed && state.screen !== volumeScreenNow) {
+      volumeScreenBefore = volumeScreenNow;
+      volumeScreenNow = state.screen;
+    }
     if ("screen" in changed || "schemeId" in changed || "project" in changed) build();
   });
+  volumeScreenNow = getState().screen;
   build();
 }
 

@@ -45,6 +45,7 @@ import {
   setMarkDimensions,
   setPlanOrigin,
   setPlanScale,
+  wallsOnScheme,
   setMarkControls,
   setRoomWallHeight,
   setSchemeFloor,
@@ -77,6 +78,7 @@ import {
   VOLUME_CLEAR_ALPHA,
   VOLUME_MITER_MAX,
   VOLUME_WALL_RGB,
+  VOLUME_SHADOW_RGB,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_AROUND_PAN_TILT_MIN,
@@ -106,6 +108,8 @@ import {
   volumeDoorAt,
   volumeFloorAt,
   volumeMoveTo,
+  volumePush,
+  volumeDepthMm,
   volumeSkyAim,
   volumeSkyPoint,
   volumeStripRuns,
@@ -148,6 +152,7 @@ import {
   volumeStep,
   volumeWallSolids,
   volumeWallTiles,
+  volumeWallMiters,
 } from "../src/volume.js";
 import {
   VOLUME_UNPLACED_SHOWN,
@@ -160,6 +165,10 @@ import {
   volumeHintText,
   volumeKeyMove,
   volumeMinimapBox,
+  volumeMinimapAt,
+  volumePlanCentre,
+  volumePlanViewAt,
+  volumeMinimapView,
   volumeNotes,
   volumeFieldBottom,
   volumePadVector,
@@ -172,6 +181,13 @@ import {
   volumeUnplacedTitle,
   volumeWhere,
 } from "../src/panels/volume.js";
+import {
+  screenPlaceDrawing,
+  screenPlaceForget,
+  screenPlaceOfDrawing,
+  screenPlaceTake,
+  screenPlaceWant,
+} from "../src/screenPlace.js";
 import { elevationNote } from "../src/panels/elevation.js";
 import { plateUnseen } from "../src/panels/plate.js";
 import { strings, text } from "../src/strings.js";
@@ -277,23 +293,27 @@ test("у комнаты есть пол, потолок и стены с тол�
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
   const ground = built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND);
-  // Пол и потолок помещения — и полоса пола под каждой из четырёх стен: она
-  // закрывает порог в проёме и щель между контуром и гранью стены (D37).
-  assert.equal(ground.length, 2 + 4, "пол, потолок и пол под каждой стеной");
+  // Пол и потолок помещения, полоса пола под каждой из четырёх стен (она
+  // закрывает порог в проёме и щель между контуром и гранью стены, D37) — и
+  // тень каждой стены на земле (D43).
+  assert.equal(ground.length, 2 + 4 + 4, "пол, потолок, пол под стенами и тени стен");
   const ceiling = ground.find((face) => face.n.z < 0);
-  const floors = ground.filter((face) => face.n.z > 0);
+  const shadows = ground.filter((face) => face.rgb === VOLUME_SHADOW_RGB);
+  assert.equal(shadows.length, 4, "тень под каждой стеной");
+  const floors = ground.filter((face) => face.n.z > 0 && face.rgb !== VOLUME_SHADOW_RGB);
   assert.equal(floors.length, 5, "у пола нормаль вверх, у потолка вниз");
   assert.ok(floors.every((face) => face.p.every((point) => point.z === 0)), "весь пол лежит на нуле");
   assert.ok(ceiling.p.every((point) => point.z === 2700), "потолок — на высоте схемы");
   // Под ними — плита по габариту чертежа. Полом она больше не работает: пол у
   // помещений свой, а плита стала землёй вокруг дома (G237).
   assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_BASE).length, 1);
-  // Толщина стены видна по торцам: у стены без проёмов две стороны, два торца
-  // и верх, низ не рисуется — он под полом. Метровой сетки, которой стороны
-  // резались в тасках 148–150 ради порядка, больше нет (таск 151): сторона без
-  // проёмов — один многоугольник.
+  // У стены без проёмов две стороны и верх, низ не рисуется — он под полом.
+  // Метровой сетки, которой стороны резались в тасках 148–150 ради порядка,
+  // больше нет (таск 151): сторона без проёмов — один многоугольник. Торцов у
+  // стен этой комнаты нет вовсе: все четыре угла сведены усом (G265), и на
+  // сведённом конце стена переходит в соседку.
   const body = built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY);
-  assert.equal(body.length, 4 * (2 + 3), "по пять граней на стену: две стороны, два торца, верх");
+  assert.equal(body.length, 4 * (2 + 1), "по три грани на стену: две стороны и верх");
 });
 
 // ——— D37: под проёмом и под стеной есть пол ———————————————————————————————
@@ -693,6 +713,59 @@ test("сквозь дверь проходят, и дальше по корид�
   let at = { x: 0, y: 300 };
   for (let step = 0; step < 100; step += 1) at = volumeStep(built, at, 200, 0);
   assert.ok(at.x > 2200, "вышли за стену сквозь проём: " + at.x);
+});
+
+// ——— дефект D39: «застревает и начинает прыгать» ————————————————————————
+//
+// Стенд — два препятствия, которые требуют разного. Просвет 250 мм между
+// гранями стен при диаметре тела 440: нижняя стена толкает на +190, верхняя на
+// −190. Прежний код двигал тело по очереди и оставлял последнее слово за
+// последним в списке — то есть за порядком стен в объекте.
+
+function slotSolids() {
+  const wall = (cy) => ({ cx: 0, cy, ux: 1, uy: 0, nx: 0, ny: -1, half: 2000, halfT: 50, bottomMm: 0, topMm: 2800 });
+  return [wall(-200), wall(200)];
+}
+
+test("тесное место не дрожит: выталкивание стоит на месте и не зависит от порядка стен", () => {
+  const solids = slotSolids();
+  const at = { x: 0, y: 0 };
+  const once = volumePush(solids, at, VOLUME_BODY_MM);
+  // Требования погасили друг друга — человек остался там, где был.
+  assert.equal(Math.round(once.x), 0);
+  assert.equal(Math.round(once.y), 0);
+  // Второй раз — то же место: цикла длиной два больше нет.
+  const twice = volumePush(solids, once, VOLUME_BODY_MM);
+  assert.ok(Math.hypot(twice.x - once.x, twice.y - once.y) < 0.01, "выталкивание не неподвижно");
+  // И порядок препятствий ничего не решает.
+  const flipped = volumePush([...solids].reverse(), at, VOLUME_BODY_MM);
+  assert.ok(Math.hypot(flipped.x - once.x, flipped.y - once.y) < 0.01, "порядок стен сменил ответ");
+});
+
+test("в тесном месте шаг не дёргает человека, а вдоль него пускает", () => {
+  const scene = { solids: slotSolids() };
+  // Жмём «вперёд» поперёк щели: шага нет вовсе, и места не меняются.
+  let at = { x: 0, y: 0 };
+  const seen = [];
+  for (let frame = 0; frame < 30; frame += 1) {
+    at = volumeStep(scene, at, 0, 40);
+    seen.push({ ...at });
+  }
+  for (const point of seen) {
+    assert.ok(Math.hypot(point.x, point.y) < 0.01, "человек съехал с места: " + JSON.stringify(point));
+  }
+  // А вдоль щели — идёт: выйти из тесного места можно всегда.
+  let along = { x: 0, y: 0 };
+  for (let frame = 0; frame < 30; frame += 1) along = volumeStep(scene, along, 40, 0);
+  assert.ok(along.x > 1000, "вдоль щели не пошёл: " + Math.round(along.x));
+});
+
+test("перенос в тесное место ставит рядом, а не в щель (D39)", () => {
+  const scene = { solids: slotSolids(), boundsMm: null };
+  const put = volumeMoveTo(scene, { x: 0, y: 0 });
+  assert.equal(volumeDepthMm(scene.solids, put.x, put.y), 0, "встали в щель шириной 250 мм");
+  // «Рядом» — именно рядом: от показанного места не дальше метра.
+  assert.ok(Math.hypot(put.x, put.y) <= 1000, "ушли далеко от показанного: " + Math.round(Math.hypot(put.x, put.y)));
 });
 
 test("начинают с самого просторного места самой большой комнаты", () => {
@@ -1464,8 +1537,11 @@ test("обзор вписывает всю схему и смотрит на н�
   assert.ok(camera.at.z > fitted.target.z, "обзор стоит выше цели");
   const frame = volumeFrame(built, camera, box);
   // Весь габарит обязан уместиться в поле — иначе «вся схема» это неправда.
-  const xs = frame.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 0));
-  const ys = frame.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 1));
+  // Считается по телам: земля и тень дома нарочно шире кадра (D43) — они
+  // земля, а не схема, и обрезаются краем поля, как обрезает их горизонт.
+  const house = frame.filter((polygon) => polygon.layer === VOLUME_LAYER_BODY);
+  const xs = house.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 0));
+  const ys = house.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 1));
   assert.ok(Math.min(...xs) > -1 && Math.max(...xs) < box.width + 1, "по ширине уместилось");
   assert.ok(Math.min(...ys) > -1 && Math.max(...ys) < box.height + 1, "по высоте уместилось");
   assert.ok(volumeFocal(box) > 0);
@@ -1532,7 +1608,7 @@ test("объект пола становится призмой, а колонн
   assert.equal(counterTop, 900, "верх столешницы — та высота, от которой отмеряют розетки над ней");
 });
 
-test("вещь на полу держит человека, а короб под потолком — нет", () => {
+test("вещь на полу занимает место, а короб под потолком — нет", () => {
   const scene = roomScene();
   const kinds = ensureSchemeObjectKinds(scene.project);
   let project = kinds.project;
@@ -1549,13 +1625,16 @@ test("вещь на полу держит человека, а короб под
       heightMm,
       heightAboveFloorMm,
     }).project;
-  const bare = volumeScene(project, scene.schemeId).solids.length;
-  // Шкаф на полу — препятствие.
-  assert.equal(volumeScene(place(2200, 0), scene.schemeId).solids.length, bare + 1);
-  // Короб под потолком — над головой, проходим.
-  assert.equal(volumeScene(place(400, 2200), scene.schemeId).solids.length, bare);
+  const bare = volumeScene(project, scene.schemeId).objectBoxes.length;
+  // Шкаф на полу занимает место: сквозь него проходят (G264), но вставать в
+  // него, открыв окно, незачем.
+  assert.equal(volumeScene(place(2200, 0), scene.schemeId).objectBoxes.length, bare + 1);
+  // Короб под потолком — над головой, место под ним свободно.
+  assert.equal(volumeScene(place(400, 2200), scene.schemeId).objectBoxes.length, bare);
   // Порожек в сто миллиметров — переступили.
-  assert.equal(volumeScene(place(100, 0), scene.schemeId).solids.length, bare);
+  assert.equal(volumeScene(place(100, 0), scene.schemeId).objectBoxes.length, bare);
+  // И ни один из трёх не стал препятствием: вещи человека не держат.
+  assert.equal(volumeScene(place(2200, 0), scene.schemeId).solids.length, volumeScene(project, scene.schemeId).solids.length);
 });
 
 test("висящий над полом объект получает и низ", () => {
@@ -1786,6 +1865,99 @@ test("миникарта живёт в левом нижнем углу и ух�
   assert.equal(volumeMinimapBox({ width: 1432, height: 300 }, bounds), null);
   // Нет габарита чертежа — нечего и рисовать.
   assert.equal(volumeMinimapBox(box, null), null);
+});
+
+test("щелчок по миникарте читается местом на плане (G270)", () => {
+  const bounds = { minX: -2000, minY: -1500, maxX: 2000, maxY: 1500, widthMm: 4000, heightMm: 3000 };
+  const box = { width: 1432, height: 580 };
+  const place = volumeMinimapBox(box, bounds);
+  const middle = { x: place.x + place.width / 2, y: place.y + place.height / 2 };
+  const centre = volumeMinimapAt(box, bounds, middle);
+  // Середина карты — середина чертежа.
+  assert.ok(Math.abs(centre.x) < 1 && Math.abs(centre.y) < 1, "середина уехала: " + JSON.stringify(centre));
+  // Углы карты (с полями в 8 точек) — углы чертежа.
+  const view = volumeMinimapView(box, bounds);
+  const corner = volumeMinimapAt(box, bounds, {
+    x: view.offsetX + bounds.minX * view.zoom,
+    y: view.offsetY + bounds.minY * view.zoom,
+  });
+  assert.ok(Math.abs(corner.x - bounds.minX) < 1 && Math.abs(corner.y - bounds.minY) < 1, "угол уехал");
+  // Четверть вправо по карте — четверть вправо по чертежу.
+  const right = volumeMinimapAt(box, bounds, { x: middle.x + view.zoom * 1000, y: middle.y });
+  assert.ok(Math.abs(right.x - 1000) < 1, "масштаб карты не сошёлся: " + JSON.stringify(right));
+  // Мимо карты — не её дело: щелчок уходит дальше, к двери и к вещи.
+  assert.equal(volumeMinimapAt(box, bounds, { x: place.x + place.width + 5, y: middle.y }), null);
+  assert.equal(volumeMinimapAt(box, bounds, { x: middle.x, y: place.y - 5 }), null);
+  // Карты нет вовсе — переносить нечем.
+  assert.equal(volumeMinimapAt({ width: 420, height: 580 }, bounds, middle), null);
+});
+
+// ——— общее место трёх режимов (G276) ————————————————————————————————————
+//
+// «При переключении Схема - Чертёж - объём мы должны находиться в одном
+// месте… центр схемы\чертежа это расположение камеры в объёме».
+
+test("середина поля плана читается местом на чертеже и ставится обратно (G276)", () => {
+  const scene = planProject();
+  const box = { width: 900, height: 600 };
+  const view = { zoom: 0.5, offsetX: 120, offsetY: -40 };
+  const middle = volumePlanCentre(scene.project, scene.schemeId, box, view);
+  assert.ok(middle, "моста план → миллиметры нет");
+  // Поставить вид на то же место — и середина поля не сдвинется ни на
+  // миллиметр: два перевода обязаны сойтись.
+  const back = volumePlanViewAt(scene.project, scene.schemeId, box, view, middle);
+  assert.equal(back.zoom, view.zoom, "масштаб трогать нельзя — его выбрал человек");
+  const again = volumePlanCentre(scene.project, scene.schemeId, box, back);
+  assert.ok(Math.abs(again.x - middle.x) <= 1 && Math.abs(again.y - middle.y) <= 1, "место уехало: " + JSON.stringify([middle, again]));
+  // Показать на точку чертежа — середина поля встаёт ровно на неё.
+  const want = { x: 2500, y: -1200 };
+  const put = volumePlanViewAt(scene.project, scene.schemeId, box, view, want);
+  const got = volumePlanCentre(scene.project, scene.schemeId, box, put);
+  assert.ok(Math.abs(got.x - want.x) <= 1 && Math.abs(got.y - want.y) <= 1, "встали не туда: " + JSON.stringify(got));
+});
+
+test("без калибровки плана переносить нечем — и это молчание, а не ошибка (G276)", () => {
+  const bare = addScheme(createProject(), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
+  const box = { width: 900, height: 600 };
+  const view = { zoom: 1, offsetX: 0, offsetY: 0 };
+  assert.equal(volumePlanCentre(bare.project, bare.scheme.id, box, view), null);
+  assert.equal(volumePlanViewAt(bare.project, bare.scheme.id, box, view, { x: 0, y: 0 }), null);
+  // И чужой схемы тоже нет.
+  assert.equal(volumePlanCentre(bare.project, "нет такой", box, view), null);
+});
+
+test("мастерская говорит, где стоит, и забирает просьбу один раз (G276)", () => {
+  screenPlaceForget();
+  assert.equal(screenPlaceOfDrawing("схема-1"), null, "на пустом месте мастерская молчит");
+  screenPlaceDrawing("схема-1", { x: 1500, y: -800 });
+  assert.deepEqual(screenPlaceOfDrawing("схема-1"), { x: 1500, y: -800 });
+  // Чужая схема — чужое место: этаж сменили, и середина прежнего не годится.
+  assert.equal(screenPlaceOfDrawing("схема-2"), null);
+  // Просьба забирается ровно один раз: второй вход в чертёж не должен
+  // возвращать человека туда, откуда он уже ушёл руками.
+  screenPlaceWant("схема-1", { x: -200, y: 400 });
+  assert.deepEqual(screenPlaceTake("схема-1"), { x: -200, y: 400 });
+  assert.equal(screenPlaceTake("схема-1"), null);
+  // И просьба к чужой схеме не исполняется.
+  screenPlaceWant("схема-1", { x: 1, y: 2 });
+  assert.equal(screenPlaceTake("схема-2"), null);
+  screenPlaceForget();
+  assert.equal(screenPlaceTake("схема-1"), null);
+});
+
+test("перенос по миникарте не ставит в стену: работает то же правило, что у пола (G270, G212)", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const bounds = built.boundsMm;
+  const box = { width: 1432, height: 580 };
+  const view = volumeMinimapView(box, bounds);
+  // Тычем в саму стену комнаты: верхняя стена идёт по y = −1500.
+  const at = { x: view.offsetX + 0 * view.zoom, y: view.offsetY + -1500 * view.zoom };
+  const spot = volumeMinimapAt(box, bounds, at);
+  assert.ok(Math.abs(spot.y + 1500) < 50, "карта показала не на стену: " + JSON.stringify(spot));
+  const moved = volumeMoveTo(built, spot);
+  assert.equal(volumeDepthMm(built.solids, moved.x, moved.y), 0, "встали в стену");
+  assert.ok(Math.hypot(moved.x - spot.x, moved.y - spot.y) < 1000, "ушли далеко от показанного места");
 });
 
 // Кнопки поля — стойка (таск 163, G242) и смена вида (таск 165, G244).
@@ -2740,7 +2912,94 @@ test("прямая полоса усом не ведётся, а острый и
   assert.ok(most > 300, "но длиннее поперечной кромки — иначе предел ни при чём: " + Math.round(most));
 });
 
-test("прозрачность — вид, а не свойство вещи: объект цел, сквозь шкаф не пройти (G68)", () => {
+// ——— ус на углу стен (G265) ——————————————————————————————————————————————
+//
+// «Внешние углы под 90 градусов в стенах сделай так же как пофиксил
+// столешницу» — то есть тем же усом по биссектрисе, что в D38.
+
+/** Две стены буквой «Г» с общей вершиной в начале координат. */
+function cornerWalls(thicknessMm = 100, second = { x: 0, y: 3000 }) {
+  const scene = planProject();
+  let project = scene.project;
+  project = addWall(project, { schemeId: scene.schemeId, aMm: { x: -4000, y: 0 }, bMm: { x: 0, y: 0 }, thicknessMm }).project;
+  project = addWall(project, { schemeId: scene.schemeId, aMm: { x: 0, y: 0 }, bMm: second, thicknessMm }).project;
+  return { project, schemeId: scene.schemeId, walls: wallsOnScheme(project, scene.schemeId) };
+}
+
+/** Сколько верхних граней стен накрывают точку плана. */
+function wallCover(faces, point) {
+  let count = 0;
+  for (const face of faces) {
+    if (face.line || !face.n || !(face.n.z > 0.9)) continue;
+    if (face.rgb[0] !== VOLUME_WALL_RGB[0]) continue;
+    if (!(face.p[0].z > 1000)) continue;
+    if (volumePointInside(point, face.p)) count += 1;
+  }
+  return count;
+}
+
+test("внешний угол стен сведён усом: ни двойного слоя, ни выреза (G265)", () => {
+  const stand = cornerWalls();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  // Стены 100 мм, вершина в (0,0): внешний угол — (50, −50), внутренний —
+  // (−50, 50). Прежде внешний не был накрыт ничем, внутренний — дважды.
+  assert.equal(wallCover(built.faces, { x: 40, y: -40 }), 1, "внешний угол пуст");
+  assert.equal(wallCover(built.faces, { x: -40, y: 40 }), 1, "внутренний угол накрыт дважды");
+  // Торцов на сведённых концах нет: там стена переходит в соседку.
+  const caps = built.faces.filter(
+    (face) => !face.line && face.n && Math.abs(face.n.z) < 0.01 && face.rgb[0] === VOLUME_WALL_RGB[0],
+  );
+  // Четыре стороны (по две на стену) и два свободных торца на дальних концах.
+  assert.equal(caps.length, 4 + 2, "торцы на сведённом углу остались: " + caps.length);
+  // Кромка общая: обе стены кончаются в одних и тех же точках.
+  const miters = volumeWallMiters(stand.walls, () => 2700);
+  const first = miters.get(stand.walls[0].id);
+  const second = miters.get(stand.walls[1].id);
+  assert.ok(first && first.end, "у первой стены нет уса");
+  assert.ok(second && second.start, "у второй стены нет уса");
+  // Первая идёт вдоль +x: её левая кромка (−y) наружная и выходит за вершину
+  // на полтолщины, правая (+y) отступает на столько же.
+  assert.equal(Math.round(first.end.left), 4050);
+  assert.equal(Math.round(first.end.right), 3950);
+  assert.equal(Math.round(second.start.left), -50);
+  assert.equal(Math.round(second.start.right), 50);
+});
+
+test("ус неприменим: тройник, разная высота, стены вдоль одной прямой", () => {
+  // Тройник: в вершину приходит третья стена — какую пару сводить, сказать
+  // нечем.
+  const tee = cornerWalls();
+  const third = addWall(tee.project, {
+    schemeId: tee.schemeId,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 3000, y: 0 },
+    thicknessMm: 100,
+  }).project;
+  const teeMiters = volumeWallMiters(wallsOnScheme(third, tee.schemeId), () => 2700);
+  assert.equal([...teeMiters.values()].filter((item) => item.start || item.end).length, 0, "тройник свели усом");
+  // Разная высота: ус срезал бы торец, а над соседкой осталась бы дыра.
+  const pair = cornerWalls();
+  const byHeight = volumeWallMiters(pair.walls, (wall) => (wall.id === pair.walls[0].id ? 2700 : 2200));
+  assert.equal([...byHeight.values()].filter((item) => item.start || item.end).length, 0, "свели стены разной высоты");
+  // Вдоль одной прямой: кромки параллельны и не пересекаются.
+  const straight = cornerWalls(100, { x: 3000, y: 0 });
+  const flat = volumeWallMiters(straight.walls, () => 2700);
+  assert.equal([...flat.values()].filter((item) => item.start || item.end).length, 0, "свели прямую");
+});
+
+test("острый угол стен: ус срезан по пределу, как у полосы", () => {
+  // Излом около 20°: ус ушёл бы на шесть полутолщин.
+  const sharp = cornerWalls(200, { x: -3000, y: 1000 });
+  const miters = volumeWallMiters(sharp.walls, () => 2700);
+  const first = miters.get(sharp.walls[0].id);
+  assert.ok(first && first.end, "ус не поставлен вовсе");
+  const limit = VOLUME_MITER_MAX * 100;
+  assert.ok(Math.abs(first.end.left - 4000) <= limit + 0.01, "ус длиннее предела");
+  assert.ok(Math.abs(first.end.right - 4000) <= limit + 0.01, "ус длиннее предела");
+  assert.ok(Math.abs(first.end.right - 4000) > 100, "предел ни при чём: ус короче полутолщины");
+});
+
+test("прозрачность — вид, а не свойство вещи: объект цел, сквозь шкаф проходят (G68, G264)", () => {
   const stand = clearStand();
   const before = JSON.stringify(stand.project);
   const built = volumeScene(stand.project, stand.schemeId, {});
@@ -2750,13 +3009,21 @@ test("прозрачность — вид, а не свойство вещи: о
     JSON.stringify(JSON.parse(before).schemeObjects),
     "и у вещи не завелось поля прозрачности",
   );
-  // Препятствие — прежний габарит: шкаф 1200 × 600 держит так же, как держал.
-  const solid = built.solids.find((item) => Math.round(item.half * 2) === 1200 && Math.round(item.halfT * 2) === 600);
-  assert.ok(solid, "препятствие шкафа на месте");
+  // Габарит шкафа 1200 × 600 остался занятым местом, но препятствием быть
+  // перестал (G264): сквозь вещи проходят.
+  const box = built.objectBoxes.find((item) => Math.round(item.half * 2) === 1200 && Math.round(item.halfT * 2) === 600);
+  assert.ok(box, "габарит шкафа на месте");
+  assert.ok(
+    !built.solids.some((item) => Math.round(item.half * 2) === 1200 && Math.round(item.halfT * 2) === 600),
+    "шкаф остался препятствием",
+  );
+  // Шкаф стоит от y = −1400 до −800: прежде человек упирался в его лицо на
+  // −580 (−800 плюс радиус тела). Теперь он входит в габарит и доходит до
+  // стены за ним — её держит `solids`.
   let at = { x: -500, y: 0 };
   for (let step = 0; step < 40; step += 1) at = volumeStep(built, at, 0, -200);
-  assert.ok(at.y > -800, "сквозь прозрачный шкаф не прошли: y = " + Math.round(at.y));
-  assert.equal(Math.round(volumeFreeMm(built.solids, at.x, at.y)), VOLUME_BODY_MM, "тело стоит вплотную к шкафу");
+  assert.ok(at.y < -1000, "сквозь прозрачный шкаф не прошли: y = " + Math.round(at.y));
+  assert.ok(volumeFreeMm(built.solids, at.x, at.y) > -1, "но в стену за ним не вошли");
 });
 
 test("рамка выделения лежит поверх всего: вещь за стеной не теряется", () => {
