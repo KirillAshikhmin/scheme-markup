@@ -63,6 +63,8 @@ import {
 } from "../src/gostSheet.js";
 import { marksTable, toCsv } from "../src/tables.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
+import { projectTopFacing } from "../src/panels/projectProps.js";
+import { strings } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "..", "src");
@@ -451,4 +453,42 @@ test("графы штампа остаются там же, где лежали,
   const located = setProjectSite(project, { address: "Москва", coords: "55.7558, 37.6173" }).project;
   assert.deepEqual(projectStamp(located), projectStamp(project));
   assert.equal(projectSite(located).address, "Москва");
+});
+
+// ——— подпись у направления ————————————————————————————————————————————
+
+test("подпись объясняет, как считать градусы — без неё поле бесполезно", () => {
+  // Это не придирка к тексту: половина людей отсчитает градусы в другую
+  // сторону, и окна южной стороны будут освещены как северные. Подпись обязана
+  // назвать и начало отсчёта, и направление, и пример.
+  const hint = strings.projectProps.topHint;
+  assert.match(hint, /по часовой/, "не сказано, в какую сторону считать: " + hint);
+  assert.match(hint, /север/, "не сказано, откуда считать");
+  assert.match(hint, /0°/);
+  assert.match(hint, /90° — на восток/, "нет примера, по которому сверяются: " + hint);
+  // И вслух сказано, что направление ничего не рисует, кроме объёма.
+  assert.match(strings.projectProps.topOnlyVolume, /объём/);
+  assert.match(strings.projectProps.topOnlyVolume, /не меняются/);
+  // Подсказка координат называет вид из карты и говорит, что будет без них.
+  assert.match(strings.projectProps.coordsHint, /9:00/);
+  assert.match(strings.projectProps.coordsHint, /21:00/);
+  assert.equal(strings.projectProps.coordsPlaceholder, "55.7558, 37.6173", "в поле стоит не тот вид, что в карте");
+});
+
+test("живая подпись называет сторону словом, а мусор молчит", () => {
+  // Два мнения о том, как считать градусы, развелись бы молча: подпись у поля
+  // и румб обязаны сойтись на одном числе.
+  for (const rhumb of AZIMUTH_RHUMBS) {
+    assert.equal(typeof strings.projectProps.rhumbs[rhumb], "string", "румб без строки: " + rhumb);
+  }
+  assert.equal(projectTopFacing("0"), "Верх чертежа смотрит на север");
+  assert.equal(projectTopFacing("90"), "Верх чертежа смотрит на восток");
+  assert.equal(projectTopFacing("90°"), "Верх чертежа смотрит на восток");
+  assert.equal(projectTopFacing("237,5"), "Верх чертежа смотрит на юго-запад");
+  assert.equal(projectTopFacing("-90"), "Верх чертежа смотрит на запад");
+  // Пустое поле молчит: «не задано» значит север, но говорить это человеку,
+  // который ещё ничего не ввёл, незачем.
+  assert.equal(projectTopFacing(""), "");
+  assert.equal(projectTopFacing(null), "");
+  assert.equal(projectTopFacing("север"), "", "мусор получил подпись, как будто он число");
 });
