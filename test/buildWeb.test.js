@@ -288,6 +288,10 @@ test("служебный скрипт держит страницу и шриф�
   const worker = await workerScript("<html>страница</html>", [FONT_FILE]);
   assert.match(worker, new RegExp('"\\./' + FONT_FILE.replace(/[.]/g, "\\$&") + '"'));
   assert.match(worker, /const CACHE = "scheme-markup-[0-9a-f]{12}"/);
+  // Имя файла страницы — тоже из сборки: по нему скрипт отличает свою страницу
+  // от соседнего адреса в той же папке, чужое тело которого в офлайн-копию
+  // приложения класть нельзя (D46).
+  assert.match(worker, new RegExp('"\\./' + PAGE_FILE.replace(/[.]/g, "\\$&") + '"'));
   // Незаполненная подстановка — это служебный скрипт, который упадёт в браузере
   // на первой же строке и тихо лишит приложение офлайна.
   assert.doesNotMatch(worker, /__[A-Z_]+__/);

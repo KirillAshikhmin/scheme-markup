@@ -5427,22 +5427,50 @@ body {
   display: none;
 }
 
-/* Инструменты чертежа — самый высокий блок в сборке: занятия, каталог вещей,
-   слои, сетка, свойства предмета, этаж и высоты. Общее правило колонки ужимает
-   разделы пропорционально их содержимому, и этот — вчетверо выше соседей —
-   садился до полоски в 146 точек (замерено живым прогоном).
+/* ——— одна прокрутка на левую колонку (таск 175, G259) —————————————————
+   Слова заказчика со снимком: «внутри развёрнутых пунктов не должно быть
+   скролла, на всю колонку один скролл». На снимке левая колонка: «Интерфейс
+   проекта» не влезал в половину колонки, получал свой ползунок — и стоял этот
+   ползунок вплотную к ползунку самой колонки.
 
-   Поэтому он не ужимается (`flex: 0 0 auto`) **и не упирается в половину
-   колонки** (`max-height: none`): потолок в 50 % оставался от общего правила и
-   резал блок ровно посередине — заказчик увидел обрезанный раздел «Сетка» и
-   спросил, почему блок не разворачивается во всю высоту (дефект D35). Теперь
-   он занимает столько, сколько нужно его содержимому, а листается **колонка**
-   целиком — тем же движением и с теми же липкими заголовками, что и всегда.
-   Остальное делится между «Помещениями» и «Схемами» по прежним правилам;
-   свернуть и спрятать блок можно так же, как всякий раздел. */
-#app[data-screen="drawing"] [data-section-id="drawTools"] {
+   Поэтому слева разделы **не ужимаются** (`flex: 0 0 auto`) и потолка в
+   половину колонки у них нет (`max-height: none`): каждый стоит на высоте
+   своего содержимого, своей прокрутки у тела нет вовсе, а листается колонка —
+   тем же движением и с теми же липкими заголовками. Свёрнутый раздел из
+   дележа выходит как и раньше: он занимает высоту заголовка.
+
+   До этого таска то же самое было выписано отдельным правилом для одного
+   блока — инструментов чертежа (дефект D35: потолок в 50 % резал их ровно
+   посередине, и заказчик увидел обрезанный раздел «Сетка»). Правило ушло: оно
+   сказало бы то же, что эти три строки, и второй раз.
+
+   **Справа правило прежнее, и это не забывчивость.** В правой колонке растущий
+   раздел — список меток: у него свой прилипший блок фильтров, своя кнопка
+   внизу и своя прокрутка к выделенной строке (`marks.marksScrollTop` меряет
+   ящик и накладки), а под ним в колонке стоит «Справочник типов». Одна
+   прокрутка увела бы справочник под восемьдесят строк списка — заказчик про
+   правую колонку не говорил, и терять до него один клик незачем. */
+#panel-left .panel__section {
   flex: 0 0 auto;
   max-height: none;
+}
+
+#panel-left .panel__section--grow {
+  /* Растущий раздел (слева это список схем) по-прежнему забирает остаток
+     колонки, но ниже своего содержимого не садится: ужался бы — и прокрутка
+     вернулась бы в тело. */
+  flex: 1 0 auto;
+}
+
+#panel-left .panel__section--grow.is-collapsed {
+  /* Свёрнутый не растёт: иначе один заголовок растянулся бы на всю колонку.
+     Правило приходится повторять под `#panel-left` — у селектора с ключом вес
+     выше, чем у общей пары классов. */
+  flex: 0 0 auto;
+}
+
+#panel-left .panel__body {
+  overflow: visible;
 }
 
 #app[data-screen="scheme"] [data-section-id="marks"],
@@ -5535,8 +5563,7 @@ body {
    вкладки поверх плана съели бы сам план, а лист снизу открывается большим
    пальцем и закрывается той же кнопкой. */
 
-#mobile-bar,
-#scheme-name {
+#mobile-bar {
   display: none;
 }
 
@@ -5584,41 +5611,12 @@ body {
   display: none;
 }
 
-/* Имя открытой схемы стоит **в том же ряду**, что и всё остальное (таск 163,
-   G242): заказчик мерил шапку строкой — «на смартфоне вся верхняя панель
-   должна уместиться в 1 строку», — и своя строка у имени была ровно второй.
-   Ему достаётся то, что осталось после кнопок и списка объектов, и обрезается
-   оно многоточием; целиком имя лежит в подсказке и в списке схем, который на
-   телефоне открывается кнопкой снизу. */
-#app.is-mobile #scheme-name {
-  display: block;
-  /* Начальная ширина — ноль, а не длина самого имени: в ряду с переносом
-     длинное имя иначе не ужимается, а переносится — ровно той второй строкой,
-     от которой уходили. Ноль делает имя последним в очереди за местом:
-     сперва кнопки и список объектов, остаток — ему. */
-  flex: 1 1 0;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--panel-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Планшет стоймя выбирает просмотр — так решил заказчик («десктоп, а с планшета
-   смотреть»), — но и в просмотре шапка обязана быть одной строкой: именно там
-   её видели расходящейся надвое.
-
-   На планшете ряд не тесен, и имя схемы там не должно разъезжаться во всю
-   ширину: потолок в 14vw оставляет место списку объектов и кнопкам. На
-   телефоне потолка нет — имя забирает остаток ряда, и остаток этот невелик
-   (таск 163, G242). */
-@media (min-width: 640px) {
-  #app.is-mobile #scheme-name {
-    flex: 0 1 auto;
-    max-width: 14vw;
-  }
-}
+/* Имени открытой схемы в этом ряду больше нет (таск 175, G271). Оно стояло
+   здесь с таска 163, когда шапку мерили строкой: имя получало остаток ряда и
+   обрезалось многоточием — на 360 точках полсотни, то есть «Схема до…».
+   Заказчик выбрал убрать его совсем; открытая схема названа в листе «Схемы».
+   Освободившееся место ушло кнопке «Интерфейс проекта» (G272), и строка
+   осталась одна — тем же снимком и мерится. */
 
 #app.is-mobile #header-actions {
   margin-left: auto;
@@ -5700,6 +5698,13 @@ body {
   flex: 1 1 auto;
   max-height: none;
   border-bottom: 0;
+}
+
+/* В листе прокрутка остаётся у тела раздела, а не у колонки (таск 175, G259
+   про левую колонку её оттуда убрал): лист — это один раздел на весь экран,
+   заголовков в нём нет, и листать «колонку» целиком нечего. */
+#app.is-mobile .panel__body {
+  overflow: auto;
 }
 
 #app.is-mobile .panel__section.is-collapsed > .panel__body {
@@ -5811,9 +5816,11 @@ body {
         <!-- Имя объекта в шапке не пишется: рядом стоит список объектов, и
              текстом оно повторяло бы выбранную строку списка. -->
         <div id="project-actions" class="mount"></div>
-        <!-- Имя открытой схемы: на узком экране списка схем на виду нет,
-             и без этой строки непонятно, что вообще открыто. -->
-        <span id="scheme-name"></span>
+        <!-- Имени открытой схемы в шапке больше нет (таск 175, G271): «в
+             мобильном интерфейсе в шапке убери надпись». Стояло оно только на
+             узком экране и только там и мешало — на 360 точках ему доставалось
+             полсотни, то есть «Схема до…». Названа открытая схема в листе
+             «Схемы», который на телефоне открывается кнопкой снизу. -->
         <!-- Поиск по всему объекту и отмена: и то, и другое относится ко
              всему сразу, поэтому живёт в шапке, а не в разделе «Метки». -->
         <div id="header-search" class="mount"></div>
@@ -5827,6 +5834,13 @@ body {
              разбор, поэтому кнопка есть и в режиме просмотра. -->
         <div id="header-links" class="mount"></div>
         <div id="header-actions" class="mount"></div>
+        <!-- «Интерфейс проекта» окном (таск 175, G272): на узком экране раздел
+             левой колонки в лист не приходит вовсе, и до размера меток,
+             подписей, слоёв и масштаба с телефона было не добраться. Кнопка
+             стоит рядом со значком принтера — обе открывают, а не правят, — и
+             на большом экране её нет: там раздел на своём месте в колонке.
+             Поля в окно собирает тот же код, что и в колонке. -->
+        <div id="header-sizes" class="mount"></div>
         <!-- Переход к полной версии показывается только там, где экран сам
              выбрал просмотр: на десктопе кнопки нет. -->
         <button id="layout-toggle" class="ui-btn" type="button" hidden></button>
@@ -6026,7 +6040,6 @@ const strings = {
     plan: "План",
     schemes: "Схемы",
     marks: "Метки",
-    noScheme: "Схема не выбрана",
     full: "Полная версия",
     fullHint: "Открыть полную раскладку с панелями правки",
     view: "Режим просмотра",
@@ -6298,6 +6311,11 @@ const strings = {
     zoomVolume: "В объёме масштаб меняют колесом, а «Вся схема» — кнопкой в блоке «Объём»",
     zoomFit: "Вписать план",
     zoomReset: "100 %",
+    // Подсказка кнопки в шапке телефона (таск 175, G272). Называется кнопка
+    // тем же словом, что раздел («Интерфейс проекта», `panels.sizes`) — двух
+    // имён у одних и тех же полей быть не должно, — а подсказка говорит, что
+    // за ней стоит.
+    sizesWindow: "Интерфейс проекта: размер меток и подписей, шрифт, слои плана и масштаб",
     undo: "Отменить",
     redo: "Вернуть",
     undoTitle: "Отменить: {label} (Ctrl+Z)",
@@ -6502,6 +6520,9 @@ const strings = {
     changeType: "смена типа",
     addType: "новый тип",
     viewSize: "размер меток и подписей",
+    // Шаг сетки лежит в объекте (таск 175, G258) — значит, и отменяется, как
+    // всякая правка объекта.
+    gridStep: "шаг сетки",
     blockMode: "режим блока",
     markField: "правка полей метки",
     markNumber: "правка номера метки",
@@ -15423,6 +15444,58 @@ function updateProject(project, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, "name")) next.name = normalizeName(patch.name);
   if (Object.prototype.hasOwnProperty.call(patch, "view")) next.view = { ...project.view, ...patch.view };
   return { project: withProject(project, next) };
+}
+
+// ——— шаг сетки чертежа ————————————————————————————————————————————————
+//
+// Таск 175 (G258). Слова заказчика: «Раздел Сетка в левом меню перенеси под
+// Высота и сделай по умолчанию значение 100 и сохраняй выбранное значение в
+// проекте».
+//
+// Шаг жил в памяти страницы и начинался с пятисот: открыл объект на другой
+// день — и сетка снова не та, по которой этот дом чертили. Теперь он лежит в
+// объекте, в `view`, рядом с размером меток и подписей: это тот же вопрос
+// «как показывается **этот** объект», и отвечают на него в том же разделе
+// «Интерфейс проекта».
+//
+// **Поле необязательное** (G68; образец — `floor` схемы и `wallHeightMm`):
+// пустое значение ключ **удаляет**, а не кладёт в него `null`, и у объекта,
+// которому шага не задавали, ключа нет вовсе — он открывается и упаковывается
+// прежним файлом, а сетка рисуется умолчанием. Чтение терпимое нарочно: мусор
+// в ключе (чужая версия, правка файла руками) не роняет объект, а читается
+// как «не задано».
+const GRID_STEP_DEFAULT_MM = 100;
+
+/** Шаг сетки этого объекта в миллиметрах. Не задан — умолчание. */
+function gridStepOf(project) {
+  const value = project && project.view ? project.view.gridStepMm : null;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : GRID_STEP_DEFAULT_MM;
+}
+
+/** Задан ли шаг у объекта своим числом. Ложь — объект живёт умолчанием. */
+function gridStepSet(project) {
+  return Boolean(project && project.view) && typeof project.view.gridStepMm === "number" && project.view.gridStepMm > 0;
+}
+
+/**
+ * Задать или снять шаг сетки. `changed: false` — ничего не поменялось, и шага
+ * истории на это не нужно (тот же договор, что у `setSchemeFloor`).
+ *
+ * Миллиметры проверяются общей дверью чертежа (`drawingPositiveMm`): целые,
+ * больше нуля, не больше километра — сетка мерится тем же, чем стены.
+ */
+function setGridStep(project, value) {
+  const empty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+  const step = empty ? null : drawingPositiveMm(value);
+  const had = project && project.view ? Object.prototype.hasOwnProperty.call(project.view, "gridStepMm") : false;
+  if (step === null && !had) return { project, changed: false };
+  if (step !== null && project && project.view && project.view.gridStepMm === step) {
+    return { project, changed: false };
+  }
+  const view = { ...((project && project.view) || {}) };
+  if (step === null) delete view.gridStepMm;
+  else view.gridStepMm = step;
+  return { project: withProject(project, { view }), changed: true };
 }
 
 // ——— вид типа: точка или линия ————————————————————————————————————————
@@ -26831,7 +26904,19 @@ const UI_ICONS = {
   // въехавший в него сверху, и лист, вышедший снизу. Знак заказчик назвал сам
   // («меню по иконке-кнопке с принтером»), и он честен: за ним и печать, и
   // файл листа — то, что уходит со страницы наружу.
-  printer: ["M7.5 9.5V4.5h9v5", "M4.5 9.5h15v7h-3", "M7.5 16.5h-3", "M7.5 13.5h9v6h-9z"],
+  //
+  // **У корпуса была правая стенка и не было левой** (таск 175, дефект D44:
+  // «иконка принтера обрезана слева у кнопки»). Обрезала её не кнопка и не
+  // стиль — её просто не нарисовали: третья линия шла по низу от 7,5 до 4,5 и
+  // там кончалась. Теперь она же поднимается до 9,5 и замыкает корпус, и
+  // ширина знака в клетке стала симметричной.
+  printer: ["M7.5 9.5V4.5h9v5", "M4.5 9.5h15v7h-3", "M7.5 16.5h-3v-7", "M7.5 13.5h9v6h-9z"],
+  // «Интерфейс проекта» в шапке телефона (таск 175, G272): два ползунка с
+  // ручками на разных местах — тем же знаком это называют везде, и за ним в
+  // разделе и правда стоят два ползунка, размер меток и размер подписей.
+  // Шестерёнка не годится: настроек страницы в сборке нет вовсе, а раздел —
+  // про то, как выглядит **этот** объект.
+  sliders: ["M4 9h16", "M4 15h16", "M10.8 9a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 0 1 3.6 0", "M16.8 15a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 0 1 3.6 0"],
   // Присесть и подпрыгнуть пальцем (таск 163, G242). Пара: у обеих земля
   // чертой внизу, и отличает их только стрелка — вниз к земле у приседа, вверх
   // от земли у прыжка. Без черты обе читались бы как «листать список»: земля и
@@ -27097,7 +27182,6 @@ function formatMegabytes(bytes) {
 // и не правят ни этот файл, ни разметку.
 
 
-
 // Виды шрифта объявлены там же, где их разбирают в семейства, — в `render.js`.
 // Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
 
@@ -27136,6 +27220,9 @@ const PANEL_IDS = {
   headerHistory: "header-history",
   headerWarnings: "header-warnings",
   headerLinks: "header-links",
+  // Кнопка «Интерфейс проекта» в шапке (таск 175, G272): на узком экране
+  // раздел левой колонки не показывается вовсе, и те же поля приходят окном.
+  headerSizes: "header-sizes",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -27371,7 +27458,15 @@ const LAYOUT_ABILITIES = {
   editRooms: ["desktop"],
   editProject: ["desktop"],
   dictionary: ["desktop"],
-  viewSizes: ["desktop"],
+  // «Интерфейс проекта» — размер меток и подписей, шрифт, слои и масштаб —
+  // пришёл на телефон окном (таск 175, G272): «в мобильной вёрстке добавь
+  // кнопку в шапку „Интерфейс проекта“, которая откроет тоже самое, что в
+  // левой колонке, но в окне». Это не правка разметки: все поля отвечают на
+  // «как я это вижу», и на объекте с телефона их и крутят — подписи мелкие,
+  // подложка мешает, план надо вписать. Раздел в колонке при этом на узком
+  // экране по-прежнему не показывается (`styles.css`): дверь к полям одна —
+  // кнопка в шапке, а сборка полей одна на оба места.
+  viewSizes: ["desktop", "mobile"],
 };
 function layoutModeFor(view, override) {
   if (override === "mobile" || override === "desktop") return override;
@@ -27555,7 +27650,6 @@ function setState(patch) {
   }
   syncCanvasClass();
   syncScreenClass();
-  syncSchemeName();
   return snapshot;
 }
 function subscribe(listener) {
@@ -27615,18 +27709,11 @@ function applyStrings(root) {
   }
 }
 
-// На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
-// открыто, — списка схем на экране нет, он спрятан в лист.
-function syncSchemeName() {
-  const node = document.getElementById("scheme-name");
-  if (!node) return;
-  const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
-  node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
-  // Имя стоит в одной строке со всем остальным (таск 163, G242) и обрезается
-  // многоточием: на телефоне ему достаётся то, что осталось. Целиком оно есть
-  // в подсказке — и в списке схем, где его видно без обрезки.
-  node.title = node.textContent;
-}
+// Имени открытой схемы в шапке больше нет (таск 175, G271). Оно стояло только
+// на узком экране — «Схема дома» в его собственных словах, — и места ему там
+// доставалось полсотни точек из трёхсот шестидесяти: читалось «Схема до…».
+// Названа открытая схема в листе «Схемы», и это предлагалось ещё в таске 163,
+// когда имя мерили строкой шапки; заказчик выбрал убрать.
 
 function syncCanvasClass() {
   const app = document.getElementById("app");
@@ -27733,7 +27820,6 @@ function syncLayout() {
   const screen = screenAfterLayout(appState.screen, mode);
   if (screen !== appState.screen) setState({ screen });
   syncSheet();
-  syncSchemeName();
 }
 
 function wireLayout() {
@@ -44293,6 +44379,13 @@ function openSizesPicker({ title, hints, current, onWall, inherited }) {
       ],
       onCancel: () => resolve(null),
     });
+    // Ширину задаёт содержимое, а не общая мера диалогов (таск 175, дефект
+    // D41: «ширина окна больше чем контент»). Общие 720 точек подобраны под
+    // окна с текстом и списками; здесь три поля по полторы сотни, и остальные
+    // триста пикселей оставались пустым полем с «Отменой» у дальнего края —
+    // ровно то, от чего в сетках выбора завели `modal--fit`. Потолок у класса
+    // прежний, так что на узком экране окно поджимается как раньше.
+    if (modal.card) modal.card.classList.add("modal--fit");
   });
 }
 
@@ -47440,7 +47533,12 @@ function markCardModel(project, markId) {
   // Стена под меткой — из той же `marksRowModel`, что строка списка: второй
   // правды о метке в сборке быть не должно.
   add(strings.marks.wallLabel, fields.wallText);
-  add(strings.panels.sizes, fields.sizes);
+  // Размеры метки, а не раздел колонки. Строка звалась `panels.sizes`, и после
+  // переименования раздела (таск 153) карточка метки говорила «Интерфейс
+  // проекта от пола 2200 мм» — найдено живым прогоном таска 175. Имя у этой
+  // строки своё и давно: «Размеры и высота» (`markSizes.open`), и заведено оно
+  // ровно затем, чтобы не спорить с названием раздела.
+  add(strings.markSizes.open, fields.sizes);
   // Связи — обе стороны и словами. «Чем управляет» идёт разложенным по каналам
   // («① Т16 ×6 · ② С1»): это та же строка, что в списке меток, и она отвечает
   // на вопрос «какая клавиша к какой нагрузке».
@@ -57789,10 +57887,24 @@ const WORKSHOP_UNIT = { width: 1, height: 1 };
 const WORKSHOP_ORIGIN_AT = { x: 0.5, y: 0.5 };
 
 // Шаги сетки: от полста миллиметров (толщина перегородки) до двух метров.
-// Половина метра по умолчанию — ею размечают квартиру, и в ней видны и
-// трёхметровая комната, и ниша.
+//
+// Выбранный шаг **лежит в объекте** (таск 175, G258) — его хозяин
+// `model.gridStepOf`/`setGridStep`, а умолчание `model.GRID_STEP_DEFAULT_MM`
+// (сто миллиметров, слово заказчика). Своего числа у окна нет: разойдись они —
+// список предлагал бы один шаг, а сетка рисовалась бы другим.
 const WORKSHOP_GRID_STEPS_MM = [50, 100, 200, 250, 500, 1000, 2000];
-const WORKSHOP_GRID_DEFAULT_MM = 500;
+
+/**
+ * Что стоит в списке шагов при этом значении: обычные шаги, а чужое число —
+ * ещё и само (G68). Объект, которому шаг правили руками в файле, не должен
+ * молча получить соседний: список показывает его своим пунктом, и сетка
+ * остаётся той, в которой чертили.
+ */
+function workshopGridOptions(stepMm) {
+  const step = Number(stepMm) || 0;
+  if (!(step > 0) || WORKSHOP_GRID_STEPS_MM.includes(step)) return [...WORKSHOP_GRID_STEPS_MM];
+  return [...WORKSHOP_GRID_STEPS_MM, step].sort((first, second) => first - second);
+}
 
 // Реже пяти пикселей на экране сетка читается заливкой — рисуется кратный шаг,
 // а притягивается по-прежнему выбранный.
@@ -59293,14 +59405,18 @@ function workshopSummaryLines(project, schemeId, placement) {
 // ——— окно ——————————————————————————————————————————————————————————————
 
 // Что человек выбрал в окне — его рабочее место, а не свойство объекта: слои,
-// шаг сетки, притяжка и толщина новых стен живут в памяти страницы и переживают
-// закрытие окна, но в `project.json` не попадают.
+// притяжка и толщина новых стен живут в памяти страницы и переживают закрытие
+// окна, но в `project.json` не попадают.
+//
+// **Шаг сетки из этого ряда ушёл** (таск 175, G258): заказчик попросил
+// «сохраняй выбранное значение в проекте», и теперь он лежит в объекте
+// (`model.gridStepOf`), а не здесь. Своей копии окно не держит — иначе два
+// числа разошлись бы на первой же смене объекта.
 // Отметки слоёв поля. «Объектов» среди них больше нет: вещи гасит общий
 // выключатель «Объекты чертежа» (таск 154, G223) — он же стоит в «Интерфейсе
 // проекта» и гасит их заодно на плане и в объёме. Две отметки с одним словом в
 // двух местах отвечали бы на один вопрос по-разному.
 let workshopLayers = { plan: true, grid: true, walls: true };
-let workshopGridMm = WORKSHOP_GRID_DEFAULT_MM;
 let workshopGridSnap = true;
 let workshopThicknessMm = WORKSHOP_THICKNESS_DEFAULT_MM;
 // Умолчания проёмов — по виду и на сеанс: поправил окно на 1300, и следующее
@@ -59517,13 +59633,13 @@ function createWorkshop({ api, hosts }) {
     on: { click: () => attach() },
   });
 
+  // Список шагов пересобирается в `sync`: его содержимое зависит от объекта
+  // (чужое число встаёт своим пунктом), а объект меняется под поверхностью.
   const gridSelect = uiEl("select", { class: "ui-input workshop__grid" });
-  for (const step of WORKSHOP_GRID_STEPS_MM) {
-    gridSelect.append(uiEl("option", { value: String(step), text: String(step) }));
-  }
   gridSelect.addEventListener("change", () => {
-    workshopGridMm = Number(gridSelect.value) || WORKSHOP_GRID_DEFAULT_MM;
-    sync();
+    // Шаг — часть объекта (G258), значит и шаг истории: иначе Ctrl+Z после
+    // смены сетки вернул бы метку, а сетку — молча и заодно.
+    setGrid(gridSelect.value);
   });
   const snapCheck = uiEl("input", { type: "checkbox" });
   snapCheck.addEventListener("change", () => {
@@ -59688,15 +59804,6 @@ function createWorkshop({ api, hosts }) {
       workshopCheckRow(objectsCheck, strings.workshop.layerObjects),
     ]),
     uiEl("div", { class: "workshop__group" }, [
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.grid }),
-      uiEl("label", { class: "workshop__field" }, [
-        uiEl("span", { class: "workshop__label", text: strings.workshop.gridStep }),
-        gridSelect,
-      ]),
-      workshopCheckRow(snapCheck, strings.workshop.gridSnap),
-      uiEl("p", { class: "workshop__note", text: strings.workshop.gridSnapHint }),
-    ]),
-    uiEl("div", { class: "workshop__group" }, [
       subjectHead,
       wallFields,
       openingFields,
@@ -59714,6 +59821,18 @@ function createWorkshop({ api, hosts }) {
       uiEl("h4", { class: "workshop__head", text: strings.workshop.heightRooms }),
       uiEl("p", { class: "workshop__note", text: strings.workshop.heightRoomsHint }),
       roomsList,
+    ]),
+    // «Сетка» — последней, под «Высотой» (таск 175, G258): «Раздел Сетка в
+    // левом меню перенеси под Высота». Шаг выбирают один раз на объект, а
+    // выше стоит то, что правят на каждой стене.
+    uiEl("div", { class: "workshop__group" }, [
+      uiEl("h4", { class: "workshop__head", text: strings.workshop.grid }),
+      uiEl("label", { class: "workshop__field" }, [
+        uiEl("span", { class: "workshop__label", text: strings.workshop.gridStep }),
+        gridSelect,
+      ]),
+      workshopCheckRow(snapCheck, strings.workshop.gridSnap),
+      uiEl("p", { class: "workshop__note", text: strings.workshop.gridSnapHint }),
     ]),
   ]);
 
@@ -59798,6 +59917,41 @@ function createWorkshop({ api, hosts }) {
 
   function commit(after, label) {
     canvasCommit(project(), after, label, { schemeId });
+  }
+
+  // Шаг сетки принадлежит объекту (таск 175, G258), и спрашивается он у
+  // модели на каждом кадре: своей копии у поверхности нет — объект меняется
+  // под ней, и копия разошлась бы с ним при первой же смене.
+  function gridMm() {
+    return gridStepOf(project());
+  }
+
+  function setGrid(value) {
+    try {
+      const next = setGridStep(project(), value);
+      if (next.changed) commit(next.project, strings.history.gridStep);
+    } catch (error) {
+      fail(error);
+    }
+    sync();
+  }
+
+  // Список шагов и выбранный пункт. Пересобирается только когда список и
+  // правда другой (сменился объект с чужим числом): `replaceChildren` на
+  // каждом кадре схлопывал бы список, раскрытый под рукой.
+  let gridOptionsKey = "";
+
+  function syncGrid() {
+    const step = gridMm();
+    const options = workshopGridOptions(step);
+    const key = options.join(",");
+    if (key !== gridOptionsKey) {
+      gridOptionsKey = key;
+      gridSelect.replaceChildren(
+        ...options.map((value) => uiEl("option", { value: String(value), text: String(value) })),
+      );
+    }
+    gridSelect.value = String(step);
   }
 
   // ——— масштаб и вид ———
@@ -59886,7 +60040,7 @@ function createWorkshop({ api, hosts }) {
   function snapOf(pointMm, free) {
     return workshopSnapMm(draft ? draft.points : [], pointMm, view, {
       free,
-      gridMm: workshopGridMm,
+      gridMm: gridMm(),
       gridSnap: workshopGridSnap,
     });
   }
@@ -60876,13 +61030,13 @@ function createWorkshop({ api, hosts }) {
           workshopPathSources(points, anchor.anchorIndex, anchor.skipIndex),
           mmOf(event),
           view,
-          { free: event.altKey, gridMm: workshopGridMm, gridSnap: workshopGridSnap },
+          { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap },
         ).point;
       }
       redraw();
       return;
     }
-    const options = { free: event.altKey, gridMm: workshopGridMm, gridSnap: workshopGridSnap };
+    const options = { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap };
     if (drag.kind === "vertex") {
       drag.toMm = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options).point;
     } else {
@@ -61322,7 +61476,7 @@ function createWorkshop({ api, hosts }) {
   }
 
   function paintGrid(box) {
-    const step = workshopGridDrawStepMm(workshopGridMm, view.zoom);
+    const step = workshopGridDrawStepMm(gridMm(), view.zoom);
     if (!(step > 0)) return;
     const from = screenToPlan({ x: 0, y: 0 }, WORKSHOP_UNIT, view);
     const to = screenToPlan({ x: box.width, y: box.height }, WORKSHOP_UNIT, view);
@@ -61728,7 +61882,7 @@ function createWorkshop({ api, hosts }) {
     gridCheck.checked = workshopLayers.grid;
     wallsCheck.checked = workshopLayers.walls;
     objectsCheck.checked = getState().objectsShown !== false;
-    gridSelect.value = String(workshopGridMm);
+    syncGrid();
     snapCheck.checked = workshopGridSnap;
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
     objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");
@@ -62650,11 +62804,23 @@ function mountToolsPanel(host, api) {
   render();
 }
 
-// Раздел «Размеры»: размер меток и подписей, масштаб плана.
-function mountSizesPanel(host, api) {
+/**
+ * Поля «Интерфейса проекта» — размер меток и подписей, шрифт, слои, развёртка
+ * и масштаб того поля, которое на экране.
+ *
+ * **Одна сборка на два места** (таск 175, G272). На большом экране это раздел
+ * левой колонки; на узком экрана раздела нет вовсе, и те же поля приходят
+ * окном по кнопке в шапке. Второй сборки здесь быть не должно: разойдись они —
+ * и человек, покрутивший подписи с телефона, не нашёл бы этого переключателя
+ * за столом.
+ *
+ * Возвращает узел и `dispose`: подписка на состояние живёт, пока жив узел, а
+ * окно закрывается — и подписку надо снять, иначе она рисовала бы в
+ * выброшенный из разметки ящик.
+ */
+function createSizesFields(api) {
   const { getState, setState, subscribe } = api;
   const box = uiEl("div", { class: "tools" });
-  host.replaceChildren(box);
   // Снимок объекта на время жеста ползунка: пока он есть, раздел не
   // перерисовывается — иначе ползунок исчезал бы из-под пальца.
   let sizeBefore = null;
@@ -62753,7 +62919,7 @@ function mountSizesPanel(host, api) {
     );
   }
 
-  subscribe((state, changed) => {
+  const stop = subscribe((state, changed) => {
     if (sizeBefore) return;
     if (
       "project" in changed ||
@@ -62768,6 +62934,61 @@ function mountSizesPanel(host, api) {
     ) {
       render();
     }
+  });
+  render();
+  return { node: box, dispose: stop };
+}
+
+// Раздел левой колонки: та же сборка полей, своей у раздела нет. Подписку он
+// не снимает — раздел живёт столько же, сколько страница.
+function mountSizesPanel(host, api) {
+  host.replaceChildren(createSizesFields(api).node);
+}
+
+/**
+ * «Интерфейс проекта» окном (таск 175, G272). Слова заказчика: «в мобильной
+ * вёрстке добавь кнопку в шапку „Интерфейс проекта“, которая откроет тоже
+ * самое, что в левой колонке, но в окне».
+ *
+ * Окно, а не лист снизу: лист занят колонками (схемы и метки), и третья
+ * кнопка в нижнем ряду сломала бы ряд из трёх равных. Окно к тому же само
+ * забирает клавиатуру и закрывается Escape, как остальные.
+ */
+function openSizesWindow(api) {
+  const fields = createSizesFields(api);
+  let modal;
+  const close = () => {
+    modal.close();
+    fields.dispose();
+  };
+  modal = uiModal({
+    title: strings.panels.sizes,
+    body: fields.node,
+    actions: [uiButton(strings.dialog.close, { class: "ui-btn ui-btn--accent", on: { click: () => close() } })],
+    // Escape и нажатие мимо закрывают окно мимо кнопки — подписку снимаем и там.
+    onCancel: () => fields.dispose(),
+  });
+}
+
+// Кнопка в шапке. Стоит рядом со значком принтера — обе открывают, а не
+// правят, — и только на узкой раскладке: на большом экране раздел на своём
+// месте в колонке, и вторая дверь к тем же полям там лишняя.
+function mountSizesButton(host, api) {
+  const { getState, subscribe } = api;
+  const button = uiIconButton("sliders", {
+    label: strings.panels.sizes,
+    title: strings.tools.sizesWindow,
+    on: { click: () => openSizesWindow(api) },
+  });
+  host.replaceChildren(button);
+
+  function render() {
+    const layout = getState().layout;
+    host.hidden = layout !== "mobile" || !layoutAllows("viewSizes", layout);
+  }
+
+  subscribe((state, changed) => {
+    if ("layout" in changed) render();
   });
   render();
 }
@@ -62814,6 +63035,7 @@ function mountHistoryPanel(host, api) {
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
 registerPanel(PANEL_IDS.headerHistory, mountHistoryPanel);
 registerPanel(PANEL_IDS.sizes, mountSizesPanel);
+registerPanel(PANEL_IDS.headerSizes, mountSizesButton);
 
 // src/panels/warnings.js
 // Предупреждения объекта: всё, что нашёл `model.validate`, одним списком со

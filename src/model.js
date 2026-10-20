@@ -6379,6 +6379,58 @@ export function updateProject(project, patch = {}) {
   return { project: withProject(project, next) };
 }
 
+// ——— шаг сетки чертежа ————————————————————————————————————————————————
+//
+// Таск 175 (G258). Слова заказчика: «Раздел Сетка в левом меню перенеси под
+// Высота и сделай по умолчанию значение 100 и сохраняй выбранное значение в
+// проекте».
+//
+// Шаг жил в памяти страницы и начинался с пятисот: открыл объект на другой
+// день — и сетка снова не та, по которой этот дом чертили. Теперь он лежит в
+// объекте, в `view`, рядом с размером меток и подписей: это тот же вопрос
+// «как показывается **этот** объект», и отвечают на него в том же разделе
+// «Интерфейс проекта».
+//
+// **Поле необязательное** (G68; образец — `floor` схемы и `wallHeightMm`):
+// пустое значение ключ **удаляет**, а не кладёт в него `null`, и у объекта,
+// которому шага не задавали, ключа нет вовсе — он открывается и упаковывается
+// прежним файлом, а сетка рисуется умолчанием. Чтение терпимое нарочно: мусор
+// в ключе (чужая версия, правка файла руками) не роняет объект, а читается
+// как «не задано».
+export const GRID_STEP_DEFAULT_MM = 100;
+
+/** Шаг сетки этого объекта в миллиметрах. Не задан — умолчание. */
+export function gridStepOf(project) {
+  const value = project && project.view ? project.view.gridStepMm : null;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : GRID_STEP_DEFAULT_MM;
+}
+
+/** Задан ли шаг у объекта своим числом. Ложь — объект живёт умолчанием. */
+export function gridStepSet(project) {
+  return Boolean(project && project.view) && typeof project.view.gridStepMm === "number" && project.view.gridStepMm > 0;
+}
+
+/**
+ * Задать или снять шаг сетки. `changed: false` — ничего не поменялось, и шага
+ * истории на это не нужно (тот же договор, что у `setSchemeFloor`).
+ *
+ * Миллиметры проверяются общей дверью чертежа (`drawingPositiveMm`): целые,
+ * больше нуля, не больше километра — сетка мерится тем же, чем стены.
+ */
+export function setGridStep(project, value) {
+  const empty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+  const step = empty ? null : drawingPositiveMm(value);
+  const had = project && project.view ? Object.prototype.hasOwnProperty.call(project.view, "gridStepMm") : false;
+  if (step === null && !had) return { project, changed: false };
+  if (step !== null && project && project.view && project.view.gridStepMm === step) {
+    return { project, changed: false };
+  }
+  const view = { ...((project && project.view) || {}) };
+  if (step === null) delete view.gridStepMm;
+  else view.gridStepMm = step;
+  return { project: withProject(project, { view }), changed: true };
+}
+
 // ——— вид типа: точка или линия ————————————————————————————————————————
 //
 // Поле `type.kind` появилось у типов позже самих типов, и объекты заказчика

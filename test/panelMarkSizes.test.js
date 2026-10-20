@@ -5,6 +5,7 @@
 // остальные, живой приёмкой.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   fillTypeSizes,
@@ -157,4 +158,25 @@ test("повторный проход ничего не меняет — миг�
   const twice = fillTypeSizes(once.project);
   assert.equal(twice.changed, false);
   assert.equal(twice.project, once.project, "второй проход обязан вернуть тот же объект");
+});
+
+// ——— ширина окна (таск 175, дефект D41) ————————————————————————————————
+//
+// «Ширина окна больше чем контент»: карточка брала общую меру диалогов в 720
+// точек, а полей в ней три, и триста пикселей справа оставались пустым полем
+// с «Отменой» у дальнего края. Класс `modal--fit` для этого и заведён в сетках
+// выбора — окно берёт ширину у содержимого, а потолок остаётся прежним.
+//
+// Сам диалог DOM-тестами не покрыт (как и остальные), поэтому читается текст —
+// тот же приём, что в `cssMeasures.test.js`: прогон про стили не говорит
+// ничего, а молча вернувшаяся общая мера видна только снимком.
+test("окно размеров берёт ширину у содержимого, а не у общей меры диалогов", () => {
+  const source = readFileSync(new URL("../src/panels/markSizes.js", import.meta.url), "utf8");
+  const dialogs = readFileSync(new URL("../src/panels/panels.css", import.meta.url), "utf8");
+  const body = readFileSync(new URL("../src/panels/marks.css", import.meta.url), "utf8");
+  assert.match(source, /classList\.add\("modal--fit"\)/, "окно размеров снова тянется на общие 720 точек");
+  assert.match(dialogs, /\.modal--fit \{\n  width: fit-content;/, "класс перестал считать ширину по содержимому");
+  // Потолок самого содержимого: без него `fit-content` растянулся бы по
+  // подсказке, написанной в одну строку.
+  assert.match(body, /\.sizes \{[\s\S]*?max-width: \d+px;[\s\S]*?\n\}/, "у содержимого окна нет своего потолка ширины");
 });

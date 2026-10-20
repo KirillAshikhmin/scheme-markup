@@ -3,7 +3,6 @@
 // и не правят ни этот файл, ни разметку.
 import { strings, text } from "./strings.js";
 import { getSetting, setSetting } from "./store.js";
-import { findScheme } from "./model.js";
 // Виды шрифта объявлены там же, где их разбирают в семейства, — в `render.js`.
 // Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
 import { FONT_DRAFT, FONT_KINDS } from "./render.js";
@@ -43,6 +42,9 @@ export const PANEL_IDS = {
   headerHistory: "header-history",
   headerWarnings: "header-warnings",
   headerLinks: "header-links",
+  // Кнопка «Интерфейс проекта» в шапке (таск 175, G272): на узком экране
+  // раздел левой колонки не показывается вовсе, и те же поля приходят окном.
+  headerSizes: "header-sizes",
   projectActions: "project-actions",
   dialogs: "dialog-host",
 };
@@ -278,7 +280,15 @@ export const LAYOUT_ABILITIES = {
   editRooms: ["desktop"],
   editProject: ["desktop"],
   dictionary: ["desktop"],
-  viewSizes: ["desktop"],
+  // «Интерфейс проекта» — размер меток и подписей, шрифт, слои и масштаб —
+  // пришёл на телефон окном (таск 175, G272): «в мобильной вёрстке добавь
+  // кнопку в шапку „Интерфейс проекта“, которая откроет тоже самое, что в
+  // левой колонке, но в окне». Это не правка разметки: все поля отвечают на
+  // «как я это вижу», и на объекте с телефона их и крутят — подписи мелкие,
+  // подложка мешает, план надо вписать. Раздел в колонке при этом на узком
+  // экране по-прежнему не показывается (`styles.css`): дверь к полям одна —
+  // кнопка в шапке, а сборка полей одна на оба места.
+  viewSizes: ["desktop", "mobile"],
 };
 
 export function layoutModeFor(view, override) {
@@ -466,7 +476,6 @@ export function setState(patch) {
   }
   syncCanvasClass();
   syncScreenClass();
-  syncSchemeName();
   return snapshot;
 }
 
@@ -529,18 +538,11 @@ export function applyStrings(root) {
   }
 }
 
-// На узком экране имя схемы стоит в шапке: с первого взгляда видно, что
-// открыто, — списка схем на экране нет, он спрятан в лист.
-function syncSchemeName() {
-  const node = document.getElementById("scheme-name");
-  if (!node) return;
-  const scheme = appState.project && appState.schemeId ? findScheme(appState.project, appState.schemeId) : null;
-  node.textContent = scheme ? scheme.name : strings.mobile.noScheme;
-  // Имя стоит в одной строке со всем остальным (таск 163, G242) и обрезается
-  // многоточием: на телефоне ему достаётся то, что осталось. Целиком оно есть
-  // в подсказке — и в списке схем, где его видно без обрезки.
-  node.title = node.textContent;
-}
+// Имени открытой схемы в шапке больше нет (таск 175, G271). Оно стояло только
+// на узком экране — «Схема дома» в его собственных словах, — и места ему там
+// доставалось полсотни точек из трёхсот шестидесяти: читалось «Схема до…».
+// Названа открытая схема в листе «Схемы», и это предлагалось ещё в таске 163,
+// когда имя мерили строкой шапки; заказчик выбрал убрать.
 
 function syncCanvasClass() {
   const app = document.getElementById("app");
@@ -652,7 +654,6 @@ function syncLayout() {
   const screen = screenAfterLayout(appState.screen, mode);
   if (screen !== appState.screen) setState({ screen });
   syncSheet();
-  syncSchemeName();
 }
 
 function wireLayout() {

@@ -81,7 +81,11 @@ test("карточка показывает поля метки и обе сто
   assert.equal(named.get(strings.marks.room), "Спальня");
   assert.equal(named.get(strings.marks.location), "над кроватью");
   assert.equal(named.get(strings.marks.comment), "L-12");
-  assert.ok(named.get(strings.panels.sizes).includes("600"));
+  // Размеры названы своим именем, а не именем раздела колонки: после
+  // переименования раздела (таск 153) строка читалась «Интерфейс проекта
+  // 600 × 400» — поймано живым прогоном таска 175.
+  assert.ok(named.get(strings.markSizes.open).includes("600"));
+  assert.equal(named.has(strings.panels.sizes), false, "карточка метки снова зовёт размеры именем раздела");
   // Управляется — со стороны светильника; управляет — со стороны выключателя.
   assert.ok(named.get(strings.marks.controlledByShort).includes("В1"));
   assert.equal(named.has(strings.marks.controls), false);

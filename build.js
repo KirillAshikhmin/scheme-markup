@@ -388,11 +388,16 @@ export function manifestJson() {
 // Список ресурсов подставляется сюда же: без шрифта в офлайн-кэше установленное
 // приложение на объекте без сети осталось бы с запасным шрифтом. Знает, что
 // положено рядом, только сборка — значит и список составляет она.
+//
+// Имя файла страницы — туда же, и по той же причине: по нему скрипт узнаёт свою
+// страницу среди соседних адресов той же папки (D46), а хозяин имени один —
+// `PAGE_FILE` здесь.
 export async function workerScript(html, assets) {
   const source = await readFile(path.join(webDir, WORKER_FILE), "utf8");
   const version = createHash("sha256").update(html).digest("hex").slice(0, 12);
   const result = source
     .replaceAll("__CACHE_VERSION__", version)
+    .replaceAll("__PAGE_FILE__", "./" + PAGE_FILE)
     .replaceAll("__ASSETS__", JSON.stringify(assets.map((name) => "./" + name)));
   const left = result.match(/__[A-Z_]+__/);
   if (left) throw new Error("В служебном скрипте осталась незаполненная подстановка " + left[0]);
