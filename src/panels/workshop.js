@@ -4417,11 +4417,15 @@ function createWorkshop({ api, hosts }) {
     const frame = box.getBoundingClientRect();
     const head = section ? section.querySelector(".panel__head") : null;
     const foot = section ? section.querySelector(".workshop__foot") : null;
-    // Заголовок меряется высотой, а не местом: своё место он занимает ровно
-    // тогда, когда раздел прошёл верхнюю кромку, — а подвести строку мы и
-    // собираемся туда, под заголовок.
-    const top = frame.top + (head ? head.offsetHeight : 0);
-    const low = frame.bottom - Math.max(panelCover(frame, foot, "foot"), panelRailInset(box));
+    // Сверху кадр закрыт лестницей заголовков (таск 201), и своего заголовка
+    // в ней уже мало: над ним стоят все уехавшие разделы. Высоту лестницы
+    // считает рейка; пока раздел её не пересёк, его заголовок в лестницу не
+    // входит — тогда берём его высоту, ведь подвести строку мы собираемся
+    // именно под него.
+    const stair = panelRailInset(box, "top");
+    const own = head ? head.offsetHeight : 0;
+    const top = frame.top + Math.max(stair, own);
+    const low = frame.bottom - Math.max(panelCover(frame, foot, "foot"), panelRailInset(box, "bottom"));
     const rect = item.getBoundingClientRect();
     // Высокая строка (раскрытые параметры) целиком не влезает: тогда читаем
     // сверху вниз — верх под заголовок, а не хвост к подвалу.

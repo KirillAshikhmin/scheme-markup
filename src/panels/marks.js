@@ -420,7 +420,7 @@ function marksScrollToRow(node, align, chrome) {
       // Снизу — кнопка смыкания и рейка заголовков тех разделов, что ещё ниже.
       // Кнопка стоит над рейкой, поэтому её накладка обычно больше; рейка
       // спрашивается отдельно на случай, когда кнопки в кадре нет вовсе.
-      footInset: Math.max(panelCover(frame, chrome && chrome.foot, "foot"), panelRailInset(box)),
+      footInset: Math.max(panelCover(frame, chrome && chrome.foot, "foot"), panelRailInset(box, "bottom")),
     },
     align,
   );

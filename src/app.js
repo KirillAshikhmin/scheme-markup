@@ -823,9 +823,12 @@ function revealSectionScroll(node) {
   }
   const frame = box.getBoundingClientRect();
   const rect = node.getBoundingClientRect();
-  const low = frame.bottom - panelRailInset(node) - rect.height;
-  if (rect.top >= frame.top && rect.top <= low) return;
-  box.scrollTop += rect.top - frame.top;
+  // Кадр закрыт с обеих сторон лестницами заголовков (таск 201): сверху —
+  // разделы, которые уехали выше, снизу — те, что ещё ниже.
+  const high = frame.top + panelRailInset(node, "top");
+  const low = frame.bottom - panelRailInset(node, "bottom") - rect.height;
+  if (rect.top >= high && rect.top <= low) return;
+  box.scrollTop += rect.top - high;
 }
 
 // Счётчик в заголовке: по свёрнутому разделу видно, пуст он или там сорок схем.

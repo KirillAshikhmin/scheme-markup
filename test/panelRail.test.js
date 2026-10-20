@@ -1,17 +1,16 @@
-// Рейка заголовков: что ниже кадра — то у нижней кромки колонки (таск 194,
-// G295), а нажатие на заголовок у кромки перелистывает к его разделу (таск
-// 198, G303).
+// Рейка заголовков — лестница у обеих кромок колонки.
 //
-// Слова заказчика: «помимо sticky headers сверху, он должен быть и снизу. Что
-// бы группы были видны всегда» и, про нажатие, «нажал — прыгнуло туда — да,
-// так и надо, а то приходится самому листать, это не очевидно».
+// Слова заказчика, три таска подряд: «помимо sticky headers сверху, он должен
+// быть и снизу. Что бы группы были видны всегда» (T194), «нажал — прыгнуло
+// туда — да, так и надо» (T198) и «заголовки должны отображаться все имеющиеся
+// на экране свёрнутые, а не только ближайший» (T201).
 //
-// Верх липнет сам браузером, низ — счёт, и счёт этот чистый: на входе места
-// разделов и высоты их заголовков, на выходе — на сколько поднять каждый и у
-// какой кромки он оказался. В Node нет ни DOM, ни высот, поэтому проверяется
-// здесь именно он, а живой вид — снимком. Приклейка к стилям и к разметке
-// (`transform`, меры `--panel-rail` и `--panel-head`, две кнопки в заголовке)
-// читается текстом: зелёный прогон про стили не говорит ничего.
+// Обе кромки считает одна чистая функция: на входе места разделов и высоты их
+// заголовков, на выходе — на сколько сдвинуть каждый и у какой кромки он
+// оказался. В Node нет ни DOM, ни высот, поэтому проверяется здесь именно она,
+// а живой вид — снимком. Приклейка к стилям и к разметке (`transform`, меры
+// `--panel-rail` и `--panel-head`, две кнопки в заголовке) читается текстом:
+// зелёный прогон про стили не говорит ничего.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -75,35 +74,78 @@ test("заголовок снимается с рейки непрерывно �
   assert.equal(drawn(COLUMN, after, 3) + HEAD, drawn(COLUMN, after, 4), "в рейке появилась щель");
 });
 
-test("вниз заголовок не двигается никогда", () => {
-  for (const scrollTop of [0, 100, 270, 640, 1000, 1500]) {
-    for (const pin of panelRailPins(COLUMN, { scrollTop, clientHeight: 420 })) {
-      assert.ok(pin.shift <= 0, "заголовок уехал вниз по своему же содержимому: " + pin.shift);
+test("ступенька не уезжает за свою кромку и не отрывается от своего места зря", () => {
+  for (const scrollTop of [0, 100, 270, 640, 1000, 1080, 1500]) {
+    const frame = { scrollTop, clientHeight: 420 };
+    const pins = panelRailPins(COLUMN, frame);
+    for (let k = 0; k < pins.length; k += 1) {
+      const at = drawn(COLUMN, pins, k);
+      if (pins[k].side === "top") {
+        assert.ok(pins[k].shift > 0, "верхняя ступенька без сдвига — значит она на своём месте");
+        assert.ok(at >= scrollTop, "верхняя ступенька уехала выше кадра");
+      }
+      if (pins[k].side === "bottom") {
+        assert.ok(pins[k].shift < 0, "нижняя ступенька без сдвига");
+        assert.ok(at + HEAD <= scrollTop + frame.clientHeight, "нижняя ступенька уехала ниже кадра");
+      }
+      if (pins[k].side === "") assert.equal(pins[k].shift, 0, "стоит на месте, а сдвиг есть");
     }
   }
 });
 
-test("докрутили до конца — рейка пуста: ниже кадра не осталось никого", () => {
-  const pins = panelRailPins(COLUMN, { scrollTop: 5 * STEP - 420, clientHeight: 420 });
-  assert.deepEqual(shifts(pins), [0, 0, 0, 0, 0]);
-  // У нижней кромки нет никого, зато у верхней стоит тот, чей раздел её
-  // пересекает: это делает браузер сам, а рейка только помечает — по метке
-  // решается, что сделает нажатие.
-  assert.deepEqual(sides(pins), ["", "", "", "top", ""]);
+test("видны все разделы колонки — всегда, на любой прокрутке", () => {
+  // Это и просил заказчик: «все имеющиеся на экране свёрнутые, а не только
+  // ближайший». Кадр высокий, предохранителю работы нет — значит ни один
+  // заголовок не имеет права оказаться за кадром.
+  const frame = { clientHeight: 600 };
+  const limit = 5 * STEP - frame.clientHeight;
+  for (let scrollTop = 0; scrollTop <= limit; scrollTop += 17) {
+    const pins = panelRailPins(COLUMN, { ...frame, scrollTop });
+    for (let k = 0; k < pins.length; k += 1) {
+      const at = drawn(COLUMN, pins, k);
+      assert.ok(
+        at + HEAD > scrollTop && at < scrollTop + frame.clientHeight,
+        "заголовок " + k + " не виден при прокрутке " + scrollTop,
+      );
+    }
+  }
 });
 
-test("низкий кадр: рейка не съедает больше половины, лишние снимаются с дальнего конца", () => {
+test("докрутили до конца — внизу пусто, вверху вся лестница", () => {
+  const frame = { scrollTop: 5 * STEP - 420, clientHeight: 420 };
+  const pins = panelRailPins(COLUMN, frame);
+  // Ниже кадра не осталось никого; четыре уехавших раздела стоят ступеньками
+  // у верхней кромки, пятый — на своём месте.
+  assert.deepEqual(sides(pins), ["top", "top", "top", "top", ""]);
+  assert.deepEqual(shifts(pins), [1080, 810, 540, 270, 0]);
+  for (let k = 0; k < 4; k += 1) {
+    assert.equal(drawn(COLUMN, pins, k), frame.scrollTop + k * HEAD, "ступенька " + k + " не на своей строке");
+  }
+});
+
+test("низкий кадр: лестницы не съедают больше половины, лишние снимаются с дальних концов", () => {
   const frame = { scrollTop: 0, clientHeight: 200 };
   const pins = panelRailPins(COLUMN, frame);
-  const rail = pins.filter((pin) => pin.shift !== 0).length * HEAD;
-  assert.ok(rail <= frame.clientHeight * PANEL_RAIL_SHARE, "рейка заняла " + rail + " из " + frame.clientHeight);
-  // Остались ближние: дальний раздел и так за двумя другими, а ближний —
-  // следующий, к которому человек подойдёт прокруткой.
-  assert.deepEqual(shifts(pins), [0, -190, -460, -730, 0]);
-  // Снятый с рейки указателем не считается: его нигде не нарисовано.
-  assert.deepEqual(sides(pins), ["", "bottom", "bottom", "bottom", ""]);
-  // Нижний в рейке по-прежнему у самой кромки — рейка не висит в воздухе.
-  assert.equal(drawn(COLUMN, pins, 3) + HEAD, frame.scrollTop + frame.clientHeight);
+  const rail = pins.filter((pin) => pin.side !== "").length * HEAD;
+  assert.ok(rail <= frame.clientHeight * PANEL_RAIL_SHARE, "лестницы заняли " + rail + " из " + frame.clientHeight);
+  // Снизу осталось двое ближних, дальние двое сняты: дальний раздел и так за
+  // соседями, а ближний — следующий, к которому человек подойдёт прокруткой.
+  assert.deepEqual(sides(pins), ["", "bottom", "bottom", "", ""]);
+  assert.deepEqual(shifts(pins), [0, -160, -430, 0, 0]);
+  // Нижняя ступенька по-прежнему у самой кромки — лестница не висит в воздухе.
+  assert.equal(drawn(COLUMN, pins, 2) + HEAD, frame.scrollTop + frame.clientHeight);
+});
+
+test("низкий кадр в середине колонки: уступает та лестница, в которой ступенек больше", () => {
+  const frame = { scrollTop: 700, clientHeight: 200 };
+  const pins = panelRailPins(COLUMN, frame);
+  // Сверху просились трое (0, 1, 2), снизу двое (3, 4) — сняли две верхние.
+  assert.deepEqual(sides(pins), ["", "", "top", "bottom", "bottom"]);
+  const rail = pins.filter((pin) => pin.side !== "").length * HEAD;
+  assert.ok(rail <= frame.clientHeight * PANEL_RAIL_SHARE, "лестницы заняли " + rail);
+  // Оставшаяся верхняя ступенька — ближняя: она стоит у самой кромки.
+  assert.equal(drawn(COLUMN, pins, 2), frame.scrollTop);
+  assert.equal(drawn(COLUMN, pins, 4) + HEAD, frame.scrollTop + frame.clientHeight);
 });
 
 test("кадра нет вовсе (спрятанная колонка, нулевая высота) — считать нечего", () => {
@@ -112,13 +154,13 @@ test("кадра нет вовсе (спрятанная колонка, нул�
   assert.deepEqual(shifts(panelRailPins(COLUMN, {})), [0, 0, 0, 0, 0]);
 });
 
-test("один раздел на колонку (объём): прилипать некуда и незачем", () => {
+test("один раздел на колонку (объём): лестница из одной ступеньки", () => {
   const single = [{ top: 0, box: 2000, head: HEAD }];
   assert.deepEqual(panelRailPins(single, { scrollTop: 0, clientHeight: 200 }), [{ shift: 0, side: "" }]);
-  // Уехав вниз по длинному списку, единственный заголовок остаётся липким
-  // сверху — и нажатие на него обязано перематывать к началу раздела, как и в
-  // рейке снизу: сверху и снизу правило одно.
-  assert.deepEqual(panelRailPins(single, { scrollTop: 900, clientHeight: 200 }), [{ shift: 0, side: "top" }]);
+  // Уехав вниз по длинному списку, единственный заголовок стоит у верхней
+  // кромки — и нажатие на него перематывает к началу раздела, как и в нижней
+  // лестнице: сверху и снизу правило одно.
+  assert.deepEqual(panelRailPins(single, { scrollTop: 900, clientHeight: 200 }), [{ shift: 900, side: "top" }]);
 });
 
 test("свёрнутые разделы в рейке участвуют: группа видна и свёрнутой", () => {
@@ -134,28 +176,34 @@ test("свёрнутые разделы в рейке участвуют: гру
   assert.equal(drawn(items, pins, 3) + HEAD, 420);
 });
 
-test("свёрнутый раздел к верхней кромке не липнет: двигать заголовок ему некуда", () => {
+test("свёрнутый раздел — такая же ступенька: видно и его", () => {
+  // До таска 201 свёрнутый к верху не липнул вовсе: браузеру было некуда
+  // двигать заголовок внутри раздела высотой в этот самый заголовок. Рейка
+  // двигает его сама, и заказчик просил видеть все разделы.
   const items = [
     { top: 0, box: HEAD, head: HEAD },
     { top: HEAD, box: 900, head: HEAD },
   ];
-  // Прокрутка прошла свёрнутый раздел насквозь — он уехал вместе с заголовком.
-  assert.deepEqual(sides(panelRailPins(items, { scrollTop: 200, clientHeight: 420 })), ["", "top"]);
+  const pins = panelRailPins(items, { scrollTop: 200, clientHeight: 420 });
+  assert.deepEqual(sides(pins), ["top", "top"]);
+  assert.equal(drawn(items, pins, 0), 200, "свёрнутый не встал первой ступенькой");
+  assert.equal(drawn(items, pins, 1), 200 + HEAD, "второй не встал под ним");
 });
 
-test("перелистывание целится под накладку, и накладку считает рейка", () => {
-  // В колонке разделы друг на друга не налезают, поэтому в целевом положении у
-  // верхней кромки стоит сам позванный раздел — и ответ всегда ноль. Важно,
-  // что это ответ счёта, а не допущение.
-  for (let k = 0; k < COLUMN.length; k += 1) assert.equal(panelRailTopInset(COLUMN, k), 0);
-  // А встанет сверху когда-нибудь лестница заголовков — цель уедет ниже на их
-  // высоту сама, без правок в том, кто рейку зовёт. Раскладка здесь нарочно
-  // невозможная: раздел накрывает собой соседа.
-  const stacked = [
-    { top: 0, box: 2000, head: HEAD },
-    { top: 500, box: 300, head: HEAD },
-  ];
-  assert.equal(panelRailTopInset(stacked, 1), HEAD);
+test("перелистывание целится под лестницу, и лестницу считает рейка", () => {
+  // С таска 201 ответ перестал быть нулём: выше позванного раздела встанут все
+  // разделы до него, и накладка — сумма их заголовков.
+  const frame = { scrollTop: 0, clientHeight: 420 };
+  for (let k = 0; k < COLUMN.length; k += 1) {
+    assert.equal(panelRailTopInset(COLUMN, k, frame), k * HEAD, "накладка перед разделом " + k);
+  }
+  // Предохранитель виден и здесь: на низком кадре лестница короче, и целиться
+  // под ступеньки, которых не будет, — значит промахнуться.
+  const low = { scrollTop: 0, clientHeight: 120 };
+  assert.equal(panelRailTopInset(COLUMN, 4, low), 60);
+  assert.ok(panelRailTopInset(COLUMN, 4, low) <= low.clientHeight * PANEL_RAIL_SHARE);
+  // Без кадра — просто сумма: предохранителю не из чего считать долю.
+  assert.equal(panelRailTopInset(COLUMN, 3), 90);
 });
 
 test("приём и его цена записаны там, где их будут искать", () => {
@@ -172,7 +220,7 @@ test("приём и его цена записаны там, где их буд�
   assert.match(RAIL_JS, /if \(node\.style\.getPropertyValue\(name\) !== css\)/);
   // Перелистывание мгновенное: плавное в колонке на три с лишним тысячи точек
   // полсекунды перестраивает рейку и показывает по дороге чужие строки.
-  assert.match(RAIL_JS, /column\.scrollTop = shown\[index\]\.top - panelRailTopInset\(shown, index\);/);
+  assert.match(RAIL_JS, /column\.scrollTop = shown\[index\]\.top - panelRailTopInset\(shown, index, frame\);/);
   assert.equal(RAIL_JS.includes("smooth"), false, "плавная прокрутка вернулась без уговора");
   assert.equal(APP_CSS.includes("scroll-behavior"), false, "плавную прокрутку включили стилем");
   // Рейку завязывает каркас — после панелей, иначе высот у разделов ещё нет.
@@ -232,7 +280,13 @@ test("стили знают про рейку: заголовок у кромк�
   assert.equal(/border-top/.test(body), false, "рамка вместо тени меняет высоту заголовка");
   // Две кнопки стоят рядом строкой, имя забирает остаток.
   const head = APP_CSS.slice(APP_CSS.indexOf("\n.panel__head {"));
-  assert.match(head.slice(0, head.indexOf("}")), /display: flex;/);
+  const headBody = head.slice(0, head.indexOf("}"));
+  assert.match(headBody, /display: flex;/);
+  // Верх считает рейка, а не браузер: двое на одну кромку спорили бы на каждом
+  // кадре (таск 201).
+  assert.equal(/position: sticky/.test(headBody), false, "липкость вернулась к заголовку — верх считают двое");
+  assert.match(APP_CSS, /\.panel__head\.is-above \{\n\s*box-shadow: 0 1px 0 var\(--panel-line\);/);
+  assert.match(APP_CSS, /\.panel__head\.is-below \{\n\s*box-shadow: 0 -1px 0 var\(--panel-line\);/);
   assert.ok(APP_CSS.includes("\n.panel__fold {"), "у галочки нет своего правила");
   // Прилипшие накладки садятся над рейкой, а не под неё.
   assert.match(MARKS_CSS, /bottom: calc\(var\(--panel-rail, 0px\) - 12px\);/);

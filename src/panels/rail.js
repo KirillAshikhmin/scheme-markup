@@ -62,59 +62,92 @@ export const PANEL_RAIL_SHARE = 0.5;
  * влияет), `box` — высота раздела, `head` — высота его заголовка. `frame` —
  * что показано: `{ scrollTop, clientHeight }`.
  *
- * Отдаёт массив той же длины: `{ shift, side }`.
+ * Отдаёт массив той же длины: `{ shift, side }`. `shift` — на сколько сдвинуть
+ * заголовок от его места (вниз — к верхней кромке, вверх — к нижней), `side` —
+ * где он оказался: `""` — на своём месте, `"top"` — ступенькой у верхней
+ * кромки, `"bottom"` — у нижней. Сторона нужна наружу затем, что по ней
+ * решается смысл нажатия (таск 198): заголовок не на своём месте — указатель.
  *
- * `shift` — ноль или на сколько поднять заголовок. Вниз заголовок не
- * двигается никогда: опустить его ниже своего места значило бы закрыть им своё
- * же содержимое.
+ * **Лестница с обеих сторон** (таск 201, G305). Слова заказчика: «заголовки
+ * должны отображаться все имеющиеся на экране свёрнутые, а не только
+ * ближайший». До этого у каждой кромки стоял один заголовок — ближайший
+ * уехавший, — и верх держал сам браузер (`position: sticky`). Теперь обе
+ * кромки считаются здесь и по одному правилу:
  *
- * `side` — где он при этом оказался: `""` — на своём месте, `"top"` — прижат к
- * верхней кромке (это делает сам браузер, `position: sticky`), `"bottom"` —
- * поднят рейкой к нижней. Наружу это нужно затем, что по стороне решается
- * смысл нажатия (таск 198): заголовок не на своём месте — указатель.
+ * — **Сверху** идём с начала и копим `used`. Раздел, чьё место уже выше строки
+ *   `scrollTop + used`, встаёт ступенькой на эту строку, и его заголовок
+ *   занимает следующие `head` точек. Первый, кто до строки не дотянулся, стоит
+ *   сам — и все, кто ниже него, тоже.
+ * — **Снизу** идём с конца и копим `stack`: последний раздел встаёт у самой
+ *   кромки, предыдущий над ним. Первый, кто дотянулся до своей строки, стоит
+ *   сам — и все, кто выше.
  *
- * Разделы, которые целиком ниже кадра, — это всегда **хвост** списка, поэтому
- * счёт идёт с конца: последний раздел встаёт у самой кромки, предыдущий над
- * ним, и каждому следующему остаётся кадра меньше. Как только раздел своим
- * местом дотянулся до своей строки в рейке — он и все, кто выше, стоят сами:
- * заголовок снимается с рейки ровно там, где сдвиг обнуляется, и перехода не
- * видно.
+ * В обе стороны заголовок **снимается со ступеньки ровно там, где сдвиг
+ * обнуляется**: перехода не видно, прыжка нет.
  *
- * Верх считается без прокрутки вовсе — одной арифметикой: браузер держит
- * заголовок внутри его раздела, значит прижат тот и только тот, чей раздел
- * **начался выше кадра и ещё не кончился**. Свёрнутый раздел (`box === head`)
- * к верху не липнет никогда: двигать заголовок ему некуда.
+ * Свёрнутый раздел — такая же ступенька, как остальные: в лестнице стоят все
+ * разделы колонки, и видно их всегда. (До таска 201 свёрнутый к верху не
+ * липнул вовсе — браузеру было некуда двигать его заголовок внутри раздела
+ * высотой в этот самый заголовок.)
+ *
+ * **Предохранитель.** Обе лестницы вместе не съедают больше `PANEL_RAIL_SHARE`
+ * кадра. Лишние ступеньки снимаются с дальних концов — сверху с самой верхней,
+ * снизу с самой нижней: дальний раздел и так за соседями, а ближний — тот, к
+ * которому человек подойдёт следующим движением. Уступает та лестница, в
+ * которой ступенек больше; поровну — уступает верхняя, потому что нижняя
+ * показывает, куда ещё идти.
  */
 export function panelRailPins(items, frame) {
   const count = items ? items.length : 0;
   const pins = [];
+  for (let k = 0; k < count; k += 1) pins.push({ shift: 0, side: "" });
   const view = Math.max(0, (frame && frame.clientHeight) || 0);
-  const from = (frame && frame.scrollTop) || 0;
-  for (let k = 0; k < count; k += 1) {
-    const item = items[k];
-    const held = item.box > item.head && item.top < from && from < item.top + item.box;
-    pins.push({ shift: 0, side: held ? "top" : "" });
-  }
   if (!count || view <= 0) return pins;
+  const from = (frame && frame.scrollTop) || 0;
   const edge = from + view;
-  let first = count;
-  let stack = 0;
-  for (let k = count - 1; k >= 0; k -= 1) {
-    const line = edge - stack - items[k].head;
-    if (items[k].top <= line) break;
-    first = k;
-    stack += items[k].head;
+
+  // Верхняя лестница — разделы `[topFrom, topTo)`: те, чьё место уже выше своей
+  // строки. Нижняя — `[botFrom, botTo)`: те, кто до своей строки не дотянулся.
+  let topFrom = 0;
+  let topTo = 0;
+  let upper = 0;
+  while (topTo < count && items[topTo].top <= from + upper) {
+    upper += items[topTo].head;
+    topTo += 1;
   }
-  if (first >= count) return pins;
-  // Лишние снимаются с дальнего конца: дальний раздел и так за двумя другими,
-  // а ближний — следующий, к которому человек подойдёт прокруткой.
-  let last = count;
-  while (last > first + 1 && stack > view * PANEL_RAIL_SHARE) {
-    last -= 1;
-    stack -= items[last].head;
+  let botFrom = count;
+  let botTo = count;
+  let lower = 0;
+  for (let k = count - 1; k >= topTo; k -= 1) {
+    if (items[k].top <= edge - lower - items[k].head) break;
+    botFrom = k;
+    lower += items[k].head;
   }
-  let line = edge;
-  for (let k = last - 1; k >= first; k -= 1) {
+
+  // Предохранитель: лестницы делят кадр с содержимым, а не занимают его.
+  const cap = view * PANEL_RAIL_SHARE;
+  while (upper + lower > cap) {
+    const top = topTo - topFrom;
+    const bottom = botTo - botFrom;
+    if (top === 0 && bottom === 0) break;
+    if (bottom === 0 || (top > 0 && top >= bottom)) {
+      upper -= items[topFrom].head;
+      topFrom += 1;
+    } else {
+      botTo -= 1;
+      lower -= items[botTo].head;
+    }
+  }
+
+  let line = from;
+  for (let k = topFrom; k < topTo; k += 1) {
+    const shift = Math.max(0, Math.round(line - items[k].top));
+    line += items[k].head;
+    if (!shift) continue;
+    pins[k] = { shift, side: "top" };
+  }
+  line = edge;
+  for (let k = botTo - 1; k >= botFrom; k -= 1) {
     line -= items[k].head;
     const shift = Math.min(0, Math.round(line - items[k].top));
     if (!shift) continue;
@@ -126,31 +159,29 @@ export function panelRailPins(items, frame) {
 /**
  * Куда прокрутить колонку, чтобы раздел встал к верхней кромке.
  *
- * Считает это рейка, а не тот, кто её зовёт: заголовок обязан встать **под**
- * накладкой — под теми заголовками, которые в целевом положении сами прижаты
- * к верху, — иначе перелистывание прячет раздел за той же рейкой, из которой
- * его позвали.
+ * Считает это рейка, а не тот, кто её зовёт: раздел обязан встать **под**
+ * лестницей — под заголовками тех, кто в целевом положении окажется выше
+ * кадра, — иначе перелистывание прячет его за той же рейкой, из которой его
+ * позвали.
  *
- * Сегодня ответ всегда ноль, и это видно из счёта, а не взято на веру: к
- * верхней кромке липнет только заголовок раздела, который её пересекает, а в
- * целевом положении её пересекает сам позванный раздел — он и встаёт на своё
- * место. Счёт оставлен счётом нарочно: заведётся сверху лестница заголовков,
- * как завелась снизу, — перелистывание сядет правильно само, и вспоминать про
- * это место не придётся.
+ * С таском 201 ответ перестал быть нулём: выше позванного раздела в лестнице
+ * встанут **все** разделы до него, и накладка — сумма их заголовков. Больше
+ * доли кадра лестница не берёт, поэтому и здесь стоит тот же предохранитель:
+ * считать накладку по ступенькам, которых не будет, — значит промахнуться.
  */
-export function panelRailTopInset(items, index) {
-  const target = items[index] ? items[index].top : 0;
+export function panelRailTopInset(items, index, frame) {
   let inset = 0;
-  for (let k = 0; k < items.length; k += 1) {
-    if (k === index) continue;
-    const item = items[k];
-    if (item.box > item.head && item.top < target && target < item.top + item.box) inset += item.head;
-  }
-  return inset;
+  for (let k = 0; k < index && k < items.length; k += 1) inset += items[k].head;
+  const view = Math.max(0, (frame && frame.clientHeight) || 0);
+  if (view <= 0) return inset;
+  const cap = view * PANEL_RAIL_SHARE;
+  for (let k = 0; k < index && inset > cap; k += 1) inset -= items[k].head;
+  return Math.max(0, inset);
 }
 
-// Высота рейки по колонкам: её спрашивают прокрутки к выделенной строке —
-// рейка закрывает низ кадра так же непрозрачно, как прилипшая кнопка.
+// Высоты лестниц по колонкам: `{top, bottom}`. Их спрашивают прокрутки к
+// выделенной строке — рейка закрывает кадр так же непрозрачно, как прилипшие
+// фильтры и кнопка смыкания.
 const railHeight = new WeakMap();
 
 /**
@@ -181,13 +212,14 @@ export function panelCover(frame, element, side) {
   return Math.max(0, side === "head" ? rect.bottom - frame.top : frame.bottom - rect.top);
 }
 
-// Высота рейки у колонки, в которой лежит узел (ноль — рейки нет). Прокрутка к
-// строке обязана её знать: подвести строку под рейку — то же, что подвести её
-// под прилипшие фильтры.
-export function panelRailInset(node) {
+// Высота лестницы у колонки, в которой лежит узел: `"top"` — сколько закрыто
+// сверху, `"bottom"` — снизу (ноль — ступенек нет). Прокрутка к строке обязана
+// это знать: подвести строку под рейку — то же, что подвести её под прилипшие
+// фильтры.
+export function panelRailInset(node, side) {
   for (let box = node; box; box = box.parentElement) {
     const rail = railHeight.get(box);
-    if (rail !== undefined) return rail;
+    if (rail !== undefined) return side === "top" ? rail.top : rail.bottom;
   }
   return 0;
 }
@@ -198,6 +230,7 @@ export function panelRailInset(node) {
 function railPin(node, pin) {
   const css = pin.shift ? "translateY(" + pin.shift + "px)" : "";
   if (node.style.transform !== css) node.style.transform = css;
+  node.classList.toggle("is-above", pin.side === "top");
   node.classList.toggle("is-below", pin.side === "bottom");
   node.classList.toggle("is-pinned", pin.side !== "");
   const title = node.querySelector(".panel__title");
@@ -237,21 +270,24 @@ function syncColumn(column) {
   const all = railItems(column);
   const shown = all.filter((item) => item.head > 0);
   const pins = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
-  let rail = 0;
+  let top = 0;
+  let bottom = 0;
   for (let k = 0; k < shown.length; k += 1) {
     railPin(shown[k].node, pins[k]);
-    if (pins[k].shift) rail += shown[k].head;
+    if (pins[k].side === "top") top += shown[k].head;
+    else if (pins[k].side === "bottom") bottom += shown[k].head;
   }
-  for (const item of all) {
-    if (item.head <= 0) railPin(item.node, RAIL_FREE);
-    // Прилипший блок внутри тела (фильтры списка меток) липнет **под**
-    // заголовком своего раздела, а не на нём: высоту заголовка он узнаёт мерой,
-    // а не числом в стилях — иначе фильтры разошлись бы с заголовком на первой
-    // же правке шрифта или отступов.
-    railVar(item.section, "--panel-head", item.head);
-  }
-  railVar(column, "--panel-rail", rail);
-  railHeight.set(column, rail);
+  for (const item of all) if (item.head <= 0) railPin(item.node, RAIL_FREE);
+  // Прилипший блок внутри тела (фильтры списка меток) липнет **под** лестницей,
+  // а не под одним своим заголовком: с таска 201 сверху стоят все уехавшие
+  // разделы, и своего заголовка там уже мало. Мера одна на колонку и меряется
+  // по ступенькам, а не числом в стилях.
+  //
+  // Первая ступенька лестницы, стоящая на своём месте (прокрутка в самом
+  // верху), в меру не входит: её сдвиг ноль, и содержимое под ней не уезжает.
+  railVar(column, "--panel-head", top);
+  railVar(column, "--panel-rail", bottom);
+  railHeight.set(column, { top, bottom });
 }
 
 /**
@@ -280,7 +316,8 @@ export function panelRailJump(node) {
   const shown = railItems(column).filter((item) => item.head > 0);
   const index = shown.findIndex((item) => item.node === head);
   if (index < 0) return false;
-  column.scrollTop = shown[index].top - panelRailTopInset(shown, index);
+  const frame = { scrollTop: column.scrollTop, clientHeight: column.clientHeight };
+  column.scrollTop = shown[index].top - panelRailTopInset(shown, index, frame);
   syncPanelRail();
   return true;
 }
