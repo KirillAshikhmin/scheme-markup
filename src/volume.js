@@ -5107,7 +5107,10 @@ function volumeDrawMoon(ctx, aim, hour) {
   ctx.fillStyle = "rgba(242,243,228," + Math.round(Math.max(0.35, Math.min(1, hour.stars + 0.35)) * 100) / 100 + ")";
   ctx.beginPath();
   ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
-  ctx.arc(at.x - radius * 0.46, at.y - radius * 0.14, radius * 0.94, 0, Math.PI * 2, true);
+  // Вырезающая окружность сдвинута больше чем на половину радиуса: при меньшем
+  // сдвиге серп в своём размере (пара десятков точек на экране) читается
+  // кольцом, а не месяцем.
+  ctx.arc(at.x - radius * 0.58, at.y - radius * 0.16, radius * 0.9, 0, Math.PI * 2, true);
   ctx.fill();
 }
 
@@ -5318,7 +5321,7 @@ export const VOLUME_NIGHT_SHARE = 0.45;
  * иначе ночь читалась бы вторым днём.
  */
 export const VOLUME_MOON_RISE_DEG = 11;
-export const VOLUME_MOON_SIZE_DEG = 1.6;
+export const VOLUME_MOON_SIZE_DEG = 1.9;
 
 /** Доля в отрезке, зажатая по краям: ею считается всё непрерывное ниже. */
 function volumeShare(value, from, to) {

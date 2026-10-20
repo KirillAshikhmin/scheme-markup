@@ -304,6 +304,11 @@ export function createVolumeParams({ now, hour, times }) {
     const line = () => {
       const at = hour();
       state.textContent = volumeParamsLine(volumeParamsRead().clock, at.minutes, at.phase);
+      // Пока время идёт, часы в поле идут вместе с ним: поле, застывшее на
+      // минуте открытия, читалось бы как «вот сейчас столько». Набирающую руку
+      // это не трогает — под курсором поле не переписывается.
+      const field = body.querySelector(".tools__time");
+      if (field && document.activeElement !== field) field.value = volumeClockText(at.minutes);
     };
     const close = () => {
       if (tick && typeof clearInterval === "function") clearInterval(tick);
