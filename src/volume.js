@@ -5444,16 +5444,103 @@ export function volumeRiverGreens(river) {
 
 export const VOLUME_RIVER_GREENS = volumeRiverGreens(VOLUME_RIVER);
 
+// ——— две земли и шов между ними (дефект D52, таск 196) ————————————————————
+//
+// Слова заказчика, со снимками обзора: «но пол дома всё равно летает, вот
+// границей перекрыл машинки. ниже спусти», «для тестов можешь перекрасить землю
+// и увидишь. Фундамент в воздухе относительно фона».
+//
+// Это **третий заход** на одно и то же: G237 (таск 157) поставил дом на землю,
+// D43 (таск 178) чинил «дом всё ещё летает». Оба раза правили сцену, и дефект
+// возвращался. Поэтому сначала — обе высоты числами, как и просил тикет.
+//
+// **Земля сцены — настоящая плоскость.** Одна грань на нулевой отметке
+// (`VOLUME_LAYER_BASE`), по габариту чертежа плюс вынос: вынос считается от
+// тени дома (`volumeShadowShift` при полуденной высоте 14°) плюс
+// `VOLUME_LAND_OUT_MM`. На объекте заказчика это 14,23 м за габарит, то есть
+// плита **37,66 × 37,16 м**, а её кромка стоит в 26,2…26,7 м от середины дома.
+// Человек ростом 1600 мм видит эту кромку в **3,43…3,49° под горизонтом** —
+// при фокусе 700 это `y = 492` при горизонте `y = 450`.
+//
+// **Земля фона — заливка ниже строки горизонта.** Никакой плоскости у неё нет
+// вовсе: `volumeDrawBackdrop` заливает `palette.land` от строки
+// `volumeHorizon(camera, box) = высота/2 + фокус · tg(наклон)` и до низа кадра,
+// а всё, что на этой земле стоит, нарисовано **на бесконечности**:
+// `volumeSkyPoint` знает направление и не знает ни дальности, ни высоты глаза.
+// Дальность у вещей фона есть только неявная — та, что получается, если принять
+// высоту глаза стоящего (`VOLUME_EYE_MM` = 1600): дорога приходит с 9,8 м,
+// улица города с 9,5 м, машинки стоят в 13,2 м, основания ближнего ряда домов в
+// 21,8 м, кусты — в 8,2 м.
+//
+// **Отсюда весь дефект, и он арифметический.** Всё, что фон рисует на земле,
+// лежит **ближе** 26,2 м — то есть внутри плиты. Плита рисуется после фона и
+// закрывает их собой: машинки на `y = 535` против кромки плиты на `y = 492`
+// срезаются ровно пополам, а у ближнего ряда домов (`y = 501`) кромка проходит
+// по основаниям. Числом «дом летает» — это 43 точки между кромкой плиты и
+// машинками.
+//
+// **Мера теперь одна, и живёт она здесь.** Панорама не рисует на земле ничего
+// **ближе кромки плиты**: самое близкое её колено (куст, 11° под горизонтом —
+// `VOLUME_PANORAMA_NEAR_DEG`) приводится ровно к углу этой кромки, а остальное
+// отъезжает тем же множителем. Множитель считается в тангенсах, то есть это
+// честное «кольцо панорамы отодвинули»: дальности всех её вещей умножены на одно
+// число, порядок (дорога ближе холмов, холмы ближе гор) сохранён, и угловые
+// размеры уехавших вещей уменьшены тем же множителем — дерево, отодвинутое
+// втрое, втрое и мельче.
+//
+// **Ближе панорама не придвигается никогда** (`Math.min(1, …)`): за кромкой
+// плиты лежит та же земля того же тона, и уйти за неё дальше вещам фона можно —
+// шва от этого не будет. А вот ближе — нельзя: там плита, и любая вещь фона
+// оказалась бы ею срезана. Поэтому в обзоре, где камера поднята и кромка плиты
+// уходит на 19…34° под горизонт, панорама остаётся **ровно той же, что была**:
+// её 11° и так дальше кромки.
+//
+// **Считается от середины чертежа, а не от камеры** — по полудиагонали плиты
+// (26,45 м на объекте заказчика). Это нарочно: возьми я дальность до кромки от
+// того места, где человек стоит, — панорама дышала бы при каждом шаге, а фон
+// обязан стоять. От высоты глаза она зависеть должна и зависит: поднялся на
+// второй этаж — кромка плиты ушла ниже, и кольцу можно подойти ближе.
+
+/**
+ * Самое близкое, что панорама рисует на земле: куст в 11° под горизонтом
+ * (`VOLUME_TREES`, az 176). Улица города приходит с 9,6°, дорога «Природы» —
+ * с 9,3°, и всё это считается от высоты глаза стоящего (`VOLUME_EYE_MM`).
+ */
+export const VOLUME_PANORAMA_NEAR_DEG = 11;
+
+/**
+ * Во сколько отодвинуть землю панорамы, чтобы она начиналась за кромкой земли
+ * сцены (D52). Единица — ничего не двигать.
+ *
+ * `land` — прямоугольник плиты (`scene.landMm`); `null` значит, что плита
+ * работает полом, а не землёй, и отодвигать нечего.
+ */
+export function volumeGroundScale(camera, land) {
+  if (!land) return 1;
+  const eyeMm = Number(camera && camera.at && camera.at.z);
+  if (!(eyeMm > 0)) return 1;
+  const reachMm = Math.hypot((Number(land.maxX) - Number(land.minX)) / 2, (Number(land.maxY) - Number(land.minY)) / 2);
+  if (!(reachMm > 0)) return 1;
+  const edge = Math.atan(eyeMm / reachMm);
+  return Math.min(1, Math.tan(edge) / Math.tan(VOLUME_PANORAMA_NEAR_DEG * DEG));
+}
+
 /**
  * Прицел панорамы: базис камеры, фокус и середина окна. Считается один раз на
  * кадр — все вещи фона смотрят через него.
+ *
+ * `ground` — множитель, которым земля панорамы отодвинута за кромку земли сцены
+ * (D52, `volumeGroundScale`). Единица — прицел, каким он был до таска 196;
+ * светило, звёзды и облака смотрят **через него**, а не через земной: небу
+ * кромка плиты не указ.
  */
-export function volumeSkyAim(camera, box) {
+export function volumeSkyAim(camera, box, ground = 1) {
   return {
     basis: volumeBasis(camera),
     focal: volumeFocal(box),
     halfWidth: box.width / 2,
     halfHeight: box.height / 2,
+    ground: Number.isFinite(Number(ground)) && Number(ground) > 0 ? Math.min(1, Number(ground)) : 1,
   };
 }
 
@@ -5466,7 +5553,13 @@ export function volumeSkyAim(camera, box) {
  * у граней сцены, и ровно потому, что камера одна и та же.
  */
 export function volumeSkyPoint(aim, azimuthDeg, riseDeg) {
-  const rise = riseDeg * DEG;
+  // Земля панорамы отодвинута за кромку земли сцены (D52): дальность всех её
+  // вещей умножена на одно число, то есть тангенс их высоты — поделен. Всё, что
+  // на горизонте и выше (светило, облака, вершины, дальний ряд деревьев),
+  // остаётся на месте: отодвигать бесконечность некуда.
+  const push = aim.ground === undefined ? 1 : aim.ground;
+  const sunk = riseDeg < 0 && push < 1;
+  const rise = sunk ? Math.atan(Math.tan(riseDeg * DEG) * push) : riseDeg * DEG;
   const azimuth = azimuthDeg * DEG;
   const flat = Math.cos(rise);
   const direction = { x: flat * Math.cos(azimuth), y: flat * Math.sin(azimuth), z: Math.sin(rise) };
@@ -5476,7 +5569,10 @@ export function volumeSkyPoint(aim, azimuthDeg, riseDeg) {
   const right = direction.x * basis.right.x + direction.y * basis.right.y + direction.z * basis.right.z;
   const up = direction.x * basis.up.x + direction.y * basis.up.y + direction.z * basis.up.z;
   const scale = focal / depth;
-  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale };
+  // Угловой размер уехавшей вещи уменьшается тем же множителем: отодвинутое
+  // втрое дерево втрое и мельче — иначе на кромке участка встал бы лес в
+  // двадцать градусов.
+  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale: sunk ? scale * push : scale };
 }
 
 /**
@@ -5554,7 +5650,7 @@ function volumeDrawStrip(ctx, aim, nodes, paint) {
  * реку, поэтому она после полос; деревья по кругу — последними, они ближе
  * всего.
  */
-export function volumeDrawBackdrop(ctx, box, camera, mood = null) {
+export function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
   const hour = mood || VOLUME_MOOD_NOON;
   const palette = hour.palette;
   const horizonY = volumeHorizon(camera, box);
@@ -5564,12 +5660,17 @@ export function volumeDrawBackdrop(ctx, box, camera, mood = null) {
   sky.addColorStop(1, hour.sky.low);
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, box.width, Math.max(0, line));
-  const aim = volumeSkyAim(camera, box);
+  // Два прицела, и разница между ними — ровно дефект D52. Небесному кромка
+  // земли сцены не указ: светило, звёзды и облака стоят там, где стоят.
+  // Земному она указ: ближе кромки панорама на земле не рисует ничего, иначе
+  // плита срезает ей машинки (`volumeGroundScale`).
+  const above = volumeSkyAim(camera, box);
+  const aim = volumeSkyAim(camera, box, volumeGroundScale(camera, land));
   // Светило и звёзды — до поля: они за горизонтом и обрезаются им.
-  if (hour.stars > 0) volumeDrawStars(ctx, aim, hour);
-  volumeDrawSun(ctx, aim, hour);
-  volumeDrawMoon(ctx, aim, hour);
-  if (hour.kind !== "plain") for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, aim, cloud, palette);
+  if (hour.stars > 0) volumeDrawStars(ctx, above, hour);
+  volumeDrawSun(ctx, above, hour);
+  volumeDrawMoon(ctx, above, hour);
+  if (hour.kind !== "plain") for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, above, cloud, palette);
   if (line < box.height) {
     // Земля — плоским тоном (G237): тем же, которым красится плита чертежа, и
     // дом от этого стоит на ней, а не на доске. Час красит обе одной краской

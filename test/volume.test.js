@@ -168,6 +168,9 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeShadowFaces,
+  volumeGroundScale,
+  VOLUME_PANORAMA_NEAR_DEG,
+  VOLUME_LAND_OUT_MM,
   volumeSunSpotFaces,
   volumeSunSpotRgb,
   volumeSunOpenings,
@@ -883,6 +886,103 @@ test("обрезка выпуклым отсекателем режет и не�
   assert.ok(Math.abs(volumeArea(back) - volumeArea(band)) < 1, "обход отсекателя поменял ответ");
   assert.deepEqual(volumeClipPolygon(room, [{ x: 9000, y: 9000 }, { x: 9500, y: 9000 }, { x: 9500, y: 9500 }]), []);
   assert.equal(VOLUME_SUN_PROBE_MM, 150);
+});
+
+// ——— D52: земля сцены и земля фона — одна мера —————————————————————————————
+//
+// Слова заказчика: «но пол дома всё равно летает, вот границей перекрыл
+// машинки», «Фундамент в воздухе относительно фона». Две земли считались
+// по-разному: сцена — настоящей плоскостью по габариту чертежа, фон — заливкой
+// ниже строки горизонта с вещами **на бесконечности**. Числа — у
+// `volumeGroundScale`; здесь проверяется, что мера одна.
+
+test("земля фона начинается ровно там, где кончается земля сцены (D52)", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const land = built.landMm;
+  assert.ok(land, "плита работает землёй — у неё есть прямоугольник");
+  // Кромка плиты от середины чертежа — полудиагональ, и считается она от
+  // выноса под тень дома: `volumeShadowShift` при полуденной высоте плюс запас.
+  const out = Math.hypot(...Object.values(volumeShadowShift(2700))) + VOLUME_LAND_OUT_MM;
+  assert.ok(Math.abs(land.maxX - (2000 + out)) < 1, "вынос плиты считается тенью дома");
+  const reach = Math.hypot((land.maxX - land.minX) / 2, (land.maxY - land.minY) / 2);
+  // Человек стоит: кромка плиты видна под малым углом, и земля фона отодвинута
+  // так, что её самое близкое колено ложится ровно на эту кромку.
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: 0, pitch: 0 };
+  const push = volumeGroundScale(camera, land);
+  assert.ok(push > 0 && push < 1, "земля фона отодвинута: " + push.toFixed(3));
+  const edgeDeg = (Math.atan(VOLUME_EYE_MM / reach) * 180) / Math.PI;
+  const box = { width: 1400, height: 900 };
+  const aim = volumeSkyAim(camera, box, push);
+  const nearest = volumeSkyPoint(aim, 0, -VOLUME_PANORAMA_NEAR_DEG);
+  const edge = volumeSkyPoint(volumeSkyAim(camera, box), 0, -edgeDeg);
+  assert.ok(Math.abs(nearest.y - edge.y) < 0.5, "ближнее колено панорамы не село на кромку плиты");
+  // Всё остальное — дальше кромки, то есть выше её на экране.
+  for (const rise of [-9.3, -6.9, -4.2, -0.6]) {
+    const point = volumeSkyPoint(aim, 0, rise);
+    assert.ok(point.y <= edge.y + 0.5, rise + "° осталось ближе кромки: y " + point.y.toFixed(0));
+  }
+  // Угловой размер уехавшей вещи уменьшается тем же множителем.
+  const plain = volumeSkyPoint(volumeSkyAim(camera, box), 0, -7.5);
+  const moved = volumeSkyPoint(aim, 0, -7.5);
+  assert.ok(Math.abs(moved.scale / plain.scale - push) < 0.02, "дерево отодвинули, а размер оставили");
+  // Небо не двигается вовсе: отодвигать бесконечность некуда.
+  for (const rise of [0, 2.6, 16]) {
+    assert.deepEqual(volumeSkyPoint(aim, 30, rise), volumeSkyPoint(volumeSkyAim(camera, box), 30, rise));
+  }
+});
+
+test("ближе кромки земля фона не придвигается, а дальше — стоит как стояла", () => {
+  const scene = roomScene();
+  const land = volumeScene(scene.project, scene.schemeId).landMm;
+  // Обзор: камера поднята, кромка плиты ушла глубоко под горизонт — панорама
+  // остаётся ровно той, что была до таска 196.
+  const around = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0, -0.73, 20000);
+  assert.equal(volumeGroundScale(around, land), 1, "обзор панораму не двигает");
+  // Поднялись на второй этаж — кромка видна ниже, и кольцу можно подойти ближе.
+  const first = volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, land);
+  const second = volumeGroundScale({ at: { x: 0, y: 0, z: 2800 + VOLUME_EYE_MM } }, land);
+  assert.ok(second > first, "со второго этажа кольцо дальше, чем с первого");
+  // Нет земли — нечего и отодвигать: плита работает полом (помещения не
+  // обведены), и фон остаётся прежним.
+  const bareScene = roomScene({ room: false });
+  const bare = volumeScene(bareScene.project, bareScene.schemeId);
+  assert.equal(bare.landMm, null, "плита-пол землёй не считается");
+  assert.equal(volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, null), 1);
+  // Шаг человека панораму не колышет: мера считается от середины чертежа.
+  const here = volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, land);
+  const there = volumeGroundScale({ at: { x: 1800, y: -1200, z: VOLUME_EYE_MM } }, land);
+  assert.equal(here, there, "фон задышал при шаге");
+});
+
+test("светило и звёзды смотрят своим прицелом, а не земным (D52)", () => {
+  const box = { x: 0, y: 0, width: 1280, height: 720 };
+  const seen = [];
+  const fade = { addColorStop: () => {} };
+  const ctx = {
+    createLinearGradient: () => fade,
+    beginPath: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    closePath: () => {},
+    fill: () => {},
+    fillRect: () => {},
+    arc: (x, y, r) => seen.push([Math.round(x), Math.round(y), Math.round(r)]),
+    ellipse: (x, y, r) => seen.push([Math.round(x), Math.round(y), Math.round(r)]),
+    save: () => {},
+    restore: () => {},
+    fillStyle: "",
+  };
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: (90 * Math.PI) / 180, pitch: -0.08 };
+  const mood = volumeMood({ minutes: 10 * 60, times: SUN_DAY, kind: "plain" });
+  volumeDrawBackdrop(ctx, box, camera, mood);
+  const bare = [...seen];
+  seen.length = 0;
+  // Та же минута, тот же ракурс, но у сцены есть земля: светило обязано
+  // остаться на месте — кромка плиты ему не указ.
+  volumeDrawBackdrop(ctx, box, camera, mood, { minX: -18000, minY: -18000, maxX: 18000, maxY: 18000 });
+  assert.deepEqual(seen, bare, "светило уехало вместе с землёй фона");
+  assert.ok(bare.length > 0, "стенд пуст: светило не нарисовано");
 });
 
 // ——— D37: под проёмом и под стеной есть пол ———————————————————————————————
