@@ -272,7 +272,6 @@ import {
   volumeMinimapBox,
   volumeMinimapAt,
   volumePlanCentre,
-  volumePlanViewAt,
   volumeMinimapView,
   volumeNotes,
   volumeStackLine,
@@ -306,6 +305,8 @@ import {
 import {
   screenPlaceForget,
   screenPlaceOf,
+  screenPlacePlanView,
+  screenPlaceScreen,
   screenPlaceSet,
 } from "../src/screenPlace.js";
 import { elevationNote } from "../src/panels/elevation.js";
@@ -3752,13 +3753,15 @@ test("середина поля плана читается местом на ч
   assert.ok(middle, "моста план → миллиметры нет");
   // Поставить вид на то же место — и середина поля не сдвинется ни на
   // миллиметр: два перевода обязаны сойтись.
-  const back = volumePlanViewAt(scene.project, scene.schemeId, box, view, middle);
+  // Вид плана по месту считает общий счёт (`screenPlacePlanView`): объём с
+  // таска 210 плану вида не правит вовсе — план читает место сам.
+  const back = screenPlacePlanView(scene.project, scene.schemeId, box, { x: middle.x, y: middle.y }, view);
   assert.equal(back.zoom, view.zoom, "масштаб трогать нельзя — его выбрал человек");
   const again = volumePlanCentre(scene.project, scene.schemeId, box, back);
   assert.ok(Math.abs(again.x - middle.x) <= 1 && Math.abs(again.y - middle.y) <= 1, "место уехало: " + JSON.stringify([middle, again]));
   // Показать на точку чертежа — середина поля встаёт ровно на неё.
   const want = { x: 2500, y: -1200 };
-  const put = volumePlanViewAt(scene.project, scene.schemeId, box, view, want);
+  const put = screenPlacePlanView(scene.project, scene.schemeId, box, want, view);
   const got = volumePlanCentre(scene.project, scene.schemeId, box, put);
   assert.ok(Math.abs(got.x - want.x) <= 1 && Math.abs(got.y - want.y) <= 1, "встали не туда: " + JSON.stringify(got));
 });
@@ -3768,15 +3771,16 @@ test("без калибровки плана переносить нечем —
   const box = { width: 900, height: 600 };
   const view = { zoom: 1, offsetX: 0, offsetY: 0 };
   assert.equal(volumePlanCentre(bare.project, bare.scheme.id, box, view), null);
-  assert.equal(volumePlanViewAt(bare.project, bare.scheme.id, box, view, { x: 0, y: 0 }), null);
+  assert.equal(screenPlacePlanView(bare.project, bare.scheme.id, box, { x: 0, y: 0 }, view), null);
   // И чужой схемы тоже нет.
   assert.equal(volumePlanCentre(bare.project, "нет такой", box, view), null);
 });
 
 test("место и масштаб — одна запись на три режима, и объём масштаб не трогает (G276, D59)", () => {
   screenPlaceForget();
+  screenPlaceScreen(null);
   assert.equal(screenPlaceOf("схема-1"), null, "на пустом месте никто не отвечает");
-  const first = screenPlaceSet("схема-1", { x: 1500, y: -800 }, 0.25);
+  const first = screenPlaceSet("scheme", "схема-1", { x: 1500, y: -800 }, 0.25);
   const place = screenPlaceOf("схема-1");
   assert.deepEqual({ x: place.x, y: place.y, pxPerMm: place.pxPerMm }, { x: 1500, y: -800, pxPerMm: 0.25 });
   assert.equal(place.stamp, first, "отметка записи — ответ той же записи");
@@ -3784,16 +3788,16 @@ test("место и масштаб — одна запись на три реж�
   assert.equal(screenPlaceOf("схема-2"), null);
   // Объём масштабом не владеет: он пишет только место, и приближение остаётся
   // тем, которое человек выбрал до ухода.
-  screenPlaceSet("схема-1", { x: -200, y: 400 });
+  screenPlaceSet("volume", "схема-1", { x: -200, y: 400 });
   assert.deepEqual(screenPlaceOf("схема-1").pxPerMm, 0.25, "масштаб перебит местом из объёма");
   assert.equal(screenPlaceOf("схема-1").x, -200);
   // Запись, ничего не меняющая, не двигает отметку: поле говорит это на каждый
   // кадр, и память вида иначе писалась бы в хранилище впустую.
   const stamp = screenPlaceOf("схема-1").stamp;
-  screenPlaceSet("схема-1", { x: -200, y: 400 }, 0.25);
+  screenPlaceSet("scheme", "схема-1", { x: -200, y: 400 }, 0.25);
   assert.equal(screenPlaceOf("схема-1").stamp, stamp, "отметка выросла на пустой записи");
   // Мусор не ломает место: негодное число отбрасывается молча.
-  screenPlaceSet("схема-1", { x: Number.NaN, y: 0 }, 1);
+  screenPlaceSet("scheme", "схема-1", { x: Number.NaN, y: 0 }, 1);
   assert.equal(screenPlaceOf("схема-1").x, -200);
   screenPlaceForget();
   assert.equal(screenPlaceOf("схема-1"), null);
