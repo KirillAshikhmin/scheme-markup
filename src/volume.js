@@ -4516,24 +4516,25 @@ const VOLUME_HILL_NEAR = "#95b291";
 const VOLUME_SKY_NEAR = 0.08;
 
 /**
- * **Солнце в полдень** при верхе чертежа на север: сторона света и высота над
- * горизонтом в градусах, угловой радиус — тоже в градусах.
+ * **Полдень в среднем**: сторона света, высота над горизонтом и угловой радиус
+ * солнца в градусах, при верхе чертежа на север.
  *
- * С таска 181 солнце ходит по небу (`volumeSunAt`), и это число стало его
- * верхней точкой, а не местом. Трое считают от него, и больше никто:
+ * С таска 190 **место солнца считается по-настоящему** (`volumeSunAt`: дата,
+ * время, координаты), и дуга дня отсюда больше не берётся. Остались трое:
  *
- *   - **дуга дня** — в полдень солнце поднимается ровно на `rise`;
  *   - **вынос земляной плиты** — из `rise` выходит самая длинная тень, которую
  *     плита обязана удержать (`volumeShadowShift`), и этот размер часть сцены:
- *     пересчитывать его каждую секунду нельзя, иначе миникарта дышала бы;
- *   - **гряда гор** стоит напротив полуденного солнца (G238).
+ *     пересчитывать его каждую секунду нельзя, иначе миникарта дышала бы. Ниже
+ *     14° тень для этого и не опускается — тем же `volumeShadowShift`;
+ *   - **гряда гор** стоит напротив полуденного солнца (G238);
+ *   - **угловой размер** диска в кадре (`size`), нарисованный, а не настоящий
+ *     (у настоящего 0,26°) — разбор у `VOLUME_MOON_SIZE_DEG`.
  *
  * `az` = 90° — это юг: у панорамы ноль смотрит вправо по листу, а при верхе на
  * север вправо уходит восток, значит юг приходится на 90° (`volumePanoramaAz`).
- * Высота небольшая (14°) и выбрана не астрономией, а окном: при поле зрения 90°
- * по длинной стороне на вертикаль остаётся около ±22°, и солнце, повешенное
- * высоко, не попадало бы в кадр вовсе — то есть не «ходило бы по небу», как
- * просил заказчик.
+ * 14° — это **не** высота солнца в полдень (в Москве она от 11° в декабре до
+ * 58° в июне), а мера самой длинной тени, которую держит плита: низкое солнце
+ * кладёт её на полторы высоты стены, и плита выкроена ровно под это.
  */
 export const VOLUME_SUN_AT = { az: 90, rise: 14, size: 2.1 };
 
@@ -5126,24 +5127,31 @@ function volumeDrawSun(ctx, aim, hour) {
 /**
  * Месяц: не круг, а серп — заказчик назвал его месяцем, и узнаётся он формой.
  *
- * Серп — область между двумя окружностями, и рисуется он **одним** путём:
- * внешняя дуга по часовой, внутренняя против (правило непустого числа
- * оборотов), и внутренняя не вычитает фон, а вырезает дыру в самой фигуре.
- * Второй заливки «цветом неба» здесь быть не может: под месяцем растяжка, и
- * заплатка плоским цветом была бы видна.
+ * Фигура приходит готовой ломаной (`volumeMoonShape`) — одной на весь круг фаз
+ * (G290), от новолуния до полнолуния и обратно. Рисуется она **одним путём без
+ * вырезания**: прежний месяц был разностью двух окружностей в одном пути, и
+ * торчащий за диск кусок вырезающей окружности правило непустого обхода
+ * заливало — отсюда дефект D48, «две пересекающиеся дуги, фигура похожа на
+ * линзу». Заливки «цветом неба» здесь быть не может тем более: под месяцем
+ * растяжка, и заплатка плоским цветом была бы видна.
+ *
+ * Новолуние не рисуется вовсе, и это решение: освещённой доли у него нет, а
+ * обведённый контуром тёмный диск был бы выдумкой — в настоящем небе его не
+ * видно. Фигура и так сходится в линию сама, порог лишь убирает волосок.
  */
 function volumeDrawMoon(ctx, aim, hour) {
-  if (hour.moon.height < -2) return;
-  const at = volumeSkyPoint(aim, hour.moon.az, hour.moon.rise);
+  const moon = hour.moon;
+  if (moon.rise < -2 || !(moon.glow > 0) || !(moon.lit > VOLUME_MOON_THIN)) return;
+  const at = volumeSkyPoint(aim, moon.az, moon.rise);
   if (!at) return;
   const radius = Math.max(4, VOLUME_MOON_SIZE_DEG * DEG * at.scale);
-  ctx.fillStyle = "rgba(242,243,228," + Math.round(Math.max(0.35, Math.min(1, hour.stars + 0.35)) * 100) / 100 + ")";
+  const shown = Math.max(0.35, Math.min(1, hour.stars + 0.35)) * moon.glow;
+  ctx.fillStyle = "rgba(242,243,228," + Math.round(shown * 100) / 100 + ")";
+  const edge = volumeMoonShape(radius, moon.edge, moon.tiltDeg);
   ctx.beginPath();
-  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
-  // Вырезающая окружность сдвинута больше чем на половину радиуса: при меньшем
-  // сдвиге серп в своём размере (пара десятков точек на экране) читается
-  // кольцом, а не месяцем.
-  ctx.arc(at.x - radius * 0.58, at.y - radius * 0.16, radius * 0.9, 0, Math.PI * 2, true);
+  ctx.moveTo(at.x + edge[0].x, at.y + edge[0].y);
+  for (let index = 1; index < edge.length; index += 1) ctx.lineTo(at.x + edge[index].x, at.y + edge[index].y);
+  ctx.closePath();
   ctx.fill();
 }
 
@@ -5338,23 +5346,68 @@ export const VOLUME_DAY_MIN = 1440;
 export const VOLUME_SUNRISE_MIN = 9 * 60;
 export const VOLUME_SUNSET_MIN = 21 * 60;
 /**
- * Ускорение времени. Числа — слова заказчика (480, а не 280: «это опечатка»),
- * и каждое читается как «за сколько минут проходят сутки»:
- * 60 → 24 минуты, 120 → 12, 240 → 6, 480 → 3, 960 → 1,5.
+ * Ускорение времени. Числа — слова заказчика (480, а не 280: «это опечатка»), и
+ * каждое читается как «во сколько раз время идёт быстрее настоящего»: 60 → сутки
+ * за 24 минуты, 120 → за 12, 240 → за 6, 480 → за 3, 960 → за полторы.
+ *
+ * **Первый пункт — единица** (G287): «добавь в Ускорение пункт первый — без
+ * ускорения. При нажатии Сейчас он и должен выбираться и время идти в реальном
+ * времени». Единица — это идущее время, а не стоячее: сутки проходят сутки, и
+ * таймер снимка часа при ней живёт, как при любом другом ускорении. Стоячее
+ * время — это `volumeClockFixed`, и оно устроено иначе.
  */
-export const VOLUME_CLOCK_SPEEDS = [60, 120, 240, 480, 960];
+export const VOLUME_CLOCK_SPEEDS = [1, 60, 120, 240, 480, 960];
 export const VOLUME_CLOCK_SPEED_DEFAULT = 60;
+/** «Без ускорения» — то, что выбирает кнопка «Сейчас». */
+export const VOLUME_CLOCK_SPEED_REAL = 1;
 /** Чаще этого фон не пересчитывается — прямое требование заказчика. */
 export const VOLUME_MOOD_MS = 1000;
 /** Тон ночи и его потолок: куда и насколько тянется цвет к полуночи. */
 export const VOLUME_NIGHT_RGB = [18, 26, 54];
 export const VOLUME_NIGHT_SHARE = 0.45;
 /**
- * Месяц: высота в середине ночи и угловой размер. Ниже солнца и мельче его —
- * иначе ночь читалась бы вторым днём.
+ * Угловой размер месяца. Мельче солнца, но обоим он **нарисованный, а не
+ * настоящий**: у настоящих светил радиус 0,26°, и в кадре с полем зрения 90°
+ * это три точки — пятнышко, у которого не видно ни цвета, ни фазы. Место на
+ * небе с таска 190 настоящее (`volumeSunAt`, `volumeMoonAt`), размер — нет, и
+ * это разные вопросы.
  */
-export const VOLUME_MOON_RISE_DEG = 11;
 export const VOLUME_MOON_SIZE_DEG = 1.9;
+/**
+ * Точек на каждую кромку месяца. Двадцать четыре — это шаг 7,5°: на диске в
+ * двадцать точек экрана излома не видно, а ломаная остаётся дешёвой —
+ * `volumeMoonShape` отдаёт 48 точек, и это весь счёт месяца в кадре.
+ */
+export const VOLUME_MOON_STEPS = 24;
+/**
+ * Тоньше этой освещённой доли месяц не рисуется вовсе — это и есть новолуние.
+ * Сотая доля диска на двадцати точках экрана даёт волосок в четверть точки:
+ * нарисованный, он читался бы соринкой на стекле, а не луной.
+ */
+export const VOLUME_MOON_THIN = 0.01;
+/** Наклон земной оси: им считаются склонения и солнца, и месяца. */
+export const VOLUME_EARTH_TILT_DEG = 23.44;
+/**
+ * Горизонт, по которому считаются рассвет и закат: −50′ на преломление воздуха
+ * и полупоперечник диска (та же мера, что у всех таблиц рассвета). Высота
+ * светила отсчитывается **от него**, поэтому ноль высоты приходится ровно на
+ * рассвет из подписи окна, а не примерно на него.
+ */
+export const VOLUME_HORIZON_DEG = -0.833;
+/**
+ * Дом без координат: широта и склонение, по которым идёт дуга, когда координат
+ * у объекта нет. Равноденствие в средней полосе — то есть дуга настоящая, а
+ * рассвет с закатом остаются словами заказчика (9:00 и 21:00), на которые она
+ * растягивается. Разбор — у `volumeSkyPlace`.
+ */
+export const VOLUME_SITE_FALLBACK = { latDeg: 55, lonDeg: 0 };
+/** Синодический месяц: от новолуния до новолуния. */
+export const VOLUME_MOON_MONTH_DAYS = 29.530588853;
+/**
+ * Опорное новолуние — 6 января 2000 года, 18:14 UTC, в сутках от эпохи. От него
+ * считается возраст луны, а из возраста — и фаза, и место на небе.
+ */
+export const VOLUME_MOON_EPOCH_DAY = Date.UTC(2000, 0, 6, 18, 14) / 86400000;
 
 /** Доля в отрезке, зажатая по краям: ею считается всё непрерывное ниже. */
 function volumeShare(value, from, to) {
@@ -5393,6 +5446,63 @@ export function volumeClockParse(text) {
   return hours * 60 + minutes;
 }
 
+// ——— дата своим числом (таск 190, G289) ————————————————————————————————
+//
+// Слова заказчика: «для положения солнца дата нужна, пусть отдельное поле будет
+// над полем время».
+//
+// Дата живёт **номером суток** — целым числом суток гражданского календаря от
+// эпохи. Не `Date` и не тройкой чисел, и причина простая: часам нужно
+// складывать её с минутами и переваливать через полночь одним сложением
+// (`volumeClockStamp`), а `Date` для этого пришлось бы собирать и разбирать на
+// каждый кадр. Перевод в обе стороны — `volumeDayNumberOf`/`volumeDayDateOf`,
+// и считаются они через `Date.UTC`, то есть не зависят ни от часового пояса, ни
+// от перехода на летнее время: номер суток — это «какое сегодня число», а не
+// «сколько миллисекунд прошло».
+
+/** Номер суток по гражданской дате: целое число суток от эпохи. */
+export function volumeDayNumberOf(date) {
+  const at = date || new Date();
+  return Math.floor(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) / 86400000);
+}
+
+/**
+ * Обратно: `Date` на полдень этих суток по месту.
+ *
+ * Полдень, а не полночь, нарочно: из этой даты читают год, месяц и число, а
+ * полночь в день перехода на летнее время умеет уехать на сутки назад.
+ */
+export function volumeDayDateOf(dayNumber) {
+  const at = new Date((Number(dayNumber) || 0) * 86400000);
+  return new Date(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate(), 12);
+}
+
+/** «2026-10-20» — то, что просит и отдаёт поле даты. */
+export function volumeDateText(dayNumber) {
+  const at = volumeDayDateOf(dayNumber);
+  return (
+    String(at.getFullYear()).padStart(4, "0") +
+    "-" +
+    String(at.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(at.getDate()).padStart(2, "0")
+  );
+}
+
+/** «2026-10-20» → номер суток. `null` — не дата. */
+export function volumeDateParse(text) {
+  const match = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$/.exec(String(text || ""));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!(month >= 1 && month <= 12) || !(day >= 1 && day <= 31)) return null;
+  const at = new Date(Date.UTC(year, month - 1, day));
+  // Тридцатое февраля браузер молча переносит на март — такую дату не берём.
+  if (at.getUTCMonth() !== month - 1 || at.getUTCDate() !== day) return null;
+  return Math.floor(at.getTime() / 86400000);
+}
+
 /**
  * Часы объёма.
  *
@@ -5405,40 +5515,87 @@ export function volumeClockParse(text) {
  * таймера.
  */
 export function volumeClockNow(nowMs, date, speed = VOLUME_CLOCK_SPEED_DEFAULT) {
-  return { fixed: false, fromMin: volumeDayMinutesOf(date), atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
+  const at = date || new Date();
+  return {
+    fixed: false,
+    fromDay: volumeDayNumberOf(at),
+    fromMin: volumeDayMinutesOf(at),
+    atMs: Number(nowMs) || 0,
+    speed: volumeClockSpeedOf(speed),
+  };
 }
 
-export function volumeClockFixed(minutes, speed = VOLUME_CLOCK_SPEED_DEFAULT) {
-  return { fixed: true, fromMin: volumeWrapMinutes(minutes), atMs: 0, speed: volumeClockSpeedOf(speed) };
+export function volumeClockFixed(minutes, speed = VOLUME_CLOCK_SPEED_DEFAULT, day = null) {
+  return {
+    fixed: true,
+    fromDay: day === null || day === undefined ? volumeDayNumberOf(new Date()) : Math.round(Number(day) || 0),
+    fromMin: volumeWrapMinutes(minutes),
+    atMs: 0,
+    speed: volumeClockSpeedOf(speed),
+  };
 }
 
-/** Своё ускорение: чужое число не берётся — у списка ровно пять пунктов. */
+/** Своё ускорение: чужое число не берётся — у списка ровно шесть пунктов. */
 export function volumeClockSpeedOf(speed) {
   const value = Number(speed);
   return VOLUME_CLOCK_SPEEDS.includes(value) ? value : VOLUME_CLOCK_SPEED_DEFAULT;
 }
 
-/** Сколько минут занимают сутки при этом ускорении: 24, 12, 6, 3 и 1,5. */
+/** Сколько минут занимают сутки при этом ускорении: 1440, 24, 12, 6, 3 и 1,5. */
 export function volumeClockDayMinutes(speed) {
   return VOLUME_DAY_MIN / volumeClockSpeedOf(speed);
 }
 
+/**
+ * Который час и какое число на часах объёма.
+ *
+ * **Полночь переводит дату** (G289): время идёт формулой, и сутки у неё не
+ * последний разряд, а часть того же числа — минуты от начала `fromDay`. Сколько
+ * бы их ни набежало, целые сутки уезжают в номер дня, остаток — в часы. При
+ * ускорении 960 это случается каждые полторы минуты настоящего времени, и
+ * считается тем же одним сложением, что и час.
+ */
+export function volumeClockStamp(clock, nowMs) {
+  if (!clock) return { day: volumeDayNumberOf(new Date()), minutes: VOLUME_SUNRISE_MIN };
+  const day = Number.isFinite(Number(clock.fromDay)) ? Number(clock.fromDay) : volumeDayNumberOf(new Date());
+  if (clock.fixed) {
+    const fixed = volumeWrapMinutes(clock.fromMin);
+    return { day: day + Math.floor(Number(clock.fromMin) / VOLUME_DAY_MIN || 0), minutes: fixed };
+  }
+  const gone = (Number(nowMs) - Number(clock.atMs)) / 60000;
+  const total = Number(clock.fromMin) + gone * volumeClockSpeedOf(clock.speed);
+  const over = Math.floor(total / VOLUME_DAY_MIN);
+  return { day: day + (Number.isFinite(over) ? over : 0), minutes: volumeWrapMinutes(total) };
+}
+
 /** Который час на часах объёма. */
 export function volumeClockMinutes(clock, nowMs) {
-  if (!clock) return VOLUME_SUNRISE_MIN;
-  if (clock.fixed) return volumeWrapMinutes(clock.fromMin);
-  const gone = (Number(nowMs) - Number(clock.atMs)) / 60000;
-  return volumeWrapMinutes(Number(clock.fromMin) + gone * volumeClockSpeedOf(clock.speed));
+  return volumeClockStamp(clock, nowMs).minutes;
 }
 
 /**
- * Сменить ускорение, не сдвинув время: часы перецепляются за ту минуту,
- * которую показывают сейчас. Иначе выбор «быстрее» прыгал бы временем.
+ * Сменить ускорение, не сдвинув время: часы перецепляются за ту минуту и то
+ * число, которые показывают сейчас. Иначе выбор «быстрее» прыгал бы временем.
  */
 export function volumeClockAt(clock, nowMs, speed) {
-  const minutes = volumeClockMinutes(clock, nowMs);
-  if (clock && clock.fixed) return volumeClockFixed(minutes, speed);
-  return { fixed: false, fromMin: minutes, atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
+  const stamp = volumeClockStamp(clock, nowMs);
+  if (clock && clock.fixed) return volumeClockFixed(stamp.minutes, speed, stamp.day);
+  return { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
+}
+
+/** Поставить другое число, не тронув ни час, ни ход часов. */
+export function volumeClockOnDay(clock, nowMs, day) {
+  const stamp = volumeClockStamp(clock, nowMs);
+  const next = Math.round(Number(day));
+  const put = Number.isFinite(next) ? next : stamp.day;
+  if (clock && clock.fixed) return volumeClockFixed(stamp.minutes, clock.speed, put);
+  return {
+    fixed: false,
+    fromDay: put,
+    fromMin: stamp.minutes,
+    atMs: Number(nowMs) || 0,
+    speed: volumeClockSpeedOf(clock ? clock.speed : undefined),
+  };
 }
 
 // ——— место объекта (таск 188) ——————————————————————————————————————————
@@ -5468,10 +5625,37 @@ export function volumeSiteOf(project) {
 }
 
 /**
- * Рассвет и закат.
+ * Долгота солнца по эклиптике в этот день года — то, из чего выходит склонение.
  *
- * Без координат — умолчание заказчика: 9:00 и 21:00. С координатами —
- * по широте и дню года, с поправкой на долготу и часовой поясом браузера.
+ * Счёт тот же, что был у склонения в таске 181 (формула Купера): нуль
+ * приходится на весеннее равноденствие, и за год долгота обходит круг. Держать
+ * её отдельным числом нужно месяцу: он ходит по той же эклиптике, только
+ * опережает солнце на свою фазу.
+ */
+export function volumeSunLonDeg(date) {
+  const at = date || new Date();
+  const start = Date.UTC(at.getFullYear(), 0, 1);
+  const day = Math.floor((Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) - start) / 86400000) + 1;
+  return (360 / 365) * (284 + day);
+}
+
+/** Склонение светила по его долготе на эклиптике: ось Земли наклонена. */
+export function volumeDeclDeg(lonDeg) {
+  return VOLUME_EARTH_TILT_DEG * Math.sin(Number(lonDeg) * DEG);
+}
+
+/**
+ * Рассвет и закат — и всё, из чего они выходят.
+ *
+ * Без координат — умолчание заказчика: 9:00 и 21:00. С координатами — по
+ * широте, дню года и долготе, с часовым поясом браузера.
+ *
+ * Отдаётся **не только пара минут**: в ответе лежат широта, склонение,
+ * солнечный полдень, долгота солнца по эклиптике, часовой пояс и номер суток —
+ * то есть всё, по чему место светила считает `volumeSunAt`. Так сделано
+ * нарочно: подпись и небо обязаны идти от одних и тех же чисел, иначе рассвет
+ * из подписи разойдётся с рассветом в кадре — ровно та ошибка, от которой таск
+ * 190 и затевался.
  *
  * **Чего здесь нет нарочно:** уравнения времени (до четверти часа у солнечного
  * полудня) и преломления сверх стандартных 50′. Часы объёма — не астрономия, и
@@ -5486,24 +5670,37 @@ export function volumeDayTimes(site, date) {
   const number = (value) => (value === null || value === undefined || value === "" ? NaN : Number(value));
   const latDeg = site ? number(site.latDeg) : NaN;
   const lonDeg = site ? number(site.lonDeg) : NaN;
-  if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg) || Math.abs(latDeg) > 90) {
-    return { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false, north: true };
-  }
   const at = date || new Date();
-  const start = Date.UTC(at.getFullYear(), 0, 1);
-  const day = Math.floor((Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) - start) / 86400000) + 1;
-  const decl = 23.44 * Math.sin(((2 * Math.PI) / 365) * (284 + day)) * DEG;
-  const lat = latDeg * DEG;
-  const zenith = -0.833 * DEG;
-  const cosH =
-    (Math.sin(zenith) - Math.sin(lat) * Math.sin(decl)) / (Math.cos(lat) * Math.cos(decl));
-  const tzHours = -at.getTimezoneOffset() / 60;
-  const noonMin = (12 - (lonDeg - 15 * tzHours) / 15) * 60;
-  const north = latDeg >= 0;
-  if (!(cosH > -1)) return { riseMin: noonMin - 720, setMin: noonMin + 720, bySite: true, north };
-  if (!(cosH < 1)) return { riseMin: noonMin, setMin: noonMin, bySite: true, north };
+  // Номер суток и часовой пояс нужны и без координат: по ним считается возраст
+  // луны, а он от широты не зависит.
+  const day = { dayNumber: volumeDayNumberOf(at), tzHours: -at.getTimezoneOffset() / 60 };
+  if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg) || Math.abs(latDeg) > 90) {
+    return { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false, ...day };
+  }
+  const sunLonDeg = volumeSunLonDeg(at);
+  const declDeg = volumeDeclDeg(sunLonDeg);
+  const noonMin = (12 - (lonDeg - 15 * day.tzHours) / 15) * 60;
+  const place = { bySite: true, latDeg, declDeg, sunLonDeg, noonMin, ...day };
+  const cosH = volumeDayCosH(latDeg, declDeg);
+  if (!(cosH > -1)) return { riseMin: noonMin - 720, setMin: noonMin + 720, ...place };
+  if (!(cosH < 1)) return { riseMin: noonMin, setMin: noonMin, ...place };
   const half = (Math.acos(cosH) / DEG / 15) * 60;
-  return { riseMin: noonMin - half, setMin: noonMin + half, bySite: true, north };
+  return { riseMin: noonMin - half, setMin: noonMin + half, ...place };
+}
+
+/**
+ * Косинус полуденного часового угла: из него выходит половина дня.
+ *
+ * `cos H₀ = (sin h₀ − sin φ sin δ) / (cos φ cos δ)`, где `h₀` — горизонт с
+ * преломлением. За единицу вышло — солнце не встаёт (полярная ночь), ниже минус
+ * единицы — не садится (полярный день).
+ */
+export function volumeDayCosH(latDeg, declDeg) {
+  const lat = Number(latDeg) * DEG;
+  const decl = Number(declDeg) * DEG;
+  return (
+    (Math.sin(VOLUME_HORIZON_DEG * DEG) - Math.sin(lat) * Math.sin(decl)) / (Math.cos(lat) * Math.cos(decl))
+  );
 }
 
 /**
@@ -5546,82 +5743,280 @@ export function volumePanoramaAz(compassDeg, topDeg = 0) {
   return (((Number(compassDeg) - (Number(topDeg) || 0) - 90) % 360) + 360) % 360;
 }
 
+// ——— настоящее место светил (таск 190, G288) ————————————————————————————
+//
+// Слова заказчика: «почему солнце и луна так низко над горизонтом? это их
+// реальное положение по координатам или просто так нарисовал? Надо сделать
+// реальное».
+//
+// До этого таска высота была **числом** (14°), а дуга — половиной синусоиды от
+// рассвета к закату. Теперь высота и сторона света считаются по дате, времени и
+// координатам объекта, и счёт у солнца с месяцем **один** (`volumeBodyAt`):
+// меняются только склонение и часовой угол.
+//
+// ——— чем считается ————————————————————————————————————————————————————
+//
+// Склонение — наклон оси, помноженный на синус долготы светила по эклиптике
+// (`volumeDeclDeg`); долготу солнца даёт день года (`volumeSunLonDeg`, формула
+// Купера, та же, что считала рассвет в таске 181). Высота и азимут — из
+// сферического треугольника «полюс — зенит — светило»:
+//
+//     sin h = sin φ · sin δ + cos φ · cos δ · cos H
+//     cos A = (sin δ − sin h · sin φ) / (cos h · cos φ),   A → 360 − A после полудня
+//
+// где `φ` — широта, `δ` — склонение, `H` — часовой угол (ноль в полдень, 15° на
+// час), `A` — азимут от севера по часовой. Из этого и выходит то, чего просил
+// заказчик: в Москве 21 июня солнце в полдень стоит на 57°, а 21 декабря — на
+// 11°, и обе цифры совпадают со справочными.
+//
+// ——— почему рассвет сходится ровно ——————————————————————————————————————
+//
+// Рассвет и закат (таск 181) считаются из **того же** склонения и того же
+// горизонта `h₀` = −0,833°: в минуту рассвета `cos H = cos H₀`, то есть высота
+// ровно `h₀`. Высота светила на небе отсчитывается от этого же горизонта
+// (`height = h − h₀`), поэтому её ноль приходится ровно на рассвет и закат из
+// подписи окна — тождеством, а не подгонкой. Проверено тестом до 10⁻⁶ градуса.
+//
+// ——— без координат ——————————————————————————————————————————————————————
+//
+// Координат нет — остаются слова заказчика: 9:00 и 21:00. Дуга при этом всё
+// равно настоящая: дом ставится на широту 55° в равноденствие
+// (`VOLUME_SITE_FALLBACK`), а часовой угол **растягивается** на окно
+// 9:00…21:00 — `H = H₀ · (t − полдень) / половина дня`. С координатами половина
+// дня и есть `H₀/15` часов, растяжка обращается в единицу, и формула остаётся
+// одна на оба случая.
+
 /**
- * Где светило в этот миг.
+ * Где дом и куда у него смотрит день: широта, склонение, солнечный полдень,
+ * половина дня и шаг часового угла.
+ *
+ * Собирается из `volumeDayTimes`, а чего там нет — берётся умолчанием. Это
+ * важно: `times` часто составляют руками (стенд, тест, старый вызов), и такой
+ * объект обязан давать настоящую дугу, а не падать.
+ */
+export function volumeSkyPlace(times) {
+  const riseMin = times && Number.isFinite(Number(times.riseMin)) ? Number(times.riseMin) : VOLUME_SUNRISE_MIN;
+  const setMin = times && Number.isFinite(Number(times.setMin)) ? Number(times.setMin) : VOLUME_SUNSET_MIN;
+  const bySite = Boolean(times && times.bySite && Number.isFinite(Number(times.latDeg)));
+  const latDeg = bySite ? Number(times.latDeg) : VOLUME_SITE_FALLBACK.latDeg;
+  const declDeg = bySite ? Number(times.declDeg) : 0;
+  const sunLonDeg = bySite ? Number(times.sunLonDeg) : 0;
+  const noonMin = bySite && Number.isFinite(Number(times.noonMin)) ? Number(times.noonMin) : (riseMin + setMin) / 2;
+  const halfMin = (setMin - riseMin) / 2;
+  // Шаг часового угла: сколько градусов приходится на минуту. По координатам
+  // выходит ровно 0,25° — то есть 15° в час, настоящая угловая скорость; без
+  // них окно заказчика растягивает ту же дугу.
+  const cosH = volumeDayCosH(latDeg, declDeg);
+  const riseAngleDeg = (Math.acos(Math.max(-1, Math.min(1, cosH))) / DEG) || 0;
+  return {
+    latDeg,
+    declDeg,
+    sunLonDeg,
+    noonMin,
+    halfMin,
+    hourScale: halfMin > 0 ? riseAngleDeg / halfMin : 0.25,
+    dayNumber: times && Number.isFinite(Number(times.dayNumber)) ? Number(times.dayNumber) : 0,
+    tzHours: times && Number.isFinite(Number(times.tzHours)) ? Number(times.tzHours) : 0,
+  };
+}
+
+/** Часовой угол солнца в эту минуту: ноль в полдень, восток в минусе. */
+export function volumeHourAngleDeg(minutes, place) {
+  const now = volumeWrapMinutes(minutes);
+  // Минуты от полудня **ближним путём** через сутки: полдень по долготе может
+  // стоять и у полуночи, и путь «через вчера» тогда короче.
+  const away = volumeWrapMinutes(now - place.noonMin + VOLUME_DAY_MIN / 2) - VOLUME_DAY_MIN / 2;
+  return away * place.hourScale;
+}
+
+/**
+ * Светило на небе: высота над горизонтом и сторона света по компасу.
+ *
+ * Счёт один на солнце и на месяц — у них разные склонение и часовой угол, а
+ * треугольник тот же. Второго такого счёта в сборке быть не должно: разойдись
+ * они, тень поехала бы от одного солнца, а свет в окнах от другого.
+ */
+export function volumeBodyAt(latDeg, declDeg, hourDeg) {
+  const lat = Number(latDeg) * DEG;
+  const decl = Number(declDeg) * DEG;
+  const hour = (((Number(hourDeg) + 180) % 360) + 360) % 360 - 180;
+  const sinAlt = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(hour * DEG);
+  const altDeg = Math.asin(Math.max(-1, Math.min(1, sinAlt))) / DEG;
+  const flat = Math.cos(altDeg * DEG) * Math.cos(lat);
+  // В зените (и на полюсе) азимут не определён вовсе: делить не на что. Там
+  // берётся полдень — юг в северном полушарии, север в южном.
+  const cosAz =
+    Math.abs(flat) < 1e-9 ? (lat >= 0 ? -1 : 1) : (Math.sin(decl) - Math.sin(altDeg * DEG) * Math.sin(lat)) / flat;
+  const azDeg = Math.acos(Math.max(-1, Math.min(1, cosAz))) / DEG;
+  return { altDeg, compassDeg: hour > 0 ? 360 - azDeg : azDeg };
+}
+
+/**
+ * Где солнце в этот миг.
  *
  * `height` — высота над горизонтом в градусах, и она **уходит в минус**: ею
- * считается вся плавность (сумерки, звёзды, тон комнаты), и обрыв на нуле дал
- * бы ступеньку ровно там, где её лучше всего видно. Дуга — половина синусоиды
- * от восхода до заката и такая же, опрокинутая, от заката до восхода: в
- * середине дня солнце выше всего, в середине ночи — ниже.
+ * считается вся плавность (сумерки, звёзды, тон комнаты, тень), и обрыв на нуле
+ * дал бы ступеньку ровно там, где её лучше всего видно. Ноль высоты — рассвет и
+ * закат из подписи окна, ровно те же минуты.
  *
- * Сторона света идёт по компасу: восход на востоке, полдень на юге (в южном
- * полушарии — на севере), закат на западе. Высота в полдень —
- * `VOLUME_SUN_AT.rise`, и число это не астрономическое, а оконное: при поле
- * зрения 90° по длинной стороне на вертикаль остаётся около ±22°, и солнце,
- * повешенное по-настоящему высоко, не попадало бы в кадр вовсе — то есть не
- * «ходило бы по небу», как просил заказчик.
+ * Полярный день и полярная ночь выходят из формулы сами: высота просто не
+ * пересекает нуль ни разу за сутки. Отдельных ветвей под них больше нет — и это
+ * не упрощение, а честность, потому что ветвь говорила бы то же самое.
  */
 export function volumeSunAt(minutes, times, topDeg = 0) {
-  const rise = times ? Number(times.riseMin) : VOLUME_SUNRISE_MIN;
-  const set = times ? Number(times.setMin) : VOLUME_SUNSET_MIN;
-  const north = !times || times.north !== false;
-  const dayLen = set - rise;
-  const now = volumeWrapMinutes(minutes);
-  const peak = Number(VOLUME_SUN_AT.rise) || 14;
-  // Полярная ночь: солнце не встаёт вовсе.
-  if (!(dayLen > 0)) {
-    return { up: false, height: -peak, az: volumePanoramaAz(north ? 180 : 0, topDeg), rise: -peak, share: 0 };
-  }
-  // Полярный день: солнце не садится, и середина суток — его верх.
-  if (dayLen >= VOLUME_DAY_MIN) {
-    const share = volumeWrapMinutes(now - rise) / VOLUME_DAY_MIN;
-    const height = peak * Math.max(0.15, Math.sin(Math.PI * share));
-    return { up: true, height, rise: height, az: volumeSunAz(share, north, topDeg), share };
-  }
-  const since = volumeWrapMinutes(now - rise);
-  if (since <= dayLen) {
-    const share = since / dayLen;
-    const height = peak * Math.sin(Math.PI * share);
-    return { up: true, height, rise: height, az: volumeSunAz(share, north, topDeg), share };
-  }
-  // Ночь: та же дуга, опрокинутая, со своей длиной. На рассвете и закате обе
-  // половины дают нуль — значит перелома в цвете на стыке нет.
-  const nightLen = VOLUME_DAY_MIN - dayLen;
-  const share = (since - dayLen) / nightLen;
-  const height = -peak * Math.sin(Math.PI * share);
-  // Ночью солнце идёт **под** землёй и дальше в ту же сторону: с запада через
-  // полночь к востоку. В кадре его нет (`volumeDrawSun` молчит ниже −3°), но
-  // гадать о стороне света, которую не рисуют, незачем — путь один и тот же.
-  const compass = north ? 270 + 180 * share : 270 - 180 * share;
-  return { up: false, height, rise: height, az: volumePanoramaAz(compass, topDeg), share };
-}
-
-/** Сторона света светила по доле пути: восход на востоке, закат на западе. */
-function volumeSunAz(share, north, topDeg) {
-  const compass = north ? 90 + 180 * share : 90 - 180 * share;
-  return volumePanoramaAz(compass, topDeg);
+  const place = volumeSkyPlace(times);
+  const hourDeg = volumeHourAngleDeg(minutes, place);
+  const at = volumeBodyAt(place.latDeg, place.declDeg, hourDeg);
+  const height = at.altDeg - VOLUME_HORIZON_DEG;
+  return { up: height > 0, height, rise: height, az: volumePanoramaAz(at.compassDeg, topDeg), hourDeg };
 }
 
 /**
- * Где месяц. Ходит он ночью и по той же дуге, что солнце днём, — только ниже
- * и своим путём: всходит на востоке после заката, садится на западе к
- * рассвету. Фазы у него нет: заказчик назвал его «месяцем», и месяцем он и
- * нарисован.
+ * Где месяц и какой он.
+ *
+ * **Своим путём, а не солнечной дугой** (прямое слово тикета). Всё выходит из
+ * одного числа — возраста луны в её месяце (`volumeMoonAgeDays`):
+ *
+ *   - **элонгация** `360° · возраст / месяц` — насколько луна ушла от солнца к
+ *     востоку. Она же двигает луну по небу: часовой угол у неё солнечный минус
+ *     элонгация, и за сутки она отстаёт от солнца на 12,2° — то есть всходит
+ *     почти на час позже, чем вчера, как и положено;
+ *   - **склонение** — та же эклиптика, что у солнца, только долгота своя:
+ *     солнечная плюс элонгация. За месяц луна обходит её целиком, поэтому
+ *     ходит она то высоко, то низко, а не по одной борозде;
+ *   - **фаза** — `edge = cos(элонгация)`, подписанная полуось внутренней кромки
+ *     серпа. Новолуние даёт +1 (кромка села на лимб, светить нечему),
+ *     четверть — 0 (кромка прямая), полнолуние — −1 (кромка ушла на другой
+ *     лимб, диск полон). Освещённая доля из неё же: `(1 − edge)/2`.
+ *
+ * **Точность.** Это правдоподобие, а не эфемериды, и вот чем за него заплачено:
+ * луна идёт средним движением, без эвекции и вариации (до ±6° по долготе),
+ * наклон её орбиты в 5,1° опущен (склонение заужено до ±23,4° вместо ±28,6°),
+ * параллакса нет. Отсюда: фаза верна до четверти суток возраста, восход и заход
+ * — до часа, высота — до пяти градусов. Для кадра, где месяц нарисован в семь
+ * раз крупнее настоящего, этого довольно: видно, что серп растёт и убывает, что
+ * полная луна стоит всю ночь, а молодая садится вслед за солнцем.
  */
 export function volumeMoonAt(minutes, times, topDeg = 0) {
-  const rise = times ? Number(times.riseMin) : VOLUME_SUNRISE_MIN;
-  const set = times ? Number(times.setMin) : VOLUME_SUNSET_MIN;
-  const north = !times || times.north !== false;
-  const dayLen = set - rise;
-  const nightLen = VOLUME_DAY_MIN - dayLen;
-  const since = volumeWrapMinutes(volumeWrapMinutes(minutes) - set);
-  if (!(nightLen > 0) || since > nightLen) {
-    return { up: false, height: -VOLUME_MOON_RISE_DEG, rise: -VOLUME_MOON_RISE_DEG, az: volumePanoramaAz(270, topDeg) };
+  const place = volumeSkyPlace(times);
+  const ageDays = volumeMoonAgeDays(place.dayNumber, minutes, place.tzHours);
+  const elongDeg = (360 * ageDays) / VOLUME_MOON_MONTH_DAYS;
+  const declDeg = volumeDeclDeg(place.sunLonDeg + elongDeg);
+  const at = volumeBodyAt(place.latDeg, declDeg, volumeHourAngleDeg(minutes, place) - elongDeg);
+  const height = at.altDeg - VOLUME_HORIZON_DEG;
+  const edge = Math.cos(elongDeg * DEG);
+  return {
+    up: height > 0,
+    height,
+    rise: height,
+    az: volumePanoramaAz(at.compassDeg, topDeg),
+    ageDays,
+    elongDeg,
+    edge,
+    lit: (1 - edge) / 2,
+  };
+}
+
+/**
+ * Возраст луны в сутках от новолуния: 0 … 29,53.
+ *
+ * Считается от опорного новолуния средним месяцем. Настоящие новолуния гуляют
+ * вокруг среднего на ±0,3 суток — это 4° фазы, то есть толщина серпа у
+ * новолуния, и в кадре такая разница не читается.
+ */
+export function volumeMoonAgeDays(dayNumber, minutes, tzHours = 0) {
+  const day = Number(dayNumber) + (volumeWrapMinutes(minutes) - (Number(tzHours) || 0) * 60) / VOLUME_DAY_MIN;
+  const age = (day - VOLUME_MOON_EPOCH_DAY) % VOLUME_MOON_MONTH_DAYS;
+  return age < 0 ? age + VOLUME_MOON_MONTH_DAYS : age;
+}
+
+/**
+ * Куда у месяца смотрит освещённый край: угол от «вверх по экрану» по часовой
+ * стрелке.
+ *
+ * Считается **по настоящим местам обоих светил**, а не назначается: рожки серпа
+ * обязаны смотреть прочь от солнца, где бы оно ни стояло — в том числе под
+ * горизонтом, откуда подсвечивает молодой месяц снизу.
+ *
+ * Счёт — три вектора в плоскости неба у месяца: сам месяц `m`, зенит и сторона
+ * роста азимута. Направление на солнце, из которого вычтена составляющая вдоль
+ * `m`, и даёт освещённую сторону; её угол меряется от зенита. Камера объёма не
+ * кренится, поэтому зенит на экране — это «вверх», и угол переносится в кадр
+ * как есть.
+ */
+export function volumeMoonTiltDeg(sun, moon) {
+  const dir = (body) => {
+    const alt = (Number(body && body.rise) || 0) * DEG;
+    const az = (Number(body && body.az) || 0) * DEG;
+    const flat = Math.cos(alt);
+    return { x: flat * Math.cos(az), y: flat * Math.sin(az), z: Math.sin(alt), az, alt };
+  };
+  const m = dir(moon);
+  const s = dir(sun);
+  const dot = s.x * m.x + s.y * m.y + s.z * m.z;
+  // Солнце за вычетом составляющей вдоль месяца — это и есть «куда светит».
+  const px = s.x - dot * m.x;
+  const py = s.y - dot * m.y;
+  const pz = s.z - dot * m.z;
+  // Зенит в той же плоскости и сторона роста азимута (на экране — вправо).
+  const uz = 1 - m.z * m.z;
+  const ux = -m.z * m.x;
+  const uy = -m.z * m.y;
+  const rx = -Math.sin(m.az);
+  const ry = Math.cos(m.az);
+  const up = px * ux + py * uy + pz * uz;
+  const right = px * rx + py * ry;
+  return Math.atan2(right, up) / DEG;
+}
+
+/**
+ * Очерк месяца: замкнутая ломаная вокруг его середины, в точках экрана.
+ *
+ * **Одна формула на весь круг фаз** (G290) — и это же починка дефекта D48
+ * («вместо серпа две пересекающиеся дуги, фигура похожа на линзу»). Прежний
+ * месяц рисовался двумя окружностями в одном пути с разным обходом: внутренняя
+ * вырезала дыру, но торчала за пределы диска, и торчащий кусок правило непустого
+ * обхода заливало — отсюда вторая дуга, выгнутая не в ту сторону.
+ *
+ * У настоящего серпа кромки две и обе лежат на диске:
+ *
+ *   - **внешняя** — сам лимб, полуокружность радиуса `R`;
+ *   - **внутренняя** — терминатор, то есть окружность раздела света и тени,
+ *     повёрнутая к нам ребром: на картинке это **полуэллипс** с той же большой
+ *     полуосью `R` и малой `edge · R`.
+ *
+ * `edge` приходит со знаком (`volumeMoonAt`), и знак — это и есть весь круг
+ * фаз: `+1` новолуние, `0` четверть (полуось нулевая, кромка — прямая), `−1`
+ * полнолуние. Обе кромки считаются **одной** записью `(edge·R·cos u, R·sin u)`,
+ * поэтому через четверть фигура проходит без скачка: полуось меняет знак, а
+ * ломаная остаётся той же.
+ *
+ * `tiltDeg` поворачивает очерк так, чтобы освещённая сторона смотрела на солнце
+ * (`volumeMoonTiltDeg`): рожки растущего и убывающего смотрят в разные стороны
+ * сами, без ветвей «растёт или убывает».
+ */
+export function volumeMoonShape(radius, edge, tiltDeg = 0, steps = VOLUME_MOON_STEPS) {
+  const turn = Number(tiltDeg) * DEG;
+  // Орт освещённой стороны и орт поперёк неё (у экрана ось `y` смотрит вниз).
+  const lit = { x: Math.sin(turn), y: -Math.cos(turn) };
+  const across = { x: Math.cos(turn), y: Math.sin(turn) };
+  const out = [];
+  const put = (along, side) => {
+    out.push({ x: lit.x * along + across.x * side, y: lit.y * along + across.y * side });
+  };
+  const count = Math.max(4, Math.round(steps));
+  const cut = Math.max(-1, Math.min(1, Number(edge)));
+  // Лимб: от рожка к рожку через самую освещённую точку.
+  for (let index = 0; index <= count; index += 1) {
+    const u = -Math.PI / 2 + (Math.PI * index) / count;
+    put(radius * Math.cos(u), radius * Math.sin(u));
   }
-  const share = since / nightLen;
-  const height = VOLUME_MOON_RISE_DEG * Math.sin(Math.PI * share);
-  return { up: true, height, rise: height, az: volumeSunAz(share, north, topDeg), share };
+  // Терминатор: обратно, той же записью со своей полуосью.
+  for (let index = count - 1; index >= 1; index -= 1) {
+    const u = -Math.PI / 2 + (Math.PI * index) / count;
+    put(radius * cut * Math.cos(u), radius * Math.sin(u));
+  }
+  return out;
 }
 
 /**
@@ -5696,15 +6091,24 @@ function volumeSunColors(height) {
  * и живёт, пока человек не тронет часы.
  */
 export function volumeMood(options = {}) {
-  const times = options.times || { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, north: true };
+  const times = options.times || { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN };
   const topDeg = Number(options.topDeg) || 0;
   const minutes = volumeWrapMinutes(options.minutes === undefined ? VOLUME_DAY_MIN / 2 : options.minutes);
   const kind = volumeBackdropKindOf(options.kind);
   const sun = volumeSunAt(minutes, times, topDeg);
-  const moon = volumeMoonAt(minutes, times, topDeg);
+  const place = volumeMoonAt(minutes, times, topDeg);
   const share = volumeNightShare(sun.height);
   const tint = { rgb: VOLUME_NIGHT_RGB, share };
   const sky = volumeSkyColors(sun.height);
+  // Месяц виден не всегда, когда он над горизонтом: настоящая луна половину
+  // месяца стоит в дневном небе и там не читается вовсе. Поэтому у него своя
+  // яркость — от высоты **солнца**, как у звёзд, только порог выше: месяц
+  // проступает уже в сумерках, когда звёзд ещё нет.
+  const moon = {
+    ...place,
+    tiltDeg: volumeMoonTiltDeg(sun, place),
+    glow: volumeShare(sun.height, 3, -4),
+  };
   return {
     minutes,
     times,
