@@ -63,10 +63,15 @@ export const MODELS_THINGS = {
   // складку: грани у полос отвёрнуты друг от друга, и между ними встаёт тёмный
   // стык — то, по чему ткань и узнают. Четвёртая полоса стоила бы шести граней
   // и ровно ничего не добавила бы: складка читается уже с трёх.
+  //
+  // **Ткань просвечивает** (таск 189, G286): «модель штор сделай
+  // полупрозрачной, по сути как тюль пусть будет». Признак стоит у полотнищ, и
+  // только у них — труба карниза остаётся плотной: прозрачной заказчик назвал
+  // штору, а не карниз, и сквозь металлическую трубу видно быть не должно.
   curtainRail: modelParts(
     modelBox("rod", { x: -0.5, width: 1, y: -0.3, depth: 0.4, z: 0.82, height: 0.16, material: "metal" }),
-    modelBox("foldLeft", { x: -0.47, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true }),
-    modelBox("foldMiddle", { x: -0.15, width: 0.3, y: -0.28, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true }),
-    modelBox("foldRight", { x: 0.17, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true }),
+    modelBox("foldLeft", { x: -0.47, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
+    modelBox("foldMiddle", { x: -0.15, width: 0.3, y: -0.28, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
+    modelBox("foldRight", { x: 0.17, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
   ),
 };
