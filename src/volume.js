@@ -3371,18 +3371,24 @@ function volumeGap(solid, x, y) {
  *
  * Препятствие без высот (такие строит рука в тестах) держит всегда: `topMm`
  * без значения — это «до потолка», и молча пропускать сквозь него нельзя.
+ *
+ * `feetMm` — где ноги (таск 192, G292): у ходящего это ноль, у летящего — его
+ * высота. Порог, через который переступают, отсчитывается **от ног**, поэтому
+ * летящий выше стены над ней и проходит: стена кончилась ниже его подошв. У
+ * нуля выходит прежнее правило до знака — второго счёта проходимости не
+ * завелось.
  */
-export function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM) {
+export function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   const bottom = Number(solid.bottomMm) || 0;
   const top = solid.topMm === undefined || solid.topMm === null ? Infinity : Number(solid.topMm);
-  return bottom < headMm && top > VOLUME_STEP_MM;
+  return bottom < headMm && top > feetMm + VOLUME_STEP_MM;
 }
 
 /** Сколько свободного места вокруг точки для человека с макушкой на `headMm`. */
-export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM) {
+export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   let free = Infinity;
   for (const solid of solids) {
-    if (!volumeSolidBlocks(solid, headMm)) continue;
+    if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
     free = Math.min(free, volumeGap(solid, x, y));
   }
   return free;
@@ -3402,8 +3408,14 @@ export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM) {
  * спрашивать нельзя не ради скорости: прижатый к ней человек стоит ровно в
  * `VOLUME_BODY_MM` от её грани, и сравнение «на волос ближе или на волос
  * дальше» в double запрещало бы ему вставать у стенки через раз.
+ *
+ * `options.ghost` — отметка «Проходить сквозь стены» (таск 192, G292): встать
+ * можно везде. «Встать негде» — это и есть столкновение с тем, что над головой,
+ * и снявший столкновения человек не должен застревать в приседе под вещью,
+ * сквозь которую он только что прошёл.
  */
-export function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM) {
+export function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM, options = {}) {
+  if (options.ghost) return true;
   for (const solid of (scene && scene.solids) || []) {
     if (volumeSolidBlocks(solid, headMm)) continue;
     if (!volumeSolidBlocks(solid, VOLUME_HEAD_MM)) continue;
@@ -3476,10 +3488,10 @@ export function volumeStart(scene) {
  * разобрать, — разойдись они, и человек то застревал бы на ровном месте, то
  * проваливался бы в стену.
  */
-export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM) {
+export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   let deep = 0;
   for (const solid of solids || []) {
-    if (!volumeSolidBlocks(solid, headMm)) continue;
+    if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
     const dx = x - solid.cx;
     const dy = y - solid.cy;
     const overAlong = solid.half + radius - Math.abs(dx * solid.ux + dy * solid.uy);
@@ -3529,7 +3541,7 @@ export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VO
  *
  * Угол при этом держится так же, как держался: четыре прохода остались.
  */
-export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
+export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   let x = at.x;
   let y = at.y;
   for (let pass = 0; pass < VOLUME_PUSH_PASSES; pass += 1) {
@@ -3538,8 +3550,9 @@ export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
     let pressed = false;
     for (const solid of solids) {
       // Присевший проходит под высоким (G234): препятствие, которое кончается
-      // ниже его макушки, тела не касается вовсе.
-      if (!volumeSolidBlocks(solid, headMm)) continue;
+      // ниже его макушки, тела не касается вовсе. Летящий (таск 192) — над тем,
+      // что кончилось ниже его ног.
+      if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
       const dx = x - solid.cx;
       const dy = y - solid.cy;
       const along = dx * solid.ux + dy * solid.uy;
@@ -3577,8 +3590,20 @@ export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
  * окажется по ту сторону, ничего не задев. На бегу (4,8 м/с) кадр длиной в
  * десятую долю секунды — это 480 мм, а перегородка бывает в 50 мм: без дробления
  * сквозь неё проходили бы при любом подвисании вкладки.
+ *
+ * ——— две отметки таска 192 (G292) ———————————————————————————————————————
+ *
+ * `options.ghost` — «Проходить сквозь стены»: шаг идёт **ровно туда, куда
+ * просили**, без дробления и выталкивания. Это и есть вся отмена столкновений,
+ * и живёт она здесь, в единственном месте, которое знает, где человек пройдёт;
+ * заведи её в поле — и в сборке стало бы два ответа на «куда шагнул».
+ *
+ * `options.feetMm` — «Летать»: высота ног. Ноль у ходящего, своя высота у
+ * летящего, и ею же решается, что он уже перелетел (`volumeSolidBlocks`).
  */
-export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
+export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM, options = {}) {
+  if (options.ghost) return { x: at.x + dx, y: at.y + dy };
+  const feetMm = Number(options.feetMm) || 0;
   const solids = scene.solids || [];
   const length = Math.hypot(dx, dy);
   const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
@@ -3586,10 +3611,16 @@ export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
   // Насколько глубоко человек сидит в препятствиях **сейчас**. Обычно ноль;
   // не ноль бывает после переноса кликом, перехода по этажам и правки чертежа
   // под ногами — и тогда выход из этого места тоже должен быть возможен.
-  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm);
+  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm, feetMm);
   for (let index = 0; index < parts; index += 1) {
-    const want = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
-    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm);
+    const want = volumePush(
+      solids,
+      { x: point.x + dx / parts, y: point.y + dy / parts },
+      VOLUME_BODY_MM,
+      headMm,
+      feetMm,
+    );
+    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm, feetMm);
     // **Хуже не становится** (D39). Выталкивание разобрало не всё — значит
     // место теснее тела, и шаг туда не делается вовсе: человек остаётся там,
     // где стоял, вместо того чтобы дрожать между двумя положениями.
@@ -3620,6 +3651,11 @@ export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
 // Стойка — `{crouchMm, liftMm, speedMm}`: насколько присел, насколько оторвался
 // от пола и с какой скоростью идёт вверх. В объект из этого не попадает ничего
 // (G68) — она живёт в сеансе поверхности, как открытые двери.
+//
+// **Полёт таска 192 (G292) живёт здесь же** и нарочно: «летать» и «прыгать» —
+// это одна третья координата человека в разных руках, и `liftMm` у них одна.
+// Второго счёта высоты в сборке нет; разойдись они — выключенная отметка
+// оставила бы летящего висеть, а прыжок считался бы от чужой высоты.
 
 /** Стойка, с которой встают на пол: в полный рост и на земле. */
 export function volumeStanceStart() {
@@ -3644,6 +3680,22 @@ export function volumeStanceHead(stance) {
   return VOLUME_HEAD_MM - stance.crouchMm;
 }
 
+/**
+ * Где у человека ноги и макушка — одной дверью (таск 192, G292).
+ *
+ * Вопрос один: столкновениям нужно знать, что держит тело. У идущего ноги на
+ * полу, и ответ ровно тот, что был до таска 192 — `volumeStanceHead`, прыжок
+ * макушку не поднимает. У **летящего** поднимается и то и другое: он проходит
+ * над тем, что кончилось ниже его подошв, и упирается в то, что ещё не
+ * кончилось. Второго счёта высоты при этом не завелось: высота у летящего — та
+ * же `liftMm`, которой прыгает стойка таска 159.
+ */
+export function volumeStanceBody(stance, flying) {
+  const headMm = volumeStanceHead(stance);
+  if (!flying) return { headMm, feetMm: 0 };
+  return { headMm: headMm + stance.liftMm, feetMm: stance.liftMm };
+}
+
 /** В воздухе ли человек: прыжок идёт, пока он не вернулся на пол. */
 export function volumeStanceAir(stance) {
   return stance.liftMm > 0 || stance.speedMm > 0;
@@ -3658,7 +3710,12 @@ export function volumeStanceAir(stance) {
  * своих 550 мм, и ждать от него нечего — встанет он на том же тике, которым
  * выйдет из-под низкого места.
  */
-export function volumeStanceBusy(stance, crouch) {
+export function volumeStanceBusy(stance, crouch, options = {}) {
+  // **Летящий висит сам** (таск 192): отпустил клавиши — остался на своей
+  // высоте, и тика ему не нужно. Поводом остаётся зажатая клавиша (`rise`) и
+  // присед, который ещё доезжает до нуля: в полёте Control значит «ниже», а не
+  // «присесть», и присед, принесённый с земли, обязан разойтись сам.
+  if (options.fly) return Boolean(options.rise) || stance.crouchMm > 0;
   if (volumeStanceAir(stance)) return true;
   return stance.crouchMm !== (crouch ? VOLUME_CROUCH_MM : 0);
 }
@@ -3675,6 +3732,7 @@ export function volumeStanceJump(stance) {
   return { ...stance, speedMm: VOLUME_JUMP_MM_S };
 }
 
+
 /**
  * Шаг стойки за `seconds` секунд: присед едет к цели, прыжок летит по дуге.
  *
@@ -3682,18 +3740,47 @@ export function volumeStanceJump(stance) {
  * встал), `canStand` — есть ли над ним место, чтобы выпрямиться. Отказ в
  * подъёме честный: присед **остаётся**, стойка не меняется ни на миллиметр, и
  * сквозь низ шкафа никто не проходит.
+ *
+ * ——— полёт (таск 192, G292) ——————————————————————————————————————————————
+ *
+ * `flyMm` — на сколько миллиметров подняться **этим тиком**; число (хоть ноль)
+ * значит «летим», `null` и отсутствие — «идём». Слова заказчика: «при движении
+ * летим в сторону курсора, пробел (прыжок) - выше, ctrl (присяд) - ниже», — и
+ * в эти миллиметры у поля уже сложены и клавиша, и наклон взгляда.
+ *
+ * **Высота у полёта та же, что у прыжка** — `liftMm`, и это главное условие
+ * таска: второго счёта высоты в сборке нет, поэтому глаза считает прежний
+ * `volumeStanceEye`, а выключенная отметка возвращает человека на пол той же
+ * дугой падения, которой он приземляется после прыжка.
+ *
+ * Миллиметры, а не скорость, нарочно: «как быстро» живёт в одном месте
+ * (`VOLUME_WALK_MM_S`, бег — `VOLUME_RUN_MM_S`), и второго числа для полёта не
+ * заводится — летят с тем же Shift, с которым бегают.
+ *
+ * **Земля держит, потолка нет.** Ниже пола не опускаются: под полом ничего не
+ * нарисовано, и провалившийся туда видел бы изнутри плиту вместо комнаты.
+ * Вверх свободно, и это не недосмотр — потолка в счёте столкновений нет вовсе
+ * (препятствия — стены и перемычки), а стены держат летящего, пока он не
+ * поднялся выше них (`volumeStanceBody`). Тяготение в полёте не считается:
+ * отпустил клавиши — висишь.
  */
 export function volumeStanceStep(stance, seconds, options = {}) {
   const span = Math.max(0, Number(seconds) || 0);
-  const crouch = Boolean(options.crouch);
-  const canStand = options.canStand !== false;
+  const flying = options.flyMm !== undefined && options.flyMm !== null;
+  // В полёте Control значит «ниже», а не «присесть»: присед, принесённый с
+  // земли, расходится сам, и встать летящему не мешает ничто.
+  const crouch = flying ? false : Boolean(options.crouch);
+  const canStand = flying ? true : options.canStand !== false;
   const target = crouch ? VOLUME_CROUCH_MM : 0;
   let crouchMm = stance.crouchMm;
   if (target > crouchMm) crouchMm = Math.min(target, crouchMm + VOLUME_CROUCH_MM_S * span);
   else if (target < crouchMm && canStand) crouchMm = Math.max(target, crouchMm - VOLUME_CROUCH_MM_S * span);
   let liftMm = stance.liftMm;
   let speedMm = stance.speedMm;
-  if (volumeStanceAir(stance)) {
+  if (flying) {
+    liftMm = Math.max(0, liftMm + (Number(options.flyMm) || 0));
+    speedMm = 0;
+  } else if (volumeStanceAir(stance)) {
     speedMm -= VOLUME_FALL_MM_S2 * span;
     liftMm += speedMm * span;
     // Приземлились: ниже пола не бывает, и скорость гасится здесь же — иначе
@@ -5564,6 +5651,31 @@ export const VOLUME_CLOCK_SPEED_DEFAULT = 60;
 export const VOLUME_CLOCK_SPEED_REAL = 1;
 /** Чаще этого фон не пересчитывается — прямое требование заказчика. */
 export const VOLUME_MOOD_MS = 1000;
+/**
+ * То же, но с отметкой «Плавные светила» (таск 192, G292): тридцать кадров в
+ * секунду, слова заказчика — «обновляй не раз в секунду, а в 30FPS».
+ *
+ * Отметка меняет **только частоту** и больше ничего: тот же снимок, та же
+ * арифметика, то же правило «при стоячем времени таймера нет вовсе». 33 мс — не
+ * круглое число нарочно: 1000/30 = 33,33, и округлять его вверх значило бы
+ * отдать заказчику 30,3 кадра вместо 30.
+ */
+export const VOLUME_MOOD_SMOOTH_MS = Math.round(1000 / 30);
+
+/**
+ * Как часто пересчитывается снимок часа. **Один хозяин у этого числа**: поле
+ * спрашивает здесь, а не выбирает само — иначе «раз в секунду» и «тридцать раз»
+ * жили бы в двух местах.
+ *
+ * Цена названа числом (замер на объекте заказчика, 25 стен и 86 меток): снимок
+ * часа — 7 мкс, грани тени дома — 16 мкс, а сам кадр — 400 мкс. То есть всё
+ * время, которое зависит от часа, стоит 5% кадра, и делить снимок на «быстрое»
+ * (светило) и «медленное» (тень, свет в окнах) незачем: деление сэкономило бы
+ * 20 мкс из 440 и завело бы в сборке вторые часы.
+ */
+export function volumeMoodMs(smooth) {
+  return smooth ? VOLUME_MOOD_SMOOTH_MS : VOLUME_MOOD_MS;
+}
 /** Тон ночи и его потолок: куда и насколько тянется цвет к полуночи. */
 export const VOLUME_NIGHT_RGB = [18, 26, 54];
 export const VOLUME_NIGHT_SHARE = 0.45;

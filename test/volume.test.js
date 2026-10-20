@@ -194,6 +194,9 @@ import {
   volumeSkyColors,
   volumeTintRgb,
   volumeMood,
+  volumeMoodMs,
+  VOLUME_MOOD_MS,
+  VOLUME_MOOD_SMOOTH_MS,
   volumeCityWindowLit,
   volumeBackdropKindOf,
   volumeShadowShift,
@@ -211,6 +214,7 @@ import {
   VOLUME_UNPLACED_SHOWN,
   volumeAltKey,
   volumeClampPitch,
+  volumeClockEvery,
   volumeAimChoice,
   volumeDoorLine,
   volumeDoorsAfterAll,
@@ -238,6 +242,7 @@ import {
 import {
   volumeParamsDay,
   volumeParamsFix,
+  volumeParamsFlag,
   volumeParamsLine,
   volumeParamsNow,
   volumeParamsRead,
@@ -2741,6 +2746,62 @@ test("окно параметров: «Сейчас» ставит дату, в�
   volumeParamsSpeed(VOLUME_CLOCK_SPEED_DEFAULT, nowMs);
 });
 
+test("три отметки объёма живут в настройках и по умолчанию сняты (таск 192, G292)", () => {
+  // Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
+  // 1. Плавные светила… 2. Проходить сквозь стены 3. Летать».
+  //
+  // Главное про них — **умолчание снято**: у человека, который галок не ставил,
+  // объём ведёт себя ровно как до таска.
+  assert.equal(volumeParamsRead().smooth, false);
+  assert.equal(volumeParamsRead().ghost, false);
+  assert.equal(volumeParamsRead().fly, false);
+  // Дверь одна на три, и спрашивается выбор тем же `volumeParamsRead`, что фон
+  // и миникарта: второго места для него нет.
+  volumeParamsFlag("fly", true);
+  assert.equal(volumeParamsRead().fly, true);
+  assert.equal(volumeParamsRead().ghost, false, "отметки друг друга не трогают");
+  volumeParamsFlag("ghost", true);
+  volumeParamsFlag("smooth", true);
+  assert.deepEqual(
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
+    { smooth: true, ghost: true, fly: true },
+  );
+  // Чужое имя двери не ломает ничего и ничего не ставит.
+  volumeParamsFlag("сквозьпотолок", true);
+  volumeParamsFlag("fly", false);
+  volumeParamsFlag("ghost", false);
+  volumeParamsFlag("smooth", false);
+  assert.deepEqual(
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
+    { smooth: false, ghost: false, fly: false },
+  );
+});
+
+test("плавные светила: тридцать кадров в секунду, стоячее время — ноль пересчётов (таск 192)", () => {
+  // Отметка меняет **только частоту**: тот же снимок, та же арифметика.
+  assert.equal(volumeMoodMs(false), VOLUME_MOOD_MS);
+  assert.equal(volumeMoodMs(false), 1000);
+  assert.equal(volumeMoodMs(true), VOLUME_MOOD_SMOOTH_MS);
+  // Тридцать кадров в секунду — и это проверяется счётом, а не словом.
+  assert.equal(Math.round(1000 / VOLUME_MOOD_SMOOTH_MS), 30);
+  // `null` — таймера нет вовсе. При **фиксированном времени** его нет и с
+  // галкой: это требование таска 181, и плавные светила его не отменяют.
+  const day = volumeDayNumberOf(new Date(2026, 9, 20));
+  const fixed = volumeClockFixed(600, 240, day);
+  const running = volumeClockNow(0, new Date(2026, 9, 20, 10, 0), 240);
+  assert.equal(volumeClockEvery({ on: true, clock: fixed, smooth: false }), null);
+  assert.equal(volumeClockEvery({ on: true, clock: fixed, smooth: true }), null, "стоячее время не пересчитывается и с галкой");
+  // Режим не на экране — тоже ноль: фон за погашенным полем считать незачем.
+  assert.equal(volumeClockEvery({ on: false, clock: running, smooth: true }), null);
+  // Идущее время: секунда без галки, тридцатая доля с ней.
+  assert.equal(volumeClockEvery({ on: true, clock: running, smooth: false }), 1000);
+  assert.equal(volumeClockEvery({ on: true, clock: running, smooth: true }), VOLUME_MOOD_SMOOTH_MS);
+  // Снимок от частоты не зависит ни одним числом: отметка про «как часто», а не
+  // «что посчитать».
+  const at = { minutes: 600, times: { riseMin: 480, setMin: 1200 }, topDeg: 0, kind: "plain" };
+  assert.deepEqual(volumeMood(at), volumeMood(at));
+});
+
 test("щелчок по миникарте читается местом на плане (G270)", () => {
   const bounds = { minX: -2000, minY: -1500, maxX: 2000, maxY: 1500, widthMm: 4000, heightMm: 3000 };
   const box = { width: 1432, height: 580 };
@@ -4611,6 +4672,18 @@ test("текст подсказки говорит про тот вид и то 
   const person = volumeHintText(base);
   assert.ok(person.includes(strings.volume.hintPerson), person);
   assert.ok(person.includes(strings.volume.hintGrab), "мышь не захвачена — про это и сказано");
+  // Стойка и стены — своими кусками (таск 192): без галок сказано то же, что
+  // говорилось до таска, слово в слово.
+  assert.ok(person.includes(strings.volume.hintStance) && person.includes(strings.volume.hintWalls), person);
+  // Три отметки **меняют** подсказку, а не дописывают её: летящему пробел не
+  // прыжок, а снявшему столкновения нельзя читать «сквозь стены нельзя».
+  const flying = volumeHintText({ ...base, fly: true });
+  assert.ok(flying.includes(strings.volume.hintFly) && !flying.includes(strings.volume.hintStance), flying);
+  const ghost = volumeHintText({ ...base, ghost: true });
+  assert.ok(ghost.includes(strings.volume.hintGhost) && !ghost.includes(strings.volume.hintWalls), ghost);
+  // В обзоре не ходят вовсе — ни про стойку, ни про стены там не говорится.
+  const aroundFly = volumeHintText({ ...base, view: "around", aim: false, fly: true, ghost: true });
+  assert.ok(!aroundFly.includes(strings.volume.hintFly) && !aroundFly.includes(strings.volume.hintGhost), aroundFly);
   assert.ok(person.includes(strings.volume.aimHint), "прицел показан — про него есть строка");
   // Обзор говорит своё, и про прицел там молчит: его в обзоре нет.
   const around = volumeHintText({ ...base, view: "around", aim: false });
