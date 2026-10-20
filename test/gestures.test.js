@@ -199,6 +199,9 @@ test("своего разбора жеста у поверхностей не о
     "src/canvas.js": readFileSync(new URL("../src/canvas.js", import.meta.url), "utf8"),
     "src/panels/workshop.js": readFileSync(new URL("../src/panels/workshop.js", import.meta.url), "utf8"),
     "src/panels/schemes.js": readFileSync(new URL("../src/panels/schemes.js", import.meta.url), "utf8"),
+    // Объём — четвёртая поверхность с таска 195: колесо и трекпад в обзоре
+    // разбирает та же дверь, своего `deltaY` у него не осталось (G299).
+    "src/panels/volume.js": readFileSync(new URL("../src/panels/volume.js", import.meta.url), "utf8"),
   };
   for (const [name, source] of Object.entries(sources)) {
     const code = source
@@ -211,13 +214,15 @@ test("своего разбора жеста у поверхностей не о
     assert.ok(/gestureWheel\(/.test(code), name + ": поверхность не зовёт общую дверь колеса");
     assert.ok(/gesturePinchStep\(/.test(code), name + ": у поверхности свой щипок по касаниям");
   }
-  // Объём ходит сюда **за щипком, и только за ним** (таск 174): два пальца в
-  // обзоре возят карту и приближают — тот самый жест, что на плане. Колесо у
-  // него своё: там оно отодвигает камеру, а не меняет масштаб полотна.
-  const volume = readFileSync(new URL("../src/panels/volume.js", import.meta.url), "utf8");
-  assert.ok(/gesturePinchStep\(/.test(volume), "в объёме снова свой щипок — третий в сборке");
+  // Объём ходил сюда за щипком с таска 174, а с таска 195 — и за колесом
+  // (G299): двухпальцевый свайп трекпада в обзоре возит карту, щипок и колесо
+  // мыши приближают. Своя мера щипка (`touchGap`) не вернулась.
+  const volume = sources["src/panels/volume.js"];
   assert.ok(!/function touchGap/.test(volume), "своя мера щипка вернулась в объём");
-  assert.ok(!/gestureWheel\(/.test(volume), "объём поехал на общее правило колеса — у него своё");
+  // Применяет объём ответ по-своему, и это не дублирование: у него колесо
+  // отодвигает камеру, а не меняет масштаб полотна.
+  assert.ok(/volumeAroundDistance\(around\.distance \/ step\.factor\)/.test(volume), "зум обзора считает не множитель двери");
+  assert.ok(/volumeAroundPan\(around, viewport\(\), step\.panX, step\.panY\)/.test(volume), "сдвиг обзора идёт не ходом двери");
 });
 
 // ——— черновик ломаной: клик и двойной клик (таск 167, G247) ———————————————
