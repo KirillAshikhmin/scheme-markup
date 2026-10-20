@@ -1,0 +1,407 @@
+// Один вид на три режима и память вида (таск 193: G293, G294, G296; дефекты
+// D54 и D59).
+//
+// Что здесь держится — по словам заказчика:
+//
+//   «сейчас при переключении я не остаюсь там же, точнее не всегда работает и
+//    уровень зума меняется. Должно совпадать пиксель в пиксель» (D59);
+//   «запоминай выбранный режим и расположение в браузере, что бы при обновлении
+//    страницы вид не менялся» (G294);
+//   «вместо галки сделай просто пункт в Шаге - Без сетки» (G293).
+//
+// Поверхности, DOM и хранилище тестами не покрыты нарочно — здесь проверяется
+// то, от чего зависит картинка и готовая работа:
+//
+//   1. **«Пиксель в пиксель» — числом.** Берётся точка чертежа, считаются её
+//      экранные координаты у плана и у мастерской после перехода, и они обязаны
+//      совпасть. Промах здесь виден только глазами, а стоит он «переключил — и
+//      потерял место, в котором работал».
+//   2. **Моста нет — молчание.** У схемы без калибровки миллиметра не
+//      существует: перенос не делается, и это не ошибка.
+//   3. **«Без сетки» в объект не пишется** (G68): шаг остаётся прежним, старый
+//      файл открывается как закрывался.
+//   4. **Выбор человека старше сохранённого** (D54): режим, выбранный пока
+//      объект грузился, память не перебивает.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  addScheme,
+  addWall,
+  createProject,
+  gridStepOf,
+  gridStepSet,
+  planMmToFraction,
+  setPlanOrigin,
+  setPlanScale,
+} from "../src/model.js";
+import { drawDrawingGrid, drawRuler, drawScheme, drawingBridge, drawingUnitBridge, planToScreen, rulerTicks } from "../src/render.js";
+import {
+  screenPlaceForget,
+  screenPlaceFrom,
+  screenPlaceOf,
+  screenPlacePlanRead,
+  screenPlacePlanScale,
+  screenPlacePlanView,
+  screenPlaceRestore,
+  screenPlaceSet,
+  screenPlaceStored,
+  screenPlaceWatch,
+} from "../src/screenPlace.js";
+import {
+  WORKSHOP_GRID_OFF,
+  WORKSHOP_UNIT,
+  workshopGridChoice,
+  workshopGridValue,
+} from "../src/panels/workshop.js";
+import { viewMemoryEntry, viewMemoryFrom, viewMemoryPatch } from "../src/app.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const LEGACY_TEXT = readFileSync(join(HERE, "legacy-project.json"), "utf8").replace(/\n$/, "");
+
+// План 1200 × 800 точек, калибровка по отрезку в шесть метров и привязка
+// чертежа в середину — то есть мост «доля ↔ миллиметр» есть целиком.
+function planScene(turn = 0) {
+  const added = addScheme(createProject(), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
+  let project = setPlanScale(added.project, added.scheme.id, {
+    a: { x: 0.1, y: 0.5 },
+    b: { x: 0.6, y: 0.5 },
+    meters: 6,
+  }).project;
+  project = setPlanOrigin(project, added.scheme.id, { at: { x: 0.5, y: 0.5 }, turn }).project;
+  return { project, schemeId: added.scheme.id, scheme: added.scheme };
+}
+
+// Где точка чертежа окажется на экране у каждого из двух полей.
+const planScreenOf = (scene, view, mm) =>
+  planToScreen(planMmToFraction(scene.project, scene.schemeId, mm), scene.scheme, view);
+const drawScreenOf = (view, mm) => planToScreen(mm, WORKSHOP_UNIT, view);
+
+// Вид мастерской по общему месту — та же арифметика, что в `pullPlace`.
+const drawViewOf = (box, place) => ({
+  zoom: place.pxPerMm,
+  offsetX: box.width / 2 - place.x * place.pxPerMm,
+  offsetY: box.height / 2 - place.y * place.pxPerMm,
+});
+
+test("D59: план и чертёж после перехода совпадают пиксель в пиксель", () => {
+  screenPlaceForget();
+  const scene = planScene();
+  const box = { width: 900, height: 600 };
+  // Человек стоит на плане: масштаб свой, кадр сдвинут руками.
+  const planView = { zoom: 1.7, offsetX: -240, offsetY: -130 };
+  const place = screenPlacePlanRead(scene.project, scene.schemeId, box, planView);
+  assert.ok(place, "моста план → миллиметры нет");
+  assert.ok(place.pxPerMm > 0, "масштаб не посчитан");
+  // Уходим в чертёж: он встаёт по тому же месту и тому же числу точек на
+  // миллиметр.
+  const drawView = drawViewOf(box, place);
+  for (const mm of [
+    { x: 0, y: 0 },
+    { x: 2500, y: -1200 },
+    { x: -3300, y: 800 },
+  ]) {
+    const onPlan = planScreenOf(scene, planView, mm);
+    const onDraw = drawScreenOf(drawView, mm);
+    assert.ok(
+      Math.abs(onPlan.x - onDraw.x) < 0.5 && Math.abs(onPlan.y - onDraw.y) < 0.5,
+      "точка " + JSON.stringify(mm) + " разъехалась: " + JSON.stringify([onPlan, onDraw]),
+    );
+  }
+  // И обратно: из чертежа на план — те же экранные точки.
+  const backPlace = { x: 1500, y: -700, pxPerMm: drawView.zoom };
+  const backView = screenPlacePlanView(scene.project, scene.schemeId, box, backPlace, planView);
+  const backDraw = drawViewOf(box, backPlace);
+  assert.ok(Math.abs(backView.zoom - 1.7) < 1e-9, "масштаб плана не вернулся: " + backView.zoom);
+  for (const mm of [
+    { x: 0, y: 0 },
+    { x: 4000, y: 2500 },
+  ]) {
+    const onPlan = planScreenOf(scene, backView, mm);
+    const onDraw = drawScreenOf(backDraw, mm);
+    assert.ok(
+      Math.abs(onPlan.x - onDraw.x) < 0.5 && Math.abs(onPlan.y - onDraw.y) < 0.5,
+      "обратный переход разъехался: " + JSON.stringify([onPlan, onDraw]),
+    );
+  }
+});
+
+test("масштаб переносится в обе стороны: мера одна — точек на миллиметр", () => {
+  const scene = planScene();
+  const box = { width: 800, height: 500 };
+  // Шесть метров уложены в полплана (600 точек) — то есть сто точек на метр.
+  assert.ok(Math.abs(screenPlacePlanScale(scene.project, scene.schemeId, { zoom: 1 }) - 0.1) < 1e-9);
+  // Приблизили план вдвое — вдвое выросли и точки на миллиметр.
+  assert.ok(Math.abs(screenPlacePlanScale(scene.project, scene.schemeId, { zoom: 2 }) - 0.2) < 1e-9);
+  // И обратно: тот же масштаб плана выходит из того же числа точек.
+  const view = screenPlacePlanView(scene.project, scene.schemeId, box, { x: 0, y: 0, pxPerMm: 0.2 }, { zoom: 1 });
+  assert.ok(Math.abs(view.zoom - 2) < 1e-9, "масштаб посчитан иначе: " + view.zoom);
+  // Середина поля смотрит ровно на место.
+  const at = planScreenOf(scene, view, { x: 0, y: 0 });
+  assert.ok(Math.abs(at.x - box.width / 2) < 0.5 && Math.abs(at.y - box.height / 2) < 0.5);
+});
+
+test("повёрнутая подложка: место и масштаб переносятся, оси не путаются", () => {
+  for (const turn of [90, 180, 270]) {
+    const scene = planScene(turn);
+    const box = { width: 900, height: 600 };
+    const planView = { zoom: 1.2, offsetX: 40, offsetY: -60 };
+    const place = screenPlacePlanRead(scene.project, scene.schemeId, box, planView);
+    assert.ok(place, "мост пропал на повороте " + turn);
+    // Вернули то же место — середина поля не сдвинулась.
+    const back = screenPlacePlanView(scene.project, scene.schemeId, box, place, planView);
+    const again = screenPlacePlanRead(scene.project, scene.schemeId, box, back);
+    assert.ok(
+      Math.abs(again.x - place.x) <= 1 && Math.abs(again.y - place.y) <= 1,
+      "поворот " + turn + ": место уехало " + JSON.stringify([place, again]),
+    );
+    assert.ok(Math.abs(again.pxPerMm - place.pxPerMm) < 1e-9, "поворот " + turn + ": масштаб уехал");
+  }
+});
+
+test("моста нет — переносить нечем, и это молчание, а не ошибка", () => {
+  const box = { width: 900, height: 600 };
+  const view = { zoom: 1, offsetX: 0, offsetY: 0 };
+  // Схема с подложкой, но без калибровки: миллиметра на ней не существует.
+  const bare = addScheme(createProject(), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
+  assert.equal(screenPlacePlanRead(bare.project, bare.scheme.id, box, view), null);
+  assert.equal(screenPlacePlanView(bare.project, bare.scheme.id, box, { x: 0, y: 0 }, view), null);
+  assert.equal(screenPlacePlanScale(bare.project, bare.scheme.id, view), 0);
+  // Схема с калибровкой, но без привязки чертежа — то же самое.
+  const scaled = setPlanScale(bare.project, bare.scheme.id, {
+    a: { x: 0.1, y: 0.5 },
+    b: { x: 0.6, y: 0.5 },
+    meters: 6,
+  }).project;
+  assert.equal(screenPlacePlanRead(scaled, bare.scheme.id, box, view), null);
+  // Вырожденное поле (поверхность ещё не измерилась) места не даёт.
+  const scene = planScene();
+  assert.equal(screenPlacePlanRead(scene.project, scene.schemeId, { width: 0, height: 0 }, view), null);
+  // Чужой схемы нет вовсе.
+  assert.equal(screenPlacePlanRead(scene.project, "нет такой", box, view), null);
+});
+
+test("память вида: что ложится в настройки и что из них поднимается", () => {
+  // Числа округляются: в хранилище незачем двадцать знаков дробной части.
+  assert.deepEqual(screenPlaceStored({ x: 1500.4, y: -800.6, pxPerMm: 0.123456789 }), {
+    x: 1500,
+    y: -801,
+    pxPerMm: 0.123457,
+  });
+  // Масштаб необязателен: место из объёма приходит без него.
+  assert.deepEqual(screenPlaceStored({ x: 1, y: 2 }), { x: 1, y: 2 });
+  // Мусор отбрасывается молча — лучше прежнее поведение, чем поле в NaN.
+  for (const bad of [null, {}, { x: "абв", y: 0 }, { x: 1 }, "строка"]) {
+    assert.equal(screenPlaceStored(bad), null, "принято негодное: " + JSON.stringify(bad));
+    assert.equal(screenPlaceFrom(bad), null);
+  }
+  // Негодный масштаб не роняет место: оно читается, а приближение остаётся
+  // тем, которое выбрал человек.
+  assert.deepEqual(screenPlaceFrom({ x: 5, y: 6, pxPerMm: -1 }), { x: 5, y: 6, pxPerMm: null });
+});
+
+test("память вида поднимается в общее место и становится чужой записью", () => {
+  screenPlaceForget();
+  const stamp = screenPlaceRestore("схема-1", { x: 900, y: -300, pxPerMm: 0.4 });
+  const place = screenPlaceOf("схема-1");
+  assert.deepEqual({ x: place.x, y: place.y, pxPerMm: place.pxPerMm }, { x: 900, y: -300, pxPerMm: 0.4 });
+  assert.equal(place.stamp, stamp, "поднятое место обязано быть чужой записью для поверхностей");
+  // Негодная запись место не ставит.
+  screenPlaceForget();
+  assert.equal(screenPlaceRestore("схема-1", { x: null }), 0);
+  assert.equal(screenPlaceOf("схема-1"), null);
+});
+
+test("о смене места сообщают — на это и пишется память", () => {
+  screenPlaceForget();
+  let heard = 0;
+  const stop = screenPlaceWatch(() => {
+    heard += 1;
+  });
+  screenPlaceSet("схема-1", { x: 10, y: 20 }, 0.5);
+  assert.equal(heard, 1);
+  // Поле говорит о месте на каждый кадр: запись, ничего не меняющая, память не
+  // будит — иначе в хранилище летело бы по шестьдесят записей в секунду.
+  screenPlaceSet("схема-1", { x: 10, y: 20 }, 0.5);
+  assert.equal(heard, 1);
+  screenPlaceSet("схема-1", { x: 11, y: 20 }, 0.5);
+  assert.equal(heard, 2);
+  stop();
+  screenPlaceSet("схема-1", { x: 12, y: 20 }, 0.5);
+  assert.equal(heard, 2, "отписка не сработала");
+  screenPlaceForget();
+});
+
+test("G294: память вида — карта по объектам, и мусор в ней не страшен", () => {
+  assert.deepEqual(viewMemoryFrom(null), {});
+  assert.deepEqual(viewMemoryFrom("строка"), {});
+  assert.deepEqual(viewMemoryFrom([1, 2]), {});
+  const map = viewMemoryFrom({
+    "объект-1": { screen: "drawing", schemeId: "схема-7", place: { x: 1.4, y: 2.6, pxPerMm: 0.25 } },
+    "объект-2": { screen: "нет такого", schemeId: 42, place: { x: "абв" } },
+    "объект-3": { screen: "volume" },
+    "объект-4": null,
+  });
+  assert.deepEqual(map["объект-1"], {
+    screen: "drawing",
+    schemeId: "схема-7",
+    place: { x: 1, y: 3, pxPerMm: 0.25 },
+  });
+  assert.equal(map["объект-2"], undefined, "чужой режим и чужая схема не должны доехать");
+  assert.deepEqual(map["объект-3"], { screen: "volume" });
+  assert.equal(map["объект-4"], undefined);
+});
+
+test("G294: в память ложатся режим, схема и расположение — и ничего больше", () => {
+  const entry = viewMemoryEntry(
+    { screen: "volume", schemeId: "схема-1", mode: "add", activeTypeId: "тип-1" },
+    { x: 500, y: -250, pxPerMm: 0.3 },
+  );
+  assert.deepEqual(entry, { screen: "volume", schemeId: "схема-1", place: { x: 500, y: -250, pxPerMm: 0.3 } });
+  // Занятие в память не попадает нарочно (G296): вернуться в «Добавление»
+  // после обновления страницы значило бы поставить метку первым же кликом.
+  assert.equal("mode" in entry, false);
+  assert.equal("activeTypeId" in entry, false);
+  // Без схемы и без места запись пустая — писать нечего.
+  assert.deepEqual(viewMemoryEntry({ screen: "нет такого" }, null), {});
+});
+
+test("G294: объект открывается своим видом, а незнакомый — схемой", () => {
+  const scene = planScene();
+  const project = scene.project;
+  const own = { screen: "drawing", schemeId: scene.schemeId };
+  assert.deepEqual(viewMemoryPatch(own, project, "desktop"), { screen: "drawing", schemeId: scene.schemeId });
+  // Памяти нет — прежнее поведение: схема (таск 153).
+  assert.deepEqual(viewMemoryPatch(null, project, "desktop"), { screen: "scheme" });
+  // Чужой режим в памяти — тоже схема.
+  assert.deepEqual(viewMemoryPatch({ screen: "нет такого" }, project, "desktop"), { screen: "scheme" });
+  // Чертежа в просмотре нет вовсе: на узкой раскладке память уводит на схему.
+  assert.deepEqual(viewMemoryPatch(own, project, "mobile"), { screen: "scheme", schemeId: scene.schemeId });
+  // Объём в просмотре есть — он только смотрит.
+  assert.deepEqual(viewMemoryPatch({ screen: "volume" }, project, "mobile"), { screen: "volume" });
+  // Схемы уже нет — открывший объект выбрал первую, и память её не перебивает.
+  assert.deepEqual(viewMemoryPatch({ screen: "volume", schemeId: "удалённая" }, project, "desktop"), {
+    screen: "volume",
+  });
+});
+
+test("D54: выбор человека старше сохранённого", () => {
+  const scene = planScene();
+  const entry = { screen: "volume", schemeId: scene.schemeId };
+  // Человек успел переключить экран, пока объект грузился: режима в заплатке
+  // нет вовсе — ни сохранённого, ни умолчания.
+  const patch = viewMemoryPatch(entry, scene.project, "desktop", { picked: true });
+  assert.equal("screen" in patch, false, "позднее применение перебило выбор человека");
+  // Схема при этом поднимается: её человек не выбирал.
+  assert.equal(patch.schemeId, scene.schemeId);
+  // А без выбора человека — сохранённый режим.
+  assert.equal(viewMemoryPatch(entry, scene.project, "desktop", { picked: false }).screen, "volume");
+});
+
+test("G293: «Без сетки» — пункт списка, и в объект от него не пишется ничего", () => {
+  // Значение пункта не число нарочно: ноль в списке читался бы шагом.
+  assert.equal(WORKSHOP_GRID_OFF, "off");
+  assert.notEqual(WORKSHOP_GRID_OFF, "0");
+  // Что стоит в списке: «Без сетки» или шаг объекта.
+  assert.equal(workshopGridValue(false, 100), WORKSHOP_GRID_OFF);
+  assert.equal(workshopGridValue(true, 100), "100");
+  assert.equal(workshopGridValue(undefined, 250), "250", "умолчание — сетка показана");
+  // Что выбрали.
+  assert.deepEqual(workshopGridChoice(WORKSHOP_GRID_OFF), { shown: false });
+  assert.deepEqual(workshopGridChoice("500"), { shown: true, stepMm: 500 });
+  for (const bad of ["", "абв", "0", "-100", null]) {
+    assert.equal(workshopGridChoice(bad), null, "принято негодное: " + JSON.stringify(bad));
+  }
+  // G68: выбор «Без сетки» объекта не касается — шаг у него остаётся прежним.
+  const scene = planScene();
+  const project = addWall(scene.project, {
+    schemeId: scene.schemeId,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 3000, y: 0 },
+    thicknessMm: 100,
+  }).project;
+  assert.equal(gridStepSet(project), false, "шага в объекте и не было");
+  assert.equal(gridStepOf(project), 100);
+  // Старый файл со своим шагом читается им же и после «Без сетки»: выбор живёт
+  // в настройках браузера, а не в `view.gridStepMm`.
+  const legacy = JSON.parse(LEGACY_TEXT);
+  legacy.view = { ...legacy.view, gridStepMm: 250 };
+  assert.equal(gridStepOf(legacy), 250);
+  assert.equal(workshopGridValue(false, gridStepOf(legacy)), WORKSHOP_GRID_OFF, "«Без сетки» не показалось");
+  assert.equal(legacy.view.gridStepMm, 250, "объект тронут выбором «Без сетки»");
+  assert.equal(workshopGridValue(true, gridStepOf(legacy)), "250", "вернулись к сетке — шаг тот же");
+});
+
+// ——— сетка и линейка: оба поля рисуют один и тот же слой ————————————————
+
+// Холст-писец: записывает каждый вызов и каждое присваивание. Тот же приём, что
+// в `test/projectSite.test.js` и `test/drawingHandles.test.js`.
+function scribe(log) {
+  const impl = { measureText: (value) => ({ width: String(value).length * 6 }) };
+  return new Proxy(impl, {
+    get: (target, key) =>
+      key in target ? target[key] : (...args) => log.push(String(key) + "(" + args.join(",") + ")"),
+    set: (target, key, value) => ((target[key] = value), log.push(String(key) + "=" + String(value)), true),
+  });
+}
+
+test("G293: сетка рисуется и на плане, и в чертеже — одним слоем", () => {
+  const scene = planScene();
+  const box = { width: 900, height: 600 };
+  const planView = { zoom: 1, offsetX: 0, offsetY: 0 };
+  // На плане: мост даёт `drawingBridge` — тот же, которым на подложку ложится
+  // чертёж. Сто точек на метр при `zoom: 1` — метровая сетка видна.
+  const plan = [];
+  const planLines = drawDrawingGrid(scribe(plan), drawingBridge(scene.project, scene.scheme, planView), box, 1000);
+  assert.ok(planLines > 0, "на плане сетка не нарисовалась");
+  assert.ok(plan.some((call) => call.startsWith("stroke(")), "линии не обведены");
+  // В чертеже: тот же слой, мост мастерской. Масштаб подобран тот же —
+  // значит и линий столько же.
+  const draw = [];
+  const drawLines = drawDrawingGrid(scribe(draw), drawingUnitBridge({ zoom: 0.1, offsetX: 0, offsetY: 0 }), box, 1000);
+  assert.equal(drawLines, planLines, "поля нарисовали разное число линий");
+  // Моста нет — слой молчит: кадр не меняется ни на пиксель.
+  const quiet = [];
+  assert.equal(drawDrawingGrid(scribe(quiet), null, box, 1000), 0);
+  assert.equal(quiet.length, 0);
+  // «Без сетки» — то же молчание: шаг ноль.
+  assert.equal(drawDrawingGrid(scribe(quiet), drawingUnitBridge({ zoom: 1 }), box, 0), 0);
+  assert.equal(quiet.length, 0);
+});
+
+test("G68: кадр без сетки не меняется ни на вызов — выгрузки её не просят", () => {
+  const scene = planScene();
+  const box = { width: 900, height: 600 };
+  const view = { zoom: 1, offsetX: 0, offsetY: 0 };
+  const options = { project: scene.project, scheme: scene.scheme, filter: {}, view, selectedIds: [] };
+  const without = [];
+  drawScheme(scribe(without), { ...options });
+  const nulled = [];
+  drawScheme(scribe(nulled), { ...options, grid: null });
+  assert.deepEqual(nulled, without, "`grid: null` что-то нарисовал");
+  const off = [];
+  drawScheme(scribe(off), { ...options, grid: { stepMm: 0, box } });
+  assert.deepEqual(off, without, "нулевой шаг что-то нарисовал");
+  const on = [];
+  drawScheme(scribe(on), { ...options, grid: { stepMm: 1000, box } });
+  assert.ok(on.length > without.length, "сетка на плане не появилась");
+});
+
+test("G293: линейка чертежа мерит миллиметры и ходит в минус", () => {
+  // У подложки деления стоят только там, где есть картинка. У чертежа краёв
+  // нет: лист бесконечен в обе стороны, и миллиметры бывают отрицательными.
+  const box = { width: 800, height: 500 };
+  const view = { zoom: 0.1, offsetX: 400, offsetY: 250 };
+  const bounded = rulerTicks(WORKSHOP_UNIT, view, box);
+  const open = rulerTicks(WORKSHOP_UNIT, view, box, { bounded: false });
+  assert.ok(open.top.length > bounded.top.length, "лист без краёв не дал делений: " + open.top.length);
+  assert.ok(open.top.some((tick) => tick.at < 0), "в минус линейка чертежа не пошла");
+  assert.ok(open.step >= 100, "деления чертежа — круглые миллиметры: " + open.step);
+  // И рисуется та же линейка тем же кодом.
+  const log = [];
+  drawRuler(scribe(log), WORKSHOP_UNIT, view, box, { bounded: false });
+  assert.ok(log.some((call) => call.startsWith("fillRect(")), "полоса линейки не залита");
+});

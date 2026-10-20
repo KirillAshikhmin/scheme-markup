@@ -6834,22 +6834,29 @@ const strings = {
     fontSystem: "Системный",
     fontHint: "Только на экране: на печать и в выгрузку всегда идёт чертёжный",
     guides: "Линейка и направляющие",
-    // ——— слои: один раздел на все три режима (таск 187, G281) ———
+    guidesHint:
+      "Полоса с делениями по краям поля и линии, которые с неё тянут. Работает на плане и в чертеже: на плане деления в пикселях подложки, в чертеже — в миллиметрах. Направляющие ставят на плане, в чертеже они видны там, где у него есть масштаб и привязка.",
+    // ——— слои: один раздел на все три режима (таск 187, G281; таск 193, G293) ———
     //
-    // Заказчик: «пункт „Слои“ убери, это же дубль вкладки Интерфейс проекта,
-    // просто почини то бы там работало и добавь недостающие пункты. Ну и в
-    // интерфейсе убери описания у пунктов».
+    // Заказчик в таске 187: «пункт „Слои“ убери, это же дубль вкладки Интерфейс
+    // проекта, просто почини то бы там работало и добавь недостающие пункты. Ну
+    // и в интерфейсе убери описания у пунктов».
     //
     // Поэтому пояснения ушли **в подсказки**: текст не потерян, но строка под
-    // галкой больше не растит раздел вдвое. А сами галки стали честными — в
-    // каждом режиме показаны те, которые в нём и правда меняют картинку.
+    // галкой больше не растит раздел вдвое.
+    //
+    // Его же слова в таске 193: «Сделай что бы сетка была и на схеме… И линейку
+    // в чертеже и т.д. Короче меню Интерфейс не должно отличаться от режима
+    // чертеж\схема». Прятать пункты по режимам после этого нельзя: раздел один
+    // и тот же во всех трёх, а подсказка каждого пункта называет, на каком поле
+    // он меняет картинку.
     layers: "Слои",
     // Два слоя плана (таск 127). Названы подложкой и чертежом теми же словами,
     // что в чертеже: это одни и те же два слоя, и второго имени у них быть
     // не должно.
     planLayer: "Подложка",
     planLayerHint:
-      "Снимите — разметка идёт по своему чертежу, а не по фотографии. Отметка уходит и в выгрузку: лист показывает то же, что экран.",
+      "Снимите — разметка идёт по своему чертежу, а не по фотографии. Работает на плане и в чертеже — в объёме подложки нет вовсе. Отметка уходит и в выгрузку: лист показывает то же, что экран.",
     // Почему отметка подложки погашена (переехало из колонки чертежа).
     planLayerNone: "Подложки у этой схемы нет",
     planLayerNoScale:
@@ -6857,16 +6864,19 @@ const strings = {
     drawingLayer: "Чертёж",
     drawingLayerHint:
       "Снимите — на плане уйдёт слой чертежа, в «Чертеже» погаснут стены и проёмы (вещи гасит отметка ниже: проёмы живут в стенах и уходят вместе с ними). Отметка уходит и в выгрузку.",
-    // Сетка чертежа (таск 187): переехала сюда из колонки чертежа вместе с
-    // шагом и притяжкой. Показывается только в режиме «Чертёж» — на плане и в
-    // объёме сетки нет вовсе, и галка там отвечала бы на незаданный вопрос.
-    gridLayer: "Сетка",
-    gridLayerHint: "Сетка видна только в режиме «Чертёж» — по ней и чертят",
-    gridStep: "Шаг сетки, мм",
-    gridStepHint: "Шаг принадлежит объекту: напарник, открывший файл, чертит по той же сетке",
+    // Сетка (таск 187 — переехала сюда из колонки чертежа вместе с шагом и
+    // притяжкой; таск 193 — рисуется **на обоих полях**, и отдельной галки
+    // показа у неё больше нет: «Без сетки» стало первым пунктом списка шагов).
+    gridStep: "Сетка, шаг в мм",
+    gridStepHint:
+      "Шаг принадлежит объекту: напарник, открывший файл, чертит по той же сетке. «Без сетки» — это выбор глаз, он остаётся в этом браузере и в объект не пишется.",
+    gridOff: "Без сетки",
+    gridNoBridge:
+      "На плане сетка появится, когда у схемы будут масштаб и привязка чертежа: без них миллиметру не от чего считаться в пикселях подложки. В чертеже она есть всегда.",
     gridSnap: "Притягивать к узлам",
     gridSnapHint:
-      "Снимите отметку, если план нарисован не по круглым числам: тогда работают прежние магниты холста — направляющие по вершинам цепочки и углы кратно 15°. Alt снимает притяжку на один клик.",
+      "Вершины чертежа садятся на узлы сетки. Снимите отметку, если план нарисован не по круглым числам: тогда работают прежние магниты холста — направляющие по вершинам цепочки и углы кратно 15°. Alt снимает притяжку на один клик.",
+    gridSnapOff: "Выбрано «Без сетки» — узлов нет, и притягиваться не к чему",
     // Вещи чертежа (таск 154, G223). Имя то же, что у слоя в мастерской: это
     // один и тот же выключатель, и второго имени у него быть не должно.
     objectsLayer: "Объекты чертежа",
@@ -6877,7 +6887,7 @@ const strings = {
     // полоса поверх холста на бумагу не попадала никогда.
     elevationStrip: "Развёртка выделенной стены",
     elevationStripHint:
-      "Полоса с развёрткой выезжает поверх плана, когда выделена стена чертежа. Снимите отметку, если размечаете по своему чертежу и задеваете стены мимо меток: стена будет выделяться, а полоса не появится.",
+      "Полоса с развёрткой выезжает поверх плана и поверх чертежа, когда выделена стена; в объёме стену не выделяют, и полосы там нет. Снимите отметку, если размечаете по своему чертежу и задеваете стены мимо меток: стена будет выделяться, а полоса не появится.",
     zoom: "Масштаб",
     zoomIn: "Приблизить",
     zoomOut: "Отдалить",
@@ -28707,6 +28717,220 @@ const renderInternals = {
   HANDLE_GAP,
 };
 
+// src/screenPlace.js
+// Одно место и один масштаб на три режима (требование G276, таск 178; дефект
+// D59, таск 193) и память вида между перезагрузками (G294).
+//
+// Слова заказчика в таске 178: «При переключении Схема - Чертёж - объём мы
+// должны находиться в одном месте… центр схемы\чертежа это расположение камеры
+// в объёме. Ну и учитывай что может попасть на стены и т.д. тогда сдвигай».
+// Его же слова в таске 193: «сейчас при переключении я не остаюсь там же,
+// точнее не всегда работает и уровень зума меняется. Должно совпадать пиксель
+// в пиксель».
+//
+// ——— почему «не всегда работало» ———————————————————————————————————————
+//
+// Потому что мест было **три**, а не одно: план держал свой `state.view`,
+// мастерская — свой `view` внутри себя, объём — где стоит человек. Этот модуль
+// до таска 193 переносил место только **через объём**: мастерская говорила,
+// где стоит, объём это читал на входе и оставлял просьбу на выходе. Переход
+// «Схема → Чертёж» напрямую не переносил ничего вовсе, а масштаб не
+// переносился ни на одном пути — ровно то, что заказчик и увидел.
+//
+// Теперь здесь лежит **одно состояние на три режима**: середина поля в
+// миллиметрах чертежа и экранных точек на миллиметр. Кто на экране — тот и
+// пишет его (на каждый кадр), а остальные читают, когда их показывают. Второго
+// счёта нет: `volumePlanCentre` и `volumePlanViewAt` объёма зовут эти же
+// функции.
+//
+// ——— почему это отдельный модуль, а не поле состояния ——————————————————
+//
+// Потому что у режимов разные системы координат, и свести их можно только в
+// миллиметрах чертежа: у плана вид задан в пикселях подложки (`state.view`), у
+// мастерской — в миллиметрах, у объёма — в миллиметрах же, но третьей осью.
+// Состояние приложения хранит вид плана и перерисовывает холст на каждую его
+// правку — положи сюда же место чертежа, и холст стал бы перерисовываться от
+// чужого переключения.
+//
+// ——— где моста нет ————————————————————————————————————————————————————
+//
+// Перевод «доля плана ↔ миллиметр чертежа» держится на двух половинах:
+// калибровке (пикселей на метр) и привязке (где нуль чертежа на плане). Нет
+// хотя бы одной — обе функции модели отвечают `null`, и перенос молча не
+// делается: каждое поле остаётся там, где стояло. Соврать тут нечем — у плана
+// без калибровки миллиметра не существует.
+//
+// ——— «чьё это место» ——————————————————————————————————————————————————
+//
+// У записи есть отметка (`stamp`), которая растёт на каждую запись. Поверхность
+// помнит отметку своей последней записи и читает место только тогда, когда она
+// другая, — то есть когда место поставил **кто-то другой**. Без этого
+// спрятанная поверхность, которая всё ещё перерисовывается (мастерская рисует
+// кадр и на чужом режиме), перебивала бы своим старым местом то, куда уехало
+// поле на экране.
+
+
+/** Общее место: `{schemeId, x, y, pxPerMm, stamp}` или `null`. */
+let place = null;
+let placeStamp = 0;
+const listeners = new Set();
+
+const placeOf = (schemeId, pointMm) => {
+  if (!schemeId || !pointMm) return null;
+  const x = Number(pointMm.x);
+  const y = Number(pointMm.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { schemeId, x, y };
+};
+
+/**
+ * Поверхность на экране говорит, где стоит середина её поля и сколько в ней
+ * экранных точек на миллиметр. `pxPerMm` необязателен: объём масштабом не
+ * владеет вовсе и оставляет прежний — вернувшись, человек видит то
+ * приближение, которое выбрал сам.
+ *
+ * Возвращает отметку записи — её зовущий запоминает своей.
+ */
+function screenPlaceSet(schemeId, pointMm, pxPerMm) {
+  const next = placeOf(schemeId, pointMm);
+  if (!next) return placeStamp;
+  const scale = Number(pxPerMm);
+  const kept = place && place.schemeId === schemeId ? place.pxPerMm : null;
+  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : kept;
+  // Запись, ничего не меняющая, не двигает отметку: мастерская и холст говорят
+  // это на каждый кадр, и память вида иначе писалась бы в хранилище впустую.
+  if (
+    place &&
+    place.schemeId === next.schemeId &&
+    place.x === next.x &&
+    place.y === next.y &&
+    place.pxPerMm === next.pxPerMm
+  ) {
+    return placeStamp;
+  }
+  placeStamp += 1;
+  place = { ...next, stamp: placeStamp };
+  for (const listener of [...listeners]) {
+    try {
+      listener(place);
+    } catch (error) {
+      // Слушатель — память вида; его беда не повод ронять кадр поля.
+    }
+  }
+  return placeStamp;
+}
+
+/** Общее место этой схемы: `{x, y, pxPerMm, stamp}` или `null`. */
+function screenPlaceOf(schemeId) {
+  if (!place || !schemeId || place.schemeId !== schemeId) return null;
+  return { x: place.x, y: place.y, pxPerMm: place.pxPerMm, stamp: place.stamp };
+}
+
+/** Забыть всё: новый объект, закрытая схема. */
+function screenPlaceForget() {
+  place = null;
+  return placeStamp;
+}
+
+/** Кому сказать, что место сменилось (память вида). Возвращает отписку. */
+function screenPlaceWatch(listener) {
+  if (typeof listener !== "function") return () => {};
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Поставить место из памяти — не от поверхности, а из настроек браузера.
+ * Отдельная дверь нарочно: у неё другое правило старшинства (выбор человека
+ * старше сохранённого, D54), и решает его тот, кто память поднимает.
+ */
+function screenPlaceRestore(schemeId, saved) {
+  const next = screenPlaceFrom(saved);
+  if (!next) return 0;
+  return screenPlaceSet(schemeId, next, next.pxPerMm);
+}
+
+/**
+ * Что из настроек годится в место. Мусор (чужая версия, правка руками)
+ * отбрасывается молча: лучше прежнее поведение, чем поле, уехавшее в `NaN`.
+ */
+function screenPlaceFrom(value) {
+  if (!value || typeof value !== "object") return null;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const scale = Number(value.pxPerMm);
+  return { x, y, pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null };
+}
+
+/** Что кладётся в настройки: только числа, и округлённые. */
+function screenPlaceStored(value) {
+  const next = screenPlaceFrom(value);
+  if (!next) return null;
+  const stored = { x: Math.round(next.x), y: Math.round(next.y) };
+  // Масштаб округляется до шестого знака: в хранилище незачем двадцать цифр
+  // дробной части, а пиксель на миллиметр — это уже лупа.
+  if (next.pxPerMm) stored.pxPerMm = Math.round(next.pxPerMm * 1e6) / 1e6;
+  return stored;
+}
+
+// ——— план: доли подложки ↔ миллиметры чертежа ————————————————————————
+//
+// Обе половины живут здесь, потому что обе нужны и холсту, и объёму, и памяти
+// вида. Арифметика взята у моста кадра (`render.drawingBridge`): экранных
+// точек на миллиметр у плана — это `zoom · пикселей на метр / 1000`.
+
+/** Экранных точек на миллиметр у плана при этом масштабе. `0` — моста нет. */
+function screenPlacePlanScale(project, schemeId, view) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  if (!(perMeter > 0)) return 0;
+  const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
+  return (zoom * perMeter) / 1000;
+}
+
+/** Масштаб плана, у которого в миллиметре столько экранных точек. `0` — моста нет. */
+function screenPlacePlanZoom(project, schemeId, pxPerMm) {
+  const perMeter = planPixelsPerMeter(project, schemeId);
+  const scale = Number(pxPerMm);
+  if (!(perMeter > 0) || !(scale > 0)) return 0;
+  return (scale * 1000) / perMeter;
+}
+
+/**
+ * Где стоит план: середина поля в миллиметрах чертежа плюс масштаб.
+ * `null` — моста нет (нет калибровки, нет привязки или нет схемы).
+ */
+function screenPlacePlanRead(project, schemeId, box, view) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme) return null;
+  const point = screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
+  const at = planFractionToMm(project, schemeId, point);
+  if (!at) return null;
+  return { x: at.x, y: at.y, pxPerMm: screenPlacePlanScale(project, schemeId, view) };
+}
+
+/**
+ * Вид плана, у которого середина поля смотрит на это место тем же масштабом.
+ *
+ * `place.pxPerMm` задаёт приближение, и это половина «пиксель в пиксель» (D59):
+ * у плана и у чертежа после перехода одинаковы и середина, и число точек на
+ * миллиметр, значит всякая точка чертежа стоит под той же точкой экрана. Нет
+ * `pxPerMm` (так приходит место из объёма — камера масштабом не владеет) —
+ * остаётся прежний масштаб поля.
+ */
+function screenPlacePlanView(project, schemeId, box, next, view) {
+  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
+  const scheme = findScheme(project, schemeId);
+  if (!scheme || !next) return null;
+  const point = planMmToFraction(project, schemeId, next);
+  if (!point) return null;
+  const asked = screenPlacePlanZoom(project, schemeId, next.pxPerMm);
+  const zoom = asked > 0 ? asked : Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
+  const at = planToScreen(point, scheme, { zoom, offsetX: 0, offsetY: 0 });
+  return { zoom, offsetX: box.width / 2 - at.x, offsetY: box.height / 2 - at.y };
+}
+
 // src/pwa.js
 // Установка страницы как приложения — только для веб-версии.
 //
@@ -29572,6 +29796,10 @@ function wirePanelRail() {
 // и не правят ни этот файл, ни разметку.
 
 
+// Расположение — одно на три режима, и считает его `screenPlace.js` (таск 178,
+// 193). Каркас только кладёт его в настройки и достаёт обратно: второго счёта
+// у памяти вида нет.
+
 // Виды шрифта объявлены там же, где их разбирают в семейства, — в `render.js`.
 // Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
 
@@ -29651,11 +29879,15 @@ const SCREEN_ABILITIES = {
 const appState = {
   layout: "desktop",
   // Что показано на основном экране: план, чертёж или объём (таск 153, G219).
-  // **Состояние сеанса вкладки и только оно** (G68): в объект режим не
-  // пишется — иначе напарник, открывший файл, попадал бы в чужой объём, — и в
-  // настройки браузера тоже не пишется: объект открывается схемой, она главная.
-  // Внутри сеанса помнится всё: поверхности живут дальше за кадром, и человек
-  // возвращается туда, где стоял в объёме, и к тому инструменту, которым чертил.
+  //
+  // **В объект режим не пишется** (G68): иначе напарник, открывший файл,
+  // попадал бы в чужой объём. А вот в настройках браузера он с таска 193
+  // помнится (G294, слова заказчика: «запоминай выбранный режим и расположение
+  // в браузере, что бы при обновлении страницы вид не менялся») — память
+  // привязана к объекту и живёт рядом с остальными выключателями показа,
+  // разбор у `VIEW_SETTING`. Прежнее правило «объект всегда открывается
+  // Схемой» (таск 153) этим и отменено: оно остаётся только для объекта, у
+  // которого памяти ещё нет.
   screen: SCREEN_DEFAULT,
   project: null,
   schemeId: null,
@@ -29790,6 +30022,32 @@ const ELEVATION_GROW_SETTING = "elevationGrow";
 // несколько, и прятать в одном вещь из другого было бы дико.
 const OBJECTS_SETTING = "schemeObjectsShown";
 const HIDDEN_OBJECTS_SETTING = "hiddenSchemeObjects";
+// ——— память вида: режим, схема и расположение (G294, таск 193) ——————————
+//
+// Слова заказчика: «А ещё запоминай выбранный режим и расположение в браузере,
+// что бы при обновлении страницы вид не менялся».
+//
+// **В браузере, а не в объекте** (G68, и заказчик сказал это сам): вид — не
+// свойство квартиры, и, уехав в файл, он пришёл бы к напарнику вместе с
+// проектом. Поэтому ключ лежит здесь, рядом с подложкой и линейкой.
+//
+// **Привязана к объекту:** в ключе карта «объект → вид», как у спрятанных
+// вещей. Открыли другой объект — у него своё место, а не чужое; открыли
+// впервые — прежнее поведение (схема, подгонка плана по первому кадру).
+//
+// Что помнится: режим (`screen`), открытая схема (`schemeId`) и расположение —
+// середина поля в миллиметрах чертежа и экранных точек на миллиметр
+// (`place`, разбор в `screenPlace.js`). Расположение одно на три режима, и
+// объём встаёт по нему камерой: своего числа у памяти нет.
+//
+// **Чего здесь нет:** занятия (выделение против добавления). Оно сбрасывается
+// при всяком переключении режима (G296) и тем более при перезагрузке: вернуться
+// в «Добавление» после обновления страницы значило бы поставить метку первым же
+// кликом по плану.
+const VIEW_SETTING = "screenView";
+// Сколько объектов помним. Карта крошечная (четыре числа на объект), но расти
+// без края ей незачем: объекты удаляют, а ключи остались бы навсегда.
+const VIEW_MEMORY_MAX = 20;
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -30044,6 +30302,142 @@ function setObjectHidden(objectId, hidden) {
   if (kept.length === 0) delete appHiddenObjects[projectId];
   Promise.resolve(setSetting(HIDDEN_OBJECTS_SETTING, appHiddenObjects)).catch(() => {});
 }
+
+// ——— память вида: чистые правила ————————————————————————————————————————
+
+/**
+ * Что из настроек годится в память вида. Мусор (чужая версия, правка руками)
+ * отбрасывается молча: лучше прежнее поведение, чем объект, открывшийся в
+ * режиме «undefined».
+ */
+function viewMemoryFrom(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const map = {};
+  for (const [id, entry] of Object.entries(value)) {
+    if (!id || !entry || typeof entry !== "object") continue;
+    const kept = {};
+    if (SCREEN_MODES.includes(entry.screen)) kept.screen = entry.screen;
+    if (typeof entry.schemeId === "string" && entry.schemeId) kept.schemeId = entry.schemeId;
+    const place = screenPlaceStored(entry.place);
+    if (place) kept.place = place;
+    if (Object.keys(kept).length > 0) map[id] = kept;
+  }
+  return map;
+}
+
+/** Что ложится в память про этот объект: режим, схема и расположение. */
+function viewMemoryEntry(state, place) {
+  const entry = {};
+  if (state && SCREEN_MODES.includes(state.screen)) entry.screen = state.screen;
+  if (state && state.schemeId) entry.schemeId = state.schemeId;
+  const stored = screenPlaceStored(place);
+  if (stored) entry.place = stored;
+  return entry;
+}
+
+/**
+ * Что из памяти применить, когда объект открылся. Возвращает заплатку для
+ * состояния — и она же отвечает за прежнее поведение: памяти нет, режим в ней
+ * чужой или в этой раскладке его не бывает — открывается схема (таск 153).
+ *
+ * Схема из памяти берётся только если она у объекта есть: удалённая схема
+ * оставила бы пустой экран, а открывший объект уже выбрал первую.
+ *
+ * `options.picked` — **человек уже выбрал режим сам** (дефект D54): тогда
+ * режима в заплатке нет вовсе, ни сохранённого, ни умолчания. Объект
+ * догружается секунду-две, и выбор, сделанный человеком за это время, старше
+ * всего, что лежит в памяти.
+ */
+function viewMemoryPatch(entry, project, layout, options = {}) {
+  const patch = {};
+  if (!options.picked) {
+    patch.screen = entry && screenAllowed(entry.screen, layout) ? entry.screen : SCREEN_DEFAULT;
+  }
+  const schemes = (project && project.schemes) || [];
+  if (entry && entry.schemeId && schemes.some((scheme) => scheme.id === entry.schemeId)) {
+    patch.schemeId = entry.schemeId;
+  }
+  return patch;
+}
+
+// ——— память вида: хранилище ————————————————————————————————————————————
+//
+// Карта лежит в памяти страницы и в настройках браузера; применяется она
+// **один раз на объект** — в тот миг, когда объект открылся.
+//
+// **Выбор человека старше сохранённого** (дефект D54). Объект поднимается из
+// базы не мгновенно: в живых прогонах человек успевал переключить режим до
+// того, как он доедет, — и позднее применение памяти перебивало его выбор
+// через секунду-две после загрузки. Поэтому у первого объекта сеанса (его
+// никто не просил открывать — он поднимается сам, как последний открытый)
+// сохранённый режим применяется только если человек ещё не выбрал своего.
+// Объект, который человек открыл руками, — другое дело: он просил объект, а не
+// режим, и память этого объекта старше.
+let appViewMemory = null;
+let appViewProjectId = null;
+let appViewFirst = true;
+let appScreenPicked = false;
+let appViewTimer = null;
+
+function syncViewMemory(changed) {
+  const projectId = appState.project ? appState.project.id : null;
+  if (projectId === appViewProjectId) return;
+  appViewProjectId = projectId;
+  // Новый объект — чужое место забыто: середина прежнего в новом ничего не
+  // значит, а масштаб тем более.
+  screenPlaceForget();
+  if (appViewMemory === null) return;
+  const patch = viewMemoryApply(projectId);
+  if (!patch) return;
+  for (const [key, value] of Object.entries(patch)) {
+    if (appState[key] === value) continue;
+    appState[key] = value;
+    changed[key] = value;
+  }
+}
+
+/**
+ * Поднять память этого объекта. Возвращает заплатку состояния (её применяет
+ * либо `setState`, либо — если память доехала позже объекта — сам вызывающий).
+ * Место при этом ставится **до** заплатки: поверхности читают его, когда
+ * узнают о новом режиме, и опоздай оно — чертёж встал бы не туда.
+ */
+function viewMemoryApply(projectId) {
+  if (!projectId) return null;
+  const entry = appViewMemory ? appViewMemory[projectId] : null;
+  // Первый объект сеанса поднимается сам (последний открытый), и человека о нём
+  // не спрашивали: его выбор режима, сделанный пока объект ехал, старше
+  // сохранённого (D54). Объект, открытый руками, — другое дело: человек просил
+  // объект, а не режим, и память **этого** объекта старше.
+  const patch = viewMemoryPatch(entry, appState.project, appState.layout, {
+    picked: appViewFirst && appScreenPicked,
+  });
+  appViewFirst = false;
+  if (entry && entry.place) screenPlaceRestore(patch.schemeId || appState.schemeId, entry.place);
+  return patch;
+}
+
+/** Записать память этого объекта — не чаще, чем раз в полсекунды. */
+function saveViewMemory() {
+  if (typeof setTimeout !== "function") return;
+  if (appViewTimer) clearTimeout(appViewTimer);
+  appViewTimer = setTimeout(() => {
+    appViewTimer = null;
+    const projectId = appState.project ? appState.project.id : null;
+    if (!projectId || appViewMemory === null) return;
+    const entry = viewMemoryEntry(appState, screenPlaceOf(appState.schemeId));
+    if (Object.keys(entry).length === 0) return;
+    const next = { ...appViewMemory };
+    // Ключ переставляется в конец: по порядку видно, какой объект забыть
+    // первым, когда их станет больше потолка.
+    delete next[projectId];
+    next[projectId] = entry;
+    const ids = Object.keys(next);
+    for (const id of ids.slice(0, Math.max(0, ids.length - VIEW_MEMORY_MAX))) delete next[id];
+    appViewMemory = next;
+    Promise.resolve(setSetting(VIEW_SETTING, next)).catch(() => {});
+  }, 500);
+}
 function setState(patch) {
   if (!patch) return getState();
   const changed = {};
@@ -30054,6 +30448,8 @@ function setState(patch) {
     }
   }
   syncHiddenObjects(changed);
+  syncViewMemory(changed);
+  if ("screen" in changed || "schemeId" in changed) saveViewMemory();
   if (Object.keys(changed).length === 0) return getState();
   const snapshot = getState();
   for (const subscriber of [...appSubscribers]) {
@@ -30151,12 +30547,33 @@ function screenMode() {
   return appState.screen;
 }
 
-// Режим меняется одной дверью: отметка на корне, панели и поверхности узнают
-// о нём из `subscribe`. Недоступный в этой раскладке режим не включается —
-// иначе переключатель обещал бы то, чего на этом экране нет.
+/**
+ * Режим меняется одной дверью: отметка на корне, панели и поверхности узнают о
+ * нём из `subscribe`. Недоступный в этой раскладке режим не включается — иначе
+ * переключатель обещал бы то, чего на этом экране нет.
+ *
+ * **Переключение сбрасывает занятие** (G296, таск 193). Слова заказчика: «при
+ * переключении между схема\чертёж\объем у первых двух сбрасывай режим на
+ * Выделение с Добавления». У плана занятие лежит здесь, в состоянии сеанса, — и
+ * сбрасывается оно в одной заплатке с режимом: подписка холста на `mode` сама
+ * дочерчивает начатое **со словами** (`canvasSyncDraft` → `canvasSettleDraft`,
+ * таск 172), то есть порядок «сперва дочертить, потом сбросить» держится
+ * механикой, а не очередью вызовов. Занятие чертежа сбрасывает сам чертёж (там
+ * оно внутри поверхности), и по тому же правилу.
+ *
+ * Сбрасывается **занятие**, а не выбор: тип метки (`activeTypeId`) и выбранная
+ * вещь остаются — вернулся и ставишь то же, но первым кликом ничего не
+ * поставишь. Место и масштаб тоже остаются (G294, G276): помнится вид, не
+ * занятие. Так и записано, чтобы следующий не «починил» одно из двух.
+ *
+ * Отметка «человек выбрал режим сам» ставится здесь же: по ней память вида
+ * понимает, что её сохранённое значение младше (D54).
+ */
 function setScreen(screen) {
   if (!screenAllowed(screen, appState.layout)) return;
-  setState({ screen });
+  appScreenPicked = true;
+  if (appState.screen === screen) return;
+  setState(appState.mode === "select" ? { screen } : { screen, mode: "select" });
 }
 
 function layoutViewport() {
@@ -30501,6 +30918,28 @@ function wireSections() {
       if (FONT_KINDS.includes(saved) && saved !== FONT_DRAFT) setState({ schemeFont: saved });
     })
     .catch(() => {});
+  // Память вида (G294): карта «объект → режим, схема, расположение». Читается
+  // асинхронно, как остальные настройки, и объект к этой минуте может быть ещё
+  // не открыт — тогда она применится сама, когда он откроется.
+  //
+  // А если объект уже открылся, пока хранилище отвечало, — применяем сейчас, и
+  // **с оговоркой D54**: выбор человека старше сохранённого. Этот путь и есть
+  // то позднее применение, из-за которого режим сам возвращался через
+  // секунду-две после загрузки.
+  Promise.resolve(getSetting(VIEW_SETTING))
+    .then((saved) => {
+      appViewMemory = viewMemoryFrom(saved);
+      if (!appViewProjectId) return;
+      const patch = viewMemoryApply(appViewProjectId);
+      if (patch) setState(patch);
+    })
+    .catch(() => {
+      appViewMemory = {};
+    });
+  // Место и масштаб пишутся в ту же память. Поле говорит о них на каждый кадр,
+  // поэтому запись отложенная — иначе в хранилище летело бы по шестьдесят
+  // записей в секунду на одно перетаскивание плана.
+  screenPlaceWatch(() => saveViewMemory());
 }
 function startApp() {
   if (appStarted) return;
@@ -32190,220 +32629,6 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
   }
 
   return { node, update, repaint: paint, destroy };
-}
-
-// src/screenPlace.js
-// Одно место и один масштаб на три режима (требование G276, таск 178; дефект
-// D59, таск 193) и память вида между перезагрузками (G294).
-//
-// Слова заказчика в таске 178: «При переключении Схема - Чертёж - объём мы
-// должны находиться в одном месте… центр схемы\чертежа это расположение камеры
-// в объёме. Ну и учитывай что может попасть на стены и т.д. тогда сдвигай».
-// Его же слова в таске 193: «сейчас при переключении я не остаюсь там же,
-// точнее не всегда работает и уровень зума меняется. Должно совпадать пиксель
-// в пиксель».
-//
-// ——— почему «не всегда работало» ———————————————————————————————————————
-//
-// Потому что мест было **три**, а не одно: план держал свой `state.view`,
-// мастерская — свой `view` внутри себя, объём — где стоит человек. Этот модуль
-// до таска 193 переносил место только **через объём**: мастерская говорила,
-// где стоит, объём это читал на входе и оставлял просьбу на выходе. Переход
-// «Схема → Чертёж» напрямую не переносил ничего вовсе, а масштаб не
-// переносился ни на одном пути — ровно то, что заказчик и увидел.
-//
-// Теперь здесь лежит **одно состояние на три режима**: середина поля в
-// миллиметрах чертежа и экранных точек на миллиметр. Кто на экране — тот и
-// пишет его (на каждый кадр), а остальные читают, когда их показывают. Второго
-// счёта нет: `volumePlanCentre` и `volumePlanViewAt` объёма зовут эти же
-// функции.
-//
-// ——— почему это отдельный модуль, а не поле состояния ——————————————————
-//
-// Потому что у режимов разные системы координат, и свести их можно только в
-// миллиметрах чертежа: у плана вид задан в пикселях подложки (`state.view`), у
-// мастерской — в миллиметрах, у объёма — в миллиметрах же, но третьей осью.
-// Состояние приложения хранит вид плана и перерисовывает холст на каждую его
-// правку — положи сюда же место чертежа, и холст стал бы перерисовываться от
-// чужого переключения.
-//
-// ——— где моста нет ————————————————————————————————————————————————————
-//
-// Перевод «доля плана ↔ миллиметр чертежа» держится на двух половинах:
-// калибровке (пикселей на метр) и привязке (где нуль чертежа на плане). Нет
-// хотя бы одной — обе функции модели отвечают `null`, и перенос молча не
-// делается: каждое поле остаётся там, где стояло. Соврать тут нечем — у плана
-// без калибровки миллиметра не существует.
-//
-// ——— «чьё это место» ——————————————————————————————————————————————————
-//
-// У записи есть отметка (`stamp`), которая растёт на каждую запись. Поверхность
-// помнит отметку своей последней записи и читает место только тогда, когда она
-// другая, — то есть когда место поставил **кто-то другой**. Без этого
-// спрятанная поверхность, которая всё ещё перерисовывается (мастерская рисует
-// кадр и на чужом режиме), перебивала бы своим старым местом то, куда уехало
-// поле на экране.
-
-
-/** Общее место: `{schemeId, x, y, pxPerMm, stamp}` или `null`. */
-let place = null;
-let placeStamp = 0;
-const listeners = new Set();
-
-const placeOf = (schemeId, pointMm) => {
-  if (!schemeId || !pointMm) return null;
-  const x = Number(pointMm.x);
-  const y = Number(pointMm.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { schemeId, x, y };
-};
-
-/**
- * Поверхность на экране говорит, где стоит середина её поля и сколько в ней
- * экранных точек на миллиметр. `pxPerMm` необязателен: объём масштабом не
- * владеет вовсе и оставляет прежний — вернувшись, человек видит то
- * приближение, которое выбрал сам.
- *
- * Возвращает отметку записи — её зовущий запоминает своей.
- */
-function screenPlaceSet(schemeId, pointMm, pxPerMm) {
-  const next = placeOf(schemeId, pointMm);
-  if (!next) return placeStamp;
-  const scale = Number(pxPerMm);
-  const kept = place && place.schemeId === schemeId ? place.pxPerMm : null;
-  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : kept;
-  // Запись, ничего не меняющая, не двигает отметку: мастерская и холст говорят
-  // это на каждый кадр, и память вида иначе писалась бы в хранилище впустую.
-  if (
-    place &&
-    place.schemeId === next.schemeId &&
-    place.x === next.x &&
-    place.y === next.y &&
-    place.pxPerMm === next.pxPerMm
-  ) {
-    return placeStamp;
-  }
-  placeStamp += 1;
-  place = { ...next, stamp: placeStamp };
-  for (const listener of [...listeners]) {
-    try {
-      listener(place);
-    } catch (error) {
-      // Слушатель — память вида; его беда не повод ронять кадр поля.
-    }
-  }
-  return placeStamp;
-}
-
-/** Общее место этой схемы: `{x, y, pxPerMm, stamp}` или `null`. */
-function screenPlaceOf(schemeId) {
-  if (!place || !schemeId || place.schemeId !== schemeId) return null;
-  return { x: place.x, y: place.y, pxPerMm: place.pxPerMm, stamp: place.stamp };
-}
-
-/** Забыть всё: новый объект, закрытая схема. */
-function screenPlaceForget() {
-  place = null;
-  return placeStamp;
-}
-
-/** Кому сказать, что место сменилось (память вида). Возвращает отписку. */
-function screenPlaceWatch(listener) {
-  if (typeof listener !== "function") return () => {};
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-/**
- * Поставить место из памяти — не от поверхности, а из настроек браузера.
- * Отдельная дверь нарочно: у неё другое правило старшинства (выбор человека
- * старше сохранённого, D54), и решает его тот, кто память поднимает.
- */
-function screenPlaceRestore(schemeId, saved) {
-  const next = screenPlaceFrom(saved);
-  if (!next) return 0;
-  return screenPlaceSet(schemeId, next, next.pxPerMm);
-}
-
-/**
- * Что из настроек годится в место. Мусор (чужая версия, правка руками)
- * отбрасывается молча: лучше прежнее поведение, чем поле, уехавшее в `NaN`.
- */
-function screenPlaceFrom(value) {
-  if (!value || typeof value !== "object") return null;
-  const x = Number(value.x);
-  const y = Number(value.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  const scale = Number(value.pxPerMm);
-  return { x, y, pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null };
-}
-
-/** Что кладётся в настройки: только числа, и округлённые. */
-function screenPlaceStored(value) {
-  const next = screenPlaceFrom(value);
-  if (!next) return null;
-  const stored = { x: Math.round(next.x), y: Math.round(next.y) };
-  // Масштаб округляется до шестого знака: в хранилище незачем двадцать цифр
-  // дробной части, а пиксель на миллиметр — это уже лупа.
-  if (next.pxPerMm) stored.pxPerMm = Math.round(next.pxPerMm * 1e6) / 1e6;
-  return stored;
-}
-
-// ——— план: доли подложки ↔ миллиметры чертежа ————————————————————————
-//
-// Обе половины живут здесь, потому что обе нужны и холсту, и объёму, и памяти
-// вида. Арифметика взята у моста кадра (`render.drawingBridge`): экранных
-// точек на миллиметр у плана — это `zoom · пикселей на метр / 1000`.
-
-/** Экранных точек на миллиметр у плана при этом масштабе. `0` — моста нет. */
-function screenPlacePlanScale(project, schemeId, view) {
-  const perMeter = planPixelsPerMeter(project, schemeId);
-  if (!(perMeter > 0)) return 0;
-  const zoom = Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
-  return (zoom * perMeter) / 1000;
-}
-
-/** Масштаб плана, у которого в миллиметре столько экранных точек. `0` — моста нет. */
-function screenPlacePlanZoom(project, schemeId, pxPerMm) {
-  const perMeter = planPixelsPerMeter(project, schemeId);
-  const scale = Number(pxPerMm);
-  if (!(perMeter > 0) || !(scale > 0)) return 0;
-  return (scale * 1000) / perMeter;
-}
-
-/**
- * Где стоит план: середина поля в миллиметрах чертежа плюс масштаб.
- * `null` — моста нет (нет калибровки, нет привязки или нет схемы).
- */
-function screenPlacePlanRead(project, schemeId, box, view) {
-  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
-  const scheme = findScheme(project, schemeId);
-  if (!scheme) return null;
-  const point = screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
-  const at = planFractionToMm(project, schemeId, point);
-  if (!at) return null;
-  return { x: at.x, y: at.y, pxPerMm: screenPlacePlanScale(project, schemeId, view) };
-}
-
-/**
- * Вид плана, у которого середина поля смотрит на это место тем же масштабом.
- *
- * `place.pxPerMm` задаёт приближение, и это половина «пиксель в пиксель» (D59):
- * у плана и у чертежа после перехода одинаковы и середина, и число точек на
- * миллиметр, значит всякая точка чертежа стоит под той же точкой экрана. Нет
- * `pxPerMm` (так приходит место из объёма — камера масштабом не владеет) —
- * остаётся прежний масштаб поля.
- */
-function screenPlacePlanView(project, schemeId, box, next, view) {
-  if (!project || !schemeId || !box || !(box.width > 0) || !(box.height > 0)) return null;
-  const scheme = findScheme(project, schemeId);
-  if (!scheme || !next) return null;
-  const point = planMmToFraction(project, schemeId, next);
-  if (!point) return null;
-  const asked = screenPlacePlanZoom(project, schemeId, next.pxPerMm);
-  const zoom = asked > 0 ? asked : Number(view && view.zoom) > 0 ? Number(view.zoom) : 1;
-  const at = planToScreen(point, scheme, { zoom, offsetX: 0, offsetY: 0 });
-  return { zoom, offsetX: box.width / 2 - at.x, offsetY: box.height / 2 - at.y };
 }
 
 // src/canvas.js
@@ -65805,12 +66030,7 @@ registerPanel(PANEL_IDS.schemes, mountSchemesPanel);
 
 
 function mountScreens(host, api) {
-  const { getState, setState, subscribe } = api;
-  // Идентификатор объекта, на котором собран ряд: сменился объект — режим
-  // возвращается к схеме (она главная, и у нового объекта чертежа может не
-  // быть вовсе). Сам `project` в состоянии меняется на каждую правку, поэтому
-  // сравнивается именно id.
-  let projectId = null;
+  const { getState, subscribe } = api;
   const row = uiEl("div", {
     class: "canvas-modes",
     attrs: { role: "group", "aria-label": strings.screens.label },
@@ -65843,18 +66063,16 @@ function mountScreens(host, api) {
     }
   };
 
+  // Что стоит на новом объекте — решает **память вида** (таск 193, G294), и
+  // решает она это в одном месте, в каркасе (`app.viewMemoryPatch`): объект
+  // открывается тем режимом, с которого с ним ушли, а объект, у которого
+  // памяти нет, — схемой, как было с таска 153.
+  //
+  // Здесь этого правила больше нет нарочно. Раньше ряд сам возвращал режим к
+  // схеме на смену объекта, и ровно это поздним срабатыванием спорило бы с
+  // памятью: объект догружается через секунду-две, и переключение, сделанное
+  // человеком до того, перебивалось бы (дефект D54).
   subscribe((state, changed) => {
-    if ("project" in changed) {
-      const id = state.project ? state.project.id : null;
-      if (id !== projectId) {
-        projectId = id;
-        // Новый объект открывается схемой (таск 153): в объект режим не
-        // пишется (G68), и помнить чужой чертёж на новом объекте незачем.
-        if (state.screen !== SCREEN_DEFAULT && screenAllowed(SCREEN_DEFAULT, state.layout)) {
-          setState({ screen: SCREEN_DEFAULT });
-        }
-      }
-    }
     if ("screen" in changed || "schemeId" in changed || "layout" in changed || "project" in changed) render();
   });
   render();
@@ -66233,6 +66451,38 @@ function workshopGridOptions(stepMm) {
   const step = Number(stepMm) || 0;
   if (!(step > 0) || WORKSHOP_GRID_STEPS_MM.includes(step)) return [...WORKSHOP_GRID_STEPS_MM];
   return [...WORKSHOP_GRID_STEPS_MM, step].sort((first, second) => first - second);
+}
+
+// ——— «Без сетки» — пункт в списке шагов (таск 193, G293) ——————————————————
+//
+// Слова заказчика: «вместо галки сделай просто пункт в Шаге - Без сетки».
+// Отдельной отметки показа сетки не осталось.
+//
+// **Где это живёт.** Шаг — в объекте (G258), а «Без сетки» — в настройках
+// браузера, там же, где подложка и чертёж (`app.GRID_SETTING`). Нулём в объекте
+// это выразить было нельзя: вид — не свойство квартиры, и, уехав в файл, он
+// пришёл бы к напарнику вместе с проектом (G68). Поэтому и значение пункта не
+// число: ноль в списке читался бы шагом, которого не бывает, а в объект от
+// выбора «Без сетки» не пишется ничего — старый файл со своим шагом
+// открывается и упаковывается как прежде.
+const WORKSHOP_GRID_OFF = "off";
+
+/** Что стоит в списке шагов при этих настройках: «Без сетки» или шаг числом. */
+function workshopGridValue(shown, stepMm) {
+  if (shown === false) return WORKSHOP_GRID_OFF;
+  const step = Number(stepMm) || 0;
+  return step > 0 ? String(step) : WORKSHOP_GRID_OFF;
+}
+
+/**
+ * Что выбрали в списке: `{shown: false}` — «Без сетки», `{shown: true, stepMm}`
+ * — шаг. `null` — негодное значение: список своего шага не придумывает, иначе
+ * опечатка в разметке молча сменила бы сетку в объекте.
+ */
+function workshopGridChoice(value) {
+  if (value === WORKSHOP_GRID_OFF) return { shown: false };
+  const step = Number(value);
+  return step > 0 ? { shown: true, stepMm: step } : null;
 }
 
 // Как часто рисуются линии сетки и каким кратным шагом — у общего слоя
@@ -71353,16 +71603,43 @@ function mountToolsPanel(host, api) {
 }
 
 /**
- * Поля «Интерфейса» — размер меток и подписей, шрифт, слои, сетка чертежа,
- * развёртка и масштаб того поля, которое на экране.
+ * Поля «Интерфейса» — размер меток и подписей, шрифт, слои, сетка, развёртка и
+ * масштаб того поля, которое на экране.
  *
  * **Все переключатели показа собраны здесь** (таск 187, G281). Слова заказчика:
  * «пункт „Слои“ убери, это же дубль вкладки Интерфейс проекта, просто почини то
  * бы там работало и добавь недостающие пункты. Ну и в интерфейсе убери описания
  * у пунктов». Описания ушли в подсказки, слои чертежа (сетка, шаг, притяжка)
- * пришли сюда из колонки, а в каждом режиме показаны ровно те отметки, которые
- * в нём меняют картинку: линейка — у плана, сетка — у чертежа, «Объекты» — у
- * всех трёх.
+ * пришли сюда из колонки.
+ *
+ * **И раздел один и тот же во всех трёх режимах** (таск 193, G293). Таск 187
+ * показывал в каждом режиме только те отметки, которые в нём меняют картинку, —
+ * заказчик решил иначе и лучше: «Сделай что бы сетка была и на схеме… И линейку
+ * в чертеже и т.д. Короче меню Интерфейс не должно отличаться от режима
+ * чертеж\схема». То есть пункт не прячут, а **учат работать**: сетка легла на
+ * план, линейка — в чертёж. Прятать по режимам больше нельзя; на каком поле
+ * пункт меняет картинку — говорит его подсказка.
+ *
+ * Разбор по пунктам (чтобы следующий не «починил» это обратно):
+ *
+ *   «Метки», «Подписи», «Шрифт» — размер и рисунок подписей схемы. Живут в
+ *     объекте, видны на плане и в выгрузках; в чертеже и в объёме меток нет —
+ *     но поля эти не про режим, а про объект, и прятать их незачем;
+ *   «Линейка и направляющие» — **оба плоских поля**: деления на плане в
+ *     пикселях подложки, в чертеже в миллиметрах. Направляющие ставят на
+ *     плане, в чертеже они видны там, где у него есть мост в миллиметры;
+ *   «Сетка, шаг в мм» с пунктом «Без сетки» — **оба плоских поля**, шаг один и
+ *     тот же (он в объекте, G258);
+ *   «Притягивать к узлам» — честно **про чертёж**: вершины стен садятся на
+ *     узлы. Метку на плане кликом ставят по фотографии помещения, и притянуть
+ *     её к сетке значило бы сдвинуть разметку, о которой никто не просил.
+ *     При «Без сетки» гаснет с причиной;
+ *   «Подложка», «Чертёж» — оба плоских поля (так было с таска 187);
+ *   «Объекты чертежа» — все три режима;
+ *   «Развёртка выделенной стены» — оба плоских поля: в объёме стену не
+ *     выделяют;
+ *   «Масштаб» — поле, которое на экране; в объёме гаснет с причиной (там
+ *     отходят и приближаются камерой).
  *
  * **Одна сборка на два места** (таск 175, G272). На большом экране это раздел
  * левой колонки; на узком экрана раздела нет вовсе, и те же поля приходят
@@ -71398,19 +71675,42 @@ function createSizesFields(api) {
     render();
   }
 
-  // ——— сетка чертежа: шаг в объекте, притяжка в настройках (таск 187) ———
+  // ——— сетка: шаг в объекте, «Без сетки» в настройках (таск 187, 193) ———
   //
   // Шаг принадлежит объекту (G258), поэтому его смена — шаг истории: иначе
   // Ctrl+Z после смены сетки вернул бы метку, а сетку — молча и заодно.
+  //
+  // А «Без сетки» — **первый пункт того же списка** (таск 193, G293: «вместо
+  // галки сделай просто пункт в Шаге - Без сетки»), и живёт он в настройках
+  // браузера, как подложка и чертёж: в объект от него не пишется ничего, шаг
+  // остаётся прежним, и старый файл открывается как закрывался (G68). Поэтому
+  // история этот выбор и не трогает — отменять нечего.
   const gridSelect = uiEl("select", {
     class: "ui-input tools__select",
     title: strings.tools.gridStepHint,
     on: {
       change: () => {
+        const choice = workshopGridChoice(gridSelect.value);
+        if (!choice) return;
         const state = getState();
-        if (!state.project) return;
+        if (!choice.shown) {
+          setState({ gridShown: false });
+          setSetting(GRID_SETTING, false);
+          render();
+          return;
+        }
+        // Выбрали число — сетка заодно и зажигается: человек выбирает шаг,
+        // чтобы её видеть, а не чтобы оставить её погашенной.
+        if (state.gridShown === false) {
+          setState({ gridShown: true });
+          setSetting(GRID_SETTING, true);
+        }
+        if (!state.project) {
+          render();
+          return;
+        }
         try {
-          const next = setGridStep(state.project, gridSelect.value);
+          const next = setGridStep(state.project, choice.stepMm);
           if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
         } catch (error) {
           notify(error.message, "error");
@@ -71424,17 +71724,18 @@ function createSizesFields(api) {
   // Список шагов пересобирается только когда он и правда другой (сменился
   // объект с чужим числом): `replaceChildren` на каждом кадре схлопывал бы
   // список, раскрытый под рукой.
-  function syncGridSelect(project) {
-    const step = gridStepOf(project);
+  function syncGridSelect(state) {
+    const step = gridStepOf(state.project);
     const options = workshopGridOptions(step);
     const key = options.join(",");
     if (key !== gridOptionsKey) {
       gridOptionsKey = key;
       gridSelect.replaceChildren(
+        uiEl("option", { value: WORKSHOP_GRID_OFF, text: strings.tools.gridOff }),
         ...options.map((value) => uiEl("option", { value: String(value), text: String(value) })),
       );
     }
-    gridSelect.value = String(step);
+    gridSelect.value = workshopGridValue(state.gridShown, step);
     return gridSelect;
   }
 
@@ -71458,17 +71759,16 @@ function createSizesFields(api) {
   function render() {
     const state = getState();
     const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
-    // ——— что показывать: только то, что в этом режиме меняет картинку ———
+    // ——— состав один и тот же во всех режимах (таск 193, G293) ————————
     //
-    // Заказчик про «Интерфейс»: «почини то бы там работало и добавь недостающие
-    // пункты». Половина починки — свести слои чертежа сюда (они жили второй
-    // парой галок в колонке чертежа), вторая — **не показывать** в режиме ту
-    // отметку, которая в нём ничего не меняет: линейка принадлежит плану, сетка
-    // — чертежу, а в объёме из всего этого работает только «Объекты».
+    // Что в каком режиме меняет картинку — сказано в подсказках, а не
+    // отсутствием пункта. Режим спрашивается только там, где у поля и правда
+    // **разная работа**: ряд масштаба зовёт то поле, которое на экране, а
+    // кнопки «Задать масштаб» и «Привязать чертёж» — это действия чертежа, и
+    // показываются они тогда, когда им есть что сделать.
     const screen = state.screen;
     const drawing = screen === "drawing";
     const plan = screen === "scheme";
-    const field = plan || drawing;
     // Подложку в чертёж не положить без масштаба — и это не решение, а
     // арифметика: миллиметру не от чего считаться в пикселях плана. Отметка в
     // таком случае гаснет, а причина стоит в её подсказке, а рядом — кнопка,
@@ -71482,6 +71782,14 @@ function createSizesFields(api) {
         : spot.kind === "noScale"
           ? strings.tools.planLayerNoScale
           : "";
+    // «Без сетки» выбрано — притягиваться не к чему: узлов нет. Отметка гаснет
+    // **с причиной** (таск 193), а не висит мёртвой.
+    const gridOff = state.gridShown === false;
+    // На плане сетка видна только там, где есть мост в миллиметры: калибровка
+    // и привязка. Сказать об этом надо в подсказке — иначе человек снимает
+    // «Без сетки» и не понимает, почему ничего не появилось.
+    const planBridge = plan && state.project && state.schemeId ? workshopPlacement(state.project, state.schemeId) : null;
+    const gridNoBridge = Boolean(planBridge) && planBridge.kind !== "ready";
     const parts = [
       uiEl("label", { class: "tools__field" }, [
         uiEl("span", { text: strings.tools.markSize }),
@@ -71498,22 +71806,18 @@ function createSizesFields(api) {
         toolsFontSelect(state, setState),
       ]),
       uiEl("p", { class: "tools__label", text: strings.tools.layers }),
-      // Линейка и направляющие — оснастка **плана**: в чертеже свои
-      // направляющие рисует черновик, в объёме линейки нет вовсе.
-      plan
-        ? uiEl("label", { class: "tools__field tools__field--check" }, [
-            toolsGuidesCheck(state, setState),
-            uiEl("span", { text: strings.tools.guides }),
-          ])
-        : null,
+      // Линейка и направляющие — оснастка **обоих плоских полей** (таск 193):
+      // в чертеже деления в миллиметрах, на плане — в пикселях подложки.
+      uiEl("label", { class: "tools__field tools__field--check", title: strings.tools.guidesHint }, [
+        toolsGuidesCheck(state, setState),
+        uiEl("span", { text: strings.tools.guides }),
+      ]),
       // Подложка и чертёж — два слоя, и **одна отметка на оба поля** (таск
       // 187): прежде в чертеже работала своя пара галок, а эта молчала.
-      field
-        ? layerRow(state, "planShown", PLAN_SETTING, strings.tools.planLayer, strings.tools.planLayerHint, {
-            off: planOff,
-            reason: planReason,
-          })
-        : null,
+      layerRow(state, "planShown", PLAN_SETTING, strings.tools.planLayer, strings.tools.planLayerHint, {
+        off: planOff,
+        reason: planReason,
+      }),
       // Две двери рядом с погашенной подложкой: уйти на план за масштабом и
       // привязать чертёж к подложке. Показываются ровно тогда, когда им есть
       // что сделать, — и только если поверхность чертежа уже собрана.
@@ -71531,31 +71835,24 @@ function createSizesFields(api) {
             on: { click: () => workshopAttachPlan() },
           })
         : null,
-      // Сетка — только у чертежа: по ней там и чертят. Шаг и притяжка стоят
-      // под ней, потому что отвечают на тот же вопрос.
-      drawing
-        ? layerRow(state, "gridShown", GRID_SETTING, strings.tools.gridLayer, strings.tools.gridLayerHint)
-        : null,
-      drawing
-        ? uiEl("label", { class: "tools__field", title: strings.tools.gridStepHint }, [
-            uiEl("span", { text: strings.tools.gridStep }),
-            syncGridSelect(state.project),
-          ])
-        : null,
-      drawing
-        ? layerRow(state, "gridSnap", GRID_SNAP_SETTING, strings.tools.gridSnap, strings.tools.gridSnapHint)
-        : null,
-      field
-        ? layerRow(state, "drawingShown", DRAWING_SETTING, strings.tools.drawingLayer, strings.tools.drawingLayerHint)
-        : null,
-      // Вещи чертежа (таск 154, G223) — единственная отметка, которая работает
-      // во всех трёх режимах: гасит их и на плане, и в чертеже, и в объёме.
+      layerRow(state, "drawingShown", DRAWING_SETTING, strings.tools.drawingLayer, strings.tools.drawingLayerHint),
+      // Сетка — на обоих плоских полях, и шаг у неё один (он в объекте, G258).
+      // Отдельной отметки показа нет: «Без сетки» — первый пункт этого списка.
+      uiEl("label", { class: "tools__field", title: gridNoBridge ? strings.tools.gridNoBridge : strings.tools.gridStepHint }, [
+        uiEl("span", { text: strings.tools.gridStep }),
+        syncGridSelect(state),
+      ]),
+      layerRow(state, "gridSnap", GRID_SNAP_SETTING, strings.tools.gridSnap, strings.tools.gridSnapHint, {
+        off: gridOff,
+        reason: gridOff ? strings.tools.gridSnapOff : "",
+      }),
+      // Вещи чертежа (таск 154, G223) — работают во всех трёх режимах: гасят
+      // их и на плане, и в чертеже, и в объёме.
       layerRow(state, "objectsShown", OBJECTS_SETTING, strings.tools.objectsLayer, strings.tools.objectsLayerHint),
       // Полоса развёртки выделенной стены — над планом и над чертежом (G185,
-      // G227). В объёме стену не выделяют, и полосы там нет.
-      field
-        ? layerRow(state, "elevationShown", ELEVATION_SETTING, strings.tools.elevationStrip, strings.tools.elevationStripHint)
-        : null,
+      // G227). В объёме стену не выделяют, и полосы там нет — об этом говорит
+      // подсказка, а не отсутствие пункта.
+      layerRow(state, "elevationShown", ELEVATION_SETTING, strings.tools.elevationStrip, strings.tools.elevationStripHint),
       // ——— масштаб того поля, которое на экране (G227) ————————————————
       //
       // Заказчик: «Кнопки + − и вписать дублируются, есть в нижнем блоке с

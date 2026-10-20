@@ -17,17 +17,12 @@
 // она открывала окно, а окна больше нет. Исключение одно и оно про экран, а не
 // про объект: на узком экране «Чертежа» нет вовсе — там нет никакой правки
 // (`screensFor`).
-import { PANEL_IDS, registerPanel, screenAllowed, screensFor, setScreen, SCREEN_DEFAULT } from "../app.js";
+import { PANEL_IDS, registerPanel, screensFor, setScreen } from "../app.js";
 import { strings } from "../strings.js";
 import { uiEl, uiButton } from "./ui.js";
 
 function mountScreens(host, api) {
-  const { getState, setState, subscribe } = api;
-  // Идентификатор объекта, на котором собран ряд: сменился объект — режим
-  // возвращается к схеме (она главная, и у нового объекта чертежа может не
-  // быть вовсе). Сам `project` в состоянии меняется на каждую правку, поэтому
-  // сравнивается именно id.
-  let projectId = null;
+  const { getState, subscribe } = api;
   const row = uiEl("div", {
     class: "canvas-modes",
     attrs: { role: "group", "aria-label": strings.screens.label },
@@ -60,18 +55,16 @@ function mountScreens(host, api) {
     }
   };
 
+  // Что стоит на новом объекте — решает **память вида** (таск 193, G294), и
+  // решает она это в одном месте, в каркасе (`app.viewMemoryPatch`): объект
+  // открывается тем режимом, с которого с ним ушли, а объект, у которого
+  // памяти нет, — схемой, как было с таска 153.
+  //
+  // Здесь этого правила больше нет нарочно. Раньше ряд сам возвращал режим к
+  // схеме на смену объекта, и ровно это поздним срабатыванием спорило бы с
+  // памятью: объект догружается через секунду-две, и переключение, сделанное
+  // человеком до того, перебивалось бы (дефект D54).
   subscribe((state, changed) => {
-    if ("project" in changed) {
-      const id = state.project ? state.project.id : null;
-      if (id !== projectId) {
-        projectId = id;
-        // Новый объект открывается схемой (таск 153): в объект режим не
-        // пишется (G68), и помнить чужой чертёж на новом объекте незачем.
-        if (state.screen !== SCREEN_DEFAULT && screenAllowed(SCREEN_DEFAULT, state.layout)) {
-          setState({ screen: SCREEN_DEFAULT });
-        }
-      }
-    }
     if ("screen" in changed || "schemeId" in changed || "layout" in changed || "project" in changed) render();
   });
   render();
