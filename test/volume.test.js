@@ -91,7 +91,12 @@ import {
   VOLUME_SHADOW_RGB,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
-  VOLUME_AROUND_PAN_TILT_MIN,
+  VOLUME_RUN_MM_S,
+  VOLUME_WALK_MM_S,
+  VOLUME_AROUND_FLY_S,
+  VOLUME_AROUND_MAX_MM,
+  VOLUME_AROUND_MIN_MM,
+  VOLUME_AROUND_TILT_MIN,
   VOLUME_HILLS,
   VOLUME_FLOOR_LAP,
   VOLUME_FLOOR_RGB,
@@ -122,6 +127,8 @@ import {
   volumeAroundEye,
   volumeAroundFit,
   volumeAroundPan,
+  volumeAroundReach,
+  volumeAroundSpeed,
   volumeAroundTarget,
   volumeClipNear,
   volumeClipDepth,
@@ -3333,21 +3340,59 @@ test("предел стояния камеры снят: обзор спуска
 });
 
 test("цель обзора — точка перед камерой, и брошенной она не бывает (таск 200)", () => {
-  // Цель не хранится: она считается от места камеры и взгляда. Поэтому
-  // «вращение вокруг цели» и «вращение точки перед собой» — одно и то же.
+  // Цель не хранится: она считается от места камеры и взгляда.
   const eye = { x: 1000, y: 2000, z: 3000 };
   const target = volumeAroundTarget(eye, 0.4, (-30 * Math.PI) / 180, 9000);
   // Туда и обратно: кадрирование по этой цели возвращает ту же камеру.
   const back = volumeAroundEye(target, 0.4, (-30 * Math.PI) / 180, 9000);
   assert.ok(Math.hypot(back.x - eye.x, back.y - eye.y, back.z - eye.z) < 1e-6, "счёт разошёлся: " + JSON.stringify(back));
-  // **Рысканье высоту камеры не меняет** — поэтому орбита вокруг цели под пол
-  // не уводит и пола не спрашивает. Обойдём цель по кругу.
-  for (let deg = 0; deg < 360; deg += 30) {
-    const spun = volumeAroundEye(target, (deg * Math.PI) / 180, (-30 * Math.PI) / 180, 9000);
-    assert.ok(Math.abs(spun.z - eye.z) < 1e-6, "на " + deg + "° орбита увела камеру по высоте: " + spun.z);
-  }
   // Цель на полу, камера над ней: обычный обзор сверху.
   assert.ok(target.z < eye.z, "цель должна лежать ниже камеры при опущенном взгляде");
+});
+
+test("мера обзора — докуда он достаёт до пола по взгляду (таск 207, G312)", () => {
+  // Отвесно вниз мера — это высота камеры.
+  const down = -Math.PI / 2;
+  assert.equal(Math.round(volumeAroundReach({ z: 9000 }, down)), 9000);
+  // Наискось — длиннее ровно во столько, во сколько положе взгляд.
+  const deg = (-30 * Math.PI) / 180;
+  assert.ok(Math.abs(volumeAroundReach({ z: 9000 }, deg) - 9000 / Math.sin(Math.PI / 6)) < 1, "мера считается не по взгляду");
+  // **Пологий взгляд меру не разгоняет**: пол у горизонта в бесконечности, и
+  // держит её тот же предел, которым держится свайп (таск 195).
+  const flat = volumeAroundReach({ z: 9000 }, 0);
+  assert.ok(Math.abs(flat - 9000 / VOLUME_AROUND_TILT_MIN) < 1, "мера ушла к горизонту: " + Math.round(flat));
+  // Взгляд вверх — то же самое: пола впереди нет, и мера берётся по пределу.
+  assert.equal(volumeAroundReach({ z: 9000 }, 0.6), flat);
+  // У самой земли мера упирается в ближний предел — иначе и колесо, и полёт
+  // встали бы намертво ровно там, куда заказчик просил пускать камеру.
+  assert.equal(volumeAroundReach({ z: 0 }, down), VOLUME_AROUND_MIN_MM);
+  assert.equal(volumeAroundReach({ z: 9_000_000 }, down), VOLUME_AROUND_MAX_MM);
+  // Мусор и пустота — не NaN: мера всегда число в своих пределах.
+  assert.equal(volumeAroundReach({}, down), VOLUME_AROUND_MIN_MM);
+  assert.equal(volumeAroundReach({ z: "высоко" }, "косо"), VOLUME_AROUND_MIN_MM);
+});
+
+test("обзор летит быстрее человека, но вблизи не быстрее шага (таск 207, G311)", () => {
+  // Правило — отношение, а не скорость: меру обзор покрывает за полторы
+  // секунды. Поэтому издали размах, вблизи точность, а чувствуется одинаково.
+  assert.equal(VOLUME_AROUND_FLY_S, 1.5);
+  const at = (z, deg) => volumeAroundSpeed(volumeAroundReach({ z }, (deg * Math.PI) / 180), false);
+  // «Вся схема» этого объекта: камера в 18 м, мера 27 м — 18 м/с.
+  assert.equal(Math.round(at(18100, -42) / 100) * 100, 18000);
+  // В комнате на высоте глаз — 3,1 м/с: четверть сверх пешехода, ход, а не рывок.
+  const room = at(1600, -10);
+  assert.ok(room > VOLUME_WALK_MM_S && room < VOLUME_WALK_MM_S * 1.5, "вблизи стало дёрганым: " + Math.round(room));
+  // **Медленнее человека обзор не ходит нигде** — у самой земли мера мала, и
+  // снизу скорость держит шаг пешехода.
+  assert.equal(at(0, -42), VOLUME_WALK_MM_S);
+  assert.equal(at(0, 0), VOLUME_WALK_MM_S);
+  // Shift удваивает, как удваивал бег: второго множителя не завелось.
+  const reach = volumeAroundReach({ z: 18100 }, (-42 * Math.PI) / 180);
+  assert.equal(volumeAroundSpeed(reach, true), volumeAroundSpeed(reach, false) * 2);
+  assert.equal(volumeAroundSpeed(volumeAroundReach({ z: 0 }, 0), true), VOLUME_RUN_MM_S);
+  // Скорость человека не тронута ни на миллиметр.
+  assert.equal(VOLUME_WALK_MM_S, 2400);
+  assert.equal(VOLUME_RUN_MM_S, 4800);
 });
 
 test("щелчок по небу в обзоре никуда не переносит", () => {
@@ -3433,7 +3478,7 @@ test("поправка на наклон есть, но у горизонта н
   const shallow = panLen(volumeAroundPan({ yaw: 0, pitch: (-5 * Math.PI) / 180, distance: 20000 }, box, 0, 100));
   const limit = panLen(volumeAroundPan({ yaw: 0, pitch: (-20 * Math.PI) / 180, distance: 20000 }, box, 0, 100));
   assert.ok(Math.abs(shallow - limit) < 1e-6, "положе предела шаг не растёт: " + shallow.toFixed(1) + " против " + limit.toFixed(1));
-  assert.ok(Math.abs(limit - (100 * 20000) / volumeFocal(box) / VOLUME_AROUND_PAN_TILT_MIN) < 1e-6, "предел считается по тому же числу");
+  assert.ok(Math.abs(limit - (100 * 20000) / volumeFocal(box) / VOLUME_AROUND_TILT_MIN) < 1e-6, "предел считается по тому же числу");
   // Взгляд ровно вдоль земли (в обзоре такого не бывает) — сторона берётся у
   // самого взгляда, и ответ не ноль и не NaN.
   const flat = volumeAroundPan({ yaw: 0, pitch: 0, distance: 9000 }, box, 0, 100);
