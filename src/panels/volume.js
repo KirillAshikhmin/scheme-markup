@@ -690,6 +690,7 @@ export function volumeHintText(state) {
   if (state.view === "person") {
     parts.push(state.fly ? strings.volume.hintFly : strings.volume.hintStance);
     parts.push(state.ghost ? strings.volume.hintGhost : strings.volume.hintWalls);
+    parts.push(strings.volume.hintMinimap);
   }
   // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
   if (state.touching) parts.push(strings.volume.hintTouch);
