@@ -65,6 +65,7 @@ import {
   VOLUME_LAYER_BASE,
   VOLUME_LAYER_BODY,
   VOLUME_LAYER_GROUND,
+  VOLUME_LAYER_SHADOW,
   VOLUME_LAYER_MARK,
   VOLUME_DOOR_RGB,
   VOLUME_PLANE_EPS_MM,
@@ -348,9 +349,10 @@ test("у комнаты есть пол, потолок и стены с тол�
   const shadows = volumeShadowFaces(built.shadowBoxes, { az: 90, rise: 14, fade: 1 });
   assert.equal(shadows.length, 4, "тень под каждой стеной");
   assert.ok(
-    shadows.every((face) => face.layer === VOLUME_LAYER_GROUND && face.flat && face.n.z > 0),
-    "тень лежит на земле тем же ярусом, каким лежала в сцене",
+    shadows.every((face) => face.layer === VOLUME_LAYER_SHADOW && face.flat && face.n.z > 0),
+    "тень лежит на земле своим ярусом: выше плиты, ниже полов (D49)",
   );
+  assert.ok(VOLUME_LAYER_BASE < VOLUME_LAYER_SHADOW && VOLUME_LAYER_SHADOW < VOLUME_LAYER_GROUND);
   assert.deepEqual(shadows[0].rgb, VOLUME_SHADOW_RGB, "в полную силу тень того же тона, что была");
   // Солнце у горизонта — тени нет вовсе: она гаснет цветом, а не прозрачностью.
   assert.deepEqual(volumeShadowFaces(built.shadowBoxes, { az: 90, rise: 1, fade: 0 }), []);
@@ -374,6 +376,74 @@ test("у комнаты есть пол, потолок и стены с тол�
   // сведённом конце стена переходит в соседку.
   const body = built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY);
   assert.equal(body.length, 4 * (2 + 1), "по три грани на стену: две стороны и верх");
+});
+
+// ——— D49: внутри дома пол, а не зелень ————————————————————————————————
+//
+// «баг отрисовки тени внутри дома — просвечивает пол». Проверка числами: в
+// точке посреди комнаты перебираются **все** грани земли, накрывающие её, и
+// спрашивается, какая ложится последней. Раньше это решала дальность середин, и
+// ответ переворачивался от часа; теперь решает ярус.
+
+test("тень дома не просвечивает сквозь пол ни в один час (D49)", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Полы подписаны: `markId` — единственное поле, которое кадр переносит в
+  // многоугольник (`pick`), и спор читается по имени, а не по цвету.
+  const named = {
+    ...built,
+    order: undefined,
+    faces: built.faces.map((face) =>
+      face.layer === VOLUME_LAYER_GROUND && face.n.z > 0 ? { ...face, markId: "пол" } : face,
+    ),
+  };
+  const box = { width: 972, height: 778 };
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0.6, -0.73, 14000);
+  const inside = (xy, x, y) => {
+    let hit = false;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i];
+      const ay = xy[i + 1];
+      const bx = xy[j];
+      const by = xy[j + 1];
+      if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) hit = !hit;
+    }
+    return hit;
+  };
+  let nearerSomewhere = false;
+  for (const hour of [6, 10, 12, 15, 19]) {
+    const mood = volumeMood({ minutes: hour * 60, times: { riseMin: 540, setMin: 1260, north: true }, kind: "nature" });
+    // Тень подписана так же, как полы: сравнение не должно опираться на ярус —
+    // иначе стенд проверял бы сам себя.
+    const shadow = volumeShadowFaces(built.shadowBoxes, mood.shadow).map((face) => ({ ...face, markId: "тень" }));
+    const frame = volumeFrame(named, camera, box, shadow, mood.tint);
+    const ground = frame.filter((polygon) => !polygon.stroke && polygon.layer <= VOLUME_LAYER_GROUND);
+    const floor = ground.find((polygon) => polygon.pick === "пол");
+    assert.ok(floor, "пол комнаты в кадре — иначе стенд ничего не проверяет");
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < floor.xy.length; i += 2) {
+      x += floor.xy[i];
+      y += floor.xy[i + 1];
+    }
+    x /= floor.xy.length / 2;
+    y /= floor.xy.length / 2;
+    const here = ground.filter((polygon) => inside(polygon.xy, x, y));
+    const shadows = here.filter((polygon) => polygon.pick === "тень");
+    if (mood.shadow.fade > 0) {
+      assert.ok(shadows.length > 0, "в " + hour + ":00 тень не дотягивается до середины комнаты — стенд пуст");
+      // Та самая дальность, на которую полагался таск 178: хотя бы в одном часе
+      // тень **ближе** пола, то есть по дальности она бы его и закрасила.
+      if (shadows.some((polygon) => polygon.depth < floor.depth)) nearerSomewhere = true;
+    }
+    const last = here[here.length - 1];
+    assert.equal(last.pick, "пол", "в " + hour + ":00 поверх пола легло что-то ещё: ярус " + last.layer);
+    assert.ok(
+      shadows.every((polygon) => polygon.layer < floor.layer),
+      "тень обязана лежать ярусом ниже пола, а не рядом с ним",
+    );
+  }
+  assert.ok(nearerSomewhere, "ни в один час тень не оказалась ближе пола — стенд перестал ловить D49");
 });
 
 // ——— D37: под проёмом и под стеной есть пол ———————————————————————————————
