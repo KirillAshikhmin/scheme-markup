@@ -4165,7 +4165,8 @@
    двоеточие, и растянутое на всю строку поле читалось бы как поле имени. Цвета
    — те же, что у остальных полей панелей (`.ui-input`): белое поле со светлым
    текстом на тёмной теме читалось бы как пустое. */
-.tools__time {
+.tools__time,
+.tools__date {
   width: 128px;
   padding: 4px 6px;
   border-radius: 6px;
@@ -4173,6 +4174,19 @@
   background: #21262d;
   color: var(--panel-text);
   font: inherit;
+}
+
+/* Поле даты (G289) шире часов: в нём число, месяц и год, и браузер рисует их
+   по своей локали — сжатое поле обрезало бы год. */
+.tools__date {
+  width: 150px;
+}
+
+/* Подпись поля в ряду: у часов её нет (там говорит само поле со временем), а у
+   даты она нужна — иначе два похожих поля друг над другом не различить. */
+.volume__paramsName {
+  color: var(--panel-muted);
+  min-width: 42px;
 }
 
 /* Цель под палец: 52 точки — столько же, сколько у кнопок нижнего ряда в
@@ -7869,16 +7883,22 @@ const strings = {
     // Время суток. Контрол с часами ставит своё время — и оно стоит; «Сейчас»
     // возвращает настоящее — и оно идёт. Так это и описано заказчиком.
     clock: "ВРЕМЯ СУТОК",
+    // Дата стоит над часами (G289): по ней считается место солнца, а значит и
+    // рассвет с закатом — зимой и летом они разные.
+    clockDate: "Дата",
+    clockDateHint: "Дата, на которую считается небо: от неё зависят высота солнца, рассвет, закат и фаза луны",
     clockOwn: "Своё время",
     clockOwnHint: "Поставить своё время. Оно будет стоять, пока не нажмёте «Сейчас» или ускорение",
     clockNow: "Сейчас",
-    clockNowHint: "Вернуть настоящее время — и оно пойдёт дальше",
+    clockNowHint: "Вернуть сегодняшнюю дату и настоящее время — и они пойдут дальше без ускорения",
     clockStop: "Остановить",
     clockStopHint: "Оставить это время стоять: фон перестанет пересчитываться вовсе",
-    clockRunning: "В объёме {time} · {phase} · время идёт, сутки за {day} мин",
-    clockFixedLine: "В объёме {time} · {phase} · время стоит",
+    clockRunning: "В объёме {date}, {time} · {phase} · время идёт, сутки за {day} мин",
+    clockRealLine: "В объёме {date}, {time} · {phase} · время идёт, как настоящее",
+    clockFixedLine: "В объёме {date}, {time} · {phase} · время стоит",
     speed: "УСКОРЕНИЕ",
     speedOption: "×{speed} — сутки за {day} мин",
+    speedNone: "Без ускорения — сутки идут сутки",
     phaseNight: "ночь",
     phaseMorning: "утро",
     phaseDay: "день",
@@ -56216,21 +56236,43 @@ function volumeParamsSpeed(speed, nowMs) {
   const next = volumeClockSpeedOf(speed);
   params.speed = next;
   setSetting(VOLUME_SPEED_SETTING, next);
-  const minutes = volumeClockMinutes(volumeParamsClock(nowMs), nowMs);
-  params.clock = { fixed: false, fromMin: minutes, atMs: nowMs, speed: next };
+  const stamp = volumeClockStamp(volumeParamsClock(nowMs), nowMs);
+  params.clock = { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: nowMs, speed: next };
   tell();
 }
 
 /** Своё время: поставили час — он стоит (и фон не пересчитывается вовсе). */
 function volumeParamsFix(minutes, nowMs) {
-  const value = minutes === null || minutes === undefined ? volumeClockMinutes(volumeParamsClock(nowMs), nowMs) : minutes;
-  params.clock = volumeClockFixed(value, params.speed);
+  const stamp = volumeClockStamp(volumeParamsClock(nowMs), nowMs);
+  const value = minutes === null || minutes === undefined ? stamp.minutes : minutes;
+  params.clock = volumeClockFixed(value, params.speed, stamp.day);
   tell();
 }
 
-/** «Сейчас»: настоящее время, и оно идёт. */
+/**
+ * Своя дата (G289): число меняется, час и ход часов — нет.
+ *
+ * Дата не останавливает время нарочно: человек выбирает **день года**, на
+ * который смотрит небо, а не замирает в нём. Остановка — отдельная кнопка, и
+ * двух смыслов у одного поля быть не должно.
+ */
+function volumeParamsDay(day, nowMs) {
+  params.clock = volumeClockOnDay(volumeParamsClock(nowMs), nowMs, day);
+  tell();
+}
+
+/**
+ * «Сейчас»: сегодняшняя дата, настоящее время — и они идут **без ускорения**.
+ *
+ * Слова заказчика (G287): «При нажатии Сейчас он и должен выбираться и время
+ * идти в реальном времени». Поэтому кнопка трогает и ускорение: вернуть
+ * настоящее время, оставив его бежать по шестьдесят минут в минуту, значило бы
+ * вернуть настоящим только первый миг.
+ */
 function volumeParamsNow(nowMs) {
-  params.clock = volumeClockNow(nowMs, new Date(), params.speed);
+  params.speed = VOLUME_CLOCK_SPEED_REAL;
+  setSetting(VOLUME_SPEED_SETTING, VOLUME_CLOCK_SPEED_REAL);
+  params.clock = volumeClockNow(nowMs, new Date(), VOLUME_CLOCK_SPEED_REAL);
   tell();
 }
 
@@ -56242,9 +56284,16 @@ function volumePhaseWord(phase) {
   return strings.volume.phaseNight;
 }
 
-/** Подпись ускорения: «×60 — сутки за 24 мин». Число — не в словаре, оно счёт. */
+/**
+ * Подпись ускорения: «×60 — сутки за 24 мин». Число — не в словаре, оно счёт.
+ *
+ * У единицы подпись своя (G287): «×1 — сутки за 1440 мин» — это та же правда,
+ * сказанная так, что её надо считать в голове.
+ */
 function volumeSpeedLabel(speed) {
-  return text("volume.speedOption", { speed: volumeClockSpeedOf(speed), day: volumeDayText(speed) });
+  const value = volumeClockSpeedOf(speed);
+  if (value === VOLUME_CLOCK_SPEED_REAL) return strings.volume.speedNone;
+  return text("volume.speedOption", { speed: value, day: volumeDayText(speed) });
 }
 
 /** 1,5 — с запятой: это число для человека, а не для кода. */
@@ -56252,10 +56301,23 @@ function volumeDayText(speed) {
   return String(volumeClockDayMinutes(speed)).replace(".", ",");
 }
 
-/** Строка состояния часов: который час, как он называется и идёт ли. */
-function volumeParamsLine(clock, minutes, phase) {
-  const where = { time: volumeClockText(minutes), phase: volumePhaseWord(phase) };
+/** Дата человеку: «20.10.2026». Поле даты говорит на ISO, строка — на нашем. */
+function volumeDayLabel(day) {
+  const iso = volumeDateText(day);
+  return iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4);
+}
+
+/** Строка состояния часов: какое число, который час и идёт ли он. */
+function volumeParamsLine(clock, minutes, phase, day) {
+  const where = {
+    date: volumeDayLabel(day === undefined || day === null ? volumeDayNumberOf(new Date()) : day),
+    time: volumeClockText(minutes),
+    phase: volumePhaseWord(phase),
+  };
   if (clock && clock.fixed) return text("volume.clockFixedLine", where);
+  if (volumeClockSpeedOf(clock ? clock.speed : null) === VOLUME_CLOCK_SPEED_REAL) {
+    return text("volume.clockRealLine", where);
+  }
   return text("volume.clockRunning", { ...where, day: volumeDayText(clock ? clock.speed : null) });
 }
 
@@ -56315,6 +56377,12 @@ function createVolumeParams({ now, hour, times }) {
         ]),
         uiEl("p", { class: "tools__note", text: strings.volume.minimapHint }),
         uiEl("p", { class: "tools__label", text: strings.volume.clock }),
+        // Дата стоит **над** часами (G289): от неё зависит место солнца, то
+        // есть и рассвет с закатом, и фаза луны. Час без даты — полдела.
+        uiEl("div", { class: "volume__paramsRow" }, [
+          uiEl("span", { class: "volume__paramsName", text: strings.volume.clockDate }),
+          dateField(dayOf(at)),
+        ]),
         uiEl("div", { class: "volume__paramsRow" }, [
           clockField(at.minutes),
           uiButton(strings.volume.clockNow, {
@@ -56354,12 +56422,16 @@ function createVolumeParams({ now, hour, times }) {
     // перерисовывается этим таймером — у него свой, и он один.
     const line = () => {
       const at = hour();
-      state.textContent = volumeParamsLine(volumeParamsRead().clock, at.minutes, at.phase);
+      state.textContent = volumeParamsLine(volumeParamsRead().clock, at.minutes, at.phase, dayOf(at));
       // Пока время идёт, часы в поле идут вместе с ним: поле, застывшее на
       // минуте открытия, читалось бы как «вот сейчас столько». Набирающую руку
       // это не трогает — под курсором поле не переписывается.
       const field = body.querySelector(".tools__time");
       if (field && document.activeElement !== field) field.value = volumeClockText(at.minutes);
+      // И дата вместе с ними: полночь переводит число сама (G289), при
+      // ускорении 960 — каждые полторы минуты.
+      const date = body.querySelector(".tools__date");
+      if (date && document.activeElement !== date) date.value = volumeDateText(dayOf(at));
     };
     const close = () => {
       if (tick && typeof clearInterval === "function") clearInterval(tick);
@@ -56402,6 +56474,37 @@ function createVolumeParams({ now, hour, times }) {
     });
     box.checked = on !== false;
     return box;
+  }
+
+  /**
+   * Какое число показывает снимок часа. Своего счёта у окна нет: дату, как и
+   * час, оно спрашивает у поля — иначе в сборке стало бы два ответа на вопрос
+   * «какое сегодня число в объёме».
+   */
+  function dayOf(at) {
+    const day = at && at.times ? Number(at.times.dayNumber) : NaN;
+    return Number.isFinite(day) ? day : volumeDayNumberOf(new Date());
+  }
+
+  function dateField(day) {
+    const field = uiEl("input", {
+      class: "tools__date",
+      type: "date",
+      value: volumeDateText(day),
+      title: strings.volume.clockDateHint,
+      attrs: { "aria-label": strings.volume.clockDate },
+      on: {
+        change: () => {
+          const own = volumeDateParse(field.value);
+          if (own === null) {
+            field.value = volumeDateText(dayOf(hour()));
+            return;
+          }
+          volumeParamsDay(own, now());
+        },
+      },
+    });
+    return field;
   }
 
   function clockField(minutes) {
@@ -57742,10 +57845,17 @@ function createVolume({ api, hosts }) {
     shadow = volumeShadowFaces(scene.shadowBoxes, hour ? hour.shadow : null);
   }
 
-  /** Рассвет и закат этого объекта: по координатам (таск 188) или умолчанием. */
-  function dayTimes() {
+  /**
+   * Рассвет и закат этого объекта: по координатам (таск 188) или умолчанием —
+   * и **на ту дату, которая стоит на часах объёма** (G289), а не на сегодня.
+   * Сегодня бралось до таска 190, и тогда поле даты не двигало бы ничего:
+   * зимний рассвет считался бы по летнему дню.
+   */
+  function dayTimes(nowMs) {
+    const at = nowMs === undefined ? Date.now() : nowMs;
+    const stamp = volumeClockStamp(volumeParamsClock(at), at);
     const site = volumeSiteOf(getState().project);
-    return { site, times: volumeDayTimes(site, new Date()) };
+    return { site, stamp, times: volumeDayTimes(site, volumeDayDateOf(stamp.day)) };
   }
 
   /** Снимок часа. Нет его — считается; есть — берётся готовым. */
@@ -57755,9 +57865,9 @@ function createVolume({ api, hosts }) {
 
   function refreshHour() {
     const at = Date.now();
-    const { site, times } = dayTimes();
+    const { site, stamp, times } = dayTimes(at);
     hour = volumeMood({
-      minutes: volumeClockMinutes(volumeParamsClock(at), at),
+      minutes: stamp.minutes,
       times,
       topDeg: site.topDeg,
       kind: volumeParamsRead().kind,

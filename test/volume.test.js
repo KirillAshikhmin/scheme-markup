@@ -173,6 +173,7 @@ import {
   volumeClockStamp,
   volumeClockText,
   volumeDateParse,
+  volumeDayMinutesOf,
   volumeDateText,
   volumeDayDateOf,
   volumeDayNumberOf,
@@ -233,8 +234,14 @@ import {
   volumeWhere,
 } from "../src/panels/volume.js";
 import {
+  volumeParamsDay,
+  volumeParamsFix,
   volumeParamsLine,
+  volumeParamsNow,
+  volumeParamsRead,
+  volumeParamsSpeed,
   volumeParamsSunLine,
+  volumeDayLabel,
   volumePhaseWord,
   volumeSpeedLabel,
 } from "../src/panels/volumeParams.js";
@@ -2662,6 +2669,9 @@ test("окно параметров: подписи ускорения и стр
   assert.equal(volumeSpeedLabel(60), "×60 — сутки за 24 мин");
   assert.equal(volumeSpeedLabel(960), "×960 — сутки за 1,5 мин");
   assert.equal(volumeSpeedLabel(7), volumeSpeedLabel(VOLUME_CLOCK_SPEED_DEFAULT), "чужое ускорение — умолчание");
+  // «Без ускорения» подписано словами, а не «×1 — сутки за 1440 мин» (G287).
+  assert.equal(volumeSpeedLabel(VOLUME_CLOCK_SPEED_REAL), strings.volume.speedNone);
+  assert.ok(!volumeSpeedLabel(VOLUME_CLOCK_SPEED_REAL).includes("1440"), "сутки за сутки в минутах не считают");
   // Слова часа — те же четыре, которыми названы отрезки суток.
   assert.equal(volumePhaseWord("night"), strings.volume.phaseNight);
   assert.equal(volumePhaseWord("morning"), strings.volume.phaseMorning);
@@ -2670,17 +2680,60 @@ test("окно параметров: подписи ускорения и стр
   assert.equal(volumePhaseWord("пятница"), strings.volume.phaseNight, "неизвестный час — ночь, а не пустота");
   // Строка состояния говорит и который час, и идёт ли он: «время стоит» — это
   // то же самое, что «фон не пересчитывается вовсе», словами человека.
+  const day = volumeDayNumberOf(new Date(2026, 9, 20));
   const running = volumeClockNow(0, new Date(2026, 9, 20, 2, 14), 240);
-  const line = volumeParamsLine(running, 134, "night");
+  const line = volumeParamsLine(running, 134, "night", day);
   assert.ok(line.includes("02:14") && line.includes("ночь") && line.includes("6"), line);
-  const fixed = volumeParamsLine(volumeClockFixed(134, 240), 134, "night");
-  assert.ok(fixed.includes("02:14") && fixed.includes("стоит"), fixed);
+  // И какое число (G289): дата двигает рассвет, значит человек обязан её видеть.
+  assert.ok(line.includes("20.10.2026"), line);
+  assert.equal(volumeDayLabel(day), "20.10.2026");
+  const fixed = volumeParamsLine(volumeClockFixed(134, 240, day), 134, "night", day);
+  assert.ok(fixed.includes("02:14") && fixed.includes("стоит") && fixed.includes("20.10.2026"), fixed);
   assert.ok(!fixed.includes("сутки"), "у стоячего времени суток не бывает: " + fixed);
+  // Без ускорения строка не врёт про минуты: сутки идут сутки.
+  const real = volumeParamsLine(volumeClockNow(0, new Date(2026, 9, 20, 2, 14), VOLUME_CLOCK_SPEED_REAL), 134, "night", day);
+  assert.ok(real.includes("идёт") && !real.includes("1440"), real);
   // Рассвет и закат: сказано, откуда они взялись.
   const own = volumeParamsSunLine({ riseMin: 300, setMin: 1300, bySite: true });
   assert.ok(own.includes("05:00") && own.includes("21:40") && own.includes("координат"), own);
   const plain = volumeParamsSunLine({ riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false });
   assert.ok(plain.includes("09:00") && plain.includes("21:00") && plain.includes("умолчание"), plain);
+});
+
+test("окно параметров: «Сейчас» ставит дату, время и «Без ускорения» (G287, G289)", () => {
+  // Двери окна правят один и тот же выбор, и спрашивается он одним
+  // `volumeParamsRead` — второго места для часов объёма нет.
+  const nowMs = 10_000;
+  volumeParamsSpeed(240, nowMs);
+  assert.equal(volumeParamsRead().speed, 240);
+  // Своё время — часы стоят, но дата у них остаётся та же.
+  volumeParamsFix(5 * 60, nowMs);
+  const stopped = volumeParamsRead().clock;
+  assert.equal(stopped.fixed, true);
+  assert.equal(volumeClockMinutes(stopped, nowMs + 9e6), 5 * 60, "стоячее время не идёт");
+  const today = volumeDayNumberOf(new Date());
+  assert.equal(volumeClockStamp(stopped, nowMs).day, today);
+  // Другая дата — число меняется, час стоит, ход не возвращается.
+  volumeParamsDay(today - 200, nowMs);
+  assert.equal(volumeClockStamp(volumeParamsRead().clock, nowMs).day, today - 200);
+  assert.equal(volumeClockStamp(volumeParamsRead().clock, nowMs).minutes, 5 * 60);
+  assert.equal(volumeParamsRead().clock.fixed, true, "дата не пускает стоячее время");
+  // «Сейчас» — сегодняшняя дата, настоящий час и «Без ускорения».
+  volumeParamsNow(nowMs);
+  const now = volumeParamsRead();
+  assert.equal(now.speed, VOLUME_CLOCK_SPEED_REAL, "кнопка выбирает первый пункт ряда сама");
+  assert.equal(now.clock.fixed, false, "и пускает время по-настоящему");
+  assert.equal(volumeClockStamp(now.clock, nowMs).day, today);
+  assert.ok(
+    Math.abs(volumeClockMinutes(now.clock, nowMs) - volumeDayMinutesOf(new Date())) < 1,
+    "час — настоящий",
+  );
+  // Минута снаружи — минута внутри: это и есть «реальное время».
+  assert.ok(
+    Math.abs(volumeClockMinutes(now.clock, nowMs + 60_000) - volumeClockMinutes(now.clock, nowMs) - 1) < 1e-6,
+    "без ускорения время идёт один к одному",
+  );
+  volumeParamsSpeed(VOLUME_CLOCK_SPEED_DEFAULT, nowMs);
 });
 
 test("щелчок по миникарте читается местом на плане (G270)", () => {
