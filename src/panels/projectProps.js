@@ -66,16 +66,29 @@ export function projectTopFacing(value) {
   return text("projectProps.topFacing", { rhumb: strings.projectProps.rhumbs[azimuthRhumb(number)] });
 }
 
-function propsField(label, input, hint) {
-  return uiEl("label", { class: "export__field" }, [
+// Подпись над полем, подсказка под ним — и подсказка **снаружи** `label`:
+// внутри она приклеивалась бы к имени поля, и читалка называла бы поле
+// «Координаты… как в карте… рассвет и закат…» целым абзацем.
+//
+// Отказ модели стоит **у своего поля**, а не общей строкой внизу окна. Живой
+// прогон показал почему: окно свойств длиннее экрана, нижняя строка оказалась
+// за краем, и «Сохранить» с мусором в координатах выглядело как «ничего не
+// произошло» — при том, что курсор уже стоял в испорченном поле наверху.
+function propsField(label, input, hint, error) {
+  const field = uiEl("label", { class: "export__field" }, [
     uiEl("span", { class: "export__field-label", text: label }),
     input,
-    hint ? uiEl("span", { class: "modal__hint", text: hint }) : null,
+  ]);
+  if (!hint && !error) return field;
+  return uiEl("div", { class: "export__field" }, [
+    field,
+    error || null,
+    hint ? uiEl("p", { class: "modal__hint", text: hint }) : null,
   ]);
 }
 
 function propsHead(label) {
-  return uiEl("div", { class: "export__field-label", text: label });
+  return uiEl("div", { class: "modal__section", text: label });
 }
 
 function propsInput(value, placeholder, extra = {}) {
@@ -102,10 +115,15 @@ export function projectPropsDialog(api, options = {}) {
     strings.projectProps.topPlaceholder,
     { attrs: { inputmode: "decimal" } },
   );
-  const facing = uiEl("p", { class: "modal__hint", text: projectTopFacing(topInput.value) });
-  topInput.addEventListener("input", () => {
+  // Живая подпись стоит только тогда, когда ей есть что сказать: пустая строка
+  // с отступами оставляла бы в окне дыру — поймано живым прогоном.
+  const facing = uiEl("p", { class: "modal__hint" });
+  const sayFacing = () => {
     facing.textContent = projectTopFacing(topInput.value);
-  });
+    facing.hidden = facing.textContent === "";
+  };
+  sayFacing();
+  topInput.addEventListener("input", sayFacing);
 
   const stampRows = PROJECT_STAMP_FIELDS.map((field) => {
     const row = STAMP_LABELS[field] || { label: field };
@@ -113,24 +131,24 @@ export function projectPropsDialog(api, options = {}) {
     return { field, input, node: propsField(strings.gost[row.label] || field, input) };
   });
 
-  const error = uiEl("p", { class: "modal__error" });
+  const coordsError = uiEl("p", { class: "modal__error" });
+  const topError = uiEl("p", { class: "modal__error" });
   const stampHead = propsHead(strings.projectProps.stamp);
-  const body = uiEl("div", { class: "export__body" }, [
+  const body = uiEl("div", { class: "modal__sections" }, [
     uiEl("div", { class: "modal__fields" }, [
       propsField(strings.projectProps.name, nameInput),
       propsField(strings.projectProps.address, addressInput, strings.projectProps.addressHint),
     ]),
     propsHead(strings.projectProps.place),
     uiEl("div", { class: "modal__fields" }, [
-      propsField(strings.projectProps.coords, coordsInput, strings.projectProps.coordsHint),
-      propsField(strings.projectProps.top, topInput, strings.projectProps.topHint),
+      propsField(strings.projectProps.coords, coordsInput, strings.projectProps.coordsHint, coordsError),
+      propsField(strings.projectProps.top, topInput, strings.projectProps.topHint, topError),
     ]),
     facing,
     uiEl("p", { class: "modal__hint", text: strings.projectProps.topOnlyVolume }),
     stampHead,
     uiEl("p", { class: "modal__hint", text: strings.gost.stampHint }),
     uiEl("div", { class: "modal__fields" }, stampRows.map((row) => row.node)),
-    error,
   ]);
 
   let modal = null;
@@ -144,6 +162,8 @@ export function projectPropsDialog(api, options = {}) {
     // **Числа проверяются первыми.** Опечатка в координатах не должна оставить
     // объект переименованным наполовину, а отказ модели остаётся в окне
     // строкой: закрыть окно и потерять набранное человек не должен.
+    coordsError.textContent = "";
+    topError.textContent = "";
     let located;
     try {
       located = setProjectSite(base, {
@@ -152,8 +172,11 @@ export function projectPropsDialog(api, options = {}) {
         topAzimuthDeg: topInput.value,
       });
     } catch (failure) {
-      error.textContent = failure.message;
-      (failure.code === "azimuthInvalid" || failure.code === "azimuthRange" ? topInput : coordsInput).focus();
+      const azimuth = failure.code === "azimuthInvalid" || failure.code === "azimuthRange";
+      const input = azimuth ? topInput : coordsInput;
+      (azimuth ? topError : coordsError).textContent = failure.message;
+      input.focus();
+      if (typeof input.scrollIntoView === "function") input.scrollIntoView({ block: "center" });
       return;
     }
     const patch = {};
