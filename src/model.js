@@ -1304,6 +1304,185 @@ export function setSchemeFloor(project, schemeId, value) {
   return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), changed: true };
 }
 
+// ——— точка привязки схемы ————————————————————————————————————————————
+//
+// Таск 205 (G309). Слова заказчика: «надо синхронизировать схемы для наложения
+// одной на другую. Можно точку привязки указать например. Кстати лестница как
+// раз таки может стать такой. Указываем в 1 месте лестницу и над ней выход с
+// лестницы».
+//
+// **Что это за точка.** Место, которое на всех планах дома одно и то же. У
+// каждой схемы свои оси: план первого этажа чертили от одного угла, план
+// второго — от другого, и ноль у них в разных местах дома. Сложи их по нулям —
+// этажи разъедутся на метры. Привязка отвечает на единственный вопрос: «где в
+// этой схеме та точка, которая у всех этажей общая».
+//
+// **Миллиметры чертежа, а не доли плана** — хотя у меток ровно наоборот
+// (ADR 002). Доводы:
+//
+//   — совмещают **чертежи**, и считается это вычитанием из координат стен:
+//     доля потребовала бы калибровки и привязки к подложке на каждый чих, а
+//     без подложки её вообще нет;
+//   — миллиметры к картинке не привязаны (ADR 008): поворот, обрезка и замена
+//     подложки чертежа не трогают, и привязку, выраженную в них, тоже —
+//     пересчитывать нечего;
+//   — лестница, из которой точку и берут, стоит на чертеже в миллиметрах.
+//
+// **Поле необязательное** (G68): у схемы без привязки нет и ключа `anchor`, и
+// этажи совмещаются по началу координат чертежа — ровно как до таска. Пустое
+// значение ключ **удаляет**, по образцу `floor` и `wallHeightMm`.
+//
+// Точку **ставит человек**, а лестница — дверь, через которую она ставится в
+// один щелчок (`schemeAnchorCandidates`). Считать её из лестницы на лету нельзя
+// по двум причинам сразу: лестниц на плане бывает несколько (и тогда это
+// догадка, а догадку по G68 показывают, а не применяют), а сдвинутая лестница
+// молча увезла бы целый этаж — человек не связал бы причину со следствием.
+
+/**
+ * Вещи чертежа, из которых берётся точка привязки, — лестница и парный ей
+ * выход с лестницы (таск 204).
+ *
+ * Порядок — порядок показа в окне. `stairsExit` в каталоге появляется таском
+ * 204; до него ни у одной вещи такого ключа нет, список тихо пуст на эту
+ * половину, а с приходом ключа начинает работать сам. **Слово здесь обязано
+ * совпадать с ключом каталога** — другого места, где выход с лестницы знают по
+ * ключу, у привязки нет.
+ */
+export const SCHEME_ANCHOR_OBJECT_KEYS = ["stairs", "stairsExit"];
+
+/** Точка привязки схемы в миллиметрах чертежа или `null`, если её не задавали. */
+export function schemeAnchorOf(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  const raw = scheme && scheme.anchor;
+  if (!raw || typeof raw !== "object") return null;
+  const x = Number(raw.x);
+  const y = Number(raw.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+// Пусто — «не задано». Половина — ошибка: одна координата точки не задаёт, а
+// молча дополнить её нулём значило бы привязать этаж к началу координат.
+function schemeAnchorValue(value) {
+  const blank = (item) =>
+    item === null || item === undefined || (typeof item === "string" && item.trim() === "");
+  if (blank(value)) return null;
+  if (typeof value !== "object") throw modelError("schemeAnchorInvalid");
+  if (blank(value.x) && blank(value.y)) return null;
+  if (blank(value.x) || blank(value.y)) throw modelError("schemeAnchorHalf");
+  return { x: drawingMmValue(value.x), y: drawingMmValue(value.y) };
+}
+
+/**
+ * Задать или снять точку привязки. `changed: false` — ничего не поменялось, и
+ * шага истории на это не нужно (тот же договор, что у `setSchemeFloor`).
+ */
+export function setSchemeAnchor(project, schemeId, value) {
+  const scheme = requireScheme(project, schemeId);
+  const anchor = schemeAnchorValue(value);
+  const had = schemeAnchorOf(project, schemeId);
+  if (anchor === null && !Object.prototype.hasOwnProperty.call(scheme, "anchor")) {
+    return { project, scheme, changed: false };
+  }
+  if (anchor && had && had.x === anchor.x && had.y === anchor.y) {
+    return { project, scheme, changed: false };
+  }
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    if (anchor === null) {
+      const { anchor: dropped, ...rest } = item;
+      return rest;
+    }
+    return { ...item, anchor };
+  });
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), changed: true };
+}
+
+/**
+ * **Где начало координат этой схемы в общем плане дома** — единственный шов
+ * совмещения этажей (таск 205, G309; стопку этажей складывает таск 202).
+ *
+ * Общий план — те же миллиметры, в которых начерчена каждая схема, только ноль
+ * у них один на дом: он поставлен в точку привязки. Значит начало координат
+ * схемы, у которой привязка стоит в `a`, лежит в общем плане в `−a`, а разница
+ * начал двух схем есть разница их привязок со знаком минус. Точка `p` схемы
+ * едет в общий план как `p − a`, и привязки всех этажей сходятся в одну точку —
+ * ровно то, о чём просил заказчик.
+ *
+ * **Нет привязки — ноль**, то есть схема стоит началом координат, как стояла
+ * до таска. Это и есть миграция старых объектов (G68): у них привязки нет ни у
+ * одной схемы, разницы нулевые, и стопка складывается по нулям — так же, как
+ * складывалась бы без этого таска вовсе. Смешанный случай определён тем же
+ * правилом: у кого привязка есть — встаёт по ней, у кого нет — по своему нулю,
+ * и половинчатую привязку называет вслух `validate` (`schemeAnchorMissing`).
+ *
+ * **Поворота здесь нет, и это решение.** Одна точка даёт только сдвиг; угол
+ * между осями двух схем она не выражает и выразить не может — для него нужна
+ * вторая точка или само число градусов. Поворот не делается потому, что
+ * механизм для него уже есть, и не здесь: кривой скан выпрямляют четвертями
+ * оборота у самой подложки (`imagePrep`), а `scheme.origin.turn` поворачивает
+ * вместе с ней и чертёж. Инженер выпрямляет план **до** того, как обводить по
+ * нему стены, — иначе у него и стены пойдут вкось, и это он увидит сразу, без
+ * всяких этажей. Произвольный угол между двумя этажами одного дома означал бы,
+ * что один из планов обведён вкось: второй угол привязки такую ошибку не
+ * исправил бы, а спрятал. Если поворот понадобится — он придёт **вторым
+ * необязательным ключом** рядом с `x` и `y` (привязка хранится объектом
+ * нарочно), и ни формат, ни этот шов менять не придётся.
+ *
+ * **Масштаб сводить не надо, и это проверено.** Чертёж у всех схем в целых
+ * миллиметрах (ADR 008), своего масштаба у него нет вовсе. Калибровка
+ * (px/метр) принадлежит **подложке** и живёт у каждой схемы своя, но в общий
+ * план она не попадает: метки переводятся в те же миллиметры мостом
+ * `planFractionToMm` ещё до того, как их увидит объём.
+ */
+export function schemeAnchorOriginMm(project, schemeId) {
+  const anchor = schemeAnchorOf(project, schemeId);
+  if (!anchor) return { x: 0, y: 0 };
+  return { x: -anchor.x, y: -anchor.y };
+}
+
+/**
+ * Откуда предложить точку: лестницы и выходы с лестницы, стоящие на чертеже
+ * этой схемы. Порядок — `SCHEME_ANCHOR_OBJECT_KEYS`, внутри ключа — порядок
+ * вещей на схеме.
+ *
+ * Точка вещи — **середина её габарита**, а не `atMm`: у ломаной (лестницу
+ * обводят и контуром) `atMm` нет вовсе, а у прямоугольника середина габарита и
+ * есть `atMm`, так что одно правило покрывает обе породы. Углы спрашиваются у
+ * `schemeObjectCorners` — своей геометрии вещи здесь не считается.
+ *
+ * Прежние вещи попадают сюда наравне с каталожными: ключ им даёт
+ * `schemeObjectKeyOf` по имени вида, и «Лестница на 2 этаж» из объекта,
+ * размеченного до каталога, узнаётся как лестница (G68).
+ */
+export function schemeAnchorCandidates(project, schemeId) {
+  const found = [];
+  for (const key of SCHEME_ANCHOR_OBJECT_KEYS) {
+    for (const object of schemeObjectsOnScheme(project, schemeId)) {
+      if (schemeObjectKeyOf(project, object) !== key) continue;
+      const corners = schemeObjectCorners(object);
+      if (corners.length === 0) continue;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const point of corners) {
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+      }
+      found.push({
+        objectId: object.id,
+        key,
+        name: schemeObjectNameOf(project, object),
+        atMm: { x: Math.round((minX + maxX) / 2), y: Math.round((minY + maxY) / 2) },
+      });
+    }
+  }
+  return found;
+}
+
 // Какие картинки объекту нужны: по этому списку хранилище понимает, что в нём
 // осталось от прежних подложек и больше никому не принадлежит.
 export function usedImageIds(project) {
@@ -7891,6 +8070,26 @@ export function validate(project) {
       problems.push(problem("drawingNotPlaced", { name: scheme.name }, scheme.id, "warning"));
     } else {
       problems.push(problem("drawingNoScale", { name: scheme.name }, scheme.id, "warning"));
+    }
+  }
+
+  // **Привязка задана не у всех этажей** (таск 205, G309). Находка, а не
+  // поломка: объект цел, а дом в объёме складывается наполовину по привязкам,
+  // наполовину по нулям чертежей — и этаж без точки уезжает в сторону.
+  //
+  // Условие нарочно узкое: говорится об этом только тогда, когда привязку
+  // **начали** ставить и бросили на полпути. Если её нет ни у одного этажа —
+  // ничего не сломано: этажи совмещаются по началу координат, как до таска, и
+  // строка здесь была бы шумом у каждого, у кого в объекте два плана. Слово
+  // про «привязки нет вовсе» говорит окно свойств схемы, где её и задают.
+  const floored = project.schemes.filter((scheme) => {
+    if (schemeFloorOf(project, scheme.id) === null) return false;
+    return wallsOnScheme(project, scheme.id).length > 0 || schemeObjectsOnScheme(project, scheme.id).length > 0;
+  });
+  if (floored.length > 1 && floored.some((scheme) => schemeAnchorOf(project, scheme.id))) {
+    for (const scheme of floored) {
+      if (schemeAnchorOf(project, scheme.id)) continue;
+      problems.push(problem("schemeAnchorMissing", { name: scheme.name }, scheme.id, "warning"));
     }
   }
 

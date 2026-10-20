@@ -35,7 +35,7 @@ const bodyOf = (head) => {
 };
 
 test("у каждого шага правки схемы есть своё имя, и оно не повторяет чужое", () => {
-  const steps = ["addScheme", "renameScheme", "schemeProps", "schemeOrder", "schemeFloor"];
+  const steps = ["addScheme", "renameScheme", "schemeProps", "schemeOrder", "schemeFloor", "schemeAnchor"];
   const said = steps.map((key) => strings.history[key]);
   for (const [index, key] of steps.entries()) {
     assert.ok(said[index] && said[index].length > 3, "нет имени шага: " + key);
@@ -45,6 +45,20 @@ test("у каждого шага правки схемы есть своё им�
   // в подсказке отмены стоят они рядом.
   assert.match(strings.history.renameScheme, /схем/);
   assert.match(strings.history.renameRoom, /помещени/);
+});
+
+test("ярлык окна свойств называет то, что правили, а не всё окно разом", () => {
+  // Таск 205. Три поля в одном окне — три ярлыка, общий только когда тронули
+  // не одно. Этаж при этом сверяется **по значению**: `setSchemeFloor`
+  // отвечает `changed: true` на любую запись, в том числе на ту же цифру, и по
+  // её ответу ярлык был бы «свойства схемы» каждый раз, когда у схемы задан
+  // этаж, — даже если поправили одну привязку. Там же пропадает пустой шаг
+  // истории от «Готово», нажатого без единой правки.
+  const body = bodyOf("    function apply() {");
+  assert.ok(body.includes("schemeFloorOf(next, schemeId) !== floor"), "этаж снова считают изменившимся по ответу модели");
+  assert.ok(body.includes("anchored.changed"), "привязка перестала попадать в ярлык");
+  assert.ok(body.includes("changes.length > 1 ? strings.history.schemeProps"), "общий ярлык взяли не на «тронули не одно»");
+  assert.ok(body.includes("if (changes.length > 0)"), "пустое «Готово» снова кладёт шаг в историю");
 });
 
 test("завести, переименовать и переставить схему — через команду отмены", () => {

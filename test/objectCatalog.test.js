@@ -2,9 +2,10 @@
 //
 // Что здесь держится:
 //
-//   1. **Состав каталога.** Двадцать две вещи в шести категориях, у каждой имя
-//      в словаре, положительный габарит и известное место установки. Вещь,
-//      забытая в словаре, вышла бы в колонку своим ключом по-английски.
+//   1. **Состав каталога.** Тридцать две вещи в семи категориях (последняя —
+//      «Транспорт», таск 204), у каждой имя в словаре, положительный габарит и
+//      известное место установки. Вещь, забытая в словаре, вышла бы в колонку
+//      своим ключом по-английски.
 //   2. **Мост до прежних видов.** Имя вида переводится в ключ терпимо, и
 //      «Столешница» не становится «Столом».
 //   3. **Две породы вещей в одном списке.** У новой ключ каталога, у прежней
@@ -35,6 +36,7 @@ import {
   objectCatalogRetiredKeys,
 } from "../src/objectCatalog.js";
 import {
+  SCHEME_ANCHOR_OBJECT_KEYS,
   SCHEME_OBJECT_SHAPES,
   addScheme,
   addSchemeObject,
@@ -44,6 +46,7 @@ import {
   schemeObjectKeyOf,
   schemeObjectMountOf,
   schemeObjectNameOf,
+  schemeAnchorCandidates,
   schemeObjectsOnScheme,
   updateSchemeObject,
   wallObjectsOn,
@@ -377,6 +380,24 @@ test("выход с лестницы — парный лестнице элем�
   assert.equal(objectCatalogKeyByName("Экран проектора"), "projectorScreen");
   assert.equal(objectCatalogKeyByName("Экран радиатора"), "radiator");
   assert.equal(objectCatalogKeyByName("Беговая дорожка"), "treadmill");
+});
+
+test("пара лестница — выход стала точкой привязки сама, без правки привязки", () => {
+  // Таск 205 положил ключи заранее и написал у себя: «придёт запись в каталог
+  // — выход начнёт предлагаться сам». Проверяю, что пришла именно та запись:
+  // слово в списке привязки и ключ каталога — одно и то же слово, и другого
+  // места, где выход знают по ключу, у привязки нет.
+  for (const key of SCHEME_ANCHOR_OBJECT_KEYS) {
+    assert.ok(objectCatalogEntry(key), key + ": привязка ждёт вещь, которой в каталоге нет");
+  }
+  const scene = room();
+  const withExit = place(scene, "stairsExit", { atMm: { x: 2000, y: 1500 } });
+  const found = schemeAnchorCandidates(withExit.project, scene.schemeId);
+  assert.deepEqual(
+    found.map((item) => [item.key, item.name]),
+    [["stairsExit", strings.schemeObjectKinds.stairsExit]],
+  );
+  assert.deepEqual(found[0].atMm, { x: 2000, y: 1500 }, "точка берётся из середины габарита выхода");
 });
 
 test("имя прежнего вида переводится в ключ терпимо, и столешница не становится столом", () => {

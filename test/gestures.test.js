@@ -221,7 +221,7 @@ test("своего разбора жеста у поверхностей не о
   assert.ok(!/function touchGap/.test(volume), "своя мера щипка вернулась в объём");
   // Применяет объём ответ по-своему, и это не дублирование: у него колесо
   // отодвигает камеру, а не меняет масштаб полотна.
-  assert.ok(/volumeAroundDistance\(around\.distance \/ step\.factor\)/.test(volume), "зум обзора считает не множитель двери");
+  assert.ok(/aroundZoom\(around\.distance \/ step\.factor\)/.test(volume), "зум обзора считает не множитель двери");
   assert.ok(/volumeAroundPan\(around, viewport\(\), step\.panX, step\.panY\)/.test(volume), "сдвиг обзора идёт не ходом двери");
 });
 

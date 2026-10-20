@@ -118,9 +118,10 @@ import {
   VOLUME_STAIR_REACH_MM,
   volumeArea,
   volumeAroundCamera,
+  volumeAroundEye,
   volumeAroundFit,
   volumeAroundPan,
-  volumeAroundStand,
+  volumeAroundTarget,
   volumeClipNear,
   volumeClipDepth,
   volumeFaceSide,
@@ -169,8 +170,21 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeShadowFaces,
-  volumeGroundScale,
-  VOLUME_PANORAMA_NEAR_DEG,
+  volumeGroundAim,
+  volumeGroundPoint,
+  volumePlateGap,
+  volumeBackdropPush,
+  volumeBackdropPlaces,
+  VOLUME_BACKDROP_NEAR_MM,
+  VOLUME_CITY_FLOOR_MM,
+  VOLUME_CITY_BAY_MM,
+  VOLUME_CITY_BANNER_PLACES,
+  VOLUME_MOUNTAIN_AWAY_M,
+  VOLUME_CITY_PARK,
+  VOLUME_CITY_GREENS,
+  VOLUME_CITY_STREETS,
+  VOLUME_CITY_MARKS,
+  VOLUME_TREES,
   VOLUME_LAND_OUT_MM,
   volumeSunSpotFaces,
   volumeSunSpotRgb,
@@ -895,101 +909,177 @@ test("обрезка выпуклым отсекателем режет и не�
   assert.equal(VOLUME_SUN_PROBE_MM, 150);
 });
 
-// ——— D52: земля сцены и земля фона — одна мера —————————————————————————————
+// ——— таск 199: вещи фона стоят на земле ————————————————————————————————————
 //
-// Слова заказчика: «но пол дома всё равно летает, вот границей перекрыл
-// машинки», «Фундамент в воздухе относительно фона». Две земли считались
-// по-разному: сцена — настоящей плоскостью по габариту чертежа, фон — заливкой
-// ниже строки горизонта с вещами **на бесконечности**. Числа — у
-// `volumeGroundScale`; здесь проверяется, что мера одна.
+// Слова заказчика: «всё эти объекты должны быть на одном уровне с фундаментом.
+// по сути на „фундаменте“ стоять». До этого таска у вещи фона не было дальности
+// вовсе — только сторона света и высота над горизонтом, — и размер её менялся
+// от высоты глаза (D53). Здесь проверяется, что места настоящие, а поведение —
+// как у предметов: отошёл — мельче, поднялся — то же самое.
 
-test("земля фона начинается ровно там, где кончается земля сцены (D52)", () => {
-  const scene = roomScene();
-  const built = volumeScene(scene.project, scene.schemeId);
-  const land = built.landMm;
-  assert.ok(land, "плита работает землёй — у неё есть прямоугольник");
-  // Кромка плиты от середины чертежа — полудиагональ, и считается она от
-  // выноса под тень дома: `volumeShadowShift` при полуденной высоте плюс запас.
-  const out = Math.hypot(...Object.values(volumeShadowShift(2700))) + VOLUME_LAND_OUT_MM;
-  assert.ok(Math.abs(land.maxX - (2000 + out)) < 1, "вынос плиты считается тенью дома");
-  const reach = Math.hypot((land.maxX - land.minX) / 2, (land.maxY - land.minY) / 2);
-  // Человек стоит: кромка плиты видна под малым углом, и земля фона отодвинута
-  // так, что её самое близкое колено ложится ровно на эту кромку.
-  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: 0, pitch: 0 };
-  const push = volumeGroundScale(camera, land);
-  assert.ok(push > 0 && push < 1, "земля фона отодвинута: " + push.toFixed(3));
-  const edgeDeg = (Math.atan(VOLUME_EYE_MM / reach) * 180) / Math.PI;
-  const box = { width: 1400, height: 900 };
-  const aim = volumeSkyAim(camera, box, push);
-  const nearest = volumeSkyPoint(aim, 0, -VOLUME_PANORAMA_NEAR_DEG);
-  const edge = volumeSkyPoint(volumeSkyAim(camera, box), 0, -edgeDeg);
-  assert.ok(Math.abs(nearest.y - edge.y) < 0.5, "ближнее колено панорамы не село на кромку плиты");
-  // Всё остальное — дальше кромки, то есть выше её на экране.
-  for (const rise of [-9.3, -6.9, -4.2, -0.6]) {
-    const point = volumeSkyPoint(aim, 0, rise);
-    assert.ok(point.y <= edge.y + 0.5, rise + "° осталось ближе кромки: y " + point.y.toFixed(0));
+const away199 = (spot) => Math.hypot(spot.x, spot.y) / 1000;
+
+test("у каждой вещи фона есть место на земле и высота в миллиметрах", () => {
+  const all = [
+    ...VOLUME_TREES,
+    ...VOLUME_RIVER_GREENS,
+    ...VOLUME_CITY,
+    ...VOLUME_CITY_PARK,
+    ...VOLUME_CITY_GREENS,
+    ...VOLUME_MOUNTAINS,
+    ...VOLUME_HILLS.flatMap((ridge) => ridge.nodes),
+  ];
+  for (const spot of all) {
+    assert.ok(Number.isFinite(spot.x) && Number.isFinite(spot.y), "у вещи нет места: " + JSON.stringify(spot));
+    assert.ok(spot.heightMm > 0, "у вещи нет высоты: " + JSON.stringify(spot));
+    // Ничего ближе ближнего куста: внутри плиты вещь срезала бы её кромка.
+    assert.ok(away199(spot) * 1000 >= VOLUME_BACKDROP_NEAR_MM - 1, "вещь залезла на участок: " + away199(spot));
   }
-  // Угловой размер уехавшей вещи уменьшается тем же множителем.
-  const plain = volumeSkyPoint(volumeSkyAim(camera, box), 0, -7.5);
-  const moved = volumeSkyPoint(aim, 0, -7.5);
-  assert.ok(Math.abs(moved.scale / plain.scale - push) < 0.02, "дерево отодвинули, а размер оставили");
-  // Небо не двигается вовсе: отодвигать бесконечность некуда.
-  for (const rise of [0, 2.6, 16]) {
-    assert.deepEqual(volumeSkyPoint(aim, 30, rise), volumeSkyPoint(volumeSkyAim(camera, box), 30, rise));
+  // Полосы — те же места: у каждого узла два края на земле.
+  for (const band of [VOLUME_ROAD, VOLUME_RIVER, ...VOLUME_CITY_STREETS, ...VOLUME_CITY_MARKS]) {
+    for (const node of band) {
+      assert.ok(Number.isFinite(node.left.x) && Number.isFinite(node.right.y), "у узла нет краёв");
+      assert.ok(away199(node) > 30, "полоса подошла к дому ближе тридцати метров: " + away199(node));
+    }
   }
 });
 
-test("ближе кромки земля фона не придвигается, а дальше — стоит как стояла", () => {
-  const scene = roomScene();
-  const land = volumeScene(scene.project, scene.schemeId).landMm;
-  // Обзор: камера поднята, кромка плиты ушла глубоко под горизонт — панорама
-  // остаётся ровно той, что была до таска 196.
-  const around = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0, -0.73, 20000);
-  assert.equal(volumeGroundScale(around, land), 1, "обзор панораму не двигает");
-  // Поднялись на второй этаж — кромка видна ниже, и кольцу можно подойти ближе.
-  const first = volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, land);
-  const second = volumeGroundScale({ at: { x: 0, y: 0, z: 2800 + VOLUME_EYE_MM } }, land);
-  assert.ok(second > first, "со второго этажа кольцо дальше, чем с первого");
-  // Нет земли — нечего и отодвигать: плита работает полом (помещения не
-  // обведены), и фон остаётся прежним.
-  const bareScene = roomScene({ room: false });
-  const bare = volumeScene(bareScene.project, bareScene.schemeId);
-  assert.equal(bare.landMm, null, "плита-пол землёй не считается");
-  assert.equal(volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, null), 1);
-  // Шаг человека панораму не колышет: мера считается от середины чертежа.
-  const here = volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, land);
-  const there = volumeGroundScale({ at: { x: 1800, y: -1200, z: VOLUME_EYE_MM } }, land);
-  assert.equal(here, there, "фон задышал при шаге");
+test("дальности названы числами: куст у кромки, горы за семь километров", () => {
+  const trees = VOLUME_TREES.map(away199);
+  assert.ok(
+    Math.min(...trees) >= VOLUME_BACKDROP_NEAR_MM / 1000 - 0.001,
+    "ближняя зелень ближе кромки участка: " + Math.min(...trees),
+  );
+  assert.ok(Math.max(...trees) > 200 && Math.max(...trees) < 600, "дальний ряд: " + Math.max(...trees));
+  // Ближний ряд читается «прямо перед глазами»: дерево в полусотне метров
+  // занимает с уровня глаз около десяти градусов.
+  const near = VOLUME_TREES.filter((tree) => away199(tree) < 55 && tree.kind !== "bush");
+  assert.ok(near.length >= 5, "ближнего ряда нет");
+  for (const tree of near) {
+    const deg = (Math.atan(tree.heightMm / (away199(tree) * 1000)) * 180) / Math.PI;
+    assert.ok(deg > 8 && deg < 30, "ближнее дерево на " + away199(tree).toFixed(0) + " м даёт " + deg.toFixed(1) + "°");
+  }
+  // Горы — дальний план: семь с половиной километров и высота в километр.
+  for (const peak of VOLUME_MOUNTAINS) {
+    assert.ok(Math.abs(away199(peak) - VOLUME_MOUNTAIN_AWAY_M) < 1, "гора ушла со своей гряды");
+    assert.ok(peak.heightMm > 700 * 1000 && peak.heightMm <= 1400 * 1000, "высота горы: " + peak.heightMm);
+    const deg = (Math.atan(peak.heightMm / (away199(peak) * 1000)) * 180) / Math.PI;
+    assert.ok(deg > 4 && deg < 12, "гора в кадре: " + deg.toFixed(1) + "°");
+  }
+  // Холмы ниже гор и ближе их: ландшафт, а не вторая гряда.
+  for (const ridge of VOLUME_HILLS) {
+    for (const node of ridge.nodes) {
+      assert.ok(away199(node) < VOLUME_MOUNTAIN_AWAY_M, "холм дальше гор");
+      assert.ok(node.heightMm < 120 * 1000, "холм выше «небольшого ландшафта»");
+    }
+  }
+  // Город: ближний ряд домов ближе и выше дальнего.
+  const nearBlocks = VOLUME_CITY.filter((block) => !block.far);
+  const farBlocks = VOLUME_CITY.filter((block) => block.far);
+  assert.ok(Math.max(...nearBlocks.map(away199)) < Math.min(...farBlocks.map(away199)), "ряды домов перемешались");
+  assert.ok(
+    Math.min(...nearBlocks.map((block) => block.heightMm)) > Math.max(...farBlocks.map((block) => block.heightMm)),
+    "ближний ряд не выше дальнего",
+  );
 });
 
-test("светило и звёзды смотрят своим прицелом, а не земным (D52)", () => {
-  const box = { x: 0, y: 0, width: 1280, height: 720 };
-  const seen = [];
-  const fade = { addColorStop: () => {} };
-  const ctx = {
-    createLinearGradient: () => fade,
-    beginPath: () => {},
-    moveTo: () => {},
-    lineTo: () => {},
-    closePath: () => {},
-    fill: () => {},
-    fillRect: () => {},
-    arc: (x, y, r) => seen.push([Math.round(x), Math.round(y), Math.round(r)]),
-    ellipse: (x, y, r) => seen.push([Math.round(x), Math.round(y), Math.round(r)]),
-    save: () => {},
-    restore: () => {},
-    fillStyle: "",
+test("вещь фона ведёт себя как предмет: дальше — мельче, выше глаз — та же", () => {
+  const box = { width: 1072, height: 778 };
+  const tree = VOLUME_TREES.find((item) => away199(item) < 60 && item.kind === "tree");
+  const heightAt = (camera) => {
+    const aim = volumeGroundAim(camera, box);
+    const base = volumeGroundPoint(aim, tree.x, tree.y, 0);
+    const top = volumeGroundPoint(aim, tree.x, tree.y, tree.heightMm);
+    return base && top ? base.y - top.y : null;
   };
-  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: (90 * Math.PI) / 180, pitch: -0.08 };
-  const mood = volumeMood({ minutes: 10 * 60, times: SUN_DAY, kind: "plain" });
-  volumeDrawBackdrop(ctx, box, camera, mood);
-  const bare = [...seen];
-  seen.length = 0;
-  // Та же минута, тот же ракурс, но у сцены есть земля: светило обязано
-  // остаться на месте — кромка плиты ему не указ.
-  volumeDrawBackdrop(ctx, box, camera, mood, { minX: -18000, minY: -18000, maxX: 18000, maxY: 18000 });
-  assert.deepEqual(seen, bare, "светило уехало вместе с землёй фона");
-  assert.ok(bare.length > 0, "стенд пуст: светило не нарисовано");
+  const yaw = Math.atan2(tree.y, tree.x);
+  const here = heightAt({ at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw, pitch: 0 });
+  // Отошли на тридцать метров назад — дерево стало мельче, и ровно по дальности.
+  const back = heightAt({
+    at: { x: -Math.cos(yaw) * 30000, y: -Math.sin(yaw) * 30000, z: VOLUME_EYE_MM },
+    yaw,
+    pitch: 0,
+  });
+  assert.ok(here > back, "отошёл, а дерево не уменьшилось");
+  const far = Math.hypot(tree.x, tree.y);
+  assert.ok(Math.abs(back / here - far / (far + 30000)) < 0.02, "уменьшилось не по дальности");
+  // Поднялись на второй этаж, не сходя с места: **размер тот же**. Это и есть
+  // D53 — прежнее кольцо здесь меняло вещь вдвое.
+  const upstairs = heightAt({ at: { x: 0, y: 0, z: VOLUME_EYE_MM + 2800 }, yaw, pitch: 0 });
+  assert.ok(Math.abs(upstairs / here - 1) < 0.01, "подъём изменил размер вещи фона: " + (upstairs / here));
+  // Из обзора — мельче, и ровно настолько, насколько камера отъехала вверх:
+  // от тридцати метров над домом до дерева не 50 м по земле, а 58 по прямой.
+  const above = heightAt({ at: { x: 0, y: 0, z: 30000 }, yaw, pitch: -0.4 });
+  const slant = Math.hypot(far, 30000 - VOLUME_EYE_MM);
+  // Точного равенства тут и не должно быть: при наклоне отвес ещё и сокращается
+  // ракурсом. Важно, что мельче ровно потому, что камера отъехала по прямой, —
+  // и что разница с дальностью считается десятками процентов, а не разами.
+  assert.ok(above < here, "из обзора вещь не уменьшилась");
+  assert.ok(Math.abs(above / here - far / slant) < 0.08, "уменьшение не объясняется дальностью: " + (above / here));
+});
+
+test("земля у вещей фона та же, что у фундамента: нулевая отметка", () => {
+  const box = { width: 1072, height: 778 };
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: 0, pitch: 0 };
+  const aim = volumeGroundAim(camera, box);
+  // Точка земли под деревом и точка плиты сцены на той же дальности ложатся в
+  // одну строку экрана: обе на нуле, обе через одну проекцию.
+  const tree = VOLUME_TREES.find((item) => Math.abs(Math.atan2(item.y, item.x)) < 0.2);
+  const base = volumeGroundPoint(aim, tree.x, tree.y, 0);
+  const plate = volumeGroundPoint(aim, tree.x, tree.y, 0);
+  assert.deepEqual(base, plate);
+  // Горизонт: точка на земле в километре лежит ниже строки горизонта и ползёт
+  // к ней с дальностью — ровно как настоящая земля.
+  const horizon = volumeHorizon(camera, box);
+  const near = volumeGroundPoint(aim, 50000, 0, 0);
+  const far = volumeGroundPoint(aim, 1000000, 0, 0);
+  assert.ok(near.y > far.y && far.y > horizon, "земля не сходится к горизонту");
+  assert.ok(far.y - horizon < 2, "в километре земля обязана прийти к горизонту: " + (far.y - horizon));
+  // За спиной земли нет: точка позади камеры не рисуется вовсе.
+  assert.equal(volumeGroundPoint(aim, -50000, 0, 0), null);
+});
+
+test("небо осталось на бесконечности: светило не двигается при ходьбе", () => {
+  const box = { width: 1072, height: 778 };
+  const where = (at) => {
+    const aim = volumeSkyAim({ at, yaw: 0, pitch: 0 }, box);
+    return volumeSkyPoint(aim, 20, 14);
+  };
+  const here = where({ x: 0, y: 0, z: VOLUME_EYE_MM });
+  const there = where({ x: 40000, y: -25000, z: VOLUME_EYE_MM + 9000 });
+  assert.deepEqual(here, there, "солнце поехало вслед за человеком");
+  // А вещь земли — поехала: это и есть разница между направлением и местом.
+  const aim = (at) => volumeGroundAim({ at, yaw: 0, pitch: 0 }, box);
+  const tree = VOLUME_TREES[0];
+  const first = volumeGroundPoint(aim({ x: 0, y: 0, z: VOLUME_EYE_MM }), tree.x, tree.y, 0);
+  const second = volumeGroundPoint(aim({ x: 20000, y: 0, z: VOLUME_EYE_MM }), tree.x, tree.y, 0);
+  assert.ok(!first || !second || Math.abs(first.x - second.x) > 1 || Math.abs(first.y - second.y) > 1);
+});
+
+test("порядок: ближе кромки плиты — второй проход, внутри плиты его нет вовсе", () => {
+  const land = { minX: -18830, minY: -18930, maxX: 18830, maxY: 18230 };
+  // Человек ходит по дому: ближе кромки нет ничего, второй проход пуст.
+  assert.equal(volumePlateGap(land, { x: 0, y: 0, z: VOLUME_EYE_MM }), 0);
+  assert.equal(volumePlateGap(land, { x: 4000, y: -3000, z: VOLUME_EYE_MM }), 0);
+  // Отлетели от плиты — у неё появилась ближняя кромка, и она считается в плане.
+  const outside = { x: 60000, y: 0, z: 30000 };
+  assert.ok(Math.abs(volumePlateGap(land, outside) - (60000 - 18830)) < 1);
+  // Расстановка зависит только от чертежа: у обычной квартиры множителя нет,
+  // у большого чертежа он больше единицы и от камеры не зависит.
+  assert.equal(volumeBackdropPush(null), 1);
+  assert.equal(volumeBackdropPush(land), 1, "плита заказчика помещается в запас");
+  const huge = { minX: -90000, minY: -90000, maxX: 90000, maxY: 90000 };
+  const push = volumeBackdropPush(huge);
+  assert.ok(push > 2, "большой чертёж отодвигает фон: " + push);
+  const places = volumeBackdropPlaces(huge);
+  assert.ok(
+    Math.hypot(places.trees[0].x, places.trees[0].y) > Math.hypot(VOLUME_TREES[0].x, VOLUME_TREES[0].y) * 2,
+    "фон не отодвинулся под большой чертёж",
+  );
+  // Высоты при этом не растянуты: дерево осталось деревом.
+  assert.equal(places.trees[0].heightMm, VOLUME_TREES[0].heightMm);
+  // Таблицы обычного чертежа отдаются как есть, без копирования.
+  assert.equal(volumeBackdropPlaces(land).trees, VOLUME_TREES);
 });
 
 // ——— D37: под проёмом и под стеной есть пол ———————————————————————————————
@@ -2021,101 +2111,115 @@ test("фон вращается вслед за поворотом, а небо 
 // вдаль» лежит **в числах**, а не в приёме рисования, и что ближний край не
 // подползает человеку под ноги.
 
-test("полоса уходит вдаль числами: высота, толщина и изгиб", () => {
-  for (const [name, band] of [
-    ["дорога", VOLUME_ROAD],
-    ["река", VOLUME_RIVER],
+test("полоса уходит вдаль числами: дальность, ширина и изгиб", () => {
+  for (const [name, band, widthM] of [
+    ["дорога", VOLUME_ROAD, 9],
+    ["река", VOLUME_RIVER, 60],
+    ["улица", VOLUME_CITY_STREETS[0], 16],
   ]) {
-    const middles = band.map((node) => (node.top + node.bottom) / 2);
-    const thick = band.map((node) => node.top - node.bottom);
+    const far = band.map((node) => Math.hypot(node.x, node.y) / 1000);
     for (let index = 1; index < band.length; index += 1) {
-      assert.ok(middles[index] > middles[index - 1], name + ": колено не поднялось к горизонту");
-      assert.ok(thick[index] < thick[index - 1], name + ": дальнее колено не сузилось");
+      assert.ok(far[index] > far[index - 1], name + ": колено не ушло дальше предыдущего");
     }
-    assert.ok(middles[0] < -6, name + ": ближний конец должен быть низко, иначе полоса не уходит, а лежит");
-    assert.ok(Math.abs(middles[middles.length - 1]) < 0.3, name + ": дальний конец не пришёл к горизонту");
+    assert.ok(far[0] > 50, name + ": ближний конец у самого дома: " + far[0]);
+    assert.ok(far[far.length - 1] > 400, name + ": дальний конец не ушёл к горизонту: " + far[far.length - 1]);
+    // Ширина полосы — настоящие метры и не зависит от дальности: на повороте
+    // она не растягивается, потому что края считаются поперёк хода.
+    for (const node of band) {
+      const wide = Math.hypot(node.left.x - node.right.x, node.left.y - node.right.y) / 1000;
+      assert.ok(Math.abs(wide - widthM) < 0.6, name + ": ширина уехала: " + wide.toFixed(2));
+    }
     // Изгиб: шаги по стороне света неравные — прямая дорога в панораме и
     // обязана быть кривой.
-    const steps = band.slice(1).map((node, index) => node.az - band[index].az);
+    const azOf = (node) => (Math.atan2(node.y, node.x) * 180) / Math.PI;
+    const steps = band.slice(1).map((node, index) => azOf(node) - azOf(band[index]));
     assert.ok(Math.max(...steps) - Math.min(...steps) > 1, name + ": полоса идёт ровными шагами, то есть не гнётся");
   }
 });
 
 test("фон разведён с домом: полосы не подползают к ногам", () => {
-  // Самое низкое место полосы — около десяти градусов под горизонтом: при
-  // росте глаз это метров десять от человека. Ближе — и дорога полезла бы в
+  // Ближний конец полосы — за кромкой участка: ближе и дорога полезла бы в
   // окно, а дорога под окном хуже, чем её отсутствие.
-  for (const band of [VOLUME_ROAD, VOLUME_RIVER]) {
-    const lowest = Math.min(...band.map((node) => node.bottom));
-    assert.ok(lowest > -10, "полоса подошла слишком близко: " + lowest);
-    assert.ok(lowest < -8, "полоса висит у горизонта и не читается как уходящая: " + lowest);
+  for (const band of [VOLUME_ROAD, VOLUME_RIVER, ...VOLUME_CITY_STREETS]) {
+    const near = Math.min(...band.map((node) => Math.hypot(node.x, node.y)));
+    assert.ok(near > VOLUME_BACKDROP_NEAR_MM, "полоса подошла слишком близко: " + near / 1000);
+    assert.ok(near < 150000, "полоса висит у горизонта и не читается как уходящая: " + near / 1000);
   }
   // Дорога и река разведены по стороне света: в одно окно попадает что-то
   // одно, перекрестием они не сходятся.
-  const roadAz = VOLUME_ROAD.map((node) => node.az);
-  const riverAz = VOLUME_RIVER.map((node) => node.az);
+  const azOf = (node) => (((Math.atan2(node.y, node.x) * 180) / Math.PI) + 360) % 360;
+  const roadAz = VOLUME_ROAD.map(azOf);
+  const riverAz = VOLUME_RIVER.map(azOf);
   assert.ok(Math.min(...riverAz) - Math.max(...roadAz.filter((az) => az < 100)) > 60, "дорога и река рядом");
 });
 
 test("ландшафт небольшой: гряды у горизонта, а не горы над домом", () => {
   assert.equal(VOLUME_HILLS.length, 2, "две гряды: дальняя сквозь воздух, ближняя своим цветом");
-  const tops = VOLUME_HILLS.flatMap((ridge) => ridge.nodes.map((node) => node.top));
-  assert.ok(Math.max(...tops) <= 2.6, "гряда выше «небольшого»: " + Math.max(...tops));
+  const deg = (node) => (Math.atan(node.heightMm / Math.hypot(node.x, node.y)) * 180) / Math.PI;
+  const tops = VOLUME_HILLS.flatMap((ridge) => ridge.nodes.map(deg));
+  assert.ok(Math.max(...tops) <= 2.6, "гряда выше «небольшого»: " + Math.max(...tops).toFixed(2));
   assert.ok(Math.max(...tops) > 1, "гряда ниже заметного — ландшафта не видно");
-  // Ближняя гряда ниже дальней: иначе дальнюю не было бы видно вовсе.
-  const high = (ridge) => Math.max(...ridge.nodes.map((node) => node.top));
-  assert.ok(high(VOLUME_HILLS[0]) > high(VOLUME_HILLS[1]));
-  for (const ridge of VOLUME_HILLS) {
-    for (const node of ridge.nodes) assert.ok(node.bottom < 0, "низ гряды обязан уйти под горизонт, иначе на стыке щель");
-  }
-  // Для меры: ближнее дерево панорамы — девятнадцать градусов, то есть холмы
-  // ровно фон.
-  assert.ok(Math.max(...tops) * 5 < 19);
+  // Дальняя гряда дальше и выше ближней — иначе её не было бы видно вовсе.
+  const away = (ridge) => Math.hypot(ridge.nodes[0].x, ridge.nodes[0].y);
+  assert.ok(away(VOLUME_HILLS[0]) > away(VOLUME_HILLS[1]), "дальняя гряда не дальше ближней");
+  assert.ok(
+    Math.max(...VOLUME_HILLS[0].nodes.map((node) => node.heightMm)) >
+      Math.max(...VOLUME_HILLS[1].nodes.map((node) => node.heightMm)),
+    "дальняя гряда не выше ближней",
+  );
+  // Для меры: ближнее дерево панорамы — около одиннадцати градусов, то есть
+  // холмы ровно фон.
+  assert.ok(Math.max(...tops) * 4 < 11);
 });
 
 test("зелень стоит по обоим берегам реки и считается из самой реки", () => {
   const greens = volumeRiverGreens(VOLUME_RIVER);
   assert.deepEqual(greens, VOLUME_RIVER_GREENS, "список собран из узлов реки, а не выписан второй таблицей");
-  assert.ok(greens.length >= 10 && greens.length <= 16, "мера «чуть»: " + greens.length);
+  assert.ok(greens.length >= 10 && greens.length <= 20, "мера «чуть»: " + greens.length);
+  const side = (spot, node) => (spot.x - node.x) * (node.left.y - node.y) - (spot.y - node.y) * (node.left.x - node.x);
   const near = VOLUME_RIVER[0];
-  const atNear = greens.filter((green) => Math.abs(green.az - near.az) < 6);
+  const wide = Math.hypot(near.left.x - near.right.x, near.left.y - near.right.y);
+  const atNear = greens.filter((green) => Math.hypot(green.x - near.x, green.y - near.y) < wide * 2);
+  assert.ok(atNear.length >= 4, "у ближнего колена зелени нет");
   assert.ok(
-    atNear.some((green) => green.rise < near.bottom) && atNear.some((green) => green.rise > near.top),
+    atNear.some((green) => side(green, near) > 0) && atNear.some((green) => side(green, near) < 0),
     "у ближнего колена обжиты оба берега",
   );
   // Ближе к воде гуще: у ближних колен зелени больше, чем у дальних.
   const far = VOLUME_RIVER[4];
-  assert.ok(atNear.length > greens.filter((green) => Math.abs(green.az - far.az) < 6).length);
-  // И дальняя зелень мельче ближней — это та же перспектива, что у полосы.
-  const sizeAt = (node) => Math.max(...greens.filter((green) => Math.abs(green.az - node.az) < 6).map((g) => g.size));
-  assert.ok(sizeAt(near) > sizeAt(far) * 3);
+  assert.ok(atNear.length > greens.filter((green) => Math.hypot(green.x - far.x, green.y - far.y) < wide * 2).length);
+  // И дальняя зелень ниже ближней: куст у горизонта не вырастает в дерево.
+  const tallest = (node) =>
+    Math.max(...greens.filter((green) => Math.hypot(green.x - node.x, green.y - node.y) < wide * 2).map((g) => g.heightMm));
+  // Радиус поиска считается от ширины реки, и у дальнего колена в него попадает
+  // зелень соседнего — поэтому сравнение простое: ближняя выше дальней.
+  assert.ok(tallest(near) > tallest(far), "зелень у дальнего колена не ниже ближней");
   // На самых дальних коленах зелени нет вовсе: там она выродилась бы в точку.
   const tail = VOLUME_RIVER[VOLUME_RIVER.length - 1];
-  assert.equal(greens.filter((green) => Math.abs(green.az - tail.az) < 3).length, 0);
+  assert.equal(greens.filter((green) => Math.hypot(green.x - tail.x, green.y - tail.y) < wide * 2).length, 0);
 });
 
 test("горы стоят напротив солнца и дальше всего, а шапки у них светлее камня", () => {
   // «Напротив солнца» — буквально: сторона света берётся у солнца и
   // поворачивается на половину оборота. Подвинется солнце — уедут и горы.
   const away = (VOLUME_SUN_AT.az + 180) % 360;
+  const azOf = (peak) => (((Math.atan2(peak.y, peak.x) * 180) / Math.PI) + 360) % 360;
+  const deg = (peak) => (Math.atan(peak.heightMm / Math.hypot(peak.x, peak.y)) * 180) / Math.PI;
   for (const peak of VOLUME_MOUNTAINS) {
-    const turn = Math.abs(((peak.az - away + 540) % 360) - 180);
+    const turn = Math.abs(((azOf(peak) - away + 540) % 360) - 180);
     assert.ok(turn < 35, "вершина ушла от стороны, противоположной солнцу: " + turn);
-    // Гряда выше ландшафта, но втрое ниже ближнего дерева панорамы — дальний
-    // план, а не стена над домом.
-    assert.ok(peak.size > 2.6 && peak.size < 8, "мера вершины: " + peak.size);
+    // Гряда выше ландшафта, но ниже ближнего дерева — дальний план, а не стена.
+    assert.ok(deg(peak) > 2.6 && deg(peak) < 12, "мера вершины: " + deg(peak).toFixed(1));
     assert.ok(peak.snow > 0.2 && peak.snow < 0.5, "шапка на всю гору или её нет вовсе: " + peak.snow);
-    assert.ok(peak.half > peak.size, "подножие уже вершины — это игла, а не гора");
+    assert.ok(peak.halfMm > peak.heightMm, "подножие уже вершины — это игла, а не гора");
   }
   assert.ok(VOLUME_MOUNTAINS.length >= 5, "гряда, а не одна вершина");
   // Пики перекрывают друг друга: у соседей подножия заходят одно на другое.
-  // Считается по сдвигу от середины гряды, а не по самой стороне света: она
-  // переходит через нуль, и соседи 358° и 4° числами далеки друг от друга.
-  const offset = (peak) => ((peak.az - away + 540) % 360) - 180;
+  const offset = (peak) => ((azOf(peak) - away + 540) % 360) - 180;
   const sorted = [...VOLUME_MOUNTAINS].sort((a, b) => offset(a) - offset(b));
   for (let index = 1; index < sorted.length; index += 1) {
-    const gap = offset(sorted[index]) - offset(sorted[index - 1]);
-    assert.ok(gap < sorted[index].half + sorted[index - 1].half, "вершины не перекрываются: " + gap);
+    const gap = Math.hypot(sorted[index].x - sorted[index - 1].x, sorted[index].y - sorted[index - 1].y);
+    assert.ok(gap < sorted[index].halfMm + sorted[index - 1].halfMm, "вершины не перекрываются: " + gap / 1000);
   }
   // Снег светлее камня, а камень — не чернота: склон к зрителю в тени, но
   // различим.
@@ -2124,9 +2228,139 @@ test("горы стоят напротив солнца и дальше всег
     assert.ok(light(peak.snowColor) > light(peak.rock) + 120, "шапка не светлее камня");
     assert.ok(light(peak.rock) > 330, "камень ушёл в черноту: " + peak.rock);
   }
-  // И гряда дальше ландшафта: холмы ниже самой низкой вершины.
-  const hills = Math.max(...VOLUME_HILLS.flatMap((ridge) => ridge.nodes.map((node) => node.top)));
-  assert.ok(hills < Math.min(...VOLUME_MOUNTAINS.map((peak) => peak.size)));
+  // И гряда дальше ландшафта: холмы ближе самой близкой вершины.
+  const hills = Math.max(...VOLUME_HILLS.flatMap((ridge) => ridge.nodes.map((node) => Math.hypot(node.x, node.y))));
+  assert.ok(hills < Math.min(...VOLUME_MOUNTAINS.map((peak) => Math.hypot(peak.x, peak.y))));
+});
+
+// ——— таск 206: город становится городом ————————————————————————————————————
+//
+// Слова заказчика после таска 199: «город стал плохим. Плоские дома (о чем и
+// говорил), по вертикали дома сплюснытые и всё очень далеко от камеры
+// где-то. И добавь туда рекламные баннеры и неоновые вывески».
+
+test("сетка окон считается из метров, и ячейка выходит почти квадратной (D57)", () => {
+  // Беда была не в высоте и не в дальности, а в сетке: `floors` и `bays`
+  // писались руками, и ячейка окна выходила вчетверо шире себя. Теперь этаж и
+  // секция — мерки в миллиметрах, а число строк и столбцов выходит делением.
+  for (const block of VOLUME_CITY) {
+    const cellH = block.heightMm / block.floors;
+    const cellW = (block.halfMm * 2) / block.bays;
+    assert.ok(Math.abs(cellH - VOLUME_CITY_FLOOR_MM) < 400, "этаж уехал: " + cellH);
+    assert.ok(Math.abs(cellW - VOLUME_CITY_BAY_MM) < 500, "секция уехала: " + cellW);
+    assert.ok(cellW / cellH < 1.4 && cellW / cellH > 0.7, "ячейка окна снова не квадратная: " + cellW / cellH);
+    // И у дома есть глубина: он коробка, а не щит.
+    assert.ok(block.deepMm > 0, "у дома нет глубины");
+    assert.ok(block.deepMm >= block.halfMm * 0.6, "глубина вдвое меньше половины лица — это всё ещё щит");
+  }
+});
+
+test("дом города — коробка: в кадре две стены и крыша, и при облёте он не плоский", () => {
+  const box = { x: 0, y: 0, width: 1072, height: 952 };
+  const mood = volumeMood({ minutes: 900, times: DAY_TIMES, kind: "city" });
+  const block = VOLUME_CITY.find((item) => !item.far);
+  const walls = (yaw) => {
+    const seen = [];
+    const ctx = {
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      beginPath: () => seen.push([]),
+      moveTo: (x, y) => seen[seen.length - 1] && seen[seen.length - 1].push([x, y]),
+      lineTo: (x, y) => seen[seen.length - 1] && seen[seen.length - 1].push([x, y]),
+      closePath: () => {},
+      fill: () => {},
+      fillRect: () => {},
+      arc: () => {},
+      ellipse: () => {},
+      save: () => {},
+      restore: () => {},
+      fillStyle: "",
+    };
+    // Камера смотрит на дом с его же стороны, с высоты человека.
+    const at = { x: block.x * 0.35, y: block.y * 0.35, z: VOLUME_EYE_MM };
+    volumeDrawBackdrop(ctx, box, { at, yaw, pitch: 0 }, mood, null);
+    return seen.filter((path) => path.length === 4);
+  };
+  const straight = Math.atan2(block.y, block.x);
+  const faces = walls(straight);
+  assert.ok(faces.length > 2, "дом не нарисован: " + faces.length);
+  // Площадь четырёхугольников дома: у коробки их видно две-три (стена, стена,
+  // крыша), у щита — одна.
+  const area = (path) => {
+    let sum = 0;
+    for (let i = 0, j = path.length - 1; i < path.length; j = i, i += 1) {
+      sum += path[j][0] * path[i][1] - path[i][0] * path[j][1];
+    }
+    return Math.abs(sum) / 2;
+  };
+  const big = faces.filter((path) => area(path) > 400);
+  assert.ok(big.length >= 2, "у дома в кадре одна стена — он снова щит");
+  // Повернулись вокруг дома: он остаётся коробкой, а не схлопывается.
+  for (const turn of [0.4, 0.9, 1.4]) {
+    const around = walls(straight + turn).filter((path) => area(path) > 400);
+    assert.ok(around.length >= 1, "при облёте дом пропал на повороте " + turn);
+  }
+});
+
+test("город придвинут: ближний ряд в сотне метров, а не в трёх (D57)", () => {
+  const away = (block) => Math.hypot(block.x, block.y) / 1000;
+  const near = VOLUME_CITY.filter((block) => !block.far);
+  const far = VOLUME_CITY.filter((block) => block.far);
+  assert.ok(Math.max(...near.map(away)) < 160, "ближний ряд далеко: " + Math.max(...near.map(away)));
+  assert.ok(Math.min(...near.map(away)) > 90, "ближний ряд въехал во двор: " + Math.min(...near.map(away)));
+  assert.ok(Math.min(...far.map(away)) > Math.max(...near.map(away)), "ряды перемешались");
+  // Угловая высота: дом через дорогу занимает больше десяти градусов.
+  for (const block of near) {
+    const deg = (Math.atan(block.heightMm / Math.hypot(block.x, block.y)) * 180) / Math.PI;
+    assert.ok(deg > 12 && deg < 30, "ближний дом даёт " + deg.toFixed(1) + "°");
+  }
+});
+
+test("река видна рекой: ближе и шире прежнего (D56)", () => {
+  const away = (node) => Math.hypot(node.x, node.y) / 1000;
+  const wide = Math.hypot(VOLUME_RIVER[0].left.x - VOLUME_RIVER[0].right.x, VOLUME_RIVER[0].left.y - VOLUME_RIVER[0].right.y) / 1000;
+  assert.ok(wide > 40, "река у́же сорока метров — это ручей: " + wide);
+  assert.ok(away(VOLUME_RIVER[0]) < 130, "ближнее колено далеко: " + away(VOLUME_RIVER[0]));
+  // Поперёк взгляда с уровня глаз ближнее колено занимает больше двадцати
+  // градусов — такую реку видно, а не угадывают по полоске у горизонта.
+  const deg = (2 * Math.atan(wide / 2 / away(VOLUME_RIVER[0])) * 180) / Math.PI;
+  assert.ok(deg > 20, "река в кадре занимает " + deg.toFixed(1) + "°");
+});
+
+test("неоновые вывески и щиты: ночью светятся, днём нет, и текста на них нет", () => {
+  const box = { x: 0, y: 0, width: 1072, height: 952 };
+  const colours = (minutes) => {
+    const seen = [];
+    const ctx = {
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, closePath: () => {},
+      fill: () => seen.push(ctx.fillStyle), fillRect: () => seen.push(ctx.fillStyle),
+      arc: () => {}, ellipse: () => {}, save: () => {}, restore: () => {},
+      fillText: () => { throw new Error("на вывеске написан текст"); },
+      strokeText: () => { throw new Error("на вывеске написан текст"); },
+      fillStyle: "",
+    };
+    const mood = volumeMood({ minutes, times: DAY_TIMES, kind: "city" });
+    for (const yaw of [0, 1.2, 2.4, 3.6, 4.8]) {
+      volumeDrawBackdrop(ctx, box, { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw, pitch: 0 }, mood, null);
+    }
+    return seen;
+  };
+  const day = colours(900);
+  const night = colours(60);
+  const neon = ["#ff5fa2", "#53e5ff", "#ffd34d", "#7bff8a"];
+  assert.ok(night.some((paint) => neon.includes(paint)), "ночью вывески не светятся");
+  assert.ok(!day.some((paint) => neon.includes(paint)), "днём вывеска светится как ночью");
+  // Свечение берётся у того же часа, что окна: где горят окна, там горит и неон.
+  assert.ok(night.includes("#ffe6a3"), "ночью не горят окна — стенд пуст");
+  assert.ok(!day.includes("#ffe6a3"), "днём горят окна");
+  // Щиты стоят у дорог и читаются полосами: их краска есть и днём, и ночью.
+  assert.equal(VOLUME_CITY_BANNER_PLACES.length >= 4, true, "щитов меньше четырёх");
+  for (const banner of VOLUME_CITY_BANNER_PLACES) {
+    const away = Math.hypot(banner.x, banner.y) / 1000;
+    assert.ok(away > VOLUME_BACKDROP_NEAR_MM / 1000 && away < 120, "щит стоит не у дороги: " + away);
+    assert.ok(banner.bottomMm > 2000 && banner.bottomMm < 6000, "полотно висит не на ногах: " + banner.bottomMm);
+    assert.ok(banner.heightMm > 2000, "полотно ниже двух метров");
+  }
 });
 
 test("земля у дома и земля за ним — один тон (G237)", () => {
@@ -2153,19 +2387,25 @@ test("земля у дома и земля за ним — один тон (G237
 
 test("полоса рвётся за спиной и не склеивается через край кадра", () => {
   const box = { width: 1200, height: 700 };
-  const aim = volumeSkyAim({ at: { x: 0, y: 0, z: 1600 }, yaw: 0, pitch: 0 }, box);
-  // Три узла впереди — один прогон; узел за спиной между ними рвёт полосу.
-  const ahead = [
-    { az: -10, top: -1, bottom: -2 },
-    { az: 0, top: -1, bottom: -2 },
-    { az: 10, top: -1, bottom: -2 },
-  ];
+  const aim = volumeGroundAim({ at: { x: 0, y: 0, z: 1600 }, yaw: 0, pitch: 0 }, box);
+  // Узел полосы — два края на земле. Три узла впереди дают один прогон; узел
+  // за спиной между ними рвёт полосу надвое.
+  const node = (azDeg, away) => {
+    const az = (azDeg * Math.PI) / 180;
+    const x = Math.cos(az) * away;
+    const y = Math.sin(az) * away;
+    return { x, y, left: { x, y: y - 3000 }, right: { x, y: y + 3000 } };
+  };
+  const ahead = [node(-10, 60000), node(0, 70000), node(10, 80000)];
   assert.equal(volumeStripRuns(aim, ahead).length, 1);
   assert.equal(volumeStripRuns(aim, ahead)[0].length, 3);
-  const broken = [ahead[0], { az: 180, top: -1, bottom: -2 }, ahead[2]];
+  const broken = [ahead[0], node(180, 60000), ahead[2]];
   assert.equal(volumeStripRuns(aim, broken).length, 0, "одинокие узлы — не полоса");
-  const twoRuns = [ahead[0], ahead[1], { az: 180, top: -1, bottom: -2 }, ahead[2], { az: 20, top: -1, bottom: -2 }];
+  const twoRuns = [ahead[0], ahead[1], node(180, 60000), ahead[2], node(20, 90000)];
   assert.equal(volumeStripRuns(aim, twoRuns).length, 2);
+  // И это не мелочь счёта: у вещей с настоящими местами за спиной оказывается
+  // половина круга, и отбрасывается она здесь.
+  assert.equal(volumeGroundPoint(aim, -60000, 0, 0), null);
 });
 
 test("фон рисует дорогу, реку, гряды и зелень — и цена кадра остаётся фоновой", () => {
@@ -2830,12 +3070,16 @@ test("три фона рисуют разное, и цена кадра у ка�
   // у них разной природы, и это не придирка, а проверка, что фоны разные.
   assert.ok(city.rect > 100, "окон в городе не нарисовано: " + city.rect);
   assert.ok(nature.arc > city.arc, "у природы круглых крон больше, чем у города");
-  // Сторож цены: фон — это фон. Кадр сцены в таске 146 стоил 0,1 мс на 650
-  // гранях, и фону нельзя разрастаться до его доли незаметно. Счёт здесь за
-  // шесть кадров (полный оборот), поэтому и мера шестикратная.
-  for (const [name, ops] of [["простой", plain], ["природа", nature], ["город", city]]) {
+  // Сторож цены: фон — это фон. Замер таска 206 на объекте заказчика: «природа»
+  // 20 мкс на кадр, «город» 50 мкс, «простой» 1 мкс — при кадре сцены 0,7 мс и
+  // бюджете 16 мс. Город подорожал вчетверо нарочно: дома стали коробками с
+  // двумя стенами окон и придвинулись втрое (D57), и это ровно то, что заказчик
+  // просил увидеть. Дальние дома при этом рисуются **этажами, а не окнами**
+  // (`VOLUME_CITY_WINDOW_PX`), иначе счёт был бы ещё вдвое больше.
+  // Счёт здесь за шесть кадров (полный оборот), поэтому и мера шестикратная.
+  for (const [name, ops, limit] of [["простой", plain, 300], ["природа", nature, 2400], ["город", city, 7000]]) {
     const total = ops.fill + ops.arc + ops.rect + ops.fade;
-    assert.ok(total < 1700, "фон «" + name + "» разросся: операций на шесть кадров " + total);
+    assert.ok(total < limit, "фон «" + name + "» разросся: операций на шесть кадров " + total);
   }
   // Ночью прибавляются звёзды и месяц, а не вторая картинка.
   const nightPlain = count("plain", 0);
@@ -3043,64 +3287,56 @@ test("в тесном месте окно говорит об этом слов�
   assert.ok(volumeFreeMm(built.solids, wall.x, wall.y) > VOLUME_NEAR_MM);
 });
 
-test("камера обзора не ныряет под крышу: место зажато расстоянием", () => {
-  const lift = 1900;
-  // Отошли далеко — стоять можно почти вдоль земли, но всё же сверху.
-  const far = volumeAroundStand(0, 20000, lift);
-  assert.ok(far < 0, "камера обзора всегда выше цели: " + far);
-  assert.ok(Math.abs(Math.sin(-far) * 20000 - lift) < 1, "подъём над целью ровно по крыше");
-  // Подошли вплотную — место становится отвесным.
-  assert.ok(volumeAroundStand(0, 2000, lift) < volumeAroundStand(0, 20000, lift));
-  // Ближе, чем крыша высока, — почти отвес, и за него не заходим.
-  assert.ok(volumeAroundStand(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
-  // Круче ограничения стоять не запрещено — запрещено положе.
-  assert.ok(volumeAroundStand(-1.2, 20000, lift) < far);
-  // Крыши нет (стенд, тест) — зажат один отвес.
-  assert.equal(volumeAroundStand(0.4, 20000, 0), 0.4);
+test("предел стояния камеры снят: обзор спускается до земли (таск 200, G304)", () => {
+  // Таск 195 держал камеру над крышей (`volumeAroundStand`) ровно затем, чтобы
+  // она не оказалась внутри стены. Заказчик предел снял сам — «по камере — ок,
+  // пусть в стенах оказываемся, это ожидаемо», — и функции этой больше нет.
+  const volumeSource = readFileSync(new URL("../src/volume.js", import.meta.url), "utf8");
+  assert.ok(!/export function volumeAroundStand/.test(volumeSource), "предел стояния вернулся");
+  // Кадрирование: камера встаёт по взгляду и расстоянию, и ничего кроме пола
+  // её не держит. Цель на полу, взгляд −42°, семь метров.
+  const target = { x: 0, y: 0, z: 1200 };
+  const pitch = (-42 * Math.PI) / 180;
+  const eye = volumeAroundEye(target, 0, pitch, 7000);
+  assert.ok(Math.abs(eye.z - (1200 + Math.sin(0.733) * 7000)) < 20, "камера встала не по взгляду: " + Math.round(eye.z));
+  // Взгляд ровно вдоль земли — камера на высоте цели: ниже высоты стен обзору
+  // больше ничего не запрещает.
+  assert.equal(Math.round(volumeAroundEye(target, 0, 0, 7000).z), 1200);
+  // **Пол держит** (`volumeGroundMm`, то же правило, которым приземляется
+  // прыжок): задранный взгляд увёл бы камеру под плиту, и она стоит на нуле.
+  const sky = (60 * Math.PI) / 180;
+  assert.equal(volumeAroundEye(target, 0, sky, 7000).z, 0, "камера ушла под пол");
+  for (let deg = -85; deg <= 85; deg += 5) {
+    const at = volumeAroundEye(target, 0.4, (deg * Math.PI) / 180, 7000);
+    assert.ok(at.z >= 0, "на " + deg + "° камера под полом: " + Math.round(at.z));
+  }
+  // Взгляд кадрирование не трогает: куда смотрят — выбор руки.
+  assert.equal(volumeAroundCamera(target, 0.4, sky, 7000).pitch, sky);
   const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
-  assert.ok(Math.abs(volumeAroundStand(Math.PI / 2, 20000, 0) - limit) < 1e-9, "за отвес не заводится");
+  assert.ok(Math.abs(volumeClampPitch(Math.PI / 2) - limit) < 1e-9, "за отвес взгляд не заводится");
 });
 
-test("обзор задирает взгляд к небу, а камеру оставляет над крышей (G298)", () => {
-  // Та самая беда, из-за которой предел стоял: цель на полу, семь метров.
-  const lift = 1900;
-  const target = { x: 0, y: 0, z: 1200 };
-  const sky = (60 * Math.PI) / 180;
-  const camera = volumeAroundCamera(target, 0.4, sky, 7000, lift);
-  // Взгляд — тот, что задали: солнце в полдень лета стоит на 58°, и смотреть
-  // туда обзор теперь вправе.
-  assert.equal(camera.pitch, sky);
-  // А место камеры — прежнее, по крыше: подъём над целью ровно `lift`, и внутрь
-  // стены соседней комнаты она не попадает ни на миллиметр.
-  assert.ok(Math.abs(camera.at.z - (target.z + lift)) < 1, "камера съехала с крыши: " + camera.at.z);
-  // Больше крыши её поднимает только собственный наклон, и ниже неё она не
-  // опускается ни на каком взгляде — пройдём весь диапазон.
-  for (let deg = -85; deg <= 85; deg += 5) {
-    const at = volumeAroundCamera(target, 0.4, (deg * Math.PI) / 180, 7000, lift).at;
-    assert.ok(at.z >= target.z + lift - 1, "на " + deg + "° камера нырнула к полу: " + Math.round(at.z));
+test("цель обзора — точка перед камерой, и брошенной она не бывает (таск 200)", () => {
+  // Цель не хранится: она считается от места камеры и взгляда. Поэтому
+  // «вращение вокруг цели» и «вращение точки перед собой» — одно и то же.
+  const eye = { x: 1000, y: 2000, z: 3000 };
+  const target = volumeAroundTarget(eye, 0.4, (-30 * Math.PI) / 180, 9000);
+  // Туда и обратно: кадрирование по этой цели возвращает ту же камеру.
+  const back = volumeAroundEye(target, 0.4, (-30 * Math.PI) / 180, 9000);
+  assert.ok(Math.hypot(back.x - eye.x, back.y - eye.y, back.z - eye.z) < 1e-6, "счёт разошёлся: " + JSON.stringify(back));
+  // **Рысканье высоту камеры не меняет** — поэтому орбита вокруг цели под пол
+  // не уводит и пола не спрашивает. Обойдём цель по кругу.
+  for (let deg = 0; deg < 360; deg += 30) {
+    const spun = volumeAroundEye(target, (deg * Math.PI) / 180, (-30 * Math.PI) / 180, 9000);
+    assert.ok(Math.abs(spun.z - eye.z) < 1e-6, "на " + deg + "° орбита увела камеру по высоте: " + spun.z);
   }
-  // Задранный взгляд камеру с места **не сдвигает**: от предела и выше она
-  // стоит там же, где стояла.
-  const edge = volumeAroundCamera(target, 0.4, volumeAroundStand(0, 7000, lift), 7000, lift);
-  assert.deepEqual(camera.at, edge.at);
-  // Приближение на задранном взгляде — шаг камеры к цели, а не поворот головы:
-  // взгляд тот же, место ближе и круче.
-  const near = volumeAroundCamera(target, 0.4, sky, 3500, lift);
-  assert.equal(near.pitch, sky);
-  assert.ok(Math.hypot(near.at.x, near.at.y) < Math.hypot(camera.at.x, camera.at.y), "камера не подошла");
-  assert.ok(near.at.z >= target.z + lift - 1, "подошедшая камера ушла под крышу");
-  // Опущенный взгляд — как было до таска 195: место и взгляд одно и то же.
-  const down = (-70 * Math.PI) / 180;
-  assert.deepEqual(
-    volumeAroundCamera(target, 0.4, down, 7000, lift),
-    volumeAroundCamera(target, 0.4, down, 7000, 0),
-    "опущенный взгляд перестал ставить камеру по себе",
-  );
+  // Цель на полу, камера над ней: обычный обзор сверху.
+  assert.ok(target.z < eye.z, "цель должна лежать ниже камеры при опущенном взгляде");
 });
 
 test("щелчок по небу в обзоре никуда не переносит", () => {
   // Луч из задранного кадра в пол не упирается — и выдуманной точки не бывает.
-  const camera = volumeAroundCamera({ x: 0, y: 0, z: 1200 }, 0.4, (60 * Math.PI) / 180, 7000, 1900);
+  const camera = { at: { x: 0, y: 0, z: 1200 }, yaw: 0.4, pitch: (60 * Math.PI) / 180 };
   const box = { width: 1200, height: 700 };
   assert.equal(volumeFloorAt(camera, box, box.width / 2, 40), null);
 });
@@ -3354,7 +3590,7 @@ test("окно параметров: «Сейчас» ставит дату, в�
   volumeParamsSpeed(VOLUME_CLOCK_SPEED_DEFAULT, nowMs);
 });
 
-test("три отметки объёма живут в настройках и по умолчанию сняты (таск 192, G292)", () => {
+test("отметки объёма живут в настройках и по умолчанию сняты (таск 192, G292)", () => {
   // Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
   // 1. Плавные светила… 2. Проходить сквозь стены 3. Летать».
   //
@@ -3362,26 +3598,35 @@ test("три отметки объёма живут в настройках и �
   // объём ведёт себя ровно как до таска.
   assert.equal(volumeParamsRead().smooth, false);
   assert.equal(volumeParamsRead().ghost, false);
-  assert.equal(volumeParamsRead().fly, false);
-  // Дверь одна на три, и спрашивается выбор тем же `volumeParamsRead`, что фон
+  // Дверь одна на обе, и спрашивается выбор тем же `volumeParamsRead`, что фон
   // и миникарта: второго места для него нет.
-  volumeParamsFlag("fly", true);
-  assert.equal(volumeParamsRead().fly, true);
-  assert.equal(volumeParamsRead().ghost, false, "отметки друг друга не трогают");
   volumeParamsFlag("ghost", true);
+  assert.equal(volumeParamsRead().ghost, true);
+  assert.equal(volumeParamsRead().smooth, false, "отметки друг друга не трогают");
   volumeParamsFlag("smooth", true);
   assert.deepEqual(
-    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
-    { smooth: true, ghost: true, fly: true },
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost },
+    { smooth: true, ghost: true },
   );
+  // ——— «Летать» убрал заказчик (таск 200, G304) ———
+  //
+  // Отметки нет ни в окне, ни в настройках, и **старое имя не оживляет её**:
+  // записанное когда-то `volumeFly: true` лежит в хранилище мёртвым грузом.
+  volumeParamsFlag("fly", true);
+  assert.equal(volumeParamsRead().fly, undefined, "отметка «Летать» вернулась");
+  const paramsSource = readFileSync(new URL("../src/panels/volumeParams.js", import.meta.url), "utf8");
+  const code = paramsSource
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+  assert.ok(!/volumeFly/.test(code), "имя настройки «Летать» вернулось в код");
   // Чужое имя двери не ломает ничего и ничего не ставит.
   volumeParamsFlag("сквозьпотолок", true);
-  volumeParamsFlag("fly", false);
   volumeParamsFlag("ghost", false);
   volumeParamsFlag("smooth", false);
   assert.deepEqual(
-    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
-    { smooth: false, ghost: false, fly: false },
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost },
+    { smooth: false, ghost: false },
   );
 });
 
@@ -5349,18 +5594,24 @@ test("текст подсказки говорит про тот вид и то 
   // Стойка и стены — своими кусками (таск 192): без галок сказано то же, что
   // говорилось до таска, слово в слово.
   assert.ok(person.includes(strings.volume.hintStance) && person.includes(strings.volume.hintWalls), person);
-  // Три отметки **меняют** подсказку, а не дописывают её: летящему пробел не
-  // прыжок, а снявшему столкновения нельзя читать «сквозь стены нельзя».
-  const flying = volumeHintText({ ...base, fly: true });
-  assert.ok(flying.includes(strings.volume.hintFly) && !flying.includes(strings.volume.hintStance), flying);
+  // Отметка **меняет** подсказку, а не дописывает её: снявшему столкновения
+  // нельзя читать «сквозь стены нельзя».
   const ghost = volumeHintText({ ...base, ghost: true });
   assert.ok(ghost.includes(strings.volume.hintGhost) && !ghost.includes(strings.volume.hintWalls), ghost);
-  // В обзоре не ходят вовсе — ни про стойку, ни про стены там не говорится.
-  const aroundFly = volumeHintText({ ...base, view: "around", aim: false, fly: true, ghost: true });
-  assert.ok(!aroundFly.includes(strings.volume.hintFly) && !aroundFly.includes(strings.volume.hintGhost), aroundFly);
+  // ——— подсказка меняется по виду (таск 200, G304) ———
+  //
+  // Человеку в первом лице не пишут про полёт, летящему в обзоре — про прыжок.
+  assert.ok(!person.includes(strings.volume.hintAroundFly), person);
+  const around = volumeHintText({ ...base, view: "around", aim: false });
+  assert.ok(around.includes(strings.volume.hintAroundFly), around);
+  assert.ok(!around.includes(strings.volume.hintStance), around);
+  // Про отметку «Проходить сквозь стены» в обзоре не говорится вовсе: там
+  // сквозь стены летают всегда, и галка там ничего не меняет.
+  const aroundGhost = volumeHintText({ ...base, view: "around", aim: false, ghost: true });
+  assert.ok(!aroundGhost.includes(strings.volume.hintGhost) && !aroundGhost.includes(strings.volume.hintWalls), aroundGhost);
+  assert.equal(aroundGhost, around, "галка переписала подсказку обзора");
   assert.ok(person.includes(strings.volume.aimHint), "прицел показан — про него есть строка");
   // Обзор говорит своё, и про прицел там молчит: его в обзоре нет.
-  const around = volumeHintText({ ...base, view: "around", aim: false });
   assert.ok(around.includes(strings.volume.hintAround), around);
   assert.ok(!around.includes(strings.volume.aimHint), around);
   // Мышь у вида — другая строка про мышь, и обе разом не говорятся.

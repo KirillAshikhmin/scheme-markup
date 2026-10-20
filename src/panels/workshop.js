@@ -118,6 +118,7 @@ import {
   planPixelsPerMeter,
   planSizeMeters,
   roomsInOrder,
+  schemeAnchorOf,
   schemeObjectCorners,
   schemeObjectKeyOf,
   schemeObjectMountOf,
@@ -1636,6 +1637,35 @@ export function workshopHint(tool, way) {
 }
 
 /**
+ * Строка под кнопками «Выделение · Добавление» — **одна на два зова**: кадр
+ * колонки (`sync`) и шаг призрака проёма (таск 203, дефект D55).
+ *
+ * `refusal` — причина, по которой показанный призрак не сядет. Её место именно
+ * здесь, строкой, а не плашкой: курсор идёт по стене десятками шагов в
+ * секунду, и плашка на каждый шаг была бы не предупреждением, а помехой
+ * (правило таска 180). Пока эту строку писали в двух местах врозь, одно из них
+ * пережило переезд колонки, а другое — нет: таск 187 унёс `subjectNote` из
+ * разметки, а две записи в него остались в разборе движения мыши, и
+ * `ReferenceError` рвал кадр ровно там, где призрак обязан был появиться.
+ *
+ * Чистая и вынесена наружу ради теста: про что говорит строка, видно без
+ * браузера.
+ */
+export function workshopModeNote({ mode, tool, wallCount, refusal } = {}) {
+  if (mode === "select") return { text: strings.workshop.modeSelectHint, bad: false };
+  // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
+  // «Что добавить» этого не видно — оно про вид и размеры, а не про то, что
+  // на схеме.
+  if (tool === "openings" && !(Number(wallCount) > 0)) {
+    return { text: strings.workshop.openingNeedWall, bad: false };
+  }
+  // Красным — потому что то же самое в эту минуту краснеет под курсором:
+  // строка объясняет призрак, а не заменяет его.
+  if (refusal) return { text: String(refusal), bad: true };
+  return { text: drawPickerHint(tool), bad: false };
+}
+
+/**
  * Строка состояния схемы: какой это из трёх случаев, что в чертеже и сколько
  * стен. Чистая — слова про случай «молча рисовать в никуда нельзя» решаются
  * здесь и проверяются без браузера.
@@ -1802,6 +1832,10 @@ const WORKSHOP_HANDLE = "#ffffff";
 const WORKSHOP_GRID_LINE = "#d0d7de";
 const WORKSHOP_GRID_MAJOR = "#aeb7c0";
 const WORKSHOP_ORIGIN = "#d1242f";
+// Точка привязки (таск 205) — свой цвет, не красный нуля: два служебных знака
+// одной краской человек принял бы за один и тот же, а стоят они в разных
+// местах и значат разное.
+const WORKSHOP_ANCHOR = "#8250df";
 
 /**
  * Собрать мастерскую чертежа на основном экране (таск 153).
@@ -2539,6 +2573,15 @@ function createWorkshop({ api, hosts }) {
     const candidate = { wallId: pick.wall.id, atMm, ...base };
     const attempt = workshopTryOpening(project(), candidate, null);
     ghost = { wall: pick.wall, opening: candidate, ok: attempt.ok, message: attempt.ok ? "" : attempt.message };
+  }
+
+  /**
+   * Чем этот призрак отличается от прежнего: стена, место на ней и ответ
+   * модели. Кадр перерисовывается только на смену отпечатка — движение мыши
+   * вдоль стены на доли миллиметра кадра не стоит.
+   */
+  function ghostStamp() {
+    return ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
   }
 
   function wallUnder(pointMm) {
@@ -3303,15 +3346,14 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (tool === "openings") {
-      const before = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
+      const before = ghostStamp();
       updateGhost(mmOf(event));
-      const after = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
-      if (before !== after) {
-        // Причина отказа живёт в строке под полем, а не в плашке: курсор ходит
+      if (ghostStamp() !== before) {
+        // Причина отказа живёт строкой под кнопками, а не плашкой: курсор ходит
         // по стене десятками шагов в секунду, и плашка на каждый шаг была бы
-        // не предупреждением, а помехой.
-        subjectNote.textContent = ghost && !ghost.ok ? ghost.message : openingHelp();
-        subjectNote.classList.toggle("is-bad", Boolean(ghost && !ghost.ok));
+        // не предупреждением, а помехой. Слова считает `workshopModeNote` — та
+        // же, которой их пишет кадр колонки.
+        syncModeNote();
         redraw();
       }
       return;
@@ -3842,6 +3884,7 @@ function createWorkshop({ api, hosts }) {
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
     paintDrawing();
+    paintAnchor();
     paintObjectHandles();
     paintDraft();
   }
@@ -3906,6 +3949,40 @@ function createWorkshop({ api, hosts }) {
     ctx.lineTo(at.x + 9, at.y);
     ctx.moveTo(at.x, at.y - 9);
     ctx.lineTo(at.x, at.y + 9);
+    ctx.stroke();
+  }
+
+  /**
+   * Точка привязки схемы (таск 205, G309) — знак геодезиста: кольцо с крестом
+   * через него.
+   *
+   * **Зачем знак вообще.** Привязка двигает в объёме целый этаж, и задаётся она
+   * двумя числами в окне свойств схемы. Числа не показывают, куда точка встала,
+   * — а встала она, например, не в ту лестницу из двух. Поэтому её видно там,
+   * где живут миллиметры: на чертеже, поверх начерченного.
+   *
+   * Поверх, а не под, в отличие от нуля: нуль прячется под стеной нарочно (он
+   * часть системы координат), а привязку ищут глазами — и ищут обычно как раз
+   * под лестницей, то есть поверх вещи.
+   *
+   * На бумагу знак не уходит: он рисуется здесь, а не в `render.drawDrawing`, —
+   * выгрузки, лист ГОСТ и миникарта зовут общий слой и о привязке не знают.
+   * Отметки показа ему не нужны: он есть ровно тогда, когда есть сама точка.
+   */
+  function paintAnchor() {
+    const anchor = schemeAnchorOf(project(), schemeId);
+    if (!anchor) return;
+    const at = screenOf(anchor);
+    ctx.strokeStyle = WORKSHOP_ANCHOR;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, 7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(at.x - 12, at.y);
+    ctx.lineTo(at.x + 12, at.y);
+    ctx.moveTo(at.x, at.y - 12);
+    ctx.lineTo(at.x, at.y + 12);
     ctx.stroke();
   }
 
@@ -4261,14 +4338,7 @@ function createWorkshop({ api, hosts }) {
     syncAddPlate();
     // Строка под кнопками — словами: по плашке не видно, ставится вещь кликом
     // или тянется цепочкой. То же правило, что у меток (`tools.kindPointHint`).
-    // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
-    // этого не видно — оно про вид и размеры, а не про то, что на схеме.
-    modeNote.textContent =
-      now === "select"
-        ? strings.workshop.modeSelectHint
-        : tool === "openings" && walls().length === 0
-          ? strings.workshop.openingNeedWall
-          : drawPickerHint(tool);
+    syncModeNote();
     syncDetails(current, wall);
     syncHeightButton(current);
     syncElevation(current, wall);
@@ -4284,6 +4354,23 @@ function createWorkshop({ api, hosts }) {
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
     node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
+  }
+
+  /**
+   * Строка под кнопками — **одна дверь к ней**: кадр колонки и шаг призрака
+   * проёма пишут её этой функцией, а слова считает чистая `workshopModeNote`.
+   * Второй записи у строки быть не должно: ровно на ней и погорел таск 187 —
+   * призрак писал в узел, которого колонка уже не держала.
+   */
+  function syncModeNote() {
+    const line = workshopModeNote({
+      mode: mode(),
+      tool,
+      wallCount: walls().length,
+      refusal: ghost && !ghost.ok ? ghost.message : "",
+    });
+    modeNote.textContent = line.text;
+    modeNote.classList.toggle("is-bad", line.bad);
   }
 
   /**
