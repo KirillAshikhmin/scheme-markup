@@ -5,7 +5,7 @@ import { strings, text } from "./strings.js";
 // Встроенный каталог вещей чертежа (таск 154): ключи, имена, габариты и место
 // установки. Данные сборки, а не справочник объекта, — поэтому модель их
 // читает, но никогда не правит.
-import { objectCatalogEntry, objectCatalogKeyByName } from "./objectCatalog.js";
+import { objectCatalogEntry, objectCatalogKeyByName, objectCatalogRetired } from "./objectCatalog.js";
 
 // Версия формата объекта. Поднимается, когда в project.json появляются поля,
 // без которых работа теряется. История:
@@ -4867,11 +4867,24 @@ export function findSchemeObjectKind(project, kindId) {
 // меняет ни в объекте, ни на чертеже — он только включает вещи модель в объёме
 // и узнавание лестницы. Не вывелось — вещь остаётся на месте со своим именем и
 // своим габаритом, как было до каталога.
+//
+// Ключ **ушедшей в метки** вещи (таск 186: телевизор, полотенцесушитель)
+// читается здесь наравне с каталожным, и это ровно то, ради чего надгробие
+// заведено: поставить такую вещь больше нельзя, а та, что уже стоит на
+// чертеже, обязана открыться со своим именем, своим местом установки и своим
+// телом в объёме (G68). Новую она не заводит ни одна дверь — `addSchemeObject`
+// такой ключ отвергает.
+
+// Что сборка знает о ключе вещи: запись каталога или надгробие ушедшей.
+// Порядок именно такой — каталог старше, и совпасть эти два списка не могут.
+function schemeObjectCatalogKnown(key) {
+  return objectCatalogEntry(key) || objectCatalogRetired(key);
+}
 
 /** Ключ каталога у вещи чертежа. `null` — вещь вне каталога. */
 export function schemeObjectKeyOf(project, object) {
   if (!object) return null;
-  if (object.catalogKey && objectCatalogEntry(object.catalogKey)) return object.catalogKey;
+  if (object.catalogKey && schemeObjectCatalogKnown(object.catalogKey)) return object.catalogKey;
   const kind = findSchemeObjectKind(project, object.kindId);
   return kind ? objectCatalogKeyByName(kind.name) : null;
 }
@@ -4885,7 +4898,7 @@ export function schemeObjectKeyOf(project, object) {
  */
 export function schemeObjectNameOf(project, object) {
   if (!object) return "";
-  const entry = object.catalogKey ? objectCatalogEntry(object.catalogKey) : null;
+  const entry = object.catalogKey ? schemeObjectCatalogKnown(object.catalogKey) : null;
   if (entry) return entry.name;
   const kind = findSchemeObjectKind(project, object.kindId);
   return kind ? kind.name : "";
@@ -4893,7 +4906,7 @@ export function schemeObjectNameOf(project, object) {
 
 /** Где вещь стоит: на полу, на стене, в полу. `null` — вещь вне каталога. */
 export function schemeObjectMountOf(project, object) {
-  const entry = objectCatalogEntry(schemeObjectKeyOf(project, object));
+  const entry = schemeObjectCatalogKnown(schemeObjectKeyOf(project, object));
   return entry ? entry.mount : null;
 }
 

@@ -46,7 +46,7 @@ import {
   objectViewForShape,
   objectViewNames,
 } from "../src/objectViews/registry.js";
-import { objectCatalogKeys } from "../src/objectCatalog.js";
+import { objectCatalogKeys, objectCatalogRetiredKeys } from "../src/objectCatalog.js";
 import { monoContext } from "../src/mono.js";
 import {
   ELEVATION_GROWN_QUIET,
@@ -525,17 +525,25 @@ const ADDED_AFTER = ["vent", "mirror"];
 // тем, что кто-то тихо дорисовал метке второй значок.
 const ADDED_OBJECTS = objectCatalogKeys();
 
+// Вещи, **ушедшие из каталога в метки** (таск 186, G279): телевизор и
+// полотенцесушитель. Изображения у них те же, что были у вещей, — переехали
+// они только семьёй (`objects` → `things`), — и отпечатка «до» у них нет по той
+// же причине, что у остальных вещей каталога. Список отдельный, потому что в
+// ключах каталога их больше нет, а в реестре они есть: по ним открываются
+// чертежи, где такая вещь уже стоит.
+const MOVED_TO_MARKS = objectCatalogRetiredKeys();
+
 test("переделка в данные не тронула вид: двадцать девять изображений из тридцати двух совпали до вызова", () => {
   const names = objectViewNames();
   assert.equal(
     names.length,
-    32 + ADDED_AFTER.length + ADDED_OBJECTS.length,
+    32 + ADDED_AFTER.length + ADDED_OBJECTS.length + MOVED_TO_MARKS.length,
     "изображений стало другое число: " + names.length,
   );
   const changed = [];
   for (const name of names) {
     const was = PRINTS_BEFORE[name];
-    if (ADDED_AFTER.includes(name) || ADDED_OBJECTS.includes(name)) {
+    if (ADDED_AFTER.includes(name) || ADDED_OBJECTS.includes(name) || MOVED_TO_MARKS.includes(name)) {
       assert.ok(!was, name + ": изображение названо новым, а отпечаток «до» у него есть");
       continue;
     }
@@ -554,6 +562,11 @@ test("у каждой вещи каталога есть изображение,
   // показать её нечем. Поймать это глазами на двух десятках плиток дорого.
   const without = objectCatalogKeys().filter((key) => !objectViewByName(key));
   assert.deepEqual(without, [], "вещь каталога без изображения");
+  // И у ушедших в метки изображение осталось: без него прежний чертёж, где
+  // такая вещь стоит, рисовал бы пустой габарит (G68).
+  for (const key of objectCatalogRetiredKeys()) {
+    assert.ok(objectViewByName(key), key + ": у ушедшей в метки вещи пропало изображение");
+  }
   assert.deepEqual(objectViewClashes(), [], "два семейства заняли одно имя — изображение досталось чужому");
 });
 

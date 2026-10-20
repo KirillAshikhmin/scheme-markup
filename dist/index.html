@@ -8614,6 +8614,10 @@ function text(key, vars) {
 //                  краям), и ищется от самого длинного корня — «Столешница»
 //                  содержит «стол», а стол со столешницей разные вещи.
 //
+// Рядом с каталогом лежит `RETIRED` — надгробия вещей, ушедших в метки (таск
+// 186). Это не каталог: в плитках, ключах и умолчаниях их нет, и поставить их
+// нельзя. Зачем они всё-таки есть, написано у самого списка.
+//
 // Имена вещей лежат в словаре (`strings.schemeObjectKinds`), как и всё видимое
 // глазу: второго места с русскими словами в сборке нет.
 
@@ -8818,17 +8822,8 @@ const CATALOG = [
     heightAboveFloorMm: 0,
     words: ["душ"],
   },
-  {
-    key: "towelDryer",
-    category: "sanitary",
-    mount: "wall",
-    shape: "rect",
-    widthMm: 500,
-    depthMm: 100,
-    heightMm: 800,
-    heightAboveFloorMm: 900,
-    words: ["полотенцесуш"],
-  },
+  // Полотенцесушителя здесь больше нет: таск 186 (G279) увёл его в метки.
+  // Надгробие — в `RETIRED` ниже.
   // Бассейн: 4 × 2 м — домашний, а не спортивный. Над полом остаётся борт в
   // 300 мм: глубину чаши объём не выкапывает, и обещать её числом нечестно.
   {
@@ -8900,6 +8895,8 @@ const CATALOG = [
   },
 
   // ——— техника ———
+  // Телевизора здесь больше нет: таск 186 (G279) увёл его в метки. Надгробие —
+  // в `RETIRED` ниже.
   {
     key: "fridge",
     category: "appliances",
@@ -8954,25 +8951,6 @@ const CATALOG = [
     heightMm: 850,
     heightAboveFloorMm: 0,
     words: ["сушильн"],
-  },
-  // Телевизор (таск 177, G262: «В технику добавь телевизор»). На стене, а не на
-  // тумбе: кронштейн — то, как его вешают сегодня, и ровно за ним прячут
-  // розетку с розеткой данных — для них и размечают.
-  //
-  // 1240 × 720 — панель 55 дюймов (диагональ 1397 при 16:9 даёт 1218 × 685, плюс
-  // рамка): это самый ходовой размер гостиной. Глубина 80 — панель с
-  // кронштейном. Низ на 850: середина экрана приходится на 1210, то есть на
-  // уровень глаз сидящего человека, — так его и вешают над тумбой.
-  {
-    key: "tv",
-    category: "appliances",
-    mount: "wall",
-    shape: "rect",
-    widthMm: 1240,
-    depthMm: 80,
-    heightMm: 720,
-    heightAboveFloorMm: 850,
-    words: ["телевизор"],
   },
 
   // ——— конструкции ———
@@ -9064,17 +9042,51 @@ const CATALOG = [
   },
 ];
 
+// ——— вещи, ушедшие в метки (таск 186, G279) ———————————————————————————————
+//
+// Слова заказчика: «Телевизор давай всё-таки уберём из объектов и сделаем
+// меткой, потому что он будет интерактивным (включаться). И полотенцесушитель
+// тоже, для него уже метка есть». Обе вещи ушли из каталога целиком: их нет ни
+// в плитках выбора, ни среди ключей, ни в умолчаниях — поставить их вещью
+// больше нельзя, и правильно, они теперь метки.
+//
+// Но **на чьём-то чертеже они уже стоят** (G68), и у такой вещи в
+// `project.json` записан один лишь ключ: имя, место установки и модель берутся
+// по нему из сборки. Выкинь ключ совсем — и вещь открылась бы безымянной, то
+// есть испорченной. Поэтому здесь остаётся надгробие: ключ, место установки и
+// корни имени, и ничего больше. Габариты надгробию не нужны — они записаны у
+// самой вещи на чертеже с того дня, как её поставили.
+//
+// Почему не отметка `legacy`, которой спрятан общий вид «Сантехника»:
+// `legacy` — вещь каталога, просто не показанная в плитках; эти две — **не
+// вещи каталога вовсе**. Разница видна в ответах: `objectCatalogEntry` их не
+// знает, `objectCatalogDefaults` молчит, а `addSchemeObject` с таким ключом
+// отказывает — нельзя поставить вещью то, что стало меткой.
+//
+// Изображение и модель у ключей остались (`objectViews/things.js`,
+// `objectModels/things.js`): реестры плоские, и метка с вещью делят в них одну
+// запись. Поэтому кадр у прежнего чертежа не меняется ни на грань.
+const RETIRED = [
+  { key: "tv", mount: "wall", words: ["телевизор"] },
+  { key: "towelDryer", mount: "wall", words: ["полотенцесуш"] },
+];
+
 // Имя приклеивается при чтении, а не лежит в записи: словарь — единственное
 // место с русскими словами, и запись каталога не должна их дублировать.
 const named = (entry) => (entry ? { ...entry, name: strings.schemeObjectKinds[entry.key] || entry.key } : null);
 
 const BY_KEY = new Map(CATALOG.map((entry) => [entry.key, entry]));
+const RETIRED_BY_KEY = new Map(RETIRED.map((entry) => [entry.key, entry]));
 
 // Корни ищутся от самого длинного: «Столешница (кухонный фронт)» содержит и
 // «столешниц», и «стол».
-const WORDS = CATALOG.flatMap((entry) => (entry.words || []).map((word) => ({ key: entry.key, word }))).sort(
-  (left, right) => right.word.length - left.word.length,
-);
+//
+// Корни ушедших вещей ищутся вместе с остальными: вид справочника, названный
+// «Полотенцесушитель» на чертеже прежней разметки, обязан узнаваться так же,
+// как узнавался вчера, — иначе у него пропало бы тело в объёме.
+const WORDS = [...CATALOG, ...RETIRED]
+  .flatMap((entry) => (entry.words || []).map((word) => ({ key: entry.key, word })))
+  .sort((left, right) => right.word.length - left.word.length);
 
 /** Все вещи каталога по порядку: сперва категория, внутри — порядок записи. */
 function objectCatalogInOrder() {
@@ -9096,6 +9108,23 @@ function objectCatalogEntry(key) {
 /** Все ключи — для сверки охвата моделями и изображениями. */
 function objectCatalogKeys() {
   return CATALOG.map((entry) => entry.key);
+}
+
+/**
+ * Вещь, **ушедшая из каталога** в метки (таск 186), — по ключу. `null` — ключ
+ * не ушедший: либо он в каталоге, либо его не было никогда.
+ *
+ * Отвечает ровно на один вопрос: чем названа и где стоит вещь, которая уже
+ * стоит на чьём-то чертеже. Габарит у неё свой, записанный в объекте, а
+ * поставить такую вещь заново нельзя — она теперь метка.
+ */
+function objectCatalogRetired(key) {
+  return key && RETIRED_BY_KEY.has(key) ? named(RETIRED_BY_KEY.get(key)) : null;
+}
+
+/** Ключи ушедших вещей — для сверки, что изображение и модель у них целы. */
+function objectCatalogRetiredKeys() {
+  return RETIRED.map((entry) => entry.key);
 }
 
 /** Имя вещи каталога. Пусто — ключа нет. */
@@ -13957,11 +13986,24 @@ function findSchemeObjectKind(project, kindId) {
 // меняет ни в объекте, ни на чертеже — он только включает вещи модель в объёме
 // и узнавание лестницы. Не вывелось — вещь остаётся на месте со своим именем и
 // своим габаритом, как было до каталога.
+//
+// Ключ **ушедшей в метки** вещи (таск 186: телевизор, полотенцесушитель)
+// читается здесь наравне с каталожным, и это ровно то, ради чего надгробие
+// заведено: поставить такую вещь больше нельзя, а та, что уже стоит на
+// чертеже, обязана открыться со своим именем, своим местом установки и своим
+// телом в объёме (G68). Новую она не заводит ни одна дверь — `addSchemeObject`
+// такой ключ отвергает.
+
+// Что сборка знает о ключе вещи: запись каталога или надгробие ушедшей.
+// Порядок именно такой — каталог старше, и совпасть эти два списка не могут.
+function schemeObjectCatalogKnown(key) {
+  return objectCatalogEntry(key) || objectCatalogRetired(key);
+}
 
 /** Ключ каталога у вещи чертежа. `null` — вещь вне каталога. */
 function schemeObjectKeyOf(project, object) {
   if (!object) return null;
-  if (object.catalogKey && objectCatalogEntry(object.catalogKey)) return object.catalogKey;
+  if (object.catalogKey && schemeObjectCatalogKnown(object.catalogKey)) return object.catalogKey;
   const kind = findSchemeObjectKind(project, object.kindId);
   return kind ? objectCatalogKeyByName(kind.name) : null;
 }
@@ -13975,7 +14017,7 @@ function schemeObjectKeyOf(project, object) {
  */
 function schemeObjectNameOf(project, object) {
   if (!object) return "";
-  const entry = object.catalogKey ? objectCatalogEntry(object.catalogKey) : null;
+  const entry = object.catalogKey ? schemeObjectCatalogKnown(object.catalogKey) : null;
   if (entry) return entry.name;
   const kind = findSchemeObjectKind(project, object.kindId);
   return kind ? kind.name : "";
@@ -13983,7 +14025,7 @@ function schemeObjectNameOf(project, object) {
 
 /** Где вещь стоит: на полу, на стене, в полу. `null` — вещь вне каталога. */
 function schemeObjectMountOf(project, object) {
-  const entry = objectCatalogEntry(schemeObjectKeyOf(project, object));
+  const entry = schemeObjectCatalogKnown(schemeObjectKeyOf(project, object));
   return entry ? entry.mount : null;
 }
 

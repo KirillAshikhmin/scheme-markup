@@ -47,7 +47,7 @@ import {
 import { markBoxMm } from "../src/markBox.js";
 import { objectViewByName, objectViewForShape } from "../src/objectViews/registry.js";
 import { MODEL_CYL_SIDES, MODEL_MATERIALS } from "../src/objectModels/kit.js";
-import { objectCatalogDefaults, objectCatalogKeys } from "../src/objectCatalog.js";
+import { objectCatalogDefaults, objectCatalogKeys, objectCatalogRetiredKeys } from "../src/objectCatalog.js";
 import { LINE_SPOT_MAX } from "../src/objectModels/lines.js";
 import {
   OBJECT_MODEL_BODY_MAX,
@@ -301,14 +301,21 @@ test("у каждой вещи каталога есть модель, и дев
   for (const key of objectCatalogKeys()) {
     assert.ok(objectModelByKey(key), key + ": вещь каталога без модели");
   }
-  // Тридцать ключей: тринадцать вещей из брифа, девять нынешних видов (шкаф у
-  // них общий), унитаз с ванной (таск 162) и шесть вещей таска 177.
-  assert.equal(objectCatalogKeys().length, 30);
-  // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам.
+  // Двадцать восемь ключей: тринадцать вещей из брифа, девять нынешних видов
+  // (шкаф у них общий), унитаз с ванной (таск 162) и шесть вещей таска 177 —
+  // минус телевизор с полотенцесушителем, ушедшие в метки (таск 186).
+  assert.equal(objectCatalogKeys().length, 28);
+  // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам. И
+  // имена **ушедших** вещей — тоже: вид прежней разметки, названный
+  // «Телевизор» или «Полотенцесушитель», обязан узнаваться как узнавался, иначе
+  // у него пропало бы тело в объёме (G68).
   for (const [key, name] of Object.entries(strings.schemeObjectKinds)) {
     const found = objectModelForName(name);
     assert.ok(found, name + ": вид не узнан по имени");
     assert.equal(found.key, key, name + ": узнан как " + found.key);
+  }
+  for (const key of objectCatalogRetiredKeys()) {
+    assert.ok(objectModelByKey(key), key + ": у ушедшей в метки вещи пропало тело");
   }
   // Терпимость та же, что у лестницы: регистр, «ё» и пробелы не считаются, а
   // корень ищется внутри строки.

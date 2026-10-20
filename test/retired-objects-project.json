@@ -1,0 +1,107 @@
+{
+  "formatVersion": 5,
+  "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000001",
+  "name": "Чертёж, где телевизор и полотенцесушитель ещё вещи",
+  "createdAt": "2026-10-12T11:05:00.000+03:00",
+  "updatedAt": "2026-10-12T12:30:00.000+03:00",
+  "categories": [],
+  "markTypes": [],
+  "rooms": [],
+  "schemes": [
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "name": "Гостиная и санузел",
+      "imageId": null,
+      "width": 1200,
+      "height": 900,
+      "order": 0
+    }
+  ],
+  "marks": [],
+  "groups": [],
+  "counters": {},
+  "view": { "zoom": 1, "offsetX": 0, "offsetY": 0, "markSize": 10, "labelSize": 12 },
+  "walls": [
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000010",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "aMm": { "x": 0, "y": 0 },
+      "bMm": { "x": 4000, "y": 0 },
+      "thicknessMm": 100
+    },
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000011",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "aMm": { "x": 4000, "y": 0 },
+      "bMm": { "x": 4000, "y": 3000 },
+      "thicknessMm": 100
+    },
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000012",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "aMm": { "x": 4000, "y": 3000 },
+      "bMm": { "x": 0, "y": 3000 },
+      "thicknessMm": 100
+    },
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000013",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "aMm": { "x": 0, "y": 3000 },
+      "bMm": { "x": 0, "y": 0 },
+      "thicknessMm": 100
+    }
+  ],
+  "schemeObjectKinds": [
+    { "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000020", "name": "Полотенцесушитель", "order": 0 }
+  ],
+  "schemeObjects": [
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000030",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "catalogKey": "tv",
+      "shape": "rect",
+      "atMm": { "x": 1800, "y": 140 },
+      "widthMm": 1240,
+      "depthMm": 80,
+      "turnDeg": 0,
+      "heightMm": 720,
+      "heightAboveFloorMm": 850
+    },
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000031",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "catalogKey": "towelDryer",
+      "shape": "rect",
+      "atMm": { "x": 3900, "y": 2200 },
+      "widthMm": 600,
+      "depthMm": 100,
+      "turnDeg": 90,
+      "heightMm": 900,
+      "heightAboveFloorMm": 950
+    },
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000032",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "kindId": "5c1d0e44-7a21-4b8e-9c33-aa0000000020",
+      "shape": "rect",
+      "atMm": { "x": 120, "y": 2300 },
+      "widthMm": 500,
+      "depthMm": 100,
+      "turnDeg": 90,
+      "heightMm": 800,
+      "heightAboveFloorMm": 900
+    },
+    {
+      "id": "5c1d0e44-7a21-4b8e-9c33-aa0000000033",
+      "schemeId": "5c1d0e44-7a21-4b8e-9c33-aa0000000002",
+      "catalogKey": "radiator",
+      "shape": "rect",
+      "atMm": { "x": 3000, "y": 140 },
+      "widthMm": 1200,
+      "depthMm": 100,
+      "turnDeg": 0,
+      "heightMm": 500,
+      "heightAboveFloorMm": 150
+    }
+  ]
+}
