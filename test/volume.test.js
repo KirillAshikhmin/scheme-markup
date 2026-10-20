@@ -145,6 +145,7 @@ import {
   volumeChannelAt,
   volumeChannelLines,
   volumeChannelLinks,
+  volumeModelKeys,
   volumeLinkLines,
   volumeMarkFaces,
   volumeMarkOnFloor,
@@ -4174,13 +4175,72 @@ test("выбранный канал оставляет стрелки тольк
   assert.deepEqual(only.ties, [], "общее управление про клавишу не знает");
   assert.deepEqual(only.groups, [], "общий номер — тождество меток, а не клавиша");
   assert.deepEqual(only.offScheme, []);
-  // Связь без канала у той же метки не приписывается первой клавише: этого в
-  // данных нет.
-  const first = volumeChannelLinks(links, { markId: "вв", channel: 1 });
+  // Связь без канала у **многоклавишной** метки не приписывается первой
+  // клавише: какая из двух — в данных не записано (правило таска 177).
+  const first = volumeChannelLinks(links, { markId: "вв", channel: 1 }, 2);
   assert.deepEqual(
     first.lines.map((line) => line.toId),
     ["т1"],
   );
+  // Не сказали, сколько клавиш, — метка считается многоклавишной: осторожное
+  // умолчание, а не «одна».
+  assert.deepEqual(
+    volumeChannelLinks(links, { markId: "вв", channel: 1 }).lines.map((line) => line.toId),
+    ["т1"],
+  );
+});
+
+// ——— одноклавишный выключатель: связь без номера — его канал (таск 191, D50) —
+//
+// Слова заказчика: «Если в Объёме нажать на клавишу 1 клавишного выключателя,
+// то пишет: Канал 1: на этой клавише нет ни одной нагрузки. Хотя по факту
+// 1 канал там и в „Чем управляет“ не указывается канал. Соответственно
+// выбранное и есть первый канал».
+//
+// Это **не** отмена правила таска 177, а его граница: домысливать нечего там,
+// где канал один. На объекте заказчика ровно этот случай и стоит — три
+// одноклавишных выключателя, и все три связи у них без номера.
+
+test("у одноклавишной метки связь без номера канала — её собственная", () => {
+  const links = {
+    lines: [
+      { fromId: "в", toId: "т1", channel: null },
+      { fromId: "в", toId: "т2", channel: 1 },
+      { fromId: "в", toId: "т3", channel: 2 },
+      { fromId: "другой", toId: "т4", channel: null },
+    ],
+    ties: [],
+    groups: [],
+    offScheme: [],
+  };
+  const one = volumeChannelLinks(links, { markId: "в", channel: 1 }, 1);
+  assert.deepEqual(
+    one.lines.map((line) => line.toId),
+    ["т1", "т2"],
+    "одна клавиша обязана забрать и связь без номера, и свою по номеру",
+  );
+  // Чужая метка не задета, и второй канал у одноклавишной не выдумывается: если
+  // в данных стоит «канал 2», это ошибка разметки, а не её клавиша.
+  assert.deepEqual(
+    volumeChannelLinks(links, { markId: "в", channel: 2 }, 1).lines.map((line) => line.toId),
+    ["т3"],
+    "вторая клавиша у одноклавишной метки берёт только то, что названо её номером",
+  );
+});
+
+test("клавиши считаются по телу модели, а не вторым счётом", () => {
+  const scene = roomScene();
+  const one = markAt(scene.project, scene.schemeId, "В", [{ x: -900, y: -1100 }]);
+  const two = markAt(one.project, scene.schemeId, "ВВ", [{ x: -500, y: -1100 }]);
+  const socket = markAt(two.project, scene.schemeId, "Р", [{ x: 0, y: -1100 }]);
+  const built = volumeScene(socket.project, scene.schemeId, {});
+  assert.equal(volumeModelKeys(placeOf(built, one.markId).model), 1, "у «В» одна клавиша");
+  assert.equal(volumeModelKeys(placeOf(built, two.markId).model), 2, "у «ВВ» две клавиши");
+  // У неклавишной вещи ноль — и ноль не значит «одна»: правило одной клавиши
+  // про неё не говорит ничего.
+  assert.equal(volumeModelKeys(placeOf(built, socket.markId).model), 0, "у розетки клавиш нет");
+  assert.equal(volumeModelKeys(null), 0);
+  assert.equal(volumeModelKeys({ parts: [] }), 0);
 });
 
 test("рамка выбранной клавиши идёт по ней, а не по лицу вещи", () => {

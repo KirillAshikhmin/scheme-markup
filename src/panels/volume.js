@@ -95,6 +95,7 @@ import {
   volumeMarkAnchor,
   volumeMarkPlace,
   volumeMarkerFaces,
+  volumeModelKeys,
   volumeMoveTo,
   volumePickAt,
   volumeSightAt,
@@ -1486,6 +1487,16 @@ function createVolume({ api, hosts }) {
     return volumeChannelAt(shown, at.x, at.y);
   }
 
+  /**
+   * Сколько клавиш нарисовано у метки: спрашивается у её же тела
+   * (`volumeModelKeys`), второго счёта клавиш в сборке нет. Одна клавиша —
+   * особый случай отбора связей (таск 191, D50).
+   */
+  function keysOf(markId) {
+    const place = markId ? volumeMarkPlace(scene, markId) : null;
+    return volumeModelKeys(place && place.model);
+  }
+
   function pickChannel(found) {
     const was = channelPick;
     const same = was && found && was.markId === found.markId && was.channel === found.channel;
@@ -1499,9 +1510,24 @@ function createVolume({ api, hosts }) {
     // а нагрузки на ней нет.
     const state = getState();
     const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    const links = scheme ? volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick) : null;
+    const all = scheme ? canvasFrameLinks(state, null, scheme) : null;
+    const links = all ? volumeChannelLinks(all, channelPick, keysOf(found.markId)) : null;
     const empty = !links || links.lines.length === 0;
-    notify(text(empty ? "volume.channelEmpty" : "volume.channelPicked", { channel: found.channel }), "info");
+    if (!empty) {
+      notify(text("volume.channelPicked", { channel: found.channel }), "info");
+      return;
+    }
+    // Клавиша пуста — но пуста ли она **по данным**? У многоклавишной метки
+    // связь без номера канала не принадлежит ни одной клавише (правило таска
+    // 177: какая из четырёх — в данных не записано), и молчать об этом нельзя:
+    // человек видит в «Чем управляет» нагрузки, а на кадре — пустую клавишу, и
+    // читает это как поломку. Поэтому такой случай говорит о себе и зовёт туда,
+    // где это чинится — проставить канал у связи.
+    const mute = ((all && all.lines) || []).filter(
+      (line) => line.fromId === found.markId && (line.channel === null || line.channel === undefined),
+    ).length;
+    const where = { channel: found.channel, count: mute };
+    notify(text(mute > 0 ? "volume.channelUnnumbered" : "volume.channelEmpty", where), "info");
   }
 
   // Рамка выделенного и стрелки связей. Правила, какие связи показывать, —
@@ -1523,8 +1549,13 @@ function createVolume({ api, hosts }) {
     const scheme = findScheme(state.project, schemeId);
     if (!scheme) return;
     // Правила, какие связи бывают, — плановые целиком; канал только сужает их
-    // до одной клавиши (таск 177, G274).
-    const links = volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick);
+    // до одной клавиши (таск 177, G274), а у одноклавишной метки берёт себе и
+    // связи без номера (таск 191, D50).
+    const links = volumeChannelLinks(
+      canvasFrameLinks(state, null, scheme),
+      channelPick,
+      channelPick ? keysOf(channelPick.markId) : 0,
+    );
     volumeLinkLines(links, (id) => volumeMarkAnchor(scene, id), overlay);
   }
 
@@ -1546,11 +1577,7 @@ function createVolume({ api, hosts }) {
   function channelKeys() {
     if (channelPick) return true;
     if (scene.empty) return false;
-    for (const id of selectedIds()) {
-      const place = volumeMarkPlace(scene, id);
-      const parts = (place && place.model && place.model.parts) || [];
-      if (parts.some((part) => part.channel > 1)) return true;
-    }
+    for (const id of selectedIds()) if (keysOf(id) > 1) return true;
     return false;
   }
 
