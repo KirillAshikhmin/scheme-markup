@@ -38,6 +38,7 @@ import {
   createVolumeParams,
   volumeParamsArrive,
   volumeParamsClock,
+  volumeParamsLine,
   volumeParamsRead,
   volumeParamsWatch,
 } from "./volumeParams.js";
@@ -83,6 +84,8 @@ import {
   volumeChannelLinks,
   volumeDoorAt,
   volumeClockStamp,
+  volumeClockText,
+  volumeDateShort,
   volumeDayDateOf,
   volumeDayTimes,
   volumeDraw,
@@ -1033,6 +1036,21 @@ function createVolume({ api, hosts }) {
   // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
   // (`volume.css`), и читать его нечем — `aria-hidden`.
   const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
+  // Дата и час симуляции — полосой в правом нижнем углу поля (таск 191, G300).
+  //
+  // Слова заказчика: «Справа снизу в Объёме пиши текущие дату и время
+  // симуляции». До этого они жили только в окне параметров: закрыл окно — и при
+  // ускорении в 480 раз непонятно, какой час на объекте, а по кадру час
+  // угадывается разве что до «день или ночь».
+  //
+  // Правый угол, а не левый: слева внизу стоят миникарта (G212) и столбик
+  // стойки (таск 163), и они там по прямому слову заказчика.
+  //
+  // Строку пишет **тот же снимок часа**, который красит небо (`refreshHour`), и
+  // другого времени у поля нет: заведи полоса свои часы — они разошлись бы с
+  // небом на первой же правке ускорения. Отсюда и частота: раз в секунду, а при
+  // остановленном времени таймера нет вовсе (G282) — полоса стоит и не мигает.
+  const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } });
   // Подсказка по управлению — плашка **слева** со знаком «?» (G228): правило
   // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
   // стоит сводка, а ещё правее — кнопка полноэкранного показа.
@@ -1065,6 +1083,7 @@ function createVolume({ api, hosts }) {
     viewButton,
     paramsButton.node,
     aimNode,
+    clockNode,
     hintPlate.node,
     askBox,
   ]);
@@ -1316,7 +1335,28 @@ function createVolume({ api, hosts }) {
       kind: volumeParamsRead().kind,
     });
     refreshShadow();
+    syncClockLine(stamp, at);
     return hour;
+  }
+
+  /**
+   * Что написано в полосе часов (таск 191, G300).
+   *
+   * Снимок приходит готовым — тот самый, которым покрашено небо: второго счёта
+   * времени у поля нет. Подсказка на полосе — та же строка, что в окне
+   * параметров (`volumeParamsLine`): она отвечает на вопрос «почему не идёт»,
+   * когда время остановлено, и на «как быстро идёт» при ускорении.
+   */
+  function syncClockLine(stamp, nowMs) {
+    clockNode.hidden = scene.empty;
+    if (scene.empty) return;
+    clockNode.textContent = text("volume.clockCorner", {
+      date: volumeDateShort(stamp.day),
+      time: volumeClockText(stamp.minutes),
+    });
+    const line = volumeParamsLine(volumeParamsClock(nowMs), stamp.minutes, hour ? hour.phase : null);
+    clockNode.title = line;
+    clockNode.setAttribute("aria-label", line);
   }
 
   /**
@@ -2812,6 +2852,11 @@ function createVolume({ api, hosts }) {
     // площадки.
     const noWalk = !touching || view !== "person" || scene.empty;
     padNode.hidden = noWalk;
+    // Полоса часов стоит в том же углу, что площадка ходьбы, и уступает ей:
+    // площадкой ходят не глядя, и накрывать её строкой нельзя. Подъём — ровно
+    // на площадку, мерой самой площадки (`volume.css`), без своих чисел.
+    clockNode.classList.toggle("volume__clock--overPad", !noWalk);
+    clockNode.hidden = scene.empty;
     if (padNode.hidden) padEnd(null);
     stanceBox.hidden = noWalk;
     if (stanceBox.hidden) crouchRelease(null);

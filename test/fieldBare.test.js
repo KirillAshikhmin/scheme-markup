@@ -184,6 +184,48 @@ test("подсказка уступает угол кнопке и встаёт 
   );
 });
 
+// ——— полоса часов в правом нижнем углу (таск 191, G300) ———————————————————
+//
+// «Справа снизу в Объёме пиши текущие дату и время симуляции». Разойтись здесь
+// есть чему молча: полоса стоит в том же углу, что площадка ходьбы, и если
+// подъём над ней посчитать своим числом, то правка размера площадки положит
+// строку под большой палец.
+
+test("полоса часов стоит в правом нижнем углу той же мерой, что кнопки", () => {
+  const clock = ruleBody(VOLUME_CSS, ".volume__clock");
+  assert.equal(prop(clock, "right"), "var(--canvas-corner-edge)", "полоса отступает от правого края не мерой угла");
+  assert.equal(prop(clock, "bottom"), "var(--canvas-corner-edge)", "и от нижнего — тоже");
+  // Клики полоса не берёт: под ней поле, по которому ходят и целятся.
+  assert.equal(prop(clock, "pointer-events"), "none");
+});
+
+test("полоса часов поднимается ровно на площадку ходьбы — её же мерой", () => {
+  const stage = ruleBody(VOLUME_CSS, ".volume__stage");
+  const pad = ruleBody(VOLUME_CSS, ".volume__pad");
+  // Мера площадки объявлена один раз, и сама площадка берёт её оттуда же.
+  const size = prop(stage, "--volume-pad-size");
+  const edge = prop(stage, "--volume-pad-edge");
+  assert.equal(prop(pad, "width"), "var(--volume-pad-size)");
+  assert.equal(prop(pad, "height"), "var(--volume-pad-size)");
+  assert.equal(prop(pad, "right"), "var(--volume-pad-edge)");
+  assert.equal(prop(pad, "bottom"), "var(--volume-pad-edge)");
+  // Подъём — площадка целиком плюс общий промежуток угла, и ни одного своего
+  // числа: в выражении только имена мер.
+  const lift = prop(ruleBody(VOLUME_CSS, ".volume__clock--overPad"), "bottom");
+  for (const name of ["--volume-pad-size", "--volume-pad-edge", "--canvas-corner-gap"]) {
+    assert.ok(lift.includes("var(" + name + ")"), "в подъёме нет меры " + name + ": " + lift);
+  }
+  const filled = lift
+    .replace(/var\(--volume-pad-size\)/g, size.replace("px", ""))
+    .replace(/var\(--volume-pad-edge\)/g, edge.replace("px", ""))
+    .replace(/var\(--canvas-corner-gap\)/g, String(CORNER.gap))
+    .replace(/calc/g, "")
+    .replace(/px/g, "");
+  assert.match(filled, /^[\d\s+*().]+$/, "в подъёме осталось чужое имя: " + lift);
+  const up = Function("return " + filled)();
+  assert.ok(up >= px(size) + px(edge), "полоса поднялась не выше площадки: " + up);
+});
+
 // ——— полный экран «Объёма»: что уходит и что остаётся (G246) ———————————————
 
 const BARE_HIDDEN = APP_CSS.slice(

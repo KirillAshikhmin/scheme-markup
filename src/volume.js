@@ -5744,6 +5744,25 @@ export function volumeDateText(dayNumber) {
   );
 }
 
+/**
+ * **Дата для человека: «20.10.2026»** (таск 191, G300).
+ *
+ * Строка часов в углу поля читается боковым зрением, пока человек ходит по
+ * комнатам, — ей нужен привычный порядок «день, месяц, год», а не ISO. ISO
+ * остаётся у поля ввода (`volumeDateText`): его просит сам браузер, и смешивать
+ * эти две строки нельзя — одна для машины, другая для глаза.
+ */
+export function volumeDateShort(dayNumber) {
+  const at = volumeDayDateOf(dayNumber);
+  return (
+    String(at.getDate()).padStart(2, "0") +
+    "." +
+    String(at.getMonth() + 1).padStart(2, "0") +
+    "." +
+    String(at.getFullYear()).padStart(4, "0")
+  );
+}
+
 /** «2026-10-20» → номер суток. `null` — не дата. */
 export function volumeDateParse(text) {
   const match = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$/.exec(String(text || ""));

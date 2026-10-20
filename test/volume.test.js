@@ -177,6 +177,7 @@ import {
   volumeClockText,
   volumeDateParse,
   volumeDayMinutesOf,
+  volumeDateShort,
   volumeDateText,
   volumeDayDateOf,
   volumeDayNumberOf,
@@ -1770,6 +1771,29 @@ test("дата — номер суток: читается, пишется и н
   const march = volumeDayNumberOf(new Date(2026, 2, 29, 3, 30));
   assert.equal(volumeDateText(march), "2026-03-29");
   assert.equal(volumeDayDateOf(march).getDate(), 29);
+});
+
+// ——— полоса часов в углу поля (таск 191, G300) ————————————————————————————
+//
+// «Справа снизу в Объёме пиши текущие дату и время симуляции». Строку собирают
+// две чистые двери — дата по-человечески и час, — а место полосы живёт в
+// стилях (`test/fieldBare.test.js`).
+
+test("дата в полосе часов читается глазом, а ISO остаётся полю ввода", () => {
+  const day = volumeDayNumberOf(new Date(2026, 9, 20, 23, 59));
+  assert.equal(volumeDateShort(day), "20.10.2026", "в углу поля дата по-человечески");
+  assert.equal(volumeDateText(day), "2026-10-20", "а у поля ввода — та, которую просит браузер");
+  // Ноль впереди стоит у обоих — иначе строка прыгала бы в ширине на каждом
+  // переходе через десятое число.
+  assert.equal(volumeDateShort(volumeDateParse("2026-01-01")), "01.01.2026");
+  assert.equal(volumeDateShort(volumeDateParse("2026-12-31")), "31.12.2026");
+  // Год целиком: человек вправе поставить другой, и «20.10.26» читалось бы как
+  // день месяца. Проверено на годе целиком — сдвига на сутки нет нигде.
+  for (let shift = 0; shift < 365; shift += 1) {
+    const text = volumeDateShort(day + shift);
+    const back = volumeDateParse(text.slice(6) + "-" + text.slice(3, 5) + "-" + text.slice(0, 2));
+    assert.equal(back, day + shift, "сутки " + shift);
+  }
 });
 
 test("контрол с часами: строка и разбор", () => {
