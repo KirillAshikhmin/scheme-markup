@@ -34,10 +34,13 @@ import {
   planScaleOf,
   planSizeMeters,
   replaceSchemeImage,
+  schemeAnchorCandidates,
+  schemeAnchorOf,
   schemeFloorOf,
   schemesInOrder,
   setPlanOrigin,
   setPlanScale,
+  setSchemeAnchor,
   setSchemeFloor,
   updateMark,
   updateOutline,
@@ -187,12 +190,19 @@ export function applyPlanEdit(project, schemeId, { imageId, width, height, trans
  * подсказке — его читают, когда хотят знать, а не когда ищут, за что нажать.
  */
 /**
- * Строка под именем схемы: этаж и размер плана (таск 170, G254).
+ * Строка под именем схемы: этаж, точка привязки и размер плана (таск 170,
+ * G254; привязка — таск 205, G309).
  *
  * Этаж стоит **первым** нарочно: в узкой колонке строка ужимается многоточием,
  * и обрезать надо размер плана (он же в подсказке и в окне масштаба), а не
  * номер этажа — ради него эта строка и выросла. Этажа нет — нет и слова о нём:
  * объект, которому этажей не задавали, выглядит ровно как вчера (G68).
+ *
+ * Привязка встаёт **между** ними и ровно тогда, когда задана. Слово в строке —
+ * единственное место, где видно сразу по всем схемам, у какого этажа точка
+ * есть, а у какого нет: окно свойств отвечает про одну схему, а разъезжается
+ * дом из-за той, про которую забыли. Самих координат здесь нет — они в окне и
+ * знаком на чертеже; в строке важно «есть или нет».
  */
 export function schemesRowMeta(project, schemeId) {
   const scheme = findScheme(project, schemeId);
@@ -201,7 +211,24 @@ export function schemesRowMeta(project, schemeId) {
     ? text("schemes.size", { width: scheme.width, height: scheme.height })
     : strings.schemes.noImage;
   const floor = schemeFloorOf(project, schemeId);
-  return floor === null ? plan : text("schemes.metaFloor", { floor, plan });
+  const anchored = Boolean(schemeAnchorOf(project, schemeId));
+  if (floor === null) return anchored ? text("schemes.metaAnchor", { plan }) : plan;
+  return text(anchored ? "schemes.metaFloorAnchor" : "schemes.metaFloor", { floor, plan });
+}
+
+/**
+ * Что сказано про точку привязки в окне свойств схемы (таск 205, G309).
+ *
+ * Чистая функция: решение о словах принимается здесь и проверяется без
+ * браузера — тем же приёмом, что `schemesScaleView` у масштаба.
+ *
+ * Без привязки строка **зовёт и объясняет**, а не сообщает «не задана»: этаж
+ * без точки в объёме встанет по началу координат чертежа, и человек должен
+ * узнать об этом здесь, а не гадая, почему дом сложился из кусков вразнобой.
+ */
+export function schemesAnchorView(anchor) {
+  if (!anchor) return { set: false, label: strings.schemes.anchorNone };
+  return { set: true, label: text("schemes.anchorSet", { x: anchor.x, y: anchor.y }) };
 }
 
 export function schemesScaleView(project, schemeId, name) {
@@ -1255,7 +1282,8 @@ function mountSchemesPanel(host, api) {
   }
 
   /**
-   * Свойства схемы: имя и этаж (таск 170, требование G254).
+   * Свойства схемы: имя, этаж и точка привязки (таск 170, требование G254;
+   * привязка — таск 205, G309).
    *
    * Слова заказчика: «Этаж этой схемы — вынеси из отдельного параметра вообще в
    * параметры схемы». Параметры схемы живут в этой панели, и правят их окнами —
@@ -1263,11 +1291,18 @@ function mountSchemesPanel(host, api) {
    * Поэтому карандаш, открывавший одно имя, открывает теперь свойства, а в
    * колонке чертежа поля этажа больше нет вовсе.
    *
-   * **Этаж остаётся необязательным** (G68, решение таска 149): пустое поле
-   * удаляет ключ `floor`, а не кладёт в него `null`, — объект, которому этажей
-   * не задавали, упаковывается байт в байт прежним. Проверку числа делает
-   * модель (`setSchemeFloor`), и её отказ остаётся в окне строкой: закрыть окно
-   * и потерять набранное из-за опечатки в этаже человек не должен.
+   * **Точка привязки стоит рядом с этажом** нарочно: это два поля, которые
+   * читает один и тот же объёмный режим, и задают их в одну минуту — завёл
+   * второй этаж, тут же сказал, чем он совмещается с первым. Своего окна
+   * привязке не заводится: вещь, у которой два числа и одна кнопка, окна не
+   * стоит.
+   *
+   * **Этаж и привязка остаются необязательными** (G68, решение таска 149):
+   * пустое поле удаляет ключ, а не кладёт в него `null`, — объект, которому их
+   * не задавали, упаковывается байт в байт прежним. Проверку чисел делает
+   * модель (`setSchemeFloor`, `setSchemeAnchor`), и её отказ остаётся в окне
+   * строкой: закрыть окно и потерять набранное из-за опечатки человек не
+   * должен.
    */
   function editSchemeProps(schemeId) {
     const scheme = findScheme(getState().project, schemeId);
@@ -1287,6 +1322,79 @@ function mountSchemesPanel(host, api) {
     });
     const floor = schemeFloorOf(getState().project, schemeId);
     floorInput.value = floor === null ? "" : String(floor);
+    // ——— точка привязки (таск 205) ———
+    const anchorField = (placeholder) =>
+      uiEl("input", {
+        class: "ui-input",
+        type: "number",
+        placeholder,
+        attrs: { step: "1", inputmode: "numeric" },
+      });
+    const anchorX = anchorField(strings.schemes.anchorX);
+    const anchorY = anchorField(strings.schemes.anchorY);
+    const anchor = schemeAnchorOf(getState().project, schemeId);
+    anchorX.value = anchor ? String(anchor.x) : "";
+    anchorY.value = anchor ? String(anchor.y) : "";
+    const anchorNote = uiEl("p", { class: "modal__hint" });
+    // Что набрано в полях прямо сейчас: половина пары точкой не считается, и
+    // строка честно говорит «не задана» — отказ на половину даёт модель при
+    // сохранении, своей проверки числа здесь нет.
+    function typedAnchor() {
+      const x = anchorX.value.trim();
+      const y = anchorY.value.trim();
+      if (x === "" || y === "") return null;
+      const first = Number(x.replace(",", "."));
+      const second = Number(y.replace(",", "."));
+      if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+      return { x: Math.round(first), y: Math.round(second) };
+    }
+    function showAnchor() {
+      anchorNote.textContent = schemesAnchorView(typedAnchor()).label;
+    }
+    anchorX.addEventListener("input", showAnchor);
+    anchorY.addEventListener("input", showAnchor);
+    // Лестница — дверь к точке, а не второй её источник: кнопка **подставляет**
+    // середину лестницы в поля, а дальше это обычная точка, которую видно,
+    // можно поправить и можно снять. Считать её из лестницы на лету нельзя:
+    // сдвинутая потом лестница молча увезла бы целый этаж.
+    const candidates = schemeAnchorCandidates(getState().project, schemeId);
+    const anchorPick =
+      candidates.length > 1
+        ? uiEl(
+            "select",
+            { class: "ui-input" },
+            candidates.map((item, index) =>
+              uiEl("option", {
+                value: String(index),
+                text: text("schemes.anchorOption", { name: item.name, x: item.atMm.x, y: item.atMm.y }),
+              }),
+            ),
+          )
+        : null;
+    const anchorStairs = uiButton(strings.schemes.anchorFromStairs, {
+      title: candidates.length === 0 ? strings.schemes.anchorNoStairs : strings.schemes.anchorFromStairsTitle,
+      on: {
+        click: () => {
+          const chosen = candidates[anchorPick ? Number(anchorPick.value) : 0];
+          if (!chosen) return;
+          anchorX.value = String(chosen.atMm.x);
+          anchorY.value = String(chosen.atMm.y);
+          showAnchor();
+        },
+      },
+    });
+    if (candidates.length === 0) anchorStairs.disabled = true;
+    const anchorClear = uiButton(strings.schemes.anchorClear, {
+      title: strings.schemes.anchorClearTitle,
+      on: {
+        click: () => {
+          anchorX.value = "";
+          anchorY.value = "";
+          showAnchor();
+        },
+      },
+    });
+    showAnchor();
     const error = uiEl("p", { class: "modal__error" });
     const body = uiEl("div", {}, [
       uiEl("div", { class: "modal__fields" }, [
@@ -1300,6 +1408,21 @@ function mountSchemesPanel(host, api) {
         ]),
       ]),
       uiEl("p", { class: "modal__hint", text: strings.schemes.floorHint }),
+      uiEl("div", { class: "modal__fields" }, [
+        uiEl("label", { class: "modal__field" }, [
+          uiEl("span", { text: strings.schemes.anchor }),
+          uiEl("div", { class: "schemes__anchorPair" }, [anchorX, anchorY]),
+        ]),
+        anchorPick
+          ? uiEl("label", { class: "modal__field" }, [
+              uiEl("span", { text: strings.schemes.anchorPick }),
+              anchorPick,
+            ])
+          : null,
+      ]),
+      uiEl("div", { class: "schemes__anchorRow" }, [anchorStairs, anchorClear]),
+      anchorNote,
+      uiEl("p", { class: "modal__hint", text: strings.schemes.anchorHint }),
       error,
     ]);
     // Enter в поле имени — то же, что «Готово»: окно открывают ради имени чаще
@@ -1317,14 +1440,22 @@ function mountSchemesPanel(host, api) {
         modal.close();
         return;
       }
-      // Этаж проверяется **первым**: мусор в нём не должен оставить схему
-      // переименованной наполовину.
+      // Числа проверяются **первыми**, и этаж первым из них: мусор в них не
+      // должен оставить схему переименованной наполовину.
       let floored;
       try {
         floored = setSchemeFloor(base, schemeId, floorInput.value);
       } catch (failure) {
         error.textContent = failure.message;
         floorInput.focus();
+        return;
+      }
+      let anchored;
+      try {
+        anchored = setSchemeAnchor(floored.project, schemeId, { x: anchorX.value, y: anchorY.value });
+      } catch (failure) {
+        error.textContent = failure.message;
+        (anchorX.value.trim() === "" ? anchorX : anchorY).focus();
         return;
       }
       const name = nameInput.value.trim();
@@ -1335,16 +1466,18 @@ function mountSchemesPanel(host, api) {
       // поставленная линия. Стек истории один на объект, и мимо него ходить
       // нельзя.
       //
-      // Ярлык шага зависит от того, что поправили: у этажа он прежний (человек
-      // читает его в подсказке отмены), у имени свой, а когда поправили оба —
-      // общий: «Готово» нажали один раз, и возвращать половину окна нельзя.
-      const next = renamed ? updateScheme(floored.project, schemeId, { name }).project : floored.project;
-      const label = floored.changed
-        ? renamed
-          ? strings.history.schemeProps
-          : strings.history.schemeFloor
-        : strings.history.renameScheme;
-      if (floored.changed || renamed) canvasCommit(base, next, label, { schemeId });
+      // Ярлык шага зависит от того, что поправили: у каждого поля свой (человек
+      // читает его в подсказке отмены), а когда поправили не одно — общий:
+      // «Готово» нажали один раз, и возвращать половину окна нельзя.
+      const next = renamed ? updateScheme(anchored.project, schemeId, { name }).project : anchored.project;
+      const changes = [
+        floored.changed ? strings.history.schemeFloor : null,
+        anchored.changed ? strings.history.schemeAnchor : null,
+        renamed ? strings.history.renameScheme : null,
+      ].filter(Boolean);
+      if (changes.length > 0) {
+        canvasCommit(base, next, changes.length > 1 ? strings.history.schemeProps : changes[0], { schemeId });
+      }
       modal.close();
     }
 
