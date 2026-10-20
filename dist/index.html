@@ -6867,7 +6867,7 @@ const strings = {
     // Сетка (таск 187 — переехала сюда из колонки чертежа вместе с шагом и
     // притяжкой; таск 193 — рисуется **на обоих полях**, и отдельной галки
     // показа у неё больше нет: «Без сетки» стало первым пунктом списка шагов).
-    gridStep: "Сетка, шаг в мм",
+    gridStep: "Сетка, мм",
     gridStepHint:
       "Шаг принадлежит объекту: напарник, открывший файл, чертит по той же сетке. «Без сетки» — это выбор глаз, он остаётся в этом браузере и в объект не пишется.",
     gridOff: "Без сетки",
@@ -71709,11 +71709,18 @@ function createSizesFields(api) {
           render();
           return;
         }
-        try {
-          const next = setGridStep(state.project, choice.stepMm);
-          if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
-        } catch (error) {
-          notify(error.message, "error");
+        // Шаг, которым объект и так живёт, в него не пишется (G68): вернуться
+        // из «Без сетки» к тому же числу — это не правка объекта, и объект,
+        // у которого ключа не было вовсе, его не получает. Живой прогон таска
+        // 193 поймал ровно это: выбор «100» на объекте без ключа дописывал ему
+        // `view.gridStepMm` и менял `updatedAt` ни за что.
+        if (gridStepOf(state.project) !== choice.stepMm) {
+          try {
+            const next = setGridStep(state.project, choice.stepMm);
+            if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
+          } catch (error) {
+            notify(error.message, "error");
+          }
         }
         render();
       },

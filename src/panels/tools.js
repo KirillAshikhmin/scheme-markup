@@ -543,11 +543,18 @@ export function createSizesFields(api) {
           render();
           return;
         }
-        try {
-          const next = setGridStep(state.project, choice.stepMm);
-          if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
-        } catch (error) {
-          notify(error.message, "error");
+        // Шаг, которым объект и так живёт, в него не пишется (G68): вернуться
+        // из «Без сетки» к тому же числу — это не правка объекта, и объект,
+        // у которого ключа не было вовсе, его не получает. Живой прогон таска
+        // 193 поймал ровно это: выбор «100» на объекте без ключа дописывал ему
+        // `view.gridStepMm` и менял `updatedAt` ни за что.
+        if (gridStepOf(state.project) !== choice.stepMm) {
+          try {
+            const next = setGridStep(state.project, choice.stepMm);
+            if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
+          } catch (error) {
+            notify(error.message, "error");
+          }
         }
         render();
       },
