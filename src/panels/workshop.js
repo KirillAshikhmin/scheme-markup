@@ -3666,9 +3666,30 @@ function createWorkshop({ api, hosts }) {
       // Через ту же дверь, что кнопка «Вписать»: у занятия «Масштаб» габарит
       // свой, и первый кадр обязан вписать картинку, а не миллиметры.
       fit();
+      // Первый вход в чертёж собирает поверхность **здесь**, уже после смены
+      // режима, — значит просьбу объёма (G276) надо забрать и на этом пути:
+      // в подписке её забирать некому, поверхности в тот миг ещё не было.
+      wantedPlace();
       return;
     }
     sync();
+  }
+
+  /**
+   * Встать серединой туда, куда просил объём (G276, таск 178). Масштаб не
+   * трогается: переносится место, а не приближение.
+   *
+   * Применённое место тут же объявляется своим (`screenPlaceDrawing`): объём
+   * спросит его **раньше**, чем мастерская успеет нарисовать первый кадр, —
+   * обратный переход бывает и через секунду.
+   */
+  function wantedPlace() {
+    const want = screenPlaceTake(schemeId);
+    if (!want) return false;
+    const box = viewport();
+    view = { ...view, offsetX: box.width / 2 - want.x * view.zoom, offsetY: box.height / 2 - want.y * view.zoom };
+    screenPlaceDrawing(schemeId, want);
+    return true;
   }
 
   function paint() {
@@ -4484,13 +4505,8 @@ function createWorkshop({ api, hosts }) {
       resize();
       // Объём мог оставить просьбу встать серединой на человека (G276, таск
       // 178): переключение режима переносит взгляд, а не бросает человека там,
-      // где он был в прошлый раз. Масштаб при этом не трогается — переносится
-      // место, а не приближение.
-      const want = screenPlaceTake(schemeId);
-      if (want) {
-        const box = viewport();
-        view = { ...view, offsetX: box.width / 2 - want.x * view.zoom, offsetY: box.height / 2 - want.y * view.zoom };
-      }
+      // где он был в прошлый раз.
+      wantedPlace();
       sync();
       if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
     }

@@ -1145,10 +1145,11 @@ function createVolume({ api, hosts }) {
    */
   function placeArrive(state) {
     if (scene.empty) return;
+    // Пришли из чертежа — спрашиваем его; из схемы (или чертёж за весь сеанс
+    // не открывали и сказать ему нечего) — считаем середину плана.
     const want =
-      volumeCameFrom() === "drawing"
-        ? screenPlaceOfDrawing(schemeId)
-        : volumePlanCentre(state.project, schemeId, viewport(), state.view);
+      (volumeCameFrom() === "drawing" ? screenPlaceOfDrawing(schemeId) : null) ||
+      volumePlanCentre(state.project, schemeId, viewport(), state.view);
     if (!want) return;
     const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
     person.x = moved.x;
@@ -1174,7 +1175,12 @@ function createVolume({ api, hosts }) {
     const at = { x: person.x, y: person.y };
     // Мастерская свой вид держит при себе — ей оставляют просьбу.
     screenPlaceWant(schemeId, at);
-    const next = volumePlanViewAt(state.project, schemeId, viewport(), state.view, at);
+    const box = viewport();
+    // Поле уже погасло, но не схлопнулось (гаснет оно `visibility`, а не
+    // `display`) — и всё же вырожденный размер лучше проверить: вид плана,
+    // посчитанный по полю в один пиксель, увёл бы схему в угол.
+    if (!(box.width > 50) || !(box.height > 50)) return;
+    const next = volumePlanViewAt(state.project, schemeId, box, state.view, at);
     if (next) setState({ view: next });
   }
 
