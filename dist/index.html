@@ -3182,6 +3182,31 @@
   min-width: 0;
 }
 
+/* ——— точка привязки схемы (таск 205) ——————————————————————————————————
+   Две координаты — одно поле по смыслу: половина пары точкой не считается, и
+   стоять они обязаны рядом, под одной подписью. Поэтому пара делит остаток
+   строки пополам и ведёт себя в раскладке как одно поле. */
+.modal__field > .schemes__anchorPair {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.schemes__anchorPair > .ui-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Кнопки под парой: «По лестнице» и «Снять». Строкой, а не в подвале окна, —
+   они правят поля, а не закрывают окно, и путать их с «Готово» нельзя. */
+.schemes__anchorRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* Столбец разделов окна свойств. Не `.export__body`, у которой своя нижняя
    мера ширины в 520 точек: окно свойств открывают и из выгрузки на узком
    экране, и там эта мера давала окну боковую прокрутку — поймано живым
@@ -7122,6 +7147,7 @@ const strings = {
     wallHeight: "высота стен схемы",
     roomWallHeight: "высота стен помещения",
     schemeFloor: "этаж схемы",
+    schemeAnchor: "точка привязки схемы",
     // Правки схемы — такие же шаги истории, как правки помещения (таск 172):
     // стек один на объект, и мимо него Ctrl+Z отменял предыдущую правку —
     // перенос метки, поставленную линию. Удаление схемы шага не имеет нарочно:
@@ -7243,6 +7269,10 @@ const strings = {
     // нулевой; половины этажа не бывает.
     schemeFloorInvalid: "Этаж — целое число: «1», «2», «0» или «-1» для подвала",
     schemeFloorRange: "Этаж — число от {min} до {max}",
+    // Точка привязки схемы (таск 205). Половина точки — отказ: дополнить её
+    // нулём значило бы молча привязать этаж к началу координат.
+    schemeAnchorInvalid: "Точка привязки — две координаты в миллиметрах чертежа: X и Y",
+    schemeAnchorHalf: "Точка привязки — обе координаты: заполните X и Y или оставьте оба поля пустыми",
     // Координаты объекта (таск 188). Главный вид — пара из карты; отказ
     // перечисляет то, что принимается, иначе человек не угадает, чем не
     // угодила его строка.
@@ -7356,6 +7386,11 @@ const strings = {
     markInOpening: "Метка {label} стоит в проёме ({kind})",
     drawingNoScale: "Чертёж схемы «{name}» не лёг на план: у плана не задан масштаб",
     drawingNotPlaced: "Чертёж схемы «{name}» не лёг на план: он к плану не привязан — привяжите его в окне «Чертёж»",
+    // Привязка задана не у всех этажей (таск 205). Говорится только тогда,
+    // когда её начали ставить и бросили: без привязки вовсе ничего не
+    // ломается — этажи совмещаются по началу координат, как раньше.
+    schemeAnchorMissing:
+      "У схемы «{name}» задан этаж, но нет точки привязки: в объёме она встанет по началу координат чертежа, а не под соседними этажами",
     typeWithoutCategory: "{code} — у типа нет категории из справочника",
     typeKindMixed: "У типа {code} есть метки другого вида",
     // Повтор знака и похожий цвет категорий: не поломка, а то, что стоит знать
@@ -7435,6 +7470,7 @@ const strings = {
       markInOpening: "Меток в проёмах: {count}",
       drawingNoScale: "Схем с чертежом без масштаба: {count}",
       drawingNotPlaced: "Схем с непривязанным чертежом: {count}",
+      schemeAnchorMissing: "Этажей без точки привязки: {count}",
       typeWithoutCategory: "Типов без категории: {count}",
       typeKindMixed: "Типов с метками другого вида: {count}",
       sharedShape: "Знаков, которые носят несколько типов: {count}",
@@ -7675,6 +7711,32 @@ const strings = {
     // колонке строка ужимается многоточием, и обрезать надо размер, а не номер
     // этажа.
     metaFloor: "этаж {floor} · {plan}",
+    // Точка привязки в той же строке — после этажа, перед размером плана
+    // (таск 205, G309). Порядок стоит целиком в словаре, а не складывается
+    // кодом: обрезается многоточием всё равно хвост, и решать, что в хвосте,
+    // должен тот, кто читает строку глазами.
+    metaAnchor: "привязка · {plan}",
+    metaFloorAnchor: "этаж {floor} · привязка · {plan}",
+    // Точка привязки схемы (таск 205, G309). Слова заказчика: «надо
+    // синхронизировать схемы для наложения одной на другую. Можно точку
+    // привязки указать например. Кстати лестница как раз таки может стать
+    // такой».
+    anchor: "Точка привязки",
+    anchorX: "X, мм",
+    anchorY: "Y, мм",
+    anchorSet: "Привязка: {x}, {y} мм",
+    anchorNone: "Привязка не задана — в объёме этажи совмещаются по началу координат чертежа",
+    anchorHint:
+      "Точка привязки — место, которое на планах всех этажей одно и то же: по ней объёмный режим ставит этажи друг над другом. " +
+      "Проще всего взять лестницу: на нижнем этаже лестница, на верхнем над ней выход с лестницы — кнопка подставит её середину. " +
+      "Пусто — привязки нет, и этажи совмещаются по началу координат чертежа, как раньше. Миллиметры чертежа, те же, что у стен.",
+    anchorFromStairs: "По лестнице",
+    anchorFromStairsTitle: "Подставить середину лестницы (или выхода с лестницы) с чертежа этой схемы",
+    anchorNoStairs: "На чертеже этой схемы нет ни лестницы, ни выхода с лестницы — задайте точку числами",
+    anchorPick: "Какую взять",
+    anchorOption: "{name} · {x}, {y} мм",
+    anchorClear: "Снять",
+    anchorClearTitle: "Убрать точку привязки: этажи будут совмещаться по началу координат чертежа",
   },
   image: {
     editTitle: "План схемы",
@@ -11186,6 +11248,185 @@ function setSchemeFloor(project, schemeId, value) {
     return { ...item, floor };
   });
   return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), changed: true };
+}
+
+// ——— точка привязки схемы ————————————————————————————————————————————
+//
+// Таск 205 (G309). Слова заказчика: «надо синхронизировать схемы для наложения
+// одной на другую. Можно точку привязки указать например. Кстати лестница как
+// раз таки может стать такой. Указываем в 1 месте лестницу и над ней выход с
+// лестницы».
+//
+// **Что это за точка.** Место, которое на всех планах дома одно и то же. У
+// каждой схемы свои оси: план первого этажа чертили от одного угла, план
+// второго — от другого, и ноль у них в разных местах дома. Сложи их по нулям —
+// этажи разъедутся на метры. Привязка отвечает на единственный вопрос: «где в
+// этой схеме та точка, которая у всех этажей общая».
+//
+// **Миллиметры чертежа, а не доли плана** — хотя у меток ровно наоборот
+// (ADR 002). Доводы:
+//
+//   — совмещают **чертежи**, и считается это вычитанием из координат стен:
+//     доля потребовала бы калибровки и привязки к подложке на каждый чих, а
+//     без подложки её вообще нет;
+//   — миллиметры к картинке не привязаны (ADR 008): поворот, обрезка и замена
+//     подложки чертежа не трогают, и привязку, выраженную в них, тоже —
+//     пересчитывать нечего;
+//   — лестница, из которой точку и берут, стоит на чертеже в миллиметрах.
+//
+// **Поле необязательное** (G68): у схемы без привязки нет и ключа `anchor`, и
+// этажи совмещаются по началу координат чертежа — ровно как до таска. Пустое
+// значение ключ **удаляет**, по образцу `floor` и `wallHeightMm`.
+//
+// Точку **ставит человек**, а лестница — дверь, через которую она ставится в
+// один щелчок (`schemeAnchorCandidates`). Считать её из лестницы на лету нельзя
+// по двум причинам сразу: лестниц на плане бывает несколько (и тогда это
+// догадка, а догадку по G68 показывают, а не применяют), а сдвинутая лестница
+// молча увезла бы целый этаж — человек не связал бы причину со следствием.
+
+/**
+ * Вещи чертежа, из которых берётся точка привязки, — лестница и парный ей
+ * выход с лестницы (таск 204).
+ *
+ * Порядок — порядок показа в окне. `stairsExit` в каталоге появляется таском
+ * 204; до него ни у одной вещи такого ключа нет, список тихо пуст на эту
+ * половину, а с приходом ключа начинает работать сам. **Слово здесь обязано
+ * совпадать с ключом каталога** — другого места, где выход с лестницы знают по
+ * ключу, у привязки нет.
+ */
+const SCHEME_ANCHOR_OBJECT_KEYS = ["stairs", "stairsExit"];
+
+/** Точка привязки схемы в миллиметрах чертежа или `null`, если её не задавали. */
+function schemeAnchorOf(project, schemeId) {
+  const scheme = findScheme(project, schemeId);
+  const raw = scheme && scheme.anchor;
+  if (!raw || typeof raw !== "object") return null;
+  const x = Number(raw.x);
+  const y = Number(raw.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+// Пусто — «не задано». Половина — ошибка: одна координата точки не задаёт, а
+// молча дополнить её нулём значило бы привязать этаж к началу координат.
+function schemeAnchorValue(value) {
+  const blank = (item) =>
+    item === null || item === undefined || (typeof item === "string" && item.trim() === "");
+  if (blank(value)) return null;
+  if (typeof value !== "object") throw modelError("schemeAnchorInvalid");
+  if (blank(value.x) && blank(value.y)) return null;
+  if (blank(value.x) || blank(value.y)) throw modelError("schemeAnchorHalf");
+  return { x: drawingMmValue(value.x), y: drawingMmValue(value.y) };
+}
+
+/**
+ * Задать или снять точку привязки. `changed: false` — ничего не поменялось, и
+ * шага истории на это не нужно (тот же договор, что у `setSchemeFloor`).
+ */
+function setSchemeAnchor(project, schemeId, value) {
+  const scheme = requireScheme(project, schemeId);
+  const anchor = schemeAnchorValue(value);
+  const had = schemeAnchorOf(project, schemeId);
+  if (anchor === null && !Object.prototype.hasOwnProperty.call(scheme, "anchor")) {
+    return { project, scheme, changed: false };
+  }
+  if (anchor && had && had.x === anchor.x && had.y === anchor.y) {
+    return { project, scheme, changed: false };
+  }
+  const schemes = project.schemes.map((item) => {
+    if (item.id !== schemeId) return item;
+    if (anchor === null) {
+      const { anchor: dropped, ...rest } = item;
+      return rest;
+    }
+    return { ...item, anchor };
+  });
+  return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), changed: true };
+}
+
+/**
+ * **Где начало координат этой схемы в общем плане дома** — единственный шов
+ * совмещения этажей (таск 205, G309; стопку этажей складывает таск 202).
+ *
+ * Общий план — те же миллиметры, в которых начерчена каждая схема, только ноль
+ * у них один на дом: он поставлен в точку привязки. Значит начало координат
+ * схемы, у которой привязка стоит в `a`, лежит в общем плане в `−a`, а разница
+ * начал двух схем есть разница их привязок со знаком минус. Точка `p` схемы
+ * едет в общий план как `p − a`, и привязки всех этажей сходятся в одну точку —
+ * ровно то, о чём просил заказчик.
+ *
+ * **Нет привязки — ноль**, то есть схема стоит началом координат, как стояла
+ * до таска. Это и есть миграция старых объектов (G68): у них привязки нет ни у
+ * одной схемы, разницы нулевые, и стопка складывается по нулям — так же, как
+ * складывалась бы без этого таска вовсе. Смешанный случай определён тем же
+ * правилом: у кого привязка есть — встаёт по ней, у кого нет — по своему нулю,
+ * и половинчатую привязку называет вслух `validate` (`schemeAnchorMissing`).
+ *
+ * **Поворота здесь нет, и это решение.** Одна точка даёт только сдвиг; угол
+ * между осями двух схем она не выражает и выразить не может — для него нужна
+ * вторая точка или само число градусов. Поворот не делается потому, что
+ * механизм для него уже есть, и не здесь: кривой скан выпрямляют четвертями
+ * оборота у самой подложки (`imagePrep`), а `scheme.origin.turn` поворачивает
+ * вместе с ней и чертёж. Инженер выпрямляет план **до** того, как обводить по
+ * нему стены, — иначе у него и стены пойдут вкось, и это он увидит сразу, без
+ * всяких этажей. Произвольный угол между двумя этажами одного дома означал бы,
+ * что один из планов обведён вкось: второй угол привязки такую ошибку не
+ * исправил бы, а спрятал. Если поворот понадобится — он придёт **вторым
+ * необязательным ключом** рядом с `x` и `y` (привязка хранится объектом
+ * нарочно), и ни формат, ни этот шов менять не придётся.
+ *
+ * **Масштаб сводить не надо, и это проверено.** Чертёж у всех схем в целых
+ * миллиметрах (ADR 008), своего масштаба у него нет вовсе. Калибровка
+ * (px/метр) принадлежит **подложке** и живёт у каждой схемы своя, но в общий
+ * план она не попадает: метки переводятся в те же миллиметры мостом
+ * `planFractionToMm` ещё до того, как их увидит объём.
+ */
+function schemeAnchorOriginMm(project, schemeId) {
+  const anchor = schemeAnchorOf(project, schemeId);
+  if (!anchor) return { x: 0, y: 0 };
+  return { x: -anchor.x, y: -anchor.y };
+}
+
+/**
+ * Откуда предложить точку: лестницы и выходы с лестницы, стоящие на чертеже
+ * этой схемы. Порядок — `SCHEME_ANCHOR_OBJECT_KEYS`, внутри ключа — порядок
+ * вещей на схеме.
+ *
+ * Точка вещи — **середина её габарита**, а не `atMm`: у ломаной (лестницу
+ * обводят и контуром) `atMm` нет вовсе, а у прямоугольника середина габарита и
+ * есть `atMm`, так что одно правило покрывает обе породы. Углы спрашиваются у
+ * `schemeObjectCorners` — своей геометрии вещи здесь не считается.
+ *
+ * Прежние вещи попадают сюда наравне с каталожными: ключ им даёт
+ * `schemeObjectKeyOf` по имени вида, и «Лестница на 2 этаж» из объекта,
+ * размеченного до каталога, узнаётся как лестница (G68).
+ */
+function schemeAnchorCandidates(project, schemeId) {
+  const found = [];
+  for (const key of SCHEME_ANCHOR_OBJECT_KEYS) {
+    for (const object of schemeObjectsOnScheme(project, schemeId)) {
+      if (schemeObjectKeyOf(project, object) !== key) continue;
+      const corners = schemeObjectCorners(object);
+      if (corners.length === 0) continue;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const point of corners) {
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+      }
+      found.push({
+        objectId: object.id,
+        key,
+        name: schemeObjectNameOf(project, object),
+        atMm: { x: Math.round((minX + maxX) / 2), y: Math.round((minY + maxY) / 2) },
+      });
+    }
+  }
+  return found;
 }
 
 // Какие картинки объекту нужны: по этому списку хранилище понимает, что в нём
@@ -17704,6 +17945,26 @@ function validate(project) {
       problems.push(problem("drawingNotPlaced", { name: scheme.name }, scheme.id, "warning"));
     } else {
       problems.push(problem("drawingNoScale", { name: scheme.name }, scheme.id, "warning"));
+    }
+  }
+
+  // **Привязка задана не у всех этажей** (таск 205, G309). Находка, а не
+  // поломка: объект цел, а дом в объёме складывается наполовину по привязкам,
+  // наполовину по нулям чертежей — и этаж без точки уезжает в сторону.
+  //
+  // Условие нарочно узкое: говорится об этом только тогда, когда привязку
+  // **начали** ставить и бросили на полпути. Если её нет ни у одного этажа —
+  // ничего не сломано: этажи совмещаются по началу координат, как до таска, и
+  // строка здесь была бы шумом у каждого, у кого в объекте два плана. Слово
+  // про «привязки нет вовсе» говорит окно свойств схемы, где её и задают.
+  const floored = project.schemes.filter((scheme) => {
+    if (schemeFloorOf(project, scheme.id) === null) return false;
+    return wallsOnScheme(project, scheme.id).length > 0 || schemeObjectsOnScheme(project, scheme.id).length > 0;
+  });
+  if (floored.length > 1 && floored.some((scheme) => schemeAnchorOf(project, scheme.id))) {
+    for (const scheme of floored) {
+      if (schemeAnchorOf(project, scheme.id)) continue;
+      problems.push(problem("schemeAnchorMissing", { name: scheme.name }, scheme.id, "warning"));
     }
   }
 
@@ -63349,12 +63610,19 @@ function applyPlanEdit(project, schemeId, { imageId, width, height, transform } 
  * подсказке — его читают, когда хотят знать, а не когда ищут, за что нажать.
  */
 /**
- * Строка под именем схемы: этаж и размер плана (таск 170, G254).
+ * Строка под именем схемы: этаж, точка привязки и размер плана (таск 170,
+ * G254; привязка — таск 205, G309).
  *
  * Этаж стоит **первым** нарочно: в узкой колонке строка ужимается многоточием,
  * и обрезать надо размер плана (он же в подсказке и в окне масштаба), а не
  * номер этажа — ради него эта строка и выросла. Этажа нет — нет и слова о нём:
  * объект, которому этажей не задавали, выглядит ровно как вчера (G68).
+ *
+ * Привязка встаёт **между** ними и ровно тогда, когда задана. Слово в строке —
+ * единственное место, где видно сразу по всем схемам, у какого этажа точка
+ * есть, а у какого нет: окно свойств отвечает про одну схему, а разъезжается
+ * дом из-за той, про которую забыли. Самих координат здесь нет — они в окне и
+ * знаком на чертеже; в строке важно «есть или нет».
  */
 function schemesRowMeta(project, schemeId) {
   const scheme = findScheme(project, schemeId);
@@ -63363,7 +63631,24 @@ function schemesRowMeta(project, schemeId) {
     ? text("schemes.size", { width: scheme.width, height: scheme.height })
     : strings.schemes.noImage;
   const floor = schemeFloorOf(project, schemeId);
-  return floor === null ? plan : text("schemes.metaFloor", { floor, plan });
+  const anchored = Boolean(schemeAnchorOf(project, schemeId));
+  if (floor === null) return anchored ? text("schemes.metaAnchor", { plan }) : plan;
+  return text(anchored ? "schemes.metaFloorAnchor" : "schemes.metaFloor", { floor, plan });
+}
+
+/**
+ * Что сказано про точку привязки в окне свойств схемы (таск 205, G309).
+ *
+ * Чистая функция: решение о словах принимается здесь и проверяется без
+ * браузера — тем же приёмом, что `schemesScaleView` у масштаба.
+ *
+ * Без привязки строка **зовёт и объясняет**, а не сообщает «не задана»: этаж
+ * без точки в объёме встанет по началу координат чертежа, и человек должен
+ * узнать об этом здесь, а не гадая, почему дом сложился из кусков вразнобой.
+ */
+function schemesAnchorView(anchor) {
+  if (!anchor) return { set: false, label: strings.schemes.anchorNone };
+  return { set: true, label: text("schemes.anchorSet", { x: anchor.x, y: anchor.y }) };
 }
 function schemesScaleView(project, schemeId, name) {
   const scale = planScaleOf(project, schemeId);
@@ -64415,7 +64700,8 @@ function mountSchemesPanel(host, api) {
   }
 
   /**
-   * Свойства схемы: имя и этаж (таск 170, требование G254).
+   * Свойства схемы: имя, этаж и точка привязки (таск 170, требование G254;
+   * привязка — таск 205, G309).
    *
    * Слова заказчика: «Этаж этой схемы — вынеси из отдельного параметра вообще в
    * параметры схемы». Параметры схемы живут в этой панели, и правят их окнами —
@@ -64423,11 +64709,18 @@ function mountSchemesPanel(host, api) {
    * Поэтому карандаш, открывавший одно имя, открывает теперь свойства, а в
    * колонке чертежа поля этажа больше нет вовсе.
    *
-   * **Этаж остаётся необязательным** (G68, решение таска 149): пустое поле
-   * удаляет ключ `floor`, а не кладёт в него `null`, — объект, которому этажей
-   * не задавали, упаковывается байт в байт прежним. Проверку числа делает
-   * модель (`setSchemeFloor`), и её отказ остаётся в окне строкой: закрыть окно
-   * и потерять набранное из-за опечатки в этаже человек не должен.
+   * **Точка привязки стоит рядом с этажом** нарочно: это два поля, которые
+   * читает один и тот же объёмный режим, и задают их в одну минуту — завёл
+   * второй этаж, тут же сказал, чем он совмещается с первым. Своего окна
+   * привязке не заводится: вещь, у которой два числа и одна кнопка, окна не
+   * стоит.
+   *
+   * **Этаж и привязка остаются необязательными** (G68, решение таска 149):
+   * пустое поле удаляет ключ, а не кладёт в него `null`, — объект, которому их
+   * не задавали, упаковывается байт в байт прежним. Проверку чисел делает
+   * модель (`setSchemeFloor`, `setSchemeAnchor`), и её отказ остаётся в окне
+   * строкой: закрыть окно и потерять набранное из-за опечатки человек не
+   * должен.
    */
   function editSchemeProps(schemeId) {
     const scheme = findScheme(getState().project, schemeId);
@@ -64447,6 +64740,79 @@ function mountSchemesPanel(host, api) {
     });
     const floor = schemeFloorOf(getState().project, schemeId);
     floorInput.value = floor === null ? "" : String(floor);
+    // ——— точка привязки (таск 205) ———
+    const anchorField = (placeholder) =>
+      uiEl("input", {
+        class: "ui-input",
+        type: "number",
+        placeholder,
+        attrs: { step: "1", inputmode: "numeric" },
+      });
+    const anchorX = anchorField(strings.schemes.anchorX);
+    const anchorY = anchorField(strings.schemes.anchorY);
+    const anchor = schemeAnchorOf(getState().project, schemeId);
+    anchorX.value = anchor ? String(anchor.x) : "";
+    anchorY.value = anchor ? String(anchor.y) : "";
+    const anchorNote = uiEl("p", { class: "modal__hint" });
+    // Что набрано в полях прямо сейчас: половина пары точкой не считается, и
+    // строка честно говорит «не задана» — отказ на половину даёт модель при
+    // сохранении, своей проверки числа здесь нет.
+    function typedAnchor() {
+      const x = anchorX.value.trim();
+      const y = anchorY.value.trim();
+      if (x === "" || y === "") return null;
+      const first = Number(x.replace(",", "."));
+      const second = Number(y.replace(",", "."));
+      if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+      return { x: Math.round(first), y: Math.round(second) };
+    }
+    function showAnchor() {
+      anchorNote.textContent = schemesAnchorView(typedAnchor()).label;
+    }
+    anchorX.addEventListener("input", showAnchor);
+    anchorY.addEventListener("input", showAnchor);
+    // Лестница — дверь к точке, а не второй её источник: кнопка **подставляет**
+    // середину лестницы в поля, а дальше это обычная точка, которую видно,
+    // можно поправить и можно снять. Считать её из лестницы на лету нельзя:
+    // сдвинутая потом лестница молча увезла бы целый этаж.
+    const candidates = schemeAnchorCandidates(getState().project, schemeId);
+    const anchorPick =
+      candidates.length > 1
+        ? uiEl(
+            "select",
+            { class: "ui-input" },
+            candidates.map((item, index) =>
+              uiEl("option", {
+                value: String(index),
+                text: text("schemes.anchorOption", { name: item.name, x: item.atMm.x, y: item.atMm.y }),
+              }),
+            ),
+          )
+        : null;
+    const anchorStairs = uiButton(strings.schemes.anchorFromStairs, {
+      title: candidates.length === 0 ? strings.schemes.anchorNoStairs : strings.schemes.anchorFromStairsTitle,
+      on: {
+        click: () => {
+          const chosen = candidates[anchorPick ? Number(anchorPick.value) : 0];
+          if (!chosen) return;
+          anchorX.value = String(chosen.atMm.x);
+          anchorY.value = String(chosen.atMm.y);
+          showAnchor();
+        },
+      },
+    });
+    if (candidates.length === 0) anchorStairs.disabled = true;
+    const anchorClear = uiButton(strings.schemes.anchorClear, {
+      title: strings.schemes.anchorClearTitle,
+      on: {
+        click: () => {
+          anchorX.value = "";
+          anchorY.value = "";
+          showAnchor();
+        },
+      },
+    });
+    showAnchor();
     const error = uiEl("p", { class: "modal__error" });
     const body = uiEl("div", {}, [
       uiEl("div", { class: "modal__fields" }, [
@@ -64460,6 +64826,21 @@ function mountSchemesPanel(host, api) {
         ]),
       ]),
       uiEl("p", { class: "modal__hint", text: strings.schemes.floorHint }),
+      uiEl("div", { class: "modal__fields" }, [
+        uiEl("label", { class: "modal__field" }, [
+          uiEl("span", { text: strings.schemes.anchor }),
+          uiEl("div", { class: "schemes__anchorPair" }, [anchorX, anchorY]),
+        ]),
+        anchorPick
+          ? uiEl("label", { class: "modal__field" }, [
+              uiEl("span", { text: strings.schemes.anchorPick }),
+              anchorPick,
+            ])
+          : null,
+      ]),
+      uiEl("div", { class: "schemes__anchorRow" }, [anchorStairs, anchorClear]),
+      anchorNote,
+      uiEl("p", { class: "modal__hint", text: strings.schemes.anchorHint }),
       error,
     ]);
     // Enter в поле имени — то же, что «Готово»: окно открывают ради имени чаще
@@ -64477,14 +64858,22 @@ function mountSchemesPanel(host, api) {
         modal.close();
         return;
       }
-      // Этаж проверяется **первым**: мусор в нём не должен оставить схему
-      // переименованной наполовину.
+      // Числа проверяются **первыми**, и этаж первым из них: мусор в них не
+      // должен оставить схему переименованной наполовину.
       let floored;
       try {
         floored = setSchemeFloor(base, schemeId, floorInput.value);
       } catch (failure) {
         error.textContent = failure.message;
         floorInput.focus();
+        return;
+      }
+      let anchored;
+      try {
+        anchored = setSchemeAnchor(floored.project, schemeId, { x: anchorX.value, y: anchorY.value });
+      } catch (failure) {
+        error.textContent = failure.message;
+        (anchorX.value.trim() === "" ? anchorX : anchorY).focus();
         return;
       }
       const name = nameInput.value.trim();
@@ -64495,16 +64884,25 @@ function mountSchemesPanel(host, api) {
       // поставленная линия. Стек истории один на объект, и мимо него ходить
       // нельзя.
       //
-      // Ярлык шага зависит от того, что поправили: у этажа он прежний (человек
-      // читает его в подсказке отмены), у имени свой, а когда поправили оба —
-      // общий: «Готово» нажали один раз, и возвращать половину окна нельзя.
-      const next = renamed ? updateScheme(floored.project, schemeId, { name }).project : floored.project;
-      const label = floored.changed
-        ? renamed
-          ? strings.history.schemeProps
-          : strings.history.schemeFloor
-        : strings.history.renameScheme;
-      if (floored.changed || renamed) canvasCommit(base, next, label, { schemeId });
+      // Ярлык шага зависит от того, что поправили: у каждого поля свой (человек
+      // читает его в подсказке отмены), а когда поправили не одно — общий:
+      // «Готово» нажали один раз, и возвращать половину окна нельзя.
+      //
+      // Этаж сверяется **по значению**, а не по ответу модели: `setSchemeFloor`
+      // отвечает `changed: true` на любую запись, в том числе на ту же цифру, и
+      // пока ярлык был один на окно, это было незаметно. С привязкой стало
+      // видно: снял точку, а в подсказке отмены — «свойства схемы», будто
+      // тронули и этаж. Заодно уходит пустой шаг истории от «Готово», нажатого
+      // без единой правки.
+      const next = renamed ? updateScheme(anchored.project, schemeId, { name }).project : anchored.project;
+      const changes = [
+        schemeFloorOf(next, schemeId) !== floor ? strings.history.schemeFloor : null,
+        anchored.changed ? strings.history.schemeAnchor : null,
+        renamed ? strings.history.renameScheme : null,
+      ].filter(Boolean);
+      if (changes.length > 0) {
+        canvasCommit(base, next, changes.length > 1 ? strings.history.schemeProps : changes[0], { schemeId });
+      }
       modal.close();
     }
 
@@ -66670,6 +67068,10 @@ const WORKSHOP_HANDLE = "#ffffff";
 const WORKSHOP_GRID_LINE = "#d0d7de";
 const WORKSHOP_GRID_MAJOR = "#aeb7c0";
 const WORKSHOP_ORIGIN = "#d1242f";
+// Точка привязки (таск 205) — свой цвет, не красный нуля: два служебных знака
+// одной краской человек принял бы за один и тот же, а стоят они в разных
+// местах и значат разное.
+const WORKSHOP_ANCHOR = "#8250df";
 
 /**
  * Собрать мастерскую чертежа на основном экране (таск 153).
@@ -68710,6 +69112,7 @@ function createWorkshop({ api, hosts }) {
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
     paintDrawing();
+    paintAnchor();
     paintObjectHandles();
     paintDraft();
   }
@@ -68774,6 +69177,40 @@ function createWorkshop({ api, hosts }) {
     ctx.lineTo(at.x + 9, at.y);
     ctx.moveTo(at.x, at.y - 9);
     ctx.lineTo(at.x, at.y + 9);
+    ctx.stroke();
+  }
+
+  /**
+   * Точка привязки схемы (таск 205, G309) — знак геодезиста: кольцо с крестом
+   * через него.
+   *
+   * **Зачем знак вообще.** Привязка двигает в объёме целый этаж, и задаётся она
+   * двумя числами в окне свойств схемы. Числа не показывают, куда точка встала,
+   * — а встала она, например, не в ту лестницу из двух. Поэтому её видно там,
+   * где живут миллиметры: на чертеже, поверх начерченного.
+   *
+   * Поверх, а не под, в отличие от нуля: нуль прячется под стеной нарочно (он
+   * часть системы координат), а привязку ищут глазами — и ищут обычно как раз
+   * под лестницей, то есть поверх вещи.
+   *
+   * На бумагу знак не уходит: он рисуется здесь, а не в `render.drawDrawing`, —
+   * выгрузки, лист ГОСТ и миникарта зовут общий слой и о привязке не знают.
+   * Отметки показа ему не нужны: он есть ровно тогда, когда есть сама точка.
+   */
+  function paintAnchor() {
+    const anchor = schemeAnchorOf(project(), schemeId);
+    if (!anchor) return;
+    const at = screenOf(anchor);
+    ctx.strokeStyle = WORKSHOP_ANCHOR;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, 7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(at.x - 12, at.y);
+    ctx.lineTo(at.x + 12, at.y);
+    ctx.moveTo(at.x, at.y - 12);
+    ctx.lineTo(at.x, at.y + 12);
     ctx.stroke();
   }
 
@@ -70524,6 +70961,9 @@ const WARNING_TARGETS = {
   // кроме неё — задать масштаб или привязать чертёж.
   drawingNoScale: "scheme",
   drawingNotPlaced: "scheme",
+  // Этаж без точки привязки ведёт к своей схеме: точку задают в её свойствах
+  // (таск 205).
+  schemeAnchorMissing: "scheme",
 };
 
 // Ошибки сверху, вопросы о виде снизу: сперва то, что сломано, потом то, что
