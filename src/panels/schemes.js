@@ -1469,9 +1469,16 @@ function mountSchemesPanel(host, api) {
       // Ярлык шага зависит от того, что поправили: у каждого поля свой (человек
       // читает его в подсказке отмены), а когда поправили не одно — общий:
       // «Готово» нажали один раз, и возвращать половину окна нельзя.
+      //
+      // Этаж сверяется **по значению**, а не по ответу модели: `setSchemeFloor`
+      // отвечает `changed: true` на любую запись, в том числе на ту же цифру, и
+      // пока ярлык был один на окно, это было незаметно. С привязкой стало
+      // видно: снял точку, а в подсказке отмены — «свойства схемы», будто
+      // тронули и этаж. Заодно уходит пустой шаг истории от «Готово», нажатого
+      // без единой правки.
       const next = renamed ? updateScheme(anchored.project, schemeId, { name }).project : anchored.project;
       const changes = [
-        floored.changed ? strings.history.schemeFloor : null,
+        schemeFloorOf(next, schemeId) !== floor ? strings.history.schemeFloor : null,
         anchored.changed ? strings.history.schemeAnchor : null,
         renamed ? strings.history.renameScheme : null,
       ].filter(Boolean);

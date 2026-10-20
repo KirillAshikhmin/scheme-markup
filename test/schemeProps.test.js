@@ -382,3 +382,21 @@ test("G68: у объекта прежней сборки привязки нет
     assert.equal(Object.prototype.hasOwnProperty.call(scheme, "anchor"), false, "привязка приписалась старой схеме");
   }
 });
+
+test("знак привязки живёт в мастерской и на бумагу не уходит", () => {
+  // Привязка — служебный знак, а не часть чертежа: её рисует мастерская
+  // (`paintAnchor` рядом с нулём чертежа), а общий слой `render.drawDrawing` о
+  // ней не знает. Поэтому её нет ни в PNG, ни на листе ГОСТ, ни в развёртке,
+  // ни в миникарте объёма — они зовут тот же общий слой.
+  //
+  // Держится это сверкой по исходникам, как вид чертежа у таска 188: забытый
+  // импорт в рисовальщике листа вынес бы фиолетовое кольцо в печать, и увидел
+  // бы это заказчик, а не прогон.
+  const read = (name) => readFileSync(join(HERE, "..", "src", name), "utf8");
+  for (const name of ["render.js", "exporter.js", "gostSheet.js", "pdf.js"]) {
+    assert.ok(!read(name).includes("schemeAnchorOf"), "привязка добралась до бумаги через " + name);
+  }
+  const workshop = read(join("panels", "workshop.js"));
+  assert.ok(workshop.includes("function paintAnchor()"), "знак привязки пропал из мастерской");
+  assert.ok(workshop.includes("paintAnchor();"), "знак привязки перестали рисовать");
+});
