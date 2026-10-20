@@ -29,11 +29,14 @@ import {
   markIsComment,
   changeMarkType,
   findMark,
+  findScheme,
   findType,
   labelOf,
   typeKindOf,
+  schemesInOrder,
   updateProject,
   updateType,
+  wallsOnScheme,
 } from "../model.js";
 import { uiEl, uiButton, uiIconButton, uiModal } from "./ui.js";
 import { setSetting } from "../store.js";
@@ -581,6 +584,49 @@ export function createSizesFields(api) {
   }
 
   /**
+   * Кого можно подложить под этот чертёж (таск 208, G315) — чистый счёт, и он
+   * же отвечает на «накладывать нечего».
+   *
+   * Берутся схемы **со стенами**: подложить нечего у той, которую не чертили,
+   * а наложение показывает только стены. Своя схема исключена всегда — калька
+   * из самой себя ничего не показала бы.
+   */
+  function overlayOptions(project, schemeId) {
+    if (!project || !schemeId) return [];
+    return schemesInOrder(project)
+      .filter((scheme) => scheme.id !== schemeId && wallsOnScheme(project, scheme.id).length > 0)
+      .map((scheme) => ({ id: scheme.id, name: scheme.name }));
+  }
+
+  function overlayTitle(state) {
+    return overlayOptions(state.project, state.schemeId).length === 0
+      ? strings.tools.overlayNone
+      : strings.tools.overlayHint;
+  }
+
+  // Выбор кальки. Значение, указывающее на схему, которой в списке нет (её
+  // удалили, или она же и открыта), читается как «нет»: показывать имя того,
+  // чего на поле не видно, нельзя.
+  function overlaySelect(state) {
+    const options = overlayOptions(state.project, state.schemeId);
+    const current = options.some((item) => item.id === state.overlaySchemeId) ? state.overlaySchemeId : "";
+    const select = uiEl(
+      "select",
+      {
+        class: "ui-input",
+        on: { change: (event) => setState({ overlaySchemeId: event.target.value || null }) },
+      },
+      [
+        uiEl("option", { value: "", text: strings.tools.overlayOff }),
+        ...options.map((item) => uiEl("option", { value: item.id, text: item.name })),
+      ],
+    );
+    select.value = current || "";
+    select.disabled = options.length === 0;
+    return select;
+  }
+
+  /**
    * Строка слоя: отметка, слово и **причина в подсказке**, а не описанием под
    * галкой (таск 187, G281 — «в интерфейсе убери описания у пунктов»).
    */
@@ -687,6 +733,22 @@ export function createSizesFields(api) {
         off: gridOff,
         reason: gridOff ? strings.tools.gridSnapOff : "",
       }),
+      // Наложенный чужой чертёж (таск 208, G315). Слова заказчика: «нужно
+      // наложение чертежей, что бы подогнать один к другому. Также через меню
+      // интерфейса и только стены и другим цветом».
+      //
+      // Выбор схемы, а не отметка «да/нет»: планов в объекте бывает три и
+      // пять, и «наложено» без имени не отвечает на «что я вижу». Список —
+      // модельный (`schemesInOrder`), в нём только те схемы, у которых есть
+      // что наложить, и никогда не своя. Накладывать нечего — ряд гаснет с
+      // причиной в подсказке, как гаснет подложка без масштаба.
+      //
+      // Стоит он здесь во всех трёх режимах, как и остальные пункты (таск 193,
+      // G293), а рисует наложенное только чертёж — об этом и говорит подсказка.
+      uiEl("label", { class: "tools__field", title: overlayTitle(state) }, [
+        uiEl("span", { text: strings.tools.overlay }),
+        overlaySelect(state),
+      ]),
       // Вещи чертежа (таск 154, G223) — работают во всех трёх режимах: гасят
       // их и на плане, и в чертеже, и в объёме.
       layerRow(state, "objectsShown", OBJECTS_SETTING, strings.tools.objectsLayer, strings.tools.objectsLayerHint),
@@ -721,6 +783,8 @@ export function createSizesFields(api) {
       "gridSnap" in changed ||
       "objectsShown" in changed ||
       "elevationShown" in changed ||
+      // Калька выбрана или снята (таск 208): ряд обязан показать выбранное.
+      "overlaySchemeId" in changed ||
       "schemeFont" in changed ||
       // Состав раздела и ряд масштаба смотрят на то поле, которое показано:
       // в каждом режиме видны те отметки, которые в нём меняют картинку.

@@ -119,6 +119,7 @@ import {
   planSizeMeters,
   roomsInOrder,
   schemeAnchorOf,
+  schemeAnchorOriginMm,
   schemeGuides,
   schemeObjectCorners,
   schemeObjectKeyOf,
@@ -130,6 +131,7 @@ import {
   setPlanOrigin,
   setPlanScale,
   setRoomWallHeight,
+  setSchemeAnchor,
   setSchemeWallHeight,
   updateOpening,
   updateScheme,
@@ -164,6 +166,8 @@ import {
 import {
   DRAWING_ACTIVE,
   DRAWING_EDGE,
+  DRAWING_GHOST_ALPHA,
+  DRAWING_GHOST_DASH,
   SNAP_STEP_DEG,
   DRAWING_OBJECT,
   DRAWING_PAPER,
@@ -372,7 +376,12 @@ export function workshopToolOf(mode, adding) {
  * целиком: разойдись он с холстом, одна и та же клавиша делала бы на двух
  * поверхностях разное.
  */
-export function workshopEscStep({ draft, selected, mode } = {}) {
+export function workshopEscStep({ anchorPick, draft, selected, mode } = {}) {
+  // Ожидание щелчка по точке привязки — верхняя ступень (таск 208): оно
+  // пришло последним и снимается первым, как черновик снимается раньше
+  // выделения. Черновика при этом под ним не бывает — `startAnchorPick`
+  // решает его судьбу словами (`workshopDraftFate`) до того, как начать ждать.
+  if (anchorPick) return "anchor";
   if (draft) return "draft";
   if (selected) return "selection";
   // Режимов у окна ровно два (`WORKSHOP_MODES`), и спрашивается именно
@@ -1671,7 +1680,12 @@ export function workshopHint(tool, way) {
  * Чистая и вынесена наружу ради теста: про что говорит строка, видно без
  * браузера.
  */
-export function workshopModeNote({ mode, tool, wallCount, refusal } = {}) {
+export function workshopModeNote({ anchorPick, mode, tool, wallCount, refusal } = {}) {
+  // Ждут щелчка по точке привязки (таск 208) — об этом строка и говорит, что
+  // бы ни стояло в занятии: ожидание старше его, и щелчок уйдёт ему, а не
+  // стене. Второй строки для этого не заводится — дверь к словам под кнопками
+  // одна (таск 203).
+  if (anchorPick) return { text: strings.workshop.anchorPickHint, bad: false };
   if (mode === "select") return { text: strings.workshop.modeSelectHint, bad: false };
   // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
   // «Что добавить» этого не видно — оно про вид и размеры, а не про то, что
@@ -1854,6 +1868,16 @@ const WORKSHOP_ORIGIN = "#d1242f";
 // одной краской человек принял бы за один и тот же, а стоят они в разных
 // местах и значат разное.
 const WORKSHOP_ANCHOR = "#8250df";
+// Наложенный чужой чертёж (таск 208, G315) — «другим цветом» словами
+// заказчика. Охра, и это единственный свободный угол палитры чертежа: своя
+// стена почти чёрная (`DRAWING_WALL`), выделенная синяя (`DRAWING_ACTIVE`),
+// вещь и знак привязки фиолетовые, нуль чертежа — чистый красный, сетка —
+// холодный серый. Охра здесь одна тёплая и тусклая разом: с красным нулём её
+// не спутать (тот яркий, тонкий и всегда один), с чёрной своей стеной — тем
+// более, а на холодной сетке она не теряется. Вполсилы — потому что это
+// калька **под** чертежом, а не второй чертёж: своё обязано остаться главным.
+const WORKSHOP_OVERLAY = "#a8762f";
+const WORKSHOP_OVERLAY_ALPHA = 0.45;
 
 /**
  * Собрать мастерскую чертежа на основном экране (таск 153).
@@ -1906,6 +1930,18 @@ function createWorkshop({ api, hosts }) {
   // она посчитана, — по ней `workshopPlacePointMm` решает, годится ли показанная
   // точка для клика. Из этой же точки вещь и встаёт: что показано, то и встало.
   let objectGhost = null;
+  // Ждут ли щелчка по точке привязки (таск 208, G314) — `{pointMm}` или `null`.
+  //
+  // Устроено призраком вещи, а не третьим режимом: `tool` не трогается вовсе,
+  // и поставленная точка возвращает человека ровно туда, где он был, — в своё
+  // занятие и со своим выделением. Режим пришлось бы вписывать в
+  // `WORKSHOP_MODES`, в ряд кнопок и в лесенку Esc, и он **залипал бы**:
+  // поставил точку — а ты всё ещё «в привязке».
+  //
+  // Точка в поле та же, что у призрака: где показано — там и встанет (правило
+  // чертежа, T164 и T168). Рука ушла с поля — `pointMm` пуст и призрака нет:
+  // обещать постановку там, куда клик не дойдёт, нельзя.
+  let anchorPick = null;
   let drag = null;
   let pan = null;
   // Нажатие, которое ещё не решило, чем станет: клик занятия или панорама.
@@ -3127,7 +3163,12 @@ function createWorkshop({ api, hosts }) {
     }
     // Правка: если под рукой что-то есть — берём его, и дальше это
     // перетаскивание, а не панорама. Пусто — жест решится по отпусканию.
-    if (tool === "edit") {
+    //
+    // Пока ждут точку привязки, под руку не берётся **ничего** (таск 208):
+    // ожидание старше занятия, и нажатие обязано дойти до клика, а не увести
+    // стену. Найдено живым прогоном: точку ставили по лестнице, а лестница
+    // выделялась и ехала за рукой — щелчок до `tap` не доходил вовсе.
+    if (tool === "edit" && !anchorPick) {
       const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
       if (pick) {
         grab(pick, event);
@@ -3182,6 +3223,12 @@ function createWorkshop({ api, hosts }) {
    * и притяжка всё равно ставит вершину в узел или на ровный угол.
    */
   function tap(event) {
+    // Ждут точку привязки — щелчок принадлежит ей, а не занятию (таск 208).
+    // Проверка стоит первой нарочно: иначе клик успел бы поставить вершину.
+    if (anchorPick) {
+      placeAnchor(event);
+      return;
+    }
     if (tool === "walls") {
       addVertex(event);
       return;
@@ -3358,6 +3405,16 @@ function createWorkshop({ api, hosts }) {
       if (!drag.moved && !workshopHandMoved(drag.start, { x: event.clientX, y: event.clientY })) return;
       drag.moved = true;
       dragTo(event);
+      return;
+    }
+    // Призрак точки привязки идёт за рукой — как призрак вещи (таск 208).
+    // Стоит выше занятий по той же причине, что и клик: ожидание их старше.
+    if (anchorPick) {
+      const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
+      const was = anchorPick.pointMm;
+      const moved = Boolean(next) !== Boolean(was) || (next && was && (next.x !== was.x || next.y !== was.y));
+      anchorPick = { pointMm: next };
+      if (moved) redraw();
       return;
     }
     if (tool === "walls" || objectDrawn()) {
@@ -3681,11 +3738,17 @@ function createWorkshop({ api, hosts }) {
       // Лесенка целиком — в `workshopEscStep`, здесь только исполнение.
       // Слушатель висит в фазе перехвата: иначе окно закрылось бы раньше, чем
       // черновик успел отмениться.
-      const step = workshopEscStep({ draft, selected, mode: mode() });
+      const step = workshopEscStep({ anchorPick: Boolean(anchorPick), draft, selected, mode: mode() });
       if (!step) return;
       event.preventDefault();
       event.stopPropagation();
-      if (step === "draft") {
+      if (step === "anchor") {
+        // Передумали ставить точку: прежняя остаётся как стояла, в историю не
+        // идёт ничего. Занятие и выделение не трогались вовсе — возвращаться
+        // некуда (таск 208).
+        anchorPick = null;
+        sync();
+      } else if (step === "draft") {
         draft = null;
         sync();
       } else if (step === "selection") {
@@ -3933,6 +3996,9 @@ function createWorkshop({ api, hosts }) {
     // тем же шагом она ложится на план (таск 193, G293). Шаг ноль — «Без
     // сетки», и слой молчит.
     drawDrawingGrid(ctx, drawingUnitBridge(view), box, gridMm());
+    // Калька — **под** своим чертежом и над подложкой: её кладут, чтобы по ней
+    // подогнать своё, и спорить со своим она не должна.
+    paintOverlay();
     if (spot.kind === "ready") paintOrigin();
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
@@ -4021,10 +4087,24 @@ function createWorkshop({ api, hosts }) {
    */
   function paintAnchor() {
     const anchor = schemeAnchorOf(project(), schemeId);
-    if (!anchor) return;
-    const at = screenOf(anchor);
+    if (anchor) anchorMark(screenOf(anchor), false);
+    // Призрак ставящейся точки (таск 208): где он — там она и встанет. Рисуется
+    // **после** стоящей, чтобы при переносе было видно обе — откуда и куда.
+    if (anchorPick && anchorPick.pointMm) anchorMark(screenOf(anchorPick.pointMm), true);
+  }
+
+  // Сам знак: кольцо с крестом. Один рисовальщик на стоящую точку и на призрак
+  // — отличается призрак ровно тем же, чем все призраки чертежа (T168):
+  // пунктиром и полусилой цвета, а не своей фигурой. Увидев другой знак,
+  // человек не узнал бы в нём ту же точку.
+  function anchorMark(at, ghostly) {
+    ctx.save();
     ctx.strokeStyle = WORKSHOP_ANCHOR;
     ctx.lineWidth = 1.5;
+    if (ghostly) {
+      ctx.globalAlpha = DRAWING_GHOST_ALPHA;
+      ctx.setLineDash(DRAWING_GHOST_DASH);
+    }
     ctx.beginPath();
     ctx.arc(at.x, at.y, 7, 0, Math.PI * 2);
     ctx.stroke();
@@ -4034,6 +4114,109 @@ function createWorkshop({ api, hosts }) {
     ctx.moveTo(at.x, at.y - 12);
     ctx.lineTo(at.x, at.y + 12);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Ждать щелчка по точке привязки (таск 208, G314). Слова заказчика: «надо
+   * указать точку на чертеже, а не только числами».
+   *
+   * Зовётся снаружи — из окна свойств схемы, где стоят две другие двери к тому
+   * же значению («По лестнице» и два поля миллиметров). Двери нарочно собраны
+   * в одном месте: узнать про третью, стоя в чужом углу интерфейса, человек бы
+   * не смог, а окно свойств он и так открывает, когда думает о привязке.
+   *
+   * Начатый черновик при этом не теряется молча — его судьбу решает та же
+   * `workshopDraftFate`, что при смене занятия (таск 172).
+   */
+  function startAnchorPick() {
+    settleDraft();
+    anchorPick = { pointMm: null };
+    sync();
+  }
+
+  /**
+   * Щелчок поставил точку. Шаг истории **один** и назван привязкой — тот же
+   * ярлык, которым её пишет окно свойств: человек читает его в подсказке
+   * отмены, и две двери к одному значению обязаны говорить одно слово.
+   *
+   * Ожидание снимается до записи: второй щелчок по той же точке не ставит её
+   * дважды, а `changed: false` модели не кладёт в историю пустого шага.
+   */
+  function placeAnchor(event) {
+    const at = anchorPick.pointMm || snapOf(mmOf(event), event.altKey).point;
+    anchorPick = null;
+    let result;
+    try {
+      result = setSchemeAnchor(project(), schemeId, at);
+    } catch (error) {
+      fail(error);
+      sync();
+      return;
+    }
+    if (result.changed) commit(result.project, strings.history.schemeAnchor);
+    notify(text("workshop.anchorSet", { x: at.x, y: at.y }), "success");
+    sync();
+  }
+
+  /**
+   * Наложенный чужой чертёж (таск 208, G315). Слова заказчика: «нужно
+   * наложение чертежей, что бы подогнать один к другому. Также через меню
+   * интерфейса и только стены и другим цветом».
+   *
+   * **Только стены** — без проёмов, вещей, букв углов и длин: это калька для
+   * подгонки, а не второй чертёж. Поэтому рисуется здесь своей короткой
+   * петлёй, а не через `render.drawDrawing`: тому пришлось бы объяснять, чего
+   * не рисовать, и список этот расходился бы с каждым новым слоем.
+   *
+   * **Где стоит.** Привязка есть у **обеих** схем — чужой чертёж встаёт по
+   * ней, и сошлось или нет видно глазом; считает это та же
+   * `schemeAnchorOriginMm`, которой стопка этажей складывает этажи (таск 205,
+   * G309), второго счёта совмещения в сборке нет. Нет хотя бы у одной — обе
+   * стоят началом координат, и это ровно тот случай, ради которого подгонку и
+   * затевают.
+   *
+   * **«Обеих», а не «каждой по себе», — и это правка живого прогона.** Сперва
+   * здесь стояло то же правило, что у стопки этажей: у кого привязка есть, тот
+   * встаёт по ней, у кого нет — по своему нулю. У стопки оно верное (дом
+   * показывают как есть, а про недоделанную привязку говорит `validate`), а
+   * здесь — вредное: привязал первый этаж, открыл второй ставить его точку, а
+   * калька уехала с экрана на разницу привязки. Инструмент подгонки обязан
+   * дождаться, пока подгонка кончится.
+   *
+   * **Мышью не трогается.** Под рукой чертёж ищет только `workshopPick`, а он
+   * спрашивает `wallsOnScheme(project, schemeId)` — свою схему и ничью больше.
+   * Наложенное сюда не попадает ни стеной, ни вершиной, ни местом для проёма:
+   * оно под рукой, а не в руках.
+   *
+   * **В выгрузки не уходит** — по той же причине, что знак привязки: рисуется
+   * в мастерской, а PNG, лист ГОСТ, развёртка и объём зовут общий слой.
+   */
+  function paintOverlay() {
+    const otherId = getState().overlaySchemeId;
+    if (!otherId || otherId === schemeId) return;
+    const base = project();
+    if (!findScheme(base, otherId)) return;
+    const walls = wallsOnScheme(base, otherId);
+    if (walls.length === 0) return;
+    const paired = Boolean(schemeAnchorOf(base, schemeId)) && Boolean(schemeAnchorOf(base, otherId));
+    const here = schemeAnchorOriginMm(base, schemeId);
+    const there = schemeAnchorOriginMm(base, otherId);
+    const shift = paired ? { x: there.x - here.x, y: there.y - here.y } : { x: 0, y: 0 };
+    ctx.save();
+    ctx.globalAlpha = WORKSHOP_OVERLAY_ALPHA;
+    ctx.strokeStyle = WORKSHOP_OVERLAY;
+    ctx.lineCap = "butt";
+    for (const wall of walls) {
+      const from = screenOf({ x: wall.aMm.x + shift.x, y: wall.aMm.y + shift.y });
+      const to = screenOf({ x: wall.bMm.x + shift.x, y: wall.bMm.y + shift.y });
+      ctx.lineWidth = Math.max(1, Number(wall.thicknessMm) * view.zoom);
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // ——— чертёж рисует общий слой ———
@@ -4402,7 +4585,8 @@ function createWorkshop({ api, hosts }) {
       alert: spot.kind === "noScale",
     });
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
-    node.style.cursor = tool === "edit" ? "default" : "crosshair";
+    // Ожидание точки привязки старше занятия — крестик и в «Правке» (таск 208).
+    node.style.cursor = anchorPick ? "crosshair" : tool === "edit" ? "default" : "crosshair";
     redraw();
   }
 
@@ -4414,6 +4598,7 @@ function createWorkshop({ api, hosts }) {
    */
   function syncModeNote() {
     const line = workshopModeNote({
+      anchorPick: Boolean(anchorPick),
       mode: mode(),
       tool,
       wallCount: walls().length,
@@ -4845,6 +5030,8 @@ function createWorkshop({ api, hosts }) {
     }
     // Вещи погасили или вернули — хоть глазком в списке, хоть галкой в
     // «Интерфейсе»: поле и список обязаны это увидеть (таск 154).
+    // Калька выбрана или снята в «Интерфейсе» — перерисовать поле (таск 208).
+    if ("overlaySchemeId" in changed) redraw();
     if ("objectsShown" in changed || "hiddenObjectIds" in changed) {
       for (const kind of Object.keys(listKeys)) listKeys[kind] = null;
       sync();
@@ -4910,6 +5097,9 @@ function createWorkshop({ api, hosts }) {
     // одним шагом истории и вписывает кадр заново.
     calibrate: () => calibrateOnPlan(),
     attach: () => attach(),
+    // Третья дверь к точке привязки (таск 208): её открывает окно свойств
+    // схемы, где стоят две первые — «По лестнице» и поля миллиметров.
+    pickAnchor: () => startAnchorPick(),
   };
 }
 
@@ -4953,6 +5143,12 @@ function mountWorkshopScreen(host, api) {
     const state = getState();
     if (!workshopSurface && state.screen === "drawing" && state.schemeId && columns().every(Boolean)) {
       workshopSurface = createWorkshop({ api, hosts });
+      // Просьба, пришедшая до того, как поверхность собралась: исполняется
+      // ровно один раз (таск 208).
+      if (workshopAnchorWanted) {
+        workshopAnchorWanted = false;
+        workshopSurface.pickAnchor();
+      }
     }
     placeholder();
   };
@@ -5006,6 +5202,26 @@ export function workshopCalibratePlan() {
 
 export function workshopAttachPlan() {
   if (workshopSurface) workshopSurface.attach();
+}
+
+/**
+ * Поставить точку привязки щелчком по чертежу (таск 208, G314) — дверь для
+ * окна свойств схемы.
+ *
+ * Поверхности может не быть вовсе: окно свойств открывают и с плана, и из
+ * списка схем, а мастерская собирается по первому входу в режим. Поэтому
+ * просьба **запоминается** и исполняется, как только поверхность встанет, —
+ * иначе человек, нажавший кнопку из «Схемы», попадал бы в чертёж, где никто
+ * ничего не ждёт.
+ */
+let workshopAnchorWanted = false;
+
+export function workshopPickAnchor() {
+  if (workshopSurface) {
+    workshopSurface.pickAnchor();
+    return;
+  }
+  workshopAnchorWanted = true;
 }
 
 // Кирпичи полей (`uiField`, `uiNumber`, `uiApply`) уехали в `panels/ui.js`

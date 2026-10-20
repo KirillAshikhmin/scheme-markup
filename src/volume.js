@@ -63,6 +63,8 @@ import {
   planMmToFraction,
   projectCoords,
   projectTopAzimuth,
+  SCHEME_ANCHOR_OBJECT_KEYS,
+  schemeAnchorOriginMm,
   schemeFloorOf,
   schemeObjectCorners,
   schemeObjectsOnScheme,
@@ -217,13 +219,38 @@ export const VOLUME_LOOK_DEG_PX = 0.22;
 export const VOLUME_AROUND_PITCH_DEG = -42;
 /** Насколько обзор отходит, когда его зовут к человеку. */
 export const VOLUME_AROUND_NEAR_MM = 7000;
+/**
+ * Пределы меры обзора (`volumeAroundReach`): ближе полутора метров и дальше
+ * четырёхсот она не считается. Ближний нужен у самой земли, где до пола по
+ * взгляду ноль, а шаг колеса и скорость полёта обязаны остаться живыми.
+ */
 export const VOLUME_AROUND_MIN_MM = 1500;
 export const VOLUME_AROUND_MAX_MM = 400000;
 /**
- * Самый положий наклон, на котором поправка на сжатие пола ещё растёт: синус
- * двадцати градусов. Зачем предел — в `volumeAroundPan`.
+ * Самый положий взгляд, на котором ещё считают пол: синус двадцати градусов.
+ *
+ * Предел один на двоих, и это нарочно. У `volumeAroundPan` он держит поправку
+ * на сжатие пола: у почти горизонтального взгляда пол под пальцем лежит у
+ * горизонта, и один мах уносил бы обзор за километры. У `volumeAroundReach`
+ * (таск 207) — ровно то же самое: «докуда до пола» при взгляде в горизонт
+ * обращается в бесконечность, и мера, которой меряют и шаг колеса, и скорость
+ * полёта, ушла бы туда же.
  */
-export const VOLUME_AROUND_PAN_TILT_MIN = Math.sin((20 * Math.PI) / 180);
+export const VOLUME_AROUND_TILT_MIN = Math.sin((20 * Math.PI) / 180);
+/**
+ * За сколько секунд обзор пролетает то, на что смотрит (таск 207, G311).
+ *
+ * Заказчик отменил своё же «скорость для камеры как и сейчас для полёта»
+ * (G306): на «Всей схеме» крупного объекта камера стоит в десятках метров и
+ * ползёт шагом пешехода. Число выбрано **отношением, а не скоростью**: сколько
+ * бы ни было до того, на что смотрит обзор, он покрывает это за полторы
+ * секунды — и управление чувствуется одинаково и над домом, и в комнате.
+ *
+ * Полторы, а не одна и не три: за секунду кадр не успевает прочитаться на
+ * размахе, а за три пролёт через квартиру снова становится ожиданием. Счёт для
+ * этого объекта — у `volumeAroundSpeed`.
+ */
+export const VOLUME_AROUND_FLY_S = 1.5;
 /**
  * Ярусы, в которых грани ложатся на холст (дефект живого прогона).
  *
@@ -741,9 +768,13 @@ export function volumeShadowFaces(boxes, shadow, out = []) {
   ];
   const at = shadow ? { az: shadow.az, rise: shadow.rise } : VOLUME_SUN_AT;
   for (const box of boxes) {
+    // `box.baseMm` — где лежит земля под этим габаритом (таск 202). У одной
+    // схемы это ноль, у стопки этажей — пол нижнего этажа: тень кладут все
+    // этажи разом, но ложится она на одну землю.
+    const baseMm = Number(box.baseMm) || 0;
     out.push(
       volumeFace(
-        volumeClockwise(volumeShadowOutline(box.corners, box.heightMm, at)).map((point) => volumeAt(point, 0)),
+        volumeClockwise(volumeShadowOutline(box.corners, box.heightMm, at)).map((point) => volumeAt(point, baseMm)),
         rgb,
         { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_SHADOW, flat: true },
       ),
@@ -1115,11 +1146,19 @@ export function volumeSunSpotFaces(spots, shadow, out = []) {
     ];
     const shape = volumeClipPolygon(room, quad);
     if (shape.length < 3) continue;
+    // `spot.baseMm` и `spot.layer` — пол и ярус **своего этажа** (таск 202). У
+    // одной схемы это ноль и `VOLUME_LAYER_SUN`; в стопке пятно обязано лежать
+    // на том полу, через чьё окно вошло, и рисоваться раньше перекрытия этажа
+    // выше — иначе оно легло бы светлым пятном на крышу.
     out.push(
       volumeFace(
-        shape.map((point) => volumeAt(point, 0)),
+        shape.map((point) => volumeAt(point, Number(spot.baseMm) || 0)),
         rgb,
-        { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_SUN, flat: true },
+        {
+          normal: { x: 0, y: 0, z: 1 },
+          layer: Number.isFinite(Number(spot.layer)) ? Number(spot.layer) : VOLUME_LAYER_SUN,
+          flat: true,
+        },
       ),
     );
   }
@@ -2113,7 +2152,13 @@ function volumePolygonGap(point, corners) {
 export function volumeStairs(project, schemeId) {
   const stairs = [];
   for (const object of schemeObjectsOnScheme(project, schemeId)) {
-    if (schemeObjectKeyOf(project, object) !== "stairs") continue;
+    const key = schemeObjectKeyOf(project, object);
+    // **Марш и выход — одна и та же дверь между этажами** (таск 204): к маршу
+    // подходят снизу, к выходу — сверху, вопрос «на какой этаж?» у них общий.
+    // Список ключей один на сборку и живёт в модели: по нему же ставится точка
+    // привязки (`SCHEME_ANCHOR_OBJECT_KEYS`, таск 205), и это не совпадение —
+    // привязку берут ровно у лестничной клетки.
+    if (!SCHEME_ANCHOR_OBJECT_KEYS.includes(key)) continue;
     const polygons = volumeObjectPrisms(project, schemeId, object, WALL_HEIGHT_FALLBACK_MM).map(
       (prism) => prism.corners,
     );
@@ -2128,9 +2173,123 @@ export function volumeStairs(project, schemeId) {
         count += 1;
       }
     }
-    stairs.push({ objectId: object.id, polygons, atMm: { x: sx / count, y: sy / count } });
+    // `key` — марш это или выход: по нему прибытие ищет **парную** вещь (D58).
+    stairs.push({ objectId: object.id, key, polygons, atMm: { x: sx / count, y: sy / count } });
   }
   return stairs;
+}
+
+// ——— куда человек попадает, поднявшись по лестнице (дефект D58) ——————————
+//
+// Слова заказчика: «почему при переходе между схемами по лестнице я оказываюсь
+// в середине объекта, а не возле лестницы? Надо доделать».
+//
+// **Что было.** Таск 149 ставил человека в **то же место плана**: мол,
+// лестничная клетка у этажей одного дома в одном месте, значит те же
+// координаты и есть «у лестницы». Довод верен ровно до тех пор, пока у двух
+// схем один ноль — а ноль у каждой свой, и берётся он с подложки: планы
+// сканируют по отдельности, обрезают по-разному и обводят с разных углов.
+// Поэтому «те же координаты» и выносили человека на середину квартиры.
+//
+// **Что теперь.** Прибытие считается от самой лестницы, а место ухода нужно
+// только затем, чтобы выбрать нужную лестничную клетку, когда их несколько:
+//
+//   1. **Выход с лестницы** (`stairsExit`, вещь таска 204) — если он на этаже
+//      нарисован, человек встаёт у него: это и есть то место, где лестница
+//      выходит на этаж, и гадать там не о чем;
+//   2. **сама лестница** — если выхода нет. Встать **на** неё нельзя: марш
+//      занимает место, и человек, поставленный в его середину, смотрел бы в
+//      ступени. Поэтому место ищется **рядом с габаритом**: шестнадцать проб
+//      вокруг, и берётся та, где человек стоит в помещении и где вокруг него
+//      больше всего пусто;
+//   3. **ни того, ни другого** — только тогда работает прежнее правило «то же
+//      место плана», и окно по-прежнему говорит об этом вслух. Теперь оно
+//      честнее: место пересчитано **через привязку** (таск 205), то есть это
+//      та же точка дома, а не та же точка чужого чертежа.
+//
+// **Куда смотреть.** Прочь от лестницы — в ту сторону, в которую с неё сошли.
+// Это и есть «лицом в комнату, а не в стену»: место выбрано там, где пусто,
+// значит и взгляд в него смотрит в комнату. Своего счёта «где тут стена» для
+// взгляда не заводится.
+
+/** Насколько отойти от габарита лестницы: тело плюс запас на ступень. */
+export const VOLUME_LANDING_GAP_MM = 250;
+
+/** Сколько проб по кругу: тот же шаг, что у поиска свободного места. */
+const VOLUME_LANDING_TRIES = 16;
+
+/** Дальше этого свободное место не ценится: трёх метров хватает любому. */
+const VOLUME_LANDING_ROOM_MM = 3000;
+
+/**
+ * Куда встать, придя по лестнице на этот этаж (D58). `null` — лестничной
+ * клетки на нём не нарисовано, и решает это вызывающий.
+ *
+ * `atMm` — место ухода, пересчитанное в координаты **этой** схемы: им
+ * выбирается лестница, когда их несколько.
+ */
+export function volumeStairLanding(scene, atMm = null, headMm = VOLUME_HEAD_MM, fromKey = null) {
+  const all = (scene && scene.stairs) || [];
+  if (all.length === 0) return null;
+  // **Приходят в парную вещь** (таск 204): поднялись по маршу — вышли у выхода,
+  // спустились от выхода — сошли у марша. Парной нет — годится любая вещь
+  // лестничной клетки: другого места, где лестница выходит на этаж, всё равно
+  // не нарисовано.
+  const want = fromKey === "stairsExit" ? "stairs" : "stairsExit";
+  const paired = all.filter((place) => place.key === want);
+  const places = paired.length > 0 ? paired : all;
+  let best = places[0];
+  if (places.length > 1 && atMm) {
+    let gap = Infinity;
+    for (const place of places) {
+      const length = Math.hypot(place.atMm.x - atMm.x, place.atMm.y - atMm.y);
+      if (length < gap) {
+        gap = length;
+        best = place;
+      }
+    }
+  }
+  const centre = best.atMm;
+  let reach = 0;
+  for (const polygon of best.polygons || []) {
+    for (const point of polygon) reach = Math.max(reach, Math.hypot(point.x - centre.x, point.y - centre.y));
+  }
+  const step = reach + VOLUME_BODY_MM + VOLUME_LANDING_GAP_MM;
+  const solids = scene.solids || [];
+  // Просторным считается место, где нет ни стены, ни мебели, — та же мерка, по
+  // которой выбирается место старта (`volumeStart`).
+  const roomy = [...solids, ...(scene.objectBoxes || [])];
+  const rooms = (scene.rooms || []).length > 0;
+  let spot = null;
+  let score = -Infinity;
+  for (let turn = 0; turn < VOLUME_LANDING_TRIES; turn += 1) {
+    const angle = (turn * 2 * Math.PI) / VOLUME_LANDING_TRIES;
+    const probe = { x: centre.x + Math.cos(angle) * step, y: centre.y + Math.sin(angle) * step };
+    const pushed = volumePush(solids, probe, VOLUME_BODY_MM, headMm);
+    // Вытолкнуть не удалось — место теснее тела, и это не площадка.
+    if (volumeDepthMm(solids, pushed.x, pushed.y, VOLUME_BODY_MM, headMm) > 0) continue;
+    const inside = !rooms || volumeRoomAt(scene, pushed) !== null;
+    const free = Math.min(volumeFreeMm(roomy, pushed.x, pushed.y, headMm), VOLUME_LANDING_ROOM_MM);
+    // В помещении — главное, простор — второе. Вне контуров человек стоял бы
+    // на улице, а по лестнице выходят в дом.
+    const value = (inside ? VOLUME_LANDING_ROOM_MM * 2 : 0) + free;
+    if (value > score) {
+      score = value;
+      spot = pushed;
+    }
+  }
+  // Вокруг лестницы одни стены — встаём там, где свободно хоть где-нибудь.
+  if (!spot) spot = volumeFreeSpotNear(solids, centre, headMm) || { x: centre.x, y: centre.y };
+  return {
+    x: spot.x,
+    y: spot.y,
+    yaw: Math.atan2(spot.y - centre.y, spot.x - centre.x),
+    objectId: best.objectId,
+    key: best.key || "stairs",
+    // Встали ли у парной вещи: `false` — её на этаже не нарисовано, и площадка
+    // взята у того, что нашлось.
+    paired: paired.length > 0,
+  };
 }
 
 /**
@@ -2187,6 +2346,447 @@ export function volumeFloors(project, schemeId) {
 export function volumeDrawn(project, schemeId) {
   if (!project || !schemeId) return false;
   return wallsOnScheme(project, schemeId).length > 0 || schemeObjectsOnScheme(project, schemeId).length > 0;
+}
+
+// ——— стопка этажей (таск 202, G307) ——————————————————————————————————————
+//
+// Слова заказчика: «давай сделаем новую фичу — отображение сразу всех этажей.
+// Но в опциях просмотра пусть будет пункт что показывать. Все этажи (если
+// указаны этажи у схем) или какой-то именно этаж».
+//
+// ——— высота этажа ————————————————————————————————————————————————————————
+//
+// **Этаж кончается там, где кончается его самая высокая стена**, и это не то
+// же, что высота схемы: у комнаты бывает своё число (таск 173), и этаж с
+// трёхметровой гостиной при схеме 2700 обязан подняться на три метра — иначе
+// перекрытие верхнего этажа срезало бы ей потолок. Отсюда `volumeFloorTopMm`:
+// потолок этажа — максимум из высоты схемы и всех её стен. Хозяин мерки один,
+// её же спрашивает сам `volumeScene` под вынос земли.
+//
+// **Высоты складываются по очереди, а не умножаются.** У каждой схемы своя
+// высота, и база следующего этажа — база этого плюс его потолок плюс
+// перекрытие. Умножить одну высоту на число этажей значило бы поставить
+// трёхметровый этаж в 2700 или наоборот.
+//
+// ——— перекрытие ——————————————————————————————————————————————————————————
+//
+// `VOLUME_SLAB_MM` = 200 мм — монолитная плита перекрытия жилого дома (сборная
+// ПК — 220). Больше в это число ничего не вложено **нарочно**: стяжка с
+// покрытием лежит уже внутри высоты этажа, потому что высота стен схемы
+// отмерена от того пола, по которому ходят, а не от плиты. Числа этого в
+// объекте нет и не будет — у схемы задаётся этаж и высота стен, а не толщина
+// пола под ней (G68); понадобится своя — это новое поле схемы и отдельный
+// разговор.
+//
+// ——— дыра в нумерации и два плана на одном номере ————————————————————————
+//
+// **Дыра не оставляет пустого места.** Есть 1 и 3, нет 2 — третий встаёт на
+// первый. Выдумать пропущенному этажу высоту нечем: своей у него нет, а взять
+// среднюю или соседнюю — это догадка, которую правило сборки запрещает
+// применять молча. Номера в окне стоят как есть (1 и 3), и видно, что между
+// ними ничего не нарисовано.
+//
+// **Два плана на одном номере — в стопке один.** Довод таска 149 («план этажа
+// и его зеркальная копия») в силе и ничего не выбрасывает: оба остаются в
+// списке лестницы, оба открываются по отдельности, ни одна схема не тронута.
+// Но поставить их в стопку обоих нельзя — они встанут друг в друга и дадут
+// кашу вместо этажа. Поэтому на номер берётся один план: открытый, если открыт
+// один из них, иначе первый по порядку схем; остальные окно называет вслух.
+
+/** Толщина перекрытия между этажами. Разбор — абзацем выше. */
+export const VOLUME_SLAB_MM = 200;
+
+/**
+ * **Где начало этой схемы в общем плане дома** — единственный шов совмещения
+ * этажей (таск 205, требование G309).
+ *
+ * Слова заказчика: «надо синхронизировать схемы для наложения одной на другую.
+ * Можно точку привязки указать например. Кстати лестница как раз таки может
+ * стать такой. Указываем в 1 месте лестницу и над ней выход с лестницы».
+ *
+ * Точку привязки завёл таск 205, и считает смещение **модель**
+ * (`schemeAnchorOriginMm`): у схемы с привязкой `a` начало координат лежит в
+ * общем плане в `−a`, у схемы без привязки — в нуле, то есть всё стоит как
+ * стояло до стопки (G68). Здесь — дверь, через которую об этом спрашивает
+ * объём, и больше нигде: `volumeFloorPlan` кладёт каждому этажу `shiftMm`
+ * (разницу начал, как разницу баз по высоте), а грани двигает
+ * `volumeFloorFaces`.
+ *
+ * Дверь не убрана за ненадобностью нарочно: совмещение спрашивается из одного
+ * места, и когда у привязки появится второй ключ (поворот — разбор в модели),
+ * править придётся здесь, а не в трёх местах сборки сцены.
+ */
+export function volumeSchemeOriginMm(project, schemeId) {
+  return schemeAnchorOriginMm(project, schemeId);
+}
+
+/** Плановые точки, сдвинутые на смещение схемы. Пустой сдвиг отдаёт их же. */
+export function volumeShiftPoints(points, shiftMm) {
+  if (!shiftMm || (!shiftMm.x && !shiftMm.y)) return points;
+  return (points || []).map((point) => ({ ...point, x: point.x + shiftMm.x, y: point.y + shiftMm.y }));
+}
+
+/**
+ * Высота каждой стены схемы: переопределение комнаты с той стороны, где оно
+ * есть, иначе высота схемы.
+ *
+ * Хозяин мерки один на сборку: её спрашивает сцена (вынос земли и грани стен)
+ * и стопка этажей (потолок этажа). Разойдись они — перекрытие срезало бы
+ * стену, которую сцена нарисовала выше.
+ */
+export function volumeWallHeights(project, schemeId, fallbackMm) {
+  const heights = new Map();
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const left = wallHeightOnSide(project, wall.id, "left");
+    const right = wallHeightOnSide(project, wall.id, "right");
+    heights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || fallbackMm);
+  }
+  return heights;
+}
+
+/** Потолок этажа: самая высокая стена схемы, но не ниже высоты самой схемы. */
+export function volumeFloorTopMm(project, schemeId, heights = null) {
+  const schemeMm = volumeHeightMm(project, schemeId, null).mm;
+  const map = heights || volumeWallHeights(project, schemeId, schemeMm);
+  let top = schemeMm || 0;
+  for (const height of map.values()) top = Math.max(top, Number(height) || 0);
+  return top;
+}
+
+/**
+ * Что стопка этажей показывает и чего ей не хватает (таск 202).
+ *
+ * Отдаёт `{floor, floors, doubles, can, why}`:
+ *
+ *   - `floors` — этажи снизу вверх, по одному плану на номер, с базой
+ *     `baseMm` **относительно того этажа, на котором стоит человек**: у него
+ *     самого ноль, у нижнего — минус. Отсчёт именно такой, потому что всё
+ *     остальное в объёме считается от пола открытой схемы — камера, ходьба,
+ *     выделение, миникарта, — и смена системы координат под ними стоила бы
+ *     переписывания ходьбы ради картинки;
+ *   - `doubles` — планы, которые на свой номер не попали (два плана на одном
+ *     этаже): окно называет их вслух;
+ *   - `can` — доступны ли «все этажи» вообще, `why` — почему нет.
+ *
+ * Схема без номера этажа этажом не считается (правило таска 149), схема без
+ * чертежа — тоже: в стопке от неё была бы пустота.
+ */
+export function volumeFloorPlan(project, schemeId) {
+  const floor = schemeFloorOf(project, schemeId);
+  const found = [];
+  for (const scheme of schemesInOrder(project)) {
+    const own = schemeFloorOf(project, scheme.id);
+    if (own === null) continue;
+    if (!volumeDrawn(project, scheme.id)) continue;
+    found.push({ schemeId: scheme.id, name: scheme.name, floor: own });
+  }
+  // Снизу вверх, а внутри номера — порядком схем: сортировка устойчива
+  // (ES2019), и первым на номере остаётся план, заведённый раньше.
+  found.sort((a, b) => a.floor - b.floor);
+  const floors = [];
+  const doubles = [];
+  for (const item of found) {
+    const already = floors.findIndex((taken) => taken.floor === item.floor);
+    if (already < 0) {
+      floors.push({ ...item });
+      continue;
+    }
+    // Открытая схема на номере главнее: человек смотрит на неё, и подменять её
+    // однофамильцем значило бы подменить то, по чему он ходит.
+    if (item.schemeId === schemeId) {
+      doubles.push(floors[already]);
+      floors[already] = { ...item };
+      continue;
+    }
+    doubles.push({ ...item });
+  }
+  let base = 0;
+  for (const item of floors) {
+    item.heightMm = volumeFloorTopMm(project, item.schemeId);
+    item.baseMm = base;
+    item.originMm = volumeSchemeOriginMm(project, item.schemeId);
+    item.current = item.schemeId === schemeId;
+    base += item.heightMm + VOLUME_SLAB_MM;
+  }
+  const mine = floors.find((item) => item.current) || null;
+  const zero = mine ? mine.baseMm : 0;
+  // Этаж стоит относительно того, на котором человек: по высоте — разница баз,
+  // в плане — разница начал (шов таска 205, `volumeSchemeOriginMm`). У своего
+  // этажа и то и другое ноль, и это не совпадение, а правило отсчёта.
+  const here = mine ? mine.originMm : { x: 0, y: 0 };
+  for (const item of floors) {
+    item.baseMm -= zero;
+    item.shiftMm = { x: item.originMm.x - here.x, y: item.originMm.y - here.y };
+  }
+  // Причина недоступности — та, которую человек может **исправить**: нет
+  // номеров вовсе, их меньше двух, или они есть, но не у открытой схемы.
+  // Порядок именно такой: сказать «у этой схемы нет этажа» там, где этажей нет
+  // ни у кого, значило бы послать править не ту схему.
+  const why = floors.length > 1 ? (mine ? null : "noFloor") : found.length > 0 ? "one" : "none";
+  return { floor, floors, doubles, can: why === null, why };
+}
+
+/**
+ * Ярус плоской грани на этаже стопки (таск 202).
+ *
+ * **Зачем вообще.** Порядок кадра у плоского (плита, полы, потолки, солнечные
+ * пятна) решает не дерево, а ярус: пол комнаты не спорит со стеной, под полом
+ * ничего нет. На одном этаже это верно, в стопке — нет: пятно солнца на полу
+ * первого этажа (ярус 3) рисовалось бы **после** перекрытия второго (ярус 2),
+ * то есть светлое пятно легло бы на крышу. Поэтому в стопке у каждого этажа
+ * свой отрезок ярусов между полами и телами: всё плоское нижнего этажа
+ * рисуется раньше всего плоского верхнего, а тела по-прежнему выкладывает
+ * дерево — точно, в каждом пикселе.
+ *
+ * Отрезок берётся между `VOLUME_LAYER_GROUND` и `VOLUME_LAYER_BODY` и делится
+ * на число этажей: при одном этаже выходят ровно прежние 2 и 3, и кадр одной
+ * схемы не меняется ни на грань.
+ *
+ * Земля и тень на ней — **не этажные**: земля одна на дом и лежит под нижним
+ * этажом, поэтому `VOLUME_LAYER_BASE` нижнего и `VOLUME_LAYER_SHADOW`
+ * остаются собой. У этажей выше плита стала перекрытием и уходит в их ярус
+ * пола — иначе перекрытие второго этажа рисовалось бы раньше пола первого.
+ */
+export function volumeFloorLayer(layer, index, count) {
+  const floors = Math.max(1, Number(count) || 1);
+  const at = Math.max(0, Math.min(floors - 1, Number(index) || 0));
+  const step = (VOLUME_LAYER_BODY - VOLUME_LAYER_GROUND) / floors;
+  if (layer === VOLUME_LAYER_GROUND || (layer === VOLUME_LAYER_BASE && at > 0)) {
+    return VOLUME_LAYER_GROUND + at * step;
+  }
+  if (layer === VOLUME_LAYER_SUN) return VOLUME_LAYER_GROUND + at * step + step / 2;
+  return layer;
+}
+
+/**
+ * Этаж стопки: грани встают на свою базу и на своё место в плане, плоское
+ * уходит в ярус этажа, а у чужого этажа снимаются хозяева.
+ *
+ * `shiftMm` — смещение схемы в общем плане (шов таска 205): сегодня ноль, и
+ * этажи совмещаются по началу координат.
+ *
+ * Правятся грани **на месте**: они только что собраны `volumeScene` и больше ни
+ * у кого на руках, а копия стопки из трёх этажей — это десятки тысяч лишних
+ * точек на каждую сборку сцены.
+ *
+ * **У этажа, на котором не стоишь, хозяев нет.** Снимаются `markId`, `channel`
+ * и `doorId`: выделение, прицел, клавиши выключателя и двери остаются на своём
+ * этаже. Иначе щелчок по розетке чужого этажа выделил бы метку чужой схемы —
+ * карточка, список меток и подсветка на плане говорили бы о том, чего в кадре
+ * нет, — а «все двери» открывало бы двери двух этажей через одну.
+ */
+export function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, index = 0, count = 1, own = true } = {}) {
+  const lift = Number(baseMm) || 0;
+  const dx = Number(shiftMm && shiftMm.x) || 0;
+  const dy = Number(shiftMm && shiftMm.y) || 0;
+  for (const face of faces || []) {
+    if (lift !== 0 || dx !== 0 || dy !== 0) {
+      for (const point of face.p) {
+        point.x += dx;
+        point.y += dy;
+        point.z += lift;
+      }
+    }
+    if (count > 1) face.layer = volumeFloorLayer(face.layer, index, count);
+    if (own) continue;
+    face.markId = null;
+    if (face.channel !== undefined) face.channel = null;
+    if (face.doorId !== undefined) face.doorId = null;
+  }
+  return faces;
+}
+
+/** Снизу и сверху: насколько грани уходят по вертикали. `null` — граней нет. */
+export function volumeFacesSpan(faces) {
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const face of faces || []) {
+    for (const point of face.p) {
+      if (point.z < minZ) minZ = point.z;
+      if (point.z > maxZ) maxZ = point.z;
+    }
+  }
+  return minZ > maxZ ? null : { minZ, maxZ };
+}
+
+/**
+ * Дерево порядка стопки: по дереву на этаж, сшитые горизонтальной плоскостью.
+ *
+ * **Почему не одно дерево на всё.** Дерево строится при сборке сцены и стоит
+ * девять миллисекунд на 2458 гранях одной схемы; растёт оно хуже, чем линейно —
+ * резы множатся. А этажи **не проникают друг в друга**: каждый лежит в своём
+ * слое между перекрытиями, и горизонтальная плоскость между ними — это точный
+ * узел дерева, а не приближение. Поэтому стопка платит ровно столько, сколько
+ * платят этажи по отдельности, и ни одного лишнего реза.
+ *
+ * `groups` — этажи снизу вверх, у каждого свои грани. Если чьи-то тела всё же
+ * перекрылись по вертикали (метка, посаженная выше стен своего этажа), сшивать
+ * нечем — такие этажи сливаются в одно дерево. Это дороже, зато верно: порядок
+ * в объёме обязан быть точным в каждом пикселе.
+ */
+export function volumeOrderStack(groups) {
+  const parts = [];
+  for (const faces of groups || []) {
+    const inTree = (faces || []).filter((face) => !face.line && face.layer === VOLUME_LAYER_BODY);
+    const span = volumeFacesSpan(inTree);
+    if (!span) continue;
+    const last = parts[parts.length - 1];
+    // Перекрылись по вертикали — плоскости между ними нет, и этажи считаются
+    // одним куском.
+    if (last && span.minZ <= last.span.maxZ) {
+      last.faces = [...last.faces, ...inTree];
+      last.span = { minZ: Math.min(last.span.minZ, span.minZ), maxZ: Math.max(last.span.maxZ, span.maxZ) };
+      continue;
+    }
+    parts.push({ faces: inTree, span });
+  }
+  if (parts.length === 0) return null;
+  let tree = volumeOrderTree(parts[0].faces);
+  for (let at = 1; at < parts.length; at += 1) {
+    const upper = volumeOrderTree(parts[at].faces);
+    if (!upper) continue;
+    if (!tree) {
+      tree = upper;
+      continue;
+    }
+    // Шов — ровно между этажами: верх нижнего и низ верхнего.
+    const zMm = (parts[at - 1].span.maxZ + parts[at].span.minZ) / 2;
+    tree = {
+      plane: { x: 0, y: 0, z: 1, d: zMm },
+      same: [],
+      front: upper,
+      back: tree,
+      count: tree.count + upper.count,
+    };
+  }
+  return tree;
+}
+
+/**
+ * Сцена из нескольких этажей (таск 202).
+ *
+ * **Чем она остаётся** — сценой того этажа, на котором стоит человек: все её
+ * поля, кроме граней, дерева, тени и пятен, принадлежат открытой схеме. Ходьба,
+ * препятствия, метки, выделение, лестница, миникарта и сводка спрашивают её,
+ * а соседние этажи добавляют к кадру только то, что видно. Это и есть ответ на
+ * «что значит ходьба при всех этажах»: ходим по своему этажу и переходим
+ * лестницей, как с таска 149, — ни провалов между этажами, ни второго правила
+ * столкновений.
+ *
+ * `optionsOf(schemeId)` — доводы сборки для каждой схемы (видимые метки,
+ * открытые двери, спрятанные вещи): фильтр и отметки обязаны значить на всех
+ * этажах одно и то же.
+ */
+export function volumeStackScene(project, plan, optionsOf) {
+  const floors = (plan && plan.floors) || [];
+  const mineAt = floors.findIndex((item) => item.current);
+  if (mineAt < 0 || floors.length < 2) return null;
+  const mine = floors[mineAt];
+  const take = (schemeId) => (typeof optionsOf === "function" ? optionsOf(schemeId) || {} : {});
+  // **Плита этажа выше нижнего — перекрытие, а не земля**: земля у дома одна и
+  // лежит под нижним этажом. Зелёный прямоугольник с выносом под тень,
+  // повторённый на каждом этаже, закрыл бы дом сверху травой. Правило одно и
+  // для той схемы, которая открыта: второй этаж не становится землёй от того,
+  // что человек на нём стоит.
+  const deckOf = (at) => at > 0;
+  const base = volumeScene(project, mine.schemeId, {
+    ...take(mine.schemeId),
+    order: false,
+    deck: deckOf(mineAt),
+  });
+  if (!base || base.empty) return base;
+  const groups = [];
+  const faces = [];
+  const shadowBoxes = [];
+  const sunSpots = [];
+  const groundMm = floors[0].baseMm;
+  let landMm = null;
+  let stackBox = null;
+  let bottomMm = 0;
+  let topMm = 0;
+  for (let at = 0; at < floors.length; at += 1) {
+    const item = floors[at];
+    const own = at === mineAt;
+    const sub = own
+      ? base
+      : volumeScene(project, item.schemeId, { ...take(item.schemeId), order: false, deck: deckOf(at) });
+    if (!sub || sub.empty) continue;
+    if (at === 0) landMm = sub.landMm;
+    volumeFloorFaces(sub.faces, {
+      baseMm: item.baseMm,
+      shiftMm: item.shiftMm,
+      index: at,
+      count: floors.length,
+      own,
+    });
+    groups.push(sub.faces);
+    faces.push(...sub.faces);
+    if (sub.boundsMm) {
+      const box = {
+        minX: sub.boundsMm.minX + item.shiftMm.x,
+        minY: sub.boundsMm.minY + item.shiftMm.y,
+        maxX: sub.boundsMm.maxX + item.shiftMm.x,
+        maxY: sub.boundsMm.maxY + item.shiftMm.y,
+      };
+      stackBox = stackBox
+        ? {
+            minX: Math.min(stackBox.minX, box.minX),
+            minY: Math.min(stackBox.minY, box.minY),
+            maxX: Math.max(stackBox.maxX, box.maxX),
+            maxY: Math.max(stackBox.maxY, box.maxY),
+          }
+        : box;
+    }
+    // Тень на земле кладут **все этажи разом**: дом отбрасывает одно пятно, а
+    // стена второго этажа даёт тень длиннее — она выше над землёй. Поэтому у
+    // габарита появляется `baseMm` (где лежит земля) и высота от неё.
+    for (const box of sub.shadowBoxes || []) {
+      shadowBoxes.push({
+        ...box,
+        corners: volumeShiftPoints(box.corners, item.shiftMm),
+        baseMm: groundMm,
+        heightMm: item.baseMm - groundMm + box.heightMm,
+      });
+    }
+    // Солнечное пятно лежит на полу **своего** этажа и в его ярусе: иначе
+    // пятно первого этажа легло бы на перекрытие второго.
+    for (const spot of sub.sunSpots || []) {
+      sunSpots.push({
+        ...spot,
+        aMm: { x: spot.aMm.x + item.shiftMm.x, y: spot.aMm.y + item.shiftMm.y },
+        left: spot.left ? volumeShiftPoints(spot.left, item.shiftMm) : null,
+        right: spot.right ? volumeShiftPoints(spot.right, item.shiftMm) : null,
+        baseMm: item.baseMm,
+        layer: volumeFloorLayer(VOLUME_LAYER_SUN, at, floors.length),
+      });
+    }
+    bottomMm = Math.min(bottomMm, item.baseMm);
+    topMm = Math.max(topMm, item.baseMm + item.heightMm);
+  }
+  return {
+    ...base,
+    faces,
+    order: volumeOrderStack(groups),
+    shadowBoxes,
+    sunSpots,
+    // Земля — у нижнего этажа: у него плита работает землёй, у остальных она
+    // стала перекрытием. Нет её и там (помещения не обведены) — нет её и у
+    // стопки: это правило сцены, а не стопки.
+    landMm,
+    // Габарит стопки: по вертикали — от пола нижнего этажа до потолка верхнего,
+    // в плане — объединение габаритов этажей (сойтись в плане они могут не
+    // точно, когда появится привязка, — шов таска 205). Им «Вся схема» вмещает
+    // дом целиком, а обзор держит камеру над его крышей, а не над потолком
+    // своего этажа.
+    stackMm: {
+      bottomMm,
+      topMm,
+      count: floors.length,
+      boundsMm: stackBox
+        ? { ...stackBox, widthMm: stackBox.maxX - stackBox.minX, heightMm: stackBox.maxY - stackBox.minY }
+        : null,
+    },
+  };
 }
 
 // ——— метки ———————————————————————————————————————————————————————————————
@@ -3476,18 +4076,17 @@ export function volumeScene(project, schemeId, options = {}) {
   // осям наружных стен — иначе ей не на чем держать тень дома, которая уходит
   // от стены на полторы высоты. Вынос считается от высоты, а не взят на глаз:
   // `VOLUME_LAND_OUT` высот от габарита во все стороны.
-  const wallHeights = new Map();
-  for (const wall of walls) {
-    const left = wallHeightOnSide(project, wall.id, "left");
-    const right = wallHeightOnSide(project, wall.id, "right");
-    wallHeights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm);
-  }
-  const tallest = walls.reduce((most, wall) => Math.max(most, wallHeights.get(wall.id) || 0), schemeHeight.mm || 0);
+  const wallHeights = volumeWallHeights(project, schemeId, schemeHeight.mm);
+  const tallest = volumeFloorTopMm(project, schemeId, wallHeights);
   // Прямоугольник плиты, когда она работает землёй (D52): им фон узнаёт, где
   // кончается земля сцены. `null` — плита сама пол, и земли у сцены нет вовсе.
+  //
+  // `options.deck` — схема показана **этажом стопки** (таск 202), и земли под
+  // ней нет: земля у дома одна, под нижним этажом. Плита тогда работает
+  // перекрытием — габаритом чертежа, без выноса под тень и цветом пола.
   let landMm = null;
   if (bounds) {
-    const land = rooms.length > 0;
+    const land = rooms.length > 0 && options.deck !== true;
     const shadow = volumeShadowShift(tallest);
     const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
     const plate = {
@@ -3722,7 +4321,13 @@ export function volumeScene(project, schemeId, options = {}) {
     notes,
     faces,
     // Дерево порядка строится здесь, один раз на сцену: кадру остаётся обход.
-    order: volumeOrderTree(faces),
+    //
+    // `options.order === false` — сцену собирают **этажом стопки** (таск 202):
+    // грани ещё поднимут на базу этажа, и дерево, построенное до подъёма, стало
+    // бы врать. Стопка строит его сама, после подъёма, и сшивает этажи
+    // плоскостью (`volumeOrderStack`). Полусобранная сцена без дерева годится
+    // только ей: кадру её отдавать нельзя.
+    order: options.order === false ? null : volumeOrderTree(faces),
     solids,
     // Габариты стен для тени дома (таск 181): час кладёт её сам, см. выше.
     shadowBoxes,
@@ -4152,8 +4757,11 @@ export function volumeStanceHead(stance) {
  * объекта. Прыжок таска 159 приземляется по нему, полёт обзора (таск 200) им же
  * останавливается у земли.
  */
-export function volumeGroundMm(mm) {
-  return Math.max(0, Number(mm) || 0);
+export function volumeGroundMm(mm, floorMm = 0) {
+  // `floorMm` — где лежит пол **сцены**: ноль у одной схемы и низ стопки
+  // этажей (таск 202), когда человек стоит не на нижнем из них. Умолчание
+  // оставляет прежнее правило до знака.
+  return Math.max(Number(floorMm) || 0, Number(mm) || 0);
 }
 
 /** В воздухе ли человек: прыжок идёт, пока он не вернулся на пол. */
@@ -7885,21 +8493,95 @@ export function volumeAroundCamera(target, yaw, pitch, distance) {
   return { at: volumeAroundEye(target, yaw, pitch, distance), yaw, pitch };
 }
 
+// ——— одна мера обзора (таск 207, G311 и G312) ————————————————————————————
+//
+// Слова заказчика: «почему движение мыши с зажатой клавишей перемещает камеру
+// вокруг какой-то цели, а не просто поворачивает камеру как при виде от 1
+// лица? должно быть так же».
+//
+// Орбиты больше нет: мышь вертит камеру **на месте**, тем же правилом, что в
+// первом лице. Вместе с орбитой ушла и хранимая `distance` — расстояние до
+// цели, которую больше никто не обходит. Два смысла у неё оставлять нельзя
+// (прямое требование тикета), поэтому смысл один и он **считается, а не
+// хранится**: `volumeAroundReach` — докуда обзор достаёт до пола по взгляду.
+//
+// Этой одной мерой живёт всё, что спрашивало расстояние:
+//
+//   - **шаг колеса и щипка**: они везут камеру по взгляду на долю меры, то
+//     есть приближение больше не упирается в предел и не умирает в комнате;
+//   - **свайп двумя пальцами** (`volumeAroundPan`): мера пикселя — `distance /
+//     focal`, и с таска 207 это **честная** глубина пола. До него там лежала
+//     длина орбитальной руки, которую полёт не трогал: слетев с тридцати
+//     метров в комнату, человек возил карту мерой тридцати метров (дефект,
+//     заведённый таском 200);
+//   - **скорость полёта** (`volumeAroundSpeed`).
+//
+// Кадрирование («Обзор», «Вся схема») расстоянием по-прежнему **пользуется**,
+// но как доводом: поставило место и взгляд — мера посчиталась сама.
+
+/**
+ * Докуда обзор достаёт до пола по взгляду — одна мера на приближение, свайп и
+ * скорость.
+ *
+ * Отвесно вниз это высота камеры, наискось — длиннее, в горизонт и вверх пола
+ * нет вовсе, и мера берётся по самому пологому взгляду, на котором его ещё
+ * считают (`VOLUME_AROUND_TILT_MIN`, тот же предел, что у свайпа). У земли,
+ * где до пола ноль, снизу держит `VOLUME_AROUND_MIN_MM`: иначе и колесо, и
+ * полёт встали бы намертво ровно там, куда заказчик просил пускать камеру.
+ */
+export function volumeAroundReach(eye, pitch) {
+  const down = Math.max(VOLUME_AROUND_TILT_MIN, -Math.sin(Number(pitch) || 0));
+  return volumeAroundDistance((Number(eye && eye.z) || 0) / down);
+}
+
+/**
+ * Как быстро летит обзор (таск 207, G311): он покрывает то, до чего достаёт,
+ * за `VOLUME_AROUND_FLY_S`.
+ *
+ * **Вблизи точность, издали размах** — и это не две скорости, а одно
+ * отношение. Числа на объекте заказчика (квартира 9,8 × 9,9 м):
+ *
+ *   - «Вся схема» — камера в 18 м над планом, мера 27 м, скорость **18 м/с**:
+ *     квартиру пролетает за полсекунды, с Shift — вчетверо быстрее пешехода;
+ *   - в комнате на высоте глаз при взгляде чуть вниз мера 4,7 м, скорость
+ *     **3,1 м/с** — четверть сверх пешехода, то есть ход, а не рывок;
+ *   - у самой земли мера упирается в полтора метра, и скорость была бы
+ *     0,9 м/с — медленнее человека. Поэтому снизу её держит **шаг пешехода**:
+ *     обзор нигде не ходит медленнее, чем ходит человек.
+ *
+ * Shift удваивает, как удваивал: бег и полёт — одно и то же движение в разных
+ * видах, и второго множителя для обзора не заводится.
+ */
+export function volumeAroundSpeed(reachMm, run) {
+  const want = volumeAroundDistance(reachMm) / VOLUME_AROUND_FLY_S;
+  const base = Math.max(VOLUME_WALK_MM_S, want);
+  return run ? base * 2 : base;
+}
+
 /**
  * Обзор, в котором видно всю схему: цель — середина чертежа, расстояние —
  * такое, чтобы габарит уместился в поле. Окно открывается именно им: заказчик
  * сказал, что показ начинается с общего вида.
  */
 export function volumeAroundFit(scene, box) {
-  const bounds = scene.boundsMm;
-  const height = scene.heightMm || WALL_HEIGHT_FALLBACK_MM;
+  // Габарит в плане: у одной схемы — её чертёж, у стопки этажей — все они
+  // вместе (таск 202).
+  const bounds = (scene.stackMm && scene.stackMm.boundsMm) || scene.boundsMm;
+  // Габарит по вертикали: у одной схемы — её высота от нуля, у стопки этажей
+  // (таск 202) — вся она, от пола нижнего этажа до потолка верхнего. Отсчёт
+  // идёт от пола открытой схемы, поэтому низ стопки бывает отрицательным, и
+  // середина вместе с ним уходит вниз: взять `height / 2` значило бы навести
+  // камеру на небо над домом.
+  const span = scene.stackMm || { bottomMm: 0, topMm: scene.heightMm || WALL_HEIGHT_FALLBACK_MM };
+  const height = Math.max(1, span.topMm - span.bottomMm);
+  const middle = (span.topMm + span.bottomMm) / 2;
   if (!bounds) {
-    return { target: { x: 0, y: 0, z: height / 2 }, distance: VOLUME_AROUND_NEAR_MM };
+    return { target: { x: 0, y: 0, z: middle }, distance: VOLUME_AROUND_NEAR_MM };
   }
   const target = {
     x: (bounds.minX + bounds.maxX) / 2,
     y: (bounds.minY + bounds.maxY) / 2,
-    z: height / 2,
+    z: middle,
   };
   // Габарит берётся с выносом: стены стоят толщиной за своими осями, пол под
   // ними — с напуском (D37), и всё это обязано попасть в кадр.
@@ -7949,7 +8631,7 @@ export function volumeAroundDistance(value) {
  * 195 в обзоре не было — обе стороны это одно и то же направление, и числа от
  * замены не изменились ни на бит.
  *
- * Поправка **ограничена** `VOLUME_AROUND_PAN_TILT_MIN`: у почти
+ * Поправка **ограничена** `VOLUME_AROUND_TILT_MIN`: у почти
  * горизонтального взгляда она уходит в бесконечность — пол под пальцем там
  * лежит у горизонта, то есть в километрах, — и один мах уносил бы обзор
  * неизвестно куда. Положе двадцати градусов карта просто отстаёт от пальца, и
@@ -7972,7 +8654,7 @@ export function volumeAroundPan(view, box, panX, panY) {
   // Экранный «верх», положенный на пол: его длина и есть мера сжатия пола
   // (синус наклона). Знака у неё нет — сторону уже дал взгляд.
   const lean = Math.hypot(basis.up.x, basis.up.y);
-  const tilt = Math.max(VOLUME_AROUND_PAN_TILT_MIN, lean);
+  const tilt = Math.max(VOLUME_AROUND_TILT_MIN, lean);
   const across = -(Number(panX) || 0) * perPixel;
   const along = ((Number(panY) || 0) * perPixel) / tilt;
   return {
