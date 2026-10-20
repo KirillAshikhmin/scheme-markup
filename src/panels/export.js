@@ -11,6 +11,7 @@ import {
   elevationPlan,
   findRoom,
   findScheme,
+  projectSite,
   projectStamp,
   roomsInOrder,
   schemeHeightPx,
@@ -56,7 +57,7 @@ import {
 import { GOST_FORMATS } from "../gostSheet.js";
 import { monoSameShapes, monoSameText } from "../mono.js";
 import { canvasStartScale } from "../canvas.js";
-import { stampDialog } from "./stampForm.js";
+import { projectPropsDialog } from "./projectProps.js";
 import { uiButton, uiDialogDepth, uiEl, uiIconButton, uiModal } from "./ui.js";
 
 // Выбор пользователя живёт между открытиями диалога: разбивку и множитель
@@ -358,8 +359,23 @@ function exportGostTableOptions(api, table) {
     mono: exportChoice.mono,
     stamp: projectStamp(project),
     object: project.name,
+    // Адрес объекта (таск 188): графу «наименование здания» заполняет он, когда
+    // лист не сужен помещением. Правило — в `gostStampValues`, здесь только
+    // доставка, как и у имени объекта.
+    address: projectSite(project).address,
     title,
   };
+}
+
+// Дверь к свойствам объекта из окна выгрузки (таск 188). Прежде здесь стояло
+// «Данные для штампа» и открывало своё окно с шестью графами; графы переехали в
+// свойства объекта, и кнопка ведёт туда же — с подсветкой нужного раздела.
+// Выгрузка данные читает (`projectStamp`, `projectSite`), но не спрашивает.
+function propsButton(api, onSaved) {
+  return uiButton(strings.projectProps.open, {
+    title: strings.projectProps.openHint,
+    on: { click: () => projectPropsDialog(api, { focus: "stamp", onSaved }) },
+  });
 }
 
 // ——— диалог таблицы ———————————————————————————————————————————————————
@@ -528,7 +544,7 @@ function exportTableDialog(api) {
   controls.append(
     gostCheck,
     formatField,
-    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refresh) } }),
+    propsButton(api, refresh),
   );
 
   const saved = (name) => notify(text("exportPanel.saved", { name }), "success");
@@ -862,7 +878,7 @@ function exportSchemeDialog(api) {
   controls.append(
     gostCheck,
     formatField,
-    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+    propsButton(api, refreshHint),
   );
 
   const guard = async (run) => {
@@ -1238,7 +1254,7 @@ function exportElevationDialog(api) {
   };
 
   const actions = [
-    uiButton(strings.gost.stampButton, { on: { click: () => stampDialog(api, refreshHint) } }),
+    propsButton(api, refreshHint),
     uiButton(strings.exportPanel.print, {
       on: {
         click: () =>

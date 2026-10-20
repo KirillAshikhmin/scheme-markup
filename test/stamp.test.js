@@ -20,7 +20,7 @@ import {
 } from "../src/model.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { mergeProjects } from "../src/merge.js";
-import { STAMP_LABELS } from "../src/panels/stampForm.js";
+import { STAMP_LABELS } from "../src/panels/projectProps.js";
 import { strings } from "../src/strings.js";
 
 // Объект «прежней разметки»: такой же, каким его оставила сборка до этого

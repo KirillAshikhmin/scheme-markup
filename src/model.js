@@ -6319,6 +6319,312 @@ export function setProjectStamp(project, patch = {}) {
   return { project: withProject(project, { stamp }), stamp: next, changed: true };
 }
 
+// ——— где стоит объект: адрес, координаты, направление верха чертежа ————
+//
+// Таск 188 (требования G283 и G284). Слова заказчика: «в свойствах проекта
+// (новый раздел, там данные что в данных для штампа, адрес, координаты и т.д.)
+// можно указать координаты и тогда по ним надо считать», и отдельно про верх:
+// «Сейчас же по умолчанию у схемы сверху север? А в жизни не всегда так, надо
+// указать направление, куда указывает верх чертежа. В градусах».
+//
+// Три вопроса, но один ответ на «чьё это свойство»: `project.site` — объекта, а
+// не схемы и не метки. Адрес и координаты одни на весь дом; направление — тоже
+// свойство дома, повернуть второй этаж относительно первого нельзя.
+//
+// **Направление ничего не рисует.** Решение заказчика: «направление живёт в
+// свойствах объекта и влияет по сути только на 3д сцену». Ни план, ни чертёж,
+// ни развёртка, ни выгрузки его не спрашивают — его читает объём, когда ставит
+// солнце и месяц (таск 181). Держит это `test/projectSite.test.js`: поворот
+// направления не меняет ни одной нарисованной линии и ни одной строки CSV, а
+// заодно сверяет по исходникам, что ключ никому, кроме объёма, не виден.
+//
+// **Поля необязательные все до единого** (G68; образец — `floor` схемы и
+// `view.gridStepMm`): пустое значение ключ **удаляет**, а когда опустели все —
+// удаляется и сам `site`. Объект, которому ничего этого не задавали, остаётся
+// байт в байт прежним файлом, и `FORMAT_VERSION` ради поля не поднят. Чтение
+// терпимое нарочно: мусор в ключе (чужая версия, правка файла руками) читается
+// как «не задано» и объект не роняет.
+
+// Адрес — одна строка: «Москва, ул. Ленина, 14, кв. 56». Двести знаков с
+// запасом хватает и на садовое товарищество с длинным именем.
+export const PROJECT_ADDRESS_MAX = 200;
+export const PROJECT_LAT_MAX = 90;
+export const PROJECT_LON_MAX = 180;
+// Шесть знаков после точки — это одиннадцать сантиметров на земле. Больше в
+// координатах дома смысла нет: их берут из карты, где палец крупнее дома.
+export const PROJECT_COORDS_DECIMALS = 6;
+// Верх чертежа смотрит на север, пока не сказано иное. Ноль — это и есть
+// «север», поэтому в файл он не пишется: объект без направления и объект, где
+// направление задали нулём, — это один и тот же объект.
+export const PROJECT_TOP_AZIMUTH_DEFAULT = 0;
+
+// Румбы: восемь сторон по 45°, север начинается за 22,5° до нуля. Нужны, чтобы
+// окно сказало словом то, что человек набрал числом, — «90°» и «смотрит на
+// восток» вместе не дают отсчитать градусы в обратную сторону.
+export const AZIMUTH_RHUMBS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+
+/** Румб направления: ключ стороны света для подписи. */
+export function azimuthRhumb(deg) {
+  const value = (((Number(deg) || 0) % 360) + 360) % 360;
+  return AZIMUTH_RHUMBS[Math.round(value / 45) % 8];
+}
+
+function siteText(raw, limit) {
+  // Переводы строк из буфера схлопываются в пробел: адрес — одна строка, а
+  // перенос в ней разложит отрисовка по ширине поля.
+  return String(raw == null ? "" : raw).replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function siteRound(value, decimals) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+// Число из файла: вне диапазона и не число — «не задано».
+function siteDegrees(raw, limit) {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || Math.abs(raw) > limit) return null;
+  return siteRound(raw, PROJECT_COORDS_DECIMALS);
+}
+
+function siteAzimuth(raw) {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return PROJECT_TOP_AZIMUTH_DEFAULT;
+  const value = siteRound(((raw % 360) + 360) % 360, 1);
+  return value >= 360 ? 0 : value;
+}
+
+// ——— разбор координат ————————————————————————————————————————————————
+//
+// Человек берёт координаты из карты и вставляет как есть: «55.7558, 37.6173».
+// Это главный вид, и он обязан проходить без правки руками. Рядом с ним без
+// лишнего кода ложатся ещё три: пробел вместо запятой, запятая вместо точки
+// («55,7558 37,6173» — так копирует карта в русской локали) и градусы с
+// минутами из энциклопедии («55°45′21″N 37°37′02″E»).
+//
+// **Мусор не угадывается.** Одно число, три числа, буквы, «Москва» — отказ
+// строкой в окне: набранного человек не теряет, а молча подставленная точка
+// увела бы солнце в другую страну. Буквы сторон света требуются парой и разных
+// осей: по одной букве непонятно, к какому из двух чисел она относится, а
+// «55N 37N» — это не точка.
+
+const COORD_UNITS = new Map([
+  ["°", "deg"],
+  ["'", "min"],
+  ["′", "min"],
+  ["’", "min"],
+  ['"', "sec"],
+  ["″", "sec"],
+  ["”", "sec"],
+]);
+
+const COORD_HEMIS = new Map([
+  ["N", { axis: "lat", sign: 1 }],
+  ["S", { axis: "lat", sign: -1 }],
+  ["E", { axis: "lon", sign: 1 }],
+  ["W", { axis: "lon", sign: -1 }],
+  ["С", { axis: "lat", sign: 1 }],
+  ["Ю", { axis: "lat", sign: -1 }],
+  ["В", { axis: "lon", sign: 1 }],
+  ["З", { axis: "lon", sign: -1 }],
+]);
+
+const COORD_NUMBER = /(-?\d+(?:[.,]\d+)?)\s*(°|'|′|’|"|″|”)?/g;
+
+// Число с единицей и его знак. Минус живёт отдельно от величины: «-55°45′» —
+// это минус у всей группы, а не у градусов внутри неё.
+function coordTokens(source) {
+  const tokens = [];
+  for (const match of source.matchAll(COORD_NUMBER)) {
+    tokens.push({
+      value: Math.abs(Number(match[1].replace(",", "."))),
+      unit: COORD_UNITS.get(match[2]) || "",
+      minus: match[1].startsWith("-"),
+    });
+  }
+  // Всё, что не число, не единица и не разделитель, — мусор: «55.7, Москва»
+  // лучше отвергнуть, чем взять от него первую половину.
+  if (/[^\s,;]/.test(source.replace(COORD_NUMBER, " "))) throw modelError("coordsInvalid");
+  return tokens;
+}
+
+// Группа — это одно число координаты: градусы и, если их писали минутами,
+// минуты с секундами.
+function coordGroupValue(group) {
+  const order = ["deg", "min", "sec"];
+  if (group.length > 3) throw modelError("coordsInvalid");
+  group.forEach((token, index) => {
+    if (token.unit && token.unit !== order[index]) throw modelError("coordsInvalid");
+  });
+  for (const token of group.slice(1)) {
+    // Минус и шестьдесят минут внутри градуса — описка, а не координата.
+    if (token.minus || token.value >= 60) throw modelError("coordsInvalid");
+  }
+  const value = group[0].value + (group[1] ? group[1].value / 60 : 0) + (group[2] ? group[2].value / 3600 : 0);
+  return { value, minus: group[0].minus };
+}
+
+function coordsChecked(lat, lon) {
+  if (Math.abs(lat) > PROJECT_LAT_MAX || Math.abs(lon) > PROJECT_LON_MAX) {
+    throw modelError("coordsRange", { lat: PROJECT_LAT_MAX, lon: PROJECT_LON_MAX });
+  }
+  return { lat: siteRound(lat, PROJECT_COORDS_DECIMALS), lon: siteRound(lon, PROJECT_COORDS_DECIMALS) };
+}
+
+/**
+ * Координаты из строки: `null` — пусто («не задано»), мусор — отказ с текстом.
+ * Принимает и пару чисел, и градусы с минутами; буквы сторон света, если они
+ * есть, сами говорят, где из двух чисел широта («37.6173E 55.7558N» — та же
+ * точка, просто записанная наоборот).
+ */
+export function parseCoords(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") {
+    const lat = siteDegrees(value.lat, PROJECT_LAT_MAX);
+    const lon = siteDegrees(value.lon, PROJECT_LON_MAX);
+    return lat === null || lon === null ? null : { lat, lon };
+  }
+  const raw = String(value).trim();
+  if (raw === "") return null;
+  // Неразрывный пробел из карты, типографский минус и сдвоенный штрих вместо
+  // секунд — невидимая глазом разница, из-за которой вставка не должна падать.
+  let source = raw
+    .replace(/[   ]/g, " ")
+    .replace(/[−–—]/g, "-")
+    .replace(/''/g, "″");
+  const hemis = [];
+  source = source.replace(/[A-Za-zА-Яа-яЁё]+/g, (word) => {
+    const key = word.toUpperCase();
+    if (word.length !== 1 || !COORD_HEMIS.has(key)) throw modelError("coordsInvalid");
+    hemis.push(COORD_HEMIS.get(key));
+    return " ";
+  });
+  const tokens = coordTokens(source);
+  // Знак градуса в строке и решает, как её читать: с ним числа собираются в
+  // две группы «градусы-минуты-секунды», без него каждое число само себе
+  // координата — «55.7558, 37.6173» это пара, а не градусы с минутами.
+  const sexagesimal = tokens.some((token) => token.unit !== "");
+  const groups = [];
+  for (const token of tokens) {
+    if (!sexagesimal || token.unit === "deg" || groups.length === 0) groups.push([token]);
+    else groups[groups.length - 1].push(token);
+  }
+  if (groups.length !== 2) throw modelError("coordsInvalid");
+  const parts = groups.map(coordGroupValue);
+  if (hemis.length === 0) {
+    return coordsChecked((parts[0].minus ? -1 : 1) * parts[0].value, (parts[1].minus ? -1 : 1) * parts[1].value);
+  }
+  if (hemis.length !== 2 || hemis[0].axis === hemis[1].axis) throw modelError("coordsInvalid");
+  // Буква уже сказала сторону — минус рядом с ней значил бы её же наоборот.
+  if (parts.some((part) => part.minus)) throw modelError("coordsInvalid");
+  const byAxis = {};
+  hemis.forEach((hemi, index) => {
+    byAxis[hemi.axis] = hemi.sign * parts[index].value;
+  });
+  return coordsChecked(byAxis.lat, byAxis.lon);
+}
+
+/** Координаты строкой в том же виде, в каком их дала карта. */
+export function formatCoords(coords) {
+  if (!coords || typeof coords.lat !== "number" || typeof coords.lon !== "number") return "";
+  return coords.lat + ", " + coords.lon;
+}
+
+/** Направление верха чертежа из строки: `null` — пусто, мусор — отказ. */
+export function parseTopAzimuth(value) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).replace(/°/g, "").trim();
+  if (raw === "") return null;
+  const number = Number(raw.replace(",", "."));
+  if (!Number.isFinite(number)) throw modelError("azimuthInvalid");
+  // Круг замкнут, и «-90» — это законные 270: человек вправе отсчитать против
+  // часовой. Дальше круга — описка («3600»), и её лучше вернуть вслух.
+  if (Math.abs(number) > 360) throw modelError("azimuthRange");
+  return siteAzimuth(number);
+}
+
+/**
+ * Свойства объекта: адрес, координаты и направление верха чертежа. Читать
+ * `project.site` самому нельзя — у объекта прежней разметки поля нет вовсе, а
+ * мусор здесь же становится «не задано».
+ *
+ * Широта и долгота — **пара**: одна без другой не точка, и половина пары
+ * читается как «координат нет».
+ */
+export function projectSite(project) {
+  const raw =
+    project && project.site && typeof project.site === "object" && !Array.isArray(project.site) ? project.site : {};
+  const lat = siteDegrees(raw.lat, PROJECT_LAT_MAX);
+  const lon = siteDegrees(raw.lon, PROJECT_LON_MAX);
+  const paired = lat !== null && lon !== null;
+  return {
+    address: siteText(raw.address, PROJECT_ADDRESS_MAX),
+    lat: paired ? lat : null,
+    lon: paired ? lon : null,
+    topAzimuthDeg: siteAzimuth(raw.topAzimuthDeg),
+  };
+}
+
+/** Координаты объекта или `null`. По ним объём считает рассвет и закат. */
+export function projectCoords(project) {
+  const site = projectSite(project);
+  return site.lat === null || site.lon === null ? null : { lat: site.lat, lon: site.lon };
+}
+
+/**
+ * Направление верха чертежа в градусах от севера по часовой стрелке. Не
+ * задано — ноль, то есть верх плана смотрит на север.
+ */
+export function projectTopAzimuth(project) {
+  return projectSite(project).topAzimuthDeg;
+}
+
+/** Заполнено ли хоть что-нибудь. Пусто — это не ошибка, но сказать честнее. */
+export function projectHasSite(project) {
+  const site = projectSite(project);
+  return site.address !== "" || site.lat !== null || site.topAzimuthDeg !== PROJECT_TOP_AZIMUTH_DEFAULT;
+}
+
+/**
+ * Правка свойств объекта. `coords` принимает строку из карты (разбор —
+ * `parseCoords`), `topAzimuthDeg` — строку или число. Пустые поля в объекте не
+ * хранятся, а когда пустыми стали все — поле `site` **убирается**: объект
+ * возвращается ровно в то состояние, в котором был до заполнения.
+ */
+export function setProjectSite(project, patch = {}) {
+  const before = projectSite(project);
+  const next = { ...before };
+  const given = (field) => Object.prototype.hasOwnProperty.call(patch, field);
+  if (given("address")) next.address = siteText(patch.address, PROJECT_ADDRESS_MAX);
+  if (given("coords")) {
+    const coords = parseCoords(patch.coords);
+    next.lat = coords ? coords.lat : null;
+    next.lon = coords ? coords.lon : null;
+  }
+  if (given("topAzimuthDeg")) {
+    const azimuth = parseTopAzimuth(patch.topAzimuthDeg);
+    next.topAzimuthDeg = azimuth === null ? PROJECT_TOP_AZIMUTH_DEFAULT : azimuth;
+  }
+  // Правка, ничего не изменившая, объект не трогает: иначе «Сохранить» без
+  // единой правки переписывало бы время объекта и ломало сравнение файлов.
+  const same =
+    next.address === before.address &&
+    next.lat === before.lat &&
+    next.lon === before.lon &&
+    next.topAzimuthDeg === before.topAzimuthDeg;
+  if (same) return { project, site: next, changed: false };
+  const site = {};
+  if (next.address !== "") site.address = next.address;
+  if (next.lat !== null && next.lon !== null) {
+    site.lat = next.lat;
+    site.lon = next.lon;
+  }
+  if (next.topAzimuthDeg !== PROJECT_TOP_AZIMUTH_DEFAULT) site.topAzimuthDeg = next.topAzimuthDeg;
+  if (Object.keys(site).length === 0) {
+    const { site: dropped, ...rest } = project;
+    return { project: withProject(rest, {}), site: next, changed: true };
+  }
+  return { project: withProject(project, { site }), site: next, changed: true };
+}
+
 // ——— правка вершин ломаной ————————————————————————————————————————————
 //
 // Та же рука, что правит контур помещения: вершину двигают, добавляют между

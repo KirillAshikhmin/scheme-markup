@@ -7,7 +7,6 @@ import {
   fillTypeSizes,
   migrateCommentType,
   migrateTypeKinds,
-  updateProject,
 } from "../model.js";
 import {
   deleteImage,
@@ -23,7 +22,8 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
-import { formatMegabytes, uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+import { formatMegabytes, uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
+import { projectPropsDialog } from "./projectProps.js";
 import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
 import { openProjectFileDialog } from "./file.js";
 
@@ -58,9 +58,12 @@ function mountProjectsPanel(host, api) {
   // нарисованные линиями, и «＋» с корзиной-эмодзи выпадали из ряда — у них
   // своя толщина, свой размер и свой цвет. Слово у каждой кнопки осталось:
   // оно в подсказке и в `aria-label`.
-  const renameButton = uiIconButton("edit", {
-    label: strings.projects.rename,
-    on: { click: () => renameCurrent() },
+  // Карандаш открывает свойства объекта (таск 188): имя, адрес, координаты,
+  // направление верха чертежа и графы штампа. Прежде он открывал одно имя, а
+  // графы штампа жили за кнопкой в окне выгрузки.
+  const propsButton = uiIconButton("edit", {
+    label: strings.projects.props,
+    on: { click: () => projectPropsDialog(api) },
   });
   const createButton = uiIconButton("plus", {
     label: strings.projects.create,
@@ -73,7 +76,7 @@ function mountProjectsPanel(host, api) {
     label: strings.projects.remove,
     on: { click: () => removeCurrent() },
   });
-  host.replaceChildren(select, createButton, renameButton, removeButton);
+  host.replaceChildren(select, createButton, propsButton, removeButton);
 
   function currentId() {
     const state = getState();
@@ -91,13 +94,13 @@ function mountProjectsPanel(host, api) {
     }
     select.value = id;
     const has = Boolean(id);
-    renameButton.disabled = !has;
+    propsButton.disabled = !has;
     removeButton.disabled = !has;
     // Режим просмотра: объект выбирается, но не заводится, не переименовывается
     // и не удаляется — на объекте с телефоном это только риск.
     const editable = layoutAllows("editProject", getState().layout);
     createButton.hidden = !editable;
-    renameButton.hidden = !editable;
+    propsButton.hidden = !editable;
     removeButton.hidden = !editable;
   }
 
@@ -148,20 +151,6 @@ function mountProjectsPanel(host, api) {
     renderList();
     notify(text("projects.created", { name: project.name }), "success");
     return project;
-  }
-
-  async function renameCurrent() {
-    const state = getState();
-    if (!state.project) return;
-    const name = await uiPrompt({
-      title: strings.projects.renameTitle,
-      value: state.project.name,
-      placeholder: strings.projects.namePlaceholder,
-    });
-    if (!name || name === state.project.name) return;
-    const next = updateProject(state.project, { name });
-    setState({ project: next.project });
-    await refreshList();
   }
 
   async function removeCurrent() {
