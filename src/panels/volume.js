@@ -34,6 +34,13 @@
 import { PANEL_IDS, cancelFrame, layoutAllows, registerPanel, scheduleFrame, screenMode } from "../app.js";
 import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasFullscreenBare, canvasFullscreenOn } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
+import {
+  createVolumeParams,
+  volumeParamsArrive,
+  volumeParamsClock,
+  volumeParamsRead,
+  volumeParamsWatch,
+} from "./volumeParams.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
 import { gesturePinchOf, gesturePinchStep } from "../gestures.js";
@@ -53,6 +60,7 @@ import {
   VOLUME_AROUND_NEAR_MM,
   VOLUME_AROUND_PITCH_DEG,
   VOLUME_LOOK_DEG_PX,
+  VOLUME_MOOD_MS,
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_POINT,
   VOLUME_MARK_NO_SIZE,
@@ -74,8 +82,11 @@ import {
   volumeChannelLines,
   volumeChannelLinks,
   volumeDoorAt,
+  volumeClockMinutes,
+  volumeDayTimes,
   volumeDraw,
   volumeDrawBackdrop,
+  volumeMood,
   volumeFloorAt,
   volumeFloors,
   volumeFrame,
@@ -88,6 +99,8 @@ import {
   volumeSightAt,
   volumeRoomAt,
   volumeScene,
+  volumeShadowFaces,
+  volumeSiteOf,
   volumeDrawn,
   volumeSelectLines,
   volumeStairNear,
@@ -315,8 +328,17 @@ export function volumeWhere(project, scene, at) {
  * **На узком или низком поле миникарты нет вовсе.** Это и есть ответ на «проверь,
  * что не загораживает вид»: накладка в треть кадра загораживает его по
  * определению, и честнее не показывать её, чем показывать поверх комнаты.
+ *
+ * `shown` — отметка «Показывать миникарту» из окна параметров (таск 181,
+ * G273). Правило про размер поля она **не отменяет и не повторяет**: это
+ * второй повод не показывать карту, а не второе правило о том, где она
+ * помещается. Поэтому отметка стоит здесь, в единственном месте, которое
+ * отвечает «есть ли карта» — её же спрашивают и рисование, и щелчок по карте, и
+ * отступ столбика стойки. Заведи её в поле отдельно — и столбик встал бы над
+ * картой, которой нет.
  */
-export function volumeMinimapBox(box, bounds) {
+export function volumeMinimapBox(box, bounds, shown = true) {
+  if (shown === false) return null;
   if (!bounds || !(bounds.widthMm > 0) || !(bounds.heightMm > 0)) return null;
   if (box.width < 520 || box.height < 320) return null;
   const width = Math.max(110, Math.min(220, box.width * 0.2));
@@ -335,8 +357,8 @@ const VOLUME_MINIMAP_PAD = 8;
  * Считай их врозь, и щелчок однажды поедет мимо того места, которое человек
  * видел под курсором.
  */
-export function volumeMinimapView(box, bounds) {
-  const place = volumeMinimapBox(box, bounds);
+export function volumeMinimapView(box, bounds, shown = true) {
+  const place = volumeMinimapBox(box, bounds, shown);
   if (!place) return null;
   const zoom = Math.min(
     (place.width - VOLUME_MINIMAP_PAD * 2) / bounds.widthMm,
@@ -411,8 +433,8 @@ export function volumePlanViewAt(project, schemeId, box, view, pointMm) {
  * Чистая и вынесена наружу ради теста: промах здесь — это «ткнул в кухню, а
  * оказался в ванной», и ловить его глазами дорого.
  */
-export function volumeMinimapAt(box, bounds, at) {
-  const view = volumeMinimapView(box, bounds);
+export function volumeMinimapAt(box, bounds, at, shown = true) {
+  const view = volumeMinimapView(box, bounds, shown);
   if (!view || !at) return null;
   const { place, zoom } = view;
   if (!(zoom > 0)) return null;
@@ -454,8 +476,8 @@ export const VOLUME_FIELD_EDGE = 18;
  * 166, G245). Имя осталось прежним нарочно — отступ принадлежит низу столбика,
  * а не той или иной кнопке в нём, и переименование ничего бы не уточнило.
  */
-export function volumeFieldBottom(box, bounds) {
-  const place = volumeMinimapBox(box, bounds);
+export function volumeFieldBottom(box, bounds, shown = true) {
+  const place = volumeMinimapBox(box, bounds, shown);
   if (!place) return VOLUME_FIELD_EDGE;
   return Math.round(box.height - place.y + 12);
 }
@@ -805,6 +827,22 @@ function createVolume({ api, hosts }) {
     });
 
   let scene = sceneOf(getState());
+  // ——— час суток (таск 181, G282) ———
+  //
+  // Снимок часа (`volumeMood`) держится здесь и пересчитывается **не чаще раза
+  // в секунду** — прямое требование заказчика («не каждый кадр, а, хотя бы раз
+  // в секунду»). Кадр о времени не знает ничего: он берёт готовые цвета, тон
+  // комнаты и готовые грани тени.
+  //
+  // **Стоячее время не считается вовсе:** таймера нет, снимок посчитан один раз
+  // и живёт, пока человек не тронет часы. Погас режим — таймер тоже снимается:
+  // поверхность жива, но фон за погашенным полем пересчитывать незачем, а
+  // идущее время — формула, и вернувшийся человек получает свой час одним
+  // умножением (`volumeClockMinutes`).
+  let hour = null;
+  let hourTick = 0;
+  // Грани тени дома в этот час: собираются вместе со снимком, а не в кадре.
+  let shadow = [];
   let view = "around";
   let closed = false;
   let frame = 0;
@@ -997,6 +1035,22 @@ function createVolume({ api, hosts }) {
   // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
   // стоит сводка, а ещё правее — кнопка полноэкранного показа.
   const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
+  // Параметры объёма — третья ячейка правого верхнего угла (таск 181, G273):
+  // полный экран, смена вида, параметры. Разбор, почему дверь одна и почему
+  // она на поле во всех раскладках, — в `panels/volumeParams.js`.
+  //
+  // Час и рассвет окно спрашивает **у поля**, а не считает само: иначе в сборке
+  // стало бы два ответа на вопрос «который час в объёме», и расходились бы они
+  // ровно в ту секунду, на которую поле снимок придерживает.
+  const paramsButton = createVolumeParams({
+    now: () => Date.now(),
+    hour: () => hourNow(),
+    times: () => dayTimes().times,
+  });
+  // Выбор человека поле слушает **всю свою жизнь**, а не пока открыто окно:
+  // этой же подпиской приезжают настройки из хранилища (читаются они
+  // асинхронно, как у плашек и слоёв, и первый кадр рисуется умолчаниями).
+  const stopParams = volumeParamsWatch(() => paramsChanged());
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
@@ -1004,6 +1058,7 @@ function createVolume({ api, hosts }) {
     padNode,
     stanceBox,
     viewButton,
+    paramsButton.node,
     aimNode,
     hintPlate.node,
     askBox,
@@ -1213,7 +1268,73 @@ function createVolume({ api, hosts }) {
    * показывают.
    */
   function placeStance() {
-    stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm) + "px";
+    stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm, volumeParamsRead().minimap) + "px";
+  }
+
+  // ——— час суток: один снимок на секунду ———
+
+  /** Сцена и тень под ней меняются вместе: тень держится за габариты стен. */
+  function setScene(state) {
+    scene = sceneOf(state) || scene;
+    refreshShadow();
+  }
+
+  function refreshShadow() {
+    shadow = volumeShadowFaces(scene.shadowBoxes, hour ? hour.shadow : null);
+  }
+
+  /** Рассвет и закат этого объекта: по координатам (таск 188) или умолчанием. */
+  function dayTimes() {
+    const site = volumeSiteOf(getState().project);
+    return { site, times: volumeDayTimes(site, new Date()) };
+  }
+
+  /** Снимок часа. Нет его — считается; есть — берётся готовым. */
+  function hourNow() {
+    return hour || refreshHour();
+  }
+
+  function refreshHour() {
+    const at = Date.now();
+    const { site, times } = dayTimes();
+    hour = volumeMood({
+      minutes: volumeClockMinutes(volumeParamsClock(at), at),
+      times,
+      topDeg: site.topDeg,
+      kind: volumeParamsRead().kind,
+    });
+    refreshShadow();
+    return hour;
+  }
+
+  /**
+   * Таймер часа. Стоит он ровно тогда, когда времени есть куда идти: поле на
+   * экране и время не остановлено. Во всех остальных случаях таймера нет
+   * вовсе — это и есть «при фиксированном времени фон не пересчитывается».
+   */
+  function syncClock() {
+    const clock = volumeParamsRead().clock;
+    const running = !closed && screenMode() === "volume" && !(clock && clock.fixed);
+    if (running === Boolean(hourTick)) return;
+    if (!running) {
+      if (typeof clearInterval === "function") clearInterval(hourTick);
+      hourTick = 0;
+      return;
+    }
+    if (typeof setInterval !== "function") return;
+    hourTick = setInterval(() => {
+      if (closed) return;
+      refreshHour();
+      paint();
+    }, VOLUME_MOOD_MS);
+  }
+
+  /** Правку в окне параметров поле принимает одним путём: час заново и кадр. */
+  function paramsChanged() {
+    refreshHour();
+    syncClock();
+    placeStance();
+    paint();
   }
 
   function paint() {
@@ -1224,9 +1345,11 @@ function createVolume({ api, hosts }) {
     ctx.clearRect(0, 0, node.width, node.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const spot = camera();
+    const at = hourNow();
     // Фон — настоящая панорама вокруг дома (G208): он знает о камере её
-    // направление и больше ничего, и поворачивается вслед за головой.
-    volumeDrawBackdrop(ctx, box, spot);
+    // направление и больше ничего, и поворачивается вслед за головой. Про время
+    // он не считает ничего — час приходит готовым снимком.
+    volumeDrawBackdrop(ctx, box, spot, at);
     if (scene.empty) {
       shown = [];
       return;
@@ -1234,7 +1357,10 @@ function createVolume({ api, hosts }) {
     // Кружок «вы здесь» рисуется только в обзоре: от первого лица человек и
     // так знает, где стоит, а под ногами кружок закрыл бы пол.
     const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
-    shown = volumeFrame(scene, spot, box, [...overlay, ...marker]);
+    // Тень дома идёт в кадр `extra`, а не гранью сцены: её кладёт час (таск
+    // 181), и ярус у неё тот же, что был, — пол помещения по-прежнему ложится
+    // поверх неё.
+    shown = volumeFrame(scene, spot, box, [...shadow, ...overlay, ...marker], at.tint);
     volumeDraw(ctx, shown);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);
@@ -1255,7 +1381,7 @@ function createVolume({ api, hosts }) {
 
   function paintMinimap(box) {
     const bounds = scene.boundsMm;
-    const spot = volumeMinimapView(box, bounds);
+    const spot = volumeMinimapView(box, bounds, volumeParamsRead().minimap);
     if (!spot) return;
     const place = spot.place;
     const state = getState();
@@ -1492,7 +1618,7 @@ function createVolume({ api, hosts }) {
   // считать её заново дешевле, чем держать второй путь «подмени одно полотно».
   // На объекте заказчика это 8 мс и происходит по нажатию клавиши, а не в кадре.
   function rebuildScene() {
-    scene = sceneOf(getState()) || scene;
+    setScene(getState());
     rebuildOverlay();
     // Низкое место могли убрать с чертежа, пока человек сидел под ним (G234).
     stanceRecheck();
@@ -1942,7 +2068,7 @@ function createVolume({ api, hosts }) {
       // вплотную к ней, а место теснее тела меняет на ближайшее свободное
       // (D39). Второго правила «куда можно встать» в сборке нет.
       if (view === "person" && !locked) {
-        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at);
+        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at, volumeParamsRead().minimap);
         if (spot) {
           const moved = volumeMoveTo(scene, spot, volumeStanceHead(stance));
           person.x = moved.x;
@@ -2271,7 +2397,7 @@ function createVolume({ api, hosts }) {
     // обязаны говорить про тот этаж, на котором человек стоит. Своя подписка
     // этого изменения не увидит как смены схемы — `schemeId` уже равен ему.
     setState({ schemeId });
-    scene = sceneOf(state) || scene;
+    setScene(state);
     const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
@@ -2331,7 +2457,7 @@ function createVolume({ api, hosts }) {
     const place = visited.get(back.schemeId) || null;
     schemeId = back.schemeId;
     setState({ schemeId });
-    scene = sceneOf(state) || scene;
+    setScene(state);
     if (!scene.empty) {
       const at = place || { x: person.x, y: person.y, yaw: person.yaw };
       const moved = volumeMoveTo(scene, at, volumeStanceHead(stance));
@@ -2694,6 +2820,10 @@ function createVolume({ api, hosts }) {
       cancelFrame(frame);
       frame = 0;
     }
+    if (hourTick && typeof clearInterval === "function") clearInterval(hourTick);
+    hourTick = 0;
+    stopParams();
+    paramsButton.dispose();
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
     if (unsubscribe) unsubscribe();
     window.removeEventListener("pointermove", onPointerMove);
@@ -2719,7 +2849,7 @@ function createVolume({ api, hosts }) {
   function followScheme(state) {
     leaveScheme();
     schemeId = state.schemeId;
-    scene = sceneOf(state) || scene;
+    setScene(state);
     if (!scene.empty) {
       const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
       person.x = moved.x;
@@ -2759,12 +2889,21 @@ function createVolume({ api, hosts }) {
         if ("screen" in changed && state.screen === "volume") {
           resize();
           placeArrive(state);
+          // «При открытии стоит реальное время» (G282): идущие часы
+          // перецепляются за настоящий час, остановленные остаются стоять.
+          volumeParamsArrive(Date.now());
+          refreshHour();
+          syncClock();
           sync();
           if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
         // Режим сменили на другой — оставляем схеме и чертежу то место, где
         // стоял человек (G276).
-        if ("screen" in changed && state.screen !== "volume") placeLeave(state);
+        if ("screen" in changed && state.screen !== "volume") {
+          placeLeave(state);
+          // Поле погасло — таймеру часа идти незачем.
+          syncClock();
+        }
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
         if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
@@ -2772,7 +2911,7 @@ function createVolume({ api, hosts }) {
         // заново: спрятанной вещи в ней нет ни гранью, ни препятствием.
         const objectsChanged = "objectsShown" in changed || "hiddenObjectIds" in changed;
         if (!("project" in changed) && !("filter" in changed) && !objectsChanged) return;
-        scene = sceneOf(state) || scene;
+        setScene(state);
         sync();
       })
     : null;
@@ -2796,6 +2935,9 @@ function createVolume({ api, hosts }) {
   document.addEventListener("pointerlockchange", onLockChange);
   for (const name of FULLSCREEN_EVENTS) document.addEventListener(name, onFullscreenChange);
 
+  volumeParamsArrive(Date.now());
+  refreshHour();
+  syncClock();
   sync();
   resize();
   // Первый вход в режим: человек встаёт туда, где была середина поля, с

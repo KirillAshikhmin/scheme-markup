@@ -103,7 +103,7 @@ test("кнопка вида стоит ровно под кнопкой полн
   assert.ok(CORNER.gap >= 4 && CORNER.gap <= CORNER.size / 2);
 });
 
-test("развёрнутая плашка на узком экране уходит под кнопки угла, а в «Объёме» — под обе", () => {
+test("развёрнутая плашка на узком экране уходит под кнопки угла, а в «Объёме» — под все три", () => {
   const row = ruleBody(CANVAS_CSS, "#app.is-mobile .canvas-hint:not(.is-collapsed)");
   const one = px(prop(row, "top"), CORNER.mobileSize);
   assert.equal(one, CORNER.edge + CORNER.mobileSize + CORNER.gap, "плашка легла на верхний ряд кнопок");
@@ -112,10 +112,17 @@ test("развёрнутая плашка на узком экране уход�
     "#app.is-mobile .volume__stage .canvas-hint.canvas-hint--info:not(.is-collapsed)",
   );
   const two = px(prop(second, "top"), CORNER.mobileSize);
-  // В объёме ячеек две — полный экран и вид: сводка опускается под обе, иначе
-  // она накрыла бы смену вида и съела её нажатия.
-  assert.equal(two, CORNER.edge + 2 * (CORNER.mobileSize + CORNER.gap));
+  // В объёме ячеек три — полный экран, вид и параметры объёма (таск 181):
+  // сводка опускается под все, иначе она накрыла бы кнопку, в которую целится
+  // палец, и съела бы её нажатия.
+  assert.equal(two, CORNER.edge + 3 * (CORNER.mobileSize + CORNER.gap));
   assert.ok(two > one);
+  // И столбик угла остаётся столбиком: у третьей ячейки то же правое поле и та
+  // же мера, что у второй, — своих чисел у неё нет.
+  const params = ruleBody(VOLUME_CSS, ".volume__paramsBtn");
+  const viewBtn = ruleBody(VOLUME_CSS, ".volume__viewBtn");
+  assert.equal(prop(params, "right"), prop(viewBtn, "right"));
+  assert.equal(px(prop(params, "top"), CORNER.size), CORNER.edge + 2 * (CORNER.size + CORNER.gap));
 });
 
 // ——— полный экран «Объёма»: что уходит и что остаётся (G246) ———————————————

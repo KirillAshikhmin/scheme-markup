@@ -206,6 +206,7 @@ import {
   volumeMinimapView,
   volumeNotes,
   volumeFieldBottom,
+  VOLUME_FIELD_EDGE,
   volumePadVector,
   volumeFloorAction,
   volumeFloorName,
@@ -216,6 +217,12 @@ import {
   volumeUnplacedTitle,
   volumeWhere,
 } from "../src/panels/volume.js";
+import {
+  volumeParamsLine,
+  volumeParamsSunLine,
+  volumePhaseWord,
+  volumeSpeedLabel,
+} from "../src/panels/volumeParams.js";
 import {
   screenPlaceDrawing,
   screenPlaceForget,
@@ -2273,6 +2280,45 @@ test("миникарта живёт в левом нижнем углу и ух�
   assert.equal(volumeMinimapBox({ width: 1432, height: 300 }, bounds), null);
   // Нет габарита чертежа — нечего и рисовать.
   assert.equal(volumeMinimapBox(box, null), null);
+  // Отметка «Показывать миникарту» (таск 181, G273) — второй повод не
+  // показывать карту, а не второе правило о том, где она помещается: снятая
+  // убирает её с любого поля, взведённая правила по размеру не отменяет.
+  assert.equal(volumeMinimapBox(box, bounds, false), null);
+  assert.deepEqual(volumeMinimapBox(box, bounds, true), place);
+  assert.equal(volumeMinimapBox({ width: 420, height: 580 }, bounds, true), null);
+  // Одно место отвечает «есть ли карта» — его же спрашивают щелчок по карте и
+  // отступ столбика стойки, иначе столбик встал бы над картой, которой нет.
+  assert.equal(volumeMinimapView(box, bounds, false), null);
+  assert.equal(volumeMinimapAt(box, bounds, { x: place.x + 10, y: place.y + 10 }, false), null);
+  assert.equal(volumeFieldBottom(box, bounds, false), VOLUME_FIELD_EDGE);
+  assert.ok(volumeFieldBottom(box, bounds, true) > VOLUME_FIELD_EDGE);
+});
+
+test("окно параметров: подписи ускорения и строка состояния часов (таск 181)", () => {
+  // Подпись называет то, что заказчик просил назвать: за сколько минут проходят
+  // сутки. Число — счёт, а не словарная строка, и 1,5 пишется с запятой.
+  assert.equal(volumeSpeedLabel(60), "×60 — сутки за 24 мин");
+  assert.equal(volumeSpeedLabel(960), "×960 — сутки за 1,5 мин");
+  assert.equal(volumeSpeedLabel(7), volumeSpeedLabel(VOLUME_CLOCK_SPEED_DEFAULT), "чужое ускорение — умолчание");
+  // Слова часа — те же четыре, которыми названы отрезки суток.
+  assert.equal(volumePhaseWord("night"), strings.volume.phaseNight);
+  assert.equal(volumePhaseWord("morning"), strings.volume.phaseMorning);
+  assert.equal(volumePhaseWord("day"), strings.volume.phaseDay);
+  assert.equal(volumePhaseWord("evening"), strings.volume.phaseEvening);
+  assert.equal(volumePhaseWord("пятница"), strings.volume.phaseNight, "неизвестный час — ночь, а не пустота");
+  // Строка состояния говорит и который час, и идёт ли он: «время стоит» — это
+  // то же самое, что «фон не пересчитывается вовсе», словами человека.
+  const running = volumeClockNow(0, new Date(2026, 9, 20, 2, 14), 240);
+  const line = volumeParamsLine(running, 134, "night");
+  assert.ok(line.includes("02:14") && line.includes("ночь") && line.includes("6"), line);
+  const fixed = volumeParamsLine(volumeClockFixed(134, 240), 134, "night");
+  assert.ok(fixed.includes("02:14") && fixed.includes("стоит"), fixed);
+  assert.ok(!fixed.includes("сутки"), "у стоячего времени суток не бывает: " + fixed);
+  // Рассвет и закат: сказано, откуда они взялись.
+  const own = volumeParamsSunLine({ riseMin: 300, setMin: 1300, bySite: true });
+  assert.ok(own.includes("05:00") && own.includes("21:40") && own.includes("координат"), own);
+  const plain = volumeParamsSunLine({ riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false });
+  assert.ok(plain.includes("09:00") && plain.includes("21:00") && plain.includes("умолчание"), plain);
 });
 
 test("щелчок по миникарте читается местом на плане (G270)", () => {
