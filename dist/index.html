@@ -5723,6 +5723,12 @@ body {
   top: 0;
   z-index: 2;
   background: var(--panel-bg);
+  /* Кнопок в заголовке две (таск 198): галочка и имя. Галочка сворачивает
+     всегда, имя — сворачивает на своём месте и перелистывает к разделу, когда
+     заголовок нарисован у кромки колонки. Ряд, а не кнопка в кнопке: вложенных
+     кнопок в разметке не бывает. */
+  display: flex;
+  align-items: stretch;
 }
 
 /* Раздел ещё ниже кадра — его заголовок стоит у нижней кромки колонки (таск
@@ -5739,13 +5745,42 @@ body {
   box-shadow: 0 -1px 0 var(--panel-line);
 }
 
+/* Галочка — своя кнопка, и дело у неё одно: свернуть раздел. Этим она и
+   ценна — заголовок в рейке перелистывает, а свернуть невидимый раздел
+   человеку всё равно нужно (так прячут список меток, чтобы добраться до
+   справочника). Поле слева прежнее заголовочное, справа — просвет до имени. */
+.panel__fold {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 9px 4px 7px 12px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  /* Тот же кегль, что у имени: заголовок — `h2`, и `font: inherit` принесло бы
+     сюда его полуторный размер, подняв высоту всей строки на пять точек. А по
+     высоте заголовка считается рейка. */
+  font-size: 11px;
+  line-height: 1;
+  color: var(--panel-muted);
+}
+
+.panel__fold:hover,
+.panel__fold:focus-visible {
+  color: var(--panel-text);
+}
+
 .panel__title {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  /* Остаток строки: по имени раздела попадают не целясь, и у рейки это
+     единственная цель перелистывания. */
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
-  padding: 9px 12px 7px;
+  padding: 9px 12px 7px 2px;
   border: 0;
   background: none;
   cursor: pointer;
@@ -6249,7 +6284,14 @@ body {
       <!-- Разделы обеих колонок устроены одинаково: кликабельный заголовок
            сворачивает раздел, заголовок липнет к верху колонки, тело листается
            под ним. Растущий раздел в колонке один — список, которому нужно
-           место: слева схемы, справа метки. -->
+           место: слева схемы, справа метки.
+
+           Кнопок в заголовке две (таск 198). Галочка слева сворачивает раздел —
+           всегда, где бы заголовок ни был нарисован. Имя сворачивает, пока
+           заголовок стоит на своём месте, и **перелистывает к разделу**, когда
+           он нарисован у кромки колонки: там он указатель, а не кнопка
+           («нажал — прыгнуло туда»). Решает это `panels/rail.js` — разметка о
+           прокрутке не знает ничего. -->
       <aside id="panel-left" class="panel">
         <!-- Верхний блок левой колонки свой в каждом режиме (таск 153): в Схеме
              «Метки», в Чертеже инструменты, в Объёме вид и этаж. Три раздела
@@ -6257,8 +6299,10 @@ body {
              «Помещения», «Схемы» и «Интерфейс проекта» общие на все три. -->
         <section class="panel__section panel__section--screen" data-section-id="drawTools">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawTools" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawTools" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawTools">
               <span class="panel__name" data-text="panels.drawTools"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6267,8 +6311,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="volumeTools">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="volumeTools" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="volumeTools" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="volumeTools">
               <span class="panel__name" data-text="panels.volumeTools"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6277,8 +6323,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="marks">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="marks" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="marks" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="marks">
               <span class="panel__name" data-text="panels.marks"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6287,8 +6335,10 @@ body {
         </section>
         <section class="panel__section" data-section-id="rooms">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="rooms" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="rooms" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="rooms">
               <span class="panel__name" data-text="panels.rooms"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6297,8 +6347,10 @@ body {
         </section>
         <section class="panel__section panel__section--grow" data-section-id="schemes">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="schemes" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="schemes" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="schemes">
               <span class="panel__name" data-text="panels.schemes"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6307,8 +6359,10 @@ body {
         </section>
         <section class="panel__section" data-section-id="sizes">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="sizes" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="sizes" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="sizes">
               <span class="panel__name" data-text="panels.sizes"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6352,8 +6406,10 @@ body {
              ровно как у метки в списке меток. -->
         <section class="panel__section panel__section--screen" data-section-id="drawWalls">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawWalls" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawWalls" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawWalls">
               <span class="panel__name" data-text="panels.drawWalls"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6362,8 +6418,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="drawOpenings">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawOpenings" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawOpenings" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawOpenings">
               <span class="panel__name" data-text="panels.drawOpenings"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6372,8 +6430,10 @@ body {
         </section>
         <section class="panel__section panel__section--screen" data-section-id="drawObjects">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawObjects" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="drawObjects" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="drawObjects">
               <span class="panel__name" data-text="panels.drawObjects"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6382,8 +6442,10 @@ body {
         </section>
         <section class="panel__section panel__section--grow panel__section--screen" data-section-id="markList">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="markList" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="markList" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="markList">
               <span class="panel__name" data-text="panels.markList"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6394,8 +6456,10 @@ body {
              незачем, и место в колонке дороже. -->
         <section class="panel__section panel__section--screen" data-section-id="properties">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="properties" aria-expanded="true">
+            <button class="panel__fold" type="button" data-section-fold="properties" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
+            </button>
+            <button class="panel__title" type="button" data-section="properties">
               <span class="panel__name" data-text="panels.properties"></span>
               <span class="panel__badge"></span>
             </button>
@@ -6467,6 +6531,15 @@ const strings = {
     showLeft: "Показать левую колонку",
     hideRight: "Скрыть правую колонку",
     showRight: "Показать правую колонку",
+    // Галочка в заголовке раздела — своя кнопка (таск 198), и подпись ей нужна:
+    // внутри один знак, а голос читает кнопку по подписи. Слово меняется по
+    // состоянию, как у ручек колонок.
+    fold: "Свернуть раздел",
+    unfold: "Развернуть раздел",
+    // Заголовок, нарисованный у кромки колонки, перелистывает к своему разделу
+    // (таск 198, G303). Подсказка на наведении — единственное место, где это
+    // сказано словом: сам заголовок выглядит как обычный.
+    jump: "Перейти к разделу",
     marksEmpty: "Меток пока нет — выберите тип и щёлкните по плану",
   },
   mobile: {
@@ -28461,8 +28534,20 @@ function formatMegabytes(bytes) {
 // восьмидесяти строк списка. Сложить рейку в один DOM-узел и показывать в ней
 // клоны заголовков было бы дешевле на чтениях, но клон — это второй заголовок:
 // своя подстановка строк, свой счётчик, свой `aria-expanded` и своя подсветка
-// позванного раздела. Второго заголовка в сборке быть не должно: нажатая в
-// рейке галочка обязана сворачивать тот же раздел, а не его портрет.
+// позванного раздела. Второго заголовка в сборке быть не должно.
+//
+// **Нажатие на заголовок у кромки перелистывает к его разделу** (таск 198,
+// G303). Слова заказчика: «нажал — прыгнуло туда — да, так и надо, а то
+// приходится самому листать, это не очевидно». Таск 194 решил иначе — узел в
+// рейке тот же самый, значит и нажатие то же, — и довод был: придумывать
+// кнопке второй смысл в зависимости от того, где она нарисована, хуже.
+// Заказчик этот довод отклонил, и правило теперь такое: **заголовок, стоящий
+// не на своём месте, — указатель на раздел, а не кнопка сворачивания**.
+// Одинаково для обеих кромок: прижатый браузером к верхней (раздел начался
+// выше кадра) и поднятый рейкой к нижней ведут себя одним образом. Заголовок
+// на своём месте — прежняя кнопка. Сворачивание из рейки не пропало: галочка
+// слева от имени — своя кнопка (`.panel__fold`), и смысл у неё один и тот же,
+// где бы заголовок ни был нарисован.
 
 // Какую долю кадра рейке отдавать нельзя. Разделов в колонке четыре-пять, и на
 // обычном экране рейка до этого не дотягивается вовсе; правило нужно низкому
@@ -28471,16 +28556,23 @@ function formatMegabytes(bytes) {
 const PANEL_RAIL_SHARE = 0.5;
 
 /**
- * Куда сдвинуть заголовки, чтобы те, чьи разделы ниже кадра, встали у кромки.
+ * Где стоит каждый заголовок при такой прокрутке.
  *
- * `items` — разделы колонки сверху вниз: `{ top, height }`, где `top` — место
- * раздела в содержимом колонки (не на экране: прокрутка на него не влияет), а
- * `height` — высота его заголовка. `frame` — что показано: `{ scrollTop,
- * clientHeight }`.
+ * `items` — разделы колонки сверху вниз: `{ top, box, head }`, где `top` —
+ * место раздела в содержимом колонки (не на экране: прокрутка на него не
+ * влияет), `box` — высота раздела, `head` — высота его заголовка. `frame` —
+ * что показано: `{ scrollTop, clientHeight }`.
  *
- * Отдаёт массив той же длины: `0` — заголовок стоит сам, отрицательное число —
- * на сколько его поднять. Вниз заголовок не двигается никогда: опустить его
- * ниже своего места значило бы закрыть им своё же содержимое.
+ * Отдаёт массив той же длины: `{ shift, side }`.
+ *
+ * `shift` — ноль или на сколько поднять заголовок. Вниз заголовок не
+ * двигается никогда: опустить его ниже своего места значило бы закрыть им своё
+ * же содержимое.
+ *
+ * `side` — где он при этом оказался: `""` — на своём месте, `"top"` — прижат к
+ * верхней кромке (это делает сам браузер, `position: sticky`), `"bottom"` —
+ * поднят рейкой к нижней. Наружу это нужно затем, что по стороне решается
+ * смысл нажатия (таск 198): заголовок не на своём месте — указатель.
  *
  * Разделы, которые целиком ниже кадра, — это всегда **хвост** списка, поэтому
  * счёт идёт с конца: последний раздел встаёт у самой кромки, предыдущий над
@@ -28488,35 +28580,74 @@ const PANEL_RAIL_SHARE = 0.5;
  * местом дотянулся до своей строки в рейке — он и все, кто выше, стоят сами:
  * заголовок снимается с рейки ровно там, где сдвиг обнуляется, и перехода не
  * видно.
+ *
+ * Верх считается без прокрутки вовсе — одной арифметикой: браузер держит
+ * заголовок внутри его раздела, значит прижат тот и только тот, чей раздел
+ * **начался выше кадра и ещё не кончился**. Свёрнутый раздел (`box === head`)
+ * к верху не липнет никогда: двигать заголовок ему некуда.
  */
 function panelRailPins(items, frame) {
   const count = items ? items.length : 0;
-  const shifts = new Array(count).fill(0);
+  const pins = [];
   const view = Math.max(0, (frame && frame.clientHeight) || 0);
-  if (!count || view <= 0) return shifts;
-  const edge = ((frame && frame.scrollTop) || 0) + view;
+  const from = (frame && frame.scrollTop) || 0;
+  for (let k = 0; k < count; k += 1) {
+    const item = items[k];
+    const held = item.box > item.head && item.top < from && from < item.top + item.box;
+    pins.push({ shift: 0, side: held ? "top" : "" });
+  }
+  if (!count || view <= 0) return pins;
+  const edge = from + view;
   let first = count;
   let stack = 0;
   for (let k = count - 1; k >= 0; k -= 1) {
-    const line = edge - stack - items[k].height;
+    const line = edge - stack - items[k].head;
     if (items[k].top <= line) break;
     first = k;
-    stack += items[k].height;
+    stack += items[k].head;
   }
-  if (first >= count) return shifts;
+  if (first >= count) return pins;
   // Лишние снимаются с дальнего конца: дальний раздел и так за двумя другими,
   // а ближний — следующий, к которому человек подойдёт прокруткой.
   let last = count;
   while (last > first + 1 && stack > view * PANEL_RAIL_SHARE) {
     last -= 1;
-    stack -= items[last].height;
+    stack -= items[last].head;
   }
   let line = edge;
   for (let k = last - 1; k >= first; k -= 1) {
-    line -= items[k].height;
-    shifts[k] = Math.min(0, Math.round(line - items[k].top));
+    line -= items[k].head;
+    const shift = Math.min(0, Math.round(line - items[k].top));
+    if (!shift) continue;
+    pins[k] = { shift, side: "bottom" };
   }
-  return shifts;
+  return pins;
+}
+
+/**
+ * Куда прокрутить колонку, чтобы раздел встал к верхней кромке.
+ *
+ * Считает это рейка, а не тот, кто её зовёт: заголовок обязан встать **под**
+ * накладкой — под теми заголовками, которые в целевом положении сами прижаты
+ * к верху, — иначе перелистывание прячет раздел за той же рейкой, из которой
+ * его позвали.
+ *
+ * Сегодня ответ всегда ноль, и это видно из счёта, а не взято на веру: к
+ * верхней кромке липнет только заголовок раздела, который её пересекает, а в
+ * целевом положении её пересекает сам позванный раздел — он и встаёт на своё
+ * место. Счёт оставлен счётом нарочно: заведётся сверху лестница заголовков,
+ * как завелась снизу, — перелистывание сядет правильно само, и вспоминать про
+ * это место не придётся.
+ */
+function panelRailTopInset(items, index) {
+  const target = items[index] ? items[index].top : 0;
+  let inset = 0;
+  for (let k = 0; k < items.length; k += 1) {
+    if (k === index) continue;
+    const item = items[k];
+    if (item.box > item.head && item.top < target && target < item.top + item.box) inset += item.head;
+  }
+  return inset;
 }
 
 // Высота рейки по колонкам: её спрашивают прокрутки к выделенной строке —
@@ -28562,10 +28693,18 @@ function panelRailInset(node) {
   return 0;
 }
 
-function railShift(head, shift) {
-  const css = shift ? "translateY(" + shift + "px)" : "";
-  if (head.style.transform !== css) head.style.transform = css;
-  head.classList.toggle("is-below", shift !== 0);
+// Заголовок, стоящий не на своём месте: поднят (`transform`), помечен классом
+// и подписан подсказкой — нажатие перелистнёт, а не свернёт. Пишем только на
+// смену значения: слепая запись стоила бы пересчёта стилей всему, что внутри.
+function railPin(node, pin) {
+  const css = pin.shift ? "translateY(" + pin.shift + "px)" : "";
+  if (node.style.transform !== css) node.style.transform = css;
+  node.classList.toggle("is-below", pin.side === "bottom");
+  node.classList.toggle("is-pinned", pin.side !== "");
+  const title = node.querySelector(".panel__title");
+  if (!title) return;
+  const hint = pin.side ? strings.panels.jump : "";
+  if (title.title !== hint) title.title = hint;
 }
 
 function railVar(node, name, value) {
@@ -28585,37 +28724,66 @@ function railItems(column) {
   const base = rect.top + column.clientTop - column.scrollTop;
   const items = [];
   for (const section of column.querySelectorAll(".panel__section")) {
-    const head = section.querySelector(".panel__head");
-    if (!head) continue;
-    items.push({
-      section,
-      head,
-      height: head.offsetHeight,
-      top: section.getBoundingClientRect().top - base,
-    });
+    const node = section.querySelector(".panel__head");
+    if (!node) continue;
+    const box = section.getBoundingClientRect();
+    items.push({ section, node, head: node.offsetHeight, top: box.top - base, box: box.height });
   }
   return items;
 }
 
+const RAIL_FREE = { shift: 0, side: "" };
+
 function syncColumn(column) {
   const all = railItems(column);
-  const shown = all.filter((item) => item.height > 0);
-  const shifts = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
+  const shown = all.filter((item) => item.head > 0);
+  const pins = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
   let rail = 0;
   for (let k = 0; k < shown.length; k += 1) {
-    railShift(shown[k].head, shifts[k]);
-    if (shifts[k]) rail += shown[k].height;
+    railPin(shown[k].node, pins[k]);
+    if (pins[k].shift) rail += shown[k].head;
   }
   for (const item of all) {
-    if (item.height <= 0) railShift(item.head, 0);
+    if (item.head <= 0) railPin(item.node, RAIL_FREE);
     // Прилипший блок внутри тела (фильтры списка меток) липнет **под**
     // заголовком своего раздела, а не на нём: высоту заголовка он узнаёт мерой,
     // а не числом в стилях — иначе фильтры разошлись бы с заголовком на первой
     // же правке шрифта или отступов.
-    railVar(item.section, "--panel-head", item.height);
+    railVar(item.section, "--panel-head", item.head);
   }
   railVar(column, "--panel-rail", rail);
   railHeight.set(column, rail);
+}
+
+/**
+ * Нажали заголовок — перелистнуть к его разделу, если заголовок нарисован у
+ * кромки (таск 198, G303).
+ *
+ * Отдаёт `true`, если нажатие было указателем и колонка перелистнута, и
+ * `false`, если заголовок стоит на своём месте: тогда это прежняя кнопка
+ * сворачивания, и решает не рейка. Знание «у кромки или нет» берётся из
+ * класса, который рейка поставила в последнем кадре прокрутки, — второго
+ * обмера ради одного клика не нужно.
+ *
+ * Прокрутка **мгновенная**, не плавная, и это выбор. Колонка на объекте
+ * заказчика — 3785 точек: плавный перелёт через неё занимает полсекунды, всё
+ * это время перестраивает рейку на каждом кадре и показывает по дороге строки,
+ * которых никто не звал. Слова заказчика («нажал — прыгнуло туда») — про
+ * прыжок. Мгновенная ещё и не спорит с рукой: начал человек листать сам —
+ * спорить не с чем, перелёт уже кончился.
+ */
+function panelRailJump(node) {
+  const head = node && node.closest ? node.closest(".panel__head") : null;
+  if (!head || !head.classList.contains("is-pinned")) return false;
+  const section = head.closest(".panel__section");
+  const column = section ? section.closest(".panel") : null;
+  if (!column) return false;
+  const shown = railItems(column).filter((item) => item.head > 0);
+  const index = shown.findIndex((item) => item.node === head);
+  if (index < 0) return false;
+  column.scrollTop = shown[index].top - panelRailTopInset(shown, index);
+  syncPanelRail();
+  return true;
 }
 
 let railColumns = [];
@@ -29363,8 +29531,16 @@ function applySectionState(id) {
   if (!node) return;
   const collapsed = appCollapsed.has(id);
   node.classList.toggle("is-collapsed", collapsed);
-  const button = node.querySelector("[data-section]");
-  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  // Состояние живёт на галочке: у неё одно дело — сворачивать, и держится оно
+  // за ней, где бы заголовок ни был нарисован. У имени раздела дело меняется
+  // от места (таск 198), и обещать голосу «свёрнуто/развёрнуто» ему нечем.
+  const fold = node.querySelector("[data-section-fold]");
+  if (fold) {
+    const label = collapsed ? strings.panels.unfold : strings.panels.fold;
+    fold.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    fold.setAttribute("aria-label", label);
+    fold.title = label;
+  }
   // Свернули раздел — разделы ниже переехали, и рейка заголовков устарела.
   // Наблюдатель за размерами поймал бы это и сам, но на кадр позже.
   syncPanelRail();
@@ -29469,7 +29645,25 @@ function setSectionBadge(id, value) {
 
 function wireSections() {
   for (const button of document.querySelectorAll("[data-section]")) {
-    button.addEventListener("click", () => toggleSection(button.dataset.section));
+    button.addEventListener("click", () => {
+      // Имя раздела: на своём месте — прежняя кнопка сворачивания, у кромки
+      // колонки — указатель на раздел (таск 198, G303). Слова заказчика:
+      // «нажал — прыгнуло туда — да, так и надо, а то приходится самому
+      // листать, это не очевидно». Где нарисован заголовок и куда от него
+      // листать — знает рейка, и спрашивают её, а не меряют заново.
+      if (panelRailJump(button)) return;
+      toggleSection(button.dataset.section);
+    });
+  }
+  // Галочка слева от имени: сворачивает всегда — и когда раздел на виду, и
+  // когда от него виден один заголовок в рейке. Без неё свернуть невидимый
+  // раздел было бы нечем, а именно так прячут список меток, чтобы добраться до
+  // справочника типов.
+  for (const button of document.querySelectorAll("[data-section-fold]")) {
+    button.addEventListener("click", () => toggleSection(button.dataset.sectionFold));
+    // Подпись голосу ставится сразу, а не с первого нажатия: внутри кнопки один
+    // знак, и до первого сворачивания она читалась бы пустой.
+    applySectionState(button.dataset.sectionFold);
   }
   // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
   // когда хранилище ответит. Ждать его с пустым экраном хуже.
