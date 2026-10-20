@@ -11,6 +11,7 @@ import {
   elevationPlan,
   findRoom,
   findScheme,
+  projectSite,
   projectStamp,
   roomsInOrder,
   schemeHeightPx,
@@ -358,6 +359,10 @@ function exportGostTableOptions(api, table) {
     mono: exportChoice.mono,
     stamp: projectStamp(project),
     object: project.name,
+    // Адрес объекта (таск 188): графу «наименование здания» заполняет он, когда
+    // лист не сужен помещением. Правило — в `gostStampValues`, здесь только
+    // доставка, как и у имени объекта.
+    address: projectSite(project).address,
     title,
   };
 }
