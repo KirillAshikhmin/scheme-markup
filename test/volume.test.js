@@ -307,11 +307,9 @@ import {
   volumeSpeedLabel,
 } from "../src/panels/volumeParams.js";
 import {
-  screenPlaceDrawing,
   screenPlaceForget,
-  screenPlaceOfDrawing,
-  screenPlaceTake,
-  screenPlaceWant,
+  screenPlaceOf,
+  screenPlaceSet,
 } from "../src/screenPlace.js";
 import { elevationNote } from "../src/panels/elevation.js";
 import { plateUnseen } from "../src/panels/plate.js";
@@ -3803,23 +3801,30 @@ test("без калибровки плана переносить нечем —
   assert.equal(volumePlanCentre(bare.project, "нет такой", box, view), null);
 });
 
-test("мастерская говорит, где стоит, и забирает просьбу один раз (G276)", () => {
+test("место и масштаб — одна запись на три режима, и объём масштаб не трогает (G276, D59)", () => {
   screenPlaceForget();
-  assert.equal(screenPlaceOfDrawing("схема-1"), null, "на пустом месте мастерская молчит");
-  screenPlaceDrawing("схема-1", { x: 1500, y: -800 });
-  assert.deepEqual(screenPlaceOfDrawing("схема-1"), { x: 1500, y: -800 });
+  assert.equal(screenPlaceOf("схема-1"), null, "на пустом месте никто не отвечает");
+  const first = screenPlaceSet("схема-1", { x: 1500, y: -800 }, 0.25);
+  const place = screenPlaceOf("схема-1");
+  assert.deepEqual({ x: place.x, y: place.y, pxPerMm: place.pxPerMm }, { x: 1500, y: -800, pxPerMm: 0.25 });
+  assert.equal(place.stamp, first, "отметка записи — ответ той же записи");
   // Чужая схема — чужое место: этаж сменили, и середина прежнего не годится.
-  assert.equal(screenPlaceOfDrawing("схема-2"), null);
-  // Просьба забирается ровно один раз: второй вход в чертёж не должен
-  // возвращать человека туда, откуда он уже ушёл руками.
-  screenPlaceWant("схема-1", { x: -200, y: 400 });
-  assert.deepEqual(screenPlaceTake("схема-1"), { x: -200, y: 400 });
-  assert.equal(screenPlaceTake("схема-1"), null);
-  // И просьба к чужой схеме не исполняется.
-  screenPlaceWant("схема-1", { x: 1, y: 2 });
-  assert.equal(screenPlaceTake("схема-2"), null);
+  assert.equal(screenPlaceOf("схема-2"), null);
+  // Объём масштабом не владеет: он пишет только место, и приближение остаётся
+  // тем, которое человек выбрал до ухода.
+  screenPlaceSet("схема-1", { x: -200, y: 400 });
+  assert.deepEqual(screenPlaceOf("схема-1").pxPerMm, 0.25, "масштаб перебит местом из объёма");
+  assert.equal(screenPlaceOf("схема-1").x, -200);
+  // Запись, ничего не меняющая, не двигает отметку: поле говорит это на каждый
+  // кадр, и память вида иначе писалась бы в хранилище впустую.
+  const stamp = screenPlaceOf("схема-1").stamp;
+  screenPlaceSet("схема-1", { x: -200, y: 400 }, 0.25);
+  assert.equal(screenPlaceOf("схема-1").stamp, stamp, "отметка выросла на пустой записи");
+  // Мусор не ломает место: негодное число отбрасывается молча.
+  screenPlaceSet("схема-1", { x: Number.NaN, y: 0 }, 1);
+  assert.equal(screenPlaceOf("схема-1").x, -200);
   screenPlaceForget();
-  assert.equal(screenPlaceTake("схема-1"), null);
+  assert.equal(screenPlaceOf("схема-1"), null);
 });
 
 test("перенос по миникарте не ставит в стену: работает то же правило, что у пола (G270, G212)", () => {

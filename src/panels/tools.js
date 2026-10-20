@@ -52,9 +52,12 @@ import {
   canvasZoomReset,
 } from "../canvas.js";
 import {
+  WORKSHOP_GRID_OFF,
   workshopAttachPlan,
   workshopCalibratePlan,
+  workshopGridChoice,
   workshopGridOptions,
+  workshopGridValue,
   workshopPlacement,
   workshopViewFit,
   workshopViewReady,
@@ -437,16 +440,43 @@ function mountToolsPanel(host, api) {
 }
 
 /**
- * Поля «Интерфейса» — размер меток и подписей, шрифт, слои, сетка чертежа,
- * развёртка и масштаб того поля, которое на экране.
+ * Поля «Интерфейса» — размер меток и подписей, шрифт, слои, сетка, развёртка и
+ * масштаб того поля, которое на экране.
  *
  * **Все переключатели показа собраны здесь** (таск 187, G281). Слова заказчика:
  * «пункт „Слои“ убери, это же дубль вкладки Интерфейс проекта, просто почини то
  * бы там работало и добавь недостающие пункты. Ну и в интерфейсе убери описания
  * у пунктов». Описания ушли в подсказки, слои чертежа (сетка, шаг, притяжка)
- * пришли сюда из колонки, а в каждом режиме показаны ровно те отметки, которые
- * в нём меняют картинку: линейка — у плана, сетка — у чертежа, «Объекты» — у
- * всех трёх.
+ * пришли сюда из колонки.
+ *
+ * **И раздел один и тот же во всех трёх режимах** (таск 193, G293). Таск 187
+ * показывал в каждом режиме только те отметки, которые в нём меняют картинку, —
+ * заказчик решил иначе и лучше: «Сделай что бы сетка была и на схеме… И линейку
+ * в чертеже и т.д. Короче меню Интерфейс не должно отличаться от режима
+ * чертеж\схема». То есть пункт не прячут, а **учат работать**: сетка легла на
+ * план, линейка — в чертёж. Прятать по режимам больше нельзя; на каком поле
+ * пункт меняет картинку — говорит его подсказка.
+ *
+ * Разбор по пунктам (чтобы следующий не «починил» это обратно):
+ *
+ *   «Метки», «Подписи», «Шрифт» — размер и рисунок подписей схемы. Живут в
+ *     объекте, видны на плане и в выгрузках; в чертеже и в объёме меток нет —
+ *     но поля эти не про режим, а про объект, и прятать их незачем;
+ *   «Линейка и направляющие» — **оба плоских поля**: деления на плане в
+ *     пикселях подложки, в чертеже в миллиметрах. Направляющие ставят на
+ *     плане, в чертеже они видны там, где у него есть мост в миллиметры;
+ *   «Сетка, шаг в мм» с пунктом «Без сетки» — **оба плоских поля**, шаг один и
+ *     тот же (он в объекте, G258);
+ *   «Притягивать к узлам» — честно **про чертёж**: вершины стен садятся на
+ *     узлы. Метку на плане кликом ставят по фотографии помещения, и притянуть
+ *     её к сетке значило бы сдвинуть разметку, о которой никто не просил.
+ *     При «Без сетки» гаснет с причиной;
+ *   «Подложка», «Чертёж» — оба плоских поля (так было с таска 187);
+ *   «Объекты чертежа» — все три режима;
+ *   «Развёртка выделенной стены» — оба плоских поля: в объёме стену не
+ *     выделяют;
+ *   «Масштаб» — поле, которое на экране; в объёме гаснет с причиной (там
+ *     отходят и приближаются камерой).
  *
  * **Одна сборка на два места** (таск 175, G272). На большом экране это раздел
  * левой колонки; на узком экрана раздела нет вовсе, и те же поля приходят
@@ -482,22 +512,52 @@ export function createSizesFields(api) {
     render();
   }
 
-  // ——— сетка чертежа: шаг в объекте, притяжка в настройках (таск 187) ———
+  // ——— сетка: шаг в объекте, «Без сетки» в настройках (таск 187, 193) ———
   //
   // Шаг принадлежит объекту (G258), поэтому его смена — шаг истории: иначе
   // Ctrl+Z после смены сетки вернул бы метку, а сетку — молча и заодно.
+  //
+  // А «Без сетки» — **первый пункт того же списка** (таск 193, G293: «вместо
+  // галки сделай просто пункт в Шаге - Без сетки»), и живёт он в настройках
+  // браузера, как подложка и чертёж: в объект от него не пишется ничего, шаг
+  // остаётся прежним, и старый файл открывается как закрывался (G68). Поэтому
+  // история этот выбор и не трогает — отменять нечего.
   const gridSelect = uiEl("select", {
     class: "ui-input tools__select",
     title: strings.tools.gridStepHint,
     on: {
       change: () => {
+        const choice = workshopGridChoice(gridSelect.value);
+        if (!choice) return;
         const state = getState();
-        if (!state.project) return;
-        try {
-          const next = setGridStep(state.project, gridSelect.value);
-          if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
-        } catch (error) {
-          notify(error.message, "error");
+        if (!choice.shown) {
+          setState({ gridShown: false });
+          setSetting(GRID_SETTING, false);
+          render();
+          return;
+        }
+        // Выбрали число — сетка заодно и зажигается: человек выбирает шаг,
+        // чтобы её видеть, а не чтобы оставить её погашенной.
+        if (state.gridShown === false) {
+          setState({ gridShown: true });
+          setSetting(GRID_SETTING, true);
+        }
+        if (!state.project) {
+          render();
+          return;
+        }
+        // Шаг, которым объект и так живёт, в него не пишется (G68): вернуться
+        // из «Без сетки» к тому же числу — это не правка объекта, и объект,
+        // у которого ключа не было вовсе, его не получает. Живой прогон таска
+        // 193 поймал ровно это: выбор «100» на объекте без ключа дописывал ему
+        // `view.gridStepMm` и менял `updatedAt` ни за что.
+        if (gridStepOf(state.project) !== choice.stepMm) {
+          try {
+            const next = setGridStep(state.project, choice.stepMm);
+            if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
+          } catch (error) {
+            notify(error.message, "error");
+          }
         }
         render();
       },
@@ -508,17 +568,18 @@ export function createSizesFields(api) {
   // Список шагов пересобирается только когда он и правда другой (сменился
   // объект с чужим числом): `replaceChildren` на каждом кадре схлопывал бы
   // список, раскрытый под рукой.
-  function syncGridSelect(project) {
-    const step = gridStepOf(project);
+  function syncGridSelect(state) {
+    const step = gridStepOf(state.project);
     const options = workshopGridOptions(step);
     const key = options.join(",");
     if (key !== gridOptionsKey) {
       gridOptionsKey = key;
       gridSelect.replaceChildren(
+        uiEl("option", { value: WORKSHOP_GRID_OFF, text: strings.tools.gridOff }),
         ...options.map((value) => uiEl("option", { value: String(value), text: String(value) })),
       );
     }
-    gridSelect.value = String(step);
+    gridSelect.value = workshopGridValue(state.gridShown, step);
     return gridSelect;
   }
 
@@ -585,17 +646,16 @@ export function createSizesFields(api) {
   function render() {
     const state = getState();
     const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
-    // ——— что показывать: только то, что в этом режиме меняет картинку ———
+    // ——— состав один и тот же во всех режимах (таск 193, G293) ————————
     //
-    // Заказчик про «Интерфейс»: «почини то бы там работало и добавь недостающие
-    // пункты». Половина починки — свести слои чертежа сюда (они жили второй
-    // парой галок в колонке чертежа), вторая — **не показывать** в режиме ту
-    // отметку, которая в нём ничего не меняет: линейка принадлежит плану, сетка
-    // — чертежу, а в объёме из всего этого работает только «Объекты».
+    // Что в каком режиме меняет картинку — сказано в подсказках, а не
+    // отсутствием пункта. Режим спрашивается только там, где у поля и правда
+    // **разная работа**: ряд масштаба зовёт то поле, которое на экране, а
+    // кнопки «Задать масштаб» и «Привязать чертёж» — это действия чертежа, и
+    // показываются они тогда, когда им есть что сделать.
     const screen = state.screen;
     const drawing = screen === "drawing";
     const plan = screen === "scheme";
-    const field = plan || drawing;
     // Подложку в чертёж не положить без масштаба — и это не решение, а
     // арифметика: миллиметру не от чего считаться в пикселях плана. Отметка в
     // таком случае гаснет, а причина стоит в её подсказке, а рядом — кнопка,
@@ -609,6 +669,14 @@ export function createSizesFields(api) {
         : spot.kind === "noScale"
           ? strings.tools.planLayerNoScale
           : "";
+    // «Без сетки» выбрано — притягиваться не к чему: узлов нет. Отметка гаснет
+    // **с причиной** (таск 193), а не висит мёртвой.
+    const gridOff = state.gridShown === false;
+    // На плане сетка видна только там, где есть мост в миллиметры: калибровка
+    // и привязка. Сказать об этом надо в подсказке — иначе человек снимает
+    // «Без сетки» и не понимает, почему ничего не появилось.
+    const planBridge = plan && state.project && state.schemeId ? workshopPlacement(state.project, state.schemeId) : null;
+    const gridNoBridge = Boolean(planBridge) && planBridge.kind !== "ready";
     const parts = [
       uiEl("label", { class: "tools__field" }, [
         uiEl("span", { text: strings.tools.markSize }),
@@ -625,22 +693,18 @@ export function createSizesFields(api) {
         toolsFontSelect(state, setState),
       ]),
       uiEl("p", { class: "tools__label", text: strings.tools.layers }),
-      // Линейка и направляющие — оснастка **плана**: в чертеже свои
-      // направляющие рисует черновик, в объёме линейки нет вовсе.
-      plan
-        ? uiEl("label", { class: "tools__field tools__field--check" }, [
-            toolsGuidesCheck(state, setState),
-            uiEl("span", { text: strings.tools.guides }),
-          ])
-        : null,
+      // Линейка и направляющие — оснастка **обоих плоских полей** (таск 193):
+      // в чертеже деления в миллиметрах, на плане — в пикселях подложки.
+      uiEl("label", { class: "tools__field tools__field--check", title: strings.tools.guidesHint }, [
+        toolsGuidesCheck(state, setState),
+        uiEl("span", { text: strings.tools.guides }),
+      ]),
       // Подложка и чертёж — два слоя, и **одна отметка на оба поля** (таск
       // 187): прежде в чертеже работала своя пара галок, а эта молчала.
-      field
-        ? layerRow(state, "planShown", PLAN_SETTING, strings.tools.planLayer, strings.tools.planLayerHint, {
-            off: planOff,
-            reason: planReason,
-          })
-        : null,
+      layerRow(state, "planShown", PLAN_SETTING, strings.tools.planLayer, strings.tools.planLayerHint, {
+        off: planOff,
+        reason: planReason,
+      }),
       // Две двери рядом с погашенной подложкой: уйти на план за масштабом и
       // привязать чертёж к подложке. Показываются ровно тогда, когда им есть
       // что сделать, — и только если поверхность чертежа уже собрана.
@@ -658,20 +722,17 @@ export function createSizesFields(api) {
             on: { click: () => workshopAttachPlan() },
           })
         : null,
-      // Сетка — только у чертежа: по ней там и чертят. Шаг и притяжка стоят
-      // под ней, потому что отвечают на тот же вопрос.
-      drawing
-        ? layerRow(state, "gridShown", GRID_SETTING, strings.tools.gridLayer, strings.tools.gridLayerHint)
-        : null,
-      drawing
-        ? uiEl("label", { class: "tools__field", title: strings.tools.gridStepHint }, [
-            uiEl("span", { text: strings.tools.gridStep }),
-            syncGridSelect(state.project),
-          ])
-        : null,
-      drawing
-        ? layerRow(state, "gridSnap", GRID_SNAP_SETTING, strings.tools.gridSnap, strings.tools.gridSnapHint)
-        : null,
+      layerRow(state, "drawingShown", DRAWING_SETTING, strings.tools.drawingLayer, strings.tools.drawingLayerHint),
+      // Сетка — на обоих плоских полях, и шаг у неё один (он в объекте, G258).
+      // Отдельной отметки показа нет: «Без сетки» — первый пункт этого списка.
+      uiEl("label", { class: "tools__field", title: gridNoBridge ? strings.tools.gridNoBridge : strings.tools.gridStepHint }, [
+        uiEl("span", { text: strings.tools.gridStep }),
+        syncGridSelect(state),
+      ]),
+      layerRow(state, "gridSnap", GRID_SNAP_SETTING, strings.tools.gridSnap, strings.tools.gridSnapHint, {
+        off: gridOff,
+        reason: gridOff ? strings.tools.gridSnapOff : "",
+      }),
       // Наложенный чужой чертёж (таск 208, G315). Слова заказчика: «нужно
       // наложение чертежей, что бы подогнать один к другому. Также через меню
       // интерфейса и только стены и другим цветом».
@@ -681,23 +742,20 @@ export function createSizesFields(api) {
       // модельный (`schemesInOrder`), в нём только те схемы, у которых есть
       // что наложить, и никогда не своя. Накладывать нечего — ряд гаснет с
       // причиной в подсказке, как гаснет подложка без масштаба.
-      drawing
-        ? uiEl("label", { class: "tools__field", title: overlayTitle(state) }, [
-            uiEl("span", { text: strings.tools.overlay }),
-            overlaySelect(state),
-          ])
-        : null,
-      field
-        ? layerRow(state, "drawingShown", DRAWING_SETTING, strings.tools.drawingLayer, strings.tools.drawingLayerHint)
-        : null,
-      // Вещи чертежа (таск 154, G223) — единственная отметка, которая работает
-      // во всех трёх режимах: гасит их и на плане, и в чертеже, и в объёме.
+      //
+      // Стоит он здесь во всех трёх режимах, как и остальные пункты (таск 193,
+      // G293), а рисует наложенное только чертёж — об этом и говорит подсказка.
+      uiEl("label", { class: "tools__field", title: overlayTitle(state) }, [
+        uiEl("span", { text: strings.tools.overlay }),
+        overlaySelect(state),
+      ]),
+      // Вещи чертежа (таск 154, G223) — работают во всех трёх режимах: гасят
+      // их и на плане, и в чертеже, и в объёме.
       layerRow(state, "objectsShown", OBJECTS_SETTING, strings.tools.objectsLayer, strings.tools.objectsLayerHint),
       // Полоса развёртки выделенной стены — над планом и над чертежом (G185,
-      // G227). В объёме стену не выделяют, и полосы там нет.
-      field
-        ? layerRow(state, "elevationShown", ELEVATION_SETTING, strings.tools.elevationStrip, strings.tools.elevationStripHint)
-        : null,
+      // G227). В объёме стену не выделяют, и полосы там нет — об этом говорит
+      // подсказка, а не отсутствие пункта.
+      layerRow(state, "elevationShown", ELEVATION_SETTING, strings.tools.elevationStrip, strings.tools.elevationStripHint),
       // ——— масштаб того поля, которое на экране (G227) ————————————————
       //
       // Заказчик: «Кнопки + − и вписать дублируются, есть в нижнем блоке с

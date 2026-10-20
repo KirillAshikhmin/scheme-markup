@@ -3,6 +3,10 @@
 // и не правят ни этот файл, ни разметку.
 import { strings, text } from "./strings.js";
 import { getSetting, setSetting } from "./store.js";
+// Расположение — одно на три режима, и считает его `screenPlace.js` (таск 178,
+// 193). Каркас только кладёт его в настройки и достаёт обратно: второго счёта
+// у памяти вида нет.
+import { screenPlaceForget, screenPlaceOf, screenPlaceRestore, screenPlaceStored, screenPlaceWatch } from "./screenPlace.js";
 // Виды шрифта объявлены там же, где их разбирают в семейства, — в `render.js`.
 // Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
 import { FONT_DRAFT, FONT_KINDS } from "./render.js";
@@ -83,11 +87,15 @@ export const SCREEN_ABILITIES = {
 const appState = {
   layout: "desktop",
   // Что показано на основном экране: план, чертёж или объём (таск 153, G219).
-  // **Состояние сеанса вкладки и только оно** (G68): в объект режим не
-  // пишется — иначе напарник, открывший файл, попадал бы в чужой объём, — и в
-  // настройки браузера тоже не пишется: объект открывается схемой, она главная.
-  // Внутри сеанса помнится всё: поверхности живут дальше за кадром, и человек
-  // возвращается туда, где стоял в объёме, и к тому инструменту, которым чертил.
+  //
+  // **В объект режим не пишется** (G68): иначе напарник, открывший файл,
+  // попадал бы в чужой объём. А вот в настройках браузера он с таска 193
+  // помнится (G294, слова заказчика: «запоминай выбранный режим и расположение
+  // в браузере, что бы при обновлении страницы вид не менялся») — память
+  // привязана к объекту и живёт рядом с остальными выключателями показа,
+  // разбор у `VIEW_SETTING`. Прежнее правило «объект всегда открывается
+  // Схемой» (таск 153) этим и отменено: оно остаётся только для объекта, у
+  // которого памяти ещё нет.
   screen: SCREEN_DEFAULT,
   project: null,
   schemeId: null,
@@ -237,6 +245,32 @@ export const ELEVATION_GROW_SETTING = "elevationGrow";
 // несколько, и прятать в одном вещь из другого было бы дико.
 export const OBJECTS_SETTING = "schemeObjectsShown";
 export const HIDDEN_OBJECTS_SETTING = "hiddenSchemeObjects";
+// ——— память вида: режим, схема и расположение (G294, таск 193) ——————————
+//
+// Слова заказчика: «А ещё запоминай выбранный режим и расположение в браузере,
+// что бы при обновлении страницы вид не менялся».
+//
+// **В браузере, а не в объекте** (G68, и заказчик сказал это сам): вид — не
+// свойство квартиры, и, уехав в файл, он пришёл бы к напарнику вместе с
+// проектом. Поэтому ключ лежит здесь, рядом с подложкой и линейкой.
+//
+// **Привязана к объекту:** в ключе карта «объект → вид», как у спрятанных
+// вещей. Открыли другой объект — у него своё место, а не чужое; открыли
+// впервые — прежнее поведение (схема, подгонка плана по первому кадру).
+//
+// Что помнится: режим (`screen`), открытая схема (`schemeId`) и расположение —
+// середина поля в миллиметрах чертежа и экранных точек на миллиметр
+// (`place`, разбор в `screenPlace.js`). Расположение одно на три режима, и
+// объём встаёт по нему камерой: своего числа у памяти нет.
+//
+// **Чего здесь нет:** занятия (выделение против добавления). Оно сбрасывается
+// при всяком переключении режима (G296) и тем более при перезагрузке: вернуться
+// в «Добавление» после обновления страницы значило бы поставить метку первым же
+// кликом по плану.
+export const VIEW_SETTING = "screenView";
+// Сколько объектов помним. Карта крошечная (четыре числа на объект), но расти
+// без края ей незачем: объекты удаляют, а ключи остались бы навсегда.
+export const VIEW_MEMORY_MAX = 20;
 // Последний открытый объект: с него начинается следующий сеанс. Ключ лежит
 // здесь, рядом с остальными, а не в панели объектов: его пишет и панель
 // объектов, и панель файла (объект, пришедший из архива, тоже становится
@@ -495,6 +529,142 @@ export function setObjectHidden(objectId, hidden) {
   Promise.resolve(setSetting(HIDDEN_OBJECTS_SETTING, appHiddenObjects)).catch(() => {});
 }
 
+// ——— память вида: чистые правила ————————————————————————————————————————
+
+/**
+ * Что из настроек годится в память вида. Мусор (чужая версия, правка руками)
+ * отбрасывается молча: лучше прежнее поведение, чем объект, открывшийся в
+ * режиме «undefined».
+ */
+export function viewMemoryFrom(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const map = {};
+  for (const [id, entry] of Object.entries(value)) {
+    if (!id || !entry || typeof entry !== "object") continue;
+    const kept = {};
+    if (SCREEN_MODES.includes(entry.screen)) kept.screen = entry.screen;
+    if (typeof entry.schemeId === "string" && entry.schemeId) kept.schemeId = entry.schemeId;
+    const place = screenPlaceStored(entry.place);
+    if (place) kept.place = place;
+    if (Object.keys(kept).length > 0) map[id] = kept;
+  }
+  return map;
+}
+
+/** Что ложится в память про этот объект: режим, схема и расположение. */
+export function viewMemoryEntry(state, place) {
+  const entry = {};
+  if (state && SCREEN_MODES.includes(state.screen)) entry.screen = state.screen;
+  if (state && state.schemeId) entry.schemeId = state.schemeId;
+  const stored = screenPlaceStored(place);
+  if (stored) entry.place = stored;
+  return entry;
+}
+
+/**
+ * Что из памяти применить, когда объект открылся. Возвращает заплатку для
+ * состояния — и она же отвечает за прежнее поведение: памяти нет, режим в ней
+ * чужой или в этой раскладке его не бывает — открывается схема (таск 153).
+ *
+ * Схема из памяти берётся только если она у объекта есть: удалённая схема
+ * оставила бы пустой экран, а открывший объект уже выбрал первую.
+ *
+ * `options.picked` — **человек уже выбрал режим сам** (дефект D54): тогда
+ * режима в заплатке нет вовсе, ни сохранённого, ни умолчания. Объект
+ * догружается секунду-две, и выбор, сделанный человеком за это время, старше
+ * всего, что лежит в памяти.
+ */
+export function viewMemoryPatch(entry, project, layout, options = {}) {
+  const patch = {};
+  if (!options.picked) {
+    patch.screen = entry && screenAllowed(entry.screen, layout) ? entry.screen : SCREEN_DEFAULT;
+  }
+  const schemes = (project && project.schemes) || [];
+  if (entry && entry.schemeId && schemes.some((scheme) => scheme.id === entry.schemeId)) {
+    patch.schemeId = entry.schemeId;
+  }
+  return patch;
+}
+
+// ——— память вида: хранилище ————————————————————————————————————————————
+//
+// Карта лежит в памяти страницы и в настройках браузера; применяется она
+// **один раз на объект** — в тот миг, когда объект открылся.
+//
+// **Выбор человека старше сохранённого** (дефект D54). Объект поднимается из
+// базы не мгновенно: в живых прогонах человек успевал переключить режим до
+// того, как он доедет, — и позднее применение памяти перебивало его выбор
+// через секунду-две после загрузки. Поэтому у первого объекта сеанса (его
+// никто не просил открывать — он поднимается сам, как последний открытый)
+// сохранённый режим применяется только если человек ещё не выбрал своего.
+// Объект, который человек открыл руками, — другое дело: он просил объект, а не
+// режим, и память этого объекта старше.
+let appViewMemory = null;
+let appViewProjectId = null;
+let appViewFirst = true;
+let appScreenPicked = false;
+let appViewTimer = null;
+
+function syncViewMemory(changed) {
+  const projectId = appState.project ? appState.project.id : null;
+  if (projectId === appViewProjectId) return;
+  appViewProjectId = projectId;
+  // Новый объект — чужое место забыто: середина прежнего в новом ничего не
+  // значит, а масштаб тем более.
+  screenPlaceForget();
+  if (appViewMemory === null) return;
+  const patch = viewMemoryApply(projectId);
+  if (!patch) return;
+  for (const [key, value] of Object.entries(patch)) {
+    if (appState[key] === value) continue;
+    appState[key] = value;
+    changed[key] = value;
+  }
+}
+
+/**
+ * Поднять память этого объекта. Возвращает заплатку состояния (её применяет
+ * либо `setState`, либо — если память доехала позже объекта — сам вызывающий).
+ * Место при этом ставится **до** заплатки: поверхности читают его, когда
+ * узнают о новом режиме, и опоздай оно — чертёж встал бы не туда.
+ */
+function viewMemoryApply(projectId) {
+  if (!projectId) return null;
+  const entry = appViewMemory ? appViewMemory[projectId] : null;
+  // Первый объект сеанса поднимается сам (последний открытый), и человека о нём
+  // не спрашивали: его выбор режима, сделанный пока объект ехал, старше
+  // сохранённого (D54). Объект, открытый руками, — другое дело: человек просил
+  // объект, а не режим, и память **этого** объекта старше.
+  const patch = viewMemoryPatch(entry, appState.project, appState.layout, {
+    picked: appViewFirst && appScreenPicked,
+  });
+  appViewFirst = false;
+  if (entry && entry.place) screenPlaceRestore(patch.schemeId || appState.schemeId, entry.place);
+  return patch;
+}
+
+/** Записать память этого объекта — не чаще, чем раз в полсекунды. */
+function saveViewMemory() {
+  if (typeof setTimeout !== "function") return;
+  if (appViewTimer) clearTimeout(appViewTimer);
+  appViewTimer = setTimeout(() => {
+    appViewTimer = null;
+    const projectId = appState.project ? appState.project.id : null;
+    if (!projectId || appViewMemory === null) return;
+    const entry = viewMemoryEntry(appState, screenPlaceOf(appState.schemeId));
+    if (Object.keys(entry).length === 0) return;
+    const next = { ...appViewMemory };
+    // Ключ переставляется в конец: по порядку видно, какой объект забыть
+    // первым, когда их станет больше потолка.
+    delete next[projectId];
+    next[projectId] = entry;
+    const ids = Object.keys(next);
+    for (const id of ids.slice(0, Math.max(0, ids.length - VIEW_MEMORY_MAX))) delete next[id];
+    appViewMemory = next;
+    Promise.resolve(setSetting(VIEW_SETTING, next)).catch(() => {});
+  }, 500);
+}
+
 export function setState(patch) {
   if (!patch) return getState();
   const changed = {};
@@ -505,6 +675,8 @@ export function setState(patch) {
     }
   }
   syncHiddenObjects(changed);
+  syncViewMemory(changed);
+  if ("screen" in changed || "schemeId" in changed) saveViewMemory();
   if (Object.keys(changed).length === 0) return getState();
   const snapshot = getState();
   for (const subscriber of [...appSubscribers]) {
@@ -606,12 +778,33 @@ export function screenMode() {
   return appState.screen;
 }
 
-// Режим меняется одной дверью: отметка на корне, панели и поверхности узнают
-// о нём из `subscribe`. Недоступный в этой раскладке режим не включается —
-// иначе переключатель обещал бы то, чего на этом экране нет.
+/**
+ * Режим меняется одной дверью: отметка на корне, панели и поверхности узнают о
+ * нём из `subscribe`. Недоступный в этой раскладке режим не включается — иначе
+ * переключатель обещал бы то, чего на этом экране нет.
+ *
+ * **Переключение сбрасывает занятие** (G296, таск 193). Слова заказчика: «при
+ * переключении между схема\чертёж\объем у первых двух сбрасывай режим на
+ * Выделение с Добавления». У плана занятие лежит здесь, в состоянии сеанса, — и
+ * сбрасывается оно в одной заплатке с режимом: подписка холста на `mode` сама
+ * дочерчивает начатое **со словами** (`canvasSyncDraft` → `canvasSettleDraft`,
+ * таск 172), то есть порядок «сперва дочертить, потом сбросить» держится
+ * механикой, а не очередью вызовов. Занятие чертежа сбрасывает сам чертёж (там
+ * оно внутри поверхности), и по тому же правилу.
+ *
+ * Сбрасывается **занятие**, а не выбор: тип метки (`activeTypeId`) и выбранная
+ * вещь остаются — вернулся и ставишь то же, но первым кликом ничего не
+ * поставишь. Место и масштаб тоже остаются (G294, G276): помнится вид, не
+ * занятие. Так и записано, чтобы следующий не «починил» одно из двух.
+ *
+ * Отметка «человек выбрал режим сам» ставится здесь же: по ней память вида
+ * понимает, что её сохранённое значение младше (D54).
+ */
 export function setScreen(screen) {
   if (!screenAllowed(screen, appState.layout)) return;
-  setState({ screen });
+  appScreenPicked = true;
+  if (appState.screen === screen) return;
+  setState(appState.mode === "select" ? { screen } : { screen, mode: "select" });
 }
 
 function layoutViewport() {
@@ -965,6 +1158,28 @@ function wireSections() {
       if (FONT_KINDS.includes(saved) && saved !== FONT_DRAFT) setState({ schemeFont: saved });
     })
     .catch(() => {});
+  // Память вида (G294): карта «объект → режим, схема, расположение». Читается
+  // асинхронно, как остальные настройки, и объект к этой минуте может быть ещё
+  // не открыт — тогда она применится сама, когда он откроется.
+  //
+  // А если объект уже открылся, пока хранилище отвечало, — применяем сейчас, и
+  // **с оговоркой D54**: выбор человека старше сохранённого. Этот путь и есть
+  // то позднее применение, из-за которого режим сам возвращался через
+  // секунду-две после загрузки.
+  Promise.resolve(getSetting(VIEW_SETTING))
+    .then((saved) => {
+      appViewMemory = viewMemoryFrom(saved);
+      if (!appViewProjectId) return;
+      const patch = viewMemoryApply(appViewProjectId);
+      if (patch) setState(patch);
+    })
+    .catch(() => {
+      appViewMemory = {};
+    });
+  // Место и масштаб пишутся в ту же память. Поле говорит о них на каждый кадр,
+  // поэтому запись отложенная — иначе в хранилище летело бы по шестьдесят
+  // записей в секунду на одно перетаскивание плана.
+  screenPlaceWatch(() => saveViewMemory());
 }
 
 export function startApp() {

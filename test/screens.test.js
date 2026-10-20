@@ -118,11 +118,16 @@ test("план уступает экран: подсказка и линейка
   assert.ok(canvasHintText(stateOf({ screen: "scheme" })));
   assert.equal(canvasHintText(stateOf({ screen: "drawing" })), null);
   assert.equal(canvasHintText(stateOf({ screen: "volume" })), null);
-  // Отступ под линейку в чужом режиме не оставляется: линейки там нет, и
-  // переключатель с полным экраном висели бы на пустом поле.
+  // Отступ под линейку остаётся на **обоих плоских полях** (таск 193, G293):
+  // линейку рисуют и план, и чертёж, отметка у них одна, и ряд кнопок над полем
+  // обязан стоять на одной высоте в обоих режимах. В объёме линейки нет вовсе —
+  // там переключатель с полным экраном висел бы на пустом поле.
   assert.equal(canvasHintInset(stateOf({})), RULER_SIZE);
   assert.equal(canvasHintInset(stateOf({ screen: "volume" })), 0);
-  assert.equal(canvasHintInset(stateOf({ screen: "drawing" })), 0);
+  assert.equal(canvasHintInset(stateOf({ screen: "drawing" })), RULER_SIZE);
+  // Спрятали линейку — отступ уходит из обоих.
+  assert.equal(canvasHintInset(stateOf({ screen: "drawing", guidesShown: false })), 0);
+  assert.equal(canvasHintInset(stateOf({ screen: "scheme", guidesShown: false })), 0);
 });
 
 // ——— две плашки над полем: подсказка слева, сводка справа (G228) ————————

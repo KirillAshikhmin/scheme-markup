@@ -47,6 +47,7 @@ import {
   findGroup,
   findOutline,
   findRoom,
+  gridStepOf,
   addSchemeGuide,
   deleteSchemeGuide,
   extendMarkLine,
@@ -145,6 +146,7 @@ import { getSetting, setSetting } from "./store.js";
 import { uiConfirm, uiDialogDepth, uiEl, uiIcon, uiPrompt } from "./panels/ui.js";
 import { createFieldPlate, plateUnseen } from "./panels/plate.js";
 import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
+import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "./screenPlace.js";
 
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
 //
@@ -550,9 +552,13 @@ export function canvasSummaryLines(state) {
 // здесь, а не в стилях: линейку прячут отметкой в «Размерах», и вместе с ней
 // обязан уходить отступ — иначе подсказка висит с пустым полем сверху.
 export function canvasHintInset(state) {
-  // Чертёж и объём линейки не рисуют вовсе, и отступ под неё оставил бы
-  // переключатель с полным экраном висеть на пустом поле (таск 153).
-  if (!canvasOnScreen(state)) return 0;
+  // Линейку рисуют **оба плоских поля** (таск 193, G293): отметка «Линейка и
+  // направляющие» одна на план и на чертёж, значит и полоса, которую она
+  // занимает, одна — иначе подсказка в чертеже наехала бы на деления. В объёме
+  // линейки нет вовсе (там не плоскость, а камера), и отступ под неё оставил бы
+  // переключатель с полным экраном висеть на пустом поле.
+  const screen = state && state.screen ? state.screen : SCREEN_DEFAULT;
+  if (screen === "volume") return 0;
   return canvasGuidesShown(state) ? RULER_SIZE : 0;
 }
 
@@ -861,6 +867,46 @@ function canvasProject(state) {
   return canvasPreview || state.project;
 }
 
+// ——— одно место и один масштаб на три режима (G276, D59) ————————————————
+//
+// Слова заказчика: «сейчас при переключении я не остаюсь там же, точнее не
+// всегда работает и уровень зума меняется. Должно совпадать пиксель в пиксель».
+//
+// План говорит, где стоит, на **каждый кадр** — в миллиметрах чертежа и в
+// экранных точках на миллиметр, — и говорит это только пока он на экране: кадр
+// рисуется и в чужом режиме, а запись из спрятанного поля перебила бы то, куда
+// уехало поле на виду. Читает он место, только когда оно **чужое**: отметка
+// записи растёт на каждую правку, и своя собственная ничего не значит.
+let canvasPlaceStamp = 0;
+
+function canvasPushPlace(state, project, view) {
+  if (!canvasOnScreen(state) || !state.schemeId) return;
+  const place = screenPlacePlanRead(project, state.schemeId, canvasBox(), view);
+  if (!place) return;
+  canvasPlaceStamp = screenPlaceSet(state.schemeId, place, place.pxPerMm);
+}
+
+/**
+ * Встать туда, где стояло поле, с которого пришли (или куда просит память
+ * вида). `false` — места нет, нет моста в миллиметры или оно своё же.
+ *
+ * Подгонка после этого не нужна и вредна: `canvasAutoFit` срабатывает, когда
+ * доедет подложка, — то есть **после** перехода, — и увёл бы план от
+ * назначенного места. Это и был случай «не всегда работает»: первый переход
+ * после загрузки объекта.
+ */
+function canvasPullPlace(state) {
+  if (!canvasOnScreen(state) || !state.schemeId) return false;
+  const place = screenPlaceOf(state.schemeId);
+  if (!place || place.stamp === canvasPlaceStamp) return false;
+  const next = screenPlacePlanView(state.project, state.schemeId, canvasBox(), place, state.view);
+  if (!next) return false;
+  canvasPlaceStamp = place.stamp;
+  canvasFitted = state.schemeId;
+  canvasApi.setState({ view: next });
+  return true;
+}
+
 function canvasPointOf(event) {
   const box = canvasNode.getBoundingClientRect();
   return { x: event.clientX - box.left, y: event.clientY - box.top };
@@ -914,6 +960,9 @@ function canvasPaint() {
   if (!scheme) return;
   const project = canvasProject(state);
   const view = canvasViewOf(state);
+  // Где стоит план — общему месту трёх режимов (D59). На кадр это один перевод
+  // середины поля в миллиметры: дешевле, чем ловить все двери к `view`.
+  canvasPushPlace(state, project, view);
   const draftColor = canvasDraftColor(state, project);
   drawScheme(canvasCtx, {
     project,
@@ -926,6 +975,9 @@ function canvasPaint() {
     // этого не уходит — там свои галки видимости.
     objects: state.objectsShown !== false,
     hiddenObjectIds: state.hiddenObjectIds,
+    // Сетка чертежа — и на плане (таск 193, G293). Шаг тот же, что в чертеже:
+    // он лежит в объекте (G258), и второго числа у сетки нет.
+    grid: canvasGridLayer(state, project),
     selectedWallId: state.selectedWallId || null,
     filter: state.filter,
     view,
@@ -1669,6 +1721,26 @@ function canvasBox() {
   return canvasNode
     ? { width: Math.max(1, canvasNode.clientWidth), height: Math.max(1, canvasNode.clientHeight) }
     : { width: 1, height: 1 };
+}
+
+/**
+ * Сетка чертежа на плане (таск 193, G293). Слова заказчика: «Сделай что бы
+ * сетка была и на схеме».
+ *
+ * Шаг — у объекта (`gridStepOf`, G258), и он **тот же**, что в чертеже: это
+ * вторая причина, по которой сетку сделали общей, а не спрятали из «Интерфейса»
+ * в режиме плана. «Без сетки» — пункт в списке шагов, а живёт он в настройках
+ * браузера (`GRID_SETTING`), как и прочие слои показа: в объект от этого не
+ * пишется ничего (G68).
+ *
+ * `null` — сетки нет: либо «Без сетки», либо у плана нет моста в миллиметры
+ * (нет калибровки или привязки) — тогда и рисовать нечего, миллиметра на таком
+ * плане не существует.
+ */
+function canvasGridLayer(state, project) {
+  if (!state || state.gridShown === false) return null;
+  const step = gridStepOf(project);
+  return step > 0 ? { stepMm: step, box: canvasBox() } : null;
 }
 
 // Полоса линейки: клик по ней вытягивает новую направляющую, а не идёт в план.
@@ -4206,6 +4278,10 @@ function mountCanvas(host, api) {
       const said = CANVAS_MODE_NOTES[state.mode];
       if (said) canvasApi.notify(said);
     }
+    // Место общее на три режима (D59): вернулись на план — встаём туда, где
+    // стояло поле, с которого пришли. **До** подгонки: встав на место, план
+    // считается подогнанным, и `canvasAutoFit` его больше не трогает.
+    if ("screen" in changed || "schemeId" in changed || "project" in changed) canvasPullPlace(state);
     // Подгонка пробуется и на правке объекта: у схемы без подложки вписывать
     // до первой стены нечего, и единственный случай, когда «вписать» впервые
     // становится возможным, — появление чертежа. Повторов это не даёт:
