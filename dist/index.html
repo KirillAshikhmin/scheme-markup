@@ -6744,7 +6744,7 @@ const strings = {
     // толщины, и частые толщины стоят плитками, чтобы не набирать число.
     wallsPresets: "Частые толщины",
     wallsAbout: "Стена рисуется цепочкой: клик — вершина, двойной клик — конец. Толщину выделенной стены меняют потом в её строке списка.",
-    openingsAbout: "Вид и размеры нового проёма. Место в стене он берёт под курсором, а отступ от начала стены правится в его строке списка.",
+    openingsAbout: "Вид и размеры нового проёма. Место в стене он берёт под курсором, а отступ от начала стены правится в его строке списка. Створку двери листают Q и E — четыре двери по кругу, не открывая это окно.",
     objectsAbout: "Вещь каталога, способ и размеры новой вещи. Размеры приходят от вещи — поправьте их здесь или потом в её строке списка.",
     startWalls: "Чертить стены",
     startOpenings: "Ставить проём",
@@ -7697,7 +7697,7 @@ const strings = {
     openingNeedWall: "Сперва нарисуйте стены: проём живёт в стене, а не рядом с ней",
     doorHinge: "Петли: {value}",
     doorSwing: "Открывание: {value}",
-    doorHint: "Ручка у петли переставляет их на другой косяк, ручка на кончике полотна перекидывает его на другую сторону стены.",
+    doorHint: "Q и E листают четыре двери по кругу. Ручка у петли переставляет их на другой косяк, ручка на кончике полотна перекидывает его на другую сторону стены.",
     // ——— объекты на полу ———
     object: "Объект",
     objectWidth: "Ширина, мм",
@@ -7826,7 +7826,7 @@ const strings = {
     hint:
       "Клик — вершина стены, двойной клик — конец цепочки, Backspace — убрать последнюю, Esc — отменить цепочку, ещё раз — выйти из добавления. Alt — без притяжки. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
     hintOpenings:
-      "Покажите на стену — проём сядет в неё серединой под курсор. Красный призрак не сядет, причина названа справа. Вид и размеры — в колонке. Esc — выйти из добавления. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
+      "Покажите на стену — проём сядет в неё серединой под курсор. Красный призрак не сядет, причина названа справа. Вид и размеры — в колонке. У двери Q и E листают четыре двери: петли у начала стены или у конца, открывание налево или направо; призрак показывает выбранную до клика. Esc — выйти из добавления. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
     // Подсказка объектов — своя у каждого способа: про «замкните контур» читал
     // бы человек, который в это время ставит радиатор кликом.
     hintObjects:
@@ -8457,6 +8457,7 @@ const strings = {
   openingKinds: {
     window: "Окно",
     door: "Дверь",
+    glassDoor: "Стеклянная дверь",
     opening: "Проём",
     arch: "Арка",
   },
@@ -14235,10 +14236,88 @@ function scaleDrawing(project, schemeId, factor) {
 // Обе названы через **направление самой стены**, а не «внутрь/наружу»: что
 // внутри, а что снаружи, модель не знает — помещения выводятся из контуров, а
 // не из стен (таск 122, развилка 2), и «внутрь» пришлось бы угадывать.
-const OPENING_KINDS = ["window", "door", "opening", "arch"];
+
+// Виды проёма. **Стеклянная дверь стоит рядом с обычной** (таск 180, G269):
+// слова заказчика — «как на французский балкон — с рамой, но не глухая, а по
+// центру стекло, ну и тоже ручки». Для модели это дверь со всеми её полями:
+// петли, сторона открывания, полотно, ручка — и отличается она только тем, из
+// чего полотно сделано. Новый ключ приписан в середину списка, а не в начало:
+// `OPENING_KINDS[0]` — вид нового проёма по умолчанию (окно), и менять его
+// значило бы менять поведение кнопки, которой человек пользуется каждый день.
+const OPENING_KINDS = ["window", "door", "glassDoor", "opening", "arch"];
 const OPENING_KIND_DOOR = "door";
+const OPENING_KIND_GLASS_DOOR = "glassDoor";
+/** Виды с полотном: петли, сторона открывания, ручка, открывание в объёме. */
+const OPENING_DOOR_KINDS = [OPENING_KIND_DOOR, OPENING_KIND_GLASS_DOOR];
 const OPENING_HINGES = ["start", "end"];
 const OPENING_SWINGS = ["left", "right"];
+
+/**
+ * **Есть ли у этого вида полотно.** Один вопрос — один хозяин: до таска 180 его
+ * задавали восемь раз сравнением `kind === OPENING_KIND_DOOR`, и стеклянной
+ * двери пришлось бы завести девятое. Спрашивать вид напрямую больше нельзя:
+ * разойдись эти сравнения — у двери в колонке появились бы петли, а в объёме
+ * нет, или наоборот.
+ */
+function openingHasLeaf(kind) {
+  return OPENING_DOOR_KINDS.includes(kind);
+}
+
+/**
+ * **Четыре состояния двери кольцом** (таск 180, G268). Слова заказчика: «при
+ * установке дверей так же вращай их по Q/E причём сразу по 4 значениям —
+ * сперва сторона петель, потом сторона открытия».
+ *
+ * Петли и сторона открывания независимы, и сочетаний у них ровно четыре.
+ * Кольцо выстроено так, что **каждый шаг меняет ровно один признак**, и первый
+ * шаг — петли: `start/left → end/left → end/right → start/right →` и снова
+ * сначала. Это и есть «сперва сторона петель, потом сторона открытия»: на
+ * чётном нажатии переезжают петли, на нечётном — сторона.
+ *
+ * Двоичный счётчик (петли — младший разряд) дал бы то же множество, но два
+ * шага из четырёх переставляли бы оба признака сразу: призрак прыгал бы через
+ * дверь, которой человек не просил. Поэтому кольцо, а не счётчик.
+ *
+ * Выведено из `OPENING_HINGES` и `OPENING_SWINGS`, а не выписано словами:
+ * второго описания того, какие бывают петли, в сборке быть не должно.
+ */
+const OPENING_DOOR_STATES = [
+  { hinge: OPENING_HINGES[0], swing: OPENING_SWINGS[0] },
+  { hinge: OPENING_HINGES[1], swing: OPENING_SWINGS[0] },
+  { hinge: OPENING_HINGES[1], swing: OPENING_SWINGS[1] },
+  { hinge: OPENING_HINGES[0], swing: OPENING_SWINGS[1] },
+];
+
+/** Какое это из четырёх состояний. Чужое или пустое — первое, а не `-1`. */
+function openingDoorStateIndex(state) {
+  const hinge = state && state.hinge != null ? state.hinge : OPENING_HINGES[0];
+  const swing = state && state.swing != null ? state.swing : OPENING_SWINGS[0];
+  const found = OPENING_DOOR_STATES.findIndex((item) => item.hinge === hinge && item.swing === swing);
+  return found < 0 ? 0 : found;
+}
+
+/**
+ * Следующее состояние двери: `+1` — по кольцу вперёд (`E`), `−1` — назад (`Q`).
+ * Отдаёт **новый** объект `{hinge, swing}`, как и всё в модели.
+ */
+function openingDoorStep(state, delta = 1) {
+  const count = OPENING_DOOR_STATES.length;
+  const step = Number(delta) || 0;
+  const index = (((openingDoorStateIndex(state) + step) % count) + count) % count;
+  return { ...OPENING_DOOR_STATES[index] };
+}
+
+/**
+ * **Ширина рамы стеклянной двери** — одна мерка на все три поверхности (план,
+ * развёртка, объём): рама по контуру полотна, в середине стекло. Девяносто
+ * миллиметров — обычная балконная дверь (рама 60–100 мм), и на плане этого
+ * ровно хватает, чтобы двойная линия полотна читалась как остеклённое.
+ *
+ * Живёт в модели по тому же правилу, что `WALL_HEIGHT_FALLBACK_MM`: число,
+ * нужное двум рисовальщикам сразу, принадлежит одному хозяину, иначе рама в
+ * объёме разойдётся с рамой на развёртке.
+ */
+const OPENING_GLASS_FRAME_MM = 90;
 
 function openingsOf(project) {
   return project && Array.isArray(project.openings) ? project.openings : [];
@@ -14294,7 +14373,7 @@ function checkOpeningHeight(project, wall, opening) {
 function openingDoorFields(kind, patch, current) {
   const has = (key) => patch && Object.prototype.hasOwnProperty.call(patch, key);
   const value = (key) => (has(key) ? patch[key] : current ? current[key] : undefined);
-  if (kind !== OPENING_KIND_DOOR) {
+  if (!openingHasLeaf(kind)) {
     // Сторона открывания у окна и у арки не значит ничего: полотна нет.
     if ((has("hinge") && patch.hinge != null) || (has("swing") && patch.swing != null)) {
       throw modelError("openingSwingOnlyDoor");
@@ -26611,7 +26690,7 @@ function drawDrawingHandles(ctx, bridge, { walls, objects, active, activeOpening
     return;
   }
   if (active.kind === "opening") {
-    if (!activeOpening || activeOpening.opening.kind !== OPENING_KIND_DOOR) return;
+    if (!activeOpening || !openingHasLeaf(activeOpening.opening.kind)) return;
     const leaf = drawingDoorLeaf(activeOpening.wall, activeOpening.opening);
     if (!leaf) return;
     handle(ctx, bridge.toScreen(leaf.hinge));
@@ -26717,6 +26796,13 @@ function drawDrawingWall(ctx, bridge, wall, active) {
  * Проём в стене: разрыв до бумаги, два косяка поперёк стены и — по виду — то,
  * что его называет. Окно — ниткой стекла вдоль середины, арка — пунктиром,
  * проём без полотна — ничем, дверь — створкой с дугой.
+ *
+ * **Стеклянная дверь** (таск 180) рисуется той же створкой и той же дугой —
+ * четыре состояния у неё те же, и различать их человек должен тем же рисунком,
+ * — но полотно у неё не линия, а контур: рама по краю, бумага внутри. Это и
+ * есть «с рамой, но не глухая, а по центру стекло» в плановой проекции, и это
+ * тот же приём, которым на плане отличается окно: стекло — незакрашенное
+ * место, обведённое по контуру.
  */
 function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
   const span = drawingOpeningSpan(wall, opening);
@@ -26764,11 +26850,16 @@ function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
     ctx.lineTo(to.x, to.y);
     ctx.stroke();
     ctx.setLineDash([]);
-  } else if (opening.kind === OPENING_KIND_DOOR) {
+  } else if (openingHasLeaf(opening.kind)) {
     drawDrawingDoor(ctx, bridge, wall, opening, colour);
   }
   ctx.restore();
 }
+
+// Полотно стеклянной двери на плане тоньше рамы не бывает: при мелком масштабе
+// 90 мм рамы дают меньше точки, и контур слился бы в ту же линию, что у
+// глухого полотна. Три точки — наименьшее, на чём двойная линия ещё двойная.
+const DRAWING_GLASS_MIN_PX = 3;
 
 function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   const leaf = drawingDoorLeaf(wall, opening);
@@ -26777,12 +26868,16 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   const closed = bridge.toScreen(leaf.closed);
   const tip = bridge.toScreen(leaf.tip);
   const radius = Math.hypot(tip.x - hinge.x, tip.y - hinge.y);
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = colour;
-  ctx.beginPath();
-  ctx.moveTo(hinge.x, hinge.y);
-  ctx.lineTo(tip.x, tip.y);
-  ctx.stroke();
+  if (opening.kind === OPENING_KIND_GLASS_DOOR) {
+    drawDrawingGlassLeaf(ctx, hinge, tip, Math.max(DRAWING_GLASS_MIN_PX, OPENING_GLASS_FRAME_MM * bridge.pxPerMm), colour);
+  } else {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = colour;
+    ctx.beginPath();
+    ctx.moveTo(hinge.x, hinge.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+  }
   if (radius > 1) {
     const start = Math.atan2(closed.y - hinge.y, closed.x - hinge.x);
     const end = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
@@ -26800,6 +26895,34 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   }
   // Ручки петли и края створки — в последнем слое (`drawDrawingHandles`): здесь
   // они ложились под буквы углов, а кружок буквы ровно на конце стены и стоит.
+}
+
+/**
+ * Остеклённое полотно: контур рамы от петли до кончика, внутри бумага.
+ *
+ * Считается в экранных точках по двум концам полотна — тем же, которыми
+ * рисуется глухое, — и поэтому поворот подложки достаётся ему даром: своей
+ * нормали в миллиметрах здесь не выводится, как не выводит её и сам проём.
+ */
+function drawDrawingGlassLeaf(ctx, hinge, tip, thickness, colour) {
+  const dx = tip.x - hinge.x;
+  const dy = tip.y - hinge.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const half = thickness / 2;
+  const nx = (dy / len) * half;
+  const ny = (-dx / len) * half;
+  // Бумага внутри — это и есть стекло: закрашенное полотно читалось бы глухим.
+  ctx.beginPath();
+  ctx.moveTo(hinge.x + nx, hinge.y + ny);
+  ctx.lineTo(tip.x + nx, tip.y + ny);
+  ctx.lineTo(tip.x - nx, tip.y - ny);
+  ctx.lineTo(hinge.x - nx, hinge.y - ny);
+  ctx.closePath();
+  ctx.fillStyle = DRAWING_PAPER;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = colour;
+  ctx.stroke();
 }
 
 /**
@@ -27380,6 +27503,19 @@ function drawElevation(ctx, elevation, box, options = {}) {
     ctx.lineWidth = 1.5 * unit;
     ctx.strokeStyle = DRAWING_EDGE;
     ctx.strokeRect(x, top, width, height);
+    // Стеклянная дверь (таск 180): на развёртку она смотрит лицом, и здесь
+    // видно ровно то, что просил заказчик, — рама по контуру, стекло в
+    // середине. Рама отложена внутрь на свою ширину, а не нарисована двойной
+    // линией на глаз: число одно на план, развёртку и объём.
+    if (opening.kind === OPENING_KIND_GLASS_DOOR) {
+      const inset = OPENING_GLASS_FRAME_MM * scale;
+      // Рама съела бы всё полотно на мелком масштабе — тогда стекла нет вовсе,
+      // и рисовать его незачем: дверь остаётся обведённым проёмом.
+      if (width > inset * 2.5 && height > inset * 2.5) {
+        ctx.lineWidth = 1 * unit;
+        ctx.strokeRect(x + inset, top + inset, width - inset * 2, height - inset * 2);
+      }
+    }
     if (opening.hinge) {
       const hingeX = opening.hinge === "start" ? x : x + width;
       ctx.setLineDash([4 * unit, 3 * unit]);
@@ -42372,7 +42508,9 @@ function openDrawPicker(options = {}) {
       fieldValue(openingWidth, sizes.widthMm);
       fieldValue(openingHeight, sizes.heightMm);
       fieldValue(openingFloor, sizes.heightAboveFloorMm);
-      doorRow.hidden = settings.openings.kind !== OPENING_KIND_DOOR;
+      // Створка — у всякого вида с полотном (таск 180): у стеклянной двери те
+      // же петли и та же сторона открывания, что у глухой.
+      doorRow.hidden = !openingHasLeaf(settings.openings.kind);
       hinge.textContent = text("workshop.doorHinge", {
         value: strings.openingHinges[settings.openings.hinge] || "",
       });
@@ -50684,6 +50822,13 @@ const VOLUME_DOOR_RGB = [176, 132, 92];
 /** Ручка двери — металл: светлее полотна и холоднее его (G207). */
 const VOLUME_HANDLE_RGB = [186, 190, 198];
 const VOLUME_FRAME_RGB = [240, 242, 244];
+/**
+ * **Стекло двери** (таск 180, G269) — холодный блик, а не цвет: сквозь него
+ * видно соседнюю комнату, и своего тона у него ровно столько, чтобы полотно
+ * читалось стеклом, а не дыркой. Отдаёт он `VOLUME_CLEAR_ALPHA` — ту же долю,
+ * что вещь чертежа (таск 169): второй прозрачности в сборке не заводится.
+ */
+const VOLUME_GLASS_RGB = [196, 216, 224];
 const VOLUME_MARKER_RGB = [31, 111, 235];
 
 /**
@@ -51383,7 +51528,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
     volumeWindowFrame(at, from, to, bottom, top, out);
     return out;
   }
-  if (opening.kind === OPENING_KIND_DOOR) {
+  if (openingHasLeaf(opening.kind)) {
     const open = volumeDoorOpen(openDoorIds, opening.id);
     volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open);
   }
@@ -51465,13 +51610,17 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
   // Куда смотрит полотно: раскрытое — прочь от стены, закрытое — вдоль неё.
   const leaf = open ? { x: n.x * side, y: n.y * side } : { x: u.x * (atStart ? 1 : -1), y: u.y * (atStart ? 1 : -1) };
   const tip = { x: hinge.x + leaf.x * width, y: hinge.y + leaf.y * width };
-  out.push(
-    volumeFace(
-      [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
-      VOLUME_DOOR_RGB,
-      { both: true, doorId },
-    ),
-  );
+  if (opening.kind === OPENING_KIND_GLASS_DOOR) {
+    volumeGlassLeaf(hinge, leaf, width, span, out, doorId);
+  } else {
+    out.push(
+      volumeFace(
+        [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
+        VOLUME_DOOR_RGB,
+        { both: true, doorId },
+      ),
+    );
+  }
   // Ручка у свободного края полотна, на высоте, на которой её берут рукой
   // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
   // открывают с той стороны, с которой подошли.
@@ -51491,6 +51640,62 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
       { doorId },
     );
   }
+  return out;
+}
+
+/**
+ * **Полотно стеклянной двери** (таск 180, G269): рама по контуру и стекло в
+ * середине. Слова заказчика — «как на французский балкон — с рамой, но не
+ * глухая, а по центру стекло, ну и тоже ручки».
+ *
+ * Четыре бруска рамы непрозрачны, пятая грань — стекло, и у неё `clear`: тот
+ * же признак и та же доля (`VOLUME_CLEAR_ALPHA`), которыми просвечивает вещь
+ * чертежа (таск 169). Второй прозрачности в сборке не заводится: разойдись
+ * они — стекло двери и стекло шкафа смешивались бы по-разному в одном кадре.
+ *
+ * ——— порядок граней ——————————————————————————————————————————————————————
+ *
+ * Рама и стекло **коплоскостны**: все пять граней лежат в одной плоскости
+ * полотна. Дерево порядка (таск 151) порядок внутри плоскости не обещает — и
+ * здесь он не нужен ни на что: бруски стоят вокруг стекла, а не поверх него, и
+ * коплоскостные грани, которые друг друга не закрывают, смешиваться между
+ * собой не могут. Ровно это условие и записано у `volumeOrderTree`.
+ *
+ * А вот то, что **за** полотном, дерево разводит как надо: плоскость полотна
+ * сама становится секущей, и всё, что за ней, рисуется раньше — то есть
+ * прозрачному стеклу достаётся уже готовый задник, как того и требует
+ * смешивание. Второго прохода «прозрачные после непрозрачных» не понадобилось
+ * и здесь.
+ *
+ * Полотно уже рамы вдвое — рама съедает ширину с двух сторон; на узкой или
+ * низкой двери (меньше трёх рам) стекла не остаётся, и полотно рисуется глухим
+ * одной гранью рамы: врать про стекло там, где его негде нарисовать, незачем.
+ */
+function volumeGlassLeaf(hinge, leaf, width, span, out, doorId) {
+  const at = (along, z) => volumeAt({ x: hinge.x + leaf.x * along, y: hinge.y + leaf.y * along }, z);
+  const quad = (fromAlong, toAlong, bottom, top, rgb, clear) => {
+    if (!(toAlong > fromAlong) || !(top > bottom)) return;
+    out.push(volumeFace([at(fromAlong, bottom), at(toAlong, bottom), at(toAlong, top), at(fromAlong, top)], rgb, {
+      both: true,
+      doorId,
+      clear,
+    }));
+  };
+  const frame = OPENING_GLASS_FRAME_MM;
+  const height = span.top - span.bottom;
+  if (!(width > frame * 3) || !(height > frame * 3)) {
+    quad(0, width, span.bottom, span.top, VOLUME_FRAME_RGB, false);
+    return out;
+  }
+  const inner = { from: frame, to: width - frame, bottom: span.bottom + frame, top: span.top - frame };
+  // Низ, верх и две стойки — рама; стойки встают между низом и верхом, чтобы
+  // бруски не легли друг на друга: наложенных коплоскостных граней в сцене
+  // быть не должно.
+  quad(0, width, span.bottom, inner.bottom, VOLUME_FRAME_RGB, false);
+  quad(0, width, inner.top, span.top, VOLUME_FRAME_RGB, false);
+  quad(0, inner.from, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
+  quad(inner.to, width, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
+  quad(inner.from, inner.to, inner.bottom, inner.top, VOLUME_GLASS_RGB, true);
   return out;
 }
 
@@ -53306,7 +53511,9 @@ function volumeScene(project, schemeId, options = {}) {
   for (const wall of walls) {
     const openings = openingsInWall(project, wall.id);
     for (const opening of openings) {
-      if (opening.kind === OPENING_KIND_DOOR && opening.id) doors.push(opening.id);
+      // Стеклянная дверь — дверь и здесь (таск 180): её открывают `E`, щелчком
+      // и касанием, и `R` открывает её вместе со всеми.
+      if (openingHasLeaf(opening.kind) && opening.id) doors.push(opening.id);
     }
     const height = wallHeights.get(wall.id);
     volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null);
@@ -62308,6 +62515,11 @@ function workshopMoveWall(project, wallId, deltaMm) {
 const WORKSHOP_OPENING_DEFAULTS = {
   window: { widthMm: 1500, heightMm: 1400, heightAboveFloorMm: 800 },
   door: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
+  // Стеклянная дверь (таск 180) — балконная: уже межкомнатной и выше её. 800 ×
+  // 2200 от пола — то, что стоит на французском балконе, о котором говорил
+  // заказчик; свои умолчания у неё потому, что подставить дверные значило бы
+  // заставить править оба числа на каждой.
+  glassDoor: { widthMm: 800, heightMm: 2200, heightAboveFloorMm: 0 },
   opening: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
   arch: { widthMm: 1200, heightMm: 2100, heightAboveFloorMm: 0 },
 };
@@ -63010,7 +63222,7 @@ function workshopPick(project, schemeId, pointMm, view, selected, hiddenObjectId
   if (selected && selected.kind === "opening") {
     const opening = findOpening(project, selected.id);
     const wall = opening ? findWall(project, opening.wallId) : null;
-    const leaf = wall && opening.kind === OPENING_KIND_DOOR ? drawingDoorLeaf(wall, opening) : null;
+    const leaf = wall && openingHasLeaf(opening.kind) ? drawingDoorLeaf(wall, opening) : null;
     if (leaf) {
       if (Math.hypot(pointMm.x - leaf.hinge.x, pointMm.y - leaf.hinge.y) <= vertexMm) {
         return { kind: "hinge", id: opening.id };
@@ -64034,7 +64246,9 @@ function createWorkshop({ api, hosts }) {
   function openingDraft(kind) {
     const sizes = workshopOpeningSizes[kind] || WORKSHOP_OPENING_DEFAULTS[kind];
     const draftOpening = { kind, ...sizes };
-    if (kind === OPENING_KIND_DOOR) {
+    // Петли и сторона открывания — у всякого вида с полотном, не только у
+    // глухой двери (таск 180): у стеклянной они те же и те же четыре.
+    if (openingHasLeaf(kind)) {
       draftOpening.hinge = workshopDoorHinge;
       draftOpening.swing = workshopDoorSwing;
     }
@@ -64047,7 +64261,7 @@ function createWorkshop({ api, hosts }) {
     const opening = selectedOpening();
     if (!opening || opening.kind === kind) return;
     try {
-      const patch = { kind, ...(kind === OPENING_KIND_DOOR ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
+      const patch = { kind, ...(openingHasLeaf(kind) ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
       commit(updateOpening(project(), opening.id, patch).project, strings.history.openingKind);
     } catch (error) {
       fail(error);
@@ -64133,26 +64347,93 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
-   * Переключить створку двери. Четыре сочетания — четыре разные двери, и
-   * различают их на плане по рисунку, а не по двум полям. Поэтому у выделенной
-   * двери на чертеже стоят две ручки: у петли и на кончике полотна. Кнопки в
-   * колонке делают то же самое словами — для тех, кто ищет глазами подпись.
+   * О какой двери сейчас речь: о выделенной, а без выделения — о той, которую
+   * поставит следующий клик. Правило то же, по которому колонка показывает
+   * толщину стены и габариты вещи, и второго его описания здесь нет.
    */
-  function flipDoor(what) {
+  function doorState(opening) {
+    return opening && openingHasLeaf(opening.kind)
+      ? { hinge: opening.hinge, swing: opening.swing }
+      : { hinge: workshopDoorHinge, swing: workshopDoorSwing };
+  }
+
+  /**
+   * Поставить двери состояние — одна дверь на все три двери к нему: кнопки
+   * «Петли» и «Открывание» в колонке, ручки у петли и на кончике полотна,
+   * клавиши `Q` и `E` (таск 180). Выделенной — правкой через историю, без
+   * выделения — той, которая встанет следующей.
+   *
+   * **Призрак под рукой переставляется здесь же.** До таска 180 кнопка в
+   * колонке меняла слова, а призрак оставался прежним до следующего движения
+   * мыши — то есть обещал дверь, которой уже не выберут. Пересчитывать его
+   * целиком незачем: створка не меняет ни места проёма, ни ответа модели
+   * «влезает ли он», — поэтому у него переставляются два поля, а `ok` и
+   * причина отказа остаются теми же.
+   */
+  function applyDoorState(state) {
     const opening = selectedOpening();
-    const flipHinge = (value) => (value === "end" ? "start" : "end");
-    const flipSwing = (value) => (value === "right" ? "left" : "right");
-    if (!opening || opening.kind !== OPENING_KIND_DOOR) return;
-    const patch =
-      what === "hinge" ? { hinge: flipHinge(opening.hinge) } : { swing: flipSwing(opening.swing) };
+    // Выделенной двери нет — значит речь о той, которая встанет по клику: её
+    // состояние живёт в сеансе, как толщина новых стен и габариты новой вещи.
+    // Кнопки в строке сюда не попадают (они видны только у выделенной), а
+    // `Q` и `E` — попадают, и в этом вся суть требования G268.
+    if (!opening || !openingHasLeaf(opening.kind)) {
+      workshopDoorHinge = state.hinge;
+      workshopDoorSwing = state.swing;
+      if (ghost && openingHasLeaf(ghost.opening.kind)) {
+        ghost = { ...ghost, opening: { ...ghost.opening, hinge: state.hinge, swing: state.swing } };
+      }
+      sync();
+      redraw();
+      return;
+    }
     try {
-      commit(updateOpening(project(), opening.id, patch).project, strings.history.openingSwing);
-      workshopDoorHinge = patch.hinge || opening.hinge;
-      workshopDoorSwing = patch.swing || opening.swing;
+      commit(updateOpening(project(), opening.id, state).project, strings.history.openingSwing);
+      workshopDoorHinge = state.hinge;
+      workshopDoorSwing = state.swing;
     } catch (error) {
       fail(error);
       sync();
     }
+  }
+
+  /**
+   * Переключить створку двери. Четыре сочетания — четыре разные двери, и
+   * различают их на плане по рисунку, а не по двум полям. Поэтому у выделенной
+   * двери на чертеже стоят две ручки: у петли и на кончике полотна. Кнопки в
+   * колонке делают то же самое словами — для тех, кто ищет глазами подпись.
+   *
+   * Кнопка переставляет **один** признак — тот, который на ней написан; по
+   * кольцу всех четырёх ведут `Q` и `E` (`stepDoor`).
+   */
+  function flipDoor(what) {
+    const now = doorState(selectedOpening());
+    const other = (list, value) => (value === list[0] ? list[1] : list[0]);
+    applyDoorState(
+      what === "hinge"
+        ? { hinge: other(OPENING_HINGES, now.hinge), swing: now.swing }
+        : { hinge: now.hinge, swing: other(OPENING_SWINGS, now.swing) },
+    );
+  }
+
+  /**
+   * `Q` и `E` — четыре двери по кругу (таск 180, G268). Слова заказчика: «при
+   * установке дверей так же вращай их по Q/E причём сразу по 4 значениям —
+   * сперва сторона петель, потом сторона открытия».
+   *
+   * Кольцо живёт в модели (`OPENING_DOOR_STATES`), здесь только шаг по нему:
+   * `E` вперёд, `Q` назад. Третьего механизма у проёма не заводится — это те
+   * же клавиши и то же условие «выделенное, а без выделения то, что встанет»,
+   * которыми таск 168 поворачивает вещь чертежа. Набор состояний другой: у
+   * вещи угол, у двери четыре сочетания петель и стороны.
+   */
+  function stepDoor(delta) {
+    applyDoorState(openingDoorStep(doorState(selectedOpening()), delta));
+  }
+
+  /** Есть ли сейчас дверь, которую листать: выделенная или та, что встанет. */
+  function doorTurnable() {
+    if (selected) return Boolean(selectedOpening()) && openingHasLeaf(selectedOpening().kind);
+    return tool === "openings" && openingHasLeaf(workshopOpeningKind);
   }
 
   // ——— объекты на полу ——————————————————————————————————————————————————
@@ -65139,6 +65420,20 @@ function createWorkshop({ api, hosts }) {
       turnBy(event.code === "KeyQ" ? -WORKSHOP_TURN_HALF_DEG : WORKSHOP_TURN_HALF_DEG);
       return;
     }
+    // Те же `Q` и `E` у двери (таск 180, G268) — и это **не третий механизм**:
+    // клавиши те же, условие то же («выделенное, а без выделения то, что
+    // встанет»), дверь к состоянию одна. Другой только набор: у вещи угол с
+    // шагом 45°, у двери четыре сочетания петель и стороны открывания.
+    //
+    // Спорить им не о чем: вещь поворачивают в занятии «объекты», дверь
+    // листают в «проёмах», и выделено в один миг что-то одно. У окна, проёма и
+    // арки полотна нет — там `Q` и `E` не перехватываются вовсе.
+    if ((event.code === "KeyQ" || event.code === "KeyE") && !event.altKey && !event.shiftKey && doorTurnable()) {
+      event.preventDefault();
+      event.stopPropagation();
+      stepDoor(event.code === "KeyQ" ? -1 : 1);
+      return;
+    }
     if ((event.key === "Delete" || event.key === "Backspace") && selected) {
       event.preventDefault();
       event.stopPropagation();
@@ -65898,12 +66193,15 @@ function createWorkshop({ api, hosts }) {
     fieldValue(openingHeight, opening.heightMm);
     fieldValue(openingFloor, opening.heightAboveFloorMm);
     fieldValue(openingAt, opening.atMm);
-    doorFields.hidden = kind !== OPENING_KIND_DOOR;
-    if (kind === OPENING_KIND_DOOR) {
+    // Поля полотна — у всякого вида с полотном (таск 180): у стеклянной двери
+    // те же петли, та же сторона и те же четыре состояния.
+    const leaf = openingHasLeaf(kind);
+    doorFields.hidden = !leaf;
+    if (leaf) {
       hingeButton.textContent = text("workshop.doorHinge", { value: strings.openingHinges[opening.hinge] });
       swingButton.textContent = text("workshop.doorSwing", { value: strings.openingSwings[opening.swing] });
     }
-    openingNote.textContent = kind === OPENING_KIND_DOOR ? strings.workshop.doorHint : "";
+    openingNote.textContent = leaf ? strings.workshop.doorHint : "";
     openingNote.hidden = openingNote.textContent === "";
   }
 
