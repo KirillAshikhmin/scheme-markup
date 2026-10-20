@@ -4477,6 +4477,34 @@ function drawLabel(ctx, box, color, runs, selected) {
   ctx.restore();
 }
 
+/**
+ * Знак метки: фигура точки, нитка линии, точка комментария — и пунктир
+ * выделения вокруг. Одна дверь на кадр плана, выгрузку и **призрака под рукой**.
+ *
+ * `options.selected` — метка выделена; `options.stacks` — расклад стопки
+ * совпавших.
+ *
+ * `options.ghost` — та же метка **до** клика (таск 176, G263). Слова
+ * заказчика: «При добавлении метки так же рисуй под курсором её». Приём взят у
+ * призрака вещи чертежа целиком (таск 168, `drawDrawingObject`): рисует
+ * призрака **этот же код**, своего у него только две приметы — полсилы цвета и
+ * пунктир, и те же две, что у чертежа (`DRAWING_GHOST_ALPHA`,
+ * `DRAWING_GHOST_DASH`): мерка призрака в сборке одна. Второго рисовальщика
+ * знака не заводится — разойдись они, под рукой была бы одна фигура, а по
+ * клику вставала другая.
+ */
+export function drawMarkSign(ctx, project, scheme, mark, view, options = {}) {
+  if (options.ghost) {
+    ctx.save();
+    ctx.globalAlpha = DRAWING_GHOST_ALPHA;
+    ctx.setLineDash(DRAWING_GHOST_DASH);
+    drawMarkSign(ctx, project, scheme, mark, view, { ...options, ghost: false });
+    ctx.restore();
+    return;
+  }
+  drawMarkBody(ctx, project, scheme, mark, view, Boolean(options.selected), options.stacks || null);
+}
+
 function drawMarkBody(ctx, project, scheme, mark, view, selected, stacks) {
   const style = styleOf(project, mark.typeId);
   const radius = markRadius(view);
@@ -4929,7 +4957,8 @@ function drawingOpeningsByWall(project, schemeId) {
  * `options.active` — что подсвечено и ручками (только мастерская).
  * `options.wallAt` — подмена концов стены на время перетаскивания.
  * `options.openingAt` — подмена отступа проёма на то же время.
- * `options.handle` — чем рисовать ручку; без неё ручек нет.
+ * `options.handle` — чем рисовать ручку; без неё ручек нет. Ручки идут
+ *   **последним слоем**, поверх всего начерченного (`drawDrawingHandles`).
  * `options.labels` — `false` рисует чертёж без слов (буквы углов, имена
  *   объектов): так его просит миникарта объёма.
  * `options.hiddenObjectIds` — вещи, спрятанные с экрана поштучно (таск 154,
@@ -4959,34 +4988,82 @@ export function drawDrawing(ctx, options = {}) {
       // Имя вещи спрашивается у модели: у вещи каталога оно каталожное, у
       // прежней — её собственное из справочника объекта (таск 154).
       name: labels ? schemeObjectNameOf(project, object) : "",
-      handle: options.handle,
     });
   }
-  if (options.walls === false) return;
-  const byWall = drawingOpeningsByWall(project, schemeId);
-  for (const wall of walls) {
-    const ends = options.wallAt ? options.wallAt(wall) : wall;
-    drawDrawingWall(ctx, bridge, ends, active && active.kind === "wall" && active.id === wall.id);
-  }
-  for (const wall of walls) {
-    const ends = options.wallAt ? options.wallAt(wall) : wall;
-    for (const opening of byWall.get(wall.id) || []) {
-      drawDrawingOpening(ctx, bridge, ends, options.openingAt ? options.openingAt(opening) : opening, {
-        active: active && active.kind === "opening" && active.id === opening.id,
-        handle: options.handle,
-      });
+  // Проём, который сейчас правят: его створку ручками показывает последний
+  // слой, и искать её там заново по стенам незачем.
+  let activeOpening = null;
+  if (options.walls !== false) {
+    const byWall = drawingOpeningsByWall(project, schemeId);
+    for (const wall of walls) {
+      const ends = options.wallAt ? options.wallAt(wall) : wall;
+      drawDrawingWall(ctx, bridge, ends, active && active.kind === "wall" && active.id === wall.id);
     }
+    for (const wall of walls) {
+      const ends = options.wallAt ? options.wallAt(wall) : wall;
+      for (const opening of byWall.get(wall.id) || []) {
+        const shown = options.openingAt ? options.openingAt(opening) : opening;
+        const live = Boolean(active && active.kind === "opening" && active.id === opening.id);
+        if (live) activeOpening = { wall: ends, opening: shown };
+        drawDrawingOpening(ctx, bridge, ends, shown, { active: live });
+      }
+    }
+    // Буквы углов — поверх стен и проёмов, но под разметкой: метка главнее
+    // обозначения стены, как и везде (G200). Вместе со слоем стен они и гаснут:
+    // буква без стены не значит ничего.
+    if (labels) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
   }
-  // Буквы углов — поверх стен и проёмов, но под разметкой: метка главнее
-  // обозначения стены, как и везде (G200). Вместе со слоем стен они и гаснут:
-  // буква без стены не значит ничего.
-  if (labels) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
-  if (!active || active.kind !== "wall" || !options.handle) return;
+  drawDrawingHandles(ctx, bridge, {
+    walls,
+    objects,
+    active,
+    activeOpening,
+    handle: options.handle,
+    wallAt: options.wallAt,
+    objectAt: options.objectAt,
+  });
+}
+
+/**
+ * Ручки правки — **последний слой чертежа** (дефект D45, снимок заказчика: «на
+ * чертеже точки, за которые можно менять размер объекта, рисуются под линией
+ * стены, а должны быть поверх»).
+ *
+ * Прежде каждый рисовал свои сам: углы вещи — `drawDrawingObject`, петлю и
+ * край створки — `drawDrawingDoor`, концы стены — хвост `drawDrawing`. Слой у
+ * ручки получался тот же, что у того, кому она принадлежит, — а вещи на полу
+ * лежат **под** стенами (так и задумано: стена на чертеже главная). Выходило,
+ * что у ванны, у столешницы и у радиатора — у всего, что к стене и приставлено,
+ * — ручка пропадала ровно под той линией, от которой вещь надо оттащить. То же
+ * и у створки двери: её ручки рисовались до букв углов и уходили под кружок
+ * буквы.
+ *
+ * Ручка — не часть чертежа, а место, куда класть руку: под чертежом ей делать
+ * нечего, и слой у неё один на всех — поверх стен, проёмов и букв.
+ */
+function drawDrawingHandles(ctx, bridge, { walls, objects, active, activeOpening, handle, wallAt, objectAt }) {
+  if (!handle || !active) return;
+  if (active.kind === "object") {
+    const object = objects.find((item) => item.id === active.id);
+    if (!object) return;
+    const shown = objectAt ? objectAt(object) : object;
+    for (const point of schemeObjectCorners(shown)) handle(ctx, bridge.toScreen(point));
+    return;
+  }
+  if (active.kind === "opening") {
+    if (!activeOpening || activeOpening.opening.kind !== OPENING_KIND_DOOR) return;
+    const leaf = drawingDoorLeaf(activeOpening.wall, activeOpening.opening);
+    if (!leaf) return;
+    handle(ctx, bridge.toScreen(leaf.hinge));
+    handle(ctx, bridge.toScreen(leaf.tip));
+    return;
+  }
+  if (active.kind !== "wall") return;
   const wall = walls.find((item) => item.id === active.id);
   if (!wall) return;
-  const ends = options.wallAt ? options.wallAt(wall) : wall;
-  options.handle(ctx, bridge.toScreen(ends.aMm));
-  options.handle(ctx, bridge.toScreen(ends.bMm));
+  const ends = wallAt ? wallAt(wall) : wall;
+  handle(ctx, bridge.toScreen(ends.aMm));
+  handle(ctx, bridge.toScreen(ends.bMm));
 }
 
 // Мельче этого буква угла на плане не ставится. Порог — экранная длина самой
@@ -5128,12 +5205,12 @@ export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
     ctx.stroke();
     ctx.setLineDash([]);
   } else if (opening.kind === OPENING_KIND_DOOR) {
-    drawDrawingDoor(ctx, bridge, wall, opening, colour, options);
+    drawDrawingDoor(ctx, bridge, wall, opening, colour);
   }
   ctx.restore();
 }
 
-function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
+function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   const leaf = drawingDoorLeaf(wall, opening);
   if (!leaf) return;
   const hinge = bridge.toScreen(leaf.hinge);
@@ -5161,9 +5238,8 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  if (!options.active || !options.handle) return;
-  options.handle(ctx, hinge);
-  options.handle(ctx, tip);
+  // Ручки петли и края створки — в последнем слое (`drawDrawingHandles`): здесь
+  // они ложились под буквы углов, а кружок буквы ровно на конце стены и стоит.
 }
 
 /**
@@ -5209,8 +5285,9 @@ export function drawDrawingObject(ctx, bridge, object, options = {}) {
   ctx.setLineDash([]);
   drawDrawingCaption(ctx, object, corners, options.name, bridge);
   ctx.restore();
-  if (!options.active || !options.handle) return;
-  for (const point of corners) options.handle(ctx, point);
+  // Ручек здесь нет: углы выделенной вещи рисует последний слой чертежа
+  // (`drawDrawingHandles`, дефект D45) — вещи лежат под стенами, и ручка вместе
+  // с ними уходила под линию стены.
 }
 
 function drawDrawingPath(ctx, points) {
@@ -5969,7 +6046,7 @@ export function drawScheme(ctx, {
   const stacks = markStacks(project, scheme, filter, state);
   drawMarkStackSpines(ctx, project, scheme, state, shown, stacks);
   for (const mark of shown) {
-    drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id), stacks);
+    drawMarkSign(ctx, project, scheme, mark, state, { selected: selected.has(mark.id), stacks });
   }
   // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
   // дугу разбора. `links` — либо готовый кадр (его считает холст из того же

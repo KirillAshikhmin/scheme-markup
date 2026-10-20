@@ -297,6 +297,37 @@ export function workshopToolOf(mode, adding) {
   return "edit";
 }
 
+/**
+ * Что снимет `Esc` — **лесенка чертежа**, и она же лесенка плана (таск 176,
+ * G260). Слова заказчика: «По Esc должно отменяться добавление объекта, как и
+ * метки».
+ *
+ * На холсте Esc идёт сверху вниз по тому, что человек успел набрать: начатая
+ * ломаная, потом правка пути, потом выделение, и только последним — сам режим
+ * добавления (`canvasKeyDown`). В чертеже этой лесенки не хватало одной, самой
+ * нижней ступени: черновик снимался, выделение снималось, а занятие оставалось
+ * добавлением — и следующий клик по полю ставил ещё одну вещь, хотя человек
+ * уже дважды сказал «нет».
+ *
+ *   `draft` — начатая цепочка, полоса или контур: снимается **без записи**.
+ *     Esc это отказ, а не «дочерти» (тем занята смена занятия, `settleDraft`);
+ *   `selection` — выделенное: пока вещь выделена, вокруг неё ручки, и они
+ *     отбирают клик у соседней;
+ *   `mode` — само добавление: занятие возвращается к правке.
+ *
+ * Чистая и вынесена наружу затем, что порядок ступеней — это всё правило
+ * целиком: разойдись он с холстом, одна и та же клавиша делала бы на двух
+ * поверхностях разное.
+ */
+export function workshopEscStep({ draft, selected, mode } = {}) {
+  if (draft) return "draft";
+  if (selected) return "selection";
+  // Режимов у окна ровно два (`WORKSHOP_MODES`), и спрашивается именно
+  // добавление, а не «всё, что не правка»: на незнакомом слове Esc обязан
+  // промолчать, а не переключать занятие наугад.
+  return mode === "add" ? "mode" : null;
+}
+
 // Пороги попадания в пикселях экрана, как у холста: иначе на разном масштабе
 // всё ведёт себя по-разному. Вершина ловится шире тела стены — ею правят, и
 // это своя мерка чертежа. А промах по стене прощается тот же, что на плане:
@@ -459,6 +490,52 @@ export function workshopSnapMm(pointsMm, cursorMm, view, options = {}) {
     guides: snap.guides,
     grid: false,
   };
+}
+
+/**
+ * Опорная точка переноса — та, которой взятое под руку садится на узел сетки.
+ *
+ * У прямоугольника это **середина**: ею он и встаёт по клику
+ * (`workshopObjectRectAt`), и правило постановки здесь повторяется буква в
+ * букву. У полосы и у стены — **первая вершина**: на узлы в чертеже садятся
+ * вершины, и вершину же тащат за ручку.
+ */
+export function workshopMoveAnchorMm(subject) {
+  if (!subject) return null;
+  if (subject.aMm) return { x: Number(subject.aMm.x), y: Number(subject.aMm.y) };
+  if (subject.shape === "polyline") {
+    const first = (subject.pointsMm || [])[0];
+    return first ? { x: Number(first.x), y: Number(first.y) } : null;
+  }
+  return subject.atMm ? { x: Number(subject.atMm.x), y: Number(subject.atMm.y) } : null;
+}
+
+/**
+ * На сколько уедет взятое под руку — **с притяжкой опорной точки к узлу**
+ * (дефект D40, снимок заказчика: «при изменении размера объекта он съезжает с
+ * сетки. двигается нужным шагом, но вот к сетке не притягивается»).
+ *
+ * Шаг считался от **точки нажатия**: `узел(курсор) − точка нажатия`. Узел
+ * ходит клетками по 500 мм, поэтому и шаг выходил кратным 500 — «двигается
+ * нужным шагом», — но к нему навсегда прибавлялось расстояние от места, за
+ * которое вещь взяли, до ближайшего узла. Взялись в 20 мм от узла — вещь так и
+ * ездит в 20 мм от сетки, сколько её ни таскай; взялись в 240 — в 240.
+ *
+ * Снято числами на сетке 500 мм: вещь серединой в узле (2000, 1500), взяли за
+ * край в 2480. Курсор 2600 → узел 2500 → шаг 20 → середина 2020; курсор 2900 →
+ * узел 3000 → шаг 520 → середина 2520; курсор 3400 → шаг 1020 → середина 3020.
+ * Шаг ровно 500, а середина мимо узла на 20 мм — всегда.
+ *
+ * Теперь притягивается **опорная точка самой вещи**, а не точка под рукой: к
+ * сырому ходу руки прибавляется опора, и уже она садится на узел — тем же
+ * `workshopSnapMm`, которым садится вершина и которым встаёт вещь по клику.
+ * Alt (`free`) снимает притяжку, как и везде: остаётся чистый ход руки.
+ */
+export function workshopMoveDeltaMm(anchorMm, startMm, cursorMm, view, options = {}) {
+  const raw = { x: Number(cursorMm.x) - Number(startMm.x), y: Number(cursorMm.y) - Number(startMm.y) };
+  if (!anchorMm) return workshopRoundMm(raw);
+  const target = workshopSnapMm([], { x: anchorMm.x + raw.x, y: anchorMm.y + raw.y }, view, options).point;
+  return workshopRoundMm({ x: target.x - anchorMm.x, y: target.y - anchorMm.y });
 }
 
 /**
@@ -2985,6 +3062,10 @@ function createWorkshop({ api, hosts }) {
       start: { x: event.clientX, y: event.clientY, touch: event.pointerType === "touch" },
       moved: false,
     };
+    // Опора переноса: ею взятое садится на узел сетки (дефект D40). Берётся на
+    // нажатии — пока вещь ещё та, за которую взялись.
+    if (pick.kind === "object") drag.anchorMm = workshopMoveAnchorMm(findSchemeObject(project(), pick.id));
+    if (pick.kind === "wall") drag.anchorMm = workshopMoveAnchorMm(findWall(project(), pick.id));
     // Ручка пути: место, где она стоит, уже и есть ответ — клик по ней без
     // движения ставит вершину туда, где её нарисовали. Ровно так ведёт себя
     // холст (`canvasPathAddCommit` берёт точку нажатия, если рука не поехала).
@@ -3278,14 +3359,14 @@ function createWorkshop({ api, hosts }) {
       redraw();
       return;
     }
-    const snap = workshopSnapMm(
-      drag.kind === "vertex" ? vertexAnchor(drag) : [],
-      mmOf(event),
-      view,
-      { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap },
-    );
-    if (drag.kind === "vertex") drag.toMm = snap.point;
-    else drag.deltaMm = workshopRoundMm({ x: snap.point.x - drag.startMm.x, y: snap.point.y - drag.startMm.y });
+    const options = { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap };
+    if (drag.kind === "vertex") {
+      drag.toMm = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options).point;
+    } else {
+      // Переносят вещь или стену: к узлу притягивается **их** опорная точка, а
+      // не место, за которое взяли (дефект D40) — `workshopMoveDeltaMm`.
+      drag.deltaMm = workshopMoveDeltaMm(drag.anchorMm, drag.startMm, mmOf(event), view, options);
+    }
     redraw();
   }
 
@@ -3499,20 +3580,23 @@ function createWorkshop({ api, hosts }) {
       event.stopPropagation();
       return;
     }
-    if (event.key === "Escape" && draft) {
-      // Esc сперва отменяет цепочку, и только потом закрывает окно — та же
-      // лесенка, что у холста. Слушатель висит в фазе перехвата: иначе окно
-      // закрылось бы раньше, чем черновик успел отмениться.
+    if (event.key === "Escape") {
+      // Лесенка целиком — в `workshopEscStep`, здесь только исполнение.
+      // Слушатель висит в фазе перехвата: иначе окно закрылось бы раньше, чем
+      // черновик успел отмениться.
+      const step = workshopEscStep({ draft, selected, mode: mode() });
+      if (!step) return;
       event.preventDefault();
       event.stopPropagation();
-      draft = null;
-      sync();
-      return;
-    }
-    if (event.key === "Escape" && selected) {
-      event.preventDefault();
-      event.stopPropagation();
-      select(null);
+      if (step === "draft") {
+        draft = null;
+        sync();
+      } else if (step === "selection") {
+        select(null);
+      } else {
+        // Добавление кончилось — занятие возвращается к правке (G260).
+        setMode("select");
+      }
       return;
     }
     if (event.key === "Enter" && draft) {
