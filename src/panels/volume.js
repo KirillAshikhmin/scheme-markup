@@ -89,6 +89,7 @@ import {
   volumeDayTimes,
   volumeDraw,
   volumeDrawBackdrop,
+  volumeDrawBackdropNear,
   volumeMood,
   volumeFloorAt,
   volumeFloors,
@@ -1528,6 +1529,10 @@ function createVolume({ api, hosts }) {
     // у них `VOLUME_LAYER_SUN` — выше полов, ниже тел.
     shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint);
     volumeDraw(ctx, shown);
+    // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
+    // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
+    // плиты проход пуст, то есть у ходящего по дому его нет вовсе.
+    volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);
     syncAim();
