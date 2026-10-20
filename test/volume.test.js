@@ -106,6 +106,8 @@ import {
   volumeDoorAt,
   volumeFloorAt,
   volumeMoveTo,
+  volumePush,
+  volumeDepthMm,
   volumeSkyAim,
   volumeSkyPoint,
   volumeStripRuns,
@@ -693,6 +695,59 @@ test("сквозь дверь проходят, и дальше по корид�
   let at = { x: 0, y: 300 };
   for (let step = 0; step < 100; step += 1) at = volumeStep(built, at, 200, 0);
   assert.ok(at.x > 2200, "вышли за стену сквозь проём: " + at.x);
+});
+
+// ——— дефект D39: «застревает и начинает прыгать» ————————————————————————
+//
+// Стенд — два препятствия, которые требуют разного. Просвет 250 мм между
+// гранями стен при диаметре тела 440: нижняя стена толкает на +190, верхняя на
+// −190. Прежний код двигал тело по очереди и оставлял последнее слово за
+// последним в списке — то есть за порядком стен в объекте.
+
+function slotSolids() {
+  const wall = (cy) => ({ cx: 0, cy, ux: 1, uy: 0, nx: 0, ny: -1, half: 2000, halfT: 50, bottomMm: 0, topMm: 2800 });
+  return [wall(-200), wall(200)];
+}
+
+test("тесное место не дрожит: выталкивание стоит на месте и не зависит от порядка стен", () => {
+  const solids = slotSolids();
+  const at = { x: 0, y: 0 };
+  const once = volumePush(solids, at, VOLUME_BODY_MM);
+  // Требования погасили друг друга — человек остался там, где был.
+  assert.equal(Math.round(once.x), 0);
+  assert.equal(Math.round(once.y), 0);
+  // Второй раз — то же место: цикла длиной два больше нет.
+  const twice = volumePush(solids, once, VOLUME_BODY_MM);
+  assert.ok(Math.hypot(twice.x - once.x, twice.y - once.y) < 0.01, "выталкивание не неподвижно");
+  // И порядок препятствий ничего не решает.
+  const flipped = volumePush([...solids].reverse(), at, VOLUME_BODY_MM);
+  assert.ok(Math.hypot(flipped.x - once.x, flipped.y - once.y) < 0.01, "порядок стен сменил ответ");
+});
+
+test("в тесном месте шаг не дёргает человека, а вдоль него пускает", () => {
+  const scene = { solids: slotSolids() };
+  // Жмём «вперёд» поперёк щели: шага нет вовсе, и места не меняются.
+  let at = { x: 0, y: 0 };
+  const seen = [];
+  for (let frame = 0; frame < 30; frame += 1) {
+    at = volumeStep(scene, at, 0, 40);
+    seen.push({ ...at });
+  }
+  for (const point of seen) {
+    assert.ok(Math.hypot(point.x, point.y) < 0.01, "человек съехал с места: " + JSON.stringify(point));
+  }
+  // А вдоль щели — идёт: выйти из тесного места можно всегда.
+  let along = { x: 0, y: 0 };
+  for (let frame = 0; frame < 30; frame += 1) along = volumeStep(scene, along, 40, 0);
+  assert.ok(along.x > 1000, "вдоль щели не пошёл: " + Math.round(along.x));
+});
+
+test("перенос в тесное место ставит рядом, а не в щель (D39)", () => {
+  const scene = { solids: slotSolids(), boundsMm: null };
+  const put = volumeMoveTo(scene, { x: 0, y: 0 });
+  assert.equal(volumeDepthMm(scene.solids, put.x, put.y), 0, "встали в щель шириной 250 мм");
+  // «Рядом» — именно рядом: от показанного места не дальше метра.
+  assert.ok(Math.hypot(put.x, put.y) <= 1000, "ушли далеко от показанного: " + Math.round(Math.hypot(put.x, put.y)));
 });
 
 test("начинают с самого просторного места самой большой комнаты", () => {

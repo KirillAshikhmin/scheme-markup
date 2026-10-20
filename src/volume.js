@@ -275,6 +275,12 @@ const VOLUME_ORDER_TRIES = 12;
 const VOLUME_ORDER_SPLIT_COST = 8;
 /** Сколько раз выталкиваем тело из стен за шаг: угол держат два прохода. */
 const VOLUME_PUSH_PASSES = 4;
+/**
+ * Сотая доля миллиметра: ниже неё сдвиг считается нулевым, а «стало глубже» —
+ * не считается вовсе (D39). Заведомо меньше всего, что человек увидит, и
+ * заведомо больше погрешности, с которой миллиметры складываются в double.
+ */
+const VOLUME_PUSH_EPS_MM = 0.01;
 /** Светлота самой тёмной и самой светлой грани. */
 const VOLUME_SHADE_MIN = 0.46;
 const VOLUME_SHADE_MAX = 1;
@@ -2884,16 +2890,72 @@ export function volumeStart(scene) {
 }
 
 /**
- * Выталкивание тела из стен. Круг против повёрнутого прямоугольника: уходим по
- * той оси, по которой пересечение меньше, — так тело скользит вдоль стены, а
- * не останавливается, уткнувшись. Четыре прохода держат угол, где давят сразу
- * две стены.
+ * Насколько глубоко тело радиуса `radius` сидит в препятствиях: ноль — не сидит
+ * вовсе. Мерка та же, по которой выталкивает `volumePush`, и это не удобство, а
+ * условие: шаг сверяет «стало ли хуже» ровно с тем, что выталкивание умеет
+ * разобрать, — разойдись они, и человек то застревал бы на ровном месте, то
+ * проваливался бы в стену.
+ */
+export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM) {
+  let deep = 0;
+  for (const solid of solids || []) {
+    if (!volumeSolidBlocks(solid, headMm)) continue;
+    const dx = x - solid.cx;
+    const dy = y - solid.cy;
+    const overAlong = solid.half + radius - Math.abs(dx * solid.ux + dy * solid.uy);
+    const overAcross = solid.halfT + radius - Math.abs(dx * solid.nx + dy * solid.ny);
+    if (overAlong <= 0 || overAcross <= 0) continue;
+    deep = Math.max(deep, Math.min(overAlong, overAcross));
+  }
+  return deep;
+}
+
+/**
+ * Выталкивание тела из стен. Круг против повёрнутого прямоугольника: из каждого
+ * препятствия уходим по той оси, по которой пересечение меньше, — так тело
+ * скользит вдоль стены, а не останавливается, уткнувшись.
+ *
+ * ——— дефект D39: «застревает и начинает прыгать» ——————————————————————————
+ *
+ * Слова заказчика: «когда ходишь иногда где-то застревает и начинает прыгать,
+ * хотя жму движение на клавиатуре». Прыгала не стойка — прыгало **место**.
+ *
+ * Прежде проходы шли по препятствиям **по очереди**, и каждое двигало тело
+ * сразу: последнее слово оставалось за последним в списке. Там, где два
+ * препятствия требуют разного, это не сходится никогда, а **чередуется**, и
+ * чередуется с частотой кадров. Замер на объекте заказчика (25 стен, 8
+ * помещений, сетка проб 50 мм — 32 375 точек):
+ *
+ *   - **402 точки (1,2 %)**, где четыре прохода не разводят тело **одними
+ *     стенами**; с вещами их было 666 (2,1 %) — то есть уборка столкновений у
+ *     вещей (G264) убрала треть случаев и не вылечила ни одного;
+ *   - разбор одной такой точки: две параллельные стены по 100 мм, оси в 350 мм
+ *     друг от друга — просвет между гранями **250 мм** против диаметра тела
+ *     **440 мм**. Нижняя стена толкает на +190 мм, верхняя тут же на −190 мм,
+ *     и так каждый кадр: человек стоит на месте и дёргается на 190 мм шестьдесят
+ *     раз в секунду. Повтори выталкивание хоть двадцать пять раз — остаток тот
+ *     же 190: это не «мало проходов», это цикл длиной два;
+ *   - второй разбор — стена против габарита вещи: 218 мм, тот же цикл.
+ *
+ * Чинится это двумя правилами, и оба здесь:
+ *
+ *   1. **Проход считает все препятствия разом и складывает их требования**
+ *      (сумма векторов), а потом двигает тело один раз. Порядок препятствий
+ *      перестал решать что-либо: в углу две стены дают диагональ и расходятся
+ *      за проход, а в тесном месте их требования гасят друг друга в ноль — и
+ *      тело **стоит ровно**, вместо того чтобы прыгать между двумя положениями.
+ *   2. **Шаг не принимает положение хуже прежнего** (`volumeStep`): если после
+ *      выталкивания тело сидит глубже, чем стояло, шаг не делается вовсе.
+ *
+ * Угол при этом держится так же, как держался: четыре прохода остались.
  */
 export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
   let x = at.x;
   let y = at.y;
   for (let pass = 0; pass < VOLUME_PUSH_PASSES; pass += 1) {
-    let moved = false;
+    let sx = 0;
+    let sy = 0;
+    let pressed = false;
     for (const solid of solids) {
       // Присевший проходит под высоким (G234): препятствие, которое кончается
       // ниже его макушки, тела не касается вовсе.
@@ -2905,18 +2967,23 @@ export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
       const overAlong = solid.half + radius - Math.abs(along);
       const overAcross = solid.halfT + radius - Math.abs(across);
       if (overAlong <= 0 || overAcross <= 0) continue;
-      moved = true;
+      pressed = true;
       if (overAcross <= overAlong) {
         const sign = across >= 0 ? 1 : -1;
-        x += solid.nx * sign * overAcross;
-        y += solid.ny * sign * overAcross;
+        sx += solid.nx * sign * overAcross;
+        sy += solid.ny * sign * overAcross;
       } else {
         const sign = along >= 0 ? 1 : -1;
-        x += solid.ux * sign * overAlong;
-        y += solid.uy * sign * overAlong;
+        sx += solid.ux * sign * overAlong;
+        sy += solid.uy * sign * overAlong;
       }
     }
-    if (!moved) break;
+    if (!pressed) break;
+    // Требования погасили друг друга: место теснее тела, и уходить отсюда
+    // некуда. Стоим — это и есть лекарство от дрожи.
+    if (Math.abs(sx) < VOLUME_PUSH_EPS_MM && Math.abs(sy) < VOLUME_PUSH_EPS_MM) break;
+    x += sx;
+    y += sy;
   }
   return { x, y };
 }
@@ -2936,8 +3003,30 @@ export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
   const length = Math.hypot(dx, dy);
   const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
   let point = { x: at.x, y: at.y };
+  // Насколько глубоко человек сидит в препятствиях **сейчас**. Обычно ноль;
+  // не ноль бывает после переноса кликом, перехода по этажам и правки чертежа
+  // под ногами — и тогда выход из этого места тоже должен быть возможен.
+  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm);
   for (let index = 0; index < parts; index += 1) {
-    point = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
+    const want = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
+    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm);
+    // **Хуже не становится** (D39). Выталкивание разобрало не всё — значит
+    // место теснее тела, и шаг туда не делается вовсе: человек остаётся там,
+    // где стоял, вместо того чтобы дрожать между двумя положениями.
+    if (deep > depth + VOLUME_PUSH_EPS_MM) break;
+    // **Стало свободнее — идём не глядя.** Это выход из тесного места, куда
+    // человека могло занести переносом или правкой чертежа: единственное
+    // правило там — «лишь бы наружу».
+    if (deep > depth - VOLUME_PUSH_EPS_MM) {
+      // **Назад от нажатой клавиши не пятимся** (D39, второе правило). Клин из
+      // двух стен умеет вытолкнуть тело дальше, чем был шаг, — и тогда человек
+      // скачет между двумя местами, нажимая «вперёд». Скольжение вдоль стены
+      // это правило не трогает: там ход поперёк, а не назад.
+      const went = (want.x - point.x) * dx + (want.y - point.y) * dy;
+      if (went < -VOLUME_PUSH_EPS_MM * length) break;
+    }
+    point = want;
+    depth = deep;
   }
   return point;
 }
@@ -3089,7 +3178,33 @@ export function volumeMoveTo(scene, at, headMm = VOLUME_HEAD_MM) {
   const point = bounds
     ? { x: inside(at.x, bounds.minX, bounds.maxX), y: inside(at.y, bounds.minY, bounds.maxY) }
     : { x: at.x, y: at.y };
-  return volumePush((scene && scene.solids) || [], point, VOLUME_BODY_MM, headMm);
+  const solids = (scene && scene.solids) || [];
+  const pushed = volumePush(solids, point, VOLUME_BODY_MM, headMm);
+  if (volumeDepthMm(solids, pushed.x, pushed.y, VOLUME_BODY_MM, headMm) <= 0) return pushed;
+  // **Вытолкнуть некуда — ищем рядом** (D39). Показали в место теснее тела: в
+  // щель между стеной и перегородкой, в толщу стены на дальнем конце луча, в
+  // угол ниши. Прежде человека там и оставляли — он оказывался зажат и дёргался
+  // на каждом нажатии; это и был главный вход в дефект, потому что ходьбой в
+  // такие места не попасть (в объекте заказчика все 390 щелей закрыты стенами).
+  //
+  // Поиск — кольцами по 100 мм до трёх метров, шестнадцать направлений в
+  // кольце: берётся первое свободное место, то есть **ближайшее**. Три метра —
+  // полкомнаты: дальше перенос перестал бы отвечать на «туда».
+  const found = volumeFreeSpotNear(solids, pushed, headMm);
+  return found || pushed;
+}
+
+/** Ближайшее к `at` место, где тело помещается целиком. `null` — не нашлось. */
+export function volumeFreeSpotNear(solids, at, headMm = VOLUME_HEAD_MM, reachMm = 3000, stepMm = 100) {
+  for (let radius = stepMm; radius <= reachMm; radius += stepMm) {
+    for (let turn = 0; turn < 16; turn += 1) {
+      const angle = (turn * Math.PI) / 8;
+      const spot = { x: at.x + Math.cos(angle) * radius, y: at.y + Math.sin(angle) * radius };
+      const pushed = volumePush(solids, spot, VOLUME_BODY_MM, headMm);
+      if (volumeDepthMm(solids, pushed.x, pushed.y, VOLUME_BODY_MM, headMm) <= 0) return pushed;
+    }
+  }
+  return null;
 }
 
 /**
