@@ -129,6 +129,22 @@ function withShelf(base, bottomMm, heightMm) {
   }).project;
 }
 
+/**
+ * Лаз в дальней стене коридора: `heightMm` от пола. Присед проверяется им, а
+ * не вещью: с таска 178 сквозь вещи проходят (G264), и низким остаётся только
+ * то, что сделано стеной.
+ */
+function withHatch(base, heightMm) {
+  return addOpening(base.project, {
+    wallId: base.walls[1],
+    kind: "opening",
+    atMm: 800,
+    widthMm: 900,
+    heightMm,
+    heightAboveFloorMm: 0,
+  }).project;
+}
+
 /** Прошёл ли человек коридор насквозь с такой макушкой. */
 function walked(scene, headMm) {
   let at = { x: -2400, y: 0 };
@@ -234,18 +250,31 @@ test("препятствие держит того, чья макушка выш
   assert.equal(volumeSolidBlocks({}, 1350), true);
 });
 
-test("под навесным шкафом присевший проходит, а стоящий упирается", () => {
+test("сквозь шкаф проходят в любой стойке (G264), и приседать для этого не надо", () => {
   const base = corridor();
-  const scene = volumeScene(withShelf(base, 1500, 700), base.schemeId);
-  assert.ok(walked(scene, VOLUME_HEAD_MM) < -500, "стоя уткнулся в шкаф");
-  assert.ok(walked(scene, 1350) > 2000, "присев прошёл насквозь");
+  // Навесной шкаф от 1500 до 2200 и шкаф до пола — оба перестали держать:
+  // «убери коллизию», слова заказчика (таск 178). Приседу осталась перемычка
+  // над низким проёмом — она ниже по файлу и стеной, а не вещью.
+  for (const scene of [
+    volumeScene(withShelf(base, 1500, 700), base.schemeId),
+    volumeScene(withShelf(base, 0, 2200), base.schemeId),
+  ]) {
+    assert.ok(walked(scene, VOLUME_HEAD_MM) > 2000, "стоя не прошёл сквозь вещь");
+    assert.ok(walked(scene, 1350) > 2000, "присев не прошёл сквозь вещь");
+  }
 });
 
-test("сквозь шкаф до пола не пройти ни стоя, ни присев", () => {
+test("низкая перемычка стены держит стоящего и пропускает присевшего", () => {
   const base = corridor();
-  const scene = volumeScene(withShelf(base, 0, 2200), base.schemeId);
-  assert.ok(walked(scene, VOLUME_HEAD_MM) < -500);
-  assert.ok(walked(scene, 1350) < -500, "присев — тоже нельзя, это слово заказчика");
+  const scene = volumeScene(withHatch(base, 1500), base.schemeId);
+  // Идём серединой лаза: он от y = −200 до y = 700.
+  const go = (headMm) => {
+    let at = { x: 2000, y: 250 };
+    for (let step = 0; step < 40; step += 1) at = volumeStep(scene, at, 100, 0, headMm);
+    return at.x;
+  };
+  assert.ok(go(VOLUME_HEAD_MM) < 3000, "стоя перемычка держит: " + go(VOLUME_HEAD_MM));
+  assert.ok(go(1350) > 3100, "присев прошёл: " + go(1350));
 });
 
 test("сквозь стену не пройти присевшим", () => {
@@ -259,10 +288,11 @@ test("сквозь стену не пройти присевшим", () => {
 
 test("встать негде под низким и можно у стены", () => {
   const base = corridor();
-  const scene = volumeScene(withShelf(base, 1500, 700), base.schemeId);
-  // Под шкафом: встать нельзя, пока не выйдешь.
-  assert.equal(volumeCanStand(scene, { x: 0, y: 0 }, 1350), false);
-  // Шаг в сторону от шкафа — и встаёт.
+  const scene = volumeScene(withHatch(base, 1500), base.schemeId);
+  // В лазе: встать нельзя, пока не выйдешь. Перемычка идёт по стене x = 3000,
+  // середина лаза — y = 250.
+  assert.equal(volumeCanStand(scene, { x: 3000, y: 250 }, 1350), false);
+  // Шаг в сторону от лаза — и встаёт.
   assert.equal(volumeCanStand(scene, { x: 1200, y: 0 }, 1350), true);
   // Вплотную к стене: присевший у стенки обязан вставать всегда. Стена держит
   // в любой стойке, и сравнивать «на волос ближе» в double здесь нельзя.
@@ -273,11 +303,13 @@ test("встать негде под низким и можно у стены", 
   assert.equal(volumeCanStand(scene, { x: 0, y: 0 }, VOLUME_HEAD_MM), true);
 });
 
-test("присед не даёт пройти сквозь вещь, которая держит и присевшего", () => {
+test("присед не даёт пройти там, где перемычка ниже его макушки", () => {
   const base = corridor();
-  // Шкаф от 1300 до потолка: макушка присевшего 1350 — выше его низа.
-  const scene = volumeScene(withShelf(base, 1300, 1400), base.schemeId);
-  assert.ok(walked(scene, 1350) < -500, "1350 выше 1300 — держит");
+  // Лаз 1300 мм: перемычка от 1300, макушка присевшего 1350 — выше неё.
+  const scene = volumeScene(withHatch(base, 1300), base.schemeId);
+  let at = { x: 2000, y: 250 };
+  for (let step = 0; step < 40; step += 1) at = volumeStep(scene, at, 100, 0, 1350);
+  assert.ok(at.x < 3000, "1350 выше 1300 — держит: " + Math.round(at.x));
 });
 
 // ——— низкая перемычка над проёмом (G234) —————————————————————————————————

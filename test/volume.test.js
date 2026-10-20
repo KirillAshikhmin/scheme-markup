@@ -1532,7 +1532,7 @@ test("объект пола становится призмой, а колонн
   assert.equal(counterTop, 900, "верх столешницы — та высота, от которой отмеряют розетки над ней");
 });
 
-test("вещь на полу держит человека, а короб под потолком — нет", () => {
+test("вещь на полу занимает место, а короб под потолком — нет", () => {
   const scene = roomScene();
   const kinds = ensureSchemeObjectKinds(scene.project);
   let project = kinds.project;
@@ -1549,13 +1549,16 @@ test("вещь на полу держит человека, а короб под
       heightMm,
       heightAboveFloorMm,
     }).project;
-  const bare = volumeScene(project, scene.schemeId).solids.length;
-  // Шкаф на полу — препятствие.
-  assert.equal(volumeScene(place(2200, 0), scene.schemeId).solids.length, bare + 1);
-  // Короб под потолком — над головой, проходим.
-  assert.equal(volumeScene(place(400, 2200), scene.schemeId).solids.length, bare);
+  const bare = volumeScene(project, scene.schemeId).objectBoxes.length;
+  // Шкаф на полу занимает место: сквозь него проходят (G264), но вставать в
+  // него, открыв окно, незачем.
+  assert.equal(volumeScene(place(2200, 0), scene.schemeId).objectBoxes.length, bare + 1);
+  // Короб под потолком — над головой, место под ним свободно.
+  assert.equal(volumeScene(place(400, 2200), scene.schemeId).objectBoxes.length, bare);
   // Порожек в сто миллиметров — переступили.
-  assert.equal(volumeScene(place(100, 0), scene.schemeId).solids.length, bare);
+  assert.equal(volumeScene(place(100, 0), scene.schemeId).objectBoxes.length, bare);
+  // И ни один из трёх не стал препятствием: вещи человека не держат.
+  assert.equal(volumeScene(place(2200, 0), scene.schemeId).solids.length, volumeScene(project, scene.schemeId).solids.length);
 });
 
 test("висящий над полом объект получает и низ", () => {
@@ -2740,7 +2743,7 @@ test("прямая полоса усом не ведётся, а острый и
   assert.ok(most > 300, "но длиннее поперечной кромки — иначе предел ни при чём: " + Math.round(most));
 });
 
-test("прозрачность — вид, а не свойство вещи: объект цел, сквозь шкаф не пройти (G68)", () => {
+test("прозрачность — вид, а не свойство вещи: объект цел, сквозь шкаф проходят (G68, G264)", () => {
   const stand = clearStand();
   const before = JSON.stringify(stand.project);
   const built = volumeScene(stand.project, stand.schemeId, {});
@@ -2750,13 +2753,21 @@ test("прозрачность — вид, а не свойство вещи: о
     JSON.stringify(JSON.parse(before).schemeObjects),
     "и у вещи не завелось поля прозрачности",
   );
-  // Препятствие — прежний габарит: шкаф 1200 × 600 держит так же, как держал.
-  const solid = built.solids.find((item) => Math.round(item.half * 2) === 1200 && Math.round(item.halfT * 2) === 600);
-  assert.ok(solid, "препятствие шкафа на месте");
+  // Габарит шкафа 1200 × 600 остался занятым местом, но препятствием быть
+  // перестал (G264): сквозь вещи проходят.
+  const box = built.objectBoxes.find((item) => Math.round(item.half * 2) === 1200 && Math.round(item.halfT * 2) === 600);
+  assert.ok(box, "габарит шкафа на месте");
+  assert.ok(
+    !built.solids.some((item) => Math.round(item.half * 2) === 1200 && Math.round(item.halfT * 2) === 600),
+    "шкаф остался препятствием",
+  );
+  // Шкаф стоит от y = −1400 до −800: прежде человек упирался в его лицо на
+  // −580 (−800 плюс радиус тела). Теперь он входит в габарит и доходит до
+  // стены за ним — её держит `solids`.
   let at = { x: -500, y: 0 };
   for (let step = 0; step < 40; step += 1) at = volumeStep(built, at, 0, -200);
-  assert.ok(at.y > -800, "сквозь прозрачный шкаф не прошли: y = " + Math.round(at.y));
-  assert.equal(Math.round(volumeFreeMm(built.solids, at.x, at.y)), VOLUME_BODY_MM, "тело стоит вплотную к шкафу");
+  assert.ok(at.y < -1000, "сквозь прозрачный шкаф не прошли: y = " + Math.round(at.y));
+  assert.ok(volumeFreeMm(built.solids, at.x, at.y) > -1, "но в стену за ним не вошли");
 });
 
 test("рамка выделения лежит поверх всего: вещь за стеной не теряется", () => {

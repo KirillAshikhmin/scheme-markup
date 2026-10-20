@@ -1083,14 +1083,16 @@ test("у ломаной модели нет: по ней задают полос
   assert.equal(faces.length, 10);
 });
 
-test("модель не трогает ни столкновения, ни объект", () => {
+test("модель не трогает ни занятое место, ни объект", () => {
   const stand = objectScene("Кровать", { widthMm: 1600, depthMm: 2000, heightMm: 500 });
   const before = JSON.stringify(stand.project);
   const built = volumeScene(stand.project, stand.schemeId);
   assert.equal(JSON.stringify(stand.project), before, "объект изменился — это запрещено прямо (G68)");
-  // Держит человека габарит, а не модель: между ножками стола не пройти, и
-  // сквозь кровать тоже.
-  assert.equal(built.solids.filter((solid) => Math.round(solid.half * 2) === 1600).length, 1);
+  // Занятое место считает габарит, а не модель: место кровати — прямоугольник
+  // 1600 × 2000, а не её ножки. Препятствием оно не стало (G264): сквозь вещи
+  // проходят, и в `solids` кровати нет вовсе.
+  assert.equal(built.objectBoxes.filter((box) => Math.round(box.half * 2) === 1600).length, 1);
+  assert.equal(built.solids.filter((solid) => Math.round(solid.half * 2) === 1600).length, 0);
   const bed = built.faces.filter((face) => face.rgb[0] !== 216 && face.rgb[0] !== 170 && face.rgb[0] !== 238);
   assert.ok(bed.length >= 15, "кровать нарисована тремя телами: " + bed.length);
 });

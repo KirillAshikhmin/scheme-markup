@@ -49,7 +49,14 @@ import {
 } from "../src/model.js";
 import { drawDrawing, drawingUnitBridge } from "../src/render.js";
 import { workshopObjectDefaultsByKey, workshopObjectDefaultsByName, workshopPick } from "../src/panels/workshop.js";
-import { volumeObjectModel, volumeScene, volumeStairs } from "../src/volume.js";
+import {
+  VOLUME_BODY_MM,
+  volumeObjectModel,
+  volumeScene,
+  volumeStairNear,
+  volumeStairs,
+  volumeStep,
+} from "../src/volume.js";
 import { objectModelByKey } from "../src/objectModels/registry.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { strings } from "../src/strings.js";
@@ -507,17 +514,41 @@ test("спрятанную вещь не взять кликом в поле", (
   assert.ok(!pick || pick.kind !== "object", "взяли за угол то, чего на поле не видно");
 });
 
-test("спрятанной вещи нет в объёме — ни гранью, ни препятствием, ни лестницей", () => {
+test("спрятанной вещи нет в объёме — ни гранью, ни занятым местом, ни лестницей", () => {
   const scene = place(room(), "stairs", { atMm: { x: 3000, y: 1500 } });
   const whole = volumeScene(scene.project, scene.schemeId, {});
   const without = volumeScene(scene.project, scene.schemeId, { hiddenObjectIds: [scene.object.id] });
   assert.equal(whole.stairs.length, 1);
   assert.deepEqual(without.stairs, [], "спрятанная лестница всё равно спрашивает про этаж");
   assert.ok(without.faces.length < whole.faces.length, "грани спрятанной вещи остались в сцене");
-  assert.ok(without.solids.length < whole.solids.length, "спрятанная вещь всё ещё не пускает");
+  assert.ok(without.objectBoxes.length < whole.objectBoxes.length, "место спрятанной вещи всё ещё занято");
   // Вещь вернули — вернулась и сцена: отметка нигде не записана.
   const back = volumeScene(scene.project, scene.schemeId, { hiddenObjectIds: [] });
   assert.equal(back.faces.length, whole.faces.length);
+});
+
+test("сквозь колонну и лестницу проходят (G264), а сквозь стену — нет", () => {
+  // Колонна 400 × 400 во всю высоту посреди комнаты 4 × 3 м: самая «несущая»
+  // вещь каталога. Исключением она не стала — список исключений завёл бы
+  // второго хозяина правила.
+  const scene = place(room(), "column", { atMm: { x: 2000, y: 1500 } });
+  const built = volumeScene(scene.project, scene.schemeId, {});
+  assert.equal(built.solids.length, 4, "препятствий ровно четыре — это стены комнаты");
+  assert.equal(built.objectBoxes.length, 1, "а место колонны занято");
+  let at = { x: 2000, y: 200 };
+  for (let step = 0; step < 40; step += 1) at = volumeStep(built, at, 0, 100);
+  assert.ok(at.y > 2000, "сквозь колонну не прошли: y = " + Math.round(at.y));
+  assert.ok(at.y < 3000 - VOLUME_BODY_MM + 1, "и вышли сквозь стену: y = " + Math.round(at.y));
+
+  // Лестница: сквозь неё тоже проходят, а переход по этажам спрашивается по
+  // расстоянию до габарита и работает даже стоя внутри марша.
+  const steps = place(room(), "stairs", { atMm: { x: 2000, y: 1500 } });
+  const withStairs = volumeScene(steps.project, steps.schemeId, {});
+  assert.equal(withStairs.solids.length, 4, "лестница стала препятствием");
+  let on = { x: 2000, y: 200 };
+  for (let step = 0; step < 40; step += 1) on = volumeStep(withStairs, on, 0, 100);
+  assert.ok(on.y > 2000, "сквозь лестницу не прошли: y = " + Math.round(on.y));
+  assert.ok(volumeStairNear(withStairs.stairs, { x: 2000, y: 1500 }), "стоя на лестнице про этаж не спросили");
 });
 
 test("удалённая вещь уносит и свою отметку скрытия — её id больше ничей", () => {
