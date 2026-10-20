@@ -88,6 +88,7 @@ import { setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
   DRAWING_MM_MAX,
+  GRID_STEP_DEFAULT_MM,
   OPENING_HINGES,
   OPENING_KINDS,
   OPENING_KIND_DOOR,
@@ -108,6 +109,7 @@ import {
   findSchemeObject,
   findWall,
   formatMeters,
+  gridStepOf,
   openingsInWall,
   planFractionToMm,
   planOriginOf,
@@ -121,6 +123,7 @@ import {
   schemeObjectTopMm,
   schemeObjectsOnScheme,
   segmentDistanceMm,
+  setGridStep,
   setPlanOrigin,
   setPlanScale,
   setRoomWallHeight,
@@ -204,10 +207,24 @@ export const WORKSHOP_UNIT = { width: 1, height: 1 };
 export const WORKSHOP_ORIGIN_AT = { x: 0.5, y: 0.5 };
 
 // Шаги сетки: от полста миллиметров (толщина перегородки) до двух метров.
-// Половина метра по умолчанию — ею размечают квартиру, и в ней видны и
-// трёхметровая комната, и ниша.
+//
+// Выбранный шаг **лежит в объекте** (таск 175, G258) — его хозяин
+// `model.gridStepOf`/`setGridStep`, а умолчание `model.GRID_STEP_DEFAULT_MM`
+// (сто миллиметров, слово заказчика). Своего числа у окна нет: разойдись они —
+// список предлагал бы один шаг, а сетка рисовалась бы другим.
 export const WORKSHOP_GRID_STEPS_MM = [50, 100, 200, 250, 500, 1000, 2000];
-export const WORKSHOP_GRID_DEFAULT_MM = 500;
+
+/**
+ * Что стоит в списке шагов при этом значении: обычные шаги, а чужое число —
+ * ещё и само (G68). Объект, которому шаг правили руками в файле, не должен
+ * молча получить соседний: список показывает его своим пунктом, и сетка
+ * остаётся той, в которой чертили.
+ */
+export function workshopGridOptions(stepMm) {
+  const step = Number(stepMm) || 0;
+  if (!(step > 0) || WORKSHOP_GRID_STEPS_MM.includes(step)) return [...WORKSHOP_GRID_STEPS_MM];
+  return [...WORKSHOP_GRID_STEPS_MM, step].sort((first, second) => first - second);
+}
 
 // Реже пяти пикселей на экране сетка читается заливкой — рисуется кратный шаг,
 // а притягивается по-прежнему выбранный.
@@ -1635,14 +1652,18 @@ export function workshopSummaryLines(project, schemeId, placement) {
 // ——— окно ——————————————————————————————————————————————————————————————
 
 // Что человек выбрал в окне — его рабочее место, а не свойство объекта: слои,
-// шаг сетки, притяжка и толщина новых стен живут в памяти страницы и переживают
-// закрытие окна, но в `project.json` не попадают.
+// притяжка и толщина новых стен живут в памяти страницы и переживают закрытие
+// окна, но в `project.json` не попадают.
+//
+// **Шаг сетки из этого ряда ушёл** (таск 175, G258): заказчик попросил
+// «сохраняй выбранное значение в проекте», и теперь он лежит в объекте
+// (`model.gridStepOf`), а не здесь. Своей копии окно не держит — иначе два
+// числа разошлись бы на первой же смене объекта.
 // Отметки слоёв поля. «Объектов» среди них больше нет: вещи гасит общий
 // выключатель «Объекты чертежа» (таск 154, G223) — он же стоит в «Интерфейсе
 // проекта» и гасит их заодно на плане и в объёме. Две отметки с одним словом в
 // двух местах отвечали бы на один вопрос по-разному.
 let workshopLayers = { plan: true, grid: true, walls: true };
-let workshopGridMm = WORKSHOP_GRID_DEFAULT_MM;
 let workshopGridSnap = true;
 let workshopThicknessMm = WORKSHOP_THICKNESS_DEFAULT_MM;
 // Умолчания проёмов — по виду и на сеанс: поправил окно на 1300, и следующее
@@ -1859,13 +1880,13 @@ function createWorkshop({ api, hosts }) {
     on: { click: () => attach() },
   });
 
+  // Список шагов пересобирается в `sync`: его содержимое зависит от объекта
+  // (чужое число встаёт своим пунктом), а объект меняется под поверхностью.
   const gridSelect = uiEl("select", { class: "ui-input workshop__grid" });
-  for (const step of WORKSHOP_GRID_STEPS_MM) {
-    gridSelect.append(uiEl("option", { value: String(step), text: String(step) }));
-  }
   gridSelect.addEventListener("change", () => {
-    workshopGridMm = Number(gridSelect.value) || WORKSHOP_GRID_DEFAULT_MM;
-    sync();
+    // Шаг — часть объекта (G258), значит и шаг истории: иначе Ctrl+Z после
+    // смены сетки вернул бы метку, а сетку — молча и заодно.
+    setGrid(gridSelect.value);
   });
   const snapCheck = uiEl("input", { type: "checkbox" });
   snapCheck.addEventListener("change", () => {
@@ -2030,15 +2051,6 @@ function createWorkshop({ api, hosts }) {
       workshopCheckRow(objectsCheck, strings.workshop.layerObjects),
     ]),
     uiEl("div", { class: "workshop__group" }, [
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.grid }),
-      uiEl("label", { class: "workshop__field" }, [
-        uiEl("span", { class: "workshop__label", text: strings.workshop.gridStep }),
-        gridSelect,
-      ]),
-      workshopCheckRow(snapCheck, strings.workshop.gridSnap),
-      uiEl("p", { class: "workshop__note", text: strings.workshop.gridSnapHint }),
-    ]),
-    uiEl("div", { class: "workshop__group" }, [
       subjectHead,
       wallFields,
       openingFields,
@@ -2056,6 +2068,18 @@ function createWorkshop({ api, hosts }) {
       uiEl("h4", { class: "workshop__head", text: strings.workshop.heightRooms }),
       uiEl("p", { class: "workshop__note", text: strings.workshop.heightRoomsHint }),
       roomsList,
+    ]),
+    // «Сетка» — последней, под «Высотой» (таск 175, G258): «Раздел Сетка в
+    // левом меню перенеси под Высота». Шаг выбирают один раз на объект, а
+    // выше стоит то, что правят на каждой стене.
+    uiEl("div", { class: "workshop__group" }, [
+      uiEl("h4", { class: "workshop__head", text: strings.workshop.grid }),
+      uiEl("label", { class: "workshop__field" }, [
+        uiEl("span", { class: "workshop__label", text: strings.workshop.gridStep }),
+        gridSelect,
+      ]),
+      workshopCheckRow(snapCheck, strings.workshop.gridSnap),
+      uiEl("p", { class: "workshop__note", text: strings.workshop.gridSnapHint }),
     ]),
   ]);
 
@@ -2140,6 +2164,41 @@ function createWorkshop({ api, hosts }) {
 
   function commit(after, label) {
     canvasCommit(project(), after, label, { schemeId });
+  }
+
+  // Шаг сетки принадлежит объекту (таск 175, G258), и спрашивается он у
+  // модели на каждом кадре: своей копии у поверхности нет — объект меняется
+  // под ней, и копия разошлась бы с ним при первой же смене.
+  function gridMm() {
+    return gridStepOf(project());
+  }
+
+  function setGrid(value) {
+    try {
+      const next = setGridStep(project(), value);
+      if (next.changed) commit(next.project, strings.history.gridStep);
+    } catch (error) {
+      fail(error);
+    }
+    sync();
+  }
+
+  // Список шагов и выбранный пункт. Пересобирается только когда список и
+  // правда другой (сменился объект с чужим числом): `replaceChildren` на
+  // каждом кадре схлопывал бы список, раскрытый под рукой.
+  let gridOptionsKey = "";
+
+  function syncGrid() {
+    const step = gridMm();
+    const options = workshopGridOptions(step);
+    const key = options.join(",");
+    if (key !== gridOptionsKey) {
+      gridOptionsKey = key;
+      gridSelect.replaceChildren(
+        ...options.map((value) => uiEl("option", { value: String(value), text: String(value) })),
+      );
+    }
+    gridSelect.value = String(step);
   }
 
   // ——— масштаб и вид ———
@@ -2228,7 +2287,7 @@ function createWorkshop({ api, hosts }) {
   function snapOf(pointMm, free) {
     return workshopSnapMm(draft ? draft.points : [], pointMm, view, {
       free,
-      gridMm: workshopGridMm,
+      gridMm: gridMm(),
       gridSnap: workshopGridSnap,
     });
   }
@@ -3214,7 +3273,7 @@ function createWorkshop({ api, hosts }) {
           workshopPathSources(points, anchor.anchorIndex, anchor.skipIndex),
           mmOf(event),
           view,
-          { free: event.altKey, gridMm: workshopGridMm, gridSnap: workshopGridSnap },
+          { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap },
         ).point;
       }
       redraw();
@@ -3224,7 +3283,7 @@ function createWorkshop({ api, hosts }) {
       drag.kind === "vertex" ? vertexAnchor(drag) : [],
       mmOf(event),
       view,
-      { free: event.altKey, gridMm: workshopGridMm, gridSnap: workshopGridSnap },
+      { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap },
     );
     if (drag.kind === "vertex") drag.toMm = snap.point;
     else drag.deltaMm = workshopRoundMm({ x: snap.point.x - drag.startMm.x, y: snap.point.y - drag.startMm.y });
@@ -3662,7 +3721,7 @@ function createWorkshop({ api, hosts }) {
   }
 
   function paintGrid(box) {
-    const step = workshopGridDrawStepMm(workshopGridMm, view.zoom);
+    const step = workshopGridDrawStepMm(gridMm(), view.zoom);
     if (!(step > 0)) return;
     const from = screenToPlan({ x: 0, y: 0 }, WORKSHOP_UNIT, view);
     const to = screenToPlan({ x: box.width, y: box.height }, WORKSHOP_UNIT, view);
@@ -4068,7 +4127,7 @@ function createWorkshop({ api, hosts }) {
     gridCheck.checked = workshopLayers.grid;
     wallsCheck.checked = workshopLayers.walls;
     objectsCheck.checked = getState().objectsShown !== false;
-    gridSelect.value = String(workshopGridMm);
+    syncGrid();
     snapCheck.checked = workshopGridSnap;
     openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
     objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");

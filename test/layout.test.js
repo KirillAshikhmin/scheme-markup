@@ -54,7 +54,13 @@ test("ручной выбор перекрывает экран в обе сто
 });
 
 test("в режиме просмотра доступно смотреть и открывать, но не править", () => {
-  for (const ability of ["viewPlan", "switchProject", "switchScheme", "markList", "filters", "tables", "exportFiles", "openFile"]) {
+  // `viewSizes` в этом списке с таска 175 (G272): «в мобильной вёрстке добавь
+  // кнопку в шапку „Интерфейс проекта“». Размер меток и подписей, шрифт, слои
+  // плана и масштаб — это «как я это вижу», а не правка разметки, и на объекте
+  // с телефона их крутят чаще, чем за столом. Раздел левой колонки на узком
+  // экране при этом по-прежнему не показывается: дверь к полям одна — кнопка
+  // в шапке.
+  for (const ability of ["viewPlan", "switchProject", "switchScheme", "markList", "filters", "tables", "exportFiles", "openFile", "viewSizes"]) {
     assert.equal(layoutAllows(ability, "mobile"), true, ability + " должно быть доступно на телефоне");
     assert.equal(layoutAllows(ability, "desktop"), true, ability + " должно быть доступно на десктопе");
   }
@@ -62,7 +68,7 @@ test("в режиме просмотра доступно смотреть и о
   // потому, что это правка: «спрячь кнопку отображения связей, тогда на
   // смартфоне вся верхняя панель должна уместиться в 1 строку». Стоит в том же
   // списке, потому что проверяется то же самое: кнопки на телефоне нет.
-  for (const ability of ["editMarks", "editSchemes", "editRooms", "editProject", "dictionary", "viewSizes", "saveFile", "markLinks"]) {
+  for (const ability of ["editMarks", "editSchemes", "editRooms", "editProject", "dictionary", "saveFile", "markLinks"]) {
     assert.equal(layoutAllows(ability, "mobile"), false, ability + " не должно быть доступно на телефоне");
     assert.equal(layoutAllows(ability, "desktop"), true, ability + " должно быть доступно на десктопе");
   }

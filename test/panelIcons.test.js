@@ -73,6 +73,70 @@ test("каждый значок нарисован линиями и начин�
   }
 });
 
+// Отрезки значка: перо и прямые ходы — `M x y`, `h dx`, `v dy`, `H x`, `V y`,
+// `L x y`, `z`. Больше в наборе и не встречается у прямоугольных знаков, а
+// дуги (`a`, `c`) этот разбор пропускает — он нужен не для картинки целиком, а
+// чтобы спросить у знака, есть ли у него стенка.
+function segmentsOf(path) {
+  const segments = [];
+  let at = null;
+  let start = null;
+  for (const [, letter, numbers] of path.matchAll(/([MmHhVvLlZz])\s*([-\d.\s,]*)/g)) {
+    const values = (numbers.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    if (letter === "M" || letter === "m") {
+      const to = letter === "M" ? { x: values[0], y: values[1] } : { x: at.x + values[0], y: at.y + values[1] };
+      at = to;
+      start = to;
+      // Перо могло продолжиться списком пар — это уже линии.
+      for (let index = 2; index + 1 < values.length; index += 2) {
+        const next = letter === "M" ? { x: values[index], y: values[index + 1] } : { x: at.x + values[index], y: at.y + values[index + 1] };
+        segments.push({ from: at, to: next });
+        at = next;
+      }
+      continue;
+    }
+    if (!at) continue;
+    if (letter === "z" || letter === "Z") {
+      segments.push({ from: at, to: start });
+      at = start;
+      continue;
+    }
+    for (const value of values) {
+      const next =
+        letter === "h"
+          ? { x: at.x + value, y: at.y }
+          : letter === "H"
+            ? { x: value, y: at.y }
+            : letter === "v"
+              ? { x: at.x, y: at.y + value }
+              : { x: at.x, y: value };
+      segments.push({ from: at, to: next });
+      at = next;
+    }
+  }
+  return segments;
+}
+
+// Дефект D44: «иконка принтера обрезана слева у кнопки». Обрезала её не кнопка
+// и не стиль — у корпуса просто не было левой стенки, при живой правой. Поэтому
+// проверяется не ширина знака (она и тогда была от 4,5 до 19,5), а сами стенки:
+// корпус — коробка, и стоять она должна на двух боках.
+test("у корпуса принтера две стенки, а не одна (D44)", () => {
+  const segments = drawn.get("printer").flatMap((path) => segmentsOf(path));
+  const vertical = segments.filter((segment) => segment.from.x === segment.to.x);
+  const wall = (x) =>
+    vertical.some(
+      (segment) =>
+        segment.from.x === x && Math.min(segment.from.y, segment.to.y) <= 10 && Math.max(segment.from.y, segment.to.y) >= 16,
+    );
+  const sides = [...new Set(segments.map((segment) => segment.from.x).concat(segments.map((segment) => segment.to.x)))];
+  const left = Math.min(...sides);
+  const right = Math.max(...sides);
+  assert.equal(left, 24 - right, "знак принтера не по середине клетки: " + left + "…" + right);
+  assert.ok(wall(left), "у корпуса нет левой стенки — знак читается обрезанным");
+  assert.ok(wall(right), "у корпуса нет правой стенки");
+});
+
 // Прежние символы и эмодзи в подписях кнопок — то, от чего уходили: у эмодзи
 // своя палитра и свой размер, а часть знаков в системном шрифте просто нет.
 test("в панелях не осталось кнопок с символом вместо значка", () => {

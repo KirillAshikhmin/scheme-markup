@@ -31,7 +31,7 @@ import {
   updateProject,
   updateType,
 } from "../model.js";
-import { uiEl, uiButton, uiIconButton } from "./ui.js";
+import { uiEl, uiButton, uiIconButton, uiModal } from "./ui.js";
 import { setSetting } from "../store.js";
 import { openTypePicker } from "./typePicker.js";
 import { FONT_DRAFT, FONT_SYSTEM, typeIcon } from "../render.js";
@@ -425,11 +425,23 @@ function mountToolsPanel(host, api) {
   render();
 }
 
-// Раздел «Размеры»: размер меток и подписей, масштаб плана.
-function mountSizesPanel(host, api) {
+/**
+ * Поля «Интерфейса проекта» — размер меток и подписей, шрифт, слои, развёртка
+ * и масштаб того поля, которое на экране.
+ *
+ * **Одна сборка на два места** (таск 175, G272). На большом экране это раздел
+ * левой колонки; на узком экрана раздела нет вовсе, и те же поля приходят
+ * окном по кнопке в шапке. Второй сборки здесь быть не должно: разойдись они —
+ * и человек, покрутивший подписи с телефона, не нашёл бы этого переключателя
+ * за столом.
+ *
+ * Возвращает узел и `dispose`: подписка на состояние живёт, пока жив узел, а
+ * окно закрывается — и подписку надо снять, иначе она рисовала бы в
+ * выброшенный из разметки ящик.
+ */
+export function createSizesFields(api) {
   const { getState, setState, subscribe } = api;
   const box = uiEl("div", { class: "tools" });
-  host.replaceChildren(box);
   // Снимок объекта на время жеста ползунка: пока он есть, раздел не
   // перерисовывается — иначе ползунок исчезал бы из-под пальца.
   let sizeBefore = null;
@@ -528,7 +540,7 @@ function mountSizesPanel(host, api) {
     );
   }
 
-  subscribe((state, changed) => {
+  const stop = subscribe((state, changed) => {
     if (sizeBefore) return;
     if (
       "project" in changed ||
@@ -543,6 +555,61 @@ function mountSizesPanel(host, api) {
     ) {
       render();
     }
+  });
+  render();
+  return { node: box, dispose: stop };
+}
+
+// Раздел левой колонки: та же сборка полей, своей у раздела нет. Подписку он
+// не снимает — раздел живёт столько же, сколько страница.
+function mountSizesPanel(host, api) {
+  host.replaceChildren(createSizesFields(api).node);
+}
+
+/**
+ * «Интерфейс проекта» окном (таск 175, G272). Слова заказчика: «в мобильной
+ * вёрстке добавь кнопку в шапку „Интерфейс проекта“, которая откроет тоже
+ * самое, что в левой колонке, но в окне».
+ *
+ * Окно, а не лист снизу: лист занят колонками (схемы и метки), и третья
+ * кнопка в нижнем ряду сломала бы ряд из трёх равных. Окно к тому же само
+ * забирает клавиатуру и закрывается Escape, как остальные.
+ */
+function openSizesWindow(api) {
+  const fields = createSizesFields(api);
+  let modal;
+  const close = () => {
+    modal.close();
+    fields.dispose();
+  };
+  modal = uiModal({
+    title: strings.panels.sizes,
+    body: fields.node,
+    actions: [uiButton(strings.dialog.close, { class: "ui-btn ui-btn--accent", on: { click: () => close() } })],
+    // Escape и нажатие мимо закрывают окно мимо кнопки — подписку снимаем и там.
+    onCancel: () => fields.dispose(),
+  });
+}
+
+// Кнопка в шапке. Стоит рядом со значком принтера — обе открывают, а не
+// правят, — и только на узкой раскладке: на большом экране раздел на своём
+// месте в колонке, и вторая дверь к тем же полям там лишняя.
+function mountSizesButton(host, api) {
+  const { getState, subscribe } = api;
+  const button = uiIconButton("sliders", {
+    label: strings.panels.sizes,
+    title: strings.tools.sizesWindow,
+    on: { click: () => openSizesWindow(api) },
+  });
+  host.replaceChildren(button);
+
+  function render() {
+    const layout = getState().layout;
+    host.hidden = layout !== "mobile" || !layoutAllows("viewSizes", layout);
+  }
+
+  subscribe((state, changed) => {
+    if ("layout" in changed) render();
   });
   render();
 }
@@ -589,3 +656,4 @@ function mountHistoryPanel(host, api) {
 registerPanel(PANEL_IDS.tools, mountToolsPanel);
 registerPanel(PANEL_IDS.headerHistory, mountHistoryPanel);
 registerPanel(PANEL_IDS.sizes, mountSizesPanel);
+registerPanel(PANEL_IDS.headerSizes, mountSizesButton);
