@@ -752,6 +752,11 @@ export function workshopMoveWall(project, wallId, deltaMm) {
 export const WORKSHOP_OPENING_DEFAULTS = {
   window: { widthMm: 1500, heightMm: 1400, heightAboveFloorMm: 800 },
   door: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
+  // Стеклянная дверь (таск 180) — балконная: уже межкомнатной и выше её. 800 ×
+  // 2200 от пола — то, что стоит на французском балконе, о котором говорил
+  // заказчик; свои умолчания у неё потому, что подставить дверные значило бы
+  // заставить править оба числа на каждой.
+  glassDoor: { widthMm: 800, heightMm: 2200, heightAboveFloorMm: 0 },
   opening: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
   arch: { widthMm: 1200, heightMm: 2100, heightAboveFloorMm: 0 },
 };

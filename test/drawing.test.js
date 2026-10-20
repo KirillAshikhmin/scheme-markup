@@ -442,7 +442,15 @@ test("сторона открывания есть у двери и только
     "openingSwingUnknown",
   );
   assert.equal(errorCode(() => addOpening(project, { wallId: wallIds[0], kind: "люк", atMm: 0, widthMm: 900, heightMm: 2100 })), "openingKindUnknown");
-  assert.deepEqual(OPENING_KINDS, ["window", "door", "opening", "arch"]);
+  // Стеклянная дверь (таск 180) — дверь во всём, что касается полотна: петли и
+  // сторона открывания у неё есть и заводятся теми же умолчаниями.
+  const glass = addOpening(project, { wallId: wallIds[0], kind: "glassDoor", atMm: 100, widthMm: 800, heightMm: 2200 });
+  assert.deepEqual([glass.opening.hinge, glass.opening.swing], [OPENING_HINGES[0], OPENING_SWINGS[0]]);
+  assert.equal(
+    errorCode(() => addOpening(project, { wallId: wallIds[0], kind: "arch", atMm: 100, widthMm: 900, heightMm: 2100, swing: "left" })),
+    "openingSwingOnlyDoor",
+  );
+  assert.deepEqual(OPENING_KINDS, ["window", "door", "glassDoor", "opening", "arch"]);
 });
 
 test("дверь стала окном — сторона открывания убирается, а не остаётся врать", () => {
