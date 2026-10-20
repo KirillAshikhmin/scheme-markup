@@ -25,8 +25,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   addScheme,
+  addSchemeObject,
   addWall,
   createProject,
+  schemeAnchorCandidates,
   schemeAnchorOf,
   schemeAnchorOriginMm,
   setSchemeAnchor,
@@ -205,4 +207,29 @@ test("щелчок пишет привязку одним шагом и назы
   // дважды, а `changed: false` не кладёт в историю пустого шага.
   assert.ok(place.indexOf("anchorPick = null") < place.indexOf("setSchemeAnchor"), "ожидание снимается после записи");
   assert.ok(place.includes("result.changed"), "пустой щелчок кладёт шаг в историю");
+});
+
+test("пара «лестница — выход» сошлась: выход предлагается точкой сам", () => {
+  // Таск 205 оставил ключ `stairsExit` в `SCHEME_ANCHOR_OBJECT_KEYS` заранее —
+  // на то, что вещь каталога заведёт таск 204. Она заведена, и привязка о ней
+  // узнала **без единой правки**: это и есть та пара, которую назвал заказчик
+  // («Указываем в 1 месте лестницу и над ней выход с лестницы»).
+  //
+  // Тест держит шов между тремя тасками: переименуй 204 свой ключ — и выход
+  // молча перестал бы предлагаться точкой, а заметил бы это заказчик.
+  let project = createProject();
+  const added = addScheme(project, { name: "2 этаж", width: 1000, height: 1000 });
+  project = addSchemeObject(added.project, {
+    schemeId: added.scheme.id,
+    catalogKey: "stairsExit",
+    shape: "rect",
+    atMm: { x: 3000, y: 4000 },
+    widthMm: 1100,
+    depthMm: 2700,
+  }).project;
+  const found = schemeAnchorCandidates(project, added.scheme.id);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].key, "stairsExit");
+  assert.equal(found[0].name, "Выход с лестницы");
+  assert.deepEqual(found[0].atMm, { x: 3000, y: 4000 });
 });
