@@ -93,7 +93,10 @@ import {
   workshopHint,
   workshopInitialTool,
   workshopLengthAt,
+  workshopEscStep,
   workshopModeOf,
+  workshopMoveAnchorMm,
+  workshopMoveDeltaMm,
   workshopMoveVertex,
   workshopMoveWall,
   workshopObjectDefaultsByName,
@@ -499,6 +502,78 @@ test("первая вершина садится той же дверью — б
   assert.deepEqual(free.point, { x: 1235, y: -87 }, "дробные миллиметры округляются на границе модели");
   const node = workshopSnapMm([], { x: 1234.6, y: -87.4 }, viewOf({ zoom: 1 }), { gridMm: 500, gridSnap: true });
   assert.deepEqual(node.point, { x: 1000, y: 0 });
+});
+
+// ——— перенос садится на сетку, а не ходит шагом мимо неё (таск 176, D40) ——
+//
+// Снимок заказчика: «при изменении размера объекта он съезжает с сетки.
+// двигается нужным шагом, но вот к сетке не притягивается». Шаг считался от
+// точки нажатия — `узел(курсор) − точка нажатия`, — и к нему навсегда
+// прибавлялось расстояние от места, за которое вещь взяли, до ближайшего узла.
+
+test("вещь садится серединой на узел, за какой край её ни возьми", () => {
+  const view = viewOf({ zoom: 0.1 });
+  const grid = { gridMm: 500, gridSnap: true };
+  const object = { shape: "rect", atMm: { x: 2000, y: 1500 }, widthMm: 1200, depthMm: 100, turnDeg: 0 };
+  const anchor = workshopMoveAnchorMm(object);
+  assert.deepEqual(anchor, { x: 2000, y: 1500 }, "опора прямоугольника — его середина");
+  // Взялись за правый край, в 20 мм от узла: прежде вещь так и ездила в 20 мм
+  // от сетки — шагом 20, 520, 1020. Теперь на узел садится середина, а рука
+  // решает, на какой именно: ход руки прибавляется к опоре, и узел берётся
+  // ближайший к ней.
+  const press = { x: 2480, y: 1530 };
+  for (const [cursor, middle] of [
+    [{ x: 2600, y: 1530 }, { x: 2000, y: 1500 }],
+    [{ x: 2900, y: 1530 }, { x: 2500, y: 1500 }],
+    [{ x: 3400, y: 1530 }, { x: 3000, y: 1500 }],
+  ]) {
+    const delta = workshopMoveDeltaMm(anchor, press, cursor, view, grid);
+    const now = { x: object.atMm.x + delta.x, y: object.atMm.y + delta.y };
+    assert.deepEqual(now, middle, "курсор " + cursor.x + ": середина уехала мимо узла в " + JSON.stringify(now));
+  }
+});
+
+test("Alt снимает притяжку переноса — остаётся чистый ход руки", () => {
+  const view = viewOf({ zoom: 0.1 });
+  const anchor = { x: 2000, y: 1500 };
+  const delta = workshopMoveDeltaMm(anchor, { x: 2480, y: 1530 }, { x: 2600, y: 1570 }, view, {
+    gridMm: 500,
+    gridSnap: true,
+    free: true,
+  });
+  assert.deepEqual(delta, { x: 120, y: 40 });
+});
+
+test("сетка выключена — перенос идёт за рукой, как и ходил", () => {
+  const view = viewOf({ zoom: 0.1 });
+  const delta = workshopMoveDeltaMm({ x: 2000, y: 1500 }, { x: 2480, y: 1530 }, { x: 2600, y: 1570 }, view, {
+    gridMm: 500,
+    gridSnap: false,
+  });
+  assert.deepEqual(delta, { x: 120, y: 40 });
+});
+
+test("у полосы и у стены опора — первая вершина: на узлы садятся вершины", () => {
+  const band = { shape: "polyline", pointsMm: [{ x: 1230, y: 870 }, { x: 3230, y: 870 }], depthMm: 600 };
+  assert.deepEqual(workshopMoveAnchorMm(band), { x: 1230, y: 870 });
+  const wall = { id: "стена", aMm: { x: 1230, y: 870 }, bMm: { x: 3230, y: 870 }, thicknessMm: 100 };
+  assert.deepEqual(workshopMoveAnchorMm(wall), { x: 1230, y: 870 });
+  // И садится она ровно на узел, а не рядом с ним.
+  const delta = workshopMoveDeltaMm(workshopMoveAnchorMm(wall), { x: 2000, y: 900 }, { x: 2600, y: 1400 }, viewOf({ zoom: 0.1 }), {
+    gridMm: 500,
+    gridSnap: true,
+  });
+  assert.deepEqual({ x: wall.aMm.x + delta.x, y: wall.aMm.y + delta.y }, { x: 2000, y: 1500 });
+});
+
+test("опоры нет — остаётся сырой ход руки, и ничего не падает", () => {
+  const delta = workshopMoveDeltaMm(null, { x: 10, y: 20 }, { x: 40, y: 60 }, viewOf({ zoom: 0.1 }), {
+    gridMm: 500,
+    gridSnap: true,
+  });
+  assert.deepEqual(delta, { x: 30, y: 40 });
+  assert.equal(workshopMoveAnchorMm(null), null);
+  assert.equal(workshopMoveAnchorMm({ shape: "polyline", pointsMm: [] }), null);
 });
 
 test("шаги сетки идут по возрастанию и начинаются с толщины перегородки", () => {
@@ -940,6 +1015,36 @@ test("режим и занятие — два взгляда на одно по�
   // Мусор вместо «что добавляем» не оставляет окно без занятия.
   assert.equal(workshopToolOf("add", "чепуха"), "walls");
   assert.equal(workshopToolOf("add", undefined), "walls");
+});
+
+// ——— Esc: лесенка отмены, та же, что на плане (таск 176, G260) ————————
+//
+// Слова заказчика: «По Esc должно отменяться добавление объекта, как и метки».
+// Ступеней три, и важен их порядок: черновик старше выделения, выделение
+// старше режима. Проверяется он здесь потому, что живой прогон показывает
+// только верхнюю ступень — ту, которая сработала.
+
+test("Esc снимает по одной ступени: сперва черновик, потом выделение, потом добавление", () => {
+  const selected = { kind: "object", id: "вещь" };
+  const draft = { points: [{ x: 0, y: 0 }] };
+  assert.equal(workshopEscStep({ draft, selected, mode: "add" }), "draft");
+  assert.equal(workshopEscStep({ draft, selected: null, mode: "select" }), "draft");
+  assert.equal(workshopEscStep({ draft: null, selected, mode: "add" }), "selection");
+  // Ради этой строки таск и заведён: добавление кончается по Esc, как на плане.
+  assert.equal(workshopEscStep({ draft: null, selected: null, mode: "add" }), "mode");
+  // В правке без выделения Esc не значит ничего — и событие остаётся чужим.
+  assert.equal(workshopEscStep({ draft: null, selected: null, mode: "select" }), null);
+  assert.equal(workshopEscStep(), null);
+});
+
+test("лесенка Esc в чертеже кончается тем же, чем на плане, — режимом", () => {
+  // Холст: `canvasKeyDown` последним шагом возвращает режим в «select».
+  // Чертёж обязан кончаться тем же, иначе одна клавиша на двух поверхностях
+  // делала бы разное.
+  for (const adding of WORKSHOP_ADDING) {
+    assert.equal(workshopEscStep({ mode: workshopModeOf(adding) }), "mode", adding + ": добавление не кончается");
+  }
+  assert.equal(workshopEscStep({ mode: workshopModeOf("edit") }), null);
 });
 
 test("у каждого занятия своя подсказка, и чужих слов в ней нет", () => {
