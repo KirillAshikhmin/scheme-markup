@@ -296,6 +296,25 @@ const VOLUME_LIGHT = volumeNormalize({ x: -0.42, y: -0.33, z: -0.84 });
 // там тушь по бумаге, а тут поверхность комнаты, и затенение гонит её светлоту
 // в обе стороны. Поэтому палитра своя и к `mono.js` отношения не имеет —
 // объёмный вид не печатают.
+/**
+ * Тень на земле (D43): земля, помноженная на 0,72.
+ *
+ * Не «серый с прозрачностью» и не вторая палитра: тень — это та же земля, до
+ * которой не дошёл свет, и взята она от неё же. Сплошная, потому что тени
+ * соседних стен перекрываются, а дом отбрасывает **одно** пятно: сложи их
+ * прозрачностью — и в углу дома вышло бы вдвое темнее, чем вдоль стены.
+ *
+ * 0,72 — примерно то же отношение, что между самой светлой и самой тёмной
+ * гранью сцены (`VOLUME_SHADE_MIN` = 0,46 … 1): тень читается, но не чернит
+ * траву.
+ */
+export const VOLUME_SHADOW_RGB = [89, 115, 67];
+/**
+ * Запас земли за тенью дома (D43): плита кончается не там, где кончается тень,
+ * а на три метра дальше. Своего числа у выноса нет — он считается от самой
+ * тени (`volumeShadowShift`), то есть от высоты стен и высоты солнца.
+ */
+export const VOLUME_LAND_OUT_MM = 3000;
 export const VOLUME_WALL_RGB = [216, 212, 204];
 export const VOLUME_FLOOR_RGB = [170, 142, 110];
 export const VOLUME_CEILING_RGB = [238, 238, 236];
@@ -460,6 +479,64 @@ export function volumeLine(points, color, options = {}) {
 
 function volumeAt(point, z) {
   return { x: point.x, y: point.y, z };
+}
+
+/**
+ * Куда уходит тень точки, поднятой на `heightMm` (D43).
+ *
+ * Кладёт её **солнце, нарисованное на небе** (`VOLUME_SUN_AT`), и это
+ * единственный разумный хозяин: тень, лежащая не в ту сторону от видимого
+ * солнца, кричит о подделке громче, чем её отсутствие.
+ *
+ * Лампа сцены (`VOLUME_LIGHT`) для этого не годится вовсе, и это стоит сказать
+ * прямо: у неё отрицательная `z` и светлее всех грань, **смотрящая вниз** (так
+ * сделано нарочно — «пол темнее потолка», требование заказчика ещё из таска
+ * 146). Светит она, выходит, снизу — а свет снизу тени на земле не кладёт.
+ * Лампа красит грани, солнце кладёт тень; смешивать их нельзя.
+ *
+ * Длина — из высоты солнца над горизонтом: `h / tg(rise)`. При 14° стена
+ * 2800 мм даёт тень 11 231 мм — длинную, как и положено низкому солнцу.
+ * Направление — ровно прочь от солнца: `az + 180°`.
+ */
+export function volumeShadowShift(heightMm) {
+  const rise = Math.max(1, Number(VOLUME_SUN_AT.rise) || 0) * DEG;
+  const reach = Number(heightMm) / Math.tan(rise);
+  const away = (Number(VOLUME_SUN_AT.az) + 180) * DEG;
+  if (!Number.isFinite(reach)) return { x: 0, y: 0 };
+  return { x: Math.cos(away) * reach, y: Math.sin(away) * reach };
+}
+
+/**
+ * Силуэт тени прямой призмы: выпуклая оболочка её габарита и того же габарита,
+ * сдвинутого на вынос тени. Одной только сдвинутой крышкой обойтись нельзя —
+ * между стеной и её тенью осталась бы светлая щель, то есть ровно то «дом не
+ * касается земли», от которого всё и затевалось.
+ */
+export function volumeShadowOutline(corners, heightMm) {
+  const shift = volumeShadowShift(heightMm);
+  const points = [];
+  for (const point of corners) {
+    points.push({ x: point.x, y: point.y });
+    points.push({ x: point.x + shift.x, y: point.y + shift.y });
+  }
+  return volumeHull(points);
+}
+
+/** Выпуклая оболочка (обход Эндрю). Точек мало — восемь на стену. */
+export function volumeHull(points) {
+  const list = [...points].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+  if (list.length < 3) return list;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (source) => {
+    const out = [];
+    for (const point of source) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], point) <= 0) out.pop();
+      out.push(point);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(list), ...half([...list].reverse())];
 }
 
 /**
@@ -2674,20 +2751,83 @@ export function volumeScene(project, schemeId, options = {}) {
   //
   // Помещения не обведены — плита и есть единственный пол, и красится полом:
   // назвать её землёй значило бы сказать, что пола в доме нет.
+  //
+  // **Плита идёт с выносом** (D43): земля под домом не может кончаться ровно по
+  // осям наружных стен — иначе ей не на чем держать тень дома, которая уходит
+  // от стены на полторы высоты. Вынос считается от высоты, а не взят на глаз:
+  // `VOLUME_LAND_OUT` высот от габарита во все стороны.
+  const wallHeights = new Map();
+  for (const wall of walls) {
+    const left = wallHeightOnSide(project, wall.id, "left");
+    const right = wallHeightOnSide(project, wall.id, "right");
+    wallHeights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm);
+  }
+  const tallest = walls.reduce((most, wall) => Math.max(most, wallHeights.get(wall.id) || 0), schemeHeight.mm || 0);
   if (bounds) {
     const land = rooms.length > 0;
+    const shadow = volumeShadowShift(tallest);
+    const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
     faces.push(
       volumeFace(
         volumeClockwise([
-          { x: bounds.minX, y: bounds.minY },
-          { x: bounds.maxX, y: bounds.minY },
-          { x: bounds.maxX, y: bounds.maxY },
-          { x: bounds.minX, y: bounds.maxY },
+          { x: bounds.minX - out, y: bounds.minY - out },
+          { x: bounds.maxX + out, y: bounds.minY - out },
+          { x: bounds.maxX + out, y: bounds.maxY + out },
+          { x: bounds.minX - out, y: bounds.maxY + out },
         ]).map((point) => volumeAt(point, 0)),
         land ? VOLUME_LAND_RGB : VOLUME_FLOOR_RGB,
         { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_BASE, flat: land },
       ),
     );
+  }
+  // **Тень дома на земле** (дефект D43). Слова заказчика по снимку обзора: «дом
+  // всё ещё летает, а не стоит на земле».
+  //
+  // Разбор числами. Плита и земля сведены в один тон ещё в G237, и сведены
+  // верно: замер пикселей живого кадра — `123,160,93` и у самой стены, и в семи
+  // метрах от дома, тон в тон. Но ровно поэтому в кадре **не осталось ничего,
+  // что говорило бы о поверхности**: плита кончается по осям наружных стен
+  // (габарит 9200 × 8700 мм на объекте заказчика), за ней геометрии нет вовсе —
+  // поле панорамы рисуется заливкой ниже строки горизонта, а в обзоре (наклон
+  // −42°, поле 972 × 778) горизонт стоит на `y = −48` точки, то есть **выше
+  // кадра**: вся высота поля залита одним плоским цветом. Ни растяжки, ни
+  // затенения (плита `flat`), ни тени — глазу не за что зацепиться, и дом
+  // читается наклейкой на зелёном листе.
+  //
+  // Поэтому в сцену добавлена **тень**: единственная примета касания, которой
+  // не было. Кладёт её солнце с неба (`volumeShadowShift`): при его высоте 14°
+  // стена 2800 мм даёт тень 11 231 мм, и ложится она ровно прочь от солнца.
+  //
+  // Тень — это силуэт: выпуклая оболочка габарита стены и того же габарита,
+  // сдвинутого на вынос. Рисуется **сплошным** тоном без затенения, поэтому
+  // наложение теней соседних стен не темнеет вдвое и дом отбрасывает одно пятно.
+  //
+  // Кладётся она только на землю — то есть когда помещения обведены и плита
+  // работает землёй. Нет обводки — плита сама пол, и тень легла бы внутри дома.
+  // Внутри дома её не видно и так: полы помещений рисуются **после** неё.
+  if (rooms.length > 0) {
+    for (const wall of walls) {
+      const vectors = wallVectors(wall);
+      if (!vectors) continue;
+      const height = wallHeights.get(wall.id) || 0;
+      if (!(height > 0)) continue;
+      const corners = volumeBoxCorners(
+        {
+          x: Number(wall.aMm.x) + vectors.u.x * (vectors.len / 2),
+          y: Number(wall.aMm.y) + vectors.u.y * (vectors.len / 2),
+        },
+        vectors.u,
+        vectors.len,
+        Number(wall.thicknessMm),
+      );
+      faces.push(
+        volumeFace(
+          volumeClockwise(volumeShadowOutline(corners, height)).map((point) => volumeAt(point, 0)),
+          VOLUME_SHADOW_RGB,
+          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND, flat: true },
+        ),
+      );
+    }
   }
   for (const room of rooms) {
     faces.push(
@@ -2712,14 +2852,9 @@ export function volumeScene(project, schemeId, options = {}) {
   // Все двери схемы: по этому списку хоткей «все двери» (G210) знает, что
   // открывать, не спрашивая объект второй раз.
   const doors = [];
-  // Высоты считаются **до** стен: по ним сводятся углы (G265) — ус ставится
-  // только между стенами одной высоты.
-  const wallHeights = new Map();
-  for (const wall of walls) {
-    const left = wallHeightOnSide(project, wall.id, "left");
-    const right = wallHeightOnSide(project, wall.id, "right");
-    wallHeights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm);
-  }
+  // Высоты посчитаны выше, до плиты: по ним идёт вынос земли и тень дома (D43),
+  // по ним же сводятся углы (G265) — ус ставится только между стенами одной
+  // высоты.
   const miters = volumeWallMiters(walls, (wall) => wallHeights.get(wall.id) || 0);
   for (const wall of walls) {
     const openings = openingsInWall(project, wall.id);

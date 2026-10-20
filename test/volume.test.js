@@ -78,6 +78,7 @@ import {
   VOLUME_CLEAR_ALPHA,
   VOLUME_MITER_MAX,
   VOLUME_WALL_RGB,
+  VOLUME_SHADOW_RGB,
   VOLUME_NEAR_MM,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_AROUND_PAN_TILT_MIN,
@@ -281,11 +282,14 @@ test("у комнаты есть пол, потолок и стены с тол�
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
   const ground = built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND);
-  // Пол и потолок помещения — и полоса пола под каждой из четырёх стен: она
-  // закрывает порог в проёме и щель между контуром и гранью стены (D37).
-  assert.equal(ground.length, 2 + 4, "пол, потолок и пол под каждой стеной");
+  // Пол и потолок помещения, полоса пола под каждой из четырёх стен (она
+  // закрывает порог в проёме и щель между контуром и гранью стены, D37) — и
+  // тень каждой стены на земле (D43).
+  assert.equal(ground.length, 2 + 4 + 4, "пол, потолок, пол под стенами и тени стен");
   const ceiling = ground.find((face) => face.n.z < 0);
-  const floors = ground.filter((face) => face.n.z > 0);
+  const shadows = ground.filter((face) => face.rgb === VOLUME_SHADOW_RGB);
+  assert.equal(shadows.length, 4, "тень под каждой стеной");
+  const floors = ground.filter((face) => face.n.z > 0 && face.rgb !== VOLUME_SHADOW_RGB);
   assert.equal(floors.length, 5, "у пола нормаль вверх, у потолка вниз");
   assert.ok(floors.every((face) => face.p.every((point) => point.z === 0)), "весь пол лежит на нуле");
   assert.ok(ceiling.p.every((point) => point.z === 2700), "потолок — на высоте схемы");
@@ -1522,8 +1526,11 @@ test("обзор вписывает всю схему и смотрит на н�
   assert.ok(camera.at.z > fitted.target.z, "обзор стоит выше цели");
   const frame = volumeFrame(built, camera, box);
   // Весь габарит обязан уместиться в поле — иначе «вся схема» это неправда.
-  const xs = frame.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 0));
-  const ys = frame.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 1));
+  // Считается по телам: земля и тень дома нарочно шире кадра (D43) — они
+  // земля, а не схема, и обрезаются краем поля, как обрезает их горизонт.
+  const house = frame.filter((polygon) => polygon.layer === VOLUME_LAYER_BODY);
+  const xs = house.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 0));
+  const ys = house.flatMap((polygon) => polygon.xy.filter((value, index) => index % 2 === 1));
   assert.ok(Math.min(...xs) > -1 && Math.max(...xs) < box.width + 1, "по ширине уместилось");
   assert.ok(Math.min(...ys) > -1 && Math.max(...ys) < box.height + 1, "по высоте уместилось");
   assert.ok(volumeFocal(box) > 0);
