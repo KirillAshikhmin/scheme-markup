@@ -80,6 +80,8 @@ import {
   VOLUME_MARK_WALL,
   VOLUME_OBJECT_RGB,
   VOLUME_CLEAR_ALPHA,
+  VOLUME_SHEER_ALPHA,
+  volumeClearAlpha,
   VOLUME_MITER_MAX,
   VOLUME_WALL_RGB,
   VOLUME_SHADOW_RGB,
@@ -1238,8 +1240,11 @@ test("порядок кадра совпадает с истиной в кажд
           if (!inside(face.p, at, axis)) continue;
           // Прозрачность — часть цвета (таск 169), и стенд сверяет её вместе с
           // ним: грань вещи обязана быть нарисована прозрачной, а грань стены —
-          // непрозрачной, иначе точка закрашена не той поверхностью.
-          truth = { t, fill: volumeFill(face.rgb, volumeShade(normal), face.clear ? VOLUME_CLEAR_ALPHA : 1) };
+          // непрозрачной, иначе точка закрашена не той поверхностью. Плотность
+          // берётся **у самой грани** (таск 189): их теперь две — 0,4 у вещи и
+          // 0,3 у тюля, — и подставить сюда одну константу значило бы сверять
+          // кадр не с ним самим.
+          truth = { t, fill: volumeFill(face.rgb, volumeShade(normal), face.alpha === undefined ? 1 : face.alpha) };
         }
         // Что нарисовано: последний накрывший точку многоугольник.
         let painted = null;
@@ -3487,6 +3492,8 @@ test("просвечивает вещь чертежа — и только он�
   }
   const markFaces = built.faces.filter((face) => face.markId && !face.line);
   assert.ok(markFaces.length > 0);
+  // Метки плотные — все, кроме ткани шторы (таск 189): в этом стенде стоит
+  // розетка, и ей просвечивать нечем. Тюль проверяется своим стендом ниже.
   assert.ok(markFaces.every((face) => !face.clear), "метки прозрачными не делаем — их и смотрят");
 
   // В кадре прозрачность живёт **в цвете**: заливка грани вещи — `rgba` с тем
@@ -3621,6 +3628,151 @@ test("стену взгляд по-прежнему не пробивает, а 
     "точка обязана лежать на прозрачной вещи",
   );
   assert.equal(volumeSightAt(frame, x, y), null, "за лицом шкафа метки нет — и взгляду отвечать нечем");
+});
+
+// ——— тюль: прозрачная метка (таск 189, требование G286) ——————————————————
+//
+// Слова заказчика: «модель штор сделай полупрозрачной, по сути как тюль пусть
+// будет». Шторы — исключение среди меток, и здесь проверяется ровно то, чем
+// исключение отличается от правила таска 169:
+//
+//   1. Просвечивает **ткань**, а не метка: труба карниза плотная.
+//   2. Плотность у тюля **своя** — 0,3 против 0,4 у вещей, и число приходит из
+//      описания тела, а не из одной константы на всё прозрачное.
+//   3. Прозрачная **метка взгляд останавливает**: её выделяют, и пропусти её
+//      взгляд — выделить шторы стало бы нельзя вовсе.
+//
+// Стенд — живой случай заказчика: карниз у него **линейный**, проведён по окну
+// линией, и шторы ему даёт повтор вдоль пути.
+
+/** Комната с окном в северной стене, линейным карнизом у окна и розеткой за тюлем. */
+function sheerStand() {
+  const scene = roomScene();
+  let project = addOpening(scene.project, {
+    wallId: scene.walls[0],
+    kind: "window",
+    atMm: 1000,
+    widthMm: 2000,
+    heightMm: 1500,
+    heightAboveFloorMm: 800,
+  }).project;
+  // Розетка на той же стене, посередине окна и на высоте окна: тюль закрывает
+  // её целиком — это и есть точка, в которой спорят метка и прозрачная метка.
+  const put = markAt(project, scene.schemeId, "Р", [{ x: 0, y: -1350 }]);
+  project = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 1200 }).project;
+  // Карниз линией вдоль окна, в 150 мм от внутренней грани стены.
+  const rail = markAt(project, scene.schemeId, "КШ", [
+    { x: -1000, y: -1250 },
+    { x: 1000, y: -1250 },
+  ], "line");
+  return {
+    project: rail.project,
+    schemeId: scene.schemeId,
+    railId: rail.markId,
+    socketId: put.markId,
+    // Стоим в комнате и смотрим в окно: тюль между глазами и окном.
+    camera: { at: { x: 0, y: 900, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: -0.05 },
+    box: { width: 1000, height: 640 },
+  };
+}
+
+test("просвечивает ткань шторы, а труба карниза — нет (G286)", () => {
+  const stand = sheerStand();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  const mine = built.faces.filter((face) => face.markId === stand.railId && !face.line);
+  const sheer = mine.filter((face) => face.clear);
+  const solid = mine.filter((face) => !face.clear);
+  assert.ok(sheer.length > 0, "у шторы нет ни одной прозрачной грани");
+  assert.ok(solid.length > 0, "у шторы не осталось плотных граней — труба карниза тоже просвечивает");
+  // Полотнищ семь (2 м пути при шаге 300), по шесть граней на каждое; полоса
+  // карниза — шесть граней одного звена (у метки рисуется и низ: на карниз
+  // смотрят и снизу).
+  assert.equal(sheer.length, 42, "прозрачных граней у штор: " + sheer.length);
+  assert.equal(solid.length, 6, "плотных граней у карниза: " + solid.length);
+  for (const face of sheer) assert.equal(face.alpha, VOLUME_SHEER_ALPHA, "плотность тюля взялась не из его описания");
+  for (const face of solid) assert.equal(face.alpha, 1, "труба карниза перестала быть плотной");
+  // Остальные метки стенда — как были. Это и есть «не раздавая её остальным».
+  const others = built.faces.filter((face) => face.markId && face.markId !== stand.railId && !face.line);
+  assert.ok(others.length > 0, "в стенде есть другие метки");
+  assert.ok(others.every((face) => !face.clear && face.alpha === 1), "прозрачной стала метка, которая не штора");
+  // И вещи чертежа со своей плотностью не перепутались: у них 0,4.
+  assert.notEqual(VOLUME_SHEER_ALPHA, VOLUME_CLEAR_ALPHA, "у тюля обязана быть своя плотность");
+  assert.equal(volumeClearAlpha(true), VOLUME_CLEAR_ALPHA, "вещь чертежа потеряла свою плотность");
+  assert.equal(volumeClearAlpha("sheer"), VOLUME_SHEER_ALPHA);
+  assert.equal(volumeClearAlpha(false), 1, "плотная грань обязана остаться плотной");
+});
+
+test("сквозь тюль видно окно: в кадре он смешан с тем, что за ним", () => {
+  const stand = sheerStand();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  const frame = volumeFrame(built, stand.camera, stand.box);
+  const sheer = frame.filter((polygon) => polygon.clear && polygon.pick === stand.railId);
+  assert.ok(sheer.length > 0, "тюля в кадре нет — стенд смотрит не туда");
+  for (const polygon of sheer) {
+    assert.ok(polygon.fill.startsWith("rgba("), "тюль нарисован плотным цветом: " + polygon.fill);
+    assert.ok(polygon.fill.endsWith("," + VOLUME_SHEER_ALPHA + ")"), polygon.fill);
+  }
+  // Смешивание некоммутативно: тюль обязан быть нарисован **после** того, что
+  // за ним, иначе он не просветит, а закрасится сам. Точка берётся там, где за
+  // тюлем стоит розетка стенда: её видно глазами как красное пятно сквозь
+  // ткань, и очередь в этой точке проверяется целиком.
+  const at = markPointAt(frame, stand.socketId);
+  const cover = coverAt(frame, at.x, at.y);
+  const tulle = cover.filter((item) => item.polygon.pick === stand.railId && item.polygon.clear);
+  const behind = cover.filter((item) => item.polygon.pick === stand.socketId);
+  assert.ok(tulle.length > 0 && behind.length > 0, "в этой точке спорят тюль и розетка за ним");
+  assert.ok(
+    Math.max(...behind.map((item) => item.index)) < Math.min(...tulle.map((item) => item.index)),
+    "тюль нарисован раньше того, что за ним, — и значит ничего не просветил",
+  );
+  // Слоёв тюля на луче один-два — из этого и посчитана плотность. Три бывает
+  // на косом взгляде (0,2 % точек на живом объекте), и за тремя остаётся треть.
+  assert.ok(tulle.length <= 2, "слоёв тюля в этой точке больше двух: " + tulle.length);
+  assert.equal(Math.round((1 - VOLUME_SHEER_ALPHA) ** 2 * 100), 49, "за двумя полотнищами окну остаётся половина");
+});
+
+test("прозрачная метка взгляд останавливает — иначе шторы стало бы не выделить (G286)", () => {
+  const stand = sheerStand();
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  const frame = volumeFrame(built, stand.camera, stand.box);
+  const at = markPointAt(frame, stand.railId);
+  // 1. Смотрим на тюль — выделяется штора. Пропусти взгляд прозрачную метку,
+  // ответом стало бы окно за ней, то есть `null`: выделить шторы взглядом
+  // нельзя было бы вовсе.
+  assert.equal(volumeSightAt(frame, at.x, at.y), stand.railId, "взгляд на тюль обязан отвечать шторой");
+  assert.equal(volumePickAt(frame, at.x, at.y), stand.railId, "и щелчок по тюлю — тоже");
+  // 2. Правило — не «прозрачное пропускается», а «пропускается то, за чем всё
+  // равно никого не выделить». Тот же кадр с плотными шторами отвечает **то же
+  // самое**: прозрачность поменяла, как штора выглядит, а не что выделяется.
+  const opaque = volumeFrame(
+    { ...built, faces: built.faces.map((face) => (face.markId ? { ...face, clear: false, alpha: 1 } : face)) },
+    stand.camera,
+    stand.box,
+  );
+  assert.equal(volumeSightAt(opaque, at.x, at.y), stand.railId, "до прозрачности взгляд отвечал той же шторой");
+  // 3. Цена названа прямо: розетка за тюлем остаётся закрытой — и взгляду, и
+  // руке. Это ровно то, что было с плотной шторой, то есть не потеря.
+  assert.notEqual(volumeSightAt(frame, at.x, at.y), stand.socketId, "метка за тюлем взглядом не достаётся");
+  assert.equal(volumeSightAt(opaque, at.x, at.y), volumeSightAt(frame, at.x, at.y), "ответ не изменился");
+  // 4. А вещь чертежа по-прежнему пропускает взгляд: у неё хозяина нет, и
+  // пропуск не отнимает ответа — правило таска 169 цело.
+  const closet = clearStand();
+  const closetScene = volumeScene(closet.project, closet.schemeId, {});
+  const closetFrame = volumeFrame(closetScene, closet.camera, closet.box);
+  const atMark = markPointAt(closetFrame, closet.markId);
+  assert.equal(volumeSightAt(closetFrame, atMark.x, atMark.y), closet.markId, "сквозь шкаф взгляд смотреть перестал");
+});
+
+test("шторы в объект не пишут ничего (G68)", () => {
+  const stand = sheerStand();
+  const before = JSON.stringify(stand.project);
+  const built = volumeScene(stand.project, stand.schemeId, {});
+  volumeFrame(built, stand.camera, stand.box);
+  assert.equal(JSON.stringify(stand.project), before, "сборка сцены поменяла объект");
+  const rail = findMark(stand.project, stand.railId);
+  assert.ok(!("clear" in rail), "у метки завелось поле прозрачности");
+  const type = stand.project.markTypes.find((item) => item.id === rail.typeId);
+  assert.ok(!("clear" in type), "у типа завелось поле прозрачности");
 });
 
 // ——— ус на изломе полосы (дефект D38) ———————————————————————————————————

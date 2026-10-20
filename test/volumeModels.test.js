@@ -46,7 +46,7 @@ import {
 } from "../src/model.js";
 import { markBoxMm } from "../src/markBox.js";
 import { objectViewByName, objectViewForShape } from "../src/objectViews/registry.js";
-import { MODEL_CYL_SIDES, MODEL_MATERIALS } from "../src/objectModels/kit.js";
+import { MODEL_CLEARS, MODEL_CYL_SIDES, MODEL_MATERIALS, modelBox } from "../src/objectModels/kit.js";
 import { objectCatalogDefaults, objectCatalogKeys, objectCatalogRetiredKeys } from "../src/objectCatalog.js";
 import { LINE_SPOT_MAX } from "../src/objectModels/lines.js";
 import {
@@ -62,8 +62,11 @@ import {
   objectModelKeys,
 } from "../src/objectModels/registry.js";
 import {
+  VOLUME_CLEAR_ALPHAS,
   VOLUME_EYE_MM,
   VOLUME_OBJECT_RGB,
+  VOLUME_SHEER_ALPHA,
+  volumeClearAlpha,
   volumeMarkFaces,
   volumeMarkPlacement,
   volumeModelPrisms,
@@ -611,6 +614,77 @@ test("линейный карниз штор одевается полотнищ
   // А подсветка карниза (ПКШ) рядом остаётся полосой: шторы у неё были бы
   // второй шторой на том же окне.
   assert.equal(linePlace("ПКШ", [{ x: -1200, y: -1300 }, { x: 1200, y: -1300 }]).repeat, null);
+});
+
+test("прозрачность живёт у тела модели, и просвечивает ею ровно ткань шторы (G286)", () => {
+  // Таск 189: «модель штор сделай полупрозрачной, по сути как тюль пусть
+  // будет». Признак стоит у **тела**, не у типа метки, и этот тест держит оба
+  // следствия: труба карниза внутри той же модели остаётся плотной, а ни одна
+  // другая модель сборки прозрачной не стала.
+  const sheer = [];
+  for (const key of objectModelKeys()) {
+    for (const part of objectModelByKey(key).parts) {
+      if (part.clear) sheer.push(key + "." + part.name + ":" + part.clear);
+    }
+  }
+  for (const code of objectLineModelCodes()) {
+    for (const part of objectLineModel(code).parts) {
+      if (part.clear) sheer.push(code + "." + part.name + ":" + part.clear);
+    }
+  }
+  // Ровно четыре тела на всю сборку: три складки точечной шторы и полотнище
+  // линейной. Остальные метки и все вещи каталога — плотные.
+  assert.deepEqual(
+    sheer.sort(),
+    [
+      "curtainRail.foldLeft:sheer",
+      "curtainRail.foldMiddle:sheer",
+      "curtainRail.foldRight:sheer",
+      "КШ.fold:sheer",
+    ],
+    "прозрачных тел в сборке не те",
+  );
+  // Труба карниза — в той же модели и плотная: признак у тела, а не у метки.
+  assert.equal(
+    objectModelByKey("curtainRail").parts.find((part) => part.name === "rod").clear,
+    null,
+    "труба карниза просвечивает — значит признак уехал на всю метку",
+  );
+  // Имя плотности проверяется по списку: опечатка не должна молча дать щит на
+  // окне вместо тюля.
+  assert.equal(modelBox("x", { clear: "мутное" }).clear, null, "незнакомая плотность принята как есть");
+  assert.equal(modelBox("x").clear, null, "тело без признака оказалось прозрачным");
+  assert.equal(modelBox("x", { clear: "sheer" }).clear, "sheer");
+  // И у каждого имени из списка есть число — одно, в `volume.js`. Разойдись
+  // это, точечная штора и линейная просвечивали бы по-разному.
+  for (const name of MODEL_CLEARS) {
+    assert.equal(typeof VOLUME_CLEAR_ALPHAS[name], "number", name + ": у плотности нет числа");
+    assert.ok(volumeClearAlpha(name) < 1, name + ": плотность не просвечивает");
+  }
+});
+
+test("шторы точечной метки просвечивают так же, как линейной", () => {
+  // Шторы описаны дважды — моделью (стартовый справочник) и повтором вдоль
+  // пути (объект заказчика). Плотность у них обязана быть одна: число живёт в
+  // одном месте, и этот тест — тот самый шов, где два описания встречаются.
+  const scene = wallMark("КШ");
+  const place = volumeMarkPlacement(scene.project, scene.mark, []);
+  const faces = volumeMarkFaces(place);
+  const clear = faces.filter((face) => face.clear);
+  const solid = faces.filter((face) => !face.clear);
+  assert.equal(clear.length, 18, "три складки по шесть граней: " + clear.length);
+  assert.equal(solid.length, 6, "труба карниза — шесть плотных граней: " + solid.length);
+  for (const face of clear) assert.equal(face.alpha, VOLUME_SHEER_ALPHA, "складка просвечивает не тюлем");
+  for (const face of solid) assert.equal(face.alpha, 1, "труба карниза перестала быть плотной");
+  for (const face of faces) assert.equal(face.markId, scene.mark.id, "хозяин у всех граней шторы — она сама");
+  // Линейная — то же число у того же шва.
+  const line = linePlace("КШ", [{ x: -1200, y: -1300 }, { x: 1200, y: -1300 }]);
+  const lineFaces = volumeMarkFaces(line).filter((face) => face.clear);
+  assert.ok(lineFaces.length > 0, "у линейной шторы нет прозрачных граней");
+  for (const face of lineFaces) assert.equal(face.alpha, VOLUME_SHEER_ALPHA, "линейная штора просвечивает иначе");
+  // А соседние типы по-прежнему плотны: подсветка карниза (ПКШ) — полоса.
+  const strip = volumeMarkFaces(linePlace("ПКШ", [{ x: -1200, y: -1300 }, { x: 1200, y: -1300 }]));
+  assert.ok(strip.length > 0 && strip.every((face) => !face.clear), "подсветка карниза стала прозрачной");
 });
 
 test("лежачий цилиндр — замкнутое тело, и все его грани смотрят наружу", () => {

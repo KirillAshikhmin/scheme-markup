@@ -42,7 +42,8 @@
 // **G68: режим только читает.** Ни одной записи в объект, ни одного нового
 // поля. Объект без чертежа честно отвечает `empty`.
 import {
-  OPENING_KIND_DOOR,
+  OPENING_GLASS_FRAME_MM,
+  OPENING_KIND_GLASS_DOOR,
   drawingBoundsMm,
   findScheme,
   schemeObjectKeyOf,
@@ -54,6 +55,7 @@ import {
   markSizes,
   markWall,
   markWallSideOn,
+  openingHasLeaf,
   openingsInWall,
   outlinesInOrder,
   planFractionToMm,
@@ -352,6 +354,13 @@ export const VOLUME_DOOR_RGB = [176, 132, 92];
 /** Ручка двери — металл: светлее полотна и холоднее его (G207). */
 export const VOLUME_HANDLE_RGB = [186, 190, 198];
 export const VOLUME_FRAME_RGB = [240, 242, 244];
+/**
+ * **Стекло двери** (таск 180, G269) — холодный блик, а не цвет: сквозь него
+ * видно соседнюю комнату, и своего тона у него ровно столько, чтобы полотно
+ * читалось стеклом, а не дыркой. Плотность у него **именованная**
+ * (`VOLUME_CLEAR_ALPHAS.glass`, таск 189): своего числа у двери нет.
+ */
+export const VOLUME_GLASS_RGB = [196, 216, 224];
 export const VOLUME_MARKER_RGB = [31, 111, 235];
 
 /**
@@ -390,6 +399,89 @@ export const VOLUME_MARKER_MM = 150;
  * должно, а метку смотрят, а не смотрят сквозь.
  */
 export const VOLUME_CLEAR_ALPHA = 0.4;
+
+/**
+ * **Тюль** — прозрачность шторы (таск 189, требование G286). Слова заказчика:
+ * «модель штор сделай полупрозрачной, по сути как тюль пусть будет».
+ *
+ * Три десятых, и число посчитано тем же счётом, что у вещей, только задача у
+ * него обратная. У вещи прозрачность служит **метке за ней**: шкаф должен
+ * читаться формой, а розетка в нём — цветом, и трети хватило. Тюль служит
+ * **окну**: сквозь него смотрят, а не на него, и «угадывается» здесь — это
+ * провал задания.
+ *
+ * Слоёв на луче у штор **один, редко два, совсем редко три**. Это замер, а не
+ * догадка: на живом объекте заказчика (линейный карниз, 9 полотнищ шага 300,
+ * 12 ракурсов, 540 тысяч точек кадра, попавших на тюль) — 1,05 слоя в среднем;
+ * один слой в 95,1 % точек, два в 4,7 %, три в 0,2 %. Два и три набегают там,
+ * где волна складок ставит полотнища друг за друга по косому взгляду, а в лоб
+ * они стоят в ряд и не перекрываются. На точечной метке то же самое: три
+ * складки в ряд, косой луч задевает две.
+ *
+ * За полотнищами стоит окно — дыра в стене, то есть панорама. Отсюда и число:
+ * окну должна оставаться **половина** там, где слоёв больше одного, —
+ * `(1 − a)² ≥ 0.5`, то есть `a ≤ 0.29`, и 0,3 с запасом в сотую. Остаётся:
+ * 0,70 за одним полотнищем, 0,49 за двумя, 0,34 за тремя. То есть в 99,8 %
+ * точек окно светится сквозь тюль, а не угадывается за ним.
+ *
+ * Прозрачность вещей переиспользовать нельзя было именно поэтому: 0,4 за двумя
+ * полотнищами оставили бы окну 0,36 — плотнее стекла в раме, то есть не тюль, а
+ * портьера.
+ *
+ * Видимой ткань при этом остаётся по той же причине, что и вещь: кадр обводит
+ * каждую грань её же цветом, и у прозрачной грани обводка ложится на свою же
+ * заливку — кромка плотнее середины. У штор это ровно то, чем ткань и
+ * узнаётся: складки стоят волной, и между полотнищами идёт двойная кромка.
+ */
+export const VOLUME_SHEER_ALPHA = 0.3;
+
+/**
+ * **Стекло двери** (таск 180, G269): четверть своего цвета, три четверти —
+ * тому, что за ним. Самое прозрачное в сборке, и порядок этот не случаен:
+ * вещь (0,4) должна читаться формой, тюль (0,3) — тканью, а стекло двери
+ * смотрят **насквозь** — в соседнюю комнату или на улицу.
+ *
+ * Держит его форму не заливка, а рама по контуру и кромка грани: кадр обводит
+ * каждую грань её же цветом, и у прозрачной обводка ложится на свою заливку.
+ */
+export const VOLUME_GLASS_ALPHA = 0.25;
+
+/**
+ * **Плотности прозрачных поверхностей: имя → сколько своего цвета остаётся.**
+ *
+ * Одно место на всю сборку, и это не украшение. Прозрачность называется в
+ * описаниях моделей (`MODEL_CLEARS` в `objectModels/kit.js`), а шторы описаны
+ * дважды — моделью у точечной метки и повтором у линейной. Жили бы числа там,
+ * они разошлись бы первой же правкой; здесь они обязаны совпасть, и что у
+ * каждого имени число есть, проверяет тест.
+ *
+ * `thing` — вещь чертежа целиком (таск 169), её признак приходит не из
+ * описания, а из `volumeObjectFaces`.
+ */
+export const VOLUME_CLEAR_ALPHAS = {
+  thing: VOLUME_CLEAR_ALPHA,
+  sheer: VOLUME_SHEER_ALPHA,
+  // Стекло двери (таск 180, G269) — самое прозрачное из трёх, и это не вкус, а
+  // порядок вещей: сквозь шкаф смотрят, чтобы разглядеть за ним розетку, сквозь
+  // тюль — чтобы угадать окно, а сквозь стекло двери **просто видно**. Четверть
+  // своего цвета оставляет полотну форму: рама по контуру и кромка грани (кадр
+  // обводит грань её же цветом) очерчивают его и на светлой стене.
+  glass: VOLUME_GLASS_ALPHA,
+};
+
+/**
+ * Сколько своего цвета остаётся грани: `1` — плотная.
+ *
+ * `true` — вещь чертежа (так её помечает `volumeObjectFaces`), строка — имя
+ * плотности из описания тела. Незнакомое имя остаётся **прозрачным** (общая
+ * плотность вещи), а не плотным: опечатка должна быть видна, а не выглядеть
+ * нормой.
+ */
+export function volumeClearAlpha(clear) {
+  if (!clear) return 1;
+  const named = VOLUME_CLEAR_ALPHAS[clear === true ? "thing" : clear];
+  return named === undefined ? VOLUME_CLEAR_ALPHA : named;
+}
 
 // ——— мелкая векторная арифметика ————————————————————————————————————————
 //
@@ -494,12 +586,16 @@ function volumeFace(points, rgb, options = {}) {
     // освещена тем же небом, что поле панорамы, и обязана совпасть с ним в
     // тон, а лампа сцены увела бы её вдвое в темноту.
     flat: Boolean(options.flat),
-    // Грань просвечивает (таск 169): вещь чертежа — и только она. Признак
-    // доезжает до двух мест и больше никуда: до цвета (`volumeFill` отдаёт
-    // `rgba`) и до взгляда (`volumeSightAt` сквозь такую грань смотрит
-    // дальше). Порядок прозрачная грань не меняет: он и так точен в каждом
-    // пикселе — см. `volumeOrderTree`.
+    // Грань просвечивает (таск 169): вещь чертежа — и тюль шторы (таск 189).
+    // Признак доезжает до двух мест и больше никуда: до цвета (`volumeFill`
+    // отдаёт `rgba`) и до взгляда (`volumeSightAt` сквозь такую грань смотрит
+    // дальше — но не сквозь метку, см. там). Порядок прозрачная грань не
+    // меняет: он и так точен в каждом пикселе — см. `volumeOrderTree`.
     clear: Boolean(options.clear),
+    // **Насколько** просвечивает: доля своего цвета (таск 189). У плотной
+    // грани единица, у вещи 0,4, у тюля 0,3 — считает это одно место
+    // (`volumeClearAlpha`), а кадр берёт готовое число.
+    alpha: volumeClearAlpha(options.clear),
     // Чья это грань: по ней кадр отвечает, во что попал клик (таск 148).
     // У стен, пола и вещей чертежа хозяина нет — и попадать в них незачем.
     markId: options.markId || null,
@@ -660,7 +756,10 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   if (corners.length < 3 || !(topMm > bottomMm)) return out;
   const markId = options.markId || null;
   const doorId = options.doorId || null;
-  const clear = Boolean(options.clear);
+  // Не `Boolean`: признак несёт **плотность** (`true` — вещь чертежа, имя —
+  // тело модели, таск 189), и свести его к «да» значило бы покрасить тюль
+  // прозрачностью шкафа.
+  const clear = options.clear || false;
   const channel = options.channel === undefined ? null : options.channel;
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
@@ -1053,7 +1152,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
     volumeWindowFrame(at, from, to, bottom, top, out);
     return out;
   }
-  if (opening.kind === OPENING_KIND_DOOR) {
+  if (openingHasLeaf(opening.kind)) {
     const open = volumeDoorOpen(openDoorIds, opening.id);
     volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open);
   }
@@ -1135,13 +1234,17 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
   // Куда смотрит полотно: раскрытое — прочь от стены, закрытое — вдоль неё.
   const leaf = open ? { x: n.x * side, y: n.y * side } : { x: u.x * (atStart ? 1 : -1), y: u.y * (atStart ? 1 : -1) };
   const tip = { x: hinge.x + leaf.x * width, y: hinge.y + leaf.y * width };
-  out.push(
-    volumeFace(
-      [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
-      VOLUME_DOOR_RGB,
-      { both: true, doorId },
-    ),
-  );
+  if (opening.kind === OPENING_KIND_GLASS_DOOR) {
+    volumeGlassLeaf(hinge, leaf, width, span, out, doorId);
+  } else {
+    out.push(
+      volumeFace(
+        [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
+        VOLUME_DOOR_RGB,
+        { both: true, doorId },
+      ),
+    );
+  }
   // Ручка у свободного края полотна, на высоте, на которой её берут рукой
   // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
   // открывают с той стороны, с которой подошли.
@@ -1161,6 +1264,65 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
       { doorId },
     );
   }
+  return out;
+}
+
+/**
+ * **Полотно стеклянной двери** (таск 180, G269): рама по контуру и стекло в
+ * середине. Слова заказчика — «как на французский балкон — с рамой, но не
+ * глухая, а по центру стекло, ну и тоже ручки».
+ *
+ * Четыре бруска рамы непрозрачны, пятая грань — стекло, и у неё тот же
+ * признак `clear`, которым просвечивает вещь чертежа (таск 169) и тюль шторы
+ * (таск 189). Доля **названа** — `"glass"` в `VOLUME_CLEAR_ALPHAS`, — а не
+ * записана числом здесь: иначе стекло двери и стекло шкафа смешивались бы
+ * по-разному в одном кадре, и расхождение заметил бы только глаз.
+ *
+ * ——— порядок граней ——————————————————————————————————————————————————————
+ *
+ * Рама и стекло **коплоскостны**: все пять граней лежат в одной плоскости
+ * полотна. Дерево порядка (таск 151) порядок внутри плоскости не обещает — и
+ * здесь он не нужен ни на что: бруски стоят вокруг стекла, а не поверх него, и
+ * коплоскостные грани, которые друг друга не закрывают, смешиваться между
+ * собой не могут. Ровно это условие и записано у `volumeOrderTree`.
+ *
+ * А вот то, что **за** полотном, дерево разводит как надо: плоскость полотна
+ * сама становится секущей, и всё, что за ней, рисуется раньше — то есть
+ * прозрачному стеклу достаётся уже готовый задник, как того и требует
+ * смешивание. Второго прохода «прозрачные после непрозрачных» не понадобилось
+ * и здесь.
+ *
+ * Полотно уже рамы вдвое — рама съедает ширину с двух сторон; на узкой или
+ * низкой двери (меньше трёх рам) стекла не остаётся, и полотно рисуется глухим
+ * одной гранью рамы: врать про стекло там, где его негде нарисовать, незачем.
+ */
+function volumeGlassLeaf(hinge, leaf, width, span, out, doorId) {
+  const at = (along, z) => volumeAt({ x: hinge.x + leaf.x * along, y: hinge.y + leaf.y * along }, z);
+  const quad = (fromAlong, toAlong, bottom, top, rgb, clear) => {
+    if (!(toAlong > fromAlong) || !(top > bottom)) return;
+    out.push(volumeFace([at(fromAlong, bottom), at(toAlong, bottom), at(toAlong, top), at(fromAlong, top)], rgb, {
+      both: true,
+      doorId,
+      clear,
+    }));
+  };
+  const frame = OPENING_GLASS_FRAME_MM;
+  const height = span.top - span.bottom;
+  if (!(width > frame * 3) || !(height > frame * 3)) {
+    quad(0, width, span.bottom, span.top, VOLUME_FRAME_RGB, false);
+    return out;
+  }
+  const inner = { from: frame, to: width - frame, bottom: span.bottom + frame, top: span.top - frame };
+  // Низ, верх и две стойки — рама; стойки встают между низом и верхом, чтобы
+  // бруски не легли друг на друга: наложенных коплоскостных граней в сцене
+  // быть не должно.
+  quad(0, width, span.bottom, inner.bottom, VOLUME_FRAME_RGB, false);
+  quad(0, width, inner.top, span.top, VOLUME_FRAME_RGB, false);
+  quad(0, inner.from, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
+  quad(inner.to, width, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
+  // Плотность стекла названа, а не задана числом (таск 189): `volumeClearAlpha`
+  // переводит имя в долю, и второго числа у двери нет.
+  quad(inner.from, inner.to, inner.bottom, inner.top, VOLUME_GLASS_RGB, "glass");
   return out;
 }
 
@@ -2352,6 +2514,9 @@ export function volumeModelPrisms(frame, parts) {
       lit: part.lit,
       // Номер канала клавиши (таск 177): у остальных тел его нет вовсе.
       channel: part.channel === undefined ? null : part.channel,
+      // Чем тело просвечивает (таск 189): имя плотности или `null`. Доезжает
+      // до грани и останавливается — в объект не пишется ничего (G68).
+      clear: part.clear || null,
     });
   }
   return out;
@@ -2435,8 +2600,12 @@ export function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
  * Грани модели.
  *
  * `options.markId` — хозяин: у вещей чертежа его нет, у меток есть.
- * `options.clear` — модель просвечивает (таск 169): так рисуются вещи
- * чертежа, и так не рисуются метки.
+ * `options.clear` — модель просвечивает **целиком** (таск 169): так рисуются
+ * вещи чертежа. У метки такого признака нет и не будет: просвечивает не метка,
+ * а **тело** — полотнище тюля (таск 189), стекло в раме, — и говорит об этом
+ * само описание (`clear` в `objectModels/kit.js`). Поэтому плотность тела
+ * сильнее общей: прозрачное тело прозрачно и внутри прозрачной вещи, а труба
+ * карниза остаётся плотной внутри шторы.
  *
  * Тела двух видов идут призмами, лежачий цилиндр — своими гранями (таск 177).
  * Разбор по виду тела здесь и только здесь: ни одна модель не знает, чем её
@@ -2446,7 +2615,8 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
   const parts = (model && model.parts) || [];
   const own = (part) => ({
     markId: options.markId || null,
-    clear: Boolean(options.clear),
+    // Плотность тела старше общей — см. заголовок.
+    clear: (part && part.clear) || options.clear || false,
     // Номер канала доезжает до грани и останавливается там: что значит «канал
     // выделен», решает окно, а в объект не пишется ничего (G68, таск 177).
     channel: part && part.channel !== undefined ? part.channel : null,
@@ -2979,7 +3149,9 @@ export function volumeScene(project, schemeId, options = {}) {
   for (const wall of walls) {
     const openings = openingsInWall(project, wall.id);
     for (const opening of openings) {
-      if (opening.kind === OPENING_KIND_DOOR && opening.id) doors.push(opening.id);
+      // Стеклянная дверь — дверь и здесь (таск 180): её открывают `E`, щелчком
+      // и касанием, и `R` открывает её вместе со всеми.
+      if (openingHasLeaf(opening.kind) && opening.id) doors.push(opening.id);
     }
     const height = wallHeights.get(wall.id);
     volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null);
@@ -4167,9 +4339,10 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     depth: middle,
     order: order === null ? -middle : order,
     layer: face.layer,
-    fill: volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.clear ? VOLUME_CLEAR_ALPHA : 1, tint),
+    fill: volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
     // Многоугольник просвечивает (таск 169): взгляд смотрит сквозь него
-    // дальше. Рисование об этом не спрашивает — прозрачность уже в цвете.
+    // дальше — если за ним есть кому отвечать (таск 189, см. `volumeSightAt`).
+    // Рисование об этом не спрашивает — прозрачность уже в цвете.
     clear: Boolean(face.clear),
     pick: face.markId || null,
     door: face.doorId || null,
@@ -4362,14 +4535,43 @@ export function volumePickAt(polygons, x, y, slack = VOLUME_PICK_SLACK_PX) {
  * ровно как прежде. Для `E` это «тут ничего нет» словами (`volume.aimless`),
  * для щелчка — снятие выделения, как по пустому месту плана. Ни одна точка
  * поля смысла не поменяла, кроме той, где за вещью **и правда** метка.
+ *
+ * ——— а сквозь тюль взгляд не проходит (таск 189, G286) ———
+ *
+ * Прозрачная грань пропускает взгляд, **пока у неё нет хозяина**. У шторы он
+ * есть: тюль — это сама метка, её выделяют, у неё открываются свойства, по ней
+ * щёлкают. Пропусти её — и выделить шторы взглядом стало бы нельзя вовсе:
+ * ответом стало бы окно за ними, то есть `null`.
+ *
+ * Поэтому правило звучит не «прозрачное пропускается», а **«пропускается то,
+ * за чем всё равно никого не выделить»**: у вещи чертежа хозяина нет (`markId`
+ * её граней — `null`), и пропуск не отнимает ни одного ответа — он только
+ * перестаёт закрывать чужой. У метки хозяин есть, и пропуск отнял бы её
+ * собственный.
+ *
+ * Цена названа прямо: **метку, целиком закрытую тюлем, взглядом не выделить** —
+ * ответом будет штора. Это ровно то, что было до таска 189 (тогда полотнище
+ * было плотным), то есть не потеря, а сохранение: прозрачность поменяла, как
+ * штора выглядит, а не что выделяется. Достать метку за шторой по-прежнему
+ * может рука — `volumePickAt` прозрачности не спрашивает вовсе, и промах в
+ * десяток точек приводит именно её.
  */
 export function volumeSightAt(polygons, x, y) {
   for (let index = polygons.length - 1; index >= 0; index -= 1) {
     const polygon = polygons[index];
-    if (polygon.stroke || polygon.clear) continue;
+    if (polygon.stroke || volumeSeeThrough(polygon)) continue;
     if (volumePolygonHit(polygon.xy, x, y)) return polygon.pick || null;
   }
   return null;
+}
+
+/**
+ * Смотрит ли взгляд сквозь этот многоугольник: прозрачный и бесхозный — да,
+ * прозрачная метка — нет. Одно место на взгляд и на клавиши: разойдись они —
+ * щелчок выбирал бы канал у выключателя за шторой.
+ */
+function volumeSeeThrough(polygon) {
+  return Boolean(polygon.clear) && !polygon.pick;
 }
 
 /**
@@ -4386,7 +4588,7 @@ export function volumeSightAt(polygons, x, y) {
 export function volumeChannelAt(polygons, x, y) {
   for (let index = polygons.length - 1; index >= 0; index -= 1) {
     const polygon = polygons[index];
-    if (polygon.stroke || polygon.clear) continue;
+    if (polygon.stroke || volumeSeeThrough(polygon)) continue;
     if (!volumePolygonHit(polygon.xy, x, y)) continue;
     if (!polygon.pick || !polygon.channel) return null;
     return { markId: polygon.pick, channel: polygon.channel };

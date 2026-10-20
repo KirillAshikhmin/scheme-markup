@@ -810,7 +810,7 @@ test("проём выше потолка не проходит, и сказан�
   assert.match(attempt.message, /2200/, attempt.message);
 });
 
-test("умолчания по виду заведены на все четыре и похожи на то, что ставят", () => {
+test("умолчания по виду заведены на все пять и похожи на то, что ставят", () => {
   for (const kind of OPENING_KINDS) {
     const sizes = WORKSHOP_OPENING_DEFAULTS[kind];
     assert.ok(sizes, "у вида «" + kind + "» нет умолчаний");
@@ -821,6 +821,17 @@ test("умолчания по виду заведены на все четыре
   }
   assert.equal(WORKSHOP_OPENING_DEFAULTS.door.heightAboveFloorMm, 0, "дверь стоит на полу");
   assert.ok(WORKSHOP_OPENING_DEFAULTS.window.heightAboveFloorMm > 0, "у окна есть подоконник");
+  // Стеклянная дверь (таск 180) стоит на полу, как всякая дверь, и свои
+  // размеры у неё балконные: уже межкомнатной и выше её.
+  assert.equal(WORKSHOP_OPENING_DEFAULTS.glassDoor.heightAboveFloorMm, 0, "стеклянная дверь стоит на полу");
+  assert.ok(
+    WORKSHOP_OPENING_DEFAULTS.glassDoor.widthMm < WORKSHOP_OPENING_DEFAULTS.door.widthMm,
+    "балконная дверь уже межкомнатной",
+  );
+  assert.ok(
+    WORKSHOP_OPENING_DEFAULTS.glassDoor.heightMm > WORKSHOP_OPENING_DEFAULTS.door.heightMm,
+    "балконная дверь выше межкомнатной",
+  );
 });
 
 // ——— таск 126: объекты на полу ————————————————————————————————————————

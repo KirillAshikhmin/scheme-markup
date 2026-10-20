@@ -229,6 +229,56 @@ export function uiButtonLabel(button, label, title) {
   return button;
 }
 
+// ——— поля: подпись над полем, число, отметка ——————————————————————————
+//
+// Три кирпича переехали сюда из `panels/workshop.js` в таске 187. Поля чертежа
+// стоят теперь в трёх местах — в строке элемента в правой колонке, в окне «Что
+// добавить» и в окне высот, — и выглядеть они обязаны одинаково: это одни и те
+// же поля одной и той же вещи. Возить их из панели в панель нельзя (окно не
+// должно тянуть за собой её подписки и регистрацию), а повторять трижды —
+// значит однажды разойтись.
+
+/**
+ * Поле с подписью **над** ним: «Толщина, мм» и «Высота стен схемы, мм» в
+ * колонке на 264 точки рядом с полем ввода ужимались до многоточия (таск 125),
+ * а единицу измерения в конце подписи обрезать нельзя — без «мм» число рядом с
+ * метрами масштаба и долями разметки читается как угодно.
+ */
+export function uiField(label, input, options = {}) {
+  return uiEl("label", { class: "ui-field" + (options.class ? " " + options.class : ""), title: options.title || "" }, [
+    uiEl("span", { class: "ui-field__label", text: label, title: options.labelTitle || "" }),
+    input,
+  ]);
+}
+
+/** Целое число в заданных границах: шаг единица, на телефоне цифровая клавиатура. */
+export function uiNumber(min, max) {
+  return uiEl("input", {
+    class: "ui-input ui-number",
+    type: "number",
+    attrs: { min: String(min), max: String(max), step: "1", inputmode: "numeric" },
+  });
+}
+
+/**
+ * Поле отдаёт значение по Enter и по уходу фокуса — и только так: правка на
+ * каждое нажатие клавиши набивала бы стек отмены на «1», «12», «120».
+ */
+export function uiApply(input, run) {
+  input.addEventListener("change", run);
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    run();
+  });
+  return input;
+}
+
+/** Строка-отметка: квадратик и слово, нажимается вся строка. */
+export function uiCheckRow(input, label, title) {
+  return uiEl("label", { class: "ui-check", title: title || "" }, [input, uiEl("span", { text: label })]);
+}
+
 // Диалоги складываются стопкой: подтверждение поверх редактора плана —
 // обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
 // основное действие, нижние ждут своей очереди и закрываются своими же close().

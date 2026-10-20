@@ -4633,10 +4633,87 @@ export function scaleDrawing(project, schemeId, factor) {
 // внутри, а что снаружи, модель не знает — помещения выводятся из контуров, а
 // не из стен (таск 122, развилка 2), и «внутрь» пришлось бы угадывать.
 
-export const OPENING_KINDS = ["window", "door", "opening", "arch"];
+// Виды проёма. **Стеклянная дверь стоит рядом с обычной** (таск 180, G269):
+// слова заказчика — «как на французский балкон — с рамой, но не глухая, а по
+// центру стекло, ну и тоже ручки». Для модели это дверь со всеми её полями:
+// петли, сторона открывания, полотно, ручка — и отличается она только тем, из
+// чего полотно сделано. Новый ключ приписан в середину списка, а не в начало:
+// `OPENING_KINDS[0]` — вид нового проёма по умолчанию (окно), и менять его
+// значило бы менять поведение кнопки, которой человек пользуется каждый день.
+export const OPENING_KINDS = ["window", "door", "glassDoor", "opening", "arch"];
 export const OPENING_KIND_DOOR = "door";
+export const OPENING_KIND_GLASS_DOOR = "glassDoor";
+/** Виды с полотном: петли, сторона открывания, ручка, открывание в объёме. */
+export const OPENING_DOOR_KINDS = [OPENING_KIND_DOOR, OPENING_KIND_GLASS_DOOR];
 export const OPENING_HINGES = ["start", "end"];
 export const OPENING_SWINGS = ["left", "right"];
+
+/**
+ * **Есть ли у этого вида полотно.** Один вопрос — один хозяин: до таска 180 его
+ * задавали восемь раз сравнением `kind === OPENING_KIND_DOOR`, и стеклянной
+ * двери пришлось бы завести девятое. Спрашивать вид напрямую больше нельзя:
+ * разойдись эти сравнения — у двери в колонке появились бы петли, а в объёме
+ * нет, или наоборот.
+ */
+export function openingHasLeaf(kind) {
+  return OPENING_DOOR_KINDS.includes(kind);
+}
+
+/**
+ * **Четыре состояния двери кольцом** (таск 180, G268). Слова заказчика: «при
+ * установке дверей так же вращай их по Q/E причём сразу по 4 значениям —
+ * сперва сторона петель, потом сторона открытия».
+ *
+ * Петли и сторона открывания независимы, и сочетаний у них ровно четыре.
+ * Кольцо выстроено так, что **каждый шаг меняет ровно один признак**, и первый
+ * шаг — петли: `start/left → end/left → end/right → start/right →` и снова
+ * сначала. Это и есть «сперва сторона петель, потом сторона открытия»: на
+ * чётном нажатии переезжают петли, на нечётном — сторона.
+ *
+ * Двоичный счётчик (петли — младший разряд) дал бы то же множество, но два
+ * шага из четырёх переставляли бы оба признака сразу: призрак прыгал бы через
+ * дверь, которой человек не просил. Поэтому кольцо, а не счётчик.
+ *
+ * Выведено из `OPENING_HINGES` и `OPENING_SWINGS`, а не выписано словами:
+ * второго описания того, какие бывают петли, в сборке быть не должно.
+ */
+export const OPENING_DOOR_STATES = [
+  { hinge: OPENING_HINGES[0], swing: OPENING_SWINGS[0] },
+  { hinge: OPENING_HINGES[1], swing: OPENING_SWINGS[0] },
+  { hinge: OPENING_HINGES[1], swing: OPENING_SWINGS[1] },
+  { hinge: OPENING_HINGES[0], swing: OPENING_SWINGS[1] },
+];
+
+/** Какое это из четырёх состояний. Чужое или пустое — первое, а не `-1`. */
+export function openingDoorStateIndex(state) {
+  const hinge = state && state.hinge != null ? state.hinge : OPENING_HINGES[0];
+  const swing = state && state.swing != null ? state.swing : OPENING_SWINGS[0];
+  const found = OPENING_DOOR_STATES.findIndex((item) => item.hinge === hinge && item.swing === swing);
+  return found < 0 ? 0 : found;
+}
+
+/**
+ * Следующее состояние двери: `+1` — по кольцу вперёд (`E`), `−1` — назад (`Q`).
+ * Отдаёт **новый** объект `{hinge, swing}`, как и всё в модели.
+ */
+export function openingDoorStep(state, delta = 1) {
+  const count = OPENING_DOOR_STATES.length;
+  const step = Number(delta) || 0;
+  const index = (((openingDoorStateIndex(state) + step) % count) + count) % count;
+  return { ...OPENING_DOOR_STATES[index] };
+}
+
+/**
+ * **Ширина рамы стеклянной двери** — одна мерка на все три поверхности (план,
+ * развёртка, объём): рама по контуру полотна, в середине стекло. Девяносто
+ * миллиметров — обычная балконная дверь (рама 60–100 мм), и на плане этого
+ * ровно хватает, чтобы двойная линия полотна читалась как остеклённое.
+ *
+ * Живёт в модели по тому же правилу, что `WALL_HEIGHT_FALLBACK_MM`: число,
+ * нужное двум рисовальщикам сразу, принадлежит одному хозяину, иначе рама в
+ * объёме разойдётся с рамой на развёртке.
+ */
+export const OPENING_GLASS_FRAME_MM = 90;
 
 function openingsOf(project) {
   return project && Array.isArray(project.openings) ? project.openings : [];
@@ -4693,7 +4770,7 @@ function checkOpeningHeight(project, wall, opening) {
 function openingDoorFields(kind, patch, current) {
   const has = (key) => patch && Object.prototype.hasOwnProperty.call(patch, key);
   const value = (key) => (has(key) ? patch[key] : current ? current[key] : undefined);
-  if (kind !== OPENING_KIND_DOOR) {
+  if (!openingHasLeaf(kind)) {
     // Сторона открывания у окна и у арки не значит ничего: полотна нет.
     if ((has("hinge") && patch.hinge != null) || (has("swing") && patch.swing != null)) {
       throw modelError("openingSwingOnlyDoor");
