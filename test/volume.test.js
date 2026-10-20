@@ -165,6 +165,8 @@ import {
   volumeHintText,
   volumeKeyMove,
   volumeMinimapBox,
+  volumeMinimapAt,
+  volumeMinimapView,
   volumeNotes,
   volumeFieldBottom,
   volumePadVector,
@@ -1854,6 +1856,46 @@ test("миникарта живёт в левом нижнем углу и ух�
   assert.equal(volumeMinimapBox({ width: 1432, height: 300 }, bounds), null);
   // Нет габарита чертежа — нечего и рисовать.
   assert.equal(volumeMinimapBox(box, null), null);
+});
+
+test("щелчок по миникарте читается местом на плане (G270)", () => {
+  const bounds = { minX: -2000, minY: -1500, maxX: 2000, maxY: 1500, widthMm: 4000, heightMm: 3000 };
+  const box = { width: 1432, height: 580 };
+  const place = volumeMinimapBox(box, bounds);
+  const middle = { x: place.x + place.width / 2, y: place.y + place.height / 2 };
+  const centre = volumeMinimapAt(box, bounds, middle);
+  // Середина карты — середина чертежа.
+  assert.ok(Math.abs(centre.x) < 1 && Math.abs(centre.y) < 1, "середина уехала: " + JSON.stringify(centre));
+  // Углы карты (с полями в 8 точек) — углы чертежа.
+  const view = volumeMinimapView(box, bounds);
+  const corner = volumeMinimapAt(box, bounds, {
+    x: view.offsetX + bounds.minX * view.zoom,
+    y: view.offsetY + bounds.minY * view.zoom,
+  });
+  assert.ok(Math.abs(corner.x - bounds.minX) < 1 && Math.abs(corner.y - bounds.minY) < 1, "угол уехал");
+  // Четверть вправо по карте — четверть вправо по чертежу.
+  const right = volumeMinimapAt(box, bounds, { x: middle.x + view.zoom * 1000, y: middle.y });
+  assert.ok(Math.abs(right.x - 1000) < 1, "масштаб карты не сошёлся: " + JSON.stringify(right));
+  // Мимо карты — не её дело: щелчок уходит дальше, к двери и к вещи.
+  assert.equal(volumeMinimapAt(box, bounds, { x: place.x + place.width + 5, y: middle.y }), null);
+  assert.equal(volumeMinimapAt(box, bounds, { x: middle.x, y: place.y - 5 }), null);
+  // Карты нет вовсе — переносить нечем.
+  assert.equal(volumeMinimapAt({ width: 420, height: 580 }, bounds, middle), null);
+});
+
+test("перенос по миникарте не ставит в стену: работает то же правило, что у пола (G270, G212)", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const bounds = built.boundsMm;
+  const box = { width: 1432, height: 580 };
+  const view = volumeMinimapView(box, bounds);
+  // Тычем в саму стену комнаты: верхняя стена идёт по y = −1500.
+  const at = { x: view.offsetX + 0 * view.zoom, y: view.offsetY + -1500 * view.zoom };
+  const spot = volumeMinimapAt(box, bounds, at);
+  assert.ok(Math.abs(spot.y + 1500) < 50, "карта показала не на стену: " + JSON.stringify(spot));
+  const moved = volumeMoveTo(built, spot);
+  assert.equal(volumeDepthMm(built.solids, moved.x, moved.y), 0, "встали в стену");
+  assert.ok(Math.hypot(moved.x - spot.x, moved.y - spot.y) < 1000, "ушли далеко от показанного места");
 });
 
 // Кнопки поля — стойка (таск 163, G242) и смена вида (таск 165, G244).

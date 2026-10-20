@@ -315,6 +315,53 @@ export function volumeMinimapBox(box, bounds) {
   return { x: 14, y: box.height - height - 14, width, height };
 }
 
+/** Поля внутри миникарты: чертёж не прижимается к её кромке. */
+const VOLUME_MINIMAP_PAD = 8;
+
+/**
+ * Мост между миникартой и чертежом: прямоугольник накладки и перевод
+ * «миллиметр → точка поля».
+ *
+ * Одна мерка на двоих — на рисование карты и на попадание по ней (G270).
+ * Считай их врозь, и щелчок однажды поедет мимо того места, которое человек
+ * видел под курсором.
+ */
+export function volumeMinimapView(box, bounds) {
+  const place = volumeMinimapBox(box, bounds);
+  if (!place) return null;
+  const zoom = Math.min(
+    (place.width - VOLUME_MINIMAP_PAD * 2) / bounds.widthMm,
+    (place.height - VOLUME_MINIMAP_PAD * 2) / bounds.heightMm,
+  );
+  return {
+    place,
+    zoom,
+    offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
+    offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
+  };
+}
+
+/**
+ * Куда на чертеже показали щелчком по миникарте (G270). `null` — мимо карты.
+ *
+ * Слова заказчика: «В режиме от первого лица при клике курсором на миникарте
+ * телепортируй туда». Карта показывает план сверху — значит и щелчок по ней
+ * значит место на плане, а не направление взгляда: за дверь, в дальнюю
+ * комнату, на другой конец коридора.
+ *
+ * Чистая и вынесена наружу ради теста: промах здесь — это «ткнул в кухню, а
+ * оказался в ванной», и ловить его глазами дорого.
+ */
+export function volumeMinimapAt(box, bounds, at) {
+  const view = volumeMinimapView(box, bounds);
+  if (!view || !at) return null;
+  const { place, zoom } = view;
+  if (!(zoom > 0)) return null;
+  if (at.x < place.x || at.x > place.x + place.width) return null;
+  if (at.y < place.y || at.y > place.y + place.height) return null;
+  return { x: (at.x - view.offsetX) / zoom, y: (at.y - view.offsetY) / zoom };
+}
+
 // ——— присед и прыжок пальцем (таск 163, G242) ——————————————————————————
 //
 // «на интерфейсе для планшетов и смартфонов добавь кнопки прыжкак и присяда».
@@ -1093,9 +1140,10 @@ function createVolume({ api, hosts }) {
   // свои пороги в экранных точках, и на миникарте стена короче порога.
 
   function paintMinimap(box) {
-    const place = volumeMinimapBox(box, scene.boundsMm);
-    if (!place) return;
     const bounds = scene.boundsMm;
+    const spot = volumeMinimapView(box, bounds);
+    if (!spot) return;
+    const place = spot.place;
     const state = getState();
     ctx.save();
     ctx.beginPath();
@@ -1106,16 +1154,8 @@ function createVolume({ api, hosts }) {
     ctx.strokeStyle = "rgba(31, 35, 40, 0.35)";
     ctx.stroke();
     ctx.clip();
-    const pad = 8;
-    const zoom = Math.min(
-      (place.width - pad * 2) / bounds.widthMm,
-      (place.height - pad * 2) / bounds.heightMm,
-    );
-    const view = {
-      zoom,
-      offsetX: place.x + (place.width - bounds.widthMm * zoom) / 2 - bounds.minX * zoom,
-      offsetY: place.y + (place.height - bounds.heightMm * zoom) / 2 - bounds.minY * zoom,
-    };
+    const zoom = spot.zoom;
+    const view = { zoom, offsetX: spot.offsetX, offsetY: spot.offsetY };
     // Без подписей: буквы углов и имена объектов на накладке в двести точек
     // слипаются в кашу, а заказчик просил «только схема и местоположение».
     drawDrawing(ctx, {
@@ -1773,6 +1813,35 @@ function createVolume({ api, hosts }) {
     // было никакого.
     if (!scene.empty) {
       const at = atEvent(event);
+      // ——— щелчок по миникарте переносит (G270) ———
+      //
+      // «В режиме от первого лица при клике курсором на миникарте телепортируй
+      // туда». Карта — накладка поверх кадра, и щелчок по ней принадлежит ей,
+      // а не тому, что за ней: иначе человек, ткнувший в дальнюю комнату,
+      // открывал бы дверь, случайно оказавшуюся под картой.
+      //
+      // Под захваченной мышью карта щелчка не берёт: курсора там нет вовсе, и
+      // прицел стоит посреди поля (таск 159) — щёлкать по углу экрана нечем.
+      //
+      // Куда человек встанет, решает **то же правило, что у переноса кликом по
+      // полу** (G212): `volumeMoveTo` выталкивает тело из стены и ставит
+      // вплотную к ней, а место теснее тела меняет на ближайшее свободное
+      // (D39). Второго правила «куда можно встать» в сборке нет.
+      if (view === "person" && !locked) {
+        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at);
+        if (spot) {
+          const moved = volumeMoveTo(scene, spot, volumeStanceHead(stance));
+          person.x = moved.x;
+          person.y = moved.y;
+          // Перенесли присевшего — под низким он остался или вышел, решает
+          // новое место (G234); у лестницы спросит про этаж, как при ходьбе.
+          stanceRecheck();
+          syncWhere();
+          stairCheck();
+          paint();
+          return;
+        }
+      }
       const door = volumeDoorAt(shown, at.x, at.y);
       const choice = aimChoiceAt(at, door);
       // Дверь, по которой щёлкнули, остаётся под рукой: E распоряжается ею и
