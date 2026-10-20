@@ -70,10 +70,11 @@ import {
   VOLUME_START_PITCH_DEG,
   VOLUME_WALK_MM_S,
   VOLUME_TIGHT_MM,
-  volumeAroundDistance,
   volumeAroundEye,
   volumeAroundFit,
   volumeAroundPan,
+  volumeAroundReach,
+  volumeAroundSpeed,
   volumeAroundTarget,
   volumeFreeMm,
   volumeBasis,
@@ -92,6 +93,7 @@ import {
   volumeDrawBackdropNear,
   volumeMood,
   volumeFloorAt,
+  volumeFloorPlan,
   volumeFloors,
   volumeFrame,
   volumeLinkLines,
@@ -105,12 +107,15 @@ import {
   volumeSightAt,
   volumeRoomAt,
   volumeScene,
+  volumeSchemeOriginMm,
+  volumeStackScene,
   volumeShadowFaces,
   volumeSunSpotFaces,
   volumeSiteOf,
   volumeDrawn,
   volumeGroundMm,
   volumeSelectLines,
+  volumeStairLanding,
   volumeStairNear,
   volumeStanceBusy,
   volumeStanceEye,
@@ -800,6 +805,23 @@ export function volumeTitle(name, floor) {
   return text("volume.titleFloor", { name, floor });
 }
 
+/**
+ * Строка сводки про стопку этажей (таск 202): сколько их в кадре и который
+ * ваш. Пусто — в кадре один этаж, и говорить нечего.
+ *
+ * Числа стен, проёмов, помещений и меток в сводке — **про свой этаж**: сцена
+ * стопки остаётся сценой открытой схемы, и складывать их по этажам значило бы
+ * соврать про то, что человек видит в списке меток справа.
+ */
+export function volumeStackLine(scene, plan) {
+  if (!scene || !scene.stackMm || !plan) return "";
+  return text("volume.countsFloors", {
+    count: scene.stackMm.count,
+    numbers: plan.floors.map((item) => item.floor).join(", "),
+    floor: plan.floor,
+  });
+}
+
 /** Строки про то, чего в сцене не хватает. Порядок — порядок важности. */
 export function volumeNotes(scene) {
   const lines = [];
@@ -842,8 +864,8 @@ function createVolume({ api, hosts }) {
   // Метки берутся **видимые на плане**: фильтр спрятал метку на плане — её нет
   // и в объёме. Иначе у одного объекта было бы два ответа на вопрос «что
   // сейчас показано».
-  const sceneMarks = (state) => {
-    const scheme = findScheme(state.project, schemeId);
+  const sceneMarks = (state, id = schemeId) => {
+    const scheme = findScheme(state.project, id);
     return scheme ? visibleMarks(state.project, scheme, state.filter) : [];
   };
   // Раскрытые двери (G207). Живут **в сеансе окна**: закрыл дверь в объёме — в
@@ -853,16 +875,36 @@ function createVolume({ api, hosts }) {
   // «Скрыть все объекты» — та же отметка, только разом: сцена собирается без
   // единой вещи чертежа. Отдельного выключателя у сцены нет нарочно — иначе
   // ответов на «что показано» стало бы два.
-  const sceneObjectIds = (state) =>
-    schemeObjectsOnScheme(state.project, schemeId).map((object) => object.id);
-  const sceneOf = (state) =>
-    volumeScene(state.project, schemeId, {
-      marks: sceneMarks(state),
-      openDoorIds: openDoors,
-      // Спрятанные вещи чертежа (таск 154, G223): «Скрытое не видно на чертеже
-      // и в объёме». Отметка приходит из сеанса, в объект не пишется.
-      hiddenObjectIds: state.objectsShown === false ? sceneObjectIds(state) : state.hiddenObjectIds,
-    });
+  const sceneObjectIds = (state, id) =>
+    schemeObjectsOnScheme(state.project, id).map((object) => object.id);
+  // Доводы сборки — **одни на все этажи стопки** (таск 202): фильтр меток,
+  // открытые двери и спрятанные вещи обязаны значить на чужом этаже то же, что
+  // на своём, иначе у вопроса «что сейчас показано» стало бы два ответа.
+  const sceneOptions = (state, id) => ({
+    marks: sceneMarks(state, id),
+    openDoorIds: openDoors,
+    // Спрятанные вещи чертежа (таск 154, G223): «Скрытое не видно на чертеже
+    // и в объёме». Отметка приходит из сеанса, в объект не пишется.
+    hiddenObjectIds: state.objectsShown === false ? sceneObjectIds(state, id) : state.hiddenObjectIds,
+  });
+  /**
+   * Какие этажи показывает окно (таск 202): стопка или одна открытая схема.
+   *
+   * Отметка «все этажи» живёт в настройках браузера, а список этажей — в
+   * объекте (номера схем). Поэтому ответ считается каждый раз заново: схему
+   * могли переименовать, этаж — задать или снять, а отметку — переставить в
+   * окне параметров.
+   */
+  const floorPlan = (state) => volumeFloorPlan(state.project, schemeId);
+  const stacking = (state, plan) => volumeParamsRead().floorsAll === true && (plan || floorPlan(state)).can;
+  const sceneOf = (state) => {
+    const plan = floorPlan(state);
+    if (stacking(state, plan)) {
+      const stack = volumeStackScene(state.project, plan, (id) => sceneOptions(state, id));
+      if (stack) return stack;
+    }
+    return volumeScene(state.project, schemeId, sceneOptions(state, schemeId));
+  };
 
   let scene = sceneOf(getState());
   // ——— час суток (таск 181, G282) ———
@@ -980,26 +1022,28 @@ function createVolume({ api, hosts }) {
    * память ушла, и это честно: заново открытый объём не помнит дороги.
    */
   const visited = new Map();
-  // ——— обзор: где стоит камера (таск 200, G304) ———
+  // ——— обзор: свободная камера (таск 200 G304, таск 207 G312) ———
   //
-  // Хранится **место камеры**, а цель — точка перед ней на `distance`
-  // (`volumeAroundTarget`). До таска 200 было наоборот: хранилась цель, а место
-  // считалось от неё, и это была орбита с пределом стояния (`volumeAroundStand`,
-  // таск 195). Предел заказчик снял и отдал обзору полёт — а полёт двигает
-  // саму камеру, не цель. Поэтому главным стало её место, и «брошенной цели на
-  // другом конце квартиры» больше не бывает: цель всегда там, куда камера
-  // летит.
-  let around = {
-    eye: volumeAroundEye(
+  // Хранятся **место камеры и её взгляд**, и больше ничего. Орбиты нет: мышь
+  // вертит обзор на месте, как в первом лице, — прямое слово заказчика
+  // («почему движение мыши… перемещает камеру вокруг какой-то цели, а не
+  // просто поворачивает камеру как при виде от 1 лица? должно быть так же»).
+  //
+  // `distance` в состоянии **не выбор, а счёт**: мера обзора
+  // (`volumeAroundReach`) — докуда он достаёт до пола по взгляду. Её пишет
+  // один `aroundSet`, и живого выбора «расстояние до цели» в сборке больше нет
+  // — второго смысла у числа взяться неоткуда.
+  let around = null;
+  aroundSet(
+    volumeAroundEye(
       { x: start.x, y: start.y, z: 1200 },
       start.yaw,
       (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
       VOLUME_AROUND_NEAR_MM,
     ),
-    yaw: start.yaw,
-    pitch: (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
-    distance: VOLUME_AROUND_NEAR_MM,
-  };
+    start.yaw,
+    (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
+  );
 
   const node = uiEl("canvas", { class: "volume__canvas" });
   // Карточка выделенной метки — внизу поверх поля, ровно так же, как она стоит
@@ -1142,6 +1186,15 @@ function createVolume({ api, hosts }) {
     now: () => Date.now(),
     hour: () => hourNow(),
     times: () => dayTimes().times,
+    // Этажи окно спрашивает у объекта через поле: номера живут в схемах, и
+    // пересчитывать их окно обязано на каждое открытие — схему могли
+    // переименовать или задать ей этаж, не выходя из режима.
+    floors: () => floorPlan(getState()),
+    // «Показывать этаж 2» и значит «открыть второй этаж»: схема ставится в
+    // состояние приложения, а дальше работает та же дверь, которой идёт выбор
+    // схемы в шапке (G217) и переход по лестнице. Второго способа сменить
+    // схему здесь не заводится.
+    goFloor: (option) => setState({ schemeId: option.schemeId }),
   });
   // Выбор человека поле слушает **всю свою жизнь**, а не пока открыто окно:
   // этой же подпиской приезжают настройки из хранилища (читаются они
@@ -1291,48 +1344,65 @@ function createVolume({ api, hosts }) {
     return Math.min(around.pitch, home);
   }
 
-  // ——— обзор: четыре руки на одно место камеры (таск 200, G304) ———————————
+  // ——— обзор: одна дверь к состоянию и одна мера (таск 207, G311 и G312) ———
   //
-  // Цель у обзора **не хранится** — она считается точкой перед камерой
-  // (`aroundTarget`). Отсюда и ответ на «что остаётся от орбиты»: орбита
-  // остаётся, и крутится она ровно вокруг той точки, в которую камера летит.
-  // Колесо подводит камеру к ней, свайп возит обе по полу, полёт несёт обе
-  // разом.
+  // Место и взгляд пишет **только** `aroundSet`, и он же считает меру
+  // (`volumeAroundReach`). Поэтому мера не может протухнуть: нет пути, которым
+  // камера сдвинулась бы, а число осталось прежним. Таким путём был полёт
+  // таска 200 — слетев с тридцати метров в комнату, человек возил карту
+  // двумя пальцами мерой тридцати метров.
 
-  /** Куда смотрит обзор: точка перед камерой на `distance`. */
+  /** Единственная дверь к обзору: место и взгляд — руками, мера — счётом. */
+  function aroundSet(eye, yaw, pitch) {
+    around = { eye, yaw, pitch, distance: volumeAroundReach(eye, pitch) };
+  }
+
+  /** Куда смотрит обзор: точка пола под взглядом (мера её и задаёт). */
   function aroundTarget() {
     return volumeAroundTarget(around.eye, around.yaw, around.pitch, around.distance);
   }
 
   /** Кадрировать: встать так, чтобы смотреть на `target` с `distance`. */
   function aroundFrame(target, yaw, pitch, distance) {
-    around = { eye: volumeAroundEye(target, yaw, pitch, distance), yaw, pitch, distance };
+    aroundSet(volumeAroundEye(target, yaw, pitch, distance), yaw, pitch);
+  }
+
+  /** Повернуть обзор на месте: то же правило, что у человека (`lookBy`). */
+  function aroundTurn(yaw, pitch) {
+    aroundSet(around.eye, yaw, pitch);
   }
 
   /**
-   * Повернуть обзор **вокруг цели** (рысканье): та самая орбита, которой
-   * обходят дом. Высота камеры от этого не меняется ни на миллиметр — рысканье
-   * не трогает вертикальную часть взгляда, — поэтому пол здесь и не
-   * спрашивается: под плиту орбита не уводит.
+   * Приблизиться или отойти (таск 207): камера **едет по взгляду** на долю
+   * меры, а не подходит к цели на расстояние.
+   *
+   * Так колесо не умирает. До таска 207 оно уменьшало хранимое расстояние, и
+   * у предела (`VOLUME_AROUND_MIN_MM`) приближаться становилось нечем: в
+   * комнате колесо переставало делать что-либо вовсе. Шаг долей меры
+   * приближает **всегда**: он сам мельчает вместе с нею и в ноль не упирается.
+   *
+   * `factor` приходит от общей двери жестов (`gestureWheel`,
+   * `gesturePinchStep`): больше единицы — приблизились.
    */
-  function aroundSpin(yaw) {
-    const target = aroundTarget();
-    around = { ...around, eye: volumeAroundEye(target, yaw, around.pitch, around.distance), yaw };
+  function aroundZoom(factor) {
+    const value = Number(factor) > 0 ? Number(factor) : 1;
+    const step = volumeAroundReach(around.eye, around.pitch) * (1 - 1 / value);
+    const basis = volumeBasis({ yaw: around.yaw, pitch: around.pitch });
+    aroundSet(
+      {
+        x: around.eye.x + basis.fwd.x * step,
+        y: around.eye.y + basis.fwd.y * step,
+        // Пол держит и здесь — тем же правилом, что держит прыжок и полёт.
+        z: volumeGroundMm(around.eye.z + basis.fwd.z * step),
+      },
+      around.yaw,
+      around.pitch,
+    );
   }
 
-  /**
-   * Приблизиться или отойти: цель на месте, камера подходит к ней по взгляду.
-   * То же, что делало колесо до таска 200, — только теперь это видно в состоянии.
-   */
-  function aroundZoom(distance) {
-    const next = volumeAroundDistance(distance);
-    const target = aroundTarget();
-    around = { ...around, eye: volumeAroundEye(target, around.yaw, around.pitch, next), distance: next };
-  }
-
-  /** Сдвинуть обзор по полу: и камера, и цель уезжают на столько же. */
+  /** Сдвинуть обзор по полу: и камера, и точка под взглядом уезжают на столько же. */
   function aroundSlide(dx, dy) {
-    around = { ...around, eye: { ...around.eye, x: around.eye.x + dx, y: around.eye.y + dy } };
+    aroundSet({ ...around.eye, x: around.eye.x + dx, y: around.eye.y + dy }, around.yaw, around.pitch);
   }
 
   /** Навести обзор на это место плана, не меняя ни взгляда, ни высоты. */
@@ -1546,6 +1616,18 @@ function createVolume({ api, hosts }) {
 
   /** Правку в окне параметров поле принимает одним путём: час заново и кадр. */
   function paramsChanged() {
+    // «Все этажи» (таск 202) — единственная отметка окна, которая меняет саму
+    // **сцену**, а не её показ: этажи приходят гранями, деревом порядка, тенью
+    // и пятнами, и собрать их можно только заново. Сверяется это с тем, что в
+    // сцене уже лежит, а не с отметкой: отметка бывает взведена и там, где
+    // стопки нет (у открытой схемы не задан этаж), и тогда пересобирать нечего.
+    const state = getState();
+    if (stacking(state) !== Boolean(scene.stackMm)) {
+      setScene(state);
+      rebuildOverlay();
+      stanceRecheck();
+      sync();
+    }
     refreshHour();
     syncClock();
     placeStance();
@@ -2059,14 +2141,18 @@ function createVolume({ api, hosts }) {
     const dy = (basis.fwd.y * forward + basis.right.y * side) * scale;
     const dz = basis.fwd.z * forward * scale + lift;
     if (dx === 0 && dy === 0 && dz === 0) return;
-    around = {
-      ...around,
-      eye: {
+    aroundSet(
+      {
         x: around.eye.x + dx,
         y: around.eye.y + dy,
-        z: volumeGroundMm(around.eye.z + dz),
+        // Пол держит камеру (таск 200) — но в стопке этажей (таск 202) земля
+        // лежит ниже пола открытой схемы, и держать надо по ней: иначе с
+        // третьего этажа дом не обойти снаружи, камера упирается в свой пол.
+        z: volumeGroundMm(around.eye.z + dz, scene.stackMm ? scene.stackMm.bottomMm : 0),
       },
-    };
+      around.yaw,
+      around.pitch,
+    );
   }
 
   // ——— присед и прыжок (G234) ———
@@ -2249,13 +2335,23 @@ function createVolume({ api, hosts }) {
       forward += pad.forward;
       turn += pad.turn;
     }
-    const speed = (run ? VOLUME_RUN_MM_S : VOLUME_WALK_MM_S) * step;
+    // ——— скорость (таск 207, G311) ———
+    //
+    // Пешком — шаг человека, и он не тронут. В обзоре — мера, пройденная за
+    // `VOLUME_AROUND_FLY_S` (`volumeAroundSpeed`): «вблизи точность, издали
+    // размах» одним отношением, а не двумя скоростями.
+    const speed =
+      (view === "person"
+        ? run
+          ? VOLUME_RUN_MM_S
+          : VOLUME_WALK_MM_S
+        : volumeAroundSpeed(around.distance, run)) * step;
     if (turn !== 0) {
       const spin = Math.max(-1, Math.min(1, turn)) * step * 2.2;
       if (view === "person") person.yaw += spin;
-      // Стрелками обзор обходит цель — той же орбитой, что перетаскиванием:
-      // второго способа повернуться не заводится.
-      else aroundSpin(around.yaw + spin);
+      // Стрелками обзор поворачивается на месте — тем же, чем вертит мышь:
+      // второго способа повернуться не заводится (таск 207).
+      else aroundTurn(around.yaw + spin, around.pitch);
     }
     const basis = volumeBasis(view === "person" ? person : { yaw: around.yaw, pitch: around.pitch });
     // Длина делится на себя же, но не больше единицы: клавиши дают ровно
@@ -2311,28 +2407,25 @@ function createVolume({ api, hosts }) {
   // каждый браузер и не во всякой вкладке, поэтому перетаскивание работает
   // всегда и само по себе.
 
+  /**
+   * Повернуть взгляд — **одно правило на оба вида** (таск 207, G312).
+   *
+   * Слова заказчика: «почему движение мыши с зажатой клавишей перемещает
+   * камеру вокруг какой-то цели, а не просто поворачивает камеру как при виде
+   * от 1 лица? должно быть так же». Орбита, которую таск 200 оставил
+   * рысканью, отменена: камера вертится **на месте** — и считается это здесь,
+   * одним счётом. Разница между видами осталась одна: чья это голова.
+   */
   function lookBy(dx, dy) {
     const perPixel = (VOLUME_LOOK_DEG_PX * Math.PI) / 180;
+    const aim = view === "person" ? person : around;
+    const yaw = aim.yaw + dx * perPixel;
+    const pitch = volumeClampPitch(aim.pitch - dy * perPixel);
     if (view === "person") {
-      person.yaw += dx * perPixel;
-      person.pitch = volumeClampPitch(person.pitch - dy * perPixel);
+      person.yaw = yaw;
+      person.pitch = pitch;
     } else {
-      // ——— что осталось от орбиты (таск 200, G304) ———
-      //
-      // **Рысканьем обзор обходит дом** — это орбита, и она та же, что была:
-      // потянул в сторону, дом повернулся. **Наклоном он задирает голову на
-      // месте** — это тоже прежнее поведение, только названное честно: таск
-      // 195 уже оставлял камеру стоять, когда взгляд поднимался выше предела
-      // (`volumeAroundStand`), а предел таска 200 снят целиком, и в наклоне
-      // от него осталось только «камера не едет».
-      //
-      // Почему не орбита и в наклоне: орбита вокруг цели поднимает камеру,
-      // когда взгляд опускают, и **опускает под пол**, когда взгляд задирают.
-      // Спустившемуся до земли (а этого заказчик просил прямо) посмотреть
-      // вверх было бы нечем. Подниматься теперь — пробелом, и это тот же
-      // полёт, которым обзор ходит.
-      aroundSpin(around.yaw + dx * perPixel);
-      around = { ...around, pitch: volumeClampPitch(around.pitch - dy * perPixel) };
+      aroundTurn(yaw, pitch);
     }
     paint();
   }
@@ -2391,7 +2484,7 @@ function createVolume({ api, hosts }) {
           // Развели пальцы — приблизились, то есть камера подошла: расстояние
           // делится на множитель, а не умножается. Взгляд щипок не трогает
           // (таск 195): куда смотрят — выбор руки, а не приближения.
-          aroundZoom(around.distance / step.factor);
+          aroundZoom(step.factor);
           const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
           aroundSlide(moved.dx, moved.dy);
           paint();
@@ -2577,7 +2670,7 @@ function createVolume({ api, hosts }) {
       const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
       aroundSlide(moved.dx, moved.dy);
     } else {
-      aroundZoom(around.distance / step.factor);
+      aroundZoom(step.factor);
     }
     paint();
   }
@@ -2790,18 +2883,18 @@ function createVolume({ api, hosts }) {
   /**
    * Перейти на другой этаж.
    *
-   * **Человек остаётся там, где стоял**, — в том же месте плана и глядя в ту же
-   * сторону, — и это и есть ответ на «камера встаёт у соответствующей лестницы
-   * нового этажа». Лестничная клетка у этажей одного дома в одном месте плана:
-   * встав по тем же координатам, человек оказывается ровно у лестницы нового
-   * этажа, а `volumeMoveTo` выталкивает его из самой лестницы и из стен тем же
-   * счётом, которым это делает ходьба.
+   * **Человек выходит у лестницы** (дефект D58, слова заказчика: «почему при
+   * переходе между схемами по лестнице я оказываюсь в середине объекта, а не
+   * возле лестницы?»). Считает это `volumeStairLanding` — одно место на всю
+   * сборку, разбор у него же: выход с лестницы, если он нарисован, иначе
+   * площадка рядом с самим маршем, и взгляд прочь от неё, в комнату.
    *
-   * **Лестницы на новом этаже нет** — правило то же, и другого честного места
-   * всё равно нет: человек встаёт в том же месте плана (у `volumeMoveTo` оно
-   * зажато габаритом чертежа и вытолкнуто из стен), а окно говорит об этом
-   * вслух. Выдумывать ему середину комнаты значило бы соврать о том, где он
-   * поднялся.
+   * **Прежнее правило «то же место плана»** (таск 149) осталось ровно на тот
+   * случай, ради которого и годилось: лестничной клетки на новом этаже не
+   * нарисовано вовсе. И оно стало честнее — место пересчитано через привязку
+   * схем (таск 205), то есть это та же точка **дома**, а не та же точка чужого
+   * чертежа. Разошлись эти два правила именно из-за нулей: у каждой схемы свой,
+   * и «те же координаты» выносили человека на середину квартиры.
    *
    * Что остаётся при человеке: открытые двери (у этажей свои проёмы, и
    * вернувшись назад он найдёт свои двери как оставил) и вид. Что сбрасывается:
@@ -2814,8 +2907,13 @@ function createVolume({ api, hosts }) {
     if (!findScheme(state.project, option.schemeId)) return;
     // Где мы стояли на покидаемой схеме и откуда пришли — в память окна
     // (G216): с этажа, где лестницы не нарисовано, человек вернётся сюда
-    // кнопкой и встанет у той же лестницы. Сам переход по лестнице память **не
-    // читает**: его правило прежнее, то же место плана (таск 149).
+    // кнопкой и встанет у той же лестницы.
+    const was = { x: person.x, y: person.y };
+    const from = schemeId;
+    // Чем воспользовались — маршем или выходом: прибытие ищет **парную** вещь
+    // (таск 204). Спрашивается это до смены схемы: после неё под ногами уже
+    // другой этаж.
+    const used = stairHere();
     leaveScheme();
     schemeId = option.schemeId;
     // Этаж, на который поднялись, становится текущей схемой всего приложения
@@ -2824,9 +2922,21 @@ function createVolume({ api, hosts }) {
     // этого изменения не увидит как смены схемы — `schemeId` уже равен ему.
     setState({ schemeId });
     setScene(state);
-    const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
+    // Место ухода в координатах нового этажа: им выбирается лестница, когда
+    // их несколько, и оно же работает запасным местом.
+    const want = sameSpotOn(state.project, from, schemeId, was);
+    const landing = volumeStairLanding(
+      scene,
+      want,
+      volumeStanceHead(stance),
+      used && used.stair ? used.stair.key : null,
+    );
+    const moved = volumeMoveTo(scene, landing || want, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
+    // Лицом в комнату: с лестницы сходят в ту сторону, где есть место. Без
+    // лестницы взгляд не трогается — человек идёт дальше, куда смотрел.
+    if (landing) person.yaw = landing.yaw;
     aroundLookAt(person.x, person.y);
     select(null);
     // У лестницы, с которой сошли, вопрос второй раз не задаётся: иначе он
@@ -2834,7 +2944,7 @@ function createVolume({ api, hosts }) {
     stairAsked = (stairHere() || {}).objectId || null;
     sync();
     notify(
-      option.stairs
+      landing
         ? text("volume.stairArrived", { floor: option.floor })
         : text("volume.stairArrivedPlain", { floor: option.floor }),
       "info",
@@ -2850,6 +2960,22 @@ function createVolume({ api, hosts }) {
   // там лестницу нельзя (её нет на чертеже), заводить вторую кнопку «обратно» —
   // значит заводить второй способ сменить схему. Выбор в шапке закрывает и то и
   // другое: он доступен всегда и на любой схеме.
+
+  /**
+   * То же место **дома**, пересчитанное из координат одной схемы в координаты
+   * другой (таск 205, G309).
+   *
+   * У каждой схемы свой ноль — он приходит с подложки, — и «те же координаты»
+   * на соседнем этаже означают другое место дома. Разницу знает привязка, и
+   * спрашивается она одной дверью (`volumeSchemeOriginMm`); без привязки
+   * разница нулевая, и всё остаётся как было (G68).
+   */
+  function sameSpotOn(project, fromId, toId, at) {
+    if (!at || fromId === toId) return at;
+    const from = volumeSchemeOriginMm(project, fromId);
+    const to = volumeSchemeOriginMm(project, toId);
+    return { ...at, x: at.x + from.x - to.x, y: at.y + from.y - to.y };
+  }
 
   /** Запомнить, где человек стоит на нынешней схеме. */
   function rememberPlace() {
@@ -2881,17 +3007,21 @@ function createVolume({ api, hosts }) {
     const state = getState();
     leaveScheme();
     const place = visited.get(back.schemeId) || null;
+    const from = schemeId;
     schemeId = back.schemeId;
     setState({ schemeId });
     setScene(state);
     if (!scene.empty) {
-      const at = place || { x: person.x, y: person.y, yaw: person.yaw };
+      // Помним мы место **той** схемы, и пересчитывать его не надо. А вот
+      // запасное (на ней ещё не стояли) приходит из координат покидаемой
+      // схемы, и его переводит привязка (таск 205).
+      const at = place || sameSpotOn(state.project, from, schemeId, { x: person.x, y: person.y, yaw: person.yaw });
       const moved = volumeMoveTo(scene, at, volumeStanceHead(stance));
       person.x = moved.x;
       person.y = moved.y;
       person.yaw = at.yaw;
       if (place) person.pitch = volumeClampPitch(place.pitch);
-      aroundSpin(person.yaw);
+      aroundTurn(person.yaw, around.pitch);
       aroundLookAt(person.x, person.y);
     }
     select(null);
@@ -3158,8 +3288,13 @@ function createVolume({ api, hosts }) {
         rooms: scene.rooms.length,
         marks: scene.marks.length,
       }),
+      // Стопка этажей (таск 202): числа выше — про тот этаж, на котором
+      // человек стоит, и промолчать о том, что в кадре их несколько, нельзя.
+      volumeStackLine(scene, floorPlan(getState())),
       ...volumeNotes(scene),
-    ].join(" ");
+    ]
+      .filter((part) => part !== "")
+      .join(" ");
     missing.textContent = volumeUnplacedLine(scene.unplaced);
     missing.title = volumeUnplacedTitle(scene.unplaced);
     missing.hidden = scene.unplaced.length === 0;
@@ -3308,11 +3443,14 @@ function createVolume({ api, hosts }) {
    * возвратом и чинят.
    */
   function followScheme(state) {
+    const from = schemeId;
     leaveScheme();
     schemeId = state.schemeId;
     setScene(state);
     if (!scene.empty) {
-      const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
+      // Место дома, а не координаты чужого чертежа (таск 205): у схем свои нули.
+      const want = sameSpotOn(state.project, from, schemeId, { x: person.x, y: person.y });
+      const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
       person.x = moved.x;
       person.y = moved.y;
       aroundLookAt(person.x, person.y);
