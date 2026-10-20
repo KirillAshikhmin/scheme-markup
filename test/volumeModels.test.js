@@ -304,10 +304,12 @@ test("у каждой вещи каталога есть модель, и дев
   for (const key of objectCatalogKeys()) {
     assert.ok(objectModelByKey(key), key + ": вещь каталога без модели");
   }
-  // Двадцать восемь ключей: тринадцать вещей из брифа, девять нынешних видов
+  // Тридцать два ключа: тринадцать вещей из брифа, девять нынешних видов
   // (шкаф у них общий), унитаз с ванной (таск 162) и шесть вещей таска 177 —
-  // минус телевизор с полотенцесушителем, ушедшие в метки (таск 186).
-  assert.equal(objectCatalogKeys().length, 28);
+  // минус телевизор с полотенцесушителем, ушедшие в метки (таск 186), — плюс
+  // четыре вещи таска 204 (дорожка, экран проектора, выход с лестницы,
+  // автомобиль).
+  assert.equal(objectCatalogKeys().length, 32);
   // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам. И
   // имена **ушедших** вещей — тоже: вид прежней разметки, названный
   // «Телевизор» или «Полотенцесушитель», обязан узнаваться как узнавался, иначе
@@ -339,6 +341,47 @@ test("у каждой вещи каталога есть модель, и дев
 test("ни один ключ не занят двумя семьями", () => {
   assert.deepEqual(objectModelClashes(), []);
   assert.ok(objectModelKeys().length >= 55, "ключей за полсотни: " + objectModelKeys().length);
+});
+
+test("у четырёх вещей таска 204 своё тело, и экран проектора — полотно, а не стекло", () => {
+  for (const key of ["treadmill", "projectorScreen", "stairsExit", "car"]) {
+    const model = objectModelByKey(key);
+    assert.ok(model, key + ": вещь таска 204 без модели");
+    // Кубики и цилиндры в долях габарита — как у всех (таск 155). Доли обязаны
+    // лежать внутри вещи: тело, вылезшее из габарита, рисовалось бы не там, где
+    // вещь выделена и измерена (G68).
+    for (const part of model.parts) {
+      assert.ok(part.x >= -0.5 && part.x + part.width <= 0.5, key + "/" + part.name + ": тело шире габарита");
+      assert.ok(part.y >= -0.5 && part.y + part.depth <= 0.5, key + "/" + part.name + ": тело глубже габарита");
+      assert.ok(part.z >= 0 && part.z + part.height <= 1, key + "/" + part.name + ": тело выше габарита");
+      assert.equal(part.lit, false, key + "/" + part.name + ": свечение включено");
+    }
+  }
+  // **Экран — полотно.** Ни прозрачности (таск 169), ни стеклянного материала:
+  // просвети его — и на стене оказалось бы второе окно. Белизна полотна — тот
+  // же `light`, что у фасада шкафа.
+  for (const part of objectModelByKey("projectorScreen").parts) {
+    assert.equal(part.clear, null, "экран просвечивает: " + part.name);
+    assert.notEqual(part.material, "glass", "у экрана стеклянное тело: " + part.name);
+  }
+  assert.deepEqual(
+    objectModelByKey("projectorScreen").parts.map((part) => [part.name, part.material]),
+    [["case", "body"], ["canvas", "light"], ["bar", "dark"]],
+  );
+  // Выход с лестницы: последняя ступень стоит **у задника**, потому что
+  // лестница поднимается от лица вещи к заднику (её верхняя ступень — `y` 0.3).
+  // Разойдись эти две стороны — сойти с лестницы пришлось бы в стену.
+  const exitStep = objectModelByKey("stairsExit").parts.find((part) => part.name === "step");
+  const stairsTop = objectModelByKey("stairs").parts[objectModelByKey("stairs").parts.length - 1];
+  assert.ok(exitStep.y > 0, "ступень выхода ушла к лицу");
+  assert.ok(stairsTop.y > 0, "верхняя ступень лестницы ушла к лицу — выход считался не с той стороны");
+  // А саму лестницу таск 204 не трогал: её тело то же, что было (таск 149
+  // узнаёт её по ключу, и кадр прежнего чертежа не меняется).
+  assert.equal(objectModelByKey("stairs").parts.length, 5);
+  assert.deepEqual(
+    objectModelByKey("stairs").parts.map((part) => part.name),
+    ["step1", "step2", "step3", "step4", "step5"],
+  );
 });
 
 // ——— предел тел и граней ——————————————————————————————————————————————————

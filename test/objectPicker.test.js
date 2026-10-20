@@ -97,8 +97,8 @@ test("узкому экрану — одна колонка, широкому н
   assert.equal(objectPickerColumnLimit(360), 1);
   assert.equal(objectPickerColumnLimit(0), 1);
   assert.ok(objectPickerColumnLimit(1000) > 1, "на 1000 точек колонок больше одной");
-  // Потолок свой: категорий шесть, и пятая колонка растянула бы окно ради двух
-  // плиток «Декора».
+  // Потолок свой: категорий семь, и пятая колонка растянула бы окно ради одной
+  // плитки «Декора».
   assert.equal(objectPickerColumnLimit(4000), 4);
 });
 

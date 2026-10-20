@@ -53,6 +53,7 @@ import { drawDrawing, drawingUnitBridge } from "../src/render.js";
 import { workshopObjectDefaultsByKey, workshopObjectDefaultsByName, workshopPick } from "../src/panels/workshop.js";
 import {
   VOLUME_BODY_MM,
+  VOLUME_STEP_MM,
   volumeObjectModel,
   volumeScene,
   volumeStairNear,
@@ -134,9 +135,9 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге двадцать восемь вещей, и каждая стоит ровно в одной категории", () => {
+test("в каталоге тридцать две вещи, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  assert.equal(keys.length, 28, "вещей в каталоге стало другое число: " + keys.length);
+  assert.equal(keys.length, 32, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -169,6 +170,11 @@ test("в каталоге двадцать восемь вещей, и кажд�
   // (таск 186).
   for (const key of ["sofa", "armchair", "coffeeTable", "deskSet", "stool"]) {
     assert.ok(objectCatalogEntry(key), "вещь таска 177 пропала: " + key);
+  }
+  // И четыре вещи таска 204 (G308): «Добавь ещё в объекты для чертежа
+  // Автомобиль, беговую дорожку, экран проектора, а так же выход с лестницы».
+  for (const key of ["treadmill", "projectorScreen", "stairsExit", "car"]) {
+    assert.ok(objectCatalogEntry(key), "вещь таска 204 пропала: " + key);
   }
   // Телевизор и полотенцесушитель — метки (таск 186, G279), и в каталоге их
   // нет ни одной дверью: ни ключом, ни плиткой, ни умолчанием.
@@ -286,6 +292,91 @@ test("унитаз и ванна встали ходовым размером, �
     objectCatalogInOrder().filter((entry) => entry.legacy).map((entry) => entry.key),
     ["plumbing"],
   );
+});
+
+// ——— четыре вещи таска 204 (G308) ————————————————————————————————————————
+
+test("дорожка, экран, выход и автомобиль встали своими числами и своей посадкой", () => {
+  // Дорожка домашняя: длина у ходовых 1700–2100, ширина 800–900, высота по
+  // консоли 1300–1450 — взяты середины. В «Технике», потому что просит розетку
+  // под свои 1,5–3 кВт, а не в «Мебели», где провода ни у кого нет.
+  assert.deepEqual(objectCatalogDefaults("treadmill"), {
+    shape: "rect",
+    widthMm: 850,
+    depthMm: 1900,
+    heightMm: 1400,
+    heightAboveFloorMm: 0,
+  });
+  assert.equal(objectCatalogEntry("treadmill").category, "appliances");
+  // Экран проектора: 100 дюймов 16:9 — полотно 2214 × 1245, кассета длиннее
+  // полотна, глубина кассеты 100–130. Габарит описывает **развёрнутый** экран,
+  // поэтому важна посадка: висит на стене, низ полотна на 1000, верх на 2250 —
+  // под потолком 2800 кассете есть куда встать.
+  assert.deepEqual(objectCatalogDefaults("projectorScreen"), {
+    shape: "rect",
+    widthMm: 2300,
+    depthMm: 120,
+    heightMm: 1250,
+    heightAboveFloorMm: 1000,
+  });
+  assert.equal(objectCatalogEntry("projectorScreen").mount, "wall", "экран обязан висеть, а не стоять на полу");
+  assert.equal(objectCatalogEntry("projectorScreen").heightAboveFloorMm + 1250, 2250);
+  // Автомобиль легковой, не фура: середина ряда C/D класса. И это ровно то, что
+  // встаёт в машиноместо 5300 × 2500 (СП 113.13330) с проходом вокруг.
+  assert.deepEqual(objectCatalogDefaults("car"), {
+    shape: "rect",
+    widthMm: 1800,
+    depthMm: 4600,
+    heightMm: 1500,
+    heightAboveFloorMm: 0,
+  });
+  assert.ok(objectCatalogDefaults("car").depthMm < 5300, "легковая, а не фура: должна влезать в машиноместо");
+  assert.equal(objectCatalogEntry("car").category, "transport");
+  // Раздел заведён под неё и стоит последним — порядок категорий это порядок
+  // колонок в окне выбора.
+  assert.equal(OBJECT_CATEGORIES[OBJECT_CATEGORIES.length - 1], "transport");
+  assert.deepEqual(objectCatalogCategory("transport").map((entry) => entry.key), ["car"]);
+});
+
+test("выход с лестницы — парный лестнице элемент: свой ключ, её габарит и своя высота", () => {
+  const stairs = objectCatalogDefaults("stairs");
+  const exit = objectCatalogDefaults("stairsExit");
+  // **Габарит тот же до миллиметра**: выход накрывает проём над лестницей, и
+  // совмещаются два этажа именно этим (таск 205). Разойдись числа — выход
+  // пришёлся бы не над лестницей.
+  assert.equal(exit.widthMm, stairs.widthMm, "ширина выхода разошлась с лестничной");
+  assert.equal(exit.depthMm, stairs.depthMm, "длина выхода разошлась с лестничной");
+  assert.equal(exit.widthMm, 1100);
+  assert.equal(exit.depthMm, 2700);
+  // А высота **своя и низкая**: лестница стоит призмой до потолка, выход — пол
+  // верхнего этажа, по которому ходят. Объём переступает через всё, что не выше
+  // `VOLUME_STEP_MM`, — поэтому выход виден, но человека не держит.
+  assert.equal(stairs.heightMm, null, "лестница по-прежнему во всю высоту помещения");
+  assert.equal(exit.heightMm, 200);
+  assert.ok(exit.heightMm <= VOLUME_STEP_MM, "через выход обязаны переступать, иначе на него не сойти");
+  assert.equal(objectCatalogEntry("stairsExit").category, "structures");
+  assert.equal(objectCatalogEntry("stairsExit").mount, "floor");
+  // **Ключ свой**, а не имя вида: по нему выход будут искать (таск 205), как по
+  // ключу ищут лестницу (таск 149).
+  assert.ok(objectCatalogKeys().includes("stairsExit"));
+  assert.notEqual(objectCatalogName("stairsExit"), objectCatalogName("stairs"));
+  // Имя выхода узнаётся выходом, хотя внутри него сидит и лестничный корень:
+  // слова ищутся от самого длинного, и путать их нельзя — иначе выход прежней
+  // разметки переводил бы по этажам не оттуда.
+  assert.equal(objectCatalogKeyByName("Выход с лестницы"), "stairsExit");
+  assert.equal(objectCatalogKeyByName("  ВЫХОД С ЛЕСТНИЦЫ  "), "stairsExit");
+  assert.equal(objectCatalogKeyByName("Сход с лестницы на 1 этаж"), "stairsExit");
+  // А сама лестница — по-прежнему лестница, и это главное: переход по этажам
+  // (таск 149) узнаёт её по этому ключу.
+  assert.equal(objectCatalogKeyByName("Лестница"), "stairs");
+  assert.equal(objectCatalogKeyByName("Лестница на 2 этаж"), "stairs");
+  // Имена новых вещей чужих корней не отбирают: «Стиральная машина» осталась
+  // машиной, а не автомобилем, и «Экран радиатора» — радиатором.
+  assert.equal(objectCatalogKeyByName("Автомобиль"), "car");
+  assert.equal(objectCatalogKeyByName("Стиральная машина"), "washer");
+  assert.equal(objectCatalogKeyByName("Экран проектора"), "projectorScreen");
+  assert.equal(objectCatalogKeyByName("Экран радиатора"), "radiator");
+  assert.equal(objectCatalogKeyByName("Беговая дорожка"), "treadmill");
 });
 
 test("имя прежнего вида переводится в ключ терпимо, и столешница не становится столом", () => {
