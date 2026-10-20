@@ -4107,6 +4107,20 @@
   background: #fff;
 }
 
+/* ——— параметры объёма: третья ячейка того же угла (таск 181, G273) ————————
+   Фон, время суток и миникарта. Место — то же правило, что у смены вида,
+   только ячейка третья: числа все из общих мер (`--canvas-corner-*`), и
+   поправишь размер кнопки полного экрана — столбик сойдётся сам. */
+.volume__paramsBtn {
+  right: var(--canvas-corner-edge);
+  top: calc(var(--canvas-corner-edge) + 2 * (var(--canvas-corner-size) + var(--canvas-corner-gap)));
+  touch-action: none;
+}
+
+.volume__paramsBtn:active {
+  background: #fff;
+}
+
 /* На узком экране развёрнутая плашка уходит под верхний ряд кнопок
    (`canvas.css`), а в «Объёме» в правом углу стоят две кнопки, не одна: сводка
    опускается под обе. Иначе она легла бы на смену вида и закрыла её собой:
@@ -4114,7 +4128,51 @@
    которую целится палец, надо видеть. Мера та же, что у кнопок, просто ячеек
    две. */
 #app.is-mobile .volume__stage .canvas-hint.canvas-hint--info:not(.is-collapsed) {
-  top: calc(var(--canvas-corner-edge) + 2 * (var(--canvas-corner-size) + var(--canvas-corner-gap)));
+  top: calc(var(--canvas-corner-edge) + 3 * (var(--canvas-corner-size) + var(--canvas-corner-gap)));
+}
+
+/* ——— окно параметров объёма (таск 181) ————————————————————————————————————
+   Ряды кнопок: фон, время, ускорение. Кнопки переносятся по строкам — пять
+   ускорений в одну строку не влезут ни на телефоне, ни в окне по содержимому,
+   а переносить их руками нечем: это одна группа равных. */
+.volume__params {
+  min-width: 260px;
+}
+
+.volume__paramsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* Строка состояния часов обновляется раз в секунду, и прыгать от неё окно не
+   должно: место под неё держится всегда. */
+.volume__paramsState {
+  min-height: 18px;
+}
+
+/* Выбранное — кнопкой нажатой, а не словом рядом: ряд из трёх фонов и ряд из
+   пяти ускорений читаются только так. Подсветка та же, что у выбранной стороны
+   развёртки, — второго языка «это выбрано» в сборке не заводится. */
+.volume__paramsRow .ui-btn.is-on {
+  border-color: var(--accent);
+  background: rgba(31, 111, 235, 0.14);
+}
+
+/* Контрол с часами. Своя мера, а не общая для полей: в нём четыре цифры и
+   двоеточие, и растянутое на всю строку поле читалось бы как поле имени. Цвета
+   — те же, что у остальных полей панелей (`.ui-input`): белое поле со светлым
+   текстом на тёмной теме читалось бы как пустое. */
+.tools__time {
+  width: 128px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-line);
+  background: #21262d;
+  color: var(--panel-text);
+  font: inherit;
 }
 
 /* Цель под палец: 52 точки — столько же, сколько у кнопок нижнего ряда в
@@ -7790,6 +7848,43 @@ const strings = {
     doorTouch: "Касание по двери открывает и закрывает её.",
     doorsAll: "Все двери",
     doorsAllHint: "Открыть или закрыть все двери разом (R)",
+    // ——— окно параметров объёма (таск 181, G273, G282) ———
+    //
+    // Кнопка-значок в правом верхнем углу поля, под сменой вида: на ней только
+    // рисунок, и слово про неё живёт здесь — как у всех кнопок-значков сборки.
+    params: "Параметры объёма",
+    paramsHint: "Тип фона, время суток и миникарта",
+    paramsTitle: "Параметры объёма",
+    minimap: "Показывать миникарту",
+    minimapHint:
+      "Вид сверху в левом нижнем углу первого лица. На узком или низком поле её нет и с галкой: " +
+      "накладка в треть кадра загораживает саму комнату.",
+    backdrop: "ТИП ФОНА",
+    backdropPlain: "Простой",
+    backdropPlainHint: "Зелёная земля, голубое небо и светило — больше ничего",
+    backdropNature: "Природа",
+    backdropNatureHint: "Дорога, река, холмы, заснеженные горы, лес и берёзовая роща",
+    backdropCity: "Город",
+    backdropCityHint: "Многоэтажки, улицы и парковка с машинами; к ночи в окнах загорается свет",
+    // Время суток. Контрол с часами ставит своё время — и оно стоит; «Сейчас»
+    // возвращает настоящее — и оно идёт. Так это и описано заказчиком.
+    clock: "ВРЕМЯ СУТОК",
+    clockOwn: "Своё время",
+    clockOwnHint: "Поставить своё время. Оно будет стоять, пока не нажмёте «Сейчас» или ускорение",
+    clockNow: "Сейчас",
+    clockNowHint: "Вернуть настоящее время — и оно пойдёт дальше",
+    clockStop: "Остановить",
+    clockStopHint: "Оставить это время стоять: фон перестанет пересчитываться вовсе",
+    clockRunning: "В объёме {time} · {phase} · время идёт, сутки за {day} мин",
+    clockFixedLine: "В объёме {time} · {phase} · время стоит",
+    speed: "УСКОРЕНИЕ",
+    speedOption: "×{speed} — сутки за {day} мин",
+    phaseNight: "ночь",
+    phaseMorning: "утро",
+    phaseDay: "день",
+    phaseEvening: "вечер",
+    sunrise: "Рассвет {rise}, закат {set} — умолчание. Укажите координаты объекта, и они посчитаются по ним",
+    sunriseSite: "Рассвет {rise}, закат {set} — по координатам объекта",
   },
   storage: {
     memory: "Браузер не дал открыть хранилище — работаем в памяти. Выгрузите объект в файл, иначе работа пропадёт при закрытии вкладки.",
@@ -49474,86 +49569,6 @@ function mountProjectsPanel(host, api) {
 
 registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 
-// src/screenPlace.js
-// Общее место трёх режимов (требование G276, таск 178).
-//
-// Слова заказчика: «При переключении Схема - Чертёж - объём мы должны
-// находиться в одном месте… центр схемы\чертежа это расположение камеры в
-// объёме. Ну и учитывай что может попасть на стены и т.д. тогда сдвигай».
-//
-// ——— что это и чего это не ———————————————————————————————————————————————
-//
-// До этого таска каждый режим помнил **своё** место: план — `view` в состоянии
-// приложения, чертёж — свой `view` внутри мастерской, объём — где стоит
-// человек. Переключение режима бросало человека туда, где он был в этом режиме
-// в прошлый раз: посмотрел кухню в объёме, вернулся на схему — а там спальня,
-// с которой уходил полчаса назад.
-//
-// Здесь лежит **одно число на двоих** — место середины чертежа в миллиметрах, —
-// и лежит оно в сеансе: в объект не пишется ничего (G68), в настройки браузера
-// тоже. Закрыл вкладку — забылось.
-//
-// ——— почему это отдельный модуль, а не поле состояния ——————————————————
-//
-// Потому что у режимов разные системы координат, и свести их можно только в
-// миллиметрах чертежа: у плана вид задан в пикселях подложки (`state.view`), у
-// мастерской — в миллиметрах, у объёма — в миллиметрах же, но третьей осью.
-// Состояние приложения хранит вид плана и перерисовывает холст на каждую его
-// правку — положи сюда же место чертежа, и холст стал бы перерисовываться от
-// чужого переключения.
-//
-// Поле плана этому модулю не нужно вовсе: объём читает и пишет `state.view`
-// сам, через тот же мост «доли ↔ миллиметры», которым живёт весь чертёж.
-// Мастерская своего вида наружу не отдаёт — поэтому у неё две двери: сказать,
-// где она стоит, и забрать, куда её просят встать.
-
-/** Где сейчас середина поля мастерской: `{schemeId, x, y}` или `null`. */
-let drawingAt = null;
-/** Куда мастерскую просят встать, когда её покажут: `{schemeId, x, y}` или `null`. */
-let drawingWanted = null;
-
-const placeOf = (schemeId, pointMm) => {
-  if (!schemeId || !pointMm) return null;
-  const x = Number(pointMm.x);
-  const y = Number(pointMm.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { schemeId, x, y };
-};
-
-/** Мастерская говорит, где стоит середина её поля. Зовётся на каждую правку вида. */
-function screenPlaceDrawing(schemeId, pointMm) {
-  drawingAt = placeOf(schemeId, pointMm);
-}
-
-/** Где стояла мастерская, когда её последний раз показывали. `null` — не знаем. */
-function screenPlaceOfDrawing(schemeId) {
-  if (!drawingAt || drawingAt.schemeId !== schemeId) return null;
-  return { x: drawingAt.x, y: drawingAt.y };
-}
-
-/**
- * Просьба к мастерской: покажут — встань серединой сюда. Лежит до тех пор,
- * пока её не заберут: человек может уйти из объёма на схему, погулять по ней и
- * прийти в чертёж только через минуту.
- */
-function screenPlaceWant(schemeId, pointMm) {
-  drawingWanted = placeOf(schemeId, pointMm);
-}
-
-/** Мастерская забирает просьбу — ровно один раз. `null` — просьбы нет. */
-function screenPlaceTake(schemeId) {
-  if (!drawingWanted || drawingWanted.schemeId !== schemeId) return null;
-  const place = { x: drawingWanted.x, y: drawingWanted.y };
-  drawingWanted = null;
-  return place;
-}
-
-/** Забыть всё: новый объект, закрытая схема. */
-function screenPlaceForget() {
-  drawingAt = null;
-  drawingWanted = null;
-}
-
 // src/volume.js
 // Объёмный режим: комната, по которой можно пройти.
 //
@@ -49923,16 +49938,51 @@ function volumeShade(normal) {
 }
 
 /**
- * Цвет грани: материал, умноженный на светлоту.
+ * Час суток в цвете: материал, сведённый к тону ночи (таск 181, G282).
+ *
+ * **Единственное место, где темнеет вечер.** Им красится и грань сцены
+ * (`volumeFill` ниже), и поле панорамы, и тень дома — а это три разные
+ * поверхности, которые обязаны совпасть в тон: земля у дома, земля за ним и
+ * её собственная тень. Разойдись у них счёт — дом снова «залетал» бы над
+ * землёй, ровно как в G237, только теперь к ночи.
+ *
+ * `tint` — `{rgb, share}`: куда и насколько тянется цвет. `null` и нулевая
+ * доля значат полдень, то есть цвет как написан.
+ */
+function volumeTintRgb(rgb, tint) {
+  const share = tint ? Math.max(0, Math.min(1, Number(tint.share) || 0)) : 0;
+  if (!(share > 0)) return rgb;
+  const to = tint.rgb || VOLUME_NIGHT_RGB;
+  return [
+    Math.round(rgb[0] * (1 - share) + to[0] * share),
+    Math.round(rgb[1] * (1 - share) + to[1] * share),
+    Math.round(rgb[2] * (1 - share) + to[2] * share),
+  ];
+}
+
+/** Тот же час, но строкой холста: `rgb(...)` для заливок панорамы. */
+function volumeTintCss(rgb, tint) {
+  return "rgb(" + volumeTintRgb(rgb, tint).join(",") + ")";
+}
+
+/**
+ * Цвет грани: материал, умноженный на светлоту и сведённый к тону часа.
  *
  * `alpha` меньше единицы — грань просвечивает (вещь чертежа, таск 169), и
  * прозрачность пишется **в сам цвет**, а не в состояние холста: кадр от этого
  * не меняется ни одной строкой — рисование так и остаётся одной заливкой на
  * многоугольник (`volumeDraw`), и цена кадра та же самая.
+ *
+ * `tint` — час суток (таск 181). Он стоит здесь, а не завесой поверх кадра, и
+ * это главное решение в освещении объёма: завеса легла бы и на небо, а небу
+ * ночью нужна своя темнота, глубже комнатной, — и ни одна завеса не дала бы
+ * **светящемуся** окну города остаться светящимся. Здесь же цена нулевая: три
+ * умножения на грань в том же счёте, где уже считается светлота.
  */
-function volumeFill(rgb, shade, alpha = 1) {
+function volumeFill(rgb, shade, alpha = 1, tint = null) {
+  const hour = volumeTintRgb(rgb, tint);
   const channel = (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
-  const parts = channel(rgb[0]) + "," + channel(rgb[1]) + "," + channel(rgb[2]);
+  const parts = channel(hour[0]) + "," + channel(hour[1]) + "," + channel(hour[2]);
   if (!(alpha < 1)) return "rgb(" + parts + ")";
   return "rgba(" + parts + "," + Math.round(alpha * 100) / 100 + ")";
 }
@@ -50020,15 +50070,25 @@ function volumeAt(point, z) {
  * Лампа красит грани, солнце кладёт тень; смешивать их нельзя.
  *
  * Длина — из высоты солнца над горизонтом: `h / tg(rise)`. При 14° стена
- * 2800 мм даёт тень 11 231 мм — длинную, как и положено низкому солнцу.
+ * 2800 мм даёт тень 11 230 мм — длинную, как и положено низкому солнцу.
  * Направление — ровно прочь от солнца: `az + 180°`.
+ *
+ * `at` — где солнце стоит **сейчас** (таск 181): с идущим временем оно ходит
+ * по небу, и тень ходит за ним. Умолчание — полдень при верхе чертежа на
+ * север (`VOLUME_SUN_AT`), и по нему же считается вынос земляной плиты: плита
+ * обязана держать тень в любой час, а размер её — часть сцены, которую нельзя
+ * пересобирать каждую секунду. Поэтому высота солнца для тени **снизу не
+ * опускается ниже полуденной** (`VOLUME_SUN_AT.rise`): тень не длиннее той, на
+ * которую плита рассчитана, а у горизонта она не тянется в бесконечность, а
+ * гаснет — см. `volumeShadowFaces`.
  */
-function volumeShadowShift(heightMm) {
-  const rise = Math.max(1, Number(VOLUME_SUN_AT.rise) || 0) * DEG;
+function volumeShadowShift(heightMm, at = VOLUME_SUN_AT) {
+  const want = Number(at && at.rise);
+  const rise = Math.max(Number(VOLUME_SUN_AT.rise) || 1, Number.isFinite(want) ? want : 0) * DEG;
   const reach = Number(heightMm) / Math.tan(rise);
-  const away = (Number(VOLUME_SUN_AT.az) + 180) * DEG;
+  const away = (Number(at && at.az) || 0) + 180;
   if (!Number.isFinite(reach)) return { x: 0, y: 0 };
-  return { x: Math.cos(away) * reach, y: Math.sin(away) * reach };
+  return { x: Math.cos(away * DEG) * reach, y: Math.sin(away * DEG) * reach };
 }
 
 /**
@@ -50037,14 +50097,50 @@ function volumeShadowShift(heightMm) {
  * между стеной и её тенью осталась бы светлая щель, то есть ровно то «дом не
  * касается земли», от которого всё и затевалось.
  */
-function volumeShadowOutline(corners, heightMm) {
-  const shift = volumeShadowShift(heightMm);
+function volumeShadowOutline(corners, heightMm, at = VOLUME_SUN_AT) {
+  const shift = volumeShadowShift(heightMm, at);
   const points = [];
   for (const point of corners) {
     points.push({ x: point.x, y: point.y });
     points.push({ x: point.x + shift.x, y: point.y + shift.y });
   }
   return volumeHull(points);
+}
+
+/**
+ * Грани тени дома в этот час (таск 181).
+ *
+ * `boxes` — габариты стен из сцены (`scene.shadowBoxes`), `shadow` — где стоит
+ * солнце и насколько тень видна (`mood.shadow`). Ярус тот же, что был у тени в
+ * сцене (`VOLUME_LAYER_GROUND`), и порядок внутри яруса считается по дальности
+ * — то есть ровно так же, как считался: пол помещения, который ближе, ложится
+ * поверх тени, а не под неё.
+ *
+ * **Гаснет тень цветом, а не прозрачностью.** Солнце у горизонта — тень
+ * сводится к самой земле (`VOLUME_LAND_RGB`) и исчезает, ночью её нет вовсе.
+ * Прозрачностью этого делать нельзя: тени соседних стен перекрываются, и в
+ * углу дома вышло бы вдвое темнее, чем вдоль стены (та же причина, по которой
+ * тень сплошная с таска 178).
+ */
+function volumeShadowFaces(boxes, shadow, out = []) {
+  const fade = shadow ? Math.max(0, Math.min(1, Number(shadow.fade))) : 1;
+  if (!boxes || boxes.length === 0 || !(fade > 0)) return out;
+  const rgb = [
+    Math.round(VOLUME_LAND_RGB[0] + (VOLUME_SHADOW_RGB[0] - VOLUME_LAND_RGB[0]) * fade),
+    Math.round(VOLUME_LAND_RGB[1] + (VOLUME_SHADOW_RGB[1] - VOLUME_LAND_RGB[1]) * fade),
+    Math.round(VOLUME_LAND_RGB[2] + (VOLUME_SHADOW_RGB[2] - VOLUME_LAND_RGB[2]) * fade),
+  ];
+  const at = shadow ? { az: shadow.az, rise: shadow.rise } : VOLUME_SUN_AT;
+  for (const box of boxes) {
+    out.push(
+      volumeFace(
+        volumeClockwise(volumeShadowOutline(box.corners, box.heightMm, at)).map((point) => volumeAt(point, 0)),
+        rgb,
+        { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND, flat: true },
+      ),
+    );
+  }
+  return out;
 }
 
 /** Выпуклая оболочка (обход Эндрю). Точек мало — восемь на стену. */
@@ -52246,6 +52342,7 @@ function volumeScene(project, schemeId, options = {}) {
       faces: [],
       order: null,
       solids: [],
+      shadowBoxes: [],
       objectBoxes: [],
       rooms: [],
       boundsMm: null,
@@ -52320,7 +52417,7 @@ function volumeScene(project, schemeId, options = {}) {
   //
   // Поэтому в сцену добавлена **тень**: единственная примета касания, которой
   // не было. Кладёт её солнце с неба (`volumeShadowShift`): при его высоте 14°
-  // стена 2800 мм даёт тень 11 231 мм, и ложится она ровно прочь от солнца.
+  // стена 2800 мм даёт тень 11 230 мм, и ложится она ровно прочь от солнца.
   //
   // Тень — это силуэт: выпуклая оболочка габарита стены и того же габарита,
   // сдвинутого на вынос. Рисуется **сплошным** тоном без затенения, поэтому
@@ -52329,28 +52426,33 @@ function volumeScene(project, schemeId, options = {}) {
   // Кладётся она только на землю — то есть когда помещения обведены и плита
   // работает землёй. Нет обводки — плита сама пол, и тень легла бы внутри дома.
   // Внутри дома её не видно и так: полы помещений рисуются **после** неё.
+  //
+  // **В сцене лежат габариты, а не грани** (таск 181). Солнце ходит по небу, и
+  // тень ходит за ним; пересобирать ради этого весь дом — восемь миллисекунд на
+  // объекте заказчика, то есть провал кадра каждую секунду у идущего человека.
+  // Поэтому сцена держит то, что от часа не зависит (габарит стены и её
+  // высоту), а грани тени собирает `volumeShadowFaces` — вместе со снимком
+  // часа, не чаще раза в секунду, и уходят они в кадр теми же `extra`, которыми
+  // идут рамка выделения и кружок «вы здесь».
+  const shadowBoxes = [];
   if (rooms.length > 0) {
     for (const wall of walls) {
       const vectors = wallVectors(wall);
       if (!vectors) continue;
       const height = wallHeights.get(wall.id) || 0;
       if (!(height > 0)) continue;
-      const corners = volumeBoxCorners(
-        {
-          x: Number(wall.aMm.x) + vectors.u.x * (vectors.len / 2),
-          y: Number(wall.aMm.y) + vectors.u.y * (vectors.len / 2),
-        },
-        vectors.u,
-        vectors.len,
-        Number(wall.thicknessMm),
-      );
-      faces.push(
-        volumeFace(
-          volumeClockwise(volumeShadowOutline(corners, height)).map((point) => volumeAt(point, 0)),
-          VOLUME_SHADOW_RGB,
-          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND, flat: true },
+      shadowBoxes.push({
+        corners: volumeBoxCorners(
+          {
+            x: Number(wall.aMm.x) + vectors.u.x * (vectors.len / 2),
+            y: Number(wall.aMm.y) + vectors.u.y * (vectors.len / 2),
+          },
+          vectors.u,
+          vectors.len,
+          Number(wall.thicknessMm),
         ),
-      );
+        heightMm: height,
+      });
     }
   }
   for (const room of rooms) {
@@ -52509,6 +52611,8 @@ function volumeScene(project, schemeId, options = {}) {
     // Дерево порядка строится здесь, один раз на сцену: кадру остаётся обход.
     order: volumeOrderTree(faces),
     solids,
+    // Габариты стен для тени дома (таск 181): час кладёт её сам, см. выше.
+    shadowBoxes,
     // Занятые места: габариты вещей, которые человека **не держат** (G264), но
     // по которым видно, где в комнате пусто. Ими пользуется только выбор места
     // старта; ходьба, перенос и «тесно» спрашивают `solids`.
@@ -53418,7 +53522,7 @@ function volumeMiddleOf(points) {
  * Невидимые грани отбрасываются по направлению нормали; двусторонние (полотно
  * двери, рама окна) нормаль поворачивают навстречу.
  */
-function volumeFrame(scene, camera, box, extra = null) {
+function volumeFrame(scene, camera, box, extra = null, tint = null) {
   const basis = volumeBasis(camera);
   const focal = volumeFocal(box);
   const halfWidth = box.width / 2;
@@ -53428,7 +53532,7 @@ function volumeFrame(scene, camera, box, extra = null) {
   // строят на месте — кадр обязан быть верным и там.
   const tree = scene.order === undefined ? volumeOrderTree(scene.faces) : scene.order;
   const take = (face, order) =>
-    volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, polygons, order);
+    volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, polygons, order, tint);
   // Половина — чтобы линия встала **между** гранями, а не спорила с одной из них.
   const rankOf = (face) => volumeOrderRank(tree, camera.at, volumeMiddleOf(face.p)) - 0.5;
   let rank = 0;
@@ -53523,7 +53627,7 @@ function volumeOutlineOrder(polygons) {
  * `order` — место в очереди: ранг из дерева у яруса тел, `null` у всех
  * остальных, и тогда порядок внутри яруса решает дальность, как прежде.
  */
-function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out, order = null) {
+function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out, order = null, tint = null) {
   if (face.line) {
     const line = volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box);
     if (line) {
@@ -53569,7 +53673,7 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     depth: middle,
     order: order === null ? -middle : order,
     layer: face.layer,
-    fill: volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.clear ? VOLUME_CLEAR_ALPHA : 1),
+    fill: volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.clear ? VOLUME_CLEAR_ALPHA : 1, tint),
     // Многоугольник просвечивает (таск 169): взгляд смотрит сквозь него
     // дальше. Рисование об этом не спрашивает — прозрачность уже в цвете.
     clear: Boolean(face.clear),
@@ -53861,8 +53965,6 @@ function volumePolygonCentre(xy) {
 // горизонту долями своей высоты (от этого солнце и ездило), а стоит на своих
 // углах и едет вместе со всем кадром.
 
-const VOLUME_SKY_TOP = "#8dbfe6";
-const VOLUME_SKY_LOW = "#dceaf4";
 /**
  * Земля — **один тон от дома до горизонта** (G237). Слова заказчика: «дом как
  * будто летает в воздухе над землей, а не стоит на земле, надо поставить на
@@ -53889,10 +53991,7 @@ const VOLUME_SKY_LOW = "#dceaf4";
  * Не обведены помещения — плита остаётся единственным полом и остаётся полом
  * по цвету: назвать её землёй значило бы сказать, что пола в доме нет.
  */
-const VOLUME_LAND = "#7ba05d";
 const VOLUME_LAND_RGB = [123, 160, 93];
-const VOLUME_SUN = "#fff3c4";
-const VOLUME_SUN_HALO = "rgba(255, 243, 196, 0.35)";
 const VOLUME_CLOUD = "#ffffff";
 const VOLUME_TRUNK = "#6b5134";
 const VOLUME_CROWN_FAR = "#6f8f5a";
@@ -53923,12 +54022,26 @@ const VOLUME_HILL_NEAR = "#95b291";
 const VOLUME_SKY_NEAR = 0.08;
 
 /**
- * Солнце: сторона света и высота над горизонтом в градусах, угловой радиус —
- * тоже в градусах. Высота небольшая (14°): при взгляде прямо и поле зрения 90°
- * по длинной стороне окна на вертикаль остаётся около ±22°, и солнце, повешенное
- * высоко, не попадало бы в кадр вовсе.
+ * **Солнце в полдень** при верхе чертежа на север: сторона света и высота над
+ * горизонтом в градусах, угловой радиус — тоже в градусах.
+ *
+ * С таска 181 солнце ходит по небу (`volumeSunAt`), и это число стало его
+ * верхней точкой, а не местом. Трое считают от него, и больше никто:
+ *
+ *   - **дуга дня** — в полдень солнце поднимается ровно на `rise`;
+ *   - **вынос земляной плиты** — из `rise` выходит самая длинная тень, которую
+ *     плита обязана удержать (`volumeShadowShift`), и этот размер часть сцены:
+ *     пересчитывать его каждую секунду нельзя, иначе миникарта дышала бы;
+ *   - **гряда гор** стоит напротив полуденного солнца (G238).
+ *
+ * `az` = 90° — это юг: у панорамы ноль смотрит вправо по листу, а при верхе на
+ * север вправо уходит восток, значит юг приходится на 90° (`volumePanoramaAz`).
+ * Высота небольшая (14°) и выбрана не астрономией, а окном: при поле зрения 90°
+ * по длинной стороне на вертикаль остаётся около ±22°, и солнце, повешенное
+ * высоко, не попадало бы в кадр вовсе — то есть не «ходило бы по небу», как
+ * просил заказчик.
  */
-const VOLUME_SUN_AT = { az: 205, rise: 14, size: 2.1 };
+const VOLUME_SUN_AT = { az: 90, rise: 14, size: 2.1 };
 
 /** Облака: сторона света, высота, угловой размер. */
 const VOLUME_CLOUDS = [
@@ -53967,6 +54080,15 @@ const VOLUME_TREES = [
   { az: 200, rise: -2, size: 8.5, kind: "tree" },
   { az: 275, rise: -2.8, size: 11, kind: "spruce" },
   { az: 330, rise: -2.4, size: 9.5, kind: "tree" },
+  // Берёзовая роща (таск 181: «плюс ещё немного берёз»). Березняк узнаётся не
+  // отдельной берёзой, а тем, что их несколько рядом: три белых ствола подряд
+  // в ближнем ряду и ещё три врозь — в среднем и дальнем.
+  { az: 16, rise: -6.4, size: 16, kind: "birch" },
+  { az: 22, rise: -7.1, size: 18.5, kind: "birch" },
+  { az: 28, rise: -6.1, size: 15, kind: "birch" },
+  { az: 145, rise: -2.4, size: 9.2, kind: "birch" },
+  { az: 252, rise: -2.5, size: 9.8, kind: "birch" },
+  { az: 68, rise: 0, size: 3, kind: "birch" },
   // ближний ряд — то, о чём просил заказчик
   { az: 62, rise: -6.5, size: 19, kind: "tree" },
   { az: 128, rise: -6.8, size: 18, kind: "birch" },
@@ -54079,10 +54201,12 @@ function volumeRidge(rises, base) {
 }
 const VOLUME_HILLS = [
   {
+    far: true,
     color: VOLUME_HILL_FAR,
     nodes: volumeRidge([1.5, 2.6, 2.1, 1.2, 1.9, 2.4, 1.4, 2.0, 2.6, 1.7, 1.1, 2.2, 1.8, 2.5], -0.6),
   },
   {
+    far: false,
     color: VOLUME_HILL_NEAR,
     nodes: volumeRidge([0.9, 0.5, 1.4, 1.6, 0.8, 1.1, 1.5, 0.6, 1.2, 1.55, 0.95, 0.7, 1.35, 1.05], -0.6),
   },
@@ -54126,7 +54250,7 @@ const VOLUME_MOUNTAIN_SNOW = "#f1f6fc";
  * Мера та же, что у холмов: гряда выше ландшафта (2,6°), но втрое ниже ближнего
  * дерева панорамы (19°) — то есть это дальний план, а не стена над домом.
  */
-function volumeRange(peaks, rock, snowColor) {
+function volumeRange(peaks, rock, snowColor, far) {
   return peaks.map(([at, size, half, snow]) => ({
     az: (VOLUME_SUN_AT.az + 180 + at + 360) % 360,
     size,
@@ -54134,6 +54258,10 @@ function volumeRange(peaks, rock, snowColor) {
     snow,
     rock,
     snowColor,
+    // Дальний ряд бледнее ближнего, и красит его час (`mood.palette`): цвета
+    // выше остались мерой — по ним видно, что снег светлее камня, — а в кадр
+    // идёт их вечерний или ночной тон.
+    far: Boolean(far),
   }));
 }
 const VOLUME_MOUNTAINS = [
@@ -54146,6 +54274,7 @@ const VOLUME_MOUNTAINS = [
     ],
     VOLUME_MOUNTAIN_FAR_ROCK,
     VOLUME_MOUNTAIN_FAR_SNOW,
+    true,
   ),
   // Ближний ряд — ниже и темнее: он перекрывает подножия дальнего.
   ...volumeRange(
@@ -54157,6 +54286,7 @@ const VOLUME_MOUNTAINS = [
     ],
     VOLUME_MOUNTAIN_ROCK,
     VOLUME_MOUNTAIN_SNOW,
+    false,
   ),
 ];
 
@@ -54293,47 +54423,231 @@ function volumeDrawStrip(ctx, aim, nodes, paint) {
 }
 
 /**
- * Фон кадра: небо с солнцем и облаками, поле, дорога, река, холмы и зелень.
+ * Фон кадра: небо со светилом, звёздами и облаками, поле, а дальше то, что
+ * выбрано видом фона (G273) — ничего, природа или город.
  *
  * Рисуется до сцены и в её сортировке не участвует — ни одна точка фона не
  * знает, где стоит человек. Возвращается строка горизонта: по ней окно рисует
  * миникарту и подписи, и второго её счёта в сборке нет.
  *
- * Порядок — по дальности, и он единственно возможный: дорога и река уходят **за
- * холмы**, а не лежат на них, поэтому полосы раньше гряд; зелень по берегам
- * заслоняет свою реку, поэтому она после полос; деревья по кругу — последними,
- * они ближе всего.
+ * `mood` — снимок часа (`volumeMood`), посчитанный **не здесь**: кадр про время
+ * не считает ничего, он берёт готовые цвета. Без него берётся полдень, то есть
+ * ровно тот фон, что был до таска 181.
+ *
+ * ——— порядок рисования ———
+ *
+ * Он по дальности и единственно возможный. Небо, светило, звёзды и облака
+ * ложатся **до поля**: заходящее солнце обязано уходить за горизонт, а не
+ * лежать на траве, и поле его подрезает само — второго способа отрезать
+ * половину диска не нужно. Дальше дорога и река уходят **за холмы**, а не
+ * лежат на них, поэтому полосы раньше гряд; зелень по берегам заслоняет свою
+ * реку, поэтому она после полос; деревья по кругу — последними, они ближе
+ * всего.
  */
-function volumeDrawBackdrop(ctx, box, camera) {
+function volumeDrawBackdrop(ctx, box, camera, mood = null) {
+  const hour = mood || VOLUME_MOOD_NOON;
+  const palette = hour.palette;
   const horizonY = volumeHorizon(camera, box);
   const line = Math.max(-box.height, Math.min(box.height * 2, horizonY));
   const sky = ctx.createLinearGradient(0, Math.min(0, line - box.height), 0, line);
-  sky.addColorStop(0, VOLUME_SKY_TOP);
-  sky.addColorStop(1, VOLUME_SKY_LOW);
+  sky.addColorStop(0, hour.sky.top);
+  sky.addColorStop(1, hour.sky.low);
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, box.width, Math.max(0, line));
+  const aim = volumeSkyAim(camera, box);
+  // Светило и звёзды — до поля: они за горизонтом и обрезаются им.
+  if (hour.stars > 0) volumeDrawStars(ctx, aim, hour);
+  volumeDrawSun(ctx, aim, hour);
+  volumeDrawMoon(ctx, aim, hour);
+  if (hour.kind !== "plain") for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, aim, cloud, palette);
   if (line < box.height) {
     // Земля — плоским тоном (G237): тем же, которым красится плита чертежа, и
-    // дом от этого стоит на ней, а не на доске. Растяжки здесь больше нет — см.
-    // `VOLUME_LAND`.
-    ctx.fillStyle = VOLUME_LAND;
+    // дом от этого стоит на ней, а не на доске. Час красит обе одной краской
+    // (`volumeTintRgb`), поэтому стык не виден и в полночь.
+    ctx.fillStyle = palette.land;
     ctx.fillRect(0, Math.max(0, line), box.width, box.height - Math.max(0, line));
   }
-  const aim = volumeSkyAim(camera, box);
-  volumeDrawSun(ctx, aim);
-  for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, aim, cloud);
+  if (hour.kind === "plain") return line;
+  if (hour.kind === "city") {
+    volumeDrawCity(ctx, aim, hour);
+    return line;
+  }
   // Горы — самое далёкое, что есть в панораме: раньше всего, что стоит на
   // земле (G238).
-  for (const peak of VOLUME_MOUNTAINS) volumeDrawPeak(ctx, aim, peak);
-  volumeDrawStrip(ctx, aim, VOLUME_ROAD, (run) => volumeStripFill(ctx, run, VOLUME_ROAD_NEAR, VOLUME_ROAD_FAR));
-  volumeDrawStrip(ctx, aim, VOLUME_RIVER, (run) => volumeStripFill(ctx, run, VOLUME_RIVER_NEAR, VOLUME_RIVER_FAR));
+  for (const peak of VOLUME_MOUNTAINS) volumeDrawPeak(ctx, aim, peak, palette);
+  volumeDrawStrip(ctx, aim, VOLUME_ROAD, (run) => volumeStripFill(ctx, run, palette.roadNear, palette.roadFar));
+  volumeDrawStrip(ctx, aim, VOLUME_RIVER, (run) => volumeStripFill(ctx, run, palette.riverNear, palette.riverFar));
   // Гряды — поверх дальних концов полос: дорога уходит за холм, а не по нему.
-  for (const ridge of VOLUME_HILLS) volumeDrawStrip(ctx, aim, ridge.nodes, () => ridge.color);
-  for (const green of VOLUME_RIVER_GREENS) volumeDrawTree(ctx, aim, green);
+  for (const ridge of VOLUME_HILLS) {
+    volumeDrawStrip(ctx, aim, ridge.nodes, () => (ridge.far ? palette.hillFar : palette.hillNear));
+  }
+  for (const green of VOLUME_RIVER_GREENS) volumeDrawTree(ctx, aim, green, palette);
   // Дальние раньше ближних: в этом порядке они и стоят в списке, и переставлять
   // их нечем — у фона нет дальности, есть только порядок рисования.
-  for (const tree of VOLUME_TREES) volumeDrawTree(ctx, aim, tree);
+  for (const tree of VOLUME_TREES) volumeDrawTree(ctx, aim, tree, palette);
   return line;
+}
+
+// ——— город (G273) ————————————————————————————————————————————————————————
+//
+// Улицы, парковка, дома, окна. Порядок тот же по смыслу, что у природы: улицы
+// лежат на земле и уходят к горизонту, дома стоят на них, машины — перед
+// ближними домами, зелень вдоль улиц. Дальний ряд домов рисуется раньше
+// ближнего — он за ним.
+function volumeDrawCity(ctx, aim, hour) {
+  const palette = hour.palette;
+  for (let index = 0; index < VOLUME_CITY_STREETS.length; index += 1) {
+    volumeDrawStrip(ctx, aim, VOLUME_CITY_STREETS[index], (run) =>
+      volumeStripFill(ctx, run, palette.asphalt, palette.asphaltFar),
+    );
+    volumeDrawStrip(ctx, aim, VOLUME_CITY_MARKS[index], () => palette.mark);
+  }
+  for (let index = 0; index < VOLUME_CITY.length; index += 1) {
+    if (!VOLUME_CITY[index].far) continue;
+    volumeDrawBlock(ctx, aim, VOLUME_CITY[index], index, hour);
+  }
+  for (let index = 0; index < VOLUME_CITY.length; index += 1) {
+    if (VOLUME_CITY[index].far) continue;
+    volumeDrawBlock(ctx, aim, VOLUME_CITY[index], index, hour);
+  }
+  for (const spot of VOLUME_CITY_PARK) volumeDrawCar(ctx, aim, spot, palette);
+  for (const green of VOLUME_CITY_GREENS) volumeDrawTree(ctx, aim, green, palette);
+}
+
+/**
+ * Многоэтажка: лицо, бок и сетка окон.
+ *
+ * Бок нужен, чтобы дом читался домом, а не вывеской: он уходит в ту сторону, в
+ * которую от зрителя отвёрнут, то есть считается из самой панорамы, а не
+ * выбирается на глаз. Окно светится или нет, решает `volumeCityWindowLit`, и
+ * светящееся **не красится часом**: светит — значит не темнеет.
+ */
+function volumeDrawBlock(ctx, aim, block, index, hour) {
+  const palette = hour.palette;
+  const left = volumeSkyPoint(aim, block.az - block.half, block.top);
+  const right = volumeSkyPoint(aim, block.az + block.half, block.top);
+  const footLeft = volumeSkyPoint(aim, block.az - block.half, block.base);
+  const footRight = volumeSkyPoint(aim, block.az + block.half, block.base);
+  if (!left || !right || !footLeft || !footRight) return;
+  ctx.fillStyle = block.far ? palette.wallFar : palette.wall;
+  ctx.beginPath();
+  ctx.moveTo(left.x, left.y);
+  ctx.lineTo(right.x, right.y);
+  ctx.lineTo(footRight.x, footRight.y);
+  ctx.lineTo(footLeft.x, footLeft.y);
+  ctx.closePath();
+  ctx.fill();
+  // Окна: сетка по этажам и секциям, с полями по краям лица. Точки считаются
+  // по лицу дома (`volumeFaceSpot`), поэтому сетка едет вместе с перспективой:
+  // у края широкого окна дом крупнее, и окна у него крупнее тоже.
+  const lit = hour.cityLit;
+  const pad = 0.14;
+  const cellX = (1 - pad * 2) / block.bays;
+  const cellY = (1 - pad * 2) / block.floors;
+  for (let floor = 0; floor < block.floors; floor += 1) {
+    for (let bay = 0; bay < block.bays; bay += 1) {
+      const fx = pad + cellX * (bay + 0.12);
+      const fy = pad + cellY * (floor + 0.14);
+      const a = volumeCitySpot(left, right, footLeft, footRight, fx, fy);
+      const b = volumeCitySpot(left, right, footLeft, footRight, fx + cellX * 0.76, fy + cellY * 0.72);
+      const width = b.x - a.x;
+      const height = b.y - a.y;
+      if (!(Math.abs(width) > 0.6) || !(Math.abs(height) > 0.6)) continue;
+      ctx.fillStyle = volumeCityWindowLit(index, floor, bay, lit) ? VOLUME_CITY_LIGHT : palette.glass;
+      ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(width), Math.abs(height));
+    }
+  }
+  // Крыша плоской чертой: дом с ровным верхом читается коробкой, а с чертой —
+  // домом с парапетом.
+  ctx.fillStyle = block.far ? palette.wallSideFar : palette.wallSide;
+  const roofHeight = Math.max(1, Math.abs(footLeft.y - left.y) * 0.02);
+  ctx.beginPath();
+  ctx.moveTo(left.x, left.y);
+  ctx.lineTo(right.x, right.y);
+  ctx.lineTo(right.x, right.y + roofHeight);
+  ctx.lineTo(left.x, left.y + roofHeight);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** Точка на лице дома по долям: верх-низ и лево-право, с перспективой. */
+function volumeCitySpot(left, right, footLeft, footRight, fx, fy) {
+  const topX = left.x + (right.x - left.x) * fx;
+  const topY = left.y + (right.y - left.y) * fx;
+  const lowX = footLeft.x + (footRight.x - footLeft.x) * fx;
+  const lowY = footLeft.y + (footRight.y - footLeft.y) * fx;
+  return { x: topX + (lowX - topX) * fy, y: topY + (lowY - topY) * fy };
+}
+
+/** Машина: кузов и крыша двумя прямоугольниками — силуэт, а не модель. */
+function volumeDrawCar(ctx, aim, spot, palette) {
+  const base = volumeSkyPoint(aim, spot.az, spot.rise);
+  if (!base) return;
+  const height = Math.max(3, spot.size * DEG * base.scale);
+  const width = height * 2.4;
+  ctx.fillStyle = palette.car[spot.car % palette.car.length];
+  ctx.fillRect(base.x - width / 2, base.y - height * 0.62, width, height * 0.62);
+  ctx.fillRect(base.x - width * 0.28, base.y - height, width * 0.56, height * 0.42);
+}
+
+/**
+ * Звёзды: точки на своих местах, одной яркостью на всё небо.
+ *
+ * Яркость — доля ночи (`mood.stars`), и она в прозрачности, а не в цвете: небо
+ * под ними своё на каждый час, и звезда обязана проступать сквозь сумерки, а
+ * не спорить с ними готовым серым.
+ */
+function volumeDrawStars(ctx, aim, hour) {
+  ctx.fillStyle = "rgba(255,255,255," + Math.round(hour.stars * 85) / 100 + ")";
+  for (const star of VOLUME_STARS) {
+    const at = volumeSkyPoint(aim, star.az, star.rise);
+    if (!at) continue;
+    const radius = Math.max(0.7, star.size * DEG * at.scale * 0.1);
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Солнце: диск с ореолом. Цвет и место — из снимка часа; у горизонта оно рыжее
+// и подрезано полем, под горизонтом его нет вовсе.
+function volumeDrawSun(ctx, aim, hour) {
+  if (hour.sun.height < -3) return;
+  const at = volumeSkyPoint(aim, hour.sun.az, hour.sun.rise);
+  if (!at) return;
+  const radius = Math.max(4, VOLUME_SUN_AT.size * DEG * at.scale);
+  ctx.fillStyle = hour.sunColors.halo;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius * 2.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = hour.sunColors.body;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * Месяц: не круг, а серп — заказчик назвал его месяцем, и узнаётся он формой.
+ *
+ * Серп — область между двумя окружностями, и рисуется он **одним** путём:
+ * внешняя дуга по часовой, внутренняя против (правило непустого числа
+ * оборотов), и внутренняя не вычитает фон, а вырезает дыру в самой фигуре.
+ * Второй заливки «цветом неба» здесь быть не может: под месяцем растяжка, и
+ * заплатка плоским цветом была бы видна.
+ */
+function volumeDrawMoon(ctx, aim, hour) {
+  if (hour.moon.height < -2) return;
+  const at = volumeSkyPoint(aim, hour.moon.az, hour.moon.rise);
+  if (!at) return;
+  const radius = Math.max(4, VOLUME_MOON_SIZE_DEG * DEG * at.scale);
+  ctx.fillStyle = "rgba(242,243,228," + Math.round(Math.max(0.35, Math.min(1, hour.stars + 0.35)) * 100) / 100 + ")";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+  // Вырезающая окружность сдвинута больше чем на половину радиуса: при меньшем
+  // сдвиге серп в своём размере (пара десятков точек на экране) читается
+  // кольцом, а не месяцем.
+  ctx.arc(at.x - radius * 0.58, at.y - radius * 0.16, radius * 0.9, 0, Math.PI * 2, true);
+  ctx.fill();
 }
 
 // Вершина: треугольник камня и шапка снега на его верхушке. Шапка считается
@@ -54341,12 +54655,12 @@ function volumeDrawBackdrop(ctx, box, camera) {
 // отдельной стороны света у неё нет: снег лежит на той же горе, а не рядом с
 // ней. Низ шапки с изломом, иначе снеговая линия выходит начерченной по
 // линейке.
-function volumeDrawPeak(ctx, aim, peak) {
+function volumeDrawPeak(ctx, aim, peak, palette) {
   const apex = volumeSkyPoint(aim, peak.az, peak.size);
   const left = volumeSkyPoint(aim, peak.az - peak.half, VOLUME_MOUNTAIN_BASE);
   const right = volumeSkyPoint(aim, peak.az + peak.half, VOLUME_MOUNTAIN_BASE);
   if (!apex || !left || !right) return;
-  ctx.fillStyle = peak.rock;
+  ctx.fillStyle = peak.far ? palette.rockFar : palette.rock;
   ctx.beginPath();
   ctx.moveTo(left.x, left.y);
   ctx.lineTo(apex.x, apex.y);
@@ -54359,7 +54673,7 @@ function volumeDrawPeak(ctx, aim, peak) {
   });
   const a = down(left);
   const b = down(right);
-  ctx.fillStyle = peak.snowColor;
+  ctx.fillStyle = peak.far ? palette.snowFar : palette.snow;
   ctx.beginPath();
   ctx.moveTo(apex.x, apex.y);
   ctx.lineTo(b.x, b.y);
@@ -54369,25 +54683,11 @@ function volumeDrawPeak(ctx, aim, peak) {
   ctx.fill();
 }
 
-function volumeDrawSun(ctx, aim) {
-  const at = volumeSkyPoint(aim, VOLUME_SUN_AT.az, VOLUME_SUN_AT.rise);
-  if (!at) return;
-  const radius = Math.max(4, VOLUME_SUN_AT.size * DEG * at.scale);
-  ctx.fillStyle = VOLUME_SUN_HALO;
-  ctx.beginPath();
-  ctx.arc(at.x, at.y, radius * 2.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = VOLUME_SUN;
-  ctx.beginPath();
-  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function volumeDrawCloud(ctx, aim, cloud) {
+function volumeDrawCloud(ctx, aim, cloud, palette) {
   const at = volumeSkyPoint(aim, cloud.az, cloud.rise);
   if (!at) return;
   const radius = Math.max(4, cloud.size * DEG * at.scale * 0.4);
-  ctx.fillStyle = VOLUME_CLOUD;
+  ctx.fillStyle = palette.cloud;
   ctx.beginPath();
   ctx.arc(at.x - radius, at.y, radius * 0.72, 0, Math.PI * 2);
   ctx.arc(at.x, at.y - radius * 0.3, radius, 0, Math.PI * 2);
@@ -54398,7 +54698,7 @@ function volumeDrawCloud(ctx, aim, cloud) {
 // Дерево, ель и куст — тремя кистями по одному и тому же правилу: основание на
 // своей высоте над горизонтом, высота угловая. Своей картинки у фона нет
 // нарочно: это рисунок за окном, а не часть чертежа.
-function volumeDrawTree(ctx, aim, tree) {
+function volumeDrawTree(ctx, aim, tree, palette) {
   const base = volumeSkyPoint(aim, tree.az, tree.rise);
   if (!base) return;
   const height = Math.max(6, tree.size * DEG * base.scale);
@@ -54408,7 +54708,7 @@ function volumeDrawTree(ctx, aim, tree) {
   const far = tree.rise > -1.2;
   if (tree.kind === "bush") {
     const radius = height * 0.5;
-    ctx.fillStyle = VOLUME_BUSH;
+    ctx.fillStyle = palette.bush;
     ctx.beginPath();
     ctx.arc(base.x - radius * 0.8, base.y - radius * 0.6, radius * 0.62, 0, Math.PI * 2);
     ctx.arc(base.x + radius * 0.75, base.y - radius * 0.5, radius * 0.56, 0, Math.PI * 2);
@@ -54417,7 +54717,7 @@ function volumeDrawTree(ctx, aim, tree) {
     return;
   }
   const slim = tree.kind === "spruce" || tree.kind === "poplar" || tree.kind === "birch";
-  ctx.fillStyle = tree.kind === "birch" ? VOLUME_BIRCH_TRUNK : VOLUME_TRUNK;
+  ctx.fillStyle = tree.kind === "birch" ? palette.birchTrunk : palette.trunk;
   const trunk = Math.max(1, height * (slim ? 0.05 : 0.08));
   const bare = tree.kind === "spruce" ? 0.2 : tree.kind === "poplar" ? 0.3 : tree.kind === "birch" ? 0.58 : 0.45;
   const trunkTop = base.y - height * bare;
@@ -54426,14 +54726,14 @@ function volumeDrawTree(ctx, aim, tree) {
   // Их три, и мельче точки они не бывают — на дальнем ряду чёрточка выродилась
   // бы в мусор, и её там просто нет.
   if (tree.kind === "birch" && trunk > 2) {
-    ctx.fillStyle = VOLUME_BIRCH_MARK;
+    ctx.fillStyle = palette.birchMark;
     for (const part of [0.3, 0.55, 0.78]) {
       const y = base.y - (base.y - trunkTop) * part;
       ctx.fillRect(base.x - trunk / 2, y, trunk * (part > 0.5 ? 0.55 : 0.75), Math.max(1, trunk * 0.3));
     }
   }
   if (tree.kind === "spruce") {
-    ctx.fillStyle = far ? VOLUME_CROWN_FAR : VOLUME_CROWN_DARK;
+    ctx.fillStyle = far ? palette.crownFar : palette.crownDark;
     const half = height * 0.27;
     for (const level of [0, 1, 2]) {
       const bottom = base.y - height * (0.18 + level * 0.26);
@@ -54451,7 +54751,7 @@ function volumeDrawTree(ctx, aim, tree) {
   // Тополь: узкая высокая крона в одно пятно — силуэт у него такой и есть,
   // и издали он отличается от круглого дерева одним только очерком.
   if (tree.kind === "poplar") {
-    ctx.fillStyle = far ? VOLUME_CROWN_FAR : VOLUME_CROWN_DARK;
+    ctx.fillStyle = far ? palette.crownFar : palette.crownDark;
     ctx.beginPath();
     ctx.ellipse(base.x, base.y - height * 0.6, height * 0.17, height * 0.44, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -54460,7 +54760,7 @@ function volumeDrawTree(ctx, aim, tree) {
   // Ива: широкая плоская крона и три свисающие пряди под ней. Стоит она у
   // воды — там её и ставит берег реки (G232).
   if (tree.kind === "willow") {
-    ctx.fillStyle = far ? VOLUME_CROWN_FAR : VOLUME_WILLOW;
+    ctx.fillStyle = far ? palette.crownFar : palette.willow;
     const wide = height * 0.46;
     ctx.beginPath();
     ctx.ellipse(base.x, base.y - height * 0.62, wide, height * 0.3, 0, 0, Math.PI * 2);
@@ -54474,7 +54774,7 @@ function volumeDrawTree(ctx, aim, tree) {
   }
   // Берёза: крона светлее и жиже круглого дерева — два пятна вместо трёх.
   if (tree.kind === "birch") {
-    ctx.fillStyle = far ? VOLUME_CROWN_FAR : VOLUME_BIRCH_CROWN;
+    ctx.fillStyle = far ? palette.crownFar : palette.birchCrown;
     const leaf = height * 0.3;
     ctx.beginPath();
     ctx.ellipse(base.x, base.y - height * 0.78, leaf * 0.85, leaf * 1.15, 0, 0, Math.PI * 2);
@@ -54483,7 +54783,7 @@ function volumeDrawTree(ctx, aim, tree) {
     ctx.fill();
     return;
   }
-  ctx.fillStyle = far ? VOLUME_CROWN_FAR : VOLUME_CROWN;
+  ctx.fillStyle = far ? palette.crownFar : palette.crown;
   const radius = height * 0.34;
   ctx.beginPath();
   ctx.arc(base.x, base.y - height * 0.66, radius, 0, Math.PI * 2);
@@ -54491,6 +54791,679 @@ function volumeDrawTree(ctx, aim, tree) {
   ctx.arc(base.x + radius * 0.7, base.y - height * 0.5, radius * 0.6, 0, Math.PI * 2);
   ctx.fill();
 }
+
+// ——— час суток: одно непрерывное время (таск 181, G282) —————————————————
+//
+// Слова заказчика: «сразу заложи по фону что бы можно было указывать время
+// суток и фон менялся, утро, день, вечер, ночь. при чем плавно менялся. на небе
+// должно двигаться солнце днём и месяц ночью… ну и само собой в виде города
+// должны загораться окна и т.д. как живой город, и внутри объекта меняться
+// освещение». И отдельно: «ночь не сильно тёмная должна быть, что бы было
+// понятно что ночь, но различимо всё».
+//
+// ——— это не четыре картинки ————————————————————————————————————————————
+//
+// Утро, день, вечер и ночь здесь — **слова, а не состояния**. Считается одно
+// число: высота солнца над горизонтом в этот миг. Из неё выходит всё — цвет
+// неба, тон комнаты, яркость окон города, звёзды, длина и сила тени, — и
+// выходит непрерывно: ни одного `if (ночь)` в рисовании нет. Слово нужно
+// только человеку в окне параметров, и считается оно по часам
+// (`volumeDayPhase`), а не по высоте: «вечер» наступает в шесть, даже если небо
+// ещё светлое.
+//
+// ——— где темнеет ———————————————————————————————————————————————————————
+//
+// Ночь — **не завеса поверх кадра**, а доля в цвете каждой грани
+// (`volumeTintRgb` в `volumeFill`). Завеса была бы и дешевле, и неправильна
+// сразу дважды: она легла бы на небо, которому ночью нужна темнота глубже
+// комнатной, и она не дала бы **светящемуся** окну города остаться светящимся —
+// а свет в окнах заказчик назвал прямо. Цена у доли в цвете нулевая: три
+// умножения на грань в том же счёте, где уже считается светлота лампы.
+//
+// Потолок доли — `VOLUME_NIGHT_SHARE` = 0,45, и это ответ на «ночь не сильно
+// тёмная»: стена 216·212·204 ночью становится 127·128·136 — тёмно-серой, но
+// различимой, а метки, их контуры и рамка выделения не темнеют вовсе (контур и
+// стрелка — линии, а линии часом не красятся). То есть ночь узнаётся небом и
+// тоном, а не потерей зрения.
+//
+// ——— раз в секунду, а при стоячем времени — никогда ———————————————————
+//
+// Слово заказчика: «достаточно оптимизировано что бы было, не каждый кадр, а,
+// хотя бы раз в секунду». Поэтому всё, что зависит от времени, собрано в один
+// снимок — `volumeMood` — и считается не в кадре: поле просит его не чаще раза
+// в секунду (`VOLUME_MOOD_MS`) и держит готовым. Кадр берёт готовые цвета и не
+// считает про время ничего. При остановленном времени снимок считается **один
+// раз**: ни пересчёта, ни перерисовки, ни таймера.
+
+/** Минут в сутках. */
+const VOLUME_DAY_MIN = 1440;
+/** Рассвет и закат по умолчанию — слова заказчика: 9:00 и 21:00. */
+const VOLUME_SUNRISE_MIN = 9 * 60;
+const VOLUME_SUNSET_MIN = 21 * 60;
+/**
+ * Ускорение времени. Числа — слова заказчика (480, а не 280: «это опечатка»),
+ * и каждое читается как «за сколько минут проходят сутки»:
+ * 60 → 24 минуты, 120 → 12, 240 → 6, 480 → 3, 960 → 1,5.
+ */
+const VOLUME_CLOCK_SPEEDS = [60, 120, 240, 480, 960];
+const VOLUME_CLOCK_SPEED_DEFAULT = 60;
+/** Чаще этого фон не пересчитывается — прямое требование заказчика. */
+const VOLUME_MOOD_MS = 1000;
+/** Тон ночи и его потолок: куда и насколько тянется цвет к полуночи. */
+const VOLUME_NIGHT_RGB = [18, 26, 54];
+const VOLUME_NIGHT_SHARE = 0.45;
+/**
+ * Месяц: высота в середине ночи и угловой размер. Ниже солнца и мельче его —
+ * иначе ночь читалась бы вторым днём.
+ */
+const VOLUME_MOON_RISE_DEG = 11;
+const VOLUME_MOON_SIZE_DEG = 1.9;
+
+/** Доля в отрезке, зажатая по краям: ею считается всё непрерывное ниже. */
+function volumeShare(value, from, to) {
+  if (from === to) return value >= to ? 1 : 0;
+  return Math.max(0, Math.min(1, (value - from) / (to - from)));
+}
+
+/** Минуты суток у настоящих часов. */
+function volumeDayMinutesOf(date) {
+  const at = date || new Date();
+  return at.getHours() * 60 + at.getMinutes() + at.getSeconds() / 60;
+}
+
+/** Минуты в сутках, с переходом через полночь в обе стороны. */
+function volumeWrapMinutes(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value)) return 0;
+  return ((value % VOLUME_DAY_MIN) + VOLUME_DAY_MIN) % VOLUME_DAY_MIN;
+}
+
+/** Часы и минуты строкой — для контрола с часами и для плашки. */
+function volumeClockText(minutes) {
+  const value = volumeWrapMinutes(minutes);
+  const hours = Math.floor(value / 60);
+  const left = Math.floor(value - hours * 60);
+  return String(hours).padStart(2, "0") + ":" + String(left).padStart(2, "0");
+}
+
+/** «09:30» → минуты суток. `null` — не время. */
+function volumeClockParse(text) {
+  const match = /^\s*(\d{1,2})\s*[:.]\s*(\d{1,2})/.exec(String(text || ""));
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!(hours >= 0 && hours < 24) || !(minutes >= 0 && minutes < 60)) return null;
+  return hours * 60 + minutes;
+}
+
+/**
+ * Часы объёма.
+ *
+ * Идущее время — **не накопитель, а формула**: `откуда + (сейчас − когда) ×
+ * ускорение`. Поэтому пока объём закрыт, ничего не идёт и не считается, а
+ * вернувшийся человек видит время, которое «прошло» за его отсутствие, с
+ * одного умножения. Накопитель требовал бы живого таймера в закрытом режиме.
+ *
+ * `fixed` — время стоит: ровно то, что человек поставил, и ни пересчёта, ни
+ * таймера.
+ */
+function volumeClockNow(nowMs, date, speed = VOLUME_CLOCK_SPEED_DEFAULT) {
+  return { fixed: false, fromMin: volumeDayMinutesOf(date), atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
+}
+function volumeClockFixed(minutes, speed = VOLUME_CLOCK_SPEED_DEFAULT) {
+  return { fixed: true, fromMin: volumeWrapMinutes(minutes), atMs: 0, speed: volumeClockSpeedOf(speed) };
+}
+
+/** Своё ускорение: чужое число не берётся — у списка ровно пять пунктов. */
+function volumeClockSpeedOf(speed) {
+  const value = Number(speed);
+  return VOLUME_CLOCK_SPEEDS.includes(value) ? value : VOLUME_CLOCK_SPEED_DEFAULT;
+}
+
+/** Сколько минут занимают сутки при этом ускорении: 24, 12, 6, 3 и 1,5. */
+function volumeClockDayMinutes(speed) {
+  return VOLUME_DAY_MIN / volumeClockSpeedOf(speed);
+}
+
+/** Который час на часах объёма. */
+function volumeClockMinutes(clock, nowMs) {
+  if (!clock) return VOLUME_SUNRISE_MIN;
+  if (clock.fixed) return volumeWrapMinutes(clock.fromMin);
+  const gone = (Number(nowMs) - Number(clock.atMs)) / 60000;
+  return volumeWrapMinutes(Number(clock.fromMin) + gone * volumeClockSpeedOf(clock.speed));
+}
+
+/**
+ * Сменить ускорение, не сдвинув время: часы перецепляются за ту минуту,
+ * которую показывают сейчас. Иначе выбор «быстрее» прыгал бы временем.
+ */
+function volumeClockAt(clock, nowMs, speed) {
+  const minutes = volumeClockMinutes(clock, nowMs);
+  if (clock && clock.fixed) return volumeClockFixed(minutes, speed);
+  return { fixed: false, fromMin: minutes, atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
+}
+
+// ——— место объекта (таск 188) ——————————————————————————————————————————
+//
+// Координаты и направление верха чертежа — **свойства объекта** (решение
+// заказчика в G283 и G284), и живут они в `project.site`. Объём их только
+// читает, и читает **чужой дверью**: `projectCoords` и `projectTopAzimuth` —
+// единственные хозяева этих полей, они же разбирают мусор и пустоту. Свой
+// разбор здесь был бы вторым ответом на вопрос «где стоит дом», и разошёлся бы
+// он ровно в тот день, когда формат поправят.
+//
+// Нет координат — рассвет и закат берутся умолчанием заказчика (9:00 и 21:00),
+// нет направления — верх чертежа смотрит на север. Ни одного поля объём не
+// создаёт: открыть объём у объекта без свойств — ноль изменений (G68).
+
+/**
+ * Место объекта: широта, долгота и направление верха чертежа (в градусах от
+ * севера по часовой стрелке).
+ */
+function volumeSiteOf(project) {
+  const coords = projectCoords(project);
+  return {
+    latDeg: coords ? coords.lat : null,
+    lonDeg: coords ? coords.lon : null,
+    topDeg: projectTopAzimuth(project),
+  };
+}
+
+/**
+ * Рассвет и закат.
+ *
+ * Без координат — умолчание заказчика: 9:00 и 21:00. С координатами —
+ * по широте и дню года, с поправкой на долготу и часовой поясом браузера.
+ *
+ * **Чего здесь нет нарочно:** уравнения времени (до четверти часа у солнечного
+ * полудня) и преломления сверх стандартных 50′. Часы объёма — не астрономия, и
+ * четверть часа на рассвете видна только в таблице, а не в кадре.
+ *
+ * Полярный день и полярная ночь не ломают счёт: в первом сутки целиком день, во
+ * втором — ночь, и это правда, а не вырождение.
+ */
+function volumeDayTimes(site, date) {
+  // `Number(null)` — это нуль, то есть экватор: пустые координаты обязаны
+  // читаться пустыми, а не нулевой широтой в Атлантике.
+  const number = (value) => (value === null || value === undefined || value === "" ? NaN : Number(value));
+  const latDeg = site ? number(site.latDeg) : NaN;
+  const lonDeg = site ? number(site.lonDeg) : NaN;
+  if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg) || Math.abs(latDeg) > 90) {
+    return { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false, north: true };
+  }
+  const at = date || new Date();
+  const start = Date.UTC(at.getFullYear(), 0, 1);
+  const day = Math.floor((Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) - start) / 86400000) + 1;
+  const decl = 23.44 * Math.sin(((2 * Math.PI) / 365) * (284 + day)) * DEG;
+  const lat = latDeg * DEG;
+  const zenith = -0.833 * DEG;
+  const cosH =
+    (Math.sin(zenith) - Math.sin(lat) * Math.sin(decl)) / (Math.cos(lat) * Math.cos(decl));
+  const tzHours = -at.getTimezoneOffset() / 60;
+  const noonMin = (12 - (lonDeg - 15 * tzHours) / 15) * 60;
+  const north = latDeg >= 0;
+  if (!(cosH > -1)) return { riseMin: noonMin - 720, setMin: noonMin + 720, bySite: true, north };
+  if (!(cosH < 1)) return { riseMin: noonMin, setMin: noonMin, bySite: true, north };
+  const half = (Math.acos(cosH) / DEG / 15) * 60;
+  return { riseMin: noonMin - half, setMin: noonMin + half, bySite: true, north };
+}
+
+/**
+ * Как час называется. Отрезки считаются от рассвета и заката, а не от
+ * полуночи: «утро» — это вокруг рассвета, а не «до двенадцати».
+ *
+ * При умолчании (9:00 и 21:00) выходит: ночь до 8, утро 8–12, день 12–18,
+ * вечер 18–22, дальше снова ночь.
+ */
+function volumeDayPhase(minutes, times) {
+  const rise = times ? Number(times.riseMin) : VOLUME_SUNRISE_MIN;
+  const set = times ? Number(times.setMin) : VOLUME_SUNSET_MIN;
+  const now = volumeWrapMinutes(minutes);
+  const inside = (from, to) => {
+    const a = volumeWrapMinutes(from);
+    const b = volumeWrapMinutes(to);
+    return a <= b ? now >= a && now < b : now >= a || now < b;
+  };
+  if (inside(rise - 60, rise + 180)) return "morning";
+  if (inside(set - 180, set + 60)) return "evening";
+  if (inside(rise + 180, set - 180)) return "day";
+  return "night";
+}
+
+/**
+ * Сторона света панорамы из стороны света по компасу.
+ *
+ * У панорамы `az` — угол в осях чертежа: ноль смотрит вправо по листу, 90° —
+ * вниз. У компаса ноль на севере и счёт по часовой стрелке. Верх листа смотрит
+ * на `topDeg` (таск 188), значит вправо по листу — это `topDeg + 90°`, и
+ * перевод выходит один:
+ *
+ *     az = компас − topDeg − 90°
+ *
+ * Проверка: верх на север (`topDeg` = 0), полдень, солнце на юге (компас 180°)
+ * — `az` = 90°, то есть вниз по листу. Ровно туда, куда на чертеже с севером
+ * вверху смотрит юг.
+ */
+function volumePanoramaAz(compassDeg, topDeg = 0) {
+  return (((Number(compassDeg) - (Number(topDeg) || 0) - 90) % 360) + 360) % 360;
+}
+
+/**
+ * Где светило в этот миг.
+ *
+ * `height` — высота над горизонтом в градусах, и она **уходит в минус**: ею
+ * считается вся плавность (сумерки, звёзды, тон комнаты), и обрыв на нуле дал
+ * бы ступеньку ровно там, где её лучше всего видно. Дуга — половина синусоиды
+ * от восхода до заката и такая же, опрокинутая, от заката до восхода: в
+ * середине дня солнце выше всего, в середине ночи — ниже.
+ *
+ * Сторона света идёт по компасу: восход на востоке, полдень на юге (в южном
+ * полушарии — на севере), закат на западе. Высота в полдень —
+ * `VOLUME_SUN_AT.rise`, и число это не астрономическое, а оконное: при поле
+ * зрения 90° по длинной стороне на вертикаль остаётся около ±22°, и солнце,
+ * повешенное по-настоящему высоко, не попадало бы в кадр вовсе — то есть не
+ * «ходило бы по небу», как просил заказчик.
+ */
+function volumeSunAt(minutes, times, topDeg = 0) {
+  const rise = times ? Number(times.riseMin) : VOLUME_SUNRISE_MIN;
+  const set = times ? Number(times.setMin) : VOLUME_SUNSET_MIN;
+  const north = !times || times.north !== false;
+  const dayLen = set - rise;
+  const now = volumeWrapMinutes(minutes);
+  const peak = Number(VOLUME_SUN_AT.rise) || 14;
+  // Полярная ночь: солнце не встаёт вовсе.
+  if (!(dayLen > 0)) {
+    return { up: false, height: -peak, az: volumePanoramaAz(north ? 180 : 0, topDeg), rise: -peak, share: 0 };
+  }
+  // Полярный день: солнце не садится, и середина суток — его верх.
+  if (dayLen >= VOLUME_DAY_MIN) {
+    const share = volumeWrapMinutes(now - rise) / VOLUME_DAY_MIN;
+    const height = peak * Math.max(0.15, Math.sin(Math.PI * share));
+    return { up: true, height, rise: height, az: volumeSunAz(share, north, topDeg), share };
+  }
+  const since = volumeWrapMinutes(now - rise);
+  if (since <= dayLen) {
+    const share = since / dayLen;
+    const height = peak * Math.sin(Math.PI * share);
+    return { up: true, height, rise: height, az: volumeSunAz(share, north, topDeg), share };
+  }
+  // Ночь: та же дуга, опрокинутая, со своей длиной. На рассвете и закате обе
+  // половины дают нуль — значит перелома в цвете на стыке нет.
+  const nightLen = VOLUME_DAY_MIN - dayLen;
+  const share = (since - dayLen) / nightLen;
+  const height = -peak * Math.sin(Math.PI * share);
+  // Ночью солнце идёт **под** землёй и дальше в ту же сторону: с запада через
+  // полночь к востоку. В кадре его нет (`volumeDrawSun` молчит ниже −3°), но
+  // гадать о стороне света, которую не рисуют, незачем — путь один и тот же.
+  const compass = north ? 270 + 180 * share : 270 - 180 * share;
+  return { up: false, height, rise: height, az: volumePanoramaAz(compass, topDeg), share };
+}
+
+/** Сторона света светила по доле пути: восход на востоке, закат на западе. */
+function volumeSunAz(share, north, topDeg) {
+  const compass = north ? 90 + 180 * share : 90 - 180 * share;
+  return volumePanoramaAz(compass, topDeg);
+}
+
+/**
+ * Где месяц. Ходит он ночью и по той же дуге, что солнце днём, — только ниже
+ * и своим путём: всходит на востоке после заката, садится на западе к
+ * рассвету. Фазы у него нет: заказчик назвал его «месяцем», и месяцем он и
+ * нарисован.
+ */
+function volumeMoonAt(minutes, times, topDeg = 0) {
+  const rise = times ? Number(times.riseMin) : VOLUME_SUNRISE_MIN;
+  const set = times ? Number(times.setMin) : VOLUME_SUNSET_MIN;
+  const north = !times || times.north !== false;
+  const dayLen = set - rise;
+  const nightLen = VOLUME_DAY_MIN - dayLen;
+  const since = volumeWrapMinutes(volumeWrapMinutes(minutes) - set);
+  if (!(nightLen > 0) || since > nightLen) {
+    return { up: false, height: -VOLUME_MOON_RISE_DEG, rise: -VOLUME_MOON_RISE_DEG, az: volumePanoramaAz(270, topDeg) };
+  }
+  const share = since / nightLen;
+  const height = VOLUME_MOON_RISE_DEG * Math.sin(Math.PI * share);
+  return { up: true, height, rise: height, az: volumeSunAz(share, north, topDeg), share };
+}
+
+/**
+ * Насколько стемнело: доля тона ночи в каждой грани.
+ *
+ * Начинает темнеть не на закате, а когда солнце уже низко (6°): в жизни
+ * золотой час темнее полудня, и ступенька ровно на горизонте читалась бы
+ * выключателем. Потолок — `VOLUME_NIGHT_SHARE`, и это ответ на «ночь не
+ * сильно тёмная».
+ */
+function volumeNightShare(height) {
+  return VOLUME_NIGHT_SHARE * volumeShare(Number(height) || 0, 6, -8);
+}
+
+/**
+ * Небо по высоте солнца: верхний и нижний цвет растяжки.
+ *
+ * Небо **не красится часом** (`volumeTintRgb` к нему не применяется) — у него
+ * свои цвета на каждую высоту, и ночью оно темнее комнаты нарочно: иначе ночь
+ * не узнавалась бы, а комнату пришлось бы гасить до «ничего не видно».
+ *
+ * Полуденные цвета — ровно те, что были до таска 181: в полдень фон байт в
+ * байт прежний.
+ */
+const VOLUME_SKY_KEYS = [
+  { h: 14, top: [141, 191, 230], low: [220, 234, 244] },
+  { h: 6, top: [132, 183, 226], low: [223, 231, 233] },
+  { h: 1, top: [111, 159, 203], low: [206, 159, 114] },
+  { h: -3, top: [60, 90, 134], low: [150, 104, 92] },
+  { h: -7, top: [38, 58, 99], low: [74, 69, 104] },
+  { h: -11, top: [15, 24, 48], low: [30, 42, 74] },
+];
+function volumeSkyColors(height) {
+  const value = Number(height) || 0;
+  const keys = VOLUME_SKY_KEYS;
+  if (value >= keys[0].h) return { top: keys[0].top, low: keys[0].low };
+  for (let index = 1; index < keys.length; index += 1) {
+    const upper = keys[index - 1];
+    const lower = keys[index];
+    if (value < lower.h) continue;
+    const share = volumeShare(value, upper.h, lower.h);
+    const mix = (a, b) => [
+      Math.round(a[0] + (b[0] - a[0]) * share),
+      Math.round(a[1] + (b[1] - a[1]) * share),
+      Math.round(a[2] + (b[2] - a[2]) * share),
+    ];
+    return { top: mix(upper.top, lower.top), low: mix(upper.low, lower.low) };
+  }
+  const last = keys[keys.length - 1];
+  return { top: last.top, low: last.low };
+}
+
+/** Цвет солнца: белое-жёлтое высоко, рыжее у горизонта. */
+function volumeSunColors(height) {
+  const share = volumeShare(Number(height) || 0, 10, 0);
+  const mix = (a, b) => [
+    Math.round(a[0] + (b[0] - a[0]) * share),
+    Math.round(a[1] + (b[1] - a[1]) * share),
+    Math.round(a[2] + (b[2] - a[2]) * share),
+  ];
+  const body = mix([255, 243, 196], [255, 164, 86]);
+  const halo = mix([255, 243, 196], [255, 136, 70]);
+  return { body: "rgb(" + body.join(",") + ")", halo: "rgba(" + halo.join(",") + ",0.35)" };
+}
+
+/**
+ * Снимок часа: всё, что зависит от времени, в одном объекте.
+ *
+ * Считается не чаще раза в секунду и **не в кадре**. Кадр берёт отсюда готовые
+ * цвета и готовое место светила; при стоячем времени снимок считается один раз
+ * и живёт, пока человек не тронет часы.
+ */
+function volumeMood(options = {}) {
+  const times = options.times || { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, north: true };
+  const topDeg = Number(options.topDeg) || 0;
+  const minutes = volumeWrapMinutes(options.minutes === undefined ? VOLUME_DAY_MIN / 2 : options.minutes);
+  const kind = volumeBackdropKindOf(options.kind);
+  const sun = volumeSunAt(minutes, times, topDeg);
+  const moon = volumeMoonAt(minutes, times, topDeg);
+  const share = volumeNightShare(sun.height);
+  const tint = { rgb: VOLUME_NIGHT_RGB, share };
+  const sky = volumeSkyColors(sun.height);
+  return {
+    minutes,
+    times,
+    topDeg,
+    kind,
+    phase: volumeDayPhase(minutes, times),
+    sun,
+    moon,
+    tint,
+    sky: { top: "rgb(" + sky.top.join(",") + ")", low: "rgb(" + sky.low.join(",") + ")" },
+    sunColors: volumeSunColors(sun.height),
+    // Звёзды зажигаются после сумерек и только там, где небо уже тёмное.
+    stars: volumeShare(sun.height, -2, -7),
+    // Окна города: к ночи загораются, днём гаснут (слова заказчика «как живой
+    // город»). Доля — сколько окон светится, а какие именно, решает не случай,
+    // а сами окна (`volumeCityWindowLit`): иначе они мигали бы каждую секунду.
+    cityLit: VOLUME_CITY_LIT_MAX * volumeShare(sun.height, 4, -6),
+    // Тень дома: куда её кладёт солнце сейчас и насколько она видна. У
+    // горизонта она не тянется в бесконечность, а гаснет — так же плавно, как
+    // темнеет небо.
+    shadow: { az: sun.az, rise: sun.rise, fade: sun.up ? volumeShare(sun.height, 1, 7) : 0 },
+    palette: volumeBackdropPalette(tint),
+  };
+}
+
+/**
+ * Тон часа для вещей панорамы: одна палитра на весь фон, покрашенная один раз
+ * вместе со снимком часа.
+ *
+ * Земля здесь — тот же `VOLUME_LAND_RGB`, что у земляной плиты сцены, и
+ * покрашена она тем же `volumeTintRgb`: стык между землёй у дома и землёй за
+ * ним не виден ни в полдень, ни в полночь (G237 держится и во времени).
+ */
+function volumeBackdropPalette(tint) {
+  const css = (hex) => volumeTintCss(volumeHexRgb(hex), tint);
+  return {
+    land: volumeTintCss(VOLUME_LAND_RGB, tint),
+    cloud: css(VOLUME_CLOUD),
+    trunk: css(VOLUME_TRUNK),
+    crown: css(VOLUME_CROWN),
+    crownFar: css(VOLUME_CROWN_FAR),
+    crownDark: css(VOLUME_CROWN_DARK),
+    bush: css(VOLUME_BUSH),
+    birchTrunk: css(VOLUME_BIRCH_TRUNK),
+    birchMark: css(VOLUME_BIRCH_MARK),
+    birchCrown: css(VOLUME_BIRCH_CROWN),
+    willow: css(VOLUME_WILLOW),
+    roadNear: css(VOLUME_ROAD_NEAR),
+    roadFar: css(VOLUME_ROAD_FAR),
+    riverNear: css(VOLUME_RIVER_NEAR),
+    riverFar: css(VOLUME_RIVER_FAR),
+    hillFar: css(VOLUME_HILL_FAR),
+    hillNear: css(VOLUME_HILL_NEAR),
+    rock: css(VOLUME_MOUNTAIN_ROCK),
+    rockFar: css(VOLUME_MOUNTAIN_FAR_ROCK),
+    snow: css(VOLUME_MOUNTAIN_SNOW),
+    snowFar: css(VOLUME_MOUNTAIN_FAR_SNOW),
+    wall: css(VOLUME_CITY_WALL),
+    wallFar: css(VOLUME_CITY_WALL_FAR),
+    wallSide: css(VOLUME_CITY_SIDE),
+    wallSideFar: css(VOLUME_CITY_SIDE_FAR),
+    glass: css(VOLUME_CITY_GLASS),
+    roof: css(VOLUME_CITY_ROOF),
+    asphalt: css(VOLUME_CITY_ASPHALT),
+    asphaltFar: css(VOLUME_CITY_ASPHALT_FAR),
+    mark: css(VOLUME_CITY_MARK),
+    car: VOLUME_CITY_CARS.map((hex) => css(hex)),
+  };
+}
+
+/** `#rrggbb` в тройку чисел: палитра фона писана цветами, а час считает числами. */
+function volumeHexRgb(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
+// ——— три фона (G273) ——————————————————————————————————————————————————
+//
+// Слова заказчика: «Тип фона — Простой…, Природа…, Город…».
+//
+//   **Простой** — зелёная земля, голубое небо и светило. Больше ничего: ни
+//     дороги, ни гор, ни деревьев. Светило заказчик назвал прямо — «на простом
+//     отображении фона тоже сделай солнце и луну, что бы было очевидно», — и
+//     звёзды оставлены с ним: звёзды это небо, а не пейзаж.
+//   **Природа** — то, что было (дорога, река, холмы, горы, зелень), плюс ещё
+//     немного берёз.
+//   **Город** — многоэтажки, улицы, парковка с машинами. Мера та же, что у
+//     «Природы»: узнаваемый силуэт, а не макет города.
+//
+// Выбор живёт **в настройках браузера**, а не в объекте, и это не мелочь:
+// фон — вид, а не свойство квартиры. Уехав в `project.json`, он пришёл бы к
+// напарнику вместе с проектом и переставил бы ему картинку за окном; а G68
+// потребовал бы миграции ради того, что человек меняет кнопкой. Координаты
+// (таск 188) — наоборот, свойство объекта, и живут в нём.
+const VOLUME_BACKDROP_KINDS = ["plain", "nature", "city"];
+const VOLUME_BACKDROP_DEFAULT = "nature";
+function volumeBackdropKindOf(kind) {
+  return VOLUME_BACKDROP_KINDS.includes(kind) ? kind : VOLUME_BACKDROP_DEFAULT;
+}
+
+// ——— город ———————————————————————————————————————————————————————————————
+//
+// Дом панорамы — та же вещь, что дерево: сторона света, высота основания,
+// угловая высота. Прибавилось одно — **ширина**: у дерева силуэт один на любую
+// ширину, а дом без ширины не дом. Поэтому у многоэтажки `half` (половина
+// ширины в градусах), и рисуется она четырьмя точками панорамы, как звено
+// полосы.
+//
+// Окна считаются по сетке этажей и секций, и **какое окно светится, решают
+// сами окна**, а не случай: `volumeCityWindowLit` — ровная постоянная примесь
+// от номера дома, этажа и секции. Поэтому к вечеру окна загораются по одному и
+// больше не мигают: доля растёт — зажигаются новые, а зажжённые остаются.
+//
+// Светящееся окно **не красится часом**: это свет, а не освещённая
+// поверхность. Правило простое и сквозное — *светит, значит не темнеет*: так
+// же не темнеют солнце, месяц и звёзды, и так же темнеет всё остальное.
+
+const VOLUME_CITY_WALL = "#9aa3b0";
+const VOLUME_CITY_WALL_FAR = "#b9c0ca";
+const VOLUME_CITY_SIDE = "#7d8694";
+const VOLUME_CITY_SIDE_FAR = "#a7afba";
+const VOLUME_CITY_GLASS = "#5d6b7d";
+const VOLUME_CITY_ROOF = "#6d7684";
+const VOLUME_CITY_ASPHALT = "#8d8f92";
+const VOLUME_CITY_ASPHALT_FAR = "#c2c4c7";
+const VOLUME_CITY_MARK = "#d8dadd";
+const VOLUME_CITY_CARS = ["#b5443c", "#3f5e8c", "#d8d9dc", "#4f6f52", "#2f3338"];
+/** Свет в окне — он же самое яркое в ночном кадре. */
+const VOLUME_CITY_LIGHT = "#ffe6a3";
+/** Какая доля окон светится в самую тёмную ночь: дом спит, а не празднует. */
+const VOLUME_CITY_LIT_MAX = 0.55;
+
+/**
+ * Многоэтажки по кругу: `az` — сторона света середины дома, `half` — половина
+ * ширины, `base` — высота низа (минус — дом ближе, земля у ног уходит вниз),
+ * `top` — высота верха, `floors` и `bays` — сетка окон, `far` — дальний ряд
+ * (бледнее и мельче).
+ *
+ * Два ряда и разная высота — то же, чем держится лес «Природы»: ближние дома
+ * заслоняют дальние, и горизонт не выглядит забором одинаковых столбов.
+ */
+const VOLUME_CITY = [
+  // дальний ряд — за улицей, бледный
+  { az: 8, half: 2.6, base: -0.6, top: 6.2, floors: 7, bays: 4, far: true },
+  { az: 24, half: 2.0, base: -0.6, top: 4.4, floors: 5, bays: 3, far: true },
+  { az: 58, half: 3.0, base: -0.7, top: 7.4, floors: 8, bays: 4, far: true },
+  { az: 96, half: 2.3, base: -0.6, top: 5.2, floors: 6, bays: 3, far: true },
+  { az: 131, half: 2.8, base: -0.7, top: 6.8, floors: 7, bays: 4, far: true },
+  { az: 168, half: 2.1, base: -0.6, top: 4.8, floors: 5, bays: 3, far: true },
+  { az: 205, half: 3.2, base: -0.7, top: 7.8, floors: 8, bays: 5, far: true },
+  { az: 241, half: 2.4, base: -0.6, top: 5.6, floors: 6, bays: 3, far: true },
+  { az: 278, half: 2.9, base: -0.7, top: 7.0, floors: 7, bays: 4, far: true },
+  { az: 316, half: 2.2, base: -0.6, top: 5.0, floors: 5, bays: 3, far: true },
+  { az: 344, half: 2.7, base: -0.7, top: 6.6, floors: 7, bays: 4, far: true },
+  // ближний ряд — высокие, тёмнее и шире
+  { az: 40, half: 5.0, base: -4.2, top: 15.5, floors: 9, bays: 5 },
+  { az: 112, half: 4.4, base: -4.6, top: 18.5, floors: 11, bays: 4 },
+  { az: 186, half: 5.6, base: -4.0, top: 13.5, floors: 8, bays: 6 },
+  { az: 258, half: 4.8, base: -4.4, top: 17.0, floors: 10, bays: 5 },
+  { az: 330, half: 4.2, base: -4.8, top: 20.0, floors: 12, bays: 4 },
+];
+
+/**
+ * Светится ли это окно при такой доле зажжённых.
+ *
+ * Чистая и постоянная: номер дома, этаж и секция дают одно и то же число
+ * всегда. Случай здесь не годится вовсе — окна мигали бы на каждом снимке
+ * часа, то есть каждую секунду.
+ */
+function volumeCityWindowLit(block, floor, bay, share) {
+  if (!(share > 0)) return false;
+  // Перемешивание тремя множителями — обычный целочисленный хэш: соседние окна
+  // получают далёкие числа, и свет не выстраивается полосами и лестницами.
+  const mixed = ((block + 1) * 73856093) ^ ((floor + 1) * 19349663) ^ ((bay + 1) * 83492791);
+  return ((mixed >>> 8) % 1000) / 1000 < share;
+}
+
+/**
+ * Машины на парковке: сторона света, высота основания, угловой размер и цвет
+ * из палитры. Стоят рядком у ближнего дома, как и положено парковке.
+ */
+const VOLUME_CITY_PARK = [
+  { az: 150, rise: -6.4, size: 1.5, car: 0 },
+  { az: 154, rise: -6.5, size: 1.5, car: 1 },
+  { az: 158, rise: -6.6, size: 1.6, car: 2 },
+  { az: 162, rise: -6.7, size: 1.6, car: 3 },
+  { az: 166, rise: -6.8, size: 1.7, car: 4 },
+  { az: 170, rise: -6.9, size: 1.7, car: 1 },
+  { az: 290, rise: -6.5, size: 1.5, car: 2 },
+  { az: 294, rise: -6.6, size: 1.6, car: 0 },
+  { az: 298, rise: -6.7, size: 1.6, car: 4 },
+  { az: 302, rise: -6.8, size: 1.7, car: 3 },
+];
+
+/** Улицы города: те же полосы, что дорога «Природы», только асфальт и разметка. */
+const VOLUME_CITY_STREETS = [
+  volumeBandNodes([
+    [134, -7.4, 1.9],
+    [148, -5.2, 1.4],
+    [163, -3.6, 1.0],
+    [178, -2.4, 0.7],
+    [193, -1.5, 0.45],
+    [208, -0.9, 0.3],
+  ]),
+  volumeBandNodes([
+    [274, -7.6, 2.0],
+    [288, -5.4, 1.45],
+    [303, -3.8, 1.05],
+    [318, -2.5, 0.72],
+    [333, -1.6, 0.46],
+    [348, -1.0, 0.3],
+  ]),
+];
+
+/** Разметка по середине улицы: тонкая полоса того же хода. */
+function volumeStreetMarks(street) {
+  return street.map((node) => {
+    const middle = (node.top + node.bottom) / 2;
+    const half = Math.max(0.03, (node.top - node.bottom) * 0.06);
+    return { az: node.az, top: middle + half, bottom: middle - half };
+  });
+}
+const VOLUME_CITY_MARKS = VOLUME_CITY_STREETS.map((street) => volumeStreetMarks(street));
+
+/** Деревья вдоль улиц: город не бетонная коробка, но и не лес. */
+const VOLUME_CITY_GREENS = [
+  { az: 143, rise: -6.0, size: 7.5, kind: "tree" },
+  { az: 176, rise: -3.1, size: 4.2, kind: "tree" },
+  { az: 199, rise: -1.9, size: 2.6, kind: "bush" },
+  { az: 283, rise: -6.2, size: 7.0, kind: "tree" },
+  { az: 311, rise: -3.3, size: 4.4, kind: "tree" },
+  { az: 341, rise: -2.0, size: 2.8, kind: "bush" },
+];
+
+/** Звёзды: раскиданы по небу раз и навсегда, своей яркости у каждой нет. */
+const VOLUME_STARS = (() => {
+  const stars = [];
+  // Числа ровные и постоянные: тот же целочисленный хэш, что у окон города.
+  for (let index = 0; index < 48; index += 1) {
+    const mixed = ((index + 1) * 2654435761) >>> 0;
+    stars.push({
+      az: (mixed % 3600) / 10,
+      rise: 6 + ((mixed >>> 12) % 520) / 10,
+      size: 0.8 + ((mixed >>> 22) % 70) / 100,
+    });
+  }
+  return stars;
+})();
+
+/** Полдень по умолчанию: фон, который был до таска 181. Им же рисуется кадр,
+ * пока снимок часа не посчитан. */
+const VOLUME_MOOD_NOON = volumeMood({
+  minutes: (VOLUME_SUNRISE_MIN + VOLUME_SUNSET_MIN) / 2,
+  kind: VOLUME_BACKDROP_DEFAULT,
+});
 
 // ——— обзор со стороны ————————————————————————————————————————————————————
 
@@ -54662,6 +55635,463 @@ function volumeMarkerFaces(at, yaw, out = [], radiusMm = VOLUME_MARKER_MM) {
   return out;
 }
 
+// src/panels/volumeParams.js
+// Окно параметров объёма: фон, время суток и миникарта (таск 181, G273, G282).
+//
+// Слова заказчика: «Аналогично 20, но в режиме Объём — там должны быть
+// параметры: Показывать миникарту, Тип фона — Простой…, Природа…, Город…». И
+// следом про время: «сразу заложи по фону что бы можно было указывать время
+// суток… можно указать своё или вернуть текущее».
+//
+// ——— где живёт выбор ———————————————————————————————————————————————————
+//
+// **В настройках браузера, а не в объекте.** Фон, время и ускорение — это вид,
+// а не свойство квартиры: уехав в `project.json`, они пришли бы к напарнику
+// вместе с проектом и переставили бы ему картинку за окном и час на небе, а
+// правило G68 потребовало бы миграции ради того, что человек меняет кнопкой.
+// Той же природы и отметка миникарты, и соседи её по складу — «скрыть вещи»,
+// шрифт схемы, свёрнутость плашек.
+//
+// Координаты объекта (таск 188) — наоборот, **свойство объекта**: место дома не
+// меняется от того, кто на него смотрит. Их объём читает у объекта
+// (`volumeSiteOf`) и сам не пишет ничего.
+//
+// Время при этом в настройки **не** ложится: заказчик сказал «при открытии
+// стоит реальное время», и запомненный час спорил бы с этим прямо. Ложится
+// только ускорение — им человек выбирает, как быстро смотреть сутки, а не
+// который час.
+//
+// ——— окно, а не раздел колонки ——————————————————————————————————————————
+//
+// Кнопка стоит **на поле, во всех раскладках**, и это ответ на вопрос тикета
+// «нужно ли оно и на большом экране». Да, нужно, и причина не во вкусе:
+// «Интерфейс проекта» (таск 175) живёт разделом левой колонки, и окно ему нужно
+// только там, где колонки уезжают листом. У объёма колонок нет вовсе в главном
+// его виде — полный экран (G246) показывает одно поле, — и дверь, которая
+// работает в полном экране, может быть только на поле. Две двери (раздел в
+// колонке и кнопка) были бы двумя местами одного выбора; одна кнопка в углу
+// работает всегда и везде.
+const VOLUME_BACKDROP_SETTING = "volumeBackdrop";
+const VOLUME_MINIMAP_SETTING = "volumeMinimap";
+const VOLUME_SPEED_SETTING = "volumeClockSpeed";
+
+/**
+ * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
+ * пересобирается (сменили схему, закрыли объект), а выбор — нет.
+ *
+ * `clock` заводится при первом спросе и дальше идёт формулой — см.
+ * `volumeClockMinutes`.
+ */
+const params = {
+  kind: VOLUME_BACKDROP_DEFAULT,
+  minimap: true,
+  speed: VOLUME_CLOCK_SPEED_DEFAULT,
+  clock: null,
+};
+
+// Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
+// умолчаний и перерисовывается, когда хранилище ответит. Кто ждёт ответа —
+// говорит об этом через `volumeParamsWatch`.
+const watchers = new Set();
+let loaded = false;
+
+function tell() {
+  for (const watcher of watchers) watcher();
+}
+function volumeParamsWatch(watcher) {
+  watchers.add(watcher);
+  volumeParamsLoad();
+  return () => watchers.delete(watcher);
+}
+function volumeParamsLoad() {
+  if (loaded) return;
+  loaded = true;
+  Promise.resolve(getSetting(VOLUME_BACKDROP_SETTING))
+    .then((saved) => {
+      if (!VOLUME_BACKDROP_KINDS.includes(saved) || saved === params.kind) return;
+      params.kind = saved;
+      tell();
+    })
+    .catch(() => {});
+  // Отметка миникарты **положительная** и умолчание у неё взведённое: сегодня
+  // карта появляется сама, и снятая галка — это просьба её убрать.
+  Promise.resolve(getSetting(VOLUME_MINIMAP_SETTING))
+    .then((saved) => {
+      if (saved !== false) return;
+      params.minimap = false;
+      tell();
+    })
+    .catch(() => {});
+  Promise.resolve(getSetting(VOLUME_SPEED_SETTING))
+    .then((saved) => {
+      const speed = volumeClockSpeedOf(saved);
+      if (speed === params.speed) return;
+      params.speed = speed;
+      if (params.clock) params.clock = { ...params.clock, speed };
+      tell();
+    })
+    .catch(() => {});
+}
+
+/** Что выбрано сейчас. Снимок: менять только через двери ниже. */
+function volumeParamsRead() {
+  return { kind: params.kind, minimap: params.minimap, speed: params.speed, clock: params.clock };
+}
+
+/** Часы объёма; при первом спросе заводятся на настоящем времени. */
+function volumeParamsClock(nowMs) {
+  if (!params.clock) params.clock = volumeClockNow(nowMs, new Date(), params.speed);
+  return params.clock;
+}
+
+/**
+ * Вошли в режим: идущие часы перецепляются за **настоящее** время.
+ *
+ * Слова заказчика — «при открытии стоит реальное время», и открытие режима и
+ * есть та минута, о которой он говорит. Без этого человек, вернувшийся в объём
+ * после обеда, попадал бы в случайный час: время идёт формулой и за час
+ * отсутствия при ускорении 60 уходит на два с половиной дня вперёд.
+ *
+ * Остановленные часы не трогаются: их человек поставил нарочно.
+ */
+function volumeParamsArrive(nowMs) {
+  if (params.clock && params.clock.fixed) return;
+  params.clock = volumeClockNow(nowMs, new Date(), params.speed);
+}
+function volumeParamsKind(kind) {
+  const next = volumeBackdropKindOf(kind);
+  if (next === params.kind) return;
+  params.kind = next;
+  setSetting(VOLUME_BACKDROP_SETTING, next);
+  tell();
+}
+function volumeParamsMinimap(shown) {
+  const next = Boolean(shown);
+  if (next === params.minimap) return;
+  params.minimap = next;
+  setSetting(VOLUME_MINIMAP_SETTING, next);
+  tell();
+}
+
+/**
+ * Ускорение. Выбрал — время **идёт**: ускорение без хода ничего не значит, и
+ * мёртвого пункта в окне быть не должно.
+ */
+function volumeParamsSpeed(speed, nowMs) {
+  const next = volumeClockSpeedOf(speed);
+  params.speed = next;
+  setSetting(VOLUME_SPEED_SETTING, next);
+  const minutes = volumeClockMinutes(volumeParamsClock(nowMs), nowMs);
+  params.clock = { fixed: false, fromMin: minutes, atMs: nowMs, speed: next };
+  tell();
+}
+
+/** Своё время: поставили час — он стоит (и фон не пересчитывается вовсе). */
+function volumeParamsFix(minutes, nowMs) {
+  const value = minutes === null || minutes === undefined ? volumeClockMinutes(volumeParamsClock(nowMs), nowMs) : minutes;
+  params.clock = volumeClockFixed(value, params.speed);
+  tell();
+}
+
+/** «Сейчас»: настоящее время, и оно идёт. */
+function volumeParamsNow(nowMs) {
+  params.clock = volumeClockNow(nowMs, new Date(), params.speed);
+  tell();
+}
+
+/** Час словом: им подписаны и окно, и отрезки суток. */
+function volumePhaseWord(phase) {
+  if (phase === "morning") return strings.volume.phaseMorning;
+  if (phase === "day") return strings.volume.phaseDay;
+  if (phase === "evening") return strings.volume.phaseEvening;
+  return strings.volume.phaseNight;
+}
+
+/** Подпись ускорения: «×60 — сутки за 24 мин». Число — не в словаре, оно счёт. */
+function volumeSpeedLabel(speed) {
+  return text("volume.speedOption", { speed: volumeClockSpeedOf(speed), day: volumeDayText(speed) });
+}
+
+/** 1,5 — с запятой: это число для человека, а не для кода. */
+function volumeDayText(speed) {
+  return String(volumeClockDayMinutes(speed)).replace(".", ",");
+}
+
+/** Строка состояния часов: который час, как он называется и идёт ли. */
+function volumeParamsLine(clock, minutes, phase) {
+  const where = { time: volumeClockText(minutes), phase: volumePhaseWord(phase) };
+  if (clock && clock.fixed) return text("volume.clockFixedLine", where);
+  return text("volume.clockRunning", { ...where, day: volumeDayText(clock ? clock.speed : null) });
+}
+
+/** Строка про рассвет и закат: по координатам объекта или по умолчанию. */
+function volumeParamsSunLine(times) {
+  const where = { rise: volumeClockText(times.riseMin), set: volumeClockText(times.setMin) };
+  return times.bySite ? text("volume.sunriseSite", where) : text("volume.sunrise", where);
+}
+
+/**
+ * Кнопка параметров на поле и окно за ней.
+ *
+ * `now` — часы страницы (аргументом, а не `Date.now()` внутри: окно обязано
+ * жить в тех же часах, в которых идёт поле), `hour` — снимок часа от поля, из
+ * него берутся слово и минута, `times` — рассвет с закатом этого объекта.
+ *
+ * О правках окно рассказывает **только себе**: поле слушает выбор своей
+ * подпиской (`volumeParamsWatch`) и той же подпиской принимает настройки,
+ * приехавшие из хранилища. Два пути к одному кадру были бы двойной
+ * перерисовкой на каждое нажатие.
+ */
+function createVolumeParams({ now, hour, times }) {
+  const button = uiIconButton("sliders", {
+    class: "canvas-corner volume__paramsBtn",
+    label: strings.volume.params,
+    title: strings.volume.paramsHint,
+    on: { click: () => open() },
+  });
+  let modal = null;
+  let stopWatch = null;
+  let tick = 0;
+
+  function open() {
+    if (modal) return;
+    const body = uiEl("div", { class: "tools volume__params" });
+    const state = uiEl("p", { class: "tools__note volume__paramsState" });
+    const render = () => {
+      const chosen = volumeParamsRead();
+      const at = hour();
+      body.replaceChildren(
+        uiEl("p", { class: "tools__label", text: strings.volume.backdrop }),
+        uiEl(
+          "div",
+          { class: "volume__paramsRow" },
+          VOLUME_BACKDROP_KINDS.map((kind) =>
+            uiButton(backdropLabel(kind), {
+              class: "ui-btn" + (chosen.kind === kind ? " is-on" : ""),
+              title: backdropHint(kind),
+              attrs: { "aria-pressed": chosen.kind === kind ? "true" : "false" },
+              on: { click: () => volumeParamsKind(kind) },
+            }),
+          ),
+        ),
+        uiEl("label", { class: "tools__field tools__field--check" }, [
+          minimapCheck(chosen.minimap),
+          uiEl("span", { text: strings.volume.minimap }),
+        ]),
+        uiEl("p", { class: "tools__note", text: strings.volume.minimapHint }),
+        uiEl("p", { class: "tools__label", text: strings.volume.clock }),
+        uiEl("div", { class: "volume__paramsRow" }, [
+          clockField(at.minutes),
+          uiButton(strings.volume.clockNow, {
+            class: "ui-btn",
+            title: strings.volume.clockNowHint,
+            on: { click: () => volumeParamsNow(now()) },
+          }),
+          uiButton(strings.volume.clockStop, {
+            class: "ui-btn" + (chosen.clock && chosen.clock.fixed ? " is-on" : ""),
+            title: strings.volume.clockStopHint,
+            attrs: { "aria-pressed": chosen.clock && chosen.clock.fixed ? "true" : "false" },
+            on: { click: () => volumeParamsFix(null, now()) },
+          }),
+        ]),
+        state,
+        uiEl("p", { class: "tools__label", text: strings.volume.speed }),
+        uiEl(
+          "div",
+          { class: "volume__paramsRow" },
+          VOLUME_CLOCK_SPEEDS.map((speed) =>
+            uiButton(volumeSpeedLabel(speed), {
+              class: "ui-btn" + (chosen.speed === speed && !(chosen.clock && chosen.clock.fixed) ? " is-on" : ""),
+              attrs: {
+                "aria-pressed":
+                  chosen.speed === speed && !(chosen.clock && chosen.clock.fixed) ? "true" : "false",
+              },
+              on: { click: () => volumeParamsSpeed(speed, now()) },
+            }),
+          ),
+        ),
+        uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times()) }),
+      );
+      line();
+    };
+    // Строка состояния обновляется сама, пока окно открыто: время идёт, и
+    // человек должен видеть, который час в объёме. Поле при этом **не**
+    // перерисовывается этим таймером — у него свой, и он один.
+    const line = () => {
+      const at = hour();
+      state.textContent = volumeParamsLine(volumeParamsRead().clock, at.minutes, at.phase);
+      // Пока время идёт, часы в поле идут вместе с ним: поле, застывшее на
+      // минуте открытия, читалось бы как «вот сейчас столько». Набирающую руку
+      // это не трогает — под курсором поле не переписывается.
+      const field = body.querySelector(".tools__time");
+      if (field && document.activeElement !== field) field.value = volumeClockText(at.minutes);
+    };
+    const close = () => {
+      if (tick && typeof clearInterval === "function") clearInterval(tick);
+      tick = 0;
+      if (stopWatch) stopWatch();
+      stopWatch = null;
+      modal = null;
+    };
+    stopWatch = volumeParamsWatch(() => render());
+    render();
+    if (typeof setInterval === "function") tick = setInterval(line, 1000);
+    // Ширину задаёт содержимое, а не общая мера диалогов (таск 175, дефект
+    // D41): в окне три ряда кнопок и галка, и общие 720 точек оставили бы
+    // половину карточки пустым полем.
+    modal = uiModal({
+      title: strings.volume.paramsTitle,
+      body,
+      actions: [
+        uiButton(strings.dialog.close, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: () => {
+              const open = modal;
+              close();
+              if (open) open.close();
+            },
+          },
+        }),
+      ],
+      onCancel: () => close(),
+    });
+    if (modal.card) modal.card.classList.add("modal--fit");
+  }
+
+  function minimapCheck(on) {
+    const box = uiEl("input", {
+      class: "tools__check",
+      type: "checkbox",
+      on: { change: () => volumeParamsMinimap(box.checked) },
+    });
+    box.checked = on !== false;
+    return box;
+  }
+
+  function clockField(minutes) {
+    const field = uiEl("input", {
+      class: "tools__time",
+      type: "time",
+      value: volumeClockText(minutes),
+      title: strings.volume.clockOwnHint,
+      attrs: { "aria-label": strings.volume.clockOwn },
+      on: {
+        change: () => {
+          const own = volumeClockParse(field.value);
+          if (own === null) return;
+          volumeParamsFix(own, now());
+        },
+      },
+    });
+    return field;
+  }
+
+  function backdropLabel(kind) {
+    if (kind === "plain") return strings.volume.backdropPlain;
+    if (kind === "city") return strings.volume.backdropCity;
+    return strings.volume.backdropNature;
+  }
+
+  function backdropHint(kind) {
+    if (kind === "plain") return strings.volume.backdropPlainHint;
+    if (kind === "city") return strings.volume.backdropCityHint;
+    return strings.volume.backdropNatureHint;
+  }
+
+  return {
+    node: button,
+    dispose() {
+      if (tick && typeof clearInterval === "function") clearInterval(tick);
+      tick = 0;
+      if (stopWatch) stopWatch();
+      stopWatch = null;
+      if (modal) modal.close();
+      modal = null;
+    },
+  };
+}
+
+// src/screenPlace.js
+// Общее место трёх режимов (требование G276, таск 178).
+//
+// Слова заказчика: «При переключении Схема - Чертёж - объём мы должны
+// находиться в одном месте… центр схемы\чертежа это расположение камеры в
+// объёме. Ну и учитывай что может попасть на стены и т.д. тогда сдвигай».
+//
+// ——— что это и чего это не ———————————————————————————————————————————————
+//
+// До этого таска каждый режим помнил **своё** место: план — `view` в состоянии
+// приложения, чертёж — свой `view` внутри мастерской, объём — где стоит
+// человек. Переключение режима бросало человека туда, где он был в этом режиме
+// в прошлый раз: посмотрел кухню в объёме, вернулся на схему — а там спальня,
+// с которой уходил полчаса назад.
+//
+// Здесь лежит **одно число на двоих** — место середины чертежа в миллиметрах, —
+// и лежит оно в сеансе: в объект не пишется ничего (G68), в настройки браузера
+// тоже. Закрыл вкладку — забылось.
+//
+// ——— почему это отдельный модуль, а не поле состояния ——————————————————
+//
+// Потому что у режимов разные системы координат, и свести их можно только в
+// миллиметрах чертежа: у плана вид задан в пикселях подложки (`state.view`), у
+// мастерской — в миллиметрах, у объёма — в миллиметрах же, но третьей осью.
+// Состояние приложения хранит вид плана и перерисовывает холст на каждую его
+// правку — положи сюда же место чертежа, и холст стал бы перерисовываться от
+// чужого переключения.
+//
+// Поле плана этому модулю не нужно вовсе: объём читает и пишет `state.view`
+// сам, через тот же мост «доли ↔ миллиметры», которым живёт весь чертёж.
+// Мастерская своего вида наружу не отдаёт — поэтому у неё две двери: сказать,
+// где она стоит, и забрать, куда её просят встать.
+
+/** Где сейчас середина поля мастерской: `{schemeId, x, y}` или `null`. */
+let drawingAt = null;
+/** Куда мастерскую просят встать, когда её покажут: `{schemeId, x, y}` или `null`. */
+let drawingWanted = null;
+
+const placeOf = (schemeId, pointMm) => {
+  if (!schemeId || !pointMm) return null;
+  const x = Number(pointMm.x);
+  const y = Number(pointMm.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { schemeId, x, y };
+};
+
+/** Мастерская говорит, где стоит середина её поля. Зовётся на каждую правку вида. */
+function screenPlaceDrawing(schemeId, pointMm) {
+  drawingAt = placeOf(schemeId, pointMm);
+}
+
+/** Где стояла мастерская, когда её последний раз показывали. `null` — не знаем. */
+function screenPlaceOfDrawing(schemeId) {
+  if (!drawingAt || drawingAt.schemeId !== schemeId) return null;
+  return { x: drawingAt.x, y: drawingAt.y };
+}
+
+/**
+ * Просьба к мастерской: покажут — встань серединой сюда. Лежит до тех пор,
+ * пока её не заберут: человек может уйти из объёма на схему, погулять по ней и
+ * прийти в чертёж только через минуту.
+ */
+function screenPlaceWant(schemeId, pointMm) {
+  drawingWanted = placeOf(schemeId, pointMm);
+}
+
+/** Мастерская забирает просьбу — ровно один раз. `null` — просьбы нет. */
+function screenPlaceTake(schemeId) {
+  if (!drawingWanted || drawingWanted.schemeId !== schemeId) return null;
+  const place = { x: drawingWanted.x, y: drawingWanted.y };
+  drawingWanted = null;
+  return place;
+}
+
+/** Забыть всё: новый объект, закрытая схема. */
+function screenPlaceForget() {
+  drawingAt = null;
+  drawingWanted = null;
+}
+
 // src/panels/volume.js
 // Окно объёмного режима: комната, по которой ходят.
 //
@@ -54696,6 +56126,7 @@ function volumeMarkerFaces(at, yaw, out = [], radiusMm = VOLUME_MARKER_MM) {
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
+
 
 
 
@@ -54921,8 +56352,17 @@ function volumeWhere(project, scene, at) {
  * **На узком или низком поле миникарты нет вовсе.** Это и есть ответ на «проверь,
  * что не загораживает вид»: накладка в треть кадра загораживает его по
  * определению, и честнее не показывать её, чем показывать поверх комнаты.
+ *
+ * `shown` — отметка «Показывать миникарту» из окна параметров (таск 181,
+ * G273). Правило про размер поля она **не отменяет и не повторяет**: это
+ * второй повод не показывать карту, а не второе правило о том, где она
+ * помещается. Поэтому отметка стоит здесь, в единственном месте, которое
+ * отвечает «есть ли карта» — её же спрашивают и рисование, и щелчок по карте, и
+ * отступ столбика стойки. Заведи её в поле отдельно — и столбик встал бы над
+ * картой, которой нет.
  */
-function volumeMinimapBox(box, bounds) {
+function volumeMinimapBox(box, bounds, shown = true) {
+  if (shown === false) return null;
   if (!bounds || !(bounds.widthMm > 0) || !(bounds.heightMm > 0)) return null;
   if (box.width < 520 || box.height < 320) return null;
   const width = Math.max(110, Math.min(220, box.width * 0.2));
@@ -54941,8 +56381,8 @@ const VOLUME_MINIMAP_PAD = 8;
  * Считай их врозь, и щелчок однажды поедет мимо того места, которое человек
  * видел под курсором.
  */
-function volumeMinimapView(box, bounds) {
-  const place = volumeMinimapBox(box, bounds);
+function volumeMinimapView(box, bounds, shown = true) {
+  const place = volumeMinimapBox(box, bounds, shown);
   if (!place) return null;
   const zoom = Math.min(
     (place.width - VOLUME_MINIMAP_PAD * 2) / bounds.widthMm,
@@ -55017,8 +56457,8 @@ function volumePlanViewAt(project, schemeId, box, view, pointMm) {
  * Чистая и вынесена наружу ради теста: промах здесь — это «ткнул в кухню, а
  * оказался в ванной», и ловить его глазами дорого.
  */
-function volumeMinimapAt(box, bounds, at) {
-  const view = volumeMinimapView(box, bounds);
+function volumeMinimapAt(box, bounds, at, shown = true) {
+  const view = volumeMinimapView(box, bounds, shown);
   if (!view || !at) return null;
   const { place, zoom } = view;
   if (!(zoom > 0)) return null;
@@ -55060,8 +56500,8 @@ const VOLUME_FIELD_EDGE = 18;
  * 166, G245). Имя осталось прежним нарочно — отступ принадлежит низу столбика,
  * а не той или иной кнопке в нём, и переименование ничего бы не уточнило.
  */
-function volumeFieldBottom(box, bounds) {
-  const place = volumeMinimapBox(box, bounds);
+function volumeFieldBottom(box, bounds, shown = true) {
+  const place = volumeMinimapBox(box, bounds, shown);
   if (!place) return VOLUME_FIELD_EDGE;
   return Math.round(box.height - place.y + 12);
 }
@@ -55411,6 +56851,22 @@ function createVolume({ api, hosts }) {
     });
 
   let scene = sceneOf(getState());
+  // ——— час суток (таск 181, G282) ———
+  //
+  // Снимок часа (`volumeMood`) держится здесь и пересчитывается **не чаще раза
+  // в секунду** — прямое требование заказчика («не каждый кадр, а, хотя бы раз
+  // в секунду»). Кадр о времени не знает ничего: он берёт готовые цвета, тон
+  // комнаты и готовые грани тени.
+  //
+  // **Стоячее время не считается вовсе:** таймера нет, снимок посчитан один раз
+  // и живёт, пока человек не тронет часы. Погас режим — таймер тоже снимается:
+  // поверхность жива, но фон за погашенным полем пересчитывать незачем, а
+  // идущее время — формула, и вернувшийся человек получает свой час одним
+  // умножением (`volumeClockMinutes`).
+  let hour = null;
+  let hourTick = 0;
+  // Грани тени дома в этот час: собираются вместе со снимком, а не в кадре.
+  let shadow = [];
   let view = "around";
   let closed = false;
   let frame = 0;
@@ -55603,6 +57059,22 @@ function createVolume({ api, hosts }) {
   // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
   // стоит сводка, а ещё правее — кнопка полноэкранного показа.
   const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
+  // Параметры объёма — третья ячейка правого верхнего угла (таск 181, G273):
+  // полный экран, смена вида, параметры. Разбор, почему дверь одна и почему
+  // она на поле во всех раскладках, — в `panels/volumeParams.js`.
+  //
+  // Час и рассвет окно спрашивает **у поля**, а не считает само: иначе в сборке
+  // стало бы два ответа на вопрос «который час в объёме», и расходились бы они
+  // ровно в ту секунду, на которую поле снимок придерживает.
+  const paramsButton = createVolumeParams({
+    now: () => Date.now(),
+    hour: () => hourNow(),
+    times: () => dayTimes().times,
+  });
+  // Выбор человека поле слушает **всю свою жизнь**, а не пока открыто окно:
+  // этой же подпиской приезжают настройки из хранилища (читаются они
+  // асинхронно, как у плашек и слоёв, и первый кадр рисуется умолчаниями).
+  const stopParams = volumeParamsWatch(() => paramsChanged());
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     card,
@@ -55610,6 +57082,7 @@ function createVolume({ api, hosts }) {
     padNode,
     stanceBox,
     viewButton,
+    paramsButton.node,
     aimNode,
     hintPlate.node,
     askBox,
@@ -55819,7 +57292,73 @@ function createVolume({ api, hosts }) {
    * показывают.
    */
   function placeStance() {
-    stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm) + "px";
+    stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm, volumeParamsRead().minimap) + "px";
+  }
+
+  // ——— час суток: один снимок на секунду ———
+
+  /** Сцена и тень под ней меняются вместе: тень держится за габариты стен. */
+  function setScene(state) {
+    scene = sceneOf(state) || scene;
+    refreshShadow();
+  }
+
+  function refreshShadow() {
+    shadow = volumeShadowFaces(scene.shadowBoxes, hour ? hour.shadow : null);
+  }
+
+  /** Рассвет и закат этого объекта: по координатам (таск 188) или умолчанием. */
+  function dayTimes() {
+    const site = volumeSiteOf(getState().project);
+    return { site, times: volumeDayTimes(site, new Date()) };
+  }
+
+  /** Снимок часа. Нет его — считается; есть — берётся готовым. */
+  function hourNow() {
+    return hour || refreshHour();
+  }
+
+  function refreshHour() {
+    const at = Date.now();
+    const { site, times } = dayTimes();
+    hour = volumeMood({
+      minutes: volumeClockMinutes(volumeParamsClock(at), at),
+      times,
+      topDeg: site.topDeg,
+      kind: volumeParamsRead().kind,
+    });
+    refreshShadow();
+    return hour;
+  }
+
+  /**
+   * Таймер часа. Стоит он ровно тогда, когда времени есть куда идти: поле на
+   * экране и время не остановлено. Во всех остальных случаях таймера нет
+   * вовсе — это и есть «при фиксированном времени фон не пересчитывается».
+   */
+  function syncClock() {
+    const clock = volumeParamsRead().clock;
+    const running = !closed && screenMode() === "volume" && !(clock && clock.fixed);
+    if (running === Boolean(hourTick)) return;
+    if (!running) {
+      if (typeof clearInterval === "function") clearInterval(hourTick);
+      hourTick = 0;
+      return;
+    }
+    if (typeof setInterval !== "function") return;
+    hourTick = setInterval(() => {
+      if (closed) return;
+      refreshHour();
+      paint();
+    }, VOLUME_MOOD_MS);
+  }
+
+  /** Правку в окне параметров поле принимает одним путём: час заново и кадр. */
+  function paramsChanged() {
+    refreshHour();
+    syncClock();
+    placeStance();
+    paint();
   }
 
   function paint() {
@@ -55830,9 +57369,11 @@ function createVolume({ api, hosts }) {
     ctx.clearRect(0, 0, node.width, node.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const spot = camera();
+    const at = hourNow();
     // Фон — настоящая панорама вокруг дома (G208): он знает о камере её
-    // направление и больше ничего, и поворачивается вслед за головой.
-    volumeDrawBackdrop(ctx, box, spot);
+    // направление и больше ничего, и поворачивается вслед за головой. Про время
+    // он не считает ничего — час приходит готовым снимком.
+    volumeDrawBackdrop(ctx, box, spot, at);
     if (scene.empty) {
       shown = [];
       return;
@@ -55840,7 +57381,10 @@ function createVolume({ api, hosts }) {
     // Кружок «вы здесь» рисуется только в обзоре: от первого лица человек и
     // так знает, где стоит, а под ногами кружок закрыл бы пол.
     const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
-    shown = volumeFrame(scene, spot, box, [...overlay, ...marker]);
+    // Тень дома идёт в кадр `extra`, а не гранью сцены: её кладёт час (таск
+    // 181), и ярус у неё тот же, что был, — пол помещения по-прежнему ложится
+    // поверх неё.
+    shown = volumeFrame(scene, spot, box, [...shadow, ...overlay, ...marker], at.tint);
     volumeDraw(ctx, shown);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);
@@ -55861,7 +57405,7 @@ function createVolume({ api, hosts }) {
 
   function paintMinimap(box) {
     const bounds = scene.boundsMm;
-    const spot = volumeMinimapView(box, bounds);
+    const spot = volumeMinimapView(box, bounds, volumeParamsRead().minimap);
     if (!spot) return;
     const place = spot.place;
     const state = getState();
@@ -56098,7 +57642,7 @@ function createVolume({ api, hosts }) {
   // считать её заново дешевле, чем держать второй путь «подмени одно полотно».
   // На объекте заказчика это 8 мс и происходит по нажатию клавиши, а не в кадре.
   function rebuildScene() {
-    scene = sceneOf(getState()) || scene;
+    setScene(getState());
     rebuildOverlay();
     // Низкое место могли убрать с чертежа, пока человек сидел под ним (G234).
     stanceRecheck();
@@ -56548,7 +58092,7 @@ function createVolume({ api, hosts }) {
       // вплотную к ней, а место теснее тела меняет на ближайшее свободное
       // (D39). Второго правила «куда можно встать» в сборке нет.
       if (view === "person" && !locked) {
-        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at);
+        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at, volumeParamsRead().minimap);
         if (spot) {
           const moved = volumeMoveTo(scene, spot, volumeStanceHead(stance));
           person.x = moved.x;
@@ -56877,7 +58421,7 @@ function createVolume({ api, hosts }) {
     // обязаны говорить про тот этаж, на котором человек стоит. Своя подписка
     // этого изменения не увидит как смены схемы — `schemeId` уже равен ему.
     setState({ schemeId });
-    scene = sceneOf(state) || scene;
+    setScene(state);
     const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
@@ -56937,7 +58481,7 @@ function createVolume({ api, hosts }) {
     const place = visited.get(back.schemeId) || null;
     schemeId = back.schemeId;
     setState({ schemeId });
-    scene = sceneOf(state) || scene;
+    setScene(state);
     if (!scene.empty) {
       const at = place || { x: person.x, y: person.y, yaw: person.yaw };
       const moved = volumeMoveTo(scene, at, volumeStanceHead(stance));
@@ -57300,6 +58844,10 @@ function createVolume({ api, hosts }) {
       cancelFrame(frame);
       frame = 0;
     }
+    if (hourTick && typeof clearInterval === "function") clearInterval(hourTick);
+    hourTick = 0;
+    stopParams();
+    paramsButton.dispose();
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
     if (unsubscribe) unsubscribe();
     window.removeEventListener("pointermove", onPointerMove);
@@ -57325,7 +58873,7 @@ function createVolume({ api, hosts }) {
   function followScheme(state) {
     leaveScheme();
     schemeId = state.schemeId;
-    scene = sceneOf(state) || scene;
+    setScene(state);
     if (!scene.empty) {
       const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
       person.x = moved.x;
@@ -57365,12 +58913,21 @@ function createVolume({ api, hosts }) {
         if ("screen" in changed && state.screen === "volume") {
           resize();
           placeArrive(state);
+          // «При открытии стоит реальное время» (G282): идущие часы
+          // перецепляются за настоящий час, остановленные остаются стоять.
+          volumeParamsArrive(Date.now());
+          refreshHour();
+          syncClock();
           sync();
           if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
         // Режим сменили на другой — оставляем схеме и чертежу то место, где
         // стоял человек (G276).
-        if ("screen" in changed && state.screen !== "volume") placeLeave(state);
+        if ("screen" in changed && state.screen !== "volume") {
+          placeLeave(state);
+          // Поле погасло — таймеру часа идти незачем.
+          syncClock();
+        }
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
         if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
@@ -57378,7 +58935,12 @@ function createVolume({ api, hosts }) {
         // заново: спрятанной вещи в ней нет ни гранью, ни препятствием.
         const objectsChanged = "objectsShown" in changed || "hiddenObjectIds" in changed;
         if (!("project" in changed) && !("filter" in changed) && !objectsChanged) return;
-        scene = sceneOf(state) || scene;
+        setScene(state);
+        // Координаты объекта и направление верха чертежа — свойства объекта
+        // (таск 188), и правят их, не выходя из режима. Час пересчитывается
+        // здесь же: при остановленном времени таймера нет вовсе, и без этого
+        // новые координаты доехали бы до неба только со следующим ходом часов.
+        refreshHour();
         sync();
       })
     : null;
@@ -57402,6 +58964,9 @@ function createVolume({ api, hosts }) {
   document.addEventListener("pointerlockchange", onLockChange);
   for (const name of FULLSCREEN_EVENTS) document.addEventListener(name, onFullscreenChange);
 
+  volumeParamsArrive(Date.now());
+  refreshHour();
+  syncClock();
   sync();
   resize();
   // Первый вход в режим: человек встаёт туда, где была середина поля, с

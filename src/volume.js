@@ -59,6 +59,8 @@ import {
   planFractionToMm,
   roomAtPoint,
   planMmToFraction,
+  projectCoords,
+  projectTopAzimuth,
   schemeFloorOf,
   schemeObjectCorners,
   schemeObjectsOnScheme,
@@ -5408,85 +5410,30 @@ export function volumeClockAt(clock, nowMs, speed) {
   return { fixed: false, fromMin: minutes, atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
 }
 
-// ——— место объекта: дверь к таску 188 ——————————————————————————————————
+// ——— место объекта (таск 188) ——————————————————————————————————————————
 //
 // Координаты и направление верха чертежа — **свойства объекта** (решение
-// заказчика в G283 и G284), и заводит их таск 188. Объём читает их здесь, и
-// читает **терпимо**: нет значений — работает по умолчаниям заказчика (рассвет
-// 9:00, закат 21:00, верх на север), и ни одного поля сам не создаёт.
+// заказчика в G283 и G284), и живут они в `project.site`. Объём их только
+// читает, и читает **чужой дверью**: `projectCoords` и `projectTopAzimuth` —
+// единственные хозяева этих полей, они же разбирают мусор и пустоту. Свой
+// разбор здесь был бы вторым ответом на вопрос «где стоит дом», и разошёлся бы
+// он ровно в тот день, когда формат поправят.
 //
-// Имена ключей перечислены списком нарочно: таск 188 выбирает их у себя, а
-// объём обязан открыть и объект, у которого их нет вовсе, — то есть любой
-// сегодняшний. Разойдись имена — поправится одна строка этого списка, а не
-// счёт светила.
-
-const VOLUME_SITE_KEYS = ["site", "object", "properties", "props", "stamp", "view"];
-const VOLUME_LAT_KEYS = ["latDeg", "lat", "latitude"];
-const VOLUME_LON_KEYS = ["lonDeg", "lon", "lng", "longitude"];
-const VOLUME_TOP_KEYS = ["topDeg", "topAzimuthDeg", "topNorthDeg", "northDeg", "planNorthDeg", "north"];
-
-function volumeNumberIn(source, keys, min, max) {
-  if (!source || typeof source !== "object") return null;
-  for (const key of keys) {
-    const value = Number(source[key]);
-    if (Number.isFinite(value) && value >= min && value <= max) return value;
-  }
-  return null;
-}
-
-/** «55.7558, 37.6173» из карт — то, что человек скопирует (таск 188). */
-function volumeCoordsIn(source) {
-  if (!source || typeof source !== "object") return null;
-  for (const key of ["coords", "coordinates", "latLon", "latlng"]) {
-    const value = source[key];
-    if (value && typeof value === "object") {
-      const lat = volumeNumberIn(value, VOLUME_LAT_KEYS, -90, 90);
-      const lon = volumeNumberIn(value, VOLUME_LON_KEYS, -180, 180);
-      if (lat !== null && lon !== null) return { latDeg: lat, lonDeg: lon };
-      continue;
-    }
-    if (typeof value !== "string") continue;
-    const pair = /^\s*(-?\d{1,2}(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$/.exec(value);
-    if (!pair) continue;
-    const lat = Number(pair[1].replace(",", "."));
-    const lon = Number(pair[2].replace(",", "."));
-    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { latDeg: lat, lonDeg: lon };
-  }
-  return null;
-}
+// Нет координат — рассвет и закат берутся умолчанием заказчика (9:00 и 21:00),
+// нет направления — верх чертежа смотрит на север. Ни одного поля объём не
+// создаёт: открыть объём у объекта без свойств — ноль изменений (G68).
 
 /**
  * Место объекта: широта, долгота и направление верха чертежа (в градусах от
- * севера по часовой стрелке, как договорено в таске 188).
- *
- * Координат нет — `latDeg`/`lonDeg` пустые, и тогда рассвет с закатом берутся
- * умолчанием. Направления нет — ноль, то есть верх чертежа смотрит на север.
+ * севера по часовой стрелке).
  */
 export function volumeSiteOf(project) {
-  let latDeg = null;
-  let lonDeg = null;
-  let topDeg = 0;
-  for (const key of VOLUME_SITE_KEYS) {
-    const source = project ? project[key] : null;
-    if (!source || typeof source !== "object") continue;
-    if (latDeg === null) {
-      const lat = volumeNumberIn(source, VOLUME_LAT_KEYS, -90, 90);
-      const lon = volumeNumberIn(source, VOLUME_LON_KEYS, -180, 180);
-      if (lat !== null && lon !== null) {
-        latDeg = lat;
-        lonDeg = lon;
-      } else {
-        const pair = volumeCoordsIn(source);
-        if (pair) {
-          latDeg = pair.latDeg;
-          lonDeg = pair.lonDeg;
-        }
-      }
-    }
-    const top = volumeNumberIn(source, VOLUME_TOP_KEYS, -720, 720);
-    if (top !== null && topDeg === 0) topDeg = ((top % 360) + 360) % 360;
-  }
-  return { latDeg, lonDeg, topDeg };
+  const coords = projectCoords(project);
+  return {
+    latDeg: coords ? coords.lat : null,
+    lonDeg: coords ? coords.lon : null,
+    topDeg: projectTopAzimuth(project),
+  };
 }
 
 /**

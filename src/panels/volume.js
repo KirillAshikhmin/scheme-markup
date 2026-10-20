@@ -2912,6 +2912,11 @@ function createVolume({ api, hosts }) {
         const objectsChanged = "objectsShown" in changed || "hiddenObjectIds" in changed;
         if (!("project" in changed) && !("filter" in changed) && !objectsChanged) return;
         setScene(state);
+        // Координаты объекта и направление верха чертежа — свойства объекта
+        // (таск 188), и правят их, не выходя из режима. Час пересчитывается
+        // здесь же: при остановленном времени таймера нет вовсе, и без этого
+        // новые координаты доехали бы до неба только со следующим ходом часов.
+        refreshHour();
         sync();
       })
     : null;

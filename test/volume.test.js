@@ -31,6 +31,9 @@ import {
   addWall,
   applyMarkWalls,
   createProject,
+  projectCoords,
+  projectTopAzimuth,
+  setProjectSite,
   SCHEME_FLOOR_MAX,
   SCHEME_FLOOR_MIN,
   ensureSchemeObjectKinds,
@@ -1663,27 +1666,29 @@ test("рассвет и закат: умолчание заказчика, а с
   assert.equal(volumeSunAt(60, light).up, true, "и в час ночи солнце над горизонтом");
 });
 
-test("место объекта читается терпимо: нет ключей — умолчания (дверь к таску 188)", () => {
-  // Сегодняшний объект свойств объекта не знает вовсе — и это не ошибка.
+test("место объекта объём читает чужой дверью — свойствами объекта (таск 188)", () => {
+  // Сегодняшний объект свойств не знает вовсе — и это не ошибка.
   const bare = volumeSiteOf(createProject());
   assert.equal(bare.latDeg, null);
   assert.equal(bare.lonDeg, null);
   assert.equal(bare.topDeg, 0, "верх чертежа смотрит на север");
   assert.deepEqual(volumeSiteOf(null), { latDeg: null, lonDeg: null, topDeg: 0 });
-  // Таск 188 заводит их в свойствах объекта. Имена ключей перечислены списком,
-  // и любое из них читается.
-  assert.equal(volumeSiteOf({ site: { latDeg: 55.75, lonDeg: 37.61 } }).latDeg, 55.75);
-  assert.equal(volumeSiteOf({ properties: { latitude: 59.94, longitude: 30.31 } }).lonDeg, 30.31);
-  // «55.7558, 37.6173» — то, что человек скопирует из карт.
-  const pasted = volumeSiteOf({ site: { coords: "55.7558, 37.6173" } });
-  assert.equal(pasted.latDeg, 55.7558);
-  assert.equal(pasted.lonDeg, 37.6173);
-  // Направление верха чертежа — в градусах от севера по часовой стрелке.
-  assert.equal(volumeSiteOf({ site: { topDeg: 90 } }).topDeg, 90);
-  assert.equal(volumeSiteOf({ site: { northDeg: -90 } }).topDeg, 270, "отрицательный угол заворачивается");
-  // Мусор не притворяется местом.
-  assert.equal(volumeSiteOf({ site: { latDeg: "юг", lonDeg: null } }).latDeg, null);
-  assert.equal(volumeSiteOf({ site: { coords: "дом у реки" } }).latDeg, null);
+  // Координаты и направление живут в свойствах объекта (G283, G284), и хозяин
+  // у них один — `projectCoords`/`projectTopAzimuth`. Своего разбора у объёма
+  // нет: разойдись они, дом стоял бы в двух местах сразу.
+  const sited = setProjectSite(createProject(), { coords: "55.7558, 37.6173", topAzimuthDeg: 90 }).project;
+  assert.deepEqual(volumeSiteOf(sited), { latDeg: 55.7558, lonDeg: 37.6173, topDeg: 90 });
+  assert.deepEqual(volumeSiteOf(sited), {
+    latDeg: projectCoords(sited).lat,
+    lonDeg: projectCoords(sited).lon,
+    topDeg: projectTopAzimuth(sited),
+  });
+  // Половина пары — не точка: широта без долготы читается как «координат нет».
+  const half = { ...sited, site: { ...sited.site, lon: null } };
+  assert.equal(volumeSiteOf(half).latDeg, null);
+  // И по этим координатам считается уже не умолчание.
+  assert.equal(volumeDayTimes(volumeSiteOf(sited), new Date(2026, 5, 21, 12)).bySite, true);
+  assert.equal(volumeDayTimes(volumeSiteOf(createProject()), new Date(2026, 5, 21, 12)).bySite, false);
 });
 
 test("утро, день, вечер и ночь — слова, а не состояния", () => {
