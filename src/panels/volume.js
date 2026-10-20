@@ -70,10 +70,11 @@ import {
   VOLUME_START_PITCH_DEG,
   VOLUME_WALK_MM_S,
   VOLUME_TIGHT_MM,
-  volumeAroundDistance,
   volumeAroundEye,
   volumeAroundFit,
   volumeAroundPan,
+  volumeAroundReach,
+  volumeAroundSpeed,
   volumeAroundTarget,
   volumeFreeMm,
   volumeBasis,
@@ -980,26 +981,28 @@ function createVolume({ api, hosts }) {
    * память ушла, и это честно: заново открытый объём не помнит дороги.
    */
   const visited = new Map();
-  // ——— обзор: где стоит камера (таск 200, G304) ———
+  // ——— обзор: свободная камера (таск 200 G304, таск 207 G312) ———
   //
-  // Хранится **место камеры**, а цель — точка перед ней на `distance`
-  // (`volumeAroundTarget`). До таска 200 было наоборот: хранилась цель, а место
-  // считалось от неё, и это была орбита с пределом стояния (`volumeAroundStand`,
-  // таск 195). Предел заказчик снял и отдал обзору полёт — а полёт двигает
-  // саму камеру, не цель. Поэтому главным стало её место, и «брошенной цели на
-  // другом конце квартиры» больше не бывает: цель всегда там, куда камера
-  // летит.
-  let around = {
-    eye: volumeAroundEye(
+  // Хранятся **место камеры и её взгляд**, и больше ничего. Орбиты нет: мышь
+  // вертит обзор на месте, как в первом лице, — прямое слово заказчика
+  // («почему движение мыши… перемещает камеру вокруг какой-то цели, а не
+  // просто поворачивает камеру как при виде от 1 лица? должно быть так же»).
+  //
+  // `distance` в состоянии **не выбор, а счёт**: мера обзора
+  // (`volumeAroundReach`) — докуда он достаёт до пола по взгляду. Её пишет
+  // один `aroundSet`, и живого выбора «расстояние до цели» в сборке больше нет
+  // — второго смысла у числа взяться неоткуда.
+  let around = null;
+  aroundSet(
+    volumeAroundEye(
       { x: start.x, y: start.y, z: 1200 },
       start.yaw,
       (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
       VOLUME_AROUND_NEAR_MM,
     ),
-    yaw: start.yaw,
-    pitch: (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
-    distance: VOLUME_AROUND_NEAR_MM,
-  };
+    start.yaw,
+    (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
+  );
 
   const node = uiEl("canvas", { class: "volume__canvas" });
   // Карточка выделенной метки — внизу поверх поля, ровно так же, как она стоит
@@ -1291,48 +1294,65 @@ function createVolume({ api, hosts }) {
     return Math.min(around.pitch, home);
   }
 
-  // ——— обзор: четыре руки на одно место камеры (таск 200, G304) ———————————
+  // ——— обзор: одна дверь к состоянию и одна мера (таск 207, G311 и G312) ———
   //
-  // Цель у обзора **не хранится** — она считается точкой перед камерой
-  // (`aroundTarget`). Отсюда и ответ на «что остаётся от орбиты»: орбита
-  // остаётся, и крутится она ровно вокруг той точки, в которую камера летит.
-  // Колесо подводит камеру к ней, свайп возит обе по полу, полёт несёт обе
-  // разом.
+  // Место и взгляд пишет **только** `aroundSet`, и он же считает меру
+  // (`volumeAroundReach`). Поэтому мера не может протухнуть: нет пути, которым
+  // камера сдвинулась бы, а число осталось прежним. Таким путём был полёт
+  // таска 200 — слетев с тридцати метров в комнату, человек возил карту
+  // двумя пальцами мерой тридцати метров.
 
-  /** Куда смотрит обзор: точка перед камерой на `distance`. */
+  /** Единственная дверь к обзору: место и взгляд — руками, мера — счётом. */
+  function aroundSet(eye, yaw, pitch) {
+    around = { eye, yaw, pitch, distance: volumeAroundReach(eye, pitch) };
+  }
+
+  /** Куда смотрит обзор: точка пола под взглядом (мера её и задаёт). */
   function aroundTarget() {
     return volumeAroundTarget(around.eye, around.yaw, around.pitch, around.distance);
   }
 
   /** Кадрировать: встать так, чтобы смотреть на `target` с `distance`. */
   function aroundFrame(target, yaw, pitch, distance) {
-    around = { eye: volumeAroundEye(target, yaw, pitch, distance), yaw, pitch, distance };
+    aroundSet(volumeAroundEye(target, yaw, pitch, distance), yaw, pitch);
+  }
+
+  /** Повернуть обзор на месте: то же правило, что у человека (`lookBy`). */
+  function aroundTurn(yaw, pitch) {
+    aroundSet(around.eye, yaw, pitch);
   }
 
   /**
-   * Повернуть обзор **вокруг цели** (рысканье): та самая орбита, которой
-   * обходят дом. Высота камеры от этого не меняется ни на миллиметр — рысканье
-   * не трогает вертикальную часть взгляда, — поэтому пол здесь и не
-   * спрашивается: под плиту орбита не уводит.
+   * Приблизиться или отойти (таск 207): камера **едет по взгляду** на долю
+   * меры, а не подходит к цели на расстояние.
+   *
+   * Так колесо не умирает. До таска 207 оно уменьшало хранимое расстояние, и
+   * у предела (`VOLUME_AROUND_MIN_MM`) приближаться становилось нечем: в
+   * комнате колесо переставало делать что-либо вовсе. Шаг долей меры
+   * приближает **всегда**: он сам мельчает вместе с нею и в ноль не упирается.
+   *
+   * `factor` приходит от общей двери жестов (`gestureWheel`,
+   * `gesturePinchStep`): больше единицы — приблизились.
    */
-  function aroundSpin(yaw) {
-    const target = aroundTarget();
-    around = { ...around, eye: volumeAroundEye(target, yaw, around.pitch, around.distance), yaw };
+  function aroundZoom(factor) {
+    const value = Number(factor) > 0 ? Number(factor) : 1;
+    const step = volumeAroundReach(around.eye, around.pitch) * (1 - 1 / value);
+    const basis = volumeBasis({ yaw: around.yaw, pitch: around.pitch });
+    aroundSet(
+      {
+        x: around.eye.x + basis.fwd.x * step,
+        y: around.eye.y + basis.fwd.y * step,
+        // Пол держит и здесь — тем же правилом, что держит прыжок и полёт.
+        z: volumeGroundMm(around.eye.z + basis.fwd.z * step),
+      },
+      around.yaw,
+      around.pitch,
+    );
   }
 
-  /**
-   * Приблизиться или отойти: цель на месте, камера подходит к ней по взгляду.
-   * То же, что делало колесо до таска 200, — только теперь это видно в состоянии.
-   */
-  function aroundZoom(distance) {
-    const next = volumeAroundDistance(distance);
-    const target = aroundTarget();
-    around = { ...around, eye: volumeAroundEye(target, around.yaw, around.pitch, next), distance: next };
-  }
-
-  /** Сдвинуть обзор по полу: и камера, и цель уезжают на столько же. */
+  /** Сдвинуть обзор по полу: и камера, и точка под взглядом уезжают на столько же. */
   function aroundSlide(dx, dy) {
-    around = { ...around, eye: { ...around.eye, x: around.eye.x + dx, y: around.eye.y + dy } };
+    aroundSet({ ...around.eye, x: around.eye.x + dx, y: around.eye.y + dy }, around.yaw, around.pitch);
   }
 
   /** Навести обзор на это место плана, не меняя ни взгляда, ни высоты. */
@@ -2059,14 +2079,15 @@ function createVolume({ api, hosts }) {
     const dy = (basis.fwd.y * forward + basis.right.y * side) * scale;
     const dz = basis.fwd.z * forward * scale + lift;
     if (dx === 0 && dy === 0 && dz === 0) return;
-    around = {
-      ...around,
-      eye: {
+    aroundSet(
+      {
         x: around.eye.x + dx,
         y: around.eye.y + dy,
         z: volumeGroundMm(around.eye.z + dz),
       },
-    };
+      around.yaw,
+      around.pitch,
+    );
   }
 
   // ——— присед и прыжок (G234) ———
@@ -2249,13 +2270,23 @@ function createVolume({ api, hosts }) {
       forward += pad.forward;
       turn += pad.turn;
     }
-    const speed = (run ? VOLUME_RUN_MM_S : VOLUME_WALK_MM_S) * step;
+    // ——— скорость (таск 207, G311) ———
+    //
+    // Пешком — шаг человека, и он не тронут. В обзоре — мера, пройденная за
+    // `VOLUME_AROUND_FLY_S` (`volumeAroundSpeed`): «вблизи точность, издали
+    // размах» одним отношением, а не двумя скоростями.
+    const speed =
+      (view === "person"
+        ? run
+          ? VOLUME_RUN_MM_S
+          : VOLUME_WALK_MM_S
+        : volumeAroundSpeed(around.distance, run)) * step;
     if (turn !== 0) {
       const spin = Math.max(-1, Math.min(1, turn)) * step * 2.2;
       if (view === "person") person.yaw += spin;
-      // Стрелками обзор обходит цель — той же орбитой, что перетаскиванием:
-      // второго способа повернуться не заводится.
-      else aroundSpin(around.yaw + spin);
+      // Стрелками обзор поворачивается на месте — тем же, чем вертит мышь:
+      // второго способа повернуться не заводится (таск 207).
+      else aroundTurn(around.yaw + spin, around.pitch);
     }
     const basis = volumeBasis(view === "person" ? person : { yaw: around.yaw, pitch: around.pitch });
     // Длина делится на себя же, но не больше единицы: клавиши дают ровно
@@ -2311,28 +2342,25 @@ function createVolume({ api, hosts }) {
   // каждый браузер и не во всякой вкладке, поэтому перетаскивание работает
   // всегда и само по себе.
 
+  /**
+   * Повернуть взгляд — **одно правило на оба вида** (таск 207, G312).
+   *
+   * Слова заказчика: «почему движение мыши с зажатой клавишей перемещает
+   * камеру вокруг какой-то цели, а не просто поворачивает камеру как при виде
+   * от 1 лица? должно быть так же». Орбита, которую таск 200 оставил
+   * рысканью, отменена: камера вертится **на месте** — и считается это здесь,
+   * одним счётом. Разница между видами осталась одна: чья это голова.
+   */
   function lookBy(dx, dy) {
     const perPixel = (VOLUME_LOOK_DEG_PX * Math.PI) / 180;
+    const aim = view === "person" ? person : around;
+    const yaw = aim.yaw + dx * perPixel;
+    const pitch = volumeClampPitch(aim.pitch - dy * perPixel);
     if (view === "person") {
-      person.yaw += dx * perPixel;
-      person.pitch = volumeClampPitch(person.pitch - dy * perPixel);
+      person.yaw = yaw;
+      person.pitch = pitch;
     } else {
-      // ——— что осталось от орбиты (таск 200, G304) ———
-      //
-      // **Рысканьем обзор обходит дом** — это орбита, и она та же, что была:
-      // потянул в сторону, дом повернулся. **Наклоном он задирает голову на
-      // месте** — это тоже прежнее поведение, только названное честно: таск
-      // 195 уже оставлял камеру стоять, когда взгляд поднимался выше предела
-      // (`volumeAroundStand`), а предел таска 200 снят целиком, и в наклоне
-      // от него осталось только «камера не едет».
-      //
-      // Почему не орбита и в наклоне: орбита вокруг цели поднимает камеру,
-      // когда взгляд опускают, и **опускает под пол**, когда взгляд задирают.
-      // Спустившемуся до земли (а этого заказчик просил прямо) посмотреть
-      // вверх было бы нечем. Подниматься теперь — пробелом, и это тот же
-      // полёт, которым обзор ходит.
-      aroundSpin(around.yaw + dx * perPixel);
-      around = { ...around, pitch: volumeClampPitch(around.pitch - dy * perPixel) };
+      aroundTurn(yaw, pitch);
     }
     paint();
   }
@@ -2391,7 +2419,7 @@ function createVolume({ api, hosts }) {
           // Развели пальцы — приблизились, то есть камера подошла: расстояние
           // делится на множитель, а не умножается. Взгляд щипок не трогает
           // (таск 195): куда смотрят — выбор руки, а не приближения.
-          aroundZoom(around.distance / step.factor);
+          aroundZoom(step.factor);
           const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
           aroundSlide(moved.dx, moved.dy);
           paint();
@@ -2577,7 +2605,7 @@ function createVolume({ api, hosts }) {
       const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
       aroundSlide(moved.dx, moved.dy);
     } else {
-      aroundZoom(around.distance / step.factor);
+      aroundZoom(step.factor);
     }
     paint();
   }
@@ -2891,7 +2919,7 @@ function createVolume({ api, hosts }) {
       person.y = moved.y;
       person.yaw = at.yaw;
       if (place) person.pitch = volumeClampPitch(place.pitch);
-      aroundSpin(person.yaw);
+      aroundTurn(person.yaw, around.pitch);
       aroundLookAt(person.x, person.y);
     }
     select(null);

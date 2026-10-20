@@ -550,6 +550,24 @@ test("у обзора нет ни своей цели, ни своей скор�
   assert.ok(!body.includes("ghost"), "камере поставили отметку «сквозь стены»");
 });
 
+test("поворот взгляда считает одно место на оба вида (таск 207, G312)", () => {
+  const panel = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "volume.js"),
+    "utf8",
+  );
+  const code = stripComments(panel);
+  // Орбиты больше нет ни следа: мышь вертит камеру на месте, как в первом лице.
+  assert.ok(!/aroundSpin/.test(code), "орбитальный поворот обзора вернулся");
+  // **Разбор один.** Мера поворота мышью встречается в поле ровно дважды —
+  // ввоз и единственный счёт: заведись второй, виды разошлись бы молча.
+  assert.equal((code.match(/VOLUME_LOOK_DEG_PX/g) || []).length, 2, "у поворота мышью завёлся второй разбор");
+  // Поворот обзора **места не трогает**: `aroundTurn` отдаёт прежнее место.
+  assert.ok(/function aroundTurn\(yaw, pitch\) \{\s*aroundSet\(around\.eye, yaw, pitch\);/.test(code), "поворот обзора двигает камеру");
+  // Мера обзора не хранится как выбор: её пишет только `aroundSet`.
+  assert.equal((code.match(/distance:/g) || []).length, 1, "расстояние обзора снова пишут мимо одной двери");
+  assert.ok(/around = \{ eye, yaw, pitch, distance: volumeAroundReach\(eye, pitch\) \}/.test(code), "мера обзора перестала считаться");
+});
+
 // ——— G68 ————————————————————————————————————————————————————————————————
 
 test("второго счёта высоты нет, и отметки не доходят до объекта (таск 192, G68)", () => {
