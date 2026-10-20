@@ -27,6 +27,7 @@ import {
   addScheme,
   addWall,
   createProject,
+  schemeAnchorOf,
   schemeAnchorOriginMm,
   setSchemeAnchor,
 } from "../src/model.js";
@@ -119,7 +120,12 @@ function house() {
 
 test("калька встаёт по привязке, а без неё — по началу координат", () => {
   const box = house();
+  // Правило кальки целиком: сдвиг считается, только когда точка есть у
+  // **обеих** схем. Половина привязки — не половина совмещения, и это разбор
+  // живого прогона: привязал первый этаж, открыл второй ставить его точку, а
+  // калька уехала с экрана на разницу привязки.
   const shift = (project, mine, other) => {
+    if (!schemeAnchorOf(project, mine) || !schemeAnchorOf(project, other)) return { x: 0, y: 0 };
     const here = schemeAnchorOriginMm(project, mine);
     const there = schemeAnchorOriginMm(project, other);
     return { x: there.x - here.x, y: there.y - here.y };
@@ -134,10 +140,15 @@ test("калька встаёт по привязке, а без неё — по
   assert.deepEqual(shift(fitted, box.lower, box.upper), { x: -5000, y: -3000 });
   // Точка верхнего этажа после сдвига ложится ровно в точку нижнего.
   assert.deepEqual({ x: 11000 - 5000, y: 11000 - 3000 }, { x: 6000, y: 8000 });
-  // Привязка только у одной — совмещать не по чему, и калька честно стоит
-  // началом координат: половина привязки это не половина совмещения.
+  // Привязка только у одной — совмещать не по чему, и калька стоит началом
+  // координат: инструмент подгонки обязан дождаться, пока подгонка кончится.
   const half = setSchemeAnchor(box.project, box.upper, { x: 11000, y: 11000 }).project;
-  assert.deepEqual(shift(half, box.lower, box.upper), { x: -11000, y: -11000 });
+  assert.deepEqual(shift(half, box.lower, box.upper), { x: 0, y: 0 });
+  // Тем же правилом живёт и поле: «обеих», а не «каждой по себе».
+  const workshop = read(join("panels", "workshop.js"));
+  const paint = workshop.slice(workshop.indexOf("function paintOverlay()"));
+  assert.ok(paint.slice(0, 1200).includes("const paired ="), "калька снова считает сдвиг по каждой схеме отдельно");
+  assert.ok(paint.slice(0, 1200).includes("paired ? {"), "сдвиг кальки перестал спрашивать про обе привязки");
 });
 
 test("калька не уходит в выгрузки и не попадает под руку", () => {
