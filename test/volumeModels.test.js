@@ -674,7 +674,7 @@ test("шторы точечной метки просвечивают так ж�
   const solid = faces.filter((face) => !face.clear);
   assert.equal(clear.length, 18, "три складки по шесть граней: " + clear.length);
   assert.equal(solid.length, 6, "труба карниза — шесть плотных граней: " + solid.length);
-  for (const face of clear) assert.equal(face.alpha, VOLUME_SHEER_ALPHA, "складка просвечивает не тюлем");
+  for (const face of clear) assert.equal(face.alpha, VOLUME_SHEER_ALPHA, "складка просвечивает не плотностью ткани");
   for (const face of solid) assert.equal(face.alpha, 1, "труба карниза перестала быть плотной");
   for (const face of faces) assert.equal(face.markId, scene.mark.id, "хозяин у всех граней шторы — она сама");
   // Линейная — то же число у того же шва.

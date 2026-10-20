@@ -9,6 +9,9 @@ import { FONT_DRAFT, FONT_KINDS } from "./render.js";
 import { registerServiceWorker } from "./pwa.js";
 // Значок кнопки раскладки рисует общий набор — своего рисунка у каркаса нет.
 import { uiIcon } from "./panels/ui.js";
+// Липкие заголовки колонок: верх умеет браузер, низ — рейка (таск 194).
+// Каркас её завязывает и трогает там, где сам меняет высоту разделов.
+import { panelRailInset, panelRailJump, panelScrollBox, syncPanelRail, wirePanelRail } from "./panels/rail.js";
 
 // Контейнеры-точки монтирования (идентификаторы из src/index.html).
 export const PANEL_IDS = {
@@ -579,6 +582,9 @@ function syncScreenClass() {
   const app = document.getElementById("app");
   if (!app) return;
   app.dataset.screen = appState.screen;
+  // Режим меняет состав разделов в обеих колонках — рейке заголовков это
+  // переезд всех её строк сразу.
+  syncPanelRail();
 }
 
 export function screenMode() {
@@ -713,8 +719,19 @@ function applySectionState(id) {
   if (!node) return;
   const collapsed = appCollapsed.has(id);
   node.classList.toggle("is-collapsed", collapsed);
-  const button = node.querySelector("[data-section]");
-  if (button) button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  // Состояние живёт на галочке: у неё одно дело — сворачивать, и держится оно
+  // за ней, где бы заголовок ни был нарисован. У имени раздела дело меняется
+  // от места (таск 198), и обещать голосу «свёрнуто/развёрнуто» ему нечем.
+  const fold = node.querySelector("[data-section-fold]");
+  if (fold) {
+    const label = collapsed ? strings.panels.unfold : strings.panels.fold;
+    fold.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    fold.setAttribute("aria-label", label);
+    fold.title = label;
+  }
+  // Свернули раздел — разделы ниже переехали, и рейка заголовков устарела.
+  // Наблюдатель за размерами поймал бы это и сам, но на кадр позже.
+  syncPanelRail();
 }
 
 export function setSectionCollapsed(id, collapsed) {
@@ -788,9 +805,27 @@ export function revealSection(id) {
   setSectionCollapsed(id, false);
   const node = sectionNode(id);
   if (!node) return;
-  if (typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "nearest" });
+  revealSectionScroll(node);
   node.classList.add("is-called");
   setTimeout(() => node.classList.remove("is-called"), 1200);
+}
+
+// Подвести позванный раздел к глазам. `scrollIntoView` сюда не годится: он
+// считает «видимым» и то, что стоит под рейкой заголовков, — позванный раздел
+// подъехал бы к нижней кромке и спрятался за заголовками тех, что ниже его.
+// Поэтому край кадра считается по рейке, а подводится раздел своим верхом: его
+// заголовок — то, что человек и ищет глазами после подсветки.
+function revealSectionScroll(node) {
+  const box = panelScrollBox(node);
+  if (!box) {
+    if (typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  const frame = box.getBoundingClientRect();
+  const rect = node.getBoundingClientRect();
+  const low = frame.bottom - panelRailInset(node) - rect.height;
+  if (rect.top >= frame.top && rect.top <= low) return;
+  box.scrollTop += rect.top - frame.top;
 }
 
 // Счётчик в заголовке: по свёрнутому разделу видно, пуст он или там сорок схем.
@@ -803,7 +838,25 @@ export function setSectionBadge(id, value) {
 
 function wireSections() {
   for (const button of document.querySelectorAll("[data-section]")) {
-    button.addEventListener("click", () => toggleSection(button.dataset.section));
+    button.addEventListener("click", () => {
+      // Имя раздела: на своём месте — прежняя кнопка сворачивания, у кромки
+      // колонки — указатель на раздел (таск 198, G303). Слова заказчика:
+      // «нажал — прыгнуло туда — да, так и надо, а то приходится самому
+      // листать, это не очевидно». Где нарисован заголовок и куда от него
+      // листать — знает рейка, и спрашивают её, а не меряют заново.
+      if (panelRailJump(button)) return;
+      toggleSection(button.dataset.section);
+    });
+  }
+  // Галочка слева от имени: сворачивает всегда — и когда раздел на виду, и
+  // когда от него виден один заголовок в рейке. Без неё свернуть невидимый
+  // раздел было бы нечем, а именно так прячут список меток, чтобы добраться до
+  // справочника типов.
+  for (const button of document.querySelectorAll("[data-section-fold]")) {
+    button.addEventListener("click", () => toggleSection(button.dataset.sectionFold));
+    // Подпись голосу ставится сразу, а не с первого нажатия: внутри кнопки один
+    // знак, и до первого сворачивания она читалась бы пустой.
+    applySectionState(button.dataset.sectionFold);
   }
   // Настройки читаются асинхронно: разделы стартуют развёрнутыми и схлопываются,
   // когда хранилище ответит. Ждать его с пустым экраном хуже.
@@ -906,6 +959,9 @@ export function startApp() {
   syncScreenClass();
   wireLayout();
   for (const id of appPanels.keys()) mountPanel(id);
+  // Рейка завязывается после панелей: разделы в разметке стоят с самого начала,
+  // а вот высоты у них появляются, когда панели в них что-то положили.
+  wirePanelRail();
   // Веб-версия заодно просит служебный скрипт: установленное приложение
   // обязано открываться и без сети. Со страницы на диске это ничего не делает.
   registerServiceWorker();

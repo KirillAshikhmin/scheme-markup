@@ -67,6 +67,9 @@ import {
   VOLUME_LAYER_GROUND,
   VOLUME_LAYER_SHADOW,
   VOLUME_LAYER_MARK,
+  VOLUME_LAYER_SUN,
+  VOLUME_SHEER_SHARE,
+  VOLUME_SUN_PROBE_MM,
   VOLUME_DOOR_RGB,
   VOLUME_PLANE_EPS_MM,
   VOLUME_HANDLE_RGB,
@@ -117,7 +120,7 @@ import {
   volumeAroundCamera,
   volumeAroundFit,
   volumeAroundPan,
-  volumeAroundPitch,
+  volumeAroundStand,
   volumeClipNear,
   volumeClipDepth,
   volumeFaceSide,
@@ -145,6 +148,7 @@ import {
   volumeChannelAt,
   volumeChannelLines,
   volumeChannelLinks,
+  volumeModelKeys,
   volumeLinkLines,
   volumeMarkFaces,
   volumeMarkOnFloor,
@@ -165,6 +169,15 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeShadowFaces,
+  volumeGroundScale,
+  VOLUME_PANORAMA_NEAR_DEG,
+  VOLUME_LAND_OUT_MM,
+  volumeSunSpotFaces,
+  volumeSunSpotRgb,
+  volumeSunOpenings,
+  volumeSheerPlace,
+  volumeCurtainOpen,
+  volumeClipPolygon,
   volumeClockNow,
   volumeClockFixed,
   volumeClockMinutes,
@@ -176,6 +189,7 @@ import {
   volumeClockText,
   volumeDateParse,
   volumeDayMinutesOf,
+  volumeDateShort,
   volumeDateText,
   volumeDayDateOf,
   volumeDayNumberOf,
@@ -194,6 +208,9 @@ import {
   volumeSkyColors,
   volumeTintRgb,
   volumeMood,
+  volumeMoodMs,
+  VOLUME_MOOD_MS,
+  VOLUME_MOOD_SMOOTH_MS,
   volumeCityWindowLit,
   volumeBackdropKindOf,
   volumeShadowShift,
@@ -211,6 +228,7 @@ import {
   VOLUME_UNPLACED_SHOWN,
   volumeAltKey,
   volumeClampPitch,
+  volumeClockEvery,
   volumeAimChoice,
   volumeDoorLine,
   volumeDoorsAfterAll,
@@ -238,6 +256,7 @@ import {
 import {
   volumeParamsDay,
   volumeParamsFix,
+  volumeParamsFlag,
   volumeParamsLine,
   volumeParamsNow,
   volumeParamsRead,
@@ -464,6 +483,513 @@ test("тень дома не просвечивает сквозь пол ни �
     );
   }
   assert.ok(nearerSomewhere, "ни в один час тень не оказалась ближе пола — стенд перестал ловить D49");
+});
+
+// ——— таск 196: солнце входит в комнату через проёмы (D51, G301) ——————————
+//
+// Внутреннего света в сборке не было никогда: тень дома лежит на земле, а
+// внутри комнат её не видно ярусом (D49). Здесь проверяется то, чего не было, —
+// пятно, которое солнце кладёт на пол через проём, и четыре правила, которыми
+// оно живёт: ярус, сторона света, контур комнаты и штора перед проёмом.
+
+const SUN_DAY = { riseMin: 540, setMin: 1260 };
+const moodAt = (hour, project = null) =>
+  volumeMood({
+    minutes: hour * 60,
+    times: SUN_DAY,
+    kind: "nature",
+    topDeg: project ? projectTopAzimuth(project) : 0,
+  });
+
+/**
+ * Комната с окном в **южной** стене (`walls[2]`, ось y = +1500): комната от неё
+ * к северу, улица к югу — то есть ровно с той стороны, откуда в этих широтах
+ * светит солнце. Окно 600 × 1400 на высоте 800: обычное кухонное.
+ */
+function sunScene(options = {}) {
+  const scene = roomScene();
+  const put = addOpening(scene.project, {
+    wallId: scene.walls[options.wall === undefined ? 2 : options.wall],
+    kind: options.kind || "window",
+    atMm: options.atMm === undefined ? 1700 : options.atMm,
+    widthMm: options.widthMm === undefined ? 600 : options.widthMm,
+    heightMm: options.heightMm === undefined ? 1400 : options.heightMm,
+    heightAboveFloorMm: options.heightAboveFloorMm === undefined ? 800 : options.heightAboveFloorMm,
+    ...(options.kind === "door" ? { hinge: "start", swing: "left" } : {}),
+  });
+  return { ...scene, project: put.project, openingId: put.opening.id };
+}
+
+/** Две комнаты 8 × 3 м через общую стену с дверью и окно в южной стене левой. */
+function twoRoomScene() {
+  const base = planProject();
+  let project = base.project;
+  const corners = [
+    { x: -4000, y: -1500 },
+    { x: 4000, y: -1500 },
+    { x: 4000, y: 1500 },
+    { x: -4000, y: 1500 },
+  ];
+  const walls = [];
+  for (let index = 0; index < corners.length; index += 1) {
+    const added = addWall(project, {
+      schemeId: base.schemeId,
+      aMm: corners[index],
+      bMm: corners[(index + 1) % corners.length],
+      thicknessMm: 200,
+    });
+    project = added.project;
+    walls.push(added.wall.id);
+  }
+  const middle = addWall(project, {
+    schemeId: base.schemeId,
+    aMm: { x: 0, y: -1500 },
+    bMm: { x: 0, y: 1500 },
+    thicknessMm: 200,
+  });
+  project = middle.project;
+  const outline = (name, from, to) => {
+    const room = addRoom(project, name);
+    project = room.project;
+    project = addOutline(project, {
+      schemeId: base.schemeId,
+      roomId: room.room.id,
+      points: [
+        { x: from, y: -1400 },
+        { x: to, y: -1400 },
+        { x: to, y: 1400 },
+        { x: from, y: 1400 },
+      ].map((point) => fraction(project, base.schemeId, point)),
+    }).project;
+    return room.room.id;
+  };
+  const left = outline("Гостиная", -3900, -100);
+  const right = outline("Спальня", 100, 3900);
+  // Дверь в общей стене: обе её стороны — комнаты.
+  const door = addOpening(project, {
+    wallId: middle.wall.id,
+    kind: "door",
+    atMm: 1000,
+    widthMm: 900,
+    heightMm: 2100,
+    heightAboveFloorMm: 0,
+    hinge: "start",
+    swing: "left",
+  });
+  project = door.project;
+  // Окно в южной стене левой комнаты: `walls[2]` идёт от (4000, 1500) к
+  // (−4000, 1500), то есть отступ 5000 приходится на x = −1000.
+  const window = addOpening(project, {
+    wallId: walls[2],
+    kind: "window",
+    atMm: 5000,
+    widthMm: 1200,
+    heightMm: 2200,
+    heightAboveFloorMm: 0,
+  });
+  project = window.project;
+  return {
+    project,
+    schemeId: base.schemeId,
+    walls: [...walls, middle.wall.id],
+    doorId: door.opening.id,
+    windowId: window.opening.id,
+    rooms: { left, right },
+  };
+}
+
+test("через окно солнце кладёт на пол пятно, и ярус у пятна свой", () => {
+  const scene = sunScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  assert.equal(built.sunSpots.length, 1, "проём сцены собран один");
+  // Солнце ровно на юге и высоко: вынос считается в уме, и пятно целиком
+  // влезает в комнату — числа можно назвать точно. `rise` 45° даёт вынос
+  // «миллиметр на миллиметр высоты», `az` 90° — свет ровно вдоль −y.
+  const faces = volumeSunSpotFaces(built.sunSpots, { az: 90, rise: 45, fade: 1 });
+  assert.equal(faces.length, 1, "южное окно светит, когда солнце на юге");
+  const spot = faces[0];
+  assert.equal(spot.layer, VOLUME_LAYER_SUN, "ярус у пятна свой");
+  assert.ok(VOLUME_LAYER_GROUND < VOLUME_LAYER_SUN && VOLUME_LAYER_SUN < VOLUME_LAYER_BODY, "выше полов, ниже тел");
+  assert.ok(spot.flat, "пятно не затеняется лампой сцены: его светлота и есть свет");
+  assert.ok(spot.n.z > 0, "пятно смотрит вверх");
+  assert.ok(
+    spot.p.every((point) => point.z === 0),
+    "пятно лежит на нулевой отметке — там же, где пол",
+  );
+  // Пятно уехало от окна **прочь от солнца**: солнце на юге (+y), значит пятно
+  // к северу от окна, то есть в сторону меньших y.
+  const room = built.rooms[0].pointsMm;
+  assert.ok(
+    spot.p.every((point) => volumePointInside(point, room)),
+    "пятно лежит внутри комнаты",
+  );
+  // Низ окна 800 мм сносится на 800, верх 2200 — на 2200; внутренняя грань
+  // стены стоит на y = 1400. Значит пятно лежит от y = 600 до y = −800 и
+  // шириной ровно в окно: 600 мм, от x = −300 до x = 300.
+  const xs = spot.p.map((point) => Math.round(point.x)).sort((a, b) => a - b);
+  const ys = spot.p.map((point) => Math.round(point.y)).sort((a, b) => a - b);
+  assert.deepEqual(xs, [-300, -300, 300, 300], "пятно шириной в окно");
+  assert.deepEqual(ys, [-800, -800, 600, 600], "низ окна снесён на 800, верх на 2200");
+  assert.ok(Math.abs(volumeArea(spot.p) - 600 * 1400) < 1, "площадь пятна — окно, снесённое по высоте");
+  // И настоящий час кладёт пятно туда же, только со скосом: солнце в полдень
+  // стоит не ровно на юге, и параллелограмм перекошен.
+  const noon = volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow);
+  assert.equal(noon.length, 1, "в полдень южное окно светит");
+  assert.ok(
+    noon[0].p.every((point) => volumePointInside(point, room)),
+    "полуденное пятно вышло за комнату",
+  );
+});
+
+test("солнце зашло или стоит за стеной — пятна нет", () => {
+  const scene = sunScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Ночь: `fade` ноль, и луна пятен не даёт.
+  for (const hour of [0, 3, 6, 23]) {
+    const mood = moodAt(hour);
+    assert.equal(mood.shadow.fade, 0, hour + ":00 — солнце под горизонтом");
+    assert.deepEqual(volumeSunSpotFaces(built.sunSpots, mood.shadow), [], hour + ":00 даёт пятно");
+  }
+  // Сумерки гаснут тем же `fade`, что тень дома: пятно сводится к полу.
+  const dim = volumeSunSpotFaces(built.sunSpots, { az: 90, rise: 45, fade: 0.5 });
+  assert.equal(dim.length, 1);
+  assert.deepEqual(dim[0].rgb, volumeSunSpotRgb(0.5));
+  // Солнце с другой стороны стены: то же окно, тот же час, свет развёрнут на
+  // полоборота — пятну негде лежать.
+  assert.deepEqual(
+    volumeSunSpotFaces(built.sunSpots, { az: 270, rise: 45, fade: 1 }),
+    [],
+    "окно светит, когда солнце за его стеной",
+  );
+  // Окно в северной стене той же комнаты не светит с юга вовсе.
+  const north = sunScene({ wall: 0 });
+  const builtNorth = volumeScene(north.project, north.schemeId);
+  assert.equal(volumeSunSpotFaces(builtNorth.sunSpots, { az: 270, rise: 45, fade: 1 }).length, 1, "стенд пуст");
+  assert.deepEqual(
+    volumeSunSpotFaces(builtNorth.sunSpots, { az: 90, rise: 45, fade: 1 }),
+    [],
+    "северное окно светит с юга",
+  );
+});
+
+test("пятно светлое, и его цвет — пол при самой светлой грани сцены", () => {
+  // Пол — самая тёмная грань сцены (`volumeShade` вверх = 0,46), и пятно это
+  // он же при светлоте 1. Отношение 2,17 — обратное тому 0,72, которым тень
+  // темнит землю.
+  const dim = volumeShade({ x: 0, y: 0, z: 1 });
+  assert.ok(Math.abs(dim - 0.502) < 0.001, "светлота пола: " + dim.toFixed(3));
+  assert.deepEqual(volumeSunSpotRgb(1), [170, 142, 110], "полный свет — пол без затенения");
+  assert.deepEqual(volumeSunSpotRgb(1), VOLUME_FLOOR_RGB);
+  // Погасшее пятно совпадает с полом точка в точку: ни ступеньки, ни канта.
+  const floor = VOLUME_FLOOR_RGB.map((value) => Math.round(value * dim));
+  assert.deepEqual(volumeSunSpotRgb(0), floor, "гаснет пятно в самый пол");
+  assert.deepEqual(floor, [85, 71, 55]);
+  // Пятно светлее пола ровно вдвое (1 / 0,502 = 1,99) — и это та же мера, что
+  // у наружной тени, только в другую сторону: там земля × 0,72.
+  assert.ok(Math.abs(volumeSunSpotRgb(1)[0] / floor[0] - 2) < 0.01, "пятно светлее пола вдвое");
+  assert.ok(volumeSunSpotRgb(0.5)[0] > floor[0] && volumeSunSpotRgb(0.5)[0] < 170, "полусвет между полом и светом");
+});
+
+test("пятно обрезано контуром своей комнаты и в соседнюю не уходит", () => {
+  const scene = twoRoomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  // Низкое солнце: вынос больше комнаты, и без обрезки пятно ушло бы сквозь
+  // стены. Высота 10° даёт от верха окна 2,2 м вынос 12,5 м при комнате в 2,8 м.
+  const reach = 2200 / Math.tan((10 * Math.PI) / 180);
+  assert.ok(reach > 12000, "стенд пуст: пятно и так влезает в комнату");
+  const faces = volumeSunSpotFaces(built.sunSpots, { az: 90, rise: 10, fade: 1 });
+  assert.equal(faces.length, 1, "светит одно окно: дверь между комнатами не светит");
+  const left = built.rooms.find((room) => room.roomId === scene.rooms.left);
+  const right = built.rooms.find((room) => room.roomId === scene.rooms.right);
+  // Точка на самой кромке контура «внутри» не считается (луч задевает ребро),
+  // поэтому обрезка проверяется габаритом комнаты и площадью, а не строгим
+  // попаданием каждой вершины.
+  for (const point of faces[0].p) {
+    assert.ok(point.x >= -3900 - 1 && point.x <= -100 + 1, "пятно вышло за комнату по x: " + point.x);
+    assert.ok(point.y >= -1400 - 1 && point.y <= 1400 + 1, "пятно вышло за комнату по y: " + point.y);
+    assert.ok(!volumePointInside(point, right.pointsMm), "пятно уехало в соседнюю комнату");
+  }
+  assert.ok(volumePointInside({ x: -1600, y: 0 }, left.pointsMm), "стенд считает комнаты верно");
+  // Обрезка оставила ровно полосу через комнату: окно 1200 мм на глубину 2800.
+  assert.ok(Math.abs(volumeArea(faces[0].p) - 1200 * 2800) < 1, "обрезка съела не то: " + volumeArea(faces[0].p));
+  // Без обрезки пятно было бы вчетверо длиннее комнаты — проверяется тем же
+  // счётом, но по контуру, который заведомо шире дома.
+  const wide = volumeClipPolygon(
+    [{ x: -40000, y: -40000 }, { x: 40000, y: -40000 }, { x: 40000, y: 40000 }, { x: -40000, y: 40000 }],
+    faces[0].p,
+  );
+  assert.ok(volumeArea(wide) <= volumeArea(faces[0].p) + 1, "пятно уже обрезано: второй раз резать нечего");
+});
+
+test("дверь между двумя комнатами пятна не даёт: светить в неё нечему", () => {
+  const scene = twoRoomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const door = built.sunSpots.find((spot) => spot.openingId === scene.doorId);
+  assert.ok(door, "дверь в списке проёмов есть");
+  assert.ok(door.left && door.right, "у двери между комнатами обе стороны — комнаты");
+  const window = built.sunSpots.find((spot) => spot.openingId === scene.windowId);
+  assert.ok(
+    Boolean(window.left) !== Boolean(window.right),
+    "у окна наружной стены комната ровно с одной стороны, улица с другой",
+  );
+  // Ни в один час внутренняя дверь пятна не даёт — и это решение, а не промах:
+  // свет сквозь неё был бы вторым шагом, то есть трассировкой.
+  for (const hour of [8, 10, 12, 15, 18, 20]) {
+    const faces = volumeSunSpotFaces([door], moodAt(hour).shadow);
+    assert.deepEqual(faces, [], hour + ":00 — внутренняя дверь положила пятно");
+  }
+});
+
+test("направление верха чертежа доезжает до пятна (G288)", () => {
+  const scene = sunScene();
+  const turned = setProjectSite(scene.project, { topAzimuthDeg: 180 }).project;
+  const built = volumeScene(turned, scene.schemeId);
+  // Верх чертежа развёрнут на юг: то же окно смотрит теперь на север, и в
+  // полдень оно не светит. Час один и тот же — меняется только чертёж.
+  const plain = volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow);
+  assert.equal(plain.length, 1, "без поворота окно светит");
+  const spun = volumeSunSpotFaces(built.sunSpots, moodAt(12, turned).shadow);
+  assert.deepEqual(spun, [], "развёрнутый чертёж — и южное окно стало северным");
+  assert.equal(projectTopAzimuth(turned), 180);
+});
+
+test("закрытая штора гасит пятно своего окна, открытая — пропускает (G301)", () => {
+  const scene = sunScene();
+  // Карниз штор у окна: метка с тюлевой моделью, привязанная к той же стене.
+  // Окно стоит отступом 1700…2300 от конца стены (4000, 1500), то есть по
+  // x = −300…300; штора в 400 мм закрывает две трети его ширины.
+  const put = markAt(scene.project, scene.schemeId, "КШ", [{ x: 0, y: 1150 }]);
+  const built = volumeScene(put.project, scene.schemeId);
+  const place = built.marks.find((mark) => mark.markId === put.markId);
+  assert.ok(volumeSheerPlace(place), "штора узнана по тюлевому телу модели, а не по коду типа");
+  assert.equal(built.sunSpots.length, 1);
+  assert.equal(built.sunSpots[0].sheerMarkId, put.markId, "штора связана со своим проёмом");
+  assert.deepEqual(volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow), [], "закрытая штора пропустила солнце");
+  // Открывание шторы — отметка состояния, как у двери (G207), и счёт пятна от
+  // неё не меняется: та же сцена, тот же час, в объекте ни строки.
+  const open = volumeScene(put.project, scene.schemeId, { openCurtainIds: new Set([put.markId]) });
+  assert.equal(open.sunSpots[0].sheerMarkId, null, "открытая штора проём не держит");
+  assert.equal(volumeSunSpotFaces(open.sunSpots, moodAt(12).shadow).length, 1, "за открытой шторой пятно вернулось");
+  assert.equal(volumeCurtainOpen(new Set([put.markId]), put.markId), true);
+  assert.equal(volumeCurtainOpen(null, put.markId), false, "список пустой — закрыты все");
+  assert.equal(JSON.stringify(put.project), JSON.stringify(volumeScene(put.project, scene.schemeId) && put.project));
+});
+
+test("штора гасит только то, что закрывает: порог — половина ширины проёма", () => {
+  // Широкое окно 2200 мм и та же штора в 400: перекрытие 0,18 — пятно остаётся.
+  const wide = sunScene({ atMm: 900, widthMm: 2200 });
+  const put = markAt(wide.project, wide.schemeId, "КШ", [{ x: 0, y: 1150 }]);
+  const built = volumeScene(put.project, wide.schemeId);
+  assert.equal(built.sunSpots[0].sheerMarkId, null, "четверть окна не гасит пятно целиком");
+  assert.equal(volumeSunSpotFaces(built.sunSpots, moodAt(12).shadow).length, 1);
+  assert.equal(VOLUME_SHEER_SHARE, 0.5);
+  // Штора на **другой** стене того же помещения проём не держит: правило
+  // спрашивает стену, а не расстояние.
+  const side = sunScene();
+  const aside = markAt(side.project, side.schemeId, "КШ", [{ x: 1850, y: 0 }]);
+  const near = volumeScene(aside.project, side.schemeId);
+  const place = near.marks.find((mark) => mark.markId === aside.markId);
+  assert.ok(volumeSheerPlace(place), "штора на боковой стене — тоже штора");
+  assert.notEqual(place.wallId, near.sunSpots[0].wallId, "и висит она на другой стене");
+  assert.equal(near.sunSpots[0].sheerMarkId, null, "чужая стена погасила пятно");
+});
+
+test("в кадре пятно ложится поверх пола и под телами, а земля сквозь пол не светит", () => {
+  // Окно от пола до верха: у такого пятно начинается у самой стены и попадает
+  // в комнату в любой час, когда солнце с его стороны.
+  const scene = sunScene({ heightAboveFloorMm: 0, heightMm: 2200, widthMm: 1200, atMm: 1400 });
+  const built = volumeScene(scene.project, scene.schemeId);
+  const named = {
+    ...built,
+    order: undefined,
+    faces: built.faces.map((face) =>
+      face.layer === VOLUME_LAYER_GROUND && face.n.z > 0 ? { ...face, markId: "пол" } : face,
+    ),
+  };
+  const box = { width: 972, height: 778 };
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0.6, -0.73, 14000);
+  const inside = (xy, x, y) => {
+    let hit = false;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i];
+      const ay = xy[i + 1];
+      const bx = xy[j];
+      const by = xy[j + 1];
+      if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) hit = !hit;
+    }
+    return hit;
+  };
+  let seen = 0;
+  for (const hour of [6, 10, 12, 15, 19]) {
+    const mood = moodAt(hour);
+    const shadow = volumeShadowFaces(built.shadowBoxes, mood.shadow).map((face) => ({ ...face, markId: "тень" }));
+    const spots = volumeSunSpotFaces(built.sunSpots, mood.shadow).map((face) => ({ ...face, markId: "пятно" }));
+    const frame = volumeFrame(named, camera, box, [...shadow, ...spots], mood.tint);
+    const ground = frame.filter((polygon) => !polygon.stroke && polygon.layer <= VOLUME_LAYER_SUN);
+    const floor = ground.find((polygon) => polygon.pick === "пол");
+    assert.ok(floor, "пол комнаты в кадре");
+    // Точка, в которой пятно лежит: его собственная середина.
+    const spot = ground.find((polygon) => polygon.pick === "пятно");
+    if (!spot) continue;
+    seen += 1;
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < spot.xy.length; i += 2) {
+      x += spot.xy[i];
+      y += spot.xy[i + 1];
+    }
+    x /= spot.xy.length / 2;
+    y /= spot.xy.length / 2;
+    const here = ground.filter((polygon) => inside(polygon.xy, x, y));
+    assert.equal(here[here.length - 1].pick, "пятно", hour + ":00 — поверх пятна легло что-то ещё");
+    assert.ok(
+      here.some((polygon) => polygon.pick === "пол"),
+      hour + ":00 — пятно лежит не на полу, а на земле",
+    );
+    assert.ok(
+      here.every((polygon) => polygon.pick !== "тень" || polygon.layer < floor.layer),
+      "наружная тень осталась ниже пола (D49)",
+    );
+    // Тела комнаты рисуются после пятна: стены и вещи его закрывают.
+    const body = frame.find((polygon) => polygon.layer === VOLUME_LAYER_BODY);
+    assert.ok(body, "тела в кадре");
+    assert.ok(frame.indexOf(spot) < frame.indexOf(body), "пятно легло после тел");
+  }
+  assert.ok(seen >= 3, "пятно попало в кадр меньше чем в трёх часах — стенд пуст");
+});
+
+test("обрезка выпуклым отсекателем режет и невыпуклый контур", () => {
+  // Г-образная комната: отсекатель выпуклый, отсекаемое — нет.
+  const room = [
+    { x: 0, y: 0 },
+    { x: 4000, y: 0 },
+    { x: 4000, y: 2000 },
+    { x: 2000, y: 2000 },
+    { x: 2000, y: 4000 },
+    { x: 0, y: 4000 },
+  ];
+  const whole = volumeClipPolygon(room, [
+    { x: -1000, y: -1000 },
+    { x: 5000, y: -1000 },
+    { x: 5000, y: 5000 },
+    { x: -1000, y: 5000 },
+  ]);
+  assert.ok(Math.abs(volumeArea(whole) - volumeArea(room)) < 1, "отсекатель шире комнаты — комната целиком");
+  // Полоса по правому крылу: вырезается только то, что в крыле и есть.
+  const band = volumeClipPolygon(room, [
+    { x: 2500, y: -500 },
+    { x: 3500, y: -500 },
+    { x: 3500, y: 4500 },
+    { x: 2500, y: 4500 },
+  ]);
+  assert.ok(Math.abs(volumeArea(band) - 1000 * 2000) < 1, "площадь полосы: " + volumeArea(band));
+  // Обход отсекателя не значит ничего: тот же ответ при обратном порядке.
+  const back = volumeClipPolygon(room, [
+    { x: 2500, y: 4500 },
+    { x: 3500, y: 4500 },
+    { x: 3500, y: -500 },
+    { x: 2500, y: -500 },
+  ]);
+  assert.ok(Math.abs(volumeArea(back) - volumeArea(band)) < 1, "обход отсекателя поменял ответ");
+  assert.deepEqual(volumeClipPolygon(room, [{ x: 9000, y: 9000 }, { x: 9500, y: 9000 }, { x: 9500, y: 9500 }]), []);
+  assert.equal(VOLUME_SUN_PROBE_MM, 150);
+});
+
+// ——— D52: земля сцены и земля фона — одна мера —————————————————————————————
+//
+// Слова заказчика: «но пол дома всё равно летает, вот границей перекрыл
+// машинки», «Фундамент в воздухе относительно фона». Две земли считались
+// по-разному: сцена — настоящей плоскостью по габариту чертежа, фон — заливкой
+// ниже строки горизонта с вещами **на бесконечности**. Числа — у
+// `volumeGroundScale`; здесь проверяется, что мера одна.
+
+test("земля фона начинается ровно там, где кончается земля сцены (D52)", () => {
+  const scene = roomScene();
+  const built = volumeScene(scene.project, scene.schemeId);
+  const land = built.landMm;
+  assert.ok(land, "плита работает землёй — у неё есть прямоугольник");
+  // Кромка плиты от середины чертежа — полудиагональ, и считается она от
+  // выноса под тень дома: `volumeShadowShift` при полуденной высоте плюс запас.
+  const out = Math.hypot(...Object.values(volumeShadowShift(2700))) + VOLUME_LAND_OUT_MM;
+  assert.ok(Math.abs(land.maxX - (2000 + out)) < 1, "вынос плиты считается тенью дома");
+  const reach = Math.hypot((land.maxX - land.minX) / 2, (land.maxY - land.minY) / 2);
+  // Человек стоит: кромка плиты видна под малым углом, и земля фона отодвинута
+  // так, что её самое близкое колено ложится ровно на эту кромку.
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: 0, pitch: 0 };
+  const push = volumeGroundScale(camera, land);
+  assert.ok(push > 0 && push < 1, "земля фона отодвинута: " + push.toFixed(3));
+  const edgeDeg = (Math.atan(VOLUME_EYE_MM / reach) * 180) / Math.PI;
+  const box = { width: 1400, height: 900 };
+  const aim = volumeSkyAim(camera, box, push);
+  const nearest = volumeSkyPoint(aim, 0, -VOLUME_PANORAMA_NEAR_DEG);
+  const edge = volumeSkyPoint(volumeSkyAim(camera, box), 0, -edgeDeg);
+  assert.ok(Math.abs(nearest.y - edge.y) < 0.5, "ближнее колено панорамы не село на кромку плиты");
+  // Всё остальное — дальше кромки, то есть выше её на экране.
+  for (const rise of [-9.3, -6.9, -4.2, -0.6]) {
+    const point = volumeSkyPoint(aim, 0, rise);
+    assert.ok(point.y <= edge.y + 0.5, rise + "° осталось ближе кромки: y " + point.y.toFixed(0));
+  }
+  // Угловой размер уехавшей вещи уменьшается тем же множителем.
+  const plain = volumeSkyPoint(volumeSkyAim(camera, box), 0, -7.5);
+  const moved = volumeSkyPoint(aim, 0, -7.5);
+  assert.ok(Math.abs(moved.scale / plain.scale - push) < 0.02, "дерево отодвинули, а размер оставили");
+  // Небо не двигается вовсе: отодвигать бесконечность некуда.
+  for (const rise of [0, 2.6, 16]) {
+    assert.deepEqual(volumeSkyPoint(aim, 30, rise), volumeSkyPoint(volumeSkyAim(camera, box), 30, rise));
+  }
+});
+
+test("ближе кромки земля фона не придвигается, а дальше — стоит как стояла", () => {
+  const scene = roomScene();
+  const land = volumeScene(scene.project, scene.schemeId).landMm;
+  // Обзор: камера поднята, кромка плиты ушла глубоко под горизонт — панорама
+  // остаётся ровно той, что была до таска 196.
+  const around = volumeAroundCamera({ x: 0, y: 0, z: 0 }, 0, -0.73, 20000);
+  assert.equal(volumeGroundScale(around, land), 1, "обзор панораму не двигает");
+  // Поднялись на второй этаж — кромка видна ниже, и кольцу можно подойти ближе.
+  const first = volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, land);
+  const second = volumeGroundScale({ at: { x: 0, y: 0, z: 2800 + VOLUME_EYE_MM } }, land);
+  assert.ok(second > first, "со второго этажа кольцо дальше, чем с первого");
+  // Нет земли — нечего и отодвигать: плита работает полом (помещения не
+  // обведены), и фон остаётся прежним.
+  const bareScene = roomScene({ room: false });
+  const bare = volumeScene(bareScene.project, bareScene.schemeId);
+  assert.equal(bare.landMm, null, "плита-пол землёй не считается");
+  assert.equal(volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, null), 1);
+  // Шаг человека панораму не колышет: мера считается от середины чертежа.
+  const here = volumeGroundScale({ at: { x: 0, y: 0, z: VOLUME_EYE_MM } }, land);
+  const there = volumeGroundScale({ at: { x: 1800, y: -1200, z: VOLUME_EYE_MM } }, land);
+  assert.equal(here, there, "фон задышал при шаге");
+});
+
+test("светило и звёзды смотрят своим прицелом, а не земным (D52)", () => {
+  const box = { x: 0, y: 0, width: 1280, height: 720 };
+  const seen = [];
+  const fade = { addColorStop: () => {} };
+  const ctx = {
+    createLinearGradient: () => fade,
+    beginPath: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    closePath: () => {},
+    fill: () => {},
+    fillRect: () => {},
+    arc: (x, y, r) => seen.push([Math.round(x), Math.round(y), Math.round(r)]),
+    ellipse: (x, y, r) => seen.push([Math.round(x), Math.round(y), Math.round(r)]),
+    save: () => {},
+    restore: () => {},
+    fillStyle: "",
+  };
+  const camera = { at: { x: 0, y: 0, z: VOLUME_EYE_MM }, yaw: (90 * Math.PI) / 180, pitch: -0.08 };
+  const mood = volumeMood({ minutes: 10 * 60, times: SUN_DAY, kind: "plain" });
+  volumeDrawBackdrop(ctx, box, camera, mood);
+  const bare = [...seen];
+  seen.length = 0;
+  // Та же минута, тот же ракурс, но у сцены есть земля: светило обязано
+  // остаться на месте — кромка плиты ему не указ.
+  volumeDrawBackdrop(ctx, box, camera, mood, { minX: -18000, minY: -18000, maxX: 18000, maxY: 18000 });
+  assert.deepEqual(seen, bare, "светило уехало вместе с землёй фона");
+  assert.ok(bare.length > 0, "стенд пуст: светило не нарисовано");
 });
 
 // ——— D37: под проёмом и под стеной есть пол ———————————————————————————————
@@ -1242,8 +1768,8 @@ test("порядок кадра совпадает с истиной в кажд
           // ним: грань вещи обязана быть нарисована прозрачной, а грань стены —
           // непрозрачной, иначе точка закрашена не той поверхностью. Плотность
           // берётся **у самой грани** (таск 189): их теперь две — 0,4 у вещи и
-          // 0,3 у тюля, — и подставить сюда одну константу значило бы сверять
-          // кадр не с ним самим.
+          // 0,6 у ткани шторы, — и подставить сюда одну константу значило бы
+          // сверять кадр не с ним самим.
           truth = { t, fill: volumeFill(face.rgb, volumeShade(normal), face.alpha === undefined ? 1 : face.alpha) };
         }
         // Что нарисовано: последний накрывший точку многоугольник.
@@ -1769,6 +2295,29 @@ test("дата — номер суток: читается, пишется и н
   const march = volumeDayNumberOf(new Date(2026, 2, 29, 3, 30));
   assert.equal(volumeDateText(march), "2026-03-29");
   assert.equal(volumeDayDateOf(march).getDate(), 29);
+});
+
+// ——— полоса часов в углу поля (таск 191, G300) ————————————————————————————
+//
+// «Справа снизу в Объёме пиши текущие дату и время симуляции». Строку собирают
+// две чистые двери — дата по-человечески и час, — а место полосы живёт в
+// стилях (`test/fieldBare.test.js`).
+
+test("дата в полосе часов читается глазом, а ISO остаётся полю ввода", () => {
+  const day = volumeDayNumberOf(new Date(2026, 9, 20, 23, 59));
+  assert.equal(volumeDateShort(day), "20.10.2026", "в углу поля дата по-человечески");
+  assert.equal(volumeDateText(day), "2026-10-20", "а у поля ввода — та, которую просит браузер");
+  // Ноль впереди стоит у обоих — иначе строка прыгала бы в ширине на каждом
+  // переходе через десятое число.
+  assert.equal(volumeDateShort(volumeDateParse("2026-01-01")), "01.01.2026");
+  assert.equal(volumeDateShort(volumeDateParse("2026-12-31")), "31.12.2026");
+  // Год целиком: человек вправе поставить другой, и «20.10.26» читалось бы как
+  // день месяца. Проверено на годе целиком — сдвига на сутки нет нигде.
+  for (let shift = 0; shift < 365; shift += 1) {
+    const text = volumeDateShort(day + shift);
+    const back = volumeDateParse(text.slice(6) + "-" + text.slice(3, 5) + "-" + text.slice(0, 2));
+    assert.equal(back, day + shift, "сутки " + shift);
+  }
 });
 
 test("контрол с часами: строка и разбор", () => {
@@ -2494,18 +3043,66 @@ test("в тесном месте окно говорит об этом слов�
   assert.ok(volumeFreeMm(built.solids, wall.x, wall.y) > VOLUME_NEAR_MM);
 });
 
-test("обзор не ныряет под крышу: наклон ограничен расстоянием", () => {
+test("камера обзора не ныряет под крышу: место зажато расстоянием", () => {
   const lift = 1900;
-  // Отошли далеко — можно смотреть почти вдоль земли, но всё же сверху.
-  const far = volumeAroundPitch(0, 20000, lift);
-  assert.ok(far < 0, "обзор всегда смотрит сверху: " + far);
+  // Отошли далеко — стоять можно почти вдоль земли, но всё же сверху.
+  const far = volumeAroundStand(0, 20000, lift);
+  assert.ok(far < 0, "камера обзора всегда выше цели: " + far);
   assert.ok(Math.abs(Math.sin(-far) * 20000 - lift) < 1, "подъём над целью ровно по крыше");
-  // Подошли вплотную — вид становится отвесным.
-  assert.ok(volumeAroundPitch(0, 2000, lift) < volumeAroundPitch(0, 20000, lift));
+  // Подошли вплотную — место становится отвесным.
+  assert.ok(volumeAroundStand(0, 2000, lift) < volumeAroundStand(0, 20000, lift));
   // Ближе, чем крыша высока, — почти отвес, и за него не заходим.
-  assert.ok(volumeAroundPitch(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
-  // Круче ограничения смотреть не запрещено — запрещено положе.
-  assert.ok(volumeAroundPitch(-1.2, 20000, lift) < far);
+  assert.ok(volumeAroundStand(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
+  // Круче ограничения стоять не запрещено — запрещено положе.
+  assert.ok(volumeAroundStand(-1.2, 20000, lift) < far);
+  // Крыши нет (стенд, тест) — зажат один отвес.
+  assert.equal(volumeAroundStand(0.4, 20000, 0), 0.4);
+  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
+  assert.ok(Math.abs(volumeAroundStand(Math.PI / 2, 20000, 0) - limit) < 1e-9, "за отвес не заводится");
+});
+
+test("обзор задирает взгляд к небу, а камеру оставляет над крышей (G298)", () => {
+  // Та самая беда, из-за которой предел стоял: цель на полу, семь метров.
+  const lift = 1900;
+  const target = { x: 0, y: 0, z: 1200 };
+  const sky = (60 * Math.PI) / 180;
+  const camera = volumeAroundCamera(target, 0.4, sky, 7000, lift);
+  // Взгляд — тот, что задали: солнце в полдень лета стоит на 58°, и смотреть
+  // туда обзор теперь вправе.
+  assert.equal(camera.pitch, sky);
+  // А место камеры — прежнее, по крыше: подъём над целью ровно `lift`, и внутрь
+  // стены соседней комнаты она не попадает ни на миллиметр.
+  assert.ok(Math.abs(camera.at.z - (target.z + lift)) < 1, "камера съехала с крыши: " + camera.at.z);
+  // Больше крыши её поднимает только собственный наклон, и ниже неё она не
+  // опускается ни на каком взгляде — пройдём весь диапазон.
+  for (let deg = -85; deg <= 85; deg += 5) {
+    const at = volumeAroundCamera(target, 0.4, (deg * Math.PI) / 180, 7000, lift).at;
+    assert.ok(at.z >= target.z + lift - 1, "на " + deg + "° камера нырнула к полу: " + Math.round(at.z));
+  }
+  // Задранный взгляд камеру с места **не сдвигает**: от предела и выше она
+  // стоит там же, где стояла.
+  const edge = volumeAroundCamera(target, 0.4, volumeAroundStand(0, 7000, lift), 7000, lift);
+  assert.deepEqual(camera.at, edge.at);
+  // Приближение на задранном взгляде — шаг камеры к цели, а не поворот головы:
+  // взгляд тот же, место ближе и круче.
+  const near = volumeAroundCamera(target, 0.4, sky, 3500, lift);
+  assert.equal(near.pitch, sky);
+  assert.ok(Math.hypot(near.at.x, near.at.y) < Math.hypot(camera.at.x, camera.at.y), "камера не подошла");
+  assert.ok(near.at.z >= target.z + lift - 1, "подошедшая камера ушла под крышу");
+  // Опущенный взгляд — как было до таска 195: место и взгляд одно и то же.
+  const down = (-70 * Math.PI) / 180;
+  assert.deepEqual(
+    volumeAroundCamera(target, 0.4, down, 7000, lift),
+    volumeAroundCamera(target, 0.4, down, 7000, 0),
+    "опущенный взгляд перестал ставить камеру по себе",
+  );
+});
+
+test("щелчок по небу в обзоре никуда не переносит", () => {
+  // Луч из задранного кадра в пол не упирается — и выдуманной точки не бывает.
+  const camera = volumeAroundCamera({ x: 0, y: 0, z: 1200 }, 0.4, (60 * Math.PI) / 180, 7000, 1900);
+  const box = { width: 1200, height: 700 };
+  assert.equal(volumeFloorAt(camera, box, box.width / 2, 40), null);
 });
 
 // ——— карта возится двумя пальцами (таск 174, G256) ————————————————————————
@@ -2589,6 +3186,22 @@ test("поправка на наклон есть, но у горизонта н
   // самого взгляда, и ответ не ноль и не NaN.
   const flat = volumeAroundPan({ yaw: 0, pitch: 0, distance: 9000 }, box, 0, 100);
   assert.ok(Number.isFinite(flat.dx) && Math.abs(flat.dx) > 0, "вдоль земли ответ есть: " + JSON.stringify(flat));
+});
+
+test("на задранном взгляде карта едет туда же, а не наоборот (таск 195)", () => {
+  // Рысканье ноль — экранное «вверх» это +x плана. Опущенный взгляд: палец
+  // вверх — карта вверх, цель вперёд.
+  const box = panBox;
+  const down = volumeAroundPan({ yaw: 0, pitch: (-40 * Math.PI) / 180, distance: 9000 }, box, 0, -100);
+  const up = volumeAroundPan({ yaw: 0, pitch: (40 * Math.PI) / 180, distance: 9000 }, box, 0, -100);
+  // Задрали взгляд на столько же вверх — сторона та же. Считай сторону по
+  // экранному «верху», как до таска 195, и знак бы перевернулся: карта поехала
+  // бы от пальца в обратную сторону.
+  assert.ok(down.dx < 0 && up.dx < 0, "сторона перевернулась: " + down.dx.toFixed(1) + " против " + up.dx.toFixed(1));
+  assert.ok(Math.abs(Math.abs(up.dx) - Math.abs(down.dx)) < 1e-9, "мера сжатия пола зависит от знака наклона");
+  // Поперёк взгляда задранность не значит ничего: пол сжат вдоль, а не поперёк.
+  const across = volumeAroundPan({ yaw: 0, pitch: (40 * Math.PI) / 180, distance: 9000 }, box, 100, 0);
+  assert.ok(across.dy < 0 && Math.abs(across.dx) < 1e-6, "поперёк сбилось: " + JSON.stringify(across));
 });
 
 test("клавиши разложены по осям камеры, а стрелки влево-вправо вертят", () => {
@@ -2739,6 +3352,62 @@ test("окно параметров: «Сейчас» ставит дату, в�
     "без ускорения время идёт один к одному",
   );
   volumeParamsSpeed(VOLUME_CLOCK_SPEED_DEFAULT, nowMs);
+});
+
+test("три отметки объёма живут в настройках и по умолчанию сняты (таск 192, G292)", () => {
+  // Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
+  // 1. Плавные светила… 2. Проходить сквозь стены 3. Летать».
+  //
+  // Главное про них — **умолчание снято**: у человека, который галок не ставил,
+  // объём ведёт себя ровно как до таска.
+  assert.equal(volumeParamsRead().smooth, false);
+  assert.equal(volumeParamsRead().ghost, false);
+  assert.equal(volumeParamsRead().fly, false);
+  // Дверь одна на три, и спрашивается выбор тем же `volumeParamsRead`, что фон
+  // и миникарта: второго места для него нет.
+  volumeParamsFlag("fly", true);
+  assert.equal(volumeParamsRead().fly, true);
+  assert.equal(volumeParamsRead().ghost, false, "отметки друг друга не трогают");
+  volumeParamsFlag("ghost", true);
+  volumeParamsFlag("smooth", true);
+  assert.deepEqual(
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
+    { smooth: true, ghost: true, fly: true },
+  );
+  // Чужое имя двери не ломает ничего и ничего не ставит.
+  volumeParamsFlag("сквозьпотолок", true);
+  volumeParamsFlag("fly", false);
+  volumeParamsFlag("ghost", false);
+  volumeParamsFlag("smooth", false);
+  assert.deepEqual(
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
+    { smooth: false, ghost: false, fly: false },
+  );
+});
+
+test("плавные светила: тридцать кадров в секунду, стоячее время — ноль пересчётов (таск 192)", () => {
+  // Отметка меняет **только частоту**: тот же снимок, та же арифметика.
+  assert.equal(volumeMoodMs(false), VOLUME_MOOD_MS);
+  assert.equal(volumeMoodMs(false), 1000);
+  assert.equal(volumeMoodMs(true), VOLUME_MOOD_SMOOTH_MS);
+  // Тридцать кадров в секунду — и это проверяется счётом, а не словом.
+  assert.equal(Math.round(1000 / VOLUME_MOOD_SMOOTH_MS), 30);
+  // `null` — таймера нет вовсе. При **фиксированном времени** его нет и с
+  // галкой: это требование таска 181, и плавные светила его не отменяют.
+  const day = volumeDayNumberOf(new Date(2026, 9, 20));
+  const fixed = volumeClockFixed(600, 240, day);
+  const running = volumeClockNow(0, new Date(2026, 9, 20, 10, 0), 240);
+  assert.equal(volumeClockEvery({ on: true, clock: fixed, smooth: false }), null);
+  assert.equal(volumeClockEvery({ on: true, clock: fixed, smooth: true }), null, "стоячее время не пересчитывается и с галкой");
+  // Режим не на экране — тоже ноль: фон за погашенным полем считать незачем.
+  assert.equal(volumeClockEvery({ on: false, clock: running, smooth: true }), null);
+  // Идущее время: секунда без галки, тридцатая доля с ней.
+  assert.equal(volumeClockEvery({ on: true, clock: running, smooth: false }), 1000);
+  assert.equal(volumeClockEvery({ on: true, clock: running, smooth: true }), VOLUME_MOOD_SMOOTH_MS);
+  // Снимок от частоты не зависит ни одним числом: отметка про «как часто», а не
+  // «что посчитать».
+  const at = { minutes: 600, times: { riseMin: 480, setMin: 1200 }, topDeg: 0, kind: "plain" };
+  assert.deepEqual(volumeMood(at), volumeMood(at));
 });
 
 test("щелчок по миникарте читается местом на плане (G270)", () => {
@@ -3630,14 +4299,15 @@ test("стену взгляд по-прежнему не пробивает, а 
   assert.equal(volumeSightAt(frame, x, y), null, "за лицом шкафа метки нет — и взгляду отвечать нечем");
 });
 
-// ——— тюль: прозрачная метка (таск 189, требование G286) ——————————————————
+// ——— ткань шторы: прозрачная метка (таск 189, G286; плотность — таск 191, G297) —
 //
-// Слова заказчика: «модель штор сделай полупрозрачной, по сути как тюль пусть
-// будет». Шторы — исключение среди меток, и здесь проверяется ровно то, чем
-// исключение отличается от правила таска 169:
+// Слова заказчика таска 189: «модель штор сделай полупрозрачной, по сути как
+// тюль пусть будет», и его же слова таска 191: «давай шторе поставим
+// прозрачность 0.6, сейчас её почти не видно». Шторы — исключение среди меток,
+// и здесь проверяется ровно то, чем исключение отличается от правила таска 169:
 //
 //   1. Просвечивает **ткань**, а не метка: труба карниза плотная.
-//   2. Плотность у тюля **своя** — 0,3 против 0,4 у вещей, и число приходит из
+//   2. Плотность у ткани **своя** — 0,6 против 0,4 у вещей, и число приходит из
 //      описания тела, а не из одной константы на всё прозрачное.
 //   3. Прозрачная **метка взгляд останавливает**: её выделяют, и пропусти её
 //      взгляд — выделить шторы стало бы нельзя вовсе.
@@ -3645,7 +4315,7 @@ test("стену взгляд по-прежнему не пробивает, а 
 // Стенд — живой случай заказчика: карниз у него **линейный**, проведён по окну
 // линией, и шторы ему даёт повтор вдоль пути.
 
-/** Комната с окном в северной стене, линейным карнизом у окна и розеткой за тюлем. */
+/** Комната с окном в северной стене, линейным карнизом у окна и розеткой за тканью. */
 function sheerStand() {
   const scene = roomScene();
   let project = addOpening(scene.project, {
@@ -3689,14 +4359,14 @@ test("просвечивает ткань шторы, а труба карниз
   // смотрят и снизу).
   assert.equal(sheer.length, 42, "прозрачных граней у штор: " + sheer.length);
   assert.equal(solid.length, 6, "плотных граней у карниза: " + solid.length);
-  for (const face of sheer) assert.equal(face.alpha, VOLUME_SHEER_ALPHA, "плотность тюля взялась не из его описания");
+  for (const face of sheer) assert.equal(face.alpha, VOLUME_SHEER_ALPHA, "плотность ткани взялась не из её описания");
   for (const face of solid) assert.equal(face.alpha, 1, "труба карниза перестала быть плотной");
   // Остальные метки стенда — как были. Это и есть «не раздавая её остальным».
   const others = built.faces.filter((face) => face.markId && face.markId !== stand.railId && !face.line);
   assert.ok(others.length > 0, "в стенде есть другие метки");
   assert.ok(others.every((face) => !face.clear && face.alpha === 1), "прозрачной стала метка, которая не штора");
   // И вещи чертежа со своей плотностью не перепутались: у них 0,4.
-  assert.notEqual(VOLUME_SHEER_ALPHA, VOLUME_CLEAR_ALPHA, "у тюля обязана быть своя плотность");
+  assert.notEqual(VOLUME_SHEER_ALPHA, VOLUME_CLEAR_ALPHA, "у ткани шторы обязана быть своя плотность");
   assert.equal(volumeClearAlpha(true), VOLUME_CLEAR_ALPHA, "вещь чертежа потеряла свою плотность");
   assert.equal(volumeClearAlpha("sheer"), VOLUME_SHEER_ALPHA);
   assert.equal(volumeClearAlpha(false), 1, "плотная грань обязана остаться плотной");
@@ -3725,10 +4395,16 @@ test("сквозь тюль видно окно: в кадре он смешан
     Math.max(...behind.map((item) => item.index)) < Math.min(...tulle.map((item) => item.index)),
     "тюль нарисован раньше того, что за ним, — и значит ничего не просветил",
   );
-  // Слоёв тюля на луче один-два — из этого и посчитана плотность. Три бывает
-  // на косом взгляде (0,2 % точек на живом объекте), и за тремя остаётся треть.
-  assert.ok(tulle.length <= 2, "слоёв тюля в этой точке больше двух: " + tulle.length);
-  assert.equal(Math.round((1 - VOLUME_SHEER_ALPHA) ** 2 * 100), 49, "за двумя полотнищами окну остаётся половина");
+  // Слоёв ткани на луче один-два: на живом объекте заказчика один слой в
+  // 96,4 % точек, два в 3,6 %, трёх не встретилось вовсе (замер таска 191).
+  assert.ok(tulle.length <= 2, "слоёв ткани в этой точке больше двух: " + tulle.length);
+  // Сколько света окну остаётся. С таска 191 плотность выведена из самой шторы
+  // («её должно быть видно»), а не из доли окну, и числа эти — следствие, а не
+  // довод: 0,40 за одним полотнищем, 0,16 за двумя. Стоят они здесь, чтобы
+  // смена плотности не прошла молча: окно сквозь ткань остаётся светлее стены
+  // (замер — в `VOLUME_SHEER_ALPHA`), и за этим следит человек на снимке.
+  assert.equal(Math.round((1 - VOLUME_SHEER_ALPHA) * 100), 40, "за одним полотнищем окну остаётся 0,40");
+  assert.equal(Math.round((1 - VOLUME_SHEER_ALPHA) ** 2 * 100), 16, "за двумя полотнищами окну остаётся 0,16");
 });
 
 test("прозрачная метка взгляд останавливает — иначе шторы стало бы не выделить (G286)", () => {
@@ -4167,13 +4843,72 @@ test("выбранный канал оставляет стрелки тольк
   assert.deepEqual(only.ties, [], "общее управление про клавишу не знает");
   assert.deepEqual(only.groups, [], "общий номер — тождество меток, а не клавиша");
   assert.deepEqual(only.offScheme, []);
-  // Связь без канала у той же метки не приписывается первой клавише: этого в
-  // данных нет.
-  const first = volumeChannelLinks(links, { markId: "вв", channel: 1 });
+  // Связь без канала у **многоклавишной** метки не приписывается первой
+  // клавише: какая из двух — в данных не записано (правило таска 177).
+  const first = volumeChannelLinks(links, { markId: "вв", channel: 1 }, 2);
   assert.deepEqual(
     first.lines.map((line) => line.toId),
     ["т1"],
   );
+  // Не сказали, сколько клавиш, — метка считается многоклавишной: осторожное
+  // умолчание, а не «одна».
+  assert.deepEqual(
+    volumeChannelLinks(links, { markId: "вв", channel: 1 }).lines.map((line) => line.toId),
+    ["т1"],
+  );
+});
+
+// ——— одноклавишный выключатель: связь без номера — его канал (таск 191, D50) —
+//
+// Слова заказчика: «Если в Объёме нажать на клавишу 1 клавишного выключателя,
+// то пишет: Канал 1: на этой клавише нет ни одной нагрузки. Хотя по факту
+// 1 канал там и в „Чем управляет“ не указывается канал. Соответственно
+// выбранное и есть первый канал».
+//
+// Это **не** отмена правила таска 177, а его граница: домысливать нечего там,
+// где канал один. На объекте заказчика ровно этот случай и стоит — три
+// одноклавишных выключателя, и все три связи у них без номера.
+
+test("у одноклавишной метки связь без номера канала — её собственная", () => {
+  const links = {
+    lines: [
+      { fromId: "в", toId: "т1", channel: null },
+      { fromId: "в", toId: "т2", channel: 1 },
+      { fromId: "в", toId: "т3", channel: 2 },
+      { fromId: "другой", toId: "т4", channel: null },
+    ],
+    ties: [],
+    groups: [],
+    offScheme: [],
+  };
+  const one = volumeChannelLinks(links, { markId: "в", channel: 1 }, 1);
+  assert.deepEqual(
+    one.lines.map((line) => line.toId),
+    ["т1", "т2"],
+    "одна клавиша обязана забрать и связь без номера, и свою по номеру",
+  );
+  // Чужая метка не задета, и второй канал у одноклавишной не выдумывается: если
+  // в данных стоит «канал 2», это ошибка разметки, а не её клавиша.
+  assert.deepEqual(
+    volumeChannelLinks(links, { markId: "в", channel: 2 }, 1).lines.map((line) => line.toId),
+    ["т3"],
+    "вторая клавиша у одноклавишной метки берёт только то, что названо её номером",
+  );
+});
+
+test("клавиши считаются по телу модели, а не вторым счётом", () => {
+  const scene = roomScene();
+  const one = markAt(scene.project, scene.schemeId, "В", [{ x: -900, y: -1100 }]);
+  const two = markAt(one.project, scene.schemeId, "ВВ", [{ x: -500, y: -1100 }]);
+  const socket = markAt(two.project, scene.schemeId, "Р", [{ x: 0, y: -1100 }]);
+  const built = volumeScene(socket.project, scene.schemeId, {});
+  assert.equal(volumeModelKeys(placeOf(built, one.markId).model), 1, "у «В» одна клавиша");
+  assert.equal(volumeModelKeys(placeOf(built, two.markId).model), 2, "у «ВВ» две клавиши");
+  // У неклавишной вещи ноль — и ноль не значит «одна»: правило одной клавиши
+  // про неё не говорит ничего.
+  assert.equal(volumeModelKeys(placeOf(built, socket.markId).model), 0, "у розетки клавиш нет");
+  assert.equal(volumeModelKeys(null), 0);
+  assert.equal(volumeModelKeys({ parts: [] }), 0);
 });
 
 test("рамка выбранной клавиши идёт по ней, а не по лицу вещи", () => {
@@ -4611,6 +5346,18 @@ test("текст подсказки говорит про тот вид и то 
   const person = volumeHintText(base);
   assert.ok(person.includes(strings.volume.hintPerson), person);
   assert.ok(person.includes(strings.volume.hintGrab), "мышь не захвачена — про это и сказано");
+  // Стойка и стены — своими кусками (таск 192): без галок сказано то же, что
+  // говорилось до таска, слово в слово.
+  assert.ok(person.includes(strings.volume.hintStance) && person.includes(strings.volume.hintWalls), person);
+  // Три отметки **меняют** подсказку, а не дописывают её: летящему пробел не
+  // прыжок, а снявшему столкновения нельзя читать «сквозь стены нельзя».
+  const flying = volumeHintText({ ...base, fly: true });
+  assert.ok(flying.includes(strings.volume.hintFly) && !flying.includes(strings.volume.hintStance), flying);
+  const ghost = volumeHintText({ ...base, ghost: true });
+  assert.ok(ghost.includes(strings.volume.hintGhost) && !ghost.includes(strings.volume.hintWalls), ghost);
+  // В обзоре не ходят вовсе — ни про стойку, ни про стены там не говорится.
+  const aroundFly = volumeHintText({ ...base, view: "around", aim: false, fly: true, ghost: true });
+  assert.ok(!aroundFly.includes(strings.volume.hintFly) && !aroundFly.includes(strings.volume.hintGhost), aroundFly);
   assert.ok(person.includes(strings.volume.aimHint), "прицел показан — про него есть строка");
   // Обзор говорит своё, и про прицел там молчит: его в обзоре нет.
   const around = volumeHintText({ ...base, view: "around", aim: false });

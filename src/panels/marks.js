@@ -52,6 +52,10 @@ import {
 import { planToScreen, shapeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { uiButton, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+// Прокрутка колонки одна на всю колонку (таск 194), и низ кадра закрывает не
+// только кнопка смыкания, но и рейка заголовков. Кто прокручивается, сколько
+// закрыто накладкой и какова рейка — общий счёт, свой у списка быть не должен.
+import { panelCover, panelRailInset, panelScrollBox } from "./rail.js";
 import { filtersActive, filtersBox, filtersMarkRows } from "./filters.js";
 import { openMarkControlsPicker } from "./markControls.js";
 import { openEquipmentWindow } from "./equipment.js";
@@ -328,18 +332,6 @@ export function marksFiltersHead({ collapsed, filter, shown, total }) {
   return { narrowed, count, hint };
 }
 
-// Кто из предков строки прокручивается. Своего прокручиваемого ящика у списка
-// нет: прокрутку держит точка монтирования панели, а на телефоне — лист, в
-// который её кладут. Поэтому не имя узла, а первый предок, которому есть что
-// прокручивать.
-function marksScrollBox(node) {
-  for (let box = node.parentElement; box; box = box.parentElement) {
-    const overflow = getComputedStyle(box).overflowY;
-    if ((overflow === "auto" || overflow === "scroll") && box.scrollHeight > box.clientHeight) return box;
-  }
-  return null;
-}
-
 // Прокрутка к строке. Не `scrollIntoView`: он норовит подвинуть заодно всех
 // прокручиваемых предков — уехала бы вся панель, — и не умеет ни зазора, ни
 // оговорки про строку выше видимой части, ни разницы между выделением на
@@ -397,7 +389,7 @@ export function marksScrollNeed(before, after) {
 // поэтому по нему и видно, что строка переехала сама, а не пользователь
 // отлистал от неё.
 function marksRowBox(node, scroller) {
-  const box = scroller || marksScrollBox(node);
+  const box = scroller || panelScrollBox(node);
   if (!box) return null;
   const row = node.getBoundingClientRect();
   const frame = box.getBoundingClientRect();
@@ -406,27 +398,29 @@ function marksRowBox(node, scroller) {
 }
 
 function marksScrollToRow(node, align, chrome) {
-  const box = marksScrollBox(node);
+  const box = panelScrollBox(node);
   if (!box) return;
   const place = marksRowBox(node, box);
   const frame = box.getBoundingClientRect();
-  // Накладки меряем по месту, а не по числам из стилей: прилипший блок
-  // сдвинут отрицательным отступом, у кнопки смыкания свой, и оба меняются
-  // от раскладки. Сколько ящика закрыто — видно по самим прямоугольникам.
-  const cover = (element, side) => {
-    if (!element || element.hidden) return 0;
-    const rect = element.getBoundingClientRect();
-    if (rect.height === 0) return 0;
-    return Math.max(0, side === "head" ? rect.bottom - frame.top : frame.bottom - rect.top);
-  };
+  // Накладки меряем по месту, а не по числам из стилей: прилипший блок сдвинут
+  // отрицательным отступом, у кнопки смыкания свой, и оба меняются от
+  // раскладки. Сколько ящика закрыто — видно по самим прямоугольникам
+  // (`panelCover`).
   box.scrollTop = marksScrollTop(
     place,
     {
       scrollTop: box.scrollTop,
       clientHeight: box.clientHeight,
       scrollHeight: box.scrollHeight,
-      headInset: cover(chrome && chrome.head, "head"),
-      footInset: cover(chrome && chrome.foot, "foot"),
+      // Сверху кадр закрыт прилипшим блоком фильтров, а с таска 194 — вместе с
+      // заголовком раздела: прокручивается вся колонка, и заголовок липнет к
+      // той же кромке. Низ фильтров от верха кадра даёт оба разом, и число
+      // остаётся верным, когда раздел уехал наверх и фильтры ушли с ним.
+      headInset: panelCover(frame, chrome && chrome.head, "head"),
+      // Снизу — кнопка смыкания и рейка заголовков тех разделов, что ещё ниже.
+      // Кнопка стоит над рейкой, поэтому её накладка обычно больше; рейка
+      // спрашивается отдельно на случай, когда кнопки в кадре нет вовсе.
+      footInset: Math.max(panelCover(frame, chrome && chrome.foot, "foot"), panelRailInset(box)),
     },
     align,
   );

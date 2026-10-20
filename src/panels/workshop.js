@@ -197,6 +197,9 @@ import {
   uiModal,
   uiNumber,
 } from "./ui.js";
+// Прокрутка колонки одна на всю колонку (таск 194): кто прокручивается,
+// сколько кадра закрыто накладкой и какова рейка заголовков — общий счёт.
+import { panelCover, panelRailInset, panelScrollBox } from "./rail.js";
 import {
   objectCatalogDefaults,
   objectCatalogEntry,
@@ -4396,18 +4399,34 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
-   * Подвести выделенную строку к глазам. Подвал списка липнет к его низу, и
-   * строка, подведённая «как есть», осталась бы под ним — поэтому край
-   * считается по подвалу, а не по краю раздела.
+   * Подвести выделенную строку к глазам.
+   *
+   * `scrollIntoView` сюда не годится, и с таска 194 — тем более: он считает
+   * «видимым» всё, что попало в кадр, а кадр закрыт с двух сторон
+   * непрозрачными накладками. Сверху — заголовок раздела (прокручивается вся
+   * колонка, и заголовок липнет к её верхней кромке), снизу — подвал списка и
+   * рейка заголовков тех разделов, что ещё ниже. Раньше это правилось вручную
+   * одним подвалом и прокруткой тела раздела — тела больше не прокручиваются,
+   * и край считается по тем же накладкам, что в списке меток.
    */
   function revealRow(item) {
-    if (!item || typeof item.scrollIntoView !== "function") return;
-    item.scrollIntoView({ block: "nearest" });
-    const host = item.closest(".panel__body");
-    const foot = host ? host.querySelector(".workshop__foot") : null;
-    if (!foot) return;
-    const hidden = item.getBoundingClientRect().bottom - foot.getBoundingClientRect().top;
-    if (hidden > 0) host.scrollTop += hidden;
+    if (!item) return;
+    const box = panelScrollBox(item);
+    if (!box) return;
+    const section = item.closest(".panel__section");
+    const frame = box.getBoundingClientRect();
+    const head = section ? section.querySelector(".panel__head") : null;
+    const foot = section ? section.querySelector(".workshop__foot") : null;
+    // Заголовок меряется высотой, а не местом: своё место он занимает ровно
+    // тогда, когда раздел прошёл верхнюю кромку, — а подвести строку мы и
+    // собираемся туда, под заголовок.
+    const top = frame.top + (head ? head.offsetHeight : 0);
+    const low = frame.bottom - Math.max(panelCover(frame, foot, "foot"), panelRailInset(box));
+    const rect = item.getBoundingClientRect();
+    // Высокая строка (раскрытые параметры) целиком не влезает: тогда читаем
+    // сверху вниз — верх под заголовок, а не хвост к подвалу.
+    if (rect.top < top || rect.height > low - top) box.scrollTop += rect.top - top;
+    else if (rect.bottom > low) box.scrollTop += rect.bottom - low;
   }
 
   function fieldValue(input, value) {
