@@ -118,9 +118,10 @@ import {
   VOLUME_STAIR_REACH_MM,
   volumeArea,
   volumeAroundCamera,
+  volumeAroundEye,
   volumeAroundFit,
   volumeAroundPan,
-  volumeAroundStand,
+  volumeAroundTarget,
   volumeClipNear,
   volumeClipDepth,
   volumeFaceSide,
@@ -3145,64 +3146,56 @@ test("в тесном месте окно говорит об этом слов�
   assert.ok(volumeFreeMm(built.solids, wall.x, wall.y) > VOLUME_NEAR_MM);
 });
 
-test("камера обзора не ныряет под крышу: место зажато расстоянием", () => {
-  const lift = 1900;
-  // Отошли далеко — стоять можно почти вдоль земли, но всё же сверху.
-  const far = volumeAroundStand(0, 20000, lift);
-  assert.ok(far < 0, "камера обзора всегда выше цели: " + far);
-  assert.ok(Math.abs(Math.sin(-far) * 20000 - lift) < 1, "подъём над целью ровно по крыше");
-  // Подошли вплотную — место становится отвесным.
-  assert.ok(volumeAroundStand(0, 2000, lift) < volumeAroundStand(0, 20000, lift));
-  // Ближе, чем крыша высока, — почти отвес, и за него не заходим.
-  assert.ok(volumeAroundStand(0, 500, lift) <= -((VOLUME_PITCH_MAX_DEG * Math.PI) / 180) + 1e-9);
-  // Круче ограничения стоять не запрещено — запрещено положе.
-  assert.ok(volumeAroundStand(-1.2, 20000, lift) < far);
-  // Крыши нет (стенд, тест) — зажат один отвес.
-  assert.equal(volumeAroundStand(0.4, 20000, 0), 0.4);
+test("предел стояния камеры снят: обзор спускается до земли (таск 200, G304)", () => {
+  // Таск 195 держал камеру над крышей (`volumeAroundStand`) ровно затем, чтобы
+  // она не оказалась внутри стены. Заказчик предел снял сам — «по камере — ок,
+  // пусть в стенах оказываемся, это ожидаемо», — и функции этой больше нет.
+  const volumeSource = readFileSync(new URL("../src/volume.js", import.meta.url), "utf8");
+  assert.ok(!/export function volumeAroundStand/.test(volumeSource), "предел стояния вернулся");
+  // Кадрирование: камера встаёт по взгляду и расстоянию, и ничего кроме пола
+  // её не держит. Цель на полу, взгляд −42°, семь метров.
+  const target = { x: 0, y: 0, z: 1200 };
+  const pitch = (-42 * Math.PI) / 180;
+  const eye = volumeAroundEye(target, 0, pitch, 7000);
+  assert.ok(Math.abs(eye.z - (1200 + Math.sin(0.733) * 7000)) < 20, "камера встала не по взгляду: " + Math.round(eye.z));
+  // Взгляд ровно вдоль земли — камера на высоте цели: ниже высоты стен обзору
+  // больше ничего не запрещает.
+  assert.equal(Math.round(volumeAroundEye(target, 0, 0, 7000).z), 1200);
+  // **Пол держит** (`volumeGroundMm`, то же правило, которым приземляется
+  // прыжок): задранный взгляд увёл бы камеру под плиту, и она стоит на нуле.
+  const sky = (60 * Math.PI) / 180;
+  assert.equal(volumeAroundEye(target, 0, sky, 7000).z, 0, "камера ушла под пол");
+  for (let deg = -85; deg <= 85; deg += 5) {
+    const at = volumeAroundEye(target, 0.4, (deg * Math.PI) / 180, 7000);
+    assert.ok(at.z >= 0, "на " + deg + "° камера под полом: " + Math.round(at.z));
+  }
+  // Взгляд кадрирование не трогает: куда смотрят — выбор руки.
+  assert.equal(volumeAroundCamera(target, 0.4, sky, 7000).pitch, sky);
   const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
-  assert.ok(Math.abs(volumeAroundStand(Math.PI / 2, 20000, 0) - limit) < 1e-9, "за отвес не заводится");
+  assert.ok(Math.abs(volumeClampPitch(Math.PI / 2) - limit) < 1e-9, "за отвес взгляд не заводится");
 });
 
-test("обзор задирает взгляд к небу, а камеру оставляет над крышей (G298)", () => {
-  // Та самая беда, из-за которой предел стоял: цель на полу, семь метров.
-  const lift = 1900;
-  const target = { x: 0, y: 0, z: 1200 };
-  const sky = (60 * Math.PI) / 180;
-  const camera = volumeAroundCamera(target, 0.4, sky, 7000, lift);
-  // Взгляд — тот, что задали: солнце в полдень лета стоит на 58°, и смотреть
-  // туда обзор теперь вправе.
-  assert.equal(camera.pitch, sky);
-  // А место камеры — прежнее, по крыше: подъём над целью ровно `lift`, и внутрь
-  // стены соседней комнаты она не попадает ни на миллиметр.
-  assert.ok(Math.abs(camera.at.z - (target.z + lift)) < 1, "камера съехала с крыши: " + camera.at.z);
-  // Больше крыши её поднимает только собственный наклон, и ниже неё она не
-  // опускается ни на каком взгляде — пройдём весь диапазон.
-  for (let deg = -85; deg <= 85; deg += 5) {
-    const at = volumeAroundCamera(target, 0.4, (deg * Math.PI) / 180, 7000, lift).at;
-    assert.ok(at.z >= target.z + lift - 1, "на " + deg + "° камера нырнула к полу: " + Math.round(at.z));
+test("цель обзора — точка перед камерой, и брошенной она не бывает (таск 200)", () => {
+  // Цель не хранится: она считается от места камеры и взгляда. Поэтому
+  // «вращение вокруг цели» и «вращение точки перед собой» — одно и то же.
+  const eye = { x: 1000, y: 2000, z: 3000 };
+  const target = volumeAroundTarget(eye, 0.4, (-30 * Math.PI) / 180, 9000);
+  // Туда и обратно: кадрирование по этой цели возвращает ту же камеру.
+  const back = volumeAroundEye(target, 0.4, (-30 * Math.PI) / 180, 9000);
+  assert.ok(Math.hypot(back.x - eye.x, back.y - eye.y, back.z - eye.z) < 1e-6, "счёт разошёлся: " + JSON.stringify(back));
+  // **Рысканье высоту камеры не меняет** — поэтому орбита вокруг цели под пол
+  // не уводит и пола не спрашивает. Обойдём цель по кругу.
+  for (let deg = 0; deg < 360; deg += 30) {
+    const spun = volumeAroundEye(target, (deg * Math.PI) / 180, (-30 * Math.PI) / 180, 9000);
+    assert.ok(Math.abs(spun.z - eye.z) < 1e-6, "на " + deg + "° орбита увела камеру по высоте: " + spun.z);
   }
-  // Задранный взгляд камеру с места **не сдвигает**: от предела и выше она
-  // стоит там же, где стояла.
-  const edge = volumeAroundCamera(target, 0.4, volumeAroundStand(0, 7000, lift), 7000, lift);
-  assert.deepEqual(camera.at, edge.at);
-  // Приближение на задранном взгляде — шаг камеры к цели, а не поворот головы:
-  // взгляд тот же, место ближе и круче.
-  const near = volumeAroundCamera(target, 0.4, sky, 3500, lift);
-  assert.equal(near.pitch, sky);
-  assert.ok(Math.hypot(near.at.x, near.at.y) < Math.hypot(camera.at.x, camera.at.y), "камера не подошла");
-  assert.ok(near.at.z >= target.z + lift - 1, "подошедшая камера ушла под крышу");
-  // Опущенный взгляд — как было до таска 195: место и взгляд одно и то же.
-  const down = (-70 * Math.PI) / 180;
-  assert.deepEqual(
-    volumeAroundCamera(target, 0.4, down, 7000, lift),
-    volumeAroundCamera(target, 0.4, down, 7000, 0),
-    "опущенный взгляд перестал ставить камеру по себе",
-  );
+  // Цель на полу, камера над ней: обычный обзор сверху.
+  assert.ok(target.z < eye.z, "цель должна лежать ниже камеры при опущенном взгляде");
 });
 
 test("щелчок по небу в обзоре никуда не переносит", () => {
   // Луч из задранного кадра в пол не упирается — и выдуманной точки не бывает.
-  const camera = volumeAroundCamera({ x: 0, y: 0, z: 1200 }, 0.4, (60 * Math.PI) / 180, 7000, 1900);
+  const camera = { at: { x: 0, y: 0, z: 1200 }, yaw: 0.4, pitch: (60 * Math.PI) / 180 };
   const box = { width: 1200, height: 700 };
   assert.equal(volumeFloorAt(camera, box, box.width / 2, 40), null);
 });
@@ -3456,7 +3449,7 @@ test("окно параметров: «Сейчас» ставит дату, в�
   volumeParamsSpeed(VOLUME_CLOCK_SPEED_DEFAULT, nowMs);
 });
 
-test("три отметки объёма живут в настройках и по умолчанию сняты (таск 192, G292)", () => {
+test("отметки объёма живут в настройках и по умолчанию сняты (таск 192, G292)", () => {
   // Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
   // 1. Плавные светила… 2. Проходить сквозь стены 3. Летать».
   //
@@ -3464,26 +3457,35 @@ test("три отметки объёма живут в настройках и �
   // объём ведёт себя ровно как до таска.
   assert.equal(volumeParamsRead().smooth, false);
   assert.equal(volumeParamsRead().ghost, false);
-  assert.equal(volumeParamsRead().fly, false);
-  // Дверь одна на три, и спрашивается выбор тем же `volumeParamsRead`, что фон
+  // Дверь одна на обе, и спрашивается выбор тем же `volumeParamsRead`, что фон
   // и миникарта: второго места для него нет.
-  volumeParamsFlag("fly", true);
-  assert.equal(volumeParamsRead().fly, true);
-  assert.equal(volumeParamsRead().ghost, false, "отметки друг друга не трогают");
   volumeParamsFlag("ghost", true);
+  assert.equal(volumeParamsRead().ghost, true);
+  assert.equal(volumeParamsRead().smooth, false, "отметки друг друга не трогают");
   volumeParamsFlag("smooth", true);
   assert.deepEqual(
-    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
-    { smooth: true, ghost: true, fly: true },
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost },
+    { smooth: true, ghost: true },
   );
+  // ——— «Летать» убрал заказчик (таск 200, G304) ———
+  //
+  // Отметки нет ни в окне, ни в настройках, и **старое имя не оживляет её**:
+  // записанное когда-то `volumeFly: true` лежит в хранилище мёртвым грузом.
+  volumeParamsFlag("fly", true);
+  assert.equal(volumeParamsRead().fly, undefined, "отметка «Летать» вернулась");
+  const paramsSource = readFileSync(new URL("../src/panels/volumeParams.js", import.meta.url), "utf8");
+  const code = paramsSource
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+  assert.ok(!/volumeFly/.test(code), "имя настройки «Летать» вернулось в код");
   // Чужое имя двери не ломает ничего и ничего не ставит.
   volumeParamsFlag("сквозьпотолок", true);
-  volumeParamsFlag("fly", false);
   volumeParamsFlag("ghost", false);
   volumeParamsFlag("smooth", false);
   assert.deepEqual(
-    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost, fly: volumeParamsRead().fly },
-    { smooth: false, ghost: false, fly: false },
+    { smooth: volumeParamsRead().smooth, ghost: volumeParamsRead().ghost },
+    { smooth: false, ghost: false },
   );
 });
 
@@ -5451,18 +5453,24 @@ test("текст подсказки говорит про тот вид и то 
   // Стойка и стены — своими кусками (таск 192): без галок сказано то же, что
   // говорилось до таска, слово в слово.
   assert.ok(person.includes(strings.volume.hintStance) && person.includes(strings.volume.hintWalls), person);
-  // Три отметки **меняют** подсказку, а не дописывают её: летящему пробел не
-  // прыжок, а снявшему столкновения нельзя читать «сквозь стены нельзя».
-  const flying = volumeHintText({ ...base, fly: true });
-  assert.ok(flying.includes(strings.volume.hintFly) && !flying.includes(strings.volume.hintStance), flying);
+  // Отметка **меняет** подсказку, а не дописывает её: снявшему столкновения
+  // нельзя читать «сквозь стены нельзя».
   const ghost = volumeHintText({ ...base, ghost: true });
   assert.ok(ghost.includes(strings.volume.hintGhost) && !ghost.includes(strings.volume.hintWalls), ghost);
-  // В обзоре не ходят вовсе — ни про стойку, ни про стены там не говорится.
-  const aroundFly = volumeHintText({ ...base, view: "around", aim: false, fly: true, ghost: true });
-  assert.ok(!aroundFly.includes(strings.volume.hintFly) && !aroundFly.includes(strings.volume.hintGhost), aroundFly);
+  // ——— подсказка меняется по виду (таск 200, G304) ———
+  //
+  // Человеку в первом лице не пишут про полёт, летящему в обзоре — про прыжок.
+  assert.ok(!person.includes(strings.volume.hintAroundFly), person);
+  const around = volumeHintText({ ...base, view: "around", aim: false });
+  assert.ok(around.includes(strings.volume.hintAroundFly), around);
+  assert.ok(!around.includes(strings.volume.hintStance), around);
+  // Про отметку «Проходить сквозь стены» в обзоре не говорится вовсе: там
+  // сквозь стены летают всегда, и галка там ничего не меняет.
+  const aroundGhost = volumeHintText({ ...base, view: "around", aim: false, ghost: true });
+  assert.ok(!aroundGhost.includes(strings.volume.hintGhost) && !aroundGhost.includes(strings.volume.hintWalls), aroundGhost);
+  assert.equal(aroundGhost, around, "галка переписала подсказку обзора");
   assert.ok(person.includes(strings.volume.aimHint), "прицел показан — про него есть строка");
   // Обзор говорит своё, и про прицел там молчит: его в обзоре нет.
-  const around = volumeHintText({ ...base, view: "around", aim: false });
   assert.ok(around.includes(strings.volume.hintAround), around);
   assert.ok(!around.includes(strings.volume.aimHint), around);
   // Мышь у вида — другая строка про мышь, и обе разом не говорятся.

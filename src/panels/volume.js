@@ -70,11 +70,11 @@ import {
   VOLUME_START_PITCH_DEG,
   VOLUME_WALK_MM_S,
   VOLUME_TIGHT_MM,
-  volumeAroundCamera,
   volumeAroundDistance,
+  volumeAroundEye,
   volumeAroundFit,
   volumeAroundPan,
-  volumeAroundStand,
+  volumeAroundTarget,
   volumeFreeMm,
   volumeBasis,
   volumeCanStand,
@@ -109,9 +109,9 @@ import {
   volumeSunSpotFaces,
   volumeSiteOf,
   volumeDrawn,
+  volumeGroundMm,
   volumeSelectLines,
   volumeStairNear,
-  volumeStanceBody,
   volumeStanceBusy,
   volumeStanceEye,
   volumeStanceHead,
@@ -689,14 +689,17 @@ export function volumeDoorLine(doors, open, aimed, touching) {
 export function volumeHintText(state) {
   if (state.empty) return strings.volume.emptyHint;
   const parts = [state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
-  // Три отметки таска 192 (G292) меняют подсказку, а не дописывают её: человек,
-  // снявший столкновения, не должен читать «сквозь стены нельзя», а летящему
-  // пробел больше не прыжок. Про стены и стойку говорится только от первого
-  // лица: в обзоре не ходят вовсе.
+  // Подсказка **меняется по виду**, а не дописывается (правило таска 192,
+  // G292): человеку в первом лице не пишут про полёт, летящему в обзоре — про
+  // прыжок, а снявший столкновения не должен читать «сквозь стены нельзя».
   if (state.view === "person") {
-    parts.push(state.fly ? strings.volume.hintFly : strings.volume.hintStance);
+    parts.push(strings.volume.hintStance);
     parts.push(state.ghost ? strings.volume.hintGhost : strings.volume.hintWalls);
     parts.push(strings.volume.hintMinimap);
+  } else {
+    // Про отметку «Проходить сквозь стены» в обзоре не говорится вовсе: там
+    // сквозь стены летают всегда, и галка ничего не меняет (таск 200, G304).
+    parts.push(strings.volume.hintAroundFly);
   }
   // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
   if (state.touching) parts.push(strings.volume.hintTouch);
@@ -954,9 +957,10 @@ function createVolume({ api, hosts }) {
   // Отпускание ищут по нему, иначе присед, начатый кнопкой, снимался бы любым
   // касанием поля.
   let crouchFinger = null;
-  // Держат ли пробел — и палец на той же кнопке (таск 192, G292). В полёте
-  // пробел не прыгает, а поднимает, пока его держат, и у этого «держат» своя
-  // пара переменных: прыжок был разовым и ему держать было нечего.
+  // Держат ли пробел — и палец на той же кнопке (таск 192, G292; таск 200,
+  // G304). **В обзоре** пробел не прыгает, а поднимает камеру, пока его
+  // держат, и у этого «держат» своя пара переменных: прыжок разовый, и ему
+  // держать было нечего.
   let riseHeld = false;
   let riseFinger = null;
   // Про «встать негде» говорится один раз на попытку, а не каждый кадр.
@@ -976,8 +980,26 @@ function createVolume({ api, hosts }) {
    * память ушла, и это честно: заново открытый объём не помнит дороги.
    */
   const visited = new Map();
-  // Обзор: цель, вокруг которой ходит камера, и расстояние до неё.
-  let around = { target: { x: start.x, y: start.y, z: 1200 }, yaw: start.yaw, pitch: (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180, distance: VOLUME_AROUND_NEAR_MM };
+  // ——— обзор: где стоит камера (таск 200, G304) ———
+  //
+  // Хранится **место камеры**, а цель — точка перед ней на `distance`
+  // (`volumeAroundTarget`). До таска 200 было наоборот: хранилась цель, а место
+  // считалось от неё, и это была орбита с пределом стояния (`volumeAroundStand`,
+  // таск 195). Предел заказчик снял и отдал обзору полёт — а полёт двигает
+  // саму камеру, не цель. Поэтому главным стало её место, и «брошенной цели на
+  // другом конце квартиры» больше не бывает: цель всегда там, куда камера
+  // летит.
+  let around = {
+    eye: volumeAroundEye(
+      { x: start.x, y: start.y, z: 1200 },
+      start.yaw,
+      (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
+      VOLUME_AROUND_NEAR_MM,
+    ),
+    yaw: start.yaw,
+    pitch: (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180,
+    distance: VOLUME_AROUND_NEAR_MM,
+  };
 
   const node = uiEl("canvas", { class: "volume__canvas" });
   // Карточка выделенной метки — внизу поверх поля, ровно так же, как она стоит
@@ -1231,9 +1253,12 @@ function createVolume({ api, hosts }) {
     // Переход к обзору ставит цель туда, где стоит человек: обзор нужен, чтобы
     // понять, где стоишь, а не чтобы потерять себя из виду.
     if (next === "around") {
-      around = { ...around, target: { x: person.x, y: person.y, z: 1200 }, yaw: person.yaw, distance: VOLUME_AROUND_NEAR_MM };
-      around = { ...around, pitch: aroundAim() };
+      aroundFrame({ x: person.x, y: person.y, z: 1200 }, person.yaw, aroundAim(), VOLUME_AROUND_NEAR_MM);
     }
+    // Клавиши высоты держат **руки**, а значат они в двух видах разное: в
+    // обзоре пробел поднимает камеру, от первого лица он прыгает. Сменили вид
+    // — отпустили: иначе вернувшийся в обзор поднимался бы без нажатия.
+    riseStop();
     view = next;
     sync();
   }
@@ -1241,8 +1266,7 @@ function createVolume({ api, hosts }) {
   function fit() {
     if (scene.empty) return;
     const fitted = volumeAroundFit(scene, viewport());
-    around = { ...around, target: fitted.target, distance: fitted.distance };
-    around = { ...around, pitch: aroundAim() };
+    aroundFrame(fitted.target, around.yaw, aroundAim(), fitted.distance);
     if (view !== "around") {
       view = "around";
       sync();
@@ -1257,15 +1281,64 @@ function createVolume({ api, hosts }) {
    * Руками взгляд задирается к небу свободно — но «Обзор» и «Вся схема» это
    * **возврат**: они и так ставят цель и расстояние заново, и нажавший их ждёт
    * увидеть схему, а не небо, в котором остался взгляд. Поэтому взгляд тут не
-   * положе умолчания обзора, и ровно так же его зажимает расстояние
-   * (`volumeAroundStand`): вплотную вид становится круче сам.
+   * положе умолчания обзора.
    *
    * Круче умолчания — не трогаем: смотреть на схему почти отвесно человек мог
    * выбрать сам, и возврат такой выбор не отнимает.
    */
   function aroundAim() {
     const home = (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180;
-    return volumeAroundStand(Math.min(around.pitch, home), around.distance, aroundLift());
+    return Math.min(around.pitch, home);
+  }
+
+  // ——— обзор: четыре руки на одно место камеры (таск 200, G304) ———————————
+  //
+  // Цель у обзора **не хранится** — она считается точкой перед камерой
+  // (`aroundTarget`). Отсюда и ответ на «что остаётся от орбиты»: орбита
+  // остаётся, и крутится она ровно вокруг той точки, в которую камера летит.
+  // Колесо подводит камеру к ней, свайп возит обе по полу, полёт несёт обе
+  // разом.
+
+  /** Куда смотрит обзор: точка перед камерой на `distance`. */
+  function aroundTarget() {
+    return volumeAroundTarget(around.eye, around.yaw, around.pitch, around.distance);
+  }
+
+  /** Кадрировать: встать так, чтобы смотреть на `target` с `distance`. */
+  function aroundFrame(target, yaw, pitch, distance) {
+    around = { eye: volumeAroundEye(target, yaw, pitch, distance), yaw, pitch, distance };
+  }
+
+  /**
+   * Повернуть обзор **вокруг цели** (рысканье): та самая орбита, которой
+   * обходят дом. Высота камеры от этого не меняется ни на миллиметр — рысканье
+   * не трогает вертикальную часть взгляда, — поэтому пол здесь и не
+   * спрашивается: под плиту орбита не уводит.
+   */
+  function aroundSpin(yaw) {
+    const target = aroundTarget();
+    around = { ...around, eye: volumeAroundEye(target, yaw, around.pitch, around.distance), yaw };
+  }
+
+  /**
+   * Приблизиться или отойти: цель на месте, камера подходит к ней по взгляду.
+   * То же, что делало колесо до таска 200, — только теперь это видно в состоянии.
+   */
+  function aroundZoom(distance) {
+    const next = volumeAroundDistance(distance);
+    const target = aroundTarget();
+    around = { ...around, eye: volumeAroundEye(target, around.yaw, around.pitch, next), distance: next };
+  }
+
+  /** Сдвинуть обзор по полу: и камера, и цель уезжают на столько же. */
+  function aroundSlide(dx, dy) {
+    around = { ...around, eye: { ...around.eye, x: around.eye.x + dx, y: around.eye.y + dy } };
+  }
+
+  /** Навести обзор на это место плана, не меняя ни взгляда, ни высоты. */
+  function aroundLookAt(x, y) {
+    const target = aroundTarget();
+    aroundSlide(x - target.x, y - target.y);
   }
 
   function camera() {
@@ -1273,9 +1346,8 @@ function createVolume({ api, hosts }) {
       // Высота глаз — у стойки (G234): присел — ниже, прыгнул — выше.
       return { at: { x: person.x, y: person.y, z: volumeStanceEye(stance) }, yaw: person.yaw, pitch: person.pitch };
     }
-    // Место камеры считает `volumeAroundStand` по `aroundLift()`: задранный
-    // взгляд поворачивает голову, а штатив оставляет над крышей (G298).
-    return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance, aroundLift());
+    // Камера обзора стоит сама: её место и есть состояние вида.
+    return { at: { ...around.eye }, yaw: around.yaw, pitch: around.pitch };
   }
 
   // ——— общее место трёх режимов (G276) ———
@@ -1306,7 +1378,7 @@ function createVolume({ api, hosts }) {
     // Обзор смотрит на то же место: вид переключают, не выходя из режима, и
     // разойдись они — человек увидел бы со стороны не ту комнату, в которой
     // только что стоял.
-    around = { ...around, target: { ...around.target, x: moved.x, y: moved.y } };
+    aroundLookAt(moved.x, moved.y);
     // Встал присевший под низкое или вышел из-под него — решает новое место.
     stanceRecheck();
     syncWhere();
@@ -1362,7 +1434,10 @@ function createVolume({ api, hosts }) {
    * показывают.
    */
   function placeStance() {
-    stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm, volumeParamsRead().minimap) + "px";
+    // Миникарта рисуется только от первого лица (`paint`), и уступать ей место
+    // в обзоре нечему: кнопки стойки стоят там же, где стоят всегда, но ниже.
+    const minimap = view === "person" && volumeParamsRead().minimap;
+    stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm, minimap) + "px";
   }
 
   // ——— час суток: один снимок на секунду ———
@@ -1474,11 +1549,8 @@ function createVolume({ api, hosts }) {
     refreshHour();
     syncClock();
     placeStance();
-    // Три отметки таска 192 меняют не только картинку: подсказка говорит про
-    // другие клавиши, кнопки стойки — другие слова, снятые стены поднимают
-    // того, кому не давали встать, а снятый полёт возвращает летящего на пол
-    // падением — для этого часам нужен тик.
-    syncStanceWords();
+    // Отметка «Проходить сквозь стены» меняет не только картинку: подсказка
+    // говорит про другое, а снятые стены поднимают того, кому не давали встать.
     syncHint();
     stanceRecheck();
     walkSchedule();
@@ -1486,12 +1558,16 @@ function createVolume({ api, hosts }) {
   }
 
   /**
-   * Слова на кнопках стойки. В полёте те же две кнопки значат «выше» и «ниже»
-   * (таск 192) — это одна оснастка в двух руках, и вторых кнопок для полёта не
-   * заводится.
+   * Слова на кнопках стойки. **В обзоре те же две кнопки значат «выше» и
+   * «ниже»** (таск 192, таск 200) — это одна оснастка в двух руках, и вторых
+   * кнопок для полёта камеры не заводится.
+   *
+   * Это и есть ответ на «куда переезжают кнопки стойки на планшете»: никуда.
+   * Они стоят в том же углу поля, в обоих видах, и меняют только подписи —
+   * клавиш у планшета нет вовсе, а пробел с Control нажать там нечем.
    */
   function syncStanceWords() {
-    const fly = volumeParamsRead().fly === true;
+    const fly = view === "around";
     const up = fly ? strings.volume.flyUp : strings.volume.jump;
     const down = fly ? strings.volume.flyDown : strings.volume.crouch;
     jumpButton.title = fly ? strings.volume.flyUpHint : strings.volume.jumpHint;
@@ -1922,37 +1998,75 @@ function createVolume({ api, hosts }) {
   // объёме идут только пока их держат, и присед с прыжком — третий повод.
   function moving() {
     if (keys.size > 0 || Boolean(pad)) return true;
-    // В полёте повод даёт зажатая клавиша высоты, а не оторванность от пола:
-    // висящий человек никуда не едет, и крутить ему кадры незачем (таск 192).
-    return volumeStanceBusy(stance, crouchHeld || crouchStuck, {
-      fly: flying(),
-      rise: riseHeld || crouchHeld,
-    });
+    // Обзор летит, пока держат клавишу высоты: висящая камера никуда не едет,
+    // и крутить ей кадры незачем (таск 200, G304).
+    if (view === "around" && (riseHeld || crouchHeld)) return true;
+    return volumeStanceBusy(stance, crouching() || crouchStuck);
   }
 
-  // ——— три отметки окна параметров (таск 192, G292) ———
+  // ——— отметка окна параметров (таск 192, G292) ———
   //
-  // Спрашиваются **у окна параметров** и нигде не запоминаются: своя копия
+  // Спрашивается **у окна параметров** и нигде не запоминается: своя копия
   // ответа разошлась бы с галкой в тот же миг, когда её снимут. В объект не
-  // пишется ничего (G68) — отметки живут в настройках браузера рядом с фоном и
+  // пишется ничего (G68) — отметка живёт в настройках браузера рядом с фоном и
   // миникартой.
 
-  /** Летим ли. */
-  function flying() {
-    return volumeParamsRead().fly === true;
-  }
-
-  /** Сняты ли столкновения со стенами. */
+  /**
+   * Сняты ли столкновения со стенами — вопрос **первого лица**.
+   *
+   * В обзоре его не задают вовсе: камера проходит сквозь стены всегда, без
+   * отметки (таск 200, G304). Камера — не человек, и запрет, который человеку
+   * снимают галкой, ей не ставили никогда.
+   */
   function ghosting() {
     return volumeParamsRead().ghost === true;
   }
 
   /**
-   * Где у человека ноги и макушка — этим спрашивают стены. Счёт в `volume.js`
-   * (`volumeStanceBody`): у идущего ноги на полу, у летящего — на его высоте.
+   * Приседает ли человек. Control держат руки, а значит он в двух видах разное:
+   * от первого лица — присед, в обзоре — спуск камеры (таск 200, G304).
    */
-  function body() {
-    return volumeStanceBody(stance, flying());
+  function crouching() {
+    return crouchHeld && view === "person";
+  }
+
+  /**
+   * Полёт камеры обзора (таск 200, G304).
+   *
+   * Слова заказчика: «механику полёта (кнопки прыжка и присяда и т.д.)
+   * перенесём в обзор и позволим в обзоре спускаться до земли и летаться сквозь
+   * стены». Поэтому:
+   *
+   *   - **ход идёт по взгляду целиком**, включая наклон: смотришь вверх —
+   *     поднимаешься. Деления на плоскую часть здесь нет — это то же правило,
+   *     по которому летал человек в таске 192;
+   *   - **пробел и Control** добавляют к этому отвесную составляющую, пока их
+   *     держат;
+   *   - **скорость своя не заводится** (слово заказчика: «скорость для камеры
+   *     как и сейчас для полёта») — `VOLUME_WALK_MM_S`, с Shift
+   *     `VOLUME_RUN_MM_S`, те же, которыми ходит человек;
+   *   - **стены не спрашиваются**: ни `volumeStep`, ни выталкивания. Камера
+   *     летит ровно туда, куда просили, и **может оказаться внутри стены —
+   *     это ожидаемо по слову заказчика** («по камере — ок, пусть в стенах
+   *     оказываемся, это ожидаемо»). Предел стояния таска 195 заводили ровно
+   *     против этого серого кадра; заказчик его снял сам, и замены ему нет;
+   *   - **пол держит** — `volumeGroundMm`, то же правило, которым приземляется
+   *     прыжок: ниже нуля не уходит ни человек, ни камера.
+   */
+  function aroundFly(forward, side, scale, basis, speed) {
+    const lift = ((riseHeld ? 1 : 0) - (crouchHeld ? 1 : 0)) * speed;
+    const dx = (basis.fwd.x * forward + basis.right.x * side) * scale;
+    const dy = (basis.fwd.y * forward + basis.right.y * side) * scale;
+    const dz = basis.fwd.z * forward * scale + lift;
+    if (dx === 0 && dy === 0 && dz === 0) return;
+    around = {
+      ...around,
+      eye: {
+        x: around.eye.x + dx,
+        y: around.eye.y + dy,
+        z: volumeGroundMm(around.eye.z + dz),
+      },
+    };
   }
 
   // ——— присед и прыжок (G234) ———
@@ -1968,28 +2082,24 @@ function createVolume({ api, hosts }) {
    * «Застрял» бывает только у того, кто уже присел: стоящего в низкое место не
    * пускает сама ходьба, и подниматься ему незачем.
    */
-  function stanceTick(step, flyMm) {
-    // Летим (таск 192): «встать негде» не бывает вовсе — Control значит «ниже»,
-    // а не «присесть», и спрашивать, что над головой, незачем.
-    if (flyMm !== null && flyMm !== undefined) {
-      crouchStuck = false;
-      stuckSaid = false;
-      stance = volumeStanceStep(stance, step, { flyMm });
-      return;
-    }
+  function stanceTick(step) {
     const room = volumeCanStand(scene, person, volumeStanceHead(stance), { ghost: ghosting() });
-    if (!crouchHeld) {
+    const want = crouching();
+    if (!want) {
       crouchStuck = stance.crouchMm > 0 && !room;
       // Отпустил Control под низким потолком — об этом говорится словом, один
       // раз на попытку: протолкнуть макушку сквозь вещь нельзя, переставить
       // человека в сторону — тоже, а молчание он прочтёт как залипшую клавишу.
-      if (crouchStuck && !stuckSaid) {
+      //
+      // В обзоре молчим: человек смотрит со стороны, Control у него под
+      // «ниже», и строка про его макушку была бы шумом не по делу.
+      if (crouchStuck && !stuckSaid && view === "person") {
         notify(strings.volume.standBlocked, "info");
         stuckSaid = true;
       }
       if (!crouchStuck) stuckSaid = false;
     }
-    stance = volumeStanceStep(stance, step, { crouch: crouchHeld || crouchStuck, canStand: room });
+    stance = volumeStanceStep(stance, step, { crouch: want || crouchStuck, canStand: room });
   }
 
   /** Control нажали: приседаем, пока держат. */
@@ -2015,17 +2125,16 @@ function createVolume({ api, hosts }) {
 
   /** Пробел: разовый прыжок. Присев и в воздухе не прыгают (`volumeStanceJump`). */
   function jump() {
+    // В обзоре пробел не прыгает, а поднимает камеру, пока его держат (таск
+    // 200): разовый прыжок там не значил бы ничего.
     if (view !== "person") return;
-    // В полёте пробел не прыгает, а поднимает, пока его держат (таск 192):
-    // «пробел (прыжок) - выше». Разовый прыжок там не значил бы ничего.
-    if (flying()) return;
     stance = volumeStanceJump(stance);
     walkSchedule();
   }
 
   /**
-   * Пробел в полёте держат (таск 192, G292). Отдельная пара рук, а не повтор
-   * приседа: прыжок был разовым, и держать ему было нечего.
+   * Пробел в обзоре держат (таск 192, G292; таск 200, G304). Отдельная пара
+   * рук, а не повтор приседа: прыжок разовый, и держать ему нечего.
    */
   function riseStart() {
     if (riseHeld) return;
@@ -2047,12 +2156,12 @@ function createVolume({ api, hosts }) {
   // у кнопок нет вовсе — они зовут то же, что Control и пробел.
 
   /**
-   * Кнопка прыжка в полёте становится кнопкой «Выше» и работает как присед —
-   * пока держат (таск 192). Не летим — кнопка остаётся разовым прыжком по
-   * щелчку, и второго способа прыгнуть не завелось.
+   * Кнопка прыжка в обзоре становится кнопкой «Выше» и работает как присед —
+   * пока держат (таск 192, таск 200). От первого лица та же кнопка остаётся
+   * разовым прыжком по щелчку, и второго способа прыгнуть не завелось.
    */
   function risePress(event) {
-    if (riseFinger !== null || !flying()) return;
+    if (riseFinger !== null || view !== "around") return;
     event.preventDefault();
     riseFinger = event.pointerId;
     if (jumpButton.setPointerCapture) {
@@ -2100,7 +2209,7 @@ function createVolume({ api, hosts }) {
    * руками.
    */
   function stanceRecheck() {
-    if (crouchHeld || !crouchStuck) return;
+    if (crouching() || !crouchStuck) return;
     if (!volumeCanStand(scene, person, volumeStanceHead(stance), { ghost: ghosting() })) return;
     crouchStuck = false;
     stuckSaid = false;
@@ -2144,62 +2253,38 @@ function createVolume({ api, hosts }) {
     if (turn !== 0) {
       const spin = Math.max(-1, Math.min(1, turn)) * step * 2.2;
       if (view === "person") person.yaw += spin;
-      else around = { ...around, yaw: around.yaw + spin };
+      // Стрелками обзор обходит цель — той же орбитой, что перетаскиванием:
+      // второго способа повернуться не заводится.
+      else aroundSpin(around.yaw + spin);
     }
-    const basis = volumeBasis(view === "person" ? person : around);
+    const basis = volumeBasis(view === "person" ? person : { yaw: around.yaw, pitch: around.pitch });
     // Длина делится на себя же, но не больше единицы: клавиши дают ровно
     // единицу (или корень из двух на двух сразу, как и было), а палец на
     // площадке — сколько увёл, и полшага должны остаться полушагом.
     const length = Math.hypot(forward, side);
     const scale = length === 0 ? 0 : (Math.min(1, length) / length) * speed;
-    const fly = flying();
-    // ——— полёт: высота тем же шагом (таск 192, G292) ———
-    //
-    // Слова заказчика: «при движении летим в сторону курсора, пробел (прыжок) -
-    // выше, ctrl (присяд) - ниже». Поэтому в миллиметры подъёма складываются
-    // два слагаемых: зажатая клавиша и **наклон взгляда** — вертикальная часть
-    // того же шага, который идёт вперёд. Это и есть «в сторону курсора»: смотрит
-    // человек вверх — поднимается, вниз — опускается, и ничего сверх шага он при
-    // этом не проходит.
-    //
-    // Миллиметры считаются здесь, а копит их стойка (`volumeStanceStep`): своей
-    // высоты у поля нет и быть не должно — она одна на прыжок и на полёт.
-    //
-    // В обзоре полёт не ведёт никуда — там камера ходит вокруг цели, и «выше»
-    // ей не значит ничего, — но высота человека **держится**: ноль подъёма, а
-    // не падение. Вернувшись к первому лицу, он висит там, где висел.
-    const flyMm = !fly
-      ? null
-      : view === "person"
-        ? ((riseHeld ? 1 : 0) - (crouchHeld ? 1 : 0)) * speed + basis.fwd.z * forward * scale
-        : 0;
-    stanceTick(step, flyMm);
-    if (forward !== 0 || side !== 0) {
-      // Пешком ход идёт **по плану**, а не по направлению взгляда: с опущенным
-      // взглядом иначе уходишь в пол, и это чувствуется как провал, а не как
-      // шаг. В полёте — наоборот, по взгляду целиком (таск 192), и деления на
-      // плоскую часть там нет: заглянув круче, человек идёт медленнее по полу и
-      // быстрее вверх, как и обещает «в сторону курсора».
-      const flat = fly ? 1 : Math.hypot(basis.fwd.x, basis.fwd.y) || 1;
-      const dx = ((basis.fwd.x / flat) * forward + basis.right.x * side) * scale;
-      const dy = ((basis.fwd.y / flat) * forward + basis.right.y * side) * scale;
-      if (view === "person") {
-        // Макушку и ноги даёт стойка (G234, таск 192): присевший проходит там,
-        // где низко, летящий — над тем, что кончилось ниже его подошв, — и
+    // Стойка — только у человека: в обзоре Control значит «ниже», а не
+    // «присесть», и приседать там некому (таск 200, G304).
+    stanceTick(step);
+    if (view === "person") {
+      if (forward !== 0 || side !== 0) {
+        // Пешком ход идёт **по плану**, а не по направлению взгляда: с
+        // опущенным взглядом иначе уходишь в пол, и это чувствуется как
+        // провал, а не как шаг.
+        const flat = Math.hypot(basis.fwd.x, basis.fwd.y) || 1;
+        const dx = ((basis.fwd.x / flat) * forward + basis.right.x * side) * scale;
+        const dy = ((basis.fwd.y / flat) * forward + basis.right.y * side) * scale;
+        // Макушку даёт стойка (G234): присевший проходит там, где низко, — и
         // ровно там, где это правда проходимо. Отметка «сквозь стены» снимает
         // этот счёт целиком, и снимает его одно место — `volumeStep`.
-        const reach = body();
-        const moved = volumeStep(scene, person, dx, dy, reach.headMm, {
-          ghost: ghosting(),
-          feetMm: reach.feetMm,
-        });
+        const moved = volumeStep(scene, person, dx, dy, volumeStanceHead(stance), { ghost: ghosting() });
         person.x = moved.x;
         person.y = moved.y;
         syncWhere();
         stairCheck();
-      } else {
-        around = { ...around, target: { ...around.target, x: around.target.x + dx, y: around.target.y + dy } };
       }
+    } else {
+      aroundFly(forward, side, scale, basis, speed);
     }
     paint();
     walkSchedule();
@@ -2226,27 +2311,28 @@ function createVolume({ api, hosts }) {
   // каждый браузер и не во всякой вкладке, поэтому перетаскивание работает
   // всегда и само по себе.
 
-  // Насколько обзор обязан подняться над целью, чтобы остаться снаружи: это
-  // высота, на которой кончается чертёж, минус высота самой цели.
-  function aroundLift() {
-    const roof = (scene.heightMm || WALL_HEIGHT_FALLBACK_MM) + 400;
-    return Math.max(0, roof - around.target.z);
-  }
-
   function lookBy(dx, dy) {
     const perPixel = (VOLUME_LOOK_DEG_PX * Math.PI) / 180;
     if (view === "person") {
       person.yaw += dx * perPixel;
       person.pitch = volumeClampPitch(person.pitch - dy * perPixel);
     } else {
-      // Взгляд обзора зажат **тем же** правилом, что взгляд человека (G298):
-      // задирается до отвеса, за отвес не заводится. Где при этом стоит
-      // камера, решает `camera()`, а не рука.
-      around = {
-        ...around,
-        yaw: around.yaw + dx * perPixel,
-        pitch: volumeClampPitch(around.pitch - dy * perPixel),
-      };
+      // ——— что осталось от орбиты (таск 200, G304) ———
+      //
+      // **Рысканьем обзор обходит дом** — это орбита, и она та же, что была:
+      // потянул в сторону, дом повернулся. **Наклоном он задирает голову на
+      // месте** — это тоже прежнее поведение, только названное честно: таск
+      // 195 уже оставлял камеру стоять, когда взгляд поднимался выше предела
+      // (`volumeAroundStand`), а предел таска 200 снят целиком, и в наклоне
+      // от него осталось только «камера не едет».
+      //
+      // Почему не орбита и в наклоне: орбита вокруг цели поднимает камеру,
+      // когда взгляд опускают, и **опускает под пол**, когда взгляд задирают.
+      // Спустившемуся до земли (а этого заказчик просил прямо) посмотреть
+      // вверх было бы нечем. Подниматься теперь — пробелом, и это тот же
+      // полёт, которым обзор ходит.
+      aroundSpin(around.yaw + dx * perPixel);
+      around = { ...around, pitch: volumeClampPitch(around.pitch - dy * perPixel) };
     }
     paint();
   }
@@ -2305,18 +2391,9 @@ function createVolume({ api, hosts }) {
           // Развели пальцы — приблизились, то есть камера подошла: расстояние
           // делится на множитель, а не умножается. Взгляд щипок не трогает
           // (таск 195): куда смотрят — выбор руки, а не приближения.
-          const distance = volumeAroundDistance(around.distance / step.factor);
-          const moved = volumeAroundPan(
-            { yaw: around.yaw, pitch: around.pitch, distance },
-            viewport(),
-            step.panX,
-            step.panY,
-          );
-          around = {
-            ...around,
-            distance,
-            target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy },
-          };
+          aroundZoom(around.distance / step.factor);
+          const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
+          aroundSlide(moved.dx, moved.dy);
           paint();
         }
         return;
@@ -2475,8 +2552,8 @@ function createVolume({ api, hosts }) {
    *
    * Что из ответа получается:
    *
-   *   `pan`  — свайп двумя пальцами **возит цель по полу**, тем же переводом
-   *            `volumeAroundPan`, которым её возят два пальца на стекле.
+   *   `pan`  — свайп двумя пальцами **возит обзор по полу**, тем же переводом
+   *            `volumeAroundPan`, которым его возят два пальца на стекле.
    *            Слово заказчика — «скролл», то есть сдвиг: вращение вокруг цели
    *            осталось за перетаскиванием, и отнимать у свайпа сдвиг в пользу
    *            второго способа вертеть головой было бы подменой просьбы.
@@ -2486,9 +2563,10 @@ function createVolume({ api, hosts }) {
    *            пальцы, значит камера подошла.
    *
    * Взгляд колесо не трогает вовсе. До таска 195 оно само делало вид круче,
-   * чтобы камера не нырнула под крышу; теперь за место камеры отвечает
-   * `volumeAroundStand` в `camera()`, и приближение на задранном взгляде
-   * значит ровно «камера подошла», а не «взгляд опустился».
+   * чтобы камера не нырнула под крышу; с таска 200 камера стоит сама, и
+   * приближение значит ровно «камера подошла к тому, на что смотрит», а не
+   * «взгляд опустился». Пол и здесь держит (`volumeAroundEye`): подойти к цели
+   * сквозь плиту нельзя.
    */
   function onWheel(event) {
     if (view !== "around") return;
@@ -2497,9 +2575,9 @@ function createVolume({ api, hosts }) {
     wheelStreak = step.streak;
     if (step.kind === "pan") {
       const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
-      around = { ...around, target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy } };
+      aroundSlide(moved.dx, moved.dy);
     } else {
-      around = { ...around, distance: volumeAroundDistance(around.distance / step.factor) };
+      aroundZoom(around.distance / step.factor);
     }
     paint();
   }
@@ -2749,7 +2827,7 @@ function createVolume({ api, hosts }) {
     const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
-    around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
+    aroundLookAt(person.x, person.y);
     select(null);
     // У лестницы, с которой сошли, вопрос второй раз не задаётся: иначе он
     // всплыл бы сразу же и предложил вернуться обратно.
@@ -2813,7 +2891,8 @@ function createVolume({ api, hosts }) {
       person.y = moved.y;
       person.yaw = at.yaw;
       if (place) person.pitch = volumeClampPitch(place.pitch);
-      around = { ...around, target: { ...around.target, x: person.x, y: person.y }, yaw: person.yaw };
+      aroundSpin(person.yaw);
+      aroundLookAt(person.x, person.y);
     }
     select(null);
     // Вернулись мы к самой лестнице — и вопрос про этаж сам не всплывает:
@@ -2925,10 +3004,10 @@ function createVolume({ api, hosts }) {
     if (stanceKey === "jump") {
       // Прокрутка страницы и кнопка под фокусом снимаются здесь и в `onKeyUp`.
       event.preventDefault();
-      // В полёте пробел держат (таск 192): «пробел (прыжок) - выше». Автоповтор
+      // В обзоре пробел держат (таск 200): «пробел (прыжок) - выше». Автоповтор
       // клавиши к этому ничего не добавляет — поднимаемся, пока не отпустили.
       if (!event.repeat) {
-        if (flying()) riseStart();
+        if (view === "around") riseStart();
         else jump();
       }
       return;
@@ -2984,7 +3063,7 @@ function createVolume({ api, hosts }) {
     // можно только здесь: пробел в объёме прыгает, а не нажимает кнопку, на
     // которой остался фокус после щелчка по панели.
     if (event.code === VOLUME_JUMP_KEY) {
-      // Отпустили пробел — в полёте перестаём подниматься (таск 192).
+      // Отпустили пробел — в обзоре перестаём подниматься (таск 200).
       // Спрашивать `ours()` для этого нельзя по той же причине, что у Control:
       // человек мог уйти в другой режим, не отпустив клавишу, и подъём остался
       // бы висеть.
@@ -3003,7 +3082,7 @@ function createVolume({ api, hosts }) {
     // Ушли с окна с зажатым Control — его отпускание до нас не дойдёт, и
     // стоять в приседе до следующего нажатия человек не просил.
     crouchStop();
-    // То же с пробелом в полёте: подниматься до следующего нажатия он не просил.
+    // То же с пробелом в обзоре: подниматься до следующего нажатия он не просил.
     riseStop();
     // Ушли с окна с зажатым Alt — его отпускание до нас не дойдёт, и ждать
     // его нечего: иначе следующий Alt оказался бы «уже нажатым».
@@ -3113,9 +3192,8 @@ function createVolume({ api, hosts }) {
       floors: floorOptions(),
       back: backFloor(),
       keys: channelKeys(),
-      // Три отметки таска 192: подсказка обязана говорить то, что делают руки
+      // Отметка таска 192: подсказка обязана говорить то, что делают руки
       // сейчас, а не то, что они делали до галки.
-      fly: flying(),
       ghost: ghosting(),
     });
     // Подсказка в полном экране не уходит, а **складывается в свой знак**
@@ -3133,12 +3211,18 @@ function createVolume({ api, hosts }) {
     aroundButton.className = "ui-btn" + (view === "around" ? " is-on" : "");
     stage.classList.toggle("volume__stage--person", view === "person");
     syncAimNode();
-    // Площадка ходьбы — только пальцем и только там, где ходят: в обзоре она
-    // возила бы цель камеры, а не человека, и была бы просто непонятной.
-    // Кнопки стойки живут по тому же правилу и в то же время: присед и прыжок
-    // — это ходьба, только вверх и вниз, и в обзоре их нет так же, как там нет
-    // площадки.
-    const noWalk = !touching || view !== "person" || scene.empty;
+    // ——— площадка и стойка пальцем в обоих видах (таск 200, G304) ———
+    //
+    // До таска 200 и площадка ходьбы, и кнопки стойки жили **только от первого
+    // лица**, и довод был честный: в обзоре площадка возила бы цель камеры, а
+    // не человека. Теперь в обзоре летают — тем же ходом по взгляду, пробелом и
+    // Control, — и площадка с кнопками значат там ровно то же, что клавиши:
+    // вперёд по взгляду, поворот, выше, ниже.
+    //
+    // Это и есть ответ на вопрос тикета про планшет: кнопки никуда не
+    // переезжают, они просто перестали исчезать в обзоре и меняют подписи
+    // (`syncStanceWords`). Второй оснастки для полёта камеры не заведено.
+    const noWalk = !touching || scene.empty;
     padNode.hidden = noWalk;
     // Полоса часов стоит в том же углу, что площадка ходьбы, и уступает ей:
     // площадкой ходят не глядя, и накрывать её строкой нельзя. Подъём — ровно
@@ -3172,6 +3256,9 @@ function createVolume({ api, hosts }) {
     // доступен всегда, и сказать, чего не хватает, обязано само поле.
     emptyNote.hidden = !scene.empty;
     emptyNote.textContent = scene.empty ? strings.volume.empty : "";
+    // Слова на кнопках стойки зависят от вида (таск 200): в обзоре те же две
+    // кнопки значат «выше» и «ниже».
+    syncStanceWords();
     // Человека могли перенести на другой этаж или на другую схему, пока он
     // сидел под низким: встать ему, может быть, уже есть где (G234).
     stanceRecheck();
@@ -3228,7 +3315,7 @@ function createVolume({ api, hosts }) {
       const moved = volumeMoveTo(scene, { x: person.x, y: person.y }, volumeStanceHead(stance));
       person.x = moved.x;
       person.y = moved.y;
-      around = { ...around, target: { ...around.target, x: person.x, y: person.y } };
+      aroundLookAt(person.x, person.y);
     }
     // Выделение осталось на прежней схеме, и карточка про него говорила бы о
     // том, чего в кадре нет.
