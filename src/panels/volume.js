@@ -38,12 +38,13 @@ import {
   createVolumeParams,
   volumeParamsArrive,
   volumeParamsClock,
+  volumeParamsLine,
   volumeParamsRead,
   volumeParamsWatch,
 } from "./volumeParams.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
-import { gesturePinchOf, gesturePinchStep } from "../gestures.js";
+import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
 import {
   WALL_HEIGHT_FALLBACK_MM,
   findRoom,
@@ -73,7 +74,7 @@ import {
   volumeAroundDistance,
   volumeAroundFit,
   volumeAroundPan,
-  volumeAroundPitch,
+  volumeAroundStand,
   volumeFreeMm,
   volumeBasis,
   volumeCanStand,
@@ -82,6 +83,8 @@ import {
   volumeChannelLinks,
   volumeDoorAt,
   volumeClockStamp,
+  volumeClockText,
+  volumeDateShort,
   volumeDayDateOf,
   volumeDayTimes,
   volumeDraw,
@@ -94,6 +97,7 @@ import {
   volumeMarkAnchor,
   volumeMarkPlace,
   volumeMarkerFaces,
+  volumeModelKeys,
   volumeMoodMs,
   volumeMoveTo,
   volumePickAt,
@@ -901,6 +905,11 @@ function createVolume({ api, hosts }) {
   // Два пальца на поле: `{distance, center}` от общего `gesturePinchStep` —
   // прошлый разведённый промежуток и прошлая середина между пальцами.
   let pinch = null;
+  // Серия колеса: `{kind, time}` от общего `gestureWheel` (таск 195). Нужна
+  // затем же, зачем плану и чертежу: внутри одного маха трекпада решение
+  // «листать или приближать» не меняется, иначе разогнавшийся мах переключался
+  // бы на зум на полпути.
+  let wheelStreak = null;
   // Касания на поле, по которым узнаётся щипок.
   const touches = new Map();
   // Открытый вопрос про этаж и лестница, про которую уже спросили. Вторая нужна
@@ -1070,13 +1079,31 @@ function createVolume({ api, hosts }) {
   // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
   // (`volume.css`), и читать его нечем — `aria-hidden`.
   const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
+  // Дата и час симуляции — полосой в правом нижнем углу поля (таск 191, G300).
+  //
+  // Слова заказчика: «Справа снизу в Объёме пиши текущие дату и время
+  // симуляции». До этого они жили только в окне параметров: закрыл окно — и при
+  // ускорении в 480 раз непонятно, какой час на объекте, а по кадру час
+  // угадывается разве что до «день или ночь».
+  //
+  // Правый угол, а не левый: слева внизу стоят миникарта (G212) и столбик
+  // стойки (таск 163), и они там по прямому слову заказчика.
+  //
+  // Строку пишет **тот же снимок часа**, который красит небо (`refreshHour`), и
+  // другого времени у поля нет: заведи полоса свои часы — они разошлись бы с
+  // небом на первой же правке ускорения. Отсюда и частота: раз в секунду, а при
+  // остановленном времени таймера нет вовсе (G282) — полоса стоит и не мигает.
+  const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } });
   // Подсказка по управлению — плашка **слева** со знаком «?» (G228): правило
   // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
   // стоит сводка, а ещё правее — кнопка полноэкранного показа.
   const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
-  // Параметры объёма — третья ячейка правого верхнего угла (таск 181, G273):
-  // полный экран, смена вида, параметры. Разбор, почему дверь одна и почему
-  // она на поле во всех раскладках, — в `panels/volumeParams.js`.
+  // Параметры объёма — **левый** верхний угол поля (таск 191, G291): «кнопку
+  // настроек отображения в 3д режиме перенеси налево». Таск 181 ставил её
+  // третьей ячейкой правого угла; теперь левый угол устроен тем же столбиком
+  // ячеек, кнопка в нём первая, а подсказка со знаком «?» уступает ей угол и
+  // встаёт второй (`volume.css`). Разбор, почему дверь одна и почему она на
+  // поле во всех раскладках, — в `panels/volumeParams.js`.
   //
   // Час и рассвет окно спрашивает **у поля**, а не считает само: иначе в сборке
   // стало бы два ответа на вопрос «который час в объёме», и расходились бы они
@@ -1099,6 +1126,7 @@ function createVolume({ api, hosts }) {
     viewButton,
     paramsButton.node,
     aimNode,
+    clockNode,
     hintPlate.node,
     askBox,
   ]);
@@ -1196,7 +1224,7 @@ function createVolume({ api, hosts }) {
     // понять, где стоишь, а не чтобы потерять себя из виду.
     if (next === "around") {
       around = { ...around, target: { x: person.x, y: person.y, z: 1200 }, yaw: person.yaw, distance: VOLUME_AROUND_NEAR_MM };
-      around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
+      around = { ...around, pitch: aroundAim() };
     }
     view = next;
     sync();
@@ -1206,7 +1234,7 @@ function createVolume({ api, hosts }) {
     if (scene.empty) return;
     const fitted = volumeAroundFit(scene, viewport());
     around = { ...around, target: fitted.target, distance: fitted.distance };
-    around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
+    around = { ...around, pitch: aroundAim() };
     if (view !== "around") {
       view = "around";
       sync();
@@ -1215,12 +1243,31 @@ function createVolume({ api, hosts }) {
     paint();
   }
 
+  /**
+   * Взгляд обзора, возвращённый на чертёж (таск 195).
+   *
+   * Руками взгляд задирается к небу свободно — но «Обзор» и «Вся схема» это
+   * **возврат**: они и так ставят цель и расстояние заново, и нажавший их ждёт
+   * увидеть схему, а не небо, в котором остался взгляд. Поэтому взгляд тут не
+   * положе умолчания обзора, и ровно так же его зажимает расстояние
+   * (`volumeAroundStand`): вплотную вид становится круче сам.
+   *
+   * Круче умолчания — не трогаем: смотреть на схему почти отвесно человек мог
+   * выбрать сам, и возврат такой выбор не отнимает.
+   */
+  function aroundAim() {
+    const home = (VOLUME_AROUND_PITCH_DEG * Math.PI) / 180;
+    return volumeAroundStand(Math.min(around.pitch, home), around.distance, aroundLift());
+  }
+
   function camera() {
     if (view === "person") {
       // Высота глаз — у стойки (G234): присел — ниже, прыгнул — выше.
       return { at: { x: person.x, y: person.y, z: volumeStanceEye(stance) }, yaw: person.yaw, pitch: person.pitch };
     }
-    return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance);
+    // Место камеры считает `volumeAroundStand` по `aroundLift()`: задранный
+    // взгляд поворачивает голову, а штатив оставляет над крышей (G298).
+    return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance, aroundLift());
   }
 
   // ——— общее место трёх режимов (G276) ———
@@ -1350,7 +1397,28 @@ function createVolume({ api, hosts }) {
       kind: volumeParamsRead().kind,
     });
     refreshShadow();
+    syncClockLine(stamp, at);
     return hour;
+  }
+
+  /**
+   * Что написано в полосе часов (таск 191, G300).
+   *
+   * Снимок приходит готовым — тот самый, которым покрашено небо: второго счёта
+   * времени у поля нет. Подсказка на полосе — та же строка, что в окне
+   * параметров (`volumeParamsLine`): она отвечает на вопрос «почему не идёт»,
+   * когда время остановлено, и на «как быстро идёт» при ускорении.
+   */
+  function syncClockLine(stamp, nowMs) {
+    clockNode.hidden = scene.empty;
+    if (scene.empty) return;
+    clockNode.textContent = text("volume.clockCorner", {
+      date: volumeDateShort(stamp.day),
+      time: volumeClockText(stamp.minutes),
+    });
+    const line = volumeParamsLine(volumeParamsClock(nowMs), stamp.minutes, hour ? hour.phase : null);
+    clockNode.title = line;
+    clockNode.setAttribute("aria-label", line);
   }
 
   /**
@@ -1551,6 +1619,16 @@ function createVolume({ api, hosts }) {
     return volumeChannelAt(shown, at.x, at.y);
   }
 
+  /**
+   * Сколько клавиш нарисовано у метки: спрашивается у её же тела
+   * (`volumeModelKeys`), второго счёта клавиш в сборке нет. Одна клавиша —
+   * особый случай отбора связей (таск 191, D50).
+   */
+  function keysOf(markId) {
+    const place = markId ? volumeMarkPlace(scene, markId) : null;
+    return volumeModelKeys(place && place.model);
+  }
+
   function pickChannel(found) {
     const was = channelPick;
     const same = was && found && was.markId === found.markId && was.channel === found.channel;
@@ -1564,9 +1642,24 @@ function createVolume({ api, hosts }) {
     // а нагрузки на ней нет.
     const state = getState();
     const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    const links = scheme ? volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick) : null;
+    const all = scheme ? canvasFrameLinks(state, null, scheme) : null;
+    const links = all ? volumeChannelLinks(all, channelPick, keysOf(found.markId)) : null;
     const empty = !links || links.lines.length === 0;
-    notify(text(empty ? "volume.channelEmpty" : "volume.channelPicked", { channel: found.channel }), "info");
+    if (!empty) {
+      notify(text("volume.channelPicked", { channel: found.channel }), "info");
+      return;
+    }
+    // Клавиша пуста — но пуста ли она **по данным**? У многоклавишной метки
+    // связь без номера канала не принадлежит ни одной клавише (правило таска
+    // 177: какая из четырёх — в данных не записано), и молчать об этом нельзя:
+    // человек видит в «Чем управляет» нагрузки, а на кадре — пустую клавишу, и
+    // читает это как поломку. Поэтому такой случай говорит о себе и зовёт туда,
+    // где это чинится — проставить канал у связи.
+    const mute = ((all && all.lines) || []).filter(
+      (line) => line.fromId === found.markId && (line.channel === null || line.channel === undefined),
+    ).length;
+    const where = { channel: found.channel, count: mute };
+    notify(text(mute > 0 ? "volume.channelUnnumbered" : "volume.channelEmpty", where), "info");
   }
 
   // Рамка выделенного и стрелки связей. Правила, какие связи показывать, —
@@ -1588,8 +1681,13 @@ function createVolume({ api, hosts }) {
     const scheme = findScheme(state.project, schemeId);
     if (!scheme) return;
     // Правила, какие связи бывают, — плановые целиком; канал только сужает их
-    // до одной клавиши (таск 177, G274).
-    const links = volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick);
+    // до одной клавиши (таск 177, G274), а у одноклавишной метки берёт себе и
+    // связи без номера (таск 191, D50).
+    const links = volumeChannelLinks(
+      canvasFrameLinks(state, null, scheme),
+      channelPick,
+      channelPick ? keysOf(channelPick.markId) : 0,
+    );
     volumeLinkLines(links, (id) => volumeMarkAnchor(scene, id), overlay);
   }
 
@@ -1611,11 +1709,7 @@ function createVolume({ api, hosts }) {
   function channelKeys() {
     if (channelPick) return true;
     if (scene.empty) return false;
-    for (const id of selectedIds()) {
-      const place = volumeMarkPlace(scene, id);
-      const parts = (place && place.model && place.model.parts) || [];
-      if (parts.some((part) => part.channel > 1)) return true;
-    }
+    for (const id of selectedIds()) if (keysOf(id) > 1) return true;
     return false;
   }
 
@@ -2118,10 +2212,13 @@ function createVolume({ api, hosts }) {
       person.yaw += dx * perPixel;
       person.pitch = volumeClampPitch(person.pitch - dy * perPixel);
     } else {
+      // Взгляд обзора зажат **тем же** правилом, что взгляд человека (G298):
+      // задирается до отвеса, за отвес не заводится. Где при этом стоит
+      // камера, решает `camera()`, а не рука.
       around = {
         ...around,
         yaw: around.yaw + dx * perPixel,
-        pitch: volumeAroundPitch(around.pitch - dy * perPixel, around.distance, aroundLift()),
+        pitch: volumeClampPitch(around.pitch - dy * perPixel),
       };
     }
     paint();
@@ -2179,14 +2276,18 @@ function createVolume({ api, hosts }) {
         if (step) pinch = step.pinch;
         if (step && view === "around") {
           // Развели пальцы — приблизились, то есть камера подошла: расстояние
-          // делится на множитель, а не умножается.
+          // делится на множитель, а не умножается. Взгляд щипок не трогает
+          // (таск 195): куда смотрят — выбор руки, а не приближения.
           const distance = volumeAroundDistance(around.distance / step.factor);
-          const pitch = volumeAroundPitch(around.pitch, distance, aroundLift());
-          const moved = volumeAroundPan({ yaw: around.yaw, pitch, distance }, viewport(), step.panX, step.panY);
+          const moved = volumeAroundPan(
+            { yaw: around.yaw, pitch: around.pitch, distance },
+            viewport(),
+            step.panX,
+            step.panY,
+          );
           around = {
             ...around,
             distance,
-            pitch,
             target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy },
           };
           paint();
@@ -2337,13 +2438,42 @@ function createVolume({ api, hosts }) {
     syncHint();
   }
 
+  /**
+   * Колесо и трекпад в обзоре (таск 195, требование G299).
+   *
+   * Слова заказчика: «я же просил в обзоре скролл 2 пальцами… сейчас 2
+   * пальцами всегда зум». Браузер шлёт двухпальцевый свайп трекпада тем же
+   * `wheel`, что и колесо мыши, и своего разбора у объёма нет: что пришло,
+   * решает общий `gestureWheel` — та же дверь, что у плана и чертежа (G241).
+   *
+   * Что из ответа получается:
+   *
+   *   `pan`  — свайп двумя пальцами **возит цель по полу**, тем же переводом
+   *            `volumeAroundPan`, которым её возят два пальца на стекле.
+   *            Слово заказчика — «скролл», то есть сдвиг: вращение вокруг цели
+   *            осталось за перетаскиванием, и отнимать у свайпа сдвиг в пользу
+   *            второго способа вертеть головой было бы подменой просьбы.
+   *   `zoom` — щипок трекпада (он приходит с `ctrlKey`) и колесо мыши
+   *            **отодвигают камеру**: мышь двумя пальцами не водят, а щипок и
+   *            на плане приближение. Расстояние делится на множитель — развели
+   *            пальцы, значит камера подошла.
+   *
+   * Взгляд колесо не трогает вовсе. До таска 195 оно само делало вид круче,
+   * чтобы камера не нырнула под крышу; теперь за место камеры отвечает
+   * `volumeAroundStand` в `camera()`, и приближение на задранном взгляде
+   * значит ровно «камера подошла», а не «взгляд опустился».
+   */
   function onWheel(event) {
     if (view !== "around") return;
     event.preventDefault();
-    const distance = volumeAroundDistance(around.distance * Math.exp(event.deltaY / 400));
-    // Приблизились — вид сам становится круче: иначе камера нырнула бы под
-    // крышу и уткнулась в стену изнутри.
-    around = { ...around, distance, pitch: volumeAroundPitch(around.pitch, distance, aroundLift()) };
+    const step = gestureWheel(event, wheelStreak);
+    wheelStreak = step.streak;
+    if (step.kind === "pan") {
+      const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
+      around = { ...around, target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy } };
+    } else {
+      around = { ...around, distance: volumeAroundDistance(around.distance / step.factor) };
+    }
     paint();
   }
 
@@ -2983,6 +3113,11 @@ function createVolume({ api, hosts }) {
     // площадки.
     const noWalk = !touching || view !== "person" || scene.empty;
     padNode.hidden = noWalk;
+    // Полоса часов стоит в том же углу, что площадка ходьбы, и уступает ей:
+    // площадкой ходят не глядя, и накрывать её строкой нельзя. Подъём — ровно
+    // на площадку, мерой самой площадки (`volume.css`), без своих чисел.
+    clockNode.classList.toggle("volume__clock--overPad", !noWalk);
+    clockNode.hidden = scene.empty;
     if (padNode.hidden) padEnd(null);
     stanceBox.hidden = noWalk;
     if (stanceBox.hidden) {

@@ -67,7 +67,7 @@ function px(value, size = CORNER.size) {
   return Function("return " + filled)();
 }
 
-test("мера угла объявлена один раз, и обе кнопки берут размер оттуда", () => {
+test("мера угла объявлена один раз, и все кнопки берут размер оттуда", () => {
   assert.ok(CORNER.size > 0 && CORNER.edge > 0 && CORNER.gap > 0);
   // Палец крупнее курсора: на узком экране кнопки угла подрастают.
   assert.ok(CORNER.mobileSize > CORNER.size, "на телефоне кнопка угла должна быть крупнее");
@@ -78,6 +78,7 @@ test("мера угла объявлена один раз, и обе кнопк
   for (const [css, selector] of [
     [CANVAS_CSS, ".canvas-full"],
     [VOLUME_CSS, ".volume__viewBtn"],
+    [VOLUME_CSS, ".volume__paramsBtn"],
   ]) {
     const body = ruleBody(css, selector);
     assert.doesNotMatch(body, /\bwidth:/, selector + " завёл свою ширину");
@@ -103,7 +104,7 @@ test("кнопка вида стоит ровно под кнопкой полн
   assert.ok(CORNER.gap >= 4 && CORNER.gap <= CORNER.size / 2);
 });
 
-test("развёрнутая плашка на узком экране уходит под кнопки угла, а в «Объёме» — под все три", () => {
+test("развёрнутая плашка на узком экране уходит под кнопки угла, а сводка — под обе", () => {
   const row = ruleBody(CANVAS_CSS, "#app.is-mobile .canvas-hint:not(.is-collapsed)");
   const one = px(prop(row, "top"), CORNER.mobileSize);
   assert.equal(one, CORNER.edge + CORNER.mobileSize + CORNER.gap, "плашка легла на верхний ряд кнопок");
@@ -112,17 +113,117 @@ test("развёрнутая плашка на узком экране уход�
     "#app.is-mobile .volume__stage .canvas-hint.canvas-hint--info:not(.is-collapsed)",
   );
   const two = px(prop(second, "top"), CORNER.mobileSize);
-  // В объёме ячеек три — полный экран, вид и параметры объёма (таск 181):
-  // сводка опускается под все, иначе она накрыла бы кнопку, в которую целится
-  // палец, и съела бы её нажатия.
-  assert.equal(two, CORNER.edge + 3 * (CORNER.mobileSize + CORNER.gap));
+  // В правом углу объёма ячеек две — полный экран и смена вида: сводка
+  // опускается под обе, иначе она накрыла бы кнопку, в которую целится палец, и
+  // съела бы её нажатия. Третьей ячейки там больше нет — параметры объёма ушли
+  // в левый угол (таск 191), и опускать сводку под пустое место значило бы
+  // отнять у неё строку текста на телефоне.
+  assert.equal(two, CORNER.edge + 2 * (CORNER.mobileSize + CORNER.gap));
   assert.ok(two > one);
-  // И столбик угла остаётся столбиком: у третьей ячейки то же правое поле и та
-  // же мера, что у второй, — своих чисел у неё нет.
+});
+
+// ——— левый верхний угол: кнопка параметров и подсказка (таск 191, G291) ————
+//
+// «Кнопку настроек отображения в 3д режиме перенеси налево».
+//
+// Разойтись здесь есть чему, и молча: подсказка в «Объёме» — абзац про руки, на
+// узком поле она ещё и уходит за предел ширины (таск 185) и накрывает то, что
+// под ней. Встань кнопка под подсказкой — её не было бы видно ровно в обычном
+// виде, а находилась бы она только в полном экране, где подсказка сложена в
+// знак. Поэтому ячейка угла принадлежит кнопке, а подсказка стоит следом.
+
+test("кнопка угла видна из-под плашки: она рисуется поверх (таск 185 — «кнопку надо видеть»)", () => {
+  // На узком поле плашка уходит за предел ширины и накрывает соседей. Клики она
+  // пропускает, но кнопку, в которую целится палец, надо видеть: с таска 191
+  // кнопка параметров стоит в левом углу, и сводка, упёршаяся в свой предел
+  // ширины, дотягивается до неё. Поэтому угол рисуется выше плашек.
+  const corner = Number(prop(ruleBody(CANVAS_CSS, ".canvas-corner"), "z-index"));
+  const plate = Number(prop(ruleBody(CANVAS_CSS, ".canvas-hint"), "z-index"));
+  const modes = Number(prop(ruleBody(CANVAS_CSS, ".canvas-modes"), "z-index"));
+  assert.ok(corner > plate, "кнопка угла (" + corner + ") обязана быть выше плашки (" + plate + ")");
+  // А плашка — выше переключателя режимов: это правило таска 185, и ломать его
+  // поднятием угла нельзя.
+  assert.ok(plate > modes, "плашка (" + plate + ") обязана остаться выше переключателя (" + modes + ")");
+});
+
+test("кнопка параметров стоит в левом верхнем углу поля, а не в правом", () => {
   const params = ruleBody(VOLUME_CSS, ".volume__paramsBtn");
+  assert.equal(prop(params, "left"), "var(--canvas-corner-edge)", "кнопка параметров не у левого края");
+  assert.doesNotMatch(params, /\bright:/, "кнопка параметров осталась и в правом углу");
+  // Первая ячейка: сама мера угла и ничего больше. Поправки под линейку нет —
+  // линейку рисует только план (как у смены вида).
+  assert.equal(px(prop(params, "top"), CORNER.size), CORNER.edge);
+  assert.equal(px(prop(params, "top"), CORNER.mobileSize), CORNER.edge);
+  // Правый угол остался правым: полный экран и смена вида на своих ячейках.
+  const full = ruleBody(CANVAS_CSS, ".canvas-full");
   const viewBtn = ruleBody(VOLUME_CSS, ".volume__viewBtn");
-  assert.equal(prop(params, "right"), prop(viewBtn, "right"));
-  assert.equal(px(prop(params, "top"), CORNER.size), CORNER.edge + 2 * (CORNER.size + CORNER.gap));
+  assert.equal(prop(full, "right"), "var(--canvas-corner-edge)");
+  assert.equal(prop(viewBtn, "right"), "var(--canvas-corner-edge)");
+});
+
+test("подсказка уступает угол кнопке и встаёт второй ячейкой — тем же шагом", () => {
+  const hint = ruleBody(VOLUME_CSS, ".volume__stage .canvas-hint:not(.canvas-hint--info)");
+  const params = ruleBody(VOLUME_CSS, ".volume__paramsBtn");
+  for (const size of [CORNER.size, CORNER.mobileSize]) {
+    const step = px(prop(hint, "top"), size) - px(prop(params, "top"), size);
+    assert.equal(step, size + CORNER.gap, "подсказка и кнопка разъехались по высоте");
+    // Ячейки не перекрываются: кнопка кончается там, где плашка начинается, —
+    // плюс промежуток. Иначе развёрнутая плашка накрыла бы кнопку.
+    assert.ok(step >= size, "плашка легла на кнопку параметров");
+  }
+  // Ширину и левый край правило не трогает: предел таска 185 остаётся тем же,
+  // каким был, когда плашка стояла в самом углу.
+  assert.doesNotMatch(hint, /\bmax-width:/, "подсказке в объёме завели свою ширину");
+  assert.doesNotMatch(hint, /\bleft:/, "подсказку в объёме сдвинули по горизонтали");
+  // Правило одно на свёрнутую и развёрнутую: знак «?» ростом ровно в угловую
+  // кнопку, и останься он в углу — лёг бы на кнопку параметров.
+  assert.doesNotMatch(
+    VOLUME_CSS,
+    /\.volume__stage \.canvas-hint:not\(\.canvas-hint--info\):not\(\.is-collapsed\)/,
+    "подсказка уступает угол только развёрнутой — свёрнутая накроет кнопку",
+  );
+});
+
+// ——— полоса часов в правом нижнем углу (таск 191, G300) ———————————————————
+//
+// «Справа снизу в Объёме пиши текущие дату и время симуляции». Разойтись здесь
+// есть чему молча: полоса стоит в том же углу, что площадка ходьбы, и если
+// подъём над ней посчитать своим числом, то правка размера площадки положит
+// строку под большой палец.
+
+test("полоса часов стоит в правом нижнем углу той же мерой, что кнопки", () => {
+  const clock = ruleBody(VOLUME_CSS, ".volume__clock");
+  assert.equal(prop(clock, "right"), "var(--canvas-corner-edge)", "полоса отступает от правого края не мерой угла");
+  assert.equal(prop(clock, "bottom"), "var(--canvas-corner-edge)", "и от нижнего — тоже");
+  // Клики полоса не берёт: под ней поле, по которому ходят и целятся.
+  assert.equal(prop(clock, "pointer-events"), "none");
+});
+
+test("полоса часов поднимается ровно на площадку ходьбы — её же мерой", () => {
+  const stage = ruleBody(VOLUME_CSS, ".volume__stage");
+  const pad = ruleBody(VOLUME_CSS, ".volume__pad");
+  // Мера площадки объявлена один раз, и сама площадка берёт её оттуда же.
+  const size = prop(stage, "--volume-pad-size");
+  const edge = prop(stage, "--volume-pad-edge");
+  assert.equal(prop(pad, "width"), "var(--volume-pad-size)");
+  assert.equal(prop(pad, "height"), "var(--volume-pad-size)");
+  assert.equal(prop(pad, "right"), "var(--volume-pad-edge)");
+  assert.equal(prop(pad, "bottom"), "var(--volume-pad-edge)");
+  // Подъём — площадка целиком плюс общий промежуток угла, и ни одного своего
+  // числа: в выражении только имена мер.
+  const lift = prop(ruleBody(VOLUME_CSS, ".volume__clock--overPad"), "bottom");
+  for (const name of ["--volume-pad-size", "--volume-pad-edge", "--canvas-corner-gap"]) {
+    assert.ok(lift.includes("var(" + name + ")"), "в подъёме нет меры " + name + ": " + lift);
+  }
+  const filled = lift
+    .replace(/var\(--volume-pad-size\)/g, size.replace("px", ""))
+    .replace(/var\(--volume-pad-edge\)/g, edge.replace("px", ""))
+    .replace(/var\(--canvas-corner-gap\)/g, String(CORNER.gap))
+    .replace(/calc/g, "")
+    .replace(/px/g, "");
+  assert.match(filled, /^[\d\s+*().]+$/, "в подъёме осталось чужое имя: " + lift);
+  const up = Function("return " + filled)();
+  assert.ok(up >= px(size) + px(edge), "полоса поднялась не выше площадки: " + up);
 });
 
 // ——— полный экран «Объёма»: что уходит и что остаётся (G246) ———————————————
