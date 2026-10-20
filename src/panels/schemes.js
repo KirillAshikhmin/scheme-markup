@@ -70,6 +70,10 @@ import { deleteImage, getImage, putImage, sweepOrphanImages } from "../store.js"
 import { strings, text } from "../strings.js";
 import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { volumeAllowed } from "./volume.js";
+// Третья дверь к точке привязки — ожидание щелчка по чертежу (таск 208).
+// Мастерская о панели схем не знает ничего: связь односторонняя, как у
+// «Интерфейса» с её масштабом (G227).
+import { workshopPickAnchor } from "./workshop.js";
 
 // Рамка меньше этой доли считается промахом мыши, а не обрезкой.
 const PLAN_FRAME_MIN = 0.02;
@@ -1394,6 +1398,32 @@ function mountSchemesPanel(host, api) {
         },
       },
     });
+    /**
+     * Третья дверь к тому же значению (таск 208, G314). Слова заказчика: «надо
+     * указать точку на чертеже, а не только числами».
+     *
+     * Стоит здесь, а не в колонке чертежа, нарочно: три двери к одной точке —
+     * числа, лестница и щелчок — обязаны стоять рядом. Разведи их по разным
+     * углам, и человек, открывший свойства схемы, про щелчок просто не узнает.
+     * Путь при этом короткий: список схем виден и в режиме «Чертёж», так что
+     * от карандаша до ожидания щелчка два нажатия.
+     *
+     * Кнопка **сперва применяет окно** и только потом уходит на чертёж: иначе
+     * набранное имя и этаж пропали бы молча — ровно та потеря, ради которой у
+     * этого окна и заведена одна кнопка «Сохранить» на все поля. Отказ модели
+     * (мусор в этаже, половина точки) оставляет окно открытым со строкой
+     * ошибки, как и у «Сохранить».
+     */
+    const anchorOnPlan = uiButton(strings.schemes.anchorOnPlan, {
+      title: strings.schemes.anchorOnPlanTitle,
+      on: {
+        click: () => {
+          if (!apply()) return;
+          openDrawing(schemeId);
+          workshopPickAnchor();
+        },
+      },
+    });
     showAnchor();
     const error = uiEl("p", { class: "modal__error" });
     const body = uiEl("div", {}, [
@@ -1420,7 +1450,7 @@ function mountSchemesPanel(host, api) {
             ])
           : null,
       ]),
-      uiEl("div", { class: "schemes__anchorRow" }, [anchorStairs, anchorClear]),
+      uiEl("div", { class: "schemes__anchorRow" }, [anchorOnPlan, anchorStairs, anchorClear]),
       anchorNote,
       uiEl("p", { class: "modal__hint", text: strings.schemes.anchorHint }),
       error,
@@ -1438,7 +1468,7 @@ function mountSchemesPanel(host, api) {
       const own = findScheme(base, schemeId);
       if (!own) {
         modal.close();
-        return;
+        return false;
       }
       // Числа проверяются **первыми**, и этаж первым из них: мусор в них не
       // должен оставить схему переименованной наполовину.
@@ -1448,7 +1478,7 @@ function mountSchemesPanel(host, api) {
       } catch (failure) {
         error.textContent = failure.message;
         floorInput.focus();
-        return;
+        return false;
       }
       let anchored;
       try {
@@ -1456,7 +1486,7 @@ function mountSchemesPanel(host, api) {
       } catch (failure) {
         error.textContent = failure.message;
         (anchorX.value.trim() === "" ? anchorX : anchorY).focus();
-        return;
+        return false;
       }
       const name = nameInput.value.trim();
       const renamed = name !== "" && name !== own.name;
@@ -1486,6 +1516,10 @@ function mountSchemesPanel(host, api) {
         canvasCommit(base, next, changes.length > 1 ? strings.history.schemeProps : changes[0], { schemeId });
       }
       modal.close();
+      // Окно применилось — кнопке «Указать на чертеже» есть куда идти дальше.
+      // Отказ модели возвращает `false` и оставляет окно открытым со строкой
+      // ошибки: набранное не теряется (таск 208).
+      return true;
     }
 
     modal = uiModal({
