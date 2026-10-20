@@ -74,22 +74,27 @@ test("G272: поля собираются один раз — и для коло
   assert.equal((TOOLS_JS.match(/fields\.dispose\(\)/g) || []).length, 2);
 });
 
-test("G259: у левой колонки одна прокрутка — ни потолка, ни ползунка внутри", () => {
-  assert.match(ruleBody(APP_CSS, "#panel-left .panel__body"), /overflow: visible;/);
-  const section = ruleBody(APP_CSS, "#panel-left .panel__section");
+test("G259 и G295: прокрутка одна на колонку — и правило одно на обе", () => {
+  // Правило общее: ни одного селектора с ключом колонки у прокрутки больше нет
+  // — иначе колонки опять разъехались бы поведением, как до таска 194.
+  assert.equal(APP_CSS.includes("#panel-left .panel__"), false, "у левой колонки завелось своё правило прокрутки");
+  assert.equal(APP_CSS.includes("#panel-right .panel__"), false, "у правой колонки завелось своё правило прокрутки");
+  assert.match(ruleBody(APP_CSS, ".panel__body"), /overflow: visible;/);
+  const section = ruleBody(APP_CSS, ".panel__section");
   assert.match(section, /flex: 0 0 auto;/, "раздел снова ужимается — прокрутка вернётся в тело");
-  assert.match(section, /max-height: none;/, "потолок в половину колонки вернулся");
-  // Растущий раздел (слева это список схем) по-прежнему забирает остаток, но
-  // ниже содержимого не садится.
-  assert.match(ruleBody(APP_CSS, "#panel-left .panel__section--grow"), /flex: 1 0 auto;/);
+  assert.equal(/max-height/.test(section), false, "потолок в половину колонки вернулся");
+  // Растущий раздел (слева список схем, справа список меток) по-прежнему
+  // забирает остаток, но ниже содержимого не садится.
+  assert.match(ruleBody(APP_CSS, ".panel__section--grow"), /flex: 1 0 auto;/);
   // Свёрнутый не растёт: иначе один заголовок растянулся бы на всю колонку.
-  assert.match(ruleBody(APP_CSS, "#panel-left .panel__section--grow.is-collapsed"), /flex: 0 0 auto;/);
+  const shut = ruleBody(APP_CSS, ".panel__section.is-collapsed,\n.panel__section--grow.is-collapsed");
+  assert.match(shut, /flex: 0 0 auto;/);
+  // Своих потолков у «Чертежа» не осталось: три списка живут общим правилом, а
+  // «какие разделы ниже» отвечает рейка заголовков, а не треть колонки.
+  assert.equal(APP_CSS.includes("max-height: 34%"), false, "потолок в треть колонки вернулся");
+  assert.equal(APP_CSS.includes("max-height: 62%"), false, "потолок разделу с полями вернулся");
   // Заголовки по-прежнему липкие — ими колонка и остаётся проходимой.
   assert.match(ruleBody(APP_CSS, ".panel__head"), /position: sticky;/);
   // В листе снизу прокрутка остаётся у тела: лист — один раздел на весь экран.
   assert.match(ruleBody(APP_CSS, "#app.is-mobile .panel__body"), /overflow: auto;/);
-  // Правая колонка живёт по общему правилу — там растущий список меток со
-  // своими прилипшими фильтрами и своей прокруткой к выделенной строке.
-  assert.match(ruleBody(APP_CSS, ".panel__body"), /overflow: auto;/);
-  assert.match(ruleBody(APP_CSS, ".panel__section"), /max-height: 50%;/);
 });
