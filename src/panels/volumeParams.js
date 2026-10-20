@@ -59,6 +59,18 @@ import { uiButton, uiEl, uiIconButton, uiModal } from "./ui.js";
 export const VOLUME_BACKDROP_SETTING = "volumeBackdrop";
 export const VOLUME_MINIMAP_SETTING = "volumeMinimap";
 export const VOLUME_SPEED_SETTING = "volumeClockSpeed";
+// ——— три отметки таска 192 (G292) ———————————————————————————————————————
+//
+// Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
+// 1. Плавные светила… 2. Проходить сквозь стены 3. Летать».
+//
+// Все три — **вид и поведение рук**, то есть той же природы, что фон и
+// миникарта: в `project.json` им нельзя (G68), и живут они в настройках
+// браузера рядом с соседями. Умолчание у каждой — **снято**: сегодняшнее
+// поведение не меняется ни на миллиметр у того, кто галок не ставил.
+export const VOLUME_SMOOTH_SETTING = "volumeSmoothSky";
+export const VOLUME_GHOST_SETTING = "volumeThroughWalls";
+export const VOLUME_FLY_SETTING = "volumeFly";
 
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
@@ -72,6 +84,9 @@ const params = {
   minimap: true,
   speed: VOLUME_CLOCK_SPEED_DEFAULT,
   clock: null,
+  smooth: false,
+  ghost: false,
+  fly: false,
 };
 
 // Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
@@ -118,11 +133,35 @@ export function volumeParamsLoad() {
       tell();
     })
     .catch(() => {});
+  // Три отметки таска 192 — **отрицательные**: умолчание снято, и только
+  // записанное `true` их включает. Поэтому читаются они одним правилом, а не
+  // тремя: `saved !== true` — это «галки не ставили».
+  for (const [key, name] of [
+    [VOLUME_SMOOTH_SETTING, "smooth"],
+    [VOLUME_GHOST_SETTING, "ghost"],
+    [VOLUME_FLY_SETTING, "fly"],
+  ]) {
+    Promise.resolve(getSetting(key))
+      .then((saved) => {
+        if (saved !== true) return;
+        params[name] = true;
+        tell();
+      })
+      .catch(() => {});
+  }
 }
 
 /** Что выбрано сейчас. Снимок: менять только через двери ниже. */
 export function volumeParamsRead() {
-  return { kind: params.kind, minimap: params.minimap, speed: params.speed, clock: params.clock };
+  return {
+    kind: params.kind,
+    minimap: params.minimap,
+    speed: params.speed,
+    clock: params.clock,
+    smooth: params.smooth,
+    ghost: params.ghost,
+    fly: params.fly,
+  };
 }
 
 /** Часы объёма; при первом спросе заводятся на настоящем времени. */
@@ -159,6 +198,29 @@ export function volumeParamsMinimap(shown) {
   if (next === params.minimap) return;
   params.minimap = next;
   setSetting(VOLUME_MINIMAP_SETTING, next);
+  tell();
+}
+
+/**
+ * Три отметки таска 192 — одной дверью (G292).
+ *
+ * `smooth` — «Плавные светила» (фон в 30 кадров в секунду вместо раза в
+ * секунду), `ghost` — «Проходить сквозь стены», `fly` — «Летать». Дверь одна
+ * на три, потому что устроены они одинаково до буквы: прочесть, записать,
+ * сказать полю. Три близнеца-функции разошлись бы на первой же правке.
+ */
+export function volumeParamsFlag(name, on) {
+  const keys = {
+    smooth: VOLUME_SMOOTH_SETTING,
+    ghost: VOLUME_GHOST_SETTING,
+    fly: VOLUME_FLY_SETTING,
+  };
+  const key = keys[name];
+  if (!key) return;
+  const next = Boolean(on);
+  if (next === params[name]) return;
+  params[name] = next;
+  setSetting(key, next);
   tell();
 }
 
@@ -305,10 +367,7 @@ export function createVolumeParams({ now, hour, times }) {
             }),
           ),
         ),
-        uiEl("label", { class: "tools__field tools__field--check" }, [
-          minimapCheck(chosen.minimap),
-          uiEl("span", { text: strings.volume.minimap }),
-        ]),
+        checkRow(strings.volume.minimap, chosen.minimap, (on) => volumeParamsMinimap(on)),
         uiEl("p", { class: "tools__note", text: strings.volume.minimapHint }),
         uiEl("p", { class: "tools__label", text: strings.volume.clock }),
         // Дата стоит **над** часами (G289): от неё зависит место солнца, то
@@ -348,6 +407,18 @@ export function createVolumeParams({ now, hour, times }) {
           ),
         ),
         uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times()) }),
+        // «Плавные светила» стоят в разделе времени, а не отдельным: отметка
+        // меняет не картинку, а то, как часто время доходит до неба.
+        checkRow(strings.volume.smooth, chosen.smooth, (on) => volumeParamsFlag("smooth", on)),
+        uiEl("p", { class: "tools__note", text: strings.volume.smoothHint }),
+        // Ходьба — свой раздел: это не вид за окном, а то, что делают руки.
+        // Обе отметки про одно — про запреты, которые человек снимает, когда
+        // показывает объект, а не ходит по нему.
+        uiEl("p", { class: "tools__label", text: strings.volume.walking }),
+        checkRow(strings.volume.ghost, chosen.ghost, (on) => volumeParamsFlag("ghost", on)),
+        uiEl("p", { class: "tools__note", text: strings.volume.ghostHint }),
+        checkRow(strings.volume.fly, chosen.fly, (on) => volumeParamsFlag("fly", on)),
+        uiEl("p", { class: "tools__note", text: strings.volume.flyHint }),
       );
       line();
     };
@@ -400,14 +471,20 @@ export function createVolumeParams({ now, hour, times }) {
     if (modal.card) modal.card.classList.add("modal--fit");
   }
 
-  function minimapCheck(on) {
+  /**
+   * Строка с галкой. Одна на все четыре отметки окна (миникарта и три отметки
+   * таска 192): четыре списанных друг с друга строки разошлись бы на первой же
+   * правке разметки, а подпись и галка обязаны оставаться одной мишенью для
+   * пальца — потому это `label`, а не `div`.
+   */
+  function checkRow(label, on, set) {
     const box = uiEl("input", {
       class: "tools__check",
       type: "checkbox",
-      on: { change: () => volumeParamsMinimap(box.checked) },
+      on: { change: () => set(box.checked) },
     });
-    box.checked = on !== false;
-    return box;
+    box.checked = on === true;
+    return uiEl("label", { class: "tools__field tools__field--check" }, [box, uiEl("span", { text: label })]);
   }
 
   /**
