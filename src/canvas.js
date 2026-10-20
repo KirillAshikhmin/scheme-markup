@@ -94,6 +94,7 @@ import {
 } from "./roomTrace.js";
 import {
   drawHandles,
+  drawMarkSign,
   drawScheme,
   drawingBridge,
   fitView,
@@ -707,6 +708,9 @@ let canvasClipboard = null;
 // Последняя точка курсора на холсте в экранных пикселях. `null` значит, что
 // курсор ушёл с холста: тогда вставка целится не под него.
 let canvasCursor = null;
+// Метка-призрак под рукой: `{point, schemeId}` в долях плана — **уже с
+// притяжкой**. `null` — показывать нечего (таск 176, G263).
+let canvasGhost = null;
 // Серия вставок подряд: `{schemeId, x, y, count}`. Пока вставляют в то же
 // место, каждая следующая копия отступает на шаг — иначе метки лягут стопкой.
 let canvasPasteRun = null;
@@ -939,6 +943,12 @@ function canvasPaint() {
     draftLineStyle:
       state.activeTypeId && state.mode !== CANVAS_MODE_SCALE ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
+  // Метка-призрак — **сразу за метками и до линейки**: поставленная метка
+  // ляжет ровно сюда же, и выглядеть призрак обязан так же. В `drawScheme` его
+  // нет вовсе — значит, в PNG, в печать и в лист «Схема» он не попадёт ни при
+  // каких отметках, как и направляющие рядом.
+  const ghostMark = canvasGhostMark(state, canvasPlaceSpot(canvasGhost, null, state.schemeId));
+  if (ghostMark) drawMarkSign(canvasCtx, project, scheme, ghostMark, view, { ghost: true });
   // Здесь `editable` отвечает только за ручки — поэтому и спрашивается про
   // них: в калибровке их нет.
   const editable = canvasHandlesShown(state);
@@ -1161,6 +1171,98 @@ function canvasPlacePoint(plan) {
   } catch (error) {
     canvasFail(error);
   }
+}
+
+// ——— метка-призрак под рукой (таск 176, G263) —————————————————————————
+//
+// Слова заказчика: «При добавлении метки так же рисуй под курсором её». «Так
+// же» — как у вещи чертежа (таск 168), и приём взят оттуда целиком, без
+// второго механизма:
+//
+//   рисует призрака **тот же код**, что и поставленную метку
+//     (`render.drawMarkSign` с приметой `ghost`) — фигура, цвет и величина
+//     знака те же, пунктиром и вполсилы;
+//   считается он **из той точки, из которой пойдёт постановка**
+//     (`canvasPlaceSpot`). В таске 168 на этом и попались: призрак считался от
+//     события движения руки, а клик — от события отпускания, и между ними
+//     разрешена вся мерка «рука поехала». На плане магнит мельче, чем сетка
+//     чертежа, но он есть: `GUIDE_SNAP_PX` — семь точек вокруг направляющей.
+//     Дрогнула рука на две точки поперёк её полосы — и метка села на семь
+//     точек в стороне от показанного, мимо перекрестия, ради которого
+//     направляющие и ставят.
+//
+// Призрака нет у метки-линии: её ведут вершинами, и до первого клика тянуть
+// резинку не от чего — ровно та же оговорка, что у росчерка в чертеже.
+// Комментарий тоже без призрака: он рисуется плашкой, а плашку рисует проход
+// подписей по её тексту, которого до постановки ещё не набрали.
+
+/**
+ * Метка, которую поставит клик, — или `null`, если показывать нечего.
+ *
+ * `point` — доли плана **с уже применённой** притяжкой к направляющим: та же
+ * точка, что уйдёт в `addMark`.
+ */
+export function canvasGhostMark(state, point) {
+  if (!state || !point || !state.schemeId || !state.project) return null;
+  if (!canvasEditAllowed(state)) return null;
+  if (!canvasPlacesByClick(state) || canvasAddKind(state) !== "point") return null;
+  const typeId = canvasPlacedTypeId(state);
+  if (!typeId) return null;
+  // Метка настоящая во всём, кроме имени: номер ей выдаст модель при
+  // постановке, и обещать его призраком нельзя — пока рука ходит по плану,
+  // метку мог поставить второй человек с того же объекта.
+  return {
+    id: "",
+    schemeId: state.schemeId,
+    typeId,
+    number: 0,
+    kind: "point",
+    points: [point],
+    closed: false,
+    groupId: null,
+    labelOffset: null,
+  };
+}
+
+/**
+ * Точка постановки — **та самая, из которой нарисован призрак** (таск 176,
+ * вслед за 168).
+ *
+ * Клик приходит из события отпускания кнопки, а призрак нарисован по
+ * последнему движению руки; между ними разрешена вся мерка «рука поехала»
+ * (`canvasDragSlop`: три точки у мыши, десять у пальца). Сама по себе эта
+ * дрожь ничего не стоит — но притяжка к направляющей ловит точку в семи точках
+ * от неё (`GUIDE_SNAP_PX`), и граница этой полосы проходит где-то рядом всегда:
+ * дрогнула рука поперёк неё — и метка села не туда, куда показывал призрак.
+ *
+ * Сырой курсор остаётся запасным путём: призрака может не быть вовсе —
+ * например, палец на сенсорном экране касается, не наведя.
+ */
+export function canvasPlaceSpot(ghost, plan, schemeId) {
+  if (!ghost || !ghost.point) return plan;
+  if (schemeId && ghost.schemeId !== schemeId) return plan;
+  return ghost.point;
+}
+
+// Пересчитать призрака под рукой. Отвечает, сменилось ли место: кадр
+// перерисовывается только тогда — мышь ходит по плану десятками шагов в
+// секунду.
+function canvasGhostUpdate(state) {
+  const scheme = canvasScheme(state);
+  const plan = scheme ? canvasCursorPlan(state, scheme, canvasViewOf(state)) : null;
+  const next =
+    plan && canvasPlacesByClick(state) ? { point: canvasGuideSnap(plan), schemeId: state.schemeId } : null;
+  const was = canvasGhost;
+  canvasGhost = next;
+  if (!was || !next) return Boolean(was) !== Boolean(next);
+  return was.schemeId !== next.schemeId || was.point.x !== next.point.x || was.point.y !== next.point.y;
+}
+
+// Призрак снимается вместе с курсором: рука ушла с холста — обещать нечего.
+function canvasGhostDrop() {
+  if (!canvasGhost) return false;
+  canvasGhost = null;
+  return true;
 }
 
 // Тип, который поставит следующий клик: выбранный в панели, пока он жив
@@ -2910,7 +3012,7 @@ function canvasTouchUp(state, drag, point, cancelled) {
   else if (kind === "vertex") {
     if (state.mode === "room") canvasOutlineClick(plan, point, false);
     else canvasLineClick(plan, point, false);
-  } else if (kind === "place") canvasPlacePoint(plan);
+  } else if (kind === "place") canvasPlacePoint(canvasPlaceSpot(canvasGhost, plan, state.schemeId));
   else if (kind === "select") {
     const patch = canvasTapAction(state, drag, {});
     if (patch) canvasApi.setState(patch);
@@ -2937,6 +3039,11 @@ function canvasPointerDown(event) {
     /* работаем без захвата */
   }
   canvasPointers.set(event.pointerId, canvasPointOf(event));
+  // Призрак пересчитывается и по нажатию, а не только по движению: палец на
+  // сенсорном экране касается, не наведя, и прежнее место под ним — с другого
+  // края плана. Постановка берёт точку у призрака, и он обязан быть свежим.
+  canvasCursor = canvasPointOf(event);
+  canvasGhostUpdate(canvasState());
 
   // Палец. Жест **всегда начинается панорамой** — иначе план перестанет
   // листаться, — а чем он был на самом деле, решают время и сдвиг:
@@ -3557,6 +3664,9 @@ function canvasPointerMove(event) {
     canvasRedraw();
   }
   if (canvasHoverUpdate(state, point)) canvasRedraw();
+  // Призрак идёт за рукой — и перерисовывается только тогда, когда его место
+  // сменилось: с притяжкой к направляющей оно меняется реже, чем курсор.
+  if (canvasGhostUpdate(state)) canvasRedraw();
   if (!canvasDrag) return;
   const shift = Math.hypot(point.x - canvasDrag.start.x, point.y - canvasDrag.start.y);
   if (shift > canvasDragSlop(canvasDrag)) {
@@ -3719,7 +3829,8 @@ function canvasPointerUp(event) {
     return;
   }
   if (drag.kind === "place") {
-    canvasPlacePoint(plan);
+    // Точка — у призрака: он её показал (таск 176, `canvasPlaceSpot`).
+    canvasPlacePoint(canvasPlaceSpot(canvasGhost, plan, state.schemeId));
     return;
   }
 }
@@ -4008,6 +4119,8 @@ function canvasKeyUp(event) {
 // известной», и копия садилась бы туда, где мыши давно нет.
 function canvasPointerLeave() {
   canvasCursor = null;
+  // Призрак уходит с курсором: обещать постановку там, где руки нет, нельзя.
+  if (canvasGhostDrop()) canvasRedraw();
   // Курсора над планом нет — и подсвеченной ручки быть не должно: иначе она
   // осталась бы гореть на последнем месте, где мышь ушла с холста.
   if (canvasHoverHandle) {
@@ -4023,6 +4136,7 @@ function canvasWindowBlur() {
   canvasPanRelease(null);
   canvasSpace = false;
   canvasCursor = null;
+  canvasGhostDrop();
   canvasSyncCursor();
 }
 
