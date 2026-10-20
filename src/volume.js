@@ -596,6 +596,138 @@ export function volumeWallTiles(lengthMm, heightMm, openings) {
   return tiles.filter((tile) => tile.toMm > tile.fromMm && tile.topMm > tile.bottomMm);
 }
 
+// ——— ус на углу стен (G265, таск 178) ————————————————————————————————————
+//
+// Слова заказчика: «Внешние углы под 90 градусов в стенах сделай так же как
+// пофиксил столешницу». Столешница — полоса вещи чертежа, починенная усом по
+// биссектрисе в таске 169 (дефект D38), и беда у стен ровно та же.
+//
+// **Что было видно.** Стена рисуется коробкой с поперечными торцами по своей
+// оси. Две стены, сошедшиеся в вершине под 90°, кладут эти коробки крест-накрест:
+// квадрат со стороной в полтолщины с **внутренней** стороны угла покрыт дважды,
+// а такой же квадрат с **внешней** — не покрыт вовсе. На стене 100 мм это
+// квадрат 50 × 50 мм: снаружи дома в углу зияет вырез, сквозь который видно
+// землю и нутро стены, а внутри комнаты по углу идёт шов.
+//
+// **Чем стены отличаются от полосы.** У полосы вершины идут цепочкой: у звена
+// всегда ровно один сосед с каждой стороны, и ширина у всей полосы одна. Стены
+// — отдельные сущности: в вершине может сойтись три стены и больше, у соседок
+// бывает разная толщина и разная высота, а конец стены может упираться в
+// середину чужой. Поэтому ус ставится только там, где стык **однозначен**:
+//
+//   1. в вершине ровно **два** конца стен — тройник и крест пропускаются: у
+//      них нет одной биссектрисы, и какую пару сводить, сказать нечем;
+//   2. **высоты соседок равны** — иначе ус срезал бы торец, а над соседкой
+//      осталась бы дыра во всю разницу высот;
+//   3. стены **не вдоль одной прямой** — у развёрнутых на 180° кромки
+//      параллельны и не пересекаются вовсе (стык и так чистый);
+//   4. ус не длиннее `VOLUME_MITER_MAX` полутолщин — то же число и та же
+//      причина, что у полосы (D38): на острых углах ус уходит в бесконечность;
+//   5. ус короче самой стены — у стены в ладонь длиной оба уса съели бы её
+//      целиком и вывернули бы грани наизнанку.
+//
+// Толщины при этом могут быть **разными**: кромка каждой стены кончается там,
+// где встречает соответствующую кромку соседки, и обе стены считают эту точку
+// одинаково — стык выходит общим и без уговора между ними.
+//
+// **Препятствие не меняется** — ровно как в D38: `volumeWallSolids` остаётся
+// прямоугольником по оси. Цена названа прямо: внешний клин угла теперь
+// нарисован, но не держит; на стене 100 мм это треугольник с катетами 50 мм,
+// вдвое меньше радиуса тела, и дотянуться до него человек всё равно не может —
+// его держит сама стена.
+
+/** Какая кромка соседки отвечает кромке `side` этой стены. Ноль — вдоль одной прямой. */
+function volumeMiterSide(side, hereN, hereAway, thereN, thereAway) {
+  const here = hereN.x * thereAway.x + hereN.y * thereAway.y;
+  const there = thereN.x * hereAway.x + thereN.y * hereAway.y;
+  if (Math.abs(here) < VOLUME_MITER_EPS || Math.abs(there) < VOLUME_MITER_EPS) return 0;
+  return side * Math.sign(here) * Math.sign(there);
+}
+
+/**
+ * Где кончается кромка `side` стены, сходящейся с соседкой: отступ вдоль оси от
+ * общей вершины, в её сторону. Отрицательный — кромка уходит **за** вершину,
+ * то есть наружу угла. `null` — ус неприменим.
+ */
+function volumeMiterReach(side, here, there) {
+  const sideThere = volumeMiterSide(side, here.n, here.away, there.n, there.away);
+  if (sideThere === 0) return null;
+  const turn = here.away.x * there.away.y - here.away.y * there.away.x;
+  if (Math.abs(turn) < VOLUME_MITER_EPS) return null;
+  const from = { x: here.n.x * side * here.half, y: here.n.y * side * here.half };
+  const to = { x: there.n.x * sideThere * there.half, y: there.n.y * sideThere * there.half };
+  const gap = { x: to.x - from.x, y: to.y - from.y };
+  const reach = (gap.x * there.away.y - gap.y * there.away.x) / turn;
+  const limit = VOLUME_MITER_MAX * here.half;
+  return Math.max(-limit, Math.min(limit, reach));
+}
+
+/**
+ * Усы на концах стен: `Map` по идентификатору стены →
+ * `{start: {left, right} | null, end: {left, right} | null}`, где числа —
+ * координаты вдоль оси стены, на которых кончаются её левая и правая кромки.
+ * Без уса это 0 и длина.
+ *
+ * `heightOf(wall)` — высота стены в сцене: ус ставится только между стенами
+ * одной высоты (см. разбор выше).
+ */
+export function volumeWallMiters(walls, heightOf = () => 0) {
+  const list = [];
+  for (const wall of walls || []) {
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    list.push({ wall, vectors, half: Math.abs(Number(wall.thicknessMm) || 0) / 2 });
+  }
+  const atCorner = new Map();
+  const keyOf = (point) => Math.round(Number(point.x)) + "," + Math.round(Number(point.y));
+  list.forEach((item, index) => {
+    for (const end of ["a", "b"]) {
+      const key = keyOf(end === "a" ? item.wall.aMm : item.wall.bMm);
+      if (!atCorner.has(key)) atCorner.set(key, []);
+      atCorner.get(key).push({ index, end });
+    }
+  });
+  const miters = new Map();
+  const seatOf = (index) => {
+    const id = list[index].wall.id;
+    if (!miters.has(id)) miters.set(id, { start: null, end: null });
+    return miters.get(id);
+  };
+  const faceOf = (item, end) => ({
+    n: item.vectors.n,
+    half: item.half,
+    // Куда стена уходит от общей вершины.
+    away: end === "a" ? item.vectors.u : { x: -item.vectors.u.x, y: -item.vectors.u.y },
+  });
+  for (const ends of atCorner.values()) {
+    if (ends.length !== 2) continue;
+    const [one, two] = ends;
+    if (one.index === two.index) continue;
+    const here = list[one.index];
+    const there = list[two.index];
+    if (!(here.half > 0) || !(there.half > 0)) continue;
+    if (Math.abs(Number(heightOf(here.wall)) - Number(heightOf(there.wall))) > 1) continue;
+    const hereFace = faceOf(here, one.end);
+    const thereFace = faceOf(there, two.end);
+    const cut = (item, face, other, end) => {
+      const left = volumeMiterReach(1, face, other);
+      const right = volumeMiterReach(-1, face, other);
+      if (left === null || right === null) return null;
+      // Ус длиннее стены: вывернул бы её грани наизнанку — оставляем торец.
+      if (Math.max(Math.abs(left), Math.abs(right)) >= item.vectors.len) return null;
+      return end === "a"
+        ? { left, right }
+        : { left: item.vectors.len - left, right: item.vectors.len - right };
+    };
+    const first = cut(here, hereFace, thereFace, one.end);
+    const second = cut(there, thereFace, hereFace, two.end);
+    if (!first || !second) continue;
+    seatOf(one.index)[one.end === "a" ? "start" : "end"] = first;
+    seatOf(two.index)[two.end === "a" ? "start" : "end"] = second;
+  }
+  return miters;
+}
+
 /**
  * Грани стены: две стороны, разбитые проёмами, два торца, верх; на каждый
  * проём — четыре грани его откосов, рама окну и полотно двери.
@@ -605,7 +737,7 @@ export function volumeWallTiles(lengthMm, heightMm, openings) {
  * все двери будут закрыты». Раскрывается оно поимённо — `openDoorIds` — и живёт
  * это только в сеансе окна: в объект состояние двери не пишется (G68).
  */
-export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null) {
+export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null) {
   const vectors = wallVectors(wall);
   if (!vectors || !(heightMm > 0)) return out;
   const half = Number(wall.thicknessMm) / 2;
@@ -614,6 +746,10 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     x: Number(wall.aMm.x) + u.x * along + n.x * across,
     y: Number(wall.aMm.y) + u.y * along + n.y * across,
   });
+  // Ус на углу (G265): кромка кончается не поперёк оси, а там, где встречает
+  // кромку соседки. Без соседки числа те же, что были, — 0 и длина.
+  const startOf = (side) => (miter && miter.start ? (side > 0 ? miter.start.left : miter.start.right) : 0);
+  const endOf = (side) => (miter && miter.end ? (side > 0 ? miter.end.left : miter.end.right) : len);
   for (const side of [1, -1]) {
     const normal = { x: n.x * side, y: n.y * side, z: 0 };
     const sideName = side > 0 ? "left" : "right";
@@ -622,8 +758,11 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     // больше нет: порядок выкладывает дерево (`volumeOrderTree`), а вещь стоит
     // перед плоскостью стены на два миллиметра — этого дереву довольно.
     for (const tile of volumeWallTiles(len, heightMm, openings)) {
-      const from = at(tile.fromMm, half * side);
-      const to = at(tile.toMm, half * side);
+      // Крайние куски стороны дотягиваются до уса: внутренняя кромка угла
+      // отступает, внешняя выходит за вершину — и обе кончаются там же, где
+      // кромки соседки.
+      const from = at(tile.fromMm === 0 ? startOf(side) : tile.fromMm, half * side);
+      const to = at(tile.toMm === len ? endOf(side) : tile.toMm, half * side);
       // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
       // стороне концы меняются местами.
       const first = side > 0 ? to : from;
@@ -643,6 +782,9 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     }
   }
   for (const end of [0, 1]) {
+    // Сведённый ус торца не имеет вовсе: там стена переходит в соседку, и
+    // поперечная грань встала бы внутри угла, споря с её же кромками.
+    if (end === 0 ? miter && miter.start : miter && miter.end) continue;
     const along = end === 0 ? 0 : len;
     const normal = { x: u.x * (end === 0 ? -1 : 1), y: u.y * (end === 0 ? -1 : 1), z: 0 };
     const left = at(along, half);
@@ -657,7 +799,9 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
   }
   out.push(
     volumeFace(
-      [at(0, half), at(len, half), at(len, -half), at(0, -half)].map((point) => volumeAt(point, heightMm)),
+      [at(startOf(1), half), at(endOf(1), half), at(endOf(-1), -half), at(startOf(-1), -half)].map((point) =>
+        volumeAt(point, heightMm),
+      ),
       VOLUME_WALL_RGB,
       { normal: { x: 0, y: 0, z: 1 } },
     ),
@@ -2568,15 +2712,22 @@ export function volumeScene(project, schemeId, options = {}) {
   // Все двери схемы: по этому списку хоткей «все двери» (G210) знает, что
   // открывать, не спрашивая объект второй раз.
   const doors = [];
+  // Высоты считаются **до** стен: по ним сводятся углы (G265) — ус ставится
+  // только между стенами одной высоты.
+  const wallHeights = new Map();
+  for (const wall of walls) {
+    const left = wallHeightOnSide(project, wall.id, "left");
+    const right = wallHeightOnSide(project, wall.id, "right");
+    wallHeights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm);
+  }
+  const miters = volumeWallMiters(walls, (wall) => wallHeights.get(wall.id) || 0);
   for (const wall of walls) {
     const openings = openingsInWall(project, wall.id);
     for (const opening of openings) {
       if (opening.kind === OPENING_KIND_DOOR && opening.id) doors.push(opening.id);
     }
-    const left = wallHeightOnSide(project, wall.id, "left");
-    const right = wallHeightOnSide(project, wall.id, "right");
-    const height = Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm;
-    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null);
+    const height = wallHeights.get(wall.id);
+    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
     // **Пол под стеной** (дефект D37). Слова заказчика: «под дверными проёмами
