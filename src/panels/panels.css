@@ -110,6 +110,104 @@
   max-width: none;
 }
 
+/* ——— поля: подпись над полем, число, отметка (таск 187) ————————————————
+   Переехали из `workshop.css` вместе с кирпичами из `ui.js`: теми же полями
+   стоят строка элемента в правой колонке, окно «Что добавить» и окно высот —
+   и выглядеть они обязаны одинаково.
+
+   Подпись над полем, а не слева: «Толщина, мм» и «Высота стен схемы, мм» в
+   колонке на 250 точек рядом с полем ввода ужимались до многоточия (видно на
+   снимке живого прогона таска 125), а единицу измерения обрезать нельзя. */
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.ui-field__label {
+  min-width: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+/* Короткая подпись и поле в одну строку: столбиком список из десятка комнат
+   занял бы всю колонку. */
+.ui-field--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ui-field--row .ui-field__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--panel-text);
+}
+
+.ui-field--row .ui-number {
+  width: 84px;
+  flex: none;
+}
+
+.ui-number {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Погашенная отметка — не поломка, а ответ: причина лежит в подсказке строки. */
+.ui-check input:disabled + span {
+  color: var(--panel-muted);
+}
+
+/* Пачка полей одного предмета: столбиком, с одним просветом на все. */
+.ui-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Ряд мелких кнопок: виды проёма, способы постановки, четверть оборота. Они
+   выбирают, а не делают, поэтому и выглядят иначе — плотнее и без заливки,
+   пока не выбраны. Переехали из `workshop.css` в таске 187: теми же плитками
+   стоят и окно «Что добавить», и строка выделенного элемента в колонке. */
+.ui-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ui-chip {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ui-chip.is-on {
+  border-color: var(--accent);
+  color: var(--panel-text);
+  background: rgba(31, 111, 235, 0.18);
+}
+
+/* Последняя кнопка ряда своей меры не отдаёт: иначе «К стене» растягивалась бы
+   на всю строку, оставшись одна во втором ряду. */
+.ui-chips .ui-chip:last-child:not(:first-child) {
+  flex: 0 0 auto;
+}
+
 #project-actions {
   display: flex;
   align-items: center;

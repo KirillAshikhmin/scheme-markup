@@ -1114,6 +1114,129 @@
   border-color: var(--panel-text);
 }
 
+/* ——— окно «Что добавить» (таск 187, G280) ————————————————————————————————
+   Три шага друг под другом, раскрыт один. Заголовок устроен как заголовок
+   раздела колонки — галочка, имя, строка состояния: это то же движение, что
+   сворачивание разделов, и учить ему заново не надо.
+
+   Ширину карточке задаёт содержимое (`modal--wide`): шаг «Объекты» ставит
+   внутрь ту же сетку плиток, что окно выбора вещи, и считает её ширину она
+   сама (`--picker-columns`). Нижняя граница держит два узких шага от того,
+   чтобы окно съёжилось в полоску. */
+
+.drawPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: min(92vw, 420px);
+}
+
+.drawPicker__step {
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Раскрытый шаг обведён цветом выбора — тем же, которым горит выбранное
+   занятие и выделенная строка списка: второго языка выбора в режиме нет. */
+.drawPicker__step.is-open {
+  border-color: var(--accent);
+}
+
+.drawPicker__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  background: #1c2129;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawPicker__head:hover,
+.drawPicker__head:focus-visible {
+  background: #21262d;
+}
+
+/* Галочка та же, что у разделов колонки: вниз — раскрыт, влево — свёрнут. */
+.drawPicker__chevron::before {
+  content: "▾";
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+
+.drawPicker__step.is-open .drawPicker__chevron::before {
+  transform: none;
+}
+
+.drawPicker__name {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Строка состояния: что поставит следующий клик. Длинное имя вещи ужимается
+   многоточием — строка не должна рвать заголовок на две. */
+.drawPicker__note {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
+.drawPicker__step.is-open .drawPicker__note {
+  color: var(--panel-text);
+}
+
+.drawPicker__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.drawPicker__about {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--panel-muted);
+}
+
+/* Поля в две колонки: столбиком пять размеров вещи растили карточку так, что
+   «Ставить вещь» уезжала за нижний край экрана. Окно шире колонки втрое —
+   место под вторую колонку в нём есть. */
+.drawPicker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px 10px;
+}
+
+/* Сетка плиток внутри шага: своей рамки и своих полей у неё тут нет — поля
+   даёт тело шага, а ширину она считает сама. */
+.drawPicker__body .picker--objects {
+  min-width: 0;
+}
+
+/* Высота сетки здесь своя, ниже, чем в окне выбора вещи: под ней в том же шаге
+   стоят способ, размеры и кнопка «Ставить вещь», и при общем потолке в 64vh
+   они уезжали за нижний край карточки — проверено живым прогоном. */
+.drawPicker__body .picker--objects .picker__columns {
+  max-height: 42vh;
+}
+
 /* ——— полоса развёртки выделенной стены ————————————————————————————————
 
    Лежит поверх плана — так просил заказчик («сверху схемы»), и так человек
@@ -2862,6 +2985,104 @@
   max-width: none;
 }
 
+/* ——— поля: подпись над полем, число, отметка (таск 187) ————————————————
+   Переехали из `workshop.css` вместе с кирпичами из `ui.js`: теми же полями
+   стоят строка элемента в правой колонке, окно «Что добавить» и окно высот —
+   и выглядеть они обязаны одинаково.
+
+   Подпись над полем, а не слева: «Толщина, мм» и «Высота стен схемы, мм» в
+   колонке на 250 точек рядом с полем ввода ужимались до многоточия (видно на
+   снимке живого прогона таска 125), а единицу измерения обрезать нельзя. */
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.ui-field__label {
+  min-width: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+/* Короткая подпись и поле в одну строку: столбиком список из десятка комнат
+   занял бы всю колонку. */
+.ui-field--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ui-field--row .ui-field__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--panel-text);
+}
+
+.ui-field--row .ui-number {
+  width: 84px;
+  flex: none;
+}
+
+.ui-number {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Погашенная отметка — не поломка, а ответ: причина лежит в подсказке строки. */
+.ui-check input:disabled + span {
+  color: var(--panel-muted);
+}
+
+/* Пачка полей одного предмета: столбиком, с одним просветом на все. */
+.ui-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Ряд мелких кнопок: виды проёма, способы постановки, четверть оборота. Они
+   выбирают, а не делают, поэтому и выглядят иначе — плотнее и без заливки,
+   пока не выбраны. Переехали из `workshop.css` в таске 187: теми же плитками
+   стоят и окно «Что добавить», и строка выделенного элемента в колонке. */
+.ui-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ui-chip {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ui-chip.is-on {
+  border-color: var(--accent);
+  color: var(--panel-text);
+  background: rgba(31, 111, 235, 0.18);
+}
+
+/* Последняя кнопка ряда своей меры не отдаёт: иначе «К стене» растягивалась бы
+   на всю строку, оставшись одна во втором ряду. */
+.ui-chips .ui-chip:last-child:not(:first-child) {
+  flex: 0 0 auto;
+}
+
 #project-actions {
   display: flex;
   align-items: center;
@@ -4243,21 +4464,21 @@
    тёмное, а плашки светлые — те же, что над планом: инструмент один, и читаться
    они должны одинаково. */
 
-/* ——— мастерская чертежа на основном экране (таск 153) ————————————————————
+/* ——— мастерская чертежа на основном экране (таск 153, переложена в 187) ———
 
-   Окна у мастерской больше нет. Заказчик: «Чтобы переключать контент, а не в
-   окне показывать чертёж и объём». Поле занимает основной экран целиком — то
-   самое «само окно делаем побольше», доведённое до конца, — а правая колонка
-   окна (слои, сетка, свойства предмета, этаж, высоты) переехала в верхний блок
-   левой колонки страницы вместе с рядами занятий.
+   Окна у мастерской нет: поле занимает основной экран целиком — то самое «само
+   окно делаем побольше», доведённое до конца.
 
-   Ряды занятий стоят **над** свойствами, а не над полем: в колонке на 264
-   точки они занимают две строки и отвечают на тот же вопрос «чем я занят», что
-   и группы под ними. Над полем у них места нет — там верхний ряд с подсказкой,
-   переключателем режимов и полным экраном.
+   **В колонке чертежа осталось два пункта** (таск 187, G280). Слова заказчика:
+   «Пусть для чертежа слева будет выделение и добавление ровно как и для меток,
+   что добавить — выбираем уже в окне… А вот параметры объекта — так же как у
+   меток — в колонке справа». Поэтому слева плашка «Что добавить» и ряд режимов,
+   справа три списка, а параметры выделенного раскрываются в его строке. Слои и
+   сетка уехали в «Интерфейс» (`styles.css`, раздел `tools`), высота стен — под
+   список стен, а поля и плитки стали общими кирпичами (`panels.css`): теми же
+   полями стоят и строка списка, и окно «Что добавить».
 
-   Полноэкранный показ даёт та же кнопка «Во весь экран», что у плана: своей
-   кнопки у режима нет, и `modal--workshop` со всеми его мерами ушёл. */
+   Полноэкранный показ даёт та же кнопка «Во весь экран», что у плана. */
 
 .workshop__panel {
   display: flex;
@@ -4266,8 +4487,8 @@
   min-width: 0;
 }
 
-/* Два ряда занятий (таск 133): «Режим» и, только в добавлении, «Добавить».
-   Второй прижат к первому вплотную — это второй уровень одного выбора. */
+/* Ряд режимов: «Выделение» и «Добавление». Второго ряда («Стены · Проёмы ·
+   Объекты») в колонке больше нет — что добавлять, выбирают в окне. */
 .workshop__tools {
   display: flex;
   flex-wrap: wrap;
@@ -4275,20 +4496,14 @@
   gap: 6px;
 }
 
-.workshop__tools--adding {
-  margin-top: -6px;
-}
-
 /* Подпись уровня: она не кнопка и нажиматься не должна — отсюда и приглушённый
    цвет, и мелкий кегль. Тот же приём, что у подписей «РЕЖИМ» и «ТИП МЕТКИ» в
-   левой колонке: там человек к нему уже привык.
+   разделе меток: там человек к нему уже привык.
 
    Строкой **над** кнопками, а не рядом с ними (дефект D35). В колонке на 264
    точки «РЕЖИМ» съедал полсотни, и пара «Выделение»/«Добавление» ломалась на
    две строки — кнопка под кнопкой, будто это два разных ряда. Подпись занимает
-   свою строку целиком (`flex-basis: 100%`), и обе пары — «Выделение ·
-   Добавление» и «Стены · Проёмы · Объекты» — встают каждая в один ряд. Ровно
-   так же устроены подписи «РЕЖИМ» и «ТИП МЕТКИ» в разделе меток. */
+   свою строку целиком (`flex-basis: 100%`), и пара встаёт в один ряд. */
 .workshop__toolsLabel {
   flex-basis: 100%;
   font-size: 11px;
@@ -4296,15 +4511,6 @@
   text-transform: uppercase;
   color: var(--panel-muted);
   margin-bottom: -2px;
-}
-
-/* Масштаб и «Вписать» — не занятия, и стоять в их ряду как равные они не
-   должны: отжимаются вправо. В колонке на 264 точки это их же строка. */
-.workshop__view {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 /* Поле чертежа — бумага, а не тёмная панель: чертёж чертят на бумаге, и те же
@@ -4327,104 +4533,6 @@
   display: block;
 }
 
-/* Строка состояния чертежа ушла в сводку над полем (G228) — своего правила у
-   неё больше нет: вид ей задаёт плашка. */
-
-/* Колонка свойств: прежде она была правой колонкой окна на 290 точек, теперь
-   это верхний блок левой колонки страницы. Своей ширины у неё больше нет —
-   ширину задаёт колонка (264 точки), и логика её прежняя: место, ширина,
-   скрытие и сворачивание у колонки не менялись.
-
-   Своей прокрутки у колонки свойств тоже нет: листается блок раздела
-   (`.panel__body`) — тем же движением, что листаются «Схемы» и «Метки». */
-.workshop__side {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
-.workshop__group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 8px 10px;
-  border: 1px solid var(--panel-line);
-  border-radius: 8px;
-  background: #1c2129;
-}
-
-.workshop__head {
-  margin: 0;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--panel-muted);
-}
-
-.workshop__check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-/* Погашенная отметка подложки — не поломка, а ответ: причина лежит в подсказке
-   строки, а под ней стоит кнопка, которая эту причину снимает. */
-.workshop__check input:disabled + span {
-  color: var(--panel-muted);
-}
-
-/* Подпись над полем, а не слева от него: «Толщина новых стен, мм» и «Высота
-   стен схемы, мм» в колонке на 250 точек рядом с полем ввода ужимались до
-   многоточия — это видно на снимке живого прогона. Единица измерения в конце
-   подписи, и обрезать её нельзя: без «мм» поле рядом с метрами масштаба и
-   долями разметки читается как угодно. */
-.workshop__field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 13px;
-}
-
-.workshop__label {
-  min-width: 0;
-  color: var(--panel-muted);
-  font-size: 12px;
-}
-
-.workshop__number {
-  width: 100%;
-  font-variant-numeric: tabular-nums;
-}
-
-.workshop__grid {
-  width: 100%;
-}
-
-/* Имя комнаты коротко, и её высота встаёт рядом строкой: столбиком список из
-   десятка комнат занял бы всю колонку. */
-.workshop__field--room {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.workshop__field--room .workshop__label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--panel-text);
-}
-
-.workshop__field--room .workshop__number {
-  width: 84px;
-  flex: none;
-}
-
 .workshop__note {
   margin: 0;
   font-size: 11px;
@@ -4438,58 +4546,14 @@
   color: var(--danger);
 }
 
-/* Поля одного предмета. Видна всегда ровно одна такая пачка: занятий в окне
-   стало три, и показывать толщину стены над размерами двери значит растить
-   колонку вдвое ради того, что сейчас не нужно. */
-.workshop__fields {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
+/* ——— плашка: «Что добавить» и вещь выделенного (таски 170, 187) ——————————
 
-/* Ряд мелких кнопок: виды проёма, формы объекта, «плюс» у справочника. Они
-   выбирают, а не делают, поэтому и выглядят иначе — плотнее и без заливки,
-   пока не выбраны. */
-.workshop__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.workshop__chip {
-  flex: 1 1 auto;
-  margin: 0;
-  padding: 3px 6px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.workshop__chip.is-on {
-  border-color: var(--accent);
-  color: var(--panel-text);
-  background: rgba(31, 111, 235, 0.18);
-}
-
-/* Выпадающий список в ряду кнопок забирает строку целиком. Основа нулевая, а
-   не по содержимому: длинное имя шире колонки, и при `auto` строка
-   переносилась бы, оставляя соседнюю кнопку одну на второй — это видно на
-   снимке живого прогона. */
-.workshop__chips select.ui-input {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.workshop__chips .workshop__chip:last-child:not(:first-child) {
-  flex: 0 0 auto;
-}
-
-/* ——— плашка выбранной вещи (таск 170, G252) ——————————————————————————————
-
-   Выбор вещи уехал в окно (`objectPicker.css`), а в колонке осталась плашка:
-   картинка, имя и слово «Выбрать». Устроена она как плашка типа метки в панели
-   инструментов (`.tools__type`) — одна дверь к окну и одно место, где видно,
-   что встанет по клику или чем стоит выделенное. Высоты эта плашка колонке не
-   стоит почти ничего: вместо сетки в два-три ряда плиток — одна строка. */
+   Выбор уехал в окна (`drawPicker.css`, `objectPicker.css`), а в интерфейсе
+   осталась плашка: картинка, имя и слово «Выбрать». Устроена она как плашка
+   типа метки в разделе «Метки» (`.tools__type`) — одна дверь к окну и одно
+   место, где видно, что встанет по клику или чем стоит выделенное. Высоты эта
+   плашка колонке не стоит почти ничего: вместо сетки в два-три ряда плиток —
+   одна строка. */
 .workshop__thing {
   display: flex;
   align-items: center;
@@ -4528,6 +4592,37 @@
   white-space: nowrap;
 }
 
+/* Плашка «Что добавить» (таск 187) говорит двумя строками: порода сверху, её
+   настройки снизу («толщина 100 мм», «Дверь, 900 × 2100 мм»). Два ответа в одну
+   строку в колонке на 264 точки не влезают, а обрезать настройки нельзя — по
+   ним и видно, что поставит следующий клик. */
+.workshop__thingText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* У стен и проёмов картинки нет вовсе (каталог — только у вещей), и пустой
+   `span` не должен оставлять в плашке дыру слева. */
+.workshop__thing--add .workshop__thingIcon[hidden] {
+  display: none;
+}
+
+.workshop__thingText .workshop__thingName {
+  font-size: 13px;
+}
+
+.workshop__thingNote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
 /* Слово «Выбрать» у плашки: по нему видно, что плашка нажимается. То же, что
    у плашки типа метки, и теми же мерами. */
 .workshop__thingPick {
@@ -4546,49 +4641,25 @@
   border-color: var(--accent);
 }
 
-.workshop__rooms {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+/* ——— три списка в правой колонке (таски 153, 154, 187) ————————————————————
+   Заказчик: «справа раздели в 3 отдельных списка раскрывающихся и не объединяй
+   в группу Элементы чертежа». Заголовки, счётчики и сворачивание у них теперь
+   разделов колонки — здесь остались сами строки.
 
-/* ——— список элементов чертежа в правой колонке (таск 153) ————————————————
-   Заказчик: правая панель своя в каждом режиме, и у чертежа это «список
-   элементов чертежа с глазками видимости». Глазки — соседний таск (154); место
-   под них в строке оставлено справа, и ряд строки для этого и сделан рядом, а
-   не одним словом.
-
-   Строка — кнопка: клик по ней выделяет вещь тем же выделением, которым её
+   Строка — кнопка: клик по ней выделяет элемент тем же выделением, которым его
    выделяет клик по полю. Выделенная подсвечена так же, как выбранное занятие:
    второго языка выделения в режиме нет. */
 .workshop__list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.workshop__listGroup {
-  display: flex;
-  flex-direction: column;
   gap: 3px;
 }
 
-.workshop__listGroup .workshop__head {
+.workshop__listItem {
   display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Счёт в заголовке группы: по нему видно, что стен тридцать, не раскрывая
-   список глазами. Тот же приём, что у счётчиков разделов колонки. */
-.workshop__listCount {
-  margin-left: auto;
-  font-size: 10px;
-  letter-spacing: 0;
-  color: var(--panel-muted);
-  background: #21262d;
-  border-radius: 8px;
-  padding: 1px 6px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 /* Строка списка: кнопка выделения и — у вещи — глазок рядом (таск 154, G223).
@@ -4627,6 +4698,45 @@
 .workshop__listPick.is-on {
   border-color: var(--accent);
   background: rgba(31, 111, 235, 0.18);
+}
+
+/* ——— параметры выделенного — в его строке (таск 187, G280) ————————————————
+   «Параметры объекта — так же как у меток — в колонке справа». У метки поля
+   раскрываются в её строке списка, и здесь то же: пачка полей переезжает в
+   выделенную строку и отступает от её края, чтобы видно было, чья она. */
+.workshop__detail {
+  margin: 0 0 6px 8px;
+  padding: 6px 8px 8px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: #1c2129;
+}
+
+/* Подвал списка стен: общая высота и своя высота у помещений (таск 187).
+   Отделён чертой — это не ещё одна строка списка, а то, что относится ко всем
+   стенам сразу.
+
+   Липнет к низу раздела, как кнопка уплотнения номеров в списке меток: стен у
+   заказчика двадцать пять, и высота, уехавшая под них, перестала бы находиться
+   глазами. Отрицательный отступ съедает нижнее поле тела раздела — без него под
+   подвалом оставалась щель, и в неё проглядывала уехавшая строка. */
+.workshop__foot {
+  position: sticky;
+  bottom: -12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 8px 0 12px;
+  margin-bottom: -12px;
+  border-top: 1px solid var(--panel-line);
+  background: var(--panel-bg);
+}
+
+/* Кнопка высот говорит числом, что перебитые комнаты есть: по ней это видно, не
+   открывая окна. Тот же приём, что у кнопок связей и размеров метки. */
+.workshop__foot .ui-btn.is-set {
+  border-color: var(--accent);
 }
 
 /* Глазок. Приглушён, пока вещь видна, — он не действие, а переключатель
@@ -5559,23 +5669,22 @@ body {
   display: flex;
 }
 
-/* ——— одна прокрутка на правую колонку чертежа (таск 187) ———————————————
-   В «Чертеже» растущих списков в колонке три — стены, проёмы, объекты, — и
-   общее правило дало бы каждому свой ползунок: три полосы прокрутки одна под
-   другой, да ещё рядом с ползунком самой колонки. Поэтому здесь правило левой
-   колонки (G259): каждый раздел стоит на высоте своего содержимого, листается
-   колонка целиком, а убирает с глаз лишнее то, чем заказчик и просил их
-   сделать — сворачивание заголовком.
+/* ——— три списка делят правую колонку поровну (таск 187) ————————————————
+   Списков в «Чертеже» три, и видны должны быть все три заголовка сразу: иначе
+   на объекте заказчика (25 стен) «Проёмы» начинаются на четырёхстах точках
+   ниже нижнего края, и человек не знает, что они вообще есть, — проверено
+   живым прогоном.
 
-   Списка меток это не касается: в «Схеме» и в «Объёме» он по-прежнему растущий
-   со своей прокруткой к выделенной строке. */
+   Поэтому здесь работает общее правило правой колонки: раздел берёт не больше
+   трети её высоты, а дальше листается своим телом. Трети, а не половины, —
+   делят её трое, и при половине третий список всё равно уезжал бы за край.
+   Свёрнутый раздел из дележа выходит и отдаёт место соседям целиком. */
 #app[data-screen="drawing"] #panel-right .panel__section {
-  flex: 0 0 auto;
-  max-height: none;
+  max-height: 34%;
 }
 
-#app[data-screen="drawing"] #panel-right .panel__body {
-  overflow: visible;
+#app[data-screen="drawing"] #panel-right .panel__section.is-collapsed {
+  max-height: none;
 }
 
 #canvas-empty {
@@ -7529,15 +7638,17 @@ const strings = {
     // «Стены», под их списком. Своего места в колонке у неё больше нет (слева
     // остались «Выделение» и «Добавление»), а в строку элемента она не идёт:
     // это высота всех стен схемы, а не выделенной.
-    height: "Высота",
+    height: "Высота стен",
+    // Кнопка подвала списка стен: по ней видно число, не открывая окна, — тот
+    // же приём, что у кнопки размеров в строке метки.
+    heightOpen: "Высота стен: {height} мм",
+    heightUnset: "Высота стен не задана",
     heightScheme: "Высота стен схемы, мм",
     heightHint: "Общая высота этажа. Пусто — не задана: объём и развёртка берут 2800 мм.",
     heightRooms: "Своя высота у помещений",
-    // Переопределение показывается окном, а не списком в колонке: комнат
-    // бывает десяток, а свою высоту им задают редко — то же правило, по
+    // Переопределение показывается в том же окне, а не списком в колонке:
+    // комнат бывает десяток, а свою высоту им задают редко — то же правило, по
     // которому размеры метки открываются окном из её строки.
-    heightRoomsOpen: "Своя высота у помещений: {count}",
-    heightRoomsNone: "Своя высота у помещений",
     heightRoomsHint: "Пусто — берётся общая высота схемы.",
     heightRoomsEmpty: "Помещений в объекте ещё нет",
     // Этажа в мастерской больше нет (таск 170, G254): поле переехало в свойства
@@ -27314,6 +27425,56 @@ function uiButtonLabel(button, label, title) {
   return button;
 }
 
+// ——— поля: подпись над полем, число, отметка ——————————————————————————
+//
+// Три кирпича переехали сюда из `panels/workshop.js` в таске 187. Поля чертежа
+// стоят теперь в трёх местах — в строке элемента в правой колонке, в окне «Что
+// добавить» и в окне высот, — и выглядеть они обязаны одинаково: это одни и те
+// же поля одной и той же вещи. Возить их из панели в панель нельзя (окно не
+// должно тянуть за собой её подписки и регистрацию), а повторять трижды —
+// значит однажды разойтись.
+
+/**
+ * Поле с подписью **над** ним: «Толщина, мм» и «Высота стен схемы, мм» в
+ * колонке на 264 точки рядом с полем ввода ужимались до многоточия (таск 125),
+ * а единицу измерения в конце подписи обрезать нельзя — без «мм» число рядом с
+ * метрами масштаба и долями разметки читается как угодно.
+ */
+function uiField(label, input, options = {}) {
+  return uiEl("label", { class: "ui-field" + (options.class ? " " + options.class : ""), title: options.title || "" }, [
+    uiEl("span", { class: "ui-field__label", text: label, title: options.labelTitle || "" }),
+    input,
+  ]);
+}
+
+/** Целое число в заданных границах: шаг единица, на телефоне цифровая клавиатура. */
+function uiNumber(min, max) {
+  return uiEl("input", {
+    class: "ui-input ui-number",
+    type: "number",
+    attrs: { min: String(min), max: String(max), step: "1", inputmode: "numeric" },
+  });
+}
+
+/**
+ * Поле отдаёт значение по Enter и по уходу фокуса — и только так: правка на
+ * каждое нажатие клавиши набивала бы стек отмены на «1», «12», «120».
+ */
+function uiApply(input, run) {
+  input.addEventListener("change", run);
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    run();
+  });
+  return input;
+}
+
+/** Строка-отметка: квадратик и слово, нажимается вся строка. */
+function uiCheckRow(input, label, title) {
+  return uiEl("label", { class: "ui-check", title: title || "" }, [input, uiEl("span", { text: label })]);
+}
+
 // Диалоги складываются стопкой: подтверждение поверх редактора плана —
 // обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
 // основное действие, нижние ждут своей очереди и закрываются своими же close().
@@ -40547,6 +40708,1185 @@ function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
   return button;
 }
 
+// src/panels/typePicker.js
+// Своё окно выбора типа метки: «буква — пояснение», поиск и ввод нового кода
+// прямо здесь.
+//
+// Категории стоят колонками рядом — «Свет», «Выключатели», «Розетки» и так
+// далее, — а не одним длинным столбцом: окно открывается десятки раз за сеанс,
+// и цель — попасть в нужный тип одним взглядом и одним кликом, без листания.
+// В одной колонке категорий бывает несколько: короткие «Розетки» и «Климат»
+// встают друг под друга, а не держат каждая свою пустую колонку до низа окна.
+// Раскладку считает `pickerLayout`, ширину окна задаёт число получившихся
+// колонок (`--picker-columns`) — справа не остаётся пустого поля, и колонки не
+// растягиваются, когда поиск оставил одну.
+//
+// Окно открывается один раз на серию: выбранный тип «залипает» в панели
+// инструментов, и дальше метки ставятся кликами без единого диалога.
+
+
+
+
+// Клетка знака в строке: одна мера на оба вида. Образец линии шире фигуры —
+// сплющить его до её ширины нельзя (точечную линию от штрихпунктирной в 22px
+// не отличить), поэтому фигура садится в клетку той же ширины, что образец.
+// Так строки точечных и линейных типов стоят колонка в колонку — то же
+// правило, по которому выровнены строки справочника.
+const PICKER_ICON = { size: 22, length: 44 };
+
+// Значок типа — цвет категории и обозначение из справочника, нарисованные
+// общим `render.typeIcon`: у точечного типа фигура, у линейного образец его
+// начертания (дефект D31 — здесь рисовались точки у всех). Вид спрашивает сам
+// `typeIcon` у `typeKindOf`: у объекта прежнего формата поля `kind` нет.
+function pickerIcon(project, typeId, size = PICKER_ICON.size) {
+  return uiEl("span", { class: "picker__icon" }, [
+    typeIcon(project, typeId, size, PICKER_ICON.length),
+  ]);
+}
+
+// Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.
+// Лишние категории уходят не во второй ряд, а вниз по колонкам — вторым рядом
+// сетка выравнивала всё по самой высокой категории и оставляла посреди окна
+// пустое поле.
+const PICKER_MAX_COLUMNS = 6;
+
+// Меры окна, по которым считается, сколько колонок в него влезет. Считать нужно
+// всё это вместе: колонка, которая «почти влезла», даёт горизонтальную
+// прокрутку — а на узком экране колонок должно становиться меньше, только и
+// всего.
+//
+// **Хозяин этих чисел — здесь, а узнаёт о них CSS двумя путями** (таск 173).
+// Где стиль может спросить — он спрашивает: число колонок приходит к нему
+// переменной `--picker-columns`, которую ставит `renderList`. Где не может —
+// ширина колонки в `minmax()`, просвет `gap`, доля экрана `96vw` и поля
+// карточки `40px` — число повторено в `typePicker.css` и `objectPicker.css`,
+// а держит их вместе `test/cssMeasures.test.js`: он читает стиль текстом и
+// падает на расхождении. Переменная с запасным значением этого не заменила бы
+// — запасное значение и есть то же число во втором месте.
+const PICKER_COLUMN_MIN = 150;
+const PICKER_COLUMN_GAP = 14;
+const PICKER_MODAL_SHARE = 0.96;
+const PICKER_MODAL_CHROME = 40;
+
+// Сколько колонок помещается в экран шириной `width`. Мера колонки — довод:
+// у окна вещей чертежа (`objectPicker.js`) колонка шире, потому что в ней
+// стоят плитки, а не строки.
+function pickerColumnLimit(width, columnMin = PICKER_COLUMN_MIN) {
+  const usable = Math.max(0, Number(width) || 0) * PICKER_MODAL_SHARE - PICKER_MODAL_CHROME;
+  const fits = Math.floor((usable + PICKER_COLUMN_GAP) / (columnMin + PICKER_COLUMN_GAP));
+  return Math.max(1, Math.min(PICKER_MAX_COLUMNS, fits));
+}
+
+// Высота категории в строках: заголовок плюс её типы. Точные пиксели здесь не
+// нужны — раскладка решает, что с чем встанет в одну колонку, а не рисует.
+//
+// Мера высоты — довод раскладки, а не её устройство: окно вещей чертежа
+// считает ряды плиток (`objectPickerWeight`), и обоим окнам хватает одной
+// раскладки. Второго такого механизма в сборке быть не должно.
+function pickerWeight(group) {
+  return 1 + (group && Array.isArray(group.types) ? group.types.length : 0);
+}
+
+// Категории кладутся в колонку подряд, пока та не станет выше `height`.
+// Порядок справочника сохраняется: колонка читается сверху вниз, колонки —
+// слева направо, «Свет» по-прежнему первый, «Щит» последний.
+function pickerFill(groups, height, weightOf) {
+  const columns = [];
+  let filled = 0;
+  for (const group of groups) {
+    const weight = weightOf(group);
+    if (columns.length > 0 && filled + weight <= height) {
+      columns[columns.length - 1].push(group);
+      filled += weight;
+      continue;
+    }
+    columns.push([group]);
+    filled = weight;
+  }
+  return columns;
+}
+
+// Раскладка категорий по колонкам. Сетка выравнивала ряд по самой высокой
+// категории: «Свет» с девятью типами держал всю первую строку, и «Щит» с
+// «Датчиками» начинались только под ним — между выключателями и датчиками
+// зияла пустая половина окна. Здесь колонка набивается подряд до высоты самой
+// длинной категории: пустых мест между категориями не остаётся, а колонок
+// выходит ровно столько, сколько понадобилось, — не больше `limit`.
+function pickerLayout(groups, limit = PICKER_MAX_COLUMNS, weightOf = pickerWeight) {
+  const list = Array.isArray(groups) ? groups.filter(Boolean) : [];
+  if (list.length === 0) return [];
+  const cap = Math.max(1, Math.floor(Number(limit)) || 1);
+  const total = list.reduce((sum, group) => sum + weightOf(group), 0);
+  let height = Math.max(...list.map(weightOf));
+  let columns = pickerFill(list, height, weightOf);
+  // Категорий больше, чем колонок помещается в окно, — колонка становится
+  // выше, и лишние уходят под соседние, а не за край экрана.
+  while (columns.length > cap && height < total) {
+    height += 1;
+    columns = pickerFill(list, height, weightOf);
+  }
+  return columns;
+}
+
+// Клавиатура по сетке: вверх-вниз — по колонке целиком, через границы
+// категорий, если их в колонке несколько; вправо-влево — в соседнюю колонку на
+// ту же строку (короткая колонка прижимает к последней строке).
+function pickerMove(box, row, dx, dy) {
+  const columns = [...box.children].filter((node) => node.classList.contains("picker__column"));
+  const rowsOf = (node) => [...node.querySelectorAll(".picker__row")];
+  const column = columns.findIndex((node) => node.contains(row));
+  if (column < 0) return;
+  const index = rowsOf(columns[column]).indexOf(row);
+  const rows = rowsOf(columns[Math.min(columns.length - 1, Math.max(0, column + dx))]);
+  const next = rows[Math.min(rows.length - 1, Math.max(0, index + dy))];
+  if (next) next.focus();
+}
+
+// Виды, внутри которых окно сужает справочник. Комментарий здесь наравне с
+// точкой и линией: плашку меняют только на плашку — текст у неё есть, а у
+// знака его негде взять (`changeMarkType` стережёт то же правило).
+// Виды, внутри которых окно сужает справочник. Комментария здесь нет и быть
+// не может: тип у него встроенный и единственный (G173), менять его не на
+// что — кнопку «Сменить тип» панель инструментов такой метке и не показывает.
+const PICKER_KINDS = ["point", "line"];
+
+// Чем окно объясняет сужение. Строка одна на вид — иначе пользователь видел бы
+// короткий список и не знал, чего в нём не хватает.
+function pickerKindNote(kind) {
+  return kind === "line" ? strings.picker.onlyLine : strings.picker.onlyPoint;
+}
+
+/**
+ * Подходит ли встроенный комментарий под набранное в поиске.
+ *
+ * Плашка стоит под таблицей и ведёт себя как её строки: поиск сужает окно, и
+ * «розетка» не должна оставлять на экране комментарий. Правило то же, что у
+ * `searchTypes`, но своё: встроенного типа в справочнике нет, и спросить
+ * модель о нём нельзя.
+ */
+function pickerCommentMatches(project, query) {
+  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  if (!needle) return true;
+  const type = findType(project, COMMENT_TYPE_ID);
+  return (
+    type.code.toLowerCase().startsWith(needle) ||
+    type.name.toLowerCase().includes(needle) ||
+    strings.picker.builtinComment.toLowerCase().includes(needle)
+  );
+}
+
+// Смена типа у метки идёт внутри её вида: линии — линейные типы, точке —
+// точечные. Окно получает вид в `options.kind` и оставляет только свои типы;
+// постановка новой метки вид не задаёт и видит справочник целиком.
+//
+// Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
+// формата поля нет вовсе. Категория, в которой не осталось ни одного типа
+// нужного вида, из окна уходит — пустой заголовок держал бы колонку зря.
+function pickerGroupsOfKind(project, groups, kind) {
+  if (!PICKER_KINDS.includes(kind)) return groups;
+  return groups
+    .map((group) => ({ ...group, types: group.types.filter((type) => typeKindOf(project, type.id) === kind) }))
+    .filter((group) => group.types.length > 0);
+}
+function openTypePicker(project, options = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    let current = project;
+    const done = (result) => {
+      modal.close();
+      resolve(result || null);
+    };
+
+    const box = uiEl("div", { class: "picker__columns" });
+    const builtin = uiEl("div", { class: "picker__builtin" });
+    const body = uiEl("div", { class: "picker picker--types" });
+    const error = uiEl("p", { class: "picker__error" });
+    const createBox = uiEl("div", { class: "picker__create" });
+    const search = uiEl("input", {
+      class: "ui-input",
+      type: "text",
+      placeholder: strings.picker.search,
+      on: {
+        input: () => renderList(),
+        keydown: (event) => {
+          // Стрелка вниз из поиска — в первую строку сетки: дальше по ней
+          // ходят стрелками, не хватаясь за мышь.
+          // Плашка комментария стоит под сеткой и в обход её не остаётся:
+          // когда поиск оставил только её, и стрелка, и Enter ведут к ней.
+          if (event.key === "ArrowDown") {
+            const first = box.querySelector(".picker__row") || builtinRow();
+            if (!first) return;
+            event.preventDefault();
+            first.focus();
+            return;
+          }
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          const first = box.querySelector(".picker__row") || builtinRow();
+          if (first) first.click();
+          else if (createBox.firstChild) createType();
+        },
+      },
+    });
+
+    let createName = null;
+    let createCategory = null;
+
+    function createType() {
+      const code = search.value.trim();
+      if (!createName || !createCategory) return;
+      try {
+        const result = addType(current, {
+          code,
+          name: createName.value.trim() || code,
+          categoryId: createCategory.value,
+          // Окно сужено до вида метки — заведённый здесь тип обязан быть того
+          // же вида, иначе его нечем будет выбрать в этом же окне.
+          ...(options.kind ? { kind: options.kind } : {}),
+        });
+        done({ typeId: result.type.id, project: result.project, created: true });
+      } catch (failure) {
+        error.textContent = failure.message;
+      }
+    }
+
+    function renderCreate(query) {
+      createBox.replaceChildren();
+      error.textContent = "";
+      // Годится ли код — знает модель, и только она: буквы, длина и занятость
+      // проверяются там же, где их проверит `addType`. Своей копии правила
+      // здесь нет намеренно — прежняя пережила снятие предела в две буквы и
+      // отказывалась заводить «ПОДСВЕТКА».
+      // Тип с таким названием или кодом уже есть — второй такой же заводить
+      // незачем: он стоит первым в списке, и Enter берёт именно его.
+      if (matchTypeExactly(current, query)) return;
+      if (codeProblem(current, query)) return;
+      createName = uiEl("input", {
+        class: "ui-input",
+        type: "text",
+        placeholder: strings.picker.createNamePlaceholder,
+      });
+      createCategory = uiEl(
+        "select",
+        { class: "ui-select" },
+        current.categories.map((category) =>
+          uiEl("option", { text: category.name, value: category.id, attrs: { value: category.id } }),
+        ),
+      );
+      createBox.append(
+        uiEl("p", { class: "picker__createTitle", text: text("picker.createTitle", { code: query }) }),
+        uiEl("p", { class: "picker__createTitle", text: text("picker.codeHint", { max: CODE_MAX_LENGTH }) }),
+        uiEl("label", { class: "picker__field" }, [
+          uiEl("span", { text: strings.picker.createName }),
+          createName,
+        ]),
+        uiEl("label", { class: "picker__field" }, [
+          uiEl("span", { text: strings.picker.createCategory }),
+          createCategory,
+        ]),
+        uiButton(strings.picker.create, {
+          class: "ui-btn ui-btn--accent",
+          on: { click: createType },
+        }),
+      );
+    }
+
+    function typeRow(type) {
+      const row = uiEl(
+        "button",
+        {
+          class: "picker__row" + (type.id === options.activeTypeId ? " is-active" : ""),
+          type: "button",
+          // Длинный код не даёт названию места, и оно ужимается многоточием —
+          // подсказка возвращает его целиком.
+          title: type.code + " — " + type.name,
+          on: { click: () => done({ typeId: type.id, project: current }) },
+        },
+        [
+          pickerIcon(current, type.id),
+          uiEl("span", { class: "picker__code", text: type.code }),
+          uiEl("span", { class: "picker__name", text: type.name }),
+        ],
+      );
+      return row;
+    }
+
+    // Категория — заголовок в её цвете и строки типов. Блок целиком, потому
+    // что в колонке их бывает несколько: заголовок должен липнуть к своим
+    // строкам и уезжать вместе с ними, а не наезжать на соседнюю категорию.
+    function categoryBlock(group) {
+      const head = uiEl("div", { class: "picker__group", text: group.category.name });
+      head.style.borderColor = group.category.color;
+      head.style.color = group.category.color;
+      return uiEl("div", { class: "picker__category" }, [head, ...group.types.map(typeRow)]);
+    }
+
+    /**
+     * Отдельная плашка «Комментарий» под основной таблицей (G173).
+     *
+     * Слова заказчика: «в окне добавления в выборе типа метки просто сделай
+     * снизу отдельную плашку Комментарий, под основной таблицей. То есть под
+     * капотом это такая же метка, но в интерфейсе отдельно выделяется».
+     *
+     * Почему не клетка сетки: сетка — это справочник объекта, который человек
+     * правит сам, а комментарий есть всегда и ни переименовать, ни удалить
+     * его нельзя. Отдельный блок под чертой и подпись «есть всегда, в
+     * справочнике его нет» говорят это прямо, а не намёком.
+     *
+     * Плашки нет, когда окно сужено видом метки (`options.kind`): там меняют
+     * тип у уже стоящей метки, а точку в комментарий не превращают — модель
+     * этого и не позволит.
+     */
+    function renderBuiltin(query) {
+      builtin.replaceChildren();
+      builtin.hidden = Boolean(options.kind) || !pickerCommentMatches(current, query);
+      if (builtin.hidden) return;
+      const type = findType(current, COMMENT_TYPE_ID);
+      const row = uiEl(
+        "button",
+        {
+          class: "picker__row picker__builtin-row" + (options.activeTypeId === COMMENT_TYPE_ID ? " is-active" : ""),
+          type: "button",
+          title: strings.picker.builtinCommentHint,
+          on: { click: () => done({ typeId: COMMENT_TYPE_ID, project: current }) },
+        },
+        [
+          pickerIcon(current, COMMENT_TYPE_ID),
+          uiEl("span", { class: "picker__code", text: commentCodeOf(current) }),
+          uiEl("span", { class: "picker__name", text: type.name }),
+        ],
+      );
+      builtin.append(
+        uiEl("p", { class: "picker__builtin-title", text: strings.picker.builtinComment }),
+        row,
+        uiEl("p", { class: "picker__builtin-hint", text: strings.picker.builtinCommentHint }),
+      );
+    }
+
+    // Строка плашки, когда она на экране. Отдельной функцией — её спрашивают
+    // и клавиатура, и проверка «а есть ли вообще что выбрать».
+    function builtinRow() {
+      return builtin.hidden ? null : builtin.querySelector(".picker__row");
+    }
+
+    function renderList() {
+      const query = search.value.trim();
+      // Что за чем показывать, решает модель: поиск по коду и названию,
+      // точное совпадение кода первым. Своей сортировки здесь нет.
+      const groups = pickerGroupsOfKind(current, searchTypes(current, query), options.kind);
+      const width = typeof window === "undefined" ? 0 : window.innerWidth;
+      const columns = pickerLayout(groups, pickerColumnLimit(width));
+      box.replaceChildren(
+        ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
+      );
+      if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.picker.empty }));
+      // Ширину окна задаёт число колонок: уместились семь категорий в четыре —
+      // окно на четыре колонки и никакого пустого поля справа, одна найденная
+      // категория — узкое окно.
+      body.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
+      renderBuiltin(query);
+      renderCreate(query);
+    }
+
+    // Клавиатура по сетке. Enter здесь обязателен свой: основное действие
+    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
+    // Enter в клик по строке, — то есть выбор терялся бы.
+    box.addEventListener("keydown", (event) => {
+      const row = event.target;
+      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        row.click();
+        return;
+      }
+      const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      pickerMove(box, row, step[0], step[1]);
+    });
+
+    renderList();
+    const note = PICKER_KINDS.includes(options.kind)
+      ? uiEl("p", { class: "picker__note", text: pickerKindNote(options.kind) })
+      : null;
+    body.replaceChildren(...[search, note, box, builtin, createBox, error].filter(Boolean));
+    modal = uiModal({
+      title: options.title || strings.picker.title,
+      body,
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
+      onCancel: () => resolve(null),
+    });
+    // Широкая карточка — только у этого окна: ширину внутри задаёт сетка колонок.
+    if (modal.card) modal.card.classList.add("modal--wide");
+    search.focus();
+  });
+}
+
+// src/panels/objectPicker.js
+// Окно выбора вещи чертежа (таск 170, требование G252).
+//
+// Слова заказчика: «механеику выбора для добавления и изменения объекта сделай
+// как для меток — в отдельном окне». До этого вещи выбирались плитками **прямо
+// в колонке** (таск 154), и довод был свой: кухню собирают из шести предметов
+// подряд, и окно пришлось бы открывать на каждый. Заказчик решил иначе, но
+// довод никуда не делся — вот что сделано, чтобы шесть вещей подряд не стали
+// шестью мучениями:
+//
+//   1. **Шага категории больше нет.** В колонке на 264 точки плитки влезали
+//      только по одной категории, и до холодильника надо было сперва выбрать
+//      «Технику». Окно шире колонки втрое: все вещи каталога стоят в нём
+//      сразу, категориями по колонкам, и до любой из них — один клик.
+//   2. **Выбранная вещь залипает** — ровно как тип метки в панели инструментов
+//      (`tools__type`). Окно открывается один раз на серию: шесть одинаковых
+//      розеток или шесть шкафов ставятся кликами по полю без единого диалога.
+//   3. **Поиск с клавиатуры.** «хол» и Enter — холодильник выбран, мышь не
+//      нужна; стрелки водят по плиткам, как по строкам окна типов.
+//
+// Механизм — тот же, что у выбора типа метки: карточка `uiModal`, поиск
+// сверху, категории колонками, раскладку колонок считает общий `pickerLayout`
+// из `typePicker.js` (он же считает её для типов — второго такого механизма в
+// сборке нет). Отличается только клетка: у типа строка «знак — код —
+// название», у вещи плитка «картинка — имя» (G224, плитки переехали сюда из
+// колонки чертежа).
+//
+// **Вещь с отметкой `legacy` из окна спрятана** (сегодня одна — общий вид
+// «Сантехника»): ею больше не размечают, но по ней открываются чужие чертежи.
+// Прячет её окно, а не каталог — что показать в выборе, дело экрана, — и
+// показывает обратно, пока такой вещью стоит выделенное: человек обязан
+// видеть, чем стоит вещь на его чертеже, а подсветить вместо неё похожую
+// значило бы соврать.
+
+
+
+
+
+// Клетка картинки на плитке. Сорок точек — столько же, сколько у крупного
+// знака типа метки в разделе «Метки»: мельче у кровати не разобрать подушек.
+const OBJECT_TILE_ICON = 40;
+// Цвет рисунка — цвет текста панели: плитка не красит вещь, она её показывает.
+// Цвет на чертеже у объектов свой и общий, и повторять его тут значило бы
+// обещать выбор краски, которого нет.
+const TILE_INK = "#e6edf3";
+
+/**
+ * Картинка вещи в клетке. Рисуется в точках устройства, а показывается в
+ * точках страницы: на экране с удвоенной плотностью контур иначе размылся бы.
+ */
+function objectTileIcon(key, size = OBJECT_TILE_ICON) {
+  const canvas = uiEl("canvas", { class: "objectTile__icon" });
+  const ratio = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? Math.min(3, devicePixelRatio) : 1;
+  canvas.width = Math.round(size * ratio);
+  canvas.height = Math.round(size * ratio);
+  canvas.style.width = size + "px";
+  canvas.style.height = size + "px";
+  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
+  const icon = objectViewByName(key);
+  if (ctx && icon) drawObjectView(ctx, icon, { x: 0, y: 0, width: canvas.width, height: canvas.height }, TILE_INK);
+  return canvas;
+}
+
+// Плиток в ряду внутри категории. Та же тройка стоит в `objectPicker.css`
+// (`grid-template-columns: repeat(3, …)`), и держать её надо вместе: по ней
+// здесь считается высота категории для раскладки колонок и шаг стрелок
+// вверх-вниз. Разойдись эти числа — стрелка прыгала бы не на ряд.
+const OBJECT_PICKER_TILES_PER_ROW = 3;
+// Колонка в три плитки по 84 точки с просветами — та же мера, что в
+// `objectPicker.css` (`minmax(270px, 1fr)`); держит их вместе
+// `test/cssMeasures.test.js`.
+const OBJECT_PICKER_COLUMN_MIN = 270;
+// Больше четырёх колонок не ставим: категорий всего шесть, и пятая колонка
+// растянула бы окно на весь экран ради двух плиток «Декора».
+const OBJECT_PICKER_MAX_COLUMNS = 4;
+
+/** Сколько колонок категорий помещается в экран шириной `width`. */
+function objectPickerColumnLimit(width) {
+  return Math.min(OBJECT_PICKER_MAX_COLUMNS, pickerColumnLimit(width, OBJECT_PICKER_COLUMN_MIN));
+}
+
+// Высота категории в единицах раскладки: заголовок плюс ряды плиток.
+function objectPickerWeight(group) {
+  const count = group && Array.isArray(group.entries) ? group.entries.length : 0;
+  return 1 + Math.ceil(count / OBJECT_PICKER_TILES_PER_ROW);
+}
+
+// Терпимое сравнение, как у каталога: регистр, «ё» и пробелы по краям не
+// считаются. Поиск идёт по имени вещи и по имени её категории — «сантех»
+// показывает весь раздел, «хол» одну плитку.
+function plain(value) {
+  return String(value == null ? "" : value)
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, "е");
+}
+
+/**
+ * Что показать в окне: категории по порядку каталога, в каждой — её вещи.
+ *
+ * `query` сужает выдачу, `key` — ключ вещи, которой стоит выделенное (или
+ * которой поставят следующую): по нему в окне остаётся спрятанная `legacy`
+ * вещь, если ею размечен чертёж. Пустая категория из выдачи уходит — пустой
+ * заголовок держал бы колонку зря.
+ */
+function objectPickerGroups(query, { key } = {}) {
+  const needle = plain(query);
+  const chosen = key || null;
+  return OBJECT_CATEGORIES.map((category) => {
+    const name = strings.schemeObjectCategories[category] || category;
+    const hay = plain(name);
+    const entries = objectCatalogCategory(category).filter((entry) => {
+      if (entry.legacy && entry.key !== chosen) return false;
+      if (needle === "") return true;
+      return plain(entry.name).includes(needle) || hay.includes(needle);
+    });
+    return { category, name, entries };
+  }).filter((group) => group.entries.length > 0);
+}
+
+/**
+ * Куда уводит стрелка. Правило то же, что в окне типов: вверх-вниз — по
+ * колонке целиком, через границы категорий (все ряды в три плитки, поэтому
+ * шаг на ряд — это шаг на три плитки); вправо-влево — в соседнюю колонку на то
+ * же место сверху (короткая колонка прижимает к последней плитке).
+ *
+ * `columns` — уже разложенные колонки (`pickerLayout`), а не категории:
+ * стрелка должна ходить по тому, что человек видит.
+ */
+function objectPickerStep(columns, key, dx, dy) {
+  const flat = (Array.isArray(columns) ? columns : []).map((column) =>
+    column.flatMap((group) => group.entries.map((entry) => entry.key)),
+  );
+  const clamp = (value, last) => Math.max(0, Math.min(last, value));
+  let at = -1;
+  let spot = -1;
+  flat.forEach((keys, index) => {
+    const found = keys.indexOf(key);
+    if (found >= 0) {
+      at = index;
+      spot = found;
+    }
+  });
+  const first = flat.find((keys) => keys.length > 0);
+  if (at < 0) return first ? first[0] : null;
+  if (dx) {
+    const target = flat[clamp(at + dx, flat.length - 1)];
+    return target.length > 0 ? target[clamp(spot, target.length - 1)] : key;
+  }
+  if (!dy) return key;
+  return flat[at][clamp(spot + dy * OBJECT_PICKER_TILES_PER_ROW, flat[at].length - 1)];
+}
+
+/**
+ * Сетка вещей как кирпич: поиск сверху, категории колонками, плитки внутри.
+ *
+ * Вынесена наружу в таске 187: той же сеткой стоит шаг «Объекты» в окне «Что
+ * добавить», и второй её сборки быть не должно — разойдись они, человек видел
+ * бы в двух окнах два разных каталога. Окно выбора вещи (ниже) — первый её
+ * хозяин, и ведёт себя в точности как прежде.
+ *
+ * `onPick(key)` зовётся кликом по плитке и Enter в поиске; что считать
+ * выбранным, решает хозяин — он же присылает это `setKey`.
+ */
+function createObjectTiles(options = {}) {
+  let key = options.key || null;
+  let columns = [];
+  const box = uiEl("div", { class: "picker__columns picker__columns--objects" });
+  const node = uiEl("div", { class: "picker picker--objects" });
+  const pick = (next) => {
+    if (next && typeof options.onPick === "function") options.onPick(next);
+  };
+  const firstKey = () => {
+    const first = box.querySelector(".objectTile");
+    return first ? first.dataset.key : null;
+  };
+
+  const search = uiEl("input", {
+    class: "ui-input",
+    type: "text",
+    placeholder: strings.objectPicker.search,
+    on: {
+      input: () => render(),
+      keydown: (event) => {
+        // Стрелка вниз из поиска — в первую плитку: дальше по сетке ходят
+        // стрелками, не хватаясь за мышь.
+        if (event.key === "ArrowDown") {
+          const first = box.querySelector(".objectTile");
+          if (!first) return;
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+        // Enter берёт первую найденную вещь. Своя обработка здесь
+        // обязательна: основное действие карточки — «Отмена», и оно
+        // сработало бы раньше (`uiModal` ловит Enter), то есть выбор
+        // терялся бы.
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        pick(firstKey());
+      },
+    },
+  });
+
+  function tile(entry) {
+    return uiEl(
+      "button",
+      {
+        class: "objectTile" + (entry.key === key ? " is-on" : ""),
+        type: "button",
+        title: entry.name,
+        attrs: { "data-key": entry.key, "aria-pressed": entry.key === key ? "true" : "false" },
+        on: { click: () => pick(entry.key) },
+      },
+      [
+        objectTileIcon(entry.key),
+        // Язык подписи назван в самой подписи: перенос по слогам
+        // (`hyphens: auto`) работает только когда браузер знает язык.
+        uiEl("span", { class: "objectTile__name", text: entry.name, attrs: { lang: "ru" } }),
+      ],
+    );
+  }
+
+  // Категория — заголовок и сетка её плиток. Блок целиком, потому что в
+  // колонке их бывает несколько: заголовок должен липнуть к своим плиткам, а
+  // не наезжать на соседнюю категорию.
+  function categoryBlock(group) {
+    return uiEl("div", { class: "picker__category" }, [
+      uiEl("div", { class: "picker__group", text: group.name }),
+      uiEl("div", { class: "objectTiles__grid" }, group.entries.map(tile)),
+    ]);
+  }
+
+  function render() {
+    const groups = objectPickerGroups(search.value, { key });
+    const width = typeof window === "undefined" ? 0 : window.innerWidth;
+    columns = pickerLayout(groups, objectPickerColumnLimit(width), objectPickerWeight);
+    box.replaceChildren(
+      ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
+    );
+    if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.objectPicker.empty }));
+    // Ширину окна задаёт число получившихся колонок: нашлась одна категория
+    // — окно узкое, и справа не остаётся пустого поля.
+    node.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
+  }
+
+  box.addEventListener("keydown", (event) => {
+    const current = event.target;
+    if (!current || !current.classList || !current.classList.contains("objectTile")) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      current.click();
+      return;
+    }
+    const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = objectPickerStep(columns, current.dataset.key, step[0], step[1]);
+    const target = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
+    if (target) target.focus();
+  });
+
+  render();
+  node.replaceChildren(search, box);
+  return {
+    node,
+    focus: () => search.focus(),
+    setKey(next) {
+      key = next || null;
+      render();
+    },
+  };
+}
+
+/**
+ * Открыть окно выбора вещи. Отдаёт ключ каталога или `null`, если закрыли.
+ *
+ * `options.key` — вещь, которая горит (у выделенной её собственная, без
+ * выделения — та, которой поставят следующую); `options.title` — заголовок
+ * окна: у смены вещи он свой, и человек должен видеть, что правит стоящее на
+ * чертеже, а не выбирает новое.
+ */
+function openObjectPicker(options = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    const tiles = createObjectTiles({
+      key: options.key,
+      onPick: (key) => {
+        modal.close();
+        resolve(key || null);
+      },
+    });
+    modal = uiModal({
+      title: options.title || strings.objectPicker.title,
+      body: tiles.node,
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => { modal.close(); resolve(null); } } })],
+      onCancel: () => resolve(null),
+    });
+    // Широкая карточка — как у окна типов: ширину внутри задаёт сетка колонок.
+    if (modal.card) modal.card.classList.add("modal--wide");
+    tiles.focus();
+  });
+}
+
+// src/panels/drawPicker.js
+// Окно «Что добавить» (таск 187, требование G280).
+//
+// Слова заказчика: «Пусть для чертежа слева будет выделение и добавление ровно
+// как и для меток, что добавить — выбираем уже в окне, при чем там так же
+// выбирается сперва тип — стены, проёмы, объекты. При выборе верхней категории
+// раскрывается уже вложенное меню, то, что сейчас слева блок соответствующий».
+//
+// **Эталон назван прямо: метки.** У них в колонке стоит плашка выбранного типа
+// и ряд «Выделение · Добавление», а что ставить — выбирают окном
+// (`typePicker.js`). Здесь то же самое, и лишнее в колонке чертежа кончилось:
+// ряд «Стены · Проёмы · Объекты», виды проёмов, способы, размеры новой вещи и
+// толщина новых стен переехали сюда.
+//
+// ——— почему шаги, а не три окна ———
+//
+// У меток тип выбирают одним окном, потому что тип — одна вещь. У чертежа
+// вещей три породы, и настройки у них разные: у стены число, у проёма вид с
+// размерами, у вещи плитка каталога со способом и габаритом. Поэтому окно одно,
+// а шагов три: заголовки стоят друг под другом, раскрыт ровно один — тот,
+// которым сейчас добавляют, — и в нём лежит то, что раньше занимало колонку.
+// Строка под заголовком говорит, что поставит следующий клик, не раскрывая шаг:
+// «толщина 100 мм», «Дверь, 900 × 2100 мм», «Радиатор, прямоугольник».
+//
+// ——— что показывает шаг «Стены» ———
+//
+// **Плиток у стен нет и быть не может**: стена — не вещь из каталога, выбирать
+// у неё нечего. Из колонки сюда переехало единственное, что у новой стены
+// настраивают, — **толщина**, и к ней добавлены плитки частых толщин, чтобы не
+// набирать число руками. Второго «способа» рисовать стену в сборке нет: она
+// рисуется цепочкой, и выдумывать ей выбор значило бы обещать то, чего нет.
+//
+// ——— один клик, повторный — закрыть ———
+//
+// Серия из шести вещей подряд (кухня) боялась переезда в окно не зря, и ответ
+// тот же, что в таске 170: выбранное **залипает** в плашке колонки, и шесть
+// одинаковых ставятся кликами по полю без единого диалога. Внутри окна правило
+// одно на все три шага: первый клик по плитке выбирает, повторный по уже
+// выбранной — закрывает окно и берётся за дело. То же делает кнопка в ряду
+// окна («Чертить стены», «Ставить проём», «Ставить вещь») и Enter.
+//
+// Своего состояния окно не держит: оно получает настройки доводом и отдаёт их
+// одним ответом. Писать в объект, в настройки браузера и в память страницы —
+// дело хозяина (`panels/workshop.js`), иначе отказ («Отмена») оставлял бы за
+// собой половину правок.
+
+
+
+
+
+// Порядок шагов — порядок работы, заданный заказчиком (G176): сперва стены,
+// потом проёмы, потом объекты. Он же порядок трёх списков в правой колонке.
+const DRAW_PICKER_STEPS = ["walls", "openings", "objects"];
+
+// Частые толщины стен в миллиметрах: кирпич в полкирпича и в кирпич,
+// газобетонная перегородка, гипсокартон на профиле 50 и 100, несущая панель.
+// Ряд не закон: рядом с плитками стоит поле любого числа до
+// `WALL_THICKNESS_MM_MAX`.
+const WALL_THICKNESS_PRESETS_MM = [80, 100, 120, 150, 200, 250, 380];
+
+/** Как зовётся порода элемента: те же слова, что у трёх списков в колонке. */
+function drawPickerName(adding) {
+  if (adding === "openings") return strings.workshop.toolOpenings;
+  if (adding === "objects") return strings.workshop.toolObjects;
+  return strings.workshop.toolWalls;
+}
+
+/** Подсказка шага: за что берутся, выбрав эту породу. */
+function drawPickerHint(adding) {
+  if (adding === "openings") return strings.workshop.toolOpeningsHint;
+  if (adding === "objects") return strings.workshop.toolObjectsHint;
+  return strings.workshop.toolWallsHint;
+}
+
+/** Неизвестное слово — стены: окно обязано раскрыть хоть один шаг. */
+function drawPickerStepOf(adding) {
+  return DRAW_PICKER_STEPS.includes(adding) ? adding : "walls";
+}
+
+/**
+ * Строка «что поставит следующий клик» — **одна на окно и на плашку колонки**.
+ *
+ * Разойдись они, и человек читал бы в колонке одно, а в окне другое. Поэтому
+ * считается она здесь и чистой функцией: `settings` — то же самое, что окно
+ * получает доводом и отдаёт ответом.
+ */
+function drawPickerNote(adding, settings = {}) {
+  const walls = settings.walls || {};
+  const openings = settings.openings || {};
+  const objects = settings.objects || {};
+  if (adding === "openings") {
+    const kind = openings.kind;
+    const sizes = (openings.sizes || {})[kind];
+    if (!kind || !sizes) return strings.drawPicker.noteEmpty;
+    return text("drawPicker.noteOpening", {
+      kind: strings.openingKinds[kind] || kind,
+      width: sizes.widthMm,
+      height: sizes.heightMm,
+    });
+  }
+  if (adding === "objects") {
+    const name = objectCatalogName(objects.key);
+    if (!name) return strings.drawPicker.noteEmpty;
+    return text("drawPicker.noteObject", {
+      name,
+      way: strings.workshop["way_" + objects.way] || strings.workshop.way_rect,
+    });
+  }
+  const thickness = Number(walls.thicknessMm);
+  return thickness > 0 ? text("drawPicker.noteWalls", { thickness }) : strings.drawPicker.noteEmpty;
+}
+
+// Глубокая копия настроек: окно правит свою, и отказ («Отмена») не должен
+// оставлять за собой ни одного числа. Строим вручную, а не `JSON.parse` —
+// высота вещи бывает `null`, и путать «во всю высоту» с нулём нельзя.
+function drawPickerSettings(options) {
+  const walls = options.walls || {};
+  const openings = options.openings || {};
+  const objects = options.objects || {};
+  const sizes = {};
+  for (const [kind, value] of Object.entries(openings.sizes || {})) sizes[kind] = { ...value };
+  return {
+    adding: drawPickerStepOf(options.adding),
+    walls: { thicknessMm: Number(walls.thicknessMm) || 100 },
+    openings: {
+      kind: OPENING_KINDS.includes(openings.kind) ? openings.kind : OPENING_KINDS[0],
+      sizes,
+      hinge: openings.hinge,
+      swing: openings.swing,
+    },
+    objects: { key: objects.key || null, way: objects.way || "rect", sizes: { ...(objects.sizes || {}) } },
+  };
+}
+
+/**
+ * Открыть окно. Отдаёт настройки целиком или `null`, если закрыли.
+ *
+ * Ответ целиком, а не «только выбранный шаг»: всё, что в окне правят, — это
+ * умолчания **нового** элемента, и записать их хозяин обязан разом. Иначе
+ * поправленный размер окна терялся бы от того, что человек в последнюю минуту
+ * решил чертить стену.
+ *
+ * `options.ways` — список способов поставить вещь, `options.defaultsOf` —
+ * габариты вещи каталога по ключу. Хозяин у них один (`panels/workshop.js`), и
+ * окно их только показывает: завести здесь второй список способов значило бы
+ * развести окно с полем.
+ */
+function openDrawPicker(options = {}) {
+  return new Promise((resolve) => {
+    const settings = drawPickerSettings(options);
+    const ways = Array.isArray(options.ways) && options.ways.length > 0 ? options.ways : ["rect"];
+    const defaultsOf = typeof options.defaultsOf === "function" ? options.defaultsOf : () => ({});
+    let modal;
+    let done = false;
+
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      modal.close();
+      resolve(value);
+    };
+    // Берёмся за дело: окно закрывается и отдаёт настройки целиком.
+    const start = () => finish({ ...settings });
+    // Основное действие стоит **одной кнопкой в ряду карточки**, а не внизу
+    // каждого шага: ряд действий у окна один, и Enter обязан нажимать то же,
+    // что мышь (`uiModal` берёт основным последнюю кнопку ряда). Слово на ней
+    // меняется вместе с раскрытым шагом — «Чертить стены», «Ставить проём»,
+    // «Ставить вещь».
+    const startButton = uiButton("", { class: "ui-btn ui-btn--accent", on: { click: start } });
+
+    // ——— шаг «Стены»: толщина и ничего больше ———
+
+    const thickness = uiNumber(1, WALL_THICKNESS_MM_MAX);
+    uiApply(thickness, () => {
+      const value = Math.round(Number(thickness.value));
+      if (value > 0) settings.walls.thicknessMm = Math.min(WALL_THICKNESS_MM_MAX, value);
+      sync();
+    });
+    const thicknessChips = WALL_THICKNESS_PRESETS_MM.map((value) =>
+      uiButton(String(value), {
+        class: "ui-btn ui-chip",
+        attrs: { "data-thickness": String(value) },
+        on: {
+          click: () => {
+            // Повторный клик по выбранной толщине — «берусь чертить»: то же
+            // правило, что у плиток вещей.
+            if (settings.walls.thicknessMm === value) {
+              start();
+              return;
+            }
+            settings.walls.thicknessMm = value;
+            sync();
+          },
+        },
+      }),
+    );
+    const wallsBody = uiEl("div", { class: "drawPicker__body" }, [
+      uiEl("p", { class: "ui-field__label", text: strings.drawPicker.wallsPresets }),
+      uiEl("div", { class: "ui-chips" }, thicknessChips),
+      uiField(strings.workshop.thicknessNew, thickness),
+      uiEl("p", { class: "drawPicker__about", text: strings.drawPicker.wallsAbout }),
+    ]);
+
+    // ——— шаг «Проёмы»: вид и размеры ———
+
+    const kindChips = OPENING_KINDS.map((kind) =>
+      uiButton(strings.openingKinds[kind], {
+        class: "ui-btn ui-chip",
+        attrs: { "data-kind": kind },
+        on: {
+          click: () => {
+            if (settings.openings.kind === kind) {
+              start();
+              return;
+            }
+            settings.openings.kind = kind;
+            sync();
+          },
+        },
+      }),
+    );
+    const openingWidth = uiNumber(1, DRAWING_MM_MAX);
+    const openingHeight = uiNumber(1, DRAWING_MM_MAX);
+    const openingFloor = uiNumber(0, DRAWING_MM_MAX);
+    const openingFields = [
+      { input: openingWidth, key: "widthMm", min: 1 },
+      { input: openingHeight, key: "heightMm", min: 1 },
+      { input: openingFloor, key: "heightAboveFloorMm", min: 0 },
+    ];
+    for (const field of openingFields) {
+      uiApply(field.input, () => {
+        const value = Math.round(Number(field.input.value));
+        const sizes = openingSizes();
+        if (value >= field.min) settings.openings.sizes[settings.openings.kind] = { ...sizes, [field.key]: value };
+        sync();
+      });
+    }
+    // Створка двери: те же две кнопки, что стояли в колонке, — петли и сторона
+    // открывания. У остальных видов створки нет, и ряд уходит целиком.
+    const hinge = uiButton("", {
+      class: "ui-btn ui-btn--wide",
+      on: {
+        click: () => {
+          settings.openings.hinge = settings.openings.hinge === "end" ? "start" : "end";
+          sync();
+        },
+      },
+    });
+    const swing = uiButton("", {
+      class: "ui-btn ui-btn--wide",
+      on: {
+        click: () => {
+          settings.openings.swing = settings.openings.swing === "right" ? "left" : "right";
+          sync();
+        },
+      },
+    });
+    const doorRow = uiEl("div", { class: "ui-fields" }, [hinge, swing]);
+    const openingsBody = uiEl("div", { class: "drawPicker__body" }, [
+      uiEl("div", { class: "ui-chips" }, kindChips),
+      // Поля в две колонки: столбиком они растили окно так, что кнопка «Ставить
+      // проём» уезжала за нижний край карточки (поймано живым прогоном).
+      uiEl("div", { class: "drawPicker__grid" }, [
+        uiField(strings.workshop.openingWidth, openingWidth),
+        uiField(strings.workshop.openingHeight, openingHeight),
+        uiField(strings.workshop.openingFloor, openingFloor),
+      ]),
+      doorRow,
+      uiEl("p", { class: "drawPicker__about", text: strings.drawPicker.openingsAbout }),
+    ]);
+
+    // ——— шаг «Объекты»: та же сетка плиток, что в окне выбора вещи ———
+
+    const tiles = createObjectTiles({
+      key: settings.objects.key,
+      onPick: (key) => {
+        if (settings.objects.key === key) {
+          start();
+          return;
+        }
+        settings.objects.key = key;
+        // Размеры возвращаются к каталожным, угол переживает смену вещи — то
+        // же правило, что у `setObjectKey` в чертеже (таск 164): угол
+        // принадлежит стене, которую обставляют, а размеры — вещи.
+        const turnDeg = Number(settings.objects.sizes.turnDeg) || 0;
+        settings.objects.sizes = { ...defaultsOf(key), ...(turnDeg ? { turnDeg } : {}) };
+        tiles.setKey(key);
+        sync();
+      },
+    });
+    const wayChips = ways.map((way) =>
+      uiButton(strings.workshop["way_" + way] || way, {
+        class: "ui-btn ui-chip",
+        title: strings.workshop["wayHint_" + way] || "",
+        attrs: { "data-way": way },
+        on: {
+          click: () => {
+            if (settings.objects.way === way) {
+              start();
+              return;
+            }
+            settings.objects.way = way;
+            sync();
+          },
+        },
+      }),
+    );
+    const objectWidth = uiNumber(1, DRAWING_MM_MAX);
+    const objectDepth = uiNumber(1, DRAWING_MM_MAX);
+    const objectTurn = uiNumber(0, 359);
+    const objectHeight = uiNumber(1, DRAWING_MM_MAX);
+    const objectFloor = uiNumber(0, DRAWING_MM_MAX);
+    const objectFields = [
+      { input: objectWidth, key: "widthMm", min: 1 },
+      { input: objectDepth, key: "depthMm", min: 1 },
+      { input: objectTurn, key: "turnDeg", min: 0 },
+      // Пустая высота — «во всю высоту помещения»: так стоят колонна, ниша и
+      // короб. Поэтому у неё своя ветка — пустое поле кладёт `null`, а не ноль.
+      { input: objectHeight, key: "heightMm", min: 1, empty: true },
+      { input: objectFloor, key: "heightAboveFloorMm", min: 0 },
+    ];
+    for (const field of objectFields) {
+      uiApply(field.input, () => {
+        if (field.empty && field.input.value === "") settings.objects.sizes[field.key] = null;
+        else {
+          const value = Math.round(Number(field.input.value));
+          if (value >= field.min) settings.objects.sizes[field.key] = value;
+        }
+        sync();
+      });
+    }
+    const widthField = uiField(strings.workshop.objectWidth, objectWidth);
+    const depthField = uiField(strings.workshop.objectDepth, objectDepth);
+    const turnField = uiField(strings.workshop.objectTurn, objectTurn);
+    const depthLabel = depthField.querySelector(".ui-field__label");
+    const objectsBody = uiEl("div", { class: "drawPicker__body" }, [
+      tiles.node,
+      uiEl("div", { class: "ui-chips" }, wayChips),
+      uiEl("div", { class: "drawPicker__grid" }, [
+        widthField,
+        depthField,
+        turnField,
+        uiField(strings.workshop.objectHeight, objectHeight),
+        uiField(strings.workshop.objectFloor, objectFloor),
+      ]),
+      uiEl("p", { class: "drawPicker__about", text: strings.drawPicker.objectsAbout }),
+    ]);
+
+    // ——— шаги: заголовок со строкой состояния и раскрытое тело ———
+
+    const bodies = { walls: wallsBody, openings: openingsBody, objects: objectsBody };
+    const notes = {};
+    const heads = {};
+    const steps = DRAW_PICKER_STEPS.map((adding) => {
+      const note = uiEl("span", { class: "drawPicker__note" });
+      notes[adding] = note;
+      const head = uiEl(
+        "button",
+        {
+          class: "drawPicker__head",
+          type: "button",
+          title: drawPickerHint(adding),
+          attrs: { "data-adding": adding },
+          on: {
+            click: () => {
+              // Раскрыли шаг — им и добавляют: второго состояния «раскрыт один,
+              // а добавляется другое» в окне не бывает.
+              settings.adding = adding;
+              sync();
+              if (adding === "objects") tiles.focus();
+            },
+          },
+        },
+        [
+          uiEl("span", { class: "drawPicker__chevron", attrs: { "aria-hidden": "true" } }),
+          uiEl("span", { class: "drawPicker__name", text: drawPickerName(adding) }),
+          note,
+        ],
+      );
+      heads[adding] = head;
+      return uiEl("div", { class: "drawPicker__step", attrs: { "data-adding": adding } }, [head, bodies[adding]]);
+    });
+
+    function openingSizes() {
+      return settings.openings.sizes[settings.openings.kind] || {};
+    }
+
+    // Значение в поле, которое не правят сию минуту: иначе набранное число
+    // затиралось бы перерисовкой на полпути.
+    function fieldValue(input, value) {
+      if (document.activeElement === input) return;
+      input.value = value === null || value === undefined ? "" : String(value);
+    }
+
+    function sync() {
+      for (const adding of DRAW_PICKER_STEPS) {
+        const on = settings.adding === adding;
+        const step = steps[DRAW_PICKER_STEPS.indexOf(adding)];
+        step.classList.toggle("is-open", on);
+        bodies[adding].hidden = !on;
+        heads[adding].setAttribute("aria-expanded", on ? "true" : "false");
+        notes[adding].textContent = drawPickerNote(adding, settings);
+      }
+      // Стены: горит плитка той толщины, которая стоит в поле.
+      fieldValue(thickness, settings.walls.thicknessMm);
+      for (const chip of thicknessChips) {
+        chip.classList.toggle("is-on", Number(chip.dataset.thickness) === settings.walls.thicknessMm);
+      }
+      // Проёмы: вид, его размеры и створка двери.
+      const sizes = openingSizes();
+      for (const chip of kindChips) chip.classList.toggle("is-on", chip.dataset.kind === settings.openings.kind);
+      fieldValue(openingWidth, sizes.widthMm);
+      fieldValue(openingHeight, sizes.heightMm);
+      fieldValue(openingFloor, sizes.heightAboveFloorMm);
+      doorRow.hidden = settings.openings.kind !== OPENING_KIND_DOOR;
+      hinge.textContent = text("workshop.doorHinge", {
+        value: strings.openingHinges[settings.openings.hinge] || "",
+      });
+      swing.textContent = text("workshop.doorSwing", {
+        value: strings.openingSwings[settings.openings.swing] || "",
+      });
+      // Объекты: способ, размеры и подпись глубины у полосы.
+      for (const chip of wayChips) chip.classList.toggle("is-on", chip.dataset.way === settings.objects.way);
+      const band = settings.objects.way === "polyline";
+      // У полосы нет ни ширины, ни угла: её форма задана точками (таск 164).
+      widthField.hidden = band;
+      turnField.hidden = band;
+      if (depthLabel) depthLabel.textContent = band ? strings.workshop.objectBand : strings.workshop.objectDepth;
+      const thing = settings.objects.sizes;
+      fieldValue(objectWidth, thing.widthMm);
+      fieldValue(objectDepth, thing.depthMm);
+      fieldValue(objectTurn, thing.turnDeg || 0);
+      fieldValue(objectHeight, thing.heightMm === null || thing.heightMm === undefined ? "" : thing.heightMm);
+      fieldValue(objectFloor, thing.heightAboveFloorMm || 0);
+      startButton.textContent =
+        settings.adding === "openings"
+          ? strings.drawPicker.startOpenings
+          : settings.adding === "objects"
+            ? strings.drawPicker.startObjects
+            : strings.drawPicker.startWalls;
+    }
+
+    const body = uiEl("div", { class: "drawPicker" }, [
+      uiEl("p", { class: "drawPicker__about", text: strings.drawPicker.hint }),
+      ...steps,
+    ]);
+    sync();
+    modal = uiModal({
+      title: strings.drawPicker.title,
+      body,
+      actions: [uiButton(strings.dialog.cancel, { on: { click: () => finish(null) } }), startButton],
+      onCancel: () => finish(null),
+    });
+    // Широкая карточка: шаг «Объекты» ставит внутрь сетку плиток, и ширину там
+    // задаёт она сама (`--picker-columns`), как в окне выбора вещи.
+    if (modal.card) modal.card.classList.add("modal--wide", "modal--drawPicker");
+    if (settings.adding === "objects") tiles.focus();
+    else thickness.focus();
+  });
+}
+
 // src/panels/filters.js
 // Фильтры списка меток: галочки категорий и типов, помещение и поиск.
 //
@@ -48112,724 +49452,6 @@ function mountMarkCard(host, api) {
 }
 
 registerPanel(PANEL_IDS.canvasCard, mountMarkCard);
-
-// src/panels/typePicker.js
-// Своё окно выбора типа метки: «буква — пояснение», поиск и ввод нового кода
-// прямо здесь.
-//
-// Категории стоят колонками рядом — «Свет», «Выключатели», «Розетки» и так
-// далее, — а не одним длинным столбцом: окно открывается десятки раз за сеанс,
-// и цель — попасть в нужный тип одним взглядом и одним кликом, без листания.
-// В одной колонке категорий бывает несколько: короткие «Розетки» и «Климат»
-// встают друг под друга, а не держат каждая свою пустую колонку до низа окна.
-// Раскладку считает `pickerLayout`, ширину окна задаёт число получившихся
-// колонок (`--picker-columns`) — справа не остаётся пустого поля, и колонки не
-// растягиваются, когда поиск оставил одну.
-//
-// Окно открывается один раз на серию: выбранный тип «залипает» в панели
-// инструментов, и дальше метки ставятся кликами без единого диалога.
-
-
-
-
-// Клетка знака в строке: одна мера на оба вида. Образец линии шире фигуры —
-// сплющить его до её ширины нельзя (точечную линию от штрихпунктирной в 22px
-// не отличить), поэтому фигура садится в клетку той же ширины, что образец.
-// Так строки точечных и линейных типов стоят колонка в колонку — то же
-// правило, по которому выровнены строки справочника.
-const PICKER_ICON = { size: 22, length: 44 };
-
-// Значок типа — цвет категории и обозначение из справочника, нарисованные
-// общим `render.typeIcon`: у точечного типа фигура, у линейного образец его
-// начертания (дефект D31 — здесь рисовались точки у всех). Вид спрашивает сам
-// `typeIcon` у `typeKindOf`: у объекта прежнего формата поля `kind` нет.
-function pickerIcon(project, typeId, size = PICKER_ICON.size) {
-  return uiEl("span", { class: "picker__icon" }, [
-    typeIcon(project, typeId, size, PICKER_ICON.length),
-  ]);
-}
-
-// Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.
-// Лишние категории уходят не во второй ряд, а вниз по колонкам — вторым рядом
-// сетка выравнивала всё по самой высокой категории и оставляла посреди окна
-// пустое поле.
-const PICKER_MAX_COLUMNS = 6;
-
-// Меры окна, по которым считается, сколько колонок в него влезет. Считать нужно
-// всё это вместе: колонка, которая «почти влезла», даёт горизонтальную
-// прокрутку — а на узком экране колонок должно становиться меньше, только и
-// всего.
-//
-// **Хозяин этих чисел — здесь, а узнаёт о них CSS двумя путями** (таск 173).
-// Где стиль может спросить — он спрашивает: число колонок приходит к нему
-// переменной `--picker-columns`, которую ставит `renderList`. Где не может —
-// ширина колонки в `minmax()`, просвет `gap`, доля экрана `96vw` и поля
-// карточки `40px` — число повторено в `typePicker.css` и `objectPicker.css`,
-// а держит их вместе `test/cssMeasures.test.js`: он читает стиль текстом и
-// падает на расхождении. Переменная с запасным значением этого не заменила бы
-// — запасное значение и есть то же число во втором месте.
-const PICKER_COLUMN_MIN = 150;
-const PICKER_COLUMN_GAP = 14;
-const PICKER_MODAL_SHARE = 0.96;
-const PICKER_MODAL_CHROME = 40;
-
-// Сколько колонок помещается в экран шириной `width`. Мера колонки — довод:
-// у окна вещей чертежа (`objectPicker.js`) колонка шире, потому что в ней
-// стоят плитки, а не строки.
-function pickerColumnLimit(width, columnMin = PICKER_COLUMN_MIN) {
-  const usable = Math.max(0, Number(width) || 0) * PICKER_MODAL_SHARE - PICKER_MODAL_CHROME;
-  const fits = Math.floor((usable + PICKER_COLUMN_GAP) / (columnMin + PICKER_COLUMN_GAP));
-  return Math.max(1, Math.min(PICKER_MAX_COLUMNS, fits));
-}
-
-// Высота категории в строках: заголовок плюс её типы. Точные пиксели здесь не
-// нужны — раскладка решает, что с чем встанет в одну колонку, а не рисует.
-//
-// Мера высоты — довод раскладки, а не её устройство: окно вещей чертежа
-// считает ряды плиток (`objectPickerWeight`), и обоим окнам хватает одной
-// раскладки. Второго такого механизма в сборке быть не должно.
-function pickerWeight(group) {
-  return 1 + (group && Array.isArray(group.types) ? group.types.length : 0);
-}
-
-// Категории кладутся в колонку подряд, пока та не станет выше `height`.
-// Порядок справочника сохраняется: колонка читается сверху вниз, колонки —
-// слева направо, «Свет» по-прежнему первый, «Щит» последний.
-function pickerFill(groups, height, weightOf) {
-  const columns = [];
-  let filled = 0;
-  for (const group of groups) {
-    const weight = weightOf(group);
-    if (columns.length > 0 && filled + weight <= height) {
-      columns[columns.length - 1].push(group);
-      filled += weight;
-      continue;
-    }
-    columns.push([group]);
-    filled = weight;
-  }
-  return columns;
-}
-
-// Раскладка категорий по колонкам. Сетка выравнивала ряд по самой высокой
-// категории: «Свет» с девятью типами держал всю первую строку, и «Щит» с
-// «Датчиками» начинались только под ним — между выключателями и датчиками
-// зияла пустая половина окна. Здесь колонка набивается подряд до высоты самой
-// длинной категории: пустых мест между категориями не остаётся, а колонок
-// выходит ровно столько, сколько понадобилось, — не больше `limit`.
-function pickerLayout(groups, limit = PICKER_MAX_COLUMNS, weightOf = pickerWeight) {
-  const list = Array.isArray(groups) ? groups.filter(Boolean) : [];
-  if (list.length === 0) return [];
-  const cap = Math.max(1, Math.floor(Number(limit)) || 1);
-  const total = list.reduce((sum, group) => sum + weightOf(group), 0);
-  let height = Math.max(...list.map(weightOf));
-  let columns = pickerFill(list, height, weightOf);
-  // Категорий больше, чем колонок помещается в окно, — колонка становится
-  // выше, и лишние уходят под соседние, а не за край экрана.
-  while (columns.length > cap && height < total) {
-    height += 1;
-    columns = pickerFill(list, height, weightOf);
-  }
-  return columns;
-}
-
-// Клавиатура по сетке: вверх-вниз — по колонке целиком, через границы
-// категорий, если их в колонке несколько; вправо-влево — в соседнюю колонку на
-// ту же строку (короткая колонка прижимает к последней строке).
-function pickerMove(box, row, dx, dy) {
-  const columns = [...box.children].filter((node) => node.classList.contains("picker__column"));
-  const rowsOf = (node) => [...node.querySelectorAll(".picker__row")];
-  const column = columns.findIndex((node) => node.contains(row));
-  if (column < 0) return;
-  const index = rowsOf(columns[column]).indexOf(row);
-  const rows = rowsOf(columns[Math.min(columns.length - 1, Math.max(0, column + dx))]);
-  const next = rows[Math.min(rows.length - 1, Math.max(0, index + dy))];
-  if (next) next.focus();
-}
-
-// Виды, внутри которых окно сужает справочник. Комментарий здесь наравне с
-// точкой и линией: плашку меняют только на плашку — текст у неё есть, а у
-// знака его негде взять (`changeMarkType` стережёт то же правило).
-// Виды, внутри которых окно сужает справочник. Комментария здесь нет и быть
-// не может: тип у него встроенный и единственный (G173), менять его не на
-// что — кнопку «Сменить тип» панель инструментов такой метке и не показывает.
-const PICKER_KINDS = ["point", "line"];
-
-// Чем окно объясняет сужение. Строка одна на вид — иначе пользователь видел бы
-// короткий список и не знал, чего в нём не хватает.
-function pickerKindNote(kind) {
-  return kind === "line" ? strings.picker.onlyLine : strings.picker.onlyPoint;
-}
-
-/**
- * Подходит ли встроенный комментарий под набранное в поиске.
- *
- * Плашка стоит под таблицей и ведёт себя как её строки: поиск сужает окно, и
- * «розетка» не должна оставлять на экране комментарий. Правило то же, что у
- * `searchTypes`, но своё: встроенного типа в справочнике нет, и спросить
- * модель о нём нельзя.
- */
-function pickerCommentMatches(project, query) {
-  const needle = String(query == null ? "" : query).trim().toLowerCase();
-  if (!needle) return true;
-  const type = findType(project, COMMENT_TYPE_ID);
-  return (
-    type.code.toLowerCase().startsWith(needle) ||
-    type.name.toLowerCase().includes(needle) ||
-    strings.picker.builtinComment.toLowerCase().includes(needle)
-  );
-}
-
-// Смена типа у метки идёт внутри её вида: линии — линейные типы, точке —
-// точечные. Окно получает вид в `options.kind` и оставляет только свои типы;
-// постановка новой метки вид не задаёт и видит справочник целиком.
-//
-// Вид спрашивается у `typeKindOf`, а не у `type.kind`: у объекта прежнего
-// формата поля нет вовсе. Категория, в которой не осталось ни одного типа
-// нужного вида, из окна уходит — пустой заголовок держал бы колонку зря.
-function pickerGroupsOfKind(project, groups, kind) {
-  if (!PICKER_KINDS.includes(kind)) return groups;
-  return groups
-    .map((group) => ({ ...group, types: group.types.filter((type) => typeKindOf(project, type.id) === kind) }))
-    .filter((group) => group.types.length > 0);
-}
-function openTypePicker(project, options = {}) {
-  return new Promise((resolve) => {
-    let modal;
-    let current = project;
-    const done = (result) => {
-      modal.close();
-      resolve(result || null);
-    };
-
-    const box = uiEl("div", { class: "picker__columns" });
-    const builtin = uiEl("div", { class: "picker__builtin" });
-    const body = uiEl("div", { class: "picker picker--types" });
-    const error = uiEl("p", { class: "picker__error" });
-    const createBox = uiEl("div", { class: "picker__create" });
-    const search = uiEl("input", {
-      class: "ui-input",
-      type: "text",
-      placeholder: strings.picker.search,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => {
-          // Стрелка вниз из поиска — в первую строку сетки: дальше по ней
-          // ходят стрелками, не хватаясь за мышь.
-          // Плашка комментария стоит под сеткой и в обход её не остаётся:
-          // когда поиск оставил только её, и стрелка, и Enter ведут к ней.
-          if (event.key === "ArrowDown") {
-            const first = box.querySelector(".picker__row") || builtinRow();
-            if (!first) return;
-            event.preventDefault();
-            first.focus();
-            return;
-          }
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          const first = box.querySelector(".picker__row") || builtinRow();
-          if (first) first.click();
-          else if (createBox.firstChild) createType();
-        },
-      },
-    });
-
-    let createName = null;
-    let createCategory = null;
-
-    function createType() {
-      const code = search.value.trim();
-      if (!createName || !createCategory) return;
-      try {
-        const result = addType(current, {
-          code,
-          name: createName.value.trim() || code,
-          categoryId: createCategory.value,
-          // Окно сужено до вида метки — заведённый здесь тип обязан быть того
-          // же вида, иначе его нечем будет выбрать в этом же окне.
-          ...(options.kind ? { kind: options.kind } : {}),
-        });
-        done({ typeId: result.type.id, project: result.project, created: true });
-      } catch (failure) {
-        error.textContent = failure.message;
-      }
-    }
-
-    function renderCreate(query) {
-      createBox.replaceChildren();
-      error.textContent = "";
-      // Годится ли код — знает модель, и только она: буквы, длина и занятость
-      // проверяются там же, где их проверит `addType`. Своей копии правила
-      // здесь нет намеренно — прежняя пережила снятие предела в две буквы и
-      // отказывалась заводить «ПОДСВЕТКА».
-      // Тип с таким названием или кодом уже есть — второй такой же заводить
-      // незачем: он стоит первым в списке, и Enter берёт именно его.
-      if (matchTypeExactly(current, query)) return;
-      if (codeProblem(current, query)) return;
-      createName = uiEl("input", {
-        class: "ui-input",
-        type: "text",
-        placeholder: strings.picker.createNamePlaceholder,
-      });
-      createCategory = uiEl(
-        "select",
-        { class: "ui-select" },
-        current.categories.map((category) =>
-          uiEl("option", { text: category.name, value: category.id, attrs: { value: category.id } }),
-        ),
-      );
-      createBox.append(
-        uiEl("p", { class: "picker__createTitle", text: text("picker.createTitle", { code: query }) }),
-        uiEl("p", { class: "picker__createTitle", text: text("picker.codeHint", { max: CODE_MAX_LENGTH }) }),
-        uiEl("label", { class: "picker__field" }, [
-          uiEl("span", { text: strings.picker.createName }),
-          createName,
-        ]),
-        uiEl("label", { class: "picker__field" }, [
-          uiEl("span", { text: strings.picker.createCategory }),
-          createCategory,
-        ]),
-        uiButton(strings.picker.create, {
-          class: "ui-btn ui-btn--accent",
-          on: { click: createType },
-        }),
-      );
-    }
-
-    function typeRow(type) {
-      const row = uiEl(
-        "button",
-        {
-          class: "picker__row" + (type.id === options.activeTypeId ? " is-active" : ""),
-          type: "button",
-          // Длинный код не даёт названию места, и оно ужимается многоточием —
-          // подсказка возвращает его целиком.
-          title: type.code + " — " + type.name,
-          on: { click: () => done({ typeId: type.id, project: current }) },
-        },
-        [
-          pickerIcon(current, type.id),
-          uiEl("span", { class: "picker__code", text: type.code }),
-          uiEl("span", { class: "picker__name", text: type.name }),
-        ],
-      );
-      return row;
-    }
-
-    // Категория — заголовок в её цвете и строки типов. Блок целиком, потому
-    // что в колонке их бывает несколько: заголовок должен липнуть к своим
-    // строкам и уезжать вместе с ними, а не наезжать на соседнюю категорию.
-    function categoryBlock(group) {
-      const head = uiEl("div", { class: "picker__group", text: group.category.name });
-      head.style.borderColor = group.category.color;
-      head.style.color = group.category.color;
-      return uiEl("div", { class: "picker__category" }, [head, ...group.types.map(typeRow)]);
-    }
-
-    /**
-     * Отдельная плашка «Комментарий» под основной таблицей (G173).
-     *
-     * Слова заказчика: «в окне добавления в выборе типа метки просто сделай
-     * снизу отдельную плашку Комментарий, под основной таблицей. То есть под
-     * капотом это такая же метка, но в интерфейсе отдельно выделяется».
-     *
-     * Почему не клетка сетки: сетка — это справочник объекта, который человек
-     * правит сам, а комментарий есть всегда и ни переименовать, ни удалить
-     * его нельзя. Отдельный блок под чертой и подпись «есть всегда, в
-     * справочнике его нет» говорят это прямо, а не намёком.
-     *
-     * Плашки нет, когда окно сужено видом метки (`options.kind`): там меняют
-     * тип у уже стоящей метки, а точку в комментарий не превращают — модель
-     * этого и не позволит.
-     */
-    function renderBuiltin(query) {
-      builtin.replaceChildren();
-      builtin.hidden = Boolean(options.kind) || !pickerCommentMatches(current, query);
-      if (builtin.hidden) return;
-      const type = findType(current, COMMENT_TYPE_ID);
-      const row = uiEl(
-        "button",
-        {
-          class: "picker__row picker__builtin-row" + (options.activeTypeId === COMMENT_TYPE_ID ? " is-active" : ""),
-          type: "button",
-          title: strings.picker.builtinCommentHint,
-          on: { click: () => done({ typeId: COMMENT_TYPE_ID, project: current }) },
-        },
-        [
-          pickerIcon(current, COMMENT_TYPE_ID),
-          uiEl("span", { class: "picker__code", text: commentCodeOf(current) }),
-          uiEl("span", { class: "picker__name", text: type.name }),
-        ],
-      );
-      builtin.append(
-        uiEl("p", { class: "picker__builtin-title", text: strings.picker.builtinComment }),
-        row,
-        uiEl("p", { class: "picker__builtin-hint", text: strings.picker.builtinCommentHint }),
-      );
-    }
-
-    // Строка плашки, когда она на экране. Отдельной функцией — её спрашивают
-    // и клавиатура, и проверка «а есть ли вообще что выбрать».
-    function builtinRow() {
-      return builtin.hidden ? null : builtin.querySelector(".picker__row");
-    }
-
-    function renderList() {
-      const query = search.value.trim();
-      // Что за чем показывать, решает модель: поиск по коду и названию,
-      // точное совпадение кода первым. Своей сортировки здесь нет.
-      const groups = pickerGroupsOfKind(current, searchTypes(current, query), options.kind);
-      const width = typeof window === "undefined" ? 0 : window.innerWidth;
-      const columns = pickerLayout(groups, pickerColumnLimit(width));
-      box.replaceChildren(
-        ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
-      );
-      if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.picker.empty }));
-      // Ширину окна задаёт число колонок: уместились семь категорий в четыре —
-      // окно на четыре колонки и никакого пустого поля справа, одна найденная
-      // категория — узкое окно.
-      body.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
-      renderBuiltin(query);
-      renderCreate(query);
-    }
-
-    // Клавиатура по сетке. Enter здесь обязателен свой: основное действие
-    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
-    // Enter в клик по строке, — то есть выбор терялся бы.
-    box.addEventListener("keydown", (event) => {
-      const row = event.target;
-      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        row.click();
-        return;
-      }
-      const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
-      if (!step) return;
-      event.preventDefault();
-      pickerMove(box, row, step[0], step[1]);
-    });
-
-    renderList();
-    const note = PICKER_KINDS.includes(options.kind)
-      ? uiEl("p", { class: "picker__note", text: pickerKindNote(options.kind) })
-      : null;
-    body.replaceChildren(...[search, note, box, builtin, createBox, error].filter(Boolean));
-    modal = uiModal({
-      title: options.title || strings.picker.title,
-      body,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
-      onCancel: () => resolve(null),
-    });
-    // Широкая карточка — только у этого окна: ширину внутри задаёт сетка колонок.
-    if (modal.card) modal.card.classList.add("modal--wide");
-    search.focus();
-  });
-}
-
-// src/panels/objectPicker.js
-// Окно выбора вещи чертежа (таск 170, требование G252).
-//
-// Слова заказчика: «механеику выбора для добавления и изменения объекта сделай
-// как для меток — в отдельном окне». До этого вещи выбирались плитками **прямо
-// в колонке** (таск 154), и довод был свой: кухню собирают из шести предметов
-// подряд, и окно пришлось бы открывать на каждый. Заказчик решил иначе, но
-// довод никуда не делся — вот что сделано, чтобы шесть вещей подряд не стали
-// шестью мучениями:
-//
-//   1. **Шага категории больше нет.** В колонке на 264 точки плитки влезали
-//      только по одной категории, и до холодильника надо было сперва выбрать
-//      «Технику». Окно шире колонки втрое: все вещи каталога стоят в нём
-//      сразу, категориями по колонкам, и до любой из них — один клик.
-//   2. **Выбранная вещь залипает** — ровно как тип метки в панели инструментов
-//      (`tools__type`). Окно открывается один раз на серию: шесть одинаковых
-//      розеток или шесть шкафов ставятся кликами по полю без единого диалога.
-//   3. **Поиск с клавиатуры.** «хол» и Enter — холодильник выбран, мышь не
-//      нужна; стрелки водят по плиткам, как по строкам окна типов.
-//
-// Механизм — тот же, что у выбора типа метки: карточка `uiModal`, поиск
-// сверху, категории колонками, раскладку колонок считает общий `pickerLayout`
-// из `typePicker.js` (он же считает её для типов — второго такого механизма в
-// сборке нет). Отличается только клетка: у типа строка «знак — код —
-// название», у вещи плитка «картинка — имя» (G224, плитки переехали сюда из
-// колонки чертежа).
-//
-// **Вещь с отметкой `legacy` из окна спрятана** (сегодня одна — общий вид
-// «Сантехника»): ею больше не размечают, но по ней открываются чужие чертежи.
-// Прячет её окно, а не каталог — что показать в выборе, дело экрана, — и
-// показывает обратно, пока такой вещью стоит выделенное: человек обязан
-// видеть, чем стоит вещь на его чертеже, а подсветить вместо неё похожую
-// значило бы соврать.
-
-
-
-
-
-// Клетка картинки на плитке. Сорок точек — столько же, сколько у крупного
-// знака типа метки в разделе «Метки»: мельче у кровати не разобрать подушек.
-const OBJECT_TILE_ICON = 40;
-// Цвет рисунка — цвет текста панели: плитка не красит вещь, она её показывает.
-// Цвет на чертеже у объектов свой и общий, и повторять его тут значило бы
-// обещать выбор краски, которого нет.
-const TILE_INK = "#e6edf3";
-
-/**
- * Картинка вещи в клетке. Рисуется в точках устройства, а показывается в
- * точках страницы: на экране с удвоенной плотностью контур иначе размылся бы.
- */
-function objectTileIcon(key, size = OBJECT_TILE_ICON) {
-  const canvas = uiEl("canvas", { class: "objectTile__icon" });
-  const ratio = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? Math.min(3, devicePixelRatio) : 1;
-  canvas.width = Math.round(size * ratio);
-  canvas.height = Math.round(size * ratio);
-  canvas.style.width = size + "px";
-  canvas.style.height = size + "px";
-  const ctx = canvas.getContext ? canvas.getContext("2d") : null;
-  const icon = objectViewByName(key);
-  if (ctx && icon) drawObjectView(ctx, icon, { x: 0, y: 0, width: canvas.width, height: canvas.height }, TILE_INK);
-  return canvas;
-}
-
-// Плиток в ряду внутри категории. Та же тройка стоит в `objectPicker.css`
-// (`grid-template-columns: repeat(3, …)`), и держать её надо вместе: по ней
-// здесь считается высота категории для раскладки колонок и шаг стрелок
-// вверх-вниз. Разойдись эти числа — стрелка прыгала бы не на ряд.
-const OBJECT_PICKER_TILES_PER_ROW = 3;
-// Колонка в три плитки по 84 точки с просветами — та же мера, что в
-// `objectPicker.css` (`minmax(270px, 1fr)`); держит их вместе
-// `test/cssMeasures.test.js`.
-const OBJECT_PICKER_COLUMN_MIN = 270;
-// Больше четырёх колонок не ставим: категорий всего шесть, и пятая колонка
-// растянула бы окно на весь экран ради двух плиток «Декора».
-const OBJECT_PICKER_MAX_COLUMNS = 4;
-
-/** Сколько колонок категорий помещается в экран шириной `width`. */
-function objectPickerColumnLimit(width) {
-  return Math.min(OBJECT_PICKER_MAX_COLUMNS, pickerColumnLimit(width, OBJECT_PICKER_COLUMN_MIN));
-}
-
-// Высота категории в единицах раскладки: заголовок плюс ряды плиток.
-function objectPickerWeight(group) {
-  const count = group && Array.isArray(group.entries) ? group.entries.length : 0;
-  return 1 + Math.ceil(count / OBJECT_PICKER_TILES_PER_ROW);
-}
-
-// Терпимое сравнение, как у каталога: регистр, «ё» и пробелы по краям не
-// считаются. Поиск идёт по имени вещи и по имени её категории — «сантех»
-// показывает весь раздел, «хол» одну плитку.
-function plain(value) {
-  return String(value == null ? "" : value)
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, "е");
-}
-
-/**
- * Что показать в окне: категории по порядку каталога, в каждой — её вещи.
- *
- * `query` сужает выдачу, `key` — ключ вещи, которой стоит выделенное (или
- * которой поставят следующую): по нему в окне остаётся спрятанная `legacy`
- * вещь, если ею размечен чертёж. Пустая категория из выдачи уходит — пустой
- * заголовок держал бы колонку зря.
- */
-function objectPickerGroups(query, { key } = {}) {
-  const needle = plain(query);
-  const chosen = key || null;
-  return OBJECT_CATEGORIES.map((category) => {
-    const name = strings.schemeObjectCategories[category] || category;
-    const hay = plain(name);
-    const entries = objectCatalogCategory(category).filter((entry) => {
-      if (entry.legacy && entry.key !== chosen) return false;
-      if (needle === "") return true;
-      return plain(entry.name).includes(needle) || hay.includes(needle);
-    });
-    return { category, name, entries };
-  }).filter((group) => group.entries.length > 0);
-}
-
-/**
- * Куда уводит стрелка. Правило то же, что в окне типов: вверх-вниз — по
- * колонке целиком, через границы категорий (все ряды в три плитки, поэтому
- * шаг на ряд — это шаг на три плитки); вправо-влево — в соседнюю колонку на то
- * же место сверху (короткая колонка прижимает к последней плитке).
- *
- * `columns` — уже разложенные колонки (`pickerLayout`), а не категории:
- * стрелка должна ходить по тому, что человек видит.
- */
-function objectPickerStep(columns, key, dx, dy) {
-  const flat = (Array.isArray(columns) ? columns : []).map((column) =>
-    column.flatMap((group) => group.entries.map((entry) => entry.key)),
-  );
-  const clamp = (value, last) => Math.max(0, Math.min(last, value));
-  let at = -1;
-  let spot = -1;
-  flat.forEach((keys, index) => {
-    const found = keys.indexOf(key);
-    if (found >= 0) {
-      at = index;
-      spot = found;
-    }
-  });
-  const first = flat.find((keys) => keys.length > 0);
-  if (at < 0) return first ? first[0] : null;
-  if (dx) {
-    const target = flat[clamp(at + dx, flat.length - 1)];
-    return target.length > 0 ? target[clamp(spot, target.length - 1)] : key;
-  }
-  if (!dy) return key;
-  return flat[at][clamp(spot + dy * OBJECT_PICKER_TILES_PER_ROW, flat[at].length - 1)];
-}
-
-/**
- * Сетка вещей как кирпич: поиск сверху, категории колонками, плитки внутри.
- *
- * Вынесена наружу в таске 187: той же сеткой стоит шаг «Объекты» в окне «Что
- * добавить», и второй её сборки быть не должно — разойдись они, человек видел
- * бы в двух окнах два разных каталога. Окно выбора вещи (ниже) — первый её
- * хозяин, и ведёт себя в точности как прежде.
- *
- * `onPick(key)` зовётся кликом по плитке и Enter в поиске; что считать
- * выбранным, решает хозяин — он же присылает это `setKey`.
- */
-function createObjectTiles(options = {}) {
-  let key = options.key || null;
-  let columns = [];
-  const box = uiEl("div", { class: "picker__columns picker__columns--objects" });
-  const node = uiEl("div", { class: "picker picker--objects" });
-  const pick = (next) => {
-    if (next && typeof options.onPick === "function") options.onPick(next);
-  };
-  const firstKey = () => {
-    const first = box.querySelector(".objectTile");
-    return first ? first.dataset.key : null;
-  };
-
-  const search = uiEl("input", {
-    class: "ui-input",
-    type: "text",
-    placeholder: strings.objectPicker.search,
-    on: {
-      input: () => render(),
-      keydown: (event) => {
-        // Стрелка вниз из поиска — в первую плитку: дальше по сетке ходят
-        // стрелками, не хватаясь за мышь.
-        if (event.key === "ArrowDown") {
-          const first = box.querySelector(".objectTile");
-          if (!first) return;
-          event.preventDefault();
-          first.focus();
-          return;
-        }
-        // Enter берёт первую найденную вещь. Своя обработка здесь
-        // обязательна: основное действие карточки — «Отмена», и оно
-        // сработало бы раньше (`uiModal` ловит Enter), то есть выбор
-        // терялся бы.
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        pick(firstKey());
-      },
-    },
-  });
-
-  function tile(entry) {
-    return uiEl(
-      "button",
-      {
-        class: "objectTile" + (entry.key === key ? " is-on" : ""),
-        type: "button",
-        title: entry.name,
-        attrs: { "data-key": entry.key, "aria-pressed": entry.key === key ? "true" : "false" },
-        on: { click: () => pick(entry.key) },
-      },
-      [
-        objectTileIcon(entry.key),
-        // Язык подписи назван в самой подписи: перенос по слогам
-        // (`hyphens: auto`) работает только когда браузер знает язык.
-        uiEl("span", { class: "objectTile__name", text: entry.name, attrs: { lang: "ru" } }),
-      ],
-    );
-  }
-
-  // Категория — заголовок и сетка её плиток. Блок целиком, потому что в
-  // колонке их бывает несколько: заголовок должен липнуть к своим плиткам, а
-  // не наезжать на соседнюю категорию.
-  function categoryBlock(group) {
-    return uiEl("div", { class: "picker__category" }, [
-      uiEl("div", { class: "picker__group", text: group.name }),
-      uiEl("div", { class: "objectTiles__grid" }, group.entries.map(tile)),
-    ]);
-  }
-
-  function render() {
-    const groups = objectPickerGroups(search.value, { key });
-    const width = typeof window === "undefined" ? 0 : window.innerWidth;
-    columns = pickerLayout(groups, objectPickerColumnLimit(width), objectPickerWeight);
-    box.replaceChildren(
-      ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
-    );
-    if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.objectPicker.empty }));
-    // Ширину окна задаёт число получившихся колонок: нашлась одна категория
-    // — окно узкое, и справа не остаётся пустого поля.
-    node.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
-  }
-
-  box.addEventListener("keydown", (event) => {
-    const current = event.target;
-    if (!current || !current.classList || !current.classList.contains("objectTile")) return;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      current.click();
-      return;
-    }
-    const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
-    if (!step) return;
-    event.preventDefault();
-    const next = objectPickerStep(columns, current.dataset.key, step[0], step[1]);
-    const target = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
-    if (target) target.focus();
-  });
-
-  render();
-  node.replaceChildren(search, box);
-  return {
-    node,
-    focus: () => search.focus(),
-    setKey(next) {
-      key = next || null;
-      render();
-    },
-  };
-}
-
-/**
- * Открыть окно выбора вещи. Отдаёт ключ каталога или `null`, если закрыли.
- *
- * `options.key` — вещь, которая горит (у выделенной её собственная, без
- * выделения — та, которой поставят следующую); `options.title` — заголовок
- * окна: у смены вещи он свой, и человек должен видеть, что правит стоящее на
- * чертеже, а не выбирает новое.
- */
-function openObjectPicker(options = {}) {
-  return new Promise((resolve) => {
-    let modal;
-    const tiles = createObjectTiles({
-      key: options.key,
-      onPick: (key) => {
-        modal.close();
-        resolve(key || null);
-      },
-    });
-    modal = uiModal({
-      title: options.title || strings.objectPicker.title,
-      body: tiles.node,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => { modal.close(); resolve(null); } } })],
-      onCancel: () => resolve(null),
-    });
-    // Широкая карточка — как у окна типов: ширину внутри задаёт сетка колонок.
-    if (modal.card) modal.card.classList.add("modal--wide");
-    tiles.focus();
-  });
-}
 
 // src/panels/projects.js
 // Объекты: список в шапке, переключение, переименование, удаление,
@@ -58988,6 +59610,7 @@ registerPanel(PANEL_IDS.headerSearch, mountSearchPanel);
 
 
 
+
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
 // экрана на миллиметр», и пороги притяжки, заданные в пикселях экрана, остаются
@@ -60304,7 +60927,7 @@ function workshopPick(project, schemeId, pointMm, view, selected, hiddenObjectId
  * опустошила колонку).
  *
  * `WORKSHOP_SUBJECTS` — всё, чем выделение бывает: на этот список смотрят и
- * `subject()`, и `aliveSelection()`.
+ * три списка правой колонки, и `aliveSelection()`.
  */
 const WORKSHOP_SUBJECTS = ["wall", "opening", "object"];
 function workshopSelectionOf(pick) {
@@ -60409,11 +61032,15 @@ function workshopHint(tool, way) {
  * здесь и проверяются без браузера.
  */
 /**
- * Список элементов чертежа для правой колонки режима «Чертёж» (таск 153).
+ * Строки трёх списков правой колонки режима «Чертёж» (таск 153, разделены в
+ * таске 187).
  *
  * Заказчик: правая панель своя в каждом режиме, и в чертеже это «список
- * элементов чертежа с глазками видимости». Глазки — соседний таск (154), здесь
- * сам список и место под них.
+ * элементов чертежа с глазками видимости» (таск 153), а потом — «справа раздели
+ * в 3 отдельных списка раскрывающихся и не объединяй в группу Элементы
+ * чертежа» (таск 187, G280). Поэтому порода у группы осталась, а **заголовка у
+ * неё больше нет**: имена разделов стоят в разметке (`panels.drawWalls` и
+ * соседи), и второго имени у списка быть не должно.
  *
  * Порядок — **модельный** (`wallsOnScheme`, `openingsInWall`,
  * `schemeObjectsOnScheme`), своей сортировки не заводится: разойдись она с
@@ -60462,9 +61089,9 @@ function workshopListGroups(project, schemeId) {
     };
   });
   return [
-    { kind: "wall", title: strings.workshop.layerWalls, rows: wallRows },
-    { kind: "opening", title: strings.workshop.toolOpenings, rows: openingRows },
-    { kind: "object", title: strings.workshop.layerObjects, rows: objectRows },
+    { kind: "wall", rows: wallRows },
+    { kind: "opening", rows: openingRows },
+    { kind: "object", rows: objectRows },
   ];
 }
 function workshopStatus(project, schemeId, placement) {
@@ -60523,12 +61150,16 @@ function workshopSummaryLines(project, schemeId, placement) {
 // «сохраняй выбранное значение в проекте», и теперь он лежит в объекте
 // (`model.gridStepOf`), а не здесь. Своей копии окно не держит — иначе два
 // числа разошлись бы на первой же смене объекта.
-// Отметки слоёв поля. «Объектов» среди них больше нет: вещи гасит общий
-// выключатель «Объекты чертежа» (таск 154, G223) — он же стоит в «Интерфейсе
-// проекта» и гасит их заодно на плане и в объёме. Две отметки с одним словом в
-// двух местах отвечали бы на один вопрос по-разному.
-let workshopLayers = { plan: true, grid: true, walls: true };
-let workshopGridSnap = true;
+// **Отметок слоёв здесь больше нет совсем** (таск 187, G281). Слова заказчика:
+// «в левой колонке пункт „Слои“ убери, это же дубль вкладки Интерфейс проекта,
+// просто почини то бы там работало и добавь недостающие пункты».
+//
+// И это была не просто пара лишних галок: подложка с чертежом стояли в двух
+// местах порознь — здесь своей памятью страницы, а в «Интерфейсе» своей
+// настройкой браузера, — и в режиме «Чертёж» работала эта пара, а та молчала.
+// Теперь все четыре слоя чертежа (подложка, сетка, чертёж, объекты) и притяжка
+// к узлам живут **в состоянии сеанса** (`app.js`) и в настройках браузера, а
+// поле их только читает: одна отметка — один ответ на оба поля.
 let workshopThicknessMm = WORKSHOP_THICKNESS_DEFAULT_MM;
 // Умолчания проёмов — по виду и на сеанс: поправил окно на 1300, и следующее
 // окно встанет 1300, а дверь останется дверью.
@@ -60631,9 +61262,6 @@ function createWorkshop({ api, hosts }) {
   let panFrame = 0;
   let panClock = 0;
   let closed = false;
-  // `null`, а не пустая строка: у объекта без комнат подпись списка — тоже
-  // строка, и начни отметка с пустой, список не нарисовался бы ни разу.
-  let roomsKey = null;
   const fingers = new Map();
   let pinch = null;
 
@@ -60684,20 +61312,6 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.modeAddHint,
     on: { click: () => setMode("add") },
   });
-  // Порядок второго ряда — порядок работы, заданный заказчиком (G176): сперва
-  // стены, потом проёмы, потом объекты.
-  const wallsButton = uiButton(strings.workshop.toolWalls, {
-    title: strings.workshop.toolWallsHint,
-    on: { click: () => setAdding("walls") },
-  });
-  const openingsButton = uiButton(strings.workshop.toolOpenings, {
-    title: strings.workshop.toolOpeningsHint,
-    on: { click: () => setAdding("openings") },
-  });
-  const objectsButton = uiButton(strings.workshop.toolObjects, {
-    title: strings.workshop.toolObjectsHint,
-    on: { click: () => setAdding("objects") },
-  });
   // Две плашки поверх поля, по общему правилу всех трёх режимов (G228):
   // **подсказка слева** со знаком «?» — про руки, **сводка справа** со знаком
   // «i» — про чертёж (размеры плана, счёт стен, проёмов и объектов). Обе
@@ -60706,88 +61320,79 @@ function createWorkshop({ api, hosts }) {
   const hintPlate = createFieldPlate({ side: "left", setting: WORKSHOP_HINT_SETTING });
   const summaryPlate = createFieldPlate({ side: "right", setting: WORKSHOP_SUMMARY_SETTING });
 
-  // ——— правая часть: слои, сетка, стена, высоты ———
-  const planCheck = uiEl("input", { type: "checkbox" });
-  const gridCheck = uiEl("input", { type: "checkbox" });
-  const wallsCheck = uiEl("input", { type: "checkbox" });
-  const objectsCheck = uiEl("input", { type: "checkbox" });
-  objectsCheck.addEventListener("change", () => {
-    setState({ objectsShown: objectsCheck.checked });
-    setSetting(OBJECTS_SETTING, objectsCheck.checked);
-  });
-  planCheck.addEventListener("change", () => {
-    workshopLayers = { ...workshopLayers, plan: planCheck.checked };
-    sync();
-  });
-  gridCheck.addEventListener("change", () => {
-    workshopLayers = { ...workshopLayers, grid: gridCheck.checked };
-    sync();
-  });
-  wallsCheck.addEventListener("change", () => {
-    workshopLayers = { ...workshopLayers, walls: wallsCheck.checked };
-    sync();
-  });
-  const planRow = workshopCheckRow(planCheck, strings.workshop.layerPlan);
-  // Масштаб плана задаётся **в «Схемах»** (G227, слова заказчика: «Масштаб
-  // убери, он в Схемах есть»). Кнопка рядом с погашенной отметкой подложки
-  // осталась — она объясняет, почему подложки не видно, — но ведёт туда же,
-  // куда «Масштаб: план …» в строке схемы: на план, где отрезок и меряют.
-  // Второй двери к калибровке в сборке нет.
-  const calibrateButton = uiButton(strings.workshop.calibrate, {
-    class: "ui-btn ui-btn--wide",
-    title: strings.workshop.calibrateHint,
-    on: { click: () => calibrateOnPlan() },
-  });
-  const attachButton = uiButton(strings.workshop.attach, {
-    class: "ui-btn ui-btn--wide",
-    title: strings.workshop.attachHint,
-    on: { click: () => attach() },
-  });
-
-  // Список шагов пересобирается в `sync`: его содержимое зависит от объекта
-  // (чужое число встаёт своим пунктом), а объект меняется под поверхностью.
-  const gridSelect = uiEl("select", { class: "ui-input workshop__grid" });
-  gridSelect.addEventListener("change", () => {
-    // Шаг — часть объекта (G258), значит и шаг истории: иначе Ctrl+Z после
-    // смены сетки вернул бы метку, а сетку — молча и заодно.
-    setGrid(gridSelect.value);
-  });
-  const snapCheck = uiEl("input", { type: "checkbox" });
-  snapCheck.addEventListener("change", () => {
-    workshopGridSnap = snapCheck.checked;
-    sync();
-  });
-
-  // ——— одна колонка свойств на троих ———
+  // ——— левая колонка: плашка «Что добавить» и ряд режимов ————————————————
   //
-  // Групп в колонке было четыре, занятий стало три, и у каждого свои поля. Если
-  // показывать все сразу, колонка вырастет вдвое и толщина стены будет висеть
-  // над размерами двери. Поэтому группа одна, и её заголовок и поля меняются
-  // вместе с тем, что делают: инструмент задаёт умолчания для нового, выделение
-  // перебивает их свойствами выделенного. Это то же правило, по которому ещё в
-  // таске 125 одно поле толщины служило и новым стенам, и выделенной.
-  const subjectHead = uiEl("h4", { class: "workshop__head" });
-  const subjectNote = uiEl("p", { class: "workshop__note" });
+  // Всё остальное из колонки ушло (таск 187, G280, G281): ряд «Стены · Проёмы ·
+  // Объекты» и настройки нового — в окно «Что добавить», параметры выделенного
+  // — в его строку в правой колонке, слои и сетка — в «Интерфейс», высота стен
+  // — под список стен. Осталось ровно то, что просил заказчик: «слева будет
+  // выделение и добавление ровно как и для меток».
+  //
+  // Плашка устроена как плашка типа метки (`tools__type`): картинка, имя, то,
+  // что поставит следующий клик, и слово «Выбрать». Она же дверь в окно.
+  const addIcon = uiEl("span", { class: "workshop__thingIcon" });
+  const addName = uiEl("span", { class: "workshop__thingName" });
+  const addNote = uiEl("span", { class: "workshop__thingNote" });
+  const addPlate = uiEl(
+    "button",
+    {
+      class: "workshop__thing workshop__thing--add is-set",
+      type: "button",
+      title: strings.workshop.addPickHint,
+      on: { click: () => chooseAdding() },
+    },
+    [
+      addIcon,
+      uiEl("span", { class: "workshop__thingText" }, [addName, addNote]),
+      uiEl("span", { class: "workshop__thingPick", text: strings.workshop.addPick }),
+    ],
+  );
+  // Что нарисовано на плашке: картинку зря не перерисовываем — `sync` зовут на
+  // каждое движение мыши по полю.
+  let addShown = null;
+  const modeNote = uiEl("p", { class: "workshop__note" });
 
-  const thicknessInput = workshopNumber(1, WALL_THICKNESS_MM_MAX);
-  const thicknessLabel = uiEl("span", { class: "workshop__label" });
-  workshopApply(thicknessInput, () => applyThickness());
-  const wallFields = uiEl("div", { class: "workshop__fields" }, [
-    uiEl("label", { class: "workshop__field" }, [thicknessLabel, thicknessInput]),
+  // ——— правая колонка: три списка и параметры выделенного ————————————————
+  //
+  // Списки — три раздела разметки (`panels.drawWalls` и соседи), и каждый
+  // листается вместе с колонкой. Параметры выделенного стоят **в его строке**,
+  // как у метки в списке меток: пачка полей одна на породу и переезжает в ту
+  // строку, которая выделена. Поэтому поля заводятся здесь по одному разу —
+  // перерисовка списка их переставляет, а не пересоздаёт, и набранное число не
+  // теряется от того, что соседняя стена сменила длину.
+  const wallsList = uiEl("div", { class: "workshop__list" });
+  const openingsList = uiEl("div", { class: "workshop__list" });
+  const objectsList = uiEl("div", { class: "workshop__list" });
+
+  const removeButton = () =>
+    uiButton(strings.workshop.remove, {
+      class: "ui-btn ui-btn--danger ui-btn--wide",
+      on: { click: () => removeSelected() },
+    });
+
+  // ——— стена: толщина ———
+  const thicknessInput = uiNumber(1, WALL_THICKNESS_MM_MAX);
+  uiApply(thicknessInput, () => applyThickness());
+  const wallNote = uiEl("p", { class: "workshop__note" });
+  const wallDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
+    uiField(strings.workshop.thickness, thicknessInput),
+    wallNote,
+    removeButton(),
   ]);
 
+  // ——— проём: вид, размеры, место в стене, створка ———
   const kindButtons = OPENING_KINDS.map((kind) =>
     uiButton(strings.openingKinds[kind], {
-      class: "ui-btn workshop__chip",
+      class: "ui-btn ui-chip",
       on: { click: () => setOpeningKind(kind) },
     }),
   );
-  const openingWidth = workshopNumber(1, DRAWING_MM_MAX);
-  const openingHeight = workshopNumber(1, DRAWING_MM_MAX);
-  const openingFloor = workshopNumber(0, DRAWING_MM_MAX);
-  const openingAt = workshopNumber(0, DRAWING_MM_MAX);
+  const openingWidth = uiNumber(1, DRAWING_MM_MAX);
+  const openingHeight = uiNumber(1, DRAWING_MM_MAX);
+  const openingFloor = uiNumber(0, DRAWING_MM_MAX);
+  const openingAt = uiNumber(0, DRAWING_MM_MAX);
   for (const input of [openingWidth, openingHeight, openingFloor, openingAt]) {
-    workshopApply(input, () => applyOpeningFields());
+    uiApply(input, () => applyOpeningFields());
   }
   const hingeButton = uiButton("", {
     class: "ui-btn ui-btn--wide",
@@ -60797,26 +61402,25 @@ function createWorkshop({ api, hosts }) {
     class: "ui-btn ui-btn--wide",
     on: { click: () => flipDoor("swing") },
   });
-  const atField = workshopField(strings.workshop.openingAt, openingAt);
-  const doorFields = uiEl("div", { class: "workshop__fields" }, [hingeButton, swingButton]);
-  const openingFields = uiEl("div", { class: "workshop__fields" }, [
-    uiEl("div", { class: "workshop__chips" }, kindButtons),
-    workshopField(strings.workshop.openingWidth, openingWidth),
-    workshopField(strings.workshop.openingHeight, openingHeight),
-    workshopField(strings.workshop.openingFloor, openingFloor),
-    atField,
+  const doorFields = uiEl("div", { class: "ui-fields" }, [hingeButton, swingButton]);
+  const openingNote = uiEl("p", { class: "workshop__note" });
+  const openingDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
+    uiEl("div", { class: "ui-chips" }, kindButtons),
+    uiField(strings.workshop.openingWidth, openingWidth),
+    uiField(strings.workshop.openingHeight, openingHeight),
+    uiField(strings.workshop.openingFloor, openingFloor),
+    uiField(strings.workshop.openingAt, openingAt),
     doorFields,
+    openingNote,
+    removeButton(),
   ]);
 
-  // Встроенный каталог: своих видов человек не заводит — заказчик решил это
-  // прямо: «без кастомных для объектов, не усложняем».
+  // ——— вещь: сама вещь, габарит, поворот, высоты ———
   //
-  // **Выбор вещи живёт в окне** (таск 170, G252): «механеику выбора для
-  // добавления и изменения объекта сделай как для меток — в отдельном окне».
-  // В колонке осталась плашка — картинка, имя и слово «Выбрать», — устроенная
-  // как плашка типа метки в панели инструментов. Дверь одна на оба случая:
-  // какую вещь поставить и какой стала выделенная. Что из двух сейчас, колонка
-  // знает сама — по тому же правилу, по которому меняются её заголовок и поля.
+  // Плашка вещи осталась той же, что в таске 170, и ведёт в то же окно выбора
+  // (`objectPicker.js`): здесь она меняет вещь у **выделенной**. Вещь, которой
+  // поставят следующую, выбирают в окне «Что добавить» — плашкой в левой
+  // колонке.
   const thingIcon = uiEl("span", { class: "workshop__thingIcon" });
   const thingName = uiEl("span", { class: "workshop__thingName" });
   const thingButton = uiEl(
@@ -60824,163 +61428,115 @@ function createWorkshop({ api, hosts }) {
     { class: "workshop__thing", type: "button", on: { click: () => chooseThing() } },
     [thingIcon, thingName, uiEl("span", { class: "workshop__thingPick", text: strings.workshop.objectPick })],
   );
-  // Что нарисовано на плашке: картинку зря не перерисовываем — `sync` зовут на
-  // каждое движение мыши по полю.
   let thingShown = null;
-  // Три способа поставить объект, а не две формы (таск 137): прямоугольник
-  // кликом по умолчаниям, он же контуром по месту, полоса цепочкой.
-  const wayButtons = WORKSHOP_OBJECT_WAYS.map((way) =>
-    uiButton(strings.workshop["way_" + way], {
-      class: "ui-btn workshop__chip",
-      title: strings.workshop["wayHint_" + way],
-      on: { click: () => setObjectWay(way) },
-    }),
-  );
-  const objectWidth = workshopNumber(1, DRAWING_MM_MAX);
-  const objectDepth = workshopNumber(1, DRAWING_MM_MAX);
-  const objectTurn = workshopNumber(0, 359);
-  const objectHeight = workshopNumber(1, DRAWING_MM_MAX);
-  const objectFloor = workshopNumber(0, DRAWING_MM_MAX);
+  const objectWidth = uiNumber(1, DRAWING_MM_MAX);
+  const objectDepth = uiNumber(1, DRAWING_MM_MAX);
+  const objectTurn = uiNumber(0, 359);
+  const objectHeight = uiNumber(1, DRAWING_MM_MAX);
+  const objectFloor = uiNumber(0, DRAWING_MM_MAX);
   for (const input of [objectWidth, objectDepth, objectTurn, objectHeight, objectFloor]) {
-    workshopApply(input, () => applyObjectFields());
+    uiApply(input, () => applyObjectFields());
   }
-  const widthField = workshopField(strings.workshop.objectWidth, objectWidth);
-  const depthField = workshopField(strings.workshop.objectDepth, objectDepth);
-  const turnField = workshopField(strings.workshop.objectTurn, objectTurn);
+  const widthField = uiField(strings.workshop.objectWidth, objectWidth);
+  const depthField = uiField(strings.workshop.objectDepth, objectDepth);
+  const turnField = uiField(strings.workshop.objectTurn, objectTurn);
   // Четверть оборота кнопкой — главный случай: вещь ставят к одной из четырёх
   // стен. Клавиша `R` названа в подсказке, а не отдельной строкой: горячий
   // ключ, о котором негде прочитать, всё равно что его нет.
   const turnLeftButton = uiButton(strings.workshop.objectTurnLeft, {
-    class: "ui-btn workshop__chip",
+    class: "ui-btn ui-chip",
     title: strings.workshop.objectTurnLeftHint,
     on: { click: () => turnBy(-WORKSHOP_TURN_STEP_DEG) },
   });
   const turnRightButton = uiButton(strings.workshop.objectTurnRight, {
-    class: "ui-btn workshop__chip",
+    class: "ui-btn ui-chip",
     title: strings.workshop.objectTurnRightHint,
     on: { click: () => turnBy(WORKSHOP_TURN_STEP_DEG) },
   });
-  // Доворот к стене — **кнопка, а не притяжка** (таск 164): при постановке
-  // вещь сама не поворачивается, см. `workshopWallTurnDeg`.
+  // Доворот к стене остался **кнопкой, а не притяжкой** (таск 164): при
+  // постановке вещь сама не поворачивается, см. `workshopWallTurnDeg`.
   const turnWallButton = uiButton(strings.workshop.objectToWall, {
-    class: "ui-btn workshop__chip",
+    class: "ui-btn ui-chip",
     title: strings.workshop.objectToWallHint,
     on: { click: () => turnToWall() },
   });
-  const turnChips = uiEl("div", { class: "workshop__chips" }, [turnLeftButton, turnRightButton, turnWallButton]);
-  const turnNote = uiEl("p", { class: "workshop__note", text: strings.workshop.objectTurnHint });
-  // Где вещь стоит — на полу, на стене, в полу. Строка стоит над высотами и
-  // отвечает ровно на вопрос «почему у картины от пола 1300, а у стола ноль».
-  const objectMountNote = uiEl("p", { class: "workshop__note" });
-  const objectFields = uiEl("div", { class: "workshop__fields" }, [
+  const turnChips = uiEl("div", { class: "ui-chips" }, [turnLeftButton, turnRightButton, turnWallButton]);
+  // Где вещь стоит и где её верх — одной строкой: «На полу · верх 650 мм».
+  // Двумя строками это занимало в колонке вдвое больше, отвечая на один вопрос.
+  const objectNote = uiEl("p", { class: "workshop__note" });
+  const objectDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     thingButton,
-    uiEl("div", { class: "workshop__chips" }, wayButtons),
     widthField,
     depthField,
     turnField,
     turnChips,
-    turnNote,
-    workshopField(strings.workshop.objectHeight, objectHeight),
-    workshopField(strings.workshop.objectFloor, objectFloor),
-    objectMountNote,
-    uiEl("p", { class: "workshop__note", text: strings.workshop.objectHeightHint }),
+    uiField(strings.workshop.objectHeight, objectHeight),
+    uiField(strings.workshop.objectFloor, objectFloor),
+    objectNote,
+    removeButton(),
   ]);
 
-  const removeButton = uiButton(strings.workshop.remove, {
-    class: "ui-btn ui-btn--danger ui-btn--wide",
-    on: { click: () => removeSelected() },
-  });
-
-  const heightInput = workshopNumber(0, DRAWING_MM_MAX);
-  heightInput.addEventListener("change", () => applySchemeHeight());
-  heightInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    applySchemeHeight();
-  });
-  // Этажа здесь больше нет (таск 170, G254). Слова заказчика: «Этаж этой схемы
-  // — вынеси из отдельного параметра вообще в параметры схемы». Поле стоит в
-  // свойствах схемы (`panels/schemes.js`), где у неё правят имя и масштаб;
-  // раздел «Схемы» виден во всех трёх режимах, и из чертежа до него один клик.
-  const roomsList = uiEl("div", { class: "workshop__rooms" });
-
-  const side = uiEl("div", { class: "workshop__side" }, [
-    uiEl("div", { class: "workshop__group" }, [
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.layers }),
-      planRow,
-      calibrateButton,
-      attachButton,
-      workshopCheckRow(gridCheck, strings.workshop.layerGrid),
-      workshopCheckRow(wallsCheck, strings.workshop.layerWalls, strings.workshop.layerWallsHint),
-      workshopCheckRow(objectsCheck, strings.workshop.layerObjects),
-    ]),
-    uiEl("div", { class: "workshop__group" }, [
-      subjectHead,
-      wallFields,
-      openingFields,
-      objectFields,
-      subjectNote,
-      removeButton,
-    ]),
-    uiEl("div", { class: "workshop__group" }, [
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.height }),
-      uiEl("label", { class: "workshop__field" }, [
-        uiEl("span", { class: "workshop__label", text: strings.workshop.heightScheme }),
-        heightInput,
-      ]),
-      uiEl("p", { class: "workshop__note", text: strings.workshop.heightHint }),
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.heightRooms }),
-      uiEl("p", { class: "workshop__note", text: strings.workshop.heightRoomsHint }),
-      roomsList,
-    ]),
-    // «Сетка» — последней, под «Высотой» (таск 175, G258): «Раздел Сетка в
-    // левом меню перенеси под Высота». Шаг выбирают один раз на объект, а
-    // выше стоит то, что правят на каждой стене.
-    uiEl("div", { class: "workshop__group" }, [
-      uiEl("h4", { class: "workshop__head", text: strings.workshop.grid }),
-      uiEl("label", { class: "workshop__field" }, [
-        uiEl("span", { class: "workshop__label", text: strings.workshop.gridStep }),
-        gridSelect,
-      ]),
-      workshopCheckRow(snapCheck, strings.workshop.gridSnap),
-      uiEl("p", { class: "workshop__note", text: strings.workshop.gridSnapHint }),
-    ]),
-  ]);
-
-  const addingRow = uiEl("div", { class: "workshop__tools workshop__tools--adding" }, [
-    uiEl("span", { class: "workshop__toolsLabel", text: strings.workshop.adding }),
-    wallsButton,
-    openingsButton,
-    objectsButton,
-  ]);
-
-  // ——— где что стоит (таск 153) ———
+  // ——— подвал списка стен: высота ———
   //
-  // Ряды занятий уехали в колонку вместе со свойствами: заказчик решил, что
-  // правая панель своя в каждом режиме, а верхний блок левой меняется, — и
-  // инструменты чертежа это и есть верхний блок. Над полем остаётся только то,
-  // что над полем и было: подсказка слева, полный экран справа, а между ними
-  // переключатель режимов.
+  // Высота — величина стен, и стоит она там же, где они. В строку элемента её
+  // не положить: это высота всех стен схемы, а не выделенной, — поэтому подвал
+  // списка, ровно как кнопка уплотнения номеров в подвале списка меток.
+  //
+  // Кнопка, а не поля: подвал липнет к низу раздела, и двумя полями он съедал
+  // у списка треть его высоты — на объекте заказчика из двадцати пяти стен в
+  // разделе оставалось три строки (поймано живым прогоном). Число стоит на
+  // самой кнопке, а окно за ней — и общая высота, и своя у помещений.
+  const heightButton = uiButton("", {
+    class: "ui-btn ui-btn--wide",
+    title: strings.workshop.heightHint,
+    on: { click: () => openHeights() },
+  });
+  const wallsFoot = uiEl("div", { class: "workshop__foot" }, [heightButton]);
+
+  // ——— где что стоит (таск 153, переложено в таске 187) ———
+  //
+  // Над полем остаётся только то, что над полем и было: подсказка слева,
+  // полный экран справа, а между ними переключатель режимов.
   stage.append(hintPlate.node, summaryPlate.node);
   hosts.stage.replaceChildren(stage);
   hosts.side.replaceChildren(
     uiEl("div", { class: "workshop__panel" }, [
-      // Ряд режимов: что делаю. Вид (масштаб и «Вписать») прижат вправо — он не
-      // режим и стоять в одном ряду с ними как равный не должен.
-      uiEl("div", { class: "workshop__tools" }, [
-        uiEl("span", { class: "workshop__toolsLabel", text: strings.workshop.mode }),
-        selectButton,
-        addButton,
-      ]),
-      // Ряд «что добавляем»: виден только в добавлении — в остальных режимах
-      // он отвечал бы на вопрос, которого человек не задавал.
-      addingRow,
-      side,
+      uiEl("p", { class: "workshop__toolsLabel", text: strings.workshop.adding }),
+      addPlate,
+      uiEl("p", { class: "workshop__toolsLabel", text: strings.workshop.mode }),
+      uiEl("div", { class: "workshop__tools" }, [selectButton, addButton]),
+      modeNote,
     ]),
   );
-  const list = uiEl("div", { class: "workshop__list" });
-  hosts.list.replaceChildren(list);
-  let listKey = null;
+  hosts.walls.replaceChildren(wallsList, wallsFoot);
+  hosts.openings.replaceChildren(openingsList);
+  hosts.objects.replaceChildren(objectsList);
+  // Три списка: раздел разметки (счётчик в его заголовке), ящик строк, слово на
+  // пустом месте и пачка полей, которая переезжает в выделенную строку.
+  const listSpecs = {
+    wall: {
+      section: SECTION_IDS.drawWalls,
+      list: wallsList,
+      empty: strings.workshop.listEmptyWalls,
+      detail: wallDetail,
+    },
+    opening: {
+      section: SECTION_IDS.drawOpenings,
+      list: openingsList,
+      empty: strings.workshop.listEmptyOpenings,
+      detail: openingDetail,
+    },
+    object: {
+      section: SECTION_IDS.drawObjects,
+      list: objectsList,
+      empty: strings.workshop.listEmptyObjects,
+      detail: objectDetail,
+    },
+  };
+  const listKeys = { wall: null, opening: null, object: null };
+  // Что в списке было выделено в прошлый раз: по смене этого, а не по всякой
+  // перерисовке, строку подводят к глазам.
+  const listChosen = { wall: null, opening: null, object: null };
 
   // ——— режим на экране ———
   //
@@ -61037,32 +61593,22 @@ function createWorkshop({ api, hosts }) {
     return gridStepOf(project());
   }
 
-  function setGrid(value) {
-    try {
-      const next = setGridStep(project(), value);
-      if (next.changed) commit(next.project, strings.history.gridStep);
-    } catch (error) {
-      fail(error);
-    }
-    sync();
+  // Шаг сетки правят в «Интерфейсе» (таск 187): поле спрашивает его у модели
+  // на каждом кадре, а список шагов и запись в объект живут там же, где
+  // остальные переключатели показа.
+
+  /**
+   * Слой показан? Отметки живут в состоянии сеанса и в настройках браузера, а
+   * ставит их «Интерфейс» — один выключатель на план и на чертёж (таск 187).
+   * Умолчание — показано: у человека без чертежа не должно меняться ничего.
+   */
+  function layerOn(key) {
+    return getState()[key] !== false;
   }
 
-  // Список шагов и выбранный пункт. Пересобирается только когда список и
-  // правда другой (сменился объект с чужим числом): `replaceChildren` на
-  // каждом кадре схлопывал бы список, раскрытый под рукой.
-  let gridOptionsKey = "";
-
-  function syncGrid() {
-    const step = gridMm();
-    const options = workshopGridOptions(step);
-    const key = options.join(",");
-    if (key !== gridOptionsKey) {
-      gridOptionsKey = key;
-      gridSelect.replaceChildren(
-        ...options.map((value) => uiEl("option", { value: String(value), text: String(value) })),
-      );
-    }
-    gridSelect.value = String(step);
+  /** Притягивать ли к узлам сетки — та же отметка из «Интерфейса». */
+  function gridSnap() {
+    return getState().gridSnap !== false;
   }
 
   // ——— масштаб и вид ———
@@ -61152,7 +61698,7 @@ function createWorkshop({ api, hosts }) {
     return workshopSnapMm(draft ? draft.points : [], pointMm, view, {
       free,
       gridMm: gridMm(),
-      gridSnap: workshopGridSnap,
+      gridSnap: gridSnap(),
     });
   }
 
@@ -61249,15 +61795,6 @@ function createWorkshop({ api, hosts }) {
     return selected && selected.kind === "object" ? findSchemeObject(project(), selected.id) : null;
   }
 
-  // Какой предмет сейчас в колонке свойств: выделенный, а без выделения — тот,
-  // который поставит следующий клик. Отсюда и заголовок группы.
-  function subject() {
-    if (selected) return selected.kind;
-    if (tool === "openings") return "opening";
-    if (tool === "objects") return "object";
-    return "wall";
-  }
-
   function finishChain(options = {}) {
     if (!draft) return;
     const points = draft.points;
@@ -61283,22 +61820,19 @@ function createWorkshop({ api, hosts }) {
     sync();
   }
 
+  // Толщина **выделенной** стены: поле стоит в её строке списка. Толщину новых
+  // стен задают в окне «Что добавить» — одно поле на два случая развелось на
+  // два (таск 187), и каждое говорит, о чьей толщине речь.
   function applyThickness() {
     const value = Number(thicknessInput.value);
     const wall = selectedWall();
-    if (!(value > 0)) {
-      sync();
-      return;
-    }
-    if (!wall) {
-      workshopThicknessMm = Math.min(WALL_THICKNESS_MM_MAX, Math.round(value));
+    if (!wall || !(value > 0)) {
       sync();
       return;
     }
     if (Math.round(value) === wall.thicknessMm) return;
     try {
       commit(updateWall(project(), wall.id, { thicknessMm: value }).project, strings.history.wallThickness);
-      workshopThicknessMm = Math.min(WALL_THICKNESS_MM_MAX, Math.round(value));
     } catch (error) {
       fail(error);
       sync();
@@ -61361,20 +61895,18 @@ function createWorkshop({ api, hosts }) {
     return draftOpening;
   }
 
+  // Вид **выделенного** проёма: плитки стоят в его строке. Вид нового выбирают
+  // в окне «Что добавить» (таск 187).
   function setOpeningKind(kind) {
     const opening = selectedOpening();
-    if (opening) {
-      try {
-        const patch = { kind, ...(kind === OPENING_KIND_DOOR ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
-        commit(updateOpening(project(), opening.id, patch).project, strings.history.openingKind);
-      } catch (error) {
-        fail(error);
-        sync();
-      }
-      return;
+    if (!opening || opening.kind === kind) return;
+    try {
+      const patch = { kind, ...(kind === OPENING_KIND_DOOR ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
+      commit(updateOpening(project(), opening.id, patch).project, strings.history.openingKind);
+    } catch (error) {
+      fail(error);
+      sync();
     }
-    workshopOpeningKind = kind;
-    sync();
   }
 
   // Призрак под курсором: что встанет и встанет ли. Считается той же попыткой
@@ -61427,19 +61959,13 @@ function createWorkshop({ api, hosts }) {
   }
 
   function applyOpeningFields() {
-    const kind = selectedOpening() ? selectedOpening().kind : workshopOpeningKind;
+    const opening = selectedOpening();
     const sizes = {
       widthMm: Number(openingWidth.value),
       heightMm: Number(openingHeight.value),
       heightAboveFloorMm: Number(openingFloor.value),
     };
-    if (!(sizes.widthMm > 0) || !(sizes.heightMm > 0) || !(sizes.heightAboveFloorMm >= 0)) {
-      sync();
-      return;
-    }
-    const opening = selectedOpening();
-    if (!opening) {
-      workshopOpeningSizes[kind] = sizes;
+    if (!opening || !(sizes.widthMm > 0) || !(sizes.heightMm > 0) || !(sizes.heightAboveFloorMm >= 0)) {
       sync();
       return;
     }
@@ -61453,7 +61979,10 @@ function createWorkshop({ api, hosts }) {
       sync();
       return;
     }
-    workshopOpeningSizes[kind] = sizes;
+    // Поправленный размер **выделенного** проёма становится и умолчанием для
+    // следующего такого же: то же правило, что было у полей в колонке (поправил
+    // окно на 1300 — следующее окно встанет 1300).
+    workshopOpeningSizes[opening.kind] = sizes;
     commit(attempt.project, strings.history.openingEdit);
   }
 
@@ -61467,12 +61996,7 @@ function createWorkshop({ api, hosts }) {
     const opening = selectedOpening();
     const flipHinge = (value) => (value === "end" ? "start" : "end");
     const flipSwing = (value) => (value === "right" ? "left" : "right");
-    if (!opening || opening.kind !== OPENING_KIND_DOOR) {
-      if (what === "hinge") workshopDoorHinge = flipHinge(workshopDoorHinge);
-      else workshopDoorSwing = flipSwing(workshopDoorSwing);
-      sync();
-      return;
-    }
+    if (!opening || opening.kind !== OPENING_KIND_DOOR) return;
     const patch =
       what === "hinge" ? { hinge: flipHinge(opening.hinge) } : { swing: flipSwing(opening.swing) };
     try {
@@ -61510,35 +62034,27 @@ function createWorkshop({ api, hosts }) {
    */
   async function chooseThing() {
     const object = selectedObject();
+    if (!object) return;
     const picked = await openObjectPicker({
       key: objectKey(object),
-      title: object ? strings.workshop.objectChange : strings.objectPicker.title,
+      title: strings.workshop.objectChange,
     });
     if (!picked) return;
     setObjectKey(picked);
   }
 
+  /**
+   * Сменить вещь у **выделенной**: прежний вид из справочника уходит вместе со
+   * своим полем, а имя на чертеже становится каталожным.
+   *
+   * Выбрали ту же самую — шага истории не будет: пустая правка в стеке отмены
+   * стоила бы человеку одного Ctrl+Z впустую (то же правило, что у «К стене»).
+   * У вещи прежней разметки `catalogKey` нет вовсе, и выбор её же ключа —
+   * настоящая правка: вид справочника уступает место каталогу.
+   */
   function setObjectKey(key) {
-    workshopObjectKey = key;
-    workshopObjectSizes = keptTurn();
     const object = selectedObject();
-    if (!object) {
-      // Способ идёт за вещью: столешницу тянут полосой, радиатор набирают
-      // прямоугольником — и спрашивать об этом отдельно незачем. Контур
-      // умолчанием не бывает: обводить или набрать числами — это решение
-      // человека, а не свойство радиатора.
-      workshopObjectWay = workshopWayOfShape(workshopObjectDefaultsByKey(key).shape);
-      sync();
-      return;
-    }
-    // Выделенной вещи выбор меняет саму вещь: прежний вид из справочника
-    // уходит вместе со своим полем, а имя на чертеже становится каталожным.
-    //
-    // Выбрали ту же самую — шага истории не будет: пустая правка в стеке
-    // отмены стоила бы человеку одного Ctrl+Z впустую (то же правило, что у
-    // «К стене»). У вещи прежней разметки `catalogKey` нет вовсе, и выбор её
-    // же ключа — настоящая правка: вид справочника уступает место каталогу.
-    if (object.catalogKey === key) return;
+    if (!object || object.catalogKey === key) return;
     try {
       commit(updateSchemeObject(project(), object.id, { catalogKey: key }).project, strings.history.objectEdit);
     } catch (error) {
@@ -61548,31 +62064,19 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
-   * Угол переживает смену вещи и способа, размеры — нет (таск 164).
+   * Способ ставить новую вещь приходит из окна «Что добавить» (таск 187).
    *
-   * Угол принадлежит **стене, которую обставляют**, а не вещи: вдоль одной
-   * стены подряд ставят шесть предметов — унитаз, раковину, стиральную машину,
-   * — и спрашивать «а под каким углом» шесть раз значило бы спрашивать одно и
-   * то же. Размеры, наоборот, у каждой вещи свои и возвращаются к каталожным.
-   * Спрятанным состоянием это не становится: угол стоит числом в колонке и
-   * нарисован призраком под рукой.
+   * Размеры при смене способа больше не сбрасываются: окно их уже показало и
+   * отдало вместе со способом — сбрось их здесь, и набранная в окне ширина
+   * полосы пропала бы по дороге.
    */
-  function keptTurn() {
-    const turnDeg = workshopTurnDeg(workshopObjectSizes.turnDeg);
-    return turnDeg ? { turnDeg } : {};
-  }
-
-  // Способ ставить объект: кликом по умолчаниям, обводкой контура или полосой.
-  // Размеры сбрасываются к умолчаниям вида: контур их посчитает сам, а клик
-  // возьмёт те, что у вида, — донашивать за контуром чужую ширину незачем.
   function setObjectWay(way) {
-    if (selectedObject() || !WORKSHOP_OBJECT_WAYS.includes(way)) return;
+    if (!WORKSHOP_OBJECT_WAYS.includes(way) || way === workshopObjectWay) return;
     // Способ — это «что рисуем», как тип на плане: начатое прежним способом
     // дочерчивается прежним способом (`settleDraft` спрашивает ещё не
-    // сменившийся `workshopObjectWay`), а не пропадает от нажатия кнопки.
+    // сменившийся `workshopObjectWay`), а не пропадает от выбора в окне.
     settleDraft();
     workshopObjectWay = way;
-    workshopObjectSizes = keptTurn();
     draft = null;
     // Призрак принадлежит клику, а не росчерку: сменили способ — он уходит.
     // Иначе он остался бы под рукой с прежним габаритом и обещал бы клик там,
@@ -61581,9 +62085,65 @@ function createWorkshop({ api, hosts }) {
     sync();
   }
 
-  function objectWay() {
-    const object = selectedObject();
-    return object ? workshopWayOfShape(object.shape) : workshopObjectWay;
+  /**
+   * Настройки нового элемента: одна сборка на окно «Что добавить» и на плашку
+   * колонки. Разойдись они — человек читал бы в колонке одно, а в окне другое.
+   */
+  function pickerSettings() {
+    const sizes = objectSizes(null);
+    return {
+      adding: workshopAdding,
+      walls: { thicknessMm: workshopThicknessMm },
+      openings: {
+        kind: workshopOpeningKind,
+        sizes: workshopOpeningSizes,
+        hinge: workshopDoorHinge,
+        swing: workshopDoorSwing,
+      },
+      objects: {
+        key: workshopObjectKey,
+        way: workshopObjectWay,
+        sizes: {
+          widthMm: sizes.widthMm,
+          depthMm: sizes.depthMm,
+          turnDeg: workshopTurnDeg(sizes.turnDeg),
+          heightMm: sizes.heightMm === undefined ? null : sizes.heightMm,
+          heightAboveFloorMm: sizes.heightAboveFloorMm || 0,
+        },
+      },
+    };
+  }
+
+  /**
+   * Окно «Что добавить» (таск 187, G280) — та же дверь, что плашка типа у
+   * меток: и «чем ставлю», и «с какими настройками».
+   *
+   * Записывает ответ **целиком**: всё в окне — это умолчания нового элемента, и
+   * терять поправленный размер окна из-за того, что человек в последнюю минуту
+   * взялся за стену, нельзя. Отказ («Отмена») не записывает ничего.
+   */
+  async function chooseAdding() {
+    const picked = await openDrawPicker({
+      ...pickerSettings(),
+      ways: WORKSHOP_OBJECT_WAYS,
+      defaultsOf: workshopObjectDefaultsByKey,
+    });
+    if (!picked) return;
+    const thickness = Math.round(Number(picked.walls.thicknessMm));
+    if (thickness > 0) workshopThicknessMm = Math.min(WALL_THICKNESS_MM_MAX, thickness);
+    workshopOpeningKind = picked.openings.kind;
+    workshopOpeningSizes = picked.openings.sizes;
+    workshopDoorHinge = picked.openings.hinge;
+    workshopDoorSwing = picked.openings.swing;
+    if (picked.objects.key) workshopObjectKey = picked.objects.key;
+    // Размеры новой вещи — те, что показаны в окне: второго счёта здесь нет,
+    // иначе окно обещало бы одно, а под рукой встало бы другое.
+    workshopObjectSizes = { ...picked.objects.sizes };
+    setObjectWay(picked.objects.way);
+    // Выбрали, что добавлять, — значит собрались добавлять: занятие и режим
+    // встают вместе, ровно как у меток (выбор типа включает «Добавление»).
+    setAdding(picked.adding);
+    sync();
   }
 
   // Рисуется ли объект росчерком — полосой или контуром. Клик по умолчаниям
@@ -61712,6 +62272,11 @@ function createWorkshop({ api, hosts }) {
   }
 
   function applyObjectFields() {
+    const object = selectedObject();
+    if (!object) {
+      sync();
+      return;
+    }
     const sizes = {
       widthMm: Number(objectWidth.value),
       depthMm: Number(objectDepth.value),
@@ -61719,12 +62284,6 @@ function createWorkshop({ api, hosts }) {
       heightMm: objectHeight.value === "" ? null : Number(objectHeight.value),
       heightAboveFloorMm: Number(objectFloor.value) || 0,
     };
-    const object = selectedObject();
-    if (!object) {
-      workshopObjectSizes = sizes;
-      sync();
-      return;
-    }
     const patch = {
       depthMm: sizes.depthMm,
       heightMm: sizes.heightMm,
@@ -61742,9 +62301,9 @@ function createWorkshop({ api, hosts }) {
     }
   }
 
-  function applySchemeHeight() {
+  function applySchemeHeight(value) {
     try {
-      const result = setSchemeWallHeight(project(), schemeId, heightInput.value);
+      const result = setSchemeWallHeight(project(), schemeId, value);
       if (!result.changed) return;
       commit(result.project, strings.history.wallHeight);
     } catch (error) {
@@ -62141,13 +62700,13 @@ function createWorkshop({ api, hosts }) {
           workshopPathSources(points, anchor.anchorIndex, anchor.skipIndex),
           mmOf(event),
           view,
-          { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap },
+          { free: event.altKey, gridMm: gridMm(), gridSnap: gridSnap() },
         ).point;
       }
       redraw();
       return;
     }
-    const options = { free: event.altKey, gridMm: gridMm(), gridSnap: workshopGridSnap };
+    const options = { free: event.altKey, gridMm: gridMm(), gridSnap: gridSnap() };
     if (drag.kind === "vertex") {
       drag.toMm = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options).point;
     } else {
@@ -62580,8 +63139,8 @@ function createWorkshop({ api, hosts }) {
     ctx.fillRect(0, 0, node.width, node.height);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const spot = placement();
-    if (workshopLayers.plan && spot.kind === "ready") paintPlan(spot, box);
-    if (workshopLayers.grid) paintGrid(box);
+    if (layerOn("planShown") && spot.kind === "ready") paintPlan(spot, box);
+    if (layerOn("gridShown")) paintGrid(box);
     if (spot.kind === "ready") paintOrigin();
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
@@ -62714,7 +63273,7 @@ function createWorkshop({ api, hosts }) {
       schemeId,
       bridge: bridge(),
       active: selected,
-      walls: workshopLayers.walls,
+      walls: layerOn("drawingShown"),
       objects: getState().objectsShown !== false,
       hiddenObjectIds: getState().hiddenObjectIds,
       wallAt: wallEnds,
@@ -62999,36 +63558,15 @@ function createWorkshop({ api, hosts }) {
     const spot = placement();
     const wall = selectedWall();
     const now = mode();
-    // Первый уровень: чем занят. Второй виден только в добавлении.
+    // Левая колонка: чем занят и что поставит следующий клик.
     selectButton.className = "ui-btn" + (now === "select" ? " ui-btn--accent" : "");
     addButton.className = "ui-btn" + (now === "add" ? " ui-btn--accent" : "");
-    addingRow.hidden = now !== "add";
-    wallsButton.className = "ui-btn" + (tool === "walls" ? " ui-btn--accent" : "");
-    planCheck.checked = workshopLayers.plan && spot.kind === "ready";
-    planCheck.disabled = spot.kind !== "ready";
-    planRow.title =
-      spot.kind === "noImage"
-        ? strings.workshop.layerPlanNone
-        : spot.kind === "noScale"
-          ? strings.workshop.layerPlanNoScale
-          : "";
-    // Кнопка остаётся там, где масштаба нет: она стоит рядом с погашенной
-    // отметкой подложки и объясняет её, а ведёт на план, в «Схемы» (G227).
-    calibrateButton.hidden = spot.kind !== "noScale";
-    attachButton.hidden = !spot.pending;
-    gridCheck.checked = workshopLayers.grid;
-    wallsCheck.checked = workshopLayers.walls;
-    objectsCheck.checked = getState().objectsShown !== false;
-    syncGrid();
-    snapCheck.checked = workshopGridSnap;
-    openingsButton.className = "ui-btn" + (tool === "openings" ? " ui-btn--accent" : "");
-    objectsButton.className = "ui-btn" + (tool === "objects" ? " ui-btn--accent" : "");
-    syncSubject(current, wall);
-    if (document.activeElement !== heightInput) {
-      const own = findScheme(current, schemeId);
-      heightInput.value = own && typeof own.wallHeightMm === "number" ? String(own.wallHeightMm) : "";
-    }
-    syncRooms(current);
+    syncAddPlate();
+    // Строка под кнопками — словами: по плашке не видно, ставится вещь кликом
+    // или тянется цепочкой. То же правило, что у меток (`tools.kindPointHint`).
+    modeNote.textContent = now === "select" ? strings.workshop.modeSelectHint : drawPickerHint(tool);
+    syncDetails(current, wall);
+    syncHeightButton(current);
     syncElevation(current, wall);
     syncList(current);
     hintPlate.update(workshopHint(tool, workshopObjectWay));
@@ -63045,83 +63583,130 @@ function createWorkshop({ api, hosts }) {
   }
 
   /**
-   * Список элементов чертежа в правой колонке (таск 153).
+   * Плашка «Что добавить» (таск 187): картинка, порода, настройки и «Выбрать».
    *
-   * Пересобирается, только когда чертёж действительно изменился: ключ —
-   * перечисление того, что в списке стоит. На объекте заказчика это сотня
-   * строк, а `sync()` зовётся на каждое движение мышью в поле — без ключа
-   * колонка пересобиралась бы кадрами. Подсветка выделенного живёт отдельно и
-   * меняется без пересборки.
+   * Устроена как плашка типа метки: по ней видно, что поставит следующий клик,
+   * и она же — дверь в окно. Строку настроек считает `drawPickerNote` — та
+   * самая, что стоит под заголовком шага в окне: разойдись они, человек читал
+   * бы в колонке одно, а в окне другое.
    */
+  function syncAddPlate() {
+    const key = tool === "objects" ? workshopObjectKey : null;
+    const note = drawPickerNote(tool, pickerSettings());
+    const mark = (key || "") + "\n" + note;
+    if (addShown === mark) return;
+    addShown = mark;
+    addIcon.replaceChildren(...(key ? [objectTileIcon(key, WORKSHOP_THING_ICON)] : []));
+    addIcon.hidden = !key;
+    addName.textContent = drawPickerName(tool);
+    addNote.textContent = note;
+  }
+
   /**
    * Строка списка: имя с размером — кнопка выделения, а у вещи рядом с ней
-   * глазок (таск 154, G223).
+   * глазок (таск 154, G223). У выделенной строки под ней раскрыта пачка её
+   * параметров (таск 187) — ровно как у метки в списке меток.
    *
-   * Две кнопки, а не одна с двумя действиями: кнопка внутри кнопки — не
-   * разметка, а по строке кликают, чтобы выделить, и промах по глазку не
-   * должен прятать вещь.
+   * Кнопка и глазок — две кнопки, а не одна с двумя действиями: кнопка внутри
+   * кнопки — не разметка, а по строке кликают, чтобы выделить, и промах по
+   * глазку не должен прятать вещь.
    */
-  function listRow(row, hidden) {
+  function listRow(row, hidden, open, detail) {
     const pick = uiEl(
       "button",
       {
-        class: "workshop__listPick",
+        class: "workshop__listPick" + (open ? " is-on" : ""),
         type: "button",
-        title: row.note,
-        attrs: { "data-kind": row.kind, "data-id": row.id },
+        title: row.note + " — " + strings.workshop.listPickHint,
+        attrs: {
+          "data-kind": row.kind,
+          "data-id": row.id,
+          "aria-pressed": open ? "true" : "false",
+          "aria-expanded": open ? "true" : "false",
+        },
         // Клик по строке — то же выделение, что клик по вещи в поле: второй
-        // правды о выделенном в режиме нет.
-        on: { click: () => select({ kind: row.kind, id: row.id }) },
+        // правды о выделенном в режиме нет. Повторный клик снимает выделение,
+        // и пачка параметров сворачивается.
+        on: { click: () => select(open ? null : { kind: row.kind, id: row.id }) },
       },
       [
         uiEl("span", { class: "workshop__listName", text: row.label }),
         uiEl("span", { class: "workshop__listNote", text: row.note }),
       ],
     );
-    if (row.kind !== "object") return uiEl("div", { class: "workshop__listRow" }, [pick]);
-    const off = hidden.has(row.id);
-    const eye = uiEl("button", {
-      class: "ui-btn ui-btn--icon workshop__eye" + (off ? " is-off" : ""),
-      type: "button",
-      title: off ? strings.workshop.objectShow : strings.workshop.objectHide,
-      attrs: { "aria-label": off ? strings.workshop.objectShow : strings.workshop.objectHide, "aria-pressed": off ? "true" : "false" },
-      on: { click: () => setObjectHidden(row.id, !off) },
-    });
-    eye.append(off ? uiIcon("viewOff") : uiIcon("view"));
-    return uiEl("div", { class: "workshop__listRow" }, [pick, eye]);
+    const head = [pick];
+    if (row.kind === "object") {
+      const off = hidden.has(row.id);
+      const eye = uiEl("button", {
+        class: "ui-btn ui-btn--icon workshop__eye" + (off ? " is-off" : ""),
+        type: "button",
+        title: off ? strings.workshop.objectShow : strings.workshop.objectHide,
+        attrs: {
+          "aria-label": off ? strings.workshop.objectShow : strings.workshop.objectHide,
+          "aria-pressed": off ? "true" : "false",
+        },
+        on: { click: () => setObjectHidden(row.id, !off) },
+      });
+      eye.append(off ? uiIcon("viewOff") : uiIcon("view"));
+      head.push(eye);
+    }
+    const parts = [uiEl("div", { class: "workshop__listRow" }, head)];
+    // Пачка полей **переезжает** в выделенную строку, а не создаётся заново:
+    // поля заведены один раз на породу, и набранное в них число не теряется от
+    // перерисовки соседей.
+    if (open && detail) parts.push(detail);
+    return uiEl("div", { class: "workshop__listItem" + (open ? " is-open" : "") }, parts);
   }
 
+  /**
+   * Три списка правой колонки (таск 187, G280): стены, проёмы, объекты.
+   *
+   * Каждый пересобирается, только когда он действительно изменился: ключ —
+   * перечисление того, что в списке стоит, плюс выделенное и спрятанное. На
+   * объекте заказчика это сотня строк, а `sync()` зовётся на каждое движение
+   * мышью в поле — без ключа колонка пересобиралась бы кадрами.
+   */
   function syncList(current) {
     const groups = workshopListGroups(current, schemeId);
     const hidden = hiddenObjects();
-    // В ключ входит и спрятанное: глазок — часть строки, и сменившись, он
-    // обязан перерисоваться.
-    const key = JSON.stringify(groups) + "|" + [...hidden].sort().join(",");
-    if (key !== listKey) {
-      listKey = key;
-      const parts = [];
-      for (const group of groups) {
-        parts.push(
-          uiEl("div", { class: "workshop__listGroup" }, [
-            uiEl("h4", { class: "workshop__head" }, [
-              uiEl("span", { text: group.title }),
-              uiEl("span", { class: "workshop__listCount", text: String(group.rows.length) }),
-            ]),
-            ...group.rows.map((row) => listRow(row, hidden)),
-          ]),
-        );
-      }
-      // Чертежа нет вовсе — колонка говорит об этом словом, а не пустотой.
-      if (groups.every((group) => group.rows.length === 0)) {
-        parts.push(uiEl("p", { class: "panel__empty", text: strings.workshop.listEmpty }));
-      }
-      list.replaceChildren(...parts);
+    for (const group of groups) {
+      const spec = listSpecs[group.kind];
+      if (!spec) continue;
+      const chosen = selected && selected.kind === group.kind ? selected.id : null;
+      const key =
+        JSON.stringify(group.rows) +
+        "|" +
+        chosen +
+        (group.kind === "object" ? "|" + [...hidden].sort().join(",") : "");
+      setSectionBadge(spec.section, group.rows.length || "");
+      if (key === listKeys[group.kind]) continue;
+      listKeys[group.kind] = key;
+      const parts = group.rows.map((row) => listRow(row, hidden, row.id === chosen, spec.detail));
+      // Список пуст — колонка говорит об этом словом, а не пустотой, и словом
+      // своим у каждого списка: «стен пока нет» и «вещей пока нет» — разные
+      // ответы, и общий на три врал бы двум.
+      if (parts.length === 0) parts.push(uiEl("p", { class: "panel__empty", text: spec.empty }));
+      spec.list.replaceChildren(...parts);
+      // Выделили из поля, а не из списка — строка может стоять за кадром:
+      // подводим её к глазам, как список меток подводит свою.
+      if (chosen && chosen !== listChosen[group.kind]) revealRow(spec.list.querySelector(".workshop__listItem.is-open"));
+      listChosen[group.kind] = chosen;
     }
-    for (const row of list.querySelectorAll(".workshop__listPick")) {
-      const on = Boolean(selected) && selected.kind === row.dataset.kind && selected.id === row.dataset.id;
-      row.classList.toggle("is-on", on);
-      row.setAttribute("aria-pressed", on ? "true" : "false");
-    }
+  }
+
+  /**
+   * Подвести выделенную строку к глазам. Подвал списка липнет к его низу, и
+   * строка, подведённая «как есть», осталась бы под ним — поэтому край
+   * считается по подвалу, а не по краю раздела.
+   */
+  function revealRow(item) {
+    if (!item || typeof item.scrollIntoView !== "function") return;
+    item.scrollIntoView({ block: "nearest" });
+    const host = item.closest(".panel__body");
+    const foot = host ? host.querySelector(".workshop__foot") : null;
+    if (!foot) return;
+    const hidden = item.getBoundingClientRect().bottom - foot.getBoundingClientRect().top;
+    if (hidden > 0) host.scrollTop += hidden;
   }
 
   function fieldValue(input, value) {
@@ -63129,67 +63714,53 @@ function createWorkshop({ api, hosts }) {
     input.value = value === null || value === undefined ? "" : String(value);
   }
 
-  // Колонка свойств на троих: показывается ровно один набор полей — тот, о
-  // котором сейчас речь. Что именно, решает `subject()`: выделенное, а без
-  // выделения — то, что поставит следующий клик.
-  function syncSubject(current, wall) {
-    const kind = subject();
-    const opening = selectedOpening();
-    const object = selectedObject();
-    wallFields.hidden = kind !== "wall";
-    openingFields.hidden = kind !== "opening";
-    objectFields.hidden = kind !== "object";
-    const editing = Boolean(selected);
-    removeButton.disabled = !editing;
-    removeButton.hidden = !editing;
-    subjectNote.classList.remove("is-bad");
-    if (kind === "wall") {
-      subjectHead.textContent = strings.workshop.wall;
-      thicknessLabel.textContent = wall ? strings.workshop.thickness : strings.workshop.thicknessNew;
-      fieldValue(thicknessInput, wall ? wall.thicknessMm : workshopThicknessMm);
-      subjectNote.textContent = wall
-        ? text("workshop.wallInfo", { length: wallLengthMm(wall) })
-        : strings.workshop.wallNone;
+  /**
+   * Параметры выделенного — в его строке (таск 187, G280). Слова заказчика:
+   * «параметры объекта — так же как у меток — в колонке справа».
+   *
+   * Заполняется ровно одна пачка — та, что сейчас раскрыта; без выделения не
+   * заполняется ни одна, и колонка остаётся списком, а не анкетой.
+   */
+  function syncDetails(current, wall) {
+    if (wall) {
+      fieldValue(thicknessInput, wall.thicknessMm);
+      wallNote.textContent = text("workshop.wallInfo", { length: wallLengthMm(wall) });
       return;
     }
-    if (kind === "opening") {
+    const opening = selectedOpening();
+    if (opening) {
       syncOpening(opening);
       return;
     }
-    syncObject(current, object);
-  }
-
-  function openingHelp() {
-    return walls().length === 0 ? strings.workshop.openingNeedWall : strings.workshop.openingHint;
+    const object = selectedObject();
+    if (object) syncObject(current, object);
   }
 
   function syncOpening(opening) {
-    const kind = opening ? opening.kind : workshopOpeningKind;
-    subjectHead.textContent = strings.workshop.opening;
+    const kind = opening.kind;
     kindButtons.forEach((button, index) => {
-      button.className = "ui-btn workshop__chip" + (OPENING_KINDS[index] === kind ? " is-on" : "");
+      button.className = "ui-btn ui-chip" + (OPENING_KINDS[index] === kind ? " is-on" : "");
     });
-    const sizes = opening || workshopOpeningSizes[kind] || WORKSHOP_OPENING_DEFAULTS[kind];
-    fieldValue(openingWidth, sizes.widthMm);
-    fieldValue(openingHeight, sizes.heightMm);
-    fieldValue(openingFloor, sizes.heightAboveFloorMm);
-    atField.hidden = !opening;
-    if (opening) fieldValue(openingAt, opening.atMm);
+    fieldValue(openingWidth, opening.widthMm);
+    fieldValue(openingHeight, opening.heightMm);
+    fieldValue(openingFloor, opening.heightAboveFloorMm);
+    fieldValue(openingAt, opening.atMm);
     doorFields.hidden = kind !== OPENING_KIND_DOOR;
-    const hinge = opening && opening.kind === OPENING_KIND_DOOR ? opening.hinge : workshopDoorHinge;
-    const swing = opening && opening.kind === OPENING_KIND_DOOR ? opening.swing : workshopDoorSwing;
-    hingeButton.textContent = text("workshop.doorHinge", { value: strings.openingHinges[hinge] });
-    swingButton.textContent = text("workshop.doorSwing", { value: strings.openingSwings[swing] });
-    subjectNote.textContent = opening ? strings.workshop.doorHint : openingHelp();
+    if (kind === OPENING_KIND_DOOR) {
+      hingeButton.textContent = text("workshop.doorHinge", { value: strings.openingHinges[opening.hinge] });
+      swingButton.textContent = text("workshop.doorSwing", { value: strings.openingSwings[opening.swing] });
+    }
+    openingNote.textContent = kind === OPENING_KIND_DOOR ? strings.workshop.doorHint : "";
+    openingNote.hidden = openingNote.textContent === "";
   }
 
   /**
-   * Плашка вещи в колонке: картинка, имя и подсказка про дверь.
+   * Плашка вещи в строке: картинка, имя и подсказка про дверь.
    *
    * Перерисовывается только когда поменялось нарисованное: `sync` зовут на
    * каждое движение мыши по полю, а картинка вещи — холст в точках устройства.
    */
-  function syncThing(key, name, object) {
+  function syncThing(key, name) {
     const mark = (key || "") + "\n" + (name || "");
     if (thingShown !== mark) {
       thingShown = mark;
@@ -63198,69 +63769,41 @@ function createWorkshop({ api, hosts }) {
       thingName.textContent = name || strings.workshop.objectUnknown;
     }
     thingButton.classList.toggle("is-set", Boolean(key));
-    thingButton.title = object ? strings.workshop.objectChangeHint : strings.workshop.objectChooseHint;
+    thingButton.title = strings.workshop.objectChangeHint;
   }
 
   function syncObject(current, object) {
-    subjectHead.textContent = strings.workshop.object;
-    // Что стоит на плашке: у выделенной вещи — её собственное имя (у прежней
-    // разметки — переименованное человеком, из справочника вида), без
-    // выделения — имя той вещи, которой поставят следующую. Картинку рисует
-    // ключ; у вещи вне каталога его нет вовсе, и плашка остаётся с одним
-    // именем, а не выдумывает чужую картинку.
+    // Имя у выделенной вещи своё: у вещи прежней разметки — переименованное
+    // человеком, из справочника вида. Картинку рисует ключ; у вещи вне каталога
+    // его нет вовсе, и плашка остаётся с одним именем, а не выдумывает чужую
+    // картинку.
     const key = objectKey(object);
-    syncThing(key, object ? schemeObjectNameOf(current, object) : objectCatalogName(key), object);
-    // Где вещь стоит. У вещи вне каталога этого ответа нет — и строка молчит,
-    // а не выдумывает «на полу».
-    const mount = object ? schemeObjectMountOf(current, object) : (objectCatalogEntry(key) || {}).mount;
-    objectMountNote.textContent = mount ? strings.schemeObjectMounts[mount] || "" : "";
-    objectMountNote.hidden = !mount;
-    // Выделенный объект **не помнит**, нарисовали его контуром или набрали
-    // числами, — и врать об этом нельзя: у прямоугольника горит
-    // «Прямоугольник», а способ выбирают для следующего.
-    const way = objectWay();
-    const shape = object ? object.shape : workshopShapeOfWay(way);
-    wayButtons.forEach((button, index) => {
-      button.className = "ui-btn workshop__chip" + (WORKSHOP_OBJECT_WAYS[index] === way ? " is-on" : "");
-      button.disabled = Boolean(object);
-    });
-    const sizes = object || objectSizes(null);
-    widthField.hidden = shape === "polyline";
-    // У полосы угла нет вовсе — её форма задана точками, — и строка не
+    syncThing(key, schemeObjectNameOf(current, object));
+    const band = object.shape === "polyline";
+    // У полосы нет ни ширины, ни угла — её форма задана точками, — и строка не
     // показывает ни пустого поля, ни прочерка: прочерк обещал бы, что угол
     // есть, просто неизвестен (таск 164).
-    turnField.hidden = shape === "polyline";
-    turnChips.hidden = shape === "polyline";
-    turnNote.hidden = shape === "polyline";
-    // «К стене» работает по выделенной вещи: без неё стену не от чего искать.
-    turnWallButton.disabled = !object;
-    turnWallButton.title = object ? strings.workshop.objectToWallHint : strings.workshop.objectToWallNone;
-    const depthLabel = depthField.querySelector(".workshop__label");
-    if (depthLabel) {
-      depthLabel.textContent = shape === "polyline" ? strings.workshop.objectBand : strings.workshop.objectDepth;
-    }
-    fieldValue(objectWidth, sizes.widthMm);
-    fieldValue(objectDepth, sizes.depthMm);
-    fieldValue(objectTurn, sizes.turnDeg || 0);
-    fieldValue(objectHeight, sizes.heightMm === null || sizes.heightMm === undefined ? "" : sizes.heightMm);
-    fieldValue(objectFloor, sizes.heightAboveFloorMm || 0);
-    const top = object ? schemeObjectTopMm(object) : null;
-    // У выделенного объекта в строке стоит его верх над полом, а без выделения
-    // — слова того способа, которым встанет следующий: они разные, и общая
-    // подсказка врала бы одному из трёх.
-    //
-    // Отдельный случай — вещь прежней разметки, которой в каталоге нет вовсе
-    // («Аквариум»): ни одна плитка не горит, и молчать об этом нельзя — иначе
-    // человек решит, что каталог сломался. Строка называет её вид и говорит,
-    // что выбор плитки её заменит.
-    const legacy = object && !key ? schemeObjectNameOf(current, object) : "";
-    subjectNote.textContent = legacy
-      ? text("workshop.objectLegacy", { name: legacy })
-      : object
-        ? top === null
-          ? strings.workshop.objectFullHeight
-          : text("workshop.objectTop", { top })
-        : strings.workshop["wayNote_" + way];
+    widthField.hidden = band;
+    turnField.hidden = band;
+    turnChips.hidden = band;
+    const depthLabel = depthField.querySelector(".ui-field__label");
+    if (depthLabel) depthLabel.textContent = band ? strings.workshop.objectBand : strings.workshop.objectDepth;
+    fieldValue(objectWidth, object.widthMm);
+    fieldValue(objectDepth, object.depthMm);
+    fieldValue(objectTurn, object.turnDeg || 0);
+    fieldValue(objectHeight, object.heightMm === null || object.heightMm === undefined ? "" : object.heightMm);
+    fieldValue(objectFloor, object.heightAboveFloorMm || 0);
+    // Одна строка на два ответа: где вещь стоит и где её верх. Вещь прежней
+    // разметки, которой в каталоге нет вовсе («Аквариум»), — отдельный случай:
+    // ни одна плитка по ней не горит, и молчать об этом нельзя, иначе человек
+    // решит, что каталог сломался.
+    const mount = schemeObjectMountOf(current, object);
+    const top = schemeObjectTopMm(object);
+    const where = mount ? strings.schemeObjectMounts[mount] || "" : "";
+    const high = top === null ? strings.workshop.objectFullHeight : text("workshop.objectTop", { top });
+    objectNote.textContent = key
+      ? [where, high].filter(Boolean).join(" · ")
+      : text("workshop.objectLegacy", { name: schemeObjectNameOf(current, object) });
   }
 
   /**
@@ -63270,8 +63813,8 @@ function createWorkshop({ api, hosts }) {
    * **Правило одно с планом** (G227). Своего режима у развёртки больше нет —
    * заказчик убрал его как дубль: «кнопка Развёртка… дублируется в блоке
    * интерфейса». Полоса выезжает там же, где над планом: выделили стену, и
-   * галка «Развёртка выделенной стены» в «Интерфейсе проекта» включена. Мешает
-   * — её снимают той же галкой, одной на оба поля.
+   * галка «Развёртка выделенной стены» в «Интерфейсе» включена. Мешает — её
+   * снимают той же галкой, одной на оба поля.
    */
   function syncElevation(current, wall) {
     if (!wall || getState().elevationShown === false) {
@@ -63292,45 +63835,65 @@ function createWorkshop({ api, hosts }) {
     });
   }
 
-  // Список комнат перестраивается только когда он и правда другой: иначе
-  // перерисовка на каждом шаге истории выбивала бы курсор из поля, в котором
-  // в эту минуту набирают высоту.
-  function syncRooms(current) {
-    const rooms = roomsInOrder(current);
-    const key = rooms.map((room) => room.id + ":" + room.name).join("|");
-    if (key !== roomsKey) {
-      roomsKey = key;
-      roomsList.replaceChildren(
-        ...(rooms.length === 0
-          ? [uiEl("p", { class: "workshop__note", text: strings.workshop.heightRoomsEmpty })]
-          : rooms.map((room) => {
-              const input = workshopNumber(0, DRAWING_MM_MAX);
-              input.dataset.roomId = room.id;
-              input.addEventListener("change", () => applyRoomHeight(room.id, input.value));
-              input.addEventListener("keydown", (event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                applyRoomHeight(room.id, input.value);
-              });
-              return uiEl("label", { class: "workshop__field workshop__field--room" }, [
-                uiEl("span", { class: "workshop__label", text: room.name, title: room.name }),
-                input,
-              ]);
-            })),
-      );
-    }
-    const common = findScheme(current, schemeId);
-    const hintValue = common && typeof common.wallHeightMm === "number" ? String(common.wallHeightMm) : "";
-    for (const input of roomsList.querySelectorAll("input")) {
-      if (document.activeElement === input) continue;
-      const room = findRoom(current, input.dataset.roomId);
-      const own = room && typeof room.wallHeightMm === "number" ? String(room.wallHeightMm) : "";
-      input.value = own;
-      // Пустое поле показывает общую высоту подсказкой-заглушкой: так видно,
-      // что́ именно перебивает своё число, — за этим переопределение и стоит
-      // строкой ниже общей высоты, а не в чужой панели.
-      input.placeholder = hintValue;
-    }
+  /**
+   * Кнопка высоты под списком стен: по ней видно число, не открывая окна, —
+   * тот же приём, что у кнопки размеров в строке метки.
+   */
+  function syncHeightButton(current) {
+    const scheme = findScheme(current, schemeId);
+    const own = typeof scheme?.wallHeightMm === "number" ? scheme.wallHeightMm : null;
+    heightButton.textContent = own === null ? strings.workshop.heightUnset : text("workshop.heightOpen", { height: own });
+    heightButton.classList.toggle("is-set", own !== null);
+  }
+
+  /**
+   * Окно «Высота стен» (таск 187): общая высота схемы и своя у помещений.
+   *
+   * Окном, а не строками в колонке: комнат бывает десяток, а свою высоту им
+   * задают редко — то же правило, по которому размеры метки открываются окном
+   * из её строки. Пустое поле комнаты показывает общую высоту заглушкой: так
+   * видно, что́ именно перебивает своё число.
+   */
+  function openHeights() {
+    const scheme = findScheme(project(), schemeId);
+    const common = scheme && typeof scheme.wallHeightMm === "number" ? String(scheme.wallHeightMm) : "";
+    const schemeInput = uiNumber(0, DRAWING_MM_MAX);
+    schemeInput.value = common;
+    uiApply(schemeInput, () => {
+      applySchemeHeight(schemeInput.value);
+      const fresh = findScheme(project(), schemeId);
+      const value = fresh && typeof fresh.wallHeightMm === "number" ? String(fresh.wallHeightMm) : "";
+      schemeInput.value = value;
+      for (const input of rows) input.placeholder = value;
+    });
+    const rooms = roomsInOrder(project());
+    const rows = [];
+    const roomFields = rooms.map((room) => {
+      const input = uiNumber(0, DRAWING_MM_MAX);
+      input.value = typeof room.wallHeightMm === "number" ? String(room.wallHeightMm) : "";
+      input.placeholder = common;
+      rows.push(input);
+      uiApply(input, () => {
+        applyRoomHeight(room.id, input.value);
+        const fresh = findRoom(project(), room.id);
+        input.value = fresh && typeof fresh.wallHeightMm === "number" ? String(fresh.wallHeightMm) : "";
+      });
+      return uiField(room.name, input, { class: "ui-field--row", labelTitle: room.name });
+    });
+    let modal;
+    modal = uiModal({
+      title: strings.workshop.height,
+      body: uiEl("div", { class: "ui-fields" }, [
+        uiField(strings.workshop.heightScheme, schemeInput),
+        uiEl("p", { class: "workshop__note", text: strings.workshop.heightHint }),
+        uiEl("p", { class: "ui-field__label", text: strings.workshop.heightRooms }),
+        uiEl("p", { class: "workshop__note", text: strings.workshop.heightRoomsHint }),
+        ...(roomFields.length > 0
+          ? roomFields
+          : [uiEl("p", { class: "panel__empty", text: strings.workshop.heightRoomsEmpty })]),
+      ]),
+      actions: [uiButton(strings.dialog.close, { class: "ui-btn ui-btn--accent", on: { click: () => modal.close() } })],
+    });
   }
 
   // ——— жизнь окна ———
@@ -63362,7 +63925,7 @@ function createWorkshop({ api, hosts }) {
       selected = null;
       hover = null;
       hoverHandle = null;
-      listKey = null;
+      for (const kind of Object.keys(listKeys)) listKeys[kind] = null;
       tool = workshopInitialTool(state.project, schemeId);
       fitted = false;
       resize();
@@ -63382,14 +63945,28 @@ function createWorkshop({ api, hosts }) {
       if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
     }
     // Галка «Развёртка выделенной стены» — одна на план и на чертёж (G227):
-    // сняли её в «Интерфейсе проекта» — полоса уходит и отсюда. Без этой
-    // строки поверхность о ней не узнавала: проверено живым прогоном.
+    // сняли её в «Интерфейсе» — полоса уходит и отсюда. Без этой строки
+    // поверхность о ней не узнавала: проверено живым прогоном.
     if ("wallSide" in changed || "elevationViews" in changed || "elevationGrow" in changed || "elevationShown" in changed)
       sync();
+    // Слои и притяжка живут в «Интерфейсе» (таск 187, G281), а рисует их поле:
+    // без этой строки галка меняла бы только себя — ровно та поломка, которую
+    // заказчик и просил починить.
+    if (
+      "planShown" in changed ||
+      "drawingShown" in changed ||
+      "gridShown" in changed ||
+      "gridSnap" in changed ||
+      // Шаг сетки принадлежит объекту, но правят его там же, и перерисовать
+      // поле на его смену обязан тот же обработчик.
+      "project" in changed
+    ) {
+      sync();
+    }
     // Вещи погасили или вернули — хоть глазком в списке, хоть галкой в
-    // «Интерфейсе проекта»: поле и список обязаны это увидеть (таск 154).
+    // «Интерфейсе»: поле и список обязаны это увидеть (таск 154).
     if ("objectsShown" in changed || "hiddenObjectIds" in changed) {
-      listKey = null;
+      for (const kind of Object.keys(listKeys)) listKeys[kind] = null;
       sync();
     }
     if ("project" in changed || "schemeImage" in changed) {
@@ -63413,7 +63990,9 @@ function createWorkshop({ api, hosts }) {
     workshopSurface = null;
     hosts.stage.replaceChildren();
     hosts.side.replaceChildren();
-    hosts.list.replaceChildren();
+    hosts.walls.replaceChildren();
+    hosts.openings.replaceChildren();
+    hosts.objects.replaceChildren();
     panKeyUp(null);
     if (unsubscribe) unsubscribe();
     window.removeEventListener("pointermove", onPointerMove);
@@ -63445,6 +64024,12 @@ function createWorkshop({ api, hosts }) {
     zoomBy: (factor) => zoomBy(factor),
     fit: () => fit(),
     reset: () => zoomReset(),
+    // Две двери, которые стояли рядом с отметкой подложки и уехали вместе с
+    // ней в «Интерфейс» (таск 187): уйти на план за масштабом и привязать
+    // чертёж к подложке. Переписывать их там заново нельзя — привязка идёт
+    // одним шагом истории и вписывает кадр заново.
+    calibrate: () => calibrateOnPlan(),
+    attach: () => attach(),
   };
 }
 
@@ -63463,19 +64048,22 @@ let workshopSurface = null;
 
 function mountWorkshopScreen(host, api) {
   const { getState, subscribe } = api;
-  // Три точки монтирования на одну поверхность: поле в основном экране,
-  // инструменты в левой колонке, список элементов в правой. Берутся по
-  // идентификатору из разметки, а не тремя регистрациями: у трёх регистраций
-  // три закрытия, а выделение, инструмент и черновик у них общие.
+  // Пять точек монтирования на одну поверхность: поле в основном экране,
+  // плашка с режимами в левой колонке и три списка в правой (таск 187).
+  // Берутся по идентификатору из разметки, а не пятью регистрациями: у пяти
+  // регистраций пять закрытий, а выделение, инструмент и черновик у них общие.
   const hosts = {
     stage: host,
     side: document.getElementById(PANEL_IDS.drawTools),
-    list: document.getElementById(PANEL_IDS.drawList),
+    walls: document.getElementById(PANEL_IDS.drawWalls),
+    openings: document.getElementById(PANEL_IDS.drawOpenings),
+    objects: document.getElementById(PANEL_IDS.drawObjects),
   };
+  const columns = () => [hosts.side, hosts.walls, hosts.openings, hosts.objects];
 
   const placeholder = () => {
     if (workshopSurface) return;
-    for (const node of [hosts.side, hosts.list]) {
+    for (const node of columns()) {
       if (!node) continue;
       node.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.screens.needScheme }));
     }
@@ -63483,7 +64071,7 @@ function mountWorkshopScreen(host, api) {
 
   const build = () => {
     const state = getState();
-    if (!workshopSurface && state.screen === "drawing" && state.schemeId && hosts.side && hosts.list) {
+    if (!workshopSurface && state.screen === "drawing" && state.schemeId && columns().every(Boolean)) {
       workshopSurface = createWorkshop({ api, hosts });
     }
     placeholder();
@@ -63519,38 +64107,25 @@ function workshopViewReset() {
   if (workshopSurface) workshopSurface.reset();
 }
 
-function workshopCheckRow(input, label, title) {
-  return uiEl("label", { class: "workshop__check", title: title || "" }, [input, uiEl("span", { text: label })]);
+/**
+ * Уйти на план задавать масштаб и привязать чертёж к подложке — две двери,
+ * которые стоят рядом с отметкой «Подложка» в «Интерфейсе» (таск 187).
+ *
+ * Обе ведут в поверхность по той же причине, что и масштаб (G227): привязка —
+ * шаг истории с перевписанным кадром, а калибровка показывает план и начинает
+ * на нём отрезок. Поверхности может не быть вовсе (в чертёж ещё не заходили) —
+ * тогда звать нечего, и кнопки в разделе не показываются.
+ */
+function workshopCalibratePlan() {
+  if (workshopSurface) workshopSurface.calibrate();
+}
+function workshopAttachPlan() {
+  if (workshopSurface) workshopSurface.attach();
 }
 
-// Поле с подписью над ним — тот же кирпич, что в таске 125: длинные подписи с
-// единицей измерения в узкой колонке рядом с полем ужимались до многоточия.
-function workshopField(label, input) {
-  return uiEl("label", { class: "workshop__field" }, [
-    uiEl("span", { class: "workshop__label", text: label }),
-    input,
-  ]);
-}
-
-// Поле отдаёт значение по Enter и по уходу фокуса — и только так: правка на
-// каждое нажатие клавиши набивала бы стек отмены на «1», «12», «120».
-function workshopApply(input, run) {
-  input.addEventListener("change", run);
-  input.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    run();
-  });
-  return input;
-}
-
-function workshopNumber(min, max) {
-  return uiEl("input", {
-    class: "ui-input workshop__number",
-    type: "number",
-    attrs: { min: String(min), max: String(max), step: "1", inputmode: "numeric" },
-  });
-}
+// Кирпичи полей (`uiField`, `uiNumber`, `uiApply`) уехали в `panels/ui.js`
+// (таск 187): теми же полями стоят строка элемента в колонке, окно «Что
+// добавить» и окно высот, и выглядеть они обязаны одинаково.
 
 // src/panels/tools.js
 // Два раздела левой колонки. «Метки» — всё про постановку: выбранный тип,
@@ -63946,8 +64521,16 @@ function mountToolsPanel(host, api) {
 }
 
 /**
- * Поля «Интерфейса проекта» — размер меток и подписей, шрифт, слои, развёртка
- * и масштаб того поля, которое на экране.
+ * Поля «Интерфейса» — размер меток и подписей, шрифт, слои, сетка чертежа,
+ * развёртка и масштаб того поля, которое на экране.
+ *
+ * **Все переключатели показа собраны здесь** (таск 187, G281). Слова заказчика:
+ * «пункт „Слои“ убери, это же дубль вкладки Интерфейс проекта, просто почини то
+ * бы там работало и добавь недостающие пункты. Ну и в интерфейсе убери описания
+ * у пунктов». Описания ушли в подсказки, слои чертежа (сетка, шаг, притяжка)
+ * пришли сюда из колонки, а в каждом режиме показаны ровно те отметки, которые
+ * в нём меняют картинку: линейка — у плана, сетка — у чертежа, «Объекты» — у
+ * всех трёх.
  *
  * **Одна сборка на два места** (таск 175, G272). На большом экране это раздел
  * левой колонки; на узком экрана раздела нет вовсе, и те же поля приходят
@@ -63960,7 +64543,7 @@ function mountToolsPanel(host, api) {
  * выброшенный из разметки ящик.
  */
 function createSizesFields(api) {
-  const { getState, setState, subscribe } = api;
+  const { getState, setState, subscribe, notify } = api;
   const box = uiEl("div", { class: "tools" });
   // Снимок объекта на время жеста ползунка: пока он есть, раздел не
   // перерисовывается — иначе ползунок исчезал бы из-под пальца.
@@ -63983,10 +64566,91 @@ function createSizesFields(api) {
     render();
   }
 
+  // ——— сетка чертежа: шаг в объекте, притяжка в настройках (таск 187) ———
+  //
+  // Шаг принадлежит объекту (G258), поэтому его смена — шаг истории: иначе
+  // Ctrl+Z после смены сетки вернул бы метку, а сетку — молча и заодно.
+  const gridSelect = uiEl("select", {
+    class: "ui-input tools__select",
+    title: strings.tools.gridStepHint,
+    on: {
+      change: () => {
+        const state = getState();
+        if (!state.project) return;
+        try {
+          const next = setGridStep(state.project, gridSelect.value);
+          if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
+        } catch (error) {
+          notify(error.message, "error");
+        }
+        render();
+      },
+    },
+  });
+  let gridOptionsKey = "";
+
+  // Список шагов пересобирается только когда он и правда другой (сменился
+  // объект с чужим числом): `replaceChildren` на каждом кадре схлопывал бы
+  // список, раскрытый под рукой.
+  function syncGridSelect(project) {
+    const step = gridStepOf(project);
+    const options = workshopGridOptions(step);
+    const key = options.join(",");
+    if (key !== gridOptionsKey) {
+      gridOptionsKey = key;
+      gridSelect.replaceChildren(
+        ...options.map((value) => uiEl("option", { value: String(value), text: String(value) })),
+      );
+    }
+    gridSelect.value = String(step);
+    return gridSelect;
+  }
+
+  /**
+   * Строка слоя: отметка, слово и **причина в подсказке**, а не описанием под
+   * галкой (таск 187, G281 — «в интерфейсе убери описания у пунктов»).
+   */
+  function layerRow(state, key, setting, label, title, options = {}) {
+    const row = uiEl("label", { class: "tools__field tools__field--check", title: options.reason || title }, [
+      toolsLayerCheck(state, setState, key, setting),
+      uiEl("span", { text: label }),
+    ]);
+    if (options.off) {
+      const input = row.querySelector("input");
+      input.disabled = true;
+      input.checked = false;
+    }
+    return row;
+  }
+
   function render() {
     const state = getState();
     const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
-    box.replaceChildren(
+    // ——— что показывать: только то, что в этом режиме меняет картинку ———
+    //
+    // Заказчик про «Интерфейс»: «почини то бы там работало и добавь недостающие
+    // пункты». Половина починки — свести слои чертежа сюда (они жили второй
+    // парой галок в колонке чертежа), вторая — **не показывать** в режиме ту
+    // отметку, которая в нём ничего не меняет: линейка принадлежит плану, сетка
+    // — чертежу, а в объёме из всего этого работает только «Объекты».
+    const screen = state.screen;
+    const drawing = screen === "drawing";
+    const plan = screen === "scheme";
+    const field = plan || drawing;
+    // Подложку в чертёж не положить без масштаба — и это не решение, а
+    // арифметика: миллиметру не от чего считаться в пикселях плана. Отметка в
+    // таком случае гаснет, а причина стоит в её подсказке, а рядом — кнопка,
+    // которая эту причину снимает.
+    const spot = drawing ? workshopPlacement(state.project, state.schemeId) : null;
+    const planOff = Boolean(spot) && spot.kind !== "ready";
+    const planReason = !spot
+      ? ""
+      : spot.kind === "noImage"
+        ? strings.tools.planLayerNone
+        : spot.kind === "noScale"
+          ? strings.tools.planLayerNoScale
+          : "";
+    const parts = [
       uiEl("label", { class: "tools__field" }, [
         uiEl("span", { text: strings.tools.markSize }),
         toolsSlider(sizes.markSize, TOOLS_MARK_SIZE, (value) => setSize("markSize", value), commitSize),
@@ -63995,56 +64659,71 @@ function createSizesFields(api) {
         uiEl("span", { text: strings.tools.labelSize }),
         toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
       ]),
-      // Шрифт подписей — сразу под их размером. Строкой ниже сказано, что это
-      // только экран: иначе выбор читался бы как «чем печатать», а печать
-      // всегда чертёжная и выбора не слушает.
-      uiEl("label", { class: "tools__field" }, [
+      // Шрифт подписей — сразу под их размером, а «только на экране» ушло в
+      // подсказку: строка под полем растила раздел, повторяя то же словами.
+      uiEl("label", { class: "tools__field", title: strings.tools.fontHint }, [
         uiEl("span", { text: strings.tools.font }),
         toolsFontSelect(state, setState),
       ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.fontHint }),
-      // Линейка и направляющие прячутся целиком, не удаляясь: оснастка нужна,
-      // пока целишься, и мешает, когда смотришь на план.
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsGuidesCheck(state, setState),
-        uiEl("span", { text: strings.tools.guides }),
-      ]),
-      // Подложка и чертёж — два слоя плана, и выключаются они порознь.
-      // Снял подложку — размечаешь по своему чертежу; снял чертёж —
-      // размечаешь по фотографии. Оба уходят и в выгрузку: лист обязан
-      // совпадать с тем, что человек на экране проверил.
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "planShown", PLAN_SETTING),
-        uiEl("span", { text: strings.tools.planLayer }),
-      ]),
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "drawingShown", DRAWING_SETTING),
-        uiEl("span", { text: strings.tools.drawingLayer }),
-      ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.layersHint }),
-      // Вещи чертежа — третий слой того же ряда (таск 154, G223): «дать
-      // возможность скрывать объекты с чертежа». Отметка **положительная**,
-      // как два соседа сверху: ряд, в котором одна галка значит «показать», а
-      // другая «скрыть», читается наоборот через раз. Снятая прячет все вещи
-      // разом; поштучно их прячет глазок в списке элементов чертежа.
-      //
-      // В выгрузку, в отличие от подложки и чертежа, она не уходит: слова
-      // заказчика — «на экране, а для выгрузок у нас же свои параметры
-      // видимости».
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "objectsShown", OBJECTS_SETTING),
-        uiEl("span", { text: strings.tools.objectsLayer }),
-      ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.objectsLayerHint }),
-      // Третий выключатель того же ряда и той же природы (таск 133, G185):
-      // полоса развёртки выделенной стены. В выгрузку он, в отличие от двух
-      // соседей, не уходит — развёртка на лист идёт своей кнопкой в шапке
-      // (таск 130), а полоса поверх холста на бумагу не попадала никогда.
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "elevationShown", ELEVATION_SETTING),
-        uiEl("span", { text: strings.tools.elevationStrip }),
-      ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.elevationStripHint }),
+      uiEl("p", { class: "tools__label", text: strings.tools.layers }),
+      // Линейка и направляющие — оснастка **плана**: в чертеже свои
+      // направляющие рисует черновик, в объёме линейки нет вовсе.
+      plan
+        ? uiEl("label", { class: "tools__field tools__field--check" }, [
+            toolsGuidesCheck(state, setState),
+            uiEl("span", { text: strings.tools.guides }),
+          ])
+        : null,
+      // Подложка и чертёж — два слоя, и **одна отметка на оба поля** (таск
+      // 187): прежде в чертеже работала своя пара галок, а эта молчала.
+      field
+        ? layerRow(state, "planShown", PLAN_SETTING, strings.tools.planLayer, strings.tools.planLayerHint, {
+            off: planOff,
+            reason: planReason,
+          })
+        : null,
+      // Две двери рядом с погашенной подложкой: уйти на план за масштабом и
+      // привязать чертёж к подложке. Показываются ровно тогда, когда им есть
+      // что сделать, — и только если поверхность чертежа уже собрана.
+      drawing && spot && spot.kind === "noScale" && workshopViewReady()
+        ? uiButton(strings.workshop.calibrate, {
+            class: "ui-btn ui-btn--wide",
+            title: strings.workshop.calibrateHint,
+            on: { click: () => workshopCalibratePlan() },
+          })
+        : null,
+      drawing && spot && spot.pending && workshopViewReady()
+        ? uiButton(strings.workshop.attach, {
+            class: "ui-btn ui-btn--wide",
+            title: strings.workshop.attachHint,
+            on: { click: () => workshopAttachPlan() },
+          })
+        : null,
+      // Сетка — только у чертежа: по ней там и чертят. Шаг и притяжка стоят
+      // под ней, потому что отвечают на тот же вопрос.
+      drawing
+        ? layerRow(state, "gridShown", GRID_SETTING, strings.tools.gridLayer, strings.tools.gridLayerHint)
+        : null,
+      drawing
+        ? uiEl("label", { class: "tools__field", title: strings.tools.gridStepHint }, [
+            uiEl("span", { text: strings.tools.gridStep }),
+            syncGridSelect(state.project),
+          ])
+        : null,
+      drawing
+        ? layerRow(state, "gridSnap", GRID_SNAP_SETTING, strings.tools.gridSnap, strings.tools.gridSnapHint)
+        : null,
+      field
+        ? layerRow(state, "drawingShown", DRAWING_SETTING, strings.tools.drawingLayer, strings.tools.drawingLayerHint)
+        : null,
+      // Вещи чертежа (таск 154, G223) — единственная отметка, которая работает
+      // во всех трёх режимах: гасит их и на плане, и в чертеже, и в объёме.
+      layerRow(state, "objectsShown", OBJECTS_SETTING, strings.tools.objectsLayer, strings.tools.objectsLayerHint),
+      // Полоса развёртки выделенной стены — над планом и над чертежом (G185,
+      // G227). В объёме стену не выделяют, и полосы там нет.
+      field
+        ? layerRow(state, "elevationShown", ELEVATION_SETTING, strings.tools.elevationStrip, strings.tools.elevationStripHint)
+        : null,
       // ——— масштаб того поля, которое на экране (G227) ————————————————
       //
       // Заказчик: «Кнопки + − и вписать дублируются, есть в нижнем блоке с
@@ -64057,7 +64736,8 @@ function createSizesFields(api) {
       // гаснет с причиной в подсказке, а не делает вид, что работает.
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       toolsZoomRow(state),
-    );
+    ];
+    box.replaceChildren(...parts.filter(Boolean));
   }
 
   const stop = subscribe((state, changed) => {
@@ -64067,11 +64747,15 @@ function createSizesFields(api) {
       "guidesShown" in changed ||
       "planShown" in changed ||
       "drawingShown" in changed ||
+      "gridShown" in changed ||
+      "gridSnap" in changed ||
       "objectsShown" in changed ||
       "elevationShown" in changed ||
       "schemeFont" in changed ||
-      // Ряд масштаба смотрит на то поле, которое показано (G227).
-      "screen" in changed
+      // Состав раздела и ряд масштаба смотрят на то поле, которое показано:
+      // в каждом режиме видны те отметки, которые в нём меняют картинку.
+      "screen" in changed ||
+      "schemeId" in changed
     ) {
       render();
     }
