@@ -43,6 +43,7 @@ import {
   planOriginOf,
   planPixelsPerMeter,
   pointInOutline,
+  roomHasFloor,
   schemeHeightPx,
   schemeObjectCorners,
   schemeObjectNameOf,
@@ -239,6 +240,12 @@ const OUTLINE_STYLE = {
   normal: { line: 1.6, fill: 0.1, label: 0.95 },
   pale: { line: 1, fill: 0.05, label: 0.6 },
 };
+// Шаг косой штриховки помещения **без пола** (таск 209, G317) и толщина её
+// штриха — в экранных точках: это пометка на плане, а не величина объекта, и
+// расти с масштабом ей незачем. Шаг крупный нарочно: мелкая сетка на бледной
+// заливке читается грязью, а должна читаться «здесь дыра».
+const OUTLINE_HATCH_PX = 14;
+const OUTLINE_HATCH_LINE_PX = 1.2;
 // Запас в пикселях, с которым попадают по стенке контура.
 const OUTLINE_HIT_PX = 6;
 // Радиус ручки вершины и ручки «+» на середине стенки.
@@ -3685,6 +3692,52 @@ function outlineScreen(scheme, outline, view) {
   return outline.points.map((point) => planToScreen(point, scheme, view));
 }
 
+/**
+ * Косая штриховка по контуру — **«пола нет»** (таск 209, G317).
+ *
+ * Снятый пол обязан быть виден на плане: человек, снявший его и забывший,
+ * пойдёт искать причину в объёме. Выбрана штриховка, а не цвет и не подпись:
+ * цвет у контура свой (его выбирает человек) и перекрашивать его значило бы
+ * отнять выбор, подпись занимает место и спорит с именем помещения, а штриховка
+ * ложится поверх любой заливки и на чёрно-белой распечатке остаётся собой.
+ *
+ * Рисуется она **тем же цветом**, что контур, и по его отсечке: наклон 45°,
+ * шаг экранный.
+ */
+function drawOutlineHatch(ctx, screen, color) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of screen) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  if (!(maxX > minX) || !(maxY > minY)) return;
+  ctx.save();
+  // Отсечка — **свой** путь по тем же точкам: на чужой путь полагаться нельзя,
+  // он один на холст и живёт до следующего `beginPath()`.
+  ctx.beginPath();
+  screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+  ctx.closePath();
+  ctx.clip();
+  ctx.lineWidth = OUTLINE_HATCH_LINE_PX;
+  ctx.strokeStyle = outlineTint(color, 0.75);
+  ctx.beginPath();
+  // Косая под 45°: прямая `x + y = c` проходит по диагонали, и одного прохода
+  // от левого верхнего угла до суммы сторон хватает на весь прямоугольник.
+  const from = minX + minY;
+  const to = maxX + maxY;
+  for (let at = Math.ceil(from / OUTLINE_HATCH_PX) * OUTLINE_HATCH_PX; at <= to; at += OUTLINE_HATCH_PX) {
+    ctx.moveTo(at - maxY, maxY);
+    ctx.lineTo(at - minY, minY);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 // Середина многоугольника для подписи: центр по площади, а не по вершинам, —
 // у Г-образной комнаты он ближе к её телу, чем среднее углов.
 function outlineCenter(points) {
@@ -3984,6 +4037,12 @@ export function drawOutlines(ctx, { project, scheme, filter, view, mode, selecte
     if (outline.id === selectedOutlineId) ctx.setLineDash([6, 4]);
     ctx.stroke();
     ctx.restore();
+    // Пола нет (таск 209) — поверх заливки и линии ложится косая штриховка.
+    // **После** обводки и своим путём: путь у холста один, и штриховка, взятая
+    // под отсечку до `stroke()`, этим же `stroke()` и рисовалась бы второй раз
+    // — уже без отсечки, через весь план. Так это и выглядело в первом живом
+    // прогоне: параллелограмм косых линий в пол-этажа.
+    if (!roomHasFloor(project, outline.roomId)) drawOutlineHatch(ctx, screen, color);
 
     const label = outlineLabelBox(project, scheme, outline, state);
     if (!label) continue;

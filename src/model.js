@@ -5434,6 +5434,56 @@ export function setSchemeWallHeight(project, schemeId, value) {
   return { project: withProject(project, { schemes }), scheme: schemes.find((item) => item.id === schemeId), changed: true };
 }
 
+// ——— пол помещения (таск 209, требование G317) ———————————————————————————
+//
+// Слова заказчика: «сделаем на чертеже пол и возможность его убрать или
+// добавить. при чем по умолчанию он есть во всех замкнутых помещениях. Для
+// чего — бывают дома, когда часть помещения в одном объёме на оба этажа, а
+// часть с разделением на этажи».
+//
+// **Ключ отрицательный и необязательный**: `hasFloor: false` пишется только
+// тому помещению, у которого пол сняли, а у всех остальных ключа нет вовсе.
+// Это и есть миграция (G68): объект прежней сборки открывается с полами у всех
+// комнат и упаковывается байт в байт прежним, потому что писать в него нечего.
+//
+// **Имя не `floor`** нарочно: `floor` у схемы — это **номер этажа** (таск 149),
+// и одно слово в двух смыслах в одном файле стоило бы кому-нибудь часа. Здесь
+// спрашивают «есть ли пол», и ключ отвечает ровно на этот вопрос.
+//
+// Двусветное помещение собирается **двумя готовыми ручками**, а не третьей
+// новой: у комнаты нижнего этажа задают высоту в два этажа (таск 173), а у
+// помещения над ней снимают пол. Поэтому высота этажа в стопке считается по
+// схеме, а не по самой высокой комнате — см. `volumeFloorTopMm`.
+
+/** Есть ли у помещения пол. Нет ключа — есть: так открывается прежний объект. */
+export function roomHasFloor(project, roomId) {
+  const room = roomId ? findRoom(project, roomId) : null;
+  return !room || room.hasFloor !== false;
+}
+
+/**
+ * Снять или вернуть пол помещению. Возвращённый пол **удаляет ключ**, а не
+ * пишет `true`: образец — `floor` у схемы и `wallHeightMm` у комнаты.
+ */
+export function setRoomFloor(project, roomId, on) {
+  const room = findRoom(project, roomId);
+  if (!room) throw modelError("roomNotFound");
+  const want = on !== false;
+  if (want && !Object.prototype.hasOwnProperty.call(room, "hasFloor")) {
+    return { project, room, changed: false };
+  }
+  if (!want && room.hasFloor === false) return { project, room, changed: false };
+  const rooms = project.rooms.map((item) => {
+    if (item.id !== roomId) return item;
+    if (want) {
+      const { hasFloor, ...rest } = item;
+      return rest;
+    }
+    return { ...item, hasFloor: false };
+  });
+  return { project: withProject(project, { rooms }), room: rooms.find((item) => item.id === roomId), changed: true };
+}
+
 export function setRoomWallHeight(project, roomId, value) {
   const room = findRoom(project, roomId);
   if (!room) throw modelError("roomNotFound");

@@ -339,11 +339,20 @@ export function volumeWhere(project, scene, at) {
   const room = volumeRoomAt(scene, at);
   const found = room && room.roomId ? findRoom(project, room.roomId) : null;
   const place = found ? text("volume.inRoom", { name: found.name }) : strings.volume.outside;
+  // **Над дырой — словом** (таск 209, G317). Пол у помещения сняли, человек
+  // стоит над двусветным пространством, а падения в сборке нет вовсе: он
+  // остаётся на своём этаже и идёт дальше. Молча это выглядело бы хождением по
+  // воздуху, поэтому полоса «где я» говорит прямо. Сделать из этого падение —
+  // отдельная работа: падать нужно **на нижний этаж**, то есть менять этаж под
+  // ногами посреди шага.
+  const hole = room && room.hasFloor === false ? " · " + strings.volume.noFloor : "";
   // Упёрлись носом в стену — об этом говорится словом, а не исправляется за
   // человека: в санузле 1,4 × 1,6 м кадр честно показывает сорок сантиметров
   // стены, и подсказать тут можно только выход — обзор.
-  if (volumeFreeMm(scene.solids, at.x, at.y) < VOLUME_TIGHT_MM) return place + " · " + strings.volume.tight;
-  return place;
+  if (volumeFreeMm(scene.solids, at.x, at.y) < VOLUME_TIGHT_MM) {
+    return place + hole + " · " + strings.volume.tight;
+  }
+  return place + hole;
 }
 
 /**

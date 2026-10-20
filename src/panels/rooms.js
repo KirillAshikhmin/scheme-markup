@@ -21,7 +21,9 @@ import {
   findRoom,
   listedMarks,
   outlinesInOrder,
+  roomHasFloor,
   roomsInOrder,
+  setRoomFloor,
   updateRoom,
 } from "../model.js";
 import { strings, text } from "../strings.js";
@@ -82,7 +84,13 @@ export function roomsRows(project, schemeId) {
   const outlines = schemeId ? outlinesInOrder(project, schemeId) : [];
   return roomsInOrder(project).map((room) => {
     const outline = outlines.find((item) => item.roomId === room.id) || null;
-    return { room, marks: roomsUsage(project, room.id), outlineId: outline ? outline.id : null };
+    return {
+      room,
+      marks: roomsUsage(project, room.id),
+      outlineId: outline ? outline.id : null,
+      // Пол помещения (таск 209): по умолчанию есть, и строка списка — его дом.
+      hasFloor: roomHasFloor(project, room.id),
+    };
   });
 }
 
@@ -282,6 +290,28 @@ function mountRoomsPanel(host, api) {
     }
   }
 
+  /**
+   * Снять или вернуть пол (таск 209, G317).
+   *
+   * Это **свойство помещения**, а не отметка показа: оно уезжает с объектом к
+   * напарнику и меняет объём у обоих. Поэтому идёт оно через историю, как
+   * имя и цвет, а не через настройки браузера.
+   */
+  function toggleFloor(roomId) {
+    const before = project();
+    const row = roomsRows(before, getState().schemeId).find((item) => item.room.id === roomId);
+    if (!row) return;
+    let after;
+    try {
+      after = setRoomFloor(before, roomId, !row.hasFloor);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (!after.changed) return;
+    commit(after.project, strings.history.roomFloor);
+  }
+
   function recolor(roomId, color) {
     const current = findRoom(project(), roomId);
     // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
@@ -360,6 +390,15 @@ function mountRoomsPanel(host, api) {
             class: "ui-btn" + (action === "edit" ? " rooms__outline--set" : ""),
             title: action === "edit" ? strings.rooms.outlineEdit : strings.rooms.outlineDraw,
             on: { click: () => startOutline(row.room.id) },
+          }),
+          // Пол — рядом с контуром: обе кнопки про одно и то же замкнутое
+          // помещение. Нажатая значит «пол есть», отжатая — «двусветное
+          // пространство», и то же самое видно на плане штриховкой.
+          uiIconButton("floorSlab", {
+            class: "ui-btn" + (row.hasFloor ? " is-on" : " rooms__floor--off"),
+            title: (row.hasFloor ? strings.rooms.floorOn : strings.rooms.floorOff) + ". " + strings.rooms.floorHint,
+            attrs: { "aria-pressed": row.hasFloor ? "true" : "false" },
+            on: { click: () => toggleFloor(row.room.id) },
           }),
           uiIconButton("trash", {
             class: "ui-btn ui-btn--danger",

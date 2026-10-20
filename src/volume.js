@@ -60,6 +60,7 @@ import {
   outlinesInOrder,
   planFractionToMm,
   roomAtPoint,
+  roomHasFloor,
   planMmToFraction,
   projectCoords,
   projectTopAzimuth,
@@ -384,6 +385,12 @@ export const VOLUME_LAND_OUT_MM = 3000;
 export const VOLUME_WALL_RGB = [216, 212, 204];
 export const VOLUME_FLOOR_RGB = [170, 142, 110];
 export const VOLUME_CEILING_RGB = [238, 238, 236];
+/**
+ * Кромка перекрытия (таск 209, дефект D60). Бетон темнее стены: перекрытие —
+ * это то, что **между** этажами, и в кадре оно обязано читаться полосой, а не
+ * сливаться со стеной в один белый блок.
+ */
+export const VOLUME_SLAB_RGB = [186, 181, 173];
 export const VOLUME_OBJECT_RGB = [150, 126, 190];
 export const VOLUME_DOOR_RGB = [176, 132, 92];
 /** Ручка двери — металл: светлее полотна и холоднее его (G207). */
@@ -962,7 +969,12 @@ export function volumeCurtainOpen(openCurtainIds, markId) {
 export function volumeSunOpenings(project, schemeId, rooms, places, heightOf, openCurtainIds = null) {
   const spots = [];
   if (!rooms || rooms.length === 0) return spots;
-  const roomAt = (point) => rooms.find((room) => volumePointInside(point, room.pointsMm)) || null;
+  // Пятну нужен **пол**: в помещении без пола (двусветное пространство, таск
+  // 209) лежать ему не на чем, и такая комната для света — та же улица.
+  // Светить сквозь дыру на нижний этаж сборка не умеет и не делает вид, что
+  // умеет: это второй шаг света, то есть трассировка, которой здесь нет.
+  const roomAt = (point) =>
+    rooms.find((room) => room.hasFloor !== false && volumePointInside(point, room.pointsMm)) || null;
   // Тюль по стенам: отступы вдоль стены, посчитанные один раз на сцену.
   const sheers = [];
   for (const place of places || []) {
@@ -1855,6 +1867,11 @@ export function volumeRooms(project, schemeId) {
       pointsMm: volumeClockwise(points),
       heightMm: height.mm,
       heightKnown: height.known,
+      // Пол помещения (таск 209, G317): нет ключа — есть пол, и прежний объект
+      // показывается как показывался. Контур без помещения (такое бывает у
+      // объекта, где комнату удалили, а обводку оставили) считается с полом:
+      // снимать его было некому.
+      hasFloor: roomHasFloor(project, outline.roomId),
     });
   }
   return rooms;
@@ -2268,7 +2285,10 @@ export function volumeStairLanding(scene, atMm = null, headMm = VOLUME_HEAD_MM, 
     const pushed = volumePush(solids, probe, VOLUME_BODY_MM, headMm);
     // Вытолкнуть не удалось — место теснее тела, и это не площадка.
     if (volumeDepthMm(solids, pushed.x, pushed.y, VOLUME_BODY_MM, headMm) > 0) continue;
-    const inside = !rooms || volumeRoomAt(scene, pushed) !== null;
+    const found = volumeRoomAt(scene, pushed);
+    // Площадка у лестницы обязана быть **с полом**: сойти с марша в дыру
+    // двусветного пространства — не прибытие, а падение (таск 209).
+    const inside = !rooms || (found !== null && found.hasFloor !== false);
     const free = Math.min(volumeFreeMm(roomy, pushed.x, pushed.y, headMm), VOLUME_LANDING_ROOM_MM);
     // В помещении — главное, простор — второе. Вне контуров человек стоял бы
     // на улице, а по лестнице выходят в дом.
@@ -2444,8 +2464,32 @@ export function volumeWallHeights(project, schemeId, fallbackMm) {
   return heights;
 }
 
-/** Потолок этажа: самая высокая стена схемы, но не ниже высоты самой схемы. */
-export function volumeFloorTopMm(project, schemeId, heights = null) {
+/**
+ * Высота этажа в стопке — **высота схемы**, а не самой высокой её комнаты
+ * (таск 209 уточняет таск 202).
+ *
+ * Сперва здесь стоял максимум по стенам: «иначе перекрытие срежет комнату, у
+ * которой своя высота». Двусветное пространство (G317) перевернуло довод.
+ * Высокая комната — это и есть помещение на два этажа, и поднимать из-за неё
+ * **весь** верхний этаж значит разносить дом: задали гостиной 5800 — и спальни
+ * над ней уехали бы на три метра вверх от лестницы.
+ *
+ * Поэтому правило простое и предсказуемое: этаж ровно такой высоты, какая
+ * задана схеме, а комната, которой задали больше, проходит сквозь перекрытие —
+ * **через ту дыру, которую оставляет снятый пол помещения над ней**. Цена
+ * названа прямо: комната выше схемы, под которой пол не снимали, упрётся в
+ * перекрытие и будет срезана им — и это видно сразу, с первого взгляда на
+ * стопку.
+ *
+ * Самую высокую стену спрашивает `volumeWallsTopMm` — она нужна земле под
+ * тень, и это другая мерка.
+ */
+export function volumeFloorTopMm(project, schemeId) {
+  return volumeHeightMm(project, schemeId, null).mm;
+}
+
+/** Самая высокая стена схемы: по ней считается вынос земли под тень (D43). */
+export function volumeWallsTopMm(project, schemeId, heights = null) {
   const schemeMm = volumeHeightMm(project, schemeId, null).mm;
   const map = heights || volumeWallHeights(project, schemeId, schemeMm);
   let top = schemeMm || 0;
@@ -2596,6 +2640,54 @@ export function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, index = 0,
   return faces;
 }
 
+/**
+ * Тело перекрытия под полом: кромка по контуру и низ (таск 209, дефект D60).
+ *
+ * **Почему это понадобилось.** Пол был одной плоскостью без толщины, и между
+ * этажами стопки зияла щель в `VOLUME_SLAB_MM`: верх стен нижнего этажа на
+ * 2800, пол верхнего на 3000, а между ними **не было ни одной грани** — замер
+ * на стенде из трёх этажей дал ноль граней, пересекающих эту полосу. Снаружи
+ * сквозь неё было видно внутрь дома, и ровно это заказчик назвал словами
+ * «говоришь рисуются, а я их не вижу».
+ *
+ * Теперь у пола есть тело: бок красится бетоном (`VOLUME_SLAB_RGB`) и идёт в
+ * дерево порядка наравне со стенами, низ — потолком, и он же закрывает вид
+ * снизу там, где у нижнего этажа комнаты не обведены.
+ *
+ * Эта же кромка — **края дыры** двусветного пространства (G317): пол снят у
+ * помещения, перекрытия там нет, а у соседних оно кончается своим торцом.
+ * Второго механизма «нарисовать край дыры» не нужно и заводить нельзя.
+ */
+export function volumeSlabFaces(points, topMm, out = []) {
+  if (!points || points.length < 3) return out;
+  const bottomMm = topMm - VOLUME_SLAB_MM;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (dx === 0 && dy === 0) continue;
+    const length = Math.hypot(dx, dy);
+    out.push(
+      volumeFace(
+        [volumeAt(a, bottomMm), volumeAt(b, bottomMm), volumeAt(b, topMm), volumeAt(a, topMm)],
+        VOLUME_SLAB_RGB,
+        // Ярус у кромки **телесный**: она стоит вертикально, как стена, и
+        // спорит с соседями порядком, а не правилом.
+        { normal: { x: dy / length, y: -dx / length, z: 0 } },
+      ),
+    );
+  }
+  out.push(
+    volumeFace(
+      points.map((point) => volumeAt(point, bottomMm)),
+      VOLUME_CEILING_RGB,
+      { normal: { x: 0, y: 0, z: -1 }, layer: VOLUME_LAYER_GROUND },
+    ),
+  );
+  return out;
+}
+
 /** Снизу и сверху: насколько грани уходят по вертикали. `null` — граней нет. */
 export function volumeFacesSpan(faces) {
   let minZ = Infinity;
@@ -2632,8 +2724,10 @@ export function volumeOrderStack(groups) {
     if (!span) continue;
     const last = parts[parts.length - 1];
     // Перекрылись по вертикали — плоскости между ними нет, и этажи считаются
-    // одним куском.
-    if (last && span.minZ <= last.span.maxZ) {
+    // одним куском. **Касание не перекрытие**: с таска 209 плита верхнего
+    // этажа начинается ровно там, где кончаются стены нижнего, и шов проходит
+    // по этой самой плоскости — ни одна грань её не пересекает.
+    if (last && span.minZ < last.span.maxZ - VOLUME_PLANE_EPS_MM) {
       last.faces = [...last.faces, ...inTree];
       last.span = { minZ: Math.min(last.span.minZ, span.minZ), maxZ: Math.max(last.span.maxZ, span.maxZ) };
       continue;
@@ -2683,16 +2777,18 @@ export function volumeStackScene(project, plan, optionsOf) {
   if (mineAt < 0 || floors.length < 2) return null;
   const mine = floors[mineAt];
   const take = (schemeId) => (typeof optionsOf === "function" ? optionsOf(schemeId) || {} : {});
-  // **Плита этажа выше нижнего — перекрытие, а не земля**: земля у дома одна и
-  // лежит под нижним этажом. Зелёный прямоугольник с выносом под тень,
-  // повторённый на каждом этаже, закрыл бы дом сверху травой. Правило одно и
-  // для той схемы, которая открыта: второй этаж не становится землёй от того,
-  // что человек на нём стоит.
-  const deckOf = (at) => at > 0;
+  // **У этажа выше нижнего плиты нет вовсе**: земля у дома одна и лежит под
+  // нижним этажом, а перекрытие собирается из полов помещений (таск 209).
+  // Зелёный прямоугольник с выносом под тень, повторённый на каждом этаже,
+  // закрыл бы дом сверху травой, а сплошная плита по габариту — затянула бы
+  // дыру двусветного пространства. Правило одно и для той схемы, которая
+  // открыта: второй этаж не становится землёй от того, что человек на нём
+  // стоит.
+  const upperOf = (at) => at > 0;
   const base = volumeScene(project, mine.schemeId, {
     ...take(mine.schemeId),
     order: false,
-    deck: deckOf(mineAt),
+    upper: upperOf(mineAt),
   });
   if (!base || base.empty) return base;
   const groups = [];
@@ -2709,7 +2805,7 @@ export function volumeStackScene(project, plan, optionsOf) {
     const own = at === mineAt;
     const sub = own
       ? base
-      : volumeScene(project, item.schemeId, { ...take(item.schemeId), order: false, deck: deckOf(at) });
+      : volumeScene(project, item.schemeId, { ...take(item.schemeId), order: false, upper: upperOf(at) });
     if (!sub || sub.empty) continue;
     if (at === 0) landMm = sub.landMm;
     volumeFloorFaces(sub.faces, {
@@ -4077,16 +4173,24 @@ export function volumeScene(project, schemeId, options = {}) {
   // от стены на полторы высоты. Вынос считается от высоты, а не взят на глаз:
   // `VOLUME_LAND_OUT` высот от габарита во все стороны.
   const wallHeights = volumeWallHeights(project, schemeId, schemeHeight.mm);
-  const tallest = volumeFloorTopMm(project, schemeId, wallHeights);
+  const tallest = volumeWallsTopMm(project, schemeId, wallHeights);
   // Прямоугольник плиты, когда она работает землёй (D52): им фон узнаёт, где
   // кончается земля сцены. `null` — плита сама пол, и земли у сцены нет вовсе.
   //
-  // `options.deck` — схема показана **этажом стопки** (таск 202), и земли под
-  // ней нет: земля у дома одна, под нижним этажом. Плита тогда работает
-  // перекрытием — габаритом чертежа, без выноса под тень и цветом пола.
+  // `options.upper` — схема показана **этажом стопки, стоящим не на земле**
+  // (таск 202). Плиты у такого этажа нет **вовсе** (таск 209, G317): земля у
+  // дома одна, под нижним этажом, а перекрытие — это полы его помещений, и
+  // второй сплошной плиты по габариту чертежа быть не должно. Именно она
+  // раньше затыкала собой дыру двусветного пространства: пол сняли, а плита
+  // под ним осталась.
+  //
+  // Цена названа прямо: где на верхнем этаже помещение **не обведено**, там
+  // перекрытия нет и видно насквозь. Это то же правило, что у заказчика в
+  // словах — «пол есть во всех замкнутых помещениях», — и другого способа
+  // узнать, есть ли там пол, у сборки нет.
   let landMm = null;
-  if (bounds) {
-    const land = rooms.length > 0 && options.deck !== true;
+  if (bounds && options.upper !== true) {
+    const land = rooms.length > 0;
     const shadow = volumeShadowShift(tallest);
     const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
     const plate = {
@@ -4166,13 +4270,23 @@ export function volumeScene(project, schemeId, options = {}) {
     }
   }
   for (const room of rooms) {
-    faces.push(
-      volumeFace(
-        room.pointsMm.map((point) => volumeAt(point, 0)),
-        VOLUME_FLOOR_RGB,
-        { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
-      ),
-    );
+    // **Пол помещения — он же перекрытие** (таск 209, G317): одно правило, а не
+    // два похожих. Есть пол — есть плита с кромкой, на которой стоит этаж выше;
+    // снят — там дыра на два этажа, и край её держат соседние плиты.
+    if (room.hasFloor) {
+      faces.push(
+        volumeFace(
+          room.pointsMm.map((point) => volumeAt(point, 0)),
+          VOLUME_FLOOR_RGB,
+          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
+        ),
+      );
+      volumeSlabFaces(room.pointsMm, 0, faces);
+    }
+    // Потолок у помещения **свой** и остаётся всегда: он не перекрытие, а
+    // верх этой комнаты. У двусветной гостиной его поднимают ей же — высотой
+    // стен помещения (таск 173), и тогда он встаёт на уровень потолка верхнего
+    // этажа сам.
     faces.push(
       volumeFace(
         [...room.pointsMm].reverse().map((point) => volumeAt(point, room.heightMm)),
@@ -4226,21 +4340,26 @@ export function volumeScene(project, schemeId, options = {}) {
     // плита сама пол, и подкладывать под стену нечего.
     if (rooms.length > 0) {
       const middleMm = vectors.len / 2;
+      const strip = volumeBoxCorners(
+        {
+          x: Number(wall.aMm.x) + vectors.u.x * middleMm,
+          y: Number(wall.aMm.y) + vectors.u.y * middleMm,
+        },
+        vectors.u,
+        vectors.len + VOLUME_FLOOR_LAP * 2,
+        Number(wall.thicknessMm) + VOLUME_FLOOR_LAP * 2,
+      );
       faces.push(
         volumeFace(
-          volumeBoxCorners(
-            {
-              x: Number(wall.aMm.x) + vectors.u.x * middleMm,
-              y: Number(wall.aMm.y) + vectors.u.y * middleMm,
-            },
-            vectors.u,
-            vectors.len + VOLUME_FLOOR_LAP * 2,
-            Number(wall.thicknessMm) + VOLUME_FLOOR_LAP * 2,
-          ).map((point) => volumeAt(point, 0)),
+          strip.map((point) => volumeAt(point, 0)),
           VOLUME_FLOOR_RGB,
           { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
         ),
       );
+      // Тело у полосы — такое же, как у пола комнаты (таск 209): иначе
+      // перекрытие кончалось бы у контура помещения, а под стеной верхнего
+      // этажа на фасаде оставалась бы щель ровно в толщину плиты.
+      volumeSlabFaces(strip, 0, faces);
     }
     // Сплошные участки стены — во всю её высоту; низкая перемычка над проёмом
     // (G234) — своим куском от верха проёма до верха стены. У препятствия
@@ -4501,7 +4620,11 @@ export function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM, options = {})
  * увидеть комнату, а не упереться в ближний угол.
  */
 export function volumeStart(scene) {
-  const rooms = [...(scene.rooms || [])].sort((a, b) => volumeArea(b.pointsMm) - volumeArea(a.pointsMm));
+  // В помещение без пола не встают (таск 209): это дыра на два этажа, и
+  // открывать окно, стоя в воздухе над нижним этажом, незачем.
+  const rooms = [...(scene.rooms || [])]
+    .filter((room) => room.hasFloor !== false)
+    .sort((a, b) => volumeArea(b.pointsMm) - volumeArea(a.pointsMm));
   const solids = scene.solids || [];
   // Место выбирается **и по вещам** (G264): сквозь них теперь проходят, но
   // открывать окно с камерой внутри дивана незачем — просторным считается то,
