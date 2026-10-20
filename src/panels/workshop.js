@@ -1636,6 +1636,35 @@ export function workshopHint(tool, way) {
 }
 
 /**
+ * Строка под кнопками «Выделение · Добавление» — **одна на два зова**: кадр
+ * колонки (`sync`) и шаг призрака проёма (таск 203, дефект D55).
+ *
+ * `refusal` — причина, по которой показанный призрак не сядет. Её место именно
+ * здесь, строкой, а не плашкой: курсор идёт по стене десятками шагов в
+ * секунду, и плашка на каждый шаг была бы не предупреждением, а помехой
+ * (правило таска 180). Пока эту строку писали в двух местах врозь, одно из них
+ * пережило переезд колонки, а другое — нет: таск 187 унёс `subjectNote` из
+ * разметки, а две записи в него остались в разборе движения мыши, и
+ * `ReferenceError` рвал кадр ровно там, где призрак обязан был появиться.
+ *
+ * Чистая и вынесена наружу ради теста: про что говорит строка, видно без
+ * браузера.
+ */
+export function workshopModeNote({ mode, tool, wallCount, refusal } = {}) {
+  if (mode === "select") return { text: strings.workshop.modeSelectHint, bad: false };
+  // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
+  // «Что добавить» этого не видно — оно про вид и размеры, а не про то, что
+  // на схеме.
+  if (tool === "openings" && !(Number(wallCount) > 0)) {
+    return { text: strings.workshop.openingNeedWall, bad: false };
+  }
+  // Красным — потому что то же самое в эту минуту краснеет под курсором:
+  // строка объясняет призрак, а не заменяет его.
+  if (refusal) return { text: String(refusal), bad: true };
+  return { text: drawPickerHint(tool), bad: false };
+}
+
+/**
  * Строка состояния схемы: какой это из трёх случаев, что в чертеже и сколько
  * стен. Чистая — слова про случай «молча рисовать в никуда нельзя» решаются
  * здесь и проверяются без браузера.
@@ -1880,7 +1909,7 @@ function createWorkshop({ api, hosts }) {
   // окно закроют.
   const strip = createElevationStrip({
     onSide: (side) => setState({ wallSide: side }),
-    // Переход к соседней стене из ряда полей (таск 179, G267). Сторона встаёт
+    // Переход на другую стену парой углов (таск 197, G302). Сторона встаёт
     // первой, стена второй: выделение у чертежа своё (`select` ведёт и его), и
     // кадра между двумя правками на экране не бывает — обе идут одной задачей.
     onWall: ({ wallId, side }) => {
@@ -2539,6 +2568,15 @@ function createWorkshop({ api, hosts }) {
     const candidate = { wallId: pick.wall.id, atMm, ...base };
     const attempt = workshopTryOpening(project(), candidate, null);
     ghost = { wall: pick.wall, opening: candidate, ok: attempt.ok, message: attempt.ok ? "" : attempt.message };
+  }
+
+  /**
+   * Чем этот призрак отличается от прежнего: стена, место на ней и ответ
+   * модели. Кадр перерисовывается только на смену отпечатка — движение мыши
+   * вдоль стены на доли миллиметра кадра не стоит.
+   */
+  function ghostStamp() {
+    return ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
   }
 
   function wallUnder(pointMm) {
@@ -3303,15 +3341,14 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (tool === "openings") {
-      const before = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
+      const before = ghostStamp();
       updateGhost(mmOf(event));
-      const after = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
-      if (before !== after) {
-        // Причина отказа живёт в строке под полем, а не в плашке: курсор ходит
+      if (ghostStamp() !== before) {
+        // Причина отказа живёт строкой под кнопками, а не плашкой: курсор ходит
         // по стене десятками шагов в секунду, и плашка на каждый шаг была бы
-        // не предупреждением, а помехой.
-        subjectNote.textContent = ghost && !ghost.ok ? ghost.message : openingHelp();
-        subjectNote.classList.toggle("is-bad", Boolean(ghost && !ghost.ok));
+        // не предупреждением, а помехой. Слова считает `workshopModeNote` — та
+        // же, которой их пишет кадр колонки.
+        syncModeNote();
         redraw();
       }
       return;
@@ -4261,14 +4298,7 @@ function createWorkshop({ api, hosts }) {
     syncAddPlate();
     // Строка под кнопками — словами: по плашке не видно, ставится вещь кликом
     // или тянется цепочкой. То же правило, что у меток (`tools.kindPointHint`).
-    // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
-    // этого не видно — оно про вид и размеры, а не про то, что на схеме.
-    modeNote.textContent =
-      now === "select"
-        ? strings.workshop.modeSelectHint
-        : tool === "openings" && walls().length === 0
-          ? strings.workshop.openingNeedWall
-          : drawPickerHint(tool);
+    syncModeNote();
     syncDetails(current, wall);
     syncHeightButton(current);
     syncElevation(current, wall);
@@ -4284,6 +4314,23 @@ function createWorkshop({ api, hosts }) {
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
     node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
+  }
+
+  /**
+   * Строка под кнопками — **одна дверь к ней**: кадр колонки и шаг призрака
+   * проёма пишут её этой функцией, а слова считает чистая `workshopModeNote`.
+   * Второй записи у строки быть не должно: ровно на ней и погорел таск 187 —
+   * призрак писал в узел, которого колонка уже не держала.
+   */
+  function syncModeNote() {
+    const line = workshopModeNote({
+      mode: mode(),
+      tool,
+      wallCount: walls().length,
+      refusal: ghost && !ghost.ok ? ghost.message : "",
+    });
+    modeNote.textContent = line.text;
+    modeNote.classList.toggle("is-bad", line.bad);
   }
 
   /**
@@ -4417,11 +4464,15 @@ function createWorkshop({ api, hosts }) {
     const frame = box.getBoundingClientRect();
     const head = section ? section.querySelector(".panel__head") : null;
     const foot = section ? section.querySelector(".workshop__foot") : null;
-    // Заголовок меряется высотой, а не местом: своё место он занимает ровно
-    // тогда, когда раздел прошёл верхнюю кромку, — а подвести строку мы и
-    // собираемся туда, под заголовок.
-    const top = frame.top + (head ? head.offsetHeight : 0);
-    const low = frame.bottom - Math.max(panelCover(frame, foot, "foot"), panelRailInset(box));
+    // Сверху кадр закрыт лестницей заголовков (таск 201), и своего заголовка
+    // в ней уже мало: над ним стоят все уехавшие разделы. Высоту лестницы
+    // считает рейка; пока раздел её не пересёк, его заголовок в лестницу не
+    // входит — тогда берём его высоту, ведь подвести строку мы собираемся
+    // именно под него.
+    const stair = panelRailInset(box, "top");
+    const own = head ? head.offsetHeight : 0;
+    const top = frame.top + Math.max(stair, own);
+    const low = frame.bottom - Math.max(panelCover(frame, foot, "foot"), panelRailInset(box, "bottom"));
     const rect = item.getBoundingClientRect();
     // Высокая строка (раскрытые параметры) целиком не влезает: тогда читаем
     // сверху вниз — верх под заголовок, а не хвост к подвалу.

@@ -5726,27 +5726,33 @@ const WALL_ROOM_PROBE_MM = 100;
  *
  * Пробная точка отходит от середины стены на её сторону: сама середина лежит
  * внутри стены, то есть на границе контура, и ответ там был бы случайным.
+ *
+ * `alongMm` — где именно по стене спрашивать, отсчёт от конца `a`; умолчание
+ * середина. Нужен участку развёртки (таск 197): стена ЛМ на объекте заказчика
+ * длиной 9200 проходит мимо трёх комнат, и её середина отвечает за всю длину
+ * неверно — у участка Л-Ю своя комната и своя высота.
  */
-export function wallRoomId(project, wallId, side) {
+export function wallRoomId(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
-  const point = wallSideProbe(project, wallId, side);
+  const point = wallSideProbe(project, wallId, side, alongMm);
   return wall && point ? roomAtPoint(project, wall.schemeId, point) : null;
 }
 
-// Пробная точка стороны: середина стены, отодвинутая за её грань на эту
+// Пробная точка стороны: место на стене, отодвинутое за её грань на эту
 // сторону, в долях плана — такими контуры и спрашивают. Вынесена из
 // `wallRoomId` ради выгрузки: ей нужен не только `roomId`, но и **тот самый
 // контур**, по которому пойдёт обход (таск 130).
-function wallSideProbe(project, wallId, side) {
+function wallSideProbe(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
   const vectors = wallVectors(wall);
   if (!wall || !vectors) return null;
   const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM);
-  const middle = {
-    x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
-    y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
+  const along = Number.isFinite(Number(alongMm)) ? Math.max(0, Math.min(vectors.len, Number(alongMm))) : vectors.len / 2;
+  const at = {
+    x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * away,
+    y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * away,
   };
-  return planMmToFraction(project, wall.schemeId, middle);
+  return planMmToFraction(project, wall.schemeId, at);
 }
 
 // Контур под этой стороной. Не `roomId`: у комнаты контуров может быть
@@ -5767,10 +5773,10 @@ function wallSideOutline(project, wallId, side) {
  * высоту этажа. Теперь комната находится по стороне, а не по стене целиком —
  * у стены между кухней и прихожей две разные высоты, и обе верные.
  */
-export function wallHeightOnSide(project, wallId, side) {
+export function wallHeightOnSide(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
   if (!wall) return null;
-  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side) });
+  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side, alongMm) });
 }
 
 // Отступ вдоль стены с нужной стороны.
@@ -5946,79 +5952,259 @@ export function wallCrossings(project, wallId, side) {
   return found.sort((first, second) => first.fromMm - second.fromMm || (first.name < second.name ? -1 : 1));
 }
 
-// ——— переход к соседней стене ———————————————————————————————————————————
+// ——— участок развёртки задаётся парой углов ——————————————————————————————
 //
-// Требование G267, таск 179. Слова заказчика: «Добавь 2 поля с выпадающим
-// списком, в каждом поле одна и другая сторона текущей стены, что бы можно
-// было выбрать другую стену или её часть. В каждом списке только те стены, с
-// которыми граничит значение второго списка».
+// Требование G302, таск 197 — правка решения таска 179 (G267). Слова
+// заказчика: «там должны быть не стены слева справа, а углы. Вот на примере
+// текущей схемы — выделил я Л-М стену, но хочу посмотреть участок стены, и вот
+// в правом выпадающем списке выбираю Ю, отображается уже Л-Ю, потом хочу
+// другую, и вместо Л выбираю К и смотрю другую стену кухни. И вот в выпадающих
+// списках должны быть только связанные стеной углы».
 //
-// **Соседи уже посчитаны.** Список «с какими стенами эта граничит на этой
-// стороне» — это ровно `wallCrossings`: он найден по геометрии (ADR 008, точное
-// совпадение в целых миллиметрах), он зависит от стороны (перегородка,
-// упирающаяся справа, слева не видна — она за стеной) и он **уже нарисован** на
-// листе торцами с именами (G201). Поэтому список выбора — это буквально «ткни в
-// один из торцов, которые видишь», а не второй механизм соседства рядом с
-// первым.
+// **Что значит «связаны стеной»: оба угла лежат на одной и той же стене** — её
+// концами или местом, где в неё уткнулась чужая стена. Это не третье прочтение
+// вместо двух очевидных, а единственное, которое сходится с примером
+// заказчика. На его объекте Ю — конец перегородки, уткнувшейся в стену ЛМ (24
+// мм не доехав до её оси), и в графе «углы — узлы, стены — рёбра» Ю с Л не
+// связан вовсе: они в разных связных кусках. Ни «соседние по чертежу углы»
+// (общего ребра нет), ни «сплошная линия стен» (пути нет) до Ю не доводят. А
+// «лежат на одной стене» доводит: Л — конец ЛМ, Ю — точка на ней, и Л-Ю это
+// первые 2979 мм её листа. Так же читается и К-Ю: К — место, где в перегородку
+// ФЮ уткнулась ИК, Ю — её конец, и К-Ю это участок листа ФЮ длиной 4126.
 //
-// Важно, что `wallCrossings` ловит **и углы, и упирающиеся в середину**: на
-// объекте заказчика из 25 стен две (АИ-АК и АЕ-АЖ) ни с кем не делят угла
-// вовсе — обоими концами они уткнуты в середины других стен, — и по углам до
-// них не дойти ни из какой стены. Список по углам был бы красивее на бумаге и
-// бесполезнее в квартире.
+// **Поэтому участок всегда плоский, и ломаным он не бывает.** Оба угла пары
+// лежат на одной стене, значит лист остаётся плоскостью одной стены с одной
+// размерной цепочкой — тем, чем развёртка и была (G179). Ломаную пару взять
+// неоткуда: её никто не положит в список. Разворачивать ломаную по сгибу — это
+// другой вид листа (два отсчёта, излом, и мерить по нему нельзя), и его никто
+// не просил.
+//
+// **Соседство таска 179 при этом не потеряно, а расширено.** Угол принадлежит
+// **каждой** стене, на которой лежит, и через него видны все такие стены:
+// перегородка, уткнувшаяся в середину чужой стены, делит с ней свой угол.
+// Поэтому две стены объекта заказчика, не делящие угла ни с кем (АИ-АК и
+// АЕ-АЖ, довод таска 179 против углов), из списков достижимы. Сверено на
+// объекте: ни одна из 25 стен не потеряла ни одного соседа, а четыре нашли
+// новых — продолжение той же стены за углом (ИЛ и ЛТ лежат в одну линию, и
+// `wallCrossings` их не видел: угол между ними меньше `WALL_CROSS_MIN_DEG`).
 
-/**
- * Соседи стены с этой стороны: `[{wallId, name, atMm, side}]` слева направо
- * **по листу** развёртки.
- *
- * `atMm` — середина торца соседки в отсчёте листа: по нему человек и находит
- * её на чертеже, который перед ним. `side` — какой стороной повернётся соседка,
- * когда на неё перейдут: см. ниже, почему это не всегда наша же сторона.
- *
- * Чистая и вынесена наружу: окно развёртки берёт списки отсюда, а не считает
- * соседство само.
- */
-export function wallNeighbours(project, wallId, side) {
-  const wall = findWall(project, wallId);
-  if (!wall) return [];
-  const view = WALL_SIDES.includes(side) ? side : "left";
-  const here = wallRoomId(project, wallId, view);
-  return wallCrossings(project, wallId, view).map((cross) => ({
-    wallId: cross.wallId,
-    name: cross.name,
-    atMm: Math.round((cross.fromMm + cross.toMm) / 2),
-    side: wallFacingSide(project, cross.wallId, here, view),
-  }));
+// Короче этого участок не бывает: два угла, сошедшиеся в одной точке листа,
+// дали бы лист нулевой ширины. Миллиметр — цена деления чертежа (ADR 008).
+export const WALL_SECTION_MIN_MM = 1;
+
+// Углы, лежащие на этой стене, в отсчёте от конца `a`: `[{letter, order,
+// alongMm, end}]` в порядке букв. `end` — наш собственный конец, `order` —
+// место угла в обходе чертежа (он же порядок букв).
+//
+// Свой конец проверки на близость не проходит, а получает её даром: он и есть
+// угол этой стены, где бы ни оказался после правки чертежа.
+function wallCornerList(project, wall) {
+  const vectors = wallVectors(wall);
+  if (!vectors) return [];
+  const length = wallLengthMm(wall);
+  // Дотянуться до стены угол может не точно: концы цепочки совпадают
+  // миллиметр в миллиметр (ADR 008), а упирающуюся перегородку рисуют и на
+  // глаз — у заказчика Ю не доехал до оси ЛМ на 24 мм, а Э остановился в 50.
+  // Запас тот же, которым `wallCrossings` отвечает на «дотянулась ли», и
+  // второго такого числа заводить нельзя: разойдись они — торец на листе
+  // нарисуется, а угла, которым его режут, в списке не будет.
+  const reach = Number(wall.thicknessMm) / 2 + WALL_CROSS_REACH_MM;
+  const found = [];
+  wallCorners(project, wall.schemeId).forEach((corner, order) => {
+    const end = corner.wallIds.includes(wall.id);
+    const along =
+      (corner.atMm.x - Number(wall.aMm.x)) * vectors.u.x + (corner.atMm.y - Number(wall.aMm.y)) * vectors.u.y;
+    if (!end) {
+      // За концом стены — не её угол: там она кончилась. Иначе угол далёкой
+      // стены, стоящей на одной линии с нашей, резал бы наш лист снаружи.
+      if (along < 0 || along > length) return;
+      if (segmentDistanceMm(corner.atMm, wall.aMm, wall.bMm) > reach) return;
+    }
+    found.push({ letter: corner.letter, order, alongMm: Math.round(Math.max(0, Math.min(length, along))), end });
+  });
+  return found;
 }
 
 /**
- * Какой стороной соседка повёрнута в то же помещение, откуда на неё смотрят.
+ * Углы, лежащие на этой стене, слева направо **по листу** этой стороны:
+ * `[{letter, order, atMm, alongMm, end}]`.
  *
- * Без этого переход работал бы через раз: стороны стены называются «слева» и
- * «справа» **от её собственного направления** (`WALL_SIDES`), а направления
- * соседних стен между собой никак не связаны — обвели одну слева направо,
- * другую снизу вверх. Перешёл по углу комнаты и попал на обратную грань, то
- * есть в соседнюю квартиру.
- *
- * Отвечает на это **помещение**: мы стоим в комнате, и нужна та грань соседки,
- * которая стоит в той же комнате. Комнаты выводятся из контуров, и спрашивает
- * их `wallRoomId` — то же место, что подписывает заголовок развёртки.
- *
- * Решает это не всегда, и тогда сторона остаётся наша:
- *
- *   - контуров нет или эта грань не накрыта ни одним (`roomId` пустой);
- *   - **ни одна** грань соседки не в нашей комнате — бывает у стены, уткнутой
- *     в нашу снаружи;
- *   - **обе** грани в нашей комнате — свободно стоящая перегородка внутри
- *     одной комнаты, и вопрос «какая из них к нам» ответа не имеет.
- *
- * Выдумывать на этих трёх нечего, и наша сторона — честное умолчание: кнопки
- * «Слева» и «Справа» на месте, одно нажатие.
+ * `atMm` — отступ угла по листу, уже зеркальный по стороне: по нему и видно,
+ * какой угол у листа слева. Список **от стороны не зависит** ничем, кроме
+ * порядка и отсчёта: угол принадлежит стене, а не её грани. Это нарочно —
+ * перегородка, уткнувшаяся с другой стороны, на нашем листе не нарисована, но
+ * место, где она к стене подходит, никуда не делось, и резать по нему стену
+ * человек вправе. Фильтруй список стороной — и пример заказчика сломался бы
+ * первым же шагом: он открыл ЛМ стороной по умолчанию и ждёт в списке Ю,
+ * который подходит к стене с обратной грани.
  */
-function wallFacingSide(project, otherId, roomId, fallback) {
-  if (!roomId) return fallback;
-  const facing = WALL_SIDES.filter((side) => wallRoomId(project, otherId, side) === roomId);
-  return facing.length === 1 ? facing[0] : fallback;
+export function wallCornersOn(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  if (!wall) return [];
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const length = wallLengthMm(wall);
+  return wallCornerList(project, wall)
+    .map((corner) => ({ ...corner, atMm: Math.round(sideAlong(length, corner.alongMm, view)) }))
+    .sort((first, second) => first.atMm - second.atMm || first.order - second.order);
+}
+
+/**
+ * Участок стены между парой углов в отсчёте листа: `{fromMm, toMm, lengthMm,
+ * fromLetter, toLetter, name, whole}`.
+ *
+ * `cut` пустой — стена целиком, и тогда буквы и длина те же, что были до
+ * таска 197 (развёртки выгрузок считаются ровно этим путём). Пара, которой на
+ * этой стене нет, — `null`: вызывающий покажет стену целиком, а не пустоту.
+ *
+ * `fromLetter` — угол у **левого** края листа, `toLetter` — у правого. Порядок
+ * решает лист, а не порядок букв в паре: поля под развёрткой называют её края,
+ * и спорить с картинкой им нельзя. `name` же, наоборот, собрано в порядке
+ * букв — так названы стены (`wallNameOf`), так их читает заказчик («Л-М»,
+ * «К-Ю») и так имя участка не меняется от того, с какой стороны смотрят.
+ */
+export function wallCornerSpan(project, wallId, side, cut = null) {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const length = wallLengthMm(wall);
+  const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
+  if (!cut || !cut.fromLetter || !cut.toLetter) {
+    return {
+      fromMm: 0,
+      toMm: length,
+      lengthMm: length,
+      // Отсчёт с левой стороны зеркалится, и вместе с ним меняются местами
+      // углы: конец `a` уходит направо (таск 142).
+      fromLetter: view === "left" ? named.bLetter : named.aLetter,
+      toLetter: view === "left" ? named.aLetter : named.bLetter,
+      name: named.name,
+      whole: true,
+    };
+  }
+  const corners = wallCornersOn(project, wallId, view);
+  const from = corners.find((corner) => corner.letter === cut.fromLetter);
+  const to = corners.find((corner) => corner.letter === cut.toLetter);
+  if (!from || !to) return null;
+  const [left, right] = from.atMm <= to.atMm ? [from, to] : [to, from];
+  if (!(right.atMm - left.atMm >= WALL_SECTION_MIN_MM)) return null;
+  const ahead = left.order <= right.order;
+  return {
+    fromMm: left.atMm,
+    toMm: right.atMm,
+    lengthMm: right.atMm - left.atMm,
+    fromLetter: left.letter,
+    toLetter: right.letter,
+    name: ahead ? wallNameOf(left.letter, right.letter) : wallNameOf(right.letter, left.letter),
+    whole: left.atMm === 0 && right.atMm === length,
+  };
+}
+
+/**
+ * Куда ведут углы, связанные стеной с опорным: `[{letter, wallId, side, cut,
+ * lengthMm, wallName, sameWall}]` — каждая запись готовый участок.
+ *
+ * Опорный угол — тот, что стоит в **противоположном** поле: заказчик просил
+ * ровно это («в каждом списке только связанные стеной углы» с углом второго
+ * списка). `edge` говорит, какое поле заполняют — `"from"` (левый угол листа)
+ * или `"to"` (правый).
+ *
+ * Порядок: сперва углы показанной стены, слева направо по её листу — ими
+ * режут тот самый лист, который перед человеком; потом углы остальных стен в
+ * порядке букв, то есть в порядке обхода чертежа.
+ */
+export function wallCornerMoves(project, { wallId, side, fromLetter, toLetter, edge = "from" } = {}) {
+  const wall = findWall(project, wallId);
+  if (!wall) return [];
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const keepLetter = edge === "to" ? fromLetter : toLetter;
+  // Угол, который в этом поле уже стоит, повторять нечем: он и есть первая
+  // запись списка — «этот угол». Без этого у стены, у которой других углов нет
+  // вовсе, поле предлагало бы самого себя и выглядело бы рабочим.
+  const skipLetter = edge === "to" ? toLetter : fromLetter;
+  if (!keepLetter) return [];
+  const here = wallCornerSpan(project, wallId, view, { fromLetter, toLetter }) || wallCornerSpan(project, wallId, view, null);
+  // Комната, в которой человек стоит, — у середины **показанного участка**, а
+  // не стены: длинная стена проходит мимо нескольких комнат.
+  const length = wallLengthMm(wall);
+  const roomId = wallRoomId(project, wallId, view, sideAlong(length, (here.fromMm + here.toMm) / 2, view));
+  const walls = wallsOnScheme(project, wall.schemeId);
+  const byLetter = new Map();
+  walls.forEach((item, order) => {
+    const corners = wallCornerList(project, item);
+    const keep = corners.find((corner) => corner.letter === keepLetter);
+    if (!keep) return;
+    for (const corner of corners) {
+      if (corner.letter === keepLetter || corner.letter === skipLetter) continue;
+      // Участок нулевой ширины — не участок: два угла в одной точке листа
+      // бывают у перегородок, уткнувшихся в стену с двух сторон напротив.
+      if (Math.abs(corner.alongMm - keep.alongMm) < WALL_SECTION_MIN_MM) continue;
+      const both = corner.end && keep.end;
+      // Та же пара углов может лежать сразу на двух стенах (стена, обведённая
+      // дважды). Выбор между ними — правилом, а не случаем: показанная стена,
+      // потом та, чьи это **собственные** концы (ею пара и названа), потом по
+      // порядку стен в модели.
+      const rank = (item.id === wallId ? 0 : both ? 1 : 2) * 1000 + order;
+      const known = byLetter.get(corner.letter);
+      if (known && known.rank <= rank) continue;
+      byLetter.set(corner.letter, {
+        letter: corner.letter,
+        order: corner.order,
+        rank,
+        sameWall: item.id === wallId,
+        wallId: item.id,
+        wallName: wallName(project, item.id),
+        lengthMm: Math.abs(corner.alongMm - keep.alongMm),
+        atMm: item.id === wallId ? Math.round(sideAlong(length, corner.alongMm, view)) : 0,
+        side:
+          item.id === wallId
+            ? view
+            : wallCornerMoveSide(project, {
+                wallId: item.id,
+                roomId,
+                middleMm: (corner.alongMm + keep.alongMm) / 2,
+                ahead: corner.alongMm < keep.alongMm,
+                edge,
+              }),
+        cut: { fromLetter: corner.letter, toLetter: keepLetter },
+      });
+    }
+  });
+  return [...byLetter.values()].sort(
+    (first, second) =>
+      Number(second.sameWall) - Number(first.sameWall) ||
+      (first.sameWall ? first.atMm - second.atMm : first.order - second.order),
+  );
+}
+
+/**
+ * Какой грани показать стену, на которую переходят парой углов.
+ *
+ * **Первое слово за помещением** — довод таска 179 остаётся в силе: стороны
+ * называются «слева» и «справа» от собственного направления стены, а
+ * направления соседок между собой никак не связаны, и без этого правила
+ * переход по углу комнаты показывал бы наружную грань, то есть соседнюю
+ * квартиру. Нужна та грань соседки, что стоит в той же комнате, и спрашивается
+ * она у середины **нового участка**, а не всей стены.
+ *
+ * Помещение отвечает не всегда: контуров может не быть вовсе, обе грани могут
+ * стоять в нашей комнате (перегородка внутри неё) или ни одна — у стены,
+ * уткнутой в нашу снаружи. Тогда слово за **полем, в которое человек поставил
+ * угол**: поставил в левое — показываем ту грань, при которой этот угол у
+ * левого края листа. Прежнее умолчание «сторона остаётся наша» было честным,
+ * пока поля назывались сторонами; у пары углов оно хуже — лист поворачивался
+ * бы наугад, и выбранный угол оказывался не там, куда его положили. На объекте
+ * заказчика это ровно его третий шаг: К-Ю, помещение не отвечает, и грань
+ * выходит та, где К слева, — западная, кухонная.
+ */
+function wallCornerMoveSide(project, { wallId, roomId, middleMm, ahead, edge }) {
+  if (roomId) {
+    const facing = WALL_SIDES.filter((side) => wallRoomId(project, wallId, side, middleMm) === roomId);
+    if (facing.length === 1) return facing[0];
+  }
+  // Лист стороны «справа» читается от конца `a`, стороны «слева» — наоборот.
+  // Значит «выбранный угол слева на листе» — это `right` при меньшем отступе
+  // от `a` и `left` при большем.
+  return ahead === (edge !== "to") ? "right" : "left";
 }
 
 /**
@@ -6032,11 +6218,15 @@ function wallFacingSide(project, otherId, roomId, fallback) {
  * выведенная из этого высота. Без числа развёртка была бы картинкой, а с
  * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
  */
-export function wallElevation(project, wallId, side = "left") {
+export function wallElevation(project, wallId, side = "left", cut = null) {
   const wall = findWall(project, wallId);
   if (!wall) return null;
   const length = wallLengthMm(wall);
   const view = WALL_SIDES.includes(side) ? side : "left";
+  // Участок между парой углов (таск 197) или стена целиком. Негодная пара —
+  // стену поправили, буквы поехали — молча читается как целая стена: развёртка
+  // не обязана пропадать с экрана из-за того, что участок стал невозможен.
+  const span = wallCornerSpan(project, wallId, view, cut) || wallCornerSpan(project, wallId, view, null);
   const openings = openingsInWall(project, wallId).map((opening) => {
     const span = sideSpan(length, Number(opening.atMm), Number(opening.atMm) + Number(opening.widthMm), view);
     return {
@@ -6102,27 +6292,63 @@ export function wallElevation(project, wallId, side = "left") {
     });
   }
   marks.sort((first, second) => first.fromMm - second.fromMm);
-  const objects = wallObjectsOn(project, wallId, view);
-  const known = wallHeightOnSide(project, wallId, view);
+  // Участок режет лист: что лежит за парой углов — уходит, что пара пересекла —
+  // обрезается по ней, и отступы считаются от **левого угла участка**. Иначе
+  // размерная цепочка соврала бы: она отсчитывает от левого края листа.
+  //
+  // У стены целиком обрезки нет вовсе, и это не оптимизация: `onSpan` выкинул
+  // бы метку, вылезшую за конец стены (бывает у привязки, сделанной рукой), а
+  // до таска 197 такая метка рисовалась — пусть и за краем листа. Целая стена
+  // обязана остаться той же, какой была (G68).
+  const onSpan = (list) => {
+    if (span.whole) return list;
+    const moved = [];
+    for (const item of list) {
+      if (item.toMm === null || item.toMm === undefined) {
+        if (item.fromMm < span.fromMm || item.fromMm > span.toMm) continue;
+        moved.push({ ...item, fromMm: Math.round(item.fromMm - span.fromMm) });
+        continue;
+      }
+      const from = Math.max(item.fromMm, span.fromMm);
+      const to = Math.min(item.toMm, span.toMm);
+      if (!(to - from > 0)) continue;
+      moved.push({ ...item, fromMm: Math.round(from - span.fromMm), toMm: Math.round(to - span.fromMm) });
+    }
+    return moved;
+  };
+  const shownOpenings = onSpan(openings);
+  const shownMarks = onSpan(marks);
+  const objects = onSpan(wallObjectsOn(project, wallId, view));
+  const crossings = onSpan(wallCrossings(project, wallId, view));
+  // Комната и высота — у середины **участка**, а не стены: стена ЛМ на объекте
+  // заказчика идёт мимо трёх комнат, и у её участков разные хозяева. У целой
+  // стены это по-прежнему её середина.
+  const middleAlongMm = sideAlong(length, (span.fromMm + span.toMm) / 2, view);
+  const known = wallHeightOnSide(project, wallId, view, middleAlongMm);
   const tops = [
-    ...openings.map((opening) => opening.topMm),
+    ...shownOpenings.map((opening) => opening.topMm),
     ...objects.map((object) => (object.topMm === null ? 0 : object.topMm)),
-    ...marks.map((mark) => mark.heightMm || 0),
+    ...shownMarks.map((mark) => mark.heightMm || 0),
   ];
-  const roomId = wallRoomId(project, wallId, view);
+  const roomId = wallRoomId(project, wallId, view, middleAlongMm);
   const room = roomId ? findRoom(project, roomId) : null;
   const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
   return {
     wallId,
     side: view,
-    // Имя стены (G200) и буквы её углов — каждая на своём краю листа. Отсчёт с
-    // левой стороны зеркалится, и вместе с ним меняются местами углы: конец
-    // `a` уходит направо. Без этого подпись «А» стояла бы на листе у того
-    // угла, который на плане зовётся Б.
+    // Имя стены (G200) и буквы углов участка — каждая на своём краю листа.
+    // Отсчёт с левой стороны зеркалится, и вместе с ним меняются местами углы:
+    // конец `a` уходит направо. Без этого подпись «А» стояла бы на листе у
+    // того угла, который на плане зовётся Б.
     name: named.name,
-    fromLetter: view === "left" ? named.bLetter : named.aLetter,
-    toLetter: view === "left" ? named.aLetter : named.bLetter,
-    lengthMm: length,
+    // Имя участка (таск 197) — в порядке букв, как имя стены; у целой стены это
+    // и есть её имя. Признак `partial` отвечает на «это вся стена или кусок»:
+    // заголовок полосы и подпись листа говорят об этом по-разному.
+    sectionName: span.name,
+    partial: !span.whole,
+    fromLetter: span.fromLetter,
+    toLetter: span.toLetter,
+    lengthMm: span.lengthMm,
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
     heightKnown: known !== null,
@@ -6138,11 +6364,11 @@ export function wallElevation(project, wallId, side = "left") {
     heightShownMm: known !== null ? known : Math.max(WALL_HEIGHT_FALLBACK_MM, Math.max(0, ...tops) + 300),
     roomId,
     roomName: room ? room.name : "",
-    openings,
-    marks,
+    openings: shownOpenings,
+    marks: shownMarks,
     objects,
     // Упирающиеся стены, видные с этой стороны (G201).
-    crossings: wallCrossings(project, wallId, view),
+    crossings,
   };
 }
 

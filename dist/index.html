@@ -1335,20 +1335,20 @@
   margin: 0;
 }
 
-/* Ряд перехода к соседней стене (таск 179, G267) — своей строкой под
-   заголовком. В заголовке уже стоят имя стены, две отметки, две кнопки сторон
-   и «Закрыть»; пара списков со стенами выдавила бы их за край на планшете.
+/* Ряд углов участка (таск 197, G302) — своей строкой под заголовком. В
+   заголовке уже стоят имя стены, две отметки, две кнопки сторон и «Закрыть»;
+   пара списков выдавила бы их за край на планшете.
 
-   Поля делят строку пополам и ужимаются вместе с полосой: имя стены короткое
-   («ЛМ · 1800 мм»), и места ему хватает даже на узком экране. */
-.elev__walkbar {
+   Поля делят строку пополам и ужимаются вместе с полосой: запись короткая
+   («Ю · участок 2979 мм»), и места ей хватает даже на узком экране. */
+.elev__cutbar {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
 }
 
-.elev__walkrow {
+.elev__cutrow {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1358,12 +1358,12 @@
   color: var(--canvas-text);
 }
 
-.elev__walklabel {
+.elev__cutlabel {
   flex: none;
   color: #57606a;
 }
 
-.elev__walk {
+.elev__cut {
   flex: 1;
   min-width: 0;
   padding: 1px 4px;
@@ -1375,7 +1375,7 @@
   border-radius: 6px;
 }
 
-.elev__walk:disabled {
+.elev__cut:disabled {
   color: #8b949e;
   background: #f6f8fa;
 }
@@ -3626,11 +3626,11 @@
 }
 
 /* Фильтры списка меток не уезжают вместе со списком.
-   Липнут они **под** заголовком своего раздела, а не на нём: с таска 194
-   прокрутка одна на всю колонку, и оба липких блока целятся в одну и ту же
-   верхнюю кромку. Высоту заголовка кладёт мерой `panels/rail.js`
-   (`--panel-head`) — второго числа про заголовок в стилях нет; в листе на
-   телефоне заголовков нет вовсе, и мера там ноль. */
+   Липнут они **под лестницей заголовков**, а не на ней: с таска 194 прокрутка
+   одна на всю колонку, и в одну верхнюю кромку целятся оба липких блока, а с
+   таска 201 сверху стоит не один заголовок, а все уехавшие. Высоту лестницы
+   кладёт мерой `panels/rail.js` (`--panel-head`) — второго числа про неё в
+   стилях нет; в листе на телефоне заголовков нет вовсе, и мера там ноль. */
 .marks__top {
   position: sticky;
   top: var(--panel-head, 0px);
@@ -5714,13 +5714,14 @@ body {
   border-bottom: none;
 }
 
-/* Заголовок всегда на экране: он липнет к верху колонки, тело листается под
-   ним. Пока раздел проходит мимо, заголовок стоит у верхней кромки — это
-   умеет сам браузер. */
+/* Заголовок всегда на экране — и у верхней кромки, и у нижней.
+   Ставит его `panels/rail.js`, обе лестницы разом (таск 201): `position:
+   sticky` отсюда ушёл нарочно, иначе верх считали бы двое — браузер и рейка, —
+   и спорили бы на каждом кадре. `relative` оставлен ради слоя: `z-index`
+   работает только у позиционированного. */
 .panel__head {
   margin: 0;
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 2;
   background: var(--panel-bg);
   /* Кнопок в заголовке две (таск 198): галочка и имя. Галочка сворачивает
@@ -5731,17 +5732,27 @@ body {
   align-items: stretch;
 }
 
-/* Раздел ещё ниже кадра — его заголовок стоит у нижней кромки колонки (таск
-   194, G295: «что бы группы были видны всегда»). Поднимает его `transform` из
+/* Заголовок, стоящий не на своём месте, — ступенька лестницы (таск 194 завёл
+   нижнюю, таск 201 — верхнюю: «заголовки должны отображаться все имеющиеся на
+   экране свёрнутые, а не только ближайший»). Двигает его `transform` из
    `panels/rail.js`: место в раскладке остаётся за заголовком, и прокрутка от
-   этого не меняется ни на точку. Почему не чистым CSS — там же, в начале файла
-   рейки.
+   этого не меняется ни на точку.
 
-   Черта сверху — тенью, а не рамкой: рамка изменила бы высоту заголовка, а по
-   высоте считается вся рейка. Слой выше липкого верха: заголовок из рейки
-   обязан накрывать и содержимое соседей, и прилипшие в нём блоки. */
-.panel__head.is-below {
+   Слой выше обычных заголовков: ступенька обязана накрывать и содержимое
+   соседей, и прилипшие в них блоки. */
+.panel__head.is-pinned {
   z-index: 3;
+}
+
+/* Черта между ступеньками — тенью, а не рамкой: рамка изменила бы высоту
+   заголовка, а по высоте считается вся лестница. Сверху черта под ступенькой,
+   снизу — над: в обе стороны она отделяет лестницу от содержимого, а соседние
+   ступеньки — друг от друга. */
+.panel__head.is-above {
+  box-shadow: 0 1px 0 var(--panel-line);
+}
+
+.panel__head.is-below {
   box-shadow: 0 -1px 0 var(--panel-line);
 }
 
@@ -8055,6 +8066,11 @@ const strings = {
     // сразу говорит, между какими углами эта стена и с какими соседями она
     // делит углы. Длина рядом: имя отвечает «какая», длина — «сколько».
     wall: "Стена {name} · {length} мм",
+    // Участок между парой углов (таск 197, G302). Стена названа первой: метки
+    // привязывают к стене, и терять её имя нельзя. Участок — парой букв, как
+    // его называет сам заказчик («Л-М», «Л-Ю», «К-Ю»), а длина та, что стоит на
+    // размерной цепочке листа, то есть длина участка, а не всей стены.
+    section: "Стена {wall} · участок {name} · {length} мм",
     // Сторона названа «изнутри/снаружи»? Нет: что внутри, модель не знает —
     // помещения выводятся из контуров, а не из стен (ADR 008). Поэтому
     // стороны названы так же, как сторона открывания двери: слева и справа от
@@ -8063,18 +8079,22 @@ const strings = {
     side_left: "Слева",
     side_right: "Справа",
     sideHint: "С какой стороны смотрим на стену: на разных сторонах разные метки, и отсчёт зеркалится",
-    // Переход к соседней стене (таск 179, G267). Слова заказчика: «в каждом
-    // поле одна и другая сторона текущей стены, что бы можно было выбрать
-    // другую стену… только те стены, с которыми граничит».
+    // Два угла участка (таск 197, G302). Слова заказчика: «там должны быть не
+    // стены слева справа, а углы… И вот в выпадающих списках должны быть только
+    // связанные стеной углы».
     //
-    // Поля подписаны теми же словами, что кнопки сторон, — «Слева» и
-    // «Справа», — и это нарочно: список стороны и есть то, что на этой стороне
-    // граничит. Кнопка показывает сторону, поле уводит с неё к соседке.
-    walkHint:
-      "Перейти к стене, с которой эта граничит {side}. В списке только соседи этой стороны — те самые торцы, что видны на развёртке, и число у каждого это его отступ по листу. Соседка повернётся той стороной, что стоит в том же помещении.",
-    walkHere: "{name} — эта стена",
-    walkAt: "{name} · {at} мм",
-    walkNone: "{side}: соседних стен нет",
+    // Поля названы **углами**, а не сторонами, хотя слова «слева» и «справа» в
+    // шапке уже есть у кнопок: кнопка отвечает на «с какой стороны смотрим»,
+    // поле — на «какой угол у этого края листа». Одинаковая подпись у двух
+    // разных вопросов рядом — верный способ перепутать их оба.
+    cornerLeft: "Левый угол",
+    cornerRight: "Правый угол",
+    cornerHint:
+      "Угол у этого края листа. В списке только те углы, что связаны стеной с углом второго поля: лежат с ним на одной стене — её концом или местом, где в неё упёрлась другая стена. Выбрали — показан участок между новой парой. Кнопки «Слева/Справа» переворачивают лист, и углы меняются полями вместе с ним.",
+    cornerHere: "{letter} — этот угол",
+    cornerSame: "{letter} · участок {length} мм",
+    cornerOther: "{letter} · стена {wall}, {length} мм",
+    cornerNone: "Связанных стеной углов больше нет: у этой стены участок один",
     close: "Закрыть развёртку",
     // Изображения объектов вместо условных знаков (таск 135, G187). Слова
     // заказчика: «что бы схема была уже живая».
@@ -15546,27 +15566,33 @@ const WALL_ROOM_PROBE_MM = 100;
  *
  * Пробная точка отходит от середины стены на её сторону: сама середина лежит
  * внутри стены, то есть на границе контура, и ответ там был бы случайным.
+ *
+ * `alongMm` — где именно по стене спрашивать, отсчёт от конца `a`; умолчание
+ * середина. Нужен участку развёртки (таск 197): стена ЛМ на объекте заказчика
+ * длиной 9200 проходит мимо трёх комнат, и её середина отвечает за всю длину
+ * неверно — у участка Л-Ю своя комната и своя высота.
  */
-function wallRoomId(project, wallId, side) {
+function wallRoomId(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
-  const point = wallSideProbe(project, wallId, side);
+  const point = wallSideProbe(project, wallId, side, alongMm);
   return wall && point ? roomAtPoint(project, wall.schemeId, point) : null;
 }
 
-// Пробная точка стороны: середина стены, отодвинутая за её грань на эту
+// Пробная точка стороны: место на стене, отодвинутое за её грань на эту
 // сторону, в долях плана — такими контуры и спрашивают. Вынесена из
 // `wallRoomId` ради выгрузки: ей нужен не только `roomId`, но и **тот самый
 // контур**, по которому пойдёт обход (таск 130).
-function wallSideProbe(project, wallId, side) {
+function wallSideProbe(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
   const vectors = wallVectors(wall);
   if (!wall || !vectors) return null;
   const away = (side === "right" ? -1 : 1) * (Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM);
-  const middle = {
-    x: (Number(wall.aMm.x) + Number(wall.bMm.x)) / 2 + vectors.n.x * away,
-    y: (Number(wall.aMm.y) + Number(wall.bMm.y)) / 2 + vectors.n.y * away,
+  const along = Number.isFinite(Number(alongMm)) ? Math.max(0, Math.min(vectors.len, Number(alongMm))) : vectors.len / 2;
+  const at = {
+    x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * away,
+    y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * away,
   };
-  return planMmToFraction(project, wall.schemeId, middle);
+  return planMmToFraction(project, wall.schemeId, at);
 }
 
 // Контур под этой стороной. Не `roomId`: у комнаты контуров может быть
@@ -15587,10 +15613,10 @@ function wallSideOutline(project, wallId, side) {
  * высоту этажа. Теперь комната находится по стороне, а не по стене целиком —
  * у стены между кухней и прихожей две разные высоты, и обе верные.
  */
-function wallHeightOnSide(project, wallId, side) {
+function wallHeightOnSide(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
   if (!wall) return null;
-  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side) });
+  return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side, alongMm) });
 }
 
 // Отступ вдоль стены с нужной стороны.
@@ -15766,79 +15792,259 @@ function wallCrossings(project, wallId, side) {
   return found.sort((first, second) => first.fromMm - second.fromMm || (first.name < second.name ? -1 : 1));
 }
 
-// ——— переход к соседней стене ———————————————————————————————————————————
+// ——— участок развёртки задаётся парой углов ——————————————————————————————
 //
-// Требование G267, таск 179. Слова заказчика: «Добавь 2 поля с выпадающим
-// списком, в каждом поле одна и другая сторона текущей стены, что бы можно
-// было выбрать другую стену или её часть. В каждом списке только те стены, с
-// которыми граничит значение второго списка».
+// Требование G302, таск 197 — правка решения таска 179 (G267). Слова
+// заказчика: «там должны быть не стены слева справа, а углы. Вот на примере
+// текущей схемы — выделил я Л-М стену, но хочу посмотреть участок стены, и вот
+// в правом выпадающем списке выбираю Ю, отображается уже Л-Ю, потом хочу
+// другую, и вместо Л выбираю К и смотрю другую стену кухни. И вот в выпадающих
+// списках должны быть только связанные стеной углы».
 //
-// **Соседи уже посчитаны.** Список «с какими стенами эта граничит на этой
-// стороне» — это ровно `wallCrossings`: он найден по геометрии (ADR 008, точное
-// совпадение в целых миллиметрах), он зависит от стороны (перегородка,
-// упирающаяся справа, слева не видна — она за стеной) и он **уже нарисован** на
-// листе торцами с именами (G201). Поэтому список выбора — это буквально «ткни в
-// один из торцов, которые видишь», а не второй механизм соседства рядом с
-// первым.
+// **Что значит «связаны стеной»: оба угла лежат на одной и той же стене** — её
+// концами или местом, где в неё уткнулась чужая стена. Это не третье прочтение
+// вместо двух очевидных, а единственное, которое сходится с примером
+// заказчика. На его объекте Ю — конец перегородки, уткнувшейся в стену ЛМ (24
+// мм не доехав до её оси), и в графе «углы — узлы, стены — рёбра» Ю с Л не
+// связан вовсе: они в разных связных кусках. Ни «соседние по чертежу углы»
+// (общего ребра нет), ни «сплошная линия стен» (пути нет) до Ю не доводят. А
+// «лежат на одной стене» доводит: Л — конец ЛМ, Ю — точка на ней, и Л-Ю это
+// первые 2979 мм её листа. Так же читается и К-Ю: К — место, где в перегородку
+// ФЮ уткнулась ИК, Ю — её конец, и К-Ю это участок листа ФЮ длиной 4126.
 //
-// Важно, что `wallCrossings` ловит **и углы, и упирающиеся в середину**: на
-// объекте заказчика из 25 стен две (АИ-АК и АЕ-АЖ) ни с кем не делят угла
-// вовсе — обоими концами они уткнуты в середины других стен, — и по углам до
-// них не дойти ни из какой стены. Список по углам был бы красивее на бумаге и
-// бесполезнее в квартире.
+// **Поэтому участок всегда плоский, и ломаным он не бывает.** Оба угла пары
+// лежат на одной стене, значит лист остаётся плоскостью одной стены с одной
+// размерной цепочкой — тем, чем развёртка и была (G179). Ломаную пару взять
+// неоткуда: её никто не положит в список. Разворачивать ломаную по сгибу — это
+// другой вид листа (два отсчёта, излом, и мерить по нему нельзя), и его никто
+// не просил.
+//
+// **Соседство таска 179 при этом не потеряно, а расширено.** Угол принадлежит
+// **каждой** стене, на которой лежит, и через него видны все такие стены:
+// перегородка, уткнувшаяся в середину чужой стены, делит с ней свой угол.
+// Поэтому две стены объекта заказчика, не делящие угла ни с кем (АИ-АК и
+// АЕ-АЖ, довод таска 179 против углов), из списков достижимы. Сверено на
+// объекте: ни одна из 25 стен не потеряла ни одного соседа, а четыре нашли
+// новых — продолжение той же стены за углом (ИЛ и ЛТ лежат в одну линию, и
+// `wallCrossings` их не видел: угол между ними меньше `WALL_CROSS_MIN_DEG`).
 
-/**
- * Соседи стены с этой стороны: `[{wallId, name, atMm, side}]` слева направо
- * **по листу** развёртки.
- *
- * `atMm` — середина торца соседки в отсчёте листа: по нему человек и находит
- * её на чертеже, который перед ним. `side` — какой стороной повернётся соседка,
- * когда на неё перейдут: см. ниже, почему это не всегда наша же сторона.
- *
- * Чистая и вынесена наружу: окно развёртки берёт списки отсюда, а не считает
- * соседство само.
- */
-function wallNeighbours(project, wallId, side) {
-  const wall = findWall(project, wallId);
-  if (!wall) return [];
-  const view = WALL_SIDES.includes(side) ? side : "left";
-  const here = wallRoomId(project, wallId, view);
-  return wallCrossings(project, wallId, view).map((cross) => ({
-    wallId: cross.wallId,
-    name: cross.name,
-    atMm: Math.round((cross.fromMm + cross.toMm) / 2),
-    side: wallFacingSide(project, cross.wallId, here, view),
-  }));
+// Короче этого участок не бывает: два угла, сошедшиеся в одной точке листа,
+// дали бы лист нулевой ширины. Миллиметр — цена деления чертежа (ADR 008).
+const WALL_SECTION_MIN_MM = 1;
+
+// Углы, лежащие на этой стене, в отсчёте от конца `a`: `[{letter, order,
+// alongMm, end}]` в порядке букв. `end` — наш собственный конец, `order` —
+// место угла в обходе чертежа (он же порядок букв).
+//
+// Свой конец проверки на близость не проходит, а получает её даром: он и есть
+// угол этой стены, где бы ни оказался после правки чертежа.
+function wallCornerList(project, wall) {
+  const vectors = wallVectors(wall);
+  if (!vectors) return [];
+  const length = wallLengthMm(wall);
+  // Дотянуться до стены угол может не точно: концы цепочки совпадают
+  // миллиметр в миллиметр (ADR 008), а упирающуюся перегородку рисуют и на
+  // глаз — у заказчика Ю не доехал до оси ЛМ на 24 мм, а Э остановился в 50.
+  // Запас тот же, которым `wallCrossings` отвечает на «дотянулась ли», и
+  // второго такого числа заводить нельзя: разойдись они — торец на листе
+  // нарисуется, а угла, которым его режут, в списке не будет.
+  const reach = Number(wall.thicknessMm) / 2 + WALL_CROSS_REACH_MM;
+  const found = [];
+  wallCorners(project, wall.schemeId).forEach((corner, order) => {
+    const end = corner.wallIds.includes(wall.id);
+    const along =
+      (corner.atMm.x - Number(wall.aMm.x)) * vectors.u.x + (corner.atMm.y - Number(wall.aMm.y)) * vectors.u.y;
+    if (!end) {
+      // За концом стены — не её угол: там она кончилась. Иначе угол далёкой
+      // стены, стоящей на одной линии с нашей, резал бы наш лист снаружи.
+      if (along < 0 || along > length) return;
+      if (segmentDistanceMm(corner.atMm, wall.aMm, wall.bMm) > reach) return;
+    }
+    found.push({ letter: corner.letter, order, alongMm: Math.round(Math.max(0, Math.min(length, along))), end });
+  });
+  return found;
 }
 
 /**
- * Какой стороной соседка повёрнута в то же помещение, откуда на неё смотрят.
+ * Углы, лежащие на этой стене, слева направо **по листу** этой стороны:
+ * `[{letter, order, atMm, alongMm, end}]`.
  *
- * Без этого переход работал бы через раз: стороны стены называются «слева» и
- * «справа» **от её собственного направления** (`WALL_SIDES`), а направления
- * соседних стен между собой никак не связаны — обвели одну слева направо,
- * другую снизу вверх. Перешёл по углу комнаты и попал на обратную грань, то
- * есть в соседнюю квартиру.
- *
- * Отвечает на это **помещение**: мы стоим в комнате, и нужна та грань соседки,
- * которая стоит в той же комнате. Комнаты выводятся из контуров, и спрашивает
- * их `wallRoomId` — то же место, что подписывает заголовок развёртки.
- *
- * Решает это не всегда, и тогда сторона остаётся наша:
- *
- *   - контуров нет или эта грань не накрыта ни одним (`roomId` пустой);
- *   - **ни одна** грань соседки не в нашей комнате — бывает у стены, уткнутой
- *     в нашу снаружи;
- *   - **обе** грани в нашей комнате — свободно стоящая перегородка внутри
- *     одной комнаты, и вопрос «какая из них к нам» ответа не имеет.
- *
- * Выдумывать на этих трёх нечего, и наша сторона — честное умолчание: кнопки
- * «Слева» и «Справа» на месте, одно нажатие.
+ * `atMm` — отступ угла по листу, уже зеркальный по стороне: по нему и видно,
+ * какой угол у листа слева. Список **от стороны не зависит** ничем, кроме
+ * порядка и отсчёта: угол принадлежит стене, а не её грани. Это нарочно —
+ * перегородка, уткнувшаяся с другой стороны, на нашем листе не нарисована, но
+ * место, где она к стене подходит, никуда не делось, и резать по нему стену
+ * человек вправе. Фильтруй список стороной — и пример заказчика сломался бы
+ * первым же шагом: он открыл ЛМ стороной по умолчанию и ждёт в списке Ю,
+ * который подходит к стене с обратной грани.
  */
-function wallFacingSide(project, otherId, roomId, fallback) {
-  if (!roomId) return fallback;
-  const facing = WALL_SIDES.filter((side) => wallRoomId(project, otherId, side) === roomId);
-  return facing.length === 1 ? facing[0] : fallback;
+function wallCornersOn(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  if (!wall) return [];
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const length = wallLengthMm(wall);
+  return wallCornerList(project, wall)
+    .map((corner) => ({ ...corner, atMm: Math.round(sideAlong(length, corner.alongMm, view)) }))
+    .sort((first, second) => first.atMm - second.atMm || first.order - second.order);
+}
+
+/**
+ * Участок стены между парой углов в отсчёте листа: `{fromMm, toMm, lengthMm,
+ * fromLetter, toLetter, name, whole}`.
+ *
+ * `cut` пустой — стена целиком, и тогда буквы и длина те же, что были до
+ * таска 197 (развёртки выгрузок считаются ровно этим путём). Пара, которой на
+ * этой стене нет, — `null`: вызывающий покажет стену целиком, а не пустоту.
+ *
+ * `fromLetter` — угол у **левого** края листа, `toLetter` — у правого. Порядок
+ * решает лист, а не порядок букв в паре: поля под развёрткой называют её края,
+ * и спорить с картинкой им нельзя. `name` же, наоборот, собрано в порядке
+ * букв — так названы стены (`wallNameOf`), так их читает заказчик («Л-М»,
+ * «К-Ю») и так имя участка не меняется от того, с какой стороны смотрят.
+ */
+function wallCornerSpan(project, wallId, side, cut = null) {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const length = wallLengthMm(wall);
+  const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
+  if (!cut || !cut.fromLetter || !cut.toLetter) {
+    return {
+      fromMm: 0,
+      toMm: length,
+      lengthMm: length,
+      // Отсчёт с левой стороны зеркалится, и вместе с ним меняются местами
+      // углы: конец `a` уходит направо (таск 142).
+      fromLetter: view === "left" ? named.bLetter : named.aLetter,
+      toLetter: view === "left" ? named.aLetter : named.bLetter,
+      name: named.name,
+      whole: true,
+    };
+  }
+  const corners = wallCornersOn(project, wallId, view);
+  const from = corners.find((corner) => corner.letter === cut.fromLetter);
+  const to = corners.find((corner) => corner.letter === cut.toLetter);
+  if (!from || !to) return null;
+  const [left, right] = from.atMm <= to.atMm ? [from, to] : [to, from];
+  if (!(right.atMm - left.atMm >= WALL_SECTION_MIN_MM)) return null;
+  const ahead = left.order <= right.order;
+  return {
+    fromMm: left.atMm,
+    toMm: right.atMm,
+    lengthMm: right.atMm - left.atMm,
+    fromLetter: left.letter,
+    toLetter: right.letter,
+    name: ahead ? wallNameOf(left.letter, right.letter) : wallNameOf(right.letter, left.letter),
+    whole: left.atMm === 0 && right.atMm === length,
+  };
+}
+
+/**
+ * Куда ведут углы, связанные стеной с опорным: `[{letter, wallId, side, cut,
+ * lengthMm, wallName, sameWall}]` — каждая запись готовый участок.
+ *
+ * Опорный угол — тот, что стоит в **противоположном** поле: заказчик просил
+ * ровно это («в каждом списке только связанные стеной углы» с углом второго
+ * списка). `edge` говорит, какое поле заполняют — `"from"` (левый угол листа)
+ * или `"to"` (правый).
+ *
+ * Порядок: сперва углы показанной стены, слева направо по её листу — ими
+ * режут тот самый лист, который перед человеком; потом углы остальных стен в
+ * порядке букв, то есть в порядке обхода чертежа.
+ */
+function wallCornerMoves(project, { wallId, side, fromLetter, toLetter, edge = "from" } = {}) {
+  const wall = findWall(project, wallId);
+  if (!wall) return [];
+  const view = WALL_SIDES.includes(side) ? side : "left";
+  const keepLetter = edge === "to" ? fromLetter : toLetter;
+  // Угол, который в этом поле уже стоит, повторять нечем: он и есть первая
+  // запись списка — «этот угол». Без этого у стены, у которой других углов нет
+  // вовсе, поле предлагало бы самого себя и выглядело бы рабочим.
+  const skipLetter = edge === "to" ? toLetter : fromLetter;
+  if (!keepLetter) return [];
+  const here = wallCornerSpan(project, wallId, view, { fromLetter, toLetter }) || wallCornerSpan(project, wallId, view, null);
+  // Комната, в которой человек стоит, — у середины **показанного участка**, а
+  // не стены: длинная стена проходит мимо нескольких комнат.
+  const length = wallLengthMm(wall);
+  const roomId = wallRoomId(project, wallId, view, sideAlong(length, (here.fromMm + here.toMm) / 2, view));
+  const walls = wallsOnScheme(project, wall.schemeId);
+  const byLetter = new Map();
+  walls.forEach((item, order) => {
+    const corners = wallCornerList(project, item);
+    const keep = corners.find((corner) => corner.letter === keepLetter);
+    if (!keep) return;
+    for (const corner of corners) {
+      if (corner.letter === keepLetter || corner.letter === skipLetter) continue;
+      // Участок нулевой ширины — не участок: два угла в одной точке листа
+      // бывают у перегородок, уткнувшихся в стену с двух сторон напротив.
+      if (Math.abs(corner.alongMm - keep.alongMm) < WALL_SECTION_MIN_MM) continue;
+      const both = corner.end && keep.end;
+      // Та же пара углов может лежать сразу на двух стенах (стена, обведённая
+      // дважды). Выбор между ними — правилом, а не случаем: показанная стена,
+      // потом та, чьи это **собственные** концы (ею пара и названа), потом по
+      // порядку стен в модели.
+      const rank = (item.id === wallId ? 0 : both ? 1 : 2) * 1000 + order;
+      const known = byLetter.get(corner.letter);
+      if (known && known.rank <= rank) continue;
+      byLetter.set(corner.letter, {
+        letter: corner.letter,
+        order: corner.order,
+        rank,
+        sameWall: item.id === wallId,
+        wallId: item.id,
+        wallName: wallName(project, item.id),
+        lengthMm: Math.abs(corner.alongMm - keep.alongMm),
+        atMm: item.id === wallId ? Math.round(sideAlong(length, corner.alongMm, view)) : 0,
+        side:
+          item.id === wallId
+            ? view
+            : wallCornerMoveSide(project, {
+                wallId: item.id,
+                roomId,
+                middleMm: (corner.alongMm + keep.alongMm) / 2,
+                ahead: corner.alongMm < keep.alongMm,
+                edge,
+              }),
+        cut: { fromLetter: corner.letter, toLetter: keepLetter },
+      });
+    }
+  });
+  return [...byLetter.values()].sort(
+    (first, second) =>
+      Number(second.sameWall) - Number(first.sameWall) ||
+      (first.sameWall ? first.atMm - second.atMm : first.order - second.order),
+  );
+}
+
+/**
+ * Какой грани показать стену, на которую переходят парой углов.
+ *
+ * **Первое слово за помещением** — довод таска 179 остаётся в силе: стороны
+ * называются «слева» и «справа» от собственного направления стены, а
+ * направления соседок между собой никак не связаны, и без этого правила
+ * переход по углу комнаты показывал бы наружную грань, то есть соседнюю
+ * квартиру. Нужна та грань соседки, что стоит в той же комнате, и спрашивается
+ * она у середины **нового участка**, а не всей стены.
+ *
+ * Помещение отвечает не всегда: контуров может не быть вовсе, обе грани могут
+ * стоять в нашей комнате (перегородка внутри неё) или ни одна — у стены,
+ * уткнутой в нашу снаружи. Тогда слово за **полем, в которое человек поставил
+ * угол**: поставил в левое — показываем ту грань, при которой этот угол у
+ * левого края листа. Прежнее умолчание «сторона остаётся наша» было честным,
+ * пока поля назывались сторонами; у пары углов оно хуже — лист поворачивался
+ * бы наугад, и выбранный угол оказывался не там, куда его положили. На объекте
+ * заказчика это ровно его третий шаг: К-Ю, помещение не отвечает, и грань
+ * выходит та, где К слева, — западная, кухонная.
+ */
+function wallCornerMoveSide(project, { wallId, roomId, middleMm, ahead, edge }) {
+  if (roomId) {
+    const facing = WALL_SIDES.filter((side) => wallRoomId(project, wallId, side, middleMm) === roomId);
+    if (facing.length === 1) return facing[0];
+  }
+  // Лист стороны «справа» читается от конца `a`, стороны «слева» — наоборот.
+  // Значит «выбранный угол слева на листе» — это `right` при меньшем отступе
+  // от `a` и `left` при большем.
+  return ahead === (edge !== "to") ? "right" : "left";
 }
 
 /**
@@ -15852,11 +16058,15 @@ function wallFacingSide(project, otherId, roomId, fallback) {
  * выведенная из этого высота. Без числа развёртка была бы картинкой, а с
  * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
  */
-function wallElevation(project, wallId, side = "left") {
+function wallElevation(project, wallId, side = "left", cut = null) {
   const wall = findWall(project, wallId);
   if (!wall) return null;
   const length = wallLengthMm(wall);
   const view = WALL_SIDES.includes(side) ? side : "left";
+  // Участок между парой углов (таск 197) или стена целиком. Негодная пара —
+  // стену поправили, буквы поехали — молча читается как целая стена: развёртка
+  // не обязана пропадать с экрана из-за того, что участок стал невозможен.
+  const span = wallCornerSpan(project, wallId, view, cut) || wallCornerSpan(project, wallId, view, null);
   const openings = openingsInWall(project, wallId).map((opening) => {
     const span = sideSpan(length, Number(opening.atMm), Number(opening.atMm) + Number(opening.widthMm), view);
     return {
@@ -15922,27 +16132,63 @@ function wallElevation(project, wallId, side = "left") {
     });
   }
   marks.sort((first, second) => first.fromMm - second.fromMm);
-  const objects = wallObjectsOn(project, wallId, view);
-  const known = wallHeightOnSide(project, wallId, view);
+  // Участок режет лист: что лежит за парой углов — уходит, что пара пересекла —
+  // обрезается по ней, и отступы считаются от **левого угла участка**. Иначе
+  // размерная цепочка соврала бы: она отсчитывает от левого края листа.
+  //
+  // У стены целиком обрезки нет вовсе, и это не оптимизация: `onSpan` выкинул
+  // бы метку, вылезшую за конец стены (бывает у привязки, сделанной рукой), а
+  // до таска 197 такая метка рисовалась — пусть и за краем листа. Целая стена
+  // обязана остаться той же, какой была (G68).
+  const onSpan = (list) => {
+    if (span.whole) return list;
+    const moved = [];
+    for (const item of list) {
+      if (item.toMm === null || item.toMm === undefined) {
+        if (item.fromMm < span.fromMm || item.fromMm > span.toMm) continue;
+        moved.push({ ...item, fromMm: Math.round(item.fromMm - span.fromMm) });
+        continue;
+      }
+      const from = Math.max(item.fromMm, span.fromMm);
+      const to = Math.min(item.toMm, span.toMm);
+      if (!(to - from > 0)) continue;
+      moved.push({ ...item, fromMm: Math.round(from - span.fromMm), toMm: Math.round(to - span.fromMm) });
+    }
+    return moved;
+  };
+  const shownOpenings = onSpan(openings);
+  const shownMarks = onSpan(marks);
+  const objects = onSpan(wallObjectsOn(project, wallId, view));
+  const crossings = onSpan(wallCrossings(project, wallId, view));
+  // Комната и высота — у середины **участка**, а не стены: стена ЛМ на объекте
+  // заказчика идёт мимо трёх комнат, и у её участков разные хозяева. У целой
+  // стены это по-прежнему её середина.
+  const middleAlongMm = sideAlong(length, (span.fromMm + span.toMm) / 2, view);
+  const known = wallHeightOnSide(project, wallId, view, middleAlongMm);
   const tops = [
-    ...openings.map((opening) => opening.topMm),
+    ...shownOpenings.map((opening) => opening.topMm),
     ...objects.map((object) => (object.topMm === null ? 0 : object.topMm)),
-    ...marks.map((mark) => mark.heightMm || 0),
+    ...shownMarks.map((mark) => mark.heightMm || 0),
   ];
-  const roomId = wallRoomId(project, wallId, view);
+  const roomId = wallRoomId(project, wallId, view, middleAlongMm);
   const room = roomId ? findRoom(project, roomId) : null;
   const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
   return {
     wallId,
     side: view,
-    // Имя стены (G200) и буквы её углов — каждая на своём краю листа. Отсчёт с
-    // левой стороны зеркалится, и вместе с ним меняются местами углы: конец
-    // `a` уходит направо. Без этого подпись «А» стояла бы на листе у того
-    // угла, который на плане зовётся Б.
+    // Имя стены (G200) и буквы углов участка — каждая на своём краю листа.
+    // Отсчёт с левой стороны зеркалится, и вместе с ним меняются местами углы:
+    // конец `a` уходит направо. Без этого подпись «А» стояла бы на листе у
+    // того угла, который на плане зовётся Б.
     name: named.name,
-    fromLetter: view === "left" ? named.bLetter : named.aLetter,
-    toLetter: view === "left" ? named.aLetter : named.bLetter,
-    lengthMm: length,
+    // Имя участка (таск 197) — в порядке букв, как имя стены; у целой стены это
+    // и есть её имя. Признак `partial` отвечает на «это вся стена или кусок»:
+    // заголовок полосы и подпись листа говорят об этом по-разному.
+    sectionName: span.name,
+    partial: !span.whole,
+    fromLetter: span.fromLetter,
+    toLetter: span.toLetter,
+    lengthMm: span.lengthMm,
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
     heightKnown: known !== null,
@@ -15958,11 +16204,11 @@ function wallElevation(project, wallId, side = "left") {
     heightShownMm: known !== null ? known : Math.max(WALL_HEIGHT_FALLBACK_MM, Math.max(0, ...tops) + 300),
     roomId,
     roomName: room ? room.name : "",
-    openings,
-    marks,
+    openings: shownOpenings,
+    marks: shownMarks,
     objects,
     // Упирающиеся стены, видные с этой стороны (G201).
-    crossings: wallCrossings(project, wallId, view),
+    crossings,
   };
 }
 
@@ -28604,59 +28850,92 @@ const PANEL_RAIL_SHARE = 0.5;
  * влияет), `box` — высота раздела, `head` — высота его заголовка. `frame` —
  * что показано: `{ scrollTop, clientHeight }`.
  *
- * Отдаёт массив той же длины: `{ shift, side }`.
+ * Отдаёт массив той же длины: `{ shift, side }`. `shift` — на сколько сдвинуть
+ * заголовок от его места (вниз — к верхней кромке, вверх — к нижней), `side` —
+ * где он оказался: `""` — на своём месте, `"top"` — ступенькой у верхней
+ * кромки, `"bottom"` — у нижней. Сторона нужна наружу затем, что по ней
+ * решается смысл нажатия (таск 198): заголовок не на своём месте — указатель.
  *
- * `shift` — ноль или на сколько поднять заголовок. Вниз заголовок не
- * двигается никогда: опустить его ниже своего места значило бы закрыть им своё
- * же содержимое.
+ * **Лестница с обеих сторон** (таск 201, G305). Слова заказчика: «заголовки
+ * должны отображаться все имеющиеся на экране свёрнутые, а не только
+ * ближайший». До этого у каждой кромки стоял один заголовок — ближайший
+ * уехавший, — и верх держал сам браузер (`position: sticky`). Теперь обе
+ * кромки считаются здесь и по одному правилу:
  *
- * `side` — где он при этом оказался: `""` — на своём месте, `"top"` — прижат к
- * верхней кромке (это делает сам браузер, `position: sticky`), `"bottom"` —
- * поднят рейкой к нижней. Наружу это нужно затем, что по стороне решается
- * смысл нажатия (таск 198): заголовок не на своём месте — указатель.
+ * — **Сверху** идём с начала и копим `used`. Раздел, чьё место уже выше строки
+ *   `scrollTop + used`, встаёт ступенькой на эту строку, и его заголовок
+ *   занимает следующие `head` точек. Первый, кто до строки не дотянулся, стоит
+ *   сам — и все, кто ниже него, тоже.
+ * — **Снизу** идём с конца и копим `stack`: последний раздел встаёт у самой
+ *   кромки, предыдущий над ним. Первый, кто дотянулся до своей строки, стоит
+ *   сам — и все, кто выше.
  *
- * Разделы, которые целиком ниже кадра, — это всегда **хвост** списка, поэтому
- * счёт идёт с конца: последний раздел встаёт у самой кромки, предыдущий над
- * ним, и каждому следующему остаётся кадра меньше. Как только раздел своим
- * местом дотянулся до своей строки в рейке — он и все, кто выше, стоят сами:
- * заголовок снимается с рейки ровно там, где сдвиг обнуляется, и перехода не
- * видно.
+ * В обе стороны заголовок **снимается со ступеньки ровно там, где сдвиг
+ * обнуляется**: перехода не видно, прыжка нет.
  *
- * Верх считается без прокрутки вовсе — одной арифметикой: браузер держит
- * заголовок внутри его раздела, значит прижат тот и только тот, чей раздел
- * **начался выше кадра и ещё не кончился**. Свёрнутый раздел (`box === head`)
- * к верху не липнет никогда: двигать заголовок ему некуда.
+ * Свёрнутый раздел — такая же ступенька, как остальные: в лестнице стоят все
+ * разделы колонки, и видно их всегда. (До таска 201 свёрнутый к верху не
+ * липнул вовсе — браузеру было некуда двигать его заголовок внутри раздела
+ * высотой в этот самый заголовок.)
+ *
+ * **Предохранитель.** Обе лестницы вместе не съедают больше `PANEL_RAIL_SHARE`
+ * кадра. Лишние ступеньки снимаются с дальних концов — сверху с самой верхней,
+ * снизу с самой нижней: дальний раздел и так за соседями, а ближний — тот, к
+ * которому человек подойдёт следующим движением. Уступает та лестница, в
+ * которой ступенек больше; поровну — уступает верхняя, потому что нижняя
+ * показывает, куда ещё идти.
  */
 function panelRailPins(items, frame) {
   const count = items ? items.length : 0;
   const pins = [];
+  for (let k = 0; k < count; k += 1) pins.push({ shift: 0, side: "" });
   const view = Math.max(0, (frame && frame.clientHeight) || 0);
-  const from = (frame && frame.scrollTop) || 0;
-  for (let k = 0; k < count; k += 1) {
-    const item = items[k];
-    const held = item.box > item.head && item.top < from && from < item.top + item.box;
-    pins.push({ shift: 0, side: held ? "top" : "" });
-  }
   if (!count || view <= 0) return pins;
+  const from = (frame && frame.scrollTop) || 0;
   const edge = from + view;
-  let first = count;
-  let stack = 0;
-  for (let k = count - 1; k >= 0; k -= 1) {
-    const line = edge - stack - items[k].head;
-    if (items[k].top <= line) break;
-    first = k;
-    stack += items[k].head;
+
+  // Верхняя лестница — разделы `[topFrom, topTo)`: те, чьё место уже выше своей
+  // строки. Нижняя — `[botFrom, botTo)`: те, кто до своей строки не дотянулся.
+  let topFrom = 0;
+  let topTo = 0;
+  let upper = 0;
+  while (topTo < count && items[topTo].top <= from + upper) {
+    upper += items[topTo].head;
+    topTo += 1;
   }
-  if (first >= count) return pins;
-  // Лишние снимаются с дальнего конца: дальний раздел и так за двумя другими,
-  // а ближний — следующий, к которому человек подойдёт прокруткой.
-  let last = count;
-  while (last > first + 1 && stack > view * PANEL_RAIL_SHARE) {
-    last -= 1;
-    stack -= items[last].head;
+  let botFrom = count;
+  let botTo = count;
+  let lower = 0;
+  for (let k = count - 1; k >= topTo; k -= 1) {
+    if (items[k].top <= edge - lower - items[k].head) break;
+    botFrom = k;
+    lower += items[k].head;
   }
-  let line = edge;
-  for (let k = last - 1; k >= first; k -= 1) {
+
+  // Предохранитель: лестницы делят кадр с содержимым, а не занимают его.
+  const cap = view * PANEL_RAIL_SHARE;
+  while (upper + lower > cap) {
+    const top = topTo - topFrom;
+    const bottom = botTo - botFrom;
+    if (top === 0 && bottom === 0) break;
+    if (bottom === 0 || (top > 0 && top >= bottom)) {
+      upper -= items[topFrom].head;
+      topFrom += 1;
+    } else {
+      botTo -= 1;
+      lower -= items[botTo].head;
+    }
+  }
+
+  let line = from;
+  for (let k = topFrom; k < topTo; k += 1) {
+    const shift = Math.max(0, Math.round(line - items[k].top));
+    line += items[k].head;
+    if (!shift) continue;
+    pins[k] = { shift, side: "top" };
+  }
+  line = edge;
+  for (let k = botTo - 1; k >= botFrom; k -= 1) {
     line -= items[k].head;
     const shift = Math.min(0, Math.round(line - items[k].top));
     if (!shift) continue;
@@ -28668,31 +28947,29 @@ function panelRailPins(items, frame) {
 /**
  * Куда прокрутить колонку, чтобы раздел встал к верхней кромке.
  *
- * Считает это рейка, а не тот, кто её зовёт: заголовок обязан встать **под**
- * накладкой — под теми заголовками, которые в целевом положении сами прижаты
- * к верху, — иначе перелистывание прячет раздел за той же рейкой, из которой
- * его позвали.
+ * Считает это рейка, а не тот, кто её зовёт: раздел обязан встать **под**
+ * лестницей — под заголовками тех, кто в целевом положении окажется выше
+ * кадра, — иначе перелистывание прячет его за той же рейкой, из которой его
+ * позвали.
  *
- * Сегодня ответ всегда ноль, и это видно из счёта, а не взято на веру: к
- * верхней кромке липнет только заголовок раздела, который её пересекает, а в
- * целевом положении её пересекает сам позванный раздел — он и встаёт на своё
- * место. Счёт оставлен счётом нарочно: заведётся сверху лестница заголовков,
- * как завелась снизу, — перелистывание сядет правильно само, и вспоминать про
- * это место не придётся.
+ * С таском 201 ответ перестал быть нулём: выше позванного раздела в лестнице
+ * встанут **все** разделы до него, и накладка — сумма их заголовков. Больше
+ * доли кадра лестница не берёт, поэтому и здесь стоит тот же предохранитель:
+ * считать накладку по ступенькам, которых не будет, — значит промахнуться.
  */
-function panelRailTopInset(items, index) {
-  const target = items[index] ? items[index].top : 0;
+function panelRailTopInset(items, index, frame) {
   let inset = 0;
-  for (let k = 0; k < items.length; k += 1) {
-    if (k === index) continue;
-    const item = items[k];
-    if (item.box > item.head && item.top < target && target < item.top + item.box) inset += item.head;
-  }
-  return inset;
+  for (let k = 0; k < index && k < items.length; k += 1) inset += items[k].head;
+  const view = Math.max(0, (frame && frame.clientHeight) || 0);
+  if (view <= 0) return inset;
+  const cap = view * PANEL_RAIL_SHARE;
+  for (let k = 0; k < index && inset > cap; k += 1) inset -= items[k].head;
+  return Math.max(0, inset);
 }
 
-// Высота рейки по колонкам: её спрашивают прокрутки к выделенной строке —
-// рейка закрывает низ кадра так же непрозрачно, как прилипшая кнопка.
+// Высоты лестниц по колонкам: `{top, bottom}`. Их спрашивают прокрутки к
+// выделенной строке — рейка закрывает кадр так же непрозрачно, как прилипшие
+// фильтры и кнопка смыкания.
 const railHeight = new WeakMap();
 
 /**
@@ -28723,13 +29000,14 @@ function panelCover(frame, element, side) {
   return Math.max(0, side === "head" ? rect.bottom - frame.top : frame.bottom - rect.top);
 }
 
-// Высота рейки у колонки, в которой лежит узел (ноль — рейки нет). Прокрутка к
-// строке обязана её знать: подвести строку под рейку — то же, что подвести её
-// под прилипшие фильтры.
-function panelRailInset(node) {
+// Высота лестницы у колонки, в которой лежит узел: `"top"` — сколько закрыто
+// сверху, `"bottom"` — снизу (ноль — ступенек нет). Прокрутка к строке обязана
+// это знать: подвести строку под рейку — то же, что подвести её под прилипшие
+// фильтры.
+function panelRailInset(node, side) {
   for (let box = node; box; box = box.parentElement) {
     const rail = railHeight.get(box);
-    if (rail !== undefined) return rail;
+    if (rail !== undefined) return side === "top" ? rail.top : rail.bottom;
   }
   return 0;
 }
@@ -28740,6 +29018,7 @@ function panelRailInset(node) {
 function railPin(node, pin) {
   const css = pin.shift ? "translateY(" + pin.shift + "px)" : "";
   if (node.style.transform !== css) node.style.transform = css;
+  node.classList.toggle("is-above", pin.side === "top");
   node.classList.toggle("is-below", pin.side === "bottom");
   node.classList.toggle("is-pinned", pin.side !== "");
   const title = node.querySelector(".panel__title");
@@ -28779,21 +29058,24 @@ function syncColumn(column) {
   const all = railItems(column);
   const shown = all.filter((item) => item.head > 0);
   const pins = panelRailPins(shown, { scrollTop: column.scrollTop, clientHeight: column.clientHeight });
-  let rail = 0;
+  let top = 0;
+  let bottom = 0;
   for (let k = 0; k < shown.length; k += 1) {
     railPin(shown[k].node, pins[k]);
-    if (pins[k].shift) rail += shown[k].head;
+    if (pins[k].side === "top") top += shown[k].head;
+    else if (pins[k].side === "bottom") bottom += shown[k].head;
   }
-  for (const item of all) {
-    if (item.head <= 0) railPin(item.node, RAIL_FREE);
-    // Прилипший блок внутри тела (фильтры списка меток) липнет **под**
-    // заголовком своего раздела, а не на нём: высоту заголовка он узнаёт мерой,
-    // а не числом в стилях — иначе фильтры разошлись бы с заголовком на первой
-    // же правке шрифта или отступов.
-    railVar(item.section, "--panel-head", item.head);
-  }
-  railVar(column, "--panel-rail", rail);
-  railHeight.set(column, rail);
+  for (const item of all) if (item.head <= 0) railPin(item.node, RAIL_FREE);
+  // Прилипший блок внутри тела (фильтры списка меток) липнет **под** лестницей,
+  // а не под одним своим заголовком: с таска 201 сверху стоят все уехавшие
+  // разделы, и своего заголовка там уже мало. Мера одна на колонку и меряется
+  // по ступенькам, а не числом в стилях.
+  //
+  // Первая ступенька лестницы, стоящая на своём месте (прокрутка в самом
+  // верху), в меру не входит: её сдвиг ноль, и содержимое под ней не уезжает.
+  railVar(column, "--panel-head", top);
+  railVar(column, "--panel-rail", bottom);
+  railHeight.set(column, { top, bottom });
 }
 
 /**
@@ -28822,7 +29104,8 @@ function panelRailJump(node) {
   const shown = railItems(column).filter((item) => item.head > 0);
   const index = shown.findIndex((item) => item.node === head);
   if (index < 0) return false;
-  column.scrollTop = shown[index].top - panelRailTopInset(shown, index);
+  const frame = { scrollTop: column.scrollTop, clientHeight: column.clientHeight };
+  column.scrollTop = shown[index].top - panelRailTopInset(shown, index, frame);
   syncPanelRail();
   return true;
 }
@@ -29671,9 +29954,12 @@ function revealSectionScroll(node) {
   }
   const frame = box.getBoundingClientRect();
   const rect = node.getBoundingClientRect();
-  const low = frame.bottom - panelRailInset(node) - rect.height;
-  if (rect.top >= frame.top && rect.top <= low) return;
-  box.scrollTop += rect.top - frame.top;
+  // Кадр закрыт с обеих сторон лестницами заголовков (таск 201): сверху —
+  // разделы, которые уехали выше, снизу — те, что ещё ниже.
+  const high = frame.top + panelRailInset(node, "top");
+  const low = frame.bottom - panelRailInset(node, "bottom") - rect.height;
+  if (rect.top >= high && rect.top <= low) return;
+  box.scrollTop += rect.top - high;
 }
 
 // Счётчик в заголовке: по свёрнутому разделу видно, пуст он или там сорок схем.
@@ -31101,10 +31387,23 @@ function elevationHeight(fieldHeight) {
  *
  * Имя стены (G200) стоит первым: им стену и называют. Длина осталась рядом —
  * имя отвечает «какая стена», длина «сколько в ней».
+ *
+ * У участка (таск 197) в заголовке **две** меры: стена, по которой он идёт, и
+ * сам участок парой углов. Назови только участок — и человек потеряет стену, а
+ * метки он привязывает к стене (G202); назови только стену — и длина в
+ * заголовке разойдётся с размерной цепочкой на листе.
  */
 function elevationTitle(elevation) {
   if (!elevation) return "";
-  const parts = [text("elevation.wall", { name: elevation.name, length: elevation.lengthMm })];
+  const parts = [
+    elevation.partial
+      ? text("elevation.section", {
+          wall: elevation.name,
+          name: elevation.sectionName,
+          length: elevation.lengthMm,
+        })
+      : text("elevation.wall", { name: elevation.name, length: elevation.lengthMm }),
+  ];
   if (elevation.roomName) parts.push(elevation.roomName);
   return parts.join(" · ");
 }
@@ -31160,44 +31459,71 @@ function elevationNote(elevation, drawn) {
 }
 
 /**
- * Два поля перехода к соседней стене — по одному на сторону текущей (таск 179,
- * требование G267).
+ * Два края листа — два поля (таск 197, требование G302): `"from"` — левый угол
+ * участка, `"to"` — правый.
+ */
+const ELEVATION_EDGES = ["from", "to"];
+
+/**
+ * Два поля с углами участка — по одному на край листа (таск 197, G302; правка
+ * решения таска 179).
  *
- * Возвращает `[{side, label, hint, here, options}]` в порядке `WALL_SIDES`;
- * `options` — `[{wallId, side, text}]` слева направо по листу. Соседство
- * считает модель (`wallNeighbours`) по чертежу, здесь только слова.
+ * Возвращает `[{edge, letter, label, hint, none, here, options}]` в порядке
+ * `ELEVATION_EDGES`; `options` — `[{letter, wallId, side, cut, text}]`. Что с
+ * чем связано стеной, считает модель (`wallCornerMoves`) по чертежу — здесь
+ * только слова.
  *
- * **Почему поля по сторонам, а не по углам.** Заказчик сказал «в каждом поле
- * одна и другая сторона текущей стены», и сторона здесь — не фигура речи:
- * список у них разный. Перегородка, упирающаяся справа, слева не видна — она за
- * стеной, — поэтому «с кем граничит стена» без стороны вопрос неполный. Углы на
- * этом не годятся ещё и по делу: на объекте заказчика две стены из двадцати
- * пяти ни с кем не делят угла вовсе, обоими концами уткнуты в середины чужих
- * стен, и список по углам до них не доводит ниоткуда.
+ * **Где лево, а где право.** Поля называют **края листа**, а не концы стены:
+ * слева в поле стоит тот угол, который нарисован слева на развёртке. Правило
+ * устойчиво, потому что другого источника у него нет — буквы на краях размерной
+ * цепочки (`fromLetter`, `toLetter`, таск 142) и есть эти два поля. Отсюда и
+ * следствие, которое надо знать: кнопки «Слева/Справа» переворачивают лист, и
+ * углы меняются полями вместе с ним. Это не перескок списка — на листе они
+ * ровно там, где написаны.
  *
- * **Что в списке и есть «часть стены».** Соседи — это ровно те торцы, которые
- * на развёртке уже нарисованы с именами (G201): ткни в тот, что видишь. Они же
- * делят стену на участки — часть стены это промежуток между двумя соседями, и
- * `atMm` у записи говорит, где он кончается. Самих участков отдельными листами
- * окно не режет: лист развёртки — целая стена с одной размерной цепочкой от
- * угла до угла, и резать его значит заводить второй вид листа и второй отсчёт.
+ * **Список считается от противоположного поля**, как и просил заказчик: в левом
+ * поле те углы, что связаны стеной с правым, и наоборот. Поэтому смена угла —
+ * это всегда «оставь тот, второй, и покажи участок до нового».
+ *
+ * **Отдельное поле «часть стены» (таск 179) не нужно и не заводится**: часть
+ * стены это и есть пара углов, и теперь лист режется по ней. Второе поле о том
+ * же дало бы два способа задать одно.
  *
  * Чистая и вынесена наружу: слова и порядок проверяются без браузера.
  */
-function elevationWalk(project, wallId) {
-  const name = wallName(project, wallId);
-  return WALL_SIDES.map((side) => {
-    const label = strings.elevation["side_" + side];
+function elevationCorners(project, elevation) {
+  if (!project || !elevation) return [];
+  return ELEVATION_EDGES.map((edge) => {
+    const letter = edge === "to" ? elevation.toLetter : elevation.fromLetter;
+    const moves = wallCornerMoves(project, {
+      wallId: elevation.wallId,
+      side: elevation.side,
+      fromLetter: elevation.fromLetter,
+      toLetter: elevation.toLetter,
+      edge,
+    });
     return {
-      side,
-      label,
-      hint: text("elevation.walkHint", { side: label.toLowerCase() }),
-      here: text("elevation.walkHere", { name }),
-      none: text("elevation.walkNone", { side: label }),
-      options: wallNeighbours(project, wallId, side).map((neighbour) => ({
-        wallId: neighbour.wallId,
-        side: neighbour.side,
-        text: text("elevation.walkAt", { name: neighbour.name, at: neighbour.atMm }),
+      edge,
+      letter,
+      label: strings.elevation[edge === "to" ? "cornerRight" : "cornerLeft"],
+      hint: strings.elevation.cornerHint,
+      none: strings.elevation.cornerNone,
+      here: text("elevation.cornerHere", { letter }),
+      options: moves.map((move) => ({
+        letter: move.letter,
+        wallId: move.wallId,
+        side: move.side,
+        cut: move.cut,
+        // Буква главная, и она стоит первой: заказчик мыслит буквами, их же он
+        // видит кружками на чертеже. Остальное — чем этот угол отличается от
+        // двадцати других: у своей стены длиной участка, у чужой её именем.
+        text: move.sameWall
+          ? text("elevation.cornerSame", { letter: move.letter, length: move.lengthMm })
+          : text("elevation.cornerOther", {
+              letter: move.letter,
+              wall: move.wallName,
+              length: move.lengthMm,
+            }),
       })),
     };
   });
@@ -31241,40 +31567,42 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
     growBox,
     uiEl("span", { text: strings.elevation.grow }),
   ]);
-  // Два поля перехода (таск 179, G267) — своим рядом под заголовком, а не в
-  // одной строке с кнопками: в шапке уже стоят заголовок, две отметки, две
-  // кнопки сторон и «Закрыть», и пара списков со стенами выдавила бы их за
-  // край на планшете. Ряд прячется вместе с полосой и перестраивается на каждой
-  // смене стены.
+  // Два поля с углами участка (таск 197, G302) — своим рядом под заголовком, а
+  // не в одной строке с кнопками: в шапке уже стоят заголовок, две отметки, две
+  // кнопки сторон и «Закрыть», и пара списков выдавила бы их за край на
+  // планшете. Ряд прячется вместе с полосой и перестраивается на каждой смене
+  // участка.
   //
-  // Выбранной записью стоит сама стена: «ЛМ — эта стена». Поэтому поле отвечает
-  // и на «где я», а не только на «куда перейти», — и совпадает со словами
-  // заказчика «в каждом поле одна и другая сторона текущей стены».
-  const walkSelects = WALL_SIDES.map((side) =>
+  // Выбранной записью стоит сам угол: «Л — этот угол». Поэтому поле отвечает и
+  // на «где я», а не только на «куда перейти».
+  const cutSelects = ELEVATION_EDGES.map((edge) =>
     uiEl("select", {
-      class: "elev__walk",
+      class: "elev__cut",
       on: {
         change: (event) => {
-          const picked = walkOptions[side].get(event.target.value);
-          // «Эта стена» — не переход: поле возвращается к ней само после
+          const picked = cutOptions[edge].get(event.target.value);
+          // «Этот угол» — не переход: поле возвращается к нему само после
           // перестройки, и дёргать вызывающего незачем.
-          if (picked && onWall) onWall(picked);
-          else syncWalk();
+          if (picked) moveTo(picked);
+          else syncCut();
         },
       },
     }),
   );
-  const walkLabels = WALL_SIDES.map((side, index) =>
-    uiEl("label", { class: "elev__walkrow" }, [
-      uiEl("span", { class: "elev__walklabel", text: strings.elevation["side_" + side] }),
-      walkSelects[index],
+  const cutLabels = ELEVATION_EDGES.map((edge, index) =>
+    uiEl("label", { class: "elev__cutrow" }, [
+      uiEl("span", {
+        class: "elev__cutlabel",
+        text: strings.elevation[edge === "to" ? "cornerRight" : "cornerLeft"],
+      }),
+      cutSelects[index],
     ]),
   );
-  const walkRow = uiEl("div", { class: "elev__walkbar" }, walkLabels);
-  // Что стоит за каждой записью: ключ записи → `{wallId, side}`. Держать это в
-  // `value` целиком значило бы собирать и разбирать строку с двумя полями —
-  // карта честнее и переживает любые имена стен.
-  const walkOptions = { left: new Map(), right: new Map() };
+  const cutRow = uiEl("div", { class: "elev__cutbar" }, cutLabels);
+  // Что стоит за каждой записью: ключ записи → `{wallId, side, cut}`. Держать
+  // это в `value` целиком значило бы собирать и разбирать строку с четырьмя
+  // полями — карта честнее и переживает любые буквы углов.
+  const cutOptions = { from: new Map(), to: new Map() };
   const closeButton = uiIconButton("close", {
     title: strings.elevation.close,
     on: { click: () => onClose && onClose() },
@@ -31282,7 +31610,7 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
   const stage = uiEl("div", { class: "elev__stage" }, [canvas]);
   const node = uiEl("div", { class: "elev" }, [
     uiEl("div", { class: "elev__head" }, [title, viewsRow, growRow, ...sideButtons, closeButton]),
-    walkRow,
+    cutRow,
     stage,
     note,
   ]);
@@ -31299,36 +31627,60 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
   let shown = null;
   let withViews = views !== false;
   let withGrow = grow === true;
-  // От чего считается ряд перехода. Объект держится здесь, а не спрашивается у
-  // вызывающего: полоса уже берёт у него развёртку тем же способом.
-  let walkProject = null;
-  let walkWallId = null;
+  // Последние доводы `update`: полоса перерисовывает себя сама, когда участок
+  // сменился внутри той же стены. Вызывающему там нечего менять — ни выделение,
+  // ни сторона не поехали, — и дёргать его состояние ради своего же листа
+  // значило бы заводить участок в состоянии сеанса на обе поверхности.
+  let last = null;
+  // Показанный участок: пара углов и стена, на которой она посчитана. Живёт у
+  // полосы, потому что это её лист: выделение стены и сторона общие с планом и
+  // мастерской, а на какой кусок стены человек смотрит — нет.
+  let cut = null;
+  let cutWallId = null;
 
   /**
-   * Перестроить ряд перехода. Зовётся на каждой смене стены: соседи считаются
-   * от чертежа, и после правки стены список обязан стать другим.
+   * Перестроить ряд углов. Зовётся на каждой смене участка: связи считаются от
+   * чертежа, и после правки стены список обязан стать другим.
    */
-  function syncWalk() {
-    const ready = Boolean(walkProject && walkWallId);
-    walkRow.hidden = !ready;
+  function syncCut() {
+    const ready = Boolean(last && last.project && shown);
+    cutRow.hidden = !ready;
     if (!ready) return;
-    elevationWalk(walkProject, walkWallId).forEach((field, index) => {
-      const select = walkSelects[index];
-      const known = walkOptions[field.side];
+    elevationCorners(last.project, shown).forEach((field, index) => {
+      const select = cutSelects[index];
+      const known = cutOptions[field.edge];
       known.clear();
       select.replaceChildren(uiEl("option", { value: "here", text: field.here }));
       for (const option of field.options) {
-        const key = option.wallId + ":" + option.side;
-        known.set(key, { wallId: option.wallId, side: option.side });
+        const key = option.letter + ":" + option.wallId + ":" + option.side;
+        known.set(key, { wallId: option.wallId, side: option.side, cut: option.cut });
         select.append(uiEl("option", { value: key, text: option.text }));
       }
-      // Выбранной всегда стоит сама стена: поле говорит, где человек, а переход
-      // уводит с него, и залипшая чужая запись врала бы о том, что открыто.
+      // Выбранным всегда стоит угол этого края листа: поле говорит, где человек,
+      // а выбор уводит с него, и залипшая чужая запись врала бы о том, что
+      // открыто.
       select.value = "here";
-      // Соседей нет — поле погашено с причиной, а не притворяется рабочим.
+      // Связанных углов нет — поле погашено с причиной, а не притворяется
+      // рабочим.
       select.disabled = field.options.length === 0;
-      walkLabels[index].title = field.options.length === 0 ? field.none : field.hint;
+      cutLabels[index].title = field.options.length === 0 ? field.none : field.hint;
     });
+  }
+
+  /**
+   * Показать участок, выбранный в поле.
+   *
+   * Участок внутри той же стены полоса показывает сама; участок на другой стене
+   * — через вызывающего: выделение стены общее с планом и чертежом, и
+   * расходиться им нельзя. Пара углов при этом уже отложена, и `update`
+   * подхватит её, как только выделение дойдёт обратно.
+   */
+  function moveTo(picked) {
+    cut = picked.cut;
+    cutWallId = picked.wallId;
+    const samePlace = shown && picked.wallId === shown.wallId && picked.side === shown.side;
+    if (!samePlace && onWall) onWall({ wallId: picked.wallId, side: picked.side });
+    else show();
   }
 
   function paint() {
@@ -31369,26 +31721,39 @@ function createElevationStrip({ onSide, onClose, onViews, views, onGrow, grow, o
       withGrow = shownGrow === true;
       growBox.checked = withGrow;
     }
+    last = { project, wallId, side, place, fieldHeight };
+    return show();
+  }
+
+  // Нарисовать то, что отложено в `last` и `cut`. Отделено от `update` ради
+  // одного: смена участка внутри стены не меняет у вызывающего ничего, и
+  // перерисовать себя полоса обязана сама.
+  function show() {
+    const { project, wallId, side, place, fieldHeight } = last || {};
     const wall = wallId ? findWall(project, wallId) : null;
     if (!wall) {
       node.hidden = true;
       shown = null;
-      walkProject = null;
-      walkWallId = null;
+      cutRow.hidden = true;
       return null;
     }
+    // Выделили другую стену — участок прежней с ней не поедет: буквы у него
+    // чужие, и показывать «участок Л-Ю» на стене БВ было бы враньём.
+    if (cutWallId !== wallId) {
+      cut = null;
+      cutWallId = null;
+    }
     const view = WALL_SIDES.includes(side) ? side : WALL_SIDES[0];
-    shown = wallElevation(project, wallId, view);
+    shown = wallElevation(project, wallId, view, cut);
     node.hidden = !shown;
     if (!shown) return null;
     node.classList.toggle("elev--top", place === "top");
     node.classList.toggle("elev--bottom", place !== "top");
     node.style.setProperty("--elev-height", Math.round(elevationHeight(fieldHeight)) + "px");
     title.textContent = elevationTitle(shown);
-    // Ряд перехода — от этой стены: соседей считает модель по чертежу (G267).
-    walkProject = project;
-    walkWallId = wallId;
-    syncWalk();
+    // Ряд углов — от показанного участка: что с чем связано стеной, считает
+    // модель по чертежу (G302).
+    syncCut();
     // Без приписки о подтянутых вещах: её допишет `paint` ниже, когда масштаб
     // станет известен. Здесь — чтобы полоса не мелькала пустой подписью.
     setNote(null);
@@ -35735,9 +36100,10 @@ function mountCanvasFullscreen(host, api) {
 function mountCanvasElevation(host, api) {
   const strip = createElevationStrip({
     onSide: (side) => api.setState({ wallSide: side }),
-    // Переход к соседней стене из ряда полей (таск 179, G267): стена и сторона
+    // Переход на другую стену парой углов (таск 197, G302): стена и сторона
     // ложатся одной правкой состояния — иначе между ними мелькнула бы развёртка
-    // новой стены с прежней стороной.
+    // новой стены с прежней стороной. Сам участок полоса держит у себя: на
+    // какой кусок стены человек смотрит, выделению знать незачем.
     onWall: ({ wallId, side }) => api.setState({ selectedWallId: wallId, wallSide: side }),
     onClose: () => api.setState({ selectedWallId: null }),
     // Отметка живёт в настройках браузера, как слои и шрифт схемы: на одном
@@ -49632,7 +49998,7 @@ function marksScrollToRow(node, align, chrome) {
       // Снизу — кнопка смыкания и рейка заголовков тех разделов, что ещё ниже.
       // Кнопка стоит над рейкой, поэтому её накладка обычно больше; рейка
       // спрашивается отдельно на случай, когда кнопки в кадре нет вовсе.
-      footInset: Math.max(panelCover(frame, chrome && chrome.foot, "foot"), panelRailInset(box)),
+      footInset: Math.max(panelCover(frame, chrome && chrome.foot, "foot"), panelRailInset(box, "bottom")),
     },
     align,
   );
@@ -56399,6 +56765,8 @@ const VOLUME_SKY_NEAR = 0.08;
  */
 const VOLUME_SUN_AT = { az: 90, rise: 14, size: 2.1 };
 
+const DEG = Math.PI / 180;
+
 /** Облака: сторона света, высота, угловой размер. */
 const VOLUME_CLOUDS = [
   { az: 25, rise: 16, size: 7 },
@@ -56410,161 +56778,233 @@ const VOLUME_CLOUDS = [
   { az: 320, rise: 19, size: 7.5 },
 ];
 
+// ——— вещи фона стоят на земле (таск 199, дефект D53) ————————————————————————
+//
+// Слова заказчика: «всё эти объекты должны быть на одном уровне с фундаментом.
+// по сути на „фундаменте“ стоять. что бы я смотрел вдоль горизонта и всегда
+// были видны ровно прямо», и про прежнюю сборку — «когда опускаешься на
+// фундамент объекты фона (машинки, деревья) уменьшаются, подлетаешь —
+// увеличиваются».
+//
+// **Это четвёртый заход на одно и то же, и первые три не могли сработать.**
+// G237 (таск 157) ставил дом на землю, D43 (178) чинил «дом летает», D52 (196)
+// сводил кромку плиты с кольцом фона множителем. Все три правили сцену или
+// кольцо, а причина была в другом: **у вещей фона не было дальностей вовсе.**
+// Панорама рисовалась на небосводе — у вещи были только сторона света и высота
+// над горизонтом, — и «насколько она далеко» выходило из её же роста. Отсюда
+// ровно то, что заказчик видит: вещь висит на небосводе, а не стоит на земле, а
+// множитель T196, отодвигавший кольцо по высоте глаза, менял её размер при
+// подъёме и спуске (0,311 на первом этаже против 1,000 в обзоре).
+//
+// Теперь **у каждой вещи фона есть место на земле**: `x`, `y` в миллиметрах от
+// середины чертежа и высота в миллиметрах. Нулевая отметка у них та же, что у
+// фундамента, и проекция та же, что у граней сцены (`volumeGroundPoint`).
+// «На одном уровне с фундаментом» выходит само: отошёл — вещь уменьшилась,
+// подошёл — выросла, и это правда, а не подгонка. Множителя `volumeGroundScale`
+// и кольца больше нет ни одного.
+//
+// **Небо осталось на бесконечности** (`volumeSkyAim`, `volumeSkyPoint`): солнце,
+// луна, звёзды, облака и растяжка неба при ходьбе двигаться не должны — у них
+// направление, а не место.
+//
+// ——— докуда расставлено и почему ——————————————————————————————————————————
+//
+// Числа подобраны так, чтобы вещь читалась тем, чем она есть, из двух мест
+// сразу: с уровня глаз (1,6 м) и из обзора (камера в полутора-четырёх десятках
+// метров над домом). Мера одна — **угловой размер с уровня глаз**:
+//
+//   кусты          38…60 м    1,6…2,4 м   — 2…4°, подлесок у кромки участка;
+//   ближние деревья 45…75 м   7…12 м      — 8…14°, «прямо перед глазами»;
+//   средний ряд    110…190 м  9…16 м      — 4…7°;
+//   дальний ряд    380…700 м  11…18 м     — 1,2…2,5°, обжитой горизонт;
+//   дорога         150…900 м  ширина 7 м  — уходит к горизонту;
+//   река           220…1200 м ширина 24 м;
+//   гряды холмов   1,6 и 3,2 км, 45 и 110 м — 1,6° и 2,0°, «небольшой ландшафт»;
+//   горы           7,5 км, 700…1400 м      — 5,3…10,6°, дальний план;
+//   улицы города   120…800 м, ширина 14 м;
+//   ближние дома   220…300 м, 28…38 м      — 5,3…9,8°, многоэтажка в квартале;
+//   дальние дома   600…900 м, 18…28 м      — 1,2…2,7°;
+//   машины         95…120 м, 1,5 м         — 0,7…0,9°, пятнышки на парковке.
+//
+// Ближе 38 м не ставится ничего, и это не вкус: земляная плита сцены (D43)
+// выкроена по габариту чертежа плюс вынос под тень, у объекта заказчика это
+// круг радиусом 26,5 м. Вещь внутри плиты была бы ею срезана — тем самым швом,
+// из-за которого затевался T196. Запас до плиты — `VOLUME_BACKDROP_CLEAR_MM`.
+
+/** Миллиметры в метре: фон размечен метрами, а сцена живёт в миллиметрах. */
+const VOLUME_M = 1000;
+
 /**
- * Деревья и кустарники. `rise` — высота **основания**: ноль значит «стоит на
- * горизонте», то есть далеко, отрицательное — ближе к дому, потому что земля у
- * ног уходит вниз. `size` — угловая высота вещи. Три вида (круглая крона, ель,
- * куст) и три дальности: ближние заказчик просил прямо, дальние держат горизонт
- * обжитым, когда смотришь между ближними.
+ * Дальше этого зелень фона бледнеет: триста метров — та дальность, с которой
+ * воздух уже заметно съедает цвет, а крона перестаёт читаться отдельными
+ * пятнами. До таска 199 то же решала высота основания над горизонтом, потому
+ * что настоящей дальности у вещи не было.
  */
-const VOLUME_TREES = [
-  // дальний ряд по всему кругу
-  { az: 10, rise: 0, size: 3.4, kind: "tree" },
-  { az: 48, rise: 0, size: 2.6, kind: "spruce" },
-  { az: 95, rise: 0, size: 3.8, kind: "poplar" },
-  { az: 140, rise: 0, size: 2.8, kind: "spruce" },
-  { az: 185, rise: 0, size: 3.2, kind: "tree" },
-  { az: 228, rise: 0, size: 2.4, kind: "birch" },
-  { az: 262, rise: 0, size: 3.6, kind: "spruce" },
-  { az: 305, rise: 0, size: 2.9, kind: "tree" },
-  { az: 345, rise: 0, size: 3.1, kind: "spruce" },
-  // средний ряд
-  { az: 30, rise: -2.2, size: 9, kind: "spruce" },
-  { az: 78, rise: -2.3, size: 9.5, kind: "poplar" },
-  { az: 112, rise: -2.6, size: 10.5, kind: "tree" },
-  { az: 171, rise: -2.1, size: 8.8, kind: "birch" },
-  { az: 200, rise: -2, size: 8.5, kind: "tree" },
-  { az: 275, rise: -2.8, size: 11, kind: "spruce" },
-  { az: 330, rise: -2.4, size: 9.5, kind: "tree" },
-  // Берёзовая роща (таск 181: «плюс ещё немного берёз»). Березняк узнаётся не
-  // отдельной берёзой, а тем, что их несколько рядом: три белых ствола подряд
-  // в ближнем ряду и ещё три врозь — в среднем и дальнем.
-  { az: 16, rise: -6.4, size: 16, kind: "birch" },
-  { az: 22, rise: -7.1, size: 18.5, kind: "birch" },
-  { az: 28, rise: -6.1, size: 15, kind: "birch" },
-  { az: 145, rise: -2.4, size: 9.2, kind: "birch" },
-  { az: 252, rise: -2.5, size: 9.8, kind: "birch" },
-  { az: 68, rise: 0, size: 3, kind: "birch" },
-  // ближний ряд — то, о чём просил заказчик
-  { az: 62, rise: -6.5, size: 19, kind: "tree" },
-  { az: 128, rise: -6.8, size: 18, kind: "birch" },
-  { az: 155, rise: -7.5, size: 21, kind: "spruce" },
-  { az: 212, rise: -6.2, size: 16.5, kind: "poplar" },
-  { az: 248, rise: -6, size: 17.5, kind: "tree" },
-  { az: 352, rise: -7, size: 20, kind: "tree" },
-  // кустарники — ниже деревьев и ближе к земле
-  { az: 44, rise: -9, size: 6.5, kind: "bush" },
-  { az: 88, rise: -10.5, size: 7.5, kind: "bush" },
-  { az: 133, rise: -8.5, size: 6, kind: "bush" },
-  { az: 176, rise: -11, size: 8, kind: "bush" },
-  { az: 219, rise: -9.5, size: 7, kind: "bush" },
-  { az: 295, rise: -10, size: 7.5, kind: "bush" },
-  { az: 315, rise: -8.8, size: 6.2, kind: "bush" },
-];
+const VOLUME_TREE_FAR_MM = 300 * VOLUME_M;
 
-const DEG = Math.PI / 180;
+/**
+ * Самое близкое, что фон ставит на землю, и запас до кромки плиты.
+ *
+ * Если чертёж большой (плита радиусом больше, чем ближний куст), **вся**
+ * расстановка отъезжает одним множителем — `volumeBackdropPlaces`. Множитель
+ * зависит только от размера чертежа и ни от чего больше: ни от камеры, ни от
+ * высоты глаза, ни от часа. Именно этим он отличается от отменённого
+ * `volumeGroundScale`, который дышал от высоты глаза.
+ */
+const VOLUME_BACKDROP_NEAR_MM = 38 * VOLUME_M;
+const VOLUME_BACKDROP_CLEAR_MM = 10 * VOLUME_M;
 
-// ——— дорога, река, холмы ——————————————————————————————————————————————————
-//
-// Слова заказчика (G231): «И дорисуй фон, нарисуй там гдже-нибудь дорогу и
-// речку. Чуть оживить». И следом (G232): «И небольшой ландшафт сделай на фоне,
-// а у реки кусты и деревья по берегам».
-//
-// ——— полоса вместо вещи ———————————————————————————————————————————————————
-//
-// Дерево панорамы — **вещь**: одна сторона света, одна высота, угловой размер.
-// Дорога и река так не описываются: у них нет «места», они тянутся. Поэтому у
-// них вереница узлов, и у каждого узла **сторона света и две высоты над
-// горизонтом** — верх полосы и низ. Никакой второй машинерии при этом не
-// завелось: узел попадает на экран тем же `volumeSkyPoint`, что солнце и ель.
-//
-// **Как полоса уходит вдаль.** Три признака, и все три — не украшение, а то же
-// самое, что делает перспектива:
-//
-//   - **высота**: у ближнего узла низ далеко под горизонтом (−7°, то есть у
-//     глаза на высоте человека это метров тринадцать), у дальнего обе высоты
-//     подходят к нулю — полоса приходит к горизонту;
-//   - **толщина**: у ближнего узла она больше двух градусов, у дальнего —
-//     десятая доля: та же дорога, просто дальше;
-//   - **изгиб**: сторона света идёт неравными шагами. Прямая дорога в
-//     панораме и обязана быть кривой — по той же причине, по которой прямые
-//     рельсы сходятся: дальние её куски занимают меньше угла.
-//
-// Вдобавок полоса **выцветает**: заливка идёт растяжкой от ближнего цвета к
-// дальнему, одной заливкой на полосу. Это дешевле и честнее, чем красить
-// звенья порознь: у звеньев были бы видны стыки.
-//
-// ——— чем фон разведён с домом ——————————————————————————————————————————
-//
-// Дорога, проходящая сквозь стену, хуже, чем её отсутствие. Разведено это
-// двумя вещами, и ни одна не считает дом:
-//
-//   1. **панорама рисуется до сцены** и в сортировке граней не участвует —
-//      стена, пол и мебель всегда лежат поверх неё. Сквозь стену фон не
-//      виден нигде, его видно только в проёме;
-//   2. **ближний край полос не подползает к ногам**: самый низ дороги −9,3°,
-//      реки −9,4°, и ниже десяти градусов под горизонт полосы не опускаются
-//      вовсе. При росте глаз это метров десять от человека, то есть дорога
-//      видна **за** домом и за ближней зеленью (кусты стоят на −8,5…−11°,
-//      частью перед полосой), а не под окном.
-//
-// Азимуты тоже разведены нарочно: дорога лежит на северо-западе и уходит на
-// северо-восток, река — на юго-востоке. В одно окно попадает что-то одно, и
-// перекрестием они не сходятся нигде.
+/** Место на земле: сторона света и дальность в метрах. */
+function volumeAway(azDeg, metres) {
+  return { x: Math.cos(azDeg * DEG) * metres * VOLUME_M, y: Math.sin(azDeg * DEG) * metres * VOLUME_M };
+}
 
-/** Узлы полосы: сторона света, верх и низ над горизонтом — в градусах. */
-function volumeBandNodes(points) {
-  return points.map(([az, rise, half]) => ({ az, top: rise + half, bottom: rise - half }));
+/** Вещь, стоящая на земле: место, высота в миллиметрах и порода. */
+function volumeStanding(azDeg, metres, heightM, kind) {
+  const spot = volumeAway(azDeg, metres);
+  return { x: spot.x, y: spot.y, heightMm: heightM * VOLUME_M, awayMm: metres * VOLUME_M, kind };
 }
 
 /**
- * Дорога: приходит с запада-северо-запада широкой и низкой, уводит на
- * северо-восток к горизонту. Изгиб средний — не серпантин.
+ * Деревья и кустарники: три дальности по всему кругу.
+ *
+ * Ближний ряд заказчик просил прямо («что бы я смотрел вдоль горизонта и всегда
+ * были видны ровно прямо»), дальний держит горизонт обжитым, когда смотришь
+ * между ближними. Бледнее дальнее становится само — по настоящей дальности, а
+ * не по высоте основания над горизонтом, как считалось в кольце.
  */
-const VOLUME_ROAD = volumeBandNodes([
-  [286, -7.2, 2.1],
-  [300, -5.0, 1.5],
-  [315, -3.4, 1.05],
-  [330, -2.2, 0.72],
-  [345, -1.3, 0.46],
-  [358, -0.75, 0.3],
-  [12, -0.4, 0.18],
-  [26, -0.18, 0.1],
-]);
-
-/** Река: с юго-востока к югу, шире дороги и извилистее — вода не спрямлена. */
-const VOLUME_RIVER = volumeBandNodes([
-  [118, -6.8, 2.6],
-  [131, -4.6, 1.9],
-  [142, -3.1, 1.3],
-  [156, -2.1, 0.95],
-  [168, -1.35, 0.62],
-  [179, -0.85, 0.4],
-  [191, -0.45, 0.24],
-  [204, -0.2, 0.12],
-]);
+const VOLUME_TREES = [
+  // дальний ряд по всему кругу: 380…700 м
+  volumeStanding(10, 520, 14, "tree"),
+  volumeStanding(48, 610, 12, "spruce"),
+  volumeStanding(95, 430, 16, "poplar"),
+  volumeStanding(140, 660, 13, "spruce"),
+  volumeStanding(185, 480, 15, "tree"),
+  volumeStanding(228, 700, 11, "birch"),
+  volumeStanding(262, 390, 18, "spruce"),
+  volumeStanding(305, 560, 13, "tree"),
+  volumeStanding(345, 640, 15, "spruce"),
+  // средний ряд: 110…190 м
+  volumeStanding(30, 150, 12, "spruce"),
+  volumeStanding(78, 185, 14, "poplar"),
+  volumeStanding(112, 125, 10, "tree"),
+  volumeStanding(171, 165, 13, "birch"),
+  volumeStanding(200, 140, 11, "tree"),
+  volumeStanding(275, 115, 9, "spruce"),
+  volumeStanding(330, 175, 16, "tree"),
+  // Берёзовая роща (таск 181: «плюс ещё немного берёз»): три белых ствола
+  // подряд в ближнем ряду и ещё три врозь — в среднем и дальнем.
+  volumeStanding(16, 52, 9, "birch"),
+  volumeStanding(22, 58, 11, "birch"),
+  volumeStanding(28, 49, 8, "birch"),
+  volumeStanding(145, 130, 12, "birch"),
+  volumeStanding(252, 155, 10, "birch"),
+  volumeStanding(68, 450, 12, "birch"),
+  // ближний ряд — то, о чём просил заказчик: 45…75 м
+  volumeStanding(62, 58, 11, "tree"),
+  volumeStanding(128, 64, 10, "birch"),
+  volumeStanding(155, 47, 9, "spruce"),
+  volumeStanding(212, 72, 12, "poplar"),
+  volumeStanding(248, 55, 10, "tree"),
+  volumeStanding(352, 68, 12, "tree"),
+  // кустарники — ниже деревьев и ближе к земле: 38…60 м
+  volumeStanding(44, 44, 2.1, "bush"),
+  volumeStanding(88, 39, 1.8, "bush"),
+  volumeStanding(133, 52, 2.4, "bush"),
+  volumeStanding(176, 41, 1.6, "bush"),
+  volumeStanding(219, 47, 2.2, "bush"),
+  volumeStanding(295, 38, 1.9, "bush"),
+  volumeStanding(315, 56, 2.3, "bush"),
+];
 
 /**
- * Гряда холмов у горизонта (G232). Мера — «небольшой ландшафт»: верх дальней
- * гряды 2,6°, ближней 1,6°. Для сравнения, ближнее дерево панорамы — 19–21°,
- * то есть холмы ровно фон, а не горы над домом.
+ * Узлы полосы, лежащей на земле: середина и половина ширины.
  *
- * Низ у обеих чуть **под** горизонтом: встань он ровно на нуль — на стыке
- * осталась бы светлая щель от растяжки поля.
+ * У полосы два края, и считаются они **поперёк её же хода** — по направлению от
+ * узла к узлу. Поэтому изгиб дороги не растягивает её ширину: семь метров
+ * остаются семью метрами и на повороте.
  */
-function volumeRidge(rises, base) {
-  return rises.map((rise, index) => ({ az: (index * 360) / rises.length, top: rise, bottom: base }));
+function volumeBandNodes(points, widthM) {
+  const middles = points.map(([az, away]) => volumeAway(az, away));
+  const half = (widthM / 2) * VOLUME_M;
+  return middles.map((spot, index) => {
+    const prev = middles[Math.max(0, index - 1)];
+    const next = middles[Math.min(middles.length - 1, index + 1)];
+    const dx = next.x - prev.x;
+    const dy = next.y - prev.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    return {
+      x: spot.x,
+      y: spot.y,
+      awayMm: Math.hypot(spot.x, spot.y),
+      left: { x: spot.x + nx * half, y: spot.y + ny * half },
+      right: { x: spot.x - nx * half, y: spot.y - ny * half },
+    };
+  });
+}
+
+/**
+ * Дорога: приходит с запада-северо-запада и уводит на северо-восток. Ширина
+ * семь метров — две полосы просёлка; ближнее колено в полутора сотнях метров,
+ * дальнее — почти в километре.
+ */
+const VOLUME_ROAD = volumeBandNodes(
+  [
+    [286, 150],
+    [300, 210],
+    [315, 300],
+    [330, 420],
+    [345, 560],
+    [358, 700],
+    [12, 820],
+    [26, 900],
+  ],
+  7,
+);
+
+/** Река: с юго-востока к югу, шире дороги и извилистее — вода не спрямлена. */
+const VOLUME_RIVER = volumeBandNodes(
+  [
+    [118, 220],
+    [131, 300],
+    [142, 400],
+    [156, 520],
+    [168, 680],
+    [179, 850],
+    [191, 1020],
+    [204, 1200],
+  ],
+  24,
+);
+
+/**
+ * Гряда холмов (G232): вереница узлов на своей дальности, у каждого высота над
+ * землёй. Рисуется силуэтом — низ по земле, верх по гребню.
+ *
+ * Мера прежняя, «небольшой ландшафт»: дальняя гряда 110 м в 3,2 км (2,0°),
+ * ближняя 45 м в 1,6 км (1,6°). Для сравнения, ближнее дерево в полусотне
+ * метров — 11°, то есть холмы остались фоном, а не стеной над домом.
+ */
+function volumeRidge(rises, away, step) {
+  return rises.map((rise, index) => {
+    const spot = volumeAway((index * 360) / rises.length, away);
+    return { x: spot.x, y: spot.y, awayMm: away * VOLUME_M, heightMm: rise * step * VOLUME_M };
+  });
 }
 const VOLUME_HILLS = [
   {
     far: true,
     color: VOLUME_HILL_FAR,
-    nodes: volumeRidge([1.5, 2.6, 2.1, 1.2, 1.9, 2.4, 1.4, 2.0, 2.6, 1.7, 1.1, 2.2, 1.8, 2.5], -0.6),
+    awayM: 3200,
+    nodes: volumeRidge([1.5, 2.6, 2.1, 1.2, 1.9, 2.4, 1.4, 2.0, 2.6, 1.7, 1.1, 2.2, 1.8, 2.5], 3200, 42),
   },
   {
     far: false,
     color: VOLUME_HILL_NEAR,
-    nodes: volumeRidge([0.9, 0.5, 1.4, 1.6, 0.8, 1.1, 1.5, 0.6, 1.2, 1.55, 0.95, 0.7, 1.35, 1.05], -0.6),
+    awayM: 1600,
+    nodes: volumeRidge([0.9, 0.5, 1.4, 1.6, 0.8, 1.1, 1.5, 0.6, 1.2, 1.55, 0.95, 0.7, 1.35, 1.05], 1600, 28),
   },
 ];
 
@@ -56591,43 +57031,50 @@ const VOLUME_HILLS = [
 // светится и в тени, и этим одним он и показан — «верх вершины светлее
 // остального», подробностей не нужно.
 
-/** Низ гряды: чуть под горизонтом, чтобы между горой и землёй не было щели. */
-const VOLUME_MOUNTAIN_BASE = -0.4;
 const VOLUME_MOUNTAIN_FAR_ROCK = "#9dabbf";
 const VOLUME_MOUNTAIN_FAR_SNOW = "#e7eef7";
 const VOLUME_MOUNTAIN_ROCK = "#8491a7";
 const VOLUME_MOUNTAIN_SNOW = "#f1f6fc";
 
 /**
- * Гряда: несколько пиков разной высоты, перекрывающих друг друга. `at` — сдвиг
- * по стороне света от середины гряды, `size` — высота вершины над горизонтом,
- * `half` — половина ширины подножия, `snow` — какая доля вершины под снегом.
+ * Гряда: несколько вершин разной высоты, перекрывающих друг друга. `at` — сдвиг
+ * по стороне света от середины гряды, `height` — высота вершины **в метрах**,
+ * `half` — половина ширины подножия в метрах, `snow` — какая доля вершины под
+ * снегом.
  *
- * Мера та же, что у холмов: гряда выше ландшафта (2,6°), но втрое ниже ближнего
- * дерева панорамы (19°) — то есть это дальний план, а не стена над домом.
+ * Дальность у обоих рядов одна — 7,5 км; разница в высоте, ширине и цвете.
+ * Гора в 1,4 км высотой с этого расстояния видна под 10,6°, то есть выше
+ * холмов (2°), но втрое ниже ближнего дерева в полусотне метров (11°): дальний
+ * план, а не стена над домом.
  */
-function volumeRange(peaks, rock, snowColor, far) {
-  return peaks.map(([at, size, half, snow]) => ({
-    az: (VOLUME_SUN_AT.az + 180 + at + 360) % 360,
-    size,
-    half,
-    snow,
-    rock,
-    snowColor,
-    // Дальний ряд бледнее ближнего, и красит его час (`mood.palette`): цвета
-    // выше остались мерой — по ним видно, что снег светлее камня, — а в кадр
-    // идёт их вечерний или ночной тон.
-    far: Boolean(far),
-  }));
+function volumeRange(peaks, away, rock, snowColor, far) {
+  return peaks.map(([at, height, half, snow]) => {
+    const az = (VOLUME_SUN_AT.az + 180 + at + 360) % 360;
+    const spot = volumeAway(az, away);
+    return {
+      x: spot.x,
+      y: spot.y,
+      awayMm: away * VOLUME_M,
+      heightMm: height * VOLUME_M,
+      halfMm: half * VOLUME_M,
+      snow,
+      rock,
+      snowColor,
+      // Дальний ряд бледнее ближнего, и красит его час (`mood.palette`).
+      far: Boolean(far),
+    };
+  });
 }
+const VOLUME_MOUNTAIN_AWAY_M = 7500;
 const VOLUME_MOUNTAINS = [
   // Дальний ряд — выше и бледнее, и он же рисуется первым.
   ...volumeRange(
     [
-      [-19, 6.2, 9, 0.34],
-      [-4, 7.6, 10.5, 0.4],
-      [13, 5.4, 8, 0.3],
+      [-19, 1150, 1500, 0.34],
+      [-4, 1400, 1750, 0.4],
+      [13, 1000, 1350, 0.3],
     ],
+    VOLUME_MOUNTAIN_AWAY_M,
     VOLUME_MOUNTAIN_FAR_ROCK,
     VOLUME_MOUNTAIN_FAR_SNOW,
     true,
@@ -56635,11 +57082,12 @@ const VOLUME_MOUNTAINS = [
   // Ближний ряд — ниже и темнее: он перекрывает подножия дальнего.
   ...volumeRange(
     [
-      [-27, 4.1, 7, 0.26],
-      [-11, 5.1, 8, 0.3],
-      [4, 4.4, 7.5, 0.26],
-      [21, 4.8, 8.5, 0.28],
+      [-27, 760, 1150, 0.26],
+      [-11, 940, 1300, 0.3],
+      [4, 810, 1250, 0.26],
+      [21, 890, 1400, 0.28],
     ],
+    VOLUME_MOUNTAIN_AWAY_M,
     VOLUME_MOUNTAIN_ROCK,
     VOLUME_MOUNTAIN_SNOW,
     false,
@@ -56651,124 +57099,203 @@ const VOLUME_MOUNTAINS = [
  * и деревья по берегам».
  *
  * Считаются из самих узлов реки, а не выписаны второй таблицей рядом: сдвинь
- * реку — зелень уйдёт вместе с ней. Второй таблицей она бы однажды осталась
- * стоять посреди воды.
- *
- * Правила простые и все три видны в числах ниже: зелень стоит **у самой
- * кромки** (отсюда «ближе к воде гуще» — дальше от берега её нет вовсе), на
- * **обоих** берегах (ближний — ниже полосы, дальний — выше), а угловой размер
- * берётся от того, насколько узел близок: у ближнего колена куст в полтора
- * десятка градусов, у дальнего — меньше градуса. Вид чередуется по узлу: ряд
+ * реку — зелень уйдёт вместе с ней. Правила те же, что были, только в метрах:
+ * зелень стоит **у самой кромки** (отступ в полширины реки от края), на
+ * **обоих** берегах, а высота падает с дальностью — у ближнего колена ива в
+ * восемь метров, у дальнего куст в полтора. Вид чередуется по узлу: ряд
  * одинаковых кустов читался бы забором.
  */
 function volumeRiverGreens(river) {
   const greens = [];
   const kinds = ["bush", "willow", "bush", "birch", "willow", "spruce"];
+  const far = river[river.length - 1].awayMm;
   river.forEach((node, index) => {
-    const middle = (node.top + node.bottom) / 2;
-    const near = Math.abs(middle);
-    // Дальние колена реки уже тоньше градуса — там зелень выродилась бы в
-    // точку, и её нет вовсе: пустой горизонт честнее мусора на нём.
-    if (near < 0.6) return;
-    const size = Math.max(1.4, near * 2.3);
-    // Ближний берег — под полосой, дальний — над: у воды есть две стороны, и
-    // обе должны быть обжиты.
-    greens.push({ az: node.az - 1.6, rise: node.bottom - size * 0.04, size, kind: kinds[index % kinds.length] });
-    greens.push({
-      az: node.az + 1.4,
-      rise: node.top + size * 0.03,
-      size: size * 0.78,
-      kind: kinds[(index + 1) % kinds.length],
-    });
+    // Дальние колена реки у горизонта: там зелень выродилась бы в точку, и её
+    // нет вовсе — пустой горизонт честнее мусора на нём.
+    if (node.awayMm > far * 0.8) return;
+    const share = 1 - node.awayMm / far;
+    const heightMm = (1.6 + share * 6.4) * VOLUME_M;
+    const bank = (edge, sign, grow, kind) => {
+      const dx = edge.x - node.x;
+      const dy = edge.y - node.y;
+      greens.push({
+        x: edge.x + dx * sign,
+        y: edge.y + dy * sign,
+        awayMm: Math.hypot(edge.x + dx * sign, edge.y + dy * sign),
+        heightMm: heightMm * grow,
+        kind,
+      });
+    };
+    bank(node.left, 0.35, 1, kinds[index % kinds.length]);
+    bank(node.right, 0.35, 0.78, kinds[(index + 1) % kinds.length]);
     // У ближних колен берег **гуще**: там видно отдельные кусты, и один куст на
     // берег читался бы случайной кочкой, а не зарослями у воды.
     if (index > 1) return;
-    greens.push({ az: node.az + 4.2, rise: node.bottom - size * 0.06, size: size * 0.62, kind: "bush" });
-    greens.push({ az: node.az - 3.4, rise: node.top + size * 0.05, size: size * 0.5, kind: "bush" });
+    bank(node.left, 1.1, 0.62, "bush");
+    bank(node.right, 1.1, 0.5, "bush");
   });
   return greens;
 }
 const VOLUME_RIVER_GREENS = volumeRiverGreens(VOLUME_RIVER);
 
-// ——— две земли и шов между ними (дефект D52, таск 196) ————————————————————
+// ——— две камеры: небо на бесконечности, земля на своих местах ————————————
 //
-// Слова заказчика, со снимками обзора: «но пол дома всё равно летает, вот
-// границей перекрыл машинки. ниже спусти», «для тестов можешь перекрасить землю
-// и увидишь. Фундамент в воздухе относительно фона».
+// Прицелов теперь два, и разница между ними — это разница между «направлением»
+// и «местом».
 //
-// Это **третий заход** на одно и то же: G237 (таск 157) поставил дом на землю,
-// D43 (таск 178) чинил «дом всё ещё летает». Оба раза правили сцену, и дефект
-// возвращался. Поэтому сначала — обе высоты числами, как и просил тикет.
+//   **Небо** (`volumeSkyAim`, `volumeSkyPoint`) знает только направление.
+//   Солнце, луна, звёзды, облака и растяжка неба при ходьбе стоять обязаны:
+//   отойти от солнца на десять метров нельзя. Множителя `ground`, которым таск
+//   196 отодвигал кольцо по высоте глаза, здесь больше нет — он и был дефектом
+//   D53.
 //
-// **Земля сцены — настоящая плоскость.** Одна грань на нулевой отметке
-// (`VOLUME_LAYER_BASE`), по габариту чертежа плюс вынос: вынос считается от
-// тени дома (`volumeShadowShift` при полуденной высоте 14°) плюс
-// `VOLUME_LAND_OUT_MM`. На объекте заказчика это 14,23 м за габарит, то есть
-// плита **37,66 × 37,16 м**, а её кромка стоит в 26,2…26,7 м от середины дома.
-// Человек ростом 1600 мм видит эту кромку в **3,43…3,49° под горизонтом** —
-// при фокусе 700 это `y = 492` при горизонте `y = 450`.
-//
-// **Земля фона — заливка ниже строки горизонта.** Никакой плоскости у неё нет
-// вовсе: `volumeDrawBackdrop` заливает `palette.land` от строки
-// `volumeHorizon(camera, box) = высота/2 + фокус · tg(наклон)` и до низа кадра,
-// а всё, что на этой земле стоит, нарисовано **на бесконечности**:
-// `volumeSkyPoint` знает направление и не знает ни дальности, ни высоты глаза.
-// Дальность у вещей фона есть только неявная — та, что получается, если принять
-// высоту глаза стоящего (`VOLUME_EYE_MM` = 1600): дорога приходит с 9,8 м,
-// улица города с 9,5 м, машинки стоят в 13,2 м, основания ближнего ряда домов в
-// 21,8 м, кусты — в 8,2 м.
-//
-// **Отсюда весь дефект, и он арифметический.** Всё, что фон рисует на земле,
-// лежит **ближе** 26,2 м — то есть внутри плиты. Плита рисуется после фона и
-// закрывает их собой: машинки на `y = 535` против кромки плиты на `y = 492`
-// срезаются ровно пополам, а у ближнего ряда домов (`y = 501`) кромка проходит
-// по основаниям. Числом «дом летает» — это 43 точки между кромкой плиты и
-// машинками.
-//
-// **Мера теперь одна, и живёт она здесь.** Панорама не рисует на земле ничего
-// **ближе кромки плиты**: самое близкое её колено (куст, 11° под горизонтом —
-// `VOLUME_PANORAMA_NEAR_DEG`) приводится ровно к углу этой кромки, а остальное
-// отъезжает тем же множителем. Множитель считается в тангенсах, то есть это
-// честное «кольцо панорамы отодвинули»: дальности всех её вещей умножены на одно
-// число, порядок (дорога ближе холмов, холмы ближе гор) сохранён, и угловые
-// размеры уехавших вещей уменьшены тем же множителем — дерево, отодвинутое
-// втрое, втрое и мельче.
-//
-// **Ближе панорама не придвигается никогда** (`Math.min(1, …)`): за кромкой
-// плиты лежит та же земля того же тона, и уйти за неё дальше вещам фона можно —
-// шва от этого не будет. А вот ближе — нельзя: там плита, и любая вещь фона
-// оказалась бы ею срезана. Поэтому в обзоре, где камера поднята и кромка плиты
-// уходит на 19…34° под горизонт, панорама остаётся **ровно той же, что была**:
-// её 11° и так дальше кромки.
-//
-// **Считается от середины чертежа, а не от камеры** — по полудиагонали плиты
-// (26,45 м на объекте заказчика). Это нарочно: возьми я дальность до кромки от
-// того места, где человек стоит, — панорама дышала бы при каждом шаге, а фон
-// обязан стоять. От высоты глаза она зависеть должна и зависит: поднялся на
-// второй этаж — кромка плиты ушла ниже, и кольцу можно подойти ближе.
+//   **Земля** (`volumeGroundAim`, `volumeGroundPoint`) знает место: точка в
+//   миллиметрах чертежа, та же система координат и та же проекция, что у граней
+//   сцены. Поэтому дерево в полусотне метров ведёт себя как дерево: подошёл —
+//   выросло, отошёл — уменьшилось, поднялся на второй этаж — осталось тем же.
 
 /**
- * Самое близкое, что панорама рисует на земле: куст в 11° под горизонтом
- * (`VOLUME_TREES`, az 176). Улица города приходит с 9,6°, дорога «Природы» —
- * с 9,3°, и всё это считается от высоты глаза стоящего (`VOLUME_EYE_MM`).
- */
-const VOLUME_PANORAMA_NEAR_DEG = 11;
-
-/**
- * Во сколько отодвинуть землю панорамы, чтобы она начиналась за кромкой земли
- * сцены (D52). Единица — ничего не двигать.
+ * Прицел земли: базис камеры, фокус, середина окна и **место камеры**.
  *
- * `land` — прямоугольник плиты (`scene.landMm`); `null` значит, что плита
- * работает полом, а не землёй, и отодвигать нечего.
+ * Считается один раз на кадр, как и небесный. Место здесь обязательно: у вещи
+ * фона есть свои координаты, и без места камеры их не во что переводить.
  */
-function volumeGroundScale(camera, land) {
+function volumeGroundAim(camera, box) {
+  return {
+    basis: volumeBasis(camera),
+    focal: volumeFocal(box),
+    halfWidth: box.width / 2,
+    halfHeight: box.height / 2,
+    at: camera.at,
+  };
+}
+
+/**
+ * Точка земли в экран — **той же проекцией, что грани сцены**.
+ *
+ * `null` — точка за ближней плоскостью (`VOLUME_NEAR_MM`), то есть за спиной
+ * или впритык к глазу. На кольце отбрасывать было нечего (у направления нет
+ * «за спиной» в половине случаев — есть, но половина круга всегда считалась),
+ * а у вещей с настоящими местами за спиной оказывается добрая половина, и это
+ * экономит кадр.
+ *
+ * `scale` — сколько экранных точек даёт **миллиметр** на этой дальности.
+ * Отвесный отрезок высотой `h` занимает на экране ровно `h · scale` точек, и
+ * этим считаются все размеры вещей фона: высота дерева, ширина дома, кузов
+ * машины. Перспектива у них от этого та же, что у стен дома.
+ */
+function volumeGroundPoint(aim, xMm, yMm, zMm = 0) {
+  const dx = xMm - aim.at.x;
+  const dy = yMm - aim.at.y;
+  const dz = (zMm || 0) - aim.at.z;
+  const { basis, focal } = aim;
+  const depth = dx * basis.fwd.x + dy * basis.fwd.y + dz * basis.fwd.z;
+  if (!(depth > VOLUME_NEAR_MM)) return null;
+  const right = dx * basis.right.x + dy * basis.right.y + dz * basis.right.z;
+  const up = dx * basis.up.x + dy * basis.up.y + dz * basis.up.z;
+  const scale = focal / depth;
+  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale, depth };
+}
+
+/**
+ * Насколько человек далёк от земляной плиты в плане: ноль — стоит на ней.
+ *
+ * Этим числом решается порядок рисования (см. `volumeDrawBackdrop`): вещь фона,
+ * которая **ближе** плиты, не может быть закрыта домом — дом стоит на плите.
+ */
+function volumePlateGap(land, at) {
+  if (!land || !at) return 0;
+  const dx = Math.max(Number(land.minX) - at.x, 0, at.x - Number(land.maxX));
+  const dy = Math.max(Number(land.minY) - at.y, 0, at.y - Number(land.maxY));
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Расстановка фона под этот чертёж.
+ *
+ * Числа таблиц писаны от середины чертежа и рассчитаны на обычную квартиру:
+ * ближний куст в 38 м, плита заказчика радиусом 26,5 м. У большого чертежа
+ * (ангар, посёлок) плита вырастает, и вещь, писанная на 38 м, оказалась бы
+ * внутри неё — то есть срезанной её кромкой. Поэтому вся расстановка отъезжает
+ * **одним множителем**, и он зависит **только от размера чертежа**: ни от
+ * камеры, ни от высоты глаза, ни от часа. Этим он и отличается от отменённого
+ * `volumeGroundScale`, из-за которого фон дышал при подъёме (D53).
+ *
+ * Множитель — единица в обычном случае, и тогда таблицы отдаются как есть, без
+ * копирования.
+ */
+const VOLUME_BACKDROP_CACHE = new Map();
+function volumeBackdropPush(land) {
   if (!land) return 1;
-  const eyeMm = Number(camera && camera.at && camera.at.z);
-  if (!(eyeMm > 0)) return 1;
-  const reachMm = Math.hypot((Number(land.maxX) - Number(land.minX)) / 2, (Number(land.maxY) - Number(land.minY)) / 2);
-  if (!(reachMm > 0)) return 1;
-  const edge = Math.atan(eyeMm / reachMm);
-  return Math.min(1, Math.tan(edge) / Math.tan(VOLUME_PANORAMA_NEAR_DEG * DEG));
+  const reach = Math.hypot((Number(land.maxX) - Number(land.minX)) / 2, (Number(land.maxY) - Number(land.minY)) / 2);
+  if (!(reach > 0)) return 1;
+  const want = (reach + VOLUME_BACKDROP_CLEAR_MM) / VOLUME_BACKDROP_NEAR_MM;
+  // Шаг множителя — десятая доля: иначе каждый чертёж получал бы свою
+  // расстановку, а кэш — свою запись.
+  return Math.max(1, Math.ceil(want * 10) / 10);
+}
+
+function volumePushSpot(spot, push) {
+  return { ...spot, x: spot.x * push, y: spot.y * push, awayMm: (spot.awayMm || 0) * push };
+}
+
+function volumePushBand(nodes, push) {
+  return nodes.map((node) => ({
+    ...volumePushSpot(node, push),
+    left: { x: node.left.x * push, y: node.left.y * push },
+    right: { x: node.right.x * push, y: node.right.y * push },
+  }));
+}
+
+/**
+ * Вещи фона на земле для этого чертежа. Таблицы — общие, множитель — свой.
+ *
+ * Высоты **не растягиваются**: отодвинутое дерево остаётся деревом в девять
+ * метров, просто видно его мельче. Растянуть высоту значило бы вернуть кольцо,
+ * у которого размер зависел не от вещи, а от того, где стоит смотрящий.
+ */
+function volumeBackdropPlaces(land) {
+  const push = volumeBackdropPush(land);
+  const kept = VOLUME_BACKDROP_CACHE.get(push);
+  if (kept) return kept;
+  const made =
+    push === 1
+      ? {
+          push,
+          trees: VOLUME_TREES,
+          road: VOLUME_ROAD,
+          river: VOLUME_RIVER,
+          greens: VOLUME_RIVER_GREENS,
+          hills: VOLUME_HILLS,
+          mountains: VOLUME_MOUNTAINS,
+          city: VOLUME_CITY,
+          streets: VOLUME_CITY_STREETS,
+          marks: VOLUME_CITY_MARKS,
+          park: VOLUME_CITY_PARK,
+          cityGreens: VOLUME_CITY_GREENS,
+        }
+      : {
+          push,
+          trees: VOLUME_TREES.map((tree) => volumePushSpot(tree, push)),
+          road: volumePushBand(VOLUME_ROAD, push),
+          river: volumePushBand(VOLUME_RIVER, push),
+          greens: VOLUME_RIVER_GREENS.map((green) => volumePushSpot(green, push)),
+          hills: VOLUME_HILLS.map((ridge) => ({
+            ...ridge,
+            nodes: ridge.nodes.map((node) => volumePushSpot(node, push)),
+          })),
+          mountains: VOLUME_MOUNTAINS.map((peak) => ({
+            ...volumePushSpot(peak, push),
+            halfMm: peak.halfMm * push,
+          })),
+          city: VOLUME_CITY.map((block) => ({ ...volumePushSpot(block, push), halfMm: block.halfMm * push })),
+          streets: VOLUME_CITY_STREETS.map((street) => volumePushBand(street, push)),
+          marks: VOLUME_CITY_MARKS.map((street) => volumePushBand(street, push)),
+          park: VOLUME_CITY_PARK.map((car) => volumePushSpot(car, push)),
+          cityGreens: VOLUME_CITY_GREENS.map((green) => volumePushSpot(green, push)),
+        };
+  VOLUME_BACKDROP_CACHE.set(push, made);
+  return made;
 }
 
 /**
@@ -56780,13 +57307,12 @@ function volumeGroundScale(camera, land) {
  * светило, звёзды и облака смотрят **через него**, а не через земной: небу
  * кромка плиты не указ.
  */
-function volumeSkyAim(camera, box, ground = 1) {
+function volumeSkyAim(camera, box) {
   return {
     basis: volumeBasis(camera),
     focal: volumeFocal(box),
     halfWidth: box.width / 2,
     halfHeight: box.height / 2,
-    ground: Number.isFinite(Number(ground)) && Number(ground) > 0 ? Math.min(1, Number(ground)) : 1,
   };
 }
 
@@ -56799,13 +57325,7 @@ function volumeSkyAim(camera, box, ground = 1) {
  * у граней сцены, и ровно потому, что камера одна и та же.
  */
 function volumeSkyPoint(aim, azimuthDeg, riseDeg) {
-  // Земля панорамы отодвинута за кромку земли сцены (D52): дальность всех её
-  // вещей умножена на одно число, то есть тангенс их высоты — поделен. Всё, что
-  // на горизонте и выше (светило, облака, вершины, дальний ряд деревьев),
-  // остаётся на месте: отодвигать бесконечность некуда.
-  const push = aim.ground === undefined ? 1 : aim.ground;
-  const sunk = riseDeg < 0 && push < 1;
-  const rise = sunk ? Math.atan(Math.tan(riseDeg * DEG) * push) : riseDeg * DEG;
+  const rise = riseDeg * DEG;
   const azimuth = azimuthDeg * DEG;
   const flat = Math.cos(rise);
   const direction = { x: flat * Math.cos(azimuth), y: flat * Math.sin(azimuth), z: Math.sin(rise) };
@@ -56815,19 +57335,17 @@ function volumeSkyPoint(aim, azimuthDeg, riseDeg) {
   const right = direction.x * basis.right.x + direction.y * basis.right.y + direction.z * basis.right.z;
   const up = direction.x * basis.up.x + direction.y * basis.up.y + direction.z * basis.up.z;
   const scale = focal / depth;
-  // Угловой размер уехавшей вещи уменьшается тем же множителем: отодвинутое
-  // втрое дерево втрое и мельче — иначе на кромке участка встал бы лес в
-  // двадцать градусов.
-  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale: sunk ? scale * push : scale };
+  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale };
 }
 
 /**
  * Прогоны полосы: вереницы узлов, попавших в кадр подряд.
  *
- * Узел за спиной `volumeSkyPoint` отдаёт как `null`, и полоса от этого рвётся —
- * у дороги длиной в сто градусов по кругу это обычное дело. Поэтому полоса
- * рисуется не одним многоугольником, а прогонами: соседние узлы делят ребро
- * ровно, и стыка между ними не видно.
+ * Узел за спиной `volumeGroundPoint` отдаёт как `null`, и полоса от этого
+ * рвётся — у дороги длиной в километр это обычное дело, а у вещей с настоящими
+ * местами за спиной оказывается добрая половина. Поэтому полоса рисуется не
+ * одним многоугольником, а прогонами: соседние узлы делят ребро ровно, и стыка
+ * между ними не видно.
  *
  * Чистая и вынесена наружу: разрыв полосы на краю кадра глазами не поймаешь.
  */
@@ -56835,8 +57353,8 @@ function volumeStripRuns(aim, nodes) {
   const runs = [];
   let run = null;
   for (const node of nodes) {
-    const top = volumeSkyPoint(aim, node.az, node.top);
-    const bottom = volumeSkyPoint(aim, node.az, node.bottom);
+    const top = volumeGroundPoint(aim, node.left.x, node.left.y, 0);
+    const bottom = volumeGroundPoint(aim, node.right.x, node.right.y, 0);
     if (!top || !bottom) {
       run = null;
       continue;
@@ -56875,26 +57393,80 @@ function volumeDrawStrip(ctx, aim, nodes, paint) {
 }
 
 /**
- * Фон кадра: небо со светилом, звёздами и облаками, поле, а дальше то, что
+ * Гряда холмов силуэтом: низ по земле, верх по гребню. Та же разбивка на
+ * прогоны, что у полосы, — гряда идёт по кругу, и половина её за спиной.
+ */
+function volumeDrawRidge(ctx, aim, ridge, palette) {
+  let run = null;
+  const runs = [];
+  for (const node of ridge.nodes) {
+    const foot = volumeGroundPoint(aim, node.x, node.y, 0);
+    const crest = volumeGroundPoint(aim, node.x, node.y, node.heightMm);
+    if (!foot || !crest) {
+      run = null;
+      continue;
+    }
+    if (!run) {
+      run = [];
+      runs.push(run);
+    }
+    run.push({ foot, crest });
+  }
+  for (const line of runs) {
+    if (line.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(line[0].crest.x, line[0].crest.y);
+    for (let index = 1; index < line.length; index += 1) ctx.lineTo(line[index].crest.x, line[index].crest.y);
+    for (let index = line.length - 1; index >= 0; index -= 1) ctx.lineTo(line[index].foot.x, line[index].foot.y);
+    ctx.closePath();
+    ctx.fillStyle = ridge.far ? palette.hillFar : palette.hillNear;
+    ctx.fill();
+  }
+}
+
+/**
+ * Фон кадра: небо со светилом, звёздами и облаками, земля, а дальше то, что
  * выбрано видом фона (G273) — ничего, природа или город.
  *
- * Рисуется до сцены и в её сортировке не участвует — ни одна точка фона не
- * знает, где стоит человек. Возвращается строка горизонта: по ней окно рисует
- * миникарту и подписи, и второго её счёта в сборке нет.
+ * Возвращается строка горизонта: по ней окно рисует миникарту и подписи, и
+ * второго её счёта в сборке нет.
  *
  * `mood` — снимок часа (`volumeMood`), посчитанный **не здесь**: кадр про время
- * не считает ничего, он берёт готовые цвета. Без него берётся полдень, то есть
- * ровно тот фон, что был до таска 181.
+ * не считает ничего, он берёт готовые цвета. `land` — прямоугольник земляной
+ * плиты (`scene.landMm`): по нему решается расстановка и порядок рисования.
  *
- * ——— порядок рисования ———
+ * ——— земля до горизонта ———
  *
- * Он по дальности и единственно возможный. Небо, светило, звёзды и облака
- * ложатся **до поля**: заходящее солнце обязано уходить за горизонт, а не
- * лежать на траве, и поле его подрезает само — второго способа отрезать
- * половину диска не нужно. Дальше дорога и река уходят **за холмы**, а не
- * лежат на них, поэтому полосы раньше гряд; зелень по берегам заслоняет свою
- * реку, поэтому она после полос; деревья по кругу — последними, они ближе
- * всего.
+ * Земля — **одна заливка** ниже строки горизонта, и это буквально та земля,
+ * которая до горизонта и доходит: строка горизонта и есть место, куда уходит
+ * плоскость на уровне глаз. Сетки узлов здесь нет и не нужно — у ровной земли
+ * без рельефа делить нечего, а тысячи точек на кадр стоили бы дороже всего
+ * остального фона вместе взятого. Плита сцены (`VOLUME_LAYER_BASE`) лежит
+ * внутри этой заливки тем же тоном (G237) и несёт на себе тень дома и
+ * солнечные пятна; кромки между ними не видно ни при каком взгляде, потому что
+ * это один цвет, покрашенный одним часом.
+ *
+ * ——— порядок рисования (таск 199) ———
+ *
+ * Вещи фона **не идут в дерево порядка сцены** (`volumeOrderTree`), и это
+ * решение, а не упущение: дерево строится при сборке сцены (9 мс на объекте
+ * заказчика), и класть в него десятки вещей фона значило бы пересобирать его
+ * при каждой правке чертежа ради того, что от чертежа не зависит. Вместо дерева
+ * — **одно правило о дальности, которое всегда верно**:
+ *
+ *   вещь фона стоит **снаружи плиты**, а дом стоит **на плите**;
+ *   значит дом ближе смотрящего только тогда, когда смотрящий **дальше плиты**,
+ *   и ровно настолько, насколько вещь ближе её кромки.
+ *
+ * Отсюда два прохода. `volumeDrawBackdrop` рисует небо, землю и всё, что
+ * **дальше** ближней кромки плиты, — дом его закроет, и это правда.
+ * `volumeDrawBackdropNear` рисует то, что **ближе** кромки, и зовётся оно уже
+ * после сцены: такую вещь дом закрыть не может, она перед ним. Внутри плиты
+ * (человек ходит по дому) ближе кромки нет ничего, и второй проход пуст.
+ *
+ * Цена ошибки названа прямо: вещь, которая дальше ближней кромки, но ближе
+ * дальней стены дома, рисуется под домом. Случается это только в обзоре с
+ * отлёта, где дом и есть то, на что смотрят.
  */
 function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
   const hour = mood || VOLUME_MOOD_NOON;
@@ -56906,13 +57478,10 @@ function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
   sky.addColorStop(1, hour.sky.low);
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, box.width, Math.max(0, line));
-  // Два прицела, и разница между ними — ровно дефект D52. Небесному кромка
-  // земли сцены не указ: светило, звёзды и облака стоят там, где стоят.
-  // Земному она указ: ближе кромки панорама на земле не рисует ничего, иначе
-  // плита срезает ей машинки (`volumeGroundScale`).
+  // Небо знает направление, земля — место. Разницу между этими двумя прицелами
+  // и чинит таск 199 (D53).
   const above = volumeSkyAim(camera, box);
-  const aim = volumeSkyAim(camera, box, volumeGroundScale(camera, land));
-  // Светило и звёзды — до поля: они за горизонтом и обрезаются им.
+  // Светило и звёзды — до земли: они за горизонтом и обрезаются ею.
   if (hour.stars > 0) volumeDrawStars(ctx, above, hour);
   volumeDrawSun(ctx, above, hour);
   volumeDrawMoon(ctx, above, hour);
@@ -56925,24 +57494,86 @@ function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
     ctx.fillRect(0, Math.max(0, line), box.width, box.height - Math.max(0, line));
   }
   if (hour.kind === "plain") return line;
-  if (hour.kind === "city") {
-    volumeDrawCity(ctx, aim, hour);
-    return line;
-  }
-  // Горы — самое далёкое, что есть в панораме: раньше всего, что стоит на
-  // земле (G238).
-  for (const peak of VOLUME_MOUNTAINS) volumeDrawPeak(ctx, aim, peak, palette);
-  volumeDrawStrip(ctx, aim, VOLUME_ROAD, (run) => volumeStripFill(ctx, run, palette.roadNear, palette.roadFar));
-  volumeDrawStrip(ctx, aim, VOLUME_RIVER, (run) => volumeStripFill(ctx, run, palette.riverNear, palette.riverFar));
-  // Гряды — поверх дальних концов полос: дорога уходит за холм, а не по нему.
-  for (const ridge of VOLUME_HILLS) {
-    volumeDrawStrip(ctx, aim, ridge.nodes, () => (ridge.far ? palette.hillFar : palette.hillNear));
-  }
-  for (const green of VOLUME_RIVER_GREENS) volumeDrawTree(ctx, aim, green, palette);
-  // Дальние раньше ближних: в этом порядке они и стоят в списке, и переставлять
-  // их нечем — у фона нет дальности, есть только порядок рисования.
-  for (const tree of VOLUME_TREES) volumeDrawTree(ctx, aim, tree, palette);
+  volumeDrawGround(ctx, box, camera, hour, land, false);
   return line;
+}
+
+/**
+ * Второй проход фона: то, что **ближе** кромки плиты. Зовётся после сцены —
+ * дом такую вещь закрыть не может (разбор у `volumeDrawBackdrop`).
+ *
+ * Внутри плиты проход пуст, и это обычный случай: человек ходит по дому.
+ */
+function volumeDrawBackdropNear(ctx, box, camera, mood = null, land = null) {
+  const hour = mood || VOLUME_MOOD_NOON;
+  if (hour.kind === "plain") return;
+  if (!(volumePlateGap(land, camera.at) > 0)) return;
+  volumeDrawGround(ctx, box, camera, hour, land, true);
+}
+
+/**
+ * Вещи фона, стоящие на земле, одним правилом на все три вида фона.
+ *
+ * `near` — какой проход: `false` — всё, что дальше ближней кромки плиты,
+ * `true` — что ближе неё.
+ *
+ * **Порядок внутри прохода — по дальности, от дальнего к ближнему**, и считать
+ * его дёшево: дальность у вещи своя, а не выведенная из её роста. Плоское
+ * (дорога, река, улицы, разметка) рисуется до стоящего — оно лежит на земле и
+ * закрыть собой дерево не может.
+ */
+function volumeDrawGround(ctx, box, camera, hour, land, near) {
+  const palette = hour.palette;
+  const aim = volumeGroundAim(camera, box);
+  const places = volumeBackdropPlaces(land);
+  const gap = volumePlateGap(land, camera.at);
+  const at = camera.at;
+  const mine = (spot) => {
+    if (!(gap > 0)) return !near;
+    const away = Math.hypot(spot.x - at.x, spot.y - at.y);
+    return near ? away < gap : away >= gap;
+  };
+  const standing = [];
+  const take = (list, paint) => {
+    for (let index = 0; index < list.length; index += 1) {
+      const spot = list[index];
+      if (!mine(spot)) continue;
+      standing.push({ depth: Math.hypot(spot.x - at.x, spot.y - at.y), spot, index, paint });
+    }
+  };
+  if (hour.kind === "city") {
+    if (!near) {
+      for (let index = 0; index < places.streets.length; index += 1) {
+        volumeDrawStrip(ctx, aim, places.streets[index], (run) =>
+          volumeStripFill(ctx, run, palette.asphalt, palette.asphaltFar),
+        );
+        volumeDrawStrip(ctx, aim, places.marks[index], () => palette.mark);
+      }
+    }
+    take(places.city, (spot, index) => volumeDrawBlock(ctx, aim, spot, index, hour));
+    take(places.park, (spot) => volumeDrawCar(ctx, aim, spot, palette));
+    take(places.cityGreens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
+  } else {
+    if (!near) {
+      // Горы — самое далёкое, что есть в панораме: раньше всего, что стоит на
+      // земле (G238). Полосы уходят за гряды, поэтому гряды после них.
+      for (const peak of places.mountains) volumeDrawPeak(ctx, aim, peak, palette);
+      volumeDrawStrip(ctx, aim, places.road, (run) =>
+        volumeStripFill(ctx, run, palette.roadNear, palette.roadFar),
+      );
+      volumeDrawStrip(ctx, aim, places.river, (run) =>
+        volumeStripFill(ctx, run, palette.riverNear, palette.riverFar),
+      );
+      for (const ridge of places.hills) volumeDrawRidge(ctx, aim, ridge, palette);
+    }
+    take(places.greens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
+    take(places.trees, (spot) => volumeDrawTree(ctx, aim, spot, palette));
+  }
+  // Порядок внутри прохода — по дальности, от дальнего к ближнему. Считать его
+  // дёшево: дальность у вещи своя, а не выведенная из её роста, и сортируются
+  // десятки вещей, а не тысячи граней.
+  standing.sort((one, two) => two.depth - one.depth);
+  for (const item of standing) item.paint(item.spot, item.index);
 }
 
 // ——— город (G273) ————————————————————————————————————————————————————————
@@ -56951,26 +57582,6 @@ function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
 // лежат на земле и уходят к горизонту, дома стоят на них, машины — перед
 // ближними домами, зелень вдоль улиц. Дальний ряд домов рисуется раньше
 // ближнего — он за ним.
-function volumeDrawCity(ctx, aim, hour) {
-  const palette = hour.palette;
-  for (let index = 0; index < VOLUME_CITY_STREETS.length; index += 1) {
-    volumeDrawStrip(ctx, aim, VOLUME_CITY_STREETS[index], (run) =>
-      volumeStripFill(ctx, run, palette.asphalt, palette.asphaltFar),
-    );
-    volumeDrawStrip(ctx, aim, VOLUME_CITY_MARKS[index], () => palette.mark);
-  }
-  for (let index = 0; index < VOLUME_CITY.length; index += 1) {
-    if (!VOLUME_CITY[index].far) continue;
-    volumeDrawBlock(ctx, aim, VOLUME_CITY[index], index, hour);
-  }
-  for (let index = 0; index < VOLUME_CITY.length; index += 1) {
-    if (VOLUME_CITY[index].far) continue;
-    volumeDrawBlock(ctx, aim, VOLUME_CITY[index], index, hour);
-  }
-  for (const spot of VOLUME_CITY_PARK) volumeDrawCar(ctx, aim, spot, palette);
-  for (const green of VOLUME_CITY_GREENS) volumeDrawTree(ctx, aim, green, palette);
-}
-
 /**
  * Многоэтажка: лицо, бок и сетка окон.
  *
@@ -56981,10 +57592,18 @@ function volumeDrawCity(ctx, aim, hour) {
  */
 function volumeDrawBlock(ctx, aim, block, index, hour) {
   const palette = hour.palette;
-  const left = volumeSkyPoint(aim, block.az - block.half, block.top);
-  const right = volumeSkyPoint(aim, block.az + block.half, block.top);
-  const footLeft = volumeSkyPoint(aim, block.az - block.half, block.base);
-  const footRight = volumeSkyPoint(aim, block.az + block.half, block.base);
+  // Лицо дома стоит поперёк взгляда на него: половина ширины откладывается по
+  // перпендикуляру к направлению «от середины чертежа к дому». Своей стороны
+  // света у дома больше нет — есть место, и перпендикуляр берётся из него.
+  const len = Math.hypot(block.x, block.y) || 1;
+  const nx = -block.y / len;
+  const ny = block.x / len;
+  const edge = (sign, zMm) =>
+    volumeGroundPoint(aim, block.x + nx * block.halfMm * sign, block.y + ny * block.halfMm * sign, zMm);
+  const left = edge(1, block.heightMm);
+  const right = edge(-1, block.heightMm);
+  const footLeft = edge(1, 0);
+  const footRight = edge(-1, 0);
   if (!left || !right || !footLeft || !footRight) return;
   ctx.fillStyle = block.far ? palette.wallFar : palette.wall;
   ctx.beginPath();
@@ -57038,9 +57657,9 @@ function volumeCitySpot(left, right, footLeft, footRight, fx, fy) {
 
 /** Машина: кузов и крыша двумя прямоугольниками — силуэт, а не модель. */
 function volumeDrawCar(ctx, aim, spot, palette) {
-  const base = volumeSkyPoint(aim, spot.az, spot.rise);
+  const base = volumeGroundPoint(aim, spot.x, spot.y, 0);
   if (!base) return;
-  const height = Math.max(3, spot.size * DEG * base.scale);
+  const height = Math.max(3, spot.heightMm * base.scale);
   const width = height * 2.4;
   ctx.fillStyle = palette.car[spot.car % palette.car.length];
   ctx.fillRect(base.x - width / 2, base.y - height * 0.62, width, height * 0.62);
@@ -57120,9 +57739,12 @@ function volumeDrawMoon(ctx, aim, hour) {
 // ней. Низ шапки с изломом, иначе снеговая линия выходит начерченной по
 // линейке.
 function volumeDrawPeak(ctx, aim, peak, palette) {
-  const apex = volumeSkyPoint(aim, peak.az, peak.size);
-  const left = volumeSkyPoint(aim, peak.az - peak.half, VOLUME_MOUNTAIN_BASE);
-  const right = volumeSkyPoint(aim, peak.az + peak.half, VOLUME_MOUNTAIN_BASE);
+  const len = Math.hypot(peak.x, peak.y) || 1;
+  const nx = -peak.y / len;
+  const ny = peak.x / len;
+  const apex = volumeGroundPoint(aim, peak.x, peak.y, peak.heightMm);
+  const left = volumeGroundPoint(aim, peak.x + nx * peak.halfMm, peak.y + ny * peak.halfMm, 0);
+  const right = volumeGroundPoint(aim, peak.x - nx * peak.halfMm, peak.y - ny * peak.halfMm, 0);
   if (!apex || !left || !right) return;
   ctx.fillStyle = peak.far ? palette.rockFar : palette.rock;
   ctx.beginPath();
@@ -57163,13 +57785,13 @@ function volumeDrawCloud(ctx, aim, cloud, palette) {
 // своей высоте над горизонтом, высота угловая. Своей картинки у фона нет
 // нарочно: это рисунок за окном, а не часть чертежа.
 function volumeDrawTree(ctx, aim, tree, palette) {
-  const base = volumeSkyPoint(aim, tree.az, tree.rise);
+  const base = volumeGroundPoint(aim, tree.x, tree.y, 0);
   if (!base) return;
-  const height = Math.max(6, tree.size * DEG * base.scale);
-  // Дальнее — бледнее: зелень у самого горизонта видна сквозь воздух. Мера
-  // общая для дальнего ряда (основание ровно на горизонте) и для зелени на
-  // дальних коленах реки — одно правило, а не ветка на каждый список.
-  const far = tree.rise > -1.2;
+  const height = Math.max(6, tree.heightMm * base.scale);
+  // Дальнее — бледнее: зелень у горизонта видна сквозь воздух. Мера теперь
+  // настоящая — дальность в метрах, а не высота основания над горизонтом:
+  // дальше трёхсот метров зелень блёкнет, ближе остаётся своей.
+  const far = tree.awayMm > VOLUME_TREE_FAR_MM;
   if (tree.kind === "bush") {
     const radius = height * 0.5;
     ctx.fillStyle = palette.bush;
@@ -58246,33 +58868,46 @@ const VOLUME_CITY_LIGHT = "#ffe6a3";
 const VOLUME_CITY_LIT_MAX = 0.55;
 
 /**
- * Многоэтажки по кругу: `az` — сторона света середины дома, `half` — половина
- * ширины, `base` — высота низа (минус — дом ближе, земля у ног уходит вниз),
- * `top` — высота верха, `floors` и `bays` — сетка окон, `far` — дальний ряд
- * (бледнее и мельче).
+ * Многоэтажки по кругу: место на земле (`x`, `y`), половина ширины, высота,
+ * сетка окон и признак дальнего ряда.
  *
  * Два ряда и разная высота — то же, чем держится лес «Природы»: ближние дома
- * заслоняют дальние, и горизонт не выглядит забором одинаковых столбов.
+ * заслоняют дальние, и горизонт не выглядит забором одинаковых столбов. Ближний
+ * ряд стоит в 220…300 м (28…38 м высоты — это 5,3…9,8° с уровня глаз, то есть
+ * квартал через дорогу), дальний — в 600…900 м (18…28 м, 1,2…2,7°).
  */
+function volumeBlock(az, away, halfM, heightM, floors, bays, far) {
+  const spot = volumeAway(az, away);
+  return {
+    x: spot.x,
+    y: spot.y,
+    awayMm: away * VOLUME_M,
+    halfMm: halfM * VOLUME_M,
+    heightMm: heightM * VOLUME_M,
+    floors,
+    bays,
+    far: Boolean(far),
+  };
+}
 const VOLUME_CITY = [
   // дальний ряд — за улицей, бледный
-  { az: 8, half: 2.6, base: -0.6, top: 6.2, floors: 7, bays: 4, far: true },
-  { az: 24, half: 2.0, base: -0.6, top: 4.4, floors: 5, bays: 3, far: true },
-  { az: 58, half: 3.0, base: -0.7, top: 7.4, floors: 8, bays: 4, far: true },
-  { az: 96, half: 2.3, base: -0.6, top: 5.2, floors: 6, bays: 3, far: true },
-  { az: 131, half: 2.8, base: -0.7, top: 6.8, floors: 7, bays: 4, far: true },
-  { az: 168, half: 2.1, base: -0.6, top: 4.8, floors: 5, bays: 3, far: true },
-  { az: 205, half: 3.2, base: -0.7, top: 7.8, floors: 8, bays: 5, far: true },
-  { az: 241, half: 2.4, base: -0.6, top: 5.6, floors: 6, bays: 3, far: true },
-  { az: 278, half: 2.9, base: -0.7, top: 7.0, floors: 7, bays: 4, far: true },
-  { az: 316, half: 2.2, base: -0.6, top: 5.0, floors: 5, bays: 3, far: true },
-  { az: 344, half: 2.7, base: -0.7, top: 6.6, floors: 7, bays: 4, far: true },
+  volumeBlock(8, 760, 28, 24, 7, 4, true),
+  volumeBlock(24, 900, 22, 18, 5, 3, true),
+  volumeBlock(58, 640, 32, 26, 8, 4, true),
+  volumeBlock(96, 820, 25, 20, 6, 3, true),
+  volumeBlock(131, 700, 30, 26, 7, 4, true),
+  volumeBlock(168, 880, 23, 19, 5, 3, true),
+  volumeBlock(205, 600, 34, 26, 8, 5, true),
+  volumeBlock(241, 840, 26, 22, 6, 3, true),
+  volumeBlock(278, 720, 31, 25, 7, 4, true),
+  volumeBlock(316, 900, 24, 19, 5, 3, true),
+  volumeBlock(344, 660, 29, 25, 7, 4, true),
   // ближний ряд — высокие, тёмнее и шире
-  { az: 40, half: 5.0, base: -4.2, top: 15.5, floors: 9, bays: 5 },
-  { az: 112, half: 4.4, base: -4.6, top: 18.5, floors: 11, bays: 4 },
-  { az: 186, half: 5.6, base: -4.0, top: 13.5, floors: 8, bays: 6 },
-  { az: 258, half: 4.8, base: -4.4, top: 17.0, floors: 10, bays: 5 },
-  { az: 330, half: 4.2, base: -4.8, top: 20.0, floors: 12, bays: 4 },
+  volumeBlock(40, 260, 23, 31, 9, 5, false),
+  volumeBlock(112, 230, 19, 36, 11, 4, false),
+  volumeBlock(186, 300, 29, 28, 8, 6, false),
+  volumeBlock(258, 250, 21, 34, 10, 5, false),
+  volumeBlock(330, 220, 17, 38, 12, 4, false),
 ];
 
 /**
@@ -58291,60 +58926,79 @@ function volumeCityWindowLit(block, floor, bay, share) {
 }
 
 /**
- * Машины на парковке: сторона света, высота основания, угловой размер и цвет
- * из палитры. Стоят рядком у ближнего дома, как и положено парковке.
+ * Машины на парковке: место на земле, высота и цвет из палитры. Стоят рядком у
+ * ближнего дома, в сотне метров — полтора метра высоты дают оттуда 0,9°, то
+ * есть пятнышко, по которому видно, что это машина, и не больше.
  */
+function volumeCar(az, away, heightM, car) {
+  const spot = volumeAway(az, away);
+  return { x: spot.x, y: spot.y, awayMm: away * VOLUME_M, heightMm: heightM * VOLUME_M, car };
+}
 const VOLUME_CITY_PARK = [
-  { az: 150, rise: -6.4, size: 1.5, car: 0 },
-  { az: 154, rise: -6.5, size: 1.5, car: 1 },
-  { az: 158, rise: -6.6, size: 1.6, car: 2 },
-  { az: 162, rise: -6.7, size: 1.6, car: 3 },
-  { az: 166, rise: -6.8, size: 1.7, car: 4 },
-  { az: 170, rise: -6.9, size: 1.7, car: 1 },
-  { az: 290, rise: -6.5, size: 1.5, car: 2 },
-  { az: 294, rise: -6.6, size: 1.6, car: 0 },
-  { az: 298, rise: -6.7, size: 1.6, car: 4 },
-  { az: 302, rise: -6.8, size: 1.7, car: 3 },
+  volumeCar(150, 118, 1.5, 0),
+  volumeCar(154, 112, 1.5, 1),
+  volumeCar(158, 106, 1.6, 2),
+  volumeCar(162, 101, 1.6, 3),
+  volumeCar(166, 97, 1.7, 4),
+  volumeCar(170, 95, 1.7, 1),
+  volumeCar(290, 115, 1.5, 2),
+  volumeCar(294, 109, 1.6, 0),
+  volumeCar(298, 104, 1.6, 4),
+  volumeCar(302, 99, 1.7, 3),
 ];
 
-/** Улицы города: те же полосы, что дорога «Природы», только асфальт и разметка. */
+/** Улицы города: те же полосы, что дорога «Природы», только шире и с разметкой. */
 const VOLUME_CITY_STREETS = [
-  volumeBandNodes([
-    [134, -7.4, 1.9],
-    [148, -5.2, 1.4],
-    [163, -3.6, 1.0],
-    [178, -2.4, 0.7],
-    [193, -1.5, 0.45],
-    [208, -0.9, 0.3],
-  ]),
-  volumeBandNodes([
-    [274, -7.6, 2.0],
-    [288, -5.4, 1.45],
-    [303, -3.8, 1.05],
-    [318, -2.5, 0.72],
-    [333, -1.6, 0.46],
-    [348, -1.0, 0.3],
-  ]),
+  volumeBandNodes(
+    [
+      [134, 120],
+      [148, 180],
+      [163, 260],
+      [178, 380],
+      [193, 540],
+      [208, 720],
+    ],
+    14,
+  ),
+  volumeBandNodes(
+    [
+      [274, 125],
+      [288, 185],
+      [303, 270],
+      [318, 390],
+      [333, 560],
+      [348, 800],
+    ],
+    14,
+  ),
 ];
 
-/** Разметка по середине улицы: тонкая полоса того же хода. */
+/** Разметка по середине улицы: та же полоса, только в полметра шириной. */
 function volumeStreetMarks(street) {
   return street.map((node) => {
-    const middle = (node.top + node.bottom) / 2;
-    const half = Math.max(0.03, (node.top - node.bottom) * 0.06);
-    return { az: node.az, top: middle + half, bottom: middle - half };
+    const dx = node.left.x - node.right.x;
+    const dy = node.left.y - node.right.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const half = (0.25 * VOLUME_M) / len;
+    return {
+      x: node.x,
+      y: node.y,
+      awayMm: node.awayMm,
+      left: { x: node.x + dx * half, y: node.y + dy * half },
+      right: { x: node.x - dx * half, y: node.y - dy * half },
+    };
   });
 }
 const VOLUME_CITY_MARKS = VOLUME_CITY_STREETS.map((street) => volumeStreetMarks(street));
 
 /** Деревья вдоль улиц: город не бетонная коробка, но и не лес. */
 const VOLUME_CITY_GREENS = [
-  { az: 143, rise: -6.0, size: 7.5, kind: "tree" },
-  { az: 176, rise: -3.1, size: 4.2, kind: "tree" },
-  { az: 199, rise: -1.9, size: 2.6, kind: "bush" },
-  { az: 283, rise: -6.2, size: 7.0, kind: "tree" },
-  { az: 311, rise: -3.3, size: 4.4, kind: "tree" },
-  { az: 341, rise: -2.0, size: 2.8, kind: "bush" },
+  volumeStanding(143, 135, 9, "tree"),
+  volumeStanding(176, 210, 7, "tree"),
+  volumeStanding(199, 300, 2.4, "bush"),
+  volumeStanding(283, 140, 8.5, "tree"),
+  volumeStanding(311, 225, 7.5, "tree"),
+  volumeStanding(341, 290, 2.6, "bush"),
 ];
 
 /** Звёзды: раскиданы по небу раз и навсегда, своей яркости у каждой нет. */
@@ -60712,6 +61366,10 @@ function createVolume({ api, hosts }) {
     // у них `VOLUME_LAYER_SUN` — выше полов, ниже тел.
     shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint);
     volumeDraw(ctx, shown);
+    // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
+    // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
+    // плиты проход пуст, то есть у ходящего по дому его нет вовсе.
+    volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);
     syncAim();
@@ -65901,6 +66559,35 @@ function workshopHint(tool, way) {
 }
 
 /**
+ * Строка под кнопками «Выделение · Добавление» — **одна на два зова**: кадр
+ * колонки (`sync`) и шаг призрака проёма (таск 203, дефект D55).
+ *
+ * `refusal` — причина, по которой показанный призрак не сядет. Её место именно
+ * здесь, строкой, а не плашкой: курсор идёт по стене десятками шагов в
+ * секунду, и плашка на каждый шаг была бы не предупреждением, а помехой
+ * (правило таска 180). Пока эту строку писали в двух местах врозь, одно из них
+ * пережило переезд колонки, а другое — нет: таск 187 унёс `subjectNote` из
+ * разметки, а две записи в него остались в разборе движения мыши, и
+ * `ReferenceError` рвал кадр ровно там, где призрак обязан был появиться.
+ *
+ * Чистая и вынесена наружу ради теста: про что говорит строка, видно без
+ * браузера.
+ */
+function workshopModeNote({ mode, tool, wallCount, refusal } = {}) {
+  if (mode === "select") return { text: strings.workshop.modeSelectHint, bad: false };
+  // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
+  // «Что добавить» этого не видно — оно про вид и размеры, а не про то, что
+  // на схеме.
+  if (tool === "openings" && !(Number(wallCount) > 0)) {
+    return { text: strings.workshop.openingNeedWall, bad: false };
+  }
+  // Красным — потому что то же самое в эту минуту краснеет под курсором:
+  // строка объясняет призрак, а не заменяет его.
+  if (refusal) return { text: String(refusal), bad: true };
+  return { text: drawPickerHint(tool), bad: false };
+}
+
+/**
  * Строка состояния схемы: какой это из трёх случаев, что в чертеже и сколько
  * стен. Чистая — слова про случай «молча рисовать в никуда нельзя» решаются
  * здесь и проверяются без браузера.
@@ -66144,7 +66831,7 @@ function createWorkshop({ api, hosts }) {
   // окно закроют.
   const strip = createElevationStrip({
     onSide: (side) => setState({ wallSide: side }),
-    // Переход к соседней стене из ряда полей (таск 179, G267). Сторона встаёт
+    // Переход на другую стену парой углов (таск 197, G302). Сторона встаёт
     // первой, стена второй: выделение у чертежа своё (`select` ведёт и его), и
     // кадра между двумя правками на экране не бывает — обе идут одной задачей.
     onWall: ({ wallId, side }) => {
@@ -66803,6 +67490,15 @@ function createWorkshop({ api, hosts }) {
     const candidate = { wallId: pick.wall.id, atMm, ...base };
     const attempt = workshopTryOpening(project(), candidate, null);
     ghost = { wall: pick.wall, opening: candidate, ok: attempt.ok, message: attempt.ok ? "" : attempt.message };
+  }
+
+  /**
+   * Чем этот призрак отличается от прежнего: стена, место на ней и ответ
+   * модели. Кадр перерисовывается только на смену отпечатка — движение мыши
+   * вдоль стены на доли миллиметра кадра не стоит.
+   */
+  function ghostStamp() {
+    return ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
   }
 
   function wallUnder(pointMm) {
@@ -67567,15 +68263,14 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (tool === "openings") {
-      const before = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
+      const before = ghostStamp();
       updateGhost(mmOf(event));
-      const after = ghost ? ghost.opening.wallId + ":" + ghost.opening.atMm + ":" + ghost.ok : "";
-      if (before !== after) {
-        // Причина отказа живёт в строке под полем, а не в плашке: курсор ходит
+      if (ghostStamp() !== before) {
+        // Причина отказа живёт строкой под кнопками, а не плашкой: курсор ходит
         // по стене десятками шагов в секунду, и плашка на каждый шаг была бы
-        // не предупреждением, а помехой.
-        subjectNote.textContent = ghost && !ghost.ok ? ghost.message : openingHelp();
-        subjectNote.classList.toggle("is-bad", Boolean(ghost && !ghost.ok));
+        // не предупреждением, а помехой. Слова считает `workshopModeNote` — та
+        // же, которой их пишет кадр колонки.
+        syncModeNote();
         redraw();
       }
       return;
@@ -68525,14 +69220,7 @@ function createWorkshop({ api, hosts }) {
     syncAddPlate();
     // Строка под кнопками — словами: по плашке не видно, ставится вещь кликом
     // или тянется цепочкой. То же правило, что у меток (`tools.kindPointHint`).
-    // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
-    // этого не видно — оно про вид и размеры, а не про то, что на схеме.
-    modeNote.textContent =
-      now === "select"
-        ? strings.workshop.modeSelectHint
-        : tool === "openings" && walls().length === 0
-          ? strings.workshop.openingNeedWall
-          : drawPickerHint(tool);
+    syncModeNote();
     syncDetails(current, wall);
     syncHeightButton(current);
     syncElevation(current, wall);
@@ -68548,6 +69236,23 @@ function createWorkshop({ api, hosts }) {
     // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
     node.style.cursor = tool === "edit" ? "default" : "crosshair";
     redraw();
+  }
+
+  /**
+   * Строка под кнопками — **одна дверь к ней**: кадр колонки и шаг призрака
+   * проёма пишут её этой функцией, а слова считает чистая `workshopModeNote`.
+   * Второй записи у строки быть не должно: ровно на ней и погорел таск 187 —
+   * призрак писал в узел, которого колонка уже не держала.
+   */
+  function syncModeNote() {
+    const line = workshopModeNote({
+      mode: mode(),
+      tool,
+      wallCount: walls().length,
+      refusal: ghost && !ghost.ok ? ghost.message : "",
+    });
+    modeNote.textContent = line.text;
+    modeNote.classList.toggle("is-bad", line.bad);
   }
 
   /**
@@ -68681,11 +69386,15 @@ function createWorkshop({ api, hosts }) {
     const frame = box.getBoundingClientRect();
     const head = section ? section.querySelector(".panel__head") : null;
     const foot = section ? section.querySelector(".workshop__foot") : null;
-    // Заголовок меряется высотой, а не местом: своё место он занимает ровно
-    // тогда, когда раздел прошёл верхнюю кромку, — а подвести строку мы и
-    // собираемся туда, под заголовок.
-    const top = frame.top + (head ? head.offsetHeight : 0);
-    const low = frame.bottom - Math.max(panelCover(frame, foot, "foot"), panelRailInset(box));
+    // Сверху кадр закрыт лестницей заголовков (таск 201), и своего заголовка
+    // в ней уже мало: над ним стоят все уехавшие разделы. Высоту лестницы
+    // считает рейка; пока раздел её не пересёк, его заголовок в лестницу не
+    // входит — тогда берём его высоту, ведь подвести строку мы собираемся
+    // именно под него.
+    const stair = panelRailInset(box, "top");
+    const own = head ? head.offsetHeight : 0;
+    const top = frame.top + Math.max(stair, own);
+    const low = frame.bottom - Math.max(panelCover(frame, foot, "foot"), panelRailInset(box, "bottom"));
     const rect = item.getBoundingClientRect();
     // Высокая строка (раскрытые параметры) целиком не влезает: тогда читаем
     // сверху вниз — верх под заголовок, а не хвост к подвалу.
