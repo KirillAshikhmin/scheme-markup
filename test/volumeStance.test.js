@@ -20,6 +20,9 @@
 //      объект не пишутся.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   addOpening,
@@ -39,6 +42,7 @@ import {
 import {
   VOLUME_BODY_MM,
   VOLUME_CROUCH_MM,
+  VOLUME_STEP_MM,
   VOLUME_CROUCH_MM_S,
   VOLUME_CROWN_MM,
   VOLUME_EYE_MM,
@@ -52,6 +56,7 @@ import {
   volumeScene,
   volumeSolidBlocks,
   volumeStanceAir,
+  volumeStanceBody,
   volumeStanceBusy,
   volumeStanceEye,
   volumeStanceHead,
@@ -399,7 +404,169 @@ test("прицел идёт за курсором, а под захваченн�
   assert.deepEqual(volumeAimAt(box, { locked: false, pointer: { x: 7, y: 9 }, view: "around" }), { x: 7, y: 9 });
 });
 
+
+// ——— таск 192: сквозь стены и полёт (G292) ———————————————————————————————
+//
+// Слова заказчика: «2. Проходить сквозь стены 3. Летать (при движении летим в
+// сторону курсора, пробел (прыжок) - выше, ctrl (присяд) - ниже)».
+//
+// За чем здесь следят, по важности:
+//
+//   1. **Без галок не изменилось ничего.** Обе отметки — необязательные доводы
+//      у того же счёта; у них по умолчанию ноль и `false`, и ходьба обязана
+//      остаться той же до миллиметра.
+//   2. **Второго счёта высоты не завелось.** Полёт считает ту же `liftMm`, что
+//      прыжок, и глаза ему считает тот же `volumeStanceEye`.
+//   3. **Земля держит, потолка нет** — это решение, и оно проверяется счётом.
+//   4. **Стойка в полёте остаётся стойкой**: присед, принесённый с земли,
+//      расходится сам, и «встать негде» в полёте не бывает.
+
+test("отметка «сквозь стены» снимает столкновения, снятая — ничего не меняет (таск 192)", () => {
+  const base = corridor();
+  const scene = volumeScene(base.project, base.schemeId);
+  // Стена коридора по y = 1000: без галки она держит (та же проверка, что в
+  // тесте «сквозь стену не пройти присевшим»).
+  const go = (options) => {
+    let at = { x: 0, y: 0 };
+    for (let step = 0; step < 60; step += 1) at = volumeStep(scene, at, 0, 100, VOLUME_HEAD_MM, options);
+    return at.y;
+  };
+  assert.ok(go(undefined) < 900, "без отметки стена держит: " + Math.round(go(undefined)));
+  assert.equal(go({}), go(undefined), "пустые доводы — та же ходьба до числа");
+  assert.equal(go({ ghost: false }), go(undefined), "снятая отметка — та же ходьба до числа");
+  // С галкой шаг идёт ровно туда, куда просили: 60 шагов по 100 мм — 6000 мм.
+  assert.equal(go({ ghost: true }), 6000, "сквозь стены проходим насквозь");
+  // И сквозь низкую перемычку в полный рост — её держала та же проверка.
+  const hatch = volumeScene(withHatch(base, 1300), base.schemeId);
+  let at = { x: 2000, y: 250 };
+  for (let step = 0; step < 40; step += 1) at = volumeStep(hatch, at, 100, 0, VOLUME_HEAD_MM, { ghost: true });
+  assert.equal(Math.round(at.x), 6000, "перемычка тоже снята");
+  // «Встать негде» — это и есть столкновение: снявший стены не застревает в
+  // приседе под тем, сквозь что он только что прошёл. Лаз здесь 1500 мм —
+  // ровно тот, под которым присевший стоит и не встаёт.
+  const low = volumeScene(withHatch(base, 1500), base.schemeId);
+  assert.equal(volumeCanStand(low, { x: 3000, y: 250 }, 1350), false);
+  assert.equal(volumeCanStand(low, { x: 3000, y: 250 }, 1350, { ghost: true }), true);
+  assert.equal(volumeCanStand(low, { x: 3000, y: 250 }, 1350, { ghost: false }), false);
+});
+
+test("ноги летящего решают, что он перелетел (таск 192)", () => {
+  // Правило одно на ходьбу и полёт: препятствие держит, если его низ ниже
+  // макушки, а верх выше ног. У ходящего ноги на нуле — выходит прежнее
+  // правило до знака.
+  const wall = { bottomMm: 0, topMm: 2700 };
+  assert.equal(volumeSolidBlocks(wall, VOLUME_HEAD_MM), true);
+  assert.equal(volumeSolidBlocks(wall, VOLUME_HEAD_MM, 0), true, "ноль ног — прежнее правило");
+  assert.equal(volumeSolidBlocks(wall, VOLUME_HEAD_MM + 2500, 2500), false, "подошвы выше стены — не держит");
+  // Порог считается от ног, а не от пола: ровно на верхе стены она ещё держит.
+  assert.equal(volumeSolidBlocks(wall, VOLUME_HEAD_MM + 2500, 2700 - VOLUME_STEP_MM - 1), true);
+  // Препятствие без высот — «до потолка», и перелететь его нельзя (так строит
+  // рука в тестах, и молча пропускать сквозь него нельзя).
+  assert.equal(volumeSolidBlocks({}, VOLUME_HEAD_MM + 9000, 9000), true);
+  // Та же мерка у шага: летящий над стеной коридора её не замечает.
+  const base = corridor();
+  const scene = volumeScene(base.project, base.schemeId);
+  const go = (feetMm) => {
+    let at = { x: 0, y: 0 };
+    for (let step = 0; step < 60; step += 1) {
+      at = volumeStep(scene, at, 0, 100, VOLUME_HEAD_MM + feetMm, { feetMm });
+    }
+    return at.y;
+  };
+  assert.ok(go(0) < 900, "на полу стена держит: " + Math.round(go(0)));
+  assert.equal(go(3000), 6000, "над стеной — летим над ней");
+});
+
+test("полёт считает ту же высоту, что прыжок, земля держит, потолка нет (таск 192)", () => {
+  // `flyMm` — миллиметры этого тика; число (хоть ноль) значит «летим».
+  let stance = volumeStanceStart();
+  stance = volumeStanceStep(stance, 1 / 60, { flyMm: 100 });
+  assert.equal(stance.liftMm, 100);
+  assert.equal(stance.speedMm, 0, "тяготения в полёте нет");
+  // Глаза считает тот же `volumeStanceEye`: второго счёта высоты не завелось.
+  assert.equal(volumeStanceEye(stance), VOLUME_EYE_MM + 100);
+  // Отпустили клавиши — висим: ноль подъёма не роняет и не поднимает.
+  const hover = volumeStanceStep({ crouchMm: 0, liftMm: 2500, speedMm: 0 }, 1, { flyMm: 0 });
+  assert.equal(hover.liftMm, 2500, "висящий не падает");
+  // Вверх свободно: потолка в счёте столкновений нет вовсе.
+  let up = { crouchMm: 0, liftMm: 0, speedMm: 0 };
+  for (let step = 0; step < 100; step += 1) up = volumeStanceStep(up, 1 / 60, { flyMm: 100 });
+  assert.equal(up.liftMm, 10_000, "десять метров — и ничего не держит");
+  // Земля держит: ниже пола не опускаются.
+  const down = volumeStanceStep({ crouchMm: 0, liftMm: 300, speedMm: 0 }, 1 / 60, { flyMm: -5000 });
+  assert.equal(down.liftMm, 0);
+  assert.equal(volumeStanceEye(down), VOLUME_EYE_MM, "на полу глаза на своём месте");
+  // Отметку сняли в воздухе — человек возвращается на пол **той же дугой**,
+  // которой приземляется после прыжка: вторых правил падения нет.
+  let fall = { crouchMm: 0, liftMm: 2000, speedMm: 0 };
+  assert.equal(volumeStanceAir(fall), true);
+  for (let step = 0; step < 120 && fall.liftMm > 0; step += 1) fall = volumeStanceStep(fall, 1 / 60, {});
+  assert.equal(fall.liftMm, 0, "приземлился");
+  assert.equal(fall.speedMm, 0);
+  // Высота ног и макушки: у ходящего ноги на полу и прыжок макушку не
+  // поднимает, у летящего поднимается и то и другое.
+  assert.deepEqual(volumeStanceBody({ crouchMm: 0, liftMm: 300, speedMm: 0 }, false), {
+    headMm: VOLUME_HEAD_MM,
+    feetMm: 0,
+  });
+  assert.deepEqual(volumeStanceBody({ crouchMm: VOLUME_CROUCH_MM, liftMm: 0, speedMm: 0 }, false), {
+    headMm: VOLUME_HEAD_MM - VOLUME_CROUCH_MM,
+    feetMm: 0,
+  });
+  assert.deepEqual(volumeStanceBody({ crouchMm: 0, liftMm: 2500, speedMm: 0 }, true), {
+    headMm: VOLUME_HEAD_MM + 2500,
+    feetMm: 2500,
+  });
+});
+
+test("в полёте Control значит «ниже», а не «присесть» (таск 192)", () => {
+  // Присед, принесённый с земли, расходится сам — и расходится прежней
+  // скоростью: `canStand` в полёте не спрашивается вовсе.
+  let stance = { crouchMm: VOLUME_CROUCH_MM, liftMm: 0, speedMm: 0 };
+  stance = volumeStanceStep(stance, 1 / 60, { flyMm: 0, crouch: true, canStand: false });
+  assert.ok(stance.crouchMm < VOLUME_CROUCH_MM, "присед в полёте не держат: " + stance.crouchMm);
+  for (let step = 0; step < 60 && stance.crouchMm > 0; step += 1) {
+    stance = volumeStanceStep(stance, 1 / 60, { flyMm: 0, crouch: true, canStand: false });
+  }
+  assert.equal(stance.crouchMm, 0, "выпрямился, хоть Control и держат");
+  // Тика летящий просит, только пока держат клавишу высоты: висящий никуда не
+  // едет, и крутить ему кадры незачем.
+  const air = { crouchMm: 0, liftMm: 2500, speedMm: 0 };
+  assert.equal(volumeStanceBusy(air, false, { fly: true }), false, "висящий не просит кадров");
+  assert.equal(volumeStanceBusy(air, false, { fly: true, rise: true }), true);
+  assert.equal(volumeStanceBusy({ crouchMm: 200, liftMm: 0, speedMm: 0 }, false, { fly: true }), true, "присед доезжает");
+  // Без полёта правило прежнее: оторванность от пола сама просит кадров —
+  // иначе прыжок замер бы в воздухе.
+  assert.equal(volumeStanceBusy(air, false), true);
+  assert.equal(volumeStanceBusy(air, false, {}), true, "пустые доводы — прежнее правило");
+});
+
 // ——— G68 ————————————————————————————————————————————————————————————————
+
+test("второго счёта высоты нет, и отметки не доходят до объекта (таск 192, G68)", () => {
+  // Требование таска прямое: «Полёт и стойка — одно и то же в разных руках: не
+  // заводи второго счёта высоты». Проверяется это по исходникам: `liftMm`
+  // живёт **только** в `volume.js`, а поле спрашивает высоту дверями
+  // (`volumeStanceEye`, `volumeStanceBody`). Появись `liftMm` в панели — там и
+  // завёлся бы второй счёт.
+  const sources = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".js")) sources.push({ name: full, text: readFileSync(full, "utf8") });
+    }
+  };
+  walk(join(dirname(fileURLToPath(import.meta.url)), "..", "src"));
+  const owns = sources.filter((file) => file.text.includes("liftMm")).map((file) => basename(file.name));
+  assert.deepEqual(owns, ["volume.js"], "высоту считает одно место: " + owns.join(", "));
+  // Три отметки — настройки браузера, и в объект им нельзя (G68). Ни модель, ни
+  // формат файла проекта о них не знают: миграции тут браться не от чего.
+  for (const key of ["volumeSmoothSky", "volumeThroughWalls", "volumeFly"]) {
+    const where = sources.filter((file) => file.text.includes('"' + key + '"')).map((file) => basename(file.name));
+    assert.deepEqual(where, ["volumeParams.js"], key + " уехал из настроек: " + where.join(", "));
+  }
+});
 
 test("ни присед, ни прыжок, ни ходьба не меняют объект (G68)", () => {
   const base = corridor();

@@ -237,8 +237,15 @@ export const VOLUME_AROUND_PAN_TILT_MIN = Math.sin((20 * Math.PI) / 180);
  *   1 — **тень дома на земле** (D43). Своим ярусом, и это починка дефекта D49 —
  *       разбор числами ниже.
  *   2 — **полы и потолки** помещений.
- *   3 — **всё остальное**: стены, объекты, полотна, рамы.
- *   4 — **кружок «вы здесь»**. Он рисуется поверх всего, и это не оплошность:
+ *   3 — **солнечное пятно на полу комнаты** (таск 196, D51): проёмом пущенный
+ *       в комнату свет. Ярус ровно тот же урок, что у тени, только с другой
+ *       стороны пола: пятно обязано лежать **выше** пола своей комнаты и ниже
+ *       всего, что в комнате стоит. Дальностью это не решается по той же
+ *       причине, по которой не решилось у тени, — пятно и пол коплоскостны
+ *       (оба на нулевой отметке), и спор их середин переворачивается от часа.
+ *       Разбор числами — у `volumeSunSpotFaces`.
+ *   4 — **всё остальное**: стены, объекты, полотна, рамы.
+ *   5 — **кружок «вы здесь»**. Он рисуется поверх всего, и это не оплошность:
  *       он не часть комнаты, а указатель. Обзор смотрит под углом, и ближняя
  *       стена высотой 2,7 м прячет за собой полосу пола метра в три — то есть
  *       ровно того человека, ради которого обзор и открыли («без него не
@@ -278,8 +285,9 @@ export const VOLUME_AROUND_PAN_TILT_MIN = Math.sin((20 * Math.PI) / 180);
 export const VOLUME_LAYER_BASE = 0;
 export const VOLUME_LAYER_SHADOW = 1;
 export const VOLUME_LAYER_GROUND = 2;
-export const VOLUME_LAYER_BODY = 3;
-export const VOLUME_LAYER_MARK = 4;
+export const VOLUME_LAYER_SUN = 3;
+export const VOLUME_LAYER_BODY = 4;
+export const VOLUME_LAYER_MARK = 5;
 /**
  * Предел уса на изломе полосы (D38): во сколько раз смещение угла может
  * превысить половину ширины. Четыре — то же число, которым ограничивают ус
@@ -738,6 +746,380 @@ export function volumeShadowFaces(boxes, shadow, out = []) {
         volumeClockwise(volumeShadowOutline(box.corners, box.heightMm, at)).map((point) => volumeAt(point, 0)),
         rgb,
         { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_SHADOW, flat: true },
+      ),
+    );
+  }
+  return out;
+}
+
+// ——— солнце в комнате (таск 196, дефект D51, требование G301) —————————————
+//
+// Слова заказчика: «почему-то теперь в доме вообще нет тени ни через двери ни
+// через окна».
+//
+// **Сломанного нет, и это надо сказать прямо.** Внутреннего света в сборке не
+// было никогда: тень дома (таск 178) лежит только на земле, а внутри комнат её
+// не видно нарочно — ярусом (D49). Раньше сквозь щели в полу местами светила
+// зелёная земля, и это читалось тенью; таск 190 щели закрыл, и «тень» вместе с
+// ними исчезла. То есть заказчик просит не починки, а того, чего не было:
+// света, который солнце кладёт на пол через проём.
+//
+// **Это проекция проёма, а не трассировка лучей.** Проём — прямоугольник в
+// стене (низ, верх, ширина вдоль стены); солнце даёт направление; пятно — тот
+// же прямоугольник, снесённый по направлению света на пол. Низ проёма сносится
+// на `низ / tg(высота солнца)`, верх — на `верх / tg(...)`, и прямоугольник
+// становится **параллелограммом**: смещение растёт с высотой линейно, а стороны
+// проёма вдоль стены параллельны. Ни карт теней, ни отражений, ни света на
+// стенах, ни второго шага (из комнаты в комнату через внутреннюю дверь) здесь
+// нет — что из этого стоит сделать дальше, сказано в отчёте таска.
+//
+// ——— один шаг света: солнечная сторона проёма обязана быть улицей ————————
+//
+// У проёма две стороны, и обе спрашиваются у контуров помещений:
+//
+//   - **принимающая** (та, куда идёт свет) обязана быть комнатой — иначе пятну
+//     негде лежать: свет уходит из дома на улицу;
+//   - **солнечная** (та, откуда идёт свет) обязана быть улицей — иначе свет
+//     пришёл бы из соседней комнаты, то есть сам был бы пятном от другого
+//     проёма, а это уже второй шаг и трассировка.
+//
+// Отсюда сразу три ответа, которых иначе пришлось бы искать по отдельности:
+//
+//   1. **дверь между двумя комнатами пятна не даёт вовсе** — у неё обе стороны
+//      комнаты, значит светить в неё нечему. Цена названа прямо: сквозь
+//      внутреннюю дверь солнце в этой сборке не проходит, даже когда соседняя
+//      комната залита светом. Врать красивее было бы дороже: пятно за
+//      внутренней дверью появлялось бы и там, где его кормить нечем — у двери
+//      в середине квартиры;
+//   2. **солнце с другой стороны стены** — окно в северной стене в полдень не
+//      светит: принимающей стороной оказывается улица, и проём отбрасывается
+//      тем же условием, а не отдельной проверкой стороны света;
+//   3. **проём в стене, у которой комнат нет совсем** (сарай на чертеже),
+//      молчит.
+//
+// На объекте заказчика из 13 проёмов пятно могут дать 5 (четыре окна и входная
+// дверь), остальные 8 — внутренние.
+
+/**
+ * Светлота пола: та же, которой красит его лампа сцены.
+ *
+ * Пол — **самая тёмная грань сцены** по построению (у `VOLUME_LIGHT`
+ * отрицательная `z`: «пол темнее потолка», требование заказчика из таска 146).
+ * Числом это `volumeShade({0,0,1})` = **0,502**, то есть пол `170·142·110`
+ * показывается как `85·71·55` — то же число, которым считался дефект D49.
+ */
+const VOLUME_SUN_SPOT_DIM = volumeShade({ x: 0, y: 0, z: 1 });
+
+/**
+ * Цвет солнечного пятна: **тот же пол, которому досталась самая светлая грань
+ * сцены вместо самой тёмной.**
+ *
+ * Мера взята из уже существующих, а не придумана: снаружи тень — это земля,
+ * помноженная на 0,72 (`VOLUME_SHADOW_RGB`, доля взята от разброса светлот
+ * `VOLUME_SHADE_MIN`…`VOLUME_SHADE_MAX` = 0,46…1); внутри всё ровно наоборот —
+ * комната в полумраке, и солнце её местами освещает, то есть пятно это пол,
+ * которому досталась светлота 1 вместо своей 0,502, — светлее себя же ровно
+ * **вдвое** (1,99). Второй краски для пятна нет вовсе: `VOLUME_FLOOR_RGB`,
+ * нарисованный без затенения (`flat`), и есть пятно — `170·142·110` против
+ * пола `85·71·55`.
+ *
+ * **Гаснет пятно цветом, как и тень** — по тому же `fade`, которым гаснет она:
+ * `fade` = 1 даёт полный свет, `fade` = 0 сводит пятно к самому полу, и в
+ * сумерках оно исчезает, не мигнув. Прозрачностью этого делать нельзя по той же
+ * причине, что у тени: пятна двух окон одной комнаты перекрываются, и на
+ * пересечении вышло бы вдвое светлее.
+ *
+ * Ночь пятно не красит сама: `tint` кладёт на него тот же час, что на все грани
+ * сцены (`volumeFrame` → `volumeFill`), — но ночью `fade` и так ноль, и пятен
+ * нет: луна их не даёт, света у неё для этого нет.
+ */
+export function volumeSunSpotRgb(fade) {
+  const share = Math.max(0, Math.min(1, Number(fade) || 0));
+  const lift = VOLUME_SUN_SPOT_DIM + (1 - VOLUME_SUN_SPOT_DIM) * share;
+  return [
+    Math.round(VOLUME_FLOOR_RGB[0] * lift),
+    Math.round(VOLUME_FLOOR_RGB[1] * lift),
+    Math.round(VOLUME_FLOOR_RGB[2] * lift),
+  ];
+}
+
+/**
+ * Насколько глубоко в комнату заходит щуп, которым спрашивают сторону проёма.
+ *
+ * Полтора сантиметра от грани стены: контур помещения обводят по подложке
+ * рукой, и промахнуться на сантиметр-другой — обычное дело (то же наблюдение,
+ * из которого вышел напуск пола `VOLUME_FLOOR_LAP`). Больше брать нельзя:
+ * перегородка в сто миллиметров, и щуп, заведённый на полметра, ушёл бы в
+ * комнату за ней. Замер на объекте заказчика: все 13 проёмов отвечают одно и то
+ * же при щупе 50, 150 и 400 мм — то есть выбор внутри этого разброса ни на что
+ * не влияет, и взята середина.
+ */
+export const VOLUME_SUN_PROBE_MM = 150;
+
+/**
+ * Какую долю проёма штора должна закрыть, чтобы погасить пятно, — **половину**.
+ *
+ * Полупятен не бывает (см. `volumeSunOpenings`), значит порог обязан быть, и
+ * половина — единственный, который не выдуман: он симметричен и не требует
+ * второго числа. Промахи названы прямо: штора, закрывающая 0,6 широкого окна,
+ * гасит пятно целиком, а закрывающая 0,4 — не гасит вовсе.
+ */
+export const VOLUME_SHEER_SHARE = 0.5;
+
+/** Ткань ли это: у тела модели стоит именованная плотность (таск 189). */
+function volumeSheerParts(parts) {
+  return Array.isArray(parts) && parts.some((part) => part && part.clear);
+}
+
+/**
+ * Штора ли эта метка — спрашивается **у модели, а не у кода типа**.
+ *
+ * Ткань в этой сборке уже помечена: у полотнищ стоит `clear: "sheer"` (таск
+ * 189) — и у модели точечной шторы (`things.js` → `curtainRail`), и у повтора
+ * вдоль пути у линейной (`lines.js` → `КШ`). Поэтому вопрос «что висит перед
+ * проёмом» задаётся тому же признаку, которым ткань рисуется: завёл человек
+ * свой тип с тюлевой моделью — он гасит пятно даром, а список кодов пришлось бы
+ * править. Труба карниза плотная и в счёт не идёт — у неё `clear` нет.
+ */
+export function volumeSheerPlace(place) {
+  if (!place) return false;
+  if (place.repeat && volumeSheerParts(place.repeat.parts)) return true;
+  return Boolean(place.model && volumeSheerParts(place.model.parts));
+}
+
+/**
+ * Открыта ли эта штора. Список пустой или не дан — закрыты все (G301).
+ *
+ * **Отметка состояния, а не поле объекта** — ровно как у двери
+ * (`volumeDoorOpen`, G207): открытые шторы живут экраном, в `project.json` о
+ * них ни строки (G68). Открывание в этом таске не делается нарочно — слова
+ * заказчика «потом сделаем их открытие», — но счёт пятна уже спрашивает
+ * **состояние**, а не «штора есть»: включить открывание значит положить id
+ * метки в это множество (`volumeScene(..., { openCurtainIds })`) и дать ему
+ * клавишу в `panels/volume.js`, где уже лежит такое же множество дверей.
+ * Переписывать счёт пятна для этого не придётся.
+ */
+export function volumeCurtainOpen(openCurtainIds, markId) {
+  if (!openCurtainIds || !markId) return false;
+  if (typeof openCurtainIds.has === "function") return openCurtainIds.has(markId);
+  return Array.isArray(openCurtainIds) && openCurtainIds.includes(markId);
+}
+
+/**
+ * Проёмы, через которые солнце может положить пятно, — **без часа**.
+ *
+ * Собирается вместе со сценой и живёт в ней (`scene.sunSpots`), потому что от
+ * времени здесь не зависит ничего: ни геометрия проёма, ни сторона, где комната,
+ * ни штора перед ним. Час добавляет только направление света
+ * (`volumeSunSpotFaces`) — тот же раздел труда, что у тени дома (таск 181):
+ * сцена держит габариты, час кладёт грани.
+ *
+ * **Штора связывается с проёмом по стене и перекрытию вдоль неё.** Правило:
+ * штора гасит проём, если она висит на **той же стене** и закрывает **не меньше
+ * половины** его ширины. Стену и отступы называет сама метка (`markWall`,
+ * привязка к стене с `atMm`…`toMm`) — это данные, а не догадка о расстоянии, и
+ * второго хозяина у вопроса «на какой стене висит метка» в сборке нет.
+ * Сторона стены при этом **не спрашивается**: ткань, повешенная перед проёмом,
+ * заслоняет его с любой стороны, а спроси я сторону — штора, размеченная с
+ * улицы, пропускала бы солнце.
+ *
+ * Промахи правила названы прямо: штора на соседней стене того же окна (эркер,
+ * размеченный одной линией по двум стенам) гасит только проёмы своей стены;
+ * штора, задвинутая на треть окна, не гасит ничего; «половина» порога — число,
+ * а не измерение света.
+ */
+export function volumeSunOpenings(project, schemeId, rooms, places, heightOf, openCurtainIds = null) {
+  const spots = [];
+  if (!rooms || rooms.length === 0) return spots;
+  const roomAt = (point) => rooms.find((room) => volumePointInside(point, room.pointsMm)) || null;
+  // Тюль по стенам: отступы вдоль стены, посчитанные один раз на сцену.
+  const sheers = [];
+  for (const place of places || []) {
+    if (!place || place.mode !== VOLUME_MARK_WALL || !place.wallId || !place.frame) continue;
+    if (!volumeSheerPlace(place)) continue;
+    if (volumeCurtainOpen(openCurtainIds, place.markId)) continue;
+    sheers.push(place);
+  }
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    const openings = openingsInWall(project, wall.id);
+    if (openings.length === 0) continue;
+    const { u, n, len } = vectors;
+    const half = Number(wall.thicknessMm) / 2;
+    const heightMm = Number(heightOf ? heightOf(wall) : 0) || 0;
+    const along = (point) => (point.x - Number(wall.aMm.x)) * u.x + (point.y - Number(wall.aMm.y)) * u.y;
+    const curtains = sheers
+      .filter((place) => place.wallId === wall.id)
+      .map((place) => {
+        const middle = along(place.frame.at);
+        const reach = Math.max(0, Number(place.frame.widthMm) || 0) / 2;
+        return { markId: place.markId, fromMm: middle - reach, toMm: middle + reach };
+      });
+    const at = (alongMm, across) => ({
+      x: Number(wall.aMm.x) + u.x * alongMm + n.x * across,
+      y: Number(wall.aMm.y) + u.y * alongMm + n.y * across,
+    });
+    for (const opening of openings) {
+      const fromMm = Math.max(0, Math.min(len, Number(opening.atMm)));
+      const toMm = Math.max(fromMm, Math.min(len, fromMm + Number(opening.widthMm)));
+      const bottomMm = Math.max(0, Number(opening.heightAboveFloorMm || 0));
+      const topMm = heightMm > 0 ? Math.min(heightMm, bottomMm + Number(opening.heightMm)) : bottomMm + Number(opening.heightMm);
+      if (!(toMm > fromMm) || !(topMm > bottomMm)) continue;
+      const middleMm = (fromMm + toMm) / 2;
+      const widthMm = toMm - fromMm;
+      // Штора считается закрывающей, когда перекрытие вдоль стены больше
+      // половины ширины проёма.
+      const covered = curtains.find(
+        (curtain) =>
+          Math.min(curtain.toMm, toMm) - Math.max(curtain.fromMm, fromMm) >= widthMm * VOLUME_SHEER_SHARE,
+      );
+      spots.push({
+        openingId: opening.id || null,
+        wallId: wall.id,
+        aMm: { x: Number(wall.aMm.x), y: Number(wall.aMm.y) },
+        u: { x: u.x, y: u.y },
+        n: { x: n.x, y: n.y },
+        halfMm: half,
+        fromMm,
+        toMm,
+        bottomMm,
+        topMm,
+        // Контуры помещений по обе стороны проёма. `null` — улица.
+        left: (roomAt(at(middleMm, half + VOLUME_SUN_PROBE_MM)) || {}).pointsMm || null,
+        right: (roomAt(at(middleMm, -half - VOLUME_SUN_PROBE_MM)) || {}).pointsMm || null,
+        sheerMarkId: covered ? covered.markId : null,
+      });
+    }
+  }
+  return spots;
+}
+
+/**
+ * Пересечение многоугольника с **выпуклым** многоугольником (обход
+ * Сазерленда — Ходжмана, по одной полуплоскости на ребро отсечки).
+ *
+ * Режется контур помещения выпуклым параллелограммом пятна, а не наоборот, и
+ * порядок здесь не вкус: алгоритм требует выпуклости **отсекающего**, а контур
+ * помещения выпуклым не бывает — его обводят рукой, и Г-образная комната
+ * обычное дело. Сторона «внутри» берётся у середины отсечки: у выпуклого
+ * многоугольника она заведомо внутри, и обход контура — по часовой или
+ * против — перестаёт значить что-либо.
+ */
+export function volumeClipPolygon(subject, clip) {
+  if (!subject || subject.length < 3 || !clip || clip.length < 3) return [];
+  let out = subject.map((point) => ({ x: point.x, y: point.y }));
+  let cx = 0;
+  let cy = 0;
+  for (const point of clip) {
+    cx += point.x;
+    cy += point.y;
+  }
+  cx /= clip.length;
+  cy /= clip.length;
+  for (let index = 0; index < clip.length; index += 1) {
+    const a = clip[index];
+    const b = clip[(index + 1) % clip.length];
+    const side = (point) => (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+    const want = side({ x: cx, y: cy }) >= 0 ? 1 : -1;
+    const inside = (point) => side(point) * want >= 0;
+    const next = [];
+    for (let at = 0; at < out.length; at += 1) {
+      const here = out[at];
+      const there = out[(at + 1) % out.length];
+      const hereIn = inside(here);
+      const thereIn = inside(there);
+      if (hereIn) next.push(here);
+      if (hereIn !== thereIn) {
+        const from = side(here);
+        const to = side(there);
+        const share = from / (from - to);
+        next.push({ x: here.x + (there.x - here.x) * share, y: here.y + (there.y - here.y) * share });
+      }
+    }
+    out = next;
+    if (out.length < 3) return [];
+  }
+  return out;
+}
+
+/**
+ * Грани солнечных пятен в этот час (таск 196).
+ *
+ * `spots` — проёмы сцены (`scene.sunSpots`), `shadow` — где стоит солнце и
+ * насколько свет виден (`mood.shadow`, та же тройка, которой гаснет наружная
+ * тень). Хозяин у света и у тени один нарочно: разойдись они, пятно на полу
+ * легло бы не в ту сторону, в которую уходит тень дома за окном.
+ *
+ * **Солнце зашло — пятен нет**: `fade` ноль, и счёт не начинается. В сумерках
+ * пятно гаснет тем же `fade`, что тень. Ночью его не даёт и луна: света у неё
+ * для этого нет, и обещать его честнее не обещать.
+ *
+ * **Ярус у пятна свой** (`VOLUME_LAYER_SUN`): пятно лежит выше пола своей
+ * комнаты и ниже всего, что в комнате стоит. Числа — те же, что стоили дефекта
+ * D49: пятно и пол **коплоскостны** (оба на нулевой отметке, и у пятна нет даже
+ * миллиметра подъёма, которым вещь стоит перед стеной), то есть дальность их
+ * середин решала бы спор от часа к часу — пятно уходит от стены в комнату и
+ * оказывается то ближе пола, то дальше. Ярусом же порядок задан правилом:
+ *
+ *   пол (2) → пятно (3) → тела (4) → указатель (5),
+ *
+ * и из этого прямо следуют два ответа, которых пришлось бы искать отдельно:
+ * **метка на полу** (тело яруса 4, поднятое на `VOLUME_MARK_LIFT_MM`) рисуется
+ * поверх пятна и остаётся видна; **вещь чертежа** (диван, шкаф) тоже, то есть
+ * пятно под ней не просвечивает — свет кончается у того, что стоит на полу.
+ * Полупрозрачная вещь (таск 169) смешивается с пятном, как смешивалась с полом.
+ *
+ * **Пятно обрезано контуром своей комнаты** (`volumeClipPolygon`). Без обрезки
+ * закатное пятно уезжает сквозь стены на десятки метров: при высоте солнца 5°
+ * окно с верхом 2,2 м даёт вынос 25 м, то есть через всю квартиру и наружу.
+ */
+export function volumeSunSpotFaces(spots, shadow, out = []) {
+  const fade = shadow ? Math.max(0, Math.min(1, Number(shadow.fade))) : 0;
+  if (!spots || spots.length === 0 || !(fade > 0)) return out;
+  const rise = Number(shadow.rise);
+  if (!Number.isFinite(rise) || !(rise > 0)) return out;
+  // Вынос на миллиметр высоты: `1 / tg(высота солнца)`. Высота снизу не
+  // подпирается (в отличие от тени дома, которой нужна земляная плита под ней):
+  // пятно обрезано комнатой, и длина ему не страшна — у `fade` ноль наступает
+  // раньше, чем `tg` уходит в ноль.
+  const reach = 1 / Math.tan(rise * DEG);
+  const away = ((Number(shadow.az) || 0) + 180) * DEG;
+  // Куда идёт свет: ровно прочь от солнца, той же мерой, которой уходит тень
+  // (`volumeShadowShift`). Сторона света чертежа здесь уже учтена — `az`
+  // приходит повёрнутым на `topAzimuthDeg` (G288, `volumeSunAt`).
+  const dir = { x: Math.cos(away), y: Math.sin(away) };
+  const rgb = volumeSunSpotRgb(fade);
+  for (const spot of spots) {
+    // Закрытая штора гасит пятно своего проёма целиком (G301).
+    if (spot.sheerMarkId) continue;
+    const into = spot.n.x * dir.x + spot.n.y * dir.y;
+    // Свет идёт вдоль стены: пятну негде лежать, и считать нечего.
+    if (!(Math.abs(into) > 1e-6)) continue;
+    const sign = into > 0 ? 1 : -1;
+    const room = sign > 0 ? spot.left : spot.right;
+    const sunny = sign > 0 ? spot.right : spot.left;
+    // Принимающая сторона — комната, солнечная — улица. Разбор — выше.
+    if (!room || sunny) continue;
+    const at = (alongMm, z) => ({
+      x: spot.aMm.x + spot.u.x * alongMm + spot.n.x * spot.halfMm * sign + dir.x * z * reach,
+      y: spot.aMm.y + spot.u.y * alongMm + spot.n.y * spot.halfMm * sign + dir.y * z * reach,
+    });
+    // Проём берётся **внутренней гранью** стены (`halfMm` в сторону комнаты):
+    // пятно начинается там, где свет входит в комнату, а не в середине стены.
+    const quad = [
+      at(spot.fromMm, spot.bottomMm),
+      at(spot.toMm, spot.bottomMm),
+      at(spot.toMm, spot.topMm),
+      at(spot.fromMm, spot.topMm),
+    ];
+    const shape = volumeClipPolygon(room, quad);
+    if (shape.length < 3) continue;
+    out.push(
+      volumeFace(
+        shape.map((point) => volumeAt(point, 0)),
+        rgb,
+        { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_SUN, flat: true },
       ),
     );
   }
@@ -3058,6 +3440,8 @@ export function volumeScene(project, schemeId, options = {}) {
       order: null,
       solids: [],
       shadowBoxes: [],
+      sunSpots: [],
+      landMm: null,
       objectBoxes: [],
       rooms: [],
       boundsMm: null,
@@ -3099,17 +3483,27 @@ export function volumeScene(project, schemeId, options = {}) {
     wallHeights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || schemeHeight.mm);
   }
   const tallest = walls.reduce((most, wall) => Math.max(most, wallHeights.get(wall.id) || 0), schemeHeight.mm || 0);
+  // Прямоугольник плиты, когда она работает землёй (D52): им фон узнаёт, где
+  // кончается земля сцены. `null` — плита сама пол, и земли у сцены нет вовсе.
+  let landMm = null;
   if (bounds) {
     const land = rooms.length > 0;
     const shadow = volumeShadowShift(tallest);
     const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
+    const plate = {
+      minX: bounds.minX - out,
+      minY: bounds.minY - out,
+      maxX: bounds.maxX + out,
+      maxY: bounds.maxY + out,
+    };
+    if (land) landMm = plate;
     faces.push(
       volumeFace(
         volumeClockwise([
-          { x: bounds.minX - out, y: bounds.minY - out },
-          { x: bounds.maxX + out, y: bounds.minY - out },
-          { x: bounds.maxX + out, y: bounds.maxY + out },
-          { x: bounds.minX - out, y: bounds.maxY + out },
+          { x: plate.minX, y: plate.minY },
+          { x: plate.maxX, y: plate.minY },
+          { x: plate.maxX, y: plate.maxY },
+          { x: plate.minX, y: plate.maxY },
         ]).map((point) => volumeAt(point, 0)),
         land ? VOLUME_LAND_RGB : VOLUME_FLOOR_RGB,
         { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_BASE, flat: land },
@@ -3332,6 +3726,22 @@ export function volumeScene(project, schemeId, options = {}) {
     solids,
     // Габариты стен для тени дома (таск 181): час кладёт её сам, см. выше.
     shadowBoxes,
+    // Проёмы, через которые солнце кладёт пятно на пол (таск 196). В сцене
+    // лежит то, что от часа не зависит — геометрия проёма, комнаты по обе его
+    // стороны и штора перед ним; грани кладёт час (`volumeSunSpotFaces`), тем
+    // же порядком, что тень дома.
+    sunSpots: volumeSunOpenings(
+      project,
+      schemeId,
+      rooms,
+      marks.placed,
+      (wall) => wallHeights.get(wall.id) || 0,
+      options.openCurtainIds || null,
+    ),
+    // Земляная плита: её прямоугольник в миллиметрах чертежа — `null`, когда
+    // плита работает полом, а не землёй. По нему фон знает, где кончается земля
+    // сцены (D52, `volumeGroundLimitDeg`), и второй мерки для этого нет.
+    landMm,
     // Занятые места: габариты вещей, которые человека **не держат** (G264), но
     // по которым видно, где в комнате пусто. Ими пользуется только выбор места
     // старта; ходьба, перенос и «тесно» спрашивают `solids`.
@@ -3424,18 +3834,24 @@ function volumeGap(solid, x, y) {
  *
  * Препятствие без высот (такие строит рука в тестах) держит всегда: `topMm`
  * без значения — это «до потолка», и молча пропускать сквозь него нельзя.
+ *
+ * `feetMm` — где ноги (таск 192, G292): у ходящего это ноль, у летящего — его
+ * высота. Порог, через который переступают, отсчитывается **от ног**, поэтому
+ * летящий выше стены над ней и проходит: стена кончилась ниже его подошв. У
+ * нуля выходит прежнее правило до знака — второго счёта проходимости не
+ * завелось.
  */
-export function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM) {
+export function volumeSolidBlocks(solid, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   const bottom = Number(solid.bottomMm) || 0;
   const top = solid.topMm === undefined || solid.topMm === null ? Infinity : Number(solid.topMm);
-  return bottom < headMm && top > VOLUME_STEP_MM;
+  return bottom < headMm && top > feetMm + VOLUME_STEP_MM;
 }
 
 /** Сколько свободного места вокруг точки для человека с макушкой на `headMm`. */
-export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM) {
+export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   let free = Infinity;
   for (const solid of solids) {
-    if (!volumeSolidBlocks(solid, headMm)) continue;
+    if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
     free = Math.min(free, volumeGap(solid, x, y));
   }
   return free;
@@ -3455,8 +3871,14 @@ export function volumeFreeMm(solids, x, y, headMm = VOLUME_HEAD_MM) {
  * спрашивать нельзя не ради скорости: прижатый к ней человек стоит ровно в
  * `VOLUME_BODY_MM` от её грани, и сравнение «на волос ближе или на волос
  * дальше» в double запрещало бы ему вставать у стенки через раз.
+ *
+ * `options.ghost` — отметка «Проходить сквозь стены» (таск 192, G292): встать
+ * можно везде. «Встать негде» — это и есть столкновение с тем, что над головой,
+ * и снявший столкновения человек не должен застревать в приседе под вещью,
+ * сквозь которую он только что прошёл.
  */
-export function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM) {
+export function volumeCanStand(scene, at, headMm = VOLUME_HEAD_MM, options = {}) {
+  if (options.ghost) return true;
   for (const solid of (scene && scene.solids) || []) {
     if (volumeSolidBlocks(solid, headMm)) continue;
     if (!volumeSolidBlocks(solid, VOLUME_HEAD_MM)) continue;
@@ -3529,10 +3951,10 @@ export function volumeStart(scene) {
  * разобрать, — разойдись они, и человек то застревал бы на ровном месте, то
  * проваливался бы в стену.
  */
-export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM) {
+export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   let deep = 0;
   for (const solid of solids || []) {
-    if (!volumeSolidBlocks(solid, headMm)) continue;
+    if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
     const dx = x - solid.cx;
     const dy = y - solid.cy;
     const overAlong = solid.half + radius - Math.abs(dx * solid.ux + dy * solid.uy);
@@ -3582,7 +4004,7 @@ export function volumeDepthMm(solids, x, y, radius = VOLUME_BODY_MM, headMm = VO
  *
  * Угол при этом держится так же, как держался: четыре прохода остались.
  */
-export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
+export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM, feetMm = 0) {
   let x = at.x;
   let y = at.y;
   for (let pass = 0; pass < VOLUME_PUSH_PASSES; pass += 1) {
@@ -3591,8 +4013,9 @@ export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
     let pressed = false;
     for (const solid of solids) {
       // Присевший проходит под высоким (G234): препятствие, которое кончается
-      // ниже его макушки, тела не касается вовсе.
-      if (!volumeSolidBlocks(solid, headMm)) continue;
+      // ниже его макушки, тела не касается вовсе. Летящий (таск 192) — над тем,
+      // что кончилось ниже его ног.
+      if (!volumeSolidBlocks(solid, headMm, feetMm)) continue;
       const dx = x - solid.cx;
       const dy = y - solid.cy;
       const along = dx * solid.ux + dy * solid.uy;
@@ -3630,8 +4053,20 @@ export function volumePush(solids, at, radius, headMm = VOLUME_HEAD_MM) {
  * окажется по ту сторону, ничего не задев. На бегу (4,8 м/с) кадр длиной в
  * десятую долю секунды — это 480 мм, а перегородка бывает в 50 мм: без дробления
  * сквозь неё проходили бы при любом подвисании вкладки.
+ *
+ * ——— две отметки таска 192 (G292) ———————————————————————————————————————
+ *
+ * `options.ghost` — «Проходить сквозь стены»: шаг идёт **ровно туда, куда
+ * просили**, без дробления и выталкивания. Это и есть вся отмена столкновений,
+ * и живёт она здесь, в единственном месте, которое знает, где человек пройдёт;
+ * заведи её в поле — и в сборке стало бы два ответа на «куда шагнул».
+ *
+ * `options.feetMm` — «Летать»: высота ног. Ноль у ходящего, своя высота у
+ * летящего, и ею же решается, что он уже перелетел (`volumeSolidBlocks`).
  */
-export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
+export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM, options = {}) {
+  if (options.ghost) return { x: at.x + dx, y: at.y + dy };
+  const feetMm = Number(options.feetMm) || 0;
   const solids = scene.solids || [];
   const length = Math.hypot(dx, dy);
   const parts = Math.max(1, Math.ceil(length / VOLUME_BODY_MM));
@@ -3639,10 +4074,16 @@ export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
   // Насколько глубоко человек сидит в препятствиях **сейчас**. Обычно ноль;
   // не ноль бывает после переноса кликом, перехода по этажам и правки чертежа
   // под ногами — и тогда выход из этого места тоже должен быть возможен.
-  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm);
+  let depth = volumeDepthMm(solids, point.x, point.y, VOLUME_BODY_MM, headMm, feetMm);
   for (let index = 0; index < parts; index += 1) {
-    const want = volumePush(solids, { x: point.x + dx / parts, y: point.y + dy / parts }, VOLUME_BODY_MM, headMm);
-    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm);
+    const want = volumePush(
+      solids,
+      { x: point.x + dx / parts, y: point.y + dy / parts },
+      VOLUME_BODY_MM,
+      headMm,
+      feetMm,
+    );
+    const deep = volumeDepthMm(solids, want.x, want.y, VOLUME_BODY_MM, headMm, feetMm);
     // **Хуже не становится** (D39). Выталкивание разобрало не всё — значит
     // место теснее тела, и шаг туда не делается вовсе: человек остаётся там,
     // где стоял, вместо того чтобы дрожать между двумя положениями.
@@ -3673,6 +4114,11 @@ export function volumeStep(scene, at, dx, dy, headMm = VOLUME_HEAD_MM) {
 // Стойка — `{crouchMm, liftMm, speedMm}`: насколько присел, насколько оторвался
 // от пола и с какой скоростью идёт вверх. В объект из этого не попадает ничего
 // (G68) — она живёт в сеансе поверхности, как открытые двери.
+//
+// **Полёт таска 192 (G292) живёт здесь же** и нарочно: «летать» и «прыгать» —
+// это одна третья координата человека в разных руках, и `liftMm` у них одна.
+// Второго счёта высоты в сборке нет; разойдись они — выключенная отметка
+// оставила бы летящего висеть, а прыжок считался бы от чужой высоты.
 
 /** Стойка, с которой встают на пол: в полный рост и на земле. */
 export function volumeStanceStart() {
@@ -3697,6 +4143,22 @@ export function volumeStanceHead(stance) {
   return VOLUME_HEAD_MM - stance.crouchMm;
 }
 
+/**
+ * Где у человека ноги и макушка — одной дверью (таск 192, G292).
+ *
+ * Вопрос один: столкновениям нужно знать, что держит тело. У идущего ноги на
+ * полу, и ответ ровно тот, что был до таска 192 — `volumeStanceHead`, прыжок
+ * макушку не поднимает. У **летящего** поднимается и то и другое: он проходит
+ * над тем, что кончилось ниже его подошв, и упирается в то, что ещё не
+ * кончилось. Второго счёта высоты при этом не завелось: высота у летящего — та
+ * же `liftMm`, которой прыгает стойка таска 159.
+ */
+export function volumeStanceBody(stance, flying) {
+  const headMm = volumeStanceHead(stance);
+  if (!flying) return { headMm, feetMm: 0 };
+  return { headMm: headMm + stance.liftMm, feetMm: stance.liftMm };
+}
+
 /** В воздухе ли человек: прыжок идёт, пока он не вернулся на пол. */
 export function volumeStanceAir(stance) {
   return stance.liftMm > 0 || stance.speedMm > 0;
@@ -3711,7 +4173,12 @@ export function volumeStanceAir(stance) {
  * своих 550 мм, и ждать от него нечего — встанет он на том же тике, которым
  * выйдет из-под низкого места.
  */
-export function volumeStanceBusy(stance, crouch) {
+export function volumeStanceBusy(stance, crouch, options = {}) {
+  // **Летящий висит сам** (таск 192): отпустил клавиши — остался на своей
+  // высоте, и тика ему не нужно. Поводом остаётся зажатая клавиша (`rise`) и
+  // присед, который ещё доезжает до нуля: в полёте Control значит «ниже», а не
+  // «присесть», и присед, принесённый с земли, обязан разойтись сам.
+  if (options.fly) return Boolean(options.rise) || stance.crouchMm > 0;
   if (volumeStanceAir(stance)) return true;
   return stance.crouchMm !== (crouch ? VOLUME_CROUCH_MM : 0);
 }
@@ -3728,6 +4195,7 @@ export function volumeStanceJump(stance) {
   return { ...stance, speedMm: VOLUME_JUMP_MM_S };
 }
 
+
 /**
  * Шаг стойки за `seconds` секунд: присед едет к цели, прыжок летит по дуге.
  *
@@ -3735,18 +4203,47 @@ export function volumeStanceJump(stance) {
  * встал), `canStand` — есть ли над ним место, чтобы выпрямиться. Отказ в
  * подъёме честный: присед **остаётся**, стойка не меняется ни на миллиметр, и
  * сквозь низ шкафа никто не проходит.
+ *
+ * ——— полёт (таск 192, G292) ——————————————————————————————————————————————
+ *
+ * `flyMm` — на сколько миллиметров подняться **этим тиком**; число (хоть ноль)
+ * значит «летим», `null` и отсутствие — «идём». Слова заказчика: «при движении
+ * летим в сторону курсора, пробел (прыжок) - выше, ctrl (присяд) - ниже», — и
+ * в эти миллиметры у поля уже сложены и клавиша, и наклон взгляда.
+ *
+ * **Высота у полёта та же, что у прыжка** — `liftMm`, и это главное условие
+ * таска: второго счёта высоты в сборке нет, поэтому глаза считает прежний
+ * `volumeStanceEye`, а выключенная отметка возвращает человека на пол той же
+ * дугой падения, которой он приземляется после прыжка.
+ *
+ * Миллиметры, а не скорость, нарочно: «как быстро» живёт в одном месте
+ * (`VOLUME_WALK_MM_S`, бег — `VOLUME_RUN_MM_S`), и второго числа для полёта не
+ * заводится — летят с тем же Shift, с которым бегают.
+ *
+ * **Земля держит, потолка нет.** Ниже пола не опускаются: под полом ничего не
+ * нарисовано, и провалившийся туда видел бы изнутри плиту вместо комнаты.
+ * Вверх свободно, и это не недосмотр — потолка в счёте столкновений нет вовсе
+ * (препятствия — стены и перемычки), а стены держат летящего, пока он не
+ * поднялся выше них (`volumeStanceBody`). Тяготение в полёте не считается:
+ * отпустил клавиши — висишь.
  */
 export function volumeStanceStep(stance, seconds, options = {}) {
   const span = Math.max(0, Number(seconds) || 0);
-  const crouch = Boolean(options.crouch);
-  const canStand = options.canStand !== false;
+  const flying = options.flyMm !== undefined && options.flyMm !== null;
+  // В полёте Control значит «ниже», а не «присесть»: присед, принесённый с
+  // земли, расходится сам, и встать летящему не мешает ничто.
+  const crouch = flying ? false : Boolean(options.crouch);
+  const canStand = flying ? true : options.canStand !== false;
   const target = crouch ? VOLUME_CROUCH_MM : 0;
   let crouchMm = stance.crouchMm;
   if (target > crouchMm) crouchMm = Math.min(target, crouchMm + VOLUME_CROUCH_MM_S * span);
   else if (target < crouchMm && canStand) crouchMm = Math.max(target, crouchMm - VOLUME_CROUCH_MM_S * span);
   let liftMm = stance.liftMm;
   let speedMm = stance.speedMm;
-  if (volumeStanceAir(stance)) {
+  if (flying) {
+    liftMm = Math.max(0, liftMm + (Number(options.flyMm) || 0));
+    speedMm = 0;
+  } else if (volumeStanceAir(stance)) {
     speedMm -= VOLUME_FALL_MM_S2 * span;
     liftMm += speedMm * span;
     // Приземлились: ниже пола не бывает, и скорость гасится здесь же — иначе
@@ -3763,9 +4260,10 @@ export function volumeStanceStep(stance, seconds, options = {}) {
  * Куда показали на полу: луч сквозь точку кадра до плоскости пола (G212,
  * «при клике курсором позволяй перемещать»).
  *
- * `null` — луч идёт вверх или вдоль пола и ни во что не упирается: с обзора,
- * который смотрит сверху всегда (`volumeAroundPitch`), такого не бывает, но
- * отвечать на это выдуманной точкой нельзя.
+ * `null` — луч идёт вверх или вдоль пола и ни во что не упирается. С таска 195
+ * это в обзоре бывает: взгляд там задирается к небу (`volumeAroundStand`), и
+ * щелчок по небу никуда не переносит — отвечать на него выдуманной точкой
+ * пола было бы хуже, чем не отвечать вовсе.
  *
  * Считается **плоскостью пола, а не гранями сцены**: указывают на место, а не
  * на поверхность, и нажатый кусок стены должен значить «туда, к этой стене», а
@@ -5087,16 +5585,103 @@ export function volumeRiverGreens(river) {
 
 export const VOLUME_RIVER_GREENS = volumeRiverGreens(VOLUME_RIVER);
 
+// ——— две земли и шов между ними (дефект D52, таск 196) ————————————————————
+//
+// Слова заказчика, со снимками обзора: «но пол дома всё равно летает, вот
+// границей перекрыл машинки. ниже спусти», «для тестов можешь перекрасить землю
+// и увидишь. Фундамент в воздухе относительно фона».
+//
+// Это **третий заход** на одно и то же: G237 (таск 157) поставил дом на землю,
+// D43 (таск 178) чинил «дом всё ещё летает». Оба раза правили сцену, и дефект
+// возвращался. Поэтому сначала — обе высоты числами, как и просил тикет.
+//
+// **Земля сцены — настоящая плоскость.** Одна грань на нулевой отметке
+// (`VOLUME_LAYER_BASE`), по габариту чертежа плюс вынос: вынос считается от
+// тени дома (`volumeShadowShift` при полуденной высоте 14°) плюс
+// `VOLUME_LAND_OUT_MM`. На объекте заказчика это 14,23 м за габарит, то есть
+// плита **37,66 × 37,16 м**, а её кромка стоит в 26,2…26,7 м от середины дома.
+// Человек ростом 1600 мм видит эту кромку в **3,43…3,49° под горизонтом** —
+// при фокусе 700 это `y = 492` при горизонте `y = 450`.
+//
+// **Земля фона — заливка ниже строки горизонта.** Никакой плоскости у неё нет
+// вовсе: `volumeDrawBackdrop` заливает `palette.land` от строки
+// `volumeHorizon(camera, box) = высота/2 + фокус · tg(наклон)` и до низа кадра,
+// а всё, что на этой земле стоит, нарисовано **на бесконечности**:
+// `volumeSkyPoint` знает направление и не знает ни дальности, ни высоты глаза.
+// Дальность у вещей фона есть только неявная — та, что получается, если принять
+// высоту глаза стоящего (`VOLUME_EYE_MM` = 1600): дорога приходит с 9,8 м,
+// улица города с 9,5 м, машинки стоят в 13,2 м, основания ближнего ряда домов в
+// 21,8 м, кусты — в 8,2 м.
+//
+// **Отсюда весь дефект, и он арифметический.** Всё, что фон рисует на земле,
+// лежит **ближе** 26,2 м — то есть внутри плиты. Плита рисуется после фона и
+// закрывает их собой: машинки на `y = 535` против кромки плиты на `y = 492`
+// срезаются ровно пополам, а у ближнего ряда домов (`y = 501`) кромка проходит
+// по основаниям. Числом «дом летает» — это 43 точки между кромкой плиты и
+// машинками.
+//
+// **Мера теперь одна, и живёт она здесь.** Панорама не рисует на земле ничего
+// **ближе кромки плиты**: самое близкое её колено (куст, 11° под горизонтом —
+// `VOLUME_PANORAMA_NEAR_DEG`) приводится ровно к углу этой кромки, а остальное
+// отъезжает тем же множителем. Множитель считается в тангенсах, то есть это
+// честное «кольцо панорамы отодвинули»: дальности всех её вещей умножены на одно
+// число, порядок (дорога ближе холмов, холмы ближе гор) сохранён, и угловые
+// размеры уехавших вещей уменьшены тем же множителем — дерево, отодвинутое
+// втрое, втрое и мельче.
+//
+// **Ближе панорама не придвигается никогда** (`Math.min(1, …)`): за кромкой
+// плиты лежит та же земля того же тона, и уйти за неё дальше вещам фона можно —
+// шва от этого не будет. А вот ближе — нельзя: там плита, и любая вещь фона
+// оказалась бы ею срезана. Поэтому в обзоре, где камера поднята и кромка плиты
+// уходит на 19…34° под горизонт, панорама остаётся **ровно той же, что была**:
+// её 11° и так дальше кромки.
+//
+// **Считается от середины чертежа, а не от камеры** — по полудиагонали плиты
+// (26,45 м на объекте заказчика). Это нарочно: возьми я дальность до кромки от
+// того места, где человек стоит, — панорама дышала бы при каждом шаге, а фон
+// обязан стоять. От высоты глаза она зависеть должна и зависит: поднялся на
+// второй этаж — кромка плиты ушла ниже, и кольцу можно подойти ближе.
+
+/**
+ * Самое близкое, что панорама рисует на земле: куст в 11° под горизонтом
+ * (`VOLUME_TREES`, az 176). Улица города приходит с 9,6°, дорога «Природы» —
+ * с 9,3°, и всё это считается от высоты глаза стоящего (`VOLUME_EYE_MM`).
+ */
+export const VOLUME_PANORAMA_NEAR_DEG = 11;
+
+/**
+ * Во сколько отодвинуть землю панорамы, чтобы она начиналась за кромкой земли
+ * сцены (D52). Единица — ничего не двигать.
+ *
+ * `land` — прямоугольник плиты (`scene.landMm`); `null` значит, что плита
+ * работает полом, а не землёй, и отодвигать нечего.
+ */
+export function volumeGroundScale(camera, land) {
+  if (!land) return 1;
+  const eyeMm = Number(camera && camera.at && camera.at.z);
+  if (!(eyeMm > 0)) return 1;
+  const reachMm = Math.hypot((Number(land.maxX) - Number(land.minX)) / 2, (Number(land.maxY) - Number(land.minY)) / 2);
+  if (!(reachMm > 0)) return 1;
+  const edge = Math.atan(eyeMm / reachMm);
+  return Math.min(1, Math.tan(edge) / Math.tan(VOLUME_PANORAMA_NEAR_DEG * DEG));
+}
+
 /**
  * Прицел панорамы: базис камеры, фокус и середина окна. Считается один раз на
  * кадр — все вещи фона смотрят через него.
+ *
+ * `ground` — множитель, которым земля панорамы отодвинута за кромку земли сцены
+ * (D52, `volumeGroundScale`). Единица — прицел, каким он был до таска 196;
+ * светило, звёзды и облака смотрят **через него**, а не через земной: небу
+ * кромка плиты не указ.
  */
-export function volumeSkyAim(camera, box) {
+export function volumeSkyAim(camera, box, ground = 1) {
   return {
     basis: volumeBasis(camera),
     focal: volumeFocal(box),
     halfWidth: box.width / 2,
     halfHeight: box.height / 2,
+    ground: Number.isFinite(Number(ground)) && Number(ground) > 0 ? Math.min(1, Number(ground)) : 1,
   };
 }
 
@@ -5109,7 +5694,13 @@ export function volumeSkyAim(camera, box) {
  * у граней сцены, и ровно потому, что камера одна и та же.
  */
 export function volumeSkyPoint(aim, azimuthDeg, riseDeg) {
-  const rise = riseDeg * DEG;
+  // Земля панорамы отодвинута за кромку земли сцены (D52): дальность всех её
+  // вещей умножена на одно число, то есть тангенс их высоты — поделен. Всё, что
+  // на горизонте и выше (светило, облака, вершины, дальний ряд деревьев),
+  // остаётся на месте: отодвигать бесконечность некуда.
+  const push = aim.ground === undefined ? 1 : aim.ground;
+  const sunk = riseDeg < 0 && push < 1;
+  const rise = sunk ? Math.atan(Math.tan(riseDeg * DEG) * push) : riseDeg * DEG;
   const azimuth = azimuthDeg * DEG;
   const flat = Math.cos(rise);
   const direction = { x: flat * Math.cos(azimuth), y: flat * Math.sin(azimuth), z: Math.sin(rise) };
@@ -5119,7 +5710,10 @@ export function volumeSkyPoint(aim, azimuthDeg, riseDeg) {
   const right = direction.x * basis.right.x + direction.y * basis.right.y + direction.z * basis.right.z;
   const up = direction.x * basis.up.x + direction.y * basis.up.y + direction.z * basis.up.z;
   const scale = focal / depth;
-  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale };
+  // Угловой размер уехавшей вещи уменьшается тем же множителем: отодвинутое
+  // втрое дерево втрое и мельче — иначе на кромке участка встал бы лес в
+  // двадцать градусов.
+  return { x: aim.halfWidth + right * scale, y: aim.halfHeight - up * scale, scale: sunk ? scale * push : scale };
 }
 
 /**
@@ -5197,7 +5791,7 @@ function volumeDrawStrip(ctx, aim, nodes, paint) {
  * реку, поэтому она после полос; деревья по кругу — последними, они ближе
  * всего.
  */
-export function volumeDrawBackdrop(ctx, box, camera, mood = null) {
+export function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
   const hour = mood || VOLUME_MOOD_NOON;
   const palette = hour.palette;
   const horizonY = volumeHorizon(camera, box);
@@ -5207,12 +5801,17 @@ export function volumeDrawBackdrop(ctx, box, camera, mood = null) {
   sky.addColorStop(1, hour.sky.low);
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, box.width, Math.max(0, line));
-  const aim = volumeSkyAim(camera, box);
+  // Два прицела, и разница между ними — ровно дефект D52. Небесному кромка
+  // земли сцены не указ: светило, звёзды и облака стоят там, где стоят.
+  // Земному она указ: ближе кромки панорама на земле не рисует ничего, иначе
+  // плита срезает ей машинки (`volumeGroundScale`).
+  const above = volumeSkyAim(camera, box);
+  const aim = volumeSkyAim(camera, box, volumeGroundScale(camera, land));
   // Светило и звёзды — до поля: они за горизонтом и обрезаются им.
-  if (hour.stars > 0) volumeDrawStars(ctx, aim, hour);
-  volumeDrawSun(ctx, aim, hour);
-  volumeDrawMoon(ctx, aim, hour);
-  if (hour.kind !== "plain") for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, aim, cloud, palette);
+  if (hour.stars > 0) volumeDrawStars(ctx, above, hour);
+  volumeDrawSun(ctx, above, hour);
+  volumeDrawMoon(ctx, above, hour);
+  if (hour.kind !== "plain") for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, above, cloud, palette);
   if (line < box.height) {
     // Земля — плоским тоном (G237): тем же, которым красится плита чертежа, и
     // дом от этого стоит на ней, а не на доске. Час красит обе одной краской
@@ -5617,6 +6216,31 @@ export const VOLUME_CLOCK_SPEED_DEFAULT = 60;
 export const VOLUME_CLOCK_SPEED_REAL = 1;
 /** Чаще этого фон не пересчитывается — прямое требование заказчика. */
 export const VOLUME_MOOD_MS = 1000;
+/**
+ * То же, но с отметкой «Плавные светила» (таск 192, G292): тридцать кадров в
+ * секунду, слова заказчика — «обновляй не раз в секунду, а в 30FPS».
+ *
+ * Отметка меняет **только частоту** и больше ничего: тот же снимок, та же
+ * арифметика, то же правило «при стоячем времени таймера нет вовсе». 33 мс — не
+ * круглое число нарочно: 1000/30 = 33,33, и округлять его вверх значило бы
+ * отдать заказчику 30,3 кадра вместо 30.
+ */
+export const VOLUME_MOOD_SMOOTH_MS = Math.round(1000 / 30);
+
+/**
+ * Как часто пересчитывается снимок часа. **Один хозяин у этого числа**: поле
+ * спрашивает здесь, а не выбирает само — иначе «раз в секунду» и «тридцать раз»
+ * жили бы в двух местах.
+ *
+ * Цена названа числом (замер на объекте заказчика, 25 стен и 86 меток): снимок
+ * часа — 7 мкс, грани тени дома — 16 мкс, а сам кадр — 400 мкс. То есть всё
+ * время, которое зависит от часа, стоит 5% кадра, и делить снимок на «быстрое»
+ * (светило) и «медленное» (тень, свет в окнах) незачем: деление сэкономило бы
+ * 20 мкс из 440 и завело бы в сборке вторые часы.
+ */
+export function volumeMoodMs(smooth) {
+  return smooth ? VOLUME_MOOD_SMOOTH_MS : VOLUME_MOOD_MS;
+}
 /** Тон ночи и его потолок: куда и насколько тянется цвет к полуночи. */
 export const VOLUME_NIGHT_RGB = [18, 26, 54];
 export const VOLUME_NIGHT_SHARE = 0.45;
@@ -6648,11 +7272,54 @@ export const VOLUME_MOOD_NOON = volumeMood({
 // ——— обзор со стороны ————————————————————————————————————————————————————
 
 /**
- * Камера обзора: отходим от цели на расстояние по рысканью и наклону.
- * Наклон отрицательный — смотрим сверху вниз.
+ * Наклон, на котором обзор **стоит**: взгляд задирается свободно, а место
+ * камеры остаётся над крышей (таск 195, требование G298).
+ *
+ * До таска 195 этим числом зажимали сам взгляд, и довод был честный: обзор
+ * ходит вокруг цели, а цель стоит на полу среди стен — подними взгляд к
+ * горизонту, и камера, отойдя на семь метров, окажется **внутри** стены
+ * соседней комнаты, кадр станет ровным серым полем, и человек решит, что
+ * сборка сломалась.
+ *
+ * Заказчик предел со взгляда снял: «разреши обзору задирать камеру». Причина
+ * названа исполнителем таска 190: выше горизонта обзор не смотрел вовсе, а
+ * солнце летом в полдень стоит на 58° — настоящая астрономия оставалась за
+ * кадром.
+ *
+ * Предел поэтому не снят, а **переставлен со взгляда на место камеры**:
+ * подъём камеры над целью по-прежнему не меньше `liftMm` — высоты, на которой
+ * кончается чертёж, — и внутрь стены ей не попасть ни при каком взгляде.
+ * Задирается только взгляд, как у камеры на штативе: штатив стоит над крышей,
+ * голова поворачивается к небу. Серый кадр от этого не возвращается, и гасить
+ * ближние стены не пришлось — сквозь них никто не смотрит.
+ *
+ * Отошли дальше — стоять можно положе; приблизились — место само становится
+ * круче, вплоть до отвесного, а заданный взгляд от приближения не сбивается.
+ *
+ * Отвес и зенит сторожит `VOLUME_PITCH_MAX_DEG` — то же число, что у человека:
+ * вверх ногами не смотрит ни один из двух видов.
  */
-export function volumeAroundCamera(target, yaw, pitch, distance) {
-  const basis = volumeBasis({ yaw, pitch });
+export function volumeAroundStand(pitch, distance, liftMm) {
+  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
+  const aim = Math.max(-limit, Math.min(limit, pitch));
+  if (!(distance > 0) || !(liftMm > 0)) return aim;
+  const ratio = Math.min(1, liftMm / distance);
+  const steepest = -Math.min(limit, Math.asin(ratio));
+  return Math.min(steepest, aim);
+}
+
+/**
+ * Камера обзора: отходим от цели на расстояние по рысканью и **наклону
+ * стояния**, а смотрим туда, куда задали.
+ *
+ * Пока взгляд не задран, это одно и то же число, и камера ведёт себя как
+ * прежде. Задранный взгляд (`pitch` положе того, на чём камера стоит) её с
+ * места не сдвигает — разбор в `volumeAroundStand`, `liftMm` оттуда же. Без
+ * `liftMm` зажат один отвес: так зовут обзор стенд и тесты, которым крыша не
+ * мешает.
+ */
+export function volumeAroundCamera(target, yaw, pitch, distance, liftMm = 0) {
+  const basis = volumeBasis({ yaw, pitch: volumeAroundStand(pitch, distance, liftMm) });
   return {
     at: {
       x: target.x - basis.fwd.x * distance,
@@ -6702,20 +7369,31 @@ export function volumeAroundDistance(value) {
  * (`gesturePinchStep` отдаёт и множитель масштаба, и ход середины) — а перевести
  * этот ход в миллиметры может только камера: это её счёт, и он здесь.
  *
+ * Тем же ходом возит и двухпальцевый свайп трекпада (таск 195, требование
+ * G299): жест разбирает тот же `gestures.js` (`gestureWheel` отдаёт `pan` с
+ * готовым ходом в экранных точках), а перевод в миллиметры здесь один на оба
+ * устройства.
+ *
  * Правило — **пол едет за пальцами**: куда ушла середина, туда уехала карта, а
  * камера на столько же в обратную сторону. Цель ходит по полу, высота её не
- * меняется: обзор смотрит сверху всегда (`volumeAroundPitch`), и поднятая цель
- * увела бы его в стену.
+ * меняется: камера обзора стоит над крышей (`volumeAroundStand`), и поднятая
+ * цель увела бы её в стену.
  *
  * Мера одного пикселя — `distance / focal`: ширина пикселя на той глубине, где
  * лежит цель. Отошли дальше — палец возит крупнее, и это ровно то, что видно
  * глазом.
  *
  * Поперёк взгляда счёт точный: камера не кренится, и экранное «вправо» лежит
- * на полу целиком. Вдоль — с поправкой на наклон, и берётся она из самой
- * камеры: экранный «верх», положенный на пол, короче единицы ровно во столько,
- * во сколько пол на экране сжат (это синус наклона). Без поправки карта
- * отставала бы от пальца вверх-вниз, хотя поперёк шла бы вровень.
+ * на полу целиком. Вдоль — в сторону взгляда, положенного на пол, и с
+ * поправкой на наклон: пол на экране сжат ровно во столько, во сколько короче
+ * единицы экранный «верх», положенный на пол (это синус наклона). Без поправки
+ * карта отставала бы от пальца вверх-вниз, хотя поперёк шла бы вровень.
+ *
+ * Сторона берётся у **взгляда**, а не у «верха» (таск 195): у задранного
+ * взгляда горизонтальная часть «верха» разворачивается назад, и карта поехала
+ * бы от пальца в обратную сторону. На опущенном взгляде — а другого до таска
+ * 195 в обзоре не было — обе стороны это одно и то же направление, и числа от
+ * замены не изменились ни на бит.
  *
  * Поправка **ограничена** `VOLUME_AROUND_PAN_TILT_MIN`: у почти
  * горизонтального взгляда она уходит в бесконечность — пол под пальцем там
@@ -6729,16 +7407,17 @@ export function volumeAroundPan(view, box, panX, panY) {
   if (!(distance > 0) || !(focal > 0)) return { dx: 0, dy: 0 };
   const perPixel = distance / focal;
   const basis = volumeBasis({ yaw: view.yaw, pitch: view.pitch });
-  // Экранный «верх», положенный на пол: и сторона, и мера сжатия сразу. У
-  // отвесного взгляда это направление рысканья, у положего — он же, но короче.
-  const lean = Math.hypot(basis.up.x, basis.up.y);
-  // Взгляд ровно вдоль земли — верх встал отвесно, и класть на пол нечего:
-  // сторону берём у самого взгляда. В обзоре такого не бывает
-  // (`volumeAroundPitch` держит камеру выше крыши), но отвечать на это нулём
-  // было бы неправдой.
-  const flat = Math.hypot(basis.fwd.x, basis.fwd.y) || 1;
+  // Взгляд, положенный на пол, — сторона сдвига вдоль. У отвесного взгляда
+  // класть нечего (он сам отвесный), и сторону даёт рысканье — то же самое
+  // направление в пределе.
+  const flat = Math.hypot(basis.fwd.x, basis.fwd.y);
   const forward =
-    lean > 1e-9 ? { x: basis.up.x / lean, y: basis.up.y / lean } : { x: basis.fwd.x / flat, y: basis.fwd.y / flat };
+    flat > 1e-9
+      ? { x: basis.fwd.x / flat, y: basis.fwd.y / flat }
+      : { x: Math.cos(view.yaw || 0), y: Math.sin(view.yaw || 0) };
+  // Экранный «верх», положенный на пол: его длина и есть мера сжатия пола
+  // (синус наклона). Знака у неё нет — сторону уже дал взгляд.
+  const lean = Math.hypot(basis.up.x, basis.up.y);
   const tilt = Math.max(VOLUME_AROUND_PAN_TILT_MIN, lean);
   const across = -(Number(panX) || 0) * perPixel;
   const along = ((Number(panY) || 0) * perPixel) / tilt;
@@ -6746,29 +7425,6 @@ export function volumeAroundPan(view, box, panX, panY) {
     dx: basis.right.x * across + forward.x * along,
     dy: basis.right.y * across + forward.y * along,
   };
-}
-
-/**
- * Наклон обзора, при котором камера заведомо выше крыши (дефект живого
- * прогона).
- *
- * Обзор ходит вокруг цели, а цель стоит на полу среди стен. Подними взгляд к
- * горизонту — и камера, отойдя на семь метров, окажется **внутри** стены
- * соседней комнаты: кадр станет ровным серым полем, и человек решит, что
- * сборка сломалась. Сквозь стены при этом смотреть нельзя по той же причине,
- * по какой сквозь них нельзя ходить, — пропадёт смысл.
- *
- * Поэтому обзор смотрит сверху всегда: наклон ограничен так, чтобы подъём
- * камеры над целью был не меньше `liftMm` — высоты, на которой кончается
- * чертёж. Отошли дальше — можно смотреть положе; приблизились — вид сам
- * становится круче, вплоть до отвесного.
- */
-export function volumeAroundPitch(pitch, distance, liftMm) {
-  const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
-  if (!(distance > 0) || !(liftMm > 0)) return Math.max(-limit, Math.min(limit, pitch));
-  const ratio = Math.min(1, liftMm / distance);
-  const steepest = -Math.min(limit, Math.asin(ratio));
-  return Math.max(-limit, Math.min(steepest, pitch));
 }
 
 /**
