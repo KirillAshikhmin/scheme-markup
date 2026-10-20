@@ -54,7 +54,7 @@ import {
 } from "../src/model.js";
 import { drawDrawingOpening, drawElevation, drawingBridge, drawingDoorLeaf } from "../src/render.js";
 import {
-  VOLUME_CLEAR_ALPHA,
+  VOLUME_CLEAR_ALPHAS,
   VOLUME_EYE_MM,
   VOLUME_FRAME_RGB,
   VOLUME_GLASS_RGB,
@@ -506,8 +506,9 @@ test("щелчок по стеклу открывает дверь, а взгл�
   assert.ok(glass.length >= 1, "стекло в кадре есть");
   for (const piece of glass) {
     assert.ok(piece.fill.startsWith("rgba("), "стекло смешивается с тем, что за ним: " + piece.fill);
-    // Доля стекла — та же, что у вещи чертежа: своей прозрачности у двери нет.
-    assert.ok(piece.fill.endsWith("," + VOLUME_CLEAR_ALPHA + ")"), piece.fill);
+    // Доля стекла названа в общей таблице плотностей (таск 189), а не задана
+    // числом у двери: своей прозрачности у неё нет.
+    assert.ok(piece.fill.endsWith("," + VOLUME_CLEAR_ALPHAS.glass + ")"), piece.fill);
   }
   const bars = frame.filter((polygon) => polygon.door === scene.ids[0] && !polygon.clear && !polygon.stroke);
   assert.ok(bars.length >= 4, "брусков рамы в кадре: " + bars.length);
