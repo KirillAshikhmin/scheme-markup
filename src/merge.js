@@ -23,6 +23,7 @@ import {
   MARK_NUMBER_MAX,
   commentCodeOf,
   markWithoutWall,
+  projectSite,
   renumberAcceptedRepeats,
 } from "./model.js";
 import { strings } from "./strings.js";
@@ -157,6 +158,46 @@ function mergeStamp(merged, ours, theirs, winner) {
   }
   if (Object.keys(stamp).length > 0) merged.stamp = stamp;
   else delete merged.stamp;
+}
+
+/**
+ * Свойства объекта: адрес, координаты и направление верха чертежа (таск 188).
+ *
+ * Сливаются **слотами**, по той же причине, что графы штампа: один вписал
+ * адрес, второй вставил координаты из карты — спора между ними нет, и работа
+ * обоих обязана сложиться. Спорит только один и тот же слот, заполненный
+ * по-разному, — там решает общий победитель.
+ *
+ * **Широта и долгота — один слот, а не два.** Половина пары не точка, и взять
+ * широту у одного, а долготу у другого значило бы поставить дом в чистое поле
+ * между ними. Направление в ноль градусов и пустой адрес «заполненными» не
+ * считаются: ноль — это умолчание «верх на север», и перебить им чужое число
+ * нельзя (`projectSite` читает их одинаково).
+ *
+ * Поля нет ни у кого — оно и не заводится: объект прежней разметки остаётся
+ * прежним, и два одинаковых файла сходятся в «ничего не изменилось» (G68).
+ */
+function mergeSite(merged, ours, theirs, winner) {
+  const has = (project) => Boolean(project && project.site && typeof project.site === "object");
+  if (!has(ours) && !has(theirs)) return;
+  const mine = projectSite(ours);
+  const other = projectSite(theirs);
+  const pick = (left, right) => (!left ? right : !right ? left : winner === "theirs" ? right : left);
+  const site = {};
+  const address = pick(mine.address, other.address);
+  if (address) site.address = address;
+  const coords = pick(
+    mine.lat === null ? null : { lat: mine.lat, lon: mine.lon },
+    other.lat === null ? null : { lat: other.lat, lon: other.lon },
+  );
+  if (coords) {
+    site.lat = coords.lat;
+    site.lon = coords.lon;
+  }
+  const top = pick(mine.topAzimuthDeg || null, other.topAzimuthDeg || null);
+  if (top) site.topAzimuthDeg = top;
+  if (Object.keys(site).length > 0) merged.site = site;
+  else delete merged.site;
 }
 
 // Кто выигрывает спор. Обе стороны считают это из одной пары и получают один
@@ -794,6 +835,7 @@ export function mergeProjects(ours, theirs, base, options = {}) {
   }
   if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
   mergeStamp(merged, ours, theirs, winner);
+  mergeSite(merged, ours, theirs, winner);
   // Ключ проекта сходится. Есть у одного — берут оба: это факт, а не мнение, и
   // после первой же встречи родство перестаёт быть догадкой. Есть у обоих и
   // разные (копии разошлись до появления ключей) — берётся меньший по строке:

@@ -11,6 +11,7 @@ import {
   findRoom,
   outlinesInOrder,
   planPixelsPerMeter,
+  projectSite,
   projectStamp,
   roomsInOrder,
   schemeHeightPx,
@@ -1292,6 +1293,7 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
     gostStampValues(projectStamp(project), {
       object: (project && project.name) || "",
       building: options.building || "",
+      address: projectSite(project).address,
       drawing: (scheme && scheme.name) || "",
       scale: plan.scaleText,
       sheet: options.sheet || 1,
@@ -1435,6 +1437,7 @@ export async function elevationSheetPng(project, elevations, page, layout, optio
       gostStampValues(projectStamp(project), {
         object: (project && project.name) || "",
         building: options.building || "",
+        address: projectSite(project).address,
         drawing: options.drawing || strings.elevationSheet.drawing,
         scale: layout.scaleText,
         sheet: options.sheet || 1,
@@ -1660,6 +1663,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
     page.form,
     gostStampValues(options.stamp || {}, {
       object: options.object || "",
+      address: options.address || "",
       drawing: options.title || "",
       sheet: options.sheet || 1,
       sheets: options.sheets || 1,
