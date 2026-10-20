@@ -7564,7 +7564,6 @@ const strings = {
     openingHeight: "Высота, мм",
     openingFloor: "От пола, мм",
     openingAt: "Отступ от начала стены, мм",
-    openingHint: "Покажите на стену — проём сядет в неё серединой под курсор. Призрак краснеет, если не влезает.",
     openingNeedWall: "Сперва нарисуйте стены: проём живёт в стене, а не рядом с ней",
     doorHinge: "Петли: {value}",
     doorSwing: "Открывание: {value}",
@@ -7588,7 +7587,6 @@ const strings = {
       "Четыре двери к одному углу: R — четверть оборота (Shift+R — против часовой), Q и E — на 45°, ручка перед вещью — кратно 15° (клик по ней — четверть оборота, Alt — целый градус), это поле — любой градус. Без выделения угол и размеры достаются той вещи, которая встанет следующей: она нарисована призраком под рукой.",
     objectToWall: "К стене",
     objectToWallHint: "Повернуть выделенную вещь спинкой к ближайшей стене: ширина ляжет вдоль стены, перёд уйдёт в комнату",
-    objectToWallNone: "Доворот считается по выделенной вещи: выделите её в режиме «Правка»",
     objectNoWall: "Рядом нет стены, к которой довернуть: нарисуйте стены или поверните вещь полем и кнопками",
     // Призрак вещи под рукой: что встанет по клику — размеры и угол.
     ghostSize: "{width} × {depth} · {turn}°",
@@ -7607,7 +7605,6 @@ const strings = {
     // «Выбрать». Подсказка у неё разная нарочно — одна дверь ведёт к двум
     // разным делам, и человек должен знать, какое из них сейчас.
     objectPick: "Выбрать",
-    objectChooseHint: "Выбрать вещь в окне каталога: она встанет по клику на поле",
     objectChange: "Сменить вещь",
     // Смена вещи у выделенной меняет **вещь**, а не её величины: имя и
     // картинка становятся каталожными, а размеры, угол и место остаются теми,
@@ -7630,6 +7627,9 @@ const strings = {
     wayHint_rect: "Клик ставит прямоугольник серединой под курсор, размеры — по виду объекта",
     wayHint_contour: "Обвести объект по месту: размеры посчитаются сами по обведённому габариту",
     wayHint_polyline: "Полоса по ломаной: длина идёт по стене с поворотом, глубина одна",
+    // Заметка способа — строкой под плитками в окне «Что добавить»: её читают
+    // **до** первого клика, и жест в ней назван теми же словами, что в
+    // подсказке над полем (G247: замыкают двойным кликом по первой вершине).
     wayNote_rect: "Клик ставит объект туда, где стоит призрак под рукой: место, поворот и размеры у него те самые.",
     wayNote_contour:
       "Обводите объект по месту той же рукой, что ломаную метки на плане: клик — вершина, двойной клик по первой вершине замыкает. Контур обязательно замкнуть; размеры посчитаются сами по габариту вдоль первой стороны и встанут в поля ниже — там их и правят.",
@@ -41772,14 +41772,19 @@ function openDrawPicker(options = {}) {
     const depthField = uiField(strings.workshop.objectDepth, objectDepth);
     const turnField = uiField(strings.workshop.objectTurn, objectTurn);
     const depthLabel = depthField.querySelector(".ui-field__label");
+    // Заметка способа: её читают до первого клика, и меняется она вместе с
+    // выбранным способом — про «замкните контур» не должен читать тот, кто в
+    // эту минуту ставит радиатор кликом.
+    const wayNote = uiEl("p", { class: "drawPicker__about" });
     const objectsBody = uiEl("div", { class: "drawPicker__body" }, [
       tiles.node,
       uiEl("div", { class: "ui-chips" }, wayChips),
+      wayNote,
       uiEl("div", { class: "drawPicker__grid" }, [
         widthField,
         depthField,
         turnField,
-        uiField(strings.workshop.objectHeight, objectHeight),
+        uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
         uiField(strings.workshop.objectFloor, objectFloor),
       ]),
       uiEl("p", { class: "drawPicker__about", text: strings.drawPicker.objectsAbout }),
@@ -41861,6 +41866,7 @@ function openDrawPicker(options = {}) {
       // Объекты: способ, размеры и подпись глубины у полосы.
       for (const chip of wayChips) chip.classList.toggle("is-on", chip.dataset.way === settings.objects.way);
       const band = settings.objects.way === "polyline";
+      wayNote.textContent = strings.workshop["wayNote_" + settings.objects.way] || "";
       // У полосы нет ни ширины, ни угла: её форма задана точками (таск 164).
       widthField.hidden = band;
       turnField.hidden = band;
@@ -61471,7 +61477,11 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.objectToWallHint,
     on: { click: () => turnToWall() },
   });
-  const turnChips = uiEl("div", { class: "ui-chips" }, [turnLeftButton, turnRightButton, turnWallButton]);
+  const turnChips = uiEl("div", { class: "ui-chips", title: strings.workshop.objectTurnHint }, [
+    turnLeftButton,
+    turnRightButton,
+    turnWallButton,
+  ]);
   // Где вещь стоит и где её верх — одной строкой: «На полу · верх 650 мм».
   // Двумя строками это занимало в колонке вдвое больше, отвечая на один вопрос.
   const objectNote = uiEl("p", { class: "workshop__note" });
@@ -61481,7 +61491,7 @@ function createWorkshop({ api, hosts }) {
     depthField,
     turnField,
     turnChips,
-    uiField(strings.workshop.objectHeight, objectHeight),
+    uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
     uiField(strings.workshop.objectFloor, objectFloor),
     objectNote,
     removeButton(),
@@ -63575,7 +63585,14 @@ function createWorkshop({ api, hosts }) {
     syncAddPlate();
     // Строка под кнопками — словами: по плашке не видно, ставится вещь кликом
     // или тянется цепочкой. То же правило, что у меток (`tools.kindPointHint`).
-    modeNote.textContent = now === "select" ? strings.workshop.modeSelectHint : drawPickerHint(tool);
+    // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
+    // этого не видно — оно про вид и размеры, а не про то, что на схеме.
+    modeNote.textContent =
+      now === "select"
+        ? strings.workshop.modeSelectHint
+        : tool === "openings" && walls().length === 0
+          ? strings.workshop.openingNeedWall
+          : drawPickerHint(tool);
     syncDetails(current, wall);
     syncHeightButton(current);
     syncElevation(current, wall);

@@ -338,14 +338,19 @@ export function openDrawPicker(options = {}) {
     const depthField = uiField(strings.workshop.objectDepth, objectDepth);
     const turnField = uiField(strings.workshop.objectTurn, objectTurn);
     const depthLabel = depthField.querySelector(".ui-field__label");
+    // Заметка способа: её читают до первого клика, и меняется она вместе с
+    // выбранным способом — про «замкните контур» не должен читать тот, кто в
+    // эту минуту ставит радиатор кликом.
+    const wayNote = uiEl("p", { class: "drawPicker__about" });
     const objectsBody = uiEl("div", { class: "drawPicker__body" }, [
       tiles.node,
       uiEl("div", { class: "ui-chips" }, wayChips),
+      wayNote,
       uiEl("div", { class: "drawPicker__grid" }, [
         widthField,
         depthField,
         turnField,
-        uiField(strings.workshop.objectHeight, objectHeight),
+        uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
         uiField(strings.workshop.objectFloor, objectFloor),
       ]),
       uiEl("p", { class: "drawPicker__about", text: strings.drawPicker.objectsAbout }),
@@ -427,6 +432,7 @@ export function openDrawPicker(options = {}) {
       // Объекты: способ, размеры и подпись глубины у полосы.
       for (const chip of wayChips) chip.classList.toggle("is-on", chip.dataset.way === settings.objects.way);
       const band = settings.objects.way === "polyline";
+      wayNote.textContent = strings.workshop["wayNote_" + settings.objects.way] || "";
       // У полосы нет ни ширины, ни угла: её форма задана точками (таск 164).
       widthField.hidden = band;
       turnField.hidden = band;

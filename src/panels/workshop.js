@@ -2061,7 +2061,11 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.objectToWallHint,
     on: { click: () => turnToWall() },
   });
-  const turnChips = uiEl("div", { class: "ui-chips" }, [turnLeftButton, turnRightButton, turnWallButton]);
+  const turnChips = uiEl("div", { class: "ui-chips", title: strings.workshop.objectTurnHint }, [
+    turnLeftButton,
+    turnRightButton,
+    turnWallButton,
+  ]);
   // Где вещь стоит и где её верх — одной строкой: «На полу · верх 650 мм».
   // Двумя строками это занимало в колонке вдвое больше, отвечая на один вопрос.
   const objectNote = uiEl("p", { class: "workshop__note" });
@@ -2071,7 +2075,7 @@ function createWorkshop({ api, hosts }) {
     depthField,
     turnField,
     turnChips,
-    uiField(strings.workshop.objectHeight, objectHeight),
+    uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
     uiField(strings.workshop.objectFloor, objectFloor),
     objectNote,
     removeButton(),
@@ -4165,7 +4169,14 @@ function createWorkshop({ api, hosts }) {
     syncAddPlate();
     // Строка под кнопками — словами: по плашке не видно, ставится вещь кликом
     // или тянется цепочкой. То же правило, что у меток (`tools.kindPointHint`).
-    modeNote.textContent = now === "select" ? strings.workshop.modeSelectHint : drawPickerHint(tool);
+    // Проём без стен поставить некуда, и сказать об этом надо здесь: в окне
+    // этого не видно — оно про вид и размеры, а не про то, что на схеме.
+    modeNote.textContent =
+      now === "select"
+        ? strings.workshop.modeSelectHint
+        : tool === "openings" && walls().length === 0
+          ? strings.workshop.openingNeedWall
+          : drawPickerHint(tool);
     syncDetails(current, wall);
     syncHeightButton(current);
     syncElevation(current, wall);
