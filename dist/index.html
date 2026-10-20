@@ -7354,17 +7354,17 @@ const strings = {
     // минуты, как занятий стало три: про «вершину цепочки» читал человек,
     // который в это время ставил окно в стену.
     hint:
-      "Клик — вершина стены, двойной клик — конец цепочки, Backspace — убрать последнюю, Esc — отменить цепочку. Alt — без притяжки. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
+      "Клик — вершина стены, двойной клик — конец цепочки, Backspace — убрать последнюю, Esc — отменить цепочку, ещё раз — выйти из добавления. Alt — без притяжки. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
     hintOpenings:
-      "Покажите на стену — проём сядет в неё серединой под курсор. Красный призрак не сядет, причина названа справа. Вид и размеры — в колонке. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
+      "Покажите на стену — проём сядет в неё серединой под курсор. Красный призрак не сядет, причина названа справа. Вид и размеры — в колонке. Esc — выйти из добавления. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
     // Подсказка объектов — своя у каждого способа: про «замкните контур» читал
     // бы человек, который в это время ставит радиатор кликом.
     hintObjects:
-      "Призрак под рукой — это и есть то, что встанет: место, поворот и размеры. R — четверть оборота, Q и E — на 45°, Shift+R — против часовой. Способ рядом в колонке: прямоугольник кликом, контуром или полосой. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
+      "Призрак под рукой — это и есть то, что встанет: место, поворот и размеры. R — четверть оборота, Q и E — на 45°, Shift+R — против часовой. Способ рядом в колонке: прямоугольник кликом, контуром или полосой. Esc — выйти из добавления. Колесо — масштаб, перетаскивание с Shift — сдвиг. Ctrl+Z — отмена.",
     hintContour:
-      "Обводите объект контуром — как ломаную метки на плане: клик — вершина, длина стороны видна над ней. Замкнуть обязательно: двойной клик по первой вершине или Enter; размеры посчитаются сами. Двойной клик по последней не закончит — незамкнутый контур объектом не становится. Backspace — убрать последнюю, Esc — отменить контур. Ctrl+Z — отмена.",
+      "Обводите объект контуром — как ломаную метки на плане: клик — вершина, длина стороны видна над ней. Замкнуть обязательно: двойной клик по первой вершине или Enter; размеры посчитаются сами. Двойной клик по последней не закончит — незамкнутый контур объектом не становится. Backspace — убрать последнюю, Esc — отменить контур, ещё раз — выйти из добавления. Ctrl+Z — отмена.",
     hintBand:
-      "Полоса рисуется цепочкой, как стена: клик — вершина, длина видна над отрезком, двойной клик — конец. Backspace — убрать последнюю, Esc — отменить. Ctrl+Z — отмена.",
+      "Полоса рисуется цепочкой, как стена: клик — вершина, длина видна над отрезком, двойной клик — конец. Backspace — убрать последнюю, Esc — отменить, ещё раз — выйти из добавления. Ctrl+Z — отмена.",
     hintEdit:
       "Клик выделяет. Вершина тянется за ручку, стена — за середину, проём — вдоль своей стены, объект — целиком или за углы. У полосы ручка на середине отрезка разбивает его, ручка за концом продолжает, двойной клик по вершине убирает. Ручка перед вещью поворачивает её: клик — четверть оборота, рука — кратно 15°. Delete убирает выделенное, Esc снимает выделение. Ctrl+Z — отмена.",
     chainAdded: "Цепочка из {count} стен",
@@ -25018,6 +25018,34 @@ function drawLabel(ctx, box, color, runs, selected) {
   ctx.restore();
 }
 
+/**
+ * Знак метки: фигура точки, нитка линии, точка комментария — и пунктир
+ * выделения вокруг. Одна дверь на кадр плана, выгрузку и **призрака под рукой**.
+ *
+ * `options.selected` — метка выделена; `options.stacks` — расклад стопки
+ * совпавших.
+ *
+ * `options.ghost` — та же метка **до** клика (таск 176, G263). Слова
+ * заказчика: «При добавлении метки так же рисуй под курсором её». Приём взят у
+ * призрака вещи чертежа целиком (таск 168, `drawDrawingObject`): рисует
+ * призрака **этот же код**, своего у него только две приметы — полсилы цвета и
+ * пунктир, и те же две, что у чертежа (`DRAWING_GHOST_ALPHA`,
+ * `DRAWING_GHOST_DASH`): мерка призрака в сборке одна. Второго рисовальщика
+ * знака не заводится — разойдись они, под рукой была бы одна фигура, а по
+ * клику вставала другая.
+ */
+function drawMarkSign(ctx, project, scheme, mark, view, options = {}) {
+  if (options.ghost) {
+    ctx.save();
+    ctx.globalAlpha = DRAWING_GHOST_ALPHA;
+    ctx.setLineDash(DRAWING_GHOST_DASH);
+    drawMarkSign(ctx, project, scheme, mark, view, { ...options, ghost: false });
+    ctx.restore();
+    return;
+  }
+  drawMarkBody(ctx, project, scheme, mark, view, Boolean(options.selected), options.stacks || null);
+}
+
 function drawMarkBody(ctx, project, scheme, mark, view, selected, stacks) {
   const style = styleOf(project, mark.typeId);
   const radius = markRadius(view);
@@ -25470,7 +25498,8 @@ function drawingOpeningsByWall(project, schemeId) {
  * `options.active` — что подсвечено и ручками (только мастерская).
  * `options.wallAt` — подмена концов стены на время перетаскивания.
  * `options.openingAt` — подмена отступа проёма на то же время.
- * `options.handle` — чем рисовать ручку; без неё ручек нет.
+ * `options.handle` — чем рисовать ручку; без неё ручек нет. Ручки идут
+ *   **последним слоем**, поверх всего начерченного (`drawDrawingHandles`).
  * `options.labels` — `false` рисует чертёж без слов (буквы углов, имена
  *   объектов): так его просит миникарта объёма.
  * `options.hiddenObjectIds` — вещи, спрятанные с экрана поштучно (таск 154,
@@ -25500,34 +25529,82 @@ function drawDrawing(ctx, options = {}) {
       // Имя вещи спрашивается у модели: у вещи каталога оно каталожное, у
       // прежней — её собственное из справочника объекта (таск 154).
       name: labels ? schemeObjectNameOf(project, object) : "",
-      handle: options.handle,
     });
   }
-  if (options.walls === false) return;
-  const byWall = drawingOpeningsByWall(project, schemeId);
-  for (const wall of walls) {
-    const ends = options.wallAt ? options.wallAt(wall) : wall;
-    drawDrawingWall(ctx, bridge, ends, active && active.kind === "wall" && active.id === wall.id);
-  }
-  for (const wall of walls) {
-    const ends = options.wallAt ? options.wallAt(wall) : wall;
-    for (const opening of byWall.get(wall.id) || []) {
-      drawDrawingOpening(ctx, bridge, ends, options.openingAt ? options.openingAt(opening) : opening, {
-        active: active && active.kind === "opening" && active.id === opening.id,
-        handle: options.handle,
-      });
+  // Проём, который сейчас правят: его створку ручками показывает последний
+  // слой, и искать её там заново по стенам незачем.
+  let activeOpening = null;
+  if (options.walls !== false) {
+    const byWall = drawingOpeningsByWall(project, schemeId);
+    for (const wall of walls) {
+      const ends = options.wallAt ? options.wallAt(wall) : wall;
+      drawDrawingWall(ctx, bridge, ends, active && active.kind === "wall" && active.id === wall.id);
     }
+    for (const wall of walls) {
+      const ends = options.wallAt ? options.wallAt(wall) : wall;
+      for (const opening of byWall.get(wall.id) || []) {
+        const shown = options.openingAt ? options.openingAt(opening) : opening;
+        const live = Boolean(active && active.kind === "opening" && active.id === opening.id);
+        if (live) activeOpening = { wall: ends, opening: shown };
+        drawDrawingOpening(ctx, bridge, ends, shown, { active: live });
+      }
+    }
+    // Буквы углов — поверх стен и проёмов, но под разметкой: метка главнее
+    // обозначения стены, как и везде (G200). Вместе со слоем стен они и гаснут:
+    // буква без стены не значит ничего.
+    if (labels) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
   }
-  // Буквы углов — поверх стен и проёмов, но под разметкой: метка главнее
-  // обозначения стены, как и везде (G200). Вместе со слоем стен они и гаснут:
-  // буква без стены не значит ничего.
-  if (labels) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
-  if (!active || active.kind !== "wall" || !options.handle) return;
+  drawDrawingHandles(ctx, bridge, {
+    walls,
+    objects,
+    active,
+    activeOpening,
+    handle: options.handle,
+    wallAt: options.wallAt,
+    objectAt: options.objectAt,
+  });
+}
+
+/**
+ * Ручки правки — **последний слой чертежа** (дефект D45, снимок заказчика: «на
+ * чертеже точки, за которые можно менять размер объекта, рисуются под линией
+ * стены, а должны быть поверх»).
+ *
+ * Прежде каждый рисовал свои сам: углы вещи — `drawDrawingObject`, петлю и
+ * край створки — `drawDrawingDoor`, концы стены — хвост `drawDrawing`. Слой у
+ * ручки получался тот же, что у того, кому она принадлежит, — а вещи на полу
+ * лежат **под** стенами (так и задумано: стена на чертеже главная). Выходило,
+ * что у ванны, у столешницы и у радиатора — у всего, что к стене и приставлено,
+ * — ручка пропадала ровно под той линией, от которой вещь надо оттащить. То же
+ * и у створки двери: её ручки рисовались до букв углов и уходили под кружок
+ * буквы.
+ *
+ * Ручка — не часть чертежа, а место, куда класть руку: под чертежом ей делать
+ * нечего, и слой у неё один на всех — поверх стен, проёмов и букв.
+ */
+function drawDrawingHandles(ctx, bridge, { walls, objects, active, activeOpening, handle, wallAt, objectAt }) {
+  if (!handle || !active) return;
+  if (active.kind === "object") {
+    const object = objects.find((item) => item.id === active.id);
+    if (!object) return;
+    const shown = objectAt ? objectAt(object) : object;
+    for (const point of schemeObjectCorners(shown)) handle(ctx, bridge.toScreen(point));
+    return;
+  }
+  if (active.kind === "opening") {
+    if (!activeOpening || activeOpening.opening.kind !== OPENING_KIND_DOOR) return;
+    const leaf = drawingDoorLeaf(activeOpening.wall, activeOpening.opening);
+    if (!leaf) return;
+    handle(ctx, bridge.toScreen(leaf.hinge));
+    handle(ctx, bridge.toScreen(leaf.tip));
+    return;
+  }
+  if (active.kind !== "wall") return;
   const wall = walls.find((item) => item.id === active.id);
   if (!wall) return;
-  const ends = options.wallAt ? options.wallAt(wall) : wall;
-  options.handle(ctx, bridge.toScreen(ends.aMm));
-  options.handle(ctx, bridge.toScreen(ends.bMm));
+  const ends = wallAt ? wallAt(wall) : wall;
+  handle(ctx, bridge.toScreen(ends.aMm));
+  handle(ctx, bridge.toScreen(ends.bMm));
 }
 
 // Мельче этого буква угла на плане не ставится. Порог — экранная длина самой
@@ -25669,12 +25746,12 @@ function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
     ctx.stroke();
     ctx.setLineDash([]);
   } else if (opening.kind === OPENING_KIND_DOOR) {
-    drawDrawingDoor(ctx, bridge, wall, opening, colour, options);
+    drawDrawingDoor(ctx, bridge, wall, opening, colour);
   }
   ctx.restore();
 }
 
-function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
+function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
   const leaf = drawingDoorLeaf(wall, opening);
   if (!leaf) return;
   const hinge = bridge.toScreen(leaf.hinge);
@@ -25702,9 +25779,8 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour, options) {
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  if (!options.active || !options.handle) return;
-  options.handle(ctx, hinge);
-  options.handle(ctx, tip);
+  // Ручки петли и края створки — в последнем слое (`drawDrawingHandles`): здесь
+  // они ложились под буквы углов, а кружок буквы ровно на конце стены и стоит.
 }
 
 /**
@@ -25750,8 +25826,9 @@ function drawDrawingObject(ctx, bridge, object, options = {}) {
   ctx.setLineDash([]);
   drawDrawingCaption(ctx, object, corners, options.name, bridge);
   ctx.restore();
-  if (!options.active || !options.handle) return;
-  for (const point of corners) options.handle(ctx, point);
+  // Ручек здесь нет: углы выделенной вещи рисует последний слой чертежа
+  // (`drawDrawingHandles`, дефект D45) — вещи лежат под стенами, и ручка вместе
+  // с ними уходила под линию стены.
 }
 
 function drawDrawingPath(ctx, points) {
@@ -26509,7 +26586,7 @@ function drawScheme(ctx, {
   const stacks = markStacks(project, scheme, filter, state);
   drawMarkStackSpines(ctx, project, scheme, state, shown, stacks);
   for (const mark of shown) {
-    drawMarkBody(ctx, project, scheme, mark, state, selected.has(mark.id), stacks);
+    drawMarkSign(ctx, project, scheme, mark, state, { selected: selected.has(mark.id), stacks });
   }
   // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
   // дугу разбора. `links` — либо готовый кадр (его считает холст из того же
@@ -30049,6 +30126,9 @@ let canvasClipboard = null;
 // Последняя точка курсора на холсте в экранных пикселях. `null` значит, что
 // курсор ушёл с холста: тогда вставка целится не под него.
 let canvasCursor = null;
+// Метка-призрак под рукой: `{point, schemeId}` в долях плана — **уже с
+// притяжкой**. `null` — показывать нечего (таск 176, G263).
+let canvasGhost = null;
 // Серия вставок подряд: `{schemeId, x, y, count}`. Пока вставляют в то же
 // место, каждая следующая копия отступает на шаг — иначе метки лягут стопкой.
 let canvasPasteRun = null;
@@ -30281,6 +30361,12 @@ function canvasPaint() {
     draftLineStyle:
       state.activeTypeId && state.mode !== CANVAS_MODE_SCALE ? styleOf(project, state.activeTypeId).lineStyle : "solid",
   });
+  // Метка-призрак — **сразу за метками и до линейки**: поставленная метка
+  // ляжет ровно сюда же, и выглядеть призрак обязан так же. В `drawScheme` его
+  // нет вовсе — значит, в PNG, в печать и в лист «Схема» он не попадёт ни при
+  // каких отметках, как и направляющие рядом.
+  const ghostMark = canvasGhostMark(state, canvasPlaceSpot(canvasGhost, null, state.schemeId));
+  if (ghostMark) drawMarkSign(canvasCtx, project, scheme, ghostMark, view, { ghost: true });
   // Здесь `editable` отвечает только за ручки — поэтому и спрашивается про
   // них: в калибровке их нет.
   const editable = canvasHandlesShown(state);
@@ -30501,6 +30587,98 @@ function canvasPlacePoint(plan) {
   } catch (error) {
     canvasFail(error);
   }
+}
+
+// ——— метка-призрак под рукой (таск 176, G263) —————————————————————————
+//
+// Слова заказчика: «При добавлении метки так же рисуй под курсором её». «Так
+// же» — как у вещи чертежа (таск 168), и приём взят оттуда целиком, без
+// второго механизма:
+//
+//   рисует призрака **тот же код**, что и поставленную метку
+//     (`render.drawMarkSign` с приметой `ghost`) — фигура, цвет и величина
+//     знака те же, пунктиром и вполсилы;
+//   считается он **из той точки, из которой пойдёт постановка**
+//     (`canvasPlaceSpot`). В таске 168 на этом и попались: призрак считался от
+//     события движения руки, а клик — от события отпускания, и между ними
+//     разрешена вся мерка «рука поехала». На плане магнит мельче, чем сетка
+//     чертежа, но он есть: `GUIDE_SNAP_PX` — семь точек вокруг направляющей.
+//     Дрогнула рука на две точки поперёк её полосы — и метка села на семь
+//     точек в стороне от показанного, мимо перекрестия, ради которого
+//     направляющие и ставят.
+//
+// Призрака нет у метки-линии: её ведут вершинами, и до первого клика тянуть
+// резинку не от чего — ровно та же оговорка, что у росчерка в чертеже.
+// Комментарий тоже без призрака: он рисуется плашкой, а плашку рисует проход
+// подписей по её тексту, которого до постановки ещё не набрали.
+
+/**
+ * Метка, которую поставит клик, — или `null`, если показывать нечего.
+ *
+ * `point` — доли плана **с уже применённой** притяжкой к направляющим: та же
+ * точка, что уйдёт в `addMark`.
+ */
+function canvasGhostMark(state, point) {
+  if (!state || !point || !state.schemeId || !state.project) return null;
+  if (!canvasEditAllowed(state)) return null;
+  if (!canvasPlacesByClick(state) || canvasAddKind(state) !== "point") return null;
+  const typeId = canvasPlacedTypeId(state);
+  if (!typeId) return null;
+  // Метка настоящая во всём, кроме имени: номер ей выдаст модель при
+  // постановке, и обещать его призраком нельзя — пока рука ходит по плану,
+  // метку мог поставить второй человек с того же объекта.
+  return {
+    id: "",
+    schemeId: state.schemeId,
+    typeId,
+    number: 0,
+    kind: "point",
+    points: [point],
+    closed: false,
+    groupId: null,
+    labelOffset: null,
+  };
+}
+
+/**
+ * Точка постановки — **та самая, из которой нарисован призрак** (таск 176,
+ * вслед за 168).
+ *
+ * Клик приходит из события отпускания кнопки, а призрак нарисован по
+ * последнему движению руки; между ними разрешена вся мерка «рука поехала»
+ * (`canvasDragSlop`: три точки у мыши, десять у пальца). Сама по себе эта
+ * дрожь ничего не стоит — но притяжка к направляющей ловит точку в семи точках
+ * от неё (`GUIDE_SNAP_PX`), и граница этой полосы проходит где-то рядом всегда:
+ * дрогнула рука поперёк неё — и метка села не туда, куда показывал призрак.
+ *
+ * Сырой курсор остаётся запасным путём: призрака может не быть вовсе —
+ * например, палец на сенсорном экране касается, не наведя.
+ */
+function canvasPlaceSpot(ghost, plan, schemeId) {
+  if (!ghost || !ghost.point) return plan;
+  if (schemeId && ghost.schemeId !== schemeId) return plan;
+  return ghost.point;
+}
+
+// Пересчитать призрака под рукой. Отвечает, сменилось ли место: кадр
+// перерисовывается только тогда — мышь ходит по плану десятками шагов в
+// секунду.
+function canvasGhostUpdate(state) {
+  const scheme = canvasScheme(state);
+  const plan = scheme ? canvasCursorPlan(state, scheme, canvasViewOf(state)) : null;
+  const next =
+    plan && canvasPlacesByClick(state) ? { point: canvasGuideSnap(plan), schemeId: state.schemeId } : null;
+  const was = canvasGhost;
+  canvasGhost = next;
+  if (!was || !next) return Boolean(was) !== Boolean(next);
+  return was.schemeId !== next.schemeId || was.point.x !== next.point.x || was.point.y !== next.point.y;
+}
+
+// Призрак снимается вместе с курсором: рука ушла с холста — обещать нечего.
+function canvasGhostDrop() {
+  if (!canvasGhost) return false;
+  canvasGhost = null;
+  return true;
 }
 
 // Тип, который поставит следующий клик: выбранный в панели, пока он жив
@@ -32245,7 +32423,7 @@ function canvasTouchUp(state, drag, point, cancelled) {
   else if (kind === "vertex") {
     if (state.mode === "room") canvasOutlineClick(plan, point, false);
     else canvasLineClick(plan, point, false);
-  } else if (kind === "place") canvasPlacePoint(plan);
+  } else if (kind === "place") canvasPlacePoint(canvasPlaceSpot(canvasGhost, plan, state.schemeId));
   else if (kind === "select") {
     const patch = canvasTapAction(state, drag, {});
     if (patch) canvasApi.setState(patch);
@@ -32272,6 +32450,11 @@ function canvasPointerDown(event) {
     /* работаем без захвата */
   }
   canvasPointers.set(event.pointerId, canvasPointOf(event));
+  // Призрак пересчитывается и по нажатию, а не только по движению: палец на
+  // сенсорном экране касается, не наведя, и прежнее место под ним — с другого
+  // края плана. Постановка берёт точку у призрака, и он обязан быть свежим.
+  canvasCursor = canvasPointOf(event);
+  canvasGhostUpdate(canvasState());
 
   // Палец. Жест **всегда начинается панорамой** — иначе план перестанет
   // листаться, — а чем он был на самом деле, решают время и сдвиг:
@@ -32892,6 +33075,9 @@ function canvasPointerMove(event) {
     canvasRedraw();
   }
   if (canvasHoverUpdate(state, point)) canvasRedraw();
+  // Призрак идёт за рукой — и перерисовывается только тогда, когда его место
+  // сменилось: с притяжкой к направляющей оно меняется реже, чем курсор.
+  if (canvasGhostUpdate(state)) canvasRedraw();
   if (!canvasDrag) return;
   const shift = Math.hypot(point.x - canvasDrag.start.x, point.y - canvasDrag.start.y);
   if (shift > canvasDragSlop(canvasDrag)) {
@@ -33054,7 +33240,8 @@ function canvasPointerUp(event) {
     return;
   }
   if (drag.kind === "place") {
-    canvasPlacePoint(plan);
+    // Точка — у призрака: он её показал (таск 176, `canvasPlaceSpot`).
+    canvasPlacePoint(canvasPlaceSpot(canvasGhost, plan, state.schemeId));
     return;
   }
 }
@@ -33343,6 +33530,8 @@ function canvasKeyUp(event) {
 // известной», и копия садилась бы туда, где мыши давно нет.
 function canvasPointerLeave() {
   canvasCursor = null;
+  // Призрак уходит с курсором: обещать постановку там, где руки нет, нельзя.
+  if (canvasGhostDrop()) canvasRedraw();
   // Курсора над планом нет — и подсвеченной ручки быть не должно: иначе она
   // осталась бы гореть на последнем месте, где мышь ушла с холста.
   if (canvasHoverHandle) {
@@ -33358,6 +33547,7 @@ function canvasWindowBlur() {
   canvasPanRelease(null);
   canvasSpace = false;
   canvasCursor = null;
+  canvasGhostDrop();
   canvasSyncCursor();
 }
 
@@ -57676,6 +57866,37 @@ function workshopToolOf(mode, adding) {
   return "edit";
 }
 
+/**
+ * Что снимет `Esc` — **лесенка чертежа**, и она же лесенка плана (таск 176,
+ * G260). Слова заказчика: «По Esc должно отменяться добавление объекта, как и
+ * метки».
+ *
+ * На холсте Esc идёт сверху вниз по тому, что человек успел набрать: начатая
+ * ломаная, потом правка пути, потом выделение, и только последним — сам режим
+ * добавления (`canvasKeyDown`). В чертеже этой лесенки не хватало одной, самой
+ * нижней ступени: черновик снимался, выделение снималось, а занятие оставалось
+ * добавлением — и следующий клик по полю ставил ещё одну вещь, хотя человек
+ * уже дважды сказал «нет».
+ *
+ *   `draft` — начатая цепочка, полоса или контур: снимается **без записи**.
+ *     Esc это отказ, а не «дочерти» (тем занята смена занятия, `settleDraft`);
+ *   `selection` — выделенное: пока вещь выделена, вокруг неё ручки, и они
+ *     отбирают клик у соседней;
+ *   `mode` — само добавление: занятие возвращается к правке.
+ *
+ * Чистая и вынесена наружу затем, что порядок ступеней — это всё правило
+ * целиком: разойдись он с холстом, одна и та же клавиша делала бы на двух
+ * поверхностях разное.
+ */
+function workshopEscStep({ draft, selected, mode } = {}) {
+  if (draft) return "draft";
+  if (selected) return "selection";
+  // Режимов у окна ровно два (`WORKSHOP_MODES`), и спрашивается именно
+  // добавление, а не «всё, что не правка»: на незнакомом слове Esc обязан
+  // промолчать, а не переключать занятие наугад.
+  return mode === "add" ? "mode" : null;
+}
+
 // Пороги попадания в пикселях экрана, как у холста: иначе на разном масштабе
 // всё ведёт себя по-разному. Вершина ловится шире тела стены — ею правят, и
 // это своя мерка чертежа. А промах по стене прощается тот же, что на плане:
@@ -57838,6 +58059,52 @@ function workshopSnapMm(pointsMm, cursorMm, view, options = {}) {
     guides: snap.guides,
     grid: false,
   };
+}
+
+/**
+ * Опорная точка переноса — та, которой взятое под руку садится на узел сетки.
+ *
+ * У прямоугольника это **середина**: ею он и встаёт по клику
+ * (`workshopObjectRectAt`), и правило постановки здесь повторяется буква в
+ * букву. У полосы и у стены — **первая вершина**: на узлы в чертеже садятся
+ * вершины, и вершину же тащат за ручку.
+ */
+function workshopMoveAnchorMm(subject) {
+  if (!subject) return null;
+  if (subject.aMm) return { x: Number(subject.aMm.x), y: Number(subject.aMm.y) };
+  if (subject.shape === "polyline") {
+    const first = (subject.pointsMm || [])[0];
+    return first ? { x: Number(first.x), y: Number(first.y) } : null;
+  }
+  return subject.atMm ? { x: Number(subject.atMm.x), y: Number(subject.atMm.y) } : null;
+}
+
+/**
+ * На сколько уедет взятое под руку — **с притяжкой опорной точки к узлу**
+ * (дефект D40, снимок заказчика: «при изменении размера объекта он съезжает с
+ * сетки. двигается нужным шагом, но вот к сетке не притягивается»).
+ *
+ * Шаг считался от **точки нажатия**: `узел(курсор) − точка нажатия`. Узел
+ * ходит клетками по 500 мм, поэтому и шаг выходил кратным 500 — «двигается
+ * нужным шагом», — но к нему навсегда прибавлялось расстояние от места, за
+ * которое вещь взяли, до ближайшего узла. Взялись в 20 мм от узла — вещь так и
+ * ездит в 20 мм от сетки, сколько её ни таскай; взялись в 240 — в 240.
+ *
+ * Снято числами на сетке 500 мм: вещь серединой в узле (2000, 1500), взяли за
+ * край в 2480. Курсор 2600 → узел 2500 → шаг 20 → середина 2020; курсор 2900 →
+ * узел 3000 → шаг 520 → середина 2520; курсор 3400 → шаг 1020 → середина 3020.
+ * Шаг ровно 500, а середина мимо узла на 20 мм — всегда.
+ *
+ * Теперь притягивается **опорная точка самой вещи**, а не точка под рукой: к
+ * сырому ходу руки прибавляется опора, и уже она садится на узел — тем же
+ * `workshopSnapMm`, которым садится вершина и которым встаёт вещь по клику.
+ * Alt (`free`) снимает притяжку, как и везде: остаётся чистый ход руки.
+ */
+function workshopMoveDeltaMm(anchorMm, startMm, cursorMm, view, options = {}) {
+  const raw = { x: Number(cursorMm.x) - Number(startMm.x), y: Number(cursorMm.y) - Number(startMm.y) };
+  if (!anchorMm) return workshopRoundMm(raw);
+  const target = workshopSnapMm([], { x: anchorMm.x + raw.x, y: anchorMm.y + raw.y }, view, options).point;
+  return workshopRoundMm({ x: target.x - anchorMm.x, y: target.y - anchorMm.y });
 }
 
 /**
@@ -60318,6 +60585,10 @@ function createWorkshop({ api, hosts }) {
       start: { x: event.clientX, y: event.clientY, touch: event.pointerType === "touch" },
       moved: false,
     };
+    // Опора переноса: ею взятое садится на узел сетки (дефект D40). Берётся на
+    // нажатии — пока вещь ещё та, за которую взялись.
+    if (pick.kind === "object") drag.anchorMm = workshopMoveAnchorMm(findSchemeObject(project(), pick.id));
+    if (pick.kind === "wall") drag.anchorMm = workshopMoveAnchorMm(findWall(project(), pick.id));
     // Ручка пути: место, где она стоит, уже и есть ответ — клик по ней без
     // движения ставит вершину туда, где её нарисовали. Ровно так ведёт себя
     // холст (`canvasPathAddCommit` берёт точку нажатия, если рука не поехала).
@@ -60611,14 +60882,14 @@ function createWorkshop({ api, hosts }) {
       redraw();
       return;
     }
-    const snap = workshopSnapMm(
-      drag.kind === "vertex" ? vertexAnchor(drag) : [],
-      mmOf(event),
-      view,
-      { free: event.altKey, gridMm: workshopGridMm, gridSnap: workshopGridSnap },
-    );
-    if (drag.kind === "vertex") drag.toMm = snap.point;
-    else drag.deltaMm = workshopRoundMm({ x: snap.point.x - drag.startMm.x, y: snap.point.y - drag.startMm.y });
+    const options = { free: event.altKey, gridMm: workshopGridMm, gridSnap: workshopGridSnap };
+    if (drag.kind === "vertex") {
+      drag.toMm = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options).point;
+    } else {
+      // Переносят вещь или стену: к узлу притягивается **их** опорная точка, а
+      // не место, за которое взяли (дефект D40) — `workshopMoveDeltaMm`.
+      drag.deltaMm = workshopMoveDeltaMm(drag.anchorMm, drag.startMm, mmOf(event), view, options);
+    }
     redraw();
   }
 
@@ -60832,20 +61103,23 @@ function createWorkshop({ api, hosts }) {
       event.stopPropagation();
       return;
     }
-    if (event.key === "Escape" && draft) {
-      // Esc сперва отменяет цепочку, и только потом закрывает окно — та же
-      // лесенка, что у холста. Слушатель висит в фазе перехвата: иначе окно
-      // закрылось бы раньше, чем черновик успел отмениться.
+    if (event.key === "Escape") {
+      // Лесенка целиком — в `workshopEscStep`, здесь только исполнение.
+      // Слушатель висит в фазе перехвата: иначе окно закрылось бы раньше, чем
+      // черновик успел отмениться.
+      const step = workshopEscStep({ draft, selected, mode: mode() });
+      if (!step) return;
       event.preventDefault();
       event.stopPropagation();
-      draft = null;
-      sync();
-      return;
-    }
-    if (event.key === "Escape" && selected) {
-      event.preventDefault();
-      event.stopPropagation();
-      select(null);
+      if (step === "draft") {
+        draft = null;
+        sync();
+      } else if (step === "selection") {
+        select(null);
+      } else {
+        // Добавление кончилось — занятие возвращается к правке (G260).
+        setMode("select");
+      }
       return;
     }
     if (event.key === "Enter" && draft) {
