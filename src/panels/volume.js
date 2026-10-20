@@ -38,6 +38,7 @@ import {
   createVolumeParams,
   volumeParamsArrive,
   volumeParamsClock,
+  volumeParamsLine,
   volumeParamsRead,
   volumeParamsWatch,
 } from "./volumeParams.js";
@@ -83,6 +84,8 @@ import {
   volumeChannelLinks,
   volumeDoorAt,
   volumeClockStamp,
+  volumeClockText,
+  volumeDateShort,
   volumeDayDateOf,
   volumeDayTimes,
   volumeDraw,
@@ -95,6 +98,7 @@ import {
   volumeMarkAnchor,
   volumeMarkPlace,
   volumeMarkerFaces,
+  volumeModelKeys,
   volumeMoveTo,
   volumePickAt,
   volumeSightAt,
@@ -1037,13 +1041,31 @@ function createVolume({ api, hosts }) {
   // в снимок вида (таск 149), где указателю не место. Пустой: весь он в стилях
   // (`volume.css`), и читать его нечем — `aria-hidden`.
   const aimNode = uiEl("div", { class: "volume__aim", attrs: { hidden: "hidden", "aria-hidden": "true" } });
+  // Дата и час симуляции — полосой в правом нижнем углу поля (таск 191, G300).
+  //
+  // Слова заказчика: «Справа снизу в Объёме пиши текущие дату и время
+  // симуляции». До этого они жили только в окне параметров: закрыл окно — и при
+  // ускорении в 480 раз непонятно, какой час на объекте, а по кадру час
+  // угадывается разве что до «день или ночь».
+  //
+  // Правый угол, а не левый: слева внизу стоят миникарта (G212) и столбик
+  // стойки (таск 163), и они там по прямому слову заказчика.
+  //
+  // Строку пишет **тот же снимок часа**, который красит небо (`refreshHour`), и
+  // другого времени у поля нет: заведи полоса свои часы — они разошлись бы с
+  // небом на первой же правке ускорения. Отсюда и частота: раз в секунду, а при
+  // остановленном времени таймера нет вовсе (G282) — полоса стоит и не мигает.
+  const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } });
   // Подсказка по управлению — плашка **слева** со знаком «?» (G228): правило
   // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
   // стоит сводка, а ещё правее — кнопка полноэкранного показа.
   const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
-  // Параметры объёма — третья ячейка правого верхнего угла (таск 181, G273):
-  // полный экран, смена вида, параметры. Разбор, почему дверь одна и почему
-  // она на поле во всех раскладках, — в `panels/volumeParams.js`.
+  // Параметры объёма — **левый** верхний угол поля (таск 191, G291): «кнопку
+  // настроек отображения в 3д режиме перенеси налево». Таск 181 ставил её
+  // третьей ячейкой правого угла; теперь левый угол устроен тем же столбиком
+  // ячеек, кнопка в нём первая, а подсказка со знаком «?» уступает ей угол и
+  // встаёт второй (`volume.css`). Разбор, почему дверь одна и почему она на
+  // поле во всех раскладках, — в `panels/volumeParams.js`.
   //
   // Час и рассвет окно спрашивает **у поля**, а не считает само: иначе в сборке
   // стало бы два ответа на вопрос «который час в объёме», и расходились бы они
@@ -1066,6 +1088,7 @@ function createVolume({ api, hosts }) {
     viewButton,
     paramsButton.node,
     aimNode,
+    clockNode,
     hintPlate.node,
     askBox,
   ]);
@@ -1336,7 +1359,28 @@ function createVolume({ api, hosts }) {
       kind: volumeParamsRead().kind,
     });
     refreshShadow();
+    syncClockLine(stamp, at);
     return hour;
+  }
+
+  /**
+   * Что написано в полосе часов (таск 191, G300).
+   *
+   * Снимок приходит готовым — тот самый, которым покрашено небо: второго счёта
+   * времени у поля нет. Подсказка на полосе — та же строка, что в окне
+   * параметров (`volumeParamsLine`): она отвечает на вопрос «почему не идёт»,
+   * когда время остановлено, и на «как быстро идёт» при ускорении.
+   */
+  function syncClockLine(stamp, nowMs) {
+    clockNode.hidden = scene.empty;
+    if (scene.empty) return;
+    clockNode.textContent = text("volume.clockCorner", {
+      date: volumeDateShort(stamp.day),
+      time: volumeClockText(stamp.minutes),
+    });
+    const line = volumeParamsLine(volumeParamsClock(nowMs), stamp.minutes, hour ? hour.phase : null);
+    clockNode.title = line;
+    clockNode.setAttribute("aria-label", line);
   }
 
   /**
@@ -1507,6 +1551,16 @@ function createVolume({ api, hosts }) {
     return volumeChannelAt(shown, at.x, at.y);
   }
 
+  /**
+   * Сколько клавиш нарисовано у метки: спрашивается у её же тела
+   * (`volumeModelKeys`), второго счёта клавиш в сборке нет. Одна клавиша —
+   * особый случай отбора связей (таск 191, D50).
+   */
+  function keysOf(markId) {
+    const place = markId ? volumeMarkPlace(scene, markId) : null;
+    return volumeModelKeys(place && place.model);
+  }
+
   function pickChannel(found) {
     const was = channelPick;
     const same = was && found && was.markId === found.markId && was.channel === found.channel;
@@ -1520,9 +1574,24 @@ function createVolume({ api, hosts }) {
     // а нагрузки на ней нет.
     const state = getState();
     const scheme = state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    const links = scheme ? volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick) : null;
+    const all = scheme ? canvasFrameLinks(state, null, scheme) : null;
+    const links = all ? volumeChannelLinks(all, channelPick, keysOf(found.markId)) : null;
     const empty = !links || links.lines.length === 0;
-    notify(text(empty ? "volume.channelEmpty" : "volume.channelPicked", { channel: found.channel }), "info");
+    if (!empty) {
+      notify(text("volume.channelPicked", { channel: found.channel }), "info");
+      return;
+    }
+    // Клавиша пуста — но пуста ли она **по данным**? У многоклавишной метки
+    // связь без номера канала не принадлежит ни одной клавише (правило таска
+    // 177: какая из четырёх — в данных не записано), и молчать об этом нельзя:
+    // человек видит в «Чем управляет» нагрузки, а на кадре — пустую клавишу, и
+    // читает это как поломку. Поэтому такой случай говорит о себе и зовёт туда,
+    // где это чинится — проставить канал у связи.
+    const mute = ((all && all.lines) || []).filter(
+      (line) => line.fromId === found.markId && (line.channel === null || line.channel === undefined),
+    ).length;
+    const where = { channel: found.channel, count: mute };
+    notify(text(mute > 0 ? "volume.channelUnnumbered" : "volume.channelEmpty", where), "info");
   }
 
   // Рамка выделенного и стрелки связей. Правила, какие связи показывать, —
@@ -1544,8 +1613,13 @@ function createVolume({ api, hosts }) {
     const scheme = findScheme(state.project, schemeId);
     if (!scheme) return;
     // Правила, какие связи бывают, — плановые целиком; канал только сужает их
-    // до одной клавиши (таск 177, G274).
-    const links = volumeChannelLinks(canvasFrameLinks(state, null, scheme), channelPick);
+    // до одной клавиши (таск 177, G274), а у одноклавишной метки берёт себе и
+    // связи без номера (таск 191, D50).
+    const links = volumeChannelLinks(
+      canvasFrameLinks(state, null, scheme),
+      channelPick,
+      channelPick ? keysOf(channelPick.markId) : 0,
+    );
     volumeLinkLines(links, (id) => volumeMarkAnchor(scene, id), overlay);
   }
 
@@ -1567,11 +1641,7 @@ function createVolume({ api, hosts }) {
   function channelKeys() {
     if (channelPick) return true;
     if (scene.empty) return false;
-    for (const id of selectedIds()) {
-      const place = volumeMarkPlace(scene, id);
-      const parts = (place && place.model && place.model.parts) || [];
-      if (parts.some((part) => part.channel > 1)) return true;
-    }
+    for (const id of selectedIds()) if (keysOf(id) > 1) return true;
     return false;
   }
 
@@ -2842,6 +2912,11 @@ function createVolume({ api, hosts }) {
     // площадки.
     const noWalk = !touching || view !== "person" || scene.empty;
     padNode.hidden = noWalk;
+    // Полоса часов стоит в том же углу, что площадка ходьбы, и уступает ей:
+    // площадкой ходят не глядя, и накрывать её строкой нельзя. Подъём — ровно
+    // на площадку, мерой самой площадки (`volume.css`), без своих чисел.
+    clockNode.classList.toggle("volume__clock--overPad", !noWalk);
+    clockNode.hidden = scene.empty;
     if (padNode.hidden) padEnd(null);
     stanceBox.hidden = noWalk;
     if (stanceBox.hidden) crouchRelease(null);
