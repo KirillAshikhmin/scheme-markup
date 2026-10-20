@@ -51,6 +51,7 @@ import {
   wallsOnScheme,
   setMarkControls,
   setRoomWallHeight,
+  setSchemeAnchor,
   setSchemeFloor,
   setSchemeWallHeight,
   styleOf,
@@ -229,6 +230,18 @@ import {
   volumeBackdropKindOf,
   volumeShadowShift,
   volumeShade,
+  volumeFloorPlan,
+  volumeStairLanding,
+  VOLUME_HEAD_MM,
+  VOLUME_LANDING_GAP_MM,
+  volumeFloorLayer,
+  volumeFloorFaces,
+  volumeFloorTopMm,
+  volumeFacesSpan,
+  volumeSchemeOriginMm,
+  volumeStackScene,
+  volumeOrderStack,
+  VOLUME_SLAB_MM,
   volumeFloors,
   volumeStairNear,
   volumeStairs,
@@ -255,6 +268,7 @@ import {
   volumePlanViewAt,
   volumeMinimapView,
   volumeNotes,
+  volumeStackLine,
   volumeFieldBottom,
   VOLUME_FIELD_EDGE,
   volumePadVector,
@@ -277,6 +291,8 @@ import {
   volumeParamsSpeed,
   volumeParamsSunLine,
   volumeDayLabel,
+  volumeFloorsNote,
+  volumeFloorOptionLabel,
   volumePhaseWord,
   volumeSpeedLabel,
 } from "../src/panels/volumeParams.js";
@@ -5659,4 +5675,451 @@ test("подсказка пальцем не обещает клавиш, кот
   assert.equal(touch.includes("E открывает"), false, "пальцем клавиши E нет вовсе: " + touch);
   // Дверей нет — строки нет ни там, ни там.
   assert.equal(volumeDoorLine([], open, null, true), "");
+});
+
+// ——— стопка этажей (таск 202, G307) ——————————————————————————————————————
+
+/**
+ * Ещё один этаж тем же чертежом: комната 4 × 3 м в своих стенах, своя высота,
+ * свой номер. План у каждой схемы свой, поэтому масштаб и начало координат
+ * ставятся заново — иначе контур помещения не привязать к чертежу.
+ */
+function addFloor(project, { name, imageId, floor, heightMm, roomHeightMm = null }) {
+  const added = addScheme(project, { name, imageId, width: 1200, height: 800 });
+  let next = setPlanScale(added.project, added.scheme.id, {
+    a: { x: 0.1, y: 0.5 },
+    b: { x: 0.6, y: 0.5 },
+    meters: 6,
+  }).project;
+  next = setPlanOrigin(next, added.scheme.id, { at: { x: 0.5, y: 0.5 }, turn: 0 }).project;
+  next = setSchemeWallHeight(next, added.scheme.id, heightMm).project;
+  const half = { x: 2000, y: 1500 };
+  const corners = [
+    { x: -half.x, y: -half.y },
+    { x: half.x, y: -half.y },
+    { x: half.x, y: half.y },
+    { x: -half.x, y: half.y },
+  ];
+  const walls = [];
+  for (let index = 0; index < corners.length; index += 1) {
+    const put = addWall(next, {
+      schemeId: added.scheme.id,
+      aMm: corners[index],
+      bMm: corners[(index + 1) % corners.length],
+      thicknessMm: 200,
+    });
+    next = put.project;
+    walls.push(put.wall.id);
+  }
+  const room = addRoom(next, name + " · комната");
+  next = room.project;
+  const inner = [
+    { x: -half.x + 100, y: -half.y + 100 },
+    { x: half.x - 100, y: -half.y + 100 },
+    { x: half.x - 100, y: half.y - 100 },
+    { x: -half.x + 100, y: half.y - 100 },
+  ];
+  next = addOutline(next, {
+    schemeId: added.scheme.id,
+    roomId: room.room.id,
+    points: inner.map((point) => planMmToFraction(next, added.scheme.id, point)),
+  }).project;
+  if (roomHeightMm) next = setRoomWallHeight(next, room.room.id, roomHeightMm).project;
+  next = setSchemeFloor(next, added.scheme.id, floor).project;
+  return { project: next, schemeId: added.scheme.id, walls, roomId: room.room.id };
+}
+
+/** Дом в три этажа: 2700, 3000 и 2800 мм — высоты нарочно разные. */
+function houseScene() {
+  const first = sunScene();
+  let project = setSchemeFloor(first.project, first.schemeId, 1).project;
+  const second = addFloor(project, { name: "2 этаж", imageId: "plan-2", floor: 2, heightMm: 3000 });
+  const third = addFloor(second.project, { name: "3 этаж", imageId: "plan-3", floor: 3, heightMm: 2800 });
+  return { project: third.project, first: first.schemeId, second: second.schemeId, third: third.schemeId };
+}
+
+const houseStack = (project, schemeId, options = {}) =>
+  volumeStackScene(project, volumeFloorPlan(project, schemeId), () => options);
+
+test("этажи стоят друг на друге: своя высота у каждого плюс перекрытие", () => {
+  const house = houseScene();
+  // Высота этажа — потолок схемы: 2700, 3000, 2800. Складываются они по
+  // очереди, а не умножением одной на число этажей.
+  assert.equal(volumeFloorTopMm(house.project, house.first), 2700);
+  assert.equal(volumeFloorTopMm(house.project, house.second), 3000);
+  assert.equal(VOLUME_SLAB_MM, 200);
+  const fromFirst = volumeFloorPlan(house.project, house.first);
+  assert.deepEqual(
+    fromFirst.floors.map((item) => [item.floor, item.baseMm, item.heightMm]),
+    [
+      [1, 0, 2700],
+      [2, 2900, 3000],
+      [3, 6100, 2800],
+    ],
+    "снизу вверх: 2700+200=2900, затем 2900+3000+200=6100",
+  );
+  assert.equal(fromFirst.can, true);
+  assert.equal(fromFirst.why, null);
+  // Отсчёт идёт от того этажа, на котором стоит человек: у него ноль, у
+  // нижнего — минус. Разницы при этом те же.
+  const fromSecond = volumeFloorPlan(house.project, house.second);
+  assert.deepEqual(
+    fromSecond.floors.map((item) => item.baseMm),
+    [-2900, 0, 3200],
+  );
+  // Своё число комнаты поднимает этаж целиком: перекрытие выше не срезает ей
+  // потолок.
+  const tall = addFloor(house.project, {
+    name: "4 этаж",
+    imageId: "plan-4",
+    floor: 4,
+    heightMm: 2700,
+    roomHeightMm: 3300,
+  });
+  assert.equal(volumeFloorTopMm(tall.project, tall.schemeId), 3300, "потолок этажа — самая высокая его стена");
+});
+
+test("дыра в нумерации не оставляет пустого места, а на номер берётся один план", () => {
+  const first = sunScene();
+  let project = setSchemeFloor(first.project, first.schemeId, 1).project;
+  // Этажа 2 нет вовсе: третий встаёт на первый, выдумывать пропущенному высоту
+  // нечем.
+  const third = addFloor(project, { name: "3 этаж", imageId: "plan-3", floor: 3, heightMm: 2800 });
+  project = third.project;
+  const hole = volumeFloorPlan(project, first.schemeId);
+  assert.deepEqual(
+    hole.floors.map((item) => [item.floor, item.baseMm]),
+    [
+      [1, 0],
+      [3, 2900],
+    ],
+    "между 1 и 3 пустого этажа не выдумано",
+  );
+  // Два плана на одном номере: в стопке один, второй назван вслух и цел.
+  const mirror = addFloor(project, { name: "3 этаж, зеркальный", imageId: "plan-3m", floor: 3, heightMm: 2800 });
+  project = mirror.project;
+  const pair = volumeFloorPlan(project, first.schemeId);
+  assert.deepEqual(
+    pair.floors.map((item) => item.name),
+    ["1 этаж", "3 этаж"],
+    "первый по порядку схем остаётся на номере",
+  );
+  assert.deepEqual(
+    pair.doubles.map((item) => item.name),
+    ["3 этаж, зеркальный"],
+  );
+  // Открытая схема на номере главнее: человек смотрит на неё.
+  const open = volumeFloorPlan(project, mirror.schemeId);
+  assert.deepEqual(
+    open.floors.map((item) => item.name),
+    ["1 этаж", "3 этаж, зеркальный"],
+  );
+  assert.deepEqual(
+    open.doubles.map((item) => item.name),
+    ["3 этаж"],
+  );
+  // Обе схемы целы: лестница по-прежнему предлагает и ту, и другую (таск 149).
+  assert.equal(volumeFloors(project, first.schemeId).options.length, 2);
+  assert.ok(volumeFloorsNote(pair, true).includes("нарисован дважды"));
+});
+
+test("«Все этажи» недоступны, пока этажи не заданы, и сказано почему словом", () => {
+  const bare = sunScene();
+  const none = volumeFloorPlan(bare.project, bare.schemeId);
+  assert.deepEqual([none.can, none.why, none.floors.length], [false, "none", 0]);
+  // Этаж задан одной схеме — стопке нужны две.
+  const one = setSchemeFloor(bare.project, bare.schemeId, 1).project;
+  const single = volumeFloorPlan(one, bare.schemeId);
+  assert.deepEqual([single.can, single.why, single.floors.length], [false, "one", 1]);
+  // Этажи есть, а у открытой схемы номера нет: места в стопке ей негде.
+  const house = houseScene();
+  const extra = addScheme(house.project, { name: "Развёртка", imageId: "plan-x", width: 1200, height: 800 });
+  const loose = addWall(extra.project, {
+    schemeId: extra.scheme.id,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 1000, y: 0 },
+    thicknessMm: 100,
+  }).project;
+  const outside = volumeFloorPlan(loose, extra.scheme.id);
+  assert.deepEqual([outside.can, outside.why], [false, "noFloor"]);
+  assert.equal(outside.floors.length, 3, "сами этажи видны — выбрать один из них можно");
+  // Молчания нет ни в одном случае: тикет требует сказать причину словом.
+  for (const plan of [none, single, outside]) {
+    assert.ok(volumeFloorsNote(plan, true).length > 20, "причина названа: " + volumeFloorsNote(plan, true));
+  }
+  assert.ok(volumeFloorsNote(volumeFloorPlan(house.project, house.first), false).length > 0);
+  assert.equal(volumeFloorOptionLabel({ floor: 2, name: "2 этаж" }), "Этаж 2 · 2 этаж");
+  // Нет стопки — нет и строки сводки про этажи.
+  assert.equal(volumeStackLine(volumeScene(house.project, house.first), none), "");
+});
+
+test("стопка остаётся сценой своего этажа: ходьба, метки, лестница и миникарта — его", () => {
+  const house = houseScene();
+  const alone = volumeScene(house.project, house.second);
+  const stack = houseStack(house.project, house.second);
+  assert.equal(stack.stackMm.count, 3);
+  for (const field of ["solids", "rooms", "marks", "unplaced", "doors", "stairs"]) {
+    assert.deepEqual(stack[field].length, alone[field].length, field + ": считано по своему этажу");
+  }
+  assert.deepEqual([stack.wallCount, stack.openingCount], [alone.wallCount, alone.openingCount]);
+  assert.deepEqual(stack.boundsMm, alone.boundsMm, "миникарта и перенос кликом — по своей схеме");
+  assert.equal(stack.heightMm, alone.heightMm);
+  // Граней стало втрое больше — ровно на столько, сколько дают соседние этажи.
+  assert.ok(stack.faces.length > alone.faces.length * 2, stack.faces.length + " против " + alone.faces.length);
+});
+
+test("у этажа, на котором не стоишь, хозяев нет: ни выделения, ни дверей", () => {
+  const house = houseScene();
+  const stack = houseStack(house.project, house.first);
+  const own = new Set(stack.marks.map((place) => place.markId));
+  const owners = stack.faces.filter((face) => face.markId);
+  assert.ok(owners.every((face) => own.has(face.markId)), "чужие метки в кадре есть, а хозяев у них нет");
+  const doors = stack.faces.filter((face) => face.doorId);
+  assert.ok(doors.every((face) => (stack.doors || []).includes(face.doorId)));
+  // Свой этаж хозяев не терял: окно первого этажа по-прежнему выделяется.
+  const mine = volumeScene(house.project, house.first);
+  assert.equal(
+    stack.faces.filter((face) => face.markId).length,
+    mine.faces.filter((face) => face.markId).length,
+  );
+});
+
+test("грани чужого этажа встали на его базу, а свои остались на месте", () => {
+  const house = houseScene();
+  const alone = volumeFacesSpan(volumeScene(house.project, house.first).faces);
+  const stack = houseStack(house.project, house.first);
+  const span = volumeFacesSpan(stack.faces);
+  assert.equal(span.minZ, alone.minZ, "свой этаж не сдвинулся ни на миллиметр");
+  // Верх стопки — потолок третьего этажа: 2900 + 3000 + 200 + 2800 = 8900.
+  assert.ok(span.maxZ >= 8900 - 1 && span.maxZ <= 8900 + 1, "верх стопки: " + span.maxZ);
+  assert.deepEqual(stack.stackMm.bottomMm, 0);
+  assert.equal(stack.stackMm.topMm, 8900);
+  // «Вся схема» наводится на середину стопки, а не на середину своего этажа.
+  const fit = volumeAroundFit(stack, { width: 900, height: 700 });
+  assert.equal(fit.target.z, 4450);
+  assert.ok(fit.distance > volumeAroundFit(volumeScene(house.project, house.first), { width: 900, height: 700 }).distance);
+});
+
+test("дерево порядка сшивает этажи плоскостью, а не пересобирается целиком", () => {
+  const house = houseScene();
+  const stack = houseStack(house.project, house.first);
+  const bodies = stack.faces.filter((face) => !face.line && face.layer === VOLUME_LAYER_BODY);
+  // Сшитое дерево режет **не больше** общего: резы внутри этажа остались его
+  // резами, а между этажами их нет вовсе — там плоскость.
+  const whole = volumeOrderTree(bodies);
+  assert.ok(stack.order.count >= bodies.length);
+  assert.ok(stack.order.count <= whole.count, stack.order.count + " против " + whole.count + " одним деревом");
+  // Шов — горизонтальная плоскость между этажами, а не чья-то стена.
+  assert.deepEqual([stack.order.plane.x, stack.order.plane.y, stack.order.plane.z], [0, 0, 1]);
+  assert.ok(stack.order.plane.d > 2700 && stack.order.plane.d < 6100, "шов между вторым и третьим: " + stack.order.plane.d);
+  assert.deepEqual(stack.order.same, []);
+  // Обход от дальнего к ближнему: сверху последними идут грани верхнего этажа,
+  // снизу — нижнего. Это и есть проверка, что шов работает в обе стороны.
+  const above = volumeOrderWalk(stack.order, { x: 0, y: 0, z: 20000 });
+  const below = volumeOrderWalk(stack.order, { x: 0, y: 0, z: -5000 });
+  const high = (face) => Math.max(...face.p.map((point) => point.z));
+  assert.ok(high(above[above.length - 1]) > 6000, "сверху ближе всех третий этаж");
+  assert.ok(high(below[below.length - 1]) < 2800, "снизу ближе всех первый");
+  assert.equal(above.length, below.length);
+  assert.equal(volumeOrderStack([]), null);
+});
+
+test("перекрытие рисуется: земля у дома одна, у этажей выше — плита пола", () => {
+  const house = houseScene();
+  const stack = houseStack(house.project, house.first);
+  // Зелёная земля с выносом под тень — только под нижним этажом.
+  const land = stack.faces.filter((face) => face.rgb === VOLUME_LAND_RGB || face.flat === true);
+  assert.equal(land.filter((face) => face.layer === VOLUME_LAYER_BASE).length, 1, "земля одна на дом");
+  assert.ok(stack.landMm, "фон знает, где кончается земля сцены (D52)");
+  // У второго этажа плита стала перекрытием: габарит чертежа, цвет пола, без
+  // выноса. Лежит она на его базе.
+  const decks = stack.faces.filter(
+    (face) =>
+      face.n.z === 1 &&
+      face.p.every((point) => point.z === 2900) &&
+      face.rgb === VOLUME_FLOOR_RGB &&
+      !face.flat,
+  );
+  assert.ok(decks.length > 0, "перекрытие второго этажа нарисовано");
+  const wide = decks.find((face) => Math.max(...face.p.map((point) => point.x)) >= 2000);
+  assert.ok(wide, "перекрытие кладётся на весь габарит чертежа, а не только по комнатам");
+  // Смотрят перекрытия вверх, значит снизу их не видно вовсе: потолок первого
+  // этажа остаётся его потолком.
+  assert.ok(decks.every((face) => face.n.z > 0));
+});
+
+test("пятно солнца лежит на своём этаже и рисуется раньше перекрытия верхнего", () => {
+  const house = houseScene();
+  const stack = houseStack(house.project, house.first);
+  // Окно есть только на первом этаже стенда — и пятно от него тоже.
+  const spots = stack.sunSpots.filter((spot) => spot.baseMm === 0);
+  assert.ok(spots.length > 0);
+  assert.ok(stack.sunSpots.every((spot) => Number.isFinite(spot.baseMm) && Number.isFinite(spot.layer)));
+  const faces = volumeSunSpotFaces(stack.sunSpots, { az: 90, rise: 30, fade: 1 });
+  assert.ok(faces.length > 0);
+  assert.ok(faces.every((face) => face.p.every((point) => point.z === 0)), "пятно лежит на полу своего этажа");
+  // Ярусы: всё плоское нижнего этажа — раньше всего плоского верхнего, и всё
+  // это раньше тел.
+  const lowSun = volumeFloorLayer(VOLUME_LAYER_SUN, 0, 3);
+  const highGround = volumeFloorLayer(VOLUME_LAYER_GROUND, 1, 3);
+  assert.ok(lowSun < highGround, lowSun + " < " + highGround);
+  assert.ok(volumeFloorLayer(VOLUME_LAYER_SUN, 2, 3) < VOLUME_LAYER_BODY);
+  assert.ok(volumeFloorLayer(VOLUME_LAYER_GROUND, 0, 3) === VOLUME_LAYER_GROUND);
+  // При одном этаже ярусы — ровно прежние числа: кадр одной схемы не меняется.
+  assert.equal(volumeFloorLayer(VOLUME_LAYER_GROUND, 0, 1), VOLUME_LAYER_GROUND);
+  assert.equal(volumeFloorLayer(VOLUME_LAYER_SUN, 0, 1), VOLUME_LAYER_SUN);
+  assert.equal(volumeFloorLayer(VOLUME_LAYER_SHADOW, 1, 3), VOLUME_LAYER_SHADOW, "тень не этажная: земля одна");
+  assert.equal(volumeFloorLayer(VOLUME_LAYER_MARK, 2, 3), VOLUME_LAYER_MARK);
+});
+
+test("тень на землю кладут все этажи разом, а ложится она под нижним", () => {
+  const house = houseScene();
+  const stack = houseStack(house.project, house.second);
+  const ground = stack.stackMm.bottomMm;
+  assert.equal(ground, -2900);
+  assert.ok(stack.shadowBoxes.length > 0);
+  assert.ok(stack.shadowBoxes.every((box) => box.baseMm === ground), "тень у всех этажей на одной земле");
+  const tallest = Math.max(...stack.shadowBoxes.map((box) => box.heightMm));
+  assert.equal(tallest, 8900, "третий этаж отбрасывает тень со своей высоты над землёй");
+  const faces = volumeShadowFaces(stack.shadowBoxes, { az: 90, rise: 14, fade: 1 });
+  assert.ok(faces.length > 0);
+  assert.ok(faces.every((face) => face.p.every((point) => point.z === ground)));
+});
+
+test("шов совмещения схем: стопка спрашивает смещение одной функцией (таск 205)", () => {
+  const house = houseScene();
+  assert.deepEqual(volumeSchemeOriginMm(house.project, house.second), { x: 0, y: 0 }, "привязки нет — ноль");
+  const plan = volumeFloorPlan(house.project, house.first);
+  assert.ok(plan.floors.every((item) => item.shiftMm.x === 0 && item.shiftMm.y === 0));
+  // Сдвиг доезжает до граней: подключив привязку, таск 205 получит совмещение
+  // без правок в стопке.
+  const faces = [{ p: [{ x: 10, y: 20, z: 30 }], layer: VOLUME_LAYER_BODY, markId: "м", doorId: "д" }];
+  volumeFloorFaces(faces, { baseMm: 100, shiftMm: { x: 5, y: -7 }, index: 1, count: 2, own: false });
+  assert.deepEqual(faces[0].p[0], { x: 15, y: 13, z: 130 });
+  assert.deepEqual([faces[0].markId, faces[0].doorId], [null, null]);
+});
+
+test("G68: стопка этажей не меняет объект ни одним полем", () => {
+  const house = houseScene();
+  const before = JSON.stringify(house.project);
+  houseStack(house.project, house.first);
+  houseStack(house.project, house.third);
+  volumeFloorPlan(house.project, house.second);
+  assert.equal(JSON.stringify(house.project), before, "объект изменился — это запрещено прямо (G68)");
+  // Объект прежней сборки этажей не знает — и стопки у него не бывает.
+  const legacy = JSON.parse(readFileSync(join(HERE, "legacy-project.json"), "utf8"));
+  const kept = JSON.stringify(legacy);
+  for (const scheme of legacy.schemes) {
+    const plan = volumeFloorPlan(legacy, scheme.id);
+    assert.deepEqual([plan.can, plan.why, plan.floors.length], [false, "none", 0]);
+    assert.equal(volumeStackScene(legacy, plan, () => ({})), null, "стопке не из чего собираться");
+  }
+  assert.equal(JSON.stringify(legacy), kept);
+});
+
+// ——— прибытие по лестнице (дефект D58) ——————————————————————————————————
+
+test("по лестнице человек выходит у лестницы, а не в середине плана (D58)", () => {
+  const stair = stairScene();
+  const scene = volumeScene(stair.project, stair.schemeId);
+  const landing = volumeStairLanding(scene, { x: 1500, y: 1200 });
+  assert.ok(landing, "лестница на этаже есть — площадка найдена");
+  assert.equal(landing.objectId, stair.objectId);
+  assert.equal(landing.paired, false, "выхода с лестницы нет — встали у самого марша");
+  // Встали **рядом** с маршем: не внутри габарита и не дальше тела с запасом.
+  const away = Math.hypot(landing.x + 1200, landing.y - 0);
+  assert.ok(away > 550, "внутри марша не стоим: " + Math.round(away));
+  assert.ok(away < 1100 + 2700 / 2 + VOLUME_BODY_MM + VOLUME_LANDING_GAP_MM + 1, "и не улетели: " + Math.round(away));
+  // Лицом прочь от лестницы: взгляд смотрит из её середины в выбранное место.
+  const look = { x: Math.cos(landing.yaw), y: Math.sin(landing.yaw) };
+  const to = { x: landing.x + 1200, y: landing.y };
+  assert.ok(look.x * to.x + look.y * to.y > 0, "смотрим в комнату, а не в ступени");
+  // В помещении, а не в стене и не на улице.
+  assert.ok(volumeRoomAt(scene, landing) !== null, "площадка внутри комнаты");
+  assert.ok(volumeFreeMm(scene.solids, landing.x, landing.y) > VOLUME_BODY_MM, "в стене не стоим");
+  // Лестницы нет вовсе — площадки нет, и решает это вызывающий (прежнее
+  // правило «то же место плана»).
+  assert.equal(volumeStairLanding(volumeScene(roomScene().project, roomScene().schemeId), { x: 0, y: 0 }), null);
+});
+
+test("из двух лестниц берётся та, что ближе к месту ухода", () => {
+  const first = stairScene({ atMm: { x: -1200, y: 0 } });
+  const second = addSchemeObject(first.project, {
+    schemeId: first.schemeId,
+    kindId: stairsKindId(first.project),
+    shape: "rect",
+    atMm: { x: 1200, y: 0 },
+    widthMm: 1100,
+    depthMm: 2700,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  const scene = volumeScene(second.project, first.schemeId);
+  assert.equal(scene.stairs.length, 2);
+  assert.equal(volumeStairLanding(scene, { x: -1500, y: 0 }).objectId, first.objectId);
+  assert.equal(volumeStairLanding(scene, { x: 1500, y: 0 }).objectId, second.schemeObject.id);
+});
+
+test("поднялись по маршу — вышли у выхода, спустились от выхода — сошли у марша (таск 204)", () => {
+  const stair = stairScene();
+  // Выход с лестницы — вещь каталога 204: ставится как любая другая.
+  const exit = addSchemeObject(stair.project, {
+    schemeId: stair.schemeId,
+    catalogKey: "stairsExit",
+    shape: "rect",
+    atMm: { x: 1200, y: 0 },
+    widthMm: 1100,
+    depthMm: 2700,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  const scene = volumeScene(exit.project, stair.schemeId);
+  assert.equal(scene.stairs.length, 2, "марш и выход — обе вещи лестничной клетки");
+  assert.deepEqual(
+    scene.stairs.map((place) => place.key).sort(),
+    ["stairs", "stairsExit"],
+    "у каждой записано, марш это или выход",
+  );
+  // Поднялись по маршу — прибытие у выхода, даже если марш ближе к месту ухода.
+  const up = volumeStairLanding(scene, { x: -1200, y: 0 }, VOLUME_HEAD_MM, "stairs");
+  assert.equal(up.objectId, exit.schemeObject.id);
+  assert.equal(up.key, "stairsExit");
+  assert.equal(up.paired, true);
+  // Спустились от выхода — прибытие у марша.
+  const down = volumeStairLanding(scene, { x: 1200, y: 0 }, VOLUME_HEAD_MM, "stairsExit");
+  assert.equal(down.objectId, stair.objectId);
+  assert.equal(down.key, "stairs");
+  // Парной вещи на этаже нет — годится та, что есть, и об этом сказано полем.
+  const alone = volumeScene(stair.project, stair.schemeId);
+  const any = volumeStairLanding(alone, { x: 0, y: 0 }, VOLUME_HEAD_MM, "stairs");
+  assert.equal(any.objectId, stair.objectId);
+  assert.equal(any.paired, false);
+  // Выход — ещё и вторая дверь к вопросу «на какой этаж?»: подошли к нему —
+  // спрашивается то же самое (таск 204).
+  const near = volumeStairNear(scene.stairs, { x: 1200, y: 0 });
+  assert.equal(near.stair.key, "stairsExit");
+});
+
+test("привязка схем доезжает до стопки: этажи совмещаются по точке, а не по нулю", () => {
+  const house = houseScene();
+  // Без привязки — как было: нулевые сдвиги (G68).
+  const plain = volumeFloorPlan(house.project, house.first);
+  assert.ok(plain.floors.every((item) => item.shiftMm.x === 0 && item.shiftMm.y === 0));
+  // Привязка у двух этажей: их чертежи сведутся по ней.
+  let project = setSchemeAnchor(house.project, house.first, { x: 1000, y: 500 }).project;
+  project = setSchemeAnchor(project, house.second, { x: -2000, y: 1500 }).project;
+  const tied = volumeFloorPlan(project, house.first);
+  const second = tied.floors.find((item) => item.floor === 2);
+  assert.deepEqual(second.shiftMm, { x: 3000, y: -1000 }, "разница привязок со знаком минус");
+  assert.deepEqual(
+    tied.floors.find((item) => item.floor === 1).shiftMm,
+    { x: 0, y: 0 },
+    "свой этаж стоит на месте всегда",
+  );
+  // Грани второго этажа уехали ровно на эту разницу.
+  const stack = houseStack(project, house.first);
+  const far = volumeFacesSpan(stack.faces);
+  assert.ok(far, "сцена собралась");
+  assert.deepEqual(volumeSchemeOriginMm(project, house.first), { x: -1000, y: -500 });
+  assert.deepEqual(volumeSchemeOriginMm(project, house.third), { x: 0, y: 0 }, "без привязки — ноль");
 });

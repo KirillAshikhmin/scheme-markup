@@ -41,6 +41,7 @@ import {
   VOLUME_CLOCK_SPEEDS,
   VOLUME_CLOCK_SPEED_DEFAULT,
   VOLUME_CLOCK_SPEED_REAL,
+  VOLUME_SLAB_MM,
   volumeBackdropKindOf,
   volumeClockDayMinutes,
   volumeClockFixed,
@@ -75,6 +76,20 @@ export const VOLUME_SPEED_SETTING = "volumeClockSpeed";
 // хранилище и не значит ничего: настройки читаются по именам, которые окно
 // спрашивает, и незнакомое имя никого не ждёт. Чистить его нечем и незачем —
 // в объект оно не попадало никогда (G68), миграции тут браться не от чего.
+// ——— что показывать: все этажи или один (таск 202, G307) ————————————————
+//
+// Слова заказчика: «в опциях просмотра пусть будет пункт что показывать. Все
+// этажи (если указаны этажи у схем) или какой-то именно этаж».
+//
+// В настройках браузера живёт **только отметка «все этажи»**, и это не
+// небрежность: «какой-то именно этаж» — это открытая схема, а она и так своя у
+// объекта и у приложения. Запиши сюда ещё и номер — и у вопроса «какая схема
+// открыта» стало бы два ответа, спорящих при открытии объекта. В `project.json`
+// не попадает ни то, ни другое (G68).
+//
+// Умолчание — **снято**: у того, кто галку не ставил, объём показывает ровно
+// то, что показывал, — открытую схему.
+export const VOLUME_FLOORS_SETTING = "volumeFloorsAll";
 export const VOLUME_SMOOTH_SETTING = "volumeSmoothSky";
 export const VOLUME_GHOST_SETTING = "volumeThroughWalls";
 
@@ -88,6 +103,7 @@ export const VOLUME_GHOST_SETTING = "volumeThroughWalls";
 const params = {
   kind: VOLUME_BACKDROP_DEFAULT,
   minimap: true,
+  floorsAll: false,
   speed: VOLUME_CLOCK_SPEED_DEFAULT,
   clock: null,
   smooth: false,
@@ -142,6 +158,7 @@ export function volumeParamsLoad() {
   // записанное `true` их включает. Поэтому читаются они одним правилом, а не
   // двумя: `saved !== true` — это «галки не ставили».
   for (const [key, name] of [
+    [VOLUME_FLOORS_SETTING, "floorsAll"],
     [VOLUME_SMOOTH_SETTING, "smooth"],
     [VOLUME_GHOST_SETTING, "ghost"],
   ]) {
@@ -160,6 +177,7 @@ export function volumeParamsRead() {
   return {
     kind: params.kind,
     minimap: params.minimap,
+    floorsAll: params.floorsAll,
     speed: params.speed,
     clock: params.clock,
     smooth: params.smooth,
@@ -208,12 +226,14 @@ export function volumeParamsMinimap(shown) {
  * Отметки таска 192 — одной дверью (G292).
  *
  * `smooth` — «Плавные светила» (фон в 30 кадров в секунду вместо раза в
- * секунду), `ghost` — «Проходить сквозь стены». Дверь одна на обе, потому что
- * устроены они одинаково до буквы: прочесть, записать, сказать полю. Два
- * близнеца-функции разошлись бы на первой же правке.
+ * секунду), `ghost` — «Проходить сквозь стены», `floorsAll` — «Все этажи»
+ * (таск 202). Дверь одна на все, потому что устроены они одинаково до буквы:
+ * прочесть, записать, сказать полю. Три близнеца-функции разошлись бы на
+ * первой же правке.
  */
 export function volumeParamsFlag(name, on) {
   const keys = {
+    floorsAll: VOLUME_FLOORS_SETTING,
     smooth: VOLUME_SMOOTH_SETTING,
     ghost: VOLUME_GHOST_SETTING,
   };
@@ -326,6 +346,42 @@ export function volumeParamsSunLine(times) {
 }
 
 /**
+ * Подпись этажа в списке «что показывать»: номер и имя схемы, как у лестницы.
+ *
+ * Номер первым — по нему этажи и ищут («этаж 2 · Второй свет»), и ровно так же
+ * подписан список перехода по лестнице (таск 149). Второго порядка слов у
+ * этажей в сборке нет.
+ */
+export function volumeFloorOptionLabel(option) {
+  return text("volume.stairOption", { floor: option.floor, name: option.name });
+}
+
+/**
+ * Что сказано под списком этажей (таск 202).
+ *
+ * Молчания здесь быть не может ни в одном случае — это прямое требование
+ * тикета: «пункт недоступен, и скажи почему словом, а не молчанием». Поэтому
+ * строка есть всегда: почему «все этажи» недоступны, что встало в стопку,
+ * какой план на номер не попал.
+ */
+export function volumeFloorsNote(plan, all) {
+  if (!plan) return "";
+  if (!plan.can) {
+    if (plan.why === "noFloor") return strings.volume.floorsNoOwn;
+    if (plan.why === "one") return strings.volume.floorsOne;
+    return strings.volume.floorsNone;
+  }
+  const doubles = (plan.doubles || [])
+    .map((item) => text("volume.floorsDouble", { floor: item.floor, name: item.name }))
+    .join(" ");
+  if (!all) return [strings.volume.floorsOneShown, doubles].filter((part) => part !== "").join(" ");
+  const numbers = plan.floors.map((item) => item.floor).join(", ");
+  return [text("volume.floorsAllShown", { numbers, slab: VOLUME_SLAB_MM }), doubles]
+    .filter((part) => part !== "")
+    .join(" ");
+}
+
+/**
  * Кнопка параметров на поле и окно за ней.
  *
  * `now` — часы страницы (аргументом, а не `Date.now()` внутри: окно обязано
@@ -337,7 +393,13 @@ export function volumeParamsSunLine(times) {
  * приехавшие из хранилища. Два пути к одному кадру были бы двойной
  * перерисовкой на каждое нажатие.
  */
-export function createVolumeParams({ now, hour, times }) {
+export function createVolumeParams(options) {
+  const { now, hour, times } = options;
+  // Этажи и переход к одному из них (таск 202) — руки поля: окно спрашивает
+  // список и просит открыть выбранный этаж, а делает это поле. Умолчания стоят
+  // затем, что стенд и тесты зовут окно без этажей вовсе.
+  const floors = options.floors || (() => null);
+  const goFloor = options.goFloor || (() => {});
   const button = uiIconButton("sliders", {
     class: "canvas-corner volume__paramsBtn",
     label: strings.volume.params,
@@ -355,7 +417,47 @@ export function createVolumeParams({ now, hour, times }) {
     const render = () => {
       const chosen = volumeParamsRead();
       const at = hour();
+      const plan = floors();
+      const stacked = chosen.floorsAll === true && plan !== null && plan.can;
       body.replaceChildren(
+        // «Что показывать» — **первым разделом**: это выбор о самой сцене, а
+        // фон, час и миникарта — о том, как её показать. Человек, открывший
+        // окно ради этажей, не должен искать их под ускорением времени.
+        uiEl("p", { class: "tools__label", text: strings.volume.floorsLabel }),
+        uiEl(
+          "div",
+          { class: "volume__paramsRow" },
+          [
+            uiButton(strings.volume.floorsAll, {
+              class: "ui-btn" + (stacked ? " is-on" : ""),
+              title: plan && plan.can ? strings.volume.floorsAllHint : volumeFloorsNote(plan, false),
+              attrs: {
+                "aria-pressed": stacked ? "true" : "false",
+                ...(plan && plan.can ? {} : { disabled: "" }),
+              },
+              on: { click: () => volumeParamsFlag("floorsAll", true) },
+            }),
+            ...((plan && plan.floors) || []).map((option) =>
+              uiButton(volumeFloorOptionLabel(option), {
+                class: "ui-btn" + (!stacked && option.current ? " is-on" : ""),
+                title: strings.volume.floorsOneHint,
+                attrs: { "aria-pressed": !stacked && option.current ? "true" : "false" },
+                on: {
+                  click: () => {
+                    // Выбрали один этаж — отметка «все этажи» снимается, а
+                    // схема становится открытой: «показывать этаж 2» и значит
+                    // «открыть второй этаж». Второго способа сменить схему тут
+                    // не заводится — зовётся та же дверь, которой переводит
+                    // лестница.
+                    volumeParamsFlag("floorsAll", false);
+                    if (!option.current) goFloor(option);
+                  },
+                },
+              }),
+            ),
+          ],
+        ),
+        uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked) }),
         uiEl("p", { class: "tools__label", text: strings.volume.backdrop }),
         uiEl(
           "div",
