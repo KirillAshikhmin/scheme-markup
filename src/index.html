@@ -153,18 +153,45 @@
       </main>
 
       <aside id="panel-right" class="panel">
-        <!-- Правая колонка своя в каждом режиме (таск 153): в Чертеже — список
-             элементов чертежа, в Схеме и в Объёме — тот же список меток
-             (выделение у них общее). -->
-        <section class="panel__section panel__section--grow panel__section--screen" data-section-id="drawList">
+        <!-- Правая колонка своя в каждом режиме (таск 153): в Чертеже — три
+             списка элементов, в Схеме и в Объёме — тот же список меток
+             (выделение у них общее).
+
+             Три раздела, а не один с группами внутри (таск 187, G280): слова
+             заказчика — «справа раздели в 3 отдельных списка раскрывающихся и
+             не объединяй в группу Элементы чертежа». Сворачиваются и помнятся
+             они как все остальные, счётчик в заголовке говорит, сколько там
+             строк, а параметры выделенного раскрываются прямо в его строке —
+             ровно как у метки в списке меток. -->
+        <section class="panel__section panel__section--screen" data-section-id="drawWalls">
           <h2 class="panel__head">
-            <button class="panel__title" type="button" data-section="drawList" aria-expanded="true">
+            <button class="panel__title" type="button" data-section="drawWalls" aria-expanded="true">
               <span class="panel__chevron" aria-hidden="true"></span>
-              <span class="panel__name" data-text="panels.drawList"></span>
+              <span class="panel__name" data-text="panels.drawWalls"></span>
               <span class="panel__badge"></span>
             </button>
           </h2>
-          <div id="panel-draw-list" class="panel__body mount"></div>
+          <div id="panel-draw-walls" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--screen" data-section-id="drawOpenings">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="drawOpenings" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.drawOpenings"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-draw-openings" class="panel__body mount"></div>
+        </section>
+        <section class="panel__section panel__section--screen" data-section-id="drawObjects">
+          <h2 class="panel__head">
+            <button class="panel__title" type="button" data-section="drawObjects" aria-expanded="true">
+              <span class="panel__chevron" aria-hidden="true"></span>
+              <span class="panel__name" data-text="panels.drawObjects"></span>
+              <span class="panel__badge"></span>
+            </button>
+          </h2>
+          <div id="panel-draw-objects" class="panel__body mount"></div>
         </section>
         <section class="panel__section panel__section--grow panel__section--screen" data-section-id="markList">
           <h2 class="panel__head">

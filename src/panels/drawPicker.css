@@ -1,0 +1,122 @@
+/* ——— окно «Что добавить» (таск 187, G280) ————————————————————————————————
+   Три шага друг под другом, раскрыт один. Заголовок устроен как заголовок
+   раздела колонки — галочка, имя, строка состояния: это то же движение, что
+   сворачивание разделов, и учить ему заново не надо.
+
+   Ширину карточке задаёт содержимое (`modal--wide`): шаг «Объекты» ставит
+   внутрь ту же сетку плиток, что окно выбора вещи, и считает её ширину она
+   сама (`--picker-columns`). Нижняя граница держит два узких шага от того,
+   чтобы окно съёжилось в полоску. */
+
+.drawPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: min(92vw, 420px);
+}
+
+.drawPicker__step {
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Раскрытый шаг обведён цветом выбора — тем же, которым горит выбранное
+   занятие и выделенная строка списка: второго языка выбора в режиме нет. */
+.drawPicker__step.is-open {
+  border-color: var(--accent);
+}
+
+.drawPicker__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  background: #1c2129;
+  color: var(--panel-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawPicker__head:hover,
+.drawPicker__head:focus-visible {
+  background: #21262d;
+}
+
+/* Галочка та же, что у разделов колонки: вниз — раскрыт, влево — свёрнут. */
+.drawPicker__chevron::before {
+  content: "▾";
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+
+.drawPicker__step.is-open .drawPicker__chevron::before {
+  transform: none;
+}
+
+.drawPicker__name {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Строка состояния: что поставит следующий клик. Длинное имя вещи ужимается
+   многоточием — строка не должна рвать заголовок на две. */
+.drawPicker__note {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
+.drawPicker__step.is-open .drawPicker__note {
+  color: var(--panel-text);
+}
+
+.drawPicker__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.drawPicker__about {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--panel-muted);
+}
+
+/* Поля в две колонки: столбиком пять размеров вещи растили карточку так, что
+   «Ставить вещь» уезжала за нижний край экрана. Окно шире колонки втрое —
+   место под вторую колонку в нём есть. */
+.drawPicker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px 10px;
+}
+
+/* Сетка плиток внутри шага: своей рамки и своих полей у неё тут нет — поля
+   даёт тело шага, а ширину она считает сама. */
+.drawPicker__body .picker--objects {
+  min-width: 0;
+}
+
+/* Высота сетки здесь своя, ниже, чем в окне выбора вещи: под ней в том же шаге
+   стоят способ, размеры и кнопка «Ставить вещь», и при общем потолке в 64vh
+   они уезжали за нижний край карточки — проверено живым прогоном. */
+.drawPicker__body .picker--objects .picker__columns {
+  max-height: 42vh;
+}

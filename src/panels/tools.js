@@ -9,6 +9,8 @@
 import {
   DRAWING_SETTING,
   ELEVATION_SETTING,
+  GRID_SETTING,
+  GRID_SNAP_SETTING,
   GUIDES_SETTING,
   OBJECTS_SETTING,
   PLAN_SETTING,
@@ -20,6 +22,8 @@ import {
 import { strings, text } from "../strings.js";
 import {
   BLOCK_MODES,
+  gridStepOf,
+  setGridStep,
   MARK_KINDS,
   MARK_KIND_COMMENT,
   markIsComment,
@@ -45,6 +49,10 @@ import {
   canvasZoomReset,
 } from "../canvas.js";
 import {
+  workshopAttachPlan,
+  workshopCalibratePlan,
+  workshopGridOptions,
+  workshopPlacement,
   workshopViewFit,
   workshopViewReady,
   workshopViewReset,
@@ -426,8 +434,16 @@ function mountToolsPanel(host, api) {
 }
 
 /**
- * Поля «Интерфейса проекта» — размер меток и подписей, шрифт, слои, развёртка
- * и масштаб того поля, которое на экране.
+ * Поля «Интерфейса» — размер меток и подписей, шрифт, слои, сетка чертежа,
+ * развёртка и масштаб того поля, которое на экране.
+ *
+ * **Все переключатели показа собраны здесь** (таск 187, G281). Слова заказчика:
+ * «пункт „Слои“ убери, это же дубль вкладки Интерфейс проекта, просто почини то
+ * бы там работало и добавь недостающие пункты. Ну и в интерфейсе убери описания
+ * у пунктов». Описания ушли в подсказки, слои чертежа (сетка, шаг, притяжка)
+ * пришли сюда из колонки, а в каждом режиме показаны ровно те отметки, которые
+ * в нём меняют картинку: линейка — у плана, сетка — у чертежа, «Объекты» — у
+ * всех трёх.
  *
  * **Одна сборка на два места** (таск 175, G272). На большом экране это раздел
  * левой колонки; на узком экрана раздела нет вовсе, и те же поля приходят
@@ -440,7 +456,7 @@ function mountToolsPanel(host, api) {
  * выброшенный из разметки ящик.
  */
 export function createSizesFields(api) {
-  const { getState, setState, subscribe } = api;
+  const { getState, setState, subscribe, notify } = api;
   const box = uiEl("div", { class: "tools" });
   // Снимок объекта на время жеста ползунка: пока он есть, раздел не
   // перерисовывается — иначе ползунок исчезал бы из-под пальца.
@@ -463,10 +479,91 @@ export function createSizesFields(api) {
     render();
   }
 
+  // ——— сетка чертежа: шаг в объекте, притяжка в настройках (таск 187) ———
+  //
+  // Шаг принадлежит объекту (G258), поэтому его смена — шаг истории: иначе
+  // Ctrl+Z после смены сетки вернул бы метку, а сетку — молча и заодно.
+  const gridSelect = uiEl("select", {
+    class: "ui-input tools__select",
+    title: strings.tools.gridStepHint,
+    on: {
+      change: () => {
+        const state = getState();
+        if (!state.project) return;
+        try {
+          const next = setGridStep(state.project, gridSelect.value);
+          if (next.changed) canvasCommit(state.project, next.project, strings.history.gridStep);
+        } catch (error) {
+          notify(error.message, "error");
+        }
+        render();
+      },
+    },
+  });
+  let gridOptionsKey = "";
+
+  // Список шагов пересобирается только когда он и правда другой (сменился
+  // объект с чужим числом): `replaceChildren` на каждом кадре схлопывал бы
+  // список, раскрытый под рукой.
+  function syncGridSelect(project) {
+    const step = gridStepOf(project);
+    const options = workshopGridOptions(step);
+    const key = options.join(",");
+    if (key !== gridOptionsKey) {
+      gridOptionsKey = key;
+      gridSelect.replaceChildren(
+        ...options.map((value) => uiEl("option", { value: String(value), text: String(value) })),
+      );
+    }
+    gridSelect.value = String(step);
+    return gridSelect;
+  }
+
+  /**
+   * Строка слоя: отметка, слово и **причина в подсказке**, а не описанием под
+   * галкой (таск 187, G281 — «в интерфейсе убери описания у пунктов»).
+   */
+  function layerRow(state, key, setting, label, title, options = {}) {
+    const row = uiEl("label", { class: "tools__field tools__field--check", title: options.reason || title }, [
+      toolsLayerCheck(state, setState, key, setting),
+      uiEl("span", { text: label }),
+    ]);
+    if (options.off) {
+      const input = row.querySelector("input");
+      input.disabled = true;
+      input.checked = false;
+    }
+    return row;
+  }
+
   function render() {
     const state = getState();
     const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
-    box.replaceChildren(
+    // ——— что показывать: только то, что в этом режиме меняет картинку ———
+    //
+    // Заказчик про «Интерфейс»: «почини то бы там работало и добавь недостающие
+    // пункты». Половина починки — свести слои чертежа сюда (они жили второй
+    // парой галок в колонке чертежа), вторая — **не показывать** в режиме ту
+    // отметку, которая в нём ничего не меняет: линейка принадлежит плану, сетка
+    // — чертежу, а в объёме из всего этого работает только «Объекты».
+    const screen = state.screen;
+    const drawing = screen === "drawing";
+    const plan = screen === "scheme";
+    const field = plan || drawing;
+    // Подложку в чертёж не положить без масштаба — и это не решение, а
+    // арифметика: миллиметру не от чего считаться в пикселях плана. Отметка в
+    // таком случае гаснет, а причина стоит в её подсказке, а рядом — кнопка,
+    // которая эту причину снимает.
+    const spot = drawing ? workshopPlacement(state.project, state.schemeId) : null;
+    const planOff = Boolean(spot) && spot.kind !== "ready";
+    const planReason = !spot
+      ? ""
+      : spot.kind === "noImage"
+        ? strings.tools.planLayerNone
+        : spot.kind === "noScale"
+          ? strings.tools.planLayerNoScale
+          : "";
+    const parts = [
       uiEl("label", { class: "tools__field" }, [
         uiEl("span", { text: strings.tools.markSize }),
         toolsSlider(sizes.markSize, TOOLS_MARK_SIZE, (value) => setSize("markSize", value), commitSize),
@@ -475,56 +572,71 @@ export function createSizesFields(api) {
         uiEl("span", { text: strings.tools.labelSize }),
         toolsSlider(sizes.labelSize, TOOLS_LABEL_SIZE, (value) => setSize("labelSize", value), commitSize),
       ]),
-      // Шрифт подписей — сразу под их размером. Строкой ниже сказано, что это
-      // только экран: иначе выбор читался бы как «чем печатать», а печать
-      // всегда чертёжная и выбора не слушает.
-      uiEl("label", { class: "tools__field" }, [
+      // Шрифт подписей — сразу под их размером, а «только на экране» ушло в
+      // подсказку: строка под полем растила раздел, повторяя то же словами.
+      uiEl("label", { class: "tools__field", title: strings.tools.fontHint }, [
         uiEl("span", { text: strings.tools.font }),
         toolsFontSelect(state, setState),
       ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.fontHint }),
-      // Линейка и направляющие прячутся целиком, не удаляясь: оснастка нужна,
-      // пока целишься, и мешает, когда смотришь на план.
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsGuidesCheck(state, setState),
-        uiEl("span", { text: strings.tools.guides }),
-      ]),
-      // Подложка и чертёж — два слоя плана, и выключаются они порознь.
-      // Снял подложку — размечаешь по своему чертежу; снял чертёж —
-      // размечаешь по фотографии. Оба уходят и в выгрузку: лист обязан
-      // совпадать с тем, что человек на экране проверил.
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "planShown", PLAN_SETTING),
-        uiEl("span", { text: strings.tools.planLayer }),
-      ]),
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "drawingShown", DRAWING_SETTING),
-        uiEl("span", { text: strings.tools.drawingLayer }),
-      ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.layersHint }),
-      // Вещи чертежа — третий слой того же ряда (таск 154, G223): «дать
-      // возможность скрывать объекты с чертежа». Отметка **положительная**,
-      // как два соседа сверху: ряд, в котором одна галка значит «показать», а
-      // другая «скрыть», читается наоборот через раз. Снятая прячет все вещи
-      // разом; поштучно их прячет глазок в списке элементов чертежа.
-      //
-      // В выгрузку, в отличие от подложки и чертежа, она не уходит: слова
-      // заказчика — «на экране, а для выгрузок у нас же свои параметры
-      // видимости».
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "objectsShown", OBJECTS_SETTING),
-        uiEl("span", { text: strings.tools.objectsLayer }),
-      ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.objectsLayerHint }),
-      // Третий выключатель того же ряда и той же природы (таск 133, G185):
-      // полоса развёртки выделенной стены. В выгрузку он, в отличие от двух
-      // соседей, не уходит — развёртка на лист идёт своей кнопкой в шапке
-      // (таск 130), а полоса поверх холста на бумагу не попадала никогда.
-      uiEl("label", { class: "tools__field tools__field--check" }, [
-        toolsLayerCheck(state, setState, "elevationShown", ELEVATION_SETTING),
-        uiEl("span", { text: strings.tools.elevationStrip }),
-      ]),
-      uiEl("p", { class: "tools__note", text: strings.tools.elevationStripHint }),
+      uiEl("p", { class: "tools__label", text: strings.tools.layers }),
+      // Линейка и направляющие — оснастка **плана**: в чертеже свои
+      // направляющие рисует черновик, в объёме линейки нет вовсе.
+      plan
+        ? uiEl("label", { class: "tools__field tools__field--check" }, [
+            toolsGuidesCheck(state, setState),
+            uiEl("span", { text: strings.tools.guides }),
+          ])
+        : null,
+      // Подложка и чертёж — два слоя, и **одна отметка на оба поля** (таск
+      // 187): прежде в чертеже работала своя пара галок, а эта молчала.
+      field
+        ? layerRow(state, "planShown", PLAN_SETTING, strings.tools.planLayer, strings.tools.planLayerHint, {
+            off: planOff,
+            reason: planReason,
+          })
+        : null,
+      // Две двери рядом с погашенной подложкой: уйти на план за масштабом и
+      // привязать чертёж к подложке. Показываются ровно тогда, когда им есть
+      // что сделать, — и только если поверхность чертежа уже собрана.
+      drawing && spot && spot.kind === "noScale" && workshopViewReady()
+        ? uiButton(strings.workshop.calibrate, {
+            class: "ui-btn ui-btn--wide",
+            title: strings.workshop.calibrateHint,
+            on: { click: () => workshopCalibratePlan() },
+          })
+        : null,
+      drawing && spot && spot.pending && workshopViewReady()
+        ? uiButton(strings.workshop.attach, {
+            class: "ui-btn ui-btn--wide",
+            title: strings.workshop.attachHint,
+            on: { click: () => workshopAttachPlan() },
+          })
+        : null,
+      // Сетка — только у чертежа: по ней там и чертят. Шаг и притяжка стоят
+      // под ней, потому что отвечают на тот же вопрос.
+      drawing
+        ? layerRow(state, "gridShown", GRID_SETTING, strings.tools.gridLayer, strings.tools.gridLayerHint)
+        : null,
+      drawing
+        ? uiEl("label", { class: "tools__field", title: strings.tools.gridStepHint }, [
+            uiEl("span", { text: strings.tools.gridStep }),
+            syncGridSelect(state.project),
+          ])
+        : null,
+      drawing
+        ? layerRow(state, "gridSnap", GRID_SNAP_SETTING, strings.tools.gridSnap, strings.tools.gridSnapHint)
+        : null,
+      field
+        ? layerRow(state, "drawingShown", DRAWING_SETTING, strings.tools.drawingLayer, strings.tools.drawingLayerHint)
+        : null,
+      // Вещи чертежа (таск 154, G223) — единственная отметка, которая работает
+      // во всех трёх режимах: гасит их и на плане, и в чертеже, и в объёме.
+      layerRow(state, "objectsShown", OBJECTS_SETTING, strings.tools.objectsLayer, strings.tools.objectsLayerHint),
+      // Полоса развёртки выделенной стены — над планом и над чертежом (G185,
+      // G227). В объёме стену не выделяют, и полосы там нет.
+      field
+        ? layerRow(state, "elevationShown", ELEVATION_SETTING, strings.tools.elevationStrip, strings.tools.elevationStripHint)
+        : null,
       // ——— масштаб того поля, которое на экране (G227) ————————————————
       //
       // Заказчик: «Кнопки + − и вписать дублируются, есть в нижнем блоке с
@@ -537,7 +649,8 @@ export function createSizesFields(api) {
       // гаснет с причиной в подсказке, а не делает вид, что работает.
       uiEl("p", { class: "tools__label", text: strings.tools.zoom }),
       toolsZoomRow(state),
-    );
+    ];
+    box.replaceChildren(...parts.filter(Boolean));
   }
 
   const stop = subscribe((state, changed) => {
@@ -547,11 +660,15 @@ export function createSizesFields(api) {
       "guidesShown" in changed ||
       "planShown" in changed ||
       "drawingShown" in changed ||
+      "gridShown" in changed ||
+      "gridSnap" in changed ||
       "objectsShown" in changed ||
       "elevationShown" in changed ||
       "schemeFont" in changed ||
-      // Ряд масштаба смотрит на то поле, которое показано (G227).
-      "screen" in changed
+      // Состав раздела и ряд масштаба смотрят на то поле, которое показано:
+      // в каждом режиме видны те отметки, которые в нём меняют картинку.
+      "screen" in changed ||
+      "schemeId" in changed
     ) {
       render();
     }

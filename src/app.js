@@ -33,9 +33,13 @@ export const PANEL_IDS = {
   screenDrawing: "screen-drawing",
   screenVolume: "screen-volume",
   // Верхний блок левой колонки в режиме «Чертёж» и в режиме «Объём» — на месте
-  // «Меток». Правая колонка в «Чертеже» — список элементов чертежа.
+  // «Меток». Правая колонка в «Чертеже» — **три списка** элементов (таск 187,
+  // G280): стены, проёмы, объекты. Группы «Элементы чертежа» больше нет —
+  // заказчик попросил три раскрывающихся списка, как список меток у меток.
   drawTools: "panel-draw-tools",
-  drawList: "panel-draw-list",
+  drawWalls: "panel-draw-walls",
+  drawOpenings: "panel-draw-openings",
+  drawObjects: "panel-draw-objects",
   volumeTools: "panel-volume-tools",
   headerActions: "header-actions",
   headerSearch: "header-search",
@@ -103,6 +107,14 @@ const appState = {
   // чертёж, а человек без чертежа не увидит никакой разницы (G68).
   planShown: true,
   drawingShown: true,
+  // Сетка чертежа и притяжка к её узлам (таск 187, G281). Жили они отдельной
+  // парой отметок в колонке чертежа, и в «Интерфейсе» их не было вовсе —
+  // заказчик попросил свести все переключатели показа в один раздел. Природа
+  // у них та же, что у подложки: выбор глаз, личная настройка браузера, в
+  // `project.json` не попадает. Шаг сетки, в отличие от них, принадлежит
+  // объекту (G258) и лежит в `project.view.gridStepMm`.
+  gridShown: true,
+  gridSnap: true,
   // Полоса развёртки выделенной стены (таск 133, G185). Выключатель той же
   // природы, что два выше: выбор глаз, а не свойство объекта.
   //
@@ -159,17 +171,22 @@ export const SECTION_IDS = {
   marks: "marks",
   rooms: "rooms",
   schemes: "schemes",
-  // Имя раздела осталось `sizes`, а подпись стала «Интерфейс проекта» (таск
-  // 153): по ключу помнится свёрнутость, и переименуй его — у всех, кто уже
-  // работает, раздел развернулся бы обратно.
+  // Имя раздела осталось `sizes`, а подпись стала «Интерфейс» (таск 153 —
+  // «Интерфейс проекта», таск 187 — просто «Интерфейс»): по ключу помнится
+  // свёрнутость, и переименуй его — у всех, кто уже работает, раздел
+  // развернулся бы обратно.
   sizes: "sizes",
   markList: "markList",
   properties: "properties",
-  // Верхние блоки левой колонки режимов «Чертёж» и «Объём» и список элементов
-  // чертежа в правой (таск 153). Сворачиваются и помнятся так же, как
-  // остальные: логика панелей не меняется ни на йоту.
+  // Верхние блоки левой колонки режимов «Чертёж» и «Объём» и три списка
+  // элементов чертежа в правой (таск 153, разделённые в таске 187).
+  // Сворачиваются и помнятся так же, как остальные: логика панелей не меняется
+  // ни на йоту. Прежний `drawList` из сохранённого списка отбрасывается сам —
+  // `sectionListFrom` знает только нынешние имена.
   drawTools: "drawTools",
-  drawList: "drawList",
+  drawWalls: "drawWalls",
+  drawOpenings: "drawOpenings",
+  drawObjects: "drawObjects",
   volumeTools: "volumeTools",
 };
 export const SECTIONS_SETTING = "collapsedSections";
@@ -185,6 +202,11 @@ export const GUIDES_SETTING = "schemeGuidesShown";
 // Подложка и чертёж: что видно на холсте и что уходит в выгрузку.
 export const PLAN_SETTING = "schemePlanShown";
 export const DRAWING_SETTING = "schemeDrawingShown";
+// Сетка чертежа и притяжка к её узлам (таск 187): такие же личные настройки
+// браузера, как подложка. До переезда в «Интерфейс» они не помнились вовсе —
+// жили в памяти страницы и слетали с перезагрузкой.
+export const GRID_SETTING = "drawingGridShown";
+export const GRID_SNAP_SETTING = "drawingGridSnap";
 // Полоса развёртки выделенной стены — третий выключатель того же ряда.
 export const ELEVATION_SETTING = "schemeElevationShown";
 // Изображения объектов на развёртке — такая же личная настройка браузера.
@@ -814,6 +836,18 @@ function wireSections() {
   Promise.resolve(getSetting(ELEVATION_SETTING))
     .then((saved) => {
       if (saved === false) setState({ elevationShown: false });
+    })
+    .catch(() => {});
+  // Сетка чертежа и притяжка (таск 187): обе стартуют взведёнными и гаснут по
+  // настройке — то же правило, что у подложки.
+  Promise.resolve(getSetting(GRID_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ gridShown: false });
+    })
+    .catch(() => {});
+  Promise.resolve(getSetting(GRID_SNAP_SETTING))
+    .then((saved) => {
+      if (saved === false) setState({ gridSnap: false });
     })
     .catch(() => {});
   Promise.resolve(getSetting(ELEVATION_VIEWS_SETTING))
