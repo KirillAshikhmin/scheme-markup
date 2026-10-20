@@ -63,6 +63,7 @@ import {
 } from "../src/gostSheet.js";
 import { marksTable, toCsv } from "../src/tables.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
+import { mergeProjects } from "../src/merge.js";
 import { projectTopFacing } from "../src/panels/projectProps.js";
 import { strings } from "../src/strings.js";
 
@@ -405,11 +406,20 @@ test("поворот направления не сдвигает ни план,
   assert.deepEqual(everything(located, made.schemeId, made.wallId), before, "координаты изменили нарисованное");
 });
 
-test("направление не видно никому, кроме модели, окна свойств и объёма", () => {
+test("направление не видно никому, кроме модели, окна, слияния и объёма", () => {
   // Сверка по исходникам, а не по обещанию: прочитать ключ выгрузке просто
   // негде. Когда таск 181 заведёт солнце, объём окажется в списке — это и есть
   // то единственное место, где направление работает.
-  const allowed = new Set(["model.js", "panels/projectProps.js", "volume.js", "panels/volume.js"]);
+  //
+  // Слияние в списке не потому, что что-то рисует: оно переносит поле из файла
+  // в файл, как любое другое, — иначе работа напарника пропадала бы молча.
+  const allowed = new Set([
+    "model.js",
+    "merge.js",
+    "panels/projectProps.js",
+    "volume.js",
+    "panels/volume.js",
+  ]);
   const files = [];
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -491,4 +501,53 @@ test("живая подпись называет сторону словом, а
   assert.equal(projectTopFacing(""), "");
   assert.equal(projectTopFacing(null), "");
   assert.equal(projectTopFacing("север"), "", "мусор получил подпись, как будто он число");
+});
+
+// ——— слияние ————————————————————————————————————————————————————————
+
+function pair() {
+  const made = scene();
+  const base = JSON.parse(JSON.stringify(made.project));
+  return [JSON.parse(JSON.stringify(base)), JSON.parse(JSON.stringify(base))];
+}
+
+test("слияние: адрес одного и координаты другого складываются", () => {
+  const [ours, theirs] = pair();
+  const mine = setProjectSite(ours, { address: "Москва, ул. Ленина, 14" }).project;
+  const other = setProjectSite(theirs, { coords: "55.7558, 37.6173", topAzimuthDeg: 90 }).project;
+  const merged = mergeProjects(mine, other, null).project;
+  assert.deepEqual(projectSite(merged), {
+    address: "Москва, ул. Ленина, 14",
+    lat: 55.7558,
+    lon: 37.6173,
+    topAzimuthDeg: 90,
+  });
+});
+
+test("слияние: один и тот же слот разным — побеждает тот, кто правил позже", () => {
+  const [ours, theirs] = pair();
+  const mine = setProjectSite(ours, { coords: "55.7558, 37.6173", topAzimuthDeg: 90 }).project;
+  const other = setProjectSite(theirs, { coords: "59.9386, 30.3141", topAzimuthDeg: 180 }).project;
+  mine.updatedAt = "2026-10-01T10:00:00+03:00";
+  other.updatedAt = "2026-10-08T10:00:00+03:00";
+  for (const merged of [mergeProjects(mine, other, null).project, mergeProjects(other, mine, null).project]) {
+    // Правило симметрично: с какой стороны ни сливай, ответ один.
+    assert.deepEqual(projectCoords(merged), { lat: 59.9386, lon: 30.3141 });
+    assert.equal(projectTopAzimuth(merged), 180);
+  }
+  // И широта с долготой приезжают **парой**: дом не встаёт между двумя городами.
+  const mixed = mergeProjects(mine, other, null).project;
+  assert.equal(mixed.site.lat === 59.9386 && mixed.site.lon === 30.3141, true, "пара разъехалась: " + JSON.stringify(mixed.site));
+});
+
+test("слияние двух объектов без свойств места поля не заводит", () => {
+  const [ours, theirs] = pair();
+  const merged = mergeProjects(ours, theirs, null).project;
+  assert.equal(Object.prototype.hasOwnProperty.call(merged, "site"), false, "слияние завело пустой раздел");
+  // Ноль градусов чужое число не перебивает: это умолчание, а не ответ.
+  const north = setProjectSite(JSON.parse(JSON.stringify(ours)), { topAzimuthDeg: "0" }).project;
+  const turned = setProjectSite(JSON.parse(JSON.stringify(theirs)), { topAzimuthDeg: 90 }).project;
+  north.updatedAt = "2026-10-09T10:00:00+03:00";
+  turned.updatedAt = "2026-10-08T10:00:00+03:00";
+  assert.equal(projectTopAzimuth(mergeProjects(north, turned, null).project), 90, "умолчание перебило чужое число");
 });
