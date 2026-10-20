@@ -43,7 +43,7 @@ import {
 } from "./volumeParams.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
-import { gesturePinchOf, gesturePinchStep } from "../gestures.js";
+import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
 import {
   WALL_HEIGHT_FALLBACK_MM,
   findRoom,
@@ -74,7 +74,7 @@ import {
   volumeAroundDistance,
   volumeAroundFit,
   volumeAroundPan,
-  volumeAroundPitch,
+  volumeAroundStand,
   volumeFreeMm,
   volumeBasis,
   volumeCanStand,
@@ -868,6 +868,11 @@ function createVolume({ api, hosts }) {
   // Два пальца на поле: `{distance, center}` от общего `gesturePinchStep` —
   // прошлый разведённый промежуток и прошлая середина между пальцами.
   let pinch = null;
+  // Серия колеса: `{kind, time}` от общего `gestureWheel` (таск 195). Нужна
+  // затем же, зачем плану и чертежу: внутри одного маха трекпада решение
+  // «листать или приближать» не меняется, иначе разогнавшийся мах переключался
+  // бы на зум на полпути.
+  let wheelStreak = null;
   // Касания на поле, по которым узнаётся щипок.
   const touches = new Map();
   // Открытый вопрос про этаж и лестница, про которую уже спросили. Вторая нужна
@@ -1158,7 +1163,7 @@ function createVolume({ api, hosts }) {
     // понять, где стоишь, а не чтобы потерять себя из виду.
     if (next === "around") {
       around = { ...around, target: { x: person.x, y: person.y, z: 1200 }, yaw: person.yaw, distance: VOLUME_AROUND_NEAR_MM };
-      around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
+      around = { ...around, pitch: aroundAim() };
     }
     view = next;
     sync();
@@ -1168,7 +1173,7 @@ function createVolume({ api, hosts }) {
     if (scene.empty) return;
     const fitted = volumeAroundFit(scene, viewport());
     around = { ...around, target: fitted.target, distance: fitted.distance };
-    around = { ...around, pitch: volumeAroundPitch(around.pitch, around.distance, aroundLift()) };
+    around = { ...around, pitch: aroundAim() };
     if (view !== "around") {
       view = "around";
       sync();
@@ -1177,12 +1182,27 @@ function createVolume({ api, hosts }) {
     paint();
   }
 
+  /**
+   * Взгляд обзора, опущенный на чертёж: наклон не положе того, на котором
+   * камера стоит (таск 195).
+   *
+   * Руками взгляд задирается к небу свободно — но «Обзор» и «Вся схема» это
+   * **возврат к чертежу**, и нажавший их ждёт увидеть схему, а не небо, в
+   * котором остался взгляд. Круче — не трогаем: выбранный сверху вид это выбор
+   * человека, и он схему показывает.
+   */
+  function aroundAim() {
+    return volumeAroundStand(around.pitch, around.distance, aroundLift());
+  }
+
   function camera() {
     if (view === "person") {
       // Высота глаз — у стойки (G234): присел — ниже, прыгнул — выше.
       return { at: { x: person.x, y: person.y, z: volumeStanceEye(stance) }, yaw: person.yaw, pitch: person.pitch };
     }
-    return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance);
+    // Место камеры считает `volumeAroundStand` по `aroundLift()`: задранный
+    // взгляд поворачивает голову, а штатив оставляет над крышей (G298).
+    return volumeAroundCamera(around.target, around.yaw, around.pitch, around.distance, aroundLift());
   }
 
   // ——— общее место трёх режимов (G276) ———
@@ -1936,10 +1956,13 @@ function createVolume({ api, hosts }) {
       person.yaw += dx * perPixel;
       person.pitch = volumeClampPitch(person.pitch - dy * perPixel);
     } else {
+      // Взгляд обзора зажат **тем же** правилом, что взгляд человека (G298):
+      // задирается до отвеса, за отвес не заводится. Где при этом стоит
+      // камера, решает `camera()`, а не рука.
       around = {
         ...around,
         yaw: around.yaw + dx * perPixel,
-        pitch: volumeAroundPitch(around.pitch - dy * perPixel, around.distance, aroundLift()),
+        pitch: volumeClampPitch(around.pitch - dy * perPixel),
       };
     }
     paint();
@@ -1997,14 +2020,18 @@ function createVolume({ api, hosts }) {
         if (step) pinch = step.pinch;
         if (step && view === "around") {
           // Развели пальцы — приблизились, то есть камера подошла: расстояние
-          // делится на множитель, а не умножается.
+          // делится на множитель, а не умножается. Взгляд щипок не трогает
+          // (таск 195): куда смотрят — выбор руки, а не приближения.
           const distance = volumeAroundDistance(around.distance / step.factor);
-          const pitch = volumeAroundPitch(around.pitch, distance, aroundLift());
-          const moved = volumeAroundPan({ yaw: around.yaw, pitch, distance }, viewport(), step.panX, step.panY);
+          const moved = volumeAroundPan(
+            { yaw: around.yaw, pitch: around.pitch, distance },
+            viewport(),
+            step.panX,
+            step.panY,
+          );
           around = {
             ...around,
             distance,
-            pitch,
             target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy },
           };
           paint();
@@ -2154,13 +2181,42 @@ function createVolume({ api, hosts }) {
     syncHint();
   }
 
+  /**
+   * Колесо и трекпад в обзоре (таск 195, требование G299).
+   *
+   * Слова заказчика: «я же просил в обзоре скролл 2 пальцами… сейчас 2
+   * пальцами всегда зум». Браузер шлёт двухпальцевый свайп трекпада тем же
+   * `wheel`, что и колесо мыши, и своего разбора у объёма нет: что пришло,
+   * решает общий `gestureWheel` — та же дверь, что у плана и чертежа (G241).
+   *
+   * Что из ответа получается:
+   *
+   *   `pan`  — свайп двумя пальцами **возит цель по полу**, тем же переводом
+   *            `volumeAroundPan`, которым её возят два пальца на стекле.
+   *            Слово заказчика — «скролл», то есть сдвиг: вращение вокруг цели
+   *            осталось за перетаскиванием, и отнимать у свайпа сдвиг в пользу
+   *            второго способа вертеть головой было бы подменой просьбы.
+   *   `zoom` — щипок трекпада (он приходит с `ctrlKey`) и колесо мыши
+   *            **отодвигают камеру**: мышь двумя пальцами не водят, а щипок и
+   *            на плане приближение. Расстояние делится на множитель — развели
+   *            пальцы, значит камера подошла.
+   *
+   * Взгляд колесо не трогает вовсе. До таска 195 оно само делало вид круче,
+   * чтобы камера не нырнула под крышу; теперь за место камеры отвечает
+   * `volumeAroundStand` в `camera()`, и приближение на задранном взгляде
+   * значит ровно «камера подошла», а не «взгляд опустился».
+   */
   function onWheel(event) {
     if (view !== "around") return;
     event.preventDefault();
-    const distance = volumeAroundDistance(around.distance * Math.exp(event.deltaY / 400));
-    // Приблизились — вид сам становится круче: иначе камера нырнула бы под
-    // крышу и уткнулась в стену изнутри.
-    around = { ...around, distance, pitch: volumeAroundPitch(around.pitch, distance, aroundLift()) };
+    const step = gestureWheel(event, wheelStreak);
+    wheelStreak = step.streak;
+    if (step.kind === "pan") {
+      const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
+      around = { ...around, target: { ...around.target, x: around.target.x + moved.dx, y: around.target.y + moved.dy } };
+    } else {
+      around = { ...around, distance: volumeAroundDistance(around.distance / step.factor) };
+    }
     paint();
   }
 
