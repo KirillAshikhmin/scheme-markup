@@ -75,6 +75,7 @@ export function openEquipmentPicker(project, options = {}) {
     const firstRow = () => list.querySelector(".picker__row");
     const search = uiPickSearch({
       placeholder: strings.equipmentPicker.search,
+      title: strings.equipmentPicker.searchHint,
       onInput: () => renderList(),
       first: firstRow,
       // Не нашлось ничего, но есть что завести — Enter заводит: человек понял,

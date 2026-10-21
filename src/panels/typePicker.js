@@ -213,6 +213,7 @@ export function openTypePicker(project, options = {}) {
     const firstRow = () => box.querySelector(".picker__row") || builtinRow();
     const search = uiPickSearch({
       placeholder: strings.picker.search,
+      title: strings.picker.searchHint,
       onInput: () => renderList(),
       first: firstRow,
       // Нечего выбрать, но есть что завести — Enter заводит: человек набрал

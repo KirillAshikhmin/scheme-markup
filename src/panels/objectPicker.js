@@ -179,6 +179,7 @@ export function createObjectTiles(options = {}) {
 
   const search = uiPickSearch({
     placeholder: strings.objectPicker.search,
+    title: strings.objectPicker.searchHint,
     onInput: () => render(),
     first: () => box.querySelector(".objectTile"),
     // Enter берёт первую найденную вещь — ключом, а не кликом по плитке:
