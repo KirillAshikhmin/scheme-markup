@@ -5001,9 +5001,14 @@ export function openingCanGlaze(kind) {
  */
 export function openingGlazed(opening) {
   if (!opening) return false;
-  if (opening.glazed === true) return true;
   const entry = openingCatalogEntry(opening.kind);
-  return Boolean(entry && entry.glazed);
+  if (entry && entry.glazed) return true;
+  // Отметка у вида, который стеклянным не бывает, не значит ничего. В объект
+  // такая не попадает (модель её не пустит), а вот в настройках окна «Что
+  // добавить» она переживает смену вида — и без этой строки строка «что
+  // поставит следующий клик» обещала бы «Балконное окно, стеклянная» (поймано
+  // живым прогоном таска 215).
+  return opening.glazed === true && openingCanGlaze(opening.kind);
 }
 
 /**

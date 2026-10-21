@@ -259,6 +259,16 @@ test("у окна и арки стеклить нечего — отметку �
   }
 });
 
+test("отметка у вида, который стеклянным не бывает, не значит ничего", () => {
+  // В объект такая отметка не попадает — модель её не пустит, — но в настройках
+  // окна «Что добавить» она переживает смену вида: поставил отметку у двери,
+  // потом выбрал балконное окно. Строка «что поставит следующий клик» обещала
+  // «Балконное окно, стеклянная» (поймано живым прогоном).
+  assert.equal(openingGlazed({ kind: "windowBalcony", glazed: true }), false);
+  assert.equal(openingTitle({ kind: "windowBalcony", glazed: true }), "Балконное окно");
+  assert.equal(openingGlazed({ kind: "doorSliding", glazed: true }), true);
+});
+
 test("подпись проёма — имя вида и приписка отметки, одним местом", () => {
   assert.equal(openingTitle({ kind: "door" }), "Распашная дверь");
   assert.equal(openingTitle({ kind: "door", glazed: true }), "Распашная дверь, стеклянная");
