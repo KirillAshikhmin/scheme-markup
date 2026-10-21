@@ -6,7 +6,14 @@ import { getSetting, setSetting } from "./store.js";
 // Расположение — одно на три режима, и считает его `screenPlace.js` (таск 178,
 // 193). Каркас только кладёт его в настройки и достаёт обратно: второго счёта
 // у памяти вида нет.
-import { screenPlaceForget, screenPlaceOf, screenPlaceRestore, screenPlaceStored, screenPlaceWatch } from "./screenPlace.js";
+import {
+  screenPlaceForget,
+  screenPlaceOf,
+  screenPlaceRestore,
+  screenPlaceScreen,
+  screenPlaceStored,
+  screenPlaceWatch,
+} from "./screenPlace.js";
 // Виды шрифта объявлены там же, где их разбирают в семейства, — в `render.js`.
 // Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
 import { FONT_DRAFT, FONT_KINDS } from "./render.js";
@@ -676,6 +683,10 @@ export function setState(patch) {
   }
   syncHiddenObjects(changed);
   syncViewMemory(changed);
+  // Кто на экране — тот и пишет общее место (дефект D61). Говорится это **до**
+  // оповещения: к мигу, когда поверхности узнают о новом режиме, хозяин записи
+  // уже новый, и погасшее поле своим кадром места не отнимет.
+  if ("screen" in changed) screenPlaceScreen(appState.screen);
   if ("screen" in changed || "schemeId" in changed) saveViewMemory();
   if (Object.keys(changed).length === 0) return getState();
   const snapshot = getState();
@@ -1185,6 +1196,9 @@ function wireSections() {
 export function startApp() {
   if (appStarted) return;
   appStarted = true;
+  // Хозяин общего места — с первой минуты: поверхности собираются ниже, и их
+  // первый же кадр обязан знать, на его режим смотрят или нет (D61).
+  screenPlaceScreen(appState.screen);
   applyStrings(document);
   wireSections();
   wirePanels();

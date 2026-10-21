@@ -53,7 +53,7 @@ import {
   schemeObjectsOnScheme,
 } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
-import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "../screenPlace.js";
+import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -447,16 +447,9 @@ export function volumePlanCentre(project, schemeId, box, view) {
   return screenPlacePlanRead(project, schemeId, box, view);
 }
 
-/**
- * Вид плана, у которого середина поля смотрит на точку чертежа. Масштаб не
- * трогается: человек его выбрал, и менять его при смене режима значило бы
- * отнять у него выбор — объём переносит **место**, а не приближение (поэтому
- * `pxPerMm` общему счёту здесь не передаётся).
- */
-export function volumePlanViewAt(project, schemeId, box, view, pointMm) {
-  if (!pointMm) return null;
-  return screenPlacePlanView(project, schemeId, box, { x: pointMm.x, y: pointMm.y }, view);
-}
+// Вид плана по месту считает `screenPlace.screenPlacePlanView` — и зовёт его
+// сам план, когда читает чужую запись (D61). Своей руки, которая правила бы
+// плану вид из объёма, больше нет: объём говорит только «вот где человек».
 
 /**
  * Куда на чертеже показали щелчком по миникарте (G270). `null` — мимо карты.
@@ -1462,26 +1455,23 @@ function createVolume({ api, hosts }) {
   }
 
   /**
-   * Уходим из объёма: схема и чертёж встают серединой на человека.
+   * Где стоит человек — общему месту трёх видов, **и только пока объём на
+   * экране** (дефект D61, таск 210).
    *
-   * Масштаб обоих полей остаётся прежним — переносится место, а не
-   * приближение: масштаб человек выбрал сам, и менять его за него значило бы
-   * отнять выбор, о котором не просили.
+   * Говорится это кадром, как у плана и у мастерской: у трёх полей одно
+   * правило — пишет тот, на кого смотрят. Прежде объём писал место на уходе из
+   * режима, а уходом считал всякую смену экрана: поверхность живёт дальше за
+   * кадром, и «Схема → Чертёж» тоже будила эту подписку. Чертёж после такого
+   * вставал по камере, а не по схеме, которую человек только что двигал.
+   *
+   * Масштаба объём не касается — камера им не владеет, и у плана с чертежом он
+   * остаётся тем, который человек выбрал сам (`screenPlaceSet` без `pxPerMm`).
+   * Назад схема и чертёж встают сами, читая чужую запись: второй руки, которая
+   * правила бы им вид, больше нет.
    */
-  function placeLeave(state) {
-    if (scene.empty) return;
-    const at = { x: person.x, y: person.y };
-    // Общему месту говорится одно: где стоит человек. Масштаба объём не
-    // касается — камера им не владеет, и у плана с чертежом он остаётся тем,
-    // который человек выбрал до ухода (`screenPlaceSet` без `pxPerMm`).
-    screenPlaceSet(schemeId, at);
-    const box = viewport();
-    // Поле уже погасло, но не схлопнулось (гаснет оно `visibility`, а не
-    // `display`) — и всё же вырожденный размер лучше проверить: вид плана,
-    // посчитанный по полю в один пиксель, увёл бы схему в угол.
-    if (!(box.width > 50) || !(box.height > 50)) return;
-    const next = volumePlanViewAt(state.project, schemeId, box, state.view, at);
-    if (next) setState({ view: next });
+  function placeHere() {
+    if (scene.empty || screenMode() !== "volume") return;
+    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y });
   }
 
   function viewport() {
@@ -1669,6 +1659,10 @@ function createVolume({ api, hosts }) {
 
   function paint() {
     if (!ctx || closed) return;
+    // Где стоит человек — общему месту трёх видов (G276, D61). На кадр это одно
+    // присваивание, и только на своём режиме: запись из погасшего поля отняла
+    // бы место у того, на которое смотрят.
+    placeHere();
     const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
     const box = viewport();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -3505,10 +3499,12 @@ function createVolume({ api, hosts }) {
           sync();
           if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
-        // Режим сменили на другой — оставляем схеме и чертежу то место, где
-        // стоял человек (G276).
+        // Режим сменили на другой. Место схеме и чертежу объём здесь больше не
+        // правит (D61): последний его кадр уже сказал, где стоит человек, а
+        // встают по этому месту они сами — читая чужую запись. Прежняя правка
+        // отсюда срабатывала и на чужих переключениях («Схема → Чертёж»), где
+        // объёма не было ни до, ни после.
         if ("screen" in changed && state.screen !== "volume") {
-          placeLeave(state);
           // Поле погасло — таймеру часа идти незачем.
           syncClock();
         }

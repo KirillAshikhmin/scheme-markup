@@ -42,6 +42,7 @@ import { drawDrawingGrid, drawRuler, drawScheme, drawingBridge, drawingUnitBridg
 import {
   screenPlaceForget,
   screenPlaceFrom,
+  screenPlaceScreen,
   screenPlaceOf,
   screenPlacePlanRead,
   screenPlacePlanScale,
@@ -217,20 +218,21 @@ test("память вида поднимается в общее место и �
 
 test("о смене места сообщают — на это и пишется память", () => {
   screenPlaceForget();
+  screenPlaceScreen(null);
   let heard = 0;
   const stop = screenPlaceWatch(() => {
     heard += 1;
   });
-  screenPlaceSet("схема-1", { x: 10, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 10, y: 20 }, 0.5);
   assert.equal(heard, 1);
   // Поле говорит о месте на каждый кадр: запись, ничего не меняющая, память не
   // будит — иначе в хранилище летело бы по шестьдесят записей в секунду.
-  screenPlaceSet("схема-1", { x: 10, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 10, y: 20 }, 0.5);
   assert.equal(heard, 1);
-  screenPlaceSet("схема-1", { x: 11, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 11, y: 20 }, 0.5);
   assert.equal(heard, 2);
   stop();
-  screenPlaceSet("схема-1", { x: 12, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 12, y: 20 }, 0.5);
   assert.equal(heard, 2, "отписка не сработала");
   screenPlaceForget();
 });
@@ -404,4 +406,93 @@ test("G293: линейка чертежа мерит миллиметры и х�
   const log = [];
   drawRuler(scribe(log), WORKSHOP_UNIT, view, box, { bounded: false });
   assert.ok(log.some((call) => call.startsWith("fillRect(")), "полоса линейки не залита");
+});
+
+// ——— D61: последнее движение человека старше вида ————————————————————————
+//
+// Слова заказчика: «если схему или чертёж сдвинуть и переключиться на другой
+// вариант то кидает туда, где стоит камера в Объёме. Последнее движение на
+// любом из 3 видов должно сохраняться».
+//
+// Отметки `stamp` для этого мало: она отвечает «чья запись», а спор был о том,
+// **чья рука**. Объём, собранный один раз, живёт дальше за кадром и писал место
+// камеры на всякую смену режима — в том числе на «Схема → Чертёж», где объёма
+// не было ни до, ни после.
+
+test("D61: пишет только то поле, которое на экране", () => {
+  screenPlaceForget();
+  screenPlaceScreen("scheme");
+  // Человек двигает схему.
+  const moved = screenPlaceSet("scheme", "с-1", { x: 1000, y: 500 }, 0.2);
+  // Объём жив за кадром и говорит, где камера, — его не слушают.
+  const ignored = screenPlaceSet("volume", "с-1", { x: -9000, y: -9000 });
+  assert.equal(ignored, moved, "запись из погасшего поля сдвинула отметку");
+  assert.deepEqual(
+    { x: screenPlaceOf("с-1").x, y: screenPlaceOf("с-1").y },
+    { x: 1000, y: 500 },
+    "место схемы перебито камерой",
+  );
+  // И мастерская, пока она не на экране, тоже молчит.
+  screenPlaceSet("drawing", "с-1", { x: 3, y: 4 }, 1);
+  assert.equal(screenPlaceOf("с-1").x, 1000);
+  assert.equal(screenPlaceOf("с-1").pxPerMm, 0.2, "и масштаб её не достался");
+  screenPlaceForget();
+  screenPlaceScreen(null);
+});
+
+test("D61: четыре порядка — последнее движение показывается всегда", () => {
+  const scheme = "с-1";
+  const read = () => {
+    const place = screenPlaceOf(scheme);
+    return place ? { x: place.x, y: place.y, pxPerMm: place.pxPerMm } : null;
+  };
+  screenPlaceForget();
+
+  // 1. Сдвинул схему → ушёл в чертёж: чертёж встаёт по схеме.
+  screenPlaceScreen("scheme");
+  screenPlaceSet("scheme", scheme, { x: 1200, y: -300 }, 0.2);
+  screenPlaceScreen("drawing");
+  assert.deepEqual(read(), { x: 1200, y: -300, pxPerMm: 0.2 }, "чертёж встал не по схеме");
+
+  // 2. Сдвинул чертёж → вернулся на схему: схема встаёт по чертежу.
+  screenPlaceSet("drawing", scheme, { x: -800, y: 900 }, 0.35);
+  screenPlaceScreen("scheme");
+  assert.deepEqual(read(), { x: -800, y: 900, pxPerMm: 0.35 }, "схема встала не по чертежу");
+
+  // 3. Побывал в объёме и не трогал камеру: возврат по последнему движению
+  //    руки — объём пишет то же место, на которое пришёл.
+  screenPlaceScreen("volume");
+  screenPlaceSet("volume", scheme, { x: -800, y: 900 });
+  screenPlaceScreen("scheme");
+  assert.deepEqual(read(), { x: -800, y: 900, pxPerMm: 0.35 }, "объём перебил место, никуда не ходив");
+
+  // 4. Подвинул камеру в объёме → ушёл на схему: схема встаёт по камере (G276),
+  //    и масштаб при этом остаётся прежним — камера им не владеет.
+  screenPlaceScreen("volume");
+  screenPlaceSet("volume", scheme, { x: 2500, y: 2500 });
+  screenPlaceScreen("scheme");
+  assert.deepEqual(read(), { x: 2500, y: 2500, pxPerMm: 0.35 }, "схема не пошла за камерой");
+
+  // И снова сдвиг схемы старше камеры: объём за кадром больше не спорит.
+  screenPlaceSet("scheme", scheme, { x: 10, y: 20 }, 0.35);
+  screenPlaceSet("volume", scheme, { x: 2500, y: 2500 });
+  screenPlaceScreen("drawing");
+  assert.deepEqual(read(), { x: 10, y: 20, pxPerMm: 0.35 }, "камера снова оказалась старше руки");
+  screenPlaceForget();
+  screenPlaceScreen(null);
+});
+
+test("D61: память вида поднимается мимо хозяина — ей спорить не с кем", () => {
+  screenPlaceForget();
+  // Страница только поднялась: на экране схема, а поднимается вид, которым
+  // человек закончил прошлый сеанс, — чертёж со своим местом.
+  screenPlaceScreen("scheme");
+  const stamp = screenPlaceRestore("с-1", { x: 4000, y: -2000, pxPerMm: 0.5 });
+  assert.ok(stamp > 0, "память не доехала до общего места");
+  assert.deepEqual(
+    { x: screenPlaceOf("с-1").x, y: screenPlaceOf("с-1").y, pxPerMm: screenPlaceOf("с-1").pxPerMm },
+    { x: 4000, y: -2000, pxPerMm: 0.5 },
+  );
+  screenPlaceForget();
+  screenPlaceScreen(null);
 });

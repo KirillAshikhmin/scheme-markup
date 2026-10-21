@@ -880,10 +880,12 @@ function canvasProject(state) {
 let canvasPlaceStamp = 0;
 
 function canvasPushPlace(state, project, view) {
+  // Кто на экране — тот и пишет (D61). Спрашивается это дважды: здесь, чтобы
+  // не считать место впустую, и в самой записи, где правило общее на три поля.
   if (!canvasOnScreen(state) || !state.schemeId) return;
   const place = screenPlacePlanRead(project, state.schemeId, canvasBox(), view);
   if (!place) return;
-  canvasPlaceStamp = screenPlaceSet(state.schemeId, place, place.pxPerMm);
+  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, place.pxPerMm);
 }
 
 /**

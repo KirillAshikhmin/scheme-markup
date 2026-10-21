@@ -29193,12 +29193,37 @@ const renderInternals = {
 // спрятанная поверхность, которая всё ещё перерисовывается (мастерская рисует
 // кадр и на чужом режиме), перебивала бы своим старым местом то, куда уехало
 // поле на экране.
+//
+// ——— и «чья это рука» (дефект D61) ————————————————————————————————————
+//
+// Слова заказчика: «если схему или чертёж сдвинуть и переключиться на другой
+// вариант то кидает туда, где стоит камера в Объёме. Последнее движение на
+// любом из 3 видов должно сохраняться».
+//
+// Отметки для этого мало: она отвечает «чья запись», а спор был о том, **чья
+// рука**. Объём, собранный один раз, живёт дальше за кадром, и его подписка
+// писала место камеры на всякую смену режима — в том числе на «Схема →
+// Чертёж», где объёма не было ни до, ни после. Чертёж честно читал чужую
+// запись и вставал по камере, а не по схеме, которую человек только что
+// двигал.
+//
+// Поэтому у записи есть хозяин: **пишет только то поле, которое на экране**.
+// Правило одно на три вида и живёт здесь, а не тремя уговорами в трёх файлах:
+// уговор можно забыть, заводя четвёртую поверхность, а отказ в записи — нет.
 
 
 /** Общее место: `{schemeId, x, y, pxPerMm, stamp}` или `null`. */
 let place = null;
 let placeStamp = 0;
 const listeners = new Set();
+// Какое поле сейчас на экране. Ставит его каркас — `app.setScreen`/`setState`,
+// **до** того, как разбудит подписчиков: к мигу, когда поверхности узнают о
+// новом режиме, хозяин записи уже новый.
+//
+// `null` — никто не сказал (так живут тесты и первые миллисекунды страницы, до
+// `startApp`): тогда пишет кто угодно. Поверхности в этот миг ещё не собраны и
+// кадров не рисуют.
+let owner = null;
 
 const placeOf = (schemeId, pointMm) => {
   if (!schemeId || !pointMm) return null;
@@ -29209,14 +29234,32 @@ const placeOf = (schemeId, pointMm) => {
 };
 
 /**
- * Поверхность на экране говорит, где стоит середина её поля и сколько в ней
- * экранных точек на миллиметр. `pxPerMm` необязателен: объём масштабом не
+ * Кто сейчас на экране (дефект D61). Зовёт это каркас на каждую смену режима —
+ * и только он: поверхность о себе этого не объявляет, иначе двое сразу считали
+ * бы себя хозяевами.
+ */
+function screenPlaceScreen(screen) {
+  owner = screen || null;
+}
+
+/**
+ * Поле, которое на экране, говорит, где стоит середина его кадра и сколько в
+ * ней экранных точек на миллиметр. `from` — чьё это движение: `"scheme"`,
+ * `"drawing"` или `"volume"`. `pxPerMm` необязателен: объём масштабом не
  * владеет вовсе и оставляет прежний — вернувшись, человек видит то
  * приближение, которое выбрал сам.
  *
+ * **Пишет только то поле, которое на экране** — и это проверяется здесь, а не
+ * тремя уговорами в трёх файлах (дефект D61). Поверхности живут дальше за
+ * кадром: объём, собранный один раз, перерисовывается и в чужом режиме, и его
+ * запись — место камеры — перебивала сдвиг схемы, сделанный человеком секунду
+ * назад. Старшинство у **последнего движения человека**, а движение человека —
+ * это движение того поля, на которое он в этот миг смотрит.
+ *
  * Возвращает отметку записи — её зовущий запоминает своей.
  */
-function screenPlaceSet(schemeId, pointMm, pxPerMm) {
+function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
+  if (owner !== null && from !== owner) return placeStamp;
   const next = placeOf(schemeId, pointMm);
   if (!next) return placeStamp;
   const scale = Number(pxPerMm);
@@ -29272,7 +29315,10 @@ function screenPlaceWatch(listener) {
 function screenPlaceRestore(schemeId, saved) {
   const next = screenPlaceFrom(saved);
   if (!next) return 0;
-  return screenPlaceSet(schemeId, next, next.pxPerMm);
+  // Мимо хозяина (D61): память — не поле, она поднимает то самое последнее
+  // движение, которым человек закончил прошлый сеанс, и спорить ей не с кем —
+  // ни одно поле ещё ничего не нарисовало.
+  return screenPlaceSet(owner, schemeId, next, next.pxPerMm);
 }
 
 /**
@@ -30893,6 +30939,10 @@ function setState(patch) {
   }
   syncHiddenObjects(changed);
   syncViewMemory(changed);
+  // Кто на экране — тот и пишет общее место (дефект D61). Говорится это **до**
+  // оповещения: к мигу, когда поверхности узнают о новом режиме, хозяин записи
+  // уже новый, и погасшее поле своим кадром места не отнимет.
+  if ("screen" in changed) screenPlaceScreen(appState.screen);
   if ("screen" in changed || "schemeId" in changed) saveViewMemory();
   if (Object.keys(changed).length === 0) return getState();
   const snapshot = getState();
@@ -31388,6 +31438,9 @@ function wireSections() {
 function startApp() {
   if (appStarted) return;
   appStarted = true;
+  // Хозяин общего места — с первой минуты: поверхности собираются ниже, и их
+  // первый же кадр обязан знать, на его режим смотрят или нет (D61).
+  screenPlaceScreen(appState.screen);
   applyStrings(document);
   wireSections();
   wirePanels();
@@ -33828,10 +33881,12 @@ function canvasProject(state) {
 let canvasPlaceStamp = 0;
 
 function canvasPushPlace(state, project, view) {
+  // Кто на экране — тот и пишет (D61). Спрашивается это дважды: здесь, чтобы
+  // не считать место впустую, и в самой записи, где правило общее на три поля.
   if (!canvasOnScreen(state) || !state.schemeId) return;
   const place = screenPlacePlanRead(project, state.schemeId, canvasBox(), view);
   if (!place) return;
-  canvasPlaceStamp = screenPlaceSet(state.schemeId, place, place.pxPerMm);
+  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, place.pxPerMm);
 }
 
 /**
@@ -62827,16 +62882,9 @@ function volumePlanCentre(project, schemeId, box, view) {
   return screenPlacePlanRead(project, schemeId, box, view);
 }
 
-/**
- * Вид плана, у которого середина поля смотрит на точку чертежа. Масштаб не
- * трогается: человек его выбрал, и менять его при смене режима значило бы
- * отнять у него выбор — объём переносит **место**, а не приближение (поэтому
- * `pxPerMm` общему счёту здесь не передаётся).
- */
-function volumePlanViewAt(project, schemeId, box, view, pointMm) {
-  if (!pointMm) return null;
-  return screenPlacePlanView(project, schemeId, box, { x: pointMm.x, y: pointMm.y }, view);
-}
+// Вид плана по месту считает `screenPlace.screenPlacePlanView` — и зовёт его
+// сам план, когда читает чужую запись (D61). Своей руки, которая правила бы
+// плану вид из объёма, больше нет: объём говорит только «вот где человек».
 
 /**
  * Куда на чертеже показали щелчком по миникарте (G270). `null` — мимо карты.
@@ -63842,26 +63890,23 @@ function createVolume({ api, hosts }) {
   }
 
   /**
-   * Уходим из объёма: схема и чертёж встают серединой на человека.
+   * Где стоит человек — общему месту трёх видов, **и только пока объём на
+   * экране** (дефект D61, таск 210).
    *
-   * Масштаб обоих полей остаётся прежним — переносится место, а не
-   * приближение: масштаб человек выбрал сам, и менять его за него значило бы
-   * отнять выбор, о котором не просили.
+   * Говорится это кадром, как у плана и у мастерской: у трёх полей одно
+   * правило — пишет тот, на кого смотрят. Прежде объём писал место на уходе из
+   * режима, а уходом считал всякую смену экрана: поверхность живёт дальше за
+   * кадром, и «Схема → Чертёж» тоже будила эту подписку. Чертёж после такого
+   * вставал по камере, а не по схеме, которую человек только что двигал.
+   *
+   * Масштаба объём не касается — камера им не владеет, и у плана с чертежом он
+   * остаётся тем, который человек выбрал сам (`screenPlaceSet` без `pxPerMm`).
+   * Назад схема и чертёж встают сами, читая чужую запись: второй руки, которая
+   * правила бы им вид, больше нет.
    */
-  function placeLeave(state) {
-    if (scene.empty) return;
-    const at = { x: person.x, y: person.y };
-    // Общему месту говорится одно: где стоит человек. Масштаба объём не
-    // касается — камера им не владеет, и у плана с чертежом он остаётся тем,
-    // который человек выбрал до ухода (`screenPlaceSet` без `pxPerMm`).
-    screenPlaceSet(schemeId, at);
-    const box = viewport();
-    // Поле уже погасло, но не схлопнулось (гаснет оно `visibility`, а не
-    // `display`) — и всё же вырожденный размер лучше проверить: вид плана,
-    // посчитанный по полю в один пиксель, увёл бы схему в угол.
-    if (!(box.width > 50) || !(box.height > 50)) return;
-    const next = volumePlanViewAt(state.project, schemeId, box, state.view, at);
-    if (next) setState({ view: next });
+  function placeHere() {
+    if (scene.empty || screenMode() !== "volume") return;
+    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y });
   }
 
   function viewport() {
@@ -64049,6 +64094,10 @@ function createVolume({ api, hosts }) {
 
   function paint() {
     if (!ctx || closed) return;
+    // Где стоит человек — общему месту трёх видов (G276, D61). На кадр это одно
+    // присваивание, и только на своём режиме: запись из погасшего поля отняла
+    // бы место у того, на которое смотрят.
+    placeHere();
     const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
     const box = viewport();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -65885,10 +65934,12 @@ function createVolume({ api, hosts }) {
           sync();
           if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
-        // Режим сменили на другой — оставляем схеме и чертежу то место, где
-        // стоял человек (G276).
+        // Режим сменили на другой. Место схеме и чертежу объём здесь больше не
+        // правит (D61): последний его кадр уже сказал, где стоит человек, а
+        // встают по этому месту они сами — читая чужую запись. Прежняя правка
+        // отсюда срабатывала и на чужих переключениях («Схема → Чертёж»), где
+        // объёма не было ни до, ни после.
         if ("screen" in changed && state.screen !== "volume") {
-          placeLeave(state);
           // Поле погасло — таймеру часа идти незачем.
           syncClock();
         }
@@ -69849,7 +69900,7 @@ function createWorkshop({ api, hosts }) {
     const box = viewport();
     const zoom = place.pxPerMm > 0 ? workshopClampZoom(place.pxPerMm, zoomCeiling()) : view.zoom;
     view = { zoom, offsetX: box.width / 2 - place.x * zoom, offsetY: box.height / 2 - place.y * zoom };
-    placeStamp = screenPlaceSet(schemeId, { x: place.x, y: place.y }, zoom);
+    placeStamp = screenPlaceSet("drawing", schemeId, { x: place.x, y: place.y }, zoom);
     return true;
   }
 
@@ -69867,6 +69918,7 @@ function createWorkshop({ api, hosts }) {
     // запись из спрятанного поля перебила бы место того, кто на виду.
     if (screenMode() === "drawing") {
       placeStamp = screenPlaceSet(
+        "drawing",
         schemeId,
         screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view),
         view.zoom,
