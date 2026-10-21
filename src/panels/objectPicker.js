@@ -17,12 +17,13 @@
 //   3. **Поиск с клавиатуры.** «хол» и Enter — холодильник выбран, мышь не
 //      нужна; стрелки водят по плиткам, как по строкам окна типов.
 //
-// Механизм — тот же, что у выбора типа метки: карточка `uiModal`, поиск
-// сверху, категории колонками, раскладку колонок считает общий `pickerLayout`
-// из `typePicker.js` (он же считает её для типов — второго такого механизма в
-// сборке нет). Отличается только клетка: у типа строка «знак — код —
-// название», у вещи плитка «картинка — имя» (G224, плитки переехали сюда из
-// колонки чертежа).
+// Механизм — тот же, что у выбора типа метки, и скелет у них общий, из
+// кирпичей `ui.js` (таск 183): карточка `uiPickCard`, поиск `uiPickSearch`,
+// клавиатура `uiPickKeys`. Раскладку колонок считает общий `pickerLayout` из
+// `typePicker.js` (он же считает её для типов — второго такого механизма в
+// сборке нет). Отличается клетка: у типа строка «знак — код — название», у
+// вещи плитка «картинка — имя» (G224, плитки переехали сюда из колонки
+// чертежа), — и шаг стрелки: она прыгает на ряд из трёх плиток.
 //
 // **Вещь с отметкой `legacy` из окна спрятана** (сегодня одна — общий вид
 // «Сантехника»): ею больше не размечают, но по ней открываются чужие чертежи.
@@ -33,7 +34,7 @@
 import { objectCatalogCategory, OBJECT_CATEGORIES } from "../objectCatalog.js";
 import { drawObjectView, objectViewByName } from "../objectViews/registry.js";
 import { strings } from "../strings.js";
-import { uiButton, uiEl, uiModal } from "./ui.js";
+import { uiEl, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
 import { pickerColumnLimit, pickerLayout } from "./typePicker.js";
 
 // Клетка картинки на плитке. Сорок точек — столько же, сколько у крупного
@@ -176,31 +177,13 @@ export function createObjectTiles(options = {}) {
     return first ? first.dataset.key : null;
   };
 
-  const search = uiEl("input", {
-    class: "ui-input",
-    type: "text",
+  const search = uiPickSearch({
     placeholder: strings.objectPicker.search,
-    on: {
-      input: () => render(),
-      keydown: (event) => {
-        // Стрелка вниз из поиска — в первую плитку: дальше по сетке ходят
-        // стрелками, не хватаясь за мышь.
-        if (event.key === "ArrowDown") {
-          const first = box.querySelector(".objectTile");
-          if (!first) return;
-          event.preventDefault();
-          first.focus();
-          return;
-        }
-        // Enter берёт первую найденную вещь. Своя обработка здесь
-        // обязательна: основное действие карточки — «Отмена», и оно
-        // сработало бы раньше (`uiModal` ловит Enter), то есть выбор
-        // терялся бы.
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        pick(firstKey());
-      },
-    },
+    onInput: () => render(),
+    first: () => box.querySelector(".objectTile"),
+    // Enter берёт первую найденную вещь — ключом, а не кликом по плитке:
+    // плитки знает сетка, а что с ключом делать, решает хозяин.
+    onEnter: () => pick(firstKey()),
   });
 
   function tile(entry) {
@@ -245,20 +228,16 @@ export function createObjectTiles(options = {}) {
     node.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
   }
 
-  box.addEventListener("keydown", (event) => {
-    const current = event.target;
-    if (!current || !current.classList || !current.classList.contains("objectTile")) return;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      current.click();
-      return;
-    }
-    const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
-    if (!step) return;
-    event.preventDefault();
-    const next = objectPickerStep(columns, current.dataset.key, step[0], step[1]);
-    const target = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
-    if (target) target.focus();
+  // Клавиатура по сетке: кирпич окна выбора, а куда уводит стрелка — своё
+  // (`objectPickerStep`), и считается это по ключам каталога, а не по разметке.
+  uiPickKeys(box, {
+    cell: "objectTile",
+    grid: true,
+    move: (current, dx, dy) => {
+      const next = objectPickerStep(columns, current.dataset.key, dx, dy);
+      const target = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
+      if (target) target.focus();
+    },
   });
 
   render();
@@ -291,14 +270,18 @@ export function openObjectPicker(options = {}) {
         resolve(key || null);
       },
     });
-    modal = uiModal({
+    modal = uiPickCard({
       title: options.title || strings.objectPicker.title,
       body: tiles.node,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => { modal.close(); resolve(null); } } })],
-      onCancel: () => resolve(null),
+      // Широкая карточка — как у окна типов: ширину внутри задаёт сетка колонок.
+      wide: true,
+      cancel: () => {
+        modal.close();
+        resolve(null);
+      },
     });
-    // Широкая карточка — как у окна типов: ширину внутри задаёт сетка колонок.
-    if (modal.card) modal.card.classList.add("modal--wide");
+    // Фокус — в поиск сетки: он лежит внутри кирпича, и просить о нём надо
+    // самой сетке.
     tiles.focus();
   });
 }

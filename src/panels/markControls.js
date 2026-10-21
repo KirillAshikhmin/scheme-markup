@@ -19,7 +19,7 @@ import {
   typeChannels,
 } from "../model.js";
 import { shapeIcon } from "../render.js";
-import { uiButton, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiEl, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
 import { filtersMarkRows } from "./filters.js";
 
 // Кандидаты: метки объекта в том же порядке, что и список сбоку, — схема за
@@ -179,18 +179,17 @@ export function openMarkPicker(project, options = {}) {
     // пункта select не примет и останется на «Все помещения».
     rooms.value = options.roomId || "";
 
-    // Поиск — тем же приёмом, что в окне типа и в окне модели: строка сверху,
-    // стрелка вниз уводит в список. `type: "search"` даёт крестик очистки —
-    // третьего вида окна здесь не заводим.
-    const search = uiEl("input", {
-      class: "ui-input",
+    // Поиск — тем же кирпичом, что в окне типа, модели и вещи (`uiPickSearch`):
+    // строка сверху, стрелка вниз уводит в список. `type: "search"` даёт
+    // крестик очистки — третьего вида окна здесь не заводим. Что значит Enter,
+    // у этого окна своё (`searchEnter` ниже).
+    const search = uiPickSearch({
       type: "search",
       placeholder: strings.controls.search,
       title: multiple ? strings.controls.searchHint : strings.controls.searchHintOne,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => onSearchKey(event),
-      },
+      onInput: () => renderList(),
+      first: () => rowStops()[0],
+      onEnter: () => searchEnter(),
     });
 
     // Строки последней отрисовки: Enter и стрелка берут метку отсюда, а не
@@ -353,65 +352,60 @@ export function openMarkPicker(project, options = {}) {
      * Снять галочку он не может: повторный Enter по уже отмеченной оставляет
      * её отмеченной — иначе быстрый набор молча снимал бы своё же.
      *
-     * Пустой поиск Enter не перехватывает: там окно ведёт себя как раньше —
-     * `uiModal` нажимает основное действие, «Сохранить связь». Не нашлось
-     * ничего — Enter не делает ничего: закрывать окно посреди набранного
-     * запроса он не должен.
+     * Пустой поиск Enter не перехватывает (`false` в ответе): там окно ведёт
+     * себя как раньше — `uiModal` нажимает основное действие, «Сохранить
+     * связь». Не нашлось ничего — Enter не делает ничего, но и наружу не
+     * уходит: закрывать окно посреди набранного запроса он не должен.
      *
      * В режиме одной метки окно ничем не отличается от соседних, и Enter в
      * нём тоже берёт первую строку и закрывает окно.
      */
-    function onSearchKey(event) {
-      if (event.key === "ArrowDown") {
-        const first = rowStops()[0];
-        if (!first) return;
-        event.preventDefault();
-        first.focus();
-        return;
-      }
-      if (event.key !== "Enter" || search.value.trim() === "") return;
-      event.preventDefault();
+    function searchEnter() {
+      if (search.value.trim() === "") return false;
       const first = shownRows[0];
-      if (!first) return;
+      if (!first) return true;
       if (!multiple) {
         done([first.mark.id]);
-        return;
+        return true;
       }
       chosen.add(first.mark.id);
       search.value = "";
       renderList();
       search.focus();
+      return true;
     }
 
-    // Стрелки по списку — как в окне модели. Вверх с первой строки возвращает
-    // в поиск: оттуда пришли, туда и уходим.
-    list.addEventListener("keydown", (event) => {
-      // В режиме одной метки Enter по строке обязан её выбрать. Свой он здесь
-      // потому же, почему в соседних окнах: основное действие этого окна —
-      // «Отмена», и `uiModal` нажал бы её раньше, чем браузер превратит Enter
-      // в клик по строке, — выбор терялся бы. В режиме галочек Enter не
-      // перехватывается: там он по-прежнему «Сохранить связь», а ставит и
-      // снимает галочку пробел.
-      if (event.key === "Enter" && !multiple) {
-        const row = event.target;
-        if (!row || !row.classList || !row.classList.contains("controls-pick__row--one")) return;
-        event.preventDefault();
-        row.click();
-        return;
-      }
-      const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
-      if (!step) return;
-      const stops = rowStops();
-      const index = stops.indexOf(event.target);
-      if (index < 0) return;
-      event.preventDefault();
-      if (index === 0 && step === -1) {
-        search.focus();
-        search.select();
-        return;
-      }
-      const next = stops[Math.min(stops.length - 1, index + step)];
-      if (next) next.focus();
+    // Клавиатура по списку — тем же кирпичом, что в соседних окнах, а
+    // остановки и шаг свои.
+    //
+    // Остановка здесь двух видов, поэтому `cell` — функция, а не класс:
+    // галочка в режиме многих, кнопка строки в режиме одной. Выбор канала
+    // остановкой не считается, и стрелки в нём листают его пункты — отнимать
+    // их нельзя.
+    //
+    // Вверх с первой строки возвращает в поиск: оттуда пришли, туда и уходим,
+    // — и набранное при этом выделяется, чтобы его можно было сразу перебить.
+    // В соседних окнах стрелка вверх на первой строке упирается в стену; это
+    // расхождение названо в разборе механик (находка 14) и **здесь не
+    // сведено**: оно про поведение, а не про устройство, а слова и повадки
+    // окон этот таск не меняет.
+    //
+    // Enter в режиме одной метки обязан выбрать строку — в режиме галочек он
+    // не наш: там он «Сохранить связь», а ставит и снимает галочку пробел.
+    uiPickKeys(list, {
+      cell: (target) => (rowStops().includes(target) ? target : null),
+      enter: (row) => !multiple && row.classList.contains("controls-pick__row--one"),
+      move: (stop, dx, dy) => {
+        const stops = rowStops();
+        const index = stops.indexOf(stop);
+        if (index === 0 && dy === -1) {
+          search.focus();
+          search.select();
+          return;
+        }
+        const next = stops[Math.min(stops.length - 1, index + dy)];
+        if (next) next.focus();
+      },
     });
 
     renderList();
@@ -420,23 +414,24 @@ export function openMarkPicker(project, options = {}) {
       modal.close();
       resolve(value);
     };
-    const actions = [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })];
-    if (multiple) {
-      actions.push(
-        uiButton(strings.controls.save, {
-          class: "ui-btn ui-btn--accent",
-          on: {
-            click: () =>
-              done(
-                pickChannel
-                  ? [...chosen].map((id) => ({ id, channel: channels.get(id) || null }))
-                  : [...chosen],
-              ),
-          },
-        }),
-      );
-    }
-    modal = uiModal({
+    // «Сохранить связь» — действие только режима многих: в режиме одной выбор
+    // строки и есть ответ, и подтверждать его нечем.
+    const extra = multiple
+      ? [
+          uiButton(strings.controls.save, {
+            class: "ui-btn ui-btn--accent",
+            on: {
+              click: () =>
+                done(
+                  pickChannel
+                    ? [...chosen].map((id) => ({ id, channel: channels.get(id) || null }))
+                    : [...chosen],
+                ),
+            },
+          }),
+        ]
+      : [];
+    modal = uiPickCard({
       title: options.title || strings.controls.room,
       // Поиск стоит первым полем окна — и потому, что так устроены соседние
       // окна, и потому, что `uiModal` отдаёт фокус первому полю: открылось —
@@ -448,8 +443,8 @@ export function openMarkPicker(project, options = {}) {
         list,
         note,
       ]),
-      actions,
-      onCancel: () => resolve(null),
+      extra,
+      cancel: () => done(null),
     });
   });
 }

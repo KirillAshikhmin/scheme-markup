@@ -30210,6 +30210,146 @@ function uiPrompt({ title, value, placeholder, submitLabel, allowEmpty }) {
     input.select();
   });
 }
+
+// ——— окно выбора ——————————————————————————————————————————————————————
+//
+// Скелет окна выбора был написан четырежды: тип метки (`typePicker.js`),
+// модель оборудования (`equipmentPicker.js`), метки (`markControls.js`) и вещь
+// чертежа (`objectPicker.js`). Одинаковы у них три вещи: карточка с «Отменой»,
+// строка поиска сверху (стрелка вниз уводит в список, Enter берёт первое) и
+// клавиатура строк (Enter нажимает строку, стрелки водят по ней) — вплоть до
+// дословно совпадающих комментариев. И они уже начали расходиться: стрелка
+// вверх с первой строки возвращала в поиск только в окне меток, а в окнах типа
+// и модели упиралась в стену, хотя обещание в подсказках одно.
+//
+// **Окна остались четырьмя, и это решение, а не недоделка.** Разбор механик
+// (находка 14) говорит прямо: общий «кирпич окна выбора» целиком будет дороже
+// болезни — отличия у них по делу. Сетка колонок против списка, строка «знак —
+// код — название» против плитки с картинкой и против галочки с каналом, свои
+// фильтры, своё правило отбора, свои слова о пустом ответе, свой ответ наружу
+// и свой смысл у Enter. Сюда вынесено только то, что у всех четырёх одинаково
+// **на ощупь**: карточка, поиск и клавиши. Куда ведёт стрелка, что стоит в
+// строке и что уходит наружу — по-прежнему дело окна.
+
+/**
+ * Строка поиска окна выбора: стрелка вниз уводит в список, Enter берёт первое.
+ *
+ * `onInput()` — перерисовать список: все четыре окна ищут на каждую букву.
+ * `first()` — первая остановка списка (строка, плитка или галочка): стрелка
+ * вниз ведёт туда, а нет её — не делает ничего, чтобы фокус не ушёл в пустоту.
+ * `onEnter()` — что Enter значит в этом окне.
+ *
+ * **Свой Enter окну выбора нужен обязательно:** основное действие карточки —
+ * «Отмена», и `uiModal` нажал бы её раньше, чем браузер превратит Enter в клик
+ * по строке, — то есть выбор терялся бы. Поэтому Enter здесь гасится всегда,
+ * когда окно его взяло; **`false` в ответе `onEnter` значит «Enter не мой»**,
+ * и тогда он достаётся основному действию карточки — так ведёт себя окно меток
+ * с пустым поиском, где основное действие «Сохранить связь».
+ */
+function uiPickSearch(options = {}) {
+  return uiEl("input", {
+    class: "ui-input",
+    type: options.type || "text",
+    placeholder: options.placeholder || "",
+    title: options.title || "",
+    on: {
+      input: () => {
+        if (options.onInput) options.onInput();
+      },
+      keydown: (event) => {
+        if (event.key === "ArrowDown") {
+          const first = options.first ? options.first() : null;
+          if (!first) return;
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+        if (event.key !== "Enter") return;
+        if (!options.onEnter || options.onEnter() === false) return;
+        event.preventDefault();
+      },
+    },
+  });
+}
+
+// Стрелки списка и стрелки сетки. В списке в стороны ходит браузер (прокрутка),
+// и отбирать их у него незачем — поэтому набор клавиш у окна с колонками свой.
+const UI_PICK_ARROWS = { ArrowDown: [0, 1], ArrowUp: [0, -1] };
+const UI_PICK_ARROWS_GRID = { ...UI_PICK_ARROWS, ArrowRight: [1, 0], ArrowLeft: [-1, 0] };
+
+/**
+ * Клавиатура строк окна выбора: Enter нажимает строку, стрелки водят по ней.
+ *
+ * `cell` — что считать строкой: имя класса (строка типа, плитка вещи) или
+ * функция от цели события — у окна меток остановки двух видов, галочка в
+ * режиме многих и кнопка строки в режиме одной. Не строка — событие остаётся
+ * тому, на кого нажали: стрелки в `select` канала листают его пункты, и
+ * отнимать их нельзя.
+ *
+ * `move(cell, dx, dy)` — **куда уводит стрелка, решает окно**: по сетке
+ * колонок, по списку или по списку с возвратом в поиск. Фокус ставит оно же:
+ * возврат в поиск — это фокус с выделением набранного, а не просто фокус.
+ *
+ * `grid` — у окна есть колонки, и стрелки в стороны его.
+ *
+ * `enter(cell)` — чем Enter отличается от клика по строке; по умолчанию он и
+ * есть клик. `false` в ответе — «не мой», и Enter достаётся карточке: так в
+ * окне меток в режиме галочек, где он «Сохранить связь», а галочку ставит
+ * пробел.
+ */
+function uiPickKeys(box, options = {}) {
+  const cellOf = (target) => {
+    if (typeof options.cell === "function") return options.cell(target) || null;
+    if (!target || !target.classList || !options.cell) return null;
+    return target.classList.contains(options.cell) ? target : null;
+  };
+  box.addEventListener("keydown", (event) => {
+    const cell = cellOf(event.target);
+    if (!cell) return;
+    if (event.key === "Enter") {
+      if (options.enter && options.enter(cell) === false) return;
+      event.preventDefault();
+      cell.click();
+      return;
+    }
+    const step = (options.grid ? UI_PICK_ARROWS_GRID : UI_PICK_ARROWS)[event.key];
+    if (!step) return;
+    event.preventDefault();
+    if (options.move) options.move(cell, step[0], step[1]);
+  });
+}
+
+/**
+ * Карточка окна выбора: заголовок, тело и «Отмена».
+ *
+ * `cancel()` зовётся и кнопкой «Отмена», и Escape: ответ у них один во всех
+ * четырёх окнах — «передумали». `extra` — действия правее «Отмены» (кнопка
+ * «Сохранить связь» в окне меток; в остальных трёх выбор строки и есть ответ,
+ * подтверждать его нечем), и основным `uiModal` возьмёт последнее из них.
+ * `wide` — широкая карточка, ширину внутри которой задаёт сетка колонок.
+ * `focus` — куда встать после открытия. Фокус в первое поле карточки `uiModal`
+ * ставит и сам, но окна выбора говорят про поиск вслух: полей у них не одно
+ * (фильтры, поля заведения), и зависеть от того, какое из них в разметке
+ * первое, окно не должно.
+ *
+ * Обещание ответа карточка на себя не берёт: что считать ответом, у четырёх
+ * окон разное — тип с новым объектом, модель, список меток с каналами, ключ
+ * каталога, — и держит это окно у себя рядом со своим `done`.
+ */
+function uiPickCard(options = {}) {
+  const cancel = () => {
+    if (options.cancel) options.cancel();
+  };
+  const modal = uiModal({
+    title: options.title || "",
+    body: options.body,
+    actions: [uiButton(strings.dialog.cancel, { on: { click: cancel } }), ...(options.extra || [])],
+    onCancel: cancel,
+  });
+  if (options.wide && modal.card) modal.card.classList.add("modal--wide");
+  if (options.focus && typeof options.focus.focus === "function") options.focus.focus();
+  return modal;
+}
 function formatMegabytes(bytes) {
   return text("units.megabytes", { value: Math.round(bytes / (1024 * 1024)) });
 }
@@ -31304,9 +31444,21 @@ function notify(message, kind = "info") {
   return toast;
 }
 
+/**
+ * Отказ модели, показанный человеку: плашка ему, стек — в консоль.
+ *
+ * Одна на всю сборку (находка 14 разбора механик). Выражение
+ * «`error.message`, а если его нет — `String(error)`» стояло ещё восемью
+ * копиями: холст, чертёж, справочник типов (дважды), оборудование, помещения,
+ * метки, предупреждения. Стек в консоль писала ровно эта, девятая, — отказ,
+ * показанный из любого другого места, отлаживался вслепую. Слова в плашке те
+ * же, что были: это выражение и есть те слова, а стека человек и раньше не
+ * видел и не увидит.
+ *
+ * Плашку ставит `notify` этого же модуля — тот самый, который панели получают
+ * в своём `api`: своего уведомителя ни у одной из них нет.
+ */
 function reportAppError(error) {
-  // Стек уходит в консоль, а человеку достаётся плашка: без стека такую
-  // ошибку ловят вслепую, а показывать его в плашке незачем.
   if (typeof console !== "undefined" && console.error) console.error(error);
   notify(error && error.message ? error.message : String(error), "error");
 }
@@ -34508,7 +34660,7 @@ function canvasAlive(project, ids) {
 }
 
 function canvasFail(error) {
-  canvasApi.notify(error && error.message ? error.message : String(error), "error");
+  reportAppError(error);
 }
 
 function canvasPlacePoint(plan) {
@@ -41262,11 +41414,25 @@ function exportMeasure(ctx, table) {
   return widths.map((width) => Math.min(EXPORT_TABLE.maxColumn, Math.ceil(width) + EXPORT_TABLE.cellGap));
 }
 
-function exportClip(ctx, value, limit) {
+/**
+ * Обрезка значения ячейки многоточием по ширине в точках.
+ *
+ * Одна на обе таблицы файла (находка 14 разбора механик): до этого здесь
+ * стояли две функции с разными именами и **байт в байт одним телом** —
+ * `exportClip` для таблицы на PNG и `gostTableCell` для таблицы на листе
+ * ГОСТ. Мера приходит доводом (`limitPx`), шрифт уже стоит в `ctx` — больше
+ * этим двум таблицам ничего друг от друга не нужно.
+ *
+ * Третья такая обрезка — `gostDrawText` в `gostSheet.js` — остаётся своей
+ * нарочно: она сперва ужимает кегль до `GOST_MIN_TEXT_MM` и только потом
+ * режет. В штампе это осмысленно (надпись обязана влезть целиком), а в строке
+ * таблицы кегль у всех ячеек один.
+ */
+function exportClipToWidth(ctx, value, limitPx) {
   const cell = value == null ? "" : String(value);
-  if (ctx.measureText(cell).width <= limit) return cell;
+  if (ctx.measureText(cell).width <= limitPx) return cell;
   let cut = cell;
-  while (cut.length > 1 && ctx.measureText(cut + "…").width > limit) cut = cut.slice(0, -1);
+  while (cut.length > 1 && ctx.measureText(cut + "…").width > limitPx) cut = cut.slice(0, -1);
   return cut + "…";
 }
 
@@ -41370,7 +41536,7 @@ async function tablePng(table, options = {}) {
     let x = textLeft;
     cells.forEach((cell, index) => {
       const limit = widths[index] - EXPORT_TABLE.cellGap;
-      ctx.fillText(exportClip(ctx, cell, limit), x, y + EXPORT_TABLE.rowHeight / 2);
+      ctx.fillText(exportClipToWidth(ctx, cell, limit), x, y + EXPORT_TABLE.rowHeight / 2);
       x += widths[index];
     });
   };
@@ -42255,14 +42421,6 @@ function gostTablePages(table, options = {}) {
   return { sheet, pages };
 }
 
-function gostTableCell(ctx, value, limitPx) {
-  const cell = value == null ? "" : String(value);
-  if (ctx.measureText(cell).width <= limitPx) return cell;
-  let cut = cell;
-  while (cut.length > 1 && ctx.measureText(cut + "…").width > limitPx) cut = cut.slice(0, -1);
-  return cut + "…";
-}
-
 /**
  * Один лист таблицы: рамка, шапка колонок, строки и основная надпись формы 5
  * (первый лист) или 6 (последующие). Шапка повторяется на каждом листе —
@@ -42301,7 +42459,7 @@ async function gostTablePng(table, page, plan, options = {}) {
     let x = field.x;
     cells.forEach((cell, index) => {
       const limit = (widths[index] - GOST_TABLE.pad * 2) * mm;
-      ctx.fillText(gostTableCell(ctx, cell, limit), (x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.fillText(exportClipToWidth(ctx, cell, limit), (x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       x += widths[index];
     });
   };
@@ -44496,30 +44654,21 @@ function openTypePicker(project, options = {}) {
     const body = uiEl("div", { class: "picker picker--types" });
     const error = uiEl("p", { class: "picker__error" });
     const createBox = uiEl("div", { class: "picker__create" });
-    const search = uiEl("input", {
-      class: "ui-input",
-      type: "text",
+    // Первая строка окна — первая строка сетки, а когда поиск оставил одну
+    // плашку комментария, то она: плашка стоит под сеткой и в обход её не
+    // остаётся, и стрелка вниз, и Enter ведут к ней.
+    const firstRow = () => box.querySelector(".picker__row") || builtinRow();
+    const search = uiPickSearch({
       placeholder: strings.picker.search,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => {
-          // Стрелка вниз из поиска — в первую строку сетки: дальше по ней
-          // ходят стрелками, не хватаясь за мышь.
-          // Плашка комментария стоит под сеткой и в обход её не остаётся:
-          // когда поиск оставил только её, и стрелка, и Enter ведут к ней.
-          if (event.key === "ArrowDown") {
-            const first = box.querySelector(".picker__row") || builtinRow();
-            if (!first) return;
-            event.preventDefault();
-            first.focus();
-            return;
-          }
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          const first = box.querySelector(".picker__row") || builtinRow();
-          if (first) first.click();
-          else if (createBox.firstChild) createType();
-        },
+      onInput: () => renderList(),
+      first: firstRow,
+      // Нечего выбрать, но есть что завести — Enter заводит: человек набрал
+      // код, которого в справочнике нет, и это ровно то движение, которого он
+      // ждёт.
+      onEnter: () => {
+        const first = firstRow();
+        if (first) first.click();
+        else if (createBox.firstChild) createType();
       },
     });
 
@@ -44682,21 +44831,12 @@ function openTypePicker(project, options = {}) {
       renderCreate(query);
     }
 
-    // Клавиатура по сетке. Enter здесь обязателен свой: основное действие
-    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
-    // Enter в клик по строке, — то есть выбор терялся бы.
-    box.addEventListener("keydown", (event) => {
-      const row = event.target;
-      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        row.click();
-        return;
-      }
-      const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
-      if (!step) return;
-      event.preventDefault();
-      pickerMove(box, row, step[0], step[1]);
+    // Клавиатура по сетке: кирпич окна выбора, а куда уводит стрелка — своё
+    // (`pickerMove`), по колонкам.
+    uiPickKeys(box, {
+      cell: "picker__row",
+      grid: true,
+      move: (row, dx, dy) => pickerMove(box, row, dx, dy),
     });
 
     renderList();
@@ -44704,15 +44844,14 @@ function openTypePicker(project, options = {}) {
       ? uiEl("p", { class: "picker__note", text: pickerKindNote(options.kind) })
       : null;
     body.replaceChildren(...[search, note, box, builtin, createBox, error].filter(Boolean));
-    modal = uiModal({
+    modal = uiPickCard({
       title: options.title || strings.picker.title,
       body,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
-      onCancel: () => resolve(null),
+      // Широкая карточка: ширину внутри задаёт сетка колонок.
+      wide: true,
+      cancel: () => done(null),
+      focus: search,
     });
-    // Широкая карточка — только у этого окна: ширину внутри задаёт сетка колонок.
-    if (modal.card) modal.card.classList.add("modal--wide");
-    search.focus();
   });
 }
 
@@ -44736,12 +44875,13 @@ function openTypePicker(project, options = {}) {
 //   3. **Поиск с клавиатуры.** «хол» и Enter — холодильник выбран, мышь не
 //      нужна; стрелки водят по плиткам, как по строкам окна типов.
 //
-// Механизм — тот же, что у выбора типа метки: карточка `uiModal`, поиск
-// сверху, категории колонками, раскладку колонок считает общий `pickerLayout`
-// из `typePicker.js` (он же считает её для типов — второго такого механизма в
-// сборке нет). Отличается только клетка: у типа строка «знак — код —
-// название», у вещи плитка «картинка — имя» (G224, плитки переехали сюда из
-// колонки чертежа).
+// Механизм — тот же, что у выбора типа метки, и скелет у них общий, из
+// кирпичей `ui.js` (таск 183): карточка `uiPickCard`, поиск `uiPickSearch`,
+// клавиатура `uiPickKeys`. Раскладку колонок считает общий `pickerLayout` из
+// `typePicker.js` (он же считает её для типов — второго такого механизма в
+// сборке нет). Отличается клетка: у типа строка «знак — код — название», у
+// вещи плитка «картинка — имя» (G224, плитки переехали сюда из колонки
+// чертежа), — и шаг стрелки: она прыгает на ряд из трёх плиток.
 //
 // **Вещь с отметкой `legacy` из окна спрятана** (сегодня одна — общий вид
 // «Сантехника»): ею больше не размечают, но по ней открываются чужие чертежи.
@@ -44894,31 +45034,13 @@ function createObjectTiles(options = {}) {
     return first ? first.dataset.key : null;
   };
 
-  const search = uiEl("input", {
-    class: "ui-input",
-    type: "text",
+  const search = uiPickSearch({
     placeholder: strings.objectPicker.search,
-    on: {
-      input: () => render(),
-      keydown: (event) => {
-        // Стрелка вниз из поиска — в первую плитку: дальше по сетке ходят
-        // стрелками, не хватаясь за мышь.
-        if (event.key === "ArrowDown") {
-          const first = box.querySelector(".objectTile");
-          if (!first) return;
-          event.preventDefault();
-          first.focus();
-          return;
-        }
-        // Enter берёт первую найденную вещь. Своя обработка здесь
-        // обязательна: основное действие карточки — «Отмена», и оно
-        // сработало бы раньше (`uiModal` ловит Enter), то есть выбор
-        // терялся бы.
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        pick(firstKey());
-      },
-    },
+    onInput: () => render(),
+    first: () => box.querySelector(".objectTile"),
+    // Enter берёт первую найденную вещь — ключом, а не кликом по плитке:
+    // плитки знает сетка, а что с ключом делать, решает хозяин.
+    onEnter: () => pick(firstKey()),
   });
 
   function tile(entry) {
@@ -44963,20 +45085,16 @@ function createObjectTiles(options = {}) {
     node.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));
   }
 
-  box.addEventListener("keydown", (event) => {
-    const current = event.target;
-    if (!current || !current.classList || !current.classList.contains("objectTile")) return;
-    if (event.key === "Enter") {
-      event.preventDefault();
-      current.click();
-      return;
-    }
-    const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
-    if (!step) return;
-    event.preventDefault();
-    const next = objectPickerStep(columns, current.dataset.key, step[0], step[1]);
-    const target = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
-    if (target) target.focus();
+  // Клавиатура по сетке: кирпич окна выбора, а куда уводит стрелка — своё
+  // (`objectPickerStep`), и считается это по ключам каталога, а не по разметке.
+  uiPickKeys(box, {
+    cell: "objectTile",
+    grid: true,
+    move: (current, dx, dy) => {
+      const next = objectPickerStep(columns, current.dataset.key, dx, dy);
+      const target = next ? box.querySelector('.objectTile[data-key="' + next + '"]') : null;
+      if (target) target.focus();
+    },
   });
 
   render();
@@ -45009,14 +45127,18 @@ function openObjectPicker(options = {}) {
         resolve(key || null);
       },
     });
-    modal = uiModal({
+    modal = uiPickCard({
       title: options.title || strings.objectPicker.title,
       body: tiles.node,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => { modal.close(); resolve(null); } } })],
-      onCancel: () => resolve(null),
+      // Широкая карточка — как у окна типов: ширину внутри задаёт сетка колонок.
+      wide: true,
+      cancel: () => {
+        modal.close();
+        resolve(null);
+      },
     });
-    // Широкая карточка — как у окна типов: ширину внутри задаёт сетка колонок.
-    if (modal.card) modal.card.classList.add("modal--wide");
+    // Фокус — в поиск сетки: он лежит внутри кирпича, и просить о нём надо
+    // самой сетке.
     tiles.focus();
   });
 }
@@ -46011,18 +46133,17 @@ function openMarkPicker(project, options = {}) {
     // пункта select не примет и останется на «Все помещения».
     rooms.value = options.roomId || "";
 
-    // Поиск — тем же приёмом, что в окне типа и в окне модели: строка сверху,
-    // стрелка вниз уводит в список. `type: "search"` даёт крестик очистки —
-    // третьего вида окна здесь не заводим.
-    const search = uiEl("input", {
-      class: "ui-input",
+    // Поиск — тем же кирпичом, что в окне типа, модели и вещи (`uiPickSearch`):
+    // строка сверху, стрелка вниз уводит в список. `type: "search"` даёт
+    // крестик очистки — третьего вида окна здесь не заводим. Что значит Enter,
+    // у этого окна своё (`searchEnter` ниже).
+    const search = uiPickSearch({
       type: "search",
       placeholder: strings.controls.search,
       title: multiple ? strings.controls.searchHint : strings.controls.searchHintOne,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => onSearchKey(event),
-      },
+      onInput: () => renderList(),
+      first: () => rowStops()[0],
+      onEnter: () => searchEnter(),
     });
 
     // Строки последней отрисовки: Enter и стрелка берут метку отсюда, а не
@@ -46185,65 +46306,60 @@ function openMarkPicker(project, options = {}) {
      * Снять галочку он не может: повторный Enter по уже отмеченной оставляет
      * её отмеченной — иначе быстрый набор молча снимал бы своё же.
      *
-     * Пустой поиск Enter не перехватывает: там окно ведёт себя как раньше —
-     * `uiModal` нажимает основное действие, «Сохранить связь». Не нашлось
-     * ничего — Enter не делает ничего: закрывать окно посреди набранного
-     * запроса он не должен.
+     * Пустой поиск Enter не перехватывает (`false` в ответе): там окно ведёт
+     * себя как раньше — `uiModal` нажимает основное действие, «Сохранить
+     * связь». Не нашлось ничего — Enter не делает ничего, но и наружу не
+     * уходит: закрывать окно посреди набранного запроса он не должен.
      *
      * В режиме одной метки окно ничем не отличается от соседних, и Enter в
      * нём тоже берёт первую строку и закрывает окно.
      */
-    function onSearchKey(event) {
-      if (event.key === "ArrowDown") {
-        const first = rowStops()[0];
-        if (!first) return;
-        event.preventDefault();
-        first.focus();
-        return;
-      }
-      if (event.key !== "Enter" || search.value.trim() === "") return;
-      event.preventDefault();
+    function searchEnter() {
+      if (search.value.trim() === "") return false;
       const first = shownRows[0];
-      if (!first) return;
+      if (!first) return true;
       if (!multiple) {
         done([first.mark.id]);
-        return;
+        return true;
       }
       chosen.add(first.mark.id);
       search.value = "";
       renderList();
       search.focus();
+      return true;
     }
 
-    // Стрелки по списку — как в окне модели. Вверх с первой строки возвращает
-    // в поиск: оттуда пришли, туда и уходим.
-    list.addEventListener("keydown", (event) => {
-      // В режиме одной метки Enter по строке обязан её выбрать. Свой он здесь
-      // потому же, почему в соседних окнах: основное действие этого окна —
-      // «Отмена», и `uiModal` нажал бы её раньше, чем браузер превратит Enter
-      // в клик по строке, — выбор терялся бы. В режиме галочек Enter не
-      // перехватывается: там он по-прежнему «Сохранить связь», а ставит и
-      // снимает галочку пробел.
-      if (event.key === "Enter" && !multiple) {
-        const row = event.target;
-        if (!row || !row.classList || !row.classList.contains("controls-pick__row--one")) return;
-        event.preventDefault();
-        row.click();
-        return;
-      }
-      const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
-      if (!step) return;
-      const stops = rowStops();
-      const index = stops.indexOf(event.target);
-      if (index < 0) return;
-      event.preventDefault();
-      if (index === 0 && step === -1) {
-        search.focus();
-        search.select();
-        return;
-      }
-      const next = stops[Math.min(stops.length - 1, index + step)];
-      if (next) next.focus();
+    // Клавиатура по списку — тем же кирпичом, что в соседних окнах, а
+    // остановки и шаг свои.
+    //
+    // Остановка здесь двух видов, поэтому `cell` — функция, а не класс:
+    // галочка в режиме многих, кнопка строки в режиме одной. Выбор канала
+    // остановкой не считается, и стрелки в нём листают его пункты — отнимать
+    // их нельзя.
+    //
+    // Вверх с первой строки возвращает в поиск: оттуда пришли, туда и уходим,
+    // — и набранное при этом выделяется, чтобы его можно было сразу перебить.
+    // В соседних окнах стрелка вверх на первой строке упирается в стену; это
+    // расхождение названо в разборе механик (находка 14) и **здесь не
+    // сведено**: оно про поведение, а не про устройство, а слова и повадки
+    // окон этот таск не меняет.
+    //
+    // Enter в режиме одной метки обязан выбрать строку — в режиме галочек он
+    // не наш: там он «Сохранить связь», а ставит и снимает галочку пробел.
+    uiPickKeys(list, {
+      cell: (target) => (rowStops().includes(target) ? target : null),
+      enter: (row) => !multiple && row.classList.contains("controls-pick__row--one"),
+      move: (stop, dx, dy) => {
+        const stops = rowStops();
+        const index = stops.indexOf(stop);
+        if (index === 0 && dy === -1) {
+          search.focus();
+          search.select();
+          return;
+        }
+        const next = stops[Math.min(stops.length - 1, index + dy)];
+        if (next) next.focus();
+      },
     });
 
     renderList();
@@ -46252,23 +46368,24 @@ function openMarkPicker(project, options = {}) {
       modal.close();
       resolve(value);
     };
-    const actions = [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })];
-    if (multiple) {
-      actions.push(
-        uiButton(strings.controls.save, {
-          class: "ui-btn ui-btn--accent",
-          on: {
-            click: () =>
-              done(
-                pickChannel
-                  ? [...chosen].map((id) => ({ id, channel: channels.get(id) || null }))
-                  : [...chosen],
-              ),
-          },
-        }),
-      );
-    }
-    modal = uiModal({
+    // «Сохранить связь» — действие только режима многих: в режиме одной выбор
+    // строки и есть ответ, и подтверждать его нечем.
+    const extra = multiple
+      ? [
+          uiButton(strings.controls.save, {
+            class: "ui-btn ui-btn--accent",
+            on: {
+              click: () =>
+                done(
+                  pickChannel
+                    ? [...chosen].map((id) => ({ id, channel: channels.get(id) || null }))
+                    : [...chosen],
+                ),
+            },
+          }),
+        ]
+      : [];
+    modal = uiPickCard({
       title: options.title || strings.controls.room,
       // Поиск стоит первым полем окна — и потому, что так устроены соседние
       // окна, и потому, что `uiModal` отдаёт фокус первому полю: открылось —
@@ -46280,8 +46397,8 @@ function openMarkPicker(project, options = {}) {
         list,
         note,
       ]),
-      actions,
-      onCancel: () => resolve(null),
+      extra,
+      cancel: () => done(null),
     });
   });
 }
@@ -46329,11 +46446,13 @@ async function openMarkControlsPicker(project, markId) {
 // на этом шаге только мешает.
 //
 // Отдельный файл по той же причине, что `markControls.js` и `typePicker.js`:
-// это диалог со своей жизнью. Третьего вида окна здесь нет — приёмы взяты у
-// уже существующих: поиск сверху, Enter берёт первую строку, стрелка вниз
-// уводит в список, Escape и возврат фокуса общие от `uiModal`. Разметка та же
-// (`picker`, `picker__list`, `picker__group`, `picker__row`) — своего набора
-// классов и своего CSS у окна нет намеренно.
+// это диалог со своей жизнью. Третьего вида окна здесь нет — скелет общий, из
+// кирпичей `ui.js` (таск 183): карточка с «Отменой» `uiPickCard`, поиск
+// `uiPickSearch`, клавиатура строк `uiPickKeys`; Escape и возврат фокуса — от
+// `uiModal` под ними. Разметка та же (`picker`, `picker__list`,
+// `picker__group`, `picker__row`) — своего набора классов и своего CSS у окна
+// нет намеренно. Своё здесь: фильтры по типу и производителю, группировка по
+// типу и строка заведения модели.
 //
 // ——— дорога к заведению новой модели ———
 //
@@ -46383,28 +46502,18 @@ function openEquipmentPicker(project, options = {}) {
     const error = uiEl("p", { class: "picker__error" });
     const createBox = uiEl("div", { class: "picker__create" });
 
-    const search = uiEl("input", {
-      class: "ui-input",
-      type: "text",
+    const firstRow = () => list.querySelector(".picker__row");
+    const search = uiPickSearch({
       placeholder: strings.equipmentPicker.search,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => {
-          // Стрелка вниз из поиска — в первую строку списка: дальше по нему
-          // ходят стрелками, не хватаясь за мышь.
-          if (event.key === "ArrowDown") {
-            const first = list.querySelector(".picker__row");
-            if (!first) return;
-            event.preventDefault();
-            first.focus();
-            return;
-          }
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          const first = list.querySelector(".picker__row");
-          if (first) first.click();
-          else if (createBox.firstChild) createModel();
-        },
+      onInput: () => renderList(),
+      first: firstRow,
+      // Не нашлось ничего, но есть что завести — Enter заводит: человек понял,
+      // что модели нет, ровно в этот миг, и возвращать его в справочник значило
+      // бы потерять шаг, ради которого окно и сделано.
+      onEnter: () => {
+        const first = firstRow();
+        if (first) first.click();
+        else if (createBox.firstChild) createModel();
       },
     });
 
@@ -46571,23 +46680,15 @@ function openEquipmentPicker(project, options = {}) {
       renderCreate(query);
     }
 
-    // Клавиатура по списку. Enter здесь обязателен свой: основное действие
-    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
-    // Enter в клик по строке, — то есть выбор терялся бы.
-    list.addEventListener("keydown", (event) => {
-      const row = event.target;
-      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        row.click();
-        return;
-      }
-      const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
-      if (!step) return;
-      event.preventDefault();
-      const rows = [...list.querySelectorAll(".picker__row")];
-      const next = rows[Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + step))];
-      if (next) next.focus();
+    // Клавиатура по списку: кирпич окна выбора, а ходят стрелки по строкам
+    // подряд — колонок у этого окна нет.
+    uiPickKeys(list, {
+      cell: "picker__row",
+      move: (row, dx, dy) => {
+        const rows = [...list.querySelectorAll(".picker__row")];
+        const next = rows[Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + dy))];
+        if (next) next.focus();
+      },
     });
 
     renderList();
@@ -46598,13 +46699,12 @@ function openEquipmentPicker(project, options = {}) {
       createBox,
       error,
     );
-    modal = uiModal({
+    modal = uiPickCard({
       title: options.title || strings.equipmentPicker.choose,
       body,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
-      onCancel: () => resolve(null),
+      cancel: () => done(null),
+      focus: search,
     });
-    search.focus();
   });
 }
 
@@ -46647,7 +46747,7 @@ function openEquipmentWindow(api, options = {}) {
   }
 
   function fail(error) {
-    api.notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
     render();
   }
 
@@ -49973,7 +50073,7 @@ function mountRoomsPanel(host, api) {
   }
 
   function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
   }
 
   function commit(after, label, options) {
@@ -50931,7 +51031,7 @@ function openTypesDictionary(api) {
   }
 
   function fail(error) {
-    api.notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
     render();
   }
 
@@ -50958,7 +51058,7 @@ function openTypesDictionary(api) {
     try {
       canvasCommit(project(), build(project()), label);
     } catch (error) {
-      api.notify(error && error.message ? error.message : String(error), "error");
+      reportAppError(error);
       const input = fields[typesAddErrorField(error && error.code)];
       if (input) {
         input.classList.add("is-wrong");
@@ -52230,7 +52330,7 @@ function mountMarksPanel(host, api) {
   }
 
   function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
   }
 
   function selectMark(markId) {
@@ -68715,7 +68815,7 @@ function createWorkshop({ api, hosts }) {
   }
 
   function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
   }
 
   function commit(after, label) {
@@ -74813,7 +74913,7 @@ function warningsModel(project) {
 }
 
 function mountWarningsPanel(host, api) {
-  const { getState, setState, subscribe, notify } = api;
+  const { getState, setState, subscribe } = api;
   let model = warningsModel(null);
   let open = false;
   // Раскрытые группы помнятся по ключу: правка объекта не должна схлопывать
@@ -74889,7 +74989,7 @@ function mountWarningsPanel(host, api) {
     try {
       canvasCommit(project, updateType(project, typeId, { kind }).project, strings.history.typeKind);
     } catch (error) {
-      notify(error && error.message ? error.message : String(error), "error");
+      reportAppError(error);
     }
   }
 

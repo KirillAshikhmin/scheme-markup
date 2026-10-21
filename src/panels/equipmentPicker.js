@@ -8,11 +8,13 @@
 // на этом шаге только мешает.
 //
 // Отдельный файл по той же причине, что `markControls.js` и `typePicker.js`:
-// это диалог со своей жизнью. Третьего вида окна здесь нет — приёмы взяты у
-// уже существующих: поиск сверху, Enter берёт первую строку, стрелка вниз
-// уводит в список, Escape и возврат фокуса общие от `uiModal`. Разметка та же
-// (`picker`, `picker__list`, `picker__group`, `picker__row`) — своего набора
-// классов и своего CSS у окна нет намеренно.
+// это диалог со своей жизнью. Третьего вида окна здесь нет — скелет общий, из
+// кирпичей `ui.js` (таск 183): карточка с «Отменой» `uiPickCard`, поиск
+// `uiPickSearch`, клавиатура строк `uiPickKeys`; Escape и возврат фокуса — от
+// `uiModal` под ними. Разметка та же (`picker`, `picker__list`,
+// `picker__group`, `picker__row`) — своего набора классов и своего CSS у окна
+// нет намеренно. Своё здесь: фильтры по типу и производителю, группировка по
+// типу и строка заведения модели.
 //
 // ——— дорога к заведению новой модели ———
 //
@@ -36,7 +38,7 @@ import {
   matchEquipmentExactly,
   searchEquipment,
 } from "../model.js";
-import { uiButton, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiEl, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
 
 // Значение пункта «Без производителя» в фильтре. Один пробел, а не пустая
 // строка: пустая уже занята пунктом «Все производители». Совпасть с настоящим
@@ -70,28 +72,18 @@ export function openEquipmentPicker(project, options = {}) {
     const error = uiEl("p", { class: "picker__error" });
     const createBox = uiEl("div", { class: "picker__create" });
 
-    const search = uiEl("input", {
-      class: "ui-input",
-      type: "text",
+    const firstRow = () => list.querySelector(".picker__row");
+    const search = uiPickSearch({
       placeholder: strings.equipmentPicker.search,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => {
-          // Стрелка вниз из поиска — в первую строку списка: дальше по нему
-          // ходят стрелками, не хватаясь за мышь.
-          if (event.key === "ArrowDown") {
-            const first = list.querySelector(".picker__row");
-            if (!first) return;
-            event.preventDefault();
-            first.focus();
-            return;
-          }
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          const first = list.querySelector(".picker__row");
-          if (first) first.click();
-          else if (createBox.firstChild) createModel();
-        },
+      onInput: () => renderList(),
+      first: firstRow,
+      // Не нашлось ничего, но есть что завести — Enter заводит: человек понял,
+      // что модели нет, ровно в этот миг, и возвращать его в справочник значило
+      // бы потерять шаг, ради которого окно и сделано.
+      onEnter: () => {
+        const first = firstRow();
+        if (first) first.click();
+        else if (createBox.firstChild) createModel();
       },
     });
 
@@ -258,23 +250,15 @@ export function openEquipmentPicker(project, options = {}) {
       renderCreate(query);
     }
 
-    // Клавиатура по списку. Enter здесь обязателен свой: основное действие
-    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
-    // Enter в клик по строке, — то есть выбор терялся бы.
-    list.addEventListener("keydown", (event) => {
-      const row = event.target;
-      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        row.click();
-        return;
-      }
-      const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
-      if (!step) return;
-      event.preventDefault();
-      const rows = [...list.querySelectorAll(".picker__row")];
-      const next = rows[Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + step))];
-      if (next) next.focus();
+    // Клавиатура по списку: кирпич окна выбора, а ходят стрелки по строкам
+    // подряд — колонок у этого окна нет.
+    uiPickKeys(list, {
+      cell: "picker__row",
+      move: (row, dx, dy) => {
+        const rows = [...list.querySelectorAll(".picker__row")];
+        const next = rows[Math.min(rows.length - 1, Math.max(0, rows.indexOf(row) + dy))];
+        if (next) next.focus();
+      },
     });
 
     renderList();
@@ -285,12 +269,11 @@ export function openEquipmentPicker(project, options = {}) {
       createBox,
       error,
     );
-    modal = uiModal({
+    modal = uiPickCard({
       title: options.title || strings.equipmentPicker.choose,
       body,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
-      onCancel: () => resolve(null),
+      cancel: () => done(null),
+      focus: search,
     });
-    search.focus();
   });
 }

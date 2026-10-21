@@ -566,6 +566,146 @@ export function uiPrompt({ title, value, placeholder, submitLabel, allowEmpty })
   });
 }
 
+// ——— окно выбора ——————————————————————————————————————————————————————
+//
+// Скелет окна выбора был написан четырежды: тип метки (`typePicker.js`),
+// модель оборудования (`equipmentPicker.js`), метки (`markControls.js`) и вещь
+// чертежа (`objectPicker.js`). Одинаковы у них три вещи: карточка с «Отменой»,
+// строка поиска сверху (стрелка вниз уводит в список, Enter берёт первое) и
+// клавиатура строк (Enter нажимает строку, стрелки водят по ней) — вплоть до
+// дословно совпадающих комментариев. И они уже начали расходиться: стрелка
+// вверх с первой строки возвращала в поиск только в окне меток, а в окнах типа
+// и модели упиралась в стену, хотя обещание в подсказках одно.
+//
+// **Окна остались четырьмя, и это решение, а не недоделка.** Разбор механик
+// (находка 14) говорит прямо: общий «кирпич окна выбора» целиком будет дороже
+// болезни — отличия у них по делу. Сетка колонок против списка, строка «знак —
+// код — название» против плитки с картинкой и против галочки с каналом, свои
+// фильтры, своё правило отбора, свои слова о пустом ответе, свой ответ наружу
+// и свой смысл у Enter. Сюда вынесено только то, что у всех четырёх одинаково
+// **на ощупь**: карточка, поиск и клавиши. Куда ведёт стрелка, что стоит в
+// строке и что уходит наружу — по-прежнему дело окна.
+
+/**
+ * Строка поиска окна выбора: стрелка вниз уводит в список, Enter берёт первое.
+ *
+ * `onInput()` — перерисовать список: все четыре окна ищут на каждую букву.
+ * `first()` — первая остановка списка (строка, плитка или галочка): стрелка
+ * вниз ведёт туда, а нет её — не делает ничего, чтобы фокус не ушёл в пустоту.
+ * `onEnter()` — что Enter значит в этом окне.
+ *
+ * **Свой Enter окну выбора нужен обязательно:** основное действие карточки —
+ * «Отмена», и `uiModal` нажал бы её раньше, чем браузер превратит Enter в клик
+ * по строке, — то есть выбор терялся бы. Поэтому Enter здесь гасится всегда,
+ * когда окно его взяло; **`false` в ответе `onEnter` значит «Enter не мой»**,
+ * и тогда он достаётся основному действию карточки — так ведёт себя окно меток
+ * с пустым поиском, где основное действие «Сохранить связь».
+ */
+export function uiPickSearch(options = {}) {
+  return uiEl("input", {
+    class: "ui-input",
+    type: options.type || "text",
+    placeholder: options.placeholder || "",
+    title: options.title || "",
+    on: {
+      input: () => {
+        if (options.onInput) options.onInput();
+      },
+      keydown: (event) => {
+        if (event.key === "ArrowDown") {
+          const first = options.first ? options.first() : null;
+          if (!first) return;
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+        if (event.key !== "Enter") return;
+        if (!options.onEnter || options.onEnter() === false) return;
+        event.preventDefault();
+      },
+    },
+  });
+}
+
+// Стрелки списка и стрелки сетки. В списке в стороны ходит браузер (прокрутка),
+// и отбирать их у него незачем — поэтому набор клавиш у окна с колонками свой.
+const UI_PICK_ARROWS = { ArrowDown: [0, 1], ArrowUp: [0, -1] };
+const UI_PICK_ARROWS_GRID = { ...UI_PICK_ARROWS, ArrowRight: [1, 0], ArrowLeft: [-1, 0] };
+
+/**
+ * Клавиатура строк окна выбора: Enter нажимает строку, стрелки водят по ней.
+ *
+ * `cell` — что считать строкой: имя класса (строка типа, плитка вещи) или
+ * функция от цели события — у окна меток остановки двух видов, галочка в
+ * режиме многих и кнопка строки в режиме одной. Не строка — событие остаётся
+ * тому, на кого нажали: стрелки в `select` канала листают его пункты, и
+ * отнимать их нельзя.
+ *
+ * `move(cell, dx, dy)` — **куда уводит стрелка, решает окно**: по сетке
+ * колонок, по списку или по списку с возвратом в поиск. Фокус ставит оно же:
+ * возврат в поиск — это фокус с выделением набранного, а не просто фокус.
+ *
+ * `grid` — у окна есть колонки, и стрелки в стороны его.
+ *
+ * `enter(cell)` — чем Enter отличается от клика по строке; по умолчанию он и
+ * есть клик. `false` в ответе — «не мой», и Enter достаётся карточке: так в
+ * окне меток в режиме галочек, где он «Сохранить связь», а галочку ставит
+ * пробел.
+ */
+export function uiPickKeys(box, options = {}) {
+  const cellOf = (target) => {
+    if (typeof options.cell === "function") return options.cell(target) || null;
+    if (!target || !target.classList || !options.cell) return null;
+    return target.classList.contains(options.cell) ? target : null;
+  };
+  box.addEventListener("keydown", (event) => {
+    const cell = cellOf(event.target);
+    if (!cell) return;
+    if (event.key === "Enter") {
+      if (options.enter && options.enter(cell) === false) return;
+      event.preventDefault();
+      cell.click();
+      return;
+    }
+    const step = (options.grid ? UI_PICK_ARROWS_GRID : UI_PICK_ARROWS)[event.key];
+    if (!step) return;
+    event.preventDefault();
+    if (options.move) options.move(cell, step[0], step[1]);
+  });
+}
+
+/**
+ * Карточка окна выбора: заголовок, тело и «Отмена».
+ *
+ * `cancel()` зовётся и кнопкой «Отмена», и Escape: ответ у них один во всех
+ * четырёх окнах — «передумали». `extra` — действия правее «Отмены» (кнопка
+ * «Сохранить связь» в окне меток; в остальных трёх выбор строки и есть ответ,
+ * подтверждать его нечем), и основным `uiModal` возьмёт последнее из них.
+ * `wide` — широкая карточка, ширину внутри которой задаёт сетка колонок.
+ * `focus` — куда встать после открытия. Фокус в первое поле карточки `uiModal`
+ * ставит и сам, но окна выбора говорят про поиск вслух: полей у них не одно
+ * (фильтры, поля заведения), и зависеть от того, какое из них в разметке
+ * первое, окно не должно.
+ *
+ * Обещание ответа карточка на себя не берёт: что считать ответом, у четырёх
+ * окон разное — тип с новым объектом, модель, список меток с каналами, ключ
+ * каталога, — и держит это окно у себя рядом со своим `done`.
+ */
+export function uiPickCard(options = {}) {
+  const cancel = () => {
+    if (options.cancel) options.cancel();
+  };
+  const modal = uiModal({
+    title: options.title || "",
+    body: options.body,
+    actions: [uiButton(strings.dialog.cancel, { on: { click: cancel } }), ...(options.extra || [])],
+    onCancel: cancel,
+  });
+  if (options.wide && modal.card) modal.card.classList.add("modal--wide");
+  if (options.focus && typeof options.focus.focus === "function") options.focus.focus();
+  return modal;
+}
+
 export function formatMegabytes(bytes) {
   return text("units.megabytes", { value: Math.round(bytes / (1024 * 1024)) });
 }

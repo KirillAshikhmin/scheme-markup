@@ -13,7 +13,7 @@
 // Окно открывается один раз на серию: выбранный тип «залипает» в панели
 // инструментов, и дальше метки ставятся кликами без единого диалога.
 import { strings, text } from "../strings.js";
-import { uiEl, uiButton, uiModal } from "./ui.js";
+import { uiEl, uiButton, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
 import {
   COMMENT_TYPE_ID,
   addType,
@@ -207,30 +207,21 @@ export function openTypePicker(project, options = {}) {
     const body = uiEl("div", { class: "picker picker--types" });
     const error = uiEl("p", { class: "picker__error" });
     const createBox = uiEl("div", { class: "picker__create" });
-    const search = uiEl("input", {
-      class: "ui-input",
-      type: "text",
+    // Первая строка окна — первая строка сетки, а когда поиск оставил одну
+    // плашку комментария, то она: плашка стоит под сеткой и в обход её не
+    // остаётся, и стрелка вниз, и Enter ведут к ней.
+    const firstRow = () => box.querySelector(".picker__row") || builtinRow();
+    const search = uiPickSearch({
       placeholder: strings.picker.search,
-      on: {
-        input: () => renderList(),
-        keydown: (event) => {
-          // Стрелка вниз из поиска — в первую строку сетки: дальше по ней
-          // ходят стрелками, не хватаясь за мышь.
-          // Плашка комментария стоит под сеткой и в обход её не остаётся:
-          // когда поиск оставил только её, и стрелка, и Enter ведут к ней.
-          if (event.key === "ArrowDown") {
-            const first = box.querySelector(".picker__row") || builtinRow();
-            if (!first) return;
-            event.preventDefault();
-            first.focus();
-            return;
-          }
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          const first = box.querySelector(".picker__row") || builtinRow();
-          if (first) first.click();
-          else if (createBox.firstChild) createType();
-        },
+      onInput: () => renderList(),
+      first: firstRow,
+      // Нечего выбрать, но есть что завести — Enter заводит: человек набрал
+      // код, которого в справочнике нет, и это ровно то движение, которого он
+      // ждёт.
+      onEnter: () => {
+        const first = firstRow();
+        if (first) first.click();
+        else if (createBox.firstChild) createType();
       },
     });
 
@@ -393,21 +384,12 @@ export function openTypePicker(project, options = {}) {
       renderCreate(query);
     }
 
-    // Клавиатура по сетке. Enter здесь обязателен свой: основное действие
-    // диалога — «Отмена», и оно сработало бы раньше, чем браузер превратит
-    // Enter в клик по строке, — то есть выбор терялся бы.
-    box.addEventListener("keydown", (event) => {
-      const row = event.target;
-      if (!row || !row.classList || !row.classList.contains("picker__row")) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        row.click();
-        return;
-      }
-      const step = { ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] }[event.key];
-      if (!step) return;
-      event.preventDefault();
-      pickerMove(box, row, step[0], step[1]);
+    // Клавиатура по сетке: кирпич окна выбора, а куда уводит стрелка — своё
+    // (`pickerMove`), по колонкам.
+    uiPickKeys(box, {
+      cell: "picker__row",
+      grid: true,
+      move: (row, dx, dy) => pickerMove(box, row, dx, dy),
     });
 
     renderList();
@@ -415,14 +397,13 @@ export function openTypePicker(project, options = {}) {
       ? uiEl("p", { class: "picker__note", text: pickerKindNote(options.kind) })
       : null;
     body.replaceChildren(...[search, note, box, builtin, createBox, error].filter(Boolean));
-    modal = uiModal({
+    modal = uiPickCard({
       title: options.title || strings.picker.title,
       body,
-      actions: [uiButton(strings.dialog.cancel, { on: { click: () => done(null) } })],
-      onCancel: () => resolve(null),
+      // Широкая карточка: ширину внутри задаёт сетка колонок.
+      wide: true,
+      cancel: () => done(null),
+      focus: search,
     });
-    // Широкая карточка — только у этого окна: ширину внутри задаёт сетка колонок.
-    if (modal.card) modal.card.classList.add("modal--wide");
-    search.focus();
   });
 }
