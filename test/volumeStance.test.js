@@ -59,8 +59,11 @@ import {
   volumeStanceAir,
   volumeStanceBusy,
   volumeStanceEye,
+  volumeStanceFalling,
   volumeStanceHead,
   volumeStanceJump,
+  volumeStanceLanded,
+  volumeStanceOnFloor,
   volumeStanceStart,
   volumeStanceStep,
   volumeStep,
@@ -539,6 +542,85 @@ test("пол держит одним правилом: прыжок призем
   assert.equal(volumeStanceEye(stance), VOLUME_EYE_MM, "на полу глаза на своём месте");
 });
 
+// ——— падение в дыру двусвета (таск 229, требование G342) ————————————————
+//
+// Слово заказчика: «Пусть падаем». Проверяется здесь **счёт**, а не картинка:
+// второго правила пола не завелось, своей дуги у падения нет, и прыгнуть в
+// полёте нельзя. Куда падать (`volumeFallTo`) считается по стопке этажей и
+// проверяется там же, где стоят её стенды.
+
+test("над дырой пол лежит ниже нуля — и человек падает той же дугой, что приземляется прыжок (G342)", () => {
+  // Пол по-прежнему держит одним правилом: меняется только то, где для этого
+  // человека ноль. Этаж ниже на 3200 мм — значит пол у него на −3200.
+  const downMm = -3200;
+  assert.equal(volumeGroundMm(-5000, downMm), downMm, "ниже пола нижнего этажа никто не уходит");
+  assert.equal(volumeGroundMm(-100, downMm), -100, "а до него — летит");
+  // Стоящий над дырой **уже в воздухе**: он выше своего пола, и стойка роняет
+  // его сама, без своей ручки «начать падение».
+  const stand = volumeStanceStart();
+  assert.equal(volumeStanceAir(stand, downMm), true, "над дырой человек в воздухе с первого тика");
+  assert.equal(volumeStanceAir(stand), false, "на своём этаже он стоит");
+  assert.equal(volumeStanceBusy(stand, false, downMm), true, "часы идут, пока он не долетит");
+  assert.equal(volumeStanceBusy(stand, false), false, "а на полу их держать нечем");
+  // **В падении не прыгают** — тем же счётом «в воздухе», а не новым запретом.
+  assert.deepEqual(volumeStanceJump(stand, downMm), stand, "над дырой прыжок не даётся");
+  assert.ok(volumeStanceJump(stand).speedMm > 0, "а на полу даётся");
+  // Дуга — земная, и число у неё одно на прыжок и на падение. Свободное
+  // падение с 3200 мм длится √(2h/g) = 0,808 с; шаг в шестидесятую дробит дугу,
+  // и приземление приходит на тик позже — это честная цена шага.
+  const exact = Math.sqrt((2 * 3200) / VOLUME_FALL_MM_S2);
+  let stance = stand;
+  let flown = 0;
+  for (let step = 0; step < 600 && !volumeStanceLanded(stance, downMm); step += 1) {
+    stance = volumeStanceStep(stance, 1 / 60, { floorMm: downMm });
+    flown += 1 / 60;
+    if (step === 0) assert.equal(volumeStanceFalling(stance), true, "первый же тик уводит ниже нуля");
+  }
+  assert.ok(Math.abs(flown - exact) < 2 / 60, "падение идёт не земным ускорением: " + flown.toFixed(3) + " с");
+  assert.equal(stance.liftMm, downMm, "встал ровно на пол нижнего этажа");
+  assert.equal(stance.speedMm, 0, "скорость погашена — иначе следующий тик утащил бы под пол");
+  assert.equal(volumeStanceEye(stance), VOLUME_EYE_MM + downMm, "глаза опустились на тот же этаж");
+  // Приземление названо одним вопросом, и на своём этаже он значит то же.
+  assert.equal(volumeStanceLanded(stance, downMm), true);
+  assert.equal(volumeStanceLanded(stand, 0), true, "стоящий на своём полу — тоже приземлившийся");
+  assert.equal(volumeStanceLanded(volumeStanceJump(stand), 0), false, "прыгнувший — нет");
+  // **Ноль переезжает вместе с человеком**: встав на новом этаже, он стоит, а
+  // глаза не дёргаются ни на миллиметр — разница баз и есть пролетённая высота.
+  const landed = volumeStanceOnFloor(stance);
+  assert.deepEqual(landed, { crouchMm: 0, liftMm: 0, speedMm: 0 });
+  assert.equal(volumeStanceEye(landed), VOLUME_EYE_MM);
+  assert.equal(volumeStanceFalling(landed), false);
+  // Присед переезд не трогает: приседая, падают тоже.
+  const sat = volumeStanceOnFloor({ crouchMm: VOLUME_CROUCH_MM, liftMm: downMm, speedMm: 0 });
+  assert.equal(sat.crouchMm, VOLUME_CROUCH_MM, "за человека его никто не поднимает");
+});
+
+test("прыжок над дырой кончается на нижнем этаже, а не на своём (G342)", () => {
+  // Прыгнул на своём этаже, в воздухе шагнул над дырой — дуга продолжается
+  // вниз, а не обрывается на прежнем нуле. Это то же одно правило пола: у
+  // человека сменился ноль, и больше ничего.
+  let stance = volumeStanceJump(volumeStanceStart());
+  for (let step = 0; step < 6; step += 1) stance = volumeStanceStep(stance, 1 / 60, {});
+  assert.ok(stance.liftMm > 0, "взлетел: " + Math.round(stance.liftMm));
+  const downMm = -2900;
+  for (let step = 0; step < 600 && !volumeStanceLanded(stance, downMm); step += 1) {
+    stance = volumeStanceStep(stance, 1 / 60, { floorMm: downMm });
+  }
+  assert.equal(stance.liftMm, downMm, "прыжок приземлился этажом ниже");
+});
+
+test("падение не заводит второго счёта: без довода стойка та же, что была (G342)", () => {
+  // Довод `floorMm` — единственный новый, и без него стойка обязана считаться
+  // как считалась до таска: ноль держит, прыжок приземляется, мусор в доводе
+  // значит ноль (то же приведение, что у `volumeGroundMm`).
+  const air = { crouchMm: 0, liftMm: 1200, speedMm: 0 };
+  assert.deepEqual(volumeStanceStep(air, 1 / 60, {}), volumeStanceStep(air, 1 / 60, { floorMm: "мусор" }));
+  assert.deepEqual(volumeStanceStep(air, 1 / 60, {}), volumeStanceStep(air, 1 / 60, { floorMm: 0 }));
+  let stance = volumeStanceStart();
+  for (let step = 0; step < 120; step += 1) stance = volumeStanceStep(stance, 1 / 60, {});
+  assert.deepEqual(stance, volumeStanceStart(), "на полу без доводов ничего не происходит");
+});
+
 test("полёта в первом лице больше нет: `flyMm` стойке не довод (таск 200, G304)", () => {
   // Отметку «Летать» заказчик убрал, и второго полёта в стойке не осталось:
   // лишний довод ничего не делает, а высота по-прежнему одна — прыжок.
@@ -588,6 +670,40 @@ test("у обзора нет ни своей цели, ни своей скор�
   // первого лица, и отметка `ghost` до камеры не доходит.
   assert.equal((code.match(/volumeStep\(/g) || []).length, 1, "шаг со столкновениями зовётся не единожды");
   assert.ok(!body.includes("ghost"), "камере поставили отметку «сквозь стены»");
+});
+
+test("падение в поле: один вопрос «куда падать», своих чисел нет, площадки нет (таск 229, G342)", () => {
+  // Смена этажа посреди шага живёт в замыкании поверхности, и тестом её не
+  // позвать. Но обещания таска проверяются по исходникам, и проверяются
+  // надёжнее, чем глазом.
+  const panel = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "volume.js"),
+    "utf8",
+  );
+  const code = stripComments(panel);
+  // **Вопрос «куда падать» задаётся одной дверью.** Заведись второй — этажи
+  // считались бы в двух местах и разошлись бы молча.
+  assert.equal((code.match(/volumeFallTo\(/g) || []).length, 1, "у падения завелась вторая дверь");
+  // **Пол стойке считает одно место.** `floorMm` приходит доводом шага, и
+  // берётся он у того же ответа, что держит часы.
+  assert.ok(/volumeStanceStep\(stance, step, \{[^}]*floorMm/.test(code), "шаг стойки не знает про пол");
+  assert.ok(/volumeStanceBusy\(stance, [^,]+, fallFloorMm\(\)\)/.test(code), "часы не держат падение");
+  assert.ok(/volumeStanceJump\(stance, fallFloorMm\(\)\)/.test(code), "в падении снова прыгают");
+  // **Переезд не свой.** Падение зовёт то же, чем переходят по лестнице:
+  // привязку схем, выталкивание из стен и переезд нуля стойки.
+  const fall = code.slice(code.indexOf("function fallTo("));
+  const body = fall.slice(0, fall.indexOf("\n  }\n"));
+  for (const door of ["sameSpotOn", "volumeMoveTo", "volumeStanceOnFloor", "setState", "setScene"]) {
+    assert.ok(body.includes(door), "падение обходит " + door);
+  }
+  // **Площадки у падения нет**: с лестницы сходят у марша (D58), а в дыру
+  // падают отвесно — выдумывать падающему другое место значило бы отменить дыру.
+  assert.ok(!body.includes("volumeStairLanding"), "падающего понесло к лестнице");
+  // **Своих чисел нет ни одного**: высоту считает стопка, дугу — стойка.
+  assert.ok(!/\d{3,}/.test(body), "в падении завелось своё число: " + body);
+  // Высота по-прежнему живёт только в `volume.js` — это проверяет тест G68
+  // ниже; здесь важно, что поле не трогает `liftMm` и в падении.
+  assert.ok(!body.includes("liftMm"), "поле считает высоту падения само");
 });
 
 test("поворот взгляда считает одно место на оба вида (таск 207, G312)", () => {

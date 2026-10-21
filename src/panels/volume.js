@@ -112,14 +112,18 @@ import {
   volumeSunSpotFaces,
   volumeSiteOf,
   volumeDrawn,
+  volumeFallTo,
   volumeGroundMm,
   volumeSelectLines,
   volumeStairLanding,
   volumeStairNear,
   volumeStanceBusy,
   volumeStanceEye,
+  volumeStanceFalling,
   volumeStanceHead,
   volumeStanceJump,
+  volumeStanceLanded,
+  volumeStanceOnFloor,
   volumeStanceStart,
   volumeStanceStep,
   volumeStart,
@@ -1048,6 +1052,20 @@ function createVolume({ api, hosts }) {
   let riseFinger = null;
   // Про «встать негде» говорится один раз на попытку, а не каждый кадр.
   let stuckSaid = false;
+  // ——— падение в дыру (таск 229, G342) ———
+  //
+  // Счёт весь в `volume.js` (`volumeFallTo` и стойка) — здесь три руки: на
+  // какой этаж падаем, снимок этого ответа и «сказали, что падать некуда».
+  //
+  // `fallAt` — выбранный этаж. Он же **зарок**: начав падать, не всплывают.
+  // Пол под ногами может вернуться посреди полёта (человек рулит в воздухе и
+  // уходит за кромку дыры), и спроси мы заново — его вытолкнуло бы наверх, на
+  // тот этаж, который он уже покинул глазами.
+  let fallAt = null;
+  // Снимок ответа: пока сцена и место те же, второй раз этажи не опрашиваются.
+  // Спрашивается это из `moving()`, то есть несколько раз за тик.
+  let fallSnap = null;
+  let fallSaid = false;
   /**
    * Где человек стоял на схемах, которые уже покидал (G216, G217).
    *
@@ -1557,6 +1575,10 @@ function createVolume({ api, hosts }) {
   /** Сцена, тень и свет меняются вместе: все трое держатся за геометрию. */
   function setScene(state) {
     scene = sceneOf(state) || scene;
+    // Пол под ногами считается по сцене: пересобрали — прежний ответ и зарок
+    // падения устарели (таск 229, G342).
+    fallSnap = null;
+    fallAt = null;
     refreshShadow();
   }
 
@@ -2161,7 +2183,9 @@ function createVolume({ api, hosts }) {
     // Обзор летит, пока держат клавишу высоты: висящая камера никуда не едет,
     // и крутить ей кадры незачем (таск 200, G304).
     if (view === "around" && (riseHeld || crouchHeld)) return true;
-    return volumeStanceBusy(stance, crouching() || crouchStuck);
+    // Падение — четвёртый повод (таск 229, G342): пол под человеком лежит
+    // ниже нуля, и часы идут, пока он не долетит до нижнего этажа.
+    return volumeStanceBusy(stance, crouching() || crouchStuck, fallFloorMm());
   }
 
   // ——— отметка окна параметров (таск 192, G292) ———
@@ -2238,6 +2262,106 @@ function createVolume({ api, hosts }) {
   // Счёт — в `volume.js`, здесь три руки: шаг стойки на каждом тике, разовый
   // прыжок и слово про «встать негде».
 
+  // ——— падение в дыру (таск 229, требование G342) ———
+  //
+  // Слово заказчика: «Пусть падаем». Счёт — в `volume.js`: куда падать, знает
+  // `volumeFallTo` (ближайший этаж снизу, у которого под этой точкой есть
+  // пол), а роняет человека та же стойка той же дугой, которой приземляется
+  // прыжок. Здесь — руки: спросить про пол под ногами, сказать, когда падать
+  // некуда, и поменять этаж в миг приземления.
+
+  /**
+   * На какой этаж человек падает — или `null`, если не падает.
+   *
+   * **Падать можно только туда, что нарисовано.** Показан один этаж — под
+   * дырой не нарисовано ничего, и провалившийся увидел бы серое поле вместо
+   * объекта; тот же довод, которым пол держит камеру обзора. Поэтому вопрос
+   * задаётся только стопке, а причину «падать некуда» окно называет вслух —
+   * один раз на дыру, как и «встать негде».
+   */
+  function fallFloor() {
+    // Зарок: начав падать, не всплывают. Разбор — у объявления `fallAt`.
+    if (fallAt && volumeStanceFalling(stance)) return fallAt;
+    if (fallSnap && fallSnap.scene === scene && fallSnap.x === person.x && fallSnap.y === person.y) {
+      fallAt = fallSnap.floor;
+      return fallAt;
+    }
+    fallAt = fallFloorNow();
+    fallSnap = { scene, x: person.x, y: person.y, floor: fallAt };
+    return fallAt;
+  }
+
+  /** Тот же вопрос без снимка: место под ногами и, если это дыра, этажи ниже. */
+  function fallFloorNow() {
+    const room = volumeRoomAt(scene, person);
+    if (!room || room.hasFloor !== false) {
+      fallSaid = false;
+      return null;
+    }
+    const state = getState();
+    const floor = scene.stackMm ? volumeFallTo(state.project, floorPlan(state), person) : null;
+    if (!floor) {
+      if (!fallSaid) {
+        notify(scene.stackMm ? strings.volume.fallNoBelow : strings.volume.fallOneFloor, "info");
+        fallSaid = true;
+      }
+      return null;
+    }
+    return floor;
+  }
+
+  /** Где для человека пол: ноль своего этажа или пол того, на который падает. */
+  function fallFloorMm() {
+    const floor = fallFloor();
+    return floor ? floor.baseMm : 0;
+  }
+
+  /**
+   * **Упасть на этаж ниже** (таск 229, G342) — смена этажа посреди шага.
+   *
+   * Зовётся в миг приземления, из шага стойки: пока человек летел, он
+   * считался по миллиметрам прежнего этажа (сцена стопки рисует все этажи
+   * разом, и нижнюю комнату он видел ещё в полёте), а коснувшись её пола —
+   * переезжает в неё целиком. Переезд — тот же, которым работает лестница
+   * (таск 149, таск 202), и ровно поэтому он не свой: открытая схема
+   * становится схемой всего приложения, место переводится привязкой
+   * (`sameSpotOn`, шов таска 205), из стен нового этажа человека выталкивает
+   * `volumeMoveTo`, выделение сбрасывается — оно осталось этажом выше.
+   *
+   * Чего здесь нет нарочно: **площадки**. С лестницы сходят у марша
+   * (`volumeStairLanding`, дефект D58), а в дыру падают отвесно — человек
+   * встаёт ровно под тем местом, с которого шагнул, и смотрит туда же, куда
+   * смотрел. Выдумывать падающему другое место значило бы отменить дыру.
+   */
+  function fallTo(floor) {
+    const state = getState();
+    const was = { x: person.x, y: person.y };
+    const from = schemeId;
+    closeAsk();
+    leaveScheme();
+    schemeId = floor.schemeId;
+    setState({ schemeId });
+    setScene(state);
+    const want = sameSpotOn(state.project, from, schemeId, was);
+    const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
+    person.x = moved.x;
+    person.y = moved.y;
+    // Ноль переехал вместе с человеком: падал он в миллиметрах прежнего этажа,
+    // встал — на полу нового. Глаза при этом не дёргаются ни на миллиметр,
+    // потому что разница баз и есть та высота, которую он пролетел.
+    stance = volumeStanceOnFloor(stance);
+    fallAt = null;
+    fallSnap = null;
+    fallSaid = false;
+    aroundLookAt(person.x, person.y);
+    select(null);
+    // У лестницы, рядом с которой упал, вопрос сам не всплывает: он выскочил
+    // бы в тот же миг, в который человек приземлился.
+    stairAsked = (stairHere() || {}).objectId || null;
+    sync();
+    notify(text("volume.fellTo", { floor: floor.floor }), "info");
+  }
+
   /**
    * Шаг стойки. Он же — то место, где человек **встаёт сам**, выйдя из-под
    * низкого: вставать можно или нет, спрашивается каждый тик по тому месту, где
@@ -2263,7 +2387,13 @@ function createVolume({ api, hosts }) {
       }
       if (!crouchStuck) stuckSaid = false;
     }
-    stance = volumeStanceStep(stance, step, { crouch: want || crouchStuck, canStand: room });
+    // Пол под ногами спрашивается каждый тик: шагнул в дыру — он ушёл на этаж
+    // ниже, и стойка роняет человека сама (таск 229, G342).
+    const floor = fallFloor();
+    const floorMm = floor ? floor.baseMm : 0;
+    stance = volumeStanceStep(stance, step, { crouch: want || crouchStuck, canStand: room, floorMm });
+    // Долетел — этаж под ним меняется **здесь**, посреди шага.
+    if (floor && volumeStanceLanded(stance, floorMm)) fallTo(floor);
   }
 
   /** Control нажали: приседаем, пока держат. */
@@ -2292,7 +2422,9 @@ function createVolume({ api, hosts }) {
     // В обзоре пробел не прыгает, а поднимает камеру, пока его держат (таск
     // 200): разовый прыжок там не значил бы ничего.
     if (view !== "person") return;
-    stance = volumeStanceJump(stance);
+    // В падении не прыгают: пол, который считает стойка, лежит ниже нуля, и
+    // человек над дырой в воздухе с первого тика (таск 229, G342).
+    stance = volumeStanceJump(stance, fallFloorMm());
     walkSchedule();
   }
 
@@ -2373,6 +2505,12 @@ function createVolume({ api, hosts }) {
    * руками.
    */
   function stanceRecheck() {
+    // Пол под ногами мог уйти тем же переносом (кликнули в дыру, переставили
+    // чертёж, включили «Все этажи»): часы в этот миг стоят, и падение начать
+    // некому. Будить их безопасно — `walkSchedule` сам спросит, держит ли ход
+    // хоть кто-нибудь (таск 229, G342).
+    fallSnap = null;
+    walkSchedule();
     if (crouching() || !crouchStuck) return;
     if (!volumeCanStand(scene, person, volumeStanceHead(stance), { ghost: ghosting() })) return;
     crouchStuck = false;
