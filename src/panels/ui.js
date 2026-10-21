@@ -283,6 +283,56 @@ export function uiCheckRow(input, label, title) {
   return uiEl("label", { class: "ui-check", title: title || "" }, [input, uiEl("span", { text: label })]);
 }
 
+// ——— кому принадлежит клавиша —————————————————————————————————————————
+//
+// **Один предикат «фокус в поле» на всю сборку** (находка 10 разбора механик).
+// Их было три: холст и объём считали полем любой `INPUT` (включая галочку) и
+// любой `SELECT`, чертёж — своё, где галочка полем **не** считается, а `SELECT`
+// считается только для части клавиш. Правило чертежа тут правильнее, и оно
+// взято за общее: от щелчка по галочке фильтров Ctrl+Z на плане замолкал, хотя
+// в чертеже тот же жест отменял, а отменять в самой галочке нечего.
+//
+// Ответа два, и они про разное:
+//
+// - `uiTypingTarget` — **клавиша здесь буква**. Поля ввода текста и числа,
+//   многострочник, `contentEditable`. Пока фокус в таком — не трогать ничего:
+//   ни горячих ключей, ни отмены (Ctrl+Z правит набранное).
+// - `uiFieldTarget` — **у поля своя клавиатура**. То же плюс список (`SELECT`:
+//   стрелки листают пункты) и ползунок (`range`: стрелки двигают значение).
+//   Отмена и копирование сюда уже доходят, а стрелки, пробел и буквы — нет.
+//
+// Галочка и переключатель не поле ни по тому, ни по другому счёту: клавиша в
+// них ничего не набирает, а пробел у них отбирается отдельно и нарочно —
+// нажатие кнопки пробелом браузер делает по `keyup`.
+
+// Поля `input`, в которых нечего набрать: у них своя работа у мыши.
+const UI_TEXTLESS_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset", "image", "file", "range", "color"]);
+// Поля `input`, у которых своя клавиатура, но набора в них нет.
+const UI_OWN_KEYS_INPUTS = new Set(["range", "color", "file"]);
+
+function uiInputType(target) {
+  return String((target && target.type) || "text").toLowerCase();
+}
+
+/** Клавиша здесь буква: фокус стоит в поле набора. */
+export function uiTypingTarget(target) {
+  if (!target || !target.tagName) return false;
+  if (target.isContentEditable === true) return true;
+  const tag = String(target.tagName).toUpperCase();
+  if (tag === "TEXTAREA") return true;
+  if (tag !== "INPUT") return false;
+  return !UI_TEXTLESS_INPUTS.has(uiInputType(target));
+}
+
+/** У поля под фокусом своя клавиатура: набор, список или ползунок. */
+export function uiFieldTarget(target) {
+  if (uiTypingTarget(target)) return true;
+  if (!target || !target.tagName) return false;
+  const tag = String(target.tagName).toUpperCase();
+  if (tag === "SELECT") return true;
+  return tag === "INPUT" && UI_OWN_KEYS_INPUTS.has(uiInputType(target));
+}
+
 // Диалоги складываются стопкой: подтверждение поверх редактора плана —
 // обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
 // основное действие, нижние ждут своей очереди и закрываются своими же close().

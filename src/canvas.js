@@ -145,7 +145,7 @@ import {
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { getSetting, setSetting } from "./store.js";
-import { uiConfirm, uiDialogDepth, uiEl, uiIcon, uiPrompt } from "./panels/ui.js";
+import { uiConfirm, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiPrompt, uiTypingTarget } from "./panels/ui.js";
 import { createFieldPlate, plateUnseen } from "./panels/plate.js";
 import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "./screenPlace.js";
@@ -3172,7 +3172,11 @@ function canvasPointerDown(event) {
   }
   if (event.button === 2) return;
   const point = canvasPointOf(event);
-  if (event.button === 1 || canvasSpace) {
+  // Средняя кнопка, зажатый пробел и Shift просят панораму прямо, без разбора.
+  // Shift добавлен к ним по находке 10 разбора механик: его обещают подсказки
+  // чертежа и окна загрузки плана, и комментарий чертежа утверждал «на холсте
+  // так же» — а на холсте `event.shiftKey` не встречался вовсе.
+  if (event.button === 1 || canvasSpace || event.shiftKey) {
     event.preventDefault();
     canvasStartPan(point);
     return;
@@ -4068,19 +4072,19 @@ function canvasTextSelected() {
   return Boolean(selection && selection.isCollapsed === false && String(selection).length > 0);
 }
 
-function canvasTypingTarget(target) {
-  if (!target || !target.tagName) return false;
-  return (
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT" ||
-    target.isContentEditable
-  );
-}
-
 function canvasKeyDown(event) {
   // Пока открыт диалог, клавиатура принадлежит ему.
-  if (uiDialogDepth() > 0 || canvasTypingTarget(event.target)) return;
+  if (uiDialogDepth() > 0) return;
+  // Предикат «фокус в поле» — общий на три поверхности (`uiTypingTarget` и
+  // `uiFieldTarget`, находка 10 разбора механик). Своего здесь больше нет, и
+  // ответов стало два: пока набирают буквы — молчим вовсе; пока фокус в списке
+  // или на ползунке — отдаём им стрелки и буквы, но не отмену.
+  //
+  // Главное, что это чинит: щелчок по галочке фильтров или по `select`
+  // выключал Ctrl+Z на плане. В галочке отменять нечего, а в чертеже тот же
+  // жест отменял — одна рука, два ответа.
+  if (uiTypingTarget(event.target)) return;
+  const inField = uiFieldTarget(event.target);
   const state = canvasState();
   const control = event.ctrlKey || event.metaKey;
   if (control && event.code === "KeyZ") {
@@ -4119,6 +4123,8 @@ function canvasKeyDown(event) {
     return;
   }
   if (control) return;
+  // Дальше — клавиши без Ctrl: их у списка и ползунка отбирать нельзя.
+  if (inField) return;
   // Q — тоже физическая клавиша: в русской раскладке это «й», и сравнение по
   // `event.key` молчало бы ровно у тех, кто размечает планы по-русски.
   if (event.code === "KeyQ" && !event.altKey) {
@@ -4139,7 +4145,20 @@ function canvasKeyDown(event) {
       return;
     }
   }
-  if (event.code === "Space") {
+  if (event.code === "Space" && !event.altKey) {
+    // **Действие браузера снимается здесь и в `canvasKeyUp`** (находка 10
+    // разбора механик): нажатие кнопки пробелом браузер делает именно по
+    // `keyup`, и одного `preventDefault` на нажатии не хватает. Без этого
+    // щёлкнул кнопку панели, подвинул план пробелом, отпустил — и кнопка
+    // срабатывала второй раз. Абзац про тот же случай написан в объёме, и
+    // там `preventDefault` стоит дважды.
+    //
+    // Сочетания с пробелом остаются системе: Ctrl+Space (раскладка),
+    // Cmd+Space (поиск), Alt+Space (меню окна) — `control` отсечён выше,
+    // Alt отсечён условием.
+    event.preventDefault();
+    // Автоповтор системы ничего не добавляет: пробел уже зажат.
+    if (canvasSpace) return;
     canvasSpace = true;
     // Через ту же дверь, что и всё про курсор: своё «grab» здесь спорило бы с
     // правилом (`render.cursorFor`, находка 6 разбора механик).
@@ -4194,6 +4213,10 @@ function canvasKeyDown(event) {
 function canvasKeyUp(event) {
   canvasPanRelease(event.code);
   if (event.code !== "Space") return;
+  // Нажатие кнопки пробелом браузер делает по **отпусканию** — снимать его
+  // надо и здесь (находка 10). Поле набора и диалог при этом не трогаем:
+  // пробел там принадлежит им.
+  if (canvasSpace && uiDialogDepth() === 0 && !uiFieldTarget(event.target)) event.preventDefault();
   canvasSpace = false;
   canvasSyncCursor();
 }
@@ -4325,10 +4348,16 @@ function mountCanvas(host, api) {
   // системным шрифтом до первого движения мышью. Один лишний кадр на загрузку.
   drawFontReady().then(() => canvasRedraw());
 
+  // Окно увели — зажатые клавиши отпустить некому, и это **не связано** с
+  // `ResizeObserver`: обработчик стоял в ветке `else` от проверки на него, то
+  // есть ни в одном живом браузере не вешался (находка 10 разбора механик).
+  // Чертёж и объём вешают свой безусловно; теперь и план. Без этого зажатая
+  // стрелка уезжала вместе с окном, а зажатый пробел оставался зажатым —
+  // курсор «рука», и клик по плану листал его вместо постановки метки.
+  window.addEventListener("blur", canvasWindowBlur);
   if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => canvasResize()).observe(host);
   } else {
-    window.addEventListener("blur", canvasWindowBlur);
     window.addEventListener("resize", canvasResize);
   }
 

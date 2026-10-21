@@ -5634,6 +5634,12 @@ test("клавиши окна не отбирают клавиши у поля �
   assert.equal(volumeTypingTarget({ tagName: "CANVAS" }), false);
   assert.equal(volumeTypingTarget({ tagName: "DIV" }), false);
   assert.equal(volumeTypingTarget(null), false);
+  // Галочка полем не считается (находка 10 разбора механик): набирать в ней
+  // нечего, «W» при фокусе на ней ходит, а пробел у неё отбирается отдельно.
+  assert.equal(volumeTypingTarget({ tagName: "INPUT", type: "checkbox" }), false);
+  assert.equal(volumeTypingTarget({ tagName: "INPUT", type: "radio" }), false);
+  // А ползунок — поле: стрелки двигают его значение.
+  assert.equal(volumeTypingTarget({ tagName: "INPUT", type: "range" }), true);
 });
 
 test("заголовок окна называет этаж, когда он задан", () => {

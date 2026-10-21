@@ -204,9 +204,11 @@ import {
   uiDialogDepth,
   uiEl,
   uiField,
+  uiFieldTarget,
   uiIcon,
   uiModal,
   uiNumber,
+  uiTypingTarget,
 } from "./ui.js";
 // Прокрутка колонки одна на всю колонку (таск 194): кто прокручивается,
 // сколько кадра закрыто накладкой и какова рейка заголовков — общий счёт.
@@ -3709,14 +3711,13 @@ function createWorkshop({ api, hosts }) {
   // стоит в фазе перехвата и до холста событие не доходит.
   function onKeyDown(event) {
     if (!active()) return;
-    const target = event.target;
-    const tag = target && target.tagName;
-    // Отметку слоя отмена не касается: в ней нечего отменять, а стоять фокус в
-    // ней может с самого открытия окна — диалог отдаёт фокус первому полю.
-    const typing = Boolean(
-      target && (tag === "TEXTAREA" || target.isContentEditable || (tag === "INPUT" && target.type !== "checkbox")),
-    );
-    const inField = typing || tag === "SELECT";
+    // Предикаты — общие на три поверхности (`uiTypingTarget`/`uiFieldTarget`,
+    // находка 10 разбора механик): своих было три, и правило чертежа взято за
+    // общее. Отметку слоя отмена не касается: в ней нечего отменять, а стоять
+    // фокус в ней может с самого открытия окна — диалог отдаёт фокус первому
+    // полю.
+    const typing = uiTypingTarget(event.target);
+    const inField = uiFieldTarget(event.target);
     const control = event.ctrlKey || event.metaKey;
     if (control && event.code === "KeyZ" && !typing) {
       event.preventDefault();
@@ -3792,6 +3793,11 @@ function createWorkshop({ api, hosts }) {
     // Четверть оборота с клавиатуры (таск 164): рука остаётся на мыши, а вещь
     // поворачивается — тем же шагом и той же дверью, что кнопки в колонке.
     const turnable = tool === "objects" || (selected && selected.kind === "object");
+    // **Автоповтор системы здесь не шаг** (`event.repeat`, находка 10 разбора
+    // механик): придержал клавишу — вещь крутилась вслепую, и в историю падал
+    // десяток шагов «поворот вещи», сквозь которые человек шёл Ctrl+Z по
+    // одному. То же у `Q` и `E` ниже: механизм один, и условие у него одно.
+    if (event.repeat && (event.code === "KeyR" || event.code === "KeyQ" || event.code === "KeyE")) return;
     if (event.code === "KeyR" && !event.altKey && turnable) {
       event.preventDefault();
       event.stopPropagation();

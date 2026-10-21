@@ -125,7 +125,7 @@ import {
   volumeStep,
 } from "../volume.js";
 import { markCardModel, markCardParts } from "./markCard.js";
-import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
+import { uiButton, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiIconButton } from "./ui.js";
 
 // ——— подсказка плашкой (G218) ————————————————————————————————————————————
 //
@@ -789,12 +789,16 @@ export function volumeFloorAction(stair, options, back) {
  * держатся глубиной диалога. Но объём переезжает на главный экран рядом с
  * панелями, где полей вдоволь: без этой проверки «W» в имени помещения увёл бы
  * человека на шаг вперёд.
+ *
+ * **Сам предикат — общий на три поверхности** (`uiFieldTarget`, находка 10
+ * разбора механик): своих было три, и расходились они на галочке. Здесь
+ * остаётся имя — его зовут клавиши окна и его проверяет тест, — а правило
+ * одно. Галочка полем не считается: «W» при фокусе на ней ходит, а пробел
+ * у неё отбирается отдельно и нарочно (`preventDefault` на нажатии **и** на
+ * отпускании).
  */
 export function volumeTypingTarget(node) {
-  if (!node || !node.tagName) return false;
-  if (node.isContentEditable === true) return true;
-  const tag = String(node.tagName).toLowerCase();
-  return tag === "select" || tag === "input" || tag === "textarea";
+  return uiFieldTarget(node);
 }
 
 /** Заголовок окна: с номером этажа, если он у схемы задан. */
