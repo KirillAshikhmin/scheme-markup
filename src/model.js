@@ -7,6 +7,11 @@ import { strings, text } from "./strings.js";
 // читает, но никогда не правит.
 import { objectCatalogEntry, objectCatalogKeyByName, objectCatalogRetired } from "./objectCatalog.js";
 import { openingCatalogEntry, openingCatalogKinds } from "./openingCatalog.js";
+// Реестр изображений (таск 135) — тоже данные сборки. Модель читает его, чтобы
+// знать, какое имя изображения существует и к чему ведёт форма знака: имя, в
+// реестре не названное, справочник принимать не должен — у типа оказалось бы
+// поле, не рисующее ничего.
+import { objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 
 // Версия формата объекта. Поднимается, когда в project.json появляются поля,
 // без которых работа теряется. История:
@@ -2558,6 +2563,158 @@ export function typeObjectView(type) {
   return type.view || type.icon || null;
 }
 
+// ——— изображение у типа: своё имя, предложение общей базы ——————————————
+//
+// **Чем это было до таска 218.** Имя изображения у типа (`view`) в формате
+// лежит с таска 135, и стартовый справочник его заполняет — но UI, чтобы его
+// задать, в сборке не было вовсе. А справочник копируется в объект **при
+// создании** и дальше живёт сам: правка шаблона до размеченного объекта не
+// доезжает. Отсюда и цена, названная в таске 216: люстра, которой дали своё
+// изображение и своё тело, у заказчика осталась шайбой — и не она одна.
+//
+// **Правило отсюда одно (G68):** догадку показывают, а не применяют. Ни одна
+// функция в этом разделе объект сама не правит — правят только `setTypeView`
+// и `applyTypeViewOffers`, и обе зовутся из рук человека.
+//
+// **Чужого изображения никто не отнимает.** Имя живёт **у типа**, а не у формы
+// знака: реестр `shapes` — данные сборки, и этот раздел его не трогает ни
+// одной строкой. Поэтому выбор изображения у одного типа не меняет ни
+// развёртку, ни тело ни одного другого — тот самый «Круг с подвесом», который
+// у заказчика носит мастер-выключатель, остаётся светильником (таск 216).
+// И изображения не исключительны: двенадцать типов света справочника делят
+// одно изображение сознательно, так что «занято» здесь не запрет, а сведение.
+
+// Что общая база знает об изображениях: код типа → имя изображения. Считается
+// один раз из `TEMPLATE_TYPES` — без `defaultTemplate()`, который на каждый
+// вызов выдаёт шесть десятков свежих UUID: эта карта нужна `validate`, а он
+// зовётся на каждую правку объекта.
+const TEMPLATE_VIEW_BY_CODE = new Map();
+for (const row of TEMPLATE_TYPES) {
+  // Имя, которого в реестре нет, в предложение не попадает: предложить
+  // изображение, которого не существует, — это обещание пустой клетки.
+  if (row.view && objectViewByName(row.view)) TEMPLATE_VIEW_BY_CODE.set(catalogRowKey(row.code), row.view);
+}
+
+/**
+ * Изображение, к которому приходит тип **сейчас** (ADR 005): имя у типа старше
+ * формы знака, форма — старше ничего. `null` — у типа нет ни того, ни другого,
+ * и развёртка рисует условный знак.
+ *
+ * Считать это самому нельзя: тот же ответ читают развёртка (`elevationViewOf`)
+ * и объём (`volumeMarkView`), и разойдись они — вещь на листе и вещь в кадре
+ * стали бы двумя разными вещами.
+ */
+export function typeViewName(project, typeId) {
+  const type = findType(project, typeId);
+  if (!type) return null;
+  const own = objectViewByName(typeObjectView(type));
+  if (own) return own.name;
+  const byShape = objectViewForShape(styleOf(project, typeId).shape);
+  return byShape ? byShape.name : null;
+}
+
+/** Задано ли имя изображения **руками** (своё у типа), а не выведено по знаку. */
+export function typeViewOwn(type) {
+  const own = objectViewByName(typeObjectView(type));
+  return own ? own.name : null;
+}
+
+/**
+ * Что общая база предлагает типу — или `null`, если предлагать нечего.
+ *
+ * Предложение появляется при трёх условиях сразу, и каждое из них — ответ на
+ * «не лезь, куда не просили»:
+ *
+ *   1. **У типа нет своего имени.** Задал человек изображение руками — он уже
+ *      ответил, и база с его ответом не спорит. Так же молчит база о типе,
+ *      заведённом руками: своей строки у него в ней нет.
+ *   2. **В базе у этого кода имя есть.** Про мастер-выключатель (`МВ`) база
+ *      молчит: имени у него в шаблоне нет нарочно, он приходит к своему
+ *      изображению знаком.
+ *   3. **Предложенное отличается от нынешнего.** «Подсветка зеркала» приходит
+ *      к `mirror` по знаку — ровно к тому, что предложила бы база; строка о
+ *      ней была бы вопросом без разницы.
+ *
+ * Ответ — `{view, now}`: что предлагается и к чему тип приходит сейчас
+ * (`now` бывает `null` — у «Ночника» изображения нет вовсе).
+ */
+export function typeViewOffer(project, typeId) {
+  const type = findType(project, typeId);
+  if (!type) return null;
+  if (typeViewOwn(type)) return null;
+  const offer = TEMPLATE_VIEW_BY_CODE.get(catalogRowKey(type.code)) || null;
+  if (!offer) return null;
+  const now = typeViewName(project, typeId);
+  if (now === offer) return null;
+  return { view: offer, now };
+}
+
+/**
+ * Типы, которые разошлись с общей базой, в порядке справочника:
+ * `[{typeId, code, name, view, now}]`. Это список **на правку**, а не правка:
+ * его показывают предупреждения и справочник.
+ */
+export function typeViewReview(project) {
+  const rows = [];
+  // Порядок справочника, а не порядок `markTypes`: список читают глазами, и
+  // идти он должен так же, как идут строки справочника (`typesInOrder` —
+  // единственный владелец этого порядка, и отдаёт он категории с типами).
+  for (const group of typesInOrder(project)) {
+    for (const type of group.types) {
+      const offer = typeViewOffer(project, type.id);
+      if (!offer) continue;
+      rows.push({ typeId: type.id, code: type.code, name: type.name, view: offer.view, now: offer.now });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Записать имя изображения у типа. `null` (или пустая строка) **убирает** имя —
+ * тип возвращается к изображению по знаку и становится ровно таким, каким был
+ * до правки (G68, образец — `setTypeSizes` и `site` объекта).
+ *
+ * Убирается при этом и прежнее имя поля (`icon`, таск 135): «вернуть к знаку»,
+ * оставив второе имя лежать, значило бы соврать — изображение осталось бы
+ * прежним, а кнопка сказала бы, что своего имени у типа нет.
+ */
+export function setTypeView(project, typeId, view) {
+  const type = findType(project, typeId);
+  if (!type) throw modelError("typeNotFound");
+  const name = view === null || view === undefined || view === "" ? null : String(view);
+  if (name !== null && !objectViewByName(name)) throw modelError("unknownView");
+  if (typeObjectView(type) === name) return { project, type };
+  const markTypes = project.markTypes.map((item) => {
+    if (item.id !== typeId) return item;
+    const copy = { ...item };
+    delete copy.icon;
+    if (name === null) delete copy.view;
+    else copy.view = name;
+    return copy;
+  });
+  return { project: withProject(project, { markTypes }), type: markTypes.find((item) => item.id === typeId) };
+}
+
+/**
+ * Применить предложения общей базы — **одним шагом**, чтобы одна отмена
+ * вернула всё. `typeIds` сужает до названных типов; без него применяется весь
+ * список `typeViewReview`.
+ *
+ * Применять нечего — возвращается **тот же** объект: пустого шага истории быть
+ * не должно.
+ */
+export function applyTypeViewOffers(project, typeIds) {
+  const only = typeIds ? new Set(typeIds) : null;
+  let next = project;
+  const applied = [];
+  for (const row of typeViewReview(project)) {
+    if (only && !only.has(row.typeId)) continue;
+    next = setTypeView(next, row.typeId, row.view).project;
+    applied.push(row);
+  }
+  return { project: next, applied };
+}
+
 /** Умолчания размеров у типа. У типа без них — четыре `null`. */
 export function typeSizes(type) {
   const sizes = type && type.sizes ? type.sizes : null;
@@ -3381,6 +3538,7 @@ export function addType(
     blockMode = "each",
     kind = "point",
     channels = TYPE_CHANNELS_DEFAULT,
+    view = null,
   } = {},
 ) {
   const type = {
@@ -3400,6 +3558,14 @@ export function addType(
     channels: checkChannels(channels),
     order: project.markTypes.length,
   };
+  // Имя изображения — только там, где его назвали: тип, заведённый руками,
+  // приходит к изображению по знаку и поля не получает вовсе (таск 218).
+  // Незнакомое имя — отказ, а не тихое `undefined`: его приносит сохранённый
+  // шаблон, и молча оставленное поле не рисовало бы ничего.
+  if (view !== null && view !== undefined && view !== "") {
+    if (!objectViewByName(view)) throw modelError("unknownView");
+    type.view = String(view);
+  }
   if (!findCategory(project, categoryId)) throw modelError("categoryNotFound");
   return { project: withProject(project, { markTypes: [...project.markTypes, type] }), type };
 }
@@ -3562,6 +3728,16 @@ function catalogMerge(templates) {
         // мог быть сохранён до появления каналов — тогда их один.
         channels:
           Number.isInteger(type.channels) && type.channels >= 1 ? Math.min(type.channels, TYPE_CHANNELS_MAX) : TYPE_CHANNELS_DEFAULT,
+        // Имя изображения едет из общей базы вместе с типом (таск 218): ЛЮ,
+        // взятая из неё, — это люстра, а не «такая же, но шайбой». До этого
+        // таска имя оставалось дома, и единственной дверью к изображению был
+        // знак — поэтому у телевизора и полотенцесушителя знак и ведёт на их
+        // изображение (таск 186). Эта дверь не закрывается: она работает и
+        // для того, кто поменяет знак своему телевизору.
+        //
+        // Имя сверяется с реестром: шаблон мог быть сохранён давно, а
+        // изображение — переименовано.
+        view: objectViewByName(typeObjectView(type)) ? typeObjectView(type) : null,
         categoryKey,
       });
     }
@@ -3621,6 +3797,10 @@ export function catalogOffer(project, templates) {
       shape: entry.shape,
       lineStyle: entry.lineStyle,
       blockMode: entry.blockMode,
+      // Имя изображения — для того, кто захочет знать, что приедет вместе с
+      // типом. Строка окна рисует знак, а не изображение: на плане стоит знак,
+      // и обещать в окне картинку развёртки значило бы показать не то.
+      view: entry.view,
     });
   }
   return [...groups.values()].filter((group) => group.types.length > 0);
@@ -3691,6 +3871,7 @@ export function addTypesFromCatalog(project, templates, typeKeys) {
         lineStyle: entry.lineStyle,
         blockMode: entry.blockMode,
         channels: entry.channels,
+        view: entry.view,
       });
       next = added.project;
       types.push(added.type);
@@ -8539,6 +8720,28 @@ export function validate(project) {
     );
   }
 
+  // Тип разошёлся с общей базой по изображению (таск 218, требование G327).
+  // Это тоже сведение о справочнике, а не поломка разметки: справочник
+  // копируется в объект при создании, и правка шаблона до него не доезжает —
+  // у заказчика так разошлись шесть типов, а у «Ночника» изображения нет
+  // вовсе. Строка **предлагает**, а не правит: применяет её человек, а
+  // крестиком «так и задумано» закрывает навсегда.
+  //
+  // Ключ принятия — тип и предложенное имя: сменится предложение в базе —
+  // вопрос задаётся заново, переименование кода вопроса не возвращает (как у
+  // повтора знака, где ключ считается по идентификаторам типов).
+  for (const row of typeViewReview(project)) {
+    problems.push(
+      problem(
+        "typeViewOffer",
+        { code: row.code, name: row.name },
+        row.typeId,
+        "warning",
+        typeViewSubject(row),
+      ),
+    );
+  }
+
   for (const outline of outlinesOf(project)) {
     const label = outlineLabel(project, outline);
     if (!findScheme(project, outline.schemeId)) problems.push(problem("outlineWithoutScheme", { label }, outline.id));
@@ -8618,7 +8821,14 @@ export function validate(project) {
 // знака. Принятие — механизм, который в сборке уже есть, и главное: оно
 // ничего не прячет. Список принятых виден в панели, каждая строка называет
 // то, на что ответили, и возвращается в работу одним нажатием.
-export const DICTIONARY_PROBLEM_CODES = ["sharedShape", "closeColors"];
+// Предложение изображения (таск 218) — третья такая строка, и попадает она
+// сюда по тому же доводу: новый объект приезжает со справочником, в котором
+// изображения уже расставлены, и предлагать ему нечего. А вот объект, созданный
+// из **сохранённого** шаблона, у которого имён нет, строку получит — и это
+// верно: справочник у него и правда разошёлся с базой. Поэтому принимается она
+// в тот же момент, что и остальные: при создании объекта и при «Добавить из
+// общей базы».
+export const DICTIONARY_PROBLEM_CODES = ["sharedShape", "closeColors", "typeViewOffer"];
 
 // Предмет предупреждения и его нынешний состав — две разные вещи, и обе нужны.
 //
@@ -8640,6 +8850,13 @@ function closeColorsSubject(pair) {
   return [...pair.categoryIds].sort().join("+");
 }
 
+// Предмет предложения изображения: тип и то, что предложено. Нынешнее
+// изображение в ключ не входит нарочно — сменил человек знак своему типу, и
+// картинка под ним поехала, но вопрос остался тем же вопросом.
+function typeViewSubject(row) {
+  return row.typeId + "#" + row.view;
+}
+
 // Нынешние строки справочника: ключ принятия → предмет.
 function dictionaryRows(project) {
   const rows = new Map();
@@ -8649,6 +8866,10 @@ function dictionaryRows(project) {
   for (const pair of closeCategoryColors(project)) {
     const subject = closeColorsSubject(pair);
     rows.set("closeColors:" + subject, "closeColors:" + subject);
+  }
+  for (const row of typeViewReview(project)) {
+    const subject = typeViewSubject(row);
+    rows.set("typeViewOffer:" + subject, "typeViewOffer:" + subject);
   }
   return rows;
 }
