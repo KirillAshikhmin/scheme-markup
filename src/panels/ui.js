@@ -374,6 +374,24 @@ export function uiFieldTarget(target) {
   return tag === "INPUT" && UI_OWN_KEYS_INPUTS.has(uiInputType(target));
 }
 
+// Галочка и переключатель: клавиатурой их нажимают **только** пробелом.
+const UI_SPACE_INPUTS = new Set(["checkbox", "radio"]);
+
+/**
+ * Пробел принадлежит тому, на чём фокус, а не поверхности.
+ *
+ * Третий вопрос про фокус, и он не лишний: поверхности забирают пробел себе
+ * (панорама на плане, прыжок в объёме) вместе с действием браузера — иначе
+ * кнопка, на которой остался фокус после щелчка мышью, срабатывает второй раз
+ * по `keyup`. У кнопки при этом остаётся Enter, а **у галочки не остаётся
+ * ничего**: пробел — её единственная клавиша, и отбирать его нельзя.
+ */
+export function uiSpaceTarget(target) {
+  if (uiFieldTarget(target)) return true;
+  if (!target || !target.tagName) return false;
+  return String(target.tagName).toUpperCase() === "INPUT" && UI_SPACE_INPUTS.has(uiInputType(target));
+}
+
 // Диалоги складываются стопкой: подтверждение поверх редактора плана —
 // обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
 // основное действие, нижние ждут своей очереди и закрываются своими же close().

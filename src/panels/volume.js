@@ -125,7 +125,7 @@ import {
   volumeStep,
 } from "../volume.js";
 import { markCardModel, markCardParts } from "./markCard.js";
-import { uiButton, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiIconButton } from "./ui.js";
+import { uiButton, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiIconButton, uiSpaceTarget } from "./ui.js";
 
 // ——— подсказка плашкой (G218) ————————————————————————————————————————————
 //
@@ -3069,6 +3069,10 @@ function createVolume({ api, hosts }) {
     // Клавиши принадлежат полю ввода, пока в нём фокус: «W» в имени помещения
     // не должно уводить человека на шаг вперёд.
     if (volumeTypingTarget(event.target)) return;
+    // Пробел у галочки и переключателя — их единственная клавиша: прыжок её не
+    // отбирает (`uiSpaceTarget`, находка 10 разбора механик). У кнопки остаётся
+    // Enter, у галочки не осталось бы ничего.
+    if (event.code === VOLUME_JUMP_KEY && uiSpaceTarget(event.target)) return;
     // Вопрос про этаж (таск 149) забирает клавиатуру себе: Enter переходит на
     // первый этаж из списка, Esc отказывается — и ни то, ни другое не доходит
     // до окна и до стопки диалогов. Иначе Esc закрыл бы весь объём, а Enter
@@ -3205,7 +3209,7 @@ function createVolume({ api, hosts }) {
       // человек мог уйти в другой режим, не отпустив клавишу, и подъём остался
       // бы висеть.
       riseStop();
-      if (ours() && !volumeTypingTarget(event.target)) {
+      if (ours() && !uiSpaceTarget(event.target)) {
         event.preventDefault();
         event.stopPropagation();
       }

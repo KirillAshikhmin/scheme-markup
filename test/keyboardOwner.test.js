@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { uiFieldTarget, uiTypingTarget } from "../src/panels/ui.js";
+import { uiFieldTarget, uiSpaceTarget, uiTypingTarget } from "../src/panels/ui.js";
 import { volumeTypingTarget } from "../src/panels/volume.js";
 
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -51,6 +51,24 @@ test("своя клавиатура поля: список и ползунок �
   assert.equal(uiFieldTarget({ tagName: "INPUT", type: "checkbox" }), false);
   assert.equal(uiFieldTarget({ tagName: "BUTTON" }), false);
   assert.equal(uiFieldTarget(null), false);
+});
+
+test("пробел остаётся галочке: у неё он единственный", () => {
+  // Поверхности забирают пробел себе вместе с действием браузера — иначе
+  // кнопка, на которой остался фокус после щелчка мышью, срабатывает второй
+  // раз по `keyup`. У кнопки при этом остаётся Enter, а у галочки не осталось
+  // бы ничего.
+  assert.equal(uiSpaceTarget({ tagName: "INPUT", type: "checkbox" }), true);
+  assert.equal(uiSpaceTarget({ tagName: "INPUT", type: "radio" }), true);
+  assert.equal(uiSpaceTarget({ tagName: "SELECT" }), true);
+  assert.equal(uiSpaceTarget({ tagName: "INPUT" }), true);
+  assert.equal(uiSpaceTarget({ tagName: "BUTTON" }), false, "у кнопки пробел отбирают нарочно");
+  assert.equal(uiSpaceTarget({ tagName: "CANVAS" }), false);
+  assert.equal(uiSpaceTarget(null), false);
+  // И обе поверхности, которые забирают пробел, спрашивают именно его.
+  for (const name of ["canvas.js", join("panels", "volume.js")]) {
+    assert.ok(read(name).includes("uiSpaceTarget("), name + ": пробел отбирается мимо uiSpaceTarget");
+  }
 });
 
 test("предикат один на три поверхности", () => {
@@ -95,6 +113,7 @@ test("пробел на плане снимает действие браузе�
   const down = text.slice(text.indexOf("function canvasKeyDown"), text.indexOf("function canvasKeyUp"));
   const up = text.slice(text.indexOf("function canvasKeyUp"), text.indexOf("function canvasPointerLeave"));
   const space = down.slice(down.indexOf('event.code === "Space"'));
+  assert.ok(space.includes("uiSpaceTarget(event.target)"), "пробел отбирают и у галочки");
   assert.ok(space.includes("event.preventDefault()"), "пробел на нажатии не снимает прокрутку страницы");
   assert.ok(space.includes("if (canvasSpace) return;"), "автоповтор системы считается новым нажатием");
   assert.ok(up.includes("event.preventDefault()"), "кнопку под фокусом пробел нажимает именно по keyup");

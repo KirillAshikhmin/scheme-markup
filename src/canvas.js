@@ -145,7 +145,7 @@ import {
 } from "./render.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { getSetting, setSetting } from "./store.js";
-import { uiConfirm, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiPrompt, uiTypingTarget } from "./panels/ui.js";
+import { uiConfirm, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiPrompt, uiSpaceTarget, uiTypingTarget } from "./panels/ui.js";
 import { createFieldPlate, plateUnseen } from "./panels/plate.js";
 import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "./screenPlace.js";
@@ -4145,7 +4145,7 @@ function canvasKeyDown(event) {
       return;
     }
   }
-  if (event.code === "Space" && !event.altKey) {
+  if (event.code === "Space" && !event.altKey && !uiSpaceTarget(event.target)) {
     // **Действие браузера снимается здесь и в `canvasKeyUp`** (находка 10
     // разбора механик): нажатие кнопки пробелом браузер делает именно по
     // `keyup`, и одного `preventDefault` на нажатии не хватает. Без этого
@@ -4216,7 +4216,7 @@ function canvasKeyUp(event) {
   // Нажатие кнопки пробелом браузер делает по **отпусканию** — снимать его
   // надо и здесь (находка 10). Поле набора и диалог при этом не трогаем:
   // пробел там принадлежит им.
-  if (canvasSpace && uiDialogDepth() === 0 && !uiFieldTarget(event.target)) event.preventDefault();
+  if (canvasSpace && uiDialogDepth() === 0 && !uiSpaceTarget(event.target)) event.preventDefault();
   canvasSpace = false;
   canvasSyncCursor();
 }

@@ -11285,9 +11285,20 @@ function createProject(template) {
 
 // ——— поиск ———————————————————————————————————————————————————————————
 
-// Буква или цифра — середина слова. Всё остальное (пробел, дефис, точка,
-// скобка) — граница: «12» обязано находить «L-12».
+// Граница слова — всё, что не буква и не цифра (пробел, дефис, точка, скобка):
+// «12» обязано находить «L-12».
 const QUERY_LETTER = /[0-9a-zа-яё]/;
+// **И стык буквы с цифрой — тоже граница.** Без него правило «с начала слова»
+// отнимало у поиска номер: обозначение метки — это код плюс номер («В1»,
+// «ПОДСВЕТКА2»), и запрос «1» на настоящем объекте заказчика находил 206 меток
+// до правки и **ноль** после (замер живого прогона таска 182). А ведь
+// «найди четырнадцатую» — обычный вопрос, и цифра в обозначении начинает своё
+// слово ровно так же, как цифра за дефисом в «L-12».
+//
+// Урок, ради которого правило и заведено, это не рушит: он про **буквы** —
+// одна «в» поднимала весь свет, потому что стояла в середине слова. Буква
+// после буквы серединой слова и осталась.
+const QUERY_DIGIT = /[0-9]/;
 
 /**
  * **Одно правило поиска по строке на всю сборку** (находка 7 разбора механик):
@@ -11311,10 +11322,19 @@ function queryHit(haystack, needle) {
   if (!haystack) return false;
   let at = haystack.indexOf(needle);
   while (at >= 0) {
-    if (at === 0 || !QUERY_LETTER.test(haystack[at - 1])) return true;
+    if (queryWordStart(haystack, at)) return true;
     at = haystack.indexOf(needle, at + 1);
   }
   return false;
+}
+
+// Начало слова: начало строки, знак-разделитель перед ним или стык буквы с
+// цифрой.
+function queryWordStart(haystack, at) {
+  if (at === 0) return true;
+  const before = haystack[at - 1];
+  if (!QUERY_LETTER.test(before)) return true;
+  return QUERY_DIGIT.test(before) !== QUERY_DIGIT.test(haystack[at]);
 }
 
 /** Запрос в приведённом виде: без краёв и без регистра. Пустой — «всё». */
@@ -29966,6 +29986,24 @@ function uiFieldTarget(target) {
   return tag === "INPUT" && UI_OWN_KEYS_INPUTS.has(uiInputType(target));
 }
 
+// Галочка и переключатель: клавиатурой их нажимают **только** пробелом.
+const UI_SPACE_INPUTS = new Set(["checkbox", "radio"]);
+
+/**
+ * Пробел принадлежит тому, на чём фокус, а не поверхности.
+ *
+ * Третий вопрос про фокус, и он не лишний: поверхности забирают пробел себе
+ * (панорама на плане, прыжок в объёме) вместе с действием браузера — иначе
+ * кнопка, на которой остался фокус после щелчка мышью, срабатывает второй раз
+ * по `keyup`. У кнопки при этом остаётся Enter, а **у галочки не остаётся
+ * ничего**: пробел — её единственная клавиша, и отбирать его нельзя.
+ */
+function uiSpaceTarget(target) {
+  if (uiFieldTarget(target)) return true;
+  if (!target || !target.tagName) return false;
+  return String(target.tagName).toUpperCase() === "INPUT" && UI_SPACE_INPUTS.has(uiInputType(target));
+}
+
 // Диалоги складываются стопкой: подтверждение поверх редактора плана —
 // обычное дело. Виден верхний, Escape закрывает только его, Enter нажимает его
 // основное действие, нижние ждут своей очереди и закрываются своими же close().
@@ -37372,7 +37410,7 @@ function canvasKeyDown(event) {
       return;
     }
   }
-  if (event.code === "Space" && !event.altKey) {
+  if (event.code === "Space" && !event.altKey && !uiSpaceTarget(event.target)) {
     // **Действие браузера снимается здесь и в `canvasKeyUp`** (находка 10
     // разбора механик): нажатие кнопки пробелом браузер делает именно по
     // `keyup`, и одного `preventDefault` на нажатии не хватает. Без этого
@@ -37443,7 +37481,7 @@ function canvasKeyUp(event) {
   // Нажатие кнопки пробелом браузер делает по **отпусканию** — снимать его
   // надо и здесь (находка 10). Поле набора и диалог при этом не трогаем:
   // пробел там принадлежит им.
-  if (canvasSpace && uiDialogDepth() === 0 && !uiFieldTarget(event.target)) event.preventDefault();
+  if (canvasSpace && uiDialogDepth() === 0 && !uiSpaceTarget(event.target)) event.preventDefault();
   canvasSpace = false;
   canvasSyncCursor();
 }
@@ -65819,6 +65857,10 @@ function createVolume({ api, hosts }) {
     // Клавиши принадлежат полю ввода, пока в нём фокус: «W» в имени помещения
     // не должно уводить человека на шаг вперёд.
     if (volumeTypingTarget(event.target)) return;
+    // Пробел у галочки и переключателя — их единственная клавиша: прыжок её не
+    // отбирает (`uiSpaceTarget`, находка 10 разбора механик). У кнопки остаётся
+    // Enter, у галочки не осталось бы ничего.
+    if (event.code === VOLUME_JUMP_KEY && uiSpaceTarget(event.target)) return;
     // Вопрос про этаж (таск 149) забирает клавиатуру себе: Enter переходит на
     // первый этаж из списка, Esc отказывается — и ни то, ни другое не доходит
     // до окна и до стопки диалогов. Иначе Esc закрыл бы весь объём, а Enter
@@ -65955,7 +65997,7 @@ function createVolume({ api, hosts }) {
       // человек мог уйти в другой режим, не отпустив клавишу, и подъём остался
       // бы висеть.
       riseStop();
-      if (ours() && !volumeTypingTarget(event.target)) {
+      if (ours() && !uiSpaceTarget(event.target)) {
         event.preventDefault();
         event.stopPropagation();
       }
