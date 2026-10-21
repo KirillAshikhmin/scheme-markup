@@ -456,11 +456,6 @@
   border-bottom: 1px solid var(--canvas-line);
 }
 
-.mark-card__icon {
-  display: inline-flex;
-  flex: none;
-}
-
 .mark-card__label {
   font-weight: 600;
   font-size: 15px;
@@ -3058,6 +3053,22 @@
   width: 100%;
   padding: 7px 8px;
   margin-bottom: 10px;
+}
+
+/* Клетка знака метки в строке списка (`uiSignCell`, таск 228): ширина одна на
+   фигуру точечного типа и на образец линии линейного, чтобы строки стояли
+   колонка в колонку. Числа принадлежат JS (`UI_SIGN`, `UI_SIGN_SMALL` в
+   ui.js), здесь они повторены — повтор держит test/cssMeasures.test.js. */
+.ui-sign {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+}
+
+.ui-sign--small {
+  width: 32px;
 }
 
 .ui-select,
@@ -8442,7 +8453,11 @@ const strings = {
     grow: "Мелкое крупнее",
     growHint:
       "Рисовать мелкие вещи крупнее их масштаба, чтобы они узнавались на листе: на стене девяти метров розетка 80 мм выходит шестью точками, а с отметкой — тринадцатью, то есть как вещь в 169 мм. Снята — всё в реальном масштабе, и мерить по картинке можно. Крупные вещи отметка не меняет вовсе. Уходит и в выгрузку, а что именно подтянуто — сказано под развёрткой и на листе.",
-    noHeight: "Высота стен не задана — показано {height} мм по тому, что на стене стоит.",
+    // Слово «на схеме», а не «на стене» (таск 228): выводится высота **этажа**,
+    // и выводит её всё, что стоит на схеме, — иначе у голой стены и у стены со
+    // шкафом в одной комнате выходило бы два разных потолка, а объём рисовал бы
+    // третий. Число здесь и число в строке объёма теперь одно.
+    noHeight: "Высота стен не задана — показано {height} мм по тому, что стоит на схеме.",
     empty: "На этой стене пока ничего нет.",
     blind: "Меток без высоты: {count} — они под полом полосой, выдумывать им высоту нельзя.",
     // Высота, взятая у типа (таск 135, G192). Показывается вслух: это догадка
@@ -18988,6 +19003,85 @@ function wallHeightOf(project, { schemeId, roomId } = {}) {
  */
 const WALL_HEIGHT_FALLBACK_MM = 2800;
 
+// Воздух над самым высоким, что стоит на этаже без заданной высоты. Триста
+// миллиметров — ровно про то, чтобы верхний косяк не упёрся в потолок: лист
+// развёртки с ними читается, а объёмная комната не срезает дверь.
+const WALL_HEIGHT_AIR_MM = 300;
+
+// Счёт самого высокого на схеме по объекту, который не трогали, выходит один и
+// тот же, а стоит он полмиллисекунды на шести сотнях меток — и спрашивают его
+// и развёртка каждой стены, и каждая комната объёма. Объект после любой правки
+// **новый** (модель не меняет данные на месте), поэтому `WeakMap` по объекту
+// сам забывает устаревшее — тот же приём, которым `render.js` помнит стопки
+// меток и раскладку подписей.
+const SCHEME_TOP_CACHE = new WeakMap();
+
+/**
+ * Самое высокое, что стоит на схеме: верх проёма, верх вещи, посадка метки.
+ *
+ * Мерки те же, какими их кладёт на лист развёртка (`wallElevation`), и те же
+ * хозяева: у проёма верх считается от высоты над полом, у вещи его отдаёт
+ * `schemeObjectTopMm`, у метки — `markSizes` вместе с умолчаниями типа (G192).
+ * Мусор (нечисло, пустая строка) в счёт не идёт: он сделал бы высоту `NaN`, а
+ * с ней пропала бы вся картинка.
+ */
+function schemeTopMm(project, schemeId) {
+  if (!project || !schemeId) return 0;
+  let perScheme = SCHEME_TOP_CACHE.get(project);
+  if (!perScheme) {
+    perScheme = new Map();
+    SCHEME_TOP_CACHE.set(project, perScheme);
+  }
+  if (perScheme.has(schemeId)) return perScheme.get(schemeId);
+  let top = 0;
+  const raise = (value) => {
+    const mm = Number(value);
+    if (Number.isFinite(mm) && mm > top) top = mm;
+  };
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    for (const opening of openingsInWall(project, wall.id)) {
+      raise(Number(opening.heightAboveFloorMm) + Number(opening.heightMm));
+    }
+  }
+  for (const object of schemeObjectsOnScheme(project, schemeId)) raise(schemeObjectTopMm(object));
+  for (const mark of project.marks || []) {
+    if (mark.schemeId !== schemeId) continue;
+    raise(markSizes(project, mark).heightAboveFloor);
+  }
+  perScheme.set(schemeId, top);
+  return top;
+}
+
+/**
+ * **Показанная высота стены — одна на объём и развёртку** (таск 228, G340).
+ *
+ * `{mm, known}`: `mm` — то, во что рисовать, `known` — своё это число человека
+ * или наше. Заданная высота берётся как есть (переопределение комнаты старше
+ * высоты схемы — `wallHeightOf`), незаданная **выводится**: умолчание
+ * `WALL_HEIGHT_FALLBACK_MM`, поднятое над самым высоким на схеме, если то выше.
+ *
+ * **Почему вывод по схеме, а не по стене.** До этого таска вывод жил только на
+ * развёртке и считался по тому, что стоит на **этой** стене, а объём рисовал
+ * комнату плоским умолчанием. Выходило два числа про одну стену: полоса
+ * развёртки писала «показано 3100 мм», окно объёма — «комната показана высотой
+ * 2800», и объёмная комната срезала дверь, которую лист рисовал целиком
+ * (`volumeWallTiles` прижимает верх проёма к потолку). Высоту задают **схеме**
+ * — это этаж, и потолок у этажа один; выводить её по отдельной стене значило бы
+ * показать в одной комнате два потолка: голой стене 2800, стене со шкафом 3100.
+ *
+ * Выведенное число **только растёт**: самое высокое на схеме не ниже самого
+ * высокого на любой её стене, поэтому лист развёртки после этого таска нигде не
+ * стал короче, чем был, и срезать то, что рисовалось, ему нечем.
+ *
+ * **Данных это не касается** (G68): в `project.json` выведенное не пишется
+ * никогда, и у кого высота задана — у того ничего не изменилось.
+ */
+function wallHeightShownMm(project, { schemeId, roomId } = {}) {
+  const known = wallHeightOf(project, { schemeId, roomId });
+  if (known > 0) return { mm: known, known: true };
+  return { mm: Math.max(WALL_HEIGHT_FALLBACK_MM, schemeTopMm(project, schemeId) + WALL_HEIGHT_AIR_MM), known: false };
+}
+
 // Снижать высоту под уже стоящим проёмом модель не даёт: промолчать значило бы
 // оставить окно выше потолка, а прижать его — угадать за человека.
 function checkHeightOverOpenings(project, schemeId, height) {
@@ -20023,10 +20117,11 @@ function wallCornerMoveSide(project, { wallId, roomId, middleMm, ahead, edge }) 
  * Отступы здесь уже **зеркальные по стороне**: рисующему остаётся отложить их
  * слева направо и ничего не знать ни про стороны, ни про направление стены.
  * `heightMm` — высота этой стороны (`null`, если её не задавали);
- * `heightShownMm` — то, во что рисовать: заданная высота, умолчание
- * `WALL_HEIGHT_FALLBACK_MM` или — если на стене стоит что-то выше его —
- * выведенная из этого высота. Без числа развёртка была бы картинкой, а с
- * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
+ * `heightShownMm` — то, во что рисовать, и это **то же число, которым объём
+ * рисует комнату** (`wallHeightShownMm`, таск 228): заданная высота или
+ * умолчание, поднятое над самым высоким на схеме. Без числа развёртка была бы
+ * картинкой, а с выдуманным молча — враньём, поэтому признак `heightKnown`
+ * идёт рядом.
  */
 function wallElevation(project, wallId, side = "left", cut = null) {
   const wall = findWall(project, wallId);
@@ -20146,12 +20241,13 @@ function wallElevation(project, wallId, side = "left", cut = null) {
   // стены это по-прежнему её середина.
   const middleAlongMm = sideAlong(length, (span.fromMm + span.toMm) / 2, view);
   const known = wallHeightOnSide(project, wallId, view, middleAlongMm);
-  const tops = [
-    ...shownOpenings.map((opening) => opening.topMm),
-    ...objects.map((object) => (object.topMm === null ? 0 : object.topMm)),
-    ...shownMarks.map((mark) => mark.heightMm || 0),
-  ];
   const roomId = wallRoomId(project, wallId, view, middleAlongMm);
+  // Показанная высота — у модели, одна на лист и на объёмную комнату (таск
+  // 228). Своего счёта у развёртки больше нет: прежде она выводила его по
+  // тому, что стоит на **этой** стене, и расходилась с объёмом на той же
+  // стене. Комната та же, по которой взята заданная высота, — иначе лист
+  // спрашивал бы об одной стороне у двух разных хозяев.
+  const shown = wallHeightShownMm(project, { schemeId: wall.schemeId, roomId });
   const room = roomId ? findRoom(project, roomId) : null;
   const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
   return {
@@ -20172,17 +20268,12 @@ function wallElevation(project, wallId, side = "left", cut = null) {
     lengthMm: span.lengthMm,
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
-    heightKnown: known !== null,
-    // Незаданная высота — умолчание `WALL_HEIGHT_FALLBACK_MM`, то же, которым
-    // рисует комнату объём. Вывод «по тому, что на стене стоит» при этом
-    // остался, но стал **запасным путём**: он поднимает лист выше умолчания,
-    // когда на стене что-то стоит выше него, и не опускает его никогда.
-    //
-    // Убрать вывод совсем было нельзя: на объекте заказчика шесть сторон из
-    // пятидесяти несут вещь или метку ростом в самый потолок, и по плоскому
-    // умолчанию у них срезало бы верх — верхний косяк упёрся бы в потолок
-    // листа. Триста миллиметров воздуха над самым высоким — ровно про это.
-    heightShownMm: known !== null ? known : Math.max(WALL_HEIGHT_FALLBACK_MM, Math.max(0, ...tops) + 300),
+    heightKnown: shown.known,
+    // Незаданная высота — выведенная (`wallHeightShownMm`): умолчание,
+    // поднятое над самым высоким на схеме. Убрать вывод совсем было нельзя —
+    // на объекте заказчика шесть сторон из пятидесяти несут вещь или метку
+    // ростом в самый потолок, и по плоскому умолчанию у них срезало бы верх.
+    heightShownMm: shown.mm,
     roomId,
     roomName: room ? room.name : "",
     openings: shownOpenings,
@@ -32237,6 +32328,31 @@ function uiButton(label, options = {}) {
   });
 }
 
+/**
+ * **Клетка знака метки в строке списка** (таск 228, находка 15 разбора).
+ *
+ * Знак метки рисует общая лестница `render.typeIcon`: у точечного типа фигура,
+ * у линейного — образец его начертания. Образец шире фигуры, и сплющить его до
+ * её ширины нельзя — точечную линию от штрихпунктирной в двадцати точках не
+ * отличить. Поэтому клетка постоянной ширины на оба вида: строки точечных и
+ * линейных меток стоят колонка в колонку, а знак садится в её середину.
+ *
+ * Клетка **одна на четыре списка** — метки, карточка метки, окно связей,
+ * поиск. Своих заводить не надо: ровно на том, что рисовальщиков было три,
+ * справочник с окном выбора и разошлись (дефект D31).
+ *
+ * Мера пары «размер фигуры — длина образца» живёт здесь, а ширину клетки
+ * повторяет стиль (`.ui-sign` в `panels.css`) — повтор держит
+ * `test/cssMeasures.test.js`.
+ */
+const UI_SIGN = { size: 20, length: 40 };
+
+/** Та же клетка мельче: строка поиска и свёрнутая карточка метки. */
+const UI_SIGN_SMALL = { size: 16, length: 32 };
+function uiSignCell(icon, { small = false } = {}) {
+  return uiEl("span", { class: small ? "ui-sign ui-sign--small" : "ui-sign" }, icon);
+}
+
 // Значки рисуются прямо здесь, своими линиями: внешних картинок и шрифтов в
 // сборке нет, а стрелки отмены в системном шрифте есть не на каждой машине —
 // на части из них вместо знака встал бы пустой прямоугольник. Рисунок задан
@@ -42925,13 +43041,24 @@ const GOST_MIN_TEXT_MM = 2.5;
 // Разрешение листа: множитель диалога (1×, 2×, 4×) переводится в dpi. 2× — это
 // привычные 300 dpi, на которых считалась подпись размера у прежних выгрузок.
 const GOST_DPI_BASE = 150;
+
+// Множитель, по которому считается запасное разрешение: 2× и есть те самые
+// 300 dpi. Хозяин числа **здесь**, и `exporter.EXPORT_DPI` берёт его отсюда, а
+// не повторяет (таск 228, находка 12): обратное направление невозможно — лист
+// ГОСТ нижний слой, выгрузка тянет из него, а не он из выгрузки.
+const GOST_DPI_SCALE_DEFAULT = 2;
 function gostDpi(scale) {
   return GOST_DPI_BASE * (scale > 0 ? scale : 1);
 }
 
+// Миллиметров в дюйме. Повторено в `exporter.js`, `pdf.js` и `pngDpi.js`
+// нарочно: число физическое и измениться не может, а связывать четыре модуля
+// ради него значило бы завести зависимость там, где её нет.
+const GOST_MM_PER_INCH = 25.4;
+
 // Пикселей в миллиметре при заданном разрешении.
 function gostPixelsPerMm(dpi) {
-  return (dpi > 0 ? dpi : 300) / 25.4;
+  return (dpi > 0 ? dpi : gostDpi(GOST_DPI_SCALE_DEFAULT)) / GOST_MM_PER_INCH;
 }
 
 /**
@@ -43578,8 +43705,11 @@ function drawGostStamp(ctx, sheet, form, values, mm) {
 //
 // Zip берётся из `projectFile.writeZip` — второй реализации zip в сборке нет.
 const EXPORT_SCALES = [1, 2, 4];
-// Разрешение печати, по которому пиксели пересчитываются в миллиметры.
-const EXPORT_DPI = 300;
+// Разрешение печати, по которому пиксели пересчитываются в миллиметры. Число не
+// своё: те же 300 dpi — это 2× базы листа ГОСТ, и хозяин у них один
+// (`gostSheet.GOST_DPI_SCALE_DEFAULT`, таск 228). Направление единственно
+// возможное: лист нижний слой, и тянуть он из выгрузки не может.
+const EXPORT_DPI = gostDpi(GOST_DPI_SCALE_DEFAULT);
 // Предел стороны холста в браузерах: за ним toBlob молча отдаёт пустое.
 const EXPORT_MAX_SIDE = 16384;
 const EXPORT_MM_PER_INCH = 25.4;
@@ -49389,8 +49519,11 @@ function openMarkPicker(project, options = {}) {
       // Где метка стоит: помещение, а для многоэтажного объекта — и схема.
       const where = [room ? room.name : "", manySchemes ? row.scheme.name : ""].filter(Boolean).join(" · ");
       return [
-        // Метка узнаётся так же, как на плане: обозначение, цвет, форма.
-        shapeIcon(row.style.shape, row.style.color, 20),
+        // Метка узнаётся так же, как на плане: обозначение, цвет и знак её
+        // типа — общей лестницей (таск 228, находка 15). Линейная метка в этом
+        // окне рисовалась точкой, и подопечную ленту приходилось искать
+        // по подписи.
+        uiSignCell(typeIcon(project, row.mark.typeId, UI_SIGN.size, UI_SIGN.length)),
         uiEl("span", { class: "controls-pick__label", text: row.label }),
         uiEl("span", { class: "controls-pick__name", text: row.type ? row.type.name : "" }),
         uiEl("span", { class: "controls-pick__room", text: where }),
@@ -56084,7 +56217,12 @@ function mountMarksPanel(host, api) {
           // Галочка раскрытия — одна и та же в обоих видах: по ней видно,
           // свёрнута строка или раскрыта, и куда нажать.
           uiEl("span", { class: "mark-row__toggle" }),
-          shapeIcon(view.style.shape, view.style.color, 20),
+          // Знак метки — общей лестницей `render.typeIcon` (таск 228, находка
+          // 15): у точечного типа фигура, у линейного образец его начертания.
+          // Прежде строка звала `shapeIcon` сама, и человек, искавший в списке
+          // свою ленту подсветки, видел у неё точку, тогда как в справочнике у
+          // неё штрих. Клетка постоянной ширины — одна на оба вида.
+          uiSignCell(typeIcon(state.project, mark.typeId, UI_SIGN.size, UI_SIGN.length)),
           // Код и номер — одним куском, вплотную. Слова заказчика: «в
           // развёрнутой карточке метки цифру метки прижми к её букве, а то там
           // большое расстояние». Раньше поле номера стояло у правого края, и
@@ -56123,7 +56261,7 @@ function mountMarksPanel(host, api) {
         ])
       : uiEl("div", { class: "mark-row__head" }, [
           uiEl("span", { class: "mark-row__toggle" }),
-          shapeIcon(view.style.shape, view.style.color, 20),
+          uiSignCell(typeIcon(state.project, mark.typeId, UI_SIGN.size, UI_SIGN.length)),
           uiEl("span", { class: "mark-row__label", text: view.label }),
           badge,
         ]);
@@ -56527,6 +56665,9 @@ function markCardModel(project, markId) {
       code: view.code,
       typeName: view.typeName,
       style: view.style,
+      // План знака (таск 228): карточку собирают два хозяина — план и объём, —
+      // и считать его дважды значило бы снова развести знак по поверхностям.
+      sign: typeIconPlan(project, mark.typeId),
       kind: mark.kind,
       comment: true,
       pointer: markPointer(mark),
@@ -56564,6 +56705,7 @@ function markCardModel(project, markId) {
     code: view.code,
     typeName: view.typeName,
     style: view.style,
+    sign: typeIconPlan(project, mark.typeId),
     kind: MARK_KINDS.includes(mark.kind) ? mark.kind : "point",
     comment: false,
     pointer: false,
@@ -56594,7 +56736,9 @@ function markCardShift(markY, cardTop, gap = MARK_CARD_GAP) {
  */
 function markCardParts(model, { headButton = null, extra = null } = {}) {
   const head = uiEl("div", { class: "mark-card__head" }, [
-    uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 20)),
+    // Знак — общей лестницей (таск 228, находка 15): у линейной метки в
+    // карточке стояла точка, хотя в справочнике у её типа штрих.
+    uiSignCell(typeSignIcon(model.sign, UI_SIGN.size, UI_SIGN.length)),
     uiEl("span", { class: "mark-card__label", text: model.label }),
     uiEl("span", { class: "mark-card__type", text: model.code + " — " + model.typeName }),
     ...(headButton ? [headButton] : []),
@@ -56663,7 +56807,7 @@ function mountMarkCard(host, api) {
             on: { click: () => flip(false) },
           },
           [
-            uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 16)),
+            uiSignCell(typeSignIcon(model.sign, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
             uiEl("span", { class: "mark-card__label", text: model.label }),
             uiIcon("chevron"),
           ],
@@ -59756,17 +59900,20 @@ function volumeGlassLeaf(hinge, leaf, width, span, out, doorId) {
 
 /**
  * Высота помещения: переопределение комнаты, высота схемы, а если ни того ни
- * другого — `WALL_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ * другого — выведенная высота и честный `known: false`.
  *
- * Умолчание живёт в модели (таск 173) и **одно** на объём и развёртку: своей
- * константы здесь больше нет. Окно говорит о нём строкой `volume.noHeight`, и
- * в строке стоит то же число, что на полосе развёртки, — прежде окно обещало
- * это согласие комментарием, а числа были разные (2700 против «не ниже 2000»).
+ * **Своего счёта здесь нет ни одной строки** (таск 228): и умолчание, и вывод
+ * живут в модели (`wallHeightShownMm`), и ровно то же читает развёртка.
+ * Умолчание стало общим ещё в таске 173, а вывод — нет: лист поднимался над
+ * самым высоким, что стоит на стене, а комната оставалась плоской. Выходило два
+ * числа про одну стену, и дверь выше умолчания объём срезал потолком
+ * (`volumeWallTiles`), пока лист рисовал её целиком.
+ *
+ * Окно говорит о выведенном строкой `volume.noHeight`, и число в ней — это
+ * `scene.heightMm`, а не константа: иначе строка снова разошлась бы с полосой.
  */
 function volumeHeightMm(project, schemeId, roomId) {
-  const given = wallHeightOf(project, { schemeId, roomId });
-  if (given > 0) return { mm: given, known: true };
-  return { mm: WALL_HEIGHT_FALLBACK_MM, known: false };
+  return wallHeightShownMm(project, { schemeId, roomId });
 }
 
 /** Внутри ли точка в плановом многоугольнике. Тот же счёт, что `pointInOutline`. */
@@ -68394,7 +68541,13 @@ function volumeNotes(scene) {
   for (const note of scene.notes || []) {
     if (note === "noRooms") lines.push(strings.volume.noRooms);
     if (note === "noBridge") lines.push(strings.volume.noBridge);
-    if (note === "noHeight") lines.push(text("volume.noHeight", { height: WALL_HEIGHT_FALLBACK_MM }));
+    // Число берётся у сцены, а не у константы (таск 228): высота, которую не
+    // задали, выводится из того, что стоит на схеме, и бывает выше умолчания.
+    // Константа в строке соврала бы ровно там, где объём и так рисует выше, —
+    // и снова разошлась бы с полосой развёртки, которая выводит то же число.
+    if (note === "noHeight") {
+      lines.push(text("volume.noHeight", { height: scene.heightMm || WALL_HEIGHT_FALLBACK_MM }));
+    }
   }
   return lines;
 }
@@ -78461,10 +78614,11 @@ registerPanel(PANEL_IDS.canvasModes, mountScreens);
 const SEARCH_LIMIT = 30;
 
 function searchRowNode(project, row, active, onPick, onHover) {
-  const style = styleOf(project, row.typeId);
   const where = [row.roomName || strings.search.noRoom, row.schemeName].filter(Boolean).join(" · ");
   const parts = [
-    shapeIcon(style.shape, style.color, 16),
+    // Знак — общей лестницей (таск 228, находка 15): у линейного типа образец
+    // его начертания, а не точка. Выдачу читают, сверяя её со справочником.
+    uiSignCell(typeIcon(project, row.typeId, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
     uiEl("span", { class: "search__label", text: row.label }),
     uiEl("span", { class: "search__type", text: row.typeName }),
     uiEl("span", { class: "search__where", text: where }),
