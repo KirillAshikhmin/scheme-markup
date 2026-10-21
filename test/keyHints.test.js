@@ -150,3 +150,44 @@ test("подсказка поиска доезжает до поля, а не л
     "сетка изображений не отдаёт свою подсказку",
   );
 });
+
+// ——— диалог забирает клавиатуру у всех трёх поверхностей (таск 222, D74) ——
+//
+// Дефект D74 оказался **не дефектом**, и это нашлось проверкой: исполнитель
+// таска 220 прочитал тело `onKeyDown` чертежа, не увидел там `uiDialogDepth`
+// и записал находку, а вопрос этот стоит уровнем выше — в `active()`, куда
+// обработчик упирается первой же строкой. Живой прогон это и показывал: при
+// открытом окне «Что добавить» «+» не делает ничего.
+//
+// Раз проверять было нечем, тест и заведён: правило сборки «пока
+// `uiDialogDepth() > 0`, клавиатура принадлежит диалогу» держалось на одном
+// комментарии, и первый же рефакторинг `active()` снял бы его молча.
+test("пока открыт диалог, клавиатура не принадлежит ни плану, ни чертежу, ни объёму", () => {
+  // План спрашивает первым делом в самом обработчике.
+  const canvas = read("canvas.js");
+  const down = canvas.slice(canvas.indexOf("function canvasKeyDown"), canvas.indexOf("function canvasKeyUp"));
+  const dialogAt = down.indexOf("uiDialogDepth() > 0");
+  assert.ok(dialogAt >= 0, "план перестал спрашивать про диалог");
+  assert.ok(
+    dialogAt < down.indexOf("uiTypingTarget(event.target)"),
+    "порядок сбился: поле набора спрашивается раньше диалога",
+  );
+
+  // Чертёж и объём спрашивают через «моя ли это минута»: обработчик упирается
+  // в сторожа первой строкой, а сторож спрашивает и свой экран, и диалог.
+  // Имя сторожа у них разное (`active` и `ours`), и это не важно — важно, что
+  // он один и что в нём оба вопроса.
+  for (const [name, screen] of [
+    [join("panels", "workshop.js"), '"drawing"'],
+    [join("panels", "volume.js"), '"volume"'],
+  ]) {
+    const text = read(name);
+    const handler = text.slice(text.indexOf("function onKeyDown"));
+    const guard = /^function onKeyDown\(event\) \{\s*if \(!(\w+)\(\)\) return;/.exec(handler);
+    assert.ok(guard, name + ": клавиши перестали упираться в сторожа первой же строкой");
+    const body = text.slice(text.indexOf("function " + guard[1] + "()"));
+    const line = body.slice(0, body.indexOf("}")).split("\n").find((item) => item.includes("screenMode() === " + screen));
+    assert.ok(line, name + ": сторож перестал спрашивать про свой экран");
+    assert.match(line, /uiDialogDepth\(\) === 0/, name + ": диалог перестал забирать клавиатуру");
+  }
+});
