@@ -6450,3 +6450,93 @@ test("снизу сквозь перекрытие не видно верхне�
   assert.ok(shots > 200, "кадр пуст — стенд ничего не проверяет: " + shots);
   assert.equal(through, 0, "сквозь потолок видно второй этаж в " + through + " точках из " + shots);
 });
+
+// ——— «Снять крышу» (таск 212, требование G319) ——————————————————————————
+
+test("крыша снимается второй стороной потолка, и больше ничем", () => {
+  const scene = roomScene();
+  const closed = volumeScene(scene.project, scene.schemeId);
+  const open = volumeScene(scene.project, scene.schemeId, { roofOff: true });
+  // Граней ровно столько же: снимается не грань, а её вторая сторона.
+  assert.equal(open.faces.length, closed.faces.length, "ни одной грани не прибавилось и не убавилось");
+  const ceilingOf = (built) => built.faces.find((face) => face.rgb === VOLUME_CEILING_RGB && face.n.z < 0 && face.p[0].z > 0);
+  assert.equal(ceilingOf(closed).both, true, "с крышей потолок двусторонний");
+  assert.equal(ceilingOf(open).both, false, "без крыши у потолка одна сторона — нижняя");
+  // Вид изнутри не меняется: потолок на месте, на той же высоте и той же
+  // нормалью вниз.
+  assert.deepEqual(ceilingOf(open).p, ceilingOf(closed).p, "потолок остался там же");
+  assert.equal(ceilingOf(open).n.z, -1, "и смотрит вниз, как смотрел");
+  // Пол, плита и кромка не трогаются вовсе: снизу и сбоку дом остаётся глухим.
+  const flat = (built, rgb, up) =>
+    built.faces.filter((face) => face.rgb === rgb && (up ? face.n.z > 0 : face.n.z < 0)).length;
+  assert.equal(flat(open, VOLUME_FLOOR_RGB, true), flat(closed, VOLUME_FLOOR_RGB, true));
+  assert.equal(
+    open.faces.filter((face) => face.rgb === VOLUME_SLAB_RGB).length,
+    closed.faces.filter((face) => face.rgb === VOLUME_SLAB_RGB).length,
+  );
+  // Пятна солнца ложатся на пол — их отметка не касается.
+  assert.equal(open.sunSpots.length, closed.sunSpots.length);
+});
+
+test("со снятой крышей сверху видно планировку, а снизу потолок на месте", () => {
+  const house = houseScene();
+  const plan = volumeFloorPlan(house.project, house.first);
+  const base = plan.floors[1].baseMm;
+  const open = volumeStackScene(house.project, plan, () => ({ roofOff: true }));
+  const named = byFloor(open, base);
+  const box = { width: 300, height: 220 };
+  const bounds = open.stackMm.boundsMm;
+  const above = {
+    at: { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2, z: open.stackMm.topMm + 3000 },
+    yaw: 0,
+    pitch: -Math.PI / 2 + 0.001,
+  };
+  // Сверху видно **нутро верхнего этажа**: его пол, стены и вещи. Нижний
+  // по-прежнему закрыт — его прячет пол верхнего, а не крыша.
+  let inside = 0;
+  let lower = 0;
+  let shots = 0;
+  for (let y = 10; y < box.height - 10; y += 6) {
+    for (let x = 10; x < box.width - 10; x += 6) {
+      const here = paintedAt(named, above, box, x, y);
+      const last = here[here.length - 1];
+      if (!last || last.layer === VOLUME_LAYER_BASE) continue;
+      shots += 1;
+      if (last.pick === "низ") lower += 1;
+      // Потолок верхнего этажа сверху больше не рисуется — значит последним
+      // лежит то, что под ним.
+      if (last.pick === "верх") inside += 1;
+    }
+  }
+  assert.ok(shots > 200, "дом не попал в кадр: " + shots);
+  assert.ok(inside > 0, "сверху не видно верхнего этажа вовсе — крыша не снялась");
+  assert.equal(lower, 0, "нижний этаж сверху виден — его закрывает пол верхнего, а не крыша");
+  // Снизу потолок на месте: тот же прогон, что ловил D63.
+  const start = volumeStart(open);
+  const below = {
+    at: { x: start.x, y: start.y, z: VOLUME_EYE_MM },
+    yaw: start.yaw,
+    pitch: Math.PI / 2 - 0.2,
+  };
+  let through = 0;
+  let seen = 0;
+  for (let y = 10; y < box.height - 10; y += 6) {
+    for (let x = 10; x < box.width - 10; x += 6) {
+      const here = paintedAt(named, below, box, x, y);
+      const last = here[here.length - 1];
+      if (!last) continue;
+      seen += 1;
+      if (last.pick === "верх") through += 1;
+    }
+  }
+  assert.ok(seen > 200);
+  assert.equal(through, 0, "со снятой крышей снизу стало видно второй этаж в " + through + " точках");
+});
+
+test("G68: отметка «снять крышу» не меняет объект", () => {
+  const house = houseScene();
+  const before = JSON.stringify(house.project);
+  volumeScene(house.project, house.first, { roofOff: true });
+  volumeStackScene(house.project, volumeFloorPlan(house.project, house.first), () => ({ roofOff: true }));
+  assert.equal(JSON.stringify(house.project), before, "объект изменился — это запрещено прямо (G68)");
+});

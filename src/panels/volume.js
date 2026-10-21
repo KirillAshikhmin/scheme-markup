@@ -58,6 +58,7 @@ import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
   VOLUME_AROUND_PITCH_DEG,
+  VOLUME_CEILING_RGB,
   VOLUME_LOOK_DEG_PX,
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_POINT,
@@ -885,6 +886,10 @@ function createVolume({ api, hosts }) {
   const sceneOptions = (state, id) => ({
     marks: sceneMarks(state, id),
     openDoorIds: openDoors,
+    // «Снять крышу» (таск 212, G319): отметка окна параметров. Доезжает до
+    // **каждого** этажа стопки — крыша снимается у всех, а не только у
+    // верхнего; разбор у самой грани в `volumeScene`.
+    roofOff: volumeParamsRead().roofOff === true,
     // Спрятанные вещи чертежа (таск 154, G223): «Скрытое не видно на чертеже
     // и в объёме». Отметка приходит из сеанса, в объект не пишется.
     hiddenObjectIds: state.objectsShown === false ? sceneObjectIds(state, id) : state.hiddenObjectIds,
@@ -1624,8 +1629,19 @@ function createVolume({ api, hosts }) {
     // и пятнами, и собрать их можно только заново. Сверяется это с тем, что в
     // сцене уже лежит, а не с отметкой: отметка бывает взведена и там, где
     // стопки нет (у открытой схемы не задан этаж), и тогда пересобирать нечего.
+    //
+    // **«Снять крышу»** (таск 212) — вторая такая отметка: она меняет грань
+    // потолка, то есть саму сцену. Сверяется она так же — с тем, что в сцене
+    // уже лежит: двусторонний потолок значит, что крыша на месте.
     const state = getState();
-    if (stacking(state) !== Boolean(scene.stackMm)) {
+    const roofOff = volumeParamsRead().roofOff === true;
+    // Крыша в сцене есть, если **хоть один** потолок двусторонний. Искать
+    // «первую грань потолочного цвета» нельзя: тем же цветом крашен низ плиты,
+    // и он односторонний всегда — на нём сверка и застревала, а отметка не
+    // доезжала до кадра.
+    const roofed = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.both === true);
+    const ceilings = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.n.z < 0);
+    if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed)) {
       setScene(state);
       rebuildOverlay();
       stanceRecheck();

@@ -8501,6 +8501,13 @@ const strings = {
     floorsNoOwn:
         "У открытой схемы этаж не задан, и места в стопке у неё нет. " +
         "Выберите этаж из списка или задайте номер в свойствах этой схемы.",
+    // «Снять крышу» (таск 212, G319): вернуть кукольный дом, не теряя
+    // непрозрачности, ради которой делались таски 209 и 211.
+    roofOff: "Снять крышу",
+    roofOffHint:
+      "Верхнее перекрытие перестаёт рисоваться сверху, и в обзоре видно планировку — как в кукольном доме. " +
+      "Снизу всё остаётся как было: потолок над головой на месте, и сквозь перекрытие ничего не просвечивает. " +
+      "В стопке этажей открывается каждый, но смотреть внутрь нижнего мешает пол верхнего — выберите нужный этаж выше.",
     floorsDouble: "Этаж {floor} нарисован дважды — в стопке стоит «{name}», вторую схему открывайте отдельно.",
     // Сводка (знак «i») в стопке говорит, что в кадре не один этаж: числа стен и
     // меток в ней — про тот этаж, на котором человек стоит, и промолчать об
@@ -57882,7 +57889,13 @@ function volumeScene(project, schemeId, options = {}) {
       volumeFace(
         [...room.pointsMm].reverse().map((point) => volumeAt(point, room.heightMm)),
         VOLUME_CEILING_RGB,
-        { normal: { x: 0, y: 0, z: -1 }, both: true },
+        // **«Снять крышу»** (таск 212, требование G319) — это ровно вторая
+        // сторона потолка, и ничего больше. Отметка снята (умолчание) —
+        // потолок двусторонний, дом сверху глухой, как с таска 211. Отметка
+        // стоит — у потолка остаётся одна сторона, нижняя: изнутри он тот же
+        // до грани, а сверху отбор по нормали его не рисует вовсе, и видно
+        // планировку. Ни одной грани при этом не прибавляется и не убавляется.
+        { normal: { x: 0, y: 0, z: -1 }, both: options.roofOff !== true },
       ),
     );
   }
@@ -62476,6 +62489,17 @@ const VOLUME_SPEED_SETTING = "volumeClockSpeed";
 // Умолчание — **снято**: у того, кто галку не ставил, объём показывает ровно
 // то, что показывал, — открытую схему.
 const VOLUME_FLOORS_SETTING = "volumeFloorsAll";
+// ——— «Снять крышу» (таск 212, требование G319) ——————————————————————————
+//
+// С таска 211 дом сверху глухой: потолок стал двусторонним, и это то, что
+// просил заказчик («перекрытия не должны быть прозрачными»). Вместе с
+// просвечивающей крышей исчез **кукольный дом** — способ посмотреть планировку
+// сверху, не выходя из объёма. Отметка возвращает его по требованию.
+//
+// Умолчание — **снято**: крыша на месте, и у того, кто галок не ставил, ничего
+// не меняется. Живёт она в настройках браузера рядом с миникартой и фоном: это
+// вид, а не свойство дома (G68).
+const VOLUME_ROOF_SETTING = "volumeRoofOff";
 const VOLUME_SMOOTH_SETTING = "volumeSmoothSky";
 const VOLUME_GHOST_SETTING = "volumeThroughWalls";
 
@@ -62490,6 +62514,7 @@ const params = {
   kind: VOLUME_BACKDROP_DEFAULT,
   minimap: true,
   floorsAll: false,
+  roofOff: false,
   speed: VOLUME_CLOCK_SPEED_DEFAULT,
   clock: null,
   smooth: false,
@@ -62543,6 +62568,7 @@ function volumeParamsLoad() {
   // двумя: `saved !== true` — это «галки не ставили».
   for (const [key, name] of [
     [VOLUME_FLOORS_SETTING, "floorsAll"],
+    [VOLUME_ROOF_SETTING, "roofOff"],
     [VOLUME_SMOOTH_SETTING, "smooth"],
     [VOLUME_GHOST_SETTING, "ghost"],
   ]) {
@@ -62562,6 +62588,7 @@ function volumeParamsRead() {
     kind: params.kind,
     minimap: params.minimap,
     floorsAll: params.floorsAll,
+    roofOff: params.roofOff,
     speed: params.speed,
     clock: params.clock,
     smooth: params.smooth,
@@ -62616,6 +62643,7 @@ function volumeParamsMinimap(shown) {
 function volumeParamsFlag(name, on) {
   const keys = {
     floorsAll: VOLUME_FLOORS_SETTING,
+    roofOff: VOLUME_ROOF_SETTING,
     smooth: VOLUME_SMOOTH_SETTING,
     ghost: VOLUME_GHOST_SETTING,
   };
@@ -62840,6 +62868,11 @@ function createVolumeParams(options) {
           ],
         ),
         uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked) }),
+        // «Снять крышу» стоит здесь, а не рядом с фоном: это про **дом**, а не
+        // про картинку за окном, и спрашивают её там же, где выбирают, какой
+        // этаж показывать.
+        checkRow(strings.volume.roofOff, chosen.roofOff, (on) => volumeParamsFlag("roofOff", on)),
+        uiEl("p", { class: "tools__note", text: strings.volume.roofOffHint }),
         uiEl("p", { class: "tools__label", text: strings.volume.backdrop }),
         uiEl(
           "div",
@@ -63852,6 +63885,10 @@ function createVolume({ api, hosts }) {
   const sceneOptions = (state, id) => ({
     marks: sceneMarks(state, id),
     openDoorIds: openDoors,
+    // «Снять крышу» (таск 212, G319): отметка окна параметров. Доезжает до
+    // **каждого** этажа стопки — крыша снимается у всех, а не только у
+    // верхнего; разбор у самой грани в `volumeScene`.
+    roofOff: volumeParamsRead().roofOff === true,
     // Спрятанные вещи чертежа (таск 154, G223): «Скрытое не видно на чертеже
     // и в объёме». Отметка приходит из сеанса, в объект не пишется.
     hiddenObjectIds: state.objectsShown === false ? sceneObjectIds(state, id) : state.hiddenObjectIds,
@@ -64591,8 +64628,19 @@ function createVolume({ api, hosts }) {
     // и пятнами, и собрать их можно только заново. Сверяется это с тем, что в
     // сцене уже лежит, а не с отметкой: отметка бывает взведена и там, где
     // стопки нет (у открытой схемы не задан этаж), и тогда пересобирать нечего.
+    //
+    // **«Снять крышу»** (таск 212) — вторая такая отметка: она меняет грань
+    // потолка, то есть саму сцену. Сверяется она так же — с тем, что в сцене
+    // уже лежит: двусторонний потолок значит, что крыша на месте.
     const state = getState();
-    if (stacking(state) !== Boolean(scene.stackMm)) {
+    const roofOff = volumeParamsRead().roofOff === true;
+    // Крыша в сцене есть, если **хоть один** потолок двусторонний. Искать
+    // «первую грань потолочного цвета» нельзя: тем же цветом крашен низ плиты,
+    // и он односторонний всегда — на нём сверка и застревала, а отметка не
+    // доезжала до кадра.
+    const roofed = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.both === true);
+    const ceilings = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.n.z < 0);
+    if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed)) {
       setScene(state);
       rebuildOverlay();
       stanceRecheck();
