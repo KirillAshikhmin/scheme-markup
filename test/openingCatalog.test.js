@@ -52,6 +52,8 @@ import {
   addScheme,
   addWall,
   createProject,
+  openingArchDropMm,
+  openingArchGeometry,
   openingCanGlaze,
   openingDoorStates,
   openingDoorStep,
@@ -411,6 +413,56 @@ test("у ворот полотно делится панелями, а у рол
   assert.equal(openingFaceGrid({ kind: "doorFolding", heightMm: 2100 }).xs.length, 3);
   // Чужой вид лица не выдумывает.
   assert.deepEqual(openingFaceGrid({ kind: "люк", heightMm: 800 }), { xs: [], ys: [] });
+});
+
+// ——— дуга арки (таск 219, G329) ——————————————————————————————————————————
+
+test("G329: у арки дуга, и только у неё", () => {
+  for (const kind of OPENING_KINDS) {
+    const sizes = openingCatalogDefaults(kind);
+    const arch = openingArchGeometry({ kind, ...sizes });
+    assert.equal(Boolean(arch), kind === "arch", kind + ": дуга взялась не у арки");
+  }
+  // Умолчание каталога — 1200 × 2100: дуга полуциркульная, радиус в половину
+  // ширины, пята на 1500 от пола.
+  const usual = { kind: "arch", widthMm: 1200, heightMm: 2100 };
+  assert.deepEqual(openingArchGeometry(usual), { riseMm: 600, radiusMm: 600 });
+  assert.equal(openingArchDropMm(usual, 0.5), 0, "в середине дуга касается верха проёма");
+  assert.equal(openingArchDropMm(usual, 0), 600, "у косяка дуга опускается на подъём");
+  assert.equal(openingArchDropMm(usual, 1), 600);
+  // На четверти ширины полуокружность опускается на R − √(R² − (R/2)²).
+  assert.ok(Math.abs(openingArchDropMm(usual, 0.25) - (600 - Math.sqrt(600 * 600 - 300 * 300))) < 1e-9);
+  // Дуга симметрична: слева и справа одно и то же.
+  for (const part of [0.1, 0.3, 0.45]) {
+    assert.ok(Math.abs(openingArchDropMm(usual, part) - openingArchDropMm(usual, 1 - part)) < 1e-9, String(part));
+  }
+});
+
+test("G329: проём ниже своей полуширины получает сегментную дугу, а не обрезанную", () => {
+  // 3000 × 1400: полуциркульной нужно 1500 подъёма, а всего высоты 1400 —
+  // пята ушла бы ниже пола. Подъём зажат половиной высоты: 700 на дугу и 700
+  // на прямые откосы.
+  const low = { kind: "arch", widthMm: 3000, heightMm: 1400 };
+  const arch = openingArchGeometry(low);
+  assert.equal(arch.riseMm, 700);
+  assert.ok(arch.radiusMm > 1500, "сегментная дуга положе полуциркульной: " + arch.radiusMm);
+  // Та же окружность: на косяке дуга опускается ровно на подъём.
+  assert.ok(Math.abs(openingArchDropMm(low, 0) - 700) < 1e-9);
+  assert.ok(Math.abs(openingArchDropMm(low, 0.5)) < 1e-9);
+  // Пята никогда не уходит ниже середины проёма — ни на каком отношении сторон.
+  for (const [width, height] of [[900, 2100], [1200, 2100], [2500, 2250], [3000, 1400], [4000, 800], [600, 3000]]) {
+    const some = { kind: "arch", widthMm: width, heightMm: height };
+    const geometry = openingArchGeometry(some);
+    assert.ok(geometry.riseMm <= height / 2 + 1e-9, width + "×" + height + ": подъём съел больше половины высоты");
+    assert.ok(geometry.riseMm <= width / 2 + 1e-9, width + "×" + height + ": дуга выше полуциркульной");
+    assert.ok(geometry.riseMm > 0);
+    // Радиус той же окружности: на косяке она опускается ровно на подъём.
+    assert.ok(Math.abs(openingArchDropMm(some, 0) - geometry.riseMm) < 1e-6, width + "×" + height);
+  }
+  // Вырожденный проём дуги не получает вовсе — и не падает.
+  assert.equal(openingArchGeometry({ kind: "arch", widthMm: 0, heightMm: 2100 }), null);
+  assert.equal(openingArchGeometry({ kind: "arch", widthMm: 1200, heightMm: 0 }), null);
+  assert.equal(openingArchDropMm({ kind: "opening", widthMm: 900, heightMm: 2100 }, 0.3), 0);
 });
 
 // ——— сквозь что ходят ————————————————————————————————————————————————————

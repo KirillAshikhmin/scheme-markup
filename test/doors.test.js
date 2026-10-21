@@ -68,6 +68,8 @@ import {
 import { strings } from "../src/strings.js";
 
 const PRINTS_BEFORE = JSON.parse(readFileSync(new URL("./fixtures/openings-before.json", import.meta.url), "utf8"));
+// Кадр развёртки **после** правки G329 (таск 219) — см. разбор у теста ниже.
+const PRINTS_AFTER = JSON.parse(readFileSync(new URL("./fixtures/openings-after-g329.json", import.meta.url), "utf8"));
 
 // Журнал вызовов холста: и вызовы, и присвоенные краски. Числа округляются до
 // сотой — иначе отпечаток падал бы от разницы в последнем бите.
@@ -303,13 +305,37 @@ test("на развёртке у стеклянной двери рама по �
 });
 
 // ——— G68: прежние проёмы рисуются ровно как прежде ——————————————————————
+//
+// ——— ВНИМАНИЕ: отпечаток развёртки обновлён **по требованию заказчика** ———
+//
+// Таск 219, требование G329: «У арки дорисуй дугу и на развёртке и в объёме».
+// До него арка на листе была прямоугольником — тем же, что проём, — и таск 215
+// этого не трогал нарочно: правка меняет кадр уже размеченного объекта, а это
+// решает заказчик, а не исполнитель. Он решил.
+//
+// Поэтому здесь **два** отпечатка, и оба нужны:
+//
+//   `openings-before.json` — кадр до таска 219. По нему по-прежнему сверяется
+//     **план**: на плане не изменилось ничего, у арки там был и остался
+//     пунктир. Файл не перезаписан и перезаписывать его нельзя.
+//   `openings-after-g329.json` — кадр развёртки после правки. Отличие от
+//     прежнего названо здесь числами: ровно одна дуга и ровно шесть лишних
+//     вызовов (`strokeRect` арки заменён контуром «откосы и дуга»).
+//
+// Следующему исполнителю: если этот тест покраснел — это **не** разрешение
+// обновить отпечаток ещё раз. Кадр прежнего объекта меняется только по слову
+// заказчика, с номером требования.
 
-test("G68: кадр прежних проёмов — вызов в вызов тот же, что до стеклянной двери", () => {
+test("G68: план прежних проёмов — вызов в вызов тот же, что до стеклянной двери", () => {
   const scene = wallScene(LEGACY_SPECS);
   scene.project.openings.forEach((opening, index) => {
     const key = "plan:" + opening.kind + ":" + index;
     assert.deepEqual(planLog(scene, opening), PRINTS_BEFORE[key], key);
   });
+});
+
+test("G329: на развёртке у арки появилась дуга — и больше не изменилось ничего", () => {
+  const scene = wallScene(LEGACY_SPECS);
   const log = [];
   drawElevation(scribe(log), wallElevation(scene.project, scene.wall.id, "right"), {
     x: 0,
@@ -317,7 +343,20 @@ test("G68: кадр прежних проёмов — вызов в вызов �
     width: 800,
     height: 400,
   });
-  assert.deepEqual(log, PRINTS_BEFORE.elevation, "развёртка прежних проёмов не изменилась");
+  assert.deepEqual(log, PRINTS_AFTER.elevation, "развёртка разошлась с отпечатком таска 219");
+  // Чем новый кадр отличается от прежнего — числами, а не на словах.
+  const arcs = (calls) => calls.filter((call) => call.startsWith("arc(")).length;
+  assert.equal(arcs(PRINTS_BEFORE.elevation), 0, "до G329 дуг на листе не было");
+  assert.equal(arcs(PRINTS_AFTER.elevation), 1, "дуга одна — у единственной арки");
+  // Шесть вызовов: прямоугольник арки заменён контуром из шести (beginPath,
+  // moveTo, lineTo, arc, lineTo, closePath) плюс свой `stroke`, минус сам
+  // `strokeRect`. Разойдись это число — значит на лист залезло что-то ещё.
+  assert.equal(PRINTS_AFTER.elevation.length - PRINTS_BEFORE.elevation.length, 6);
+  assert.equal(
+    PRINTS_AFTER.elevation.filter((call) => call.startsWith("strokeRect(")).length,
+    PRINTS_BEFORE.elevation.filter((call) => call.startsWith("strokeRect(")).length - 1,
+    "прямоугольник у арки ровно один и пропал именно он",
+  );
 });
 
 test("G68: прежний проём не обзавёлся ни одним новым полем", () => {
