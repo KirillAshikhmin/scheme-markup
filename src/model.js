@@ -1247,6 +1247,10 @@ function requireMark(project, markId) {
  * блока), а каноническая пара функций была приватной в `render.js` — и поэтому
  * её переписывали заново вместо того, чтобы позвать. Модель — нижний слой:
  * позвать её может любой, а она не зовёт никого.
+ *
+ * **Запасной размер — обещание, а не правда**, и однажды оно становится
+ * правдой: у схемы появляется свой размер. Всё, что было поставлено до этого,
+ * переносит `resizeSchemePlan` — см. её абзац ниже (дефект D67).
  */
 export const SCHEME_FALLBACK_PX = 1000;
 
@@ -1256,6 +1260,100 @@ export function schemeWidthPx(scheme) {
 
 export function schemeHeightPx(scheme) {
   return scheme && scheme.height > 0 ? scheme.height : SCHEME_FALLBACK_PX;
+}
+
+/**
+ * **У плана появился (или сменился) свой размер — и всё остаётся на своих
+ * пикселях плана.** Дефект D67, найден исполнителем таска 217.
+ *
+ * Схема без подложки заводится нулями, и доля метки до этой минуты считалась
+ * от запасного квадрата `SCHEME_FALLBACK_PX` — тысяча на тысячу. Первая стена
+ * (или первая вещь) заводит схеме лист 4000 × 3000, и та же доля начинает
+ * значить другое место: 0,56 была 560-м пикселем квадрата, а стала 2240-м
+ * пикселем листа. Замер таска 217: три метки в 60–70 точках друг от друга
+ * оказались в 2,4 м и 1,2 м, да ещё и с перекошенной пропорцией — лист 4:3
+ * против квадрата 1:1.
+ *
+ * **Правило пересчёта одно: расстояние в пикселях плана не меняется.** План
+ * растёт вокруг своей середины, и доля каждой точки пересчитывается так, чтобы
+ * её отступ от середины в пикселях остался прежним:
+ *
+ *     доля′ = ½ + (доля − ½) · прежний размер / новый
+ *
+ * Отсюда и главное свойство: между любыми двумя точками было столько же
+ * пикселей плана, сколько стало. Почему мерить надо в пикселях, а не в долях:
+ * в пикселях плана задано всё остальное — размер знака, смещение подписи, шаг
+ * блока, порог попадания по клику. Сохрани долю — метки остались бы на своих
+ * долях, а подписи, знаки и блоки, вчетверо мельче плана, разъехались бы по
+ * всему листу; сохрани пиксель — не меняется ни одно из этих чисел, и
+ * пересчитывать их не приходится вовсе. Взаимная геометрия точек при этом
+ * точная: каждая ось делится на свой множитель, и прямоугольник остаётся
+ * прямоугольником, а не перекашивается 4:3.
+ *
+ * Почему вокруг середины, а не от угла: середина листа — это начало координат
+ * чертежа (`WORKSHOP_ORIGIN_AT`), то есть то самое место, вокруг которого
+ * человек в эту минуту рисует первые стены. От угла метки уехали бы за
+ * пятнадцать метров от чертежа — формально «на своём пикселе», а по делу в
+ * пустое поле.
+ *
+ * Пересчитывается **всё, что задано долями этого плана**: точки меток, точки
+ * контуров помещений, направляющие (у горизонтальной доля — от высоты, у
+ * вертикальной — от ширины), точки калибровки и привязка чертежа. Калибровку
+ * это не портит: пиксельная длина отрезка и метры те же — значит и px/м тот
+ * же. Пиксельные величины (смещения подписей) не трогаются ни одна — ровно
+ * потому, что пиксель остался собой.
+ *
+ * Размер тот же — возвращается **тот же объект по ссылке**: ни шага истории,
+ * ни `updatedAt` на пустом месте (G68).
+ */
+export function resizeSchemePlan(project, schemeId, { width, height } = {}) {
+  const scheme = requireScheme(project, schemeId);
+  const nextWidth = Math.round(Number(width));
+  const nextHeight = Math.round(Number(height));
+  if (!(nextWidth > 0) || !(nextHeight > 0)) throw modelError("planSizeInvalid");
+  // Доли считались от того размера, который за схемой числился: у схемы без
+  // своего — от запасного.
+  const kx = schemeWidthPx(scheme) / nextWidth;
+  const ky = schemeHeightPx(scheme) / nextHeight;
+  if (kx === 1 && ky === 1) return { project, scheme, marks: 0, outlines: 0, changed: false };
+  const keep = (value, k) => 0.5 + (Number(value) - 0.5) * k;
+  const keepPoint = (point) => ({ x: clampFraction(keep(point.x, kx)), y: clampFraction(keep(point.y, ky)) });
+  let next = updateScheme(project, schemeId, { width: nextWidth, height: nextHeight }).project;
+  const marks = project.marks.filter((mark) => mark.schemeId === schemeId);
+  for (const mark of marks) {
+    next = updateMark(next, mark.id, { points: (mark.points || []).map(keepPoint) }).project;
+  }
+  const outlines = outlinesOf(project).filter((outline) => outline.schemeId === schemeId);
+  for (const outline of outlines) {
+    next = updateOutline(next, outline.id, { points: (outline.points || []).map(keepPoint) }).project;
+  }
+  const guides = schemeGuides(project, schemeId);
+  if (guides.length > 0) {
+    next = withGuides(
+      next,
+      schemeId,
+      guides.map((guide) => ({ ...guide, at: clampFraction(keep(guide.at, guide.axis === "h" ? ky : kx)) })),
+    );
+  }
+  const scale = planScaleOf(project, schemeId);
+  if (scale) {
+    next = setPlanScale(next, schemeId, { a: keepPoint(scale.a), b: keepPoint(scale.b), meters: scale.meters }).project;
+  }
+  const origin = planOriginOf(project, schemeId);
+  if (origin) {
+    // Якорь чертежа к краю плана **не** прижимается — причина у `setPlanOrigin`.
+    next = setPlanOrigin(next, schemeId, {
+      at: { x: keep(origin.at.x, kx), y: keep(origin.at.y, ky) },
+      turn: origin.turn,
+    }).project;
+  }
+  return {
+    project: next,
+    scheme: findScheme(next, schemeId),
+    marks: marks.length,
+    outlines: outlines.length,
+    changed: true,
+  };
 }
 
 export function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
