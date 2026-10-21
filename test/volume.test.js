@@ -100,6 +100,7 @@ import {
   VOLUME_AROUND_TILT_MIN,
   VOLUME_HILLS,
   VOLUME_FLOOR_LAP,
+  VOLUME_CEILING_RGB,
   VOLUME_FLOOR_RGB,
   VOLUME_LAND_RGB,
   VOLUME_MOUNTAINS,
@@ -242,7 +243,6 @@ import {
   volumeStairLanding,
   VOLUME_HEAD_MM,
   VOLUME_LANDING_GAP_MM,
-  volumeFloorLayer,
   volumeFloorFaces,
   volumeFloorTopMm,
   volumeWallsTopMm,
@@ -416,7 +416,13 @@ test("схема без чертежа отвечает empty, а не пуст�
 test("у комнаты есть пол, потолок и стены с толщиной", () => {
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
-  const ground = built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND);
+  // Полы, потолки и плита с таска 211 лежат в ярусе тел: порядок им считает
+  // дерево. Поэтому считаются они не по ярусу, а по тому, чем они являются —
+  // по цвету и направлению нормали.
+  const flat = (rgb, up) =>
+    built.faces.filter((face) => face.rgb === rgb && (up ? face.n.z > 0 : face.n.z < 0));
+  const ground = [...flat(VOLUME_FLOOR_RGB, true), ...flat(VOLUME_CEILING_RGB, false)];
+  assert.equal(built.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND).length, 0, "ярус полов пуст");
   // Пол и потолок помещения и полоса пола под каждой из четырёх стен (она
   // закрывает порог в проёме и щель между контуром и гранью стены, D37).
   // Тени стен (D43) в сцене больше не лежат гранями: с таска 181 солнце ходит
@@ -467,8 +473,21 @@ test("у комнаты есть пол, потолок и стены с тол�
   //
   // Кромки плит (таск 209) стоят в том же ярусе: по четыре на пол комнаты и на
   // каждую полосу под стеной.
-  const body = built.faces.filter((face) => face.layer === VOLUME_LAYER_BODY && face.rgb !== VOLUME_SLAB_RGB);
+  const body = built.faces.filter(
+    (face) =>
+      face.layer === VOLUME_LAYER_BODY &&
+      face.rgb !== VOLUME_SLAB_RGB &&
+      face.rgb !== VOLUME_FLOOR_RGB &&
+      face.rgb !== VOLUME_CEILING_RGB,
+  );
   assert.equal(body.length, 4 * (2 + 1), "по три грани на стену: две стороны и верх");
+  // Все горизонтали перекрытия идут в дерево порядка (таск 211, D62/D63):
+  // иначе тела любого этажа рисовались бы поверх них.
+  assert.ok(
+    ground.every((face) => face.layer === VOLUME_LAYER_BODY),
+    "пол и потолок выкладывает дерево, а не ярус",
+  );
+  assert.equal(built.order.count >= ground.length, true, "и они в дереве");
   assert.equal(
     built.faces.filter((face) => face.rgb === VOLUME_SLAB_RGB).length,
     4 + 4 * 4,
@@ -492,7 +511,7 @@ test("тень дома не просвечивает сквозь пол ни �
     ...built,
     order: undefined,
     faces: built.faces.map((face) =>
-      face.layer === VOLUME_LAYER_GROUND && face.n.z > 0 ? { ...face, markId: "пол" } : face,
+      face.rgb === VOLUME_FLOOR_RGB && face.n.z > 0 ? { ...face, markId: "пол" } : face,
     ),
   };
   const box = { width: 972, height: 778 };
@@ -515,7 +534,10 @@ test("тень дома не просвечивает сквозь пол ни �
     // иначе стенд проверял бы сам себя.
     const shadow = volumeShadowFaces(built.shadowBoxes, mood.shadow).map((face) => ({ ...face, markId: "тень" }));
     const frame = volumeFrame(named, camera, box, shadow, mood.tint);
-    const ground = frame.filter((polygon) => !polygon.stroke && polygon.layer <= VOLUME_LAYER_GROUND);
+    // С таска 211 пол лежит в ярусе тел (его порядок считает дерево), а тень
+    // осталась ниже — на земле. Поэтому в разбор идут все незаштрихованные
+    // многоугольники, а не только нижние ярусы.
+    const ground = frame.filter((polygon) => !polygon.stroke);
     const floor = ground.find((polygon) => polygon.pick === "пол");
     assert.ok(floor, "пол комнаты в кадре — иначе стенд ничего не проверяет");
     let x = 0;
@@ -534,12 +556,17 @@ test("тень дома не просвечивает сквозь пол ни �
       // тень **ближе** пола, то есть по дальности она бы его и закрасила.
       if (shadows.some((polygon) => polygon.depth < floor.depth)) nearerSomewhere = true;
     }
-    const last = here[here.length - 1];
-    assert.equal(last.pick, "пол", "в " + hour + ":00 поверх пола легло что-то ещё: ярус " + last.layer);
-    assert.ok(
-      shadows.every((polygon) => polygon.layer < floor.layer),
-      "тень обязана лежать ярусом ниже пола, а не рядом с ним",
-    );
+    // Тень ложится **раньше пола**, и проверяется это порядком в кадре, а не
+    // ярусом: с таска 211 пол лежит в ярусе тел, а тень осталась на земле.
+    // Поверх пола может лечь стена или метка — это законно; незаконно, чтобы
+    // поверх него легла тень.
+    for (const shade of shadows) {
+      assert.ok(
+        here.indexOf(shade) < here.indexOf(floor),
+        "в " + hour + ":00 тень легла поверх пола (D49)",
+      );
+    }
+    assert.ok(floor.layer > VOLUME_LAYER_SHADOW, "пол рисуется после тени");
   }
   assert.ok(nearerSomewhere, "ни в один час тень не оказалась ближе пола — стенд перестал ловить D49");
 });
@@ -667,8 +694,10 @@ test("через окно солнце кладёт на пол пятно, и �
   const faces = volumeSunSpotFaces(built.sunSpots, { az: 90, rise: 45, fade: 1 });
   assert.equal(faces.length, 1, "южное окно светит, когда солнце на юге");
   const spot = faces[0];
-  assert.equal(spot.layer, VOLUME_LAYER_SUN, "ярус у пятна свой");
-  assert.ok(VOLUME_LAYER_GROUND < VOLUME_LAYER_SUN && VOLUME_LAYER_SUN < VOLUME_LAYER_BODY, "выше полов, ниже тел");
+  // С таска 211 у пятна **ярус тел**: оно лежит на полу, а пол выкладывает
+  // дерево порядка. Прежний собственный ярус (выше полов, ниже тел) потерял
+  // смысл вместе с ярусом полов — место в очереди пятну считает обход.
+  assert.equal(spot.layer, VOLUME_LAYER_BODY, "пятно выкладывает дерево вместе с полом");
   assert.ok(spot.flat, "пятно не затеняется лампой сцены: его светлота и есть свет");
   assert.ok(spot.n.z > 0, "пятно смотрит вверх");
   assert.ok(
@@ -862,7 +891,7 @@ test("в кадре пятно ложится поверх пола и под т
     ...built,
     order: undefined,
     faces: built.faces.map((face) =>
-      face.layer === VOLUME_LAYER_GROUND && face.n.z > 0 ? { ...face, markId: "пол" } : face,
+      face.rgb === VOLUME_FLOOR_RGB && face.n.z > 0 ? { ...face, markId: "пол" } : face,
     ),
   };
   const box = { width: 972, height: 778 };
@@ -884,7 +913,7 @@ test("в кадре пятно ложится поверх пола и под т
     const shadow = volumeShadowFaces(built.shadowBoxes, mood.shadow).map((face) => ({ ...face, markId: "тень" }));
     const spots = volumeSunSpotFaces(built.sunSpots, mood.shadow).map((face) => ({ ...face, markId: "пятно" }));
     const frame = volumeFrame(named, camera, box, [...shadow, ...spots], mood.tint);
-    const ground = frame.filter((polygon) => !polygon.stroke && polygon.layer <= VOLUME_LAYER_SUN);
+    const ground = frame.filter((polygon) => !polygon.stroke);
     const floor = ground.find((polygon) => polygon.pick === "пол");
     assert.ok(floor, "пол комнаты в кадре");
     // Точка, в которой пятно лежит: его собственная середина.
@@ -900,19 +929,37 @@ test("в кадре пятно ложится поверх пола и под т
     x /= spot.xy.length / 2;
     y /= spot.xy.length / 2;
     const here = ground.filter((polygon) => inside(polygon.xy, x, y));
-    assert.equal(here[here.length - 1].pick, "пятно", hour + ":00 — поверх пятна легло что-то ещё");
+    // Пятно лежит **на полу**: пол нарисован раньше него, и ничего между ними
+    // нет. Выше пятна в этой точке может оказаться стена, которая к камере
+    // ближе, — это законно и проверяется ниже отдельно.
     assert.ok(
-      here.some((polygon) => polygon.pick === "пол"),
-      hour + ":00 — пятно лежит не на полу, а на земле",
+      here.indexOf(floor) >= 0 && here.indexOf(floor) < here.indexOf(spot),
+      hour + ":00 — пятно лежит не на полу",
     );
     assert.ok(
-      here.every((polygon) => polygon.pick !== "тень" || polygon.layer < floor.layer),
-      "наружная тень осталась ниже пола (D49)",
+      here.every((polygon) => polygon.pick !== "тень" || here.indexOf(polygon) < here.indexOf(floor)),
+      "наружная тень осталась под полом (D49)",
     );
-    // Тела комнаты рисуются после пятна: стены и вещи его закрывают.
-    const body = frame.find((polygon) => polygon.layer === VOLUME_LAYER_BODY);
-    assert.ok(body, "тела в кадре");
-    assert.ok(frame.indexOf(spot) < frame.indexOf(body), "пятно легло после тел");
+    // Тело, которое в этой же точке **ближе** пятна, рисуется после него:
+    // порядок им обоим считает дерево, и закрывать пятно стене не запрещено.
+    for (const body of here) {
+      if (body === spot || body === floor || body.pick) continue;
+      // Земля и тень лежат ниже ярусом и рисуются раньше по правилу, а не по
+      // дальности: сравнивать с ними нечего.
+      if (body.layer !== VOLUME_LAYER_BODY) continue;
+      // Полосы пола под стенами лежат в одной плоскости с пятном: у
+      // коплоскостных граней дальность середины ничего не решает, и обход
+      // ставит их рядом. Сравниваются только тела, стоящие **над** полом.
+      if (body.fill === floor.fill) continue;
+      // Коплоскостные с полом грани (полосы, пятна соседних проёмов) стоят в
+      // очереди рядом, и дальность середины у них ничего не решает. Сравнение
+      // идёт только с теми, кто заметно ближе — то есть стоит над полом.
+      if (!(body.depth < spot.depth - 500)) continue;
+      assert.ok(
+        here.indexOf(body) > here.indexOf(spot),
+        hour + ":00 — тело ближе пятна, а нарисовано раньше него",
+      );
+    }
   }
   assert.ok(seen >= 3, "пятно попало в кадр меньше чем в трёх часах — стенд пуст");
 });
@@ -1218,7 +1265,7 @@ test("переопределение высоты комнаты доходит 
   const built = volumeScene(scene.project, scene.schemeId);
   // Вниз смотрит и низ плиты (таск 209) — потолок ищется выше нуля.
   const ceiling = built.faces.find(
-    (face) => face.layer === VOLUME_LAYER_GROUND && face.n.z < 0 && face.p[0].z > 0,
+    (face) => face.rgb === VOLUME_CEILING_RGB && face.n.z < 0 && face.p[0].z > 0,
   );
   assert.equal(ceiling.p[0].z, 3100, "потолок встал по высоте комнаты");
   // Стена рисуется до верхнего из двух своих потолков: снаружи 2700, внутри
@@ -1236,7 +1283,7 @@ test("высоты нет вовсе — рисуется умолчание, и
   const built = volumeScene(project, scene.schemeId);
   assert.deepEqual(built.notes, ["noHeight"]);
   const ceiling = built.faces.find(
-    (face) => face.layer === VOLUME_LAYER_GROUND && face.n.z < 0 && face.p[0].z > 0,
+    (face) => face.rgb === VOLUME_CEILING_RGB && face.n.z < 0 && face.p[0].z > 0,
   );
   assert.equal(ceiling.p[0].z, WALL_HEIGHT_FALLBACK_MM);
   assert.ok(volumeNotes(built)[0].includes(String(WALL_HEIGHT_FALLBACK_MM)), "число названо в строке");
@@ -1374,8 +1421,16 @@ const doorLeafOf = (built) => built.faces.find((face) => face.both && face.rgb[0
 test("дверь закрыта по умолчанию: полотно стоит в проёме, а не поперёк комнаты", () => {
   const scene = doorScene();
   const built = volumeScene(scene.project, scene.schemeId);
+  // Двусторонних граней шесть: полотно двери, четыре бруска рамы окна и
+  // **потолок** — с таска 211 он смотрит в обе стороны (снизу потолок, сверху
+  // крыша), иначе сверху дом просматривался насквозь (D62).
   const twoSided = built.faces.filter((face) => face.both);
-  assert.equal(twoSided.length, 5, "одно полотно двери и четыре бруска рамы окна");
+  assert.equal(twoSided.length, 6, "полотно двери, четыре бруска рамы окна и потолок");
+  assert.equal(
+    twoSided.filter((face) => face.rgb === VOLUME_CEILING_RGB).length,
+    1,
+    "потолок комнаты двусторонний",
+  );
   const leaf = doorLeafOf(built);
   // Стена идёт по y = −1500. Закрытое полотно лежит вдоль неё: от стены оно не
   // отходит, а проём перекрывает по всей ширине.
@@ -1669,7 +1724,7 @@ test("грань, пересекающая плоскость камеры, от
   assert.equal(volumeClipNear(points.map((point) => ({ ...point, z: -500 }))).length, 0);
 });
 
-test("в кадре пол и потолок лежат раньше стен, а дальнее раньше ближнего", () => {
+test("в кадре плита ложится первой, а полы и потолки выкладывает дерево (T211)", () => {
   const scene = roomScene();
   const built = volumeScene(scene.project, scene.schemeId);
   const box = { width: 1200, height: 700 };
@@ -1681,25 +1736,22 @@ test("в кадре пол и потолок лежат раньше стен, �
     box,
   );
   assert.ok(frame.length > 3, "внутри комнаты видно не меньше пола, потолка и двух стен: " + frame.length);
-  assert.ok(frame.some((polygon) => polygon.layer === VOLUME_LAYER_GROUND), "пол и потолок в кадре");
+  // **Правило порядка сменилось в таске 211** (дефекты D62 и D63). Полы и
+  // потолки лежали своим ярусом — ниже тел, — и потому не закрывали ни одного
+  // тела: сквозь перекрытие было видно и сверху, и снизу. Теперь они в ярусе
+  // тел и в дереве порядка, а по дальности выкладывается только то, что под
+  // ними: земляная плита.
   assert.equal(frame[0].layer, VOLUME_LAYER_BASE, "плита ложится первой");
-  const firstBody = frame.findIndex((polygon) => polygon.layer === VOLUME_LAYER_BODY);
-  assert.ok(
-    frame.slice(0, firstBody).every((polygon) => polygon.layer < VOLUME_LAYER_BODY),
-    "пол и потолок стоят в начале списка",
+  assert.equal(
+    frame.filter((polygon) => polygon.layer === VOLUME_LAYER_GROUND).length,
+    0,
+    "ярус полов пуст — они ушли в дерево",
   );
-  // По дальности выкладываются **только** ярусы вне дерева порядка: плита,
-  // полы и потолки. Ярус тел с таска 151 выкладывает дерево, и дальность
-  // середины там ничего не решает — это и есть лекарство от D32 и D33.
-  //
-  // Дальность сравнивается **внутри яруса**, а не поперёк них: ярусы идут
-  // своим порядком (земля под полом всегда, как бы далеко ни лежал её
-  // середина), и мерить их одной линейкой нельзя.
-  for (const layer of [VOLUME_LAYER_BASE, VOLUME_LAYER_GROUND]) {
-    const part = frame.slice(0, firstBody).filter((polygon) => polygon.layer === layer);
-    for (let index = 1; index < part.length; index += 1) {
-      assert.ok(part[index - 1].depth >= part[index].depth - 1e-9, "порядок по дальности сбился");
-    }
+  const flat = frame.filter((polygon) => !polygon.stroke && polygon.layer === VOLUME_LAYER_BODY);
+  assert.ok(flat.length > 3, "пол, потолок и стены лежат в одном ярусе и выкладываются деревом");
+  const plate = frame.filter((polygon) => polygon.layer === VOLUME_LAYER_BASE);
+  for (let index = 1; index < plate.length; index += 1) {
+    assert.ok(plate[index - 1].depth >= plate[index].depth - 1e-9, "порядок по дальности сбился");
   }
 });
 
@@ -4063,7 +4115,10 @@ test("потолочная без высоты встаёт под потоло�
   const put = markAt(scene.project, scene.schemeId, "Т", [{ x: 0, y: 0 }]);
   const ceiling = placeOf(volumeScene(put.project, scene.schemeId, {}), put.markId);
   assert.equal(ceiling.mode, VOLUME_MARK_CEILING);
-  assert.equal(faceSpanZ(ceiling).topMm, 2700, "верх вещи — потолок комнаты");
+  // Потолок комнаты 2700, а вещь висит на зазор ниже (`VOLUME_MARK_LIFT_MM`,
+  // таск 211): совпавшие плоскости порядок в кадре решать не умеют, и трек с
+  // лентой проступали сквозь крышу на виде сверху.
+  assert.equal(faceSpanZ(ceiling).topMm, 2700 - VOLUME_MARK_LIFT_MM, "верх вещи — потолок без зазора");
   assert.ok(ceiling.face.normal.z < 0, "лицо потолочной вещи смотрит вниз");
   // Высоту поставили руками — вещь уходит на неё, оставаясь на своём месте.
   const lowered = setMarkDimensions(put.project, put.markId, { heightAboveFloor: 2400 }).project;
@@ -4117,7 +4172,7 @@ test("линейная метка идёт по своей линии, а выс
   const above = placeOf(volumeScene(track.project, scene.schemeId, {}), track.markId);
   assert.equal(above.mode, VOLUME_MARK_CEILING);
   assert.equal(above.prisms.length, 2, "по призме на звено ломаной");
-  assert.equal(faceSpanZ(above).topMm, 2700);
+  assert.equal(faceSpanZ(above).topMm, 2700 - VOLUME_MARK_LIFT_MM, "трек висит под потолком на тот же зазор");
   assert.equal(above.face, null, "у ленты лица нет: изображение объекта принадлежит вещи, а не линии");
 });
 
@@ -6039,28 +6094,31 @@ test("перекрытие рисуется: земля у дома одна, у
   assert.ok(decks.every((face) => face.n.z > 0));
 });
 
-test("пятно солнца лежит на своём этаже и рисуется раньше перекрытия верхнего", () => {
+test("пятно солнца лежит на полу своего этажа, и порядок ему считает дерево", () => {
   const house = houseScene();
   const stack = houseStack(house.project, house.first);
   // Окно есть только на первом этаже стенда — и пятно от него тоже.
   const spots = stack.sunSpots.filter((spot) => spot.baseMm === 0);
   assert.ok(spots.length > 0);
-  assert.ok(stack.sunSpots.every((spot) => Number.isFinite(spot.baseMm) && Number.isFinite(spot.layer)));
+  assert.ok(stack.sunSpots.every((spot) => Number.isFinite(spot.baseMm)));
   const faces = volumeSunSpotFaces(stack.sunSpots, { az: 90, rise: 30, fade: 1 });
   assert.ok(faces.length > 0);
   assert.ok(faces.every((face) => face.p.every((point) => point.z === 0)), "пятно лежит на полу своего этажа");
-  // Ярусы: всё плоское нижнего этажа — раньше всего плоского верхнего, и всё
-  // это раньше тел.
-  const lowSun = volumeFloorLayer(VOLUME_LAYER_SUN, 0, 3);
-  const highGround = volumeFloorLayer(VOLUME_LAYER_GROUND, 1, 3);
-  assert.ok(lowSun < highGround, lowSun + " < " + highGround);
-  assert.ok(volumeFloorLayer(VOLUME_LAYER_SUN, 2, 3) < VOLUME_LAYER_BODY);
-  assert.ok(volumeFloorLayer(VOLUME_LAYER_GROUND, 0, 3) === VOLUME_LAYER_GROUND);
-  // При одном этаже ярусы — ровно прежние числа: кадр одной схемы не меняется.
-  assert.equal(volumeFloorLayer(VOLUME_LAYER_GROUND, 0, 1), VOLUME_LAYER_GROUND);
-  assert.equal(volumeFloorLayer(VOLUME_LAYER_SUN, 0, 1), VOLUME_LAYER_SUN);
-  assert.equal(volumeFloorLayer(VOLUME_LAYER_SHADOW, 1, 3), VOLUME_LAYER_SHADOW, "тень не этажная: земля одна");
-  assert.equal(volumeFloorLayer(VOLUME_LAYER_MARK, 2, 3), VOLUME_LAYER_MARK);
+  // **Ярусов по этажам больше нет** (таск 211): всё плоское ушло в ярус тел,
+  // и порядок — у дерева. Прежняя раскладка ярусов лечила следствие: пятно
+  // нижнего этажа рисовалось поверх перекрытия верхнего, потому что у полов
+  // был свой ярус ниже тел.
+  assert.ok(faces.every((face) => face.layer === VOLUME_LAYER_BODY), "пятно выкладывает дерево");
+  assert.equal(
+    stack.faces.filter((face) => face.layer === VOLUME_LAYER_GROUND).length,
+    0,
+    "ярус полов пуст на всех этажах стопки",
+  );
+  assert.equal(
+    stack.faces.filter((face) => face.layer === VOLUME_LAYER_BASE).length,
+    1,
+    "земля одна, и она ниже всех",
+  );
 });
 
 test("тень на землю кладут все этажи разом, а ложится она под нижним", () => {
@@ -6243,7 +6301,7 @@ test("у пола есть тело: между этажами стоит пли
 test("снятый пол — дыра в перекрытии, и край её держат соседи", () => {
   const scene = roomScene();
   const withFloor = volumeScene(scene.project, scene.schemeId);
-  const floors = (built) => built.faces.filter((face) => face.n.z > 0 && face.layer === VOLUME_LAYER_GROUND);
+  const floors = (built) => built.faces.filter((face) => face.n.z > 0 && face.rgb === VOLUME_FLOOR_RGB);
   assert.equal(floors(withFloor).length, 5, "пол комнаты и четыре полосы под стенами");
   const off = setRoomFloor(scene.project, scene.roomId, false).project;
   const holed = volumeScene(off, scene.schemeId);
@@ -6296,4 +6354,99 @@ test("G68: объект прежней сборки показывается в 
     assert.ok(built.rooms.every((room) => room.hasFloor === true), "у всех прежних помещений пол есть");
   }
   assert.equal(JSON.stringify(legacy), before, "объект изменился — это запрещено прямо (G68)");
+});
+
+// ——— перекрытие перекрывает: дефекты D62 и D63 (таск 211) ————————————————
+
+/**
+ * Что нарисовано в точке кадра, по порядку. Тот же счёт, которым разбирались
+ * дефекты: кадр — список многоугольников, и видно последний.
+ */
+function paintedAt(scene, camera, box, x, y) {
+  const inside = (xy, px, py) => {
+    let hit = false;
+    for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {
+      const ax = xy[i];
+      const ay = xy[i + 1];
+      const bx = xy[j];
+      const by = xy[j + 1];
+      if (ay > py !== by > py && px < ((bx - ax) * (py - ay)) / (by - ay) + ax) hit = !hit;
+    }
+    return hit;
+  };
+  return volumeFrame(scene, camera, box).filter((polygon) => !polygon.stroke && inside(polygon.xy, x, y));
+}
+
+/**
+ * Сцена, у которой каждая грань подписана своим этажом: `markId` — единственное
+ * поле, которое кадр переносит в многоугольник (`pick`), и спор читается по
+ * имени, а не по цвету и не по ярусу.
+ */
+function byFloor(stack, baseMm) {
+  return {
+    ...stack,
+    order: undefined,
+    faces: stack.faces.map((face) => ({
+      ...face,
+      markId: Math.max(...face.p.map((point) => point.z)) < baseMm ? "низ" : "верх",
+    })),
+  };
+}
+
+test("сверху сквозь перекрытие не видно нижнего этажа (D62)", () => {
+  const house = houseScene();
+  const plan = volumeFloorPlan(house.project, house.first);
+  const base = plan.floors[1].baseMm;
+  const stack = houseStack(house.project, house.first);
+  const named = byFloor(stack, base);
+  const bounds = stack.stackMm.boundsMm;
+  const box = { width: 300, height: 220 };
+  const camera = {
+    at: { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2, z: stack.stackMm.topMm + 3000 },
+    yaw: 0,
+    pitch: -Math.PI / 2 + 0.001,
+  };
+  let through = 0;
+  let shots = 0;
+  for (let y = 10; y < box.height - 10; y += 6) {
+    for (let x = 10; x < box.width - 10; x += 6) {
+      const here = paintedAt(named, camera, box, x, y);
+      const last = here[here.length - 1];
+      if (!last || last.layer === VOLUME_LAYER_BASE) continue;
+      shots += 1;
+      // Земля вокруг дома законна, а нутро нижнего этажа сверху — нет: его
+      // закрывает перекрытие верхнего.
+      if (last.pick === "низ") through += 1;
+    }
+  }
+  assert.ok(shots > 200, "дом не попал в кадр — стенд ничего не проверяет: " + shots);
+  assert.equal(through, 0, "сквозь перекрытие видно нижний этаж в " + through + " точках из " + shots);
+});
+
+test("снизу сквозь перекрытие не видно верхнего этажа (D63)", () => {
+  const house = houseScene();
+  const plan = volumeFloorPlan(house.project, house.first);
+  const base = plan.floors[1].baseMm;
+  const stack = houseStack(house.project, house.first);
+  const named = byFloor(stack, base);
+  const box = { width: 300, height: 220 };
+  const start = volumeStart(stack);
+  const camera = {
+    at: { x: start.x, y: start.y, z: VOLUME_EYE_MM },
+    yaw: start.yaw,
+    pitch: Math.PI / 2 - 0.2,
+  };
+  let through = 0;
+  let shots = 0;
+  for (let y = 10; y < box.height - 10; y += 6) {
+    for (let x = 10; x < box.width - 10; x += 6) {
+      const here = paintedAt(named, camera, box, x, y);
+      const last = here[here.length - 1];
+      if (!last) continue;
+      shots += 1;
+      if (last.pick === "верх") through += 1;
+    }
+  }
+  assert.ok(shots > 200, "кадр пуст — стенд ничего не проверяет: " + shots);
+  assert.equal(through, 0, "сквозь потолок видно второй этаж в " + through + " точках из " + shots);
 });

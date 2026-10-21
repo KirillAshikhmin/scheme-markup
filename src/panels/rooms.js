@@ -395,7 +395,10 @@ function mountRoomsPanel(host, api) {
           // помещение. Нажатая значит «пол есть», отжатая — «двусветное
           // пространство», и то же самое видно на плане штриховкой.
           uiIconButton("floorSlab", {
-            class: "ui-btn" + (row.hasFloor ? " is-on" : " rooms__floor--off"),
+            // Состояние видно и цветом, и перечёркнутым значком (D64): класс
+            // `is-on` у значковых кнопок раздела ничего не красил, и человек
+            // жал в пустоту.
+            class: "ui-btn " + (row.hasFloor ? "rooms__floor--on" : "rooms__floor--off"),
             title: (row.hasFloor ? strings.rooms.floorOn : strings.rooms.floorOff) + ". " + strings.rooms.floorHint,
             attrs: { "aria-pressed": row.hasFloor ? "true" : "false" },
             on: { click: () => toggleFloor(row.room.id) },

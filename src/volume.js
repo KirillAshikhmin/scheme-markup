@@ -312,6 +312,35 @@ export const VOLUME_AROUND_FLY_S = 1.5;
  */
 export const VOLUME_LAYER_BASE = 0;
 export const VOLUME_LAYER_SHADOW = 1;
+/**
+ * **Ярус полов и потолков пуст с таска 211** — и это не забывчивость, а
+ * разбор дефектов D62 и D63.
+ *
+ * Слова заказчика: «И где же перекрытия между этажами? Они не должны быть
+ * прозрачными» и следом «И снизу, с 1 этажа тоже видно второй насквозь».
+ *
+ * Причина была в этом номере. Кадр выкладывает многоугольники **сперва по
+ * ярусу, и только внутри яруса — по дереву**, а горизонтали перекрытия лежали
+ * в ярусе 2, тела — в ярусе 4. Значит любое тело любого этажа рисовалось
+ * поверх любого пола и любого потолка. Замер на объекте заказчика (два этажа,
+ * 15 391 грань) в одной точке кадра:
+ *
+ *   - снизу, стоя на первом этаже под вещью второго: ярус 2 — потолок (z
+ *     3000), ярус 3 — низ плиты (3000) и потолок второго (6000), ярус 4 —
+ *     **вещь второго этажа (4300), и видно именно её**;
+ *   - сверху, отвесно: ярус 0 — земля, ярус 2 — пол первого (0), ярус 3 — пол
+ *     второго (3200), ярус 4 — **вещь второго (5400)**. А по всему кадру
+ *     сверху: 23 % точек показывали нутро **первого** этажа сквозь плиту
+ *     второго, и 0 % — потолок.
+ *
+ * Заказчик это и заметил: «а у перекрытий, кстати, появляются боковые грани» —
+ * кромка плиты (таск 209) стоит в ярусе тел и закрывает как следует, а её
+ * собственные верх и низ не закрывали ничего.
+ *
+ * Поэтому полы, потолки и плита переведены в ярус тел: порядок им считает
+ * дерево, точно и в каждом пикселе. Номер оставлен в сборке — на него смотрят
+ * тень (D49) и солнечное пятно, которым важно лечь **между** землёй и телами.
+ */
 export const VOLUME_LAYER_GROUND = 2;
 export const VOLUME_LAYER_SUN = 3;
 export const VOLUME_LAYER_BODY = 4;
@@ -1163,15 +1192,15 @@ export function volumeSunSpotFaces(spots, shadow, out = []) {
     // на том полу, через чьё окно вошло, и рисоваться раньше перекрытия этажа
     // выше — иначе оно легло бы светлым пятном на крышу.
     out.push(
-      volumeFace(
-        shape.map((point) => volumeAt(point, Number(spot.baseMm) || 0)),
-        rgb,
-        {
-          normal: { x: 0, y: 0, z: 1 },
-          layer: Number.isFinite(Number(spot.layer)) ? Number(spot.layer) : VOLUME_LAYER_SUN,
-          flat: true,
-        },
-      ),
+      // **Ярус у пятна телесный** (таск 211): оно лежит на полу, а пол с этого
+      // таска выкладывает дерево. Оставь пятну прежний ярус — и пол, рисуясь
+      // после него, закрасил бы его целиком. Место в очереди пятну считает то
+      // же дерево (`volumeOrderRank`): грань пятна коплоскостна полу, и обход
+      // ставит её сразу за ним, а тело, стоящее на этом полу, — после неё.
+      volumeFace(shape.map((point) => volumeAt(point, Number(spot.baseMm) || 0)), rgb, {
+        normal: { x: 0, y: 0, z: 1 },
+        flat: true,
+      }),
     );
   }
   return out;
@@ -2571,36 +2600,16 @@ export function volumeFloorPlan(project, schemeId) {
 }
 
 /**
- * Ярус плоской грани на этаже стопки (таск 202).
+ * **Ярусов по этажам больше нет** (таск 211 снял их вместе с ярусом полов).
  *
- * **Зачем вообще.** Порядок кадра у плоского (плита, полы, потолки, солнечные
- * пятна) решает не дерево, а ярус: пол комнаты не спорит со стеной, под полом
- * ничего нет. На одном этаже это верно, в стопке — нет: пятно солнца на полу
- * первого этажа (ярус 3) рисовалось бы **после** перекрытия второго (ярус 2),
- * то есть светлое пятно легло бы на крышу. Поэтому в стопке у каждого этажа
- * свой отрезок ярусов между полами и телами: всё плоское нижнего этажа
- * рисуется раньше всего плоского верхнего, а тела по-прежнему выкладывает
- * дерево — точно, в каждом пикселе.
- *
- * Отрезок берётся между `VOLUME_LAYER_GROUND` и `VOLUME_LAYER_BODY` и делится
- * на число этажей: при одном этаже выходят ровно прежние 2 и 3, и кадр одной
- * схемы не меняется ни на грань.
- *
- * Земля и тень на ней — **не этажные**: земля одна на дом и лежит под нижним
- * этажом, поэтому `VOLUME_LAYER_BASE` нижнего и `VOLUME_LAYER_SHADOW`
- * остаются собой. У этажей выше плита стала перекрытием и уходит в их ярус
- * пола — иначе перекрытие второго этажа рисовалось бы раньше пола первого.
+ * В таске 202 каждому этажу стопки отводился свой отрезок ярусов между полами
+ * и телами: иначе солнечное пятно первого этажа (ярус 3) рисовалось бы поверх
+ * перекрытия второго (ярус 2). Лечило это следствие, а не причину — причиной
+ * был сам ярус полов, из-за которого горизонтали не закрывали ни одного тела
+ * (D62, D63). Теперь полы, потолки, плита и пятна лежат в ярусе тел, и порядок
+ * им всем — на всех этажах разом — считает дерево, сшитое по этажам
+ * плоскостями (`volumeOrderStack`). Делить ярусы стало нечего.
  */
-export function volumeFloorLayer(layer, index, count) {
-  const floors = Math.max(1, Number(count) || 1);
-  const at = Math.max(0, Math.min(floors - 1, Number(index) || 0));
-  const step = (VOLUME_LAYER_BODY - VOLUME_LAYER_GROUND) / floors;
-  if (layer === VOLUME_LAYER_GROUND || (layer === VOLUME_LAYER_BASE && at > 0)) {
-    return VOLUME_LAYER_GROUND + at * step;
-  }
-  if (layer === VOLUME_LAYER_SUN) return VOLUME_LAYER_GROUND + at * step + step / 2;
-  return layer;
-}
 
 /**
  * Этаж стопки: грани встают на свою базу и на своё место в плане, плоское
@@ -2619,7 +2628,7 @@ export function volumeFloorLayer(layer, index, count) {
  * карточка, список меток и подсветка на плане говорили бы о том, чего в кадре
  * нет, — а «все двери» открывало бы двери двух этажей через одну.
  */
-export function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, index = 0, count = 1, own = true } = {}) {
+export function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, own = true } = {}) {
   const lift = Number(baseMm) || 0;
   const dx = Number(shiftMm && shiftMm.x) || 0;
   const dy = Number(shiftMm && shiftMm.y) || 0;
@@ -2631,7 +2640,6 @@ export function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, index = 0,
         point.z += lift;
       }
     }
-    if (count > 1) face.layer = volumeFloorLayer(face.layer, index, count);
     if (own) continue;
     face.markId = null;
     if (face.channel !== undefined) face.channel = null;
@@ -2679,11 +2687,9 @@ export function volumeSlabFaces(points, topMm, out = []) {
     );
   }
   out.push(
-    volumeFace(
-      points.map((point) => volumeAt(point, bottomMm)),
-      VOLUME_CEILING_RGB,
-      { normal: { x: 0, y: 0, z: -1 }, layer: VOLUME_LAYER_GROUND },
-    ),
+    volumeFace(points.map((point) => volumeAt(point, bottomMm)), VOLUME_CEILING_RGB, {
+      normal: { x: 0, y: 0, z: -1 },
+    }),
   );
   return out;
 }
@@ -2808,13 +2814,7 @@ export function volumeStackScene(project, plan, optionsOf) {
       : volumeScene(project, item.schemeId, { ...take(item.schemeId), order: false, upper: upperOf(at) });
     if (!sub || sub.empty) continue;
     if (at === 0) landMm = sub.landMm;
-    volumeFloorFaces(sub.faces, {
-      baseMm: item.baseMm,
-      shiftMm: item.shiftMm,
-      index: at,
-      count: floors.length,
-      own,
-    });
+    volumeFloorFaces(sub.faces, { baseMm: item.baseMm, shiftMm: item.shiftMm, own });
     groups.push(sub.faces);
     faces.push(...sub.faces);
     if (sub.boundsMm) {
@@ -2853,7 +2853,6 @@ export function volumeStackScene(project, plan, optionsOf) {
         left: spot.left ? volumeShiftPoints(spot.left, item.shiftMm) : null,
         right: spot.right ? volumeShiftPoints(spot.right, item.shiftMm) : null,
         baseMm: item.baseMm,
-        layer: volumeFloorLayer(VOLUME_LAYER_SUN, at, floors.length),
       });
     }
     bottomMm = Math.min(bottomMm, item.baseMm);
@@ -3375,7 +3374,18 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
   // (`volumeMarkOnFloor`, D34) — низом: робот-пылесос с выступом 90 занимает от
   // нуля до девяноста, а не от минус сорока пяти до сорока пяти.
   const onFloor = volumeMarkOnFloor(heightMm);
-  const bottomMm = heightMm === null ? room.heightMm - depthMm : onFloor ? 0 : heightMm - depthMm / 2;
+  // Потолочная вещь висит **на два миллиметра ниже потолка** — ту же щель
+  // (`VOLUME_MARK_LIFT_MM`), которой вещь на стене отходит от стены. До таска
+  // 211 её верх лежал ровно в плоскости потолка, и это сходило с рук: потолок
+  // рисовался ярусом раньше тел и всегда оказывался под ними. Теперь порядок
+  // им считает дерево, а у совпавших плоскостей порядок решать нечем — трек и
+  // лента проступали сквозь крышу на виде сверху.
+  const bottomMm =
+    heightMm === null
+      ? room.heightMm - depthMm - VOLUME_MARK_LIFT_MM
+      : onFloor
+        ? 0
+        : heightMm - depthMm / 2;
   const topMm = bottomMm + depthMm;
   const centreMm = (topMm + bottomMm) / 2;
   const prisms = line
@@ -4275,23 +4285,30 @@ export function volumeScene(project, schemeId, options = {}) {
     // снят — там дыра на два этажа, и край её держат соседние плиты.
     if (room.hasFloor) {
       faces.push(
-        volumeFace(
-          room.pointsMm.map((point) => volumeAt(point, 0)),
-          VOLUME_FLOOR_RGB,
-          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
-        ),
+        // Ярус у пола **телесный** (таск 211): порядок ему считает дерево.
+        volumeFace(room.pointsMm.map((point) => volumeAt(point, 0)), VOLUME_FLOOR_RGB, {
+          normal: { x: 0, y: 0, z: 1 },
+        }),
       );
       volumeSlabFaces(room.pointsMm, 0, faces);
     }
-    // Потолок у помещения **свой** и остаётся всегда: он не перекрытие, а
-    // верх этой комнаты. У двусветной гостиной его поднимают ей же — высотой
-    // стен помещения (таск 173), и тогда он встаёт на уровень потолка верхнего
-    // этажа сам.
+    // **Потолок двусторонний** (таск 211, дефект D62): снизу это потолок
+    // комнаты, сверху — крыша. До таска у него была одна сторона, нормалью
+    // вниз, и сверху он отбрасывался отбором — поэтому в кадре сверху потолок
+    // занимал **ноль процентов**, а человек смотрел прямо в комнату.
+    //
+    // Почему двусторонняя грань, а не плита с телом, как у пола: плита над
+    // каждым помещением встала бы ровно туда, где у этажа выше лежит его
+    // собственный пол, — две одинаковые плиты друг в друге, и этажи перестали
+    // бы делиться плоскостью (их дерево порядка сшивается по ней, таск 202).
+    // Двусторонний потолок не добавляет в сцену **ни одной грани** и держит
+    // этажи раздельными: низ перекрытия — это и есть потолок нижнего этажа, а
+    // толщину ему даёт плита пола верхнего.
     faces.push(
       volumeFace(
         [...room.pointsMm].reverse().map((point) => volumeAt(point, room.heightMm)),
         VOLUME_CEILING_RGB,
-        { normal: { x: 0, y: 0, z: -1 }, layer: VOLUME_LAYER_GROUND },
+        { normal: { x: 0, y: 0, z: -1 }, both: true },
       ),
     );
   }
@@ -4350,11 +4367,9 @@ export function volumeScene(project, schemeId, options = {}) {
         Number(wall.thicknessMm) + VOLUME_FLOOR_LAP * 2,
       );
       faces.push(
-        volumeFace(
-          strip.map((point) => volumeAt(point, 0)),
-          VOLUME_FLOOR_RGB,
-          { normal: { x: 0, y: 0, z: 1 }, layer: VOLUME_LAYER_GROUND },
-        ),
+        volumeFace(strip.map((point) => volumeAt(point, 0)), VOLUME_FLOOR_RGB, {
+          normal: { x: 0, y: 0, z: 1 },
+        }),
       );
       // Тело у полосы — такое же, как у пола комнаты (таск 209): иначе
       // перекрытие кончалось бы у контура помещения, а под стеной верхнего

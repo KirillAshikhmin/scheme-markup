@@ -566,6 +566,41 @@
   border-color: var(--accent);
 }
 
+/*
+ * Кнопка пола помещения (таск 209, дефект D64).
+ *
+ * Слова заказчика: «в списке помещений переключатель пола не меняет своё
+ * состояние визуально, хотя по факту меняется». Так и было: класс кнопке
+ * ставился (`is-on`), а правила для него в стилях не было ни одного — у
+ * значковых кнопок раздела `is-on` ничего не красит. Жать и не видеть отклика
+ * — то же, что жать в пустоту.
+ *
+ * Состояний два, и читаются они **и цветом, и рисунком**: пол есть — кнопка
+ * как обычная, пол снят — она гаснет и перечёркнута косой чертой, той же
+ * косой, которой помещение без пола заштриховано на плане.
+ */
+#panel-rooms .rooms__row .ui-btn.rooms__floor--off {
+  position: relative;
+  color: var(--muted);
+  border-color: transparent;
+  opacity: 0.75;
+}
+
+#panel-rooms .rooms__row .ui-btn.rooms__floor--off::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 50%;
+  border-top: 1.5px solid currentColor;
+  transform: rotate(-32deg);
+}
+
+#panel-rooms .rooms__row .ui-btn.rooms__floor--on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 #panel-rooms .rooms__add {
   display: grid;
   grid-template-columns: 1fr;
