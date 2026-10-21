@@ -1311,6 +1311,38 @@ function createVolume({ api, hosts }) {
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
 
+  // ——— поле меряется по своему прямоугольнику (таск 231, дефект D79) ————
+  //
+  // `resize()` звали события, которые **могли** изменить ширину поля: окно
+  // потянули, вошли в режим, вышли из полного экрана. Ширину при этом меняет и
+  // то, о чём событий нет: ручка колонки (`is-left-hidden`) и уход правой
+  // колонки вместе с режимом (G348). Найдено живым прогоном: свернёшь ручкой
+  // левую колонку в объёме — стойка 1582 точки, холст остаётся 1072, и справа
+  // зияет чёрная полоса в четверть кадра. Дефект старше таска: на `main` он
+  // воспроизводится ручкой, а с уходом правой колонки стал виден при каждом
+  // входе в режим.
+  //
+  // Правильного события тут нет и быть не может: `data-screen` страница ставит
+  // **после** оповещения подписчиков (`app.setState`), то есть в миг
+  // переключения поле мерило бы прежнюю ширину, сколько ни зови. Поэтому
+  // ширину сторожит сам прямоугольник.
+  //
+  // Холостых перерисовок это не добавляет: наблюдатель сверяет меру с той, по
+  // которой холст уже нарезан, и равную пропускает.
+  let stageSize = { width: 0, height: 0 };
+  const stageWatch =
+    typeof ResizeObserver === "function"
+      ? new ResizeObserver(() => {
+          if (closed) return;
+          const box = viewport();
+          if (box.width === stageSize.width && box.height === stageSize.height) return;
+          stageSize = box;
+          resize();
+        })
+      : null;
+  if (stageWatch) stageWatch.observe(stage);
+
+
   const personButton = uiButton(strings.volume.viewPerson, {
     title: strings.volume.viewPersonHint,
     on: { click: () => setView("person") },
@@ -3708,6 +3740,7 @@ function createVolume({ api, hosts }) {
     }
     if (hourTick && typeof clearInterval === "function") clearInterval(hourTick);
     hourTick = 0;
+    if (stageWatch) stageWatch.disconnect();
     stopParams();
     paramsFields.dispose();
     paramsButton.dispose();
@@ -3770,6 +3803,14 @@ function createVolume({ api, hosts }) {
         // Схему сменили в списке схем — идём туда же. Переход по лестнице
         // досюда не доходит: он меняет `schemeId` сам и ставит его в состояние
         // заодно, так что к этому мигу обе схемы уже совпадают.
+        // Список этажей в параметрах считается по объекту: по схемам и по той
+        // из них, что открыта (таск 202). Сменились — ряды обязаны пересобраться,
+        // иначе выбранным останется прежний этаж. Стоит это **до** перехода на
+        // другую схему: тот возвращается сразу, а список устарел уже сейчас.
+        if ("project" in changed || "schemeId" in changed) {
+          paramsFields.refresh();
+          paramsButton.refresh();
+        }
         if (state.schemeId !== schemeId) {
           followScheme(state);
           return;
