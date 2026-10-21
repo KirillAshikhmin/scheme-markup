@@ -331,7 +331,7 @@ test("розетка в дверном проёме названа — при л
   assert.ok(markOpeningHit(project, mark), "проём от пола перекрывает стену во всю полосу");
   const found = validate(project).find((item) => item.code === "markInOpening");
   assert.ok(found, JSON.stringify(validate(project).map((item) => item.code)));
-  assert.match(found.message, /Дверь/);
+  assert.match(found.message, /дверь/);
   assert.equal(found.kind, "warning", "это находка, а не поломка: иногда розетка у косяка и задумана");
 });
 

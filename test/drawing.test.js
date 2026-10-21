@@ -450,7 +450,12 @@ test("сторона открывания есть у двери и только
     errorCode(() => addOpening(project, { wallId: wallIds[0], kind: "arch", atMm: 100, widthMm: 900, heightMm: 2100, swing: "left" })),
     "openingSwingOnlyDoor",
   );
-  assert.deepEqual(OPENING_KINDS, ["window", "door", "glassDoor", "opening", "arch"]);
+  // Пять прежних видов остались в каталоге и зовутся теми же ключами (G68):
+  // список с таска 215 вырос, но ни одного ключа в нём не переименовано —
+  // переименуй, и у заказчика перестали бы открываться размеченные чертежи.
+  for (const kind of ["window", "door", "glassDoor", "opening", "arch"]) {
+    assert.ok(OPENING_KINDS.includes(kind), kind);
+  }
 });
 
 test("дверь стала окном — сторона открывания убирается, а не остаётся врать", () => {
