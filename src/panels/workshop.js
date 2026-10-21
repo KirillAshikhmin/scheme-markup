@@ -173,6 +173,7 @@ import {
   DRAWING_PAPER,
   LABEL_TURN_RADIUS,
   RULER_SIZE,
+  cursorFor,
   drawDrawing,
   drawDrawingGrid,
   drawDrawingGuides,
@@ -3159,6 +3160,7 @@ function createWorkshop({ api, hosts }) {
     // просят. Остаются ради привычки — на холсте так же (там ещё и пробел).
     if (event.button === 1 || event.shiftKey) {
       pan = { x: event.clientX, y: event.clientY };
+      syncCursor();
       return;
     }
     // Правка: если под рукой что-то есть — берём его, и дальше это
@@ -3459,13 +3461,14 @@ function createWorkshop({ api, hosts }) {
     if (next !== hover) {
       hover = next;
       hoverHandle = handle;
-      node.style.cursor = !pick
-        ? "default"
-        : pick.kind === "vertex" || (handle && (handle.kind === "vertex" || handle.kind === "turn"))
-          ? "grab"
-          : pick.kind === "hinge" || pick.kind === "swing" || handle
-            ? "pointer"
-            : "move";
+      // Слова курсора — общие с планом (`render.cursorFor`, находка 6 разбора
+      // механик): вершина и ручка-кольцо тянутся, створка и ручка нажимаются,
+      // тело едет. Панорама и ожидание точки отвечают раньше — в `sync()`.
+      node.style.cursor = cursorFor({
+        pull: Boolean(pick && (pick.kind === "vertex" || (handle && (handle.kind === "vertex" || handle.kind === "turn")))),
+        press: Boolean(pick && (pick.kind === "hinge" || pick.kind === "swing" || handle)),
+        move: Boolean(pick),
+      });
       // Ручка под рукой меняет рисунок — бледный «плюс» становится квадратом
       // будущей вершины. Кадр поэтому перерисовывается, а не только курсор.
       redraw();
@@ -3621,6 +3624,7 @@ function createWorkshop({ api, hosts }) {
       if (fingers.size < 2) pinch = null;
     }
     pan = null;
+    syncCursor();
     // Нажатие, которое так и не поехало, — клик занятия. Отмена жеста
     // (`pointercancel`: палец увели за край, система забрала указатель)
     // действием не считается: холст решает так же.
@@ -4585,9 +4589,7 @@ function createWorkshop({ api, hosts }) {
       // будучи свёрнутой: без него подложку под чертёж не положить.
       alert: spot.kind === "noScale",
     });
-    // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
-    // Ожидание точки привязки старше занятия — крестик и в «Правке» (таск 208).
-    node.style.cursor = anchorPick ? "crosshair" : tool === "edit" ? "default" : "crosshair";
+    syncCursor();
     redraw();
   }
 
@@ -4597,6 +4599,22 @@ function createWorkshop({ api, hosts }) {
    * Второй записи у строки быть не должно: ровно на ней и погорел таск 187 —
    * призрак писал в узел, которого колонка уже не держала.
    */
+  /**
+   * Курсор поля без наведения: панорама, потом ожидание точки, потом занятие.
+   *
+   * Правило — одно на план и чертёж (`render.cursorFor`, находка 6 разбора
+   * механик). Стрелка там, где выбирают, крестик там, где ставят: развёртка
+   * выбирает. Ожидание точки привязки старше занятия — крестик и в «Правке»
+   * (таск 208). Что под рукой, отвечает поверх этого — в наведении
+   * (`hoverAt`), и только в «Правке»: в постановке попадание ответа не меняет.
+   */
+  function syncCursor() {
+    node.style.cursor = cursorFor({
+      pan: Boolean(pan),
+      place: Boolean(anchorPick) || tool !== "edit",
+    });
+  }
+
   function syncModeNote() {
     const line = workshopModeNote({
       anchorPick: Boolean(anchorPick),

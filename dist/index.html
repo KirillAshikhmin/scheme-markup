@@ -23019,6 +23019,52 @@ const DRAFT_ANGLE_FREE = "#57606a";
 // поверхности.
 const DRAFT_ANGLE_MIN_PX = 8;
 
+// ——— чем курсор отвечает на вопрос «что случится, если я сейчас нажму» ——————
+//
+// **Одно правило на две плоские поверхности** (находка 6 разбора механик). Их
+// ответы были противоположны: план знал только про режим (`default` в
+// «Выделении», `crosshair` во всём остальном) и не спрашивал, что под рукой, —
+// наведение на метку ничем не отличалось от пустого места, и что метку можно
+// тащить, человек узнавал, только потащив. Чертёж наоборот: лестница по
+// `workshopPick` и ни слова о занятии в наведении.
+//
+// Выбран ответ **и про режим, и про то, что под рукой**, в таком порядке:
+//
+// 1. панорама зажата (пробел, Shift, средняя кнопка) — `grab`: рука возит лист,
+//    и что под ней, не значит ничего;
+// 2. ждут точку (постановка, привязка, калибровка) — `crosshair`: клик
+//    поставит точку, и что под ней, тоже не значит ничего. Поэтому попадание
+//    в «Добавлении» не спрашивается — там оно не меняет ответа;
+// 3. «Выделение» — отвечает то, что под рукой: вершина и ручка-кольцо тянутся
+//    (`grab`), ручка и створка откликаются (`pointer`), тело едет (`move`);
+// 4. пусто — `default`.
+//
+// Объёма это не касается: там курсор отдан прицелу, и это другое дело.
+const CURSOR_PAN = "grab";
+const CURSOR_PLACE = "crosshair";
+const CURSOR_PULL = "grab";
+const CURSOR_PRESS = "pointer";
+const CURSOR_MOVE = "move";
+const CURSOR_IDLE = "default";
+
+/**
+ * Имя курсора по тому, что сейчас под рукой и чем занята рука.
+ *
+ * Чистая и одна на холст и мастерскую: правило, записанное внутри двух
+ * обработчиков, уже разошлось один раз.
+ *
+ * `pan` — панорама зажата; `place` — ждут точку; `pull`/`press`/`move` — что
+ * под рукой в «Выделении».
+ */
+function cursorFor(what = {}) {
+  if (what.pan) return CURSOR_PAN;
+  if (what.place) return CURSOR_PLACE;
+  if (what.pull) return CURSOR_PULL;
+  if (what.press) return CURSOR_PRESS;
+  if (what.move) return CURSOR_MOVE;
+  return CURSOR_IDLE;
+}
+
 // Направляющая: мелкий пунктир в волос толщиной и вполсилы. Узор мельче любого
 // начертания метки — на пунктирной линии подсказку иначе не отличить от самого
 // черновика.
@@ -36811,6 +36857,9 @@ function canvasPointerMove(event) {
     canvasRedraw();
   }
   if (canvasHoverUpdate(state, point)) canvasRedraw();
+  // Курсор — в тот же заход, что наведение: он отвечает про ту же точку, и
+  // считать её дважды незачем (находка 6 разбора механик).
+  canvasSyncCursor();
   // Призрак идёт за рукой — и перерисовывается только тогда, когда его место
   // сменилось: с притяжкой к направляющей оно меняется реже, чем курсор.
   if (canvasGhostUpdate(state)) canvasRedraw();
@@ -37206,7 +37255,9 @@ function canvasKeyDown(event) {
   }
   if (event.code === "Space") {
     canvasSpace = true;
-    if (canvasNode) canvasNode.style.cursor = "grab";
+    // Через ту же дверь, что и всё про курсор: своё «grab» здесь спорило бы с
+    // правилом (`render.cursorFor`, находка 6 разбора механик).
+    canvasSyncCursor();
     return;
   }
   if (event.key === "Escape") {
@@ -37274,6 +37325,7 @@ function canvasPointerLeave() {
     canvasHoverHandle = null;
     canvasRedraw();
   }
+  canvasSyncCursor();
 }
 
 // Окно увели — зажатые клавиши отпустить некому: своего keyup они уже не
@@ -37287,11 +37339,78 @@ function canvasWindowBlur() {
   canvasSyncCursor();
 }
 
+/**
+ * Что под рукой на плане — в словах курсора (находка 6 разбора механик).
+ *
+ * До этого курсор плана знал **только про режим** и о наведении не спрашивал,
+ * хотя попадание считается на каждое движение мыши: метка под рукой ничем не
+ * отличалась от пустого места, и что её можно тащить, человек узнавал, только
+ * потащив. В чертеже это было ровно наоборот, и один и тот же вопрос получал
+ * два противоположных ответа.
+ *
+ * Лестница повторяет порядок `canvasPointerDown`, а не живёт сама по себе:
+ * обещать курсором одно, а делать по клику другое — хуже, чем молчать.
+ * Спрашивается она только в «Выделении»: в постановке и калибровке клик ставит
+ * точку, и что под рукой, ответа не меняет.
+ */
+function canvasCursorAt(state, point) {
+  if (!point || !state || state.mode !== "select") return {};
+  const scheme = canvasScheme(state);
+  if (!scheme) return {};
+  const view = canvasViewOf(state);
+  const editable = canvasEditAllowed(state);
+  const handles = canvasHandlesShown(state);
+  // Линейка лежит поверх плана и забирает клик себе: с неё тянут направляющую.
+  if (editable && canvasGuidesShown(state) && rulerAxis(point)) return { pull: true };
+  // Ручки подписи выделенной метки: поворот и поводок — нажимаются, не тянутся.
+  if (handles && state.selectedMarkIds.length === 1) {
+    const target = labelTargetOf(state.project, scheme, state.selectedMarkIds[0], state.filter);
+    if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter)) return { press: true };
+    if (target && hitLabelLeader(state.project, scheme, target, point, view, state.filter)) return { press: true };
+  }
+  if (handles && state.selectedOutlineId) {
+    const selected = findOutline(state.project, state.selectedOutlineId);
+    if (selected && selected.schemeId === scheme.id && hitOutlineLabelTurn(state.project, scheme, selected, point, view)) {
+      return { press: true };
+    }
+  }
+  // Ручки правимого пути: вершину тянут, ручку разбивки и продолжения нажимают.
+  const editedPath = editable ? canvasEditedPath(state, scheme) : null;
+  if (editedPath) {
+    const handle = hitPathHandle(pathEditHandles(scheme, editedPath, view), point);
+    if (handle) return handle.kind === "vertex" ? { pull: true } : { press: true };
+  }
+  // Ручка «+» вокруг выделенной точки — быстрый путь к соседу по блоку.
+  if (editable && state.selectedMarkIds.length === 1) {
+    const selected = findMark(state.project, state.selectedMarkIds[0]);
+    if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
+      if (hitHandle(scheme, selected, point, view, 0, canvasStacks(state, scheme))) return { press: true };
+    }
+  }
+  // Метка, её подпись и контур помещения — их возят, значит `move`. В режиме
+  // просмотра возить нельзя, но выделить можно: курсор там говорит «нажмётся»,
+  // а не «поедет», и это правда.
+  const hit = hitTest(state.project, scheme, point, view, state.filter);
+  if (hit) return editable ? { move: true } : { press: true };
+  const outlineHit = hitOutline(state.project, scheme, point, view, state.filter, null);
+  if (outlineHit) return editable ? { move: true } : { press: true };
+  // Направляющая — последней, как и в нажатии: метка под ней главнее.
+  if (editable && canvasGuidesShown(state)) {
+    if (hitSchemeGuide(canvasSchemeGuides(state, scheme), point, scheme, view)) return { pull: true };
+  }
+  return {};
+}
+
 function canvasSyncCursor() {
   if (!canvasNode) return;
   const state = canvasState();
-  if (canvasSpace) canvasNode.style.cursor = "grab";
-  else canvasNode.style.cursor = state.mode === "select" ? "default" : "crosshair";
+  // Правило — одно на план и чертёж (`render.cursorFor`): панорама, потом
+  // постановка точки, потом то, что под рукой.
+  canvasNode.style.cursor = cursorFor({
+    pan: canvasSpace || Boolean(canvasDrag && canvasDrag.kind === "pan" && canvasDrag.moved),
+    place: state.mode !== "select" || Boolean(canvasDraft),
+    ...canvasCursorAt(state, canvasDrag ? null : canvasCursor),
+  });
 }
 
 // ——— монтирование ————————————————————————————————————————————————————
@@ -69153,6 +69272,7 @@ function createWorkshop({ api, hosts }) {
     // просят. Остаются ради привычки — на холсте так же (там ещё и пробел).
     if (event.button === 1 || event.shiftKey) {
       pan = { x: event.clientX, y: event.clientY };
+      syncCursor();
       return;
     }
     // Правка: если под рукой что-то есть — берём его, и дальше это
@@ -69453,13 +69573,14 @@ function createWorkshop({ api, hosts }) {
     if (next !== hover) {
       hover = next;
       hoverHandle = handle;
-      node.style.cursor = !pick
-        ? "default"
-        : pick.kind === "vertex" || (handle && (handle.kind === "vertex" || handle.kind === "turn"))
-          ? "grab"
-          : pick.kind === "hinge" || pick.kind === "swing" || handle
-            ? "pointer"
-            : "move";
+      // Слова курсора — общие с планом (`render.cursorFor`, находка 6 разбора
+      // механик): вершина и ручка-кольцо тянутся, створка и ручка нажимаются,
+      // тело едет. Панорама и ожидание точки отвечают раньше — в `sync()`.
+      node.style.cursor = cursorFor({
+        pull: Boolean(pick && (pick.kind === "vertex" || (handle && (handle.kind === "vertex" || handle.kind === "turn")))),
+        press: Boolean(pick && (pick.kind === "hinge" || pick.kind === "swing" || handle)),
+        move: Boolean(pick),
+      });
       // Ручка под рукой меняет рисунок — бледный «плюс» становится квадратом
       // будущей вершины. Кадр поэтому перерисовывается, а не только курсор.
       redraw();
@@ -69615,6 +69736,7 @@ function createWorkshop({ api, hosts }) {
       if (fingers.size < 2) pinch = null;
     }
     pan = null;
+    syncCursor();
     // Нажатие, которое так и не поехало, — клик занятия. Отмена жеста
     // (`pointercancel`: палец увели за край, система забрала указатель)
     // действием не считается: холст решает так же.
@@ -70579,9 +70701,7 @@ function createWorkshop({ api, hosts }) {
       // будучи свёрнутой: без него подложку под чертёж не положить.
       alert: spot.kind === "noScale",
     });
-    // Стрелка там, где выбирают, крестик там, где ставят: развёртка выбирает.
-    // Ожидание точки привязки старше занятия — крестик и в «Правке» (таск 208).
-    node.style.cursor = anchorPick ? "crosshair" : tool === "edit" ? "default" : "crosshair";
+    syncCursor();
     redraw();
   }
 
@@ -70591,6 +70711,22 @@ function createWorkshop({ api, hosts }) {
    * Второй записи у строки быть не должно: ровно на ней и погорел таск 187 —
    * призрак писал в узел, которого колонка уже не держала.
    */
+  /**
+   * Курсор поля без наведения: панорама, потом ожидание точки, потом занятие.
+   *
+   * Правило — одно на план и чертёж (`render.cursorFor`, находка 6 разбора
+   * механик). Стрелка там, где выбирают, крестик там, где ставят: развёртка
+   * выбирает. Ожидание точки привязки старше занятия — крестик и в «Правке»
+   * (таск 208). Что под рукой, отвечает поверх этого — в наведении
+   * (`hoverAt`), и только в «Правке»: в постановке попадание ответа не меняет.
+   */
+  function syncCursor() {
+    node.style.cursor = cursorFor({
+      pan: Boolean(pan),
+      place: Boolean(anchorPick) || tool !== "edit",
+    });
+  }
+
   function syncModeNote() {
     const line = workshopModeNote({
       anchorPick: Boolean(anchorPick),
