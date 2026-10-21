@@ -90,6 +90,17 @@ export const VOLUME_SPEED_SETTING = "volumeClockSpeed";
 // Умолчание — **снято**: у того, кто галку не ставил, объём показывает ровно
 // то, что показывал, — открытую схему.
 export const VOLUME_FLOORS_SETTING = "volumeFloorsAll";
+// ——— «Снять крышу» (таск 212, требование G319) ——————————————————————————
+//
+// С таска 211 дом сверху глухой: потолок стал двусторонним, и это то, что
+// просил заказчик («перекрытия не должны быть прозрачными»). Вместе с
+// просвечивающей крышей исчез **кукольный дом** — способ посмотреть планировку
+// сверху, не выходя из объёма. Отметка возвращает его по требованию.
+//
+// Умолчание — **снято**: крыша на месте, и у того, кто галок не ставил, ничего
+// не меняется. Живёт она в настройках браузера рядом с миникартой и фоном: это
+// вид, а не свойство дома (G68).
+export const VOLUME_ROOF_SETTING = "volumeRoofOff";
 export const VOLUME_SMOOTH_SETTING = "volumeSmoothSky";
 export const VOLUME_GHOST_SETTING = "volumeThroughWalls";
 
@@ -104,6 +115,7 @@ const params = {
   kind: VOLUME_BACKDROP_DEFAULT,
   minimap: true,
   floorsAll: false,
+  roofOff: false,
   speed: VOLUME_CLOCK_SPEED_DEFAULT,
   clock: null,
   smooth: false,
@@ -159,6 +171,7 @@ export function volumeParamsLoad() {
   // двумя: `saved !== true` — это «галки не ставили».
   for (const [key, name] of [
     [VOLUME_FLOORS_SETTING, "floorsAll"],
+    [VOLUME_ROOF_SETTING, "roofOff"],
     [VOLUME_SMOOTH_SETTING, "smooth"],
     [VOLUME_GHOST_SETTING, "ghost"],
   ]) {
@@ -178,6 +191,7 @@ export function volumeParamsRead() {
     kind: params.kind,
     minimap: params.minimap,
     floorsAll: params.floorsAll,
+    roofOff: params.roofOff,
     speed: params.speed,
     clock: params.clock,
     smooth: params.smooth,
@@ -234,6 +248,7 @@ export function volumeParamsMinimap(shown) {
 export function volumeParamsFlag(name, on) {
   const keys = {
     floorsAll: VOLUME_FLOORS_SETTING,
+    roofOff: VOLUME_ROOF_SETTING,
     smooth: VOLUME_SMOOTH_SETTING,
     ghost: VOLUME_GHOST_SETTING,
   };
@@ -458,6 +473,11 @@ export function createVolumeParams(options) {
           ],
         ),
         uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked) }),
+        // «Снять крышу» стоит здесь, а не рядом с фоном: это про **дом**, а не
+        // про картинку за окном, и спрашивают её там же, где выбирают, какой
+        // этаж показывать.
+        checkRow(strings.volume.roofOff, chosen.roofOff, (on) => volumeParamsFlag("roofOff", on)),
+        uiEl("p", { class: "tools__note", text: strings.volume.roofOffHint }),
         uiEl("p", { class: "tools__label", text: strings.volume.backdrop }),
         uiEl(
           "div",
