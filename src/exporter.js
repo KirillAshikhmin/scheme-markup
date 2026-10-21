@@ -557,11 +557,25 @@ function exportMeasure(ctx, table) {
   return widths.map((width) => Math.min(EXPORT_TABLE.maxColumn, Math.ceil(width) + EXPORT_TABLE.cellGap));
 }
 
-function exportClip(ctx, value, limit) {
+/**
+ * Обрезка значения ячейки многоточием по ширине в точках.
+ *
+ * Одна на обе таблицы файла (находка 14 разбора механик): до этого здесь
+ * стояли две функции с разными именами и **байт в байт одним телом** —
+ * `exportClip` для таблицы на PNG и `gostTableCell` для таблицы на листе
+ * ГОСТ. Мера приходит доводом (`limitPx`), шрифт уже стоит в `ctx` — больше
+ * этим двум таблицам ничего друг от друга не нужно.
+ *
+ * Третья такая обрезка — `gostDrawText` в `gostSheet.js` — остаётся своей
+ * нарочно: она сперва ужимает кегль до `GOST_MIN_TEXT_MM` и только потом
+ * режет. В штампе это осмысленно (надпись обязана влезть целиком), а в строке
+ * таблицы кегль у всех ячеек один.
+ */
+function exportClipToWidth(ctx, value, limitPx) {
   const cell = value == null ? "" : String(value);
-  if (ctx.measureText(cell).width <= limit) return cell;
+  if (ctx.measureText(cell).width <= limitPx) return cell;
   let cut = cell;
-  while (cut.length > 1 && ctx.measureText(cut + "…").width > limit) cut = cut.slice(0, -1);
+  while (cut.length > 1 && ctx.measureText(cut + "…").width > limitPx) cut = cut.slice(0, -1);
   return cut + "…";
 }
 
@@ -665,7 +679,7 @@ export async function tablePng(table, options = {}) {
     let x = textLeft;
     cells.forEach((cell, index) => {
       const limit = widths[index] - EXPORT_TABLE.cellGap;
-      ctx.fillText(exportClip(ctx, cell, limit), x, y + EXPORT_TABLE.rowHeight / 2);
+      ctx.fillText(exportClipToWidth(ctx, cell, limit), x, y + EXPORT_TABLE.rowHeight / 2);
       x += widths[index];
     });
   };
@@ -1552,14 +1566,6 @@ export function gostTablePages(table, options = {}) {
   return { sheet, pages };
 }
 
-function gostTableCell(ctx, value, limitPx) {
-  const cell = value == null ? "" : String(value);
-  if (ctx.measureText(cell).width <= limitPx) return cell;
-  let cut = cell;
-  while (cut.length > 1 && ctx.measureText(cut + "…").width > limitPx) cut = cut.slice(0, -1);
-  return cut + "…";
-}
-
 /**
  * Один лист таблицы: рамка, шапка колонок, строки и основная надпись формы 5
  * (первый лист) или 6 (последующие). Шапка повторяется на каждом листе —
@@ -1598,7 +1604,7 @@ export async function gostTablePng(table, page, plan, options = {}) {
     let x = field.x;
     cells.forEach((cell, index) => {
       const limit = (widths[index] - GOST_TABLE.pad * 2) * mm;
-      ctx.fillText(gostTableCell(ctx, cell, limit), (x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
+      ctx.fillText(exportClipToWidth(ctx, cell, limit), (x + GOST_TABLE.pad) * mm, (y + GOST_TABLE.row / 2) * mm);
       x += widths[index];
     });
   };
