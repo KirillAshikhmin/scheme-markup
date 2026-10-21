@@ -50,6 +50,7 @@ import {
   setPlanScale,
   wallsOnScheme,
   setMarkControls,
+  roomsInOrder,
   setRoomFloor,
   setRoomWallHeight,
   setSchemeAnchor,
@@ -257,6 +258,8 @@ import {
   volumeStairs,
   volumeStart,
   volumeStep,
+  volumeWallCovers,
+  volumeWallFree,
   volumeWallSolids,
   volumeWallTiles,
   volumeWallMiters,
@@ -6538,5 +6541,106 @@ test("G68: отметка «снять крышу» не меняет объек
   const before = JSON.stringify(house.project);
   volumeScene(house.project, house.first, { roofOff: true });
   volumeStackScene(house.project, volumeFloorPlan(house.project, house.first), () => ({ roofOff: true }));
+  assert.equal(JSON.stringify(house.project), before, "объект изменился — это запрещено прямо (G68)");
+});
+
+// ——— чья стена в полосе двусвета (таск 214, дефект D65) ————————————————
+
+/** Стена-отрезок для проверок накрытия: в своих координатах, без схемы. */
+const wallAt = (ax, ay, bx, by, thicknessMm = 200) => ({
+  id: "w" + ax + "." + ay,
+  aMm: { x: ax, y: ay },
+  bMm: { x: bx, y: by },
+  thicknessMm,
+});
+
+test("стена считается накрытой, когда наверху по ней идёт своя стена", () => {
+  const low = wallAt(0, 0, 6000, 0);
+  // Ровно над ней, той же осью — накрыта целиком.
+  assert.deepEqual(volumeWallCovers(low, [wallAt(0, 0, 6000, 0)]), [{ fromMm: 0, toMm: 6000 }]);
+  // Короче и со сдвигом — накрыт только её кусок.
+  assert.deepEqual(volumeWallCovers(low, [wallAt(1500, 0, 4000, 0)]), [{ fromMm: 1500, toMm: 4000 }]);
+  // Два куска подряд сливаются в один.
+  assert.deepEqual(
+    volumeWallCovers(low, [wallAt(0, 0, 3000, 0), wallAt(3000, 0, 6000, 0)]),
+    [{ fromMm: 0, toMm: 6000 }],
+  );
+  // Перегородка, упирающаяся в стену под прямым углом, накрытием не считается:
+  // иначе она пробивала бы в двусветной стене дыру шириной в себя.
+  assert.deepEqual(volumeWallCovers(low, [wallAt(3000, 0, 3000, 4000)]), []);
+  // Стена наверху, идущая рядом, но в стороне — чужая.
+  assert.deepEqual(volumeWallCovers(low, [wallAt(0, 900, 6000, 900)]), []);
+  // Чуть косая (в пределах допуска) — та же самая.
+  assert.equal(volumeWallCovers(low, [wallAt(0, 0, 6000, 900)]).length, 1);
+  // Свободные куски — дополнение к накрытым.
+  assert.deepEqual(volumeWallFree(6000, [{ fromMm: 1500, toMm: 4000 }]), [
+    { fromMm: 0, toMm: 1500 },
+    { fromMm: 4000, toMm: 6000 },
+  ]);
+  assert.deepEqual(volumeWallFree(6000, []), [{ fromMm: 0, toMm: 6000 }]);
+  assert.deepEqual(volumeWallFree(6000, [{ fromMm: 0, toMm: 6000 }]), []);
+});
+
+test("в двусвете высокая стена уступает стене этажа выше, а простенок остаётся", () => {
+  // Стенд: два этажа, у комнаты снизу высота в два этажа, у комнаты сверху
+  // снят пол — то самое двусветное пространство (таск 209).
+  const house = houseScene();
+  const plan = volumeFloorPlan(house.project, house.first);
+  const cap = plan.floors[1].baseMm;
+  const tall = setRoomWallHeight(house.project, roomsInOrder(house.project)[0].id, cap + 2000).project;
+  const built = volumeScene(tall, house.first, {});
+  const wall = wallsOnScheme(tall, house.first)[0];
+  const topOf = (scene, id) =>
+    Math.max(
+      ...scene.faces
+        .filter((face) => face.rgb === VOLUME_WALL_RGB && face.n.z === 0)
+        .flatMap((face) => face.p.map((point) => point.z)),
+    );
+  assert.equal(topOf(built), cap + 2000, "без стопки высокая стена идёт во всю свою высоту");
+  // Накрываем её стеной «этажа выше» на половину длины.
+  const vectors = { len: Math.hypot(wall.bMm.x - wall.aMm.x, wall.bMm.y - wall.aMm.y) };
+  const middle = { x: (wall.aMm.x + wall.bMm.x) / 2, y: (wall.aMm.y + wall.bMm.y) / 2 };
+  const covers = new Map([[wall.id, volumeWallCovers(wall, [{ aMm: wall.aMm, bMm: middle, thicknessMm: wall.thicknessMm }])]]);
+  const cut = volumeScene(tall, house.first, { capMm: cap, covers });
+  // Накрытая половина кончается на перекрытии, свободная идёт вверх телом.
+  const sides = cut.faces.filter((face) => face.rgb === VOLUME_WALL_RGB && face.n.z === 0);
+  const above = sides.filter((face) => Math.max(...face.p.map((point) => point.z)) > cap + 1);
+  assert.ok(above.length > 0, "простенок продолжается вверх");
+  assert.equal(topOf(cut), cap + 2000, "и ровно до своей высоты");
+  // Накрытая половина: в её створе выше перекрытия больше нет ни одной грани
+  // этой стены.
+  const quarter = { x: (wall.aMm.x + middle.x) / 2, y: (wall.aMm.y + middle.y) / 2 };
+  const crosses = (face, p, z) => {
+    // Допуск — полтолщины стены: её стороны отстоят от оси ровно на столько.
+    const gap = Math.abs(face.n.x * (p.x - face.p[0].x) + face.n.y * (p.y - face.p[0].y));
+    if (gap > Number(wall.thicknessMm) / 2 + 1) return false;
+    const zs = face.p.map((point) => point.z);
+    if (z < Math.min(...zs) || z > Math.max(...zs)) return false;
+    const along = face.p.map((point) => point.x * -face.n.y + point.y * face.n.x);
+    const at = p.x * -face.n.y + p.y * face.n.x;
+    return at > Math.min(...along) + 20 && at < Math.max(...along) - 20;
+  };
+  assert.equal(
+    sides.filter((face) => crosses(face, quarter, cap + 1000)).length,
+    0,
+    "над накрытым куском стены больше нет",
+  );
+  assert.ok(
+    sides.filter((face) => crosses(face, { x: (middle.x + wall.bMm.x) / 2, y: (middle.y + wall.bMm.y) / 2 }, cap + 1000)).length > 0,
+    "а над свободным — есть",
+  );
+  // Проёмы ниже перекрытия целы: их число не изменилось.
+  const holes = (scene) => scene.faces.filter((face) => face.rgb === VOLUME_WALL_RGB).length;
+  assert.ok(holes(cut) > 0 && holes(built) > 0);
+  // Солнце: проёмы сцены считаются по объекту, и срез их не удваивает.
+  assert.equal(cut.sunSpots.length, built.sunSpots.length, "пятен столько же");
+  assert.equal(cut.doors.length, built.doors.length, "дверей столько же");
+});
+
+test("G68: накрытия считаются по объекту и его не меняют", () => {
+  const house = houseScene();
+  const before = JSON.stringify(house.project);
+  const plan = volumeFloorPlan(house.project, house.first);
+  volumeStackScene(house.project, plan, () => ({}));
   assert.equal(JSON.stringify(house.project), before, "объект изменился — это запрещено прямо (G68)");
 });

@@ -56276,6 +56276,99 @@ function volumeSlabFaces(points, topMm, out = []) {
   return out;
 }
 
+// ——— чья стена в полосе двусвета (таск 214, дефект D65) ————————————————
+//
+// Слова заказчика: «если на двусветном помещении на 2 этаже отрисовать проёмы
+// в стенах (проход, дверь, окна), то их перекрывает стена первого этажа и
+// становятся глухими».
+//
+// **Откуда берутся две стены.** Двусвет собирается двумя ручками (таск 209):
+// комнате снизу задают высоту в два этажа, у помещения сверху снимают пол.
+// Высота комнаты поднимает её стены (`wallHeightOnSide`), и в полосе второго
+// этажа оказываются **две стены разом**: высокая нижняя, глухая наверху, и
+// своя стена второго этажа — та, в которой человек чертит проёмы. Толщина,
+// место и плоскость у них те же, и порядок между совпавшими плоскостями
+// решать нечем: чья грань нарисуется последней, ту и видно. На объекте
+// заказчика так закрыты **7 проёмов из 17** на втором этаже — шесть окон
+// (4000…5400 мм) и проход (3200…5300).
+//
+// **Главная — стена того этажа, в чьей полосе она стоит.** Это не «спрятать
+// лишнее», а прочтение данных: один и тот же кусок дома человек чертит на
+// каждом плане своего этажа, и проёмы верхней полосы он рисует на верхнем
+// плане. Нижняя стена поднимается выше своего этажа только там, где **у
+// верхнего этажа своей стены нет** — тогда уступать некому, и простенок
+// двусветной стены честно стоит на всю высоту. Оба случая встречаются в одной
+// комнате: на объекте заказчика пять высоких стен накрыты верхними целиком, а
+// шестая — на 5 % длины, и остальные её 95 % остаются высокими.
+//
+// Уступает стена **кусками, а не целиком**: накрытый кусок становится проёмом
+// от перекрытия до её верха. Поэтому в сцене не заводится ни одного нового
+// вида грани — работают те же откосы, те же куски стены между проёмами и те же
+// препятствия, которыми живут настоящие проёмы.
+
+/** Насколько стены считаются «той же самой»: угол между их осями. */
+const VOLUME_WALL_SAME_DEG = 20;
+
+/**
+ * Куски стены, которые на этаже выше накрыты его собственной стеной.
+ *
+ * `uppers` — стены верхнего этажа, **уже переведённые в координаты этой
+ * схемы** (разницу привязок знает стопка). Считается «та же стена»: оси
+ * сонаправлены с точностью до `VOLUME_WALL_SAME_DEG` и отстоят не дальше, чем
+ * сумма полутолщин. Стена, которая просто упирается в эту (перегородка под
+ * прямым углом), накрытием не считается — иначе она пробивала бы в двусветной
+ * стене дыру шириной в себя.
+ */
+function volumeWallCovers(wall, uppers) {
+  const vectors = wallVectors(wall);
+  if (!vectors) return [];
+  const half = Number(wall.thicknessMm) / 2;
+  const limit = Math.cos(VOLUME_WALL_SAME_DEG * DEG);
+  const spans = [];
+  for (const up of uppers || []) {
+    const other = wallVectors(up);
+    if (!other) continue;
+    if (Math.abs(vectors.u.x * other.u.x + vectors.u.y * other.u.y) < limit) continue;
+    const reach = half + Number(up.thicknessMm) / 2;
+    const ends = [up.aMm, up.bMm].map((point) => {
+      const dx = Number(point.x) - Number(wall.aMm.x);
+      const dy = Number(point.y) - Number(wall.aMm.y);
+      return {
+        along: dx * vectors.u.x + dy * vectors.u.y,
+        across: dx * vectors.n.x + dy * vectors.n.y,
+      };
+    });
+    if (Math.abs(ends[0].across) > reach && Math.abs(ends[1].across) > reach) continue;
+    const from = Math.max(0, Math.min(ends[0].along, ends[1].along));
+    const to = Math.min(vectors.len, Math.max(ends[0].along, ends[1].along));
+    if (!(to - from > 1)) continue;
+    spans.push({ fromMm: from, toMm: to });
+  }
+  spans.sort((a, b) => a.fromMm - b.fromMm);
+  const merged = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span.fromMm <= last.toMm + 1) {
+      last.toMm = Math.max(last.toMm, span.toMm);
+      continue;
+    }
+    merged.push({ ...span });
+  }
+  return merged;
+}
+
+/** Куски стены, которые **не** накрыты: дополнение к `volumeWallCovers`. */
+function volumeWallFree(lengthMm, covers) {
+  const free = [];
+  let cursor = 0;
+  for (const span of covers || []) {
+    if (span.fromMm > cursor) free.push({ fromMm: cursor, toMm: Math.min(lengthMm, span.fromMm) });
+    cursor = Math.max(cursor, span.toMm);
+  }
+  if (cursor < lengthMm) free.push({ fromMm: cursor, toMm: lengthMm });
+  return free.filter((span) => span.toMm - span.fromMm > 1);
+}
+
 /** Снизу и сверху: насколько грани уходят по вертикали. `null` — граней нет. */
 function volumeFacesSpan(faces) {
   let minZ = Infinity;
@@ -56373,8 +56466,35 @@ function volumeStackScene(project, plan, optionsOf) {
   // открыта: второй этаж не становится землёй от того, что человек на нём
   // стоит.
   const upperOf = (at) => at > 0;
+
+  /**
+   * Чем этаж накрыт сверху (таск 214): потолок его полосы и куски стен, у
+   * которых этаж выше поставил свою стену на то же место. Стены соседа
+   * переводятся в координаты этого этажа — разницу привязок знает план стопки.
+   */
+  const coverOf = (at) => {
+    const here = floors[at];
+    const above = floors[at + 1];
+    if (!above) return {};
+    const dx = above.shiftMm.x - here.shiftMm.x;
+    const dy = above.shiftMm.y - here.shiftMm.y;
+    const uppers = wallsOnScheme(project, above.schemeId).map((wall) => ({
+      aMm: { x: Number(wall.aMm.x) + dx, y: Number(wall.aMm.y) + dy },
+      bMm: { x: Number(wall.bMm.x) + dx, y: Number(wall.bMm.y) + dy },
+      thicknessMm: wall.thicknessMm,
+    }));
+    const covers = new Map();
+    for (const wall of wallsOnScheme(project, here.schemeId)) {
+      const spans = volumeWallCovers(wall, uppers);
+      if (spans.length > 0) covers.set(wall.id, spans);
+    }
+    // Потолок полосы этажа в его собственных миллиметрах: база соседа минус
+    // своя, то есть высота этажа вместе с перекрытием.
+    return { capMm: above.baseMm - here.baseMm, covers };
+  };
   const base = volumeScene(project, mine.schemeId, {
     ...take(mine.schemeId),
+    ...coverOf(mineAt),
     order: false,
     upper: upperOf(mineAt),
   });
@@ -56393,7 +56513,12 @@ function volumeStackScene(project, plan, optionsOf) {
     const own = at === mineAt;
     const sub = own
       ? base
-      : volumeScene(project, item.schemeId, { ...take(item.schemeId), order: false, upper: upperOf(at) });
+      : volumeScene(project, item.schemeId, {
+          ...take(item.schemeId),
+          ...coverOf(at),
+          order: false,
+          upper: upperOf(at),
+        });
     if (!sub || sub.empty) continue;
     if (at === 0) landMm = sub.landMm;
     volumeFloorFaces(sub.faces, { baseMm: item.baseMm, shiftMm: item.shiftMm, own });
@@ -57911,16 +58036,52 @@ function volumeScene(project, schemeId, options = {}) {
   // высоты.
   const miters = volumeWallMiters(walls, (wall) => wallHeights.get(wall.id) || 0);
   for (const wall of walls) {
+    // **Накрытые куски стены** (таск 214, дефект D65): там, где у этажа выше
+    // стоит его собственная стена, эта уступает ей — накрытый кусок выше
+    // перекрытия становится проходом. Считает накрытия стопка (`options.covers`
+    // и `options.capMm`): одна схема про соседние этажи не знает ничего, и
+    // без стопки этого словаря нет вовсе — тогда всё как было.
+    const covers = options.covers instanceof Map ? options.covers.get(wall.id) : null;
     const openings = openingsInWall(project, wall.id);
     for (const opening of openings) {
       // Стеклянная дверь — дверь и здесь (таск 180): её открывают `E`, щелчком
       // и касанием, и `R` открывает её вместе со всеми.
       if (openingHasLeaf(opening.kind) && opening.id) doors.push(opening.id);
     }
-    const height = wallHeights.get(wall.id);
+    const own = wallHeights.get(wall.id);
+    // **Стена уступает полосе этажа выше** (таск 214, дефект D65). Накрыта
+    // верхней стеной — своя строится до потолка своей полосы (`capMm`), а
+    // выше стоит стена соседа, в которой и прорезаны его проёмы. Не накрыта —
+    // высота своя, как была: простенок двусветной стены честно идёт на всю
+    // высоту, и это тот самый случай, который видно на рендерах заказчика.
+    const cap = covers && covers.length > 0 ? Math.min(own, Number(options.capMm) || own) : own;
+    const height = cap;
     volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
+    // Куски, которые верхняя стена не накрыла, продолжаются вверх своим телом:
+    // проёмов выше перекрытия у них не бывает — чертят их на том плане, где
+    // этот кусок стоит.
+    if (cap < own) {
+      for (const span of volumeWallFree(vectors.len, covers)) {
+        const middleMm = (span.fromMm + span.toMm) / 2;
+        volumePrismFaces(
+          volumeBoxCorners(
+            {
+              x: Number(wall.aMm.x) + vectors.u.x * middleMm,
+              y: Number(wall.aMm.y) + vectors.u.y * middleMm,
+            },
+            vectors.u,
+            span.toMm - span.fromMm,
+            Number(wall.thicknessMm),
+          ),
+          cap,
+          own,
+          VOLUME_WALL_RGB,
+          faces,
+        );
+      }
+    }
     // **Пол под стеной** (дефект D37). Слова заказчика: «под дверными проёмами
     // нет пола».
     //
