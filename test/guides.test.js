@@ -136,6 +136,12 @@ test("обрезка считает направляющую по своей с�
   const base = scene();
   const pinned = setSchemeGuides(base.project, base.schemeId, [{ axis: "h", at: -0.3 }]);
   assert.equal(pinned.guides[0].at, 0);
+  // Поворот и рамка приходят **одним** преобразованием (`rotateTransform` их
+  // копит), и считаются они тоже одним — своей арифметики на сочетание нет.
+  const both = { rotate: 90, crop: { x: 0.25, y: 0, width: 0.5, height: 1 } };
+  // Горизонтальная на 0,4 сперва становится вертикальной на 0,6, а рамка
+  // 0,25…0,75 по ширине переводит 0,6 в 0,7.
+  assert.deepEqual(transformGuide({ axis: "h", at: 0.4 }, both), { axis: "v", at: 0.7 });
 });
 
 test("поворот подложки доворачивает направляющие вместе с метками", () => {
