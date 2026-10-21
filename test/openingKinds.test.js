@@ -26,6 +26,8 @@ import { readFileSync } from "node:fs";
 import {
   OPENING_KINDS,
   OPENING_KIND_GLASS_DOOR,
+  openingHasLeaf,
+  openingOpens,
   addOpening,
   addScheme,
   addWall,
@@ -40,11 +42,21 @@ import {
   wallElevation,
   wallsOnScheme,
 } from "../src/model.js";
+import { openingArchGeometry } from "../src/model.js";
 import { openingCatalogDefaults } from "../src/openingCatalog.js";
 import { drawDrawingOpening, drawElevation, drawOpeningFace, drawingBridge, drawingDoorLeaves } from "../src/render.js";
-import { volumeDoorOpen, volumeOpeningWalkable, volumeScene } from "../src/volume.js";
+import {
+  VOLUME_ARCH_SEGMENTS,
+  VOLUME_ROLL_MM,
+  volumeDoorOpen,
+  volumeInnerSide,
+  volumeOpeningWalkable,
+  volumeScene,
+} from "../src/volume.js";
 
 const VOLUME_BEFORE = JSON.parse(readFileSync(new URL("./fixtures/openings-volume-before.json", import.meta.url), "utf8"));
+// Кадр **после** правки G329 (таск 219): у арки свод и пазухи. Разбор — у теста.
+const VOLUME_AFTER = JSON.parse(readFileSync(new URL("./fixtures/openings-after-g329.json", import.meta.url), "utf8"));
 const LEGACY_TEXT = readFileSync(new URL("./legacy-openings-project.json", import.meta.url), "utf8");
 
 const round = (value) => (typeof value === "number" ? Math.round(value * 100) / 100 : value);
@@ -309,7 +321,7 @@ test("импосты окна стоят и в объёме: тройное — 
   assert.equal(bars("windowGlazing"), 4, "витраж — одна секция");
 });
 
-test("полотно поднимающихся ворот стоит в проёме панелями и не открывается", () => {
+test("закрытые поднимающиеся ворота стоят полотном в проёме", () => {
   const panels = (kind) => {
     const scene = one(kind);
     const built = volumeScene(scene.project, scene.schemeId);
@@ -319,15 +331,93 @@ test("полотно поднимающихся ворот стоит в про�
   assert.equal(sectional.faces.length, 4, "четыре панели");
   const roller = panels("gateRoller");
   assert.ok(roller.faces.length > 10, "ламели: " + roller.faces.length);
-  // Открытого положения у них нет: в список дверей сцены они не попадают, и
-  // `R` их не откроет. Решение названо вслух — полотно уходит вверх, а не в
-  // сторону.
-  assert.deepEqual(sectional.built.doors, [], "секционные ворота не числятся дверью");
-  assert.deepEqual(roller.built.doors, []);
-  assert.equal(volumeDoorOpen(new Set(roller.scene.ids), null), false);
   // Панели лежат в одной плоскости и друг на друга не налезают.
   const ys = sectional.faces.flatMap((face) => face.p.map((point) => point.y));
   assert.ok(Math.max(...ys) - Math.min(...ys) < 1, "полотно плоское");
+  // Полотно именное: щелчок по нему открывает **эти** ворота, а не соседние.
+  for (const face of sectional.faces) assert.equal(face.doorId, sectional.scene.ids[0]);
+});
+
+// ——— ворота поднимаются (таск 219, G328) —————————————————————————————————
+//
+// Слова заказчика: «Ворота-роллеты и секционные не открываются — должны
+// открываться в объёме. Да, пусть лист будет». В таске 215 открытого положения
+// у них не было, и довод был назван: полотно уходит вверх, и показывать это
+// пришлось бы горизонтальным листом в комнате. Лист принят.
+
+test("G328: поднимающиеся ворота — двери сцены: R их открывает, счётчик их считает", () => {
+  for (const kind of ["gateRoller", "gateSectional"]) {
+    const scene = one(kind);
+    const built = volumeScene(scene.project, scene.schemeId);
+    assert.deepEqual(built.doors, [scene.ids[0]], kind + " не попали в список дверей сцены");
+    assert.equal(volumeDoorOpen(new Set(built.doors), scene.ids[0]), true, kind);
+  }
+  // Положений у них **два**, а не четыре: ни петель, ни стороны стены у
+  // полотна нет — кольцо `Q`/`E` их не водит, и полей створки у них в объекте
+  // не появляется.
+  for (const kind of ["gateRoller", "gateSectional"]) {
+    assert.equal(openingHasLeaf(kind), false, kind + ": сторона у полотна появилась");
+    assert.equal(openingOpens(kind), true, kind + ": полотно есть, и оно открывается");
+    const scene = one(kind);
+    assert.equal(Object.prototype.hasOwnProperty.call(scene.project.openings[0], "hinge"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(scene.project.openings[0], "swing"), false);
+  }
+  // Распашные и сдвижные ворота открывались и раньше — список от этого не
+  // сбился: в нём теперь все четверо.
+  const all = room([
+    { kind: "gateRoller", atMm: 0, ...openingCatalogDefaults("gateRoller") },
+    { kind: "gateSectional", atMm: 2600, ...openingCatalogDefaults("gateSectional") },
+  ]);
+  assert.equal(volumeScene(all.project, all.schemeId).doors.length, 2);
+});
+
+test("G328: роллета сворачивается в вал, а секционные уходят листом в комнату", () => {
+  const opened = (kind) => {
+    const scene = one(kind);
+    const shut = volumeScene(scene.project, scene.schemeId);
+    const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) });
+    return { scene, shut: leafOf(shut, scene.ids[0]), open: leafOf(open, scene.ids[0]) };
+  };
+  const roller = opened("gateRoller");
+  // Полотна в проёме не осталось: сквозь открытые ворота видно.
+  const inOpening = (faces) => faces.filter((face) => face.p.every((point) => Math.abs(point.y) < 1));
+  assert.ok(inOpening(roller.shut).length > 10, "закрытая роллета стоит ламелями в проёме");
+  assert.equal(inOpening(roller.open).length, 0, "открытая роллета из проёма ушла");
+  // Вал — короб над проёмом: его грани стоят **выше** верха полотна.
+  const top = openingCatalogDefaults("gateRoller").heightMm;
+  const zs = roller.open.flatMap((face) => face.p.map((point) => point.z));
+  assert.ok(Math.min(...zs) >= top - 1, "вал встал под перемычкой: низ " + Math.min(...zs));
+  assert.ok(Math.max(...zs) <= top + VOLUME_ROLL_MM + 1, "вал не толще своей меры");
+  // Рулон занимает место поперёк стены, но в комнату не выступает дальше
+  // полутолщины: его ставят коробом под перемычку.
+  const away = Math.max(...roller.open.flatMap((face) => face.p.map((point) => Math.abs(point.y))));
+  assert.ok(away <= 101, "вал не вылез в комнату: " + away);
+
+  const sectional = opened("gateSectional");
+  assert.equal(inOpening(sectional.open).length, 0, "открытые секционные из проёма ушли");
+  // Пакет панелей — **один горизонтальный лист** под перемычкой: все четыре
+  // угла на одной высоте, и уходит он от стены внутрь на высоту полотна.
+  assert.equal(sectional.open.length, 1, "лист один");
+  const sheet = sectional.open[0];
+  const heights = sheet.p.map((point) => point.z);
+  assert.ok(Math.max(...heights) - Math.min(...heights) < 1, "лист горизонтален");
+  assert.ok(Math.abs(Math.max(...heights) - openingCatalogDefaults("gateSectional").heightMm) < 1, "лист под перемычкой");
+  const deep = Math.max(...sheet.p.map((point) => Math.abs(point.y)));
+  assert.ok(deep > 2000, "лист уходит в комнату на высоту полотна: " + deep);
+});
+
+test("G328: лист секционных уходит в комнату, а не на улицу", () => {
+  // Сторону спрашивают у контуров помещений — тем же щупом, которым солнце
+  // выясняет, куда ему светить. Комната здесь по y > 0 (стена по y = 0, а
+  // прямоугольник комнаты уходит вниз по чертежу).
+  const scene = one("gateSectional");
+  const outlined = volumeInnerSide(scene.wall, [{ pointsMm: [
+    { x: 100, y: 100 }, { x: 6900, y: 100 }, { x: 6900, y: 3900 }, { x: 100, y: 3900 },
+  ] }], 1500);
+  assert.equal(outlined, -1, "комната — та сторона, где её контур");
+  // Контуров нет — ответа нет, и сторону выбирает тот, кто спрашивал.
+  assert.equal(volumeInnerSide(scene.wall, [], 1500), 0);
+  assert.equal(volumeInnerSide(scene.wall, null, 1500), 0);
 });
 
 test("двустворчатая дверь — две створки с ручками, и обе уходят на сторону открывания", () => {
@@ -383,9 +473,89 @@ test("сквозь стекло в пол не ходят, а сквозь во�
   }
 });
 
+// ——— дуга арки на трёх поверхностях (таск 219, G329) —————————————————————
+
+test("G329: дуга есть на листе и в плитке выбора, а на плане у арки прежний пунктир", () => {
+  const scene = one("arch");
+  const face = wallElevation(scene.project, scene.wall.id, "right").openings[0];
+  assert.ok(face.arch && face.arch.riseMm > 0, "лист не знает про дугу");
+  const sheet = [];
+  drawOpeningFace(scribe(sheet), { x: 0, y: 0, width: 240, height: 420 }, face, { unit: 1, scale: 0.2 });
+  assert.equal(sheet.filter((call) => call.startsWith("arc(")).length, 1, "дуги на листе нет");
+  assert.equal(sheet.filter((call) => call.startsWith("strokeRect(")).length, 0, "арка обведена прямоугольником");
+  // Плитка выбора рисуется тем же лицом, и дуга на ней та же: до таска 219
+  // «Проём» и «Арка» в окне выбора были неразличимы.
+  const plain = [];
+  const plainScene = one("opening");
+  const plainFace = wallElevation(plainScene.project, plainScene.wall.id, "right").openings[0];
+  drawOpeningFace(scribe(plain), { x: 0, y: 0, width: 240, height: 420 }, plainFace, { unit: 1, scale: 0.2 });
+  assert.equal(plain.filter((call) => call.startsWith("arc(")).length, 0, "у проёма дуги быть не должно");
+  assert.notDeepEqual(sheet, plain, "арка и проём на лице снова совпали");
+  // На плане у арки — пунктир, и он не изменился: это проверяет отпечаток
+  // таска 180 (`doors.test.js`), а здесь — что дуга туда не просочилась.
+  assert.equal(planLog(scene, scene.project.openings[0]).filter((call) => call.startsWith("arc(")).length, 0);
+  // На клетке, в которой дуге негде встать (просвет ниже её подъёма), проём
+  // обводится прямоугольником — как обводился всегда, а не рвётся.
+  const tiny = [];
+  drawOpeningFace(scribe(tiny), { x: 0, y: 0, width: 6, height: 2 }, face, { unit: 1, scale: 0.002 });
+  assert.equal(tiny.filter((call) => call.startsWith("strokeRect(")).length, 1);
+  assert.equal(tiny.filter((call) => call.startsWith("arc(")).length, 0);
+});
+
+test("G329: в объёме у арки свод по дуге, откосы до пяты и пазухи по сторонам", () => {
+  const scene = one("arch");
+  const built = volumeScene(scene.project, scene.schemeId);
+  const arch = openingArchGeometry(scene.project.openings[0]);
+  const span = { from: 1000, to: 1000 + openingCatalogDefaults("arch").widthMm };
+  const inArch = built.faces.filter((face) =>
+    face.p.every((point) => point.x >= span.from - 0.01 && point.x <= span.to + 0.01 && Math.abs(point.y) <= 100.01),
+  );
+  // Свод: отрезков столько, на сколько режется дуга, и все они стоят между
+  // пятой и верхом проёма.
+  const top = openingCatalogDefaults("arch").heightMm;
+  // Грани свода — те, у которых все четыре точки лежат на окружности дуги.
+  const centre = top - arch.radiusMm;
+  const onArc = (face) =>
+    face.p.every((point) => Math.abs(Math.hypot(point.x - (span.from + span.to) / 2, point.z - centre) - arch.radiusMm) < 1);
+  assert.equal(inArch.filter(onArc).length, VOLUME_ARCH_SEGMENTS, "свод режется дугой");
+  // Откосы кончаются на пяте: выше неё стена не стоит, там свод.
+  const isJamb = (face) =>
+    !onArc(face) && face.p.every((point) => Math.abs(point.x - span.from) < 0.01 || Math.abs(point.x - span.to) < 0.01);
+  const jambs = inArch.filter(isJamb);
+  assert.equal(jambs.length, 2, "откосов двое");
+  for (const jamb of jambs) {
+    assert.ok(Math.max(...jamb.p.map((point) => point.z)) <= top - arch.riseMm + 0.01, "откос залез выше пяты");
+  }
+  // Пазухи: по двенадцать трапеций на сторону, у каждой нижняя кромка
+  // наклонная — она и садится на дугу.
+  const spandrel = inArch.filter((face) => !onArc(face) && !isJamb(face));
+  assert.equal(spandrel.length, VOLUME_ARCH_SEGMENTS * 2, "пазух не по двенадцать на сторону: " + spandrel.length);
+  const sloped = spandrel.filter((face) => {
+    const low = face.p.map((point) => point.z).sort((a, b) => a - b).slice(0, 2);
+    return Math.abs(low[0] - low[1]) > 0.01;
+  });
+  assert.ok(sloped.length >= spandrel.length - 2, "нижняя кромка пазухи обязана идти по дуге");
+  // Сквозь арку по-прежнему ходят, и свет сквозь неё идёт: проём с дугой —
+  // всё ещё проём.
+  assert.equal(volumeOpeningWalkable(scene.project.openings[0]), true);
+});
+
 // ——— G68 ——————————————————————————————————————————————————————————————————
 
-test("G68: кадр прежних проёмов в объёме — грань в грань тот же, что до каталога", () => {
+// ——— ВНИМАНИЕ: отпечаток объёма обновлён **по требованию заказчика** ————————
+//
+// Таск 219, требование G329: «У арки дорисуй дугу и на развёртке и в объёме».
+// Кадр прежней сцены изменился — у арки появились свод и пазухи, — и это
+// решение заказчика, а не поломка. Прежний отпечаток
+// (`openings-volume-before.json`) **оставлен на месте**: по нему здесь
+// проверяется, что всё, кроме самой арки, не изменилось ни на грань. Новый
+// (`openings-after-g329.json`) держит кадр с дугой.
+//
+// Следующему исполнителю: покрасневший тест — не разрешение обновить
+// отпечаток. Кадр прежнего объекта меняется только по слову заказчика, с
+// номером требования.
+
+test("G329: в объёме у арки появились свод и пазухи — и больше не изменилось ничего", () => {
   const scene = room([
     { kind: "window", atMm: 200, widthMm: 1500, heightMm: 1400, heightAboveFloorMm: 800 },
     { kind: "door", atMm: 2000, widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0, hinge: "start", swing: "left" },
@@ -400,9 +570,26 @@ test("G68: кадр прежних проёмов в объёме — грань
     door: face.doorId ? scene.ids.indexOf(face.doorId) : null,
     p: face.p.map((point) => [round(point.x), round(point.y), round(point.z)]),
   }));
-  assert.equal(built.doors.length, VOLUME_BEFORE.doors);
-  assert.equal(print.length, VOLUME_BEFORE.faces, "число граней прежней сцены изменилось");
-  assert.deepEqual(print, VOLUME_BEFORE.print, "кадр прежней сцены разошёлся с отпечатком");
+  assert.equal(built.doors.length, VOLUME_BEFORE.doors, "дверей в сцене столько же");
+  assert.deepEqual(print, VOLUME_AFTER.volume.print, "кадр сцены разошёлся с отпечатком таска 219");
+  // Арка стоит пятой, на отступе 5000 шириной 1200, в стене по y = 0 толщиной
+  // 200. Её грани — те, что целиком лежат в этой коробке; всё остальное к арке
+  // отношения не имеет и обязано совпасть с прежним отпечатком **грань в
+  // грань**.
+  const archy = (face) =>
+    face.p.every((point) => point[0] >= 4999.99 && point[0] <= 6200.01 && Math.abs(point[1]) <= 100.01);
+  assert.deepEqual(
+    print.filter((face) => !archy(face)),
+    VOLUME_BEFORE.print.filter((face) => !archy(face)),
+    "G329 тронул что-то кроме арки",
+  );
+  // Чем именно стала арка — числами. Было пять граней: перемычка, два откоса и
+  // два куска стены над проёмом. Стало сорок: двенадцать отрезков свода,
+  // двенадцать трапеций пазухи на каждой стороне и те же два откоса, которые
+  // теперь кончаются на пяте.
+  assert.equal(VOLUME_BEFORE.print.filter(archy).length, 5);
+  assert.equal(print.filter(archy).length, 2 + VOLUME_ARCH_SEGMENTS * 3);
+  assert.equal(print.length - VOLUME_BEFORE.faces, 33);
 });
 
 test("G68: стеклянная дверь прежней разметки рисуется ровно как распашная с отметкой", () => {

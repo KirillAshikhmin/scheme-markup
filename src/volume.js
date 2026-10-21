@@ -54,7 +54,11 @@ import {
   markSizes,
   markWall,
   markWallSideOn,
+  openingArchDropMm,
+  openingArchGeometry,
   openingFaceGrid,
+  openingOpens,
+  openingSlatted,
   openingFamilyOf,
   openingGlazed,
   openingHasLeaf,
@@ -1363,12 +1367,59 @@ export function volumeWallTiles(lengthMm, heightMm, openings) {
     if (from > cursor) tiles.push({ fromMm: cursor, toMm: from, bottomMm: 0, topMm: heightMm });
     if (to > from) {
       if (bottom > 0) tiles.push({ fromMm: from, toMm: to, bottomMm: 0, topMm: bottom });
-      if (heightMm > top) tiles.push({ fromMm: from, toMm: to, bottomMm: top, topMm: heightMm });
+      // **Пазухи арки** (таск 219, G329): над дугой стена не кончается по
+      // прямой — у косяков она спускается до пяты, и эти два серпа и есть то,
+      // чем арка отличается от проёма. Нарезаются они трапециями по дуге, а не
+      // одним вогнутым многоугольником: дерево порядка (таск 151) режет грани
+      // плоскостями соседей и выпуклости от них не требует, но вогнутая грань
+      // ему досталась бы одной штукой на весь серп — и легла бы поверх того,
+      // что видно сквозь саму арку.
+      const span = volumeArchSpan(opening, from, to, top, bottom);
+      if (span) {
+        for (let index = 0; index < span.length - 1; index += 1) {
+          const left = span[index];
+          const right = span[index + 1];
+          const low = Math.min(left.zMm, right.zMm);
+          if (!(heightMm > low)) continue;
+          tiles.push({
+            fromMm: left.alongMm,
+            toMm: right.alongMm,
+            bottomMm: low,
+            topMm: heightMm,
+            bottomFromMm: left.zMm,
+            bottomToMm: right.zMm,
+          });
+        }
+      } else if (heightMm > top) {
+        tiles.push({ fromMm: from, toMm: to, bottomMm: top, topMm: heightMm });
+      }
     }
     cursor = Math.max(cursor, to);
   }
   if (lengthMm > cursor) tiles.push({ fromMm: cursor, toMm: lengthMm, bottomMm: 0, topMm: heightMm });
   return tiles.filter((tile) => tile.toMm > tile.fromMm && tile.topMm > tile.bottomMm);
+}
+
+/** Во сколько отрезков режется дуга арки: и свод, и пазухи, и ничего больше. */
+export const VOLUME_ARCH_SEGMENTS = 12;
+
+/**
+ * Дуга арки ломаной вдоль стены: `{alongMm, zMm}` от косяка до косяка.
+ *
+ * `null` — у вида прямой верх или дуге негде встать (просвет ниже её подъёма).
+ * Числа берутся у модели (`openingArchGeometry` и `openingArchDropMm`) — теми
+ * же, какими дугу рисует лист развёртки: второй формы у арки быть не должно.
+ */
+function volumeArchSpan(opening, from, to, top, bottom) {
+  const arch = openingArchGeometry(opening);
+  if (!arch) return null;
+  if (!(top - bottom > arch.riseMm)) return null;
+  const points = [];
+  for (let index = 0; index <= VOLUME_ARCH_SEGMENTS; index += 1) {
+    const part = index / VOLUME_ARCH_SEGMENTS;
+    points.push({ alongMm: from + (to - from) * part, zMm: top - openingArchDropMm(opening, part) });
+  }
+  return points;
 }
 
 // ——— ус на углу стен (G265, таск 178) ————————————————————————————————————
@@ -1512,7 +1563,7 @@ export function volumeWallMiters(walls, heightOf = () => 0) {
  * все двери будут закрыты». Раскрывается оно поимённо — `openDoorIds` — и живёт
  * это только в сеансе окна: в объект состояние двери не пишется (G68).
  */
-export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null) {
+export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null, rooms = null) {
   const vectors = wallVectors(wall);
   if (!vectors || !(heightMm > 0)) return out;
   const half = Number(wall.thicknessMm) / 2;
@@ -1538,15 +1589,22 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
       // кромки соседки.
       const from = at(tile.fromMm === 0 ? startOf(side) : tile.fromMm, half * side);
       const to = at(tile.toMm === len ? endOf(side) : tile.toMm, half * side);
+      // Нижняя кромка куска бывает наклонной — так стена садится на дугу арки
+      // (таск 219). У прямого куска оба угла на одной высоте, и кадр прежних
+      // стен от этого не меняется ни на грань.
+      const bottomFrom = tile.bottomFromMm == null ? tile.bottomMm : tile.bottomFromMm;
+      const bottomTo = tile.bottomToMm == null ? tile.bottomMm : tile.bottomToMm;
       // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
       // стороне концы меняются местами.
       const first = side > 0 ? to : from;
       const second = side > 0 ? from : to;
+      const firstBottom = side > 0 ? bottomTo : bottomFrom;
+      const secondBottom = side > 0 ? bottomFrom : bottomTo;
       out.push(
         volumeFace(
           [
-            volumeAt(first, tile.bottomMm),
-            volumeAt(second, tile.bottomMm),
+            volumeAt(first, firstBottom),
+            volumeAt(second, secondBottom),
             volumeAt(second, tile.topMm),
             volumeAt(first, tile.topMm),
           ],
@@ -1582,13 +1640,40 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     ),
   );
   for (const opening of openings || []) {
-    volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds);
+    volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms);
   }
   return out;
 }
 
+/**
+ * **С какой стороны стены комната** — `1`, `-1` или `0`, если ответа нет.
+ *
+ * Спрашивается у контуров помещений тем же щупом, которым солнце выясняет,
+ * куда ему светить (`VOLUME_SUN_PROBE_MM`): точка в полутора сантиметрах от
+ * грани стены — уже комната, если контур обведён. Второго числа для этого не
+ * заведено, и обводят контур один раз на обе задачи.
+ *
+ * `0` — обе стороны одинаковы (две комнаты или улица с обеих): тогда выбор
+ * делает тот, кто спрашивал, и своё умолчание он называет сам.
+ */
+export function volumeInnerSide(wall, rooms, alongMm) {
+  if (!Array.isArray(rooms) || rooms.length === 0) return 0;
+  const vectors = wallVectors(wall);
+  if (!vectors) return 0;
+  const half = Number(wall.thicknessMm) / 2;
+  const probe = (side) => ({
+    x: Number(wall.aMm.x) + vectors.u.x * alongMm + vectors.n.x * side * (half + VOLUME_SUN_PROBE_MM),
+    y: Number(wall.aMm.y) + vectors.u.y * alongMm + vectors.n.y * side * (half + VOLUME_SUN_PROBE_MM),
+  });
+  const inside = (side) => rooms.some((room) => volumePointInside(probe(side), room.pointsMm));
+  const left = inside(1);
+  const right = inside(-1);
+  if (left === right) return 0;
+  return left ? 1 : -1;
+}
+
 /** Откосы проёма, рама окна и полотно двери — закрытое или раскрытое. */
-function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
+function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = null) {
   const vectors = wallVectors(wall);
   if (!vectors) return out;
   const half = Number(wall.thicknessMm) / 2;
@@ -1613,7 +1698,43 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
       ),
     );
   }
-  if (top < heightMm) {
+  // **Свод арки** (таск 219, G329): у неё верх не перемычкой, а дугой, и
+  // откосы кончаются на пяте. Свод нарезан теми же отрезками, что пазухи, —
+  // одной ломаной на обе поверхности.
+  const span = volumeArchSpan(opening, from, to, top, bottom);
+  const springMm = span ? span[0].zMm : top;
+  if (span) {
+    const middle = (from + to) / 2;
+    const arch = openingArchGeometry(opening);
+    for (let index = 0; index < span.length - 1; index += 1) {
+      const left = span[index];
+      const right = span[index + 1];
+      // Нормаль свода смотрит **внутрь проёма** — к центру той окружности, по
+      // которой он идёт: лампа сцены тогда гасит дугу к косякам, и свод виден
+      // сводом, а не плоской полосой.
+      const atMm = (left.alongMm + right.alongMm) / 2;
+      const zMm = (left.zMm + right.zMm) / 2;
+      const toCentre = { along: middle - atMm, z: top - arch.radiusMm - zMm };
+      const length = Math.hypot(toCentre.along, toCentre.z) || 1;
+      const normal = {
+        x: (u.x * toCentre.along) / length,
+        y: (u.y * toCentre.along) / length,
+        z: toCentre.z / length,
+      };
+      out.push(
+        volumeFace(
+          [
+            volumeAt(at(left.alongMm, -half), left.zMm),
+            volumeAt(at(right.alongMm, -half), right.zMm),
+            volumeAt(at(right.alongMm, half), right.zMm),
+            volumeAt(at(left.alongMm, half), left.zMm),
+          ],
+          VOLUME_WALL_RGB,
+          { normal },
+        ),
+      );
+    }
+  } else if (top < heightMm) {
     out.push(
       volumeFace(
         [at(from, -half), at(to, -half), at(to, half), at(from, half)].map((point) => volumeAt(point, top)),
@@ -1630,7 +1751,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
     const first = sign > 0 ? right : left;
     const second = sign > 0 ? left : right;
     out.push(
-      volumeFace([volumeAt(first, bottom), volumeAt(second, bottom), volumeAt(second, top), volumeAt(first, top)], VOLUME_WALL_RGB, {
+      volumeFace([volumeAt(first, bottom), volumeAt(second, bottom), volumeAt(second, springMm), volumeAt(first, springMm)], VOLUME_WALL_RGB, {
         normal,
       }),
     );
@@ -1644,16 +1765,79 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
     volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open);
     return out;
   }
-  // **Роллетные и подъёмно-секционные ворота** (таск 215): полотно стоит в
-  // проёме, в середине толщины стены — там же, где бруски рамы у окна, — и
-  // открытого положения у них нет. Решение названо вслух: открытая роллета
-  // уезжает в вал под перемычкой, а секционные панели уходят под потолок, то
-  // есть **из плоскости проёма наружу**, и показывать это пришлось бы
-  // горизонтальным листом в комнате. Полотно в проёме честнее: ворота закрыты,
-  // и это видно.
+  // **Роллетные и подъёмно-секционные ворота.** Закрытые стоят полотном в
+  // проёме, в середине толщины стены — там же, где бруски рамы у окна.
+  // Открытые уходят **вверх** (таск 219, G328): в таске 215 открытого
+  // положения у них не было вовсе, и довод был — «показывать это пришлось бы
+  // горизонтальным листом в комнате». Заказчик довод прочёл и лист принял:
+  // «да, пусть лист будет».
   if (openingMotionOf(opening.kind) === "lift") {
-    volumeLiftLeaf(at, from, to, bottom, top, out, openingFaceGrid(opening));
+    const open = volumeDoorOpen(openDoorIds, opening.id);
+    const inner = open ? volumeInnerSide(wall, rooms, (from + to) / 2) : 0;
+    if (open) volumeLiftOpen(wall, opening, { at, from, to, bottom, top, half, heightMm, inner }, out);
+    else volumeLiftLeaf(at, from, to, bottom, top, out, openingFaceGrid(opening), opening.id || null);
   }
+  return out;
+}
+
+/** Толщина свёрнутого полотна: вал роллеты и пакет панелей секционных. */
+export const VOLUME_ROLL_MM = 300;
+
+/**
+ * **Открытые поднимающиеся ворота** (таск 219, G328).
+ *
+ * Разница между рулоном и пакетом дешева, и поэтому она видна — это два разных
+ * механизма, и человек, выбравший один из них, должен увидеть именно его:
+ *
+ *   **роллетные** — полотно свёрнуто в **вал над проёмом**: короб поперёк
+ *     стены, во всю ширину проёма, прямо под перемычкой. Так его и ставят —
+ *     накладным коробом либо в нишу; места он занимает ровно `VOLUME_ROLL_MM`,
+ *     и в комнату не выступает ничем;
+ *   **подъёмно-секционные** — панели ушли по направляющим под потолок и лежат
+ *     **горизонтальным листом в комнате**: лист той же ширины, что проём, и
+ *     той же длины, какой была высота полотна. Это и есть «пусть лист будет».
+ *
+ * Куда уводить лист, спрашивается у помещений (`inner`): панели уезжают
+ * **внутрь**, в гараж, а не на улицу. Помещения не обведены — сторона взята
+ * по нормали стены и названа здесь же: промах стоит картинки, а не разметки.
+ *
+ * Полотна в проёме при этом нет вовсе — ворота открыты, сквозь них видно.
+ */
+function volumeLiftOpen(wall, opening, span, out) {
+  const { at, from, to, top, bottom, half, heightMm, inner } = span;
+  const doorId = opening.id || null;
+  const leaf = Math.max(0, top - bottom);
+  const roll = Math.min(VOLUME_ROLL_MM, Math.max(60, leaf));
+  if (openingSlatted(opening.kind)) {
+    // Рулон: короб под перемычкой, поперёк стены, во всю ширину проёма. Если
+    // над проёмом места не осталось (проём до самого потолка), вал опускается
+    // в сам проём — вверху, где ему и быть.
+    const room = Math.max(0, heightMm - top);
+    const low = room >= roll ? top : Math.max(bottom, top - roll);
+    const high = low + roll;
+    const vectors = wallVectors(wall);
+    volumePrismFaces(
+      volumeBoxCorners(at((from + to) / 2, 0), vectors.u, to - from, Math.min(roll, half * 2)),
+      low,
+      high,
+      VOLUME_DOOR_RGB,
+      out,
+      { doorId },
+    );
+    return out;
+  }
+  // Пакет панелей: горизонтальный лист под перемычкой, уходящий в комнату.
+  const side = inner || 1;
+  const deep = Math.max(half, leaf);
+  const near = { from: at(from, half * side), to: at(to, half * side) };
+  const far = { from: at(from, (half + deep) * side), to: at(to, (half + deep) * side) };
+  out.push(
+    volumeFace(
+      [volumeAt(near.from, top), volumeAt(near.to, top), volumeAt(far.to, top), volumeAt(far.from, top)],
+      VOLUME_DOOR_RGB,
+      { both: true, doorId },
+    ),
+  );
   return out;
 }
 
@@ -1665,7 +1849,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
  * плоскости, которые друг друга не закрывают, в сортировке по дальности
  * безразличны.
  */
-function volumeLiftLeaf(at, from, to, bottom, top, out, grid) {
+function volumeLiftLeaf(at, from, to, bottom, top, out, grid, doorId = null) {
   const height = top - bottom;
   const edges = [0, ...(grid && Array.isArray(grid.ys) ? grid.ys : []), 1];
   for (let index = 1; index < edges.length; index += 1) {
@@ -1677,6 +1861,7 @@ function volumeLiftLeaf(at, from, to, bottom, top, out, grid) {
     out.push(
       volumeFace([volumeAt(first, low), volumeAt(second, low), volumeAt(second, high), volumeAt(first, high)], VOLUME_DOOR_RGB, {
         both: true,
+        doorId,
       }),
     );
   }
@@ -4576,7 +4761,11 @@ export function volumeScene(project, schemeId, options = {}) {
     for (const opening of openings) {
       // Стеклянная дверь — дверь и здесь (таск 180): её открывают `E`, щелчком
       // и касанием, и `R` открывает её вместе со всеми.
-      if (openingHasLeaf(opening.kind) && opening.id) doors.push(opening.id);
+      // Открывается всё, у чего есть полотно (таск 219, G328): распашное,
+      // едущее и поднимающееся. До таска список спрашивал «есть ли сторона», и
+      // роллетные с секционными в него не попадали — `R` их не трогал, а
+      // счётчик «открыто N из M» их не считал.
+      if (openingOpens(opening.kind) && opening.id) doors.push(opening.id);
     }
     const own = wallHeights.get(wall.id);
     // **Стена уступает полосе этажа выше** (таск 214, дефект D65). Накрыта
@@ -4586,7 +4775,7 @@ export function volumeScene(project, schemeId, options = {}) {
     // высоту, и это тот самый случай, который видно на рендерах заказчика.
     const cap = covers && covers.length > 0 ? Math.min(own, Number(options.capMm) || own) : own;
     const height = cap;
-    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null);
+    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null, rooms);
     const vectors = wallVectors(wall);
     if (!vectors) continue;
     // Куски, которые верхняя стена не накрыла, продолжаются вверх своим телом:

@@ -36,6 +36,7 @@ import {
   markLabelLeader,
   markPointer,
   listedTypes,
+  openingArchGeometry,
   openingFaceGrid,
   openingFamilyOf,
   openingGlazed,
@@ -5847,7 +5848,13 @@ export function drawOpeningFace(ctx, box, face, options = {}) {
   }
   ctx.lineWidth = 1.5 * unit;
   ctx.strokeStyle = ink;
-  ctx.strokeRect(x, top, width, height);
+  // **Верх дугой** (таск 219, G329): у арки просвет кончается не перемычкой, а
+  // полуциркульной дугой — её рисуют и в кирпиче, и из гипсокартона. Контур
+  // идёт откосами до пяты и дальше по дуге; бумага под ним осталась залитой на
+  // весь прямоугольник, и это не видно: поле стены на листе такое же бумажное,
+  // то есть пазухи над дугой — это стена, какой она и есть.
+  if (face.arch && drawOpeningArchPath(ctx, box, face.arch)) ctx.stroke();
+  else ctx.strokeRect(x, top, width, height);
   // Стеклянная дверь (таск 180): на развёртку она смотрит лицом, и здесь видно
   // ровно то, что просил заказчик, — рама по контуру, стекло в середине. Рама
   // отложена внутрь на свою ширину, а не нарисована двойной линией на глаз:
@@ -5888,6 +5895,42 @@ export function drawOpeningFace(ctx, box, face, options = {}) {
     }
   }
   if (face.motion && face.motion !== "swing") drawOpeningFaceMotion(ctx, box, face, ink, unit);
+}
+
+/**
+ * Контур проёма с дугой: откосы до пяты, дальше по окружности.
+ *
+ * Считается по тем же двум числам, которыми объём режет свод
+ * (`model.openingArchGeometry`), и в экранную меру переводится одним
+ * множителем: лист, плитка выбора и грань в объёме обязаны показывать одну и ту
+ * же дугу. Отдаёт `false`, когда дуге негде встать (вырожденный просвет), —
+ * тогда проём обводится прямоугольником, как обводился всегда.
+ */
+function drawOpeningArchPath(ctx, box, arch) {
+  const scale = box.width / (2 * Math.max(1e-6, archHalfMm(arch)));
+  const rise = arch.riseMm * scale;
+  const radius = arch.radiusMm * scale;
+  if (!(rise > 0.5) || !(radius > 0.5) || !(box.height > rise)) return false;
+  const middle = box.x + box.width / 2;
+  const centre = box.y + radius;
+  const start = Math.atan2(box.y + rise - centre, box.x - middle);
+  const end = Math.atan2(box.y + rise - centre, box.x + box.width - middle);
+  ctx.beginPath();
+  ctx.moveTo(box.x, box.y + box.height);
+  ctx.lineTo(box.x, box.y + rise);
+  ctx.arc(middle, centre, radius, start, end);
+  ctx.lineTo(box.x + box.width, box.y + box.height);
+  ctx.closePath();
+  return true;
+}
+
+/**
+ * Полуширина проёма, выведенная обратно из дуги: `R = (a² + f²) / 2f`, значит
+ * `a = sqrt(2Rf − f²)`. Лицу не передают ширину в миллиметрах — у него есть
+ * клетка в точках, — а множитель «точек на миллиметр» нужен только дуге.
+ */
+function archHalfMm(arch) {
+  return Math.sqrt(Math.max(0, 2 * arch.radiusMm * arch.riseMm - arch.riseMm * arch.riseMm));
 }
 
 /** Импосты лица: вертикальные по долям ширины, горизонтальные — от низа. */
