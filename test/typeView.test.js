@@ -417,6 +417,32 @@ test("сохранённый шаблон уносит имя изображен
   // Имя, которого в реестре больше нет, не едет: ключ, не рисующий ничего,
   // хуже отсутствия ключа.
   assert.ok(!Object.prototype.hasOwnProperty.call(template.markTypes[1], "view"));
-  const project = createProject({ name: "Из шаблона", template });
+  // `createProject` берёт шаблон **первым доводом**, а не полем: обёртка
+  // `{template}` молча свалилась бы на встроенный справочник, и тест позеленел
+  // бы, ничего не проверив.
+  const project = createProject(template);
+  assert.deepEqual(project.markTypes.map((type) => type.code), ["ЛЮ", "Т"]);
   assert.equal(typeViewName(project, byCode(project, "ЛЮ").id), "chandelier");
+});
+
+test("новый объект из шаблона без имён встречает человека молча", () => {
+  // Шаблон, сохранённый до этого таска, имён не несёт — и у нового объекта
+  // справочник правда расходится с базой. Но строк он не получает: человек
+  // этих изображений не выбирал, он только что нажал «Создать объект».
+  // Механизм тот же, что у повтора знака и похожих цветов
+  // (`DICTIONARY_PROBLEM_CODES`): принято за него, список принятых виден, и
+  // любая строка возвращается одним нажатием.
+  const old = {
+    categories: [{ id: "c", name: "Свет", color: "#F2CC0C", shape: "circle" }],
+    markTypes: [{ categoryId: "c", code: "ЛЮ", name: "Люстра", kind: "point", shape: null }],
+  };
+  const project = createProject(typesTemplateFrom(old));
+  assert.equal(typeViewReview(project).length, 1, "предложение есть — справочник и правда разошёлся");
+  const shown = warningsModel(project).groups.find((group) => group.code === "typeViewOffer");
+  assert.equal(shown, undefined, "новый объект встретил человека жёлтой строкой");
+  assert.equal(
+    acceptedProblems(project).filter((record) => record.code === "typeViewOffer").length,
+    1,
+    "ответ не записан — строка вернётся при первой же правке",
+  );
 });
