@@ -74,7 +74,7 @@ import {
   projectCoords,
   projectTopAzimuth,
   SCHEME_ANCHOR_OBJECT_KEYS,
-  SCHEME_STAIR_EXIT_KEY,
+  schemeStairArrivalKeys,
   SCHEME_STAIR_OBJECT_KEYS,
   schemeAnchorOriginMm,
   schemeFloorOf,
@@ -3205,13 +3205,13 @@ export function volumeStairLanding(scene, atMm = null, headMm = VOLUME_HEAD_MM, 
   // лестничной клетки: другого места, где лестница выходит на этаж, всё равно
   // не нарисовано.
   //
-  // Маршей с таска 216 четыре вида (прямой, Г-образный, П-образный,
-  // спиральный), а выход один — поэтому пара спрашивается **стороной**, а не
-  // равенством ключей: сверь я ключ с одним словом `stairs`, и спустившийся от
-  // выхода сходил бы только у прямого марша, а у спирального оказывался бы
-  // посреди комнаты.
-  const fromExit = fromKey === SCHEME_STAIR_EXIT_KEY;
-  const paired = all.filter((place) => (place.key === SCHEME_STAIR_EXIT_KEY) !== fromExit);
+  // Кого считать парой — **одно правило на всю клетку** и лежит оно в модели
+  // (`schemeStairArrivalKeys`): маршем ушли — в выход, выходом — в марш,
+  // лифтом — в лифт (таск 224). Своей сверки ключей здесь больше нет нарочно:
+  // маршей четыре вида, лифт приходит сам в себя, и перечисляй я это на месте,
+  // третья порода клетки тихо разъехалась бы с первыми двумя.
+  const want = schemeStairArrivalKeys(fromKey);
+  const paired = all.filter((place) => want.includes(place.key));
   const places = paired.length > 0 ? paired : all;
   let best = places[0];
   if (places.length > 1 && atMm) {
