@@ -8,7 +8,7 @@
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { findMark, findScheme, searchProject, styleOf } from "../model.js";
 import { strings, text } from "../strings.js";
-import { uiDialogDepth, uiEl, uiIconButton } from "./ui.js";
+import { uiDialogDepth, uiEl, uiFieldTarget, uiIconButton } from "./ui.js";
 import { shapeIcon } from "../render.js";
 // Подводит холст к метке — то же самое делает клик по строке списка меток.
 import { marksCenteredView } from "./marks.js";
@@ -214,21 +214,14 @@ function mountSearchPanel(host, api) {
   });
 
   // Горячая клавиша: «/» без модификаторов, по физической клавише — раскладка
-  // роли не играет. Пока открыт диалог или курсор стоит в поле ввода, клавиша
-  // принадлежит им.
+  // роли не играет. Пока открыт диалог или курсор стоит в поле, клавиша
+  // принадлежит им — спрашивается это общим предикатом (`uiFieldTarget`, таск
+  // 182): своего сравнения с `INPUT` и `SELECT` здесь стояло четвёртое, и оно
+  // расходилось с остальными тремя на галочке.
   document.addEventListener("keydown", (event) => {
     if (event.code !== "Slash" || event.ctrlKey || event.metaKey || event.altKey) return;
     if (host.hidden || uiDialogDepth() > 0) return;
-    const target = event.target;
-    if (
-      target &&
-      (target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.tagName === "SELECT" ||
-        target.isContentEditable)
-    ) {
-      return;
-    }
+    if (uiFieldTarget(event.target)) return;
     event.preventDefault();
     openSearch();
   });
