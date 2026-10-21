@@ -67,6 +67,48 @@ import {
 } from "./workshop.js";
 
 /**
+ * Что обещает клик по плану выбранному типу: точку, ломаную или плашку.
+ * Отдельно от режима, потому что это же обещание висит подсказкой на самой
+ * кнопке «Добавление» — там оно про то, что **будет**, когда её нажмут.
+ */
+export function toolsKindNote(kind) {
+  if (!kind) return strings.canvas.needType;
+  if (kind === "line") return strings.tools.kindLineHint;
+  if (kind === MARK_KIND_COMMENT) return strings.tools.kindCommentHint;
+  return strings.tools.kindPointHint;
+}
+
+/**
+ * Строка под кнопками «Выделение · Добавление» в разделе «Метки» — **одна
+ * дверь к словам о том, что сейчас сделает клик** (пара к `workshopModeNote`
+ * чертежа, таск 203).
+ *
+ * Дефект D66, с которого начался таск 217: на схеме со стенами и обведённым
+ * помещением метка «перестала ставиться» — три клика подряд и «Меток 0».
+ * Постановка оказалась цела: не ставила её не схема, а режим. Переход между
+ * полями «Чертёж · Схема · Объём» сбрасывает занятие на «Выделение» — это
+ * правило заказчика (G296, таск 193), и отменять его нельзя. А вот **молчать
+ * о нём нельзя тем более**: тип в плашке остаётся выбранным, и строка под
+ * кнопками до этого таска при любом режиме обещала «клик по плану ставит
+ * точку». Человек, вернувшийся из чертежа, читал обещание, кликал — и не
+ * получал ничего.
+ *
+ * Поэтому в «Выделении» с выбранным типом строка говорит правду и называет
+ * дверь: режим, что делает клик и какую кнопку нажать. Без типа правда другая
+ * и она уже была — «Сначала выберите тип метки»; режимы без своей кнопки
+ * (обводка, калибровка) говорят о себе сами, как и раньше.
+ *
+ * Чистая и вынесена наружу ради теста: строка, разошедшаяся с тем, что делает
+ * клик, — это и есть дефект, который ловят глазами последним.
+ */
+export function toolsModeNote({ mode, kind, label } = {}) {
+  const named = mode && mode !== "select" && mode !== "add" ? mode : null;
+  if (named) return strings.tools["modeNow_" + named] || toolsKindNote(kind);
+  if (mode === "select" && kind) return text("tools.modeSelectNote", { label });
+  return toolsKindNote(kind);
+}
+
+/**
  * Ряд масштаба: «−», «+», «Вписать план», «100 %» (G227).
  *
  * Куда он смотрит, решает режим экрана, а не панель: панель только зовёт.
@@ -342,14 +384,12 @@ function mountToolsPanel(host, api) {
     // **имя текущего режима** — не кнопка: нажимать его некуда, он отвечает на
     // «где я», а дверь наружу — соседнее «Выделение» и Esc.
     const named = state.mode !== "select" && state.mode !== "add" ? state.mode : null;
-    const kindNote = !kind
-      ? strings.canvas.needType
-      : kind === "line"
-        ? strings.tools.kindLineHint
-        : kind === MARK_KIND_COMMENT
-          ? strings.tools.kindCommentHint
-          : strings.tools.kindPointHint;
-    const modeNote = named ? strings.tools["modeNow_" + named] || kindNote : kindNote;
+    const kindNote = toolsKindNote(kind);
+    const modeNote = toolsModeNote({
+      mode: state.mode,
+      kind,
+      label: type ? type.code + " — " + type.name : "",
+    });
     const modeRow = uiEl(
       "div",
       { class: "tools__row tools__row--modes" },
