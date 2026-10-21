@@ -1303,20 +1303,32 @@ test("метка в воздухе: модель висит под потолк�
     { roomId: scene.roomId, pointsMm: [{ x: -1900, y: -1400 }, { x: 1900, y: -1400 }, { x: 1900, y: 1400 }, { x: -1900, y: 1400 }], heightMm: 2700 },
   ]);
   assert.equal(place.mode, "ceiling");
-  assert.equal(place.model.key, "lamp");
+  // С таска 216 у люстры своё тело, а не общий плафон (G323).
+  assert.equal(place.model.key, "chandelier");
   const prisms = volumeModelPrisms(place.frame, place.model.parts);
   const tops = prisms.map((prism) => prism.topMm);
   // Потолок 2700, и вещь висит на зазор ниже (`VOLUME_MARK_LIFT_MM`, таск
   // 211): совпавшие плоскости в кадре порядок решать не умеют.
-  assert.equal(Math.max(...tops), 2700 - VOLUME_MARK_LIFT_MM, "подвес под самым потолком");
-  const shade = prisms.find((prism) => prism.name === "shade");
-  assert.equal(shade.bottomMm, 2400 - VOLUME_MARK_LIFT_MM, "плафон свисает на выступ люстры");
-  assert.ok(shade.corners.length === MODEL_CYL_SIDES);
+  assert.equal(Math.max(...tops), 2700 - VOLUME_MARK_LIFT_MM, "чашка под самым потолком");
+  const drop = prisms.find((prism) => prism.name === "dropLong");
+  assert.equal(drop.bottomMm, 2400 - VOLUME_MARK_LIFT_MM, "длинный подвес свисает на весь выступ люстры");
+  // Подвесы **разной длины** — в этом и была просьба заказчика: четыре низа,
+  // и все разные.
+  const bottoms = prisms.filter((prism) => prism.name.startsWith("drop")).map((prism) => prism.bottomMm);
+  assert.equal(bottoms.length, 4, "подвесов не четыре");
+  assert.equal(new Set(bottoms).size, 4, "подвесы одной длины — это снова шайба");
+  // Плафон точечного светильника остался цилиндром: его модель люстра не
+  // тронула.
+  const spot = volumeModelPrisms(place.frame, objectModelByKey("lamp").parts).find((prism) => prism.name === "shade");
+  assert.ok(spot.corners.length === MODEL_CYL_SIDES);
 });
 
-test("точечный светильник и люстра: одно описание, разные вещи в кадре", () => {
-  // Та самая цена общей модели, объявленная вслух: разводит их габарит, и
-  // разводит сильнее, чем развели бы два описания.
+test("точечный светильник и люстра: разные описания и разные вещи в кадре (G323)", () => {
+  // До таска 216 описание у них было **одно**, и это была объявленная вслух
+  // цена общей формы знака: разводил их только габарит. Заказчик на неё и
+  // указал — «люстру сделай более красивой всё-таки, а то просто шайба», — и
+  // теперь у люстры своё тело. Габарит при этом разводит их по-прежнему, и
+  // проверяется здесь и то и другое.
   const scene = roomScene();
   const rooms = [
     {
@@ -1348,5 +1360,11 @@ test("точечный светильник и люстра: одно описа
   assert.equal(spot.drop, 2 + VOLUME_MARK_LIFT_MM, "точечный сидит в потолке: выступ у него нулевой");
   assert.equal(chandelier.drop, 300 + VOLUME_MARK_LIFT_MM, "люстра свисает на свой выступ");
   assert.ok(chandelier.width > spot.width * 4, "и шире впятеро: " + chandelier.width + " против " + spot.width);
+  // И описания у них теперь разные: у точечного плафон, у люстры подвесы.
+  assert.equal(objectModelByKey("lamp").parts[0].name, "shade");
+  assert.deepEqual(
+    objectModelByKey("chandelier").parts.map((part) => part.name),
+    ["canopy", "dropLong", "dropMid", "dropShort", "dropTop"],
+  );
   assert.deepEqual(styleOf(scene.project, scene.project.markTypes.find((item) => item.code === "Т").id).shape, "circle-cross");
 });

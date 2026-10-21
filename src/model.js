@@ -802,7 +802,11 @@ const TEMPLATE_TYPES = [
   { category: "curtains", code: "КШ", name: strings.types.curtainRail, sizes: { length: 400, width: 120, depth: 120, heightAboveFloor: 2400 } },
   { category: "light", code: "ППл", name: strings.types.floorLight, sizes: { length: 40, width: 40, depth: 15, heightAboveFloor: 100 } },
   { category: "light", code: "ПКШ", name: strings.types.corniceLight, kind: "line", lineStyle: "wave", sizes: { length: 40, width: 40, depth: 15, heightAboveFloor: 2400 } },
-  { category: "light", code: "ЛЮ", name: strings.types.chandelier, sizes: { length: 500, width: 400, depth: 300 } },
+  // Люстре — **своё изображение** (таск 216, G323): имя изображения это ключ её
+  // тела в объёме, и без него она приходила к общему плафону и была в кадре
+  // шайбой. Знака у неё нет нарочно — «Круг с подвесом» носит мастер-выключатель
+  // заказчика, и переезд знака сменил бы тому тело (G68).
+  { category: "light", code: "ЛЮ", name: strings.types.chandelier, view: "chandelier", sizes: { length: 500, width: 400, depth: 300 } },
   { category: "switches", code: "П", name: strings.types.switchToggle, shape: "square-chevron", channels: 1, sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
   { category: "switches", code: "ПП", name: strings.types.switchToggleDouble, shape: "square-cross", channels: 2, view: "switchToggle", sizes: { length: 80, width: 80, depth: 10, heightAboveFloor: 900 } },
   { category: "light", code: "Н", name: strings.types.nightLight, shape: "circle-drain", view: "nightLight", sizes: { length: 80, width: 80, depth: 25, heightAboveFloor: 300 } },
