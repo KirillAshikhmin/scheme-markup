@@ -1306,12 +1306,10 @@
   color: var(--panel-text);
 }
 
+/* Красное поле и строка причины — общие с колонкой чертежа (`.ui-input.is-bad`
+   и `.ui-bad` в `panels.css`, находка 9 разбора механик): ответ на негодное
+   число один, значит и вид один. Здесь остаётся только ширина поля сетки —
+   `.sizes__input` своего цвета больше не держит. */
 .sizes__input.is-bad {
   border-color: var(--danger);
-}
-
-.sizes__error {
-  margin: 0;
-  color: var(--danger);
-  font-size: 12px;
 }

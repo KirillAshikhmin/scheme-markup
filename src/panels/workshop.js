@@ -102,7 +102,10 @@ import {
   deleteSchemeObject,
   deleteWall,
   drawingBoundsMm,
+  drawingHeightMm,
   drawingMmValue,
+  drawingOffsetMm,
+  drawingPositiveMm,
   findOpening,
   findRoom,
   findScheme,
@@ -126,6 +129,7 @@ import {
   schemeObjectMountOf,
   schemeObjectNameOf,
   schemeObjectTopMm,
+  schemeObjectTurnDeg,
   schemeObjectsOnScheme,
   segmentDistanceMm,
   setPlanOrigin,
@@ -203,9 +207,11 @@ import {
   uiConfirm,
   uiDialogDepth,
   uiEl,
+  uiBadLine,
   uiField,
   uiFieldTarget,
   uiIcon,
+  uiMarkBad,
   uiModal,
   uiNumber,
   uiTypingTarget,
@@ -355,6 +361,42 @@ export function workshopModeOf(tool) {
 export function workshopToolOf(mode, adding) {
   if (mode === "add") return WORKSHOP_ADDING.includes(adding) ? adding : "walls";
   return "edit";
+}
+
+/**
+ * **Один ответ на негодное число** (находка 9 разбора механик): разобрать
+ * набранное **полем за полем** правилами модели и сказать, какое из полей не
+ * понравилось.
+ *
+ * Своего разбора здесь быть не должно, и в этом вся находка: колонка писала
+ * `Number(objectWidth.value)` и `Number(objectTurn.value) || 0`, и «абв»
+ * превращалось в ноль **молча**. Отказ модели, если он всё же случался,
+ * показывался плашкой в углу экрана, а поле тихо откатывалось на прежнее
+ * число — человек смотрел на поле, а ответ ему давали в другом месте, и
+ * набранное пропадало.
+ *
+ * `fields` — `[{input, parse}]`, где `parse` — модельная дверь
+ * (`drawingPositiveMm`, `drawingOffsetMm`, `drawingHeightMm`,
+ * `schemeObjectTurnDeg`). Отвечает `{values, bad}`: `values` — разобранное по
+ * ключам, `bad` — `[{input, message}]` в порядке полей.
+ *
+ * Чистая и вынесена наружу: правило, записанное внутри обработчика, не
+ * проверяется ничем — а проверять тут надо как раз «ноль из «абв» больше не
+ * выходит».
+ */
+export function workshopParseFields(fields) {
+  const values = {};
+  const bad = [];
+  for (const field of fields || []) {
+    if (!field) continue;
+    try {
+      values[field.key] = field.parse(field.value);
+    } catch (error) {
+      values[field.key] = null;
+      bad.push({ input: field.input, message: error && error.message ? error.message : String(error) });
+    }
+  }
+  return { values, bad };
 }
 
 /**
@@ -2110,8 +2152,13 @@ function createWorkshop({ api, hosts }) {
   const thicknessInput = uiNumber(1, WALL_THICKNESS_MM_MAX);
   uiApply(thicknessInput, () => applyThickness());
   const wallNote = uiEl("p", { class: "workshop__note" });
+  // Причина, по которой число не взяли, — строкой под пачкой, у самого поля
+  // (находка 9 разбора механик). Своя у каждой породы: пачка полей одна на
+  // породу и переезжает в выделенную строку, значит и строка причины с ней.
+  const wallBad = uiBadLine();
   const wallDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     uiField(strings.workshop.thickness, thicknessInput),
+    wallBad,
     wallNote,
     removeButton(),
   ]);
@@ -2140,6 +2187,7 @@ function createWorkshop({ api, hosts }) {
   });
   const doorFields = uiEl("div", { class: "ui-fields" }, [hingeButton, swingButton]);
   const openingNote = uiEl("p", { class: "workshop__note" });
+  const openingBad = uiBadLine();
   const openingDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     uiEl("div", { class: "ui-chips" }, kindButtons),
     uiField(strings.workshop.openingWidth, openingWidth),
@@ -2147,6 +2195,7 @@ function createWorkshop({ api, hosts }) {
     uiField(strings.workshop.openingFloor, openingFloor),
     uiField(strings.workshop.openingAt, openingAt),
     doorFields,
+    openingBad,
     openingNote,
     removeButton(),
   ]);
@@ -2204,6 +2253,7 @@ function createWorkshop({ api, hosts }) {
   // Где вещь стоит и где её верх — одной строкой: «На полу · верх 650 мм».
   // Двумя строками это занимало в колонке вдвое больше, отвечая на один вопрос.
   const objectNote = uiEl("p", { class: "workshop__note" });
+  const objectBad = uiBadLine();
   const objectDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     thingButton,
     widthField,
@@ -2212,6 +2262,7 @@ function createWorkshop({ api, hosts }) {
     turnChips,
     uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
     uiField(strings.workshop.objectFloor, objectFloor),
+    objectBad,
     objectNote,
     removeButton(),
   ]);
@@ -2506,6 +2557,7 @@ function createWorkshop({ api, hosts }) {
     press = null;
     // Выделение снимается вместе со сменой занятия: иначе поля выделенной
     // стены перебивали бы умолчания проёма, за которым человек и переключился.
+    clearBad();
     selected = null;
     tool = next;
     // Выделенная стена живёт и в состоянии сеанса: сняли выделение — полоса
@@ -2517,6 +2569,9 @@ function createWorkshop({ api, hosts }) {
   function select(next) {
     const same = Boolean(selected) === Boolean(next) && (!next || (selected.kind === next.kind && selected.id === next.id));
     if (same) return;
+    // Красное поле и причина — про прежнее выделенное: выделили другое, и
+    // ответ про чужое число остался бы висеть (находка 9 разбора механик).
+    clearBad();
     selected = next;
     // Выделенная стена попадает и в состояние сеанса: выделение у чертежа и у
     // плана общее, и полоса развёртки выезжает по одному правилу на оба поля
@@ -2525,6 +2580,14 @@ function createWorkshop({ api, hosts }) {
     const wallId = next && next.kind === "wall" ? next.id : null;
     if (getState().selectedWallId !== wallId) setState({ selectedWallId: wallId });
     sync();
+  }
+
+  // Снять ответ про негодное число во всех трёх пачках (находка 9 разбора
+  // механик): он относился к тому, что было выделено.
+  function clearBad() {
+    uiMarkBad(wallBad, [thicknessInput]);
+    uiMarkBad(openingBad, [openingWidth, openingHeight, openingFloor, openingAt]);
+    uiMarkBad(objectBad, [objectWidth, objectDepth, objectTurn, objectHeight, objectFloor]);
   }
 
   // Подхват общего выделения стены: правило — чистая `workshopWallAdopt`,
@@ -2589,16 +2652,27 @@ function createWorkshop({ api, hosts }) {
   // стен задают в окне «Что добавить» — одно поле на два случая развелось на
   // два (таск 187), и каждое говорит, о чьей толщине речь.
   function applyThickness() {
-    const value = Number(thicknessInput.value);
     const wall = selectedWall();
-    if (!wall || !(value > 0)) {
+    if (!wall) {
       sync();
       return;
     }
-    if (Math.round(value) === wall.thicknessMm) return;
+    // Разбор — модельный и поле за полем (находка 9 разбора механик): здесь
+    // стояло `Number(...)` и молчаливый `sync()` на негодное, то есть «абв»
+    // возвращало прежнюю толщину без единого слова.
+    const parsed = workshopParseFields([
+      { key: "thicknessMm", input: thicknessInput, value: thicknessInput.value, parse: drawingPositiveMm },
+    ]);
+    if (uiMarkBad(wallBad, [thicknessInput], parsed.bad)) return;
+    if (parsed.values.thicknessMm === wall.thicknessMm) return;
     try {
-      commit(updateWall(project(), wall.id, { thicknessMm: value }).project, strings.history.wallThickness);
+      commit(
+        updateWall(project(), wall.id, { thicknessMm: parsed.values.thicknessMm }).project,
+        strings.history.wallThickness,
+      );
     } catch (error) {
+      // Отказ, который к одному полю не привязан («стена толще двух метров —
+      // это уже объект»), остаётся плашкой: повесить его на поле нельзя.
       fail(error);
       sync();
     }
@@ -2736,23 +2810,34 @@ function createWorkshop({ api, hosts }) {
 
   function applyOpeningFields() {
     const opening = selectedOpening();
-    const sizes = {
-      widthMm: Number(openingWidth.value),
-      heightMm: Number(openingHeight.value),
-      heightAboveFloorMm: Number(openingFloor.value),
-    };
-    if (!opening || !(sizes.widthMm > 0) || !(sizes.heightMm > 0) || !(sizes.heightAboveFloorMm >= 0)) {
+    if (!opening) {
       sync();
       return;
     }
-    const patch = { ...sizes, atMm: Number(openingAt.value) };
+    // Разбор — модельный и поле за полем (находка 9 разбора механик): четыре
+    // числа разбирались `Number()`, и негодное любое из них давало молчаливый
+    // `sync()` — прежние числа возвращались, не сказав, какое не понравилось.
+    const parsed = workshopParseFields([
+      { key: "widthMm", input: openingWidth, value: openingWidth.value, parse: drawingPositiveMm },
+      { key: "heightMm", input: openingHeight, value: openingHeight.value, parse: drawingPositiveMm },
+      { key: "heightAboveFloorMm", input: openingFloor, value: openingFloor.value, parse: drawingOffsetMm },
+      { key: "atMm", input: openingAt, value: openingAt.value, parse: drawingOffsetMm },
+    ]);
+    const openingInputs = [openingWidth, openingHeight, openingFloor, openingAt];
+    if (uiMarkBad(openingBad, openingInputs, parsed.bad)) return;
+    const sizes = {
+      widthMm: parsed.values.widthMm,
+      heightMm: parsed.values.heightMm,
+      heightAboveFloorMm: parsed.values.heightAboveFloorMm,
+    };
+    const patch = { ...sizes, atMm: parsed.values.atMm };
     const attempt = workshopTryOpening(project(), patch, opening.id);
     if (!attempt.ok) {
-      // Набранное число — не движение мыши: призрака у него нет, и промолчать
-      // здесь значило бы просто вернуть прежнее значение без объяснения.
-      // Поэтому один отказ на одно нажатие Enter, плашкой.
+      // Отказ, который к одному полю не привязан («окно не садится в эту
+      // стену»), остаётся плашкой: показать его у одного из четырёх полей
+      // значило бы указать не на то. Числа при этом не откатываются — набранное
+      // остаётся на правку.
       notify(attempt.message, "error");
-      sync();
       return;
     }
     // Поправленный размер **выделенного** проёма становится и умолчанием для
@@ -3120,49 +3205,58 @@ function createWorkshop({ api, hosts }) {
       sync();
       return;
     }
-    const sizes = {
-      widthMm: Number(objectWidth.value),
-      depthMm: Number(objectDepth.value),
-      turnDeg: Number(objectTurn.value) || 0,
-      heightMm: objectHeight.value === "" ? null : Number(objectHeight.value),
-      heightAboveFloorMm: Number(objectFloor.value) || 0,
-    };
+    // Разбор — модельный и поле за полем (находка 9 разбора механик). Здесь
+    // было хуже всего: `Number(objectTurn.value) || 0` превращало «абв» в ноль
+    // **молча** и разворачивало вещь, а высота от пола так же уезжала в ноль.
+    const rect = object.shape === "rect";
+    const fields = [
+      rect ? { key: "widthMm", input: objectWidth, value: objectWidth.value, parse: drawingPositiveMm } : null,
+      { key: "depthMm", input: objectDepth, value: objectDepth.value, parse: drawingPositiveMm },
+      rect ? { key: "turnDeg", input: objectTurn, value: objectTurn.value, parse: schemeObjectTurnDeg } : null,
+      { key: "heightMm", input: objectHeight, value: objectHeight.value, parse: drawingHeightMm },
+      { key: "heightAboveFloorMm", input: objectFloor, value: objectFloor.value, parse: drawingOffsetMm },
+    ].filter(Boolean);
+    const parsed = workshopParseFields(fields);
+    const objectInputs = [objectWidth, objectDepth, objectTurn, objectHeight, objectFloor];
+    if (uiMarkBad(objectBad, objectInputs, parsed.bad)) return;
     const patch = {
-      depthMm: sizes.depthMm,
-      heightMm: sizes.heightMm,
-      heightAboveFloorMm: sizes.heightAboveFloorMm,
+      depthMm: parsed.values.depthMm,
+      heightMm: parsed.values.heightMm,
+      heightAboveFloorMm: parsed.values.heightAboveFloorMm,
     };
-    if (object.shape === "rect") {
-      patch.widthMm = sizes.widthMm;
-      patch.turnDeg = sizes.turnDeg;
+    if (rect) {
+      patch.widthMm = parsed.values.widthMm;
+      patch.turnDeg = parsed.values.turnDeg;
     }
     try {
       commit(updateSchemeObject(project(), object.id, patch).project, strings.history.objectEdit);
     } catch (error) {
+      // Отказ, не привязанный к полю, остаётся плашкой.
       fail(error);
       sync();
     }
   }
 
-  function applySchemeHeight(value) {
+  /**
+   * Высота схемы и высота помещения: тот же ответ на негодное число, что в
+   * колонке (находка 9 разбора механик) — красное поле и причина строкой в
+   * окне. Плашку в углу тут показывать нельзя особенно: окно стоит поверх
+   * поля и само закрывает тот угол.
+   *
+   * `line` и `input` — строка причины окна и поле, в котором набрали;
+   * отвечает, записалось ли.
+   */
+  function applyHeight(run, label, input, line) {
     try {
-      const result = setSchemeWallHeight(project(), schemeId, value);
-      if (!result.changed) return;
-      commit(result.project, strings.history.wallHeight);
+      const result = run();
+      uiMarkBad(line, [input]);
+      if (!result.changed) return true;
+      commit(result.project, label);
+      return true;
     } catch (error) {
-      fail(error);
-      sync();
-    }
-  }
-
-  function applyRoomHeight(roomId, value) {
-    try {
-      const result = setRoomWallHeight(project(), roomId, value);
-      if (!result.changed) return;
-      commit(result.project, strings.history.roomWallHeight);
-    } catch (error) {
-      fail(error);
-      sync();
+      const message = error && error.message ? error.message : String(error);
+      uiMarkBad(line, [input], [{ input, message }]);
+      return false;
     }
   }
 
@@ -4984,10 +5078,18 @@ function createWorkshop({ api, hosts }) {
   function openHeights() {
     const scheme = findScheme(project(), schemeId);
     const common = scheme && typeof scheme.wallHeightMm === "number" ? String(scheme.wallHeightMm) : "";
+    // Причина, по которой число не взяли, — строкой в окне, у полей (находка 9
+    // разбора механик): плашка в углу здесь особенно не годится — окно стоит
+    // поверх поля и само закрывает тот угол.
+    const heightBad = uiBadLine();
     const schemeInput = uiNumber(0, DRAWING_MM_MAX);
     schemeInput.value = common;
     uiApply(schemeInput, () => {
-      applySchemeHeight(schemeInput.value);
+      // Негодное число остаётся в поле на правку: обратно оно переписывается
+      // только тогда, когда правка дошла до объекта.
+      if (!applyHeight(() => setSchemeWallHeight(project(), schemeId, schemeInput.value), strings.history.wallHeight, schemeInput, heightBad)) {
+        return;
+      }
       const fresh = findScheme(project(), schemeId);
       const value = fresh && typeof fresh.wallHeightMm === "number" ? String(fresh.wallHeightMm) : "";
       schemeInput.value = value;
@@ -5001,7 +5103,9 @@ function createWorkshop({ api, hosts }) {
       input.placeholder = common;
       rows.push(input);
       uiApply(input, () => {
-        applyRoomHeight(room.id, input.value);
+        if (!applyHeight(() => setRoomWallHeight(project(), room.id, input.value), strings.history.roomWallHeight, input, heightBad)) {
+          return;
+        }
         const fresh = findRoom(project(), room.id);
         input.value = fresh && typeof fresh.wallHeightMm === "number" ? String(fresh.wallHeightMm) : "";
       });
@@ -5018,6 +5122,7 @@ function createWorkshop({ api, hosts }) {
         ...(roomFields.length > 0
           ? roomFields
           : [uiEl("p", { class: "panel__empty", text: strings.workshop.heightRoomsEmpty })]),
+        heightBad,
       ]),
       actions: [uiButton(strings.dialog.close, { class: "ui-btn ui-btn--accent", on: { click: () => modal.close() } })],
     });

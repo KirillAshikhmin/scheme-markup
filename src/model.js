@@ -4197,8 +4197,13 @@ export function drawingOffsetMm(value) {
  * Необязательная высота: пусто (`""`, `null`, `undefined`) — «не задано».
  * У объекта схемы это значит «во всю высоту помещения», у схемы и помещения —
  * «высота не задана».
+ *
+ * Наружу — ради колонки чертежа (находка 9 разбора механик): она разбирает
+ * набранное **полем за полем**, чтобы сказать, какое из пяти чисел не
+ * понравилось, и правило разбора обязано быть модельным. Своё `Number()`
+ * превращало «абв» в ноль молча.
  */
-function drawingHeightMm(value) {
+export function drawingHeightMm(value) {
   if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return null;
   const mm = drawingPositiveMm(value);
   if (mm > MARK_DIMENSION_MAX) {
@@ -5316,7 +5321,7 @@ export function findSchemeObject(project, objectId) {
   return schemeObjectsOf(project).find((object) => object.id === objectId) || null;
 }
 
-function schemeObjectTurnDeg(value) {
+export function schemeObjectTurnDeg(value) {
   const number = Number(value === "" || value === null || value === undefined ? 0 : value);
   if (!Number.isFinite(number)) throw modelError("schemeObjectTurnInvalid");
   return ((Math.round(number) % 360) + 360) % 360;

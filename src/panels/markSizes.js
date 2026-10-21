@@ -35,7 +35,7 @@ import {
   typeAxisSeat,
   typeSizes,
 } from "../model.js";
-import { uiButton, uiEl, uiModal } from "./ui.js";
+import { uiBadLine, uiButton, uiEl, uiMarkBad, uiModal } from "./ui.js";
 
 // Поля, у которых имя зависит от посадки (таск 161): «Длина» и «Высота над
 // полом» при любой посадке значат одно и то же, и второго имени у них нет.
@@ -168,8 +168,9 @@ function openSizesPicker({ title, hints, current, onWall, inherited }) {
   return new Promise((resolve) => {
     const inputs = new Map();
     const labels = new Map();
-    const error = uiEl("p", { class: "sizes__error" });
-    error.hidden = true;
+    // Строка причины — общий кирпич (`uiBadLine`, находка 9 разбора механик):
+    // ответ окна и ответ колонки чертежа теперь один, и вид у него один.
+    const error = uiBadLine();
 
     // Посадка, с которой окно открывается: по высоте над полом, которая у
     // вещи уже есть — своей или унаследованной.
@@ -264,13 +265,12 @@ function openSizesPicker({ title, hints, current, onWall, inherited }) {
       const raw = {};
       for (const [field, input] of inputs) raw[field] = input.value;
       const parsed = markSizesParse(raw);
-      for (const [field, input] of inputs) {
-        input.classList.toggle("is-bad", parsed.invalid.some((item) => item.field === field));
-      }
-      if (parsed.invalid.length > 0) {
-        error.textContent = parsed.invalid[0].message;
-        error.hidden = false;
-        inputs.get(parsed.invalid[0].field).focus();
+      const bad = parsed.invalid.map((item) => ({ input: inputs.get(item.field), message: item.message }));
+      if (uiMarkBad(error, [...inputs.values()], bad)) {
+        // Фокус в плохое поле ставит **окно**, а не кирпич: здесь жест — кнопка
+        // «Сохранить», и фокус стоит на ней. В колонке чертежа поле отдаёт
+        // значение по уходу фокуса, и дёргать его обратно нельзя.
+        bad[0].input.focus();
         return;
       }
       done(parsed.values);
