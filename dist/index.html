@@ -7265,6 +7265,10 @@ const strings = {
     deleteOutlineConfirm: "Удалить контур",
     needType: "Сначала выберите тип метки",
     needScheme: "Сначала загрузите план схемы",
+    // Метку поставили за краем плана (таск 222, дефект D73). Говорится один раз
+    // на вход в занятие. Про печать сказано нарочно: это и есть причина, по
+    // которой метке за планом не место, — в таблице она была бы, а на листе нет.
+    markPinned: "Метка встала у края плана: дальше плана метки не ставятся — туда не печатается ни лист, ни PNG",
     // Клик, который ничего не сделал (таск 217, дефект D66). Говорится один
     // раз на вход в «Выделение» — ровно тогда, когда человек целился в план с
     // выбранным типом и не получил ничего. Молчания в этом месте быть не
@@ -14172,13 +14176,16 @@ function resizeSchemePlan(project, schemeId, { width, height } = {}) {
   for (const outline of outlines) {
     next = updateOutline(next, outline.id, { points: (outline.points || []).map(keepPoint) }).project;
   }
+  // Направляющие едут через ту же дверь, что и у правки плана целиком
+  // (`setSchemeGuides`, таск 222): у списка один хозяин, и второго места, где
+  // он переписывается, быть не должно.
   const guides = schemeGuides(project, schemeId);
   if (guides.length > 0) {
-    next = withGuides(
+    next = setSchemeGuides(
       next,
       schemeId,
-      guides.map((guide) => ({ ...guide, at: clampFraction(keep(guide.at, guide.axis === "h" ? ky : kx)) })),
-    );
+      guides.map((guide) => ({ ...guide, at: keep(guide.at, guide.axis === "h" ? ky : kx) })),
+    ).project;
   }
   const scale = planScaleOf(project, schemeId);
   if (scale) {
@@ -14696,9 +14703,42 @@ function pick(source, allowed) {
 
 // ——— метки ———————————————————————————————————————————————————————————
 
+/**
+ * Точки метки или контура: числа и **доли плана**, то есть 0…1 (дефект D73).
+ *
+ * Зажим стоит здесь, в единственном месте, через которое точки попадают в
+ * объект: `addMark`, `updateMark` и всё, что ходит через них, — перенос
+ * вершины, вставка, продолжение линии, вставка копии, контур помещения.
+ *
+ * **Почему зажимать, а не отказывать в клике за планом.** Доля вне 0…1 — не
+ * доля ни от чего: её одинаково не ждут ни попадание по клику, ни выгрузка, ни
+ * объём, ни мост в миллиметры. Главное — такая метка **не печатается**: лист
+ * ГОСТ, PNG и архив рисуют прямоугольник плана, и метка остаётся в таблице, в
+ * CSV и в нумерации, а на бумаге её нет. Это и есть тихая потеря работы.
+ * Отказать в клике было бы честно на схеме с подложкой, где край плана видно,
+ * и нечестно на схеме без неё: там не нарисовано ничего, край запасного
+ * квадрата невидим, и поле молча отказывало бы в клике по пустому месту.
+ * Поэтому метка встаёт у края — там, где её видно и откуда её можно утащить
+ * рукой, — а о том, что её прижало, сказано словом (`markPinned`).
+ *
+ * **Чужую метку, уже лежащую за планом, это не двигает** (G68): зажим стоит на
+ * входе, а не проходом по объекту. Открытый файл прежней разметки остаётся
+ * байт в байт тем же, пока человек сам не возьмёт метку рукой.
+ */
 function normalizePoints(points) {
   if (!Array.isArray(points) || points.length === 0) throw modelError("noPoints");
-  return points.map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+  return points.map((point) => ({ x: clampFraction(Number(point.x)), y: clampFraction(Number(point.y)) }));
+}
+
+/** Была ли точка за планом до зажима — об этом говорят вслух. */
+function pointOutsidePlan(point) {
+  const x = Number(point && point.x);
+  const y = Number(point && point.y);
+  return !(x >= 0 && x <= 1) || !(y >= 0 && y <= 1);
+}
+
+function pointsOutsidePlan(points) {
+  return Array.isArray(points) && points.some(pointOutsidePlan);
 }
 
 // Самый большой номер, выданный меткам этого кода типа.
@@ -14798,7 +14838,10 @@ function addMark(project, { schemeId, typeId, kind = "point", points, blockMode 
   }
 
   const next = withProject(project, { marks: [...project.marks, ...created], groups, counters });
-  return { project: next, mark: created[0], marks: created, group };
+  // `pinned` — метку поставили за планом, и её прижало к краю (дефект D73).
+  // Сказать об этом обязан вызывающий: молча метка встала бы не туда, куда
+  // щёлкнули, и человек списал бы это на дрожь руки.
+  return { project: next, mark: created[0], marks: created, group, pinned: pointsOutsidePlan(points) };
 }
 
 // ——— обозначения —————————————————————————————————————————————————————
@@ -16004,6 +16047,9 @@ function pasteMark(project, snapshot, { schemeId, point } = {}) {
     const value = snapshot[field];
     if (value !== null && value !== undefined && value !== "") patch[field] = value;
   }
+  // Про зажим у вставки своего слова нет, и оно ей не нужно: `markShapeAt`
+  // двигает **всю** копию целиком, пока она не войдёт в план, — правило
+  // старше таска 222 и лучше поточечного зажима, потому что не плющит форму.
   if (Object.keys(patch).length === 0) return { project: result.project, mark: result.mark };
   const updated = updateMark(result.project, result.mark.id, patch);
   return { project: updated.project, mark: updated.mark };
@@ -17032,7 +17078,10 @@ function removeOutlinePoint(project, outlineId, index) {
 //
 // Живут **у схемы**: у каждого плана свои. Координата — **доля 0…1** от размера
 // плана, как точки меток (ADR 002): при замене подложки они остаются там же,
-// где их поставили, а не разъезжаются в пикселях.
+// где их поставили, а не разъезжаются в пикселях. До таска 222 это было
+// обещанием без исполнения: правка плана целиком (`applyPlanEdit`) двигала
+// метки, контуры, калибровку и привязку, а направляющие оставляла как лежали —
+// после поворота подложки они указывали поперёк (дефект D72).
 const GUIDE_AXES = ["h", "v"];
 function schemeGuides(project, schemeId) {
   const scheme = findScheme(project, schemeId);
@@ -17042,6 +17091,36 @@ function schemeGuides(project, schemeId) {
 function withGuides(project, schemeId, guides) {
   const schemes = project.schemes.map((scheme) => (scheme.id === schemeId ? { ...scheme, guides } : scheme));
   return withProject(project, { schemes });
+}
+
+/**
+ * Переписать направляющие схемы целиком — дверь для правок **всего плана**:
+ * поворота с обрезкой (`panels/schemes.applyPlanEdit`) и смены размера
+ * (`resizeSchemePlan`). Поштучные правки ходят своими дверьми; здесь список
+ * едет разом, потому что преобразование плана трогает каждую.
+ *
+ * Род и доля проверяются тем же правилом, что у `addSchemeGuide`: доля
+ * зажимается в 0…1. Направляющая, вышедшая за рамку обрезки, прижимается к
+ * краю, а не пропадает: она рабочая оснастка, и прижатую видно, а пропавшую
+ * человек ищет глазами.
+ *
+ * **Ничего не изменилось — тот же объект по ссылке** (G68): у схемы, которой
+ * направляющих не ставили, не появляется ни пустого списка, ни `updatedAt`.
+ */
+function setSchemeGuides(project, schemeId, guides) {
+  requireScheme(project, schemeId);
+  const before = schemeGuides(project, schemeId);
+  const list = (Array.isArray(guides) ? guides : []).map((guide) => {
+    if (!guide || !GUIDE_AXES.includes(guide.axis)) throw modelError("guideAxisUnknown");
+    const at = clampFraction(Number(guide.at));
+    if (!Number.isFinite(at)) throw modelError("guideAtInvalid");
+    return { id: guide.id || newId(), axis: guide.axis, at };
+  });
+  const same =
+    before.length === list.length &&
+    before.every((guide, index) => guide.id === list[index].id && guide.axis === list[index].axis && guide.at === list[index].at);
+  if (same) return { project, guides: before, changed: false };
+  return { project: withGuides(project, schemeId, list), guides: list, changed: true };
 }
 function addSchemeGuide(project, schemeId, { axis, at } = {}) {
   requireScheme(project, schemeId);
@@ -37150,6 +37229,25 @@ function canvasFail(error) {
   reportAppError(error);
 }
 
+/**
+ * Метку поставили за планом, и модель прижала её к краю (дефект D73) — сказать
+ * об этом надо словом. Дверь одна на обе постановки — точку и линию; две копии
+ * правила разошлись бы, а повод у них один. Вставка копии сюда не ходит: её
+ * `markShapeAt` двигает целиком, пока она не войдёт в план, и за краем копия
+ * не оказывается никогда.
+ *
+ * Говорится **один раз на вход в занятие** — той же меркой и в том же месте,
+ * что молчаливый клик таска 217: человек, который ведёт мышь по краю плана, не
+ * должен читать одну и ту же строку на каждую метку.
+ */
+let canvasPinnedSaid = false;
+
+function canvasSayPinned(result) {
+  if (!result || !result.pinned || canvasPinnedSaid) return;
+  canvasPinnedSaid = true;
+  canvasApi.notify(strings.canvas.markPinned, "info");
+}
+
 function canvasPlacePoint(plan) {
   const state = canvasState();
   if (!state.activeTypeId) {
@@ -37168,6 +37266,7 @@ function canvasPlacePoint(plan) {
       points: [canvasGuideSnap(plan)],
     });
     canvasCommit(state.project, result.project, strings.history.addMark, { selection: [result.mark.id] });
+    canvasSayPinned(result);
   } catch (error) {
     canvasFail(error);
   }
@@ -38389,6 +38488,7 @@ function canvasLineFinish(closed, typeId) {
     if (closed) project = updateMark(project, result.mark.id, { closed: true }).project;
     canvasDraft = null;
     canvasCommit(state.project, project, strings.history.addLine, { selection: [result.mark.id] });
+    canvasSayPinned(result);
     return result.mark.id;
   } catch (error) {
     canvasCancelDraft();
@@ -40377,8 +40477,11 @@ function mountCanvas(host, api) {
     if ("mode" in changed) {
       canvasSyncCursor();
       // Новое занятие — молчание начинается заново (таск 217, D66): про
-      // пустой клик говорится один раз на каждый вход в «Выделение».
+      // пустой клик говорится один раз на каждый вход в «Выделение». По той же
+      // мерке и по тому же поводу — слова о метке, прижатой к краю плана
+      // (таск 222, D73).
       canvasSilentSaid = false;
+      canvasPinnedSaid = false;
       // Режим, у которого нет своей кнопки, говорит о себе сам — кто бы его ни
       // включил. См. `CANVAS_MODE_NOTES`.
       const said = CANVAS_MODE_NOTES[state.mode];
@@ -45284,6 +45387,32 @@ function transformPoint(point, transform) {
   const turned = rotateFraction({ x: Number(point.x), y: Number(point.y) }, rotate);
   if (!crop) return turned;
   return { x: (turned.x - crop.x) / crop.width, y: (turned.y - crop.y) / crop.height };
+}
+
+/**
+ * Направляющая через то же преобразование — **со сменой рода** (дефект D72).
+ *
+ * Направляющая не точка, а линия через весь план, и хранится она одним числом:
+ * у горизонтальной доля отсчитана от высоты, у вертикальной — от ширины. На
+ * повороте подложки на четверть горизонтальная становится **вертикальной**, и
+ * одним пересчётом числа этого не выразить: меняется и род, и само число.
+ *
+ * Считается это не таблицей из восьми случаев, а той же `transformPoint`, что
+ * двигает метки: берутся два конца линии, преобразуются — и смотрится, какая
+ * координата у них осталась общей. Она и есть новая доля, а её ось — новый
+ * род. Поворот, обрезка и их сочетание выходят отсюда сами, и второй арифметики
+ * у направляющих не заводится.
+ *
+ * Равенство здесь точное, а не с допуском: у обоих концов общая координата
+ * считается **одним и тем же** выражением из одного и того же числа.
+ */
+function transformGuide(guide, transform) {
+  const horizontal = guide.axis === "h";
+  const at = Number(guide.at);
+  const a = transformPoint(horizontal ? { x: 0, y: at } : { x: at, y: 0 }, transform);
+  const b = transformPoint(horizontal ? { x: 1, y: at } : { x: at, y: 1 }, transform);
+  const vertical = a.x === b.x;
+  return { ...guide, axis: vertical ? "v" : "h", at: vertical ? a.x : a.y };
 }
 
 // Смещение подписи задано в пикселях экрана: обрезка его не трогает, поворот —
@@ -70999,41 +71128,76 @@ function workshopInitialTool(project, schemeId) {
 // заданы в пикселях плана, и у фотографии плана квартиры их примерно тысяча на
 // десять метров. Возьми пиксель в миллиметр — метки стали бы в десять раз
 // мельче подписей, и раскладка подписей поехала бы на всех схемах разом.
+//
+// **Свой размер схемы старше листа** (таск 222, G333; слова заказчика: «сейчас
+// нет схем без подложки у меня в работе, так что сделай как должно быть»).
+// Бывает схема без подложки, у которой размер и калибровка уже есть — пришла
+// из старого файла или из прежней разметки. До таска 222 лист перетирал и то и
+// другое: размер становился 4000 × 3000, а **метры менялись молча** — длины,
+// по которым заказывают ленту, после первой же стены начинали значить другое.
+// Теперь лист добавляет только недостающее: нет размера — даёт свой, нет
+// калибровки — объявляет пиксель сантиметром (`mmPerPx`) **от того размера,
+// который у схемы есть**, нет привязки — ставит нуль в середину. У листа
+// 4000 × 3000 это те же сорок метров, что и были; у плана на 1200 точек —
+// двенадцать метров, то есть ровно `WORKSHOP_EMPTY_MM`, квартира по фасаду.
+// Постоянная здесь не «сорок метров», а сантиметр в пикселе.
 const WORKSHOP_SHEET = { width: 4000, height: 3000, mmPerPx: 10 };
 
 /**
- * Завести лист у схемы без подложки, если его ещё нет. Возвращает тот же
- * объект по ссылке, когда заводить нечего: ни лишнего шага истории, ни
+ * Дать схеме без подложки систему координат, если её ещё нет. Возвращает тот
+ * же объект по ссылке, когда давать нечего: ни лишнего шага истории, ни
  * `updatedAt` на пустом месте (G68).
+ *
+ * **Добавляется только недостающее, по частям** (таск 222, G333). Части три —
+ * размер, калибровка, привязка, — и у каждой свой вопрос «а есть ли она уже».
+ * Прежняя проверка была одна на все три и всё-или-ничего: не хватало привязки
+ * — перезаписывались и размер, и калибровка. Своё старше выданного: размер и
+ * метры задал человек или прежняя разметка, а лист — умолчание для пустой
+ * схемы.
  *
  * `marks` — сколько меток лист забрал себе из запасного квадрата (дефект
  * D67). Доли до листа считались от `SCHEME_FALLBACK_PX`, а с листом значили бы
  * другое место, поэтому размер схема получает **не** `updateScheme`, а
  * `model.resizeSchemePlan`: он один знает правило «пиксель плана остаётся тем
  * же пикселем». Число идёт наружу, чтобы о пересчёте сказать словом: лист
- * заводится молча, а молчать о переехавших метках нельзя.
+ * заводится молча, а молчать о переехавших метках нельзя. Схеме со своим
+ * размером пересчитывать нечего — её доли и так считались от него, и `marks`
+ * у неё ноль.
  */
 function workshopEnsureSheet(project, schemeId) {
   const scheme = findScheme(project, schemeId);
   if (!scheme || scheme.imageId) return { project, added: false, marks: 0 };
-  if (Number(scheme.width) > 0 && Number(scheme.height) > 0 && planOriginOf(project, schemeId)) {
-    return { project, added: false, marks: 0 };
+  const hasSize = Number(scheme.width) > 0 && Number(scheme.height) > 0;
+  const hasScale = planHasScale(project, schemeId);
+  const hasOrigin = Boolean(planOriginOf(project, schemeId));
+  if (hasSize && hasScale && hasOrigin) return { project, added: false, marks: 0 };
+  let next = project;
+  let marks = 0;
+  if (!hasSize) {
+    const resized = resizeSchemePlan(project, schemeId, {
+      width: WORKSHOP_SHEET.width,
+      height: WORKSHOP_SHEET.height,
+    });
+    next = resized.project;
+    marks = resized.marks;
   }
-  const resized = resizeSchemePlan(project, schemeId, {
-    width: WORKSHOP_SHEET.width,
-    height: WORKSHOP_SHEET.height,
-  });
-  let next = resized.project;
-  // Калибровка: четверть ширины листа объявлена десятью метрами. При ширине
-  // 4000 это 1000 пикселей на 10 м, то есть сто пикселей на метр и сантиметр
-  // на пиксель — ровно то, что обещано выше.
-  next = setPlanScale(next, schemeId, {
-    a: { x: 0.25, y: 0.5 },
-    b: { x: 0.5, y: 0.5 },
-    meters: (WORKSHOP_SHEET.width / 4) * (WORKSHOP_SHEET.mmPerPx / 1000),
-  }).project;
-  next = setPlanOrigin(next, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 }).project;
-  return { project: next, added: true, marks: resized.marks };
+  if (!hasScale) {
+    // Калибровка: четверть ширины плана объявлена её же сантиметрами. При
+    // ширине 4000 это 1000 пикселей на 10 м, то есть сто пикселей на метр и
+    // сантиметр на пиксель — ровно то, что обещано выше; при ширине 1200 это
+    // 300 пикселей на 3 м, и пиксель снова сантиметр.
+    const width = Number(findScheme(next, schemeId).width);
+    next = setPlanScale(next, schemeId, {
+      a: { x: 0.25, y: 0.5 },
+      b: { x: 0.5, y: 0.5 },
+      meters: (width / 4) * (WORKSHOP_SHEET.mmPerPx / 1000),
+    }).project;
+  }
+  // Нуль чертежа — середина плана, какого бы размера он ни был: это
+  // единственная точка, которая существует до того, как человек куда-то
+  // показал.
+  if (!hasOrigin) next = setPlanOrigin(next, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 }).project;
+  return { project: next, added: true, marks };
 }
 
 /**
@@ -75877,10 +76041,16 @@ function outlinesOfScheme(project, schemeId) {
 /**
  * Правка плана одним куском: новая подложка, её размер и пересчёт всего, что
  * задано в координатах этого плана, — точки меток, смещения их подписей,
- * контуры помещений и смещения подписей комнат. Контуры двигаются вместе с
- * метками не для красоты: помещение метки подставляется по контуру на каждом
- * шаге истории, и оставь контур лежать поперёк повёрнутых стен — половина
- * меток молча уедет в чужие комнаты.
+ * контуры помещений, смещения подписей комнат и направляющие. Контуры
+ * двигаются вместе с метками не для красоты: помещение метки подставляется по
+ * контуру на каждом шаге истории, и оставь контур лежать поперёк повёрнутых
+ * стен — половина меток молча уедет в чужие комнаты.
+ *
+ * **Направляющие едут здесь с таска 222** (дефект D72). Они тоже доли — ради
+ * этого и выбраны долями, — но пересчёта им не досталось: после поворота
+ * подложки горизонтальная оставалась горизонтальной и указывала поперёк стен,
+ * по которым её ставили. Род у неё при повороте на четверть меняется, и
+ * считает это `imagePrep.transformGuide` той же `transformPoint`, что метки.
  *
  * Чистая и вынесена наружу нарочно: «до» и «после» одного и того же объекта —
  * это и есть шаг отмены, и проверяется он тестом, без DOM и без хранилища.
@@ -75917,6 +76087,10 @@ function applyPlanEdit(project, schemeId, { imageId, width, height, transform } 
   for (const outline of outlinesOfScheme(project, schemeId)) {
     const patch = remapForTransform(outline, transform);
     next = updateOutline(next, outline.id, patch.labelOffset ? patch : { points: patch.points }).project;
+  }
+  const guides = schemeGuides(project, schemeId);
+  if (guides.length > 0) {
+    next = setSchemeGuides(next, schemeId, guides.map((guide) => transformGuide(guide, transform))).project;
   }
   if (scale && !scaleLost) {
     try {
